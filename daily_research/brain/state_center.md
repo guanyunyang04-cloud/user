@@ -26,7 +26,7 @@
 
 ## 当前接管入口
 - 默认读取顺序：`identity_layer.md -> state_center.md -> knowledge_center.md -> continuous_policy_design_contract.md -> operations_center.md -> governance_layer.md`。
-- 首选工具入口：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow capsule --child daily_research --task "<task>" --json`。
+- 首选工具入口：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`。
 - 所有 `daily_research` 程序必须显式使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`。
 - PowerShell 中文显示异常时，先用显式 UTF-8 复读；不得直接判定文档损坏。
 - `latest_*` 不得直接当真源；若 latest study/protocol/audit/ledger 不同源，必须使用 explicit study tag / protocol tag / dataset id。

@@ -1,10 +1,92 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 51,
+  "record_count": 55,
   "duplicates": [],
   "missing_paths": [],
   "records": [
+    {
+      "id": "brain_system_refactor_contract_20260518",
+      "date": "2026-05-18",
+      "r_id": "",
+      "path": "brain/references/brain_system_refactor_contract_20260518.md",
+      "tags": [
+        "brain"
+      ],
+      "workflow": "brain",
+      "study_tags": [],
+      "verdict": "Status: `brain_system_refactor / control-plane governance / no strategy change`.; Goal: make all workspace brains discoverable, auditable, migration-safe, and language-consistent.; Language policy: `zh_semantic_en_identifiers_v1`，即中文语义 + 英文工程标识。; Active execution impact: `daily_research/output/active_execution_strategy.json` must remain unchanged.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Use `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow audit-brain --scope all --json` for future brain structure audits.",
+        "Treat noncanonical brain roots as warnings until explicitly attached through `brain/brain_manifest.json`."
+      ],
+      "active_artifact_impact": "not_stated",
+      "dataset_ids": []
+    },
+    {
+      "id": "workspace_brain_platform_refactor_20260523",
+      "date": "2026-05-23",
+      "r_id": "",
+      "path": "brain/references/workspace_brain_platform_refactor_20260523.md",
+      "tags": [
+        "brain"
+      ],
+      "workflow": "brain",
+      "study_tags": [],
+      "verdict": "",
+      "blockers": [],
+      "next_allowed_actions": [
+        "后续 agent 接管先运行主脑 capsule，不得直接读取分脑 capsule。"
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": []
+    },
+    {
+      "id": "workspace_full_slim_20260511",
+      "date": "2026-05-11",
+      "r_id": "r52d",
+      "path": "brain/references/workspace_full_slim_20260511.md",
+      "tags": [
+        "r52d",
+        "brain"
+      ],
+      "workflow": "brain",
+      "study_tags": [],
+      "verdict": "",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "not_stated",
+      "dataset_ids": []
+    },
+    {
+      "id": "workspace_maintenance_review_20260511",
+      "date": "2026-05-11",
+      "r_id": "r52d",
+      "path": "brain/references/workspace_maintenance_review_20260511.md",
+      "tags": [
+        "r52d",
+        "brain"
+      ],
+      "workflow": "brain",
+      "study_tags": [
+        "self_opt_study_r52d_validation_closure_dryrun_20260511_01",
+        "self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01",
+        "self_opt_study_r53_cash_funded_allocation_core_dryrun_20260512_03",
+        "self_opt_study_r53_cash_funded_allocation_core_screening_safe_20260512_03"
+      ],
+      "verdict": "维护主脑与三个分脑的边界：主脑只保留跨项目规则和路由，分脑只保留项目事实与执行入口。; 纠偏 `daily_research` r52d 状态：代码合同、测试、dry-run 与 safe screening-only 已存在，但没有 confirmatory / stable verdict。; `daily_stock_analysis-main` 修正 Windows 后端构建脚本、后端验证配置、Web ESLint flat config、Web smoke 认证边界和 Windows UTF-8 源码测试。; `t0_project` 只做离线静态验收并写回实验隔离边界。",
+      "blockers": [
+        "`daily_research` 已补充 r52d explicit evidence capsule，并裁决 `r52d screening-only failed confirmatory eligibility`；本轮不启动 confirmatory / resume / promotion。",
+        "r52d 已完成 safe screening-only 裁决：3/3 trials 均 evidence insufficient、composite<0、cash timing<0、exposure~0.33，因此不启动 confirmatory；仍缺的是下一轮 deployment / cash timing / exposure utilization / training evidence 修复方案。",
+        "r52d safe screening-only：`self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01` 完成 3/3 trials、0 failed、confirmatory disabled、true solver disabled",
+        "r52d explicit evidence verdict：`r52d screening-only failed confirmatory eligibility`",
+        "Result: r53 materially fixed the high-cash / low-exposure failure shape, but remains research/shadow-only because training evidence is insufficient, cash timing is negative, and composite score is strongly negative."
+      ],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": []
+    },
     {
       "id": "alpha_path20_arch_gain_result_20260521",
       "date": "2026-05-21",
@@ -792,7 +874,7 @@
       "dataset_ids": []
     },
     {
-      "id": "r52d",
+      "id": "r52d_native_validation_closure_status_20260511",
       "date": "2026-05-11",
       "r_id": "r52d",
       "path": "daily_research/brain/references/r52d_native_validation_closure_status_20260511.md",

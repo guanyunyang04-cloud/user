@@ -1,4 +1,0 @@
-interface:
-  display_name: "Daily Research Brain"
-  short_description: "Use the daily_research brain operating system."
-  default_prompt: "Use the daily_research brain capsule, preflight, evidence registry, and writeback workflow before changing the project."

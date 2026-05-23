@@ -6,6 +6,8 @@ __pycache__/
 *.pth
 *.onnx
 
+brain/output/
+
 daily_research/cache/
 daily_research/output/
 daily_research/execution/output/

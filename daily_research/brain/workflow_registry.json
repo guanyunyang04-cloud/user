@@ -1,5 +1,0 @@
-{
-  "schema_version": 2,
-  "redirect": "daily_research/brain/workflows/registry.json",
-  "description": "Compatibility stub. Full workflow metadata lives in daily_research/brain/workflows/registry.json and playbooks/*.json."
-}

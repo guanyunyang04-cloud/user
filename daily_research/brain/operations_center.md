@@ -1,16 +1,15 @@
 # Daily Research 操作中枢
 
-快照日期：`2026-05-14`
+快照日期：`2026-05-23`
 
 ## 默认操作纪律
 - 默认工作分支：`main`。
 - Python 入口：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe`。
+- 进入本分脑前，必须先由主脑 `tools.brain.workflow capsule` 路由到 `daily_research`。
 - 不使用 `KMP_DUPLICATE_LIB_OK` 作为默认方案。
 - 不触碰 `daily_research/output/active_execution_strategy.json`，除非有明确 promotion 决策。
 - 不把 smoke、dry-run、failed trial、interrupted outer study、realtime tail label 写成 completed evidence。
 - 长训练或 study 需要 progress JSONL、latest progress JSON、stdout/stderr log 和明确 tag。
-- PowerShell 中文写入不作为默认文档编辑方式；中文正文优先用 `apply_patch` 或显式 UTF-8 工具链。
-- 文档语言遵循 `brain/language_policy.md`：中文语义 + 英文工程标识；CLI、JSON key、dataset id、workflow id、tag、模型名不强行翻译。
 
 ## 项目地图
 - brain 真源：`daily_research/brain/`。
@@ -21,29 +20,27 @@
 - execution app：`daily_research/execution/run_execution_app.py`。
 
 ## 高频 Brain 命令
-- `brain_workflow` 是 `daily_research` 项目本地接管、预检、证据查询、验证调度和写回辅助；它不是通用 skill 真源，不替代本机 `C:/Users/ASUS/.codex/skills`。
-- API/no-plugin 会话可用 `--workflow auto` 作为项目 fallback；fallback 只解释项目安全约束、active artifact 边界、证据规则和验证矩阵。
-- TDD、debugging、planning、verification 等通用操作方法以本机 skills 为准；本分脑只记录 daily_research 特例和必须使用的项目命令。
-- task capsule：
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow capsule --child daily_research --task "<task>" --json`
+- 主脑 task capsule：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
 - API/no-plugin auto workflow capsule：
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow capsule --child daily_research --task "<task>" --workflow auto --json`
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --workflow auto --json`
 - current frontier freshness：
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow current-frontier --json`
-- 凡涉及“接管、当前状态、下一步、是否训练、主线推进到哪”的问题，必须先运行 task capsule 或 current frontier；若 `brain_may_be_stale=true`，先读 output explicit tags 与 summary，再回答当前状态。
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow current-frontier --json`
 - workflow guide：
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow workflow-guide --workflow <workflow_id> --json`
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow workflow-guide --workflow <workflow_id> --json`
 - explicit evidence status：
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow status --workflow continuous_policy --study-tag <study_tag> --json`
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow status --workflow continuous_policy --study-tag <study_tag> --json`
 - evidence registry rebuild：
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow evidence-index --rebuild --json`
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow evidence-index --rebuild --json`
 - evidence query：
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow query --q <r_id|tag|dataset_id> --json`
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow query --q <r_id|tag|dataset_id> --json`
 - selective verification plan：
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow verify-plan --json`
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow verify-plan --json`
 - brain guards：
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/doc_guard.py check`
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_integrity_check.py --json`
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check`
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`
+
+凡涉及“接管、当前状态、下一步、是否训练、主线推进到哪”的问题，必须先运行主脑 task capsule 或 current frontier；若 `brain_may_be_stale=true`，先读 output explicit tags 与 summary，再回答当前状态。
 
 ## Continuous Policy 运行口径
 - Direct protocol smoke 先于 dry-run study，dry-run study 先于 safe screening。
@@ -53,35 +50,14 @@
 - 若 `protocol_summary.json` 存在但 `study_summary.json` 缺失，只能记为 protocol-level evidence。
 - 后台运行建议只把整个 study 作为一个 OS 后台进程启动；study 内部仍保持 `protocol_runner_mode=in_process`，前台只轮询 progress / PID / logs / summaries。
 - 长训练或 study 的默认轮询实现为 `Start-Process -PassThru` 记录 PID，并用 `Wait-Process -Id <pid> -Timeout 7200` 等待；进程提前结束时立即返回，随后解析 progress、日志、summary、checkpoint 与评估产物。
-- `7200` 秒是单轮默认最大等待上限；首个 progress 尚未生成、资源风险较高、用户询问状态或异常排障时，可以临时缩短 timeout，但不得改用裸 `Get-Process python` 或固定 sleep 作为主判断。
-
-## 当前 r65 口径
-- Active research profile：`split_heads_portfolio_daily_release_first_portfolio_set_v5_r65`。
-- Backend/loss：`formal_torch_portfolio_set_v5` / `alpha_result_value_budget_split_v48`。
-- 默认 strict Gold dataset：`continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`。
-- r65 是 `research / shadow-only / architecture upgrade`；不得 confirmatory、promotion、live/default 或 active artifact change。
-- r65 下一步应修 held source creation、receiver target realization、target/action translation 与 day-set sampling。
-
-## Data Lake 口径
-- Full-window strict Gold 已完成并 audit-clean：`continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`。
-- Full-window realtime Gold 仍 pending；realtime tail labels 只能用于 research/audit。
-- 构建或读取数据集必须使用 explicit dataset id，不用 loose latest 判断完成。
-- Gold 构建采用 sharded/resumable builder，不再通过训练入口强行构建全量 Gold。
-- `policy_sector_board_view` 是板块/行业 metadata source lineage，不是 research evidence。
-- `latest_static_snapshot` 行业/板块视图不得冒充 point-in-time 历史成分；正式证据中必须记录 `source_sector_board_view_id`、`as_of_date` 和 `snapshot_semantics`。
-- 板块/行业视图只保存 membership/summary/manifest，不复制 OHLCV，不替代 `policy_input_bundle` 行情真源。
 
 ## 必跑守卫
 - `git diff -- daily_research/output/active_execution_strategy.json`
 - `git diff --check`
-- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/doc_guard.py check`
-- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_integrity_check.py --json`
-- 日常验证先生成选择性验证计划：
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow verify-plan --json`
-- 未触达的低耦合子系统可以跳过重测试；触达 shared core、execution/active 边界、promotion 边界或 evidence 边界时，必须扩大验证或记录人工复核。
-- 选择性验证计划只是 verification scheduling，不是 research evidence，不得用于 promotion、live/default 或 active artifact 结论。
-- 修改 brain workflow / registry / rules 后，跑：
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest daily_research/tools/tests/test_brain_capsule.py daily_research/tools/tests/test_brain_evidence_registry.py daily_research/tools/tests/test_brain_rules.py daily_research/tools/tests/test_brain_workflow_cli.py daily_research/tools/tests/test_daily_research_brain_skill.py -q`
+- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check`
+- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`
+- 修改 brain platform / workflow / registry / rules 后，跑：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest tools/brain/tests -q`
 
 ## 写回路由
 - 当前状态和允许动作：`daily_research/brain/state_center.md`。

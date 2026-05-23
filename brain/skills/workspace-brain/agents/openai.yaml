@@ -1,0 +1,4 @@
+interface:
+  display_name: "Workspace Brain"
+  short_description: "Use the workspace main brain for takeover, routing, governance, and child-brain handoff."
+  default_prompt: "Run the workspace brain capsule first, follow main-brain routing, then enter the selected child brain only when routing is unambiguous."

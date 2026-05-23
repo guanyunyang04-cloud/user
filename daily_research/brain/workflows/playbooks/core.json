@@ -1,56 +1,10 @@
 {
   "schema_version": 1,
   "workflows": {
-    "brain_handoff": {
-      "description": "Resolve the main-brain and child-brain handoff capsule before entering project body work.",
-      "preflight": ["brain_integrity", "doc_guard"],
-      "checklist": ["resolve_main_manifest", "resolve_child_manifest", "read_fast_handoff_paths", "confirm_active_artifact_guard"],
-      "allowed_commands": ["daily_research/tools/brain_workflow.py handoff --child <brain_id> --json", "daily_research/tools/brain_bootstrap.py --child <brain_id> --json"],
-      "forbidden_actions": ["edit_brain_docs", "start_training", "modify_active_execution_artifact"],
-      "artifacts": ["brain/brain_manifest.json", "daily_research/brain/brain_manifest.json"],
-      "writeback_routes": {"state": "daily_research/brain/state_center.md", "operations": "daily_research/brain/operations_center.md", "episodic": "daily_research/brain/episodic_memory.md"},
-      "completion": ["boot_order_resolved", "fast_handoff_paths_resolved", "encoding_report_clean"],
-      "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json"]
-    },
-    "brain_maintenance": {
-      "description": "Maintain compact brain documents, archive long history, and verify structure without changing project behavior.",
-      "preflight": ["brain_integrity", "doc_guard", "project_consistency"],
-      "checklist": ["inspect_brain_docs", "keep_main_centers_compact", "archive_long_history", "run_guards"],
-      "allowed_commands": ["daily_research/tools/doc_guard.py check", "daily_research/tools/brain_integrity_check.py --json", "daily_research/tools/project_consistency_check.py"],
-      "forbidden_actions": ["start_training", "modify_active_execution_artifact", "write_runtime_state_as_brain_truth"],
-      "artifacts": ["daily_research/brain/references/"],
-      "writeback_routes": {"state": "daily_research/brain/state_center.md", "knowledge": "daily_research/brain/knowledge_center.md", "operations": "daily_research/brain/operations_center.md", "episodic": "daily_research/brain/episodic_memory.md"},
-      "completion": ["doc_guard_ok", "brain_integrity_ok", "operations_center_under_line_limit"],
-      "validation_commands": ["C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/doc_guard.py check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_integrity_check.py --json"]
-    },
-    "brain_system_audit": {
-      "description": "Audit all workspace brain roots, complexity, language policy, workflow registry state, and active-artifact guard status.",
-      "preflight": ["brain_catalog", "doc_guard", "brain_integrity"],
-      "checklist": ["list_attached_brains", "list_noncanonical_brains", "check_core_doc_line_counts", "check_language_policy", "check_workflow_registry_mode", "check_active_artifact_diff"],
-      "allowed_commands": ["daily_research/tools/brain_workflow.py audit-brain --scope all --json", "daily_research/tools/doc_guard.py check", "daily_research/tools/brain_integrity_check.py --json"],
-      "forbidden_actions": ["modify_active_execution_artifact", "start_training", "treat_cache_brain_as_truth"],
-      "artifacts": ["brain/brain_catalog.json", "brain/language_policy.md", "daily_research/brain/workflows/registry.json"],
-      "writeback_routes": {"workspace": "brain/", "references": "brain/references/", "daily_research_references": "daily_research/brain/references/"},
-      "stop_conditions": ["catalog_missing", "manifest_catalog_conflict", "active_artifact_dirty"],
-      "completion": ["audit_verdict_reported", "noncanonical_brains_classified", "language_policy_reported"],
-      "validation_commands": ["C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow audit-brain --scope all --json", "git diff -- daily_research/output/active_execution_strategy.json"]
-    },
-    "brain_architecture_refactor": {
-      "description": "Execute an explicitly approved brain architecture migration while preserving old CLI behavior or providing redirects.",
-      "preflight": ["brain_system_audit", "brain_catalog", "active_artifact_guard_clean"],
-      "checklist": ["write_tests_first", "migrate_catalog_and_registry", "preserve_cli_compatibility", "update_guards", "write_refactor_references", "run_full_guards"],
-      "allowed_commands": ["daily_research/tools/brain_workflow.py audit-brain --scope all --json", "daily_research/tools/doc_guard.py check", "daily_research/tools/brain_integrity_check.py --json"],
-      "forbidden_actions": ["modify_active_execution_artifact", "start_training", "delete_cache_or_archive_payloads"],
-      "artifacts": ["brain/brain_catalog.json", "daily_research/brain/workflows/", "brain/references/brain_system_refactor_contract_20260518.md"],
-      "writeback_routes": {"workspace": "brain/", "daily_research": "daily_research/brain/", "references": "brain/references/", "daily_research_references": "daily_research/brain/references/"},
-      "stop_conditions": ["tests_cannot_express_migration", "manifest_catalog_conflict_unresolved", "guard_failure"],
-      "completion": ["old_cli_paths_work", "new_audit_cli_works", "doc_and_integrity_guards_pass"],
-      "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json", "git diff --check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/doc_guard.py check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_integrity_check.py --json"]
-    },
     "continuous_policy_safe_screening": {
-      "description": "Run only resource-safe continuous_policy screening after explicit launch approval.",
-      "preflight": ["brain_handoff", "resource_limits", "no_conflict_process", "unique_study_tag"],
-      "checklist": ["confirm_resource_profile", "confirm_unique_study_tag", "launch_safe_screening", "monitor_progress", "write_verified_evidence"],
+      "description": "Run only resource-safe daily_research continuous_policy screening after explicit launch approval from a routed main-brain capsule.",
+      "preflight": ["main_brain_capsule", "resource_limits", "no_conflict_process", "unique_study_tag"],
+      "checklist": ["confirm_main_brain_routed_to_daily_research", "confirm_resource_profile", "confirm_unique_study_tag", "launch_safe_screening", "monitor_progress", "write_verified_evidence"],
       "allowed_commands": ["run_self_optimizing_study --disable-confirmatory --resource-profile safe --thread-limit 4 --cpu-affinity-count 4"],
       "forbidden_actions": ["enable_true_solver_by_default", "start_confirmatory", "modify_active_execution_artifact", "use_KMP_DUPLICATE_LIB_OK"],
       "artifacts": ["daily_research/output/continuous_policy/studies/<study_tag>/study_progress.json", "daily_research/output/continuous_policy/studies/<study_tag>/study_summary.json"],
@@ -59,98 +13,20 @@
       "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json"]
     },
     "continuous_policy_result_review": {
-      "description": "Read study/protocol/audit/ledger artifacts and decide whether evidence supports continuation.",
-      "preflight": ["artifact_freshness", "study_summary_readable", "protocol_summary_readable_if_available"],
+      "description": "Read study/protocol/audit/ledger artifacts and decide whether daily_research evidence supports continuation.",
+      "preflight": ["main_brain_capsule", "artifact_freshness", "study_summary_readable", "protocol_summary_readable_if_available"],
       "checklist": ["check_freshness", "read_explicit_study_tag_if_needed", "separate_smoke_from_completed_evidence", "list_gaps", "choose_next_allowed_action"],
-      "allowed_commands": ["daily_research/tools/brain_workflow.py status --workflow continuous_policy --json", "daily_research/tools/brain_workflow.py status --workflow continuous_policy --study-tag <tag> --json", "daily_research/tools/brain_workflow.py writeback-plan --source latest --json", "daily_research/tools/brain_workflow.py writeback-plan --source study:<tag> --json"],
+      "allowed_commands": [
+        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow status --workflow continuous_policy --json",
+        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow status --workflow continuous_policy --study-tag <tag> --json",
+        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow writeback-plan --source latest --json",
+        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow writeback-plan --source study:<tag> --json"
+      ],
       "forbidden_actions": ["promote_from_screening_only", "modify_active_execution_artifact", "treat_loose_latest_as_truth_without_freshness"],
       "artifacts": ["daily_research/output/continuous_policy/latest_study_summary.json", "daily_research/output/continuous_policy/latest_protocol_summary.json", "daily_research/output/continuous_policy/latest_behavior_audit_summary.json", "daily_research/output/continuous_policy/latest_conclusion_ledger.json"],
       "writeback_routes": {"state": "daily_research/brain/state_center.md", "knowledge": "daily_research/brain/knowledge_center.md", "operations": "daily_research/brain/operations_center.md", "episodic": "daily_research/brain/episodic_memory.md"},
       "completion": ["freshness_report_written", "explicit_study_evidence_capsule_read_if_latest_is_stale", "evidence_gap_listed", "next_allowed_action_selected"],
       "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json"]
-    },
-    "brain_writeback": {
-      "description": "Generate or apply a routed brain writeback from verified evidence.",
-      "preflight": ["artifact_freshness", "writeback_plan_generated", "doc_guard"],
-      "checklist": ["generate_writeback_plan", "route_current_facts_to_centers", "route_long_evidence_to_references", "run_doc_guard"],
-      "allowed_commands": ["daily_research/tools/brain_workflow.py writeback-plan --source latest --json", "daily_research/tools/brain_workflow.py writeback-plan --source study:<tag> --json", "daily_research/tools/brain_workflow.py writeback-plan --source study:<tag> --json --apply-brain-writeback"],
-      "forbidden_actions": ["write_unverified_latest_to_brain", "append_dated_logs_to_main_centers", "use_powershell_here_string_for_chinese_docs"],
-      "artifacts": ["daily_research/output/brain_workflow/writeback_plan_*.json"],
-      "writeback_routes": {"state": "daily_research/brain/state_center.md", "knowledge": "daily_research/brain/knowledge_center.md", "operations": "daily_research/brain/operations_center.md", "episodic": "daily_research/brain/episodic_memory.md", "references": "daily_research/brain/references/"},
-      "completion": ["routes_explicit", "archive_boundary_explicit", "doc_guard_ok_after_write"],
-      "validation_commands": ["C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/doc_guard.py check"]
-    },
-    "brainstorming_design": {
-      "description": "Turn a new feature, route, architecture change, or experiment idea into a clear design before implementation.",
-      "preflight": ["task_capsule", "project_context_read", "scope_boundary_identified"],
-      "checklist": ["state_goal_success_criteria", "separate_facts_inferences_assumptions_boundaries", "compare_approaches", "select_recommended_design", "define_acceptance_criteria"],
-      "allowed_commands": ["daily_research/tools/brain_workflow.py capsule --child daily_research --task <task> --workflow auto --json", "daily_research/tools/brain_workflow.py query --q <term> --json"],
-      "forbidden_actions": ["write_implementation_code_before_design", "start_long_training", "modify_active_execution_artifact"],
-      "artifacts": ["daily_research/brain/references/"],
-      "stop_conditions": ["goal_or_success_criteria_unclear", "scope_too_large_for_one_design", "required_context_missing"],
-      "writeback_routes": {"references": "daily_research/brain/references/", "operations": "daily_research/brain/operations_center.md"},
-      "completion": ["design_is_decision_complete", "scope_boundaries_explicit", "acceptance_criteria_written"],
-      "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json"]
-    },
-    "writing_plan": {
-      "description": "Convert an approved design or stable intent into an implementation-ready plan without executing it.",
-      "preflight": ["task_capsule", "design_or_user_intent_read", "repo_context_checked"],
-      "checklist": ["define_implementation_steps", "define_interfaces_and_data_flow", "define_edge_cases_and_failure_modes", "define_tests_and_guards", "record_assumptions_and_defaults"],
-      "allowed_commands": ["daily_research/tools/brain_workflow.py capsule --child daily_research --task <task> --workflow auto --json", "daily_research/tools/brain_workflow.py workflow-guide --workflow writing_plan --json"],
-      "forbidden_actions": ["edit_tracked_files_to_execute_plan", "start_training", "modify_active_execution_artifact"],
-      "artifacts": ["daily_research/brain/references/"],
-      "stop_conditions": ["implementation_decision_missing", "test_or_guard_plan_missing", "scope_boundary_ambiguous"],
-      "writeback_routes": {"references": "daily_research/brain/references/"},
-      "completion": ["plan_is_decision_complete", "tests_and_guards_explicit", "assumptions_recorded"],
-      "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json"]
-    },
-    "executing_plan": {
-      "description": "Execute an explicit user-approved plan step by step with verification and writeback.",
-      "preflight": ["task_capsule", "plan_read", "active_artifact_guard_clean"],
-      "checklist": ["review_plan_for_conflicts", "execute_steps_in_order", "stop_and_debug_on_failure", "run_required_guards", "writeback_verified_evidence"],
-      "allowed_commands": ["daily_research/tools/brain_workflow.py capsule --child daily_research --task <task> --workflow auto --json", "daily_research/tools/brain_workflow.py workflow-guide --workflow executing_plan --json"],
-      "forbidden_actions": ["skip_plan_steps", "skip_verification", "treat_failed_or_interrupted_work_as_complete", "modify_active_execution_artifact"],
-      "artifacts": ["daily_research/brain/references/"],
-      "stop_conditions": ["plan_conflict_or_gap_found", "verification_fails_repeatedly", "required_dependency_missing"],
-      "writeback_routes": {"references": "daily_research/brain/references/", "state": "daily_research/brain/state_center.md", "operations": "daily_research/brain/operations_center.md"},
-      "completion": ["all_plan_items_accounted_for", "fresh_guards_passed", "writeback_done_if_evidence_changed"],
-      "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json", "git diff --check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/doc_guard.py check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_integrity_check.py --json"]
-    },
-    "systematic_debugging": {
-      "description": "Diagnose bugs, failed tests, interrupted training, CUDA/OOM issues, or abnormal metrics before proposing fixes.",
-      "preflight": ["task_capsule", "symptom_and_artifact_identified", "active_artifact_guard_clean"],
-      "checklist": ["reproduce_or_read_failure_artifact", "identify_smallest_likely_cause", "make_minimal_fix", "add_or_run_regression_test", "verify_original_symptom_is_gone"],
-      "allowed_commands": ["daily_research/tools/brain_workflow.py capsule --child daily_research --task <task> --workflow auto --json", "daily_research/tools/brain_workflow.py query --q <error_or_tag> --json"],
-      "forbidden_actions": ["guess_fix_without_evidence", "large_unrelated_refactor", "modify_active_execution_artifact"],
-      "artifacts": ["daily_research/brain/references/"],
-      "stop_conditions": ["cannot_reproduce_or_locate_failure", "fix_requires_policy_or_scope_decision", "resource_risk_exceeds_current_boundary"],
-      "writeback_routes": {"references": "daily_research/brain/references/", "operations": "daily_research/brain/operations_center.md"},
-      "completion": ["root_cause_or_best_evidence_stated", "regression_guard_run", "residual_risk_recorded"],
-      "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json", "git diff --check"]
-    },
-    "verification_before_completion": {
-      "description": "Run fresh verification before claiming work is complete, fixed, passing, or safe.",
-      "preflight": ["task_capsule", "claim_to_verify_identified"],
-      "checklist": ["identify_command_that_proves_claim", "run_fresh_verification", "read_exit_code_and_output", "state_result_and_residual_risk", "avoid_completion_claim_if_verification_failed"],
-      "allowed_commands": ["daily_research/tools/doc_guard.py check", "daily_research/tools/brain_integrity_check.py --json", "git diff --check", "git diff -- daily_research/output/active_execution_strategy.json"],
-      "forbidden_actions": ["claim_complete_without_fresh_verification", "ignore_failed_guard", "modify_active_execution_artifact"],
-      "artifacts": ["daily_research/brain/references/"],
-      "stop_conditions": ["verification_command_missing", "verification_fails", "output_not_read_or_ambiguous"],
-      "writeback_routes": {"references": "daily_research/brain/references/"},
-      "completion": ["fresh_verification_passed", "claim_matches_evidence", "active_artifact_diff_checked"],
-      "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json", "git diff --check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/doc_guard.py check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_integrity_check.py --json"]
-    },
-    "brain_writeback_verified": {
-      "description": "Write verified mainline, evidence, experiment, or contract changes back into brain references and indexes.",
-      "preflight": ["verified_source_artifact", "writeback_route_selected", "doc_guard"],
-      "checklist": ["write_dated_reference_for_large_evidence", "update_compact_current_docs_only_if_needed", "rebuild_evidence_registry", "run_doc_and_brain_guards", "confirm_active_artifact_unchanged"],
-      "allowed_commands": ["daily_research/tools/brain_workflow.py writeback-plan --source <source> --json", "daily_research/tools/brain_workflow.py evidence-index --rebuild --json", "daily_research/tools/doc_guard.py check", "daily_research/tools/brain_integrity_check.py --json"],
-      "forbidden_actions": ["write_unverified_latest_to_brain", "append_dated_logs_to_main_centers", "modify_active_execution_artifact"],
-      "artifacts": ["daily_research/brain/references/evidence_registry.json"],
-      "stop_conditions": ["source_evidence_unverified", "writeback_route_unclear", "doc_or_brain_guard_fails"],
-      "writeback_routes": {"state": "daily_research/brain/state_center.md", "knowledge": "daily_research/brain/knowledge_center.md", "operations": "daily_research/brain/operations_center.md", "references": "daily_research/brain/references/"},
-      "completion": ["reference_docs_updated", "evidence_registry_rebuilt", "doc_guard_and_brain_integrity_ok"],
-      "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json", "git diff --check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/doc_guard.py check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_integrity_check.py --json"]
     }
   }
 }

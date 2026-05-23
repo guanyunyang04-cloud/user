@@ -114,7 +114,9 @@
     }
   ],
   "tooling": {
-    "doc_guard": "daily_research/tools/doc_guard.py",
+    "doc_guard": "tools.brain.doc_guard",
+    "integrity_check": "tools.brain.integrity_check",
+    "workflow": "tools.brain.workflow",
     "gemini_frontend_cmd": "daily_research/tools/gemini_frontend.cmd",
     "gemini_frontend_ps1": "daily_research/tools/gemini_frontend.ps1"
   },

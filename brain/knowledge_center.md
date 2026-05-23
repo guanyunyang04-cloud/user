@@ -22,8 +22,8 @@
   - 通用操作技能归本机 `C:/Users/ASUS/.codex/skills` 维护；brain 不复制 skill 正文，不把 TDD、调试、计划、验证、前端、安全或部署方法写成平行技能库。
 - `brain-cognitive-rule`
   - brain 只保留事实、推断、假设、权威层级、项目状态、风险边界、证据索引、写回路由和必要命令入口；脑区不是通用操作技能仓库。
-- `project-fallback-rule`
-  - API 或 no-plugin 会话无法加载本机 skills 时，可以使用项目 `brain_workflow capsule/workflow-guide` 作为本地 fallback；fallback 只承载项目约束、预检、证据边界和验证调度，不宣称替代本机 skills。
+- `workspace-fallback-rule`
+  - API 或 no-plugin 会话无法加载本机 skills 时，可以使用主脑 `tools.brain.workflow capsule/workflow-guide` 作为本地 fallback；fallback 只承载主脑路由、项目约束、预检、证据边界和验证调度，不宣称替代本机 skills。
 - `skills-brain-tools-matrix`
   - 本机 skills 管通用操作能力；主脑和分脑管认知治理与项目真相；项目 `tools/` 管可执行守卫。项目安全边界高于通用 skill 默认行为。
 ## 2. 已验证教训
@@ -35,7 +35,7 @@
 - 如果接管入口、命令入口或写回路由已经漂移，先纠偏再重开实验，通常比直接推进更能降低误操作风险
 - 如果控制台显示疑似中文乱码，先用 UTF-8 读取工具确认真实文件内容，不能把终端编码错觉当作文件损坏来修
 - 脑内文档铁律：当前层标题、正文、规则、状态和复盘写回必须使用简体中文；命令、路径、指标名、tag、模型名等技术标识保留原文
-- 主分脑结构变更后必须跑 `brain_integrity_check.py --json`，确认父子附着、读序、写回路由、body 映射和编码合同仍一致
+- 主分脑结构变更后必须跑 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`，确认父子附着、读序、写回路由、body 映射和编码合同仍一致
 - 主脑 `state_center.md` 只承载当前路由和跨项目边界，不再追加日期型实验日志；分脑高频入口也必须优先保留当前结论，历史细节下沉到 `episodic_memory.md` 或 `brain/references/`
 - 长任务运行纪律是受监管独立进程，不是脱管后台化：训练、评估、审计、bounded study、confirmatory rerun 与执行任务可以用 `Start-Process -PassThru` 启动，但必须记录 PID、持久 stdout/stderr、run tag 或产物路径
 - 长任务默认用 `Wait-Process -Id <pid> -Timeout 7200` 轮询；`7200` 秒是单轮最大等待上限，进程提前自然结束时必须立即返回并解析 progress、日志、summary、checkpoint 或评估产物

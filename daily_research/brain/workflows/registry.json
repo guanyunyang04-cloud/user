@@ -1,19 +1,8 @@
 {
   "schema_version": 1,
-  "description": "Compact workflow registry. Each entry points to a playbook that stores the full operating contract.",
+  "description": "daily_research child-brain workflow registry. Workspace governance and brain-native fallback workflows live in brain/workflows/registry.json.",
   "workflows": [
-    {"id": "brain_handoff", "title": "Brain Handoff", "category": "brain", "playbook": "daily_research/brain/workflows/playbooks/core.json#brain_handoff"},
-    {"id": "brain_maintenance", "title": "Brain Maintenance", "category": "brain", "playbook": "daily_research/brain/workflows/playbooks/core.json#brain_maintenance"},
-    {"id": "brain_system_audit", "title": "Brain System Audit", "category": "brain", "playbook": "daily_research/brain/workflows/playbooks/core.json#brain_system_audit"},
-    {"id": "brain_architecture_refactor", "title": "Brain Architecture Refactor", "category": "brain", "playbook": "daily_research/brain/workflows/playbooks/core.json#brain_architecture_refactor"},
     {"id": "continuous_policy_safe_screening", "title": "Continuous Policy Safe Screening", "category": "continuous_policy", "playbook": "daily_research/brain/workflows/playbooks/core.json#continuous_policy_safe_screening"},
-    {"id": "continuous_policy_result_review", "title": "Continuous Policy Result Review", "category": "continuous_policy", "playbook": "daily_research/brain/workflows/playbooks/core.json#continuous_policy_result_review"},
-    {"id": "brain_writeback", "title": "Brain Writeback", "category": "brain", "playbook": "daily_research/brain/workflows/playbooks/core.json#brain_writeback"},
-    {"id": "brainstorming_design", "title": "Brainstorming Design", "category": "brain_native_superpowers", "playbook": "daily_research/brain/workflows/playbooks/core.json#brainstorming_design"},
-    {"id": "writing_plan", "title": "Writing Plan", "category": "brain_native_superpowers", "playbook": "daily_research/brain/workflows/playbooks/core.json#writing_plan"},
-    {"id": "executing_plan", "title": "Executing Plan", "category": "brain_native_superpowers", "playbook": "daily_research/brain/workflows/playbooks/core.json#executing_plan"},
-    {"id": "systematic_debugging", "title": "Systematic Debugging", "category": "brain_native_superpowers", "playbook": "daily_research/brain/workflows/playbooks/core.json#systematic_debugging"},
-    {"id": "verification_before_completion", "title": "Verification Before Completion", "category": "brain_native_superpowers", "playbook": "daily_research/brain/workflows/playbooks/core.json#verification_before_completion"},
-    {"id": "brain_writeback_verified", "title": "Brain Writeback Verified", "category": "brain_native_superpowers", "playbook": "daily_research/brain/workflows/playbooks/core.json#brain_writeback_verified"}
+    {"id": "continuous_policy_result_review", "title": "Continuous Policy Result Review", "category": "continuous_policy", "playbook": "daily_research/brain/workflows/playbooks/core.json#continuous_policy_result_review"}
   ]
 }

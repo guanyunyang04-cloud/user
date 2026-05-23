@@ -1,67 +1,48 @@
 # 主脑操作中枢
 
 ## 1. 默认接管入口
-- 只接主脑：
-  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_bootstrap.py`
-- 接主脑并进入目标分脑：
-  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_bootstrap.py --child <brain_id>`
+- schema v2 capsule：
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
+- 任务路由：
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow route --task "<task>" --json`
+- 主脑或分脑 bootstrap：
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain <brain_id|workspace> --json`
 
-## 1.0 Skills / Brain / Tools 调用顺序
-- 先读 brain 约束：确认事实、推断、假设、权威层级、分支纪律、active artifact 禁区和目标分脑边界。
+## 2. Skills / Brain / Tools 调用顺序
+- 先运行主脑 capsule，确认事实、推断、假设、权威层级、分支纪律、active artifact 禁区和目标分脑边界。
 - 再调用适用的本机 skill：TDD、debugging、planning、verification、文档、前端、安全和部署等通用操作流程以 `C:/Users/ASUS/.codex/skills` 为准。
-- 最后跑项目守卫：项目特有预检、验证矩阵、证据查询和写回路线由对应分脑与 `daily_research/tools/` 提供。
+- 最后进入被主脑路由选中的分脑，读取项目事实、项目命令、证据边界和验证矩阵。
 - 冲突时先服从项目安全边界：如果通用 skill 默认要求 worktree、commit、写 spec 或扩大执行，而 brain 明确要求 `main`、不提交、不触碰 active artifact，则以 brain 约束为准。
-- brain 只记录项目特例和必要命令索引；不得在主脑正文复制本机 skill 的完整方法正文。
-- brain 是认知真源；但当目标分脑的 output explicit artifacts 晚于 brain references 或未登记进 evidence registry 时，必须先做 freshness reconciliation，再给出“当前状态 / 下一步”结论。
 
-## 1.1 Mutation 前预检
+## 3. Mutation 前预检
 - 先确认工作区和分支：
   - `git status --short --branch --untracked-files=all`
   - `git branch --show-current`
 - 如果当前分支不是 `main`，任何会修改 repo-tracked 文件的任务都必须先纠偏到 `main`，或由用户显式撤销 `main-branch-only` 规则。
 - 分支异常是 preflight blocker；不得写成研究证据、promotion 证据或分脑当前结论。
 
-## 2. 结构变更顺序
-- 先改 `brain/brain_architecture.md`
-- 再改 `brain/brain_manifest.json`
-- 再改目标分脑 manifest 与区域特化
-- 最后改具体中枢正文和兼容别名
+## 4. 结构变更顺序
+- 先改 `brain/brain_architecture.md`。
+- 再改 `brain/brain_manifest.json`。
+- 再改目标分脑 manifest、workflow registry 与区域特化。
+- 最后改具体中枢正文、skill 入口和守卫。
 
-## 2.1 文档收口顺序
-- 先判断文档内容属于哪个脑：
-  - 工作区共性规则写入 `brain/`
-  - 项目事实、入口、流程写入对应 `<child>/brain/`
-  - 过长但仍需保留的参考材料写入 `<child>/brain/references/`
-- 再把 body 顶层 README / 兼容文档改成简体中文索引，明确指向 brain 真源
-- 最后运行 `brain_integrity_check.py --json` 与 `doc_guard.py check`
-
-## 3. 写回路由
-- 工作区级当前状态写回 `brain/state_center.md`
-- 工作区级固定规则与教训写回 `brain/knowledge_center.md`
-- 工作区级拓扑写回 `brain/master_brain.md`
-- 工作区级治理写回 `brain/governance_layer.md`
-- 工作区级项目特例、环境与守卫入口写回 `brain/operations_center.md`
-- 通用操作技能的详细方法不写入 brain；需要时使用本机 `C:/Users/ASUS/.codex/skills`。
-## 4. 守卫入口
-- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_integrity_check.py --json`
-- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/doc_guard.py check`
+## 5. 守卫入口
+- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check`
+- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/project_consistency_check.py`
-- `doc_guard.py check` 已包含主分脑完整性检查；结构变更后仍建议单独跑一次 `brain_integrity_check.py --json` 便于快速定位
-## 5. 环境基线
-- brain 文档统一使用 UTF-8
-- brain 当前层正文、标题、复盘和规则写回遵循 `brain/language_policy.md`：中文语义 + 英文工程标识。
-- 命令、路径、JSON key、workflow id、dataset id、tag、模型名等技术标识保留原文。
-- 工具调用优先走显式 Python 路径或显式脚本入口；当前 `daily_research` 相关 Python 命令统一使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`
-- 不依赖“当前 shell 恰好已经处于正确环境”的隐性状态
+- `doc_guard` 已包含主分脑完整性检查；结构变更后仍建议单独跑一次 `integrity_check` 便于快速定位。
 
-## 长时任务运行纪律
-- 工作区级规则：项目长任务必须受监管运行，任务主进程不得脱离 PID、日志、run tag 或产物路径追踪，也不得中途人为中断。
-- 允许使用受监管独立 OS 进程承载训练、评估、审计、bounded study、confirmatory rerun 和执行任务；禁止无追踪、无日志、无 PID 的脱管后台化。
-- 任务启动必须使用目标分脑声明的显式运行环境；当前 `daily_research` 全部 Python 任务必须使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`。
-- 涉及 GPU 训练的任务必须在完成后核验训练诊断中的 `device = cuda` 与 `cuda_available = true`，不得把未核验环境的结果写成正式证据。
-- 进程存活判断必须绑定 PID、CommandLine、run_tag 或最新产物时间戳；不得用裸 `Get-Process python` 把检查脚本自身或其他短暂 Python 误判为目标任务。
+## 6. 写回路由
+- 工作区级当前状态写回 `brain/state_center.md`。
+- 工作区级固定规则与教训写回 `brain/knowledge_center.md`。
+- 工作区级拓扑写回 `brain/master_brain.md`。
+- 工作区级治理写回 `brain/governance_layer.md`。
+- 工作区级项目特例、环境与守卫入口写回 `brain/operations_center.md`。
+- 项目事实、实验状态、rXX 证据和项目命令写回被路由选中的分脑。
+
+## 7. 长时任务运行纪律
+- 项目长任务必须受监管运行，任务主进程不得脱离 PID、日志、run tag 或产物路径追踪。
 - 启动模板：用 `Start-Process -PassThru` 启动目标命令，记录 PID、stdout/stderr 日志路径、run tag、预期 summary / progress / checkpoint 路径。
 - 轮询模板：默认用 `Wait-Process -Id <pid> -Timeout 7200` 等待；`7200` 秒是长任务单轮默认最大等待上限，进程提前自然结束时必须立即返回并解析产物。
 - 每轮状态必须计算已用时间和预计剩余时间；状态来源优先使用 progress、PID、日志尾部、GPU/内存与最新产物时间戳。
-- 首个 progress 尚未生成、正在排障、用户要求更密集状态或资源风险较高时，可以临时缩短单轮 timeout；不得用固定 sleep 取代 PID 绑定等待。
-- 任务完成后一次性读取日志、summary、checkpoint、evaluation 或 audit 产物，并按目标分脑写回；除 7200s 长任务监控、异常与用户询问外，不做无意义进度轮询。

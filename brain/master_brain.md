@@ -1,18 +1,17 @@
 # 主脑
 
 ## 1. 作用
-`brain/` 是整个工作区的共享脑核与全局路由层。
+`brain/` 是整个工作区的共享脑核、任务路由层和 agent 接管入口。
 
 它只负责四件事：
 
-- 定义主脑与分脑的统一结构
-- 维护跨项目边界和拓扑
-- 维护工作区级目标函数与治理顺序
-- 保证任何 agent 都能先接脑、再接状态、最后进入 body
+- 定义主脑与分脑的统一结构。
+- 维护跨项目边界、分支纪律和禁区判断。
+- 先路由任务，再按需进入分脑。
+- 保证任何 agent 都从主脑 capsule 进入，而不是直接绑定某个项目分脑。
 
 ## 2. 当前脑网络
-- 主脑：
-  - `brain/`
+- 主脑：`brain/`
 - 一级分脑：
   - `daily_research/brain/`
   - `t0_project/brain/`
@@ -20,30 +19,25 @@
 
 当前角色固定为：
 
-- `daily_research`
-  - 正式生产研究与执行主线
-- `t0_project`
-  - 盘中执行与 RL 实验分脑
-- `daily_stock_analysis-main`
-  - 多市场分析产品分脑
+- `daily_research`：正式生产研究与执行主线。
+- `t0_project`：盘中执行与 RL 实验分脑。
+- `daily_stock_analysis-main`：多市场分析产品分脑。
 
 ## 3. 当前治理边界
-- `brain-first`
-  - 先接主脑，再接目标分脑，再进 body
-- `single-hub`
-  - 同一种信息只保留一个权威中枢
-- `common-in-main`
-  - 共享结构只在主脑维护
-- `local-in-child`
-  - 项目事实只在分脑维护
-- `brain-as-doc-hub`
-  - 权威说明只留在 `brain/` 或 `brain/references/`
+- `main-brain-first`：主脑是唯一 agent 接管入口。
+- `route-before-child`：只有主脑路由明确选中分脑后，才读取分脑上下文。
+- `common-in-main`：共享结构、共享顺序、共享治理只在主脑维护。
+- `local-in-child`：项目事实、实验状态、项目命令只在分脑维护。
+- `no-loose-default-child`：多个分脑高置信冲突时返回 `ambiguous`，不得默认落到 `daily_research`。
+
 ## 4. 当前默认接脑方式
-- 只接主脑：
-  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_bootstrap.py`
-- 接主脑并进入目标分脑：
-  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_bootstrap.py --child <brain_id>`
+- 生成 schema v2 接管胶囊：
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
+- 只做任务路由：
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow route --task "<task>" --json`
+- 解析主脑或目标分脑 boot order：
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain <brain_id|workspace> --json`
 
 ## 5. 当前主问题
-- 当前最重要的事情已经不是“有没有脑结构”
-- 而是持续维持这套精炼脑核，不再重新长回碎片化文档
+- 当前最重要的事情不是“有没有脑结构”，而是维持主脑优先的平台入口，不让 capsule、skill、workflow registry 再和某个分脑绑定。
+- 主脑只保存跨项目规则和路由；`daily_research` 的 Path20、continuous_policy、deep_alpha 事实必须留在 `daily_research/brain/`。
