@@ -8,7 +8,7 @@ from typing import Any, Iterable
 import numpy as np
 import pandas as pd
 
-from daily_research.path_policy.labels import PATH20_CUMULATIVE_HORIZONS, PATH20_HORIZON
+from daily_research.path_policy.labels import PATH20_CUMULATIVE_HORIZONS, PATH20_HORIZON, normalize_cumulative_horizons
 
 
 STUDIES_ROOT = Path("daily_research/output/path_policy/studies")
@@ -91,27 +91,84 @@ def _target_name(target: dict[str, float]) -> str:
     )
 
 
-def _decision_utility_columns(frame: pd.DataFrame, target: dict[str, float]) -> pd.DataFrame:
-    horizons = list(PATH20_CUMULATIVE_HORIZONS)
+def _infer_horizons_from_columns(frame: pd.DataFrame) -> tuple[int, ...]:
+    horizons: list[int] = []
+    prefix = "future_cum_excess_return_"
+    suffix = "d"
+    for column in frame.columns:
+        text = str(column)
+        if not text.startswith(prefix) or not text.endswith(suffix):
+            continue
+        raw = text[len(prefix) : -len(suffix)]
+        if raw.isdigit():
+            horizons.append(int(raw))
+    return tuple(sorted(dict.fromkeys(horizons)))
+
+
+def _resolve_audit_horizons(
+    frame: pd.DataFrame,
+    cumulative_horizons: tuple[int, ...] | list[int] | str | None,
+) -> tuple[tuple[int, ...], str, int]:
+    inferred = _infer_horizons_from_columns(frame)
+    if cumulative_horizons is None:
+        horizons = inferred or PATH20_CUMULATIVE_HORIZONS
+        source = "columns" if inferred else "default"
+    else:
+        if isinstance(cumulative_horizons, str):
+            requested = [int(item.strip()) for item in cumulative_horizons.split(",") if item.strip()]
+        else:
+            requested = [int(item) for item in cumulative_horizons]
+        max_hint = max([*requested, *[int(item) for item in inferred], PATH20_HORIZON])
+        horizons = normalize_cumulative_horizons(cumulative_horizons, horizon=max(max_hint, PATH20_HORIZON))
+        source = "argument"
+    return horizons, source, int(max(horizons) if horizons else PATH20_HORIZON)
+
+
+def _risk_column_for_horizon(frame: pd.DataFrame, horizon: int) -> str:
+    specific = f"future_path_max_drawdown_{int(horizon)}d"
+    if specific in frame.columns:
+        return specific
+    if "future_path_max_drawdown_20d" in frame.columns:
+        return "future_path_max_drawdown_20d"
+    raise ValueError(
+        "target_calibration_audit missing required risk column: "
+        f"{specific!r} or 'future_path_max_drawdown_20d'"
+    )
+
+
+def _decision_utility_columns(
+    frame: pd.DataFrame,
+    target: dict[str, float],
+    *,
+    cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
+) -> tuple[pd.DataFrame, tuple[int, ...], str]:
+    horizons, horizon_source, max_horizon = _resolve_audit_horizons(frame, cumulative_horizons)
+    horizons_list = list(horizons)
     required = [f"future_cum_excess_return_{int(horizon)}d" for horizon in horizons]
-    required.append("future_path_max_drawdown_20d")
+    risk_columns = [_risk_column_for_horizon(frame, int(horizon)) for horizon in horizons]
+    required.extend(risk_columns)
     _require_columns(frame, required)
 
-    y_cum = frame[[f"future_cum_excess_return_{int(horizon)}d" for horizon in horizons]].apply(
+    y_cum = frame[[f"future_cum_excess_return_{int(horizon)}d" for horizon in horizons_list]].apply(
         pd.to_numeric,
         errors="coerce",
     )
-    max_dd = pd.to_numeric(frame["future_path_max_drawdown_20d"], errors="coerce").to_numpy(dtype=float).reshape(-1, 1)
-    horizon_arr = np.asarray(horizons, dtype=float).reshape(1, -1)
-    downside = np.maximum(0.0, -max_dd)
+    drawdown = np.column_stack(
+        [
+            pd.to_numeric(frame[column], errors="coerce").to_numpy(dtype=float)
+            for column in risk_columns
+        ]
+    )
+    horizon_arr = np.asarray(horizons_list, dtype=float).reshape(1, -1)
+    downside = np.maximum(0.0, -drawdown)
     utility = (
         y_cum.to_numpy(dtype=float)
         - _finite_float(target.get("cost_bps")) / 10000.0
-        - _finite_float(target.get("drawdown_penalty")) * downside * np.sqrt(horizon_arr / float(PATH20_HORIZON))
+        - _finite_float(target.get("drawdown_penalty")) * downside * np.sqrt(horizon_arr / float(max_horizon))
     )
     audit_columns = [column for column in frame.columns if str(column).startswith("audit_")]
     result = frame.drop(columns=audit_columns).copy() if audit_columns else frame.copy()
-    for pos, horizon in enumerate(horizons):
+    for pos, horizon in enumerate(horizons_list):
         result[f"audit_future_utility_{int(horizon)}d"] = utility[:, pos]
         result[f"audit_future_hit_label_{int(horizon)}d"] = utility[:, pos] > (
             _finite_float(target.get("hit_threshold_bps")) / 10000.0
@@ -119,9 +176,9 @@ def _decision_utility_columns(frame: pd.DataFrame, target: dict[str, float]) -> 
     finite_utility = np.where(np.isfinite(utility), utility, -np.inf)
     decision_utility = np.nanmax(utility, axis=1)
     result["audit_future_utility"] = pd.Series(decision_utility, index=result.index, dtype=float)
-    result["audit_best_horizon"] = [horizons[int(pos)] for pos in np.nanargmax(finite_utility, axis=1)]
+    result["audit_best_horizon"] = [horizons_list[int(pos)] for pos in np.nanargmax(finite_utility, axis=1)]
     result["audit_hit_label"] = decision_utility > (_finite_float(target.get("hit_threshold_bps")) / 10000.0)
-    return result
+    return result, tuple(horizons_list), horizon_source
 
 
 def _rank_ic_by_date(frame: pd.DataFrame, score_column: str, target_column: str) -> float:
@@ -290,9 +347,10 @@ def summarize_target_frame(
     *,
     score_column: str = "pred_decision_score",
     deciles: int = 10,
+    cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
 ) -> dict[str, Any]:
     _require_columns(frame, ["date", score_column])
-    work = _decision_utility_columns(frame, target)
+    work, horizons, horizon_source = _decision_utility_columns(frame, target, cumulative_horizons=cumulative_horizons)
     work["date"] = pd.to_datetime(work["date"])
     work[score_column] = pd.to_numeric(work[score_column], errors="coerce")
     utility_deciles = _decile_payload(work, "audit_future_utility", deciles=deciles)
@@ -327,6 +385,8 @@ def summarize_target_frame(
     gate = {"passed": all(checks.values()), "checks": checks}
     return {
         "target": {**target, "name": _target_name(target)},
+        "horizons": [int(item) for item in horizons],
+        "horizon_source": horizon_source,
         "row_count": int(len(work)),
         "date_count": int(work["date"].nunique()),
         "hit_base_rate": hit_base_rate,
@@ -349,6 +409,7 @@ def summarize_study_target_calibration(
     *,
     studies_root: Path = STUDIES_ROOT,
     target_grid: list[dict[str, float]] | None = None,
+    cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
 ) -> dict[str, Any]:
     study_root = Path(studies_root) / str(tag)
     if not study_root.exists():
@@ -366,8 +427,8 @@ def summarize_study_target_calibration(
 
     targets = []
     for target in list(target_grid or parse_target_grid(DEFAULT_TARGET_GRID)):
-        validation = summarize_target_frame(pd.read_csv(validation_path), target)
-        test = summarize_target_frame(pd.read_csv(test_path), target)
+        validation = summarize_target_frame(pd.read_csv(validation_path), target, cumulative_horizons=cumulative_horizons)
+        test = summarize_target_frame(pd.read_csv(test_path), target, cumulative_horizons=cumulative_horizons)
         drift = abs(_finite_float(validation.get("hit_base_rate")) - _finite_float(test.get("hit_base_rate")))
         checks = {
             "validation_gate_a_passed": bool(validation["gate_a"]["passed"]),
@@ -407,12 +468,18 @@ def build_target_calibration_audit(
     *,
     studies_root: Path = STUDIES_ROOT,
     target_grid: list[dict[str, float]] | None = None,
+    cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
 ) -> dict[str, Any]:
     if not tags:
         raise ValueError("target calibration audit requires at least one study tag")
     resolved_grid = list(target_grid or parse_target_grid(DEFAULT_TARGET_GRID))
     studies = [
-        summarize_study_target_calibration(tag, studies_root=Path(studies_root), target_grid=resolved_grid)
+        summarize_study_target_calibration(
+            tag,
+            studies_root=Path(studies_root),
+            target_grid=resolved_grid,
+            cumulative_horizons=cumulative_horizons,
+        )
         for tag in tags
     ]
     passed = [
@@ -446,13 +513,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--studies-root", default=str(STUDIES_ROOT))
     parser.add_argument("--output", required=True)
     parser.add_argument("--target-grid", default=DEFAULT_TARGET_GRID, help="cost_bps:hit_threshold_bps:drawdown_penalty,...")
+    parser.add_argument(
+        "--cumulative-horizons",
+        default="",
+        help="Optional comma-separated horizon grid for audit labels. Defaults to prediction CSV columns.",
+    )
     args = parser.parse_args(argv)
 
     tags = [item.strip() for item in str(args.tags).split(",") if item.strip()]
+    horizons = str(args.cumulative_horizons or "").strip() or None
     payload = build_target_calibration_audit(
         tags,
         studies_root=Path(args.studies_root),
         target_grid=parse_target_grid(str(args.target_grid)),
+        cumulative_horizons=horizons,
     )
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)

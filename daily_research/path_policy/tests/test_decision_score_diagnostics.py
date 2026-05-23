@@ -126,6 +126,7 @@ def test_score_gate_requires_validation_test_and_monthly_stability() -> None:
 
     assert not score_passes_gate(passed_validation, weak_test, baseline_negative_count=2)["passed"]
     assert score_passes_gate(passed_validation, strong_test, baseline_negative_count=2)["passed"]
+    assert score_passes_gate(passed_validation, strong_test, baseline_negative_count=0)["passed"]
 
 
 def test_build_diagnostics_reads_completed_study_fixture(tmp_path: Path) -> None:

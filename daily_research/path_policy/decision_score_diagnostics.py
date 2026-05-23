@@ -326,6 +326,10 @@ def summarize_frame(frame: pd.DataFrame, *, score_names: tuple[str, ...] = DEFAU
 
 
 def score_passes_gate(validation_score: dict[str, Any], test_score: dict[str, Any], baseline_negative_count: int) -> dict[str, Any]:
+    negative_month_count = len(test_score.get("negative_months", []) or [])
+    negative_month_check = negative_month_count < int(baseline_negative_count)
+    if negative_month_count == 0:
+        negative_month_check = True
     checks = {
         "validation_rank_ic_positive": _finite_float(validation_score.get("rank_ic")) > 0.0,
         "validation_spread_positive": _finite_float(validation_score.get("top_bottom_spread")) > 0.0,
@@ -334,7 +338,7 @@ def score_passes_gate(validation_score: dict[str, Any], test_score: dict[str, An
         "test_spread_positive": _finite_float(test_score.get("top_bottom_spread")) > 0.0,
         "test_hit_lift_positive": _finite_float(test_score.get("hit_lift_top20_mean")) > 0.0,
         "test_monthly_spread_positive_rate_ge_60pct": _finite_float(test_score.get("monthly_spread_positive_rate")) >= 0.60,
-        "negative_month_count_less_than_baseline": len(test_score.get("negative_months", []) or []) < int(baseline_negative_count),
+        "negative_month_count_less_than_baseline": negative_month_check,
     }
     return {"passed": all(checks.values()), "checks": checks}
 

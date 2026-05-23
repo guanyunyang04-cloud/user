@@ -39,6 +39,23 @@ def _target_frame(*, rows_per_month: int = 20, reverse_february: bool = False) -
     return pd.DataFrame(rows)
 
 
+def _dynamic_horizon_frame() -> pd.DataFrame:
+    rows = []
+    horizons = (1, 2, 3, 5, 8, 10, 15, 20, 30)
+    for idx in range(12):
+        strength = (idx + 1) / 12.0
+        row = {
+            "date": f"2024-01-{idx % 4 + 1:02d}",
+            "stock": f"S{idx:03d}",
+            "pred_decision_score": strength,
+        }
+        for horizon in horizons:
+            row[f"future_cum_excess_return_{horizon}d"] = strength * horizon / 100.0
+            row[f"future_path_max_drawdown_{horizon}d"] = -0.01 * horizon / 30.0
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def test_parse_target_grid_requires_cost_hit_and_drawdown_penalty() -> None:
     grid = parse_target_grid("20:10:0.10, 15:5:0.00")
 
@@ -63,6 +80,48 @@ def test_summarize_target_frame_reports_monotonic_utility_deciles() -> None:
     assert summary["score_decile_calibration"]["future_utility_top_bottom_spread"] > 0.0
     assert summary["score_decile_calibration"]["monthly_spread_positive_rate"] == pytest.approx(1.0)
     assert summary["gate_a"]["passed"] is True
+
+
+def test_summarize_target_frame_infers_dynamic_horizons_from_columns() -> None:
+    horizons = (1, 2, 3, 5, 8, 10, 15, 20, 30)
+
+    summary = summarize_target_frame(
+        _dynamic_horizon_frame(),
+        {"cost_bps": 0.0, "hit_threshold_bps": 10.0, "drawdown_penalty": 0.0},
+        deciles=4,
+    )
+
+    assert summary["horizons"] == list(horizons)
+    assert summary["horizon_source"] == "columns"
+    assert summary["utility_decile_monotonicity"]["is_monotonic"] is True
+
+
+def test_summarize_target_frame_uses_horizon_specific_drawdown() -> None:
+    frame = pd.DataFrame(
+        [
+            {
+                "date": "2024-01-02",
+                "stock": "AAA",
+                "pred_decision_score": 1.0,
+                "future_cum_excess_return_10d": 0.03,
+                "future_cum_excess_return_30d": 0.04,
+                "future_path_max_drawdown_10d": -0.01,
+                "future_path_max_drawdown_30d": -0.30,
+            }
+        ]
+    )
+
+    summary = summarize_target_frame(
+        frame,
+        {"cost_bps": 0.0, "hit_threshold_bps": -1_000.0, "drawdown_penalty": 0.10},
+        cumulative_horizons=(10, 30),
+    )
+
+    assert summary["horizons"] == [10, 30]
+    assert summary["horizon_source"] == "argument"
+    assert summary["utility_deciles"][0]["future_utility_mean"] == pytest.approx(
+        0.03 - 0.10 * 0.01 * (10 / 30) ** 0.5
+    )
 
 
 def test_summarize_target_frame_flags_sparse_and_dense_hit_labels() -> None:
@@ -117,6 +176,7 @@ def test_build_target_calibration_audit_reads_study_predictions(tmp_path: Path) 
         [tag],
         studies_root=tmp_path / "studies",
         target_grid=[{"cost_bps": 0.0, "hit_threshold_bps": 10.0, "drawdown_penalty": 0.0}],
+        cumulative_horizons=(1, 3, 5, 10, 20),
     )
 
     assert payload["schema_version"] == 1

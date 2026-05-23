@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 55,
+  "record_count": 56,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -362,6 +362,39 @@
         "policy_sector_board_view__4b07bb20fe1fbe05b6e13f45",
         "policy_pool_view__8161f6879815d3a22dd3b3f2",
         "policy_pool_view__ef6e9054e28cf5a71c6996e4"
+      ]
+    },
+    {
+      "id": "alpha_path20_horizon_discovery_result_20260523",
+      "date": "2026-05-23",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_path20_horizon_discovery_result_20260523.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [
+        "alpha_path20_neural_policy_v1",
+        "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01"
+      ],
+      "verdict": "The multi-horizon no-alpha GRU run completed: `status=completed`, `evidence_verdict=forecast_test_confirmed`.; `trade_utility_score` passed the corrected selection calibration gate on validation and test.; Target calibration Gate A passed for `cost20_hit10_dd0.1`; utility deciles were monotonic and hit label base rate was stable across validation/test.; This is a research-stage forecast / selection candidate only; it does not authorize liquid800, multi-seed, allocator, replay, live/default, or active artifact promotion.",
+      "blockers": [
+        "Best-horizon distribution collapse must be treated as a calibration blocker before claiming a true horizon chooser.",
+        "This is single seed only; it is not yet robust enough for expansion.",
+        "`forecast_5d_mu`, `forecast_20d_mu`, and `short_horizon_blend` did not pass the corrected gate because test negative months remained.",
+        "The study is still shadow-only and does not include allocator/replay/live execution evidence."
+      ],
+      "next_allowed_actions": [
+        "Do not run liquid800, allocator, replay, live/default, or active promotion from this result.",
+        "Next research should compare `trade_utility_score` against a constrained horizon-score variant that prevents near-total 30d collapse.",
+        "If the constrained variant keeps validation/test spread, hit lift, and monthly stability, then run seeds `7,11,19`.",
+        "If multi-seed is stable, then test whether `15/20/30d` can be simplified into a longer-horizon utility family instead of a broad horizon grid."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d",
+        "policy_pool_view__c11400fa72ad263f3d1eecfa",
+        "policy_sector_board_view__ed15b2873f544e9e9b24aae5"
       ]
     },
     {
