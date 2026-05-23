@@ -1,8 +1,8 @@
 # daily_research 主线审阅 current
 
-Snapshot date: `2026-05-18`
+Snapshot date: `2026-05-23`
 
-Scope: this document is the rolling review entry for all attempted project mainlines since project start. It separates facts, inferences, assumptions, current stance, and next allowed actions. It does not replace `daily_research/brain/state_center.md`, and it must not be used as promotion authority.
+Scope: this document is the rolling review entry for all attempted project mainlines since project start. It separates facts, inferences, assumptions, current stance, and next allowed actions. It does not replace `daily_research/brain/state_center.md`, and it must not be used as promotion authority. The 2026-05-23 update reviews the newer Path20 / multi-horizon, TDX-free data platform, and execution-reliability evidence after the 2026-05-18 snapshot.
 
 ## 0. Operating Rules
 
@@ -12,8 +12,10 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - Current effective live execution profile remains `regoff_k1_20d_ensemble_native_anchor`.
 - `continuous_policy` remains `research / shadow_only`.
 - `path_policy` remains `research / shadow-only`.
+- Current `path_policy` research pointer is `alpha_multi_horizon_utility_policy_v1`; `alpha_path20_neural_policy_v1` is now historical evidence and code/tag namespace, not the current target definition.
 - Reusable strict training-safe Gold dataset remains `continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`.
 - Near-term repaired policy input bundle is `policy_input_bundle__7c8f58d851bce8179e1e9e2d`.
+- TDX-free data platform V2 is the current ingestion boundary for new research data: online fetches belong to `daily_research.data_platform` refresh/import, while training/evaluation/diagnostics must read explicit lake dataset ids.
 - All project mainlines are switchable current work pointers.
 - After an explicit user or governance switch, subsequent work should continue along the newly selected mainline.
 
@@ -24,6 +26,24 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - Any active execution write requires explicit future promotion authority and active artifact guards.
 - Research-mainline switching does not automatically change live/default execution, promotion status, or `daily_research/output/active_execution_strategy.json`.
 - Prior mainline evidence remains historical or comparison evidence unless the pointer is switched back.
+
+## 0.5 Mainline Map and Classification
+
+### Facts
+- Current live/default execution line: `Deep Alpha / short_alpha / short_expert_policy_v5b` plus the execution-alignment production bridge.
+- Current `path_policy` research frontier: `alpha_multi_horizon_utility_policy_v1`, with latest completed evidence `path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01`.
+- Current `continuous_policy` allocation frontier: portfolio-set v5 / DFL-PG / cashflow-decision family through r74, all still `research / shadow-only`.
+- Current data infrastructure frontier: TDX-free `data_platform_v2` plus explicit lake dataset ids, not ad hoc online fetches during research.
+- Secondary comparison routes remain useful: `alpha_path20_sequence_policy_v1`, r39 allocation objective consolidation, r68 cashflow translation closure, r70 oracle/version-boundary repair, and r73/r74 lake behavior-quality diagnostics.
+
+### Inferences
+- The project has two different frontier questions now: path_policy asks "which stocks/horizons rank as profitable opportunities", while continuous_policy asks "how current portfolio capital should move among source, receiver, and cash." Mixing those questions causes false promotion pressure.
+- The current live anchor is not the most experimental frontier; it is the most operationally materialized and guarded default.
+- Infrastructure mainlines are part of the project mainline history because they decide what evidence is admissible, but they are not model-validity evidence by themselves.
+
+### Assumptions
+- "All mainlines" means durable research, execution, data, and governance directions recorded in brain and evidence references, not every individual trial or transient tag.
+- This review is allowed to update brain reference state, but it is not authorized to update `daily_research/output/active_execution_strategy.json`.
 
 ## 1. Baseline Factor / Rule Trading
 
@@ -201,6 +221,26 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - Do not mutate old bundle contents in place; create and audit a new repaired bundle.
 - Use explicit repaired dataset id `policy_input_bundle__7c8f58d851bce8179e1e9e2d` for next Path20 Stage 1 pilots.
 
+## 12.6 TDX-Free Data Platform V2
+
+### Facts
+- 2026-05-23 V2 is recorded in `daily_research/brain/references/tdx_free_data_platform_v2_20260523.md`.
+- V2 supports domain-based refresh for `market_daily`, `trading_calendar`, `universe_snapshot`, `security_status`, `limit_status`, `industry_concept`, `valuation`, and `money_flow_hotspot`.
+- `refresh_daily` now supports `--universe all_a|liquid500|file:<path>|symbols:<csv>`; explicit `--symbols` remains a small-sample/debug path, not the daily-update requirement.
+- CSV is an import/patching channel only: it must enter Bronze, normalize through Silver, and register lake datasets before research use.
+- First-class providers remain non-TDX: `eastmoney_efinance`, `akshare_eastmoney`, `baostock`, optional Tushare HTTP, and non-default realtime supplementation.
+- Verification for V2 recorded `24` data-platform tests, `25` data-lake tests, and focused path/continuous/brain contract tests passing, with active artifact diff empty.
+
+### Inference
+- The project has moved from "TDX as an inconvenient dependency" to "TDX-family excluded from the formal research data boundary."
+- Future model failures should not be diagnosed by silently falling back to online data inside training/evaluation. They should be diagnosed against explicit lake dataset ids and sidecar metadata.
+- Provider health, refresh smoke, and CSV import are data admissibility evidence, not model effectiveness evidence.
+
+### Current Stance
+- Treat TDX-free V2 as the current data-ingestion mainline.
+- Keep data-platform work separate from live execution and broker automation.
+- Require explicit lake dataset ids for PathPolicy / Multi Horizon Utility / continuous_policy research.
+
 ## 13. Continuous Policy r65: Portfolio-Set v5
 
 ### Facts
@@ -326,7 +366,7 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - Full-universe Stage 1 training is no longer blocked by the eager-only design, but still requires a real repaired-bundle memmap dataset smoke and training smoke before evidence-grade full-universe runs.
 
 ### Current Stance
-- Current Path20 research route.
+- Historical Path20 neural-policy research route from 2026-05-17 to the 2026-05-23 naming migration.
 - Allow new neural-policy mainline diagnostics with explicit tags and fixed dataset ids.
 - Treat Stage 1 forecast evidence as prediction-task evidence only; it does not prove a portfolio strategy until Stage 2 allocator/replay evidence exists.
 - Do not touch active execution or infer live/default promotion from capped forecast evidence.
@@ -334,6 +374,33 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - Use completed feature ablation as the input evidence baseline; do not treat any single profile as final without considering raw K-line, context, and no-alpha-prior tradeoffs.
 - Next priority is selection-rule review and Stage 2 allocator/oracle/replay design, with separate handling for multiscale trend/path and upside opportunity capture.
 - Do not run full-universe training until repaired-bundle memmap dataset and training smokes pass.
+
+## 17.5 Multi-Horizon Utility Policy v1
+
+### Facts
+- 2026-05-23 user/governance decision renamed the current path_policy research pointer to `alpha_multi_horizon_utility_policy_v1`.
+- Chinese name: `多 Horizon 交易效用排序主线`.
+- The latest completed evidence is `path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01`.
+- The run used the repaired policy input bundle `policy_input_bundle__7c8f58d851bce8179e1e9e2d`, liquid500 pool `policy_pool_view__c11400fa72ad263f3d1eecfa`, GRU static-context family, seed `7`, train `2019-2022`, validation `2023`, test `2024`, `decision_utility_v1`, and horizon grid `1,2,3,5,8,10,15,20,30`.
+- Verdict was `forecast_test_confirmed`: `trade_utility_score` validation rank IC `0.113993`, validation spread `0.028361`, validation hit lift `0.017385`, validation monthly positive rate `81.8%`; test rank IC `0.099703`, test spread `0.040183`, test hit lift `0.022097`, test monthly positive rate `100.0%`.
+- Horizon-specific test signal strengthened toward longer horizons: `5d` rank IC `0.030911`, `10d` `0.045247`, `20d` `0.064482`, and `30d` `0.087132`.
+- Predicted best horizon collapsed heavily toward `30d` on test, while future best horizon remained distributed.
+- Active artifact impact remained empty; no allocator, replay, live/default, liquid800, or multi-seed authority was granted.
+
+### Inference
+- The new mainline is no longer fixed 20-day path prediction. It is a multi-horizon trade-utility ranking problem with a strong current 20-30 day tilt.
+- The model appears to have found a robust longer-horizon utility ranking signal, but it has not learned a balanced per-sample horizon chooser.
+- The current blocker is calibration: constrain or regularize horizon-score selection without destroying validation/test spread, hit lift, and monthly stability.
+
+### Assumptions
+- The `path20_...` tag namespace and `daily_research.path_policy.run_alpha_path20_protocol` module name remain historical/code compatibility names until a separate code-level rename is explicitly planned.
+- Single-seed liquid500 evidence is enough to justify calibration research, but not enough for universe expansion, allocator/replay, or promotion discussion.
+
+### Current Stance
+- Current path_policy research pointer.
+- Next allowed action is a constrained horizon-score / calibration variant with explicit `mh_utility_...` style naming when new artifacts are created.
+- Only after calibration preserves the useful ranking signal should seeds `7,11,19` be run.
+- Only after multi-seed stability should the team consider simplifying the broad grid into a `15/20/30d` longer-horizon utility family.
 
 ## 18. Path20 Sequence Policy v1
 
@@ -362,11 +429,31 @@ Scope: this document is the rolling review entry for all attempted project mainl
 ### P1
 - Loose latest misuse while latest study/protocol tags differ.
 - Continuous policy semantic drift in simulator, source/receiver/cash, and feature contracts.
-- Path20 protocol becoming large and monolithic while remaining shadow-only.
+- Path20 / multi-horizon protocol becoming large and monolithic while remaining shadow-only.
+- Horizon-selection collapse: treating the current `30d` predicted-horizon dominance as a solved horizon chooser would overstate the evidence.
+- Data boundary regression: letting formal research fall back to TDX-family online fetches or loose CSV would undo the TDX-free lake-first contract.
 
 ### P2
 - Health/check aggregation has shown one non-stable concurrent failure; reruns passed, so track as tooling fragility.
 - `state_builder.py` DataFrame fragmentation warnings indicate performance debt.
+- Slow PathPolicy forecast dataset tests can create false negatives if short timeouts leave residual pytest processes; use selective verification first and long tests only when risk warrants.
+
+## 19.5 Cross-Mainline Analysis
+
+### Facts
+- Baseline/deep-alpha/live execution lines are the only lines currently materialized as active daily execution.
+- continuous_policy has the richest portfolio-allocation semantics, but remains shadow-only because source/receiver/cash quality, training evidence, and promotion gates are not closed.
+- path_policy / multi-horizon has produced stronger ranking evidence, but it is still forecast/selection evidence before allocator/replay.
+- data_lake / data_platform lines decide admissible inputs and reproducibility but do not prove trading effectiveness.
+
+### Inferences
+- The most dangerous mistake would be combining the strengths of different lines verbally: using path_policy ranking quality, continuous_policy allocation ambition, and live short-alpha materialization as if one integrated model already exists.
+- The more coherent next architecture is a staged bridge: multi-horizon utility ranking can become an opportunity prior, continuous_policy can learn funding and cash movement, and the execution bridge can materialize only after formal gates.
+- The current state favors "calibrate before expand" for path_policy and "repair feature/behavior contracts before strict resume" for continuous_policy.
+
+### Assumptions
+- A future integration between multi-horizon utility ranking and continuous allocation would be a new explicit research route, not an implicit promotion of either existing line.
+- The live anchor should remain unchanged unless a future task explicitly authorizes promotion review and active artifact mutation.
 
 ## 20. Update Discipline
 
@@ -376,5 +463,5 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - Always run:
   - `git diff -- daily_research/output/active_execution_strategy.json`
   - `git diff --check`
-  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/doc_guard.py check`
-  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_integrity_check.py --json`
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check`
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`
