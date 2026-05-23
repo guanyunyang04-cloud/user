@@ -269,6 +269,7 @@ DOCUMENT_REDIRECTS = {
 
 ALLOWED_EXTERNAL_DOCS = {
     "docs/superpowers/plans/2026-05-12-continuous-policy-key-progress.md",
+    "README.md",
     "daily_research/README.md",
     "daily_research/execution/使用教程.md",
     "daily_stock_analysis-main/AGENTS.md",
@@ -280,9 +281,19 @@ ALLOWED_EXTERNAL_DOCS = {
 }
 
 REQUIRED_DOC_SNIPPETS = {
+    "README.md": (
+        "权威接管真源是主脑",
+        "tools.brain.workflow capsule",
+        "tools.brain.workflow route",
+        "tools.brain.doc_guard check",
+        "tools.brain.integrity_check --json",
+    ),
     "daily_research/README.md": (
-        "权威接管真源",
+        "接管必须先从工作区主脑进入",
+        "tools.brain.workflow capsule",
         "daily_research/brain/",
+        "tools.brain.integrity_check --json",
+        "tools.brain.doc_guard check",
     ),
     "daily_research/brain/identity_layer.md": (
         "## 5. 当前事实入口",

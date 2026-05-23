@@ -1,8 +1,14 @@
 # daily_research
 
-`daily_research` 是当前工作区的正式生产研究与执行主线，负责长期研究、连续策略、默认执行、Web 控制台、维护工具和项目大脑状态。
+`daily_research` 是当前工作区的正式生产研究与执行主线，负责长期研究、连续策略、默认执行、Web 控制台、维护工具和项目分脑状态。
 
-权威接管真源：`daily_research/brain/`。本 README 只作为简体中文快速索引，不替代大脑中的当前状态、规则、证据和治理判断。
+接管必须先从工作区主脑进入：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json
+```
+
+主脑路由到 `daily_research` 后，`daily_research/brain/` 才是本项目事实层。本 README 只作为简体中文快速索引，不替代主脑或分脑中的当前状态、规则、证据和治理判断。
 
 ## 模块地图
 
@@ -22,6 +28,8 @@
 - `t0_project/tqcenter.py` 是工作区内的数据依赖，不由 Conda 安装；使用 `tq` 数据源时必须存在。
 
 ## 常用入口
+
+先由主脑 capsule 确认本任务属于 `daily_research`，再使用以下项目入口：
 
 - 连续策略正式协议：
   `python daily_research/continuous_policy/run_continuous_policy_protocol.py ...`
@@ -44,14 +52,14 @@ C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research\tools\proj
 
 ```powershell
 python -m compileall -q daily_research
-C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research\tools\brain_integrity_check.py --json
+C:\Users\ASUS\miniconda3\envs\yolos\python.exe -m tools.brain.integrity_check --json
 C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research\tools\project_consistency_check.py
-C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research\tools\doc_guard.py check
+C:\Users\ASUS\miniconda3\envs\yolos\python.exe -m tools.brain.doc_guard check
 ```
 
 ## 治理
 
-- 先读主脑，再读 `daily_research/brain/`。
-- `brain/brain_manifest.json` 定义所有分脑共享的主脑合同。
+- 先运行主脑 capsule，再按 `routing.selected_brain_id` 进入 `daily_research/brain/`。
+- 工作区根 `brain/brain_manifest.json` 定义所有分脑共享的主脑合同。
 - 新的文档内容必须先整合进对应 brain；README 只保留简体中文索引和公开入口。
 - 生成实验产物应留在 `daily_research/output/`，需要复核或裁剪时使用 `workspace_maintenance.py`。
