@@ -54,4 +54,49 @@ describe("JobsPage", () => {
     expect(await screen.findByText("stderr line")).toBeInTheDocument();
     expect(api.getJob).toHaveBeenCalledWith("job1", 200);
   });
+
+  it("shows business and runner status separately when a job was reconciled", async () => {
+    const api = {
+      getJobs: vi.fn().mockResolvedValue([
+        {
+          job_id: "job1",
+          task_name: "data-platform-refresh",
+          status: "succeeded",
+          business_status: "ok",
+          runner_status: "warning"
+        }
+      ]),
+      getJob: vi.fn().mockResolvedValue({
+        job_id: "job1",
+        task_name: "data-platform-refresh",
+        status: "succeeded",
+        business_status: "ok",
+        runner_status: "warning",
+        artifact_status: "ok",
+        evidence_paths: { refresh_manifest: "H:/run/refresh_manifest.json" },
+        metadata: {
+          job_id: "job1",
+          task_name: "data-platform-refresh",
+          status: "succeeded",
+          business_status: "ok",
+          runner_status: "warning",
+          artifact_status: "ok",
+          evidence_paths: { refresh_manifest: "H:/run/refresh_manifest.json" },
+          command_argv: ["python", "refresh.py"]
+        },
+        stdout_tail: ["ok manifest"],
+        stderr_tail: ["runner warning"],
+        can_resume: false
+      }),
+      resumeJob: vi.fn()
+    } as unknown as ExecutionApi;
+
+    render(<JobsPage api={api} selectedJobId="job1" pollMs={100000} />);
+
+    expect(await screen.findByText("业务状态")).toBeInTheDocument();
+    expect(screen.getAllByText("ok").length).toBeGreaterThan(0);
+    expect(screen.getByText("Runner")).toBeInTheDocument();
+    expect(screen.getAllByText("warning").length).toBeGreaterThan(0);
+    expect(screen.getByText("H:/run/refresh_manifest.json")).toBeInTheDocument();
+  });
 });

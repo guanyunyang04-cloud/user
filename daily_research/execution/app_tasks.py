@@ -180,7 +180,6 @@ TASK_REGISTRY: dict[str, ExecutionTaskSpec] = {spec.name: spec for spec in TASK_
 
 CORE_FRONTEND_TASK_NAMES: tuple[str, ...] = (
     "trade-plan",
-    "refresh-production-default",
 )
 
 

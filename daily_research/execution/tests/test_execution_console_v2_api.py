@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from io import StringIO
 from pathlib import Path
 
 import pandas as pd
@@ -346,6 +347,351 @@ def test_data_refresh_job_success_syncs_active_manifest(monkeypatch: pytest.Monk
     assert captured["reason"] == "data-platform-refresh"
     assert "policy_input_bundle__latest" in result["metadata"]["summary_note"]
     assert result["metadata"]["active_manifest_update"]["dataset_id"] == "policy_input_bundle__latest"
+
+
+def test_data_refresh_reconciles_successful_manifest_after_runner_output_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from daily_research.execution import app_service
+
+    script = tmp_path / "refresh_manifest_then_output_error.py"
+    refresh_manifest_path = tmp_path / "refresh_run" / "refresh_manifest.json"
+    refresh_manifest_text = str(refresh_manifest_path).replace("\\", "/")
+    script.write_text(
+        "from pathlib import Path\n"
+        "import json\n"
+        f"manifest_path = Path({refresh_manifest_text!r})\n"
+        "manifest_path.parent.mkdir(exist_ok=True)\n"
+        "manifest_path.write_text(json.dumps({\n"
+        "    'status': 'ok',\n"
+        "    'refresh_run_id': 'refresh_ok',\n"
+        "    'registered_market_dataset_id': 'policy_input_bundle__latest',\n"
+        "    'policy_input_dataset_id': 'policy_input_bundle__latest',\n"
+        "}, ensure_ascii=False), encoding='utf-8')\n"
+        "print('business refresh completed')\n",
+        encoding="utf-8",
+    )
+
+    class FakeSpec:
+        description = "refresh data"
+
+    def fake_create_job_record(**kwargs):
+        job_dir = tmp_path / "job"
+        job_dir.mkdir(exist_ok=True)
+
+        class Paths:
+            job_id = "refresh_job_reconciled"
+            stdout_path = job_dir / "stdout.log"
+            stderr_path = job_dir / "stderr.log"
+            metadata_path = job_dir / "metadata.json"
+
+        return Paths()
+
+    finished: dict[str, object] = {}
+
+    def fake_mark_job_finished(job_paths, **kwargs):
+        finished.update(kwargs)
+        return {
+            "job_id": job_paths.job_id,
+            "status": kwargs["status"],
+            "exit_code": kwargs["exit_code"],
+            "summary_note": kwargs["summary_note"],
+            "business_status": kwargs.get("business_status", ""),
+            "runner_status": kwargs.get("runner_status", ""),
+            "runner_warnings": kwargs.get("runner_warnings", []),
+            "artifact_status": kwargs.get("artifact_status", ""),
+            "artifact_paths": kwargs.get("artifact_paths", {}),
+        }
+
+    captured: dict[str, object] = {}
+
+    def fake_sync(**kwargs):
+        captured.update(kwargs)
+        return {"updated": True, "dataset_id": "policy_input_bundle__latest"}
+
+    class BrokenFlush:
+        def write(self, text: str) -> int:
+            return len(text)
+
+        def flush(self) -> None:
+            raise OSError(22, "Invalid argument")
+
+    monkeypatch.setattr(app_service, "get_task_spec", lambda _: FakeSpec())
+    monkeypatch.setattr(app_service, "build_task_command", lambda **_: [sys.executable, str(script)])
+    monkeypatch.setattr(app_service, "create_job_record", fake_create_job_record)
+    monkeypatch.setattr(app_service, "mark_job_started", lambda *args, **kwargs: None)
+    monkeypatch.setattr(app_service, "mark_job_finished", fake_mark_job_finished)
+    monkeypatch.setattr(app_service, "update_job_metadata", lambda job_paths, **kwargs: dict(kwargs))
+    monkeypatch.setattr(app_service, "append_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(app_service, "sync_active_manifest_to_latest_lake_dataset", fake_sync)
+    monkeypatch.setattr(app_service, "_latest_refresh_manifest_path", lambda: str(refresh_manifest_path.resolve()))
+    monkeypatch.setattr(app_service.sys, "stdout", BrokenFlush())
+
+    class FakeLock:
+        payload = {}
+
+        def __init__(self, **_: object) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+    monkeypatch.setattr(app_service, "ExecutionAppLock", FakeLock)
+
+    result = app_service.run_task_sync(
+        task_name="data-platform-refresh",
+        passthrough_args=[],
+        echo_output=True,
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["metadata"]["business_status"] == "ok"
+    assert result["metadata"]["runner_status"] == "warning"
+    assert result["metadata"]["runner_warnings"]
+    assert result["metadata"]["artifact_status"] == "ok"
+    assert result["metadata"]["artifact_paths"]["refresh_manifest"].endswith("refresh_manifest.json")
+    assert captured["refresh_manifest_path"].endswith("refresh_manifest.json")
+    assert finished["exit_code"] == 0
+
+
+def test_data_refresh_post_process_persists_evidence_metadata(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from daily_research.execution import app_service
+
+    refresh_manifest_path = tmp_path / "refresh_run" / "refresh_manifest.json"
+    refresh_manifest_path.parent.mkdir()
+    refresh_manifest_path.write_text(
+        json.dumps(
+            {
+                "status": "ok",
+                "registered_market_dataset_id": "policy_input_bundle__latest",
+                "policy_input_dataset_id": "policy_input_bundle__latest",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    class Paths:
+        job_id = "refresh_job"
+        metadata_path = tmp_path / "metadata.json"
+
+    persisted: dict[str, object] = {}
+
+    def fake_update(job_paths, **kwargs):
+        persisted.update(kwargs)
+        return dict(persisted)
+
+    monkeypatch.setattr(app_service, "_latest_refresh_manifest_path", lambda: str(refresh_manifest_path.resolve()))
+    monkeypatch.setattr(app_service, "update_job_metadata", fake_update)
+    monkeypatch.setattr(
+        app_service,
+        "sync_active_manifest_to_latest_lake_dataset",
+        lambda **kwargs: {"updated": True, "dataset_id": "policy_input_bundle__latest"},
+    )
+
+    _, metadata = app_service._post_process_successful_task(
+        job_paths=Paths(),
+        task_name="data-platform-refresh",
+        summary_note="refresh data",
+    )
+
+    assert metadata["business_status"] == "ok"
+    assert persisted["business_status"] == "ok"
+    assert persisted["artifact_status"] == "ok"
+    assert persisted["artifact_paths"]["refresh_manifest"].endswith("refresh_manifest.json")
+    assert persisted["active_manifest_update"]["dataset_id"] == "policy_input_bundle__latest"
+
+
+def test_blocked_refresh_manifest_does_not_sync_active_manifest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from daily_research.execution import app_service
+
+    refresh_manifest_path = tmp_path / "refresh_run" / "refresh_manifest.json"
+    refresh_manifest_path.parent.mkdir()
+    refresh_manifest_path.write_text(
+        json.dumps(
+            {
+                "status": "blocked",
+                "blockers": ["coverage_below_threshold"],
+                "registered_market_dataset_id": "",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    class Paths:
+        job_id = "refresh_blocked"
+        metadata_path = tmp_path / "metadata.json"
+
+    persisted: dict[str, object] = {}
+
+    monkeypatch.setattr(app_service, "_latest_refresh_manifest_path", lambda: str(refresh_manifest_path.resolve()))
+    monkeypatch.setattr(app_service, "update_job_metadata", lambda job_paths, **kwargs: persisted.update(kwargs) or dict(persisted))
+    monkeypatch.setattr(
+        app_service,
+        "sync_active_manifest_to_latest_lake_dataset",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("blocked refresh must not sync active manifest")),
+    )
+
+    note, metadata = app_service._post_process_successful_task(
+        job_paths=Paths(),
+        task_name="data-platform-refresh",
+        summary_note="refresh data",
+    )
+
+    assert "blocked" in note
+    assert metadata["business_status"] == "blocked"
+    assert "active_manifest_update" not in metadata
+    assert persisted["artifact_status"] == "blocked"
+
+
+def test_blocked_refresh_manifest_marks_job_blocked(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from daily_research.execution import app_service
+
+    script = tmp_path / "refresh_blocked.py"
+    refresh_manifest_path = tmp_path / "refresh_run" / "refresh_manifest.json"
+    refresh_manifest_text = str(refresh_manifest_path).replace("\\", "/")
+    script.write_text(
+        "from pathlib import Path\n"
+        "import json\n"
+        f"manifest_path = Path({refresh_manifest_text!r})\n"
+        "manifest_path.parent.mkdir(exist_ok=True)\n"
+        "manifest_path.write_text(json.dumps({\n"
+        "    'status': 'blocked',\n"
+        "    'blockers': ['coverage_below_threshold'],\n"
+        "    'registered_market_dataset_id': '',\n"
+        "}, ensure_ascii=False), encoding='utf-8')\n"
+        "print('refresh blocked by coverage')\n",
+        encoding="utf-8",
+    )
+
+    class FakeSpec:
+        description = "refresh data"
+
+    def fake_create_job_record(**kwargs):
+        job_dir = tmp_path / "job"
+        job_dir.mkdir(exist_ok=True)
+
+        class Paths:
+            job_id = "refresh_blocked_job"
+            stdout_path = job_dir / "stdout.log"
+            stderr_path = job_dir / "stderr.log"
+            metadata_path = job_dir / "metadata.json"
+
+        return Paths()
+
+    monkeypatch.setattr(app_service, "get_task_spec", lambda _: FakeSpec())
+    monkeypatch.setattr(app_service, "build_task_command", lambda **_: [sys.executable, str(script)])
+    monkeypatch.setattr(app_service, "create_job_record", fake_create_job_record)
+    monkeypatch.setattr(app_service, "mark_job_started", lambda *args, **kwargs: None)
+    monkeypatch.setattr(app_service, "append_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(app_service, "_latest_refresh_manifest_path", lambda: str(refresh_manifest_path.resolve()))
+    monkeypatch.setattr(
+        app_service,
+        "sync_active_manifest_to_latest_lake_dataset",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("blocked refresh must not sync active manifest")),
+    )
+
+    class FakeLock:
+        payload = {}
+
+        def __init__(self, **_: object) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+    monkeypatch.setattr(app_service, "ExecutionAppLock", FakeLock)
+
+    result = app_service.run_task_sync(task_name="data-platform-refresh", passthrough_args=[], echo_output=False)
+
+    assert result["status"] == "blocked"
+    assert result["exit_code"] == 0
+    assert result["metadata"]["business_status"] == "blocked"
+    assert result["metadata"]["runner_status"] == "ok"
+    assert result["metadata"]["artifact_status"] == "blocked"
+
+
+def test_missing_refresh_manifest_marks_job_failed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from daily_research.execution import app_service
+
+    script = tmp_path / "refresh_without_manifest.py"
+    script.write_text("print('refresh script exited without manifest')\n", encoding="utf-8")
+    missing_manifest_path = tmp_path / "missing" / "refresh_manifest.json"
+
+    class FakeSpec:
+        description = "refresh data"
+
+    def fake_create_job_record(**kwargs):
+        job_dir = tmp_path / "job"
+        job_dir.mkdir(exist_ok=True)
+
+        class Paths:
+            job_id = "refresh_missing_manifest"
+            stdout_path = job_dir / "stdout.log"
+            stderr_path = job_dir / "stderr.log"
+            metadata_path = job_dir / "metadata.json"
+
+        return Paths()
+
+    monkeypatch.setattr(app_service, "get_task_spec", lambda _: FakeSpec())
+    monkeypatch.setattr(app_service, "build_task_command", lambda **_: [sys.executable, str(script)])
+    monkeypatch.setattr(app_service, "create_job_record", fake_create_job_record)
+    monkeypatch.setattr(app_service, "mark_job_started", lambda *args, **kwargs: None)
+    monkeypatch.setattr(app_service, "append_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(app_service, "_latest_refresh_manifest_path", lambda: str(missing_manifest_path.resolve()))
+    monkeypatch.setattr(
+        app_service,
+        "sync_active_manifest_to_latest_lake_dataset",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("missing refresh manifest must not sync active manifest")),
+    )
+
+    class FakeLock:
+        payload = {}
+
+        def __init__(self, **_: object) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+    monkeypatch.setattr(app_service, "ExecutionAppLock", FakeLock)
+
+    result = app_service.run_task_sync(task_name="data-platform-refresh", passthrough_args=[], echo_output=False)
+
+    assert result["status"] == "failed"
+    assert result["exit_code"] == 0
+    assert result["metadata"]["business_status"] == "missing"
+    assert result["metadata"]["runner_status"] == "ok"
+    assert result["metadata"]["artifact_status"] == "missing"
+
+
+def test_tee_text_io_compresses_repeated_carriage_progress() -> None:
+    from daily_research.execution.app_service import _TeeTextIO
+
+    handle = StringIO()
+    heartbeats: list[str] = []
+    tee = _TeeTextIO(handle, heartbeat=heartbeats.append)
+
+    tee.write("stage 1\r")
+    tee.write("stage 1\r")
+    tee.write("stage 2\r")
+    tee.write("stage 2\r")
+    tee.write("done\n")
+    tee.flush()
+
+    assert handle.getvalue().splitlines() == ["stage 1", "stage 2", "done"]
+    assert heartbeats == ["stage 1", "stage 2", "done"]
 
 
 def test_task_launch_strips_timeout_args(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -56,9 +56,17 @@ export interface DataSourcesPayload {
   lake_root: string;
   catalog_status: string;
   datasets: DataSourceRow[];
+  active_dataset_id?: string;
+  latest_policy_input_dataset_id?: string;
+  latest_policy_input_dataset_end_date?: string;
+  dataset_sync_status?: string;
   data_platform: {
     runs_root: string;
     latest_refresh_run: string;
+    latest_refresh_manifest_path?: string;
+    latest_refresh_manifest_status?: string;
+    latest_refresh_registered_dataset_id?: string;
+    latest_refresh_blockers?: string[];
     provider_plan: string;
     latest_completed_trading_date?: string;
     recommended_domains?: string[];
@@ -133,8 +141,15 @@ export interface JobSummary {
   job_id: string;
   task_name: string;
   status: string;
+  business_status?: string;
+  runner_status?: string;
+  artifact_status?: string;
+  artifact_paths?: Record<string, string>;
+  evidence_paths?: Record<string, string>;
+  runner_warnings?: string[];
   created_at?: string;
   started_at?: string;
+  completed_at?: string;
   finished_at?: string;
   exit_code?: number;
   summary_note?: string;
@@ -146,6 +161,12 @@ export interface JobDetail {
   job_id: string;
   task_name: string;
   status: string;
+  business_status?: string;
+  runner_status?: string;
+  artifact_status?: string;
+  artifact_paths?: Record<string, string>;
+  evidence_paths?: Record<string, string>;
+  runner_warnings?: string[];
   metadata: JobSummary;
   stdout_tail: string[];
   stderr_tail: string[];

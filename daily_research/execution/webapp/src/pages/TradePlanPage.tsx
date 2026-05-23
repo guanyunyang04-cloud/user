@@ -1,21 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
 import { Play, RefreshCw } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import type { ExecutionApi, TradePlanPayload } from "../types";
-import { DataTable, EmptyState, ErrorState, Field, LoadingState, PageHeader, Panel, Stat } from "../components";
+import type { ExecutionApi, JobDetail, TradePlanPayload } from "../types";
+import { DataTable, EmptyState, ErrorState, Field, LoadingState, PageHeader, Panel, Stat, StatusPill } from "../components";
 import { numberValue, pick, text } from "../format";
 
 interface TradePlanPageProps {
   api: ExecutionApi;
+  pollMs?: number;
 }
 
-export function TradePlanPage({ api }: TradePlanPageProps): JSX.Element {
+export function TradePlanPage({ api, pollMs = 3000 }: TradePlanPageProps): JSX.Element {
   const [payload, setPayload] = useState<TradePlanPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [candidateProfile, setCandidateProfile] = useState("active_execution_strategy");
   const [cash, setCash] = useState("");
   const [jobMessage, setJobMessage] = useState("");
+  const [activeJobId, setActiveJobId] = useState("");
+  const [jobDetail, setJobDetail] = useState<JobDetail | null>(null);
+  const [jobError, setJobError] = useState("");
 
   const load = (): void => {
     setLoading(true);
@@ -45,6 +49,8 @@ export function TradePlanPage({ api }: TradePlanPageProps): JSX.Element {
 
   async function generate(): Promise<void> {
     setJobMessage("");
+    setJobDetail(null);
+    setJobError("");
     try {
       const response = await api.generateTradePlan({
         candidate_profile: candidateProfile,
@@ -52,10 +58,47 @@ export function TradePlanPage({ api }: TradePlanPageProps): JSX.Element {
         force_unlock: false
       });
       setJobMessage(`已提交作业 ${response.job_id || ""} (${response.status})`);
+      setActiveJobId(response.job_id || "");
     } catch (err) {
       setJobMessage(err instanceof Error ? err.message : "提交失败");
     }
   }
+
+  useEffect(() => {
+    if (!activeJobId) {
+      return undefined;
+    }
+    let disposed = false;
+    let timer: number | undefined;
+    const loadJob = (): void => {
+      api
+        .getJob(activeJobId, 160)
+        .then((next) => {
+          if (disposed) {
+            return;
+          }
+          setJobDetail(next);
+          setJobError("");
+          if (["queued", "running"].includes(String(next.status || "").toLowerCase())) {
+            timer = window.setTimeout(loadJob, pollMs);
+          } else {
+            load();
+          }
+        })
+        .catch((err: Error) => {
+          if (!disposed) {
+            setJobError(err.message);
+          }
+        });
+    };
+    loadJob();
+    return () => {
+      disposed = true;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [api, activeJobId, pollMs]);
 
   const summary = payload?.summary || {};
   const missing = payload?.status === "missing" || payload?.exists === false;
@@ -83,6 +126,38 @@ export function TradePlanPage({ api }: TradePlanPageProps): JSX.Element {
         <button className="primary" onClick={generate}><Play size={16} />生成交易计划</button>
         {jobMessage ? <p className="inline-message">{jobMessage}</p> : null}
       </Panel>
+
+      {activeJobId ? (
+        <Panel title="生成进度" meta={jobDetail ? <StatusPill value={jobDetail.status} /> : null}>
+          {jobError ? <ErrorState message={jobError} /> : null}
+          {jobDetail ? (
+            <div className="job-detail">
+              <div className="key-list">
+                <span>Job ID</span>
+                <strong>{jobDetail.job_id}</strong>
+                <span>业务状态</span>
+                <strong><StatusPill value={jobDetail.business_status || jobDetail.metadata.business_status || "-"} /></strong>
+                <span>Runner</span>
+                <strong><StatusPill value={jobDetail.runner_status || jobDetail.metadata.runner_status || "-"} /></strong>
+                <span>Artifact</span>
+                <strong><StatusPill value={jobDetail.artifact_status || jobDetail.metadata.artifact_status || "-"} /></strong>
+              </div>
+              <div className="log-grid">
+                <div>
+                  <h3>stdout</h3>
+                  <pre>{jobDetail.stdout_tail.join("\n") || "-"}</pre>
+                </div>
+                <div>
+                  <h3>stderr</h3>
+                  <pre>{jobDetail.stderr_tail.join("\n") || "-"}</pre>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <LoadingState label="等待作业日志" />
+          )}
+        </Panel>
+      ) : null}
 
       <div className="stat-grid">
         <Stat label="信号日" value={text(summary.signal_date)} />

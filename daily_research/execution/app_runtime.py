@@ -167,6 +167,12 @@ def create_job_record(
         "stdout_log": str(job_paths.stdout_path.resolve()),
         "stderr_log": str(job_paths.stderr_path.resolve()),
         "exit_code": None,
+        "business_status": "",
+        "runner_status": "",
+        "artifact_status": "",
+        "artifact_paths": {},
+        "evidence_paths": {},
+        "runner_warnings": [],
         "last_heartbeat_at": "",
         "last_output_stream": "",
         "last_output_line": "",
@@ -249,6 +255,12 @@ def mark_job_finished(
     status: str,
     exit_code: int,
     summary_note: str = "",
+    business_status: str = "",
+    runner_status: str = "",
+    artifact_status: str = "",
+    artifact_paths: dict[str, Any] | None = None,
+    evidence_paths: dict[str, Any] | None = None,
+    runner_warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     completed_at = now_iso()
     metadata = update_job_metadata(
@@ -257,6 +269,12 @@ def mark_job_finished(
         exit_code=int(exit_code),
         completed_at=completed_at,
         summary_note=str(summary_note or ""),
+        business_status=str(business_status or ""),
+        runner_status=str(runner_status or ""),
+        artifact_status=str(artifact_status or ""),
+        artifact_paths=artifact_paths or {},
+        evidence_paths=evidence_paths or artifact_paths or {},
+        runner_warnings=runner_warnings or [],
         last_heartbeat_at=completed_at,
     )
     state = load_runtime_state()
@@ -270,6 +288,9 @@ def mark_job_finished(
         "started_at": str(metadata.get("started_at", "")),
         "completed_at": completed_at,
         "exit_code": int(exit_code),
+        "business_status": str(metadata.get("business_status", "")),
+        "runner_status": str(metadata.get("runner_status", "")),
+        "artifact_status": str(metadata.get("artifact_status", "")),
     }
     _update_recent_jobs(state, summary)
     task_name = str(metadata.get("task_name", ""))

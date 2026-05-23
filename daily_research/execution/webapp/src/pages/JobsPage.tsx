@@ -2,11 +2,18 @@ import { useEffect, useState } from "react";
 import { RotateCcw } from "lucide-react";
 import type { ExecutionApi, JobDetail, JobSummary } from "../types";
 import { DataTable, ErrorState, LoadingState, PageHeader, Panel, StatusPill } from "../components";
+import { text } from "../format";
 
 interface JobsPageProps {
   api: ExecutionApi;
   pollMs?: number;
   selectedJobId?: string;
+}
+
+function objectRows(payload: Record<string, string> | undefined): Array<{ key: string; path: string }> {
+  return Object.entries(payload || {})
+    .filter(([, value]) => String(value || "").trim())
+    .map(([key, value]) => ({ key, path: String(value) }));
 }
 
 export function JobsPage({ api, pollMs = 5000, selectedJobId = "" }: JobsPageProps): JSX.Element {
@@ -115,9 +122,34 @@ export function JobsPage({ api, pollMs = 5000, selectedJobId = "" }: JobsPagePro
                 <strong>{jobDetail.task_name}</strong>
                 <span>状态</span>
                 <strong><StatusPill value={jobDetail.status} /></strong>
+                <span>业务状态</span>
+                <strong><StatusPill value={jobDetail.business_status || jobDetail.metadata.business_status || "-"} /></strong>
+                <span>Runner</span>
+                <strong><StatusPill value={jobDetail.runner_status || jobDetail.metadata.runner_status || "-"} /></strong>
+                <span>Artifact</span>
+                <strong><StatusPill value={jobDetail.artifact_status || jobDetail.metadata.artifact_status || "-"} /></strong>
                 <span>命令</span>
                 <strong>{(jobDetail.metadata.command_argv || []).join(" ") || "-"}</strong>
               </div>
+              {objectRows(jobDetail.evidence_paths || jobDetail.metadata.evidence_paths).length ? (
+                <div>
+                  <h3>Evidence</h3>
+                  <DataTable
+                    rows={objectRows(jobDetail.evidence_paths || jobDetail.metadata.evidence_paths)}
+                    preferredColumns={["key", "path"]}
+                  />
+                </div>
+              ) : null}
+              {(jobDetail.runner_warnings || jobDetail.metadata.runner_warnings || []).length ? (
+                <div>
+                  <h3>Runner Warnings</h3>
+                  <ul className="compact-list">
+                    {(jobDetail.runner_warnings || jobDetail.metadata.runner_warnings || []).map((warning) => (
+                      <li key={warning}>{warning}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
               <div className="log-grid">
                 <div>
                   <h3>stdout</h3>
@@ -142,6 +174,8 @@ export function JobsPage({ api, pollMs = 5000, selectedJobId = "" }: JobsPagePro
               <strong>{job.task_name}</strong>
               <code>{job.job_id}</code>
               <StatusPill value={job.status} />
+              <StatusPill value={job.business_status || "-"} />
+              <StatusPill value={job.runner_status || "-"} />
               <span>{job.created_at || job.started_at || ""}</span>
               <button onClick={() => loadDetail(job.job_id)}>查看</button>
               {["failed", "blocked", "succeeded"].includes(job.status) ? (
@@ -155,11 +189,14 @@ export function JobsPage({ api, pollMs = 5000, selectedJobId = "" }: JobsPagePro
             job_id: job.job_id,
             task_name: job.task_name,
             status: job.status,
+            business_status: text(job.business_status),
+            runner_status: text(job.runner_status),
+            artifact_status: text(job.artifact_status),
             started_at: job.started_at,
-            finished_at: job.finished_at,
+            completed_at: job.completed_at || job.finished_at,
             exit_code: job.exit_code
           }))}
-          preferredColumns={["job_id", "task_name", "status", "started_at", "finished_at", "exit_code"]}
+          preferredColumns={["job_id", "task_name", "status", "business_status", "runner_status", "artifact_status", "started_at", "completed_at", "exit_code"]}
           emptyText="暂无作业"
         />
       </Panel>

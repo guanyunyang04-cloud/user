@@ -67,6 +67,7 @@ FORMAL_DATA_PLATFORM_DOMAINS: tuple[str, ...] = (
 FORMAL_DATA_PLATFORM_PROVIDER_PLAN = "baostock_only"
 _ACTIVE_JOB_THREADS: dict[str, threading.Thread] = {}
 _ACTIVE_JOB_THREADS_LOCK = threading.Lock()
+_RUNNER_WARNING_LIMIT = 20
 
 
 def sanitize_passthrough_args(values: list[str] | None) -> list[str]:
@@ -252,6 +253,10 @@ def active_manifest_summary() -> dict[str, Any]:
             "execution_policy_label": "",
             "effective_live_target_weight_mode": "",
             "effective_live_execution_profile": "",
+            "data_source": "",
+            "lake_dataset_id": "",
+            "source_market_dataset_id": "",
+            "lake_dataset_end_date": "",
         }
     return {
         "path": str(ACTIVE_MANIFEST_PATH.resolve()),
@@ -269,6 +274,10 @@ def active_manifest_summary() -> dict[str, Any]:
         "execution_policy_label": str(payload.get("execution_policy_label", "") or payload.get("execution_alignment_profile", "") or ""),
         "effective_live_target_weight_mode": str(payload.get("effective_live_target_weight_mode", "") or ""),
         "effective_live_execution_profile": str(payload.get("effective_live_execution_profile", "") or ""),
+        "data_source": str(payload.get("data_source", "") or ""),
+        "lake_dataset_id": str(payload.get("lake_dataset_id", "") or ""),
+        "source_market_dataset_id": str(payload.get("source_market_dataset_id", "") or ""),
+        "lake_dataset_end_date": str(payload.get("lake_dataset_end_date", "") or ""),
     }
 
 
@@ -524,6 +533,21 @@ def data_sources_summary(*, dataset_limit: int = 60) -> dict[str, Any]:
     if platform_runs.exists():
         runs = sorted(platform_runs.iterdir(), key=lambda item: item.stat().st_mtime, reverse=True)
         latest_refresh = str(runs[0].resolve()) if runs else ""
+    latest_manifest_path = _latest_refresh_manifest_path()
+    latest_manifest = _read_json(Path(latest_manifest_path)) if latest_manifest_path else {}
+    try:
+        latest_policy_input = _latest_policy_input_lake_dataset(lake_root=lake_root)
+    except Exception:
+        latest_policy_input = {}
+    active = active_manifest_summary()
+    active_dataset_id = str(active.get("lake_dataset_id", "") or active.get("source_market_dataset_id", "") or "")
+    latest_policy_input_dataset_id = str(latest_policy_input.get("dataset_id", "") or "")
+    if not active_dataset_id or not latest_policy_input_dataset_id:
+        dataset_sync_status = "unknown"
+    elif active_dataset_id == latest_policy_input_dataset_id:
+        dataset_sync_status = "synced"
+    else:
+        dataset_sync_status = "stale"
     try:
         latest_completed = str(get_latest_completed_trading_date())
     except Exception:
@@ -534,9 +558,21 @@ def data_sources_summary(*, dataset_limit: int = 60) -> dict[str, Any]:
         "lake_root": str((PROJECT_ROOT / "output" / "research_data_lake").resolve()),
         "catalog_status": catalog_status,
         "datasets": datasets,
+        "active_dataset_id": active_dataset_id,
+        "latest_policy_input_dataset_id": latest_policy_input_dataset_id,
+        "latest_policy_input_dataset_end_date": str(latest_policy_input.get("end_date", "") or ""),
+        "dataset_sync_status": dataset_sync_status,
         "data_platform": {
             "runs_root": str(platform_runs.resolve()),
             "latest_refresh_run": latest_refresh,
+            "latest_refresh_manifest_path": latest_manifest_path,
+            "latest_refresh_manifest_status": str(latest_manifest.get("status", "") or ""),
+            "latest_refresh_registered_dataset_id": str(
+                latest_manifest.get("registered_market_dataset_id", "")
+                or latest_manifest.get("policy_input_dataset_id", "")
+                or ""
+            ),
+            "latest_refresh_blockers": list(latest_manifest.get("blockers", []) if isinstance(latest_manifest.get("blockers"), list) else []),
             "provider_plan": FORMAL_DATA_PLATFORM_PROVIDER_PLAN,
             "latest_completed_trading_date": latest_completed,
             "recommended_domains": recommended_domains,
@@ -642,17 +678,48 @@ def _latest_refresh_manifest_path() -> str:
     return str(latest.resolve())
 
 
+def _data_refresh_artifact_status(refresh_manifest_path: str = "") -> dict[str, Any]:
+    manifest_path = str(refresh_manifest_path or _latest_refresh_manifest_path() or "").strip()
+    manifest_file = Path(manifest_path) if manifest_path else Path("")
+    manifest = _read_json(manifest_file) if manifest_path and manifest_file.exists() else {}
+    status = str(manifest.get("status", "") or "").strip().lower()
+    dataset_id = str(
+        manifest.get("registered_market_dataset_id", "")
+        or manifest.get("policy_input_dataset_id", "")
+        or manifest.get("registered_dataset_id", "")
+        or ""
+    ).strip()
+    artifact_status = status or ("missing" if not manifest_path or not manifest_file.exists() else "unknown")
+    business_status = "ok" if status in {"ok", "skipped"} and (dataset_id or status == "skipped") else artifact_status
+    return {
+        "business_status": business_status,
+        "artifact_status": artifact_status,
+        "artifact_paths": {"refresh_manifest": str(Path(manifest_path).resolve()) if manifest_path else ""},
+        "evidence_paths": {"refresh_manifest": str(Path(manifest_path).resolve()) if manifest_path else ""},
+        "refresh_manifest": manifest,
+        "refresh_dataset_id": dataset_id,
+        "refresh_manifest_path": str(Path(manifest_path).resolve()) if manifest_path else "",
+    }
+
+
 def _post_process_successful_task(*, job_paths: Any, task_name: str, summary_note: str) -> tuple[str, dict[str, Any]]:
     if task_name != "data-platform-refresh":
-        return summary_note, {}
+        return summary_note, {"business_status": "ok", "runner_status": "ok", "artifact_status": "not_applicable"}
     refresh_manifest_path = _latest_refresh_manifest_path()
+    artifact_metadata = _data_refresh_artifact_status(refresh_manifest_path)
+    if artifact_metadata.get("business_status") != "ok":
+        status = str(artifact_metadata.get("business_status", "") or artifact_metadata.get("artifact_status", "unknown"))
+        note = f"{summary_note} refresh manifest business_status={status}; active manifest unchanged"
+        update_job_metadata(job_paths, **artifact_metadata)
+        return note, artifact_metadata
     update = sync_active_manifest_to_latest_lake_dataset(
         reason=task_name,
         refresh_manifest_path=refresh_manifest_path,
     )
     note = f"{summary_note} active manifest lake_dataset_id={update.get('dataset_id', '')}"
-    update_job_metadata(job_paths, active_manifest_update=update)
-    return note, {"active_manifest_update": update}
+    metadata = {**artifact_metadata, "active_manifest_update": update, "business_status": "ok"}
+    update_job_metadata(job_paths, **metadata)
+    return note, metadata
 
 
 def save_account_snapshot(
@@ -818,10 +885,18 @@ def build_job_detail_payload(job_id: str, *, lines: int = 80) -> dict[str, Any]:
     stdout_lines = tail_file(Path(str(metadata.get("stdout_log", ""))), lines=lines)
     stderr_lines = tail_file(Path(str(metadata.get("stderr_log", ""))), lines=lines)
     status = str(metadata.get("status", "") or "")
+    artifact_paths = metadata.get("artifact_paths", {}) if isinstance(metadata.get("artifact_paths", {}), dict) else {}
+    evidence_paths = metadata.get("evidence_paths", {}) if isinstance(metadata.get("evidence_paths", {}), dict) else artifact_paths
     return {
         "job_id": str(metadata.get("job_id", "")),
         "task_name": str(metadata.get("task_name", "")),
         "status": status,
+        "business_status": str(metadata.get("business_status", "") or ""),
+        "runner_status": str(metadata.get("runner_status", "") or ""),
+        "artifact_status": str(metadata.get("artifact_status", "") or ""),
+        "artifact_paths": artifact_paths,
+        "evidence_paths": evidence_paths,
+        "runner_warnings": list(metadata.get("runner_warnings", []) if isinstance(metadata.get("runner_warnings"), list) else []),
         "metadata": metadata,
         "stdout_tail": stdout_lines,
         "stderr_tail": stderr_lines,
@@ -858,8 +933,9 @@ def _run_existing_job(
     exit_code = 1
     status = "failed"
     summary_note = ""
+    post_process_metadata: dict[str, Any] = {}
+    runner_warnings: list[str] = []
     try:
-        post_process_metadata: dict[str, Any] = {}
         with ExecutionAppLock(job_id=job_paths.job_id, task_name=task_name, force=force_unlock) as lock:
             mark_job_started(job_paths, lock_payload=lock.payload)
             with job_paths.stdout_path.open("w", encoding="utf-8") as stdout_handle:
@@ -871,6 +947,7 @@ def _run_existing_job(
                         console_stdout=sys.stdout if echo_output else None,
                         console_stderr=sys.stderr if echo_output else None,
                         job_paths=job_paths,
+                        runner_warnings=runner_warnings,
                     )
             status = "succeeded" if exit_code == 0 else "failed"
             summary_note = spec.description
@@ -880,6 +957,28 @@ def _run_existing_job(
                     task_name=task_name,
                     summary_note=summary_note,
                 )
+                business_status = str(post_process_metadata.get("business_status", "") or "").lower()
+                if business_status == "blocked":
+                    status = "blocked"
+                elif business_status in {"failed", "missing", "unknown"}:
+                    status = "failed"
+            elif task_name == "data-platform-refresh":
+                artifact_metadata = _data_refresh_artifact_status()
+                if artifact_metadata.get("business_status") == "ok":
+                    try:
+                        refresh_manifest_path = str(artifact_metadata.get("refresh_manifest_path", "") or "")
+                        update = sync_active_manifest_to_latest_lake_dataset(
+                            reason=task_name,
+                            refresh_manifest_path=refresh_manifest_path,
+                        )
+                        artifact_metadata["active_manifest_update"] = update
+                        update_job_metadata(job_paths, **artifact_metadata)
+                    except Exception as exc:
+                        runner_warnings.append(f"active_manifest_sync_after_reconcile_failed: {exc}")
+                    status = "succeeded"
+                    exit_code = 0
+                    summary_note = f"{spec.description} reconciled from refresh manifest"
+                    post_process_metadata = artifact_metadata
     except ExecutionAppLockError as exc:
         summary_note = str(exc)
         exit_code = 2
@@ -889,9 +988,23 @@ def _run_existing_job(
         exit_code = 1
         status = "failed"
     finally:
-        metadata = mark_job_finished(job_paths, status=status, exit_code=exit_code, summary_note=summary_note)
+        runner_status = "warning" if runner_warnings else ("ok" if int(exit_code) == 0 else ("blocked" if status == "blocked" else "failed"))
+        metadata = mark_job_finished(
+            job_paths,
+            status=status,
+            exit_code=exit_code,
+            summary_note=summary_note,
+            business_status=str(post_process_metadata.get("business_status", "ok" if status == "succeeded" else status)),
+            runner_status=str(post_process_metadata.get("runner_status", runner_status)),
+            artifact_status=str(post_process_metadata.get("artifact_status", "")),
+            artifact_paths=post_process_metadata.get("artifact_paths", {}) if isinstance(post_process_metadata.get("artifact_paths", {}), dict) else {},
+            evidence_paths=post_process_metadata.get("evidence_paths", {}) if isinstance(post_process_metadata.get("evidence_paths", {}), dict) else {},
+            runner_warnings=runner_warnings,
+        )
         if post_process_metadata:
             metadata.update(post_process_metadata)
+            metadata["runner_warnings"] = runner_warnings
+            metadata["runner_status"] = str(post_process_metadata.get("runner_status", runner_status))
         with _ACTIVE_JOB_THREADS_LOCK:
             _ACTIVE_JOB_THREADS.pop(job_paths.job_id, None)
     return {
@@ -910,16 +1023,38 @@ def _run_existing_job(
 
 
 class _TeeTextIO:
-    def __init__(self, *handles: TextIO | None, heartbeat: Any | None = None) -> None:
+    def __init__(self, *handles: TextIO | None, heartbeat: Any | None = None, runner_warnings: list[str] | None = None) -> None:
         self._handles = [handle for handle in handles if handle is not None]
         self._heartbeat = heartbeat
         self._buffer = ""
+        self._runner_warnings = runner_warnings if runner_warnings is not None else []
+        self._last_heartbeat_line = ""
+        self._last_written_progress_line = ""
+
+    def _record_warning(self, message: str) -> None:
+        if len(self._runner_warnings) >= _RUNNER_WARNING_LIMIT:
+            return
+        if message not in self._runner_warnings:
+            self._runner_warnings.append(message)
 
     def write(self, text: str) -> int:
         value = str(text)
+        write_value = value
+        if "\r" in value and "\n" not in value:
+            clean_value = value.rstrip("\r").strip()
+            if clean_value and clean_value == self._last_written_progress_line:
+                write_value = ""
+            else:
+                self._last_written_progress_line = clean_value
         for handle in self._handles:
-            handle.write(value)
-            handle.flush()
+            if not write_value:
+                continue
+            try:
+                handle.write(write_value)
+                handle.flush()
+            except OSError as exc:
+                self._record_warning(f"output_sink_error: {exc}")
+                continue
         self._buffer += value
         while "\n" in self._buffer or "\r" in self._buffer:
             newline_pos = self._buffer.find("\n")
@@ -928,16 +1063,22 @@ class _TeeTextIO:
             split_pos = min(positions)
             line = self._buffer[:split_pos]
             self._buffer = self._buffer[split_pos + 1 :]
-            if self._heartbeat is not None and line.strip():
+            clean_line = line.strip()
+            if self._heartbeat is not None and clean_line and clean_line != self._last_heartbeat_line:
                 try:
-                    self._heartbeat(line)
+                    self._heartbeat(clean_line)
+                    self._last_heartbeat_line = clean_line
                 except Exception:
                     pass
         return len(value)
 
     def flush(self) -> None:
         for handle in self._handles:
-            handle.flush()
+            try:
+                handle.flush()
+            except OSError as exc:
+                self._record_warning(f"output_flush_error: {exc}")
+                continue
 
 
 def _run_command_in_current_process(
@@ -948,6 +1089,7 @@ def _run_command_in_current_process(
     console_stdout: TextIO | None,
     console_stderr: TextIO | None,
     job_paths: Any | None = None,
+    runner_warnings: list[str] | None = None,
 ) -> int:
     if len(command) < 2:
         raise ValueError("command must contain python executable and script path")
@@ -960,11 +1102,13 @@ def _run_command_in_current_process(
         stdout_handle,
         console_stdout,
         heartbeat=(lambda line: mark_job_heartbeat(job_paths, stream_name="stdout", line=line)) if job_paths is not None else None,
+        runner_warnings=runner_warnings,
     )
     stderr_tee = _TeeTextIO(
         stderr_handle,
         console_stderr,
         heartbeat=(lambda line: mark_job_heartbeat(job_paths, stream_name="stderr", line=line)) if job_paths is not None else None,
+        runner_warnings=runner_warnings,
     )
     try:
         os.chdir(WORKSPACE_ROOT)

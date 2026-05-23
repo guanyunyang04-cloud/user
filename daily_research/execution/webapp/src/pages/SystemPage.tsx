@@ -53,7 +53,25 @@ export function SystemPage({ api }: SystemPageProps): JSX.Element {
         <Stat label="Yolos Python" value={text(status?.yolos_python)} />
         <Stat label="Runtime Root" value={text(status?.runtime_root)} />
         <Stat label="锁" value={<StatusPill value={status?.lock && Object.keys(status.lock).length ? "locked" : "ok"} />} />
+        <Stat label="Active Dataset" value={text(status?.active_manifest?.lake_dataset_id || status?.active_manifest?.source_market_dataset_id)} />
+        <Stat label="交易计划" value={<StatusPill value={String(status?.latest_trade_plan?.status || "missing")} />} />
       </div>
+      <Panel title="关键证据">
+        <div className="key-list">
+          <span>Active Manifest</span>
+          <strong>{text(status?.active_manifest?.path)}</strong>
+          <span>Data Source</span>
+          <strong>{text(status?.active_manifest?.data_source)}</strong>
+          <span>Lake Dataset</span>
+          <strong>{text(status?.active_manifest?.lake_dataset_id || status?.active_manifest?.source_market_dataset_id)}</strong>
+          <span>Dataset End Date</span>
+          <strong>{text(status?.active_manifest?.lake_dataset_end_date)}</strong>
+          <span>Trade Plan Run</span>
+          <strong>{text(status?.latest_trade_plan?.artifact_paths?.run_dir)}</strong>
+          <span>Trade Plan TXT</span>
+          <strong>{text(status?.latest_trade_plan?.artifact_paths?.txt || status?.latest_trade_plan?.path)}</strong>
+        </div>
+      </Panel>
       <Panel title="Doctor Checks">
         <DataTable
           rows={(doctor?.checks || []).map((check) => ({ name: check.name, ok: String(check.ok), detail: check.detail }))}

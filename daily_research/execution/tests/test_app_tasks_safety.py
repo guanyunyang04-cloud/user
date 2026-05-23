@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from daily_research.execution.app_tasks import get_task_spec, list_task_specs
+from daily_research.execution.app_tasks import get_task_spec, list_core_frontend_task_specs, list_task_specs
 
 
 def test_danger_tasks_are_marked_danger() -> None:
@@ -29,3 +29,10 @@ def test_execution_task_registry_omits_continuous_policy_surface() -> None:
     assert "continuous-policy-train" not in task_names
     assert "continuous-policy-evaluate" not in task_names
     assert "continuous-policy-export" not in task_names
+
+
+def test_default_frontend_task_surface_hides_dangerous_production_refresh() -> None:
+    task_names = {spec.name for spec in list_core_frontend_task_specs()}
+
+    assert "trade-plan" in task_names
+    assert "refresh-production-default" not in task_names

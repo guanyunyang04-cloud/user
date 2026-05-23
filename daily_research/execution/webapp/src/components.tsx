@@ -47,11 +47,11 @@ export function Stat({ label, value, tone = "neutral" }: { label: string; value:
 export function StatusPill({ value }: { value: string | boolean | undefined }): JSX.Element {
   const label = typeof value === "boolean" ? (value ? "ok" : "fail") : text(value, "unknown");
   const normalized = label.toLowerCase();
-  const tone = ["ok", "active", "succeeded", "safe", "fresh"].includes(normalized)
+  const tone = ["ok", "active", "succeeded", "safe", "fresh", "synced"].includes(normalized)
     ? "good"
     : ["failed", "danger", "blocked", "fail"].includes(normalized)
       ? "bad"
-      : ["running", "queued", "manual", "shadow", "caution"].includes(normalized)
+      : ["running", "queued", "manual", "shadow", "caution", "warning", "stale"].includes(normalized)
         ? "wait"
         : "neutral";
   return <span className={`pill pill-${tone}`}>{label}</span>;

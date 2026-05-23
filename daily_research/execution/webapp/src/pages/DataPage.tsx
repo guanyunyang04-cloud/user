@@ -109,7 +109,34 @@ export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
         <Stat label="Catalog" value={text(payload?.catalog_status)} />
         <Stat label="Dataset 数" value={payload?.datasets.length || 0} />
         <Stat label="最新 Refresh" value={text(payload?.data_platform.latest_refresh_run)} />
+        <Stat label="Active Dataset" value={text(payload?.active_dataset_id)} />
+        <Stat label="同步状态" value={<StatusPill value={payload?.dataset_sync_status || "unknown"} />} />
       </div>
+      <Panel title="Dataset 同步">
+        <div className="key-list">
+          <span>最新完成交易日</span>
+          <strong>{text(payload?.data_platform.latest_completed_trading_date)}</strong>
+          <span>Active Dataset</span>
+          <strong>{text(payload?.active_dataset_id)}</strong>
+          <span>Latest Policy Input</span>
+          <strong>{text(payload?.latest_policy_input_dataset_id)}</strong>
+          <span>Latest End Date</span>
+          <strong>{text(payload?.latest_policy_input_dataset_end_date)}</strong>
+          <span>Refresh Manifest</span>
+          <strong>{text(payload?.data_platform.latest_refresh_manifest_path)}</strong>
+          <span>Refresh Status</span>
+          <strong><StatusPill value={payload?.data_platform.latest_refresh_manifest_status || "unknown"} /></strong>
+          <span>Registered Dataset</span>
+          <strong>{text(payload?.data_platform.latest_refresh_registered_dataset_id)}</strong>
+        </div>
+        {(payload?.data_platform.latest_refresh_blockers || []).length ? (
+          <ul className="compact-list">
+            {(payload?.data_platform.latest_refresh_blockers || []).map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        ) : null}
+      </Panel>
       <Panel title="显式刷新">
         <div className="form-grid">
           <Field label="As-of 日期">
@@ -138,7 +165,21 @@ export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
                 <strong>{jobDetail.job_id}</strong>
                 <span>任务</span>
                 <strong>{jobDetail.task_name}</strong>
+                <span>业务状态</span>
+                <strong><StatusPill value={jobDetail.business_status || jobDetail.metadata.business_status || "-"} /></strong>
+                <span>Runner</span>
+                <strong><StatusPill value={jobDetail.runner_status || jobDetail.metadata.runner_status || "-"} /></strong>
+                <span>Artifact</span>
+                <strong><StatusPill value={jobDetail.artifact_status || jobDetail.metadata.artifact_status || "-"} /></strong>
               </div>
+              {Object.entries(jobDetail.evidence_paths || jobDetail.metadata.evidence_paths || {}).some(([, value]) => String(value || "").trim()) ? (
+                <DataTable
+                  rows={Object.entries(jobDetail.evidence_paths || jobDetail.metadata.evidence_paths || {})
+                    .filter(([, value]) => String(value || "").trim())
+                    .map(([key, value]) => ({ key, path: String(value) }))}
+                  preferredColumns={["key", "path"]}
+                />
+              ) : null}
               <div className="log-grid">
                 <div>
                   <h3>stdout</h3>
