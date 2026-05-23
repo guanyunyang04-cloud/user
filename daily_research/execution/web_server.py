@@ -3,17 +3,24 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import uvicorn
 
 from daily_research.execution import app_service
-from daily_research.execution.web_models import AccountSnapshotRequest, ResumeRequest, TaskRunRequest, UnlockRequest
+from daily_research.execution.web_models import (
+    AccountSnapshotRequest,
+    DataRefreshRequest,
+    ModelTrainRequest,
+    ResumeRequest,
+    TaskRunRequest,
+    TradePlanGenerateRequest,
+    UnlockRequest,
+)
 from daily_research.execution.web_service import (
     account_context,
     base_context,
-    continuous_policy_context,
     dashboard_context,
     doctor_context,
     guide_context,
@@ -32,6 +39,14 @@ UI_PATHS = ui_paths()
 TEMPLATES = Jinja2Templates(directory=str(UI_PATHS["templates"]))
 TEMPLATES.env.filters["status_label"] = status_label
 TEMPLATES.env.filters["section_label"] = section_label
+RETIRED_FRONTEND_PATHS = {"/continuous-policy"}
+
+
+def _react_index_response() -> FileResponse | None:
+    index_path = UI_PATHS.get("react_dist", UI_PATHS["ui_root"]) / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path)
+    return None
 
 
 def _render_template(
@@ -55,25 +70,42 @@ def create_app() -> FastAPI:
         redoc_url=None,
     )
     app.mount("/static", StaticFiles(directory=str(UI_PATHS["static"])), name="static")
+    react_dist = UI_PATHS.get("react_dist")
+    if react_dist is not None and react_dist.exists():
+        assets_dir = react_dist / "assets"
+        if assets_dir.exists():
+            app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="react-assets")
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
     @app.get("/", response_class=HTMLResponse)
-    def dashboard_page(request: Request) -> HTMLResponse:
+    def dashboard_page(request: Request) -> Response:
+        react_response = _react_index_response()
+        if react_response is not None:
+            return react_response
         return _render_template(request, "dashboard.html", active_path="/", context=dashboard_context())
 
     @app.get("/tasks", response_class=HTMLResponse)
-    def tasks_page(request: Request, task: str = Query(default="")) -> HTMLResponse:
+    def tasks_page(request: Request, task: str = Query(default="")) -> Response:
+        react_response = _react_index_response()
+        if react_response is not None:
+            return react_response
         return _render_template(request, "tasks.html", active_path="/tasks", context=tasks_context(selected_task=task))
 
     @app.get("/jobs", response_class=HTMLResponse)
-    def jobs_page(request: Request, limit: int = Query(default=30, ge=1, le=100)) -> HTMLResponse:
+    def jobs_page(request: Request, limit: int = Query(default=30, ge=1, le=100)) -> Response:
+        react_response = _react_index_response()
+        if react_response is not None:
+            return react_response
         return _render_template(request, "jobs.html", active_path="/jobs", context=jobs_context(limit=limit))
 
     @app.get("/jobs/{job_id}", response_class=HTMLResponse)
-    def job_page(request: Request, job_id: str, lines: int = Query(default=120, ge=10, le=400)) -> HTMLResponse:
+    def job_page(request: Request, job_id: str, lines: int = Query(default=120, ge=10, le=400)) -> Response:
+        react_response = _react_index_response()
+        if react_response is not None:
+            return react_response
         try:
             context = job_detail_context(job_id, lines=lines)
         except FileNotFoundError as exc:
@@ -81,27 +113,38 @@ def create_app() -> FastAPI:
         return _render_template(request, "job_detail.html", active_path="/jobs", context=context)
 
     @app.get("/doctor", response_class=HTMLResponse)
-    def doctor_page(request: Request) -> HTMLResponse:
+    def doctor_page(request: Request) -> Response:
+        react_response = _react_index_response()
+        if react_response is not None:
+            return react_response
         return _render_template(request, "doctor.html", active_path="/doctor", context=doctor_context())
 
     @app.get("/artifacts/trade-plan", response_class=HTMLResponse)
-    def trade_plan_page(request: Request) -> HTMLResponse:
+    def trade_plan_page(request: Request) -> Response:
+        react_response = _react_index_response()
+        if react_response is not None:
+            return react_response
         return _render_template(request, "trade_plan.html", active_path="/artifacts/trade-plan", context=trade_plan_context())
 
-    @app.get("/continuous-policy", response_class=HTMLResponse)
-    def continuous_policy_page(request: Request) -> HTMLResponse:
-        return _render_template(request, "continuous_policy.html", active_path="/continuous-policy", context=continuous_policy_context())
-
     @app.get("/account", response_class=HTMLResponse)
-    def account_page(request: Request) -> HTMLResponse:
+    def account_page(request: Request) -> Response:
+        react_response = _react_index_response()
+        if react_response is not None:
+            return react_response
         return _render_template(request, "account.html", active_path="/account", context=account_context())
 
     @app.get("/guide", response_class=HTMLResponse)
-    def guide_page(request: Request) -> HTMLResponse:
+    def guide_page(request: Request) -> Response:
+        react_response = _react_index_response()
+        if react_response is not None:
+            return react_response
         return _render_template(request, "guide.html", active_path="/guide", context=guide_context())
 
     @app.get("/settings/runtime", response_class=HTMLResponse)
-    def runtime_page(request: Request) -> HTMLResponse:
+    def runtime_page(request: Request) -> Response:
+        react_response = _react_index_response()
+        if react_response is not None:
+            return react_response
         return _render_template(request, "runtime.html", active_path="/settings/runtime", context=runtime_context())
 
     @app.get("/api/status")
@@ -151,9 +194,102 @@ def create_app() -> FastAPI:
     def api_trade_plan() -> dict[str, Any]:
         return app_service.latest_trade_plan_summary(max_lines=240)
 
-    @app.get("/api/continuous-policy")
-    def api_continuous_policy() -> dict[str, Any]:
-        return app_service.continuous_policy_summary(action_rows_limit=16)
+    @app.post("/api/trade-plan/generate")
+    def api_generate_trade_plan(request: TradePlanGenerateRequest) -> JSONResponse:
+        form_payload: dict[str, Any] = {}
+        if request.candidate_profile:
+            form_payload["candidate_profile"] = request.candidate_profile
+        raw_args: list[str] = []
+        if request.positions_file:
+            raw_args.extend(["--positions-file", request.positions_file])
+        if request.cash not in {None, ""}:
+            raw_args.extend(["--cash", str(request.cash)])
+        if request.lot_size not in {None, ""}:
+            raw_args.extend(["--lot-size", str(request.lot_size)])
+        if request.target_weight_top_k not in {None, ""}:
+            raw_args.extend(["--target-weight-top-k", str(request.target_weight_top_k)])
+        if request.target_weight_min_weight not in {None, ""}:
+            raw_args.extend(["--target-weight-min-weight", str(request.target_weight_min_weight)])
+        if request.raw_args_text:
+            raw_args.extend(app_service.parse_raw_args_text(request.raw_args_text))
+        try:
+            payload = app_service.launch_task_async(
+                task_name="trade-plan",
+                passthrough_args=[
+                    *app_service.build_passthrough_args_from_form(
+                        task_name="trade-plan",
+                        form_payload=form_payload,
+                    ),
+                    *raw_args,
+                ],
+                job_label=request.job_label,
+                force_unlock=request.force_unlock,
+            )
+            return JSONResponse(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/models")
+    def api_models() -> dict[str, Any]:
+        return app_service.models_summary()
+
+    @app.get("/api/models/{model_id}")
+    def api_model(model_id: str) -> dict[str, Any]:
+        try:
+            return app_service.model_detail(model_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/models/{model_id}/train")
+    def api_model_train(model_id: str, request: ModelTrainRequest) -> JSONResponse:
+        try:
+            if model_id != "production-full-fit":
+                raise ValueError(f"模型 {model_id} 暂未接入执行端训练入口。")
+            task_name = "refresh-production-default"
+            raw_args: list[str] = []
+            if request.start_date:
+                raw_args.extend(["--start-date", request.start_date])
+            if request.end_date:
+                raw_args.extend(["--end-date", request.end_date])
+            if request.advanced_args:
+                raw_args.extend(app_service.parse_raw_args_text(request.advanced_args))
+            payload = app_service.launch_task_async(
+                task_name=task_name,
+                passthrough_args=raw_args,
+                job_label=request.job_label or f"manual-train:{model_id}",
+                force_unlock=request.force_unlock,
+            )
+            return JSONResponse(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/data-sources")
+    def api_data_sources() -> dict[str, Any]:
+        return app_service.data_sources_summary()
+
+    @app.post("/api/data-sources/refresh")
+    def api_data_sources_refresh(request: DataRefreshRequest) -> JSONResponse:
+        try:
+            args: list[str] = []
+            if request.as_of_date:
+                args.extend(["--as-of-date", request.as_of_date])
+            if request.start_date:
+                args.extend(["--start-date", request.start_date])
+            if request.universe:
+                args.extend(["--universe", request.universe])
+            if request.domains:
+                args.extend(["--domains", ",".join(request.domains)])
+            if request.advanced_args:
+                args.extend(app_service.parse_raw_args_text(request.advanced_args))
+            payload = app_service.launch_task_async(
+                task_name="data-platform-refresh",
+                passthrough_args=args,
+                job_label=request.job_label or "manual-data-refresh",
+                force_unlock=request.force_unlock,
+            )
+            return JSONResponse(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/account")
     def api_account() -> dict[str, Any]:
@@ -233,6 +369,18 @@ def create_app() -> FastAPI:
             return JSONResponse(app_service.unlock_runtime(force=request.force))
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/{full_path:path}", response_class=HTMLResponse, response_model=None)
+    def react_app_fallback(full_path: str) -> Response:
+        request_path = f"/{str(full_path).strip('/')}"
+        if request_path in RETIRED_FRONTEND_PATHS:
+            raise HTTPException(status_code=404, detail=f"Retired execution console path: {request_path}")
+        if str(full_path).startswith("api/"):
+            raise HTTPException(status_code=404, detail=f"API path not found: /{full_path}")
+        react_response = _react_index_response()
+        if react_response is not None:
+            return react_response
+        raise HTTPException(status_code=404, detail=f"React app build not found for path: /{full_path}")
 
     return app
 

@@ -585,7 +585,6 @@ def _candidate_label_for_mode(profile: ResearchCandidateProfile, mode: str) -> s
 
 
 def _ensure_live_panels(profile: ResearchCandidateProfile, *, mode: str) -> None:
-    _maybe_auto_retrain_production(profile, mode=mode)
     refresh_run_dir = _refresh_run_dir_for_mode(profile, mode)
     if not refresh_run_dir:
         refresh_run_dir = ""

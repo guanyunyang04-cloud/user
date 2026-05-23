@@ -85,7 +85,7 @@ DEFAULT_PRODUCTION_POOL_REFRESH_POLICY = (
 DEFAULT_PRODUCTION_DAILY_POOL_REFRESH_ENABLED = DEFAULT_PRODUCTION_POOL_REBALANCE_DAYS == 1
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Promote the current formal deep_alpha winner into a production full-fit model. "
@@ -100,6 +100,11 @@ def parse_args() -> argparse.Namespace:
         "--end-date",
         default="",
         help="Production launch cutoff date. Defaults to latest completed trading date.",
+    )
+    parser.add_argument(
+        "--start-date",
+        default="",
+        help="Optional production training start date override. Empty means inherit from the source run config.",
     )
     parser.add_argument("--experiment-tag", default="", help="Optional run tag under daily_research/output.")
     parser.add_argument(
@@ -211,7 +216,7 @@ def parse_args() -> argparse.Namespace:
         help="Explicitly confirm that this command may modify the active execution strategy manifest.",
     )
     parser.set_defaults(activate_strategy=False, resume_existing_run=True)
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def _load_source_config(source_run_dir: Path) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -557,9 +562,12 @@ def _resolve_training_dates(
     *,
     source_run_dir: Path,
     latest_completed_date: str,
+    train_start_date_override: str = "",
 ) -> tuple[str, str, int]:
     metrics, raw_cfg = _load_source_config(source_run_dir)
     cfg = research_main.DeepAlphaConfig(**raw_cfg)
+    if str(train_start_date_override or "").strip():
+        cfg.start_date = pd.Timestamp(str(train_start_date_override).strip()).strftime("%Y%m%d")
     cfg.end_date = str(latest_completed_date)
 
     args = SimpleNamespace(
@@ -662,8 +670,10 @@ def _build_retrain_command(
     execution_alignment_profile_override: str = "",
     execution_alignment_candidate_profiles_override: str = "",
     static_fallback_profile_override: str = "",
+    train_start_date_override: str = "",
 ) -> list[str]:
     metrics, cfg = _load_source_config(source_run_dir)
+    train_start_date = str(train_start_date_override or cfg.get("start_date", "20210101")).strip() or "20210101"
     family_key = _infer_family_key_for_source(source_run_dir, cfg)
     recommended_epoch_budget = resolve_epoch_budget_for_family(
         family_key,
@@ -679,7 +689,7 @@ def _build_retrain_command(
     cmd: list[str] = [resolve_project_python_executable(sys.executable), str(script_path)]
 
     _append_arg(cmd, "--data-source", "tq")
-    _append_arg(cmd, "--start-date", cfg.get("start_date", "20210101"))
+    _append_arg(cmd, "--start-date", train_start_date)
     _append_arg(cmd, "--end-date", latest_completed_date)
     _append_arg(cmd, "--benchmark", cfg.get("benchmark", "000300.SH"))
 
@@ -1551,7 +1561,7 @@ def main() -> None:
     strategy_manifest_path = Path(args.strategy_manifest_path).resolve()
     source_metrics, cfg = _load_source_config(source_run_dir)
     family_key = _infer_family_key_for_source(source_run_dir, cfg)
-    train_start_date = str(cfg.get("start_date", "20210101"))
+    train_start_date = str(args.start_date or cfg.get("start_date", "20210101"))
     latest_completed_date = pd.Timestamp(args.end_date or get_latest_completed_trading_date()).strftime("%Y%m%d")
     experiment_tag = (
         args.experiment_tag.strip()
@@ -1599,6 +1609,7 @@ def main() -> None:
     latest_trainable_date, internal_monitor_start_date, internal_monitor_days = _resolve_training_dates(
         source_run_dir=source_run_dir,
         latest_completed_date=latest_completed_date,
+        train_start_date_override=train_start_date,
     )
     label_horizon_guard_trading_days = _infer_label_horizon_guard_trading_days(source_metrics, cfg)
     minimum_new_trainable_trading_days = _infer_minimum_new_trainable_trading_days(
@@ -1639,6 +1650,7 @@ def main() -> None:
             execution_alignment_profile_override=str(args.execution_alignment_profile or ""),
             execution_alignment_candidate_profiles_override=str(args.execution_alignment_candidate_profiles or ""),
             static_fallback_profile_override=str(args.static_fallback_profile or ""),
+            train_start_date_override=train_start_date,
         )
         resume_artifact_path = run_dir / "deep_alpha_model.pt"
         existing_convergence = _load_metrics_payload(run_dir / "production_retrain_convergence.json")

@@ -275,23 +275,11 @@ def _assess_model_freshness(
         )
         return result
 
-    if max_trading_days > 0 and trading_day_lag >= int(max_trading_days):
-        result["status"] = "blocked"
-        result["status_text"] = "blocked"
-        result["should_block"] = True
-        result["warnings"].append(
-            f"Model latest_data_date={latest_data_date.date()} lags the current signal date by "
-            f"{trading_day_lag} trading days, reaching the blocking threshold {max_trading_days}."
-        )
-        return result
-
-    if warn_trading_days > 0 and trading_day_lag >= int(warn_trading_days):
-        result["status"] = "warning"
-        result["status_text"] = "warning"
-        result["warnings"].append(
-            f"Model latest_data_date={latest_data_date.date()} lags the current signal date by "
-            f"{trading_day_lag} trading days; run update_model.py as soon as possible."
-        )
+    if (max_trading_days > 0 and trading_day_lag >= int(max_trading_days)) or (
+        warn_trading_days > 0 and trading_day_lag >= int(warn_trading_days)
+    ):
+        result["status"] = "lagged"
+        result["status_text"] = "lagged"
         return result
 
     result["status"] = "fresh"
@@ -421,19 +409,7 @@ def _assess_external_model_retrain_freshness(
     )
     lag = freshness.get("trading_day_lag")
     latest_signal_text = str(pd.Timestamp(latest_signal_date).date())
-    if freshness.get("status") == "warning":
-        result["warnings"].append(
-            f"Production full-fit last launch cutoff={launch_cutoff_date.date()} lags current signal date "
-            f"{latest_signal_text} by {lag} trading days, reaching the retrain warning threshold "
-            f"{resolved_warn} ({preferred_label or 'configured cadence'}); run daily_research/execution/update_default_candidate_production.py soon."
-        )
-    elif freshness.get("status") == "blocked":
-        result["warnings"].append(
-            f"Production full-fit last launch cutoff={launch_cutoff_date.date()} lags current signal date "
-            f"{latest_signal_text} by {lag} trading days, reaching the retrain blocking threshold "
-            f"{resolved_max}; run daily_research/execution/update_default_candidate_production.py first."
-        )
-    elif freshness.get("status") == "future":
+    if freshness.get("status") == "future":
         result["warnings"].extend(list(freshness.get("warnings", [])))
     return result
 
@@ -1724,10 +1700,6 @@ def _write_trade_plan_txt(
         retrain_line = f"{model_info.get('production_model_retrain_label', '底层模型重训时效')}: {model_info['production_model_retrain_status']}"
         if model_info.get("production_model_retrain_trading_day_lag") is not None:
             retrain_line += f" | 交易日滞后 {model_info['production_model_retrain_trading_day_lag']}"
-        if model_info.get("production_model_retrain_warn_trading_days"):
-            retrain_line += f" | 提醒阈值 {model_info['production_model_retrain_warn_trading_days']}"
-        if model_info.get("production_model_retrain_max_trading_days"):
-            retrain_line += f" | 阻断阈值 {model_info['production_model_retrain_max_trading_days']}"
         lines.append(retrain_line)
     history_window = model_info.get("history_window")
     if isinstance(history_window, dict) and history_window.get("effective_start_date"):

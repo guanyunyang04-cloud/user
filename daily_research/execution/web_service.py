@@ -15,7 +15,6 @@ NAV_ITEMS = (
     {"path": "/jobs", "label": "作业"},
     {"path": "/doctor", "label": "体检"},
     {"path": "/artifacts/trade-plan", "label": "交易计划"},
-    {"path": "/continuous-policy", "label": "连续策略"},
     {"path": "/account", "label": "模拟账户"},
     {"path": "/guide", "label": "使用教程"},
     {"path": "/settings/runtime", "label": "运行时"},
@@ -101,10 +100,6 @@ def trade_plan_context() -> dict[str, Any]:
     return {"artifact": app_service.latest_trade_plan_summary(max_lines=200)}
 
 
-def continuous_policy_context() -> dict[str, Any]:
-    return {"continuous_policy": app_service.continuous_policy_summary(action_rows_limit=16)}
-
-
 def account_context() -> dict[str, Any]:
     return {"account": app_service.load_account_snapshot()}
 
@@ -121,8 +116,10 @@ def guide_context() -> dict[str, Any]:
 
 def ui_paths() -> dict[str, Path]:
     ui_root = Path(__file__).resolve().parent / "web"
+    execution_root = Path(__file__).resolve().parent
     return {
         "ui_root": ui_root,
         "templates": ui_root / "templates",
         "static": ui_root / "static",
+        "react_dist": execution_root / "webapp" / "dist",
     }

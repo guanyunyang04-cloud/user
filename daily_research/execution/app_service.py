@@ -12,16 +12,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, TextIO
 
-from daily_research.continuous_policy.runtime import (
-    CONTINUOUS_POLICY_ROOT,
-    LATEST_BEHAVIOR_AUDIT_SUMMARY_PATH,
-    LATEST_CONCLUSION_LEDGER_PATH,
-    LATEST_EVALUATION_SUMMARY_PATH,
-    LATEST_EXPORT_SUMMARY_PATH,
-    LATEST_PROTOCOL_SUMMARY_PATH,
-    LATEST_TRAIN_SUMMARY_PATH,
-    RUNTIME_STATE_PATH as CONTINUOUS_POLICY_RUNTIME_STATE_PATH,
-)
 from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.execution.app_runtime import (
     EVENTS_PATH,
@@ -75,6 +65,30 @@ def sanitize_passthrough_args(values: list[str] | None) -> list[str]:
 
 def _read_json(path: Path) -> dict[str, Any]:
     return read_json_file(path)
+
+
+def _resolve_existing_project_path(raw_path: Any) -> Path:
+    text = str(raw_path or "").strip()
+    if not text:
+        return Path("")
+    path = Path(text).expanduser()
+    candidates = [path]
+    normalized = text.replace("\\", "/")
+    marker = "/daily_research/"
+    if marker in normalized:
+        suffix = normalized.split(marker, 1)[1]
+        candidates.append(PROJECT_ROOT / suffix)
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except Exception:
+            resolved = candidate
+        if resolved.exists():
+            return resolved
+    try:
+        return path.resolve()
+    except Exception:
+        return path
 
 
 def _file_mtime_text(path: Path) -> str:
@@ -245,13 +259,58 @@ def active_manifest_summary() -> dict[str, Any]:
     }
 
 
-def latest_trade_plan_summary(*, max_lines: int = 80) -> dict[str, Any]:
-    lines = tail_file(LATEST_TRADE_PLAN_PATH, lines=max_lines)
+def _latest_trade_plan_run_dir(output_dir: Path) -> Path | None:
+    if not output_dir.exists():
+        return None
+    candidates = [
+        path
+        for path in output_dir.iterdir()
+        if path.is_dir()
+        and any((path / name).exists() for name in ("plan_summary.json", "actions_today.csv", "daily_trade_plan.txt"))
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: item.stat().st_mtime)
+
+
+def latest_trade_plan_summary(
+    *,
+    max_lines: int = 80,
+    output_dir: Path | str | None = None,
+    latest_txt_path: Path | str | None = None,
+) -> dict[str, Any]:
+    resolved_output_dir = Path(output_dir) if output_dir is not None else EXECUTION_DIR / "output"
+    resolved_latest_txt = Path(latest_txt_path) if latest_txt_path is not None else resolved_output_dir / "latest_trade_plan.txt"
+    run_dir = _latest_trade_plan_run_dir(resolved_output_dir)
+    summary_path = run_dir / "plan_summary.json" if run_dir is not None else None
+    actions_path = run_dir / "actions_today.csv" if run_dir is not None else None
+    holdings_path = run_dir / "holdings_snapshot.csv" if run_dir is not None else None
+    watchlist_path = run_dir / "watchlist.csv" if run_dir is not None else None
+    txt_path = resolved_latest_txt if resolved_latest_txt.exists() else (run_dir / "daily_trade_plan.txt" if run_dir is not None else resolved_latest_txt)
+    lines = tail_file(txt_path, lines=max_lines) if txt_path.exists() else []
+    summary = _read_json(summary_path) if summary_path is not None and summary_path.exists() else {}
+    model_info = summary.get("model_freshness") if isinstance(summary.get("model_freshness"), dict) else {}
     return {
-        "path": str(LATEST_TRADE_PLAN_PATH.resolve()),
-        "exists": LATEST_TRADE_PLAN_PATH.exists(),
+        "path": str(txt_path.resolve()),
+        "exists": txt_path.exists(),
+        "status": "ok" if txt_path.exists() or run_dir is not None else "missing",
+        "summary": summary,
+        "actions": _read_csv_preview(actions_path, limit=200) if actions_path and actions_path.exists() else [],
+        "holdings": _read_csv_preview(holdings_path, limit=300) if holdings_path and holdings_path.exists() else [],
+        "watchlist": _read_csv_preview(watchlist_path, limit=200) if watchlist_path and watchlist_path.exists() else [],
+        "model_info": model_info,
+        "txt_preview": lines,
         "preview_lines": lines,
         "line_count": len(lines),
+        "artifact_paths": {
+            "output_dir": str(resolved_output_dir.resolve()),
+            "run_dir": str(run_dir.resolve()) if run_dir is not None else "",
+            "summary_json": str(summary_path.resolve()) if summary_path is not None else "",
+            "actions_csv": str(actions_path.resolve()) if actions_path is not None else "",
+            "holdings_csv": str(holdings_path.resolve()) if holdings_path is not None else "",
+            "watchlist_csv": str(watchlist_path.resolve()) if watchlist_path is not None else "",
+            "txt": str(txt_path.resolve()),
+        },
     }
 
 
@@ -268,28 +327,170 @@ def _read_csv_preview(path: Path, *, limit: int = 12) -> list[dict[str, str]]:
     return rows
 
 
-def continuous_policy_summary(*, action_rows_limit: int = 12) -> dict[str, Any]:
-    train_summary = _read_json(LATEST_TRAIN_SUMMARY_PATH)
-    evaluation_summary = _read_json(LATEST_EVALUATION_SUMMARY_PATH)
-    export_summary = _read_json(LATEST_EXPORT_SUMMARY_PATH)
-    protocol_summary = _read_json(LATEST_PROTOCOL_SUMMARY_PATH)
-    behavior_audit_summary = _read_json(LATEST_BEHAVIOR_AUDIT_SUMMARY_PATH)
-    conclusion_ledger_summary = _read_json(LATEST_CONCLUSION_LEDGER_PATH)
-    runtime_summary = _read_json(CONTINUOUS_POLICY_RUNTIME_STATE_PATH)
-    action_panel_path = Path(str(export_summary.get("action_panel_csv", "") or "")).expanduser()
+def _model_card(
+    *,
+    model_id: str,
+    role: str,
+    name: str,
+    status: str,
+    usage: str,
+    is_live: bool = False,
+    is_shadow: bool = False,
+    is_legacy: bool = False,
+    data_source: str = "",
+    dataset_id: str = "",
+    trained_at: str = "",
+    train_start_date: str = "",
+    train_end_date: str = "",
+    signal_date: str = "",
+    artifact_path: str = "",
+    detail: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     return {
-        "root": str(CONTINUOUS_POLICY_ROOT.resolve()),
-        "exists": CONTINUOUS_POLICY_ROOT.exists(),
-        "latest_train": train_summary,
-        "latest_evaluation": evaluation_summary,
-        "latest_export": export_summary,
-        "latest_protocol": protocol_summary,
-        "latest_behavior_audit": behavior_audit_summary,
-        "latest_conclusion_ledger": conclusion_ledger_summary,
-        "runtime_state": runtime_summary,
-        "action_panel_preview": _read_csv_preview(action_panel_path, limit=action_rows_limit)
-        if action_panel_path and action_panel_path.exists()
-        else [],
+        "id": model_id,
+        "role": role,
+        "name": name,
+        "status": status,
+        "usage": usage,
+        "is_live": bool(is_live),
+        "is_shadow": bool(is_shadow),
+        "is_legacy": bool(is_legacy),
+        "data_source": data_source,
+        "dataset_id": dataset_id,
+        "trained_at": trained_at,
+        "train_start_date": train_start_date,
+        "train_end_date": train_end_date,
+        "signal_date": signal_date,
+        "artifact_path": artifact_path,
+        "detail": detail or {},
+    }
+
+
+def _safe_nested(payload: dict[str, Any], *keys: str) -> Any:
+    current: Any = payload
+    for key in keys:
+        if not isinstance(current, dict):
+            return ""
+        current = current.get(key)
+    return current
+
+
+def models_summary() -> dict[str, Any]:
+    active = active_manifest_summary()
+    active_payload = _read_json(ACTIVE_MANIFEST_PATH)
+    production_manifest_path = _resolve_existing_project_path(active_payload.get("production_manifest_json", ""))
+    production_manifest = _read_json(production_manifest_path) if production_manifest_path and production_manifest_path.exists() else {}
+    path_studies_root = PROJECT_ROOT / "output" / "path_policy" / "studies"
+    path_summary_path = Path("")
+    if path_studies_root.exists():
+        summaries = sorted(path_studies_root.glob("*/study_summary.json"), key=lambda item: item.stat().st_mtime, reverse=True)
+        path_summary_path = summaries[0] if summaries else Path("")
+    path_summary = _read_json(path_summary_path) if path_summary_path and path_summary_path.exists() else {}
+    models = [
+        _model_card(
+            model_id="active-live",
+            role="live",
+            name=active.get("strategy_name") or active.get("candidate_label") or "active execution",
+            status="active",
+            usage="当前交易计划默认执行链路",
+            is_live=True,
+            data_source=str(active_payload.get("data_source", "")),
+            trained_at=str(active_payload.get("promoted_at", "")),
+            train_end_date=str(production_manifest.get("train_end_date", "")),
+            signal_date=str(active_payload.get("effective_live_target_weight_mode", "")),
+            artifact_path=str(active.get("path", "")),
+            detail={"manifest": active_payload, "summary": active},
+        ),
+        _model_card(
+            model_id="production-full-fit",
+            role="production",
+            name=str(production_manifest.get("strategy_name") or active.get("candidate_label") or "production full-fit"),
+            status="manual",
+            usage="显式 production retrain 后供交易计划读取",
+            data_source=str(active_payload.get("data_source", "")),
+            trained_at=str(production_manifest.get("created_at", "")),
+            train_start_date=str(production_manifest.get("train_start_date", "")),
+            train_end_date=str(production_manifest.get("train_end_date", "")),
+            artifact_path=str(production_manifest.get("active_production_run_dir", "")),
+            detail={"manifest_path": str(production_manifest_path), "manifest": production_manifest},
+        ),
+        _model_card(
+            model_id="path-policy-research",
+            role="path_policy",
+            name=str(path_summary.get("study_tag") or path_summary.get("tag") or (path_summary_path.parent.name if path_summary_path else "path policy research")),
+            status=str(path_summary.get("status") or path_summary.get("evidence_verdict") or "research"),
+            usage="多 horizon 交易效用排序研究",
+            is_shadow=True,
+            data_source="lake",
+            dataset_id=", ".join(str(item) for item in path_summary.get("dataset_ids", []) if str(item)) if isinstance(path_summary.get("dataset_ids"), list) else "",
+            trained_at=str(path_summary.get("completed_at") or path_summary.get("created_at") or ""),
+            artifact_path=str(path_summary_path),
+            detail=path_summary,
+        ),
+        _model_card(
+            model_id="legacy-ml",
+            role="legacy",
+            name="legacy ML trade model",
+            status="legacy",
+            usage="旧版 ML 兼容入口，默认 UI 隐藏",
+            is_legacy=True,
+            data_source="legacy",
+            artifact_path=str((EXECUTION_DIR / "models" / "latest_ml_model.joblib").resolve()),
+        ),
+    ]
+    return {"status": "ok", "models": models, "updated_at": time.strftime("%Y-%m-%d %H:%M:%S")}
+
+
+def model_detail(model_id: str) -> dict[str, Any]:
+    payload = models_summary()
+    for item in payload["models"]:
+        if item["id"] == model_id:
+            return {"status": "ok", "model": item}
+    raise KeyError(f"Unknown model id: {model_id}")
+
+
+def data_sources_summary(*, dataset_limit: int = 60) -> dict[str, Any]:
+    from daily_research.data_lake import DEFAULT_DATA_LAKE_ROOT, ResearchDataLake
+
+    lake_root = DEFAULT_DATA_LAKE_ROOT
+    datasets: list[dict[str, Any]] = []
+    catalog_status = "missing"
+    try:
+        lake = ResearchDataLake(lake_root)
+        frame = lake.list_datasets()
+        catalog_status = "ok"
+        if not frame.empty:
+            frame = frame.sort_values("created_at", ascending=False).head(int(dataset_limit))
+            datasets = [
+                {
+                    "dataset_id": str(row.get("dataset_id", "")),
+                    "dataset_kind": str(row.get("dataset_kind", "")),
+                    "domain": str(row.get("domain", "")),
+                    "zone": str(row.get("zone", "")),
+                    "status": str(row.get("status", "")),
+                    "start_date": str(row.get("start_date", "")),
+                    "end_date": str(row.get("end_date", "")),
+                    "created_at": str(row.get("created_at", "")),
+                }
+                for _, row in frame.iterrows()
+            ]
+    except Exception as exc:
+        catalog_status = f"unavailable:{exc}"
+    platform_runs = PROJECT_ROOT / "output" / "research_data_lake" / "data_platform" / "runs"
+    latest_refresh = ""
+    if platform_runs.exists():
+        runs = sorted(platform_runs.iterdir(), key=lambda item: item.stat().st_mtime, reverse=True)
+        latest_refresh = str(runs[0].resolve()) if runs else ""
+    return {
+        "status": "ok",
+        "lake_root": str((PROJECT_ROOT / "output" / "research_data_lake").resolve()),
+        "catalog_status": catalog_status,
+        "datasets": datasets,
+        "data_platform": {
+            "runs_root": str(platform_runs.resolve()),
+            "latest_refresh_run": latest_refresh,
+            "provider_plan": "default_free",
+        },
     }
 
 
@@ -386,7 +587,6 @@ def build_status_payload(*, history_limit: int = 8) -> dict[str, Any]:
         "active_manifest": active_manifest_summary(),
         "current_positions": positions_summary(),
         "latest_trade_plan": latest_trade_plan_summary(max_lines=24),
-        "continuous_policy": continuous_policy_summary(action_rows_limit=8),
         "warnings": warnings,
         "updated_at": state.get("updated_at", ""),
     }

@@ -1,0 +1,30 @@
+{
+  "name": "daily-research-execution-console",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5174",
+    "build": "tsc -b && vite build",
+    "test": "vitest run",
+    "preview": "vite preview --host 0.0.0.0 --port 4174"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^2.12.7"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.4.6",
+    "@testing-library/react": "^15.0.7",
+    "@testing-library/user-event": "^14.5.2",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "jsdom": "^24.1.0",
+    "typescript": "^5.5.4",
+    "vite": "^5.3.5",
+    "vitest": "^1.6.0"
+  }
+}

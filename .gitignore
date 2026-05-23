@@ -1,5 +1,7 @@
 __pycache__/
 *.py[cod]
+node_modules/
+*.tsbuildinfo
 *.pkl
 *.joblib
 *.pt
@@ -12,6 +14,7 @@ daily_research/cache/
 daily_research/output/
 daily_research/execution/output/
 daily_research/execution/current_positions.csv
+daily_research/execution/webapp/node_modules/
 daily_research/execution/models/*
 !daily_research/execution/models/.gitkeep
 daily_research/execution/universe/history/

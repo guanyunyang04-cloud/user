@@ -20,3 +20,12 @@ def test_registered_task_scripts_exist() -> None:
     missing = [spec.name for spec in list_task_specs() if not spec.script_path.exists()]
 
     assert missing == []
+
+
+def test_execution_task_registry_omits_continuous_policy_surface() -> None:
+    task_names = {spec.name for spec in list_task_specs()}
+
+    assert "continuous-policy-protocol" not in task_names
+    assert "continuous-policy-train" not in task_names
+    assert "continuous-policy-evaluate" not in task_names
+    assert "continuous-policy-export" not in task_names
