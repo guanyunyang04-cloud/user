@@ -38,12 +38,13 @@
 - 主分脑结构变更后必须跑 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`，确认父子附着、读序、写回路由、body 映射和编码合同仍一致
 - 主脑 `state_center.md` 只承载当前路由和跨项目边界，不再追加日期型实验日志；分脑高频入口也必须优先保留当前结论，历史细节下沉到 `episodic_memory.md` 或 `brain/references/`
 - 长任务运行纪律是受监管独立进程，不是脱管后台化：训练、评估、审计、bounded study、confirmatory rerun 与执行任务可以用 `Start-Process -PassThru` 启动，但必须记录 PID、持久 stdout/stderr、run tag 或产物路径
-- 长任务默认用 `Wait-Process -Id <pid> -Timeout 7200` 轮询；`7200` 秒是单轮最大等待上限，进程提前自然结束时必须立即返回并解析 progress、日志、summary、checkpoint 或评估产物
-- 固定 sleep 式轮询容易错过提前完成和混淆进程状态；长任务轮询必须绑定 PID、progress、日志、GPU/内存或最新产物时间戳，每轮状态必须计算已用时间和预计剩余时间，首个 progress 未出现或排障时才临时缩短 timeout
+- 长任务默认用 `Wait-Process -Id <pid> -Timeout 7200` 轮询；`7200` 秒是单轮前台等待窗口，不是任务执行超时，不是失败证据；进程提前自然结束时必须立即返回并解析 progress、日志、summary、checkpoint 或评估产物
+- 若单轮等待窗口耗尽但 PID 仍存活、日志或产物仍在推进，且没有明确代码错误、资源危险或用户停止指令，必须继续下一轮 PID 绑定轮询；不得停止进程、不得把窗口耗尽写成 failed evidence
+- 固定 sleep 式轮询容易错过提前完成和混淆进程状态；长任务轮询必须绑定 PID、progress、日志、GPU/内存或最新产物时间戳，每轮状态必须计算已用时间和预计剩余时间，首个 progress 未出现或排障时才临时缩短观察窗口
 - 当前 `daily_research` 任务必须显式使用 `yolos` 环境；GPU 训练任务完成后必须核验 `training_diagnostics.json` 中 `device = cuda`、`cuda_available = true` 与 `python_executable` 指向 yolos
 - 如果本机 skill 要求建 worktree、写 spec、提交或执行默认流程，但项目脑区要求 `main`、不提交、不触碰 active artifact，则先服从项目脑区安全边界。
 - 如果脑区和本机 skill 对“怎么做 TDD、调试、计划或验证”有重复描述，以本机 skill 为通用操作真源；脑区只记录本工作区和项目特例。
-- 自进化闭环：遇到 timeout、入口失败、残留进程、验证误选或其他可复现异常时，先定位根因并区分“慢 / 卡 / 失败 / 入口问题”；凡可修问题必须形成“记录经验 -> 工程修复 -> 防复发测试或验证调度”的闭环，不能只写聊天复盘，也不能把 timeout 直接当失败结论。
+- 自进化闭环：遇到 timeout、入口失败、残留进程、验证误选或其他可复现异常时，先定位根因并区分“时间没给足 / 慢 / 卡 / 失败 / 入口问题”；若证据表明只是时间没给足，应移除或绕开该限制并持续轮询；凡可修问题必须形成“记录经验 -> 工程修复 -> 防复发测试或验证调度”的闭环，不能只写聊天复盘，也不能把 timeout 直接当失败结论。
 - 可执行问题优先工程化：脑区记录原则和项目特例，代码或工具负责消除可重复踩坑的入口、验证选择和守卫缺口；若只能操作手动命令，必须写明安全匹配边界，避免误伤其他任务。
 
 ## 3. 当前长期边界

@@ -53,7 +53,8 @@
 - Protocol 是单次训练/评估/shadow/export 层，写 `protocol_summary.json`。
 - 若 `protocol_summary.json` 存在但 `study_summary.json` 缺失，只能记为 protocol-level evidence。
 - 后台运行建议只把整个 study 作为一个 OS 后台进程启动；study 内部仍保持 `protocol_runner_mode=in_process`，前台只轮询 progress / PID / logs / summaries。
-- 长训练或 study 的默认轮询实现为 `Start-Process -PassThru` 记录 PID，并用 `Wait-Process -Id <pid> -Timeout 7200` 等待；进程提前结束时立即返回，随后解析 progress、日志、summary、checkpoint 与评估产物。
+- 长训练或 study 的默认轮询实现为 `Start-Process -PassThru` 记录 PID，并用 `Wait-Process -Id <pid> -Timeout 7200` 等待；`7200` 秒只是单轮前台等待窗口，进程提前结束时立即返回，随后解析 progress、日志、summary、checkpoint 与评估产物。
+- 单轮等待窗口耗尽后，先查 PID、exit code、日志、progress、summary / checkpoint / artifact 时间戳；若进程仍在推进且没有明确代码错误、资源危险或用户停止指令，继续下一轮 `Wait-Process -Id <pid> -Timeout 7200`，不得停止任务或写成 failed evidence。
 
 ## Multi Horizon Utility 运行口径
 - 当前 path_policy 研究主线名：`alpha_multi_horizon_utility_policy_v1`，中文名为“多 Horizon 交易效用排序主线”。
@@ -82,7 +83,7 @@
 ## PathPolicy 执行异常处理口径
 - `test_forecast_dataset.py` 是慢集成测试，不是默认轻量合同测试；它的 synthetic fixture 会用 700/820/900 个交易日并走完整 feature、label、cumulative horizon 和 horizon risk 构造，单项可到分钟级。
 - 修改 forecast 相关代码时，默认先跑 selective verification 推荐的快速合同测试；完整 `test_forecast_dataset.py` 与 `test_forecast_training.py` 放入 `deferred_long_commands`，需要长验证、发布前检查或风险升高时再跑。
-- pytest timeout 后不得直接下失败结论；先查是否有本轮残留 pytest 进程，再单项复现慢测试，区分资源挤占、真实死锁、fixture 慢和代码失败。
+- pytest timeout 后不得直接下失败结论；先查是否有本轮残留 pytest 进程，再单项复现慢测试，区分时间没给足、资源挤占、真实死锁、fixture 慢和代码失败。
 - 手动清理残留进程只允许匹配本轮 pytest 命令行，只清理 pytest 子进程，不碰其他 Python 任务；示例：
   `Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -like '*pytest*daily_research/path_policy/tests/test_forecast_dataset.py*' }`
 - 如果确认要终止本轮残留 pytest，再对上述匹配结果执行 `Stop-Process -Id <ProcessId> -Force`；不要用泛化的 `Stop-Process python`。

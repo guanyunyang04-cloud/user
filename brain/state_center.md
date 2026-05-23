@@ -26,8 +26,8 @@
 - 分脑入口必须精炼；长过程、长命令和历史证据进入 `episodic_memory.md` 或 `brain/references/`。
 - 当前所有 `daily_research` 任务必须显式使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`。
 - 后续 agent 不得从 `H:\new_tdx64\PYPlugins\user` 接管本项目；旧路径只可能出现在历史 reference 或回滚说明中。
-- 训练、评估、审计、bounded study、confirmatory rerun 与执行任务必须受监管运行：允许用 `Start-Process -PassThru` 启动独立 OS 进程，但必须记录 PID、持久 stdout/stderr、run tag 或产物路径，并用 `Wait-Process -Id <pid> -Timeout 7200` 轮询。
-- 长任务禁止无 PID、无日志、无产物定位的脱管后台化；禁止用固定 sleep 替代 PID 绑定等待；每轮轮询必须报告已用时间和预计剩余时间，进程提前结束时立即解析产物。
+- 训练、评估、审计、bounded study、confirmatory rerun 与执行任务必须受监管运行：允许用 `Start-Process -PassThru` 启动独立 OS 进程，但必须记录 PID、持久 stdout/stderr、run tag 或产物路径，并用 `Wait-Process -Id <pid> -Timeout 7200` 轮询；`7200` 秒只是单轮前台等待窗口。
+- 长任务禁止无 PID、无日志、无产物定位的脱管后台化；禁止用固定 sleep 替代 PID 绑定等待；每轮轮询必须报告已用时间和预计剩余时间，进程提前结束时立即解析产物；窗口耗尽但 PID / 日志 / 产物仍推进时继续下一轮轮询，不中断任务。
 
 ## 当前边界
 - 主脑不得记录具体 trial 指标、训练 tag 长列表或局部实验命令；这些属于分脑。
@@ -39,7 +39,7 @@
 - 如果主脑继续追加日期日志，接管会重新退化为长文扫描。
 - 如果只改分脑、不改主脑，跨项目规则会再次漂移。
 - 如果兼容入口、README 或教程保留 brain 未收录的规则，后续 agent 会绕过中枢。
-- 如果长任务没有 PID、日志、progress、summary 或环境诊断可追溯，就不能写成正式证据。
+- 如果长任务没有 PID、日志、progress、summary 或环境诊断可追溯，就不能写成正式证据；如果只有前台等待窗口耗尽而没有代码错误证据，也不能写成失败证据。
 - 如果 agent 或脚本默认落到旧通达信插件 `user` 目录，先纠偏到 `H:\quant_project`，再继续操作。
 
 ## 推荐下一步

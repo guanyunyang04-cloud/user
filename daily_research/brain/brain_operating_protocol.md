@@ -35,6 +35,7 @@
 
 ## 证据规则
 - failed、interrupted、timeout、smoke、dry-run、diagnostic-only run 都不是 completed evidence。
+- timeout 首先表示外层等待或观察窗口耗尽；若 PID 仍存活、日志或产物仍在推进，且没有明确代码错误、资源危险或用户停止指令，必须继续轮询，不得把它写成 failed evidence。
 - forward outcome 未观测的 realtime tail label 不能写成 completed training evidence。
 - Full Gold 训练集声明必须引用已注册的 Gold data-lake dataset，并给出 row count、date range 和 label completeness。
 - active execution 变更需要未来明确 promotion authority；普通 research 必须保持 `daily_research/output/active_execution_strategy.json` 不变。
