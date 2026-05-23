@@ -8,7 +8,12 @@ import numpy as np
 import pandas as pd
 
 from daily_research.baseline.advanced_ml_runtime import HistoryWindow, load_raw_data_with_cache
-from daily_research.baseline.data_provider import get_latest_completed_trading_date, load_universe_from_tq
+from daily_research.baseline.data_provider import (
+    filter_a_share_universe,
+    get_latest_completed_trading_date,
+    load_cached_stock_name_map,
+    load_universe_from_tq,
+)
 
 DEFAULT_POOL_SIZES: tuple[int, ...] = (300, 500, 800)
 DEFAULT_SIGNAL_LOOKBACK_DAYS = 80
@@ -290,6 +295,14 @@ def build_liquidity_rankings(
 
     close_frame = raw_df_dict["Close"].copy()
     amount_frame = raw_df_dict["Amount"].copy()
+    tradeable_columns = filter_a_share_universe(
+        [str(column).strip().upper() for column in close_frame.columns],
+        universe_scope=universe_scope,
+        stock_name_map=load_cached_stock_name_map(),
+    )
+    if tradeable_columns:
+        close_frame = close_frame.reindex(columns=tradeable_columns)
+        amount_frame = amount_frame.reindex(columns=tradeable_columns)
     latest_date = close_frame.dropna(how="all").index.max()
     if pd.isna(latest_date):
         raise RuntimeError("No valid latest trading date found while building liquidity pool.")

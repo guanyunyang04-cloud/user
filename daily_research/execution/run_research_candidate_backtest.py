@@ -53,7 +53,7 @@ def main():
         resolved = apply_profile_defaults(
             candidate_profile,
             mode="backtest",
-            ensure_live_panels=not is_help_request(),
+            ensure_live_panels=False,
         )
         if not is_help_request():
             print(f"candidate_profile={resolved.name}")

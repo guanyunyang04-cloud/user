@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import type { DataSourcesPayload, ExecutionApi } from "../types";
-import { DataTable, ErrorState, Field, LoadingState, PageHeader, Panel, Stat } from "../components";
+import type { DataSourcesPayload, ExecutionApi, JobDetail } from "../types";
+import { DataTable, ErrorState, Field, LoadingState, PageHeader, Panel, Stat, StatusPill } from "../components";
 import { text } from "../format";
 
 interface DataPageProps {
   api: ExecutionApi;
+  pollMs?: number;
 }
 
-export function DataPage({ api }: DataPageProps): JSX.Element {
+export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
   const [payload, setPayload] = useState<DataSourcesPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -17,6 +18,9 @@ export function DataPage({ api }: DataPageProps): JSX.Element {
   const [universe, setUniverse] = useState("all_a");
   const [domains, setDomains] = useState("market_daily");
   const [jobMessage, setJobMessage] = useState("");
+  const [activeJobId, setActiveJobId] = useState("");
+  const [jobDetail, setJobDetail] = useState<JobDetail | null>(null);
+  const [jobError, setJobError] = useState("");
 
   const load = (): void => {
     setLoading(true);
@@ -42,6 +46,8 @@ export function DataPage({ api }: DataPageProps): JSX.Element {
 
   async function refresh(): Promise<void> {
     setJobMessage("");
+    setJobDetail(null);
+    setJobError("");
     try {
       const response = await api.refreshDataSources({
         as_of_date: asOfDate,
@@ -51,10 +57,47 @@ export function DataPage({ api }: DataPageProps): JSX.Element {
         force_unlock: false
       });
       setJobMessage(`已提交作业 ${response.job_id || ""} (${response.status})`);
+      setActiveJobId(response.job_id || "");
     } catch (err) {
       setJobMessage(err instanceof Error ? err.message : "提交失败");
     }
   }
+
+  useEffect(() => {
+    if (!activeJobId) {
+      return undefined;
+    }
+    let disposed = false;
+    let timer: number | undefined;
+    const loadJob = (): void => {
+      api
+        .getJob(activeJobId, 160)
+        .then((next) => {
+          if (disposed) {
+            return;
+          }
+          setJobDetail(next);
+          setJobError("");
+          if (["queued", "running"].includes(String(next.status || "").toLowerCase())) {
+            timer = window.setTimeout(loadJob, pollMs);
+          } else {
+            load();
+          }
+        })
+        .catch((err: Error) => {
+          if (!disposed) {
+            setJobError(err.message);
+          }
+        });
+    };
+    loadJob();
+    return () => {
+      disposed = true;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [api, activeJobId, pollMs]);
 
   return (
     <div>
@@ -85,6 +128,33 @@ export function DataPage({ api }: DataPageProps): JSX.Element {
         <button className="primary" onClick={refresh}>刷新数据</button>
         {jobMessage ? <p className="inline-message">{jobMessage}</p> : null}
       </Panel>
+      {activeJobId ? (
+        <Panel title="刷新进度" meta={jobDetail ? <StatusPill value={jobDetail.status} /> : null}>
+          {jobError ? <ErrorState message={jobError} /> : null}
+          {jobDetail ? (
+            <div className="job-detail">
+              <div className="key-list">
+                <span>Job ID</span>
+                <strong>{jobDetail.job_id}</strong>
+                <span>任务</span>
+                <strong>{jobDetail.task_name}</strong>
+              </div>
+              <div className="log-grid">
+                <div>
+                  <h3>stdout</h3>
+                  <pre>{jobDetail.stdout_tail.join("\n") || "-"}</pre>
+                </div>
+                <div>
+                  <h3>stderr</h3>
+                  <pre>{jobDetail.stderr_tail.join("\n") || "-"}</pre>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <LoadingState label="等待作业日志" />
+          )}
+        </Panel>
+      ) : null}
       <Panel title="Lake Datasets">
         <DataTable
           rows={(payload?.datasets || []).map((row) => ({ ...row }))}

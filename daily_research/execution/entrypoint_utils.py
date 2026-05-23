@@ -147,6 +147,7 @@ def ensure_default_pool_argument(*, pool_name: str = "", pool_size: int = 0) -> 
             data_source=data_source,
             lake_dataset_id=lake_dataset_id,
             data_lake_root=data_lake_root,
+            refresh_cache=False,
         )
     if not pool_file.exists() and not is_help_request():
         raise FileNotFoundError(
@@ -154,23 +155,38 @@ def ensure_default_pool_argument(*, pool_name: str = "", pool_size: int = 0) -> 
             "Please run daily_research/execution/update_liquid_pool.py after close first."
         )
     if pool_file.exists() and not is_help_request():
-        raw_stocks = [
-            line.strip().upper()
-            for line in pool_file.read_text(encoding="utf-8-sig").splitlines()
-            if line.strip()
-        ]
-        stock_name_map = load_cached_stock_name_map()
-        violations = find_universe_violations(
-            raw_stocks,
-            stock_name_map=stock_name_map if not stock_name_map.empty else None,
-        )
+        violations = _pool_file_violations(pool_file)
         if violations:
-            bad_examples = ", ".join(list(violations.keys())[:8])
-            raise ValueError(
-                "Default execution pool contains stocks outside the allowed trade universe "
-                f"(main-board SH/SZ A-shares only, excluding ST). Re-run update_liquid_pool.py. Examples: {bad_examples}"
+            pool_file = ensure_default_pool_file(
+                pool_size=resolved_pool_size,
+                data_source=data_source,
+                lake_dataset_id=lake_dataset_id,
+                data_lake_root=data_lake_root,
+                refresh_cache=True,
             )
+            violations = _pool_file_violations(pool_file)
+            if violations:
+                bad_examples = ", ".join(list(violations.keys())[:8])
+                raise ValueError(
+                    "Default execution pool contains stocks outside the allowed trade universe "
+                    f"(main-board SH/SZ A-shares only, excluding ST). Re-run update_liquid_pool.py. Examples: {bad_examples}"
+                )
     inject_default_arg("--stocks-file", str(pool_file))
+
+
+def _pool_file_violations(pool_file: Path) -> dict[str, str]:
+    from daily_research.baseline.data_provider import find_universe_violations, load_cached_stock_name_map
+
+    raw_stocks = [
+        line.strip().upper()
+        for line in pool_file.read_text(encoding="utf-8-sig").splitlines()
+        if line.strip()
+    ]
+    stock_name_map = load_cached_stock_name_map()
+    return find_universe_violations(
+        raw_stocks,
+        stock_name_map=stock_name_map if not stock_name_map.empty else None,
+    )
 
 
 def ensure_execution_strategy_defaults() -> None:

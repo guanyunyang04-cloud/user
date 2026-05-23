@@ -281,10 +281,12 @@ def create_app() -> FastAPI:
                 args.extend(["--start-date", request.start_date])
             if universe:
                 args.extend(["--universe", universe])
+            args.extend(["--provider-plan", app_service.FORMAL_DATA_PLATFORM_PROVIDER_PLAN])
             if domains:
                 args.extend(["--domains", ",".join(domains)])
             if request.advanced_args:
-                args.extend(app_service.parse_raw_args_text(request.advanced_args))
+                advanced_args = app_service.strip_execution_timeout_args(app_service.parse_raw_args_text(request.advanced_args))
+                args.extend(advanced_args)
             payload = app_service.launch_task_async(
                 task_name="data-platform-refresh",
                 passthrough_args=args,

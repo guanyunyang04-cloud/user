@@ -37,7 +37,16 @@ describe("DataPage", () => {
           }
         }
       }),
-      refreshDataSources: vi.fn().mockResolvedValue({ job_id: "job-data", status: "queued" })
+      refreshDataSources: vi.fn().mockResolvedValue({ job_id: "job-data", status: "queued" }),
+      getJob: vi.fn().mockResolvedValue({
+        job_id: "job-data",
+        task_name: "data-platform-refresh",
+        status: "running",
+        metadata: {},
+        stdout_tail: ["DataRefresh 4/8 Fetch provider domains"],
+        stderr_tail: [],
+        can_resume: false
+      })
     } as unknown as ExecutionApi;
 
     render(<DataPage api={api} />);
@@ -56,5 +65,6 @@ describe("DataPage", () => {
         force_unlock: false
       });
     });
+    expect(await screen.findByText("DataRefresh 4/8 Fetch provider domains")).toBeInTheDocument();
   });
 });

@@ -214,7 +214,22 @@ class ResearchDataLake:
             else:
                 out[key] = value
         out["label_completeness_summary"] = out.pop("label_completeness", {})
+        if isinstance(out.get("content_paths"), dict):
+            out["content_paths"] = self._resolve_content_paths(dict(out["content_paths"]))
         return out
+
+    def _resolve_content_paths(self, content_paths: dict[str, Any]) -> dict[str, str]:
+        resolved: dict[str, str] = {}
+        marker = "research_data_lake"
+        for key, value in content_paths.items():
+            raw = str(value or "")
+            if raw and not Path(raw.replace("*", "")).exists() and marker in raw:
+                suffix = raw.split(marker, 1)[1].lstrip("\\/")
+                candidate = str((self.root / Path(suffix)).resolve())
+                if "*" in raw or Path(candidate).exists():
+                    raw = candidate
+            resolved[str(key)] = raw
+        return resolved
 
     def build_catalog_manifest(self) -> dict[str, Any]:
         rows = self.list_datasets()

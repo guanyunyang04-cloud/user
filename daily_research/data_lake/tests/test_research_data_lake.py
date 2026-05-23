@@ -1,4 +1,5 @@
 import unittest
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
@@ -205,6 +206,48 @@ class ResearchDataLakeTest(unittest.TestCase):
         pd.testing.assert_frame_equal(prepared.close, close)
         self.assertEqual(prepared.raw_cache_meta["source"], "data_lake")
         self.assertIn("score_blend_lag1", prepared.derived_frames)
+
+    def test_loader_resolves_relocated_lake_content_paths(self) -> None:
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
+        market_frames, membership_frame, feature_frames = _synthetic_policy_bundle_parts(dates)
+        feature_frames.update(
+            {
+                "ret_1d": market_frames["Close"].pct_change(),
+                "score_delta_1d": market_frames["Close"] * 0.0,
+                "score_blend_lag1": market_frames["Close"].shift(1) * 0.0,
+            }
+        )
+        benchmark_close = pd.Series([4000.0, 4010.0, 4020.0], index=dates, name="000300.SH")
+
+        with TemporaryDirectory() as temp_dir:
+            lake = ResearchDataLake(Path(temp_dir))
+            record = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic"},
+                market_frames=market_frames,
+                benchmark_close=benchmark_close,
+                membership_frame=membership_frame,
+                feature_frames=feature_frames,
+                source="synthetic",
+            )
+            metadata = lake.describe_dataset(record.dataset_id)
+            stale_paths = {
+                key: str(value).replace(str(Path(temp_dir)), r"H:\old_project\daily_research\output\research_data_lake")
+                for key, value in metadata["content_paths"].items()
+            }
+            lake.query(
+                "update datasets set content_paths_json = ? where dataset_id = ?",
+                [json.dumps(stale_paths), record.dataset_id],
+            )
+
+            prepared = load_policy_inputs_from_lake(
+                lake=lake,
+                dataset_id=record.dataset_id,
+                start_date="2026-01-05",
+                end_date="2026-01-07",
+            )
+
+        self.assertEqual(prepared.raw_cache_meta["dataset_id"], record.dataset_id)
+        pd.testing.assert_frame_equal(prepared.close, market_frames["Close"])
 
     def test_market_bundle_persists_benchmark_open_and_loader_uses_it(self) -> None:
         dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])

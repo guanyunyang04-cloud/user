@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import csv
+import contextlib
 import importlib.util
 import json
+import os
+import runpy
 import shlex
-import subprocess
 import sys
 import threading
+import traceback
 import time
 from datetime import datetime
 from pathlib import Path
@@ -34,8 +37,10 @@ from daily_research.execution.app_runtime import (
     mark_job_finished,
     mark_job_heartbeat,
     mark_job_started,
+    now_iso,
     read_json_file,
     tail_file,
+    update_job_metadata,
 )
 from daily_research.execution.app_tasks import (
     build_task_command,
@@ -58,10 +63,8 @@ FORMAL_DATA_PLATFORM_DOMAINS: tuple[str, ...] = (
     "trading_calendar",
     "universe_snapshot",
     "security_status",
-    "limit_status",
-    "industry_concept",
-    "valuation",
 )
+FORMAL_DATA_PLATFORM_PROVIDER_PLAN = "baostock_only"
 _ACTIVE_JOB_THREADS: dict[str, threading.Thread] = {}
 _ACTIVE_JOB_THREADS_LOCK = threading.Lock()
 
@@ -70,7 +73,7 @@ def sanitize_passthrough_args(values: list[str] | None) -> list[str]:
     items = [str(item) for item in (values or [])]
     if items[:1] == ["--"]:
         items = items[1:]
-    return items
+    return strip_execution_timeout_args(items)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -283,13 +286,43 @@ def _latest_trade_plan_run_dir(output_dir: Path) -> Path | None:
     return max(candidates, key=lambda item: item.stat().st_mtime)
 
 
+def _normalize_trade_plan_model_info(summary: dict[str, Any]) -> dict[str, Any]:
+    freshness = summary.get("model_freshness") if isinstance(summary.get("model_freshness"), dict) else {}
+    model_info = dict(freshness)
+    if summary.get("production_model_train_end_date"):
+        model_info.setdefault("train_end_date", str(summary.get("production_model_train_end_date", "")))
+        model_info.setdefault("artifact_latest_data_date", str(summary.get("production_model_train_end_date", "")))
+    if summary.get("production_model_launch_cutoff_date"):
+        model_info.setdefault("launch_cutoff_date", str(summary.get("production_model_launch_cutoff_date", "")))
+    if summary.get("signal_date"):
+        model_info.setdefault("signal_date", str(summary.get("signal_date", "")))
+        model_info.setdefault("latest_completed_trading_date", str(summary.get("signal_date", "")))
+    trading_day_lag = (
+        summary.get("production_model_trading_day_lag")
+        if summary.get("production_model_trading_day_lag") is not None
+        else summary.get("production_model_retrain_trading_day_lag")
+    )
+    if trading_day_lag is not None:
+        model_info.setdefault("trading_day_lag", trading_day_lag)
+    status = str(summary.get("production_model_status", "") or summary.get("production_model_retrain_status", "") or "")
+    if status:
+        model_info.setdefault("status", status)
+        model_info.setdefault("status_text", status)
+    return model_info
+
+
 def latest_trade_plan_summary(
     *,
     max_lines: int = 80,
     output_dir: Path | str | None = None,
     latest_txt_path: Path | str | None = None,
 ) -> dict[str, Any]:
-    resolved_output_dir = Path(output_dir) if output_dir is not None else EXECUTION_DIR / "output"
+    if output_dir is not None:
+        resolved_output_dir = Path(output_dir)
+    elif latest_txt_path is not None:
+        resolved_output_dir = Path(latest_txt_path).parent
+    else:
+        resolved_output_dir = EXECUTION_DIR / "output"
     resolved_latest_txt = Path(latest_txt_path) if latest_txt_path is not None else resolved_output_dir / "latest_trade_plan.txt"
     run_dir = _latest_trade_plan_run_dir(resolved_output_dir)
     summary_path = run_dir / "plan_summary.json" if run_dir is not None else None
@@ -299,7 +332,7 @@ def latest_trade_plan_summary(
     txt_path = resolved_latest_txt if resolved_latest_txt.exists() else (run_dir / "daily_trade_plan.txt" if run_dir is not None else resolved_latest_txt)
     lines = tail_file(txt_path, lines=max_lines) if txt_path.exists() else []
     summary = _read_json(summary_path) if summary_path is not None and summary_path.exists() else {}
-    model_info = summary.get("model_freshness") if isinstance(summary.get("model_freshness"), dict) else {}
+    model_info = _normalize_trade_plan_model_info(summary)
     return {
         "path": str(txt_path.resolve()),
         "exists": txt_path.exists(),
@@ -504,17 +537,122 @@ def data_sources_summary(*, dataset_limit: int = 60) -> dict[str, Any]:
         "data_platform": {
             "runs_root": str(platform_runs.resolve()),
             "latest_refresh_run": latest_refresh,
-            "provider_plan": "default_free",
+            "provider_plan": FORMAL_DATA_PLATFORM_PROVIDER_PLAN,
             "latest_completed_trading_date": latest_completed,
             "recommended_domains": recommended_domains,
             "default_refresh": {
                 "as_of_date": latest_completed,
                 "universe": "all_a",
                 "domains": recommended_domains,
-                "provider_plan": "default_free",
+                "provider_plan": FORMAL_DATA_PLATFORM_PROVIDER_PLAN,
             },
         },
     }
+
+
+def _select_latest_policy_input_lake_dataset(frame: Any) -> dict[str, Any]:
+    import pandas as pd
+
+    if frame is None or getattr(frame, "empty", True):
+        return {}
+    filtered = frame.copy()
+    if "dataset_kind" in filtered.columns:
+        filtered = filtered.loc[filtered["dataset_kind"].astype(str).eq("policy_input_bundle")].copy()
+    if "dataset_id" in filtered.columns:
+        filtered = filtered.loc[filtered["dataset_id"].astype(str).str.startswith("policy_input_bundle__")].copy()
+    if "status" in filtered.columns:
+        status = filtered["status"].astype(str).str.lower()
+        filtered = filtered.loc[~status.isin({"blocked", "failed", "error"})].copy()
+    if filtered.empty:
+        return {}
+    filtered["_end_date_sort"] = pd.to_datetime(filtered.get("end_date", ""), errors="coerce")
+    filtered["_created_at_sort"] = pd.to_datetime(filtered.get("created_at", ""), errors="coerce")
+    filtered = filtered.sort_values(["_end_date_sort", "_created_at_sort", "dataset_id"], ascending=[False, False, False])
+    row = filtered.iloc[0].to_dict()
+    return {
+        "dataset_id": str(row.get("dataset_id", "") or ""),
+        "end_date": str(row.get("end_date", "") or ""),
+        "start_date": str(row.get("start_date", "") or ""),
+        "created_at": str(row.get("created_at", "") or ""),
+        "source": str(row.get("source", "") or ""),
+        "status": str(row.get("status", "") or ""),
+    }
+
+
+def _latest_policy_input_lake_dataset(lake_root: Path | str | None = None) -> dict[str, Any]:
+    from daily_research.data_lake import DEFAULT_DATA_LAKE_ROOT, ResearchDataLake
+
+    lake = ResearchDataLake(lake_root or DEFAULT_DATA_LAKE_ROOT)
+    frame = lake.list_datasets(dataset_kind="policy_input_bundle")
+    return _select_latest_policy_input_lake_dataset(frame)
+
+
+def sync_active_manifest_to_latest_lake_dataset(
+    *,
+    reason: str = "",
+    refresh_manifest_path: str = "",
+    lake_root: Path | str | None = None,
+) -> dict[str, Any]:
+    payload = _read_json(ACTIVE_MANIFEST_PATH)
+    if not payload:
+        raise FileNotFoundError(f"active execution strategy manifest 缺失：{ACTIVE_MANIFEST_PATH}")
+    latest = _latest_policy_input_lake_dataset(lake_root=lake_root)
+    dataset_id = str(latest.get("dataset_id", "") or "").strip()
+    if not dataset_id:
+        raise ValueError("未找到可用的 policy_input_bundle lake dataset。")
+    previous_dataset_id = str(payload.get("lake_dataset_id", "") or payload.get("source_market_dataset_id", "") or "").strip()
+    payload["data_source"] = "lake"
+    payload["lake_dataset_id"] = dataset_id
+    payload["source_market_dataset_id"] = dataset_id
+    payload["data_lake_root"] = str((Path(lake_root) if lake_root is not None else PROJECT_ROOT / "output" / "research_data_lake").resolve())
+    if latest.get("end_date"):
+        payload["lake_dataset_end_date"] = str(latest.get("end_date", ""))
+    if latest.get("start_date"):
+        payload["lake_dataset_start_date"] = str(latest.get("start_date", ""))
+    if latest.get("created_at"):
+        payload["lake_dataset_created_at"] = str(latest.get("created_at", ""))
+    payload["latest_data_refresh_synced_at"] = now_iso()
+    payload["latest_data_refresh_sync_reason"] = str(reason or "manual")
+    if refresh_manifest_path:
+        payload["latest_data_refresh_manifest"] = str(Path(refresh_manifest_path).resolve())
+    temp_path = ACTIVE_MANIFEST_PATH.with_suffix(ACTIVE_MANIFEST_PATH.suffix + ".tmp")
+    temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path.replace(ACTIVE_MANIFEST_PATH)
+    result = {
+        "status": "ok",
+        "updated": dataset_id != previous_dataset_id,
+        "previous_dataset_id": previous_dataset_id,
+        "dataset_id": dataset_id,
+        "end_date": str(latest.get("end_date", "") or ""),
+        "manifest_path": str(ACTIVE_MANIFEST_PATH.resolve()),
+        "refresh_manifest_path": str(Path(refresh_manifest_path).resolve()) if refresh_manifest_path else "",
+    }
+    append_event("active_manifest_lake_dataset_synced", reason=str(reason or ""), **result)
+    return result
+
+
+def _latest_refresh_manifest_path() -> str:
+    runs_root = PROJECT_ROOT / "output" / "research_data_lake" / "data_platform" / "runs"
+    if not runs_root.exists():
+        return ""
+    candidates = [path / "refresh_manifest.json" for path in runs_root.iterdir() if path.is_dir() and (path / "refresh_manifest.json").exists()]
+    if not candidates:
+        return ""
+    latest = max(candidates, key=lambda item: item.stat().st_mtime)
+    return str(latest.resolve())
+
+
+def _post_process_successful_task(*, job_paths: Any, task_name: str, summary_note: str) -> tuple[str, dict[str, Any]]:
+    if task_name != "data-platform-refresh":
+        return summary_note, {}
+    refresh_manifest_path = _latest_refresh_manifest_path()
+    update = sync_active_manifest_to_latest_lake_dataset(
+        reason=task_name,
+        refresh_manifest_path=refresh_manifest_path,
+    )
+    note = f"{summary_note} active manifest lake_dataset_id={update.get('dataset_id', '')}"
+    update_job_metadata(job_paths, active_manifest_update=update)
+    return note, {"active_manifest_update": update}
 
 
 def save_account_snapshot(
@@ -581,6 +719,7 @@ def reset_account_snapshot_from_example(
 
 def build_status_payload(*, history_limit: int = 8) -> dict[str, Any]:
     ensure_runtime_layout()
+    _mark_abandoned_jobs()
     state = load_runtime_state()
     lock_payload = _read_json(LOCK_PATH)
     recent_jobs = list_recent_job_metadata(limit=history_limit)
@@ -613,6 +752,27 @@ def build_status_payload(*, history_limit: int = 8) -> dict[str, Any]:
         "warnings": warnings,
         "updated_at": state.get("updated_at", ""),
     }
+
+
+def _mark_abandoned_jobs(limit: int = 50) -> None:
+    lock_payload = _read_json(LOCK_PATH)
+    locked_job_id = str(lock_payload.get("job_id", "") or "") if lock_payload else ""
+    active_thread_ids = set(list_active_thread_job_ids())
+    for metadata in list_recent_job_metadata(limit=limit):
+        status = str(metadata.get("status", "") or "")
+        job_id = str(metadata.get("job_id", "") or "")
+        if status not in {"queued", "running"}:
+            continue
+        if job_id and (job_id == locked_job_id or job_id in active_thread_ids):
+            continue
+        job_paths = type("JobPathsRef", (), {"metadata_path": JOBS_ROOT / job_id / "metadata.json"})()
+        update_job_metadata(
+            job_paths,
+            status="abandoned",
+            completed_at=now_iso(),
+            exit_code=3,
+            summary_note="旧任务未持有运行时锁或活跃线程，已标记为 abandoned。",
+        )
 
 
 def build_doctor_payload() -> dict[str, Any]:
@@ -682,31 +842,6 @@ def resolve_resume_metadata(job_id: str = "") -> dict[str, Any]:
     raise FileNotFoundError("没有找到可恢复的失败或阻塞作业。")
 
 
-def _pump_stream(
-    *,
-    process_stream,
-    target_handle,
-    console_stream: TextIO | None,
-    stream_name: str,
-    job_paths,
-    heartbeat_interval_seconds: float = 2.0,
-) -> None:
-    last_heartbeat = 0.0
-    try:
-        for raw_line in iter(process_stream.readline, ""):
-            target_handle.write(raw_line)
-            target_handle.flush()
-            if console_stream is not None:
-                console_stream.write(raw_line)
-                console_stream.flush()
-            now = time.monotonic()
-            if now - last_heartbeat >= heartbeat_interval_seconds:
-                mark_job_heartbeat(job_paths, stream_name=stream_name, line=raw_line)
-                last_heartbeat = now
-    finally:
-        process_stream.close()
-
-
 def _run_existing_job(
     *,
     job_paths,
@@ -724,51 +859,27 @@ def _run_existing_job(
     status = "failed"
     summary_note = ""
     try:
+        post_process_metadata: dict[str, Any] = {}
         with ExecutionAppLock(job_id=job_paths.job_id, task_name=task_name, force=force_unlock) as lock:
             mark_job_started(job_paths, lock_payload=lock.payload)
             with job_paths.stdout_path.open("w", encoding="utf-8") as stdout_handle:
                 with job_paths.stderr_path.open("w", encoding="utf-8") as stderr_handle:
-                    process = subprocess.Popen(
-                        command,
-                        cwd=str(WORKSPACE_ROOT),
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
-                        bufsize=1,
+                    exit_code = _run_command_in_current_process(
+                        command=command,
+                        stdout_handle=stdout_handle,
+                        stderr_handle=stderr_handle,
+                        console_stdout=sys.stdout if echo_output else None,
+                        console_stderr=sys.stderr if echo_output else None,
+                        job_paths=job_paths,
                     )
-                    threads = [
-                        threading.Thread(
-                            target=_pump_stream,
-                            kwargs={
-                                "process_stream": process.stdout,
-                                "target_handle": stdout_handle,
-                                "console_stream": sys.stdout if echo_output else None,
-                                "stream_name": "stdout",
-                                "job_paths": job_paths,
-                            },
-                            daemon=True,
-                        ),
-                        threading.Thread(
-                            target=_pump_stream,
-                            kwargs={
-                                "process_stream": process.stderr,
-                                "target_handle": stderr_handle,
-                                "console_stream": sys.stderr if echo_output else None,
-                                "stream_name": "stderr",
-                                "job_paths": job_paths,
-                            },
-                            daemon=True,
-                        ),
-                    ]
-                    for thread in threads:
-                        thread.start()
-                    exit_code = int(process.wait())
-                    for thread in threads:
-                        thread.join()
             status = "succeeded" if exit_code == 0 else "failed"
             summary_note = spec.description
+            if status == "succeeded":
+                summary_note, post_process_metadata = _post_process_successful_task(
+                    job_paths=job_paths,
+                    task_name=task_name,
+                    summary_note=summary_note,
+                )
     except ExecutionAppLockError as exc:
         summary_note = str(exc)
         exit_code = 2
@@ -779,6 +890,8 @@ def _run_existing_job(
         status = "failed"
     finally:
         metadata = mark_job_finished(job_paths, status=status, exit_code=exit_code, summary_note=summary_note)
+        if post_process_metadata:
+            metadata.update(post_process_metadata)
         with _ACTIVE_JOB_THREADS_LOCK:
             _ACTIVE_JOB_THREADS.pop(job_paths.job_id, None)
     return {
@@ -794,6 +907,85 @@ def _run_existing_job(
         "passthrough_args": passthrough_args,
         "python_executable": python_executable,
     }
+
+
+class _TeeTextIO:
+    def __init__(self, *handles: TextIO | None, heartbeat: Any | None = None) -> None:
+        self._handles = [handle for handle in handles if handle is not None]
+        self._heartbeat = heartbeat
+        self._buffer = ""
+
+    def write(self, text: str) -> int:
+        value = str(text)
+        for handle in self._handles:
+            handle.write(value)
+            handle.flush()
+        self._buffer += value
+        while "\n" in self._buffer or "\r" in self._buffer:
+            newline_pos = self._buffer.find("\n")
+            carriage_pos = self._buffer.find("\r")
+            positions = [pos for pos in (newline_pos, carriage_pos) if pos >= 0]
+            split_pos = min(positions)
+            line = self._buffer[:split_pos]
+            self._buffer = self._buffer[split_pos + 1 :]
+            if self._heartbeat is not None and line.strip():
+                try:
+                    self._heartbeat(line)
+                except Exception:
+                    pass
+        return len(value)
+
+    def flush(self) -> None:
+        for handle in self._handles:
+            handle.flush()
+
+
+def _run_command_in_current_process(
+    *,
+    command: list[str],
+    stdout_handle: TextIO,
+    stderr_handle: TextIO,
+    console_stdout: TextIO | None,
+    console_stderr: TextIO | None,
+    job_paths: Any | None = None,
+) -> int:
+    if len(command) < 2:
+        raise ValueError("command must contain python executable and script path")
+    script_path = Path(command[1]).resolve()
+    argv = [str(script_path), *[str(item) for item in command[2:]]]
+    old_argv = sys.argv[:]
+    old_cwd = Path.cwd()
+    sys.argv = argv
+    stdout_tee = _TeeTextIO(
+        stdout_handle,
+        console_stdout,
+        heartbeat=(lambda line: mark_job_heartbeat(job_paths, stream_name="stdout", line=line)) if job_paths is not None else None,
+    )
+    stderr_tee = _TeeTextIO(
+        stderr_handle,
+        console_stderr,
+        heartbeat=(lambda line: mark_job_heartbeat(job_paths, stream_name="stderr", line=line)) if job_paths is not None else None,
+    )
+    try:
+        os.chdir(WORKSPACE_ROOT)
+        with contextlib.redirect_stdout(stdout_tee), contextlib.redirect_stderr(stderr_tee):
+            try:
+                runpy.run_path(str(script_path), run_name="__main__")
+                return 0
+            except SystemExit as exc:
+                code = exc.code
+                if code is None:
+                    return 0
+                if isinstance(code, int):
+                    return int(code)
+                print(str(code), file=sys.stderr)
+                return 1
+            except BaseException:
+                traceback.print_exc()
+                return 1
+    finally:
+        sys.argv = old_argv
+        os.chdir(old_cwd)
 
 
 def run_task_sync(
@@ -889,9 +1081,10 @@ def resume_task_sync(
     if not command:
         raise ValueError(f"作业 {metadata.get('job_id', '')} 不包含 command_argv。")
     task_name = str(metadata.get("task_name", "") or "resumed_job")
-    passthrough_args = [str(item) for item in metadata.get("passthrough_args", []) if str(item).strip()]
+    passthrough_args = strip_execution_timeout_args([str(item) for item in metadata.get("passthrough_args", []) if str(item).strip()])
     python_executable = resolve_project_python_executable(str(metadata.get("python_executable", "") or command[0]))
     command[0] = python_executable
+    command = [command[0], command[1], *strip_execution_timeout_args(command[2:])] if len(command) > 2 else command
     effective_job_label = str(job_label or f"resume:{metadata.get('job_id', '')}")
     job_paths = create_job_record(
         task_name=task_name,
@@ -926,9 +1119,10 @@ def resume_task_async(
     if not command:
         raise ValueError(f"作业 {metadata.get('job_id', '')} 不包含 command_argv。")
     task_name = str(metadata.get("task_name", "") or "resumed_job")
-    passthrough_args = [str(item) for item in metadata.get("passthrough_args", []) if str(item).strip()]
+    passthrough_args = strip_execution_timeout_args([str(item) for item in metadata.get("passthrough_args", []) if str(item).strip()])
     python_executable = resolve_project_python_executable(str(metadata.get("python_executable", "") or command[0]))
     command[0] = python_executable
+    command = [command[0], command[1], *strip_execution_timeout_args(command[2:])] if len(command) > 2 else command
     effective_job_label = str(job_label or f"resume:{metadata.get('job_id', '')}")
     job_paths = create_job_record(
         task_name=task_name,
@@ -985,6 +1179,24 @@ def parse_raw_args_text(raw_args_text: str) -> list[str]:
     if not text:
         return []
     return [str(item) for item in shlex.split(text, posix=False)]
+
+
+def strip_execution_timeout_args(values: list[str] | tuple[str, ...] | None) -> list[str]:
+    items = [str(item) for item in (values or [])]
+    stripped: list[str] = []
+    skip_next = False
+    for item in items:
+        if skip_next:
+            skip_next = False
+            continue
+        normalized = str(item or "").strip().lower()
+        if normalized in {"--timeout", "--timeout-seconds", "--timeout_seconds"}:
+            skip_next = True
+            continue
+        if normalized.startswith(("--timeout=", "--timeout-seconds=", "--timeout_seconds=")):
+            continue
+        stripped.append(item)
+    return stripped
 
 
 def build_passthrough_args_from_form(

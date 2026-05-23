@@ -1,6 +1,8 @@
 import unittest
 from unittest import mock
 from pathlib import Path
+import subprocess
+import sys
 
 from daily_research.baseline import data_provider
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
@@ -54,6 +56,20 @@ class TdxFreeGuardTest(unittest.TestCase):
             get_latest_completed_trading_date(reference_ts="2026-05-24 20:00"),
             "2026-05-22",
         )
+
+    def test_refresh_daily_script_help_bootstraps_project_imports(self) -> None:
+        repo_root = Path(__file__).resolve().parents[3]
+        script = repo_root / "daily_research" / "data_platform" / "refresh_daily.py"
+
+        result = subprocess.run(
+            [sys.executable, str(script), "--help"],
+            cwd=str(repo_root),
+            text=True,
+            capture_output=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--as-of-date", result.stdout)
 
     def test_legacy_tq_import_is_disabled_without_explicit_environment_flag(self) -> None:
         with mock.patch.dict("os.environ", {"DAILY_RESEARCH_ALLOW_TDX_FAMILY": ""}, clear=False):

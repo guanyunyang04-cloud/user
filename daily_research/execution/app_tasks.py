@@ -126,10 +126,10 @@ TASK_SPECS: tuple[ExecutionTaskSpec, ...] = (
     ExecutionTaskSpec(
         name="data-platform-refresh",
         script_relative_path="daily_research/data_platform/refresh_daily.py",
-        description="显式刷新 TDX-free data platform 并注册 lake dataset。",
+        description="显式刷新 TDX-free data platform，注册 lake dataset，并把当前执行 manifest 接到最新 policy_input_bundle。",
         category="data_platform",
         safety_level="caution",
-        safety_summary="只刷新研究数据湖，不改写 active execution manifest。",
+        safety_summary="刷新研究数据湖；成功后只更新 active execution manifest 的 lake dataset 指针，不触发重训或 promotion。",
     ),
     ExecutionTaskSpec(
         name="refresh-production-static-fallback",

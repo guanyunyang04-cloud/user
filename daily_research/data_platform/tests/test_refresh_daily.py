@@ -6,54 +6,37 @@ from tempfile import TemporaryDirectory
 import pandas as pd
 
 from daily_research.data_lake import ResearchDataLake, load_policy_inputs_from_lake
-from daily_research.data_platform.contracts import DataDomain, DomainFetchRequest, FetchRequest
+from daily_research.data_platform.contracts import DataDomain, DomainFetchRequest, FetchRequest, ProviderResult
 from daily_research.data_platform.manager import InMemoryDomainProvider, InMemoryMarketProvider
-from daily_research.data_platform.refresh_daily import RefreshConfig, run_refresh
+from daily_research.data_platform.refresh_daily import RefreshConfig, build_parser, run_refresh
 
 
-def _market_frame(*, dates: list[str], provider: str, close_offset: float = 0.0) -> pd.DataFrame:
+def _market_frame(*, dates: list[str], provider: str, close_offset: float = 0.0, symbols: list[str] | None = None) -> pd.DataFrame:
+    requested_symbols = symbols or ["000001.SZ", "600000.SH", "000300.SH"]
+    values = {
+        "000001.SZ": (10.0, 10.5, 9.8, 10.2 + close_offset, 1000, 10200),
+        "600000.SH": (20.0, 20.5, 19.8, 20.2 + close_offset, 2000, 40400),
+        "000300.SH": (4000.0, 4010.0, 3990.0, 4005.0 + close_offset, 3000, 12015000),
+        "300001.SZ": (30.0, 30.5, 29.8, 30.2 + close_offset, 3000, 90600),
+    }
     rows = []
     for trade_date in dates:
-        rows.extend(
-            [
+        for symbol in requested_symbols:
+            open_, high, low, close, volume, amount = values[symbol]
+            rows.append(
                 {
-                    "symbol": "000001.SZ",
+                    "symbol": symbol,
                     "trade_date": trade_date,
-                    "open": 10.0,
-                    "high": 10.5,
-                    "low": 9.8,
-                    "close": 10.2 + close_offset,
-                    "volume": 1000,
-                    "amount": 10200,
+                    "open": open_,
+                    "high": high,
+                    "low": low,
+                    "close": close,
+                    "volume": volume,
+                    "amount": amount,
                     "source": provider,
                     "adjusted_flag": "none",
-                },
-                {
-                    "symbol": "600000.SH",
-                    "trade_date": trade_date,
-                    "open": 20.0,
-                    "high": 20.5,
-                    "low": 19.8,
-                    "close": 20.2 + close_offset,
-                    "volume": 2000,
-                    "amount": 40400,
-                    "source": provider,
-                    "adjusted_flag": "none",
-                },
-                {
-                    "symbol": "000300.SH",
-                    "trade_date": trade_date,
-                    "open": 4000.0,
-                    "high": 4010.0,
-                    "low": 3990.0,
-                    "close": 4005.0 + close_offset,
-                    "volume": 3000,
-                    "amount": 12015000,
-                    "source": provider,
-                    "adjusted_flag": "none",
-                },
-            ]
-        )
+                }
+            )
     return pd.DataFrame(rows)
 
 
@@ -68,18 +51,25 @@ def _calendar_frame(*, dates: list[str], provider: str) -> pd.DataFrame:
     )
 
 
-def _universe_frame(*, provider: str, trade_date: str = "2026-01-05") -> pd.DataFrame:
+def _universe_frame(*, provider: str, trade_date: str = "2026-01-05", symbols: list[str] | None = None) -> pd.DataFrame:
+    requested_symbols = symbols or ["000001.SZ", "600000.SH", "000300.SH"]
+    names = {
+        "000001.SZ": "平安银行",
+        "600000.SH": "浦发银行",
+        "000300.SH": "沪深300",
+        "300001.SZ": "特锐德",
+    }
     return pd.DataFrame(
         {
-            "symbol": ["000001.SZ", "600000.SH", "000300.SH"],
-            "trade_date": [trade_date, trade_date, trade_date],
-            "name": ["平安银行", "浦发银行", "沪深300"],
-            "exchange": ["SZ", "SH", "SH"],
-            "board": ["main", "main", "index"],
-            "list_status": ["L", "L", "L"],
-            "list_date": ["1991-04-03", "1999-11-10", "2005-04-08"],
-            "delist_date": ["", "", ""],
-            "source": [provider, provider, provider],
+            "symbol": requested_symbols,
+            "trade_date": [trade_date] * len(requested_symbols),
+            "name": [names.get(symbol, symbol) for symbol in requested_symbols],
+            "exchange": ["SH" if symbol.endswith(".SH") else "SZ" for symbol in requested_symbols],
+            "board": ["index" if symbol == "000300.SH" else "main" for symbol in requested_symbols],
+            "list_status": ["L"] * len(requested_symbols),
+            "list_date": ["2005-04-08" if symbol == "000300.SH" else "1991-04-03" for symbol in requested_symbols],
+            "delist_date": [""] * len(requested_symbols),
+            "source": [provider] * len(requested_symbols),
         }
     )
 
@@ -171,6 +161,22 @@ def _valuation_frame(*, provider: str, dates: list[str]) -> pd.DataFrame:
 
 
 class DataPlatformRefreshDailyTest(unittest.TestCase):
+    def test_refresh_cli_does_not_expose_execution_timeout_flag(self) -> None:
+        parser = build_parser()
+        self.assertNotIn("--timeout-seconds", parser.format_help())
+
+        with self.assertRaises(SystemExit):
+            parser.parse_args(
+                [
+                    "--as-of-date",
+                    "2026-01-05",
+                    "--symbols",
+                    "000001.SZ,000300.SH",
+                    "--timeout-seconds",
+                    "1",
+                ]
+            )
+
     def test_first_refresh_writes_bronze_silver_manifest_and_lake_bundle(self) -> None:
         with TemporaryDirectory() as temp_dir:
             provider = InMemoryMarketProvider(
@@ -245,6 +251,55 @@ class DataPlatformRefreshDailyTest(unittest.TestCase):
         self.assertEqual(last_request.start_date, "2026-01-07")
         self.assertEqual(last_request.end_date, "2026-01-07")
 
+    def test_incremental_refresh_registers_extended_long_history_bundle(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            provider = InMemoryMarketProvider(
+                "eastmoney_efinance",
+                _market_frame(
+                    dates=["2026-01-05", "2026-01-06", "2026-01-07"],
+                    provider="eastmoney_efinance",
+                ),
+            )
+            first = run_refresh(
+                RefreshConfig(
+                    lake_root=Path(temp_dir),
+                    as_of_date="2026-01-06",
+                    start_date="2026-01-05",
+                    symbols=("000001.SZ", "600000.SH", "000300.SH"),
+                    benchmark="000300.SH",
+                ),
+                providers=[provider],
+            )
+            self.assertEqual(first.status, "ok")
+
+            second = run_refresh(
+                RefreshConfig(
+                    lake_root=Path(temp_dir),
+                    as_of_date="2026-01-07",
+                    start_date="2026-01-05",
+                    symbols=("000001.SZ", "600000.SH", "000300.SH"),
+                    benchmark="000300.SH",
+                ),
+                providers=[provider],
+            )
+
+            lake = ResearchDataLake(Path(temp_dir))
+            metadata = lake.describe_dataset(second.registered_market_dataset_id)
+            prepared = load_policy_inputs_from_lake(
+                lake=lake,
+                dataset_id=second.registered_market_dataset_id,
+                start_date="2026-01-05",
+                end_date="2026-01-07",
+                benchmark="000300.SH",
+                min_trading_days=3,
+            )
+
+        self.assertEqual(second.status, "ok")
+        self.assertEqual(metadata["start_date"], "2026-01-05")
+        self.assertEqual(metadata["end_date"], "2026-01-07")
+        self.assertEqual(len(prepared.close), 3)
+        self.assertEqual(prepared.close.index.max().strftime("%Y-%m-%d"), "2026-01-07")
+
     def test_incremental_refresh_does_not_reuse_history_for_different_universe(self) -> None:
         with TemporaryDirectory() as temp_dir:
             provider = InMemoryMarketProvider(
@@ -281,6 +336,83 @@ class DataPlatformRefreshDailyTest(unittest.TestCase):
         last_request: FetchRequest = provider.requests[-1]
         self.assertEqual(last_request.start_date, "2026-01-05")
         self.assertEqual(last_request.end_date, "2026-01-07")
+
+    def test_all_a_incremental_refresh_extends_base_when_provider_adds_new_symbol(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            first_provider = InMemoryDomainProvider(
+                "akshare_eastmoney",
+                payloads={
+                    DataDomain.TRADING_CALENDAR: _calendar_frame(dates=["2026-01-05", "2026-01-06"], provider="akshare_eastmoney"),
+                    DataDomain.UNIVERSE_SNAPSHOT: _universe_frame(provider="akshare_eastmoney", symbols=["000001.SZ", "600000.SH", "000300.SH"]),
+                    DataDomain.MARKET_DAILY: _market_frame(
+                        dates=["2026-01-05", "2026-01-06"],
+                        provider="akshare_eastmoney",
+                        symbols=["000001.SZ", "600000.SH", "000300.SH"],
+                    ),
+                },
+            )
+            first = run_refresh(
+                RefreshConfig(
+                    lake_root=Path(temp_dir),
+                    as_of_date="2026-01-06",
+                    start_date="2026-01-05",
+                    universe="all_a",
+                    domains=(DataDomain.MARKET_DAILY, DataDomain.TRADING_CALENDAR, DataDomain.UNIVERSE_SNAPSHOT),
+                    benchmark="000300.SH",
+                    min_coverage_ratio=0.70,
+                ),
+                providers=[first_provider],
+            )
+            self.assertEqual(first.status, "ok")
+
+            second_provider = InMemoryDomainProvider(
+                "akshare_eastmoney",
+                payloads={
+                    DataDomain.TRADING_CALENDAR: _calendar_frame(dates=["2026-01-05", "2026-01-06", "2026-01-07"], provider="akshare_eastmoney"),
+                    DataDomain.UNIVERSE_SNAPSHOT: _universe_frame(
+                        provider="akshare_eastmoney",
+                        trade_date="2026-01-07",
+                        symbols=["000001.SZ", "600000.SH", "300001.SZ", "000300.SH"],
+                    ),
+                    DataDomain.MARKET_DAILY: _market_frame(
+                        dates=["2026-01-07"],
+                        provider="akshare_eastmoney",
+                        symbols=["000001.SZ", "600000.SH", "300001.SZ", "000300.SH"],
+                    ),
+                },
+            )
+            second = run_refresh(
+                RefreshConfig(
+                    lake_root=Path(temp_dir),
+                    as_of_date="2026-01-07",
+                    start_date="2026-01-05",
+                    universe="all_a",
+                    domains=(DataDomain.MARKET_DAILY, DataDomain.TRADING_CALENDAR, DataDomain.UNIVERSE_SNAPSHOT),
+                    benchmark="000300.SH",
+                    min_coverage_ratio=0.70,
+                ),
+                providers=[second_provider],
+            )
+            lake = ResearchDataLake(Path(temp_dir))
+            metadata = lake.describe_dataset(second.registered_market_dataset_id)
+            prepared = load_policy_inputs_from_lake(
+                lake=lake,
+                dataset_id=second.registered_market_dataset_id,
+                start_date="2026-01-05",
+                end_date="2026-01-07",
+                benchmark="000300.SH",
+                min_trading_days=3,
+            )
+
+        market_requests = [req for req in second_provider.domain_requests if req.domain == DataDomain.MARKET_DAILY]
+        self.assertEqual(second.status, "ok")
+        self.assertEqual(market_requests[-1].start_date, "2026-01-07")
+        self.assertEqual(metadata["parameters"]["refresh_semantics"], "extend_existing_policy_input_bundle")
+        self.assertEqual(metadata["parameters"]["source_market_dataset_id"], first.registered_market_dataset_id)
+        self.assertEqual(metadata["start_date"], "2026-01-05")
+        self.assertEqual(metadata["end_date"], "2026-01-07")
+        self.assertIn("300001.SZ", prepared.close.columns)
+        self.assertEqual(prepared.close.loc[pd.Timestamp("2026-01-05"), "000001.SZ"], 10.2)
 
     def test_conflict_blocks_gold_registration_but_keeps_bronze_and_report(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -453,6 +585,43 @@ class DataPlatformRefreshDailyTest(unittest.TestCase):
         self.assertEqual(result.status, "blocked")
         self.assertEqual(result.registered_market_dataset_id, "")
         self.assertIn("required_domain_blocked:valuation", result.blockers)
+
+    def test_universe_all_a_empty_provider_result_explains_provider_errors(self) -> None:
+        def fail_universe(_: DomainFetchRequest) -> ProviderResult:
+            return ProviderResult(
+                provider="akshare_eastmoney",
+                data=pd.DataFrame(),
+                error_report=[
+                    {
+                        "provider": "akshare_eastmoney",
+                        "domain": DataDomain.UNIVERSE_SNAPSHOT,
+                        "code": "provider_exception",
+                        "error_type": "RuntimeError",
+                        "message": "akshare is not installed in the yolos environment",
+                    }
+                ],
+            )
+
+        provider = InMemoryDomainProvider(
+            "akshare_eastmoney",
+            payloads={
+                DataDomain.TRADING_CALENDAR: _calendar_frame(dates=["2026-01-05"], provider="akshare_eastmoney"),
+                DataDomain.UNIVERSE_SNAPSHOT: fail_universe,
+            },
+        )
+        with TemporaryDirectory() as temp_dir:
+            with self.assertRaisesRegex(ValueError, "akshare is not installed"):
+                run_refresh(
+                    RefreshConfig(
+                        lake_root=Path(temp_dir),
+                        as_of_date="2026-01-05",
+                        start_date="2026-01-05",
+                        universe="all_a",
+                        domains=(DataDomain.MARKET_DAILY, DataDomain.TRADING_CALENDAR, DataDomain.UNIVERSE_SNAPSHOT),
+                        benchmark="000300.SH",
+                    ),
+                    providers=[provider],
+                )
 
 
 if __name__ == "__main__":

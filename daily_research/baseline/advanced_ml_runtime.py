@@ -170,6 +170,7 @@ def load_raw_data_with_cache(
 ) -> tuple[Dict[str, pd.DataFrame], dict[str, Any]]:
     payload = {
         "kind": "raw_data",
+        "cache_schema_version": 2,
         "data_source": data_source,
         "csv_folder": str(Path(csv_folder).resolve()) if csv_folder else "",
         "csv_folder_signature": _csv_folder_signature(csv_folder),
@@ -230,14 +231,11 @@ def load_raw_data_with_cache(
             "Amount": prepared.amount.reindex(columns=[*selected, prepared.benchmark]),
         }
         for field in raw_df_dict:
-            if prepared.benchmark not in raw_df_dict[field].columns:
-                if field == "Open":
-                    benchmark_series = prepared.benchmark_open
-                elif field == "Close":
-                    benchmark_series = prepared.benchmark_close
-                else:
-                    benchmark_series = prepared.benchmark_close
-                raw_df_dict[field][prepared.benchmark] = benchmark_series.reindex(raw_df_dict[field].index)
+            if field == "Open":
+                benchmark_series = prepared.benchmark_open
+            else:
+                benchmark_series = prepared.benchmark_close
+            raw_df_dict[field][prepared.benchmark] = benchmark_series.reindex(raw_df_dict[field].index)
         raw_df_dict = {field: frame.sort_index() for field, frame in raw_df_dict.items()}
     else:
         raise ValueError(f"Unsupported data_source: {data_source}")

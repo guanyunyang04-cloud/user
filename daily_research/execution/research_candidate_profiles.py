@@ -666,7 +666,7 @@ def _ensure_live_panels(profile: ResearchCandidateProfile, *, mode: str) -> None
     )
 
 
-def apply_profile_defaults(profile_name: str, *, mode: str, ensure_live_panels: bool = True) -> ResearchCandidateProfile:
+def apply_profile_defaults(profile_name: str, *, mode: str, ensure_live_panels: bool = False) -> ResearchCandidateProfile:
     profile = get_profile(profile_name)
     if ensure_live_panels:
         _ensure_live_panels(profile, mode=mode)

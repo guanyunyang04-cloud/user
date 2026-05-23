@@ -87,7 +87,7 @@ def main():
         resolved_profile = apply_profile_defaults(
             candidate_profile,
             mode="trade_plan",
-            ensure_live_panels=not is_help_request(),
+            ensure_live_panels=False,
         )
         pool_name_hint = str(resolved_profile.liquidity_pool_name or "").strip()
 

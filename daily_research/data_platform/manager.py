@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Callable, Iterable
 
 import pandas as pd
@@ -130,11 +129,9 @@ class ProviderManager:
         self,
         providers: Iterable[MarketProvider],
         *,
-        timeout_seconds: float = 30.0,
         allow_tdx_family: bool = False,
     ) -> None:
         self.providers = list(providers)
-        self.timeout_seconds = float(timeout_seconds or 0.0)
         self.allow_tdx_family = bool(allow_tdx_family)
         for provider in self.providers:
             validate_provider_name(getattr(provider, "name", ""), allow_tdx_family=self.allow_tdx_family)
@@ -243,17 +240,7 @@ class ProviderManager:
         )
 
     def _call_provider_domain(self, provider: MarketProvider, request: DomainFetchRequest) -> ProviderResult:
-        if self.timeout_seconds <= 0:
-            return self._invoke_provider_domain(provider, request)
-        executor = ThreadPoolExecutor(max_workers=1)
-        future = executor.submit(self._invoke_provider_domain, provider, request)
-        try:
-            return future.result(timeout=self.timeout_seconds)
-        except FuturesTimeoutError as exc:
-            future.cancel()
-            raise TimeoutError(f"provider timed out after {self.timeout_seconds:g}s") from exc
-        finally:
-            executor.shutdown(wait=False, cancel_futures=True)
+        return self._invoke_provider_domain(provider, request)
 
     def _invoke_provider_domain(self, provider: MarketProvider, request: DomainFetchRequest) -> ProviderResult:
         fetch_domain = getattr(provider, "fetch_domain", None)
@@ -272,14 +259,4 @@ class ProviderManager:
         raise UnsupportedDomainError(f"{getattr(provider, 'name', 'provider')} does not support domain={request.domain}")
 
     def _call_provider(self, provider: MarketProvider, request: FetchRequest) -> ProviderResult:
-        if self.timeout_seconds <= 0:
-            return provider.fetch_market_bars(request)
-        executor = ThreadPoolExecutor(max_workers=1)
-        future = executor.submit(provider.fetch_market_bars, request)
-        try:
-            return future.result(timeout=self.timeout_seconds)
-        except FuturesTimeoutError as exc:
-            future.cancel()
-            raise TimeoutError(f"provider timed out after {self.timeout_seconds:g}s") from exc
-        finally:
-            executor.shutdown(wait=False, cancel_futures=True)
+        return provider.fetch_market_bars(request)

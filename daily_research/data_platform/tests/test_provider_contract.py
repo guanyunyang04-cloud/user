@@ -1,6 +1,5 @@
 import unittest
 import sys
-import time
 import types
 from unittest import mock
 
@@ -14,7 +13,8 @@ from daily_research.data_platform.contracts import (
     validate_provider_name,
 )
 from daily_research.data_platform.manager import InMemoryMarketProvider, ProviderManager
-from daily_research.data_platform.providers import EastmoneyEfinanceProvider, build_default_providers
+from daily_research.data_platform.providers import EastmoneyEfinanceProvider, TushareHttpOptionalProvider, build_default_providers
+from daily_research.data_platform.providers import _baostock_stock_basic_frame
 
 
 class DataPlatformProviderContractTest(unittest.TestCase):
@@ -55,7 +55,7 @@ class DataPlatformProviderContractTest(unittest.TestCase):
         empty = InMemoryMarketProvider("eastmoney_efinance", pd.DataFrame())
 
         def fail_provider(_: FetchRequest) -> ProviderResult:
-            raise TimeoutError("provider timed out")
+            raise RuntimeError("provider failed")
 
         manager = ProviderManager(
             providers=[
@@ -73,29 +73,17 @@ class DataPlatformProviderContractTest(unittest.TestCase):
         self.assertIn("provider_exception", codes)
         self.assertEqual(result.coverage_report["status"], "no_data")
 
-    def test_provider_manager_timeout_returns_without_waiting_for_worker(self) -> None:
+    def test_provider_manager_does_not_accept_execution_timeout(self) -> None:
         request = FetchRequest(
             symbols=("000001.SZ",),
             start_date="2026-01-05",
             end_date="2026-01-05",
         )
-
-        def slow_provider(_: FetchRequest) -> ProviderResult:
-            time.sleep(2.0)
-            return ProviderResult(provider="eastmoney_efinance", data=pd.DataFrame())
-
-        manager = ProviderManager(
-            providers=[InMemoryMarketProvider("eastmoney_efinance", slow_provider)],
-            timeout_seconds=0.05,
-        )
-
-        started = time.perf_counter()
-        result = manager.fetch_market_bars(request)
-        elapsed = time.perf_counter() - started
-
-        self.assertLess(elapsed, 1.0)
-        self.assertTrue(result.data.empty)
-        self.assertIn("provider_exception", {item["code"] for item in result.error_report})
+        with self.assertRaises(TypeError):
+            ProviderManager(
+                providers=[InMemoryMarketProvider("eastmoney_efinance", pd.DataFrame())],
+                timeout_seconds=0.05,
+            ).fetch_market_bars(request)
 
     def test_efinance_provider_preserves_requested_symbol_suffix(self) -> None:
         raw = pd.DataFrame(
@@ -122,9 +110,60 @@ class DataPlatformProviderContractTest(unittest.TestCase):
     def test_default_free_provider_plan_excludes_unimplemented_realtime_adapter(self) -> None:
         default_names = [provider.name for provider in build_default_providers("default_free")]
         realtime_names = [provider.name for provider in build_default_providers("default_free_with_realtime")]
+        baostock_only_names = [provider.name for provider in build_default_providers("baostock_only")]
 
         self.assertNotIn("sina_tencent_realtime", default_names)
         self.assertIn("sina_tencent_realtime", realtime_names)
+        self.assertEqual(baostock_only_names, ["baostock"])
+
+    def test_tushare_http_provider_does_not_set_execution_timeout(self) -> None:
+        calls: list[dict[str, object]] = []
+
+        class FakeResponse:
+            def raise_for_status(self) -> None:
+                pass
+
+            def json(self) -> dict[str, object]:
+                return {"code": 0, "data": {"fields": ["ts_code", "trade_date", "open", "high", "low", "close", "vol", "amount"], "items": []}}
+
+        def fake_post(*args, **kwargs):
+            calls.append(dict(kwargs))
+            return FakeResponse()
+
+        request = FetchRequest(symbols=("000001.SZ",), start_date="2026-01-05", end_date="2026-01-05")
+        with mock.patch("daily_research.data_platform.providers.requests.post", fake_post):
+            TushareHttpOptionalProvider(token="token").fetch_market_bars(request)
+
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("timeout", calls[0])
+
+    def test_baostock_stock_basic_frame_maps_stock_rows(self) -> None:
+        class FakeQuery:
+            fields = ["code", "code_name", "ipoDate", "outDate", "type", "status"]
+            error_code = "0"
+            error_msg = "success"
+
+            def __init__(self) -> None:
+                self._rows = [
+                    ["sh.000001", "上证综合指数", "1991-07-15", "", "2", "1"],
+                    ["sh.600000", "浦发银行", "1999-11-10", "", "1", "1"],
+                    ["sz.000001", "平安银行", "1991-04-03", "", "1", "1"],
+                ]
+                self._index = -1
+
+            def next(self) -> bool:
+                self._index += 1
+                return self._index < len(self._rows)
+
+            def get_row_data(self) -> list[str]:
+                return self._rows[self._index]
+
+        frame = _baostock_stock_basic_frame(FakeQuery(), trade_date="2026-05-22")
+
+        self.assertEqual(frame["symbol"].tolist(), ["600000.SH", "000001.SZ"])
+        self.assertEqual(frame["name"].tolist(), ["浦发银行", "平安银行"])
+        self.assertEqual(frame["list_status"].tolist(), ["L", "L"])
+        self.assertEqual(frame["list_date"].tolist(), ["1999-11-10", "1991-04-03"])
 
 
 if __name__ == "__main__":

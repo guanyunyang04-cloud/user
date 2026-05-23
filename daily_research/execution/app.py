@@ -86,15 +86,14 @@ def _handle_run(args: argparse.Namespace) -> int:
         )
         return 0
     if args.background:
-        result = launch_task_async(
-            task_name=task_name,
-            python_executable=python_executable,
-            passthrough_args=passthrough_args,
-            job_label=str(args.job_label or ""),
-            force_unlock=bool(args.force_unlock),
-        )
-        _print_payload(result, as_json=args.json)
-        return 0
+        payload = {
+            "status": "unsupported",
+            "detail": "CLI --background needs a long-running web server; use the website or run without --background.",
+            "task_name": task_name,
+            "command": command,
+        }
+        _print_payload(payload, as_json=args.json)
+        return 2
     result = run_task_sync(
         task_name=task_name,
         python_executable=python_executable,
@@ -109,13 +108,13 @@ def _handle_run(args: argparse.Namespace) -> int:
 
 def _handle_resume(args: argparse.Namespace) -> int:
     if args.background:
-        result = resume_task_async(
-            job_id=str(args.job_id or ""),
-            job_label=str(args.job_label or ""),
-            force_unlock=bool(args.force_unlock),
-        )
-        _print_payload(result, as_json=args.json)
-        return 0
+        payload = {
+            "status": "unsupported",
+            "detail": "CLI --background needs a long-running web server; use the website or resume without --background.",
+            "job_id": str(args.job_id or ""),
+        }
+        _print_payload(payload, as_json=args.json)
+        return 2
     result = resume_task_sync(
         job_id=str(args.job_id or ""),
         job_label=str(args.job_label or ""),

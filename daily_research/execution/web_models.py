@@ -9,9 +9,6 @@ FORMAL_DATA_PLATFORM_DOMAINS = [
     "trading_calendar",
     "universe_snapshot",
     "security_status",
-    "limit_status",
-    "industry_concept",
-    "valuation",
 ]
 
 

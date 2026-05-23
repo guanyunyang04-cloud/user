@@ -16,6 +16,7 @@ from daily_research.data_platform.contracts import (
     normalize_market_frame,
     validate_provider_name,
 )
+from daily_research.progress import create_progress, progress_write
 
 
 def _strip_suffix(symbol: str) -> str:
@@ -162,23 +163,28 @@ class BaostockProvider:
             raise RuntimeError(f"baostock login failed: {getattr(login, 'error_msg', '')}")
         rows: list[pd.DataFrame] = []
         try:
-            for symbol in request.symbols:
-                code = _to_baostock_code(symbol)
-                query = bs.query_history_k_data_plus(
-                    code,
-                    "date,code,open,high,low,close,volume,amount",
-                    start_date=request.start_date,
-                    end_date=request.end_date,
-                    frequency="d",
-                    adjustflag="2" if request.adjusted_flag in {"front", "qfq"} else "3",
-                )
-                data: list[list[Any]] = []
-                while getattr(query, "error_code", "1") == "0" and query.next():
-                    data.append(query.get_row_data())
-                frame = pd.DataFrame(data, columns=["trade_date", "symbol", "open", "high", "low", "close", "volume", "amount"])
-                if not frame.empty:
-                    frame["symbol"] = symbol
-                    rows.append(frame)
+            with create_progress(total=len(request.symbols), desc="Baostock market_daily", unit="symbol", leave=False) as progress:
+                for idx, symbol in enumerate(request.symbols, start=1):
+                    if idx == 1 or idx % 50 == 0 or idx == len(request.symbols):
+                        progress_write(f"baostock_market_daily={idx}/{len(request.symbols)} symbol={symbol}")
+                    progress.set_description_str(f"Baostock market_daily {symbol}")
+                    progress.update(1)
+                    code = _to_baostock_code(symbol)
+                    query = bs.query_history_k_data_plus(
+                        code,
+                        "date,code,open,high,low,close,volume,amount",
+                        start_date=request.start_date,
+                        end_date=request.end_date,
+                        frequency="d",
+                        adjustflag="2" if request.adjusted_flag in {"front", "qfq"} else "3",
+                    )
+                    data: list[list[Any]] = []
+                    while getattr(query, "error_code", "1") == "0" and query.next():
+                        data.append(query.get_row_data())
+                    frame = pd.DataFrame(data, columns=["trade_date", "symbol", "open", "high", "low", "close", "volume", "amount"])
+                    if not frame.empty:
+                        frame["symbol"] = symbol
+                        rows.append(frame)
         finally:
             bs.logout()
         data = normalize_market_frame(pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(), source=self.name, adjusted_flag=request.adjusted_flag, require_columns=False)
@@ -211,19 +217,7 @@ class BaostockProvider:
                 frame = pd.DataFrame(rows, columns=["trade_date", "is_open"])
                 frame["exchange"] = request.exchange
             elif request.domain in {DataDomain.UNIVERSE_SNAPSHOT, DataDomain.SECURITY_STATUS}:
-                query = bs.query_all_stock(day=request.end_date)
-                rows = []
-                while getattr(query, "error_code", "1") == "0" and query.next():
-                    rows.append(query.get_row_data())
-                frame = pd.DataFrame(rows, columns=["trade_date", "symbol", "name", "type", "status"])
-                if not frame.empty:
-                    frame["symbol"] = frame["symbol"].map(_from_baostock_code)
-                    frame["board"] = frame["type"]
-                    frame["list_status"] = frame["status"].map(lambda item: "L" if str(item) in {"1", "上市", "L"} else str(item))
-                    frame["is_st"] = frame["name"].astype(str).str.upper().str.startswith(("ST", "*ST"))
-                    frame["is_suspended"] = False
-                    frame["is_delisted"] = frame["list_status"].astype(str).str.upper().isin({"D", "DELIST"})
-                    frame["status_reason"] = frame["status"].astype(str)
+                frame = _baostock_stock_basic_frame(bs.query_stock_basic(), trade_date=request.end_date)
             else:
                 raise RuntimeError(f"unsupported_domain: {self.name} does not support {request.domain}")
         finally:
@@ -236,7 +230,6 @@ class BaostockProvider:
 class TushareHttpOptionalProvider:
     name: str = "tushare_http_optional"
     token: str = ""
-    timeout_seconds: int = 30
 
     def fetch_market_bars(self, request: FetchRequest) -> ProviderResult:
         validate_provider_name(self.name)
@@ -258,7 +251,6 @@ class TushareHttpOptionalProvider:
                     },
                     "fields": "ts_code,trade_date,open,high,low,close,vol,amount",
                 },
-                timeout=self.timeout_seconds,
             )
             response.raise_for_status()
             payload = response.json()
@@ -333,7 +325,6 @@ class TushareHttpOptionalProvider:
         response = requests.post(
             "http://api.tushare.pro",
             json={"api_name": api_name, "token": token, "params": params, "fields": fields},
-            timeout=self.timeout_seconds,
         )
         response.raise_for_status()
         payload = response.json()
@@ -361,6 +352,8 @@ def build_default_providers(provider_plan: str = "default_free") -> list:
         return [EastmoneyEfinanceProvider(), AkshareEastmoneyProvider(), BaostockProvider()]
     if plan == "default_free_no_realtime":
         return [EastmoneyEfinanceProvider(), AkshareEastmoneyProvider(), BaostockProvider()]
+    if plan == "baostock_only":
+        return [BaostockProvider()]
     if plan == "default_free_with_realtime":
         return [EastmoneyEfinanceProvider(), AkshareEastmoneyProvider(), BaostockProvider(), SinaTencentRealtimeProvider()]
     if plan == "tushare_optional":
@@ -388,6 +381,40 @@ def _from_baostock_code(value: Any) -> str:
     if raw.startswith("bj."):
         return f"{raw[3:].upper()}.BJ"
     return str(value or "").strip().upper()
+
+
+def _baostock_stock_basic_frame(query: Any, *, trade_date: str) -> pd.DataFrame:
+    fields = [str(item) for item in (getattr(query, "fields", None) or [])]
+    rows: list[list[Any]] = []
+    while getattr(query, "error_code", "1") == "0" and query.next():
+        rows.append(query.get_row_data())
+    frame = pd.DataFrame(rows, columns=fields) if fields else pd.DataFrame(rows)
+    if frame.empty:
+        return pd.DataFrame()
+    rename_map = {
+        "code": "symbol",
+        "code_name": "name",
+        "ipoDate": "list_date",
+        "outDate": "delist_date",
+    }
+    frame = frame.rename(columns=rename_map).copy()
+    if "type" in frame.columns:
+        frame = frame.loc[frame["type"].astype(str).eq("1")].copy()
+    if "symbol" in frame.columns:
+        frame["symbol"] = frame["symbol"].map(_from_baostock_code)
+    if "status" in frame.columns:
+        frame["list_status"] = frame["status"].map(lambda item: "L" if str(item) in {"1", "上市", "L"} else str(item))
+    frame["trade_date"] = str(trade_date)
+    frame["board"] = frame.get("type", "")
+    if "name" in frame.columns:
+        name_upper = frame["name"].fillna("").astype(str).str.upper()
+        frame["is_st"] = name_upper.str.startswith(("ST", "*ST"))
+    else:
+        frame["is_st"] = False
+    frame["is_suspended"] = False
+    frame["is_delisted"] = frame.get("list_status", "").astype(str).str.upper().isin({"D", "DELIST", "0", "退市"})
+    frame["status_reason"] = frame.get("status", "").astype(str)
+    return frame
 
 
 def _date_range_strings(start_date: str, end_date: str) -> list[str]:

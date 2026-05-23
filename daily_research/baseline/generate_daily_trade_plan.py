@@ -1687,26 +1687,16 @@ def _write_trade_plan_txt(
         lines.append(f"候选执行信号日: {model_info['execution_signal_date']}")
     if model_info.get("latest_data_date"):
         lines.append(f"{model_info.get('latest_data_label', '模型最新数据日')}: {model_info['latest_data_date']}")
-    if model_info.get("freshness_status"):
-        freshness_line = f"{model_info.get('freshness_label', '模型新鲜度')}: {model_info['freshness_status']}"
-        if model_info.get("trading_day_lag") is not None:
-            freshness_line += f" | 交易日滞后 {model_info['trading_day_lag']}"
-        if model_info.get("latest_completed_trading_date"):
-            freshness_line += f" | 最新完成交易日 {model_info['latest_completed_trading_date']}"
-        lines.append(freshness_line)
     if model_info.get("production_model_train_end_date"):
         lines.append(f"底层模型训练样本截止: {model_info['production_model_train_end_date']}")
     if model_info.get("production_model_launch_cutoff_date"):
         lines.append(f"底层模型最近一次上线截止: {model_info['production_model_launch_cutoff_date']}")
-    if model_info.get("production_model_retrain_policy"):
-        lines.append(f"底层模型重训策略: {model_info['production_model_retrain_policy']}")
-    if model_info.get("production_model_retrain_window"):
-        lines.append(f"重训研究比较窗: {model_info['production_model_retrain_window']}")
-    if model_info.get("production_model_retrain_status"):
-        retrain_line = f"{model_info.get('production_model_retrain_label', '底层模型重训时效')}: {model_info['production_model_retrain_status']}"
-        if model_info.get("production_model_retrain_trading_day_lag") is not None:
-            retrain_line += f" | 交易日滞后 {model_info['production_model_retrain_trading_day_lag']}"
-        lines.append(retrain_line)
+    if model_info.get("latest_completed_trading_date"):
+        lines.append(f"最新完成交易日: {model_info['latest_completed_trading_date']}")
+    if model_info.get("production_model_retrain_trading_day_lag") is not None:
+        lines.append(f"底层模型距最新交易日: {model_info['production_model_retrain_trading_day_lag']} 个交易日")
+    if model_info.get("trading_day_lag") is not None:
+        lines.append(f"候选信号距最新交易日: {model_info['trading_day_lag']} 个交易日")
     history_window = model_info.get("history_window")
     if isinstance(history_window, dict) and history_window.get("effective_start_date"):
         lines.append(
@@ -2128,23 +2118,13 @@ def main():
             freshness_info.setdefault("warnings", []).append(
                 "Model metadata does not yet include validation_summary; run update_model.py to build a fresh artifact."
             )
-        if freshness_info.get("should_block") and args.allow_stale_model:
-            freshness_info.setdefault("warnings", []).append(
-                "stale model allowed by --allow-stale-model; proceed carefully."
-            )
         for warning in freshness_info.get("warnings", []):
             print(f"[warning] {warning}")
-        if freshness_info.get("should_block") and not args.allow_stale_model:
-            raise RuntimeError(
-                "Model freshness reached the blocking threshold."
-                f" latest_data_date={freshness_info.get('artifact_latest_data_date', '')},"
-                f" trading_day_lag={freshness_info.get('trading_day_lag')}."
-                " Run daily_research/execution/update_model.py first, or pass --allow-stale-model explicitly."
-            )
         model_info.update(
             {
                 "latest_data_date": str(artifact_meta.get("latest_data_date", "")),
                 "freshness_status": str(freshness_info.get("status_text", "")),
+                "freshness_info_label": "模型数据间隔",
                 "trading_day_lag": freshness_info.get("trading_day_lag"),
                 "warnings": list(freshness_info.get("warnings", [])),
                 "validation_summary": validation_summary,
@@ -2709,21 +2689,14 @@ def main_with_progress():
                     freshness_info.setdefault("warnings", []).append(
                         "artifact metadata has no validation_summary; rerun update_model.py for a fresh artifact."
                     )
-                if freshness_info.get("should_block") and args.allow_stale_model:
-                    freshness_info.setdefault("warnings", []).append("stale artifact allowed by --allow-stale-model")
                 for warning in freshness_info.get("warnings", []):
                     progress.log(f"[warning] {warning}")
-                if freshness_info.get("should_block") and not args.allow_stale_model:
-                    raise RuntimeError(
-                        "Model artifact reached stale blocking threshold. Run daily_research/execution/update_model.py "
-                        "or pass --allow-stale-model explicitly."
-                    )
                 model_info.update(
                     {
                         "latest_data_date": str(artifact_meta.get("latest_data_date", "")),
                         "latest_data_label": "模型最新数据日",
                         "freshness_status": str(freshness_info.get("status_text", "")),
-                        "freshness_label": "模型新鲜度",
+                        "freshness_info_label": "模型数据间隔",
                         "trading_day_lag": freshness_info.get("trading_day_lag"),
                         "warnings": list(freshness_info.get("warnings", [])),
                         "validation_summary": validation_summary,
@@ -2747,23 +2720,14 @@ def main_with_progress():
                 )
                 warnings = list(model_info.get("warnings", []))
                 warnings.extend(freshness_info.get("warnings", []))
-                if freshness_info.get("should_block") and args.allow_stale_model:
-                    warnings.append("stale external candidate allowed by --allow-stale-model")
                 for warning in freshness_info.get("warnings", []):
                     progress.log(f"[warning] {warning}")
-                if freshness_info.get("should_block") and not args.allow_stale_model:
-                    raise RuntimeError(
-                        "External candidate panel reached stale blocking threshold. "
-                        "Refresh the active manifest-driven research candidate pipeline, "
-                        "or pass --allow-stale-model explicitly. "
-                        "Use --legacy-ml only when you intentionally want the old legacy chain."
-                    )
                 model_info.update(
                     {
                         "latest_data_date": str(pd.Timestamp(source_signal_date).date()),
                         "latest_data_label": "候选源信号日",
                         "freshness_status": str(freshness_info.get("status_text", "")),
-                        "freshness_label": "候选信号新鲜度",
+                        "freshness_info_label": "候选信号间隔",
                         "latest_completed_trading_date": freshness_info.get("latest_completed_trading_date"),
                         "trading_day_lag": freshness_info.get("trading_day_lag"),
                         "warnings": warnings,
@@ -2784,30 +2748,16 @@ def main_with_progress():
                     )
                     warnings = list(model_info.get("warnings", []))
                     warnings.extend(retrain_info.get("warnings", []))
-                    if retrain_info.get("should_block") and args.allow_stale_model:
-                        warnings.append(
-                            "stale production retrain cadence allowed by --allow-stale-model; proceed carefully."
-                        )
                     for warning in retrain_info.get("warnings", []):
                         progress.log(f"[warning] {warning}")
-                    if retrain_info.get("should_block") and not args.allow_stale_model:
-                        raise RuntimeError(
-                            "External candidate underlying production model reached retrain blocking threshold. "
-                            "Run daily_research/execution/update_default_candidate_production.py or pass --allow-stale-model explicitly."
-                        )
                     model_info.update(
                         {
                             "warnings": warnings,
                             "production_model_train_end_date": str(retrain_info.get("train_end_date", "")),
                             "production_model_launch_cutoff_date": str(retrain_info.get("launch_cutoff_date", "")),
                             "production_model_retrain_status": str(retrain_info.get("status_text", "")),
-                            "production_model_retrain_label": "底层模型重训时效",
                             "production_model_retrain_trading_day_lag": retrain_info.get("trading_day_lag"),
-                            "production_model_retrain_warn_trading_days": retrain_info.get("warn_trading_days"),
-                            "production_model_retrain_max_trading_days": retrain_info.get("max_trading_days"),
                             "production_model_retrain_manifest": str(retrain_info.get("manifest_path", "")),
-                            "production_model_retrain_policy": str(retrain_info.get("preferred_label", "")),
-                            "production_model_retrain_window": str(retrain_info.get("comparison_window", "")),
                             "production_model_retrain_leaderboard_csv": str(retrain_info.get("leaderboard_csv", "")),
                             "production_model_active_run_dir": str(retrain_info.get("active_production_run_dir", "")),
                             "target_weight_semantics": str(
@@ -2910,13 +2860,9 @@ def main_with_progress():
                 if model_info.get("production_model_train_end_date"):
                     summary["production_model_train_end_date"] = str(model_info.get("production_model_train_end_date", ""))
                     summary["production_model_launch_cutoff_date"] = str(model_info.get("production_model_launch_cutoff_date", ""))
-                    summary["production_model_retrain_status"] = str(model_info.get("production_model_retrain_status", ""))
-                    summary["production_model_retrain_trading_day_lag"] = model_info.get("production_model_retrain_trading_day_lag")
-                    summary["production_model_retrain_warn_trading_days"] = model_info.get("production_model_retrain_warn_trading_days")
-                    summary["production_model_retrain_max_trading_days"] = model_info.get("production_model_retrain_max_trading_days")
+                    summary["production_model_status"] = str(model_info.get("production_model_retrain_status", ""))
+                    summary["production_model_trading_day_lag"] = model_info.get("production_model_retrain_trading_day_lag")
                     summary["production_model_retrain_manifest"] = str(model_info.get("production_model_retrain_manifest", ""))
-                    summary["production_model_retrain_policy"] = str(model_info.get("production_model_retrain_policy", ""))
-                    summary["production_model_retrain_window"] = str(model_info.get("production_model_retrain_window", ""))
             elif external_score_path is not None:
                 summary["candidate_score_csv"] = str(external_score_path)
                 summary["candidate_label"] = str(model_info.get("candidate_label", ""))

@@ -31,5 +31,8 @@ dependencies:
   - pip:
       - cvxpylayers>=0.1.9
       - diffcp>=1.1.0
+      - efinance>=0.5
+      - akshare>=1.16
+      - baostock>=0.8
   # Legacy tqcenter/TDX adapters are not part of the formal daily_research
   # research data boundary. Use only for explicitly authorized historical paths.
