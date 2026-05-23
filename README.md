@@ -2,6 +2,8 @@
 
 本 README 只作为 agent 和维护者的第一眼索引。权威接管真源是主脑 `brain/`，项目事实由主脑路由后的分脑维护。
 
+当前工作区根目录：`H:\quant_project`。旧通达信插件目录 `H:\new_tdx64\PYPlugins\user` 不再承载本项目代码、脑区或研究产物。
+
 ## Agent 接管入口
 
 接管、路由或修改 tracked 文件前，先运行主脑 capsule：

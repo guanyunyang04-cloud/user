@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 60,
+  "record_count": 61,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -84,6 +84,25 @@
         "Result: r53 materially fixed the high-cash / low-exposure failure shape, but remains research/shadow-only because training evidence is insufficient, cash timing is negative, and composite score is strongly negative."
       ],
       "next_allowed_actions": [],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": []
+    },
+    {
+      "id": "workspace_root_migration_20260523",
+      "date": "2026-05-23",
+      "r_id": "",
+      "path": "brain/references/workspace_root_migration_20260523.md",
+      "tags": [
+        "brain"
+      ],
+      "workflow": "brain",
+      "study_tags": [],
+      "verdict": "结论：当前工作区根目录固定为 `H:\\quant_project`。; 结论：`H:\\new_tdx64\\PYPlugins\\user` 还原为通达信插件用户目录，只保留通达信原生/TQ 用户脚本，不再作为 agent 接管、研究、训练或数据平台根目录。; 边界：本次迁移只改变工作区位置和冷数据归档位置，不改变 `daily_research/output/active_execution_strategy.json`，不启动训练、study、replay、live/default 或 promotion。",
+      "blockers": [],
+      "next_allowed_actions": [
+        "以 `H:\\quant_project` 为唯一当前工作区根继续接管。",
+        "如发现历史命令引用旧路径，只在复现实验需要时转换到新根目录；不得把旧路径重新写成当前入口。"
+      ],
       "active_artifact_impact": "guarded",
       "dataset_ids": []
     },

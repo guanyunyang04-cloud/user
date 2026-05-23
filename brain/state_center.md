@@ -1,8 +1,10 @@
 # 主脑状态中枢
 
-快照日期：`2026-05-20`
+快照日期：`2026-05-23`
 
 ## 当前接管摘要
+- 当前工作区根目录固定为 `H:\quant_project`。
+- 旧通达信插件目录 `H:\new_tdx64\PYPlugins\user` 不再承载本项目；它应保持为空或只保留通达信原生用户插件文件。
 - 工作区正式生产研究与执行主线仍是 `daily_research`。
 - 已接入主脑的一级分脑固定为：`daily_research`、`t0_project`、`daily_stock_analysis-main`。
 - 默认接管顺序为：主脑 `identity -> state -> knowledge -> topology -> operations -> governance`，再进入目标分脑。
@@ -23,6 +25,7 @@
 - 维护主脑作为共享脑核，不让主脑重新长成分脑实验日志。
 - 分脑入口必须精炼；长过程、长命令和历史证据进入 `episodic_memory.md` 或 `brain/references/`。
 - 当前所有 `daily_research` 任务必须显式使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`。
+- 后续 agent 不得从 `H:\new_tdx64\PYPlugins\user` 接管本项目；旧路径只可能出现在历史 reference 或回滚说明中。
 - 训练、评估、审计、bounded study、confirmatory rerun 与执行任务必须受监管运行：允许用 `Start-Process -PassThru` 启动独立 OS 进程，但必须记录 PID、持久 stdout/stderr、run tag 或产物路径，并用 `Wait-Process -Id <pid> -Timeout 7200` 轮询。
 - 长任务禁止无 PID、无日志、无产物定位的脱管后台化；禁止用固定 sleep 替代 PID 绑定等待；每轮轮询必须报告已用时间和预计剩余时间，进程提前结束时立即解析产物。
 
@@ -37,6 +40,7 @@
 - 如果只改分脑、不改主脑，跨项目规则会再次漂移。
 - 如果兼容入口、README 或教程保留 brain 未收录的规则，后续 agent 会绕过中枢。
 - 如果长任务没有 PID、日志、progress、summary 或环境诊断可追溯，就不能写成正式证据。
+- 如果 agent 或脚本默认落到旧通达信插件 `user` 目录，先纠偏到 `H:\quant_project`，再继续操作。
 
 ## 推荐下一步
 - 结构变更先跑 `brain_integrity_check.py --json`，再跑 `doc_guard.py check` 与 `project_consistency_check.py`。

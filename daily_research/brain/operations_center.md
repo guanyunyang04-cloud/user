@@ -4,14 +4,17 @@
 
 ## 默认操作纪律
 - 默认工作分支：`main`。
+- 当前工作区根目录：`H:\quant_project`。
 - Python 入口：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe`。
 - 进入本分脑前，必须先由主脑 `tools.brain.workflow capsule` 路由到 `daily_research`。
+- `H:\new_tdx64\PYPlugins\user` 已退出本项目主链路；历史 reference 中旧路径只作历史证据，不作为当前入口。
 - 不使用 `KMP_DUPLICATE_LIB_OK` 作为默认方案。
 - 不触碰 `daily_research/output/active_execution_strategy.json`，除非有明确 promotion 决策。
 - 不把 smoke、dry-run、failed trial、interrupted outer study、realtime tail label 写成 completed evidence。
 - 长训练或 study 需要 progress JSONL、latest progress JSON、stdout/stderr log 和明确 tag。
 
 ## 项目地图
+- workspace root：`H:\quant_project`。
 - brain 真源：`daily_research/brain/`。
 - research data lake：`daily_research/output/research_data_lake/`。
 - path_policy studies：`daily_research/output/path_policy/studies/`。

@@ -4,6 +4,7 @@
 
 ## 1. 稳定事实
 - `daily_research` 同时负责研究、formal 验证、recent 验证、production full-fit、live 执行和接管治理。
+- 当前工作区根目录是 `H:\quant_project`；旧 `H:\new_tdx64\PYPlugins\user` 不是项目真源。
 - strongest-model research winner、deployable learned-control、live mainline 必须显式区分。
 - 当前 live 默认执行仍由 `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active` 承担。
 - `daily_research/environment.yml` 是依赖环境真源；任何程序都必须在 `yolos` 环境下运行。
@@ -39,6 +40,7 @@
 - 数据集必须可复用、可审计、可查询；pickle/cache 可兼容，但新训练集应进入 DuckDB + Parquet data lake。
 - `lake` 是研究存储真源，不是在线数据源；每日更新源是 `daily_research.data_platform` 的非 TDX online providers，写入 Bronze/Silver 后才能注册为研究 lake dataset。V2 默认使用 `--universe all_a` 和真实交易日历，CSV 只能作为入湖导入/补洞通道，不能被正式研究直接读取。
 - TDX-family 已退出正式研究主链路：`tqcenter.py`、`pytdx`、`mootdx` 不得作为 `daily_research` 默认或正式 provider；若旧脚本保留这些名字，只能视为 legacy/historical path。
+- 工作区迁移后，旧通达信插件 `user` 路径只能出现在历史 reference 或回滚说明中；新接管、新数据、新命令必须以 `H:\quant_project` 为根。
 - 脑区是项目事实真源，skills 只是流程入口，不复制长历史。
 
 ## 4. 研究主线索引

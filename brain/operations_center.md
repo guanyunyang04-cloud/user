@@ -1,6 +1,8 @@
 # 主脑操作中枢
 
 ## 1. 默认接管入口
+- 当前工作区根目录：`H:\quant_project`。
+- 旧路径 `H:\new_tdx64\PYPlugins\user` 已退出本项目主链路，不得作为接管根目录。
 - schema v2 capsule：
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
 - 任务路由：
@@ -46,3 +48,9 @@
 - 启动模板：用 `Start-Process -PassThru` 启动目标命令，记录 PID、stdout/stderr 日志路径、run tag、预期 summary / progress / checkpoint 路径。
 - 轮询模板：默认用 `Wait-Process -Id <pid> -Timeout 7200` 等待；`7200` 秒是长任务单轮默认最大等待上限，进程提前自然结束时必须立即返回并解析产物。
 - 每轮状态必须计算已用时间和预计剩余时间；状态来源优先使用 progress、PID、日志尾部、GPU/内存与最新产物时间戳。
+
+## 8. 工作区迁移纪律
+- 当前唯一工作区根：`H:\quant_project`。
+- `H:\new_tdx64\PYPlugins\user` 只属于通达信插件用户目录，不再保存本项目代码、brain、output、cache 或 archive。
+- 历史 reference 中的旧路径保留为历史事实；新命令、新文档、新产物路径必须使用 `H:\quant_project`。
+- 若需要从旧备份恢复冷数据，先复制到 `H:\quant_project`，校验后再删除旧备份；不得把旧备份目录当成当前项目根。
