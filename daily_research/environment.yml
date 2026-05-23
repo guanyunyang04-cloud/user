@@ -31,4 +31,5 @@ dependencies:
   - pip:
       - cvxpylayers>=0.1.9
       - diffcp>=1.1.0
-  # tqcenter remains a workspace-local dependency provided by t0_project/tqcenter.py.
+  # Legacy tqcenter/TDX adapters are not part of the formal daily_research
+  # research data boundary. Use only for explicitly authorized historical paths.

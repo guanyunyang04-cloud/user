@@ -21,6 +21,10 @@
       "operations_center"
     ],
     "body_entry_priority": [
+      "daily_research/data_platform",
+      "daily_research/data_lake",
+      "daily_research/path_policy",
+      "daily_research/continuous_policy",
       "daily_research/baseline",
       "daily_research/execution",
       "daily_research/deep_alpha",
@@ -47,6 +51,18 @@
   "body_map": {
     "research": [
       "daily_research/baseline"
+    ],
+    "allocation_research": [
+      "daily_research/continuous_policy"
+    ],
+    "opportunity_ranking": [
+      "daily_research/path_policy"
+    ],
+    "data_lake": [
+      "daily_research/data_lake"
+    ],
+    "data_platform": [
+      "daily_research/data_platform"
     ],
     "execution": [
       "daily_research/execution"
@@ -123,6 +139,10 @@
   "handoff_contract": {
     "derive_entry_sequence_from_shared_contract": true,
     "body_entry_priority": [
+      "data_platform",
+      "data_lake",
+      "opportunity_ranking",
+      "allocation_research",
       "research",
       "execution",
       "long_horizon_research",

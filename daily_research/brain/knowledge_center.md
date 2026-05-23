@@ -45,6 +45,7 @@
 
 ## 4. 研究主线索引
 - 滚动总览入口：`daily_research/brain/references/mainline_review_current.md`；用于检阅立项以来所有 durable 主线，但不替代 `state_center.md` 或 active artifact。
+- 完整代码库检阅 successor：`daily_research/brain/references/brain_system_full_codebase_review_20260523.md`；用于当前模块地图、全库风险和 2026-05-22 旧路径/旧主线纠偏。
 - `alpha_multi_horizon_utility_policy_v1`：当前 path_policy research pointer；目标是多 horizon 交易效用排序，首轮 horizon grid 为 `1,2,3,5,8,10,15,20,30`，当前 blocker 是 predicted best horizon 向 `30d` 塌缩。
 - `alpha_path20_neural_policy_v1`：2026-05-17 到 2026-05-23 的 Path20 neural-policy 历史主线；其 evidence 仍有效，但新结论必须按 `alpha_multi_horizon_utility_policy_v1` 解释。
 - `alpha_path20_sequence_policy_v1`：shadow comparison / secondary research route；除非未来显式切换，不代表当前主线。

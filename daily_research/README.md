@@ -16,6 +16,8 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule -
 
 - `baseline/`：历史研究链路与仍受支持的交易计划管线
 - `continuous_policy/`：当前连续决策策略的训练、评估、导出与协议编排
+- `path_policy/`：多 Horizon 交易效用排序、历史 Path20 预测/RL 与 shadow 对照研究
+- `data_lake/`：DuckDB/Parquet 研究数据集、显式 dataset id、pool view 与 sector/board view
 - `data_platform/`：TDX-free 在线 provider、每日 refresh、Bronze/Silver 仲裁与 lake 注册入口
 - `deep_alpha/`：更长周期的模型架构、alpha 与执行策略研究
 - `execution/`：执行应用、任务运行器、Web 控制台与 production 更新入口

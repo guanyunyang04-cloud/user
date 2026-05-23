@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 61,
+  "record_count": 62,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -829,6 +829,41 @@
       "dataset_ids": [
         "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1",
         "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
+      ]
+    },
+    {
+      "id": "brain_system_full_codebase_review_20260523",
+      "date": "2026-05-23",
+      "r_id": "",
+      "path": "daily_research/brain/references/brain_system_full_codebase_review_20260523.md",
+      "tags": [
+        "brain"
+      ],
+      "workflow": "brain",
+      "study_tags": [
+        "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01",
+        "alpha_multi_horizon_utility_policy_v1",
+        "alpha_path20_neural_policy_v1"
+      ],
+      "verdict": "目的：固化当前代码结构、durable 主线、风险边界和后续安全动作。; 当前最大错误风险仍是边界混写：把 short-alpha live materialization、多 horizon ranking evidence 和 continuous allocation ambition 说成一个已经集成且可 promotion 的模型。; TDX-family 代码仍存在于 legacy baseline/deep_alpha/tools 路径中；准确边界不是“代码库无 TDX 字符串”，而是“正式新研究和数据平台边界默认 TDX-free，legacy 路径隔离或显式 gated”。; data platform line：非 TDX provider refresh/import boundary、Bronze/Silver normalization、domain sidecars 与 lake registration。",
+      "blockers": [
+        "`continuous_policy` 仍是组合 allocation 语义最丰富的研究面，但 blocker 仍是行为质量与证据充分性，不只是训练基础设施。",
+        "把 smoke、dry-run、failed、interrupted、unit、realtime-tail 或 protocol-only output 写成 completed strategy evidence。"
+      ],
+      "next_allowed_actions": [
+        "除非未来 explicit promotion task 授权，否则继续冻结 live/default 与 active artifact。",
+        "multi-horizon utility 下一步只跑 constrained horizon-score / calibration variants；在 multi-seed 前必须保住 validation/test spread、hit lift 与 monthly stability。",
+        "continuous_policy 下一步聚焦 feature contract health、source/receiver coverage、cash timing、source quality、receiver-source spread 与 sufficient training evidence，再讨论 strict resume 或 promotion。",
+        "data platform 后续 provider health / refresh smoke 只记录为 data admissibility work，不记录为 strategy evidence。",
+        "governance 下一步先通过 evidence registry / reference updates reconcile unregistered latest output tags，再回答 loose latest 类问题。",
+        "active manifest 旧路径迁移必须单独做 explicit migration plan，含 rollback 与 guard validation；不能作为本次 review 的副作用。"
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1",
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d",
+        "policy_pool_view__c11400fa72ad263f3d1eecfa",
+        "policy_sector_board_view__ed15b2873f544e9e9b24aae5"
       ]
     },
     {
