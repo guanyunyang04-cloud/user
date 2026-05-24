@@ -30,6 +30,7 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertIn("-m tools.brain.workflow query", text)
         self.assertIn("writeback-plan", text)
         self.assertIn("brain_runtime.py", text)
+        self.assertIn("brain_runtime.py health", text)
         self.assertNotIn("r10-r52", text)
 
     def test_skill_mentions_api_fallback(self) -> None:
@@ -212,7 +213,32 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertTrue(Path(payload["json_path"]).exists())
         self.assertTrue(Path(payload["markdown_path"]).exists())
         self.assertIn("brain/output/runtime_learning", payload["json_path"].replace("\\", "/"))
-        self.assertIn("requires_user_confirmation", json.loads(Path(payload["json_path"]).read_text(encoding="utf-8"))["authority"])
+        proposal_payload = json.loads(Path(payload["json_path"]).read_text(encoding="utf-8"))
+        self.assertIn("requires_user_confirmation", proposal_payload["authority"])
+        self.assertEqual(proposal_payload["severity"], "info")
+        self.assertEqual(proposal_payload["owner_brain"], "learning_demo")
+        self.assertEqual(proposal_payload["writeback_target"], "brain/references/")
+        self.assertTrue(proposal_payload["requires_user_confirmation"])
+
+    def test_brain_runtime_health_reports_brain_guard_summary(self) -> None:
+        result = subprocess.run(
+            [PYTHON, str(RUNTIME), "health", "--cwd", str(ROOT)],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        payload = json.loads(result.stdout)
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertIn("detect", payload)
+        self.assertIn("skill_sync", payload)
+        self.assertIn("doc_guard", payload)
+        self.assertIn("integrity", payload)
+        self.assertIn("frontier", payload)
+        self.assertIn("catalog", payload)
+        self.assertIn("next_actions", payload)
 
 
 if __name__ == "__main__":

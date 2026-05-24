@@ -219,6 +219,21 @@ def _registered_study_tags(root: Path) -> list[str]:
     return _dedupe(tags)
 
 
+def _references_mention_tag(root: Path, tag: str) -> bool:
+    ref_root = root / BRAIN_REFERENCE_ROOT
+    if not tag or not ref_root.exists():
+        return False
+    for path in ref_root.iterdir():
+        if not path.is_file() or path.suffix.lower() not in {".md", ".json"}:
+            continue
+        try:
+            if tag in path.read_text(encoding="utf-8-sig"):
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def build_frontier_report(workspace_root: str | Path | None = None, max_studies: int = 12) -> dict[str, Any]:
     """Build a read-only freshness report for daily_research handoff decisions."""
 
@@ -229,6 +244,22 @@ def build_frontier_report(workspace_root: str | Path | None = None, max_studies:
     registered_tags = set(_registered_study_tags(root))
     latest_tags = [str(study.get("tag", "") or "") for study in latest_studies if study.get("tag")]
     unregistered_latest_tags = [tag for tag in latest_tags if tag not in registered_tags]
+    studies_by_tag = {str(study.get("tag", "") or ""): study for study in latest_studies if study.get("tag")}
+    unregistered_latest_output_details = []
+    for tag in unregistered_latest_tags:
+        study = studies_by_tag.get(tag, {})
+        reference_exists = _references_mention_tag(root, tag)
+        unregistered_latest_output_details.append(
+            {
+                "tag": tag,
+                "path": str(study.get("summary_path", "") or ""),
+                "mtime": str(study.get("mtime", "") or ""),
+                "mtime_epoch": float(study.get("mtime_epoch", 0.0) or 0.0),
+                "reference_exists": reference_exists,
+                "registered": False,
+                "suggested_action": "repair_registry_reference" if reference_exists else "create_reconciliation_proposal",
+            }
+        )
     latest_output_epoch = max((float(study.get("mtime_epoch", 0.0) or 0.0) for study in latest_studies), default=0.0)
     output_newer_than_brain = bool(latest_output_epoch and latest_output_epoch > latest_brain_reference_epoch)
     warnings: list[str] = []
@@ -243,9 +274,9 @@ def build_frontier_report(workspace_root: str | Path | None = None, max_studies:
         "latest_brain_reference_epoch": latest_brain_reference_epoch,
         "registered_study_tag_count": len(registered_tags),
         "unregistered_latest_tags": unregistered_latest_tags,
+        "unregistered_latest_output_details": unregistered_latest_output_details,
         "output_newer_than_brain": output_newer_than_brain,
         "brain_may_be_stale": output_newer_than_brain or bool(unregistered_latest_tags),
         "warnings": warnings,
         "guidance": "If brain_may_be_stale=true, read output explicit tags before answering current state or next-step questions.",
     }
-

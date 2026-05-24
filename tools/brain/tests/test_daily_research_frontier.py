@@ -60,6 +60,13 @@ class FrontierScannerTest(unittest.TestCase):
         self.assertTrue(report["brain_may_be_stale"])
         self.assertIn("path20_unregistered", report["unregistered_latest_tags"])
         self.assertIn("unregistered_latest_output_tags", report["warnings"])
+        details = {item["tag"]: item for item in report["unregistered_latest_output_details"]}
+        self.assertIn("path20_unregistered", details)
+        detail = details["path20_unregistered"]
+        self.assertEqual(detail["path"], "daily_research/output/path_policy/studies/path20_unregistered/study_summary.json")
+        self.assertEqual(detail["mtime_epoch"], 100)
+        self.assertFalse(detail["reference_exists"])
+        self.assertEqual(detail["suggested_action"], "create_reconciliation_proposal")
 
     def test_failed_or_interrupted_summary_is_not_upgraded_to_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -120,4 +127,3 @@ class FrontierScannerTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

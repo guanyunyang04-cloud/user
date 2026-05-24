@@ -315,6 +315,14 @@ def build_brain_catalog() -> dict[str, Any]:
             )
         )
 
+    acknowledged_non_truth_statuses = {
+        "cache_legacy",
+        "non_truth_tooling",
+        "external_or_inactive_missing_manifest",
+    }
+    action_needed_noncanonical_statuses = {"discovered_untracked", "missing_manifest"}
+    noncanonical_statuses = acknowledged_non_truth_statuses | action_needed_noncanonical_statuses
+
     for root in _discover_brain_dirs():
         if root.as_posix() in canonical_roots:
             continue
@@ -322,14 +330,24 @@ def build_brain_catalog() -> dict[str, Any]:
         if root.as_posix() == "daily_research/cache/brain":
             brain_id = "daily_research_cache_legacy"
             status = "cache_legacy"
+            manifest_ref: Path | str = manifest_path if workspace_path(manifest_path).exists() else ""
+        elif root.as_posix() == "tools/brain":
+            brain_id = "tools"
+            status = "non_truth_tooling"
+            manifest_ref = ""
+        elif root.as_posix() == "a_stock_daily_selection/brain":
+            brain_id = "a_stock_daily_selection"
+            status = "external_or_inactive_missing_manifest"
+            manifest_ref = ""
         else:
             brain_id = root.parent.as_posix().replace("/", "_").replace("-", "_")
             status = "discovered_untracked" if workspace_path(manifest_path).exists() else "missing_manifest"
+            manifest_ref = manifest_path if workspace_path(manifest_path).exists() else ""
         records.append(
             _catalog_record(
                 brain_id=brain_id,
                 root=root,
-                manifest_path=manifest_path if workspace_path(manifest_path).exists() else "",
+                manifest_path=manifest_ref,
                 status=status,
                 body_root=root.parent,
                 last_guard_status="not_guarded",
@@ -339,7 +357,7 @@ def build_brain_catalog() -> dict[str, Any]:
     current_ids = {str(item.get("brain_id", "")) for item in records}
     for brain_id, record in registered_catalog.items():
         status = str(record.get("status", "") or "")
-        if brain_id in current_ids or status not in {"cache_legacy", "discovered_untracked", "missing_manifest"}:
+        if brain_id in current_ids or status not in noncanonical_statuses:
             continue
         root = Path(str(record.get("root", "") or ""))
         if not root.as_posix():
@@ -357,7 +375,7 @@ def build_brain_catalog() -> dict[str, Any]:
 
     return {
         "schema_version": 1,
-        "generated_at": "2026-05-18",
+        "generated_at": datetime.now().date().isoformat(),
         "language_policy": LANGUAGE_POLICY_ID,
         "brains": records,
     }
@@ -644,10 +662,17 @@ def audit_brain_system(*, scope: str = "all") -> dict[str, Any]:
         }
         for item in catalog["brains"]
     }
+    noncanonical_statuses = {
+        "discovered_untracked",
+        "cache_legacy",
+        "missing_manifest",
+        "non_truth_tooling",
+        "external_or_inactive_missing_manifest",
+    }
     noncanonical = [
         item
         for item in catalog["brains"]
-        if item.get("status") in {"discovered_untracked", "cache_legacy", "missing_manifest"}
+        if item.get("status") in noncanonical_statuses
     ]
     split_exists = workspace_path(SPLIT_WORKFLOW_REGISTRY).exists()
     legacy_exists = workspace_path(WORKFLOW_REGISTRY).exists()

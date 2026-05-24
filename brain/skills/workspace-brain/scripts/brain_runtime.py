@@ -47,6 +47,34 @@ def _run_git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _run_command(cwd: Path, command: list[str]) -> dict[str, Any]:
+    result = subprocess.run(
+        command,
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    return {
+        "command": command,
+        "returncode": result.returncode,
+        "ok": result.returncode == 0,
+        "stdout": result.stdout or "",
+        "stderr": result.stderr or "",
+        "stdout_tail": (result.stdout or "")[-4000:],
+        "stderr_tail": (result.stderr or "")[-2000:],
+    }
+
+
+def _parse_json_stdout(result: dict[str, Any]) -> dict[str, Any]:
+    try:
+        payload = json.loads(str(result.get("stdout", result.get("stdout_tail", "")) or ""))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _git_state(cwd: Path) -> dict[str, Any]:
     root_result = _run_git(cwd, "rev-parse", "--show-toplevel")
     is_git = root_result.returncode == 0
@@ -89,6 +117,116 @@ def detect(cwd: Path) -> dict[str, Any]:
         "brain_tools_workflow": str(tools_workflow.resolve()) if tools_workflow.exists() else "",
         "git": git,
         "next_actions": ["run_capsule"] if has_brain else ["init_brain_available"],
+    }
+
+
+def _summary_counts(payload: dict[str, Any]) -> dict[str, Any]:
+    findings = payload.get("findings", [])
+    if not isinstance(findings, list):
+        findings = []
+    return {
+        "status": str(payload.get("status", "") or ""),
+        "error_count": int(payload.get("error_count", 0) or 0),
+        "warning_count": int(payload.get("warning_count", 0) or 0),
+        "warning_codes": [
+            str(item.get("code", "") or "")
+            for item in findings
+            if isinstance(item, dict) and str(item.get("severity", "") or "") == "warning"
+        ],
+    }
+
+
+def health(cwd: Path) -> dict[str, Any]:
+    detected = detect(cwd)
+    workspace = Path(detected["brain_root"] or cwd.resolve()).resolve()
+    skill_sync_result = _run_command(
+        workspace,
+        [sys.executable, "-m", "tools.brain.skill_install", "--check"],
+    )
+    integrity_result = _run_command(
+        workspace,
+        [sys.executable, "-m", "tools.brain.integrity_check", "--json"],
+    )
+    doc_guard_result = _run_command(
+        workspace,
+        [sys.executable, "-m", "tools.brain.doc_guard", "check"],
+    )
+    skill_sync = _parse_json_stdout(skill_sync_result)
+    integrity = _parse_json_stdout(integrity_result)
+
+    catalog_summary: dict[str, Any] = {"status": "unavailable"}
+    frontier_summary: dict[str, Any] = {"status": "unavailable"}
+    try:
+        if str(workspace) not in sys.path:
+            sys.path.insert(0, str(workspace))
+        from tools.brain.platform import build_brain_catalog
+        from tools.brain.adapters.daily_research_frontier import build_frontier_report
+
+        catalog = build_brain_catalog()
+        non_truth_statuses = {
+            "cache_legacy",
+            "non_truth_tooling",
+            "external_or_inactive_missing_manifest",
+            "discovered_untracked",
+            "missing_manifest",
+        }
+        catalog_summary = {
+            "status": "ok",
+            "brain_count": len(catalog.get("brains", [])),
+            "generated_at": catalog.get("generated_at", ""),
+            "non_truth_brains": [
+                {
+                    "brain_id": item.get("brain_id", ""),
+                    "status": item.get("status", ""),
+                    "root": item.get("root", ""),
+                }
+                for item in catalog.get("brains", [])
+                if isinstance(item, dict) and item.get("status") in non_truth_statuses
+            ],
+        }
+        frontier = build_frontier_report(workspace_root=workspace)
+        frontier_summary = {
+            "status": "warning" if frontier.get("brain_may_be_stale") else "ok",
+            "brain_may_be_stale": bool(frontier.get("brain_may_be_stale")),
+            "warnings": list(frontier.get("warnings", []) or []),
+            "unregistered_latest_tags": list(frontier.get("unregistered_latest_tags", []) or []),
+            "unregistered_latest_output_details": list(frontier.get("unregistered_latest_output_details", []) or []),
+        }
+    except Exception as exc:
+        catalog_summary = {"status": "error", "error": str(exc)}
+        frontier_summary = {"status": "error", "error": str(exc)}
+
+    next_actions: list[str] = []
+    if not detected["has_brain"]:
+        next_actions.append("init_brain")
+    if not skill_sync.get("all_in_sync", False):
+        next_actions.append("run_skill_install")
+    integrity_summary = _summary_counts(integrity)
+    if integrity_summary["error_count"]:
+        next_actions.append("fix_integrity_errors")
+    if frontier_summary.get("brain_may_be_stale"):
+        next_actions.append("review_frontier_reconciliation")
+    if not next_actions:
+        next_actions.append("run_capsule")
+
+    return {
+        "status": "ok" if detected["status"] == "ok" and integrity_result["returncode"] == 0 else "warning",
+        "detect": detected,
+        "skill_sync": {
+            "status": "ok" if skill_sync_result["returncode"] == 0 else "failed",
+            "all_in_sync": bool(skill_sync.get("all_in_sync", False)),
+            "skills": list(skill_sync.get("skills", []) or []),
+        },
+        "doc_guard": {
+            "status": "ok" if doc_guard_result["returncode"] == 0 else "failed",
+            "returncode": doc_guard_result["returncode"],
+            "stdout_tail": doc_guard_result["stdout_tail"],
+            "stderr_tail": doc_guard_result["stderr_tail"],
+        },
+        "integrity": integrity_summary,
+        "catalog": catalog_summary,
+        "frontier": frontier_summary,
+        "next_actions": next_actions,
     }
 
 
@@ -173,7 +311,13 @@ def capsule(cwd: Path, task: str, intent: str) -> dict[str, Any]:
         )
         if result.returncode == 0:
             return json.loads(result.stdout)
-        return {"status": "error", "error": result.stderr.strip(), "command": command, "detect": detected}
+        return {
+            "status": "error",
+            "error": result.stderr.strip(),
+            "command": command,
+            "detect": detected,
+            "health_summary": health(cwd),
+        }
     mutation_allowed = intent != "mutate" or (not detected["git"]["is_git_repo"] or detected["git"]["on_main"])
     blockers = [] if mutation_allowed else ["not_on_main_for_mutation"]
     if not detected["has_brain"]:
@@ -187,10 +331,34 @@ def capsule(cwd: Path, task: str, intent: str) -> dict[str, Any]:
         "mutation_allowed": mutation_allowed,
         "preflight_blockers": blockers,
         "next_actions": detected["next_actions"],
+        "health_summary": health(cwd),
     }
 
 
-def proposal(cwd: Path, title: str, trigger: str, evidence: str, recommendation: str) -> dict[str, Any]:
+def _owner_brain(cwd: Path, fallback: str) -> str:
+    brain_root = _find_brain_root(cwd.resolve())
+    manifest = (brain_root or cwd.resolve()) / "brain" / "brain_manifest.json"
+    if not manifest.exists():
+        return fallback
+    try:
+        payload = json.loads(manifest.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return fallback
+    return str(payload.get("brain_id") or payload.get("brain_type") or fallback)
+
+
+def proposal(
+    cwd: Path,
+    title: str,
+    trigger: str,
+    evidence: str,
+    recommendation: str,
+    *,
+    severity: str = "info",
+    owner_brain: str = "",
+    writeback_target: str = "brain/references/",
+    requires_user_confirmation: bool = True,
+) -> dict[str, Any]:
     resolved = cwd.resolve()
     brain_root = _find_brain_root(resolved) or resolved
     out_dir = brain_root / "brain" / "output" / "runtime_learning"
@@ -202,12 +370,16 @@ def proposal(cwd: Path, title: str, trigger: str, evidence: str, recommendation:
         "title": title,
         "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "authority": "requires_user_confirmation",
+        "severity": severity,
+        "owner_brain": owner_brain or _owner_brain(resolved, "workspace"),
+        "writeback_target": writeback_target,
+        "requires_user_confirmation": bool(requires_user_confirmation),
         "facts": [trigger],
         "inferences": [],
         "assumptions": [],
         "trigger_evidence": [evidence],
         "recommendation": recommendation,
-        "suggested_write_routes": ["brain/references/", "brain/knowledge_center.md"],
+        "suggested_write_routes": [writeback_target, "brain/knowledge_center.md"],
         "suggested_tests": [],
         "risks": ["Core brain or skill changes must not be applied without explicit confirmation."],
     }
@@ -220,6 +392,9 @@ def proposal(cwd: Path, title: str, trigger: str, evidence: str, recommendation:
                 f"# {title}",
                 "",
                 f"- Authority: `{payload['authority']}`",
+                f"- Severity: `{payload['severity']}`",
+                f"- Owner brain: `{payload['owner_brain']}`",
+                f"- Writeback target: `{payload['writeback_target']}`",
                 f"- Trigger: {trigger}",
                 f"- Evidence: {evidence}",
                 f"- Recommendation: {recommendation}",
@@ -244,12 +419,18 @@ def build_parser() -> argparse.ArgumentParser:
     capsule_parser.add_argument("--cwd", default=".")
     capsule_parser.add_argument("--task", default="")
     capsule_parser.add_argument("--intent", choices=("read", "mutate", "long_task", "writeback"), default="read")
+    health_parser = sub.add_parser("health")
+    health_parser.add_argument("--cwd", default=".")
     proposal_parser = sub.add_parser("proposal")
     proposal_parser.add_argument("--cwd", default=".")
     proposal_parser.add_argument("--title", required=True)
     proposal_parser.add_argument("--trigger", required=True)
     proposal_parser.add_argument("--evidence", required=True)
     proposal_parser.add_argument("--recommendation", required=True)
+    proposal_parser.add_argument("--severity", default="info")
+    proposal_parser.add_argument("--owner-brain", default="")
+    proposal_parser.add_argument("--writeback-target", default="brain/references/")
+    proposal_parser.add_argument("--requires-user-confirmation", action="store_true", default=True)
     return parser
 
 
@@ -262,8 +443,20 @@ def main() -> int:
         payload = init_brain(cwd, str(args.brain_id))
     elif args.command == "capsule":
         payload = capsule(cwd, str(args.task or ""), str(args.intent or "read"))
+    elif args.command == "health":
+        payload = health(cwd)
     elif args.command == "proposal":
-        payload = proposal(cwd, str(args.title), str(args.trigger), str(args.evidence), str(args.recommendation))
+        payload = proposal(
+            cwd,
+            str(args.title),
+            str(args.trigger),
+            str(args.evidence),
+            str(args.recommendation),
+            severity=str(args.severity),
+            owner_brain=str(args.owner_brain or ""),
+            writeback_target=str(args.writeback_target),
+            requires_user_confirmation=bool(args.requires_user_confirmation),
+        )
     else:
         raise ValueError(f"Unsupported command: {args.command}")
     _print_json(payload)

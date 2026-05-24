@@ -13,6 +13,12 @@ Run detection first when taking over an unknown workspace:
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py detect --cwd .
 ```
 
+Run a read-only health snapshot so catalog, guard, skill sync, and frontier warnings are visible before work begins:
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py health --cwd .
+```
+
 If the project has no `brain/brain_manifest.json`, initialize a minimal brain only when mutation is allowed:
 
 ```powershell
@@ -61,7 +67,7 @@ This fallback returns schema v2 capsule context, the selected workflow, checklis
 Generate a runtime learning proposal when a repeated failure, rule conflict, timeout misread, branch violation, missing entrypoint, or stale skill is discovered:
 
 ```powershell
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py proposal --cwd . --title "<short title>" --trigger "<fact>" --evidence "<path or observation>" --recommendation "<change proposal>"
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py proposal --cwd . --title "<short title>" --trigger "<fact>" --evidence "<path or observation>" --recommendation "<change proposal>" --severity info --owner-brain workspace --writeback-target brain/references/
 ```
 
 The proposal is advisory. Do not rewrite core brain docs, workflow rules, or this skill without explicit user confirmation.

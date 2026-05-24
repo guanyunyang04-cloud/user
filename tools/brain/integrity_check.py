@@ -625,14 +625,24 @@ def _validate_brain_catalog(findings: list[Finding], main_manifest: dict[str, An
     for brain_id, built in built_records.items():
         if brain_id not in records:
             findings.append(Finding("warning", "brain_catalog_discovered_entry_missing", f"catalog omits discovered brain: {brain_id}", catalog_path))
+    acknowledged_non_truth_statuses = {
+        "cache_legacy",
+        "non_truth_tooling",
+        "external_or_inactive_missing_manifest",
+    }
+    action_needed_noncanonical_statuses = {"discovered_untracked", "missing_manifest"}
     for brain_id, record in records.items():
         status = str(record.get("status", ""))
-        if status in {"cache_legacy", "discovered_untracked", "missing_manifest"}:
+        if status in acknowledged_non_truth_statuses | action_needed_noncanonical_statuses:
+            if status in acknowledged_non_truth_statuses:
+                detail = f"{brain_id} is an acknowledged non-truth source classified as {status}"
+            else:
+                detail = f"{brain_id} needs review: classified as {status} and is not a truth source"
             findings.append(
                 Finding(
                     "warning",
                     "catalog_noncanonical_brain",
-                    f"{brain_id} is classified as {status} and is not a truth source",
+                    detail,
                     str(record.get("root", "") or catalog_path),
                 )
             )
@@ -691,4 +701,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

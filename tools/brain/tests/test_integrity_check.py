@@ -13,8 +13,18 @@ class BrainIntegrityCatalogTest(unittest.TestCase):
 
         self.assertEqual(errors, [])
         self.assertIn("catalog_noncanonical_brain", warning_codes)
+        self.assertNotIn("brain_catalog_discovered_entry_missing", warning_codes)
+
+    def test_non_truth_catalog_warnings_are_acknowledged_boundaries(self) -> None:
+        findings = run_checks()
+        warnings = [finding for finding in findings if finding.code == "catalog_noncanonical_brain"]
+
+        self.assertTrue(warnings)
+        self.assertTrue(
+            all("acknowledged non-truth" in finding.detail for finding in warnings),
+            [finding.detail for finding in warnings],
+        )
 
 
 if __name__ == "__main__":
     unittest.main()
-
