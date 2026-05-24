@@ -4,6 +4,7 @@ import json
 import sys
 from io import StringIO
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -88,6 +89,9 @@ def test_trade_plan_summary_normalizes_external_model_info(tmp_path: Path) -> No
                 "production_model_status": "fresh",
                 "production_model_trading_day_lag": 20,
                 "candidate_target_weight_csv": "target.csv",
+                "source_signal_date": "2026-05-22",
+                "execution_signal_date": "2026-05-22",
+                "signal_panel_status": "ok",
             },
             ensure_ascii=False,
         ),
@@ -101,6 +105,60 @@ def test_trade_plan_summary_normalizes_external_model_info(tmp_path: Path) -> No
     assert payload["model_info"]["latest_completed_trading_date"] == "2026-05-22"
     assert payload["model_info"]["trading_day_lag"] == 20
     assert payload["model_info"]["status"] == "fresh"
+    assert payload["model_info"]["source_signal_date"] == "2026-05-22"
+    assert payload["model_info"]["execution_signal_date"] == "2026-05-22"
+    assert payload["model_info"]["signal_panel_status"] == "ok"
+
+
+def test_run_trade_plan_injects_fresh_signal_panel_guard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from daily_research.baseline import generate_daily_trade_plan
+    from daily_research.execution import run_trade_plan
+
+    exec_dir = tmp_path / "execution"
+    exec_dir.mkdir()
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(run_trade_plan, "bootstrap_execution_paths", lambda _file: exec_dir)
+    monkeypatch.setattr(run_trade_plan, "ensure_default_pool_argument", lambda **_kwargs: None)
+    monkeypatch.setattr(run_trade_plan, "ensure_execution_strategy_defaults", lambda: None)
+    monkeypatch.setattr(
+        run_trade_plan.sys,
+        "argv",
+        ["run_trade_plan.py", "--legacy-ml", "--model-artifact", str(tmp_path / "model.joblib")],
+    )
+    monkeypatch.setattr(generate_daily_trade_plan, "main", lambda: captured.setdefault("argv", list(run_trade_plan.sys.argv)))
+
+    run_trade_plan.main()
+
+    assert "--require-fresh-signal-panel" in captured["argv"]
+
+
+def test_external_target_weight_universe_uses_latest_panel_stocks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from daily_research.execution import entrypoint_utils, liquidity_universe
+
+    panel = tmp_path / "target.csv"
+    panel.write_text(
+        "date,stock,target_weight\n"
+        "2026-05-21,000001.SZ,1.0\n"
+        "2026-05-22,600864.SH,0.5\n"
+        "2026-05-22,002866.SZ,0.5\n",
+        encoding="utf-8",
+    )
+    universe_dir = tmp_path / "universe"
+    monkeypatch.setattr(liquidity_universe, "get_universe_dir", lambda: universe_dir)
+    monkeypatch.setattr(
+        entrypoint_utils.sys,
+        "argv",
+        ["run_trade_plan.py", "--external-target-weight-csv", str(panel)],
+    )
+
+    assert entrypoint_utils.ensure_external_target_weight_universe_argument() is True
+
+    stocks_file = Path(entrypoint_utils.sys.argv[entrypoint_utils.sys.argv.index("--stocks-file") + 1])
+    assert stocks_file.read_text(encoding="utf-8").splitlines() == ["002866.SZ", "600864.SH"]
 
 
 def test_models_payload_includes_core_model_roles() -> None:
@@ -114,6 +172,38 @@ def test_models_payload_includes_core_model_roles() -> None:
     assert "continuous_policy" not in roles
     assert not any(item["id"] == "continuous-policy-shadow" for item in payload["models"])
     assert any(item["is_live"] for item in payload["models"])
+
+
+def test_active_manifest_summary_keeps_trade_plan_signal_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from daily_research.execution import app_service
+
+    manifest_path = tmp_path / "active_execution_strategy.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "trade_plan_target_weight_panel_csv": str(tmp_path / "target.csv"),
+                "trade_plan_score_panel_csv": str(tmp_path / "score.csv"),
+                "production_root": str(tmp_path / "production"),
+                "production_manifest_json": str(tmp_path / "production" / "production_retrain_manifest.json"),
+                "production_anchor_source_run_dir": str(tmp_path / "fullfit"),
+                "production_anchor_sync_manifest": str(tmp_path / "production" / "production_anchor_sync_manifest.json"),
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(app_service, "ACTIVE_MANIFEST_PATH", manifest_path)
+
+    payload = app_service.active_manifest_summary()
+
+    assert payload["trade_plan_target_weight_panel_csv"].endswith("target.csv")
+    assert payload["trade_plan_score_panel_csv"].endswith("score.csv")
+    assert payload["production_root"].endswith("production")
+    assert payload["production_manifest_json"].endswith("production_retrain_manifest.json")
+    assert payload["production_anchor_source_run_dir"].endswith("fullfit")
+    assert payload["production_anchor_sync_manifest"].endswith("production_anchor_sync_manifest.json")
 
 
 def test_data_sources_payload_includes_lake_and_platform() -> None:
@@ -176,6 +266,228 @@ def test_data_sources_payload_marks_current_dataset_latest(monkeypatch: pytest.M
     assert payload["is_current_dataset_complete"] is True
     assert payload["next_refresh_action"] == "skip"
     assert "2026-05-22" in payload["refresh_explanation"]
+
+
+def test_production_anchor_audit_detects_default_fullfit_mismatch(tmp_path: Path) -> None:
+    from daily_research.execution import production_signal
+
+    fullfit = tmp_path / "fullfit"
+    production = tmp_path / "production"
+    fullfit.mkdir()
+    production.mkdir()
+    (fullfit / "deep_alpha_model.pt").write_bytes(b"fullfit-model")
+    (production / "deep_alpha_model.pt").write_bytes(b"formal-source-model")
+    (fullfit / "metrics.json").write_text(
+        json.dumps({"train_end": "2026-03-31", "stocks_file": ""}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (production / "metrics.json").write_text(
+        json.dumps(
+            {
+                "train_end": "2025-03-17",
+                "stocks_file": r"H:\new_tdx64\PYPlugins\user\daily_research\execution\universe\liquid500_latest.txt",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    audit = production_signal.audit_production_anchor(
+        production_root=production,
+        fullfit_run_dir=fullfit,
+        project_root=tmp_path / "daily_research",
+    )
+
+    assert audit["status"] == "stale_or_mismatched"
+    assert audit["model_hash_match"] is False
+    assert audit["metrics_train_end_match"] is False
+    assert audit["old_path_count"] == 1
+
+
+def test_data_sources_payload_marks_signal_panels_stale(monkeypatch: pytest.MonkeyPatch) -> None:
+    from daily_research.execution import app_service
+
+    monkeypatch.setattr(app_service, "get_latest_completed_trading_date", lambda: "2026-05-22", raising=False)
+    monkeypatch.setattr(
+        app_service,
+        "_latest_policy_input_lake_dataset",
+        lambda lake_root=None: {
+            "dataset_id": "policy_input_bundle__current",
+            "start_date": "2024-01-01",
+            "end_date": "2026-05-22",
+            "created_at": "2026-05-24T00:00:00",
+            "status": "stored",
+        },
+    )
+    monkeypatch.setattr(
+        app_service,
+        "active_manifest_summary",
+        lambda: {
+            "lake_dataset_id": "policy_input_bundle__current",
+            "source_market_dataset_id": "policy_input_bundle__current",
+            "trade_plan_target_weight_panel_csv": "target.csv",
+            "trade_plan_score_panel_csv": "score.csv",
+        },
+    )
+    monkeypatch.setattr(app_service, "_latest_refresh_manifest_path", lambda: "", raising=False)
+    monkeypatch.setattr(
+        app_service.production_signal,
+        "signal_panel_summary",
+        lambda active, latest_completed_date: {
+            "status": "stale",
+            "target_panel_latest_date": "2026-05-19",
+            "score_panel_latest_date": "2026-05-19",
+            "latest_date": "2026-05-19",
+            "required_date": "2026-05-22",
+            "next_signal_action": "refresh",
+        },
+    )
+    monkeypatch.setattr(
+        app_service.production_signal,
+        "audit_production_anchor",
+        lambda **kwargs: {"status": "ok", "model_hash_match": True},
+    )
+
+    payload = app_service.data_sources_summary()
+
+    assert payload["next_refresh_action"] == "skip"
+    assert payload["next_signal_action"] == "refresh"
+    assert payload["signal_panel_status"] == "stale"
+    assert payload["signal_panel_latest_date"] == "2026-05-19"
+    assert payload["production_anchor_status"] == "ok"
+
+
+def test_data_refresh_api_runs_signal_refresh_when_data_latest_but_signal_stale(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from daily_research.execution import web_server
+
+    captured: dict[str, Any] = {}
+
+    def fake_launch_task_async(**kwargs):
+        captured.update(kwargs)
+        return {"job_id": "signal-job", "task_name": kwargs["task_name"], "status": "queued"}
+
+    monkeypatch.setattr(
+        web_server.app_service,
+        "data_sources_summary",
+        lambda: {
+            "status": "ok",
+            "active_dataset_id": "policy_input_bundle__current",
+            "latest_policy_input_dataset_id": "policy_input_bundle__current",
+            "latest_policy_input_dataset_end_date": "2026-05-22",
+            "dataset_sync_status": "synced",
+            "is_current_dataset_latest": True,
+            "is_current_dataset_complete": True,
+            "next_refresh_action": "skip",
+            "next_signal_action": "refresh",
+            "signal_panel_status": "stale",
+            "refresh_explanation": "数据已最新，但生产信号面板需要刷新。",
+            "data_platform": {
+                "latest_completed_trading_date": "2026-05-22",
+                "recommended_domains": FORMAL_REFRESH_DOMAINS,
+                "default_refresh": {
+                    "as_of_date": "2026-05-22",
+                    "universe": "all_a",
+                    "domains": FORMAL_REFRESH_DOMAINS,
+                    "provider_plan": "baostock_only",
+                },
+            },
+        },
+    )
+    monkeypatch.setattr(web_server.app_service, "launch_task_async", fake_launch_task_async)
+
+    client = TestClient(web_server.create_app())
+    response = client.post("/api/data-sources/refresh", json={})
+
+    assert response.status_code == 200
+    assert response.json()["task_name"] == "refresh-production-live-panels"
+    assert captured["task_name"] == "refresh-production-live-panels"
+
+
+def test_signal_refresh_clones_latest_sector_board_view_for_current_dataset(tmp_path: Path) -> None:
+    from daily_research.data_lake import ResearchDataLake, load_policy_inputs_from_lake
+    from daily_research.execution import production_signal
+
+    dates = pd.to_datetime(["2026-05-20", "2026-05-21", "2026-05-22"])
+    stocks = ["000001.SZ", "600000.SH"]
+    close = pd.DataFrame([[10.0, 20.0], [10.1, 20.1], [10.2, 20.2]], index=dates, columns=stocks)
+    market_frames = {
+        "Open": close - 0.1,
+        "High": close + 0.2,
+        "Low": close - 0.2,
+        "Close": close,
+        "Volume": pd.DataFrame(1000.0, index=dates, columns=stocks),
+        "Amount": pd.DataFrame(10000.0, index=dates, columns=stocks),
+    }
+    lake = ResearchDataLake(tmp_path / "lake")
+    old_bundle = lake.save_market_data_bundle(
+        spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "old"},
+        market_frames=market_frames,
+        benchmark_close=pd.Series(4000.0, index=dates, name="000300.SH"),
+        benchmark_open=pd.Series(3995.0, index=dates, name="000300.SH"),
+        membership_frame=pd.DataFrame(True, index=dates, columns=stocks),
+        feature_frames={"score_none": close * 0.0, "score_v2": close * 0.0 + 0.1},
+        source="old",
+    )
+    current_bundle = lake.save_market_data_bundle(
+        spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "current"},
+        market_frames=market_frames,
+        benchmark_close=pd.Series(4000.0, index=dates, name="000300.SH"),
+        benchmark_open=pd.Series(3995.0, index=dates, name="000300.SH"),
+        membership_frame=pd.DataFrame(True, index=dates, columns=stocks),
+        feature_frames={"score_none": close * 0.0, "score_v2": close * 0.0 + 0.1},
+        source="current",
+    )
+    lake.save_sector_board_view(
+        spec={
+            "source_market_dataset_id": old_bundle.dataset_id,
+            "view_kind": "latest_static_snapshot",
+            "view_name": "sector_board_latest_static",
+            "snapshot_semantics": "latest_static_snapshot",
+            "as_of_date": "2026-05-22",
+        },
+        industry_map_frame=pd.DataFrame(
+            {
+                "symbol": stocks,
+                "industry": ["银行", "银行"],
+                "source": ["synthetic", "synthetic"],
+                "as_of_date": ["2026-05-22", "2026-05-22"],
+            }
+        ),
+        board_membership_frame=pd.DataFrame(
+            {
+                "symbol": stocks,
+                "board_kind": ["FG", "FG"],
+                "board_name": ["高股息", "高股息"],
+                "board_code": ["880002", "880002"],
+                "source": ["synthetic", "synthetic"],
+                "source_start_date": ["2020-01-01", "2020-01-01"],
+                "source_update_date": ["2026-05-22", "2026-05-22"],
+                "as_of_date": ["2026-05-22", "2026-05-22"],
+            }
+        ),
+        board_summary_frame=pd.DataFrame({"board_kind": ["FG"], "board_name": ["高股息"], "board_code": ["880002"]}),
+        source_cache={"cloned": False},
+    )
+
+    sector_view_id = production_signal._ensure_sector_board_view_for_dataset(
+        data_lake_root=tmp_path / "lake",
+        lake_dataset_id=current_bundle.dataset_id,
+    )
+    metadata = lake.describe_dataset(sector_view_id)
+    prepared = load_policy_inputs_from_lake(
+        lake=lake,
+        dataset_id=current_bundle.dataset_id,
+        sector_board_view_id=sector_view_id,
+        start_date="2026-05-20",
+        end_date="2026-05-22",
+        benchmark="000300.SH",
+    )
+
+    assert metadata["source"] == current_bundle.dataset_id
+    assert prepared.metadata_frames["industry_map"]["symbol"].tolist() == stocks
+    assert prepared.metadata_frames["board_membership"]["symbol"].tolist() == stocks
 
 
 def test_data_refresh_api_skips_when_current_dataset_is_latest(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -453,6 +765,20 @@ def test_data_refresh_job_success_syncs_active_manifest(monkeypatch: pytest.Monk
 
     script = tmp_path / "refresh_success.py"
     script.write_text("print('refresh ok')\n", encoding="utf-8")
+    refresh_manifest_path = tmp_path / "refresh_run" / "refresh_manifest.json"
+    refresh_manifest_path.parent.mkdir()
+    refresh_manifest_path.write_text(
+        json.dumps(
+            {
+                "status": "ok",
+                "registered_market_dataset_id": "policy_input_bundle__latest",
+                "policy_input_dataset_id": "policy_input_bundle__latest",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    signal_manifest_path = tmp_path / "signal" / "live_panel_refresh_manifest.json"
 
     class FakeSpec:
         description = "refresh data"
@@ -481,7 +807,7 @@ def test_data_refresh_job_success_syncs_active_manifest(monkeypatch: pytest.Monk
 
     def fake_sync(**kwargs):
         captured.update(kwargs)
-        return {"updated": True, "dataset_id": "policy_input_bundle__latest"}
+        return {"updated": True, "dataset_id": "policy_input_bundle__latest", "end_date": "2026-05-22"}
 
     monkeypatch.setattr(app_service, "get_task_spec", lambda _: FakeSpec())
     monkeypatch.setattr(app_service, "build_task_command", lambda **_: [sys.executable, str(script)])
@@ -491,6 +817,20 @@ def test_data_refresh_job_success_syncs_active_manifest(monkeypatch: pytest.Monk
     monkeypatch.setattr(app_service, "update_job_metadata", lambda job_paths, **kwargs: {"active_manifest_update": kwargs["active_manifest_update"]})
     monkeypatch.setattr(app_service, "append_event", lambda *args, **kwargs: None)
     monkeypatch.setattr(app_service, "sync_active_manifest_to_latest_lake_dataset", fake_sync)
+    monkeypatch.setattr(app_service, "_latest_refresh_manifest_path", lambda: str(refresh_manifest_path.resolve()))
+    monkeypatch.setattr(
+        app_service,
+        "_signal_refresh_metadata",
+        lambda **_: {
+            "business_status": "ok",
+            "runner_status": "ok",
+            "artifact_status": "ok",
+            "signal_refresh_manifest_path": str(signal_manifest_path.resolve()),
+            "panel_latest_date": "2026-05-22",
+            "artifact_paths": {"live_panel_refresh_manifest": str(signal_manifest_path.resolve())},
+            "evidence_paths": {"live_panel_refresh_manifest": str(signal_manifest_path.resolve())},
+        },
+    )
 
     class FakeLock:
         payload = {}
@@ -591,6 +931,23 @@ def test_data_refresh_reconciles_successful_manifest_after_runner_output_error(
     monkeypatch.setattr(app_service, "append_event", lambda *args, **kwargs: None)
     monkeypatch.setattr(app_service, "sync_active_manifest_to_latest_lake_dataset", fake_sync)
     monkeypatch.setattr(app_service, "_latest_refresh_manifest_path", lambda: str(refresh_manifest_path.resolve()))
+    monkeypatch.setattr(
+        app_service,
+        "_signal_refresh_metadata",
+        lambda **_: {
+            "business_status": "ok",
+            "runner_status": "ok",
+            "artifact_status": "ok",
+            "signal_refresh_manifest_path": str((tmp_path / "signal" / "live_panel_refresh_manifest.json").resolve()),
+            "panel_latest_date": "2026-05-22",
+            "artifact_paths": {
+                "live_panel_refresh_manifest": str((tmp_path / "signal" / "live_panel_refresh_manifest.json").resolve())
+            },
+            "evidence_paths": {
+                "live_panel_refresh_manifest": str((tmp_path / "signal" / "live_panel_refresh_manifest.json").resolve())
+            },
+        },
+    )
     monkeypatch.setattr(app_service.sys, "stdout", BrokenFlush())
 
     class FakeLock:
@@ -657,6 +1014,23 @@ def test_data_refresh_post_process_persists_evidence_metadata(monkeypatch: pytes
         "sync_active_manifest_to_latest_lake_dataset",
         lambda **kwargs: {"updated": True, "dataset_id": "policy_input_bundle__latest"},
     )
+    monkeypatch.setattr(
+        app_service,
+        "_signal_refresh_metadata",
+        lambda **_: {
+            "business_status": "ok",
+            "runner_status": "ok",
+            "artifact_status": "ok",
+            "signal_refresh_manifest_path": str((tmp_path / "signal" / "live_panel_refresh_manifest.json").resolve()),
+            "panel_latest_date": "2026-05-22",
+            "artifact_paths": {
+                "live_panel_refresh_manifest": str((tmp_path / "signal" / "live_panel_refresh_manifest.json").resolve())
+            },
+            "evidence_paths": {
+                "live_panel_refresh_manifest": str((tmp_path / "signal" / "live_panel_refresh_manifest.json").resolve())
+            },
+        },
+    )
 
     _, metadata = app_service._post_process_successful_task(
         job_paths=Paths(),
@@ -669,6 +1043,85 @@ def test_data_refresh_post_process_persists_evidence_metadata(monkeypatch: pytes
     assert persisted["artifact_status"] == "ok"
     assert persisted["artifact_paths"]["refresh_manifest"].endswith("refresh_manifest.json")
     assert persisted["active_manifest_update"]["dataset_id"] == "policy_input_bundle__latest"
+
+
+def test_data_refresh_signal_refresh_failure_marks_job_failed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from daily_research.execution import app_service
+
+    script = tmp_path / "refresh_manifest_ok.py"
+    refresh_manifest_path = tmp_path / "refresh_run" / "refresh_manifest.json"
+    refresh_manifest_text = str(refresh_manifest_path).replace("\\", "/")
+    script.write_text(
+        "from pathlib import Path\n"
+        "import json\n"
+        f"manifest_path = Path({refresh_manifest_text!r})\n"
+        "manifest_path.parent.mkdir(exist_ok=True)\n"
+        "manifest_path.write_text(json.dumps({\n"
+        "    'status': 'ok',\n"
+        "    'registered_market_dataset_id': 'policy_input_bundle__latest',\n"
+        "    'policy_input_dataset_id': 'policy_input_bundle__latest',\n"
+        "}, ensure_ascii=False), encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+
+    class FakeSpec:
+        description = "refresh data"
+
+    def fake_create_job_record(**kwargs):
+        job_dir = tmp_path / "job"
+        job_dir.mkdir(exist_ok=True)
+
+        class Paths:
+            job_id = "refresh_signal_failed"
+            stdout_path = job_dir / "stdout.log"
+            stderr_path = job_dir / "stderr.log"
+            metadata_path = job_dir / "metadata.json"
+
+        return Paths()
+
+    monkeypatch.setattr(app_service, "get_task_spec", lambda _: FakeSpec())
+    monkeypatch.setattr(app_service, "build_task_command", lambda **_: [sys.executable, str(script)])
+    monkeypatch.setattr(app_service, "create_job_record", fake_create_job_record)
+    monkeypatch.setattr(app_service, "mark_job_started", lambda *args, **kwargs: None)
+    monkeypatch.setattr(app_service, "append_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(app_service, "_latest_refresh_manifest_path", lambda: str(refresh_manifest_path.resolve()))
+    monkeypatch.setattr(
+        app_service,
+        "sync_active_manifest_to_latest_lake_dataset",
+        lambda **kwargs: {"updated": True, "dataset_id": "policy_input_bundle__latest", "end_date": "2026-05-22"},
+    )
+    monkeypatch.setattr(
+        app_service,
+        "_signal_refresh_metadata",
+        lambda **_: {
+            "business_status": "signal_failed",
+            "runner_status": "ok",
+            "artifact_status": "failed",
+            "signal_refresh_error": "score panel export failed",
+            "artifact_paths": {},
+            "evidence_paths": {},
+        },
+    )
+
+    class FakeLock:
+        payload = {}
+
+        def __init__(self, **_: object) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+    monkeypatch.setattr(app_service, "ExecutionAppLock", FakeLock)
+
+    result = app_service.run_task_sync(task_name="data-platform-refresh", passthrough_args=[], echo_output=False)
+
+    assert result["status"] == "failed"
+    assert result["metadata"]["business_status"] == "signal_failed"
+    assert result["metadata"]["signal_refresh_result"]["signal_refresh_error"] == "score panel export failed"
 
 
 def test_blocked_refresh_manifest_does_not_sync_active_manifest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

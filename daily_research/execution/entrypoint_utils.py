@@ -128,7 +128,7 @@ def _resolve_requested_pool_size(*, pool_name: str = "", pool_size: int = 0) -> 
     return int(DEFAULT_POOL_SIZE)
 
 
-def ensure_default_pool_argument(*, pool_name: str = "", pool_size: int = 0) -> None:
+def ensure_default_pool_argument(*, pool_name: str = "", pool_size: int = 0, start_date: str = "") -> None:
     if has_arg("--stocks") or has_arg("--stocks-file") or is_help_request():
         return
     from daily_research.execution.liquidity_universe import ensure_default_pool_file, get_default_pool_file
@@ -139,11 +139,13 @@ def ensure_default_pool_argument(*, pool_name: str = "", pool_size: int = 0) -> 
     data_source = str(get_arg_value("--data-source") or "lake").strip().lower()
     lake_dataset_id = str(get_arg_value("--lake-dataset-id") or "").strip()
     data_lake_root = str(get_arg_value("--data-lake-root") or "").strip()
+    resolved_start_date = str(start_date or get_arg_value("--start-date") or "20240101").strip()
     if is_help_request():
         pool_file = get_default_pool_file(resolved_pool_size)
     else:
         pool_file = ensure_default_pool_file(
             pool_size=resolved_pool_size,
+            start_date=resolved_start_date,
             data_source=data_source,
             lake_dataset_id=lake_dataset_id,
             data_lake_root=data_lake_root,
@@ -159,6 +161,7 @@ def ensure_default_pool_argument(*, pool_name: str = "", pool_size: int = 0) -> 
         if violations:
             pool_file = ensure_default_pool_file(
                 pool_size=resolved_pool_size,
+                start_date=resolved_start_date,
                 data_source=data_source,
                 lake_dataset_id=lake_dataset_id,
                 data_lake_root=data_lake_root,
@@ -172,6 +175,52 @@ def ensure_default_pool_argument(*, pool_name: str = "", pool_size: int = 0) -> 
                     f"(main-board SH/SZ A-shares only, excluding ST). Re-run update_liquid_pool.py. Examples: {bad_examples}"
                 )
     inject_default_arg("--stocks-file", str(pool_file))
+
+
+def ensure_external_target_weight_universe_argument(
+    *,
+    target_weight_csv: str = "",
+    stock_column: str = "stock",
+    date_column: str = "date",
+    output_name: str = "external_target_weight_latest",
+) -> bool:
+    if has_arg("--stocks") or has_arg("--stocks-file") or is_help_request():
+        return False
+    path_text = str(target_weight_csv or get_arg_value("--external-target-weight-csv") or "").strip()
+    if not path_text:
+        return False
+    path = Path(path_text).expanduser()
+    if not path.exists():
+        return False
+
+    import pandas as pd
+
+    frame = pd.read_csv(path, usecols=lambda column: str(column).strip().lower() in {date_column.lower(), stock_column.lower()})
+    columns = {str(column).strip().lower(): str(column) for column in frame.columns}
+    if date_column.lower() not in columns or stock_column.lower() not in columns:
+        return False
+    dates = pd.to_datetime(frame[columns[date_column.lower()]], errors="coerce")
+    latest_date = dates.max()
+    if pd.isna(latest_date):
+        return False
+    latest = frame.loc[dates.eq(latest_date)].copy()
+    stocks = sorted(
+        {
+            str(stock).strip().upper()
+            for stock in latest[columns[stock_column.lower()]].dropna().astype(str)
+            if str(stock).strip()
+        }
+    )
+    if not stocks:
+        return False
+    from daily_research.execution.liquidity_universe import get_universe_dir
+
+    universe_dir = get_universe_dir()
+    universe_dir.mkdir(parents=True, exist_ok=True)
+    universe_path = universe_dir / f"{output_name}.txt"
+    universe_path.write_text("\n".join(stocks) + "\n", encoding="utf-8")
+    inject_default_arg("--stocks-file", str(universe_path))
+    return True
 
 
 def _pool_file_violations(pool_file: Path) -> dict[str, str]:

@@ -12,9 +12,11 @@ from daily_research.execution.entrypoint_utils import (
     consume_option_arg,
     ensure_default_pool_argument,
     ensure_execution_strategy_defaults,
+    ensure_external_target_weight_universe_argument,
     ensure_text_file_from_example,
     has_arg,
     inject_default_arg,
+    inject_flag_arg,
     is_help_request,
     missing_runtime_dependency_error,
 )
@@ -71,6 +73,7 @@ def main():
     inject_default_arg("--external-score-column", "model_decision_score")
     inject_default_arg("--external-watch-score-column", "model_decision_score")
     inject_default_arg("--external-target-weight-column", "target_weight")
+    inject_flag_arg("--require-fresh-signal-panel")
 
     if (
         not legacy_ml
@@ -91,7 +94,8 @@ def main():
         )
         pool_name_hint = str(resolved_profile.liquidity_pool_name or "").strip()
 
-    ensure_default_pool_argument(pool_name=pool_name_hint)
+    if not ensure_external_target_weight_universe_argument():
+        ensure_default_pool_argument(pool_name=pool_name_hint)
     ensure_execution_strategy_defaults()
 
     if candidate_profile:

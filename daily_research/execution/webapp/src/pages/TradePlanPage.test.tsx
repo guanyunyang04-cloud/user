@@ -112,7 +112,12 @@ describe("TradePlanPage", () => {
         actions: [],
         holdings: [],
         watchlist: [],
-        model_info: { trading_day_lag: 20 },
+        model_info: {
+          trading_day_lag: 20,
+          source_signal_date: "2026-05-22",
+          execution_signal_date: "2026-05-22",
+          signal_panel_status: "ok"
+        },
         diagnostics: {
           target_position_count: 0,
           actionable_target_position_count: 0,
@@ -140,5 +145,8 @@ describe("TradePlanPage", () => {
     expect(screen.getByText("2249")).toBeInTheDocument();
     expect(screen.getByText("471")).toBeInTheDocument();
     expect(screen.getByText("1778")).toBeInTheDocument();
+    expect(screen.getByText("源信号日")).toBeInTheDocument();
+    expect(screen.getByText("执行信号日")).toBeInTheDocument();
+    expect(screen.getByText("Signal Panel")).toBeInTheDocument();
   });
 });

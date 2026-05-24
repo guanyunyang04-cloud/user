@@ -126,4 +126,87 @@ describe("DataPage", () => {
     expect(api.refreshDataSources).not.toHaveBeenCalled();
     expect(screen.getByText("历史 Lake Datasets")).toBeInTheDocument();
   });
+
+  it("allows a signal-panel refresh when the dataset is current but production signals are stale", async () => {
+    const user = userEvent.setup();
+    const api = {
+      getDataSources: vi.fn().mockResolvedValue({
+        status: "ok",
+        lake_root: "H:/quant_project/daily_research/output/research_data_lake",
+        catalog_status: "ok",
+        datasets: [],
+        active_dataset_id: "policy_input_bundle__current",
+        active_dataset_end_date: "2026-05-22",
+        latest_policy_input_dataset_id: "policy_input_bundle__current",
+        latest_policy_input_dataset_end_date: "2026-05-22",
+        dataset_sync_status: "synced",
+        current_dataset_status: "latest_complete",
+        is_current_dataset_latest: true,
+        is_current_dataset_complete: true,
+        next_refresh_action: "skip",
+        next_signal_action: "refresh",
+        signal_panel_status: "stale",
+        signal_panel_latest_date: "2026-05-19",
+        signal_panel_target_latest_date: "2026-05-19",
+        signal_panel_score_latest_date: "2026-05-19",
+        production_anchor_status: "ok",
+        refresh_explanation: "数据已最新，但 production signal panels 只到 2026-05-19。",
+        signal_panels: {
+          required_date: "2026-05-22",
+          target_panel_latest_date: "2026-05-19",
+          score_panel_latest_date: "2026-05-19",
+          target_position_count: 12
+        },
+        production_anchor: {
+          status: "ok",
+          fullfit_run_dir: "H:/quant_project/daily_research/output/short_expert_policy_v5b_execalign_production_fullfit_20260421_r1"
+        },
+        data_platform: {
+          runs_root: "runs",
+          latest_refresh_run: "",
+          provider_plan: "baostock_only",
+          latest_completed_trading_date: "2026-05-22",
+          recommended_domains: recommendedDomains,
+          default_refresh: {
+            as_of_date: "2026-05-22",
+            universe: "all_a",
+            domains: recommendedDomains,
+            provider_plan: "baostock_only"
+          }
+        }
+      }),
+      refreshDataSources: vi.fn().mockResolvedValue({ job_id: "signal-job", task_name: "refresh-production-live-panels", status: "queued" }),
+      getJob: vi.fn().mockResolvedValue({
+        job_id: "signal-job",
+        task_name: "refresh-production-live-panels",
+        status: "succeeded",
+        business_status: "ok",
+        artifact_status: "ok",
+        metadata: { business_status: "ok", artifact_status: "ok" },
+        stdout_tail: ["signal refresh complete"],
+        stderr_tail: [],
+        can_resume: false
+      })
+    } as unknown as ExecutionApi;
+
+    render(<DataPage api={api} />);
+
+    expect(await screen.findByText("生产信号面板")).toBeInTheDocument();
+    expect(screen.getAllByText("2026-05-19").length).toBeGreaterThan(0);
+    const button = screen.getByRole("button", { name: "刷新信号面板" });
+    expect(button).not.toBeDisabled();
+
+    await user.click(button);
+
+    await waitFor(() => {
+      expect(api.refreshDataSources).toHaveBeenCalledWith({
+        as_of_date: "2026-05-22",
+        start_date: "",
+        universe: "all_a",
+        domains: recommendedDomains,
+        force_unlock: false
+      });
+    });
+    expect(await screen.findByText("signal refresh complete")).toBeInTheDocument();
+  });
 });

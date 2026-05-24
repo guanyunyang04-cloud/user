@@ -132,6 +132,14 @@ TASK_SPECS: tuple[ExecutionTaskSpec, ...] = (
         safety_summary="刷新研究数据湖；成功后只更新 active execution manifest 的 lake dataset 指针，不触发重训或 promotion。",
     ),
     ExecutionTaskSpec(
+        name="refresh-production-live-panels",
+        script_relative_path="daily_research/execution/refresh_production_live_panels.py",
+        description="基于当前 active lake dataset 刷新 production live score/target panels；不训练、不 promotion。",
+        category="data_platform",
+        safety_level="safe",
+        safety_summary="只做 production signal inference/export，并校验 panels 覆盖最新完成交易日。",
+    ),
+    ExecutionTaskSpec(
         name="refresh-production-static-fallback",
         script_relative_path="daily_research/execution/refresh_production_static_fallback.py",
         description="刷新 production_root 的静态 fallback 产物与 manifest 元数据。",

@@ -6,8 +6,10 @@ import pandas as pd
 
 from daily_research.baseline.config import ResearchConfig
 from daily_research.baseline.generate_daily_trade_plan import (
+    _assess_external_model_retrain_freshness,
     _build_scores_from_external_target_weight_csv,
     _load_external_panel_row,
+    _validate_external_signal_panels_fresh,
 )
 
 
@@ -109,3 +111,49 @@ def test_external_panel_row_uses_latest_non_empty_row_before_requested_date(tmp_
     assert signal_date == pd.Timestamp("2026-05-19")
     assert row["000001.SZ"] == 0.70
     assert pd.isna(row["600000.SH"])
+
+
+def test_external_signal_panel_preflight_blocks_stale_default_trade_plan(tmp_path: Path) -> None:
+    weights = tmp_path / "weights.csv"
+    weights.write_text("date,stock,target_weight\n2026-05-19,000001.SZ,0.10\n", encoding="utf-8")
+    scores = tmp_path / "scores.csv"
+    scores.write_text("date,stock,score\n2026-05-19,000001.SZ,0.70\n", encoding="utf-8")
+
+    try:
+        _validate_external_signal_panels_fresh(
+            target_weight_csv=weights,
+            score_csv=scores,
+            required_date=pd.Timestamp("2026-05-22"),
+        )
+    except RuntimeError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("stale production signal panels must block default trade-plan generation")
+
+    assert "生产信号面板已过期" in message
+    assert "2026-05-19" in message
+    assert "2026-05-22" in message
+
+
+def test_external_model_without_retrain_thresholds_is_informational(tmp_path: Path) -> None:
+    manifest = tmp_path / "production_retrain_manifest.json"
+    manifest.write_text(
+        "{"
+        '"train_end_date": "2026-04-03",'
+        '"launch_cutoff_date": "2026-04-21",'
+        '"retrain_frequency_policy": {"auto_retrain_enabled": false}'
+        "}",
+        encoding="utf-8",
+    )
+
+    payload = _assess_external_model_retrain_freshness(
+        manifest_path=manifest,
+        latest_signal_date=pd.Timestamp("2026-05-22"),
+        trading_dates=pd.DatetimeIndex(pd.to_datetime(["2026-04-21", "2026-05-22"])),
+        warn_trading_days=0,
+        max_trading_days=0,
+    )
+
+    assert payload["status_text"] == "informational"
+    assert payload["trading_day_lag"] == 1
+    assert payload["warnings"] == []

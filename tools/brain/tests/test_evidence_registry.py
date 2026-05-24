@@ -106,6 +106,13 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
 
             self.assertTrue(daily_research_evidence.is_reference_file(path))
 
+    def test_adapter_indexes_execution_reference_names(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "execution_signal_refresh_closure_20260524.md"
+            path.write_text("# Execution Signal Refresh Closure\n", encoding="utf-8")
+
+            self.assertTrue(daily_research_evidence.is_reference_file(path))
+
     def test_registry_indexes_tdx_free_data_platform_decision(self) -> None:
         registry = build_evidence_registry()
         matches = [
@@ -129,6 +136,19 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0]["workflow"], "research_data_lake")
         self.assertIn("data_platform", matches[0]["tags"])
+
+    def test_registry_indexes_execution_signal_refresh_closure(self) -> None:
+        registry = build_evidence_registry()
+        matches = [
+            record
+            for record in registry["records"]
+            if record["id"] == "execution_signal_refresh_closure_20260524"
+        ]
+
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["workflow"], "execution")
+        self.assertIn("execution", matches[0]["tags"])
+        self.assertIn("signal_panel", matches[0]["tags"])
 
     def test_registry_uses_section_aware_tags_and_next_actions(self) -> None:
         registry = build_evidence_registry()
@@ -168,4 +188,3 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -410,12 +410,24 @@ def load_lake_market_data_with_pool_view(
     min_trading_days: int = 2,
 ) -> dict[str, Any]:
     lake = ResearchDataLake(str(data_lake_root or "").strip() or None)
+    resolved_pool_name = str(pool_name or "learned_all_a").strip().lower()
+    if not str(pool_view_id or "").strip() and pool_view_spec is None and resolved_pool_name not in {"", "all_a", "learned_all_a"}:
+        pool_view_spec = {
+            "source_market_dataset_id": str(lake_dataset_id),
+            "view_kind": "rolling_liquidity",
+            "view_name": f"rolling_{resolved_pool_name.replace('rolling_', '')}",
+            "pool_name": resolved_pool_name.replace("rolling_", ""),
+            "start_date": str(start_date),
+            "end_date": str(end_date),
+            "rebalance_every_days": 21,
+            "adv_window": 20,
+        }
     prepared = load_policy_inputs_from_lake(
         lake=lake,
         dataset_id=str(lake_dataset_id),
         start_date=str(start_date),
         end_date=str(end_date),
-        pool_name=str(pool_name or "learned_all_a"),
+        pool_name=resolved_pool_name,
         benchmark=str(benchmark or "000300.SH"),
         pool_view_id=str(pool_view_id or ""),
         pool_view_spec=pool_view_spec,

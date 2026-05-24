@@ -17,6 +17,7 @@ from typing import Any, TextIO
 
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
 from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
+from daily_research.execution import production_signal
 from daily_research.execution.app_runtime import (
     EVENTS_PATH,
     JOBS_ROOT,
@@ -278,6 +279,11 @@ def active_manifest_summary() -> dict[str, Any]:
             "liquidity_pool_name": "",
             "source_target_weight_panel_csv": "",
             "trade_plan_target_weight_panel_csv": "",
+            "trade_plan_score_panel_csv": "",
+            "production_root": "",
+            "production_manifest_json": "",
+            "production_anchor_source_run_dir": "",
+            "production_anchor_sync_manifest": "",
             "execution_policy_label": "",
             "effective_live_target_weight_mode": "",
             "effective_live_execution_profile": "",
@@ -299,6 +305,11 @@ def active_manifest_summary() -> dict[str, Any]:
         ),
         "source_target_weight_panel_csv": str(payload.get("source_target_weight_panel_csv", "") or ""),
         "trade_plan_target_weight_panel_csv": str(payload.get("trade_plan_target_weight_panel_csv", "") or ""),
+        "trade_plan_score_panel_csv": str(payload.get("trade_plan_score_panel_csv", "") or ""),
+        "production_root": str(payload.get("production_root", "") or payload.get("trade_plan_refresh_run_dir", "") or ""),
+        "production_manifest_json": str(payload.get("production_manifest_json", "") or ""),
+        "production_anchor_source_run_dir": str(payload.get("production_anchor_source_run_dir", "") or ""),
+        "production_anchor_sync_manifest": str(payload.get("production_anchor_sync_manifest", "") or ""),
         "execution_policy_label": str(payload.get("execution_policy_label", "") or payload.get("execution_alignment_profile", "") or ""),
         "effective_live_target_weight_mode": str(payload.get("effective_live_target_weight_mode", "") or ""),
         "effective_live_execution_profile": str(payload.get("effective_live_execution_profile", "") or ""),
@@ -334,6 +345,9 @@ def _normalize_trade_plan_model_info(summary: dict[str, Any]) -> dict[str, Any]:
     if summary.get("signal_date"):
         model_info.setdefault("signal_date", str(summary.get("signal_date", "")))
         model_info.setdefault("latest_completed_trading_date", str(summary.get("signal_date", "")))
+    for key in ("source_signal_date", "execution_signal_date", "signal_panel_status"):
+        if summary.get(key) not in {None, ""}:
+            model_info.setdefault(key, str(summary.get(key, "")))
     trading_day_lag = (
         summary.get("production_model_trading_day_lag")
         if summary.get("production_model_trading_day_lag") is not None
@@ -422,6 +436,9 @@ def _trade_plan_diagnostics(
         "empty_plan_reason": reason,
         "regime_state": regime_state,
         "market_filter_text": market_filter_text,
+        "source_signal_date": str(summary.get("source_signal_date", "") or ""),
+        "execution_signal_date": str(summary.get("execution_signal_date", "") or summary.get("signal_date", "") or ""),
+        "signal_panel_status": str(summary.get("signal_panel_status", "") or ""),
         "action_count": len(actions),
         "holding_count": len(holdings),
         "watchlist_count": len(watchlist),
@@ -698,6 +715,15 @@ def data_sources_summary(*, dataset_limit: int = 60) -> dict[str, Any]:
         current_dataset_status = "unknown"
         next_refresh_action = "refresh"
         refresh_explanation = "无法确认当前数据集是否完整，建议执行刷新。"
+    signal_summary = production_signal.signal_panel_summary(active, latest_completed_date=latest_completed_date)
+    anchor_summary = production_signal.audit_production_anchor()
+    signal_panel_status = str(signal_summary.get("status", "unknown") or "unknown")
+    next_signal_action = str(signal_summary.get("next_signal_action", "refresh") or "refresh")
+    if next_refresh_action == "skip" and next_signal_action == "refresh":
+        refresh_explanation = (
+            f"{refresh_explanation} 但 production signal panels 只覆盖到 "
+            f"{signal_summary.get('latest_date', '') or '未知'}，需要刷新生产信号。"
+        )
     recommended_domains = list(FORMAL_DATA_PLATFORM_DOMAINS)
     return {
         "status": "ok",
@@ -713,6 +739,14 @@ def data_sources_summary(*, dataset_limit: int = 60) -> dict[str, Any]:
         "is_current_dataset_latest": is_current_dataset_latest,
         "is_current_dataset_complete": is_current_dataset_complete,
         "next_refresh_action": next_refresh_action,
+        "signal_panel_status": signal_panel_status,
+        "signal_panel_latest_date": str(signal_summary.get("latest_date", "") or ""),
+        "signal_panel_target_latest_date": str(signal_summary.get("target_panel_latest_date", "") or ""),
+        "signal_panel_score_latest_date": str(signal_summary.get("score_panel_latest_date", "") or ""),
+        "next_signal_action": next_signal_action,
+        "production_anchor_status": str(anchor_summary.get("status", "unknown") or "unknown"),
+        "production_anchor": anchor_summary,
+        "signal_panels": signal_summary,
         "refresh_explanation": refresh_explanation,
         "data_platform": {
             "runs_root": str(platform_runs.resolve()),
@@ -771,6 +805,62 @@ def data_refresh_skip_payload(*, data_sources: dict[str, Any], as_of_date: str =
             "latest_completed_trading_date": latest_completed,
             "summary_note": summary_note,
         },
+    }
+
+
+def _signal_refresh_metadata(*, as_of_date: str = "") -> dict[str, Any]:
+    try:
+        result = production_signal.refresh_production_live_panels(as_of_date=as_of_date)
+    except Exception as exc:
+        return {
+            "business_status": "signal_failed",
+            "runner_status": "ok",
+            "artifact_status": "failed",
+            "signal_refresh_error": str(exc),
+            "artifact_paths": {},
+            "evidence_paths": {},
+        }
+    metadata = {
+        "business_status": "ok",
+        "runner_status": "ok",
+        "artifact_status": "ok",
+        "signal_refresh": result.get("signal_refresh", result),
+        "signal_refresh_manifest_path": str(result.get("signal_refresh_manifest_path", "") or ""),
+        "panel_latest_date": str(result.get("panel_latest_date", "") or ""),
+        "signal_panel_latest_date": str(result.get("signal_panel_latest_date", "") or ""),
+        "artifact_paths": result.get("artifact_paths", {}) if isinstance(result.get("artifact_paths", {}), dict) else {},
+        "evidence_paths": result.get("evidence_paths", {}) if isinstance(result.get("evidence_paths", {}), dict) else {},
+    }
+    return metadata
+
+
+def _signal_refresh_artifact_status() -> dict[str, Any]:
+    active = active_manifest_summary()
+    production_root = Path(str(active.get("production_root", "") or ""))
+    manifest_path = production_root / "live_panel_refresh_manifest.json" if str(production_root) else Path("")
+    manifest = _read_json(manifest_path) if manifest_path and manifest_path.exists() else {}
+    status = str(manifest.get("status", "") or "").lower()
+    panel_status = manifest.get("panel_status", {}) if isinstance(manifest.get("panel_status"), dict) else {}
+    artifact_paths = {
+        "live_panel_refresh_manifest": str(manifest_path.resolve()) if manifest_path and manifest_path.exists() else "",
+        "target_panel": str(panel_status.get("target_panel", "") or active.get("trade_plan_target_weight_panel_csv", "") or ""),
+        "score_panel": str(panel_status.get("score_panel", "") or active.get("trade_plan_score_panel_csv", "") or ""),
+        "production_anchor_sync_manifest": str(
+            _safe_nested(manifest, "anchor_sync", "manifest_path")
+            or active.get("production_anchor_sync_manifest", "")
+            or ""
+        ),
+    }
+    return {
+        "business_status": "ok" if status == "ok" else (status or "missing"),
+        "runner_status": "ok",
+        "artifact_status": status or "missing",
+        "signal_refresh": manifest,
+        "signal_refresh_manifest_path": artifact_paths["live_panel_refresh_manifest"],
+        "panel_latest_date": str(panel_status.get("latest_date", "") or ""),
+        "signal_panel_latest_date": str(panel_status.get("latest_date", "") or ""),
+        "artifact_paths": artifact_paths,
+        "evidence_paths": artifact_paths,
     }
 
 
@@ -891,6 +981,12 @@ def _data_refresh_artifact_status(refresh_manifest_path: str = "") -> dict[str, 
 
 
 def _post_process_successful_task(*, job_paths: Any, task_name: str, summary_note: str) -> tuple[str, dict[str, Any]]:
+    if task_name == "refresh-production-live-panels":
+        metadata = _signal_refresh_artifact_status()
+        status = str(metadata.get("business_status", ""))
+        note = f"{summary_note} signal_refresh_status={status}"
+        update_job_metadata(job_paths, **metadata)
+        return note, metadata
     if task_name != "data-platform-refresh":
         return summary_note, {"business_status": "ok", "runner_status": "ok", "artifact_status": "not_applicable"}
     refresh_manifest_path = _latest_refresh_manifest_path()
@@ -905,7 +1001,26 @@ def _post_process_successful_task(*, job_paths: Any, task_name: str, summary_not
         refresh_manifest_path=refresh_manifest_path,
     )
     note = f"{summary_note} active manifest lake_dataset_id={update.get('dataset_id', '')}"
-    metadata = {**artifact_metadata, "active_manifest_update": update, "business_status": "ok"}
+    signal_metadata = _signal_refresh_metadata(as_of_date=str(update.get("end_date", "") or ""))
+    metadata = {
+        **artifact_metadata,
+        "active_manifest_update": update,
+        "data_refresh": artifact_metadata,
+        "signal_refresh_result": signal_metadata,
+        "business_status": "ok" if signal_metadata.get("business_status") == "ok" else "signal_failed",
+        "runner_status": signal_metadata.get("runner_status", "ok"),
+        "artifact_status": "ok" if signal_metadata.get("artifact_status") == "ok" else str(signal_metadata.get("artifact_status", "")),
+        "artifact_paths": {
+            **(artifact_metadata.get("artifact_paths", {}) if isinstance(artifact_metadata.get("artifact_paths", {}), dict) else {}),
+            **(signal_metadata.get("artifact_paths", {}) if isinstance(signal_metadata.get("artifact_paths", {}), dict) else {}),
+        },
+        "evidence_paths": {
+            **(artifact_metadata.get("evidence_paths", {}) if isinstance(artifact_metadata.get("evidence_paths", {}), dict) else {}),
+            **(signal_metadata.get("evidence_paths", {}) if isinstance(signal_metadata.get("evidence_paths", {}), dict) else {}),
+        },
+        "signal_refresh_manifest_path": str(signal_metadata.get("signal_refresh_manifest_path", "") or ""),
+        "panel_latest_date": str(signal_metadata.get("panel_latest_date", "") or ""),
+    }
     update_job_metadata(job_paths, **metadata)
     return note, metadata
 
@@ -1148,7 +1263,7 @@ def _run_existing_job(
                 business_status = str(post_process_metadata.get("business_status", "") or "").lower()
                 if business_status == "blocked":
                     status = "blocked"
-                elif business_status in {"failed", "missing", "unknown"}:
+                elif business_status in {"failed", "missing", "unknown"} or business_status.endswith("_failed"):
                     status = "failed"
             elif task_name == "data-platform-refresh":
                 artifact_metadata = _data_refresh_artifact_status()
@@ -1177,13 +1292,16 @@ def _run_existing_job(
         status = "failed"
     finally:
         runner_status = "warning" if runner_warnings else ("ok" if int(exit_code) == 0 else ("blocked" if status == "blocked" else "failed"))
+        metadata_runner_status = str(post_process_metadata.get("runner_status", runner_status))
+        if runner_warnings and metadata_runner_status == "ok":
+            metadata_runner_status = "warning"
         metadata = mark_job_finished(
             job_paths,
             status=status,
             exit_code=exit_code,
             summary_note=summary_note,
             business_status=str(post_process_metadata.get("business_status", "ok" if status == "succeeded" else status)),
-            runner_status=str(post_process_metadata.get("runner_status", runner_status)),
+            runner_status=metadata_runner_status,
             artifact_status=str(post_process_metadata.get("artifact_status", "")),
             artifact_paths=post_process_metadata.get("artifact_paths", {}) if isinstance(post_process_metadata.get("artifact_paths", {}), dict) else {},
             evidence_paths=post_process_metadata.get("evidence_paths", {}) if isinstance(post_process_metadata.get("evidence_paths", {}), dict) else {},
@@ -1192,7 +1310,7 @@ def _run_existing_job(
         if post_process_metadata:
             metadata.update(post_process_metadata)
             metadata["runner_warnings"] = runner_warnings
-            metadata["runner_status"] = str(post_process_metadata.get("runner_status", runner_status))
+            metadata["runner_status"] = metadata_runner_status
         with _ACTIVE_JOB_THREADS_LOCK:
             _ACTIVE_JOB_THREADS.pop(job_paths.job_id, None)
     return {

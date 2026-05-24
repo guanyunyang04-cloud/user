@@ -9,6 +9,10 @@ interface DataPageProps {
   pollMs?: number;
 }
 
+function field(record: Record<string, unknown> | undefined, key: string): string {
+  return text(record?.[key]);
+}
+
 export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
   const [payload, setPayload] = useState<DataSourcesPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -21,8 +25,9 @@ export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
   const [activeJobId, setActiveJobId] = useState("");
   const [jobDetail, setJobDetail] = useState<JobDetail | null>(null);
   const [jobError, setJobError] = useState("");
-  const refreshIsSkip = payload?.next_refresh_action === "skip";
-  const refreshButtonLabel = refreshIsSkip ? "已是最新" : "补齐到最新交易日";
+  const signalNeedsRefresh = payload?.next_signal_action === "refresh";
+  const refreshIsSkip = payload?.next_refresh_action === "skip" && !signalNeedsRefresh;
+  const refreshButtonLabel = signalNeedsRefresh ? "刷新信号面板" : refreshIsSkip ? "已是最新" : "补齐到最新交易日";
 
   const load = (): void => {
     setLoading(true);
@@ -118,6 +123,9 @@ export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
         <Stat label="Active Dataset" value={text(payload?.active_dataset_id)} />
         <Stat label="同步状态" value={<StatusPill value={payload?.dataset_sync_status || "unknown"} />} />
         <Stat label="刷新动作" value={<StatusPill value={payload?.next_refresh_action || "unknown"} />} />
+        <Stat label="信号面板" value={<StatusPill value={payload?.signal_panel_status || "unknown"} />} />
+        <Stat label="信号最新日" value={text(payload?.signal_panel_latest_date)} />
+        <Stat label="Production Anchor" value={<StatusPill value={payload?.production_anchor_status || "unknown"} />} />
       </div>
       <Panel title="当前数据集">
         <div className="key-list">
@@ -154,6 +162,48 @@ export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
           </ul>
         ) : null}
       </Panel>
+      <div className="two-column">
+        <Panel title="生产信号面板">
+          <div className="key-list">
+            <span>状态</span>
+            <strong><StatusPill value={payload?.signal_panel_status || "unknown"} /></strong>
+            <span>最新完成交易日</span>
+            <strong>{text(payload?.data_platform.latest_completed_trading_date)}</strong>
+            <span>要求覆盖日期</span>
+            <strong>{field(payload?.signal_panels, "required_date")}</strong>
+            <span>面板最新日期</span>
+            <strong>{text(payload?.signal_panel_latest_date)}</strong>
+            <span>Target Panel 最新</span>
+            <strong>{text(payload?.signal_panel_target_latest_date || field(payload?.signal_panels, "target_panel_latest_date"))}</strong>
+            <span>Score Panel 最新</span>
+            <strong>{text(payload?.signal_panel_score_latest_date || field(payload?.signal_panels, "score_panel_latest_date"))}</strong>
+            <span>目标持仓数</span>
+            <strong>{field(payload?.signal_panels, "target_position_count")}</strong>
+            <span>下一步</span>
+            <strong><StatusPill value={payload?.next_signal_action || field(payload?.signal_panels, "next_signal_action")} /></strong>
+            <span>Target Panel</span>
+            <strong>{field(payload?.signal_panels, "target_panel")}</strong>
+            <span>Score Panel</span>
+            <strong>{field(payload?.signal_panels, "score_panel")}</strong>
+          </div>
+        </Panel>
+        <Panel title="Production 锚点">
+          <div className="key-list">
+            <span>状态</span>
+            <strong><StatusPill value={payload?.production_anchor_status || "unknown"} /></strong>
+            <span>Production Root</span>
+            <strong>{field(payload?.production_anchor, "production_root")}</strong>
+            <span>Full-fit Run</span>
+            <strong>{field(payload?.production_anchor, "fullfit_run_dir")}</strong>
+            <span>Model Hash Match</span>
+            <strong><StatusPill value={Boolean(payload?.production_anchor?.model_hash_match)} /></strong>
+            <span>Train End Match</span>
+            <strong><StatusPill value={Boolean(payload?.production_anchor?.metrics_train_end_match)} /></strong>
+            <span>旧路径数量</span>
+            <strong>{field(payload?.production_anchor, "old_path_count")}</strong>
+          </div>
+        </Panel>
+      </div>
       <Panel title="显式刷新">
         <div className="form-grid">
           <Field label="As-of 日期">
@@ -191,6 +241,10 @@ export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
                 <strong><StatusPill value={jobDetail.runner_status || jobDetail.metadata.runner_status || "-"} /></strong>
                 <span>Artifact</span>
                 <strong><StatusPill value={jobDetail.artifact_status || jobDetail.metadata.artifact_status || "-"} /></strong>
+                <span>Signal Manifest</span>
+                <strong>{text(jobDetail.metadata.signal_refresh_manifest_path)}</strong>
+                <span>Panel Latest</span>
+                <strong>{text(jobDetail.metadata.panel_latest_date)}</strong>
               </div>
               {Object.entries(jobDetail.evidence_paths || jobDetail.metadata.evidence_paths || {}).some(([, value]) => String(value || "").trim()) ? (
                 <DataTable

@@ -230,6 +230,9 @@ export function TradePlanPage({ api, pollMs = 3000 }: TradePlanPageProps): JSX.E
             <span>样本截止</span><strong>{text(payload?.model_info?.artifact_latest_data_date || payload?.model_info?.train_end_date)}</strong>
             <span>最新完成交易日</span><strong>{text(payload?.model_info?.latest_completed_trading_date)}</strong>
             <span>相差交易日数</span><strong>{text(payload?.model_info?.trading_day_lag)}</strong>
+            <span>源信号日</span><strong>{text(payload?.model_info?.source_signal_date)}</strong>
+            <span>执行信号日</span><strong>{text(payload?.model_info?.execution_signal_date || summary.signal_date)}</strong>
+            <span>Signal Panel</span><strong><StatusPill value={String(payload?.model_info?.signal_panel_status || "unknown")} /></strong>
           </div>
         </Panel>
       </div>

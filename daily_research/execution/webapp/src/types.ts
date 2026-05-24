@@ -65,6 +65,14 @@ export interface DataSourcesPayload {
   is_current_dataset_latest?: boolean;
   is_current_dataset_complete?: boolean;
   next_refresh_action?: "skip" | "refresh" | string;
+  signal_panel_status?: string;
+  signal_panel_latest_date?: string;
+  signal_panel_target_latest_date?: string;
+  signal_panel_score_latest_date?: string;
+  next_signal_action?: "skip" | "refresh" | string;
+  production_anchor_status?: string;
+  production_anchor?: JsonObject;
+  signal_panels?: JsonObject;
   refresh_explanation?: string;
   data_platform: {
     runs_root: string;

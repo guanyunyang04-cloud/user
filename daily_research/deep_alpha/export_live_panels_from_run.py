@@ -21,6 +21,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Refresh live candidate panels from an existing deep_alpha run without retraining.")
     parser.add_argument("--run-dir", required=True, help="Path to an existing deep_alpha output run directory.")
     parser.add_argument("--end-date", default="", help="Optional latest signal date override, default is latest completed trading date.")
+    parser.add_argument("--data-source", choices=["tq", "lake"], default="tq")
+    parser.add_argument("--lake-dataset-id", default="")
+    parser.add_argument("--data-lake-root", default="")
     return parser.parse_args()
 
 
@@ -71,7 +74,59 @@ def _ordered_target_frames(
     return {name: target_frames[name] for name in expected_target_names}
 
 
-def refresh_live_panels_for_run(run_dir: Path, latest_end_date: str | None = None) -> dict[str, Any]:
+def _expected_style_names(feature_names: list[str]) -> list[str]:
+    names: list[str] = []
+    for feature_name in feature_names:
+        text = str(feature_name)
+        if not text.startswith("style_"):
+            continue
+        suffix = "_strength_20" if text.endswith("_strength_20") else "_member" if text.endswith("_member") else ""
+        if not suffix:
+            continue
+        style_name = text.removeprefix("style_").removesuffix(suffix)
+        if style_name and style_name not in names:
+            names.append(style_name)
+    return names
+
+
+def _augment_style_map_for_feature_contract(
+    style_map: pd.DataFrame | None,
+    *,
+    columns: list[str],
+    expected_feature_names: list[str],
+    cache_path: Path | str | None = None,
+    keep_existing: bool = True,
+) -> pd.DataFrame:
+    expected_styles = _expected_style_names(expected_feature_names)
+    base = style_map.copy() if style_map is not None and not style_map.empty else pd.DataFrame(index=columns)
+    base.index = base.index.astype(str).str.upper()
+    base = base.reindex([str(item).upper() for item in columns]).fillna(False).astype(bool)
+    if not keep_existing:
+        base = base[[name for name in expected_styles if name in base.columns]].copy()
+    missing_styles = [name for name in expected_styles if name not in base.columns]
+    if missing_styles:
+        resolved_cache = Path(cache_path) if cache_path is not None else Path(__file__).resolve().parents[1] / "cache" / "style_map_tq.csv"
+        if resolved_cache.exists():
+            cached = pd.read_csv(resolved_cache, dtype={"stock": str})
+            if "stock" in cached.columns:
+                cached["stock"] = cached["stock"].astype(str).str.upper()
+                cached = cached.drop_duplicates(subset=["stock"]).set_index("stock")
+                for style_name in missing_styles:
+                    if style_name in cached.columns:
+                        base[style_name] = cached[style_name].reindex(base.index).fillna(False).astype(bool)
+    return base
+
+
+def refresh_live_panels_for_run(
+    run_dir: Path,
+    latest_end_date: str | None = None,
+    *,
+    data_source: str = "tq",
+    lake_dataset_id: str = "",
+    data_lake_root: str = "",
+    production_manifest: dict[str, Any] | None = None,
+    sector_board_view_id: str = "",
+) -> dict[str, Any]:
     run_dir = Path(run_dir).resolve()
     metrics_path = run_dir / "metrics.json"
     model_path = run_dir / "deep_alpha_model.pt"
@@ -99,10 +154,21 @@ def refresh_live_panels_for_run(run_dir: Path, latest_end_date: str | None = Non
             f"Run {run_dir.name} uses score_risk_mode={score_risk_mode}, but risk_gate_artifact.pkl is missing."
         )
 
+    manifest = production_manifest if isinstance(production_manifest, dict) else {}
+    resolved_data_source = str(data_source or manifest.get("data_source", "") or "tq").strip().lower()
+    if resolved_data_source not in {"tq", "lake"}:
+        resolved_data_source = "tq"
+    resolved_lake_dataset_id = str(
+        lake_dataset_id
+        or manifest.get("lake_dataset_id", "")
+        or manifest.get("source_market_dataset_id", "")
+        or ""
+    ).strip()
+    resolved_data_lake_root = str(data_lake_root or manifest.get("data_lake_root", "") or "").strip()
     args = SimpleNamespace(
-        data_source="tq",
+        data_source=resolved_data_source,
         csv_folder=None,
-        stocks_file=str(metrics.get("stocks_file", "") or ""),
+        stocks_file="" if resolved_data_source == "lake" else str(metrics.get("stocks_file", "") or ""),
         liquidity_pool=str(metrics.get("liquidity_pool", "") or ""),
         rolling_liquidity_pool=str(metrics.get("rolling_liquidity_pool", "") or ""),
         pool_rebalance_days=int(metrics.get("rolling_pool_rebalance_days", 21) or 21),
@@ -114,7 +180,28 @@ def refresh_live_panels_for_run(run_dir: Path, latest_end_date: str | None = Non
 
     stocks_file = args.stocks_file or None
     universe = research_main.load_stocks_from_file(stocks_file) if stocks_file else []
-    if args.data_source == "tq":
+    rolling_membership_frame = None
+    rolling_pool_key = ""
+    if args.data_source == "lake":
+        if not resolved_lake_dataset_id:
+            raise ValueError("Lake live panel refresh requires lake_dataset_id.")
+        lake_payload = research_main.load_lake_market_data_with_pool_view(
+            data_lake_root=resolved_data_lake_root,
+            lake_dataset_id=resolved_lake_dataset_id,
+            sector_board_view_id=str(sector_board_view_id or manifest.get("sector_board_view_id", "") or ""),
+            start_date=str(cfg.start_date),
+            end_date=str(cfg.end_date),
+            benchmark=str(cfg.benchmark),
+            pool_name=str(args.rolling_liquidity_pool or args.liquidity_pool or "learned_all_a"),
+        )
+        raw_df_dict = dict(lake_payload["df_dict"])
+        raw_key = str(lake_payload["raw_key"])
+        benchmark_open = lake_payload["benchmark_open"]
+        benchmark_close = lake_payload["benchmark_close"]
+        df_dict = dict(lake_payload["df_dict"])
+        rolling_membership_frame = lake_payload["rolling_membership_frame"]
+        rolling_pool_key = str(lake_payload.get("rolling_pool_key", "") or "")
+    elif args.data_source == "tq":
         if args.rolling_liquidity_pool:
             try:
                 universe = research_main.load_universe_from_tq(cfg.universe_scope)
@@ -131,19 +218,19 @@ def refresh_live_panels_for_run(run_dir: Path, latest_end_date: str | None = Non
         elif not universe:
             raise ValueError("TQ mode without stocks requires a valid stocks_file or universe_scope=all_a.")
 
-    raw_df_dict, raw_key = research_main.load_raw_market_data(
-        cfg,
-        args,
-        universe,
-        progress_desc="Refresh live candidate market data",
-    )
-    benchmark_open = raw_df_dict["Open"][cfg.benchmark].copy()
-    df_dict, benchmark_close = research_main.split_benchmark_from_universe(raw_df_dict, cfg.benchmark)
+        raw_df_dict, raw_key = research_main.load_raw_market_data(
+            cfg,
+            args,
+            universe,
+            progress_desc="Refresh live candidate market data",
+        )
+        benchmark_open = raw_df_dict["Open"][cfg.benchmark].copy()
+        df_dict, benchmark_close = research_main.split_benchmark_from_universe(raw_df_dict, cfg.benchmark)
+    else:
+        raise ValueError(f"Unsupported data_source for live panel refresh: {args.data_source}")
 
     rolling_pool_artifact = None
-    rolling_membership_frame = None
-    rolling_pool_key = ""
-    if args.rolling_liquidity_pool:
+    if args.data_source != "lake" and args.rolling_liquidity_pool:
         rolling_pool_artifact, rolling_pool_key = research_main.load_cached_or_build_rolling_pool(
             args=args,
             cfg=cfg,
@@ -181,6 +268,9 @@ def refresh_live_panels_for_run(run_dir: Path, latest_end_date: str | None = Non
 
     industry_map = None
     style_map = None
+    if (args.relation_layer or cfg.dynamic_graph_layer) and args.data_source == "lake":
+        industry_map = lake_payload.get("industry_map")
+        style_map = lake_payload.get("style_map")
     if (args.relation_layer or cfg.dynamic_graph_layer) and args.data_source == "tq":
         try:
             industry_map = research_main.load_industry_map_from_tq(list(close.columns))
@@ -193,6 +283,13 @@ def refresh_live_panels_for_run(run_dir: Path, latest_end_date: str | None = Non
 
     target_names = list(artifact["target_names"])
     feature_names = list(artifact["feature_names"])
+    if (args.relation_layer or cfg.dynamic_graph_layer) and args.data_source == "lake":
+        style_map = _augment_style_map_for_feature_contract(
+            style_map,
+            columns=list(close.columns),
+            expected_feature_names=feature_names,
+            keep_existing=False,
+        )
     breakout_event_task = any(str(name).startswith("event_breakout_") for name in target_names)
     clean_breakout_event_task = any(str(name).startswith("event_clean_breakout_") for name in target_names)
 
@@ -436,18 +533,57 @@ def refresh_live_panels_for_run(run_dir: Path, latest_end_date: str | None = Non
 
     live_signal_date = _panel_latest_date(run_dir / "daily_live_target_weight_panel.csv")
     summary = {
+        "status": "ok",
         "run_dir": str(run_dir),
+        "data_source": args.data_source,
+        "lake_dataset_id": resolved_lake_dataset_id,
+        "data_lake_root": resolved_data_lake_root,
+        "sector_board_view_id": str(sector_board_view_id or manifest.get("sector_board_view_id", "") or ""),
         "live_signal_date": "" if live_signal_date is None else str(live_signal_date.date()),
         "latest_end_date": str(pd.Timestamp(cfg.end_date).date()),
         "target_weight_panel": str((run_dir / "daily_live_target_weight_panel.csv").resolve()),
         "score_panel": str((run_dir / "daily_live_score_panel.csv").resolve()),
+        "execution_aligned_target_weight_panel": str((run_dir / "execution_aligned_daily_live_target_weight_panel.csv").resolve()),
+        "execution_aligned_score_panel": str((run_dir / "execution_aligned_daily_live_score_panel.csv").resolve()),
+        "raw_target_panel_rows": int(len(live_target_weights.stack(dropna=False))),
+        "raw_score_panel_rows": int(len(live_score_frame.stack(dropna=False))),
     }
+    aligned_target_path = run_dir / "execution_aligned_daily_live_target_weight_panel.csv"
+    aligned_score_path = run_dir / "execution_aligned_daily_live_score_panel.csv"
+    if aligned_target_path.exists():
+        try:
+            aligned_target = pd.read_csv(aligned_target_path)
+            summary["execution_aligned_target_panel_rows"] = int(len(aligned_target))
+            if "target_weight" in aligned_target.columns and "date" in aligned_target.columns:
+                latest_aligned = pd.to_datetime(aligned_target["date"], errors="coerce")
+                latest_date = latest_aligned.max()
+                summary["execution_aligned_signal_date"] = "" if pd.isna(latest_date) else str(pd.Timestamp(latest_date).date())
+                latest_rows = aligned_target.loc[latest_aligned.eq(latest_date)] if not pd.isna(latest_date) else aligned_target.iloc[0:0]
+                weights = pd.to_numeric(latest_rows.get("target_weight", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
+                summary["target_position_count"] = int((weights > 0.0).sum())
+        except Exception:
+            pass
+    if aligned_score_path.exists():
+        try:
+            aligned_score = pd.read_csv(aligned_score_path)
+            summary["execution_aligned_score_panel_rows"] = int(len(aligned_score))
+        except Exception:
+            pass
+    manifest_path = run_dir / "live_panel_refresh_manifest.json"
+    manifest_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    summary["manifest_path"] = str(manifest_path.resolve())
     return summary
 
 
 def main() -> None:
     args = parse_args()
-    summary = refresh_live_panels_for_run(Path(args.run_dir), latest_end_date=args.end_date or None)
+    summary = refresh_live_panels_for_run(
+        Path(args.run_dir),
+        latest_end_date=args.end_date or None,
+        data_source=args.data_source,
+        lake_dataset_id=args.lake_dataset_id,
+        data_lake_root=args.data_lake_root,
+    )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 

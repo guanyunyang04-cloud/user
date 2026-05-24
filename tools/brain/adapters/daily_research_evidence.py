@@ -12,6 +12,7 @@ REFERENCE_FILE_PATTERNS = (
     re.compile(r"^(alpha_path20|path20|path_policy|alpha_multi_horizon)_.+\.md$"),
     re.compile(r"^data_lake_.+\.md$"),
     re.compile(r"^tdx_free_data_platform_.+\.md$"),
+    re.compile(r"^execution_.+\.md$"),
     re.compile(r"^(brain_native|brain_system|api_agent)_.+\.md$"),
 )
 STUDY_TAG_PATTERN = re.compile(r"\b(?:self_opt_study|protocol|path20|alpha_path20|mh_utility|alpha_multi_horizon)_[A-Za-z0-9_]+")
@@ -49,6 +50,8 @@ def workflow_from(path: Path, text: str) -> str:
         return "brain"
     if "tdx-free" in lower or "tdx_free" in lower or "data platform" in lower:
         return "research_data_lake"
+    if path.name.startswith("execution_") or "daily_research.execution" in lower or "execution console" in lower:
+        return "execution"
     if "path_policy" in lower or "alpha_path20" in lower or "alpha_multi_horizon" in lower or "mh_utility" in lower:
         return "path_policy"
     if "continuous_policy" in lower or "core_v4" in lower or "release_first" in lower:
@@ -69,6 +72,15 @@ def extra_tags(path: Path, text: str, workflow: str) -> list[str]:
     is_portfolio_set_v5 = "portfolio-set" in haystack or "portfolio_set" in haystack or "portfolio set" in haystack
     if "tdx-free" in haystack or "tdx_free" in haystack or "data platform" in haystack:
         tags.extend(["data_lake", "data_platform"])
+        return _dedupe(tags)
+    if workflow == "execution":
+        tags.append("execution")
+        if "signal" in haystack:
+            tags.append("signal_panel")
+        if "trade" in haystack:
+            tags.append("trade_plan")
+        if "data refresh" in haystack or "data_refresh" in haystack:
+            tags.append("data_platform")
         return _dedupe(tags)
     if "data lake" in haystack or "research_data_lake" in haystack:
         tags.append("data_lake")

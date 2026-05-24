@@ -145,6 +145,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stale-model-warn-trading-days", type=int, default=1)
     parser.add_argument("--stale-model-max-trading-days", type=int, default=3)
     parser.add_argument("--allow-stale-model", action="store_true")
+    parser.add_argument("--require-fresh-signal-panel", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--transaction-cost-bps", type=float, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--slippage-bps", type=float, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--sell-tax-bps", type=float, default=None, help=argparse.SUPPRESS)
@@ -388,11 +389,19 @@ def _assess_external_model_retrain_freshness(
         )
         return result
     if resolved_warn <= 0 and resolved_max <= 0:
-        result["status_text"] = "thresholds-missing"
-        result["warnings"].append(
-            f"Production manifest does not provide retrain thresholds: {manifest_path}; cannot verify configured "
-            "retrain freshness against research conclusions."
+        freshness = _assess_model_freshness(
+            artifact_meta={
+                "latest_data_date": str(launch_cutoff_date.date()),
+                "trained_at": str(created_at) if created_at is not None else "",
+            },
+            latest_signal_date=pd.Timestamp(latest_signal_date),
+            trading_dates=trading_dates,
+            warn_trading_days=0,
+            max_trading_days=0,
         )
+        result["status"] = "informational"
+        result["status_text"] = "informational"
+        result["trading_day_lag"] = freshness.get("trading_day_lag")
         return result
 
     freshness = _assess_model_freshness(
@@ -705,6 +714,53 @@ def _load_external_panel_row(
     signal_date = pd.Timestamp(valid_index.max())
     row = pd.to_numeric(source_panel.loc[signal_date], errors="coerce").reindex(allowed_columns)
     return row, signal_date
+
+
+def _panel_latest_date_from_csv(panel_csv: Path) -> pd.Timestamp | None:
+    if not panel_csv.exists():
+        return None
+    try:
+        frame = pd.read_csv(panel_csv, usecols=["date"])
+    except Exception:
+        return None
+    if frame.empty or "date" not in frame.columns:
+        return None
+    dates = pd.to_datetime(frame["date"], errors="coerce").dropna()
+    if dates.empty:
+        return None
+    return pd.Timestamp(dates.max()).normalize()
+
+
+def _validate_external_signal_panels_fresh(
+    *,
+    target_weight_csv: Path,
+    score_csv: Path | None,
+    required_date: pd.Timestamp,
+) -> dict[str, str]:
+    required_ts = pd.Timestamp(required_date).normalize()
+    target_latest = _panel_latest_date_from_csv(target_weight_csv)
+    score_latest = _panel_latest_date_from_csv(score_csv) if score_csv is not None else target_latest
+    blockers: list[str] = []
+    if target_latest is None:
+        blockers.append(f"target panel missing or has no date rows: {target_weight_csv}")
+    elif target_latest < required_ts:
+        blockers.append(f"target panel latest={target_latest.date()} required={required_ts.date()}")
+    if score_csv is not None:
+        if score_latest is None:
+            blockers.append(f"score panel missing or has no date rows: {score_csv}")
+        elif score_latest < required_ts:
+            blockers.append(f"score panel latest={score_latest.date()} required={required_ts.date()}")
+    if blockers:
+        raise RuntimeError(
+            "生产信号面板已过期，请先在执行端刷新数据/生产信号后再生成交易计划："
+            + "; ".join(blockers)
+        )
+    return {
+        "status": "ok",
+        "target_panel_latest_date": "" if target_latest is None else str(target_latest.date()),
+        "score_panel_latest_date": "" if score_latest is None else str(score_latest.date()),
+        "required_date": str(required_ts.date()),
+    }
 
 
 def _build_scores_from_external_csv(
@@ -1961,6 +2017,13 @@ def main():
     external_watch_score_path = (
         Path(args.external_watch_score_csv).expanduser() if str(args.external_watch_score_csv).strip() else None
     )
+    if args.require_fresh_signal_panel and external_target_weight_path is not None:
+        required_signal_date = pd.Timestamp(args.end_date or get_latest_completed_trading_date()).normalize()
+        _validate_external_signal_panels_fresh(
+            target_weight_csv=external_target_weight_path,
+            score_csv=external_score_path,
+            required_date=required_signal_date,
+        )
     effective_profile = args.enhanced_profile
     effective_ml_cfg = ml_cfg
     if not args.train_on_the_fly:
@@ -2839,6 +2902,16 @@ def main_with_progress():
                 "prepared": prepared_cache_meta,
             }
             summary.update(soft_state_meta)
+            for key in ("source_signal_date", "execution_signal_date", "score_context_status"):
+                if model_info.get(key) not in {None, ""}:
+                    summary[key] = str(model_info.get(key, ""))
+            if external_target_weight_path is not None or external_score_path is not None:
+                source_signal_text = str(model_info.get("source_signal_date", "") or "")
+                execution_signal_text = str(model_info.get("execution_signal_date", "") or summary.get("signal_date", "") or "")
+                summary["signal_panel_status"] = (
+                    str(model_info.get("signal_panel_status", "") or "")
+                    or ("ok" if source_signal_text and source_signal_text == execution_signal_text else "bridged")
+                )
             if external_target_weight_path is not None:
                 summary["candidate_target_weight_csv"] = str(external_target_weight_path)
                 if external_score_path is not None:

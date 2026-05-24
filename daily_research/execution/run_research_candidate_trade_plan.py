@@ -12,6 +12,7 @@ from daily_research.execution.entrypoint_utils import (
     consume_option_arg,
     ensure_default_pool_argument,
     ensure_execution_strategy_defaults,
+    ensure_external_target_weight_universe_argument,
     ensure_text_file_from_example,
     has_arg,
     inject_default_arg,
@@ -59,19 +60,23 @@ def main():
     inject_default_arg("--external-score-column", "model_decision_score")
     inject_default_arg("--external-watch-score-column", "model_decision_score")
     inject_default_arg("--external-target-weight-column", "target_weight")
-    ensure_default_pool_argument()
-    ensure_execution_strategy_defaults()
 
     if not candidate_profile and not has_arg("--external-score-csv") and not has_arg("--external-target-weight-csv") and not is_help_request():
         candidate_profile = DEFAULT_EXECUTION_CANDIDATE_PROFILE
+    pool_name_hint = ""
     if candidate_profile:
         resolved = apply_profile_defaults(
             candidate_profile,
             mode="trade_plan",
             ensure_live_panels=False,
         )
+        pool_name_hint = str(resolved.liquidity_pool_name or "").strip()
         if not is_help_request():
             print(f"candidate_profile={resolved.name}")
+
+    if not ensure_external_target_weight_universe_argument():
+        ensure_default_pool_argument(pool_name=pool_name_hint)
+    ensure_execution_strategy_defaults()
 
     if not has_arg("--external-score-csv") and not has_arg("--external-target-weight-csv") and not is_help_request():
         raise ValueError(

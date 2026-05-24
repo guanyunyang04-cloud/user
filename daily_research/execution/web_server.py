@@ -288,6 +288,18 @@ def create_app() -> FastAPI:
                 and [item for item in domains] == default_domains
                 and str(as_of_date) == default_as_of
             )
+            if (
+                requested_is_default
+                and current_data.get("next_refresh_action") == "skip"
+                and current_data.get("next_signal_action") == "refresh"
+            ):
+                payload = app_service.launch_task_async(
+                    task_name="refresh-production-live-panels",
+                    passthrough_args=["--as-of-date", str(as_of_date)],
+                    job_label=request.job_label or "manual-signal-refresh",
+                    force_unlock=request.force_unlock,
+                )
+                return JSONResponse(payload)
             if requested_is_default and current_data.get("next_refresh_action") == "skip":
                 return JSONResponse(app_service.data_refresh_skip_payload(data_sources=current_data, as_of_date=as_of_date))
             args: list[str] = []
