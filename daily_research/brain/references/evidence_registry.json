@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 64,
+  "record_count": 65,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -105,6 +105,40 @@
       ],
       "active_artifact_impact": "guarded",
       "dataset_ids": []
+    },
+    {
+      "id": "alpha_multi_horizon_root_cause_audit_20260524",
+      "date": "2026-05-24",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_multi_horizon_root_cause_audit_20260524.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [
+        "alpha_multi_horizon_utility_policy_v1",
+        "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01",
+        "mh_utility_horizon_root_cause_audit_20260524_01"
+      ],
+      "verdict": "Fact: the read-only audit completed with conclusion enums:; `true_long_horizon_edge`; `target_bias_to_long`; `horizon_head_collapse`",
+      "blockers": [
+        "`short_feature_insufficient`",
+        "Inference: short horizon is not dead, but current daily input and objective are not enough to prove a robust 1-5d tradable edge.",
+        "calibration gate remained `failed_regression`.",
+        "Inference: the strongest immediate blocker is not \"long horizon exists\"; it is that the model does not yet behave like a reliable per-sample horizon chooser."
+      ],
+      "next_allowed_actions": [
+        "First run shadow-only target-function controls with the same dataset, pool, split, model family, and seed:",
+        "`mh_short_utility_1_3_5d_v1`",
+        "`mh_mid_utility_5_10_20d_v1`",
+        "`mh_long_utility_15_20_30d_v1`",
+        "Only if a target family passes validation/test prediction gates should architecture controls run:",
+        "`gru_sequence_static_context`"
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
+      ]
     },
     {
       "id": "alpha_multi_horizon_utility_calibration_posthoc_20260524",
