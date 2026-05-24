@@ -19,6 +19,20 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertEqual(payload["status"], "selected")
         self.assertEqual(payload["selected_brain_id"], "daily_research")
 
+    def test_route_multi_horizon_and_path_policy_terms_to_daily_research(self) -> None:
+        cases = (
+            "alpha_multi_horizon_utility_policy_v1 根因审计",
+            "Alpha Multi-Horizon 长短周期根因评估",
+            "path_policy horizon root cause audit",
+            "daily_research/path_policy/horizon_root_cause_audit.py 修复",
+        )
+        for task in cases:
+            with self.subTest(task=task):
+                payload = route_task_to_brain(task)
+                self.assertEqual(payload["status"], "selected")
+                self.assertEqual(payload["selected_brain_id"], "daily_research")
+                self.assertTrue(payload.get("routing_sources"))
+
     def test_route_daily_research_execution_terms(self) -> None:
         cases = (
             "执行端交易计划没有动作",
@@ -39,6 +53,12 @@ class BrainCapsuleTest(unittest.TestCase):
 
         self.assertEqual(payload["status"], "selected")
         self.assertEqual(payload["selected_brain_id"], "t0_project")
+
+    def test_route_daily_stock_analysis_task_to_product_brain(self) -> None:
+        payload = route_task_to_brain("daily_stock_analysis 多市场产品修复")
+
+        self.assertEqual(payload["status"], "selected")
+        self.assertEqual(payload["selected_brain_id"], "daily_stock_analysis-main")
 
     def test_route_ambiguous_task_does_not_default_to_daily_research(self) -> None:
         payload = route_task_to_brain("Path20 和盘中 RL 联合接管")
@@ -70,6 +90,17 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertNotIn("state_summary", payload["child_context"])
         self.assertNotIn("hard_rules", payload["child_context"])
         self.assertNotIn("latest_output_studies", payload["guards"].get("frontier_report", {}))
+
+    def test_capsule_multi_horizon_registry_fallback_attaches_daily_research_child_context(self) -> None:
+        payload = build_task_capsule(task="alpha_multi_horizon_utility_policy_v1 根因审计", workflow="auto")
+
+        self.assertEqual(payload["schema_version"], 2)
+        self.assertEqual(payload["routing"]["selected_brain_id"], "daily_research")
+        self.assertIn("child_context", payload)
+        self.assertEqual(payload["child_context"]["brain_id"], "daily_research")
+        self.assertIn("active_artifact_guard", payload["guards"])
+        self.assertIn("frontier_report", payload["guards"])
+        self.assertIn("registry_exact_match", payload["routing"].get("routing_sources", []))
 
     def test_capsule_lite_exposes_deep_dive_commands(self) -> None:
         payload = build_task_capsule(task="Path20 当前状态", workflow="auto")
