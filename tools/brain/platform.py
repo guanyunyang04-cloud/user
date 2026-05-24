@@ -271,6 +271,18 @@ def _discover_brain_dirs() -> list[Path]:
 
 def build_brain_catalog() -> dict[str, Any]:
     main_manifest = load_manifest(MAIN_MANIFEST)
+    registered_catalog: dict[str, dict[str, Any]] = {}
+    if workspace_path(BRAIN_CATALOG).exists():
+        try:
+            file_catalog = json.loads(read_text(BRAIN_CATALOG))
+            if isinstance(file_catalog, dict):
+                registered_catalog = {
+                    str(item.get("brain_id", "")): item
+                    for item in file_catalog.get("brains", [])
+                    if isinstance(item, dict) and str(item.get("brain_id", ""))
+                }
+        except Exception:
+            registered_catalog = {}
     records: list[dict[str, Any]] = [
         _catalog_record(
             brain_id="workspace_root",
@@ -321,6 +333,25 @@ def build_brain_catalog() -> dict[str, Any]:
                 status=status,
                 body_root=root.parent,
                 last_guard_status="not_guarded",
+            )
+        )
+
+    current_ids = {str(item.get("brain_id", "")) for item in records}
+    for brain_id, record in registered_catalog.items():
+        status = str(record.get("status", "") or "")
+        if brain_id in current_ids or status not in {"cache_legacy", "discovered_untracked", "missing_manifest"}:
+            continue
+        root = Path(str(record.get("root", "") or ""))
+        if not root.as_posix():
+            continue
+        records.append(
+            _catalog_record(
+                brain_id=brain_id,
+                root=root,
+                manifest_path=str(record.get("manifest_path", "") or ""),
+                status=status,
+                body_root=Path(str(record.get("body_root", "") or root.parent.as_posix())),
+                last_guard_status=str(record.get("last_guard_status", "") or "not_guarded"),
             )
         )
 
@@ -882,4 +913,3 @@ def print_json(payload: dict[str, Any]) -> None:
 def ensure_workspace_on_path() -> None:
     if str(WORKSPACE_ROOT) not in sys.path:
         sys.path.insert(0, str(WORKSPACE_ROOT))
-

@@ -124,7 +124,18 @@ class StudyEvidenceReport:
 
 def workspace_path(path: str | Path) -> Path:
     candidate = Path(path)
-    return candidate if candidate.is_absolute() else WORKSPACE_ROOT / candidate
+    if not candidate.is_absolute():
+        return WORKSPACE_ROOT / candidate
+    try:
+        if candidate.resolve().is_relative_to(WORKSPACE_ROOT.resolve()):
+            return candidate
+    except OSError:
+        pass
+    parts = candidate.parts
+    if "daily_research" in parts:
+        rel = Path(*parts[parts.index("daily_research") :])
+        return WORKSPACE_ROOT / rel
+    return candidate
 
 
 def _read_json_if_exists(path: Path) -> dict[str, Any]:
@@ -393,4 +404,3 @@ def capsule_guard_additions(rule_report: Mapping[str, Any]) -> dict[str, Any]:
 
 def control_plane_doc_limits() -> dict[Path, int]:
     return dict(CONTROL_PLANE_DOC_LIMITS)
-

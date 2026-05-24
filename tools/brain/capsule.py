@@ -141,7 +141,39 @@ def _child_context(selected_brain_id: str, task: str, workflow_id: str, study_ta
     return context
 
 
-def build_task_capsule(*, task: str = "", workflow: str = "brain_handoff", study_tag: str = "") -> dict[str, Any]:
+def _skill_sync_status() -> dict[str, Any]:
+    try:
+        from tools.brain.skill_install import build_sync_plan
+
+        plan = build_sync_plan()
+        return {
+            "status": "ok",
+            "all_in_sync": bool(plan.get("all_in_sync")),
+            "skills": plan.get("skills", []),
+        }
+    except Exception as exc:
+        return {"status": "error", "error": str(exc), "all_in_sync": False, "skills": []}
+
+
+def _preflight_blockers(*, routing: dict[str, Any], main_context: dict[str, Any], intent: str, guards: dict[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    normalized_intent = str(intent or "read")
+    if normalized_intent in {"mutate", "long_task", "writeback"} and not bool(main_context.get("git", {}).get("on_main")):
+        blockers.append("not_on_main_for_mutation")
+    if routing.get("status") == "ambiguous":
+        blockers.append("ambiguous_routing")
+    if str(routing.get("selected_brain_id", "") or "") and routing.get("status") != "selected":
+        blockers.append("missing_child_brain")
+    active_guard_status = str(guards.get("active_artifact_guard", {}).get("status", "") or "")
+    if active_guard_status and active_guard_status != "clean":
+        blockers.append("active_artifact_dirty")
+    skill_status = _skill_sync_status()
+    if not bool(skill_status.get("all_in_sync")):
+        blockers.append("stale_or_missing_global_skill")
+    return sorted(set(blockers))
+
+
+def build_task_capsule(*, task: str = "", workflow: str = "brain_handoff", study_tag: str = "", intent: str = "read") -> dict[str, Any]:
     routing = route_task_to_brain(task)
     selected_brain_id = str(routing.get("selected_brain_id", "") or "")
     selection = select_workflow_for_task(task) if workflow == "auto" else {"selected_workflow": workflow, "reason": "explicit workflow requested"}
@@ -165,16 +197,24 @@ def build_task_capsule(*, task: str = "", workflow: str = "brain_handoff", study
     if selected_brain_id == "daily_research":
         guards.update(daily_research_adapter.capsule_guard_additions(rules))
 
+    main_context = _main_context()
+    skill_status = _skill_sync_status()
+    preflight_blockers = _preflight_blockers(routing=routing, main_context=main_context, intent=intent, guards=guards)
+    mutation_allowed = str(intent or "read") not in {"mutate", "long_task", "writeback"} or "not_on_main_for_mutation" not in preflight_blockers
     payload: dict[str, Any] = {
         "schema_version": 2,
         "task": task,
+        "intent": str(intent or "read"),
+        "mutation_allowed": bool(mutation_allowed),
+        "preflight_blockers": preflight_blockers,
+        "global_skill_sync": skill_status,
         "workflow": workflow_id,
         "workflow_selection": selection,
         "workflow_guide": workflow_guide,
         "required_checklist": workflow_guide.get("checklist", []),
         "stop_conditions": workflow_guide.get("stop_conditions", []),
         "study_tag": study_tag,
-        "main_context": _main_context(),
+        "main_context": main_context,
         "routing": routing,
         "guards": guards,
         "forbidden_actions": workflow_state.get("registry_entry", {}).get("forbidden_actions", []),

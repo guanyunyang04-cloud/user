@@ -214,6 +214,25 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertIn("stop_conditions", payload)
         self.assertEqual(payload["workflow_guide"]["workflow_id"], "executing_plan")
 
+    def test_capsule_intent_mutate_blocks_non_main_branch(self) -> None:
+        payload = run_cli(
+            "capsule",
+            "--task",
+            "实现脑区 Runtime Skill 计划",
+            "--workflow",
+            "auto",
+            "--intent",
+            "mutate",
+        )
+
+        self.assertIn("mutation_allowed", payload)
+        if payload["main_context"]["git"]["on_main"]:
+            self.assertTrue(payload["mutation_allowed"])
+            self.assertNotIn("not_on_main_for_mutation", payload["preflight_blockers"])
+        else:
+            self.assertFalse(payload["mutation_allowed"])
+            self.assertIn("not_on_main_for_mutation", payload["preflight_blockers"])
+
     def test_verify_plan_cli_delegates_to_selective_verification(self) -> None:
         payload = run_cli(
             "verify-plan",
@@ -250,4 +269,3 @@ class BrainWorkflowCliTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
