@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 63,
+  "record_count": 64,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -105,6 +105,38 @@
       ],
       "active_artifact_impact": "guarded",
       "dataset_ids": []
+    },
+    {
+      "id": "alpha_multi_horizon_utility_calibration_posthoc_20260524",
+      "date": "2026-05-24",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_multi_horizon_utility_calibration_posthoc_20260524.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [
+        "alpha_multi_horizon_utility_policy_v1",
+        "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01",
+        "mh_utility_horizon_calibration_posthoc_20260524_01"
+      ],
+      "verdict": "Fact: the post-hoc calibration run completed and wrote:; `daily_research/output/path_policy/studies/mh_utility_horizon_calibration_posthoc_20260524_01/horizon_calibration_report.json`; `daily_research/output/path_policy/studies/mh_utility_horizon_calibration_posthoc_20260524_01/horizon_score_comparison.csv`; Fact: gate result is `failed_regression`; no tested post-hoc score profile both preserved baseline validation/test quality and reduced horizon concentration enough to pass.",
+      "blockers": [
+        "Fact: gate result is `failed_regression`; no tested post-hoc score profile both preserved baseline validation/test quality and reduced horizon concentration enough to pass.",
+        "It still failed the gate because validation spread fell below the required `90%` baseline floor."
+      ],
+      "next_allowed_actions": [
+        "Keep `trade_utility_score` as the current baseline research score for this source study.",
+        "Do not proceed to multi-seed on any calibrated post-hoc profile from this result.",
+        "A next research plan may compare:",
+        "a deliberately longer-horizon utility family using `15/20/30d` targets,",
+        "a training-time horizon diversity or entropy regularizer,",
+        "a two-stage model that separates utility ranking from horizon selection."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
+      ]
     },
     {
       "id": "alpha_multi_horizon_utility_policy_mainline_rename_20260523",
