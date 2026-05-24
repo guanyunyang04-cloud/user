@@ -691,18 +691,19 @@ def _load_external_panel_row(
         value_name=value_name,
     )
     panel = (
-        panel.reindex(index=market_index, columns=allowed_columns)
+        panel.reindex(columns=allowed_columns)
         .sort_index()
         .loc[lambda df: df.index <= latest_market_date]
     )
-    if panel.empty:
+    source_panel = panel.dropna(how="all")
+    if source_panel.empty:
         raise ValueError(f"{panel_label} CSV has no aligned dates inside the current execution calendar: {panel_csv}")
     requested_ts = pd.Timestamp(requested_date)
-    valid_index = panel.index[panel.index <= requested_ts]
+    valid_index = source_panel.index[source_panel.index <= requested_ts]
     if len(valid_index) == 0:
         raise ValueError(f"{panel_label} CSV has no usable rows on or before signal date: {requested_ts.date()}")
     signal_date = pd.Timestamp(valid_index.max())
-    row = pd.to_numeric(panel.loc[signal_date], errors="coerce").reindex(allowed_columns)
+    row = pd.to_numeric(source_panel.loc[signal_date], errors="coerce").reindex(allowed_columns)
     return row, signal_date
 
 
@@ -834,17 +835,23 @@ def _build_scores_from_external_target_weight_csv(
         panel_label="external target weight",
         value_name="target_weight",
     )
-    target_weight_panel = (
-        target_weight_panel.reindex(index=market_index, columns=allowed_columns)
+    source_target_weight_panel = (
+        target_weight_panel.reindex(columns=allowed_columns)
         .sort_index()
         .loc[lambda df: df.index <= latest_market_date]
         .fillna(0.0)
     )
-    if target_weight_panel.empty:
+    if source_target_weight_panel.empty:
         raise ValueError(
             "External target-weight CSV has no aligned dates inside the current execution calendar. "
             f"target_weight_csv={external_target_weight_csv}"
         )
+    target_weight_panel = (
+        source_target_weight_panel.reindex(index=market_index[market_index <= latest_market_date], columns=allowed_columns)
+        .sort_index()
+        .ffill()
+        .fillna(0.0)
+    )
 
     target_weights, bridge_meta = build_target_weight_bridge(
         target_weight_panel,
@@ -875,12 +882,12 @@ def _build_scores_from_external_target_weight_csv(
                 value_column=external_score_column,
                 latest_market_date=latest_market_date,
                 label="external score",
-                requested_date=signal_date,
+                requested_date=pd.Timestamp(source_signal_date),
             )
-            if pd.Timestamp(score_signal_date) != pd.Timestamp(signal_date):
+            if pd.Timestamp(score_signal_date) != pd.Timestamp(source_signal_date):
                 raise ValueError(
-                    "External score CSV signal date does not match target-weight signal date. "
-                    f"score_date={score_signal_date.date()} target_weight_date={signal_date.date()}"
+                    "External score CSV signal date does not match target-weight source signal date. "
+                    f"score_date={score_signal_date.date()} target_weight_source_date={pd.Timestamp(source_signal_date).date()}"
                 )
             raw_scores = raw_scores.rename(columns={"value": "score"})
             usable_scores = raw_scores[raw_scores["stock"].isin(allowed_columns)].copy()
