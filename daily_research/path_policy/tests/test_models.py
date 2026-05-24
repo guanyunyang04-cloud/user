@@ -84,6 +84,24 @@ def test_forecaster_variants_emit_dynamic_horizon_contract() -> None:
     assert prediction["decision_aux"].shape[1] == 27
 
 
+def test_decision_forecaster_supports_daily_1_to_45_feasibility_grid() -> None:
+    horizons = tuple(range(1, 46))
+    model = GRUPath20Forecaster(
+        input_dim=5,
+        hidden_dim=8,
+        horizon=45,
+        output_profile="decision_utility_v1",
+        cumulative_horizons=horizons,
+    )
+
+    prediction = model(torch.randn(4, 6, 5))
+
+    assert prediction["mu"].shape == (4, 45)
+    assert prediction["aux"].shape == (4, path20_forecast_aux_dim(horizons, horizon=45))
+    assert prediction["decision_aux"].shape == (4, path20_decision_aux_dim(horizons, horizon=45))
+    assert prediction["decision_aux"].shape[1] == 135
+
+
 def test_dlinear_dynamic_horizon_contract() -> None:
     horizons = (1, 2, 3, 5, 8, 10, 15, 20, 30)
     model = DLinearPath20Forecaster(

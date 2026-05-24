@@ -9,6 +9,7 @@ import torch
 from daily_research.path_policy.forecast_dataset import build_forecast_memmap_dataset, build_forecast_sequence_dataset
 from daily_research.path_policy.forecast_training import (
     forecast_evidence_verdict,
+    forecast_loss_profile_contract,
     forecast_prediction_metrics,
     make_forecast_model,
     ranking_relevance_labels,
@@ -230,6 +231,100 @@ def test_train_forecast_models_records_loss_profile_in_summary_and_resume_contra
     assert checkpoint["training_config"]["loss_profile"] == "rank_aux"
 
 
+def test_auxiliary_decision_loss_profiles_record_weight_contract_and_finite_loss() -> None:
+    from daily_research.path_policy.forecast_training import _forecast_loss
+    from daily_research.path_policy.models import path20_decision_aux_dim, path20_forecast_aux_dim
+
+    horizons = (1, 2, 3, 5, 8, 10, 15, 20, 30)
+    for profile in (
+        "forecast_path_v1_baseline",
+        "decision_utility_v1_baseline",
+        "decision_utility_path_aux_v1",
+        "decision_utility_hit_risk_aux_v1",
+        "decision_utility_rank_aux_v1",
+    ):
+        contract = forecast_loss_profile_contract(profile, cumulative_horizons=horizons, forecast_horizon=30)
+        assert contract["loss_profile"] == profile
+        assert contract["status"] == "active"
+        assert contract["cumulative_horizons"] == list(horizons)
+        assert "loss_component_weights" in contract
+        if profile.startswith("decision_utility"):
+            weights = contract["loss_component_weights"]
+            assert contract["required_output_profile"] == "decision_utility_v1"
+            assert weights["decision_utility"] > weights["path_daily"]
+            assert weights["decision_utility"] > weights["risk_aux"]
+            assert weights["decision_utility"] > weights["rank_aux"]
+
+            prediction = {
+                "mu": torch.randn(6, 30) * 0.01,
+                "q10": torch.randn(6, 30) * 0.01 - 0.01,
+                "q50": torch.randn(6, 30) * 0.01,
+                "q90": torch.randn(6, 30) * 0.01 + 0.01,
+                "aux": torch.randn(6, path20_forecast_aux_dim(horizons, horizon=30)) * 0.01,
+                "decision_aux": torch.randn(6, path20_decision_aux_dim(horizons, horizon=30)) * 0.01,
+            }
+            loss = _forecast_loss(
+                prediction,
+                torch.randn(6, 30) * 0.01,
+                torch.randn(6, len(horizons)) * 0.01,
+                torch.randn(6, len(horizons), 3) * 0.01,
+                loss_profile=profile,
+                target_scale=1.0,
+                decision_cost_bps=20.0,
+                decision_hit_threshold_bps=10.0,
+                decision_drawdown_penalty=0.10,
+                cumulative_horizons=horizons,
+            )
+            assert torch.isfinite(loss)
+
+
+def test_train_forecast_models_records_auxiliary_loss_contract_in_summary_and_checkpoint(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ", "DDD.SH"), start_date="2019-07-01")
+    dataset = build_forecast_sequence_dataset(
+        prepared,
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=8,
+    )
+
+    summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "study",
+        model_families=("linear_last_day",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=5,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=24,
+        dropout=0.0,
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+        output_profile="decision_utility_v1",
+        loss_profile="decision_utility_path_aux_v1",
+        selection_profile="decision_utility",
+        decision_cost_bps=20.0,
+        decision_hit_threshold_bps=10.0,
+        decision_drawdown_penalty=0.10,
+    )
+
+    contract = summary["training_config"]["loss_profile_contract"]
+    assert contract["loss_profile"] == "decision_utility_path_aux_v1"
+    assert contract["required_output_profile"] == "decision_utility_v1"
+    assert contract["loss_component_weights"]["decision_utility"] > contract["loss_component_weights"]["path_aux"]
+    assert summary["loss_component_weights"] == contract["loss_component_weights"]
+
+    seed_summary = summary["models"]["linear_last_day"]["seed_summaries"]["7"]
+    checkpoint = torch.load(seed_summary["last_checkpoint_pt"], map_location="cpu", weights_only=False)
+    assert checkpoint["resume_contract"]["loss_profile_contract"] == contract
+    assert checkpoint["training_config"]["loss_profile_contract"] == contract
+
+
 def test_decision_utility_targets_and_loss_are_finite() -> None:
     from daily_research.path_policy.forecast_training import _decision_utility_targets, _forecast_loss
 
@@ -448,6 +543,58 @@ def test_train_forecast_models_accepts_custom_horizon_decision_utility_contract(
             decision_drawdown_penalty=0.10,
             resume_from=seed_summary["last_checkpoint_pt"],
         )
+
+
+def test_train_forecast_models_accepts_daily_1_to_45_grid_feasibility_contract(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=980, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ", "DDD.SH"), start_date="2018-01-02")
+    horizons = tuple(range(1, 46))
+    dataset = build_forecast_sequence_dataset(
+        prepared,
+        train_start_year=2018,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=45,
+        cumulative_horizons=horizons,
+        max_samples_per_role=8,
+    )
+
+    summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "study",
+        model_families=("linear_last_day",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=5,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=24,
+        dropout=0.0,
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+        output_profile="decision_utility_v1",
+        loss_profile="decision_utility_path_aux_v1",
+        selection_profile="decision_utility",
+        decision_cost_bps=20.0,
+        decision_hit_threshold_bps=10.0,
+        decision_drawdown_penalty=0.10,
+    )
+
+    assert summary["status"] == "completed"
+    assert summary["training_config"]["forecast_horizon"] == 45
+    assert summary["training_config"]["cumulative_horizons"] == list(horizons)
+    assert summary["training_config"]["loss_profile_contract"]["cumulative_horizons"] == list(horizons)
+    validation_predictions = pd.read_csv(tmp_path / "study" / "forecast_predictions_validation.csv")
+    assert {
+        "pred_cum_mu_45d",
+        "future_cum_excess_return_45d",
+        "pred_decision_utility_45d",
+        "future_decision_utility_45d",
+        "pred_hit_prob_45d",
+        "future_hit_label_45d",
+    }.issubset(validation_predictions.columns)
 
 
 def test_ranking_baseline_dependency_missing_reports_status(tmp_path) -> None:

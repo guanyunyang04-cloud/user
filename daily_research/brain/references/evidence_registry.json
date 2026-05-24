@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 66,
+  "record_count": 67,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -103,6 +103,24 @@
         "以 `H:\\quant_project` 为唯一当前工作区根继续接管。",
         "如发现历史命令引用旧路径，只在复现实验需要时转换到新根目录；不得把旧路径重新写成当前入口。"
       ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": []
+    },
+    {
+      "id": "alpha_multi_horizon_output_aux_grid_tooling_20260525",
+      "date": "2026-05-25",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_multi_horizon_output_aux_grid_tooling_20260525.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "verdict": "Status: `research tooling implemented / shadow-only / no training launched`.; Verdict: `alpha_multi_horizon_utility_policy_v1` now has code-level support for output/loss profile comparison, auxiliary utility tasks, explicit 45d horizon-grid feasibility, and read-only comparison artifacts.; Boundary: `daily_research/output/active_execution_strategy.json`, production root, live/default, trade-plan, paper account, allocator/replay, and broker behavior are unchanged.",
+      "blockers": [],
+      "next_allowed_actions": [],
       "active_artifact_impact": "guarded",
       "dataset_ids": []
     },

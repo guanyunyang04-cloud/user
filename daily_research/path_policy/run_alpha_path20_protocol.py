@@ -43,6 +43,7 @@ from daily_research.path_policy.forecast_training import (
     FORECAST_MODEL_FAMILIES,
     FORECAST_OUTPUT_PROFILES,
     FORECAST_SELECTION_PROFILES,
+    forecast_loss_profile_contract,
     train_forecast_models,
 )
 from daily_research.path_policy.labels import PATH20_HORIZON, build_path20_dataset_frame
@@ -583,6 +584,12 @@ def _resolve_forecast_horizon_args(args: argparse.Namespace) -> tuple[int, tuple
         if int(getattr(args, "forecast_horizon", 0) or 0) > 0:
             raise ValueError("--forecast-horizon must be >= max(--forecast-cumulative-horizons).")
         forecast_horizon = int(max(cumulative_horizons))
+    explicit_horizon = int(getattr(args, "forecast_horizon", 0) or 0) > 0
+    if int(max(cumulative_horizons)) > 30 and not explicit_horizon:
+        raise ValueError(
+            "horizon grids above 30d require explicit --forecast-horizon 45 "
+            "to make label window and purge semantics auditable."
+        )
     invalid = [item for item in cumulative_horizons if int(item) <= 0 or int(item) > forecast_horizon]
     if invalid:
         raise ValueError(f"--forecast-cumulative-horizons values must be in [1, {forecast_horizon}], got {invalid}.")
@@ -3500,9 +3507,18 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
             normalize_static_context_fields(str(getattr(args, "forecast_static_fields", "")))
         except ValueError as exc:
             parser.error(str(exc))
-        if str(getattr(args, "forecast_loss_profile", "default")) == "decision_utility_v1" or str(
-            getattr(args, "forecast_selection_profile", "multiscale")
-        ) == "decision_utility":
+        try:
+            loss_contract = forecast_loss_profile_contract(
+                getattr(args, "forecast_loss_profile", "default"),
+                cumulative_horizons=cumulative_horizons,
+                forecast_horizon=forecast_horizon,
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+        if (
+            str(loss_contract.get("required_output_profile", "")) == "decision_utility_v1"
+            or str(getattr(args, "forecast_selection_profile", "multiscale")) == "decision_utility"
+        ):
             args.forecast_output_profile = "decision_utility_v1"
         if str(getattr(args, "forecast_output_profile", "forecast_path_v1")) == "decision_utility_v1" and str(
             getattr(args, "forecast_loss_profile", "default")

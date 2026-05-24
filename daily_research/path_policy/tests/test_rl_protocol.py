@@ -158,6 +158,77 @@ def test_protocol_parser_accepts_decision_utility_forecast_contract() -> None:
     assert args.forecast_decision_drawdown_penalty == pytest.approx(0.4)
 
 
+def test_protocol_parser_accepts_auxiliary_decision_loss_profiles_and_sets_decision_output() -> None:
+    parser = build_arg_parser()
+    for profile in (
+        "decision_utility_v1_baseline",
+        "decision_utility_path_aux_v1",
+        "decision_utility_hit_risk_aux_v1",
+        "decision_utility_rank_aux_v1",
+    ):
+        args = parser.parse_args(
+            [
+                "--stage",
+                "forecast-walkforward-study",
+                "--tag",
+                f"unit_{profile}",
+                "--data-source",
+                "lake",
+                "--lake-dataset-id",
+                "policy_input_bundle__fixed",
+                "--forecast-loss-profile",
+                profile,
+                "--forecast-selection-profile",
+                "decision_utility",
+            ]
+        )
+        _validate_protocol_args(parser, args)
+
+        assert args.forecast_output_profile == "decision_utility_v1"
+        assert args.forecast_loss_profile == profile
+
+
+def test_protocol_daily_grid_requires_explicit_45d_forecast_horizon() -> None:
+    parser = build_arg_parser()
+    daily_grid = ",".join(str(item) for item in range(1, 46))
+    args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-walkforward-study",
+            "--tag",
+            "unit_daily_grid_missing_horizon",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-cumulative-horizons",
+            daily_grid,
+        ]
+    )
+    with pytest.raises(SystemExit):
+        _validate_protocol_args(parser, args)
+
+    args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-walkforward-study",
+            "--tag",
+            "unit_daily_grid_45",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-horizon",
+            "45",
+            "--forecast-cumulative-horizons",
+            daily_grid,
+        ]
+    )
+    _validate_protocol_args(parser, args)
+    assert args.forecast_horizon == 45
+    assert args.forecast_cumulative_horizons == daily_grid
+
+
 def test_protocol_accepts_forecast_resume_and_checkpoint_flags(tmp_path) -> None:
     resume_path = tmp_path / "forecast_model_linear_last_day_seed7_last.pt"
     resume_path.write_bytes(b"placeholder")

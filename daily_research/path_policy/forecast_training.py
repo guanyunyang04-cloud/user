@@ -49,7 +49,17 @@ FORECAST_MODEL_FAMILIES = (
 FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES = ("stock_mixer_sequence", "sector_slot_mixer_sequence")
 FORECAST_OUTPUT_PROFILES = ("forecast_path_v1", "decision_utility_v1")
 FORECAST_SELECTION_PROFILES = ("multiscale", "trend20", "short_burst", "decision_utility")
-FORECAST_LOSS_PROFILES = ("default", "rank_aux", "multitask_v1", "decision_utility_v1")
+FORECAST_LOSS_PROFILES = (
+    "default",
+    "rank_aux",
+    "multitask_v1",
+    "forecast_path_v1_baseline",
+    "decision_utility_v1",
+    "decision_utility_v1_baseline",
+    "decision_utility_path_aux_v1",
+    "decision_utility_hit_risk_aux_v1",
+    "decision_utility_rank_aux_v1",
+)
 FORECAST_RANKING_BASELINES = ("none", "lightgbm", "xgboost")
 FORECAST_RISK_AUX_NAMES = ("downside_floor", "worst_1d", "upside")
 FORECAST_RANK_LOSS_WEIGHTS = {1: 0.0025, 3: 0.0050, 5: 0.0075, 10: 0.0075, 20: 0.0100}
@@ -57,6 +67,141 @@ FORECAST_PROFILE_HORIZON_WEIGHTS: dict[str, dict[int, float]] = {
     "multiscale": {1: 0.05, 3: 0.15, 5: 0.20, 10: 0.25, 20: 0.25},
     "trend20": {10: 0.35, 20: 0.65},
     "short_burst": {1: 0.05, 3: 0.35, 5: 0.30, 10: 0.15, 20: 0.05},
+}
+_FORECAST_DECISION_LOSS_PROFILES = {
+    "decision_utility_v1",
+    "decision_utility_v1_baseline",
+    "decision_utility_path_aux_v1",
+    "decision_utility_hit_risk_aux_v1",
+    "decision_utility_rank_aux_v1",
+}
+_FORECAST_LOSS_WEIGHT_PRESETS: dict[str, dict[str, float]] = {
+    "default": {
+        "path_daily": 1.00,
+        "quantile": 0.60,
+        "path_aux": 0.25,
+        "risk_aux": 0.05,
+        "rank_aux": 1.00,
+        "risk_rank_aux": 0.005,
+        "direction_aux": 0.0,
+        "downside_rank_aux": 0.0,
+        "decision_utility": 0.0,
+        "hit_aux": 0.0,
+        "horizon_classification": 0.0,
+        "decision_rank_aux": 0.0,
+    },
+    "rank_aux": {
+        "path_daily": 1.00,
+        "quantile": 0.60,
+        "path_aux": 0.25,
+        "risk_aux": 0.05,
+        "rank_aux": 1.75,
+        "risk_rank_aux": 0.005,
+        "direction_aux": 0.0,
+        "downside_rank_aux": 0.0,
+        "decision_utility": 0.0,
+        "hit_aux": 0.0,
+        "horizon_classification": 0.0,
+        "decision_rank_aux": 0.0,
+    },
+    "multitask_v1": {
+        "path_daily": 1.00,
+        "quantile": 0.60,
+        "path_aux": 0.25,
+        "risk_aux": 0.05,
+        "rank_aux": 2.25,
+        "risk_rank_aux": 0.005,
+        "direction_aux": 0.025,
+        "downside_rank_aux": 0.010,
+        "decision_utility": 0.0,
+        "hit_aux": 0.0,
+        "horizon_classification": 0.0,
+        "decision_rank_aux": 0.0,
+    },
+    "forecast_path_v1_baseline": {
+        "path_daily": 1.00,
+        "quantile": 0.60,
+        "path_aux": 0.25,
+        "risk_aux": 0.05,
+        "rank_aux": 1.00,
+        "risk_rank_aux": 0.005,
+        "direction_aux": 0.0,
+        "downside_rank_aux": 0.0,
+        "decision_utility": 0.0,
+        "hit_aux": 0.0,
+        "horizon_classification": 0.0,
+        "decision_rank_aux": 0.0,
+    },
+    "decision_utility_v1": {
+        "path_daily": 0.55,
+        "quantile": 0.20,
+        "path_aux": 0.15,
+        "risk_aux": 0.05,
+        "rank_aux": 0.75,
+        "risk_rank_aux": 0.005,
+        "direction_aux": 0.0,
+        "downside_rank_aux": 0.0,
+        "decision_utility": 1.00,
+        "hit_aux": 0.25,
+        "horizon_classification": 0.25,
+        "decision_rank_aux": 0.25,
+    },
+    "decision_utility_v1_baseline": {
+        "path_daily": 0.55,
+        "quantile": 0.20,
+        "path_aux": 0.15,
+        "risk_aux": 0.05,
+        "rank_aux": 0.75,
+        "risk_rank_aux": 0.005,
+        "direction_aux": 0.0,
+        "downside_rank_aux": 0.0,
+        "decision_utility": 1.00,
+        "hit_aux": 0.25,
+        "horizon_classification": 0.25,
+        "decision_rank_aux": 0.25,
+    },
+    "decision_utility_path_aux_v1": {
+        "path_daily": 0.65,
+        "quantile": 0.25,
+        "path_aux": 0.30,
+        "risk_aux": 0.05,
+        "rank_aux": 0.75,
+        "risk_rank_aux": 0.005,
+        "direction_aux": 0.0,
+        "downside_rank_aux": 0.0,
+        "decision_utility": 1.00,
+        "hit_aux": 0.20,
+        "horizon_classification": 0.20,
+        "decision_rank_aux": 0.20,
+    },
+    "decision_utility_hit_risk_aux_v1": {
+        "path_daily": 0.50,
+        "quantile": 0.20,
+        "path_aux": 0.15,
+        "risk_aux": 0.30,
+        "rank_aux": 0.75,
+        "risk_rank_aux": 0.010,
+        "direction_aux": 0.0,
+        "downside_rank_aux": 0.010,
+        "decision_utility": 1.00,
+        "hit_aux": 0.35,
+        "horizon_classification": 0.20,
+        "decision_rank_aux": 0.20,
+    },
+    "decision_utility_rank_aux_v1": {
+        "path_daily": 0.50,
+        "quantile": 0.20,
+        "path_aux": 0.15,
+        "risk_aux": 0.05,
+        "rank_aux": 0.95,
+        "risk_rank_aux": 0.005,
+        "direction_aux": 0.0,
+        "downside_rank_aux": 0.0,
+        "decision_utility": 1.00,
+        "hit_aux": 0.20,
+        "horizon_classification": 0.20,
+        "decision_rank_aux": 0.45,
+    },
 }
 
 
@@ -146,6 +291,7 @@ class LinearLastDayPath20Forecaster(nn.Module):
         cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
     ) -> None:
         super().__init__()
+        self.horizon = int(horizon)
         self.output_profile = str(output_profile or "forecast_path_v1").strip().lower()
         self.cumulative_horizons = normalize_path20_cumulative_horizons(cumulative_horizons, horizon=int(horizon))
         self.base = LinearPath20Forecaster(
@@ -172,6 +318,7 @@ class MLPLastDayPath20Forecaster(nn.Module):
         cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
     ) -> None:
         super().__init__()
+        self.horizon = int(horizon)
         self.output_profile = str(output_profile or "forecast_path_v1").strip().lower()
         self.cumulative_horizons = normalize_path20_cumulative_horizons(cumulative_horizons, horizon=int(horizon))
         self.base = Path20ForecasterMLP(
@@ -357,6 +504,52 @@ def _now_iso_seconds() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+def _normalize_forecast_loss_profile(loss_profile: str | None) -> str:
+    profile = str(loss_profile or "default").strip().lower()
+    if profile not in FORECAST_LOSS_PROFILES:
+        raise ValueError(f"Unsupported forecast loss profile: {profile}")
+    return profile
+
+
+def forecast_loss_profile_contract(
+    loss_profile: str | None,
+    *,
+    cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
+    forecast_horizon: int = PATH20_HORIZON,
+) -> dict[str, Any]:
+    profile = _normalize_forecast_loss_profile(loss_profile)
+    horizons = normalize_path20_cumulative_horizons(cumulative_horizons, horizon=int(forecast_horizon))
+    weights = dict(_FORECAST_LOSS_WEIGHT_PRESETS[profile])
+    return _json_ready(
+        {
+            "schema_version": 1,
+            "status": "active",
+            "loss_profile": profile,
+            "profile_family": "decision_utility_aux" if profile in _FORECAST_DECISION_LOSS_PROFILES else "path_forecast",
+            "required_output_profile": "decision_utility_v1"
+            if profile in _FORECAST_DECISION_LOSS_PROFILES
+            else "forecast_path_v1",
+            "primary_objective": "decision_utility" if profile in _FORECAST_DECISION_LOSS_PROFILES else "path_forecast",
+            "auxiliary_objectives": [
+                key
+                for key, value in weights.items()
+                if float(value) > 0.0
+                and key
+                not in {
+                    "decision_utility" if profile in _FORECAST_DECISION_LOSS_PROFILES else "path_daily",
+                    "quantile",
+                }
+            ],
+            "loss_component_weights": weights,
+            "forecast_horizon": int(forecast_horizon),
+            "cumulative_horizons": [int(item) for item in horizons],
+            "shadow_only": True,
+            "promotion_allowed": False,
+            "active_execution_strategy_expected_diff": "none",
+        }
+    )
+
+
 def _forecast_resume_contract(
     *,
     model_family: str,
@@ -395,6 +588,11 @@ def _forecast_resume_contract(
         "selection_profile": str(selection_profile),
         "loss_profile": str(loss_profile or "default"),
         "output_profile": str(output_profile or "forecast_path_v1"),
+        "loss_profile_contract": forecast_loss_profile_contract(
+            loss_profile,
+            cumulative_horizons=cumulative_horizons,
+            forecast_horizon=int(horizon),
+        ),
         "decision_cost_bps": float(decision_cost_bps),
         "decision_hit_threshold_bps": float(decision_hit_threshold_bps),
         "decision_drawdown_penalty": float(decision_drawdown_penalty),
@@ -702,48 +900,45 @@ def _forecast_loss(
     decision_drawdown_penalty: float = 0.25,
     cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
 ) -> torch.Tensor:
-    profile = str(loss_profile or "default").strip().lower()
-    if profile not in FORECAST_LOSS_PROFILES:
-        raise ValueError(f"Unsupported forecast loss profile: {profile}")
+    profile = _normalize_forecast_loss_profile(loss_profile)
+    weights = dict(_FORECAST_LOSS_WEIGHT_PRESETS[profile])
     daily_weights = torch.ones((y_daily_scaled.shape[1],), device=y_daily_scaled.device, dtype=y_daily_scaled.dtype)
     daily_weights[:3] = 1.15
     daily_weights[3:5] = 1.05
     daily_loss = F.huber_loss(prediction["mu"], y_daily_scaled, reduction="none")
-    loss = (daily_loss * daily_weights.reshape(1, -1)).mean()
-    loss = loss + 0.20 * pinball_loss(prediction["q10"], y_daily_scaled, 0.10)
-    loss = loss + 0.20 * pinball_loss(prediction["q50"], y_daily_scaled, 0.50)
-    loss = loss + 0.20 * pinball_loss(prediction["q90"], y_daily_scaled, 0.90)
+    loss = float(weights["path_daily"]) * (daily_loss * daily_weights.reshape(1, -1)).mean()
+    quantile_weight = float(weights["quantile"]) / 3.0
+    loss = loss + quantile_weight * pinball_loss(prediction["q10"], y_daily_scaled, 0.10)
+    loss = loss + quantile_weight * pinball_loss(prediction["q50"], y_daily_scaled, 0.50)
+    loss = loss + quantile_weight * pinball_loss(prediction["q90"], y_daily_scaled, 0.90)
     horizons = normalize_path20_cumulative_horizons(cumulative_horizons, horizon=int(y_daily_scaled.shape[1]))
     cum_count = len(horizons)
-    loss = loss + 0.25 * F.huber_loss(prediction["aux"][:, :cum_count], y_cum_scaled)
+    loss = loss + float(weights["path_aux"]) * F.huber_loss(prediction["aux"][:, :cum_count], y_cum_scaled)
     risk_start = cum_count
     risk_width = cum_count * 3
     risk_pred = prediction["aux"][:, risk_start : risk_start + risk_width].reshape(-1, cum_count, 3)
     if y_risk_scaled.ndim == 2:
         y_risk_scaled = y_risk_scaled.reshape(y_risk_scaled.shape[0], 1, y_risk_scaled.shape[1]).expand(-1, cum_count, -1)
-    loss = loss + 0.05 * F.huber_loss(risk_pred, y_risk_scaled)
+    loss = loss + float(weights["risk_aux"]) * F.huber_loss(risk_pred, y_risk_scaled)
     for pos, horizon in enumerate(horizons):
-        weight = float(FORECAST_RANK_LOSS_WEIGHTS.get(int(horizon), 0.0))
-        if profile == "rank_aux":
-            weight *= 1.75
-        elif profile == "multitask_v1":
-            weight *= 2.25
+        weight = float(FORECAST_RANK_LOSS_WEIGHTS.get(int(horizon), 0.0)) * float(weights["rank_aux"])
         if weight <= 0.0:
             continue
         score = prediction["mu"][:, : int(horizon)].sum(dim=1)
         target = y_cum_scaled[:, pos]
         loss = loss + weight * pairwise_rank_loss(score, target)
-    loss = loss + 0.005 * pairwise_rank_loss(risk_pred[:, -1, 2], y_risk_scaled[:, -1, 2])
-    if profile == "multitask_v1":
+    loss = loss + float(weights["risk_rank_aux"]) * pairwise_rank_loss(risk_pred[:, -1, 2], y_risk_scaled[:, -1, 2])
+    if float(weights["direction_aux"]) > 0.0:
         direction_target = (y_cum_scaled[:, -1] > 0).to(dtype=prediction["aux"].dtype)
         direction_logit = prediction["mu"].sum(dim=1)
-        loss = loss + 0.025 * F.binary_cross_entropy_with_logits(direction_logit, direction_target)
+        loss = loss + float(weights["direction_aux"]) * F.binary_cross_entropy_with_logits(direction_logit, direction_target)
+    if float(weights["downside_rank_aux"]) > 0.0:
         downside_target = y_risk_scaled[:, -1, 0]
         downside_score = risk_pred[:, -1, 0]
-        loss = loss + 0.010 * pairwise_rank_loss(-downside_score, -downside_target)
-    if profile == "decision_utility_v1":
+        loss = loss + float(weights["downside_rank_aux"]) * pairwise_rank_loss(-downside_score, -downside_target)
+    if profile in _FORECAST_DECISION_LOSS_PROFILES:
         if "decision_aux" not in prediction:
-            raise ValueError("decision_utility_v1 loss requires decision_aux outputs.")
+            raise ValueError(f"{profile} loss requires decision_aux outputs.")
         decision_aux = prediction["decision_aux"]
         expected_decision_width = path20_decision_aux_dim(horizons, horizon=int(y_daily_scaled.shape[1]))
         if int(decision_aux.shape[1]) != expected_decision_width:
@@ -766,10 +961,10 @@ def _forecast_loss(
         best_horizon_index = targets["best_horizon_index"].to(device=horizon_logits.device, dtype=torch.long)
         pred_decision_score = utility_pred.max(dim=1).values
         future_decision_score = targets["decision_score_scaled"].to(dtype=pred_decision_score.dtype)
-        loss = loss + 0.20 * F.huber_loss(utility_pred, utility_target)
-        loss = loss + 0.05 * F.binary_cross_entropy_with_logits(hit_logits, hit_target)
-        loss = loss + 0.05 * F.cross_entropy(horizon_logits, best_horizon_index)
-        loss = loss + 0.05 * pairwise_rank_loss(pred_decision_score, future_decision_score)
+        loss = loss + float(weights["decision_utility"]) * F.huber_loss(utility_pred, utility_target)
+        loss = loss + float(weights["hit_aux"]) * F.binary_cross_entropy_with_logits(hit_logits, hit_target)
+        loss = loss + float(weights["horizon_classification"]) * F.cross_entropy(horizon_logits, best_horizon_index)
+        loss = loss + float(weights["decision_rank_aux"]) * pairwise_rank_loss(pred_decision_score, future_decision_score)
     return loss
 
 
@@ -2260,11 +2455,9 @@ def train_forecast_models(
     output_profile = str(output_profile or "forecast_path_v1").strip().lower()
     if output_profile not in FORECAST_OUTPUT_PROFILES:
         raise ValueError(f"Unsupported forecast output profile: {output_profile}")
-    loss_profile = str(loss_profile or "default").strip().lower()
-    if loss_profile not in FORECAST_LOSS_PROFILES:
-        raise ValueError(f"Unsupported forecast loss profile: {loss_profile}")
-    if loss_profile == "decision_utility_v1" and output_profile != "decision_utility_v1":
-        raise ValueError("decision_utility_v1 loss requires output_profile=decision_utility_v1.")
+    loss_profile = _normalize_forecast_loss_profile(loss_profile)
+    if loss_profile in _FORECAST_DECISION_LOSS_PROFILES and output_profile != "decision_utility_v1":
+        raise ValueError(f"{loss_profile} loss requires output_profile=decision_utility_v1.")
     if selection_profile == "decision_utility" and output_profile != "decision_utility_v1":
         raise ValueError("decision_utility selection requires output_profile=decision_utility_v1.")
     dataset_view = _ForecastDatasetView(dataset)
@@ -2274,6 +2467,11 @@ def train_forecast_models(
         "drawdown_penalty": float(decision_drawdown_penalty),
         "horizons": [int(item) for item in dataset_view.cumulative_horizons],
     }
+    loss_profile_contract = forecast_loss_profile_contract(
+        loss_profile,
+        cumulative_horizons=dataset_view.cumulative_horizons,
+        forecast_horizon=int(dataset_view.horizon),
+    )
     ranking_baseline = str(ranking_baseline or "none").strip().lower()
     if ranking_baseline not in FORECAST_RANKING_BASELINES:
         ranking_baseline_summary = {
@@ -2474,6 +2672,8 @@ def train_forecast_models(
                 "selection_profile": selection_profile,
                 "output_profile": str(output_profile),
                 "loss_profile": str(loss_profile),
+                "loss_profile_contract": dict(loss_profile_contract),
+                "loss_component_weights": dict(loss_profile_contract["loss_component_weights"]),
                 "decision_utility": dict(decision_config),
                 "ranking_baseline": str(ranking_baseline),
                 "slot_diagnostics": bool(slot_diagnostics),
@@ -2991,6 +3191,8 @@ def train_forecast_models(
             "selection_profile": selection_profile,
             "output_profile": str(output_profile),
             "loss_profile": str(loss_profile),
+            "loss_profile_contract": dict(loss_profile_contract),
+            "loss_component_weights": dict(loss_profile_contract["loss_component_weights"]),
             "decision_utility": dict(decision_config),
             "slot_diagnostics": bool(slot_diagnostics),
             "train_rows": int(len(train_indices)),
@@ -3121,6 +3323,8 @@ def train_forecast_models(
             "selection_profile": selection_profile,
             "output_profile": str(output_profile),
             "loss_profile": str(loss_profile),
+            "loss_profile_contract": dict(loss_profile_contract),
+            "loss_component_weights": dict(loss_profile_contract["loss_component_weights"]),
             "decision_utility": dict(decision_config),
             "ranking_baseline": str(ranking_baseline),
             "slot_diagnostics": bool(slot_diagnostics),
@@ -3150,6 +3354,8 @@ def train_forecast_models(
         "validation_selection_score": float(selected_seed_summary.get("validation_selection_score", 0.0) or 0.0),
         "validation_metrics": validation_metrics,
         "test_metrics": test_metrics,
+        "loss_profile_contract": dict(loss_profile_contract),
+        "loss_component_weights": dict(loss_profile_contract["loss_component_weights"]),
         "test_interpretable": verdict in {"forecast_test_confirmed", "forecast_promising"}
         and validation_metrics.get("status") == "completed"
         and _profile_pass(validation_metrics, selection_profile),
