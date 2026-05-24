@@ -29,7 +29,7 @@ from daily_research.data_platform.contracts import (
     trading_dates_from_calendar,
 )
 from daily_research.data_platform.manager import ProviderManager
-from daily_research.data_platform.providers import build_default_providers
+from daily_research.data_platform.providers import build_default_providers, provider_capability_matrix
 from daily_research.progress import StageProgress, progress_write
 
 
@@ -315,6 +315,13 @@ def run_refresh(config: RefreshConfig, *, providers: Iterable[Any] | None = None
             progress.complete_stage()
         with progress.stage("Write refresh manifest", status):
             manifest_path = run_root / "refresh_manifest.json"
+            domain_quality_status = _domain_quality_status(domain_outputs=domain_outputs, required_domains=required_domains)
+            source_provenance = _source_provenance(domain_outputs)
+            provider_health_summary = _provider_health_summary_from_refresh(
+                provider_chain=provider_chain,
+                provider_coverage_report=provider_coverage_report,
+                provider_error_report=provider_error_report,
+            )
             manifest = {
                 "schema_version": 1,
                 "status": status,
@@ -350,6 +357,10 @@ def run_refresh(config: RefreshConfig, *, providers: Iterable[Any] | None = None
                 "conflict_summary": conflict_summary,
                 "provider_coverage_report": provider_coverage_report,
                 "provider_error_report": provider_error_report,
+                "provider_health_summary": provider_health_summary,
+                "domain_quality_status": domain_quality_status,
+                "source_provenance": source_provenance,
+                "domain_matrix": provider_capability_matrix(resolved.provider_plan),
                 "blockers": blockers,
                 "registered_market_dataset_id": registered_dataset_id,
                 "registered_domain_dataset_ids": registered_domain_dataset_ids,
@@ -913,6 +924,70 @@ def _refresh_blockers(
     if int(coverage_report.get("row_count", 0) or 0) <= 0:
         blockers.append("empty_canonical_market")
     return [item for item in blockers if not item.startswith("_")]
+
+
+def _domain_quality_status(*, domain_outputs: dict[str, dict[str, Any]], required_domains: set[str]) -> dict[str, dict[str, Any]]:
+    payload: dict[str, dict[str, Any]] = {}
+    for domain, output in domain_outputs.items():
+        coverage = dict(output.get("coverage_report", {}) or {})
+        conflict = dict(output.get("conflict_summary", {}) or {})
+        row_count = int(coverage.get("row_count", 0) or 0)
+        requirement = "required" if domain in required_domains else "optional"
+        if row_count > 0:
+            status = "ok"
+        elif requirement == "required":
+            status = "blocked"
+        else:
+            status = "degraded"
+        if requirement == "required" and int(conflict.get("severe_conflict_count", 0) or 0) > 0:
+            status = "blocked"
+        payload[domain] = {
+            "status": status,
+            "requirement": requirement,
+            "row_count": row_count,
+            "coverage_ratio": float(coverage.get("coverage_ratio", 0.0) or 0.0),
+            "severe_conflict_count": int(conflict.get("severe_conflict_count", 0) or 0),
+        }
+    return payload
+
+
+def _source_provenance(domain_outputs: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    payload: dict[str, dict[str, Any]] = {}
+    for domain, output in domain_outputs.items():
+        provider_result = output.get("provider_result")
+        data = getattr(provider_result, "data", pd.DataFrame())
+        providers: list[str] = []
+        if isinstance(data, pd.DataFrame) and not data.empty and "source" in data.columns:
+            providers = sorted(str(item) for item in data["source"].dropna().astype(str).unique() if str(item).strip())
+        payload[domain] = {
+            "providers": providers,
+            "silver_path": str(output.get("silver_path", "")),
+            "conflict_report_path": str(output.get("conflict_report_path", "")),
+        }
+    return payload
+
+
+def _provider_health_summary_from_refresh(
+    *,
+    provider_chain: list[str],
+    provider_coverage_report: dict[str, Any],
+    provider_error_report: list[dict[str, Any]],
+) -> dict[str, Any]:
+    domain_status: dict[str, str] = {}
+    ok_domain_count = 0
+    for domain, coverage in provider_coverage_report.items():
+        row_count = int(dict(coverage or {}).get("row_count", 0) or 0)
+        status = "ok" if row_count > 0 else "no_data"
+        domain_status[str(domain)] = status
+        ok_domain_count += int(status == "ok")
+    return {
+        "provider_chain": list(provider_chain),
+        "domain_status": domain_status,
+        "checked_domain_count": len(provider_coverage_report),
+        "ok_domain_count": ok_domain_count,
+        "error_count": len(provider_error_report),
+        "errors": list(provider_error_report[:20]),
+    }
 
 
 def _register_policy_input_bundle(

@@ -10,6 +10,10 @@ import type {
   JobSummary,
   ModelDetailPayload,
   ModelsPayload,
+  ProviderHealthPayload,
+  ProviderHealthRequest,
+  SchedulerConfigRequest,
+  SchedulerPayload,
   StatusPayload,
   TradePlanGenerateRequest,
   TradePlanPayload,
@@ -46,6 +50,13 @@ function postJson<T>(fetcher: FetchLike, url: string, body: unknown): Promise<T>
   });
 }
 
+function patchJson<T>(fetcher: FetchLike, url: string, body: unknown): Promise<T> {
+  return requestJson<T>(fetcher, url, {
+    method: "PATCH",
+    body: JSON.stringify(body)
+  });
+}
+
 export function createApiClient(fetcher: FetchLike = window.fetch.bind(window)): ExecutionApi {
   return {
     getStatus: (historyLimit = 10) => requestJson<StatusPayload>(fetcher, `/api/status?history_limit=${historyLimit}`),
@@ -56,6 +67,10 @@ export function createApiClient(fetcher: FetchLike = window.fetch.bind(window)):
       postJson<JobLaunchPayload>(fetcher, `/api/models/${encodeURIComponent(modelId)}/train`, payload),
     getDataSources: () => requestJson<DataSourcesPayload>(fetcher, "/api/data-sources"),
     refreshDataSources: (payload: DataRefreshRequest) => postJson<JobLaunchPayload>(fetcher, "/api/data-sources/refresh", payload),
+    runProviderHealth: (payload: ProviderHealthRequest) =>
+      postJson<ProviderHealthPayload>(fetcher, "/api/data-sources/provider-health", payload),
+    getScheduler: () => requestJson<SchedulerPayload>(fetcher, "/api/data-sources/scheduler"),
+    updateScheduler: (payload: SchedulerConfigRequest) => patchJson<SchedulerPayload>(fetcher, "/api/data-sources/scheduler", payload),
     getTradePlan: () => requestJson<TradePlanPayload>(fetcher, "/api/trade-plan"),
     generateTradePlan: (payload: TradePlanGenerateRequest) => postJson<JobLaunchPayload>(fetcher, "/api/trade-plan/generate", payload),
     getAccount: () => requestJson<AccountPayload>(fetcher, "/api/account"),

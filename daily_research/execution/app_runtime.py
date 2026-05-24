@@ -52,6 +52,13 @@ def _default_state() -> dict[str, Any]:
         "recent_jobs": [],
         "last_success_by_task": {},
         "last_failure_by_task": {},
+        "scheduler": {
+            "enabled": True,
+            "post_close_time": "15:30",
+            "timezone": "Asia/Shanghai",
+            "last_auto_refresh": {},
+            "last_tick": {},
+        },
     }
 
 

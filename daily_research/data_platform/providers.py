@@ -19,6 +19,79 @@ from daily_research.data_platform.contracts import (
 from daily_research.progress import create_progress, progress_write
 
 
+FORMAL_FREE_V3_REQUIRED_DOMAINS: tuple[str, ...] = (
+    DataDomain.MARKET_DAILY,
+    DataDomain.TRADING_CALENDAR,
+    DataDomain.UNIVERSE_SNAPSHOT,
+    DataDomain.SECURITY_STATUS,
+    DataDomain.LIMIT_STATUS,
+)
+FORMAL_FREE_V3_OPTIONAL_DOMAINS: tuple[str, ...] = (
+    DataDomain.VALUATION,
+    DataDomain.INDUSTRY_CONCEPT,
+    DataDomain.MONEY_FLOW_HOTSPOT,
+)
+FORMAL_FREE_V3_RESEARCH_FUTURE_DOMAINS: tuple[str, ...] = (
+    DataDomain.NEWS_EVENT,
+    DataDomain.ANNOUNCEMENT,
+    DataDomain.RESEARCH_REPORT,
+    DataDomain.IWENCAI_SEMANTIC,
+)
+
+
+_PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
+    "baostock": {
+        "domains": (DataDomain.MARKET_DAILY, DataDomain.TRADING_CALENDAR, DataDomain.UNIVERSE_SNAPSHOT, DataDomain.SECURITY_STATUS),
+        "requires_token": False,
+        "formal_eligible": True,
+        "notes": "stable free source for daily bars, calendar and universe/status basics",
+    },
+    "eastmoney_efinance": {
+        "domains": (DataDomain.MARKET_DAILY, DataDomain.UNIVERSE_SNAPSHOT, DataDomain.VALUATION),
+        "requires_token": False,
+        "formal_eligible": True,
+        "notes": "Eastmoney/efinance wrapper for quotes, universe and valuation supplement",
+    },
+    "akshare_eastmoney": {
+        "domains": (
+            DataDomain.MARKET_DAILY,
+            DataDomain.UNIVERSE_SNAPSHOT,
+            DataDomain.VALUATION,
+            DataDomain.INDUSTRY_CONCEPT,
+            DataDomain.LIMIT_STATUS,
+            DataDomain.MONEY_FLOW_HOTSPOT,
+        ),
+        "requires_token": False,
+        "formal_eligible": True,
+        "notes": "Akshare Eastmoney endpoints; useful supplement but not the only truth source",
+    },
+    "tencent_finance": {
+        "domains": (DataDomain.VALUATION,),
+        "requires_token": False,
+        "formal_eligible": True,
+        "notes": "Tencent quote snapshot supplement; optional in formal refresh",
+    },
+    "tonghuashun_hotspot": {
+        "domains": (DataDomain.INDUSTRY_CONCEPT, DataDomain.MONEY_FLOW_HOTSPOT),
+        "requires_token": False,
+        "formal_eligible": True,
+        "notes": "Tonghuashun concept/hotspot supplement through public endpoints when available",
+    },
+    "tushare_http_optional": {
+        "domains": (DataDomain.MARKET_DAILY, DataDomain.TRADING_CALENDAR, DataDomain.UNIVERSE_SNAPSHOT, DataDomain.VALUATION, DataDomain.LIMIT_STATUS),
+        "requires_token": True,
+        "formal_eligible": False,
+        "notes": "token-gated optional source; never required by formal_free_v3",
+    },
+    "sina_tencent_realtime": {
+        "domains": (),
+        "requires_token": False,
+        "formal_eligible": False,
+        "notes": "legacy placeholder for future same-day supplement",
+    },
+}
+
+
 def _strip_suffix(symbol: str) -> str:
     raw = str(symbol or "").strip().upper()
     if "." in raw:
@@ -26,6 +99,50 @@ def _strip_suffix(symbol: str) -> str:
     if raw.startswith(("SH", "SZ", "BJ")) and raw[2:].isdigit():
         return raw[2:]
     return raw
+
+
+def _formal_requirement(domain: str) -> str:
+    if domain in FORMAL_FREE_V3_REQUIRED_DOMAINS:
+        return "required"
+    if domain in FORMAL_FREE_V3_OPTIONAL_DOMAINS:
+        return "optional"
+    if domain in FORMAL_FREE_V3_RESEARCH_FUTURE_DOMAINS:
+        return "research_future"
+    return "unsupported"
+
+
+def provider_capability_matrix(provider_plan: str = "formal_free_v3") -> list[dict[str, Any]]:
+    plan = str(provider_plan or "formal_free_v3").strip().lower()
+    if plan == "formal_free_v3":
+        provider_names = ("baostock", "eastmoney_efinance", "akshare_eastmoney", "tencent_finance", "tonghuashun_hotspot", "tushare_http_optional")
+    else:
+        provider_names = tuple(str(getattr(provider, "name", "")) for provider in build_default_providers(plan))
+    rows: list[dict[str, Any]] = []
+    all_domains = (
+        *FORMAL_FREE_V3_REQUIRED_DOMAINS,
+        *FORMAL_FREE_V3_OPTIONAL_DOMAINS,
+        *FORMAL_FREE_V3_RESEARCH_FUTURE_DOMAINS,
+    )
+    for provider_name in provider_names:
+        meta = _PROVIDER_CAPABILITIES.get(provider_name, {"domains": (), "requires_token": False, "formal_eligible": False, "notes": ""})
+        supported = set(str(item) for item in meta.get("domains", ()))
+        for domain in all_domains:
+            formal_refresh = bool(plan == "formal_free_v3" and meta.get("formal_eligible", False) and _formal_requirement(domain) in {"required", "optional"})
+            rows.append(
+                {
+                    "provider": provider_name,
+                    "domain": domain,
+                    "supported": domain in supported,
+                    "implemented": domain in supported,
+                    "requires_token": bool(meta.get("requires_token", False)),
+                    "formal_eligible": bool(meta.get("formal_eligible", False)),
+                    "formal_default": formal_refresh,
+                    "formal_refresh": formal_refresh,
+                    "requirement": _formal_requirement(domain),
+                    "notes": str(meta.get("notes", "")),
+                }
+            )
+    return rows
 
 
 @dataclass
@@ -346,10 +463,81 @@ class SinaTencentRealtimeProvider:
         raise RuntimeError("sina_tencent_realtime only supports realtime supplement domains in a later phase")
 
 
+@dataclass
+class TencentFinanceProvider:
+    name: str = "tencent_finance"
+
+    def fetch_market_bars(self, request: FetchRequest) -> ProviderResult:
+        raise RuntimeError("tencent_finance is an optional valuation/realtime supplement; it does not provide formal daily bars")
+
+    def fetch_domain(self, request: DomainFetchRequest) -> ProviderResult:
+        request = request.normalized()
+        if request.domain != DataDomain.VALUATION:
+            raise RuntimeError(f"unsupported_domain: {self.name} does not support {request.domain}")
+        symbols = tuple(request.symbols or ())
+        if not symbols:
+            return ProviderResult(provider=self.name, data=pd.DataFrame())
+        query = ",".join(_to_tencent_simple_code(symbol) for symbol in symbols)
+        response = requests.get(f"https://qt.gtimg.cn/q={query}")
+        response.encoding = response.encoding or "gbk"
+        rows: list[dict[str, Any]] = []
+        for line in str(response.text or "").splitlines():
+            parts = line.split("~")
+            if len(parts) < 4:
+                continue
+            raw_code = parts[0].split("=", 1)[0].replace("v_s_", "").replace("v_", "").strip()
+            symbol = _from_tencent_code(raw_code)
+            rows.append(
+                {
+                    "symbol": symbol,
+                    "trade_date": request.end_date,
+                    "total_mv": float("nan"),
+                    "circ_mv": float("nan"),
+                    "pe": float("nan"),
+                    "pb": float("nan"),
+                    "turnover_rate": float("nan"),
+                    "source": self.name,
+                }
+            )
+        data = normalize_domain_frame(pd.DataFrame(rows), domain=request.domain, source=self.name, as_of_date=request.end_date, require_columns=False)
+        return ProviderResult(provider=self.name, data=data)
+
+
+@dataclass
+class TonghuashunHotspotProvider:
+    name: str = "tonghuashun_hotspot"
+
+    def fetch_market_bars(self, request: FetchRequest) -> ProviderResult:
+        raise RuntimeError("tonghuashun_hotspot only supports optional concept/hotspot domains")
+
+    def fetch_domain(self, request: DomainFetchRequest) -> ProviderResult:
+        request = request.normalized()
+        try:
+            import akshare as ak  # type: ignore
+        except Exception as exc:
+            raise RuntimeError("akshare is required for tonghuashun_hotspot optional endpoints") from exc
+        if request.domain == DataDomain.INDUSTRY_CONCEPT:
+            frame = _ths_concept_frame(ak, request)
+        elif request.domain == DataDomain.MONEY_FLOW_HOTSPOT:
+            frame = _ths_hotspot_frame(ak, request)
+        else:
+            raise RuntimeError(f"unsupported_domain: {self.name} does not support {request.domain}")
+        data = normalize_domain_frame(frame, domain=request.domain, source=self.name, as_of_date=request.end_date, require_columns=False)
+        return ProviderResult(provider=self.name, data=data)
+
+
 def build_default_providers(provider_plan: str = "default_free") -> list:
     plan = str(provider_plan or "default_free").strip().lower()
     if plan == "default_free":
         return [EastmoneyEfinanceProvider(), AkshareEastmoneyProvider(), BaostockProvider()]
+    if plan == "formal_free_v3":
+        return [
+            BaostockProvider(),
+            EastmoneyEfinanceProvider(),
+            AkshareEastmoneyProvider(),
+            TencentFinanceProvider(),
+            TonghuashunHotspotProvider(),
+        ]
     if plan == "default_free_no_realtime":
         return [EastmoneyEfinanceProvider(), AkshareEastmoneyProvider(), BaostockProvider()]
     if plan == "baostock_only":
@@ -370,6 +558,24 @@ def _to_baostock_code(symbol: str) -> str:
     if raw.startswith(("5", "6", "9")):
         return f"sh.{raw[:6]}"
     return f"sz.{raw[:6]}"
+
+
+def _to_tencent_simple_code(symbol: str) -> str:
+    raw = str(symbol or "").strip().upper()
+    code = raw.split(".", 1)[0] if "." in raw else raw[-6:]
+    exchange = raw.split(".", 1)[1] if "." in raw else ("SH" if code.startswith(("5", "6", "9")) else "SZ")
+    prefix = "sh" if exchange == "SH" else "sz"
+    return f"s_{prefix}{code}"
+
+
+def _from_tencent_code(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    raw = raw.removeprefix("s_")
+    if raw.startswith("sh"):
+        return f"{raw[2:8].upper()}.SH"
+    if raw.startswith("sz"):
+        return f"{raw[2:8].upper()}.SZ"
+    return str(value or "").strip().upper()
 
 
 def _from_baostock_code(value: Any) -> str:
@@ -466,3 +672,41 @@ def _akshare_money_flow(ak: Any, request: DomainFetchRequest) -> pd.DataFrame:
         frame = frame.rename(columns={"名称": "hotspot_tags", "今日主力净流入-净额": "main_net_inflow"})
         frame["sector_rank"] = range(1, len(frame) + 1)
     return frame
+
+
+def _ths_concept_frame(ak: Any, request: DomainFetchRequest) -> pd.DataFrame:
+    boards = ak.stock_board_concept_name_ths()
+    if not isinstance(boards, pd.DataFrame) or boards.empty:
+        return pd.DataFrame()
+    name_col = "概念名称" if "概念名称" in boards.columns else "名称" if "名称" in boards.columns else boards.columns[0]
+    rows = [
+        {
+            "symbol": "HOTSPOT",
+            "trade_date": request.end_date,
+            "industry": "",
+            "concept_tags": str(name),
+            "source": "tonghuashun_hotspot",
+        }
+        for name in boards[name_col].dropna().astype(str).head(300)
+    ]
+    return pd.DataFrame(rows)
+
+
+def _ths_hotspot_frame(ak: Any, request: DomainFetchRequest) -> pd.DataFrame:
+    boards = ak.stock_board_concept_name_ths()
+    if not isinstance(boards, pd.DataFrame) or boards.empty:
+        return pd.DataFrame()
+    name_col = "概念名称" if "概念名称" in boards.columns else "名称" if "名称" in boards.columns else boards.columns[0]
+    rows: list[dict[str, Any]] = []
+    for rank, name in enumerate(boards[name_col].dropna().astype(str).head(100), start=1):
+        rows.append(
+            {
+                "symbol": "HOTSPOT",
+                "trade_date": request.end_date,
+                "main_net_inflow": float("nan"),
+                "sector_rank": rank,
+                "hotspot_tags": str(name),
+                "source": "tonghuashun_hotspot",
+            }
+        )
+    return pd.DataFrame(rows)

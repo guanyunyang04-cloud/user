@@ -13,7 +13,9 @@ from daily_research.execution.web_models import (
     AccountSnapshotRequest,
     DataRefreshRequest,
     ModelTrainRequest,
+    ProviderHealthRequest,
     ResumeRequest,
+    SchedulerConfigRequest,
     TaskRunRequest,
     TradePlanGenerateRequest,
     UnlockRequest,
@@ -267,6 +269,35 @@ def create_app() -> FastAPI:
     def api_data_sources() -> dict[str, Any]:
         return app_service.data_sources_summary()
 
+    @app.post("/api/data-sources/provider-health")
+    def api_data_sources_provider_health(request: ProviderHealthRequest) -> JSONResponse:
+        try:
+            payload = app_service.provider_health_summary(
+                provider_plan=request.provider_plan or app_service.FORMAL_DATA_PLATFORM_PROVIDER_PLAN,
+                as_of_date=request.as_of_date,
+                domains=request.domains or list(app_service.FORMAL_DATA_PLATFORM_REQUIRED_DOMAINS),
+                symbols=request.symbols or ["000001.SZ", "600000.SH", "000300.SH"],
+            )
+            return JSONResponse(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/data-sources/scheduler")
+    def api_data_sources_scheduler() -> dict[str, Any]:
+        return app_service.scheduler_summary()
+
+    @app.patch("/api/data-sources/scheduler")
+    def api_data_sources_scheduler_update(request: SchedulerConfigRequest) -> JSONResponse:
+        try:
+            patch: dict[str, Any] = {}
+            if request.enabled is not None:
+                patch["enabled"] = request.enabled
+            if request.post_close_time:
+                patch["post_close_time"] = request.post_close_time
+            return JSONResponse(app_service.update_scheduler_config(patch))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.post("/api/data-sources/refresh")
     def api_data_sources_refresh(request: DataRefreshRequest) -> JSONResponse:
         try:
@@ -310,6 +341,7 @@ def create_app() -> FastAPI:
             if universe:
                 args.extend(["--universe", universe])
             args.extend(["--provider-plan", app_service.FORMAL_DATA_PLATFORM_PROVIDER_PLAN])
+            args.extend(["--required-domains", ",".join(app_service.FORMAL_DATA_PLATFORM_REQUIRED_DOMAINS)])
             if domains:
                 args.extend(["--domains", ",".join(domains)])
             if request.advanced_args:
@@ -423,5 +455,7 @@ app = create_app()
 
 
 def run_web_console(*, host: str = "127.0.0.1", port: int = 8765, reload: bool = False) -> None:
+    if not reload:
+        app_service.start_scheduler_loop()
     target = "daily_research.execution.web_server:app" if reload else app
     uvicorn.run(target, host=str(host), port=int(port), reload=bool(reload), log_level="info")

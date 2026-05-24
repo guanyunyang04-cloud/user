@@ -546,6 +546,56 @@ class DataPlatformRefreshDailyTest(unittest.TestCase):
         self.assertIn("sidecar_dataset_ids", metadata["parameters"])
         self.assertIn("calendar_dataset_id", metadata["parameters"])
 
+    def test_refresh_manifest_records_v3_domain_quality_and_optional_degradation(self) -> None:
+        provider = InMemoryDomainProvider(
+            "akshare_eastmoney",
+            payloads={
+                DataDomain.TRADING_CALENDAR: _calendar_frame(dates=["2026-01-05"], provider="akshare_eastmoney"),
+                DataDomain.UNIVERSE_SNAPSHOT: _universe_frame(provider="akshare_eastmoney"),
+                DataDomain.MARKET_DAILY: _market_frame(dates=["2026-01-05"], provider="akshare_eastmoney"),
+                DataDomain.SECURITY_STATUS: _status_frame(provider="akshare_eastmoney", dates=["2026-01-05"]),
+                DataDomain.LIMIT_STATUS: _limit_frame(provider="akshare_eastmoney", dates=["2026-01-05"]),
+            },
+        )
+        with TemporaryDirectory() as temp_dir:
+            result = run_refresh(
+                RefreshConfig(
+                    lake_root=Path(temp_dir),
+                    as_of_date="2026-01-05",
+                    start_date="2026-01-05",
+                    universe="all_a",
+                    domains=(
+                        DataDomain.MARKET_DAILY,
+                        DataDomain.TRADING_CALENDAR,
+                        DataDomain.UNIVERSE_SNAPSHOT,
+                        DataDomain.SECURITY_STATUS,
+                        DataDomain.LIMIT_STATUS,
+                        DataDomain.VALUATION,
+                    ),
+                    required_domains=(
+                        DataDomain.MARKET_DAILY,
+                        DataDomain.TRADING_CALENDAR,
+                        DataDomain.UNIVERSE_SNAPSHOT,
+                        DataDomain.SECURITY_STATUS,
+                        DataDomain.LIMIT_STATUS,
+                    ),
+                    benchmark="000300.SH",
+                    provider_plan="formal_free_v3",
+                    min_coverage_ratio=0.70,
+                ),
+                providers=[provider],
+            )
+            manifest = json.loads(Path(result.manifest_path).read_text(encoding="utf-8"))
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(manifest["provider_plan"], "formal_free_v3")
+        self.assertEqual(manifest["domain_quality_status"][DataDomain.MARKET_DAILY]["status"], "ok")
+        self.assertEqual(manifest["domain_quality_status"][DataDomain.VALUATION]["status"], "degraded")
+        self.assertEqual(manifest["domain_quality_status"][DataDomain.VALUATION]["requirement"], "optional")
+        self.assertIn("provider_health_summary", manifest)
+        self.assertIn("source_provenance", manifest)
+        self.assertIn("akshare_eastmoney", manifest["source_provenance"][DataDomain.MARKET_DAILY]["providers"])
+
     def test_calendar_incremental_skips_closed_business_day(self) -> None:
         provider = InMemoryDomainProvider(
             "akshare_eastmoney",

@@ -997,6 +997,15 @@ class ResearchDataLakeTest(unittest.TestCase):
         self.assertTrue(skip_market.skip_market)
         self.assertEqual(defaults.max_universe_size, 0)
 
+    def test_build_research_database_requires_explicit_lake_dataset_id(self) -> None:
+        parser = build_research_database.build_parser()
+        defaults = parser.parse_args([])
+
+        self.assertEqual(defaults.data_source, "lake")
+        self.assertEqual(defaults.lake_dataset_id, "")
+        with self.assertRaisesRegex(ValueError, "explicit --lake-dataset-id"):
+            build_research_database.validate_args(defaults)
+
     def test_import_legacy_training_cache_registers_gold_dataset(self) -> None:
         sample_frame = pd.DataFrame({"date": ["2026-01-05"], "stock": ["000001.SZ"], "action_label": ["open"]})
         daily_frame = pd.DataFrame({"date": ["2026-01-05"], "gross_exposure_target": [0.80]})

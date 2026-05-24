@@ -54,6 +54,14 @@ class GoldTrainingBuilderTest(unittest.TestCase):
         self.assertEqual(build_gold_training_dataset._resolve_start_date("2019-01-02"), "20190102")
         self.assertEqual(build_gold_training_dataset._resolve_end_date("2019-06-30"), "20190630")
 
+    def test_gold_cli_requires_explicit_source_market_dataset_id(self) -> None:
+        args = build_gold_training_dataset.build_parser().parse_args([])
+
+        self.assertEqual(args.data_source, "lake")
+        self.assertEqual(args.source_market_dataset_id, "")
+        with self.assertRaisesRegex(ValueError, "explicit --source-market-dataset-id"):
+            build_gold_training_dataset.validate_args(args)
+
     def _spec(self, *, shard_frequency: str = "month") -> GoldBuildSpec:
         return GoldBuildSpec(
             universe="learned_all_a",

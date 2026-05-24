@@ -5,6 +5,7 @@ import sys
 from io import StringIO
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import pandas as pd
 import pytest
@@ -15,6 +16,18 @@ FORMAL_REFRESH_DOMAINS = [
     "trading_calendar",
     "universe_snapshot",
     "security_status",
+    "limit_status",
+    "valuation",
+    "industry_concept",
+    "money_flow_hotspot",
+]
+
+FORMAL_REQUIRED_DOMAINS = [
+    "market_daily",
+    "trading_calendar",
+    "universe_snapshot",
+    "security_status",
+    "limit_status",
 ]
 
 
@@ -230,8 +243,13 @@ def test_data_sources_payload_exposes_default_refresh_contract(monkeypatch: pyte
         "as_of_date": "2026-05-22",
         "universe": "all_a",
         "domains": FORMAL_REFRESH_DOMAINS,
-        "provider_plan": "baostock_only",
+        "required_domains": FORMAL_REQUIRED_DOMAINS,
+        "provider_plan": "formal_free_v3",
     }
+    assert payload["data_platform"]["default_refresh"]["required_domains"] == FORMAL_REQUIRED_DOMAINS
+    assert payload["formal_provider_plan"] == "formal_free_v3"
+    assert "domain_matrix" in payload
+    assert "scheduler_status" in payload
 
 
 def test_data_sources_payload_marks_current_dataset_latest(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -390,7 +408,7 @@ def test_data_refresh_api_runs_signal_refresh_when_data_latest_but_signal_stale(
                     "as_of_date": "2026-05-22",
                     "universe": "all_a",
                     "domains": FORMAL_REFRESH_DOMAINS,
-                    "provider_plan": "baostock_only",
+                    "provider_plan": "formal_free_v3",
                 },
             },
         },
@@ -518,7 +536,7 @@ def test_data_refresh_api_skips_when_current_dataset_is_latest(monkeypatch: pyte
                     "as_of_date": "2026-05-22",
                     "universe": "all_a",
                     "domains": FORMAL_REFRESH_DOMAINS,
-                    "provider_plan": "baostock_only",
+                    "provider_plan": "formal_free_v3",
                 },
             },
         },
@@ -560,7 +578,7 @@ def test_data_refresh_api_defaults_to_completed_date_and_formal_domains(monkeypa
                     "as_of_date": "2026-05-22",
                     "universe": "all_a",
                     "domains": FORMAL_REFRESH_DOMAINS,
-                    "provider_plan": "baostock_only",
+                    "provider_plan": "formal_free_v3",
                 },
             },
         },
@@ -577,7 +595,9 @@ def test_data_refresh_api_defaults_to_completed_date_and_formal_domains(monkeypa
         "--universe",
         "all_a",
         "--provider-plan",
-        "baostock_only",
+        "formal_free_v3",
+        "--required-domains",
+        ",".join(FORMAL_REQUIRED_DOMAINS),
         "--domains",
         ",".join(FORMAL_REFRESH_DOMAINS),
     ]
@@ -608,7 +628,7 @@ def test_data_refresh_api_ignores_timeout_override(monkeypatch: pytest.MonkeyPat
                     "as_of_date": "2026-05-22",
                     "universe": "all_a",
                     "domains": FORMAL_REFRESH_DOMAINS,
-                    "provider_plan": "baostock_only",
+                    "provider_plan": "formal_free_v3",
                 },
             },
         },
@@ -621,6 +641,157 @@ def test_data_refresh_api_ignores_timeout_override(monkeypatch: pytest.MonkeyPat
     assert response.status_code == 200
     assert "--timeout-seconds" not in captured["passthrough_args"]
     assert "1" not in captured["passthrough_args"]
+
+
+def test_provider_health_api_is_read_only_and_returns_matrix(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from daily_research.execution import web_server
+
+    called: dict[str, Any] = {}
+
+    def fake_provider_health_summary(**kwargs):
+        called.update(kwargs)
+        return {
+            "status": "ok",
+            "provider_plan": "formal_free_v3",
+            "summary": {"ok_domain_count": 2, "checked_domain_count": 2},
+            "domain_matrix": [{"provider": "baostock", "domain": "market_daily"}],
+            "providers": [],
+        }
+
+    monkeypatch.setattr(web_server.app_service, "provider_health_summary", fake_provider_health_summary)
+
+    client = TestClient(web_server.create_app())
+    response = client.post("/api/data-sources/provider-health", json={})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["provider_plan"] == "formal_free_v3"
+    assert payload["domain_matrix"][0]["domain"] == "market_daily"
+    assert called["provider_plan"] == "formal_free_v3"
+
+
+def test_scheduler_api_reads_and_updates_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from daily_research.execution import web_server
+
+    captured: dict[str, Any] = {}
+
+    monkeypatch.setattr(
+        web_server.app_service,
+        "scheduler_summary",
+        lambda: {
+            "enabled": True,
+            "post_close_time": "15:30",
+            "timezone": "Asia/Shanghai",
+            "last_auto_refresh": {},
+            "next_check_at": "2026-05-25T15:30:00+08:00",
+        },
+    )
+
+    def fake_update_scheduler_config(payload):
+        captured.update(payload)
+        return {"enabled": False, "post_close_time": "15:45", "timezone": "Asia/Shanghai"}
+
+    monkeypatch.setattr(web_server.app_service, "update_scheduler_config", fake_update_scheduler_config)
+
+    client = TestClient(web_server.create_app())
+    get_response = client.get("/api/data-sources/scheduler")
+    patch_response = client.patch("/api/data-sources/scheduler", json={"enabled": False, "post_close_time": "15:45"})
+
+    assert get_response.status_code == 200
+    assert get_response.json()["post_close_time"] == "15:30"
+    assert patch_response.status_code == 200
+    assert patch_response.json()["enabled"] is False
+    assert captured == {"enabled": False, "post_close_time": "15:45"}
+
+
+def test_scheduler_tick_launches_auto_refresh_when_due(monkeypatch: pytest.MonkeyPatch) -> None:
+    from daily_research.execution import app_service
+
+    captured: dict[str, Any] = {}
+
+    monkeypatch.setattr(
+        app_service,
+        "scheduler_summary",
+        lambda: {
+            "enabled": True,
+            "post_close_time": "15:30",
+            "timezone": "Asia/Shanghai",
+            "last_auto_refresh": {},
+            "missed_status": "",
+        },
+    )
+    monkeypatch.setattr(app_service, "get_latest_completed_trading_date", lambda: "2026-05-22", raising=False)
+    monkeypatch.setattr(
+        app_service,
+        "data_sources_summary",
+        lambda: {
+            "status": "ok",
+            "next_refresh_action": "refresh",
+            "next_signal_action": "refresh",
+            "data_platform": {
+                "latest_completed_trading_date": "2026-05-22",
+                "default_refresh": {
+                    "as_of_date": "2026-05-22",
+                    "universe": "all_a",
+                    "domains": FORMAL_REFRESH_DOMAINS,
+                    "required_domains": FORMAL_REQUIRED_DOMAINS,
+                    "provider_plan": "formal_free_v3",
+                },
+            },
+        },
+    )
+
+    def fake_launch_task_async(**kwargs):
+        captured.update(kwargs)
+        return {"job_id": "auto-job", "task_name": kwargs["task_name"], "status": "queued"}
+
+    monkeypatch.setattr(app_service, "launch_task_async", fake_launch_task_async)
+    monkeypatch.setattr(app_service, "_scheduler_already_ran_for_date", lambda *_args, **_kwargs: False, raising=False)
+    monkeypatch.setattr(app_service, "_scheduler_time_is_due", lambda *_args, **_kwargs: True, raising=False)
+    monkeypatch.setattr(app_service, "_scheduler_auto_window_matches_latest_completed", lambda *_args, **_kwargs: True, raising=False)
+
+    result = app_service.run_scheduler_tick(trigger="auto_post_close")
+
+    assert result["status"] == "launched"
+    assert result["job_id"] == "auto-job"
+    assert captured["task_name"] == "data-platform-refresh"
+    assert captured["job_label"] == "auto-post-close:2026-05-22"
+    assert "--provider-plan" in captured["passthrough_args"]
+    assert "formal_free_v3" in captured["passthrough_args"]
+    assert "--required-domains" in captured["passthrough_args"]
+
+
+def test_scheduler_tick_does_not_auto_backfill_when_site_was_offline_after_trading_day(monkeypatch: pytest.MonkeyPatch) -> None:
+    from daily_research.execution import app_service
+
+    monkeypatch.setattr(
+        app_service,
+        "scheduler_summary",
+        lambda: {
+            "enabled": True,
+            "post_close_time": "15:30",
+            "timezone": "Asia/Shanghai",
+            "last_auto_refresh": {},
+            "missed_status": "missed_while_offline",
+        },
+    )
+    monkeypatch.setattr(app_service, "get_latest_completed_trading_date", lambda: "2026-05-22", raising=False)
+    monkeypatch.setattr(app_service, "_scheduler_already_ran_for_date", lambda *_args, **_kwargs: False, raising=False)
+    monkeypatch.setattr(app_service, "_scheduler_time_is_due", lambda *_args, **_kwargs: True, raising=False)
+    monkeypatch.setattr(app_service, "_scheduler_auto_window_matches_latest_completed", lambda *_args, **_kwargs: False, raising=False)
+    launch = mock.Mock()
+    monkeypatch.setattr(app_service, "launch_task_async", launch)
+
+    result = app_service.run_scheduler_tick(trigger="auto_post_close")
+
+    assert result["status"] == "skipped_missed_while_offline"
+    assert result["latest_completed_trading_date"] == "2026-05-22"
+    launch.assert_not_called()
 
 
 def test_trade_plan_summary_explains_empty_structured_plan(tmp_path: Path) -> None:

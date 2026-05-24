@@ -51,11 +51,67 @@ export interface DataSourceRow {
   created_at: string;
 }
 
+export interface DomainMatrixRow {
+  provider: string;
+  domain: string;
+  requirement?: string;
+  supported?: boolean;
+  requires_token?: boolean;
+  formal_refresh?: boolean;
+  notes?: string;
+  [key: string]: unknown;
+}
+
+export interface ProviderHealthRequest {
+  as_of_date?: string;
+  domains?: string[];
+  provider_plan?: string;
+}
+
+export interface ProviderHealthPayload {
+  status: string;
+  provider_plan?: string;
+  checked_at?: string;
+  as_of_date?: string;
+  summary?: JsonObject;
+  domain_matrix?: DomainMatrixRow[];
+  providers?: JsonObject[];
+  [key: string]: unknown;
+}
+
+export interface SchedulerStatus {
+  enabled?: boolean;
+  post_close_time?: string;
+  timezone?: string;
+  next_check_at?: string;
+  last_auto_refresh?: JsonObject;
+  recent_decision?: JsonObject;
+  missed_status?: string;
+  [key: string]: unknown;
+}
+
+export interface SchedulerConfigRequest {
+  enabled?: boolean;
+  post_close_time?: string;
+}
+
+export interface SchedulerPayload {
+  status: string;
+  scheduler_status: SchedulerStatus;
+}
+
 export interface DataSourcesPayload {
   status: string;
   lake_root: string;
   catalog_status: string;
   datasets: DataSourceRow[];
+  formal_provider_plan?: string;
+  domain_matrix?: DomainMatrixRow[];
+  provider_health?: ProviderHealthPayload | JsonObject;
+  scheduler_status?: SchedulerStatus;
+  last_auto_refresh?: JsonObject;
+  current_dataset_health?: JsonObject;
+  signal_panel_health?: JsonObject;
   active_dataset_id?: string;
   active_dataset_end_date?: string;
   latest_policy_input_dataset_id?: string;
@@ -88,6 +144,7 @@ export interface DataSourcesPayload {
       as_of_date: string;
       universe: string;
       domains: string[];
+      required_domains?: string[];
       provider_plan: string;
     };
   };
@@ -205,6 +262,8 @@ export interface StatusPayload {
   active_manifest?: JsonObject;
   current_positions?: JsonObject;
   latest_trade_plan?: TradePlanPayload;
+  scheduler_status?: SchedulerStatus;
+  last_auto_refresh?: JsonObject;
   warnings?: string[];
   lock?: JsonObject;
   updated_at?: string;
@@ -225,6 +284,9 @@ export interface ExecutionApi {
   trainModel(modelId: string, payload: TrainModelRequest): Promise<JobLaunchPayload>;
   getDataSources(): Promise<DataSourcesPayload>;
   refreshDataSources(payload: DataRefreshRequest): Promise<JobLaunchPayload>;
+  runProviderHealth(payload: ProviderHealthRequest): Promise<ProviderHealthPayload>;
+  getScheduler(): Promise<SchedulerPayload>;
+  updateScheduler(payload: SchedulerConfigRequest): Promise<SchedulerPayload>;
   getTradePlan(): Promise<TradePlanPayload>;
   generateTradePlan(payload: TradePlanGenerateRequest): Promise<JobLaunchPayload>;
   getAccount(): Promise<AccountPayload>;

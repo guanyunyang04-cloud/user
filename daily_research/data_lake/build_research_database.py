@@ -22,7 +22,6 @@ from daily_research.continuous_policy.state_builder import (
     prepare_policy_inputs,
 )
 from daily_research.data_lake import ResearchDataLake, build_label_completeness_summary
-from daily_research.data_lake.policy_input_loader import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -40,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--zones", default="strict_train,realtime_research")
     parser.add_argument("--data-source", default="lake", choices=("lake",))
     parser.add_argument("--csv-folder", default="")
-    parser.add_argument("--lake-dataset-id", default=DEFAULT_POLICY_INPUT_LAKE_DATASET_ID)
+    parser.add_argument("--lake-dataset-id", default="")
     parser.add_argument("--label-preset", default="holdcash_v3", choices=tuple(sorted(LABEL_CONFIGS)))
     parser.add_argument("--execution-semantics", default=DEFAULT_EXECUTION_SEMANTICS)
     parser.add_argument("--budget-semantics", default=DEFAULT_BUDGET_SEMANTICS)
@@ -70,6 +69,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip Bronze/Silver registration and only construct requested Gold training dataset zones.",
     )
     return parser
+
+
+def validate_args(args: argparse.Namespace) -> None:
+    if str(getattr(args, "data_source", "") or "").strip().lower() == "lake" and not str(getattr(args, "lake_dataset_id", "") or "").strip():
+        raise ValueError("formal research database builds require an explicit --lake-dataset-id.")
 
 
 def _resolve_start_date(value: str) -> str:
@@ -106,6 +110,7 @@ def _json_safe(value: Any) -> Any:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    validate_args(args)
     requested_start = _resolve_start_date(args.start_date)
     requested_end = _resolve_end_date(args.end_date)
     zones = _zone_list(args.zones)

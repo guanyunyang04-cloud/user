@@ -13,7 +13,12 @@ from daily_research.data_platform.contracts import (
     validate_provider_name,
 )
 from daily_research.data_platform.manager import InMemoryMarketProvider, ProviderManager
-from daily_research.data_platform.providers import EastmoneyEfinanceProvider, TushareHttpOptionalProvider, build_default_providers
+from daily_research.data_platform.providers import (
+    EastmoneyEfinanceProvider,
+    TushareHttpOptionalProvider,
+    build_default_providers,
+    provider_capability_matrix,
+)
 from daily_research.data_platform.providers import _baostock_stock_basic_frame
 
 
@@ -115,6 +120,38 @@ class DataPlatformProviderContractTest(unittest.TestCase):
         self.assertNotIn("sina_tencent_realtime", default_names)
         self.assertIn("sina_tencent_realtime", realtime_names)
         self.assertEqual(baostock_only_names, ["baostock"])
+
+    def test_formal_free_v3_provider_plan_has_required_free_domains_without_tdx(self) -> None:
+        provider_names = [provider.name for provider in build_default_providers("formal_free_v3")]
+        matrix = provider_capability_matrix("formal_free_v3")
+        required_domains = {
+            item["domain"]
+            for item in matrix
+            if item.get("formal_default") is True and item.get("requirement") == "required"
+        }
+        formal_refresh_domains = {
+            item["domain"]
+            for item in matrix
+            if item.get("formal_refresh") is True and item.get("requirement") == "required"
+        }
+        optional_domains = {
+            item["domain"]
+            for item in matrix
+            if item.get("formal_default") is True and item.get("requirement") == "optional"
+        }
+
+        self.assertIn("baostock", provider_names)
+        self.assertIn("eastmoney_efinance", provider_names)
+        self.assertIn("akshare_eastmoney", provider_names)
+        self.assertIn("tencent_finance", provider_names)
+        self.assertIn("tonghuashun_hotspot", provider_names)
+        self.assertFalse({"tq", "tdx", "pytdx", "mootdx"} & set(provider_names))
+        self.assertEqual(
+            required_domains,
+            {"market_daily", "trading_calendar", "universe_snapshot", "security_status", "limit_status"},
+        )
+        self.assertEqual(formal_refresh_domains, required_domains)
+        self.assertGreaterEqual(optional_domains, {"valuation", "industry_concept", "money_flow_hotspot"})
 
     def test_tushare_http_provider_does_not_set_execution_timeout(self) -> None:
         calls: list[dict[str, object]] = []

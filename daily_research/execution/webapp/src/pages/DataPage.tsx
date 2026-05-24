@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import type { DataSourcesPayload, ExecutionApi, JobDetail } from "../types";
+import type { DataSourcesPayload, ExecutionApi, JobDetail, ProviderHealthPayload, TableRow } from "../types";
 import { DataTable, ErrorState, Field, LoadingState, PageHeader, Panel, Stat, StatusPill } from "../components";
 import { text } from "../format";
 
@@ -11,6 +11,14 @@ interface DataPageProps {
 
 function field(record: Record<string, unknown> | undefined, key: string): string {
   return text(record?.[key]);
+}
+
+function domainsFromText(value: string): string[] {
+  return value.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function summaryRows(summary: Record<string, unknown> | undefined): TableRow[] {
+  return Object.entries(summary || {}).map(([key, value]) => ({ key, value: text(value) }));
 }
 
 export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
@@ -25,9 +33,13 @@ export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
   const [activeJobId, setActiveJobId] = useState("");
   const [jobDetail, setJobDetail] = useState<JobDetail | null>(null);
   const [jobError, setJobError] = useState("");
+  const [healthChecking, setHealthChecking] = useState(false);
+  const [providerHealth, setProviderHealth] = useState<ProviderHealthPayload | null>(null);
+  const [providerHealthMessage, setProviderHealthMessage] = useState("");
   const signalNeedsRefresh = payload?.next_signal_action === "refresh";
   const refreshIsSkip = payload?.next_refresh_action === "skip" && !signalNeedsRefresh;
   const refreshButtonLabel = signalNeedsRefresh ? "刷新信号面板" : refreshIsSkip ? "已是最新" : "补齐到最新交易日";
+  const providerPlan = payload?.formal_provider_plan || payload?.data_platform.default_refresh?.provider_plan || payload?.data_platform.provider_plan;
 
   const load = (): void => {
     setLoading(true);
@@ -64,13 +76,31 @@ export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
         as_of_date: asOfDate,
         start_date: startDate,
         universe,
-        domains: domains.split(",").map((item) => item.trim()).filter(Boolean),
+        domains: domainsFromText(domains),
         force_unlock: false
       });
       setJobMessage(`已提交作业 ${response.job_id || ""} (${response.status})`);
       setActiveJobId(response.job_id || "");
     } catch (err) {
       setJobMessage(err instanceof Error ? err.message : "提交失败");
+    }
+  }
+
+  async function checkProviderHealth(): Promise<void> {
+    setHealthChecking(true);
+    setProviderHealthMessage("");
+    try {
+      const response = await api.runProviderHealth({
+        as_of_date: asOfDate,
+        domains: domainsFromText(domains),
+        provider_plan: providerPlan || "formal_free_v3"
+      });
+      setProviderHealth(response);
+      setProviderHealthMessage(`provider health: ${response.status}`);
+    } catch (err) {
+      setProviderHealthMessage(err instanceof Error ? err.message : "数据源检查失败");
+    } finally {
+      setHealthChecking(false);
     }
   }
 
@@ -118,6 +148,7 @@ export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
       <div className="stat-grid">
         <Stat label="Lake Root" value={text(payload?.lake_root)} />
         <Stat label="Catalog" value={text(payload?.catalog_status)} />
+        <Stat label="Provider Plan" value={text(providerPlan)} />
         <Stat label="当前 End Date" value={text(payload?.active_dataset_end_date || payload?.latest_policy_input_dataset_end_date)} />
         <Stat label="最新完成交易日" value={text(payload?.data_platform.latest_completed_trading_date)} />
         <Stat label="Active Dataset" value={text(payload?.active_dataset_id)} />
@@ -161,6 +192,60 @@ export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
             ))}
           </ul>
         ) : null}
+      </Panel>
+      <div className="two-column">
+        <Panel title="数据源健康">
+          <div className="key-list">
+            <span>正式方案</span>
+            <strong>{text(providerPlan)}</strong>
+            <span>最近检查</span>
+            <strong><StatusPill value={providerHealth?.status || String(payload?.provider_health?.status || "unknown")} /></strong>
+            <span>检查日期</span>
+            <strong>{text(providerHealth?.as_of_date || payload?.data_platform.default_refresh?.as_of_date)}</strong>
+            <span>Required Domains</span>
+            <strong>{text(payload?.data_platform.default_refresh?.required_domains?.join(","))}</strong>
+          </div>
+          <button onClick={checkProviderHealth} disabled={healthChecking}>
+            <RefreshCw size={16} />
+            检查数据源
+          </button>
+          {providerHealthMessage ? <p className="inline-message">{providerHealthMessage}</p> : null}
+          <DataTable
+            rows={summaryRows(providerHealth?.summary || (payload?.provider_health?.summary as Record<string, unknown> | undefined))}
+            preferredColumns={["key", "value"]}
+            emptyText="暂无健康摘要"
+          />
+        </Panel>
+        <Panel title="自动更新">
+          <div className="key-list">
+            <span>启用</span>
+            <strong><StatusPill value={Boolean(payload?.scheduler_status?.enabled)} /></strong>
+            <span>盘后检查</span>
+            <strong>{text(payload?.scheduler_status?.post_close_time)}</strong>
+            <span>时区</span>
+            <strong>{text(payload?.scheduler_status?.timezone)}</strong>
+            <span>下一次检查</span>
+            <strong>{text(payload?.scheduler_status?.next_check_at)}</strong>
+            <span>错过状态</span>
+            <strong>{text(payload?.scheduler_status?.missed_status)}</strong>
+            <span>最近自动作业</span>
+            <strong>{text(payload?.last_auto_refresh?.job_id || payload?.scheduler_status?.last_auto_refresh?.job_id)}</strong>
+          </div>
+        </Panel>
+      </div>
+      <Panel title="Provider Matrix">
+        <DataTable
+          rows={(payload?.domain_matrix || []).map((row) => ({
+            provider: row.provider,
+            domain: row.domain,
+            requirement: text(row.requirement),
+            supported: String(Boolean(row.supported)),
+            requires_token: String(Boolean(row.requires_token)),
+            formal_refresh: String(Boolean(row.formal_refresh))
+          }))}
+          preferredColumns={["provider", "domain", "requirement", "supported", "requires_token", "formal_refresh"]}
+          emptyText="暂无 provider matrix"
+        />
       </Panel>
       <div className="two-column">
         <Panel title="生产信号面板">

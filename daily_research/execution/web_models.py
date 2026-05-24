@@ -9,6 +9,10 @@ FORMAL_DATA_PLATFORM_DOMAINS = [
     "trading_calendar",
     "universe_snapshot",
     "security_status",
+    "limit_status",
+    "valuation",
+    "industry_concept",
+    "money_flow_hotspot",
 ]
 
 
@@ -65,6 +69,18 @@ class DataRefreshRequest(BaseModel):
     force_unlock: bool = False
     background: bool = True
     advanced_args: str = ""
+
+
+class ProviderHealthRequest(BaseModel):
+    provider_plan: str = ""
+    as_of_date: str = ""
+    domains: list[str] = Field(default_factory=list)
+    symbols: list[str] = Field(default_factory=list)
+
+
+class SchedulerConfigRequest(BaseModel):
+    enabled: bool | None = None
+    post_close_time: str = ""
 
 
 class TradePlanGenerateRequest(BaseModel):

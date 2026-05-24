@@ -34,6 +34,10 @@ class DataDomain:
     INDUSTRY_CONCEPT = "industry_concept"
     VALUATION = "valuation"
     MONEY_FLOW_HOTSPOT = "money_flow_hotspot"
+    NEWS_EVENT = "news_event"
+    ANNOUNCEMENT = "announcement"
+    RESEARCH_REPORT = "research_report"
+    IWENCAI_SEMANTIC = "iwencai_semantic"
 
 
 DOMAIN_STANDARD_COLUMNS: dict[str, list[str]] = {
@@ -78,6 +82,10 @@ DOMAIN_STANDARD_COLUMNS: dict[str, list[str]] = {
         "hotspot_tags",
         "source",
     ],
+    DataDomain.NEWS_EVENT: ["symbol", "trade_date", "title", "url", "summary", "source"],
+    DataDomain.ANNOUNCEMENT: ["symbol", "trade_date", "title", "url", "category", "source"],
+    DataDomain.RESEARCH_REPORT: ["symbol", "trade_date", "title", "institution", "analyst", "url", "source"],
+    DataDomain.IWENCAI_SEMANTIC: ["symbol", "trade_date", "query", "answer", "tags", "source"],
 }
 
 
@@ -172,6 +180,11 @@ def normalize_domain(domain: str) -> str:
         "daily_basic": DataDomain.VALUATION,
         "money_flow": DataDomain.MONEY_FLOW_HOTSPOT,
         "hotspot": DataDomain.MONEY_FLOW_HOTSPOT,
+        "news": DataDomain.NEWS_EVENT,
+        "announcement": DataDomain.ANNOUNCEMENT,
+        "research_report": DataDomain.RESEARCH_REPORT,
+        "report": DataDomain.RESEARCH_REPORT,
+        "iwencai": DataDomain.IWENCAI_SEMANTIC,
     }
     normalized = aliases.get(normalized, normalized)
     if normalized not in DOMAIN_STANDARD_COLUMNS:
@@ -317,6 +330,13 @@ def normalize_domain_frame(
         return normalize_valuation_frame(frame, source=source, as_of_date=as_of_date, require_columns=require_columns)
     if normalized_domain == DataDomain.MONEY_FLOW_HOTSPOT:
         return normalize_money_flow_hotspot_frame(frame, source=source, as_of_date=as_of_date, require_columns=require_columns)
+    if normalized_domain in {
+        DataDomain.NEWS_EVENT,
+        DataDomain.ANNOUNCEMENT,
+        DataDomain.RESEARCH_REPORT,
+        DataDomain.IWENCAI_SEMANTIC,
+    }:
+        return normalize_generic_text_domain_frame(frame, domain=normalized_domain, source=source, as_of_date=as_of_date, require_columns=require_columns)
     raise ValueError(f"unsupported data domain: {domain}")
 
 
@@ -448,6 +468,36 @@ def normalize_money_flow_hotspot_frame(frame: pd.DataFrame, *, source: str, as_o
     data["hotspot_tags"] = data["hotspot_tags"].map(_tag_value)
     data["source"] = _source_series(data, provider)
     return data.loc[data["symbol"].astype(str).str.len() > 0, DOMAIN_STANDARD_COLUMNS[DataDomain.MONEY_FLOW_HOTSPOT]].drop_duplicates().sort_values(["trade_date", "symbol"]).reset_index(drop=True)
+
+
+def normalize_generic_text_domain_frame(
+    frame: pd.DataFrame,
+    *,
+    domain: str,
+    source: str,
+    as_of_date: str,
+    require_columns: bool = True,
+) -> pd.DataFrame:
+    normalized_domain = normalize_domain(domain)
+    provider = validate_provider_name(source)
+    data = _prepare_domain_frame(frame, domain=normalized_domain, source=provider, as_of_date=as_of_date, require_columns=False)
+    if data.empty:
+        return data
+    if "trade_date" not in data.columns:
+        _rename_first(data, "trade_date", ("date", "publish_date", "公告日期", "日期"))
+    if "symbol" not in data.columns:
+        _rename_first(data, "symbol", ("code", "stock", "ts_code", "证券代码", "股票代码"))
+    _require_domain_columns(data, normalized_domain, require_columns=require_columns)
+    data = _ensure_domain_columns(data, normalized_domain)
+    data["symbol"] = data["symbol"].map(_normalize_symbol)
+    data["trade_date"] = _date_series(data["trade_date"]).fillna(pd.Timestamp(as_of_date))
+    data["source"] = _source_series(data, provider)
+    return (
+        data.loc[data["trade_date"].astype(str).str.lower() != "nat", DOMAIN_STANDARD_COLUMNS[normalized_domain]]
+        .drop_duplicates()
+        .sort_values(["trade_date", "symbol"])
+        .reset_index(drop=True)
+    )
 
 
 def valid_market_rows(frame: pd.DataFrame) -> pd.Series:

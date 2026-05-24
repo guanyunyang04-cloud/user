@@ -14,8 +14,17 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, TextIO
+from zoneinfo import ZoneInfo
+
+import pandas as pd
 
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
+from daily_research.data_platform.providers import (
+    FORMAL_FREE_V3_OPTIONAL_DOMAINS,
+    FORMAL_FREE_V3_REQUIRED_DOMAINS,
+    provider_capability_matrix,
+)
+from daily_research.data_platform.provider_health import ProviderHealthConfig, run_provider_health
 from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.execution import production_signal
 from daily_research.execution.app_runtime import (
@@ -42,6 +51,7 @@ from daily_research.execution.app_runtime import (
     read_json_file,
     tail_file,
     update_job_metadata,
+    write_runtime_state,
 )
 from daily_research.execution.app_tasks import (
     build_task_command,
@@ -60,14 +70,16 @@ ENVIRONMENT_PATH = PROJECT_ROOT / "environment.yml"
 LATEST_TRADE_PLAN_PATH = EXECUTION_DIR / "output" / "latest_trade_plan.txt"
 ACCOUNT_FILE_HEADERS = ("record_type", "stock", "shares", "cost_price", "available_cash")
 FORMAL_DATA_PLATFORM_DOMAINS: tuple[str, ...] = (
-    "market_daily",
-    "trading_calendar",
-    "universe_snapshot",
-    "security_status",
+    *FORMAL_FREE_V3_REQUIRED_DOMAINS,
+    *FORMAL_FREE_V3_OPTIONAL_DOMAINS,
 )
-FORMAL_DATA_PLATFORM_PROVIDER_PLAN = "baostock_only"
+FORMAL_DATA_PLATFORM_REQUIRED_DOMAINS: tuple[str, ...] = FORMAL_FREE_V3_REQUIRED_DOMAINS
+FORMAL_DATA_PLATFORM_PROVIDER_PLAN = "formal_free_v3"
 _ACTIVE_JOB_THREADS: dict[str, threading.Thread] = {}
 _ACTIVE_JOB_THREADS_LOCK = threading.Lock()
+_SCHEDULER_THREAD: threading.Thread | None = None
+_SCHEDULER_THREAD_LOCK = threading.Lock()
+_SCHEDULER_STOP = threading.Event()
 _RUNNER_WARNING_LIMIT = 20
 
 
@@ -725,9 +737,35 @@ def data_sources_summary(*, dataset_limit: int = 60) -> dict[str, Any]:
             f"{signal_summary.get('latest_date', '') or '未知'}，需要刷新生产信号。"
         )
     recommended_domains = list(FORMAL_DATA_PLATFORM_DOMAINS)
+    state = load_runtime_state()
+    provider_health = dict(state.get("last_provider_health", {}) or {})
+    current_dataset_health = {
+        "status": current_dataset_status,
+        "is_latest": is_current_dataset_latest,
+        "is_complete": is_current_dataset_complete,
+        "active_dataset_id": active_dataset_id,
+        "active_dataset_end_date": active_dataset_end_date,
+        "latest_policy_input_dataset_id": latest_policy_input_dataset_id,
+        "latest_policy_input_dataset_end_date": latest_policy_input_end_date,
+    }
+    signal_panel_health = {
+        "status": signal_panel_status,
+        "latest_date": str(signal_summary.get("latest_date", "") or ""),
+        "target_panel_latest_date": str(signal_summary.get("target_panel_latest_date", "") or ""),
+        "score_panel_latest_date": str(signal_summary.get("score_panel_latest_date", "") or ""),
+        "required_date": str(signal_summary.get("required_date", "") or latest_completed_date),
+        "next_signal_action": next_signal_action,
+    }
     return {
         "status": "ok",
         "lake_root": str((PROJECT_ROOT / "output" / "research_data_lake").resolve()),
+        "formal_provider_plan": FORMAL_DATA_PLATFORM_PROVIDER_PLAN,
+        "domain_matrix": provider_capability_matrix(FORMAL_DATA_PLATFORM_PROVIDER_PLAN),
+        "provider_health": provider_health,
+        "scheduler_status": scheduler_summary(),
+        "last_auto_refresh": dict((state.get("scheduler", {}) or {}).get("last_auto_refresh", {}) or {}),
+        "current_dataset_health": current_dataset_health,
+        "signal_panel_health": signal_panel_health,
         "catalog_status": catalog_status,
         "datasets": datasets,
         "active_dataset_id": active_dataset_id,
@@ -766,6 +804,7 @@ def data_sources_summary(*, dataset_limit: int = 60) -> dict[str, Any]:
                 "as_of_date": latest_completed,
                 "universe": "all_a",
                 "domains": recommended_domains,
+                "required_domains": list(FORMAL_DATA_PLATFORM_REQUIRED_DOMAINS),
                 "provider_plan": FORMAL_DATA_PLATFORM_PROVIDER_PLAN,
             },
         },
@@ -806,6 +845,262 @@ def data_refresh_skip_payload(*, data_sources: dict[str, Any], as_of_date: str =
             "summary_note": summary_note,
         },
     }
+
+
+def provider_health_summary(
+    *,
+    provider_plan: str = FORMAL_DATA_PLATFORM_PROVIDER_PLAN,
+    as_of_date: str = "",
+    domains: list[str] | tuple[str, ...] | None = None,
+    symbols: list[str] | tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    resolved_as_of = _normalize_date_text(as_of_date or get_latest_completed_trading_date())
+    payload = run_provider_health(
+        ProviderHealthConfig(
+            provider_plan=str(provider_plan or FORMAL_DATA_PLATFORM_PROVIDER_PLAN),
+            as_of_date=resolved_as_of,
+            domains=tuple(domains or FORMAL_DATA_PLATFORM_REQUIRED_DOMAINS),
+            symbols=tuple(symbols or ("000001.SZ", "600000.SH", "000300.SH")),
+        )
+    )
+    state = load_runtime_state()
+    state["last_provider_health"] = payload
+    write_runtime_state(state)
+    return payload
+
+
+def _default_scheduler_config() -> dict[str, Any]:
+    return {
+        "enabled": True,
+        "post_close_time": "15:30",
+        "timezone": "Asia/Shanghai",
+        "last_auto_refresh": {},
+        "last_tick": {},
+    }
+
+
+def _scheduler_config_from_state() -> dict[str, Any]:
+    state = load_runtime_state()
+    scheduler = _default_scheduler_config()
+    loaded = state.get("scheduler", {})
+    if isinstance(loaded, dict):
+        scheduler.update(loaded)
+    scheduler["enabled"] = bool(scheduler.get("enabled", True))
+    scheduler["post_close_time"] = _normalize_clock_text(scheduler.get("post_close_time", "15:30"))
+    scheduler["timezone"] = str(scheduler.get("timezone", "") or "Asia/Shanghai")
+    if not isinstance(scheduler.get("last_auto_refresh"), dict):
+        scheduler["last_auto_refresh"] = {}
+    if not isinstance(scheduler.get("last_tick"), dict):
+        scheduler["last_tick"] = {}
+    return scheduler
+
+
+def scheduler_summary() -> dict[str, Any]:
+    scheduler = _scheduler_config_from_state()
+    latest_completed = _normalize_date_text(get_latest_completed_trading_date())
+    due = _scheduler_time_is_due(scheduler)
+    already_ran = _scheduler_already_ran_for_date(scheduler, latest_completed)
+    missed_status = ""
+    if scheduler.get("enabled") and due and latest_completed and not already_ran:
+        missed_status = "pending_today" if _scheduler_auto_window_matches_latest_completed(scheduler, latest_completed) else "missed_while_offline"
+    return {
+        **scheduler,
+        "latest_completed_trading_date": latest_completed,
+        "is_due": due,
+        "already_ran_for_latest_completed_date": already_ran,
+        "missed_status": missed_status,
+        "next_check_at": _next_scheduler_check_at(scheduler),
+    }
+
+
+def update_scheduler_config(payload: dict[str, Any]) -> dict[str, Any]:
+    scheduler = _scheduler_config_from_state()
+    if "enabled" in payload:
+        scheduler["enabled"] = bool(payload.get("enabled"))
+    if str(payload.get("post_close_time", "") or "").strip():
+        scheduler["post_close_time"] = _normalize_clock_text(payload.get("post_close_time", "15:30"))
+    state = load_runtime_state()
+    state["scheduler"] = scheduler
+    write_runtime_state(state)
+    append_event("scheduler_config_updated", enabled=scheduler["enabled"], post_close_time=scheduler["post_close_time"])
+    return scheduler_summary()
+
+
+def run_scheduler_tick(*, trigger: str = "auto_post_close") -> dict[str, Any]:
+    scheduler = scheduler_summary()
+    latest_completed = str(scheduler.get("latest_completed_trading_date", "") or _normalize_date_text(get_latest_completed_trading_date()))
+    decision: dict[str, Any] = {
+        "trigger": str(trigger or "auto_post_close"),
+        "checked_at": now_iso(),
+        "latest_completed_trading_date": latest_completed,
+    }
+    if not scheduler.get("enabled", True):
+        return _persist_scheduler_decision({**decision, "status": "skipped_disabled"})
+    if not _scheduler_time_is_due(scheduler):
+        return _persist_scheduler_decision({**decision, "status": "skipped_not_due"})
+    if str(trigger or "") == "auto_post_close" and not _scheduler_auto_window_matches_latest_completed(scheduler, latest_completed):
+        return _persist_scheduler_decision({**decision, "status": "skipped_missed_while_offline"})
+    if _scheduler_already_ran_for_date(scheduler, latest_completed):
+        return _persist_scheduler_decision({**decision, "status": "skipped_already_ran"})
+    if _read_json(LOCK_PATH) or list_active_thread_job_ids():
+        return _persist_scheduler_decision({**decision, "status": "skipped_due_to_active_job"})
+
+    data_sources = data_sources_summary()
+    default_refresh = dict(_safe_nested(data_sources, "data_platform", "default_refresh") or {})
+    as_of_date = str(default_refresh.get("as_of_date", "") or latest_completed)
+    domains = list(default_refresh.get("domains", []) or FORMAL_DATA_PLATFORM_DOMAINS)
+    required_domains = list(default_refresh.get("required_domains", []) or FORMAL_DATA_PLATFORM_REQUIRED_DOMAINS)
+    universe = str(default_refresh.get("universe", "") or "all_a")
+    if data_sources.get("next_refresh_action") == "skip" and data_sources.get("next_signal_action") == "skip":
+        return _persist_scheduler_decision({**decision, "status": "skipped_up_to_date", "data_sources": data_sources})
+    if data_sources.get("next_refresh_action") == "skip" and data_sources.get("next_signal_action") == "refresh":
+        payload = launch_task_async(
+            task_name="refresh-production-live-panels",
+            passthrough_args=["--as-of-date", as_of_date],
+            job_label=f"auto-post-close:{as_of_date}",
+            force_unlock=False,
+        )
+    else:
+        args = [
+            "--as-of-date",
+            as_of_date,
+            "--universe",
+            universe,
+            "--provider-plan",
+            FORMAL_DATA_PLATFORM_PROVIDER_PLAN,
+            "--required-domains",
+            ",".join(required_domains),
+            "--domains",
+            ",".join(domains),
+        ]
+        payload = launch_task_async(
+            task_name="data-platform-refresh",
+            passthrough_args=args,
+            job_label=f"auto-post-close:{as_of_date}",
+            force_unlock=False,
+        )
+    _patch_job_metadata_by_id(
+        str(payload.get("job_id", "")),
+        trigger=str(trigger or "auto_post_close"),
+        scheduler_decision=decision,
+    )
+    return _persist_scheduler_decision(
+        {
+            **decision,
+            "status": "launched",
+            "job_id": str(payload.get("job_id", "") or ""),
+            "task_name": str(payload.get("task_name", "") or ""),
+            "data_refresh_result": payload if payload.get("task_name") == "data-platform-refresh" else {},
+            "signal_refresh_result": payload if payload.get("task_name") == "refresh-production-live-panels" else {},
+        },
+        update_last_auto=True,
+    )
+
+
+def start_scheduler_loop(*, interval_seconds: int = 60) -> None:
+    global _SCHEDULER_THREAD
+    with _SCHEDULER_THREAD_LOCK:
+        if _SCHEDULER_THREAD is not None and _SCHEDULER_THREAD.is_alive():
+            return
+        _SCHEDULER_STOP.clear()
+        _SCHEDULER_THREAD = threading.Thread(
+            target=_scheduler_loop,
+            kwargs={"interval_seconds": max(int(interval_seconds), 1)},
+            name="daily-research-post-close-scheduler",
+            daemon=True,
+        )
+        _SCHEDULER_THREAD.start()
+
+
+def _scheduler_loop(*, interval_seconds: int) -> None:
+    while not _SCHEDULER_STOP.is_set():
+        try:
+            run_scheduler_tick(trigger="auto_post_close")
+        except Exception as exc:
+            _persist_scheduler_decision({"trigger": "auto_post_close", "checked_at": now_iso(), "status": "scheduler_error", "error": str(exc)})
+        _SCHEDULER_STOP.wait(interval_seconds)
+
+
+def _persist_scheduler_decision(decision: dict[str, Any], *, update_last_auto: bool = False) -> dict[str, Any]:
+    state = load_runtime_state()
+    scheduler = _default_scheduler_config()
+    if isinstance(state.get("scheduler"), dict):
+        scheduler.update(state.get("scheduler", {}))
+    scheduler["last_tick"] = decision
+    if update_last_auto or str(decision.get("status", "")).startswith("skipped_"):
+        scheduler["last_auto_refresh"] = decision
+    state["scheduler"] = scheduler
+    write_runtime_state(state)
+    append_event("scheduler_tick", **{key: value for key, value in decision.items() if key not in {"data_sources"}})
+    return decision
+
+
+def _scheduler_time_is_due(scheduler: dict[str, Any], *, now: datetime | None = None) -> bool:
+    tz = ZoneInfo(str(scheduler.get("timezone", "") or "Asia/Shanghai"))
+    if now is None:
+        current = datetime.now(tz)
+    elif now.tzinfo is None:
+        current = now.replace(tzinfo=tz)
+    else:
+        current = now.astimezone(tz)
+    hour, minute = [int(item) for item in _normalize_clock_text(scheduler.get("post_close_time", "15:30")).split(":", 1)]
+    return (current.hour, current.minute) >= (hour, minute)
+
+
+def _scheduler_auto_window_matches_latest_completed(
+    scheduler: dict[str, Any],
+    latest_completed: str,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    if not str(latest_completed or "").strip():
+        return False
+    tz = ZoneInfo(str(scheduler.get("timezone", "") or "Asia/Shanghai"))
+    if now is None:
+        current = datetime.now(tz)
+    elif now.tzinfo is None:
+        current = now.replace(tzinfo=tz)
+    else:
+        current = now.astimezone(tz)
+    return current.date().isoformat() == _normalize_date_text(latest_completed)
+
+
+def _scheduler_already_ran_for_date(scheduler: dict[str, Any], latest_completed: str) -> bool:
+    last = dict(scheduler.get("last_auto_refresh", {}) or {})
+    if str(last.get("latest_completed_trading_date", "") or "") != str(latest_completed or ""):
+        return False
+    return str(last.get("status", "") or "") in {"launched", "skipped_up_to_date", "skipped_already_ran"}
+
+
+def _next_scheduler_check_at(scheduler: dict[str, Any]) -> str:
+    tz = ZoneInfo(str(scheduler.get("timezone", "") or "Asia/Shanghai"))
+    now = datetime.now(tz)
+    hour, minute = [int(item) for item in _normalize_clock_text(scheduler.get("post_close_time", "15:30")).split(":", 1)]
+    candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if candidate <= now:
+        candidate = (pd.Timestamp(candidate) + pd.offsets.BDay(1)).to_pydatetime()
+    return candidate.astimezone(tz).isoformat(timespec="seconds")
+
+
+def _normalize_clock_text(value: Any) -> str:
+    raw = str(value or "15:30").strip()
+    parts = raw.split(":", 1)
+    try:
+        hour = max(0, min(23, int(parts[0])))
+        minute = max(0, min(59, int(parts[1] if len(parts) > 1 else 0)))
+    except Exception:
+        hour, minute = 15, 30
+    return f"{hour:02d}:{minute:02d}"
+
+
+def _patch_job_metadata_by_id(job_id: str, **patch: Any) -> None:
+    if not str(job_id or "").strip():
+        return
+    metadata_path = JOBS_ROOT / str(job_id) / "metadata.json"
+    if not metadata_path.exists():
+        return
+    job_paths = type("JobPathsRef", (), {"metadata_path": metadata_path})()
+    update_job_metadata(job_paths, **patch)
 
 
 def _signal_refresh_metadata(*, as_of_date: str = "") -> dict[str, Any]:
@@ -1119,6 +1414,8 @@ def build_status_payload(*, history_limit: int = 8) -> dict[str, Any]:
         "active_manifest": active_manifest_summary(),
         "current_positions": positions_summary(),
         "latest_trade_plan": latest_trade_plan_summary(max_lines=24),
+        "scheduler_status": scheduler_summary(),
+        "last_auto_refresh": dict((state.get("scheduler", {}) or {}).get("last_auto_refresh", {}) or {}),
         "warnings": warnings,
         "updated_at": state.get("updated_at", ""),
     }

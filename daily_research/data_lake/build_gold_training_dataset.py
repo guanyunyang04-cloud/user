@@ -123,8 +123,14 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def validate_args(args: argparse.Namespace) -> None:
+    if str(getattr(args, "data_source", "") or "").strip().lower() == "lake" and not str(getattr(args, "source_market_dataset_id", "") or "").strip():
+        raise ValueError("formal Gold training builds require an explicit --source-market-dataset-id.")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    validate_args(args)
     requested_start = _resolve_start_date(args.start_date)
     requested_end = _resolve_end_date(args.end_date)
     zones = _zone_list(args)
