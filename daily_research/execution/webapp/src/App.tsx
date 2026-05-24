@@ -3,6 +3,7 @@ import {
   Activity,
   BriefcaseBusiness,
   Database,
+  HelpCircle,
   LayoutDashboard,
   ListChecks,
   MonitorCog,
@@ -18,8 +19,9 @@ import { TradePlanPage } from "./pages/TradePlanPage";
 import { AccountPage } from "./pages/AccountPage";
 import { JobsPage } from "./pages/JobsPage";
 import { SystemPage } from "./pages/SystemPage";
+import { HelpPage } from "./pages/HelpPage";
 
-type PageKey = "overview" | "models" | "data" | "trade-plan" | "account" | "jobs" | "system";
+type PageKey = "overview" | "models" | "data" | "trade-plan" | "account" | "jobs" | "system" | "help";
 
 const NAV_ITEMS: Array<{ key: PageKey; label: string; icon: typeof LayoutDashboard; path: string }> = [
   { key: "overview", label: "总览", icon: LayoutDashboard, path: "/" },
@@ -28,7 +30,8 @@ const NAV_ITEMS: Array<{ key: PageKey; label: string; icon: typeof LayoutDashboa
   { key: "trade-plan", label: "交易计划", icon: PieChart, path: "/trade-plan" },
   { key: "account", label: "账户", icon: WalletCards, path: "/account" },
   { key: "jobs", label: "作业", icon: ListChecks, path: "/jobs" },
-  { key: "system", label: "系统", icon: MonitorCog, path: "/system" }
+  { key: "system", label: "系统", icon: MonitorCog, path: "/system" },
+  { key: "help", label: "帮助", icon: HelpCircle, path: "/help" }
 ];
 
 function pageFromPath(pathname: string): PageKey {
@@ -39,6 +42,7 @@ function pageFromPath(pathname: string): PageKey {
   if (normalized === "/account") return "account";
   if (normalized === "/jobs" || normalized.startsWith("/jobs/")) return "jobs";
   if (normalized === "/system" || normalized === "/doctor" || normalized === "/settings/runtime") return "system";
+  if (normalized === "/help" || normalized === "/guide") return "help";
   return "overview";
 }
 
@@ -99,6 +103,7 @@ export function App({ api = apiClient }: AppProps): JSX.Element {
         {page === "account" ? <AccountPage api={api} /> : null}
         {page === "jobs" ? <JobsPage api={api} selectedJobId={selectedJobId} /> : null}
         {page === "system" ? <SystemPage api={api} /> : null}
+        {page === "help" ? <HelpPage api={api} /> : null}
       </main>
     </div>
   );
