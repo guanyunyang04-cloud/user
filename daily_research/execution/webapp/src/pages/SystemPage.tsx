@@ -43,6 +43,8 @@ export function SystemPage({ api }: SystemPageProps): JSX.Element {
     }
   }
 
+  const paper = status?.paper_account || {};
+
   return (
     <div>
       <PageHeader title="系统" eyebrow="doctor、runtime、锁状态与环境信息" />
@@ -55,6 +57,7 @@ export function SystemPage({ api }: SystemPageProps): JSX.Element {
         <Stat label="锁" value={<StatusPill value={status?.lock && Object.keys(status.lock).length ? "locked" : "ok"} />} />
         <Stat label="Active Dataset" value={text(status?.active_manifest?.lake_dataset_id || status?.active_manifest?.source_market_dataset_id)} />
         <Stat label="交易计划" value={<StatusPill value={String(status?.latest_trade_plan?.status || "missing")} />} />
+        <Stat label="模拟账户" value={<StatusPill value={String(paper.status || paper.source || "unknown")} />} />
         <Stat label="自动更新" value={<StatusPill value={Boolean(status?.scheduler_status?.enabled)} />} />
         <Stat label="盘后检查" value={text(status?.scheduler_status?.post_close_time)} />
       </div>
@@ -72,6 +75,10 @@ export function SystemPage({ api }: SystemPageProps): JSX.Element {
           <strong>{text(status?.latest_trade_plan?.artifact_paths?.run_dir)}</strong>
           <span>Trade Plan TXT</span>
           <strong>{text(status?.latest_trade_plan?.artifact_paths?.txt || status?.latest_trade_plan?.path)}</strong>
+          <span>Paper Ledger</span>
+          <strong>{text(paper.db_path)}</strong>
+          <span>Pending Orders</span>
+          <strong>{text(paper.pending_order_count)}</strong>
         </div>
       </Panel>
       <Panel title="自动盘后更新">

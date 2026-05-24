@@ -554,6 +554,28 @@ def test_data_refresh_api_skips_when_current_dataset_is_latest(monkeypatch: pyte
     assert "2026-05-22" in payload["summary_note"]
 
 
+def test_data_refresh_skip_payload_includes_paper_reconcile(monkeypatch: pytest.MonkeyPatch) -> None:
+    from daily_research.execution import app_service
+
+    monkeypatch.setattr(
+        app_service,
+        "paper_account_reconcile",
+        lambda as_of_date="": {"status": "ok", "as_of_date": as_of_date, "apply_result": {"pending_order_count": 0}},
+    )
+
+    payload = app_service.data_refresh_skip_payload(
+        data_sources={
+            "active_dataset_id": "policy_input_bundle__current",
+            "refresh_explanation": "当前 active dataset 已覆盖最新完成交易日 2026-05-22。",
+            "data_platform": {"latest_completed_trading_date": "2026-05-22"},
+        },
+        as_of_date="2026-05-22",
+    )
+
+    assert payload["paper_trading"]["status"] == "ok"
+    assert payload["metadata"]["paper_trading"]["as_of_date"] == "2026-05-22"
+
+
 def test_data_refresh_api_defaults_to_completed_date_and_formal_domains(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi.testclient import TestClient
 
@@ -1861,3 +1883,138 @@ def test_trade_plan_txt_renders_model_dates_as_information(tmp_path: Path) -> No
     assert "候选信号新鲜度" not in text
     assert "提醒阈值" not in text
     assert "阻断" not in text
+
+
+def _write_paper_account_snapshot(path: Path) -> None:
+    path.write_text(
+        "record_type,stock,shares,cost_price,available_cash\n"
+        "account,,,,100000\n"
+        "position,600000.SH,100,10.5,\n",
+        encoding="utf-8",
+    )
+
+
+def test_paper_account_api_initializes_from_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fastapi.testclient import TestClient
+
+    from daily_research.execution import web_server
+
+    snapshot = tmp_path / "current_positions.csv"
+    _write_paper_account_snapshot(snapshot)
+    monkeypatch.setattr(web_server.app_service, "PAPER_ACCOUNT_DB_PATH", tmp_path / "paper.sqlite3", raising=False)
+    monkeypatch.setattr(web_server.app_service, "POSITIONS_PATH", snapshot)
+
+    client = TestClient(web_server.create_app())
+    response = client.get("/api/paper-account")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["source"] == "paper_ledger"
+    assert payload["available_cash"] == 100000.0
+    assert payload["positions"][0]["stock"] == "600000.SH"
+    assert payload["pending_order_count"] == 0
+
+
+def test_paper_account_cash_flow_and_performance_api(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fastapi.testclient import TestClient
+
+    from daily_research.execution import paper_trading, web_server
+
+    snapshot = tmp_path / "current_positions.csv"
+    snapshot.write_text("record_type,stock,shares,cost_price,available_cash\naccount,,,,0\n", encoding="utf-8")
+    db_path = tmp_path / "paper.sqlite3"
+    monkeypatch.setattr(web_server.app_service, "PAPER_ACCOUNT_DB_PATH", db_path, raising=False)
+    monkeypatch.setattr(web_server.app_service, "POSITIONS_PATH", snapshot)
+    paper_trading.ensure_ledger(db_path=db_path, snapshot_path=snapshot)
+
+    client = TestClient(web_server.create_app())
+    deposit = client.post("/api/paper-account/cash-flow", json={"flow_type": "deposit", "amount": 100000, "reason": "initial"})
+    assert deposit.status_code == 200
+    paper_trading.write_daily_equity(db_path=db_path, price_lookup={"2026-05-22": {}}, as_of_date="2026-05-22")
+    top_up = client.post("/api/paper-account/cash-flow", json={"flow_type": "deposit", "amount": 50000, "reason": "top up"})
+    assert top_up.status_code == 200
+    paper_trading.write_daily_equity(db_path=db_path, price_lookup={"2026-05-25": {}}, as_of_date="2026-05-25")
+
+    response = client.get("/api/paper-account/performance?start_date=2026-05-22&end_date=2026-05-25")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["total_return"] == 0.0
+    assert payload["net_cash_flow"] == 50000.0
+
+
+def test_legacy_account_api_reads_paper_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fastapi.testclient import TestClient
+
+    from daily_research.execution import web_server
+
+    snapshot = tmp_path / "current_positions.csv"
+    _write_paper_account_snapshot(snapshot)
+    monkeypatch.setattr(web_server.app_service, "PAPER_ACCOUNT_DB_PATH", tmp_path / "paper.sqlite3", raising=False)
+    monkeypatch.setattr(web_server.app_service, "POSITIONS_PATH", snapshot)
+
+    client = TestClient(web_server.create_app())
+    response = client.get("/api/account")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "paper_ledger"
+    assert payload["available_cash"] == 100000.0
+
+
+def test_trade_plan_post_process_registers_paper_orders(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from daily_research.execution import app_service
+
+    output_dir = tmp_path / "execution" / "output"
+    run_dir = output_dir / "20260522"
+    run_dir.mkdir(parents=True)
+    (output_dir / "latest_trade_plan.txt").write_text("plan\n", encoding="utf-8")
+    (run_dir / "plan_summary.json").write_text(
+        json.dumps(
+            {
+                "signal_date": "2026-05-22",
+                "execution_date": "2026-05-25",
+                "candidate_label": "paper-test",
+                "transaction_cost_bps": 3.0,
+                "slippage_bps": 7.0,
+                "sell_tax_bps": 10.0,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "actions_today.csv").write_text(
+        "stock,action,shares,price,target_weight\n002866.SZ,买入,100,22,0.1\n",
+        encoding="utf-8-sig",
+    )
+    snapshot = tmp_path / "current_positions.csv"
+    snapshot.write_text("record_type,stock,shares,cost_price,available_cash\naccount,,,,100000\n", encoding="utf-8")
+    metadata_path = tmp_path / "metadata.json"
+    metadata_path.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(app_service, "EXECUTION_DIR", tmp_path / "execution")
+    monkeypatch.setattr(app_service, "PAPER_ACCOUNT_DB_PATH", tmp_path / "paper.sqlite3", raising=False)
+    monkeypatch.setattr(app_service, "POSITIONS_PATH", snapshot)
+
+    note, metadata = app_service._post_process_successful_task(
+        job_paths=SimpleNamespace(metadata_path=metadata_path),
+        task_name="trade-plan",
+        summary_note="trade plan done",
+    )
+    account = app_service.paper_account_summary()
+
+    assert "paper_order_status=registered" in note
+    assert metadata["paper_trading"]["status"] == "registered"
+    assert account["pending_order_count"] == 1

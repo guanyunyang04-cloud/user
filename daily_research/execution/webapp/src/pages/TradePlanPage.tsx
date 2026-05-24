@@ -110,6 +110,7 @@ export function TradePlanPage({ api, pollMs = 3000 }: TradePlanPageProps): JSX.E
 
   const summary = payload?.summary || {};
   const diagnostics = payload?.diagnostics || {};
+  const paper = payload?.paper_trading || {};
   const missing = payload?.status === "missing" || payload?.exists === false;
   const noActionPlan = Boolean(payload && !missing && payload.status === "ok" && (payload.actions || []).length === 0);
 
@@ -176,7 +177,19 @@ export function TradePlanPage({ api, pollMs = 3000 }: TradePlanPageProps): JSX.E
         <Stat label="输入现金" value={text(summary.cash_input)} />
         <Stat label="计划后现金" value={text(summary.estimated_cash_after_plan)} />
         <Stat label="动作数" value={payload?.actions.length || 0} />
+        <Stat label="模拟订单" value={<StatusPill value={String(paper.status || "unregistered")} />} />
       </div>
+
+      <Panel title="模拟账户订单">
+        <div className="key-list">
+          <span>注册状态</span><strong><StatusPill value={String(paper.status || "unregistered")} /></strong>
+          <span>Batch ID</span><strong>{text(field(paper, "batch_id"))}</strong>
+          <span>执行日</span><strong>{text(field(paper, "execution_date"))}</strong>
+          <span>待执行</span><strong>{text(field(paper, "pending_order_count"))}</strong>
+          <span>已成交</span><strong>{text(field(paper, "filled_order_count"))}</strong>
+          <span>阻塞</span><strong>{text(field(paper, "blocked_order_count"))}</strong>
+        </div>
+      </Panel>
 
       {noActionPlan ? (
         <Panel title="无动作计划">

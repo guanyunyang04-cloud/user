@@ -48,6 +48,25 @@ class AccountSnapshotRequest(BaseModel):
     positions: list[AccountPositionInput] = Field(default_factory=list)
 
 
+class PaperCashFlowRequest(BaseModel):
+    flow_type: str = Field(default="deposit")
+    amount: float | int | str
+    reason: str = ""
+
+
+class PaperManualAdjustmentRequest(BaseModel):
+    adjustment_type: str = Field(default="cash")
+    stock: str = ""
+    shares: int | float | str | None = None
+    cost_price: float | int | str | None = None
+    amount: float | int | str | None = None
+    reason: str = ""
+
+
+class PaperApplyLatestPlanRequest(BaseModel):
+    execution_date: str = ""
+
+
 class ModelTrainRequest(BaseModel):
     model_id: str = ""
     dataset_mode: str = "latest"

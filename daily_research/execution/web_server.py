@@ -13,6 +13,9 @@ from daily_research.execution.web_models import (
     AccountSnapshotRequest,
     DataRefreshRequest,
     ModelTrainRequest,
+    PaperApplyLatestPlanRequest,
+    PaperCashFlowRequest,
+    PaperManualAdjustmentRequest,
     ProviderHealthRequest,
     ResumeRequest,
     SchedulerConfigRequest,
@@ -356,6 +359,54 @@ def create_app() -> FastAPI:
             return JSONResponse(payload)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/paper-account")
+    def api_paper_account() -> dict[str, Any]:
+        return app_service.paper_account_summary()
+
+    @app.post("/api/paper-account/cash-flow")
+    def api_paper_account_cash_flow(request: PaperCashFlowRequest) -> JSONResponse:
+        try:
+            payload = app_service.paper_account_cash_flow(
+                flow_type=request.flow_type,
+                amount=request.amount,
+                reason=request.reason,
+            )
+            return JSONResponse(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/paper-account/manual-adjustment")
+    def api_paper_account_manual_adjustment(request: PaperManualAdjustmentRequest) -> JSONResponse:
+        try:
+            payload = app_service.paper_account_manual_adjustment(
+                adjustment_type=request.adjustment_type,
+                stock=request.stock,
+                shares=request.shares,
+                cost_price=request.cost_price,
+                amount=request.amount,
+                reason=request.reason,
+            )
+            return JSONResponse(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/paper-account/apply-latest-plan")
+    def api_paper_account_apply_latest_plan(request: PaperApplyLatestPlanRequest) -> JSONResponse:
+        try:
+            payload = app_service.paper_account_apply_latest_plan(execution_date=request.execution_date)
+            return JSONResponse(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/paper-account/performance")
+    def api_paper_account_performance(
+        start_date: str = Query(default=""),
+        end_date: str = Query(default=""),
+    ) -> dict[str, Any]:
+        if not start_date or not end_date:
+            raise HTTPException(status_code=400, detail="start_date and end_date are required")
+        return app_service.paper_account_performance(start_date=start_date, end_date=end_date)
 
     @app.get("/api/account")
     def api_account() -> dict[str, Any]:

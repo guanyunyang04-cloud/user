@@ -31,6 +31,7 @@ export function OverviewPage({ api }: OverviewPageProps): JSX.Element {
 
   const manifest = payload?.active_manifest || {};
   const tradePlan = payload?.latest_trade_plan;
+  const paper = payload?.paper_account || {};
   const jobs = useMemo<TableRow[]>(
     () =>
       (payload?.recent_jobs || []).map((job) => ({
@@ -53,7 +54,9 @@ export function OverviewPage({ api }: OverviewPageProps): JSX.Element {
         <Stat label="Active 策略" value={text(manifest.strategy_name || manifest.candidate_label)} />
         <Stat label="交易计划" value={<StatusPill value={tradePlan?.status || "missing"} />} />
         <Stat label="动作数" value={tradePlan?.actions?.length || 0} />
-        <Stat label="账户持仓" value={text(payload?.current_positions?.row_count)} />
+        <Stat label="账户权益" value={text(paper.latest_equity && typeof paper.latest_equity === "object" ? (paper.latest_equity as Record<string, unknown>).total_equity : "")} />
+        <Stat label="未成交" value={text(paper.pending_order_count)} />
+        <Stat label="账户持仓" value={text(payload?.current_positions?.row_count || paper.position_count)} />
         <Stat label="锁状态" value={<StatusPill value={payload?.lock && Object.keys(payload.lock).length ? "locked" : "ok"} />} />
       </div>
       <div className="two-column">
@@ -71,6 +74,14 @@ export function OverviewPage({ api }: OverviewPageProps): JSX.Element {
             <span>现金</span><strong>{text(tradePlan?.summary?.cash_input)}</strong>
             <span>模型训练</span><strong>{text(tradePlan?.model_info?.trained_at)}</strong>
             <span>相差交易日</span><strong>{text(tradePlan?.model_info?.trading_day_lag)}</strong>
+          </div>
+        </Panel>
+        <Panel title="模拟账户">
+          <div className="key-list">
+            <span>账本</span><strong>{text(paper.source)}</strong>
+            <span>现金</span><strong>{text(paper.available_cash)}</strong>
+            <span>权益日期</span><strong>{text(paper.latest_equity && typeof paper.latest_equity === "object" ? (paper.latest_equity as Record<string, unknown>).as_of_date : "")}</strong>
+            <span>待执行订单</span><strong>{text(paper.pending_order_count)}</strong>
           </div>
         </Panel>
       </div>

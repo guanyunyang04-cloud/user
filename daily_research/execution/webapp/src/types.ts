@@ -172,6 +172,7 @@ export interface TradePlanPayload {
   watchlist: TableRow[];
   model_info: JsonObject;
   diagnostics?: JsonObject;
+  paper_trading?: JsonObject;
   txt_preview: string[];
   artifact_paths: Record<string, string>;
 }
@@ -195,18 +196,57 @@ export interface AccountPosition {
 }
 
 export interface AccountPayload {
+  status?: string;
   path: string;
   exists: boolean;
+  source?: string;
+  db_path?: string;
   available_cash: number | null;
   positions: AccountPosition[];
+  positions_by_stock?: JsonObject;
   position_count: number;
   total_shares: number;
   last_modified_at: string;
+  pending_order_count?: number;
+  filled_order_count?: number;
+  blocked_order_count?: number;
+  pending_orders?: TableRow[];
+  recent_fills?: TableRow[];
+  recent_cash_flows?: TableRow[];
+  latest_equity?: JsonObject;
 }
 
 export interface AccountSaveRequest {
   available_cash: number | string | null;
   positions: AccountPosition[];
+}
+
+export type PaperAccountPayload = AccountPayload;
+
+export interface PaperCashFlowRequest {
+  flow_type: string;
+  amount: number | string;
+  reason?: string;
+}
+
+export interface PaperManualAdjustmentRequest {
+  adjustment_type: string;
+  stock?: string;
+  shares?: number | string | null;
+  cost_price?: number | string | null;
+  amount?: number | string | null;
+  reason?: string;
+}
+
+export interface PaperPerformancePayload {
+  status: string;
+  start_date?: string;
+  end_date?: string;
+  total_return?: number;
+  max_drawdown?: number;
+  net_cash_flow?: number;
+  points?: TableRow[];
+  [key: string]: unknown;
 }
 
 export interface JobSummary {
@@ -261,6 +301,7 @@ export interface StatusPayload {
   recent_jobs?: JobSummary[];
   active_manifest?: JsonObject;
   current_positions?: JsonObject;
+  paper_account?: JsonObject;
   latest_trade_plan?: TradePlanPayload;
   scheduler_status?: SchedulerStatus;
   last_auto_refresh?: JsonObject;
@@ -292,6 +333,11 @@ export interface ExecutionApi {
   getAccount(): Promise<AccountPayload>;
   saveAccount(payload: AccountSaveRequest): Promise<AccountPayload>;
   resetAccountExample(): Promise<AccountPayload>;
+  getPaperAccount(): Promise<PaperAccountPayload>;
+  recordPaperCashFlow(payload: PaperCashFlowRequest): Promise<PaperAccountPayload>;
+  recordPaperManualAdjustment(payload: PaperManualAdjustmentRequest): Promise<PaperAccountPayload>;
+  applyLatestPaperPlan(payload?: { execution_date?: string }): Promise<JsonObject>;
+  getPaperPerformance(startDate: string, endDate: string): Promise<PaperPerformancePayload>;
   getJobs(limit?: number): Promise<JobSummary[]>;
   getJob(jobId: string, lines?: number): Promise<JobDetail>;
   resumeJob(jobId: string): Promise<JobLaunchPayload>;

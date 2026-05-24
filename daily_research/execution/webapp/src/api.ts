@@ -10,6 +10,10 @@ import type {
   JobSummary,
   ModelDetailPayload,
   ModelsPayload,
+  PaperAccountPayload,
+  PaperCashFlowRequest,
+  PaperManualAdjustmentRequest,
+  PaperPerformancePayload,
   ProviderHealthPayload,
   ProviderHealthRequest,
   SchedulerConfigRequest,
@@ -76,6 +80,16 @@ export function createApiClient(fetcher: FetchLike = window.fetch.bind(window)):
     getAccount: () => requestJson<AccountPayload>(fetcher, "/api/account"),
     saveAccount: (payload: AccountSaveRequest) => postJson<AccountPayload>(fetcher, "/api/account", payload),
     resetAccountExample: () => postJson<AccountPayload>(fetcher, "/api/account/reset-example", {}),
+    getPaperAccount: () => requestJson<PaperAccountPayload>(fetcher, "/api/paper-account"),
+    recordPaperCashFlow: (payload: PaperCashFlowRequest) => postJson<PaperAccountPayload>(fetcher, "/api/paper-account/cash-flow", payload),
+    recordPaperManualAdjustment: (payload: PaperManualAdjustmentRequest) =>
+      postJson<PaperAccountPayload>(fetcher, "/api/paper-account/manual-adjustment", payload),
+    applyLatestPaperPlan: (payload = {}) => postJson(fetcher, "/api/paper-account/apply-latest-plan", payload),
+    getPaperPerformance: (startDate: string, endDate: string) =>
+      requestJson<PaperPerformancePayload>(
+        fetcher,
+        `/api/paper-account/performance?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`
+      ),
     getJobs: (limit = 30) => requestJson<JobSummary[]>(fetcher, `/api/jobs?limit=${limit}`),
     getJob: (jobId: string, lines = 160) => requestJson<JobDetail>(fetcher, `/api/jobs/${encodeURIComponent(jobId)}?lines=${lines}`),
     resumeJob: (jobId: string) => postJson<JobLaunchPayload>(fetcher, "/api/resume", { job_id: jobId, background: true }),

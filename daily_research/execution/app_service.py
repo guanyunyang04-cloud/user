@@ -26,6 +26,7 @@ from daily_research.data_platform.providers import (
 )
 from daily_research.data_platform.provider_health import ProviderHealthConfig, run_provider_health
 from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
+from daily_research.execution import paper_trading
 from daily_research.execution import production_signal
 from daily_research.execution.app_runtime import (
     EVENTS_PATH,
@@ -66,6 +67,8 @@ EXECUTION_DIR = Path(__file__).resolve().parent
 ACTIVE_MANIFEST_PATH = PROJECT_ROOT / "output" / "active_execution_strategy.json"
 POSITIONS_PATH = EXECUTION_DIR / "current_positions.csv"
 POSITIONS_EXAMPLE_PATH = EXECUTION_DIR / "current_positions.example.csv"
+PAPER_ACCOUNT_ROOT = RUNTIME_ROOT / "paper_account"
+PAPER_ACCOUNT_DB_PATH = PAPER_ACCOUNT_ROOT / "paper_account.sqlite3"
 ENVIRONMENT_PATH = PROJECT_ROOT / "environment.yml"
 LATEST_TRADE_PLAN_PATH = EXECUTION_DIR / "output" / "latest_trade_plan.txt"
 ACCOUNT_FILE_HEADERS = ("record_type", "stock", "shares", "cost_price", "available_cash")
@@ -196,7 +199,7 @@ def _write_csv_atomic(path: Path, *, rows: list[dict[str, Any]]) -> None:
     temp_path.replace(path)
 
 
-def load_account_snapshot(path: Path = POSITIONS_PATH) -> dict[str, Any]:
+def _load_account_snapshot_csv(path: Path) -> dict[str, Any]:
     snapshot = {
         "path": str(path.resolve()),
         "exists": path.exists(),
@@ -266,7 +269,63 @@ def load_account_snapshot(path: Path = POSITIONS_PATH) -> dict[str, Any]:
     return snapshot
 
 
-def positions_summary(path: Path = POSITIONS_PATH) -> dict[str, Any]:
+def _ensure_paper_account() -> dict[str, Any]:
+    result = paper_trading.ensure_ledger(db_path=PAPER_ACCOUNT_DB_PATH, snapshot_path=POSITIONS_PATH)
+    paper_trading.export_account_snapshot(db_path=PAPER_ACCOUNT_DB_PATH, path=POSITIONS_PATH)
+    return result
+
+
+def _paper_summary_to_account_snapshot(summary: dict[str, Any], *, path: Path) -> dict[str, Any]:
+    positions = [
+        {
+            "stock": str(item.get("stock", "") or ""),
+            "shares": int(float(item.get("shares", 0) or 0)),
+            "cost_price": float(item.get("cost_price", 0) or 0),
+        }
+        for item in list(summary.get("positions", []) if isinstance(summary.get("positions"), list) else [])
+    ]
+    return {
+        "status": "ok",
+        "path": str(path.resolve()),
+        "db_path": str(PAPER_ACCOUNT_DB_PATH.resolve()),
+        "exists": path.exists(),
+        "source": "paper_ledger",
+        "headers_ok": True,
+        "available_cash": float(summary.get("available_cash", 0) or 0),
+        "positions": positions,
+        "positions_by_stock": summary.get("positions_by_stock", {}),
+        "position_count": len(positions),
+        "total_shares": sum(int(item["shares"]) for item in positions),
+        "tickers": [str(item["stock"]) for item in positions[:20]],
+        "last_modified_at": _file_mtime_text(path),
+        "pending_order_count": int(summary.get("pending_order_count", 0) or 0),
+        "filled_order_count": int(summary.get("filled_order_count", 0) or 0),
+        "blocked_order_count": int(summary.get("blocked_order_count", 0) or 0),
+        "pending_orders": list(summary.get("pending_orders", []) if isinstance(summary.get("pending_orders"), list) else []),
+        "recent_fills": list(summary.get("recent_fills", []) if isinstance(summary.get("recent_fills"), list) else []),
+        "recent_cash_flows": list(summary.get("recent_cash_flows", []) if isinstance(summary.get("recent_cash_flows"), list) else []),
+        "latest_equity": dict(summary.get("latest_equity", {}) if isinstance(summary.get("latest_equity"), dict) else {}),
+    }
+
+
+def paper_account_summary() -> dict[str, Any]:
+    init = _ensure_paper_account()
+    summary = paper_trading.account_summary(db_path=PAPER_ACCOUNT_DB_PATH)
+    return {
+        **_paper_summary_to_account_snapshot(summary, path=POSITIONS_PATH),
+        "initialized_from_snapshot": bool(init.get("initialized_from_snapshot")),
+        "ledger": summary,
+    }
+
+
+def load_account_snapshot(path: Path | None = None) -> dict[str, Any]:
+    resolved_path = path or POSITIONS_PATH
+    if Path(resolved_path) != POSITIONS_PATH:
+        return _load_account_snapshot_csv(Path(resolved_path))
+    return paper_account_summary()
+
+
+def positions_summary(path: Path | None = None) -> dict[str, Any]:
     snapshot = load_account_snapshot(path)
     return {
         "path": snapshot["path"],
@@ -457,6 +516,16 @@ def _trade_plan_diagnostics(
     }
 
 
+def _paper_trade_plan_status(run_dir: Path | None) -> dict[str, Any]:
+    if run_dir is None:
+        return {"status": "missing_trade_plan_run"}
+    try:
+        paper_trading.ensure_ledger(db_path=PAPER_ACCOUNT_DB_PATH, snapshot_path=POSITIONS_PATH)
+        return paper_trading.trade_plan_batch_status(db_path=PAPER_ACCOUNT_DB_PATH, run_dir=run_dir)
+    except Exception as exc:
+        return {"status": "warning", "error": str(exc), "run_dir": str(run_dir)}
+
+
 def latest_trade_plan_summary(
     *,
     max_lines: int = 80,
@@ -489,6 +558,7 @@ def latest_trade_plan_summary(
         watchlist=watchlist,
         txt_preview=lines,
     )
+    paper_status = _paper_trade_plan_status(run_dir)
     return {
         "path": str(txt_path.resolve()),
         "exists": txt_path.exists(),
@@ -499,6 +569,7 @@ def latest_trade_plan_summary(
         "watchlist": watchlist,
         "model_info": model_info,
         "diagnostics": diagnostics,
+        "paper_trading": paper_status,
         "txt_preview": lines,
         "preview_lines": lines,
         "line_count": len(lines),
@@ -821,6 +892,10 @@ def data_refresh_skip_payload(*, data_sources: dict[str, Any], as_of_date: str =
     explanation = str(data_sources.get("refresh_explanation", "") or "")
     job_id = f"data-platform-refresh_skipped_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     summary_note = explanation or f"当前 active dataset 已覆盖最新完成交易日 {latest_completed}。"
+    try:
+        paper_result = paper_account_reconcile(as_of_date=latest_completed)
+    except Exception as exc:
+        paper_result = {"status": "warning", "as_of_date": latest_completed, "error": str(exc)}
     return {
         "job_id": job_id,
         "task_name": "data-platform-refresh",
@@ -833,6 +908,7 @@ def data_refresh_skip_payload(*, data_sources: dict[str, Any], as_of_date: str =
         "latest_completed_trading_date": latest_completed,
         "summary_note": summary_note,
         "refresh_explanation": explanation,
+        "paper_trading": paper_result,
         "metadata": {
             "job_id": job_id,
             "task_name": "data-platform-refresh",
@@ -843,6 +919,7 @@ def data_refresh_skip_payload(*, data_sources: dict[str, Any], as_of_date: str =
             "active_dataset_id": dataset_id,
             "latest_completed_trading_date": latest_completed,
             "summary_note": summary_note,
+            "paper_trading": paper_result,
         },
     }
 
@@ -1159,6 +1236,13 @@ def _signal_refresh_artifact_status() -> dict[str, Any]:
     }
 
 
+def _safe_paper_reconcile(*, as_of_date: str = "") -> dict[str, Any]:
+    try:
+        return paper_account_reconcile(as_of_date=as_of_date)
+    except Exception as exc:
+        return {"status": "warning", "error": str(exc), "as_of_date": str(as_of_date or "")}
+
+
 def _select_latest_policy_input_lake_dataset(frame: Any) -> dict[str, Any]:
     import pandas as pd
 
@@ -1278,8 +1362,23 @@ def _data_refresh_artifact_status(refresh_manifest_path: str = "") -> dict[str, 
 def _post_process_successful_task(*, job_paths: Any, task_name: str, summary_note: str) -> tuple[str, dict[str, Any]]:
     if task_name == "refresh-production-live-panels":
         metadata = _signal_refresh_artifact_status()
+        paper_result = _safe_paper_reconcile(
+            as_of_date=str(metadata.get("panel_latest_date", "") or metadata.get("signal_panel_latest_date", "") or "")
+        )
+        metadata["paper_trading"] = paper_result
         status = str(metadata.get("business_status", ""))
-        note = f"{summary_note} signal_refresh_status={status}"
+        note = f"{summary_note} signal_refresh_status={status} paper_reconcile_status={paper_result.get('status', '')}"
+        update_job_metadata(job_paths, **metadata)
+        return note, metadata
+    if task_name == "trade-plan":
+        paper_result = paper_account_register_latest_plan()
+        metadata = {
+            "business_status": "ok",
+            "runner_status": "ok",
+            "artifact_status": "ok",
+            "paper_trading": paper_result,
+        }
+        note = f"{summary_note} paper_order_status={paper_result.get('status', '')}"
         update_job_metadata(job_paths, **metadata)
         return note, metadata
     if task_name != "data-platform-refresh":
@@ -1297,11 +1396,13 @@ def _post_process_successful_task(*, job_paths: Any, task_name: str, summary_not
     )
     note = f"{summary_note} active manifest lake_dataset_id={update.get('dataset_id', '')}"
     signal_metadata = _signal_refresh_metadata(as_of_date=str(update.get("end_date", "") or ""))
+    paper_result = _safe_paper_reconcile(as_of_date=str(update.get("end_date", "") or ""))
     metadata = {
         **artifact_metadata,
         "active_manifest_update": update,
         "data_refresh": artifact_metadata,
         "signal_refresh_result": signal_metadata,
+        "paper_trading": paper_result,
         "business_status": "ok" if signal_metadata.get("business_status") == "ok" else "signal_failed",
         "runner_status": signal_metadata.get("runner_status", "ok"),
         "artifact_status": "ok" if signal_metadata.get("artifact_status") == "ok" else str(signal_metadata.get("artifact_status", "")),
@@ -1324,8 +1425,9 @@ def save_account_snapshot(
     *,
     available_cash: float | int | str | None,
     positions: list[dict[str, Any]] | None,
-    path: Path = POSITIONS_PATH,
+    path: Path | None = None,
 ) -> dict[str, Any]:
+    resolved_path = path or POSITIONS_PATH
     cash_value: float | None = None
     if available_cash not in {None, ""}:
         try:
@@ -1360,26 +1462,189 @@ def save_account_snapshot(
         }
         for position in normalized_positions
     )
-    _write_csv_atomic(path, rows=rows)
-    append_event("account_snapshot_saved", path=str(path.resolve()), position_count=len(normalized_positions), available_cash=cash_value)
-    return load_account_snapshot(path)
+    _write_csv_atomic(resolved_path, rows=rows)
+    if resolved_path == POSITIONS_PATH:
+        paper_trading.ensure_ledger(db_path=PAPER_ACCOUNT_DB_PATH, snapshot_path=resolved_path)
+        paper_trading.replace_account_state(
+            db_path=PAPER_ACCOUNT_DB_PATH,
+            available_cash=cash_value,
+            positions=normalized_positions,
+            reason="legacy /api/account save",
+        )
+        paper_trading.export_account_snapshot(db_path=PAPER_ACCOUNT_DB_PATH, path=resolved_path)
+    append_event(
+        "account_snapshot_saved",
+        path=str(resolved_path.resolve()),
+        position_count=len(normalized_positions),
+        available_cash=cash_value,
+    )
+    return load_account_snapshot(resolved_path)
 
 
 def reset_account_snapshot_from_example(
     *,
-    target_path: Path = POSITIONS_PATH,
+    target_path: Path | None = None,
     example_path: Path = POSITIONS_EXAMPLE_PATH,
 ) -> dict[str, Any]:
+    resolved_target = target_path or POSITIONS_PATH
     if not example_path.exists():
         raise FileNotFoundError(f"未找到示例账户文件：{example_path}")
-    example_snapshot = load_account_snapshot(example_path)
+    example_snapshot = _load_account_snapshot_csv(example_path)
     restored = save_account_snapshot(
         available_cash=example_snapshot["available_cash"],
         positions=example_snapshot["positions"],
-        path=target_path,
+        path=resolved_target,
     )
-    append_event("account_snapshot_reset_from_example", target_path=str(target_path.resolve()), example_path=str(example_path.resolve()))
+    append_event("account_snapshot_reset_from_example", target_path=str(resolved_target.resolve()), example_path=str(example_path.resolve()))
     return restored
+
+
+def paper_account_cash_flow(*, flow_type: str, amount: float | int | str, reason: str = "") -> dict[str, Any]:
+    _ensure_paper_account()
+    payload = paper_trading.record_cash_flow(
+        db_path=PAPER_ACCOUNT_DB_PATH,
+        flow_type=str(flow_type or ""),
+        amount=float(amount),
+        reason=str(reason or ""),
+    )
+    paper_trading.export_account_snapshot(db_path=PAPER_ACCOUNT_DB_PATH, path=POSITIONS_PATH)
+    append_event("paper_account_cash_flow", flow_type=str(flow_type or ""), amount=float(amount), reason=str(reason or ""))
+    return {**paper_account_summary(), "cash_flow": payload}
+
+
+def paper_account_manual_adjustment(
+    *,
+    adjustment_type: str,
+    stock: str = "",
+    shares: float | int | str | None = None,
+    cost_price: float | int | str | None = None,
+    amount: float | int | str | None = None,
+    reason: str = "",
+) -> dict[str, Any]:
+    _ensure_paper_account()
+    payload = paper_trading.record_manual_adjustment(
+        db_path=PAPER_ACCOUNT_DB_PATH,
+        adjustment_type=adjustment_type,
+        stock=stock,
+        shares=shares,
+        cost_price=cost_price,
+        amount=amount,
+        reason=reason,
+    )
+    paper_trading.export_account_snapshot(db_path=PAPER_ACCOUNT_DB_PATH, path=POSITIONS_PATH)
+    append_event("paper_account_manual_adjustment", adjustment_type=adjustment_type, stock=stock, reason=reason)
+    return {**_paper_summary_to_account_snapshot(payload, path=POSITIONS_PATH), "manual_adjustment_status": "ok"}
+
+
+def _paper_price_lookup_for_date(as_of_date: str) -> dict[str, Any]:
+    active_payload = _read_json(ACTIVE_MANIFEST_PATH)
+    dataset_id = str(active_payload.get("lake_dataset_id", "") or active_payload.get("source_market_dataset_id", "") or "").strip()
+    if not dataset_id:
+        return {as_of_date: {}}
+    lake_root = Path(str(active_payload.get("data_lake_root", "") or PROJECT_ROOT / "output" / "research_data_lake"))
+    try:
+        from daily_research.data_lake import ResearchDataLake, load_policy_inputs_from_lake
+
+        lake = ResearchDataLake(lake_root)
+        prepared = load_policy_inputs_from_lake(
+            lake=lake,
+            dataset_id=dataset_id,
+            start_date=as_of_date,
+            end_date=as_of_date,
+            min_trading_days=1,
+        )
+        open_frame = prepared.open_.copy()
+        close_frame = prepared.close.copy()
+        ts = pd.Timestamp(as_of_date)
+        if ts not in open_frame.index:
+            return {as_of_date: {}}
+        lookup: dict[str, dict[str, float]] = {}
+        open_row = open_frame.loc[ts]
+        close_row = close_frame.loc[ts] if ts in close_frame.index else pd.Series(dtype=float)
+        for stock in open_row.index:
+            open_value = pd.to_numeric(pd.Series([open_row.get(stock)]), errors="coerce").iloc[0]
+            close_value = pd.to_numeric(pd.Series([close_row.get(stock)]), errors="coerce").iloc[0] if stock in close_row.index else float("nan")
+            item: dict[str, float] = {}
+            if pd.notna(open_value):
+                item["open"] = float(open_value)
+            if pd.notna(close_value):
+                item["close"] = float(close_value)
+            if item:
+                lookup[str(stock)] = item
+        return {as_of_date: lookup}
+    except Exception as exc:
+        append_event("paper_account_price_lookup_failed", as_of_date=as_of_date, error=str(exc))
+        return {as_of_date: {}}
+
+
+def paper_account_register_latest_plan() -> dict[str, Any]:
+    _ensure_paper_account()
+    plan = latest_trade_plan_summary(max_lines=40)
+    run_dir = str(_safe_nested(plan, "artifact_paths", "run_dir") or "")
+    if not run_dir:
+        return {"status": "missing_trade_plan_run", "trade_plan": plan}
+    result = paper_trading.register_trade_plan_run(db_path=PAPER_ACCOUNT_DB_PATH, run_dir=run_dir)
+    paper_trading.export_account_snapshot(db_path=PAPER_ACCOUNT_DB_PATH, path=POSITIONS_PATH)
+    append_event("paper_account_trade_plan_registered", **{key: value for key, value in result.items() if key != "trade_plan"})
+    return {**result, "trade_plan": plan}
+
+
+def paper_account_apply_latest_plan(*, execution_date: str = "") -> dict[str, Any]:
+    _ensure_paper_account()
+    registration = paper_account_register_latest_plan()
+    plan_summary = dict(_safe_nested(registration, "trade_plan", "summary") or {})
+    resolved_execution_date = _normalize_date_text(execution_date or plan_summary.get("execution_date", ""))
+    if not resolved_execution_date:
+        return {"status": "missing_execution_date", "registration": registration, "account": paper_account_summary()}
+    price_lookup = _paper_price_lookup_for_date(resolved_execution_date)
+    apply_result = paper_trading.apply_pending_orders(
+        db_path=PAPER_ACCOUNT_DB_PATH,
+        price_lookup=price_lookup,
+        execution_date=resolved_execution_date,
+    )
+    equity_result = paper_trading.write_daily_equity(
+        db_path=PAPER_ACCOUNT_DB_PATH,
+        price_lookup=price_lookup,
+        as_of_date=resolved_execution_date,
+    )
+    paper_trading.export_account_snapshot(db_path=PAPER_ACCOUNT_DB_PATH, path=POSITIONS_PATH)
+    result = {
+        "status": "ok",
+        "execution_date": resolved_execution_date,
+        "registration": registration,
+        "apply_result": apply_result,
+        "equity_result": equity_result,
+        "account": paper_account_summary(),
+    }
+    append_event("paper_account_latest_plan_applied", execution_date=resolved_execution_date, filled_order_count=apply_result.get("filled_order_count", 0))
+    return result
+
+
+def paper_account_reconcile(*, as_of_date: str = "") -> dict[str, Any]:
+    _ensure_paper_account()
+    resolved_date = _normalize_date_text(as_of_date or get_latest_completed_trading_date())
+    price_lookup = _paper_price_lookup_for_date(resolved_date)
+    apply_result = paper_trading.apply_pending_orders(
+        db_path=PAPER_ACCOUNT_DB_PATH,
+        price_lookup=price_lookup,
+        execution_date=resolved_date,
+    )
+    equity_result = paper_trading.write_daily_equity(
+        db_path=PAPER_ACCOUNT_DB_PATH,
+        price_lookup=price_lookup,
+        as_of_date=resolved_date,
+    )
+    paper_trading.export_account_snapshot(db_path=PAPER_ACCOUNT_DB_PATH, path=POSITIONS_PATH)
+    return {"status": "ok", "as_of_date": resolved_date, "apply_result": apply_result, "equity_result": equity_result}
+
+
+def paper_account_performance(*, start_date: str, end_date: str) -> dict[str, Any]:
+    _ensure_paper_account()
+    return paper_trading.performance_summary(
+        db_path=PAPER_ACCOUNT_DB_PATH,
+        start_date=_normalize_date_text(start_date),
+        end_date=_normalize_date_text(end_date),
+    )
 
 
 def build_status_payload(*, history_limit: int = 8) -> dict[str, Any]:
@@ -1401,6 +1666,10 @@ def build_status_payload(*, history_limit: int = 8) -> dict[str, Any]:
             "execution app 当前被锁定："
             f"job_id={lock_payload.get('job_id', '')} task={lock_payload.get('task_name', '')}"
         )
+    try:
+        paper_account = paper_account_summary()
+    except Exception as exc:
+        paper_account = {"status": "warning", "error": str(exc)}
     return {
         "runtime_root": str(RUNTIME_ROOT.resolve()),
         "state_path": str(STATE_PATH.resolve()),
@@ -1413,6 +1682,7 @@ def build_status_payload(*, history_limit: int = 8) -> dict[str, Any]:
         "recent_jobs": recent_jobs,
         "active_manifest": active_manifest_summary(),
         "current_positions": positions_summary(),
+        "paper_account": paper_account,
         "latest_trade_plan": latest_trade_plan_summary(max_lines=24),
         "scheduler_status": scheduler_summary(),
         "last_auto_refresh": dict((state.get("scheduler", {}) or {}).get("last_auto_refresh", {}) or {}),
