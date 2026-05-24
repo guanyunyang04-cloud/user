@@ -214,6 +214,31 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertIn("stop_conditions", payload)
         self.assertEqual(payload["workflow_guide"]["workflow_id"], "executing_plan")
 
+    def test_capsule_cli_defaults_to_lite_context(self) -> None:
+        payload = run_cli(
+            "capsule",
+            "--task",
+            "Path20 当前到哪了",
+            "--json",
+        )
+
+        self.assertEqual(payload["context_profile"], "lite")
+        self.assertIn("frontier_report", payload["guards"])
+        self.assertNotIn("latest_output_studies", payload["guards"]["frontier_report"])
+
+    def test_capsule_cli_full_context_keeps_frontier_details(self) -> None:
+        payload = run_cli(
+            "capsule",
+            "--task",
+            "Path20 当前到哪了",
+            "--verbosity",
+            "full",
+            "--json",
+        )
+
+        self.assertEqual(payload["context_profile"], "full")
+        self.assertIn("latest_output_studies", payload["guards"]["frontier_report"])
+
     def test_capsule_intent_mutate_blocks_non_main_branch(self) -> None:
         payload = run_cli(
             "capsule",

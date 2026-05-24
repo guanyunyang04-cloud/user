@@ -79,6 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     capsule.add_argument("--workflow", default="brain_handoff")
     capsule.add_argument("--study-tag", default="")
     capsule.add_argument("--intent", default="read", choices=("read", "mutate", "long_task", "writeback"))
+    capsule.add_argument("--verbosity", default="lite", choices=("lite", "standard", "full"))
     capsule.add_argument("--json", action="store_true")
     capsule.add_argument("--write-output", action="store_true")
 
@@ -153,6 +154,7 @@ def build_payload(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
             workflow=str(getattr(args, "workflow", "") or "brain_handoff"),
             study_tag=str(getattr(args, "study_tag", "") or ""),
             intent=str(getattr(args, "intent", "") or "read"),
+            verbosity=str(getattr(args, "verbosity", "") or "lite"),
         )
     if args.command == "current-frontier":
         return "current_frontier", daily_research_adapter.build_frontier_report()

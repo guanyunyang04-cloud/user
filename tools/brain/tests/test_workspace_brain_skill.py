@@ -232,13 +232,55 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         payload = json.loads(result.stdout)
 
         self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["mode"], "compact")
         self.assertIn("detect", payload)
         self.assertIn("skill_sync", payload)
-        self.assertIn("doc_guard", payload)
+        self.assertIn("doc_guard_status", payload)
         self.assertIn("integrity", payload)
         self.assertIn("frontier", payload)
         self.assertIn("catalog", payload)
         self.assertIn("next_actions", payload)
+
+    def test_brain_runtime_health_compact_separates_acknowledged_info(self) -> None:
+        result = subprocess.run(
+            [PYTHON, str(RUNTIME), "health", "--cwd", str(ROOT), "--mode", "compact"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        payload = json.loads(result.stdout)
+
+        self.assertEqual(payload["mode"], "compact")
+        self.assertIn("catalog", payload)
+        self.assertIn("acknowledged_info", payload["catalog"])
+        self.assertEqual(payload["catalog"]["actionable_warning_count"], 0)
+        self.assertNotIn("doc_guard", payload)
+        self.assertIn("doc_guard_status", payload)
+
+    def test_brain_runtime_health_full_keeps_detailed_payload(self) -> None:
+        result = subprocess.run(
+            [PYTHON, str(RUNTIME), "health", "--cwd", str(ROOT), "--mode", "full"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        payload = json.loads(result.stdout)
+
+        self.assertEqual(payload["mode"], "full")
+        self.assertIn("doc_guard", payload)
+        self.assertIn("unregistered_latest_output_details", payload["frontier"])
+
+    def test_workspace_brain_skill_first_move_is_lite(self) -> None:
+        text = SKILL.read_text(encoding="utf-8")
+
+        self.assertIn("capsule --task", text)
+        self.assertIn("--verbosity lite", text)
+        self.assertIn("health --cwd . --mode compact", text)
+        self.assertIn("health --cwd . --mode full", text)
 
 
 if __name__ == "__main__":

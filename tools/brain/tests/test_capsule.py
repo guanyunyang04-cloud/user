@@ -19,6 +19,21 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertEqual(payload["status"], "selected")
         self.assertEqual(payload["selected_brain_id"], "daily_research")
 
+    def test_route_daily_research_execution_terms(self) -> None:
+        cases = (
+            "执行端交易计划没有动作",
+            "数据刷新后 signal panel 过期",
+            "模型页 active manifest 状态",
+            "daily_research/execution/app_service.py 修复",
+            "production signal refresh 闭环",
+            "当前数据集不完整",
+        )
+        for task in cases:
+            with self.subTest(task=task):
+                payload = route_task_to_brain(task)
+                self.assertEqual(payload["status"], "selected")
+                self.assertEqual(payload["selected_brain_id"], "daily_research")
+
     def test_route_intraday_task_to_t0_project(self) -> None:
         payload = route_task_to_brain("盘中 RL 原型接管")
 
@@ -46,19 +61,41 @@ class BrainCapsuleTest(unittest.TestCase):
         payload = build_task_capsule(task="Path20 当前状态", workflow="auto")
 
         self.assertEqual(payload["schema_version"], 2)
+        self.assertEqual(payload["context_profile"], "lite")
         self.assertEqual(payload["routing"]["selected_brain_id"], "daily_research")
         self.assertIn("child_context", payload)
         self.assertEqual(payload["child_context"]["brain_id"], "daily_research")
         self.assertIn("daily_research/brain/state_center.md", payload["child_context"]["fast_handoff_paths"])
         self.assertIn("active_artifact_guard", payload["guards"])
+        self.assertNotIn("state_summary", payload["child_context"])
+        self.assertNotIn("hard_rules", payload["child_context"])
+        self.assertNotIn("latest_output_studies", payload["guards"].get("frontier_report", {}))
+
+    def test_capsule_lite_exposes_deep_dive_commands(self) -> None:
+        payload = build_task_capsule(task="Path20 当前状态", workflow="auto")
+
+        self.assertEqual(payload["context_profile"], "lite")
+        self.assertIn("summary_budget", payload)
+        commands = "\n".join(payload["available_deep_dive_commands"])
+        self.assertIn("current-frontier", commands)
+        self.assertIn("query", commands)
+        self.assertIn("health --mode full", commands)
+
+    def test_capsule_full_preserves_deep_context(self) -> None:
+        payload = build_task_capsule(task="Path20 当前状态", workflow="auto", verbosity="full")
+
+        self.assertEqual(payload["context_profile"], "full")
+        self.assertIn("state_summary", payload["child_context"])
+        self.assertIn("hard_rules", payload["child_context"])
+        self.assertIn("latest_output_studies", payload["guards"]["frontier_report"])
 
     def test_capsule_workspace_governance_has_no_daily_research_state_summary(self) -> None:
         payload = build_task_capsule(task="主脑 capsule 重构", workflow="auto")
 
         self.assertEqual(payload["routing"]["selected_brain_id"], "workspace_governance")
         self.assertNotIn("child_context", payload)
-        text = "\n".join(payload["main_context"]["summary"])
-        self.assertNotIn("Path20 当前研究主线指针", text)
+        self.assertNotIn("summary", payload["main_context"])
+        self.assertNotIn("hard_rules", payload["main_context"])
 
 
 if __name__ == "__main__":

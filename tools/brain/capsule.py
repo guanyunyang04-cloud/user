@@ -19,6 +19,14 @@ from tools.brain.platform import (
 )
 from tools.brain.routing import route_task_to_brain
 from tools.brain.rules import run_brain_rules
+from tools.brain.runtime_context import (
+    compact_child_context,
+    compact_main_context,
+    deep_dive_commands,
+    normalize_verbosity,
+    summarize_frontier,
+    summary_budget,
+)
 
 
 PROJECT_TERM_DEFAULTS = {
@@ -94,6 +102,7 @@ def _related_references(task: str, selected_brain_id: str) -> list[dict[str, Any
             {
                 "id": match.get("id", ""),
                 "path": path,
+                "tags": match.get("tags", []),
                 "verdict": match.get("verdict", ""),
                 "blockers": match.get("blockers", []),
                 "dataset_ids": match.get("dataset_ids", []),
@@ -173,7 +182,15 @@ def _preflight_blockers(*, routing: dict[str, Any], main_context: dict[str, Any]
     return sorted(set(blockers))
 
 
-def build_task_capsule(*, task: str = "", workflow: str = "brain_handoff", study_tag: str = "", intent: str = "read") -> dict[str, Any]:
+def build_task_capsule(
+    *,
+    task: str = "",
+    workflow: str = "brain_handoff",
+    study_tag: str = "",
+    intent: str = "read",
+    verbosity: str = "lite",
+) -> dict[str, Any]:
+    context_profile = normalize_verbosity(verbosity)
     routing = route_task_to_brain(task)
     selected_brain_id = str(routing.get("selected_brain_id", "") or "")
     selection = select_workflow_for_task(task) if workflow == "auto" else {"selected_workflow": workflow, "reason": "explicit workflow requested"}
@@ -196,14 +213,20 @@ def build_task_capsule(*, task: str = "", workflow: str = "brain_handoff", study
     }
     if selected_brain_id == "daily_research":
         guards.update(daily_research_adapter.capsule_guard_additions(rules))
+        if "frontier_report" in guards:
+            guards["frontier_report"] = summarize_frontier(guards["frontier_report"], profile=context_profile)
 
-    main_context = _main_context()
+    raw_main_context = _main_context()
+    main_context = compact_main_context(raw_main_context, profile=context_profile)
     skill_status = _skill_sync_status()
     preflight_blockers = _preflight_blockers(routing=routing, main_context=main_context, intent=intent, guards=guards)
     mutation_allowed = str(intent or "read") not in {"mutate", "long_task", "writeback"} or "not_on_main_for_mutation" not in preflight_blockers
     payload: dict[str, Any] = {
         "schema_version": 2,
         "task": task,
+        "context_profile": context_profile,
+        "summary_budget": summary_budget(context_profile),
+        "available_deep_dive_commands": deep_dive_commands(selected_brain_id=selected_brain_id),
         "intent": str(intent or "read"),
         "mutation_allowed": bool(mutation_allowed),
         "preflight_blockers": preflight_blockers,
@@ -225,5 +248,6 @@ def build_task_capsule(*, task: str = "", workflow: str = "brain_handoff", study
         ],
     }
     if selected_brain_id in child_brain_ids() and routing.get("status") == "selected":
-        payload["child_context"] = _child_context(selected_brain_id, task, workflow_id, study_tag)
+        raw_child_context = _child_context(selected_brain_id, task, workflow_id, study_tag)
+        payload["child_context"] = compact_child_context(raw_child_context, profile=context_profile)
     return payload

@@ -136,7 +136,37 @@ def _summary_counts(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def health(cwd: Path) -> dict[str, Any]:
+def _compact_health(full_payload: dict[str, Any]) -> dict[str, Any]:
+    from tools.brain.runtime_context import compact_catalog_health, compact_frontier_health
+
+    detect_payload = full_payload.get("detect", {}) if isinstance(full_payload.get("detect"), dict) else {}
+    skill_sync = full_payload.get("skill_sync", {}) if isinstance(full_payload.get("skill_sync"), dict) else {}
+    doc_guard = full_payload.get("doc_guard", {}) if isinstance(full_payload.get("doc_guard"), dict) else {}
+    catalog = full_payload.get("catalog", {}) if isinstance(full_payload.get("catalog"), dict) else {}
+    frontier = full_payload.get("frontier", {}) if isinstance(full_payload.get("frontier"), dict) else {}
+    return {
+        "status": full_payload.get("status", "unknown"),
+        "mode": "compact",
+        "detect": {
+            "status": detect_payload.get("status", ""),
+            "cwd": detect_payload.get("cwd", ""),
+            "has_brain": bool(detect_payload.get("has_brain")),
+            "has_brain_tools": bool(detect_payload.get("has_brain_tools")),
+            "git": detect_payload.get("git", {}),
+        },
+        "skill_sync": {
+            "status": skill_sync.get("status", "unknown"),
+            "all_in_sync": bool(skill_sync.get("all_in_sync")),
+        },
+        "doc_guard_status": doc_guard.get("status", "unknown"),
+        "integrity": full_payload.get("integrity", {}),
+        "catalog": compact_catalog_health(catalog),
+        "frontier": compact_frontier_health(frontier),
+        "next_actions": list(full_payload.get("next_actions", []) or []),
+    }
+
+
+def health(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
     detected = detect(cwd)
     workspace = Path(detected["brain_root"] or cwd.resolve()).resolve()
     skill_sync_result = _run_command(
@@ -209,8 +239,9 @@ def health(cwd: Path) -> dict[str, Any]:
     if not next_actions:
         next_actions.append("run_capsule")
 
-    return {
+    payload = {
         "status": "ok" if detected["status"] == "ok" and integrity_result["returncode"] == 0 else "warning",
+        "mode": "full",
         "detect": detected,
         "skill_sync": {
             "status": "ok" if skill_sync_result["returncode"] == 0 else "failed",
@@ -228,6 +259,7 @@ def health(cwd: Path) -> dict[str, Any]:
         "frontier": frontier_summary,
         "next_actions": next_actions,
     }
+    return payload if str(mode or "compact").lower() == "full" else _compact_health(payload)
 
 
 def _title_from_brain_id(brain_id: str) -> str:
@@ -285,7 +317,7 @@ def init_brain(cwd: Path, brain_id: str) -> dict[str, Any]:
     }
 
 
-def capsule(cwd: Path, task: str, intent: str) -> dict[str, Any]:
+def capsule(cwd: Path, task: str, intent: str, *, verbosity: str = "lite") -> dict[str, Any]:
     detected = detect(cwd)
     if detected["has_brain_tools"]:
         command = [
@@ -299,6 +331,8 @@ def capsule(cwd: Path, task: str, intent: str) -> dict[str, Any]:
             "auto",
             "--intent",
             intent,
+            "--verbosity",
+            verbosity,
             "--json",
         ]
         result = subprocess.run(
@@ -316,7 +350,7 @@ def capsule(cwd: Path, task: str, intent: str) -> dict[str, Any]:
             "error": result.stderr.strip(),
             "command": command,
             "detect": detected,
-            "health_summary": health(cwd),
+            "health_summary": health(cwd, mode="compact"),
         }
     mutation_allowed = intent != "mutate" or (not detected["git"]["is_git_repo"] or detected["git"]["on_main"])
     blockers = [] if mutation_allowed else ["not_on_main_for_mutation"]
@@ -331,7 +365,7 @@ def capsule(cwd: Path, task: str, intent: str) -> dict[str, Any]:
         "mutation_allowed": mutation_allowed,
         "preflight_blockers": blockers,
         "next_actions": detected["next_actions"],
-        "health_summary": health(cwd),
+        "health_summary": health(cwd, mode="compact"),
     }
 
 
@@ -419,8 +453,10 @@ def build_parser() -> argparse.ArgumentParser:
     capsule_parser.add_argument("--cwd", default=".")
     capsule_parser.add_argument("--task", default="")
     capsule_parser.add_argument("--intent", choices=("read", "mutate", "long_task", "writeback"), default="read")
+    capsule_parser.add_argument("--verbosity", choices=("lite", "standard", "full"), default="lite")
     health_parser = sub.add_parser("health")
     health_parser.add_argument("--cwd", default=".")
+    health_parser.add_argument("--mode", choices=("compact", "full"), default="compact")
     proposal_parser = sub.add_parser("proposal")
     proposal_parser.add_argument("--cwd", default=".")
     proposal_parser.add_argument("--title", required=True)
@@ -442,9 +478,9 @@ def main() -> int:
     elif args.command == "init":
         payload = init_brain(cwd, str(args.brain_id))
     elif args.command == "capsule":
-        payload = capsule(cwd, str(args.task or ""), str(args.intent or "read"))
+        payload = capsule(cwd, str(args.task or ""), str(args.intent or "read"), verbosity=str(args.verbosity or "lite"))
     elif args.command == "health":
-        payload = health(cwd)
+        payload = health(cwd, mode=str(args.mode or "compact"))
     elif args.command == "proposal":
         payload = proposal(
             cwd,

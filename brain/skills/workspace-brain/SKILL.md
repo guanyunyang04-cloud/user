@@ -13,22 +13,28 @@ Run detection first when taking over an unknown workspace:
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py detect --cwd .
 ```
 
-Run a read-only health snapshot so catalog, guard, skill sync, and frontier warnings are visible before work begins:
+For existing brain workspaces, run a lightweight main-brain capsule before changing tracked files, launching studies, claiming evidence, or entering a child brain:
 
 ```powershell
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py health --cwd .
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<user task>" --workflow auto --intent <read|mutate|long_task|writeback> --verbosity lite --json
+```
+
+Run compact health during takeover, anomaly triage, or final verification so catalog, guard, skill sync, and frontier warnings are visible without loading deep evidence:
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py health --cwd . --mode compact
+```
+
+Use full health only when compact health reports actionable warnings, routing/evidence is disputed, or you are auditing the brain system:
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py health --cwd . --mode full
 ```
 
 If the project has no `brain/brain_manifest.json`, initialize a minimal brain only when mutation is allowed:
 
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py init --cwd . --brain-id <project_id>
-```
-
-For existing brain workspaces, run a main-brain capsule before changing tracked files, launching studies, claiming evidence, or entering a child brain:
-
-```powershell
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<user task>" --workflow auto --intent <read|mutate|long_task|writeback> --json
 ```
 
 Use `preflight_blockers`, `mutation_allowed`, `routing`, `workflow_guide`, and `stop_conditions` as the operating contract. If mutation is blocked, stop and correct the blocker before editing tracked files.
@@ -38,11 +44,12 @@ Use `preflight_blockers`, `mutation_allowed`, `routing`, `workflow_guide`, and `
 When native skills are unavailable, use the repository brain platform directly:
 
 ```powershell
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<user task>" --workflow auto --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<user task>" --workflow auto --verbosity lite --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<user task>" --workflow auto --verbosity full --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow workflow-guide --workflow <selected_workflow> --json
 ```
 
-This fallback returns schema v2 capsule context, the selected workflow, checklist, stop conditions, validation commands, and writeback routes. It is procedural only; do not copy long project histories into this skill.
+The lightweight fallback returns schema v2 capsule context, the selected workflow, checklist, stop conditions, validation commands, and writeback routes. Use `--verbosity full` only for audit, promotion, active-artifact, training-evidence, or evidence-conflict deep dives.
 
 ## Runtime Contract
 
@@ -90,6 +97,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap
 Read or rebuild the evidence index:
 
 ```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow current-frontier --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow evidence-index --rebuild --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow query --q "<r-id/tag/dataset/blocker>" --json
 ```
