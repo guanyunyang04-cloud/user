@@ -274,6 +274,22 @@ def create_app() -> FastAPI:
             as_of_date = str(request.as_of_date or "").strip() or str(app_service.get_latest_completed_trading_date())
             universe = str(request.universe or "").strip() or "all_a"
             domains = [str(item).strip() for item in (request.domains or []) if str(item).strip()] or default_domains
+            current_data = app_service.data_sources_summary()
+            default_as_of = str(
+                current_data.get("data_platform", {})
+                .get("default_refresh", {})
+                .get("as_of_date", "")
+                or current_data.get("data_platform", {}).get("latest_completed_trading_date", "")
+                or as_of_date
+            )
+            requested_is_default = (
+                not str(request.start_date or "").strip()
+                and universe == "all_a"
+                and [item for item in domains] == default_domains
+                and str(as_of_date) == default_as_of
+            )
+            if requested_is_default and current_data.get("next_refresh_action") == "skip":
+                return JSONResponse(app_service.data_refresh_skip_payload(data_sources=current_data, as_of_date=as_of_date))
             args: list[str] = []
             if as_of_date:
                 args.extend(["--as-of-date", as_of_date])

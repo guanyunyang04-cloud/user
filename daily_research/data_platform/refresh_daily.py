@@ -146,6 +146,48 @@ def run_refresh(config: RefreshConfig, *, providers: Iterable[Any] | None = None
             universe_error_report=universe_result.error_report if universe_result is not None else [],
         )
         progress_write(f"resolved_symbols={len(request_symbols)}")
+        covering_bundle = _find_base_policy_input_bundle(
+            lake=lake,
+            config=resolved,
+            request_symbols=request_symbols,
+            min_trading_days=1,
+            allow_covering=True,
+        )
+        covering_end_date = ""
+        if covering_bundle is not None:
+            covering_end_date = str(
+                covering_bundle.get("end_date", "")
+                or dict(covering_bundle.get("parameters", {}) or {}).get("end_date", "")
+                or ""
+            )
+        if covering_end_date and pd.Timestamp(covering_end_date) >= pd.Timestamp(resolved.as_of_date):
+            with progress.stage("Write skipped manifest", f"already covers {resolved.as_of_date}"):
+                manifest_path = run_root / "refresh_manifest.json"
+                reused_dataset_id = str(covering_bundle.get("dataset_id", "") or "")
+                payload = {
+                    "status": "skipped",
+                    "refresh_run_id": refresh_run_id,
+                    "reason": "lake already covers requested as_of_date",
+                    "as_of_date": resolved.as_of_date,
+                    "request_start_date": next_business_date(covering_end_date),
+                    "domains": list(domains),
+                    "provider_chain": provider_chain,
+                    "reused_policy_input_dataset_id": reused_dataset_id,
+                    "reused_policy_input_dataset_end_date": pd.Timestamp(covering_end_date).strftime("%Y-%m-%d"),
+                    "registered_market_dataset_id": reused_dataset_id,
+                    "policy_input_dataset_id": reused_dataset_id,
+                }
+                _write_json(manifest_path, payload)
+            return RefreshResult(
+                status="skipped",
+                refresh_run_id=refresh_run_id,
+                manifest_path=str(manifest_path.resolve()),
+                bronze_paths={},
+                silver_market_path="",
+                conflict_report_path="",
+                registered_market_dataset_id=reused_dataset_id,
+                blockers=[],
+            )
         request_start = _resolve_incremental_start(lake, resolved, request_symbols=request_symbols, calendar=calendar_frame)
         if pd.Timestamp(request_start) > pd.Timestamp(resolved.as_of_date):
             with progress.stage("Write skipped manifest", f"already covers {resolved.as_of_date}"):
@@ -455,6 +497,7 @@ def _find_base_policy_input_bundle(
     config: RefreshConfig,
     request_symbols: tuple[str, ...],
     min_trading_days: int,
+    allow_covering: bool = False,
 ) -> dict[str, Any] | None:
     requested = {str(item).strip().upper() for item in request_symbols if str(item).strip()}
     benchmark = str(config.benchmark or "").strip().upper()
@@ -475,7 +518,7 @@ def _find_base_policy_input_bundle(
         end_date = str(metadata.get("end_date", "") or dict(metadata.get("parameters", {}) or {}).get("end_date", "") or "")
         if not end_date:
             continue
-        if pd.Timestamp(end_date) >= pd.Timestamp(config.as_of_date):
+        if not allow_covering and pd.Timestamp(end_date) >= pd.Timestamp(config.as_of_date):
             continue
         paths = dict(metadata.get("content_paths", {}) or {})
         market_path = str(paths.get("bronze_market_data", "") or "")

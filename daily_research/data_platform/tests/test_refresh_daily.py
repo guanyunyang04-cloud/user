@@ -251,6 +251,36 @@ class DataPlatformRefreshDailyTest(unittest.TestCase):
         self.assertEqual(last_request.start_date, "2026-01-07")
         self.assertEqual(last_request.end_date, "2026-01-07")
 
+    def test_refresh_skips_when_existing_bundle_already_covers_as_of_date(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            provider = InMemoryMarketProvider(
+                "eastmoney_efinance",
+                _market_frame(
+                    dates=["2026-01-05", "2026-01-06"],
+                    provider="eastmoney_efinance",
+                ),
+            )
+            config = RefreshConfig(
+                lake_root=Path(temp_dir),
+                as_of_date="2026-01-06",
+                start_date="2026-01-05",
+                symbols=("000001.SZ", "600000.SH", "000300.SH"),
+                benchmark="000300.SH",
+            )
+            first = run_refresh(config, providers=[provider])
+            self.assertEqual(first.status, "ok")
+            request_count_after_first = len(provider.requests)
+
+            second = run_refresh(config, providers=[provider])
+            manifest = json.loads(Path(second.manifest_path).read_text(encoding="utf-8"))
+
+        self.assertEqual(second.status, "skipped")
+        self.assertEqual(second.registered_market_dataset_id, first.registered_market_dataset_id)
+        self.assertEqual(manifest["reused_policy_input_dataset_id"], first.registered_market_dataset_id)
+        self.assertEqual(manifest["reused_policy_input_dataset_end_date"], "2026-01-06")
+        self.assertEqual(manifest["reason"], "lake already covers requested as_of_date")
+        self.assertEqual(len(provider.requests), request_count_after_first)
+
     def test_incremental_refresh_registers_extended_long_history_bundle(self) -> None:
         with TemporaryDirectory() as temp_dir:
             provider = InMemoryMarketProvider(

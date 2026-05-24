@@ -21,6 +21,8 @@ export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
   const [activeJobId, setActiveJobId] = useState("");
   const [jobDetail, setJobDetail] = useState<JobDetail | null>(null);
   const [jobError, setJobError] = useState("");
+  const refreshIsSkip = payload?.next_refresh_action === "skip";
+  const refreshButtonLabel = refreshIsSkip ? "已是最新" : "补齐到最新交易日";
 
   const load = (): void => {
     setLoading(true);
@@ -45,6 +47,10 @@ export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
   }, []);
 
   async function refresh(): Promise<void> {
+    if (refreshIsSkip) {
+      setJobMessage(payload?.refresh_explanation || "当前数据集已是最新。");
+      return;
+    }
     setJobMessage("");
     setJobDetail(null);
     setJobError("");
@@ -107,21 +113,32 @@ export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
       <div className="stat-grid">
         <Stat label="Lake Root" value={text(payload?.lake_root)} />
         <Stat label="Catalog" value={text(payload?.catalog_status)} />
-        <Stat label="Dataset 数" value={payload?.datasets.length || 0} />
-        <Stat label="最新 Refresh" value={text(payload?.data_platform.latest_refresh_run)} />
+        <Stat label="当前 End Date" value={text(payload?.active_dataset_end_date || payload?.latest_policy_input_dataset_end_date)} />
+        <Stat label="最新完成交易日" value={text(payload?.data_platform.latest_completed_trading_date)} />
         <Stat label="Active Dataset" value={text(payload?.active_dataset_id)} />
         <Stat label="同步状态" value={<StatusPill value={payload?.dataset_sync_status || "unknown"} />} />
+        <Stat label="刷新动作" value={<StatusPill value={payload?.next_refresh_action || "unknown"} />} />
       </div>
-      <Panel title="Dataset 同步">
+      <Panel title="当前数据集">
         <div className="key-list">
           <span>最新完成交易日</span>
           <strong>{text(payload?.data_platform.latest_completed_trading_date)}</strong>
           <span>Active Dataset</span>
           <strong>{text(payload?.active_dataset_id)}</strong>
+          <span>Active End Date</span>
+          <strong>{text(payload?.active_dataset_end_date)}</strong>
           <span>Latest Policy Input</span>
           <strong>{text(payload?.latest_policy_input_dataset_id)}</strong>
           <span>Latest End Date</span>
           <strong>{text(payload?.latest_policy_input_dataset_end_date)}</strong>
+          <span>当前状态</span>
+          <strong><StatusPill value={payload?.current_dataset_status || "unknown"} /></strong>
+          <span>是否最新</span>
+          <strong><StatusPill value={payload?.is_current_dataset_latest} /></strong>
+          <span>是否完整</span>
+          <strong><StatusPill value={payload?.is_current_dataset_complete} /></strong>
+          <span>刷新判断</span>
+          <strong>{text(payload?.refresh_explanation)}</strong>
           <span>Refresh Manifest</span>
           <strong>{text(payload?.data_platform.latest_refresh_manifest_path)}</strong>
           <span>Refresh Status</span>
@@ -152,7 +169,10 @@ export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
             <input value={domains} onChange={(event) => setDomains(event.target.value)} />
           </Field>
         </div>
-        <button className="primary" onClick={refresh}>刷新数据</button>
+        <button className="primary" onClick={refresh} disabled={refreshIsSkip} aria-label={refreshButtonLabel}>
+          <RefreshCw size={16} />
+          {refreshButtonLabel}
+        </button>
         {jobMessage ? <p className="inline-message">{jobMessage}</p> : null}
       </Panel>
       {activeJobId ? (
@@ -196,13 +216,14 @@ export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
           )}
         </Panel>
       ) : null}
-      <Panel title="Lake Datasets">
+      <details className="panel">
+        <summary>历史 Lake Datasets</summary>
         <DataTable
           rows={(payload?.datasets || []).map((row) => ({ ...row }))}
           preferredColumns={["dataset_id", "dataset_kind", "domain", "zone", "status", "start_date", "end_date", "created_at"]}
           emptyText="暂无 dataset"
         />
-      </Panel>
+      </details>
     </div>
   );
 }

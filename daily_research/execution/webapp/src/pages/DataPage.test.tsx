@@ -54,7 +54,7 @@ describe("DataPage", () => {
     expect(await screen.findByLabelText("As-of 日期")).toHaveValue("2026-05-22");
     expect(screen.getByLabelText("Domains")).toHaveValue(recommendedDomains.join(","));
 
-    await user.click(screen.getByRole("button", { name: "刷新数据" }));
+    await user.click(screen.getByRole("button", { name: "补齐到最新交易日" }));
 
     await waitFor(() => {
       expect(api.refreshDataSources).toHaveBeenCalledWith({
@@ -66,5 +66,64 @@ describe("DataPage", () => {
       });
     });
     expect(await screen.findByText("DataRefresh 4/8 Fetch provider domains")).toBeInTheDocument();
+  });
+
+  it("shows the current dataset as latest and does not submit a duplicate refresh", async () => {
+    const user = userEvent.setup();
+    const api = {
+      getDataSources: vi.fn().mockResolvedValue({
+        status: "ok",
+        lake_root: "H:/quant_project/daily_research/output/research_data_lake",
+        catalog_status: "ok",
+        datasets: [
+          {
+            dataset_id: "policy_input_bundle__current",
+            dataset_kind: "policy_input_bundle",
+            domain: "",
+            zone: "",
+            status: "stored",
+            start_date: "2024-01-01",
+            end_date: "2026-05-22",
+            created_at: "2026-05-24T00:00:00"
+          }
+        ],
+        active_dataset_id: "policy_input_bundle__current",
+        latest_policy_input_dataset_id: "policy_input_bundle__current",
+        latest_policy_input_dataset_end_date: "2026-05-22",
+        dataset_sync_status: "synced",
+        current_dataset_status: "latest_complete",
+        is_current_dataset_latest: true,
+        is_current_dataset_complete: true,
+        next_refresh_action: "skip",
+        refresh_explanation: "当前 active dataset 已覆盖最新完成交易日 2026-05-22。",
+        data_platform: {
+          runs_root: "runs",
+          latest_refresh_run: "",
+          provider_plan: "baostock_only",
+          latest_completed_trading_date: "2026-05-22",
+          recommended_domains: recommendedDomains,
+          default_refresh: {
+            as_of_date: "2026-05-22",
+            universe: "all_a",
+            domains: recommendedDomains,
+            provider_plan: "baostock_only"
+          }
+        }
+      }),
+      refreshDataSources: vi.fn()
+    } as unknown as ExecutionApi;
+
+    render(<DataPage api={api} />);
+
+    expect(await screen.findByText("当前数据集")).toBeInTheDocument();
+    expect(screen.getAllByText("policy_input_bundle__current").length).toBeGreaterThan(0);
+    expect(screen.getByText("当前 active dataset 已覆盖最新完成交易日 2026-05-22。")).toBeInTheDocument();
+    const button = screen.getByRole("button", { name: "已是最新" });
+    expect(button).toBeDisabled();
+
+    await user.click(button);
+
+    expect(api.refreshDataSources).not.toHaveBeenCalled();
+    expect(screen.getByText("历史 Lake Datasets")).toBeInTheDocument();
   });
 });

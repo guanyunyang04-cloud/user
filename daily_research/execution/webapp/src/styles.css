@@ -182,6 +182,16 @@ pre {
   padding: 14px;
 }
 
+details.panel summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+details.panel[open] summary {
+  margin-bottom: 12px;
+}
+
 .panel-title {
   display: flex;
   justify-content: space-between;

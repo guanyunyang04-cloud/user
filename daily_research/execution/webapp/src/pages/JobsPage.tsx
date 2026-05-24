@@ -18,6 +18,7 @@ function objectRows(payload: Record<string, string> | undefined): Array<{ key: s
 
 export function JobsPage({ api, pollMs = 5000, selectedJobId = "" }: JobsPageProps): JSX.Element {
   const [jobs, setJobs] = useState<JobSummary[]>([]);
+  const [selectedId, setSelectedId] = useState(selectedJobId);
   const [jobDetail, setJobDetail] = useState<JobDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -35,11 +36,16 @@ export function JobsPage({ api, pollMs = 5000, selectedJobId = "" }: JobsPagePro
       .finally(() => setLoading(false));
   };
 
-  const loadDetail = (jobId: string): Promise<void> => {
+  const loadDetail = (jobId: string, updateUrl = true): Promise<void> => {
     if (!jobId) {
+      setSelectedId("");
       setJobDetail(null);
       setDetailError("");
       return Promise.resolve();
+    }
+    setSelectedId(jobId);
+    if (updateUrl && window.location.pathname !== `/jobs/${encodeURIComponent(jobId)}`) {
+      window.history.pushState(null, "", `/jobs/${encodeURIComponent(jobId)}`);
     }
     setDetailLoading(true);
     return api
@@ -73,7 +79,12 @@ export function JobsPage({ api, pollMs = 5000, selectedJobId = "" }: JobsPagePro
 
   useEffect(() => {
     let disposed = false;
-    if (!selectedJobId) {
+    setSelectedId(selectedJobId);
+  }, [selectedJobId]);
+
+  useEffect(() => {
+    let disposed = false;
+    if (!selectedId) {
       setJobDetail(null);
       setDetailError("");
       return () => {
@@ -82,7 +93,7 @@ export function JobsPage({ api, pollMs = 5000, selectedJobId = "" }: JobsPagePro
     }
     setDetailLoading(true);
     api
-      .getJob(selectedJobId, 200)
+      .getJob(selectedId, 200)
       .then((next) => {
         if (!disposed) {
           setJobDetail(next);
@@ -102,14 +113,14 @@ export function JobsPage({ api, pollMs = 5000, selectedJobId = "" }: JobsPagePro
     return () => {
       disposed = true;
     };
-  }, [api, selectedJobId]);
+  }, [api, selectedId]);
 
   return (
     <div>
       <PageHeader title="作业" eyebrow="任务历史、状态轮询与恢复入口" actions={<button onClick={load}><RotateCcw size={16} />刷新</button>} />
       {loading ? <LoadingState /> : null}
       {error ? <ErrorState message={error} /> : null}
-      {selectedJobId ? (
+      {selectedId ? (
         <Panel title="作业详情">
           {detailLoading ? <LoadingState label="加载作业详情" /> : null}
           {detailError ? <ErrorState message={detailError} /> : null}
@@ -161,7 +172,7 @@ export function JobsPage({ api, pollMs = 5000, selectedJobId = "" }: JobsPagePro
                 </div>
               </div>
               {jobDetail.can_resume ? (
-                <button onClick={() => api.resumeJob(jobDetail.job_id)}>重跑/恢复</button>
+                <button onClick={() => api.resumeJob(jobDetail.job_id)}>重跑/恢复 {jobDetail.job_id}</button>
               ) : null}
             </div>
           ) : null}
@@ -179,7 +190,7 @@ export function JobsPage({ api, pollMs = 5000, selectedJobId = "" }: JobsPagePro
               <span>{job.created_at || job.started_at || ""}</span>
               <button onClick={() => loadDetail(job.job_id)}>查看</button>
               {["failed", "blocked", "succeeded"].includes(job.status) ? (
-                <button onClick={() => api.resumeJob(job.job_id)}>重跑/恢复</button>
+                <button onClick={() => api.resumeJob(job.job_id)}>重跑/恢复 {job.job_id}</button>
               ) : null}
             </div>
           ))}

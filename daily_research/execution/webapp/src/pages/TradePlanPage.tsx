@@ -1,13 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import { Play, RefreshCw } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import type { ExecutionApi, JobDetail, TradePlanPayload } from "../types";
+import type { ExecutionApi, JobDetail, JsonObject, TradePlanPayload } from "../types";
 import { DataTable, EmptyState, ErrorState, Field, LoadingState, PageHeader, Panel, Stat, StatusPill } from "../components";
 import { numberValue, pick, text } from "../format";
 
 interface TradePlanPageProps {
   api: ExecutionApi;
   pollMs?: number;
+}
+
+function field(payload: JsonObject, key: string): string | number | boolean | null | undefined {
+  const value = payload[key];
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean" || value === null || value === undefined) {
+    return value;
+  }
+  return JSON.stringify(value);
 }
 
 export function TradePlanPage({ api, pollMs = 3000 }: TradePlanPageProps): JSX.Element {
@@ -101,7 +109,9 @@ export function TradePlanPage({ api, pollMs = 3000 }: TradePlanPageProps): JSX.E
   }, [api, activeJobId, pollMs]);
 
   const summary = payload?.summary || {};
+  const diagnostics = payload?.diagnostics || {};
   const missing = payload?.status === "missing" || payload?.exists === false;
+  const noActionPlan = Boolean(payload && !missing && payload.status === "ok" && (payload.actions || []).length === 0);
 
   return (
     <div>
@@ -161,12 +171,39 @@ export function TradePlanPage({ api, pollMs = 3000 }: TradePlanPageProps): JSX.E
 
       <div className="stat-grid">
         <Stat label="信号日" value={text(summary.signal_date)} />
+        <Stat label="市场状态" value={text(field(diagnostics, "regime_state"))} />
+        <Stat label="市场过滤" value={text(field(diagnostics, "market_filter_text"))} />
         <Stat label="输入现金" value={text(summary.cash_input)} />
         <Stat label="计划后现金" value={text(summary.estimated_cash_after_plan)} />
         <Stat label="动作数" value={payload?.actions.length || 0} />
-        <Stat label="模型训练时间" value={text(payload?.model_info?.trained_at)} />
-        <Stat label="交易日间隔" value={text(payload?.model_info?.trading_day_lag)} />
       </div>
+
+      {noActionPlan ? (
+        <Panel title="无动作计划">
+          <div className="key-list">
+            <span>原因</span>
+            <strong>{text(field(diagnostics, "empty_plan_reason"), "当前计划无交易动作")}</strong>
+            <span>目标仓位数</span>
+            <strong>{text(field(diagnostics, "target_position_count"))}</strong>
+            <span>可执行目标数</span>
+            <strong>{text(field(diagnostics, "actionable_target_position_count"))}</strong>
+            <span>候选总行数</span>
+            <strong>{text(field(diagnostics, "candidate_total_rows"))}</strong>
+            <span>候选可用行数</span>
+            <strong>{text(field(diagnostics, "candidate_usable_rows"))}</strong>
+            <span>候选丢弃行数</span>
+            <strong>{text(field(diagnostics, "candidate_dropped_rows"))}</strong>
+            <span>买入过滤数</span>
+            <strong>{text(field(diagnostics, "blocked_buy_candidate_count"))}</strong>
+            <span>Score Context</span>
+            <strong>{text(field(diagnostics, "score_context_status"))}</strong>
+            <span>市场状态</span>
+            <strong>{text(field(diagnostics, "regime_state"))}</strong>
+            <span>市场过滤</span>
+            <strong>{text(field(diagnostics, "market_filter_text"))}</strong>
+          </div>
+        </Panel>
+      ) : null}
 
       <div className="two-column">
         <Panel title="目标权重对比">

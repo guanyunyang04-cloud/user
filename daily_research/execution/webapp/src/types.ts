@@ -57,9 +57,15 @@ export interface DataSourcesPayload {
   catalog_status: string;
   datasets: DataSourceRow[];
   active_dataset_id?: string;
+  active_dataset_end_date?: string;
   latest_policy_input_dataset_id?: string;
   latest_policy_input_dataset_end_date?: string;
   dataset_sync_status?: string;
+  current_dataset_status?: string;
+  is_current_dataset_latest?: boolean;
+  is_current_dataset_complete?: boolean;
+  next_refresh_action?: "skip" | "refresh" | string;
+  refresh_explanation?: string;
   data_platform: {
     runs_root: string;
     latest_refresh_run: string;
@@ -100,6 +106,7 @@ export interface TradePlanPayload {
   holdings: TableRow[];
   watchlist: TableRow[];
   model_info: JsonObject;
+  diagnostics?: JsonObject;
   txt_preview: string[];
   artifact_paths: Record<string, string>;
 }

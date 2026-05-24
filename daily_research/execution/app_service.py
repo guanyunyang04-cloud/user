@@ -111,6 +111,34 @@ def _file_mtime_text(path: Path) -> str:
     return datetime.fromtimestamp(path.stat().st_mtime).astimezone().isoformat(timespec="seconds")
 
 
+def _normalize_date_text(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        import pandas as pd
+
+        parsed = pd.to_datetime(raw, errors="coerce")
+        if pd.isna(parsed):
+            return raw
+        return parsed.strftime("%Y-%m-%d")
+    except Exception:
+        return raw[:10]
+
+
+def _date_covers(left: Any, right: Any) -> bool:
+    left_text = _normalize_date_text(left)
+    right_text = _normalize_date_text(right)
+    if not left_text or not right_text:
+        return False
+    try:
+        import pandas as pd
+
+        return bool(pd.Timestamp(left_text) >= pd.Timestamp(right_text))
+    except Exception:
+        return left_text >= right_text
+
+
 def _clean_csv_cell(value: Any) -> str:
     return str(value or "").strip()
 
@@ -320,6 +348,86 @@ def _normalize_trade_plan_model_info(summary: dict[str, Any]) -> dict[str, Any]:
     return model_info
 
 
+def _trade_plan_diagnostics(
+    *,
+    summary: dict[str, Any],
+    actions: list[dict[str, str]],
+    holdings: list[dict[str, str]],
+    watchlist: list[dict[str, str]],
+    txt_preview: list[str],
+) -> dict[str, Any]:
+    def pick_number(key: str) -> int | float | str:
+        value = summary.get(key)
+        if value in {None, ""}:
+            return 0
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return str(value)
+        return int(numeric) if numeric.is_integer() else numeric
+
+    joined_text = "\n".join(str(line) for line in txt_preview)
+    score_context_status = str(summary.get("score_context_status", "") or "").strip()
+    if not score_context_status:
+        lowered = joined_text.lower()
+        if "external score context fallback" in lowered and "no usable rows" in lowered:
+            score_context_status = "fallback_no_signal_rows"
+        elif joined_text:
+            score_context_status = "ok"
+        else:
+            score_context_status = "unknown"
+
+    regime_state = str(summary.get("regime_state", "") or summary.get("market_regime_state", "") or "").strip()
+    if not regime_state:
+        for line in txt_preview:
+            text_line = str(line)
+            if "市场状态" in text_line and ":" in text_line:
+                regime_state = text_line.split(":", 1)[1].strip()
+                break
+
+    market_filter_text = str(summary.get("market_filter_text", "") or summary.get("market_filter_status", "") or "").strip()
+    if not market_filter_text:
+        for line in txt_preview:
+            text_line = str(line)
+            if "市场过滤" in text_line and ":" in text_line:
+                market_filter_text = text_line.split(":", 1)[1].strip()
+                break
+    if not market_filter_text and summary.get("market_regime_filter_enabled") is False:
+        market_filter_text = "不拦截"
+
+    reason = str(summary.get("empty_plan_reason", "") or "").strip()
+    if not actions and not reason:
+        parts: list[str] = []
+        if not holdings and int(float(summary.get("current_position_count", 0) or 0)) == 0:
+            parts.append("无当前持仓")
+        if int(float(summary.get("target_position_count", 0) or 0)) == 0:
+            parts.append("目标仓位数为 0")
+        if int(float(summary.get("actionable_target_position_count", 0) or 0)) == 0:
+            parts.append("无可执行目标")
+        if score_context_status == "fallback_no_signal_rows" or "no usable rows" in joined_text.lower():
+            parts.append("score panel 对信号日无可用行")
+        blocked = int(float(summary.get("blocked_buy_candidate_count", 0) or 0))
+        if blocked:
+            parts.append(f"{blocked} 个买入候选被过滤")
+        reason = "；".join(dict.fromkeys(parts)) or "当前计划无交易动作"
+
+    return {
+        "target_position_count": pick_number("target_position_count"),
+        "actionable_target_position_count": pick_number("actionable_target_position_count"),
+        "candidate_total_rows": pick_number("candidate_total_rows"),
+        "candidate_usable_rows": pick_number("candidate_usable_rows"),
+        "candidate_dropped_rows": pick_number("candidate_dropped_rows"),
+        "blocked_buy_candidate_count": pick_number("blocked_buy_candidate_count"),
+        "score_context_status": score_context_status,
+        "empty_plan_reason": reason,
+        "regime_state": regime_state,
+        "market_filter_text": market_filter_text,
+        "action_count": len(actions),
+        "holding_count": len(holdings),
+        "watchlist_count": len(watchlist),
+    }
+
+
 def latest_trade_plan_summary(
     *,
     max_lines: int = 80,
@@ -342,15 +450,26 @@ def latest_trade_plan_summary(
     lines = tail_file(txt_path, lines=max_lines) if txt_path.exists() else []
     summary = _read_json(summary_path) if summary_path is not None and summary_path.exists() else {}
     model_info = _normalize_trade_plan_model_info(summary)
+    actions = _read_csv_preview(actions_path, limit=200) if actions_path and actions_path.exists() else []
+    holdings = _read_csv_preview(holdings_path, limit=300) if holdings_path and holdings_path.exists() else []
+    watchlist = _read_csv_preview(watchlist_path, limit=200) if watchlist_path and watchlist_path.exists() else []
+    diagnostics = _trade_plan_diagnostics(
+        summary=summary,
+        actions=actions,
+        holdings=holdings,
+        watchlist=watchlist,
+        txt_preview=lines,
+    )
     return {
         "path": str(txt_path.resolve()),
         "exists": txt_path.exists(),
         "status": "ok" if txt_path.exists() or run_dir is not None else "missing",
         "summary": summary,
-        "actions": _read_csv_preview(actions_path, limit=200) if actions_path and actions_path.exists() else [],
-        "holdings": _read_csv_preview(holdings_path, limit=300) if holdings_path and holdings_path.exists() else [],
-        "watchlist": _read_csv_preview(watchlist_path, limit=200) if watchlist_path and watchlist_path.exists() else [],
+        "actions": actions,
+        "holdings": holdings,
+        "watchlist": watchlist,
         "model_info": model_info,
+        "diagnostics": diagnostics,
         "txt_preview": lines,
         "preview_lines": lines,
         "line_count": len(lines),
@@ -542,6 +661,8 @@ def data_sources_summary(*, dataset_limit: int = 60) -> dict[str, Any]:
     active = active_manifest_summary()
     active_dataset_id = str(active.get("lake_dataset_id", "") or active.get("source_market_dataset_id", "") or "")
     latest_policy_input_dataset_id = str(latest_policy_input.get("dataset_id", "") or "")
+    latest_policy_input_end_date = _normalize_date_text(latest_policy_input.get("end_date", ""))
+    active_dataset_end_date = _normalize_date_text(active.get("lake_dataset_end_date", "") or latest_policy_input_end_date)
     if not active_dataset_id or not latest_policy_input_dataset_id:
         dataset_sync_status = "unknown"
     elif active_dataset_id == latest_policy_input_dataset_id:
@@ -552,6 +673,31 @@ def data_sources_summary(*, dataset_limit: int = 60) -> dict[str, Any]:
         latest_completed = str(get_latest_completed_trading_date())
     except Exception:
         latest_completed = ""
+    latest_completed_date = _normalize_date_text(latest_completed)
+    is_synced = dataset_sync_status == "synced"
+    is_current_dataset_complete = bool(active_dataset_id and latest_completed_date and _date_covers(active_dataset_end_date, latest_completed_date))
+    is_current_dataset_latest = bool(is_synced and latest_policy_input_dataset_id and latest_completed_date and _date_covers(latest_policy_input_end_date, latest_completed_date))
+    latest_manifest_status = str(latest_manifest.get("status", "") or "")
+    if is_current_dataset_latest and is_current_dataset_complete:
+        current_dataset_status = "latest_complete"
+        next_refresh_action = "skip"
+        refresh_explanation = f"当前 active dataset 已覆盖最新完成交易日 {latest_completed_date}。"
+    elif not active_dataset_id:
+        current_dataset_status = "missing_active_dataset"
+        next_refresh_action = "refresh"
+        refresh_explanation = "当前 active manifest 未接入 policy_input_bundle，需要刷新并同步数据集。"
+    elif not is_synced:
+        current_dataset_status = "stale_active_dataset"
+        next_refresh_action = "refresh"
+        refresh_explanation = "当前 active dataset 不是最新 policy_input_bundle，需要同步到最新完整数据。"
+    elif not is_current_dataset_complete:
+        current_dataset_status = "incomplete"
+        next_refresh_action = "refresh"
+        refresh_explanation = f"当前 active dataset 只覆盖到 {active_dataset_end_date or '未知'}，需要补齐到 {latest_completed_date or '最新完成交易日'}。"
+    else:
+        current_dataset_status = "unknown"
+        next_refresh_action = "refresh"
+        refresh_explanation = "无法确认当前数据集是否完整，建议执行刷新。"
     recommended_domains = list(FORMAL_DATA_PLATFORM_DOMAINS)
     return {
         "status": "ok",
@@ -560,13 +706,19 @@ def data_sources_summary(*, dataset_limit: int = 60) -> dict[str, Any]:
         "datasets": datasets,
         "active_dataset_id": active_dataset_id,
         "latest_policy_input_dataset_id": latest_policy_input_dataset_id,
-        "latest_policy_input_dataset_end_date": str(latest_policy_input.get("end_date", "") or ""),
+        "latest_policy_input_dataset_end_date": latest_policy_input_end_date,
+        "active_dataset_end_date": active_dataset_end_date,
         "dataset_sync_status": dataset_sync_status,
+        "current_dataset_status": current_dataset_status,
+        "is_current_dataset_latest": is_current_dataset_latest,
+        "is_current_dataset_complete": is_current_dataset_complete,
+        "next_refresh_action": next_refresh_action,
+        "refresh_explanation": refresh_explanation,
         "data_platform": {
             "runs_root": str(platform_runs.resolve()),
             "latest_refresh_run": latest_refresh,
             "latest_refresh_manifest_path": latest_manifest_path,
-            "latest_refresh_manifest_status": str(latest_manifest.get("status", "") or ""),
+            "latest_refresh_manifest_status": latest_manifest_status,
             "latest_refresh_registered_dataset_id": str(
                 latest_manifest.get("registered_market_dataset_id", "")
                 or latest_manifest.get("policy_input_dataset_id", "")
@@ -582,6 +734,42 @@ def data_sources_summary(*, dataset_limit: int = 60) -> dict[str, Any]:
                 "domains": recommended_domains,
                 "provider_plan": FORMAL_DATA_PLATFORM_PROVIDER_PLAN,
             },
+        },
+    }
+
+
+def data_refresh_skip_payload(*, data_sources: dict[str, Any], as_of_date: str = "") -> dict[str, Any]:
+    dataset_id = str(data_sources.get("active_dataset_id", "") or data_sources.get("latest_policy_input_dataset_id", "") or "")
+    latest_completed = _normalize_date_text(
+        as_of_date
+        or _safe_nested(data_sources, "data_platform", "latest_completed_trading_date")
+        or _safe_nested(data_sources, "data_platform", "default_refresh", "as_of_date")
+    )
+    explanation = str(data_sources.get("refresh_explanation", "") or "")
+    job_id = f"data-platform-refresh_skipped_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    summary_note = explanation or f"当前 active dataset 已覆盖最新完成交易日 {latest_completed}。"
+    return {
+        "job_id": job_id,
+        "task_name": "data-platform-refresh",
+        "status": "skipped",
+        "business_status": "synced",
+        "runner_status": "ok",
+        "artifact_status": "not_applicable",
+        "dataset_id": dataset_id,
+        "active_dataset_id": dataset_id,
+        "latest_completed_trading_date": latest_completed,
+        "summary_note": summary_note,
+        "refresh_explanation": explanation,
+        "metadata": {
+            "job_id": job_id,
+            "task_name": "data-platform-refresh",
+            "status": "skipped",
+            "business_status": "synced",
+            "runner_status": "ok",
+            "artifact_status": "not_applicable",
+            "active_dataset_id": dataset_id,
+            "latest_completed_trading_date": latest_completed,
+            "summary_note": summary_note,
         },
     }
 

@@ -1,4 +1,5 @@
 import { act, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { JobsPage } from "./JobsPage";
 import type { ExecutionApi } from "../types";
@@ -53,6 +54,40 @@ describe("JobsPage", () => {
     expect(await screen.findByText("stdout line")).toBeInTheDocument();
     expect(await screen.findByText("stderr line")).toBeInTheDocument();
     expect(api.getJob).toHaveBeenCalledWith("job1", 200);
+  });
+
+  it("opens job detail from the jobs list and updates the URL", async () => {
+    const user = userEvent.setup();
+    window.history.pushState(null, "", "/jobs");
+    const api = {
+      getJobs: vi.fn().mockResolvedValue([{ job_id: "job2", task_name: "data-platform-refresh", status: "succeeded" }]),
+      getJob: vi.fn().mockResolvedValue({
+        job_id: "job2",
+        task_name: "data-platform-refresh",
+        status: "succeeded",
+        metadata: {
+          job_id: "job2",
+          task_name: "data-platform-refresh",
+          status: "succeeded",
+          command_argv: ["python", "refresh.py"]
+        },
+        stdout_tail: ["refresh stdout"],
+        stderr_tail: ["refresh stderr"],
+        can_resume: true
+      }),
+      resumeJob: vi.fn()
+    } as unknown as ExecutionApi;
+
+    render(<JobsPage api={api} pollMs={100000} />);
+
+    await user.click(await screen.findByRole("button", { name: "查看" }));
+
+    expect(await screen.findByText("作业详情")).toBeInTheDocument();
+    expect(screen.getByText("refresh stdout")).toBeInTheDocument();
+    expect(screen.getByText("refresh stderr")).toBeInTheDocument();
+    expect(api.getJob).toHaveBeenCalledWith("job2", 200);
+    expect(window.location.pathname).toBe("/jobs/job2");
+    expect(screen.getAllByRole("button", { name: "重跑/恢复 job2" }).length).toBeGreaterThan(0);
   });
 
   it("shows business and runner status separately when a job was reconciled", async () => {

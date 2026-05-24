@@ -144,6 +144,86 @@ def test_data_sources_payload_exposes_default_refresh_contract(monkeypatch: pyte
     }
 
 
+def test_data_sources_payload_marks_current_dataset_latest(monkeypatch: pytest.MonkeyPatch) -> None:
+    from daily_research.execution import app_service
+
+    monkeypatch.setattr(app_service, "get_latest_completed_trading_date", lambda: "2026-05-22", raising=False)
+    monkeypatch.setattr(
+        app_service,
+        "_latest_policy_input_lake_dataset",
+        lambda lake_root=None: {
+            "dataset_id": "policy_input_bundle__current",
+            "start_date": "2024-01-01",
+            "end_date": "2026-05-22",
+            "created_at": "2026-05-24T00:00:00",
+            "status": "stored",
+        },
+    )
+    monkeypatch.setattr(
+        app_service,
+        "active_manifest_summary",
+        lambda: {
+            "lake_dataset_id": "policy_input_bundle__current",
+            "source_market_dataset_id": "policy_input_bundle__current",
+        },
+    )
+    monkeypatch.setattr(app_service, "_latest_refresh_manifest_path", lambda: "", raising=False)
+
+    payload = app_service.data_sources_summary()
+
+    assert payload["current_dataset_status"] == "latest_complete"
+    assert payload["is_current_dataset_latest"] is True
+    assert payload["is_current_dataset_complete"] is True
+    assert payload["next_refresh_action"] == "skip"
+    assert "2026-05-22" in payload["refresh_explanation"]
+
+
+def test_data_refresh_api_skips_when_current_dataset_is_latest(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from daily_research.execution import web_server
+
+    def fail_launch_task_async(**kwargs):
+        raise AssertionError("latest complete dataset must not launch a real refresh task")
+
+    monkeypatch.setattr(
+        web_server.app_service,
+        "data_sources_summary",
+        lambda: {
+            "status": "ok",
+            "active_dataset_id": "policy_input_bundle__current",
+            "latest_policy_input_dataset_id": "policy_input_bundle__current",
+            "latest_policy_input_dataset_end_date": "2026-05-22",
+            "dataset_sync_status": "synced",
+            "is_current_dataset_latest": True,
+            "is_current_dataset_complete": True,
+            "next_refresh_action": "skip",
+            "refresh_explanation": "当前 active dataset 已覆盖最新完成交易日 2026-05-22。",
+            "data_platform": {
+                "latest_completed_trading_date": "2026-05-22",
+                "recommended_domains": FORMAL_REFRESH_DOMAINS,
+                "default_refresh": {
+                    "as_of_date": "2026-05-22",
+                    "universe": "all_a",
+                    "domains": FORMAL_REFRESH_DOMAINS,
+                    "provider_plan": "baostock_only",
+                },
+            },
+        },
+    )
+    monkeypatch.setattr(web_server.app_service, "launch_task_async", fail_launch_task_async)
+
+    client = TestClient(web_server.create_app())
+    response = client.post("/api/data-sources/refresh", json={})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "skipped"
+    assert payload["business_status"] == "synced"
+    assert payload["dataset_id"] == "policy_input_bundle__current"
+    assert "2026-05-22" in payload["summary_note"]
+
+
 def test_data_refresh_api_defaults_to_completed_date_and_formal_domains(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi.testclient import TestClient
 
@@ -156,6 +236,23 @@ def test_data_refresh_api_defaults_to_completed_date_and_formal_domains(monkeypa
         return {"job_id": "job1", "task_name": kwargs["task_name"], "status": "queued"}
 
     monkeypatch.setattr(web_server.app_service, "get_latest_completed_trading_date", lambda: "2026-05-22", raising=False)
+    monkeypatch.setattr(
+        web_server.app_service,
+        "data_sources_summary",
+        lambda: {
+            "status": "ok",
+            "next_refresh_action": "refresh",
+            "data_platform": {
+                "latest_completed_trading_date": "2026-05-22",
+                "default_refresh": {
+                    "as_of_date": "2026-05-22",
+                    "universe": "all_a",
+                    "domains": FORMAL_REFRESH_DOMAINS,
+                    "provider_plan": "baostock_only",
+                },
+            },
+        },
+    )
     monkeypatch.setattr(web_server.app_service, "launch_task_async", fake_launch_task_async)
 
     client = TestClient(web_server.create_app())
@@ -187,6 +284,23 @@ def test_data_refresh_api_ignores_timeout_override(monkeypatch: pytest.MonkeyPat
         return {"job_id": "job1", "task_name": kwargs["task_name"], "status": "queued"}
 
     monkeypatch.setattr(web_server.app_service, "get_latest_completed_trading_date", lambda: "2026-05-22", raising=False)
+    monkeypatch.setattr(
+        web_server.app_service,
+        "data_sources_summary",
+        lambda: {
+            "status": "ok",
+            "next_refresh_action": "refresh",
+            "data_platform": {
+                "latest_completed_trading_date": "2026-05-22",
+                "default_refresh": {
+                    "as_of_date": "2026-05-22",
+                    "universe": "all_a",
+                    "domains": FORMAL_REFRESH_DOMAINS,
+                    "provider_plan": "baostock_only",
+                },
+            },
+        },
+    )
     monkeypatch.setattr(web_server.app_service, "launch_task_async", fake_launch_task_async)
 
     client = TestClient(web_server.create_app())
@@ -195,6 +309,57 @@ def test_data_refresh_api_ignores_timeout_override(monkeypatch: pytest.MonkeyPat
     assert response.status_code == 200
     assert "--timeout-seconds" not in captured["passthrough_args"]
     assert "1" not in captured["passthrough_args"]
+
+
+def test_trade_plan_summary_explains_empty_structured_plan(tmp_path: Path) -> None:
+    from daily_research.execution import app_service
+
+    output_dir = tmp_path / "execution" / "output"
+    run_dir = output_dir / "20260522"
+    run_dir.mkdir(parents=True)
+    (output_dir / "latest_trade_plan.txt").write_text(
+        "市场状态: trend_up_low_vol\n"
+        "市场过滤: 关闭 | 当前市场状态仅展示，不拦截开仓\n"
+        "external score context fallback: no usable rows for signal date\n",
+        encoding="utf-8",
+    )
+    (run_dir / "daily_trade_plan.txt").write_text("run text\n", encoding="utf-8")
+    (run_dir / "plan_summary.json").write_text(
+        json.dumps(
+            {
+                "signal_date": "2026-05-22",
+                "current_position_count": 0,
+                "target_position_count": 0,
+                "actionable_target_position_count": 0,
+                "candidate_total_rows": 2249,
+                "candidate_usable_rows": 471,
+                "candidate_dropped_rows": 1778,
+                "blocked_buy_candidate_count": 0,
+                "regime_state": "trend_up_low_vol",
+                "market_filter_text": "关闭 | 当前市场状态仅展示，不拦截开仓",
+                "score_context_status": "fallback_no_signal_rows",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "actions_today.csv").write_text("stock,action,target_weight\n", encoding="utf-8-sig")
+    (run_dir / "holdings_snapshot.csv").write_text("stock,current_weight,target_weight\n", encoding="utf-8-sig")
+    (run_dir / "watchlist.csv").write_text("stock,score\n", encoding="utf-8-sig")
+
+    payload = app_service.latest_trade_plan_summary(output_dir=output_dir)
+
+    assert payload["status"] == "ok"
+    assert payload["actions"] == []
+    assert payload["watchlist"] == []
+    assert payload["diagnostics"]["regime_state"] == "trend_up_low_vol"
+    assert payload["diagnostics"]["market_filter_text"] == "关闭 | 当前市场状态仅展示，不拦截开仓"
+    assert payload["diagnostics"]["candidate_total_rows"] == 2249
+    assert payload["diagnostics"]["candidate_usable_rows"] == 471
+    assert payload["diagnostics"]["candidate_dropped_rows"] == 1778
+    assert "无当前持仓" in payload["diagnostics"]["empty_plan_reason"]
+    assert "无可执行目标" in payload["diagnostics"]["empty_plan_reason"]
+    assert "score panel" in payload["diagnostics"]["empty_plan_reason"]
 
 
 def test_latest_policy_input_dataset_prefers_newest_end_date_then_creation() -> None:
