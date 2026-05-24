@@ -92,6 +92,19 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
             {match["id"] for match in payload["matches"]},
         )
 
+    def test_adapter_indexes_mh_target_function_study_tags(self) -> None:
+        text = """
+        - `mh_short_utility_1_3_5d_v1`
+        - `mh_mid_utility_5_10_20d_v1`
+        - `mh_long_utility_15_20_30d_v1`
+        """
+
+        tags = daily_research_evidence.study_tags(text)
+
+        self.assertIn("mh_short_utility_1_3_5d_v1", tags)
+        self.assertIn("mh_mid_utility_5_10_20d_v1", tags)
+        self.assertIn("mh_long_utility_15_20_30d_v1", tags)
+
     def test_adapter_indexes_path_policy_reference_names(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "path_policy_execution_issue_learning_20260523.md"

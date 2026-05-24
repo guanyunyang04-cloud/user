@@ -15,7 +15,9 @@ REFERENCE_FILE_PATTERNS = (
     re.compile(r"^execution_.+\.md$"),
     re.compile(r"^(brain_native|brain_system|api_agent)_.+\.md$"),
 )
-STUDY_TAG_PATTERN = re.compile(r"\b(?:self_opt_study|protocol|path20|alpha_path20|mh_utility|alpha_multi_horizon)_[A-Za-z0-9_]+")
+STUDY_TAG_PATTERN = re.compile(
+    r"\b(?:self_opt_study|protocol|path20|alpha_path20|mh_utility|mh_short|mh_mid|mh_long|alpha_multi_horizon)_[A-Za-z0-9_]+"
+)
 
 
 def is_reference_file(path: Path) -> bool:
