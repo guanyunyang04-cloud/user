@@ -193,7 +193,10 @@ def build_task_capsule(
     context_profile = normalize_verbosity(verbosity)
     routing = route_task_to_brain(task)
     selected_brain_id = str(routing.get("selected_brain_id", "") or "")
-    selection = select_workflow_for_task(task) if workflow == "auto" else {"selected_workflow": workflow, "reason": "explicit workflow requested"}
+    if workflow == "auto" and str(intent or "") == "long_task":
+        selection = {"task": task, "selected_workflow": "long_task", "reason": "long_task intent requested"}
+    else:
+        selection = select_workflow_for_task(task) if workflow == "auto" else {"selected_workflow": workflow, "reason": "explicit workflow requested"}
     workflow_id = str(selection.get("selected_workflow", "") or "brain_handoff")
     child_registry_id = selected_brain_id if selected_brain_id in child_brain_ids() else None
     registry = load_workflow_registry(child_registry_id)
@@ -247,6 +250,9 @@ def build_task_capsule(
             "No child brain is loaded until main-brain routing selects one",
         ],
     }
+    long_task_contract = workflow_state.get("registry_entry", {}).get("long_task_contract", {})
+    if str(intent or "") == "long_task" and isinstance(long_task_contract, dict) and long_task_contract:
+        payload["long_task_contract"] = dict(long_task_contract)
     if selected_brain_id in child_brain_ids() and routing.get("status") == "selected":
         raw_child_context = _child_context(selected_brain_id, task, workflow_id, study_tag)
         payload["child_context"] = compact_child_context(raw_child_context, profile=context_profile)

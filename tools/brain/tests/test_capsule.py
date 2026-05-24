@@ -128,6 +128,23 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertNotIn("summary", payload["main_context"])
         self.assertNotIn("hard_rules", payload["main_context"])
 
+    def test_capsule_long_task_intent_exposes_wait_contract_in_lite_context(self) -> None:
+        payload = build_task_capsule(
+            task="三组 shadow-only seed7 长训练轮询",
+            workflow="auto",
+            intent="long_task",
+            verbosity="lite",
+        )
+
+        self.assertEqual(payload["workflow"], "long_task")
+        self.assertIn("long_task_contract", payload)
+        contract = payload["long_task_contract"]
+        self.assertEqual(contract["poll_window_seconds"], 7200)
+        self.assertIn("Wait-Process -Id <pid> -Timeout 7200", contract["required_wait_command"])
+        self.assertTrue(contract["eta_required"])
+        self.assertIn("Start-Sleep", contract["forbidden_patterns"])
+        self.assertIn("estimated_remaining_seconds", contract["status_required_fields"])
+
 
 if __name__ == "__main__":
     unittest.main()

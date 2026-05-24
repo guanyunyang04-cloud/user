@@ -31,6 +31,22 @@ Use full health only when compact health reports actionable warnings, routing/ev
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py health --cwd . --mode full
 ```
 
+For long training, research, build, data refresh, or other long-running jobs, load the long-task contract before launch or polling:
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<user task>" --workflow auto --intent long_task --verbosity lite --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor template --json
+```
+
+The required wait window is `Wait-Process -Id <pid> -Timeout 7200`. The `7200` seconds are one observation window, not a business timeout. After each window, report PID status, elapsed time, progress, ETA, log tail, artifact mtime, and the next decision:
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor status --pid <pid> --progress <progress.json> --stdout <stdout.log> --stderr <stderr.log> --artifact-dir <artifact_dir> --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor wait-once --pid <pid> --timeout 7200 --progress <progress.json> --stdout <stdout.log> --stderr <stderr.log> --artifact-dir <artifact_dir> --json
+```
+
+`Start-Sleep` must not be used as the primary long-task polling mechanism; it is only acceptable for very short UI pacing outside the long-task wait loop. Every user update for training polls must include ETA or state why ETA is not yet estimable.
+
 If the project has no `brain/brain_manifest.json`, initialize a minimal brain only when mutation is allowed:
 
 ```powershell

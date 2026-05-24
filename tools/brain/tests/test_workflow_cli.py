@@ -149,6 +149,7 @@ class BrainWorkflowCliTest(unittest.TestCase):
             "systematic_debugging",
             "verification_before_completion",
             "brain_writeback_verified",
+            "long_task",
         }
 
         self.assertTrue(expected.issubset(registry))
@@ -171,6 +172,14 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertIn("validation_commands", payload)
         self.assertIn("writeback_routes", payload)
 
+    def test_workflow_guide_cli_knows_long_task(self) -> None:
+        payload = run_cli("workflow-guide", "--workflow", "long_task", "--json")
+
+        self.assertEqual(payload["workflow_id"], "long_task")
+        self.assertIn("Wait-Process", "\n".join(payload["allowed_commands"]))
+        self.assertIn("fixed_sleep_polling", payload["forbidden_actions"])
+        self.assertIn("eta_reported_each_poll", payload["completion"])
+
     def test_select_workflow_cli_maps_task_intent(self) -> None:
         cases = {
             "继续实施计划": "executing_plan",
@@ -180,6 +189,7 @@ class BrainWorkflowCliTest(unittest.TestCase):
             "更新脑区和 evidence registry": "brain_writeback_verified",
             "现在脑区乱不乱复杂不复杂": "brain_system_audit",
             "强重构脑区结构": "brain_architecture_refactor",
+            "启动长训练并估算剩余时间": "long_task",
         }
         for task, expected in cases.items():
             with self.subTest(task=task):

@@ -282,6 +282,16 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertIn("health --cwd . --mode compact", text)
         self.assertIn("health --cwd . --mode full", text)
 
+    def test_workspace_brain_skill_long_task_uses_contract_monitor(self) -> None:
+        text = SKILL.read_text(encoding="utf-8")
+
+        self.assertIn("--intent long_task", text)
+        self.assertIn("tools.brain.long_task_monitor", text)
+        self.assertIn("Wait-Process -Id <pid> -Timeout 7200", text)
+        self.assertIn("ETA", text)
+        self.assertIn("Start-Sleep", text)
+        self.assertIn("must not be used as the primary long-task polling mechanism", text)
+
 
 if __name__ == "__main__":
     unittest.main()

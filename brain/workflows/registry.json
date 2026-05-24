@@ -11,6 +11,7 @@
     {"id": "writing_plan", "title": "Writing Plan", "category": "brain_native_superpowers", "playbook": "brain/workflows/playbooks/core.json#writing_plan"},
     {"id": "executing_plan", "title": "Executing Plan", "category": "brain_native_superpowers", "playbook": "brain/workflows/playbooks/core.json#executing_plan"},
     {"id": "systematic_debugging", "title": "Systematic Debugging", "category": "brain_native_superpowers", "playbook": "brain/workflows/playbooks/core.json#systematic_debugging"},
+    {"id": "long_task", "title": "Long Task Execution", "category": "brain_native_superpowers", "playbook": "brain/workflows/playbooks/core.json#long_task"},
     {"id": "verification_before_completion", "title": "Verification Before Completion", "category": "brain_native_superpowers", "playbook": "brain/workflows/playbooks/core.json#verification_before_completion"},
     {"id": "brain_writeback_verified", "title": "Brain Writeback Verified", "category": "brain_native_superpowers", "playbook": "brain/workflows/playbooks/core.json#brain_writeback_verified"}
   ]

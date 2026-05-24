@@ -71,6 +71,7 @@ class BrainPlatformTest(unittest.TestCase):
             "brain_writeback",
             "brain_system_audit",
             "brain_architecture_refactor",
+            "long_task",
         }
         self.assertTrue(expected.issubset(set(registry)))
         for workflow_id in expected:
@@ -80,6 +81,18 @@ class BrainPlatformTest(unittest.TestCase):
         child_registry = load_workflow_registry("daily_research")
         self.assertIn("continuous_policy_safe_screening", child_registry)
         self.assertIn("continuous_policy_result_review", child_registry)
+
+    def test_long_task_workflow_declares_machine_contract(self) -> None:
+        registry = load_workflow_registry()
+        workflow = registry["long_task"]
+
+        self.assertIn("long_task_contract", workflow)
+        contract = workflow["long_task_contract"]
+        self.assertEqual(contract["poll_window_seconds"], 7200)
+        self.assertIn("Wait-Process -Id <pid> -Timeout 7200", contract["required_wait_command"])
+        self.assertTrue(contract["eta_required"])
+        self.assertIn("Start-Sleep", contract["forbidden_patterns"])
+        self.assertNotIn("Start-Sleep", "\n".join(workflow["allowed_commands"]))
 
     def test_split_workflow_registry_and_catalog_are_available(self) -> None:
         registry = load_workflow_registry()
@@ -285,4 +298,3 @@ class BrainPlatformTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

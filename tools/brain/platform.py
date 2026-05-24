@@ -867,7 +867,10 @@ def select_workflow_for_task(task: str) -> dict[str, Any]:
     def has_any(*needles: str) -> bool:
         return any(needle in lower or needle in text for needle in needles)
 
-    if has_any("报错", "失败", "bug", "error", "oom", "cuda", "异常", "中断", "debug", "修复"):
+    if has_any("长训练", "长任务", "long task", "long_task", "训练轮询", "估算剩余时间", "eta", "wait-process"):
+        selected = "long_task"
+        reason = "task asks to launch, monitor, or report a long-running task"
+    elif has_any("报错", "失败", "bug", "error", "oom", "cuda", "异常", "中断", "debug", "修复"):
         selected = "systematic_debugging"
         reason = "task mentions a failure, runtime error, debugging, or repair signal"
     elif has_any("是否全部完成", "完成了吗", "是否完成", "是否通过", "检查一下", "verify", "verification", "完成没"):

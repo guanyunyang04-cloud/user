@@ -106,6 +106,27 @@
       "completion": ["root_cause_or_best_evidence_stated", "regression_guard_run", "residual_risk_recorded"],
       "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json", "git diff --check"]
     },
+    "long_task": {
+      "description": "Launch or monitor long-running training, research, build, or data jobs with PID-bound wait windows and ETA reporting.",
+      "preflight": ["task_capsule_with_long_task_intent", "active_artifact_guard_clean", "progress_or_log_path_identified"],
+      "checklist": ["start_process_with_pid", "wait_with_pid_bound_window", "report_elapsed_and_eta_each_poll", "inspect_logs_and_artifact_mtime", "continue_only_if_pid_or_artifacts_progress"],
+      "allowed_commands": ["Wait-Process -Id <pid> -Timeout 7200", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor template --json", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor status --pid <pid> --progress <progress.json> --stdout <stdout.log> --stderr <stderr.log> --artifact-dir <artifact_dir> --json", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor wait-once --pid <pid> --timeout 7200 --progress <progress.json> --stdout <stdout.log> --stderr <stderr.log> --artifact-dir <artifact_dir> --json"],
+      "forbidden_actions": ["fixed_sleep_polling", "use_Start_Sleep_as_primary_long_task_wait", "treat_wait_window_timeout_as_business_failure", "claim_completion_without_exit_or_artifact_verification", "modify_active_execution_artifact"],
+      "artifacts": ["progress_json", "stdout_log", "stderr_log", "artifact_dir"],
+      "stop_conditions": ["pid_missing", "progress_and_logs_missing", "stalled_without_artifact_or_log_progress", "resource_risk_exceeds_current_boundary"],
+      "writeback_routes": {"references": "brain/references/", "operations": "brain/operations_center.md"},
+      "completion": ["pid_bound_wait_used", "eta_reported_each_poll", "logs_or_artifact_mtime_checked", "exit_or_completion_artifacts_verified"],
+      "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json", "git diff --check"],
+      "long_task_contract": {
+        "required_wait_command": "Wait-Process -Id <pid> -Timeout 7200",
+        "poll_window_seconds": 7200,
+        "forbidden_patterns": ["Start-Sleep", "fixed sleep polling", "timeout as business failure"],
+        "status_required_fields": ["pid_alive", "elapsed_seconds", "estimated_remaining_seconds", "eta_at", "progress_percent", "latest_metric", "last_log_lines", "artifact_mtime", "decision"],
+        "eta_required": true,
+        "continue_conditions": ["pid_alive", "progress_updated", "log_updated", "artifact_mtime_updated"],
+        "stop_conditions": ["process_exited_and_artifacts_verified", "process_exited_with_error", "stalled_or_waiting_requires_inspection", "resource_risk_exceeds_current_boundary"]
+      }
+    },
     "verification_before_completion": {
       "description": "Run fresh verification before claiming work is complete, fixed, passing, or safe.",
       "preflight": ["task_capsule", "claim_to_verify_identified"],
