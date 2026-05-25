@@ -96,6 +96,39 @@ def test_summarize_target_frame_infers_dynamic_horizons_from_columns() -> None:
     assert summary["utility_decile_monotonicity"]["is_monotonic"] is True
 
 
+def test_summarize_target_frame_uses_path_proxy_decision_scores() -> None:
+    frame = _dynamic_horizon_frame().drop(columns=["pred_decision_score"])
+    horizons = (1, 2, 3, 5, 8, 10, 15, 20, 30)
+    for horizon in horizons:
+        frame[f"pred_cum_mu_{horizon}d"] = frame[f"future_cum_excess_return_{horizon}d"] + 0.001
+
+    summary = summarize_target_frame(
+        frame,
+        {"cost_bps": 0.0, "hit_threshold_bps": 10.0, "drawdown_penalty": 0.0},
+        deciles=4,
+    )
+
+    assert summary["decision_score_source"] == "path_proxy"
+    assert summary["score_decile_calibration"]["rank_ic"] > 0.0
+
+
+def test_summarize_target_frame_accepts_string_horizon_grid_for_path_proxy() -> None:
+    frame = _dynamic_horizon_frame().drop(columns=["pred_decision_score"])
+    for horizon in (1, 2, 3, 5, 8, 10, 15, 20, 30):
+        frame[f"pred_cum_mu_{horizon}d"] = frame[f"future_cum_excess_return_{horizon}d"] + 0.001
+
+    summary = summarize_target_frame(
+        frame,
+        {"cost_bps": 0.0, "hit_threshold_bps": 10.0, "drawdown_penalty": 0.0},
+        deciles=4,
+        cumulative_horizons="1,2,3,5,8,10,15,20,30",
+    )
+
+    assert summary["decision_score_source"] == "path_proxy"
+    assert summary["horizons"] == [1, 2, 3, 5, 8, 10, 15, 20, 30]
+    assert summary["horizon_source"] == "argument"
+
+
 def test_summarize_target_frame_uses_horizon_specific_drawdown() -> None:
     frame = pd.DataFrame(
         [

@@ -10,6 +10,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from daily_research.path_policy.decision_score_proxy import add_path_proxy_decision_scores
+
 
 OUTPUT_AUX_VERDICTS = {
     "utility_baseline_keep",
@@ -29,6 +31,12 @@ REQUIRED_PREDICTION_COLUMNS = (
     "pred_best_horizon",
     "future_best_horizon",
 )
+PATH_PROXY_LOSS_PROFILES = {
+    "default",
+    "rank_aux",
+    "multitask_v1",
+    "forecast_path_v1_baseline",
+}
 
 
 def _jsonable(value: Any) -> Any:
@@ -90,6 +98,25 @@ def _require_prediction_columns(frame: pd.DataFrame) -> None:
                 missing.append(column)
     if missing:
         raise ValueError(f"missing required prediction columns: {missing}")
+
+
+def _decision_score_source(frame: pd.DataFrame) -> str:
+    if "decision_score_source" not in frame.columns:
+        return "unknown"
+    values = sorted({str(item) for item in frame["decision_score_source"].dropna().unique() if str(item)})
+    if not values:
+        return "unknown"
+    return values[0] if len(values) == 1 else "mixed"
+
+
+def _prepare_prediction_frame(frame: pd.DataFrame, *, loss_profile: str) -> pd.DataFrame:
+    profile = str(loss_profile or "").strip().lower()
+    if profile in PATH_PROXY_LOSS_PROFILES:
+        return add_path_proxy_decision_scores(frame)
+    out = frame.copy()
+    if "decision_score_source" not in out.columns:
+        out["decision_score_source"] = "model_decision_utility"
+    return out
 
 
 def _rank_ic_by_date(frame: pd.DataFrame, score_column: str, target_column: str) -> float:
@@ -180,6 +207,7 @@ def _summarize_predictions(frame: pd.DataFrame, *, role: str) -> dict[str, Any]:
     return {
         "role": role,
         "status": "completed",
+        "decision_score_source": _decision_score_source(frame),
         "row_count": int(len(frame)),
         "horizons": [int(item) for item in horizons],
         "decision_score_rank_ic": _rank_ic_by_date(frame, "pred_decision_score", "future_decision_score"),
@@ -215,9 +243,16 @@ def _study_summary(study_dir: str | Path) -> dict[str, Any]:
     root = Path(study_dir)
     training = _read_json(root / "forecast_training_summary.json")
     config = dict(training.get("training_config", {}) or {})
+    loss_profile = str(config.get("loss_profile", training.get("loss_profile", "")))
     try:
-        validation = pd.read_csv(root / "forecast_predictions_validation.csv")
-        test = pd.read_csv(root / "forecast_predictions_test.csv")
+        validation = _prepare_prediction_frame(
+            pd.read_csv(root / "forecast_predictions_validation.csv"),
+            loss_profile=loss_profile,
+        )
+        test = _prepare_prediction_frame(
+            pd.read_csv(root / "forecast_predictions_test.csv"),
+            loss_profile=loss_profile,
+        )
         validation_metrics = _summarize_predictions(validation, role="validation")
         test_metrics = _summarize_predictions(test, role="test")
     except Exception as exc:
@@ -235,7 +270,7 @@ def _study_summary(study_dir: str | Path) -> dict[str, Any]:
         "study_tag": _study_tag(root, training),
         "study_dir": str(root),
         "status": "completed",
-        "loss_profile": str(config.get("loss_profile", training.get("loss_profile", ""))),
+        "loss_profile": loss_profile,
         "output_profile": str(config.get("output_profile", "")),
         "model_family": str(training.get("selected_model_family", "")),
         "seed": int(training.get("selected_seed", 0) or 0),
@@ -246,6 +281,9 @@ def _study_summary(study_dir: str | Path) -> dict[str, Any]:
         "daily_grid_feasibility": bool(len(horizons) >= 40 and max(horizons or (0,)) >= 45),
         "validation": validation_metrics,
         "test": test_metrics,
+        "decision_score_source": validation_metrics.get("decision_score_source")
+        if validation_metrics.get("decision_score_source") == test_metrics.get("decision_score_source")
+        else "mixed",
         "evidence_verdict": str(training.get("evidence_verdict", "")),
         "shadow_only": True,
         "promotion_allowed": False,
@@ -343,6 +381,7 @@ def output_profile_comparison_rows(report: dict[str, Any]) -> list[dict[str, Any
                     "seed": study.get("seed", 0),
                     "feature_profile": study.get("feature_profile", ""),
                     "role": role,
+                    "decision_score_source": study.get("decision_score_source", metrics.get("decision_score_source", "")),
                     "decision_score_rank_ic": metrics.get("decision_score_rank_ic", 0.0),
                     "decision_score_top_bottom_spread": metrics.get("decision_score_top_bottom_spread", 0.0),
                     "decision_hit_lift_top20_mean": metrics.get("decision_hit_lift_top20_mean", 0.0),

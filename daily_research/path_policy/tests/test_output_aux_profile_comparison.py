@@ -8,6 +8,7 @@ import pandas as pd
 from daily_research.path_policy.output_aux_profile_comparison import (
     OUTPUT_AUX_VERDICTS,
     build_output_aux_profile_comparison,
+    output_profile_comparison_rows,
     write_output_aux_profile_comparison,
 )
 
@@ -94,6 +95,58 @@ def test_build_output_aux_profile_comparison_blocks_missing_required_columns(tmp
     assert report["studies"][0]["status"] == "blocked"
     assert "missing required prediction columns" in report["studies"][0]["reason"]
     assert report["research_verdicts"] == ["needs_input_redesign"]
+
+
+def test_path_only_baseline_uses_path_proxy_decision_scores(tmp_path: Path) -> None:
+    study = _study(
+        tmp_path,
+        "path_only_full_seed7",
+        loss_profile="forecast_path_v1_baseline",
+        horizons=(1, 2, 3, 5, 8, 10, 15, 20, 30),
+    )
+    for name in ("forecast_predictions_validation.csv", "forecast_predictions_test.csv"):
+        frame = pd.read_csv(study / name)
+        drop_cols = [
+            column
+            for column in frame.columns
+            if column.startswith("pred_decision_utility_")
+            or column.startswith("future_decision_utility_")
+            or column.startswith("pred_hit_prob_")
+            or column.startswith("future_hit_label_")
+            or column
+            in {
+                "pred_decision_score",
+                "future_decision_score",
+                "trade_utility_score",
+                "pred_best_horizon",
+                "future_best_horizon",
+            }
+        ]
+        frame.drop(columns=drop_cols).to_csv(study / name, index=False)
+
+    report = build_output_aux_profile_comparison([study], run_tag="unit")
+
+    assert report["status"] == "completed"
+    assert report["studies"][0]["status"] == "completed"
+    assert report["studies"][0]["decision_score_source"] == "path_proxy"
+    rows = output_profile_comparison_rows(report)
+    assert {row["decision_score_source"] for row in rows} == {"path_proxy"}
+
+
+def test_decision_utility_baseline_preserves_native_decision_score_source(tmp_path: Path) -> None:
+    study = _study(
+        tmp_path,
+        "utility_full_seed7",
+        loss_profile="decision_utility_v1_baseline",
+        horizons=(1, 2, 3, 5, 8, 10, 15, 20, 30),
+    )
+
+    report = build_output_aux_profile_comparison([study], run_tag="unit")
+
+    assert report["status"] == "completed"
+    assert report["studies"][0]["decision_score_source"] == "model_decision_utility"
+    rows = output_profile_comparison_rows(report)
+    assert {row["decision_score_source"] for row in rows} == {"model_decision_utility"}
 
 
 def test_write_output_aux_profile_comparison_outputs_schema_and_daily_grid_feasibility_verdict(tmp_path: Path) -> None:

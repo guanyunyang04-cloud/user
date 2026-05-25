@@ -105,7 +105,11 @@ def add_path_proxy_decision_scores(
     if cumulative_horizons is None:
         horizons = inferred
     else:
-        max_hint = max([*inferred, *[int(item) for item in cumulative_horizons]] or [1])
+        if isinstance(cumulative_horizons, str):
+            requested = [int(item.strip()) for item in cumulative_horizons.split(",") if item.strip()]
+        else:
+            requested = [int(item) for item in cumulative_horizons]
+        max_hint = max([*inferred, *requested] or [1])
         horizons = normalize_path20_cumulative_horizons(cumulative_horizons, horizon=max_hint)
     if not horizons:
         return frame.copy()

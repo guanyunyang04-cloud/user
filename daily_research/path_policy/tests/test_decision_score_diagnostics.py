@@ -86,6 +86,29 @@ def test_add_score_columns_infers_dynamic_horizons_and_trade_utility_score() -> 
     assert frame["horizon_selected_utility"].iloc[0] == pytest.approx(0.058)
 
 
+def test_summarize_frame_uses_path_proxy_decision_scores() -> None:
+    horizons = (1, 2, 3, 5, 8, 10, 15, 20, 30)
+    rows = []
+    for idx in range(12):
+        strength = (idx + 1) / 12.0
+        row = {
+            "date": f"2024-01-{idx % 4 + 1:02d}",
+            "stock": f"S{idx:03d}",
+            "future_path_max_drawdown_20d": -0.01,
+        }
+        for horizon in horizons:
+            row[f"pred_cum_mu_{horizon}d"] = strength * horizon / 100.0
+            row[f"future_cum_excess_return_{horizon}d"] = strength * horizon / 100.0
+            row[f"future_path_max_drawdown_{horizon}d"] = -0.01 * horizon / 30.0
+        rows.append(row)
+
+    summary = summarize_frame(pd.DataFrame(rows))
+
+    assert summary["decision_score_source"] == "path_proxy"
+    assert summary["horizons"] == list(horizons)
+    assert summary["scores"]["trade_utility_score"]["rank_ic"] > 0.0
+
+
 def test_summarize_frame_reports_monthly_spread_and_negative_months() -> None:
     summary = summarize_frame(_fixture_frame())
     max_score = summary["scores"]["max_pred_utility"]

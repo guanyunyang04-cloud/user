@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from daily_research.path_policy.decision_score_proxy import add_path_proxy_decision_scores
 from daily_research.path_policy.labels import PATH20_CUMULATIVE_HORIZONS
 
 
@@ -201,6 +202,7 @@ def _negative_month_context(frame: pd.DataFrame, score_column: str, target_colum
 
 
 def add_score_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    frame = add_path_proxy_decision_scores(frame)
     horizons, _ = _infer_horizons(frame)
     required = [
         "date",
@@ -305,14 +307,15 @@ def _horizon_discovery(scored: pd.DataFrame, horizons: tuple[int, ...]) -> dict[
 
 
 def summarize_frame(frame: pd.DataFrame, *, score_names: tuple[str, ...] = DEFAULT_SCORE_NAMES) -> dict[str, Any]:
-    horizons, horizon_source = _infer_horizons(frame)
     scored = add_score_columns(frame)
+    horizons, horizon_source = _infer_horizons(scored)
     score_candidates = tuple(score_name for score_name in score_names if score_name in scored.columns)
     payload = {
         "row_count": int(len(scored)),
         "date_count": int(scored["date"].nunique()),
         "horizons": [int(item) for item in horizons],
         "horizon_source": horizon_source,
+        "decision_score_source": str(scored.get("decision_score_source", pd.Series(["unknown"])).iloc[0]),
         "horizon_discovery": _horizon_discovery(scored, horizons),
         "pred_best_horizon_distribution": _value_counts_payload(scored["pred_best_horizon"]),
         "future_best_horizon_distribution": _value_counts_payload(scored["future_best_horizon"])

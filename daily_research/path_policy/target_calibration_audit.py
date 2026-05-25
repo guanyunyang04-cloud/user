@@ -8,6 +8,7 @@ from typing import Any, Iterable
 import numpy as np
 import pandas as pd
 
+from daily_research.path_policy.decision_score_proxy import add_path_proxy_decision_scores
 from daily_research.path_policy.labels import PATH20_CUMULATIVE_HORIZONS, PATH20_HORIZON, normalize_cumulative_horizons
 
 
@@ -349,6 +350,7 @@ def summarize_target_frame(
     deciles: int = 10,
     cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
 ) -> dict[str, Any]:
+    frame = add_path_proxy_decision_scores(frame, cumulative_horizons=cumulative_horizons)
     _require_columns(frame, ["date", score_column])
     work, horizons, horizon_source = _decision_utility_columns(frame, target, cumulative_horizons=cumulative_horizons)
     work["date"] = pd.to_datetime(work["date"])
@@ -387,6 +389,7 @@ def summarize_target_frame(
         "target": {**target, "name": _target_name(target)},
         "horizons": [int(item) for item in horizons],
         "horizon_source": horizon_source,
+        "decision_score_source": str(frame.get("decision_score_source", pd.Series(["unknown"])).iloc[0]),
         "row_count": int(len(work)),
         "date_count": int(work["date"].nunique()),
         "hit_base_rate": hit_base_rate,
