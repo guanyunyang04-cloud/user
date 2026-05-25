@@ -467,6 +467,9 @@ def review(
             "guard the long-task monitor contract and require ETA status in polling reports",
         )
     workflow_conflict_terms = (
+        "selected brain_handoff for a brain rule mutation",
+        "brain_handoff for a brain rule",
+        "brain rule mutation",
         "workflow selector",
         "workflow_selector",
         "workflow mismatch",
@@ -475,9 +478,14 @@ def review(
         "capsule workflow mismatch",
         "intent mismatch",
         "intent override",
+        "completion_review=false",
+        "completion_review_required=false",
         "路由误判",
         "工作流误判",
         "选错 workflow",
+        "脑区规则被 handoff",
+        "selector 漏判",
+        "规则修改没有触发",
     )
     if any(term in text for term in workflow_conflict_terms):
         add_candidate(

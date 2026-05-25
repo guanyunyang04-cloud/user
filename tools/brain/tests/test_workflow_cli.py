@@ -266,9 +266,16 @@ class BrainWorkflowCliTest(unittest.TestCase):
         cases = {
             "继续实施计划": "brain_handoff",
             "报错了帮我查": "brain_handoff",
+            "CSS selector bug": "brain_handoff",
+            "React selector dropdown 报错": "brain_handoff",
             "是否全部完成": "brain_handoff",
             "深入思考详细计划": "brain_handoff",
             "更新脑区和 evidence registry": "brain_writeback_verified",
+            "修改脑区规则": "brain_maintenance",
+            "更新 workspace-brain skill 并同步本机 skill": "brain_maintenance",
+            "更新 workflow registry": "brain_maintenance",
+            "workflow selector 漏判": "brain_maintenance",
+            "更新 evidence registry": "brain_writeback_verified",
             "现在脑区乱不乱复杂不复杂": "brain_system_audit",
             "强重构脑区结构": "brain_architecture_refactor",
             "启动长训练并估算剩余时间": "brain_handoff",
@@ -306,6 +313,19 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertEqual(payload["selected_workflow"], "brain_handoff")
         self.assertFalse(payload["intent_override_applied"])
         self.assertIn("external_skill_signal", payload["decision_sources"])
+
+    def test_select_workflow_cli_writeback_intent_selects_verified_writeback(self) -> None:
+        payload = run_cli(
+            "select-workflow",
+            "--task",
+            "执行 brain writeback verified 登记证据",
+            "--intent",
+            "writeback",
+            "--json",
+        )
+
+        self.assertEqual(payload["selected_workflow"], "brain_writeback_verified")
+        self.assertIn("writeback", payload["matched_terms"])
 
     def test_audit_brain_cli_outputs_catalog_language_and_guards(self) -> None:
         payload = run_cli("audit-brain", "--scope", "all", "--json")
@@ -365,6 +385,21 @@ class BrainWorkflowCliTest(unittest.TestCase):
         )
 
         self.assertEqual(payload["workflow"], "brain_writeback_verified")
+        self.assertTrue(payload["self_evolution_hooks"]["completion_review_required"])
+
+    def test_capsule_brain_rule_mutation_uses_maintenance_review(self) -> None:
+        payload = run_cli(
+            "capsule",
+            "--task",
+            "修改脑区规则",
+            "--workflow",
+            "auto",
+            "--intent",
+            "mutate",
+            "--json",
+        )
+
+        self.assertEqual(payload["workflow"], "brain_maintenance")
         self.assertTrue(payload["self_evolution_hooks"]["completion_review_required"])
 
     def test_capsule_cli_defaults_to_lite_context(self) -> None:

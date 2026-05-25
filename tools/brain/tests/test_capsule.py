@@ -155,6 +155,19 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertFalse(hooks["completion_review_required"])
         self.assertIn("routing_or_workflow_conflict", hooks["review_triggers"])
 
+    def test_capsule_brain_rule_mutation_uses_brain_maintenance(self) -> None:
+        payload = build_task_capsule(
+            task="修改脑区规则",
+            workflow="auto",
+            intent="mutate",
+            verbosity="lite",
+        )
+
+        self.assertEqual(payload["workflow"], "brain_maintenance")
+        self.assertEqual(payload["routing"]["selected_brain_id"], "workspace_governance")
+        hooks = payload["self_evolution_hooks"]
+        self.assertTrue(hooks["completion_review_required"])
+
 
 if __name__ == "__main__":
     unittest.main()

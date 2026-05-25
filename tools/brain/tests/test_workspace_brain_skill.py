@@ -276,6 +276,33 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertTrue(candidates)
         self.assertIn("study_evidence_resolver", {candidate["target_layer"] for candidate in candidates})
 
+    def test_brain_runtime_review_detects_brain_rule_selector_miss(self) -> None:
+        result = subprocess.run(
+            [
+                PYTHON,
+                str(RUNTIME),
+                "review",
+                "--cwd",
+                str(ROOT),
+                "--task",
+                "修改脑区规则",
+                "--observation",
+                "capsule selected brain_handoff for a brain rule mutation",
+                "--json",
+            ],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        payload = json.loads(result.stdout)
+
+        self.assertEqual(payload["status"], "ok")
+        candidates = payload["evolution_candidates"]
+        self.assertTrue(candidates)
+        self.assertIn("workflow_selector", {candidate["target_layer"] for candidate in candidates})
+
     def test_brain_runtime_review_does_not_flag_completed_generic_adapter_retirement(self) -> None:
         result = subprocess.run(
             [

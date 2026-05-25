@@ -100,6 +100,8 @@ class BrainPlatformTest(unittest.TestCase):
         categories = {str(item.get("category", "")) for item in payload.get("workflows", [])}
 
         self.assertNotIn("brain_native_" + "superpowers", categories)
+        self.assertNotIn("skill " + "fallback", str(payload.get("description", "")).lower())
+        self.assertIn("guards", str(payload.get("description", "")).lower())
 
     def test_split_workflow_registry_and_catalog_are_available(self) -> None:
         registry = load_workflow_registry()

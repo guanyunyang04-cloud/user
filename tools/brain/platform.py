@@ -941,18 +941,75 @@ def select_workflow_for_task(task: str, *, intent: str = "read") -> dict[str, An
 
     has_any(*method_terms, source="external_skill_signal")
 
-    if has_any("强重构", "脑区迁移", "结构重做", "brain refactor", "architecture refactor"):
+    architecture_terms = (
+        "强重构",
+        "脑区迁移",
+        "结构重做",
+        "brain refactor",
+        "architecture refactor",
+    )
+    audit_terms = (
+        "脑区乱",
+        "乱不乱",
+        "复杂不复杂",
+        "有没有错",
+        "全中文",
+        "需要优化",
+        "脑区检查",
+        "brain audit",
+    )
+    maintenance_terms = (
+        "脑区规则",
+        "规则修改",
+        "workspace-brain",
+        "本机 skill",
+        "global skill",
+        "skill_install",
+        "skill sync",
+        "workflow registry",
+        "playbook",
+        "capsule",
+        "brain selector",
+        "selector 漏判",
+        "workflow selector",
+    )
+    writeback_terms = (
+        "更新脑区",
+        "写回",
+        "writeback",
+        "writeback verified",
+        "证据登记",
+        "登记证据",
+        "evidence registry",
+        "evidence-index",
+        "evidence index",
+        "rebuild evidence",
+        "主线审阅",
+        "审阅文档",
+        "入库",
+    )
+
+    architecture_match = has_any(*architecture_terms)
+    writeback_match = False if architecture_match else has_any(*writeback_terms)
+    audit_match = False if architecture_match or normalized_intent == "writeback" or writeback_match else has_any(*audit_terms)
+    maintenance_match = (
+        False
+        if architecture_match or normalized_intent == "writeback" or writeback_match or audit_match
+        else has_any("脑区维护", "主脑维护", "brain maintenance", "health", *maintenance_terms)
+    )
+
+    if architecture_match:
         selected = "brain_architecture_refactor"
         reason = "task asks for a brain architecture refactor or migration"
-    elif has_any("脑区乱", "乱不乱", "复杂不复杂", "有没有错", "全中文", "需要优化", "脑区检查", "brain audit"):
-        selected = "brain_system_audit"
-        reason = "task asks to audit brain structure, complexity, language, or optimization need"
-    elif has_any("脑区维护", "主脑维护", "brain maintenance", "health", "skill sync"):
-        selected = "brain_maintenance"
-        reason = "task asks to maintain or health-check the workspace brain"
-    elif has_any("更新脑区", "写回", "evidence", "registry", "主线审阅", "审阅文档", "入库"):
+    elif normalized_intent == "writeback" or writeback_match:
         selected = "brain_writeback_verified"
         reason = "task asks for brain writeback, evidence registry, or mainline review updates"
+    elif audit_match:
+        selected = "brain_system_audit"
+        reason = "task asks to audit brain structure, complexity, language, or optimization need"
+    elif maintenance_match:
+        selected = "brain_maintenance"
+        reason = "task asks to maintain or health-check the workspace brain"
     else:
         selected = "brain_handoff"
         reason = "task method is left to local skills; brain only supplies project handoff and guards"

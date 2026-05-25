@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Workspace-level workflow registry. The main brain owns global handoff, governance, skill fallback, verification, and writeback workflows.",
+  "description": "Workspace-level workflow registry. The main brain owns handoff, governance, routing, guards, evidence, writeback, and sync checks.",
   "workflows": [
     {"id": "brain_handoff", "title": "Brain Handoff", "category": "workspace_governance", "playbook": "brain/workflows/playbooks/core.json#brain_handoff"},
     {"id": "brain_maintenance", "title": "Brain Maintenance", "category": "workspace_governance", "playbook": "brain/workflows/playbooks/core.json#brain_maintenance"},
