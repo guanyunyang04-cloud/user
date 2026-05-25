@@ -31,6 +31,21 @@ REQUIRED_PREDICTION_COLUMNS = (
     "pred_best_horizon",
     "future_best_horizon",
 )
+SCORE_VARIANT_COLUMNS = (
+    "pred_decision_score",
+    "trade_utility_score",
+    "max_pred_utility",
+    "horizon_selected_utility",
+    "hit_weighted_utility",
+    "short_horizon_blend",
+    "forecast_5d_mu",
+    "forecast_20d_mu",
+    "decision_forecast_blend",
+)
+STAGE2_SELECTED_LOSS_PROFILES = (
+    "decision_utility_path_aux_v1",
+    "decision_utility_v1_baseline",
+)
 PATH_PROXY_LOSS_PROFILES = {
     "default",
     "rank_aux",
@@ -112,11 +127,69 @@ def _decision_score_source(frame: pd.DataFrame) -> str:
 def _prepare_prediction_frame(frame: pd.DataFrame, *, loss_profile: str) -> pd.DataFrame:
     profile = str(loss_profile or "").strip().lower()
     if profile in PATH_PROXY_LOSS_PROFILES:
-        return add_path_proxy_decision_scores(frame)
+        return _add_score_variant_columns(add_path_proxy_decision_scores(frame))
     out = frame.copy()
     if "decision_score_source" not in out.columns:
         out["decision_score_source"] = "model_decision_utility"
+    return _add_score_variant_columns(out)
+
+
+def _add_score_variant_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    horizons = _prediction_horizons(out)
+    if "pred_decision_score" in out.columns and "max_pred_utility" not in out.columns:
+        out["max_pred_utility"] = pd.to_numeric(out["pred_decision_score"], errors="coerce")
+    utility_cols = [f"pred_decision_utility_{int(horizon)}d" for horizon in horizons if f"pred_decision_utility_{int(horizon)}d" in out.columns]
+    hit_cols = [f"pred_hit_prob_{int(horizon)}d" for horizon in horizons if f"pred_hit_prob_{int(horizon)}d" in out.columns]
+    if utility_cols and "trade_utility_score" not in out.columns:
+        out["trade_utility_score"] = out[utility_cols].apply(pd.to_numeric, errors="coerce").max(axis=1)
+    if utility_cols and hit_cols and len(utility_cols) == len(hit_cols) and "hit_weighted_utility" not in out.columns:
+        out[utility_cols + hit_cols] = out[utility_cols + hit_cols].apply(pd.to_numeric, errors="coerce")
+        out["hit_weighted_utility"] = (
+            out[utility_cols].to_numpy(dtype=float) * out[hit_cols].to_numpy(dtype=float)
+        ).max(axis=1)
+    if utility_cols and "horizon_selected_utility" not in out.columns and "pred_best_horizon" in out.columns:
+        horizon_to_col = {int(horizon): f"pred_decision_utility_{int(horizon)}d" for horizon in horizons}
+        out["horizon_selected_utility"] = [
+            _finite_float(row.get(horizon_to_col.get(int(_finite_float(row.get("pred_best_horizon"), 1)), ""), np.nan), np.nan)
+            for _, row in out.iterrows()
+        ]
+    if utility_cols and "short_horizon_blend" not in out.columns:
+        short_weights = (0.50, 0.30, 0.20)
+        short_horizons = [item for item in (1, 3, 5) if f"pred_decision_utility_{item}d" in out.columns]
+        if len(short_horizons) < 3:
+            short_horizons = list(horizons[: min(3, len(horizons))])
+        weight_sum = sum(short_weights[: len(short_horizons)]) or 1.0
+        out["short_horizon_blend"] = sum(
+            (short_weights[pos] / weight_sum) * pd.to_numeric(out[f"pred_decision_utility_{int(horizon)}d"], errors="coerce")
+            for pos, horizon in enumerate(short_horizons)
+        )
+    if "forecast_5d_mu" not in out.columns:
+        if "pred_cum_mu_5d" in out.columns:
+            out["forecast_5d_mu"] = pd.to_numeric(out["pred_cum_mu_5d"], errors="coerce")
+        elif "short_horizon_blend" in out.columns:
+            out["forecast_5d_mu"] = out["short_horizon_blend"]
+    if "forecast_20d_mu" not in out.columns:
+        if "pred_cum_mu_20d" in out.columns:
+            out["forecast_20d_mu"] = pd.to_numeric(out["pred_cum_mu_20d"], errors="coerce")
+        elif "max_pred_utility" in out.columns:
+            out["forecast_20d_mu"] = out["max_pred_utility"]
+    if (
+        "decision_forecast_blend" not in out.columns
+        and "max_pred_utility" in out.columns
+        and "forecast_5d_mu" in out.columns
+        and "forecast_20d_mu" in out.columns
+    ):
+        out["decision_forecast_blend"] = (
+            0.50 * pd.to_numeric(out["max_pred_utility"], errors="coerce")
+            + 0.30 * pd.to_numeric(out["forecast_5d_mu"], errors="coerce")
+            + 0.20 * pd.to_numeric(out["forecast_20d_mu"], errors="coerce")
+        )
     return out
+
+
+def _score_variant_columns(frame: pd.DataFrame) -> tuple[str, ...]:
+    return tuple(column for column in SCORE_VARIANT_COLUMNS if column in frame.columns)
 
 
 def _rank_ic_by_date(frame: pd.DataFrame, score_column: str, target_column: str) -> float:
@@ -235,6 +308,39 @@ def _summarize_predictions(frame: pd.DataFrame, *, role: str) -> dict[str, Any]:
     }
 
 
+def _score_variant_metrics(frame: pd.DataFrame, *, role: str) -> list[dict[str, Any]]:
+    _require_prediction_columns(frame)
+    horizons = _prediction_horizons(frame)
+    rows: list[dict[str, Any]] = []
+    for score_name in _score_variant_columns(frame):
+        positive_rate, negative_months, worst_month = _monthly_positive_rate(
+            frame,
+            score_name,
+            "future_decision_score",
+        )
+        rows.append(
+            {
+                "role": role,
+                "score_name": score_name,
+                "decision_score_source": _decision_score_source(frame),
+                "decision_score_rank_ic": _rank_ic_by_date(frame, score_name, "future_decision_score"),
+                "decision_score_top_bottom_spread": _top_bottom_spread_by_date(
+                    frame,
+                    score_name,
+                    "future_decision_score",
+                ),
+                "decision_hit_lift_top20_mean": _hit_lift(frame, score_name, horizons),
+                "monthly_spread_positive_rate": positive_rate,
+                "negative_month_count": len(negative_months),
+                "worst_month_spread": worst_month,
+                "long_horizon_share": float(
+                    pd.to_numeric(frame["pred_best_horizon"], errors="coerce").isin([15, 20, 30, 45]).mean()
+                ),
+            }
+        )
+    return rows
+
+
 def _study_tag(path: Path, training: dict[str, Any]) -> str:
     return str(training.get("study_tag") or training.get("tag") or path.name)
 
@@ -255,6 +361,8 @@ def _study_summary(study_dir: str | Path) -> dict[str, Any]:
         )
         validation_metrics = _summarize_predictions(validation, role="validation")
         test_metrics = _summarize_predictions(test, role="test")
+        validation_score_variants = _score_variant_metrics(validation, role="validation")
+        test_score_variants = _score_variant_metrics(test, role="test")
     except Exception as exc:
         return {
             "study_tag": _study_tag(root, training),
@@ -266,6 +374,9 @@ def _study_summary(study_dir: str | Path) -> dict[str, Any]:
             "active_execution_strategy_expected_diff": "none",
         }
     horizons = tuple(int(item) for item in test_metrics.get("horizons", []) or [])
+    configured_grid = str(config.get("horizon_grid_name", "") or "")
+    horizon_grid = ",".join(str(int(item)) for item in horizons)
+    horizon_grid_key = configured_grid or horizon_grid
     return {
         "study_tag": _study_tag(root, training),
         "study_dir": str(root),
@@ -277,10 +388,13 @@ def _study_summary(study_dir: str | Path) -> dict[str, Any]:
         "feature_profile": str(config.get("feature_profile", training.get("feature_profile", ""))),
         "forecast_horizon": int(config.get("forecast_horizon", max(horizons) if horizons else 0) or 0),
         "cumulative_horizons": [int(item) for item in horizons],
-        "horizon_grid_name": str(config.get("horizon_grid_name", "")),
+        "horizon_grid_name": configured_grid,
+        "horizon_grid": horizon_grid,
+        "horizon_grid_key": horizon_grid_key,
         "daily_grid_feasibility": bool(len(horizons) >= 40 and max(horizons or (0,)) >= 45),
         "validation": validation_metrics,
         "test": test_metrics,
+        "score_variants": [*validation_score_variants, *test_score_variants],
         "decision_score_source": validation_metrics.get("decision_score_source")
         if validation_metrics.get("decision_score_source") == test_metrics.get("decision_score_source")
         else "mixed",
@@ -339,7 +453,14 @@ def _derive_verdicts(studies: list[dict[str, Any]]) -> list[str]:
             verdicts.add("hit_risk_aux_continue")
         elif profile == "decision_utility_rank_aux_v1":
             verdicts.add("rank_aux_continue")
-    if len([study for study in completed if _passes_role(dict(study.get("validation", {}))) and _passes_role(dict(study.get("test", {})), strong_test=True)]) >= 2:
+    architecture_ready = [
+        study
+        for study in completed
+        if not bool(study.get("daily_grid_feasibility"))
+        and _passes_role(dict(study.get("validation", {})))
+        and _passes_role(dict(study.get("test", {})), strong_test=True)
+    ]
+    if len(architecture_ready) >= 2:
         verdicts.add("architecture_compare_allowed")
     if blocked and not verdicts:
         verdicts.add("needs_input_redesign")
@@ -380,6 +501,8 @@ def output_profile_comparison_rows(report: dict[str, Any]) -> list[dict[str, Any
                     "model_family": study.get("model_family", ""),
                     "seed": study.get("seed", 0),
                     "feature_profile": study.get("feature_profile", ""),
+                    "horizon_grid_key": study.get("horizon_grid_key", ""),
+                    "horizon_grid": study.get("horizon_grid", ",".join(str(item) for item in study.get("cumulative_horizons", []) or [])),
                     "role": role,
                     "decision_score_source": study.get("decision_score_source", metrics.get("decision_score_source", "")),
                     "decision_score_rank_ic": metrics.get("decision_score_rank_ic", 0.0),
@@ -392,6 +515,196 @@ def output_profile_comparison_rows(report: dict[str, Any]) -> list[dict[str, Any
                 }
             )
     return rows
+
+
+def score_variant_comparison_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for study in report.get("studies", []) or []:
+        for metrics in study.get("score_variants", []) or []:
+            row = {
+                "study_tag": study.get("study_tag", ""),
+                "study_status": study.get("status", ""),
+                "loss_profile": study.get("loss_profile", ""),
+                "output_profile": study.get("output_profile", ""),
+                "model_family": study.get("model_family", ""),
+                "seed": study.get("seed", 0),
+                "feature_profile": study.get("feature_profile", ""),
+                "horizon_grid_key": study.get("horizon_grid_key", ""),
+                "horizon_grid": study.get("horizon_grid", ",".join(str(item) for item in study.get("cumulative_horizons", []) or [])),
+                "role": metrics.get("role", ""),
+                "score_name": metrics.get("score_name", ""),
+                "decision_score_source": metrics.get("decision_score_source", study.get("decision_score_source", "")),
+                "decision_score_rank_ic": metrics.get("decision_score_rank_ic", 0.0),
+                "decision_score_top_bottom_spread": metrics.get("decision_score_top_bottom_spread", 0.0),
+                "decision_hit_lift_top20_mean": metrics.get("decision_hit_lift_top20_mean", 0.0),
+                "monthly_spread_positive_rate": metrics.get("monthly_spread_positive_rate", 0.0),
+                "negative_month_count": metrics.get("negative_month_count", 0),
+                "worst_month_spread": metrics.get("worst_month_spread", 0.0),
+                "long_horizon_share": metrics.get("long_horizon_share", 0.0),
+            }
+            rows.append(row)
+    return rows
+
+
+def _mean(values: list[float]) -> float:
+    return _finite_float(np.mean(values) if values else 0.0)
+
+
+def _std(values: list[float]) -> float:
+    return _finite_float(np.std(values, ddof=0) if values else 0.0)
+
+
+def profile_aggregate_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = score_variant_comparison_rows(report)
+    groups: dict[tuple[str, str, str, str, str, str, str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        if row.get("study_status") != "completed":
+            continue
+        key = (
+            str(row.get("loss_profile", "")),
+            str(row.get("output_profile", "")),
+            str(row.get("model_family", "")),
+            str(row.get("feature_profile", "")),
+            str(row.get("horizon_grid_key", "")),
+            str(row.get("horizon_grid", "")),
+            str(row.get("role", "")),
+            str(row.get("score_name", "")),
+        )
+        groups.setdefault(key, []).append(row)
+    out: list[dict[str, Any]] = []
+    for (
+        loss_profile,
+        output_profile,
+        model_family,
+        feature_profile,
+        horizon_grid_key,
+        horizon_grid,
+        role,
+        score_name,
+    ), items in sorted(groups.items()):
+        rank_ic = [_finite_float(item.get("decision_score_rank_ic")) for item in items]
+        spread = [_finite_float(item.get("decision_score_top_bottom_spread")) for item in items]
+        hit_lift = [_finite_float(item.get("decision_hit_lift_top20_mean")) for item in items]
+        monthly = [_finite_float(item.get("monthly_spread_positive_rate")) for item in items]
+        negative = [int(item.get("negative_month_count", 0) or 0) for item in items]
+        worst = [_finite_float(item.get("worst_month_spread")) for item in items]
+        long_share = [_finite_float(item.get("long_horizon_share")) for item in items]
+        seed_count = len({int(item.get("seed", 0) or 0) for item in items})
+        horizon_count = len([item for item in horizon_grid.split(",") if item.strip()])
+        daily_grid_feasibility = bool(
+            horizon_count >= 40
+            or "daily" in horizon_grid_key.lower()
+            or "daily" in horizon_grid.lower()
+        )
+        all_positive = all(value > 0.0 for value in rank_ic) and all(value > 0.0 for value in spread) and all(
+            value > 0.0 for value in hit_lift
+        )
+        stage3_weak_gate = bool(
+            role == "test"
+            and seed_count >= 3
+            and not daily_grid_feasibility
+            and all_positive
+            and _mean(monthly) >= 0.75
+            and max(negative or [99]) <= 2
+        )
+        out.append(
+            {
+                "loss_profile": loss_profile,
+                "output_profile": output_profile,
+                "model_family": model_family,
+                "feature_profile": feature_profile,
+                "horizon_grid_key": horizon_grid_key,
+                "horizon_grid": horizon_grid,
+                "role": role,
+                "score_name": score_name,
+                "seed_count": seed_count,
+                "daily_grid_feasibility": daily_grid_feasibility,
+                "rank_ic_mean": _mean(rank_ic),
+                "rank_ic_min": min(rank_ic) if rank_ic else 0.0,
+                "rank_ic_std": _std(rank_ic),
+                "spread_mean": _mean(spread),
+                "spread_min": min(spread) if spread else 0.0,
+                "spread_std": _std(spread),
+                "hit_lift_mean": _mean(hit_lift),
+                "hit_lift_min": min(hit_lift) if hit_lift else 0.0,
+                "hit_lift_std": _std(hit_lift),
+                "monthly_positive_rate_mean": _mean(monthly),
+                "monthly_positive_rate_min": min(monthly) if monthly else 0.0,
+                "negative_month_count_mean": _mean([float(item) for item in negative]),
+                "negative_month_count_max": max(negative) if negative else 0,
+                "worst_month_spread_min": min(worst) if worst else 0.0,
+                "long_horizon_share_mean": _mean(long_share),
+                "all_seed_rank_ic_spread_hit_positive": all_positive,
+                "stage3_weak_gate_pass": stage3_weak_gate,
+            }
+        )
+    return out
+
+
+def next_stage_decision(report: dict[str, Any]) -> dict[str, Any]:
+    aggregates = profile_aggregate_rows(report)
+    stage3_candidates = [
+        row
+        for row in aggregates
+        if row.get("role") == "test"
+        and row.get("score_name") == "pred_decision_score"
+        and bool(row.get("stage3_weak_gate_pass"))
+    ]
+    return {
+        "schema_version": 1,
+        "run_tag": report.get("run_tag", ""),
+        "stage2_selected_loss_profiles": list(STAGE2_SELECTED_LOSS_PROFILES),
+        "stage2_horizon_grids": {
+            "reuse_full": "1,2,3,5,8,10,15,20,30",
+            "sparse_long": "1,3,5,10,15,20,30,45",
+            "dense_short_mid": "1,2,3,4,5,8,10,15,20,30",
+            "daily1_45_feas": ",".join(str(item) for item in range(1, 46)),
+        },
+        "rejected_loss_profiles": [
+            "forecast_path_v1_baseline",
+            "decision_utility_hit_risk_aux_v1",
+            "decision_utility_rank_aux_v1",
+        ],
+        "stage3_architecture_allowed": bool(stage3_candidates),
+        "stage3_architecture_gate": "test rank IC/spread/hit lift all positive across seeds, mean monthly positive rate >= 0.75, max test negative months <= 2",
+        "stage3_candidates": stage3_candidates,
+        "default_next_action": "run_stage2_horizon_grid_calibration",
+        "boundary": "research-only / shadow-only; no active promotion, production root, trade-plan, paper account, or broker integration",
+    }
+
+
+def calibration_review_markdown(report: dict[str, Any]) -> str:
+    decision = next_stage_decision(report)
+    aggregates = [
+        row
+        for row in profile_aggregate_rows(report)
+        if row.get("role") == "test" and row.get("score_name") == "pred_decision_score"
+    ]
+    lines = [
+        "# Alpha Multi-Horizon Calibration Review",
+        "",
+        f"- status: `{report.get('status', '')}`",
+        "- path-only baseline rejected: `forecast_path_v1_baseline` remains a negative control, not a Stage 2 candidate.",
+        "- utility family kept: model-native decision utility remains the main research direction.",
+        "- path-aux continue: `decision_utility_path_aux_v1` is the current primary Stage 2 candidate.",
+        "- horizon chooser not solved: long-horizon concentration remains a calibration issue, not promotion evidence.",
+        "- boundary: research-only / shadow-only; no active manifest, production root, trade-plan, paper account, or broker integration.",
+        "",
+        "## Stage 2 Decision",
+        "",
+        f"- selected loss profiles: `{', '.join(decision['stage2_selected_loss_profiles'])}`",
+        f"- architecture allowed now: `{decision['stage3_architecture_allowed']}`",
+        "",
+        "## Test Aggregates",
+    ]
+    for row in sorted(aggregates, key=lambda item: _finite_float(item.get("rank_ic_mean")), reverse=True):
+        lines.append(
+            f"- `{row.get('loss_profile')}`: rank_ic_mean=`{_finite_float(row.get('rank_ic_mean')):.6f}`, "
+            f"spread_mean=`{_finite_float(row.get('spread_mean')):.6f}`, "
+            f"monthly_positive_rate_mean=`{_finite_float(row.get('monthly_positive_rate_mean')):.6f}`, "
+            f"stage3_weak_gate_pass=`{bool(row.get('stage3_weak_gate_pass'))}`"
+        )
+    return "\n".join(lines) + "\n"
 
 
 def horizon_grid_comparison_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
@@ -422,10 +735,18 @@ def write_output_aux_profile_comparison(report: dict[str, Any], output_dir: str 
     root.mkdir(parents=True, exist_ok=True)
     output_profile_csv = root / "output_profile_comparison.csv"
     horizon_grid_csv = root / "horizon_grid_comparison.csv"
+    profile_aggregate_csv = root / "profile_aggregate.csv"
+    score_variant_csv = root / "score_variant_comparison.csv"
+    next_stage_json = root / "next_stage_decision.json"
+    calibration_review_md = root / "calibration_review.md"
     interaction_json = root / "architecture_input_interaction_report.json"
     verdict_md = root / "research_verdict.md"
     pd.DataFrame(output_profile_comparison_rows(report)).to_csv(output_profile_csv, index=False, encoding="utf-8")
     pd.DataFrame(horizon_grid_comparison_rows(report)).to_csv(horizon_grid_csv, index=False, encoding="utf-8")
+    pd.DataFrame(profile_aggregate_rows(report)).to_csv(profile_aggregate_csv, index=False, encoding="utf-8")
+    pd.DataFrame(score_variant_comparison_rows(report)).to_csv(score_variant_csv, index=False, encoding="utf-8")
+    next_stage_json.write_text(json.dumps(_jsonable(next_stage_decision(report)), ensure_ascii=False, indent=2), encoding="utf-8")
+    calibration_review_md.write_text(calibration_review_markdown(report), encoding="utf-8")
     interaction_json.write_text(json.dumps(_jsonable(report), ensure_ascii=False, indent=2), encoding="utf-8")
     verdict_lines = [
         "# Alpha Multi-Horizon Output/Aux/Grid Comparison",
@@ -445,6 +766,10 @@ def write_output_aux_profile_comparison(report: dict[str, Any], output_dir: str 
     return {
         "output_profile_comparison_csv": output_profile_csv,
         "horizon_grid_comparison_csv": horizon_grid_csv,
+        "profile_aggregate_csv": profile_aggregate_csv,
+        "score_variant_comparison_csv": score_variant_csv,
+        "next_stage_decision_json": next_stage_json,
+        "calibration_review_md": calibration_review_md,
         "architecture_input_interaction_report_json": interaction_json,
         "research_verdict_md": verdict_md,
     }

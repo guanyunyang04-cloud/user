@@ -16,7 +16,7 @@ REFERENCE_FILE_PATTERNS = (
     re.compile(r"^(brain_native|brain_system|api_agent)_.+\.md$"),
 )
 STUDY_TAG_PATTERN = re.compile(
-    r"\b(?:self_opt_study|protocol|path20|alpha_path20|mh_utility|mh_short|mh_mid|mh_long|mh_out|alpha_multi_horizon)_[A-Za-z0-9_]+"
+    r"\b(?:self_opt_study|protocol|path20|alpha_path20|mh_utility|mh_short|mh_mid|mh_long|mh_out|mh_grid|alpha_multi_horizon)_[A-Za-z0-9_]+"
 )
 
 

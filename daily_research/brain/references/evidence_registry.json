@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 67,
+  "record_count": 68,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -192,6 +192,51 @@
       "dataset_ids": [
         "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
       ]
+    },
+    {
+      "id": "alpha_multi_horizon_stage2_calibration_status_20260525",
+      "date": "2026-05-25",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_multi_horizon_stage2_calibration_status_20260525.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [
+        "alpha_multi_horizon_utility_policy_v1",
+        "mh_out_decision_utility_v1_baseline_fullgrid_seed7_20260525_01",
+        "mh_out_decision_utility_v1_baseline_fullgrid_seed11_20260525_01",
+        "mh_out_decision_utility_v1_baseline_fullgrid_seed19_20260525_01",
+        "mh_out_decision_utility_path_aux_v1_fullgrid_seed7_20260525_01",
+        "mh_out_decision_utility_path_aux_v1_fullgrid_seed11_20260525_01",
+        "mh_out_decision_utility_path_aux_v1_fullgrid_seed19_20260525_01",
+        "mh_grid_decision_utility_path_aux_v1_sparse_long_seed7_20260525_02",
+        "mh_grid_decision_utility_path_aux_v1_sparse_long_seed11_20260525_02",
+        "mh_grid_decision_utility_path_aux_v1_sparse_long_seed19_20260525_02",
+        "mh_grid_decision_utility_path_aux_v1_dense_short_mid_seed7_20260525_02",
+        "mh_grid_decision_utility_path_aux_v1_dense_short_mid_seed11_20260525_02",
+        "mh_grid_decision_utility_path_aux_v1_dense_short_mid_seed19_20260525_02",
+        "mh_grid_decision_utility_path_aux_v1_daily1_45_feas_seed7_20260525_02",
+        "mh_grid_decision_utility_v1_baseline_sparse_long_seed7_20260525_02",
+        "mh_grid_decision_utility_v1_baseline_sparse_long_seed11_20260525_02",
+        "mh_grid_decision_utility_v1_baseline_sparse_long_seed19_20260525_02",
+        "mh_grid_decision_utility_v1_baseline_dense_short_mid_seed7_20260525_02",
+        "mh_grid_decision_utility_v1_baseline_dense_short_mid_seed11_20260525_02",
+        "mh_grid_decision_utility_v1_baseline_dense_short_mid_seed19_20260525_02",
+        "mh_grid_decision_utility_v1_baseline_daily1_45_feas_seed7_20260525_02"
+      ],
+      "verdict": "Status: `stage2_completed / shadow-only / research-only`.; Mainline: `alpha_multi_horizon_utility_policy_v1`.; Verdict: Stage 2 horizon-grid calibration completed for `decision_utility_path_aux_v1` and `decision_utility_v1_baseline`. No non-daily multi-seed grid passed the Stage 3 architecture gate.; Decision: do not launch `patch_transformer` / `stock_mixer_sequence` architecture expansion from this evidence. Continue score/loss/horizon calibration first.",
+      "blockers": [
+        "Progress: `daily_research/output/path_policy/studies/mh_horizon_grid_calibration_20260525_02/stage2_progress.json` reported `completed`, `task_count=14`, `failed_tags=[]`."
+      ],
+      "next_allowed_actions": [
+        "Prefer focused score/loss/horizon calibration around `decision_utility_path_aux_v1`.",
+        "Investigate why full grid has positive all-seed rank/spread/hit but weak monthly stability.",
+        "Treat daily `1..45` as a promising information-density clue; run multi-seed daily only if the next objective is explicitly feasibility-to-stability conversion.",
+        "Do not promote or connect to active strategy from this evidence."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
     },
     {
       "id": "alpha_multi_horizon_target_function_shadow_seed7_20260524",
