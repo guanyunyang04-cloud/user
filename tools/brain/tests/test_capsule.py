@@ -128,24 +128,20 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertNotIn("summary", payload["main_context"])
         self.assertNotIn("hard_rules", payload["main_context"])
 
-    def test_capsule_long_task_intent_exposes_wait_contract_in_lite_context(self) -> None:
+    def test_capsule_long_task_wording_stays_in_brain_handoff(self) -> None:
         payload = build_task_capsule(
             task="三组 shadow-only seed7 长训练轮询",
             workflow="auto",
-            intent="long_task",
+            intent="mutate",
             verbosity="lite",
         )
 
-        self.assertEqual(payload["workflow"], "long_task")
-        self.assertIn("long_task_contract", payload)
-        contract = payload["long_task_contract"]
-        self.assertEqual(contract["poll_window_seconds"], 7200)
-        self.assertIn("Wait-Process -Id <pid> -Timeout 7200", contract["required_wait_command"])
-        self.assertTrue(contract["eta_required"])
-        self.assertIn("Start-Sleep", contract["forbidden_patterns"])
-        self.assertIn("estimated_remaining_seconds", contract["status_required_fields"])
+        self.assertEqual(payload["workflow"], "brain_handoff")
+        self.assertNotIn("long_task_contract", payload)
+        self.assertIn("guards", payload)
+        self.assertIn("preflight_blockers", payload)
 
-    def test_capsule_mutate_plan_title_selects_executing_plan_and_learning_hooks(self) -> None:
+    def test_capsule_mutate_plan_title_stays_in_brain_handoff(self) -> None:
         payload = build_task_capsule(
             task="将所有未完成计划结合在一起，全部完成",
             workflow="auto",
@@ -153,10 +149,10 @@ class BrainCapsuleTest(unittest.TestCase):
             verbosity="lite",
         )
 
-        self.assertEqual(payload["workflow"], "executing_plan")
-        self.assertIn("implement_signal", payload["workflow_selection"]["decision_sources"])
+        self.assertEqual(payload["workflow"], "brain_handoff")
+        self.assertIn("external_skill_signal", payload["workflow_selection"]["decision_sources"])
         hooks = payload["self_evolution_hooks"]
-        self.assertTrue(hooks["completion_review_required"])
+        self.assertFalse(hooks["completion_review_required"])
         self.assertIn("routing_or_workflow_conflict", hooks["review_triggers"])
 
 

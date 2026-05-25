@@ -7,12 +7,6 @@
     {"id": "brain_system_audit", "title": "Brain System Audit", "category": "workspace_governance", "playbook": "brain/workflows/playbooks/core.json#brain_system_audit"},
     {"id": "brain_architecture_refactor", "title": "Brain Architecture Refactor", "category": "workspace_governance", "playbook": "brain/workflows/playbooks/core.json#brain_architecture_refactor"},
     {"id": "brain_writeback", "title": "Brain Writeback", "category": "workspace_governance", "playbook": "brain/workflows/playbooks/core.json#brain_writeback"},
-    {"id": "brainstorming_design", "title": "Brainstorming Design", "category": "brain_native_superpowers", "playbook": "brain/workflows/playbooks/core.json#brainstorming_design"},
-    {"id": "writing_plan", "title": "Writing Plan", "category": "brain_native_superpowers", "playbook": "brain/workflows/playbooks/core.json#writing_plan"},
-    {"id": "executing_plan", "title": "Executing Plan", "category": "brain_native_superpowers", "playbook": "brain/workflows/playbooks/core.json#executing_plan"},
-    {"id": "systematic_debugging", "title": "Systematic Debugging", "category": "brain_native_superpowers", "playbook": "brain/workflows/playbooks/core.json#systematic_debugging"},
-    {"id": "long_task", "title": "Long Task Execution", "category": "brain_native_superpowers", "playbook": "brain/workflows/playbooks/core.json#long_task"},
-    {"id": "verification_before_completion", "title": "Verification Before Completion", "category": "brain_native_superpowers", "playbook": "brain/workflows/playbooks/core.json#verification_before_completion"},
-    {"id": "brain_writeback_verified", "title": "Brain Writeback Verified", "category": "brain_native_superpowers", "playbook": "brain/workflows/playbooks/core.json#brain_writeback_verified"}
+    {"id": "brain_writeback_verified", "title": "Brain Writeback Verified", "category": "workspace_governance", "playbook": "brain/workflows/playbooks/core.json#brain_writeback_verified"}
   ]
 }

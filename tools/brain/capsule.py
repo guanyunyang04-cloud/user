@@ -167,7 +167,7 @@ def _skill_sync_status() -> dict[str, Any]:
 def _preflight_blockers(*, routing: dict[str, Any], main_context: dict[str, Any], intent: str, guards: dict[str, Any]) -> list[str]:
     blockers: list[str] = []
     normalized_intent = str(intent or "read")
-    if normalized_intent in {"mutate", "long_task", "writeback"} and not bool(main_context.get("git", {}).get("on_main")):
+    if normalized_intent in {"mutate", "writeback"} and not bool(main_context.get("git", {}).get("on_main")):
         blockers.append("not_on_main_for_mutation")
     if routing.get("status") == "ambiguous":
         blockers.append("ambiguous_routing")
@@ -193,24 +193,11 @@ def build_task_capsule(
     context_profile = normalize_verbosity(verbosity)
     routing = route_task_to_brain(task)
     selected_brain_id = str(routing.get("selected_brain_id", "") or "")
-    if workflow == "auto" and str(intent or "") == "long_task":
-        selection = {
-            "task": task,
-            "intent": str(intent or "read"),
-            "selected_workflow": "long_task",
-            "reason": "long_task intent requested",
-            "matched_terms": ["long_task"],
-            "decision_sources": ["intent_long_task_override"],
-            "confidence": "high",
-            "intent_override_applied": True,
-            "ambiguous_signals": [],
-        }
-    else:
-        selection = (
-            select_workflow_for_task(task, intent=str(intent or "read"))
-            if workflow == "auto"
-            else {"selected_workflow": workflow, "reason": "explicit workflow requested"}
-        )
+    selection = (
+        select_workflow_for_task(task, intent=str(intent or "read"))
+        if workflow == "auto"
+        else {"selected_workflow": workflow, "reason": "explicit workflow requested"}
+    )
     workflow_id = str(selection.get("selected_workflow", "") or "brain_handoff")
     child_registry_id = selected_brain_id if selected_brain_id in child_brain_ids() else None
     registry = load_workflow_registry(child_registry_id)
@@ -237,7 +224,7 @@ def build_task_capsule(
     main_context = compact_main_context(raw_main_context, profile=context_profile)
     skill_status = _skill_sync_status()
     preflight_blockers = _preflight_blockers(routing=routing, main_context=main_context, intent=intent, guards=guards)
-    mutation_allowed = str(intent or "read") not in {"mutate", "long_task", "writeback"} or "not_on_main_for_mutation" not in preflight_blockers
+    mutation_allowed = str(intent or "read") not in {"mutate", "writeback"} or "not_on_main_for_mutation" not in preflight_blockers
     payload: dict[str, Any] = {
         "schema_version": 2,
         "task": task,
@@ -266,9 +253,6 @@ def build_task_capsule(
         "self_evolution_hooks": {
             "completion_review_required": workflow_id
             in {
-                "executing_plan",
-                "long_task",
-                "systematic_debugging",
                 "brain_maintenance",
                 "brain_architecture_refactor",
                 "brain_writeback_verified",
@@ -279,7 +263,7 @@ def build_task_capsule(
                 "user_reported_repeated_failure",
                 "missing_guard_or_regression_test",
                 "stale_skill_or_brain_contract",
-                "long_task_contract_violation",
+                "long_task_monitor_violation",
             ],
             "proposal_command": (
                 f"{PYTHON_EXECUTABLE} brain/skills/workspace-brain/scripts/brain_runtime.py "
@@ -289,9 +273,6 @@ def build_task_capsule(
             ),
         },
     }
-    long_task_contract = workflow_state.get("registry_entry", {}).get("long_task_contract", {})
-    if str(intent or "") == "long_task" and isinstance(long_task_contract, dict) and long_task_contract:
-        payload["long_task_contract"] = dict(long_task_contract)
     if selected_brain_id in child_brain_ids() and routing.get("status") == "selected":
         raw_child_context = _child_context(selected_brain_id, task, workflow_id, study_tag)
         payload["child_context"] = compact_child_context(raw_child_context, profile=context_profile)

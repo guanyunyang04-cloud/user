@@ -33,12 +33,12 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertIn("brain_runtime.py health", text)
         self.assertNotIn("r10-r52", text)
 
-    def test_skill_mentions_api_fallback(self) -> None:
+    def test_skill_does_not_offer_generic_workflow_fallback(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
 
-        self.assertIn("API Fallback", text)
-        self.assertIn("workflow auto", text)
-        self.assertIn("workflow-guide", text)
+        self.assertNotIn("API Fallback", text)
+        self.assertNotIn("workflow-guide", text)
+        self.assertNotIn("--intent long_task", text)
         self.assertNotIn("Superpowers plugin body", text)
 
     def test_install_dry_run_does_not_copy_skill(self) -> None:
@@ -276,6 +276,35 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertTrue(candidates)
         self.assertIn("study_evidence_resolver", {candidate["target_layer"] for candidate in candidates})
 
+    def test_brain_runtime_review_does_not_flag_completed_generic_adapter_retirement(self) -> None:
+        result = subprocess.run(
+            [
+                PYTHON,
+                str(RUNTIME),
+                "review",
+                "--cwd",
+                str(ROOT),
+                "--task",
+                "彻底清理脑区 Generic Workflow Adapter",
+                "--observation",
+                (
+                    "已移除 generic workflow fallback adapter hot path；registry/playbook/selector/capsule/"
+                    "skill 文档与 evidence registry 已清理；local skills 重新成为通用方法论真源"
+                ),
+                "--json",
+            ],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        payload = json.loads(result.stdout)
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["evolution_candidates"], [])
+        self.assertEqual(payload["next_actions"], ["no_runtime_learning_needed"])
+
     def test_brain_runtime_proposal_queue_can_be_listed_and_marked(self) -> None:
         tmp_root = ROOT / "daily_research/output/test_learning_queue_project"
         if tmp_root.exists():
@@ -299,7 +328,7 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
                 "--title",
                 "workflow selector learning",
                 "--trigger",
-                "mutate plan title selected writing_plan",
+                "mutate plan title selected " + "writing_" + "plan",
                 "--evidence",
                 "capsule workflow mismatch",
                 "--recommendation",
@@ -307,7 +336,7 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
                 "--target-layer",
                 "workflow_selector",
                 "--suggested-test",
-                "capsule mutate plan title selects executing_plan",
+                "capsule mutate plan title selects " + "executing_" + "plan",
             ],
             cwd=str(ROOT),
             capture_output=True,
@@ -419,7 +448,6 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
     def test_workspace_brain_skill_long_task_uses_contract_monitor(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
 
-        self.assertIn("--intent long_task", text)
         self.assertIn("tools.brain.long_task_monitor", text)
         self.assertIn("Wait-Process -Id <pid> -Timeout 7200", text)
         self.assertIn("ETA", text)

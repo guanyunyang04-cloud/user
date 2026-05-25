@@ -466,13 +466,41 @@ def review(
             "tests_guard",
             "guard the long-task monitor contract and require ETA status in polling reports",
         )
-    if any(term in text for term in ("writing_plan", "executing_plan", "workflow", "路由误判", "intent")):
+    workflow_conflict_terms = (
+        "workflow selector",
+        "workflow_selector",
+        "workflow mismatch",
+        "wrong workflow",
+        "selected wrong workflow",
+        "capsule workflow mismatch",
+        "intent mismatch",
+        "intent override",
+        "路由误判",
+        "工作流误判",
+        "选错 workflow",
+    )
+    if any(term in text for term in workflow_conflict_terms):
         add_candidate(
             "workflow_selector_conflict",
             "workflow_selector",
-            "make intent and explicit action verbs participate in workflow selection",
+            "tighten brain-native workflow selector rules while keeping generic method terms owned by local skills",
         )
-    if any(term in text for term in ("skill", "同步", "stale skill", "global skill")):
+    skill_gap_terms = (
+        "stale skill",
+        "global skill",
+        "stale_or_missing_global_skill",
+        "skill sync",
+        "skill_install",
+        "skill out of sync",
+        "out of sync",
+        "not in sync",
+        "技能不同步",
+        "skill 不同步",
+        "未同步",
+        "安装版落后",
+        "同步失败",
+    )
+    if any(term in text for term in skill_gap_terms):
         add_candidate(
             "skill_sync_or_contract_gap",
             "skill",

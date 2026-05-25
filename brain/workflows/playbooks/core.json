@@ -9,6 +9,7 @@
       "forbidden_actions": ["bypass_main_brain_entry", "default_ambiguous_tasks_to_daily_research", "modify_active_execution_artifact"],
       "artifacts": ["brain/brain_manifest.json", "brain/workflows/registry.json"],
       "writeback_routes": {"workspace_state": "brain/state_center.md", "workspace_operations": "brain/operations_center.md", "workspace_governance": "brain/governance_layer.md"},
+      "stop_conditions": [],
       "completion": ["schema_v2_capsule_returned", "routing_status_explicit", "guards_listed"],
       "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json"]
     },
@@ -20,6 +21,7 @@
       "forbidden_actions": ["start_training", "modify_active_execution_artifact", "write_runtime_state_as_brain_truth"],
       "artifacts": ["brain/", "brain/references/"],
       "writeback_routes": {"workspace_state": "brain/state_center.md", "workspace_knowledge": "brain/knowledge_center.md", "workspace_operations": "brain/operations_center.md"},
+      "stop_conditions": [],
       "completion": ["doc_guard_ok", "brain_integrity_ok", "active_artifact_unchanged"],
       "validation_commands": ["C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json"]
     },
@@ -55,89 +57,9 @@
       "forbidden_actions": ["write_unverified_latest_to_brain", "append_dated_logs_to_main_centers", "modify_active_execution_artifact"],
       "artifacts": ["brain/output/brain_workflow/writeback_plan_*.json"],
       "writeback_routes": {"workspace_state": "brain/state_center.md", "workspace_operations": "brain/operations_center.md", "daily_research_state": "daily_research/brain/state_center.md", "daily_research_references": "daily_research/brain/references/"},
+      "stop_conditions": ["writeback_source_unverified", "route_unclear"],
       "completion": ["routes_explicit", "archive_boundary_explicit", "doc_guard_ok_after_write"],
       "validation_commands": ["C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check"]
-    },
-    "brainstorming_design": {
-      "description": "Turn a new feature, route, architecture change, or experiment idea into a clear design before implementation.",
-      "preflight": ["task_capsule", "workspace_context_read", "scope_boundary_identified"],
-      "checklist": ["state_goal_success_criteria", "separate_facts_inferences_assumptions_boundaries", "compare_approaches", "select_recommended_design", "define_acceptance_criteria"],
-      "allowed_commands": ["C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task <task> --workflow auto --json", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow query --q <term> --json"],
-      "forbidden_actions": ["write_implementation_code_before_design", "start_long_training", "modify_active_execution_artifact"],
-      "artifacts": ["brain/references/", "daily_research/brain/references/"],
-      "stop_conditions": ["goal_or_success_criteria_unclear", "scope_too_large_for_one_design", "required_context_missing"],
-      "writeback_routes": {"references": "brain/references/", "operations": "brain/operations_center.md"},
-      "completion": ["design_is_decision_complete", "scope_boundaries_explicit", "acceptance_criteria_written"],
-      "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json"]
-    },
-    "writing_plan": {
-      "description": "Convert an approved design or stable intent into an implementation-ready plan without executing it.",
-      "preflight": ["task_capsule", "design_or_user_intent_read", "repo_context_checked"],
-      "checklist": ["define_implementation_steps", "define_interfaces_and_data_flow", "define_edge_cases_and_failure_modes", "define_tests_and_guards", "record_assumptions_and_defaults"],
-      "allowed_commands": ["C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task <task> --workflow auto --json", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow workflow-guide --workflow writing_plan --json"],
-      "forbidden_actions": ["edit_tracked_files_to_execute_plan", "start_training", "modify_active_execution_artifact"],
-      "artifacts": ["brain/references/", "daily_research/brain/references/"],
-      "stop_conditions": ["implementation_decision_missing", "test_or_guard_plan_missing", "scope_boundary_ambiguous"],
-      "writeback_routes": {"references": "brain/references/"},
-      "completion": ["plan_is_decision_complete", "tests_and_guards_explicit", "assumptions_recorded"],
-      "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json"]
-    },
-    "executing_plan": {
-      "description": "Execute an explicit user-approved plan step by step with verification and writeback.",
-      "preflight": ["task_capsule", "plan_read", "active_artifact_guard_clean"],
-      "checklist": ["review_plan_for_conflicts", "execute_steps_in_order", "stop_and_debug_on_failure", "run_required_guards", "writeback_verified_evidence"],
-      "allowed_commands": ["C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task <task> --workflow auto --json", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow workflow-guide --workflow executing_plan --json"],
-      "forbidden_actions": ["skip_plan_steps", "skip_verification", "treat_failed_or_interrupted_work_as_complete", "modify_active_execution_artifact"],
-      "artifacts": ["brain/references/", "daily_research/brain/references/"],
-      "stop_conditions": ["plan_conflict_or_gap_found", "verification_fails_repeatedly", "required_dependency_missing"],
-      "writeback_routes": {"references": "brain/references/", "state": "brain/state_center.md", "operations": "brain/operations_center.md"},
-      "completion": ["all_plan_items_accounted_for", "fresh_guards_passed", "writeback_done_if_evidence_changed"],
-      "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json", "git diff --check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json"]
-    },
-    "systematic_debugging": {
-      "description": "Diagnose bugs, failed tests, interrupted training, CUDA/OOM issues, or abnormal metrics before proposing fixes.",
-      "preflight": ["task_capsule", "symptom_and_artifact_identified", "active_artifact_guard_clean"],
-      "checklist": ["reproduce_or_read_failure_artifact", "identify_smallest_likely_cause", "make_minimal_fix", "add_or_run_regression_test", "verify_original_symptom_is_gone"],
-      "allowed_commands": ["C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task <task> --workflow auto --json", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow query --q <error_or_tag> --json"],
-      "forbidden_actions": ["guess_fix_without_evidence", "large_unrelated_refactor", "modify_active_execution_artifact"],
-      "artifacts": ["brain/references/", "daily_research/brain/references/"],
-      "stop_conditions": ["cannot_reproduce_or_locate_failure", "fix_requires_policy_or_scope_decision", "resource_risk_exceeds_current_boundary"],
-      "writeback_routes": {"references": "brain/references/", "operations": "brain/operations_center.md"},
-      "completion": ["root_cause_or_best_evidence_stated", "regression_guard_run", "residual_risk_recorded"],
-      "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json", "git diff --check"]
-    },
-    "long_task": {
-      "description": "Launch or monitor long-running training, research, build, or data jobs with PID-bound wait windows and ETA reporting.",
-      "preflight": ["task_capsule_with_long_task_intent", "active_artifact_guard_clean", "progress_or_log_path_identified"],
-      "checklist": ["start_process_with_pid", "wait_with_pid_bound_window", "report_elapsed_and_eta_each_poll", "inspect_logs_and_artifact_mtime", "continue_only_if_pid_or_artifacts_progress"],
-      "allowed_commands": ["Wait-Process -Id <pid> -Timeout 7200", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor template --json", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor status --pid <pid> --progress <progress.json> --stdout <stdout.log> --stderr <stderr.log> --artifact-dir <artifact_dir> --json", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor wait-once --pid <pid> --timeout 7200 --progress <progress.json> --stdout <stdout.log> --stderr <stderr.log> --artifact-dir <artifact_dir> --json"],
-      "forbidden_actions": ["fixed_sleep_polling", "use_Start_Sleep_as_primary_long_task_wait", "treat_wait_window_timeout_as_business_failure", "claim_completion_without_exit_or_artifact_verification", "modify_active_execution_artifact"],
-      "artifacts": ["progress_json", "stdout_log", "stderr_log", "artifact_dir"],
-      "stop_conditions": ["pid_missing", "progress_and_logs_missing", "stalled_without_artifact_or_log_progress", "resource_risk_exceeds_current_boundary"],
-      "writeback_routes": {"references": "brain/references/", "operations": "brain/operations_center.md"},
-      "completion": ["pid_bound_wait_used", "eta_reported_each_poll", "logs_or_artifact_mtime_checked", "exit_or_completion_artifacts_verified"],
-      "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json", "git diff --check"],
-      "long_task_contract": {
-        "required_wait_command": "Wait-Process -Id <pid> -Timeout 7200",
-        "poll_window_seconds": 7200,
-        "forbidden_patterns": ["Start-Sleep", "fixed sleep polling", "timeout as business failure"],
-        "status_required_fields": ["pid_alive", "elapsed_seconds", "estimated_remaining_seconds", "eta_at", "progress_percent", "latest_metric", "last_log_lines", "artifact_mtime", "decision"],
-        "eta_required": true,
-        "continue_conditions": ["pid_alive", "progress_updated", "log_updated", "artifact_mtime_updated"],
-        "stop_conditions": ["process_exited_and_artifacts_verified", "process_exited_with_error", "stalled_or_waiting_requires_inspection", "resource_risk_exceeds_current_boundary"]
-      }
-    },
-    "verification_before_completion": {
-      "description": "Run fresh verification before claiming work is complete, fixed, passing, or safe.",
-      "preflight": ["task_capsule", "claim_to_verify_identified"],
-      "checklist": ["identify_command_that_proves_claim", "run_fresh_verification", "read_exit_code_and_output", "state_result_and_residual_risk", "avoid_completion_claim_if_verification_failed"],
-      "allowed_commands": ["C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json", "git diff --check", "git diff -- daily_research/output/active_execution_strategy.json"],
-      "forbidden_actions": ["claim_complete_without_fresh_verification", "ignore_failed_guard", "modify_active_execution_artifact"],
-      "artifacts": ["brain/references/", "daily_research/brain/references/"],
-      "stop_conditions": ["verification_command_missing", "verification_fails", "output_not_read_or_ambiguous"],
-      "writeback_routes": {"references": "brain/references/"},
-      "completion": ["fresh_verification_passed", "claim_matches_evidence", "active_artifact_diff_checked"],
-      "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json", "git diff --check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json"]
     },
     "brain_writeback_verified": {
       "description": "Write verified mainline, evidence, experiment, or contract changes back into brain references and indexes.",

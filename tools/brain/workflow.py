@@ -78,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     capsule.add_argument("--task", default="")
     capsule.add_argument("--workflow", default="brain_handoff")
     capsule.add_argument("--study-tag", default="")
-    capsule.add_argument("--intent", default="read", choices=("read", "mutate", "long_task", "writeback"))
+    capsule.add_argument("--intent", default="read", choices=("read", "mutate", "writeback"))
     capsule.add_argument("--verbosity", default="lite", choices=("lite", "standard", "full"))
     capsule.add_argument("--json", action="store_true")
     capsule.add_argument("--write-output", action="store_true")
@@ -104,7 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     selector = sub.add_parser("select-workflow", help="Select a brain workflow from task intent.")
     selector.add_argument("--task", required=True)
-    selector.add_argument("--intent", default="read", choices=("read", "mutate", "long_task", "writeback"))
+    selector.add_argument("--intent", default="read", choices=("read", "mutate", "writeback"))
     selector.add_argument("--json", action="store_true")
     selector.add_argument("--write-output", action="store_true")
 

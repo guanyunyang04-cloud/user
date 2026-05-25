@@ -24,8 +24,8 @@
   - 通用操作技能归本机 `C:/Users/ASUS/.codex/skills` 维护；brain 不复制 skill 正文，不把 TDD、调试、计划、验证、前端、安全或部署方法写成平行技能库。
 - `brain-cognitive-rule`
   - brain 只保留事实、推断、假设、权威层级、项目状态、风险边界、证据索引、写回路由和必要命令入口；脑区不是通用操作技能仓库。
-- `workspace-fallback-rule`
-  - API 或 no-plugin 会话无法加载本机 skills 时，可以使用主脑 `tools.brain.workflow capsule/workflow-guide` 作为本地 fallback；fallback 只承载主脑路由、项目约束、预检、证据边界和验证调度，不宣称替代本机 skills。
+- `decisive-cleanup-rule`
+  - 对确定性收益、低事实损失、可测试验证的清理，默认彻底移除旧路径，不保留兼容层；保守兼容只有在仍有真实外部调用者或不可替代证据价值时才成立。
 - `skills-brain-tools-matrix`
   - 本机 skills 管通用操作能力；主脑和分脑管认知治理与项目真相；项目 `tools/` 管可执行守卫。项目安全边界高于通用 skill 默认行为。
 ## 2. 已验证教训

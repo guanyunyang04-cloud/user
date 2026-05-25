@@ -25,6 +25,16 @@ from tools.brain.platform import (
 )
 from tools.brain.adapters import daily_research as daily_research_adapter
 
+ROOT = Path(__file__).resolve().parents[3]
+REMOVED_WORKFLOWS = {
+    "brainstorming_" + "design",
+    "writing_" + "plan",
+    "executing_" + "plan",
+    "systematic_" + "debugging",
+    "verification_before_" + "completion",
+    "long_task",
+}
+
 
 class BrainPlatformTest(unittest.TestCase):
     def test_resolve_bootstrap_builds_daily_research_handoff_capsule(self) -> None:
@@ -71,9 +81,11 @@ class BrainPlatformTest(unittest.TestCase):
             "brain_writeback",
             "brain_system_audit",
             "brain_architecture_refactor",
-            "long_task",
+            "brain_writeback_verified",
         }
+        removed = REMOVED_WORKFLOWS
         self.assertTrue(expected.issubset(set(registry)))
+        self.assertFalse(removed.intersection(registry))
         for workflow_id in expected:
             workflow = registry[workflow_id]
             for key in ("preflight", "artifacts", "writeback_routes", "forbidden_actions"):
@@ -82,17 +94,12 @@ class BrainPlatformTest(unittest.TestCase):
         self.assertIn("continuous_policy_safe_screening", child_registry)
         self.assertIn("continuous_policy_result_review", child_registry)
 
-    def test_long_task_workflow_declares_machine_contract(self) -> None:
-        registry = load_workflow_registry()
-        workflow = registry["long_task"]
+    def test_workspace_registry_has_no_generic_adapter_category(self) -> None:
+        registry_path = ROOT / "brain/workflows/registry.json"
+        payload = json.loads(registry_path.read_text(encoding="utf-8"))
+        categories = {str(item.get("category", "")) for item in payload.get("workflows", [])}
 
-        self.assertIn("long_task_contract", workflow)
-        contract = workflow["long_task_contract"]
-        self.assertEqual(contract["poll_window_seconds"], 7200)
-        self.assertIn("Wait-Process -Id <pid> -Timeout 7200", contract["required_wait_command"])
-        self.assertTrue(contract["eta_required"])
-        self.assertIn("Start-Sleep", contract["forbidden_patterns"])
-        self.assertNotIn("Start-Sleep", "\n".join(workflow["allowed_commands"]))
+        self.assertNotIn("brain_native_" + "superpowers", categories)
 
     def test_split_workflow_registry_and_catalog_are_available(self) -> None:
         registry = load_workflow_registry()
