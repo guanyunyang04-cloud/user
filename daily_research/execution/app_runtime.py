@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
@@ -64,9 +65,24 @@ def _default_state() -> dict[str, Any]:
 
 def _write_text_atomic(path: Path, text: str) -> None:
     ensure_runtime_layout()
-    temp_path = path.with_suffix(path.suffix + ".tmp")
-    temp_path.write_text(text, encoding="utf-8")
-    temp_path.replace(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(
+        dir=str(path.parent),
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        text=True,
+    )
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        temp_path.replace(path)
+    finally:
+        try:
+            if temp_path.exists():
+                temp_path.unlink()
+        except OSError:
+            pass
 
 
 def read_json_file(path: Path) -> dict[str, Any]:
@@ -349,6 +365,15 @@ def clear_lock_file() -> None:
     append_event("lock_cleared")
 
 
+def _lock_payload_is_stale(payload: dict[str, Any]) -> bool:
+    job_id = str(payload.get("job_id", "") or "").strip() if isinstance(payload, dict) else ""
+    if not job_id:
+        return False
+    metadata = read_json_file(JOBS_ROOT / job_id / "metadata.json")
+    status = str(metadata.get("status", "") or "").strip().lower()
+    return status in {"succeeded", "failed", "blocked", "abandoned", "skipped"}
+
+
 class ExecutionAppLock(AbstractContextManager["ExecutionAppLock"]):
     def __init__(self, *, job_id: str, task_name: str, force: bool = False) -> None:
         self.job_id = str(job_id)
@@ -360,7 +385,7 @@ class ExecutionAppLock(AbstractContextManager["ExecutionAppLock"]):
         ensure_runtime_layout()
         if LOCK_PATH.exists():
             existing = read_json_file(LOCK_PATH)
-            if not self.force:
+            if not self.force and not _lock_payload_is_stale(existing):
                 raise ExecutionAppLockError(
                     "Execution app lock is already held. "
                     f"job_id={existing.get('job_id', '')} task_name={existing.get('task_name', '')} "
@@ -373,12 +398,22 @@ class ExecutionAppLock(AbstractContextManager["ExecutionAppLock"]):
             "pid": os.getpid(),
             "acquired_at": now_iso(),
         }
-        write_json_file(LOCK_PATH, self.payload)
-        state = load_runtime_state()
-        state["lock"] = dict(self.payload)
-        write_runtime_state(state)
-        append_event("lock_acquired", **self.payload)
-        return self
+        try:
+            write_json_file(LOCK_PATH, self.payload)
+            state = load_runtime_state()
+            state["lock"] = dict(self.payload)
+            write_runtime_state(state)
+            append_event("lock_acquired", **self.payload)
+            return self
+        except Exception:
+            if LOCK_PATH.exists():
+                current = read_json_file(LOCK_PATH)
+                if str(current.get("job_id", "")) == self.job_id:
+                    try:
+                        LOCK_PATH.unlink()
+                    except OSError:
+                        pass
+            raise
 
     def __exit__(self, exc_type, exc, tb) -> None:
         if LOCK_PATH.exists():

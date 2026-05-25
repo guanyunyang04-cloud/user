@@ -788,6 +788,73 @@ def test_scheduler_tick_launches_auto_refresh_when_due(monkeypatch: pytest.Monke
     assert "--required-domains" in captured["passthrough_args"]
 
 
+def test_scheduler_tick_ignores_stale_lock_for_finished_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from daily_research.execution import app_service
+
+    captured: dict[str, Any] = {}
+    jobs_root = tmp_path / "jobs"
+    job_dir = jobs_root / "stale_failed_job"
+    job_dir.mkdir(parents=True)
+    (job_dir / "metadata.json").write_text(
+        json.dumps({"job_id": "stale_failed_job", "status": "failed", "task_name": "data-platform-refresh"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    lock_path = tmp_path / "execution_app.lock"
+    lock_path.write_text(
+        json.dumps({"job_id": "stale_failed_job", "task_name": "data-platform-refresh"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(app_service, "JOBS_ROOT", jobs_root)
+    monkeypatch.setattr(app_service, "LOCK_PATH", lock_path)
+    monkeypatch.setattr(app_service, "list_active_thread_job_ids", lambda: [])
+    monkeypatch.setattr(
+        app_service,
+        "scheduler_summary",
+        lambda: {
+            "enabled": True,
+            "post_close_time": "15:30",
+            "timezone": "Asia/Shanghai",
+            "last_auto_refresh": {},
+            "missed_status": "",
+        },
+    )
+    monkeypatch.setattr(app_service, "get_latest_completed_trading_date", lambda: "2026-05-22", raising=False)
+    monkeypatch.setattr(
+        app_service,
+        "data_sources_summary",
+        lambda: {
+            "status": "ok",
+            "next_refresh_action": "refresh",
+            "next_signal_action": "refresh",
+            "data_platform": {
+                "latest_completed_trading_date": "2026-05-22",
+                "default_refresh": {
+                    "as_of_date": "2026-05-22",
+                    "universe": "all_a",
+                    "domains": FORMAL_REFRESH_DOMAINS,
+                    "required_domains": FORMAL_REQUIRED_DOMAINS,
+                    "provider_plan": "formal_free_v3",
+                },
+            },
+        },
+    )
+
+    def fake_launch_task_async(**kwargs):
+        captured.update(kwargs)
+        return {"job_id": "auto-job", "task_name": kwargs["task_name"], "status": "queued"}
+
+    monkeypatch.setattr(app_service, "launch_task_async", fake_launch_task_async)
+    monkeypatch.setattr(app_service, "_scheduler_already_ran_for_date", lambda *_args, **_kwargs: False, raising=False)
+    monkeypatch.setattr(app_service, "_scheduler_time_is_due", lambda *_args, **_kwargs: True, raising=False)
+    monkeypatch.setattr(app_service, "_scheduler_auto_window_matches_latest_completed", lambda *_args, **_kwargs: True, raising=False)
+
+    result = app_service.run_scheduler_tick(trigger="auto_post_close")
+
+    assert result["status"] == "launched"
+    assert captured["task_name"] == "data-platform-refresh"
+
+
 def test_scheduler_tick_does_not_auto_backfill_when_site_was_offline_after_trading_day(monkeypatch: pytest.MonkeyPatch) -> None:
     from daily_research.execution import app_service
 
@@ -1607,6 +1674,50 @@ def test_status_payload_omits_continuous_policy() -> None:
     assert "continuous_policy" not in payload
 
 
+def test_status_payload_clears_stale_lock_for_finished_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from daily_research.execution import app_service
+
+    runtime_root = tmp_path / "runtime"
+    jobs_root = runtime_root / "jobs"
+    job_dir = jobs_root / "finished_job"
+    job_dir.mkdir(parents=True)
+    (job_dir / "metadata.json").write_text(
+        json.dumps({"job_id": "finished_job", "status": "failed", "task_name": "data-platform-refresh"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    lock_path = runtime_root / "execution_app.lock"
+    state_path = runtime_root / "runtime_state.json"
+    lock_path.write_text(json.dumps({"job_id": "finished_job", "task_name": "data-platform-refresh"}), encoding="utf-8")
+    state_path.write_text(
+        json.dumps(
+            {
+                "lock": {"job_id": "finished_job", "task_name": "data-platform-refresh"},
+                "current_job": {"job_id": "finished_job", "status": "running"},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(app_service, "RUNTIME_ROOT", runtime_root)
+    monkeypatch.setattr(app_service, "JOBS_ROOT", jobs_root)
+    monkeypatch.setattr(app_service, "LOCK_PATH", lock_path)
+    monkeypatch.setattr(app_service, "STATE_PATH", state_path)
+    monkeypatch.setattr(app_service, "EVENTS_PATH", runtime_root / "events.jsonl")
+    monkeypatch.setattr(app_service, "list_active_thread_job_ids", lambda: [])
+    monkeypatch.setattr(app_service, "paper_account_summary", lambda: {"status": "ok"})
+    monkeypatch.setattr(app_service, "positions_summary", lambda: {"exists": True, "headers_ok": True, "row_count": 0})
+    monkeypatch.setattr(app_service, "active_manifest_summary", lambda: {})
+    monkeypatch.setattr(app_service, "latest_trade_plan_summary", lambda **_: {"status": "missing"})
+    monkeypatch.setattr(app_service, "scheduler_summary", lambda: {})
+
+    payload = app_service.build_status_payload(history_limit=1)
+
+    assert payload["lock"] == {}
+    assert payload["current_job"] == {}
+    assert not lock_path.exists()
+
+
 def test_continuous_policy_api_is_removed_from_execution_console() -> None:
     from fastapi.testclient import TestClient
 
@@ -1617,6 +1728,27 @@ def test_continuous_policy_api_is_removed_from_execution_console() -> None:
     assert client.get("/api/continuous-policy").status_code == 404
     assert client.get("/api/models/continuous-policy-shadow").status_code == 404
     assert client.get("/continuous-policy").status_code == 404
+
+
+def test_runtime_json_atomic_writes_use_unique_temp_files(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from daily_research.execution import app_runtime
+
+    state_path = tmp_path / "runtime_state.json"
+    temp_paths: list[str] = []
+
+    def fake_replace(self: Path, target: Path) -> None:
+        temp_paths.append(self.name)
+        if len(temp_paths) == 1:
+            app_runtime.write_json_file(state_path, {"writer": "nested"})
+        target.write_text(self.read_text(encoding="utf-8"), encoding="utf-8")
+        self.unlink()
+
+    monkeypatch.setattr(Path, "replace", fake_replace)
+
+    app_runtime.write_json_file(state_path, {"writer": "outer"})
+
+    assert len(temp_paths) == 2
+    assert temp_paths[0] != temp_paths[1]
 
 
 def test_ui_paths_include_react_dist() -> None:

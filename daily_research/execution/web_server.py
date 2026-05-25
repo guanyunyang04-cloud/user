@@ -305,21 +305,24 @@ def create_app() -> FastAPI:
     def api_data_sources_refresh(request: DataRefreshRequest) -> JSONResponse:
         try:
             default_domains = list(app_service.FORMAL_DATA_PLATFORM_DOMAINS)
-            as_of_date = str(request.as_of_date or "").strip() or str(app_service.get_latest_completed_trading_date())
-            universe = str(request.universe or "").strip() or "all_a"
-            domains = [str(item).strip() for item in (request.domains or []) if str(item).strip()] or default_domains
             current_data = app_service.data_sources_summary()
+            default_refresh = dict(current_data.get("data_platform", {}).get("default_refresh", {}) or {})
             default_as_of = str(
-                current_data.get("data_platform", {})
-                .get("default_refresh", {})
-                .get("as_of_date", "")
+                default_refresh.get("as_of_date", "")
                 or current_data.get("data_platform", {}).get("latest_completed_trading_date", "")
-                or as_of_date
+                or app_service.get_latest_completed_trading_date()
             )
+            as_of_date = str(request.as_of_date or "").strip() or default_as_of
+            universe = str(request.universe or "").strip() or str(default_refresh.get("universe", "") or "all_a")
+            requested_domains = [str(item).strip() for item in (request.domains or []) if str(item).strip()]
+            default_refresh_domains = [
+                str(item).strip() for item in (default_refresh.get("domains", []) or default_domains) if str(item).strip()
+            ]
+            domains = requested_domains or default_refresh_domains or default_domains
             requested_is_default = (
                 not str(request.start_date or "").strip()
                 and universe == "all_a"
-                and [item for item in domains] == default_domains
+                and [item for item in domains] == default_refresh_domains
                 and str(as_of_date) == default_as_of
             )
             if (

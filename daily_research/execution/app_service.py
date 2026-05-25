@@ -1019,7 +1019,7 @@ def run_scheduler_tick(*, trigger: str = "auto_post_close") -> dict[str, Any]:
         return _persist_scheduler_decision({**decision, "status": "skipped_missed_while_offline"})
     if _scheduler_already_ran_for_date(scheduler, latest_completed):
         return _persist_scheduler_decision({**decision, "status": "skipped_already_ran"})
-    if _read_json(LOCK_PATH) or list_active_thread_job_ids():
+    if _has_active_runtime_job():
         return _persist_scheduler_decision({**decision, "status": "skipped_due_to_active_job"})
 
     data_sources = data_sources_summary()
@@ -1110,6 +1110,44 @@ def _persist_scheduler_decision(decision: dict[str, Any], *, update_last_auto: b
     write_runtime_state(state)
     append_event("scheduler_tick", **{key: value for key, value in decision.items() if key not in {"data_sources"}})
     return decision
+
+
+def _has_active_runtime_job() -> bool:
+    lock_payload = _read_json(LOCK_PATH)
+    if lock_payload:
+        if not _lock_payload_refers_to_finished_job(lock_payload):
+            return True
+        if not _clear_runtime_lock_payload(lock_payload):
+            return True
+    return bool(list_active_thread_job_ids())
+
+
+def _lock_payload_refers_to_finished_job(payload: dict[str, Any]) -> bool:
+    job_id = str(payload.get("job_id", "") or "").strip() if isinstance(payload, dict) else ""
+    if not job_id:
+        return False
+    metadata = _read_json(JOBS_ROOT / job_id / "metadata.json")
+    status = str(metadata.get("status", "") or "").strip().lower()
+    return status in {"succeeded", "failed", "blocked", "abandoned", "skipped"}
+
+
+def _clear_runtime_lock_payload(payload: dict[str, Any]) -> bool:
+    job_id = str(payload.get("job_id", "") or "").strip() if isinstance(payload, dict) else ""
+    try:
+        if LOCK_PATH.exists():
+            current = _read_json(LOCK_PATH)
+            if not job_id or str(current.get("job_id", "") or "") == job_id:
+                LOCK_PATH.unlink()
+        state = load_runtime_state()
+        if not job_id or str(state.get("lock", {}).get("job_id", "") or "") == job_id:
+            state["lock"] = {}
+        if not job_id or str(state.get("current_job", {}).get("job_id", "") or "") == job_id:
+            state["current_job"] = {}
+        write_runtime_state(state)
+        append_event("stale_lock_cleared", job_id=job_id)
+        return True
+    except Exception:
+        return False
 
 
 def _scheduler_time_is_due(scheduler: dict[str, Any], *, now: datetime | None = None) -> bool:
@@ -1652,6 +1690,10 @@ def build_status_payload(*, history_limit: int = 8) -> dict[str, Any]:
     _mark_abandoned_jobs()
     state = load_runtime_state()
     lock_payload = _read_json(LOCK_PATH)
+    if lock_payload and _lock_payload_refers_to_finished_job(lock_payload):
+        _clear_runtime_lock_payload(lock_payload)
+        state = load_runtime_state()
+        lock_payload = _read_json(LOCK_PATH)
     recent_jobs = list_recent_job_metadata(limit=history_limit)
     warnings: list[str] = []
     yolos_python = resolve_project_python_executable(sys.executable)
@@ -1730,6 +1772,9 @@ def build_doctor_payload() -> dict[str, Any]:
     add_check("task_registry_scripts", not missing_scripts, "全部任务脚本存在" if not missing_scripts else ", ".join(missing_scripts))
     add_check("runtime_layout", RUNTIME_ROOT.exists() and JOBS_ROOT.exists(), str(RUNTIME_ROOT.resolve()))
     lock_payload = _read_json(LOCK_PATH)
+    if lock_payload and _lock_payload_refers_to_finished_job(lock_payload):
+        _clear_runtime_lock_payload(lock_payload)
+        lock_payload = _read_json(LOCK_PATH)
     add_check("runtime_lock", not bool(lock_payload), "未锁定" if not lock_payload else json.dumps(lock_payload, ensure_ascii=False))
     add_check("web_dependency_fastapi", importlib.util.find_spec("fastapi") is not None, "fastapi")
     add_check("web_dependency_uvicorn", importlib.util.find_spec("uvicorn") is not None, "uvicorn")
