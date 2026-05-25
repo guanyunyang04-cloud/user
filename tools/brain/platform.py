@@ -729,8 +729,8 @@ def audit_brain_system(*, scope: str = "all") -> dict[str, Any]:
     }
 
 
-def resolve_study_evidence(study_tag: str) -> StudyEvidenceReport:
-    return daily_research_adapter.resolve_study_evidence(study_tag)
+def resolve_study_evidence(study_tag: str, workflow: str | None = None) -> StudyEvidenceReport:
+    return daily_research_adapter.resolve_study_evidence(study_tag, workflow=workflow)
 
 
 def _openmp_strict_env() -> dict[str, str]:
@@ -819,7 +819,7 @@ def build_workflow_state(workflow_id: str, *, study_tag: str | None = None, chil
     freshness = resolve_artifact_freshness()
     study_evidence: dict[str, Any] = {}
     if study_tag and normalized.startswith("continuous_policy"):
-        evidence = resolve_study_evidence(study_tag)
+        evidence = resolve_study_evidence(study_tag, workflow="continuous_policy")
         study_evidence = evidence.to_dict()
         gaps = list(evidence.evidence_gaps)
     else:
@@ -859,6 +859,7 @@ def build_workflow_guide(workflow_id: str, *, child_brain: str | None = None) ->
         "systematic_debugging",
         "brain_maintenance",
         "brain_architecture_refactor",
+        "brain_writeback_verified",
     }
     return {
         "workflow_id": normalized,
@@ -981,7 +982,12 @@ def build_writeback_plan(source: str, *, apply_brain_writeback: bool = False) ->
     source_text = str(source or "latest").strip() or "latest"
     study_evidence: dict[str, Any] = {}
     if source_text.startswith("study:"):
-        study_evidence = resolve_study_evidence(source_text.split(":", 1)[1]).to_dict()
+        study_source = source_text.split(":", 1)[1]
+        workflow = None
+        study_tag = study_source
+        if ":" in study_source:
+            workflow, study_tag = study_source.split(":", 1)
+        study_evidence = resolve_study_evidence(study_tag, workflow=workflow).to_dict()
     return {
         "source": source_text,
         "apply_brain_writeback": bool(apply_brain_writeback),

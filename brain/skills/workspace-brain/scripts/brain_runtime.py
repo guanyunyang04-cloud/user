@@ -444,6 +444,22 @@ def review(
             "capsule_contract",
             "add the rule to capsule/skill hot path and cover it with a regression test",
         )
+    if any(
+        term in text
+        for term in (
+            "writeback-plan",
+            "path_policy/studies",
+            "continuous_policy/studies",
+            "证据域",
+            "手工绕过",
+            "错路由",
+        )
+    ):
+        add_candidate(
+            "study_evidence_domain_mismatch",
+            "study_evidence_resolver",
+            "make study evidence resolution workflow-aware and cover path_policy plus continuous_policy tags with regression tests",
+        )
     if any(term in text for term in ("start-sleep", "wait-process", "长任务", "轮询", "eta")):
         add_candidate(
             "long_task_contract_gap",

@@ -265,7 +265,14 @@ def build_task_capsule(
         ],
         "self_evolution_hooks": {
             "completion_review_required": workflow_id
-            in {"executing_plan", "long_task", "systematic_debugging", "brain_maintenance", "brain_architecture_refactor"},
+            in {
+                "executing_plan",
+                "long_task",
+                "systematic_debugging",
+                "brain_maintenance",
+                "brain_architecture_refactor",
+                "brain_writeback_verified",
+            },
             "review_triggers": [
                 "routing_or_workflow_conflict",
                 "rule_exists_but_was_not_followed",

@@ -6,7 +6,13 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-from tools.brain.adapters.daily_research_frontier import build_frontier_report
+from tools.brain.adapters.daily_research_frontier import (
+    SUMMARY_FILENAMES,
+    STUDY_ROOTS,
+    _dataset_ids,
+    _model_families,
+    build_frontier_report,
+)
 
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
@@ -105,6 +111,14 @@ class StudyEvidenceReport:
     study_summary_json: str
     exists: bool
     coherent: bool
+    workflow: str
+    summary_kind: str
+    status: str
+    stage: str
+    evidence_verdict: str
+    dataset_ids: list[str]
+    model_families: list[str]
+    searched_paths: list[str]
     artifact_freshness: dict[str, Any]
     trial_count: int
     completed_trial_count: int
@@ -218,6 +232,54 @@ def _study_summary_path(study_tag: str) -> Path:
     return CONTINUOUS_POLICY_OUTPUT_ROOT / "studies" / study_tag / "study_summary.json"
 
 
+def _summary_path_candidates(study_tag: str, workflow: str | None = None) -> list[tuple[str, Path]]:
+    workflow_key = str(workflow or "").strip()
+    workflows = [workflow_key] if workflow_key else list(STUDY_ROOTS)
+    candidates: list[tuple[str, Path]] = []
+    for candidate_workflow in workflows:
+        root = STUDY_ROOTS.get(candidate_workflow)
+        if root is None:
+            continue
+        for filename in SUMMARY_FILENAMES:
+            candidates.append((candidate_workflow, root / study_tag / filename))
+    return candidates
+
+
+def _empty_study_evidence_report(
+    *,
+    study_tag: str,
+    workflow: str = "",
+    searched_paths: list[str] | None = None,
+    evidence_gaps: list[str] | None = None,
+) -> StudyEvidenceReport:
+    paths = list(searched_paths or [])
+    gaps = list(evidence_gaps or [])
+    return StudyEvidenceReport(
+        study_tag=study_tag,
+        study_summary_json="",
+        exists=False,
+        coherent=False,
+        workflow=workflow,
+        summary_kind="",
+        status="",
+        stage="",
+        evidence_verdict="",
+        dataset_ids=[],
+        model_families=[],
+        searched_paths=paths,
+        artifact_freshness=resolve_artifact_freshness().to_dict(),
+        trial_count=0,
+        completed_trial_count=0,
+        failed_trial_count=0,
+        search_profile="",
+        objective_profile="",
+        confirmatory_enabled=False,
+        resource_limits={},
+        trials=[],
+        evidence_gaps=gaps,
+    )
+
+
 def _nested_dict(payload: dict[str, Any], *keys: str) -> dict[str, Any]:
     current: Any = payload
     for key in keys:
@@ -311,11 +373,44 @@ def _build_trial_evidence(trial_payload: dict[str, Any]) -> StudyTrialEvidence:
     )
 
 
-def resolve_study_evidence(study_tag: str) -> StudyEvidenceReport:
+def resolve_study_evidence(study_tag: str, workflow: str | None = None) -> StudyEvidenceReport:
     tag = str(study_tag or "").strip()
     if not tag:
         raise ValueError("study_tag is required")
-    path = _study_summary_path(tag)
+    workflow_key = str(workflow or "").strip()
+    if workflow_key and workflow_key not in STUDY_ROOTS:
+        return _empty_study_evidence_report(
+            study_tag=tag,
+            workflow=workflow_key,
+            evidence_gaps=[f"unsupported_study_workflow: {workflow_key}"],
+        )
+
+    candidates = _summary_path_candidates(tag, workflow=workflow_key or None)
+    searched_paths = [path.as_posix() for _, path in candidates]
+    hits: list[tuple[str, Path]] = []
+    workflows_with_hits: set[str] = set()
+    for candidate_workflow, path in candidates:
+        if candidate_workflow in workflows_with_hits:
+            continue
+        if workspace_path(path).is_file():
+            hits.append((candidate_workflow, path))
+            workflows_with_hits.add(candidate_workflow)
+    if len(hits) > 1:
+        hit_paths = [path.as_posix() for _, path in hits]
+        return _empty_study_evidence_report(
+            study_tag=tag,
+            searched_paths=hit_paths,
+            evidence_gaps=[f"ambiguous_study_tag: {tag}"],
+        )
+    if not hits:
+        return _empty_study_evidence_report(
+            study_tag=tag,
+            workflow=workflow_key,
+            searched_paths=searched_paths,
+            evidence_gaps=[f"study summary not found: {path}" for path in searched_paths],
+        )
+
+    resolved_workflow, path = hits[0]
     summary = _read_json_if_exists(path)
     gaps: list[str] = []
     trials: list[StudyTrialEvidence] = []
@@ -336,6 +431,14 @@ def resolve_study_evidence(study_tag: str) -> StudyEvidenceReport:
         study_summary_json=path.as_posix(),
         exists=bool(summary),
         coherent=bool(summary) and not gaps,
+        workflow=resolved_workflow,
+        summary_kind=path.name,
+        status=str(summary.get("status", "") or ""),
+        stage=str(summary.get("stage", "") or ""),
+        evidence_verdict=str(summary.get("evidence_verdict", "") or ""),
+        dataset_ids=_dataset_ids(summary),
+        model_families=_model_families(summary),
+        searched_paths=searched_paths,
         artifact_freshness=resolve_artifact_freshness().to_dict(),
         trial_count=int(summary.get("trial_count", 0) or 0),
         completed_trial_count=int(summary.get("completed_trial_count", 0) or 0),

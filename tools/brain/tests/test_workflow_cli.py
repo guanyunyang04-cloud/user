@@ -123,7 +123,59 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertEqual(payload["source"], f"study:{tag}")
         self.assertFalse(payload["apply_brain_writeback"])
         self.assertEqual(payload["study_evidence"]["study_tag"], tag)
+        self.assertEqual(payload["study_evidence"]["workflow"], "continuous_policy")
         self.assertTrue(payload["requires_explicit_apply"])
+
+    def test_writeback_plan_study_source_infers_path_policy(self) -> None:
+        tag = "path20_input_ablation_no_alpha_liquid500_du_cost20_hit10_dd010_20260522_01"
+        payload = run_cli("writeback-plan", "--source", f"study:{tag}", "--json")
+        evidence = payload["study_evidence"]
+
+        self.assertEqual(evidence["study_tag"], tag)
+        self.assertEqual(evidence["workflow"], "path_policy")
+        self.assertEqual(
+            evidence["study_summary_json"],
+            f"daily_research/output/path_policy/studies/{tag}/study_summary.json",
+        )
+        self.assertTrue(evidence["exists"])
+        self.assertEqual(evidence["status"], "completed")
+        self.assertEqual(evidence["stage"], "forecast_walkforward_study")
+        self.assertEqual(evidence["evidence_verdict"], "forecast_test_confirmed")
+        self.assertIn("policy_input_bundle__7c8f58d851bce8179e1e9e2d", evidence["dataset_ids"])
+        self.assertIn("gru_sequence_static_context", evidence["model_families"])
+
+    def test_writeback_plan_study_source_accepts_explicit_path_policy(self) -> None:
+        tag = "path20_input_ablation_no_alpha_liquid500_du_cost20_hit10_dd010_20260522_01"
+        payload = run_cli("writeback-plan", "--source", f"study:path_policy:{tag}", "--json")
+        evidence = payload["study_evidence"]
+
+        self.assertEqual(payload["source"], f"study:path_policy:{tag}")
+        self.assertEqual(evidence["study_tag"], tag)
+        self.assertEqual(evidence["workflow"], "path_policy")
+        self.assertTrue(evidence["exists"])
+
+    def test_writeback_plan_missing_study_reports_all_searched_paths(self) -> None:
+        tag = "missing_study_for_writeback_plan_regression_20990101_01"
+        payload = run_cli("writeback-plan", "--source", f"study:{tag}", "--json")
+        evidence = payload["study_evidence"]
+
+        self.assertEqual(evidence["study_tag"], tag)
+        self.assertFalse(evidence["exists"])
+        self.assertIn(
+            f"daily_research/output/path_policy/studies/{tag}/study_summary.json",
+            evidence["searched_paths"],
+        )
+        self.assertIn(
+            f"daily_research/output/continuous_policy/studies/{tag}/study_summary.json",
+            evidence["searched_paths"],
+        )
+
+    def test_writeback_plan_unsupported_study_workflow_returns_evidence_gap(self) -> None:
+        payload = run_cli("writeback-plan", "--source", "study:unknown_workflow:any_tag", "--json")
+        evidence = payload["study_evidence"]
+
+        self.assertFalse(evidence["exists"])
+        self.assertIn("unsupported_study_workflow: unknown_workflow", evidence["evidence_gaps"])
 
     def test_script_path_cli_imports_package_root(self) -> None:
         payload = run_script_cli("status", "--workflow", "continuous_policy", "--json")
@@ -182,6 +234,12 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertIn("Wait-Process", "\n".join(payload["allowed_commands"]))
         self.assertIn("fixed_sleep_polling", payload["forbidden_actions"])
         self.assertIn("eta_reported_each_poll", payload["completion"])
+
+    def test_workflow_guide_cli_requires_writeback_completion_review(self) -> None:
+        payload = run_cli("workflow-guide", "--workflow", "brain_writeback_verified", "--json")
+
+        self.assertEqual(payload["workflow_id"], "brain_writeback_verified")
+        self.assertTrue(payload["completion_review_required"])
 
     def test_select_workflow_cli_maps_task_intent(self) -> None:
         cases = {
@@ -275,6 +333,21 @@ class BrainWorkflowCliTest(unittest.TestCase):
         )
         self.assertIn("self_evolution_hooks", payload)
         self.assertIn("completion_review_required", payload["self_evolution_hooks"])
+
+    def test_capsule_writeback_workflow_requires_completion_review(self) -> None:
+        payload = run_cli(
+            "capsule",
+            "--task",
+            "更新脑区和 evidence registry",
+            "--workflow",
+            "auto",
+            "--intent",
+            "writeback",
+            "--json",
+        )
+
+        self.assertEqual(payload["workflow"], "brain_writeback_verified")
+        self.assertTrue(payload["self_evolution_hooks"]["completion_review_required"])
 
     def test_capsule_cli_defaults_to_lite_context(self) -> None:
         payload = run_cli(

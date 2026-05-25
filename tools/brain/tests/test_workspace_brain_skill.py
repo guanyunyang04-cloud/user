@@ -249,6 +249,33 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertIn(candidate["target_layer"], {"workflow_selector", "capsule_contract", "skill", "tests_guard"})
         self.assertTrue(candidate["requires_user_confirmation"])
 
+    def test_brain_runtime_review_detects_study_evidence_domain_mismatch(self) -> None:
+        result = subprocess.run(
+            [
+                PYTHON,
+                str(RUNTIME),
+                "review",
+                "--cwd",
+                str(ROOT),
+                "--task",
+                "writeback-plan 对 path_policy study tag 查 continuous_policy/studies",
+                "--observation",
+                "工具被手工绕过：证据域错路由导致 path_policy/studies 证据查成 continuous_policy/studies",
+                "--json",
+            ],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        payload = json.loads(result.stdout)
+
+        self.assertEqual(payload["status"], "ok")
+        candidates = payload["evolution_candidates"]
+        self.assertTrue(candidates)
+        self.assertIn("study_evidence_resolver", {candidate["target_layer"] for candidate in candidates})
+
     def test_brain_runtime_proposal_queue_can_be_listed_and_marked(self) -> None:
         tmp_root = ROOT / "daily_research/output/test_learning_queue_project"
         if tmp_root.exists():

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 67,
+  "record_count": 68,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -560,6 +560,36 @@
         "policy_input_bundle__7c8f58d851bce8179e1e9e2d",
         "policy_pool_view__c11400fa72ad263f3d1eecfa",
         "policy_sector_board_view__ed15b2873f544e9e9b24aae5"
+      ]
+    },
+    {
+      "id": "alpha_path20_input_ablation_simple_baselines_reconciliation_20260525",
+      "date": "2026-05-25",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_path20_input_ablation_simple_baselines_reconciliation_20260525.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [
+        "alpha_path20_neural_policy_v1",
+        "alpha_multi_horizon_utility_policy_v1",
+        "path20_gate_b_simple_baselines_liquid500_du_cost20_hit10_dd010_20260522_01",
+        "path20_input_ablation_no_alpha_liquid500_du_cost20_hit10_dd010_20260522_01",
+        "path20_input_ablation_no_sector_static_liquid500_du_cost20_hit10_dd010_20260522_01"
+      ],
+      "verdict": "Fact: all three studies completed and passed validation/test decision utility profile gates in their own `study_summary.json` files.; Fact: no-alpha-prior GRU kept positive test decision rank, spread, and hit lift, so the Path20 signal is not explained only by legacy alpha-prior replay.; Fact: removing industry / board static fields preserved strong 20d forecast rank and spread, but nearly eliminated aggregate test decision spread.; Fact: simple baselines remained surprisingly competitive; `linear_last_day` was selected over `dlinear_sequence` by validation and produced positive 20d and decision metrics on test.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Keep these three tags registered as completed Path20 research evidence.",
+        "Use them as input-ablation and simple-baseline context for later `alpha_multi_horizon_utility_policy_v1` target/profile comparisons.",
+        "Before any expansion, compare no-alpha-prior, sector/static, and simple-baseline behavior under the current multi-horizon target framing with explicit study tags and active-artifact guard."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d",
+        "policy_pool_view__c11400fa72ad263f3d1eecfa",
+        "policy_sector_board_view__4b07bb20fe1fbe05b6e13f45"
       ]
     },
     {
