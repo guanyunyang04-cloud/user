@@ -220,6 +220,111 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertEqual(proposal_payload["writeback_target"], "brain/references/")
         self.assertTrue(proposal_payload["requires_user_confirmation"])
 
+    def test_brain_runtime_review_detects_user_correction_learning_candidate(self) -> None:
+        result = subprocess.run(
+            [
+                PYTHON,
+                str(RUNTIME),
+                "review",
+                "--cwd",
+                str(ROOT),
+                "--task",
+                "脑区中的规则明明写了，为什么还是没有执行？",
+                "--observation",
+                "用户指出 Start-Sleep 被用作长任务轮询",
+                "--json",
+            ],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        payload = json.loads(result.stdout)
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertTrue(payload["completion_review_required"])
+        self.assertTrue(payload["evolution_candidates"])
+        candidate = payload["evolution_candidates"][0]
+        self.assertIn(candidate["target_layer"], {"workflow_selector", "capsule_contract", "skill", "tests_guard"})
+        self.assertTrue(candidate["requires_user_confirmation"])
+
+    def test_brain_runtime_proposal_queue_can_be_listed_and_marked(self) -> None:
+        tmp_root = ROOT / "daily_research/output/test_learning_queue_project"
+        if tmp_root.exists():
+            shutil.rmtree(tmp_root)
+        tmp_root.mkdir(parents=True)
+        subprocess.run(
+            [PYTHON, str(RUNTIME), "init", "--cwd", str(tmp_root), "--brain-id", "learning_queue"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        proposal = subprocess.run(
+            [
+                PYTHON,
+                str(RUNTIME),
+                "proposal",
+                "--cwd",
+                str(tmp_root),
+                "--title",
+                "workflow selector learning",
+                "--trigger",
+                "mutate plan title selected writing_plan",
+                "--evidence",
+                "capsule workflow mismatch",
+                "--recommendation",
+                "make intent participate in selector",
+                "--target-layer",
+                "workflow_selector",
+                "--suggested-test",
+                "capsule mutate plan title selects executing_plan",
+            ],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        proposal_payload = json.loads(proposal.stdout)
+        listed = subprocess.run(
+            [PYTHON, str(RUNTIME), "list-proposals", "--cwd", str(tmp_root)],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        listed_payload = json.loads(listed.stdout)
+
+        self.assertEqual(len(listed_payload["proposals"]), 1)
+        self.assertEqual(listed_payload["proposals"][0]["status"], "proposed")
+
+        marked = subprocess.run(
+            [
+                PYTHON,
+                str(RUNTIME),
+                "mark-proposal",
+                "--cwd",
+                str(tmp_root),
+                "--proposal-id",
+                proposal_payload["proposal_id"],
+                "--status",
+                "approved",
+            ],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        marked_payload = json.loads(marked.stdout)
+
+        self.assertEqual(marked_payload["status"], "ok")
+        self.assertEqual(marked_payload["proposal"]["status"], "approved")
+
     def test_brain_runtime_health_reports_brain_guard_summary(self) -> None:
         result = subprocess.run(
             [PYTHON, str(RUNTIME), "health", "--cwd", str(ROOT)],
@@ -281,6 +386,8 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertIn("--verbosity lite", text)
         self.assertIn("health --cwd . --mode compact", text)
         self.assertIn("health --cwd . --mode full", text)
+        self.assertIn("Self-Evolution Final Review", text)
+        self.assertIn("runtime learning proposal", text)
 
     def test_workspace_brain_skill_long_task_uses_contract_monitor(self) -> None:
         text = SKILL.read_text(encoding="utf-8")

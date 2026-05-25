@@ -104,6 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     selector = sub.add_parser("select-workflow", help="Select a brain workflow from task intent.")
     selector.add_argument("--task", required=True)
+    selector.add_argument("--intent", default="read", choices=("read", "mutate", "long_task", "writeback"))
     selector.add_argument("--json", action="store_true")
     selector.add_argument("--write-output", action="store_true")
 
@@ -175,7 +176,10 @@ def build_payload(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
             child_brain=child_brain,
         )
     if args.command == "select-workflow":
-        return "select_workflow", select_workflow_for_task(str(getattr(args, "task", "") or ""))
+        return "select_workflow", select_workflow_for_task(
+            str(getattr(args, "task", "") or ""),
+            intent=str(getattr(args, "intent", "") or "read"),
+        )
     if args.command == "audit-brain":
         return "audit_brain", audit_brain_system(scope=str(getattr(args, "scope", "") or "all"))
     if args.command == "writeback-plan":

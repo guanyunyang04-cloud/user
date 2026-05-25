@@ -87,10 +87,27 @@ The lightweight fallback returns schema v2 capsule context, the selected workflo
 
 ## Self-Evolution
 
+### Self-Evolution Final Review
+
+Before the final answer for implementation, debugging, long-task, or brain-maintenance work, run or mentally apply a completion review for repeated failures, rule conflicts, stale skill behavior, missing guards, routing/workflow mismatch, and long-task contract violations. When evidence exists, propose a runtime learning proposal instead of leaving the lesson only in chat:
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py review --cwd . --task "<user task>" --observation "<what happened>" --json
+```
+
+If review returns candidates, ask for confirmation or generate a runtime learning proposal with `status=proposed`; do not silently rewrite core brain docs.
+
 Generate a runtime learning proposal when a repeated failure, rule conflict, timeout misread, branch violation, missing entrypoint, or stale skill is discovered:
 
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py proposal --cwd . --title "<short title>" --trigger "<fact>" --evidence "<path or observation>" --recommendation "<change proposal>" --severity info --owner-brain workspace --writeback-target brain/references/
+```
+
+Review queued proposals:
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py list-proposals --cwd .
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py mark-proposal --cwd . --proposal-id <id> --status <approved|implemented|rejected|superseded>
 ```
 
 The proposal is advisory. Do not rewrite core brain docs, workflow rules, or this skill without explicit user confirmation.

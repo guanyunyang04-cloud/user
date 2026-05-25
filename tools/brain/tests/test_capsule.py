@@ -145,6 +145,20 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertIn("Start-Sleep", contract["forbidden_patterns"])
         self.assertIn("estimated_remaining_seconds", contract["status_required_fields"])
 
+    def test_capsule_mutate_plan_title_selects_executing_plan_and_learning_hooks(self) -> None:
+        payload = build_task_capsule(
+            task="将所有未完成计划结合在一起，全部完成",
+            workflow="auto",
+            intent="mutate",
+            verbosity="lite",
+        )
+
+        self.assertEqual(payload["workflow"], "executing_plan")
+        self.assertIn("implement_signal", payload["workflow_selection"]["decision_sources"])
+        hooks = payload["self_evolution_hooks"]
+        self.assertTrue(hooks["completion_review_required"])
+        self.assertIn("routing_or_workflow_conflict", hooks["review_triggers"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -381,6 +381,103 @@ def _owner_brain(cwd: Path, fallback: str) -> str:
     return str(payload.get("brain_id") or payload.get("brain_type") or fallback)
 
 
+def _runtime_learning_dir(cwd: Path) -> Path:
+    resolved = cwd.resolve()
+    brain_root = _find_brain_root(resolved) or resolved
+    return brain_root / "brain" / "output" / "runtime_learning"
+
+
+def _index_path(cwd: Path) -> Path:
+    return _runtime_learning_dir(cwd) / "runtime_learning_index.json"
+
+
+def _load_learning_index(cwd: Path) -> dict[str, Any]:
+    path = _index_path(cwd)
+    if not path.exists():
+        return {"schema_version": 1, "proposals": []}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {"schema_version": 1, "proposals": []}
+    if not isinstance(payload, dict):
+        return {"schema_version": 1, "proposals": []}
+    proposals = payload.get("proposals", [])
+    if not isinstance(proposals, list):
+        proposals = []
+    return {"schema_version": int(payload.get("schema_version", 1) or 1), "proposals": proposals}
+
+
+def _write_learning_index(cwd: Path, payload: dict[str, Any]) -> Path:
+    out_dir = _runtime_learning_dir(cwd)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "runtime_learning_index.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    return path
+
+
+def review(
+    cwd: Path,
+    *,
+    task: str = "",
+    observation: str = "",
+    test_output: str = "",
+) -> dict[str, Any]:
+    text = "\n".join([str(task or ""), str(observation or ""), str(test_output or "")]).lower()
+    candidates: list[dict[str, Any]] = []
+
+    def add_candidate(trigger: str, target_layer: str, recommendation: str, severity: str = "info") -> None:
+        candidates.append(
+            {
+                "trigger": trigger,
+                "evidence": observation or task or test_output,
+                "root_cause": "runtime rule was not present in the default executable path",
+                "recommended_change": recommendation,
+                "target_layer": target_layer,
+                "severity": severity,
+                "requires_user_confirmation": True,
+            }
+        )
+
+    if any(term in text for term in ("明明写", "为什么还是", "没有执行", "又错", "重复", "用户指出")):
+        add_candidate(
+            "user_correction_or_repeated_failure",
+            "capsule_contract",
+            "add the rule to capsule/skill hot path and cover it with a regression test",
+        )
+    if any(term in text for term in ("start-sleep", "wait-process", "长任务", "轮询", "eta")):
+        add_candidate(
+            "long_task_contract_gap",
+            "tests_guard",
+            "guard the long-task monitor contract and require ETA status in polling reports",
+        )
+    if any(term in text for term in ("writing_plan", "executing_plan", "workflow", "路由误判", "intent")):
+        add_candidate(
+            "workflow_selector_conflict",
+            "workflow_selector",
+            "make intent and explicit action verbs participate in workflow selection",
+        )
+    if any(term in text for term in ("skill", "同步", "stale skill", "global skill")):
+        add_candidate(
+            "skill_sync_or_contract_gap",
+            "skill",
+            "sync canonical workspace-brain skill and add a skill_install guard",
+        )
+
+    unique: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for candidate in candidates:
+        key = (str(candidate["trigger"]), str(candidate["target_layer"]))
+        if key not in seen:
+            unique.append(candidate)
+            seen.add(key)
+    return {
+        "status": "ok",
+        "completion_review_required": True,
+        "evolution_candidates": unique,
+        "next_actions": ["create_runtime_learning_proposal"] if unique else ["no_runtime_learning_needed"],
+    }
+
+
 def proposal(
     cwd: Path,
     title: str,
@@ -392,21 +489,29 @@ def proposal(
     owner_brain: str = "",
     writeback_target: str = "brain/references/",
     requires_user_confirmation: bool = True,
+    target_layer: str = "brain_docs",
+    status: str = "proposed",
+    related_task: str = "",
+    suggested_tests: list[str] | None = None,
 ) -> dict[str, Any]:
     resolved = cwd.resolve()
-    brain_root = _find_brain_root(resolved) or resolved
-    out_dir = brain_root / "brain" / "output" / "runtime_learning"
+    out_dir = _runtime_learning_dir(resolved)
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_title = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in title.lower()).strip("_") or "proposal"
+    proposal_id = f"{stamp}_{safe_title}"
     payload = {
         "schema_version": 1,
+        "proposal_id": proposal_id,
         "title": title,
         "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "authority": "requires_user_confirmation",
+        "status": status,
         "severity": severity,
         "owner_brain": owner_brain or _owner_brain(resolved, "workspace"),
         "writeback_target": writeback_target,
+        "target_layer": target_layer,
+        "related_task": related_task,
         "requires_user_confirmation": bool(requires_user_confirmation),
         "facts": [trigger],
         "inferences": [],
@@ -414,11 +519,11 @@ def proposal(
         "trigger_evidence": [evidence],
         "recommendation": recommendation,
         "suggested_write_routes": [writeback_target, "brain/knowledge_center.md"],
-        "suggested_tests": [],
+        "suggested_tests": list(suggested_tests or []),
         "risks": ["Core brain or skill changes must not be applied without explicit confirmation."],
     }
-    json_path = out_dir / f"{stamp}_{safe_title}.json"
-    md_path = out_dir / f"{stamp}_{safe_title}.md"
+    json_path = out_dir / f"{proposal_id}.json"
+    md_path = out_dir / f"{proposal_id}.md"
     json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     md_path.write_text(
         "\n".join(
@@ -438,7 +543,63 @@ def proposal(
         encoding="utf-8",
         newline="\n",
     )
-    return {"status": "ok", "json_path": str(json_path.resolve()), "markdown_path": str(md_path.resolve())}
+    index = _load_learning_index(resolved)
+    proposals = [item for item in index.get("proposals", []) if isinstance(item, dict) and item.get("proposal_id") != proposal_id]
+    proposals.append(
+        {
+            "proposal_id": proposal_id,
+            "title": title,
+            "status": status,
+            "severity": severity,
+            "target_layer": target_layer,
+            "json_path": str(json_path.resolve()),
+            "markdown_path": str(md_path.resolve()),
+            "created_at": payload["created_at"],
+        }
+    )
+    index["proposals"] = proposals
+    _write_learning_index(resolved, index)
+    return {
+        "status": "ok",
+        "proposal_id": proposal_id,
+        "json_path": str(json_path.resolve()),
+        "markdown_path": str(md_path.resolve()),
+    }
+
+
+def list_proposals(cwd: Path) -> dict[str, Any]:
+    index = _load_learning_index(cwd)
+    return {"status": "ok", "proposals": list(index.get("proposals", []) or [])}
+
+
+def mark_proposal(cwd: Path, proposal_id: str, status: str) -> dict[str, Any]:
+    normalized = str(status or "").strip().lower()
+    if normalized not in {"proposed", "approved", "implemented", "rejected", "superseded"}:
+        return {"status": "error", "error": f"unsupported proposal status: {status}"}
+    index = _load_learning_index(cwd)
+    proposals = list(index.get("proposals", []) or [])
+    updated: dict[str, Any] | None = None
+    for item in proposals:
+        if isinstance(item, dict) and item.get("proposal_id") == proposal_id:
+            item["status"] = normalized
+            item["updated_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+            updated = item
+            json_path = Path(str(item.get("json_path", "")))
+            if json_path.exists():
+                try:
+                    payload = json.loads(json_path.read_text(encoding="utf-8-sig"))
+                    if isinstance(payload, dict):
+                        payload["status"] = normalized
+                        payload["updated_at"] = item["updated_at"]
+                        json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+                except Exception:
+                    pass
+            break
+    if updated is None:
+        return {"status": "error", "error": f"proposal not found: {proposal_id}"}
+    index["proposals"] = proposals
+    _write_learning_index(cwd, index)
+    return {"status": "ok", "proposal": updated}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -467,6 +628,22 @@ def build_parser() -> argparse.ArgumentParser:
     proposal_parser.add_argument("--owner-brain", default="")
     proposal_parser.add_argument("--writeback-target", default="brain/references/")
     proposal_parser.add_argument("--requires-user-confirmation", action="store_true", default=True)
+    proposal_parser.add_argument("--target-layer", default="brain_docs")
+    proposal_parser.add_argument("--status", default="proposed")
+    proposal_parser.add_argument("--related-task", default="")
+    proposal_parser.add_argument("--suggested-test", action="append", default=[])
+    review_parser = sub.add_parser("review")
+    review_parser.add_argument("--cwd", default=".")
+    review_parser.add_argument("--task", default="")
+    review_parser.add_argument("--observation", default="")
+    review_parser.add_argument("--test-output", default="")
+    review_parser.add_argument("--json", action="store_true")
+    list_parser = sub.add_parser("list-proposals")
+    list_parser.add_argument("--cwd", default=".")
+    mark_parser = sub.add_parser("mark-proposal")
+    mark_parser.add_argument("--cwd", default=".")
+    mark_parser.add_argument("--proposal-id", required=True)
+    mark_parser.add_argument("--status", required=True)
     return parser
 
 
@@ -492,7 +669,22 @@ def main() -> int:
             owner_brain=str(args.owner_brain or ""),
             writeback_target=str(args.writeback_target),
             requires_user_confirmation=bool(args.requires_user_confirmation),
+            target_layer=str(args.target_layer or "brain_docs"),
+            status=str(args.status or "proposed"),
+            related_task=str(args.related_task or ""),
+            suggested_tests=list(args.suggested_test or []),
         )
+    elif args.command == "review":
+        payload = review(
+            cwd,
+            task=str(args.task or ""),
+            observation=str(args.observation or ""),
+            test_output=str(args.test_output or ""),
+        )
+    elif args.command == "list-proposals":
+        payload = list_proposals(cwd)
+    elif args.command == "mark-proposal":
+        payload = mark_proposal(cwd, str(args.proposal_id), str(args.status))
     else:
         raise ValueError(f"Unsupported command: {args.command}")
     _print_json(payload)

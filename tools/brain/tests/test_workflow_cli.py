@@ -171,6 +171,9 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertIn("stop_conditions", payload)
         self.assertIn("validation_commands", payload)
         self.assertIn("writeback_routes", payload)
+        self.assertTrue(payload["completion_review_required"])
+        self.assertIn("project_guard_adapter", payload["workflow_mode"])
+        self.assertIn("Generic skills own the execution method", payload["skill_boundary"])
 
     def test_workflow_guide_cli_knows_long_task(self) -> None:
         payload = run_cli("workflow-guide", "--workflow", "long_task", "--json")
@@ -196,6 +199,35 @@ class BrainWorkflowCliTest(unittest.TestCase):
                 payload = run_cli("select-workflow", "--task", task, "--json")
                 self.assertEqual(payload["selected_workflow"], expected)
                 self.assertIn("reason", payload)
+
+    def test_select_workflow_cli_uses_mutate_intent_to_execute_plan_titles(self) -> None:
+        payload = run_cli(
+            "select-workflow",
+            "--task",
+            "Alpha Multi-Horizon 输出设计、辅助任务与 Horizon Grid 完整对照计划",
+            "--intent",
+            "mutate",
+            "--json",
+        )
+
+        self.assertEqual(payload["selected_workflow"], "executing_plan")
+        self.assertTrue(payload["intent_override_applied"])
+        self.assertIn("intent_mutate_override", payload["decision_sources"])
+        self.assertIn("计划", payload["matched_terms"])
+
+    def test_select_workflow_cli_keeps_plan_only_requests_as_writing_plan(self) -> None:
+        payload = run_cli(
+            "select-workflow",
+            "--task",
+            "深入分析，详细计划",
+            "--intent",
+            "read",
+            "--json",
+        )
+
+        self.assertEqual(payload["selected_workflow"], "writing_plan")
+        self.assertFalse(payload["intent_override_applied"])
+        self.assertIn("plan_only_signal", payload["decision_sources"])
 
     def test_audit_brain_cli_outputs_catalog_language_and_guards(self) -> None:
         payload = run_cli("audit-brain", "--scope", "all", "--json")
@@ -223,6 +255,26 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertIn("required_checklist", payload)
         self.assertIn("stop_conditions", payload)
         self.assertEqual(payload["workflow_guide"]["workflow_id"], "executing_plan")
+
+    def test_capsule_auto_workflow_uses_mutate_intent_for_plan_title(self) -> None:
+        payload = run_cli(
+            "capsule",
+            "--task",
+            "将所有未完成计划结合在一起，全部完成",
+            "--workflow",
+            "auto",
+            "--intent",
+            "mutate",
+            "--json",
+        )
+
+        self.assertEqual(payload["workflow"], "executing_plan")
+        self.assertIn(
+            "implement_signal",
+            payload["workflow_selection"]["decision_sources"],
+        )
+        self.assertIn("self_evolution_hooks", payload)
+        self.assertIn("completion_review_required", payload["self_evolution_hooks"])
 
     def test_capsule_cli_defaults_to_lite_context(self) -> None:
         payload = run_cli(

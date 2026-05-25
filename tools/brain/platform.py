@@ -846,9 +846,30 @@ def build_workflow_guide(workflow_id: str, *, child_brain: str | None = None) ->
     if normalized not in registry:
         raise KeyError(f"Unknown workflow: {workflow_id}")
     entry = dict(registry[normalized])
+    generic_adapter_workflows = {
+        "brainstorming_design",
+        "writing_plan",
+        "executing_plan",
+        "systematic_debugging",
+        "verification_before_completion",
+    }
+    completion_review_workflows = {
+        "executing_plan",
+        "long_task",
+        "systematic_debugging",
+        "brain_maintenance",
+        "brain_architecture_refactor",
+    }
     return {
         "workflow_id": normalized,
         "description": str(entry.get("description", "") or ""),
+        "workflow_mode": "project_guard_adapter" if normalized in generic_adapter_workflows else "brain_native_contract",
+        "skill_boundary": (
+            "Generic skills own the execution method; brain workflow supplies project guards, routing, evidence, and writeback boundaries."
+            if normalized in generic_adapter_workflows
+            else "Brain workflow owns this project-specific contract."
+        ),
+        "completion_review_required": normalized in completion_review_workflows,
         "preflight": list(entry.get("preflight", []) or []),
         "checklist": list(entry.get("checklist", []) or []),
         "allowed_commands": list(entry.get("allowed_commands", []) or []),
@@ -860,12 +881,51 @@ def build_workflow_guide(workflow_id: str, *, child_brain: str | None = None) ->
     }
 
 
-def select_workflow_for_task(task: str) -> dict[str, Any]:
+def select_workflow_for_task(task: str, *, intent: str = "read") -> dict[str, Any]:
     text = str(task or "").strip()
     lower = text.lower()
+    normalized_intent = str(intent or "read").strip().lower() or "read"
 
-    def has_any(*needles: str) -> bool:
-        return any(needle in lower or needle in text for needle in needles)
+    matched_terms: list[str] = []
+
+    def has_any(*needles: str, source: str = "term_match") -> bool:
+        found = [needle for needle in needles if needle in lower or needle in text]
+        if found:
+            matched_terms.extend(found)
+            if source not in decision_sources:
+                decision_sources.append(source)
+            return True
+        return False
+
+    decision_sources: list[str] = []
+    ambiguous_signals: list[str] = []
+    intent_override_applied = False
+
+    implement_terms = (
+        "继续实施",
+        "实施计划",
+        "implement",
+        "execute",
+        "执行计划",
+        "please implement",
+        "please implement this plan",
+        "按计划实现",
+        "开始落地",
+        "全部完成",
+        "完成这个计划",
+    )
+    plan_terms = ("详细计划", "计划", "方案", "设计", "深入思考", "plan", "design")
+    plan_only_terms = ("深入分析", "深入思考", "详细计划", "评估", "方案设计", "不要修改代码", "只做计划")
+
+    explicit_implement = has_any(*implement_terms, source="implement_signal")
+    explicit_plan_only = has_any(*plan_only_terms, source="plan_only_signal")
+    has_plan_word = any(term in lower or term in text for term in plan_terms)
+    if has_plan_word:
+        for term in plan_terms:
+            if term in lower or term in text:
+                matched_terms.append(term)
+        if "plan_word" not in decision_sources:
+            decision_sources.append("plan_word")
 
     if has_any("长训练", "长任务", "long task", "long_task", "训练轮询", "估算剩余时间", "eta", "wait-process"):
         selected = "long_task"
@@ -885,16 +945,33 @@ def select_workflow_for_task(task: str) -> dict[str, Any]:
     elif has_any("更新脑区", "写回", "evidence", "registry", "主线审阅", "审阅文档", "入库"):
         selected = "brain_writeback_verified"
         reason = "task asks for brain writeback, evidence registry, or mainline review updates"
-    elif has_any("继续实施", "实施计划", "implement", "execute", "执行计划", "please implement"):
+    elif explicit_implement:
         selected = "executing_plan"
         reason = "task asks to implement or continue an explicit plan"
-    elif has_any("详细计划", "计划", "方案", "设计", "深入思考", "plan", "design"):
+    elif normalized_intent == "mutate" and has_plan_word and not explicit_plan_only:
+        selected = "executing_plan"
+        reason = "mutate intent plus plan title indicates execution rather than plan writing"
+        intent_override_applied = True
+        decision_sources.append("intent_mutate_override")
+    elif has_plan_word:
         selected = "writing_plan"
         reason = "task asks for a detailed plan, design, or implementation specification"
+        if normalized_intent in {"mutate", "writeback"}:
+            ambiguous_signals.append(f"intent={normalized_intent} conflicts with plan-only wording")
     else:
         selected = "brain_handoff"
         reason = "no stronger task intent matched; default to brain handoff"
-    return {"task": text, "selected_workflow": selected, "reason": reason}
+    return {
+        "task": text,
+        "intent": normalized_intent,
+        "selected_workflow": selected,
+        "reason": reason,
+        "matched_terms": sorted(set(matched_terms)),
+        "decision_sources": sorted(set(decision_sources)),
+        "confidence": "high" if not ambiguous_signals else "medium",
+        "intent_override_applied": intent_override_applied,
+        "ambiguous_signals": ambiguous_signals,
+    }
 
 
 def build_writeback_plan(source: str, *, apply_brain_writeback: bool = False) -> dict[str, Any]:

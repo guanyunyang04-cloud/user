@@ -194,9 +194,23 @@ def build_task_capsule(
     routing = route_task_to_brain(task)
     selected_brain_id = str(routing.get("selected_brain_id", "") or "")
     if workflow == "auto" and str(intent or "") == "long_task":
-        selection = {"task": task, "selected_workflow": "long_task", "reason": "long_task intent requested"}
+        selection = {
+            "task": task,
+            "intent": str(intent or "read"),
+            "selected_workflow": "long_task",
+            "reason": "long_task intent requested",
+            "matched_terms": ["long_task"],
+            "decision_sources": ["intent_long_task_override"],
+            "confidence": "high",
+            "intent_override_applied": True,
+            "ambiguous_signals": [],
+        }
     else:
-        selection = select_workflow_for_task(task) if workflow == "auto" else {"selected_workflow": workflow, "reason": "explicit workflow requested"}
+        selection = (
+            select_workflow_for_task(task, intent=str(intent or "read"))
+            if workflow == "auto"
+            else {"selected_workflow": workflow, "reason": "explicit workflow requested"}
+        )
     workflow_id = str(selection.get("selected_workflow", "") or "brain_handoff")
     child_registry_id = selected_brain_id if selected_brain_id in child_brain_ids() else None
     registry = load_workflow_registry(child_registry_id)
@@ -249,6 +263,24 @@ def build_task_capsule(
             "Work remains on main unless the user explicitly changes branch policy",
             "No child brain is loaded until main-brain routing selects one",
         ],
+        "self_evolution_hooks": {
+            "completion_review_required": workflow_id
+            in {"executing_plan", "long_task", "systematic_debugging", "brain_maintenance", "brain_architecture_refactor"},
+            "review_triggers": [
+                "routing_or_workflow_conflict",
+                "rule_exists_but_was_not_followed",
+                "user_reported_repeated_failure",
+                "missing_guard_or_regression_test",
+                "stale_skill_or_brain_contract",
+                "long_task_contract_violation",
+            ],
+            "proposal_command": (
+                f"{PYTHON_EXECUTABLE} brain/skills/workspace-brain/scripts/brain_runtime.py "
+                'proposal --cwd . --title "<short title>" --trigger "<fact>" '
+                '--evidence "<path or observation>" --recommendation "<change proposal>" '
+                "--severity info --owner-brain workspace --writeback-target brain/references/"
+            ),
+        },
     }
     long_task_contract = workflow_state.get("registry_entry", {}).get("long_task_contract", {})
     if str(intent or "") == "long_task" and isinstance(long_task_contract, dict) and long_task_contract:
