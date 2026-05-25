@@ -88,8 +88,10 @@ class BrainPlatformTest(unittest.TestCase):
         self.assertFalse(removed.intersection(registry))
         for workflow_id in expected:
             workflow = registry[workflow_id]
-            for key in ("preflight", "artifacts", "writeback_routes", "forbidden_actions"):
+            for key in ("preflight", "artifacts", "writeback_routes", "capability_hints", "risk_signals", "verification_hints"):
                 self.assertIn(key, workflow, workflow_id)
+            self.assertNotIn("forbidden_" + "actions", workflow, workflow_id)
+            self.assertNotIn("start_" + "training", json.dumps(workflow, ensure_ascii=False), workflow_id)
         child_registry = load_workflow_registry("daily_research")
         self.assertIn("continuous_policy_safe_screening", child_registry)
         self.assertIn("continuous_policy_result_review", child_registry)
@@ -137,7 +139,9 @@ class BrainPlatformTest(unittest.TestCase):
                     "preflight": [],
                     "artifacts": [],
                     "writeback_routes": {},
-                    "forbidden_actions": [],
+                    "capability_hints": [],
+                    "risk_signals": [],
+                    "verification_hints": [],
                 }
             }
         }
@@ -181,7 +185,9 @@ class BrainPlatformTest(unittest.TestCase):
                     "preflight": [],
                     "artifacts": [],
                     "writeback_routes": {},
-                    "forbidden_actions": [],
+                    "capability_hints": [],
+                    "risk_signals": [],
+                    "verification_hints": [],
                 }
             }
         }

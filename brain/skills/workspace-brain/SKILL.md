@@ -13,7 +13,7 @@ Run detection first when taking over an unknown workspace:
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py detect --cwd .
 ```
 
-For existing brain workspaces, run a lightweight main-brain capsule before changing tracked files, launching studies, claiming evidence, or entering a child brain:
+For existing brain workspaces, run a lightweight main-brain capsule to make routing, guards, evidence hints, and skill sync visible before changing tracked files, launching studies, claiming evidence, or entering a child brain:
 
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<user task>" --workflow auto --intent <read|mutate|writeback> --verbosity lite --json
@@ -45,7 +45,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor 
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor wait-once --pid <pid> --timeout 7200 --progress <progress.json> --stdout <stdout.log> --stderr <stderr.log> --artifact-dir <artifact_dir> --json
 ```
 
-`Start-Sleep` must not be used as the primary long-task polling mechanism; it is only acceptable for very short UI pacing outside the long-task wait loop. Every user update for training polls must include ETA or state why ETA is not yet estimable.
+Prefer `long_task_monitor wait-once/status` for long-task polling. `Start-Sleep` remains useful for very short UI pacing outside the monitor loop. Every user update for training polls should include ETA or state why ETA is not yet estimable.
 
 If the project has no `brain/brain_manifest.json`, initialize a minimal brain only when mutation is allowed:
 
@@ -53,22 +53,22 @@ If the project has no `brain/brain_manifest.json`, initialize a minimal brain on
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py init --cwd . --brain-id <project_id>
 ```
 
-Use `preflight_blockers`, `mutation_allowed`, `routing`, guards, and writeback routes as the operating contract. If mutation is blocked, stop and correct the blocker before editing tracked files.
+Use `preflight_blockers`, `mutation_allowed`, `routing`, guards, risk signals, capability hints, and writeback routes as the operating contract. Resolve or explicitly account for blockers before risky tracked-file edits.
 
 ## Runtime Contract
 
 - Skill = entrypoint and procedure.
 - Brain docs = project truth, current state, governance, evidence, and write routes.
 - Tools = deterministic checks, capsules, health reports, sync checks, frontier scans, evidence queries, writeback plans, and long-task monitors.
-- Local skills remain responsible for TDD, debugging, planning, frontend, security, deployment, and verification method. Brain safety boundaries override local skill defaults.
+- Local skills remain responsible for TDD, debugging, planning, frontend, security, deployment, and verification method. Brain supplies project facts, routing, guards, evidence, writeback routes, and sync checks.
 
 ## Operating Rules
 
 - The main brain is the only agent takeover entrypoint.
 - Child brains are project fact layers loaded only after main-brain routing.
 - Work on `main` unless the user explicitly changes the branch rule.
-- If capsule reports `not_on_main_for_mutation`, do not mutate repo-tracked files.
-- Do not modify `daily_research/output/active_execution_strategy.json` without explicit future promotion authority.
+- If capsule reports `not_on_main_for_mutation`, resolve branch authority or explicitly account for the blocker before repo-tracked mutation.
+- Make `daily_research/output/active_execution_strategy.json` diffs explicit when the task asks for active strategy, promotion, or live-policy changes.
 - Prefer explicit study tags, protocol tags, dataset ids, and reference docs over loose `latest_*` files.
 - Treat smoke, dry-run, failed, interrupted, timeout, and diagnostic-only runs as non-completed evidence.
 - Separate facts, inferences, assumptions, and action boundaries in substantial reports.
@@ -99,7 +99,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scri
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py mark-proposal --cwd . --proposal-id <id> --status <approved|implemented|rejected|superseded>
 ```
 
-The proposal is advisory. Do not rewrite core brain docs, workflow rules, or this skill without explicit user confirmation.
+The proposal is advisory. Core brain docs, workflow rules, and this skill should change only when the user has explicitly asked for that governance or skill update.
 
 ## Common Commands
 

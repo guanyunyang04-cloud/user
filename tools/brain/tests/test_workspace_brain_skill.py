@@ -38,7 +38,7 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
 
         self.assertNotIn("API Fallback", text)
         self.assertNotIn("workflow-guide", text)
-        self.assertNotIn("--intent long_task", text)
+        self.assertNotIn("--intent " + "long_" + "task", text)
         self.assertNotIn("Superpowers plugin body", text)
 
     def test_install_dry_run_does_not_copy_skill(self) -> None:
@@ -479,7 +479,83 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertIn("Wait-Process -Id <pid> -Timeout 7200", text)
         self.assertIn("ETA", text)
         self.assertIn("Start-Sleep", text)
-        self.assertIn("must not be used as the primary long-task polling mechanism", text)
+        self.assertNotIn("must not be used as the primary " + "long-task polling mechanism", text)
+        self.assertNotIn("start_" + "training", text)
+        self.assertNotIn("Do not " + "modify", text)
+        self.assertNotIn("\u4e0d\u5f97", text)
+        self.assertNotIn("\u7981\u6b62", text)
+
+    def test_brain_runtime_capsule_rejects_removed_long_task_intent(self) -> None:
+        result = subprocess.run(
+            [
+                PYTHON,
+                str(RUNTIME),
+                "capsule",
+                "--cwd",
+                str(ROOT),
+                "--task",
+                "长训练",
+                "--intent",
+                "long_" + "task",
+            ],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("invalid choice", result.stderr)
+
+    def test_brain_runtime_capsule_mutate_intent_still_works(self) -> None:
+        result = subprocess.run(
+            [
+                PYTHON,
+                str(RUNTIME),
+                "capsule",
+                "--cwd",
+                str(ROOT),
+                "--task",
+                "修改脑区规则",
+                "--intent",
+                "mutate",
+            ],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        payload = json.loads(result.stdout)
+
+        self.assertEqual(payload["workflow"], "brain_maintenance")
+
+    def test_brain_runtime_review_detects_planned_training_step_skipped(self) -> None:
+        result = subprocess.run(
+            [
+                PYTHON,
+                str(RUNTIME),
+                "review",
+                "--cwd",
+                str(ROOT),
+                "--task",
+                "继续实施计划，到最后启动长训练",
+                "--observation",
+                "计划包含训练但 agent 结束任务，需要用户提示继续实施计划",
+                "--json",
+            ],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        payload = json.loads(result.stdout)
+
+        self.assertTrue(payload["evolution_candidates"])
+        targets = {candidate["target_layer"] for candidate in payload["evolution_candidates"]}
+        self.assertTrue({"execution_completion_gate", "long_task_execution_closure"}.intersection(targets))
 
 
 if __name__ == "__main__":

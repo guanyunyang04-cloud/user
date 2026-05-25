@@ -127,7 +127,7 @@ def _main_context() -> dict[str, Any]:
         "global_boundaries": [
             "main brain is the agent entrypoint",
             "child brains hold project facts only after routing",
-            "generic skills yield to brain safety boundaries",
+            "local skills own general methods; brain supplies project facts, routing, guards, evidence, and writeback routes",
         ],
         "summary": _text_excerpt("brain/state_center.md"),
         "hard_rules": _text_excerpt("brain/knowledge_center.md"),
@@ -182,6 +182,37 @@ def _preflight_blockers(*, routing: dict[str, Any], main_context: dict[str, Any]
     return sorted(set(blockers))
 
 
+def _dedupe_text(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        out.append(text)
+        seen.add(text)
+    return out
+
+
+def _task_has_long_task_signal(task: str) -> bool:
+    lower = str(task or "").lower()
+    signals = (
+        "长训练",
+        "长任务",
+        "训练轮询",
+        "启动训练",
+        "long training",
+        "long-running",
+        "long running",
+        "long task",
+        "training",
+        "wait-process",
+        "eta",
+        "pid",
+    )
+    return any(signal in lower for signal in signals)
+
+
 def build_task_capsule(
     *,
     task: str = "",
@@ -205,6 +236,15 @@ def build_task_capsule(
         workflow_id = "brain_handoff"
     workflow_state = build_workflow_state(workflow_id, study_tag=study_tag or None, child_brain=child_registry_id).to_dict()
     workflow_guide = build_workflow_guide(workflow_id, child_brain=child_registry_id)
+    capability_hints = list(workflow_guide.get("capability_hints", []) or [])
+    risk_signals = list(workflow_guide.get("risk_signals", []) or [])
+    verification_hints = list(workflow_guide.get("verification_hints", []) or [])
+    if _task_has_long_task_signal(task):
+        capability_hints.append(
+            f"long_task_monitor: use {PYTHON_EXECUTABLE} -m tools.brain.long_task_monitor template/status/wait-once with PID, logs, progress, artifact mtime, and ETA"
+        )
+        risk_signals.append("long_task_without_pid_log_progress_or_eta")
+        verification_hints.append("for long jobs, report PID status, elapsed time, progress, ETA, log tail, artifact mtime, and next decision after each wait window")
     rules = run_brain_rules(has_explicit_study_tag=bool(study_tag))
     guards: dict[str, Any] = {
         "rule_report": rules,
@@ -225,6 +265,10 @@ def build_task_capsule(
     skill_status = _skill_sync_status()
     preflight_blockers = _preflight_blockers(routing=routing, main_context=main_context, intent=intent, guards=guards)
     mutation_allowed = str(intent or "read") not in {"mutate", "writeback"} or "not_on_main_for_mutation" not in preflight_blockers
+    risk_signals.extend(preflight_blockers)
+    for finding in guards.get("rule_report", {}).get("findings", []):
+        if isinstance(finding, dict) and str(finding.get("severity", "") or "") == "warning":
+            risk_signals.append(str(finding.get("code", "") or ""))
     payload: dict[str, Any] = {
         "schema_version": 2,
         "task": task,
@@ -239,12 +283,14 @@ def build_task_capsule(
         "workflow_selection": selection,
         "workflow_guide": workflow_guide,
         "required_checklist": workflow_guide.get("checklist", []),
+        "capability_hints": _dedupe_text(capability_hints),
+        "risk_signals": _dedupe_text(risk_signals),
+        "verification_hints": _dedupe_text(verification_hints),
         "stop_conditions": workflow_guide.get("stop_conditions", []),
         "study_tag": study_tag,
         "main_context": main_context,
         "routing": routing,
         "guards": guards,
-        "forbidden_actions": workflow_state.get("registry_entry", {}).get("forbidden_actions", []),
         "next_allowed_actions": workflow_state.get("next_allowed_actions", []),
         "assumptions": [
             "Work remains on main unless the user explicitly changes branch policy",

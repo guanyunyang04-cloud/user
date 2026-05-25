@@ -231,10 +231,14 @@ class BrainWorkflowCliTest(unittest.TestCase):
             entry = registry[workflow_id]
             self.assertIn("description", entry)
             self.assertIn("preflight", entry)
-            self.assertIn("forbidden_actions", entry)
+            self.assertIn("capability_hints", entry)
+            self.assertIn("risk_signals", entry)
+            self.assertIn("verification_hints", entry)
             self.assertIn("completion", entry)
             self.assertIn("checklist", entry)
             self.assertIn("stop_conditions", entry)
+            self.assertNotIn("forbidden_" + "actions", entry)
+            self.assertNotIn("start_" + "training", json.dumps(entry, ensure_ascii=False))
 
     def test_workflow_guide_cli_rejects_removed_generic_workflows(self) -> None:
         for workflow_id in ("executing_" + "plan", "writing_" + "plan", "long_task"):
@@ -249,12 +253,27 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertEqual(payload["workflow_id"], "brain_writeback_verified")
         self.assertIn("description", payload)
         self.assertIn("checklist", payload)
+        self.assertIn("capability_hints", payload)
+        self.assertIn("risk_signals", payload)
+        self.assertIn("verification_hints", payload)
         self.assertIn("stop_conditions", payload)
         self.assertIn("validation_commands", payload)
         self.assertIn("writeback_routes", payload)
+        self.assertNotIn("forbidden_" + "actions", payload)
         self.assertTrue(payload["completion_review_required"])
         self.assertEqual(payload["workflow_mode"], "brain_native_contract")
         self.assertIn("Brain workflow owns", payload["skill_boundary"])
+
+    def test_workflow_guide_cli_exposes_capabilities_without_training_blocks(self) -> None:
+        payload = run_cli("workflow-guide", "--workflow", "brain_maintenance", "--json")
+        encoded = json.dumps(payload, ensure_ascii=False)
+
+        self.assertEqual(payload["workflow_id"], "brain_maintenance")
+        self.assertIn("capability_hints", payload)
+        self.assertIn("risk_signals", payload)
+        self.assertIn("verification_hints", payload)
+        self.assertNotIn("forbidden_" + "actions", payload)
+        self.assertNotIn("start_" + "training", encoded)
 
     def test_workflow_guide_cli_requires_writeback_completion_review(self) -> None:
         payload = run_cli("workflow-guide", "--workflow", "brain_writeback_verified", "--json")
@@ -351,8 +370,51 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertEqual(payload["workflow"], "brain_handoff")
         self.assertIn("workflow_guide", payload)
         self.assertIn("required_checklist", payload)
+        self.assertIn("capability_hints", payload)
+        self.assertIn("risk_signals", payload)
+        self.assertIn("verification_hints", payload)
         self.assertIn("stop_conditions", payload)
+        self.assertNotIn("forbidden_" + "actions", payload)
         self.assertEqual(payload["workflow_guide"]["workflow_id"], "brain_handoff")
+
+    def test_capsule_does_not_treat_training_as_brain_workflow_blocker(self) -> None:
+        payload = run_cli(
+            "capsule",
+            "--task",
+            "修改脑区规则并启动训练",
+            "--workflow",
+            "auto",
+            "--intent",
+            "mutate",
+            "--json",
+        )
+        encoded = json.dumps(payload, ensure_ascii=False)
+
+        self.assertEqual(payload["workflow"], "brain_maintenance")
+        self.assertNotIn("forbidden_" + "actions", payload)
+        self.assertNotIn("start_" + "training", encoded)
+        self.assertIn("capability_hints", payload)
+        self.assertIn("risk_signals", payload)
+        self.assertIn("verification_hints", payload)
+        self.assertIn("long_task_monitor", encoded)
+        self.assertNotIn("training", payload["preflight_blockers"])
+
+    def test_capsule_long_training_plan_stays_handoff_with_monitor_capability(self) -> None:
+        payload = run_cli(
+            "capsule",
+            "--task",
+            "继续实施计划，到最后启动长训练",
+            "--workflow",
+            "auto",
+            "--intent",
+            "mutate",
+            "--json",
+        )
+        encoded = json.dumps(payload, ensure_ascii=False)
+
+        self.assertEqual(payload["workflow"], "brain_handoff")
+        self.assertIn("long_task_monitor", encoded)
+        self.assertIn("capability_hints", payload)
 
     def test_capsule_auto_workflow_keeps_mutate_plan_title_in_handoff(self) -> None:
         payload = run_cli(

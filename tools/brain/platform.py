@@ -164,6 +164,10 @@ def _load_playbook(playbook_ref: str, workflow_id: str) -> dict[str, Any]:
         raise ValueError(f"Workflow playbook entry must be an object: {playbook_ref}")
     out = dict(entry)
     out.setdefault("artifacts", [])
+    out.setdefault("capability_hints", [])
+    out.setdefault("risk_signals", [])
+    out.setdefault("verification_hints", [])
+    out.setdefault("stop_conditions", [])
     return out
 
 
@@ -860,7 +864,9 @@ def build_workflow_guide(workflow_id: str, *, child_brain: str | None = None) ->
         "preflight": list(entry.get("preflight", []) or []),
         "checklist": list(entry.get("checklist", []) or []),
         "allowed_commands": list(entry.get("allowed_commands", []) or []),
-        "forbidden_actions": list(entry.get("forbidden_actions", []) or []),
+        "capability_hints": list(entry.get("capability_hints", []) or []),
+        "risk_signals": list(entry.get("risk_signals", []) or []),
+        "verification_hints": list(entry.get("verification_hints", []) or []),
         "stop_conditions": list(entry.get("stop_conditions", []) or []),
         "completion": list(entry.get("completion", []) or []),
         "validation_commands": list(entry.get("validation_commands", []) or []),

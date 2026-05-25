@@ -466,6 +466,23 @@ def review(
             "tests_guard",
             "guard the long-task monitor contract and require ETA status in polling reports",
         )
+    if any(
+        term in text
+        for term in (
+            "计划包含训练但 agent 结束任务",
+            "需要用户提示继续实施计划",
+            "训练没启动",
+            "long task step skipped",
+            "training step skipped",
+            "ended before training",
+            "ended task before training",
+        )
+    ):
+        add_candidate(
+            "long_task_execution_closure",
+            "execution_completion_gate",
+            "tighten the skill/runtime completion checklist so planned training or long-running steps are either launched with PID/log/progress monitoring or explicitly reported as blocked",
+        )
     workflow_conflict_terms = (
         "selected brain_handoff for a brain rule mutation",
         "brain_handoff for a brain rule",
@@ -665,7 +682,7 @@ def build_parser() -> argparse.ArgumentParser:
     capsule_parser = sub.add_parser("capsule")
     capsule_parser.add_argument("--cwd", default=".")
     capsule_parser.add_argument("--task", default="")
-    capsule_parser.add_argument("--intent", choices=("read", "mutate", "long_task", "writeback"), default="read")
+    capsule_parser.add_argument("--intent", choices=("read", "mutate", "writeback"), default="read")
     capsule_parser.add_argument("--verbosity", choices=("lite", "standard", "full"), default="lite")
     health_parser = sub.add_parser("health")
     health_parser.add_argument("--cwd", default=".")
