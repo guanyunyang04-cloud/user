@@ -430,9 +430,10 @@ class BrainWorkflowCliTest(unittest.TestCase):
 
         self.assertEqual(payload["workflow"], "brain_handoff")
         self.assertIn("external_skill_signal", payload["workflow_selection"]["decision_sources"])
-        self.assertIn("self_evolution_hooks", payload)
-        self.assertIn("completion_review_required", payload["self_evolution_hooks"])
-        self.assertFalse(payload["self_evolution_hooks"]["completion_review_required"])
+        self.assertNotIn("self_" + "evolution_hooks", payload)
+        self.assertIn("runtime_learning_hooks", payload)
+        self.assertIn("reflection_review_required", payload["runtime_learning_hooks"])
+        self.assertFalse(payload["runtime_learning_hooks"]["reflection_review_required"])
 
     def test_capsule_writeback_workflow_requires_completion_review(self) -> None:
         payload = run_cli(
@@ -447,7 +448,7 @@ class BrainWorkflowCliTest(unittest.TestCase):
         )
 
         self.assertEqual(payload["workflow"], "brain_writeback_verified")
-        self.assertTrue(payload["self_evolution_hooks"]["completion_review_required"])
+        self.assertTrue(payload["runtime_learning_hooks"]["reflection_review_required"])
 
     def test_capsule_brain_rule_mutation_uses_maintenance_review(self) -> None:
         payload = run_cli(
@@ -462,7 +463,7 @@ class BrainWorkflowCliTest(unittest.TestCase):
         )
 
         self.assertEqual(payload["workflow"], "brain_maintenance")
-        self.assertTrue(payload["self_evolution_hooks"]["completion_review_required"])
+        self.assertTrue(payload["runtime_learning_hooks"]["reflection_review_required"])
 
     def test_capsule_cli_defaults_to_lite_context(self) -> None:
         payload = run_cli(

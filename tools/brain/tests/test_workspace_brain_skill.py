@@ -24,7 +24,7 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertTrue(text.startswith("---\nname: workspace-brain"))
         self.assertIn("description: Use the workspace main brain", text)
         self.assertIn("脑区", text)
-        self.assertIn("自进化", text)
+        self.assertIn("runtime learning", text.lower())
         self.assertIn("-m tools.brain.workflow capsule", text)
         self.assertIn("-m tools.brain.workflow route", text)
         self.assertIn("-m tools.brain.workflow query", text)
@@ -214,11 +214,16 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertTrue(Path(payload["markdown_path"]).exists())
         self.assertIn("brain/output/runtime_learning", payload["json_path"].replace("\\", "/"))
         proposal_payload = json.loads(Path(payload["json_path"]).read_text(encoding="utf-8"))
+        self.assertEqual(proposal_payload["schema_version"], 2)
         self.assertIn("requires_user_confirmation", proposal_payload["authority"])
         self.assertEqual(proposal_payload["severity"], "info")
         self.assertEqual(proposal_payload["owner_brain"], "learning_demo")
         self.assertEqual(proposal_payload["writeback_target"], "brain/references/")
         self.assertTrue(proposal_payload["requires_user_confirmation"])
+        self.assertIn("lesson", proposal_payload)
+        self.assertIn("root_cause", proposal_payload)
+        self.assertIn("supporting_events", proposal_payload)
+        self.assertIn("anti_overfit_check", proposal_payload)
 
     def test_brain_runtime_review_detects_user_correction_learning_candidate(self) -> None:
         result = subprocess.run(
@@ -243,9 +248,10 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         payload = json.loads(result.stdout)
 
         self.assertEqual(payload["status"], "ok")
-        self.assertTrue(payload["completion_review_required"])
-        self.assertTrue(payload["evolution_candidates"])
-        candidate = payload["evolution_candidates"][0]
+        self.assertEqual(payload["analysis_mode"], "freeform_fallback")
+        self.assertTrue(payload["reflection_review_required"])
+        self.assertTrue(payload["learning_candidates"])
+        candidate = payload["learning_candidates"][0]
         self.assertIn(candidate["target_layer"], {"workflow_selector", "capsule_contract", "skill", "tests_guard"})
         self.assertTrue(candidate["requires_user_confirmation"])
 
@@ -272,7 +278,7 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         payload = json.loads(result.stdout)
 
         self.assertEqual(payload["status"], "ok")
-        candidates = payload["evolution_candidates"]
+        candidates = payload["learning_candidates"]
         self.assertTrue(candidates)
         self.assertIn("study_evidence_resolver", {candidate["target_layer"] for candidate in candidates})
 
@@ -299,7 +305,7 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         payload = json.loads(result.stdout)
 
         self.assertEqual(payload["status"], "ok")
-        candidates = payload["evolution_candidates"]
+        candidates = payload["learning_candidates"]
         self.assertTrue(candidates)
         self.assertIn("workflow_selector", {candidate["target_layer"] for candidate in candidates})
 
@@ -329,7 +335,7 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         payload = json.loads(result.stdout)
 
         self.assertEqual(payload["status"], "ok")
-        self.assertEqual(payload["evolution_candidates"], [])
+        self.assertEqual(payload["learning_candidates"], [])
         self.assertEqual(payload["next_actions"], ["no_runtime_learning_needed"])
 
     def test_brain_runtime_proposal_queue_can_be_listed_and_marked(self) -> None:
@@ -469,8 +475,12 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertIn("--verbosity lite", text)
         self.assertIn("health --cwd . --mode compact", text)
         self.assertIn("health --cwd . --mode full", text)
-        self.assertIn("Self-Evolution Final Review", text)
+        self.assertIn("Runtime Reflection Learning", text)
+        self.assertIn("reflection-template", text)
+        self.assertIn("review --trace-json", text)
         self.assertIn("runtime learning proposal", text)
+        self.assertNotIn("Self-" + "Evolution", text)
+        self.assertNotIn("\u81ea\u8fdb\u5316", text)
 
     def test_workspace_brain_skill_long_task_uses_contract_monitor(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
@@ -553,8 +563,8 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         )
         payload = json.loads(result.stdout)
 
-        self.assertTrue(payload["evolution_candidates"])
-        targets = {candidate["target_layer"] for candidate in payload["evolution_candidates"]}
+        self.assertTrue(payload["learning_candidates"])
+        targets = {candidate["target_layer"] for candidate in payload["learning_candidates"]}
         self.assertTrue({"execution_completion_gate", "long_task_execution_closure"}.intersection(targets))
 
 

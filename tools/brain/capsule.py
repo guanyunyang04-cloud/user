@@ -296,21 +296,21 @@ def build_task_capsule(
             "Work remains on main unless the user explicitly changes branch policy",
             "No child brain is loaded until main-brain routing selects one",
         ],
-        "self_evolution_hooks": {
-            "completion_review_required": workflow_id
+        "runtime_learning_hooks": {
+            "reflection_review_required": workflow_id
             in {
                 "brain_maintenance",
                 "brain_architecture_refactor",
                 "brain_writeback_verified",
             },
-            "review_triggers": [
-                "routing_or_workflow_conflict",
-                "rule_exists_but_was_not_followed",
-                "user_reported_repeated_failure",
-                "missing_guard_or_regression_test",
-                "stale_skill_or_brain_contract",
-                "long_task_monitor_violation",
-            ],
+            "trace_template_command": (
+                f"{PYTHON_EXECUTABLE} brain/skills/workspace-brain/scripts/brain_runtime.py "
+                "reflection-template --json"
+            ),
+            "review_command": (
+                f"{PYTHON_EXECUTABLE} brain/skills/workspace-brain/scripts/brain_runtime.py "
+                'review --cwd . --trace-json "<trace.json>" --json'
+            ),
             "proposal_command": (
                 f"{PYTHON_EXECUTABLE} brain/skills/workspace-brain/scripts/brain_runtime.py "
                 'proposal --cwd . --title "<short title>" --trigger "<fact>" '

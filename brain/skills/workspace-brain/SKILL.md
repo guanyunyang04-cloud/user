@@ -1,6 +1,6 @@
 ---
 name: workspace-brain
-description: Use the workspace main brain as the first entrypoint for project takeover, task routing, branch discipline, brain governance, capsules, evidence lookup, guard checks, self-evolution proposals, and child-brain handoff. Trigger when the user mentions brain, 脑区, 项目大脑, 接管, capsule, governance, main-only, branch, 自进化, daily_research, t0_project, or daily_stock_analysis-main.
+description: Use the workspace main brain as the first entrypoint for project takeover, task routing, branch discipline, brain governance, capsules, evidence lookup, guard checks, runtime learning proposals, and child-brain handoff. Trigger when the user mentions brain, 脑区, 项目大脑, 接管, capsule, governance, main-only, branch, runtime learning, daily_research, t0_project, or daily_stock_analysis-main.
 ---
 
 # Workspace Brain Runtime
@@ -74,17 +74,24 @@ Use `preflight_blockers`, `mutation_allowed`, `routing`, guards, risk signals, c
 - Separate facts, inferences, assumptions, and action boundaries in substantial reports.
 - For deterministic cleanup with clear benefit, low fact loss, and tests, remove stale paths completely instead of leaving compatibility shells.
 
-## Self-Evolution
+## Runtime Reflection Learning
 
-### Self-Evolution Final Review
+### Reflection Review
 
-Before the final answer for implementation, debugging, long-task, or brain-maintenance work, run or mentally apply a completion review for repeated failures, rule conflicts, stale skill behavior, missing guards, routing mismatch, and long-task monitor violations. When evidence exists, propose a runtime learning proposal instead of leaving the lesson only in chat:
+Before the final answer for implementation, debugging, long-task, or brain-maintenance work, compare planned steps, blockers, workarounds, user nudges, and verification against the final state. Prefer a structured trace when anything was blocked, skipped, manually bypassed, corrected by the user, or verified after failure:
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py reflection-template --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py review --trace-json <trace.json> --cwd . --json
+```
+
+Freeform review is a low-confidence fallback for legacy observations only:
 
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py review --cwd . --task "<user task>" --observation "<what happened>" --json
 ```
 
-If review returns candidates, ask for confirmation or generate a runtime learning proposal with `status=proposed`; do not silently rewrite core brain docs.
+If review returns learning candidates, ask for confirmation or generate a runtime learning proposal with `status=proposed`; do not silently rewrite core brain docs.
 
 Generate a runtime learning proposal when a repeated failure, rule conflict, timeout misread, branch violation, missing entrypoint, or stale skill is discovered:
 

@@ -9,6 +9,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from reflection_learning import analyze_freeform, analyze_trace, build_proposal_payload, reflection_template
+
 
 CORE_DOCS = {
     "identity_layer.md": "# {title} 身份层\n\n- 本项目脑区由 `workspace-brain` runtime 初始化。\n- 本文件保存项目身份、目标和边界。\n",
@@ -16,7 +22,7 @@ CORE_DOCS = {
     "knowledge_center.md": "# {title} 知识中枢\n\n- 稳定事实、硬规则和可复用教训写入这里。\n- 长证据和过程细节下沉到 `brain/references/`。\n",
     "brain_architecture.md": "# {title} 脑区架构\n\n- 采用最小脑区结构：identity、state、knowledge、operations、governance、episodic。\n",
     "operations_center.md": "# {title} 操作中枢\n\n- 接管入口：先运行 brain runtime detect/capsule，再执行项目任务。\n",
-    "governance_layer.md": "# {title} 治理层\n\n- 重大动作前区分事实、推断、假设和边界。\n- 自进化默认只生成 proposal，核心治理写回需要用户确认。\n",
+    "governance_layer.md": "# {title} 治理层\n\n- 重大动作前区分事实、推断、假设和边界。\n- Runtime learning 默认只生成 proposal，核心治理写回需要用户确认。\n",
     "episodic_memory.md": "# {title} 情景记忆\n\n- 时间顺序证据和长复盘写入这里或 `brain/references/`。\n",
 }
 
@@ -421,130 +427,12 @@ def review(
     task: str = "",
     observation: str = "",
     test_output: str = "",
+    trace_json: Path | None = None,
 ) -> dict[str, Any]:
-    text = "\n".join([str(task or ""), str(observation or ""), str(test_output or "")]).lower()
-    candidates: list[dict[str, Any]] = []
-
-    def add_candidate(trigger: str, target_layer: str, recommendation: str, severity: str = "info") -> None:
-        candidates.append(
-            {
-                "trigger": trigger,
-                "evidence": observation or task or test_output,
-                "root_cause": "runtime rule was not present in the default executable path",
-                "recommended_change": recommendation,
-                "target_layer": target_layer,
-                "severity": severity,
-                "requires_user_confirmation": True,
-            }
-        )
-
-    if any(term in text for term in ("明明写", "为什么还是", "没有执行", "又错", "重复", "用户指出")):
-        add_candidate(
-            "user_correction_or_repeated_failure",
-            "capsule_contract",
-            "add the rule to capsule/skill hot path and cover it with a regression test",
-        )
-    if any(
-        term in text
-        for term in (
-            "writeback-plan",
-            "path_policy/studies",
-            "continuous_policy/studies",
-            "证据域",
-            "手工绕过",
-            "错路由",
-        )
-    ):
-        add_candidate(
-            "study_evidence_domain_mismatch",
-            "study_evidence_resolver",
-            "make study evidence resolution workflow-aware and cover path_policy plus continuous_policy tags with regression tests",
-        )
-    if any(term in text for term in ("start-sleep", "wait-process", "长任务", "轮询", "eta")):
-        add_candidate(
-            "long_task_contract_gap",
-            "tests_guard",
-            "guard the long-task monitor contract and require ETA status in polling reports",
-        )
-    if any(
-        term in text
-        for term in (
-            "计划包含训练但 agent 结束任务",
-            "需要用户提示继续实施计划",
-            "训练没启动",
-            "long task step skipped",
-            "training step skipped",
-            "ended before training",
-            "ended task before training",
-        )
-    ):
-        add_candidate(
-            "long_task_execution_closure",
-            "execution_completion_gate",
-            "tighten the skill/runtime completion checklist so planned training or long-running steps are either launched with PID/log/progress monitoring or explicitly reported as blocked",
-        )
-    workflow_conflict_terms = (
-        "selected brain_handoff for a brain rule mutation",
-        "brain_handoff for a brain rule",
-        "brain rule mutation",
-        "workflow selector",
-        "workflow_selector",
-        "workflow mismatch",
-        "wrong workflow",
-        "selected wrong workflow",
-        "capsule workflow mismatch",
-        "intent mismatch",
-        "intent override",
-        "completion_review=false",
-        "completion_review_required=false",
-        "路由误判",
-        "工作流误判",
-        "选错 workflow",
-        "脑区规则被 handoff",
-        "selector 漏判",
-        "规则修改没有触发",
-    )
-    if any(term in text for term in workflow_conflict_terms):
-        add_candidate(
-            "workflow_selector_conflict",
-            "workflow_selector",
-            "tighten brain-native workflow selector rules while keeping generic method terms owned by local skills",
-        )
-    skill_gap_terms = (
-        "stale skill",
-        "global skill",
-        "stale_or_missing_global_skill",
-        "skill sync",
-        "skill_install",
-        "skill out of sync",
-        "out of sync",
-        "not in sync",
-        "技能不同步",
-        "skill 不同步",
-        "未同步",
-        "安装版落后",
-        "同步失败",
-    )
-    if any(term in text for term in skill_gap_terms):
-        add_candidate(
-            "skill_sync_or_contract_gap",
-            "skill",
-            "sync canonical workspace-brain skill and add a skill_install guard",
-        )
-
-    unique: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
-    for candidate in candidates:
-        key = (str(candidate["trigger"]), str(candidate["target_layer"]))
-        if key not in seen:
-            unique.append(candidate)
-            seen.add(key)
-    return {
-        "status": "ok",
-        "completion_review_required": True,
-        "evolution_candidates": unique,
-        "next_actions": ["create_runtime_learning_proposal"] if unique else ["no_runtime_learning_needed"],
-    }
+    if trace_json is not None:
+        payload = json.loads(trace_json.read_text(encoding="utf-8-sig"))
+        return analyze_trace(payload if isinstance(payload, dict) else {})
+    return analyze_freeform(task=task, observation=observation, test_output=test_output)
 
 
 def proposal(
@@ -562,6 +450,10 @@ def proposal(
     status: str = "proposed",
     related_task: str = "",
     suggested_tests: list[str] | None = None,
+    lesson: str = "",
+    root_cause: str = "",
+    supporting_events: list[dict[str, Any]] | None = None,
+    anti_overfit_check: str = "",
 ) -> dict[str, Any]:
     resolved = cwd.resolve()
     out_dir = _runtime_learning_dir(resolved)
@@ -569,28 +461,27 @@ def proposal(
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_title = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in title.lower()).strip("_") or "proposal"
     proposal_id = f"{stamp}_{safe_title}"
-    payload = {
-        "schema_version": 1,
-        "proposal_id": proposal_id,
-        "title": title,
-        "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "authority": "requires_user_confirmation",
-        "status": status,
-        "severity": severity,
-        "owner_brain": owner_brain or _owner_brain(resolved, "workspace"),
-        "writeback_target": writeback_target,
-        "target_layer": target_layer,
-        "related_task": related_task,
-        "requires_user_confirmation": bool(requires_user_confirmation),
-        "facts": [trigger],
-        "inferences": [],
-        "assumptions": [],
-        "trigger_evidence": [evidence],
-        "recommendation": recommendation,
-        "suggested_write_routes": [writeback_target, "brain/knowledge_center.md"],
-        "suggested_tests": list(suggested_tests or []),
-        "risks": ["Core brain or skill changes must not be applied without explicit confirmation."],
-    }
+    created_at = datetime.now().astimezone().isoformat(timespec="seconds")
+    payload = build_proposal_payload(
+        proposal_id=proposal_id,
+        title=title,
+        created_at=created_at,
+        status=status,
+        severity=severity,
+        owner_brain=owner_brain or _owner_brain(resolved, "workspace"),
+        writeback_target=writeback_target,
+        target_layer=target_layer,
+        related_task=related_task,
+        trigger=trigger,
+        evidence=evidence,
+        recommendation=recommendation,
+        requires_user_confirmation=requires_user_confirmation,
+        suggested_tests=list(suggested_tests or []),
+        lesson=lesson,
+        root_cause=root_cause,
+        supporting_events=supporting_events,
+        anti_overfit_check=anti_overfit_check,
+    )
     json_path = out_dir / f"{proposal_id}.json"
     md_path = out_dir / f"{proposal_id}.md"
     json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
@@ -606,6 +497,8 @@ def proposal(
                 f"- Trigger: {trigger}",
                 f"- Evidence: {evidence}",
                 f"- Recommendation: {recommendation}",
+                f"- Lesson: {payload['lesson']}",
+                f"- Root cause: {payload['root_cause']}",
                 "",
             ]
         ),
@@ -687,6 +580,8 @@ def build_parser() -> argparse.ArgumentParser:
     health_parser = sub.add_parser("health")
     health_parser.add_argument("--cwd", default=".")
     health_parser.add_argument("--mode", choices=("compact", "full"), default="compact")
+    template_parser = sub.add_parser("reflection-template")
+    template_parser.add_argument("--json", action="store_true")
     proposal_parser = sub.add_parser("proposal")
     proposal_parser.add_argument("--cwd", default=".")
     proposal_parser.add_argument("--title", required=True)
@@ -706,6 +601,7 @@ def build_parser() -> argparse.ArgumentParser:
     review_parser.add_argument("--task", default="")
     review_parser.add_argument("--observation", default="")
     review_parser.add_argument("--test-output", default="")
+    review_parser.add_argument("--trace-json", default="")
     review_parser.add_argument("--json", action="store_true")
     list_parser = sub.add_parser("list-proposals")
     list_parser.add_argument("--cwd", default=".")
@@ -727,6 +623,8 @@ def main() -> int:
         payload = capsule(cwd, str(args.task or ""), str(args.intent or "read"), verbosity=str(args.verbosity or "lite"))
     elif args.command == "health":
         payload = health(cwd, mode=str(args.mode or "compact"))
+    elif args.command == "reflection-template":
+        payload = reflection_template()
     elif args.command == "proposal":
         payload = proposal(
             cwd,
@@ -749,6 +647,7 @@ def main() -> int:
             task=str(args.task or ""),
             observation=str(args.observation or ""),
             test_output=str(args.test_output or ""),
+            trace_json=Path(str(args.trace_json)).resolve() if str(args.trace_json or "").strip() else None,
         )
     elif args.command == "list-proposals":
         payload = list_proposals(cwd)
