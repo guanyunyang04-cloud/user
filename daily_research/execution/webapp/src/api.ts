@@ -2,7 +2,6 @@ import type {
   AccountPayload,
   AccountSaveRequest,
   DataRefreshRequest,
-  DailyRunRequest,
   DailyRunStatusPayload,
   DailyRunVerdict,
   DataReadinessPayload,
@@ -19,7 +18,6 @@ import type {
   PaperManualAdjustmentRequest,
   PaperPerformancePayload,
   ProviderHealthRequest,
-  SchedulerPayload,
   TradePlanGenerateRequest,
   TradePlanPayload,
   TrainModelRequest
@@ -59,7 +57,6 @@ export function createApiClient(fetcher: FetchLike = window.fetch.bind(window)):
   return {
     getDailyRunStatus: () => requestJson<DailyRunStatusPayload>(fetcher, "/api/daily-run/status"),
     getLatestDailyRun: () => requestJson<DailyRunVerdict>(fetcher, "/api/daily-run/latest"),
-    runDailyPlan: (payload: DailyRunRequest) => postJson<JobLaunchPayload>(fetcher, "/api/daily-run/run", payload),
     getDataReadiness: (candidateDate = "") =>
       requestJson<DataReadinessPayload>(
         fetcher,
@@ -75,7 +72,6 @@ export function createApiClient(fetcher: FetchLike = window.fetch.bind(window)):
     refreshDataSources: (payload: DataRefreshRequest) => postJson<JobLaunchPayload>(fetcher, "/api/data-sources/refresh", payload),
     runProviderHealth: (payload: ProviderHealthRequest) =>
       postJson<JobLaunchPayload>(fetcher, "/api/data-sources/provider-health", payload),
-    getScheduler: () => requestJson<SchedulerPayload>(fetcher, "/api/data-sources/scheduler"),
     getTradePlan: () => requestJson<TradePlanPayload>(fetcher, "/api/trade-plan"),
     generateTradePlan: (payload: TradePlanGenerateRequest) => postJson<JobLaunchPayload>(fetcher, "/api/trade-plan/generate", payload),
     getAccount: () => requestJson<AccountPayload>(fetcher, "/api/account"),

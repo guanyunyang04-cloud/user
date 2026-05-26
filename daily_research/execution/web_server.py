@@ -9,13 +9,11 @@ import uvicorn
 import json
 
 from daily_research.execution import app_service
-from daily_research.execution import daily_plan_runner
+from daily_research.execution import daily_verdict
 from daily_research.execution import data_readiness
-from daily_research.execution import scheduler_cli
 from daily_research.execution.web_models import (
     AccountSnapshotRequest,
     DataRefreshRequest,
-    DailyRunRequest,
     ModelTrainRequest,
     PaperApplyLatestPlanRequest,
     PaperCashFlowRequest,
@@ -127,43 +125,26 @@ def create_app() -> FastAPI:
     @app.get("/api/system/doctor")
     def api_system_doctor() -> dict[str, Any]:
         payload = app_service.build_doctor_payload()
-        payload["scheduler"] = scheduler_cli.scheduler_status()
-        payload["daily_run"] = daily_plan_runner.daily_run_status()
+        payload["daily_run"] = daily_verdict.daily_run_status()
         return payload
 
     @app.get("/api/daily-run/status")
     def api_daily_run_status() -> dict[str, Any]:
-        return daily_plan_runner.daily_run_status()
+        return daily_verdict.daily_run_status()
 
     @app.get("/api/daily-run/latest")
     def api_daily_run_latest() -> dict[str, Any]:
-        payload = daily_plan_runner.latest_daily_verdict()
+        payload = daily_verdict.latest_daily_verdict()
         if not payload:
             raise HTTPException(status_code=404, detail="No daily run verdict found")
         return payload
 
     @app.get("/api/daily-run/{run_date}")
     def api_daily_run_date(run_date: str) -> dict[str, Any]:
-        payload = daily_plan_runner.verdict_for_date(run_date)
+        payload = daily_verdict.verdict_for_date(run_date)
         if not payload:
             raise HTTPException(status_code=404, detail=f"No daily run verdict found for {run_date}")
         return payload
-
-    @app.post("/api/daily-run/run")
-    def api_daily_run_run(request: DailyRunRequest) -> JSONResponse:
-        try:
-            args = ["--mode", request.mode, "--json"]
-            if request.run_date:
-                args.extend(["--run-date", request.run_date])
-            payload = app_service.launch_task_async(
-                task_name="daily-plan-runner",
-                passthrough_args=args,
-                job_label=request.job_label or f"manual-daily-plan:{request.mode}",
-                force_unlock=request.force_unlock,
-            )
-            return JSONResponse(payload)
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/data-readiness")
     def api_data_readiness(candidate_date: str = Query(default="")) -> dict[str, Any]:
@@ -338,10 +319,6 @@ def create_app() -> FastAPI:
             return JSONResponse(payload)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    @app.get("/api/data-sources/scheduler")
-    def api_data_sources_scheduler() -> dict[str, Any]:
-        return scheduler_cli.scheduler_status()
 
     @app.post("/api/data-sources/refresh")
     def api_data_sources_refresh(request: DataRefreshRequest) -> JSONResponse:

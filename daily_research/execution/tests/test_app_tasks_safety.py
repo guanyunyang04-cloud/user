@@ -41,6 +41,12 @@ def test_default_frontend_task_surface_hides_dangerous_production_refresh() -> N
     assert "refresh-production-default" not in task_names
 
 
+def test_task_registry_does_not_expose_automatic_daily_runner() -> None:
+    task_names = {spec.name for spec in list_task_specs()}
+
+    assert "daily-plan-runner" not in task_names
+
+
 def test_provider_health_check_runs_from_execution_task_command() -> None:
     command = build_task_command(
         task_name="provider-health-check",

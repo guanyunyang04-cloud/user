@@ -35,7 +35,6 @@ export function OverviewPage({ api }: OverviewPageProps): JSX.Element {
   }, []);
 
   const verdict = dailyRun?.latest_verdict || {};
-  const scheduler = dailyRun?.scheduler || {};
   const jobs = useMemo<TableRow[]>(
     () =>
       recentJobs.map((job) => ({
@@ -62,7 +61,7 @@ export function OverviewPage({ api }: OverviewPageProps): JSX.Element {
         <Stat label="账户权益" value={text(paper?.latest_equity && typeof paper.latest_equity === "object" ? (paper.latest_equity as Record<string, unknown>).total_equity : "")} />
         <Stat label="未成交" value={text(paper?.pending_order_count)} />
         <Stat label="账户持仓" value={text(paper?.position_count)} />
-        <Stat label="系统任务" value={<StatusPill value={Boolean((scheduler as Record<string, unknown>).enabled)} />} />
+        <Stat label="执行方式" value={<StatusPill value="manual" />} />
       </div>
       <div className="two-column">
         <Panel title="Daily Verdict">

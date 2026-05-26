@@ -34,3 +34,20 @@ def test_execution_tests_default_to_isolated_runtime_root() -> None:
 
     assert app_runtime.RUNTIME_ROOT != real_runtime_root
     assert "pytest" in app_runtime.RUNTIME_ROOT.as_posix() or "tmp" in app_runtime.RUNTIME_ROOT.as_posix().lower()
+
+
+def test_daily_verdict_follows_retargeted_runtime_root(tmp_path: Path) -> None:
+    from daily_research.execution import app_runtime, daily_verdict
+
+    runtime_root = tmp_path / "runtime"
+    app_runtime.configure_runtime_root(runtime_root)
+
+    verdict_dir = runtime_root / "daily_runs" / "20260527"
+    verdict_dir.mkdir(parents=True)
+    app_runtime.write_json_file(verdict_dir / "verdict.json", {"run_date": "2026-05-27", "status": "blocked"})
+
+    payload = daily_verdict.daily_run_status()
+
+    assert payload["latest_run_date"] == "2026-05-27"
+    assert payload["status"] == "blocked"
+    assert payload["daily_runs_root"] == str((runtime_root / "daily_runs").resolve())

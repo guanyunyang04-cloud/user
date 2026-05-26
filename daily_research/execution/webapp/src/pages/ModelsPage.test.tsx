@@ -8,7 +8,6 @@ function fakeApi(overrides: Partial<ExecutionApi> = {}): ExecutionApi {
   return {
     getDailyRunStatus: vi.fn(),
     getLatestDailyRun: vi.fn(),
-    runDailyPlan: vi.fn(),
     getDataReadiness: vi.fn(),
     getSystemDoctor: vi.fn(),
     getDoctor: vi.fn(),
@@ -79,7 +78,6 @@ function fakeApi(overrides: Partial<ExecutionApi> = {}): ExecutionApi {
     getDataSources: vi.fn(),
     refreshDataSources: vi.fn(),
     runProviderHealth: vi.fn(),
-    getScheduler: vi.fn(),
     getTradePlan: vi.fn(),
     generateTradePlan: vi.fn(),
     getAccount: vi.fn(),

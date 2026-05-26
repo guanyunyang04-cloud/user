@@ -93,28 +93,6 @@ export interface JobProgress {
   [key: string]: unknown;
 }
 
-export interface SchedulerStatus {
-  enabled?: boolean;
-  post_close_time?: string;
-  timezone?: string;
-  next_check_at?: string;
-  recent_decision?: JsonObject;
-  missed_status?: string;
-  [key: string]: unknown;
-}
-
-export interface SchedulerPayload {
-  status: string;
-  installed?: boolean;
-  enabled?: boolean;
-  task_name?: string;
-  time?: string;
-  next_run_time?: string;
-  last_run_time?: string;
-  last_result?: string;
-  detail?: string;
-}
-
 export interface DailyRunVerdict {
   schema_version?: number;
   run_date?: string;
@@ -135,15 +113,7 @@ export interface DailyRunStatusPayload {
   status: string;
   latest_run_date?: string;
   latest_verdict?: DailyRunVerdict;
-  scheduler?: SchedulerPayload | JsonObject;
   daily_runs_root?: string;
-}
-
-export interface DailyRunRequest {
-  mode?: "post-close" | "dry-run" | string;
-  run_date?: string;
-  job_label?: string;
-  force_unlock?: boolean;
 }
 
 export interface DataReadinessPayload {
@@ -386,7 +356,6 @@ export interface DoctorPayload {
 export interface ExecutionApi {
   getDailyRunStatus(): Promise<DailyRunStatusPayload>;
   getLatestDailyRun(): Promise<DailyRunVerdict>;
-  runDailyPlan(payload: DailyRunRequest): Promise<JobLaunchPayload>;
   getDataReadiness(candidateDate?: string): Promise<DataReadinessPayload>;
   getSystemDoctor(): Promise<DoctorPayload>;
   getDoctor(): Promise<DoctorPayload>;
@@ -396,7 +365,6 @@ export interface ExecutionApi {
   getDataSources(): Promise<DataSourcesPayload>;
   refreshDataSources(payload: DataRefreshRequest): Promise<JobLaunchPayload>;
   runProviderHealth(payload: ProviderHealthRequest): Promise<JobLaunchPayload>;
-  getScheduler(): Promise<SchedulerPayload>;
   getTradePlan(): Promise<TradePlanPayload>;
   generateTradePlan(payload: TradePlanGenerateRequest): Promise<JobLaunchPayload>;
   getAccount(): Promise<AccountPayload>;

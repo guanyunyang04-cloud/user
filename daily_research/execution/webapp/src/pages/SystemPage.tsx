@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Unlock } from "lucide-react";
-import type { DailyRunStatusPayload, DoctorPayload, ExecutionApi, SchedulerPayload } from "../types";
+import type { DailyRunStatusPayload, DoctorPayload, ExecutionApi } from "../types";
 import { DataTable, ErrorState, LoadingState, PageHeader, Panel, Stat, StatusPill } from "../components";
 import { text } from "../format";
 
@@ -10,7 +10,6 @@ interface SystemPageProps {
 
 export function SystemPage({ api }: SystemPageProps): JSX.Element {
   const [dailyRun, setDailyRun] = useState<DailyRunStatusPayload | null>(null);
-  const [scheduler, setScheduler] = useState<SchedulerPayload | null>(null);
   const [doctor, setDoctor] = useState<DoctorPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -19,11 +18,10 @@ export function SystemPage({ api }: SystemPageProps): JSX.Element {
 
   const load = (): void => {
     setLoading(true);
-    Promise.all([api.getDailyRunStatus(), api.getSystemDoctor(), api.getScheduler()])
-      .then(([nextDailyRun, nextDoctor, nextScheduler]) => {
+    Promise.all([api.getDailyRunStatus(), api.getSystemDoctor()])
+      .then(([nextDailyRun, nextDoctor]) => {
         setDailyRun(nextDailyRun);
         setDoctor(nextDoctor);
-        setScheduler(nextScheduler);
         setError("");
       })
       .catch((err: Error) => setError(err.message))
@@ -49,7 +47,7 @@ export function SystemPage({ api }: SystemPageProps): JSX.Element {
 
   return (
     <div>
-      <PageHeader title="系统" eyebrow="doctor、系统任务与 daily verdict" />
+      <PageHeader title="系统" eyebrow="doctor、锁与 daily verdict" />
       {loading ? <LoadingState /> : null}
       {error ? <ErrorState message={error} /> : null}
       <div className="stat-grid">
@@ -57,10 +55,7 @@ export function SystemPage({ api }: SystemPageProps): JSX.Element {
         <Stat label="Daily Run" value={<StatusPill value={dailyRun?.status || "missing"} />} />
         <Stat label="目标交易日" value={text(verdict.target_trading_date)} />
         <Stat label="阻断原因" value={text(verdict.blocker_code)} />
-        <Stat label="系统任务" value={<StatusPill value={Boolean(scheduler?.enabled)} />} />
-        <Stat label="任务名" value={text(scheduler?.task_name)} />
-        <Stat label="下次运行" value={text(scheduler?.next_run_time)} />
-        <Stat label="上次结果" value={text(scheduler?.last_result)} />
+        <Stat label="执行方式" value={<StatusPill value="manual" />} />
       </div>
       <Panel title="关键证据">
         <div className="key-list">
@@ -76,22 +71,6 @@ export function SystemPage({ api }: SystemPageProps): JSX.Element {
           <strong>{text(verdict.trade_plan_run_dir)}</strong>
           <span>Paper Reconcile</span>
           <strong>{text(verdict.paper_reconcile_status)}</strong>
-        </div>
-      </Panel>
-      <Panel title="Windows Task Scheduler">
-        <div className="key-list">
-          <span>Installed</span>
-          <strong><StatusPill value={Boolean(scheduler?.installed)} /></strong>
-          <span>Enabled</span>
-          <strong><StatusPill value={Boolean(scheduler?.enabled)} /></strong>
-          <span>Task Name</span>
-          <strong>{text(scheduler?.task_name)}</strong>
-          <span>Next Run</span>
-          <strong>{text(scheduler?.next_run_time)}</strong>
-          <span>Last Run</span>
-          <strong>{text(scheduler?.last_run_time)}</strong>
-          <span>Last Result</span>
-          <strong>{text(scheduler?.last_result)}</strong>
         </div>
       </Panel>
       <Panel title="Doctor Checks">

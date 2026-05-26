@@ -25,14 +25,14 @@
 - r73 已把 data lake 接入决策特征利用审计与 r71 collapse 诊断；`protocol_r73_lake_native_r71_collapse_repair_smoke_20260515_02` 完整跑通，eval/shadow 均保持 cashflow valid=1、intent conflict=0 且 source/receiver target 非零，但 training evidence 仍 `insufficient`、promotion gate 仍 `shadow_only`，行为质量仍有 cash timing、source quality、receiver-source spread 阻塞。
 - r74 已新增显式 `portfolio_set_v5_dfl_pg_v1_r74_lake_behavior_quality` 研究线，并完成 tiny lake smoke `protocol_r74_lake_behavior_quality_v5_smoke_20260515_03`；cashflow valid=1、intent conflict=0、source/receiver 非零，source wrong-side sell、reversal、cash timing 与 shadow receiver-source spread 相对 r73 有改善，但 source/receiver 覆盖收缩、feature contract degraded rate=1.0、training evidence 仍 `insufficient`，仍不是 promotion 或 behavior-success verdict。
 - 2026-05-23 已将 TDX-free data platform 升级到 V2：正式研究入口 lake-first，`tqcenter.py` / `pytdx` / `mootdx` 不再是 daily_research 主链路依赖；`refresh_daily` 支持 `--universe all_a|liquid500|file:<path>|symbols:<csv>`、真实交易日历、多 domain sidecar、Bronze/Silver 仲裁和显式 lake dataset 注册。
-- 2026-05-26 执行端已从“控制台能运行”重构为“每日计划状态机”：自动盘后由 Windows Task Scheduler 触发 `daily_plan_runner`，每日结论以 daily verdict 为准。
+- 2026-05-27 执行端已改为手动-only：帮助页提供“刷新数据/信号 -> 生成交易计划 -> 模拟账户过账 -> 复核状态”的显式按钮流程；调度、轮询触发和一键每日流水线不属于当前产品面。
 - 当前 fresh daily verdict：`daily_research/output/execution_app/daily_runs/20260526/verdict.json`，状态 `blocked:data_not_ready`，目标交易日 `2026-05-26`；完整证据见 `daily_research/brain/references/execution_daily_plan_state_machine_refactor_20260526.md`。
 
 ## 当前接管入口
 - 默认读取顺序：`identity_layer.md -> state_center.md -> knowledge_center.md -> continuous_policy_design_contract.md -> operations_center.md -> governance_layer.md`。
 - 首选工具入口：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`。
 - 所有 `daily_research` 程序必须显式使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`。
-- 每日执行接管先看 daily verdict；Web 能打开、job succeeded 或 latest trade plan 存在都不能替代 daily verdict。
+- 每日执行接管先看帮助页手动流程、作业证据和 daily verdict；Web 能打开、job succeeded 或 latest trade plan 存在都不能单独证明每日任务完成。
 - PowerShell 中文显示异常时，先用显式 UTF-8 复读；不得直接判定文档损坏。
 - `latest_*` 不得直接当真源；若 latest study/protocol/audit/ledger 不同源，必须使用 explicit run tag / protocol tag / dataset id。
 
@@ -53,7 +53,7 @@
 
 ## 当前优先级
 - P0：冻结 live/default/promotion/active artifact，所有新线先保持 research / shadow-only。
-- P1：每日执行端以 daily verdict 为最终事实层；数据缺口严格阻断，不能自动回退旧交易日生成“今日计划”。
+- P1：每日执行端以手动帮助页流程、作业证据和 daily verdict 共同构成事实层；数据缺口严格阻断，不能回退旧交易日伪装“今日计划”。
 - P2：保持脑区控制面简洁；长历史、完整复盘、长命令进入 `references/`。
 - P3：`alpha_multi_horizon_utility_policy_v1` 下一步只做 constrained horizon-score / calibration 研究；约束后仍保持 spread、hit lift 和月稳，才允许 seeds `7,11,19`，仍不得上 liquid800 或 live/default。
 - P4：围绕 r71/r74 multi-stage regret 与 lake-native decision features 继续验证 receiver/deploy 平衡、cash timing、drawdown/reversal、source quality、feature contract health 与 sufficient training evidence；translation closure、oracle feasibility 和 lake source/receiver collapse 不再是当前主 blocker。

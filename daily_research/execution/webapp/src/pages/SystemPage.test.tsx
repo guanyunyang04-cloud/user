@@ -4,7 +4,7 @@ import { SystemPage } from "./SystemPage";
 import type { ExecutionApi } from "../types";
 
 describe("SystemPage", () => {
-  it("shows post-close scheduler status and latest automatic refresh evidence", async () => {
+  it("shows manual system doctor and latest verdict evidence without scheduler surface", async () => {
     const api = {
       getDailyRunStatus: vi.fn().mockResolvedValue({
         status: "completed",
@@ -21,21 +21,15 @@ describe("SystemPage", () => {
         }
       }),
       getSystemDoctor: vi.fn().mockResolvedValue({ status: "ok", checked_at: "2026-05-24T00:00:00", checks: [] }),
-      getScheduler: vi.fn().mockResolvedValue({
-        status: "ok",
-        installed: true,
-        enabled: true,
-        task_name: "DailyResearchDailyPlan",
-        next_run_time: "2026-05-27 15:45:00",
-        last_result: "0"
-      }),
       unlockRuntime: vi.fn()
     } as unknown as ExecutionApi;
 
     render(<SystemPage api={api} />);
 
-    expect(await screen.findByText("Windows Task Scheduler")).toBeInTheDocument();
-    expect(screen.getAllByText("DailyResearchDailyPlan").length).toBeGreaterThan(0);
+    expect(await screen.findByText("关键证据")).toBeInTheDocument();
+    expect(screen.queryByText("Windows Task Scheduler")).not.toBeInTheDocument();
+    expect(screen.queryByText("DailyResearchDailyPlan")).not.toBeInTheDocument();
+    expect("getScheduler" in api).toBe(false);
     expect(screen.getByText("policy_input_bundle__current")).toBeInTheDocument();
     expect(screen.getByText("H:/verdict.json")).toBeInTheDocument();
   });

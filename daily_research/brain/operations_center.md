@@ -81,19 +81,17 @@
 - 本轮不实现实盘自动交易；后续 paper/live 需要单独设计 QMT/PTrade broker adapter、风控、合规报备和 kill switch。
 
 ## Daily Execution 运行口径
-- 每日盘后计划的权威状态是 daily verdict，不是 Web 是否能打开、单个 job 是否 succeeded、旧 runtime state 或 latest trade plan。
-- 状态机入口：
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.execution.daily_plan_runner --mode post-close --json`
-- dry-run / readiness 预检入口：
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.execution.daily_plan_runner --mode dry-run --json`
-- Windows Task Scheduler 是自动盘后执行主体；Web 进程不得启动后台 scheduler loop 或保存 scheduler enabled/post-close 配置。
-- 系统任务命令：
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.execution.scheduler_cli install --time 15:45`
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.execution.scheduler_cli status --json`
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.execution.scheduler_cli uninstall`
+- 每日任务只走手动步骤；权威状态来自 Web 帮助页当前流程、作业证据路径和只读 daily verdict，不是 Web 是否能打开、单个 job 是否 succeeded、旧 runtime state 或 latest trade plan。
+- 启动 Web：
+  `conda run -n yolos python daily_research/execution/run_execution_web.py --port 8765`
+- 统一应用入口：
+  `conda run -n yolos python daily_research/execution/run_execution_app.py web --port 8765`
+- 帮助页手动顺序：刷新数据/信号 -> 生成交易计划 -> 模拟账户过账 -> 复核状态。
+- 所有任务都必须由按钮或明确 CLI 单项命令显式触发；调度、轮询触发和一键每日流水线不属于当前产品面。
 - 数据 readiness 是硬门禁：候选日 `market_daily` 必须非空且覆盖率达标后才允许刷新、信号刷新和交易计划；不得用上一完整交易日伪装今日 completed。
-- Web API 热路径只读 compact daily state：`/api/daily-run/status`、`/api/daily-run/latest`、`/api/daily-run/run`、`/api/data-readiness`、`/api/system/doctor`。
-- 当前 2026-05-26 fresh verdict 为 `blocked:data_not_ready`；完整重构记录见 `daily_research/brain/references/execution_daily_plan_state_machine_refactor_20260526.md`。
+- Web API 热路径只读 compact daily state：`/api/daily-run/status`、`/api/daily-run/latest`、`/api/data-readiness`、`/api/system/doctor`。
+- 任务提交入口只保留单项显式动作：`/api/data-sources/refresh`、`/api/trade-plan/generate`、`/api/paper-account/apply-latest-plan` 和必要诊断/恢复入口。
+- 当前 2026-05-26 fresh verdict 为 `blocked:data_not_ready`；后续操作以手动帮助页流程为准，完整旧状态机记录见 `daily_research/brain/references/execution_daily_plan_state_machine_refactor_20260526.md`。
 
 ## PathPolicy 执行异常处理口径
 - `test_forecast_dataset.py` 是慢集成测试；修改 forecast 默认先跑 selective verification 推荐的快速合同测试，完整 forecast dataset/training 测试只在长验证、发布前或风险升高时跑。

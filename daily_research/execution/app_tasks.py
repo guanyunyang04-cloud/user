@@ -81,15 +81,6 @@ TASK_SPECS: tuple[ExecutionTaskSpec, ...] = (
         launcher_notes=("默认路径应保持跟随 active_execution_strategy。",),
     ),
     ExecutionTaskSpec(
-        name="daily-plan-runner",
-        script_relative_path="daily_research/execution/daily_plan_runner.py",
-        description="每日盘后计划状态机：数据 readiness、刷新、信号、交易计划和 paper reconcile。",
-        category="execution",
-        timeout_seconds=14400,
-        safety_level="caution",
-        safety_summary="按 daily verdict 写入 execution_app/daily_runs；不做 promotion/live/default 切换。",
-    ),
-    ExecutionTaskSpec(
         name="refresh-production-default",
         script_relative_path="daily_research/execution/update_default_candidate_production.py",
         description="刷新默认 production full-fit，并可选择更新 active manifest。",

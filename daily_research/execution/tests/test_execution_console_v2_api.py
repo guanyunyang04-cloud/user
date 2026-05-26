@@ -749,24 +749,20 @@ def test_provider_health_sync_api_remains_available_for_diagnostics(monkeypatch:
     assert called["provider_plan"] == "formal_free_v3"
 
 
-def test_scheduler_api_is_read_only_and_patch_removed(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_scheduler_api_is_removed() -> None:
     from fastapi.testclient import TestClient
 
     from daily_research.execution import web_server
 
-    monkeypatch.setattr(
-        web_server.scheduler_cli,
-        "scheduler_status",
-        lambda: {"status": "ok", "installed": True, "enabled": True, "time": "15:45", "task_name": "DailyResearchDailyPlan"},
-    )
-
     client = TestClient(web_server.create_app())
     get_response = client.get("/api/data-sources/scheduler")
     patch_response = client.patch("/api/data-sources/scheduler", json={"enabled": False, "post_close_time": "15:45"})
+    route_paths = {getattr(route, "path", "") for route in client.app.routes}
 
-    assert get_response.status_code == 200
-    assert get_response.json()["task_name"] == "DailyResearchDailyPlan"
-    assert patch_response.status_code == 405
+    assert get_response.status_code == 404
+    assert patch_response.status_code in {404, 405}
+    assert "/api/data-sources/scheduler" not in route_paths
+    assert not hasattr(web_server, "scheduler_cli")
 
 
 def test_daily_run_api_returns_compact_status_and_does_not_expose_runtime_json(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -775,7 +771,7 @@ def test_daily_run_api_returns_compact_status_and_does_not_expose_runtime_json(m
     from daily_research.execution import web_server
 
     monkeypatch.setattr(
-        web_server.daily_plan_runner,
+        web_server.daily_verdict,
         "daily_run_status",
         lambda: {
             "status": "blocked",
@@ -785,7 +781,6 @@ def test_daily_run_api_returns_compact_status_and_does_not_expose_runtime_json(m
                 "blocker_code": "data_not_ready",
                 "target_trading_date": "2026-05-26",
             },
-            "scheduler": {"installed": True, "enabled": True},
         },
     )
 
@@ -795,32 +790,27 @@ def test_daily_run_api_returns_compact_status_and_does_not_expose_runtime_json(m
     assert response.status_code == 200
     payload = response.json()
     assert payload["latest_verdict"]["blocker_code"] == "data_not_ready"
+    assert "scheduler" not in payload
     assert "recent_jobs" not in payload
     assert "current_job" not in payload
     assert "runtime_state" not in payload
 
 
-def test_daily_run_api_launches_single_daily_runner(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_daily_run_manual_runner_api_removed(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi.testclient import TestClient
 
     from daily_research.execution import web_server
 
-    captured: dict[str, Any] = {}
-
-    def fake_launch(**kwargs):
-        captured.update(kwargs)
-        return {"job_id": "daily-plan-job", "task_name": kwargs["task_name"], "status": "queued"}
-
-    monkeypatch.setattr(web_server.app_service, "launch_task_async", fake_launch)
+    launch = mock.Mock()
+    monkeypatch.setattr(web_server.app_service, "launch_task_async", launch)
 
     client = TestClient(web_server.create_app())
-    response = client.post("/api/daily-run/run", json={"mode": "post-close"})
+    response = client.post("/api/daily-run/run", json={"mode": "manual"})
+    route_paths = {getattr(route, "path", "") for route in client.app.routes}
 
-    assert response.status_code == 200
-    assert response.json()["task_name"] == "daily-plan-runner"
-    assert captured["task_name"] == "daily-plan-runner"
-    assert "--mode" in captured["passthrough_args"]
-    assert "post-close" in captured["passthrough_args"]
+    assert response.status_code in {404, 405}
+    assert "/api/daily-run/run" not in route_paths
+    launch.assert_not_called()
 
 
 def test_data_readiness_api_reports_candidate_blocker(monkeypatch: pytest.MonkeyPatch) -> None:

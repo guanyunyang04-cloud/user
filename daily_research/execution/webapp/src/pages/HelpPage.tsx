@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { CheckCircle2, FileText, RefreshCw, WalletCards } from "lucide-react";
 import type {
   DailyRunStatusPayload,
   DataSourcesPayload,
@@ -212,7 +212,7 @@ const PAGE_ROWS: TableRow[] = [
   { page: "交易计划", use: "生成并查看结构化动作、watchlist、市场状态和 TXT 原文", safe_action: "注册模拟订单" },
   { page: "模拟账户", use: "查看现金、持仓、pending orders、成交流水和区间收益", safe_action: "充值提现、手动修正、模拟过账" },
   { page: "作业", use: "查看任务历史、runner/business/artifact 状态和日志", safe_action: "查看详情或恢复失败任务" },
-  { page: "系统", use: "查看 doctor、锁、Windows Task Scheduler 和 daily verdict 证据路径", safe_action: "必要时清理锁" }
+  { page: "系统", use: "查看 doctor、锁和 daily verdict 证据路径", safe_action: "必要时清理锁" }
 ];
 
 const STATUS_ROWS: TableRow[] = [
@@ -240,6 +240,7 @@ export function HelpPage({ api }: HelpPageProps): JSX.Element {
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
 
   const load = (): void => {
     setLoading(true);
@@ -268,16 +269,55 @@ export function HelpPage({ api }: HelpPageProps): JSX.Element {
     const row = guide.checklistRows.find((item) => item.step === "生成交易计划");
     return String(row?.status || tradePlan?.status || "missing");
   }, [guide.checklistRows, tradePlan?.status]);
+  const defaultRefresh = dataSources?.data_platform?.default_refresh;
+  const defaultAsOfDate = defaultRefresh?.as_of_date || dataSources?.data_platform?.latest_completed_trading_date || "";
+  const defaultDomains = defaultRefresh?.domains || [];
+  const defaultUniverse = defaultRefresh?.universe || "all_a";
+  const busy = hasRunningJob(jobs);
+
+  async function runManualAction(
+    label: string,
+    action: () => Promise<{ job_id?: string; status?: string } | Record<string, unknown>>
+  ): Promise<void> {
+    setActionMessage("");
+    setError("");
+    try {
+      const response = await action();
+      const jobId = "job_id" in response ? String(response.job_id || "") : "";
+      const status = "status" in response ? String(response.status || "") : "";
+      setActionMessage(`${label} 已提交${jobId ? `：${jobId}` : ""}${status ? ` (${status})` : ""}`);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `${label} 失败`);
+    }
+  }
+
+  function refreshDataAndSignals(): Promise<{ job_id?: string; status?: string }> {
+    return api.refreshDataSources({
+      as_of_date: defaultAsOfDate,
+      universe: defaultUniverse,
+      domains: defaultDomains,
+      force_unlock: false
+    });
+  }
+
+  function generateTradePlan(): Promise<{ job_id?: string; status?: string }> {
+    return api.generateTradePlan({
+      candidate_profile: "active_execution_strategy",
+      force_unlock: false
+    });
+  }
 
   return (
     <div>
       <PageHeader
         title="帮助"
-        eyebrow="日常盘后 runbook、状态解释与安全边界"
+        eyebrow="手动每日流程、状态解释与安全边界"
         actions={<button onClick={load}><RefreshCw size={16} />刷新状态</button>}
       />
       {loading ? <LoadingState /> : null}
       {error ? <ErrorState message={error} /> : null}
+      {actionMessage ? <p className="inline-message">{actionMessage}</p> : null}
 
       <div className="stat-grid">
         <Stat label="下一步" value="查看流程" />
@@ -301,6 +341,27 @@ export function HelpPage({ api }: HelpPageProps): JSX.Element {
         />
       </Panel>
 
+      <Panel title="手动每日任务">
+        <div className="guide-boundaries">
+          <button onClick={() => runManualAction("刷新数据/信号", refreshDataAndSignals)} disabled={busy}>
+            <RefreshCw size={16} />
+            1 刷新数据/信号
+          </button>
+          <button onClick={() => runManualAction("生成交易计划", generateTradePlan)} disabled={busy}>
+            <FileText size={16} />
+            2 生成交易计划
+          </button>
+          <button onClick={() => runManualAction("模拟账户过账", () => api.applyLatestPaperPlan({}))} disabled={busy}>
+            <WalletCards size={16} />
+            3 模拟账户过账
+          </button>
+          <button onClick={load}>
+            <CheckCircle2 size={16} />
+            4 复核状态
+          </button>
+        </div>
+      </Panel>
+
       {guide.warningRows.length ? (
         <Panel title="当前提示">
           <DataTable rows={guide.warningRows} preferredColumns={["item", "meaning", "where"]} />
@@ -321,7 +382,7 @@ export function HelpPage({ api }: HelpPageProps): JSX.Element {
           <span>不自动重训</span>
           <span>不 promotion</span>
           <span>不 activation</span>
-          <span>只读状态不会触发任务</span>
+          <span>任务只由按钮显式触发</span>
         </div>
       </Panel>
 

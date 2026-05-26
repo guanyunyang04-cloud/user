@@ -97,13 +97,6 @@ class ProviderHealthRequest(BaseModel):
     symbols: list[str] = Field(default_factory=list)
 
 
-class DailyRunRequest(BaseModel):
-    mode: str = Field(default="post-close")
-    run_date: str = ""
-    job_label: str = ""
-    force_unlock: bool = False
-
-
 class TradePlanGenerateRequest(BaseModel):
     candidate_profile: str = ""
     positions_file: str = ""

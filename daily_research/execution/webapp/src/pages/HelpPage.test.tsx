@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { HelpPage } from "./HelpPage";
 import type { ExecutionApi } from "../types";
@@ -56,21 +57,50 @@ function baseApi(overrides: Partial<ExecutionApi> = {}): ExecutionApi {
       pending_orders: []
     }),
     getJobs: vi.fn().mockResolvedValue([]),
+    refreshDataSources: vi.fn().mockResolvedValue({ job_id: "data-job", status: "queued", task_name: "data-platform-refresh" }),
+    generateTradePlan: vi.fn().mockResolvedValue({ job_id: "plan-job", status: "queued", task_name: "trade-plan" }),
+    applyLatestPaperPlan: vi.fn().mockResolvedValue({ status: "ok", apply_result: { filled_order_count: 1 } }),
     ...overrides
   } as unknown as ExecutionApi;
 }
 
 describe("HelpPage", () => {
-  it("shows the post-close runbook and marks the flow complete when fresh plan and account are settled", async () => {
+  it("shows the manual workflow and marks the flow complete when fresh plan and account are settled", async () => {
     render(<HelpPage api={baseApi()} />);
 
-    expect(await screen.findByText("今日盘后流程")).toBeInTheDocument();
+    expect(await screen.findByText("手动每日任务")).toBeInTheDocument();
+    expect(screen.getByText("今日盘后流程")).toBeInTheDocument();
     expect(screen.getByText("数据、信号、交易计划和模拟账户均已收口。")).toBeInTheDocument();
     expect(screen.getByText("今日流程已完成")).toBeInTheDocument();
     expect(screen.getByText("安全边界")).toBeInTheDocument();
     expect(screen.getByText("不真实下单")).toBeInTheDocument();
     expect(screen.getByText("不自动重训")).toBeInTheDocument();
     expect(screen.getByText("不 promotion")).toBeInTheDocument();
+    expect(screen.queryByText(/Windows Task Scheduler/)).not.toBeInTheDocument();
+  });
+
+  it("runs daily manual steps directly from the help page", async () => {
+    const user = userEvent.setup();
+    const api = baseApi();
+
+    render(<HelpPage api={api} />);
+
+    await user.click(await screen.findByRole("button", { name: "1 刷新数据/信号" }));
+    await waitFor(() => expect(api.refreshDataSources).toHaveBeenCalled());
+    expect(api.refreshDataSources).toHaveBeenCalledWith(expect.objectContaining({
+      as_of_date: "2026-05-22",
+      universe: "all_a",
+      force_unlock: false
+    }));
+
+    await user.click(screen.getByRole("button", { name: "2 生成交易计划" }));
+    await waitFor(() => expect(api.generateTradePlan).toHaveBeenCalledWith(expect.objectContaining({
+      candidate_profile: "active_execution_strategy",
+      force_unlock: false
+    })));
+
+    await user.click(screen.getByRole("button", { name: "3 模拟账户过账" }));
+    await waitFor(() => expect(api.applyLatestPaperPlan).toHaveBeenCalledWith({}));
   });
 
   it("points users to refresh signal panels when dataset is current but signal panels are stale", async () => {
@@ -256,7 +286,7 @@ describe("HelpPage", () => {
     expect(screen.getByText("当前交易计划信号日 2026-05-22，尚未覆盖最新完成交易日 2026-05-25。")).toBeInTheDocument();
   });
 
-  it("treats next-execution-date pending orders as a complete post-close flow", async () => {
+  it("treats next-execution-date pending orders as a complete manual flow", async () => {
     const api = baseApi({
       getDataSources: vi.fn().mockResolvedValue({
         status: "ok",
