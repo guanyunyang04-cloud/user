@@ -63,6 +63,16 @@
 - 当前下一步只允许 constrained horizon-score / calibration 研究；不跑 liquid800、allocator、replay、live/default、promotion，除非新的 liquid500 seed-7 calibration 结果先通过 gate。
 - 标准代码入口继续使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.run_alpha_path20_protocol`，因为这是包级入口；直接脚本 `daily_research/path_policy/run_alpha_path20_protocol.py` 只作为容错 smoke，不能替代文档推荐入口。
 
+## 实验预算可信度纪律
+- 启动任何会影响模型输入、架构、输出、loss、horizon grid、stage gate 或后续方向选择的实验前，必须在计划或 tag 说明中声明证据等级：`smoke_only`、`scout_only`、`evidence_grade` 或 `promotion_grade`。
+- `smoke_only` 只验证入口、shape、loss、数据和 artifact；允许 `1-2` epoch / 单 seed，但结论只能写“可运行/不可运行”。
+- `scout_only` 只用于粗筛下一步候选；允许较小预算，但必须标明不能作为模型优劣、stage gate、架构扩张、promotion 或 live/default 的依据。
+- `evidence_grade` 才能支撑模型质量比较或阶段决策；默认至少 `3` seeds，关键候选优先 `5` seeds，epoch 预算必须让 early stopping 有真实工作空间，并记录 `epochs_ran`、`best_epoch`、`stopped_reason`、train/validation loss 曲线和核心 validation metrics。
+- 若 `stopped_reason=max_epochs_reached` 且 `best_epoch` 贴近最后一轮，必须判为训练预算不足或 scout evidence，除非另有充分收敛证据；test metrics 只能作为 confirm，不得用反复查看 test 来调参。
+- `promotion_grade` 必须在 `evidence_grade` 之外再满足正式 gate、跨期/月度稳定、成本、drawdown、replay/allocator 或执行约束，并显式确认 `daily_research/output/active_execution_strategy.json` 边界。
+- 复盘近期或历史实验时，如果发现 `epochs=2`、单 seed、best epoch 贴边、缺 learning curve 或缺多 seed 聚合，必须降级为 `smoke_only` / `scout_only`，即使目录里 `status=completed`。
+- 写入 reference、state 或回答用户时，必须把“运行完成状态”和“证据可信等级”分开写；completed run 不自动等于 completed model-quality evidence。
+
 ## TDX-Free Data Platform 运行口径
 - `lake` 是研究存储真源，不是在线数据源；`csv` 是导入/补洞通道，不是每日自动更新方案。
 - 正式研究入口只使用 `--data-source lake --lake-dataset-id <explicit_id>`；不得传 `tq/tdx/pytdx/mootdx`。

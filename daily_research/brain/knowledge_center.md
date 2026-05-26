@@ -25,6 +25,12 @@
 - realtime tail label 必须显式标记 unobserved，不得计入 completed training evidence。
 - active artifact diff 是硬失败。
 - 主脑文档只保留控制面；长历史、完整 rXX 证据、长命令和复盘进入 `references/`。
+- 实验证据必须按预算可信度分级；不得把低预算 run 包装成模型质量结论：
+  - `smoke_only`：只验证代码、数据、shape、loss 接线、artifact 落盘和入口可运行；不得解读模型优劣。
+  - `scout_only`：只用于粗筛方向和生成下一步候选；不得淘汰主线、触发 stage gate、架构扩张、promotion 或 live/default 讨论。
+  - `evidence_grade`：才允许支撑模型质量比较、阶段 gate 或方向选择；必须有预先声明的充分训练预算、有效 early stopping 空间、多 seed 覆盖、validation 收敛/稳定性检查和 test confirm。
+  - `promotion_grade`：在 `evidence_grade` 之上，还必须满足正式 gate、跨时期/月度质量、成本、drawdown、replay/allocator 或执行约束，以及 active artifact 边界。
+- 对 epoch 模型，固定 `2` epoch、`max_epochs_reached`、best epoch 贴近最后一轮、单 seed 或缺 validation 收敛证据的 run，只能标为 `smoke_only` 或 `scout_only`；即使 run status 是 completed，也不是 completed model-quality evidence。
 
 ## 3. 长期教训
 - 个股动作和组合资金分配不是同一问题；真正目标是当前组合状态下最优仓位调整集合。
@@ -73,6 +79,7 @@
 - 每个重大研究结论必须写成 facts / inferences / assumptions / boundary。
 - explicit dataset id、study tag、protocol tag 优先于 loose latest。
 - 新多 horizon utility 实验 tag 应优先使用 `mh_utility_...` 前缀并显式写 horizon grid；旧 `path20_...` tag 只作为历史 / 兼容 evidence 命名，不得让命名把目标拉回固定 20 日路径误差。
+- 模型输入、架构、输出、loss、horizon grid 或训练配置的结论必须声明证据等级；低预算探索可以提出 follow-up，但不能作为“更好/更差/已失败/已通过”的稳定判断。
 - 正式训练、评估和 diagnostics 必须读取显式 `policy_input_bundle__...` / Gold dataset id；不得在训练或诊断过程中临时在线抓取行情。
 - 若 source/reduce/exit 仍为 0，结论必须写成行为闭环未打通，不能包装成“更多 epoch/loss”。
 - 若 full Gold 或 realtime Gold 状态变化，必须同时记录 catalog entry、audit、row counts 和 label completeness。
