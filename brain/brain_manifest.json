@@ -89,6 +89,8 @@
     "required_passes": ["task_start", "decision_boundary", "before_final"],
     "writeback_boundary": "core brain docs, workflow rules, skills, guards, and tests change only after user-authorized implementation",
     "proposal_queue": "brain/output/agent_learning/",
+    "pending_approval_statuses": ["proposed", "approved"],
+    "pending_approval_surface_rule": "Agent must proactively surface proposed or approved agent learning proposals in the next substantial update or final answer; if none exist, say there are no pending approvals when the queue was checked.",
     "skill_sync_required": true
   },
   "brain_contract": {

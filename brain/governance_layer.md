@@ -23,6 +23,7 @@
 - 第一版权限为 `propose_only`：agent 可自动发现、分级、提示、审计和生成 proposal；核心 brain docs、workflow、skill、guard、tests 写入仍需用户授权。
 - capsule 若返回 `agent_meta.review.status != clear`，agent 必须在最终答复或后续计划中说明信号、目标层、writeback route 和验证要求。
 - 用户说“这应该学会 / 为什么没提示 / 以后都要”，或发现低预算证据污染模型质量结论时，优先创建 agent learning proposal 或运行 `brain_runtime.py agent-meta-audit --cwd . --mode compact`。
+- agent 必须主动提示待决 agent learning proposal：若队列中存在 `proposed` 或 `approved`，在下一次实质进展更新或最终答复中列出需用户批准或跟进的学习项；若已检查且没有待决项，也要简短说明当前无待批准 proposal。
 - daily_research 的低预算实验纪律由分脑知识中枢维护；主脑只保存 agent 元能力边界和路由责任。
 
 ## 3. 守卫

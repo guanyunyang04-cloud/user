@@ -489,6 +489,8 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertIn("reflection-template", text)
         self.assertIn("review --trace-json", text)
         self.assertIn("agent learning proposal", text)
+        self.assertIn("pending agent learning approvals", text)
+        self.assertIn("proposed` or `approved", text)
 
     def test_workspace_brain_skill_long_task_uses_contract_monitor(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
@@ -592,6 +594,63 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertIn("agent_meta_contract", payload)
         self.assertIn("daily_research_evidence_quality", payload)
         self.assertIn("actionable_items", payload)
+
+    def test_agent_meta_audit_reports_proposed_and_approved_learning_items(self) -> None:
+        tmp_root = ROOT / "daily_research/output/test_agent_learning_pending_project"
+        if tmp_root.exists():
+            shutil.rmtree(tmp_root)
+        tmp_root.mkdir(parents=True)
+        subprocess.run(
+            [PYTHON, str(RUNTIME), "init", "--cwd", str(tmp_root), "--brain-id", "pending_learning"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        for title, status in (("needs approval", "proposed"), ("already approved", "approved")):
+            subprocess.run(
+                [
+                    PYTHON,
+                    str(RUNTIME),
+                    "proposal",
+                    "--cwd",
+                    str(tmp_root),
+                    "--title",
+                    title,
+                    "--trigger",
+                    "agent learning item needs user-visible follow-up",
+                    "--evidence",
+                    "agent learning queue",
+                    "--recommendation",
+                    "surface pending learning approvals proactively",
+                    "--status",
+                    status,
+                ],
+                cwd=str(ROOT),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=True,
+            )
+
+        result = subprocess.run(
+            [PYTHON, str(RUNTIME), "agent-meta-audit", "--cwd", str(tmp_root), "--mode", "compact"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        payload = json.loads(result.stdout)
+
+        self.assertEqual(payload["agent_learning"]["pending_approval_count"], 2)
+        self.assertEqual(payload["agent_learning"]["proposed_count"], 1)
+        self.assertEqual(payload["agent_learning"]["approved_count"], 1)
+        actionable = [item for item in payload["actionable_items"] if item["type"] == "agent_learning_pending_approval"]
+        self.assertEqual(len(actionable), 1)
+        self.assertIn("2", actionable[0]["summary"])
+        self.assertIn("proposed or approved", actionable[0]["recommended_action"])
 
     def test_brain_runtime_meta_audit_command_is_removed(self) -> None:
         result = subprocess.run(

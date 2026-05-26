@@ -96,6 +96,8 @@ Use this when the user says "this should be learned", "why did it not prompt", "
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py agent-meta-audit --cwd . --mode compact
 ```
 
+Proactively surface pending agent learning approvals. When `agent-meta-audit` or `list-proposals` shows any proposal with status `proposed` or `approved`, mention those pending agent learning approvals in the next substantial user update or final answer; if none exist, say that there are no pending approvals instead of staying silent. Do not dump the whole queue unless asked.
+
 Capsule `agent_meta.review.learning_opportunities[]` names the target layer, owner brain, writeback route, confidence, and required verification. If `agent_meta.review.status != clear` or `agent_review.before_final_required=true`, mention the signal in the final answer or next plan and propose the verification/writeback path.
 
 ### Reflection Review

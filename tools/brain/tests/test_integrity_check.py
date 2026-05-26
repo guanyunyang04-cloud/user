@@ -41,6 +41,10 @@ class BrainIntegrityCatalogTest(unittest.TestCase):
         self.assertEqual(contract["authority"], "propose_only")
         self.assertEqual(contract["required_passes"], ["task_start", "decision_boundary", "before_final"])
         self.assertEqual(contract["proposal_queue"], "brain/output/agent_learning/")
+        self.assertEqual(contract["pending_approval_statuses"], ["proposed", "approved"])
+        self.assertIn("proactively", contract["pending_approval_surface_rule"])
+        self.assertIn("proposed", contract["pending_approval_surface_rule"])
+        self.assertIn("approved", contract["pending_approval_surface_rule"])
 
     def test_agent_meta_contract_docs_do_not_reintroduce_legacy_public_terms(self) -> None:
         findings = run_checks()

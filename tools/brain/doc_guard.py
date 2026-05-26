@@ -707,6 +707,11 @@ def _check_manifest_semantics(path: Path, text: str) -> list[str]:
                 issues.append("main_agent_meta_protocol_required_passes_invalid")
             if agent_meta.get("proposal_queue") != "brain/output/agent_learning/":
                 issues.append("main_agent_meta_protocol_proposal_queue_invalid")
+            if agent_meta.get("pending_approval_statuses") != ["proposed", "approved"]:
+                issues.append("main_agent_meta_protocol_pending_approval_statuses_invalid")
+            surface_rule = str(agent_meta.get("pending_approval_surface_rule", "") or "").lower()
+            if "proposed" not in surface_rule or "approved" not in surface_rule or "proactively" not in surface_rule:
+                issues.append("main_agent_meta_protocol_pending_approval_surface_rule_invalid")
         child_brains = data.get("child_brains")
         if not isinstance(child_brains, list) or not child_brains:
             issues.append("main_manifest_child_brains_missing_or_empty")

@@ -409,6 +409,25 @@ def _validate_main_manifest(findings: list[Finding], main_manifest: dict[str, An
         proposal_queue = str(agent_meta.get("proposal_queue", "") or "")
         if proposal_queue != "brain/output/agent_learning/":
             findings.append(Finding("error", "main_agent_meta_protocol_invalid", "proposal_queue must be brain/output/agent_learning/", main_path))
+        if agent_meta.get("pending_approval_statuses") != ["proposed", "approved"]:
+            findings.append(
+                Finding(
+                    "error",
+                    "main_agent_meta_protocol_invalid",
+                    "pending_approval_statuses must be proposed and approved",
+                    main_path,
+                )
+            )
+        surface_rule = str(agent_meta.get("pending_approval_surface_rule", "") or "").lower()
+        if "proposed" not in surface_rule or "approved" not in surface_rule or "proactively" not in surface_rule:
+            findings.append(
+                Finding(
+                    "error",
+                    "main_agent_meta_protocol_invalid",
+                    "pending_approval_surface_rule must require proactive proposed/approved proposal surfacing",
+                    main_path,
+                )
+            )
         if agent_meta.get("skill_sync_required") is not True:
             findings.append(Finding("error", "main_agent_meta_protocol_invalid", "skill_sync_required must be true", main_path))
 

@@ -589,13 +589,19 @@ def meta_audit(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
     status_counts = _proposal_status_counts(proposals)
     actionable_items: list[dict[str, Any]] = []
     proposed_count = status_counts.get("proposed", 0)
-    if proposed_count:
+    approved_count = status_counts.get("approved", 0)
+    pending_approval_statuses = ("proposed", "approved")
+    pending_approval_count = sum(status_counts.get(status, 0) for status in pending_approval_statuses)
+    if pending_approval_count:
         actionable_items.append(
             {
-                "type": "agent_learning_queue",
+                "type": "agent_learning_pending_approval",
                 "severity": "info",
-                "summary": f"{proposed_count} agent learning proposal(s) still proposed",
-                "recommended_action": "review proposal queue and mark approved/implemented/verified/rejected/superseded",
+                "summary": f"{pending_approval_count} agent learning proposal(s) need user-visible approval or follow-up",
+                "recommended_action": (
+                    "surface proposed or approved agent learning items to the user, then mark approved/"
+                    "implemented/verified/rejected/superseded as appropriate"
+                ),
             }
         )
 
@@ -652,6 +658,9 @@ def meta_audit(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
             "proposal_count": len(proposals),
             "status_counts": status_counts,
             "proposed_count": proposed_count,
+            "approved_count": approved_count,
+            "pending_approval_statuses": list(pending_approval_statuses),
+            "pending_approval_count": pending_approval_count,
         },
         "agent_meta_contract": agent_meta_contract,
         "daily_research_evidence_quality": {
