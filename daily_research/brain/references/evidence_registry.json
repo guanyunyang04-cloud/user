@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 68,
+  "record_count": 69,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -187,6 +187,45 @@
         "`mh_long_utility_15_20_30d_v1`",
         "Only if a target family passes validation/test prediction gates should architecture controls run:",
         "`gru_sequence_static_context`"
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
+      ]
+    },
+    {
+      "id": "alpha_multi_horizon_stage25_stability_calibration_20260526",
+      "date": "2026-05-26",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_multi_horizon_stage25_stability_calibration_20260526.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [
+        "alpha_multi_horizon_utility_policy_v1",
+        "mh25_path_aux_fullgrid_rebudget_seed7_20260526_01",
+        "mh25_path_aux_fullgrid_rebudget_seed11_20260526_01",
+        "mh25_path_aux_fullgrid_rebudget_seed19_20260526_01",
+        "mh25_path_aux_daily1_45_multiseed_seed7_20260526_01",
+        "mh25_path_aux_daily1_45_multiseed_seed11_20260526_01",
+        "mh25_path_aux_daily1_45_multiseed_seed19_20260526_01",
+        "mh25_path_aux_long_family_simplified_seed7_20260526_01",
+        "mh25_path_aux_long_family_simplified_seed11_20260526_01",
+        "mh25_path_aux_long_family_simplified_seed19_20260526_01"
+      ],
+      "verdict": "Status: `stage25_completed / evidence-grade calibration / shadow-only / research-only`.; Mainline: `alpha_multi_horizon_utility_policy_v1`.; Verdict: Stage 2.5 completed 9/9 runs with seeds `7,11,19`; no candidate passed the Stage 2.5 stability gate.; Decision: do not launch `patch_transformer`, `stock_mixer_sequence`, allocator, replay, live/default, paper, or promotion from this evidence.",
+      "blockers": [
+        "Progress: `stage25_progress.json` reported `completed`, `task_count=9`, `failed_tags=[]`.",
+        "The bottleneck is no longer \"insufficient experiment budget\"; it is target/loss/monthly-stability behavior.",
+        "Next research should audit monthly failure modes by month/market regime and compare validation-to-test sign changes without tuning on test."
+      ],
+      "next_allowed_actions": [
+        "Do not expand model architecture or connect allocator/replay/live from this evidence.",
+        "Next research should audit monthly failure modes by month/market regime and compare validation-to-test sign changes without tuning on test.",
+        "Focus on target/loss/monthly stability root cause: utility target normalization, drawdown/risk shaping, horizon-selection regularization, and regime-robust score aggregation.",
+        "Treat `daily1_45_multiseed` as feasibility-to-stability conversion material only, not a production or architecture gate pass.",
+        "Keep `fullgrid_rebudget` as the cleaner multi-seed baseline for future stability diagnostics."
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": [

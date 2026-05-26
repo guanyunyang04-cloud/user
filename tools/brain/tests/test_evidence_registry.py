@@ -110,6 +110,7 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
         - `mh_out_forecast_path_v1_baseline_fullgrid_seed19_20260525_01`
         - `mh_grid_decision_utility_path_aux_v1_daily1_45_feas_seed7_20260525_02`
         - `mh_grid_decision_utility_v1_baseline_sparse_long_seed19_20260525_02`
+        - `mh25_path_aux_daily1_45_multiseed_seed19_20260526_01`
         """
 
         tags = daily_research_evidence.study_tags(text)
@@ -118,6 +119,7 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
         self.assertIn("mh_out_forecast_path_v1_baseline_fullgrid_seed19_20260525_01", tags)
         self.assertIn("mh_grid_decision_utility_path_aux_v1_daily1_45_feas_seed7_20260525_02", tags)
         self.assertIn("mh_grid_decision_utility_v1_baseline_sparse_long_seed19_20260525_02", tags)
+        self.assertIn("mh25_path_aux_daily1_45_multiseed_seed19_20260526_01", tags)
 
     def test_adapter_indexes_path_policy_reference_names(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
