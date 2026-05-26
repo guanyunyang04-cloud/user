@@ -255,6 +255,25 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertEqual(opportunity["source_signal"], "actor_boundary_mismatch")
         self.assertTrue(payload["agent_review"]["before_final_required"])
 
+    def test_capsule_brain_rule_obstruction_exposes_burden_governance(self) -> None:
+        payload = build_task_capsule(
+            task="当前脑区规则是否过多，是否阻碍 agent 判断，需要清理冗余兼容和过细测试",
+            workflow="auto",
+            intent="read",
+            verbosity="lite",
+        )
+
+        review = payload["agent_meta"]["review"]
+        self.assertEqual(review["status"], "opportunity")
+        self.assertIn("brain_rule_obstruction", review["signals"])
+        opportunity = next(
+            item for item in review["learning_opportunities"]
+            if item["target_layer"] == "brain_burden_governance"
+        )
+        self.assertEqual(opportunity["owner_brain"], "workspace")
+        self.assertEqual(opportunity["source_signal"], "brain_rule_obstruction")
+        self.assertNotIn("actor_boundary_mismatch", review["signals"])
+
     def test_capsule_multi_horizon_low_budget_review_exposes_domain_signal(self) -> None:
         payload = build_task_capsule(
             task="审阅 multi-horizon 低预算实验是否可作模型质量结论",

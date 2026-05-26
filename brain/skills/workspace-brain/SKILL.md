@@ -6,178 +6,79 @@ description: Use the workspace main brain as the first entrypoint for project ta
 # Workspace Brain Runtime
 
 ## First Move
-
-Run detection first when taking over an unknown workspace:
-
+Detect the workspace, then use workflow capsule as the only capsule entrypoint:
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py detect --cwd .
-```
-
-For existing brain workspaces, run a lightweight main-brain capsule to make routing, guards, evidence hints, and skill sync visible before changing tracked files, launching studies, claiming evidence, or entering a child brain:
-
-```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<user task>" --workflow auto --intent <read|mutate|writeback> --verbosity lite --json
 ```
-
-Schema v4 capsules separate routing from the agent meta protocol:
-
-- `routing.target.id` is the bootstrap target (`workspace` or a child brain id).
-- `routing.target.kind` is `workspace`, `child`, or `ambiguous`.
-- `routing.target.domain` is the workflow domain, such as `workspace_governance`.
-- `workspace_governance` is a workspace domain and bootstrap alias, not a child brain id.
-- `agent_meta` describes the agent-owned meta protocol supplied by the brain; the brain is the substrate and tools are sensors.
-- `agent_review.before_final_required` tells the agent when a structured before-final review is mandatory.
-
-Run compact health during takeover, anomaly triage, or final verification so catalog, guard, skill sync, and frontier warnings are visible without loading deep evidence:
-
+For takeover or verification:
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py health --cwd . --mode compact
-```
-
-Use full health only when compact health reports actionable warnings, routing/evidence is disputed, or you are auditing the brain system:
-
-```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py health --cwd . --mode full
 ```
-
-For long training, research, build, data refresh, or other long-running jobs, first run the normal capsule with `--intent mutate`, then use the deterministic monitor:
-
-```powershell
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<user task>" --workflow auto --intent mutate --verbosity lite --json
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor template --json
-```
-
-The required wait window is `Wait-Process -Id <pid> -Timeout 7200`. The `7200` seconds are one observation window, not a business timeout. After each window, report PID status, elapsed time, progress, ETA, log tail, artifact mtime, and the next decision:
-
-```powershell
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor status --pid <pid> --progress <progress.json> --stdout <stdout.log> --stderr <stderr.log> --artifact-dir <artifact_dir> --json
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor wait-once --pid <pid> --timeout 7200 --progress <progress.json> --stdout <stdout.log> --stderr <stderr.log> --artifact-dir <artifact_dir> --json
-```
-
-Prefer `long_task_monitor wait-once/status` for long-task polling. `Start-Sleep` remains useful for very short UI pacing outside the monitor loop. Every user update for training polls should include ETA or state why ETA is not yet estimable.
-
-If the project has no `brain/brain_manifest.json`, initialize a minimal brain only when mutation is allowed:
-
+Initialize only when no `brain/brain_manifest.json` exists and mutation is allowed:
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py init --cwd . --brain-id <project_id>
 ```
 
-Use `preflight_blockers`, `mutation_allowed`, `routing`, guards, risk signals, capability hints, and writeback routes as the operating contract. Resolve or explicitly account for blockers before risky tracked-file edits.
-
 ## Runtime Contract
+- Main brain is the only agent takeover entrypoint; child brains load only after routing.
+- Skill = entrypoint and procedure. Brain docs = project truth, evidence, and write routes. Tools = deterministic sensors and guards.
+- Schema v4 separates `routing.target` from Agent Meta Protocol. `workspace_governance` is a workspace domain and bootstrap alias, not a child brain id.
+- Use `preflight_blockers`, `mutation_allowed`, `routing`, guards, risk signals, capability hints, and writeback routes as the operating contract.
+- Work on `main` unless the user explicitly changes branch policy.
+- Make `daily_research/output/active_execution_strategy.json` diffs explicit when active strategy, promotion, or live policy is in scope.
 
-- Skill = entrypoint and procedure.
-- Brain docs = project truth, current state, governance, evidence, and write routes.
-- Tools = deterministic checks, capsules, health reports, sync checks, frontier scans, evidence queries, writeback plans, and long-task monitors.
-- Local skills remain responsible for TDD, debugging, planning, frontend, security, deployment, and verification method. Brain supplies project facts, routing, guards, evidence, writeback routes, and sync checks.
-
-## Operating Rules
-
-- The main brain is the only agent takeover entrypoint.
-- Child brains are project fact layers loaded only after main-brain routing.
-- Work on `main` unless the user explicitly changes the branch rule.
-- If capsule reports `not_on_main_for_mutation`, resolve branch authority or explicitly account for the blocker before repo-tracked mutation.
-- Make `daily_research/output/active_execution_strategy.json` diffs explicit when the task asks for active strategy, promotion, or live-policy changes.
-- Prefer explicit evidence docs, dataset ids, protocol tags, and registry v3 program/family/run fields over loose `latest_*` files.
-- For evidence lookup, use `research_programs` for stable problem lines, `study_families` for stages or method families, and `run_tags` for physical run instances; do not create new research semantics by expanding run-tag prefixes.
-- Treat smoke, dry-run, failed, interrupted, timeout, and diagnostic-only runs as non-completed evidence.
+## Evidence Model
+Prefer explicit dataset ids, protocol tags, registry v3 program/family/run fields, and dated references over loose `latest_*` files.
+- `research_programs`: stable problem lines.
+- `study_families`: stages or method families.
+- `run_tags`: physical run instances; do not create new research semantics by expanding run-tag prefixes.
+- Smoke, dry-run, failed, interrupted, timeout, and diagnostic-only runs are non-completed evidence.
 - Separate facts, inferences, assumptions, and action boundaries in substantial reports.
-- For deterministic cleanup with clear benefit, low fact loss, and tests, remove stale paths completely instead of leaving compatibility shells.
 
 ## Agent Meta Protocol
-
-Agent owns the meta capability. Brain persists, distributes, and verifies the protocol. Capsules, audits, guards, and tests are sensors, not thinkers.
-
-Run the agent meta pass at task start, every major decision boundary, and before the final answer. Do this even when capsule `agent_meta.review.status` is `clear`; a clear tool result does not waive the agent's responsibility to notice reusable lessons, evidence gaps, actor-boundary mismatches, or missed rules.
-
-Use this when the user says "this should be learned", "why did it not prompt", "from now on", or when evidence quality is polluted by low-budget runs:
-
+Agent owns the meta capability. Brain persists, distributes, and verifies it; capsules, audits, guards, and tests are sensors.
+Run the agent meta pass at task start, major decision boundaries, and before final answer. If `agent_meta.review.status != clear` or `agent_review.before_final_required=true`, mention signal, target layer, writeback route, and verification path.
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py agent-meta-audit --cwd . --mode compact
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py brain-burden-audit --cwd . --mode compact
 ```
+Proactively surface pending agent learning approvals. If `agent-meta-audit` or `list-proposals` shows any proposal with status `proposed` or `approved`, mention those pending agent learning approvals in the next substantial update or final answer; if none exist, say so when checked.
+Brain burden rule: when rules, docs, compatibility shells, or wording tests slow or mislead the agent, treat it as `brain_rule_obstruction` and propose `brain_burden_governance` cleanup. Hard safety rules still win; operating defaults may be compressed with reasons.
 
-Proactively surface pending agent learning approvals. When `agent-meta-audit` or `list-proposals` shows any proposal with status `proposed` or `approved`, mention those pending agent learning approvals in the next substantial user update or final answer; if none exist, say that there are no pending approvals instead of staying silent. Do not dump the whole queue unless asked.
-
-Capsule `agent_meta.review.learning_opportunities[]` names the target layer, owner brain, writeback route, confidence, and required verification. If `agent_meta.review.status != clear` or `agent_review.before_final_required=true`, mention the signal in the final answer or next plan and propose the verification/writeback path.
-
-### Reflection Review
-
-Before the final answer for implementation, debugging, long-task, or brain-maintenance work, compare planned steps, blockers, workarounds, user nudges, and verification against the final state. Prefer a structured trace when anything was blocked, skipped, manually bypassed, corrected by the user, or verified after failure:
-
+## Reflection And Proposals
+Run before-final reflection for implementation, debugging, long-task, or brain-maintenance work when anything was blocked, skipped, manually bypassed, corrected by the user, or verified after failure:
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py reflection-template --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py review --trace-json <trace.json> --cwd . --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py review --cwd . --task "<task>" --observation "<what happened>" --json
 ```
-
-Freeform review is a low-confidence fallback for legacy observations only:
-
-```powershell
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py review --cwd . --task "<user task>" --observation "<what happened>" --json
-```
-
-If review returns learning candidates, ask for confirmation or generate an agent learning proposal with `status=proposed`; do not silently rewrite core brain docs.
-
-Generate an agent learning proposal when a repeated failure, rule conflict, timeout misread, branch violation, missing entrypoint, stale skill, missed meta pass, or actor-boundary mismatch is discovered:
-
+Create an agent learning proposal for repeated failure, rule conflict, timeout misread, branch violation, missing entrypoint, stale skill, missed meta pass, actor-boundary mismatch, or brain-rule obstruction:
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py proposal --cwd . --title "<short title>" --trigger "<fact>" --evidence "<path or observation>" --recommendation "<change proposal>" --severity info --owner-brain workspace --writeback-target brain/references/
-```
-
-Review queued proposals:
-
-```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py list-proposals --cwd .
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py mark-proposal --cwd . --proposal-id <id> --status <approved|implemented|verified|rejected|superseded>
 ```
 
-The proposal is advisory. Core brain docs, workflow rules, and this skill should change only when the user has explicitly asked for that governance or skill update.
-
 ## Common Commands
-
-Route a task:
-
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow route --task "<user task>" --json
-```
-
-Bootstrap the workspace or a selected child brain:
-
-```powershell
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain workspace --json
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain workspace_governance --json
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain <brain_id|workspace> --json
-```
-
-Read or rebuild the evidence index:
-
-```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain <brain_id|workspace|workspace_governance> --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow current-frontier --json
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow evidence-index --rebuild --json
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow query --q "<r-id/research_program/study_family/run_tag/dataset/blocker>" --json
-```
-
-Plan a routed writeback:
-
-```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow query --q "<research_program/study_family/run_tag/dataset/blocker>" --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow writeback-plan --source run:<tag> --json
-```
-
-Check or install global skills from canonical repo source:
-
-```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.skill_install --check
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.skill_install --install
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor template --json
 ```
+Use `tools.brain.long_task_monitor` for long training, research, build, data refresh, or other long-running jobs after a mutate capsule. Report PID status, elapsed time, ETA or why no ETA exists, log tail, progress, artifact mtime, and next decision.
 
-Run guards before finalizing:
-
+## Final Guards
 ```powershell
 git diff -- daily_research/output/active_execution_strategy.json
 git diff --check
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json
 ```
-
-## Writeback
-
-Write workspace-level decisions to `brain/`. Write project-specific facts to the routed child brain. Put dated details in the relevant `references/` directory, then rebuild the evidence registry when daily_research evidence changes.
+Write workspace decisions to `brain/`; write routed project facts to the selected child brain; put dated details in `references/`, then rebuild the evidence registry when daily_research evidence changes.

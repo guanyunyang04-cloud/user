@@ -196,6 +196,42 @@ def analyze_agent_meta_signals(
     opportunities: list[dict[str, Any]] = []
     actions: list[str] = []
 
+    obstruction_terms = (
+        "规则太多",
+        "内容过多",
+        "测试过细",
+        "测试过多",
+        "过于复杂",
+        "阻碍",
+        "拖累",
+        "降低agent工作效率",
+        "降低 agent 工作效率",
+        "误导agent",
+        "误导 agent",
+        "冗余兼容",
+        "旧兼容",
+        "checklist runner",
+        "rule obstruction",
+        "brain burden",
+        "rules are blocking",
+    )
+    if any(term in text for term in obstruction_terms):
+        signals.append("brain_rule_obstruction")
+        opportunities.append(
+            _opportunity(
+                target_layer="brain_burden_governance",
+                owner_brain="workspace",
+                confidence="high",
+                recommended_action=(
+                    "audit whether brain rules, skill text, tests, or compatibility shells are slowing or misleading the agent; "
+                    "keep hard safety rules, compress operating defaults, move deep-dive material to references, and remove unsupported compatibility"
+                ),
+                writeback_route="brain/governance_layer.md",
+                source_signal="brain_rule_obstruction",
+                detector_id="brain_rule_obstruction_detector",
+            )
+        )
+
     if (
         "脑区只是载体" in text
         or ("没有思考能力" in text and "agent" in text)

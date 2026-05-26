@@ -712,6 +712,23 @@ def _check_manifest_semantics(path: Path, text: str) -> list[str]:
             surface_rule = str(agent_meta.get("pending_approval_surface_rule", "") or "").lower()
             if "proposed" not in surface_rule or "approved" not in surface_rule or "proactively" not in surface_rule:
                 issues.append("main_agent_meta_protocol_pending_approval_surface_rule_invalid")
+        burden = data.get("brain_burden_contract")
+        if not isinstance(burden, dict):
+            issues.append("main_brain_burden_contract_missing_or_invalid")
+        else:
+            expected_budgets = {
+                "workspace_skill_line_budget": 100,
+                "daily_research_state_center_line_budget": 100,
+                "daily_research_operations_center_line_budget": 120,
+            }
+            for key, value in expected_budgets.items():
+                if burden.get(key) != value:
+                    issues.append(f"main_brain_burden_contract_{key}_must_be_{value}")
+            if burden.get("rule_classes") != ["hard_safety", "operating_default", "deep_dive", "deprecated"]:
+                issues.append("main_brain_burden_contract_rule_classes_invalid")
+            fields = burden.get("compatibility_entry_required_fields")
+            if not isinstance(fields, list) or not {"owner", "usage_evidence", "delete_by"}.issubset({str(item) for item in fields}):
+                issues.append("main_brain_burden_contract_compatibility_fields_invalid")
         child_brains = data.get("child_brains")
         if not isinstance(child_brains, list) or not child_brains:
             issues.append("main_manifest_child_brains_missing_or_empty")

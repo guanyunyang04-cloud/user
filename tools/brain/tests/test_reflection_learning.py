@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,6 +16,7 @@ REFLECTION = ROOT / "brain/skills/workspace-brain/scripts/reflection_learning.py
 
 
 def load_reflection_module():
+    sys.dont_write_bytecode = True
     spec = importlib.util.spec_from_file_location("workspace_brain_reflection_learning", REFLECTION)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -167,6 +169,20 @@ class ReflectionLearningTest(unittest.TestCase):
         self.assertIn("actor_boundary_mismatch", payload["signals"])
         opportunity = next(item for item in payload["learning_opportunities"] if item["target_layer"] == "agent_meta_protocol")
         self.assertEqual(opportunity["source_signal"], "actor_boundary_mismatch")
+
+    def test_analyze_agent_meta_signals_detects_brain_rule_obstruction(self) -> None:
+        module = load_reflection_module()
+
+        payload = module.analyze_agent_meta_signals(
+            task="脑区规则太多，测试过细，旧兼容入口让 agent 变成 checklist runner，需要判断规则是否阻碍任务",
+            capsule_context={"target_kind": "workspace", "workflow_domain": "workspace_governance"},
+        )
+
+        self.assertEqual(payload["status"], "opportunity")
+        self.assertIn("brain_rule_obstruction", payload["signals"])
+        opportunity = next(item for item in payload["learning_opportunities"] if item["target_layer"] == "brain_burden_governance")
+        self.assertEqual(opportunity["source_signal"], "brain_rule_obstruction")
+        self.assertEqual(opportunity["owner_brain"], "workspace")
 
     def test_analyze_meta_signals_detects_low_budget_evidence_pollution(self) -> None:
         module = load_reflection_module()

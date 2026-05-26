@@ -93,6 +93,23 @@
     "pending_approval_surface_rule": "Agent must proactively surface proposed or approved agent learning proposals in the next substantial update or final answer; if none exist, say there are no pending approvals when the queue was checked.",
     "skill_sync_required": true
   },
+  "brain_burden_contract": {
+    "workspace_skill_line_budget": 100,
+    "daily_research_state_center_line_budget": 100,
+    "daily_research_operations_center_line_budget": 120,
+    "rule_classes": [
+      "hard_safety",
+      "operating_default",
+      "deep_dive",
+      "deprecated"
+    ],
+    "compatibility_entry_required_fields": [
+      "owner",
+      "usage_evidence",
+      "delete_by"
+    ],
+    "unsupported_compatibility_policy": "remove compatibility entries without owner, usage_evidence, and delete_by"
+  },
   "brain_contract": {
     "required_sub_brain_keys": ["brain_type", "brain_id", "parent_brain", "attach_status", "entrypoint", "body_root", "shared_contract_source", "regional_specialization", "write_routes", "body_map", "modules", "handoff_contract"],
     "recommended_sub_brain_keys": ["identity_path", "state_path", "knowledge_path", "operations_path", "governance_path"]

@@ -26,6 +26,13 @@
 - agent 必须主动提示待决 agent learning proposal：若队列中存在 `proposed` 或 `approved`，在下一次实质进展更新或最终答复中列出需用户批准或跟进的学习项；若已检查且没有待决项，也要简短说明当前无待批准 proposal。
 - daily_research 的低预算实验纪律由分脑知识中枢维护；主脑只保存 agent 元能力边界和路由责任。
 
+## 2.2 Brain Burden Governance
+- 规则分级为 `hard_safety`、`operating_default`、`deep_dive`、`deprecated`；安全硬规则不可自动绕过，流程默认可被 agent 临时压缩但必须说明理由。
+- 当规则冲突、文档读取成本超过任务收益、兼容入口造成歧义、测试锁住旧设计或 agent 被迫执行无关流程时，记录 `brain_rule_obstruction`，目标层为 `brain_burden_governance`。
+- 默认热路径预算由 `brain/brain_manifest.json#brain_burden_contract` 管理；超预算内容迁入 references 或 runtime help，不继续堆进 skill / state / operations。
+- 兼容入口必须有 `owner`、`usage_evidence`、`delete_by`；没有证据的兼容入口直接删除。
+- 审计入口：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py brain-burden-audit --cwd . --mode compact`。
+
 ## 3. 守卫
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check`

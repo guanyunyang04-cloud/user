@@ -69,10 +69,8 @@
 - outer study 未写 `study_summary.json` 时，只能写 protocol-level evidence，不能写 completed study verdict。
 
 ## 当前风险
-- 主文档继续堆 dated log 会削弱 agent 接管效率；r66 起主脑只保留控制面。
-- 只看 target-sum closure 会掩盖 release/source/receiver dead 与 intent translation conflict。
-- 只增加 epoch、loss 或模型宽度可能掩盖 target construction 与 allocation semantics 断点。
-- realtime Gold 若被误作 training-safe，会污染 completed training evidence。
+- 文档继续堆 dated log 会削弱接管效率；只看 target-sum closure 会掩盖 release/source/receiver dead 与 intent translation conflict。
+- 只增加 epoch、loss 或模型宽度可能掩盖 target construction 与 allocation semantics 断点；realtime Gold 若被误作 training-safe，会污染 completed training evidence。
 - 后台 OS 进程轮询能降低交互超时风险，但不能替代 checkpoint、progress、artifact diagnostics。
 
 ## 最新证据索引
@@ -98,7 +96,5 @@
 - 机器索引：`daily_research/brain/references/evidence_registry.json`。
 
 ## 历史归档入口
-- 本文件归档前完整快照：`daily_research/brain/references/state_center_archive_20260510.md`。
-- 早期状态原文：`daily_research/brain/references/state_center_history_raw_20260424.md`。
+- 完整快照 / 早期原文：`daily_research/brain/references/state_center_archive_20260510.md`、`daily_research/brain/references/state_center_history_raw_20260424.md`。
 - 早期状态索引：`daily_research/brain/references/state_center_evidence_index_20260424.md`。
-- r50-r74 详细证据：`daily_research/brain/references/r*_*.md`。

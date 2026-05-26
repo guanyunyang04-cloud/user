@@ -30,6 +30,7 @@ REQUIRED_MAIN_KEYS = (
     SHARED_CONTRACT_KEY,
     "hot_handoff_contract",
     "agent_meta_protocol",
+    "brain_burden_contract",
     "brain_contract",
     "child_brains",
     "write_routes",
@@ -37,6 +38,7 @@ REQUIRED_MAIN_KEYS = (
 )
 
 REQUIRED_AGENT_META_PASSES = ("task_start", "decision_boundary", "before_final")
+REQUIRED_BRAIN_BURDEN_RULE_CLASSES = ("hard_safety", "operating_default", "deep_dive", "deprecated")
 
 REQUIRED_HOT_HANDOFF_KEYS = (
     "workspace_default_paths",
@@ -428,8 +430,40 @@ def _validate_main_manifest(findings: list[Finding], main_manifest: dict[str, An
                     main_path,
                 )
             )
-        if agent_meta.get("skill_sync_required") is not True:
-            findings.append(Finding("error", "main_agent_meta_protocol_invalid", "skill_sync_required must be true", main_path))
+    if agent_meta.get("skill_sync_required") is not True:
+        findings.append(Finding("error", "main_agent_meta_protocol_invalid", "skill_sync_required must be true", main_path))
+
+    brain_burden = main_manifest.get("brain_burden_contract", {})
+    if not isinstance(brain_burden, dict) or not brain_burden:
+        findings.append(Finding("error", "main_brain_burden_contract_invalid", "brain_burden_contract must be a non-empty object", main_path))
+    else:
+        expected_budgets = {
+            "workspace_skill_line_budget": 100,
+            "daily_research_state_center_line_budget": 100,
+            "daily_research_operations_center_line_budget": 120,
+        }
+        for key, value in expected_budgets.items():
+            if brain_burden.get(key) != value:
+                findings.append(Finding("error", "main_brain_burden_contract_invalid", f"{key} must be {value}", main_path))
+        if brain_burden.get("rule_classes") != list(REQUIRED_BRAIN_BURDEN_RULE_CLASSES):
+            findings.append(
+                Finding(
+                    "error",
+                    "main_brain_burden_contract_invalid",
+                    "rule_classes must be hard_safety, operating_default, deep_dive, deprecated",
+                    main_path,
+                )
+            )
+        fields = brain_burden.get("compatibility_entry_required_fields")
+        if not isinstance(fields, list) or not {"owner", "usage_evidence", "delete_by"}.issubset({str(item) for item in fields}):
+            findings.append(
+                Finding(
+                    "error",
+                    "main_brain_burden_contract_invalid",
+                    "compatibility entries must require owner, usage_evidence, and delete_by",
+                    main_path,
+                )
+            )
 
     contract = main_manifest.get(SHARED_CONTRACT_KEY, {})
     if not isinstance(contract, dict) or not contract:

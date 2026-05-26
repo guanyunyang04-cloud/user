@@ -46,6 +46,17 @@ class BrainIntegrityCatalogTest(unittest.TestCase):
         self.assertIn("proposed", contract["pending_approval_surface_rule"])
         self.assertIn("approved", contract["pending_approval_surface_rule"])
 
+    def test_main_manifest_declares_brain_burden_contract(self) -> None:
+        manifest = load_manifest("brain/brain_manifest.json")
+        contract = manifest["brain_burden_contract"]
+
+        self.assertEqual(contract["workspace_skill_line_budget"], 100)
+        self.assertEqual(contract["daily_research_state_center_line_budget"], 100)
+        self.assertEqual(contract["daily_research_operations_center_line_budget"], 120)
+        self.assertEqual(contract["rule_classes"], ["hard_safety", "operating_default", "deep_dive", "deprecated"])
+        self.assertIn("owner", contract["compatibility_entry_required_fields"])
+        self.assertIn("delete_by", contract["compatibility_entry_required_fields"])
+
     def test_agent_meta_contract_docs_do_not_reintroduce_legacy_public_terms(self) -> None:
         findings = run_checks()
         error_codes = {finding.code for finding in findings if finding.severity == "error"}

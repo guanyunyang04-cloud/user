@@ -14,25 +14,16 @@
 - 长训练或 study 需要 progress JSONL、latest progress JSON、stdout/stderr log 和明确 tag。
 
 ## 项目地图
-- workspace root：`H:\quant_project`。
-- brain 真源：`daily_research/brain/`。
+- workspace root：`H:\quant_project`；brain 真源：`daily_research/brain/`。
 - research data lake：`daily_research/output/research_data_lake/`。
-- path_policy studies：`daily_research/output/path_policy/studies/`。
-- continuous_policy studies：`daily_research/output/continuous_policy/studies/`。
-- continuous_policy protocols：`daily_research/output/continuous_policy/protocols/`。
-- production active artifact：`daily_research/output/active_execution_strategy.json`。
-- execution app：`daily_research/execution/run_execution_app.py`。
-- daily execution verdict root：`daily_research/output/execution_app/daily_runs/`。
+- studies：`daily_research/output/path_policy/studies/`、`daily_research/output/continuous_policy/studies/`；protocols：`daily_research/output/continuous_policy/protocols/`。
+- active artifact：`daily_research/output/active_execution_strategy.json`；execution app：`daily_research/execution/run_execution_app.py`；daily verdict root：`daily_research/output/execution_app/daily_runs/`。
 
 ## 高频 Brain 命令
 - 主脑 task capsule：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
-- API/no-plugin auto workflow capsule：
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --workflow auto --json`
 - current frontier freshness：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow current-frontier --json`
-- workflow guide：
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow workflow-guide --workflow <workflow_id> --json`
 - explicit evidence status：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow status --workflow continuous_policy --run-tag <run_tag> --json`
 - evidence registry rebuild：
@@ -75,12 +66,10 @@
 - 写入 reference、state 或回答用户时，必须把“运行完成状态”和“证据可信等级”分开写；completed run 不自动等于 completed model-quality evidence。
 
 ## TDX-Free Data Platform 运行口径
-- `lake` 是研究存储真源，不是在线数据源；`csv` 是导入/补洞通道，不是每日自动更新方案。
-- 正式研究入口只使用 `--data-source lake --lake-dataset-id <explicit_id>`；不得传 `tq/tdx/pytdx/mootdx`。
+- `lake` 是研究存储真源，不是在线数据源；`csv` 是导入/补洞通道；正式研究入口只使用 `--data-source lake --lake-dataset-id <explicit_id>`，不得传 `tq/tdx/pytdx/mootdx`。
 - V2 每日更新入口：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.data_platform.refresh_daily --as-of-date YYYY-MM-DD --provider-plan default_free --universe all_a --domains market_daily,trading_calendar,universe_snapshot,security_status,limit_status,industry_concept,valuation --json`
-- 小样本调试可传 `--symbols 000001.SZ,600000.SH`；正式每日更新默认使用 `--universe all_a`，不再要求显式 symbols。
-- `--universe` 支持 `all_a|liquid500|file:<path>|symbols:<csv>`；`liquid500` 必须从已有 lake/pool view 或 market amount 生成，数据不足时应 blocked。
+- 小样本调试可传 `--symbols 000001.SZ,600000.SH`；正式每日更新默认 `--universe all_a`；`--universe` 支持 `all_a|liquid500|file:<path>|symbols:<csv>`，数据不足时应 blocked。
 - `--domains` 表示本次尝试刷新的数据域；`--required-domains` 表示阻断条件。缺失 optional domain 不阻断 market daily 入湖，缺失 required domain 必须 blocked。
 - V2 domain 包括 `market_daily`、`trading_calendar`、`universe_snapshot`、`security_status`、`limit_status`、`industry_concept`、`valuation`、`money_flow_hotspot`。
 - refresh 输出必须包含 `refresh_run_id`、provider chain、domains、universe key、calendar source、Bronze provider parquet、Silver canonical parquet、`source_conflict_report`、coverage report、provider error report、blockers、registered dataset ids 和 manifest。
@@ -107,18 +96,13 @@
 - 当前 2026-05-26 fresh verdict 为 `blocked:data_not_ready`；完整重构记录见 `daily_research/brain/references/execution_daily_plan_state_machine_refactor_20260526.md`。
 
 ## PathPolicy 执行异常处理口径
-- `test_forecast_dataset.py` 是慢集成测试，不是默认轻量合同测试；它的 synthetic fixture 会用 700/820/900 个交易日并走完整 feature、label、cumulative horizon 和 horizon risk 构造，单项可到分钟级。
-- 修改 forecast 相关代码时，默认先跑 selective verification 推荐的快速合同测试；完整 `test_forecast_dataset.py` 与 `test_forecast_training.py` 放入 `deferred_long_commands`，需要长验证、发布前检查或风险升高时再跑。
-- pytest timeout 后不得直接下失败结论；先查是否有本轮残留 pytest 进程，再单项复现慢测试，区分时间没给足、资源挤占、真实死锁、fixture 慢和代码失败。
-- 手动清理残留进程只允许匹配本轮 pytest 命令行，只清理 pytest 子进程，不碰其他 Python 任务；示例：
-  `Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -like '*pytest*daily_research/path_policy/tests/test_forecast_dataset.py*' }`
-- 如果确认要终止本轮残留 pytest，再对上述匹配结果执行 `Stop-Process -Id <ProcessId> -Force`；不要用泛化的 `Stop-Process python`。
+- `test_forecast_dataset.py` 是慢集成测试；修改 forecast 默认先跑 selective verification 推荐的快速合同测试，完整 forecast dataset/training 测试只在长验证、发布前或风险升高时跑。
+- pytest timeout 后先查残留 pytest 子进程和单项复现，区分时间不足、资源挤占、真实死锁、fixture 慢和代码失败；只允许按本轮 pytest 命令行匹配后清理，不做泛化 Python 终止。
 
 ## 必跑守卫
 - `git diff -- daily_research/output/active_execution_strategy.json`
 - `git diff --check`
-- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check`
-- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`
+- brain guards：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check`；`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`
 - 修改 brain platform / workflow / registry / rules 后，跑：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest tools/brain/tests -q`
 

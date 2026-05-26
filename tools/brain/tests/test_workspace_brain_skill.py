@@ -129,6 +129,20 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertTrue(payload["all_in_sync"])
         self.assertFalse(copied_cache_exists)
 
+    def test_workspace_brain_source_has_no_python_cache_files(self) -> None:
+        tracked = subprocess.run(
+            ["git", "ls-files", "brain/skills/workspace-brain"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        tracked_paths = [line.strip().replace("\\", "/") for line in tracked.stdout.splitlines() if line.strip()]
+
+        self.assertFalse(any("__pycache__" in path or path.endswith(".pyc") for path in tracked_paths), tracked_paths)
+        self.assertFalse((ROOT / "brain/skills/workspace-brain/scripts/__pycache__").exists())
+
     def test_brain_runtime_detects_project_without_brain(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp_root = Path(raw_tmp) / "test_no_brain_project"
@@ -479,6 +493,7 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
 
     def test_workspace_brain_skill_first_move_is_lite(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
+        line_count = len(text.splitlines())
 
         self.assertIn("capsule --task", text)
         self.assertIn("--verbosity lite", text)
@@ -491,21 +506,21 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertIn("agent learning proposal", text)
         self.assertIn("pending agent learning approvals", text)
         self.assertIn("proposed` or `approved", text)
+        self.assertLessEqual(line_count, 100)
 
-    def test_workspace_brain_skill_long_task_uses_contract_monitor(self) -> None:
+    def test_workspace_brain_skill_points_long_tasks_to_monitor_without_template_bloat(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
 
         self.assertIn("tools.brain.long_task_monitor", text)
-        self.assertIn("Wait-Process -Id <pid> -Timeout 7200", text)
-        self.assertIn("ETA", text)
-        self.assertIn("Start-Sleep", text)
+        self.assertNotIn("Wait-Process -Id <pid> -Timeout 7200", text)
+        self.assertNotIn("Start-Sleep", text)
         self.assertNotIn("must not be used as the primary " + "long-task polling mechanism", text)
         self.assertNotIn("start_" + "training", text)
         self.assertNotIn("Do not " + "modify", text)
         self.assertNotIn("\u4e0d\u5f97", text)
         self.assertNotIn("\u7981\u6b62", text)
 
-    def test_brain_runtime_capsule_rejects_removed_long_task_intent(self) -> None:
+    def test_brain_runtime_capsule_compat_command_is_removed(self) -> None:
         result = subprocess.run(
             [
                 PYTHON,
@@ -528,18 +543,22 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("invalid choice", result.stderr)
 
-    def test_brain_runtime_capsule_mutate_intent_still_works(self) -> None:
+    def test_workflow_capsule_mutate_intent_still_works(self) -> None:
         result = subprocess.run(
             [
                 PYTHON,
-                str(RUNTIME),
+                "-m",
+                "tools.brain.workflow",
                 "capsule",
-                "--cwd",
-                str(ROOT),
                 "--task",
                 "修改脑区规则",
                 "--intent",
                 "mutate",
+                "--workflow",
+                "auto",
+                "--verbosity",
+                "lite",
+                "--json",
             ],
             cwd=str(ROOT),
             capture_output=True,
@@ -594,6 +613,24 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertIn("agent_meta_contract", payload)
         self.assertIn("daily_research_evidence_quality", payload)
         self.assertIn("actionable_items", payload)
+
+    def test_brain_runtime_burden_audit_compact_reports_budget_contract(self) -> None:
+        result = subprocess.run(
+            [PYTHON, str(RUNTIME), "brain-burden-audit", "--cwd", str(ROOT), "--mode", "compact"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        payload = json.loads(result.stdout)
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertIn("brain_burden", payload)
+        self.assertEqual(payload["brain_burden"]["blocked_count"], 0)
+        self.assertLessEqual(payload["brain_burden"]["hot_path_files"]["brain/skills/workspace-brain/SKILL.md"]["line_count"], 100)
+        self.assertIn("compatibility", payload["brain_burden"])
+        self.assertIn("tracked_non_source_files", payload["brain_burden"])
 
     def test_agent_meta_audit_reports_proposed_and_approved_learning_items(self) -> None:
         tmp_root = ROOT / "daily_research/output/test_agent_learning_pending_project"
