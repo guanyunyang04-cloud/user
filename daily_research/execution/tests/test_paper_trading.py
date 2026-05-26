@@ -127,6 +127,62 @@ def test_missing_execution_open_keeps_order_pending(tmp_path: Path) -> None:
     assert "missing_execution_open" in result["blockers"]
 
 
+def test_cash_limited_partial_buy_blocks_unfillable_remainder(tmp_path: Path) -> None:
+    from daily_research.execution import paper_trading
+
+    db_path = tmp_path / "paper_account.sqlite3"
+    paper_trading.ensure_ledger(db_path=db_path)
+    paper_trading.record_cash_flow(db_path=db_path, flow_type="deposit", amount=98500, reason="initial")
+    run_dir = tmp_path / "execution" / "output" / "20260522"
+    run_dir.mkdir(parents=True)
+    (run_dir / "plan_summary.json").write_text(
+        json.dumps(
+            {
+                "signal_date": "2026-05-22",
+                "execution_date": "2026-05-25",
+                "candidate_label": "cash-limited-test",
+                "transaction_cost_bps": 3.0,
+                "slippage_bps": 7.0,
+                "sell_tax_bps": 10.0,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "actions_today.csv").write_text(
+        "stock,action,shares,price,est_value,reason,current_weight,target_weight\n"
+        "002866.SZ,买入,1500,22.0,33000.0,进入目标组合,0,0.3333333333\n"
+        "000065.SZ,买入,2700,12.19,32913.0,进入目标组合,0,0.3333333333\n"
+        "600864.SH,买入,5900,5.56,32804.0,进入目标组合,0,0.3333333333\n",
+        encoding="utf-8-sig",
+    )
+    paper_trading.register_trade_plan_run(db_path=db_path, run_dir=run_dir)
+
+    result = paper_trading.apply_pending_orders(
+        db_path=db_path,
+        price_lookup={
+            "2026-05-25": {
+                "002866.SZ": {"open": 22.0},
+                "000065.SZ": {"open": 12.19},
+                "600864.SH": {"open": 5.56},
+            }
+        },
+        execution_date="2026-05-25",
+    )
+    account = paper_trading.account_summary(db_path=db_path)
+
+    assert "partial_due_to_cash" in result["blockers"]
+    assert result["pending_order_count"] == 0
+    assert result["blocked_order_count"] == 1
+    assert account["pending_order_count"] == 0
+    assert account["blocked_order_count"] == 1
+    blocked = account["pending_orders"][0]
+    assert blocked["stock"] == "600864.SH"
+    assert blocked["status"] == "blocked"
+    assert blocked["reason"] == "insufficient_cash_remainder"
+    assert blocked["remaining_shares"] == 100
+
+
 def test_cash_flows_do_not_distort_twr(tmp_path: Path) -> None:
     from daily_research.execution import paper_trading
 

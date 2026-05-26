@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import csv
-import contextlib
 import importlib.util
 import json
 import os
-import runpy
 import shlex
+import subprocess
 import sys
 import threading
-import traceback
 import time
 from datetime import datetime
 from pathlib import Path
@@ -39,6 +37,7 @@ from daily_research.execution.app_runtime import (
     ExecutionAppLock,
     ExecutionAppLockError,
     append_event,
+    build_job_paths,
     clear_lock_file,
     create_job_record,
     ensure_runtime_layout,
@@ -52,6 +51,7 @@ from daily_research.execution.app_runtime import (
     read_json_file,
     tail_file,
     update_job_metadata,
+    write_json_file,
     write_runtime_state,
 )
 from daily_research.execution.app_tasks import (
@@ -84,6 +84,7 @@ _SCHEDULER_THREAD: threading.Thread | None = None
 _SCHEDULER_THREAD_LOCK = threading.Lock()
 _SCHEDULER_STOP = threading.Event()
 _RUNNER_WARNING_LIMIT = 20
+RUNNER_TIMEOUT_EXIT_CODE = 124
 
 
 def sanitize_passthrough_args(values: list[str] | None) -> list[str]:
@@ -808,7 +809,7 @@ def data_sources_summary(*, dataset_limit: int = 60) -> dict[str, Any]:
             f"{signal_summary.get('latest_date', '') or '未知'}，需要刷新生产信号。"
         )
     recommended_domains = list(FORMAL_DATA_PLATFORM_DOMAINS)
-    state = load_runtime_state()
+    state = _read_json(STATE_PATH) or load_runtime_state()
     provider_health = dict(state.get("last_provider_health", {}) or {})
     current_dataset_health = {
         "status": current_dataset_status,
@@ -940,9 +941,9 @@ def provider_health_summary(
             symbols=tuple(symbols or ("000001.SZ", "600000.SH", "000300.SH")),
         )
     )
-    state = load_runtime_state()
+    state = _read_json(STATE_PATH) or load_runtime_state()
     state["last_provider_health"] = payload
-    write_runtime_state(state)
+    write_json_file(STATE_PATH, state)
     return payload
 
 
@@ -957,7 +958,7 @@ def _default_scheduler_config() -> dict[str, Any]:
 
 
 def _scheduler_config_from_state() -> dict[str, Any]:
-    state = load_runtime_state()
+    state = _read_json(STATE_PATH) or load_runtime_state()
     scheduler = _default_scheduler_config()
     loaded = state.get("scheduler", {})
     if isinstance(loaded, dict):
@@ -996,9 +997,9 @@ def update_scheduler_config(payload: dict[str, Any]) -> dict[str, Any]:
         scheduler["enabled"] = bool(payload.get("enabled"))
     if str(payload.get("post_close_time", "") or "").strip():
         scheduler["post_close_time"] = _normalize_clock_text(payload.get("post_close_time", "15:30"))
-    state = load_runtime_state()
+    state = _read_json(STATE_PATH) or load_runtime_state()
     state["scheduler"] = scheduler
-    write_runtime_state(state)
+    write_json_file(STATE_PATH, state)
     append_event("scheduler_config_updated", enabled=scheduler["enabled"], post_close_time=scheduler["post_close_time"])
     return scheduler_summary()
 
@@ -1099,7 +1100,7 @@ def _scheduler_loop(*, interval_seconds: int) -> None:
 
 
 def _persist_scheduler_decision(decision: dict[str, Any], *, update_last_auto: bool = False) -> dict[str, Any]:
-    state = load_runtime_state()
+    state = _read_json(STATE_PATH) or load_runtime_state()
     scheduler = _default_scheduler_config()
     if isinstance(state.get("scheduler"), dict):
         scheduler.update(state.get("scheduler", {}))
@@ -1107,7 +1108,7 @@ def _persist_scheduler_decision(decision: dict[str, Any], *, update_last_auto: b
     if update_last_auto or str(decision.get("status", "")).startswith("skipped_"):
         scheduler["last_auto_refresh"] = decision
     state["scheduler"] = scheduler
-    write_runtime_state(state)
+    write_json_file(STATE_PATH, state)
     append_event("scheduler_tick", **{key: value for key, value in decision.items() if key not in {"data_sources"}})
     return decision
 
@@ -1115,6 +1116,10 @@ def _persist_scheduler_decision(decision: dict[str, Any], *, update_last_auto: b
 def _has_active_runtime_job() -> bool:
     lock_payload = _read_json(LOCK_PATH)
     if lock_payload:
+        if _recover_stale_running_lock(lock_payload):
+            lock_payload = _read_json(LOCK_PATH)
+            if not lock_payload:
+                return bool(list_active_thread_job_ids())
         if not _lock_payload_refers_to_finished_job(lock_payload):
             return True
         if not _clear_runtime_lock_payload(lock_payload):
@@ -1131,6 +1136,201 @@ def _lock_payload_refers_to_finished_job(payload: dict[str, Any]) -> bool:
     return status in {"succeeded", "failed", "blocked", "abandoned", "skipped"}
 
 
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text)
+    except Exception:
+        return None
+
+
+def _job_runtime_age_seconds(metadata: dict[str, Any], payload: dict[str, Any]) -> float:
+    started_at = _parse_iso_datetime(metadata.get("started_at")) or _parse_iso_datetime(payload.get("acquired_at"))
+    if started_at is None:
+        return 0.0
+    now = datetime.now(started_at.tzinfo) if started_at.tzinfo is not None else datetime.now()
+    return max((now - started_at).total_seconds(), 0.0)
+
+
+def _pid_is_running(pid: Any) -> bool:
+    try:
+        clean_pid = int(pid or 0)
+    except Exception:
+        return False
+    if clean_pid <= 0:
+        return False
+    if clean_pid == os.getpid():
+        return True
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(0x1000, False, clean_pid)
+            if not handle:
+                return False
+            exit_code = ctypes.c_ulong()
+            try:
+                if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                    return False
+                return int(exit_code.value) == 259
+            finally:
+                kernel32.CloseHandle(handle)
+        except Exception:
+            try:
+                result = subprocess.run(
+                    ["tasklist", "/FI", f"PID eq {clean_pid}", "/FO", "CSV", "/NH"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
+                return f'"{clean_pid}"' in result.stdout or f",{clean_pid}," in result.stdout
+            except Exception:
+                return False
+    try:
+        os.kill(clean_pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _recover_missing_subprocess_worker(payload: dict[str, Any], metadata: dict[str, Any] | None = None) -> bool:
+    job_id = str(payload.get("job_id", "") or "").strip() if isinstance(payload, dict) else ""
+    if not job_id:
+        return False
+    metadata_path = JOBS_ROOT / job_id / "metadata.json"
+    loaded_metadata = metadata if isinstance(metadata, dict) and metadata else _read_json(metadata_path)
+    if str(loaded_metadata.get("status", "") or "").strip().lower() not in {"queued", "running"}:
+        return False
+    if str(loaded_metadata.get("async_runner_mode", "") or "").strip().lower() == "detached_worker":
+        launcher_pid = int(loaded_metadata.get("worker_launcher_pid", 0) or payload.get("worker_launcher_pid", 0) or 0)
+        if launcher_pid > 0 and _pid_is_running(launcher_pid):
+            return False
+    if str(loaded_metadata.get("runner_mode", "") or "").strip().lower() != "subprocess":
+        return False
+    worker_pid = int(loaded_metadata.get("worker_pid", 0) or payload.get("worker_pid", 0) or 0)
+    if worker_pid <= 0 or _pid_is_running(worker_pid):
+        return False
+    task_name = str(loaded_metadata.get("task_name", "") or payload.get("task_name", "") or "")
+    warnings = list(loaded_metadata.get("runner_warnings", []) if isinstance(loaded_metadata.get("runner_warnings"), list) else [])
+    _append_limited_warning(
+        warnings,
+        f"subprocess_worker_missing: worker_pid={worker_pid} server_pid={loaded_metadata.get('server_pid', payload.get('server_pid', ''))}",
+    )
+    job_paths = type("JobPathsRef", (), {"job_id": job_id, "metadata_path": metadata_path})()
+    mark_job_finished(
+        job_paths,
+        status="blocked",
+        exit_code=3,
+        summary_note=f"Subprocess worker pid={worker_pid} is no longer running; job was marked blocked and the runtime lock was released.",
+        business_status="blocked",
+        runner_status="blocked",
+        artifact_status=str(loaded_metadata.get("artifact_status", "") or ""),
+        artifact_paths=loaded_metadata.get("artifact_paths", {}) if isinstance(loaded_metadata.get("artifact_paths", {}), dict) else {},
+        evidence_paths=loaded_metadata.get("evidence_paths", {}) if isinstance(loaded_metadata.get("evidence_paths", {}), dict) else {},
+        runner_warnings=warnings,
+    )
+    _clear_runtime_lock_payload({"job_id": job_id})
+    append_event("subprocess_worker_missing_recovered", job_id=job_id, task_name=task_name, worker_pid=worker_pid)
+    return True
+
+
+def _recover_missing_detached_worker(payload: dict[str, Any], metadata: dict[str, Any] | None = None) -> bool:
+    job_id = str(payload.get("job_id", "") or "").strip() if isinstance(payload, dict) else ""
+    if not job_id:
+        return False
+    metadata_path = JOBS_ROOT / job_id / "metadata.json"
+    loaded_metadata = metadata if isinstance(metadata, dict) and metadata else _read_json(metadata_path)
+    if str(loaded_metadata.get("status", "") or "").strip().lower() not in {"queued", "running"}:
+        return False
+    if str(loaded_metadata.get("async_runner_mode", "") or "").strip().lower() != "detached_worker":
+        return False
+    launcher_pid = int(loaded_metadata.get("worker_launcher_pid", 0) or payload.get("worker_launcher_pid", 0) or 0)
+    task_worker_pid = int(loaded_metadata.get("worker_pid", 0) or payload.get("worker_pid", 0) or 0)
+    if launcher_pid > 0 and _pid_is_running(launcher_pid):
+        return False
+    if task_worker_pid > 0 and _pid_is_running(task_worker_pid):
+        return False
+    task_name = str(loaded_metadata.get("task_name", "") or payload.get("task_name", "") or "")
+    warnings = list(loaded_metadata.get("runner_warnings", []) if isinstance(loaded_metadata.get("runner_warnings"), list) else [])
+    _append_limited_warning(
+        warnings,
+        f"detached_worker_missing: worker_launcher_pid={launcher_pid} worker_pid={task_worker_pid}",
+    )
+    job_paths = type("JobPathsRef", (), {"job_id": job_id, "metadata_path": metadata_path})()
+    mark_job_finished(
+        job_paths,
+        status="blocked",
+        exit_code=3,
+        summary_note=(
+            f"Detached execution worker pid={launcher_pid or 'unknown'} is no longer running; "
+            "job was marked blocked and the runtime lock was released."
+        ),
+        business_status="blocked",
+        runner_status="blocked",
+        artifact_status=str(loaded_metadata.get("artifact_status", "") or ""),
+        artifact_paths=loaded_metadata.get("artifact_paths", {}) if isinstance(loaded_metadata.get("artifact_paths", {}), dict) else {},
+        evidence_paths=loaded_metadata.get("evidence_paths", {}) if isinstance(loaded_metadata.get("evidence_paths", {}), dict) else {},
+        runner_warnings=warnings,
+    )
+    _clear_runtime_lock_payload({"job_id": job_id})
+    append_event("detached_worker_missing_recovered", job_id=job_id, task_name=task_name, worker_launcher_pid=launcher_pid)
+    return True
+
+
+def _recover_stale_running_lock(payload: dict[str, Any]) -> bool:
+    job_id = str(payload.get("job_id", "") or "").strip() if isinstance(payload, dict) else ""
+    if not job_id:
+        return False
+    metadata_path = JOBS_ROOT / job_id / "metadata.json"
+    metadata = _read_json(metadata_path)
+    if str(metadata.get("status", "") or "").strip().lower() not in {"queued", "running"}:
+        return False
+    if _recover_missing_detached_worker(payload, metadata):
+        return True
+    if _recover_missing_subprocess_worker(payload, metadata):
+        return True
+    if str(metadata.get("runner_mode", "") or "").strip():
+        return False
+    if int(metadata.get("worker_pid", 0) or payload.get("worker_pid", 0) or 0) > 0:
+        return False
+    task_name = str(metadata.get("task_name", "") or payload.get("task_name", "") or "")
+    try:
+        timeout_seconds = int(getattr(get_task_spec(task_name), "timeout_seconds", 0) or 0)
+    except Exception:
+        timeout_seconds = 0
+    if timeout_seconds <= 0:
+        return False
+    age_seconds = _job_runtime_age_seconds(metadata, payload)
+    grace_seconds = max(300, int(timeout_seconds * 0.1))
+    if age_seconds < timeout_seconds + grace_seconds:
+        return False
+    job_paths = type("JobPathsRef", (), {"job_id": job_id, "metadata_path": metadata_path})()
+    warnings = list(metadata.get("runner_warnings", []) if isinstance(metadata.get("runner_warnings"), list) else [])
+    _append_limited_warning(
+        warnings,
+        f"stale_inprocess_runner_recovered: exceeded {timeout_seconds} seconds without worker_pid",
+    )
+    mark_job_finished(
+        job_paths,
+        status="blocked",
+        exit_code=RUNNER_TIMEOUT_EXIT_CODE,
+        summary_note=f"旧版 in-process runner 超过 {timeout_seconds} 秒且没有 worker_pid，已标记为 blocked 并释放 execution app 锁。",
+        business_status="blocked",
+        runner_status="blocked",
+        artifact_status=str(metadata.get("artifact_status", "") or ""),
+        artifact_paths=metadata.get("artifact_paths", {}) if isinstance(metadata.get("artifact_paths", {}), dict) else {},
+        evidence_paths=metadata.get("evidence_paths", {}) if isinstance(metadata.get("evidence_paths", {}), dict) else {},
+        runner_warnings=warnings,
+    )
+    _clear_runtime_lock_payload(payload)
+    append_event("stale_inprocess_runner_recovered", job_id=job_id, task_name=task_name, age_seconds=age_seconds)
+    return True
+
+
 def _clear_runtime_lock_payload(payload: dict[str, Any]) -> bool:
     job_id = str(payload.get("job_id", "") or "").strip() if isinstance(payload, dict) else ""
     try:
@@ -1138,12 +1338,12 @@ def _clear_runtime_lock_payload(payload: dict[str, Any]) -> bool:
             current = _read_json(LOCK_PATH)
             if not job_id or str(current.get("job_id", "") or "") == job_id:
                 LOCK_PATH.unlink()
-        state = load_runtime_state()
+        state = _read_json(STATE_PATH) or load_runtime_state()
         if not job_id or str(state.get("lock", {}).get("job_id", "") or "") == job_id:
             state["lock"] = {}
         if not job_id or str(state.get("current_job", {}).get("job_id", "") or "") == job_id:
             state["current_job"] = {}
-        write_runtime_state(state)
+        write_json_file(STATE_PATH, state)
         append_event("stale_lock_cleared", job_id=job_id)
         return True
     except Exception:
@@ -1216,6 +1416,40 @@ def _patch_job_metadata_by_id(job_id: str, **patch: Any) -> None:
         return
     job_paths = type("JobPathsRef", (), {"metadata_path": metadata_path})()
     update_job_metadata(job_paths, **patch)
+
+
+def _patch_runtime_worker_payload(*, job_id: str, worker_pid: int) -> None:
+    clean_job_id = str(job_id or "").strip()
+    pid = int(worker_pid or 0)
+    if not clean_job_id or pid <= 0:
+        return
+    server_pid = int(os.getpid())
+    if LOCK_PATH.exists():
+        lock_payload = _read_json(LOCK_PATH)
+        if str(lock_payload.get("job_id", "") or "") == clean_job_id:
+            lock_payload.update(
+                {
+                    "pid": pid,
+                    "server_pid": server_pid,
+                    "worker_pid": pid,
+                    "worker_started_at": now_iso(),
+                }
+            )
+            write_json_file(LOCK_PATH, lock_payload)
+    state = _read_json(STATE_PATH) or load_runtime_state()
+    changed = False
+    lock_state = dict(state.get("lock", {}) or {}) if isinstance(state.get("lock", {}), dict) else {}
+    if str(lock_state.get("job_id", "") or "") == clean_job_id:
+        lock_state.update({"pid": pid, "server_pid": server_pid, "worker_pid": pid})
+        state["lock"] = lock_state
+        changed = True
+    current_job = dict(state.get("current_job", {}) or {}) if isinstance(state.get("current_job", {}), dict) else {}
+    if str(current_job.get("job_id", "") or "") == clean_job_id:
+        current_job.update({"worker_pid": pid, "server_pid": server_pid})
+        state["current_job"] = current_job
+        changed = True
+    if changed:
+        write_json_file(STATE_PATH, state)
 
 
 def _signal_refresh_metadata(*, as_of_date: str = "") -> dict[str, Any]:
@@ -1373,8 +1607,43 @@ def _latest_refresh_manifest_path() -> str:
     return str(latest.resolve())
 
 
-def _data_refresh_artifact_status(refresh_manifest_path: str = "") -> dict[str, Any]:
-    manifest_path = str(refresh_manifest_path or _latest_refresh_manifest_path() or "").strip()
+def _arg_value(args: list[str] | tuple[str, ...], name: str) -> str:
+    values = [str(item) for item in (args or [])]
+    for idx, item in enumerate(values):
+        if item == name and idx + 1 < len(values):
+            return str(values[idx + 1])
+        prefix = f"{name}="
+        if item.startswith(prefix):
+            return str(item[len(prefix) :])
+    return ""
+
+
+def _refresh_manifest_path_from_args(args: list[str] | tuple[str, ...]) -> str:
+    data_lake_root = _arg_value(args, "--data-lake-root")
+    run_id = _arg_value(args, "--run-id")
+    if not data_lake_root or not run_id:
+        return ""
+    root = Path(data_lake_root)
+    if not root.is_absolute():
+        root = WORKSPACE_ROOT / root
+    return str((root / "data_platform" / "runs" / run_id / "refresh_manifest.json").resolve())
+
+
+def _run_uses_custom_data_lake(args: list[str] | tuple[str, ...]) -> bool:
+    root_text = _arg_value(args, "--data-lake-root")
+    if not root_text:
+        return False
+    root = Path(root_text)
+    if not root.is_absolute():
+        root = WORKSPACE_ROOT / root
+    try:
+        return root.resolve() != (PROJECT_ROOT / "output" / "research_data_lake").resolve()
+    except Exception:
+        return True
+
+
+def _data_refresh_artifact_status(refresh_manifest_path: str = "", *, allow_latest_fallback: bool = True) -> dict[str, Any]:
+    manifest_path = str(refresh_manifest_path or (_latest_refresh_manifest_path() if allow_latest_fallback else "") or "").strip()
     manifest_file = Path(manifest_path) if manifest_path else Path("")
     manifest = _read_json(manifest_file) if manifest_path and manifest_file.exists() else {}
     status = str(manifest.get("status", "") or "").strip().lower()
@@ -1397,7 +1666,13 @@ def _data_refresh_artifact_status(refresh_manifest_path: str = "") -> dict[str, 
     }
 
 
-def _post_process_successful_task(*, job_paths: Any, task_name: str, summary_note: str) -> tuple[str, dict[str, Any]]:
+def _post_process_successful_task(
+    *,
+    job_paths: Any,
+    task_name: str,
+    summary_note: str,
+    passthrough_args: list[str] | tuple[str, ...] | None = None,
+) -> tuple[str, dict[str, Any]]:
     if task_name == "refresh-production-live-panels":
         metadata = _signal_refresh_artifact_status()
         paper_result = _safe_paper_reconcile(
@@ -1421,11 +1696,30 @@ def _post_process_successful_task(*, job_paths: Any, task_name: str, summary_not
         return note, metadata
     if task_name != "data-platform-refresh":
         return summary_note, {"business_status": "ok", "runner_status": "ok", "artifact_status": "not_applicable"}
-    refresh_manifest_path = _latest_refresh_manifest_path()
-    artifact_metadata = _data_refresh_artifact_status(refresh_manifest_path)
+    clean_args = [str(item) for item in (passthrough_args or [])]
+    refresh_manifest_path = _refresh_manifest_path_from_args(clean_args)
+    custom_data_lake = _run_uses_custom_data_lake(clean_args)
+    allow_latest_fallback = not refresh_manifest_path and not custom_data_lake
+    if allow_latest_fallback:
+        refresh_manifest_path = _latest_refresh_manifest_path()
+    artifact_metadata = _data_refresh_artifact_status(
+        refresh_manifest_path,
+        allow_latest_fallback=allow_latest_fallback,
+    )
     if artifact_metadata.get("business_status") != "ok":
         status = str(artifact_metadata.get("business_status", "") or artifact_metadata.get("artifact_status", "unknown"))
         note = f"{summary_note} refresh manifest business_status={status}; active manifest unchanged"
+        update_job_metadata(job_paths, **artifact_metadata)
+        return note, artifact_metadata
+    if custom_data_lake:
+        artifact_metadata["active_manifest_update"] = {
+            "status": "skipped",
+            "reason": "custom_data_lake_root",
+            "refresh_manifest_path": str(artifact_metadata.get("refresh_manifest_path", "") or ""),
+        }
+        artifact_metadata["business_status"] = "ok"
+        artifact_metadata["runner_status"] = "ok"
+        note = f"{summary_note} custom data lake refresh completed; active manifest unchanged"
         update_job_metadata(job_paths, **artifact_metadata)
         return note, artifact_metadata
     update = sync_active_manifest_to_latest_lake_dataset(
@@ -1688,12 +1982,13 @@ def paper_account_performance(*, start_date: str, end_date: str) -> dict[str, An
 def build_status_payload(*, history_limit: int = 8) -> dict[str, Any]:
     ensure_runtime_layout()
     _mark_abandoned_jobs()
-    state = load_runtime_state()
     lock_payload = _read_json(LOCK_PATH)
+    if lock_payload and _recover_stale_running_lock(lock_payload):
+        lock_payload = _read_json(LOCK_PATH)
     if lock_payload and _lock_payload_refers_to_finished_job(lock_payload):
         _clear_runtime_lock_payload(lock_payload)
-        state = load_runtime_state()
         lock_payload = _read_json(LOCK_PATH)
+    state = _read_json(STATE_PATH) or load_runtime_state()
     recent_jobs = list_recent_job_metadata(limit=history_limit)
     warnings: list[str] = []
     yolos_python = resolve_project_python_executable(sys.executable)
@@ -1754,6 +2049,24 @@ def _mark_abandoned_jobs(limit: int = 50) -> None:
         )
 
 
+def _reconcile_running_job_metadata(job_id: str) -> dict[str, Any]:
+    metadata = _read_json(JOBS_ROOT / str(job_id) / "metadata.json")
+    if not metadata:
+        return {}
+    status = str(metadata.get("status", "") or "").strip().lower()
+    if status not in {"queued", "running"}:
+        return metadata
+    lock_payload = _read_json(LOCK_PATH)
+    if lock_payload and str(lock_payload.get("job_id", "") or "") == str(job_id):
+        if _recover_stale_running_lock(lock_payload):
+            return _read_json(JOBS_ROOT / str(job_id) / "metadata.json")
+    if _recover_missing_detached_worker({"job_id": str(job_id), **(lock_payload if isinstance(lock_payload, dict) else {})}, metadata):
+        return _read_json(JOBS_ROOT / str(job_id) / "metadata.json")
+    if _recover_missing_subprocess_worker({"job_id": str(job_id), **(lock_payload if isinstance(lock_payload, dict) else {})}, metadata):
+        return _read_json(JOBS_ROOT / str(job_id) / "metadata.json")
+    return metadata
+
+
 def build_doctor_payload() -> dict[str, Any]:
     ensure_runtime_layout()
     yolos_python = resolve_project_python_executable(sys.executable)
@@ -1790,11 +2103,18 @@ def list_tasks_payload(*, core_only: bool = False) -> list[dict[str, Any]]:
 
 
 def list_jobs_payload(*, limit: int = 20) -> list[dict[str, Any]]:
+    jobs = list_recent_job_metadata(limit=limit)
+    for metadata in jobs:
+        job_id = str(metadata.get("job_id", "") or "")
+        if job_id and str(metadata.get("status", "") or "").strip().lower() in {"queued", "running"}:
+            _reconcile_running_job_metadata(job_id)
     return list_recent_job_metadata(limit=limit)
 
 
 def build_job_detail_payload(job_id: str, *, lines: int = 80) -> dict[str, Any]:
-    metadata = load_job_metadata(str(job_id))
+    metadata = _reconcile_running_job_metadata(str(job_id))
+    if not metadata:
+        metadata = load_job_metadata(str(job_id))
     if not metadata:
         raise FileNotFoundError(f"未找到作业元数据：{job_id}")
     stdout_lines = tail_file(Path(str(metadata.get("stdout_log", ""))), lines=lines)
@@ -1855,7 +2175,7 @@ def _run_existing_job(
             mark_job_started(job_paths, lock_payload=lock.payload)
             with job_paths.stdout_path.open("w", encoding="utf-8") as stdout_handle:
                 with job_paths.stderr_path.open("w", encoding="utf-8") as stderr_handle:
-                    exit_code = _run_command_in_current_process(
+                    exit_code = _run_command_in_subprocess(
                         command=command,
                         stdout_handle=stdout_handle,
                         stderr_handle=stderr_handle,
@@ -1863,14 +2183,19 @@ def _run_existing_job(
                         console_stderr=sys.stderr if echo_output else None,
                         job_paths=job_paths,
                         runner_warnings=runner_warnings,
+                        timeout_seconds=int(getattr(spec, "timeout_seconds", 0) or 0),
                     )
             status = "succeeded" if exit_code == 0 else "failed"
             summary_note = spec.description
-            if status == "succeeded":
+            if exit_code == RUNNER_TIMEOUT_EXIT_CODE:
+                status = "blocked"
+                summary_note = f"{spec.description} timed out after {int(getattr(spec, 'timeout_seconds', 0) or 0)} seconds"
+            elif status == "succeeded":
                 summary_note, post_process_metadata = _post_process_successful_task(
                     job_paths=job_paths,
                     task_name=task_name,
                     summary_note=summary_note,
+                    passthrough_args=passthrough_args,
                 )
                 business_status = str(post_process_metadata.get("business_status", "") or "").lower()
                 if business_status == "blocked":
@@ -1878,15 +2203,38 @@ def _run_existing_job(
                 elif business_status in {"failed", "missing", "unknown"} or business_status.endswith("_failed"):
                     status = "failed"
             elif task_name == "data-platform-refresh":
-                artifact_metadata = _data_refresh_artifact_status()
-                if artifact_metadata.get("business_status") == "ok":
+                refresh_manifest_path = _refresh_manifest_path_from_args(passthrough_args)
+                allow_latest_fallback = False
+                if not refresh_manifest_path:
+                    latest_candidate = _latest_refresh_manifest_path()
+                    latest_metadata = _data_refresh_artifact_status(
+                        latest_candidate,
+                        allow_latest_fallback=False,
+                    )
+                    if latest_metadata.get("business_status") == "blocked":
+                        refresh_manifest_path = latest_candidate
+                artifact_metadata = _data_refresh_artifact_status(
+                    refresh_manifest_path,
+                    allow_latest_fallback=allow_latest_fallback,
+                )
+                if artifact_metadata.get("business_status") == "blocked":
+                    status = "blocked"
+                    summary_note = f"{spec.description} refresh manifest business_status=blocked"
+                    post_process_metadata = artifact_metadata
+                elif artifact_metadata.get("business_status") == "ok":
                     try:
-                        refresh_manifest_path = str(artifact_metadata.get("refresh_manifest_path", "") or "")
-                        update = sync_active_manifest_to_latest_lake_dataset(
-                            reason=task_name,
-                            refresh_manifest_path=refresh_manifest_path,
-                        )
-                        artifact_metadata["active_manifest_update"] = update
+                        if _run_uses_custom_data_lake(passthrough_args):
+                            artifact_metadata["active_manifest_update"] = {
+                                "status": "skipped",
+                                "reason": "custom_data_lake_root",
+                            }
+                        else:
+                            refresh_manifest_path = str(artifact_metadata.get("refresh_manifest_path", "") or "")
+                            update = sync_active_manifest_to_latest_lake_dataset(
+                                reason=task_name,
+                                refresh_manifest_path=refresh_manifest_path,
+                            )
+                            artifact_metadata["active_manifest_update"] = update
                         update_job_metadata(job_paths, **artifact_metadata)
                     except Exception as exc:
                         runner_warnings.append(f"active_manifest_sync_after_reconcile_failed: {exc}")
@@ -1903,7 +2251,14 @@ def _run_existing_job(
         exit_code = 1
         status = "failed"
     finally:
-        runner_status = "warning" if runner_warnings else ("ok" if int(exit_code) == 0 else ("blocked" if status == "blocked" else "failed"))
+        if runner_warnings:
+            runner_status = "warning"
+        elif int(exit_code) == 0 or str(post_process_metadata.get("business_status", "") or "").lower() == "blocked":
+            runner_status = "ok"
+        elif status == "blocked":
+            runner_status = "blocked"
+        else:
+            runner_status = "failed"
         metadata_runner_status = str(post_process_metadata.get("runner_status", runner_status))
         if runner_warnings and metadata_runner_status == "ok":
             metadata_runner_status = "warning"
@@ -1999,7 +2354,78 @@ class _TeeTextIO:
                 continue
 
 
-def _run_command_in_current_process(
+def _append_limited_warning(runner_warnings: list[str] | None, message: str) -> None:
+    if runner_warnings is None:
+        return
+    clean = str(message or "").strip()
+    if not clean:
+        return
+    if len(runner_warnings) >= _RUNNER_WARNING_LIMIT:
+        return
+    if clean not in runner_warnings:
+        runner_warnings.append(clean)
+
+
+def _safe_update_job_metadata(job_paths: Any, runner_warnings: list[str] | None = None, **patch: Any) -> dict[str, Any]:
+    try:
+        return update_job_metadata(job_paths, **patch)
+    except Exception as exc:
+        _append_limited_warning(runner_warnings, f"metadata_update_error: {exc}")
+        return dict(patch)
+
+
+def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
+    try:
+        if process.poll() is not None:
+            return
+    except Exception:
+        return
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(int(process.pid)), "/T", "/F"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return
+        except Exception:
+            pass
+    try:
+        process.terminate()
+        process.wait(timeout=5)
+    except Exception:
+        try:
+            process.kill()
+        except Exception:
+            pass
+
+
+def _start_new_process_group_kwargs() -> dict[str, Any]:
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"preexec_fn": os.setsid}
+
+
+def _python_unbuffered_command(command: list[str]) -> list[str]:
+    clean_command = [str(item) for item in command]
+    if not clean_command:
+        return clean_command
+    executable = Path(clean_command[0]).name.lower()
+    if "python" not in executable:
+        return clean_command
+    if any(item in {"-u", "-I"} for item in clean_command[1:3]):
+        return clean_command
+    return [clean_command[0], "-u", *clean_command[1:]]
+
+
+def _runner_environment() -> dict[str, str]:
+    env = dict(os.environ)
+    env["PYTHONUNBUFFERED"] = "1"
+    return env
+
+
+def _run_command_in_subprocess(
     *,
     command: list[str],
     stdout_handle: TextIO,
@@ -2008,14 +2434,12 @@ def _run_command_in_current_process(
     console_stderr: TextIO | None,
     job_paths: Any | None = None,
     runner_warnings: list[str] | None = None,
+    timeout_seconds: int | float | None = None,
 ) -> int:
     if len(command) < 2:
         raise ValueError("command must contain python executable and script path")
-    script_path = Path(command[1]).resolve()
-    argv = [str(script_path), *[str(item) for item in command[2:]]]
-    old_argv = sys.argv[:]
-    old_cwd = Path.cwd()
-    sys.argv = argv
+    clean_command = _python_unbuffered_command(command)
+    timeout_value = float(timeout_seconds or 0)
     stdout_tee = _TeeTextIO(
         stdout_handle,
         console_stdout,
@@ -2028,26 +2452,83 @@ def _run_command_in_current_process(
         heartbeat=(lambda line: mark_job_heartbeat(job_paths, stream_name="stderr", line=line)) if job_paths is not None else None,
         runner_warnings=runner_warnings,
     )
-    try:
-        os.chdir(WORKSPACE_ROOT)
-        with contextlib.redirect_stdout(stdout_tee), contextlib.redirect_stderr(stderr_tee):
+    process = subprocess.Popen(
+        clean_command,
+        cwd=str(WORKSPACE_ROOT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+        env=_runner_environment(),
+        **_start_new_process_group_kwargs(),
+    )
+    if job_paths is not None:
+        _patch_runtime_worker_payload(job_id=str(getattr(job_paths, "job_id", "")), worker_pid=int(process.pid))
+        _safe_update_job_metadata(
+            job_paths,
+            runner_warnings=runner_warnings,
+            runner_mode="subprocess",
+            server_pid=int(os.getpid()),
+            worker_pid=int(process.pid),
+            worker_started_at=now_iso(),
+            runner_timeout_seconds=int(timeout_value) if timeout_value > 0 else 0,
+        )
+    deadline = time.monotonic() + timeout_value if timeout_value > 0 else None
+
+    def pump_stream(stream: Any, tee: _TeeTextIO) -> None:
+        try:
+            for line in iter(stream.readline, ""):
+                if not line:
+                    break
+                tee.write(line)
+            tee.flush()
+        except Exception as exc:
+            _append_limited_warning(runner_warnings, f"output_reader_error: {exc}")
+        finally:
             try:
-                runpy.run_path(str(script_path), run_name="__main__")
-                return 0
-            except SystemExit as exc:
-                code = exc.code
-                if code is None:
-                    return 0
-                if isinstance(code, int):
-                    return int(code)
-                print(str(code), file=sys.stderr)
-                return 1
-            except BaseException:
-                traceback.print_exc()
-                return 1
-    finally:
-        sys.argv = old_argv
-        os.chdir(old_cwd)
+                stream.close()
+            except Exception:
+                pass
+
+    stdout_thread = threading.Thread(target=pump_stream, args=(process.stdout, stdout_tee), name=f"execution-runner-stdout-{process.pid}", daemon=True)
+    stderr_thread = threading.Thread(target=pump_stream, args=(process.stderr, stderr_tee), name=f"execution-runner-stderr-{process.pid}", daemon=True)
+    stdout_thread.start()
+    stderr_thread.start()
+    timed_out = False
+    while True:
+        return_code = process.poll()
+        if return_code is not None:
+            break
+        if deadline is not None and time.monotonic() >= deadline:
+            timed_out = True
+            _append_limited_warning(runner_warnings, f"runner_timeout: exceeded {int(timeout_value)} seconds")
+            if job_paths is not None:
+                _safe_update_job_metadata(
+                    job_paths,
+                    runner_warnings=runner_warnings,
+                    runner_mode="subprocess",
+                    server_pid=int(os.getpid()),
+                    worker_pid=int(process.pid),
+                    runner_timeout_seconds=int(timeout_value),
+                    runner_timed_out=True,
+                    runner_timeout_at=now_iso(),
+                )
+            _terminate_process_tree(process)
+            break
+        time.sleep(0.2)
+    try:
+        process.wait(timeout=5)
+    except Exception:
+        _terminate_process_tree(process)
+    stdout_thread.join(timeout=5)
+    stderr_thread.join(timeout=5)
+    stdout_tee.flush()
+    stderr_tee.flush()
+    if timed_out:
+        return RUNNER_TIMEOUT_EXIT_CODE
+    return int(process.returncode or 0)
 
 
 def run_task_sync(
@@ -2082,6 +2563,105 @@ def run_task_sync(
     )
 
 
+def run_recorded_job_sync(
+    *,
+    job_id: str,
+    force_unlock: bool = False,
+    echo_output: bool = False,
+) -> dict[str, Any]:
+    metadata = load_job_metadata(str(job_id))
+    if not metadata:
+        raise FileNotFoundError(f"未找到作业元数据：{job_id}")
+    command = [str(item) for item in metadata.get("command_argv", []) if str(item).strip()]
+    if not command:
+        raise ValueError(f"作业 {job_id} 不包含 command_argv。")
+    task_name = str(metadata.get("task_name", "") or "")
+    python_executable = resolve_project_python_executable(str(metadata.get("python_executable", "") or command[0]))
+    command[0] = python_executable
+    passthrough_args = sanitize_passthrough_args([str(item) for item in metadata.get("passthrough_args", []) if str(item).strip()])
+    return _run_existing_job(
+        job_paths=build_job_paths(str(job_id)),
+        task_name=task_name,
+        command=command,
+        python_executable=python_executable,
+        passthrough_args=passthrough_args,
+        job_label=str(metadata.get("job_label", "") or ""),
+        resumed_from_job_id=str(metadata.get("resumed_from_job_id", "") or ""),
+        force_unlock=force_unlock,
+        echo_output=echo_output,
+    )
+
+
+def _spawn_detached_job_worker(
+    *,
+    job_id: str,
+    python_executable: str,
+    force_unlock: bool = False,
+) -> dict[str, Any]:
+    clean_job_id = str(job_id or "").strip()
+    if not clean_job_id:
+        raise ValueError("job_id is required")
+    job_paths = build_job_paths(clean_job_id)
+    worker_stdout_log = job_paths.job_root / "worker_stdout.log"
+    worker_stderr_log = job_paths.job_root / "worker_stderr.log"
+    command = [
+        str(python_executable),
+        "-m",
+        "daily_research.execution.job_worker",
+        "--job-id",
+        clean_job_id,
+    ]
+    if force_unlock:
+        command.append("--force-unlock")
+    stdout_handle = worker_stdout_log.open("a", encoding="utf-8")
+    stderr_handle = worker_stderr_log.open("a", encoding="utf-8")
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=str(WORKSPACE_ROOT),
+            stdout=stdout_handle,
+            stderr=stderr_handle,
+            stdin=subprocess.DEVNULL,
+            close_fds=True,
+            env=_runner_environment(),
+            **_start_new_process_group_kwargs(),
+        )
+    finally:
+        stdout_handle.close()
+        stderr_handle.close()
+    payload = {
+        "async_runner_mode": "detached_worker",
+        "worker_launcher_pid": int(process.pid),
+        "worker_command_argv": command,
+        "worker_stdout_log": str(worker_stdout_log.resolve()),
+        "worker_stderr_log": str(worker_stderr_log.resolve()),
+        "worker_launch_requested_at": now_iso(),
+    }
+    update_job_metadata(job_paths, **payload)
+    return payload
+
+
+def _mark_job_launch_pending(job_paths: Any, *, task_name: str) -> None:
+    pending_at = now_iso()
+    payload = {
+        "job_id": str(getattr(job_paths, "job_id", "") or ""),
+        "task_name": str(task_name or ""),
+        "pid": 0,
+        "acquired_at": pending_at,
+        "status": "launch_pending",
+    }
+    write_json_file(LOCK_PATH, payload)
+    state = _read_json(STATE_PATH) or load_runtime_state()
+    state["lock"] = dict(payload)
+    state["current_job"] = {
+        "job_id": str(getattr(job_paths, "job_id", "") or ""),
+        "task_name": str(task_name or ""),
+        "status": "launch_pending",
+        "started_at": pending_at,
+    }
+    write_json_file(STATE_PATH, state)
+
+
 def launch_task_async(
     *,
     task_name: str,
@@ -2090,6 +2670,8 @@ def launch_task_async(
     job_label: str = "",
     force_unlock: bool = False,
 ) -> dict[str, Any]:
+    if not force_unlock and _has_active_runtime_job():
+        raise ExecutionAppLockError("Execution app lock is already held by an active job.")
     resolved_python = resolve_project_python_executable(python_executable or sys.executable)
     clean_passthrough = sanitize_passthrough_args(passthrough_args)
     command = build_task_command(task_name=task_name, python_executable=resolved_python, passthrough_args=clean_passthrough)
@@ -2101,24 +2683,12 @@ def launch_task_async(
         passthrough_args=clean_passthrough,
         job_label=job_label,
     )
-    thread = threading.Thread(
-        target=_run_existing_job,
-        kwargs={
-            "job_paths": job_paths,
-            "task_name": task_name,
-            "command": command,
-            "python_executable": resolved_python,
-            "passthrough_args": clean_passthrough,
-            "job_label": job_label,
-            "force_unlock": force_unlock,
-            "echo_output": False,
-        },
-        name=f"execution-app-{job_paths.job_id}",
-        daemon=True,
+    _mark_job_launch_pending(job_paths, task_name=task_name)
+    worker_payload = _spawn_detached_job_worker(
+        job_id=job_paths.job_id,
+        python_executable=resolved_python,
+        force_unlock=force_unlock,
     )
-    with _ACTIVE_JOB_THREADS_LOCK:
-        _ACTIVE_JOB_THREADS[job_paths.job_id] = thread
-    thread.start()
     append_event("job_launch_requested", job_id=job_paths.job_id, task_name=task_name)
     return {
         "job_id": job_paths.job_id,
@@ -2128,6 +2698,7 @@ def launch_task_async(
         "command": command,
         "stdout_log": str(job_paths.stdout_path.resolve()),
         "stderr_log": str(job_paths.stderr_path.resolve()),
+        **worker_payload,
     }
 
 
@@ -2176,6 +2747,8 @@ def resume_task_async(
     job_label: str = "",
     force_unlock: bool = False,
 ) -> dict[str, Any]:
+    if not force_unlock and _has_active_runtime_job():
+        raise ExecutionAppLockError("Execution app lock is already held by an active job.")
     metadata = resolve_resume_metadata(job_id)
     command = [str(item) for item in metadata.get("command_argv", []) if str(item).strip()]
     if not command:
@@ -2195,25 +2768,12 @@ def resume_task_async(
         job_label=effective_job_label,
         resumed_from_job_id=str(metadata.get("job_id", "")),
     )
-    thread = threading.Thread(
-        target=_run_existing_job,
-        kwargs={
-            "job_paths": job_paths,
-            "task_name": task_name,
-            "command": command,
-            "python_executable": python_executable,
-            "passthrough_args": passthrough_args,
-            "job_label": effective_job_label,
-            "resumed_from_job_id": str(metadata.get("job_id", "")),
-            "force_unlock": force_unlock,
-            "echo_output": False,
-        },
-        name=f"execution-app-{job_paths.job_id}",
-        daemon=True,
+    _mark_job_launch_pending(job_paths, task_name=task_name)
+    worker_payload = _spawn_detached_job_worker(
+        job_id=job_paths.job_id,
+        python_executable=python_executable,
+        force_unlock=force_unlock,
     )
-    with _ACTIVE_JOB_THREADS_LOCK:
-        _ACTIVE_JOB_THREADS[job_paths.job_id] = thread
-    thread.start()
     append_event("job_resume_requested", job_id=job_paths.job_id, task_name=task_name, resumed_from_job_id=str(metadata.get("job_id", "")))
     return {
         "job_id": job_paths.job_id,
@@ -2224,6 +2784,7 @@ def resume_task_async(
         "stdout_log": str(job_paths.stdout_path.resolve()),
         "stderr_log": str(job_paths.stderr_path.resolve()),
         "resumed_from_job_id": str(metadata.get("job_id", "")),
+        **worker_payload,
     }
 
 

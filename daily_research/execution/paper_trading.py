@@ -645,6 +645,7 @@ def apply_pending_orders(
                         )
                         continue
                     blockers.add("partial_due_to_cash")
+                    blockers.add("insufficient_cash_remainder")
                 gross = fill_price * fill_shares
                 cost = gross * transaction_rate
                 tax = 0.0
@@ -669,6 +670,10 @@ def apply_pending_orders(
 
             remaining_after = remaining - fill_shares
             status = "filled" if remaining_after <= 0 else "partial"
+            reason = ""
+            if side == "buy" and remaining_after > 0 and "partial_due_to_cash" in blockers:
+                status = "blocked"
+                reason = "insufficient_cash_remainder"
             conn.execute(
                 """
                 INSERT INTO fills(
@@ -693,8 +698,8 @@ def apply_pending_orders(
                 ),
             )
             conn.execute(
-                "UPDATE orders SET status=?, remaining_shares=?, reason='', updated_at=? WHERE id=?",
-                (status, max(0, remaining_after), _now_iso(), order_id),
+                "UPDATE orders SET status=?, remaining_shares=?, reason=?, updated_at=? WHERE id=?",
+                (status, max(0, remaining_after), reason, _now_iso(), order_id),
             )
             filled += 1
 

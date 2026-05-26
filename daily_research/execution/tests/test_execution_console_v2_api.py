@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import warnings
+import gc
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -185,6 +188,17 @@ def test_models_payload_includes_core_model_roles() -> None:
     assert "continuous_policy" not in roles
     assert not any(item["id"] == "continuous-policy-shadow" for item in payload["models"])
     assert any(item["is_live"] for item in payload["models"])
+
+
+def test_execution_smoke_task_is_registered_as_safe_diagnostic() -> None:
+    from daily_research.execution.app_tasks import get_task_spec
+
+    spec = get_task_spec("execution-smoke")
+
+    assert spec.category == "diagnostic"
+    assert spec.safety_level == "safe"
+    assert spec.timeout_seconds == 60
+    assert spec.script_path.name == "run_execution_smoke.py"
 
 
 def test_active_manifest_summary_keeps_trade_plan_signal_paths(
@@ -855,6 +869,93 @@ def test_scheduler_tick_ignores_stale_lock_for_finished_job(monkeypatch: pytest.
     assert captured["task_name"] == "data-platform-refresh"
 
 
+def test_scheduler_tick_recovers_legacy_inprocess_stale_lock(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from daily_research.execution import app_service
+
+    captured: dict[str, Any] = {}
+    runtime_root = tmp_path / "runtime"
+    jobs_root = runtime_root / "jobs"
+    job_dir = jobs_root / "legacy_running_job"
+    job_dir.mkdir(parents=True)
+    old_started_at = "2026-05-25T10:00:00+08:00"
+    (job_dir / "metadata.json").write_text(
+        json.dumps(
+            {
+                "job_id": "legacy_running_job",
+                "status": "running",
+                "task_name": "data-platform-refresh",
+                "started_at": old_started_at,
+                "runner_warnings": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    lock_path = runtime_root / "execution_app.lock"
+    state_path = runtime_root / "runtime_state.json"
+    events_path = runtime_root / "events.jsonl"
+    lock_path.write_text(
+        json.dumps({"job_id": "legacy_running_job", "task_name": "data-platform-refresh", "pid": os.getpid(), "acquired_at": old_started_at}),
+        encoding="utf-8",
+    )
+    state_path.write_text(
+        json.dumps(
+            {
+                "lock": {"job_id": "legacy_running_job", "task_name": "data-platform-refresh"},
+                "current_job": {"job_id": "legacy_running_job", "status": "running"},
+                "scheduler": {"enabled": True, "post_close_time": "15:30", "timezone": "Asia/Shanghai", "last_auto_refresh": {}},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(app_service, "RUNTIME_ROOT", runtime_root)
+    monkeypatch.setattr(app_service, "JOBS_ROOT", jobs_root)
+    monkeypatch.setattr(app_service, "LOCK_PATH", lock_path)
+    monkeypatch.setattr(app_service, "STATE_PATH", state_path)
+    monkeypatch.setattr(app_service, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(app_service, "list_active_thread_job_ids", lambda: [])
+    monkeypatch.setattr(app_service, "get_latest_completed_trading_date", lambda: "2026-05-22", raising=False)
+    monkeypatch.setattr(app_service, "_scheduler_already_ran_for_date", lambda *_args, **_kwargs: False, raising=False)
+    monkeypatch.setattr(app_service, "_scheduler_time_is_due", lambda *_args, **_kwargs: True, raising=False)
+    monkeypatch.setattr(app_service, "_scheduler_auto_window_matches_latest_completed", lambda *_args, **_kwargs: True, raising=False)
+    monkeypatch.setattr(
+        app_service,
+        "data_sources_summary",
+        lambda: {
+            "status": "ok",
+            "next_refresh_action": "refresh",
+            "next_signal_action": "refresh",
+            "data_platform": {
+                "latest_completed_trading_date": "2026-05-22",
+                "default_refresh": {
+                    "as_of_date": "2026-05-22",
+                    "universe": "all_a",
+                    "domains": FORMAL_REFRESH_DOMAINS,
+                    "required_domains": FORMAL_REQUIRED_DOMAINS,
+                    "provider_plan": "formal_free_v3",
+                },
+            },
+        },
+    )
+
+    def fake_launch_task_async(**kwargs):
+        captured.update(kwargs)
+        return {"job_id": "auto-job", "task_name": kwargs["task_name"], "status": "queued"}
+
+    monkeypatch.setattr(app_service, "launch_task_async", fake_launch_task_async)
+
+    result = app_service.run_scheduler_tick(trigger="auto_post_close")
+    recovered_metadata = json.loads((job_dir / "metadata.json").read_text(encoding="utf-8"))
+
+    assert recovered_metadata["status"] == "blocked"
+    assert recovered_metadata["exit_code"] == app_service.RUNNER_TIMEOUT_EXIT_CODE
+    assert not lock_path.exists()
+    assert result["status"] == "launched"
+    assert captured["task_name"] == "data-platform-refresh"
+
+
 def test_scheduler_tick_does_not_auto_backfill_when_site_was_offline_after_trading_day(monkeypatch: pytest.MonkeyPatch) -> None:
     from daily_research.execution import app_service
 
@@ -1305,6 +1406,108 @@ def test_data_refresh_post_process_persists_evidence_metadata(monkeypatch: pytes
     assert persisted["active_manifest_update"]["dataset_id"] == "policy_input_bundle__latest"
 
 
+def test_data_refresh_custom_lake_root_skips_active_manifest_sync(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from daily_research.execution import app_service
+
+    custom_lake_root = tmp_path / "custom_lake"
+    refresh_manifest_path = custom_lake_root / "data_platform" / "runs" / "smoke_run" / "refresh_manifest.json"
+    refresh_manifest_path.parent.mkdir(parents=True)
+    refresh_manifest_path.write_text(
+        json.dumps(
+            {
+                "status": "ok",
+                "registered_market_dataset_id": "policy_input_bundle__smoke",
+                "policy_input_dataset_id": "policy_input_bundle__smoke",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    class Paths:
+        job_id = "custom_lake_refresh"
+        metadata_path = tmp_path / "metadata.json"
+
+    def fail_sync(**kwargs):
+        raise AssertionError(f"custom data lake smoke must not sync active manifest: {kwargs}")
+
+    persisted: dict[str, object] = {}
+
+    def fake_update(job_paths, **kwargs):
+        persisted.update(kwargs)
+        return dict(persisted)
+
+    monkeypatch.setattr(app_service, "update_job_metadata", fake_update)
+    monkeypatch.setattr(app_service, "sync_active_manifest_to_latest_lake_dataset", fail_sync)
+
+    note, metadata = app_service._post_process_successful_task(
+        job_paths=Paths(),
+        task_name="data-platform-refresh",
+        summary_note="refresh data",
+        passthrough_args=[
+            "--data-lake-root",
+            str(custom_lake_root),
+            "--run-id",
+            "smoke_run",
+        ],
+    )
+
+    assert metadata["business_status"] == "ok"
+    assert metadata["active_manifest_update"]["status"] == "skipped"
+    assert metadata["active_manifest_update"]["reason"] == "custom_data_lake_root"
+    assert metadata["artifact_paths"]["refresh_manifest"] == str(refresh_manifest_path.resolve())
+    assert "active manifest unchanged" in note
+
+
+def test_data_refresh_custom_lake_root_without_run_id_does_not_use_latest_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from daily_research.execution import app_service
+
+    default_manifest_path = tmp_path / "default_lake" / "data_platform" / "runs" / "old" / "refresh_manifest.json"
+    default_manifest_path.parent.mkdir(parents=True)
+    default_manifest_path.write_text(
+        json.dumps(
+            {
+                "status": "ok",
+                "registered_market_dataset_id": "policy_input_bundle__old",
+                "policy_input_dataset_id": "policy_input_bundle__old",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    class Paths:
+        job_id = "custom_lake_missing_run_id"
+        metadata_path = tmp_path / "metadata.json"
+
+    monkeypatch.setattr(app_service, "_latest_refresh_manifest_path", lambda: str(default_manifest_path.resolve()))
+    monkeypatch.setattr(app_service, "update_job_metadata", lambda job_paths, **kwargs: dict(kwargs))
+    monkeypatch.setattr(
+        app_service,
+        "sync_active_manifest_to_latest_lake_dataset",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError(f"custom lake without run-id must not sync: {kwargs}")),
+    )
+
+    note, metadata = app_service._post_process_successful_task(
+        job_paths=Paths(),
+        task_name="data-platform-refresh",
+        summary_note="refresh data",
+        passthrough_args=[
+            "--data-lake-root",
+            str(tmp_path / "custom_lake_without_run_id"),
+        ],
+    )
+
+    assert "missing" in note
+    assert metadata["business_status"] == "missing"
+    assert metadata["artifact_status"] == "missing"
+    assert metadata["artifact_paths"]["refresh_manifest"] == ""
+    assert "active_manifest_update" not in metadata
+
+
 def test_data_refresh_signal_refresh_failure_marks_job_failed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from daily_research.execution import app_service
 
@@ -1497,6 +1700,82 @@ def test_blocked_refresh_manifest_marks_job_blocked(monkeypatch: pytest.MonkeyPa
     assert result["metadata"]["artifact_status"] == "blocked"
 
 
+def test_blocked_refresh_manifest_with_nonzero_exit_is_business_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from daily_research.execution import app_service
+
+    script = tmp_path / "refresh_blocked_exit2.py"
+    refresh_manifest_path = tmp_path / "refresh_run" / "refresh_manifest.json"
+    refresh_manifest_text = str(refresh_manifest_path).replace("\\", "/")
+    script.write_text(
+        "from pathlib import Path\n"
+        "import json\n"
+        "import sys\n"
+        f"manifest_path = Path({refresh_manifest_text!r})\n"
+        "manifest_path.parent.mkdir(exist_ok=True)\n"
+        "manifest_path.write_text(json.dumps({\n"
+        "    'status': 'blocked',\n"
+        "    'blockers': ['severe_source_conflict'],\n"
+        "    'registered_market_dataset_id': '',\n"
+        "}, ensure_ascii=False), encoding='utf-8')\n"
+        "print('blocked: ' + str(manifest_path), flush=True)\n"
+        "raise SystemExit(2)\n",
+        encoding="utf-8",
+    )
+
+    class FakeSpec:
+        description = "refresh data"
+        timeout_seconds = 0
+
+    def fake_create_job_record(**kwargs):
+        job_dir = tmp_path / "job"
+        job_dir.mkdir(exist_ok=True)
+
+        class Paths:
+            job_id = "refresh_blocked_exit2_job"
+            stdout_path = job_dir / "stdout.log"
+            stderr_path = job_dir / "stderr.log"
+            metadata_path = job_dir / "metadata.json"
+
+        return Paths()
+
+    monkeypatch.setattr(app_service, "get_task_spec", lambda _: FakeSpec())
+    monkeypatch.setattr(app_service, "build_task_command", lambda **_: [sys.executable, str(script)])
+    monkeypatch.setattr(app_service, "create_job_record", fake_create_job_record)
+    monkeypatch.setattr(app_service, "mark_job_started", lambda *args, **kwargs: None)
+    monkeypatch.setattr(app_service, "append_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(app_service, "_latest_refresh_manifest_path", lambda: str(refresh_manifest_path.resolve()))
+    monkeypatch.setattr(
+        app_service,
+        "sync_active_manifest_to_latest_lake_dataset",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("blocked refresh must not sync active manifest")),
+    )
+
+    class FakeLock:
+        payload = {}
+
+        def __init__(self, **_: object) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+    monkeypatch.setattr(app_service, "ExecutionAppLock", FakeLock)
+
+    result = app_service.run_task_sync(task_name="data-platform-refresh", passthrough_args=[], echo_output=False)
+
+    assert result["status"] == "blocked"
+    assert result["exit_code"] == 2
+    assert result["metadata"]["business_status"] == "blocked"
+    assert result["metadata"]["runner_status"] == "ok"
+    assert result["metadata"]["artifact_status"] == "blocked"
+
+
 def test_missing_refresh_manifest_marks_job_failed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from daily_research.execution import app_service
 
@@ -1554,6 +1833,85 @@ def test_missing_refresh_manifest_marks_job_failed(monkeypatch: pytest.MonkeyPat
     assert result["metadata"]["artifact_status"] == "missing"
 
 
+def test_failed_data_refresh_does_not_reconcile_from_old_latest_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from daily_research.execution import app_service
+
+    script = tmp_path / "refresh_failed_without_manifest.py"
+    script.write_text(
+        "import sys\n"
+        "print('refresh started')\n"
+        "print('refresh failed before manifest', file=sys.stderr)\n"
+        "raise SystemExit(1)\n",
+        encoding="utf-8",
+    )
+    old_manifest_path = tmp_path / "old_refresh" / "refresh_manifest.json"
+    old_manifest_path.parent.mkdir()
+    old_manifest_path.write_text(
+        json.dumps(
+            {
+                "status": "ok",
+                "registered_market_dataset_id": "policy_input_bundle__old",
+                "policy_input_dataset_id": "policy_input_bundle__old",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeSpec:
+        description = "refresh data"
+        timeout_seconds = 0
+
+    def fake_create_job_record(**kwargs):
+        job_dir = tmp_path / "job"
+        job_dir.mkdir(exist_ok=True)
+
+        class Paths:
+            job_id = "refresh_failed_without_manifest"
+            stdout_path = job_dir / "stdout.log"
+            stderr_path = job_dir / "stderr.log"
+            metadata_path = job_dir / "metadata.json"
+
+        return Paths()
+
+    monkeypatch.setattr(app_service, "get_task_spec", lambda _: FakeSpec())
+    monkeypatch.setattr(app_service, "build_task_command", lambda **_: [sys.executable, str(script)])
+    monkeypatch.setattr(app_service, "create_job_record", fake_create_job_record)
+    monkeypatch.setattr(app_service, "mark_job_started", lambda *args, **kwargs: None)
+    monkeypatch.setattr(app_service, "append_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(app_service, "_latest_refresh_manifest_path", lambda: str(old_manifest_path.resolve()))
+    monkeypatch.setattr(
+        app_service,
+        "sync_active_manifest_to_latest_lake_dataset",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError(f"failed refresh must not sync from old manifest: {kwargs}")),
+    )
+
+    class FakeLock:
+        payload = {}
+
+        def __init__(self, **_: object) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+    monkeypatch.setattr(app_service, "ExecutionAppLock", FakeLock)
+
+    result = app_service.run_task_sync(task_name="data-platform-refresh", passthrough_args=[], echo_output=False)
+
+    assert result["status"] == "failed"
+    assert result["exit_code"] == 1
+    assert result["metadata"]["business_status"] == "failed"
+    assert result["metadata"]["artifact_status"] == ""
+    assert "policy_input_bundle__old" not in json.dumps(result["metadata"], ensure_ascii=False)
+
+
 def test_tee_text_io_compresses_repeated_carriage_progress() -> None:
     from daily_research.execution.app_service import _TeeTextIO
 
@@ -1596,18 +1954,20 @@ def test_task_launch_strips_timeout_args(monkeypatch: pytest.MonkeyPatch, tmp_pa
     monkeypatch.setattr(app_service, "build_task_command", fake_build_task_command)
     monkeypatch.setattr(app_service, "create_job_record", fake_create_job_record)
     monkeypatch.setattr(app_service, "append_event", lambda *args, **kwargs: None)
-
-    class FakeThread:
-        def __init__(self, **kwargs) -> None:
-            self.kwargs = kwargs
-
-        def start(self) -> None:
-            return None
-
-        def is_alive(self) -> bool:
-            return False
-
-    monkeypatch.setattr(app_service.threading, "Thread", FakeThread)
+    monkeypatch.setattr(app_service, "LOCK_PATH", tmp_path / "execution_app.lock")
+    monkeypatch.setattr(app_service, "STATE_PATH", tmp_path / "runtime_state.json")
+    monkeypatch.setattr(app_service, "RUNTIME_ROOT", tmp_path)
+    monkeypatch.setattr(
+        app_service,
+        "_spawn_detached_job_worker",
+        lambda **kwargs: {
+            "worker_launcher_pid": 12345,
+            "worker_command_argv": [sys.executable, "-m", "daily_research.execution.job_worker", "--job-id", "job_without_timeout"],
+            "worker_stdout_log": str(tmp_path / "worker_stdout.log"),
+            "worker_stderr_log": str(tmp_path / "worker_stderr.log"),
+        },
+        raising=False,
+    )
 
     app_service.launch_task_async(
         task_name="data-platform-refresh",
@@ -1617,23 +1977,141 @@ def test_task_launch_strips_timeout_args(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert captured["passthrough_args"] == ["--as-of-date", "2026-05-22", "--universe", "all_a"]
 
 
-def test_run_task_sync_executes_in_current_process_without_popen(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_launch_task_async_uses_detached_worker_process(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from daily_research.execution import app_service
+
+    script = tmp_path / "noop.py"
+    script.write_text("print('noop')\n", encoding="utf-8")
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    detached_metadata_path = job_dir / "metadata.json"
+    detached_metadata_path.write_text("{}", encoding="utf-8")
+
+    class Paths:
+        job_id = "detached_job"
+        job_root = job_dir
+        stdout_path = job_dir / "stdout.log"
+        stderr_path = job_dir / "stderr.log"
+        metadata_path = detached_metadata_path
+
+    class FakeProcess:
+        pid = 24680
+
+    captured: dict[str, object] = {}
+
+    def fake_popen(command, **kwargs):
+        captured["command"] = list(command)
+        captured["kwargs"] = dict(kwargs)
+        return FakeProcess()
+
+    updates: dict[str, object] = {}
+
+    monkeypatch.setattr(app_service, "build_task_command", lambda **_: [sys.executable, str(script)])
+    monkeypatch.setattr(app_service, "create_job_record", lambda **_: Paths())
+    monkeypatch.setattr(app_service, "update_job_metadata", lambda job_paths, **kwargs: updates.update(kwargs) or dict(updates))
+    monkeypatch.setattr(app_service, "append_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(app_service, "LOCK_PATH", tmp_path / "execution_app.lock")
+    monkeypatch.setattr(app_service, "STATE_PATH", tmp_path / "runtime_state.json")
+    monkeypatch.setattr(app_service, "RUNTIME_ROOT", tmp_path)
+    monkeypatch.setattr(app_service.subprocess, "Popen", fake_popen)
+
+    result = app_service.launch_task_async(task_name="data-platform-refresh", passthrough_args=[])
+
+    command = captured["command"]
+    assert command[:3] == [sys.executable, "-m", "daily_research.execution.job_worker"]
+    assert "--job-id" in command
+    assert command[command.index("--job-id") + 1] == "detached_job"
+    assert captured["kwargs"]["cwd"] == str(app_service.WORKSPACE_ROOT)
+    assert captured["kwargs"]["env"]["PYTHONUNBUFFERED"] == "1"
+    assert updates["async_runner_mode"] == "detached_worker"
+    assert updates["worker_launcher_pid"] == 24680
+    assert result["worker_launcher_pid"] == 24680
+
+
+def test_detached_job_worker_exits_zero_for_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    from daily_research.execution import job_worker
+
+    monkeypatch.setattr(
+        job_worker.app_service,
+        "run_recorded_job_sync",
+        lambda **_: {"status": "succeeded", "exit_code": 0},
+    )
+    monkeypatch.setattr(job_worker, "append_event", lambda *args, **kwargs: None)
+
+    assert job_worker.main(["--job-id", "ok_job"]) == 0
+
+
+def test_execution_lock_allows_same_job_to_claim_launch_pending(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from daily_research.execution import app_runtime
+
+    runtime_root = tmp_path / "runtime"
+    jobs_root = runtime_root / "jobs"
+    jobs_root.mkdir(parents=True)
+    lock_path = runtime_root / "execution_app.lock"
+    state_path = runtime_root / "runtime_state.json"
+    lock_path.write_text(
+        json.dumps(
+            {
+                "job_id": "pending_job",
+                "task_name": "execution-smoke",
+                "status": "launch_pending",
+                "acquired_at": "2026-05-26T01:51:16+08:00",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    state_path.write_text(json.dumps({"lock": {"job_id": "pending_job"}, "current_job": {"job_id": "pending_job"}}), encoding="utf-8")
+
+    monkeypatch.setattr(app_runtime, "RUNTIME_ROOT", runtime_root)
+    monkeypatch.setattr(app_runtime, "JOBS_ROOT", jobs_root)
+    monkeypatch.setattr(app_runtime, "LOCK_PATH", lock_path)
+    monkeypatch.setattr(app_runtime, "STATE_PATH", state_path)
+    monkeypatch.setattr(app_runtime, "EVENTS_PATH", runtime_root / "events.jsonl")
+
+    with app_runtime.ExecutionAppLock(job_id="pending_job", task_name="execution-smoke") as lock:
+        assert lock.payload["job_id"] == "pending_job"
+        assert lock.payload["pid"] == os.getpid()
+
+
+def test_launch_task_async_rejects_existing_active_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from daily_research.execution import app_service
+
+    monkeypatch.setattr(app_service, "_has_active_runtime_job", lambda: True)
+
+    with pytest.raises(app_service.ExecutionAppLockError):
+        app_service.launch_task_async(task_name="execution-smoke", passthrough_args=[])
+
+
+def test_run_task_sync_executes_task_in_worker_subprocess(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from daily_research.execution import app_service
 
     script = tmp_path / "inline_task.py"
-    script.write_text("import sys\nprint('inline task argv=' + '|'.join(sys.argv[1:]))\n", encoding="utf-8")
+    script.write_text(
+        "import os\nimport sys\n"
+        "print('inline task argv=' + '|'.join(sys.argv[1:]))\n"
+        "print('worker pid=' + str(os.getpid()))\n",
+        encoding="utf-8",
+    )
 
     class FakeSpec:
         description = "inline task"
+        timeout_seconds = 0
 
     def fake_create_job_record(**kwargs):
         job_dir = tmp_path / "job"
         job_dir.mkdir(exist_ok=True)
+        metadata_file = job_dir / "metadata.json"
+        metadata_file.write_text("{}", encoding="utf-8")
 
         class Paths:
             job_id = "inline_job"
             stdout_path = job_dir / "stdout.log"
             stderr_path = job_dir / "stderr.log"
+            metadata_path = metadata_file
 
         return Paths()
 
@@ -1658,12 +2136,273 @@ def test_run_task_sync_executes_in_current_process_without_popen(monkeypatch: py
 
     monkeypatch.setattr(app_service, "ExecutionAppLock", FakeLock)
 
-    assert not hasattr(app_service, "subprocess")
-
     result = app_service.run_task_sync(task_name="inline", passthrough_args=["--flag", "x"], echo_output=False)
+    metadata = json.loads((tmp_path / "job" / "metadata.json").read_text(encoding="utf-8"))
 
     assert result["status"] == "succeeded"
-    assert "inline task argv=--flag|x" in (tmp_path / "job" / "stdout.log").read_text(encoding="utf-8")
+    stdout_text = (tmp_path / "job" / "stdout.log").read_text(encoding="utf-8")
+    assert "inline task argv=--flag|x" in stdout_text
+    assert metadata["runner_mode"] == "subprocess"
+    assert metadata["server_pid"] == os.getpid()
+    assert int(metadata["worker_pid"]) != os.getpid()
+
+
+def test_worker_pid_is_reflected_in_runtime_lock(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from daily_research.execution import app_service
+
+    lock_path = tmp_path / "execution_app.lock"
+    state_path = tmp_path / "runtime_state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "lock": {"job_id": "inline_job", "task_name": "inline", "pid": os.getpid()},
+                "current_job": {"job_id": "inline_job", "task_name": "inline", "status": "running"},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    lock_path.write_text(
+        json.dumps({"job_id": "inline_job", "task_name": "inline", "pid": os.getpid()}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(app_service, "LOCK_PATH", lock_path)
+    monkeypatch.setattr(app_service, "STATE_PATH", state_path)
+    monkeypatch.setattr(app_service, "EVENTS_PATH", tmp_path / "events.jsonl")
+    monkeypatch.setattr(app_service, "RUNTIME_ROOT", tmp_path)
+
+    app_service._patch_runtime_worker_payload(job_id="inline_job", worker_pid=12345)
+
+    lock_payload = json.loads(lock_path.read_text(encoding="utf-8"))
+    state_payload = json.loads(state_path.read_text(encoding="utf-8"))
+    assert lock_payload["pid"] == 12345
+    assert lock_payload["server_pid"] == os.getpid()
+    assert lock_payload["worker_pid"] == 12345
+    assert state_payload["lock"]["worker_pid"] == 12345
+    assert state_payload["current_job"]["worker_pid"] == 12345
+
+
+def test_job_detail_marks_missing_subprocess_worker_blocked(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from daily_research.execution import app_service
+
+    runtime_root = tmp_path / "runtime"
+    jobs_root = runtime_root / "jobs"
+    job_id = "lost_subprocess_job"
+    job_dir = jobs_root / job_id
+    job_dir.mkdir(parents=True)
+    stdout_path = job_dir / "stdout.log"
+    stderr_path = job_dir / "stderr.log"
+    stdout_path.write_text("stage snapshot\n", encoding="utf-8")
+    stderr_path.write_text("", encoding="utf-8")
+    (job_dir / "metadata.json").write_text(
+        json.dumps(
+            {
+                "job_id": job_id,
+                "task_name": "data-platform-refresh",
+                "status": "running",
+                "started_at": "2026-05-26T01:01:17+08:00",
+                "stdout_log": str(stdout_path),
+                "stderr_log": str(stderr_path),
+                "runner_mode": "subprocess",
+                "server_pid": 111111,
+                "worker_pid": 999999,
+                "artifact_paths": {},
+                "evidence_paths": {},
+                "runner_warnings": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    lock_path = runtime_root / "execution_app.lock"
+    state_path = runtime_root / "runtime_state.json"
+    lock_path.write_text(json.dumps({"job_id": job_id, "task_name": "data-platform-refresh", "worker_pid": 999999}), encoding="utf-8")
+    state_path.write_text(
+        json.dumps(
+            {
+                "lock": {"job_id": job_id, "task_name": "data-platform-refresh", "worker_pid": 999999},
+                "current_job": {"job_id": job_id, "task_name": "data-platform-refresh", "status": "running"},
+                "recent_jobs": [{"job_id": job_id, "task_name": "data-platform-refresh", "status": "running"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(app_service, "RUNTIME_ROOT", runtime_root)
+    monkeypatch.setattr(app_service, "JOBS_ROOT", jobs_root)
+    monkeypatch.setattr(app_service, "LOCK_PATH", lock_path)
+    monkeypatch.setattr(app_service, "STATE_PATH", state_path)
+    monkeypatch.setattr(app_service, "EVENTS_PATH", runtime_root / "events.jsonl")
+    monkeypatch.setattr(app_service, "_pid_is_running", lambda pid: False, raising=False)
+
+    payload = app_service.build_job_detail_payload(job_id, lines=10)
+
+    assert payload["status"] == "blocked"
+    assert payload["runner_status"] == "blocked"
+    assert payload["business_status"] == "blocked"
+    assert payload["can_resume"] is True
+    assert any("subprocess_worker_missing" in warning for warning in payload["runner_warnings"])
+    assert payload["stdout_tail"] == ["stage snapshot"]
+    assert not lock_path.exists()
+    state_payload = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state_payload["lock"] == {}
+    assert state_payload["current_job"] == {}
+
+
+def test_job_detail_does_not_mark_missing_child_blocked_while_detached_worker_is_alive(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from daily_research.execution import app_service
+
+    runtime_root = tmp_path / "runtime"
+    jobs_root = runtime_root / "jobs"
+    job_id = "post_processing_detached_job"
+    job_dir = jobs_root / job_id
+    job_dir.mkdir(parents=True)
+    stdout_path = job_dir / "stdout.log"
+    stderr_path = job_dir / "stderr.log"
+    stdout_path.write_text("task child completed\n", encoding="utf-8")
+    stderr_path.write_text("", encoding="utf-8")
+    (job_dir / "metadata.json").write_text(
+        json.dumps(
+            {
+                "job_id": job_id,
+                "task_name": "data-platform-refresh",
+                "status": "running",
+                "stdout_log": str(stdout_path),
+                "stderr_log": str(stderr_path),
+                "async_runner_mode": "detached_worker",
+                "worker_launcher_pid": 222222,
+                "runner_mode": "subprocess",
+                "worker_pid": 333333,
+                "runner_warnings": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    lock_path = runtime_root / "execution_app.lock"
+    state_path = runtime_root / "runtime_state.json"
+    lock_path.write_text(
+        json.dumps(
+            {
+                "job_id": job_id,
+                "task_name": "data-platform-refresh",
+                "worker_launcher_pid": 222222,
+                "worker_pid": 333333,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    state_path.write_text(
+        json.dumps(
+            {
+                "lock": {"job_id": job_id, "task_name": "data-platform-refresh"},
+                "current_job": {"job_id": job_id, "task_name": "data-platform-refresh", "status": "running"},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(app_service, "RUNTIME_ROOT", runtime_root)
+    monkeypatch.setattr(app_service, "JOBS_ROOT", jobs_root)
+    monkeypatch.setattr(app_service, "LOCK_PATH", lock_path)
+    monkeypatch.setattr(app_service, "STATE_PATH", state_path)
+    monkeypatch.setattr(app_service, "EVENTS_PATH", runtime_root / "events.jsonl")
+    monkeypatch.setattr(app_service, "_pid_is_running", lambda pid: int(pid) == 222222, raising=False)
+
+    payload = app_service.build_job_detail_payload(job_id, lines=10)
+
+    assert payload["status"] == "running"
+    assert payload["runner_warnings"] == []
+    assert lock_path.exists()
+
+
+def test_subprocess_runner_times_out_and_marks_warning(tmp_path: Path) -> None:
+    from daily_research.execution import app_service
+
+    script = tmp_path / "sleep_task.py"
+    script.write_text(
+        "import time\nprint('before sleep', flush=True)\ntime.sleep(5)\nprint('after sleep', flush=True)\n",
+        encoding="utf-8",
+    )
+    metadata_file = tmp_path / "metadata.json"
+    metadata_file.write_text("{}", encoding="utf-8")
+
+    class Paths:
+        job_id = "timeout_job"
+        metadata_path = metadata_file
+
+    warnings_seen: list[str] = []
+    with (tmp_path / "stdout.log").open("w", encoding="utf-8") as stdout_handle:
+        with (tmp_path / "stderr.log").open("w", encoding="utf-8") as stderr_handle:
+            exit_code = app_service._run_command_in_subprocess(
+                command=[sys.executable, str(script)],
+                stdout_handle=stdout_handle,
+                stderr_handle=stderr_handle,
+                console_stdout=None,
+                console_stderr=None,
+                job_paths=Paths(),
+                runner_warnings=warnings_seen,
+                timeout_seconds=1,
+            )
+
+    assert exit_code == app_service.RUNNER_TIMEOUT_EXIT_CODE
+    assert any("runner_timeout" in item for item in warnings_seen)
+    assert "before sleep" in (tmp_path / "stdout.log").read_text(encoding="utf-8")
+    assert "after sleep" not in (tmp_path / "stdout.log").read_text(encoding="utf-8")
+
+
+def test_subprocess_runner_streams_unflushed_python_output_before_exit(tmp_path: Path) -> None:
+    from daily_research.execution import app_service
+
+    script = tmp_path / "unflushed_sleep_task.py"
+    script.write_text(
+        "import time\nprint('unflushed before sleep')\ntime.sleep(5)\nprint('unflushed after sleep')\n",
+        encoding="utf-8",
+    )
+    metadata_file = tmp_path / "metadata.json"
+    metadata_file.write_text("{}", encoding="utf-8")
+
+    class Paths:
+        job_id = "unflushed_timeout_job"
+        metadata_path = metadata_file
+
+    warnings_seen: list[str] = []
+    with (tmp_path / "stdout.log").open("w", encoding="utf-8") as stdout_handle:
+        with (tmp_path / "stderr.log").open("w", encoding="utf-8") as stderr_handle:
+            exit_code = app_service._run_command_in_subprocess(
+                command=[sys.executable, str(script)],
+                stdout_handle=stdout_handle,
+                stderr_handle=stderr_handle,
+                console_stdout=None,
+                console_stderr=None,
+                job_paths=Paths(),
+                runner_warnings=warnings_seen,
+                timeout_seconds=1,
+            )
+
+    stdout_text = (tmp_path / "stdout.log").read_text(encoding="utf-8")
+    assert exit_code == app_service.RUNNER_TIMEOUT_EXIT_CODE
+    assert "unflushed before sleep" in stdout_text
+    assert "unflushed after sleep" not in stdout_text
+
+
+def test_panel_row_count_closes_file_handle(tmp_path: Path) -> None:
+    from daily_research.execution import production_signal
+
+    path = tmp_path / "panel.csv"
+    path.write_text("date,score\n2026-05-22,1\n2026-05-25,2\n", encoding="utf-8")
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", ResourceWarning)
+        assert production_signal.panel_row_count(path) == 2
+        gc.collect()
 
 
 def test_status_payload_omits_continuous_policy() -> None:

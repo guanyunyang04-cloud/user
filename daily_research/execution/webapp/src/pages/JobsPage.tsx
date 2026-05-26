@@ -78,42 +78,49 @@ export function JobsPage({ api, pollMs = 5000, selectedJobId = "" }: JobsPagePro
   }, [api, pollMs]);
 
   useEffect(() => {
-    let disposed = false;
     setSelectedId(selectedJobId);
   }, [selectedJobId]);
 
   useEffect(() => {
     let disposed = false;
-    if (!selectedId) {
-      setJobDetail(null);
-      setDetailError("");
-      return () => {
-        disposed = true;
-      };
+    let timer: number | undefined;
+    const run = (): void => {
+      if (!selectedId) {
+        setJobDetail(null);
+        setDetailError("");
+        return;
+      }
+      api
+        .getJob(selectedId, 200)
+        .then((next) => {
+          if (!disposed) {
+            setJobDetail(next);
+            setDetailError("");
+          }
+        })
+        .catch((err: Error) => {
+          if (!disposed) {
+            setDetailError(err.message);
+          }
+        })
+        .finally(() => {
+          if (!disposed) {
+            setDetailLoading(false);
+            timer = window.setTimeout(run, pollMs);
+          }
+        });
+    };
+    if (selectedId) {
+      setDetailLoading(true);
     }
-    setDetailLoading(true);
-    api
-      .getJob(selectedId, 200)
-      .then((next) => {
-        if (!disposed) {
-          setJobDetail(next);
-          setDetailError("");
-        }
-      })
-      .catch((err: Error) => {
-        if (!disposed) {
-          setDetailError(err.message);
-        }
-      })
-      .finally(() => {
-        if (!disposed) {
-          setDetailLoading(false);
-        }
-      });
+    run();
     return () => {
       disposed = true;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
     };
-  }, [api, selectedId]);
+  }, [api, selectedId, pollMs]);
 
   return (
     <div>

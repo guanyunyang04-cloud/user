@@ -374,6 +374,15 @@ def _lock_payload_is_stale(payload: dict[str, Any]) -> bool:
     return status in {"succeeded", "failed", "blocked", "abandoned", "skipped"}
 
 
+def _lock_payload_is_launch_pending_for_job(payload: dict[str, Any], *, job_id: str) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    return (
+        str(payload.get("status", "") or "").strip().lower() == "launch_pending"
+        and str(payload.get("job_id", "") or "").strip() == str(job_id or "").strip()
+    )
+
+
 class ExecutionAppLock(AbstractContextManager["ExecutionAppLock"]):
     def __init__(self, *, job_id: str, task_name: str, force: bool = False) -> None:
         self.job_id = str(job_id)
@@ -385,7 +394,8 @@ class ExecutionAppLock(AbstractContextManager["ExecutionAppLock"]):
         ensure_runtime_layout()
         if LOCK_PATH.exists():
             existing = read_json_file(LOCK_PATH)
-            if not self.force and not _lock_payload_is_stale(existing):
+            launch_pending_for_this_job = _lock_payload_is_launch_pending_for_job(existing, job_id=self.job_id)
+            if not self.force and not launch_pending_for_this_job and not _lock_payload_is_stale(existing):
                 raise ExecutionAppLockError(
                     "Execution app lock is already held. "
                     f"job_id={existing.get('job_id', '')} task_name={existing.get('task_name', '')} "

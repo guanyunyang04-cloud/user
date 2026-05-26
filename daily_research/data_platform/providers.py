@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import multiprocessing
+import queue as queue_module
 from dataclasses import dataclass
 from typing import Any
 
@@ -318,27 +320,16 @@ class BaostockProvider:
                     adjusted_flag=request.adjusted_flag,
                 )
             )
-        try:
-            import baostock as bs  # type: ignore
-        except Exception as exc:
-            raise RuntimeError("baostock is not installed in the yolos environment") from exc
-        login = bs.login()
-        if getattr(login, "error_code", "1") != "0":
-            raise RuntimeError(f"baostock login failed: {getattr(login, 'error_msg', '')}")
-        try:
-            if request.domain == DataDomain.TRADING_CALENDAR:
-                query = bs.query_trade_dates(start_date=request.start_date, end_date=request.end_date)
-                rows: list[list[Any]] = []
-                while getattr(query, "error_code", "1") == "0" and query.next():
-                    rows.append(query.get_row_data())
-                frame = pd.DataFrame(rows, columns=["trade_date", "is_open"])
-                frame["exchange"] = request.exchange
-            elif request.domain in {DataDomain.UNIVERSE_SNAPSHOT, DataDomain.SECURITY_STATUS}:
-                frame = _baostock_stock_basic_frame(bs.query_stock_basic(), trade_date=request.end_date)
-            else:
-                raise RuntimeError(f"unsupported_domain: {self.name} does not support {request.domain}")
-        finally:
-            bs.logout()
+        if request.domain == DataDomain.TRADING_CALENDAR:
+            frame = _fetch_baostock_trade_calendar_frame_with_timeout(
+                start_date=request.start_date,
+                end_date=request.end_date,
+                exchange=request.exchange,
+            )
+        elif request.domain in {DataDomain.UNIVERSE_SNAPSHOT, DataDomain.SECURITY_STATUS}:
+            frame = _fetch_baostock_stock_basic_frame_with_timeout(trade_date=request.end_date)
+        else:
+            raise RuntimeError(f"unsupported_domain: {self.name} does not support {request.domain}")
         data = normalize_domain_frame(frame, domain=request.domain, source=self.name, as_of_date=request.end_date, require_columns=False)
         return ProviderResult(provider=self.name, data=data)
 
@@ -587,6 +578,106 @@ def _from_baostock_code(value: Any) -> str:
     if raw.startswith("bj."):
         return f"{raw[3:].upper()}.BJ"
     return str(value or "").strip().upper()
+
+
+def _baostock_stock_basic_worker(queue: Any, trade_date: str) -> None:
+    try:
+        import baostock as bs  # type: ignore
+
+        login = bs.login()
+        if getattr(login, "error_code", "1") != "0":
+            queue.put({"status": "error", "error_type": "RuntimeError", "error": f"baostock login failed: {getattr(login, 'error_msg', '')}"})
+            return
+        try:
+            frame = _baostock_stock_basic_frame(bs.query_stock_basic(), trade_date=trade_date)
+        finally:
+            bs.logout()
+        queue.put({"status": "ok", "data": frame})
+    except Exception as exc:
+        queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
+
+
+def _baostock_trade_calendar_worker(queue: Any, start_date: str, end_date: str, exchange: str) -> None:
+    try:
+        import baostock as bs  # type: ignore
+
+        login = bs.login()
+        if getattr(login, "error_code", "1") != "0":
+            queue.put({"status": "error", "error_type": "RuntimeError", "error": f"baostock login failed: {getattr(login, 'error_msg', '')}"})
+            return
+        try:
+            query = bs.query_trade_dates(start_date=start_date, end_date=end_date)
+            rows: list[list[Any]] = []
+            while getattr(query, "error_code", "1") == "0" and query.next():
+                rows.append(query.get_row_data())
+            frame = pd.DataFrame(rows, columns=["trade_date", "is_open"])
+            frame["exchange"] = exchange
+        finally:
+            bs.logout()
+        queue.put({"status": "ok", "data": frame})
+    except Exception as exc:
+        queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
+
+
+def _fetch_baostock_payload_with_timeout(
+    *,
+    target: Any,
+    kwargs: dict[str, Any],
+    timeout_seconds: int = 60,
+    timeout_label: str,
+    failure_label: str,
+) -> pd.DataFrame:
+    timeout = max(float(timeout_seconds or 0), 1.0)
+    context = multiprocessing.get_context("spawn")
+    payload_queue = context.Queue()
+    process = context.Process(
+        target=target,
+        kwargs={"queue": payload_queue, **kwargs},
+    )
+    process.start()
+    process.join(timeout)
+    if process.is_alive():
+        process.terminate()
+        process.join(5)
+        raise TimeoutError(f"{timeout_label}: exceeded {int(timeout)} seconds")
+    try:
+        payload = payload_queue.get(timeout=1.0)
+    except queue_module.Empty:
+        if process.exitcode not in {0, None}:
+            raise RuntimeError(f"{failure_label}_worker_failed: exitcode={process.exitcode}")
+        raise RuntimeError(f"{failure_label}_worker_returned_no_payload")
+    if not isinstance(payload, dict) or payload.get("status") != "ok":
+        error_type = str(payload.get("error_type", "RuntimeError")) if isinstance(payload, dict) else "RuntimeError"
+        error = str(payload.get("error", payload) if isinstance(payload, dict) else payload)
+        raise RuntimeError(f"{failure_label}_worker_error:{error_type}: {error}")
+    data = payload.get("data")
+    return data.copy() if isinstance(data, pd.DataFrame) else pd.DataFrame()
+
+
+def _fetch_baostock_stock_basic_frame_with_timeout(*, trade_date: str, timeout_seconds: int = 60) -> pd.DataFrame:
+    return _fetch_baostock_payload_with_timeout(
+        target=_baostock_stock_basic_worker,
+        kwargs={"trade_date": str(trade_date)},
+        timeout_seconds=timeout_seconds,
+        timeout_label="baostock_stock_basic_timeout",
+        failure_label="baostock_stock_basic",
+    )
+
+
+def _fetch_baostock_trade_calendar_frame_with_timeout(
+    *,
+    start_date: str,
+    end_date: str,
+    exchange: str,
+    timeout_seconds: int = 60,
+) -> pd.DataFrame:
+    return _fetch_baostock_payload_with_timeout(
+        target=_baostock_trade_calendar_worker,
+        kwargs={"start_date": str(start_date), "end_date": str(end_date), "exchange": str(exchange or "SSE")},
+        timeout_seconds=timeout_seconds,
+        timeout_label="baostock_trade_calendar_timeout",
+        failure_label="baostock_trade_calendar",
+    )
 
 
 def _baostock_stock_basic_frame(query: Any, *, trade_date: str) -> pd.DataFrame:

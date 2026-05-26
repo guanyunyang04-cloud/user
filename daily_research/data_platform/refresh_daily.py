@@ -26,6 +26,7 @@ from daily_research.data_platform.contracts import (
     next_business_date,
     normalize_domain,
     normalize_domain_frame,
+    ProviderResult,
     trading_dates_from_calendar,
 )
 from daily_research.data_platform.manager import ProviderManager
@@ -79,6 +80,27 @@ class _PolicyInputBundleFrames:
     end_date: str
     source_market_dataset_id: str = ""
     source_market_dataset_end_date: str = ""
+
+
+@dataclass(frozen=True)
+class _UniverseResolution:
+    symbols: tuple[str, ...]
+    frame: pd.DataFrame
+    status: str
+    source: str
+    source_dataset_id: str = ""
+    source_end_date: str = ""
+    provider_error_summary: str = ""
+
+    def manifest_payload(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "source": self.source,
+            "source_dataset_id": self.source_dataset_id,
+            "source_end_date": self.source_end_date,
+            "symbol_count": int(len(self.symbols)),
+            "provider_error_summary": self.provider_error_summary,
+        }
 
 
 def run_refresh(config: RefreshConfig, *, providers: Iterable[Any] | None = None) -> RefreshResult:
@@ -139,12 +161,42 @@ def run_refresh(config: RefreshConfig, *, providers: Iterable[Any] | None = None
         else:
             progress.start_stage(2, "Resolve explicit symbols", f"symbols={len(resolved.symbols)}")
             progress.complete_stage()
-        request_symbols = _resolve_request_symbols(
+        universe_resolution = _resolve_request_symbols(
             lake=lake,
             config=resolved,
             universe_frame=universe_result.data if universe_result is not None else pd.DataFrame(),
             universe_error_report=universe_result.error_report if universe_result is not None else [],
         )
+        request_symbols = universe_resolution.symbols
+        if (
+            universe_result is not None
+            and universe_resolution.status == "fallback"
+            and not universe_resolution.frame.empty
+        ):
+            universe_result = ProviderResult(
+                provider=universe_resolution.source,
+                data=universe_resolution.frame,
+                coverage_report={
+                    "status": "ok",
+                    "domain": DataDomain.UNIVERSE_SNAPSHOT,
+                    "row_count": int(len(universe_resolution.frame)),
+                    "symbol_count": int(universe_resolution.frame["symbol"].nunique()) if "symbol" in universe_resolution.frame.columns else 0,
+                    "trade_date_count": int(universe_resolution.frame["trade_date"].nunique()) if "trade_date" in universe_resolution.frame.columns else 0,
+                    "expected_rows": int(len(universe_resolution.frame)),
+                    "coverage_ratio": 1.0,
+                    "fallback_source": universe_resolution.source,
+                    "fallback_source_dataset_id": universe_resolution.source_dataset_id,
+                    "fallback_source_date": universe_resolution.source_end_date,
+                    "fallback_reason": "provider_universe_snapshot_empty",
+                },
+                error_report=list(universe_result.error_report or []),
+            )
+            prefetch_results[DataDomain.UNIVERSE_SNAPSHOT] = universe_result
+        if universe_result is not None and DataDomain.SECURITY_STATUS in domains:
+            prefetch_results[DataDomain.SECURITY_STATUS] = _derive_security_status_from_universe_result(
+                universe_result=universe_result,
+                as_of_date=resolved.as_of_date,
+            )
         progress_write(f"resolved_symbols={len(request_symbols)}")
         covering_bundle = _find_base_policy_input_bundle(
             lake=lake,
@@ -248,6 +300,7 @@ def run_refresh(config: RefreshConfig, *, providers: Iterable[Any] | None = None
                 canonical.to_parquet(domain_silver_path, index=False)
                 conflict_report.to_parquet(domain_conflict_path, index=False)
                 coverage = _domain_coverage_report(canonical, domain_request, calendar=calendar_frame)
+                coverage.update(_domain_coverage_metadata(provider_result.coverage_report))
                 domain_outputs[domain] = {
                     "provider_result": provider_result,
                     "bronze_paths": domain_bronze_paths,
@@ -339,6 +392,7 @@ def run_refresh(config: RefreshConfig, *, providers: Iterable[Any] | None = None
                 "adjusted_flag": resolved.adjusted_flag,
                 "requested_symbols": list(request.symbols),
                 "refresh_universe_key": _universe_key(request.symbols),
+                "universe_resolution": universe_resolution.manifest_payload(),
                 "calendar_source": "provider" if not calendar_frame.empty else "business_day_fallback",
                 "bronze_paths": bronze_paths,
                 "domain_outputs": {
@@ -396,6 +450,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--required-domains", default=DataDomain.MARKET_DAILY)
     parser.add_argument("--benchmark", default="000300.SH")
     parser.add_argument("--data-lake-root", default="")
+    parser.add_argument("--run-id", default="")
     parser.add_argument("--adjusted-flag", default="none")
     parser.add_argument("--min-coverage-ratio", type=float, default=0.80)
     parser.add_argument("--conflict-tolerance-pct", type=float, default=0.005)
@@ -424,6 +479,7 @@ def main(argv: list[str] | None = None) -> int:
             min_coverage_ratio=float(args.min_coverage_ratio),
             conflict_tolerance_pct=float(args.conflict_tolerance_pct),
             severe_conflict_limit=int(args.severe_conflict_limit),
+            run_id=str(args.run_id or ""),
         )
     )
     payload = {
@@ -618,37 +674,161 @@ def _resolve_request_symbols(
     config: RefreshConfig,
     universe_frame: pd.DataFrame,
     universe_error_report: Iterable[dict[str, Any]] | None = None,
-) -> tuple[str, ...]:
+) -> _UniverseResolution:
     if config.symbols:
-        return _request_symbols(config)
+        symbols = _request_symbols(config)
+        return _UniverseResolution(
+            symbols=symbols,
+            frame=pd.DataFrame(),
+            status="explicit",
+            source="explicit_symbols",
+        )
     mode = _universe_mode(config)
     benchmark = str(config.benchmark or "").strip().upper()
     symbols: list[str] = []
+    frame = pd.DataFrame()
+    status = "provider"
+    source = mode
+    source_dataset_id = ""
+    source_end_date = ""
+    provider_error_summary = ""
     if mode == "all_a":
         if universe_frame is None or universe_frame.empty or "symbol" not in universe_frame.columns:
-            detail = _format_provider_errors(universe_error_report or [])
-            suffix = f"; provider_errors={detail}" if detail else ""
-            raise ValueError(f"universe=all_a requires a non-empty universe_snapshot provider result{suffix}")
-        statuses = universe_frame["list_status"].fillna("").astype(str).str.upper() if "list_status" in universe_frame.columns else pd.Series(["L"] * len(universe_frame))
-        symbols = [str(item).strip().upper() for item in universe_frame.loc[statuses.isin({"", "L", "LIST", "上市"}), "symbol"] if str(item).strip()]
+            provider_error_summary = _format_provider_errors(universe_error_report or [])
+            fallback = _latest_universe_snapshot_before(lake=lake, as_of_date=config.as_of_date)
+            if fallback is None:
+                suffix = f"; provider_errors={provider_error_summary}" if provider_error_summary else ""
+                raise ValueError(f"universe=all_a requires a non-empty universe_snapshot provider result{suffix}")
+            frame = fallback["frame"]
+            status = "fallback"
+            source = "lake_universe_snapshot"
+            source_dataset_id = str(fallback.get("dataset_id", "") or "")
+            source_end_date = str(fallback.get("end_date", "") or "")
+        else:
+            frame = universe_frame
+            source = "provider_universe_snapshot"
+            source_end_date = str(frame["trade_date"].max()) if "trade_date" in frame.columns and not frame.empty else config.as_of_date
+        statuses = frame["list_status"].fillna("").astype(str).str.upper() if "list_status" in frame.columns else pd.Series(["L"] * len(frame))
+        symbols = [str(item).strip().upper() for item in frame.loc[statuses.isin({"", "L", "LIST", "上市"}), "symbol"] if str(item).strip()]
     elif mode == "liquid500":
         symbols = _resolve_liquid_universe_from_lake(lake=lake, benchmark=benchmark, limit=500)
+        status = "lake"
+        source = "lake_liquid500"
     elif mode == "file":
         path = Path(str(config.universe).split(":", 1)[1]).expanduser()
         if not path.exists():
             raise ValueError(f"universe file does not exist: {path}")
         text = path.read_text(encoding="utf-8")
         symbols = [item.strip().upper() for item in text.replace("\n", ",").split(",") if item.strip()]
+        status = "file"
+        source = str(path)
     elif mode == "symbols_inline":
         symbols = [item.strip().upper() for item in str(config.universe).split(":", 1)[1].split(",") if item.strip()]
+        status = "explicit"
+        source = "inline_symbols"
     else:
         raise ValueError(f"unsupported universe: {config.universe}")
-    return FetchRequest(
+    normalized_symbols = FetchRequest(
         symbols=tuple(dict.fromkeys([*symbols, benchmark])),
         start_date=config.start_date,
         end_date=config.as_of_date,
         adjusted_flag=config.adjusted_flag,
     ).normalized().symbols
+    return _UniverseResolution(
+        symbols=normalized_symbols,
+        frame=frame,
+        status=status,
+        source=source,
+        source_dataset_id=source_dataset_id,
+        source_end_date=source_end_date,
+        provider_error_summary=provider_error_summary,
+    )
+
+
+def _latest_universe_snapshot_before(*, lake: ResearchDataLake, as_of_date: str) -> dict[str, Any] | None:
+    try:
+        rows = lake.list_datasets(dataset_kind=f"data_platform_{DataDomain.UNIVERSE_SNAPSHOT}")
+    except Exception:
+        return None
+    if rows.empty:
+        return None
+    candidates: list[tuple[pd.Timestamp, str, pd.DataFrame]] = []
+    for _, row in rows.iterrows():
+        dataset_id = str(row.get("dataset_id", "") or "")
+        try:
+            metadata = lake.describe_dataset(dataset_id)
+        except Exception:
+            continue
+        end_date = str(metadata.get("end_date", "") or dict(metadata.get("parameters", {}) or {}).get("end_date", "") or "")
+        if not end_date or pd.Timestamp(end_date) >= pd.Timestamp(as_of_date):
+            continue
+        path = str(dict(metadata.get("content_paths", {}) or {}).get("silver_domain_data", "") or "")
+        if not path or not Path(path).exists():
+            continue
+        try:
+            frame = pd.read_parquet(path)
+        except Exception:
+            continue
+        frame = normalize_domain_frame(
+            frame,
+            domain=DataDomain.UNIVERSE_SNAPSHOT,
+            source="lake_universe_snapshot",
+            as_of_date=end_date,
+            require_columns=False,
+        )
+        if frame.empty or "symbol" not in frame.columns:
+            continue
+        candidates.append((pd.Timestamp(end_date), dataset_id, frame))
+    if candidates:
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        end_ts, dataset_id, frame = candidates[-1]
+        return {
+            "dataset_id": dataset_id,
+            "end_date": end_ts.strftime("%Y-%m-%d"),
+            "frame": frame,
+        }
+    return _latest_universe_from_policy_input_before(lake=lake, as_of_date=as_of_date)
+
+
+def _latest_universe_from_policy_input_before(*, lake: ResearchDataLake, as_of_date: str) -> dict[str, Any] | None:
+    metadata = _latest_policy_input_bundle_before(lake=lake, as_of_date=as_of_date)
+    if metadata is None:
+        return None
+    end_date = str(metadata.get("end_date", "") or dict(metadata.get("parameters", {}) or {}).get("end_date", "") or "")
+    market_path = str(dict(metadata.get("content_paths", {}) or {}).get("bronze_market_data", "") or "")
+    if not end_date or not market_path or not Path(market_path).exists():
+        return None
+    try:
+        market = pd.read_parquet(market_path, columns=["symbol"])
+    except Exception:
+        return None
+    symbols = [str(item).strip().upper() for item in market["symbol"].dropna().unique() if str(item).strip()]
+    if not symbols:
+        return None
+    frame = pd.DataFrame(
+        {
+            "symbol": symbols,
+            "trade_date": [end_date] * len(symbols),
+            "name": [""] * len(symbols),
+            "exchange": [item.rsplit(".", 1)[-1] if "." in item else "" for item in symbols],
+            "board": [""] * len(symbols),
+            "list_status": ["L"] * len(symbols),
+            "list_date": [""] * len(symbols),
+            "delist_date": [""] * len(symbols),
+            "source": ["lake_policy_input_bundle"] * len(symbols),
+        }
+    )
+    return {
+        "dataset_id": str(metadata.get("dataset_id", "") or ""),
+        "end_date": end_date,
+        "frame": normalize_domain_frame(
+            frame,
+            domain=DataDomain.UNIVERSE_SNAPSHOT,
+            source="lake_policy_input_bundle",
+            as_of_date=end_date,
+            require_columns=False,
+        ),
+    }
 
 
 def _format_provider_errors(error_report: Iterable[dict[str, Any]]) -> str:
@@ -714,6 +894,56 @@ def _domain_request(
     ).normalized()
 
 
+def _derive_security_status_from_universe_result(*, universe_result: ProviderResult, as_of_date: str) -> ProviderResult:
+    universe = normalize_domain_frame(
+        universe_result.data,
+        domain=DataDomain.UNIVERSE_SNAPSHOT,
+        source=str(universe_result.provider or "provider_manager"),
+        as_of_date=as_of_date,
+        require_columns=False,
+    )
+    if universe.empty:
+        status_frame = pd.DataFrame()
+    else:
+        name_upper = universe["name"].fillna("").astype(str).str.upper() if "name" in universe.columns else pd.Series("", index=universe.index)
+        list_status = universe["list_status"].fillna("").astype(str).str.upper() if "list_status" in universe.columns else pd.Series("", index=universe.index)
+        status_frame = pd.DataFrame(
+            {
+                "symbol": universe["symbol"].astype(str),
+                "trade_date": as_of_date,
+                "is_st": name_upper.str.startswith(("ST", "*ST")),
+                "is_suspended": False,
+                "is_delisted": list_status.isin({"D", "DELIST", "0", "退市"}),
+                "status_reason": universe["list_status"].fillna("").astype(str) if "list_status" in universe.columns else "",
+                "source": "universe_snapshot_derived",
+            }
+        )
+    normalized = normalize_domain_frame(
+        status_frame,
+        domain=DataDomain.SECURITY_STATUS,
+        source="universe_snapshot_derived",
+        as_of_date=as_of_date,
+        require_columns=False,
+    )
+    report_request = DomainFetchRequest(
+        domain=DataDomain.SECURITY_STATUS,
+        symbols=tuple(normalized["symbol"].dropna().astype(str).unique()) if not normalized.empty else (),
+        start_date=as_of_date,
+        end_date=as_of_date,
+    )
+    coverage = coverage_report_for_domain(normalized, report_request, provider="universe_snapshot_derived")
+    return ProviderResult(
+        provider="universe_snapshot_derived",
+        data=normalized,
+        coverage_report={
+            **coverage,
+            "derivation_source_domain": DataDomain.UNIVERSE_SNAPSHOT,
+            "derivation_note": "derived from the same stock-basic universe snapshot to avoid duplicate baostock query_stock_basic calls",
+        },
+        error_report=list(universe_result.error_report or []),
+    )
+
+
 def _write_bronze(data: pd.DataFrame, bronze_root: Path, provider_chain: list[str]) -> dict[str, str]:
     paths: dict[str, str] = {}
     for provider in provider_chain:
@@ -729,7 +959,8 @@ def _write_bronze_domain(data: pd.DataFrame, bronze_root: Path, provider_chain: 
     bronze_root.mkdir(parents=True, exist_ok=True)
     paths: dict[str, str] = {}
     columns = data.columns if not data.empty else []
-    for provider in provider_chain:
+    providers = list(dict.fromkeys([*provider_chain, *_data_sources(data)]))
+    for provider in providers:
         safe = _safe_name(provider)
         path = bronze_root / f"{safe}.parquet"
         if not data.empty and "source" in data.columns:
@@ -739,6 +970,12 @@ def _write_bronze_domain(data: pd.DataFrame, bronze_root: Path, provider_chain: 
         subset.to_parquet(path, index=False)
         paths[str(provider)] = str(path.resolve())
     return paths
+
+
+def _data_sources(data: pd.DataFrame) -> list[str]:
+    if data is None or data.empty or "source" not in data.columns:
+        return []
+    return [str(item).strip() for item in data["source"].dropna().astype(str).unique() if str(item).strip()]
 
 
 def _build_silver_domain(
@@ -907,6 +1144,16 @@ def _domain_coverage_report(canonical: pd.DataFrame, request: DomainFetchRequest
         report["expected_rows"] = expected_rows
         report["coverage_ratio"] = float(int(report.get("row_count", 0) or 0) / expected_rows) if expected_rows else 0.0
     return report
+
+
+def _domain_coverage_metadata(coverage_report: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(coverage_report, dict):
+        return {}
+    return {
+        str(key): value
+        for key, value in coverage_report.items()
+        if str(key).startswith(("derivation_", "fallback_"))
+    }
 
 
 def _refresh_blockers(

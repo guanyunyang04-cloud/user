@@ -43,8 +43,68 @@ function hasRunningJob(status?: StatusPayload | null, jobs: JobSummary[] = []): 
   return jobs.some((job) => ["queued", "running"].includes(String(job.status || "").toLowerCase()));
 }
 
-function hasMissingExecutionOpen(paperAccount?: PaperAccountPayload | null): boolean {
-  return (paperAccount?.pending_orders || []).some((order) => String(order.reason || "").includes("missing_execution_open"));
+function isPendingLikeOrder(order: TableRow): boolean {
+  const status = String(order.status || "").toLowerCase();
+  return !status || status === "pending" || status === "partial";
+}
+
+function isFutureOrder(order: TableRow, latestCompletedDate: string): boolean {
+  const executionDate = normalizeDateText(order.execution_date);
+  return Boolean(executionDate && latestCompletedDate && executionDate > latestCompletedDate);
+}
+
+function isActionablePendingOrder(order: TableRow, latestCompletedDate: string): boolean {
+  if (!isPendingLikeOrder(order)) {
+    return false;
+  }
+  const executionDate = normalizeDateText(order.execution_date);
+  if (!executionDate || !latestCompletedDate) {
+    return true;
+  }
+  return executionDate <= latestCompletedDate;
+}
+
+function pendingPaperOrderCounts(paperAccount: PaperAccountPayload | null | undefined, latestCompletedDate: string): {
+  actionable: number;
+  future: number;
+  total: number;
+} {
+  const reportedTotal = Number(paperAccount?.pending_order_count || 0);
+  const detailedOrders = paperAccount?.pending_orders || [];
+  if (!detailedOrders.length) {
+    return { actionable: reportedTotal, future: 0, total: reportedTotal };
+  }
+  const pendingLikeOrders = detailedOrders.filter(isPendingLikeOrder);
+  const future = pendingLikeOrders.filter((order) => isFutureOrder(order, latestCompletedDate)).length;
+  const actionable = pendingLikeOrders.filter((order) => isActionablePendingOrder(order, latestCompletedDate)).length;
+  return { actionable, future, total: reportedTotal || pendingLikeOrders.length };
+}
+
+function hasMissingExecutionOpen(paperAccount: PaperAccountPayload | null | undefined, latestCompletedDate: string): boolean {
+  return (paperAccount?.pending_orders || [])
+    .filter((order) => isActionablePendingOrder(order, latestCompletedDate))
+    .some((order) => String(order.reason || "").includes("missing_execution_open"));
+}
+
+function normalizeDateText(value: unknown): string {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const match = raw.match(/\d{4}[-/]?\d{2}[-/]?\d{2}/);
+  if (!match) {
+    return raw.slice(0, 10);
+  }
+  return match[0].replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3").replace(/\//g, "-");
+}
+
+function dateCovers(left: unknown, right: unknown): boolean {
+  const leftDate = normalizeDateText(left);
+  const rightDate = normalizeDateText(right);
+  if (!leftDate || !rightDate) {
+    return false;
+  }
+  return leftDate >= rightDate;
 }
 
 export function deriveGuideState({
@@ -58,11 +118,20 @@ export function deriveGuideState({
   const dataNeedsRefresh = dataSources?.next_refresh_action !== "skip";
   const signalNeedsRefresh = dataSources?.next_signal_action === "refresh";
   const tradePlanReady = tradePlan?.status === "ok" && tradePlan.exists !== false;
-  const pendingPaperOrders = Number(paperAccount?.pending_order_count || 0) > 0;
-  const missingExecutionOpen = hasMissingExecutionOpen(paperAccount);
+  const requiredTradePlanSignalDate = normalizeDateText(
+    dataSources?.signal_panel_latest_date || dataSources?.data_platform?.latest_completed_trading_date
+  );
+  const tradePlanSignalDate = normalizeDateText(tradePlan?.summary?.signal_date || tradePlan?.model_info?.signal_date);
+  const tradePlanFresh = Boolean(tradePlanReady && dateCovers(tradePlanSignalDate, requiredTradePlanSignalDate));
+  const paperOrderCounts = pendingPaperOrderCounts(paperAccount, requiredTradePlanSignalDate);
+  const pendingPaperOrders = paperOrderCounts.actionable > 0;
+  const missingExecutionOpen = hasMissingExecutionOpen(paperAccount, requiredTradePlanSignalDate);
+  const paperOrderDetail = paperOrderCounts.future
+    ? `${paperOrderCounts.actionable} 个待过账 / ${paperOrderCounts.future} 个未来执行订单`
+    : `${paperOrderCounts.actionable} 个待过账`;
 
-  let nextStep = "可生成交易计划";
-  let nextStepDetail = "数据与信号已最新";
+  let nextStep = "今日流程已完成";
+  let nextStepDetail = "数据、信号、交易计划和模拟账户均已收口。";
   if (runtimeBusy) {
     nextStep = "先查看运行中作业";
     nextStepDetail = "当前存在运行中 job 或 runtime lock，先到作业/系统页确认状态。";
@@ -72,15 +141,18 @@ export function deriveGuideState({
   } else if (signalNeedsRefresh) {
     nextStep = "先刷新信号面板";
     nextStepDetail = "数据已最新，但 production signal panel 还没覆盖最新完成交易日。";
-  } else if (!tradePlanReady) {
-    nextStep = "生成交易计划";
-    nextStepDetail = "数据和信号已经就绪，但还没有可展示的最新交易计划。";
   } else if (missingExecutionOpen) {
     nextStep = "等待执行日开盘价入湖";
     nextStepDetail = "模拟订单已注册，但执行日 open 价格缺失，所以不能伪造成交。";
   } else if (pendingPaperOrders) {
     nextStep = "模拟账户过账";
     nextStepDetail = "交易计划订单已注册，等待可用价格后可在账户页模拟过账。";
+  } else if (!tradePlanReady) {
+    nextStep = "生成交易计划";
+    nextStepDetail = "数据和信号已经就绪，但还没有可展示的最新交易计划。";
+  } else if (!tradePlanFresh) {
+    nextStep = "生成交易计划";
+    nextStepDetail = `当前交易计划信号日 ${tradePlanSignalDate || "未知"}，尚未覆盖最新完成交易日 ${requiredTradePlanSignalDate || "未知"}。`;
   }
 
   const checklistRows: TableRow[] = [
@@ -98,15 +170,17 @@ export function deriveGuideState({
     },
     {
       step: "生成交易计划",
-      status: tradePlanReady ? "ok" : "missing",
-      action: tradePlanReady ? "检查结构化动作与 TXT 原文" : "去交易计划页生成",
-      detail: `${tradePlan?.actions?.length || 0} 个动作`
+      status: !tradePlanReady ? "missing" : tradePlanFresh ? "ok" : "stale",
+      action: tradePlanFresh ? "检查结构化动作与 TXT 原文" : "去交易计划页生成",
+      detail: tradePlanFresh
+        ? `${tradePlan?.actions?.length || 0} 个动作`
+        : `信号日 ${tradePlanSignalDate || "未知"} / 要求 ${requiredTradePlanSignalDate || "未知"}`
     },
     {
       step: "模拟账户过账",
       status: missingExecutionOpen ? "pending" : pendingPaperOrders ? "pending" : "ok",
-      action: missingExecutionOpen ? "等 open 价格可用后过账" : pendingPaperOrders ? "去账户页模拟过账" : "无待处理订单",
-      detail: `${paperAccount?.pending_order_count || 0} 个未成交订单`
+      action: missingExecutionOpen ? "等 open 价格可用后过账" : pendingPaperOrders ? "去账户页模拟过账" : "无到期待处理订单",
+      detail: paperOrderDetail
     },
     {
       step: "查看收益",
@@ -125,6 +199,9 @@ export function deriveGuideState({
   }
   if (signalNeedsRefresh) {
     warningRows.push({ item: "signal stale", meaning: "信号面板未覆盖最新完成交易日", where: "数据" });
+  }
+  if (tradePlanReady && !tradePlanFresh && !dataNeedsRefresh && !signalNeedsRefresh) {
+    warningRows.push({ item: "trade plan stale", meaning: "交易计划信号日落后于最新信号面板", where: "交易计划" });
   }
   return { nextStep, nextStepDetail, checklistRows, warningRows };
 }
@@ -188,6 +265,10 @@ export function HelpPage({ api }: HelpPageProps): JSX.Element {
     () => deriveGuideState({ status, dataSources, tradePlan, paperAccount, jobs }),
     [status, dataSources, tradePlan, paperAccount, jobs]
   );
+  const tradePlanStatus = useMemo(() => {
+    const row = guide.checklistRows.find((item) => item.step === "生成交易计划");
+    return String(row?.status || tradePlan?.status || "missing");
+  }, [guide.checklistRows, tradePlan?.status]);
 
   return (
     <div>
@@ -203,7 +284,7 @@ export function HelpPage({ api }: HelpPageProps): JSX.Element {
         <Stat label="下一步" value="查看流程" />
         <Stat label="数据" value={<StatusPill value={dataSources?.dataset_sync_status || dataSources?.next_refresh_action || "unknown"} />} />
         <Stat label="信号面板" value={<StatusPill value={dataSources?.signal_panel_status || "unknown"} />} />
-        <Stat label="交易计划" value={<StatusPill value={tradePlan?.status || "missing"} />} />
+        <Stat label="交易计划" value={<StatusPill value={tradePlanStatus} />} />
         <Stat label="未成交订单" value={paperAccount?.pending_order_count || 0} />
         <Stat label="运行状态" value={<StatusPill value={hasRuntimeLock(status) || hasRunningJob(status, jobs) ? "running" : "ok"} />} />
       </div>

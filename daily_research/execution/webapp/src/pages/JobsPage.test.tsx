@@ -56,6 +56,52 @@ describe("JobsPage", () => {
     expect(api.getJob).toHaveBeenCalledWith("job1", 200);
   });
 
+  it("polls selected job detail so stdout is not a stale snapshot", async () => {
+    vi.useFakeTimers();
+    const getJob = vi
+      .fn()
+      .mockResolvedValueOnce({
+        job_id: "job1",
+        task_name: "data-platform-refresh",
+        status: "running",
+        metadata: { job_id: "job1", task_name: "data-platform-refresh", status: "running", command_argv: ["python", "refresh.py"] },
+        stdout_tail: ["stage 1"],
+        stderr_tail: [],
+        can_resume: false
+      })
+      .mockResolvedValue({
+        job_id: "job1",
+        task_name: "data-platform-refresh",
+        status: "running",
+        metadata: { job_id: "job1", task_name: "data-platform-refresh", status: "running", command_argv: ["python", "refresh.py"] },
+        stdout_tail: ["stage 2"],
+        stderr_tail: [],
+        can_resume: false
+      });
+    const api = {
+      getJobs: vi.fn().mockResolvedValue([{ job_id: "job1", task_name: "data-platform-refresh", status: "running" }]),
+      getJob,
+      resumeJob: vi.fn()
+    } as unknown as ExecutionApi;
+
+    const { unmount } = render(<JobsPage api={api} selectedJobId="job1" pollMs={50} />);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText("stage 1")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("stage 2")).toBeInTheDocument();
+    expect(getJob).toHaveBeenCalledTimes(2);
+    unmount();
+  });
+
   it("opens job detail from the jobs list and updates the URL", async () => {
     const user = userEvent.setup();
     window.history.pushState(null, "", "/jobs");

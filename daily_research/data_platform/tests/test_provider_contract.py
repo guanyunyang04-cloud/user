@@ -6,6 +6,8 @@ from unittest import mock
 import pandas as pd
 
 from daily_research.data_platform.contracts import (
+    DataDomain,
+    DomainFetchRequest,
     STANDARD_MARKET_COLUMNS,
     FetchRequest,
     ProviderResult,
@@ -14,6 +16,7 @@ from daily_research.data_platform.contracts import (
 )
 from daily_research.data_platform.manager import InMemoryMarketProvider, ProviderManager
 from daily_research.data_platform.providers import (
+    BaostockProvider,
     EastmoneyEfinanceProvider,
     TushareHttpOptionalProvider,
     build_default_providers,
@@ -201,6 +204,183 @@ class DataPlatformProviderContractTest(unittest.TestCase):
         self.assertEqual(frame["name"].tolist(), ["浦发银行", "平安银行"])
         self.assertEqual(frame["list_status"].tolist(), ["L", "L"])
         self.assertEqual(frame["list_date"].tolist(), ["1999-11-10", "1991-04-03"])
+
+    def test_baostock_security_status_uses_guarded_stock_basic_fetch(self) -> None:
+        guarded_frame = pd.DataFrame(
+            {
+                "symbol": ["000001.SZ"],
+                "trade_date": ["2026-05-22"],
+                "is_st": [False],
+                "is_suspended": [False],
+                "is_delisted": [False],
+                "status_reason": ["1"],
+                "source": ["baostock"],
+            }
+        )
+
+        with mock.patch(
+            "daily_research.data_platform.providers._fetch_baostock_stock_basic_frame_with_timeout",
+            return_value=guarded_frame,
+        ) as guarded:
+            result = BaostockProvider().fetch_domain(
+                DomainFetchRequest(domain=DataDomain.SECURITY_STATUS, start_date="2026-05-22", end_date="2026-05-22")
+            )
+
+        guarded.assert_called_once_with(trade_date="2026-05-22")
+        self.assertEqual(result.data["symbol"].tolist(), ["000001.SZ"])
+        self.assertEqual(result.data["source"].tolist(), ["baostock"])
+
+    def test_baostock_calendar_uses_guarded_fetch(self) -> None:
+        guarded_frame = pd.DataFrame(
+            {
+                "trade_date": ["2026-05-22"],
+                "is_open": [True],
+                "exchange": ["SSE"],
+                "source": ["baostock"],
+            }
+        )
+
+        with mock.patch(
+            "daily_research.data_platform.providers._fetch_baostock_trade_calendar_frame_with_timeout",
+            return_value=guarded_frame,
+        ) as guarded:
+            result = BaostockProvider().fetch_domain(
+                DomainFetchRequest(
+                    domain=DataDomain.TRADING_CALENDAR,
+                    start_date="2026-05-22",
+                    end_date="2026-05-22",
+                    exchange="SSE",
+                )
+            )
+
+        guarded.assert_called_once_with(start_date="2026-05-22", end_date="2026-05-22", exchange="SSE")
+        self.assertEqual(result.data["trade_date"].tolist(), ["2026-05-22"])
+        self.assertEqual(result.data["source"].tolist(), ["baostock"])
+
+    def test_baostock_stock_basic_guard_times_out_and_terminates_child(self) -> None:
+        from daily_research.data_platform import providers
+
+        class FakeQueue:
+            def get(self, timeout: float | None = None) -> object:
+                raise providers.queue_module.Empty
+
+        class FakeProcess:
+            exitcode = None
+
+            def __init__(self) -> None:
+                self.started = False
+                self.terminated = False
+
+            def start(self) -> None:
+                self.started = True
+
+            def join(self, timeout: float | None = None) -> None:
+                return None
+
+            def is_alive(self) -> bool:
+                return not self.terminated
+
+            def terminate(self) -> None:
+                self.terminated = True
+
+        fake_process = FakeProcess()
+
+        class FakeContext:
+            def Queue(self) -> FakeQueue:
+                return FakeQueue()
+
+            def Process(self, **_: object) -> FakeProcess:
+                return fake_process
+
+        with mock.patch("daily_research.data_platform.providers.multiprocessing.get_context", return_value=FakeContext()):
+            with self.assertRaisesRegex(TimeoutError, "baostock_stock_basic_timeout"):
+                providers._fetch_baostock_stock_basic_frame_with_timeout(trade_date="2026-05-22", timeout_seconds=1)
+
+        self.assertTrue(fake_process.started)
+        self.assertTrue(fake_process.terminated)
+
+    def test_baostock_stock_basic_guard_uses_blocking_queue_get(self) -> None:
+        from daily_research.data_platform import providers
+
+        expected = pd.DataFrame({"symbol": ["000001.SZ"], "trade_date": ["2026-05-22"]})
+
+        class FakeQueue:
+            def empty(self) -> bool:
+                return True
+
+            def get(self, timeout: float | None = None) -> dict[str, object]:
+                return {"status": "ok", "data": expected}
+
+        class FakeProcess:
+            exitcode = 0
+
+            def start(self) -> None:
+                return None
+
+            def join(self, timeout: float | None = None) -> None:
+                return None
+
+            def is_alive(self) -> bool:
+                return False
+
+        class FakeContext:
+            def Queue(self) -> FakeQueue:
+                return FakeQueue()
+
+            def Process(self, **_: object) -> FakeProcess:
+                return FakeProcess()
+
+        with mock.patch("daily_research.data_platform.providers.multiprocessing.get_context", return_value=FakeContext()):
+            frame = providers._fetch_baostock_stock_basic_frame_with_timeout(trade_date="2026-05-22", timeout_seconds=1)
+
+        pd.testing.assert_frame_equal(frame, expected)
+
+    def test_baostock_trade_calendar_guard_times_out_and_terminates_child(self) -> None:
+        from daily_research.data_platform import providers
+
+        class FakeQueue:
+            def get(self, timeout: float | None = None) -> object:
+                raise providers.queue_module.Empty
+
+        class FakeProcess:
+            exitcode = None
+
+            def __init__(self) -> None:
+                self.started = False
+                self.terminated = False
+
+            def start(self) -> None:
+                self.started = True
+
+            def join(self, timeout: float | None = None) -> None:
+                return None
+
+            def is_alive(self) -> bool:
+                return not self.terminated
+
+            def terminate(self) -> None:
+                self.terminated = True
+
+        fake_process = FakeProcess()
+
+        class FakeContext:
+            def Queue(self) -> FakeQueue:
+                return FakeQueue()
+
+            def Process(self, **_: object) -> FakeProcess:
+                return fake_process
+
+        with mock.patch("daily_research.data_platform.providers.multiprocessing.get_context", return_value=FakeContext()):
+            with self.assertRaisesRegex(TimeoutError, "baostock_trade_calendar_timeout"):
+                providers._fetch_baostock_trade_calendar_frame_with_timeout(
+                    start_date="2026-05-22",
+                    end_date="2026-05-22",
+                    exchange="SSE",
+                    timeout_seconds=1,
+                )
+
+        self.assertTrue(fake_process.started)
+        self.assertTrue(fake_process.terminated)
 
 
 if __name__ == "__main__":

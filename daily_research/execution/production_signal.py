@@ -133,7 +133,8 @@ def panel_row_count(path: Path) -> int:
     if not path.exists():
         return 0
     try:
-        return int(sum(1 for _ in path.open("r", encoding="utf-8", errors="ignore")) - 1)
+        with path.open("r", encoding="utf-8", errors="ignore") as handle:
+            return int(sum(1 for _ in handle) - 1)
     except Exception:
         return 0
 

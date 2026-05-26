@@ -11,6 +11,23 @@ from daily_research.data_platform.manager import InMemoryDomainProvider, InMemor
 from daily_research.data_platform.refresh_daily import RefreshConfig, build_parser, run_refresh
 
 
+def test_refresh_cli_accepts_explicit_run_id() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(
+        [
+            "--as-of-date",
+            "2026-01-05",
+            "--symbols",
+            "000001.SZ,000300.SH",
+            "--run-id",
+            "smoke_run",
+        ]
+    )
+
+    assert args.run_id == "smoke_run"
+
+
 def _market_frame(*, dates: list[str], provider: str, close_offset: float = 0.0, symbols: list[str] | None = None) -> pd.DataFrame:
     requested_symbols = symbols or ["000001.SZ", "600000.SH", "000300.SH"]
     values = {
@@ -666,6 +683,56 @@ class DataPlatformRefreshDailyTest(unittest.TestCase):
         self.assertEqual(result.registered_market_dataset_id, "")
         self.assertIn("required_domain_blocked:valuation", result.blockers)
 
+    def test_security_status_reuses_universe_snapshot_when_available(self) -> None:
+        def fail_if_called(request: DomainFetchRequest) -> ProviderResult:
+            raise AssertionError(f"security_status should be derived from universe_snapshot, got {request}")
+
+        provider = InMemoryDomainProvider(
+            "akshare_eastmoney",
+            payloads={
+                DataDomain.TRADING_CALENDAR: _calendar_frame(dates=["2026-01-05"], provider="akshare_eastmoney"),
+                DataDomain.UNIVERSE_SNAPSHOT: _universe_frame(provider="akshare_eastmoney"),
+                DataDomain.SECURITY_STATUS: fail_if_called,
+                DataDomain.MARKET_DAILY: _market_frame(dates=["2026-01-05"], provider="akshare_eastmoney"),
+            },
+        )
+        with TemporaryDirectory() as temp_dir:
+            result = run_refresh(
+                RefreshConfig(
+                    lake_root=Path(temp_dir),
+                    as_of_date="2026-01-05",
+                    start_date="2026-01-05",
+                    universe="all_a",
+                    domains=(
+                        DataDomain.MARKET_DAILY,
+                        DataDomain.TRADING_CALENDAR,
+                        DataDomain.UNIVERSE_SNAPSHOT,
+                        DataDomain.SECURITY_STATUS,
+                    ),
+                    required_domains=(
+                        DataDomain.MARKET_DAILY,
+                        DataDomain.TRADING_CALENDAR,
+                        DataDomain.UNIVERSE_SNAPSHOT,
+                        DataDomain.SECURITY_STATUS,
+                    ),
+                    benchmark="000300.SH",
+                    min_coverage_ratio=0.70,
+                ),
+                providers=[provider],
+            )
+            manifest = json.loads(Path(result.manifest_path).read_text(encoding="utf-8"))
+
+        status_requests = [req for req in provider.domain_requests if req.domain == DataDomain.SECURITY_STATUS]
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(status_requests, [])
+        self.assertEqual(manifest["domain_quality_status"][DataDomain.SECURITY_STATUS]["status"], "ok")
+        status_output = manifest["domain_outputs"][DataDomain.SECURITY_STATUS]
+        self.assertIn("universe_snapshot_derived", status_output["bronze_paths"])
+        self.assertEqual(
+            status_output["coverage_report"]["derivation_source_domain"],
+            DataDomain.UNIVERSE_SNAPSHOT,
+        )
+
     def test_universe_all_a_empty_provider_result_explains_provider_errors(self) -> None:
         def fail_universe(_: DomainFetchRequest) -> ProviderResult:
             return ProviderResult(
@@ -702,6 +769,84 @@ class DataPlatformRefreshDailyTest(unittest.TestCase):
                     ),
                     providers=[provider],
                 )
+
+    def test_universe_all_a_uses_latest_lake_universe_when_provider_is_empty(self) -> None:
+        first_provider = InMemoryDomainProvider(
+            "akshare_eastmoney",
+            payloads={
+                DataDomain.TRADING_CALENDAR: _calendar_frame(dates=["2026-01-05"], provider="akshare_eastmoney"),
+                DataDomain.UNIVERSE_SNAPSHOT: _universe_frame(provider="akshare_eastmoney", trade_date="2026-01-05"),
+                DataDomain.MARKET_DAILY: _market_frame(dates=["2026-01-05"], provider="akshare_eastmoney"),
+            },
+        )
+
+        def fail_universe(_: DomainFetchRequest) -> ProviderResult:
+            return ProviderResult(
+                provider="akshare_eastmoney",
+                data=pd.DataFrame(),
+                error_report=[
+                    {
+                        "provider": "akshare_eastmoney",
+                        "domain": DataDomain.UNIVERSE_SNAPSHOT,
+                        "code": "provider_exception",
+                        "error_type": "TimeoutError",
+                        "message": "stock basic timed out",
+                    }
+                ],
+            )
+
+        second_provider = InMemoryDomainProvider(
+            "akshare_eastmoney",
+            payloads={
+                DataDomain.TRADING_CALENDAR: _calendar_frame(dates=["2026-01-05", "2026-01-06"], provider="akshare_eastmoney"),
+                DataDomain.UNIVERSE_SNAPSHOT: fail_universe,
+                DataDomain.MARKET_DAILY: _market_frame(dates=["2026-01-06"], provider="akshare_eastmoney"),
+            },
+        )
+
+        with TemporaryDirectory() as temp_dir:
+            first = run_refresh(
+                RefreshConfig(
+                    lake_root=Path(temp_dir),
+                    as_of_date="2026-01-05",
+                    start_date="2026-01-05",
+                    universe="all_a",
+                    domains=(DataDomain.MARKET_DAILY, DataDomain.TRADING_CALENDAR, DataDomain.UNIVERSE_SNAPSHOT),
+                    required_domains=(DataDomain.MARKET_DAILY, DataDomain.TRADING_CALENDAR, DataDomain.UNIVERSE_SNAPSHOT),
+                    benchmark="000300.SH",
+                    min_coverage_ratio=0.70,
+                ),
+                providers=[first_provider],
+            )
+            self.assertEqual(first.status, "ok")
+
+            second = run_refresh(
+                RefreshConfig(
+                    lake_root=Path(temp_dir),
+                    as_of_date="2026-01-06",
+                    start_date="2026-01-05",
+                    universe="all_a",
+                    domains=(DataDomain.MARKET_DAILY, DataDomain.TRADING_CALENDAR, DataDomain.UNIVERSE_SNAPSHOT),
+                    required_domains=(DataDomain.MARKET_DAILY, DataDomain.TRADING_CALENDAR, DataDomain.UNIVERSE_SNAPSHOT),
+                    benchmark="000300.SH",
+                    min_coverage_ratio=0.70,
+                ),
+                providers=[second_provider],
+            )
+            manifest = json.loads(Path(second.manifest_path).read_text(encoding="utf-8"))
+
+        self.assertEqual(second.status, "ok")
+        self.assertEqual(manifest["universe_resolution"]["status"], "fallback")
+        self.assertEqual(manifest["universe_resolution"]["source"], "lake_universe_snapshot")
+        self.assertEqual(manifest["universe_resolution"]["source_end_date"], "2026-01-05")
+        self.assertIn("akshare_eastmoney:provider_exception:TimeoutError:stock basic timed out", manifest["universe_resolution"]["provider_error_summary"])
+        self.assertEqual(manifest["domain_quality_status"][DataDomain.UNIVERSE_SNAPSHOT]["status"], "ok")
+        self.assertEqual(
+            manifest["domain_outputs"][DataDomain.UNIVERSE_SNAPSHOT]["coverage_report"]["fallback_source_date"],
+            "2026-01-05",
+        )
+        self.assertIn("000001.SZ", manifest["requested_symbols"])
+        self.assertIn("600000.SH", manifest["requested_symbols"])
 
 
 if __name__ == "__main__":
