@@ -77,7 +77,8 @@ Use `preflight_blockers`, `mutation_allowed`, `routing`, guards, risk signals, c
 - Work on `main` unless the user explicitly changes the branch rule.
 - If capsule reports `not_on_main_for_mutation`, resolve branch authority or explicitly account for the blocker before repo-tracked mutation.
 - Make `daily_research/output/active_execution_strategy.json` diffs explicit when the task asks for active strategy, promotion, or live-policy changes.
-- Prefer explicit study tags, protocol tags, dataset ids, and reference docs over loose `latest_*` files.
+- Prefer explicit evidence docs, dataset ids, protocol tags, and registry v3 program/family/run fields over loose `latest_*` files.
+- For evidence lookup, use `research_programs` for stable problem lines, `study_families` for stages or method families, and `run_tags` for physical run instances; do not create new research semantics by expanding run-tag prefixes.
 - Treat smoke, dry-run, failed, interrupted, timeout, and diagnostic-only runs as non-completed evidence.
 - Separate facts, inferences, assumptions, and action boundaries in substantial reports.
 - For deterministic cleanup with clear benefit, low fact loss, and tests, remove stale paths completely instead of leaving compatibility shells.
@@ -149,13 +150,13 @@ Read or rebuild the evidence index:
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow current-frontier --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow evidence-index --rebuild --json
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow query --q "<r-id/tag/dataset/blocker>" --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow query --q "<r-id/research_program/study_family/run_tag/dataset/blocker>" --json
 ```
 
 Plan a routed writeback:
 
 ```powershell
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow writeback-plan --source study:<tag> --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow writeback-plan --source run:<tag> --json
 ```
 
 Check or install global skills from canonical repo source:

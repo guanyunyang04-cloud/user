@@ -139,35 +139,60 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertIn("workspace_state", payload["routes"])
         self.assertIn("daily_research_state", payload["routes"])
 
-    def test_status_cli_accepts_explicit_study_tag_capsule(self) -> None:
+    def test_status_cli_accepts_explicit_run_tag_capsule(self) -> None:
         tag = "self_opt_study_r52_native_source_delta_closure_screening_safe_20260510_02"
-        payload = run_cli("status", "--workflow", "continuous_policy", "--study-tag", tag, "--json")
+        payload = run_cli("status", "--workflow", "continuous_policy", "--run-tag", tag, "--json")
 
         self.assertEqual(payload["workflow_id"], "continuous_policy_result_review")
-        self.assertIn("study_evidence", payload)
-        self.assertEqual(payload["study_evidence"]["study_tag"], tag)
-        self.assertEqual(payload["study_evidence"]["completed_trial_count"], 3)
+        self.assertIn("run_evidence", payload)
+        self.assertNotIn("study_evidence", payload)
+        self.assertEqual(payload["run_evidence"]["run_tag"], tag)
+        self.assertEqual(payload["run_evidence"]["completed_trial_count"], 3)
         self.assertTrue(payload["artifact_freshness"]["is_stale_risk"])
 
-    def test_writeback_plan_study_source_is_read_only(self) -> None:
-        tag = "self_opt_study_r52_native_source_delta_closure_screening_safe_20260510_02"
-        payload = run_cli("writeback-plan", "--source", f"study:{tag}", "--json")
+    def test_status_cli_rejects_removed_study_tag_option(self) -> None:
+        result = subprocess.run(
+            [
+                PYTHON,
+                "-m",
+                "tools.brain.workflow",
+                "status",
+                "--workflow",
+                "continuous_policy",
+                "--study-tag",
+                "legacy_tag",
+                "--json",
+            ],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
 
-        self.assertEqual(payload["source"], f"study:{tag}")
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_writeback_plan_run_source_is_read_only(self) -> None:
+        tag = "self_opt_study_r52_native_source_delta_closure_screening_safe_20260510_02"
+        payload = run_cli("writeback-plan", "--source", f"run:{tag}", "--json")
+
+        self.assertEqual(payload["source"], f"run:{tag}")
         self.assertFalse(payload["apply_brain_writeback"])
-        self.assertEqual(payload["study_evidence"]["study_tag"], tag)
-        self.assertEqual(payload["study_evidence"]["workflow"], "continuous_policy")
+        self.assertIn("run_evidence", payload)
+        self.assertNotIn("study_evidence", payload)
+        self.assertEqual(payload["run_evidence"]["run_tag"], tag)
+        self.assertEqual(payload["run_evidence"]["workflow"], "continuous_policy")
         self.assertTrue(payload["requires_explicit_apply"])
 
-    def test_writeback_plan_study_source_infers_path_policy(self) -> None:
+    def test_writeback_plan_run_source_infers_path_policy(self) -> None:
         tag = "path20_input_ablation_no_alpha_liquid500_du_cost20_hit10_dd010_20260522_01"
-        payload = run_cli("writeback-plan", "--source", f"study:{tag}", "--json")
-        evidence = payload["study_evidence"]
+        payload = run_cli("writeback-plan", "--source", f"run:{tag}", "--json")
+        evidence = payload["run_evidence"]
 
-        self.assertEqual(evidence["study_tag"], tag)
+        self.assertEqual(evidence["run_tag"], tag)
         self.assertEqual(evidence["workflow"], "path_policy")
         self.assertEqual(
-            evidence["study_summary_json"],
+            evidence["run_summary_json"],
             f"daily_research/output/path_policy/studies/{tag}/study_summary.json",
         )
         self.assertTrue(evidence["exists"])
@@ -177,22 +202,22 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertIn("policy_input_bundle__7c8f58d851bce8179e1e9e2d", evidence["dataset_ids"])
         self.assertIn("gru_sequence_static_context", evidence["model_families"])
 
-    def test_writeback_plan_study_source_accepts_explicit_path_policy(self) -> None:
+    def test_writeback_plan_run_source_accepts_explicit_path_policy(self) -> None:
         tag = "path20_input_ablation_no_alpha_liquid500_du_cost20_hit10_dd010_20260522_01"
-        payload = run_cli("writeback-plan", "--source", f"study:path_policy:{tag}", "--json")
-        evidence = payload["study_evidence"]
+        payload = run_cli("writeback-plan", "--source", f"run:path_policy:{tag}", "--json")
+        evidence = payload["run_evidence"]
 
-        self.assertEqual(payload["source"], f"study:path_policy:{tag}")
-        self.assertEqual(evidence["study_tag"], tag)
+        self.assertEqual(payload["source"], f"run:path_policy:{tag}")
+        self.assertEqual(evidence["run_tag"], tag)
         self.assertEqual(evidence["workflow"], "path_policy")
         self.assertTrue(evidence["exists"])
 
-    def test_writeback_plan_missing_study_reports_all_searched_paths(self) -> None:
+    def test_writeback_plan_missing_run_reports_all_searched_paths(self) -> None:
         tag = "missing_study_for_writeback_plan_regression_20990101_01"
-        payload = run_cli("writeback-plan", "--source", f"study:{tag}", "--json")
-        evidence = payload["study_evidence"]
+        payload = run_cli("writeback-plan", "--source", f"run:{tag}", "--json")
+        evidence = payload["run_evidence"]
 
-        self.assertEqual(evidence["study_tag"], tag)
+        self.assertEqual(evidence["run_tag"], tag)
         self.assertFalse(evidence["exists"])
         self.assertIn(
             f"daily_research/output/path_policy/studies/{tag}/study_summary.json",
@@ -203,12 +228,12 @@ class BrainWorkflowCliTest(unittest.TestCase):
             evidence["searched_paths"],
         )
 
-    def test_writeback_plan_unsupported_study_workflow_returns_evidence_gap(self) -> None:
-        payload = run_cli("writeback-plan", "--source", "study:unknown_workflow:any_tag", "--json")
-        evidence = payload["study_evidence"]
+    def test_writeback_plan_unsupported_run_workflow_returns_evidence_gap(self) -> None:
+        payload = run_cli("writeback-plan", "--source", "run:unknown_workflow:any_tag", "--json")
+        evidence = payload["run_evidence"]
 
         self.assertFalse(evidence["exists"])
-        self.assertIn("unsupported_study_workflow: unknown_workflow", evidence["evidence_gaps"])
+        self.assertIn("unsupported_run_workflow: unknown_workflow", evidence["evidence_gaps"])
 
     def test_script_path_cli_imports_package_root(self) -> None:
         payload = run_script_cli("status", "--workflow", "continuous_policy", "--json")
@@ -520,7 +545,7 @@ class BrainWorkflowCliTest(unittest.TestCase):
 
         self.assertEqual(payload["context_profile"], "lite")
         self.assertIn("frontier_report", payload["guards"])
-        self.assertNotIn("latest_output_studies", payload["guards"]["frontier_report"])
+        self.assertNotIn("latest_output_runs", payload["guards"]["frontier_report"])
 
     def test_capsule_cli_full_context_keeps_frontier_details(self) -> None:
         payload = run_cli(
@@ -533,7 +558,7 @@ class BrainWorkflowCliTest(unittest.TestCase):
         )
 
         self.assertEqual(payload["context_profile"], "full")
-        self.assertIn("latest_output_studies", payload["guards"]["frontier_report"])
+        self.assertIn("latest_output_runs", payload["guards"]["frontier_report"])
 
     def test_capsule_intent_mutate_blocks_non_main_branch(self) -> None:
         payload = run_cli(
@@ -570,9 +595,9 @@ class BrainWorkflowCliTest(unittest.TestCase):
     def test_current_frontier_cli_outputs_stable_json(self) -> None:
         payload = run_cli("current-frontier", "--json")
 
-        self.assertIn("latest_output_studies", payload)
+        self.assertIn("latest_output_runs", payload)
         self.assertIn("latest_brain_reference_time", payload)
-        self.assertIn("unregistered_latest_tags", payload)
+        self.assertIn("unregistered_latest_run_tags", payload)
         self.assertIn("brain_may_be_stale", payload)
 
     def test_capsule_includes_current_frontier_report(self) -> None:

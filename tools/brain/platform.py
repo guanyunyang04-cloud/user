@@ -47,7 +47,7 @@ MOJIBAKE_MARKERS = (
 ArtifactRecord = daily_research_adapter.ArtifactRecord
 ArtifactFreshnessReport = daily_research_adapter.ArtifactFreshnessReport
 StudyTrialEvidence = daily_research_adapter.StudyTrialEvidence
-StudyEvidenceReport = daily_research_adapter.StudyEvidenceReport
+RunEvidenceReport = daily_research_adapter.RunEvidenceReport
 
 
 @dataclass(frozen=True)
@@ -119,7 +119,7 @@ class WorkflowState:
     evidence_gaps: list[str]
     next_allowed_actions: list[str]
     resource_risk: str
-    study_evidence: dict[str, Any] = field(default_factory=dict)
+    run_evidence: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -755,8 +755,8 @@ def audit_brain_system(*, scope: str = "all") -> dict[str, Any]:
     }
 
 
-def resolve_study_evidence(study_tag: str, workflow: str | None = None) -> StudyEvidenceReport:
-    return daily_research_adapter.resolve_study_evidence(study_tag, workflow=workflow)
+def resolve_run_evidence(run_tag: str, workflow: str | None = None) -> RunEvidenceReport:
+    return daily_research_adapter.resolve_run_evidence(run_tag, workflow=workflow)
 
 
 def _openmp_strict_env() -> dict[str, str]:
@@ -837,16 +837,16 @@ def _continuous_policy_evidence_gaps(freshness: ArtifactFreshnessReport) -> list
     return daily_research_adapter.artifact_freshness_evidence_gaps(freshness)
 
 
-def build_workflow_state(workflow_id: str, *, study_tag: str | None = None, child_brain: str | None = None) -> WorkflowState:
+def build_workflow_state(workflow_id: str, *, run_tag: str | None = None, child_brain: str | None = None) -> WorkflowState:
     registry = load_workflow_registry(child_brain)
     normalized = "continuous_policy_result_review" if workflow_id == "continuous_policy" else workflow_id
     if normalized not in registry:
         raise KeyError(f"Unknown workflow: {workflow_id}")
     freshness = resolve_artifact_freshness()
-    study_evidence: dict[str, Any] = {}
-    if study_tag and normalized.startswith("continuous_policy"):
-        evidence = resolve_study_evidence(study_tag, workflow="continuous_policy")
-        study_evidence = evidence.to_dict()
+    run_evidence: dict[str, Any] = {}
+    if run_tag and normalized.startswith("continuous_policy"):
+        evidence = resolve_run_evidence(run_tag, workflow="continuous_policy")
+        run_evidence = evidence.to_dict()
         gaps = list(evidence.evidence_gaps)
     else:
         gaps = _continuous_policy_evidence_gaps(freshness) if normalized.startswith("continuous_policy") else []
@@ -861,8 +861,8 @@ def build_workflow_state(workflow_id: str, *, study_tag: str | None = None, chil
         artifact_freshness=freshness.to_dict(),
         evidence_gaps=gaps,
         next_allowed_actions=next_allowed,
-        resource_risk=("normal_with_stale_latest" if study_evidence and freshness.is_stale_risk else resource_risk),
-        study_evidence=study_evidence,
+        resource_risk=("normal_with_stale_latest" if run_evidence and freshness.is_stale_risk else resource_risk),
+        run_evidence=run_evidence,
     )
 
 
@@ -1059,20 +1059,20 @@ def build_writeback_plan(source: str, *, apply_brain_writeback: bool = False) ->
     routes = dict(registry["brain_writeback"].get("writeback_routes", {}) or {})
     freshness = resolve_artifact_freshness().to_dict()
     source_text = str(source or "latest").strip() or "latest"
-    study_evidence: dict[str, Any] = {}
-    if source_text.startswith("study:"):
-        study_source = source_text.split(":", 1)[1]
+    run_evidence: dict[str, Any] = {}
+    if source_text.startswith("run:"):
+        run_source = source_text.split(":", 1)[1]
         workflow = None
-        study_tag = study_source
-        if ":" in study_source:
-            workflow, study_tag = study_source.split(":", 1)
-        study_evidence = resolve_study_evidence(study_tag, workflow=workflow).to_dict()
+        run_tag = run_source
+        if ":" in run_source:
+            workflow, run_tag = run_source.split(":", 1)
+        run_evidence = resolve_run_evidence(run_tag, workflow=workflow).to_dict()
     return {
         "source": source_text,
         "apply_brain_writeback": bool(apply_brain_writeback),
         "routes": routes,
         "artifact_freshness": freshness,
-        "study_evidence": study_evidence,
+        "run_evidence": run_evidence,
         "planned_updates": [
             {"route": "state", "reason": "current status, boundaries, and priority changes"},
             {"route": "operations", "reason": "new command or workflow entry changes"},

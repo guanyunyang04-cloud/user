@@ -135,7 +135,7 @@ def _main_context() -> dict[str, Any]:
     }
 
 
-def _child_context(selected_brain_id: str, task: str, workflow_id: str, study_tag: str) -> dict[str, Any]:
+def _child_context(selected_brain_id: str, task: str, workflow_id: str, run_tag: str) -> dict[str, Any]:
     bootstrap = resolve_bootstrap(selected_brain_id).to_dict()
     context: dict[str, Any] = {
         "brain_id": selected_brain_id,
@@ -242,7 +242,7 @@ def build_task_capsule(
     *,
     task: str = "",
     workflow: str = "brain_handoff",
-    study_tag: str = "",
+    run_tag: str = "",
     intent: str = "read",
     verbosity: str = "lite",
 ) -> dict[str, Any]:
@@ -263,7 +263,7 @@ def build_task_capsule(
     registry = load_workflow_registry(child_registry_id)
     if workflow_id not in registry:
         workflow_id = "brain_handoff"
-    workflow_state = build_workflow_state(workflow_id, study_tag=study_tag or None, child_brain=child_registry_id).to_dict()
+    workflow_state = build_workflow_state(workflow_id, run_tag=run_tag or None, child_brain=child_registry_id).to_dict()
     workflow_guide = build_workflow_guide(workflow_id, child_brain=child_registry_id)
     capability_hints = list(workflow_guide.get("capability_hints", []) or [])
     risk_signals = list(workflow_guide.get("risk_signals", []) or [])
@@ -274,7 +274,7 @@ def build_task_capsule(
         )
         risk_signals.append("long_task_without_pid_log_progress_or_eta")
         verification_hints.append("for long jobs, report PID status, elapsed time, progress, ETA, log tail, artifact mtime, and next decision after each wait window")
-    rules = run_brain_rules(has_explicit_study_tag=bool(study_tag))
+    rules = run_brain_rules(has_explicit_run_tag=bool(run_tag))
     guards: dict[str, Any] = {
         "rule_report": rules,
         "validation_commands": [
@@ -318,7 +318,7 @@ def build_task_capsule(
         "risk_signals": _dedupe_text(risk_signals),
         "verification_hints": _dedupe_text(verification_hints),
         "stop_conditions": workflow_guide.get("stop_conditions", []),
-        "study_tag": study_tag,
+        "run_tag": run_tag,
         "main_context": main_context,
         "routing": routing,
         "guards": guards,
@@ -353,7 +353,7 @@ def build_task_capsule(
     if target_kind == "workspace" and routing.get("status") == "selected":
         payload["workspace_context"] = _workspace_context(main_context)
     if target_kind == "child" and selected_brain_id in child_brain_ids() and routing.get("status") == "selected":
-        raw_child_context = _child_context(selected_brain_id, task, workflow_id, study_tag)
+        raw_child_context = _child_context(selected_brain_id, task, workflow_id, run_tag)
         payload["child_context"] = compact_child_context(raw_child_context, profile=context_profile)
     meta_cognition = analyze_meta_signals(
         task=task,

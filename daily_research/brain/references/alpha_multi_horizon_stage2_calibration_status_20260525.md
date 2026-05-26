@@ -25,7 +25,7 @@
   - `architecture_input_interaction_report.json`
   - `research_verdict.md`
 
-## Study Tags
+## Run Tags
 
 Reused full-grid Stage 1 studies:
 

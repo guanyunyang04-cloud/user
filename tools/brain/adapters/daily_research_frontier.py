@@ -8,7 +8,7 @@ from typing import Any, Iterable, Mapping
 
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
-STUDY_ROOTS = {
+RUN_ROOTS = {
     "path_policy": Path("daily_research/output/path_policy/studies"),
     "continuous_policy": Path("daily_research/output/continuous_policy/studies"),
 }
@@ -132,7 +132,7 @@ def _model_families(payload: Mapping[str, Any]) -> list[str]:
 
 
 def _tag_from(study_dir: Path, payload: Mapping[str, Any]) -> str:
-    for key in ("study_tag", "run_tag", "protocol_tag", "tag"):
+    for key in ("run_tag", "protocol_tag", "tag"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
@@ -149,30 +149,30 @@ def _completed_evidence(payload: Mapping[str, Any]) -> bool:
     return not any(marker in verdict for marker in FAILED_VERDICT_MARKERS)
 
 
-def _summary_path_for_study(study_dir: Path) -> Path | None:
+def _summary_path_for_run(run_dir: Path) -> Path | None:
     for filename in SUMMARY_FILENAMES:
-        candidate = study_dir / filename
+        candidate = run_dir / filename
         if candidate.is_file():
             return candidate
     return None
 
 
-def _scan_output_studies(root: Path) -> list[dict[str, Any]]:
-    studies: list[dict[str, Any]] = []
-    for workflow, rel_root in STUDY_ROOTS.items():
+def _scan_output_runs(root: Path) -> list[dict[str, Any]]:
+    runs: list[dict[str, Any]] = []
+    for workflow, rel_root in RUN_ROOTS.items():
         abs_root = root / rel_root
         if not abs_root.exists():
             continue
-        for study_dir in sorted(path for path in abs_root.iterdir() if path.is_dir()):
-            summary_path = _summary_path_for_study(study_dir)
+        for run_dir in sorted(path for path in abs_root.iterdir() if path.is_dir()):
+            summary_path = _summary_path_for_run(run_dir)
             if summary_path is None:
                 continue
             payload = _load_json(summary_path)
             mtime_epoch = _mtime_epoch(summary_path)
-            studies.append(
+            runs.append(
                 {
                     "workflow": workflow,
-                    "tag": _tag_from(study_dir, payload),
+                    "run_tag": _tag_from(run_dir, payload),
                     "mtime": _iso_from_epoch(mtime_epoch),
                     "mtime_epoch": mtime_epoch,
                     "status": str(payload.get("status", "") or ""),
@@ -184,7 +184,7 @@ def _scan_output_studies(root: Path) -> list[dict[str, Any]]:
                     "completed_evidence": _completed_evidence(payload),
                 }
             )
-    return sorted(studies, key=lambda item: float(item.get("mtime_epoch", 0.0) or 0.0), reverse=True)
+    return sorted(runs, key=lambda item: float(item.get("mtime_epoch", 0.0) or 0.0), reverse=True)
 
 
 def _latest_brain_reference(root: Path) -> tuple[str, float]:
@@ -198,7 +198,7 @@ def _latest_brain_reference(root: Path) -> tuple[str, float]:
     return _iso_from_epoch(latest), latest
 
 
-def _registered_study_tags(root: Path) -> list[str]:
+def _registered_run_tags(root: Path) -> list[str]:
     registry_path = root / EVIDENCE_REGISTRY_PATH
     if not registry_path.exists():
         return []
@@ -210,7 +210,7 @@ def _registered_study_tags(root: Path) -> list[str]:
     for record in records:
         if not isinstance(record, Mapping):
             continue
-        for key in ("study_tags", "study_tag", "tag", "id"):
+        for key in ("run_tags", "run_tag"):
             value = record.get(key)
             if isinstance(value, list):
                 tags.extend(str(item) for item in value)
@@ -234,49 +234,49 @@ def _references_mention_tag(root: Path, tag: str) -> bool:
     return False
 
 
-def build_frontier_report(workspace_root: str | Path | None = None, max_studies: int = 12) -> dict[str, Any]:
+def build_frontier_report(workspace_root: str | Path | None = None, max_runs: int = 12) -> dict[str, Any]:
     """Build a read-only freshness report for daily_research handoff decisions."""
 
     root = _workspace_root(workspace_root)
-    all_studies = _scan_output_studies(root)
-    latest_studies = all_studies[: max(int(max_studies), 0)]
+    all_runs = _scan_output_runs(root)
+    latest_runs = all_runs[: max(int(max_runs), 0)]
     latest_brain_reference_time, latest_brain_reference_epoch = _latest_brain_reference(root)
-    registered_tags = set(_registered_study_tags(root))
-    latest_tags = [str(study.get("tag", "") or "") for study in latest_studies if study.get("tag")]
-    unregistered_latest_tags = [tag for tag in latest_tags if tag not in registered_tags]
-    studies_by_tag = {str(study.get("tag", "") or ""): study for study in latest_studies if study.get("tag")}
-    unregistered_latest_output_details = []
-    for tag in unregistered_latest_tags:
-        study = studies_by_tag.get(tag, {})
+    registered_tags = set(_registered_run_tags(root))
+    latest_run_tags = [str(run.get("run_tag", "") or "") for run in latest_runs if run.get("run_tag")]
+    unregistered_latest_run_tags = [tag for tag in latest_run_tags if tag not in registered_tags]
+    runs_by_tag = {str(run.get("run_tag", "") or ""): run for run in latest_runs if run.get("run_tag")}
+    unregistered_latest_run_details = []
+    for tag in unregistered_latest_run_tags:
+        run = runs_by_tag.get(tag, {})
         reference_exists = _references_mention_tag(root, tag)
-        unregistered_latest_output_details.append(
+        unregistered_latest_run_details.append(
             {
-                "tag": tag,
-                "path": str(study.get("summary_path", "") or ""),
-                "mtime": str(study.get("mtime", "") or ""),
-                "mtime_epoch": float(study.get("mtime_epoch", 0.0) or 0.0),
+                "run_tag": tag,
+                "path": str(run.get("summary_path", "") or ""),
+                "mtime": str(run.get("mtime", "") or ""),
+                "mtime_epoch": float(run.get("mtime_epoch", 0.0) or 0.0),
                 "reference_exists": reference_exists,
                 "registered": False,
                 "suggested_action": "repair_registry_reference" if reference_exists else "create_reconciliation_proposal",
             }
         )
-    latest_output_epoch = max((float(study.get("mtime_epoch", 0.0) or 0.0) for study in latest_studies), default=0.0)
+    latest_output_epoch = max((float(run.get("mtime_epoch", 0.0) or 0.0) for run in latest_runs), default=0.0)
     output_newer_than_brain = bool(latest_output_epoch and latest_output_epoch > latest_brain_reference_epoch)
     warnings: list[str] = []
     if output_newer_than_brain:
         warnings.append("output_newer_than_brain_references")
-    if unregistered_latest_tags:
-        warnings.append("unregistered_latest_output_tags")
+    if unregistered_latest_run_tags:
+        warnings.append("unregistered_latest_run_tags")
     return {
         "schema_version": 1,
-        "latest_output_studies": latest_studies,
+        "latest_output_runs": latest_runs,
         "latest_brain_reference_time": latest_brain_reference_time,
         "latest_brain_reference_epoch": latest_brain_reference_epoch,
-        "registered_study_tag_count": len(registered_tags),
-        "unregistered_latest_tags": unregistered_latest_tags,
-        "unregistered_latest_output_details": unregistered_latest_output_details,
+        "registered_run_tag_count": len(registered_tags),
+        "unregistered_latest_run_tags": unregistered_latest_run_tags,
+        "unregistered_latest_run_details": unregistered_latest_run_details,
         "output_newer_than_brain": output_newer_than_brain,
-        "brain_may_be_stale": output_newer_than_brain or bool(unregistered_latest_tags),
+        "brain_may_be_stale": output_newer_than_brain or bool(unregistered_latest_run_tags),
         "warnings": warnings,
         "guidance": "If brain_may_be_stale=true, read output explicit tags before answering current state or next-step questions.",
     }

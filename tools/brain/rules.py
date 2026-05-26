@@ -42,9 +42,9 @@ def check_active_artifact_diff() -> BrainRuleFinding | None:
     return None
 
 
-def findings_for_failed_completed_trials(study_evidence: Mapping[str, Any]) -> list[BrainRuleFinding]:
+def findings_for_failed_completed_trials(run_evidence: Mapping[str, Any]) -> list[BrainRuleFinding]:
     findings: list[BrainRuleFinding] = []
-    trials = study_evidence.get("trials", [])
+    trials = run_evidence.get("trials", [])
     if not isinstance(trials, list):
         return findings
     for trial in trials:
@@ -64,13 +64,13 @@ def findings_for_failed_completed_trials(study_evidence: Mapping[str, Any]) -> l
     return findings
 
 
-def finding_for_stale_latest_without_explicit_tag(*, has_explicit_study_tag: bool) -> BrainRuleFinding | None:
+def finding_for_stale_latest_without_explicit_tag(*, has_explicit_run_tag: bool) -> BrainRuleFinding | None:
     freshness = daily_research_adapter.resolve_artifact_freshness()
-    if freshness.is_stale_risk and not has_explicit_study_tag:
+    if freshness.is_stale_risk and not has_explicit_run_tag:
         return BrainRuleFinding(
             "warning",
             "loose_latest_stale_requires_explicit_tag",
-            freshness.mismatch_reason or "latest artifacts are stale-risk; use an explicit study tag",
+            freshness.mismatch_reason or "latest artifacts are stale-risk; use an explicit run tag",
         )
     return None
 
@@ -208,8 +208,8 @@ def findings_for_control_plane_doc_lengths(
 
 def run_brain_rules(
     *,
-    study_evidence: Mapping[str, Any] | None = None,
-    has_explicit_study_tag: bool = False,
+    run_evidence: Mapping[str, Any] | None = None,
+    has_explicit_run_tag: bool = False,
     claim_text: str = "",
     label_summaries: Iterable[Mapping[str, Any]] = (),
     evidence_summaries: Iterable[Mapping[str, Any]] = (),
@@ -219,14 +219,14 @@ def run_brain_rules(
     active = check_active_artifact_diff()
     if active is not None:
         findings.append(active)
-    stale = finding_for_stale_latest_without_explicit_tag(has_explicit_study_tag=has_explicit_study_tag)
+    stale = finding_for_stale_latest_without_explicit_tag(has_explicit_run_tag=has_explicit_run_tag)
     if stale is not None:
         findings.append(stale)
     frontier_stale = finding_for_frontier_staleness()
     if frontier_stale is not None:
         findings.append(frontier_stale)
-    if study_evidence:
-        findings.extend(findings_for_failed_completed_trials(study_evidence))
+    if run_evidence:
+        findings.extend(findings_for_failed_completed_trials(run_evidence))
     gold = finding_for_full_gold_claim_without_catalog(claim_text)
     if gold is not None:
         findings.append(gold)
@@ -247,4 +247,3 @@ def run_brain_rules(
 
 def print_json(payload: Mapping[str, Any]) -> None:
     print(json.dumps(dict(payload), ensure_ascii=False, indent=2))
-

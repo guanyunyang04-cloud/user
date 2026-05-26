@@ -30,7 +30,7 @@ def deep_dive_commands(*, selected_brain_id: str = "", target_kind: str = "") ->
         ]
     commands = [
         'C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow current-frontier --json',
-        'C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow query --q "<tag|dataset|r-id>" --json',
+        'C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow query --q "<r-id/research_program/study_family/run_tag/dataset/blocker>" --json',
         "C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py health --mode full --cwd .",
         'C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --workflow auto --intent read --verbosity full --json',
     ]
@@ -68,14 +68,14 @@ def summarize_frontier(report: Any, *, profile: str) -> dict[str, Any]:
     if normalize_verbosity(profile) == "full":
         return dict(report)
     budget = summary_budget(profile)
-    unregistered = list(report.get("unregistered_latest_tags", []) or [])
+    unregistered = list(report.get("unregistered_latest_run_tags", []) or [])
     warnings = list(report.get("warnings", []) or [])
     return {
         "brain_may_be_stale": bool(report.get("brain_may_be_stale")),
         "warnings": warnings,
         "warning_count": len(warnings),
-        "unregistered_latest_count": len(unregistered),
-        "unregistered_latest_tags": unregistered[: budget["frontier_tags"]],
+        "unregistered_latest_run_count": len(unregistered),
+        "unregistered_latest_run_tags": unregistered[: budget["frontier_tags"]],
         "latest_brain_reference_time": str(report.get("latest_brain_reference_time", "") or ""),
         "guidance": str(report.get("guidance", "") or ""),
     }
@@ -152,11 +152,11 @@ def compact_catalog_health(catalog: dict[str, Any]) -> dict[str, Any]:
 
 
 def compact_frontier_health(frontier: dict[str, Any]) -> dict[str, Any]:
-    unregistered = list(frontier.get("unregistered_latest_tags", []) or [])
+    unregistered = list(frontier.get("unregistered_latest_run_tags", []) or [])
     return {
         "status": frontier.get("status", "unknown"),
         "brain_may_be_stale": bool(frontier.get("brain_may_be_stale")),
         "warnings": list(frontier.get("warnings", []) or []),
-        "unregistered_latest_count": len(unregistered),
-        "unregistered_latest_tags": unregistered[:3],
+        "unregistered_latest_run_count": len(unregistered),
+        "unregistered_latest_run_tags": unregistered[:3],
     }

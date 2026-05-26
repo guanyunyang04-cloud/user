@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "status": "ok",
   "record_count": 69,
   "duplicates": [],
@@ -17,7 +17,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [],
-      "study_tags": [],
       "verdict": "Status: `brain_system_refactor / control-plane governance / no strategy change`.; Goal: make all workspace brains discoverable, auditable, migration-safe, and language-consistent.; Language policy: `zh_semantic_en_identifiers_v1`，即中文语义 + 英文工程标识。; Active execution impact: `daily_research/output/active_execution_strategy.json` must remain unchanged.",
       "blockers": [],
       "next_allowed_actions": [
@@ -39,7 +38,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [],
-      "study_tags": [],
       "verdict": "",
       "blockers": [],
       "next_allowed_actions": [
@@ -61,7 +59,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [],
-      "study_tags": [],
       "verdict": "",
       "blockers": [],
       "next_allowed_actions": [],
@@ -81,12 +78,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [
-        "self_opt_study_r52d_validation_closure_dryrun_20260511_01",
-        "self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01",
-        "self_opt_study_r53_cash_funded_allocation_core_dryrun_20260512_03",
-        "self_opt_study_r53_cash_funded_allocation_core_screening_safe_20260512_03"
-      ],
-      "study_tags": [
         "self_opt_study_r52d_validation_closure_dryrun_20260511_01",
         "self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01",
         "self_opt_study_r53_cash_funded_allocation_core_dryrun_20260512_03",
@@ -116,7 +107,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [],
-      "study_tags": [],
       "verdict": "结论：当前工作区根目录固定为 `H:\\quant_project`。; 结论：`H:\\new_tdx64\\PYPlugins\\user` 还原为通达信插件用户目录，只保留通达信原生/TQ 用户脚本，不再作为 agent 接管、研究、训练或数据平台根目录。; 边界：本次迁移只改变工作区位置和冷数据归档位置，不改变 `daily_research/output/active_execution_strategy.json`，不启动训练、study、replay、live/default 或 promotion。",
       "blockers": [],
       "next_allowed_actions": [
@@ -158,23 +148,6 @@
         "mh_out_decision_utility_rank_aux_v1_fullgrid_seed11_20260525_01",
         "mh_out_decision_utility_rank_aux_v1_fullgrid_seed19_20260525_01"
       ],
-      "study_tags": [
-        "mh_out_forecast_path_v1_baseline_fullgrid_seed7_20260525_01",
-        "mh_out_forecast_path_v1_baseline_fullgrid_seed11_20260525_01",
-        "mh_out_forecast_path_v1_baseline_fullgrid_seed19_20260525_01",
-        "mh_out_decision_utility_v1_baseline_fullgrid_seed7_20260525_01",
-        "mh_out_decision_utility_v1_baseline_fullgrid_seed11_20260525_01",
-        "mh_out_decision_utility_v1_baseline_fullgrid_seed19_20260525_01",
-        "mh_out_decision_utility_path_aux_v1_fullgrid_seed7_20260525_01",
-        "mh_out_decision_utility_path_aux_v1_fullgrid_seed11_20260525_01",
-        "mh_out_decision_utility_path_aux_v1_fullgrid_seed19_20260525_01",
-        "mh_out_decision_utility_hit_risk_aux_v1_fullgrid_seed7_20260525_01",
-        "mh_out_decision_utility_hit_risk_aux_v1_fullgrid_seed11_20260525_01",
-        "mh_out_decision_utility_hit_risk_aux_v1_fullgrid_seed19_20260525_01",
-        "mh_out_decision_utility_rank_aux_v1_fullgrid_seed7_20260525_01",
-        "mh_out_decision_utility_rank_aux_v1_fullgrid_seed11_20260525_01",
-        "mh_out_decision_utility_rank_aux_v1_fullgrid_seed19_20260525_01"
-      ],
       "verdict": "Status: `stage1_completed / shadow-only / research-only`.; Verdict: full-grid output/loss comparison completed for 5 profiles x 3 separate seeds. No profile passed the multi-seed continuation gate; Stage 2 horizon-grid expansion was not launched.; Active artifact impact: `daily_research/output/active_execution_strategy.json` unchanged.; Boundary: `daily_research/output/active_execution_strategy.json`, production root, live/default, trade-plan, paper account, allocator/replay, and broker behavior are unchanged.",
       "blockers": [],
       "next_allowed_actions": [],
@@ -195,7 +168,6 @@
       ],
       "study_families": [],
       "run_tags": [],
-      "study_tags": [],
       "verdict": "Status: `research tooling implemented / shadow-only / no training launched`.; Verdict: `alpha_multi_horizon_utility_policy_v1` now has code-level support for output/loss profile comparison, auxiliary utility tasks, explicit 45d horizon-grid feasibility, and read-only comparison artifacts.; Boundary: `daily_research/output/active_execution_strategy.json`, production root, live/default, trade-plan, paper account, allocator/replay, and broker behavior are unchanged.",
       "blockers": [],
       "next_allowed_actions": [],
@@ -218,13 +190,6 @@
       "run_tags": [
         "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01",
         "mh_utility_horizon_root_cause_audit_20260524_01"
-      ],
-      "study_tags": [
-        "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01",
-        "mh_utility_horizon_root_cause_audit_20260524_01",
-        "mh_short_utility_1_3_5d_v1",
-        "mh_mid_utility_5_10_20d_v1",
-        "mh_long_utility_15_20_30d_v1"
       ],
       "verdict": "Fact: the read-only audit completed with conclusion enums:; `true_long_horizon_edge`; `target_bias_to_long`; `horizon_head_collapse`",
       "blockers": [
@@ -262,17 +227,6 @@
         "stage25_stability_calibration"
       ],
       "run_tags": [
-        "mh25_path_aux_fullgrid_rebudget_seed7_20260526_01",
-        "mh25_path_aux_fullgrid_rebudget_seed11_20260526_01",
-        "mh25_path_aux_fullgrid_rebudget_seed19_20260526_01",
-        "mh25_path_aux_daily1_45_multiseed_seed7_20260526_01",
-        "mh25_path_aux_daily1_45_multiseed_seed11_20260526_01",
-        "mh25_path_aux_daily1_45_multiseed_seed19_20260526_01",
-        "mh25_path_aux_long_family_simplified_seed7_20260526_01",
-        "mh25_path_aux_long_family_simplified_seed11_20260526_01",
-        "mh25_path_aux_long_family_simplified_seed19_20260526_01"
-      ],
-      "study_tags": [
         "mh25_path_aux_fullgrid_rebudget_seed7_20260526_01",
         "mh25_path_aux_fullgrid_rebudget_seed11_20260526_01",
         "mh25_path_aux_fullgrid_rebudget_seed19_20260526_01",
@@ -338,28 +292,6 @@
         "mh_grid_decision_utility_v1_baseline_dense_short_mid_seed19_20260525_02",
         "mh_grid_decision_utility_v1_baseline_daily1_45_feas_seed7_20260525_02"
       ],
-      "study_tags": [
-        "mh_out_decision_utility_v1_baseline_fullgrid_seed7_20260525_01",
-        "mh_out_decision_utility_v1_baseline_fullgrid_seed11_20260525_01",
-        "mh_out_decision_utility_v1_baseline_fullgrid_seed19_20260525_01",
-        "mh_out_decision_utility_path_aux_v1_fullgrid_seed7_20260525_01",
-        "mh_out_decision_utility_path_aux_v1_fullgrid_seed11_20260525_01",
-        "mh_out_decision_utility_path_aux_v1_fullgrid_seed19_20260525_01",
-        "mh_grid_decision_utility_path_aux_v1_sparse_long_seed7_20260525_02",
-        "mh_grid_decision_utility_path_aux_v1_sparse_long_seed11_20260525_02",
-        "mh_grid_decision_utility_path_aux_v1_sparse_long_seed19_20260525_02",
-        "mh_grid_decision_utility_path_aux_v1_dense_short_mid_seed7_20260525_02",
-        "mh_grid_decision_utility_path_aux_v1_dense_short_mid_seed11_20260525_02",
-        "mh_grid_decision_utility_path_aux_v1_dense_short_mid_seed19_20260525_02",
-        "mh_grid_decision_utility_path_aux_v1_daily1_45_feas_seed7_20260525_02",
-        "mh_grid_decision_utility_v1_baseline_sparse_long_seed7_20260525_02",
-        "mh_grid_decision_utility_v1_baseline_sparse_long_seed11_20260525_02",
-        "mh_grid_decision_utility_v1_baseline_sparse_long_seed19_20260525_02",
-        "mh_grid_decision_utility_v1_baseline_dense_short_mid_seed7_20260525_02",
-        "mh_grid_decision_utility_v1_baseline_dense_short_mid_seed11_20260525_02",
-        "mh_grid_decision_utility_v1_baseline_dense_short_mid_seed19_20260525_02",
-        "mh_grid_decision_utility_v1_baseline_daily1_45_feas_seed7_20260525_02"
-      ],
       "verdict": "Status: `stage2_completed / shadow-only / research-only`.; Mainline: `alpha_multi_horizon_utility_policy_v1`.; Verdict: Stage 2 horizon-grid calibration completed for `decision_utility_path_aux_v1` and `decision_utility_v1_baseline`. No non-daily multi-seed grid passed the Stage 3 architecture gate.; Decision: do not launch `patch_transformer` / `stock_mixer_sequence` architecture expansion from this evidence. Continue score/loss/horizon calibration first.",
       "blockers": [
         "Progress: `daily_research/output/path_policy/studies/mh_horizon_grid_calibration_20260525_02/stage2_progress.json` reported `completed`, `task_count=14`, `failed_tags=[]`."
@@ -387,11 +319,6 @@
       ],
       "study_families": [],
       "run_tags": [],
-      "study_tags": [
-        "mh_short_utility_1_3_5d_v1",
-        "mh_mid_utility_5_10_20d_v1",
-        "mh_long_utility_15_20_30d_v1"
-      ],
       "verdict": "Fact: all three shadow-only seed7 target-function runs completed and produced study summaries, validation/test predictions, target calibration audits, and decision score diagnostics.; Fact: `mh_short_utility_1_3_5d_v1` is weak. It stopped at epoch `8`, best epoch `1`; validation decision rank IC `0.013986`, spread `0.005116`; test decision rank IC `0.029569`, spread `0.005598`, but test decision utility profile failed and hit lift was negative.; Fact: `mh_mid_utility_5_10_20d_v1` is test-confirmed. It stopped at epoch `8`, best epoch `2`; validation decision rank IC `0.086660`, spread `0.010785`; test decision rank IC `0.036099`, spread `0.010266`; test decision utility profile passed.; Fact: `mh_long_utility_15_20_30d_v1` is the strongest single-seed candidate. It stopped at epoch `9`, best epoch `3`; validation decision rank IC `0.094242`, spread `0.025083`; test decision rank IC `0.095089`, spread `0.041296`; validation/test decision utility profiles passed.",
       "blockers": [
         "Fact: `mh_short_utility_1_3_5d_v1` is weak. It stopped at epoch `8`, best epoch `1`; validation decision rank IC `0.013986`, spread `0.005116`; test decision rank IC `0.029569`, spread `0.005598`, but test decision utility profile failed and hit lift was negative.",
@@ -424,10 +351,6 @@
       ],
       "study_families": [],
       "run_tags": [
-        "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01",
-        "mh_utility_horizon_calibration_posthoc_20260524_01"
-      ],
-      "study_tags": [
         "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01",
         "mh_utility_horizon_calibration_posthoc_20260524_01"
       ],
@@ -465,11 +388,6 @@
       "run_tags": [
         "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01"
       ],
-      "study_tags": [
-        "alpha_path20_neural_policy_v1",
-        "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01",
-        "alpha_path20_sequence_policy_v1"
-      ],
       "verdict": "",
       "blockers": [],
       "next_allowed_actions": [
@@ -494,13 +412,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [
-        "path20_arch_gain_liquid500_sector_v1_20260520_01",
-        "path20_arch_gain_liquid800_sector_v1_20260520_01",
-        "path20_pool_liquid500_sector_gru_seed7_probe_20260519_01",
-        "path20_pool_liquid800_gru_seed7_probe_20260519_01"
-      ],
-      "study_tags": [
-        "alpha_path20_neural_policy_v1",
         "path20_arch_gain_liquid500_sector_v1_20260520_01",
         "path20_arch_gain_liquid800_sector_v1_20260520_01",
         "path20_pool_liquid500_sector_gru_seed7_probe_20260519_01",
@@ -534,17 +445,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [
-        "path20_arch_gain_liquid500_sector_v1_20260520_01",
-        "path20_architecture_revalidation_audit_20260521",
-        "path20_decision_architecture_gate_20260521",
-        "path20_arch_gain_liquid800_sector_v1_20260520_01",
-        "path20_decision_output_liquid500_du_cost20_hit10_dd010_20260521_01",
-        "path20_decision_arch_patch_liquid500_du_cost20_hit10_dd010_20260521_01",
-        "path20_decision_arch_stock_mixer_liquid500_du_cost20_hit10_dd010_20260521_01",
-        "path20_decision_arch_sector_slot_liquid500_du_cost20_hit10_dd010_20260521_01"
-      ],
-      "study_tags": [
-        "alpha_path20_neural_policy_v1",
         "path20_arch_gain_liquid500_sector_v1_20260520_01",
         "path20_architecture_revalidation_audit_20260521",
         "path20_decision_architecture_gate_20260521",
@@ -591,12 +491,6 @@
         "path20_data_len_liquid500_du_train2018_2022_20260522_01",
         "path20_data_len_liquid500_du_train2016_2022_20260522_01"
       ],
-      "study_tags": [
-        "path20_data_length_regime_audit_20260522",
-        "path20_decision_output_liquid500_du_cost20_hit10_dd010_20260521_01",
-        "path20_data_len_liquid500_du_train2018_2022_20260522_01",
-        "path20_data_len_liquid500_du_train2016_2022_20260522_01"
-      ],
       "verdict": "Data length / regime coverage remains a credible contributor: the long `2016-2022` run improved monthly spread positive rate from `50.0%` to `58.3%`.; Data length alone is not sufficient: both longer-window runs flipped aggregate test decision spread negative.; Current bottleneck is more likely a combination of target / selection calibration and input regime contamination than pure sample count.; Repeating larger architecture or liquid800 expansion before target / selection review is not recommended.",
       "blockers": [],
       "next_allowed_actions": [
@@ -625,14 +519,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [
-        "path20_arch_gain_liquid500_sector_v1_20260520_01",
-        "path20_decision_output_liquid500_sector_v1_20260521_01",
-        "path20_decision_output_liquid500_du_cost10_hit10_dd025_20260521_01",
-        "path20_decision_output_liquid500_du_cost20_hit10_dd010_20260521_01",
-        "path20_decision_output_liquid500_du_cost20_hit20_dd000_20260521_01"
-      ],
-      "study_tags": [
-        "alpha_path20_neural_policy_v1",
         "path20_arch_gain_liquid500_sector_v1_20260520_01",
         "path20_decision_output_liquid500_sector_v1_20260521_01",
         "path20_decision_output_liquid500_du_cost10_hit10_dd025_20260521_01",
@@ -672,10 +558,6 @@
       "run_tags": [
         "path20_decision_output_liquid500_sector_v1_20260521_01"
       ],
-      "study_tags": [
-        "alpha_path20_neural_policy_v1",
-        "path20_decision_output_liquid500_sector_v1_20260521_01"
-      ],
       "verdict": "Status: `forecast decision-output study / research / shadow-only / no promotion`.; Mainline: `alpha_path20_neural_policy_v1`.; Study tag: `path20_decision_output_liquid500_sector_v1_20260521_01`.; Evidence verdict: `forecast_promising`.",
       "blockers": [],
       "next_allowed_actions": [
@@ -703,13 +585,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [
-        "path20_decision_output_liquid500_du_cost20_hit10_dd010_20260521_01",
-        "path20_decision_output_liquid500_du_cost20_hit20_dd000_20260521_01",
-        "path20_decision_output_liquid500_stability_audit_20260521",
-        "path20_decision_output_score_selection_stability_20260521"
-      ],
-      "study_tags": [
-        "alpha_path20_neural_policy_v1",
         "path20_decision_output_liquid500_du_cost20_hit10_dd010_20260521_01",
         "path20_decision_output_liquid500_du_cost20_hit20_dd000_20260521_01",
         "path20_decision_output_liquid500_stability_audit_20260521",
@@ -750,13 +625,6 @@
         "path20_data_len_liquid500_du_train2016_2022_20260522_01",
         "path20_decision_arch_stock_mixer_liquid500_du_cost20_hit10_dd010_20260521_01"
       ],
-      "study_tags": [
-        "path20_decision_score_diagnostics_20260522",
-        "path20_decision_output_liquid500_du_cost20_hit10_dd010_20260521_01",
-        "path20_data_len_liquid500_du_train2018_2022_20260522_01",
-        "path20_data_len_liquid500_du_train2016_2022_20260522_01",
-        "path20_decision_arch_stock_mixer_liquid500_du_cost20_hit10_dd010_20260521_01"
-      ],
       "verdict": "The current GRU signal is not zero: rank IC, spread, and hit lift are positive for several aggregate scores.; Selection-only calibration did not solve monthly instability: the GRU baseline, longer train-window GRU runs, and simple score blends all keep recurring weak months, especially early-year and late-2024 months.; Longer train windows did not fix the selection problem. The `2016-2022` run improved some hit-lift and monthly-rate signals, but its aggregate spread stayed weak or negative for most decision scores.; Stock mixer is the most important exception: it has materially stronger test ranking / spread stability (`max_pred_utility` monthly positive rate `83.3%`) but negative hit lift. This suggests ranking signal exists, while the current hit / utility target contract may be miscalibrated.",
       "blockers": [
         "Treat stock mixer as a research candidate for ranking stability only; it is not a promotion candidate because hit lift failed."
@@ -782,21 +650,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [
-        "path20_pool_liquid500_sector_gru_seed7_probe_20260519_01",
-        "path20_pool_liquid800_gru_seed7_probe_20260519_01",
-        "path20_pool_liquid500_gru_seed7_probe_20260519_01",
-        "path20_pool_liquid300_gru_seed7_probe_20260519_01",
-        "path20_memmap_training_smoke_full_gru_reuse_20260518_01",
-        "path20_memmap_training_smoke_cap80_gru_patch_20260518_01",
-        "path20_memmap_training_smoke_cap80_20260518_02",
-        "path20_memmap_dataset_liquid500_sector_probe_20260519_01",
-        "path20_memmap_dataset_liquid800_probe_20260519_01",
-        "path20_memmap_dataset_liquid500_probe_20260519_01",
-        "path20_memmap_dataset_liquid300_probe_20260519_01",
-        "path20_memmap_dataset_full_repaired_20260518_01"
-      ],
-      "study_tags": [
-        "alpha_path20_neural_policy_v1",
         "path20_pool_liquid500_sector_gru_seed7_probe_20260519_01",
         "path20_pool_liquid800_gru_seed7_probe_20260519_01",
         "path20_pool_liquid500_gru_seed7_probe_20260519_01",
@@ -848,10 +701,6 @@
       "run_tags": [
         "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01"
       ],
-      "study_tags": [
-        "alpha_path20_neural_policy_v1",
-        "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01"
-      ],
       "verdict": "The multi-horizon no-alpha GRU run completed: `status=completed`, `evidence_verdict=forecast_test_confirmed`.; `trade_utility_score` passed the corrected selection calibration gate on validation and test.; Target calibration Gate A passed for `cost20_hit10_dd0.1`; utility deciles were monotonic and hit label base rate was stable across validation/test.; This is a research-stage forecast / selection candidate only; it does not authorize liquid800, multi-seed, allocator, replay, live/default, or active artifact promotion.",
       "blockers": [
         "Best-horizon distribution collapse must be treated as a calibration blocker before claiming a true horizon chooser.",
@@ -890,18 +739,12 @@
         "path20_input_ablation_no_alpha_liquid500_du_cost20_hit10_dd010_20260522_01",
         "path20_input_ablation_no_sector_static_liquid500_du_cost20_hit10_dd010_20260522_01"
       ],
-      "study_tags": [
-        "alpha_path20_neural_policy_v1",
-        "path20_gate_b_simple_baselines_liquid500_du_cost20_hit10_dd010_20260522_01",
-        "path20_input_ablation_no_alpha_liquid500_du_cost20_hit10_dd010_20260522_01",
-        "path20_input_ablation_no_sector_static_liquid500_du_cost20_hit10_dd010_20260522_01"
-      ],
       "verdict": "Fact: all three studies completed and passed validation/test decision utility profile gates in their own `study_summary.json` files.; Fact: no-alpha-prior GRU kept positive test decision rank, spread, and hit lift, so the Path20 signal is not explained only by legacy alpha-prior replay.; Fact: removing industry / board static fields preserved strong 20d forecast rank and spread, but nearly eliminated aggregate test decision spread.; Fact: simple baselines remained surprisingly competitive; `linear_last_day` was selected over `dlinear_sequence` by validation and produced positive 20d and decision metrics on test.",
       "blockers": [],
       "next_allowed_actions": [
         "Keep these three tags registered as completed Path20 research evidence.",
         "Use them as input-ablation and simple-baseline context for later `alpha_multi_horizon_utility_policy_v1` target/profile comparisons.",
-        "Before any expansion, compare no-alpha-prior, sector/static, and simple-baseline behavior under the current multi-horizon target framing with explicit study tags and active-artifact guard."
+        "Before any expansion, compare no-alpha-prior, sector/static, and simple-baseline behavior under the current multi-horizon target framing with explicit run tags and active-artifact guard."
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": [
@@ -922,11 +765,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [
-        "alpha_path20_neural_policy_v1_tiny_smoke_20260516_01"
-      ],
-      "study_tags": [
-        "alpha_path20_neural_policy_v1",
-        "alpha_path20_sequence_policy_v1",
         "alpha_path20_neural_policy_v1_tiny_smoke_20260516_01"
       ],
       "verdict": "Status: `current path20 research mainline pointer / research / shadow-only / neural-policy route`.; User decision on 2026-05-17 switches the current Path20 research mainline pointer to `alpha_path20_neural_policy_v1`.; The Path20 research mainline is intentionally switchable; this record is the current routing state, not a permanent hierarchy.; `alpha_path20_sequence_policy_v1` remains available as a shadow comparison / secondary research route, but is no longer the current Path20 mainline.",
@@ -954,12 +792,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [
-        "alpha_path20_stage1_formal_cap80_result_20260518",
-        "path20_stage1_formal_cap80_repaired_20260518_01",
-        "alpha_path20_stage1_feature_ablation_result_20260518"
-      ],
-      "study_tags": [
-        "alpha_path20_neural_policy_v1",
         "alpha_path20_stage1_formal_cap80_result_20260518",
         "path20_stage1_formal_cap80_repaired_20260518_01",
         "alpha_path20_stage1_feature_ablation_result_20260518"
@@ -999,13 +831,6 @@
         "alpha_path20_neural_policy_v1_tiny_smoke_20260516_01",
         "alpha_path20_dataset__e96ad3bf15b4df878feb1aca"
       ],
-      "study_tags": [
-        "alpha_path20_neural_policy_v1",
-        "alpha_path20_mainline_switch_status_20260517",
-        "alpha_path20_sequence_policy_v1",
-        "alpha_path20_neural_policy_v1_tiny_smoke_20260516_01",
-        "alpha_path20_dataset__e96ad3bf15b4df878feb1aca"
-      ],
       "verdict": "2026-05-17 route-switch update: the current Path20 research mainline pointer is switched to `alpha_path20_neural_policy_v1` by user decision. See `daily_research/brain/references/alpha_path20_mainline_switch_status_20260517.md`.; Path20 research mainline is a switchable routing state, not a permanent hierarchy.; The older 2026-05-16 status below is retained as historical context only.; Superseded 2026-05-16 status: `legacy / diagnostic-only / no-new-mainline-budget`.",
       "blockers": [
         "The negative linear forecaster smoke is expected at 2 epochs on a tiny slice; it should be treated as a baseline plumbing result, not a failure of the full direction."
@@ -1034,10 +859,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [],
-      "study_tags": [
-        "alpha_path20_sequence_policy_v1",
-        "alpha_path20_neural_policy_v1"
-      ],
       "verdict": "2026-05-17 route-switch update: the current Path20 research mainline pointer is switched to `alpha_path20_neural_policy_v1` by user decision. `alpha_path20_sequence_policy_v1` remains a shadow comparison / secondary research route.; Path20 research mainline is a switchable routing state, not a permanent hierarchy.; Superseded 2026-05-16 status: `main path20 research line / research / shadow-only / sequence-policy RL loop`.; Superseded 2026-05-16 statement: `alpha_path20_sequence_policy_v1` was the only active path20 main research route after the 2026-05-16 route consolidation.",
       "blockers": [
         "Projection mismatch warnings downgrade evidence interpretation to `insufficient_or_incomplete`."
@@ -1069,13 +890,6 @@
         "alpha_path20_sequence_policy_v3_walkforward_matrix_contract_20260517",
         "alpha_path20_mainline_switch_status_20260517"
       ],
-      "study_tags": [
-        "alpha_path20_sequence_policy_v2",
-        "alpha_path20_neural_policy_v1",
-        "alpha_path20_sequence_policy_v1",
-        "alpha_path20_sequence_policy_v3_walkforward_matrix_contract_20260517",
-        "alpha_path20_mainline_switch_status_20260517"
-      ],
       "verdict": "2026-05-17 route-switch update: while the current Path20 mainline pointer is `alpha_path20_neural_policy_v1`, this v2 sequence/RL contract is shadow comparison evidence.; v2 sequence/RL evidence becomes current Path20 mainline evidence only after an explicit future pointer switch.; This contract remains valid for annual episode-loop mechanics and leakage/replay boundaries.",
       "blockers": [],
       "next_allowed_actions": [],
@@ -1094,10 +908,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [
-        "path20_v3_full_year_matrix_20260517_01"
-      ],
-      "study_tags": [
-        "alpha_path20_sequence_policy_v3",
         "path20_v3_full_year_matrix_20260517_01"
       ],
       "verdict": "The v3 evidence loop is operational, but the strategy has not proved validation alpha.; 2024 positive test numbers must not be interpreted as success because 2022 validation is negative.; Decision Transformer shows low projected gross exposure in validation/test, so exposure collapse is a likely diagnostic target.; GRU has stronger test return but still failed validation, so generalization and 2022 regime behavior need diagnosis before any model promotion discussion.",
@@ -1129,10 +939,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [],
-      "study_tags": [
-        "alpha_path20_sequence_policy_v3",
-        "alpha_path20_sequence_policy_v1"
-      ],
       "verdict": "`rl-walkforward-matrix` runs fixed-family comparison for `sequence_gru` and `decision_transformer`.; Verdict levels:; `contract_passed`; `diagnosed_failure`",
       "blockers": [
         "After the 2026-05-17 full-year matrix, v3 must also diagnose failed validation evidence. `contract_passed` means the evidence loop is intact; it does not mean alpha success.",
@@ -1157,10 +963,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [],
-      "study_tags": [
-        "alpha_path20_sequence_policy_v4",
-        "alpha_path20_sequence_policy_v1"
-      ],
       "verdict": "`insufficient_or_incomplete`: artifact, data completeness, or projection parity is broken.; `contract_passed`: pipeline ran but validation did not prove usefulness.; `diagnosed_failure`: pipeline ran and selected checkpoint exists, but validation is negative or fails baseline comparison.; `validation_promising`: exact 2022 replay is positive, sharpe is positive, and baselines are beaten.",
       "blockers": [
         "`insufficient_or_incomplete`: artifact, data completeness, or projection parity is broken.",
@@ -1184,10 +986,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [],
-      "study_tags": [
-        "alpha_path20_sequence_policy_v5",
-        "alpha_path20_neural_policy_v1"
-      ],
       "verdict": "Status: `research / shadow-only / path20 v5 paper-grade Decision Transformer contract`.; 2026-05-17 route-switch update: while the current Path20 mainline pointer is `alpha_path20_neural_policy_v1`, v5 sequence/DT evidence is shadow comparison evidence, not current Path20 mainline evidence.; v5 adds `decision_transformer_v2` as an architecture and evidence contract; it does not replace the v4 `sequence_gru` validation-first baseline.; The v5 policy is pure utility training: no oracle imitation, no path-label imitation, and no future-feature input.",
       "blockers": [
         "No full-year v5 evidence run has been approved or completed in this contract update.",
@@ -1218,13 +1016,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [
-        "path20_stage1_ablation_state_v1_cap80_repaired_20260518_01",
-        "path20_stage1_ablation_raw_kline_v1_cap80_repaired_20260518_01",
-        "path20_stage1_ablation_raw_kline_context_v1_cap80_repaired_20260518_01",
-        "path20_stage1_ablation_raw_kline_context_no_alpha_prior_v1_cap80_repaired_20260518_01"
-      ],
-      "study_tags": [
-        "alpha_path20_neural_policy_v1",
         "path20_stage1_ablation_state_v1_cap80_repaired_20260518_01",
         "path20_stage1_ablation_raw_kline_v1_cap80_repaired_20260518_01",
         "path20_stage1_ablation_raw_kline_context_v1_cap80_repaired_20260518_01",
@@ -1262,13 +1053,6 @@
         "path20_stage1_pilot_cap80_repaired_20260518_04",
         "alpha_path20_stage1_feature_ablation_result_20260518"
       ],
-      "study_tags": [
-        "alpha_path20_neural_policy_v1",
-        "path20_stage1_formal_cap80_repaired_20260518_01",
-        "path20_stage1_preflight_cap80_repaired_20260518_01",
-        "path20_stage1_pilot_cap80_repaired_20260518_04",
-        "alpha_path20_stage1_feature_ablation_result_20260518"
-      ],
       "verdict": "Status: `completed capped formal forecast evidence / forecast_test_confirmed / research / shadow-only / no promotion`.; Mainline: `alpha_path20_neural_policy_v1`.; Study tag: `path20_stage1_formal_cap80_repaired_20260518_01`.; Dataset id: `policy_input_bundle__7c8f58d851bce8179e1e9e2d`.",
       "blockers": [
         "Pilot `_03` exposed a metric dtype bug: AMP/CUDA predictions could reach Pandas as `float16`, and `nlargest/nsmallest` failed during top-bottom spread computation."
@@ -1297,11 +1081,6 @@
       "study_families": [],
       "run_tags": [
         "alpha_path20_decision_score_diagnostics_20260522"
-      ],
-      "study_tags": [
-        "alpha_path20_decision_score_diagnostics_20260522",
-        "alpha_path20_neural_policy_v1",
-        "alpha_path20_sequence_policy_v1"
       ],
       "verdict": "The current Path20 GRU decision signal is not zero: several aggregate scores; Selection-only calibration has not solved monthly instability.; Longer train windows did not fix the current selection problem.; Stock mixer has stronger ranking/spread stability but failed hit-lift gates.",
       "blockers": [
@@ -1342,10 +1121,6 @@
       "run_tags": [
         "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01"
       ],
-      "study_tags": [
-        "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01",
-        "alpha_path20_neural_policy_v1"
-      ],
       "verdict": "目的：固化当前代码结构、durable 主线、风险边界和后续安全动作。; 当前最大错误风险仍是边界混写：把 short-alpha live materialization、多 horizon ranking evidence 和 continuous allocation ambition 说成一个已经集成且可 promotion 的模型。; TDX-family 代码仍存在于 legacy baseline/deep_alpha/tools 路径中；准确边界不是“代码库无 TDX 字符串”，而是“正式新研究和数据平台边界默认 TDX-free，legacy 路径隔离或显式 gated”。; data platform line：非 TDX provider refresh/import boundary、Bronze/Silver normalization、domain sidecars 与 lake registration。",
       "blockers": [
         "`continuous_policy` 仍是组合 allocation 语义最丰富的研究面，但 blocker 仍是行为质量与证据充分性，不只是训练基础设施。",
@@ -1379,7 +1154,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [],
-      "study_tags": [],
       "verdict": "Status: `brain_system_refactor / completed control-plane migration`.; Workflow: `brain`.; Active artifact impact: `daily_research/output/active_execution_strategy.json` remains unchanged by design.; Scope: brain catalog, split workflow registry, audit CLI, language policy, doc/integrity guards, and reference writeback.",
       "blockers": [],
       "next_allowed_actions": [
@@ -1402,7 +1176,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [],
-      "study_tags": [],
       "verdict": "Status: `current infrastructure mainline / data_lake_universal_repair / research / shadow-only / no promotion`.; The current work pointer is temporarily switched from Path20 Stage 1 training to universal data-lake repair because the base policy input bundle must be trustworthy before forecast evidence is interpretable.; Boundary: this contract repairs data correctness and auditability only. It does not change live/default execution and does not modify `daily_research/output/active_execution_strategy.json`.",
       "blockers": [
         "Do not run Path20 Stage 1 formal training on `policy_input_bundle__0f116a9b78c92ff045a6853d` for `2019-2024`; use the repaired full bundle instead.",
@@ -1437,7 +1210,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [],
-      "study_tags": [],
       "verdict": "",
       "blockers": [],
       "next_allowed_actions": [],
@@ -1458,9 +1230,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [],
-      "study_tags": [
-        "alpha_path20_neural_policy_v1"
-      ],
       "verdict": "Status: `implemented memory-safe forecast dataset/training pipe / research / shadow-only / no promotion`.; Current Path20 research mainline remains `alpha_path20_neural_policy_v1`.; This work repairs full-universe training feasibility; it is not a model-quality or live/default promotion claim.; `promotion_allowed=false`, `shadow_only=true`, and `active_execution_strategy_expected_diff=none`.",
       "blockers": [
         "The previous full-universe blocker was not the repaired lake itself, but the eager `[N,252,F]` training sample materialization.",
@@ -1489,11 +1258,6 @@
       "run_tags": [
         "alpha_path20_mainline_switch_status_20260517"
       ],
-      "study_tags": [
-        "alpha_path20_neural_policy_v1",
-        "alpha_path20_mainline_switch_status_20260517",
-        "alpha_path20_sequence_policy_v1"
-      ],
       "verdict": "",
       "blockers": [
         "Annual completeness is part of evidence quality. A year with fewer than 180 trading days is an incomplete artifact, not a failed strategy and not aggregate evidence."
@@ -1518,7 +1282,6 @@
       ],
       "study_families": [],
       "run_tags": [],
-      "study_tags": [],
       "verdict": "",
       "blockers": [
         "Direct script execution of `daily_research/path_policy/run_alpha_path20_protocol.py --help` failed before the fix because package imports could not resolve `daily_research`; module execution with `-m daily_research.path_policy.run_alpha_path20_protocol --help` worked.",
@@ -1551,10 +1314,6 @@
         "self_opt_study_r50_integrated_convex_capital_flow_true_solver_smoke_20260509_1852",
         "self_opt_study_r50_integrated_convex_capital_flow_true_solver_smoke_20260509_1852__trial_01__train"
       ],
-      "study_tags": [
-        "self_opt_study_r50_integrated_convex_capital_flow_true_solver_smoke_20260509_1852",
-        "self_opt_study_r50_integrated_convex_capital_flow_true_solver_smoke_20260509_1852__trial_01__train"
-      ],
       "verdict": "",
       "blockers": [],
       "next_allowed_actions": [],
@@ -1574,9 +1333,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [
-        "self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01"
-      ],
-      "study_tags": [
         "self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01"
       ],
       "verdict": "Verdict: `r52d screening-only failed confirmatory eligibility`.",
@@ -1604,10 +1360,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [
-        "self_opt_study_r52e_deployment_cash_exposure_closure_screening_safe_20260511_01",
-        "self_opt_study_r52e_deployment_cash_exposure_closure_screening_safe_20260511_01__trial_01__audit_recomputed_after_closure_fix_20260512_01"
-      ],
-      "study_tags": [
         "self_opt_study_r52e_deployment_cash_exposure_closure_screening_safe_20260511_01",
         "self_opt_study_r52e_deployment_cash_exposure_closure_screening_safe_20260511_01__trial_01__audit_recomputed_after_closure_fix_20260512_01"
       ],
@@ -1644,11 +1396,6 @@
         "self_opt_study_r53_cash_funded_allocation_core_screening_safe_20260512_03",
         "self_opt_study_r53_cash_funded_allocation_core_screening_safe_20260512_03__trial_03"
       ],
-      "study_tags": [
-        "self_opt_study_r53_cash_funded_allocation_core_dryrun_20260512_03",
-        "self_opt_study_r53_cash_funded_allocation_core_screening_safe_20260512_03",
-        "self_opt_study_r53_cash_funded_allocation_core_screening_safe_20260512_03__trial_03"
-      ],
       "verdict": "r53 has a valid code contract and safe-screening evidence that the high-cash / low-budget deployment bug is materially improved.; r53 is not a strategy-success verdict.; r53 must not enter confirmatory, strict resume, promotion, live/default, or active artifact changes yet.; all screening trials still have `training_evidence_status=insufficient`;",
       "blockers": [
         "Safe screening `self_opt_study_r53_cash_funded_allocation_core_screening_safe_20260512_03` completed `3/3` screening trials, `0` failed trials, `confirmatory_enabled=false`, `confirmatory_completed_trial_count=0`.",
@@ -1678,13 +1425,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [
-        "self_opt_study_r54_semantic_budget_controller_dryrun_20260512_02",
-        "self_opt_study_r54_semantic_budget_controller_screening_safe_20260512_02",
-        "self_opt_study_r54_semantic_budget_controller_screening_safe_20260512_02__trial_02",
-        "self_opt_study_r54_semantic_budget_controller_screening_safe_20260512_02__trial_03",
-        "protocol_summary"
-      ],
-      "study_tags": [
         "self_opt_study_r54_semantic_budget_controller_dryrun_20260512_02",
         "self_opt_study_r54_semantic_budget_controller_screening_safe_20260512_02",
         "self_opt_study_r54_semantic_budget_controller_screening_safe_20260512_02__trial_02",
@@ -1726,10 +1466,6 @@
         "self_opt_study_r55_cash_timing_release_controller_dryrun_20260512_01",
         "self_opt_study_r55_cash_timing_release_controller_screening_safe_20260512_01"
       ],
-      "study_tags": [
-        "self_opt_study_r55_cash_timing_release_controller_dryrun_20260512_01",
-        "self_opt_study_r55_cash_timing_release_controller_screening_safe_20260512_01"
-      ],
       "verdict": "Current verdict: r55 is a useful diagnostic/code-contract and screening improvement over r54 composite, but not a strategy-success verdict.",
       "blockers": [
         "Added artifact diagnostics for abnormal trial exits: failed trials can record JSON existence/parse state/exit code, but failed trial `completed_evidence` is forced to `0.0`.",
@@ -1763,7 +1499,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [],
-      "study_tags": [],
       "verdict": "",
       "blockers": [
         "RED: `test_training_runtime_acceleration.py` failed with missing module before implementation.",
@@ -1786,14 +1521,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [
-        "self_opt_study_r56_release_first_constrained_decoder_dryrun_20260513_01",
-        "self_opt_study_r56_release_first_constrained_decoder_screening_safe_20260513_01",
-        "self_opt_study_r56_release_first_constrained_decoder_screening_safe_20260513_02",
-        "self_opt_study_r56_release_first_constrained_decoder_screening_safe_20260513_03",
-        "self_opt_study_r56_release_first_constrained_decoder_screening_safe_20260513_04",
-        "protocol_summary"
-      ],
-      "study_tags": [
         "self_opt_study_r56_release_first_constrained_decoder_dryrun_20260513_01",
         "self_opt_study_r56_release_first_constrained_decoder_screening_safe_20260513_01",
         "self_opt_study_r56_release_first_constrained_decoder_screening_safe_20260513_02",
@@ -1832,7 +1559,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [],
-      "study_tags": [],
       "verdict": "The project had entered a framework-complexity loop: adding more runner layers and loss/profile variants was increasing operational surface without producing completed r56 behavior evidence.; r58 deliberately does not judge strategy quality. It restores a smaller operating loop so r56/r59 research can be evaluated through completed protocol summaries rather than orchestration machinery.",
       "blockers": [],
       "next_allowed_actions": [],
@@ -1854,12 +1580,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [
-        "protocol_r59_core_v4_direct_smoke_20260513_03",
-        "protocol_summary",
-        "protocol_r59_core_v4_direct_smoke_20260513_03__train",
-        "self_opt_study_r59_core_v4_release_first_dryrun_20260513_01"
-      ],
-      "study_tags": [
         "protocol_r59_core_v4_direct_smoke_20260513_03",
         "protocol_summary",
         "protocol_r59_core_v4_direct_smoke_20260513_03__train",
@@ -1892,11 +1612,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [
-        "protocol_r60_profile_bound_core_v4_smoke_20260513_01",
-        "self_opt_study_r60_profile_bound_core_v4_dryrun_20260513_01",
-        "self_opt_study_r60_profile_bound_core_v4_screening_safe_20260513_01"
-      ],
-      "study_tags": [
         "protocol_r60_profile_bound_core_v4_smoke_20260513_01",
         "self_opt_study_r60_profile_bound_core_v4_dryrun_20260513_01",
         "self_opt_study_r60_profile_bound_core_v4_screening_safe_20260513_01"
@@ -1935,13 +1650,6 @@
         "self_opt_study_r61_release_first_decision_core_v4_screening_safe_20260514_01",
         "self_opt_study_r61_release_first_decision_core_v4_screening_safe_20260514_01__trial_01"
       ],
-      "study_tags": [
-        "protocol_summary",
-        "protocol_r61_release_first_decision_core_v4_smoke_20260514_03",
-        "self_opt_study_r61_release_first_decision_core_v4_dryrun_20260514_02",
-        "self_opt_study_r61_release_first_decision_core_v4_screening_safe_20260514_01",
-        "self_opt_study_r61_release_first_decision_core_v4_screening_safe_20260514_01__trial_01"
-      ],
       "verdict": "Fact: r61 fixed several infrastructure and wiring blockers from r60. Profile binding, core-v4 v47 loss resolution, reusable dataset cache, release-flow trace, and protocol diagnostics all work.; Fact: release/source is no longer fully absent in evaluation, but it is far below the r61 floor of `>= 1.0`; shadow remains fully source-dead.; Inference: the release/source/receiver/target-delta loop is still not behavior-closed. The current blocker is not a generic need for more loss weight. It is that held negative delta and executable source semantics are still not produced reliably enough for the allocator.; Inference: the very high intent translation conflict rate means target intent and final execution semantics remain misaligned even when target-sum closure is clean.",
       "blockers": [
         "Screening study tag attempted: `self_opt_study_r61_release_first_decision_core_v4_screening_safe_20260514_01`.",
@@ -1971,7 +1679,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [],
-      "study_tags": [],
       "verdict": "r62 implements a local research data lake using DuckDB catalog metadata plus Parquet storage.; Scope completed: reusable catalog APIs, Bronze/Silver market-feature storage, Gold training dataset registration, train-policy lake-backed reuse with legacy pickle fallback, and CLI tooling.; Boundary: this is research infrastructure only. It does not change live/default/promotion behavior and does not modify `daily_research/output/active_execution_strategy.json`.",
       "blockers": [
         "Full Gold construction for `2010-01-04` to `2026-05-13`, uncapped `learned_all_a`, is not complete.",
@@ -2006,10 +1713,9 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [],
-      "study_tags": [],
-      "verdict": "Fact: r63 adds `daily_research/brain/brain_operating_protocol.md` as a compact operating protocol for task capsules, preflight, evidence rules, and writeback discipline.; Fact: `brain_workflow.py` now exposes `capsule`, `evidence-index`, and `query` commands in addition to existing handoff/status/preflight/writeback-plan paths.; Fact: `daily_research/brain/references/evidence_registry.json` is now the machine-readable index for reference evidence. It indexes recent r-number docs, study tags, blockers, next actions, active-artifact impact, and dataset ids.; Fact: repo-canonical project skill `daily_research/brain/skills/daily-research-brain` now exists and points agents to brain capsule/preflight/query/writeback commands without copying long r-number history.",
+      "verdict": "Fact: r63 adds `daily_research/brain/brain_operating_protocol.md` as a compact operating protocol for task capsules, preflight, evidence rules, and writeback discipline.; Fact: `brain_workflow.py` now exposes `capsule`, `evidence-index`, and `query` commands in addition to existing handoff/status/preflight/writeback-plan paths.; Fact: `daily_research/brain/references/evidence_registry.json` is now the machine-readable index for reference evidence. It indexes recent r-number docs, registry v3 program/family/run fields, blockers, next actions, active-artifact impact, and dataset ids.; Fact: repo-canonical project skill `daily_research/brain/skills/daily-research-brain` now exists and points agents to brain capsule/preflight/query/writeback commands without copying long r-number history.",
       "blockers": [
-        "Fact: `daily_research/brain/references/evidence_registry.json` is now the machine-readable index for reference evidence. It indexes recent r-number docs, study tags, blockers, next actions, active-artifact impact, and dataset ids.",
+        "Fact: `daily_research/brain/references/evidence_registry.json` is now the machine-readable index for reference evidence. It indexes recent r-number docs, registry v3 program/family/run fields, blockers, next actions, active-artifact impact, and dataset ids.",
         "Fact: `brain_rules.py` adds phased guard checks for active artifact diffs, stale loose latest pointers, failed-trial completed-evidence mistakes, full Gold claims without catalog evidence, and realtime-tail training evidence misuse."
       ],
       "next_allowed_actions": [
@@ -2034,7 +1740,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [],
-      "study_tags": [],
       "verdict": "Fact: r64 adds a resumable, sharded Gold training dataset builder for the DuckDB + Parquet research data lake.; Fact: the builder uses the existing full-universe Bronze/Silver dataset `policy_input_bundle__0f116a9b78c92ff045a6853d` instead of refetching from TQ.; Fact: the first full-universe lake-backed smoke passed for uncapped `learned_all_a` with `3,070` symbols over `2019-01-02` to `2019-06-30`.; Fact: full-window strict Gold now exists for uncapped `learned_all_a`, sourced from `policy_input_bundle__0f116a9b78c92ff045a6853d`.",
       "blockers": [
         "Full-window `strict_train` Gold is no longer blocked.",
@@ -2074,13 +1779,6 @@
         "self_opt_study_r65_portfolio_set_v5_screening_safe_20260514_01",
         "self_opt_study_r65_portfolio_set_v5_screening_safe_20260514_01__trial_01"
       ],
-      "study_tags": [
-        "protocol_r65_portfolio_set_v5_smoke_20260514_01",
-        "protocol_summary",
-        "self_opt_study_r65_portfolio_set_v5_dryrun_20260514_01",
-        "self_opt_study_r65_portfolio_set_v5_screening_safe_20260514_01",
-        "self_opt_study_r65_portfolio_set_v5_screening_safe_20260514_01__trial_01"
-      ],
       "verdict": "Status: `research / shadow-only / architecture upgrade`.; Production anchor: `daily_research/output/active_execution_strategy.json` remains unchanged.; Active live strategy remains `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`.; r65 adds the parallel backend `formal_torch_portfolio_set_v5` to replace MLP-style core-v4 as the next research mainline, without replacing v3/v4 artifact loading.",
       "blockers": [
         "Screening study tag attempted: `self_opt_study_r65_portfolio_set_v5_screening_safe_20260514_01`.",
@@ -2111,7 +1809,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [],
-      "study_tags": [],
       "verdict": "Status: `brain / workflow maintenance / control-plane compaction`.; Production anchor: `daily_research/output/active_execution_strategy.json` remains unchanged.; This is not strategy evidence, training evidence, promotion support, live/default change, or continuous_policy effectiveness evidence.; This note uses explicit brain-tool checks and file paths only; it does not infer conclusions from loose `latest_*`.",
       "blockers": [
         "Compacted `daily_research/brain/continuous_policy_design_contract.md` into current design boundaries, active r65 research contract, success criteria, known blockers, and historical index.",
@@ -2137,13 +1834,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [
-        "protocol_r67_paper_dfl_replace_v5_smoke_20260514_01",
-        "protocol_r67_paper_dfl_replace_v5_smoke_20260514_02",
-        "protocol_r67_paper_dfl_replace_v5_smoke_20260514_02__audit_recheck_after_max_universe_fix",
-        "protocol_r67_paper_dfl_replace_v5_smoke_20260514_04",
-        "protocol_summary"
-      ],
-      "study_tags": [
         "protocol_r67_paper_dfl_replace_v5_smoke_20260514_01",
         "protocol_r67_paper_dfl_replace_v5_smoke_20260514_02",
         "protocol_r67_paper_dfl_replace_v5_smoke_20260514_02__audit_recheck_after_max_universe_fix",
@@ -2192,12 +1882,6 @@
         "protocol_r68_cashflow_decision_v1_close_v5_smoke_20260514_03",
         "protocol_summary"
       ],
-      "study_tags": [
-        "protocol_r68_cashflow_decision_v1_close_v5_smoke_20260514_01",
-        "protocol_r68_cashflow_decision_v1_close_v5_smoke_20260514_02",
-        "protocol_r68_cashflow_decision_v1_close_v5_smoke_20260514_03",
-        "protocol_summary"
-      ],
       "verdict": "Status: `research / shadow-only / source-translation closure evidence`.; Production anchor: `daily_research/output/active_execution_strategy.json` unchanged.; Live default remains `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`.; r68 adds a shared `portfolio_cashflow_decision_v1` contract so v5 prediction, simulator, release trace, and continuity metrics use the same source / receiver / cash semantics.",
       "blockers": [
         "Failed promotion checks include `contract_promotable`, `training_evidence_sufficient`, `open_win_rate_5d`, `exit_timeliness_rate_5d`, `cash_timing_quality_1d`, `max_drawdown`, `shadow_reversal`, `annual_return_vs_active`, and `sharpe_vs_active`.",
@@ -2234,12 +1918,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [
-        "protocol_r69_value_arbitration_v5_behavior_smoke_20260514_01",
-        "protocol_r69_value_arbitration_v5_behavior_smoke_20260514_02",
-        "protocol_r69_value_arbitration_v5_behavior_traincheck_20260514_03",
-        "protocol_r68_cashflow_decision_v1_close_v5_smoke_20260514_03"
-      ],
-      "study_tags": [
         "protocol_r69_value_arbitration_v5_behavior_smoke_20260514_01",
         "protocol_r69_value_arbitration_v5_behavior_smoke_20260514_02",
         "protocol_r69_value_arbitration_v5_behavior_traincheck_20260514_03",
@@ -2283,10 +1961,6 @@
         "protocol_r70_v5_version_boundary_oracle_repair_smoke_20260514_01",
         "protocol_r69_value_arbitration_v5_behavior_traincheck_20260514_03"
       ],
-      "study_tags": [
-        "protocol_r70_v5_version_boundary_oracle_repair_smoke_20260514_01",
-        "protocol_r69_value_arbitration_v5_behavior_traincheck_20260514_03"
-      ],
       "verdict": "Status: `research / shadow-only / version-boundary and mechanism-repair evidence`.; Production anchor: `daily_research/output/active_execution_strategy.json` unchanged.; Live default remains `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`.; r70 restores the base portfolio-set v5 internal version to `portfolio_set_v5_dfl_pg_v1` and keeps `portfolio_set_v5_dfl_pg_v1_r69_value_arbitration` behind explicit loss/profile or artifact metadata.",
       "blockers": [
         "r70 repairs the r69 oracle constraint violation and allows the tiny strict-Gold behavior smoke to complete past the previous TDX empty-batch blocker.",
@@ -2322,13 +1996,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [
-        "protocol_r71_multistage_regret_v5_behavior_smoke_20260514_01",
-        "protocol_r71_multistage_regret_v5_behavior_smoke_20260514_02",
-        "protocol_r71_multistage_regret_v5_behavior_smoke_20260514_03",
-        "protocol_r71_multistage_regret_v5_behavior_smoke_20260514_04",
-        "protocol_r70_v5_version_boundary_oracle_repair_smoke_20260514_01"
-      ],
-      "study_tags": [
         "protocol_r71_multistage_regret_v5_behavior_smoke_20260514_01",
         "protocol_r71_multistage_regret_v5_behavior_smoke_20260514_02",
         "protocol_r71_multistage_regret_v5_behavior_smoke_20260514_03",
@@ -2376,10 +2043,6 @@
         "protocol_r71_multistage_regret_v5_behavior_lake_smoke_20260515_01",
         "protocol_r71_multistage_regret_v5_behavior_lake_smoke_20260515_02"
       ],
-      "study_tags": [
-        "protocol_r71_multistage_regret_v5_behavior_lake_smoke_20260515_01",
-        "protocol_r71_multistage_regret_v5_behavior_lake_smoke_20260515_02"
-      ],
       "verdict": "Status: `research / shadow-only / infrastructure progress`.; Scope completed: `evaluate_policy.py`, protocol shadow, export, behavior audit, and related helper CLIs can use `data_source=lake`.; Default market lake dataset: `policy_input_bundle__0f116a9b78c92ff045a6853d`.; Training remains strict Gold by default for portfolio-set v5: `continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`.",
       "blockers": [
         "Lake coverage preflight reports `lake_coverage_blocker` for missing market fields, benchmark, membership, or insufficient trading days.",
@@ -2415,9 +2078,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [
-        "protocol_r73_lake_native_r71_collapse_repair_smoke_20260515_02"
-      ],
-      "study_tags": [
         "protocol_r73_lake_native_r71_collapse_repair_smoke_20260515_02"
       ],
       "verdict": "Status: `research / shadow-only / lake-native utilization and r71 collapse-repair evidence`.; Production anchor: `daily_research/output/active_execution_strategy.json` unchanged.; Live default remains `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`.; Training dataset remains strict Gold: `continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`.",
@@ -2458,10 +2118,6 @@
         "protocol_r74_lake_behavior_quality_v5_smoke_20260515_03",
         "protocol_r73_lake_native_r71_collapse_repair_smoke_20260515_02"
       ],
-      "study_tags": [
-        "protocol_r74_lake_behavior_quality_v5_smoke_20260515_03",
-        "protocol_r73_lake_native_r71_collapse_repair_smoke_20260515_02"
-      ],
       "verdict": "Status: `research / shadow-only / lake-native behavior-quality evidence`.; Production anchor: `daily_research/output/active_execution_strategy.json` unchanged.; Live default remains `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`.; Training dataset remains strict Gold: `continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`.",
       "blockers": [
         "`training_evidence.status=insufficient`.",
@@ -2497,7 +2153,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [],
-      "study_tags": [],
       "verdict": "Scope: `daily_research` 数据入口、每日更新流水线、正式研究数据边界。; 第一版 provider 计划以非 TDX 源为主：`eastmoney_efinance`、`akshare_eastmoney`、`baostock`、`tushare_http_optional`、`sina_tencent_realtime`；其中 `tushare_http_optional` 仅在 token 配置后启用，`sina_tencent_realtime` 当前只作为后续实时/盘后补充边界。; 正确边界是 `online providers -> Bronze raw -> Silver canonical -> Gold/research lake`，研究和训练只读已落地、可审计、可复现的数据集。",
       "blockers": [],
       "next_allowed_actions": [
@@ -2524,7 +2179,6 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [],
-      "study_tags": [],
       "verdict": "Scope: `daily_research.data_platform` 多 domain refresh、CSV 入湖、research lake sidecar metadata 与正式研究数据边界。; 研究、训练和 diagnostics 必须只读 explicit lake dataset id；在线抓取只允许发生在 data platform refresh/import 边界内。",
       "blockers": [],
       "next_allowed_actions": [

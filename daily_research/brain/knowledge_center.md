@@ -11,8 +11,8 @@
 - 当前统一权重语义是 `research_raw_target_weight`；当前统一上限语义是 `follow_research_raw_no_global_cap`。
 - 所有主线都是可显式切换的当前工作指针；切换后按切换后的主线继续，旧主线保留为历史或对照证据。
 - 多 Horizon 交易效用排序当前研究主线指针是 `alpha_multi_horizon_utility_policy_v1`；这是 research mainline，不是 live/default 或 active execution mainline。
-- evidence registry v2 使用三层证据索引：`research_programs` 表示稳定研究主线，`study_families` 表示阶段/实验族，`run_tags` 表示物理 run 实例；旧 `study_tags` 仅作兼容与反查，不再承担主线语义。
-- `Path20` / `alpha_path20_neural_policy_v1` 是历史证据代号、代码 namespace 和旧 study tag namespace，不再代表当前目标定义；新研究应写成多 horizon utility / ranking / calibration，而不是固定 20 日路径预测。
+- evidence registry v3 使用三层证据索引：`research_programs` 表示稳定研究主线，`study_families` 表示阶段/实验族，`run_tags` 表示物理 run 实例；registry 只输出和读取这三层，不再存在旧 `study_tags` 字段。
+- `Path20` / `alpha_path20_neural_policy_v1` 是历史证据代号和代码 namespace，不再代表当前目标定义；历史 run 仍按原字符串引用，新研究应写成多 horizon utility / ranking / calibration，而不是固定 20 日路径预测。
 - continuous_policy 的终局目标是日级连续交易执行模型，不是固定调仓或人工执行桥。
 - r39 仍是 continuous_policy 有效证据基线；r40-r74 是 research / shadow 升级链或基础设施证据。
 - r64 full-window strict Gold 是当前 reusable training-safe Gold 数据集；realtime Gold 仍不能作为 completed training evidence。
@@ -79,8 +79,8 @@
 ## 5. 当前方法论
 - 先直接 protocol smoke，再 study dry-run，再 safe screening；不得跳到 confirmatory。
 - 每个重大研究结论必须写成 facts / inferences / assumptions / boundary。
-- explicit dataset id、study tag、protocol tag 优先于 loose latest。
-- 新多 horizon utility 实验 tag 应优先使用 `mh_utility_...` 前缀并显式写 horizon grid；旧 `path20_...` tag 只作为历史 / 兼容 evidence 命名，不得让命名把目标拉回固定 20 日路径误差。
+- explicit dataset id、protocol tag、run tag 和 reference doc 优先于 loose latest。
+- 新多 horizon utility 实验必须归入明确的 `research_programs` 和 `study_families`；run tag 只表示物理实例，应显式写 pool、feature、model、seed、年份、output/loss、成本参数和 horizon grid，不得让命名把目标拉回固定 20 日路径误差。
 - 模型输入、架构、输出、loss、horizon grid 或训练配置的结论必须声明证据等级；低预算探索可以提出 follow-up，但不能作为“更好/更差/已失败/已通过”的稳定判断。
 - 正式训练、评估和 diagnostics 必须读取显式 `policy_input_bundle__...` / Gold dataset id；不得在训练或诊断过程中临时在线抓取行情。
 - 若 source/reduce/exit 仍为 0，结论必须写成行为闭环未打通，不能包装成“更多 epoch/loss”。

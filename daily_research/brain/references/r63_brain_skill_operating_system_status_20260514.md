@@ -5,7 +5,7 @@ Date: `2026-05-14`
 ## Summary
 - Fact: r63 adds `daily_research/brain/brain_operating_protocol.md` as a compact operating protocol for task capsules, preflight, evidence rules, and writeback discipline.
 - Fact: `brain_workflow.py` now exposes `capsule`, `evidence-index`, and `query` commands in addition to existing handoff/status/preflight/writeback-plan paths.
-- Fact: `daily_research/brain/references/evidence_registry.json` is now the machine-readable index for reference evidence. It indexes recent r-number docs, study tags, blockers, next actions, active-artifact impact, and dataset ids.
+- Fact: `daily_research/brain/references/evidence_registry.json` is now the machine-readable index for reference evidence. It indexes recent r-number docs, registry v3 program/family/run fields, blockers, next actions, active-artifact impact, and dataset ids.
 - Fact: repo-canonical project skill `daily_research/brain/skills/daily-research-brain` now exists and points agents to brain capsule/preflight/query/writeback commands without copying long r-number history.
 - Fact: `install_project_skills.py --dry-run` reports the skill sync plan but does not install globally unless `--install` is explicitly used.
 - Fact: `brain_rules.py` adds phased guard checks for active artifact diffs, stale loose latest pointers, failed-trial completed-evidence mistakes, full Gold claims without catalog evidence, and realtime-tail training evidence misuse.

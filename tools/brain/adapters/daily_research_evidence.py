@@ -15,7 +15,7 @@ REFERENCE_FILE_PATTERNS = (
     re.compile(r"^execution_.+\.md$"),
     re.compile(r"^(brain_native|brain_system|api_agent)_.+\.md$"),
 )
-STUDY_TAG_PATTERN = re.compile(
+RUN_TAG_PATTERN = re.compile(
     r"\b(?:self_opt_study|protocol|path20|alpha_path20|mh_utility|mh_short|mh_mid|mh_long|mh_out|mh_grid|mh25)_[A-Za-z0-9_]+"
 )
 RESEARCH_PROGRAM_PATTERN = re.compile(r"\balpha_multi_horizon_utility_policy_v\d+\b")
@@ -26,13 +26,9 @@ RUN_INSTANCE_MARKER_PATTERN = re.compile(
     r"(?:20\d{6}|seed\d+|\br\d+[a-z]?\b|protocol_|study_|smoke_|dryrun_|fullgrid|daily\d|liquid\d|h\d)",
     re.IGNORECASE,
 )
-STUDY_TAG_SECTION_HEADINGS = (
-    "study tags",
-    "study tag",
+RUN_TAG_SECTION_HEADINGS = (
     "run tags",
     "run tag",
-    "study ids",
-    "study id",
 )
 STATUS_FAMILY_MAP = (
     ("stage25_completed", "stage25_stability_calibration"),
@@ -120,8 +116,8 @@ def extra_tags(path: Path, text: str, workflow: str) -> list[str]:
     return _dedupe(tags)
 
 
-def study_tags(text: str) -> list[str]:
-    candidates = [*STUDY_TAG_PATTERN.findall(text), *_section_code_tokens(text, STUDY_TAG_SECTION_HEADINGS)]
+def _candidate_run_tokens(text: str) -> list[str]:
+    candidates = [*RUN_TAG_PATTERN.findall(text), *_section_code_tokens(text, RUN_TAG_SECTION_HEADINGS)]
     research_program_tokens = set(RESEARCH_PROGRAM_PATTERN.findall(text))
     return _dedupe(tag for tag in candidates if tag not in research_program_tokens)
 
@@ -132,7 +128,7 @@ def research_programs(text: str) -> list[str]:
     if (
         "alpha multi-horizon" in lower
         or "alpha_multi_horizon" in lower
-        or any(tag.startswith(("mh_", "mh25_")) for tag in study_tags(text))
+        or any(tag.startswith(("mh_", "mh25_")) for tag in _candidate_run_tokens(text))
     ):
         programs.append("alpha_multi_horizon_utility_policy_v1")
     return _dedupe(programs)
@@ -140,7 +136,7 @@ def research_programs(text: str) -> list[str]:
 
 def run_tags(text: str) -> list[str]:
     programs = set(research_programs(text))
-    return _dedupe(tag for tag in study_tags(text) if tag not in programs and _is_run_instance_tag(tag))
+    return _dedupe(tag for tag in _candidate_run_tokens(text) if tag not in programs and _is_run_instance_tag(tag))
 
 
 def study_families(text: str) -> list[str]:

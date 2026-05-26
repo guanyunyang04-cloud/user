@@ -18,7 +18,7 @@
   - `target_calibration_audit.json`
   - `decision_score_diagnostics.json`
 - Run log: `daily_research/output/path_policy/studies/mh_output_aux_grid_full_comparison_20260525_01_stage1_run_log.jsonl`.
-- Study tags:
+- Run tags:
   - `mh_out_forecast_path_v1_baseline_fullgrid_seed7_20260525_01`
   - `mh_out_forecast_path_v1_baseline_fullgrid_seed11_20260525_01`
   - `mh_out_forecast_path_v1_baseline_fullgrid_seed19_20260525_01`

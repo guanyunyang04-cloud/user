@@ -22,7 +22,7 @@
 - 新研究主线名固定为 `alpha_multi_horizon_utility_policy_v1`。
 - 新实验 tag 默认使用 `mh_utility_...` 前缀，并显式写入 horizon grid。
 - 旧 `path20_...` tag、`alpha_path20_neural_policy_v1`、`alpha_path20_sequence_policy_v1` 和 `daily_research.path_policy.run_alpha_path20_protocol` 保留为历史证据、shadow comparison 或代码 namespace。
-- 不批量改写历史 reference、study tag、artifact path 或输出目录；历史名字是证据轨迹的一部分。
+- 不批量改写历史 reference、run tag、artifact path 或输出目录；历史名字是证据轨迹的一部分。
 
 ## 边界
 - 本次是命名与治理迁移，不是 live/default、promotion、allocator、replay 或 active artifact 变更。

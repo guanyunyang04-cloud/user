@@ -3,7 +3,7 @@
 ## Scope
 - Status: `research / post-hoc calibration / shadow-only / no retraining / no promotion`.
 - Mainline: `alpha_multi_horizon_utility_policy_v1`.
-- Source study tag: `path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01`.
+- Source run tag: `path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01`.
 - Calibration artifact tag: `mh_utility_horizon_calibration_posthoc_20260524_01`.
 - Dataset id: `policy_input_bundle__7c8f58d851bce8179e1e9e2d`.
 - Model family: `gru_sequence_static_context`; seed `7`; feature profile `raw_kline_context_no_alpha_prior_v1`.

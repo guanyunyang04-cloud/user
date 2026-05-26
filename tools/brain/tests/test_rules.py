@@ -34,14 +34,14 @@ class BrainRulesTest(unittest.TestCase):
             mismatch_reason = "mismatch"
 
         with patch.object(brain_rules.daily_research_adapter, "resolve_artifact_freshness", return_value=Freshness()):
-            finding = finding_for_stale_latest_without_explicit_tag(has_explicit_study_tag=False)
+            finding = finding_for_stale_latest_without_explicit_tag(has_explicit_run_tag=False)
 
         self.assertIsNotNone(finding)
         self.assertEqual(finding.code, "loose_latest_stale_requires_explicit_tag")
 
     def test_active_artifact_diff_is_hard_failure(self) -> None:
         with patch.object(brain_rules, "_run_git_diff_name", return_value="diff --git ..."):
-            payload = brain_rules.run_brain_rules(has_explicit_study_tag=True, check_control_plane_lengths=False)
+            payload = brain_rules.run_brain_rules(has_explicit_run_tag=True, check_control_plane_lengths=False)
 
         self.assertEqual(payload["status"], "failed")
         self.assertIn("active_artifact_diff", {finding["code"] for finding in payload["findings"]})
@@ -89,7 +89,7 @@ class BrainRulesTest(unittest.TestCase):
 
     def test_run_brain_rules_checks_shadow_promotional_evidence(self) -> None:
         payload = brain_rules.run_brain_rules(
-            has_explicit_study_tag=True,
+            has_explicit_run_tag=True,
             check_control_plane_lengths=False,
             evidence_summaries=[
                 {
@@ -121,4 +121,3 @@ class BrainRulesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

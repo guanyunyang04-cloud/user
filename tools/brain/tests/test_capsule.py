@@ -111,7 +111,7 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertIn("active_artifact_guard", payload["guards"])
         self.assertNotIn("state_summary", payload["child_context"])
         self.assertNotIn("hard_rules", payload["child_context"])
-        self.assertNotIn("latest_output_studies", payload["guards"].get("frontier_report", {}))
+        self.assertNotIn("latest_output_runs", payload["guards"].get("frontier_report", {}))
 
     def test_capsule_multi_horizon_registry_fallback_attaches_daily_research_child_context(self) -> None:
         payload = build_task_capsule(task="alpha_multi_horizon_utility_policy_v1 根因审计", workflow="auto")
@@ -149,7 +149,7 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertEqual(payload["context_profile"], "full")
         self.assertIn("state_summary", payload["child_context"])
         self.assertIn("hard_rules", payload["child_context"])
-        self.assertIn("latest_output_studies", payload["guards"]["frontier_report"])
+        self.assertIn("latest_output_runs", payload["guards"]["frontier_report"])
 
     def test_capsule_workspace_governance_has_no_daily_research_state_summary(self) -> None:
         payload = build_task_capsule(task="主脑 capsule 重构", workflow="auto")

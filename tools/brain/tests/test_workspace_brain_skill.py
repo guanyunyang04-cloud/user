@@ -33,6 +33,15 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertIn("brain_runtime.py health", text)
         self.assertNotIn("r10-r52", text)
 
+    def test_skill_uses_program_family_run_evidence_model(self) -> None:
+        text = SKILL.read_text(encoding="utf-8")
+
+        self.assertIn("research_programs", text)
+        self.assertIn("study_families", text)
+        self.assertIn("run_tags", text)
+        self.assertIn("program/family/run", text)
+        self.assertNotIn("Prefer explicit study tags", text)
+
     def test_skill_does_not_offer_generic_workflow_fallback(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
 
@@ -255,7 +264,7 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertIn(candidate["target_layer"], {"workflow_selector", "capsule_contract", "skill", "tests_guard"})
         self.assertTrue(candidate["requires_user_confirmation"])
 
-    def test_brain_runtime_review_detects_study_evidence_domain_mismatch(self) -> None:
+    def test_brain_runtime_review_detects_run_evidence_domain_mismatch(self) -> None:
         result = subprocess.run(
             [
                 PYTHON,
@@ -264,7 +273,7 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
                 "--cwd",
                 str(ROOT),
                 "--task",
-                "writeback-plan 对 path_policy study tag 查 continuous_policy/studies",
+                "writeback-plan 对 path_policy run tag 查 continuous_policy/studies",
                 "--observation",
                 "工具被手工绕过：证据域错路由导致 path_policy/studies 证据查成 continuous_policy/studies",
                 "--json",
@@ -280,7 +289,7 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertEqual(payload["status"], "ok")
         candidates = payload["learning_candidates"]
         self.assertTrue(candidates)
-        self.assertIn("study_evidence_resolver", {candidate["target_layer"] for candidate in candidates})
+        self.assertIn("run_evidence_resolver", {candidate["target_layer"] for candidate in candidates})
 
     def test_brain_runtime_review_detects_brain_rule_selector_miss(self) -> None:
         result = subprocess.run(
@@ -466,7 +475,7 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
 
         self.assertEqual(payload["mode"], "full")
         self.assertIn("doc_guard", payload)
-        self.assertIn("unregistered_latest_output_details", payload["frontier"])
+        self.assertIn("unregistered_latest_run_details", payload["frontier"])
 
     def test_workspace_brain_skill_first_move_is_lite(self) -> None:
         text = SKILL.read_text(encoding="utf-8")

@@ -225,8 +225,8 @@ def health(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
             "status": "warning" if frontier.get("brain_may_be_stale") else "ok",
             "brain_may_be_stale": bool(frontier.get("brain_may_be_stale")),
             "warnings": list(frontier.get("warnings", []) or []),
-            "unregistered_latest_tags": list(frontier.get("unregistered_latest_tags", []) or []),
-            "unregistered_latest_output_details": list(frontier.get("unregistered_latest_output_details", []) or []),
+            "unregistered_latest_run_tags": list(frontier.get("unregistered_latest_run_tags", []) or []),
+            "unregistered_latest_run_details": list(frontier.get("unregistered_latest_run_details", []) or []),
         }
     except Exception as exc:
         catalog_summary = {"status": "error", "error": str(exc)}

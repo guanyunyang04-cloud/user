@@ -28,7 +28,6 @@ class EvidenceRecord:
     research_programs: list[str]
     study_families: list[str]
     run_tags: list[str]
-    study_tags: list[str]
     verdict: str
     blockers: list[str]
     next_allowed_actions: list[str]
@@ -221,7 +220,6 @@ def build_evidence_record(path: Path) -> EvidenceRecord:
         research_programs=daily_research_evidence.research_programs(text),
         study_families=daily_research_evidence.study_families(text),
         run_tags=daily_research_evidence.run_tags(text),
-        study_tags=daily_research_evidence.study_tags(text),
         verdict=verdict,
         blockers=blockers,
         next_allowed_actions=next_allowed_actions,
@@ -247,7 +245,6 @@ def build_evidence_registry() -> dict[str, Any]:
             research_programs=record.research_programs,
             study_families=record.study_families,
             run_tags=record.run_tags,
-            study_tags=record.study_tags,
             verdict=record.verdict,
             blockers=record.blockers,
             next_allowed_actions=record.next_allowed_actions,
@@ -266,7 +263,7 @@ def build_evidence_registry() -> dict[str, Any]:
         if not (WORKSPACE_ROOT / record.path).exists():
             missing_paths.append(record.path)
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "status": "ok" if not duplicates and not missing_paths else "invalid",
         "record_count": len(records),
         "duplicates": duplicates,
@@ -304,7 +301,6 @@ def query_evidence_registry(query: str, *, path: str | Path = REGISTRY_PATH) -> 
                 or needle in {str(item).lower() for item in record.get("research_programs", []) if item}
                 or needle in {str(item).lower() for item in record.get("study_families", []) if item}
                 or needle in {str(item).lower() for item in record.get("run_tags", []) if item}
-                or needle in {str(item).lower() for item in record.get("study_tags", []) if item}
                 or needle in {str(item).lower() for item in record.get("dataset_ids", []) if item}
             )
         ]

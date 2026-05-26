@@ -2,7 +2,7 @@
 
 ## Scope
 - Status: `completed forecast evidence reconciliation / research / shadow-only / no promotion`.
-- Purpose: register three completed 2026-05-22 Path20 output studies that appeared in frontier as `unregistered_latest_output_tags`.
+- Purpose: register three completed 2026-05-22 Path20 output runs that appeared in frontier as `unregistered_latest_run_tags`.
 - Mainline boundary: these studies belong to the historical `alpha_path20_neural_policy_v1` / Path20 namespace. They do not override the current `alpha_multi_horizon_utility_policy_v1` naming migration.
 - Active artifact boundary: `daily_research/output/active_execution_strategy.json` remains unchanged and is not authorized for change by this reference.
 
@@ -47,4 +47,4 @@
 ## Next Allowed Actions
 - Keep these three tags registered as completed Path20 research evidence.
 - Use them as input-ablation and simple-baseline context for later `alpha_multi_horizon_utility_policy_v1` target/profile comparisons.
-- Before any expansion, compare no-alpha-prior, sector/static, and simple-baseline behavior under the current multi-horizon target framing with explicit study tags and active-artifact guard.
+- Before any expansion, compare no-alpha-prior, sector/static, and simple-baseline behavior under the current multi-horizon target framing with explicit run tags and active-artifact guard.

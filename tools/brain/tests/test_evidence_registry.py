@@ -31,7 +31,7 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
     def test_registry_indexes_recent_status_docs_with_existing_paths(self) -> None:
         payload = build_evidence_registry()
 
-        self.assertEqual(payload["schema_version"], 2)
+        self.assertEqual(payload["schema_version"], 3)
         self.assertEqual(payload["status"], "ok")
         ids = {record["id"] for record in payload["records"]}
         self.assertIn("r61", ids)
@@ -40,6 +40,7 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
         self.assertIn("r55_gpu_training_runtime_acceleration_status_20260513", ids)
         for record in payload["records"]:
             self.assertTrue((ROOT / record["path"]).exists(), record["path"])
+            self.assertNotIn("study_tags", record)
 
     def test_query_finds_r62_and_dataset_ids(self) -> None:
         payload = query_evidence_registry("r62")
@@ -63,12 +64,13 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
 
         self.assertEqual(matches, [])
 
-    def test_registry_indexes_path20_study_tags(self) -> None:
+    def test_registry_indexes_path20_run_tags(self) -> None:
         registry = build_evidence_registry()
         matches = [record for record in registry["records"] if record["id"] == "alpha_path20_stage1_formal_cap80_result_20260518"]
 
         self.assertEqual(len(matches), 1)
-        self.assertIn("path20_stage1_formal_cap80_repaired_20260518_01", matches[0]["study_tags"])
+        self.assertIn("path20_stage1_formal_cap80_repaired_20260518_01", matches[0]["run_tags"])
+        self.assertNotIn("study_tags", matches[0])
         payload = query_evidence_registry("path20_stage1_formal_cap80_repaired_20260518_01")
         self.assertIn(
             "alpha_path20_stage1_formal_cap80_result_20260518",
@@ -105,7 +107,7 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
         self.assertIn("alpha_multi_horizon_utility_policy_v1", match["research_programs"])
         self.assertIn("stage25_stability_calibration", match["study_families"])
         self.assertIn("mh25_path_aux_daily1_45_multiseed_seed19_20260526_01", match["run_tags"])
-        self.assertIn("mh25_path_aux_daily1_45_multiseed_seed19_20260526_01", match["study_tags"])
+        self.assertNotIn("study_tags", match)
 
     def test_query_can_find_multi_horizon_evidence_by_program_and_family(self) -> None:
         program_payload = query_evidence_registry("alpha_multi_horizon_utility_policy_v1")
@@ -129,22 +131,18 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
         self.assertIn("alpha_multi_horizon_utility_policy_v1", matches[0]["research_programs"])
         self.assertEqual(matches[0]["study_families"], ["stage1_output_aux_grid"])
 
-    def test_adapter_indexes_mh_target_function_study_tags(self) -> None:
+    def test_adapter_does_not_treat_target_function_names_as_run_tags(self) -> None:
         text = """
         - `mh_short_utility_1_3_5d_v1`
         - `mh_mid_utility_5_10_20d_v1`
         - `mh_long_utility_15_20_30d_v1`
         """
 
-        tags = daily_research_evidence.study_tags(text)
+        self.assertEqual(daily_research_evidence.run_tags(text), [])
 
-        self.assertIn("mh_short_utility_1_3_5d_v1", tags)
-        self.assertIn("mh_mid_utility_5_10_20d_v1", tags)
-        self.assertIn("mh_long_utility_15_20_30d_v1", tags)
-
-    def test_adapter_indexes_mh_output_aux_grid_study_tags(self) -> None:
+    def test_adapter_indexes_mh_output_aux_grid_run_tags(self) -> None:
         text = """
-        ## Study Tags
+        ## Run Tags
 
         - `mh_out_decision_utility_path_aux_v1_fullgrid_seed7_20260525_01`
         - `mh_out_forecast_path_v1_baseline_fullgrid_seed19_20260525_01`
@@ -153,7 +151,7 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
         - `mh25_path_aux_daily1_45_multiseed_seed19_20260526_01`
         """
 
-        tags = daily_research_evidence.study_tags(text)
+        tags = daily_research_evidence.run_tags(text)
 
         self.assertIn("mh_out_decision_utility_path_aux_v1_fullgrid_seed7_20260525_01", tags)
         self.assertIn("mh_out_forecast_path_v1_baseline_fullgrid_seed19_20260525_01", tags)
@@ -161,7 +159,7 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
         self.assertIn("mh_grid_decision_utility_v1_baseline_sparse_long_seed19_20260525_02", tags)
         self.assertIn("mh25_path_aux_daily1_45_multiseed_seed19_20260526_01", tags)
 
-    def test_adapter_treats_study_tag_section_entries_as_run_instances_without_prefix_whitelist(self) -> None:
+    def test_adapter_ignores_removed_study_tag_section_for_run_instances(self) -> None:
         text = """
         - Mainline: `alpha_multi_horizon_utility_policy_v1`.
 
@@ -170,11 +168,18 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
         - `mh26_path_aux_future_family_seed7_20260601_01`
         """
 
-        self.assertIn("mh26_path_aux_future_family_seed7_20260601_01", daily_research_evidence.study_tags(text))
-        self.assertEqual(
-            daily_research_evidence.run_tags(text),
-            ["mh26_path_aux_future_family_seed7_20260601_01"],
-        )
+        self.assertEqual(daily_research_evidence.run_tags(text), [])
+
+    def test_adapter_treats_run_tag_section_entries_as_run_instances_without_prefix_whitelist(self) -> None:
+        text = """
+        - Mainline: `alpha_multi_horizon_utility_policy_v1`.
+
+        ## Run Tags
+
+        - `mh26_path_aux_future_family_seed7_20260601_01`
+        """
+
+        self.assertEqual(daily_research_evidence.run_tags(text), ["mh26_path_aux_future_family_seed7_20260601_01"])
 
     def test_adapter_does_not_treat_research_pointers_as_run_instances(self) -> None:
         text = """

@@ -401,9 +401,9 @@ def analyze_freeform(*, task: str = "", observation: str = "", test_output: str 
         add(
             lesson="Evidence resolver domain mismatch should be captured as a tool contract gap.",
             root_cause="freeform observation reported evidence domain mismatch or manual workaround",
-            target_layer="study_evidence_resolver",
-            recommended_change="confirm with trace and cover path_policy plus continuous_policy study tags with regression tests",
-            suggested_tests=["freeform evidence domain mismatch returns study_evidence_resolver candidate"],
+            target_layer="run_evidence_resolver",
+            recommended_change="confirm with trace and cover path_policy plus continuous_policy run tags with regression tests",
+            suggested_tests=["freeform evidence domain mismatch returns run_evidence_resolver candidate"],
         )
     if any(term in text for term in ("start-sleep", "wait-process", "长任务", "轮询", "eta")):
         add(

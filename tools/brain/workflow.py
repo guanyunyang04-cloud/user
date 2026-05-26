@@ -63,13 +63,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     status = sub.add_parser("status", help="Build workflow status from registry and latest artifacts.")
     status.add_argument("--workflow", required=True)
-    status.add_argument("--study-tag", default="")
+    status.add_argument("--run-tag", default="")
     status.add_argument("--json", action="store_true")
     status.add_argument("--write-output", action="store_true")
 
     preflight = sub.add_parser("preflight", help="Build read-only preflight state for a workflow.")
     preflight.add_argument("--workflow", required=True)
-    preflight.add_argument("--study-tag", default="")
+    preflight.add_argument("--run-tag", default="")
     preflight.add_argument("--task", default="")
     preflight.add_argument("--json", action="store_true")
     preflight.add_argument("--write-output", action="store_true")
@@ -77,13 +77,13 @@ def build_parser() -> argparse.ArgumentParser:
     capsule = sub.add_parser("capsule", help="Build a main-brain-first task capsule.")
     capsule.add_argument("--task", default="")
     capsule.add_argument("--workflow", default="brain_handoff")
-    capsule.add_argument("--study-tag", default="")
+    capsule.add_argument("--run-tag", default="")
     capsule.add_argument("--intent", default="read", choices=("read", "mutate", "writeback"))
     capsule.add_argument("--verbosity", default="lite", choices=("lite", "standard", "full"))
     capsule.add_argument("--json", action="store_true")
     capsule.add_argument("--write-output", action="store_true")
 
-    frontier = sub.add_parser("current-frontier", help="Scan latest output studies against brain references and registry.")
+    frontier = sub.add_parser("current-frontier", help="Scan latest output runs against brain references and registry.")
     frontier.add_argument("--json", action="store_true")
     frontier.add_argument("--write-output", action="store_true")
 
@@ -141,7 +141,7 @@ def build_payload(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
         child_brain = resolve_workflow_child_brain(args.workflow)
         payload = build_workflow_state(
             args.workflow,
-            study_tag=str(getattr(args, "study_tag", "") or ""),
+            run_tag=str(getattr(args, "run_tag", "") or ""),
             child_brain=child_brain,
         ).to_dict()
         if args.command == "preflight":
@@ -153,7 +153,7 @@ def build_payload(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
         return "capsule", build_task_capsule(
             task=str(getattr(args, "task", "") or ""),
             workflow=str(getattr(args, "workflow", "") or "brain_handoff"),
-            study_tag=str(getattr(args, "study_tag", "") or ""),
+            run_tag=str(getattr(args, "run_tag", "") or ""),
             intent=str(getattr(args, "intent", "") or "read"),
             verbosity=str(getattr(args, "verbosity", "") or "lite"),
         )

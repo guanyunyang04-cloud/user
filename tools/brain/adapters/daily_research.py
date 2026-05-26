@@ -8,7 +8,7 @@ from typing import Any, Mapping
 
 from tools.brain.adapters.daily_research_frontier import (
     SUMMARY_FILENAMES,
-    STUDY_ROOTS,
+    RUN_ROOTS,
     _dataset_ids,
     _model_families,
     build_frontier_report,
@@ -124,8 +124,8 @@ class StudyTrialEvidence:
 
 
 @dataclass(frozen=True)
-class StudyEvidenceReport:
-    study_tag: str
+class RunEvidenceReport:
+    run_tag: str
     study_summary_json: str
     exists: bool
     coherent: bool
@@ -151,6 +151,7 @@ class StudyEvidenceReport:
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["trials"] = [trial.to_dict() for trial in self.trials]
+        payload["run_summary_json"] = payload.pop("study_summary_json", "")
         return payload
 
 
@@ -306,7 +307,7 @@ def detect_low_budget_evidence(
 
 
 def _extract_artifact_tag(payload: dict[str, Any]) -> str:
-    for key in ("study_tag", "protocol_tag", "run_tag", "tag"):
+    for key in ("run_tag", "protocol_tag", "tag"):
         value = str(payload.get(key, "") or "").strip()
         if value:
             return value
@@ -329,12 +330,12 @@ def _artifact_record(name: str, path: Path) -> ArtifactRecord:
 
 def resolve_artifact_freshness() -> ArtifactFreshnessReport:
     records = {name: _artifact_record(name, path) for name, path in LATEST_ARTIFACTS.items()}
-    study_tag = records["latest_study_summary"].tag
+    run_tag = records["latest_study_summary"].tag
     protocol_tag = records["latest_protocol_summary"].tag
-    mismatch = bool(study_tag and protocol_tag and study_tag != protocol_tag)
+    mismatch = bool(run_tag and protocol_tag and run_tag != protocol_tag)
     reason = ""
     if mismatch:
-        reason = f"latest study tag differs from latest protocol tag: {study_tag} != {protocol_tag}"
+        reason = f"latest run tag differs from latest protocol tag: {run_tag} != {protocol_tag}"
     return ArtifactFreshnessReport(records, mismatch, reason)
 
 
@@ -364,34 +365,34 @@ def artifact_freshness_evidence_gaps(freshness: ArtifactFreshnessReport | Mappin
     return gaps
 
 
-def _study_summary_path(study_tag: str) -> Path:
-    return CONTINUOUS_POLICY_OUTPUT_ROOT / "studies" / study_tag / "study_summary.json"
+def _study_summary_path(run_tag: str) -> Path:
+    return CONTINUOUS_POLICY_OUTPUT_ROOT / "studies" / run_tag / "study_summary.json"
 
 
-def _summary_path_candidates(study_tag: str, workflow: str | None = None) -> list[tuple[str, Path]]:
+def _summary_path_candidates(run_tag: str, workflow: str | None = None) -> list[tuple[str, Path]]:
     workflow_key = str(workflow or "").strip()
-    workflows = [workflow_key] if workflow_key else list(STUDY_ROOTS)
+    workflows = [workflow_key] if workflow_key else list(RUN_ROOTS)
     candidates: list[tuple[str, Path]] = []
     for candidate_workflow in workflows:
-        root = STUDY_ROOTS.get(candidate_workflow)
+        root = RUN_ROOTS.get(candidate_workflow)
         if root is None:
             continue
         for filename in SUMMARY_FILENAMES:
-            candidates.append((candidate_workflow, root / study_tag / filename))
+            candidates.append((candidate_workflow, root / run_tag / filename))
     return candidates
 
 
-def _empty_study_evidence_report(
+def _empty_run_evidence_report(
     *,
-    study_tag: str,
+    run_tag: str,
     workflow: str = "",
     searched_paths: list[str] | None = None,
     evidence_gaps: list[str] | None = None,
-) -> StudyEvidenceReport:
+) -> RunEvidenceReport:
     paths = list(searched_paths or [])
     gaps = list(evidence_gaps or [])
-    return StudyEvidenceReport(
-        study_tag=study_tag,
+    return RunEvidenceReport(
+        run_tag=run_tag,
         study_summary_json="",
         exists=False,
         coherent=False,
@@ -509,16 +510,16 @@ def _build_trial_evidence(trial_payload: dict[str, Any]) -> StudyTrialEvidence:
     )
 
 
-def resolve_study_evidence(study_tag: str, workflow: str | None = None) -> StudyEvidenceReport:
-    tag = str(study_tag or "").strip()
+def resolve_run_evidence(run_tag: str, workflow: str | None = None) -> RunEvidenceReport:
+    tag = str(run_tag or "").strip()
     if not tag:
-        raise ValueError("study_tag is required")
+        raise ValueError("run_tag is required")
     workflow_key = str(workflow or "").strip()
-    if workflow_key and workflow_key not in STUDY_ROOTS:
-        return _empty_study_evidence_report(
-            study_tag=tag,
+    if workflow_key and workflow_key not in RUN_ROOTS:
+        return _empty_run_evidence_report(
+            run_tag=tag,
             workflow=workflow_key,
-            evidence_gaps=[f"unsupported_study_workflow: {workflow_key}"],
+            evidence_gaps=[f"unsupported_run_workflow: {workflow_key}"],
         )
 
     candidates = _summary_path_candidates(tag, workflow=workflow_key or None)
@@ -533,14 +534,14 @@ def resolve_study_evidence(study_tag: str, workflow: str | None = None) -> Study
             workflows_with_hits.add(candidate_workflow)
     if len(hits) > 1:
         hit_paths = [path.as_posix() for _, path in hits]
-        return _empty_study_evidence_report(
-            study_tag=tag,
+        return _empty_run_evidence_report(
+            run_tag=tag,
             searched_paths=hit_paths,
-            evidence_gaps=[f"ambiguous_study_tag: {tag}"],
+            evidence_gaps=[f"ambiguous_run_tag: {tag}"],
         )
     if not hits:
-        return _empty_study_evidence_report(
-            study_tag=tag,
+        return _empty_run_evidence_report(
+            run_tag=tag,
             workflow=workflow_key,
             searched_paths=searched_paths,
             evidence_gaps=[f"study summary not found: {path}" for path in searched_paths],
@@ -560,10 +561,13 @@ def resolve_study_evidence(study_tag: str, workflow: str | None = None) -> Study
                 gaps.append(f"trial {evidence.trial_id} missing protocol_summary_json")
             if not evidence.training_diagnostics_json:
                 gaps.append(f"trial {evidence.trial_id} missing training diagnostics path")
-    if summary and str(summary.get("study_tag", "") or summary.get("run_tag", "") or "") != tag:
-        gaps.append("study summary tag differs from requested tag")
-    return StudyEvidenceReport(
-        study_tag=tag,
+    summary_run_tag = str(summary.get("run_tag", "") or "") if summary else ""
+    if summary and not summary_run_tag:
+        gaps.append("run summary missing run_tag")
+    elif summary and summary_run_tag != tag:
+        gaps.append("run summary tag differs from requested tag")
+    return RunEvidenceReport(
+        run_tag=tag,
         study_summary_json=path.as_posix(),
         exists=bool(summary),
         coherent=bool(summary) and not gaps,

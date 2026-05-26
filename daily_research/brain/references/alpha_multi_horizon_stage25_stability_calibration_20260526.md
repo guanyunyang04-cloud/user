@@ -27,7 +27,7 @@
   - `calibration_review.md`
   - `next_stage_decision.json`
 
-## Study Tags
+## Run Tags
 
 - `mh25_path_aux_fullgrid_rebudget_seed7_20260526_01`
 - `mh25_path_aux_fullgrid_rebudget_seed11_20260526_01`

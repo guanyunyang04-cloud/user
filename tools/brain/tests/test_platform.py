@@ -21,7 +21,7 @@ from tools.brain.platform import (
     resolve_artifact_freshness,
     resolve_workflow_child_brain,
     resolve_bootstrap,
-    resolve_study_evidence,
+    resolve_run_evidence,
 )
 from tools.brain.adapters import daily_research as daily_research_adapter
 
@@ -229,12 +229,18 @@ class BrainPlatformTest(unittest.TestCase):
         self.assertIn("loose_latest", payload)
         self.assertTrue(payload["discovered_noncanonical_brains"])
 
-    def test_explicit_study_evidence_capsule_reads_coherent_r52_trials(self) -> None:
+    def test_explicit_run_evidence_capsule_reads_coherent_r52_trials(self) -> None:
         tag = "self_opt_study_r52_native_source_delta_closure_screening_safe_20260510_02"
-        report = resolve_study_evidence(tag)
+        report = resolve_run_evidence(tag)
         payload = report.to_dict()
 
-        self.assertEqual(payload["study_tag"], tag)
+        self.assertEqual(payload["run_tag"], tag)
+        self.assertEqual(
+            payload["run_summary_json"],
+            f"daily_research/output/continuous_policy/studies/{tag}/study_summary.json",
+        )
+        self.assertNotIn("study_summary_json", payload)
+        self.assertNotIn("study_tag", payload)
         self.assertEqual(payload["completed_trial_count"], 3)
         self.assertEqual(len(payload["trials"]), 3)
         self.assertTrue(payload["artifact_freshness"]["is_stale_risk"])
@@ -243,6 +249,27 @@ class BrainPlatformTest(unittest.TestCase):
         self.assertEqual(first["sample_model_type"], "temporal_day_set")
         self.assertIn("native_target_valid", first["metrics"])
         self.assertIn("native_source_threshold_loss", first["training_terms"])
+
+    def test_run_evidence_requires_run_tag_field_when_summary_exists(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tag = "path20_removed_study_tag_field"
+            summary = root / f"daily_research/output/path_policy/studies/{tag}/study_summary.json"
+            summary.parent.mkdir(parents=True)
+            summary.write_text(
+                json.dumps({"study_tag": tag, "status": "completed"}, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            with patch.object(brain_platform, "WORKSPACE_ROOT", root), patch.object(
+                daily_research_adapter,
+                "WORKSPACE_ROOT",
+                root,
+            ):
+                report = resolve_run_evidence(tag, workflow="path_policy").to_dict()
+
+        self.assertTrue(report["exists"])
+        self.assertFalse(report["coherent"])
+        self.assertIn("run summary missing run_tag", report["evidence_gaps"])
 
     def test_evidence_metric_registry_includes_r52c_receiver_mask_metrics(self) -> None:
         for key in (
