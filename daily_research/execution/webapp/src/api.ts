@@ -14,7 +14,6 @@ import type {
   PaperCashFlowRequest,
   PaperManualAdjustmentRequest,
   PaperPerformancePayload,
-  ProviderHealthPayload,
   ProviderHealthRequest,
   SchedulerConfigRequest,
   SchedulerPayload,
@@ -72,7 +71,7 @@ export function createApiClient(fetcher: FetchLike = window.fetch.bind(window)):
     getDataSources: () => requestJson<DataSourcesPayload>(fetcher, "/api/data-sources"),
     refreshDataSources: (payload: DataRefreshRequest) => postJson<JobLaunchPayload>(fetcher, "/api/data-sources/refresh", payload),
     runProviderHealth: (payload: ProviderHealthRequest) =>
-      postJson<ProviderHealthPayload>(fetcher, "/api/data-sources/provider-health", payload),
+      postJson<JobLaunchPayload>(fetcher, "/api/data-sources/provider-health", payload),
     getScheduler: () => requestJson<SchedulerPayload>(fetcher, "/api/data-sources/scheduler"),
     updateScheduler: (payload: SchedulerConfigRequest) => patchJson<SchedulerPayload>(fetcher, "/api/data-sources/scheduler", payload),
     getTradePlan: () => requestJson<TradePlanPayload>(fetcher, "/api/trade-plan"),
@@ -92,6 +91,27 @@ export function createApiClient(fetcher: FetchLike = window.fetch.bind(window)):
       ),
     getJobs: (limit = 30) => requestJson<JobSummary[]>(fetcher, `/api/jobs?limit=${limit}`),
     getJob: (jobId: string, lines = 160) => requestJson<JobDetail>(fetcher, `/api/jobs/${encodeURIComponent(jobId)}?lines=${lines}`),
+    streamJob: (jobId, handlers) => {
+      if (typeof EventSource === "undefined") {
+        const error = new Error("EventSource is not available");
+        window.setTimeout(() => handlers.onError?.(error), 0);
+        return { close: () => undefined };
+      }
+      const source = new EventSource(`/api/jobs/${encodeURIComponent(jobId)}/stream`);
+      const forward = (event: MessageEvent): void => {
+        try {
+          handlers.onEvent?.(JSON.parse(event.data));
+        } catch (err) {
+          handlers.onError?.(err instanceof Error ? err : new Error("Invalid stream event"));
+        }
+      };
+      ["snapshot", "progress", "stdout", "stderr", "status", "done", "error"].forEach((eventName) => {
+        source.addEventListener(eventName, forward as EventListener);
+      });
+      source.onopen = () => handlers.onOpen?.();
+      source.onerror = (event) => handlers.onError?.(event);
+      return { close: () => source.close() };
+    },
     resumeJob: (jobId: string) => postJson<JobLaunchPayload>(fetcher, "/api/resume", { job_id: jobId, background: true }),
     unlockRuntime: (force: boolean) => postJson<{ status: string; detail: string }>(fetcher, "/api/unlock", { force })
   };

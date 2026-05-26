@@ -1,7 +1,19 @@
 import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import type { DataSourcesPayload, ExecutionApi, JobDetail, ProviderHealthPayload, TableRow } from "../types";
-import { DataTable, ErrorState, Field, LoadingState, PageHeader, Panel, Stat, StatusPill } from "../components";
+import type { DataSourcesPayload, DomainMatrixRow, ExecutionApi, JobDetail, JobProgress, JobSummary, ProviderHealthPayload, TableRow } from "../types";
+import {
+  DataTable,
+  ErrorState,
+  Field,
+  LoadingState,
+  LogDisclosure,
+  PageHeader,
+  Panel,
+  ProgressBar,
+  ResizableTablePanel,
+  Stat,
+  StatusPill
+} from "../components";
 import { text } from "../format";
 
 interface DataPageProps {
@@ -36,6 +48,13 @@ export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
   const [healthChecking, setHealthChecking] = useState(false);
   const [providerHealth, setProviderHealth] = useState<ProviderHealthPayload | null>(null);
   const [providerHealthMessage, setProviderHealthMessage] = useState("");
+  const [providerHealthJobId, setProviderHealthJobId] = useState("");
+  const [providerHealthProgress, setProviderHealthProgress] = useState<JobProgress | null>(null);
+  const [providerHealthStdout, setProviderHealthStdout] = useState<string[]>([]);
+  const [providerHealthStderr, setProviderHealthStderr] = useState<string[]>([]);
+  const [providerHealthUsePolling, setProviderHealthUsePolling] = useState(false);
+  const [matrixOpen, setMatrixOpen] = useState(false);
+  const [matrixFilter, setMatrixFilter] = useState<"problems" | "required" | "formal" | "all">("problems");
   const signalNeedsRefresh = payload?.next_signal_action === "refresh";
   const refreshIsSkip = payload?.next_refresh_action === "skip" && !signalNeedsRefresh;
   const refreshButtonLabel = signalNeedsRefresh ? "刷新信号面板" : refreshIsSkip ? "已是最新" : "补齐到最新交易日";
@@ -89,21 +108,160 @@ export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
   async function checkProviderHealth(): Promise<void> {
     setHealthChecking(true);
     setProviderHealthMessage("");
+    setProviderHealthProgress({ mode: "indeterminate", stage: "提交 provider health 检查" });
+    setProviderHealthStdout([]);
+    setProviderHealthStderr([]);
+    setProviderHealthUsePolling(false);
     try {
       const response = await api.runProviderHealth({
         as_of_date: asOfDate,
         domains: domainsFromText(domains),
         provider_plan: providerPlan || "formal_free_v3"
       });
-      setProviderHealth(response);
-      setProviderHealthMessage(`provider health: ${response.status}`);
+      setProviderHealthJobId(response.job_id || "");
+      setProviderHealthMessage(`provider health job: ${response.job_id || response.status}`);
     } catch (err) {
       setProviderHealthMessage(err instanceof Error ? err.message : "数据源检查失败");
-    } finally {
+      setProviderHealthProgress(null);
       setHealthChecking(false);
     }
   }
 
+  useEffect(() => {
+    if (!providerHealthJobId) {
+      return undefined;
+    }
+    if (!api.streamJob) {
+      setProviderHealthUsePolling(true);
+      return undefined;
+    }
+    if (providerHealthUsePolling) {
+      return undefined;
+    }
+    let disposed = false;
+    let subscription: { close(): void } | undefined;
+    subscription = api.streamJob(providerHealthJobId, {
+      onEvent: (event) => {
+        if (disposed) {
+          return;
+        }
+        const metadata = (event.metadata || {}) as JobSummary & { progress?: JobProgress; provider_health?: ProviderHealthPayload };
+        const progress = (event.progress || metadata.progress) as JobProgress | undefined;
+        if (progress) {
+          setProviderHealthProgress(progress);
+        }
+        if (event.event === "stdout" && event.line !== undefined) {
+          setProviderHealthStdout((lines) => [...lines.slice(-199), String(event.line)]);
+        }
+        if (event.event === "stderr" && event.line !== undefined) {
+          setProviderHealthStderr((lines) => [...lines.slice(-199), String(event.line)]);
+        }
+        const completedHealth = metadata.provider_health as ProviderHealthPayload | undefined;
+        if (completedHealth) {
+          setProviderHealth(completedHealth);
+          setProviderHealthMessage(`provider health: ${completedHealth.status}`);
+        }
+        if (event.event === "done") {
+          setHealthChecking(false);
+          load();
+          subscription?.close();
+        }
+      },
+      onError: () => {
+        if (!disposed) {
+          setProviderHealthMessage("provider health stream fallback");
+          setProviderHealthUsePolling(true);
+          subscription?.close();
+        }
+      }
+    });
+    return () => {
+      disposed = true;
+      subscription?.close();
+    };
+  }, [api, providerHealthJobId, providerHealthUsePolling]);
+
+  useEffect(() => {
+    if (!providerHealthJobId || !providerHealthUsePolling) {
+      return undefined;
+    }
+    let disposed = false;
+    let timer: number | undefined;
+    const pollJob = (): void => {
+      api
+        .getJob(providerHealthJobId, 120)
+        .then((next) => {
+          if (disposed) {
+            return;
+          }
+          const metadata = next.metadata || {};
+          const progress = (next.progress || metadata.progress) as JobProgress | undefined;
+          if (progress) {
+            setProviderHealthProgress(progress);
+          }
+          setProviderHealthStdout(next.stdout_tail || []);
+          setProviderHealthStderr(next.stderr_tail || []);
+          const completedHealth = metadata.provider_health as ProviderHealthPayload | undefined;
+          if (completedHealth) {
+            setProviderHealth(completedHealth);
+            setProviderHealthMessage(`provider health: ${completedHealth.status}`);
+          }
+          if (["queued", "running", "launch_pending"].includes(String(next.status || "").toLowerCase())) {
+            timer = window.setTimeout(pollJob, pollMs);
+          } else {
+            setHealthChecking(false);
+            load();
+          }
+        })
+        .catch((err: Error) => {
+          if (!disposed) {
+            setProviderHealthMessage(err.message);
+            setHealthChecking(false);
+          }
+        });
+    };
+    pollJob();
+    return () => {
+      disposed = true;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [api, providerHealthJobId, providerHealthUsePolling, pollMs]);
+
+  function matrixRows(): Array<DomainMatrixRow & TableRow> {
+    const rows = payload?.domain_matrix || [];
+    return rows.filter((row) => {
+      if (matrixFilter === "all") {
+        return true;
+      }
+      if (matrixFilter === "required") {
+        return String(row.requirement || "").toLowerCase() === "required";
+      }
+      if (matrixFilter === "formal") {
+        return Boolean(row.formal_refresh);
+      }
+      return !Boolean(row.supported) || (String(row.requirement || "").toLowerCase() === "required" && !Boolean(row.formal_refresh));
+    }) as Array<DomainMatrixRow & TableRow>;
+  }
+
+  function matrixSummaryRows(): TableRow[] {
+    const rows = payload?.domain_matrix || [];
+    const providers = new Set(rows.map((row) => row.provider));
+    const domainsSet = new Set(rows.map((row) => row.domain));
+    const required = rows.filter((row) => String(row.requirement || "").toLowerCase() === "required");
+    const formal = rows.filter((row) => Boolean(row.formal_refresh));
+    const problems = rows.filter(
+      (row) => !Boolean(row.supported) || (String(row.requirement || "").toLowerCase() === "required" && !Boolean(row.formal_refresh))
+    );
+    return [
+      { metric: "Providers", value: providers.size },
+      { metric: "Domains", value: domainsSet.size },
+      { metric: "Required Coverage", value: `${required.filter((row) => Boolean(row.supported)).length}/${required.length}` },
+      { metric: "Formal Refresh", value: formal.length },
+      { metric: "Problems", value: problems.length }
+    ];
+  }
   useEffect(() => {
     if (!activeJobId) {
       return undefined;
@@ -210,11 +368,15 @@ export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
             检查数据源
           </button>
           {providerHealthMessage ? <p className="inline-message">{providerHealthMessage}</p> : null}
+          {healthChecking || providerHealthProgress ? <ProgressBar progress={providerHealthProgress} /> : null}
           <DataTable
             rows={summaryRows(providerHealth?.summary || (payload?.provider_health?.summary as Record<string, unknown> | undefined))}
             preferredColumns={["key", "value"]}
             emptyText="暂无健康摘要"
           />
+          {providerHealthStdout.length || providerHealthStderr.length ? (
+            <LogDisclosure stdout={providerHealthStdout} stderr={providerHealthStderr} />
+          ) : null}
         </Panel>
         <Panel title="自动更新">
           <div className="key-list">
@@ -233,19 +395,31 @@ export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
           </div>
         </Panel>
       </div>
-      <Panel title="Provider Matrix">
-        <DataTable
-          rows={(payload?.domain_matrix || []).map((row) => ({
-            provider: row.provider,
-            domain: row.domain,
-            requirement: text(row.requirement),
-            supported: String(Boolean(row.supported)),
-            requires_token: String(Boolean(row.requires_token)),
-            formal_refresh: String(Boolean(row.formal_refresh))
-          }))}
-          preferredColumns={["provider", "domain", "requirement", "supported", "requires_token", "formal_refresh"]}
-          emptyText="暂无 provider matrix"
-        />
+      <Panel title="Provider Matrix 摘要">
+        <DataTable rows={matrixSummaryRows()} preferredColumns={["metric", "value"]} emptyText="暂无 provider matrix" />
+        <button onClick={() => setMatrixOpen((value) => !value)}>{matrixOpen ? "收起完整矩阵" : "展开完整矩阵"}</button>
+        {matrixOpen ? (
+          <div className="matrix-controls">
+            <button className={matrixFilter === "problems" ? "filter-active" : ""} onClick={() => setMatrixFilter("problems")}>Problems only</button>
+            <button className={matrixFilter === "required" ? "filter-active" : ""} onClick={() => setMatrixFilter("required")}>Required only</button>
+            <button className={matrixFilter === "formal" ? "filter-active" : ""} onClick={() => setMatrixFilter("formal")}>Formal refresh only</button>
+            <button className={matrixFilter === "all" ? "filter-active" : ""} onClick={() => setMatrixFilter("all")}>All</button>
+          </div>
+        ) : null}
+        {matrixOpen ? (
+          <ResizableTablePanel
+            rows={matrixRows().map((row) => ({
+              provider: row.provider,
+              domain: row.domain,
+              requirement: text(row.requirement),
+              supported: String(Boolean(row.supported)),
+              requires_token: String(Boolean(row.requires_token)),
+              formal_refresh: String(Boolean(row.formal_refresh))
+            }))}
+            preferredColumns={["provider", "domain", "requirement", "supported", "requires_token", "formal_refresh"]}
+            emptyText="当前筛选无 provider matrix 行"
+          />
+        ) : null}
       </Panel>
       <div className="two-column">
         <Panel title="生产信号面板">
@@ -339,16 +513,8 @@ export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
                   preferredColumns={["key", "path"]}
                 />
               ) : null}
-              <div className="log-grid">
-                <div>
-                  <h3>stdout</h3>
-                  <pre>{jobDetail.stdout_tail.join("\n") || "-"}</pre>
-                </div>
-                <div>
-                  <h3>stderr</h3>
-                  <pre>{jobDetail.stderr_tail.join("\n") || "-"}</pre>
-                </div>
-              </div>
+              <ProgressBar progress={(jobDetail.metadata.progress as JobProgress) || jobDetail.progress} />
+              <LogDisclosure stdout={jobDetail.stdout_tail} stderr={jobDetail.stderr_tail} />
             </div>
           ) : (
             <LoadingState label="等待作业日志" />

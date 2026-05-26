@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { RotateCcw } from "lucide-react";
-import type { ExecutionApi, JobDetail, JobSummary } from "../types";
-import { DataTable, ErrorState, LoadingState, PageHeader, Panel, StatusPill } from "../components";
+import type { ExecutionApi, JobDetail, JobProgress, JobSummary } from "../types";
+import { DataTable, ErrorState, LoadingState, LogDisclosure, PageHeader, Panel, ProgressBar, StatusPill } from "../components";
 import { text } from "../format";
 
 interface JobsPageProps {
@@ -24,6 +24,10 @@ export function JobsPage({ api, pollMs = 5000, selectedJobId = "" }: JobsPagePro
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState("");
   const [detailError, setDetailError] = useState("");
+  const [streamMode, setStreamMode] = useState<"stream" | "fallback">("stream");
+  const [streamStdout, setStreamStdout] = useState<string[]>([]);
+  const [streamStderr, setStreamStderr] = useState<string[]>([]);
+  const [streamProgress, setStreamProgress] = useState<JobProgress | null>(null);
 
   const load = (): Promise<void> => {
     return api
@@ -84,10 +88,67 @@ export function JobsPage({ api, pollMs = 5000, selectedJobId = "" }: JobsPagePro
   useEffect(() => {
     let disposed = false;
     let timer: number | undefined;
+    let subscription: { close(): void } | undefined;
+    let usePolling = false;
     const run = (): void => {
       if (!selectedId) {
         setJobDetail(null);
         setDetailError("");
+        return;
+      }
+      if (!usePolling && api.streamJob) {
+        setStreamMode("stream");
+        setStreamStdout([]);
+        setStreamStderr([]);
+        subscription = api.streamJob(selectedId, {
+          onEvent: (event) => {
+            if (disposed) {
+              return;
+            }
+            const metadata = (event.metadata || {}) as JobSummary & { progress?: JobProgress };
+            if (metadata.job_id || event.job_id) {
+              setJobDetail((current) => ({
+                job_id: String(metadata.job_id || event.job_id || selectedId),
+                task_name: String(metadata.task_name || current?.task_name || ""),
+                status: String(metadata.status || event.status || current?.status || ""),
+                business_status: String(metadata.business_status || current?.business_status || ""),
+                runner_status: String(metadata.runner_status || current?.runner_status || ""),
+                artifact_status: String(metadata.artifact_status || current?.artifact_status || ""),
+                artifact_paths: (metadata.artifact_paths as Record<string, string>) || current?.artifact_paths || {},
+                evidence_paths: (metadata.evidence_paths as Record<string, string>) || current?.evidence_paths || {},
+                runner_warnings: (metadata.runner_warnings as string[]) || current?.runner_warnings || [],
+                metadata: metadata as JobSummary,
+                progress: event.progress || metadata.progress || current?.progress,
+                stdout_tail: current?.stdout_tail || [],
+                stderr_tail: current?.stderr_tail || [],
+                can_resume: ["failed", "blocked", "succeeded"].includes(String(metadata.status || event.status || ""))
+              }));
+            }
+            if (event.progress || metadata.progress) {
+              setStreamProgress((event.progress || metadata.progress || null) as JobProgress | null);
+            }
+            if (event.event === "stdout" && event.line !== undefined) {
+              setStreamStdout((lines) => [...lines.slice(-399), String(event.line)]);
+            }
+            if (event.event === "stderr" && event.line !== undefined) {
+              setStreamStderr((lines) => [...lines.slice(-399), String(event.line)]);
+            }
+            if (event.event === "done") {
+              subscription?.close();
+            }
+            setDetailError("");
+            setDetailLoading(false);
+          },
+          onError: () => {
+            if (disposed || usePolling) {
+              return;
+            }
+            usePolling = true;
+            setStreamMode("fallback");
+            subscription?.close();
+            run();
+          }
+        });
         return;
       }
       api
@@ -116,6 +177,7 @@ export function JobsPage({ api, pollMs = 5000, selectedJobId = "" }: JobsPagePro
     run();
     return () => {
       disposed = true;
+      subscription?.close();
       if (timer !== undefined) {
         window.clearTimeout(timer);
       }
@@ -148,7 +210,10 @@ export function JobsPage({ api, pollMs = 5000, selectedJobId = "" }: JobsPagePro
                 <strong><StatusPill value={jobDetail.artifact_status || jobDetail.metadata.artifact_status || "-"} /></strong>
                 <span>命令</span>
                 <strong>{(jobDetail.metadata.command_argv || []).join(" ") || "-"}</strong>
+                <span>Stream</span>
+                <strong><StatusPill value={streamMode === "stream" ? "streaming" : "stream fallback"} /></strong>
               </div>
+              <ProgressBar progress={streamProgress || jobDetail.progress || (jobDetail.metadata.progress as JobProgress)} />
               {objectRows(jobDetail.evidence_paths || jobDetail.metadata.evidence_paths).length ? (
                 <div>
                   <h3>Evidence</h3>
@@ -168,16 +233,10 @@ export function JobsPage({ api, pollMs = 5000, selectedJobId = "" }: JobsPagePro
                   </ul>
                 </div>
               ) : null}
-              <div className="log-grid">
-                <div>
-                  <h3>stdout</h3>
-                  <pre>{jobDetail.stdout_tail.join("\n") || "-"}</pre>
-                </div>
-                <div>
-                  <h3>stderr</h3>
-                  <pre>{jobDetail.stderr_tail.join("\n") || "-"}</pre>
-                </div>
-              </div>
+              <LogDisclosure
+                stdout={streamStdout.length ? streamStdout : jobDetail.stdout_tail}
+                stderr={streamStderr.length ? streamStderr : jobDetail.stderr_tail}
+              />
               {jobDetail.can_resume ? (
                 <button onClick={() => api.resumeJob(jobDetail.job_id)}>重跑/恢复 {jobDetail.job_id}</button>
               ) : null}

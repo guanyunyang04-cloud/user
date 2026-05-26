@@ -79,6 +79,20 @@ export interface ProviderHealthPayload {
   [key: string]: unknown;
 }
 
+export interface JobProgress {
+  mode?: "determinate" | "indeterminate" | string;
+  stage?: string;
+  completed_steps?: number;
+  total_steps?: number;
+  percent?: number;
+  current_item?: string;
+  current_provider?: string;
+  current_domain?: string;
+  updated_at?: string;
+  status?: string;
+  [key: string]: unknown;
+}
+
 export interface SchedulerStatus {
   enabled?: boolean;
   post_close_time?: string;
@@ -280,9 +294,33 @@ export interface JobDetail {
   evidence_paths?: Record<string, string>;
   runner_warnings?: string[];
   metadata: JobSummary;
+  progress?: JobProgress;
   stdout_tail: string[];
   stderr_tail: string[];
   can_resume: boolean;
+}
+
+export interface JobStreamEvent {
+  event: "snapshot" | "progress" | "stdout" | "stderr" | "status" | "done" | "error" | string;
+  job_id: string;
+  status: string;
+  timestamp?: string;
+  stream?: "stdout" | "stderr" | string;
+  line?: string;
+  line_no?: number;
+  metadata?: JobSummary & { progress?: JobProgress; provider_health?: ProviderHealthPayload };
+  progress?: JobProgress;
+  message?: string;
+}
+
+export interface JobStreamSubscription {
+  close(): void;
+}
+
+export interface JobStreamHandlers {
+  onEvent?: (event: JobStreamEvent) => void;
+  onError?: (error: Event | Error) => void;
+  onOpen?: () => void;
 }
 
 export interface JobLaunchPayload {
@@ -325,7 +363,7 @@ export interface ExecutionApi {
   trainModel(modelId: string, payload: TrainModelRequest): Promise<JobLaunchPayload>;
   getDataSources(): Promise<DataSourcesPayload>;
   refreshDataSources(payload: DataRefreshRequest): Promise<JobLaunchPayload>;
-  runProviderHealth(payload: ProviderHealthRequest): Promise<ProviderHealthPayload>;
+  runProviderHealth(payload: ProviderHealthRequest): Promise<JobLaunchPayload>;
   getScheduler(): Promise<SchedulerPayload>;
   updateScheduler(payload: SchedulerConfigRequest): Promise<SchedulerPayload>;
   getTradePlan(): Promise<TradePlanPayload>;
@@ -340,6 +378,7 @@ export interface ExecutionApi {
   getPaperPerformance(startDate: string, endDate: string): Promise<PaperPerformancePayload>;
   getJobs(limit?: number): Promise<JobSummary[]>;
   getJob(jobId: string, lines?: number): Promise<JobDetail>;
+  streamJob?: (jobId: string, handlers: JobStreamHandlers) => JobStreamSubscription;
   resumeJob(jobId: string): Promise<JobLaunchPayload>;
   unlockRuntime(force: boolean): Promise<{ status: string; detail: string }>;
 }

@@ -385,6 +385,103 @@ details.panel[open] summary {
   overflow-x: auto;
 }
 
+.progress-block {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.progress-bar {
+  position: relative;
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.progress-bar span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: block;
+  border-radius: inherit;
+  background: #1d4ed8;
+  transition: width 180ms ease;
+}
+
+.progress-indeterminate span {
+  width: 42%;
+  animation: progress-slide 1.15s ease-in-out infinite;
+}
+
+.progress-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.progress-meta strong {
+  color: #111827;
+  font-size: 13px;
+}
+
+@keyframes progress-slide {
+  0% {
+    transform: translateX(-115%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+.log-disclosure {
+  margin-top: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 10px 12px;
+}
+
+.log-disclosure summary {
+  cursor: pointer;
+  color: #334155;
+  font-weight: 700;
+}
+
+.log-disclosure[open] summary {
+  margin-bottom: 10px;
+}
+
+.resizable-table {
+  min-height: 180px;
+  max-height: 460px;
+  margin-top: 10px;
+  overflow: auto;
+  resize: vertical;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.resizable-table .table-wrap {
+  min-height: 100%;
+}
+
+.matrix-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+button.filter-active {
+  border-color: #1d4ed8;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

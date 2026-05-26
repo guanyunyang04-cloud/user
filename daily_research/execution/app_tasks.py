@@ -148,6 +148,15 @@ TASK_SPECS: tuple[ExecutionTaskSpec, ...] = (
         safety_summary="刷新研究数据湖；成功后只更新 active execution manifest 的 lake dataset 指针，不触发重训或 promotion。",
     ),
     ExecutionTaskSpec(
+        name="provider-health-check",
+        script_relative_path="daily_research/data_platform/provider_health.py",
+        description="检查 data platform provider/domain 健康，并写入可流式展示的结构化进度。",
+        category="data_platform",
+        timeout_seconds=1800,
+        safety_level="safe",
+        safety_summary="只读 provider/domain 健康检查，不刷新数据湖、不改 active manifest。",
+    ),
+    ExecutionTaskSpec(
         name="refresh-production-live-panels",
         script_relative_path="daily_research/execution/refresh_production_live_panels.py",
         description="基于当前 active lake dataset 刷新 production live score/target panels；不训练、不 promotion。",

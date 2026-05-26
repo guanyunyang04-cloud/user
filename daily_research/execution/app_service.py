@@ -48,8 +48,10 @@ from daily_research.execution.app_runtime import (
     mark_job_heartbeat,
     mark_job_started,
     now_iso,
+    read_file_increment,
     read_json_file,
     tail_file,
+    update_job_progress,
     update_job_metadata,
     write_json_file,
     write_runtime_state,
@@ -2139,6 +2141,72 @@ def build_job_detail_payload(job_id: str, *, lines: int = 80) -> dict[str, Any]:
     }
 
 
+def iter_job_stream_events(job_id: str, *, poll_interval_seconds: float = 0.4, max_idle_seconds: float = 2.0):
+    clean_job_id = str(job_id or "").strip()
+    if not clean_job_id:
+        yield {"event": "error", "job_id": "", "status": "error", "timestamp": now_iso(), "message": "job_id is required"}
+        return
+    stdout_offset = 0
+    stderr_offset = 0
+    stdout_line_no = 0
+    stderr_line_no = 0
+    idle_started_at = time.monotonic()
+    sent_done = False
+
+    while True:
+        metadata = _reconcile_running_job_metadata(clean_job_id)
+        if not metadata:
+            metadata = load_job_metadata(clean_job_id)
+        if not metadata:
+            yield {
+                "event": "error",
+                "job_id": clean_job_id,
+                "status": "missing",
+                "timestamp": now_iso(),
+                "message": f"未找到作业元数据：{clean_job_id}",
+            }
+            return
+
+        status = str(metadata.get("status", "") or "")
+        base = {"job_id": clean_job_id, "status": status, "timestamp": now_iso()}
+        yield {
+            "event": "snapshot",
+            **base,
+            "metadata": metadata,
+            "progress": metadata.get("progress", {}) if isinstance(metadata.get("progress", {}), dict) else {},
+        }
+
+        stdout_delta = read_file_increment(Path(str(metadata.get("stdout_log", ""))), offset=stdout_offset)
+        stdout_offset = int(stdout_delta.get("offset", stdout_offset) or 0)
+        if stdout_delta.get("truncated"):
+            stdout_line_no = 0
+        for line in stdout_delta.get("lines", []):
+            stdout_line_no += 1
+            yield {"event": "stdout", **base, "stream": "stdout", "line": str(line), "line_no": stdout_line_no}
+
+        stderr_delta = read_file_increment(Path(str(metadata.get("stderr_log", ""))), offset=stderr_offset)
+        stderr_offset = int(stderr_delta.get("offset", stderr_offset) or 0)
+        if stderr_delta.get("truncated"):
+            stderr_line_no = 0
+        for line in stderr_delta.get("lines", []):
+            stderr_line_no += 1
+            yield {"event": "stderr", **base, "stream": "stderr", "line": str(line), "line_no": stderr_line_no}
+
+        progress = metadata.get("progress", {}) if isinstance(metadata.get("progress", {}), dict) else {}
+        if progress:
+            yield {"event": "progress", **base, "progress": progress, "metadata": metadata}
+
+        if str(status).lower() not in {"queued", "running", "launch_pending"}:
+            yield {"event": "done", **base, "metadata": metadata, "progress": progress}
+            sent_done = True
+            return
+        if time.monotonic() - idle_started_at >= max_idle_seconds:
+            idle_started_at = time.monotonic()
+        if sent_done:
+            return
+        time.sleep(max(float(poll_interval_seconds), 0.1))
+
+
 def resolve_resume_metadata(job_id: str = "") -> dict[str, Any]:
     requested_job_id = str(job_id or "").strip()
     if requested_job_id:
@@ -2452,6 +2520,10 @@ def _run_command_in_subprocess(
         heartbeat=(lambda line: mark_job_heartbeat(job_paths, stream_name="stderr", line=line)) if job_paths is not None else None,
         runner_warnings=runner_warnings,
     )
+    env = _runner_environment()
+    if job_paths is not None:
+        env["EXECUTION_APP_JOB_ID"] = str(getattr(job_paths, "job_id", "") or "")
+        env["EXECUTION_APP_TASK_NAME"] = str(load_job_metadata(str(getattr(job_paths, "job_id", "") or "")).get("task_name", "") or "")
     process = subprocess.Popen(
         clean_command,
         cwd=str(WORKSPACE_ROOT),
@@ -2461,7 +2533,7 @@ def _run_command_in_subprocess(
         encoding="utf-8",
         errors="replace",
         bufsize=1,
-        env=_runner_environment(),
+        env=env,
         **_start_new_process_group_kwargs(),
     )
     if job_paths is not None:

@@ -47,4 +47,31 @@ describe("api client", () => {
       })
     );
   });
+
+  it("opens a server-sent event stream for job updates", () => {
+    const opened: string[] = [];
+    class FakeEventSource {
+      url: string;
+
+      constructor(url: string) {
+        this.url = url;
+        opened.push(url);
+      }
+
+      addEventListener(): void {
+        // no-op
+      }
+
+      close(): void {
+        // no-op
+      }
+    }
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const api = createApiClient(vi.fn() as unknown as typeof fetch);
+
+    const subscription = api.streamJob?.("job 1", {});
+
+    expect(opened).toEqual(["/api/jobs/job%201/stream"]);
+    subscription?.close();
+  });
 });

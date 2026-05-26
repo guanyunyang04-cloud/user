@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Iterable
 
 import pandas as pd
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from daily_research.data_platform.contracts import DataDomain, DomainFetchRequest, normalize_domain
 from daily_research.data_platform.manager import UnsupportedDomainError
@@ -35,17 +41,30 @@ def run_provider_health(config: ProviderHealthConfig | None = None, *, providers
     total_checked = 0
     ok_count = 0
     error_count = 0
+    total_steps = len(provider_chain) * len(domains)
+    last_provider_name = ""
+    last_domain = ""
     for provider in provider_chain:
         provider_name = str(getattr(provider, "name", "") or "")
         provider_entry = {"provider": provider_name, "domains": {}}
         for domain in domains:
-            total_checked += 1
+            last_provider_name = provider_name
+            last_domain = domain
+            stage = f"Checking {provider_name} / {domain}"
             request = DomainFetchRequest(
                 domain=domain,
                 symbols=tuple(resolved.symbols or ()),
                 start_date=as_of_date,
                 end_date=as_of_date,
                 adjusted_flag=resolved.adjusted_flag,
+            )
+            _update_execution_job_progress(
+                stage=stage,
+                completed_steps=total_checked,
+                total_steps=total_steps,
+                current_provider=provider_name,
+                current_domain=domain,
+                current_item=f"{provider_name} / {domain}",
             )
             try:
                 result = provider.fetch_domain(request)
@@ -72,6 +91,15 @@ def run_provider_health(config: ProviderHealthConfig | None = None, *, providers
                     "error_type": type(exc).__name__,
                     "error": str(exc),
                 }
+            total_checked += 1
+            _update_execution_job_progress(
+                stage=stage,
+                completed_steps=total_checked,
+                total_steps=total_steps,
+                current_provider=provider_name,
+                current_domain=domain,
+                current_item=f"{provider_name} / {domain}",
+            )
         providers_payload.append(provider_entry)
     summary = {
         "checked_provider_count": len(providers_payload),
@@ -93,7 +121,7 @@ def run_provider_health(config: ProviderHealthConfig | None = None, *, providers
     summary["required_domain_status"] = required_domain_status
     summary["missing_domain_count"] = sum(1 for value in domain_status.values() if value != "ok")
     status = "ok" if domain_status and all(value == "ok" for value in domain_status.values()) else "degraded"
-    return {
+    payload = {
         "status": status,
         "provider_plan": str(resolved.provider_plan),
         "as_of_date": as_of_date,
@@ -103,6 +131,54 @@ def run_provider_health(config: ProviderHealthConfig | None = None, *, providers
         "domain_matrix": matrix,
         "providers": providers_payload,
     }
+    _update_execution_job_progress(
+        stage="Provider health completed",
+        completed_steps=total_steps,
+        total_steps=total_steps,
+        current_item="completed",
+        current_provider=last_provider_name,
+        current_domain=last_domain,
+        status=status,
+        provider_health=payload,
+    )
+    return payload
+
+
+def _update_execution_job_progress(
+    *,
+    stage: str,
+    completed_steps: int,
+    total_steps: int,
+    current_provider: str = "",
+    current_domain: str = "",
+    current_item: str = "",
+    status: str = "running",
+    provider_health: dict[str, Any] | None = None,
+) -> None:
+    job_id = str(os.getenv("EXECUTION_APP_JOB_ID", "") or "").strip()
+    if not job_id:
+        return
+    try:
+        from daily_research.execution.app_runtime import update_job_progress
+
+        total = max(int(total_steps or 0), 0)
+        completed = max(int(completed_steps or 0), 0)
+        percent = round((completed / total) * 100.0, 2) if total else None
+        update_job_progress(
+            job_id,
+            mode="determinate" if total else "indeterminate",
+            stage=stage,
+            completed_steps=completed,
+            total_steps=total,
+            percent=percent,
+            current_item=current_item,
+            current_provider=current_provider,
+            current_domain=current_domain,
+            status=status,
+            provider_health=provider_health,
+        )
+    except Exception:
+        return
 
 
 def build_parser() -> argparse.ArgumentParser:

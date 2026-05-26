@@ -3,10 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import uvicorn
+import json
 
 from daily_research.execution import app_service
 from daily_research.execution.web_models import (
@@ -195,6 +196,27 @@ def create_app() -> FastAPI:
             "stderr_tail": payload["stderr_tail"],
         }
 
+    @app.get("/api/jobs/{job_id}/stream")
+    def api_job_stream(job_id: str) -> StreamingResponse:
+        def event_source():
+            try:
+                for payload in app_service.iter_job_stream_events(job_id):
+                    event_name = str(payload.get("event", "message") or "message")
+                    yield f"event: {event_name}\n"
+                    yield "data: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
+            except Exception as exc:
+                error_payload = {
+                    "event": "error",
+                    "job_id": str(job_id),
+                    "status": "error",
+                    "timestamp": app_service.now_iso(),
+                    "message": str(exc),
+                }
+                yield "event: error\n"
+                yield "data: " + json.dumps(error_payload, ensure_ascii=False) + "\n\n"
+
+        return StreamingResponse(event_source(), media_type="text/event-stream")
+
     @app.get("/api/trade-plan")
     def api_trade_plan() -> dict[str, Any]:
         return app_service.latest_trade_plan_summary(max_lines=240)
@@ -274,6 +296,30 @@ def create_app() -> FastAPI:
 
     @app.post("/api/data-sources/provider-health")
     def api_data_sources_provider_health(request: ProviderHealthRequest) -> JSONResponse:
+        try:
+            args = [
+                "--provider-plan",
+                request.provider_plan or app_service.FORMAL_DATA_PLATFORM_PROVIDER_PLAN,
+            ]
+            if request.as_of_date:
+                args.extend(["--as-of-date", request.as_of_date])
+            domains = request.domains or list(app_service.FORMAL_DATA_PLATFORM_REQUIRED_DOMAINS)
+            if domains:
+                args.extend(["--domains", ",".join(domains)])
+            if request.symbols:
+                args.extend(["--symbols", ",".join(request.symbols)])
+            args.append("--json")
+            payload = app_service.launch_task_async(
+                task_name="provider-health-check",
+                passthrough_args=args,
+                job_label="manual-provider-health",
+            )
+            return JSONResponse(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/data-sources/provider-health/sync")
+    def api_data_sources_provider_health_sync(request: ProviderHealthRequest) -> JSONResponse:
         try:
             payload = app_service.provider_health_summary(
                 provider_plan=request.provider_plan or app_service.FORMAL_DATA_PLATFORM_PROVIDER_PLAN,

@@ -355,6 +355,73 @@ def tail_file(path: Path, *, lines: int = 40) -> list[str]:
     return [line.rstrip("\n") for line in content[-limit:]]
 
 
+def read_file_increment(path: Path, *, offset: int = 0) -> dict[str, Any]:
+    resolved = Path(path)
+    current_size = resolved.stat().st_size if resolved.exists() else 0
+    start_offset = max(int(offset or 0), 0)
+    truncated = bool(start_offset > current_size)
+    if truncated:
+        start_offset = 0
+    if not resolved.exists():
+        return {"path": str(resolved), "offset": 0, "lines": [], "truncated": False}
+    with resolved.open("rb") as handle:
+        handle.seek(start_offset)
+        raw = handle.read()
+        next_offset = handle.tell()
+    text = raw.decode("utf-8", errors="replace")
+    lines = [line.rstrip("\n\r") for line in text.splitlines()]
+    return {"path": str(resolved), "offset": next_offset, "lines": lines, "truncated": truncated}
+
+
+def update_job_progress(
+    job_id: str,
+    *,
+    mode: str = "indeterminate",
+    stage: str = "",
+    completed_steps: int | None = None,
+    total_steps: int | None = None,
+    percent: float | int | None = None,
+    current_item: str = "",
+    current_provider: str = "",
+    current_domain: str = "",
+    status: str = "",
+    provider_health: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    clean_job_id = str(job_id or "").strip()
+    if not clean_job_id:
+        return {}
+    job_paths = build_job_paths(clean_job_id)
+    progress: dict[str, Any] = {
+        "mode": str(mode or "indeterminate"),
+        "stage": str(stage or ""),
+        "current_item": str(current_item or ""),
+        "current_provider": str(current_provider or ""),
+        "current_domain": str(current_domain or ""),
+        "updated_at": now_iso(),
+    }
+    if completed_steps is not None:
+        progress["completed_steps"] = int(completed_steps)
+    if total_steps is not None:
+        progress["total_steps"] = int(total_steps)
+    if percent is not None:
+        progress["percent"] = float(percent)
+    if status:
+        progress["status"] = str(status)
+    patch: dict[str, Any] = {"progress": progress}
+    if provider_health is not None:
+        patch["provider_health"] = provider_health
+    metadata = update_job_metadata(job_paths, **patch)
+    state = load_runtime_state()
+    current_job = dict(state.get("current_job", {})) if isinstance(state.get("current_job"), dict) else {}
+    if str(current_job.get("job_id", "")) == clean_job_id:
+        current_job["progress"] = progress
+        state["current_job"] = current_job
+    if provider_health is not None:
+        state["last_provider_health"] = provider_health
+    write_runtime_state(state)
+    return metadata
+
+
 def clear_lock_file() -> None:
     if LOCK_PATH.exists():
         LOCK_PATH.unlink()

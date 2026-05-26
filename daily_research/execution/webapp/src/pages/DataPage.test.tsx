@@ -18,6 +18,47 @@ const recommendedDomains = [
 describe("DataPage", () => {
   it("prefills the formal refresh contract and submits it", async () => {
     const user = userEvent.setup();
+    const streamJob = vi.fn((_jobId, handlers) => {
+      handlers.onEvent({
+        event: "snapshot",
+        job_id: "provider-health-job",
+        status: "running",
+        timestamp: "2026-05-26T10:00:00+08:00",
+        metadata: {
+          job_id: "provider-health-job",
+          task_name: "provider-health-check",
+          status: "running",
+          progress: {
+            mode: "determinate",
+            stage: "Checking baostock / market_daily",
+            completed_steps: 1,
+            total_steps: 2,
+            percent: 50
+          }
+        }
+      });
+      window.setTimeout(() => {
+        handlers.onEvent({
+          event: "done",
+          job_id: "provider-health-job",
+          status: "succeeded",
+          timestamp: "2026-05-26T10:00:01+08:00",
+          metadata: {
+            job_id: "provider-health-job",
+            task_name: "provider-health-check",
+            status: "succeeded",
+            progress: { mode: "determinate", stage: "Completed", completed_steps: 2, total_steps: 2, percent: 100 },
+            provider_health: {
+              status: "ok",
+              summary: { ok_domain_count: 2, checked_domain_count: 2 },
+              domain_matrix: [],
+              providers: []
+            }
+          }
+        });
+      }, 250);
+      return { close: vi.fn() };
+    });
     const api = {
       getDataSources: vi.fn().mockResolvedValue({
         status: "ok",
@@ -54,14 +95,9 @@ describe("DataPage", () => {
           }
         }
       }),
-      runProviderHealth: vi.fn().mockResolvedValue({
-        status: "ok",
-        provider_plan: "formal_free_v3",
-        summary: { ok_domain_count: 2, checked_domain_count: 2 },
-        domain_matrix: [],
-        providers: []
-      }),
+      runProviderHealth: vi.fn().mockResolvedValue({ job_id: "provider-health-job", task_name: "provider-health-check", status: "queued" }),
       refreshDataSources: vi.fn().mockResolvedValue({ job_id: "job-data", status: "queued" }),
+      streamJob,
       getJob: vi.fn().mockResolvedValue({
         job_id: "job-data",
         task_name: "data-platform-refresh",
@@ -77,8 +113,8 @@ describe("DataPage", () => {
 
     expect(await screen.findByLabelText("As-of 日期")).toHaveValue("2026-05-22");
     expect(screen.getByLabelText("Domains")).toHaveValue(recommendedDomains.join(","));
-    expect(screen.getByText("Provider Matrix")).toBeInTheDocument();
-    expect(screen.getByText("tencent_finance")).toBeInTheDocument();
+    expect(screen.getByText("Provider Matrix 摘要")).toBeInTheDocument();
+    expect(screen.queryByText("tencent_finance")).not.toBeInTheDocument();
     expect(screen.getByText("自动更新")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "检查数据源" }));
@@ -89,6 +125,8 @@ describe("DataPage", () => {
         provider_plan: "formal_free_v3"
       });
     });
+    expect(await screen.findByText("Checking baostock / market_daily")).toBeInTheDocument();
+    expect(await screen.findByText("50%")).toBeInTheDocument();
     expect(await screen.findByText("provider health: ok")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "补齐到最新交易日" }));
@@ -103,6 +141,54 @@ describe("DataPage", () => {
       });
     });
     expect(await screen.findByText("DataRefresh 4/8 Fetch provider domains")).toBeInTheDocument();
+  });
+
+  it("keeps provider matrix compact by default and supports problem filtering", async () => {
+    const user = userEvent.setup();
+    const api = {
+      getDataSources: vi.fn().mockResolvedValue({
+        status: "ok",
+        lake_root: "lake",
+        catalog_status: "ok",
+        datasets: [],
+        formal_provider_plan: "formal_free_v3",
+        domain_matrix: [
+          { provider: "baostock", domain: "market_daily", requirement: "required", supported: true, formal_refresh: true },
+          { provider: "tencent_finance", domain: "valuation", requirement: "optional", supported: false, formal_refresh: false }
+        ],
+        provider_health: {},
+        scheduler_status: {},
+        next_refresh_action: "skip",
+        data_platform: {
+          runs_root: "runs",
+          latest_refresh_run: "",
+          provider_plan: "formal_free_v3",
+          latest_completed_trading_date: "2026-05-22",
+          default_refresh: {
+            as_of_date: "2026-05-22",
+            universe: "all_a",
+            domains: recommendedDomains,
+            required_domains: recommendedDomains.slice(0, 5),
+            provider_plan: "formal_free_v3"
+          }
+        }
+      }),
+      runProviderHealth: vi.fn()
+    } as unknown as ExecutionApi;
+
+    render(<DataPage api={api} />);
+
+    expect(await screen.findByText("Provider Matrix 摘要")).toBeInTheDocument();
+    expect(screen.getByText("Providers")).toBeInTheDocument();
+    expect(screen.queryByText("baostock")).not.toBeInTheDocument();
+
+    await user.click(screen.getByText("展开完整矩阵"));
+
+    expect(await screen.findByText("tencent_finance")).toBeInTheDocument();
+    expect(screen.queryByText("baostock")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "All" }));
+    expect(await screen.findByText("baostock")).toBeInTheDocument();
   });
 
   it("shows the current dataset as latest and does not submit a duplicate refresh", async () => {

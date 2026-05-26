@@ -679,7 +679,47 @@ def test_data_refresh_api_ignores_timeout_override(monkeypatch: pytest.MonkeyPat
     assert "1" not in captured["passthrough_args"]
 
 
-def test_provider_health_api_is_read_only_and_returns_matrix(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_provider_health_api_launches_background_progress_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from daily_research.execution import web_server
+
+    called: dict[str, Any] = {}
+
+    def fake_launch_task_async(**kwargs):
+        called.update(kwargs)
+        return {
+            "job_id": "provider-health-job",
+            "task_name": kwargs["task_name"],
+            "status": "queued",
+            "command": ["python", "provider_health.py"],
+        }
+
+    monkeypatch.setattr(web_server.app_service, "launch_task_async", fake_launch_task_async)
+
+    client = TestClient(web_server.create_app())
+    response = client.post(
+        "/api/data-sources/provider-health",
+        json={"as_of_date": "2026-05-22", "domains": ["market_daily"], "provider_plan": "formal_free_v3"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "queued"
+    assert payload["task_name"] == "provider-health-check"
+    assert called["task_name"] == "provider-health-check"
+    assert called["passthrough_args"] == [
+        "--provider-plan",
+        "formal_free_v3",
+        "--as-of-date",
+        "2026-05-22",
+        "--domains",
+        "market_daily",
+        "--json",
+    ]
+
+
+def test_provider_health_sync_api_remains_available_for_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi.testclient import TestClient
 
     from daily_research.execution import web_server
@@ -699,12 +739,11 @@ def test_provider_health_api_is_read_only_and_returns_matrix(monkeypatch: pytest
     monkeypatch.setattr(web_server.app_service, "provider_health_summary", fake_provider_health_summary)
 
     client = TestClient(web_server.create_app())
-    response = client.post("/api/data-sources/provider-health", json={})
+    response = client.post("/api/data-sources/provider-health/sync", json={})
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "ok"
-    assert payload["provider_plan"] == "formal_free_v3"
     assert payload["domain_matrix"][0]["domain"] == "market_daily"
     assert called["provider_plan"] == "formal_free_v3"
 
@@ -2488,6 +2527,137 @@ def test_runtime_json_atomic_writes_use_unique_temp_files(monkeypatch: pytest.Mo
 
     assert len(temp_paths) == 2
     assert temp_paths[0] != temp_paths[1]
+
+
+def test_read_file_increment_reads_only_new_lines_and_survives_truncation(tmp_path: Path) -> None:
+    from daily_research.execution import app_runtime
+
+    log_path = tmp_path / "stdout.log"
+    log_path.write_text("line 1\nline 2\n", encoding="utf-8")
+
+    first = app_runtime.read_file_increment(log_path, offset=0)
+    assert first["lines"] == ["line 1", "line 2"]
+    assert first["offset"] > 0
+
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write("line 3\n")
+
+    second = app_runtime.read_file_increment(log_path, offset=int(first["offset"]))
+    assert second["lines"] == ["line 3"]
+
+    log_path.write_text("fresh\n", encoding="utf-8")
+    truncated = app_runtime.read_file_increment(log_path, offset=int(second["offset"]))
+    assert truncated["truncated"] is True
+    assert truncated["lines"] == ["fresh"]
+
+
+def test_job_stream_endpoint_emits_snapshot_incremental_stdout_and_done(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from daily_research.execution import web_server
+
+    stdout_path = tmp_path / "stdout.log"
+    stderr_path = tmp_path / "stderr.log"
+    stdout_path.write_text("hello stream\n", encoding="utf-8")
+    stderr_path.write_text("", encoding="utf-8")
+    metadata = {
+        "job_id": "stream-job",
+        "task_name": "data-platform-refresh",
+        "status": "succeeded",
+        "stdout_log": str(stdout_path),
+        "stderr_log": str(stderr_path),
+        "progress": {"mode": "determinate", "stage": "done", "completed_steps": 1, "total_steps": 1, "percent": 100},
+    }
+
+    monkeypatch.setattr(web_server.app_service, "_reconcile_running_job_metadata", lambda job_id: metadata)
+    monkeypatch.setattr(web_server.app_service, "load_job_metadata", lambda job_id: metadata)
+
+    client = TestClient(web_server.create_app())
+    response = client.get("/api/jobs/stream-job/stream")
+
+    assert response.status_code == 200
+    body = response.text
+    assert "event: snapshot" in body
+    assert '"status": "succeeded"' in body
+    assert "event: stdout" in body
+    assert "hello stream" in body
+    assert "event: done" in body
+
+
+def test_provider_health_cli_updates_job_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    from daily_research.data_platform import provider_health
+
+    updates: list[dict[str, object]] = []
+
+    class FakeProvider:
+        name = "fake"
+
+        def fetch_domain(self, request):
+            import pandas as pd
+
+            return type(
+                "Result",
+                (),
+                {"data": pd.DataFrame({"symbol": ["000001.SZ"]}), "coverage_report": {}, "error_report": []},
+            )()
+
+    monkeypatch.setenv("EXECUTION_APP_JOB_ID", "provider-health-job")
+    monkeypatch.setattr(provider_health, "build_default_providers", lambda provider_plan: [FakeProvider()])
+    monkeypatch.setattr(provider_health, "_update_execution_job_progress", lambda **kwargs: updates.append(kwargs))
+
+    payload = provider_health.run_provider_health(
+        provider_health.ProviderHealthConfig(
+            provider_plan="formal_free_v3",
+            as_of_date="2026-05-22",
+            domains=("market_daily", "trading_calendar"),
+            symbols=("000001.SZ",),
+        )
+    )
+
+    assert payload["status"] == "ok"
+    assert updates
+    assert updates[-1]["completed_steps"] == 2
+    assert updates[-1]["total_steps"] == 2
+    assert updates[-1]["current_domain"] == "trading_calendar"
+
+
+def test_provider_health_progress_updates_before_each_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
+    from daily_research.data_platform import provider_health
+
+    updates: list[dict[str, object]] = []
+
+    class SlowProvider:
+        name = "slow_provider"
+
+        def fetch_domain(self, request):
+            import pandas as pd
+
+            assert updates
+            assert updates[-1]["stage"] == "Checking slow_provider / market_daily"
+            return type(
+                "Result",
+                (),
+                {"data": pd.DataFrame({"symbol": ["000001.SZ"]}), "coverage_report": {}, "error_report": []},
+            )()
+
+    monkeypatch.setenv("EXECUTION_APP_JOB_ID", "provider-health-progress-job")
+    monkeypatch.setattr(provider_health, "build_default_providers", lambda provider_plan: [SlowProvider()])
+    monkeypatch.setattr(provider_health, "_update_execution_job_progress", lambda **kwargs: updates.append(kwargs))
+
+    payload = provider_health.run_provider_health(
+        provider_health.ProviderHealthConfig(
+            provider_plan="formal_free_v3",
+            as_of_date="2026-05-22",
+            domains=("market_daily",),
+            symbols=("000001.SZ",),
+        )
+    )
+
+    assert payload["status"] == "ok"
+    assert updates[0]["completed_steps"] == 0
+    assert updates[0]["total_steps"] == 1
+    assert updates[0]["current_item"] == "slow_provider / market_daily"
+    assert updates[-1]["stage"] == "Provider health completed"
 
 
 def test_ui_paths_include_react_dist() -> None:

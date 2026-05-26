@@ -56,6 +56,46 @@ describe("JobsPage", () => {
     expect(api.getJob).toHaveBeenCalledWith("job1", 200);
   });
 
+  it("streams selected job detail before falling back to polling", async () => {
+    const streamJob = vi.fn((_jobId, handlers) => {
+      handlers.onEvent({
+        event: "snapshot",
+        job_id: "job1",
+        status: "running",
+        timestamp: "2026-05-26T10:00:00+08:00",
+        metadata: {
+          job_id: "job1",
+          task_name: "data-platform-refresh",
+          status: "running",
+          progress: { mode: "determinate", stage: "Fetching domains", completed_steps: 1, total_steps: 4, percent: 25 }
+        }
+      });
+      handlers.onEvent({
+        event: "stdout",
+        job_id: "job1",
+        status: "running",
+        timestamp: "2026-05-26T10:00:01+08:00",
+        stream: "stdout",
+        line: "streamed line",
+        line_no: 1
+      });
+      return { close: vi.fn() };
+    });
+    const api = {
+      getJobs: vi.fn().mockResolvedValue([{ job_id: "job1", task_name: "data-platform-refresh", status: "running" }]),
+      getJob: vi.fn(),
+      streamJob,
+      resumeJob: vi.fn()
+    } as unknown as ExecutionApi;
+
+    render(<JobsPage api={api} selectedJobId="job1" pollMs={100000} />);
+
+    expect(await screen.findByText("Fetching domains")).toBeInTheDocument();
+    expect(screen.getByText("25%")).toBeInTheDocument();
+    expect(screen.getByText("streamed line")).toBeInTheDocument();
+    expect(api.getJob).not.toHaveBeenCalled();
+  });
+
   it("polls selected job detail so stdout is not a stale snapshot", async () => {
     vi.useFakeTimers();
     const getJob = vi

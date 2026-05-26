@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from daily_research.execution.app_tasks import get_task_spec, list_core_frontend_task_specs, list_task_specs
+import subprocess
+import sys
+
+from daily_research.execution.app_tasks import build_task_command, get_task_spec, list_core_frontend_task_specs, list_task_specs
 
 
 def test_danger_tasks_are_marked_danger() -> None:
@@ -36,3 +39,17 @@ def test_default_frontend_task_surface_hides_dangerous_production_refresh() -> N
 
     assert "trade-plan" in task_names
     assert "refresh-production-default" not in task_names
+
+
+def test_provider_health_check_runs_from_execution_task_command() -> None:
+    command = build_task_command(
+        task_name="provider-health-check",
+        python_executable=sys.executable,
+        passthrough_args=["--domains", "market_daily", "--symbols", "000001.SZ", "--json"],
+    )
+
+    result = subprocess.run(command, cwd=".", text=True, capture_output=True, timeout=120)
+
+    assert result.returncode in {0, 2}
+    assert "ModuleNotFoundError" not in result.stderr
+    assert "provider_plan" in result.stdout

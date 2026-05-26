@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
-import type { TableRow } from "./types";
+import type { JobProgress, TableRow } from "./types";
 import { tableColumns, text } from "./format";
 
 interface PageHeaderProps {
@@ -118,6 +118,60 @@ export function DataTable({
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+export function ProgressBar({ progress }: { progress?: JobProgress | null }): JSX.Element {
+  const total = Number(progress?.total_steps || 0);
+  const completed = Number(progress?.completed_steps || 0);
+  const rawPercent = progress?.percent !== undefined ? Number(progress.percent) : total > 0 ? (completed / total) * 100 : 0;
+  const percentValue = Number.isFinite(rawPercent) ? Math.max(0, Math.min(100, rawPercent)) : 0;
+  const determinate = total > 0 || String(progress?.mode || "") === "determinate";
+  return (
+    <div className="progress-block">
+      <div className={`progress-bar ${determinate ? "progress-determinate" : "progress-indeterminate"}`}>
+        <span style={determinate ? { width: `${percentValue}%` } : undefined} />
+      </div>
+      <div className="progress-meta">
+        <strong>{determinate ? `${Math.round(percentValue)}%` : "运行中"}</strong>
+        <span>{text(progress?.stage || progress?.current_item || "正在运行")}</span>
+        {total > 0 ? <span>{completed}/{total}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+export function LogDisclosure({ stdout, stderr }: { stdout: string[]; stderr: string[] }): JSX.Element {
+  return (
+    <details className="log-disclosure">
+      <summary>实时日志 / 调试信息</summary>
+      <div className="log-grid">
+        <div>
+          <h3>stdout</h3>
+          <pre>{stdout.join("\n") || "-"}</pre>
+        </div>
+        <div>
+          <h3>stderr</h3>
+          <pre>{stderr.join("\n") || "-"}</pre>
+        </div>
+      </div>
+    </details>
+  );
+}
+
+export function ResizableTablePanel({
+  rows,
+  preferredColumns = [],
+  emptyText = "暂无数据"
+}: {
+  rows: TableRow[];
+  preferredColumns?: string[];
+  emptyText?: string;
+}): JSX.Element {
+  return (
+    <div className="resizable-table">
+      <DataTable rows={rows} preferredColumns={preferredColumns} emptyText={emptyText} />
     </div>
   );
 }
