@@ -6,7 +6,11 @@ import type { ExecutionApi } from "../types";
 
 function fakeApi(overrides: Partial<ExecutionApi> = {}): ExecutionApi {
   return {
-    getStatus: vi.fn(),
+    getDailyRunStatus: vi.fn(),
+    getLatestDailyRun: vi.fn(),
+    runDailyPlan: vi.fn(),
+    getDataReadiness: vi.fn(),
+    getSystemDoctor: vi.fn(),
     getDoctor: vi.fn(),
     getModels: vi.fn().mockResolvedValue({
       status: "ok",
@@ -76,7 +80,6 @@ function fakeApi(overrides: Partial<ExecutionApi> = {}): ExecutionApi {
     refreshDataSources: vi.fn(),
     runProviderHealth: vi.fn(),
     getScheduler: vi.fn(),
-    updateScheduler: vi.fn(),
     getTradePlan: vi.fn(),
     generateTradePlan: vi.fn(),
     getAccount: vi.fn(),

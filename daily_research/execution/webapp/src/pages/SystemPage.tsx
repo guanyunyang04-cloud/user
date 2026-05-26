@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Unlock } from "lucide-react";
-import type { DoctorPayload, ExecutionApi, StatusPayload } from "../types";
+import type { DailyRunStatusPayload, DoctorPayload, ExecutionApi, SchedulerPayload } from "../types";
 import { DataTable, ErrorState, LoadingState, PageHeader, Panel, Stat, StatusPill } from "../components";
 import { text } from "../format";
 
@@ -9,7 +9,8 @@ interface SystemPageProps {
 }
 
 export function SystemPage({ api }: SystemPageProps): JSX.Element {
-  const [status, setStatus] = useState<StatusPayload | null>(null);
+  const [dailyRun, setDailyRun] = useState<DailyRunStatusPayload | null>(null);
+  const [scheduler, setScheduler] = useState<SchedulerPayload | null>(null);
   const [doctor, setDoctor] = useState<DoctorPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -18,10 +19,11 @@ export function SystemPage({ api }: SystemPageProps): JSX.Element {
 
   const load = (): void => {
     setLoading(true);
-    Promise.all([api.getStatus(20), api.getDoctor()])
-      .then(([nextStatus, nextDoctor]) => {
-        setStatus(nextStatus);
+    Promise.all([api.getDailyRunStatus(), api.getSystemDoctor(), api.getScheduler()])
+      .then(([nextDailyRun, nextDoctor, nextScheduler]) => {
+        setDailyRun(nextDailyRun);
         setDoctor(nextDoctor);
+        setScheduler(nextScheduler);
         setError("");
       })
       .catch((err: Error) => setError(err.message))
@@ -43,60 +45,53 @@ export function SystemPage({ api }: SystemPageProps): JSX.Element {
     }
   }
 
-  const paper = status?.paper_account || {};
+  const verdict = dailyRun?.latest_verdict || {};
 
   return (
     <div>
-      <PageHeader title="系统" eyebrow="doctor、runtime、锁状态与环境信息" />
+      <PageHeader title="系统" eyebrow="doctor、系统任务与 daily verdict" />
       {loading ? <LoadingState /> : null}
       {error ? <ErrorState message={error} /> : null}
       <div className="stat-grid">
         <Stat label="Doctor" value={<StatusPill value={doctor?.status || "unknown"} />} />
-        <Stat label="Yolos Python" value={text(status?.yolos_python)} />
-        <Stat label="Runtime Root" value={text(status?.runtime_root)} />
-        <Stat label="锁" value={<StatusPill value={status?.lock && Object.keys(status.lock).length ? "locked" : "ok"} />} />
-        <Stat label="Active Dataset" value={text(status?.active_manifest?.lake_dataset_id || status?.active_manifest?.source_market_dataset_id)} />
-        <Stat label="交易计划" value={<StatusPill value={String(status?.latest_trade_plan?.status || "missing")} />} />
-        <Stat label="模拟账户" value={<StatusPill value={String(paper.status || paper.source || "unknown")} />} />
-        <Stat label="自动更新" value={<StatusPill value={Boolean(status?.scheduler_status?.enabled)} />} />
-        <Stat label="盘后检查" value={text(status?.scheduler_status?.post_close_time)} />
+        <Stat label="Daily Run" value={<StatusPill value={dailyRun?.status || "missing"} />} />
+        <Stat label="目标交易日" value={text(verdict.target_trading_date)} />
+        <Stat label="阻断原因" value={text(verdict.blocker_code)} />
+        <Stat label="系统任务" value={<StatusPill value={Boolean(scheduler?.enabled)} />} />
+        <Stat label="任务名" value={text(scheduler?.task_name)} />
+        <Stat label="下次运行" value={text(scheduler?.next_run_time)} />
+        <Stat label="上次结果" value={text(scheduler?.last_result)} />
       </div>
       <Panel title="关键证据">
         <div className="key-list">
-          <span>Active Manifest</span>
-          <strong>{text(status?.active_manifest?.path)}</strong>
-          <span>Data Source</span>
-          <strong>{text(status?.active_manifest?.data_source)}</strong>
-          <span>Lake Dataset</span>
-          <strong>{text(status?.active_manifest?.lake_dataset_id || status?.active_manifest?.source_market_dataset_id)}</strong>
-          <span>Dataset End Date</span>
-          <strong>{text(status?.active_manifest?.lake_dataset_end_date)}</strong>
+          <span>Daily Runs Root</span>
+          <strong>{text(dailyRun?.daily_runs_root)}</strong>
+          <span>Verdict</span>
+          <strong>{text(verdict.evidence_paths?.verdict)}</strong>
+          <span>Dataset</span>
+          <strong>{text(verdict.dataset_id)}</strong>
+          <span>Signal Panel Date</span>
+          <strong>{text(verdict.signal_panel_date)}</strong>
           <span>Trade Plan Run</span>
-          <strong>{text(status?.latest_trade_plan?.artifact_paths?.run_dir)}</strong>
-          <span>Trade Plan TXT</span>
-          <strong>{text(status?.latest_trade_plan?.artifact_paths?.txt || status?.latest_trade_plan?.path)}</strong>
-          <span>Paper Ledger</span>
-          <strong>{text(paper.db_path)}</strong>
-          <span>Pending Orders</span>
-          <strong>{text(paper.pending_order_count)}</strong>
+          <strong>{text(verdict.trade_plan_run_dir)}</strong>
+          <span>Paper Reconcile</span>
+          <strong>{text(verdict.paper_reconcile_status)}</strong>
         </div>
       </Panel>
-      <Panel title="自动盘后更新">
+      <Panel title="Windows Task Scheduler">
         <div className="key-list">
-          <span>启用</span>
-          <strong><StatusPill value={Boolean(status?.scheduler_status?.enabled)} /></strong>
-          <span>盘后检查时间</span>
-          <strong>{text(status?.scheduler_status?.post_close_time)}</strong>
-          <span>时区</span>
-          <strong>{text(status?.scheduler_status?.timezone)}</strong>
-          <span>下一次检查</span>
-          <strong>{text(status?.scheduler_status?.next_check_at)}</strong>
-          <span>错过状态</span>
-          <strong>{text(status?.scheduler_status?.missed_status)}</strong>
-          <span>最近自动 Job</span>
-          <strong>{text(status?.last_auto_refresh?.job_id || status?.scheduler_status?.last_auto_refresh?.job_id)}</strong>
-          <span>最近决策</span>
-          <strong>{text(status?.last_auto_refresh?.scheduler_decision || status?.scheduler_status?.recent_decision?.decision)}</strong>
+          <span>Installed</span>
+          <strong><StatusPill value={Boolean(scheduler?.installed)} /></strong>
+          <span>Enabled</span>
+          <strong><StatusPill value={Boolean(scheduler?.enabled)} /></strong>
+          <span>Task Name</span>
+          <strong>{text(scheduler?.task_name)}</strong>
+          <span>Next Run</span>
+          <strong>{text(scheduler?.next_run_time)}</strong>
+          <span>Last Run</span>
+          <strong>{text(scheduler?.last_run_time)}</strong>
+          <span>Last Result</span>
+          <strong>{text(scheduler?.last_result)}</strong>
         </div>
       </Panel>
       <Panel title="Doctor Checks">
@@ -113,9 +108,6 @@ export function SystemPage({ api }: SystemPageProps): JSX.Element {
         </label>
         <button onClick={unlock}><Unlock size={16} />清理锁</button>
         {message ? <p className="inline-message">{message}</p> : null}
-      </Panel>
-      <Panel title="Runtime JSON">
-        <pre className="detail-json">{JSON.stringify(status, null, 2)}</pre>
       </Panel>
     </div>
   );

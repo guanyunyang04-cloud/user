@@ -74,12 +74,6 @@ describe("DataPage", () => {
           status: "unknown",
           summary: {}
         },
-        scheduler_status: {
-          enabled: true,
-          post_close_time: "15:30",
-          timezone: "Asia/Shanghai",
-          missed_status: ""
-        },
         data_platform: {
           runs_root: "runs",
           latest_refresh_run: "",
@@ -115,7 +109,7 @@ describe("DataPage", () => {
     expect(screen.getByLabelText("Domains")).toHaveValue(recommendedDomains.join(","));
     expect(screen.getByText("Provider Matrix 摘要")).toBeInTheDocument();
     expect(screen.queryByText("tencent_finance")).not.toBeInTheDocument();
-    expect(screen.getByText("自动更新")).toBeInTheDocument();
+    expect(screen.getByText("Daily readiness")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "检查数据源" }));
     await waitFor(() => {
@@ -157,7 +151,6 @@ describe("DataPage", () => {
           { provider: "tencent_finance", domain: "valuation", requirement: "optional", supported: false, formal_refresh: false }
         ],
         provider_health: {},
-        scheduler_status: {},
         next_refresh_action: "skip",
         data_platform: {
           runs_root: "runs",
@@ -222,7 +215,6 @@ describe("DataPage", () => {
         formal_provider_plan: "formal_free_v3",
         domain_matrix: [],
         provider_health: {},
-        scheduler_status: { enabled: true, post_close_time: "15:30", timezone: "Asia/Shanghai" },
         data_platform: {
           runs_root: "runs",
           latest_refresh_run: "",
@@ -293,7 +285,6 @@ describe("DataPage", () => {
         formal_provider_plan: "formal_free_v3",
         domain_matrix: [],
         provider_health: {},
-        scheduler_status: { enabled: true, post_close_time: "15:30", timezone: "Asia/Shanghai" },
         data_platform: {
           runs_root: "runs",
           latest_refresh_run: "",

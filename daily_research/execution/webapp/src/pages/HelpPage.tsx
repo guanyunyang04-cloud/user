@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import type {
+  DailyRunStatusPayload,
   DataSourcesPayload,
   ExecutionApi,
   JobSummary,
   PaperAccountPayload,
-  StatusPayload,
   TableRow,
   TradePlanPayload
 } from "../types";
@@ -17,7 +17,7 @@ interface HelpPageProps {
 }
 
 interface HelpPayloads {
-  status?: StatusPayload | null;
+  dailyRun?: DailyRunStatusPayload | null;
   dataSources?: DataSourcesPayload | null;
   tradePlan?: TradePlanPayload | null;
   paperAccount?: PaperAccountPayload | null;
@@ -31,15 +31,7 @@ interface GuideState {
   warningRows: TableRow[];
 }
 
-function hasRuntimeLock(status?: StatusPayload | null): boolean {
-  return Boolean(status?.lock && Object.keys(status.lock).length);
-}
-
-function hasRunningJob(status?: StatusPayload | null, jobs: JobSummary[] = []): boolean {
-  const currentStatus = String(status?.current_job?.status || "").toLowerCase();
-  if (["queued", "running"].includes(currentStatus)) {
-    return true;
-  }
+function hasRunningJob(jobs: JobSummary[] = []): boolean {
   return jobs.some((job) => ["queued", "running"].includes(String(job.status || "").toLowerCase()));
 }
 
@@ -108,13 +100,14 @@ function dateCovers(left: unknown, right: unknown): boolean {
 }
 
 export function deriveGuideState({
-  status,
+  dailyRun,
   dataSources,
   tradePlan,
   paperAccount,
   jobs = []
 }: HelpPayloads): GuideState {
-  const runtimeBusy = hasRuntimeLock(status) || hasRunningJob(status, jobs);
+  const runtimeBusy = hasRunningJob(jobs);
+  const dailyBlocked = dailyRun?.status === "blocked";
   const dataNeedsRefresh = dataSources?.next_refresh_action !== "skip";
   const signalNeedsRefresh = dataSources?.next_signal_action === "refresh";
   const tradePlanReady = tradePlan?.status === "ok" && tradePlan.exists !== false;
@@ -135,6 +128,9 @@ export function deriveGuideState({
   if (runtimeBusy) {
     nextStep = "先查看运行中作业";
     nextStepDetail = "当前存在运行中 job 或 runtime lock，先到作业/系统页确认状态。";
+  } else if (dailyBlocked) {
+    nextStep = "先处理每日阻断";
+    nextStepDetail = `daily verdict 阻断原因：${dailyRun?.latest_verdict?.blocker_code || "unknown"}。`;
   } else if (dataNeedsRefresh) {
     nextStep = "先刷新数据";
     nextStepDetail = "当前 active dataset 还没有确认覆盖最新完成交易日。";
@@ -192,7 +188,10 @@ export function deriveGuideState({
 
   const warningRows: TableRow[] = [];
   if (runtimeBusy) {
-    warningRows.push({ item: "运行中作业", meaning: "当前不建议提交新任务", where: "作业 / 系统" });
+    warningRows.push({ item: "运行中作业", meaning: "当前不建议提交新任务", where: "作业" });
+  }
+  if (dailyBlocked) {
+    warningRows.push({ item: "daily verdict blocked", meaning: String(dailyRun?.latest_verdict?.blocker_code || "unknown"), where: "总览 / 系统" });
   }
   if (missingExecutionOpen) {
     warningRows.push({ item: "missing_execution_open", meaning: "执行日开盘价缺失，模拟订单保持 pending", where: "账户" });
@@ -209,11 +208,11 @@ export function deriveGuideState({
 const PAGE_ROWS: TableRow[] = [
   { page: "总览", use: "看 active manifest、交易计划、模拟账户和最近作业摘要", safe_action: "只读检查" },
   { page: "模型", use: "确认当前 live/production/research/legacy 模型状态", safe_action: "显式训练才会提交任务" },
-  { page: "数据", use: "检查当前数据集、provider 健康、signal panel、盘后自动更新", safe_action: "刷新数据或信号" },
+  { page: "数据", use: "检查当前数据集、provider 健康、signal panel 与 readiness 阻断", safe_action: "刷新数据或信号" },
   { page: "交易计划", use: "生成并查看结构化动作、watchlist、市场状态和 TXT 原文", safe_action: "注册模拟订单" },
   { page: "模拟账户", use: "查看现金、持仓、pending orders、成交流水和区间收益", safe_action: "充值提现、手动修正、模拟过账" },
   { page: "作业", use: "查看任务历史、runner/business/artifact 状态和日志", safe_action: "查看详情或恢复失败任务" },
-  { page: "系统", use: "查看 doctor、runtime、锁、scheduler 和关键证据路径", safe_action: "必要时清理锁" }
+  { page: "系统", use: "查看 doctor、锁、Windows Task Scheduler 和 daily verdict 证据路径", safe_action: "必要时清理锁" }
 ];
 
 const STATUS_ROWS: TableRow[] = [
@@ -234,7 +233,7 @@ const FAQ_ROWS: TableRow[] = [
 ];
 
 export function HelpPage({ api }: HelpPageProps): JSX.Element {
-  const [status, setStatus] = useState<StatusPayload | null>(null);
+  const [dailyRun, setDailyRun] = useState<DailyRunStatusPayload | null>(null);
   const [dataSources, setDataSources] = useState<DataSourcesPayload | null>(null);
   const [tradePlan, setTradePlan] = useState<TradePlanPayload | null>(null);
   const [paperAccount, setPaperAccount] = useState<PaperAccountPayload | null>(null);
@@ -244,9 +243,9 @@ export function HelpPage({ api }: HelpPageProps): JSX.Element {
 
   const load = (): void => {
     setLoading(true);
-    Promise.all([api.getStatus(10), api.getDataSources(), api.getTradePlan(), api.getPaperAccount(), api.getJobs(10)])
-      .then(([nextStatus, nextDataSources, nextTradePlan, nextPaperAccount, nextJobs]) => {
-        setStatus(nextStatus);
+    Promise.all([api.getDailyRunStatus(), api.getDataSources(), api.getTradePlan(), api.getPaperAccount(), api.getJobs(10)])
+      .then(([nextDailyRun, nextDataSources, nextTradePlan, nextPaperAccount, nextJobs]) => {
+        setDailyRun(nextDailyRun);
         setDataSources(nextDataSources);
         setTradePlan(nextTradePlan);
         setPaperAccount(nextPaperAccount);
@@ -262,8 +261,8 @@ export function HelpPage({ api }: HelpPageProps): JSX.Element {
   }, []);
 
   const guide = useMemo(
-    () => deriveGuideState({ status, dataSources, tradePlan, paperAccount, jobs }),
-    [status, dataSources, tradePlan, paperAccount, jobs]
+    () => deriveGuideState({ dailyRun, dataSources, tradePlan, paperAccount, jobs }),
+    [dailyRun, dataSources, tradePlan, paperAccount, jobs]
   );
   const tradePlanStatus = useMemo(() => {
     const row = guide.checklistRows.find((item) => item.step === "生成交易计划");
@@ -286,7 +285,8 @@ export function HelpPage({ api }: HelpPageProps): JSX.Element {
         <Stat label="信号面板" value={<StatusPill value={dataSources?.signal_panel_status || "unknown"} />} />
         <Stat label="交易计划" value={<StatusPill value={tradePlanStatus} />} />
         <Stat label="未成交订单" value={paperAccount?.pending_order_count || 0} />
-        <Stat label="运行状态" value={<StatusPill value={hasRuntimeLock(status) || hasRunningJob(status, jobs) ? "running" : "ok"} />} />
+        <Stat label="每日计划" value={<StatusPill value={dailyRun?.status || "missing"} />} />
+        <Stat label="运行状态" value={<StatusPill value={hasRunningJob(jobs) ? "running" : "ok"} />} />
       </div>
 
       <Panel title="今日盘后流程">

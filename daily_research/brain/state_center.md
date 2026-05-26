@@ -1,6 +1,6 @@
 # Daily Research 状态中枢
 
-快照日期：`2026-05-23`
+快照日期：`2026-05-26`
 
 ## 当前结论
 - `daily_research` 是当前正式生产研究与执行主线。
@@ -25,16 +25,20 @@
 - r73 已把 data lake 接入决策特征利用审计与 r71 collapse 诊断；`protocol_r73_lake_native_r71_collapse_repair_smoke_20260515_02` 完整跑通，eval/shadow 均保持 cashflow valid=1、intent conflict=0 且 source/receiver target 非零，但 training evidence 仍 `insufficient`、promotion gate 仍 `shadow_only`，行为质量仍有 cash timing、source quality、receiver-source spread 阻塞。
 - r74 已新增显式 `portfolio_set_v5_dfl_pg_v1_r74_lake_behavior_quality` 研究线，并完成 tiny lake smoke `protocol_r74_lake_behavior_quality_v5_smoke_20260515_03`；cashflow valid=1、intent conflict=0、source/receiver 非零，source wrong-side sell、reversal、cash timing 与 shadow receiver-source spread 相对 r73 有改善，但 source/receiver 覆盖收缩、feature contract degraded rate=1.0、training evidence 仍 `insufficient`，仍不是 promotion 或 behavior-success verdict。
 - 2026-05-23 已将 TDX-free data platform 升级到 V2：正式研究入口 lake-first，`tqcenter.py` / `pytdx` / `mootdx` 不再是 daily_research 主链路依赖；`refresh_daily` 支持 `--universe all_a|liquid500|file:<path>|symbols:<csv>`、真实交易日历、多 domain sidecar、Bronze/Silver 仲裁和显式 lake dataset 注册。
+- 2026-05-26 执行端已从“控制台能运行”重构为“每日计划状态机”：自动盘后由 Windows Task Scheduler 触发 `daily_plan_runner`，每日结论以 daily verdict 为准。
+- 当前 fresh daily verdict：`daily_research/output/execution_app/daily_runs/20260526/verdict.json`，状态 `blocked:data_not_ready`，目标交易日 `2026-05-26`；完整证据见 `daily_research/brain/references/execution_daily_plan_state_machine_refactor_20260526.md`。
 
 ## 当前接管入口
 - 默认读取顺序：`identity_layer.md -> state_center.md -> knowledge_center.md -> continuous_policy_design_contract.md -> operations_center.md -> governance_layer.md`。
 - 首选工具入口：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`。
 - 所有 `daily_research` 程序必须显式使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`。
+- 每日执行接管先看 daily verdict；Web 能打开、job succeeded 或 latest trade plan 存在都不能替代 daily verdict。
 - PowerShell 中文显示异常时，先用显式 UTF-8 复读；不得直接判定文档损坏。
 - `latest_*` 不得直接当真源；若 latest study/protocol/audit/ledger 不同源，必须使用 explicit run tag / protocol tag / dataset id。
 
 ## 当前主问题
 - production 执行侧不是当前阻塞点；默认 active 继续由 `short_expert_policy_v5b` 承担。
+- daily execution 当前阻塞点是 2026-05-26 数据源 readiness：候选交易日 formal refresh `market_daily` 为空，因此严格阻断并不生成新交易计划。
 - `alpha_multi_horizon_utility_policy_v1` 的当前 blocker 是 horizon / score calibration：模型已经学习到强的 20-30d 倾向交易效用排序信号，但还不是稳定的逐样本 horizon chooser。
 - continuous_policy 的核心瓶颈是组合日级资金分配：谁是 receiver、谁是 source、留多少 cash、承受多少 turnover / cost / drawdown。
 - r53-r55 解决了部分 cash/exposure closure，但 source/reduce/exit 和 cash timing 没闭合。
@@ -49,12 +53,13 @@
 
 ## 当前优先级
 - P0：冻结 live/default/promotion/active artifact，所有新线先保持 research / shadow-only。
-- P1：保持脑区控制面简洁；长历史、完整复盘、长命令进入 `references/`。
-- P2：`alpha_multi_horizon_utility_policy_v1` 下一步只做 constrained horizon-score / calibration 研究；约束后仍保持 spread、hit lift 和月稳，才允许 seeds `7,11,19`，仍不得上 liquid800 或 live/default。
-- P3：围绕 r71/r74 multi-stage regret 与 lake-native decision features 继续验证 receiver/deploy 平衡、cash timing、drawdown/reversal、source quality、feature contract health 与 sufficient training evidence；translation closure、oracle feasibility 和 lake source/receiver collapse 不再是当前主 blocker。
-- P4：继续用 strict Gold dataset id 作为训练数据真源；realtime tail label 只可用于 research/audit。
-- P5：补齐 TDX-free data platform 后续域：全 A universe discovery、交易日历、ST/退市/停牌、涨跌停、行业/概念、估值、资金/热点；这些进入 Bronze/Silver 后才能用于研究。
-- P6：保持 study/protocol 单进程研究框架；长任务可用外部后台启动 + 前台轮询，但研究本体仍应可诊断、可恢复；默认轮询采用 `Wait-Process -Id <pid> -Timeout 7200`，以 PID 绑定等待支持提前完成即返回；`7200` 秒只是单轮前台等待窗口，耗尽后若 PID / 日志 / 产物仍推进且无代码错误证据，应继续下一轮轮询。
+- P1：每日执行端以 daily verdict 为最终事实层；数据缺口严格阻断，不能自动回退旧交易日生成“今日计划”。
+- P2：保持脑区控制面简洁；长历史、完整复盘、长命令进入 `references/`。
+- P3：`alpha_multi_horizon_utility_policy_v1` 下一步只做 constrained horizon-score / calibration 研究；约束后仍保持 spread、hit lift 和月稳，才允许 seeds `7,11,19`，仍不得上 liquid800 或 live/default。
+- P4：围绕 r71/r74 multi-stage regret 与 lake-native decision features 继续验证 receiver/deploy 平衡、cash timing、drawdown/reversal、source quality、feature contract health 与 sufficient training evidence；translation closure、oracle feasibility 和 lake source/receiver collapse 不再是当前主 blocker。
+- P5：继续用 strict Gold dataset id 作为训练数据真源；realtime tail label 只可用于 research/audit。
+- P6：补齐 TDX-free data platform 后续域：全 A universe discovery、交易日历、ST/退市/停牌、涨跌停、行业/概念、估值、资金/热点；这些进入 Bronze/Silver 后才能用于研究。
+- P7：保持 study/protocol 单进程研究框架；长任务可用外部后台启动 + 前台轮询，但研究本体仍应可诊断、可恢复；默认轮询采用 `Wait-Process -Id <pid> -Timeout 7200`，以 PID 绑定等待支持提前完成即返回；`7200` 秒只是单轮前台等待窗口，耗尽后若 PID / 日志 / 产物仍推进且无代码错误证据，应继续下一轮轮询。
 
 ## 当前边界
 - formal、recent、promotion、live 不得混写。

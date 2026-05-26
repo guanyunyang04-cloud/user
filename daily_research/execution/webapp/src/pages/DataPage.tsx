@@ -378,20 +378,20 @@ export function DataPage({ api, pollMs = 3000 }: DataPageProps): JSX.Element {
             <LogDisclosure stdout={providerHealthStdout} stderr={providerHealthStderr} />
           ) : null}
         </Panel>
-        <Panel title="自动更新">
+        <Panel title="Daily readiness">
           <div className="key-list">
-            <span>启用</span>
-            <strong><StatusPill value={Boolean(payload?.scheduler_status?.enabled)} /></strong>
-            <span>盘后检查</span>
-            <strong>{text(payload?.scheduler_status?.post_close_time)}</strong>
-            <span>时区</span>
-            <strong>{text(payload?.scheduler_status?.timezone)}</strong>
-            <span>下一次检查</span>
-            <strong>{text(payload?.scheduler_status?.next_check_at)}</strong>
-            <span>错过状态</span>
-            <strong>{text(payload?.scheduler_status?.missed_status)}</strong>
-            <span>最近自动作业</span>
-            <strong>{text(payload?.last_auto_refresh?.job_id || payload?.scheduler_status?.last_auto_refresh?.job_id)}</strong>
+            <span>候选交易日</span>
+            <strong>{text(payload?.data_platform.default_refresh?.as_of_date || payload?.data_platform.latest_completed_trading_date)}</strong>
+            <span>Required Domains</span>
+            <strong>{text(payload?.data_platform.default_refresh?.required_domains?.join(","))}</strong>
+            <span>刷新动作</span>
+            <strong><StatusPill value={payload?.next_refresh_action || "unknown"} /></strong>
+            <span>信号动作</span>
+            <strong><StatusPill value={payload?.next_signal_action || "unknown"} /></strong>
+            <span>最新 Manifest</span>
+            <strong>{text(payload?.data_platform.latest_refresh_manifest_path)}</strong>
+            <span>最新阻断</span>
+            <strong>{text((payload?.data_platform.latest_refresh_blockers || []).join(","))}</strong>
           </div>
         </Panel>
       </div>

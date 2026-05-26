@@ -263,7 +263,8 @@ def test_data_sources_payload_exposes_default_refresh_contract(monkeypatch: pyte
     assert payload["data_platform"]["default_refresh"]["required_domains"] == FORMAL_REQUIRED_DOMAINS
     assert payload["formal_provider_plan"] == "formal_free_v3"
     assert "domain_matrix" in payload
-    assert "scheduler_status" in payload
+    assert "scheduler_status" not in payload
+    assert "last_auto_refresh" not in payload
 
 
 def test_data_sources_payload_marks_current_dataset_latest(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -748,279 +749,113 @@ def test_provider_health_sync_api_remains_available_for_diagnostics(monkeypatch:
     assert called["provider_plan"] == "formal_free_v3"
 
 
-def test_scheduler_api_reads_and_updates_config(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_scheduler_api_is_read_only_and_patch_removed(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi.testclient import TestClient
 
     from daily_research.execution import web_server
 
-    captured: dict[str, Any] = {}
-
     monkeypatch.setattr(
-        web_server.app_service,
-        "scheduler_summary",
-        lambda: {
-            "enabled": True,
-            "post_close_time": "15:30",
-            "timezone": "Asia/Shanghai",
-            "last_auto_refresh": {},
-            "next_check_at": "2026-05-25T15:30:00+08:00",
-        },
+        web_server.scheduler_cli,
+        "scheduler_status",
+        lambda: {"status": "ok", "installed": True, "enabled": True, "time": "15:45", "task_name": "DailyResearchDailyPlan"},
     )
-
-    def fake_update_scheduler_config(payload):
-        captured.update(payload)
-        return {"enabled": False, "post_close_time": "15:45", "timezone": "Asia/Shanghai"}
-
-    monkeypatch.setattr(web_server.app_service, "update_scheduler_config", fake_update_scheduler_config)
 
     client = TestClient(web_server.create_app())
     get_response = client.get("/api/data-sources/scheduler")
     patch_response = client.patch("/api/data-sources/scheduler", json={"enabled": False, "post_close_time": "15:45"})
 
     assert get_response.status_code == 200
-    assert get_response.json()["post_close_time"] == "15:30"
-    assert patch_response.status_code == 200
-    assert patch_response.json()["enabled"] is False
-    assert captured == {"enabled": False, "post_close_time": "15:45"}
+    assert get_response.json()["task_name"] == "DailyResearchDailyPlan"
+    assert patch_response.status_code == 405
 
 
-def test_scheduler_tick_launches_auto_refresh_when_due(monkeypatch: pytest.MonkeyPatch) -> None:
-    from daily_research.execution import app_service
+def test_daily_run_api_returns_compact_status_and_does_not_expose_runtime_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from daily_research.execution import web_server
+
+    monkeypatch.setattr(
+        web_server.daily_plan_runner,
+        "daily_run_status",
+        lambda: {
+            "status": "blocked",
+            "latest_run_date": "2026-05-26",
+            "latest_verdict": {
+                "status": "blocked",
+                "blocker_code": "data_not_ready",
+                "target_trading_date": "2026-05-26",
+            },
+            "scheduler": {"installed": True, "enabled": True},
+        },
+    )
+
+    client = TestClient(web_server.create_app())
+    response = client.get("/api/daily-run/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["latest_verdict"]["blocker_code"] == "data_not_ready"
+    assert "recent_jobs" not in payload
+    assert "current_job" not in payload
+    assert "runtime_state" not in payload
+
+
+def test_daily_run_api_launches_single_daily_runner(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from daily_research.execution import web_server
 
     captured: dict[str, Any] = {}
 
-    monkeypatch.setattr(
-        app_service,
-        "scheduler_summary",
-        lambda: {
-            "enabled": True,
-            "post_close_time": "15:30",
-            "timezone": "Asia/Shanghai",
-            "last_auto_refresh": {},
-            "missed_status": "",
-        },
-    )
-    monkeypatch.setattr(app_service, "get_latest_completed_trading_date", lambda: "2026-05-22", raising=False)
-    monkeypatch.setattr(
-        app_service,
-        "data_sources_summary",
-        lambda: {
-            "status": "ok",
-            "next_refresh_action": "refresh",
-            "next_signal_action": "refresh",
-            "data_platform": {
-                "latest_completed_trading_date": "2026-05-22",
-                "default_refresh": {
-                    "as_of_date": "2026-05-22",
-                    "universe": "all_a",
-                    "domains": FORMAL_REFRESH_DOMAINS,
-                    "required_domains": FORMAL_REQUIRED_DOMAINS,
-                    "provider_plan": "formal_free_v3",
-                },
-            },
-        },
-    )
-
-    def fake_launch_task_async(**kwargs):
+    def fake_launch(**kwargs):
         captured.update(kwargs)
-        return {"job_id": "auto-job", "task_name": kwargs["task_name"], "status": "queued"}
+        return {"job_id": "daily-plan-job", "task_name": kwargs["task_name"], "status": "queued"}
 
-    monkeypatch.setattr(app_service, "launch_task_async", fake_launch_task_async)
-    monkeypatch.setattr(app_service, "_scheduler_already_ran_for_date", lambda *_args, **_kwargs: False, raising=False)
-    monkeypatch.setattr(app_service, "_scheduler_time_is_due", lambda *_args, **_kwargs: True, raising=False)
-    monkeypatch.setattr(app_service, "_scheduler_auto_window_matches_latest_completed", lambda *_args, **_kwargs: True, raising=False)
+    monkeypatch.setattr(web_server.app_service, "launch_task_async", fake_launch)
 
-    result = app_service.run_scheduler_tick(trigger="auto_post_close")
+    client = TestClient(web_server.create_app())
+    response = client.post("/api/daily-run/run", json={"mode": "post-close"})
 
-    assert result["status"] == "launched"
-    assert result["job_id"] == "auto-job"
-    assert captured["task_name"] == "data-platform-refresh"
-    assert captured["job_label"] == "auto-post-close:2026-05-22"
-    assert "--provider-plan" in captured["passthrough_args"]
-    assert "formal_free_v3" in captured["passthrough_args"]
-    assert "--required-domains" in captured["passthrough_args"]
+    assert response.status_code == 200
+    assert response.json()["task_name"] == "daily-plan-runner"
+    assert captured["task_name"] == "daily-plan-runner"
+    assert "--mode" in captured["passthrough_args"]
+    assert "post-close" in captured["passthrough_args"]
 
 
-def test_scheduler_tick_ignores_stale_lock_for_finished_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_data_readiness_api_reports_candidate_blocker(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from daily_research.execution import web_server
+
+    monkeypatch.setattr(
+        web_server.data_readiness,
+        "resolve_provider_ready_trading_date",
+        lambda **kwargs: {
+            "status": "blocked",
+            "blocker_code": "data_not_ready",
+            "candidate_date": "2026-05-26",
+            "row_count": 0,
+            "coverage_ratio": 0.0,
+        },
+    )
+
+    client = TestClient(web_server.create_app())
+    response = client.get("/api/data-readiness")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "blocked"
+    assert payload["blocker_code"] == "data_not_ready"
+    assert payload["candidate_date"] == "2026-05-26"
+
+
+def test_web_scheduler_tick_interface_removed() -> None:
     from daily_research.execution import app_service
 
-    captured: dict[str, Any] = {}
-    jobs_root = tmp_path / "jobs"
-    job_dir = jobs_root / "stale_failed_job"
-    job_dir.mkdir(parents=True)
-    (job_dir / "metadata.json").write_text(
-        json.dumps({"job_id": "stale_failed_job", "status": "failed", "task_name": "data-platform-refresh"}, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    lock_path = tmp_path / "execution_app.lock"
-    lock_path.write_text(
-        json.dumps({"job_id": "stale_failed_job", "task_name": "data-platform-refresh"}, ensure_ascii=False),
-        encoding="utf-8",
-    )
-
-    monkeypatch.setattr(app_service, "JOBS_ROOT", jobs_root)
-    monkeypatch.setattr(app_service, "LOCK_PATH", lock_path)
-    monkeypatch.setattr(app_service, "list_active_thread_job_ids", lambda: [])
-    monkeypatch.setattr(
-        app_service,
-        "scheduler_summary",
-        lambda: {
-            "enabled": True,
-            "post_close_time": "15:30",
-            "timezone": "Asia/Shanghai",
-            "last_auto_refresh": {},
-            "missed_status": "",
-        },
-    )
-    monkeypatch.setattr(app_service, "get_latest_completed_trading_date", lambda: "2026-05-22", raising=False)
-    monkeypatch.setattr(
-        app_service,
-        "data_sources_summary",
-        lambda: {
-            "status": "ok",
-            "next_refresh_action": "refresh",
-            "next_signal_action": "refresh",
-            "data_platform": {
-                "latest_completed_trading_date": "2026-05-22",
-                "default_refresh": {
-                    "as_of_date": "2026-05-22",
-                    "universe": "all_a",
-                    "domains": FORMAL_REFRESH_DOMAINS,
-                    "required_domains": FORMAL_REQUIRED_DOMAINS,
-                    "provider_plan": "formal_free_v3",
-                },
-            },
-        },
-    )
-
-    def fake_launch_task_async(**kwargs):
-        captured.update(kwargs)
-        return {"job_id": "auto-job", "task_name": kwargs["task_name"], "status": "queued"}
-
-    monkeypatch.setattr(app_service, "launch_task_async", fake_launch_task_async)
-    monkeypatch.setattr(app_service, "_scheduler_already_ran_for_date", lambda *_args, **_kwargs: False, raising=False)
-    monkeypatch.setattr(app_service, "_scheduler_time_is_due", lambda *_args, **_kwargs: True, raising=False)
-    monkeypatch.setattr(app_service, "_scheduler_auto_window_matches_latest_completed", lambda *_args, **_kwargs: True, raising=False)
-
-    result = app_service.run_scheduler_tick(trigger="auto_post_close")
-
-    assert result["status"] == "launched"
-    assert captured["task_name"] == "data-platform-refresh"
-
-
-def test_scheduler_tick_recovers_legacy_inprocess_stale_lock(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    from daily_research.execution import app_service
-
-    captured: dict[str, Any] = {}
-    runtime_root = tmp_path / "runtime"
-    jobs_root = runtime_root / "jobs"
-    job_dir = jobs_root / "legacy_running_job"
-    job_dir.mkdir(parents=True)
-    old_started_at = "2026-05-25T10:00:00+08:00"
-    (job_dir / "metadata.json").write_text(
-        json.dumps(
-            {
-                "job_id": "legacy_running_job",
-                "status": "running",
-                "task_name": "data-platform-refresh",
-                "started_at": old_started_at,
-                "runner_warnings": [],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-    lock_path = runtime_root / "execution_app.lock"
-    state_path = runtime_root / "runtime_state.json"
-    events_path = runtime_root / "events.jsonl"
-    lock_path.write_text(
-        json.dumps({"job_id": "legacy_running_job", "task_name": "data-platform-refresh", "pid": os.getpid(), "acquired_at": old_started_at}),
-        encoding="utf-8",
-    )
-    state_path.write_text(
-        json.dumps(
-            {
-                "lock": {"job_id": "legacy_running_job", "task_name": "data-platform-refresh"},
-                "current_job": {"job_id": "legacy_running_job", "status": "running"},
-                "scheduler": {"enabled": True, "post_close_time": "15:30", "timezone": "Asia/Shanghai", "last_auto_refresh": {}},
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-
-    monkeypatch.setattr(app_service, "RUNTIME_ROOT", runtime_root)
-    monkeypatch.setattr(app_service, "JOBS_ROOT", jobs_root)
-    monkeypatch.setattr(app_service, "LOCK_PATH", lock_path)
-    monkeypatch.setattr(app_service, "STATE_PATH", state_path)
-    monkeypatch.setattr(app_service, "EVENTS_PATH", events_path)
-    monkeypatch.setattr(app_service, "list_active_thread_job_ids", lambda: [])
-    monkeypatch.setattr(app_service, "get_latest_completed_trading_date", lambda: "2026-05-22", raising=False)
-    monkeypatch.setattr(app_service, "_scheduler_already_ran_for_date", lambda *_args, **_kwargs: False, raising=False)
-    monkeypatch.setattr(app_service, "_scheduler_time_is_due", lambda *_args, **_kwargs: True, raising=False)
-    monkeypatch.setattr(app_service, "_scheduler_auto_window_matches_latest_completed", lambda *_args, **_kwargs: True, raising=False)
-    monkeypatch.setattr(
-        app_service,
-        "data_sources_summary",
-        lambda: {
-            "status": "ok",
-            "next_refresh_action": "refresh",
-            "next_signal_action": "refresh",
-            "data_platform": {
-                "latest_completed_trading_date": "2026-05-22",
-                "default_refresh": {
-                    "as_of_date": "2026-05-22",
-                    "universe": "all_a",
-                    "domains": FORMAL_REFRESH_DOMAINS,
-                    "required_domains": FORMAL_REQUIRED_DOMAINS,
-                    "provider_plan": "formal_free_v3",
-                },
-            },
-        },
-    )
-
-    def fake_launch_task_async(**kwargs):
-        captured.update(kwargs)
-        return {"job_id": "auto-job", "task_name": kwargs["task_name"], "status": "queued"}
-
-    monkeypatch.setattr(app_service, "launch_task_async", fake_launch_task_async)
-
-    result = app_service.run_scheduler_tick(trigger="auto_post_close")
-    recovered_metadata = json.loads((job_dir / "metadata.json").read_text(encoding="utf-8"))
-
-    assert recovered_metadata["status"] == "blocked"
-    assert recovered_metadata["exit_code"] == app_service.RUNNER_TIMEOUT_EXIT_CODE
-    assert not lock_path.exists()
-    assert result["status"] == "launched"
-    assert captured["task_name"] == "data-platform-refresh"
-
-
-def test_scheduler_tick_does_not_auto_backfill_when_site_was_offline_after_trading_day(monkeypatch: pytest.MonkeyPatch) -> None:
-    from daily_research.execution import app_service
-
-    monkeypatch.setattr(
-        app_service,
-        "scheduler_summary",
-        lambda: {
-            "enabled": True,
-            "post_close_time": "15:30",
-            "timezone": "Asia/Shanghai",
-            "last_auto_refresh": {},
-            "missed_status": "missed_while_offline",
-        },
-    )
-    monkeypatch.setattr(app_service, "get_latest_completed_trading_date", lambda: "2026-05-22", raising=False)
-    monkeypatch.setattr(app_service, "_scheduler_already_ran_for_date", lambda *_args, **_kwargs: False, raising=False)
-    monkeypatch.setattr(app_service, "_scheduler_time_is_due", lambda *_args, **_kwargs: True, raising=False)
-    monkeypatch.setattr(app_service, "_scheduler_auto_window_matches_latest_completed", lambda *_args, **_kwargs: False, raising=False)
-    launch = mock.Mock()
-    monkeypatch.setattr(app_service, "launch_task_async", launch)
-
-    result = app_service.run_scheduler_tick(trigger="auto_post_close")
-
-    assert result["status"] == "skipped_missed_while_offline"
-    assert result["latest_completed_trading_date"] == "2026-05-22"
-    launch.assert_not_called()
+    assert not hasattr(app_service, "run_scheduler_tick")
+    assert not hasattr(app_service, "update_scheduler_config")
+    assert not hasattr(app_service, "scheduler_summary")
 
 
 def test_trade_plan_summary_explains_empty_structured_plan(tmp_path: Path) -> None:
@@ -2487,8 +2322,6 @@ def test_status_payload_clears_stale_lock_for_finished_job(monkeypatch: pytest.M
     monkeypatch.setattr(app_service, "positions_summary", lambda: {"exists": True, "headers_ok": True, "row_count": 0})
     monkeypatch.setattr(app_service, "active_manifest_summary", lambda: {})
     monkeypatch.setattr(app_service, "latest_trade_plan_summary", lambda **_: {"status": "missing"})
-    monkeypatch.setattr(app_service, "scheduler_summary", lambda: {})
-
     payload = app_service.build_status_payload(history_limit=1)
 
     assert payload["lock"] == {}
@@ -2661,7 +2494,7 @@ def test_provider_health_progress_updates_before_each_fetch(monkeypatch: pytest.
 
 
 def test_ui_paths_include_react_dist() -> None:
-    from daily_research.execution.web_service import ui_paths
+    from daily_research.execution.web_paths import ui_paths
 
     payload = ui_paths()
 

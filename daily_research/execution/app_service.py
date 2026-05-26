@@ -12,7 +12,6 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, TextIO
-from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -82,11 +81,23 @@ FORMAL_DATA_PLATFORM_REQUIRED_DOMAINS: tuple[str, ...] = FORMAL_FREE_V3_REQUIRED
 FORMAL_DATA_PLATFORM_PROVIDER_PLAN = "formal_free_v3"
 _ACTIVE_JOB_THREADS: dict[str, threading.Thread] = {}
 _ACTIVE_JOB_THREADS_LOCK = threading.Lock()
-_SCHEDULER_THREAD: threading.Thread | None = None
-_SCHEDULER_THREAD_LOCK = threading.Lock()
-_SCHEDULER_STOP = threading.Event()
 _RUNNER_WARNING_LIMIT = 20
 RUNNER_TIMEOUT_EXIT_CODE = 124
+
+
+def configure_runtime_root(runtime_root: str | Path) -> Path:
+    from daily_research.execution import app_runtime
+
+    global RUNTIME_ROOT, JOBS_ROOT, STATE_PATH, EVENTS_PATH, LOCK_PATH, PAPER_ACCOUNT_ROOT, PAPER_ACCOUNT_DB_PATH
+    resolved = app_runtime.configure_runtime_root(runtime_root)
+    RUNTIME_ROOT = resolved
+    JOBS_ROOT = resolved / "jobs"
+    STATE_PATH = resolved / "runtime_state.json"
+    EVENTS_PATH = resolved / "events.jsonl"
+    LOCK_PATH = resolved / "execution_app.lock"
+    PAPER_ACCOUNT_ROOT = resolved / "paper_account"
+    PAPER_ACCOUNT_DB_PATH = PAPER_ACCOUNT_ROOT / "paper_account.sqlite3"
+    return resolved
 
 
 def sanitize_passthrough_args(values: list[str] | None) -> list[str]:
@@ -836,8 +847,6 @@ def data_sources_summary(*, dataset_limit: int = 60) -> dict[str, Any]:
         "formal_provider_plan": FORMAL_DATA_PLATFORM_PROVIDER_PLAN,
         "domain_matrix": provider_capability_matrix(FORMAL_DATA_PLATFORM_PROVIDER_PLAN),
         "provider_health": provider_health,
-        "scheduler_status": scheduler_summary(),
-        "last_auto_refresh": dict((state.get("scheduler", {}) or {}).get("last_auto_refresh", {}) or {}),
         "current_dataset_health": current_dataset_health,
         "signal_panel_health": signal_panel_health,
         "catalog_status": catalog_status,
@@ -947,172 +956,6 @@ def provider_health_summary(
     state["last_provider_health"] = payload
     write_json_file(STATE_PATH, state)
     return payload
-
-
-def _default_scheduler_config() -> dict[str, Any]:
-    return {
-        "enabled": True,
-        "post_close_time": "15:30",
-        "timezone": "Asia/Shanghai",
-        "last_auto_refresh": {},
-        "last_tick": {},
-    }
-
-
-def _scheduler_config_from_state() -> dict[str, Any]:
-    state = _read_json(STATE_PATH) or load_runtime_state()
-    scheduler = _default_scheduler_config()
-    loaded = state.get("scheduler", {})
-    if isinstance(loaded, dict):
-        scheduler.update(loaded)
-    scheduler["enabled"] = bool(scheduler.get("enabled", True))
-    scheduler["post_close_time"] = _normalize_clock_text(scheduler.get("post_close_time", "15:30"))
-    scheduler["timezone"] = str(scheduler.get("timezone", "") or "Asia/Shanghai")
-    if not isinstance(scheduler.get("last_auto_refresh"), dict):
-        scheduler["last_auto_refresh"] = {}
-    if not isinstance(scheduler.get("last_tick"), dict):
-        scheduler["last_tick"] = {}
-    return scheduler
-
-
-def scheduler_summary() -> dict[str, Any]:
-    scheduler = _scheduler_config_from_state()
-    latest_completed = _normalize_date_text(get_latest_completed_trading_date())
-    due = _scheduler_time_is_due(scheduler)
-    already_ran = _scheduler_already_ran_for_date(scheduler, latest_completed)
-    missed_status = ""
-    if scheduler.get("enabled") and due and latest_completed and not already_ran:
-        missed_status = "pending_today" if _scheduler_auto_window_matches_latest_completed(scheduler, latest_completed) else "missed_while_offline"
-    return {
-        **scheduler,
-        "latest_completed_trading_date": latest_completed,
-        "is_due": due,
-        "already_ran_for_latest_completed_date": already_ran,
-        "missed_status": missed_status,
-        "next_check_at": _next_scheduler_check_at(scheduler),
-    }
-
-
-def update_scheduler_config(payload: dict[str, Any]) -> dict[str, Any]:
-    scheduler = _scheduler_config_from_state()
-    if "enabled" in payload:
-        scheduler["enabled"] = bool(payload.get("enabled"))
-    if str(payload.get("post_close_time", "") or "").strip():
-        scheduler["post_close_time"] = _normalize_clock_text(payload.get("post_close_time", "15:30"))
-    state = _read_json(STATE_PATH) or load_runtime_state()
-    state["scheduler"] = scheduler
-    write_json_file(STATE_PATH, state)
-    append_event("scheduler_config_updated", enabled=scheduler["enabled"], post_close_time=scheduler["post_close_time"])
-    return scheduler_summary()
-
-
-def run_scheduler_tick(*, trigger: str = "auto_post_close") -> dict[str, Any]:
-    scheduler = scheduler_summary()
-    latest_completed = str(scheduler.get("latest_completed_trading_date", "") or _normalize_date_text(get_latest_completed_trading_date()))
-    decision: dict[str, Any] = {
-        "trigger": str(trigger or "auto_post_close"),
-        "checked_at": now_iso(),
-        "latest_completed_trading_date": latest_completed,
-    }
-    if not scheduler.get("enabled", True):
-        return _persist_scheduler_decision({**decision, "status": "skipped_disabled"})
-    if not _scheduler_time_is_due(scheduler):
-        return _persist_scheduler_decision({**decision, "status": "skipped_not_due"})
-    if str(trigger or "") == "auto_post_close" and not _scheduler_auto_window_matches_latest_completed(scheduler, latest_completed):
-        return _persist_scheduler_decision({**decision, "status": "skipped_missed_while_offline"})
-    if _scheduler_already_ran_for_date(scheduler, latest_completed):
-        return _persist_scheduler_decision({**decision, "status": "skipped_already_ran"})
-    if _has_active_runtime_job():
-        return _persist_scheduler_decision({**decision, "status": "skipped_due_to_active_job"})
-
-    data_sources = data_sources_summary()
-    default_refresh = dict(_safe_nested(data_sources, "data_platform", "default_refresh") or {})
-    as_of_date = str(default_refresh.get("as_of_date", "") or latest_completed)
-    domains = list(default_refresh.get("domains", []) or FORMAL_DATA_PLATFORM_DOMAINS)
-    required_domains = list(default_refresh.get("required_domains", []) or FORMAL_DATA_PLATFORM_REQUIRED_DOMAINS)
-    universe = str(default_refresh.get("universe", "") or "all_a")
-    if data_sources.get("next_refresh_action") == "skip" and data_sources.get("next_signal_action") == "skip":
-        return _persist_scheduler_decision({**decision, "status": "skipped_up_to_date", "data_sources": data_sources})
-    if data_sources.get("next_refresh_action") == "skip" and data_sources.get("next_signal_action") == "refresh":
-        payload = launch_task_async(
-            task_name="refresh-production-live-panels",
-            passthrough_args=["--as-of-date", as_of_date],
-            job_label=f"auto-post-close:{as_of_date}",
-            force_unlock=False,
-        )
-    else:
-        args = [
-            "--as-of-date",
-            as_of_date,
-            "--universe",
-            universe,
-            "--provider-plan",
-            FORMAL_DATA_PLATFORM_PROVIDER_PLAN,
-            "--required-domains",
-            ",".join(required_domains),
-            "--domains",
-            ",".join(domains),
-        ]
-        payload = launch_task_async(
-            task_name="data-platform-refresh",
-            passthrough_args=args,
-            job_label=f"auto-post-close:{as_of_date}",
-            force_unlock=False,
-        )
-    _patch_job_metadata_by_id(
-        str(payload.get("job_id", "")),
-        trigger=str(trigger or "auto_post_close"),
-        scheduler_decision=decision,
-    )
-    return _persist_scheduler_decision(
-        {
-            **decision,
-            "status": "launched",
-            "job_id": str(payload.get("job_id", "") or ""),
-            "task_name": str(payload.get("task_name", "") or ""),
-            "data_refresh_result": payload if payload.get("task_name") == "data-platform-refresh" else {},
-            "signal_refresh_result": payload if payload.get("task_name") == "refresh-production-live-panels" else {},
-        },
-        update_last_auto=True,
-    )
-
-
-def start_scheduler_loop(*, interval_seconds: int = 60) -> None:
-    global _SCHEDULER_THREAD
-    with _SCHEDULER_THREAD_LOCK:
-        if _SCHEDULER_THREAD is not None and _SCHEDULER_THREAD.is_alive():
-            return
-        _SCHEDULER_STOP.clear()
-        _SCHEDULER_THREAD = threading.Thread(
-            target=_scheduler_loop,
-            kwargs={"interval_seconds": max(int(interval_seconds), 1)},
-            name="daily-research-post-close-scheduler",
-            daemon=True,
-        )
-        _SCHEDULER_THREAD.start()
-
-
-def _scheduler_loop(*, interval_seconds: int) -> None:
-    while not _SCHEDULER_STOP.is_set():
-        try:
-            run_scheduler_tick(trigger="auto_post_close")
-        except Exception as exc:
-            _persist_scheduler_decision({"trigger": "auto_post_close", "checked_at": now_iso(), "status": "scheduler_error", "error": str(exc)})
-        _SCHEDULER_STOP.wait(interval_seconds)
-
-
-def _persist_scheduler_decision(decision: dict[str, Any], *, update_last_auto: bool = False) -> dict[str, Any]:
-    state = _read_json(STATE_PATH) or load_runtime_state()
-    scheduler = _default_scheduler_config()
-    if isinstance(state.get("scheduler"), dict):
-        scheduler.update(state.get("scheduler", {}))
-    scheduler["last_tick"] = decision
-    if update_last_auto or str(decision.get("status", "")).startswith("skipped_"):
-        scheduler["last_auto_refresh"] = decision
-    state["scheduler"] = scheduler
-    write_json_file(STATE_PATH, state)
-    append_event("scheduler_tick", **{key: value for key, value in decision.items() if key not in {"data_sources"}})
-    return decision
 
 
 def _has_active_runtime_job() -> bool:
@@ -1350,74 +1193,6 @@ def _clear_runtime_lock_payload(payload: dict[str, Any]) -> bool:
         return True
     except Exception:
         return False
-
-
-def _scheduler_time_is_due(scheduler: dict[str, Any], *, now: datetime | None = None) -> bool:
-    tz = ZoneInfo(str(scheduler.get("timezone", "") or "Asia/Shanghai"))
-    if now is None:
-        current = datetime.now(tz)
-    elif now.tzinfo is None:
-        current = now.replace(tzinfo=tz)
-    else:
-        current = now.astimezone(tz)
-    hour, minute = [int(item) for item in _normalize_clock_text(scheduler.get("post_close_time", "15:30")).split(":", 1)]
-    return (current.hour, current.minute) >= (hour, minute)
-
-
-def _scheduler_auto_window_matches_latest_completed(
-    scheduler: dict[str, Any],
-    latest_completed: str,
-    *,
-    now: datetime | None = None,
-) -> bool:
-    if not str(latest_completed or "").strip():
-        return False
-    tz = ZoneInfo(str(scheduler.get("timezone", "") or "Asia/Shanghai"))
-    if now is None:
-        current = datetime.now(tz)
-    elif now.tzinfo is None:
-        current = now.replace(tzinfo=tz)
-    else:
-        current = now.astimezone(tz)
-    return current.date().isoformat() == _normalize_date_text(latest_completed)
-
-
-def _scheduler_already_ran_for_date(scheduler: dict[str, Any], latest_completed: str) -> bool:
-    last = dict(scheduler.get("last_auto_refresh", {}) or {})
-    if str(last.get("latest_completed_trading_date", "") or "") != str(latest_completed or ""):
-        return False
-    return str(last.get("status", "") or "") in {"launched", "skipped_up_to_date", "skipped_already_ran"}
-
-
-def _next_scheduler_check_at(scheduler: dict[str, Any]) -> str:
-    tz = ZoneInfo(str(scheduler.get("timezone", "") or "Asia/Shanghai"))
-    now = datetime.now(tz)
-    hour, minute = [int(item) for item in _normalize_clock_text(scheduler.get("post_close_time", "15:30")).split(":", 1)]
-    candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if candidate <= now:
-        candidate = (pd.Timestamp(candidate) + pd.offsets.BDay(1)).to_pydatetime()
-    return candidate.astimezone(tz).isoformat(timespec="seconds")
-
-
-def _normalize_clock_text(value: Any) -> str:
-    raw = str(value or "15:30").strip()
-    parts = raw.split(":", 1)
-    try:
-        hour = max(0, min(23, int(parts[0])))
-        minute = max(0, min(59, int(parts[1] if len(parts) > 1 else 0)))
-    except Exception:
-        hour, minute = 15, 30
-    return f"{hour:02d}:{minute:02d}"
-
-
-def _patch_job_metadata_by_id(job_id: str, **patch: Any) -> None:
-    if not str(job_id or "").strip():
-        return
-    metadata_path = JOBS_ROOT / str(job_id) / "metadata.json"
-    if not metadata_path.exists():
-        return
-    job_paths = type("JobPathsRef", (), {"metadata_path": metadata_path})()
-    update_job_metadata(job_paths, **patch)
 
 
 def _patch_runtime_worker_payload(*, job_id: str, worker_pid: int) -> None:
@@ -2023,8 +1798,6 @@ def build_status_payload(*, history_limit: int = 8) -> dict[str, Any]:
         "current_positions": positions_summary(),
         "paper_account": paper_account,
         "latest_trade_plan": latest_trade_plan_summary(max_lines=24),
-        "scheduler_status": scheduler_summary(),
-        "last_auto_refresh": dict((state.get("scheduler", {}) or {}).get("last_auto_refresh", {}) or {}),
         "warnings": warnings,
         "updated_at": state.get("updated_at", ""),
     }
@@ -2093,7 +1866,6 @@ def build_doctor_payload() -> dict[str, Any]:
     add_check("runtime_lock", not bool(lock_payload), "未锁定" if not lock_payload else json.dumps(lock_payload, ensure_ascii=False))
     add_check("web_dependency_fastapi", importlib.util.find_spec("fastapi") is not None, "fastapi")
     add_check("web_dependency_uvicorn", importlib.util.find_spec("uvicorn") is not None, "uvicorn")
-    add_check("web_dependency_jinja2", importlib.util.find_spec("jinja2") is not None, "jinja2")
     add_check("latest_trade_plan_artifact", LATEST_TRADE_PLAN_PATH.exists(), str(LATEST_TRADE_PLAN_PATH.resolve()))
     overall_ok = all(bool(item["ok"]) for item in checks)
     return {"status": "ok" if overall_ok else "degraded", "checked_at": time.strftime("%Y-%m-%d %H:%M:%S"), "checks": checks}

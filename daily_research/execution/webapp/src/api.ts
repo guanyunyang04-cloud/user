@@ -2,6 +2,10 @@ import type {
   AccountPayload,
   AccountSaveRequest,
   DataRefreshRequest,
+  DailyRunRequest,
+  DailyRunStatusPayload,
+  DailyRunVerdict,
+  DataReadinessPayload,
   DataSourcesPayload,
   DoctorPayload,
   ExecutionApi,
@@ -15,9 +19,7 @@ import type {
   PaperManualAdjustmentRequest,
   PaperPerformancePayload,
   ProviderHealthRequest,
-  SchedulerConfigRequest,
   SchedulerPayload,
-  StatusPayload,
   TradePlanGenerateRequest,
   TradePlanPayload,
   TrainModelRequest
@@ -53,16 +55,17 @@ function postJson<T>(fetcher: FetchLike, url: string, body: unknown): Promise<T>
   });
 }
 
-function patchJson<T>(fetcher: FetchLike, url: string, body: unknown): Promise<T> {
-  return requestJson<T>(fetcher, url, {
-    method: "PATCH",
-    body: JSON.stringify(body)
-  });
-}
-
 export function createApiClient(fetcher: FetchLike = window.fetch.bind(window)): ExecutionApi {
   return {
-    getStatus: (historyLimit = 10) => requestJson<StatusPayload>(fetcher, `/api/status?history_limit=${historyLimit}`),
+    getDailyRunStatus: () => requestJson<DailyRunStatusPayload>(fetcher, "/api/daily-run/status"),
+    getLatestDailyRun: () => requestJson<DailyRunVerdict>(fetcher, "/api/daily-run/latest"),
+    runDailyPlan: (payload: DailyRunRequest) => postJson<JobLaunchPayload>(fetcher, "/api/daily-run/run", payload),
+    getDataReadiness: (candidateDate = "") =>
+      requestJson<DataReadinessPayload>(
+        fetcher,
+        `/api/data-readiness${candidateDate ? `?candidate_date=${encodeURIComponent(candidateDate)}` : ""}`
+      ),
+    getSystemDoctor: () => requestJson<DoctorPayload>(fetcher, "/api/system/doctor"),
     getDoctor: () => requestJson<DoctorPayload>(fetcher, "/api/doctor"),
     getModels: () => requestJson<ModelsPayload>(fetcher, "/api/models"),
     getModelDetail: (modelId: string) => requestJson<ModelDetailPayload>(fetcher, `/api/models/${encodeURIComponent(modelId)}`),
@@ -73,7 +76,6 @@ export function createApiClient(fetcher: FetchLike = window.fetch.bind(window)):
     runProviderHealth: (payload: ProviderHealthRequest) =>
       postJson<JobLaunchPayload>(fetcher, "/api/data-sources/provider-health", payload),
     getScheduler: () => requestJson<SchedulerPayload>(fetcher, "/api/data-sources/scheduler"),
-    updateScheduler: (payload: SchedulerConfigRequest) => patchJson<SchedulerPayload>(fetcher, "/api/data-sources/scheduler", payload),
     getTradePlan: () => requestJson<TradePlanPayload>(fetcher, "/api/trade-plan"),
     generateTradePlan: (payload: TradePlanGenerateRequest) => postJson<JobLaunchPayload>(fetcher, "/api/trade-plan/generate", payload),
     getAccount: () => requestJson<AccountPayload>(fetcher, "/api/account"),

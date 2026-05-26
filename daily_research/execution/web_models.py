@@ -97,9 +97,11 @@ class ProviderHealthRequest(BaseModel):
     symbols: list[str] = Field(default_factory=list)
 
 
-class SchedulerConfigRequest(BaseModel):
-    enabled: bool | None = None
-    post_close_time: str = ""
+class DailyRunRequest(BaseModel):
+    mode: str = Field(default="post-close")
+    run_date: str = ""
+    job_label: str = ""
+    force_unlock: bool = False
 
 
 class TradePlanGenerateRequest(BaseModel):

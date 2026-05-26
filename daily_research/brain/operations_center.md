@@ -1,6 +1,6 @@
 # Daily Research 操作中枢
 
-快照日期：`2026-05-23`
+快照日期：`2026-05-26`
 
 ## 默认操作纪律
 - 默认工作分支：`main`。
@@ -22,6 +22,7 @@
 - continuous_policy protocols：`daily_research/output/continuous_policy/protocols/`。
 - production active artifact：`daily_research/output/active_execution_strategy.json`。
 - execution app：`daily_research/execution/run_execution_app.py`。
+- daily execution verdict root：`daily_research/output/execution_app/daily_runs/`。
 
 ## 高频 Brain 命令
 - 主脑 task capsule：
@@ -89,6 +90,21 @@
 - CSV 必须先进 Bronze，再经 Silver normalize / quality gate 后注册 lake dataset；训练、评估、diagnostics 不得直接读散落 CSV。
 - 训练、评估、diagnostics 只读已注册 lake dataset；禁止在研究流程中临时在线抓取外部行情。
 - 本轮不实现实盘自动交易；后续 paper/live 需要单独设计 QMT/PTrade broker adapter、风控、合规报备和 kill switch。
+
+## Daily Execution 运行口径
+- 每日盘后计划的权威状态是 daily verdict，不是 Web 是否能打开、单个 job 是否 succeeded、旧 runtime state 或 latest trade plan。
+- 状态机入口：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.execution.daily_plan_runner --mode post-close --json`
+- dry-run / readiness 预检入口：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.execution.daily_plan_runner --mode dry-run --json`
+- Windows Task Scheduler 是自动盘后执行主体；Web 进程不得启动后台 scheduler loop 或保存 scheduler enabled/post-close 配置。
+- 系统任务命令：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.execution.scheduler_cli install --time 15:45`
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.execution.scheduler_cli status --json`
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.execution.scheduler_cli uninstall`
+- 数据 readiness 是硬门禁：候选日 `market_daily` 必须非空且覆盖率达标后才允许刷新、信号刷新和交易计划；不得用上一完整交易日伪装今日 completed。
+- Web API 热路径只读 compact daily state：`/api/daily-run/status`、`/api/daily-run/latest`、`/api/daily-run/run`、`/api/data-readiness`、`/api/system/doctor`。
+- 当前 2026-05-26 fresh verdict 为 `blocked:data_not_ready`；完整重构记录见 `daily_research/brain/references/execution_daily_plan_state_machine_refactor_20260526.md`。
 
 ## PathPolicy 执行异常处理口径
 - `test_forecast_dataset.py` 是慢集成测试，不是默认轻量合同测试；它的 synthetic fixture 会用 700/820/900 个交易日并走完整 feature、label、cumulative horizon 和 horizon risk 构造，单项可到分钟级。

@@ -5,7 +5,7 @@ import type { ExecutionApi } from "./types";
 
 function fakeApi(): ExecutionApi {
   return {
-    getStatus: vi.fn().mockResolvedValue({ lock: {}, current_job: {}, recent_jobs: [] }),
+    getDailyRunStatus: vi.fn().mockResolvedValue({ status: "completed", latest_verdict: {} }),
     getDataSources: vi.fn().mockResolvedValue({
       status: "ok",
       lake_root: "lake",

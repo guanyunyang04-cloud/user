@@ -98,20 +98,66 @@ export interface SchedulerStatus {
   post_close_time?: string;
   timezone?: string;
   next_check_at?: string;
-  last_auto_refresh?: JsonObject;
   recent_decision?: JsonObject;
   missed_status?: string;
   [key: string]: unknown;
 }
 
-export interface SchedulerConfigRequest {
-  enabled?: boolean;
-  post_close_time?: string;
-}
-
 export interface SchedulerPayload {
   status: string;
-  scheduler_status: SchedulerStatus;
+  installed?: boolean;
+  enabled?: boolean;
+  task_name?: string;
+  time?: string;
+  next_run_time?: string;
+  last_run_time?: string;
+  last_result?: string;
+  detail?: string;
+}
+
+export interface DailyRunVerdict {
+  schema_version?: number;
+  run_date?: string;
+  target_trading_date?: string;
+  status?: "completed" | "blocked" | "missing" | string;
+  blocker_code?: string;
+  stage_results?: JsonObject;
+  dataset_id?: string;
+  signal_panel_date?: string;
+  trade_plan_run_dir?: string;
+  paper_reconcile_status?: string;
+  evidence_paths?: Record<string, string>;
+  created_at?: string;
+  [key: string]: unknown;
+}
+
+export interface DailyRunStatusPayload {
+  status: string;
+  latest_run_date?: string;
+  latest_verdict?: DailyRunVerdict;
+  scheduler?: SchedulerPayload | JsonObject;
+  daily_runs_root?: string;
+}
+
+export interface DailyRunRequest {
+  mode?: "post-close" | "dry-run" | string;
+  run_date?: string;
+  job_label?: string;
+  force_unlock?: boolean;
+}
+
+export interface DataReadinessPayload {
+  status: string;
+  blocker_code?: string;
+  candidate_date?: string;
+  provider_ready_date?: string;
+  provider_plan?: string;
+  provider?: string;
+  row_count?: number;
+  coverage_ratio?: number;
+  provider_error?: string;
+  providers?: JsonObject[];
+  [key: string]: unknown;
 }
 
 export interface DataSourcesPayload {
@@ -122,8 +168,6 @@ export interface DataSourcesPayload {
   formal_provider_plan?: string;
   domain_matrix?: DomainMatrixRow[];
   provider_health?: ProviderHealthPayload | JsonObject;
-  scheduler_status?: SchedulerStatus;
-  last_auto_refresh?: JsonObject;
   current_dataset_health?: JsonObject;
   signal_panel_health?: JsonObject;
   active_dataset_id?: string;
@@ -333,22 +377,6 @@ export interface JobLaunchPayload {
   [key: string]: unknown;
 }
 
-export interface StatusPayload {
-  runtime_root: string;
-  current_job?: JsonObject;
-  recent_jobs?: JobSummary[];
-  active_manifest?: JsonObject;
-  current_positions?: JsonObject;
-  paper_account?: JsonObject;
-  latest_trade_plan?: TradePlanPayload;
-  scheduler_status?: SchedulerStatus;
-  last_auto_refresh?: JsonObject;
-  warnings?: string[];
-  lock?: JsonObject;
-  updated_at?: string;
-  [key: string]: unknown;
-}
-
 export interface DoctorPayload {
   status: string;
   checked_at: string;
@@ -356,7 +384,11 @@ export interface DoctorPayload {
 }
 
 export interface ExecutionApi {
-  getStatus(historyLimit?: number): Promise<StatusPayload>;
+  getDailyRunStatus(): Promise<DailyRunStatusPayload>;
+  getLatestDailyRun(): Promise<DailyRunVerdict>;
+  runDailyPlan(payload: DailyRunRequest): Promise<JobLaunchPayload>;
+  getDataReadiness(candidateDate?: string): Promise<DataReadinessPayload>;
+  getSystemDoctor(): Promise<DoctorPayload>;
   getDoctor(): Promise<DoctorPayload>;
   getModels(): Promise<ModelsPayload>;
   getModelDetail(modelId: string): Promise<ModelDetailPayload>;
@@ -365,7 +397,6 @@ export interface ExecutionApi {
   refreshDataSources(payload: DataRefreshRequest): Promise<JobLaunchPayload>;
   runProviderHealth(payload: ProviderHealthRequest): Promise<JobLaunchPayload>;
   getScheduler(): Promise<SchedulerPayload>;
-  updateScheduler(payload: SchedulerConfigRequest): Promise<SchedulerPayload>;
   getTradePlan(): Promise<TradePlanPayload>;
   generateTradePlan(payload: TradePlanGenerateRequest): Promise<JobLaunchPayload>;
   getAccount(): Promise<AccountPayload>;

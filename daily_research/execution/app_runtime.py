@@ -12,7 +12,18 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE_ROOT = PROJECT_ROOT.parent
-RUNTIME_ROOT = PROJECT_ROOT / "output" / "execution_app"
+
+
+def _default_runtime_root() -> Path:
+    override = str(os.getenv("DAILY_RESEARCH_EXECUTION_RUNTIME_ROOT", "") or "").strip()
+    if override:
+        return Path(override).expanduser()
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return Path(tempfile.gettempdir()) / "daily_research_execution_app_pytest"
+    return PROJECT_ROOT / "output" / "execution_app"
+
+
+RUNTIME_ROOT = _default_runtime_root()
 JOBS_ROOT = RUNTIME_ROOT / "jobs"
 STATE_PATH = RUNTIME_ROOT / "runtime_state.json"
 EVENTS_PATH = RUNTIME_ROOT / "events.jsonl"
@@ -34,6 +45,17 @@ class JobPaths:
     stderr_path: Path
 
 
+def configure_runtime_root(runtime_root: str | Path) -> Path:
+    global RUNTIME_ROOT, JOBS_ROOT, STATE_PATH, EVENTS_PATH, LOCK_PATH
+    resolved = Path(runtime_root).expanduser()
+    RUNTIME_ROOT = resolved
+    JOBS_ROOT = RUNTIME_ROOT / "jobs"
+    STATE_PATH = RUNTIME_ROOT / "runtime_state.json"
+    EVENTS_PATH = RUNTIME_ROOT / "events.jsonl"
+    LOCK_PATH = RUNTIME_ROOT / "execution_app.lock"
+    return RUNTIME_ROOT
+
+
 def now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
@@ -53,13 +75,6 @@ def _default_state() -> dict[str, Any]:
         "recent_jobs": [],
         "last_success_by_task": {},
         "last_failure_by_task": {},
-        "scheduler": {
-            "enabled": True,
-            "post_close_time": "15:30",
-            "timezone": "Asia/Shanghai",
-            "last_auto_refresh": {},
-            "last_tick": {},
-        },
     }
 
 

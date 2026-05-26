@@ -5,46 +5,31 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 import uvicorn
 import json
 
 from daily_research.execution import app_service
+from daily_research.execution import daily_plan_runner
+from daily_research.execution import data_readiness
+from daily_research.execution import scheduler_cli
 from daily_research.execution.web_models import (
     AccountSnapshotRequest,
     DataRefreshRequest,
+    DailyRunRequest,
     ModelTrainRequest,
     PaperApplyLatestPlanRequest,
     PaperCashFlowRequest,
     PaperManualAdjustmentRequest,
     ProviderHealthRequest,
     ResumeRequest,
-    SchedulerConfigRequest,
     TaskRunRequest,
     TradePlanGenerateRequest,
     UnlockRequest,
 )
-from daily_research.execution.web_service import (
-    account_context,
-    base_context,
-    dashboard_context,
-    doctor_context,
-    guide_context,
-    job_detail_context,
-    jobs_context,
-    runtime_context,
-    section_label,
-    status_label,
-    tasks_context,
-    trade_plan_context,
-    ui_paths,
-)
+from daily_research.execution.web_paths import ui_paths
 
 
 UI_PATHS = ui_paths()
-TEMPLATES = Jinja2Templates(directory=str(UI_PATHS["templates"]))
-TEMPLATES.env.filters["status_label"] = status_label
-TEMPLATES.env.filters["section_label"] = section_label
 RETIRED_FRONTEND_PATHS = {"/continuous-policy"}
 
 
@@ -55,19 +40,6 @@ def _react_index_response() -> FileResponse | None:
     return None
 
 
-def _render_template(
-    request: Request,
-    template_name: str,
-    *,
-    active_path: str,
-    context: dict[str, Any] | None = None,
-) -> HTMLResponse:
-    payload = base_context(active_path=active_path)
-    payload.update(context if isinstance(context, dict) else {})
-    payload["request"] = request
-    return TEMPLATES.TemplateResponse(request=request, name=template_name, context=payload)
-
-
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Daily Research 执行控制台",
@@ -75,7 +47,6 @@ def create_app() -> FastAPI:
         docs_url="/api/docs",
         redoc_url=None,
     )
-    app.mount("/static", StaticFiles(directory=str(UI_PATHS["static"])), name="static")
     react_dist = UI_PATHS.get("react_dist")
     if react_dist is not None and react_dist.exists():
         assets_dir = react_dist / "assets"
@@ -91,75 +62,112 @@ def create_app() -> FastAPI:
         react_response = _react_index_response()
         if react_response is not None:
             return react_response
-        return _render_template(request, "dashboard.html", active_path="/", context=dashboard_context())
+        raise HTTPException(status_code=404, detail="React app build not found")
 
     @app.get("/tasks", response_class=HTMLResponse)
     def tasks_page(request: Request, task: str = Query(default="")) -> Response:
         react_response = _react_index_response()
         if react_response is not None:
             return react_response
-        return _render_template(request, "tasks.html", active_path="/tasks", context=tasks_context(selected_task=task))
+        raise HTTPException(status_code=404, detail="React app build not found")
 
     @app.get("/jobs", response_class=HTMLResponse)
     def jobs_page(request: Request, limit: int = Query(default=30, ge=1, le=100)) -> Response:
         react_response = _react_index_response()
         if react_response is not None:
             return react_response
-        return _render_template(request, "jobs.html", active_path="/jobs", context=jobs_context(limit=limit))
+        raise HTTPException(status_code=404, detail="React app build not found")
 
     @app.get("/jobs/{job_id}", response_class=HTMLResponse)
     def job_page(request: Request, job_id: str, lines: int = Query(default=120, ge=10, le=400)) -> Response:
         react_response = _react_index_response()
         if react_response is not None:
             return react_response
-        try:
-            context = job_detail_context(job_id, lines=lines)
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return _render_template(request, "job_detail.html", active_path="/jobs", context=context)
+        raise HTTPException(status_code=404, detail="React app build not found")
 
     @app.get("/doctor", response_class=HTMLResponse)
     def doctor_page(request: Request) -> Response:
         react_response = _react_index_response()
         if react_response is not None:
             return react_response
-        return _render_template(request, "doctor.html", active_path="/doctor", context=doctor_context())
+        raise HTTPException(status_code=404, detail="React app build not found")
 
     @app.get("/artifacts/trade-plan", response_class=HTMLResponse)
     def trade_plan_page(request: Request) -> Response:
         react_response = _react_index_response()
         if react_response is not None:
             return react_response
-        return _render_template(request, "trade_plan.html", active_path="/artifacts/trade-plan", context=trade_plan_context())
+        raise HTTPException(status_code=404, detail="React app build not found")
 
     @app.get("/account", response_class=HTMLResponse)
     def account_page(request: Request) -> Response:
         react_response = _react_index_response()
         if react_response is not None:
             return react_response
-        return _render_template(request, "account.html", active_path="/account", context=account_context())
+        raise HTTPException(status_code=404, detail="React app build not found")
 
     @app.get("/guide", response_class=HTMLResponse)
     def guide_page(request: Request) -> Response:
         react_response = _react_index_response()
         if react_response is not None:
             return react_response
-        return _render_template(request, "guide.html", active_path="/guide", context=guide_context())
+        raise HTTPException(status_code=404, detail="React app build not found")
 
     @app.get("/settings/runtime", response_class=HTMLResponse)
     def runtime_page(request: Request) -> Response:
         react_response = _react_index_response()
         if react_response is not None:
             return react_response
-        return _render_template(request, "runtime.html", active_path="/settings/runtime", context=runtime_context())
-
-    @app.get("/api/status")
-    def api_status(history_limit: int = Query(default=10, ge=1, le=100)) -> dict[str, Any]:
-        return app_service.build_status_payload(history_limit=history_limit)
+        raise HTTPException(status_code=404, detail="React app build not found")
 
     @app.get("/api/doctor")
     def api_doctor() -> dict[str, Any]:
         return app_service.build_doctor_payload()
+
+    @app.get("/api/system/doctor")
+    def api_system_doctor() -> dict[str, Any]:
+        payload = app_service.build_doctor_payload()
+        payload["scheduler"] = scheduler_cli.scheduler_status()
+        payload["daily_run"] = daily_plan_runner.daily_run_status()
+        return payload
+
+    @app.get("/api/daily-run/status")
+    def api_daily_run_status() -> dict[str, Any]:
+        return daily_plan_runner.daily_run_status()
+
+    @app.get("/api/daily-run/latest")
+    def api_daily_run_latest() -> dict[str, Any]:
+        payload = daily_plan_runner.latest_daily_verdict()
+        if not payload:
+            raise HTTPException(status_code=404, detail="No daily run verdict found")
+        return payload
+
+    @app.get("/api/daily-run/{run_date}")
+    def api_daily_run_date(run_date: str) -> dict[str, Any]:
+        payload = daily_plan_runner.verdict_for_date(run_date)
+        if not payload:
+            raise HTTPException(status_code=404, detail=f"No daily run verdict found for {run_date}")
+        return payload
+
+    @app.post("/api/daily-run/run")
+    def api_daily_run_run(request: DailyRunRequest) -> JSONResponse:
+        try:
+            args = ["--mode", request.mode, "--json"]
+            if request.run_date:
+                args.extend(["--run-date", request.run_date])
+            payload = app_service.launch_task_async(
+                task_name="daily-plan-runner",
+                passthrough_args=args,
+                job_label=request.job_label or f"manual-daily-plan:{request.mode}",
+                force_unlock=request.force_unlock,
+            )
+            return JSONResponse(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/data-readiness")
+    def api_data_readiness(candidate_date: str = Query(default="")) -> dict[str, Any]:
+        return data_readiness.resolve_provider_ready_trading_date(candidate_date=candidate_date)
 
     @app.get("/api/tasks")
     def api_tasks(core_only: bool = Query(default=True)) -> list[dict[str, Any]]:
@@ -333,19 +341,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/data-sources/scheduler")
     def api_data_sources_scheduler() -> dict[str, Any]:
-        return app_service.scheduler_summary()
-
-    @app.patch("/api/data-sources/scheduler")
-    def api_data_sources_scheduler_update(request: SchedulerConfigRequest) -> JSONResponse:
-        try:
-            patch: dict[str, Any] = {}
-            if request.enabled is not None:
-                patch["enabled"] = request.enabled
-            if request.post_close_time:
-                patch["post_close_time"] = request.post_close_time
-            return JSONResponse(app_service.update_scheduler_config(patch))
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return scheduler_cli.scheduler_status()
 
     @app.post("/api/data-sources/refresh")
     def api_data_sources_refresh(request: DataRefreshRequest) -> JSONResponse:
@@ -555,7 +551,5 @@ app = create_app()
 
 
 def run_web_console(*, host: str = "127.0.0.1", port: int = 8765, reload: bool = False) -> None:
-    if not reload:
-        app_service.start_scheduler_loop()
     target = "daily_research.execution.web_server:app" if reload else app
     uvicorn.run(target, host=str(host), port=int(port), reload=bool(reload), log_level="info")

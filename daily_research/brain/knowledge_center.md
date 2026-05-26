@@ -1,6 +1,6 @@
 # Daily Research 知识中枢
 
-快照日期：`2026-05-23`
+快照日期：`2026-05-26`
 
 ## 1. 稳定事实
 - `daily_research` 同时负责研究、formal 验证、recent 验证、production full-fit、live 执行和接管治理。
@@ -14,6 +14,7 @@
 - evidence registry v3 使用三层证据索引：`research_programs` 表示稳定研究主线，`study_families` 表示阶段/实验族，`run_tags` 表示物理 run 实例；registry 只输出和读取这三层，不再存在旧 `study_tags` 字段。
 - `Path20` / `alpha_path20_neural_policy_v1` 是历史证据代号和代码 namespace，不再代表当前目标定义；历史 run 仍按原字符串引用，新研究应写成多 horizon utility / ranking / calibration，而不是固定 20 日路径预测。
 - continuous_policy 的终局目标是日级连续交易执行模型，不是固定调仓或人工执行桥。
+- daily execution 的权威事实层是 `daily_research/output/execution_app/daily_runs/YYYYMMDD/verdict.json`；Web 可运行、job succeeded、latest trade plan 或旧 runtime state 都不能替代 daily verdict。
 - r39 仍是 continuous_policy 有效证据基线；r40-r74 是 research / shadow 升级链或基础设施证据。
 - r64 full-window strict Gold 是当前 reusable training-safe Gold 数据集；realtime Gold 仍不能作为 completed training evidence。
 
@@ -25,6 +26,8 @@
 - failed / timeout / interrupted trial 只能写诊断，不得写 completed evidence；timeout 还必须先区分外层等待窗口耗尽、时间没给足、真实卡死和代码失败。
 - realtime tail label 必须显式标记 unobserved，不得计入 completed training evidence。
 - active artifact diff 是硬失败。
+- 每日执行数据缺口必须严格阻断：候选交易日 `market_daily` 为空或 required domain blocked 时，只能写 `blocked:data_not_ready`，不得自动回退到上一完整交易日生成“今日计划”。
+- 自动盘后执行主体必须是 Windows Task Scheduler 触发 `daily_plan_runner`；Web 进程、Jinja fallback、旧 `/api/status` runtime JSON 和 Web 内 scheduler loop 不再是执行端热路径。
 - 主脑文档只保留控制面；长历史、完整 rXX 证据、长命令和复盘进入 `references/`。
 - 实验证据必须按预算可信度分级；不得把低预算 run 包装成模型质量结论：
   - `smoke_only`：只验证代码、数据、shape、loss 接线、artifact 落盘和入口可运行；不得解读模型优劣。
@@ -46,6 +49,8 @@
 - `daily_research.path_policy.run_alpha_path20_protocol` 的标准入口是 `python -m ...`；直接脚本入口允许作为容错 smoke，但新命令记录和 reference 默认写包级入口。
 - 数据集必须可复用、可审计、可查询；pickle/cache 可兼容，但新训练集应进入 DuckDB + Parquet data lake。
 - `lake` 是研究存储真源，不是在线数据源；每日更新源是 `daily_research.data_platform` 的非 TDX online providers，写入 Bronze/Silver 后才能注册为研究 lake dataset。V2 默认使用 `--universe all_a` 和真实交易日历，CSV 只能作为入湖导入/补洞通道，不能被正式研究直接读取。
+- 每日计划是强状态机而不是人工 runbook 的拼接：`preflight -> data_readiness -> data_refresh -> signal_refresh -> trade_plan -> paper_reconcile -> final_verdict` 必须串联成功才是 `completed`。
+- 旧 runtime 只可归档为事故证据；测试和诊断必须使用隔离 runtime root，不能污染真实 `daily_research/output/execution_app`。
 - TDX-family 已退出正式研究主链路：`tqcenter.py`、`pytdx`、`mootdx` 不得作为 `daily_research` 默认或正式 provider；若旧脚本保留这些名字，只能视为 legacy/historical path。
 - 工作区迁移后，旧通达信插件 `user` 路径只能出现在历史 reference 或回滚说明中；新接管、新数据、新命令必须以 `H:\quant_project` 为根。
 - 脑区是项目事实真源，skills 只是流程入口，不复制长历史。

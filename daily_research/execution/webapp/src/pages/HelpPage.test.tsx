@@ -5,10 +5,12 @@ import type { ExecutionApi } from "../types";
 
 function baseApi(overrides: Partial<ExecutionApi> = {}): ExecutionApi {
   return {
-    getStatus: vi.fn().mockResolvedValue({
-      lock: {},
-      current_job: {},
-      recent_jobs: []
+    getDailyRunStatus: vi.fn().mockResolvedValue({
+      status: "completed",
+      latest_verdict: {
+        status: "completed",
+        target_trading_date: "2026-05-22"
+      }
     }),
     getDataSources: vi.fn().mockResolvedValue({
       status: "ok",

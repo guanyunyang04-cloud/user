@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 69,
+  "record_count": 70,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -1195,6 +1195,24 @@
         "policy_input_bundle__c4886777fe70bfe6616e1259",
         "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
       ]
+    },
+    {
+      "id": "execution_daily_plan_state_machine_refactor_20260526",
+      "date": "2026-05-26",
+      "r_id": "",
+      "path": "daily_research/brain/references/execution_daily_plan_state_machine_refactor_20260526.md",
+      "tags": [
+        "execution"
+      ],
+      "workflow": "execution",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "每日盘后计划的权威状态改为 daily verdict：`daily_research/output/execution_app/daily_runs/YYYYMMDD/verdict.json`。; 每日最终状态只允许 `completed` 或 `blocked`；目标日关键行情不可用时写 `blocked:data_not_ready`，不得自动回退到上一完整交易日生成“今日计划”。; 自动盘后执行主体改为 Windows Task Scheduler 触发 CLI；Web 进程只展示状态和提供手动触发入口。",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": []
     },
     {
       "id": "execution_signal_refresh_closure_20260524",

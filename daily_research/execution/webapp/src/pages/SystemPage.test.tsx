@@ -6,45 +6,37 @@ import type { ExecutionApi } from "../types";
 describe("SystemPage", () => {
   it("shows post-close scheduler status and latest automatic refresh evidence", async () => {
     const api = {
-      getStatus: vi.fn().mockResolvedValue({
-        runtime_root: "H:/quant_project/daily_research/output/execution_app",
-        active_manifest: {
-          lake_dataset_id: "policy_input_bundle__current",
-          lake_dataset_end_date: "2026-05-22"
-        },
-        latest_trade_plan: {
-          exists: true,
-          status: "ok",
-          summary: {},
-          actions: [],
-          holdings: [],
-          watchlist: [],
-          model_info: {},
-          txt_preview: [],
-          artifact_paths: {}
-        },
-        scheduler_status: {
-          enabled: true,
-          post_close_time: "15:30",
-          timezone: "Asia/Shanghai",
-          next_check_at: "2026-05-25T15:30:00+08:00",
-          missed_status: "none"
-        },
-        last_auto_refresh: {
-          job_id: "auto-refresh-1",
-          scheduler_decision: "refresh"
-        },
-        lock: {}
+      getDailyRunStatus: vi.fn().mockResolvedValue({
+        status: "completed",
+        daily_runs_root: "H:/quant_project/daily_research/output/execution_app/daily_runs",
+        latest_verdict: {
+          status: "completed",
+          run_date: "2026-05-26",
+          target_trading_date: "2026-05-26",
+          dataset_id: "policy_input_bundle__current",
+          signal_panel_date: "2026-05-26",
+          trade_plan_run_dir: "H:/trade_plan_run",
+          paper_reconcile_status: "ok",
+          evidence_paths: { verdict: "H:/verdict.json" }
+        }
       }),
-      getDoctor: vi.fn().mockResolvedValue({ status: "ok", checked_at: "2026-05-24T00:00:00", checks: [] }),
+      getSystemDoctor: vi.fn().mockResolvedValue({ status: "ok", checked_at: "2026-05-24T00:00:00", checks: [] }),
+      getScheduler: vi.fn().mockResolvedValue({
+        status: "ok",
+        installed: true,
+        enabled: true,
+        task_name: "DailyResearchDailyPlan",
+        next_run_time: "2026-05-27 15:45:00",
+        last_result: "0"
+      }),
       unlockRuntime: vi.fn()
     } as unknown as ExecutionApi;
 
     render(<SystemPage api={api} />);
 
-    expect(await screen.findByText("自动盘后更新")).toBeInTheDocument();
-    expect(screen.getAllByText("15:30").length).toBeGreaterThan(0);
-    expect(screen.getByText("Asia/Shanghai")).toBeInTheDocument();
-    expect(screen.getByText("auto-refresh-1")).toBeInTheDocument();
+    expect(await screen.findByText("Windows Task Scheduler")).toBeInTheDocument();
+    expect(screen.getAllByText("DailyResearchDailyPlan").length).toBeGreaterThan(0);
+    expect(screen.getByText("policy_input_bundle__current")).toBeInTheDocument();
+    expect(screen.getByText("H:/verdict.json")).toBeInTheDocument();
   });
 });
