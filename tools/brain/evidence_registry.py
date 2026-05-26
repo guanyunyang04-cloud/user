@@ -25,6 +25,9 @@ class EvidenceRecord:
     path: str
     tags: list[str]
     workflow: str
+    research_programs: list[str]
+    study_families: list[str]
+    run_tags: list[str]
     study_tags: list[str]
     verdict: str
     blockers: list[str]
@@ -215,6 +218,9 @@ def build_evidence_record(path: Path) -> EvidenceRecord:
         path=rel_path,
         tags=_tags_from(path, text, r_id, workflow),
         workflow=workflow,
+        research_programs=daily_research_evidence.research_programs(text),
+        study_families=daily_research_evidence.study_families(text),
+        run_tags=daily_research_evidence.run_tags(text),
         study_tags=daily_research_evidence.study_tags(text),
         verdict=verdict,
         blockers=blockers,
@@ -238,6 +244,9 @@ def build_evidence_registry() -> dict[str, Any]:
             path=record.path,
             tags=record.tags,
             workflow=record.workflow,
+            research_programs=record.research_programs,
+            study_families=record.study_families,
+            run_tags=record.run_tags,
             study_tags=record.study_tags,
             verdict=record.verdict,
             blockers=record.blockers,
@@ -257,7 +266,7 @@ def build_evidence_registry() -> dict[str, Any]:
         if not (WORKSPACE_ROOT / record.path).exists():
             missing_paths.append(record.path)
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "ok" if not duplicates and not missing_paths else "invalid",
         "record_count": len(records),
         "duplicates": duplicates,
@@ -292,6 +301,9 @@ def query_evidence_registry(query: str, *, path: str | Path = REGISTRY_PATH) -> 
             if isinstance(record, dict)
             and (
                 needle in {str(record.get("id", "")).lower(), str(record.get("r_id", "")).lower()}
+                or needle in {str(item).lower() for item in record.get("research_programs", []) if item}
+                or needle in {str(item).lower() for item in record.get("study_families", []) if item}
+                or needle in {str(item).lower() for item in record.get("run_tags", []) if item}
                 or needle in {str(item).lower() for item in record.get("study_tags", []) if item}
                 or needle in {str(item).lower() for item in record.get("dataset_ids", []) if item}
             )
@@ -310,4 +322,3 @@ def query_evidence_registry(query: str, *, path: str | Path = REGISTRY_PATH) -> 
         "registry_status": registry.get("status", ""),
         "registry_path": Path(path).as_posix(),
     }
-

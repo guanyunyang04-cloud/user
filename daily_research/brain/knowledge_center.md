@@ -11,6 +11,7 @@
 - 当前统一权重语义是 `research_raw_target_weight`；当前统一上限语义是 `follow_research_raw_no_global_cap`。
 - 所有主线都是可显式切换的当前工作指针；切换后按切换后的主线继续，旧主线保留为历史或对照证据。
 - 多 Horizon 交易效用排序当前研究主线指针是 `alpha_multi_horizon_utility_policy_v1`；这是 research mainline，不是 live/default 或 active execution mainline。
+- evidence registry v2 使用三层证据索引：`research_programs` 表示稳定研究主线，`study_families` 表示阶段/实验族，`run_tags` 表示物理 run 实例；旧 `study_tags` 仅作兼容与反查，不再承担主线语义。
 - `Path20` / `alpha_path20_neural_policy_v1` 是历史证据代号、代码 namespace 和旧 study tag namespace，不再代表当前目标定义；新研究应写成多 horizon utility / ranking / calibration，而不是固定 20 日路径预测。
 - continuous_policy 的终局目标是日级连续交易执行模型，不是固定调仓或人工执行桥。
 - r39 仍是 continuous_policy 有效证据基线；r40-r74 是 research / shadow 升级链或基础设施证据。
@@ -53,6 +54,7 @@
 - 滚动总览入口：`daily_research/brain/references/mainline_review_current.md`；用于检阅立项以来所有 durable 主线，但不替代 `state_center.md` 或 active artifact。
 - 完整代码库检阅 successor：`daily_research/brain/references/brain_system_full_codebase_review_20260523.md`；用于当前模块地图、全库风险和 2026-05-22 旧路径/旧主线纠偏。
 - `alpha_multi_horizon_utility_policy_v1`：当前 path_policy research pointer；目标是多 horizon 交易效用排序，首轮 horizon grid 为 `1,2,3,5,8,10,15,20,30`，当前 blocker 是 predicted best horizon 向 `30d` 塌缩。
+- 近期 multi-horizon 阶段 family：`stage1_output_aux_grid`、`stage2_horizon_grid_calibration`、`stage25_stability_calibration`；新增 run tag 不应通过扩 evidence tag 前缀来代表新主线，必须归入既有或新声明的 `study_family`。
 - `alpha_path20_neural_policy_v1`：2026-05-17 到 2026-05-23 的 Path20 neural-policy 历史主线；其 evidence 仍有效，但新结论必须按 `alpha_multi_horizon_utility_policy_v1` 解释。
 - `alpha_path20_sequence_policy_v1`：shadow comparison / secondary research route；除非未来显式切换，不代表当前主线。
 - `data_platform_v2` / TDX-free lake-first ingestion：当前数据入口主线；provider refresh/import 才能在线取数，正式训练、评估和 diagnostics 必须读 explicit lake dataset id。

@@ -59,7 +59,7 @@
 ## Multi Horizon Utility 运行口径
 - 当前 path_policy 研究主线名：`alpha_multi_horizon_utility_policy_v1`，中文名为“多 Horizon 交易效用排序主线”。
 - 旧 `Path20` / `alpha_path20_neural_policy_v1` / `path20_...` study tag 保留为历史证据和代码 namespace；不得批量改写历史 tag，也不得把旧名解释成当前仍以固定 20 日路径预测为目标。
-- 新实验 tag 默认使用 `mh_utility_...` 前缀，并显式写入 pool、feature profile、model、seed、train/validation/test 年份、output/loss、cost/hit/drawdown 参数和 horizon grid。
+- 新实验必须显式写入 research program、study family 和 run tag：`research_programs` 查询稳定主线，`study_families` 查询阶段/实验族，`run_tags` 查询物理实例；run tag 需包含 pool、feature、model、seed、年份、output/loss、成本参数和 horizon grid，不得靠扩 study tag 前缀表达新主线。
 - 当前下一步只允许 constrained horizon-score / calibration 研究；不跑 liquid800、allocator、replay、live/default、promotion，除非新的 liquid500 seed-7 calibration 结果先通过 gate。
 - 标准代码入口继续使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.run_alpha_path20_protocol`，因为这是包级入口；直接脚本 `daily_research/path_policy/run_alpha_path20_protocol.py` 只作为容错 smoke，不能替代文档推荐入口。
 

@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "status": "ok",
   "record_count": 69,
   "duplicates": [],
@@ -14,6 +14,9 @@
         "brain"
       ],
       "workflow": "brain",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
       "study_tags": [],
       "verdict": "Status: `brain_system_refactor / control-plane governance / no strategy change`.; Goal: make all workspace brains discoverable, auditable, migration-safe, and language-consistent.; Language policy: `zh_semantic_en_identifiers_v1`，即中文语义 + 英文工程标识。; Active execution impact: `daily_research/output/active_execution_strategy.json` must remain unchanged.",
       "blockers": [],
@@ -33,6 +36,9 @@
         "brain"
       ],
       "workflow": "brain",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
       "study_tags": [],
       "verdict": "",
       "blockers": [],
@@ -52,6 +58,9 @@
         "brain"
       ],
       "workflow": "brain",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
       "study_tags": [],
       "verdict": "",
       "blockers": [],
@@ -69,6 +78,14 @@
         "brain"
       ],
       "workflow": "brain",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "self_opt_study_r52d_validation_closure_dryrun_20260511_01",
+        "self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01",
+        "self_opt_study_r53_cash_funded_allocation_core_dryrun_20260512_03",
+        "self_opt_study_r53_cash_funded_allocation_core_screening_safe_20260512_03"
+      ],
       "study_tags": [
         "self_opt_study_r52d_validation_closure_dryrun_20260511_01",
         "self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01",
@@ -96,6 +113,9 @@
         "brain"
       ],
       "workflow": "brain",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
       "study_tags": [],
       "verdict": "结论：当前工作区根目录固定为 `H:\\quant_project`。; 结论：`H:\\new_tdx64\\PYPlugins\\user` 还原为通达信插件用户目录，只保留通达信原生/TQ 用户脚本，不再作为 agent 接管、研究、训练或数据平台根目录。; 边界：本次迁移只改变工作区位置和冷数据归档位置，不改变 `daily_research/output/active_execution_strategy.json`，不启动训练、study、replay、live/default 或 promotion。",
       "blockers": [],
@@ -115,6 +135,29 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [
+        "stage1_output_aux_grid"
+      ],
+      "run_tags": [
+        "mh_out_forecast_path_v1_baseline_fullgrid_seed7_20260525_01",
+        "mh_out_forecast_path_v1_baseline_fullgrid_seed11_20260525_01",
+        "mh_out_forecast_path_v1_baseline_fullgrid_seed19_20260525_01",
+        "mh_out_decision_utility_v1_baseline_fullgrid_seed7_20260525_01",
+        "mh_out_decision_utility_v1_baseline_fullgrid_seed11_20260525_01",
+        "mh_out_decision_utility_v1_baseline_fullgrid_seed19_20260525_01",
+        "mh_out_decision_utility_path_aux_v1_fullgrid_seed7_20260525_01",
+        "mh_out_decision_utility_path_aux_v1_fullgrid_seed11_20260525_01",
+        "mh_out_decision_utility_path_aux_v1_fullgrid_seed19_20260525_01",
+        "mh_out_decision_utility_hit_risk_aux_v1_fullgrid_seed7_20260525_01",
+        "mh_out_decision_utility_hit_risk_aux_v1_fullgrid_seed11_20260525_01",
+        "mh_out_decision_utility_hit_risk_aux_v1_fullgrid_seed19_20260525_01",
+        "mh_out_decision_utility_rank_aux_v1_fullgrid_seed7_20260525_01",
+        "mh_out_decision_utility_rank_aux_v1_fullgrid_seed11_20260525_01",
+        "mh_out_decision_utility_rank_aux_v1_fullgrid_seed19_20260525_01"
+      ],
       "study_tags": [
         "mh_out_forecast_path_v1_baseline_fullgrid_seed7_20260525_01",
         "mh_out_forecast_path_v1_baseline_fullgrid_seed11_20260525_01",
@@ -147,9 +190,12 @@
         "path_policy"
       ],
       "workflow": "path_policy",
-      "study_tags": [
+      "research_programs": [
         "alpha_multi_horizon_utility_policy_v1"
       ],
+      "study_families": [],
+      "run_tags": [],
+      "study_tags": [],
       "verdict": "Status: `research tooling implemented / shadow-only / no training launched`.; Verdict: `alpha_multi_horizon_utility_policy_v1` now has code-level support for output/loss profile comparison, auxiliary utility tasks, explicit 45d horizon-grid feasibility, and read-only comparison artifacts.; Boundary: `daily_research/output/active_execution_strategy.json`, production root, live/default, trade-plan, paper account, allocator/replay, and broker behavior are unchanged.",
       "blockers": [],
       "next_allowed_actions": [],
@@ -165,8 +211,15 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [],
+      "run_tags": [
+        "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01",
+        "mh_utility_horizon_root_cause_audit_20260524_01"
+      ],
       "study_tags": [
-        "alpha_multi_horizon_utility_policy_v1",
         "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01",
         "mh_utility_horizon_root_cause_audit_20260524_01",
         "mh_short_utility_1_3_5d_v1",
@@ -202,8 +255,24 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [
+        "stage25_stability_calibration"
+      ],
+      "run_tags": [
+        "mh25_path_aux_fullgrid_rebudget_seed7_20260526_01",
+        "mh25_path_aux_fullgrid_rebudget_seed11_20260526_01",
+        "mh25_path_aux_fullgrid_rebudget_seed19_20260526_01",
+        "mh25_path_aux_daily1_45_multiseed_seed7_20260526_01",
+        "mh25_path_aux_daily1_45_multiseed_seed11_20260526_01",
+        "mh25_path_aux_daily1_45_multiseed_seed19_20260526_01",
+        "mh25_path_aux_long_family_simplified_seed7_20260526_01",
+        "mh25_path_aux_long_family_simplified_seed11_20260526_01",
+        "mh25_path_aux_long_family_simplified_seed19_20260526_01"
+      ],
       "study_tags": [
-        "alpha_multi_horizon_utility_policy_v1",
         "mh25_path_aux_fullgrid_rebudget_seed7_20260526_01",
         "mh25_path_aux_fullgrid_rebudget_seed11_20260526_01",
         "mh25_path_aux_fullgrid_rebudget_seed19_20260526_01",
@@ -241,8 +310,35 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [
+        "stage2_horizon_grid_calibration"
+      ],
+      "run_tags": [
+        "mh_out_decision_utility_v1_baseline_fullgrid_seed7_20260525_01",
+        "mh_out_decision_utility_v1_baseline_fullgrid_seed11_20260525_01",
+        "mh_out_decision_utility_v1_baseline_fullgrid_seed19_20260525_01",
+        "mh_out_decision_utility_path_aux_v1_fullgrid_seed7_20260525_01",
+        "mh_out_decision_utility_path_aux_v1_fullgrid_seed11_20260525_01",
+        "mh_out_decision_utility_path_aux_v1_fullgrid_seed19_20260525_01",
+        "mh_grid_decision_utility_path_aux_v1_sparse_long_seed7_20260525_02",
+        "mh_grid_decision_utility_path_aux_v1_sparse_long_seed11_20260525_02",
+        "mh_grid_decision_utility_path_aux_v1_sparse_long_seed19_20260525_02",
+        "mh_grid_decision_utility_path_aux_v1_dense_short_mid_seed7_20260525_02",
+        "mh_grid_decision_utility_path_aux_v1_dense_short_mid_seed11_20260525_02",
+        "mh_grid_decision_utility_path_aux_v1_dense_short_mid_seed19_20260525_02",
+        "mh_grid_decision_utility_path_aux_v1_daily1_45_feas_seed7_20260525_02",
+        "mh_grid_decision_utility_v1_baseline_sparse_long_seed7_20260525_02",
+        "mh_grid_decision_utility_v1_baseline_sparse_long_seed11_20260525_02",
+        "mh_grid_decision_utility_v1_baseline_sparse_long_seed19_20260525_02",
+        "mh_grid_decision_utility_v1_baseline_dense_short_mid_seed7_20260525_02",
+        "mh_grid_decision_utility_v1_baseline_dense_short_mid_seed11_20260525_02",
+        "mh_grid_decision_utility_v1_baseline_dense_short_mid_seed19_20260525_02",
+        "mh_grid_decision_utility_v1_baseline_daily1_45_feas_seed7_20260525_02"
+      ],
       "study_tags": [
-        "alpha_multi_horizon_utility_policy_v1",
         "mh_out_decision_utility_v1_baseline_fullgrid_seed7_20260525_01",
         "mh_out_decision_utility_v1_baseline_fullgrid_seed11_20260525_01",
         "mh_out_decision_utility_v1_baseline_fullgrid_seed19_20260525_01",
@@ -286,8 +382,12 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [],
+      "run_tags": [],
       "study_tags": [
-        "alpha_multi_horizon_utility_policy_v1",
         "mh_short_utility_1_3_5d_v1",
         "mh_mid_utility_5_10_20d_v1",
         "mh_long_utility_15_20_30d_v1"
@@ -319,8 +419,15 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [],
+      "run_tags": [
+        "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01",
+        "mh_utility_horizon_calibration_posthoc_20260524_01"
+      ],
       "study_tags": [
-        "alpha_multi_horizon_utility_policy_v1",
         "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01",
         "mh_utility_horizon_calibration_posthoc_20260524_01"
       ],
@@ -351,8 +458,14 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [],
+      "run_tags": [
+        "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01"
+      ],
       "study_tags": [
-        "alpha_multi_horizon_utility_policy_v1",
         "alpha_path20_neural_policy_v1",
         "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01",
         "alpha_path20_sequence_policy_v1"
@@ -378,6 +491,14 @@
         "gpu"
       ],
       "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "path20_arch_gain_liquid500_sector_v1_20260520_01",
+        "path20_arch_gain_liquid800_sector_v1_20260520_01",
+        "path20_pool_liquid500_sector_gru_seed7_probe_20260519_01",
+        "path20_pool_liquid800_gru_seed7_probe_20260519_01"
+      ],
       "study_tags": [
         "alpha_path20_neural_policy_v1",
         "path20_arch_gain_liquid500_sector_v1_20260520_01",
@@ -410,6 +531,18 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "path20_arch_gain_liquid500_sector_v1_20260520_01",
+        "path20_architecture_revalidation_audit_20260521",
+        "path20_decision_architecture_gate_20260521",
+        "path20_arch_gain_liquid800_sector_v1_20260520_01",
+        "path20_decision_output_liquid500_du_cost20_hit10_dd010_20260521_01",
+        "path20_decision_arch_patch_liquid500_du_cost20_hit10_dd010_20260521_01",
+        "path20_decision_arch_stock_mixer_liquid500_du_cost20_hit10_dd010_20260521_01",
+        "path20_decision_arch_sector_slot_liquid500_du_cost20_hit10_dd010_20260521_01"
+      ],
       "study_tags": [
         "alpha_path20_neural_policy_v1",
         "path20_arch_gain_liquid500_sector_v1_20260520_01",
@@ -450,6 +583,14 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "path20_data_length_regime_audit_20260522",
+        "path20_decision_output_liquid500_du_cost20_hit10_dd010_20260521_01",
+        "path20_data_len_liquid500_du_train2018_2022_20260522_01",
+        "path20_data_len_liquid500_du_train2016_2022_20260522_01"
+      ],
       "study_tags": [
         "path20_data_length_regime_audit_20260522",
         "path20_decision_output_liquid500_du_cost20_hit10_dd010_20260521_01",
@@ -481,6 +622,15 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "path20_arch_gain_liquid500_sector_v1_20260520_01",
+        "path20_decision_output_liquid500_sector_v1_20260521_01",
+        "path20_decision_output_liquid500_du_cost10_hit10_dd025_20260521_01",
+        "path20_decision_output_liquid500_du_cost20_hit10_dd010_20260521_01",
+        "path20_decision_output_liquid500_du_cost20_hit20_dd000_20260521_01"
+      ],
       "study_tags": [
         "alpha_path20_neural_policy_v1",
         "path20_arch_gain_liquid500_sector_v1_20260520_01",
@@ -517,6 +667,11 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "path20_decision_output_liquid500_sector_v1_20260521_01"
+      ],
       "study_tags": [
         "alpha_path20_neural_policy_v1",
         "path20_decision_output_liquid500_sector_v1_20260521_01"
@@ -545,6 +700,14 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "path20_decision_output_liquid500_du_cost20_hit10_dd010_20260521_01",
+        "path20_decision_output_liquid500_du_cost20_hit20_dd000_20260521_01",
+        "path20_decision_output_liquid500_stability_audit_20260521",
+        "path20_decision_output_score_selection_stability_20260521"
+      ],
       "study_tags": [
         "alpha_path20_neural_policy_v1",
         "path20_decision_output_liquid500_du_cost20_hit10_dd010_20260521_01",
@@ -578,6 +741,15 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "path20_decision_score_diagnostics_20260522",
+        "path20_decision_output_liquid500_du_cost20_hit10_dd010_20260521_01",
+        "path20_data_len_liquid500_du_train2018_2022_20260522_01",
+        "path20_data_len_liquid500_du_train2016_2022_20260522_01",
+        "path20_decision_arch_stock_mixer_liquid500_du_cost20_hit10_dd010_20260521_01"
+      ],
       "study_tags": [
         "path20_decision_score_diagnostics_20260522",
         "path20_decision_output_liquid500_du_cost20_hit10_dd010_20260521_01",
@@ -607,6 +779,22 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "path20_pool_liquid500_sector_gru_seed7_probe_20260519_01",
+        "path20_pool_liquid800_gru_seed7_probe_20260519_01",
+        "path20_pool_liquid500_gru_seed7_probe_20260519_01",
+        "path20_pool_liquid300_gru_seed7_probe_20260519_01",
+        "path20_memmap_training_smoke_full_gru_reuse_20260518_01",
+        "path20_memmap_training_smoke_cap80_gru_patch_20260518_01",
+        "path20_memmap_training_smoke_cap80_20260518_02",
+        "path20_memmap_dataset_liquid500_sector_probe_20260519_01",
+        "path20_memmap_dataset_liquid800_probe_20260519_01",
+        "path20_memmap_dataset_liquid500_probe_20260519_01",
+        "path20_memmap_dataset_liquid300_probe_20260519_01",
+        "path20_memmap_dataset_full_repaired_20260518_01"
+      ],
       "study_tags": [
         "alpha_path20_neural_policy_v1",
         "path20_pool_liquid500_sector_gru_seed7_probe_20260519_01",
@@ -653,9 +841,15 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [],
+      "run_tags": [
+        "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01"
+      ],
       "study_tags": [
         "alpha_path20_neural_policy_v1",
-        "alpha_multi_horizon_utility_policy_v1",
         "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01"
       ],
       "verdict": "The multi-horizon no-alpha GRU run completed: `status=completed`, `evidence_verdict=forecast_test_confirmed`.; `trade_utility_score` passed the corrected selection calibration gate on validation and test.; Target calibration Gate A passed for `cost20_hit10_dd0.1`; utility deciles were monotonic and hit label base rate was stable across validation/test.; This is a research-stage forecast / selection candidate only; it does not authorize liquid800, multi-seed, allocator, replay, live/default, or active artifact promotion.",
@@ -687,9 +881,17 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [],
+      "run_tags": [
+        "path20_gate_b_simple_baselines_liquid500_du_cost20_hit10_dd010_20260522_01",
+        "path20_input_ablation_no_alpha_liquid500_du_cost20_hit10_dd010_20260522_01",
+        "path20_input_ablation_no_sector_static_liquid500_du_cost20_hit10_dd010_20260522_01"
+      ],
       "study_tags": [
         "alpha_path20_neural_policy_v1",
-        "alpha_multi_horizon_utility_policy_v1",
         "path20_gate_b_simple_baselines_liquid500_du_cost20_hit10_dd010_20260522_01",
         "path20_input_ablation_no_alpha_liquid500_du_cost20_hit10_dd010_20260522_01",
         "path20_input_ablation_no_sector_static_liquid500_du_cost20_hit10_dd010_20260522_01"
@@ -717,6 +919,11 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "alpha_path20_neural_policy_v1_tiny_smoke_20260516_01"
+      ],
       "study_tags": [
         "alpha_path20_neural_policy_v1",
         "alpha_path20_sequence_policy_v1",
@@ -744,6 +951,13 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "alpha_path20_stage1_formal_cap80_result_20260518",
+        "path20_stage1_formal_cap80_repaired_20260518_01",
+        "alpha_path20_stage1_feature_ablation_result_20260518"
+      ],
       "study_tags": [
         "alpha_path20_neural_policy_v1",
         "alpha_path20_stage1_formal_cap80_result_20260518",
@@ -778,6 +992,13 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "alpha_path20_mainline_switch_status_20260517",
+        "alpha_path20_neural_policy_v1_tiny_smoke_20260516_01",
+        "alpha_path20_dataset__e96ad3bf15b4df878feb1aca"
+      ],
       "study_tags": [
         "alpha_path20_neural_policy_v1",
         "alpha_path20_mainline_switch_status_20260517",
@@ -810,6 +1031,9 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
       "study_tags": [
         "alpha_path20_sequence_policy_v1",
         "alpha_path20_neural_policy_v1"
@@ -839,6 +1063,12 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "alpha_path20_sequence_policy_v3_walkforward_matrix_contract_20260517",
+        "alpha_path20_mainline_switch_status_20260517"
+      ],
       "study_tags": [
         "alpha_path20_sequence_policy_v2",
         "alpha_path20_neural_policy_v1",
@@ -861,6 +1091,11 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "path20_v3_full_year_matrix_20260517_01"
+      ],
       "study_tags": [
         "alpha_path20_sequence_policy_v3",
         "path20_v3_full_year_matrix_20260517_01"
@@ -891,6 +1126,9 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
       "study_tags": [
         "alpha_path20_sequence_policy_v3",
         "alpha_path20_sequence_policy_v1"
@@ -916,6 +1154,9 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
       "study_tags": [
         "alpha_path20_sequence_policy_v4",
         "alpha_path20_sequence_policy_v1"
@@ -940,6 +1181,9 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
       "study_tags": [
         "alpha_path20_sequence_policy_v5",
         "alpha_path20_neural_policy_v1"
@@ -971,6 +1215,14 @@
         "gpu"
       ],
       "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "path20_stage1_ablation_state_v1_cap80_repaired_20260518_01",
+        "path20_stage1_ablation_raw_kline_v1_cap80_repaired_20260518_01",
+        "path20_stage1_ablation_raw_kline_context_v1_cap80_repaired_20260518_01",
+        "path20_stage1_ablation_raw_kline_context_no_alpha_prior_v1_cap80_repaired_20260518_01"
+      ],
       "study_tags": [
         "alpha_path20_neural_policy_v1",
         "path20_stage1_ablation_state_v1_cap80_repaired_20260518_01",
@@ -1002,6 +1254,14 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "path20_stage1_formal_cap80_repaired_20260518_01",
+        "path20_stage1_preflight_cap80_repaired_20260518_01",
+        "path20_stage1_pilot_cap80_repaired_20260518_04",
+        "alpha_path20_stage1_feature_ablation_result_20260518"
+      ],
       "study_tags": [
         "alpha_path20_neural_policy_v1",
         "path20_stage1_formal_cap80_repaired_20260518_01",
@@ -1033,6 +1293,11 @@
         "brain"
       ],
       "workflow": "brain",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "alpha_path20_decision_score_diagnostics_20260522"
+      ],
       "study_tags": [
         "alpha_path20_decision_score_diagnostics_20260522",
         "alpha_path20_neural_policy_v1",
@@ -1070,9 +1335,15 @@
         "brain"
       ],
       "workflow": "brain",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [],
+      "run_tags": [
+        "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01"
+      ],
       "study_tags": [
         "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01",
-        "alpha_multi_horizon_utility_policy_v1",
         "alpha_path20_neural_policy_v1"
       ],
       "verdict": "目的：固化当前代码结构、durable 主线、风险边界和后续安全动作。; 当前最大错误风险仍是边界混写：把 short-alpha live materialization、多 horizon ranking evidence 和 continuous allocation ambition 说成一个已经集成且可 promotion 的模型。; TDX-family 代码仍存在于 legacy baseline/deep_alpha/tools 路径中；准确边界不是“代码库无 TDX 字符串”，而是“正式新研究和数据平台边界默认 TDX-free，legacy 路径隔离或显式 gated”。; data platform line：非 TDX provider refresh/import boundary、Bronze/Silver normalization、domain sidecars 与 lake registration。",
@@ -1105,6 +1376,9 @@
         "brain"
       ],
       "workflow": "brain",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
       "study_tags": [],
       "verdict": "Status: `brain_system_refactor / completed control-plane migration`.; Workflow: `brain`.; Active artifact impact: `daily_research/output/active_execution_strategy.json` remains unchanged by design.; Scope: brain catalog, split workflow registry, audit CLI, language policy, doc/integrity guards, and reference writeback.",
       "blockers": [],
@@ -1125,6 +1399,9 @@
         "data_lake"
       ],
       "workflow": "research_data_lake",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
       "study_tags": [],
       "verdict": "Status: `current infrastructure mainline / data_lake_universal_repair / research / shadow-only / no promotion`.; The current work pointer is temporarily switched from Path20 Stage 1 training to universal data-lake repair because the base policy input bundle must be trustworthy before forecast evidence is interpretable.; Boundary: this contract repairs data correctness and auditability only. It does not change live/default execution and does not modify `daily_research/output/active_execution_strategy.json`.",
       "blockers": [
@@ -1157,6 +1434,9 @@
         "data_platform"
       ],
       "workflow": "execution",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
       "study_tags": [],
       "verdict": "",
       "blockers": [],
@@ -1175,6 +1455,9 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
       "study_tags": [
         "alpha_path20_neural_policy_v1"
       ],
@@ -1201,6 +1484,11 @@
         "path_policy"
       ],
       "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "alpha_path20_mainline_switch_status_20260517"
+      ],
       "study_tags": [
         "alpha_path20_neural_policy_v1",
         "alpha_path20_mainline_switch_status_20260517",
@@ -1225,9 +1513,12 @@
         "path_policy"
       ],
       "workflow": "path_policy",
-      "study_tags": [
+      "research_programs": [
         "alpha_multi_horizon_utility_policy_v1"
       ],
+      "study_families": [],
+      "run_tags": [],
+      "study_tags": [],
       "verdict": "",
       "blockers": [
         "Direct script execution of `daily_research/path_policy/run_alpha_path20_protocol.py --help` failed before the fix because package imports could not resolve `daily_research`; module execution with `-m daily_research.path_policy.run_alpha_path20_protocol --help` worked.",
@@ -1254,6 +1545,12 @@
         "continuous_policy"
       ],
       "workflow": "continuous_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "self_opt_study_r50_integrated_convex_capital_flow_true_solver_smoke_20260509_1852",
+        "self_opt_study_r50_integrated_convex_capital_flow_true_solver_smoke_20260509_1852__trial_01__train"
+      ],
       "study_tags": [
         "self_opt_study_r50_integrated_convex_capital_flow_true_solver_smoke_20260509_1852",
         "self_opt_study_r50_integrated_convex_capital_flow_true_solver_smoke_20260509_1852__trial_01__train"
@@ -1274,6 +1571,11 @@
         "continuous_policy"
       ],
       "workflow": "continuous_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01"
+      ],
       "study_tags": [
         "self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01"
       ],
@@ -1299,6 +1601,12 @@
         "daily_research"
       ],
       "workflow": "daily_research",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "self_opt_study_r52e_deployment_cash_exposure_closure_screening_safe_20260511_01",
+        "self_opt_study_r52e_deployment_cash_exposure_closure_screening_safe_20260511_01__trial_01__audit_recomputed_after_closure_fix_20260512_01"
+      ],
       "study_tags": [
         "self_opt_study_r52e_deployment_cash_exposure_closure_screening_safe_20260511_01",
         "self_opt_study_r52e_deployment_cash_exposure_closure_screening_safe_20260511_01__trial_01__audit_recomputed_after_closure_fix_20260512_01"
@@ -1329,6 +1637,13 @@
         "continuous_policy"
       ],
       "workflow": "continuous_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "self_opt_study_r53_cash_funded_allocation_core_dryrun_20260512_03",
+        "self_opt_study_r53_cash_funded_allocation_core_screening_safe_20260512_03",
+        "self_opt_study_r53_cash_funded_allocation_core_screening_safe_20260512_03__trial_03"
+      ],
       "study_tags": [
         "self_opt_study_r53_cash_funded_allocation_core_dryrun_20260512_03",
         "self_opt_study_r53_cash_funded_allocation_core_screening_safe_20260512_03",
@@ -1360,6 +1675,15 @@
         "continuous_policy"
       ],
       "workflow": "continuous_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "self_opt_study_r54_semantic_budget_controller_dryrun_20260512_02",
+        "self_opt_study_r54_semantic_budget_controller_screening_safe_20260512_02",
+        "self_opt_study_r54_semantic_budget_controller_screening_safe_20260512_02__trial_02",
+        "self_opt_study_r54_semantic_budget_controller_screening_safe_20260512_02__trial_03",
+        "protocol_summary"
+      ],
       "study_tags": [
         "self_opt_study_r54_semantic_budget_controller_dryrun_20260512_02",
         "self_opt_study_r54_semantic_budget_controller_screening_safe_20260512_02",
@@ -1396,6 +1720,12 @@
         "daily_research"
       ],
       "workflow": "daily_research",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "self_opt_study_r55_cash_timing_release_controller_dryrun_20260512_01",
+        "self_opt_study_r55_cash_timing_release_controller_screening_safe_20260512_01"
+      ],
       "study_tags": [
         "self_opt_study_r55_cash_timing_release_controller_dryrun_20260512_01",
         "self_opt_study_r55_cash_timing_release_controller_screening_safe_20260512_01"
@@ -1430,6 +1760,9 @@
         "gpu"
       ],
       "workflow": "continuous_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
       "study_tags": [],
       "verdict": "",
       "blockers": [
@@ -1450,6 +1783,16 @@
         "continuous_policy"
       ],
       "workflow": "continuous_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "self_opt_study_r56_release_first_constrained_decoder_dryrun_20260513_01",
+        "self_opt_study_r56_release_first_constrained_decoder_screening_safe_20260513_01",
+        "self_opt_study_r56_release_first_constrained_decoder_screening_safe_20260513_02",
+        "self_opt_study_r56_release_first_constrained_decoder_screening_safe_20260513_03",
+        "self_opt_study_r56_release_first_constrained_decoder_screening_safe_20260513_04",
+        "protocol_summary"
+      ],
       "study_tags": [
         "self_opt_study_r56_release_first_constrained_decoder_dryrun_20260513_01",
         "self_opt_study_r56_release_first_constrained_decoder_screening_safe_20260513_01",
@@ -1486,6 +1829,9 @@
         "continuous_policy"
       ],
       "workflow": "continuous_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
       "study_tags": [],
       "verdict": "The project had entered a framework-complexity loop: adding more runner layers and loss/profile variants was increasing operational surface without producing completed r56 behavior evidence.; r58 deliberately does not judge strategy quality. It restores a smaller operating loop so r56/r59 research can be evaluated through completed protocol summaries rather than orchestration machinery.",
       "blockers": [],
@@ -1505,6 +1851,14 @@
         "core_v4"
       ],
       "workflow": "continuous_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "protocol_r59_core_v4_direct_smoke_20260513_03",
+        "protocol_summary",
+        "protocol_r59_core_v4_direct_smoke_20260513_03__train",
+        "self_opt_study_r59_core_v4_release_first_dryrun_20260513_01"
+      ],
       "study_tags": [
         "protocol_r59_core_v4_direct_smoke_20260513_03",
         "protocol_summary",
@@ -1535,6 +1889,13 @@
         "core_v4"
       ],
       "workflow": "continuous_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "protocol_r60_profile_bound_core_v4_smoke_20260513_01",
+        "self_opt_study_r60_profile_bound_core_v4_dryrun_20260513_01",
+        "self_opt_study_r60_profile_bound_core_v4_screening_safe_20260513_01"
+      ],
       "study_tags": [
         "protocol_r60_profile_bound_core_v4_smoke_20260513_01",
         "self_opt_study_r60_profile_bound_core_v4_dryrun_20260513_01",
@@ -1565,6 +1926,15 @@
         "core_v4"
       ],
       "workflow": "continuous_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "protocol_summary",
+        "protocol_r61_release_first_decision_core_v4_smoke_20260514_03",
+        "self_opt_study_r61_release_first_decision_core_v4_dryrun_20260514_02",
+        "self_opt_study_r61_release_first_decision_core_v4_screening_safe_20260514_01",
+        "self_opt_study_r61_release_first_decision_core_v4_screening_safe_20260514_01__trial_01"
+      ],
       "study_tags": [
         "protocol_summary",
         "protocol_r61_release_first_decision_core_v4_smoke_20260514_03",
@@ -1598,6 +1968,9 @@
         "data_lake"
       ],
       "workflow": "continuous_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
       "study_tags": [],
       "verdict": "r62 implements a local research data lake using DuckDB catalog metadata plus Parquet storage.; Scope completed: reusable catalog APIs, Bronze/Silver market-feature storage, Gold training dataset registration, train-policy lake-backed reuse with legacy pickle fallback, and CLI tooling.; Boundary: this is research infrastructure only. It does not change live/default/promotion behavior and does not modify `daily_research/output/active_execution_strategy.json`.",
       "blockers": [
@@ -1630,6 +2003,9 @@
         "brain"
       ],
       "workflow": "brain",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
       "study_tags": [],
       "verdict": "Fact: r63 adds `daily_research/brain/brain_operating_protocol.md` as a compact operating protocol for task capsules, preflight, evidence rules, and writeback discipline.; Fact: `brain_workflow.py` now exposes `capsule`, `evidence-index`, and `query` commands in addition to existing handoff/status/preflight/writeback-plan paths.; Fact: `daily_research/brain/references/evidence_registry.json` is now the machine-readable index for reference evidence. It indexes recent r-number docs, study tags, blockers, next actions, active-artifact impact, and dataset ids.; Fact: repo-canonical project skill `daily_research/brain/skills/daily-research-brain` now exists and points agents to brain capsule/preflight/query/writeback commands without copying long r-number history.",
       "blockers": [
@@ -1655,6 +2031,9 @@
         "data_lake"
       ],
       "workflow": "continuous_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
       "study_tags": [],
       "verdict": "Fact: r64 adds a resumable, sharded Gold training dataset builder for the DuckDB + Parquet research data lake.; Fact: the builder uses the existing full-universe Bronze/Silver dataset `policy_input_bundle__0f116a9b78c92ff045a6853d` instead of refetching from TQ.; Fact: the first full-universe lake-backed smoke passed for uncapped `learned_all_a` with `3,070` symbols over `2019-01-02` to `2019-06-30`.; Fact: full-window strict Gold now exists for uncapped `learned_all_a`, sourced from `policy_input_bundle__0f116a9b78c92ff045a6853d`.",
       "blockers": [
@@ -1686,6 +2065,15 @@
         "portfolio_set_v5"
       ],
       "workflow": "continuous_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "protocol_r65_portfolio_set_v5_smoke_20260514_01",
+        "protocol_summary",
+        "self_opt_study_r65_portfolio_set_v5_dryrun_20260514_01",
+        "self_opt_study_r65_portfolio_set_v5_screening_safe_20260514_01",
+        "self_opt_study_r65_portfolio_set_v5_screening_safe_20260514_01__trial_01"
+      ],
       "study_tags": [
         "protocol_r65_portfolio_set_v5_smoke_20260514_01",
         "protocol_summary",
@@ -1720,6 +2108,9 @@
         "brain"
       ],
       "workflow": "brain",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
       "study_tags": [],
       "verdict": "Status: `brain / workflow maintenance / control-plane compaction`.; Production anchor: `daily_research/output/active_execution_strategy.json` remains unchanged.; This is not strategy evidence, training evidence, promotion support, live/default change, or continuous_policy effectiveness evidence.; This note uses explicit brain-tool checks and file paths only; it does not infer conclusions from loose `latest_*`.",
       "blockers": [
@@ -1743,6 +2134,15 @@
         "portfolio_set_v5"
       ],
       "workflow": "continuous_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "protocol_r67_paper_dfl_replace_v5_smoke_20260514_01",
+        "protocol_r67_paper_dfl_replace_v5_smoke_20260514_02",
+        "protocol_r67_paper_dfl_replace_v5_smoke_20260514_02__audit_recheck_after_max_universe_fix",
+        "protocol_r67_paper_dfl_replace_v5_smoke_20260514_04",
+        "protocol_summary"
+      ],
       "study_tags": [
         "protocol_r67_paper_dfl_replace_v5_smoke_20260514_01",
         "protocol_r67_paper_dfl_replace_v5_smoke_20260514_02",
@@ -1784,6 +2184,14 @@
         "portfolio_set_v5"
       ],
       "workflow": "continuous_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "protocol_r68_cashflow_decision_v1_close_v5_smoke_20260514_01",
+        "protocol_r68_cashflow_decision_v1_close_v5_smoke_20260514_02",
+        "protocol_r68_cashflow_decision_v1_close_v5_smoke_20260514_03",
+        "protocol_summary"
+      ],
       "study_tags": [
         "protocol_r68_cashflow_decision_v1_close_v5_smoke_20260514_01",
         "protocol_r68_cashflow_decision_v1_close_v5_smoke_20260514_02",
@@ -1823,6 +2231,14 @@
         "portfolio_set_v5"
       ],
       "workflow": "continuous_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "protocol_r69_value_arbitration_v5_behavior_smoke_20260514_01",
+        "protocol_r69_value_arbitration_v5_behavior_smoke_20260514_02",
+        "protocol_r69_value_arbitration_v5_behavior_traincheck_20260514_03",
+        "protocol_r68_cashflow_decision_v1_close_v5_smoke_20260514_03"
+      ],
       "study_tags": [
         "protocol_r69_value_arbitration_v5_behavior_smoke_20260514_01",
         "protocol_r69_value_arbitration_v5_behavior_smoke_20260514_02",
@@ -1861,6 +2277,12 @@
         "portfolio_set_v5"
       ],
       "workflow": "continuous_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "protocol_r70_v5_version_boundary_oracle_repair_smoke_20260514_01",
+        "protocol_r69_value_arbitration_v5_behavior_traincheck_20260514_03"
+      ],
       "study_tags": [
         "protocol_r70_v5_version_boundary_oracle_repair_smoke_20260514_01",
         "protocol_r69_value_arbitration_v5_behavior_traincheck_20260514_03"
@@ -1897,6 +2319,15 @@
         "portfolio_set_v5"
       ],
       "workflow": "continuous_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "protocol_r71_multistage_regret_v5_behavior_smoke_20260514_01",
+        "protocol_r71_multistage_regret_v5_behavior_smoke_20260514_02",
+        "protocol_r71_multistage_regret_v5_behavior_smoke_20260514_03",
+        "protocol_r71_multistage_regret_v5_behavior_smoke_20260514_04",
+        "protocol_r70_v5_version_boundary_oracle_repair_smoke_20260514_01"
+      ],
       "study_tags": [
         "protocol_r71_multistage_regret_v5_behavior_smoke_20260514_01",
         "protocol_r71_multistage_regret_v5_behavior_smoke_20260514_02",
@@ -1939,6 +2370,12 @@
         "portfolio_set_v5"
       ],
       "workflow": "continuous_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "protocol_r71_multistage_regret_v5_behavior_lake_smoke_20260515_01",
+        "protocol_r71_multistage_regret_v5_behavior_lake_smoke_20260515_02"
+      ],
       "study_tags": [
         "protocol_r71_multistage_regret_v5_behavior_lake_smoke_20260515_01",
         "protocol_r71_multistage_regret_v5_behavior_lake_smoke_20260515_02"
@@ -1975,6 +2412,11 @@
         "continuous_policy"
       ],
       "workflow": "continuous_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "protocol_r73_lake_native_r71_collapse_repair_smoke_20260515_02"
+      ],
       "study_tags": [
         "protocol_r73_lake_native_r71_collapse_repair_smoke_20260515_02"
       ],
@@ -2010,6 +2452,12 @@
         "portfolio_set_v5"
       ],
       "workflow": "continuous_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "protocol_r74_lake_behavior_quality_v5_smoke_20260515_03",
+        "protocol_r73_lake_native_r71_collapse_repair_smoke_20260515_02"
+      ],
       "study_tags": [
         "protocol_r74_lake_behavior_quality_v5_smoke_20260515_03",
         "protocol_r73_lake_native_r71_collapse_repair_smoke_20260515_02"
@@ -2046,6 +2494,9 @@
         "data_platform"
       ],
       "workflow": "research_data_lake",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
       "study_tags": [],
       "verdict": "Scope: `daily_research` 数据入口、每日更新流水线、正式研究数据边界。; 第一版 provider 计划以非 TDX 源为主：`eastmoney_efinance`、`akshare_eastmoney`、`baostock`、`tushare_http_optional`、`sina_tencent_realtime`；其中 `tushare_http_optional` 仅在 token 配置后启用，`sina_tencent_realtime` 当前只作为后续实时/盘后补充边界。; 正确边界是 `online providers -> Bronze raw -> Silver canonical -> Gold/research lake`，研究和训练只读已落地、可审计、可复现的数据集。",
       "blockers": [],
@@ -2070,6 +2521,9 @@
         "data_platform"
       ],
       "workflow": "research_data_lake",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
       "study_tags": [],
       "verdict": "Scope: `daily_research.data_platform` 多 domain refresh、CSV 入湖、research lake sidecar metadata 与正式研究数据边界。; 研究、训练和 diagnostics 必须只读 explicit lake dataset id；在线抓取只允许发生在 data platform refresh/import 边界内。",
       "blockers": [],

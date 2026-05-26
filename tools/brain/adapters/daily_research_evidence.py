@@ -16,7 +16,28 @@ REFERENCE_FILE_PATTERNS = (
     re.compile(r"^(brain_native|brain_system|api_agent)_.+\.md$"),
 )
 STUDY_TAG_PATTERN = re.compile(
-    r"\b(?:self_opt_study|protocol|path20|alpha_path20|mh_utility|mh_short|mh_mid|mh_long|mh_out|mh_grid|mh25|alpha_multi_horizon)_[A-Za-z0-9_]+"
+    r"\b(?:self_opt_study|protocol|path20|alpha_path20|mh_utility|mh_short|mh_mid|mh_long|mh_out|mh_grid|mh25)_[A-Za-z0-9_]+"
+)
+RESEARCH_PROGRAM_PATTERN = re.compile(r"\balpha_multi_horizon_utility_policy_v\d+\b")
+EXPLICIT_STUDY_FAMILY_PATTERN = re.compile(r"(?:Study family|study_family)\s*:\s*`?([A-Za-z0-9_]+)`?", re.IGNORECASE)
+CODE_TOKEN_PATTERN = re.compile(r"`([A-Za-z][A-Za-z0-9_]*(?:_[A-Za-z0-9]+)+)`")
+RESEARCH_POINTER_PATTERN = re.compile(r"^alpha_[A-Za-z0-9_]+_policy_v\d+$")
+RUN_INSTANCE_MARKER_PATTERN = re.compile(
+    r"(?:20\d{6}|seed\d+|\br\d+[a-z]?\b|protocol_|study_|smoke_|dryrun_|fullgrid|daily\d|liquid\d|h\d)",
+    re.IGNORECASE,
+)
+STUDY_TAG_SECTION_HEADINGS = (
+    "study tags",
+    "study tag",
+    "run tags",
+    "run tag",
+    "study ids",
+    "study id",
+)
+STATUS_FAMILY_MAP = (
+    ("stage25_completed", "stage25_stability_calibration"),
+    ("stage2_completed", "stage2_horizon_grid_calibration"),
+    ("stage1_completed", "stage1_output_aux_grid"),
 )
 
 
@@ -100,7 +121,92 @@ def extra_tags(path: Path, text: str, workflow: str) -> list[str]:
 
 
 def study_tags(text: str) -> list[str]:
-    return _dedupe(STUDY_TAG_PATTERN.findall(text))
+    candidates = [*STUDY_TAG_PATTERN.findall(text), *_section_code_tokens(text, STUDY_TAG_SECTION_HEADINGS)]
+    research_program_tokens = set(RESEARCH_PROGRAM_PATTERN.findall(text))
+    return _dedupe(tag for tag in candidates if tag not in research_program_tokens)
+
+
+def research_programs(text: str) -> list[str]:
+    programs = RESEARCH_PROGRAM_PATTERN.findall(text)
+    lower = text.lower()
+    if (
+        "alpha multi-horizon" in lower
+        or "alpha_multi_horizon" in lower
+        or any(tag.startswith(("mh_", "mh25_")) for tag in study_tags(text))
+    ):
+        programs.append("alpha_multi_horizon_utility_policy_v1")
+    return _dedupe(programs)
+
+
+def run_tags(text: str) -> list[str]:
+    programs = set(research_programs(text))
+    return _dedupe(tag for tag in study_tags(text) if tag not in programs and _is_run_instance_tag(tag))
+
+
+def study_families(text: str) -> list[str]:
+    explicit = _dedupe(EXPLICIT_STUDY_FAMILY_PATTERN.findall(text))
+    if explicit:
+        return explicit
+    status_family = _family_from_status(text)
+    if status_family:
+        return [status_family]
+    title = _document_title(text)
+    if "stage 2.5" in title or "stage25" in title:
+        return ["stage25_stability_calibration"]
+    if "stage 2" in title and ("calibration" in title or "horizon-grid" in title or "horizon grid" in title):
+        return ["stage2_horizon_grid_calibration"]
+    if "stage 1" in title and (
+        "output/aux" in title
+        or "output/loss" in title
+        or "output aux" in title
+        or "output-aux" in title
+    ):
+        return ["stage1_output_aux_grid"]
+    return []
+
+
+def _section_code_tokens(text: str, heading_keywords: Iterable[str]) -> list[str]:
+    keywords = [keyword.lower() for keyword in heading_keywords]
+    tokens: list[str] = []
+    in_section = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            heading = stripped.lstrip("#").strip().lower()
+            in_section = any(keyword in heading for keyword in keywords)
+            continue
+        if not in_section:
+            continue
+        tokens.extend(CODE_TOKEN_PATTERN.findall(stripped))
+    return _dedupe(tokens)
+
+
+def _family_from_status(text: str) -> str:
+    for line in text.splitlines()[:24]:
+        lowered = line.lower()
+        if "status" not in lowered:
+            continue
+        for status_token, family in STATUS_FAMILY_MAP:
+            if status_token in lowered:
+                return family
+    return ""
+
+
+def _document_title(text: str) -> str:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            return stripped.lstrip("#").strip().lower()
+    return ""
+
+
+def _is_run_instance_tag(tag: str) -> bool:
+    normalized = str(tag or "").strip()
+    if not normalized:
+        return False
+    if RESEARCH_POINTER_PATTERN.match(normalized):
+        return False
+    return bool(RUN_INSTANCE_MARKER_PATTERN.search(normalized))
 
 
 def _dedupe(items: Iterable[str]) -> list[str]:

@@ -170,6 +170,9 @@ def _registry_daily_research_match(task: str) -> RouteCandidate | None:
         values = [
             str(record.get("id", "") or ""),
             str(record.get("path", "") or ""),
+            *[str(item) for item in record.get("research_programs", []) or []],
+            *[str(item) for item in record.get("study_families", []) or []],
+            *[str(item) for item in record.get("run_tags", []) or []],
             *[str(item) for item in record.get("study_tags", []) or []],
             *[str(item) for item in record.get("dataset_ids", []) or []],
         ]

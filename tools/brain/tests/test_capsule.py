@@ -125,6 +125,14 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertIn("frontier_report", payload["guards"])
         self.assertIn("registry_exact_match", payload["routing"].get("routing_sources", []))
 
+    def test_route_multi_horizon_study_family_from_registry_to_daily_research(self) -> None:
+        payload = route_task_to_brain("stage25_stability_calibration 复盘")
+
+        self.assertEqual(payload["status"], "selected")
+        self.assertEqual(payload["selected_brain_id"], "daily_research")
+        self.assertEqual(payload["target"]["kind"], "child")
+        self.assertIn("registry_exact_match", payload["routing_sources"])
+
     def test_capsule_lite_exposes_deep_dive_commands(self) -> None:
         payload = build_task_capsule(task="Path20 当前状态", workflow="auto")
 
