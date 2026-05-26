@@ -62,6 +62,25 @@
       "experience_buffer": ["episodic_memory"]
     }
   },
+  "hot_handoff_contract": {
+    "workspace_default_paths": [
+      "brain/state_center.md",
+      "brain/operations_center.md",
+      "brain/governance_layer.md"
+    ],
+    "child_default_modules": [
+      "state_center",
+      "operations_center"
+    ],
+    "never_default_modules": [
+      "episodic_memory"
+    ],
+    "line_budgets": {
+      "workspace_core_doc": 80,
+      "child_state_center": 100,
+      "child_operations_center": 120
+    }
+  },
   "brain_contract": {
     "required_sub_brain_keys": ["brain_type", "brain_id", "parent_brain", "attach_status", "entrypoint", "body_root", "shared_contract_source", "regional_specialization", "write_routes", "body_map", "modules", "handoff_contract"],
     "recommended_sub_brain_keys": ["identity_path", "state_path", "knowledge_path", "operations_path", "governance_path"]

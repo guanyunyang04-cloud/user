@@ -12,7 +12,7 @@
       "artifacts": ["brain/brain_manifest.json", "brain/workflows/registry.json"],
       "writeback_routes": {"workspace_state": "brain/state_center.md", "workspace_operations": "brain/operations_center.md", "workspace_governance": "brain/governance_layer.md"},
       "stop_conditions": [],
-      "completion": ["schema_v2_capsule_returned", "routing_status_explicit", "guards_listed"],
+      "completion": ["schema_v3_capsule_returned", "routing_target_explicit", "guards_listed"],
       "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json"]
     },
     "brain_maintenance": {

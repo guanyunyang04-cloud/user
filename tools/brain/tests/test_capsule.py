@@ -12,7 +12,11 @@ class BrainCapsuleTest(unittest.TestCase):
         payload = route_task_to_brain("审阅主脑和分脑接管治理")
 
         self.assertEqual(payload["status"], "selected")
-        self.assertEqual(payload["selected_brain_id"], "workspace_governance")
+        self.assertEqual(payload["selected_brain_id"], "workspace")
+        self.assertEqual(payload["target"]["id"], "workspace")
+        self.assertEqual(payload["target"]["kind"], "workspace")
+        self.assertEqual(payload["target"]["domain"], "workspace_governance")
+        self.assertIn("workspace_governance", payload["target"]["bootstrap_aliases"])
 
     def test_route_path20_task_to_daily_research(self) -> None:
         payload = route_task_to_brain("Path20 多 horizon 训练计划")
@@ -32,6 +36,9 @@ class BrainCapsuleTest(unittest.TestCase):
                 payload = route_task_to_brain(task)
                 self.assertEqual(payload["status"], "selected")
                 self.assertEqual(payload["selected_brain_id"], "daily_research")
+                self.assertEqual(payload["target"]["id"], "daily_research")
+                self.assertEqual(payload["target"]["kind"], "child")
+                self.assertEqual(payload["target"]["domain"], "daily_research")
                 self.assertTrue(payload.get("routing_sources"))
 
     def test_route_daily_research_execution_terms(self) -> None:
@@ -66,14 +73,21 @@ class BrainCapsuleTest(unittest.TestCase):
 
         self.assertEqual(payload["status"], "ambiguous")
         self.assertEqual(payload["selected_brain_id"], "")
+        self.assertEqual(payload["target"]["kind"], "ambiguous")
+        self.assertEqual(payload["target"]["domain"], "")
 
-    def test_capsule_without_child_returns_schema_v2_main_context(self) -> None:
+    def test_capsule_without_child_returns_schema_v3_workspace_context(self) -> None:
         payload = build_task_capsule(task="审阅主脑接管规则", workflow="auto")
 
-        self.assertEqual(payload["schema_version"], 2)
+        self.assertEqual(payload["schema_version"], 3)
         self.assertIn("main_context", payload)
-        self.assertEqual(payload["routing"]["selected_brain_id"], "workspace_governance")
+        self.assertIn("workspace_context", payload)
+        self.assertEqual(payload["routing"]["selected_brain_id"], "workspace")
+        self.assertEqual(payload["routing"]["target"]["kind"], "workspace")
+        self.assertEqual(payload["target_kind"], "workspace")
+        self.assertEqual(payload["workflow_domain"], "workspace_governance")
         self.assertNotIn("child", payload)
+        self.assertNotIn("child_context", payload)
         self.assertNotIn("state_summary", payload)
         self.assertNotIn("hard_rules", payload)
         self.assertNotIn("fast_handoff_paths", payload)
@@ -81,9 +95,12 @@ class BrainCapsuleTest(unittest.TestCase):
     def test_capsule_path20_attaches_daily_research_child_context(self) -> None:
         payload = build_task_capsule(task="Path20 当前状态", workflow="auto")
 
-        self.assertEqual(payload["schema_version"], 2)
+        self.assertEqual(payload["schema_version"], 3)
         self.assertEqual(payload["context_profile"], "lite")
         self.assertEqual(payload["routing"]["selected_brain_id"], "daily_research")
+        self.assertEqual(payload["routing"]["target"]["kind"], "child")
+        self.assertEqual(payload["target_kind"], "child")
+        self.assertEqual(payload["workflow_domain"], "daily_research")
         self.assertIn("child_context", payload)
         self.assertEqual(payload["child_context"]["brain_id"], "daily_research")
         self.assertIn("daily_research/brain/state_center.md", payload["child_context"]["fast_handoff_paths"])
@@ -95,8 +112,9 @@ class BrainCapsuleTest(unittest.TestCase):
     def test_capsule_multi_horizon_registry_fallback_attaches_daily_research_child_context(self) -> None:
         payload = build_task_capsule(task="alpha_multi_horizon_utility_policy_v1 根因审计", workflow="auto")
 
-        self.assertEqual(payload["schema_version"], 2)
+        self.assertEqual(payload["schema_version"], 3)
         self.assertEqual(payload["routing"]["selected_brain_id"], "daily_research")
+        self.assertEqual(payload["routing"]["target"]["kind"], "child")
         self.assertIn("child_context", payload)
         self.assertEqual(payload["child_context"]["brain_id"], "daily_research")
         self.assertIn("active_artifact_guard", payload["guards"])
@@ -124,8 +142,10 @@ class BrainCapsuleTest(unittest.TestCase):
     def test_capsule_workspace_governance_has_no_daily_research_state_summary(self) -> None:
         payload = build_task_capsule(task="主脑 capsule 重构", workflow="auto")
 
-        self.assertEqual(payload["routing"]["selected_brain_id"], "workspace_governance")
+        self.assertEqual(payload["routing"]["selected_brain_id"], "workspace")
+        self.assertEqual(payload["routing"]["target"]["domain"], "workspace_governance")
         self.assertNotIn("child_context", payload)
+        self.assertIn("workspace_context", payload)
         self.assertNotIn("summary", payload["main_context"])
         self.assertNotIn("hard_rules", payload["main_context"])
 
@@ -184,7 +204,8 @@ class BrainCapsuleTest(unittest.TestCase):
         )
 
         self.assertEqual(payload["workflow"], "brain_maintenance")
-        self.assertEqual(payload["routing"]["selected_brain_id"], "workspace_governance")
+        self.assertEqual(payload["routing"]["selected_brain_id"], "workspace")
+        self.assertEqual(payload["routing"]["target"]["kind"], "workspace")
         hooks = payload["runtime_learning_hooks"]
         self.assertTrue(hooks["reflection_review_required"])
 

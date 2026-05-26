@@ -17,6 +17,38 @@ class RouteCandidate:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class RouteTarget:
+    id: str
+    kind: str
+    domain: str
+    bootstrap_aliases: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+WORKSPACE_TARGET = RouteTarget(
+    id="workspace",
+    kind="workspace",
+    domain="workspace_governance",
+    bootstrap_aliases=["workspace", "workspace_root", "workspace_governance"],
+)
+
+
+def _child_target(brain_id: str) -> RouteTarget:
+    return RouteTarget(
+        id=brain_id,
+        kind="child",
+        domain=brain_id,
+        bootstrap_aliases=[brain_id],
+    )
+
+
+def _ambiguous_target() -> RouteTarget:
+    return RouteTarget(id="", kind="ambiguous", domain="", bootstrap_aliases=[])
+
+
 ROUTE_TERMS: dict[str, tuple[str, ...]] = {
     "workspace_governance": (
         "主脑",
@@ -181,16 +213,19 @@ def route_task_to_brain(task: str) -> dict[str, Any]:
     candidates = _merge_candidates(raw_candidates)
     candidates = sorted(candidates, key=lambda item: (-item.score, item.brain_id))
     positive_children = [item for item in candidates if item.brain_id != "workspace_governance" and item.score > 0]
-    selected = "workspace_governance"
+    selected = "workspace"
+    target = WORKSPACE_TARGET
     status = "selected"
     reason = "no project path, route terms, or registry evidence matched; default to workspace governance"
 
     if len(positive_children) > 1:
         selected = ""
+        target = _ambiguous_target()
         status = "ambiguous"
         reason = "multiple child brains matched; main brain must not default to daily_research"
     elif positive_children:
         selected = positive_children[0].brain_id
+        target = _child_target(selected)
         reason = f"task matched {selected} terms: {', '.join(positive_children[0].matched_terms)}"
     elif any(item.brain_id == "workspace_governance" for item in candidates):
         reason = "task matched workspace governance terms"
@@ -198,6 +233,7 @@ def route_task_to_brain(task: str) -> dict[str, Any]:
     return {
         "status": status,
         "selected_brain_id": selected,
+        "target": target.to_dict(),
         "candidates": [item.to_dict() for item in candidates],
         "routing_sources": sorted({source for item in candidates for source in item.sources}),
         "reason": reason,

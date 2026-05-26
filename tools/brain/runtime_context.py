@@ -20,7 +20,14 @@ def summary_budget(profile: str) -> dict[str, int]:
     return {"main_summary_lines": 0, "child_summary_lines": 0, "related_references": 3, "frontier_tags": 3}
 
 
-def deep_dive_commands(*, selected_brain_id: str = "") -> list[str]:
+def deep_dive_commands(*, selected_brain_id: str = "", target_kind: str = "") -> list[str]:
+    if target_kind == "workspace":
+        return [
+            "C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py health --mode full --cwd .",
+            'C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --workflow auto --intent read --verbosity full --json',
+            "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain workspace --json",
+            "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow audit-brain --scope all --json",
+        ]
     commands = [
         'C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow current-frontier --json',
         'C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow query --q "<tag|dataset|r-id>" --json',

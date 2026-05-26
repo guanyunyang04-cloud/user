@@ -19,6 +19,13 @@ For existing brain workspaces, run a lightweight main-brain capsule to make rout
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<user task>" --workflow auto --intent <read|mutate|writeback> --verbosity lite --json
 ```
 
+Schema v3 capsules separate the routing layers:
+
+- `routing.target.id` is the bootstrap target (`workspace` or a child brain id).
+- `routing.target.kind` is `workspace`, `child`, or `ambiguous`.
+- `routing.target.domain` is the workflow domain, such as `workspace_governance`.
+- `workspace_governance` is a workspace domain and bootstrap alias, not a child brain id.
+
 Run compact health during takeover, anomaly triage, or final verification so catalog, guard, skill sync, and frontier warnings are visible without loading deep evidence:
 
 ```powershell
@@ -120,6 +127,7 @@ Bootstrap the workspace or a selected child brain:
 
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain workspace --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain workspace_governance --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain <brain_id|workspace> --json
 ```
 

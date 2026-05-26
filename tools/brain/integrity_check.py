@@ -13,6 +13,8 @@ if str(WORKSPACE_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKSPACE_ROOT))
 
 from tools.brain.platform import build_brain_catalog, check_text_encoding, read_text as platform_read_text
+from tools.brain.routing import route_task_to_brain
+from tools.brain.platform import resolve_bootstrap
 
 MAIN_MANIFEST = Path("brain/brain_manifest.json")
 BRAIN_CATALOG = Path("brain/brain_catalog.json")
@@ -26,10 +28,18 @@ REQUIRED_MAIN_KEYS = (
     "governance",
     "cognition_contract",
     SHARED_CONTRACT_KEY,
+    "hot_handoff_contract",
     "brain_contract",
     "child_brains",
     "write_routes",
     "handoff_contract",
+)
+
+REQUIRED_HOT_HANDOFF_KEYS = (
+    "workspace_default_paths",
+    "child_default_modules",
+    "never_default_modules",
+    "line_budgets",
 )
 
 OPTIONAL_MAIN_PATH_KEYS = (
@@ -328,6 +338,32 @@ def _validate_main_manifest(findings: list[Finding], main_manifest: dict[str, An
         for key, value in write_routes.items():
             _add_path_finding(findings, value, main_path, "main_write_route_invalid", f"write_routes.{key}")
 
+    hot_handoff = main_manifest.get("hot_handoff_contract", {})
+    if not isinstance(hot_handoff, dict) or not hot_handoff:
+        findings.append(Finding("error", "main_hot_handoff_contract_invalid", "hot_handoff_contract must be a non-empty object", main_path))
+    else:
+        for key in REQUIRED_HOT_HANDOFF_KEYS:
+            if key not in hot_handoff:
+                findings.append(Finding("error", "main_hot_handoff_contract_invalid", f"missing key: {key}", main_path))
+        workspace_paths = hot_handoff.get("workspace_default_paths", [])
+        if isinstance(workspace_paths, list) and workspace_paths:
+            for path in workspace_paths:
+                _add_path_finding(findings, path, main_path, "main_hot_handoff_path_invalid", "workspace_default_paths")
+        else:
+            findings.append(Finding("error", "main_hot_handoff_contract_invalid", "workspace_default_paths must be a non-empty list", main_path))
+        for key in ("child_default_modules", "never_default_modules"):
+            values = hot_handoff.get(key, [])
+            if not isinstance(values, list) or not values:
+                findings.append(Finding("error", "main_hot_handoff_contract_invalid", f"{key} must be a non-empty list", main_path))
+        budgets = hot_handoff.get("line_budgets", {})
+        if not isinstance(budgets, dict) or not budgets:
+            findings.append(Finding("error", "main_hot_handoff_contract_invalid", "line_budgets must be a non-empty object", main_path))
+        else:
+            for key in ("workspace_core_doc", "child_state_center", "child_operations_center"):
+                value = budgets.get(key)
+                if not isinstance(value, int) or value <= 0:
+                    findings.append(Finding("error", "main_hot_handoff_contract_invalid", f"line_budgets.{key} must be a positive integer", main_path))
+
     contract = main_manifest.get(SHARED_CONTRACT_KEY, {})
     if not isinstance(contract, dict) or not contract:
         findings.append(
@@ -579,6 +615,64 @@ def _validate_child_manifest(
         _validate_markdown_and_encoding(findings, item)
 
 
+def _validate_route_targets(findings: list[Finding]) -> None:
+    samples = (
+        "清理脑区治理规则",
+        "修复 daily_research execution web 控制台",
+        "修复 t0_project 的 RL 策略",
+        "修复 daily_stock_analysis-main Web 登录页",
+    )
+    for task in samples:
+        payload = route_task_to_brain(task)
+        if payload.get("status") != "selected":
+            continue
+        target = payload.get("target", {})
+        if not isinstance(target, dict):
+            findings.append(Finding("error", "route_target_missing", f"route target missing for task: {task}", "tools/brain/routing.py"))
+            continue
+        target_id = str(target.get("id", "") or "")
+        target_kind = str(target.get("kind", "") or "")
+        if target_kind not in {"workspace", "child"} or not target_id:
+            findings.append(Finding("error", "route_target_invalid", f"invalid route target for task: {task}", "tools/brain/routing.py"))
+            continue
+        try:
+            resolve_bootstrap(target_id)
+        except Exception as exc:
+            findings.append(
+                Finding(
+                    "error",
+                    "route_target_unbootstrapable",
+                    f"{target_id} from task {task!r} cannot bootstrap: {exc}",
+                    "tools/brain/routing.py",
+                )
+            )
+
+
+def _validate_workflow_categories(findings: list[Finding], main_manifest: dict[str, Any]) -> None:
+    registry_path = Path("brain/workflows/registry.json")
+    if not _workspace_path(registry_path).exists():
+        return
+    try:
+        payload = _read_json(registry_path)
+    except Exception as exc:
+        findings.append(Finding("error", "workflow_registry_invalid_json", str(exc), registry_path.as_posix()))
+        return
+    child_ids = {str(child.get("id", "")) for child in main_manifest.get("child_brains", []) if isinstance(child, dict)}
+    for item in payload.get("workflows", []) or []:
+        if not isinstance(item, dict):
+            continue
+        category = str(item.get("category", "") or "")
+        if category in child_ids:
+            findings.append(
+                Finding(
+                    "warning",
+                    "workflow_category_matches_child_brain_id",
+                    f"workflow category should be a domain, not child brain id: {category}",
+                    registry_path.as_posix(),
+                )
+            )
+
+
 def _validate_brain_catalog(findings: list[Finding], main_manifest: dict[str, Any]) -> None:
     catalog_path = _rel(BRAIN_CATALOG)
     if not _workspace_path(BRAIN_CATALOG).exists():
@@ -669,6 +763,8 @@ def run_checks() -> list[Finding]:
 
     for child_ref in child_refs:
         _validate_child_manifest(findings, main_manifest, child_ref, required_child_keys)
+    _validate_route_targets(findings)
+    _validate_workflow_categories(findings, main_manifest)
     return findings
 
 

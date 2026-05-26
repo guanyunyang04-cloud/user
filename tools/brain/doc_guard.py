@@ -592,8 +592,45 @@ def _resolve_rule(path: Path) -> DocRule | None:
     normalized = _normalized_path(path)
     for suffix, rule in sorted(DOC_RULES.items(), key=lambda item: len(item[0]), reverse=True):
         if normalized.endswith(suffix):
-            return rule
+            return _apply_hot_handoff_budget(normalized, rule)
     return None
+
+
+def _hot_handoff_line_budgets() -> dict[str, int]:
+    try:
+        manifest = _load_main_manifest()
+    except Exception:
+        return {}
+    contract = manifest.get("hot_handoff_contract", {})
+    budgets = contract.get("line_budgets", {}) if isinstance(contract, dict) else {}
+    return {str(key): int(value) for key, value in budgets.items() if isinstance(value, int) and value > 0}
+
+
+def _apply_hot_handoff_budget(normalized: str, rule: DocRule) -> DocRule:
+    budgets = _hot_handoff_line_budgets()
+    if normalized in {
+        "brain/state_center.md",
+        "brain/operations_center.md",
+        "brain/governance_layer.md",
+    }:
+        budget = budgets.get("workspace_core_doc")
+    elif normalized.endswith("/brain/state_center.md"):
+        budget = budgets.get("child_state_center")
+    elif normalized.endswith("/brain/operations_center.md"):
+        budget = budgets.get("child_operations_center")
+    else:
+        budget = None
+    if budget is None:
+        return rule
+    # The manifest budget is a hot-path warning threshold. The existing max line
+    # remains a hard guard so current mature docs can be compacted incrementally.
+    return DocRule(
+        warn_lines=budget,
+        max_lines=rule.max_lines,
+        forbidden_heading_patterns=rule.forbidden_heading_patterns,
+        forbidden_text_patterns=rule.forbidden_text_patterns,
+        enforce_non_decreasing_dated_headings=rule.enforce_non_decreasing_dated_headings,
+    )
 
 
 def _matching_lines(lines: Iterable[str], pattern: str) -> list[str]:
@@ -1174,4 +1211,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -3,12 +3,15 @@
 ## 1. 默认接管入口
 - 当前工作区根目录：`H:\quant_project`。
 - 旧路径 `H:\new_tdx64\PYPlugins\user` 已退出本项目主链路，不得作为接管根目录。
-- schema v2 capsule：
+- schema v3 capsule：
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
+  - 读取 `target_kind` 与 `workflow_domain` 区分 workspace governance 和 child brain body work。
 - 任务路由：
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow route --task "<task>" --json`
+  - workspace 治理任务返回 `target.id=workspace`、`target.kind=workspace`、`target.domain=workspace_governance`。
 - 主脑或分脑 bootstrap：
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain <brain_id|workspace> --json`
+  - `workspace_governance` 是 workspace bootstrap alias，不是分脑 id。
 
 ## 2. Skills / Brain / Tools 调用顺序
 - 先运行主脑 capsule，确认事实、推断、假设、权威层级、分支纪律、active artifact 禁区和目标分脑边界。

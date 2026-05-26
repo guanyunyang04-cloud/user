@@ -65,3 +65,10 @@
 - 脑区 Markdown 仍是权威事实、规则和边界来源。
 - workflow JSON / CLI 输出只代表运行态胶囊，用于接管、预检、产物 freshness 和写回建议。
 - 运行态 JSON 不得替代 `state_center.md`、`knowledge_center.md` 或 `operations_center.md` 的权威写回。
+
+## 7. Target / Domain / Manifest 边界
+- routing target 表示本次任务进入哪里，只允许 `workspace`、已附着 child brain 或 `ambiguous`。
+- workflow domain 表示采用哪类治理流程，例如 `workspace_governance`；它不是 brain id，也不需要 child manifest。
+- brain manifest 表示可 bootstrap 的事实层；`workspace_governance` 只能作为 workspace domain / bootstrap alias，不能再伪装成分脑。
+- schema v3 capsule 必须显式输出 `target_kind` 与 `workflow_domain`，agent 后续动作以这两个字段区分 workspace 治理和 child body work。
+- `hot_handoff_contract` 定义默认热路径；`episodic_memory` 与 `references/` 永远只按需下钻。

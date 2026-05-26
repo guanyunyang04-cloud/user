@@ -61,6 +61,8 @@ class BrainWorkflowCliTest(unittest.TestCase):
     def test_bootstrap_cli_outputs_valid_json_capsule(self) -> None:
         payload = run_cli("bootstrap", "--brain", "daily_research", "--json")
 
+        self.assertEqual(payload["target_kind"], "child")
+        self.assertEqual(payload["workflow_domain"], "daily_research")
         self.assertEqual(payload["child_brain"], "daily_research")
         self.assertIn("boot_order", payload)
         self.assertIn("artifact_freshness", payload)
@@ -81,6 +83,16 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertIn("artifact_freshness", payload)
         self.assertIn("workflow_hints", payload)
         self.assertIn("encoding_report", payload)
+        self.assertEqual(payload["target_kind"], "workspace")
+        self.assertEqual(payload["workflow_domain"], "workspace_governance")
+
+    def test_workspace_governance_bootstrap_alias_outputs_workspace(self) -> None:
+        payload = run_cli("bootstrap", "--brain", "workspace_governance", "--json")
+
+        self.assertEqual(payload["target_kind"], "workspace")
+        self.assertEqual(payload["workflow_domain"], "workspace_governance")
+        self.assertEqual(payload["child_brain"], "")
+        self.assertEqual(payload["main_manifest"], "brain/brain_manifest.json")
 
     def test_old_daily_research_brain_workflow_module_fails(self) -> None:
         result = subprocess.run(
@@ -346,6 +358,32 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertEqual(payload["selected_workflow"], "brain_writeback_verified")
         self.assertIn("writeback", payload["matched_terms"])
 
+    def test_route_cli_outputs_structured_workspace_target(self) -> None:
+        payload = run_cli("route", "--task", "清理脑区治理规则", "--json")
+
+        self.assertEqual(payload["status"], "selected")
+        self.assertEqual(payload["selected_brain_id"], "workspace")
+        self.assertEqual(payload["target"]["id"], "workspace")
+        self.assertEqual(payload["target"]["kind"], "workspace")
+        self.assertEqual(payload["target"]["domain"], "workspace_governance")
+        self.assertIn("workspace_governance", payload["target"]["bootstrap_aliases"])
+
+    def test_route_cli_outputs_structured_child_target(self) -> None:
+        payload = run_cli("route", "--task", "修复 daily_research execution web 控制台", "--json")
+
+        self.assertEqual(payload["status"], "selected")
+        self.assertEqual(payload["selected_brain_id"], "daily_research")
+        self.assertEqual(payload["target"]["id"], "daily_research")
+        self.assertEqual(payload["target"]["kind"], "child")
+        self.assertEqual(payload["target"]["domain"], "daily_research")
+
+    def test_route_cli_keeps_ambiguous_target(self) -> None:
+        payload = run_cli("route", "--task", "Path20 和盘中 RL 联合接管", "--json")
+
+        self.assertEqual(payload["status"], "ambiguous")
+        self.assertEqual(payload["selected_brain_id"], "")
+        self.assertEqual(payload["target"]["kind"], "ambiguous")
+
     def test_audit_brain_cli_outputs_catalog_language_and_guards(self) -> None:
         payload = run_cli("audit-brain", "--scope", "all", "--json")
 
@@ -366,6 +404,7 @@ class BrainWorkflowCliTest(unittest.TestCase):
             "--json",
         )
 
+        self.assertEqual(payload["schema_version"], 3)
         self.assertEqual(payload["workflow_selection"]["selected_workflow"], "brain_handoff")
         self.assertEqual(payload["workflow"], "brain_handoff")
         self.assertIn("workflow_guide", payload)
@@ -390,7 +429,10 @@ class BrainWorkflowCliTest(unittest.TestCase):
         )
         encoded = json.dumps(payload, ensure_ascii=False)
 
+        self.assertEqual(payload["schema_version"], 3)
         self.assertEqual(payload["workflow"], "brain_maintenance")
+        self.assertEqual(payload["target_kind"], "workspace")
+        self.assertEqual(payload["workflow_domain"], "workspace_governance")
         self.assertNotIn("forbidden_" + "actions", payload)
         self.assertNotIn("start_" + "training", encoded)
         self.assertIn("capability_hints", payload)
@@ -463,6 +505,9 @@ class BrainWorkflowCliTest(unittest.TestCase):
         )
 
         self.assertEqual(payload["workflow"], "brain_maintenance")
+        self.assertEqual(payload["schema_version"], 3)
+        self.assertEqual(payload["target_kind"], "workspace")
+        self.assertEqual(payload["workflow_domain"], "workspace_governance")
         self.assertTrue(payload["runtime_learning_hooks"]["reflection_review_required"])
 
     def test_capsule_cli_defaults_to_lite_context(self) -> None:

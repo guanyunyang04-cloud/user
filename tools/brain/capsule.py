@@ -150,6 +150,19 @@ def _child_context(selected_brain_id: str, task: str, workflow_id: str, study_ta
     return context
 
 
+def _workspace_context(main_context: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "brain_id": "workspace",
+        "workspace_manifest": main_context.get("main_manifest", ""),
+        "workspace_entrypoint": main_context.get("main_entrypoint", ""),
+        "write_routes": {
+            "workspace_state": "brain/state_center.md",
+            "workspace_operations": "brain/operations_center.md",
+            "workspace_governance": "brain/governance_layer.md",
+        },
+    }
+
+
 def _skill_sync_status() -> dict[str, Any]:
     try:
         from tools.brain.skill_install import build_sync_plan
@@ -171,6 +184,17 @@ def _preflight_blockers(*, routing: dict[str, Any], main_context: dict[str, Any]
         blockers.append("not_on_main_for_mutation")
     if routing.get("status") == "ambiguous":
         blockers.append("ambiguous_routing")
+    target = routing.get("target", {})
+    if routing.get("status") == "selected":
+        target_kind = str(target.get("kind", "") if isinstance(target, dict) else "")
+        target_id = str(target.get("id", "") if isinstance(target, dict) else "")
+        if target_kind not in {"workspace", "child"} or not target_id:
+            blockers.append("unbootstrapable_route_target")
+        else:
+            try:
+                resolve_bootstrap(target_id)
+            except Exception:
+                blockers.append("unbootstrapable_route_target")
     if str(routing.get("selected_brain_id", "") or "") and routing.get("status") != "selected":
         blockers.append("missing_child_brain")
     active_guard_status = str(guards.get("active_artifact_guard", {}).get("status", "") or "")
@@ -223,14 +247,18 @@ def build_task_capsule(
 ) -> dict[str, Any]:
     context_profile = normalize_verbosity(verbosity)
     routing = route_task_to_brain(task)
-    selected_brain_id = str(routing.get("selected_brain_id", "") or "")
+    target = routing.get("target", {}) if isinstance(routing.get("target", {}), dict) else {}
+    target_id = str(target.get("id", "") or str(routing.get("selected_brain_id", "") or ""))
+    target_kind = str(target.get("kind", "") or ("child" if target_id in child_brain_ids() else "workspace"))
+    workflow_domain = str(target.get("domain", "") or ("workspace_governance" if target_kind == "workspace" else target_id))
+    selected_brain_id = target_id if target_kind == "child" else ""
     selection = (
         select_workflow_for_task(task, intent=str(intent or "read"))
         if workflow == "auto"
         else {"selected_workflow": workflow, "reason": "explicit workflow requested"}
     )
     workflow_id = str(selection.get("selected_workflow", "") or "brain_handoff")
-    child_registry_id = selected_brain_id if selected_brain_id in child_brain_ids() else None
+    child_registry_id = selected_brain_id if target_kind == "child" and selected_brain_id in child_brain_ids() else None
     registry = load_workflow_registry(child_registry_id)
     if workflow_id not in registry:
         workflow_id = "brain_handoff"
@@ -270,14 +298,16 @@ def build_task_capsule(
         if isinstance(finding, dict) and str(finding.get("severity", "") or "") == "warning":
             risk_signals.append(str(finding.get("code", "") or ""))
     payload: dict[str, Any] = {
-        "schema_version": 2,
+        "schema_version": 3,
         "task": task,
         "context_profile": context_profile,
         "summary_budget": summary_budget(context_profile),
-        "available_deep_dive_commands": deep_dive_commands(selected_brain_id=selected_brain_id),
+        "available_deep_dive_commands": deep_dive_commands(selected_brain_id=target_id, target_kind=target_kind),
         "intent": str(intent or "read"),
         "mutation_allowed": bool(mutation_allowed),
         "preflight_blockers": preflight_blockers,
+        "target_kind": target_kind,
+        "workflow_domain": workflow_domain,
         "global_skill_sync": skill_status,
         "workflow": workflow_id,
         "workflow_selection": selection,
@@ -319,7 +349,9 @@ def build_task_capsule(
             ),
         },
     }
-    if selected_brain_id in child_brain_ids() and routing.get("status") == "selected":
+    if target_kind == "workspace" and routing.get("status") == "selected":
+        payload["workspace_context"] = _workspace_context(main_context)
+    if target_kind == "child" and selected_brain_id in child_brain_ids() and routing.get("status") == "selected":
         raw_child_context = _child_context(selected_brain_id, task, workflow_id, study_tag)
         payload["child_context"] = compact_child_context(raw_child_context, profile=context_profile)
     return payload

@@ -41,6 +41,8 @@ class BrainPlatformTest(unittest.TestCase):
         state = resolve_bootstrap("daily_research")
         payload = state.to_dict()
 
+        self.assertEqual(payload["target_kind"], "child")
+        self.assertEqual(payload["workflow_domain"], "daily_research")
         self.assertEqual(payload["child_brain"], "daily_research")
         self.assertIn("brain/brain_manifest.json", payload["main_boot_order"])
         self.assertIn("daily_research/brain/brain_manifest.json", payload["child_boot_order"])
@@ -48,6 +50,17 @@ class BrainPlatformTest(unittest.TestCase):
         self.assertEqual(payload["child_write_routes"]["state"], "daily_research/brain/state_center.md")
         self.assertIn("artifact_freshness", payload)
         self.assertIn("encoding_report", payload)
+
+    def test_workspace_governance_alias_bootstraps_workspace(self) -> None:
+        for alias in ("workspace", "workspace_root", "workspace_governance"):
+            with self.subTest(alias=alias):
+                payload = resolve_bootstrap(alias).to_dict()
+
+                self.assertEqual(payload["target_kind"], "workspace")
+                self.assertEqual(payload["workflow_domain"], "workspace_governance")
+                self.assertEqual(payload["child_brain"], "")
+                self.assertEqual(payload["main_manifest"], "brain/brain_manifest.json")
+                self.assertIn("brain/brain_manifest.json", payload["boot_order"])
 
     def test_encoding_report_distinguishes_valid_utf8_from_real_mojibake(self) -> None:
         valid = check_text_encoding(Path("daily_research/brain/operations_center.md"))

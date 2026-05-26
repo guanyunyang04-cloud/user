@@ -23,6 +23,7 @@ OUTPUT_ROOT = WORKSPACE_ROOT / "brain/output/brain_workflow"
 PYTHON_EXECUTABLE = "C:/Users/ASUS/miniconda3/envs/yolos/python.exe"
 SHARED_CONTRACT_KEY = "shared_regional_brain_contract"
 LANGUAGE_POLICY_ID = "zh_semantic_en_identifiers_v1"
+WORKSPACE_BOOTSTRAP_ALIASES = frozenset({"", "workspace", "workspace_root", "workspace_governance"})
 OPTIONAL_BRAIN_KEYS = (
     "identity_path",
     "state_path",
@@ -72,6 +73,8 @@ class BrainBootstrapState:
     shared_region_bindings: dict[str, Any]
     shared_fast_handoff_modules: list[str]
     boot_order: list[str]
+    target_kind: str = "workspace"
+    workflow_domain: str = "workspace_governance"
     child_brain: str = ""
     child_manifest: str = ""
     child_entrypoint: str = ""
@@ -466,6 +469,20 @@ def _resolve_child(main_manifest: dict[str, Any], child_id: str) -> dict[str, An
     raise KeyError(f"Unknown child brain: {child_id}")
 
 
+def normalize_bootstrap_target(target_id: str | None) -> str | None:
+    text = str(target_id or "").strip()
+    return None if text in WORKSPACE_BOOTSTRAP_ALIASES else text
+
+
+def target_kind_for_bootstrap(target_id: str | None) -> str:
+    return "workspace" if normalize_bootstrap_target(target_id) is None else "child"
+
+
+def workflow_domain_for_bootstrap(target_id: str | None) -> str:
+    normalized = normalize_bootstrap_target(target_id)
+    return "workspace_governance" if normalized is None else normalized
+
+
 def _module_path_map(manifest: dict[str, Any]) -> dict[str, list[Path]]:
     out: dict[str, list[Path]] = {}
     for module in manifest.get("modules", []):
@@ -558,6 +575,7 @@ def _encoding_summary(paths: list[str]) -> dict[str, Any]:
 
 
 def resolve_bootstrap(child_id: str | None = None) -> BrainBootstrapState:
+    child_id = normalize_bootstrap_target(child_id)
     main_manifest = load_manifest(MAIN_MANIFEST)
     shared_contract = _shared_contract(main_manifest)
     main_order = _build_main_order(main_manifest)
@@ -575,6 +593,8 @@ def resolve_bootstrap(child_id: str | None = None) -> BrainBootstrapState:
             shared_region_bindings=dict(shared_contract.get("region_bindings", {})),
             shared_fast_handoff_modules=list(shared_contract.get("fast_handoff_modules", [])),
             boot_order=main_paths,
+            target_kind="workspace",
+            workflow_domain="workspace_governance",
             main_optional_paths=_collect_optional_paths(main_manifest),
             artifact_freshness=artifact_freshness,
             workflow_hints={"available_workflows": sorted(registry)},
@@ -596,6 +616,8 @@ def resolve_bootstrap(child_id: str | None = None) -> BrainBootstrapState:
         shared_region_bindings=dict(shared_contract.get("region_bindings", {})),
         shared_fast_handoff_modules=list(shared_contract.get("fast_handoff_modules", [])),
         boot_order=boot_order,
+        target_kind="child",
+        workflow_domain=str(child_ref["id"]),
         child_brain=str(child_ref["id"]),
         child_manifest=child_manifest_path.as_posix(),
         child_entrypoint=str(child_manifest.get("entrypoint", "")),
