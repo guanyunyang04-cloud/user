@@ -34,6 +34,23 @@ def reflection_template() -> dict[str, Any]:
     return {
         "schema_version": 1,
         "task": "",
+        "agent_meta_passes": [
+            {
+                "phase": "task_start",
+                "status": "pending",
+                "notes": "agent checks whether the task reveals a reusable rule, evidence gap, or actor-boundary issue",
+            },
+            {
+                "phase": "decision_boundary",
+                "status": "pending",
+                "notes": "agent checks whether a major route, workaround, or conclusion needs a learning proposal",
+            },
+            {
+                "phase": "before_final",
+                "status": "pending",
+                "notes": "agent checks whether final claims, skipped work, or verification gaps should update the brain-mediated protocol",
+            },
+        ],
         "planned_steps": [
             {
                 "id": "step_id",
@@ -244,7 +261,7 @@ def analyze_trace(raw_trace: dict[str, Any]) -> dict[str, Any]:
     if _events_of_type(events, "skill_sync_gap"):
         candidates.append(
             _candidate(
-                lesson="Skill sync gaps need a runtime learning proposal when they affect behavior.",
+                lesson="Skill sync gaps need an agent learning proposal when they affect behavior.",
                 root_cause="canonical and installed workspace skill were out of sync during execution",
                 target_layer="skill",
                 recommended_change="make skill sync visible in capsule and final verification when canonical skill changes",
@@ -318,12 +335,12 @@ def analyze_trace(raw_trace: dict[str, Any]) -> dict[str, Any]:
         support = _events_of_type(events, "learning_opportunity_missed")
         candidates.append(
             _candidate(
-                lesson="Missed learning opportunities should be surfaced by meta cognition instead of relying on user reminders.",
+                lesson="Missed learning opportunities should be surfaced by the agent meta protocol instead of relying on user reminders.",
                 root_cause="structured trace reported a situation where the agent should have proposed learning but did not",
-                target_layer=str(support[0].get("target_layer", "") or "meta_cognition"),
-                recommended_change="add or tune a meta detector and proposal prompt for this class of missed opportunity",
+                target_layer=str(support[0].get("target_layer", "") or "agent_meta_protocol"),
+                recommended_change="add or tune the agent meta protocol and proposal prompt for this class of missed opportunity",
                 supporting_events=support,
-                suggested_tests=["review trace with learning_opportunity_missed returns meta_cognition candidate"],
+                suggested_tests=["review trace with learning_opportunity_missed returns agent_meta_protocol candidate"],
                 anti_overfit_check="only apply when a user correction or structured trace identifies a repeatable learning opportunity",
                 confidence=str(support[0].get("confidence", "") or "high"),
             )
@@ -359,7 +376,7 @@ def analyze_trace(raw_trace: dict[str, Any]) -> dict[str, Any]:
         "reflection_review_required": True,
         "evidence_gaps": [],
         "learning_candidates": unique,
-        "next_actions": ["create_runtime_learning_proposal"] if unique else ["no_runtime_learning_needed"],
+        "next_actions": ["create_agent_learning_proposal"] if unique else ["no_agent_learning_needed"],
     }
 
 
@@ -395,7 +412,7 @@ def analyze_freeform(*, task: str = "", observation: str = "", test_output: str 
             root_cause="freeform observation reported a repeated failure or user correction",
             target_layer="capsule_contract",
             recommended_change="collect a structured trace and add the missing behavior to the capsule, skill, or test guard",
-            suggested_tests=["freeform user correction returns low-confidence runtime learning candidate"],
+            suggested_tests=["freeform user correction returns low-confidence agent learning candidate"],
         )
     if any(term in text for term in ("writeback-plan", "path_policy/studies", "continuous_policy/studies", "证据域", "手工绕过", "错路由")):
         add(
@@ -453,20 +470,20 @@ def analyze_freeform(*, task: str = "", observation: str = "", test_output: str 
         "reflection_review_required": True,
         "evidence_gaps": ["structured_trace_missing"],
         "learning_candidates": unique,
-        "next_actions": ["create_runtime_learning_proposal"] if unique else ["no_runtime_learning_needed"],
+        "next_actions": ["create_agent_learning_proposal"] if unique else ["no_agent_learning_needed"],
     }
 
 
-def analyze_meta_signals(
+def analyze_agent_meta_signals(
     *,
     task: str = "",
     capsule_context: dict[str, Any] | None = None,
     trace: dict[str, Any] | None = None,
     observations: Any = None,
 ) -> dict[str, Any]:
-    from tools.brain.meta_cognition import analyze_meta_signals as _analyze_meta_signals
+    from tools.brain.agent_meta import analyze_agent_meta_signals as _analyze_agent_meta_signals
 
-    return _analyze_meta_signals(
+    return _analyze_agent_meta_signals(
         task=task,
         capsule_context=capsule_context or {},
         trace=trace,
@@ -510,7 +527,7 @@ def build_proposal_payload(
         "target_layer": target_layer,
         "verification_required": bool(requires_user_confirmation),
         "detector_id": "manual_proposal",
-        "source_signal": "manual_runtime_learning",
+        "source_signal": "manual_agent_learning",
         "related_task": related_task,
         "requires_user_confirmation": bool(requires_user_confirmation),
         "facts": [trigger],
@@ -519,7 +536,7 @@ def build_proposal_payload(
         "trigger_evidence": [evidence],
         "recommendation": recommendation,
         "lesson": lesson or recommendation or trigger,
-        "root_cause": root_cause or "runtime learning proposal was created from reported execution evidence",
+        "root_cause": root_cause or "agent learning proposal was created from reported execution evidence",
         "supporting_events": list(supporting_events or [{"type": "proposal_input", "step_id": "", "summary": evidence}]),
         "anti_overfit_check": anti_overfit_check or "confirm the pattern with execution evidence before changing hot-path behavior",
         "suggested_write_routes": [writeback_target, "brain/knowledge_center.md"],

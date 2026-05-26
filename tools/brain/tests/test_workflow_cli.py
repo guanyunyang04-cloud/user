@@ -429,7 +429,7 @@ class BrainWorkflowCliTest(unittest.TestCase):
             "--json",
         )
 
-        self.assertEqual(payload["schema_version"], 3)
+        self.assertEqual(payload["schema_version"], 4)
         self.assertEqual(payload["workflow_selection"]["selected_workflow"], "brain_handoff")
         self.assertEqual(payload["workflow"], "brain_handoff")
         self.assertIn("workflow_guide", payload)
@@ -454,7 +454,7 @@ class BrainWorkflowCliTest(unittest.TestCase):
         )
         encoded = json.dumps(payload, ensure_ascii=False)
 
-        self.assertEqual(payload["schema_version"], 3)
+        self.assertEqual(payload["schema_version"], 4)
         self.assertEqual(payload["workflow"], "brain_maintenance")
         self.assertEqual(payload["target_kind"], "workspace")
         self.assertEqual(payload["workflow_domain"], "workspace_governance")
@@ -498,9 +498,10 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertEqual(payload["workflow"], "brain_handoff")
         self.assertIn("external_skill_signal", payload["workflow_selection"]["decision_sources"])
         self.assertNotIn("self_" + "evolution_hooks", payload)
-        self.assertIn("runtime_learning_hooks", payload)
-        self.assertIn("reflection_review_required", payload["runtime_learning_hooks"])
-        self.assertFalse(payload["runtime_learning_hooks"]["reflection_review_required"])
+        self.assertNotIn("runtime_learning_hooks", payload)
+        self.assertIn("agent_meta", payload)
+        self.assertIn("agent_review", payload)
+        self.assertFalse(payload["agent_review"]["before_final_required"])
 
     def test_capsule_writeback_workflow_requires_completion_review(self) -> None:
         payload = run_cli(
@@ -515,7 +516,8 @@ class BrainWorkflowCliTest(unittest.TestCase):
         )
 
         self.assertEqual(payload["workflow"], "brain_writeback_verified")
-        self.assertTrue(payload["runtime_learning_hooks"]["reflection_review_required"])
+        self.assertTrue(payload["agent_review"]["before_final_required"])
+        self.assertIn("workflow_completion_review", payload["agent_review"]["reason_codes"])
 
     def test_capsule_brain_rule_mutation_uses_maintenance_review(self) -> None:
         payload = run_cli(
@@ -530,10 +532,11 @@ class BrainWorkflowCliTest(unittest.TestCase):
         )
 
         self.assertEqual(payload["workflow"], "brain_maintenance")
-        self.assertEqual(payload["schema_version"], 3)
+        self.assertEqual(payload["schema_version"], 4)
         self.assertEqual(payload["target_kind"], "workspace")
         self.assertEqual(payload["workflow_domain"], "workspace_governance")
-        self.assertTrue(payload["runtime_learning_hooks"]["reflection_review_required"])
+        self.assertTrue(payload["agent_review"]["before_final_required"])
+        self.assertIn("workflow_completion_review", payload["agent_review"]["reason_codes"])
 
     def test_capsule_cli_defaults_to_lite_context(self) -> None:
         payload = run_cli(

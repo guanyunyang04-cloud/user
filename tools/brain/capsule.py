@@ -6,7 +6,7 @@ from typing import Any
 
 from tools.brain.adapters import daily_research as daily_research_adapter
 from tools.brain.evidence_registry import query_evidence_registry
-from tools.brain.meta_cognition import analyze_meta_signals
+from tools.brain.agent_meta import AGENT_META_REQUIRED_PASSES, analyze_agent_meta_signals
 from tools.brain.platform import (
     PYTHON_EXECUTABLE,
     WORKSPACE_ROOT,
@@ -238,6 +238,40 @@ def _task_has_long_task_signal(task: str) -> bool:
     return any(signal in lower for signal in signals)
 
 
+def _agent_meta_commands() -> dict[str, str]:
+    return {
+        "agent_meta_audit": f"{PYTHON_EXECUTABLE} brain/skills/workspace-brain/scripts/brain_runtime.py agent-meta-audit --cwd . --mode compact",
+        "reflection_template": f"{PYTHON_EXECUTABLE} brain/skills/workspace-brain/scripts/brain_runtime.py reflection-template --json",
+        "review_trace": f'{PYTHON_EXECUTABLE} brain/skills/workspace-brain/scripts/brain_runtime.py review --cwd . --trace-json "<trace.json>" --json',
+        "proposal": (
+            f"{PYTHON_EXECUTABLE} brain/skills/workspace-brain/scripts/brain_runtime.py "
+            'proposal --cwd . --title "<short title>" --trigger "<fact>" '
+            '--evidence "<path or observation>" --recommendation "<change proposal>" '
+            "--severity info --owner-brain workspace --writeback-target brain/references/"
+        ),
+    }
+
+
+def _build_agent_review(*, workflow_id: str, agent_meta_review: dict[str, Any]) -> dict[str, Any]:
+    reason_codes: list[str] = []
+    if workflow_id in {
+        "brain_maintenance",
+        "brain_architecture_refactor",
+        "brain_writeback_verified",
+    }:
+        reason_codes.append("workflow_completion_review")
+    if agent_meta_review.get("status") != "clear":
+        reason_codes.append("agent_meta_opportunity")
+    commands = _agent_meta_commands()
+    return {
+        "before_final_required": bool(reason_codes),
+        "reason_codes": _dedupe_text(reason_codes),
+        "trace_template_command": commands["reflection_template"],
+        "review_command": commands["review_trace"],
+        "proposal_command": commands["proposal"],
+    }
+
+
 def build_task_capsule(
     *,
     task: str = "",
@@ -299,7 +333,7 @@ def build_task_capsule(
         if isinstance(finding, dict) and str(finding.get("severity", "") or "") == "warning":
             risk_signals.append(str(finding.get("code", "") or ""))
     payload: dict[str, Any] = {
-        "schema_version": 3,
+        "schema_version": 4,
         "task": task,
         "context_profile": context_profile,
         "summary_budget": summary_budget(context_profile),
@@ -327,35 +361,13 @@ def build_task_capsule(
             "Work remains on main unless the user explicitly changes branch policy",
             "No child brain is loaded until main-brain routing selects one",
         ],
-        "runtime_learning_hooks": {
-            "reflection_review_required": workflow_id
-            in {
-                "brain_maintenance",
-                "brain_architecture_refactor",
-                "brain_writeback_verified",
-            },
-            "trace_template_command": (
-                f"{PYTHON_EXECUTABLE} brain/skills/workspace-brain/scripts/brain_runtime.py "
-                "reflection-template --json"
-            ),
-            "review_command": (
-                f"{PYTHON_EXECUTABLE} brain/skills/workspace-brain/scripts/brain_runtime.py "
-                'review --cwd . --trace-json "<trace.json>" --json'
-            ),
-            "proposal_command": (
-                f"{PYTHON_EXECUTABLE} brain/skills/workspace-brain/scripts/brain_runtime.py "
-                'proposal --cwd . --title "<short title>" --trigger "<fact>" '
-                '--evidence "<path or observation>" --recommendation "<change proposal>" '
-                "--severity info --owner-brain workspace --writeback-target brain/references/"
-            ),
-        },
     }
     if target_kind == "workspace" and routing.get("status") == "selected":
         payload["workspace_context"] = _workspace_context(main_context)
     if target_kind == "child" and selected_brain_id in child_brain_ids() and routing.get("status") == "selected":
         raw_child_context = _child_context(selected_brain_id, task, workflow_id, run_tag)
         payload["child_context"] = compact_child_context(raw_child_context, profile=context_profile)
-    meta_cognition = analyze_meta_signals(
+    agent_meta_review = analyze_agent_meta_signals(
         task=task,
         capsule_context={
             "target_kind": target_kind,
@@ -366,7 +378,14 @@ def build_task_capsule(
             "preflight_blockers": preflight_blockers,
         },
     )
-    payload["meta_cognition"] = meta_cognition
-    if meta_cognition.get("status") != "clear":
-        payload["runtime_learning_hooks"]["reflection_review_required"] = True
+    payload["agent_meta"] = {
+        "actor": "agent",
+        "substrate": "brain",
+        "tool_role": "sensor",
+        "authority": "propose_only",
+        "required_passes": list(AGENT_META_REQUIRED_PASSES),
+        "review": agent_meta_review,
+        "commands": _agent_meta_commands(),
+    }
+    payload["agent_review"] = _build_agent_review(workflow_id=workflow_id, agent_meta_review=agent_meta_review)
     return payload

@@ -3,17 +3,18 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 
-META_AUTHORITY = "propose_only"
-META_CLEAR_ACTION = "no_learning_needed"
+AGENT_META_AUTHORITY = "propose_only"
+AGENT_META_CLEAR_ACTION = "no_learning_needed"
+AGENT_META_REQUIRED_PASSES = ["task_start", "decision_boundary", "before_final"]
 
 
-def clear_meta_cognition() -> dict[str, Any]:
+def clear_agent_meta_review() -> dict[str, Any]:
     return {
         "status": "clear",
-        "authority": META_AUTHORITY,
+        "authority": AGENT_META_AUTHORITY,
         "signals": [],
         "learning_opportunities": [],
-        "next_actions": [META_CLEAR_ACTION],
+        "next_actions": [AGENT_META_CLEAR_ACTION],
     }
 
 
@@ -115,12 +116,22 @@ def _event_opportunity(event: Mapping[str, Any]) -> dict[str, Any] | None:
             source_signal=event_type,
             detector_id="trace_event_detector",
         )
-    if event_type in {"rule_not_enforced", "learning_opportunity_missed"}:
+    if event_type == "learning_opportunity_missed":
         return _opportunity(
-            target_layer=target_layer or "meta_cognition",
+            target_layer=target_layer or "agent_meta_protocol",
             owner_brain=owner_brain,
             confidence=str(event.get("confidence", "") or "high"),
-            recommended_action="add a runtime learning proposal and verification hook so the missed rule becomes executable",
+            recommended_action="make the missed learning trigger part of the agent meta protocol and verify it with a capsule or review test",
+            writeback_route="brain/governance_layer.md",
+            source_signal=event_type,
+            detector_id="trace_event_detector",
+        )
+    if event_type == "rule_not_enforced":
+        return _opportunity(
+            target_layer=target_layer or "capsule_contract",
+            owner_brain=owner_brain,
+            confidence=str(event.get("confidence", "") or "high"),
+            recommended_action="add an executable hot-path contract so the documented rule affects future agent behavior",
             writeback_route="brain/governance_layer.md",
             source_signal=event_type,
             detector_id="trace_event_detector",
@@ -172,7 +183,7 @@ def _daily_research_applies(task: str, capsule_context: Mapping[str, Any]) -> bo
     return any(term in text for term in terms)
 
 
-def analyze_meta_signals(
+def analyze_agent_meta_signals(
     *,
     task: str = "",
     capsule_context: Mapping[str, Any] | None = None,
@@ -184,6 +195,25 @@ def analyze_meta_signals(
     signals: list[str] = []
     opportunities: list[dict[str, Any]] = []
     actions: list[str] = []
+
+    if (
+        "脑区只是载体" in text
+        or ("没有思考能力" in text and "agent" in text)
+        or ("agent" in text and "元能力" in text and ("脑区" in text or "brain" in text))
+        or ("brain" in text and "substrate" in text and "agent" in text)
+    ):
+        signals.append("actor_boundary_mismatch")
+        opportunities.append(
+            _opportunity(
+                target_layer="agent_meta_protocol",
+                owner_brain="workspace",
+                confidence="high",
+                recommended_action="rewrite the hot-path contract so the agent owns meta capability while the brain persists, distributes, and verifies the protocol",
+                writeback_route="brain/governance_layer.md",
+                source_signal="actor_boundary_mismatch",
+                detector_id="actor_boundary_detector",
+            )
+        )
 
     learning_terms = (
         "应该学会",
@@ -201,10 +231,10 @@ def analyze_meta_signals(
         signals.extend(["user_correction", "learning_opportunity_missed"])
         opportunities.append(
             _opportunity(
-                target_layer="meta_cognition",
+                target_layer="agent_meta_protocol",
                 owner_brain="workspace",
                 confidence="medium",
-                recommended_action="create a runtime learning proposal so future capsules surface this class of missed learning opportunity",
+                recommended_action="create an agent learning proposal so future agents run the required meta pass instead of waiting for a tool prompt",
                 writeback_route="brain/governance_layer.md",
                 source_signal="learning_opportunity_missed",
                 detector_id="user_correction_detector",
@@ -255,10 +285,10 @@ def analyze_meta_signals(
     opportunities = _dedupe_opportunities(opportunities)
     actions = _dedupe_strings([*actions, *("create_proposal" for _ in opportunities)])
     if not signals and not opportunities:
-        return clear_meta_cognition()
+        return clear_agent_meta_review()
     return {
         "status": "opportunity",
-        "authority": META_AUTHORITY,
+        "authority": AGENT_META_AUTHORITY,
         "signals": signals,
         "learning_opportunities": opportunities,
         "next_actions": actions or ["create_proposal"],

@@ -1,6 +1,6 @@
 ---
 name: workspace-brain
-description: Use the workspace main brain as the first entrypoint for project takeover, task routing, branch discipline, brain governance, capsules, evidence lookup, guard checks, runtime learning proposals, and child-brain handoff. Trigger when the user mentions brain, 脑区, 项目大脑, 接管, capsule, governance, main-only, branch, runtime learning, daily_research, t0_project, or daily_stock_analysis-main.
+description: Use the workspace main brain as the first entrypoint for project takeover, task routing, branch discipline, brain governance, capsules, evidence lookup, guard checks, agent learning proposals, and child-brain handoff. Trigger when the user mentions brain, 脑区, 项目大脑, 接管, capsule, governance, main-only, branch, agent learning, daily_research, t0_project, or daily_stock_analysis-main.
 ---
 
 # Workspace Brain Runtime
@@ -19,13 +19,14 @@ For existing brain workspaces, run a lightweight main-brain capsule to make rout
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<user task>" --workflow auto --intent <read|mutate|writeback> --verbosity lite --json
 ```
 
-Schema v3 capsules separate the routing layers:
+Schema v4 capsules separate routing from the agent meta protocol:
 
 - `routing.target.id` is the bootstrap target (`workspace` or a child brain id).
 - `routing.target.kind` is `workspace`, `child`, or `ambiguous`.
 - `routing.target.domain` is the workflow domain, such as `workspace_governance`.
 - `workspace_governance` is a workspace domain and bootstrap alias, not a child brain id.
-- `meta_cognition` is the controlled learning loop. If `meta_cognition.status != clear`, mention the signal in the final answer or next plan and propose the verification/writeback path.
+- `agent_meta` describes the agent-owned meta protocol supplied by the brain; the brain is the substrate and tools are sensors.
+- `agent_review.before_final_required` tells the agent when a structured before-final review is mandatory.
 
 Run compact health during takeover, anomaly triage, or final verification so catalog, guard, skill sync, and frontier warnings are visible without loading deep evidence:
 
@@ -83,19 +84,19 @@ Use `preflight_blockers`, `mutation_allowed`, `routing`, guards, risk signals, c
 - Separate facts, inferences, assumptions, and action boundaries in substantial reports.
 - For deterministic cleanup with clear benefit, low fact loss, and tests, remove stale paths completely instead of leaving compatibility shells.
 
-## Runtime Reflection Learning
+## Agent Meta Protocol
 
-### Meta Cognition
+Agent owns the meta capability. Brain persists, distributes, and verifies the protocol. Capsules, audits, guards, and tests are sensors, not thinkers.
 
-Meta Cognition is the active learning loop: Observe -> Detect -> Classify -> Route -> Propose -> Verify -> Reuse. It is controlled autonomy: capsules and audits may discover, classify, record, and recommend learning, but core brain docs, workflow rules, skills, guards, and tests change only after user-authorized implementation.
+Run the agent meta pass at task start, every major decision boundary, and before the final answer. Do this even when capsule `agent_meta.review.status` is `clear`; a clear tool result does not waive the agent's responsibility to notice reusable lessons, evidence gaps, actor-boundary mismatches, or missed rules.
 
 Use this when the user says "this should be learned", "why did it not prompt", "from now on", or when evidence quality is polluted by low-budget runs:
 
 ```powershell
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py meta-audit --cwd . --mode compact
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py agent-meta-audit --cwd . --mode compact
 ```
 
-Capsule `meta_cognition.learning_opportunities[]` names the target layer, owner brain, writeback route, confidence, and required verification. Treat `runtime_learning_hooks` as a compatibility field; `meta_cognition` is the primary contract.
+Capsule `agent_meta.review.learning_opportunities[]` names the target layer, owner brain, writeback route, confidence, and required verification. If `agent_meta.review.status != clear` or `agent_review.before_final_required=true`, mention the signal in the final answer or next plan and propose the verification/writeback path.
 
 ### Reflection Review
 
@@ -112,9 +113,9 @@ Freeform review is a low-confidence fallback for legacy observations only:
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py review --cwd . --task "<user task>" --observation "<what happened>" --json
 ```
 
-If review returns learning candidates, ask for confirmation or generate a runtime learning proposal with `status=proposed`; do not silently rewrite core brain docs.
+If review returns learning candidates, ask for confirmation or generate an agent learning proposal with `status=proposed`; do not silently rewrite core brain docs.
 
-Generate a runtime learning proposal when a repeated failure, rule conflict, timeout misread, branch violation, missing entrypoint, or stale skill is discovered:
+Generate an agent learning proposal when a repeated failure, rule conflict, timeout misread, branch violation, missing entrypoint, stale skill, missed meta pass, or actor-boundary mismatch is discovered:
 
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py proposal --cwd . --title "<short title>" --trigger "<fact>" --evidence "<path or observation>" --recommendation "<change proposal>" --severity info --owner-brain workspace --writeback-target brain/references/

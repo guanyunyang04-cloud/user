@@ -690,6 +690,23 @@ def _check_manifest_semantics(path: Path, text: str) -> list[str]:
             optional_path = str(data.get(optional_key, "")).strip()
             if optional_path and not Path(optional_path).exists():
                 issues.append(f"main_optional_brain_path_missing:{optional_key}:{optional_path}")
+        agent_meta = data.get("agent_meta_protocol")
+        if not isinstance(agent_meta, dict):
+            issues.append("main_agent_meta_protocol_missing_or_invalid")
+        else:
+            expected = {
+                "actor": "agent",
+                "substrate": "brain",
+                "tool_role": "sensor",
+                "authority": "propose_only",
+            }
+            for key, value in expected.items():
+                if agent_meta.get(key) != value:
+                    issues.append(f"main_agent_meta_protocol_{key}_must_be_{value}")
+            if agent_meta.get("required_passes") != ["task_start", "decision_boundary", "before_final"]:
+                issues.append("main_agent_meta_protocol_required_passes_invalid")
+            if agent_meta.get("proposal_queue") != "brain/output/agent_learning/":
+                issues.append("main_agent_meta_protocol_proposal_queue_invalid")
         child_brains = data.get("child_brains")
         if not isinstance(child_brains, list) or not child_brains:
             issues.append("main_manifest_child_brains_missing_or_empty")

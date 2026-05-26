@@ -3,9 +3,10 @@
 ## 1. 默认接管入口
 - 当前工作区根目录：`H:\quant_project`。
 - 旧路径 `H:\new_tdx64\PYPlugins\user` 已退出本项目主链路，不得作为接管根目录。
-- schema v3 capsule：
+- schema v4 capsule：
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
   - 读取 `target_kind` 与 `workflow_domain` 区分 workspace governance 和 child brain body work。
+  - 读取 `agent_meta` 与 `agent_review` 执行 agent 元能力检查；brain 只提供协议和传感器结果。
 - 任务路由：
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow route --task "<task>" --json`
   - workspace 治理任务返回 `target.id=workspace`、`target.kind=workspace`、`target.domain=workspace_governance`。
@@ -36,6 +37,8 @@
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/project_consistency_check.py`
+- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py agent-meta-audit --cwd . --mode compact`
+- Agent Meta Protocol 守卫确认 agent 是元能力执行者，brain 是持久化载体，tools 是传感器。
 - `doc_guard` 已包含主分脑完整性检查；结构变更后仍建议单独跑一次 `integrity_check` 便于快速定位。
 
 ## 6. 写回路由

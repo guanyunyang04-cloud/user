@@ -31,6 +31,25 @@ class BrainIntegrityCatalogTest(unittest.TestCase):
         self.assertIn("episodic_memory", contract["never_default_modules"])
         self.assertEqual(contract["line_budgets"]["workspace_core_doc"], 80)
 
+    def test_main_manifest_declares_agent_meta_protocol(self) -> None:
+        manifest = load_manifest("brain/brain_manifest.json")
+        contract = manifest["agent_meta_protocol"]
+
+        self.assertEqual(contract["actor"], "agent")
+        self.assertEqual(contract["substrate"], "brain")
+        self.assertEqual(contract["tool_role"], "sensor")
+        self.assertEqual(contract["authority"], "propose_only")
+        self.assertEqual(contract["required_passes"], ["task_start", "decision_boundary", "before_final"])
+        self.assertEqual(contract["proposal_queue"], "brain/output/agent_learning/")
+
+    def test_agent_meta_contract_docs_do_not_reintroduce_legacy_public_terms(self) -> None:
+        findings = run_checks()
+        error_codes = {finding.code for finding in findings if finding.severity == "error"}
+
+        self.assertNotIn("agent_meta_legacy_contract_text", error_codes)
+        self.assertNotIn("agent_meta_capsule_schema_invalid", error_codes)
+        self.assertNotIn("agent_meta_legacy_capsule_field_present", error_codes)
+
     def test_non_truth_catalog_warnings_are_acknowledged_boundaries(self) -> None:
         findings = run_checks()
         warnings = [finding for finding in findings if finding.code == "catalog_noncanonical_brain"]

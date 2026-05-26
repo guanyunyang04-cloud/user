@@ -13,7 +13,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from reflection_learning import analyze_freeform, analyze_meta_signals, analyze_trace, build_proposal_payload, reflection_template
+from reflection_learning import analyze_agent_meta_signals, analyze_freeform, analyze_trace, build_proposal_payload, reflection_template
 
 
 CORE_DOCS = {
@@ -387,14 +387,14 @@ def _owner_brain(cwd: Path, fallback: str) -> str:
     return str(payload.get("brain_id") or payload.get("brain_type") or fallback)
 
 
-def _runtime_learning_dir(cwd: Path) -> Path:
+def _agent_learning_dir(cwd: Path) -> Path:
     resolved = cwd.resolve()
     brain_root = _find_brain_root(resolved) or resolved
-    return brain_root / "brain" / "output" / "runtime_learning"
+    return brain_root / "brain" / "output" / "agent_learning"
 
 
 def _index_path(cwd: Path) -> Path:
-    return _runtime_learning_dir(cwd) / "runtime_learning_index.json"
+    return _agent_learning_dir(cwd) / "agent_learning_index.json"
 
 
 def _load_learning_index(cwd: Path) -> dict[str, Any]:
@@ -424,9 +424,9 @@ def _proposal_status_counts(proposals: list[Any]) -> dict[str, int]:
 
 
 def _write_learning_index(cwd: Path, payload: dict[str, Any]) -> Path:
-    out_dir = _runtime_learning_dir(cwd)
+    out_dir = _agent_learning_dir(cwd)
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / "runtime_learning_index.json"
+    path = out_dir / "agent_learning_index.json"
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     return path
 
@@ -466,7 +466,7 @@ def proposal(
     anti_overfit_check: str = "",
 ) -> dict[str, Any]:
     resolved = cwd.resolve()
-    out_dir = _runtime_learning_dir(resolved)
+    out_dir = _agent_learning_dir(resolved)
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_title = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in title.lower()).strip("_") or "proposal"
@@ -592,31 +592,38 @@ def meta_audit(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
     if proposed_count:
         actionable_items.append(
             {
-                "type": "runtime_learning_queue",
+                "type": "agent_learning_queue",
                 "severity": "info",
-                "summary": f"{proposed_count} runtime learning proposal(s) still proposed",
+                "summary": f"{proposed_count} agent learning proposal(s) still proposed",
                 "recommended_action": "review proposal queue and mark approved/implemented/verified/rejected/superseded",
             }
         )
 
-    capsule_contract = {"status": "unknown", "has_meta_cognition": False, "meta_status": ""}
+    agent_meta_contract = {"status": "unknown", "has_agent_meta": False, "review_status": ""}
     try:
-        sample_capsule = capsule(workspace, "meta cognition contract audit", "read", verbosity="lite")
-        meta = sample_capsule.get("meta_cognition", {}) if isinstance(sample_capsule, dict) else {}
-        capsule_contract = {
-            "status": "ok" if isinstance(meta, dict) and meta.get("authority") == "propose_only" else "warning",
-            "has_meta_cognition": isinstance(meta, dict),
-            "meta_status": str(meta.get("status", "") if isinstance(meta, dict) else ""),
+        sample_capsule = capsule(workspace, "agent meta protocol contract audit", "read", verbosity="lite")
+        agent_meta = sample_capsule.get("agent_meta", {}) if isinstance(sample_capsule, dict) else {}
+        review = agent_meta.get("review", {}) if isinstance(agent_meta, dict) else {}
+        agent_meta_contract = {
+            "status": "ok"
+            if isinstance(agent_meta, dict)
+            and agent_meta.get("actor") == "agent"
+            and agent_meta.get("substrate") == "brain"
+            and agent_meta.get("tool_role") == "sensor"
+            and isinstance(review, dict)
+            else "warning",
+            "has_agent_meta": isinstance(agent_meta, dict),
+            "review_status": str(review.get("status", "") if isinstance(review, dict) else ""),
         }
     except Exception as exc:
-        capsule_contract = {"status": "error", "has_meta_cognition": False, "error": str(exc)}
-    if capsule_contract.get("status") != "ok":
+        agent_meta_contract = {"status": "error", "has_agent_meta": False, "error": str(exc)}
+    if agent_meta_contract.get("status") != "ok":
         actionable_items.append(
             {
-                "type": "capsule_meta_contract",
+                "type": "agent_meta_contract",
                 "severity": "warning",
-                "summary": "capsule meta_cognition contract is not confirmed",
-                "recommended_action": "run capsule contract tests before relying on runtime learning prompts",
+                "summary": "capsule agent_meta contract is not confirmed",
+                "recommended_action": "run capsule contract tests before relying on agent learning prompts",
             }
         )
 
@@ -640,13 +647,13 @@ def meta_audit(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
     payload: dict[str, Any] = {
         "status": "ok",
         "mode": str(mode or "compact"),
-        "runtime_learning": {
+        "agent_learning": {
             "index_schema_version": index.get("schema_version", 1),
             "proposal_count": len(proposals),
             "status_counts": status_counts,
             "proposed_count": proposed_count,
         },
-        "capsule_meta_contract": capsule_contract,
+        "agent_meta_contract": agent_meta_contract,
         "daily_research_evidence_quality": {
             "status": daily_quality.get("status", "unknown"),
             "signals": list(daily_quality.get("signals", []) or []),
@@ -656,7 +663,7 @@ def meta_audit(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
         "next_actions": ["review_actionable_items"] if actionable_items else ["no_meta_audit_action_needed"],
     }
     if str(mode or "compact").lower() == "full":
-        payload["runtime_learning"]["proposals"] = proposals
+        payload["agent_learning"]["proposals"] = proposals
         payload["daily_research_evidence_quality"]["learning_opportunities"] = list(daily_quality.get("learning_opportunities", []) or [])
     return payload
 
@@ -700,7 +707,7 @@ def build_parser() -> argparse.ArgumentParser:
     review_parser.add_argument("--test-output", default="")
     review_parser.add_argument("--trace-json", default="")
     review_parser.add_argument("--json", action="store_true")
-    meta_audit_parser = sub.add_parser("meta-audit")
+    meta_audit_parser = sub.add_parser("agent-meta-audit")
     meta_audit_parser.add_argument("--cwd", default=".")
     meta_audit_parser.add_argument("--mode", choices=("compact", "full"), default="compact")
     list_parser = sub.add_parser("list-proposals")
@@ -749,7 +756,7 @@ def main() -> int:
             test_output=str(args.test_output or ""),
             trace_json=Path(str(args.trace_json)).resolve() if str(args.trace_json or "").strip() else None,
         )
-    elif args.command == "meta-audit":
+    elif args.command == "agent-meta-audit":
         payload = meta_audit(cwd, mode=str(args.mode or "compact"))
     elif args.command == "list-proposals":
         payload = list_proposals(cwd)

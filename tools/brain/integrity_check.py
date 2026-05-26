@@ -29,11 +29,14 @@ REQUIRED_MAIN_KEYS = (
     "cognition_contract",
     SHARED_CONTRACT_KEY,
     "hot_handoff_contract",
+    "agent_meta_protocol",
     "brain_contract",
     "child_brains",
     "write_routes",
     "handoff_contract",
 )
+
+REQUIRED_AGENT_META_PASSES = ("task_start", "decision_boundary", "before_final")
 
 REQUIRED_HOT_HANDOFF_KEYS = (
     "workspace_default_paths",
@@ -112,6 +115,22 @@ COMPACT_CORE_LINE_WARNINGS = {
     "daily_stock_analysis-main/brain/brain_architecture.md": 160,
     "daily_stock_analysis-main/brain/governance_layer.md": 180,
 }
+
+AGENT_META_CONTRACT_DOCS = (
+    "brain/governance_layer.md",
+    "brain/operations_center.md",
+    "brain/skills/workspace-brain/SKILL.md",
+)
+
+AGENT_META_LEGACY_TEXT_PATTERNS = (
+    "Meta Cognition",
+    "meta_cognition",
+    "runtime_learning_hooks",
+    "runtime_learning",
+    "runtime learning",
+    "brain_runtime.py meta-audit",
+    "capsules and audits may discover",
+)
 
 
 @dataclass(frozen=True)
@@ -363,6 +382,35 @@ def _validate_main_manifest(findings: list[Finding], main_manifest: dict[str, An
                 value = budgets.get(key)
                 if not isinstance(value, int) or value <= 0:
                     findings.append(Finding("error", "main_hot_handoff_contract_invalid", f"line_budgets.{key} must be a positive integer", main_path))
+
+    agent_meta = main_manifest.get("agent_meta_protocol", {})
+    if not isinstance(agent_meta, dict) or not agent_meta:
+        findings.append(Finding("error", "main_agent_meta_protocol_invalid", "agent_meta_protocol must be a non-empty object", main_path))
+    else:
+        expected = {
+            "actor": "agent",
+            "substrate": "brain",
+            "tool_role": "sensor",
+            "authority": "propose_only",
+        }
+        for key, value in expected.items():
+            if agent_meta.get(key) != value:
+                findings.append(Finding("error", "main_agent_meta_protocol_invalid", f"{key} must be {value}", main_path))
+        passes = agent_meta.get("required_passes")
+        if passes != list(REQUIRED_AGENT_META_PASSES):
+            findings.append(
+                Finding(
+                    "error",
+                    "main_agent_meta_protocol_invalid",
+                    "required_passes must be task_start, decision_boundary, before_final",
+                    main_path,
+                )
+            )
+        proposal_queue = str(agent_meta.get("proposal_queue", "") or "")
+        if proposal_queue != "brain/output/agent_learning/":
+            findings.append(Finding("error", "main_agent_meta_protocol_invalid", "proposal_queue must be brain/output/agent_learning/", main_path))
+        if agent_meta.get("skill_sync_required") is not True:
+            findings.append(Finding("error", "main_agent_meta_protocol_invalid", "skill_sync_required must be true", main_path))
 
     contract = main_manifest.get(SHARED_CONTRACT_KEY, {})
     if not isinstance(contract, dict) or not contract:
@@ -673,6 +721,70 @@ def _validate_workflow_categories(findings: list[Finding], main_manifest: dict[s
             )
 
 
+def _validate_agent_meta_runtime_contract(findings: list[Finding], main_manifest: dict[str, Any]) -> None:
+    try:
+        from tools.brain.capsule import build_task_capsule
+    except Exception as exc:
+        findings.append(Finding("error", "agent_meta_capsule_import_failed", str(exc), "tools/brain/capsule.py"))
+        return
+    payload = build_task_capsule(task="agent meta protocol integrity sample", workflow="auto", intent="read", verbosity="lite")
+    if payload.get("schema_version") != 4:
+        findings.append(Finding("error", "agent_meta_capsule_schema_invalid", "capsule schema_version must be 4", "tools/brain/capsule.py"))
+    if "meta_cognition" in payload or "runtime_learning_hooks" in payload:
+        findings.append(
+            Finding(
+                "error",
+                "agent_meta_legacy_capsule_field_present",
+                "capsule must not expose meta_cognition or runtime_learning_hooks",
+                "tools/brain/capsule.py",
+            )
+        )
+    agent_meta = payload.get("agent_meta", {})
+    if not isinstance(agent_meta, dict):
+        findings.append(Finding("error", "agent_meta_capsule_contract_missing", "capsule missing agent_meta object", "tools/brain/capsule.py"))
+        return
+    manifest_contract = main_manifest.get("agent_meta_protocol", {})
+    for key in ("actor", "substrate", "tool_role", "authority"):
+        if agent_meta.get(key) != manifest_contract.get(key):
+            findings.append(
+                Finding("error", "agent_meta_capsule_manifest_mismatch", f"{key} mismatch", "tools/brain/capsule.py")
+            )
+    if agent_meta.get("required_passes") != manifest_contract.get("required_passes"):
+        findings.append(
+            Finding("error", "agent_meta_capsule_manifest_mismatch", "required_passes mismatch", "tools/brain/capsule.py")
+        )
+    if not isinstance(payload.get("agent_review"), dict):
+        findings.append(Finding("error", "agent_review_contract_missing", "capsule missing agent_review object", "tools/brain/capsule.py"))
+
+
+def _validate_agent_meta_contract_docs(findings: list[Finding]) -> None:
+    for relative_path in AGENT_META_CONTRACT_DOCS:
+        path = _workspace_path(relative_path)
+        if not path.exists():
+            findings.append(Finding("error", "agent_meta_contract_doc_missing", "agent meta contract doc missing", relative_path))
+            continue
+        text = _read_text(relative_path)
+        for pattern in AGENT_META_LEGACY_TEXT_PATTERNS:
+            if pattern in text:
+                findings.append(
+                    Finding(
+                        "error",
+                        "agent_meta_legacy_contract_text",
+                        f"current contract doc still contains legacy text: {pattern}",
+                        relative_path,
+                    )
+                )
+        if "Agent Meta Protocol" not in text and "agent meta protocol" not in text:
+            findings.append(
+                Finding(
+                    "error",
+                    "agent_meta_contract_text_missing",
+                    "current contract doc must name the agent meta protocol",
+                    relative_path,
+                )
+            )
+
+
 def _validate_brain_catalog(findings: list[Finding], main_manifest: dict[str, Any]) -> None:
     catalog_path = _rel(BRAIN_CATALOG)
     if not _workspace_path(BRAIN_CATALOG).exists():
@@ -765,6 +877,8 @@ def run_checks() -> list[Finding]:
         _validate_child_manifest(findings, main_manifest, child_ref, required_child_keys)
     _validate_route_targets(findings)
     _validate_workflow_categories(findings, main_manifest)
+    _validate_agent_meta_runtime_contract(findings, main_manifest)
+    _validate_agent_meta_contract_docs(findings)
     return findings
 
 

@@ -98,7 +98,7 @@ class ReflectionLearningTest(unittest.TestCase):
         payload = module.analyze_trace(trace)
 
         self.assertEqual(payload["learning_candidates"], [])
-        self.assertEqual(payload["next_actions"], ["no_runtime_learning_needed"])
+        self.assertEqual(payload["next_actions"], ["no_agent_learning_needed"])
 
     def test_one_off_environment_failure_does_not_create_persistent_learning(self) -> None:
         module = load_reflection_module()
@@ -143,7 +143,7 @@ class ReflectionLearningTest(unittest.TestCase):
     def test_analyze_meta_signals_detects_learning_opportunity_missed(self) -> None:
         module = load_reflection_module()
 
-        payload = module.analyze_meta_signals(
+        payload = module.analyze_agent_meta_signals(
             task="这应该学会，为什么没提示，以后都要自动发现",
             capsule_context={"target_kind": "workspace", "workflow_domain": "workspace_governance"},
         )
@@ -153,11 +153,25 @@ class ReflectionLearningTest(unittest.TestCase):
         self.assertIn("learning_opportunity_missed", payload["signals"])
         self.assertIn("create_proposal", payload["next_actions"])
         self.assertTrue(payload["learning_opportunities"])
+        self.assertEqual(payload["learning_opportunities"][0]["target_layer"], "agent_meta_protocol")
+
+    def test_analyze_agent_meta_signals_detects_actor_boundary_mismatch(self) -> None:
+        module = load_reflection_module()
+
+        payload = module.analyze_agent_meta_signals(
+            task="脑区只是载体，没有思考能力，真正思考并执行的是 agent",
+            capsule_context={"target_kind": "workspace", "workflow_domain": "workspace_governance"},
+        )
+
+        self.assertEqual(payload["status"], "opportunity")
+        self.assertIn("actor_boundary_mismatch", payload["signals"])
+        opportunity = next(item for item in payload["learning_opportunities"] if item["target_layer"] == "agent_meta_protocol")
+        self.assertEqual(opportunity["source_signal"], "actor_boundary_mismatch")
 
     def test_analyze_meta_signals_detects_low_budget_evidence_pollution(self) -> None:
         module = load_reflection_module()
 
-        payload = module.analyze_meta_signals(
+        payload = module.analyze_agent_meta_signals(
             task="审阅 multi-horizon 低预算实验是否可作模型质量结论",
             capsule_context={
                 "target_kind": "child",
@@ -233,6 +247,7 @@ class ReflectionLearningTest(unittest.TestCase):
         payload = json.loads(result.stdout)
 
         self.assertEqual(payload["schema_version"], 1)
+        self.assertIn("agent_meta_passes", payload)
         self.assertIn("planned_steps", payload)
         self.assertIn("events", payload)
         self.assertIn("final_state", payload)

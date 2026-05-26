@@ -24,7 +24,7 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertTrue(text.startswith("---\nname: workspace-brain"))
         self.assertIn("description: Use the workspace main brain", text)
         self.assertIn("脑区", text)
-        self.assertIn("runtime learning", text.lower())
+        self.assertIn("agent learning", text.lower())
         self.assertIn("-m tools.brain.workflow capsule", text)
         self.assertIn("-m tools.brain.workflow route", text)
         self.assertIn("-m tools.brain.workflow query", text)
@@ -221,7 +221,7 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertEqual(payload["status"], "ok")
         self.assertTrue(Path(payload["json_path"]).exists())
         self.assertTrue(Path(payload["markdown_path"]).exists())
-        self.assertIn("brain/output/runtime_learning", payload["json_path"].replace("\\", "/"))
+        self.assertIn("brain/output/agent_learning", payload["json_path"].replace("\\", "/"))
         proposal_payload = json.loads(Path(payload["json_path"]).read_text(encoding="utf-8"))
         self.assertEqual(proposal_payload["schema_version"], 3)
         self.assertIn("requires_user_confirmation", proposal_payload["authority"])
@@ -345,7 +345,7 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
 
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["learning_candidates"], [])
-        self.assertEqual(payload["next_actions"], ["no_runtime_learning_needed"])
+        self.assertEqual(payload["next_actions"], ["no_agent_learning_needed"])
 
     def test_brain_runtime_proposal_queue_can_be_listed_and_marked(self) -> None:
         tmp_root = ROOT / "daily_research/output/test_learning_queue_project"
@@ -484,12 +484,11 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertIn("--verbosity lite", text)
         self.assertIn("health --cwd . --mode compact", text)
         self.assertIn("health --cwd . --mode full", text)
-        self.assertIn("Runtime Reflection Learning", text)
-        self.assertIn("Meta Cognition", text)
-        self.assertIn("meta-audit", text)
+        self.assertIn("Agent Meta Protocol", text)
+        self.assertIn("agent-meta-audit", text)
         self.assertIn("reflection-template", text)
         self.assertIn("review --trace-json", text)
-        self.assertIn("runtime learning proposal", text)
+        self.assertIn("agent learning proposal", text)
 
     def test_workspace_brain_skill_long_task_uses_contract_monitor(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
@@ -576,9 +575,9 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         targets = {candidate["target_layer"] for candidate in payload["learning_candidates"]}
         self.assertTrue({"execution_completion_gate", "long_task_execution_closure"}.intersection(targets))
 
-    def test_brain_runtime_meta_audit_compact_reports_contract(self) -> None:
+    def test_brain_runtime_agent_meta_audit_compact_reports_contract(self) -> None:
         result = subprocess.run(
-            [PYTHON, str(RUNTIME), "meta-audit", "--cwd", str(ROOT), "--mode", "compact"],
+            [PYTHON, str(RUNTIME), "agent-meta-audit", "--cwd", str(ROOT), "--mode", "compact"],
             cwd=str(ROOT),
             capture_output=True,
             text=True,
@@ -589,10 +588,22 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
 
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["mode"], "compact")
-        self.assertIn("runtime_learning", payload)
-        self.assertIn("capsule_meta_contract", payload)
+        self.assertIn("agent_learning", payload)
+        self.assertIn("agent_meta_contract", payload)
         self.assertIn("daily_research_evidence_quality", payload)
         self.assertIn("actionable_items", payload)
+
+    def test_brain_runtime_meta_audit_command_is_removed(self) -> None:
+        result = subprocess.run(
+            [PYTHON, str(RUNTIME), "meta-audit", "--cwd", str(ROOT), "--mode", "compact"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
 
     def test_brain_runtime_proposal_schema_v3_has_lifecycle_fields(self) -> None:
         tmp_root = ROOT / "daily_research/output/test_learning_schema_v3_project"
@@ -616,17 +627,17 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
                 "--cwd",
                 str(tmp_root),
                 "--title",
-                "meta cognition learning",
+                "agent meta protocol learning",
                 "--trigger",
                 "learning opportunity missed",
                 "--evidence",
-                "capsule lacked meta cognition",
+                "agent skipped the required meta pass",
                 "--recommendation",
-                "add meta cognition contract",
+                "add agent meta protocol contract",
                 "--target-layer",
-                "meta_cognition",
+                "agent_meta_protocol",
                 "--suggested-test",
-                "capsule includes meta_cognition",
+                "capsule includes agent_meta",
             ],
             cwd=str(ROOT),
             capture_output=True,
@@ -638,7 +649,7 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         proposal_payload = json.loads(Path(payload["json_path"]).read_text(encoding="utf-8"))
 
         self.assertEqual(proposal_payload["schema_version"], 3)
-        self.assertEqual(proposal_payload["target_layer"], "meta_cognition")
+        self.assertEqual(proposal_payload["target_layer"], "agent_meta_protocol")
         self.assertEqual(proposal_payload["lifecycle_status"], "proposed")
         self.assertIn("verification_required", proposal_payload)
         self.assertIn("writeback_route", proposal_payload)
