@@ -80,6 +80,10 @@ class BrainCapsuleTest(unittest.TestCase):
         payload = build_task_capsule(task="审阅主脑接管规则", workflow="auto")
 
         self.assertEqual(payload["schema_version"], 3)
+        self.assertIn("meta_cognition", payload)
+        self.assertEqual(payload["meta_cognition"]["status"], "clear")
+        self.assertEqual(payload["meta_cognition"]["authority"], "propose_only")
+        self.assertEqual(payload["meta_cognition"]["next_actions"], ["no_learning_needed"])
         self.assertIn("main_context", payload)
         self.assertIn("workspace_context", payload)
         self.assertEqual(payload["routing"]["selected_brain_id"], "workspace")
@@ -194,6 +198,43 @@ class BrainCapsuleTest(unittest.TestCase):
         hooks = payload["runtime_learning_hooks"]
         self.assertFalse(hooks["reflection_review_required"])
         self.assertIn("trace_template_command", hooks)
+
+    def test_capsule_user_learning_question_exposes_meta_opportunity(self) -> None:
+        payload = build_task_capsule(
+            task="为什么这个应该学会却没提示，以后都要自动发现",
+            workflow="auto",
+            intent="read",
+            verbosity="lite",
+        )
+
+        meta = payload["meta_cognition"]
+        self.assertEqual(meta["status"], "opportunity")
+        self.assertEqual(meta["authority"], "propose_only")
+        self.assertIn("user_correction", meta["signals"])
+        self.assertIn("learning_opportunity_missed", meta["signals"])
+        layers = {item["target_layer"] for item in meta["learning_opportunities"]}
+        self.assertTrue({"meta_cognition", "capsule_contract"}.intersection(layers))
+        self.assertIn("create_proposal", meta["next_actions"])
+        self.assertTrue(payload["runtime_learning_hooks"]["reflection_review_required"])
+
+    def test_capsule_multi_horizon_low_budget_review_exposes_domain_signal(self) -> None:
+        payload = build_task_capsule(
+            task="审阅 multi-horizon 低预算实验是否可作模型质量结论",
+            workflow="auto",
+            intent="read",
+            verbosity="lite",
+        )
+
+        meta = payload["meta_cognition"]
+        self.assertEqual(meta["status"], "opportunity")
+        self.assertIn("low_budget_evidence_pollution", meta["signals"])
+        opportunity = next(
+            item for item in meta["learning_opportunities"]
+            if item["target_layer"] == "experiment_governance"
+        )
+        self.assertEqual(opportunity["owner_brain"], "daily_research")
+        self.assertEqual(opportunity["writeback_route"], "daily_research/brain/knowledge_center.md")
+        self.assertTrue(opportunity["verification_required"])
 
     def test_capsule_brain_rule_mutation_uses_brain_maintenance(self) -> None:
         payload = build_task_capsule(

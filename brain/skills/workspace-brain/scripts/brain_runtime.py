@@ -13,7 +13,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from reflection_learning import analyze_freeform, analyze_trace, build_proposal_payload, reflection_template
+from reflection_learning import analyze_freeform, analyze_meta_signals, analyze_trace, build_proposal_payload, reflection_template
 
 
 CORE_DOCS = {
@@ -413,6 +413,16 @@ def _load_learning_index(cwd: Path) -> dict[str, Any]:
     return {"schema_version": int(payload.get("schema_version", 1) or 1), "proposals": proposals}
 
 
+def _proposal_status_counts(proposals: list[Any]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in proposals:
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status", "") or item.get("lifecycle_status", "") or "unknown")
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
 def _write_learning_index(cwd: Path, payload: dict[str, Any]) -> Path:
     out_dir = _runtime_learning_dir(cwd)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -512,8 +522,11 @@ def proposal(
             "proposal_id": proposal_id,
             "title": title,
             "status": status,
+            "lifecycle_status": payload["lifecycle_status"],
             "severity": severity,
             "target_layer": target_layer,
+            "writeback_route": payload["writeback_route"],
+            "verification_required": payload["verification_required"],
             "json_path": str(json_path.resolve()),
             "markdown_path": str(md_path.resolve()),
             "created_at": payload["created_at"],
@@ -536,7 +549,7 @@ def list_proposals(cwd: Path) -> dict[str, Any]:
 
 def mark_proposal(cwd: Path, proposal_id: str, status: str) -> dict[str, Any]:
     normalized = str(status or "").strip().lower()
-    if normalized not in {"proposed", "approved", "implemented", "rejected", "superseded"}:
+    if normalized not in {"proposed", "approved", "implemented", "verified", "rejected", "superseded"}:
         return {"status": "error", "error": f"unsupported proposal status: {status}"}
     index = _load_learning_index(cwd)
     proposals = list(index.get("proposals", []) or [])
@@ -544,6 +557,7 @@ def mark_proposal(cwd: Path, proposal_id: str, status: str) -> dict[str, Any]:
     for item in proposals:
         if isinstance(item, dict) and item.get("proposal_id") == proposal_id:
             item["status"] = normalized
+            item["lifecycle_status"] = normalized
             item["updated_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
             updated = item
             json_path = Path(str(item.get("json_path", "")))
@@ -552,6 +566,7 @@ def mark_proposal(cwd: Path, proposal_id: str, status: str) -> dict[str, Any]:
                     payload = json.loads(json_path.read_text(encoding="utf-8-sig"))
                     if isinstance(payload, dict):
                         payload["status"] = normalized
+                        payload["lifecycle_status"] = normalized
                         payload["updated_at"] = item["updated_at"]
                         json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
                 except Exception:
@@ -562,6 +577,88 @@ def mark_proposal(cwd: Path, proposal_id: str, status: str) -> dict[str, Any]:
     index["proposals"] = proposals
     _write_learning_index(cwd, index)
     return {"status": "ok", "proposal": updated}
+
+
+def meta_audit(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
+    detected = detect(cwd)
+    workspace = Path(detected["brain_root"] or cwd.resolve()).resolve()
+    if str(workspace) not in sys.path:
+        sys.path.insert(0, str(workspace))
+    index = _load_learning_index(workspace)
+    proposals = list(index.get("proposals", []) or [])
+    status_counts = _proposal_status_counts(proposals)
+    actionable_items: list[dict[str, Any]] = []
+    proposed_count = status_counts.get("proposed", 0)
+    if proposed_count:
+        actionable_items.append(
+            {
+                "type": "runtime_learning_queue",
+                "severity": "info",
+                "summary": f"{proposed_count} runtime learning proposal(s) still proposed",
+                "recommended_action": "review proposal queue and mark approved/implemented/verified/rejected/superseded",
+            }
+        )
+
+    capsule_contract = {"status": "unknown", "has_meta_cognition": False, "meta_status": ""}
+    try:
+        sample_capsule = capsule(workspace, "meta cognition contract audit", "read", verbosity="lite")
+        meta = sample_capsule.get("meta_cognition", {}) if isinstance(sample_capsule, dict) else {}
+        capsule_contract = {
+            "status": "ok" if isinstance(meta, dict) and meta.get("authority") == "propose_only" else "warning",
+            "has_meta_cognition": isinstance(meta, dict),
+            "meta_status": str(meta.get("status", "") if isinstance(meta, dict) else ""),
+        }
+    except Exception as exc:
+        capsule_contract = {"status": "error", "has_meta_cognition": False, "error": str(exc)}
+    if capsule_contract.get("status") != "ok":
+        actionable_items.append(
+            {
+                "type": "capsule_meta_contract",
+                "severity": "warning",
+                "summary": "capsule meta_cognition contract is not confirmed",
+                "recommended_action": "run capsule contract tests before relying on runtime learning prompts",
+            }
+        )
+
+    daily_quality: dict[str, Any] = {"status": "unavailable"}
+    try:
+        from tools.brain.adapters.daily_research import detect_low_budget_evidence
+
+        daily_quality = detect_low_budget_evidence(task="审阅 multi-horizon 低预算实验是否可作模型质量结论")
+    except Exception as exc:
+        daily_quality = {"status": "error", "error": str(exc)}
+    if daily_quality.get("status") != "clear":
+        actionable_items.append(
+            {
+                "type": "daily_research_evidence_quality",
+                "severity": "info",
+                "summary": "daily_research low-budget evidence discipline should be visible when reviewing model-quality conclusions",
+                "recommended_action": "downgrade low-budget runs to smoke_only/scout_only unless promotion-grade evidence exists",
+            }
+        )
+
+    payload: dict[str, Any] = {
+        "status": "ok",
+        "mode": str(mode or "compact"),
+        "runtime_learning": {
+            "index_schema_version": index.get("schema_version", 1),
+            "proposal_count": len(proposals),
+            "status_counts": status_counts,
+            "proposed_count": proposed_count,
+        },
+        "capsule_meta_contract": capsule_contract,
+        "daily_research_evidence_quality": {
+            "status": daily_quality.get("status", "unknown"),
+            "signals": list(daily_quality.get("signals", []) or []),
+            "evidence_grade": str(daily_quality.get("evidence_grade", "") or ""),
+        },
+        "actionable_items": actionable_items,
+        "next_actions": ["review_actionable_items"] if actionable_items else ["no_meta_audit_action_needed"],
+    }
+    if str(mode or "compact").lower() == "full":
+        payload["runtime_learning"]["proposals"] = proposals
+        payload["daily_research_evidence_quality"]["learning_opportunities"] = list(daily_quality.get("learning_opportunities", []) or [])
+    return payload
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -603,6 +700,9 @@ def build_parser() -> argparse.ArgumentParser:
     review_parser.add_argument("--test-output", default="")
     review_parser.add_argument("--trace-json", default="")
     review_parser.add_argument("--json", action="store_true")
+    meta_audit_parser = sub.add_parser("meta-audit")
+    meta_audit_parser.add_argument("--cwd", default=".")
+    meta_audit_parser.add_argument("--mode", choices=("compact", "full"), default="compact")
     list_parser = sub.add_parser("list-proposals")
     list_parser.add_argument("--cwd", default=".")
     mark_parser = sub.add_parser("mark-proposal")
@@ -649,6 +749,8 @@ def main() -> int:
             test_output=str(args.test_output or ""),
             trace_json=Path(str(args.trace_json)).resolve() if str(args.trace_json or "").strip() else None,
         )
+    elif args.command == "meta-audit":
+        payload = meta_audit(cwd, mode=str(args.mode or "compact"))
     elif args.command == "list-proposals":
         payload = list_proposals(cwd)
     elif args.command == "mark-proposal":

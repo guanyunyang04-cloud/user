@@ -6,6 +6,7 @@ from typing import Any
 
 from tools.brain.adapters import daily_research as daily_research_adapter
 from tools.brain.evidence_registry import query_evidence_registry
+from tools.brain.meta_cognition import analyze_meta_signals
 from tools.brain.platform import (
     PYTHON_EXECUTABLE,
     WORKSPACE_ROOT,
@@ -354,4 +355,18 @@ def build_task_capsule(
     if target_kind == "child" and selected_brain_id in child_brain_ids() and routing.get("status") == "selected":
         raw_child_context = _child_context(selected_brain_id, task, workflow_id, study_tag)
         payload["child_context"] = compact_child_context(raw_child_context, profile=context_profile)
+    meta_cognition = analyze_meta_signals(
+        task=task,
+        capsule_context={
+            "target_kind": target_kind,
+            "workflow_domain": workflow_domain,
+            "workflow": workflow_id,
+            "routing": routing,
+            "guards": guards,
+            "preflight_blockers": preflight_blockers,
+        },
+    )
+    payload["meta_cognition"] = meta_cognition
+    if meta_cognition.get("status") != "clear":
+        payload["runtime_learning_hooks"]["reflection_review_required"] = True
     return payload

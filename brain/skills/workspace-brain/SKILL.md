@@ -25,6 +25,7 @@ Schema v3 capsules separate the routing layers:
 - `routing.target.kind` is `workspace`, `child`, or `ambiguous`.
 - `routing.target.domain` is the workflow domain, such as `workspace_governance`.
 - `workspace_governance` is a workspace domain and bootstrap alias, not a child brain id.
+- `meta_cognition` is the controlled learning loop. If `meta_cognition.status != clear`, mention the signal in the final answer or next plan and propose the verification/writeback path.
 
 Run compact health during takeover, anomaly triage, or final verification so catalog, guard, skill sync, and frontier warnings are visible without loading deep evidence:
 
@@ -83,6 +84,18 @@ Use `preflight_blockers`, `mutation_allowed`, `routing`, guards, risk signals, c
 
 ## Runtime Reflection Learning
 
+### Meta Cognition
+
+Meta Cognition is the active learning loop: Observe -> Detect -> Classify -> Route -> Propose -> Verify -> Reuse. It is controlled autonomy: capsules and audits may discover, classify, record, and recommend learning, but core brain docs, workflow rules, skills, guards, and tests change only after user-authorized implementation.
+
+Use this when the user says "this should be learned", "why did it not prompt", "from now on", or when evidence quality is polluted by low-budget runs:
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py meta-audit --cwd . --mode compact
+```
+
+Capsule `meta_cognition.learning_opportunities[]` names the target layer, owner brain, writeback route, confidence, and required verification. Treat `runtime_learning_hooks` as a compatibility field; `meta_cognition` is the primary contract.
+
 ### Reflection Review
 
 Before the final answer for implementation, debugging, long-task, or brain-maintenance work, compare planned steps, blockers, workarounds, user nudges, and verification against the final state. Prefer a structured trace when anything was blocked, skipped, manually bypassed, corrected by the user, or verified after failure:
@@ -110,7 +123,7 @@ Review queued proposals:
 
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py list-proposals --cwd .
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py mark-proposal --cwd . --proposal-id <id> --status <approved|implemented|rejected|superseded>
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py mark-proposal --cwd . --proposal-id <id> --status <approved|implemented|verified|rejected|superseded>
 ```
 
 The proposal is advisory. Core brain docs, workflow rules, and this skill should change only when the user has explicitly asked for that governance or skill update.

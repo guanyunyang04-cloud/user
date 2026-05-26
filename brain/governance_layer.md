@@ -17,6 +17,13 @@
 6. `Reflect`：把结果沉淀回状态、知识、操作、治理或 reference。
 7. `Replan`：如结果改写路径，立刻更新 state 与 next step。
 
+## 2.1 Meta Cognition
+- 元认知闭环为 `Observe -> Detect -> Classify -> Route -> Propose -> Verify -> Reuse`。
+- 第一版权限为 `propose_only`：可自动发现、分级、提示、审计和生成 proposal；核心 brain docs、workflow、skill、guard、tests 写入仍需用户授权。
+- capsule 若返回 `meta_cognition.status != clear`，agent 必须在最终答复或后续计划中说明信号、目标层、writeback route 和验证要求。
+- 用户说“这应该学会 / 为什么没提示 / 以后都要”，或发现低预算证据污染模型质量结论时，优先创建 runtime learning proposal 或运行 `brain_runtime.py meta-audit --cwd . --mode compact`。
+- daily_research 的低预算实验纪律由分脑知识中枢维护；主脑只保存元能力边界和路由责任。
+
 ## 3. 守卫
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check`

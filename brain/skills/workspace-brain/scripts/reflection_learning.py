@@ -14,6 +14,19 @@ TRACE_EVENT_TYPES = (
     "completion_claim",
     "route_or_selector_mismatch",
     "skill_sync_gap",
+    "evidence_quality_gap",
+    "budget_reliability_gap",
+    "rule_not_enforced",
+    "learning_opportunity_missed",
+    "domain_guard_gap",
+)
+
+TRACE_OPTIONAL_EVENT_FIELDS = (
+    "owner_brain",
+    "target_layer",
+    "artifact_path",
+    "evidence_grade",
+    "confidence",
 )
 
 
@@ -82,17 +95,20 @@ def normalize_trace(raw: dict[str, Any]) -> dict[str, Any]:
         event_type = str(item.get("type", "") or "").strip()
         if event_type not in TRACE_EVENT_TYPES:
             continue
-        events.append(
-            {
-                "type": event_type,
-                "step_id": str(item.get("step_id", "") or ""),
-                "summary": str(item.get("summary", "") or ""),
-                "evidence": str(item.get("evidence", "") or ""),
-                "command": str(item.get("command", "") or ""),
-                "returncode": item.get("returncode", ""),
-                "artifact_path": str(item.get("artifact_path", "") or ""),
-            }
-        )
+        event = {
+            "type": event_type,
+            "step_id": str(item.get("step_id", "") or ""),
+            "summary": str(item.get("summary", "") or ""),
+            "evidence": str(item.get("evidence", "") or ""),
+            "command": str(item.get("command", "") or ""),
+            "returncode": item.get("returncode", ""),
+        }
+        for key in TRACE_OPTIONAL_EVENT_FIELDS:
+            if key in item:
+                event[key] = str(item.get(key, "") or "")
+        if "artifact_path" not in event:
+            event["artifact_path"] = str(item.get("artifact_path", "") or "")
+        events.append(event)
     final_state_raw = trace.get("final_state") if isinstance(trace.get("final_state"), dict) else {}
     return {
         "schema_version": 1,
@@ -253,6 +269,81 @@ def analyze_trace(raw_trace: dict[str, Any]) -> dict[str, Any]:
             )
         )
 
+    if _events_of_type(events, "budget_reliability_gap"):
+        support = _events_of_type(events, "budget_reliability_gap")
+        candidates.append(
+            _candidate(
+                lesson="Low-budget training evidence must be downgraded before it is used as a model-quality conclusion.",
+                root_cause="training evidence showed insufficient budget, boundary best epoch, max epochs reached, single seed, or missing convergence evidence",
+                target_layer=str(support[0].get("target_layer", "") or "experiment_governance"),
+                recommended_change="require smoke/scout/evidence/promotion-grade labels and validation convergence checks before model-quality conclusions",
+                supporting_events=support,
+                suggested_tests=["review trace with budget_reliability_gap returns experiment_governance"],
+                anti_overfit_check="only applies when trace or domain evidence explicitly reports low training budget or reliability gaps",
+                confidence=str(support[0].get("confidence", "") or "high"),
+            )
+        )
+
+    if _events_of_type(events, "evidence_quality_gap"):
+        support = _events_of_type(events, "evidence_quality_gap")
+        candidates.append(
+            _candidate(
+                lesson="Evidence quality gaps should be routed to the owning brain before conclusions are reused.",
+                root_cause="structured trace reported a conclusion backed by incomplete, stale, or weak evidence",
+                target_layer=str(support[0].get("target_layer", "") or "evidence_governance"),
+                recommended_change="add an evidence grade, writeback route, or verification check for this evidence class",
+                supporting_events=support,
+                suggested_tests=["review trace with evidence_quality_gap returns evidence governance candidate"],
+                anti_overfit_check="do not apply to ordinary uncertainty unless the trace reports a concrete evidence quality gap",
+                confidence=str(support[0].get("confidence", "") or "high"),
+            )
+        )
+
+    if _events_of_type(events, "rule_not_enforced"):
+        support = _events_of_type(events, "rule_not_enforced")
+        candidates.append(
+            _candidate(
+                lesson="Rules written in docs must become executable through capsule, workflow, guard, skill, or tests.",
+                root_cause="structured trace reported a documented rule that did not affect the runtime hot path",
+                target_layer=str(support[0].get("target_layer", "") or "capsule_contract"),
+                recommended_change="route the rule to an executable hot-path contract and add a regression test",
+                supporting_events=support,
+                suggested_tests=["review trace with rule_not_enforced returns capsule contract candidate"],
+                anti_overfit_check="only applies when a specific documented rule and missed runtime behavior are both observed",
+                confidence=str(support[0].get("confidence", "") or "high"),
+            )
+        )
+
+    if _events_of_type(events, "learning_opportunity_missed"):
+        support = _events_of_type(events, "learning_opportunity_missed")
+        candidates.append(
+            _candidate(
+                lesson="Missed learning opportunities should be surfaced by meta cognition instead of relying on user reminders.",
+                root_cause="structured trace reported a situation where the agent should have proposed learning but did not",
+                target_layer=str(support[0].get("target_layer", "") or "meta_cognition"),
+                recommended_change="add or tune a meta detector and proposal prompt for this class of missed opportunity",
+                supporting_events=support,
+                suggested_tests=["review trace with learning_opportunity_missed returns meta_cognition candidate"],
+                anti_overfit_check="only apply when a user correction or structured trace identifies a repeatable learning opportunity",
+                confidence=str(support[0].get("confidence", "") or "high"),
+            )
+        )
+
+    if _events_of_type(events, "domain_guard_gap"):
+        support = _events_of_type(events, "domain_guard_gap")
+        candidates.append(
+            _candidate(
+                lesson="Domain-specific guard gaps should be owned by the routed child brain.",
+                root_cause="structured trace reported a missing domain guard or enforcement hook",
+                target_layer=str(support[0].get("target_layer", "") or "domain_guard"),
+                recommended_change="add a child-brain domain hook, guard, or regression test for the observed gap",
+                supporting_events=support,
+                suggested_tests=["review trace with domain_guard_gap returns domain guard candidate"],
+                anti_overfit_check="only applies when the task is routed to a concrete domain and the gap is domain-specific",
+                confidence=str(support[0].get("confidence", "") or "high"),
+            )
+        )
+
     unique: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     for candidate in candidates:
@@ -366,6 +457,23 @@ def analyze_freeform(*, task: str = "", observation: str = "", test_output: str 
     }
 
 
+def analyze_meta_signals(
+    *,
+    task: str = "",
+    capsule_context: dict[str, Any] | None = None,
+    trace: dict[str, Any] | None = None,
+    observations: Any = None,
+) -> dict[str, Any]:
+    from tools.brain.meta_cognition import analyze_meta_signals as _analyze_meta_signals
+
+    return _analyze_meta_signals(
+        task=task,
+        capsule_context=capsule_context or {},
+        trace=trace,
+        observations=observations,
+    )
+
+
 def build_proposal_payload(
     *,
     proposal_id: str,
@@ -388,16 +496,21 @@ def build_proposal_payload(
     anti_overfit_check: str = "",
 ) -> dict[str, Any]:
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "proposal_id": proposal_id,
         "title": title,
         "created_at": created_at,
         "authority": "requires_user_confirmation",
         "status": status,
+        "lifecycle_status": status,
         "severity": severity,
         "owner_brain": owner_brain,
         "writeback_target": writeback_target,
+        "writeback_route": writeback_target,
         "target_layer": target_layer,
+        "verification_required": bool(requires_user_confirmation),
+        "detector_id": "manual_proposal",
+        "source_signal": "manual_runtime_learning",
         "related_task": related_task,
         "requires_user_confirmation": bool(requires_user_confirmation),
         "facts": [trigger],

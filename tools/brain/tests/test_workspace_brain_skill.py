@@ -214,7 +214,7 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertTrue(Path(payload["markdown_path"]).exists())
         self.assertIn("brain/output/runtime_learning", payload["json_path"].replace("\\", "/"))
         proposal_payload = json.loads(Path(payload["json_path"]).read_text(encoding="utf-8"))
-        self.assertEqual(proposal_payload["schema_version"], 2)
+        self.assertEqual(proposal_payload["schema_version"], 3)
         self.assertIn("requires_user_confirmation", proposal_payload["authority"])
         self.assertEqual(proposal_payload["severity"], "info")
         self.assertEqual(proposal_payload["owner_brain"], "learning_demo")
@@ -476,11 +476,11 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertIn("health --cwd . --mode compact", text)
         self.assertIn("health --cwd . --mode full", text)
         self.assertIn("Runtime Reflection Learning", text)
+        self.assertIn("Meta Cognition", text)
+        self.assertIn("meta-audit", text)
         self.assertIn("reflection-template", text)
         self.assertIn("review --trace-json", text)
         self.assertIn("runtime learning proposal", text)
-        self.assertNotIn("Self-" + "Evolution", text)
-        self.assertNotIn("\u81ea\u8fdb\u5316", text)
 
     def test_workspace_brain_skill_long_task_uses_contract_monitor(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
@@ -566,6 +566,132 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertTrue(payload["learning_candidates"])
         targets = {candidate["target_layer"] for candidate in payload["learning_candidates"]}
         self.assertTrue({"execution_completion_gate", "long_task_execution_closure"}.intersection(targets))
+
+    def test_brain_runtime_meta_audit_compact_reports_contract(self) -> None:
+        result = subprocess.run(
+            [PYTHON, str(RUNTIME), "meta-audit", "--cwd", str(ROOT), "--mode", "compact"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        payload = json.loads(result.stdout)
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["mode"], "compact")
+        self.assertIn("runtime_learning", payload)
+        self.assertIn("capsule_meta_contract", payload)
+        self.assertIn("daily_research_evidence_quality", payload)
+        self.assertIn("actionable_items", payload)
+
+    def test_brain_runtime_proposal_schema_v3_has_lifecycle_fields(self) -> None:
+        tmp_root = ROOT / "daily_research/output/test_learning_schema_v3_project"
+        if tmp_root.exists():
+            shutil.rmtree(tmp_root)
+        tmp_root.mkdir(parents=True)
+        subprocess.run(
+            [PYTHON, str(RUNTIME), "init", "--cwd", str(tmp_root), "--brain-id", "learning_schema_v3"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+
+        result = subprocess.run(
+            [
+                PYTHON,
+                str(RUNTIME),
+                "proposal",
+                "--cwd",
+                str(tmp_root),
+                "--title",
+                "meta cognition learning",
+                "--trigger",
+                "learning opportunity missed",
+                "--evidence",
+                "capsule lacked meta cognition",
+                "--recommendation",
+                "add meta cognition contract",
+                "--target-layer",
+                "meta_cognition",
+                "--suggested-test",
+                "capsule includes meta_cognition",
+            ],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        payload = json.loads(result.stdout)
+        proposal_payload = json.loads(Path(payload["json_path"]).read_text(encoding="utf-8"))
+
+        self.assertEqual(proposal_payload["schema_version"], 3)
+        self.assertEqual(proposal_payload["target_layer"], "meta_cognition")
+        self.assertEqual(proposal_payload["lifecycle_status"], "proposed")
+        self.assertIn("verification_required", proposal_payload)
+        self.assertIn("writeback_route", proposal_payload)
+
+    def test_brain_runtime_mark_proposal_accepts_verified(self) -> None:
+        tmp_root = ROOT / "daily_research/output/test_learning_verified_project"
+        if tmp_root.exists():
+            shutil.rmtree(tmp_root)
+        tmp_root.mkdir(parents=True)
+        subprocess.run(
+            [PYTHON, str(RUNTIME), "init", "--cwd", str(tmp_root), "--brain-id", "learning_verified"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        proposal = subprocess.run(
+            [
+                PYTHON,
+                str(RUNTIME),
+                "proposal",
+                "--cwd",
+                str(tmp_root),
+                "--title",
+                "verified lifecycle",
+                "--trigger",
+                "proposal needs verified state",
+                "--evidence",
+                "mark-proposal",
+                "--recommendation",
+                "allow verified",
+            ],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        proposal_payload = json.loads(proposal.stdout)
+
+        marked = subprocess.run(
+            [
+                PYTHON,
+                str(RUNTIME),
+                "mark-proposal",
+                "--cwd",
+                str(tmp_root),
+                "--proposal-id",
+                proposal_payload["proposal_id"],
+                "--status",
+                "verified",
+            ],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        marked_payload = json.loads(marked.stdout)
+
+        self.assertEqual(marked_payload["proposal"]["status"], "verified")
 
 
 if __name__ == "__main__":

@@ -57,6 +57,24 @@ STUDY_SUMMARY_METRIC_KEYS = (
     "training_evidence_status",
 )
 
+EXPERIMENT_REVIEW_TERMS = (
+    "multi-horizon",
+    "multi horizon",
+    "path_policy",
+    "path20",
+    "stage gate",
+    "model quality",
+    "training",
+    "experiment",
+    "evidence",
+    "预算",
+    "实验",
+    "训练",
+    "模型",
+    "证据",
+    "质量结论",
+)
+
 
 @dataclass(frozen=True)
 class ArtifactRecord:
@@ -167,6 +185,124 @@ def _read_json_path_text(path_text: str) -> dict[str, Any]:
     if not path_text:
         return {}
     return _read_json_if_exists(Path(path_text))
+
+
+def _task_is_experiment_review(task: str) -> bool:
+    text = str(task or "").lower()
+    return any(term in text for term in EXPERIMENT_REVIEW_TERMS)
+
+
+def _walk_mappings(value: Any) -> list[Mapping[str, Any]]:
+    mappings: list[Mapping[str, Any]] = []
+    if isinstance(value, Mapping):
+        mappings.append(value)
+        for child in value.values():
+            mappings.extend(_walk_mappings(child))
+    elif isinstance(value, list):
+        for child in value:
+            mappings.extend(_walk_mappings(child))
+    return mappings
+
+
+def _as_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _training_summary_gaps(training_summary: Mapping[str, Any] | None) -> list[str]:
+    if not isinstance(training_summary, Mapping):
+        return []
+    gaps: list[str] = []
+    config = training_summary.get("training_config") if isinstance(training_summary.get("training_config"), Mapping) else {}
+    configured_epochs = _as_int(config.get("epochs") or config.get("max_epochs") or training_summary.get("epochs"))
+    if configured_epochs is not None and configured_epochs <= 2:
+        gaps.append("epochs<=2")
+
+    seed_values: set[str] = set()
+    has_learning_curve = False
+    for mapping in _walk_mappings(training_summary):
+        seed = mapping.get("seed")
+        if seed is not None:
+            seed_values.add(str(seed))
+        if isinstance(mapping.get("learning_curve"), list) and mapping.get("learning_curve"):
+            has_learning_curve = True
+        epochs_ran = _as_int(mapping.get("epochs_ran") or mapping.get("epoch_count"))
+        best_epoch = _as_int(mapping.get("best_epoch"))
+        if epochs_ran is not None and epochs_ran <= 2:
+            gaps.append("epochs_ran<=2")
+        if epochs_ran is not None and best_epoch is not None and epochs_ran == best_epoch:
+            gaps.append("best_epoch_at_last_epoch")
+        stopped_reason = str(mapping.get("stopped_reason", "") or mapping.get("stop_reason", "") or "").lower()
+        if stopped_reason == "max_epochs_reached":
+            gaps.append("max_epochs_reached")
+    if len(seed_values) == 1:
+        gaps.append("single_seed")
+    if not has_learning_curve:
+        gaps.append("missing_learning_curve")
+    return sorted(set(gaps))
+
+
+def _heuristic_low_budget_task(task: str) -> bool:
+    text = str(task or "").lower()
+    return any(term in text for term in ("低预算", "2 epoch", "2epoch", "epochs=2", "scout", "smoke")) and any(
+        term in text for term in ("质量结论", "模型质量", "实验", "证据", "review", "审阅")
+    )
+
+
+def detect_low_budget_evidence(
+    *,
+    task: str,
+    training_summary: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    if not _task_is_experiment_review(task):
+        return {
+            "status": "clear",
+            "signals": [],
+            "learning_opportunities": [],
+            "evidence_grade": "",
+            "next_actions": ["no_learning_needed"],
+        }
+
+    gaps = _training_summary_gaps(training_summary)
+    low_budget = bool(gaps) or _heuristic_low_budget_task(task)
+    if not low_budget:
+        return {
+            "status": "clear",
+            "signals": [],
+            "learning_opportunities": [],
+            "evidence_grade": "",
+            "next_actions": ["no_learning_needed"],
+        }
+
+    confidence = "high" if gaps else "medium"
+    evidence_grade = "scout_only" if gaps or _heuristic_low_budget_task(task) or "scout" in str(task or "").lower() else "smoke_only"
+    action = (
+        "downgrade low-budget runs to smoke_only/scout_only, require enough epochs, effective early stopping, multi-seed checks, "
+        "and validation convergence before using results as model-quality conclusions"
+    )
+    return {
+        "status": "opportunity",
+        "signals": ["low_budget_evidence_pollution"],
+        "learning_opportunities": [
+            {
+                "target_layer": "experiment_governance",
+                "owner_brain": "daily_research",
+                "confidence": confidence,
+                "recommended_action": action,
+                "writeback_route": "daily_research/brain/knowledge_center.md",
+                "verification_required": True,
+                "detector_id": "daily_research_low_budget_detector",
+                "source_signal": "low_budget_evidence_pollution",
+                "evidence_gaps": gaps or ["task_reports_low_budget_evidence"],
+            }
+        ],
+        "evidence_grade": evidence_grade,
+        "next_actions": ["create_proposal"],
+    }
 
 
 def _extract_artifact_tag(payload: dict[str, Any]) -> str:

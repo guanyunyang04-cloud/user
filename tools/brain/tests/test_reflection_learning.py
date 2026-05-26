@@ -114,6 +114,63 @@ class ReflectionLearningTest(unittest.TestCase):
         self.assertEqual(payload["learning_candidates"], [])
         self.assertEqual(payload["next_actions"], ["no_persistent_learning"])
 
+    def test_budget_reliability_gap_generates_experiment_governance_candidate(self) -> None:
+        module = load_reflection_module()
+        trace = {
+            "task": "审阅 multi-horizon 实验结果",
+            "planned_steps": [{"id": "review", "title": "review evidence", "expected_outcome": "budget graded", "required": True}],
+            "events": [
+                {
+                    "type": "budget_reliability_gap",
+                    "step_id": "review",
+                    "summary": "epochs=2 max_epochs_reached best_epoch=2 single seed used as model-quality evidence",
+                    "owner_brain": "daily_research",
+                    "target_layer": "experiment_governance",
+                    "evidence_grade": "scout_only",
+                }
+            ],
+            "final_state": {"completed": True, "skipped_steps": [], "unresolved_blockers": [], "user_nudges": [], "verification": []},
+        }
+
+        payload = module.analyze_trace(trace)
+
+        candidates = payload["learning_candidates"]
+        self.assertIn("experiment_governance", {candidate["target_layer"] for candidate in candidates})
+        candidate = next(candidate for candidate in candidates if candidate["target_layer"] == "experiment_governance")
+        self.assertEqual(candidate["confidence"], "high")
+        self.assertEqual(candidate["supporting_events"][0]["owner_brain"], "daily_research")
+
+    def test_analyze_meta_signals_detects_learning_opportunity_missed(self) -> None:
+        module = load_reflection_module()
+
+        payload = module.analyze_meta_signals(
+            task="这应该学会，为什么没提示，以后都要自动发现",
+            capsule_context={"target_kind": "workspace", "workflow_domain": "workspace_governance"},
+        )
+
+        self.assertEqual(payload["status"], "opportunity")
+        self.assertEqual(payload["authority"], "propose_only")
+        self.assertIn("learning_opportunity_missed", payload["signals"])
+        self.assertIn("create_proposal", payload["next_actions"])
+        self.assertTrue(payload["learning_opportunities"])
+
+    def test_analyze_meta_signals_detects_low_budget_evidence_pollution(self) -> None:
+        module = load_reflection_module()
+
+        payload = module.analyze_meta_signals(
+            task="审阅 multi-horizon 低预算实验是否可作模型质量结论",
+            capsule_context={
+                "target_kind": "child",
+                "workflow_domain": "daily_research",
+                "routing": {"selected_brain_id": "daily_research"},
+            },
+        )
+
+        self.assertEqual(payload["status"], "opportunity")
+        self.assertIn("low_budget_evidence_pollution", payload["signals"])
+        opportunity = next(item for item in payload["learning_opportunities"] if item["target_layer"] == "experiment_governance")
+        self.assertEqual(opportunity["owner_brain"], "daily_research")
+
     def test_review_cli_accepts_trace_json(self) -> None:
         trace_path = write_trace(
             {
