@@ -100,7 +100,88 @@ class ReflectionLearningTest(unittest.TestCase):
         payload = module.analyze_trace(trace)
 
         self.assertEqual(payload["learning_candidates"], [])
+        self.assertEqual(payload["meta_question_candidates"], [])
         self.assertEqual(payload["next_actions"], ["no_agent_learning_needed"])
+
+    def test_human_feedback_overrode_tool_clear_generates_evaluation_meta_candidate(self) -> None:
+        module = load_reflection_module()
+        trace = {
+            "task": "评估 agent meta audit 是否说明无问题",
+            "planned_steps": [{"id": "review", "title": "review meta audit", "expected_outcome": "closure judged", "required": True}],
+            "events": [
+                {
+                    "type": "human_feedback_overrode_tool_clear",
+                    "step_id": "review",
+                    "summary": "agent_meta_audit returned clear, but user pointed out the agent missed the meta problem",
+                    "evidence": "工具 clear 与人类反馈冲突",
+                }
+            ],
+            "final_state": {"completed": True, "skipped_steps": [], "unresolved_blockers": [], "user_nudges": ["工具 clear 不是免责"], "verification": []},
+        }
+
+        payload = module.analyze_trace(trace)
+
+        candidates = payload["meta_question_candidates"]
+        self.assertTrue(candidates)
+        candidate = candidates[0]
+        self.assertEqual(candidate["meta_layer"], "evaluation")
+        self.assertEqual(candidate["object_level_issue"], "agent_meta_audit returned clear, but user pointed out the agent missed the meta problem")
+        self.assertIn("clear", candidate["meta_question"])
+        self.assertTrue(candidate["ask_user_for_evolution"])
+        self.assertEqual(candidate["confidence"], "high")
+        self.assertIn("ask_user_for_evolution", payload["next_actions"])
+
+    def test_meta_question_missed_generates_learning_salience_candidate(self) -> None:
+        module = load_reflection_module()
+        trace = {
+            "task": "回答用户指出的执行边界误读",
+            "planned_steps": [{"id": "answer", "title": "explain mistake", "expected_outcome": "meta issue recognized", "required": True}],
+            "events": [
+                {
+                    "type": "meta_question_missed",
+                    "step_id": "answer",
+                    "summary": "agent fixed the object-level answer but did not recognize this as a learnable meta-cognitive failure",
+                    "evidence": "用户指出：你没有意识到问题本身",
+                }
+            ],
+            "final_state": {"completed": True, "skipped_steps": [], "unresolved_blockers": [], "user_nudges": ["没有意识到元问题"], "verification": []},
+        }
+
+        payload = module.analyze_trace(trace)
+
+        candidates = payload["meta_question_candidates"]
+        self.assertTrue(candidates)
+        candidate = candidates[0]
+        self.assertEqual(candidate["meta_layer"], "learning_salience")
+        self.assertIn("可泛化", candidate["why_it_matters"])
+        self.assertTrue(candidate["ask_user_for_evolution"])
+        self.assertEqual(candidate["confidence"], "high")
+
+    def test_handoff_conflict_is_authority_order_example_not_special_case(self) -> None:
+        module = load_reflection_module()
+        trace = {
+            "task": "执行用户明确要求的训练计划",
+            "planned_steps": [{"id": "train", "title": "run planned training", "expected_outcome": "training launched", "required": True}],
+            "events": [
+                {
+                    "type": "closure_boundary_misread",
+                    "step_id": "train",
+                    "summary": "agent treated handoff conservatism as higher authority than the user's explicit plan",
+                    "evidence": "handoff said no training; user plan said default full training",
+                    "target_layer": "authority_order",
+                }
+            ],
+            "final_state": {"completed": True, "skipped_steps": ["train"], "unresolved_blockers": [], "user_nudges": ["为什么不训练"], "verification": []},
+        }
+
+        payload = module.analyze_trace(trace)
+
+        candidates = payload["meta_question_candidates"]
+        self.assertTrue(candidates)
+        candidate = candidates[0]
+        self.assertEqual(candidate["meta_layer"], "authority")
+        self.assertNotIn("handoff", candidate["meta_layer"])
+        self.assertTrue(candidate["ask_user_for_evolution"])
 
     def test_one_off_environment_failure_does_not_create_persistent_learning(self) -> None:
         module = load_reflection_module()

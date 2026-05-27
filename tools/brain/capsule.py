@@ -262,13 +262,17 @@ def _build_agent_review(*, workflow_id: str, agent_meta_review: dict[str, Any]) 
         reason_codes.append("workflow_completion_review")
     if agent_meta_review.get("status") != "clear":
         reason_codes.append("agent_meta_opportunity")
+        reason_codes.append("closure_meta_review")
     commands = _agent_meta_commands()
+    closure_meta_review_required = bool(reason_codes)
     return {
         "before_final_required": bool(reason_codes),
         "reason_codes": _dedupe_text(reason_codes),
         "trace_template_command": commands["reflection_template"],
         "review_command": commands["review_trace"],
         "proposal_command": commands["proposal"],
+        "closure_meta_review_required": closure_meta_review_required,
+        "closure_review_command": commands["review_trace"],
     }
 
 

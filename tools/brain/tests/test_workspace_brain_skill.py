@@ -596,6 +596,53 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         targets = {candidate["target_layer"] for candidate in payload["learning_candidates"]}
         self.assertTrue({"execution_completion_gate", "long_task_execution_closure"}.intersection(targets))
 
+    def test_brain_runtime_review_outputs_meta_question_candidates(self) -> None:
+        trace_path = ROOT / "daily_research/output/test_trace_meta_question.json"
+        trace_path.parent.mkdir(parents=True, exist_ok=True)
+        trace_path.write_text(
+            json.dumps(
+                {
+                    "task": "判断 agent 是否遗漏元问题",
+                    "planned_steps": [
+                        {"id": "review", "title": "review closure", "expected_outcome": "meta issue found", "required": True}
+                    ],
+                    "events": [
+                        {
+                            "type": "human_feedback_overrode_tool_clear",
+                            "step_id": "review",
+                            "summary": "audit was clear but user feedback showed the closure judgment was wrong",
+                            "evidence": "agent-meta-audit clear; user says meta-cognition missing",
+                        }
+                    ],
+                    "final_state": {
+                        "completed": True,
+                        "skipped_steps": [],
+                        "unresolved_blockers": [],
+                        "user_nudges": ["工具 clear 但人类反馈不 clear"],
+                        "verification": [],
+                    },
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        try:
+            result = subprocess.run(
+                [PYTHON, str(RUNTIME), "review", "--cwd", str(ROOT), "--trace-json", str(trace_path), "--json"],
+                cwd=str(ROOT),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=True,
+            )
+        finally:
+            trace_path.unlink(missing_ok=True)
+        payload = json.loads(result.stdout)
+
+        self.assertTrue(payload["meta_question_candidates"])
+        self.assertIn("ask_user_for_evolution", payload["next_actions"])
+        self.assertTrue(payload["meta_question_candidates"][0]["ask_user_for_evolution"])
+
     def test_brain_runtime_agent_meta_audit_compact_reports_contract(self) -> None:
         result = subprocess.run(
             [PYTHON, str(RUNTIME), "agent-meta-audit", "--cwd", str(ROOT), "--mode", "compact"],
@@ -611,6 +658,7 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertEqual(payload["mode"], "compact")
         self.assertIn("agent_learning", payload)
         self.assertIn("agent_meta_contract", payload)
+        self.assertIn("closure_meta_review", payload["agent_meta_contract"])
         self.assertIn("daily_research_evidence_quality", payload)
         self.assertIn("actionable_items", payload)
 

@@ -60,6 +60,7 @@ def agent_meta_audit(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
     sample = subprocess.run(command, cwd=str(workspace), capture_output=True, text=True, encoding="utf-8", check=False)
     sample_capsule = _parse_json_stdout(sample)
     agent_meta = sample_capsule.get("agent_meta", {}) if isinstance(sample_capsule, dict) else {}
+    agent_review = sample_capsule.get("agent_review", {}) if isinstance(sample_capsule, dict) else {}
     review = agent_meta.get("review", {}) if isinstance(agent_meta, dict) else {}
     agent_meta_contract = {
         "status": "ok"
@@ -72,6 +73,10 @@ def agent_meta_audit(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
         else "warning",
         "has_agent_meta": isinstance(agent_meta, dict),
         "review_status": str(review.get("status", "") if isinstance(review, dict) else ""),
+        "closure_meta_review": {
+            "available": isinstance(agent_review, dict) and "closure_review_command" in agent_review,
+            "required": bool(agent_review.get("closure_meta_review_required")) if isinstance(agent_review, dict) else False,
+        },
     }
     if sample.returncode != 0:
         agent_meta_contract["returncode"] = sample.returncode

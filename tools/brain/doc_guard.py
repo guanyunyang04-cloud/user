@@ -705,6 +705,13 @@ def _check_manifest_semantics(path: Path, text: str) -> list[str]:
                     issues.append(f"main_agent_meta_protocol_{key}_must_be_{value}")
             if agent_meta.get("required_passes") != ["task_start", "decision_boundary", "before_final"]:
                 issues.append("main_agent_meta_protocol_required_passes_invalid")
+            if agent_meta.get("before_final_mode") != "closure_boundary_meta_question_discovery":
+                issues.append("main_agent_meta_protocol_before_final_mode_invalid")
+            if agent_meta.get("before_final_trigger_policy") != "low_noise":
+                issues.append("main_agent_meta_protocol_before_final_trigger_policy_invalid")
+            human_override_rule = str(agent_meta.get("before_final_human_override_rule", "") or "").lower()
+            if "tool clear" not in human_override_rule or "human feedback" not in human_override_rule:
+                issues.append("main_agent_meta_protocol_before_final_human_override_rule_invalid")
             if agent_meta.get("proposal_queue") != "brain/output/agent_learning/":
                 issues.append("main_agent_meta_protocol_proposal_queue_invalid")
             if agent_meta.get("pending_approval_statuses") != ["proposed", "approved"]:

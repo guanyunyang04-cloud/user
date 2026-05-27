@@ -92,6 +92,8 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertEqual(payload["agent_meta"]["review"]["status"], "clear")
         self.assertEqual(payload["agent_meta"]["review"]["next_actions"], ["no_learning_needed"])
         self.assertFalse(payload["agent_review"]["before_final_required"])
+        self.assertFalse(payload["agent_review"]["closure_meta_review_required"])
+        self.assertIn("closure_review_command", payload["agent_review"])
         self.assertIn("main_context", payload)
         self.assertIn("workspace_context", payload)
         self.assertEqual(payload["routing"]["selected_brain_id"], "workspace")
@@ -234,6 +236,23 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertIn("create_proposal", review["next_actions"])
         self.assertTrue(payload["agent_review"]["before_final_required"])
         self.assertIn("agent_meta_opportunity", payload["agent_review"]["reason_codes"])
+        self.assertTrue(payload["agent_review"]["closure_meta_review_required"])
+
+    def test_capsule_meta_question_request_exposes_closure_review(self) -> None:
+        payload = build_task_capsule(
+            task="你真的理解我说的元问题吗？重点是任务结束前要意识到问题本身",
+            workflow="auto",
+            intent="read",
+            verbosity="lite",
+        )
+
+        review = payload["agent_meta"]["review"]
+        self.assertEqual(review["status"], "opportunity")
+        self.assertIn("meta_question_discovery_gap", review["signals"])
+        self.assertTrue(payload["agent_review"]["closure_meta_review_required"])
+        self.assertIn("closure_meta_review", payload["agent_review"]["reason_codes"])
+        self.assertIn(" review ", payload["agent_review"]["closure_review_command"])
+        self.assertIn("--trace-json", payload["agent_review"]["closure_review_command"])
 
     def test_capsule_actor_boundary_mismatch_exposes_agent_meta_opportunity(self) -> None:
         payload = build_task_capsule(
@@ -306,6 +325,7 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertEqual(payload["routing"]["target"]["kind"], "workspace")
         self.assertTrue(payload["agent_review"]["before_final_required"])
         self.assertIn("workflow_completion_review", payload["agent_review"]["reason_codes"])
+        self.assertTrue(payload["agent_review"]["closure_meta_review_required"])
 
 
 if __name__ == "__main__":

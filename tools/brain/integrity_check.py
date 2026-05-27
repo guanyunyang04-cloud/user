@@ -408,6 +408,29 @@ def _validate_main_manifest(findings: list[Finding], main_manifest: dict[str, An
                     main_path,
                 )
             )
+        if agent_meta.get("before_final_mode") != "closure_boundary_meta_question_discovery":
+            findings.append(
+                Finding(
+                    "error",
+                    "main_agent_meta_protocol_invalid",
+                    "before_final_mode must be closure_boundary_meta_question_discovery",
+                    main_path,
+                )
+            )
+        if agent_meta.get("before_final_trigger_policy") != "low_noise":
+            findings.append(
+                Finding("error", "main_agent_meta_protocol_invalid", "before_final_trigger_policy must be low_noise", main_path)
+            )
+        human_override_rule = str(agent_meta.get("before_final_human_override_rule", "") or "").lower()
+        if "tool clear" not in human_override_rule or "human feedback" not in human_override_rule:
+            findings.append(
+                Finding(
+                    "error",
+                    "main_agent_meta_protocol_invalid",
+                    "before_final_human_override_rule must describe human feedback overriding tool clear closure",
+                    main_path,
+                )
+            )
         proposal_queue = str(agent_meta.get("proposal_queue", "") or "")
         if proposal_queue != "brain/output/agent_learning/":
             findings.append(Finding("error", "main_agent_meta_protocol_invalid", "proposal_queue must be brain/output/agent_learning/", main_path))

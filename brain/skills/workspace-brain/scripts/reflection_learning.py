@@ -19,6 +19,9 @@ TRACE_EVENT_TYPES = (
     "rule_not_enforced",
     "learning_opportunity_missed",
     "domain_guard_gap",
+    "meta_question_missed",
+    "human_feedback_overrode_tool_clear",
+    "closure_boundary_misread",
 )
 
 TRACE_OPTIONAL_EVENT_FIELDS = (
@@ -77,6 +80,10 @@ def reflection_template() -> dict[str, Any]:
             "user_nudges": [],
             "verification": [],
         },
+        "closure_review": {
+            "status": "pending",
+            "notes": "optional closure-boundary review for meta-questions about frame, criteria, method, authority, evaluation, or learning salience",
+        },
     }
 
 
@@ -127,6 +134,7 @@ def normalize_trace(raw: dict[str, Any]) -> dict[str, Any]:
             event["artifact_path"] = str(item.get("artifact_path", "") or "")
         events.append(event)
     final_state_raw = trace.get("final_state") if isinstance(trace.get("final_state"), dict) else {}
+    closure_review_raw = trace.get("closure_review") if isinstance(trace.get("closure_review"), dict) else {}
     return {
         "schema_version": 1,
         "task": str(trace.get("task", "") or ""),
@@ -138,6 +146,10 @@ def normalize_trace(raw: dict[str, Any]) -> dict[str, Any]:
             "unresolved_blockers": _string_list(final_state_raw.get("unresolved_blockers")),
             "user_nudges": _string_list(final_state_raw.get("user_nudges")),
             "verification": _list_of_dicts(final_state_raw.get("verification")),
+        },
+        "closure_review": {
+            "status": str(closure_review_raw.get("status", "") or ""),
+            "notes": str(closure_review_raw.get("notes", "") or ""),
         },
     }
 
@@ -166,12 +178,110 @@ def _candidate(
     }
 
 
+def _meta_question_candidate(
+    *,
+    meta_layer: str,
+    object_level_issue: str,
+    meta_question: str,
+    why_it_matters: str,
+    confidence: str,
+    supporting_events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "meta_layer": meta_layer,
+        "object_level_issue": object_level_issue,
+        "meta_question": meta_question,
+        "why_it_matters": why_it_matters,
+        "ask_user_for_evolution": True,
+        "confidence": confidence,
+        "supporting_events": supporting_events,
+    }
+
+
 def _events_of_type(events: list[dict[str, Any]], event_type: str) -> list[dict[str, Any]]:
     return [event for event in events if event.get("type") == event_type]
 
 
 def _event_text(event: dict[str, Any]) -> str:
     return " ".join(str(event.get(key, "") or "") for key in ("summary", "evidence", "command")).lower()
+
+
+def _meta_candidates_from_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+
+    for event in _events_of_type(events, "human_feedback_overrode_tool_clear"):
+        summary = str(event.get("summary", "") or "tool/audit clear conflicted with human feedback")
+        candidates.append(
+            _meta_question_candidate(
+                meta_layer="evaluation",
+                object_level_issue=summary,
+                meta_question="When a tool or audit says clear, what higher-level evidence can override that clear signal?",
+                why_it_matters="工具 clear 只是传感器结论；若人类反馈指出闭合判断不成立，评价机制本身需要被重新审视。",
+                confidence=str(event.get("confidence", "") or "high"),
+                supporting_events=[event],
+            )
+        )
+
+    for event in _events_of_type(events, "meta_question_missed"):
+        summary = str(event.get("summary", "") or "agent corrected object-level behavior but missed the meta-question")
+        candidates.append(
+            _meta_question_candidate(
+                meta_layer="learning_salience",
+                object_level_issue=summary,
+                meta_question="Did the correction reveal a reusable flaw in how the agent frames, evaluates, or closes tasks?",
+                why_it_matters="这不是一次性错误；它暴露了可泛化的认知缺陷发现能力，需要在闭合前主动识别并征求是否沉淀。",
+                confidence=str(event.get("confidence", "") or "high"),
+                supporting_events=[event],
+            )
+        )
+
+    for event in _events_of_type(events, "closure_boundary_misread"):
+        summary = str(event.get("summary", "") or "agent misread the closure boundary")
+        text = _event_text(event)
+        target_layer = str(event.get("target_layer", "") or "").lower()
+        if "authority" in target_layer or any(term in text for term in ("handoff", "explicit plan", "user", "用户", "clear", "old context", "旧上下文")):
+            candidates.append(
+                _meta_question_candidate(
+                    meta_layer="authority",
+                    object_level_issue=summary,
+                    meta_question="Which instruction or evidence source should control the closure judgment when context sources conflict?",
+                    why_it_matters="权威排序错误会跨任务复发：agent 可能持续把旧上下文、工具输出或保守推断放到用户明确意图之上。",
+                    confidence=str(event.get("confidence", "") or "high"),
+                    supporting_events=[event],
+                )
+            )
+        elif any(term in text for term in ("criterion", "success", "完成标准", "标准")):
+            candidates.append(
+                _meta_question_candidate(
+                    meta_layer="criterion",
+                    object_level_issue=summary,
+                    meta_question="What success criterion is being used to decide this task is complete, and does the user share it?",
+                    why_it_matters="完成标准错位会让对象层工作看似完成，但实际没有回答用户要闭合的问题。",
+                    confidence=str(event.get("confidence", "") or "medium"),
+                    supporting_events=[event],
+                )
+            )
+        else:
+            candidates.append(
+                _meta_question_candidate(
+                    meta_layer="frame",
+                    object_level_issue=summary,
+                    meta_question="Is the agent closing the object-level task while missing a higher-level question about the task frame?",
+                    why_it_matters="框架误读会让 agent 用局部修补替代对问题本身的重构判断。",
+                    confidence=str(event.get("confidence", "") or "medium"),
+                    supporting_events=[event],
+                )
+            )
+
+    unique: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for candidate in candidates:
+        key = (str(candidate["meta_layer"]), str(candidate["object_level_issue"]))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(candidate)
+    return unique
 
 
 def _is_one_off_environment_failure(events: list[dict[str, Any]], final_state: dict[str, Any]) -> bool:
@@ -200,6 +310,7 @@ def analyze_trace(raw_trace: dict[str, Any]) -> dict[str, Any]:
             "reflection_review_required": True,
             "evidence_gaps": [],
             "learning_candidates": [],
+            "meta_question_candidates": [],
             "next_actions": ["no_persistent_learning"],
         }
 
@@ -370,13 +481,23 @@ def analyze_trace(raw_trace: dict[str, Any]) -> dict[str, Any]:
         seen.add(key)
         unique.append(candidate)
 
+    meta_question_candidates = _meta_candidates_from_events(events)
+    next_actions: list[str] = []
+    if unique:
+        next_actions.append("create_agent_learning_proposal")
+    if meta_question_candidates:
+        next_actions.append("ask_user_for_evolution")
+    if not next_actions:
+        next_actions.append("no_agent_learning_needed")
+
     return {
         "status": "ok",
         "analysis_mode": "structured_trace",
         "reflection_review_required": True,
         "evidence_gaps": [],
         "learning_candidates": unique,
-        "next_actions": ["create_agent_learning_proposal"] if unique else ["no_agent_learning_needed"],
+        "meta_question_candidates": meta_question_candidates,
+        "next_actions": next_actions,
     }
 
 
@@ -455,6 +576,19 @@ def analyze_freeform(*, task: str = "", observation: str = "", test_output: str 
             suggested_tests=["freeform skill sync observation returns skill candidate"],
         )
 
+    meta_question_candidates: list[dict[str, Any]] = []
+    if any(term in text for term in ("元问题", "元认知", "问题本身", "任务结束前", "工具 clear", "audit clear", "评价机制", "完成标准")):
+        meta_question_candidates.append(
+            _meta_question_candidate(
+                meta_layer="learning_salience",
+                object_level_issue=evidence,
+                meta_question="Is this observation about the object-level task, or about how the agent framed, evaluated, or closed the task?",
+                why_it_matters="用户把问题提升到元层时，agent 需要识别可泛化的认知缺陷，而不是只修正对象层回答。",
+                confidence="low",
+                supporting_events=[{"type": "freeform_observation", "step_id": "", "summary": evidence}],
+            )
+        )
+
     unique: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     for candidate in candidates:
@@ -470,7 +604,11 @@ def analyze_freeform(*, task: str = "", observation: str = "", test_output: str 
         "reflection_review_required": True,
         "evidence_gaps": ["structured_trace_missing"],
         "learning_candidates": unique,
-        "next_actions": ["create_agent_learning_proposal"] if unique else ["no_agent_learning_needed"],
+        "meta_question_candidates": meta_question_candidates,
+        "next_actions": (
+            [*("create_agent_learning_proposal" for _ in unique[:1]), *("ask_user_for_evolution" for _ in meta_question_candidates[:1])]
+            or ["no_agent_learning_needed"]
+        ),
     }
 
 

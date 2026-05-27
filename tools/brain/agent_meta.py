@@ -277,6 +277,42 @@ def analyze_agent_meta_signals(
             )
         )
 
+    meta_question_terms = (
+        "元问题",
+        "元认知",
+        "元能力",
+        "关于问题的问题",
+        "问题本身",
+        "任务结束前",
+        "闭合边界",
+        "完成标准",
+        "评价机制",
+        "方法选择",
+        "前提",
+        "目标一致性",
+        "框架",
+        "metacognition",
+        "meta question",
+        "meta-reasoning",
+        "closure boundary",
+    )
+    if any(term in text for term in meta_question_terms):
+        signals.extend(["user_correction", "meta_question_discovery_gap"])
+        opportunities.append(
+            _opportunity(
+                target_layer="agent_meta_protocol",
+                owner_brain="workspace",
+                confidence="high",
+                recommended_action=(
+                    "treat before-final as low-noise closure-boundary meta-question discovery: "
+                    "when human feedback, task facts, or method/frame mismatch contradict tool-clear closure, ask the user whether to evolve the agent/brain protocol"
+                ),
+                writeback_route="brain/governance_layer.md",
+                source_signal="meta_question_discovery_gap",
+                detector_id="meta_question_detector",
+            )
+        )
+
     if any(term in text for term in ("规则写了", "明明写", "没有执行", "未进入热路径", "rule not enforced")):
         signals.append("rule_not_enforced")
         opportunities.append(
@@ -319,6 +355,8 @@ def analyze_agent_meta_signals(
 
     signals = _dedupe_strings(signals)
     opportunities = _dedupe_opportunities(opportunities)
+    if "meta_question_discovery_gap" in signals:
+        actions.append("ask_user_for_evolution")
     actions = _dedupe_strings([*actions, *("create_proposal" for _ in opportunities)])
     if not signals and not opportunities:
         return clear_agent_meta_review()
