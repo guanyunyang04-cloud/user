@@ -276,6 +276,69 @@ def _long_horizon_share(frame: pd.DataFrame) -> float:
     return float((horizons >= 15).mean())
 
 
+def _thirty_d_concentration(frame: pd.DataFrame) -> float:
+    horizons = pd.to_numeric(frame["pred_best_horizon"], errors="coerce").dropna()
+    if horizons.empty:
+        return 0.0
+    return float((horizons == 30).mean())
+
+
+def _future_long_horizon_share(frame: pd.DataFrame) -> float:
+    horizons = pd.to_numeric(frame["future_best_horizon"], errors="coerce").dropna()
+    if horizons.empty:
+        return 0.0
+    return float((horizons >= 15).mean())
+
+
+def _pred_future_horizon_gap(frame: pd.DataFrame) -> float:
+    pred = pd.to_numeric(frame["pred_best_horizon"], errors="coerce")
+    future = pd.to_numeric(frame["future_best_horizon"], errors="coerce")
+    valid = pred.notna() & future.notna()
+    if int(valid.sum()) == 0:
+        return 0.0
+    return float((pred.loc[valid] - future.loc[valid]).abs().mean())
+
+
+def _utility_distribution_summary(frame: pd.DataFrame, *, prefix: str) -> dict[str, dict[str, float]]:
+    rows: dict[str, dict[str, float]] = {}
+    pattern = re.compile(rf"^{re.escape(prefix)}_(\d+)d$")
+    for column in sorted(frame.columns):
+        match = pattern.match(str(column))
+        if match is None:
+            continue
+        values = pd.to_numeric(frame[column], errors="coerce").dropna()
+        if values.empty:
+            rows[str(int(match.group(1)))] = {"mean": 0.0, "std": 0.0, "p10": 0.0, "p50": 0.0, "p90": 0.0}
+            continue
+        rows[str(int(match.group(1)))] = {
+            "mean": _finite_float(values.mean()),
+            "std": _finite_float(values.std(ddof=0)),
+            "p10": _finite_float(values.quantile(0.10)),
+            "p50": _finite_float(values.quantile(0.50)),
+            "p90": _finite_float(values.quantile(0.90)),
+        }
+    return rows
+
+
+def _future_target_normalized_best_horizon_distribution(frame: pd.DataFrame) -> dict[str, int]:
+    horizons = _prediction_horizons(frame)
+    utility_cols = [f"future_decision_utility_{int(horizon)}d" for horizon in horizons]
+    if not utility_cols:
+        return {}
+    utility = frame[utility_cols].apply(pd.to_numeric, errors="coerce")
+    if utility.empty:
+        return {}
+    std = utility.std(axis=0, ddof=0).clip(lower=1.0e-8)
+    normalized = (utility - utility.mean(axis=0)) / std
+    best_idx = normalized.to_numpy(dtype=float).argmax(axis=1)
+    horizon_values = np.asarray(horizons, dtype=int)
+    best_horizons = pd.Series(horizon_values[best_idx])
+    return {
+        str(int(key)): int(value)
+        for key, value in best_horizons.value_counts().sort_index().to_dict().items()
+    }
+
+
 def _summarize_predictions(frame: pd.DataFrame, *, role: str) -> dict[str, Any]:
     _require_prediction_columns(frame)
     horizons = _prediction_horizons(frame)
@@ -311,7 +374,22 @@ def _summarize_predictions(frame: pd.DataFrame, *, role: str) -> dict[str, Any]:
             .to_dict()
             .items()
         },
+        "future_horizon_concentration": {
+            str(int(key)): int(value)
+            for key, value in pd.to_numeric(frame["future_best_horizon"], errors="coerce")
+            .dropna()
+            .astype(int)
+            .value_counts()
+            .sort_index()
+            .to_dict()
+            .items()
+        },
+        "future_target_normalized_best_horizon_concentration": _future_target_normalized_best_horizon_distribution(frame),
+        "future_utility_distribution": _utility_distribution_summary(frame, prefix="future_decision_utility"),
         "long_horizon_share": _long_horizon_share(frame),
+        "thirty_d_concentration": _thirty_d_concentration(frame),
+        "future_long_horizon_share": _future_long_horizon_share(frame),
+        "pred_future_horizon_gap": _pred_future_horizon_gap(frame),
     }
 
 
@@ -341,6 +419,9 @@ def _score_variant_metrics(frame: pd.DataFrame, *, role: str) -> list[dict[str, 
                 "negative_month_count": len(negative_months),
                 "worst_month_spread": worst_month,
                 "long_horizon_share": _long_horizon_share(frame),
+                "thirty_d_concentration": _thirty_d_concentration(frame),
+                "future_long_horizon_share": _future_long_horizon_share(frame),
+                "pred_future_horizon_gap": _pred_future_horizon_gap(frame),
             }
         )
     return rows
@@ -517,6 +598,9 @@ def output_profile_comparison_rows(report: dict[str, Any]) -> list[dict[str, Any
                     "negative_month_count": metrics.get("negative_month_count", 0),
                     "worst_month_spread": metrics.get("worst_month_spread", 0.0),
                     "long_horizon_share": metrics.get("long_horizon_share", 0.0),
+                    "thirty_d_concentration": metrics.get("thirty_d_concentration", 0.0),
+                    "future_long_horizon_share": metrics.get("future_long_horizon_share", 0.0),
+                    "pred_future_horizon_gap": metrics.get("pred_future_horizon_gap", 0.0),
                 }
             )
     return rows
@@ -546,6 +630,9 @@ def score_variant_comparison_rows(report: dict[str, Any]) -> list[dict[str, Any]
                 "negative_month_count": metrics.get("negative_month_count", 0),
                 "worst_month_spread": metrics.get("worst_month_spread", 0.0),
                 "long_horizon_share": metrics.get("long_horizon_share", 0.0),
+                "thirty_d_concentration": metrics.get("thirty_d_concentration", 0.0),
+                "future_long_horizon_share": metrics.get("future_long_horizon_share", 0.0),
+                "pred_future_horizon_gap": metrics.get("pred_future_horizon_gap", 0.0),
             }
             rows.append(row)
     return rows
@@ -594,6 +681,9 @@ def profile_aggregate_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
         negative = [int(item.get("negative_month_count", 0) or 0) for item in items]
         worst = [_finite_float(item.get("worst_month_spread")) for item in items]
         long_share = [_finite_float(item.get("long_horizon_share")) for item in items]
+        thirty_d = [_finite_float(item.get("thirty_d_concentration")) for item in items]
+        future_long = [_finite_float(item.get("future_long_horizon_share")) for item in items]
+        pred_future_gap = [_finite_float(item.get("pred_future_horizon_gap")) for item in items]
         seed_count = len({int(item.get("seed", 0) or 0) for item in items})
         horizon_count = len([item for item in horizon_grid.split(",") if item.strip()])
         daily_grid_feasibility = bool(
@@ -639,10 +729,59 @@ def profile_aggregate_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
                 "negative_month_count_max": max(negative) if negative else 0,
                 "worst_month_spread_min": min(worst) if worst else 0.0,
                 "long_horizon_share_mean": _mean(long_share),
+                "thirty_d_concentration_mean": _mean(thirty_d),
+                "future_long_horizon_share_mean": _mean(future_long),
+                "pred_future_horizon_gap_mean": _mean(pred_future_gap),
                 "all_seed_rank_ic_spread_hit_positive": all_positive,
                 "stage3_weak_gate_pass": stage3_weak_gate,
             }
         )
+    validation_lookup = {
+        (
+            row["loss_profile"],
+            row["output_profile"],
+            row["model_family"],
+            row["feature_profile"],
+            row["horizon_grid_key"],
+            row["horizon_grid"],
+            row["score_name"],
+        ): row
+        for row in out
+        if row.get("role") == "validation"
+    }
+    for row in out:
+        validation = validation_lookup.get(
+            (
+                row["loss_profile"],
+                row["output_profile"],
+                row["model_family"],
+                row["feature_profile"],
+                row["horizon_grid_key"],
+                row["horizon_grid"],
+                row["score_name"],
+            ),
+            {},
+        )
+        validation_rank = _finite_float(validation.get("rank_ic_mean"))
+        validation_spread = _finite_float(validation.get("spread_mean"))
+        validation_hit = _finite_float(validation.get("hit_lift_mean"))
+        validation_monthly = _finite_float(validation.get("monthly_positive_rate_mean"))
+        row["validation_rank_ic_mean"] = validation_rank
+        row["validation_spread_mean"] = validation_spread
+        row["validation_hit_lift_mean"] = validation_hit
+        row["validation_monthly_positive_rate_mean"] = validation_monthly
+        if row.get("role") == "test" and validation:
+            row["validation_test_rank_ic_gap"] = _finite_float(row.get("rank_ic_mean")) - validation_rank
+            row["validation_test_spread_gap"] = _finite_float(row.get("spread_mean")) - validation_spread
+            row["validation_test_hit_lift_gap"] = _finite_float(row.get("hit_lift_mean")) - validation_hit
+            row["validation_test_monthly_positive_rate_gap"] = _finite_float(row.get("monthly_positive_rate_mean")) - validation_monthly
+            row["validation_test_metric_gap"] = row["validation_test_rank_ic_gap"]
+        else:
+            row["validation_test_rank_ic_gap"] = 0.0
+            row["validation_test_spread_gap"] = 0.0
+            row["validation_test_hit_lift_gap"] = 0.0
+            row["validation_test_monthly_positive_rate_gap"] = 0.0
+            row["validation_test_metric_gap"] = 0.0
     return out
 
 

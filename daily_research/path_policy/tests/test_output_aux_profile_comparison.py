@@ -436,6 +436,37 @@ def test_daily_grid_long_horizon_share_counts_all_horizons_at_or_above_15(tmp_pa
     assert row["long_horizon_share_mean"] == 1.0
 
 
+def test_profile_aggregate_rows_include_stage27_horizon_and_validation_test_diagnostics(tmp_path: Path) -> None:
+    studies = [
+        _study_with_seed(tmp_path, "target_norm_seed7", loss_profile="target_norm_head_constraint_v1", seed=7),
+        _study_with_seed(tmp_path, "target_norm_seed11", loss_profile="target_norm_head_constraint_v1", seed=11),
+        _study_with_seed(tmp_path, "target_norm_seed19", loss_profile="target_norm_head_constraint_v1", seed=19),
+    ]
+    for study in studies:
+        validation = pd.read_csv(study / "forecast_predictions_validation.csv")
+        test = pd.read_csv(study / "forecast_predictions_test.csv")
+        validation["future_decision_score"] = validation["future_decision_score"] * 1.50
+        validation.to_csv(study / "forecast_predictions_validation.csv", index=False)
+        test["pred_best_horizon"] = 30
+        test["future_best_horizon"] = 1
+        test.to_csv(study / "forecast_predictions_test.csv", index=False)
+
+    report = build_output_aux_profile_comparison(studies, run_tag="unit")
+    row = next(
+        item
+        for item in profile_aggregate_rows(report)
+        if item["role"] == "test"
+        and item["score_name"] == "pred_decision_score"
+        and item["loss_profile"] == "target_norm_head_constraint_v1"
+    )
+
+    assert row["thirty_d_concentration_mean"] == 1.0
+    assert row["future_long_horizon_share_mean"] == 0.0
+    assert row["pred_future_horizon_gap_mean"] == 29.0
+    assert row["validation_test_rank_ic_gap"] == row["rank_ic_mean"] - row["validation_rank_ic_mean"]
+    assert row["validation_test_spread_gap"] < 0.0
+
+
 def test_write_output_aux_profile_comparison_outputs_calibration_artifacts(tmp_path: Path) -> None:
     studies = [
         _study_with_seed(tmp_path, "utility_seed7", loss_profile="decision_utility_v1_baseline", seed=7),

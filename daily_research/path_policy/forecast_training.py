@@ -62,6 +62,9 @@ FORECAST_LOSS_PROFILES = (
     "score_monthly_robust_v1",
     "horizon_entropy_regularized_v1",
     "risk_drawdown_reweighted_v1",
+    "horizon_target_normalized_v1",
+    "horizon_head_soft_constraint_v1",
+    "target_norm_head_constraint_v1",
 )
 FORECAST_RANKING_BASELINES = ("none", "lightgbm", "xgboost")
 FORECAST_RISK_AUX_NAMES = ("downside_floor", "worst_1d", "upside")
@@ -80,6 +83,9 @@ _FORECAST_DECISION_LOSS_PROFILES = {
     "score_monthly_robust_v1",
     "horizon_entropy_regularized_v1",
     "risk_drawdown_reweighted_v1",
+    "horizon_target_normalized_v1",
+    "horizon_head_soft_constraint_v1",
+    "target_norm_head_constraint_v1",
 }
 _FORECAST_LOSS_WEIGHT_PRESETS: dict[str, dict[str, float]] = {
     "default": {
@@ -253,7 +259,70 @@ _FORECAST_LOSS_WEIGHT_PRESETS: dict[str, dict[str, float]] = {
         "decision_rank_aux": 0.25,
         "horizon_entropy": 0.0,
     },
+    "horizon_target_normalized_v1": {
+        "path_daily": 0.50,
+        "quantile": 0.20,
+        "path_aux": 0.20,
+        "risk_aux": 0.05,
+        "rank_aux": 0.95,
+        "risk_rank_aux": 0.005,
+        "direction_aux": 0.0,
+        "downside_rank_aux": 0.0,
+        "decision_utility": 1.00,
+        "hit_aux": 0.20,
+        "horizon_classification": 0.12,
+        "decision_rank_aux": 0.50,
+        "horizon_entropy": 0.0,
+        "horizon_target_normalization": 1.0,
+        "horizon_head_soft_constraint": 0.0,
+    },
+    "horizon_head_soft_constraint_v1": {
+        "path_daily": 0.50,
+        "quantile": 0.20,
+        "path_aux": 0.20,
+        "risk_aux": 0.05,
+        "rank_aux": 1.00,
+        "risk_rank_aux": 0.005,
+        "direction_aux": 0.0,
+        "downside_rank_aux": 0.0,
+        "decision_utility": 1.00,
+        "hit_aux": 0.20,
+        "horizon_classification": 0.10,
+        "decision_rank_aux": 0.55,
+        "horizon_entropy": 0.0,
+        "horizon_target_normalization": 0.0,
+        "horizon_head_soft_constraint": 0.05,
+    },
+    "target_norm_head_constraint_v1": {
+        "path_daily": 0.50,
+        "quantile": 0.20,
+        "path_aux": 0.20,
+        "risk_aux": 0.05,
+        "rank_aux": 0.95,
+        "risk_rank_aux": 0.005,
+        "direction_aux": 0.0,
+        "downside_rank_aux": 0.0,
+        "decision_utility": 1.00,
+        "hit_aux": 0.20,
+        "horizon_classification": 0.10,
+        "decision_rank_aux": 0.55,
+        "horizon_entropy": 0.0,
+        "horizon_target_normalization": 1.0,
+        "horizon_head_soft_constraint": 0.05,
+    },
 }
+
+_FORECAST_TARGET_NORMALIZED_LOSS_PROFILES = {
+    "horizon_target_normalized_v1",
+    "target_norm_head_constraint_v1",
+}
+_FORECAST_HEAD_CONSTRAINT_LOSS_PROFILES = {
+    "horizon_head_soft_constraint_v1",
+    "target_norm_head_constraint_v1",
+}
+_HORIZON_HEAD_CONSTRAINT_MAX_30D_PROBABILITY = 0.75
+_HORIZON_HEAD_CONSTRAINT_LONG_HORIZONS = (15, 20, 30)
+_HORIZON_HEAD_CONSTRAINT_MIN_LONG_PROBABILITY = 0.40
 
 
 class _EagerTorchDataset(torch.utils.data.Dataset):
@@ -594,6 +663,15 @@ def forecast_loss_profile_contract(
             "loss_component_weights": weights,
             "forecast_horizon": int(forecast_horizon),
             "cumulative_horizons": [int(item) for item in horizons],
+            "target_normalization": "per_horizon_utility_zscore"
+            if profile in _FORECAST_TARGET_NORMALIZED_LOSS_PROFILES
+            else "none",
+            "horizon_head_constraint": {
+                "enabled": profile in _FORECAST_HEAD_CONSTRAINT_LOSS_PROFILES,
+                "max_30d_probability": _HORIZON_HEAD_CONSTRAINT_MAX_30D_PROBABILITY,
+                "min_long_horizon_probability": _HORIZON_HEAD_CONSTRAINT_MIN_LONG_PROBABILITY,
+                "long_horizons": list(_HORIZON_HEAD_CONSTRAINT_LONG_HORIZONS),
+            },
             "shadow_only": True,
             "promotion_allowed": False,
             "active_execution_strategy_expected_diff": "none",
@@ -1003,6 +1081,7 @@ def _forecast_loss(
             drawdown_penalty=float(decision_drawdown_penalty),
             cumulative_horizons=horizons,
             max_horizon=int(y_daily_scaled.shape[1]),
+            normalize_per_horizon=profile in _FORECAST_TARGET_NORMALIZED_LOSS_PROFILES,
         )
         utility_pred = decision_aux[:, :cum_count]
         hit_logits = decision_aux[:, cum_count : cum_count * 2]
@@ -1016,6 +1095,19 @@ def _forecast_loss(
         loss = loss + float(weights["hit_aux"]) * F.binary_cross_entropy_with_logits(hit_logits, hit_target)
         loss = loss + float(weights["horizon_classification"]) * F.cross_entropy(horizon_logits, best_horizon_index)
         loss = loss + float(weights["decision_rank_aux"]) * pairwise_rank_loss(pred_decision_score, future_decision_score)
+        constraint_weight = float(weights.get("horizon_head_soft_constraint", 0.0))
+        if constraint_weight > 0.0:
+            probabilities = F.softmax(horizon_logits, dim=1)
+            horizon_values = torch.as_tensor(horizons, dtype=torch.long, device=horizon_logits.device)
+            thirty_mask = horizon_values == int(max(horizons))
+            long_mask = torch.zeros_like(horizon_values, dtype=torch.bool)
+            for item in _HORIZON_HEAD_CONSTRAINT_LONG_HORIZONS:
+                long_mask = long_mask | (horizon_values == int(item))
+            thirty_probability = probabilities[:, thirty_mask].sum(dim=1) if bool(thirty_mask.any()) else probabilities.new_zeros(probabilities.shape[0])
+            long_probability = probabilities[:, long_mask].sum(dim=1) if bool(long_mask.any()) else probabilities.new_zeros(probabilities.shape[0])
+            over_thirty = torch.clamp(thirty_probability - _HORIZON_HEAD_CONSTRAINT_MAX_30D_PROBABILITY, min=0.0)
+            under_long = torch.clamp(_HORIZON_HEAD_CONSTRAINT_MIN_LONG_PROBABILITY - long_probability, min=0.0)
+            loss = loss + constraint_weight * (over_thirty.square().mean() + 0.25 * under_long.square().mean())
         entropy_weight = float(weights.get("horizon_entropy", 0.0))
         if entropy_weight > 0.0:
             probabilities = F.softmax(horizon_logits, dim=1)
@@ -1064,6 +1156,7 @@ def _decision_utility_targets(
     drawdown_penalty: float,
     cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
     max_horizon: int | None = None,
+    normalize_per_horizon: bool = False,
 ) -> dict[str, torch.Tensor]:
     scale = max(float(target_scale), 1.0e-8)
     y_cum = y_cum_scaled / scale
@@ -1079,12 +1172,19 @@ def _decision_utility_targets(
     horizon_scale = torch.sqrt(horizons / float(max(int(max_horizon or int(max(resolved_horizons))), 1)))
     downside = torch.clamp(-max_drawdown, min=0.0)
     utility = y_cum - float(cost_bps) / 10000.0 - float(drawdown_penalty) * downside * horizon_scale
+    if normalize_per_horizon:
+        mean = utility.mean(dim=0, keepdim=True)
+        std = torch.clamp(utility.std(dim=0, keepdim=True, unbiased=False), min=1.0e-6)
+        selection_utility = (utility - mean) / std
+    else:
+        selection_utility = utility
     hit_label = utility > (float(hit_threshold_bps) / 10000.0)
-    best_horizon_index = torch.argmax(utility, dim=1)
-    decision_score = utility.max(dim=1).values
+    best_horizon_index = torch.argmax(selection_utility, dim=1)
+    decision_score = selection_utility.max(dim=1).values if normalize_per_horizon else utility.max(dim=1).values
     return {
         "utility": utility,
-        "utility_scaled": utility * scale,
+        "selection_utility": selection_utility,
+        "utility_scaled": selection_utility * scale if normalize_per_horizon else utility * scale,
         "hit_label": hit_label,
         "best_horizon_index": best_horizon_index,
         "decision_score": decision_score,

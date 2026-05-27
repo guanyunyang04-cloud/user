@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 71,
+  "record_count": 72,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -291,6 +291,48 @@
         "Do not copy these fullgrid candidates to daily `1..45`, because fullgrid did not pass.",
         "Before Stage 3 architecture review, require a calibration candidate with all three seeds positive on rank/spread/hit, mean monthly positive rate `>=0.75`, max negative months `<=2`, and no worsened horizon concentration.",
         "Continue with constrained target/loss work: reduce target bias to long, make horizon selection non-collapsed without forcing uniformity, and verify validation/test behavior before using test as confirmation."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
+      ]
+    },
+    {
+      "id": "alpha_multi_horizon_stage27_target_head_stability_20260527",
+      "date": "2026-05-27",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_multi_horizon_stage27_target_head_stability_20260527.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [
+        "stage27_target_head_stability"
+      ],
+      "run_tags": [
+        "mh27_horizon_target_normalized_v1_fullgrid_seed7_20260527_01",
+        "mh27_horizon_target_normalized_v1_fullgrid_seed11_20260527_01",
+        "mh27_horizon_target_normalized_v1_fullgrid_seed19_20260527_01",
+        "mh27_horizon_head_soft_constraint_v1_fullgrid_seed7_20260527_01",
+        "mh27_horizon_head_soft_constraint_v1_fullgrid_seed11_20260527_01",
+        "mh27_horizon_head_soft_constraint_v1_fullgrid_seed19_20260527_01",
+        "mh27_target_norm_head_constraint_v1_fullgrid_seed7_20260527_01",
+        "mh27_target_norm_head_constraint_v1_fullgrid_seed11_20260527_01",
+        "mh27_target_norm_head_constraint_v1_fullgrid_seed19_20260527_01"
+      ],
+      "verdict": "Status: `stage27_completed / evidence-grade target-loss stability / shadow-only / research-only`.; Mainline: `alpha_multi_horizon_utility_policy_v1`.; Study family: `stage27_target_head_stability`.; Verdict: Stage 2.7 completed the 9/9 target-normalization and horizon-head stability runs, but no candidate passed the Stage 2.7 stability gate.",
+      "blockers": [
+        "Training summary: `stage27_training_summary.json` status `completed`, completed tags `9`, failed tags `0`.",
+        "They still failed on monthly stability: `max_negative_months=4`, above the gate limit `<=2`."
+      ],
+      "next_allowed_actions": [
+        "Keep Stage 3 architecture review locked.",
+        "Treat `target_norm_head_constraint_v1` and `horizon_target_normalized_v1` as useful diagnostic evidence, not deployable candidates.",
+        "Next research should narrow or redesign the target family around `15/20/30d` long-horizon utility, with monthly regime diagnostics and seed-specific negative month analysis before any larger architecture.",
+        "Continue research-only / shadow-only boundaries; no active artifact, allocator, replay, paper, live/default, or promotion action is authorized."
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": [

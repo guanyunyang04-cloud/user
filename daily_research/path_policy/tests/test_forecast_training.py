@@ -245,6 +245,9 @@ def test_auxiliary_decision_loss_profiles_record_weight_contract_and_finite_loss
         "score_monthly_robust_v1",
         "horizon_entropy_regularized_v1",
         "risk_drawdown_reweighted_v1",
+        "horizon_target_normalized_v1",
+        "horizon_head_soft_constraint_v1",
+        "target_norm_head_constraint_v1",
     ):
         contract = forecast_loss_profile_contract(profile, cumulative_horizons=horizons, forecast_horizon=30)
         assert contract["loss_profile"] == profile
@@ -267,6 +270,19 @@ def test_auxiliary_decision_loss_profiles_record_weight_contract_and_finite_loss
             if profile == "risk_drawdown_reweighted_v1":
                 assert weights["risk_aux"] >= 0.20
                 assert weights["downside_rank_aux"] >= 0.02
+            if profile == "horizon_target_normalized_v1":
+                assert contract["target_normalization"] == "per_horizon_utility_zscore"
+                assert weights["horizon_target_normalization"] > 0.0
+                assert weights["horizon_head_soft_constraint"] == 0.0
+            if profile == "horizon_head_soft_constraint_v1":
+                assert contract["target_normalization"] == "none"
+                assert weights["horizon_head_soft_constraint"] > 0.0
+                assert weights["horizon_head_soft_constraint"] < weights["decision_utility"]
+                assert contract["horizon_head_constraint"]["max_30d_probability"] == 0.75
+            if profile == "target_norm_head_constraint_v1":
+                assert contract["target_normalization"] == "per_horizon_utility_zscore"
+                assert weights["horizon_target_normalization"] > 0.0
+                assert weights["horizon_head_soft_constraint"] > 0.0
 
             prediction = {
                 "mu": torch.randn(6, 30) * 0.01,

@@ -168,6 +168,9 @@ def test_protocol_parser_accepts_auxiliary_decision_loss_profiles_and_sets_decis
         "score_monthly_robust_v1",
         "horizon_entropy_regularized_v1",
         "risk_drawdown_reweighted_v1",
+        "horizon_target_normalized_v1",
+        "horizon_head_soft_constraint_v1",
+        "target_norm_head_constraint_v1",
     ):
         args = parser.parse_args(
             [
