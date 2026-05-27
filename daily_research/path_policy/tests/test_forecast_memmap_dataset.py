@@ -104,6 +104,32 @@ def test_forecast_memmap_dataset_accepts_custom_horizon_grid_and_horizon_risk(tm
     assert loaded.y_drawdown_by_horizon.shape == (loaded.row_count, len(horizons))
 
 
+def test_forecast_memmap_loader_resolves_copied_absolute_manifest_paths(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC"), start_date="2019-07-01")
+    dataset = build_forecast_memmap_dataset(
+        prepared,
+        root=tmp_path,
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=6,
+        min_lookback_valid_ratio=0.80,
+    )
+    manifest_path = tmp_path / "forecast_dataset_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["feature_store_path"] = str(tmp_path / "missing_old_root" / "forecast_feature_store.dat")
+    manifest["sample_index_csv"] = str(tmp_path / "missing_old_root" / "forecast_sample_index.csv")
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    loaded = load_forecast_memmap_dataset(manifest_path)
+
+    assert loaded.row_count == dataset.row_count
+    assert loaded.feature_store_path == tmp_path / "forecast_feature_store.dat"
+
+
 def test_static_context_vocab_is_stable_and_memmap_samples_are_aligned(tmp_path) -> None:
     prepared = make_prepared_policy_inputs(days=420, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ"), start_date="2019-07-01")
     prepared.metadata_frames["industry_map"] = __import__("pandas").DataFrame(

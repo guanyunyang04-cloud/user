@@ -17,6 +17,12 @@ from daily_research.path_policy.output_aux_profile_comparison import (
     profile_aggregate_rows,
     write_output_aux_profile_comparison,
 )
+from daily_research.path_policy.stage_universe_scope import (
+    FULL_ROLLING_LIQUID500_SCOPE,
+    full_pool_task_metadata,
+    full_rolling_liquid500_command_args,
+    study_scope_from_summary_path,
+)
 
 
 PYTHON = "C:/Users/ASUS/miniconda3/envs/yolos/python.exe"
@@ -105,8 +111,7 @@ def _training_command(*, tag: str, loss_profile: str, seed: int) -> list[str]:
         "lake",
         "--lake-dataset-id",
         DATASET_ID,
-        "--pool-name",
-        "rolling_liquid500",
+        *full_rolling_liquid500_command_args(STUDIES_ROOT),
         "--forecast-dataset-mode",
         "memmap",
         "--forecast-train-start-year",
@@ -176,6 +181,7 @@ def build_stage26_training_tasks(*, output_root: str | Path | None = None) -> li
                     "research_program": RESEARCH_PROGRAM,
                     "study_family": STUDY_FAMILY,
                     "scope": "research_shadow_only",
+                    **full_pool_task_metadata(STUDIES_ROOT),
                     "may_touch_active_manifest": False,
                 }
             )
@@ -191,6 +197,8 @@ def write_stage26_task_list(output_root: str | Path | None = None) -> Path:
         "research_program": RESEARCH_PROGRAM,
         "study_family": STUDY_FAMILY,
         "created_at": _now(),
+        "universe_scope": FULL_ROLLING_LIQUID500_SCOPE,
+        "reused_forecast_memmap_manifest": str(full_pool_task_metadata(STUDIES_ROOT)["forecast_memmap_manifest"]),
         "audit_task_count": len(selected_stage25_audit_tasks(output_root=root)),
         "training_task_count": len(build_stage26_training_tasks(output_root=root)),
         "audit_tasks": selected_stage25_audit_tasks(output_root=root),
@@ -246,6 +254,20 @@ def run_training_tasks(*, output_root: str | Path | None = None, skip_existing: 
     results: list[dict[str, Any]] = []
     for task in build_stage26_training_tasks(output_root=root):
         summary_path = Path(task["study_dir"]) / "study_summary.json"
+        if summary_path.exists():
+            observed_scope = study_scope_from_summary_path(summary_path)
+            if observed_scope.get("universe_scope") != task.get("universe_scope"):
+                failed.append(task["tag"])
+                results.append(
+                    {
+                        "tag": task["tag"],
+                        "status": "blocked_existing_scope_mismatch",
+                        "study_summary_json": str(summary_path),
+                        "expected_universe_scope": task.get("universe_scope"),
+                        "observed_scope": observed_scope,
+                    }
+                )
+                break
         if skip_existing and summary_path.exists():
             completed.append(task["tag"])
             results.append({"tag": task["tag"], "status": "skipped_existing", "study_summary_json": str(summary_path)})

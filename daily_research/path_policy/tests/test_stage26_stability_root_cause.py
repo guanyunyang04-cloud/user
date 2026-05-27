@@ -13,6 +13,7 @@ from daily_research.path_policy.stage26_stability_root_cause import (
     selected_stage25_audit_tasks,
     write_stage26_task_list,
 )
+from daily_research.path_policy.stage_universe_scope import FULL_ROLLING_LIQUID500_SCOPE
 
 
 def test_stage26_training_tasks_are_fullgrid_evidence_grade_and_shadow_only() -> None:
@@ -35,10 +36,16 @@ def test_stage26_training_tasks_are_fullgrid_evidence_grade_and_shadow_only() ->
         assert command[command.index("--forecast-feature-profile") + 1] == "raw_kline_context_no_alpha_prior_v1"
         assert command[command.index("--forecast-output-profile") + 1] == "decision_utility_v1"
         assert command[command.index("--forecast-loss-profile") + 1] == task["candidate"]
+        assert command[command.index("--pool-view-kind") + 1] == "rolling_liquidity"
+        assert command[command.index("--pool-view-name") + 1] == "rolling_liquid500"
+        assert command[command.index("--max-universe-size") + 1] == "0"
+        assert command[command.index("--forecast-memmap-manifest") + 1].endswith("forecast_dataset_manifest.json")
         assert command[command.index("--forecast-epochs") + 1] == "24"
         assert command[command.index("--forecast-min-epochs") + 1] == "8"
         assert command[command.index("--forecast-early-stop-patience") + 1] == "6"
         assert task["scope"] == "research_shadow_only"
+        assert task["universe_scope"] == FULL_ROLLING_LIQUID500_SCOPE
+        assert task["expected_min_train_rows"] >= 400_000
         assert task["may_touch_active_manifest"] is False
         assert task["research_program"] == RESEARCH_PROGRAM
         assert task["study_family"] == STUDY_FAMILY
@@ -63,6 +70,8 @@ def test_write_stage26_task_list_outputs_audit_and_training_tasks(tmp_path: Path
     assert payload["study_family"] == STUDY_FAMILY
     assert payload["audit_task_count"] == 6
     assert payload["training_task_count"] == 9
+    assert payload["universe_scope"] == FULL_ROLLING_LIQUID500_SCOPE
+    assert payload["reused_forecast_memmap_manifest"].endswith("forecast_dataset_manifest.json")
     assert payload["training_tasks"][0]["tag"].startswith("mh26_")
     assert payload["boundary"] == "research-only / shadow-only; no active manifest, live/default, production root, paper, or broker integration"
 
@@ -140,6 +149,10 @@ def test_run_training_tasks_marks_progress_completed_when_all_existing_summaries
         "daily_research.path_policy.stage26_stability_root_cause.build_stage26_training_tasks",
         lambda output_root=None: tasks,
     )
+    monkeypatch.setattr(
+        "daily_research.path_policy.stage26_stability_root_cause.study_scope_from_summary_path",
+        lambda _: {"universe_scope": None},
+    )
 
     payload = run_training_tasks(output_root=tmp_path, skip_existing=True)
     progress = json.loads((tmp_path / "stage26_progress.json").read_text(encoding="utf-8"))
@@ -149,3 +162,30 @@ def test_run_training_tasks_marks_progress_completed_when_all_existing_summaries
     assert progress["completed_tags"] == ["unit_seed7", "unit_seed11", "unit_seed19"]
     assert progress["research_program"] == RESEARCH_PROGRAM
     assert progress["study_family"] == STUDY_FAMILY
+
+
+def test_run_training_tasks_blocks_existing_cap80_scope(tmp_path: Path, monkeypatch) -> None:
+    study_dir = tmp_path / "cap80_existing"
+    study_dir.mkdir()
+    (study_dir / "study_summary.json").write_text("{}", encoding="utf-8")
+    tasks = [
+        {
+            "tag": "cap80_existing",
+            "study_dir": str(study_dir),
+            "universe_scope": FULL_ROLLING_LIQUID500_SCOPE,
+        }
+    ]
+    monkeypatch.setattr(
+        "daily_research.path_policy.stage26_stability_root_cause.build_stage26_training_tasks",
+        lambda output_root=None: tasks,
+    )
+    monkeypatch.setattr(
+        "daily_research.path_policy.stage26_stability_root_cause.study_scope_from_summary_path",
+        lambda _: {"universe_scope": "cap80_diagnostic", "universe_size": 80, "train_rows": 74640},
+    )
+
+    payload = run_training_tasks(output_root=tmp_path, skip_existing=True)
+
+    assert payload["status"] == "blocked"
+    assert payload["failed_tags"] == ["cap80_existing"]
+    assert payload["results"][0]["status"] == "blocked_existing_scope_mismatch"

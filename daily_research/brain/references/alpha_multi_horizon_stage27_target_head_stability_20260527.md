@@ -2,19 +2,20 @@
 
 ## Verdict
 
-- Status: `stage27_completed / evidence-grade target-loss stability / shadow-only / research-only`.
+- Status: `stage27_completed / cap80 diagnostic target-loss stability / shadow-only / research-only`.
 - Mainline: `alpha_multi_horizon_utility_policy_v1`.
 - Study family: `stage27_target_head_stability`.
 - Verdict: Stage 2.7 completed the 9/9 target-normalization and horizon-head stability runs, but no candidate passed the Stage 2.7 stability gate.
 - Decision: do not launch `patch_transformer`, `stock_mixer_sequence`, liquid800, allocator, replay, paper, live/default, or promotion from this evidence.
 - Active artifact impact: `daily_research/output/active_execution_strategy.json remains unchanged`.
-- Boundary: this is fixed-GRU / fixed-input target-loss evidence only; it unlocks neither Stage 3 architecture review nor active execution changes.
+- Boundary: this is cap80 fixed-GRU / fixed-input target-loss diagnostic evidence only; it unlocks neither Stage 3 architecture review nor active execution changes.
 
 ## Evidence
 
 - Study root: `daily_research/output/path_policy/studies/mh_stage27_target_head_stability_20260527_01/`.
 - Dataset: `policy_input_bundle__7c8f58d851bce8179e1e9e2d`.
-- Pool: `rolling_liquid500`.
+- Intended pool: `rolling_liquid500`.
+- Universe scope correction, 2026-05-27: Stage 2.7 artifacts are `cap80_diagnostic`, not full rolling_liquid500 evidence. Example artifact `mh27_target_norm_head_constraint_v1_fullgrid_seed7_20260527_01` has `prepared_summary.universe_size=80`, `source_pool_view_id=""`, `feature_store_shape=[1699,80,156]`, and `train_rows=74640`.
 - Fixed configuration: `gru_sequence_static_context`, `raw_kline_context_no_alpha_prior_v1`, `decision_utility_v1`, fullgrid horizons `1,2,3,5,8,10,15,20,30`.
 - Stage 2.7 candidates: `horizon_target_normalized_v1`, `horizon_head_soft_constraint_v1`, `target_norm_head_constraint_v1`.
 - Budget: `forecast_epochs=24`, `forecast_min_epochs=8`, `early_stop_patience=6`, `checkpoint_every_n_epochs=4`, CUDA.
@@ -56,15 +57,15 @@ Gate requirements were: 3 seeds all positive on rank IC, top-bottom spread, and 
 
 ## Interpretation
 
-- Target normalization and the combined target-normalization/head-constraint candidates both reduced 30d concentration sharply while preserving positive rank/spread/hit across all three seeds.
+- On the cap80 diagnostic universe, target normalization and the combined target-normalization/head-constraint candidates both reduced 30d concentration sharply while preserving positive rank/spread/hit across all three seeds.
 - They still failed on monthly stability: `max_negative_months=4`, above the gate limit `<=2`.
 - The head soft constraint alone did not repair collapse: mean 30d concentration stayed `0.906181`, long horizon share rose above the Stage 2.6 baseline, and monthly stability worsened.
-- Stage 2.7 therefore confirms that the bottleneck is not solved by simply normalizing horizon utility scale or softly constraining the head.
-- The evidence suggests the current signal is real but still behaves like an unstable long-horizon utility family. Stage 3 architecture expansion would risk amplifying unresolved target/loss instability.
+- Stage 2.7 therefore shows that the bottleneck is not solved on cap80 by simply normalizing horizon utility scale or softly constraining the head.
+- The evidence suggests the current signal is worth full-pool confirmation, but these artifacts are not sufficient to conclude full rolling_liquid500 stability or instability.
 
 ## Next Action
 
 - Keep Stage 3 architecture review locked.
-- Treat `target_norm_head_constraint_v1` and `horizon_target_normalized_v1` as useful diagnostic evidence, not deployable candidates.
-- Next research should narrow or redesign the target family around `15/20/30d` long-horizon utility, with monthly regime diagnostics and seed-specific negative month analysis before any larger architecture.
+- Treat `target_norm_head_constraint_v1` and `horizon_target_normalized_v1` as useful cap80 diagnostics, not deployable or architecture-gate candidates.
+- Next research should rerun the target/loss stability question on full rolling_liquid500 using the full-pool memmap manifest before narrowing or redesigning the target family around `15/20/30d`.
 - Continue research-only / shadow-only boundaries; no active artifact, allocator, replay, paper, live/default, or promotion action is authorized.

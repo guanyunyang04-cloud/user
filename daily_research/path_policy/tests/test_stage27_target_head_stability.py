@@ -9,8 +9,10 @@ from daily_research.path_policy.stage27_target_head_stability import (
     STUDY_FAMILY,
     build_stage27_training_tasks,
     run_stage27_comparison,
+    run_training_tasks,
     write_stage27_task_list,
 )
+from daily_research.path_policy.stage_universe_scope import FULL_ROLLING_LIQUID500_SCOPE
 
 
 def test_stage27_training_tasks_are_fixed_gru_evidence_grade_and_shadow_only() -> None:
@@ -33,10 +35,16 @@ def test_stage27_training_tasks_are_fixed_gru_evidence_grade_and_shadow_only() -
         assert command[command.index("--forecast-feature-profile") + 1] == "raw_kline_context_no_alpha_prior_v1"
         assert command[command.index("--forecast-output-profile") + 1] == "decision_utility_v1"
         assert command[command.index("--forecast-loss-profile") + 1] == task["candidate"]
+        assert command[command.index("--pool-view-kind") + 1] == "rolling_liquidity"
+        assert command[command.index("--pool-view-name") + 1] == "rolling_liquid500"
+        assert command[command.index("--max-universe-size") + 1] == "0"
+        assert command[command.index("--forecast-memmap-manifest") + 1].endswith("forecast_dataset_manifest.json")
         assert command[command.index("--forecast-epochs") + 1] == "24"
         assert command[command.index("--forecast-min-epochs") + 1] == "8"
         assert command[command.index("--forecast-early-stop-patience") + 1] == "6"
         assert task["scope"] == "research_shadow_only"
+        assert task["universe_scope"] == FULL_ROLLING_LIQUID500_SCOPE
+        assert task["expected_min_train_rows"] >= 400_000
         assert task["may_touch_active_manifest"] is False
         assert task["research_program"] == RESEARCH_PROGRAM
         assert task["study_family"] == STUDY_FAMILY
@@ -50,6 +58,8 @@ def test_write_stage27_task_list_records_baseline_and_boundary(tmp_path: Path) -
     assert payload["research_program"] == RESEARCH_PROGRAM
     assert payload["study_family"] == STUDY_FAMILY
     assert payload["training_task_count"] == 9
+    assert payload["universe_scope"] == FULL_ROLLING_LIQUID500_SCOPE
+    assert payload["reused_forecast_memmap_manifest"].endswith("forecast_dataset_manifest.json")
     assert payload["baseline_stage26_profiles"] == [
         "score_monthly_robust_v1",
         "horizon_entropy_regularized_v1",
@@ -157,3 +167,30 @@ def test_stage27_comparison_gate_accepts_stable_lower_concentration_candidate(
 
     assert payload["stage3_architecture_allowed"] is True
     assert payload["stage3_candidates"] == [passing]
+
+
+def test_stage27_training_blocks_existing_cap80_artifact(tmp_path: Path, monkeypatch) -> None:
+    study_dir = tmp_path / "cap80_existing"
+    study_dir.mkdir()
+    (study_dir / "study_summary.json").write_text("{}", encoding="utf-8")
+    tasks = [
+        {
+            "tag": "cap80_existing",
+            "study_dir": str(study_dir),
+            "universe_scope": FULL_ROLLING_LIQUID500_SCOPE,
+        }
+    ]
+    monkeypatch.setattr(
+        "daily_research.path_policy.stage27_target_head_stability.build_stage27_training_tasks",
+        lambda output_root=None: tasks,
+    )
+    monkeypatch.setattr(
+        "daily_research.path_policy.stage27_target_head_stability.study_scope_from_summary_path",
+        lambda _: {"universe_scope": "cap80_diagnostic", "universe_size": 80, "train_rows": 74640},
+    )
+
+    payload = run_training_tasks(output_root=tmp_path, skip_existing=True)
+
+    assert payload["status"] == "blocked"
+    assert payload["failed_tags"] == ["cap80_existing"]
+    assert payload["results"][0]["status"] == "blocked_existing_scope_mismatch"

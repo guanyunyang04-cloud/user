@@ -2,19 +2,20 @@
 
 ## Verdict
 
-- Status: `stage26_completed / evidence-grade calibration / shadow-only / research-only`.
+- Status: `stage26_completed / cap80 diagnostic calibration / shadow-only / research-only`.
 - Mainline: `alpha_multi_horizon_utility_policy_v1`.
 - Study family: `stage26_stability_root_cause`.
 - Verdict: Stage 2.6 completed the root-cause audit and 9/9 calibration runs, but no candidate passed the Stage 2.6 stability gate.
 - Decision: do not launch `patch_transformer`, `stock_mixer_sequence`, liquid800, allocator, replay, paper, live/default, or promotion from this evidence.
 - Active artifact impact: `daily_research/output/active_execution_strategy.json remains unchanged`.
-- Boundary: this is fixed-GRU / fixed-input target-loss-score calibration evidence only; it does not prove enough monthly stability for architecture expansion.
+- Boundary: this is cap80 fixed-GRU / fixed-input target-loss-score diagnostic evidence only; it does not prove full rolling_liquid500 monthly stability and cannot unlock architecture expansion.
 
 ## Evidence
 
 - Study root: `daily_research/output/path_policy/studies/mh_stage26_stability_root_cause_20260527_01/`.
 - Dataset: `policy_input_bundle__7c8f58d851bce8179e1e9e2d`.
-- Pool: `rolling_liquid500`.
+- Intended pool: `rolling_liquid500`.
+- Universe scope correction, 2026-05-27: Stage 2.6 training artifacts are `cap80_diagnostic`, not full rolling_liquid500 evidence. Example artifact `mh26_score_monthly_robust_v1_fullgrid_seed7_20260527_01` has `prepared_summary.universe_size=80`, `source_pool_view_id=""`, `feature_store_shape=[1699,80,156]`, and `train_rows=74640`.
 - Fixed configuration: `gru_sequence_static_context`, `raw_kline_context_no_alpha_prior_v1`, `decision_utility_v1`, fullgrid horizons `1,2,3,5,8,10,15,20,30`.
 - Root-cause audit inputs: Stage 2.5 `fullgrid_rebudget` and `daily1_45_multiseed`, seeds `7,11,19`.
 - Stage 2.6 calibration candidates: `score_monthly_robust_v1`, `horizon_entropy_regularized_v1`, `risk_drawdown_reweighted_v1`.
@@ -82,14 +83,14 @@ Validation looked stronger than test for all three candidates. Test confirms uti
 
 ## Interpretation
 
-- Stage 2.6 answers the intended question: simple loss/score calibration did not stabilize the current fixed-GRU multi-horizon utility model.
-- The model has real utility-native signal, but long-horizon concentration remains around `0.93-0.95` for fullgrid calibration candidates.
+- Stage 2.6 answers a cap80 diagnostic question only: simple loss/score calibration did not stabilize the default capped fixed-GRU multi-horizon utility model.
+- The cap80 diagnostic artifacts retain utility-native signal, but long-horizon concentration remains around `0.93-0.95` for fullgrid calibration candidates.
 - The current bottleneck is still target/loss/horizon-head stability, not input availability or basic architecture capacity.
 - The correct next move is not architecture expansion. It is a smaller root-cause loop around target normalization, horizon-head constraint, seed instability, and validation-test mismatch.
 
 ## Next Action
 
-- Keep `fullgrid_rebudget` as the Stage 2.5 baseline and `score_monthly_robust_v1` / `horizon_entropy_regularized_v1` as signal-preserving but unstable calibration references.
+- Keep `fullgrid_rebudget` as the Stage 2.5 cap80 baseline and `score_monthly_robust_v1` / `horizon_entropy_regularized_v1` as signal-preserving but unstable cap80 calibration references.
 - Do not copy these fullgrid candidates to daily `1..45`, because fullgrid did not pass.
-- Before Stage 3 architecture review, require a calibration candidate with all three seeds positive on rank/spread/hit, mean monthly positive rate `>=0.75`, max negative months `<=2`, and no worsened horizon concentration.
+- Before Stage 3 architecture review, require a full rolling_liquid500 calibration candidate with all three seeds positive on rank/spread/hit, mean monthly positive rate `>=0.75`, max negative months `<=2`, and no worsened horizon concentration.
 - Continue with constrained target/loss work: reduce target bias to long, make horizon selection non-collapsed without forcing uniformity, and verify validation/test behavior before using test as confirmation.

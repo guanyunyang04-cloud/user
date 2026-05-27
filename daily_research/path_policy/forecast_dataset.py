@@ -865,6 +865,10 @@ def _resolve_manifest_path(value: Any, *, manifest_path: Path) -> Path:
     path = Path(str(value or ""))
     if not path.is_absolute():
         path = manifest_path.parent / path
+    elif not path.exists():
+        sibling = manifest_path.parent / path.name
+        if sibling.exists():
+            path = sibling
     return path
 
 

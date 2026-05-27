@@ -2,12 +2,12 @@
 
 ## Verdict
 
-- Status: `stage25_completed / evidence-grade calibration / shadow-only / research-only`.
+- Status: `stage25_completed / cap80 diagnostic calibration / shadow-only / research-only`.
 - Mainline: `alpha_multi_horizon_utility_policy_v1`.
 - Verdict: Stage 2.5 completed 9/9 runs with seeds `7,11,19`; no candidate passed the Stage 2.5 stability gate.
 - Decision: do not launch `patch_transformer`, `stock_mixer_sequence`, allocator, replay, live/default, paper, or promotion from this evidence.
 - Active artifact impact: `daily_research/output/active_execution_strategy.json remains unchanged`.
-- Boundary: this is stability calibration evidence only; it confirms utility-native signal but does not prove enough monthly stability for architecture expansion.
+- Boundary: this is cap80 stability diagnostic evidence only; it does not prove full rolling_liquid500 monthly stability and cannot unlock architecture expansion.
 
 ## Evidence
 
@@ -16,7 +16,8 @@
 - Driver summary: `daily_research/output/path_policy/studies/mh_stage25_stability_calibration_20260526_01/stage25_driver_summary.json`.
 - Progress: `stage25_progress.json` reported `completed`, `task_count=9`, `failed_tags=[]`.
 - Dataset: `policy_input_bundle__7c8f58d851bce8179e1e9e2d`.
-- Pool: `rolling_liquid500`.
+- Intended pool: `rolling_liquid500`.
+- Universe scope correction, 2026-05-27: the retained Stage 2.5 artifacts are `cap80_diagnostic`, not full rolling_liquid500 evidence. Example artifact `mh25_path_aux_fullgrid_rebudget_seed7_20260526_01` has `prepared_summary.universe_size=80`, `source_pool_view_id=""`, `feature_store_shape=[1699,80,156]`, and `train_rows=74640`.
 - Fixed configuration: `gru_sequence_static_context`, `raw_kline_context_no_alpha_prior_v1`, `decision_utility_v1`, `decision_utility_path_aux_v1`.
 - Budget: `forecast_epochs=24`, `forecast_min_epochs=8`, `early_stop_patience=6`, `checkpoint_every_n_epochs=4`, CUDA.
 - Comparison artifacts:
@@ -86,9 +87,9 @@ Facts:
 
 ## Interpretation
 
-- Stage 2.5 answers the intended question: stability did not improve enough under elevated budget.
+- Stage 2.5 answers a cap80 diagnostic question only: stability did not improve enough on the default capped universe.
 - The bottleneck is no longer "insufficient experiment budget"; it is target/loss/monthly-stability behavior.
-- The model is past smoke/scout for signal existence, but not past evidence-grade stability gate for architecture expansion.
+- The model is past smoke/scout for cap80 signal existence, but not past evidence-grade full-pool stability gate for architecture expansion.
 - Current state: `research / shadow-only / no architecture / no promotion`.
 
 ## Next Action
@@ -97,4 +98,4 @@ Facts:
 - Next research should audit monthly failure modes by month/market regime and compare validation-to-test sign changes without tuning on test.
 - Focus on target/loss/monthly stability root cause: utility target normalization, drawdown/risk shaping, horizon-selection regularization, and regime-robust score aggregation.
 - Treat `daily1_45_multiseed` as feasibility-to-stability conversion material only, not a production or architecture gate pass.
-- Keep `fullgrid_rebudget` as the cleaner multi-seed baseline for future stability diagnostics.
+- Keep `fullgrid_rebudget` as a cap80 diagnostic baseline only; full rolling_liquid500 confirmation must rerun with an explicit pool view and `--max-universe-size 0` or reuse a full-pool memmap manifest.

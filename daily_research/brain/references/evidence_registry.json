@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 72,
+  "record_count": 73,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -237,7 +237,7 @@
         "mh25_path_aux_long_family_simplified_seed11_20260526_01",
         "mh25_path_aux_long_family_simplified_seed19_20260526_01"
       ],
-      "verdict": "Status: `stage25_completed / evidence-grade calibration / shadow-only / research-only`.; Mainline: `alpha_multi_horizon_utility_policy_v1`.; Verdict: Stage 2.5 completed 9/9 runs with seeds `7,11,19`; no candidate passed the Stage 2.5 stability gate.; Decision: do not launch `patch_transformer`, `stock_mixer_sequence`, allocator, replay, live/default, paper, or promotion from this evidence.",
+      "verdict": "Status: `stage25_completed / cap80 diagnostic calibration / shadow-only / research-only`.; Mainline: `alpha_multi_horizon_utility_policy_v1`.; Verdict: Stage 2.5 completed 9/9 runs with seeds `7,11,19`; no candidate passed the Stage 2.5 stability gate.; Decision: do not launch `patch_transformer`, `stock_mixer_sequence`, allocator, replay, live/default, paper, or promotion from this evidence.",
       "blockers": [
         "Progress: `stage25_progress.json` reported `completed`, `task_count=9`, `failed_tags=[]`.",
         "The bottleneck is no longer \"insufficient experiment budget\"; it is target/loss/monthly-stability behavior.",
@@ -248,7 +248,7 @@
         "Next research should audit monthly failure modes by month/market regime and compare validation-to-test sign changes without tuning on test.",
         "Focus on target/loss/monthly stability root cause: utility target normalization, drawdown/risk shaping, horizon-selection regularization, and regime-robust score aggregation.",
         "Treat `daily1_45_multiseed` as feasibility-to-stability conversion material only, not a production or architecture gate pass.",
-        "Keep `fullgrid_rebudget` as the cleaner multi-seed baseline for future stability diagnostics."
+        "Keep `fullgrid_rebudget` as a cap80 diagnostic baseline only; full rolling_liquid500 confirmation must rerun with an explicit pool view and `--max-universe-size 0` or reuse a full-pool memmap manifest."
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": [
@@ -281,15 +281,15 @@
         "mh26_risk_drawdown_reweighted_v1_fullgrid_seed11_20260527_01",
         "mh26_risk_drawdown_reweighted_v1_fullgrid_seed19_20260527_01"
       ],
-      "verdict": "Status: `stage26_completed / evidence-grade calibration / shadow-only / research-only`.; Mainline: `alpha_multi_horizon_utility_policy_v1`.; Study family: `stage26_stability_root_cause`.; Verdict: Stage 2.6 completed the root-cause audit and 9/9 calibration runs, but no candidate passed the Stage 2.6 stability gate.",
+      "verdict": "Status: `stage26_completed / cap80 diagnostic calibration / shadow-only / research-only`.; Mainline: `alpha_multi_horizon_utility_policy_v1`.; Study family: `stage26_stability_root_cause`.; Verdict: Stage 2.6 completed the root-cause audit and 9/9 calibration runs, but no candidate passed the Stage 2.6 stability gate.",
       "blockers": [
         "Training summary: `stage26_training_summary.json` status `completed`, completed tags `9`, failed tags `0`.",
         "Fullgrid shows `true_long_horizon_edge`, `target_bias_to_long`, `horizon_head_collapse`, `short_feature_insufficient`, and `training_instability`."
       ],
       "next_allowed_actions": [
-        "Keep `fullgrid_rebudget` as the Stage 2.5 baseline and `score_monthly_robust_v1` / `horizon_entropy_regularized_v1` as signal-preserving but unstable calibration references.",
+        "Keep `fullgrid_rebudget` as the Stage 2.5 cap80 baseline and `score_monthly_robust_v1` / `horizon_entropy_regularized_v1` as signal-preserving but unstable cap80 calibration references.",
         "Do not copy these fullgrid candidates to daily `1..45`, because fullgrid did not pass.",
-        "Before Stage 3 architecture review, require a calibration candidate with all three seeds positive on rank/spread/hit, mean monthly positive rate `>=0.75`, max negative months `<=2`, and no worsened horizon concentration.",
+        "Before Stage 3 architecture review, require a full rolling_liquid500 calibration candidate with all three seeds positive on rank/spread/hit, mean monthly positive rate `>=0.75`, max negative months `<=2`, and no worsened horizon concentration.",
         "Continue with constrained target/loss work: reduce target bias to long, make horizon selection non-collapsed without forcing uniformity, and verify validation/test behavior before using test as confirmation."
       ],
       "active_artifact_impact": "unchanged",
@@ -323,15 +323,15 @@
         "mh27_target_norm_head_constraint_v1_fullgrid_seed11_20260527_01",
         "mh27_target_norm_head_constraint_v1_fullgrid_seed19_20260527_01"
       ],
-      "verdict": "Status: `stage27_completed / evidence-grade target-loss stability / shadow-only / research-only`.; Mainline: `alpha_multi_horizon_utility_policy_v1`.; Study family: `stage27_target_head_stability`.; Verdict: Stage 2.7 completed the 9/9 target-normalization and horizon-head stability runs, but no candidate passed the Stage 2.7 stability gate.",
+      "verdict": "Status: `stage27_completed / cap80 diagnostic target-loss stability / shadow-only / research-only`.; Mainline: `alpha_multi_horizon_utility_policy_v1`.; Study family: `stage27_target_head_stability`.; Verdict: Stage 2.7 completed the 9/9 target-normalization and horizon-head stability runs, but no candidate passed the Stage 2.7 stability gate.",
       "blockers": [
         "Training summary: `stage27_training_summary.json` status `completed`, completed tags `9`, failed tags `0`.",
         "They still failed on monthly stability: `max_negative_months=4`, above the gate limit `<=2`."
       ],
       "next_allowed_actions": [
         "Keep Stage 3 architecture review locked.",
-        "Treat `target_norm_head_constraint_v1` and `horizon_target_normalized_v1` as useful diagnostic evidence, not deployable candidates.",
-        "Next research should narrow or redesign the target family around `15/20/30d` long-horizon utility, with monthly regime diagnostics and seed-specific negative month analysis before any larger architecture.",
+        "Treat `target_norm_head_constraint_v1` and `horizon_target_normalized_v1` as useful cap80 diagnostics, not deployable or architecture-gate candidates.",
+        "Next research should rerun the target/loss stability question on full rolling_liquid500 using the full-pool memmap manifest before narrowing or redesigning the target family around `15/20/30d`.",
         "Continue research-only / shadow-only boundaries; no active artifact, allocator, replay, paper, live/default, or promotion action is authorized."
       ],
       "active_artifact_impact": "unchanged",
@@ -419,6 +419,31 @@
         "policy_input_bundle__7c8f58d851bce8179e1e9e2d",
         "policy_pool_view__c11400fa72ad263f3d1eecfa",
         "policy_sector_board_view__ed15b2873f544e9e9b24aae5"
+      ]
+    },
+    {
+      "id": "alpha_multi_horizon_universe_scope_correction_20260527",
+      "date": "2026-05-27",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_multi_horizon_universe_scope_correction_20260527.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [],
+      "run_tags": [
+        "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01",
+        "mh25_path_aux_fullgrid_rebudget_seed7_20260526_01"
+      ],
+      "verdict": "Status: `scope_correction / evidence_boundary_repaired / shadow-only`.; Affected studies: Stage 2.5, Stage 2.6, and Stage 2.7 multi-horizon stability runs.; Decision: treat Stage 2.5-2.7 artifacts as `cap80_diagnostic`, not full rolling_liquid500 evidence.; Stage 3 architecture review remains locked.",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_pool_view__c11400fa72ad263f3d1eecfa"
       ]
     },
     {
