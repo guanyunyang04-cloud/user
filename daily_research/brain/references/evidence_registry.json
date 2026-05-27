@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 70,
+  "record_count": 71,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -249,6 +249,48 @@
         "Focus on target/loss/monthly stability root cause: utility target normalization, drawdown/risk shaping, horizon-selection regularization, and regime-robust score aggregation.",
         "Treat `daily1_45_multiseed` as feasibility-to-stability conversion material only, not a production or architecture gate pass.",
         "Keep `fullgrid_rebudget` as the cleaner multi-seed baseline for future stability diagnostics."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
+      ]
+    },
+    {
+      "id": "alpha_multi_horizon_stage26_stability_root_cause_20260527",
+      "date": "2026-05-27",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_multi_horizon_stage26_stability_root_cause_20260527.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [
+        "stage26_stability_root_cause"
+      ],
+      "run_tags": [
+        "mh26_score_monthly_robust_v1_fullgrid_seed7_20260527_01",
+        "mh26_score_monthly_robust_v1_fullgrid_seed11_20260527_01",
+        "mh26_score_monthly_robust_v1_fullgrid_seed19_20260527_01",
+        "mh26_horizon_entropy_regularized_v1_fullgrid_seed7_20260527_01",
+        "mh26_horizon_entropy_regularized_v1_fullgrid_seed11_20260527_01",
+        "mh26_horizon_entropy_regularized_v1_fullgrid_seed19_20260527_01",
+        "mh26_risk_drawdown_reweighted_v1_fullgrid_seed7_20260527_01",
+        "mh26_risk_drawdown_reweighted_v1_fullgrid_seed11_20260527_01",
+        "mh26_risk_drawdown_reweighted_v1_fullgrid_seed19_20260527_01"
+      ],
+      "verdict": "Status: `stage26_completed / evidence-grade calibration / shadow-only / research-only`.; Mainline: `alpha_multi_horizon_utility_policy_v1`.; Study family: `stage26_stability_root_cause`.; Verdict: Stage 2.6 completed the root-cause audit and 9/9 calibration runs, but no candidate passed the Stage 2.6 stability gate.",
+      "blockers": [
+        "Training summary: `stage26_training_summary.json` status `completed`, completed tags `9`, failed tags `0`.",
+        "Fullgrid shows `true_long_horizon_edge`, `target_bias_to_long`, `horizon_head_collapse`, `short_feature_insufficient`, and `training_instability`."
+      ],
+      "next_allowed_actions": [
+        "Keep `fullgrid_rebudget` as the Stage 2.5 baseline and `score_monthly_robust_v1` / `horizon_entropy_regularized_v1` as signal-preserving but unstable calibration references.",
+        "Do not copy these fullgrid candidates to daily `1..45`, because fullgrid did not pass.",
+        "Before Stage 3 architecture review, require a calibration candidate with all three seeds positive on rank/spread/hit, mean monthly positive rate `>=0.75`, max negative months `<=2`, and no worsened horizon concentration.",
+        "Continue with constrained target/loss work: reduce target bias to long, make horizon selection non-collapsed without forcing uniformity, and verify validation/test behavior before using test as confirmation."
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": [

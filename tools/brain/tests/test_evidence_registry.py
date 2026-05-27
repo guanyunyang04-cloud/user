@@ -114,10 +114,15 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
         program_ids = {match["id"] for match in program_payload["matches"]}
         self.assertIn("alpha_multi_horizon_output_aux_grid_stage1_shadow_20260525", program_ids)
         self.assertIn("alpha_multi_horizon_stage25_stability_calibration_20260526", program_ids)
+        self.assertIn("alpha_multi_horizon_stage26_stability_root_cause_20260527", program_ids)
 
         family_payload = query_evidence_registry("stage25_stability_calibration")
         family_ids = {match["id"] for match in family_payload["matches"]}
         self.assertIn("alpha_multi_horizon_stage25_stability_calibration_20260526", family_ids)
+
+        stage26_payload = query_evidence_registry("stage26_stability_root_cause")
+        stage26_ids = {match["id"] for match in stage26_payload["matches"]}
+        self.assertIn("alpha_multi_horizon_stage26_stability_root_cause_20260527", stage26_ids)
 
     def test_stage1_reference_does_not_inherit_stage2_family_from_negative_mention(self) -> None:
         registry = build_evidence_registry()

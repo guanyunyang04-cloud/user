@@ -181,8 +181,8 @@ def _per_horizon_metrics(frame: pd.DataFrame, horizons: tuple[int, ...]) -> dict
 def _horizon_alignment(frame: pd.DataFrame) -> dict[str, Any]:
     pred = pd.to_numeric(frame["pred_best_horizon"], errors="coerce").dropna()
     future = pd.to_numeric(frame["future_best_horizon"], errors="coerce").dropna()
-    pred_long = pred.isin([15, 20, 30])
-    future_long = future.isin([15, 20, 30])
+    pred_long = pred >= 15
+    future_long = future >= 15
     return {
         "pred_best_horizon_distribution": _value_counts(pred),
         "future_best_horizon_distribution": _value_counts(future),
@@ -619,6 +619,186 @@ def write_horizon_root_cause_artifacts(report: dict[str, Any], output_dir: str |
     pd.DataFrame(artifact_rows(report)).to_csv(csv_path, index=False, encoding="utf-8")
     markdown_path.write_text(_markdown_report(report), encoding="utf-8")
     return {"json": json_path, "csv": csv_path, "markdown": markdown_path}
+
+
+def _stage26_candidate_from_tag(tag: str) -> str:
+    value = str(tag or "")
+    for candidate in ("fullgrid_rebudget", "daily1_45_multiseed", "long_family_simplified"):
+        if candidate in value:
+            return candidate
+    return "unknown"
+
+
+def _stage26_seed_from_report(report: dict[str, Any]) -> int:
+    metadata = report.get("metadata", {}) if isinstance(report.get("metadata"), dict) else {}
+    seed = metadata.get("seed", "")
+    try:
+        return int(seed)
+    except (TypeError, ValueError):
+        tag = str(metadata.get("study_tag", ""))
+        match = re.search(r"_seed(\d+)_", tag)
+        return int(match.group(1)) if match else 0
+
+
+def _stage26_matrix_rows(reports: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for report in reports:
+        if report.get("status") != "completed":
+            continue
+        metadata = report.get("metadata", {}) if isinstance(report.get("metadata"), dict) else {}
+        tag = str(metadata.get("study_tag", ""))
+        candidate = _stage26_candidate_from_tag(tag)
+        seed = _stage26_seed_from_report(report)
+        conclusions = ",".join(report.get("conclusion_enums", []) or [])
+        for role in ("validation", "test"):
+            role_payload = (report.get("roles", {}) or {}).get(role, {})
+            alignment = role_payload.get("horizon_alignment", {}) if isinstance(role_payload, dict) else {}
+            for horizon, payload in (role_payload.get("per_horizon", {}) or {}).items():
+                negative_months = [str(item) for item in payload.get("negative_months", []) or []]
+                rows.append(
+                    {
+                        "study_tag": tag,
+                        "candidate": candidate,
+                        "seed": seed,
+                        "role": role,
+                        "horizon": int(horizon),
+                        "rank_ic": payload.get("rank_ic", 0.0),
+                        "top_bottom_spread": payload.get("top_bottom_spread", 0.0),
+                        "hit_lift_top20_mean": payload.get("hit_lift_top20_mean", 0.0),
+                        "monthly_spread_positive_rate": payload.get("monthly_spread_positive_rate", 0.0),
+                        "negative_month_count": len(negative_months),
+                        "negative_months": ",".join(negative_months),
+                        "pred_long_share": alignment.get("pred_long_share", 0.0),
+                        "pred_30d_share": alignment.get("pred_30d_share", 0.0),
+                        "future_long_share": alignment.get("future_long_share", 0.0),
+                        "conclusion_enums": conclusions,
+                    }
+                )
+    return rows
+
+
+def _stage26_recommended_path(
+    *,
+    common_negative_months: list[str],
+    seed_specific_months: list[str],
+    mean_pred_long_share: float,
+    conclusion_counts: dict[str, int],
+) -> str:
+    if mean_pred_long_share > 0.90 or conclusion_counts.get("horizon_head_collapse", 0) > 0:
+        return "loss_regularization_stabilization"
+    if common_negative_months:
+        return "regime_aware_score_calibration"
+    if seed_specific_months or conclusion_counts.get("training_instability", 0) > 0:
+        return "loss_regularization_stabilization"
+    return "target_score_calibration"
+
+
+def build_stage26_root_cause_summary(reports: list[dict[str, Any]], *, run_tag: str) -> dict[str, Any]:
+    completed = [report for report in reports if report.get("status") == "completed"]
+    rows = _stage26_matrix_rows(completed)
+    frame = pd.DataFrame(rows)
+    candidate_summary: dict[str, Any] = {}
+    if not frame.empty:
+        for candidate, group in frame.groupby("candidate", sort=True):
+            test_rows = group[group["role"] == "test"]
+            seeds = sorted(int(item) for item in group["seed"].dropna().unique())
+            month_sets: list[set[str]] = []
+            for _, row in test_rows.iterrows():
+                months = {item for item in str(row.get("negative_months", "")).split(",") if item}
+                if months:
+                    month_sets.append(months)
+            common = sorted(set.intersection(*month_sets)) if month_sets else []
+            all_months = sorted(set.union(*month_sets)) if month_sets else []
+            seed_specific = sorted(set(all_months) - set(common))
+            conclusion_counts: dict[str, int] = {}
+            for text in group["conclusion_enums"].dropna().astype(str):
+                for item in [part for part in text.split(",") if part]:
+                    conclusion_counts[item] = conclusion_counts.get(item, 0) + 1
+            mean_pred_long = _finite_float(test_rows["pred_long_share"].mean() if not test_rows.empty else 0.0)
+            candidate_summary[str(candidate)] = {
+                "seed_count": len(seeds),
+                "seeds": seeds,
+                "common_test_negative_months": common,
+                "seed_specific_test_negative_months": seed_specific,
+                "mean_test_monthly_positive_rate": _finite_float(
+                    test_rows["monthly_spread_positive_rate"].mean() if not test_rows.empty else 0.0
+                ),
+                "max_test_negative_month_count": int(test_rows["negative_month_count"].max()) if not test_rows.empty else 0,
+                "mean_test_pred_long_share": mean_pred_long,
+                "mean_test_pred_30d_share": _finite_float(test_rows["pred_30d_share"].mean() if not test_rows.empty else 0.0),
+                "conclusion_counts": conclusion_counts,
+                "recommended_path": _stage26_recommended_path(
+                    common_negative_months=common,
+                    seed_specific_months=seed_specific,
+                    mean_pred_long_share=mean_pred_long,
+                    conclusion_counts=conclusion_counts,
+                ),
+            }
+    return _jsonable(
+        {
+            "schema_version": 1,
+            "status": "completed" if completed else "blocked",
+            "run_tag": str(run_tag),
+            "purpose": "Stage 2.6 cross-run root-cause summary for alpha_multi_horizon_utility_policy_v1",
+            "report_count": len(reports),
+            "completed_report_count": len(completed),
+            "candidate_summary": candidate_summary,
+            "matrix_rows": rows,
+            "production_boundaries": {
+                "training_started_by_summary": False,
+                "active_manifest_touched": False,
+                "live_default_touched": False,
+                "production_root_touched": False,
+                "broker_touched": False,
+            },
+        }
+    )
+
+
+def _stage26_summary_markdown(report: dict[str, Any]) -> str:
+    lines = [
+        "# Alpha Multi-Horizon Stage 2.6 Root-Cause Summary",
+        "",
+        f"- status: `{report.get('status', '')}`",
+        f"- run_tag: `{report.get('run_tag', '')}`",
+        "- boundary: research-only / shadow-only; no active manifest, live/default, production root, paper, or broker path.",
+        "",
+        "## Candidate Summary",
+    ]
+    for candidate, payload in (report.get("candidate_summary", {}) or {}).items():
+        lines.extend(
+            [
+                f"- `{candidate}`: seeds=`{payload.get('seeds', [])}`, "
+                f"mean monthly positive=`{_finite_float(payload.get('mean_test_monthly_positive_rate')):.6f}`, "
+                f"max negative months=`{payload.get('max_test_negative_month_count', 0)}`, "
+                f"mean pred long share=`{_finite_float(payload.get('mean_test_pred_long_share')):.6f}`, "
+                f"recommended_path=`{payload.get('recommended_path', '')}`.",
+                f"  common test negative months: `{payload.get('common_test_negative_months', [])}`; "
+                f"seed-specific test negative months: `{payload.get('seed_specific_test_negative_months', [])}`.",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "## Interpretation",
+            "- Common negative months point to regime-aware score calibration.",
+            "- Seed-specific negative months or horizon collapse point to loss regularization stabilization.",
+            "- This summary does not start training; it only chooses the next research branch.",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+def write_stage26_root_cause_summary_artifacts(report: dict[str, Any], output_dir: str | Path) -> dict[str, Path]:
+    root = Path(output_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    json_path = root / "stage26_root_cause_summary.json"
+    matrix_csv = root / "stage26_root_cause_matrix.csv"
+    verdict_md = root / "stage26_root_cause_verdict.md"
+    json_path.write_text(json.dumps(_jsonable(report), ensure_ascii=False, indent=2), encoding="utf-8")
+    pd.DataFrame(report.get("matrix_rows", []) or []).to_csv(matrix_csv, index=False, encoding="utf-8")
+    verdict_md.write_text(_stage26_summary_markdown(report), encoding="utf-8")
+    return {"summary_json": json_path, "matrix_csv": matrix_csv, "verdict_md": verdict_md}
 
 
 def _read_json(path: str | Path | None) -> dict[str, Any] | None:

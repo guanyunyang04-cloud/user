@@ -269,6 +269,13 @@ def _hit_lift(frame: pd.DataFrame, score_column: str, horizons: tuple[int, ...])
     return _finite_float(np.mean(lifts) if lifts else 0.0)
 
 
+def _long_horizon_share(frame: pd.DataFrame) -> float:
+    horizons = pd.to_numeric(frame["pred_best_horizon"], errors="coerce").dropna()
+    if horizons.empty:
+        return 0.0
+    return float((horizons >= 15).mean())
+
+
 def _summarize_predictions(frame: pd.DataFrame, *, role: str) -> dict[str, Any]:
     _require_prediction_columns(frame)
     horizons = _prediction_horizons(frame)
@@ -304,7 +311,7 @@ def _summarize_predictions(frame: pd.DataFrame, *, role: str) -> dict[str, Any]:
             .to_dict()
             .items()
         },
-        "long_horizon_share": float(pd.to_numeric(frame["pred_best_horizon"], errors="coerce").isin([15, 20, 30, 45]).mean()),
+        "long_horizon_share": _long_horizon_share(frame),
     }
 
 
@@ -333,9 +340,7 @@ def _score_variant_metrics(frame: pd.DataFrame, *, role: str) -> list[dict[str, 
                 "monthly_spread_positive_rate": positive_rate,
                 "negative_month_count": len(negative_months),
                 "worst_month_spread": worst_month,
-                "long_horizon_share": float(
-                    pd.to_numeric(frame["pred_best_horizon"], errors="coerce").isin([15, 20, 30, 45]).mean()
-                ),
+                "long_horizon_share": _long_horizon_share(frame),
             }
         )
     return rows

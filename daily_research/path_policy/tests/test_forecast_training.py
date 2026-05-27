@@ -242,6 +242,9 @@ def test_auxiliary_decision_loss_profiles_record_weight_contract_and_finite_loss
         "decision_utility_path_aux_v1",
         "decision_utility_hit_risk_aux_v1",
         "decision_utility_rank_aux_v1",
+        "score_monthly_robust_v1",
+        "horizon_entropy_regularized_v1",
+        "risk_drawdown_reweighted_v1",
     ):
         contract = forecast_loss_profile_contract(profile, cumulative_horizons=horizons, forecast_horizon=30)
         assert contract["loss_profile"] == profile
@@ -253,7 +256,17 @@ def test_auxiliary_decision_loss_profiles_record_weight_contract_and_finite_loss
             assert contract["required_output_profile"] == "decision_utility_v1"
             assert weights["decision_utility"] > weights["path_daily"]
             assert weights["decision_utility"] > weights["risk_aux"]
-            assert weights["decision_utility"] > weights["rank_aux"]
+            if profile != "score_monthly_robust_v1":
+                assert weights["decision_utility"] > weights["rank_aux"]
+            if profile == "score_monthly_robust_v1":
+                assert weights["decision_rank_aux"] > 0.45
+                assert weights["rank_aux"] >= 1.0
+            if profile == "horizon_entropy_regularized_v1":
+                assert weights["horizon_entropy"] > 0.0
+                assert weights["horizon_classification"] < 0.20
+            if profile == "risk_drawdown_reweighted_v1":
+                assert weights["risk_aux"] >= 0.20
+                assert weights["downside_rank_aux"] >= 0.02
 
             prediction = {
                 "mu": torch.randn(6, 30) * 0.01,

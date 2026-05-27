@@ -59,6 +59,9 @@ FORECAST_LOSS_PROFILES = (
     "decision_utility_path_aux_v1",
     "decision_utility_hit_risk_aux_v1",
     "decision_utility_rank_aux_v1",
+    "score_monthly_robust_v1",
+    "horizon_entropy_regularized_v1",
+    "risk_drawdown_reweighted_v1",
 )
 FORECAST_RANKING_BASELINES = ("none", "lightgbm", "xgboost")
 FORECAST_RISK_AUX_NAMES = ("downside_floor", "worst_1d", "upside")
@@ -74,6 +77,9 @@ _FORECAST_DECISION_LOSS_PROFILES = {
     "decision_utility_path_aux_v1",
     "decision_utility_hit_risk_aux_v1",
     "decision_utility_rank_aux_v1",
+    "score_monthly_robust_v1",
+    "horizon_entropy_regularized_v1",
+    "risk_drawdown_reweighted_v1",
 }
 _FORECAST_LOSS_WEIGHT_PRESETS: dict[str, dict[str, float]] = {
     "default": {
@@ -201,6 +207,51 @@ _FORECAST_LOSS_WEIGHT_PRESETS: dict[str, dict[str, float]] = {
         "hit_aux": 0.20,
         "horizon_classification": 0.20,
         "decision_rank_aux": 0.45,
+    },
+    "score_monthly_robust_v1": {
+        "path_daily": 0.50,
+        "quantile": 0.20,
+        "path_aux": 0.20,
+        "risk_aux": 0.05,
+        "rank_aux": 1.05,
+        "risk_rank_aux": 0.005,
+        "direction_aux": 0.0,
+        "downside_rank_aux": 0.0,
+        "decision_utility": 1.00,
+        "hit_aux": 0.20,
+        "horizon_classification": 0.15,
+        "decision_rank_aux": 0.60,
+        "horizon_entropy": 0.0,
+    },
+    "horizon_entropy_regularized_v1": {
+        "path_daily": 0.60,
+        "quantile": 0.25,
+        "path_aux": 0.30,
+        "risk_aux": 0.05,
+        "rank_aux": 0.75,
+        "risk_rank_aux": 0.005,
+        "direction_aux": 0.0,
+        "downside_rank_aux": 0.0,
+        "decision_utility": 1.00,
+        "hit_aux": 0.20,
+        "horizon_classification": 0.10,
+        "decision_rank_aux": 0.25,
+        "horizon_entropy": 0.05,
+    },
+    "risk_drawdown_reweighted_v1": {
+        "path_daily": 0.50,
+        "quantile": 0.20,
+        "path_aux": 0.20,
+        "risk_aux": 0.25,
+        "rank_aux": 0.75,
+        "risk_rank_aux": 0.015,
+        "direction_aux": 0.0,
+        "downside_rank_aux": 0.025,
+        "decision_utility": 1.00,
+        "hit_aux": 0.25,
+        "horizon_classification": 0.15,
+        "decision_rank_aux": 0.25,
+        "horizon_entropy": 0.0,
     },
 }
 
@@ -965,6 +1016,12 @@ def _forecast_loss(
         loss = loss + float(weights["hit_aux"]) * F.binary_cross_entropy_with_logits(hit_logits, hit_target)
         loss = loss + float(weights["horizon_classification"]) * F.cross_entropy(horizon_logits, best_horizon_index)
         loss = loss + float(weights["decision_rank_aux"]) * pairwise_rank_loss(pred_decision_score, future_decision_score)
+        entropy_weight = float(weights.get("horizon_entropy", 0.0))
+        if entropy_weight > 0.0:
+            probabilities = F.softmax(horizon_logits, dim=1)
+            entropy = -(probabilities * torch.log(torch.clamp(probabilities, min=1.0e-8))).sum(dim=1)
+            max_entropy = torch.log(torch.as_tensor(float(cum_count), device=entropy.device, dtype=entropy.dtype))
+            loss = loss + entropy_weight * torch.clamp(max_entropy - entropy, min=0.0).mean()
     return loss
 
 

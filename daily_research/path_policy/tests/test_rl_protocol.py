@@ -165,6 +165,9 @@ def test_protocol_parser_accepts_auxiliary_decision_loss_profiles_and_sets_decis
         "decision_utility_path_aux_v1",
         "decision_utility_hit_risk_aux_v1",
         "decision_utility_rank_aux_v1",
+        "score_monthly_robust_v1",
+        "horizon_entropy_regularized_v1",
+        "risk_drawdown_reweighted_v1",
     ):
         args = parser.parse_args(
             [

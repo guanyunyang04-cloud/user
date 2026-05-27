@@ -39,7 +39,7 @@
 ## 当前主问题
 - production 执行侧不是当前阻塞点；默认 active 继续由 `short_expert_policy_v5b` 承担。
 - daily execution 当前阻塞点是 2026-05-26 数据源 readiness：候选交易日 formal refresh `market_daily` 为空，因此严格阻断并不生成新交易计划。
-- `alpha_multi_horizon_utility_policy_v1` 的当前 blocker 是 horizon / score calibration：模型已经学习到强的 20-30d 倾向交易效用排序信号，但还不是稳定的逐样本 horizon chooser。
+- `alpha_multi_horizon_utility_policy_v1` 的当前 blocker 是 target / loss / horizon-head stability：Stage 2.6 三个 fullgrid 校准候选 9/9 completed，但均未通过 monthly stability 与 horizon concentration gate，Stage 3 architecture review 仍未解锁。
 - continuous_policy 的核心瓶颈是组合日级资金分配：谁是 receiver、谁是 source、留多少 cash、承受多少 turnover / cost / drawdown。
 - r53-r55 解决了部分 cash/exposure closure，但 source/reduce/exit 和 cash timing 没闭合。
 - r56-r61 推进 release-first / core-v4 接线，证明诊断与部分接线有效，但行为仍未闭合。
@@ -55,7 +55,7 @@
 - P0：冻结 live/default/promotion/active artifact，所有新线先保持 research / shadow-only。
 - P1：每日执行端以手动帮助页流程、作业证据和 daily verdict 共同构成事实层；数据缺口严格阻断，不能回退旧交易日伪装“今日计划”。
 - P2：保持脑区控制面简洁；长历史、完整复盘、长命令进入 `references/`。
-- P3：`alpha_multi_horizon_utility_policy_v1` 下一步只做 constrained horizon-score / calibration 研究；约束后仍保持 spread、hit lift 和月稳，才允许 seeds `7,11,19`，仍不得上 liquid800 或 live/default。
+- P3：`alpha_multi_horizon_utility_policy_v1` 下一步继续 target/loss/horizon-head 根因修正；只有 fullgrid seeds `7,11,19` 同时满足 rank/spread/hit 全正、mean monthly positive rate `>=0.75`、max negative months `<=2` 且 horizon concentration 不恶化，才允许 Stage 3 architecture review。
 - P4：围绕 r71/r74 multi-stage regret 与 lake-native decision features 继续验证 receiver/deploy 平衡、cash timing、drawdown/reversal、source quality、feature contract health 与 sufficient training evidence；translation closure、oracle feasibility 和 lake source/receiver collapse 不再是当前主 blocker。
 - P5：继续用 strict Gold dataset id 作为训练数据真源；realtime tail label 只可用于 research/audit。
 - P6：补齐 TDX-free data platform 后续域：全 A universe discovery、交易日历、ST/退市/停牌、涨跌停、行业/概念、估值、资金/热点；这些进入 Bronze/Silver 后才能用于研究。
@@ -89,7 +89,7 @@
 - r73 lake-native r71 utilization：`daily_research/brain/references/r73_lake_native_r71_utilization_status_20260515.md`。
 - r74 lake behavior quality：`daily_research/brain/references/r74_lake_behavior_quality_status_20260515.md`。
 - 多 Horizon 交易效用命名迁移：`daily_research/brain/references/alpha_multi_horizon_utility_policy_mainline_rename_20260523.md`。
-- 多 Horizon 交易效用首轮结果：`daily_research/brain/references/alpha_path20_horizon_discovery_result_20260523.md`。
+- 多 Horizon 交易效用首轮 / Stage 2.6：`daily_research/brain/references/alpha_path20_horizon_discovery_result_20260523.md`、`daily_research/brain/references/alpha_multi_horizon_stage26_stability_root_cause_20260527.md`。
 - PathPolicy 执行异常学习：`daily_research/brain/references/path_policy_execution_issue_learning_20260523.md`。
 - TDX-free 数据平台决策：`daily_research/brain/references/tdx_free_data_platform_decision_20260523.md`。
 - TDX-free 数据平台 V2：`daily_research/brain/references/tdx_free_data_platform_v2_20260523.md`。

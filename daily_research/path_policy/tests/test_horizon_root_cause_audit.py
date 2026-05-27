@@ -7,8 +7,10 @@ import pandas as pd
 
 from daily_research.path_policy.horizon_root_cause_audit import (
     build_horizon_root_cause_audit,
+    build_stage26_root_cause_summary,
     evaluate_next_experiment_gate,
     target_experiment_configs,
+    write_stage26_root_cause_summary_artifacts,
     write_horizon_root_cause_artifacts,
 )
 
@@ -135,6 +137,7 @@ def test_build_audit_identifies_dynamic_horizons_and_root_causes() -> None:
     assert report["roles"]["validation"]["per_horizon"]["30"]["rank_ic"] > 0.0
     assert report["roles"]["test"]["per_horizon"]["1"]["target_std"] >= 0.0
     assert report["roles"]["test"]["horizon_alignment"]["pred_30d_share"] > 0.90
+    assert report["roles"]["test"]["horizon_alignment"]["pred_long_share"] > 0.90
     assert report["roles"]["test"]["horizon_alignment"]["future_long_share"] < 0.70
     assert "true_long_horizon_edge" in report["conclusion_enums"]
     assert "horizon_head_collapse" in report["conclusion_enums"]
@@ -174,6 +177,75 @@ def test_write_artifacts_outputs_json_csv_and_markdown(tmp_path: Path) -> None:
     assert loaded["status"] == "completed"
     assert {"role", "horizon", "rank_ic", "top_bottom_spread", "hit_lift_top20_mean"}.issubset(rows.columns)
     assert "无 live/default" in markdown
+
+
+def test_stage26_summary_classifies_common_seed_and_test_only_negative_months(tmp_path: Path) -> None:
+    base = {
+        "status": "completed",
+        "metadata": {"study_tag": "mh25_path_aux_fullgrid_rebudget_seed7_20260526_01", "seed": 7},
+        "conclusion_enums": ["horizon_head_collapse", "training_instability"],
+        "roles": {
+            "validation": {
+                "horizon_alignment": {"pred_long_share": 0.84, "pred_30d_share": 0.80},
+                "per_horizon": {
+                    "30": {
+                        "monthly_spread": {"2023-01": -0.01, "2023-02": 0.02},
+                        "monthly_spread_positive_rate": 0.50,
+                        "negative_months": ["2023-01"],
+                    }
+                },
+            },
+            "test": {
+                "horizon_alignment": {"pred_long_share": 0.94, "pred_30d_share": 0.90},
+                "per_horizon": {
+                    "30": {
+                        "monthly_spread": {"2024-01": -0.03, "2024-02": 0.01, "2024-03": -0.02},
+                        "monthly_spread_positive_rate": 0.333333,
+                        "negative_months": ["2024-01", "2024-03"],
+                    }
+                },
+            },
+        },
+    }
+    seed11 = json.loads(json.dumps(base))
+    seed11["metadata"]["study_tag"] = "mh25_path_aux_fullgrid_rebudget_seed11_20260526_01"
+    seed11["metadata"]["seed"] = 11
+    seed11["roles"]["test"]["per_horizon"]["30"]["negative_months"] = ["2024-01"]
+    seed11["roles"]["test"]["per_horizon"]["30"]["monthly_spread"] = {"2024-01": -0.02, "2024-02": 0.02}
+    daily = json.loads(json.dumps(base))
+    daily["metadata"]["study_tag"] = "mh25_path_aux_daily1_45_multiseed_seed7_20260526_01"
+    daily["roles"]["test"]["horizon_alignment"]["pred_long_share"] = 0.70
+
+    report = build_stage26_root_cause_summary([base, seed11, daily], run_tag="unit_stage26")
+
+    assert report["status"] == "completed"
+    assert report["run_tag"] == "unit_stage26"
+    assert report["candidate_summary"]["fullgrid_rebudget"]["seed_count"] == 2
+    assert report["candidate_summary"]["fullgrid_rebudget"]["common_test_negative_months"] == ["2024-01"]
+    assert "2024-03" in report["candidate_summary"]["fullgrid_rebudget"]["seed_specific_test_negative_months"]
+    assert report["candidate_summary"]["fullgrid_rebudget"]["mean_test_pred_long_share"] > 0.90
+    assert report["candidate_summary"]["fullgrid_rebudget"]["recommended_path"] == "loss_regularization_stabilization"
+    assert report["production_boundaries"]["training_started_by_summary"] is False
+
+    paths = write_stage26_root_cause_summary_artifacts(report, tmp_path)
+    assert paths["matrix_csv"].name == "stage26_root_cause_matrix.csv"
+    assert paths["verdict_md"].name == "stage26_root_cause_verdict.md"
+    matrix = pd.read_csv(paths["matrix_csv"])
+    verdict = paths["verdict_md"].read_text(encoding="utf-8")
+    assert {"candidate", "seed", "role", "horizon", "negative_months"}.issubset(matrix.columns)
+    assert "Stage 2.6" in verdict
+
+
+def test_horizon_alignment_treats_daily_grid_horizons_above_30_as_long() -> None:
+    frame = _prediction_frame(role="test", rows=6, collapse_to_30d=False)
+    frame["pred_best_horizon"] = [31, 35, 40, 45, 20, 5]
+    frame["future_best_horizon"] = [31, 35, 8, 10, 20, 5]
+
+    report = build_horizon_root_cause_audit(frame, frame)
+
+    alignment = report["roles"]["test"]["horizon_alignment"]
+    assert alignment["pred_long_share"] == 5 / 6
+    assert alignment["future_long_share"] == 3 / 6
 
 
 def test_target_experiment_configs_are_shadow_only_and_do_not_overlap_tags() -> None:

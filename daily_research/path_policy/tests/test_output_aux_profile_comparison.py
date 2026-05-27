@@ -411,6 +411,31 @@ def test_profile_aggregate_rows_keep_horizon_grids_separate(tmp_path: Path) -> N
     }
 
 
+def test_daily_grid_long_horizon_share_counts_all_horizons_at_or_above_15(tmp_path: Path) -> None:
+    study = _study_with_seed(
+        tmp_path,
+        "daily_grid_seed7",
+        loss_profile="decision_utility_path_aux_v1",
+        seed=7,
+        horizons=tuple(range(1, 46)),
+    )
+    for name in ("forecast_predictions_validation.csv", "forecast_predictions_test.csv"):
+        frame = pd.read_csv(study / name)
+        frame["pred_best_horizon"] = [31 if idx % 2 == 0 else 44 for idx in range(len(frame))]
+        frame.to_csv(study / name, index=False)
+
+    report = build_output_aux_profile_comparison([study], run_tag="unit")
+    row = next(
+        item
+        for item in profile_aggregate_rows(report)
+        if item["role"] == "test"
+        and item["score_name"] == "pred_decision_score"
+        and item["loss_profile"] == "decision_utility_path_aux_v1"
+    )
+
+    assert row["long_horizon_share_mean"] == 1.0
+
+
 def test_write_output_aux_profile_comparison_outputs_calibration_artifacts(tmp_path: Path) -> None:
     studies = [
         _study_with_seed(tmp_path, "utility_seed7", loss_profile="decision_utility_v1_baseline", seed=7),
