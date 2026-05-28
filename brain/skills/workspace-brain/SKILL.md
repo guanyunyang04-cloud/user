@@ -35,12 +35,14 @@ Prefer explicit dataset ids, protocol tags, registry v3 program/family/run field
 - `study_families`: stages or method families.
 - `run_tags`: physical run instances; do not create new research semantics by expanding run-tag prefixes.
 - Smoke, dry-run, failed, interrupted, timeout, and diagnostic-only runs are non-completed evidence.
+- For research/model verdicts, enforce before-final scope-grade alignment: conclusion level must match evidence scope and grade, including `universe_scope`, dataset/pool binding, seed count, budget class, gate result, and diagnostic-vs-evidence-grade status.
 - Separate facts, inferences, assumptions, and action boundaries in substantial reports.
 
 ## Agent Meta Protocol
 Agent owns the meta capability. Brain persists, distributes, and verifies it; capsules, audits, guards, and tests are sensors.
 Run the agent meta pass at task start, major decision boundaries, and before final answer. If `agent_meta.review.status != clear` or `agent_review.before_final_required=true`, mention signal, target layer, writeback route, and verification path.
 Before-final means closure-boundary meta-question discovery, not a fixed checklist: after the object-level answer is ready but before final response, low-noise check whether the task exposed a problem in frame, success criteria, method choice, authority order, evaluation mechanism, or learning salience. If it did, ask the user whether to evolve the agent/brain protocol; do not auto-create or implement learning without approval.
+For research/model conclusions, before-final also checks scope-grade alignment: do not close with a stronger claim than the evidence grade supports, even when metrics look good.
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py agent-meta-audit --cwd . --mode compact
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py brain-burden-audit --cwd . --mode compact

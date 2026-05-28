@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 75,
+  "record_count": 76,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -114,6 +114,37 @@
         "如发现历史命令引用旧路径，只在复现实验需要时转换到新根目录；不得把旧路径重新写成当前入口。"
       ],
       "active_artifact_impact": "guarded",
+      "dataset_ids": []
+    },
+    {
+      "id": "alpha_multi_horizon_experiment_audit_20260528",
+      "date": "2026-05-28",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_multi_horizon_experiment_audit_20260528.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [],
+      "run_tags": [
+        "path20_horizon_discovery",
+        "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01",
+        "mh_utility_horizon_calibration_posthoc_20260524_01",
+        "mh_utility_horizon_root_cause_audit_20260524_01"
+      ],
+      "verdict": "Status: `multi_horizon_evidence_audit / shadow-only / no active change`.; Mainline: `alpha_multi_horizon_utility_policy_v1`.; Audit target: all retained multi-horizon research artifacts from the 2026-05-23 full-pool discovery through Stage 3A-3C architecture/input scout.; Active artifact impact: `daily_research/output/active_execution_strategy.json` unchanged.",
+      "blockers": [
+        "Softmax and long-blend variants reduced concentration but failed validation or regression constraints.",
+        "Audit judgment: the `failed_regression` conclusion is correct; post-hoc score calibration did not safely repair horizon collapse.",
+        "Needs qualification: mid/long `forecast_test_confirmed` is not a stability pass. All three target-family controls failed the comparison gate and remained single-seed evidence.",
+        "Sector branch blocker: `raw_kline_context_sector_v1` full-pool anchor had `sector_context_feature_count=0`; sector input was blocked and is not evidence against sector information.",
+        "Architecture upgrade: not allowed after Stage 3C; patch failed final gate."
+      ],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "unchanged",
       "dataset_ids": []
     },
     {

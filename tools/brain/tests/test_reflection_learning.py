@@ -252,6 +252,46 @@ class ReflectionLearningTest(unittest.TestCase):
         self.assertEqual(candidate["confidence"], "high")
         self.assertEqual(candidate["supporting_events"][0]["owner_brain"], "daily_research")
 
+    def test_research_scope_grade_mismatch_generates_conclusion_gate_candidate(self) -> None:
+        module = load_reflection_module()
+        trace = {
+            "task": "审阅 multi-horizon 研究结论是否被错误证据支撑",
+            "planned_steps": [
+                {
+                    "id": "audit",
+                    "title": "audit evidence scope and grade",
+                    "expected_outcome": "conclusion wording downgraded when scope is diagnostic",
+                    "required": True,
+                }
+            ],
+            "events": [
+                {
+                    "type": "research_scope_grade_mismatch",
+                    "step_id": "audit",
+                    "summary": "cap80_diagnostic metrics were at risk of being read as full-pool model-quality evidence",
+                    "evidence": "universe_scope=cap80_diagnostic; claimed_conclusion=full_rolling_liquid500 gate pass",
+                    "owner_brain": "daily_research",
+                    "target_layer": "research_conclusion_gate",
+                    "evidence_grade": "diagnostic_only",
+                    "confidence": "high",
+                }
+            ],
+            "final_state": {"completed": True, "skipped_steps": [], "unresolved_blockers": [], "user_nudges": [], "verification": []},
+        }
+
+        payload = module.analyze_trace(trace)
+
+        candidates = payload["learning_candidates"]
+        self.assertTrue(candidates)
+        candidate = candidates[0]
+        self.assertEqual(candidate["target_layer"], "research_conclusion_gate")
+        self.assertIn("scope", candidate["lesson"])
+        self.assertIn("universe_scope", candidate["recommended_change"])
+        self.assertEqual(candidate["confidence"], "high")
+        self.assertEqual(candidate["supporting_events"][0]["evidence_grade"], "diagnostic_only")
+        self.assertTrue(payload["meta_question_candidates"])
+        self.assertEqual(payload["meta_question_candidates"][0]["meta_layer"], "criterion")
+
     def test_analyze_meta_signals_detects_learning_opportunity_missed(self) -> None:
         module = load_reflection_module()
 
@@ -293,6 +333,25 @@ class ReflectionLearningTest(unittest.TestCase):
         opportunity = next(item for item in payload["learning_opportunities"] if item["target_layer"] == "brain_burden_governance")
         self.assertEqual(opportunity["source_signal"], "brain_rule_obstruction")
         self.assertEqual(opportunity["owner_brain"], "workspace")
+
+    def test_analyze_meta_signals_detects_research_scope_grade_alignment_gap(self) -> None:
+        module = load_reflection_module()
+
+        payload = module.analyze_agent_meta_signals(
+            task="审阅研究结论，确认 cap80 diagnostic 没有被当作 full-pool evidence 或 evidence-grade gate pass",
+            capsule_context={
+                "target_kind": "child",
+                "workflow_domain": "daily_research",
+                "routing": {"selected_brain_id": "daily_research"},
+            },
+        )
+
+        self.assertEqual(payload["status"], "opportunity")
+        self.assertIn("research_scope_grade_alignment_gap", payload["signals"])
+        opportunity = next(item for item in payload["learning_opportunities"] if item["target_layer"] == "research_conclusion_gate")
+        self.assertEqual(opportunity["owner_brain"], "workspace")
+        self.assertEqual(opportunity["source_signal"], "research_scope_grade_alignment_gap")
+        self.assertIn("scope", opportunity["recommended_action"])
 
     def test_analyze_meta_signals_detects_low_budget_evidence_pollution(self) -> None:
         module = load_reflection_module()

@@ -116,6 +116,19 @@ def _event_opportunity(event: Mapping[str, Any]) -> dict[str, Any] | None:
             source_signal=event_type,
             detector_id="trace_event_detector",
         )
+    if event_type == "research_scope_grade_mismatch":
+        return _opportunity(
+            target_layer=target_layer or "research_conclusion_gate",
+            owner_brain="workspace",
+            confidence=str(event.get("confidence", "") or "high"),
+            recommended_action=(
+                "add before-final research scope-grade alignment: verify universe_scope, dataset/pool binding, seed count, "
+                "budget class, gate result, and diagnostic-vs-evidence-grade status before closing a model/research verdict"
+            ),
+            writeback_route="brain/governance_layer.md",
+            source_signal="research_scope_grade_alignment_gap",
+            detector_id="research_scope_grade_detector",
+        )
     if event_type == "learning_opportunity_missed":
         return _opportunity(
             target_layer=target_layer or "agent_meta_protocol",
@@ -313,6 +326,60 @@ def analyze_agent_meta_signals(
             )
         )
 
+    scope_grade_terms = (
+        "scope-grade",
+        "scope grade",
+        "evidence scope",
+        "evidence-grade",
+        "evidence grade",
+        "universe_scope",
+        "full-pool",
+        "full pool",
+        "full_rolling",
+        "cap80",
+        "diagnostic",
+        "diagnostic_only",
+        "gate pass",
+        "gate evidence",
+        "研究结论",
+        "证据级",
+        "证据等级",
+        "证据范围",
+        "诊断线索",
+        "数据集范围",
+        "被当作",
+    )
+    conclusion_terms = (
+        "research",
+        "model",
+        "experiment",
+        "conclusion",
+        "verdict",
+        "evidence",
+        "gate",
+        "研究",
+        "模型",
+        "实验",
+        "结论",
+        "证据",
+    )
+    if any(term in text for term in scope_grade_terms) and any(term in text for term in conclusion_terms):
+        signals.append("research_scope_grade_alignment_gap")
+        opportunities.append(
+            _opportunity(
+                target_layer="research_conclusion_gate",
+                owner_brain="workspace",
+                confidence="high",
+                recommended_action=(
+                    "before closing research/model conclusions, align the claimed conclusion level with evidence scope: "
+                    "universe_scope, dataset/pool binding, seed count, budget class, gate result, and diagnostic-vs-evidence-grade status"
+                ),
+                writeback_route="brain/governance_layer.md",
+                source_signal="research_scope_grade_alignment_gap",
+                detector_id="research_scope_grade_detector",
+            )
+        )
+
     if any(term in text for term in ("规则写了", "明明写", "没有执行", "未进入热路径", "rule not enforced")):
         signals.append("rule_not_enforced")
         opportunities.append(
@@ -334,6 +401,8 @@ def analyze_agent_meta_signals(
             continue
         if event_type == "budget_reliability_gap":
             signals.append("low_budget_evidence_pollution")
+        elif event_type == "research_scope_grade_mismatch":
+            signals.append("research_scope_grade_alignment_gap")
         else:
             signals.append(event_type)
         opportunities.append(opportunity)

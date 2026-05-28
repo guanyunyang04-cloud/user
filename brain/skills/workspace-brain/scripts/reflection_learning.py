@@ -22,6 +22,7 @@ TRACE_EVENT_TYPES = (
     "meta_question_missed",
     "human_feedback_overrode_tool_clear",
     "closure_boundary_misread",
+    "research_scope_grade_mismatch",
     "long_task_poll",
 )
 
@@ -290,6 +291,19 @@ def _meta_candidates_from_events(events: list[dict[str, Any]]) -> list[dict[str,
                 )
             )
 
+    for event in _events_of_type(events, "research_scope_grade_mismatch"):
+        summary = str(event.get("summary", "") or "research conclusion exceeded the supporting evidence scope or grade")
+        candidates.append(
+            _meta_question_candidate(
+                meta_layer="criterion",
+                object_level_issue=summary,
+                meta_question="Does the evidence scope and grade actually support the conclusion level being claimed?",
+                why_it_matters="研究结论的完成标准不是指标好看，而是 evidence scope/grade 足以支撑结论层级；否则会把诊断线索误写成证据级结论。",
+                confidence=str(event.get("confidence", "") or "high"),
+                supporting_events=[event],
+            )
+        )
+
     unique: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     for candidate in candidates:
@@ -440,6 +454,24 @@ def analyze_trace(raw_trace: dict[str, Any]) -> dict[str, Any]:
                 supporting_events=support,
                 suggested_tests=["review trace with evidence_quality_gap returns evidence governance candidate"],
                 anti_overfit_check="do not apply to ordinary uncertainty unless the trace reports a concrete evidence quality gap",
+                confidence=str(support[0].get("confidence", "") or "high"),
+            )
+        )
+
+    if _events_of_type(events, "research_scope_grade_mismatch"):
+        support = _events_of_type(events, "research_scope_grade_mismatch")
+        candidates.append(
+            _candidate(
+                lesson="Research conclusions require scope-grade alignment before final wording.",
+                root_cause="a research/model conclusion was at risk of exceeding the supporting evidence scope, grade, or gate status",
+                target_layer=str(support[0].get("target_layer", "") or "research_conclusion_gate"),
+                recommended_change=(
+                    "before closing research conclusions, verify universe_scope, dataset/pool binding, seed count, budget class, "
+                    "gate result, and diagnostic-vs-evidence-grade status; downgrade wording when the evidence does not support the claimed level"
+                ),
+                supporting_events=support,
+                suggested_tests=["review trace with research_scope_grade_mismatch returns research_conclusion_gate"],
+                anti_overfit_check="only applies to research/model verdicts with explicit scope, grade, gate, or conclusion-level mismatch evidence",
                 confidence=str(support[0].get("confidence", "") or "high"),
             )
         )

@@ -42,6 +42,15 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertIn("program/family/run", text)
         self.assertNotIn("Prefer explicit study tags", text)
 
+    def test_skill_mentions_research_scope_grade_alignment_before_final(self) -> None:
+        text = SKILL.read_text(encoding="utf-8")
+
+        self.assertIn("scope-grade alignment", text)
+        self.assertIn("universe_scope", text)
+        self.assertIn("seed count", text)
+        self.assertIn("gate result", text)
+        self.assertIn("diagnostic-vs-evidence-grade", text)
+
     def test_skill_does_not_offer_generic_workflow_fallback(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
 

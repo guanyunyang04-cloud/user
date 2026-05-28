@@ -312,6 +312,26 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertEqual(opportunity["writeback_route"], "daily_research/brain/knowledge_center.md")
         self.assertTrue(opportunity["verification_required"])
 
+    def test_capsule_research_scope_grade_review_exposes_closure_signal(self) -> None:
+        payload = build_task_capsule(
+            task="详细审阅 multi-horizon 研究结论，确认 cap80 diagnostic 没有被当作 full-pool evidence 或 evidence-grade gate pass",
+            workflow="auto",
+            intent="read",
+            verbosity="lite",
+        )
+
+        review = payload["agent_meta"]["review"]
+        self.assertEqual(review["status"], "opportunity")
+        self.assertIn("research_scope_grade_alignment_gap", review["signals"])
+        opportunity = next(
+            item for item in review["learning_opportunities"]
+            if item["target_layer"] == "research_conclusion_gate"
+        )
+        self.assertEqual(opportunity["owner_brain"], "workspace")
+        self.assertEqual(opportunity["writeback_route"], "brain/governance_layer.md")
+        self.assertTrue(payload["agent_review"]["before_final_required"])
+        self.assertTrue(payload["agent_review"]["closure_meta_review_required"])
+
     def test_capsule_brain_rule_mutation_uses_brain_maintenance(self) -> None:
         payload = build_task_capsule(
             task="修改脑区规则",

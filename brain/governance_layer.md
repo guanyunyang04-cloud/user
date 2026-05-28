@@ -21,6 +21,7 @@
 - 元能力属于 agent；brain 是持久化载体，负责保存协议、证据、守卫和写回路径；capsule、audit 和 guard 只是传感器。
 - 闭环为 `Brain primes agent -> Agent observes -> Detect -> Classify -> Route -> Ask/Propose -> Verify -> Brain updates -> Future agent reuses`。
 - `before_final` 是闭合边界的元问题发现，不是固定 checklist：对象层任务准备交付但 final answer 尚未发出时，agent 低噪声判断是否暴露了框架、标准、方法、权威排序、评价机制或学习显著性问题。
+- 研究 / 模型结论闭合前必须做 `scope-grade alignment`：结论层级必须匹配 evidence scope/grade，至少核对 `universe_scope`、dataset/pool 绑定、seed count、budget class、gate result、diagnostic-vs-evidence-grade status；不匹配时先降级措辞，再决定是否提出协议演化。
 - 若工具 / audit 显示 clear，但人类反馈或任务事实说明闭合判断不成立，clear 只能作为传感器信号；agent 必须优先说明元问题，并征求是否沉淀为 agent/brain 学习。
 - 第一版权限为 `propose_only`：agent 可自动发现、分级、提示、审计和生成 proposal；核心 brain docs、workflow、skill、guard、tests 写入仍需用户授权。
 - capsule 若返回 `agent_meta.review.status != clear`，agent 必须在最终答复或后续计划中说明信号、目标层、writeback route 和验证要求。
