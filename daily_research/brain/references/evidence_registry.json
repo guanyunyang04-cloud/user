@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 73,
+  "record_count": 74,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -333,6 +333,48 @@
         "Treat `target_norm_head_constraint_v1` and `horizon_target_normalized_v1` as useful cap80 diagnostics, not deployable or architecture-gate candidates.",
         "Next research should rerun the target/loss stability question on full rolling_liquid500 using the full-pool memmap manifest before narrowing or redesigning the target family around `15/20/30d`.",
         "Continue research-only / shadow-only boundaries; no active artifact, allocator, replay, paper, live/default, or promotion action is authorized."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
+      ]
+    },
+    {
+      "id": "alpha_multi_horizon_stage28_full_pool_revalidation_20260528",
+      "date": "2026-05-28",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_multi_horizon_stage28_full_pool_revalidation_20260528.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [
+        "stage28_full_pool_revalidation"
+      ],
+      "run_tags": [
+        "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01",
+        "mh28_fullpool_decision_utility_v1_fullgrid_seed7_20260527_01",
+        "mh28_fullpool_decision_utility_v1_fullgrid_seed11_20260527_01",
+        "mh28_fullpool_decision_utility_v1_fullgrid_seed19_20260527_01",
+        "mh28_fullpool_horizon_target_normalized_v1_fullgrid_seed7_20260527_01",
+        "mh28_fullpool_horizon_target_normalized_v1_fullgrid_seed11_20260527_01",
+        "mh28_fullpool_horizon_target_normalized_v1_fullgrid_seed19_20260527_01",
+        "mh28_fullpool_target_norm_head_constraint_v1_fullgrid_seed7_20260527_01",
+        "mh28_fullpool_target_norm_head_constraint_v1_fullgrid_seed11_20260527_01",
+        "mh28_fullpool_target_norm_head_constraint_v1_fullgrid_seed19_20260527_01"
+      ],
+      "verdict": "Status: `stage28_completed / full_rolling_liquid500 revalidation / shadow-only / research-only`.; Mainline: `alpha_multi_horizon_utility_policy_v1`.; Study family: `stage28_full_pool_revalidation`.; Verdict: Stage 2.8 completed the 9/9 full rolling_liquid500 revalidation runs. `target_norm_head_constraint_v1` passed the full-pool gate.",
+      "blockers": [
+        "Training summary: `stage28_training_summary.json` status `completed`, completed tags `9`, failed tags `0`."
+      ],
+      "next_allowed_actions": [
+        "Keep active execution unchanged.",
+        "Write a Stage 3 architecture review plan using `target_norm_head_constraint_v1` as the primary fixed target/loss baseline.",
+        "Candidate architectures may include `patch_transformer_static_context` and `stock_mixer_sequence`, but all runs must remain research / shadow-only.",
+        "Do not mechanically rerun every old cap80 grid. If more evidence is needed, add only targeted full-pool controls around target normalization, head concentration, and monthly regime stability."
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": [
