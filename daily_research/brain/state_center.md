@@ -13,6 +13,7 @@
 - 多 Horizon 交易效用排序当前研究主线指针：`alpha_multi_horizon_utility_policy_v1`（2026-05-23 命名迁移）；旧 `alpha_path20_neural_policy_v1` / `Path20` 保留为历史证据代号和代码 / study namespace，不再代表当前目标定义；`alpha_path20_sequence_policy_v1` 暂作 shadow comparison / secondary research route；三者均不代表 live/default。
 - 最新多 Horizon 交易效用 full-pool 结论：Stage 2.8 `mh_stage28_full_pool_revalidation_20260527_01` 已完成 9/9 full rolling_liquid500 runs；`target_norm_head_constraint_v1` 通过 full-pool gate，允许进入 Stage 3 architecture review 计划，但仍是 research / shadow-only，不授权 liquid800、allocator、replay、paper、live/default 或 active promotion。
 - Stage 2.8 对照显示旧 `decision_utility_v1` full-pool baseline 仍有正 rank/spread/hit，但因 max negative months `3` 与 30d concentration `0.884804` 未过严格 gate；`target_norm_head_constraint_v1` 将 30d concentration 降至 `0.776934`、long horizon share 降至 `0.815462`，且 3 seeds rank/spread/hit 全正、mean monthly positive rate `0.878788`、max negative months `2`。
+- 最新 Stage 3A-3C architecture/input scout 结论：`mh_stage30_arch_input_scout_20260528_01` 已完成 low-seed full-pool scout、seed11 confirmation 与 seed19 final confirmation；`patch_transformer_static_context` 进入 Stage 3C 但 final 3-seed gate 失败（test hit lift min `-0.000133`、max negative months `3`、30d concentration `0.916702` 高于 Stage 2.8 GRU baseline `0.776934`），因此不升级架构，Stage 3 baseline 仍为 `gru_sequence_static_context + raw_kline_context_no_alpha_prior_v1 + target_norm_head_constraint_v1`。sector input branch 因 full-pool sector artifact `sector_context_feature_count=0` 被阻塞，不代表 sector 信息无效。
 - continuous_policy 当前仍是 `research / shadow_only`；未过 formal evidence、v2 gate、stable confirm 与 promotion gate 前，不得替代 active 执行链。
 - 当前有效 continuous_policy 研究基线仍是 r39 allocation objective consolidation；r40-r74 均为 research / shadow 升级链或基础设施证据。
 - r64 已产出 full-window strict Gold：`continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`，`2010-01-04 -> 2026-04-10` observed strict window，`is_training_safe=true`，audit `ok`。
@@ -40,7 +41,7 @@
 ## 当前主问题
 - production 执行侧不是当前阻塞点；默认 active 继续由 `short_expert_policy_v5b` 承担。
 - daily execution 当前阻塞点是 2026-05-26 数据源 readiness：候选交易日 formal refresh `market_daily` 为空，因此严格阻断并不生成新交易计划。
-- `alpha_multi_horizon_utility_policy_v1` 的当前 blocker 已从 full-pool target/loss stability 转为 Stage 3 architecture review 设计：Stage 2.5-2.7 仍只是 `cap80_diagnostic`，但 Stage 2.8 已用 full rolling_liquid500 memmap 完成核心链路复验并通过 `target_norm_head_constraint_v1` gate；下一步只能做 shadow-only 架构评审，不得直接 promotion。
+- `alpha_multi_horizon_utility_policy_v1` 的当前 blocker 已从 target/loss stability 转为架构/输入诊断：Stage 2.8 已用 full rolling_liquid500 memmap 通过 `target_norm_head_constraint_v1` gate；Stage 3A-3C 显示 patch 架构未形成 final 3-seed upgrade evidence，sector input 构造未真正提供 sector_context 特征；下一步应先修 sector feature construction 或做更窄的 single-seed scout + 晋级确认，不得直接 promotion。
 - continuous_policy 的核心瓶颈是组合日级资金分配：谁是 receiver、谁是 source、留多少 cash、承受多少 turnover / cost / drawdown。
 - r53-r55 解决了部分 cash/exposure closure，但 source/reduce/exit 和 cash timing 没闭合。
 - r56-r61 推进 release-first / core-v4 接线，证明诊断与部分接线有效，但行为仍未闭合。
@@ -56,7 +57,7 @@
 - P0：冻结 live/default/promotion/active artifact，所有新线先保持 research / shadow-only。
 - P1：每日执行端以手动帮助页流程、作业证据和 daily verdict 共同构成事实层；数据缺口严格阻断，不能回退旧交易日伪装“今日计划”。
 - P2：保持脑区控制面简洁；长历史、完整复盘、长命令进入 `references/`。
-- P3：`alpha_multi_horizon_utility_policy_v1` 已完成 Stage 2.8 full rolling_liquid500 target/loss 复验；下一步写 Stage 3 architecture review 计划，以 `target_norm_head_constraint_v1` 为 primary fixed target/loss baseline，候选可包括 `patch_transformer_static_context` 与 `stock_mixer_sequence`，但全部必须 research / shadow-only。cap80 结果只能作为诊断线索，不能作为 gate evidence。
+- P3：`alpha_multi_horizon_utility_policy_v1` 已完成 Stage 2.8 full rolling_liquid500 target/loss 复验与 Stage 3A-3C low-seed architecture/input scout；当前不升级 patch/stock/slot 架构，保留 GRU baseline。下一步优先修复 `raw_kline_context_sector_v1` 的 sector_context 特征缺失，或只对明确问题做窄矩阵 single-seed scout；多 seed 继续作为晋级确认工具。cap80 结果只能作为诊断线索，不能作为 gate evidence。
 - P4：围绕 r71/r74 multi-stage regret 与 lake-native decision features 继续验证 receiver/deploy 平衡、cash timing、drawdown/reversal、source quality、feature contract health 与 sufficient training evidence；translation closure、oracle feasibility 和 lake source/receiver collapse 不再是当前主 blocker。
 - P5：继续用 strict Gold dataset id 作为训练数据真源；realtime tail label 只可用于 research/audit。
 - P6：补齐 TDX-free data platform 后续域：全 A universe discovery、交易日历、ST/退市/停牌、涨跌停、行业/概念、估值、资金/热点；这些进入 Bronze/Silver 后才能用于研究。
@@ -90,7 +91,7 @@
 - r73 lake-native r71 utilization：`daily_research/brain/references/r73_lake_native_r71_utilization_status_20260515.md`。
 - r74 lake behavior quality：`daily_research/brain/references/r74_lake_behavior_quality_status_20260515.md`。
 - 多 Horizon 交易效用命名迁移：`daily_research/brain/references/alpha_multi_horizon_utility_policy_mainline_rename_20260523.md`。
-- 多 Horizon 交易效用首轮 / Stage 2.5-2.8 / universe scope correction：`daily_research/brain/references/alpha_path20_horizon_discovery_result_20260523.md`、`daily_research/brain/references/alpha_multi_horizon_stage25_stability_calibration_20260526.md`、`daily_research/brain/references/alpha_multi_horizon_stage26_stability_root_cause_20260527.md`、`daily_research/brain/references/alpha_multi_horizon_stage27_target_head_stability_20260527.md`、`daily_research/brain/references/alpha_multi_horizon_universe_scope_correction_20260527.md`、`daily_research/brain/references/alpha_multi_horizon_stage28_full_pool_revalidation_20260528.md`。
+- 多 Horizon 交易效用首轮 / Stage 2.5-3C / universe scope correction：`daily_research/brain/references/alpha_path20_horizon_discovery_result_20260523.md`、`daily_research/brain/references/alpha_multi_horizon_stage25_stability_calibration_20260526.md`、`daily_research/brain/references/alpha_multi_horizon_stage26_stability_root_cause_20260527.md`、`daily_research/brain/references/alpha_multi_horizon_stage27_target_head_stability_20260527.md`、`daily_research/brain/references/alpha_multi_horizon_universe_scope_correction_20260527.md`、`daily_research/brain/references/alpha_multi_horizon_stage28_full_pool_revalidation_20260528.md`、`daily_research/brain/references/alpha_multi_horizon_stage30_arch_input_scout_20260528.md`。
 - PathPolicy 执行异常学习：`daily_research/brain/references/path_policy_execution_issue_learning_20260523.md`。
 - TDX-free 数据平台决策：`daily_research/brain/references/tdx_free_data_platform_decision_20260523.md`。
 - TDX-free 数据平台 V2：`daily_research/brain/references/tdx_free_data_platform_v2_20260523.md`。

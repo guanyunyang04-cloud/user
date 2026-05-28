@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 74,
+  "record_count": 75,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -430,6 +430,40 @@
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": []
+    },
+    {
+      "id": "alpha_multi_horizon_stage30_arch_input_scout_20260528",
+      "date": "2026-05-28",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_multi_horizon_stage30_arch_input_scout_20260528.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [],
+      "run_tags": [
+        "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01"
+      ],
+      "verdict": "Status: `stage30_completed_with_branch_blockers`, `stage31_completed`, `stage32_completed / no architecture upgrade / shadow-only`.; Mainline: `alpha_multi_horizon_utility_policy_v1`.; Study root: `daily_research/output/path_policy/studies/mh_stage30_arch_input_scout_20260528_01/`.; Fixed target/loss baseline: `decision_utility_v1` output with `target_norm_head_constraint_v1`.",
+      "blockers": [
+        "Status: `stage30_completed_with_branch_blockers`, `stage31_completed`, `stage32_completed / no architecture upgrade / shadow-only`.",
+        "Final decision: keep `gru_sequence_static_context + raw_kline_context_no_alpha_prior_v1 + target_norm_head_constraint_v1` as the Stage 3 baseline. `patch_transformer_static_context` reached Stage 3C but failed final 3-seed upgrade gate.",
+        "The sector input branch did not actually test sector information; the built `raw_kline_context_sector_v1` full-pool artifact had zero sector context features. This is an input-construction blocker, not evidence that sector information is useless."
+      ],
+      "next_allowed_actions": [
+        "Keep active execution unchanged.",
+        "Keep Stage 3 architecture baseline as `gru_sequence_static_context + raw_kline_context_no_alpha_prior_v1 + target_norm_head_constraint_v1`.",
+        "Do not promote PatchTST/patch transformer from this run.",
+        "Before more architecture search, either fix the sector feature construction path or run narrowly targeted input/architecture scouts with single seed followed by confirmation only for clear winners.",
+        "If pursuing patch further, treat it as a diagnostics candidate: investigate why seed19 drives hit lift negative and 30d concentration back up before allocating more full-pool training."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
+      ]
     },
     {
       "id": "alpha_multi_horizon_target_function_shadow_seed7_20260524",
