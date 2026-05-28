@@ -72,6 +72,8 @@ def agent_meta_audit(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
         and isinstance(review, dict)
         else "warning",
         "has_agent_meta": isinstance(agent_meta, dict),
+        "proposal_creation_policy": str(agent_meta.get("proposal_creation_policy", "") if isinstance(agent_meta, dict) else ""),
+        "implementation_approval_policy": str(agent_meta.get("implementation_approval_policy", "") if isinstance(agent_meta, dict) else ""),
         "review_status": str(review.get("status", "") if isinstance(review, dict) else ""),
         "closure_meta_review": {
             "available": isinstance(agent_review, dict) and "closure_review_command" in agent_review,

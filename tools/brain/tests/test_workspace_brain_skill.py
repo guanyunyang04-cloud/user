@@ -252,6 +252,9 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertEqual(proposal_payload["owner_brain"], "learning_demo")
         self.assertEqual(proposal_payload["writeback_target"], "brain/references/")
         self.assertTrue(proposal_payload["requires_user_confirmation"])
+        self.assertEqual(proposal_payload["proposal_creation_policy"], "auto_create_low_risk_proposed_status")
+        self.assertEqual(proposal_payload["proposal_status"], "proposed")
+        self.assertTrue(proposal_payload["implementation_requires_user_confirmation"])
         self.assertIn("lesson", proposal_payload)
         self.assertIn("root_cause", proposal_payload)
         self.assertIn("supporting_events", proposal_payload)
@@ -286,6 +289,9 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         candidate = payload["learning_candidates"][0]
         self.assertIn(candidate["target_layer"], {"workflow_selector", "capsule_contract", "skill", "tests_guard"})
         self.assertTrue(candidate["requires_user_confirmation"])
+        self.assertEqual(candidate["proposal_creation_policy"], "auto_create_low_risk_proposed_status")
+        self.assertEqual(candidate["proposal_status"], "proposed")
+        self.assertTrue(candidate["implementation_requires_user_confirmation"])
 
     def test_brain_runtime_review_detects_run_evidence_domain_mismatch(self) -> None:
         result = subprocess.run(
@@ -513,6 +519,8 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertIn("reflection-template", text)
         self.assertIn("review --trace-json", text)
         self.assertIn("agent learning proposal", text)
+        self.assertIn("auto-create low-risk proposals", text)
+        self.assertIn("implementation requires user approval", text)
         self.assertIn("pending agent learning approvals", text)
         self.assertIn("proposed` or `approved", text)
         self.assertLessEqual(line_count, 100)
@@ -650,8 +658,10 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         payload = json.loads(result.stdout)
 
         self.assertTrue(payload["meta_question_candidates"])
-        self.assertIn("ask_user_for_evolution", payload["next_actions"])
-        self.assertTrue(payload["meta_question_candidates"][0]["ask_user_for_evolution"])
+        self.assertIn("create_agent_learning_proposal", payload["next_actions"])
+        self.assertNotIn("ask_user_for_evolution", payload["next_actions"])
+        self.assertTrue(payload["meta_question_candidates"][0]["auto_create_proposal"])
+        self.assertTrue(payload["meta_question_candidates"][0]["implementation_requires_user_confirmation"])
 
     def test_brain_runtime_agent_meta_audit_compact_reports_contract(self) -> None:
         result = subprocess.run(
@@ -807,6 +817,9 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         self.assertEqual(proposal_payload["lifecycle_status"], "proposed")
         self.assertIn("verification_required", proposal_payload)
         self.assertIn("writeback_route", proposal_payload)
+        self.assertEqual(proposal_payload["proposal_creation_policy"], "auto_create_low_risk_proposed_status")
+        self.assertEqual(proposal_payload["proposal_status"], "proposed")
+        self.assertTrue(proposal_payload["implementation_requires_user_confirmation"])
 
     def test_brain_runtime_mark_proposal_accepts_verified(self) -> None:
         tmp_root = ROOT / "daily_research/output/test_learning_verified_project"

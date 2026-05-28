@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
@@ -49,6 +50,9 @@ TRACE_OPTIONAL_EVENT_FIELDS = (
     "decision",
     "final_verification",
 )
+
+PROPOSAL_CREATION_POLICY = "auto_create_low_risk_proposed_status"
+PROPOSAL_STATUS = "proposed"
 
 
 def reflection_template() -> dict[str, Any]:
@@ -192,7 +196,10 @@ def _candidate(
         "anti_overfit_check": anti_overfit_check,
         "confidence": confidence,
         "supporting_events": supporting_events,
+        "proposal_creation_policy": PROPOSAL_CREATION_POLICY,
+        "proposal_status": PROPOSAL_STATUS,
         "requires_user_confirmation": True,
+        "implementation_requires_user_confirmation": True,
     }
 
 
@@ -210,7 +217,10 @@ def _meta_question_candidate(
         "object_level_issue": object_level_issue,
         "meta_question": meta_question,
         "why_it_matters": why_it_matters,
-        "ask_user_for_evolution": True,
+        "auto_create_proposal": True,
+        "proposal_creation_policy": PROPOSAL_CREATION_POLICY,
+        "proposal_status": PROPOSAL_STATUS,
+        "implementation_requires_user_confirmation": True,
         "confidence": confidence,
         "supporting_events": supporting_events,
     }
@@ -222,6 +232,13 @@ def _events_of_type(events: list[dict[str, Any]], event_type: str) -> list[dict[
 
 def _event_text(event: dict[str, Any]) -> str:
     return " ".join(str(event.get(key, "") or "") for key in ("summary", "evidence", "command")).lower()
+
+
+def _freeform_term_present(text: str, term: str) -> bool:
+    normalized = str(term or "").lower()
+    if normalized == "eta":
+        return re.search(r"(?<![a-z0-9_])eta(?![a-z0-9_])", text) is not None
+    return normalized in text
 
 
 def _meta_candidates_from_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -535,9 +552,10 @@ def analyze_trace(raw_trace: dict[str, Any]) -> dict[str, Any]:
     if unique:
         next_actions.append("create_agent_learning_proposal")
     if meta_question_candidates:
-        next_actions.append("ask_user_for_evolution")
+        next_actions.append("create_agent_learning_proposal")
     if not next_actions:
         next_actions.append("no_agent_learning_needed")
+    next_actions = list(dict.fromkeys(next_actions))
 
     return {
         "status": "ok",
@@ -592,7 +610,7 @@ def analyze_freeform(*, task: str = "", observation: str = "", test_output: str 
             recommended_change="confirm with trace and cover path_policy plus continuous_policy run tags with regression tests",
             suggested_tests=["freeform evidence domain mismatch returns run_evidence_resolver candidate"],
         )
-    if any(term in text for term in ("start-sleep", "wait-process", "长任务", "轮询", "eta")):
+    if any(_freeform_term_present(text, term) for term in ("start-sleep", "wait-process", "长任务", "轮询", "eta")):
         add(
             lesson="Long-task polling discipline should be verified with structured execution evidence.",
             root_cause="freeform observation reported long-task monitor or ETA behavior gap",
@@ -616,7 +634,36 @@ def analyze_freeform(*, task: str = "", observation: str = "", test_output: str 
             recommended_change="tighten brain-native workflow selector rules while keeping generic method terms owned by local skills",
             suggested_tests=["freeform workflow mismatch returns workflow_selector candidate"],
         )
-    if any(term in text for term in ("stale skill", "global skill", "stale_or_missing_global_skill", "skill sync", "skill_install", "skill out of sync", "out of sync", "not in sync", "技能不同步", "skill 不同步", "未同步", "安装版落后", "同步失败")):
+    skill_sync_signal = any(
+        term in text
+        for term in (
+            "stale skill",
+            "global skill",
+            "stale_or_missing_global_skill",
+            "skill sync",
+            "skill_install",
+            "skill out of sync",
+            "技能不同步",
+            "skill 不同步",
+            "安装版落后",
+            "同步失败",
+        )
+    )
+    skill_sync_gap = any(
+        term in text
+        for term in (
+            "gap",
+            "stale",
+            "missing",
+            "out of sync",
+            "not in sync",
+            "不同步",
+            "未同步",
+            "落后",
+            "失败",
+        )
+    )
+    if skill_sync_signal and skill_sync_gap:
         add(
             lesson="Skill sync gaps should be learned only when they affect execution behavior.",
             root_cause="freeform observation reported a canonical or installed skill sync gap",
@@ -655,7 +702,14 @@ def analyze_freeform(*, task: str = "", observation: str = "", test_output: str 
         "learning_candidates": unique,
         "meta_question_candidates": meta_question_candidates,
         "next_actions": (
-            [*("create_agent_learning_proposal" for _ in unique[:1]), *("ask_user_for_evolution" for _ in meta_question_candidates[:1])]
+            list(
+                dict.fromkeys(
+                    [
+                        *("create_agent_learning_proposal" for _ in unique[:1]),
+                        *("create_agent_learning_proposal" for _ in meta_question_candidates[:1]),
+                    ]
+                )
+            )
             or ["no_agent_learning_needed"]
         ),
     }
@@ -707,6 +761,8 @@ def build_proposal_payload(
         "authority": "requires_user_confirmation",
         "status": status,
         "lifecycle_status": status,
+        "proposal_creation_policy": PROPOSAL_CREATION_POLICY,
+        "proposal_status": status,
         "severity": severity,
         "owner_brain": owner_brain,
         "writeback_target": writeback_target,
@@ -717,6 +773,7 @@ def build_proposal_payload(
         "source_signal": "manual_agent_learning",
         "related_task": related_task,
         "requires_user_confirmation": bool(requires_user_confirmation),
+        "implementation_requires_user_confirmation": bool(requires_user_confirmation),
         "facts": [trigger],
         "inferences": [],
         "assumptions": [],

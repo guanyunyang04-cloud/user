@@ -421,6 +421,34 @@ def _validate_main_manifest(findings: list[Finding], main_manifest: dict[str, An
             findings.append(
                 Finding("error", "main_agent_meta_protocol_invalid", "before_final_trigger_policy must be low_noise", main_path)
             )
+        if agent_meta.get("proposal_creation_policy") != "auto_create_low_risk_proposed_status":
+            findings.append(
+                Finding(
+                    "error",
+                    "main_agent_meta_protocol_invalid",
+                    "proposal_creation_policy must be auto_create_low_risk_proposed_status",
+                    main_path,
+                )
+            )
+        creation_boundary = str(agent_meta.get("proposal_creation_boundary", "") or "").lower()
+        if "proposed status" not in creation_boundary or "implementation" not in creation_boundary:
+            findings.append(
+                Finding(
+                    "error",
+                    "main_agent_meta_protocol_invalid",
+                    "proposal_creation_boundary must separate proposed-status creation from implementation approval",
+                    main_path,
+                )
+            )
+        if agent_meta.get("implementation_approval_policy") != "requires_explicit_user_approval_for_protocol_or_behavior_changes":
+            findings.append(
+                Finding(
+                    "error",
+                    "main_agent_meta_protocol_invalid",
+                    "implementation_approval_policy must require explicit user approval for protocol or behavior changes",
+                    main_path,
+                )
+            )
         human_override_rule = str(agent_meta.get("before_final_human_override_rule", "") or "").lower()
         if "tool clear" not in human_override_rule or "human feedback" not in human_override_rule:
             findings.append(
@@ -821,6 +849,11 @@ def _validate_agent_meta_runtime_contract(findings: list[Finding], main_manifest
         return
     manifest_contract = main_manifest.get("agent_meta_protocol", {})
     for key in ("actor", "substrate", "tool_role", "authority"):
+        if agent_meta.get(key) != manifest_contract.get(key):
+            findings.append(
+                Finding("error", "agent_meta_capsule_manifest_mismatch", f"{key} mismatch", "tools/brain/capsule.py")
+            )
+    for key in ("proposal_creation_policy", "implementation_approval_policy"):
         if agent_meta.get(key) != manifest_contract.get(key):
             findings.append(
                 Finding("error", "agent_meta_capsule_manifest_mismatch", f"{key} mismatch", "tools/brain/capsule.py")

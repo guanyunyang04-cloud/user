@@ -52,6 +52,9 @@ class ReflectionLearningTest(unittest.TestCase):
         self.assertEqual(candidate["confidence"], "high")
         self.assertIn("train", candidate["supporting_events"][0]["step_id"])
         self.assertTrue(candidate["suggested_tests"])
+        self.assertEqual(candidate["proposal_creation_policy"], "auto_create_low_risk_proposed_status")
+        self.assertEqual(candidate["proposal_status"], "proposed")
+        self.assertTrue(candidate["implementation_requires_user_confirmation"])
 
     def test_tool_failure_followed_by_manual_workaround_generates_tool_contract_gap(self) -> None:
         module = load_reflection_module()
@@ -156,9 +159,11 @@ class ReflectionLearningTest(unittest.TestCase):
         self.assertEqual(candidate["meta_layer"], "evaluation")
         self.assertEqual(candidate["object_level_issue"], "agent_meta_audit returned clear, but user pointed out the agent missed the meta problem")
         self.assertIn("clear", candidate["meta_question"])
-        self.assertTrue(candidate["ask_user_for_evolution"])
+        self.assertTrue(candidate["auto_create_proposal"])
+        self.assertTrue(candidate["implementation_requires_user_confirmation"])
         self.assertEqual(candidate["confidence"], "high")
-        self.assertIn("ask_user_for_evolution", payload["next_actions"])
+        self.assertIn("create_agent_learning_proposal", payload["next_actions"])
+        self.assertNotIn("ask_user_for_evolution", payload["next_actions"])
 
     def test_meta_question_missed_generates_learning_salience_candidate(self) -> None:
         module = load_reflection_module()
@@ -183,7 +188,8 @@ class ReflectionLearningTest(unittest.TestCase):
         candidate = candidates[0]
         self.assertEqual(candidate["meta_layer"], "learning_salience")
         self.assertIn("可泛化", candidate["why_it_matters"])
-        self.assertTrue(candidate["ask_user_for_evolution"])
+        self.assertTrue(candidate["auto_create_proposal"])
+        self.assertTrue(candidate["implementation_requires_user_confirmation"])
         self.assertEqual(candidate["confidence"], "high")
 
     def test_handoff_conflict_is_authority_order_example_not_special_case(self) -> None:
@@ -210,7 +216,8 @@ class ReflectionLearningTest(unittest.TestCase):
         candidate = candidates[0]
         self.assertEqual(candidate["meta_layer"], "authority")
         self.assertNotIn("handoff", candidate["meta_layer"])
-        self.assertTrue(candidate["ask_user_for_evolution"])
+        self.assertTrue(candidate["auto_create_proposal"])
+        self.assertTrue(candidate["implementation_requires_user_confirmation"])
 
     def test_one_off_environment_failure_does_not_create_persistent_learning(self) -> None:
         module = load_reflection_module()
@@ -305,7 +312,11 @@ class ReflectionLearningTest(unittest.TestCase):
         self.assertIn("learning_opportunity_missed", payload["signals"])
         self.assertIn("create_proposal", payload["next_actions"])
         self.assertTrue(payload["learning_opportunities"])
-        self.assertEqual(payload["learning_opportunities"][0]["target_layer"], "agent_meta_protocol")
+        opportunity = payload["learning_opportunities"][0]
+        self.assertEqual(opportunity["target_layer"], "agent_meta_protocol")
+        self.assertEqual(opportunity["proposal_creation_policy"], "auto_create_low_risk_proposed_status")
+        self.assertEqual(opportunity["proposal_status"], "proposed")
+        self.assertTrue(opportunity["implementation_requires_user_confirmation"])
 
     def test_analyze_agent_meta_signals_detects_actor_boundary_mismatch(self) -> None:
         module = load_reflection_module()
@@ -352,6 +363,8 @@ class ReflectionLearningTest(unittest.TestCase):
         self.assertEqual(opportunity["owner_brain"], "workspace")
         self.assertEqual(opportunity["source_signal"], "research_scope_grade_alignment_gap")
         self.assertIn("scope", opportunity["recommended_action"])
+        self.assertEqual(opportunity["proposal_creation_policy"], "auto_create_low_risk_proposed_status")
+        self.assertTrue(opportunity["implementation_requires_user_confirmation"])
 
     def test_analyze_meta_signals_detects_low_budget_evidence_pollution(self) -> None:
         module = load_reflection_module()
@@ -419,6 +432,20 @@ class ReflectionLearningTest(unittest.TestCase):
         self.assertEqual(payload["evidence_gaps"], ["structured_trace_missing"])
         self.assertTrue(payload["learning_candidates"])
         self.assertEqual(payload["learning_candidates"][0]["confidence"], "low")
+
+    def test_freeform_completion_review_does_not_match_eta_inside_targeted_or_completed_sync(self) -> None:
+        module = load_reflection_module()
+
+        payload = module.analyze_freeform(
+            task="simplify agent learning proposal flow",
+            observation=(
+                "Implemented policy split. Targeted tests, skill sync, doc guard, "
+                "integrity check, and agent meta audit completed."
+            ),
+        )
+
+        self.assertEqual(payload["learning_candidates"], [])
+        self.assertEqual(payload["next_actions"], ["no_agent_learning_needed"])
 
     def test_reflection_template_cli_outputs_trace_schema(self) -> None:
         result = subprocess.run(

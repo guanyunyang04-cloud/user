@@ -41,7 +41,7 @@ Prefer explicit dataset ids, protocol tags, registry v3 program/family/run field
 ## Agent Meta Protocol
 Agent owns the meta capability. Brain persists, distributes, and verifies it; capsules, audits, guards, and tests are sensors.
 Run the agent meta pass at task start, major decision boundaries, and before final answer. If `agent_meta.review.status != clear` or `agent_review.before_final_required=true`, mention signal, target layer, writeback route, and verification path.
-Before-final means closure-boundary meta-question discovery, not a fixed checklist: after the object-level answer is ready but before final response, low-noise check whether the task exposed a problem in frame, success criteria, method choice, authority order, evaluation mechanism, or learning salience. If it did, ask the user whether to evolve the agent/brain protocol; do not auto-create or implement learning without approval.
+Before-final means closure-boundary meta-question discovery, not a fixed checklist: after the object-level answer is ready but before final response, low-noise check whether the task exposed a problem in frame, success criteria, method choice, authority order, evaluation mechanism, or learning salience. For clear low-risk learnings, auto-create low-risk proposals in `proposed` status; implementation requires user approval.
 For research/model conclusions, before-final also checks scope-grade alignment: do not close with a stronger claim than the evidence grade supports, even when metrics look good.
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py agent-meta-audit --cwd . --mode compact
@@ -57,7 +57,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scri
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py review --trace-json <trace.json> --cwd . --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py review --cwd . --task "<task>" --observation "<what happened>" --json
 ```
-Create an agent learning proposal for repeated failure, rule conflict, timeout misread, branch violation, missing entrypoint, stale skill, missed meta pass, actor-boundary mismatch, or brain-rule obstruction:
+Create an agent learning proposal for repeated failure, rule conflict, timeout misread, branch violation, missing entrypoint, stale skill, missed meta pass, actor-boundary mismatch, or brain-rule obstruction; low-risk proposal creation does not need a pre-question, but implementation requires user approval:
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py proposal --cwd . --title "<short title>" --trigger "<fact>" --evidence "<path or observation>" --recommendation "<change proposal>" --severity info --owner-brain workspace --writeback-target brain/references/
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py list-proposals --cwd .

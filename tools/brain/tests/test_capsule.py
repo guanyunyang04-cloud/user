@@ -88,6 +88,11 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertEqual(payload["agent_meta"]["substrate"], "brain")
         self.assertEqual(payload["agent_meta"]["tool_role"], "sensor")
         self.assertEqual(payload["agent_meta"]["authority"], "propose_only")
+        self.assertEqual(payload["agent_meta"]["proposal_creation_policy"], "auto_create_low_risk_proposed_status")
+        self.assertEqual(
+            payload["agent_meta"]["implementation_approval_policy"],
+            "requires_explicit_user_approval_for_protocol_or_behavior_changes",
+        )
         self.assertEqual(payload["agent_meta"]["required_passes"], ["task_start", "decision_boundary", "before_final"])
         self.assertEqual(payload["agent_meta"]["review"]["status"], "clear")
         self.assertEqual(payload["agent_meta"]["review"]["next_actions"], ["no_learning_needed"])
@@ -234,6 +239,10 @@ class BrainCapsuleTest(unittest.TestCase):
         layers = {item["target_layer"] for item in review["learning_opportunities"]}
         self.assertIn("agent_meta_protocol", layers)
         self.assertIn("create_proposal", review["next_actions"])
+        opportunity = next(item for item in review["learning_opportunities"] if item["target_layer"] == "agent_meta_protocol")
+        self.assertEqual(opportunity["proposal_creation_policy"], "auto_create_low_risk_proposed_status")
+        self.assertEqual(opportunity["proposal_status"], "proposed")
+        self.assertTrue(opportunity["implementation_requires_user_confirmation"])
         self.assertTrue(payload["agent_review"]["before_final_required"])
         self.assertIn("agent_meta_opportunity", payload["agent_review"]["reason_codes"])
         self.assertTrue(payload["agent_review"]["closure_meta_review_required"])
@@ -249,6 +258,8 @@ class BrainCapsuleTest(unittest.TestCase):
         review = payload["agent_meta"]["review"]
         self.assertEqual(review["status"], "opportunity")
         self.assertIn("meta_question_discovery_gap", review["signals"])
+        self.assertIn("create_proposal", review["next_actions"])
+        self.assertNotIn("ask_user_for_evolution", review["next_actions"])
         self.assertTrue(payload["agent_review"]["closure_meta_review_required"])
         self.assertIn("closure_meta_review", payload["agent_review"]["reason_codes"])
         self.assertIn(" review ", payload["agent_review"]["closure_review_command"])

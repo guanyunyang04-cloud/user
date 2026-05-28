@@ -6,7 +6,12 @@ from typing import Any
 
 from tools.brain.adapters import daily_research as daily_research_adapter
 from tools.brain.evidence_registry import query_evidence_registry
-from tools.brain.agent_meta import AGENT_META_REQUIRED_PASSES, analyze_agent_meta_signals
+from tools.brain.agent_meta import (
+    AGENT_META_IMPLEMENTATION_APPROVAL_POLICY,
+    AGENT_META_PROPOSAL_CREATION_POLICY,
+    AGENT_META_REQUIRED_PASSES,
+    analyze_agent_meta_signals,
+)
 from tools.brain.platform import (
     PYTHON_EXECUTABLE,
     WORKSPACE_ROOT,
@@ -387,6 +392,8 @@ def build_task_capsule(
         "substrate": "brain",
         "tool_role": "sensor",
         "authority": "propose_only",
+        "proposal_creation_policy": AGENT_META_PROPOSAL_CREATION_POLICY,
+        "implementation_approval_policy": AGENT_META_IMPLEMENTATION_APPROVAL_POLICY,
         "required_passes": list(AGENT_META_REQUIRED_PASSES),
         "review": agent_meta_review,
         "commands": _agent_meta_commands(),

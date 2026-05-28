@@ -6,6 +6,9 @@ from typing import Any, Mapping
 AGENT_META_AUTHORITY = "propose_only"
 AGENT_META_CLEAR_ACTION = "no_learning_needed"
 AGENT_META_REQUIRED_PASSES = ["task_start", "decision_boundary", "before_final"]
+AGENT_META_PROPOSAL_CREATION_POLICY = "auto_create_low_risk_proposed_status"
+AGENT_META_PROPOSAL_STATUS = "proposed"
+AGENT_META_IMPLEMENTATION_APPROVAL_POLICY = "requires_explicit_user_approval_for_protocol_or_behavior_changes"
 
 
 def clear_agent_meta_review() -> dict[str, Any]:
@@ -78,6 +81,9 @@ def _opportunity(
         "recommended_action": recommended_action,
         "writeback_route": writeback_route,
         "verification_required": bool(verification_required),
+        "proposal_creation_policy": AGENT_META_PROPOSAL_CREATION_POLICY,
+        "proposal_status": AGENT_META_PROPOSAL_STATUS,
+        "implementation_requires_user_confirmation": True,
         "detector_id": detector_id,
         "source_signal": source_signal,
     }
@@ -318,7 +324,8 @@ def analyze_agent_meta_signals(
                 confidence="high",
                 recommended_action=(
                     "treat before-final as low-noise closure-boundary meta-question discovery: "
-                    "when human feedback, task facts, or method/frame mismatch contradict tool-clear closure, ask the user whether to evolve the agent/brain protocol"
+                    "when human feedback, task facts, or method/frame mismatch contradict tool-clear closure, create a low-risk proposed "
+                    "agent-learning record and keep protocol implementation gated by user approval"
                 ),
                 writeback_route="brain/governance_layer.md",
                 source_signal="meta_question_discovery_gap",
@@ -424,8 +431,6 @@ def analyze_agent_meta_signals(
 
     signals = _dedupe_strings(signals)
     opportunities = _dedupe_opportunities(opportunities)
-    if "meta_question_discovery_gap" in signals:
-        actions.append("ask_user_for_evolution")
     actions = _dedupe_strings([*actions, *("create_proposal" for _ in opportunities)])
     if not signals and not opportunities:
         return clear_agent_meta_review()

@@ -709,6 +709,13 @@ def _check_manifest_semantics(path: Path, text: str) -> list[str]:
                 issues.append("main_agent_meta_protocol_before_final_mode_invalid")
             if agent_meta.get("before_final_trigger_policy") != "low_noise":
                 issues.append("main_agent_meta_protocol_before_final_trigger_policy_invalid")
+            if agent_meta.get("proposal_creation_policy") != "auto_create_low_risk_proposed_status":
+                issues.append("main_agent_meta_protocol_proposal_creation_policy_invalid")
+            creation_boundary = str(agent_meta.get("proposal_creation_boundary", "") or "").lower()
+            if "proposed status" not in creation_boundary or "implementation" not in creation_boundary:
+                issues.append("main_agent_meta_protocol_proposal_creation_boundary_invalid")
+            if agent_meta.get("implementation_approval_policy") != "requires_explicit_user_approval_for_protocol_or_behavior_changes":
+                issues.append("main_agent_meta_protocol_implementation_approval_policy_invalid")
             human_override_rule = str(agent_meta.get("before_final_human_override_rule", "") or "").lower()
             if "tool clear" not in human_override_rule or "human feedback" not in human_override_rule:
                 issues.append("main_agent_meta_protocol_before_final_human_override_rule_invalid")

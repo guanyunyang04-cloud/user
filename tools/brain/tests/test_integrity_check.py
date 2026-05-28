@@ -42,6 +42,12 @@ class BrainIntegrityCatalogTest(unittest.TestCase):
         self.assertEqual(contract["required_passes"], ["task_start", "decision_boundary", "before_final"])
         self.assertEqual(contract["before_final_mode"], "closure_boundary_meta_question_discovery")
         self.assertEqual(contract["before_final_trigger_policy"], "low_noise")
+        self.assertEqual(contract["proposal_creation_policy"], "auto_create_low_risk_proposed_status")
+        self.assertIn("proposed status", contract["proposal_creation_boundary"])
+        self.assertEqual(
+            contract["implementation_approval_policy"],
+            "requires_explicit_user_approval_for_protocol_or_behavior_changes",
+        )
         self.assertIn("tool clear", contract["before_final_human_override_rule"].lower())
         self.assertNotIn("fixed checklist", contract["before_final_human_override_rule"].lower())
         self.assertIn("universe_scope", contract["before_final_research_scope_grade_rule"])

@@ -26,7 +26,7 @@ CORE_DOCS = {
     "knowledge_center.md": "# {title} 知识中枢\n\n- 稳定事实、硬规则和可复用教训写入这里。\n- 长证据和过程细节下沉到 `brain/references/`。\n",
     "brain_architecture.md": "# {title} 脑区架构\n\n- 采用最小脑区结构：identity、state、knowledge、operations、governance、episodic。\n",
     "operations_center.md": "# {title} 操作中枢\n\n- 接管入口：先运行 brain runtime detect，再用 workflow capsule 接管项目任务。\n",
-    "governance_layer.md": "# {title} 治理层\n\n- 重大动作前区分事实、推断、假设和边界。\n- Agent learning 默认只生成 proposal，核心治理写回需要用户确认。\n",
+    "governance_layer.md": "# {title} 治理层\n\n- 重大动作前区分事实、推断、假设和边界。\n- Agent learning 可自动创建低风险 proposed proposal；实现协议或行为改动仍需用户确认。\n",
     "episodic_memory.md": "# {title} 情景记忆\n\n- 时间顺序证据和长复盘写入这里或 `brain/references/`。\n",
 }
 
