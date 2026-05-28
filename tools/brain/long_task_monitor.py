@@ -77,6 +77,25 @@ def _artifact_mtime(path: Path | None) -> str:
     return datetime.fromtimestamp(latest, tz=timezone.utc).isoformat()
 
 
+def _artifact_summary(path: Path | None, *, limit: int = 8) -> list[dict[str, Any]]:
+    if path is None or not path.exists():
+        return []
+    candidates = [item for item in path.rglob("*") if item.is_file()] if path.is_dir() else [path]
+    candidates.sort(key=lambda item: item.stat().st_mtime, reverse=True)
+    out: list[dict[str, Any]] = []
+    for item in candidates[:limit]:
+        stat = item.stat()
+        out.append(
+            {
+                "path": str(item),
+                "name": item.name,
+                "bytes": int(stat.st_size),
+                "mtime": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+            }
+        )
+    return out
+
+
 def _pid_alive(pid: int | None) -> bool:
     if not pid or pid <= 0:
         return False
@@ -93,6 +112,29 @@ def _pid_alive(pid: int | None) -> bool:
         check=False,
     )
     return "alive" in (result.stdout or "")
+
+
+def _parse_child_pids(value: str | list[int] | None) -> list[int]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        out: list[int] = []
+        for item in value:
+            try:
+                out.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        return out
+    out = []
+    for part in str(value or "").replace(";", ",").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            out.append(int(part))
+        except ValueError:
+            continue
+    return out
 
 
 def _progress_fraction(progress: dict[str, Any]) -> tuple[float | None, float | None, float | None]:
@@ -141,6 +183,8 @@ def build_template(*, timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS) -> dict[st
                 "$pid = $proc.Id",
                 f"Wait-Process -Id <pid> -Timeout {timeout}",
                 "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor status --pid $pid --progress <progress.json> --stdout <stdout.log> --stderr <stderr.log> --artifact-dir <artifact_dir> --json",
+                "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor trace-poll --trace-json <trace.json> --pid $pid --poll-window-seconds "
+                f"{timeout} --progress <progress.json> --stdout <stdout.log> --stderr <stderr.log> --artifact-dir <artifact_dir> --json",
             ]
         ),
     }
@@ -218,6 +262,103 @@ def build_status(
     }
 
 
+def build_trace_event(
+    *,
+    task: str = "",
+    step_id: str = "",
+    run_tag: str = "",
+    pid: int | None = None,
+    child_pids: list[int] | None = None,
+    poll_window_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+    progress_path: str | Path | None = None,
+    stdout_path: str | Path | None = None,
+    stderr_path: str | Path | None = None,
+    artifact_dir: str | Path | None = None,
+    stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS,
+    final_verification: str = "",
+) -> dict[str, Any]:
+    progress_file = Path(progress_path) if progress_path else None
+    stdout_file = Path(stdout_path) if stdout_path else None
+    stderr_file = Path(stderr_path) if stderr_path else None
+    artifact_path = Path(artifact_dir) if artifact_dir else None
+    status = build_status(
+        pid=pid,
+        progress_path=progress_file,
+        stdout_path=stdout_file,
+        stderr_path=stderr_file,
+        artifact_dir=artifact_path,
+        stale_after_seconds=stale_after_seconds,
+    )
+    eta_no_eta_reason = ""
+    if status.get("eta_status") not in {"estimated", "completed"}:
+        eta_no_eta_reason = str(status.get("eta_status") or "progress_unavailable")
+    event = {
+        "type": "long_task_poll",
+        "step_id": str(step_id or ""),
+        "summary": f"long task poll for {run_tag or task or 'unnamed task'}",
+        "evidence": (
+            f"pid_alive={status.get('pid_alive')} progress_percent={status.get('progress_percent')} "
+            f"eta_status={status.get('eta_status')} decision={status.get('decision')}"
+        ),
+        "task": str(task or ""),
+        "run_tag": str(run_tag or ""),
+        "pid": int(pid or 0),
+        "pid_alive": bool(status.get("pid_alive")),
+        "child_pids": list(child_pids or []),
+        "poll_window_seconds": int(poll_window_seconds),
+        "progress_path": str(progress_file or ""),
+        "stdout_path": str(stdout_file or ""),
+        "stderr_path": str(stderr_file or ""),
+        "artifact_dir": str(artifact_path or ""),
+        "artifact_mtime": str(status.get("artifact_mtime") or ""),
+        "artifact_summary": _artifact_summary(artifact_path),
+        "elapsed_seconds": status.get("elapsed_seconds"),
+        "estimated_remaining_seconds": status.get("estimated_remaining_seconds"),
+        "eta_at": str(status.get("eta_at") or ""),
+        "eta_status": str(status.get("eta_status") or ""),
+        "eta_no_eta_reason": eta_no_eta_reason,
+        "progress_percent": status.get("progress_percent"),
+        "current_step": status.get("current_step"),
+        "total_steps": status.get("total_steps"),
+        "updated_at": str(status.get("updated_at") or ""),
+        "decision": str(status.get("decision") or ""),
+        "stdout_tail": list(status.get("last_log_lines") or []),
+        "stderr_tail": list(status.get("last_error_lines") or []),
+        "final_verification": str(final_verification or ""),
+        "observed_at": _utc_now().isoformat(),
+    }
+    return event
+
+
+def append_trace_event(trace_path: str | Path, event: dict[str, Any], *, task: str = "") -> dict[str, Any]:
+    path = Path(trace_path)
+    payload = _load_json(path)
+    if not payload or "_load_error" in payload:
+        payload = {
+            "schema_version": 1,
+            "task": task,
+            "planned_steps": [],
+            "events": [],
+            "final_state": {
+                "completed": False,
+                "skipped_steps": [],
+                "unresolved_blockers": [],
+                "user_nudges": [],
+                "verification": [],
+            },
+        }
+    if task and not payload.get("task"):
+        payload["task"] = task
+    events = payload.get("events")
+    if not isinstance(events, list):
+        events = []
+        payload["events"] = events
+    events.append(event)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return payload
+
+
 def _print_payload(payload: dict[str, Any], *, as_json: bool) -> None:
     if as_json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -257,6 +398,22 @@ def build_parser() -> argparse.ArgumentParser:
     wait_once.add_argument("--artifact-dir", default="")
     wait_once.add_argument("--stale-after-seconds", type=int, default=DEFAULT_STALE_AFTER_SECONDS)
     wait_once.add_argument("--json", action="store_true")
+
+    trace_poll = sub.add_parser("trace-poll", help="Build and optionally append a structured long-task poll trace event.")
+    trace_poll.add_argument("--trace-json", default="")
+    trace_poll.add_argument("--task", default="")
+    trace_poll.add_argument("--step-id", default="")
+    trace_poll.add_argument("--run-tag", default="")
+    trace_poll.add_argument("--pid", type=int, default=0)
+    trace_poll.add_argument("--child-pids", default="")
+    trace_poll.add_argument("--poll-window-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
+    trace_poll.add_argument("--progress", default="")
+    trace_poll.add_argument("--stdout", default="")
+    trace_poll.add_argument("--stderr", default="")
+    trace_poll.add_argument("--artifact-dir", default="")
+    trace_poll.add_argument("--stale-after-seconds", type=int, default=DEFAULT_STALE_AFTER_SECONDS)
+    trace_poll.add_argument("--final-verification", default="")
+    trace_poll.add_argument("--json", action="store_true")
     return parser
 
 
@@ -275,6 +432,26 @@ def main() -> int:
             ],
             check=False,
         )
+    if args.command == "trace-poll":
+        event = build_trace_event(
+            task=str(getattr(args, "task", "") or ""),
+            step_id=str(getattr(args, "step_id", "") or ""),
+            run_tag=str(getattr(args, "run_tag", "") or ""),
+            pid=int(getattr(args, "pid", 0) or 0),
+            child_pids=_parse_child_pids(str(getattr(args, "child_pids", "") or "")),
+            poll_window_seconds=int(getattr(args, "poll_window_seconds", DEFAULT_TIMEOUT_SECONDS)),
+            progress_path=str(getattr(args, "progress", "") or "") or None,
+            stdout_path=str(getattr(args, "stdout", "") or "") or None,
+            stderr_path=str(getattr(args, "stderr", "") or "") or None,
+            artifact_dir=str(getattr(args, "artifact_dir", "") or "") or None,
+            stale_after_seconds=int(getattr(args, "stale_after_seconds", DEFAULT_STALE_AFTER_SECONDS)),
+            final_verification=str(getattr(args, "final_verification", "") or ""),
+        )
+        trace_json = str(getattr(args, "trace_json", "") or "")
+        if trace_json:
+            append_trace_event(trace_json, event, task=str(getattr(args, "task", "") or ""))
+        _print_payload({"status": "ok", "event": event, "trace_json": trace_json}, as_json=bool(getattr(args, "json", False)))
+        return 0
     payload = build_status(
         pid=int(getattr(args, "pid", 0) or 0),
         progress_path=str(getattr(args, "progress", "") or "") or None,

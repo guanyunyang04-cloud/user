@@ -22,6 +22,7 @@ TRACE_EVENT_TYPES = (
     "meta_question_missed",
     "human_feedback_overrode_tool_clear",
     "closure_boundary_misread",
+    "long_task_poll",
 )
 
 TRACE_OPTIONAL_EVENT_FIELDS = (
@@ -30,6 +31,22 @@ TRACE_OPTIONAL_EVENT_FIELDS = (
     "artifact_path",
     "evidence_grade",
     "confidence",
+    "run_tag",
+    "pid",
+    "pid_alive",
+    "child_pids",
+    "poll_window_seconds",
+    "progress_path",
+    "stdout_path",
+    "stderr_path",
+    "artifact_dir",
+    "artifact_mtime",
+    "eta_status",
+    "eta_at",
+    "eta_no_eta_reason",
+    "progress_percent",
+    "decision",
+    "final_verification",
 )
 
 

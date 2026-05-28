@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from tools.brain.long_task_monitor import build_status, build_template
+from tools.brain.long_task_monitor import build_status, build_template, build_trace_event
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -116,6 +116,95 @@ class LongTaskMonitorTest(unittest.TestCase):
 
         self.assertEqual(payload["progress_percent"], 50.0)
         self.assertIn("estimated_remaining_seconds", payload)
+
+    def test_trace_event_records_structured_polling_evidence(self) -> None:
+        with TemporaryDirectory() as raw_tmp:
+            root = Path(raw_tmp)
+            progress = root / "forecast_progress.json"
+            stdout = root / "train.out"
+            stderr = root / "train.err"
+            artifact_dir = root / "artifacts"
+            artifact_dir.mkdir()
+            started_at = datetime.now(timezone.utc) - timedelta(minutes=20)
+            progress.write_text(
+                json.dumps({"started_at": started_at.isoformat(), "current_step": 2, "total_steps": 4}),
+                encoding="utf-8",
+            )
+            stdout.write_text("epoch 1\n", encoding="utf-8")
+            stderr.write_text("", encoding="utf-8")
+            (artifact_dir / "checkpoint.pt").write_text("x", encoding="utf-8")
+
+            event = build_trace_event(
+                task="train patch seed19",
+                step_id="stage32_final",
+                run_tag="mh_stage32_arch_input_final_confirmation_20260528_01",
+                pid=999999,
+                child_pids=[111, 222],
+                poll_window_seconds=7200,
+                progress_path=progress,
+                stdout_path=stdout,
+                stderr_path=stderr,
+                artifact_dir=artifact_dir,
+                final_verification="pending",
+            )
+
+        self.assertEqual(event["type"], "long_task_poll")
+        self.assertEqual(event["step_id"], "stage32_final")
+        self.assertEqual(event["pid"], 999999)
+        self.assertEqual(event["child_pids"], [111, 222])
+        self.assertEqual(event["poll_window_seconds"], 7200)
+        self.assertEqual(event["eta_status"], "estimated")
+        self.assertEqual(event["eta_no_eta_reason"], "")
+        self.assertEqual(event["final_verification"], "pending")
+        self.assertIn("checkpoint.pt", [item["name"] for item in event["artifact_summary"]])
+
+    def test_cli_trace_poll_appends_review_trace_event(self) -> None:
+        with TemporaryDirectory() as raw_tmp:
+            root = Path(raw_tmp)
+            progress = root / "forecast_progress.json"
+            trace_json = root / "long_task_trace.json"
+            started_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+            progress.write_text(
+                json.dumps({"started_at": started_at.isoformat(), "current_step": 1, "total_steps": 2}),
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    PYTHON,
+                    "-m",
+                    "tools.brain.long_task_monitor",
+                    "trace-poll",
+                    "--trace-json",
+                    str(trace_json),
+                    "--task",
+                    "long training",
+                    "--step-id",
+                    "train",
+                    "--run-tag",
+                    "run_01",
+                    "--pid",
+                    "999999",
+                    "--poll-window-seconds",
+                    "7200",
+                    "--progress",
+                    str(progress),
+                    "--final-verification",
+                    "pending",
+                    "--json",
+                ],
+                cwd=str(ROOT),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+            trace_payload = json.loads(trace_json.read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(trace_payload["task"], "long training")
+        self.assertEqual(trace_payload["events"][0]["type"], "long_task_poll")
+        self.assertEqual(trace_payload["events"][0]["run_tag"], "run_01")
 
 
 if __name__ == "__main__":

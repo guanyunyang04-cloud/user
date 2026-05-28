@@ -101,6 +101,35 @@ class ReflectionLearningTest(unittest.TestCase):
 
         self.assertEqual(payload["learning_candidates"], [])
         self.assertEqual(payload["meta_question_candidates"], [])
+
+    def test_review_trace_preserves_long_task_poll_events(self) -> None:
+        module = load_reflection_module()
+        trace = {
+            "task": "long training",
+            "planned_steps": [{"id": "train", "title": "train", "expected_outcome": "completed run", "required": True}],
+            "events": [
+                {
+                    "type": "long_task_poll",
+                    "step_id": "train",
+                    "summary": "7200s poll returned while training was still running",
+                    "evidence": "progress_percent=50 eta_status=estimated",
+                    "run_tag": "run_01",
+                    "pid": 123,
+                    "poll_window_seconds": 7200,
+                    "progress_path": "forecast_progress.json",
+                    "eta_status": "estimated",
+                    "decision": "continue_wait_process_window",
+                }
+            ],
+            "final_state": {"completed": False},
+        }
+
+        normalized = module.normalize_trace(trace)
+        payload = module.analyze_trace(trace)
+
+        self.assertEqual(normalized["events"][0]["type"], "long_task_poll")
+        self.assertEqual(normalized["events"][0]["run_tag"], "run_01")
+        self.assertEqual(normalized["events"][0]["poll_window_seconds"], "7200")
         self.assertEqual(payload["next_actions"], ["no_agent_learning_needed"])
 
     def test_human_feedback_overrode_tool_clear_generates_evaluation_meta_candidate(self) -> None:

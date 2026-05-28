@@ -512,6 +512,7 @@ class WorkspaceBrainSkillTest(unittest.TestCase):
         text = SKILL.read_text(encoding="utf-8")
 
         self.assertIn("tools.brain.long_task_monitor", text)
+        self.assertIn("trace-poll", text)
         self.assertNotIn("Wait-Process -Id <pid> -Timeout 7200", text)
         self.assertNotIn("Start-Sleep", text)
         self.assertNotIn("must not be used as the primary " + "long-task polling mechanism", text)

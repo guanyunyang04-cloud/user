@@ -73,7 +73,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.skill_install --ch
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.skill_install --install
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor template --json
 ```
-Use `tools.brain.long_task_monitor` for long training, research, build, data refresh, or other long-running jobs after a mutate capsule. Report PID status, elapsed time, ETA or why no ETA exists, log tail, progress, artifact mtime, and next decision.
+Use `tools.brain.long_task_monitor` for long training, research, build, data refresh, or other long-running jobs after a mutate capsule. Use `trace-poll` when a long task spans polling windows or will feed before-final review. Report PID status, elapsed time, ETA or why no ETA exists, log tail, progress, artifact mtime, and next decision.
 
 ## Final Guards
 ```powershell
