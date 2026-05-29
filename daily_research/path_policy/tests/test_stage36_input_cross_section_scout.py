@@ -15,6 +15,7 @@ from daily_research.path_policy.stage36_input_cross_section_scout import (
     STAGE38_RUN_TAG,
     STAGE39_RUN_TAG,
     STUDY_FAMILY,
+    _training_progress_payload,
     build_stage36_scout_tasks,
     build_stage37_arch_retest_tasks,
     build_stage38_confirmation_tasks,
@@ -150,6 +151,25 @@ def test_write_stage36_task_list_marks_single_seed_scout_only(tmp_path: Path) ->
     assert payload["baseline_stage28_seed7_tag"] == BASELINE_STAGE28_SEED7_TAG
     assert payload["single_seed_scout_only"] is True
     assert payload["evidence_grade_input_or_architecture_pass"] is False
+
+
+def test_stage36_progress_payload_supports_short_poll_recovery() -> None:
+    payload = _training_progress_payload(
+        status="running",
+        completed=[],
+        failed=[],
+        run_tag=RUN_TAG,
+        study_family=STUDY_FAMILY,
+        current_tag="mh36_scout_raw_kline_context_regime_v1_seed7_20260529_01",
+        current_step=0,
+        total_steps=3,
+    )
+
+    assert payload["current_tag"] == "mh36_scout_raw_kline_context_regime_v1_seed7_20260529_01"
+    assert payload["completed_steps"] == 0
+    assert payload["total_steps"] == 3
+    assert payload["poll_window_seconds"] == 7200
+    assert payload["next_decision"] == "continue_short_polling"
 
 
 def test_stage36_comparison_blocks_missing_required_feature_groups(tmp_path: Path, monkeypatch) -> None:

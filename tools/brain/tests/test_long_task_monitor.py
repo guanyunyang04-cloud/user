@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import unittest
+import unittest.mock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -15,10 +16,12 @@ PYTHON = "C:/Users/ASUS/miniconda3/envs/yolos/python.exe"
 
 
 class LongTaskMonitorTest(unittest.TestCase):
-    def test_template_uses_wait_process_and_not_fixed_sleep_polling(self) -> None:
+    def test_template_uses_gpu_active_wait_process_window(self) -> None:
         payload = build_template(timeout_seconds=7200)
         script = payload["powershell_template"]
 
+        self.assertEqual(payload["poll_window_seconds"], 7200)
+        self.assertEqual(payload["monitoring_mode"], "foreground_wait_process_after_gpu_start")
         self.assertIn("Wait-Process -Id <pid> -Timeout 7200", script)
         self.assertNotIn("Start-Sleep", script)
         self.assertTrue(payload["eta_required"])
@@ -85,6 +88,15 @@ class LongTaskMonitorTest(unittest.TestCase):
 
         self.assertEqual(payload["eta_status"], "stalled_or_waiting")
         self.assertEqual(payload["decision"], "inspect_logs_or_resources")
+
+    def test_running_pid_decision_uses_short_polling_language(self) -> None:
+        with TemporaryDirectory() as raw_tmp:
+            progress = Path(raw_tmp) / "forecast_progress.json"
+            progress.write_text(json.dumps({"current_step": 0, "total_steps": 100}), encoding="utf-8")
+            with unittest.mock.patch("tools.brain.long_task_monitor._pid_alive", return_value=True):
+                payload = build_status(pid=1234, progress_path=progress)
+
+        self.assertEqual(payload["decision"], "continue_short_polling")
 
     def test_cli_status_outputs_json(self) -> None:
         with TemporaryDirectory() as raw_tmp:

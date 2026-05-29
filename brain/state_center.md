@@ -26,7 +26,7 @@
 - 分脑入口必须精炼；长过程、长命令和历史证据进入 `episodic_memory.md` 或 `brain/references/`。
 - 当前所有 `daily_research` 任务必须显式使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`。
 - 后续 agent 不得从 `H:\new_tdx64\PYPlugins\user` 接管本项目；旧路径只可能出现在历史 reference 或回滚说明中。
-- 训练、评估、审计、bounded study、confirmatory rerun 与执行任务必须受监管运行：允许用 `Start-Process -PassThru` 启动独立 OS 进程，但必须记录 PID、持久 stdout/stderr、run tag 或产物路径，并用 `Wait-Process -Id <pid> -Timeout 7200` 轮询；`7200` 秒只是单轮前台等待窗口。
+- 训练、评估、审计、bounded study、confirmatory rerun 与执行任务必须受监管运行：允许用 `Start-Process -PassThru` 启动独立 OS 进程，但必须记录 PID、持久 stdout/stderr、run tag 或产物路径；GPU 进程确认工作后必须用 `Wait-Process -Id <pid> -Timeout 7200` 前台轮询，除非再次出现系统崩溃或宿主不可用。
 - 长任务禁止无 PID、无日志、无产物定位的脱管后台化；禁止用固定 sleep 替代 PID 绑定等待；每轮轮询必须报告已用时间和预计剩余时间，进程提前结束时立即解析产物；窗口耗尽但 PID / 日志 / 产物仍推进时继续下一轮轮询，不中断任务。
 
 ## 当前边界

@@ -55,8 +55,8 @@
 ## 7. 长时任务运行纪律
 - 项目长任务必须受监管运行，任务主进程不得脱离 PID、日志、run tag 或产物路径追踪。
 - 启动模板：用 `Start-Process -PassThru` 启动目标命令，记录 PID、stdout/stderr 日志路径、run tag、预期 summary / progress / checkpoint 路径。
-- 轮询模板：默认用 `Wait-Process -Id <pid> -Timeout 7200` 等待；`7200` 秒是长任务单轮前台等待窗口，进程提前自然结束时必须立即返回并解析产物。
-- 单轮等待窗口耗尽后，先检查 PID、exit code、日志、progress、summary / checkpoint / artifact 时间戳；若进程仍在推进且没有明确代码错误、资源危险或用户停止指令，继续下一轮 `Wait-Process -Id <pid> -Timeout 7200`，不得杀进程或把窗口耗尽写成任务失败。
+- 轮询模板：启动后先短查 PID、日志和 GPU；一旦确认 GPU 进程已正式工作，默认使用前台 `Wait-Process -Id <pid> -Timeout 7200` 轮询，除非再次出现系统崩溃或宿主不可用。
+- `7200` 秒窗口结束后，先检查 PID、exit code、日志、progress、summary / checkpoint / artifact 时间戳；若进程仍在推进且没有明确代码错误、资源危险或用户停止指令，继续下一轮 `Wait-Process -Id <pid> -Timeout 7200`，不得杀进程或把窗口耗尽写成任务失败。
 - 每轮状态必须计算已用时间和预计剩余时间；状态来源优先使用 progress、PID、日志尾部、GPU/内存与最新产物时间戳。
 
 ## 8. 工作区迁移纪律

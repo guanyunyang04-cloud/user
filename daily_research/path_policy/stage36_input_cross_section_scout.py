@@ -302,7 +302,25 @@ def write_stage36_task_list(output_root: str | Path | None = None) -> Path:
     return path
 
 
-def _training_progress_payload(*, status: str, completed: list[str], failed: list[str], run_tag: str, study_family: str) -> dict[str, Any]:
+def _training_progress_payload(
+    *,
+    status: str,
+    completed: list[str],
+    failed: list[str],
+    run_tag: str,
+    study_family: str,
+    current_tag: str = "",
+    current_step: int | None = None,
+    total_steps: int | None = None,
+) -> dict[str, Any]:
+    completed_steps = len(completed) if current_step is None else int(current_step)
+    step_count = len(completed) + len(failed) if total_steps is None else int(total_steps)
+    if str(status) == "completed":
+        next_decision = "verify_artifacts"
+    elif str(status) == "blocked":
+        next_decision = "inspect_failure_artifacts"
+    else:
+        next_decision = "continue_short_polling"
     return {
         "schema_version": 1,
         "status": status,
@@ -311,6 +329,15 @@ def _training_progress_payload(*, status: str, completed: list[str], failed: lis
         "study_family": study_family,
         "completed_tags": completed,
         "failed_tags": failed,
+        "current_tag": str(current_tag or ""),
+        "current_step": completed_steps,
+        "completed_steps": completed_steps,
+        "total_steps": step_count,
+        "step_count": step_count,
+        "poll_window_seconds": 7200,
+        "monitoring_mode": "background_process_short_poll",
+        "long_timeout_is_not_failure": True,
+        "next_decision": next_decision,
         "updated_at": _now(),
     }
 
@@ -401,7 +428,21 @@ def _run_training_tasks(
     completed: list[str] = []
     failed: list[str] = []
     results: list[dict[str, Any]] = []
+    total_steps = int(len(tasks))
     for task in tasks:
+        _write_json(
+            output_root / progress_name,
+            _training_progress_payload(
+                status="running",
+                completed=completed,
+                failed=failed,
+                run_tag=run_tag,
+                study_family=study_family,
+                current_tag=str(task.get("tag", "")),
+                current_step=len(completed),
+                total_steps=total_steps,
+            ),
+        )
         summary_path = Path(task["study_dir"]) / "study_summary.json"
         if skip_existing and summary_path.exists():
             completed.append(task["tag"])
@@ -424,6 +465,9 @@ def _run_training_tasks(
                 failed=failed,
                 run_tag=run_tag,
                 study_family=study_family,
+                current_tag=str(task.get("tag", "")),
+                current_step=len(completed),
+                total_steps=total_steps,
             ),
         )
         if returncode != 0:
@@ -448,6 +492,9 @@ def _run_training_tasks(
             failed=failed,
             run_tag=run_tag,
             study_family=study_family,
+            current_tag="",
+            current_step=len(completed),
+            total_steps=total_steps,
         ),
     )
     _write_json(output_root / summary_name, payload)

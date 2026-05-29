@@ -170,11 +170,18 @@ def _updated_at(progress: dict[str, Any], progress_path: Path | None) -> datetim
     return None
 
 
-def build_template(*, timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS) -> dict[str, Any]:
+def build_template(
+    *,
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
     timeout = int(timeout_seconds)
     return {
         "schema_version": 1,
         "poll_window_seconds": timeout,
+        "monitoring_mode": "foreground_wait_process_after_gpu_start",
+        "gpu_active_wait_rule": (
+            "After a GPU task is confirmed active, use a foreground Wait-Process window unless the host crashes."
+        ),
         "eta_required": True,
         "required_wait_command": f"Wait-Process -Id <pid> -Timeout {timeout}",
         "powershell_template": "\n".join(
@@ -234,7 +241,7 @@ def build_status(
     if eta_status == "stalled_or_waiting":
         decision = "inspect_logs_or_resources"
     elif _pid_alive(pid):
-        decision = "continue_wait_process_window"
+        decision = "continue_short_polling"
     elif eta_status == "completed":
         decision = "verify_artifacts"
     else:

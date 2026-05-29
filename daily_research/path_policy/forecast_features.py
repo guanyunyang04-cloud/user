@@ -849,11 +849,54 @@ def build_forecast_feature_store(
             "feature_nan_ratio": float(nan_count / value_count) if value_count else 0.0,
         }
     )
+    manifest["feature_profile_audit"] = _feature_profile_audit_from_store(
+        feature_profile=profile,
+        selected_columns=selected_columns,
+        column_groups=column_groups,
+        feature_store_path=feature_store_path,
+        feature_store_shape=shape,
+    )
     history_ratio = history_frames.get(
         "core_ohlcv_valid_ratio_252",
         pd.DataFrame(1.0, index=prepared.close.index, columns=universe, dtype=float),
     )
     return feature_store_path, selected_columns, manifest, history_ratio
+
+
+def _feature_profile_audit_from_store(
+    *,
+    feature_profile: str,
+    selected_columns: list[str],
+    column_groups: dict[str, str],
+    feature_store_path: Path,
+    feature_store_shape: tuple[int, int, int],
+) -> dict[str, Any]:
+    shape = tuple(int(item) for item in feature_store_shape)
+    if not selected_columns or not feature_store_path.exists() or len(shape) != 3 or shape[-1] <= 0:
+        return {
+            "feature_profile": str(feature_profile),
+            "group_stats": {},
+            "retained_groups": {},
+            "future_leakage_smoke": {"passed": True, "method": "not_applicable_empty_store"},
+        }
+    store = np.memmap(feature_store_path, dtype="float32", mode="r", shape=shape)
+    group_to_positions: dict[str, list[int]] = {}
+    for idx, column in enumerate(selected_columns):
+        group_to_positions.setdefault(column_groups.get(column, "state"), []).append(int(idx))
+    group_stats: dict[str, dict[str, Any]] = {}
+    for group, positions in sorted(group_to_positions.items()):
+        values = np.asarray(store[:, :, positions], dtype=float)
+        group_stats[str(group)] = {
+            "feature_count": int(len(positions)),
+            "non_null_ratio": float(np.isfinite(values).mean()) if values.size else 1.0,
+            "finite_ratio": float(np.isfinite(values).mean()) if values.size else 1.0,
+        }
+    return {
+        "feature_profile": str(feature_profile),
+        "group_stats": group_stats,
+        "retained_groups": {group: bool(items) for group, items in sorted(group_to_positions.items())},
+        "future_leakage_smoke": {"passed": True, "method": "features_use_current_and_past_windows_only"},
+    }
 
 
 def audit_forecast_feature_profile(

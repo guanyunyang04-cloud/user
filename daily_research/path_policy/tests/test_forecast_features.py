@@ -13,6 +13,7 @@ from daily_research.path_policy.forecast_features import (
     FORECAST_FEATURE_PROFILES,
     audit_forecast_feature_profile,
     build_forecast_feature_panels,
+    build_forecast_feature_store,
 )
 from daily_research.path_policy.tests.fixtures import make_prepared_policy_inputs
 
@@ -430,4 +431,39 @@ def test_feature_profile_audit_reports_group_stats_and_future_leakage_smoke() ->
     assert feature_audit["group_stats"]["sector_relative_context"]["feature_count"] > 0
     assert feature_audit["group_stats"]["regime_context"]["feature_count"] > 0
     assert feature_audit["group_stats"]["sector_relative_context"]["finite_ratio"] > 0.0
+    assert feature_audit["future_leakage_smoke"]["passed"] is True
+
+
+def test_feature_store_manifest_includes_profile_audit_for_training_artifacts(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=90, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2024-01-02")
+    prepared.metadata_frames["industry_map"] = pd.DataFrame(
+        {
+            "symbol": ["AAA", "BBB", "CCC", "DDD"],
+            "industry": ["tech", "tech", "bank", "bank"],
+        }
+    )
+    prepared.metadata_frames["board_membership"] = pd.DataFrame(
+        {
+            "symbol": ["AAA", "BBB", "CCC"],
+            "board_kind": ["GN", "GN", "FG"],
+            "board_name": ["ai", "ai", "dividend"],
+            "board_code": ["880001", "880001", "880002"],
+        }
+    )
+    prepared.metadata_summary["sector_board_view"] = {"dataset_id": "policy_sector_board_view__unit"}
+    dates = [pd.Timestamp(item).normalize() for item in prepared.close.index[-8:]]
+
+    _, _, manifest, _ = build_forecast_feature_store(
+        prepared,
+        dates,
+        root=tmp_path,
+        feature_profile="raw_kline_context_sector_relative_regime_v1",
+        max_feature_columns=192,
+    )
+
+    feature_audit = manifest["feature_profile_audit"]
+    assert feature_audit["feature_profile"] == "raw_kline_context_sector_relative_regime_v1"
+    assert feature_audit["retained_groups"]["sector_relative_context"] is True
+    assert feature_audit["retained_groups"]["regime_context"] is True
+    assert feature_audit["group_stats"]["sector_relative_context"]["feature_count"] > 0
     assert feature_audit["future_leakage_smoke"]["passed"] is True

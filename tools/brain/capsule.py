@@ -313,7 +313,7 @@ def build_task_capsule(
     verification_hints = list(workflow_guide.get("verification_hints", []) or [])
     if _task_has_long_task_signal(task):
         capability_hints.append(
-            f"long_task_monitor: use {PYTHON_EXECUTABLE} -m tools.brain.long_task_monitor template/status/wait-once with PID, logs, progress, artifact mtime, and ETA"
+            f"long_task_monitor: use {PYTHON_EXECUTABLE} -m tools.brain.long_task_monitor template/status/wait-once with PID, logs, progress, artifact mtime, and ETA; after GPU is confirmed active, use a 7200s foreground Wait-Process window unless the host crashes"
         )
         risk_signals.append("long_task_without_pid_log_progress_or_eta")
         verification_hints.append("for long jobs, report PID status, elapsed time, progress, ETA, log tail, artifact mtime, and next decision after each wait window")
