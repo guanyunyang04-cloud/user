@@ -198,6 +198,168 @@ def test_sector_context_profile_records_source_view_from_raw_cache_meta() -> Non
     assert manifest["source_sector_board_view_id"] == "policy_sector_board_view__raw_cache"
 
 
+def test_sector_relative_profile_uses_industry_relative_features_and_logs() -> None:
+    prepared = make_prepared_policy_inputs(days=90, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2024-01-02")
+    prepared.metadata_frames["industry_map"] = pd.DataFrame(
+        {
+            "symbol": ["AAA", "BBB", "CCC", "DDD"],
+            "industry": ["tech", "tech", "bank", "bank"],
+        }
+    )
+    prepared.metadata_frames["board_membership"] = pd.DataFrame(
+        {
+            "symbol": ["AAA", "BBB", "CCC"],
+            "board_kind": ["GN", "GN", "FG"],
+            "board_name": ["ai", "ai", "dividend"],
+            "board_code": ["880001", "880001", "880002"],
+        }
+    )
+    prepared.raw_cache_meta["sector_board_view"] = {
+        "dataset_id": "policy_sector_board_view__raw_cache",
+        "view_kind": "latest_static_snapshot",
+    }
+    date = pd.Timestamp(prepared.close.index[-1]).normalize()
+
+    panels, feature_columns, manifest = build_forecast_feature_panels(
+        prepared,
+        [date],
+        feature_profile="raw_kline_context_sector_relative_v1",
+        max_feature_columns=256,
+    )
+
+    assert "raw_kline_context_sector_relative_v1" in FORECAST_FEATURE_PROFILES
+    assert "industry_ret_5_excess" in feature_columns
+    assert "stock_ret_20_minus_industry" in feature_columns
+    assert "industry_positive_share_20" in feature_columns
+    assert "industry_member_count_log" in feature_columns
+    assert "board_member_count_log" in feature_columns
+    assert manifest["sector_relative_context_feature_count"] == 10
+    assert manifest["source_sector_board_view_id"] == "policy_sector_board_view__raw_cache"
+    assert panels[date].loc["AAA", "industry_member_count_log"] == pytest.approx(np.log1p(2.0))
+    assert panels[date].loc["DDD", "board_member_count_log"] == pytest.approx(0.0)
+
+
+def test_regime_profile_adds_market_regime_features_without_sector_metadata() -> None:
+    prepared = make_prepared_policy_inputs(days=120, stocks=("AAA", "BBB", "CCC", "DDD", "EEE"), start_date="2024-01-02")
+    date = pd.Timestamp(prepared.close.index[-1]).normalize()
+
+    _, feature_columns, manifest = build_forecast_feature_panels(
+        prepared,
+        [date],
+        feature_profile="raw_kline_context_regime_v1",
+        max_feature_columns=256,
+    )
+
+    assert "raw_kline_context_regime_v1" in FORECAST_FEATURE_PROFILES
+    assert "market_ret_20_z" in feature_columns
+    assert "market_vol_20_z" in feature_columns
+    assert "market_drawdown_20" in feature_columns
+    assert "cross_section_ret_dispersion_20" in feature_columns
+    assert "benchmark_trend_vol_interaction_20" in feature_columns
+    assert manifest["regime_context_feature_count"] == 8
+    assert manifest["sector_relative_context_feature_count"] == 0
+
+
+def test_combined_sector_relative_regime_profile_reports_both_groups() -> None:
+    prepared = make_prepared_policy_inputs(days=120, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2024-01-02")
+    prepared.metadata_frames["industry_map"] = pd.DataFrame(
+        {
+            "symbol": ["AAA", "BBB", "CCC", "DDD"],
+            "industry": ["tech", "tech", "bank", "bank"],
+        }
+    )
+    prepared.metadata_frames["board_membership"] = pd.DataFrame(
+        {
+            "symbol": ["AAA", "BBB", "CCC"],
+            "board_kind": ["GN", "GN", "FG"],
+            "board_name": ["ai", "ai", "dividend"],
+            "board_code": ["880001", "880001", "880002"],
+        }
+    )
+    prepared.metadata_summary["sector_board_view"] = {"dataset_id": "policy_sector_board_view__unit"}
+    date = pd.Timestamp(prepared.close.index[-1]).normalize()
+
+    _, feature_columns, manifest = build_forecast_feature_panels(
+        prepared,
+        [date],
+        feature_profile="raw_kline_context_sector_relative_regime_v1",
+        max_feature_columns=256,
+    )
+
+    assert "raw_kline_context_sector_relative_regime_v1" in FORECAST_FEATURE_PROFILES
+    assert "industry_rank_ret_5" in feature_columns
+    assert "market_breadth_20" in feature_columns
+    assert manifest["sector_relative_context_feature_count"] == 10
+    assert manifest["regime_context_feature_count"] == 8
+    assert manifest["source_sector_board_view_id"] == "policy_sector_board_view__unit"
+
+
+def test_combined_profile_new_features_do_not_change_when_future_prices_are_mutated() -> None:
+    prepared = make_prepared_policy_inputs(days=140, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2024-01-02")
+    prepared.metadata_frames["industry_map"] = pd.DataFrame(
+        {
+            "symbol": ["AAA", "BBB", "CCC", "DDD"],
+            "industry": ["tech", "tech", "bank", "bank"],
+        }
+    )
+    prepared.metadata_frames["board_membership"] = pd.DataFrame(
+        {
+            "symbol": ["AAA", "BBB", "CCC"],
+            "board_kind": ["GN", "GN", "FG"],
+            "board_name": ["ai", "ai", "dividend"],
+            "board_code": ["880001", "880001", "880002"],
+        }
+    )
+    prepared.raw_cache_meta["sector_board_view"] = {
+        "dataset_id": "policy_sector_board_view__raw_cache",
+        "view_kind": "latest_static_snapshot",
+    }
+    date = pd.Timestamp(prepared.close.index[70]).normalize()
+    future_mask = prepared.close.index > date
+
+    original_panels, _, _ = build_forecast_feature_panels(
+        prepared,
+        [date],
+        feature_profile="raw_kline_context_sector_relative_regime_v1",
+        max_feature_columns=256,
+    )
+
+    mutated_frames = {}
+    for name in ("open_", "high", "low", "close", "volume", "amount"):
+        frame = getattr(prepared, name).copy()
+        frame.loc[future_mask] = frame.loc[future_mask] * 1000.0 + 123.0
+        mutated_frames[name] = frame
+    mutated = replace(prepared, **mutated_frames)
+    mutated_panels, _, _ = build_forecast_feature_panels(
+        mutated,
+        [date],
+        feature_profile="raw_kline_context_sector_relative_regime_v1",
+        max_feature_columns=256,
+    )
+
+    new_columns = [
+        column
+        for column in original_panels[date].columns
+        if column.startswith("industry_")
+        or column.startswith("stock_ret_")
+        or column.startswith("market_ret_20_z")
+        or column.startswith("market_vol_20_z")
+        or column.startswith("market_drawdown_20")
+        or column.startswith("market_breadth_20")
+        or column.startswith("market_liquidity_z20")
+        or column.startswith("cross_section_ret_dispersion_20")
+        or column.startswith("limit_up_down_pressure_5")
+        or column.startswith("benchmark_trend_vol_interaction_20")
+        or column.startswith("board_member_count_log")
+    ]
+    np.testing.assert_allclose(
+        original_panels[date][new_columns].to_numpy(dtype=float),
+        mutated_panels[date][new_columns].to_numpy(dtype=float),
+        rtol=1.0e-9,
+        atol=1.0e-9,
+    )
+
+
 def test_no_alpha_prior_profile_removes_old_alpha_score_dependencies() -> None:
     prepared = make_prepared_policy_inputs(days=90, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2024-01-02")
     date = pd.Timestamp(prepared.close.index[-1]).normalize()
@@ -232,3 +394,40 @@ def test_feature_profile_audit_reports_group_counts_and_profile() -> None:
     assert audit["feature_count_before_cap"] >= audit["feature_count_after_cap"]
     assert audit["feature_count_after_cap"] <= 128
     assert audit["feature_group_counts"]["raw_kline"] > 0
+
+
+def test_feature_profile_audit_reports_group_stats_and_future_leakage_smoke() -> None:
+    prepared = make_prepared_policy_inputs(days=140, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2024-01-02")
+    prepared.metadata_frames["industry_map"] = pd.DataFrame(
+        {
+            "symbol": ["AAA", "BBB", "CCC", "DDD"],
+            "industry": ["tech", "tech", "bank", "bank"],
+        }
+    )
+    prepared.metadata_frames["board_membership"] = pd.DataFrame(
+        {
+            "symbol": ["AAA", "BBB", "CCC"],
+            "board_kind": ["GN", "GN", "FG"],
+            "board_name": ["ai", "ai", "dividend"],
+            "board_code": ["880001", "880001", "880002"],
+        }
+    )
+    prepared.metadata_summary["sector_board_view"] = {"dataset_id": "policy_sector_board_view__unit"}
+    dates = [pd.Timestamp(item).normalize() for item in prepared.close.index[-5:]]
+
+    audit = audit_forecast_feature_profile(
+        prepared,
+        dates,
+        feature_profile="raw_kline_context_sector_relative_regime_v1",
+        max_feature_columns=192,
+    )
+
+    feature_audit = audit["feature_profile_audit"]
+    assert feature_audit["feature_profile"] == "raw_kline_context_sector_relative_regime_v1"
+    assert feature_audit["retained_groups"]["raw_kline"] is True
+    assert feature_audit["retained_groups"]["sector_relative_context"] is True
+    assert feature_audit["retained_groups"]["regime_context"] is True
+    assert feature_audit["group_stats"]["sector_relative_context"]["feature_count"] > 0
+    assert feature_audit["group_stats"]["regime_context"]["feature_count"] > 0
+    assert feature_audit["group_stats"]["sector_relative_context"]["finite_ratio"] > 0.0
+    assert feature_audit["future_leakage_smoke"]["passed"] is True
