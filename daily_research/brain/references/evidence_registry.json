@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 76,
+  "record_count": 77,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -494,6 +494,39 @@
       "active_artifact_impact": "unchanged",
       "dataset_ids": [
         "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
+      ]
+    },
+    {
+      "id": "alpha_multi_horizon_stage33_sector_input_repair_scout_20260529",
+      "date": "2026-05-29",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_multi_horizon_stage33_sector_input_repair_scout_20260529.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "Status: `stage33_completed`, `stage34_completed`, `stage35_completed / no input-or-architecture upgrade / shadow-only`.; Mainline: `alpha_multi_horizon_utility_policy_v1`.; Study root: `daily_research/output/path_policy/studies/mh_stage33_sector_input_repair_scout_20260529_01/`.; Fixed target/loss baseline: `decision_utility_v1` output with `target_norm_head_constraint_v1`.",
+      "blockers": [
+        "Final decision: sector input construction is repaired, but `raw_kline_context_sector_v1 + gru_sequence_static_context` failed the final 3-seed upgrade gate. Keep the Stage 3 baseline as `gru_sequence_static_context + raw_kline_context_no_alpha_prior_v1 + target_norm_head_constraint_v1`.",
+        "The previous Stage 3A-3C sector blocker was real and is now repaired. `raw_kline_context_sector_v1` no longer silently produces zero sector context when the driver requests the registered sector-board view.",
+        "Sector input did not improve the ranking/trading utility side on final 3-seed test. The candidate failed the full upgrade gate because test hit lift min became negative and rank/spread/hit means were lower than the Stage 2.8 raw baseline."
+      ],
+      "next_allowed_actions": [
+        "Keep active execution unchanged.",
+        "Keep Stage 3 baseline as `gru_sequence_static_context + raw_kline_context_no_alpha_prior_v1 + target_norm_head_constraint_v1`.",
+        "Do not upgrade to sector GRU, sector stock mixer, or sector slot mixer from this run.",
+        "Use sector features as diagnostics for horizon concentration and gap. If pursuing sector input further, redesign sector feature scaling/interaction rather than simply appending four sector context columns.",
+        "Potential next targeted research: sector context ablation with rank-preserving regularization, or cross-sectional sector-relative features that target hit lift directly, still using single-seed scout followed by seed confirmation only for clear winners."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d",
+        "policy_sector_board_view__ed15b2873f544e9e9b24aae5"
       ]
     },
     {

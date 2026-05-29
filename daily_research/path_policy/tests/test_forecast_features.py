@@ -164,6 +164,40 @@ def test_sector_context_profile_uses_prepared_metadata_frames() -> None:
     assert panels[date].loc["DDD", "board_member_count"] == pytest.approx(0.0)
 
 
+def test_sector_context_profile_records_source_view_from_raw_cache_meta() -> None:
+    prepared = make_prepared_policy_inputs(days=90, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2024-01-02")
+    prepared.metadata_frames["industry_map"] = pd.DataFrame(
+        {
+            "symbol": ["AAA", "BBB", "CCC", "DDD"],
+            "industry": ["tech", "tech", "bank", "bank"],
+        }
+    )
+    prepared.metadata_frames["board_membership"] = pd.DataFrame(
+        {
+            "symbol": ["AAA", "BBB", "CCC"],
+            "board_kind": ["GN", "GN", "FG"],
+            "board_name": ["ai", "ai", "dividend"],
+            "board_code": ["880001", "880001", "880002"],
+        }
+    )
+    prepared.raw_cache_meta["sector_board_view"] = {
+        "dataset_id": "policy_sector_board_view__raw_cache",
+        "view_kind": "latest_static_snapshot",
+    }
+    date = pd.Timestamp(prepared.close.index[-1]).normalize()
+
+    _, feature_columns, manifest = build_forecast_feature_panels(
+        prepared,
+        [date],
+        feature_profile="raw_kline_context_sector_v1",
+        max_feature_columns=256,
+    )
+
+    assert "industry_ret_20_excess" in feature_columns
+    assert manifest["sector_context_feature_count"] == 4
+    assert manifest["source_sector_board_view_id"] == "policy_sector_board_view__raw_cache"
+
+
 def test_no_alpha_prior_profile_removes_old_alpha_score_dependencies() -> None:
     prepared = make_prepared_policy_inputs(days=90, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2024-01-02")
     date = pd.Timestamp(prepared.close.index[-1]).normalize()

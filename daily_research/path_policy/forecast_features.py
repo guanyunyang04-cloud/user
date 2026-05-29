@@ -28,7 +28,16 @@ def _source_sector_board_view_id(prepared: PreparedPolicyInputs) -> str:
     summary = dict(getattr(prepared, "metadata_summary", {}) or {})
     sector_summary = summary.get("sector_board_view", {})
     if isinstance(sector_summary, dict):
-        return str(sector_summary.get("dataset_id", "") or "")
+        dataset_id = str(sector_summary.get("dataset_id", "") or "").strip()
+        if dataset_id:
+            return dataset_id
+    for attr_name in ("raw_cache_meta", "prepared_cache_meta"):
+        cache_meta = dict(getattr(prepared, attr_name, {}) or {})
+        sector_meta = cache_meta.get("sector_board_view", {})
+        if isinstance(sector_meta, dict):
+            dataset_id = str(sector_meta.get("dataset_id", "") or "").strip()
+            if dataset_id:
+                return dataset_id
     return ""
 
 
