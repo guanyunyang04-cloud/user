@@ -187,10 +187,10 @@ def build_template(
         "powershell_template": "\n".join(
             [
                 "$proc = Start-Process -FilePath <command> -ArgumentList <args> -PassThru -NoNewWindow",
-                "$pid = $proc.Id",
-                f"Wait-Process -Id <pid> -Timeout {timeout}",
-                "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor status --pid $pid --progress <progress.json> --stdout <stdout.log> --stderr <stderr.log> --artifact-dir <artifact_dir> --json",
-                "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor trace-poll --trace-json <trace.json> --pid $pid --poll-window-seconds "
+                "$taskPid = $proc.Id",
+                f"Wait-Process -Id $taskPid -Timeout {timeout}",
+                "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor status --pid $taskPid --progress <progress.json> --stdout <stdout.log> --stderr <stderr.log> --artifact-dir <artifact_dir> --json",
+                "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor trace-poll --trace-json <trace.json> --pid $taskPid --poll-window-seconds "
                 f"{timeout} --progress <progress.json> --stdout <stdout.log> --stderr <stderr.log> --artifact-dir <artifact_dir> --json",
             ]
         ),

@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 77,
+  "record_count": 78,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -522,6 +522,36 @@
         "Do not upgrade to sector GRU, sector stock mixer, or sector slot mixer from this run.",
         "Use sector features as diagnostics for horizon concentration and gap. If pursuing sector input further, redesign sector feature scaling/interaction rather than simply appending four sector context columns.",
         "Potential next targeted research: sector context ablation with rank-preserving regularization, or cross-sectional sector-relative features that target hit lift directly, still using single-seed scout followed by seed confirmation only for clear winners."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d",
+        "policy_sector_board_view__ed15b2873f544e9e9b24aae5"
+      ]
+    },
+    {
+      "id": "alpha_multi_horizon_stage36_input_cross_section_scout_20260530",
+      "date": "2026-05-30",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_multi_horizon_stage36_input_cross_section_scout_20260530.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "Status: `stage36_completed`, `stage37_completed`, `stage38_completed / no Stage 39 candidate / shadow-only`.; Mainline: `alpha_multi_horizon_utility_policy_v1`.; Study root: `daily_research/output/path_policy/studies/mh_stage36_input_cross_section_scout_20260529_01/`.; Fixed baseline contract: `decision_utility_v1` output with `target_norm_head_constraint_v1`, horizons `1,2,3,5,8,10,15,20,30`.",
+      "blockers": [
+        "Training status: completed, return code `0`, failed tags `[]`."
+      ],
+      "next_allowed_actions": [
+        "Keep active execution unchanged.",
+        "Keep Stage 3 baseline as `gru_sequence_static_context + raw_kline_context_no_alpha_prior_v1 + target_norm_head_constraint_v1`.",
+        "Do not run Stage 39 for this plan.",
+        "If continuing this line, focus on why sector-relative/regime improves validation and hit lift but hurts test rank/spread/month stability: regime split diagnostics, feature scaling/interaction ablations, and hit-lift-preserving rank regularization are better next targets than expanding architectures."
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": [

@@ -22,7 +22,12 @@ class LongTaskMonitorTest(unittest.TestCase):
 
         self.assertEqual(payload["poll_window_seconds"], 7200)
         self.assertEqual(payload["monitoring_mode"], "foreground_wait_process_after_gpu_start")
-        self.assertIn("Wait-Process -Id <pid> -Timeout 7200", script)
+        self.assertEqual(payload["required_wait_command"], "Wait-Process -Id <pid> -Timeout 7200")
+        self.assertIn("Wait-Process -Id $taskPid -Timeout 7200", script)
+        self.assertIn("$taskPid = $proc.Id", script)
+        self.assertIn("--pid $taskPid", script)
+        self.assertNotIn("$pid = $proc.Id", script)
+        self.assertNotIn("--pid $pid", script)
         self.assertNotIn("Start-Sleep", script)
         self.assertTrue(payload["eta_required"])
 
