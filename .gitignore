@@ -10,8 +10,10 @@ node_modules/
 
 brain/output/
 
-daily_research/cache/
-daily_research/output/
+daily_research/cache/*
+!daily_research/cache/.gitkeep
+daily_research/output/*
+!daily_research/output/.gitkeep
 daily_research/execution/output/
 daily_research/execution/current_positions.csv
 daily_research/execution/webapp/node_modules/

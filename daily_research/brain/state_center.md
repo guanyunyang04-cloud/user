@@ -1,10 +1,11 @@
 # Daily Research 状态中枢
 
-快照日期：`2026-05-30`
+快照日期：`2026-05-31`
 
 ## 当前结论
 - `daily_research` 是当前正式生产研究与执行主线。
 - active 执行物化真源：`daily_research/output/active_execution_strategy.json`。
+- 2026-05-31 接管事实：`daily_research/output/` 与 `daily_research/cache/` 曾被误删；用户确认近期 brain 结论仍正确。该事实不推翻下列 recent / research / live/default 结论，但在恢复真实 payload 前，任何依赖 output/cache 物理文件的 replay、`project_consistency_check.py`、explicit run evidence lookup 和 active artifact inspection 都属于受阻验证。
 - 当前 live 默认执行 label：`short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`。
 - 当前 effective live execution profile：`regoff_k1_20d_ensemble_native_anchor`。
 - 当前 production root：`daily_research/output/short_expert_policy_v5b_execalign_production_default`。
@@ -40,9 +41,11 @@
 - 每日执行接管先看帮助页手动流程、作业证据和 daily verdict；Web 能打开、job succeeded 或 latest trade plan 存在都不能单独证明每日任务完成。
 - PowerShell 中文显示异常时，先用显式 UTF-8 复读；不得直接判定文档损坏。
 - `latest_*` 不得直接当真源；若 latest study/protocol/audit/ledger 不同源，必须使用 explicit run tag / protocol tag / dataset id。
+- 当前本地 `output/cache` 热产物缺失时，优先读取 brain 当前状态和 dated references；缺少 payload 只能写作恢复/验证阻塞，不得自动降级近期结论。
 
 ## 当前主问题
 - production 执行侧不是当前阻塞点；默认 active 继续由 `short_expert_policy_v5b` 承担。
+- 本地 artifact 恢复是当前接管控制面阻塞：需从真实备份恢复 `daily_research/output/` 与 `daily_research/cache/` 后，再恢复文件级 active artifact 检查、run evidence lookup 和 `project_consistency_check.py` health。
 - daily execution 当前阻塞点是 2026-05-26 数据源 readiness：候选交易日 formal refresh `market_daily` 为空，因此严格阻断并不生成新交易计划。
 - `alpha_multi_horizon_utility_policy_v1` 的当前 blocker 已从 target/loss stability 转为输入/横截面特征质量诊断：Stage 2.8 已用 full rolling_liquid500 memmap 通过 `target_norm_head_constraint_v1` gate；Stage 3A-3C 显示 patch 架构未形成 final 3-seed upgrade evidence；Stage 3D-3F 已修通 sector context 输入但 sector GRU final 未过升级 gate；Stage 3G 显示 sector-relative/regime 输入有强 scout 与 hit lift/concentration 改善，但 seed7+11 confirmation 因 test rank/spread 与月度稳定性未过 gate。下一步若继续 multi-horizon，应围绕 regime split、feature scaling/interaction ablation、hit-lift-preserving rank regularization 或 horizon concentration/utility tradeoff 做窄矩阵，不得直接 promotion。
 - continuous_policy 的核心瓶颈是组合日级资金分配：谁是 receiver、谁是 source、留多少 cash、承受多少 turnover / cost / drawdown。
@@ -77,6 +80,7 @@
 - 文档继续堆 dated log 会削弱接管效率；只看 target-sum closure 会掩盖 release/source/receiver dead 与 intent translation conflict。
 - 只增加 epoch、loss 或模型宽度可能掩盖 target construction 与 allocation semantics 断点；realtime Gold 若被误作 training-safe，会污染 completed training evidence。
 - 后台 OS 进程轮询能降低交互超时风险，但不能替代 checkpoint、progress、artifact diagnostics。
+- 若误删后的空目录骨架存在但真实 payload 未恢复，guard 通过不等于 output 证据可 replay；回答当前结论时必须显式区分 brain-confirmed conclusion 与 file-backed evidence availability。
 
 ## 最新证据索引
 - continuous_policy r61-r74 证据：见 `daily_research/brain/references/r61_release_first_decision_core_v4_status_20260514.md`、`daily_research/brain/references/r65_portfolio_set_v5_status_20260514.md` 到 `daily_research/brain/references/r74_lake_behavior_quality_status_20260515.md`；机器索引用 `evidence_registry.json`。
@@ -85,6 +89,7 @@
 - 多 Horizon Stage 3D-3F sector input repair：`daily_research/brain/references/alpha_multi_horizon_stage33_sector_input_repair_scout_20260529.md`。
 - 多 Horizon Stage 3G input cross-section scout：`daily_research/brain/references/alpha_multi_horizon_stage36_input_cross_section_scout_20260530.md`。
 - PathPolicy / TDX-free 数据平台：`daily_research/brain/references/path_policy_execution_issue_learning_20260523.md`、`daily_research/brain/references/tdx_free_data_platform_decision_20260523.md`、`daily_research/brain/references/tdx_free_data_platform_v2_20260523.md`。
+- output/cache 误删恢复边界：`daily_research/brain/references/data_lake_output_cache_loss_recovery_boundary_20260531.md`。
 - 机器索引：`daily_research/brain/references/evidence_registry.json`。
 ## 历史归档入口
 - 历史归档：`daily_research/brain/references/state_center_archive_20260510.md`、`daily_research/brain/references/state_center_history_raw_20260424.md`、`daily_research/brain/references/state_center_evidence_index_20260424.md`。

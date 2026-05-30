@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 78,
+  "record_count": 79,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -1440,6 +1440,26 @@
         "Attach any future discovered brain only through `brain/brain_manifest.json` plus catalog/integrity guards."
       ],
       "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "data_lake_output_cache_loss_recovery_boundary_20260531",
+      "date": "2026-05-31",
+      "r_id": "",
+      "path": "daily_research/brain/references/data_lake_output_cache_loss_recovery_boundary_20260531.md",
+      "tags": [
+        "brain"
+      ],
+      "workflow": "brain",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "`daily_research/output/` 与 `daily_research/cache/` 曾被误删；当前仓库只保留空目录骨架以恢复 manifest 与 integrity 入口。; 用户明确确认近期 brain 结论仍正确。因此本事件不推翻 `state_center.md` 中的 recent / research / live/default 结论。; 缺失 payload 影响的是文件级验证、replay、active artifact inspection、explicit run evidence lookup 和 `project_consistency_check.py` health，不等价于实验结论失效。",
+      "blockers": [
+        "不得把缺失 output/cache 文件写成 failed trial、模型回归、promotion 失败或 live/default 失效。"
+      ],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "not_stated",
       "dataset_ids": []
     },
     {

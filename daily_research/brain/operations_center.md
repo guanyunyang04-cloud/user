@@ -1,6 +1,6 @@
 # Daily Research 操作中枢
 
-快照日期：`2026-05-26`
+快照日期：`2026-05-31`
 
 ## 默认操作纪律
 - 默认工作分支：`main`。
@@ -10,6 +10,7 @@
 - `H:\new_tdx64\PYPlugins\user` 已退出本项目主链路；历史 reference 中旧路径只作历史证据，不作为当前入口。
 - 不使用 `KMP_DUPLICATE_LIB_OK` 作为默认方案。
 - 不触碰 `daily_research/output/active_execution_strategy.json`，除非有明确 promotion 决策。
+- 2026-05-31 恢复边界：`daily_research/output/` 与 `daily_research/cache/` 曾被误删，当前空目录骨架只保证 manifest/integrity 入口存在；不得把缺失 payload 当成近期结论失效，也不得凭 state 文本手工重造 active artifact。
 - 不把 smoke、dry-run、failed trial、interrupted outer study、realtime tail label 写成 completed evidence。
 - 长训练或 study 需要 progress JSONL、latest progress JSON、stdout/stderr log 和明确 tag。
 
@@ -18,6 +19,7 @@
 - research data lake：`daily_research/output/research_data_lake/`。
 - studies：`daily_research/output/path_policy/studies/`、`daily_research/output/continuous_policy/studies/`；protocols：`daily_research/output/continuous_policy/protocols/`。
 - active artifact：`daily_research/output/active_execution_strategy.json`；execution app：`daily_research/execution/run_execution_app.py`；daily verdict root：`daily_research/output/execution_app/daily_runs/`。
+- 以上 output/cache 路径在真实 payload 恢复前只代表目标位置；文件级 evidence lookup、replay、active artifact inspection 和 `project_consistency_check.py` 可能失败，结论回答需回到 brain references 与用户确认边界。
 
 ## 高频 Brain 命令
 - 主脑 task capsule：
