@@ -48,10 +48,17 @@ RESEARCH_REBUILD_MINIMAL_REQUIRED_DOMAINS: tuple[str, ...] = (
 
 _PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
     "baostock": {
-        "domains": (DataDomain.MARKET_DAILY, DataDomain.TRADING_CALENDAR, DataDomain.UNIVERSE_SNAPSHOT, DataDomain.SECURITY_STATUS),
+        "domains": (
+            DataDomain.MARKET_DAILY,
+            DataDomain.TRADING_CALENDAR,
+            DataDomain.UNIVERSE_SNAPSHOT,
+            DataDomain.SECURITY_STATUS,
+            DataDomain.INDUSTRY_CONCEPT,
+            DataDomain.VALUATION,
+        ),
         "requires_token": False,
         "formal_eligible": True,
-        "notes": "stable free source for daily bars, calendar and universe/status basics",
+        "notes": "BaoStock-first source for research market lake daily bars, calendar, universe, status, industry and basic valuation",
     },
     "eastmoney_efinance": {
         "domains": (DataDomain.MARKET_DAILY, DataDomain.UNIVERSE_SNAPSHOT, DataDomain.VALUATION),
@@ -97,10 +104,15 @@ _PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
         "notes": "legacy placeholder for future same-day supplement",
     },
     "research_rebuild_minimal_free": {
-        "domains": (*RESEARCH_REBUILD_MINIMAL_REQUIRED_DOMAINS, DataDomain.VALUATION),
+        "domains": (
+            *RESEARCH_REBUILD_MINIMAL_REQUIRED_DOMAINS,
+            DataDomain.SECURITY_STATUS,
+            DataDomain.INDUSTRY_CONCEPT,
+            DataDomain.VALUATION,
+        ),
         "requires_token": False,
         "formal_eligible": True,
-        "notes": "domain-scoped rebuild plan: baostock market/calendar plus eastmoney universe; weak providers excluded from critical path",
+        "notes": "BaoStock-first research rebuild core plan; weak web providers excluded from critical path",
     },
 }
 
@@ -352,7 +364,21 @@ class BaostockProvider:
                 exchange=request.exchange,
             )
         elif request.domain in {DataDomain.UNIVERSE_SNAPSHOT, DataDomain.SECURITY_STATUS}:
-            frame = _fetch_baostock_stock_basic_frame_with_timeout(trade_date=request.end_date)
+            frame = _fetch_baostock_all_stock_frame_with_timeout(domain=request.domain, trade_date=request.end_date)
+        elif request.domain == DataDomain.INDUSTRY_CONCEPT:
+            frame = _fetch_baostock_industry_frame_with_timeout(trade_date=request.end_date)
+        elif request.domain == DataDomain.VALUATION:
+            try:
+                import baostock as bs  # type: ignore
+            except Exception as exc:
+                raise RuntimeError("baostock is not installed in the yolos environment") from exc
+            login = bs.login()
+            if getattr(login, "error_code", "1") != "0":
+                raise RuntimeError(f"baostock login failed: {getattr(login, 'error_msg', '')}")
+            try:
+                frame = _baostock_valuation_frame_from_history(bs, request)
+            finally:
+                bs.logout()
         else:
             raise RuntimeError(f"unsupported_domain: {self.name} does not support {request.domain}")
         data = normalize_domain_frame(frame, domain=request.domain, source=self.name, as_of_date=request.end_date, require_columns=False)
@@ -555,9 +581,18 @@ class ResearchRebuildMinimalFreeProvider:
 
     def fetch_domain(self, request: DomainFetchRequest) -> ProviderResult:
         request = request.normalized()
-        if request.domain in {DataDomain.MARKET_DAILY, DataDomain.TRADING_CALENDAR}:
+        if request.domain in {
+            DataDomain.MARKET_DAILY,
+            DataDomain.TRADING_CALENDAR,
+            DataDomain.UNIVERSE_SNAPSHOT,
+            DataDomain.SECURITY_STATUS,
+            DataDomain.INDUSTRY_CONCEPT,
+        }:
             return self._baostock.fetch_domain(request)
-        if request.domain in {DataDomain.UNIVERSE_SNAPSHOT, DataDomain.VALUATION}:
+        if request.domain == DataDomain.VALUATION:
+            result = self._baostock.fetch_domain(request)
+            if result.data is not None and not result.data.empty:
+                return result
             return self._eastmoney.fetch_domain(request)
         raise RuntimeError(f"unsupported_domain: {self.name} does not support {request.domain}")
 
@@ -627,6 +662,164 @@ def _from_baostock_code(value: Any) -> str:
     return str(value or "").strip().upper()
 
 
+def _baostock_query_to_frame(query: Any, failure_label: str) -> pd.DataFrame:
+    error_code = str(getattr(query, "error_code", "1"))
+    error_msg = str(getattr(query, "error_msg", ""))
+    if error_code != "0":
+        raise RuntimeError(f"{failure_label}_query_error:{error_code}: {error_msg}")
+    fields = [str(item) for item in (getattr(query, "fields", None) or [])]
+    rows: list[list[Any]] = []
+    while query.next():
+        rows.append(query.get_row_data())
+    return pd.DataFrame(rows, columns=fields) if fields else pd.DataFrame(rows)
+
+
+def _is_baostock_a_share_code(value: Any) -> bool:
+    raw = str(value or "").strip().lower()
+    if raw.startswith("sh."):
+        code = raw[3:9]
+        return code.startswith(("600", "601", "603", "605", "688"))
+    if raw.startswith("sz."):
+        code = raw[3:9]
+        return code.startswith(("000", "001", "002", "003", "300", "301"))
+    if raw.startswith("bj."):
+        return raw[3:9].isdigit()
+    return False
+
+
+def _baostock_exchange(value: Any) -> str:
+    raw = str(value or "").strip().upper()
+    if raw.endswith(".SH"):
+        return "SH"
+    if raw.endswith(".SZ"):
+        return "SZ"
+    if raw.endswith(".BJ"):
+        return "BJ"
+    return ""
+
+
+def _baostock_board(value: Any) -> str:
+    raw = str(value or "").strip().upper()
+    code = raw.split(".", 1)[0]
+    exchange = raw.split(".", 1)[1] if "." in raw else ""
+    if exchange == "BJ":
+        return "beijing"
+    if exchange == "SH" and code.startswith("688"):
+        return "star"
+    if exchange == "SZ" and code.startswith(("300", "301")):
+        return "chi_next"
+    if exchange in {"SH", "SZ"}:
+        return "main"
+    return "unknown"
+
+
+def _baostock_name_is_st(value: Any) -> bool:
+    name = str(value or "").strip().upper()
+    return name.startswith(("ST", "*ST"))
+
+
+def _baostock_all_stock_raw_frame(query: Any) -> pd.DataFrame:
+    frame = _baostock_query_to_frame(query, "baostock_all_stock")
+    if frame.empty or "code" not in frame.columns:
+        return pd.DataFrame()
+    frame = frame.loc[frame["code"].map(_is_baostock_a_share_code)].copy()
+    if frame.empty:
+        return pd.DataFrame()
+    frame["symbol"] = frame["code"].map(_from_baostock_code)
+    frame["name"] = frame.get("code_name", "").fillna("").astype(str).str.strip()
+    frame["tradeStatus"] = frame.get("tradeStatus", "").fillna("").astype(str).str.strip()
+    return frame
+
+
+def _baostock_all_stock_frame(query: Any, *, trade_date: str) -> pd.DataFrame:
+    raw = _baostock_all_stock_raw_frame(query)
+    if raw.empty:
+        return pd.DataFrame()
+    frame = pd.DataFrame(
+        {
+            "symbol": raw["symbol"],
+            "trade_date": str(trade_date),
+            "name": raw["name"],
+            "exchange": raw["symbol"].map(_baostock_exchange),
+            "board": raw["symbol"].map(_baostock_board),
+            "list_status": "L",
+            "list_date": "",
+            "delist_date": "",
+            "source": "baostock",
+        }
+    )
+    return frame.reset_index(drop=True)
+
+
+def _baostock_status_frame_from_all_stock(query: Any, *, trade_date: str) -> pd.DataFrame:
+    raw = _baostock_all_stock_raw_frame(query)
+    if raw.empty:
+        return pd.DataFrame()
+    trade_status = raw["tradeStatus"].fillna("").astype(str).str.strip()
+    frame = pd.DataFrame(
+        {
+            "symbol": raw["symbol"],
+            "trade_date": str(trade_date),
+            "is_st": raw["name"].map(_baostock_name_is_st),
+            "is_suspended": trade_status.eq("0"),
+            "is_delisted": False,
+            "status_reason": "tradeStatus=" + trade_status,
+            "source": "baostock",
+        }
+    )
+    return frame.reset_index(drop=True)
+
+
+def _baostock_industry_frame(query: Any, *, trade_date: str) -> pd.DataFrame:
+    frame = _baostock_query_to_frame(query, "baostock_industry")
+    if frame.empty or "code" not in frame.columns:
+        return pd.DataFrame()
+    frame = frame.loc[frame["code"].map(_is_baostock_a_share_code)].copy()
+    if frame.empty:
+        return pd.DataFrame()
+    return pd.DataFrame(
+        {
+            "symbol": frame["code"].map(_from_baostock_code),
+            "trade_date": str(trade_date),
+            "industry": frame.get("industry", "").fillna("").astype(str).str.strip(),
+            "concept_tags": "",
+            "source": "baostock",
+        }
+    ).reset_index(drop=True)
+
+
+def _baostock_valuation_frame_from_history(bs: Any, request: DomainFetchRequest) -> pd.DataFrame:
+    request = request.normalized()
+    frames: list[pd.DataFrame] = []
+    for symbol in request.symbols:
+        query = bs.query_history_k_data_plus(
+            _to_baostock_code(symbol),
+            "date,code,turn,peTTM,pbMRQ",
+            start_date=request.start_date,
+            end_date=request.end_date,
+            frequency="d",
+            adjustflag="3",
+        )
+        raw = _baostock_query_to_frame(query, "baostock_valuation")
+        if raw.empty:
+            continue
+        frames.append(
+            pd.DataFrame(
+                {
+                    "symbol": raw["code"].map(_from_baostock_code),
+                    "trade_date": raw["date"],
+                    "total_mv": float("nan"),
+                    "circ_mv": float("nan"),
+                    "pe": raw.get("peTTM", ""),
+                    "pb": raw.get("pbMRQ", ""),
+                    "turnover_rate": raw.get("turn", ""),
+                    "source": "baostock",
+                }
+            )
+        )
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
 def _baostock_stock_basic_worker(queue: Any, trade_date: str) -> None:
     try:
         import baostock as bs  # type: ignore
@@ -637,6 +830,44 @@ def _baostock_stock_basic_worker(queue: Any, trade_date: str) -> None:
             return
         try:
             frame = _baostock_stock_basic_frame(bs.query_stock_basic(), trade_date=trade_date)
+        finally:
+            bs.logout()
+        queue.put({"status": "ok", "data": frame})
+    except Exception as exc:
+        queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
+
+
+def _baostock_all_stock_worker(queue: Any, domain: str, trade_date: str) -> None:
+    try:
+        import baostock as bs  # type: ignore
+
+        login = bs.login()
+        if getattr(login, "error_code", "1") != "0":
+            queue.put({"status": "error", "error_type": "RuntimeError", "error": f"baostock login failed: {getattr(login, 'error_msg', '')}"})
+            return
+        try:
+            query = bs.query_all_stock(day=trade_date)
+            if domain == DataDomain.SECURITY_STATUS:
+                frame = _baostock_status_frame_from_all_stock(query, trade_date=trade_date)
+            else:
+                frame = _baostock_all_stock_frame(query, trade_date=trade_date)
+        finally:
+            bs.logout()
+        queue.put({"status": "ok", "data": frame})
+    except Exception as exc:
+        queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
+
+
+def _baostock_industry_worker(queue: Any, trade_date: str) -> None:
+    try:
+        import baostock as bs  # type: ignore
+
+        login = bs.login()
+        if getattr(login, "error_code", "1") != "0":
+            queue.put({"status": "error", "error_type": "RuntimeError", "error": f"baostock login failed: {getattr(login, 'error_msg', '')}"})
+            return
+        try:
+            frame = _baostock_industry_frame(bs.query_stock_industry(date=trade_date), trade_date=trade_date)
         finally:
             bs.logout()
         queue.put({"status": "ok", "data": frame})
@@ -682,17 +913,18 @@ def _fetch_baostock_payload_with_timeout(
         kwargs={"queue": payload_queue, **kwargs},
     )
     process.start()
-    process.join(timeout)
-    if process.is_alive():
-        process.terminate()
-        process.join(5)
-        raise TimeoutError(f"{timeout_label}: exceeded {int(timeout)} seconds")
     try:
-        payload = payload_queue.get(timeout=1.0)
+        payload = payload_queue.get(timeout=timeout)
     except queue_module.Empty:
+        process.join(0)
+        if process.is_alive():
+            process.terminate()
+            process.join(5)
+            raise TimeoutError(f"{timeout_label}: exceeded {int(timeout)} seconds")
         if process.exitcode not in {0, None}:
             raise RuntimeError(f"{failure_label}_worker_failed: exitcode={process.exitcode}")
         raise RuntimeError(f"{failure_label}_worker_returned_no_payload")
+    process.join(5)
     if not isinstance(payload, dict) or payload.get("status") != "ok":
         error_type = str(payload.get("error_type", "RuntimeError")) if isinstance(payload, dict) else "RuntimeError"
         error = str(payload.get("error", payload) if isinstance(payload, dict) else payload)
@@ -708,6 +940,26 @@ def _fetch_baostock_stock_basic_frame_with_timeout(*, trade_date: str, timeout_s
         timeout_seconds=timeout_seconds,
         timeout_label="baostock_stock_basic_timeout",
         failure_label="baostock_stock_basic",
+    )
+
+
+def _fetch_baostock_all_stock_frame_with_timeout(*, domain: str, trade_date: str, timeout_seconds: int = 60) -> pd.DataFrame:
+    return _fetch_baostock_payload_with_timeout(
+        target=_baostock_all_stock_worker,
+        kwargs={"domain": str(domain), "trade_date": str(trade_date)},
+        timeout_seconds=timeout_seconds,
+        timeout_label="baostock_all_stock_timeout",
+        failure_label="baostock_all_stock",
+    )
+
+
+def _fetch_baostock_industry_frame_with_timeout(*, trade_date: str, timeout_seconds: int = 90) -> pd.DataFrame:
+    return _fetch_baostock_payload_with_timeout(
+        target=_baostock_industry_worker,
+        kwargs={"trade_date": str(trade_date)},
+        timeout_seconds=timeout_seconds,
+        timeout_label="baostock_industry_timeout",
+        failure_label="baostock_industry",
     )
 
 
@@ -728,11 +980,7 @@ def _fetch_baostock_trade_calendar_frame_with_timeout(
 
 
 def _baostock_stock_basic_frame(query: Any, *, trade_date: str) -> pd.DataFrame:
-    fields = [str(item) for item in (getattr(query, "fields", None) or [])]
-    rows: list[list[Any]] = []
-    while getattr(query, "error_code", "1") == "0" and query.next():
-        rows.append(query.get_row_data())
-    frame = pd.DataFrame(rows, columns=fields) if fields else pd.DataFrame(rows)
+    frame = _baostock_query_to_frame(query, "baostock_stock_basic")
     if frame.empty:
         return pd.DataFrame()
     rename_map = {
