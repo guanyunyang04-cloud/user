@@ -39,6 +39,11 @@ FORMAL_FREE_V3_RESEARCH_FUTURE_DOMAINS: tuple[str, ...] = (
     DataDomain.RESEARCH_REPORT,
     DataDomain.IWENCAI_SEMANTIC,
 )
+RESEARCH_REBUILD_MINIMAL_REQUIRED_DOMAINS: tuple[str, ...] = (
+    DataDomain.MARKET_DAILY,
+    DataDomain.TRADING_CALENDAR,
+    DataDomain.UNIVERSE_SNAPSHOT,
+)
 
 
 _PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
@@ -91,6 +96,12 @@ _PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
         "formal_eligible": False,
         "notes": "legacy placeholder for future same-day supplement",
     },
+    "research_rebuild_minimal_free": {
+        "domains": (*RESEARCH_REBUILD_MINIMAL_REQUIRED_DOMAINS, DataDomain.VALUATION),
+        "requires_token": False,
+        "formal_eligible": True,
+        "notes": "domain-scoped rebuild plan: baostock market/calendar plus eastmoney universe; weak providers excluded from critical path",
+    },
 }
 
 
@@ -117,6 +128,8 @@ def provider_capability_matrix(provider_plan: str = "formal_free_v3") -> list[di
     plan = str(provider_plan or "formal_free_v3").strip().lower()
     if plan == "formal_free_v3":
         provider_names = ("baostock", "eastmoney_efinance", "akshare_eastmoney", "tencent_finance", "tonghuashun_hotspot", "tushare_http_optional")
+    elif plan == "research_rebuild_minimal_free":
+        provider_names = ("research_rebuild_minimal_free",)
     else:
         provider_names = tuple(str(getattr(provider, "name", "")) for provider in build_default_providers(plan))
     rows: list[dict[str, Any]] = []
@@ -129,7 +142,19 @@ def provider_capability_matrix(provider_plan: str = "formal_free_v3") -> list[di
         meta = _PROVIDER_CAPABILITIES.get(provider_name, {"domains": (), "requires_token": False, "formal_eligible": False, "notes": ""})
         supported = set(str(item) for item in meta.get("domains", ()))
         for domain in all_domains:
-            formal_refresh = bool(plan == "formal_free_v3" and meta.get("formal_eligible", False) and _formal_requirement(domain) in {"required", "optional"})
+            formal_refresh = bool(
+                (
+                    plan == "formal_free_v3"
+                    and meta.get("formal_eligible", False)
+                    and _formal_requirement(domain) in {"required", "optional"}
+                )
+                or (
+                    plan == "research_rebuild_minimal_free"
+                    and meta.get("formal_eligible", False)
+                    and domain in RESEARCH_REBUILD_MINIMAL_REQUIRED_DOMAINS
+                    and domain in supported
+                )
+            )
             rows.append(
                 {
                     "provider": provider_name,
@@ -517,8 +542,30 @@ class TonghuashunHotspotProvider:
         return ProviderResult(provider=self.name, data=data)
 
 
+@dataclass
+class ResearchRebuildMinimalFreeProvider:
+    name: str = "research_rebuild_minimal_free"
+
+    def __post_init__(self) -> None:
+        self._baostock = BaostockProvider()
+        self._eastmoney = EastmoneyEfinanceProvider()
+
+    def fetch_market_bars(self, request: FetchRequest) -> ProviderResult:
+        return self._baostock.fetch_market_bars(request)
+
+    def fetch_domain(self, request: DomainFetchRequest) -> ProviderResult:
+        request = request.normalized()
+        if request.domain in {DataDomain.MARKET_DAILY, DataDomain.TRADING_CALENDAR}:
+            return self._baostock.fetch_domain(request)
+        if request.domain in {DataDomain.UNIVERSE_SNAPSHOT, DataDomain.VALUATION}:
+            return self._eastmoney.fetch_domain(request)
+        raise RuntimeError(f"unsupported_domain: {self.name} does not support {request.domain}")
+
+
 def build_default_providers(provider_plan: str = "default_free") -> list:
     plan = str(provider_plan or "default_free").strip().lower()
+    if plan == "research_rebuild_minimal_free":
+        return [ResearchRebuildMinimalFreeProvider()]
     if plan == "default_free":
         return [EastmoneyEfinanceProvider(), AkshareEastmoneyProvider(), BaostockProvider()]
     if plan == "formal_free_v3":

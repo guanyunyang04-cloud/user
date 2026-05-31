@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 79,
+  "record_count": 80,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -2455,6 +2455,41 @@
         "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1",
         "policy_input_bundle__0f116a9b78c92ff045a6853d"
       ]
+    },
+    {
+      "id": "research_only_output_cache_rebuild_blocked_20260531",
+      "date": "2026-05-31",
+      "r_id": "",
+      "path": "daily_research/brain/references/research_only_output_cache_rebuild_blocked_20260531.md",
+      "tags": [
+        "path_policy",
+        "gpu"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "This is a data-source availability blocker, not a model-quality result and not evidence that recent brain conclusions are wrong.; The correct state remains: old conclusions are brain-confirmed/user-confirmed, while file-backed research rebuild is currently blocked by missing full all-A universe snapshot.; Do not use partial universe, cap80, stale CSV, or manually reconstructed payloads to claim a full-pool research rebuild.",
+      "blockers": [
+        "The refresh failed before any `policy_input_bundle` was registered.",
+        "Failure point: `universe=all_a` resolution.",
+        "Error: `ValueError: universe=all_a requires a non-empty universe_snapshot provider result`.",
+        "Provider details:",
+        "`eastmoney_efinance`: `JSONDecodeError`.",
+        "`akshare_eastmoney`: `ProxyError` against Eastmoney API host.",
+        "`baostock`: `baostock_stock_basic_timeout: exceeded 60 seconds`.",
+        "Log root: `daily_research/output/research_data_lake/rebuild_20260531/`."
+      ],
+      "next_allowed_actions": [
+        "Retry provider health and all-A refresh only when universe snapshot providers are available.",
+        "If a fresh, auditable CSV/universe source is supplied, import it through Bronze/Silver/lake first; do not train directly from scattered CSV.",
+        "If a true backup exists, restoring `daily_research/output/` and `daily_research/cache/` remains the cleanest way to recover old file-backed evidence.",
+        "Keep `daily_research/output/active_execution_strategy.json` untouched unless a future explicit promotion/recovery authority is given."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
     },
     {
       "id": "tdx_free_data_platform_decision_20260523",

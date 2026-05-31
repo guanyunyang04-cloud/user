@@ -18,6 +18,7 @@ from daily_research.data_platform.manager import InMemoryMarketProvider, Provide
 from daily_research.data_platform.providers import (
     BaostockProvider,
     EastmoneyEfinanceProvider,
+    ResearchRebuildMinimalFreeProvider,
     TushareHttpOptionalProvider,
     build_default_providers,
     provider_capability_matrix,
@@ -155,6 +156,53 @@ class DataPlatformProviderContractTest(unittest.TestCase):
         )
         self.assertEqual(formal_refresh_domains, required_domains)
         self.assertGreaterEqual(optional_domains, {"valuation", "industry_concept", "money_flow_hotspot"})
+
+    def test_research_rebuild_minimal_free_plan_isolates_weak_providers_from_critical_path(self) -> None:
+        providers = build_default_providers("research_rebuild_minimal_free")
+        provider_names = [provider.name for provider in providers]
+        matrix = provider_capability_matrix("research_rebuild_minimal_free")
+        formal_refresh_domains = {
+            item["domain"]
+            for item in matrix
+            if item.get("formal_refresh") is True and item.get("requirement") == "required"
+        }
+
+        self.assertEqual(provider_names, ["research_rebuild_minimal_free"])
+        self.assertEqual(
+            formal_refresh_domains,
+            {"market_daily", "trading_calendar", "universe_snapshot"},
+        )
+        self.assertFalse({"akshare_eastmoney", "sina_tencent_realtime", "tushare_http_optional"} & set(provider_names))
+
+    def test_research_rebuild_minimal_free_provider_routes_only_rebuild_domains(self) -> None:
+        provider = ResearchRebuildMinimalFreeProvider()
+        calls: list[tuple[str, str]] = []
+
+        def fake_baostock(request: DomainFetchRequest) -> ProviderResult:
+            calls.append(("baostock", request.domain))
+            return ProviderResult(provider="baostock", data=pd.DataFrame({"symbol": ["000001.SZ"], "trade_date": ["2026-01-05"]}))
+
+        def fake_eastmoney(request: DomainFetchRequest) -> ProviderResult:
+            calls.append(("eastmoney_efinance", request.domain))
+            return ProviderResult(provider="eastmoney_efinance", data=pd.DataFrame({"symbol": ["000001.SZ"], "trade_date": ["2026-01-05"]}))
+
+        provider._baostock.fetch_domain = fake_baostock  # type: ignore[method-assign]
+        provider._eastmoney.fetch_domain = fake_eastmoney  # type: ignore[method-assign]
+
+        provider.fetch_domain(DomainFetchRequest(domain=DataDomain.MARKET_DAILY, start_date="2026-01-05", end_date="2026-01-05"))
+        provider.fetch_domain(DomainFetchRequest(domain=DataDomain.TRADING_CALENDAR, start_date="2026-01-05", end_date="2026-01-05"))
+        provider.fetch_domain(DomainFetchRequest(domain=DataDomain.UNIVERSE_SNAPSHOT, start_date="2026-01-05", end_date="2026-01-05"))
+
+        self.assertEqual(
+            calls,
+            [
+                ("baostock", DataDomain.MARKET_DAILY),
+                ("baostock", DataDomain.TRADING_CALENDAR),
+                ("eastmoney_efinance", DataDomain.UNIVERSE_SNAPSHOT),
+            ],
+        )
+        with self.assertRaisesRegex(RuntimeError, "unsupported_domain"):
+            provider.fetch_domain(DomainFetchRequest(domain=DataDomain.LIMIT_STATUS, start_date="2026-01-05", end_date="2026-01-05"))
 
     def test_tushare_http_provider_does_not_set_execution_timeout(self) -> None:
         calls: list[dict[str, object]] = []

@@ -45,7 +45,7 @@
 
 ## 当前主问题
 - production 执行侧不是当前阻塞点；默认 active 继续由 `short_expert_policy_v5b` 承担。
-- 本地 artifact 恢复是当前接管控制面阻塞：需从真实备份恢复 `daily_research/output/` 与 `daily_research/cache/` 后，再恢复文件级 active artifact 检查、run evidence lookup 和 `project_consistency_check.py` health。
+- 本地 artifact 恢复是当前接管控制面阻塞：需从真实备份恢复 `daily_research/output/` 与 `daily_research/cache/` 后，再恢复文件级 active artifact 检查、run evidence lookup 和 `project_consistency_check.py` health。2026-05-31 research-only rebuild 尝试已完成 preflight 与测试残留 quarantine，但 all-A refresh 在 `universe_snapshot` 阶段因免费 provider 全部失败而阻塞，未创建新 `policy_input_bundle`、pool/sector view、memmap 或 baseline training。
 - daily execution 当前阻塞点是 2026-05-26 数据源 readiness：候选交易日 formal refresh `market_daily` 为空，因此严格阻断并不生成新交易计划。
 - `alpha_multi_horizon_utility_policy_v1` 的当前 blocker 已从 target/loss stability 转为输入/横截面特征质量诊断：Stage 2.8 已用 full rolling_liquid500 memmap 通过 `target_norm_head_constraint_v1` gate；Stage 3A-3C 显示 patch 架构未形成 final 3-seed upgrade evidence；Stage 3D-3F 已修通 sector context 输入但 sector GRU final 未过升级 gate；Stage 3G 显示 sector-relative/regime 输入有强 scout 与 hit lift/concentration 改善，但 seed7+11 confirmation 因 test rank/spread 与月度稳定性未过 gate。下一步若继续 multi-horizon，应围绕 regime split、feature scaling/interaction ablation、hit-lift-preserving rank regularization 或 horizon concentration/utility tradeoff 做窄矩阵，不得直接 promotion。
 - continuous_policy 的核心瓶颈是组合日级资金分配：谁是 receiver、谁是 source、留多少 cash、承受多少 turnover / cost / drawdown。
@@ -89,7 +89,7 @@
 - 多 Horizon Stage 3D-3F sector input repair：`daily_research/brain/references/alpha_multi_horizon_stage33_sector_input_repair_scout_20260529.md`。
 - 多 Horizon Stage 3G input cross-section scout：`daily_research/brain/references/alpha_multi_horizon_stage36_input_cross_section_scout_20260530.md`。
 - PathPolicy / TDX-free 数据平台：`daily_research/brain/references/path_policy_execution_issue_learning_20260523.md`、`daily_research/brain/references/tdx_free_data_platform_decision_20260523.md`、`daily_research/brain/references/tdx_free_data_platform_v2_20260523.md`。
-- output/cache 误删恢复边界：`daily_research/brain/references/data_lake_output_cache_loss_recovery_boundary_20260531.md`。
+- output/cache 误删恢复边界：`daily_research/brain/references/data_lake_output_cache_loss_recovery_boundary_20260531.md`；research-only rebuild provider blocker：`daily_research/brain/references/research_only_output_cache_rebuild_blocked_20260531.md`。
 - 机器索引：`daily_research/brain/references/evidence_registry.json`。
 ## 历史归档入口
 - 历史归档：`daily_research/brain/references/state_center_archive_20260510.md`、`daily_research/brain/references/state_center_history_raw_20260424.md`、`daily_research/brain/references/state_center_evidence_index_20260424.md`。
