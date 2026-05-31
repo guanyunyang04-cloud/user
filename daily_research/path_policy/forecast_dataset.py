@@ -994,6 +994,12 @@ def load_forecast_memmap_dataset(manifest_json: str | Path) -> ForecastMemmapDat
         "risk_horizons": [int(item) for item in cumulative_horizons],
         "forecast_horizon": int(horizon),
     }
+    date_values = [str(item) for item in manifest.get("date_values", [])]
+    stock_values = [str(item) for item in manifest.get("stock_values", [])]
+    if not date_values and "date" in sample_index.columns:
+        date_values = [pd.Timestamp(item).strftime("%Y-%m-%d") for item in pd.to_datetime(sample_index["date"]).tolist()]
+    if not stock_values and "stock" in sample_index.columns:
+        stock_values = [str(item).strip().upper() for item in sample_index["stock"].dropna().astype(str).tolist() if str(item).strip()]
     return ForecastMemmapDataset(
         root=root,
         feature_store_path=feature_store_path,
@@ -1014,8 +1020,8 @@ def load_forecast_memmap_dataset(manifest_json: str | Path) -> ForecastMemmapDat
         manifest=manifest,
         feature_mean=feature_mean,
         feature_std=feature_std,
-        date_values=np.array([], dtype=object),
-        stock_values=np.array([], dtype=object),
+        date_values=np.array(date_values, dtype=object),
+        stock_values=np.array(stock_values, dtype=object),
         static_context_ids=static_context_ids,
     )
 
@@ -1340,6 +1346,8 @@ def build_forecast_memmap_dataset(
         "feature_store_path": str(feature_store_path.resolve()),
         "feature_store_shape": [int(item) for item in feature_shape],
         "sample_index_csv": str(sample_index_path.resolve()),
+        "date_values": [dt.strftime("%Y-%m-%d") for dt in dates],
+        "stock_values": [str(stock) for stock in universe],
         "cumulative_horizons": [int(item) for item in resolved_horizons],
         "rank_horizons": [int(item) for item in resolved_horizons],
         "risk_horizons": [int(item) for item in resolved_horizons],

@@ -411,6 +411,7 @@ class ResearchDataLakeTest(unittest.TestCase):
             first = build_pool_view_from_policy_bundle(lake=lake, spec=spec)
             second = build_pool_view_from_policy_bundle(lake=lake, spec=spec)
             loaded = load_pool_view(lake=lake, pool_view_id=first.dataset_id)
+            quality_report_exists = Path(first.content_paths["quality_report"]).exists()
 
         self.assertEqual(second.dataset_id, first.dataset_id)
         self.assertEqual(second.status, "hit")
@@ -419,6 +420,10 @@ class ResearchDataLakeTest(unittest.TestCase):
         self.assertEqual(loaded.membership_frame.shape[1], 3)
         self.assertEqual(int(loaded.membership_frame.sum(axis=1).median()), 2)
         self.assertEqual(loaded.metadata["parameters"]["source_market_dataset_id"], market_record.dataset_id)
+        self.assertIn("quality_report", first.content_paths)
+        self.assertEqual(loaded.metadata["source_cache"]["quality_report"]["zero_member_days"], 0)
+        self.assertEqual(loaded.metadata["source_cache"]["quality_report"]["member_count_median"], 2.0)
+        self.assertTrue(quality_report_exists)
 
     def test_pool_view_exchange_filter_and_loader_pool_view_priority(self) -> None:
         dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
@@ -687,6 +692,152 @@ class ResearchDataLakeTest(unittest.TestCase):
         with mock.patch("daily_research.data_lake.build_sector_board_view._active_artifact_has_diff", return_value=True):
             with self.assertRaisesRegex(ValueError, "active_artifact_diff_blocker"):
                 build_sector_board_view.main(["--source-market-dataset-id", "policy_input_bundle__fixed"])
+
+    def test_sector_board_view_uses_lake_sidecar_industry_and_explicit_empty_board(self) -> None:
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
+        stocks = ["000001.SZ", "600000.SH", "430001.BJ"]
+        market_frames, membership_frame, feature_frames = _synthetic_policy_bundle_parts(dates, stocks=stocks)
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            lake = ResearchDataLake(root / "lake")
+            industry = pd.DataFrame(
+                {
+                    "symbol": ["000001.SZ", "000001.SZ", "600000.SH", "999999.SH"],
+                    "trade_date": ["2026-01-05", "2026-01-07", "2026-01-06", "2026-01-06"],
+                    "industry": ["旧银行", "银行", "银行", "缺席行业"],
+                    "concept_tags": ["", "", "", ""],
+                    "source": ["baostock"] * 4,
+                }
+            )
+            sidecar = lake.save_domain_dataset(
+                domain="industry_concept",
+                frame=industry,
+                spec={"dataset": "data_platform_industry_concept", "start_date": "2026-01-05", "end_date": "2026-01-07"},
+                source="data_platform_refresh",
+            )
+            market_record = lake.save_market_data_bundle(
+                spec={
+                    "pool_name": "learned_all_a",
+                    "benchmark": "000300.SH",
+                    "source": "synthetic",
+                    "sidecar_dataset_ids": {"industry_concept": sidecar.dataset_id},
+                },
+                market_frames=market_frames,
+                benchmark_close=pd.Series(4000.0, index=dates, name="000300.SH"),
+                membership_frame=membership_frame,
+                feature_frames=feature_frames,
+                source="synthetic",
+            )
+            sector_view = build_sector_board_view_from_policy_bundle(
+                lake=lake,
+                spec=SectorBoardViewSpec(
+                    source_market_dataset_id=market_record.dataset_id,
+                    industry_source_kind="lake_sidecar",
+                    board_source_kind="empty",
+                    allow_empty_board=True,
+                    as_of_date="2026-01-07",
+                    view_name="sector_board_baostock_industry_latest_static",
+                ),
+            )
+            loaded = load_sector_board_view(lake=lake, sector_board_view_id=sector_view.dataset_id)
+
+        self.assertEqual(set(loaded.industry_map_frame["symbol"]), {"000001.SZ", "600000.SH"})
+        self.assertEqual(loaded.industry_map_frame.loc[loaded.industry_map_frame["symbol"].eq("000001.SZ"), "industry"].iloc[0], "银行")
+        self.assertTrue(loaded.board_membership_frame.empty)
+        self.assertTrue(loaded.board_summary_frame.empty)
+        self.assertEqual(loaded.metadata["parameters"]["industry_source_kind"], "lake_sidecar")
+        self.assertEqual(loaded.metadata["parameters"]["board_source_kind"], "empty")
+        self.assertEqual(loaded.metadata["source_cache"]["industry_coverage"]["covered_symbols"], 2)
+        self.assertEqual(loaded.metadata["source_cache"]["board_coverage"]["status"], "empty_explicit")
+
+    def test_sector_board_view_rejects_empty_board_without_explicit_allowance(self) -> None:
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
+        stocks = ["000001.SZ", "600000.SH"]
+        market_frames, membership_frame, feature_frames = _synthetic_policy_bundle_parts(dates, stocks=stocks)
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            industry_csv = root / "industry.csv"
+            industry_csv.write_text("stock,industry\n000001.SZ,银行\n600000.SH,银行\n", encoding="utf-8-sig")
+            lake = ResearchDataLake(root / "lake")
+            market_record = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic"},
+                market_frames=market_frames,
+                benchmark_close=pd.Series(4000.0, index=dates, name="000300.SH"),
+                membership_frame=membership_frame,
+                feature_frames=feature_frames,
+                source="synthetic",
+            )
+            with self.assertRaisesRegex(ValueError, "empty board requires allow_empty_board"):
+                build_sector_board_view_from_policy_bundle(
+                    lake=lake,
+                    spec=SectorBoardViewSpec(
+                        source_market_dataset_id=market_record.dataset_id,
+                        industry_source_path=str(industry_csv),
+                        board_source_kind="empty",
+                        allow_empty_board=False,
+                        as_of_date="2026-01-07",
+                    ),
+                )
+
+    def test_sector_board_view_cli_accepts_lake_sidecar_and_empty_board_modes(self) -> None:
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
+        stocks = ["000001.SZ", "600000.SH"]
+        market_frames, membership_frame, feature_frames = _synthetic_policy_bundle_parts(dates, stocks=stocks)
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            lake = ResearchDataLake(root)
+            sidecar = lake.save_domain_dataset(
+                domain="industry_concept",
+                frame=pd.DataFrame(
+                    {
+                        "symbol": ["000001.SZ", "600000.SH"],
+                        "trade_date": ["2026-01-07", "2026-01-07"],
+                        "industry": ["银行", "银行"],
+                        "concept_tags": ["", ""],
+                        "source": ["baostock", "baostock"],
+                    }
+                ),
+                spec={"dataset": "data_platform_industry_concept", "start_date": "2026-01-07", "end_date": "2026-01-07"},
+                source="data_platform_refresh",
+            )
+            market_record = lake.save_market_data_bundle(
+                spec={
+                    "pool_name": "learned_all_a",
+                    "benchmark": "000300.SH",
+                    "source": "synthetic",
+                    "sidecar_dataset_ids": {"industry_concept": sidecar.dataset_id},
+                },
+                market_frames=market_frames,
+                benchmark_close=pd.Series(4000.0, index=dates, name="000300.SH"),
+                membership_frame=membership_frame,
+                feature_frames=feature_frames,
+                source="synthetic",
+            )
+            manifest = build_sector_board_view.main(
+                [
+                    "--data-lake-root",
+                    temp_dir,
+                    "--source-market-dataset-id",
+                    market_record.dataset_id,
+                    "--industry-source-kind",
+                    "lake_sidecar",
+                    "--board-source-kind",
+                    "empty",
+                    "--allow-empty-board",
+                    "--as-of-date",
+                    "2026-01-07",
+                    "--view-name",
+                    "sector_board_baostock_industry_latest_static",
+                ]
+            )
+
+        self.assertEqual(manifest["status"], "ok")
+        self.assertEqual(manifest["industry_source_kind"], "lake_sidecar")
+        self.assertEqual(manifest["board_source_kind"], "empty")
+        self.assertEqual(manifest["board_coverage"]["status"], "empty_explicit")
 
     def test_lake_loader_attaches_sector_board_metadata_without_changing_universe(self) -> None:
         dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])

@@ -371,6 +371,7 @@ class ResearchDataLake:
             "membership_frame": str((dataset_dir / "membership_frame.parquet").resolve()),
             "schedule_frame": str((dataset_dir / "schedule_frame.parquet").resolve()),
             "summary_frame": str((dataset_dir / "summary_frame.parquet").resolve()),
+            "quality_report": str((dataset_dir / "quality_report.json").resolve()),
             "view_manifest": str((dataset_dir / "view_manifest.json").resolve()),
         }
         existing = self._existing_by_fingerprint(fingerprint)
@@ -406,6 +407,50 @@ class ResearchDataLake:
         membership_out.to_parquet(content_paths["membership_frame"], index=False)
         schedule.to_parquet(content_paths["schedule_frame"], index=False)
         summary.to_parquet(content_paths["summary_frame"], index=False)
+        quality_report = {
+            "dataset_id": dataset_id,
+            "dataset_kind": dataset_kind,
+            "fingerprint": fingerprint,
+            "status": "computed",
+            "view_kind": str(dict(spec).get("view_kind", "") or ""),
+            "view_name": str(dict(spec).get("view_name", "") or ""),
+            "source_market_dataset_id": str(dict(spec).get("source_market_dataset_id", "") or ""),
+            "date_bounds": {
+                "start_date": membership.index.min().strftime("%Y-%m-%d"),
+                "end_date": membership.index.max().strftime("%Y-%m-%d"),
+            },
+            "membership_rows": int(len(membership.index)),
+            "membership_symbols": int(len(membership.columns)),
+            "true_cells": int(membership.to_numpy(dtype=bool).sum()),
+            "universe_size": int(membership.any(axis=0).sum()),
+            "member_count_min": int(membership.sum(axis=1).min()) if len(membership.index) else 0,
+            "member_count_median": float(membership.sum(axis=1).median()) if len(membership.index) else 0.0,
+            "member_count_max": int(membership.sum(axis=1).max()) if len(membership.index) else 0,
+            "zero_member_days": int((membership.sum(axis=1) <= 0).sum()) if len(membership.index) else 0,
+            "rebalance_count": int(len(schedule)),
+            "average_rebalance_turnover": 0.0,
+        }
+        if not schedule.empty and "pool_turnover" in schedule.columns:
+            turnover_values = pd.to_numeric(schedule["pool_turnover"], errors="coerce").dropna()
+            if not turnover_values.empty:
+                quality_report["average_rebalance_turnover"] = float(turnover_values.mean())
+        _write_json(Path(content_paths["quality_report"]), quality_report)
+        source_cache_payload = dict(source_cache or {})
+        source_cache_payload["quality_report_path"] = content_paths["quality_report"]
+        source_cache_payload["quality_report"] = {
+            "status": quality_report["status"],
+            "date_bounds": dict(quality_report["date_bounds"]),
+            "membership_rows": int(quality_report["membership_rows"]),
+            "membership_symbols": int(quality_report["membership_symbols"]),
+            "true_cells": int(quality_report["true_cells"]),
+            "universe_size": int(quality_report["universe_size"]),
+            "member_count_min": int(quality_report["member_count_min"]),
+            "member_count_median": float(quality_report["member_count_median"]),
+            "member_count_max": int(quality_report["member_count_max"]),
+            "zero_member_days": int(quality_report["zero_member_days"]),
+            "rebalance_count": int(quality_report["rebalance_count"]),
+            "average_rebalance_turnover": float(quality_report["average_rebalance_turnover"]),
+        }
         manifest = {
             "dataset_id": dataset_id,
             "dataset_kind": dataset_kind,
@@ -417,6 +462,7 @@ class ResearchDataLake:
             "membership_symbols": int(len(membership.columns)),
             "membership_true_cells": int(membership.to_numpy(dtype=bool).sum()),
             "universe_size": int(membership.any(axis=0).sum()),
+            "quality_report": quality_report,
         }
         _write_json(Path(content_paths["view_manifest"]), manifest)
 
@@ -445,7 +491,7 @@ class ResearchDataLake:
             label_completeness_summary={},
             content_paths=content_paths,
             row_counts=row_counts,
-            source_cache=source_cache,
+            source_cache=source_cache_payload,
             fingerprint=fingerprint,
             status="stored",
         )
@@ -522,7 +568,12 @@ class ResearchDataLake:
         summary = board_summary_frame.copy()
         if industry.empty or not {"symbol", "industry"}.issubset(industry.columns):
             raise ValueError("sector_board_view_blocker: industry_map frame is empty or invalid.")
-        if board.empty or not {"symbol", "board_kind", "board_name"}.issubset(board.columns):
+        board_columns_ok = {"symbol", "board_kind", "board_name"}.issubset(board.columns)
+        explicit_empty_board = (
+            bool(dict(spec).get("allow_empty_board", False))
+            and str(dict(spec).get("board_source_kind", "") or "").strip().lower() == "empty"
+        )
+        if (not board_columns_ok) or (board.empty and not explicit_empty_board):
             raise ValueError("sector_board_view_blocker: board_membership frame is empty or invalid.")
         dataset_dir.mkdir(parents=True, exist_ok=True)
         industry.to_parquet(content_paths["industry_map"], index=False)

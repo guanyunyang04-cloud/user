@@ -41,6 +41,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-market-dataset-id", required=True)
     parser.add_argument("--industry-source-path", default=DEFAULT_INDUSTRY_SOURCE_PATH)
     parser.add_argument("--board-source-path", default=DEFAULT_BOARD_SOURCE_PATH)
+    parser.add_argument("--industry-source-kind", default="file", choices=("file", "lake_sidecar"))
+    parser.add_argument("--board-source-kind", default="file", choices=("file", "empty"))
+    parser.add_argument("--allow-empty-board", action="store_true")
     parser.add_argument("--as-of-date", default="")
     parser.add_argument("--view-kind", default=SNAPSHOT_SEMANTICS)
     parser.add_argument("--view-name", default="sector_board_latest_static")
@@ -67,6 +70,9 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         source_market_dataset_id=str(args.source_market_dataset_id).strip(),
         industry_source_path=str(args.industry_source_path or "").strip(),
         board_source_path=str(args.board_source_path or "").strip(),
+        industry_source_kind=str(args.industry_source_kind or "file").strip().lower(),
+        board_source_kind=str(args.board_source_kind or "file").strip().lower(),
+        allow_empty_board=bool(args.allow_empty_board),
         as_of_date=str(args.as_of_date or "").strip(),
         view_kind=str(args.view_kind or SNAPSHOT_SEMANTICS).strip(),
         view_name=str(args.view_name or "sector_board_latest_static").strip(),
@@ -83,6 +89,9 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         "view_kind": str(metadata.get("parameters", {}).get("view_kind", "") or ""),
         "view_name": str(metadata.get("parameters", {}).get("view_name", "") or ""),
         "snapshot_semantics": str(metadata.get("parameters", {}).get("snapshot_semantics", "") or SNAPSHOT_SEMANTICS),
+        "industry_source_kind": str(metadata.get("parameters", {}).get("industry_source_kind", "") or ""),
+        "board_source_kind": str(metadata.get("parameters", {}).get("board_source_kind", "") or ""),
+        "allow_empty_board": bool(metadata.get("parameters", {}).get("allow_empty_board", False)),
         "source_market_dataset_id": spec.source_market_dataset_id,
         "row_counts": record.row_counts,
         "content_paths": record.content_paths,

@@ -13,6 +13,8 @@ from daily_research.path_policy.forecast_dataset import (
     load_forecast_memmap_dataset,
 )
 from daily_research.path_policy.tests.fixtures import make_prepared_policy_inputs
+from daily_research.path_policy.validate_forecast_memmap import main as validate_memmap_main
+from daily_research.path_policy.validate_forecast_memmap import validate_forecast_memmap_manifest
 
 
 def test_forecast_memmap_dataset_builds_lazy_store_and_batches(tmp_path) -> None:
@@ -31,7 +33,7 @@ def test_forecast_memmap_dataset_builds_lazy_store_and_batches(tmp_path) -> None
         train_start_year=2019,
         train_end_year=2019,
         validation_year=2020,
-        test_year=2021,
+        test_year=2020,
         lookback_days=5,
         horizon=20,
         max_samples_per_role=8,
@@ -65,6 +67,137 @@ def test_forecast_memmap_dataset_builds_lazy_store_and_batches(tmp_path) -> None
     assert tuple(y_risk.shape) == (5, 3)
     assert int(row_idx.item()) == int(train_indices[0])
     assert torch.isfinite(x).all()
+
+
+def test_validate_forecast_memmap_manifest_reports_ok_and_source_binding(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
+    prepared.raw_cache_meta["dataset_id"] = "policy_input_bundle__unit"
+    prepared.raw_cache_meta["pool_view"] = {
+        "dataset_id": "policy_pool_view__unit",
+        "view_kind": "rolling_liquidity",
+        "view_name": "rolling_liquid500",
+        "source_market_dataset_id": "policy_input_bundle__unit",
+    }
+    build_forecast_memmap_dataset(
+        prepared,
+        root=tmp_path,
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2020,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=8,
+        min_lookback_valid_ratio=0.80,
+    )
+
+    report = validate_forecast_memmap_manifest(
+        manifest=tmp_path / "forecast_dataset_manifest.json",
+        expect_source_market_dataset_id="policy_input_bundle__unit",
+        expect_pool_view_id="policy_pool_view__unit",
+        expect_pool_view_kind="rolling_liquidity",
+        expect_pool_view_name="rolling_liquid500",
+        min_universe_size=4,
+        min_train_rows=1,
+        require_roles=("train",),
+    )
+
+    assert report["status"] == "ok"
+    assert report["blockers"] == []
+    assert report["source_market_dataset_id"] == "policy_input_bundle__unit"
+    assert report["source_pool_view_id"] == "policy_pool_view__unit"
+    assert report["universe_size"] == 4
+    assert report["sample_count_by_role"]["train"] > 0
+
+
+def test_validate_forecast_memmap_manifest_blocks_pool_mismatch_and_low_train_rows(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
+    prepared.raw_cache_meta["dataset_id"] = "policy_input_bundle__unit"
+    prepared.raw_cache_meta["pool_view"] = {
+        "dataset_id": "policy_pool_view__unit",
+        "view_kind": "rolling_liquidity",
+        "view_name": "rolling_liquid500",
+        "source_market_dataset_id": "policy_input_bundle__unit",
+    }
+    build_forecast_memmap_dataset(
+        prepared,
+        root=tmp_path,
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2020,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=8,
+        min_lookback_valid_ratio=0.80,
+    )
+
+    report = validate_forecast_memmap_manifest(
+        manifest=tmp_path / "forecast_dataset_manifest.json",
+        expect_pool_view_id="policy_pool_view__other",
+        min_train_rows=999999,
+        require_roles=("train", "validation", "test"),
+    )
+
+    assert report["status"] == "blocked"
+    assert "source_pool_view_mismatch" in report["blockers"]
+    assert "train_rows_below_minimum" in report["blockers"]
+
+
+def test_validate_forecast_memmap_cli_writes_json_and_returns_nonzero_on_blocker(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
+    build_forecast_memmap_dataset(
+        prepared,
+        root=tmp_path,
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=8,
+        min_lookback_valid_ratio=0.80,
+    )
+    json_output = tmp_path / "validator.json"
+
+    with pytest.raises(SystemExit) as exc:
+        validate_memmap_main(
+            [
+                "--manifest",
+                str(tmp_path / "forecast_dataset_manifest.json"),
+                "--min-universe-size",
+                "999",
+                "--json-output",
+                str(json_output),
+            ]
+        )
+
+    assert exc.value.code == 1
+    payload = json.loads(json_output.read_text(encoding="utf-8"))
+    assert payload["status"] == "blocked"
+    assert "universe_size_below_minimum" in payload["blockers"]
+
+
+def test_validate_forecast_memmap_manifest_classifies_missing_memmap_file(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
+    build_forecast_memmap_dataset(
+        prepared,
+        root=tmp_path,
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=8,
+        min_lookback_valid_ratio=0.80,
+    )
+    (tmp_path / "forecast_y_daily_excess.dat").unlink()
+
+    report = validate_forecast_memmap_manifest(manifest=tmp_path / "forecast_dataset_manifest.json")
+
+    assert report["status"] == "blocked"
+    assert report["blockers"] == ["missing_memmap_file"]
 
 
 def test_forecast_memmap_dataset_accepts_custom_horizon_grid_and_horizon_risk(tmp_path) -> None:

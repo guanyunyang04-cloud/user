@@ -12,6 +12,10 @@ from daily_research.data_lake.catalog import LakeDatasetRecord, ResearchDataLake
 DEFAULT_INDUSTRY_SOURCE_PATH = "daily_research/cache/industry_map_tq.csv"
 DEFAULT_BOARD_SOURCE_PATH = "daily_research/cache/imported_board_membership/infoharbor_block.dat"
 SNAPSHOT_SEMANTICS = "latest_static_snapshot"
+INDUSTRY_SOURCE_KIND_FILE = "file"
+INDUSTRY_SOURCE_KIND_LAKE_SIDE_CAR = "lake_sidecar"
+BOARD_SOURCE_KIND_FILE = "file"
+BOARD_SOURCE_KIND_EMPTY = "empty"
 
 
 @dataclass(frozen=True)
@@ -19,6 +23,9 @@ class SectorBoardViewSpec:
     source_market_dataset_id: str
     industry_source_path: str = DEFAULT_INDUSTRY_SOURCE_PATH
     board_source_path: str = DEFAULT_BOARD_SOURCE_PATH
+    industry_source_kind: str = INDUSTRY_SOURCE_KIND_FILE
+    board_source_kind: str = BOARD_SOURCE_KIND_FILE
+    allow_empty_board: bool = False
     as_of_date: str = ""
     view_kind: str = SNAPSHOT_SEMANTICS
     view_name: str = "sector_board_latest_static"
@@ -29,6 +36,9 @@ class SectorBoardViewSpec:
         payload["source_market_dataset_id"] = str(payload["source_market_dataset_id"] or "").strip()
         payload["industry_source_path"] = str(payload["industry_source_path"] or DEFAULT_INDUSTRY_SOURCE_PATH).strip()
         payload["board_source_path"] = str(payload["board_source_path"] or DEFAULT_BOARD_SOURCE_PATH).strip()
+        payload["industry_source_kind"] = str(payload.get("industry_source_kind", "") or INDUSTRY_SOURCE_KIND_FILE).strip().lower()
+        payload["board_source_kind"] = str(payload.get("board_source_kind", "") or BOARD_SOURCE_KIND_FILE).strip().lower()
+        payload["allow_empty_board"] = bool(payload.get("allow_empty_board", False))
         payload["as_of_date"] = _normalize_date(payload.get("as_of_date", ""))
         payload["view_kind"] = str(payload.get("view_kind", "") or SNAPSHOT_SEMANTICS).strip().lower()
         payload["view_name"] = str(payload.get("view_name", "") or "sector_board_latest_static").strip().lower()
@@ -149,6 +159,88 @@ def _read_industry_map(path: Path, *, lake_symbols: list[str], as_of_date: str) 
     return effective[["symbol", "industry", "source", "as_of_date"]], coverage
 
 
+def _read_industry_map_from_lake_sidecar(
+    lake: ResearchDataLake,
+    *,
+    source_market_dataset_id: str,
+    lake_symbols: list[str],
+    as_of_date: str,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    market_metadata = lake.describe_dataset(str(source_market_dataset_id))
+    if str(market_metadata.get("dataset_kind", "")) != "policy_input_bundle":
+        raise ValueError(f"sector_board_view_blocker: source dataset is not policy_input_bundle: {source_market_dataset_id}")
+    parameters = dict(market_metadata.get("parameters", {}) or {})
+    sidecar_ids = dict(parameters.get("sidecar_dataset_ids", {}) or {})
+    industry_dataset_id = str(sidecar_ids.get("industry_concept", "") or "").strip()
+    if not industry_dataset_id:
+        raise ValueError(
+            f"sector_board_view_blocker: policy_input_bundle has no industry_concept sidecar: {source_market_dataset_id}"
+        )
+    industry_metadata = lake.describe_dataset(industry_dataset_id)
+    if str(industry_metadata.get("dataset_kind", "")) != "data_platform_industry_concept":
+        raise ValueError(
+            "sector_board_view_blocker: sidecar dataset is not data_platform_industry_concept: "
+            f"{industry_dataset_id}"
+        )
+    paths = dict(industry_metadata.get("content_paths", {}) or {})
+    industry_path = Path(str(paths.get("silver_domain_data", "") or ""))
+    if not industry_path.exists():
+        raise ValueError(
+            "sector_board_view_blocker: industry_concept sidecar is missing silver_domain_data: "
+            f"{industry_dataset_id}"
+        )
+    raw = pd.read_parquet(industry_path)
+    symbol_col = "symbol" if "symbol" in raw.columns else "code" if "code" in raw.columns else ""
+    industry_col = "industry" if "industry" in raw.columns else "industryClassification" if "industryClassification" in raw.columns else ""
+    trade_date_col = "trade_date" if "trade_date" in raw.columns else "updateDate" if "updateDate" in raw.columns else "date" if "date" in raw.columns else ""
+    if not symbol_col or not industry_col:
+        raise ValueError(
+            "sector_board_view_blocker: sidecar industry source must contain symbol/code and industry/industryClassification columns: "
+            f"{industry_dataset_id}"
+        )
+    frame = pd.DataFrame(
+        {
+            "symbol": [_normalize_symbol(item) for item in raw[symbol_col].tolist()],
+            "industry": raw[industry_col].fillna("").astype(str).str.strip(),
+        }
+    )
+    if trade_date_col:
+        frame["trade_date"] = pd.to_datetime(raw[trade_date_col], errors="coerce")
+    else:
+        frame["trade_date"] = pd.NaT
+    frame = frame.loc[(frame["symbol"] != "") & (frame["industry"] != "")].copy()
+    if frame.empty:
+        raise ValueError(f"sector_board_view_blocker: sidecar industry source has no usable rows: {industry_dataset_id}")
+    frame["trade_date"] = pd.to_datetime(frame["trade_date"], errors="coerce")
+    if str(as_of_date or "").strip():
+        as_of_ts = pd.Timestamp(as_of_date)
+        frame = frame.loc[frame["trade_date"].isna() | (frame["trade_date"] <= as_of_ts)].copy()
+    lake_set = set(lake_symbols)
+    frame = frame.loc[frame["symbol"].isin(lake_set)].copy()
+    if frame.empty:
+        raise ValueError(f"sector_board_view_blocker: sidecar industry source has no overlap with lake symbols: {industry_dataset_id}")
+    frame["trade_date"] = frame["trade_date"].fillna(pd.Timestamp(as_of_date) if str(as_of_date or "").strip() else pd.Timestamp.now().normalize())
+    frame = frame.sort_values(["symbol", "trade_date"]).drop_duplicates(subset=["symbol"], keep="last").reset_index(drop=True)
+    resolved_trade_date = pd.to_datetime(frame["trade_date"]).dt.strftime("%Y-%m-%d")
+    frame["trade_date"] = resolved_trade_date
+    frame["concept_tags"] = ""
+    frame["source"] = "baostock_lake_sidecar"
+    frame["as_of_date"] = str(as_of_date)
+    source_symbols = set(_normalize_symbols(raw[symbol_col].dropna().astype(str).unique().tolist()))
+    coverage = {
+        "source_kind": INDUSTRY_SOURCE_KIND_LAKE_SIDE_CAR,
+        "source_dataset_id": industry_dataset_id,
+        "source_symbols": int(len(source_symbols)),
+        "lake_symbols": int(len(lake_set)),
+        "covered_symbols": int(len(frame)),
+        "missing_symbols": sorted(lake_set - set(frame["symbol"].tolist())),
+        "extra_source_symbols": sorted(source_symbols - lake_set)[:100],
+        "coverage_ratio": float(len(frame) / len(lake_set)) if lake_set else 0.0,
+        "as_of_date": str(as_of_date),
+    }
+    return frame[["symbol", "trade_date", "industry", "concept_tags", "source", "as_of_date"]], coverage
+
+
 def _parse_board_header(line: str) -> dict[str, str]:
     parts = [item.strip() for item in line.lstrip("#").split(",")]
     raw_name = parts[0] if parts else ""
@@ -249,6 +341,43 @@ def _read_board_membership(path: Path, *, lake_symbols: list[str], as_of_date: s
     return frame, summary, board_coverage
 
 
+def _empty_board_membership(*, lake_symbols: list[str], as_of_date: str) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    frame = pd.DataFrame(
+        columns=[
+            "symbol",
+            "board_kind",
+            "board_name",
+            "board_code",
+            "source",
+            "source_start_date",
+            "source_update_date",
+            "as_of_date",
+        ]
+    )
+    summary = pd.DataFrame(
+        columns=[
+            "board_kind",
+            "board_name",
+            "board_code",
+            "source",
+            "source_member_count",
+            "lake_covered_count",
+            "as_of_date",
+        ]
+    )
+    board_coverage = {
+        "status": "empty_explicit",
+        "board_count": 0,
+        "source_members": 0,
+        "lake_covered_members": 0,
+        "missing_symbol_count": int(len(lake_symbols)),
+        "missing_symbols": [],
+        "extra_source_symbols": [],
+        "as_of_date": str(as_of_date),
+    }
+    return frame, summary, board_coverage
+
+
 def build_sector_board_view_from_policy_bundle(
     *,
     lake: ResearchDataLake,
@@ -259,30 +388,66 @@ def build_sector_board_view_from_policy_bundle(
     payload = resolved.to_dict()
     if not payload["source_market_dataset_id"]:
         raise ValueError("sector_board_view_blocker: source_market_dataset_id is required.")
+    as_of_date = str(payload.get("as_of_date") or "")
+    industry_source_kind = str(payload.get("industry_source_kind", INDUSTRY_SOURCE_KIND_FILE) or INDUSTRY_SOURCE_KIND_FILE).strip().lower()
+    board_source_kind = str(payload.get("board_source_kind", BOARD_SOURCE_KIND_FILE) or BOARD_SOURCE_KIND_FILE).strip().lower()
+    allow_empty_board = bool(payload.get("allow_empty_board", False))
     industry_path = Path(payload["industry_source_path"])
     board_path = Path(payload["board_source_path"])
-    if not industry_path.exists():
-        raise ValueError(f"sector_board_view_blocker: industry source file does not exist: {industry_path}")
-    if not board_path.exists():
-        raise ValueError(f"sector_board_view_blocker: board source file does not exist: {board_path}")
-    as_of_date = str(payload.get("as_of_date") or "")
-    if not as_of_date:
-        as_of_date = pd.Timestamp.fromtimestamp(max(industry_path.stat().st_mtime, board_path.stat().st_mtime)).strftime("%Y-%m-%d")
-        payload["as_of_date"] = as_of_date
-    payload["snapshot_semantics"] = SNAPSHOT_SEMANTICS
-    payload["source_files"] = {
-        "industry": _file_signature(industry_path),
-        "board": _file_signature(board_path),
-    }
     lake_symbols = _read_lake_symbols(lake, str(payload["source_market_dataset_id"]))
-    industry, industry_coverage = _read_industry_map(industry_path, lake_symbols=lake_symbols, as_of_date=as_of_date)
-    board, summary, board_coverage = _read_board_membership(board_path, lake_symbols=lake_symbols, as_of_date=as_of_date)
+    if industry_source_kind == INDUSTRY_SOURCE_KIND_FILE:
+        if not industry_path.exists():
+            raise ValueError(f"sector_board_view_blocker: industry source file does not exist: {industry_path}")
+        if not as_of_date:
+            as_of_date = pd.Timestamp.fromtimestamp(industry_path.stat().st_mtime).strftime("%Y-%m-%d")
+            payload["as_of_date"] = as_of_date
+        industry, industry_coverage = _read_industry_map(industry_path, lake_symbols=lake_symbols, as_of_date=as_of_date)
+    elif industry_source_kind == INDUSTRY_SOURCE_KIND_LAKE_SIDE_CAR:
+        industry, industry_coverage = _read_industry_map_from_lake_sidecar(
+            lake,
+            source_market_dataset_id=str(payload["source_market_dataset_id"]),
+            lake_symbols=lake_symbols,
+            as_of_date=as_of_date,
+        )
+        if not as_of_date and not industry.empty and "trade_date" in industry.columns:
+            as_of_date = str(pd.to_datetime(industry["trade_date"]).max().strftime("%Y-%m-%d"))
+            payload["as_of_date"] = as_of_date
+    else:
+        raise ValueError(f"sector_board_view_blocker: unsupported industry_source_kind: {industry_source_kind}")
+    payload["snapshot_semantics"] = SNAPSHOT_SEMANTICS
+    source_files: dict[str, Any] = {
+        "industry": _file_signature(industry_path) if industry_source_kind == INDUSTRY_SOURCE_KIND_FILE else {
+            "source_kind": INDUSTRY_SOURCE_KIND_LAKE_SIDE_CAR,
+            "source_market_dataset_id": str(payload["source_market_dataset_id"]),
+            "source_dataset_id": str(industry_coverage.get("source_dataset_id", "")),
+        },
+    }
+    if board_source_kind == BOARD_SOURCE_KIND_FILE:
+        if not board_path.exists():
+            raise ValueError(f"sector_board_view_blocker: board source file does not exist: {board_path}")
+        if not as_of_date:
+            as_of_date = pd.Timestamp.fromtimestamp(board_path.stat().st_mtime).strftime("%Y-%m-%d")
+            payload["as_of_date"] = as_of_date
+        board, summary, board_coverage = _read_board_membership(board_path, lake_symbols=lake_symbols, as_of_date=as_of_date)
+        source_files["board"] = _file_signature(board_path)
+    elif board_source_kind == BOARD_SOURCE_KIND_EMPTY:
+        if not allow_empty_board:
+            raise ValueError("sector_board_view_blocker: empty board requires allow_empty_board")
+        board, summary, board_coverage = _empty_board_membership(lake_symbols=lake_symbols, as_of_date=as_of_date)
+        source_files["board"] = {"source_kind": BOARD_SOURCE_KIND_EMPTY}
+    else:
+        raise ValueError(f"sector_board_view_blocker: unsupported board_source_kind: {board_source_kind}")
+    payload["source_files"] = source_files
     source_cache = {
         "source_market_dataset_id": payload["source_market_dataset_id"],
         "snapshot_semantics": SNAPSHOT_SEMANTICS,
         "as_of_date": as_of_date,
-        "industry_source_path": str(industry_path.resolve()),
-        "board_source_path": str(board_path.resolve()),
+        "industry_source_kind": industry_source_kind,
+        "board_source_kind": board_source_kind,
+        "allow_empty_board": allow_empty_board,
+        "industry_source_path": str(industry_path.resolve()) if industry_source_kind == INDUSTRY_SOURCE_KIND_FILE else "",
+        "board_source_path": str(board_path.resolve()) if board_source_kind == BOARD_SOURCE_KIND_FILE else "",
+        "industry_source_dataset_id": str(industry_coverage.get("source_dataset_id", "")),
         "industry_coverage": industry_coverage,
         "board_coverage": board_coverage,
     }
