@@ -1,6 +1,6 @@
 ---
 name: workspace-brain
-description: Use the workspace main brain as the first entrypoint for project takeover, task routing, brain initialization, child-brain registration, guard checks, agent learning proposals, and brain audits. Trigger when the user mentions brain, 脑区, 项目大脑, 接管, capsule, governance, branch, agent learning, or an attached child brain.
+description: Use when the user mentions brain, 脑区, 项目大脑, 接管, capsule, governance, branch, agent learning, child brains, brain initialization, routing, proposals, or brain audits.
 ---
 
 # Workspace Brain Runtime
