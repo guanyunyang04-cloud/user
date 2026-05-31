@@ -299,7 +299,12 @@ def run_refresh(config: RefreshConfig, *, providers: Iterable[Any] | None = None
                 domain_conflict_path = silver_root / f"source_conflict_report_{domain}.parquet"
                 canonical.to_parquet(domain_silver_path, index=False)
                 conflict_report.to_parquet(domain_conflict_path, index=False)
-                coverage = _domain_coverage_report(canonical, domain_request, calendar=calendar_frame)
+                coverage = _domain_coverage_report(
+                    canonical,
+                    domain_request,
+                    calendar=calendar_frame,
+                    market_coverage_basis="observed_symbol_lifecycle" if _universe_mode(resolved) == "all_a" else "raw_full_grid",
+                )
                 coverage.update(_domain_coverage_metadata(provider_result.coverage_report))
                 domain_outputs[domain] = {
                     "provider_result": provider_result,
@@ -1108,11 +1113,30 @@ def _build_silver_market(
     }
 
 
-def _coverage_report(canonical: pd.DataFrame, request: FetchRequest, *, calendar: pd.DataFrame | None = None) -> dict[str, Any]:
+def _coverage_report(
+    canonical: pd.DataFrame,
+    request: FetchRequest,
+    *,
+    calendar: pd.DataFrame | None = None,
+    coverage_basis: str = "raw_full_grid",
+) -> dict[str, Any]:
     expected_dates = trading_dates_from_calendar(calendar, request.start_date, request.end_date) if calendar is not None and not calendar.empty else market_business_dates(request.start_date, request.end_date)
-    expected_rows = int(len(request.symbols) * len(expected_dates))
     row_count = int(len(canonical))
-    coverage_ratio = float(row_count / expected_rows) if expected_rows else 0.0
+    raw_expected_rows = int(len(request.symbols) * len(expected_dates))
+    resolved_basis = str(coverage_basis or "raw_full_grid")
+    if resolved_basis == "observed_symbol_lifecycle":
+        expected_rows = _observed_symbol_lifecycle_expected_rows(canonical, expected_dates)
+    else:
+        expected_rows = raw_expected_rows
+    if expected_rows <= 0:
+        expected_rows = raw_expected_rows
+        resolved_basis = "raw_full_grid"
+    row_coverage_ratio = float(row_count / expected_rows) if expected_rows else 0.0
+    observed_symbols = int(canonical["symbol"].nunique()) if not canonical.empty else 0
+    requested_symbol_count = int(len(set(str(item).strip().upper() for item in request.symbols if str(item).strip())))
+    symbol_coverage_ratio = float(observed_symbols / requested_symbol_count) if requested_symbol_count else 0.0
+    coverage_ratio = min(row_coverage_ratio, symbol_coverage_ratio) if resolved_basis == "observed_symbol_lifecycle" else row_coverage_ratio
+    raw_coverage_ratio = float(row_count / raw_expected_rows) if raw_expected_rows else 0.0
     return {
         "status": "ok" if row_count and coverage_ratio >= 1.0 else "partial" if row_count else "empty",
         "start_date": request.start_date,
@@ -1120,12 +1144,46 @@ def _coverage_report(canonical: pd.DataFrame, request: FetchRequest, *, calendar
         "expected_rows": expected_rows,
         "row_count": row_count,
         "coverage_ratio": coverage_ratio,
-        "symbol_count": int(canonical["symbol"].nunique()) if not canonical.empty else 0,
+        "row_coverage_ratio": row_coverage_ratio,
+        "requested_symbol_count": requested_symbol_count,
+        "symbol_coverage_ratio": symbol_coverage_ratio,
+        "coverage_basis": resolved_basis,
+        "raw_full_grid_expected_rows": raw_expected_rows,
+        "raw_full_grid_coverage_ratio": raw_coverage_ratio,
+        "symbol_count": observed_symbols,
         "trade_date_count": int(canonical["trade_date"].nunique()) if not canonical.empty else 0,
     }
 
 
-def _domain_coverage_report(canonical: pd.DataFrame, request: DomainFetchRequest, *, calendar: pd.DataFrame | None = None) -> dict[str, Any]:
+def _observed_symbol_lifecycle_expected_rows(canonical: pd.DataFrame, expected_dates: list[str]) -> int:
+    if canonical is None or canonical.empty or not expected_dates:
+        return 0
+    if "symbol" not in canonical.columns or "trade_date" not in canonical.columns:
+        return 0
+    date_index = pd.Index(pd.to_datetime(expected_dates, errors="coerce").dropna().unique()).sort_values()
+    if len(date_index) == 0:
+        return 0
+    positions = {pd.Timestamp(value).strftime("%Y-%m-%d"): idx for idx, value in enumerate(date_index)}
+    data = canonical[["symbol", "trade_date"]].copy()
+    data["symbol"] = data["symbol"].astype(str).str.strip().str.upper()
+    data["trade_date"] = pd.to_datetime(data["trade_date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    data = data.loc[data["symbol"].astype(bool) & data["trade_date"].isin(positions)]
+    if data.empty:
+        return 0
+    first_dates = data.groupby("symbol", sort=False)["trade_date"].min()
+    total = 0
+    for first_date in first_dates:
+        total += len(date_index) - int(positions.get(str(first_date), len(date_index)))
+    return int(total)
+
+
+def _domain_coverage_report(
+    canonical: pd.DataFrame,
+    request: DomainFetchRequest,
+    *,
+    calendar: pd.DataFrame | None = None,
+    market_coverage_basis: str = "raw_full_grid",
+) -> dict[str, Any]:
     if request.domain == DataDomain.MARKET_DAILY:
         return _coverage_report(
             canonical,
@@ -1136,6 +1194,7 @@ def _domain_coverage_report(canonical: pd.DataFrame, request: DomainFetchRequest
                 adjusted_flag=request.adjusted_flag,
             ),
             calendar=calendar,
+            coverage_basis=market_coverage_basis,
         )
     report = coverage_report_for_domain(canonical, request, provider="silver")
     if request.domain != DataDomain.TRADING_CALENDAR and calendar is not None and not calendar.empty and request.symbols:

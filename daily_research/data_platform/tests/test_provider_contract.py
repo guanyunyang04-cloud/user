@@ -29,6 +29,7 @@ from daily_research.data_platform.providers import (
     _baostock_status_frame_from_all_stock,
     _baostock_stock_basic_frame,
     _baostock_valuation_frame_from_history,
+    _baostock_history_frame,
 )
 
 
@@ -415,6 +416,194 @@ class DataPlatformProviderContractTest(unittest.TestCase):
         self.assertEqual(frame["turnover_rate"].tolist(), ["1.23"])
         self.assertTrue(pd.isna(frame["total_mv"].iloc[0]))
         self.assertTrue(pd.isna(frame["circ_mv"].iloc[0]))
+
+    def test_baostock_history_frame_maps_daily_market_rows(self) -> None:
+        class FakeQuery:
+            fields = ["date", "code", "open", "high", "low", "close", "volume", "amount"]
+            error_code = "0"
+            error_msg = "success"
+
+            def __init__(self) -> None:
+                self._rows = [["2026-05-22", "sh.600000", "10", "11", "9", "10.5", "100", "1050"]]
+                self._index = -1
+
+            def next(self) -> bool:
+                self._index += 1
+                return self._index < len(self._rows)
+
+            def get_row_data(self) -> list[str]:
+                return self._rows[self._index]
+
+        frame = _baostock_history_frame(FakeQuery(), symbol="600000.SH")
+
+        self.assertEqual(frame["trade_date"].tolist(), ["2026-05-22"])
+        self.assertEqual(frame["symbol"].tolist(), ["600000.SH"])
+        self.assertEqual(frame["close"].tolist(), ["10.5"])
+
+    def test_baostock_market_daily_uses_guarded_per_symbol_fetch(self) -> None:
+        guarded_frames = [
+            pd.DataFrame(
+                {
+                    "trade_date": ["2026-05-22"],
+                    "symbol": ["600000.SH"],
+                    "open": ["10"],
+                    "high": ["11"],
+                    "low": ["9"],
+                    "close": ["10.5"],
+                    "volume": ["100"],
+                    "amount": ["1050"],
+                }
+            ),
+            pd.DataFrame(
+                {
+                    "trade_date": ["2026-05-22"],
+                    "symbol": ["000001.SZ"],
+                    "open": ["20"],
+                    "high": ["21"],
+                    "low": ["19"],
+                    "close": ["20.5"],
+                    "volume": ["200"],
+                    "amount": ["4100"],
+                }
+            ),
+        ]
+
+        with mock.patch(
+            "daily_research.data_platform.providers._fetch_baostock_history_frame_with_timeout",
+            side_effect=guarded_frames,
+        ) as guarded:
+            result = BaostockProvider().fetch_market_bars(
+                FetchRequest(
+                    symbols=("600000.SH", "000001.SZ"),
+                    start_date="2026-05-22",
+                    end_date="2026-05-22",
+                )
+            )
+
+        self.assertEqual(
+            {call.kwargs["symbol"] for call in guarded.call_args_list},
+            {"600000.SH", "000001.SZ"},
+        )
+        self.assertEqual(set(result.data["symbol"].tolist()), {"600000.SH", "000001.SZ"})
+        self.assertEqual(result.error_report, [])
+
+    def test_baostock_market_daily_records_timed_out_symbols_without_hanging_batch(self) -> None:
+        def guarded_fetch(*, symbol: str, **_: object) -> pd.DataFrame:
+            if symbol == "600001.SH":
+                raise TimeoutError("baostock_history_timeout: exceeded 1 seconds")
+            return pd.DataFrame(
+                {
+                    "trade_date": ["2026-05-22"],
+                    "symbol": [symbol],
+                    "open": ["10"],
+                    "high": ["11"],
+                    "low": ["9"],
+                    "close": ["10.5"],
+                    "volume": ["100"],
+                    "amount": ["1050"],
+                }
+            )
+
+        with mock.patch(
+            "daily_research.data_platform.providers._fetch_baostock_history_frame_with_timeout",
+            side_effect=guarded_fetch,
+        ):
+            result = BaostockProvider().fetch_market_bars(
+                FetchRequest(
+                    symbols=("600000.SH", "600001.SH"),
+                    start_date="2026-05-22",
+                    end_date="2026-05-22",
+                )
+            )
+
+        self.assertEqual(result.data["symbol"].tolist(), ["600000.SH"])
+        self.assertEqual(len(result.error_report), 1)
+        self.assertEqual(result.error_report[0]["symbol"], "600001.SH")
+        self.assertEqual(result.error_report[0]["code"], "symbol_fetch_timeout")
+
+    def test_baostock_market_daily_retries_failed_parallel_symbols_sequentially(self) -> None:
+        attempts: dict[str, int] = {}
+
+        def guarded_fetch(*, symbol: str, **_: object) -> pd.DataFrame:
+            attempts[symbol] = attempts.get(symbol, 0) + 1
+            if symbol == "000300.SH" and attempts[symbol] == 1:
+                raise RuntimeError("baostock_history_worker_error:RuntimeError: baostock_history_query_error:10001001: 用户未登录")
+            return pd.DataFrame(
+                {
+                    "trade_date": ["2026-05-22"],
+                    "symbol": [symbol],
+                    "open": ["10"],
+                    "high": ["11"],
+                    "low": ["9"],
+                    "close": ["10.5"],
+                    "volume": ["100"],
+                    "amount": ["1050"],
+                }
+            )
+
+        with mock.patch(
+            "daily_research.data_platform.providers._fetch_baostock_history_frame_with_timeout",
+            side_effect=guarded_fetch,
+        ):
+            result = BaostockProvider(_market_daily_max_workers=2).fetch_market_bars(
+                FetchRequest(
+                    symbols=("600000.SH", "000300.SH"),
+                    start_date="2026-05-22",
+                    end_date="2026-05-22",
+                )
+            )
+
+        self.assertEqual(attempts["000300.SH"], 2)
+        self.assertEqual(set(result.data["symbol"].tolist()), {"600000.SH", "000300.SH"})
+        self.assertEqual(result.error_report, [])
+
+    def test_baostock_history_guard_times_out_and_terminates_child(self) -> None:
+        from daily_research.data_platform import providers
+
+        class FakeQueue:
+            def get(self, timeout: float | None = None) -> object:
+                raise providers.queue_module.Empty
+
+        class FakeProcess:
+            exitcode = None
+
+            def __init__(self) -> None:
+                self.started = False
+                self.terminated = False
+
+            def start(self) -> None:
+                self.started = True
+
+            def join(self, timeout: float | None = None) -> None:
+                return None
+
+            def is_alive(self) -> bool:
+                return not self.terminated
+
+            def terminate(self) -> None:
+                self.terminated = True
+
+        fake_process = FakeProcess()
+
+        class FakeContext:
+            def Queue(self) -> FakeQueue:
+                return FakeQueue()
+
+            def Process(self, **_: object) -> FakeProcess:
+                return fake_process
+
+        with mock.patch("daily_research.data_platform.providers.multiprocessing.get_context", return_value=FakeContext()):
+            with self.assertRaisesRegex(TimeoutError, "baostock_history_timeout"):
+                providers._fetch_baostock_history_frame_with_timeout(
+                    symbol="600000.SH",
+                    start_date="2026-05-22",
+                    end_date="2026-05-22",
+                    adjusted_flag="none",
+                    timeout_seconds=1,
+                )
+
+        self.assertTrue(fake_process.started)
+        self.assertTrue(fake_process.terminated)
 
     def test_baostock_security_status_uses_guarded_stock_basic_fetch(self) -> None:
         guarded_frame = pd.DataFrame(

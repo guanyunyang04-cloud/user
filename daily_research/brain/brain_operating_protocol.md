@@ -7,6 +7,8 @@
 
 `daily_research/brain/` 保存项目事实、证据、状态和治理规则。主脑平台负责接管、路由、全局规则和守卫入口；本分脑只负责 `daily_research` 的项目事实层。
 
+本文件是 `daily_research` 可选补充协议，不属于主脑共享 7 模块核；核心结构、读取顺序和 attach 契约以 manifest 为准。
+
 ## 进入顺序
 - 重大 `daily_research` 任务开始前，先运行主脑 task capsule：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`

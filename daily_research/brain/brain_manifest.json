@@ -79,6 +79,46 @@
       "daily_research/archive"
     ]
   },
+  "routing_hints": {
+    "aliases": [
+      "daily_research",
+      "daily research"
+    ],
+    "path_prefixes": [
+      "daily_research"
+    ],
+    "terms": [
+      "path20",
+      "path_policy",
+      "alpha_path20",
+      "alpha_multi_horizon",
+      "alpha_multi_horizon_utility_policy_v1",
+      "multi-horizon",
+      "multi horizon",
+      "horizon root cause",
+      "root-cause audit",
+      "root cause audit",
+      "根因审计",
+      "长短周期",
+      "效用排序",
+      "forecast",
+      "utility policy",
+      "continuous_policy",
+      "deep_alpha",
+      "study",
+      "training",
+      "data lake",
+      "active_execution_strategy",
+      "active manifest",
+      "执行端",
+      "交易计划",
+      "数据刷新",
+      "数据集",
+      "模型页",
+      "production signal",
+      "signal panel"
+    ]
+  },
   "modules": [
     {
       "id": "identity_layer",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import multiprocessing
 import queue as queue_module
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any
 
@@ -306,45 +307,78 @@ class AkshareEastmoneyProvider:
 @dataclass
 class BaostockProvider:
     name: str = "baostock"
+    _market_daily_max_workers: int = 4
 
     def fetch_market_bars(self, request: FetchRequest) -> ProviderResult:
         validate_provider_name(self.name)
-        try:
-            import baostock as bs  # type: ignore
-        except Exception as exc:
-            raise RuntimeError("baostock is not installed in the yolos environment") from exc
         request = request.normalized()
-        login = bs.login()
-        if getattr(login, "error_code", "1") != "0":
-            raise RuntimeError(f"baostock login failed: {getattr(login, 'error_msg', '')}")
         rows: list[pd.DataFrame] = []
-        try:
-            with create_progress(total=len(request.symbols), desc="Baostock market_daily", unit="symbol", leave=False) as progress:
-                for idx, symbol in enumerate(request.symbols, start=1):
-                    if idx == 1 or idx % 50 == 0 or idx == len(request.symbols):
-                        progress_write(f"baostock_market_daily={idx}/{len(request.symbols)} symbol={symbol}")
+        errors: list[dict[str, Any]] = []
+        failed_symbols: list[tuple[str, BaseException]] = []
+        symbols = tuple(request.symbols)
+        max_workers = min(self._market_daily_max_workers, len(symbols)) if symbols else 0
+        if not symbols:
+            data = normalize_market_frame(pd.DataFrame(), source=self.name, adjusted_flag=request.adjusted_flag, require_columns=False)
+            return ProviderResult(provider=self.name, data=data, error_report=errors)
+        with create_progress(total=len(symbols), desc="Baostock market_daily", unit="symbol", leave=False) as progress:
+            if len(symbols) == 1 or max_workers <= 1:
+                iterable = ((symbol, _fetch_baostock_history_frame_with_timeout(
+                    symbol=symbol,
+                    start_date=request.start_date,
+                    end_date=request.end_date,
+                    adjusted_flag=request.adjusted_flag,
+                )) for symbol in symbols)
+                for idx, (symbol, frame) in enumerate(iterable, start=1):
+                    if idx == 1 or idx % 50 == 0 or idx == len(symbols):
+                        progress_write(f"baostock_market_daily={idx}/{len(symbols)} symbol={symbol}")
                     progress.set_description_str(f"Baostock market_daily {symbol}")
                     progress.update(1)
-                    code = _to_baostock_code(symbol)
-                    query = bs.query_history_k_data_plus(
-                        code,
-                        "date,code,open,high,low,close,volume,amount",
+                    if not frame.empty:
+                        rows.append(frame)
+            else:
+                futures: dict[Any, str] = {}
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    for idx, symbol in enumerate(symbols, start=1):
+                        if idx == 1 or idx % 50 == 0 or idx == len(symbols):
+                            progress_write(f"baostock_market_daily={idx}/{len(symbols)} symbol={symbol}")
+                        futures[
+                            executor.submit(
+                                _fetch_baostock_history_frame_with_timeout,
+                                symbol=symbol,
+                                start_date=request.start_date,
+                                end_date=request.end_date,
+                                adjusted_flag=request.adjusted_flag,
+                            )
+                        ] = symbol
+                    for future in as_completed(futures):
+                        symbol = futures[future]
+                        progress.set_description_str(f"Baostock market_daily {symbol}")
+                        progress.update(1)
+                        try:
+                            frame = future.result()
+                        except Exception as exc:
+                            failed_symbols.append((symbol, exc))
+                            continue
+                        if not frame.empty:
+                            rows.append(frame)
+        if failed_symbols:
+            progress_write(f"baostock_market_daily_retry={len(failed_symbols)}")
+            for retry_idx, (symbol, first_exc) in enumerate(failed_symbols, start=1):
+                progress_write(f"baostock_market_daily_retry={retry_idx}/{len(failed_symbols)} symbol={symbol}")
+                try:
+                    frame = _fetch_baostock_history_frame_with_timeout(
+                        symbol=symbol,
                         start_date=request.start_date,
                         end_date=request.end_date,
-                        frequency="d",
-                        adjustflag="2" if request.adjusted_flag in {"front", "qfq"} else "3",
+                        adjusted_flag=request.adjusted_flag,
                     )
-                    data: list[list[Any]] = []
-                    while getattr(query, "error_code", "1") == "0" and query.next():
-                        data.append(query.get_row_data())
-                    frame = pd.DataFrame(data, columns=["trade_date", "symbol", "open", "high", "low", "close", "volume", "amount"])
-                    if not frame.empty:
-                        frame["symbol"] = symbol
-                        rows.append(frame)
-        finally:
-            bs.logout()
+                except Exception as exc:
+                    errors.append(_baostock_symbol_error(self.name, symbol, exc, first_error=first_exc))
+                    continue
+                if not frame.empty:
+                    rows.append(frame)
         data = normalize_market_frame(pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(), source=self.name, adjusted_flag=request.adjusted_flag, require_columns=False)
-        return ProviderResult(provider=self.name, data=data)
+        return ProviderResult(provider=self.name, data=data, error_report=errors)
 
     def fetch_domain(self, request: DomainFetchRequest) -> ProviderResult:
         request = request.normalized()
@@ -820,6 +854,65 @@ def _baostock_valuation_frame_from_history(bs: Any, request: DomainFetchRequest)
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
+def _baostock_history_frame(query: Any, *, symbol: str) -> pd.DataFrame:
+    raw = _baostock_query_to_frame(query, "baostock_history")
+    if raw.empty:
+        return pd.DataFrame()
+    rename_map = {
+        "date": "trade_date",
+        "code": "symbol",
+    }
+    frame = raw.rename(columns=rename_map).copy()
+    frame["symbol"] = str(symbol).strip().upper()
+    expected = ["trade_date", "symbol", "open", "high", "low", "close", "volume", "amount"]
+    return frame[[column for column in expected if column in frame.columns]]
+
+
+def _baostock_symbol_error(provider: str, symbol: str, exc: BaseException, *, first_error: BaseException | None = None) -> dict[str, Any]:
+    message = str(exc)
+    if first_error is not None and str(first_error) and str(first_error) != message:
+        message = f"{message}; first_error={first_error}"
+    return {
+        "provider": provider,
+        "domain": DataDomain.MARKET_DAILY,
+        "symbol": str(symbol),
+        "code": "symbol_fetch_timeout" if isinstance(exc, TimeoutError) else "symbol_fetch_exception",
+        "error_type": type(exc).__name__,
+        "message": message,
+    }
+
+
+def _baostock_history_worker(
+    queue: Any,
+    symbol: str,
+    start_date: str,
+    end_date: str,
+    adjusted_flag: str,
+) -> None:
+    try:
+        import baostock as bs  # type: ignore
+
+        login = bs.login()
+        if getattr(login, "error_code", "1") != "0":
+            queue.put({"status": "error", "error_type": "RuntimeError", "error": f"baostock login failed: {getattr(login, 'error_msg', '')}"})
+            return
+        try:
+            query = bs.query_history_k_data_plus(
+                _to_baostock_code(symbol),
+                "date,code,open,high,low,close,volume,amount",
+                start_date=start_date,
+                end_date=end_date,
+                frequency="d",
+                adjustflag="2" if adjusted_flag in {"front", "qfq"} else "3",
+            )
+            frame = _baostock_history_frame(query, symbol=symbol)
+        finally:
+            bs.logout()
+        queue.put({"status": "ok", "data": frame})
+    except Exception as exc:
+        queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
+
+
 def _baostock_stock_basic_worker(queue: Any, trade_date: str) -> None:
     try:
         import baostock as bs  # type: ignore
@@ -940,6 +1033,28 @@ def _fetch_baostock_stock_basic_frame_with_timeout(*, trade_date: str, timeout_s
         timeout_seconds=timeout_seconds,
         timeout_label="baostock_stock_basic_timeout",
         failure_label="baostock_stock_basic",
+    )
+
+
+def _fetch_baostock_history_frame_with_timeout(
+    *,
+    symbol: str,
+    start_date: str,
+    end_date: str,
+    adjusted_flag: str,
+    timeout_seconds: int = 60,
+) -> pd.DataFrame:
+    return _fetch_baostock_payload_with_timeout(
+        target=_baostock_history_worker,
+        kwargs={
+            "symbol": str(symbol),
+            "start_date": str(start_date),
+            "end_date": str(end_date),
+            "adjusted_flag": str(adjusted_flag or "none"),
+        },
+        timeout_seconds=timeout_seconds,
+        timeout_label="baostock_history_timeout",
+        failure_label="baostock_history",
     )
 
 

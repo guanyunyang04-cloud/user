@@ -66,6 +66,21 @@
       "daily_stock_analysis-main/tests"
     ]
   },
+  "routing_hints": {
+    "aliases": [
+      "daily_stock_analysis-main",
+      "daily_stock_analysis",
+      "daily stock analysis"
+    ],
+    "path_prefixes": [
+      "daily_stock_analysis-main",
+      "daily_stock_analysis"
+    ],
+    "terms": [
+      "多市场",
+      "stock analysis product"
+    ]
+  },
   "modules": [
     {
       "id": "identity_layer",

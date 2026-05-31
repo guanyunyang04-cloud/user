@@ -513,6 +513,176 @@ class DataPlatformRefreshDailyTest(unittest.TestCase):
         self.assertEqual(result.registered_market_dataset_id, "")
         self.assertIn("coverage_below_threshold", result.blockers)
 
+    def test_all_a_market_coverage_uses_observed_symbol_lifecycle_for_gate(self) -> None:
+        def lifecycle_market(_: DomainFetchRequest) -> ProviderResult:
+            return ProviderResult(
+                provider="baostock",
+                data=pd.DataFrame(
+                    [
+                        {
+                            "symbol": "000001.SZ",
+                            "trade_date": "2026-01-05",
+                            "open": 10.0,
+                            "high": 10.5,
+                            "low": 9.8,
+                            "close": 10.2,
+                            "volume": 1000,
+                            "amount": 10200,
+                            "source": "baostock",
+                            "adjusted_flag": "none",
+                        },
+                        {
+                            "symbol": "000300.SH",
+                            "trade_date": "2026-01-05",
+                            "open": 4000.0,
+                            "high": 4010.0,
+                            "low": 3990.0,
+                            "close": 4005.0,
+                            "volume": 3000,
+                            "amount": 12015000,
+                            "source": "baostock",
+                            "adjusted_flag": "none",
+                        },
+                        {
+                            "symbol": "000001.SZ",
+                            "trade_date": "2026-01-06",
+                            "open": 10.0,
+                            "high": 10.5,
+                            "low": 9.8,
+                            "close": 10.2,
+                            "volume": 1000,
+                            "amount": 10200,
+                            "source": "baostock",
+                            "adjusted_flag": "none",
+                        },
+                        {
+                            "symbol": "300001.SZ",
+                            "trade_date": "2026-01-06",
+                            "open": 30.0,
+                            "high": 30.5,
+                            "low": 29.8,
+                            "close": 30.2,
+                            "volume": 3000,
+                            "amount": 90600,
+                            "source": "baostock",
+                            "adjusted_flag": "none",
+                        },
+                        {
+                            "symbol": "000300.SH",
+                            "trade_date": "2026-01-06",
+                            "open": 4000.0,
+                            "high": 4010.0,
+                            "low": 3990.0,
+                            "close": 4005.0,
+                            "volume": 3000,
+                            "amount": 12015000,
+                            "source": "baostock",
+                            "adjusted_flag": "none",
+                        },
+                    ]
+                ),
+            )
+
+        provider = InMemoryDomainProvider(
+            "baostock",
+            payloads={
+                DataDomain.TRADING_CALENDAR: _calendar_frame(dates=["2026-01-05", "2026-01-06"], provider="baostock"),
+                DataDomain.UNIVERSE_SNAPSHOT: _universe_frame(
+                    provider="baostock",
+                    trade_date="2026-01-06",
+                    symbols=["000001.SZ", "300001.SZ", "000300.SH"],
+                ),
+                DataDomain.MARKET_DAILY: lifecycle_market,
+            },
+        )
+        with TemporaryDirectory() as temp_dir:
+            result = run_refresh(
+                RefreshConfig(
+                    lake_root=Path(temp_dir),
+                    as_of_date="2026-01-06",
+                    start_date="2026-01-05",
+                    universe="all_a",
+                    domains=(DataDomain.MARKET_DAILY, DataDomain.TRADING_CALENDAR, DataDomain.UNIVERSE_SNAPSHOT),
+                    required_domains=(DataDomain.MARKET_DAILY, DataDomain.TRADING_CALENDAR, DataDomain.UNIVERSE_SNAPSHOT),
+                    benchmark="000300.SH",
+                    min_coverage_ratio=0.90,
+                ),
+                providers=[provider],
+            )
+            manifest = json.loads(Path(result.manifest_path).read_text(encoding="utf-8"))
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(manifest["coverage_report"]["raw_full_grid_coverage_ratio"], 5 / 6)
+        self.assertEqual(manifest["coverage_report"]["coverage_ratio"], 1.0)
+        self.assertEqual(manifest["coverage_report"]["coverage_basis"], "observed_symbol_lifecycle")
+
+    def test_all_a_market_coverage_still_blocks_when_requested_symbols_are_missing(self) -> None:
+        def missing_symbol_market(_: DomainFetchRequest) -> ProviderResult:
+            return ProviderResult(
+                provider="baostock",
+                data=pd.DataFrame(
+                    [
+                        {
+                            "symbol": "000001.SZ",
+                            "trade_date": "2026-01-05",
+                            "open": 10.0,
+                            "high": 10.5,
+                            "low": 9.8,
+                            "close": 10.2,
+                            "volume": 1000,
+                            "amount": 10200,
+                            "source": "baostock",
+                            "adjusted_flag": "none",
+                        },
+                        {
+                            "symbol": "000300.SH",
+                            "trade_date": "2026-01-05",
+                            "open": 4000.0,
+                            "high": 4010.0,
+                            "low": 3990.0,
+                            "close": 4005.0,
+                            "volume": 3000,
+                            "amount": 12015000,
+                            "source": "baostock",
+                            "adjusted_flag": "none",
+                        },
+                    ]
+                ),
+            )
+
+        provider = InMemoryDomainProvider(
+            "baostock",
+            payloads={
+                DataDomain.TRADING_CALENDAR: _calendar_frame(dates=["2026-01-05"], provider="baostock"),
+                DataDomain.UNIVERSE_SNAPSHOT: _universe_frame(
+                    provider="baostock",
+                    trade_date="2026-01-05",
+                    symbols=["000001.SZ", "300001.SZ", "000300.SH"],
+                ),
+                DataDomain.MARKET_DAILY: missing_symbol_market,
+            },
+        )
+        with TemporaryDirectory() as temp_dir:
+            result = run_refresh(
+                RefreshConfig(
+                    lake_root=Path(temp_dir),
+                    as_of_date="2026-01-05",
+                    start_date="2026-01-05",
+                    universe="all_a",
+                    domains=(DataDomain.MARKET_DAILY, DataDomain.TRADING_CALENDAR, DataDomain.UNIVERSE_SNAPSHOT),
+                    required_domains=(DataDomain.MARKET_DAILY, DataDomain.TRADING_CALENDAR, DataDomain.UNIVERSE_SNAPSHOT),
+                    benchmark="000300.SH",
+                    min_coverage_ratio=0.90,
+                ),
+                providers=[provider],
+            )
+            manifest = json.loads(Path(result.manifest_path).read_text(encoding="utf-8"))
+
+        self.assertEqual(result.status, "blocked")
+        self.assertIn("coverage_below_threshold", result.blockers)
+        self.assertEqual(manifest["coverage_report"]["symbol_coverage_ratio"], 2 / 3)
+        self.assertEqual(manifest["coverage_report"]["coverage_ratio"], 2 / 3)
+
     def test_universe_all_a_refresh_uses_calendar_and_writes_sidecar_metadata(self) -> None:
         provider = InMemoryDomainProvider(
             "akshare_eastmoney",

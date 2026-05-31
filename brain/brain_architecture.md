@@ -1,74 +1,34 @@
 # 主脑架构
 
-## 1. 目标
-整个项目的 brain 不再追求“文档细分完整”，而追求“接管路径最短、职责边界最清、长期维护最稳”。
+## 1. 真源边界
+`brain/brain_manifest.json` 是 boot、read、write、attach、shared contract、child list 的单一权威源。
 
-核心原则：
+本文件只解释结构原则，不维护读取顺序、子脑清单或入口命令；这些由 manifest、catalog 和 runtime helper 生成。
 
-- `Agent 无状态，项目大脑有状态`
-- 主脑定义共享脑核
-- 分脑只保留区域特化
-- 同一种功能只保留一个权威中枢
+## 2. 统一 7 模块核
+主脑和附着子脑共享同一 7 模块核：
 
-## 2. 精炼脑核
-现在每个分脑统一收敛为 `7` 个核心模块：
+- `identity_layer.md`：身份、目标、禁区。
+- `state_center.md`：当前状态、优先级、handoff。
+- `knowledge_center.md`：稳定事实、硬规则、长期教训。
+- `brain_architecture.md`：结构解释、模块边界、扩展原则。
+- `operations_center.md`：body 地图、环境基线、命令入口、写回路由。
+- `governance_layer.md`：治理闭环、接管纪律、反偏移机制。
+- `episodic_memory.md`：时间顺序证据库，按需下钻。
 
-1. `identity_layer.md`
-   - 我是谁、追求什么、不能做什么
-2. `state_center.md`
-   - 当前状态、当前问题、当前优先级、当前时态、当前 handoff
-3. `knowledge_center.md`
-   - 稳定事实、硬规则、长期教训
-4. `brain_architecture.md`
-   - 结构合同、模块边界、读取原则
-5. `operations_center.md`
-   - body 地图、环境基线、命令入口、流程与写回路由
-6. `governance_layer.md`
-   - 治理闭环、接管纪律、反偏移机制
-7. `episodic_memory.md`
-   - 时间顺序证据库，按需下钻
+## 3. 主脑与子脑
+- 主脑维护共享脑核、跨项目边界、拓扑、注册和治理规则。
+- 子脑维护本项目状态、知识、入口、证据和区域特化。
+- 共享结构只在主脑写一次；项目事实只在对应子脑写一次。
+- `daily_research/brain/brain_operating_protocol.md` 是可选补充协议，不属于核心模块。
 
-## 3. 标准读取顺序
-附着分脑默认读取顺序统一为：
+## 4. 扩展原则
+- 新项目先生成 7 模块 skeleton，再通过 runtime `register` 写入主脑 child list 和 catalog。
+- 新模块默认不新增；先判断能否并入现有 7 模块。
+- 长证据、命令 transcript、dated review 放入 `references/`，核心中枢只保留当前索引和稳定结论。
+- 自进化保持 proposal-only：低风险观察可进入 proposal 队列，协议或行为变更必须用户批准后实施。
 
-1. `brain_manifest.json`
-2. `identity_layer.md`
-3. `state_center.md`
-4. `knowledge_center.md`
-5. `brain_architecture.md`
-6. `operations_center.md`
-7. `governance_layer.md`
-8. `episodic_memory.md`
-
-读取原则：
-
-- 默认只读到能完成接管为止
-- `episodic_memory.md` 不是默认入口
-- 不再为了“兼容旧拆分”维持平行文档
-
-## 4. 主脑与分脑分工
-- 主脑：
-  - 只维护共享脑核、跨项目边界、拓扑和统一治理
-- 分脑：
-  - 只维护本项目状态、知识、入口和区域差异
-- 任何共享结构只在主脑写一次
-- 任何项目事实只在对应分脑写一次
-
-## 5. 去冗余规则
-- 不再保留 `handoff / working / temporal` 三份平行现状文档
-- 不再保留 `semantic / rule / lesson` 三份平行长期记忆文档
-- 不再保留 `project_map / procedural / environment / action / handoff_rules` 五份平行操作文档
-- 新文档默认先判断能否并入现有中枢
-- 只有当信息类型无法归入现有中枢时，才允许新增模块
-
-## 6. 平台化边界
-- 脑区 Markdown 仍是权威事实、规则和边界来源。
-- workflow JSON / CLI 输出只代表运行态胶囊，用于接管、预检、产物 freshness 和写回建议。
-- 运行态 JSON 不得替代 `state_center.md`、`knowledge_center.md` 或 `operations_center.md` 的权威写回。
-
-## 7. Target / Domain / Manifest 边界
-- routing target 表示本次任务进入哪里，只允许 `workspace`、已附着 child brain 或 `ambiguous`。
-- workflow domain 表示采用哪类治理流程，例如 `workspace_governance`；它不是 brain id，也不需要 child manifest。
-- brain manifest 表示可 bootstrap 的事实层；`workspace_governance` 只能作为 workspace domain / bootstrap alias，不能再伪装成分脑。
-- schema v3 capsule 必须显式输出 `target_kind` 与 `workflow_domain`，agent 后续动作以这两个字段区分 workspace 治理和 child body work。
-- `hot_handoff_contract` 定义默认热路径；`episodic_memory` 与 `references/` 永远只按需下钻。
+## 5. 运行边界
+- routing target 只允许 `workspace`、已附着 child brain 或 `ambiguous`。
+- `workspace_governance` 是 workspace workflow domain 和 bootstrap alias，不是 child brain id。
+- workflow JSON / CLI 输出是运行态传感器，不替代 Markdown 与 manifest 的权威写回。

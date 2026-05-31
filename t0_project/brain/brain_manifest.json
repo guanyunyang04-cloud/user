@@ -63,6 +63,22 @@
       "t0_project/tqcenter.py"
     ]
   },
+  "routing_hints": {
+    "aliases": [
+      "t0_project",
+      "t0"
+    ],
+    "path_prefixes": [
+      "t0_project"
+    ],
+    "terms": [
+      "t0",
+      "盘中",
+      "intraday",
+      "rl",
+      "reinforcement"
+    ]
+  },
   "modules": [
     {
       "id": "identity_layer",

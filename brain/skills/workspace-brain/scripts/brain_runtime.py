@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -24,11 +26,21 @@ CORE_DOCS = {
     "identity_layer.md": "# {title} 身份层\n\n- 本项目脑区由 `workspace-brain` runtime 初始化。\n- 本文件保存项目身份、目标和边界。\n",
     "state_center.md": "# {title} 状态中枢\n\n- 当前状态：新建脑区，等待首次接管写入事实。\n- 默认分支纪律：repo-tracked mutation 优先在 `main` 分支执行。\n",
     "knowledge_center.md": "# {title} 知识中枢\n\n- 稳定事实、硬规则和可复用教训写入这里。\n- 长证据和过程细节下沉到 `brain/references/`。\n",
-    "brain_architecture.md": "# {title} 脑区架构\n\n- 采用最小脑区结构：identity、state、knowledge、operations、governance、episodic。\n",
+    "brain_architecture.md": "# {title} 脑区架构\n\n- 采用统一 7 模块核：identity、state、knowledge、architecture、operations、governance、episodic。\n- 共享结构以 workspace 主脑 manifest 为准；本文件只记录区域特化。\n",
     "operations_center.md": "# {title} 操作中枢\n\n- 接管入口：先运行 brain runtime detect，再用 workflow capsule 接管项目任务。\n",
     "governance_layer.md": "# {title} 治理层\n\n- 重大动作前区分事实、推断、假设和边界。\n- Agent learning 可自动创建低风险 proposed proposal；实现协议或行为改动仍需用户确认。\n",
     "episodic_memory.md": "# {title} 情景记忆\n\n- 时间顺序证据和长复盘写入这里或 `brain/references/`。\n",
 }
+
+CORE_MODULES = (
+    ("identity_layer", "identity_layer.md"),
+    ("state_center", "state_center.md"),
+    ("knowledge_center", "knowledge_center.md"),
+    ("brain_architecture", "brain_architecture.md"),
+    ("operations_center", "operations_center.md"),
+    ("governance_layer", "governance_layer.md"),
+    ("episodic_memory", "episodic_memory.md"),
+)
 
 
 def _json_default(value: object) -> str:
@@ -85,6 +97,19 @@ def _parse_json_stdout(result: dict[str, Any]) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _load_json(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+
+
 def _git_state(cwd: Path) -> dict[str, Any]:
     root_result = _run_git(cwd, "rev-parse", "--show-toplevel")
     is_git = root_result.returncode == 0
@@ -107,6 +132,17 @@ def _find_brain_root(cwd: Path) -> Path | None:
     for candidate in [cwd, *cwd.parents]:
         manifest = candidate / "brain" / "brain_manifest.json"
         if manifest.exists():
+            return candidate
+    return None
+
+
+def _find_main_workspace_root(cwd: Path) -> Path | None:
+    for candidate in [cwd, *cwd.parents]:
+        manifest = candidate / "brain" / "brain_manifest.json"
+        if not manifest.exists():
+            continue
+        payload = _load_json(manifest)
+        if payload.get("brain_type") == "main":
             return candidate
     return None
 
@@ -147,13 +183,19 @@ def _summary_counts(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _compact_health(full_payload: dict[str, Any]) -> dict[str, Any]:
-    from tools.brain.runtime_context import compact_catalog_health, compact_frontier_health
-
     detect_payload = full_payload.get("detect", {}) if isinstance(full_payload.get("detect"), dict) else {}
     skill_sync = full_payload.get("skill_sync", {}) if isinstance(full_payload.get("skill_sync"), dict) else {}
     doc_guard = full_payload.get("doc_guard", {}) if isinstance(full_payload.get("doc_guard"), dict) else {}
     catalog = full_payload.get("catalog", {}) if isinstance(full_payload.get("catalog"), dict) else {}
     frontier = full_payload.get("frontier", {}) if isinstance(full_payload.get("frontier"), dict) else {}
+    try:
+        from tools.brain.runtime_context import compact_catalog_health, compact_frontier_health
+
+        compact_catalog = compact_catalog_health(catalog)
+        compact_frontier = compact_frontier_health(frontier)
+    except Exception:
+        compact_catalog = catalog
+        compact_frontier = frontier
     return {
         "status": full_payload.get("status", "unknown"),
         "mode": "compact",
@@ -170,8 +212,8 @@ def _compact_health(full_payload: dict[str, Any]) -> dict[str, Any]:
         },
         "doc_guard_status": doc_guard.get("status", "unknown"),
         "integrity": full_payload.get("integrity", {}),
-        "catalog": compact_catalog_health(catalog),
-        "frontier": compact_frontier_health(frontier),
+        "catalog": compact_catalog,
+        "frontier": compact_frontier,
         "next_actions": list(full_payload.get("next_actions", []) or []),
     }
 
@@ -179,6 +221,25 @@ def _compact_health(full_payload: dict[str, Any]) -> dict[str, Any]:
 def health(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
     detected = detect(cwd)
     workspace = Path(detected["brain_root"] or cwd.resolve()).resolve()
+    if detected["has_brain"] and not detected["has_brain_tools"]:
+        payload = {
+            "status": "ok",
+            "mode": "full",
+            "detect": detected,
+            "skill_sync": {"status": "skipped", "all_in_sync": False, "skills": []},
+            "doc_guard": {"status": "skipped", "returncode": 0, "stdout_tail": "", "stderr_tail": ""},
+            "integrity": {"status": "ok", "error_count": 0, "warning_count": 0, "warning_codes": []},
+            "catalog": {"status": "standalone", "brain_count": 1, "generated_at": "", "non_truth_brains": []},
+            "frontier": {
+                "status": "skipped",
+                "brain_may_be_stale": False,
+                "warnings": [],
+                "unregistered_latest_run_tags": [],
+                "unregistered_latest_run_details": [],
+            },
+            "next_actions": ["register_brain"],
+        }
+        return payload if str(mode or "compact").lower() == "full" else _compact_health(payload)
     skill_sync_result = _run_command(
         workspace,
         [sys.executable, "-m", "tools.brain.skill_install", "--check"],
@@ -276,8 +337,68 @@ def _title_from_brain_id(brain_id: str) -> str:
     return " ".join(part.capitalize() for part in str(brain_id or "project").replace("-", "_").split("_") if part)
 
 
-def init_brain(cwd: Path, brain_id: str) -> dict[str, Any]:
+def _infer_brain_id(cwd: Path) -> str:
+    raw = cwd.resolve().name.strip().lower()
+    normalized = re.sub(r"[^a-z0-9_-]+", "_", raw).strip("_-")
+    return normalized or "project_brain"
+
+
+def _local_core_path(filename: str, *, body_root: str = "") -> str:
+    prefix = str(body_root or "").strip().strip("/\\")
+    path = f"brain/{filename}" if not prefix or prefix == "." else f"{prefix}/brain/{filename}"
+    return path.replace("\\", "/")
+
+
+def _build_project_manifest(brain_id: str, *, body_root: str = ".") -> dict[str, Any]:
+    modules = [{"id": module_id, "paths": [_local_core_path(filename, body_root=body_root)]} for module_id, filename in CORE_MODULES]
+    return {
+        "brain_type": "project",
+        "brain_id": brain_id,
+        "attach_status": "standalone_unattached",
+        "entrypoint": _local_core_path("identity_layer.md", body_root=body_root),
+        "body_root": body_root,
+        "regional_specialization": {
+            "role": "project_cortex",
+            "priority_regions": ["orientation_system", "long_term_memory", "executive_control", "sensorimotor_loop"],
+            "focus_modules": ["state_center", "knowledge_center", "operations_center"],
+            "body_entry_priority": [body_root],
+        },
+        "read_order": [_local_core_path(filename, body_root=body_root) for _, filename in CORE_MODULES],
+        "identity_path": _local_core_path("identity_layer.md", body_root=body_root),
+        "state_path": _local_core_path("state_center.md", body_root=body_root),
+        "knowledge_path": _local_core_path("knowledge_center.md", body_root=body_root),
+        "operations_path": _local_core_path("operations_center.md", body_root=body_root),
+        "governance_path": _local_core_path("governance_layer.md", body_root=body_root),
+        "write_routes": {
+            "identity": _local_core_path("identity_layer.md", body_root=body_root),
+            "state": _local_core_path("state_center.md", body_root=body_root),
+            "knowledge": _local_core_path("knowledge_center.md", body_root=body_root),
+            "operations": _local_core_path("operations_center.md", body_root=body_root),
+            "governance": _local_core_path("governance_layer.md", body_root=body_root),
+            "episodic": _local_core_path("episodic_memory.md", body_root=body_root),
+            "brain_structure": _local_core_path("brain_architecture.md", body_root=body_root),
+            "references": (f"{body_root}/brain/references/" if body_root and body_root != "." else "brain/references/").replace("\\", "/"),
+        },
+        "body_map": {"project": [body_root]},
+        "modules": modules,
+        "routing_hints": {
+            "aliases": [brain_id],
+            "terms": [],
+            "path_prefixes": [] if body_root == "." else [body_root],
+        },
+        "handoff_contract": {
+            "derive_entry_sequence_from_shared_contract": False,
+            "entry_sequence": [_local_core_path(filename, body_root=body_root) for _, filename in CORE_MODULES],
+            "body_entry_priority": ["project"],
+            "principle": "Attach to the project brain first, then enter the project body through body_map.",
+        },
+    }
+
+
+def init_brain(cwd: Path, brain_id: str | None = None) -> dict[str, Any]:
     resolved = cwd.resolve()
+    resolved.mkdir(parents=True, exist_ok=True)
+    resolved_brain_id = str(brain_id or "").strip() or _infer_brain_id(resolved)
     git = _git_state(resolved)
     if git["is_git_repo"] and not git["on_main"]:
         return {
@@ -288,42 +409,220 @@ def init_brain(cwd: Path, brain_id: str) -> dict[str, Any]:
         }
     brain_dir = resolved / "brain"
     manifest_path = brain_dir / "brain_manifest.json"
-    title = _title_from_brain_id(brain_id)
+    title = _title_from_brain_id(resolved_brain_id)
     brain_dir.mkdir(parents=True, exist_ok=True)
     (brain_dir / "references").mkdir(parents=True, exist_ok=True)
     for filename, template in CORE_DOCS.items():
         path = brain_dir / filename
         if not path.exists():
             path.write_text(template.format(title=title), encoding="utf-8", newline="\n")
-    manifest = {
-        "brain_type": "project",
-        "brain_id": brain_id,
-        "entrypoint": "brain/identity_layer.md",
-        "read_order": [
-            "brain/identity_layer.md",
-            "brain/state_center.md",
-            "brain/knowledge_center.md",
-            "brain/brain_architecture.md",
-            "brain/operations_center.md",
-            "brain/governance_layer.md",
-        ],
-        "write_routes": {
-            "state": "brain/state_center.md",
-            "knowledge": "brain/knowledge_center.md",
-            "operations": "brain/operations_center.md",
-            "governance": "brain/governance_layer.md",
-            "episodic": "brain/episodic_memory.md",
-            "references": "brain/references/",
-        },
-    }
     if not manifest_path.exists():
-        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+        _write_json(manifest_path, _build_project_manifest(resolved_brain_id))
     return {
         "status": "ok",
         "mutation_allowed": True,
-        "brain_id": brain_id,
+        "brain_id": resolved_brain_id,
         "brain_manifest": str(manifest_path.resolve()),
         "created_paths": [str((brain_dir / name).resolve()) for name in [*CORE_DOCS, "brain_manifest.json"]],
+    }
+
+
+def _workspace_relative(workspace_root: Path, path: Path) -> str:
+    return path.resolve().relative_to(workspace_root.resolve()).as_posix()
+
+
+def _reference_count(root: Path) -> int:
+    references = root / "references"
+    if not references.exists():
+        return 0
+    return sum(1 for item in references.iterdir() if item.is_file())
+
+
+def _catalog_record(
+    *,
+    brain_id: str,
+    root: str,
+    manifest_path: str,
+    status: str,
+    body_root: str,
+    last_guard_status: str,
+) -> dict[str, Any]:
+    return {
+        "brain_id": brain_id,
+        "root": root,
+        "manifest_path": manifest_path,
+        "status": status,
+        "body_root": body_root,
+        "references_path": f"{root}/references" if root else "",
+        "references_count": _reference_count(Path(root)) if root else 0,
+        "language_policy": "zh_semantic_en_identifiers_v1",
+        "last_guard_status": last_guard_status,
+    }
+
+
+def _rebuild_catalog(workspace_root: Path, main_manifest: dict[str, Any]) -> dict[str, Any]:
+    existing_catalog = _load_json(workspace_root / "brain" / "brain_catalog.json")
+    preserved = []
+    for item in existing_catalog.get("brains", []) if isinstance(existing_catalog.get("brains"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status", "") or "")
+        if status in {"canonical_root", "attached"}:
+            continue
+        preserved.append(item)
+    records = [
+        _catalog_record(
+            brain_id="workspace_root",
+            root="brain",
+            manifest_path="brain/brain_manifest.json",
+            status="canonical_root",
+            body_root=".",
+            last_guard_status="ok",
+        )
+    ]
+    for child in main_manifest.get("child_brains", []) if isinstance(main_manifest.get("child_brains"), list) else []:
+        if not isinstance(child, dict):
+            continue
+        child_id = str(child.get("id", "") or "").strip()
+        child_path = str(child.get("path", "") or "").strip().replace("\\", "/")
+        body_root = str(child.get("body_root", "") or "").strip().replace("\\", "/")
+        if not child_id or not child_path:
+            continue
+        root = str(Path(child_path).parent).replace("\\", "/")
+        records.append(
+            _catalog_record(
+                brain_id=child_id,
+                root=root,
+                manifest_path=child_path,
+                status="attached" if str(child.get("attach_status", "") or "").startswith("attached") else "discovered_untracked",
+                body_root=body_root or str(Path(root).parent).replace("\\", "/"),
+                last_guard_status="ok",
+            )
+        )
+    seen = {str(item.get("brain_id", "")) for item in records}
+    records.extend(item for item in preserved if str(item.get("brain_id", "")) not in seen)
+    return {
+        "schema_version": 1,
+        "generated_at": datetime.now().date().isoformat(),
+        "language_policy": "zh_semantic_en_identifiers_v1",
+        "brains": records,
+    }
+
+
+def _attached_manifest(base_manifest: dict[str, Any], *, brain_id: str, body_root: str) -> dict[str, Any]:
+    manifest = _build_project_manifest(brain_id, body_root=body_root)
+    regional = base_manifest.get("regional_specialization") if isinstance(base_manifest.get("regional_specialization"), dict) else {}
+    routing_hints = base_manifest.get("routing_hints") if isinstance(base_manifest.get("routing_hints"), dict) else {}
+    body_priority = list(regional.get("body_entry_priority", []) or [])
+    if not body_priority or body_priority == ["."]:
+        body_priority = [body_root]
+    manifest.update(
+        {
+            "brain_type": "sub_brain",
+            "parent_brain": "brain/brain_manifest.json",
+            "attach_status": "attached_to_main_brain",
+            "shared_contract_source": "brain/brain_manifest.json#shared_regional_brain_contract",
+            "regional_specialization": {
+                "role": str(regional.get("role", "") or "project_cortex"),
+                "priority_regions": list(regional.get("priority_regions", []) or ["orientation_system", "long_term_memory", "executive_control", "sensorimotor_loop"]),
+                "focus_modules": list(regional.get("focus_modules", []) or ["state_center", "knowledge_center", "operations_center"]),
+                "body_entry_priority": body_priority,
+            },
+            "routing_hints": {
+                "aliases": sorted(set([brain_id, body_root, *list(routing_hints.get("aliases", []) or [])])),
+                "terms": sorted(set(str(item) for item in routing_hints.get("terms", []) or [] if str(item).strip())),
+                "path_prefixes": sorted(set([body_root, *[str(item) for item in routing_hints.get("path_prefixes", []) or [] if str(item).strip()]])),
+            },
+            "handoff_contract": {
+                "derive_entry_sequence_from_shared_contract": True,
+                "body_entry_priority": ["project"],
+                "principle": "Attach to the brain first, then read identity, state, knowledge, operations, governance, and enter body_map.",
+            },
+        }
+    )
+    manifest.pop("read_order", None)
+    return manifest
+
+
+def register_brain(cwd: Path, *, workspace_root: Path | None = None, brain_id: str | None = None) -> dict[str, Any]:
+    project_root = cwd.resolve()
+    workspace = (workspace_root.resolve() if workspace_root is not None else (_find_main_workspace_root(project_root.parent) or _find_main_workspace_root(project_root)))
+    if workspace is None:
+        return {"status": "error", "error": "workspace_main_brain_not_found", "project_root": str(project_root)}
+    if project_root == workspace:
+        return {"status": "error", "error": "cannot_register_workspace_root_as_child", "workspace_root": str(workspace)}
+    try:
+        body_root = _workspace_relative(workspace, project_root)
+    except ValueError:
+        return {
+            "status": "blocked",
+            "blockers": ["project_outside_workspace"],
+            "workspace_root": str(workspace),
+            "project_root": str(project_root),
+        }
+
+    git = _git_state(workspace)
+    if git["is_git_repo"] and not git["on_main"]:
+        return {
+            "status": "blocked",
+            "blockers": ["not_on_main_for_mutation"],
+            "mutation_allowed": False,
+            "git": git,
+        }
+
+    child_manifest_path = project_root / "brain" / "brain_manifest.json"
+    if not child_manifest_path.exists():
+        return {"status": "error", "error": "project_brain_manifest_missing", "project_root": str(project_root)}
+    main_manifest_path = workspace / "brain" / "brain_manifest.json"
+    main_manifest = _load_json(main_manifest_path)
+    if main_manifest.get("brain_type") != "main":
+        return {"status": "error", "error": "workspace_manifest_is_not_main", "workspace_root": str(workspace)}
+    base_manifest = _load_json(child_manifest_path)
+    resolved_brain_id = str(brain_id or base_manifest.get("brain_id") or "").strip() or _infer_brain_id(project_root)
+    attached_manifest = _attached_manifest(base_manifest, brain_id=resolved_brain_id, body_root=body_root)
+    _write_json(child_manifest_path, attached_manifest)
+
+    child_ref = {
+        "id": resolved_brain_id,
+        "path": f"{body_root}/brain/brain_manifest.json",
+        "role": attached_manifest["regional_specialization"]["role"],
+        "regional_role": attached_manifest["regional_specialization"]["role"],
+        "control_level": "managed_by_main_brain",
+        "body_root": body_root,
+        "entrypoint": f"{body_root}/brain/identity_layer.md",
+        "attach_status": "attached",
+    }
+    children = main_manifest.get("child_brains")
+    if not isinstance(children, list):
+        children = []
+    replaced = False
+    updated_children: list[dict[str, Any]] = []
+    for item in children:
+        if not isinstance(item, dict):
+            continue
+        if item.get("id") == resolved_brain_id or item.get("body_root") == body_root:
+            updated_children.append(child_ref)
+            replaced = True
+        else:
+            updated_children.append(item)
+    if not replaced:
+        updated_children.append(child_ref)
+    main_manifest["child_brains"] = updated_children
+    _write_json(main_manifest_path, main_manifest)
+    catalog = _rebuild_catalog(workspace, main_manifest)
+    catalog_path = workspace / "brain" / "brain_catalog.json"
+    _write_json(catalog_path, catalog)
+    return {
+        "status": "ok",
+        "mutation_allowed": True,
+        "registered": not replaced,
+        "updated_existing": replaced,
+        "brain_id": resolved_brain_id,
+        "body_root": body_root,
+        "child_manifest": str(child_manifest_path.resolve()),
+        "workspace_manifest": str(main_manifest_path.resolve()),
+        "catalog_path": str(catalog_path.resolve()),
+        "child_ref": child_ref,
     }
 
 
@@ -401,7 +700,15 @@ def build_parser() -> argparse.ArgumentParser:
     detect_parser.add_argument("--cwd", default=".")
     init_parser = sub.add_parser("init")
     init_parser.add_argument("--cwd", default=".")
-    init_parser.add_argument("--brain-id", required=True)
+    init_parser.add_argument("--brain-id", default="")
+    register_parser = sub.add_parser("register")
+    register_parser.add_argument("--cwd", default=".")
+    register_parser.add_argument("--workspace-root", default="")
+    register_parser.add_argument("--brain-id", default="")
+    attach_parser = sub.add_parser("attach")
+    attach_parser.add_argument("--cwd", default=".")
+    attach_parser.add_argument("--workspace-root", default="")
+    attach_parser.add_argument("--brain-id", default="")
     health_parser = sub.add_parser("health")
     health_parser.add_argument("--cwd", default=".")
     health_parser.add_argument("--mode", choices=("compact", "full"), default="compact")
@@ -449,7 +756,10 @@ def main() -> int:
     if args.command == "detect":
         payload = detect(cwd)
     elif args.command == "init":
-        payload = init_brain(cwd, str(args.brain_id))
+        payload = init_brain(cwd, str(args.brain_id or "") or None)
+    elif args.command in {"register", "attach"}:
+        workspace_root = Path(str(args.workspace_root)).resolve() if str(args.workspace_root or "").strip() else None
+        payload = register_brain(cwd, workspace_root=workspace_root, brain_id=str(args.brain_id or "") or None)
     elif args.command == "health":
         payload = health(cwd, mode=str(args.mode or "compact"))
     elif args.command == "reflection-template":

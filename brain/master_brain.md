@@ -1,46 +1,22 @@
 # 主脑
 
-## 1. 作用
-`brain/` 是整个工作区的共享脑核、任务路由层和 agent 接管入口。
+## 1. 拓扑地图
+`brain/` 是 workspace 主脑。结构、读取顺序、写回路由、child 注册以 `brain/brain_manifest.json` 为准。
 
-它只负责四件事：
+当前一级附着子脑：
 
-- 定义主脑与分脑的统一结构。
-- 维护跨项目边界、分支纪律和禁区判断。
-- 先路由任务，再按需进入分脑。
-- 保证任何 agent 都从主脑 capsule 进入，而不是直接绑定某个项目分脑。
+- `daily_research/brain/`：生产研究与执行主线。
+- `t0_project/brain/`：盘中执行与 RL 实验。
+- `daily_stock_analysis-main/brain/`：多市场分析产品。
 
-## 2. 当前脑网络
-- 主脑：`brain/`
-- 一级分脑：
-  - `daily_research/brain/`
-  - `t0_project/brain/`
-  - `daily_stock_analysis-main/brain/`
+## 2. 接管边界
+- `main-brain-first`：主脑是 agent 接管入口。
+- `route-before-child`：路由明确选中后才读取子脑。
+- `common-in-main`：共享结构、注册、治理规则写在主脑。
+- `local-in-child`：项目事实、项目命令、项目证据写在子脑。
+- `no-loose-default-child`：多个子脑冲突返回 `ambiguous`。
 
-当前角色固定为：
+## 3. 注册原则
+新项目脑由 runtime 初始化并注册；注册结果必须进入主脑 manifest、catalog 和发现式路由链路。
 
-- `daily_research`：正式生产研究与执行主线。
-- `t0_project`：盘中执行与 RL 实验分脑。
-- `daily_stock_analysis-main`：多市场分析产品分脑。
-
-## 3. 当前治理边界
-- `main-brain-first`：主脑是唯一 agent 接管入口。
-- `route-before-child`：只有主脑路由明确选中分脑后，才读取分脑上下文。
-- `common-in-main`：共享结构、共享顺序、共享治理只在主脑维护。
-- `local-in-child`：项目事实、实验状态、项目命令只在分脑维护。
-- `no-loose-default-child`：多个分脑高置信冲突时返回 `ambiguous`，不得默认落到 `daily_research`。
-- `workspace-governance-domain`：`workspace_governance` 是 workspace workflow domain，不是分脑 id；workspace 治理任务的 route target 必须是 `workspace`。
-
-## 4. 当前默认接脑方式
-- 生成 schema v3 接管胶囊：
-  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
-- 只做任务路由：
-  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow route --task "<task>" --json`
-- 解析主脑或目标分脑 boot order：
-  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain <brain_id|workspace> --json`
-- 兼容 workspace 治理 alias：
-  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain workspace_governance --json`
-
-## 5. 当前主问题
-- 当前最重要的事情不是“有没有脑结构”，而是维持主脑优先的平台入口，不让 capsule、skill、workflow registry 再和某个分脑绑定。
-- 主脑只保存跨项目规则和路由；`daily_research` 的 Path20 历史线、multi_horizon_utility 当前主线、continuous_policy、deep_alpha 事实必须留在 `daily_research/brain/`。
+本文件不重复 boot order 或入口命令，避免成为 manifest 之外的第二套脑。
