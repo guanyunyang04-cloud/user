@@ -144,6 +144,11 @@ def test_next_open_label_diff_detects_open_shift() -> None:
     symbols = ["600000.SH", "000001.SZ", "000002.SZ"]
     bao = _frames(symbols, dates)
     tq = _frames(symbols, dates, open_shift=1)
+    bao["Open"] = pd.DataFrame(10.0, index=dates, columns=symbols)
+    tq["Open"] = pd.DataFrame(
+        {symbol: [10.0 + idx * (0.05 + pos * 0.01) for idx in range(len(dates))] for pos, symbol in enumerate(symbols)},
+        index=dates,
+    )
     prepared = _prepared(bao, symbols, dates)
 
     _, summary = audit.compare_next_open_labels(

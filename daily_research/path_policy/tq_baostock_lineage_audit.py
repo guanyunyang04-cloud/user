@@ -527,6 +527,34 @@ def _label_frame(prepared: Any, *, start_date: str, end_date: str, horizons: tup
         drawdown_penalty=0.10,
         cumulative_horizons=horizons,
     )
+    missing_future_hits = [horizon for horizon in horizons if f"future_hit_label_{int(horizon)}d" not in frame.columns]
+    if missing_future_hits:
+        future_utilities: list[pd.Series] = []
+        used_horizons: list[int] = []
+        max_horizon = max(int(item) for item in horizons)
+        for horizon in horizons:
+            horizon_int = int(horizon)
+            return_col = f"future_cum_excess_return_{horizon_int}d"
+            if return_col not in frame.columns:
+                continue
+            drawdown_col = f"future_path_max_drawdown_{horizon_int}d"
+            drawdown = pd.to_numeric(frame.get(drawdown_col, frame.get("future_path_max_drawdown_20d", 0.0)), errors="coerce").fillna(0.0)
+            horizon_scale = math.sqrt(horizon_int / max(float(max_horizon), 1.0))
+            utility = (
+                pd.to_numeric(frame[return_col], errors="coerce")
+                - 20.0 / 10000.0
+                - 0.10 * drawdown.mul(-1.0).clip(lower=0.0) * horizon_scale
+            )
+            frame[f"future_decision_utility_{horizon_int}d"] = utility
+            frame[f"future_hit_label_{horizon_int}d"] = (utility > (10.0 / 10000.0)).astype(int)
+            future_utilities.append(utility)
+            used_horizons.append(horizon_int)
+        if future_utilities:
+            matrix = np.column_stack([series.to_numpy(dtype=float) for series in future_utilities])
+            horizon_values = np.asarray(used_horizons, dtype=int)
+            idx = np.nanargmax(np.where(np.isfinite(matrix), matrix, -np.inf), axis=1)
+            frame["future_best_horizon"] = horizon_values[idx]
+            frame["future_decision_score"] = np.nanmax(matrix, axis=1)
     keep = [
         "date",
         "stock",

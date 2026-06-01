@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 85,
+  "record_count": 86,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -725,6 +725,36 @@
         "policy_input_bundle__7c8f58d851bce8179e1e9e2d",
         "policy_pool_view__c11400fa72ad263f3d1eecfa",
         "policy_sector_board_view__ed15b2873f544e9e9b24aae5"
+      ]
+    },
+    {
+      "id": "alpha_multi_horizon_tq_baostock_lineage_audit_20260601",
+      "date": "2026-06-01",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_multi_horizon_tq_baostock_lineage_audit_20260601.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "The audit harness now exists and can compare TQ `none/front` daily bars against the BaoStock-first lake once TQ initialization is available.; This run did not prove BaoStock data is equivalent or non-equivalent to TQ, because the legacy TQ interface did not initialize.; The old `156` feature schema remains unrecovered after file-backed search, so the corrected new `[1699,2596,116]` baseline still cannot be treated as an old Stage 2.8 payload replay.; Old Stage 2.8 remains brain-confirmed historical evidence, not current file-backed replay evidence.",
+      "blockers": [
+        "Boundary: loose prose mentioning `156` features is insufficient; do not fabricate a `legacy156` profile."
+      ],
+      "next_allowed_actions": [
+        "Fix or document the TQ runtime initialization path for read-only data extraction only.",
+        "Rerun `tq_baostock_lineage_audit` after TQ can return `get_market_data` for daily bars.",
+        "Continue searching external backups for a traceable `forecast_dataset_manifest.json` or complete `156` feature column list.",
+        "Keep execution frozen; do not promote, rebuild production root, or write active execution strategy from this audit."
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
+        "policy_pool_view__74f45f4f83263bccd64a8027"
       ]
     },
     {
