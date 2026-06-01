@@ -57,6 +57,9 @@
 - 新实验必须显式写入 research program、study family 和 run tag：`research_programs` 查询稳定主线，`study_families` 查询阶段/实验族，`run_tags` 查询物理实例；run tag 需包含 pool、feature、model、seed、年份、output/loss、成本参数和 horizon grid，不得靠扩标签前缀表达新主线。
 - 当前下一步只允许 constrained horizon-score / calibration 研究；不跑 liquid800、allocator、replay、live/default、promotion，除非新的 liquid500 seed-7 calibration 结果先通过 gate。
 - 标准代码入口继续使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.run_alpha_path20_protocol`，因为这是包级入口；直接脚本 `daily_research/path_policy/run_alpha_path20_protocol.py` 只作为容错 smoke，不能替代文档推荐入口。
+- rebuild 差异审计入口：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.rebuild_lineage_diff_audit`
+- 审计默认读取 `mh_rebuild_infra_v2_fullpool_anchor_20260531_01` 与 seed7/11/19 rebuild artifacts，输出 `rebuild_lineage_diff_audit.json`、`rebuild_lineage_diff_audit.md`、`rebuild_seed_monthly_spread.csv` 和 `rebuild_feature_columns.csv`；该命令只读研究 artifacts，不训练、不 promotion、不写 active/default。
 
 ## 实验预算可信度纪律
 - 启动任何会影响模型输入、架构、输出、loss、horizon grid、stage gate 或后续方向选择的实验前，必须在计划或 tag 说明中声明证据等级：`smoke_only`、`scout_only`、`evidence_grade` 或 `promotion_grade`。
@@ -96,7 +99,7 @@
 - Web API 热路径只读 compact daily state：`/api/daily-run/status`、`/api/daily-run/latest`、`/api/data-readiness`、`/api/system/doctor`。
 - 任务提交入口只保留单项显式动作：`/api/data-sources/refresh`、`/api/trade-plan/generate`、`/api/paper-account/apply-latest-plan` 和必要诊断/恢复入口。
 - 当前 2026-05-26 fresh verdict 为 `blocked:data_not_ready`；后续操作以手动帮助页流程为准，完整旧状态机记录见 `daily_research/brain/references/execution_daily_plan_state_machine_refactor_20260526.md`。
-- 冻结解除前置：解释 new lineage 研究结果与旧 Stage 2.8 / Stage 3G / short_v5b 证据差异；完成同口径候选 backtest 方案；明确旧 production payload 是恢复、归档为不可用，还是由新研究主线显式替代。
+- 冻结解除前置：解释 new lineage 研究结果与旧 Stage 2.8 / Stage 3G / short_v5b 证据差异；完成同口径候选 backtest 方案；明确旧 production payload 是恢复、归档为不可用，还是由新研究主线显式替代。`rebuild_lineage_diff_audit` 已完成第一项中的谱系差异解释，但尚未完成同口径 short_v5b backtest 或旧 production payload 路径决策。
 
 ## PathPolicy 执行异常处理口径
 - `test_forecast_dataset.py` 是慢集成测试；修改 forecast 默认先跑 selective verification 推荐的快速合同测试，完整 forecast dataset/training 测试只在长验证、发布前或风险升高时跑。

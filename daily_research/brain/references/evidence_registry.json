@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 82,
+  "record_count": 83,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -204,6 +204,36 @@
       "next_allowed_actions": [],
       "active_artifact_impact": "guarded",
       "dataset_ids": []
+    },
+    {
+      "id": "alpha_multi_horizon_rebuild_lineage_diff_audit_20260601",
+      "date": "2026-06-01",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_multi_horizon_rebuild_lineage_diff_audit_20260601.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "Status: `rebuild_lineage_diff_audit_completed / research-only / shadow-only`.; Mainline: `alpha_multi_horizon_utility_policy_v1`.; Source artifact: `daily_research/output/path_policy/studies/mh_rebuild_infra_v2_fullpool_anchor_20260531_01/rebuild_lineage_diff_audit.json`.; Human report: `daily_research/output/path_policy/studies/mh_rebuild_infra_v2_fullpool_anchor_20260531_01/rebuild_lineage_diff_audit.md`.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Compare feature columns and missing old feature groups once old payload or feature manifest is recovered.",
+        "Compare pool membership overlap by date if old Stage 2.8 membership frame is recovered.",
+        "Run common-symbol/date OHLCV and next-open label diff if old `policy_input_bundle__7c8f58d851bce8179e1e9e2d` payload is recovered.",
+        "On the new lineage, isolate seed11 negative months by regime, history bucket, horizon, hit base rate, and liquidity/price buckets.",
+        "Before any execution rebuild, define a same-protocol backtest bridge versus short_v5b with common pool, costs, rebalance policy, benchmark, date splits, and score/target-weight panel semantics."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
+        "policy_pool_view__8f9367ce305548e3ecd04feb",
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
+      ]
     },
     {
       "id": "alpha_multi_horizon_research_rebuild_infra_v2_20260601",
