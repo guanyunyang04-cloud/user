@@ -88,7 +88,7 @@
 - 新多 horizon utility 实验必须归入明确的 `research_programs` 和 `study_families`；run tag 只表示物理实例，应显式写 pool、feature、model、seed、年份、output/loss、成本参数和 horizon grid，不得让命名把目标拉回固定 20 日路径误差。
 - 旧 multi-horizon / short_v5b 等价 universe 是沪深主板口径，必须剔除创业板和科创板；新 lake / pool view 若用于旧线复刻或同口径比较，必须显式排除 `300,301,688,689` 前缀，并在 manifest 中保留 `exclude_symbol_prefixes`。
 - corrected mainboard-only rebuild 通过 pool/memmap hard validation 后，仍必须把 `near_pass` 与 full pass 分开：rank IC、spread、monthly stability 和 concentration 过线不能抵消 hit lift min 为负；在旧 `156` feature schema 或 short_v5b payload 不可 replay 时，不得宣布新模型优于旧执行模型。
-- TQ/BaoStock lineage audit 只能回答数据与标签是否等价；若 TQ runtime 初始化失败，结论必须停在 `blocked_tq_unavailable`，不能把缺失 diff 解释为 BaoStock 差、TQ 优或旧结论失效。
+- TQ/BaoStock lineage audit 只能回答数据与标签是否等价；TQ read-only adapter 必须先用旧脚本路径调用 `tq.initialize(...)` 再读 `get_market_data`。若 TQ runtime 初始化失败，结论必须停在 `blocked_tq_unavailable`，不能把缺失 diff 解释为 BaoStock 差、TQ 优或旧结论失效；若 label 等价但 OHLCV 有 amount/missing 差异，也不能直接宣布旧 Stage 2.8 已 file-backed replay。
 - 模型输入、架构、输出、loss、horizon grid 或训练配置的结论必须声明证据等级；低预算探索可以提出 follow-up，但不能作为“更好/更差/已失败/已通过”的稳定判断。
 - 正式训练、评估和 diagnostics 必须读取显式 `policy_input_bundle__...` / Gold dataset id；不得在训练或诊断过程中临时在线抓取行情。
 - 若 source/reduce/exit 仍为 0，结论必须写成行为闭环未打通，不能包装成“更多 epoch/loss”。

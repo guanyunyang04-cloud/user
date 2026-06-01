@@ -70,7 +70,7 @@
 - 当前 corrected mainboard-only anchor：`mh_rebuild_mainboard_anchor_20260601_01`；seed tags 为 `mh_rebuild_mainboard_target_norm_head_constraint_raw_seed7_20260601_01`、`...seed11...`、`...seed19...`。该 anchor 是 new-lineage mainboard baseline，不是旧 Stage 2.8 payload replay；comparison 输出 `mainboard_rebuild_summary.json`、`mainboard_lineage_equivalence_audit.json`、`feature_schema_diff_report.json` 与 `mainboard_memmap_validation.json`。
 - TQ vs BaoStock lineage audit 入口：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.tq_baostock_lineage_audit --json`
-- 当前 TQ/BaoStock audit tag：`tq_baostock_lineage_audit_20260601_01`；该入口只读旧 `H:\new_tdx64\PYPlugins\user\t0_project\tqcenter.py` 的 `get_market_data`，不调用刷新、下载、交易、写板块或下单接口。若 TQ 初始化失败，应写 `blocked_tq_unavailable`，不得手工模拟旧 TQ 数据。
+- 当前 TQ/BaoStock audit tag：`tq_baostock_lineage_audit_20260601_01`；该入口只读旧 `H:\new_tdx64\PYPlugins\user\t0_project\tqcenter.py` 的 `get_market_data`，不调用刷新、下载、交易、写板块或下单接口。TQ adapter 必须先以旧脚本路径执行 `tq.initialize(...)`；若 TQ 初始化失败，应写 `blocked_tq_unavailable`，不得手工模拟旧 TQ 数据。
 
 ## 实验预算可信度纪律
 - 启动任何会影响模型输入、架构、输出、loss、horizon grid、stage gate 或后续方向选择的实验前，必须在计划或 tag 说明中声明证据等级：`smoke_only`、`scout_only`、`evidence_grade` 或 `promotion_grade`。

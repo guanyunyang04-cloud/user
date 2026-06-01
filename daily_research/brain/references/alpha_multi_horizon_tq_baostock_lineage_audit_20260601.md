@@ -40,23 +40,32 @@
 
 ## TQ vs BaoStock Diff
 
-- TQ status: `blocked_tq_unavailable`.
-- TQ error: `TQ数据接口初始化失败`.
+- TQ status: `ok`.
+- TQ initialization fix: `TQCenterAdapter` now calls `tq.initialize(...)` before `get_market_data`.
+- TQ connection path: `H:\new_tdx64\PYPlugins\user\t0_project\tqcenter.py`.
 - Sample symbol count prepared from corrected mainboard pool: `120`.
-- OHLCV diff status: `blocked_tq_unavailable`.
-- Next-open label diff status: `blocked_tq_unavailable`.
+- OHLCV diff status: `material_data_source_shift`.
+- Best price-label comparison dividend type: `none`.
+- `none` price p95 relative diff mean: `0.0`; price mismatches exist mostly outside p95 and missing mismatch is about `3.53%`.
+- `front` price p95 relative diff mean: `0.35637313122440645`; this is much worse than `none`, so the old/new close/open price lineage is likely unadjusted rather than front-adjusted.
+- `Amount` differs materially: TQ/BaoStock amount relative diff p95 is about `0.9999000001`, consistent with a unit-scale mismatch rather than a next-open label break by itself.
+- Next-open label diff status: `label_equivalent`.
+- Max hit label flip rate: `0.0014824531454960379`.
+- Future decision score correlation: `0.999750308636608`.
+- Top20 hit label flip rate: `0.0`.
 - Replay verdict: `old_stage28_still_text_only`.
 
 ## Interpretation
 
-- The audit harness now exists and can compare TQ `none/front` daily bars against the BaoStock-first lake once TQ initialization is available.
-- This run did not prove BaoStock data is equivalent or non-equivalent to TQ, because the legacy TQ interface did not initialize.
+- TQ read-only access is available when initialized with the legacy script path before market reads.
+- On the 120-symbol corrected-mainboard sample, BaoStock and TQ `none` OHLC prices are close enough for next-open label semantics by p95 price diff and hit-label flip criteria.
+- The audit still marks OHLCV as `material_data_source_shift` because missing-rate and amount-unit differences are material, and amount-derived features may differ even when open/close labels are mostly equivalent.
 - The old `156` feature schema remains unrecovered after file-backed search, so the corrected new `[1699,2596,116]` baseline still cannot be treated as an old Stage 2.8 payload replay.
 - Old Stage 2.8 remains brain-confirmed historical evidence, not current file-backed replay evidence.
 
 ## Next Allowed Actions
 
-- Fix or document the TQ runtime initialization path for read-only data extraction only.
-- Rerun `tq_baostock_lineage_audit` after TQ can return `get_market_data` for daily bars.
+- Investigate the `Amount` unit mismatch and whether any of the missing-rate rows correspond to suspensions, listing gaps, or fill policy differences.
+- If extending the bridge, compare amount-derived feature columns separately and decide whether unit normalization is needed for a TQ-compatible feature profile.
 - Continue searching external backups for a traceable `forecast_dataset_manifest.json` or complete `156` feature column list.
 - Keep execution frozen; do not promote, rebuild production root, or write active execution strategy from this audit.

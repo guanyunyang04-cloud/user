@@ -70,6 +70,46 @@ class FailingAdapter:
         raise RuntimeError("unit unavailable")
 
 
+def test_tqcenter_adapter_initializes_before_market_read(tmp_path: Path) -> None:
+    module_path = tmp_path / "tqcenter.py"
+    module_path.write_text(
+        "\n".join(
+            [
+                "import pandas as pd",
+                "class tq:",
+                "    initialized = False",
+                "    connection_path = ''",
+                "    @classmethod",
+                "    def initialize(cls, path):",
+                "        cls.initialized = True",
+                "        cls.connection_path = path",
+                "    @classmethod",
+                "    def get_market_data(cls, **kwargs):",
+                "        if not cls.initialized:",
+                "            raise RuntimeError('not initialized')",
+                "        dates = pd.date_range('2024-01-01', periods=1)",
+                "        return {field: pd.DataFrame({kwargs['stock_list'][0]: [1.0]}, index=dates) for field in kwargs['field_list']}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    adapter = audit.TQCenterAdapter(module_path, connection_path="unit_connection.py")
+    frames = adapter.get_market_data(
+        field_list=["Open"],
+        stock_list=["000001.SZ"],
+        period="1d",
+        start_time="20240101",
+        end_time="20240101",
+        count=-1,
+        dividend_type="none",
+        fill_data=True,
+    )
+
+    assert list(frames) == ["Open"]
+    assert adapter.tq.connection_path == "unit_connection.py"
+
+
 def test_recover_legacy156_manifest_reports_feature_diff(tmp_path: Path) -> None:
     current = tmp_path / "current" / "forecast_dataset_manifest.json"
     legacy = tmp_path / "legacy" / "forecast_dataset_manifest.json"

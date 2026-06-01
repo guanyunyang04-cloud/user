@@ -27,6 +27,7 @@ RUN_TAG = "tq_baostock_lineage_audit_20260601_01"
 NEW_DATASET_ID = "policy_input_bundle__45e3d8c059ba718426a9f887"
 CORRECTED_POOL_VIEW_ID = "policy_pool_view__74f45f4f83263bccd64a8027"
 TQCENTER_PATH = Path("H:/new_tdx64/PYPlugins/user/t0_project/tqcenter.py")
+TQ_CONNECTION_PATH = TQCENTER_PATH
 CURRENT_MANIFEST_PATH = (
     STUDIES_ROOT
     / "mh_rebuild_mainboard_target_norm_head_constraint_raw_seed7_20260601_01"
@@ -323,7 +324,12 @@ def recover_legacy156_features(
 
 
 class TQCenterAdapter:
-    def __init__(self, tqcenter_path: str | Path = TQCENTER_PATH) -> None:
+    def __init__(
+        self,
+        tqcenter_path: str | Path = TQCENTER_PATH,
+        *,
+        connection_path: str | Path | None = TQ_CONNECTION_PATH,
+    ) -> None:
         path = Path(tqcenter_path)
         if not path.exists():
             raise FileNotFoundError(f"tqcenter.py not found: {path}")
@@ -334,6 +340,8 @@ class TQCenterAdapter:
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         self.tq = getattr(module, "tq")
+        self.connection_path = str(connection_path or path)
+        self.tq.initialize(self.connection_path)
 
     def get_market_data(
         self,
@@ -707,6 +715,7 @@ def run_audit(
     dataset_id: str = NEW_DATASET_ID,
     pool_view_id: str = CORRECTED_POOL_VIEW_ID,
     tqcenter_path: str | Path = TQCENTER_PATH,
+    tq_connection_path: str | Path | None = TQ_CONNECTION_PATH,
     start_date: str = "20180101",
     end_date: str = "20241231",
     period: str = "1d",
@@ -745,7 +754,7 @@ def run_audit(
     tq_error = ""
     tq_frames_by_dividend: dict[str, dict[str, pd.DataFrame]] = {}
     try:
-        resolved_adapter = adapter or TQCenterAdapter(tqcenter_path)
+        resolved_adapter = adapter or TQCenterAdapter(tqcenter_path, connection_path=tq_connection_path)
         for dividend_type in dividend_type_matrix:
             tq_frames_by_dividend[str(dividend_type)] = fetch_tq_market_frames(
                 adapter=resolved_adapter,
@@ -797,6 +806,7 @@ def run_audit(
         "dataset_id": dataset_id,
         "pool_view_id": pool_view_id,
         "tqcenter_path": str(tqcenter_path),
+        "tq_connection_path": str(tq_connection_path or tqcenter_path),
         "tq_status": tq_status,
         "tq_error": tq_error,
         "sample_symbol_count": int(len(symbols)),
@@ -823,6 +833,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dataset-id", default=NEW_DATASET_ID)
     parser.add_argument("--pool-view-id", default=CORRECTED_POOL_VIEW_ID)
     parser.add_argument("--tqcenter-path", default=str(TQCENTER_PATH))
+    parser.add_argument("--tq-connection-path", default=str(TQ_CONNECTION_PATH))
     parser.add_argument("--start-date", default="20180101")
     parser.add_argument("--end-date", default="20241231")
     parser.add_argument("--period", default="1d")
@@ -834,6 +845,7 @@ def main(argv: list[str] | None = None) -> int:
         dataset_id=args.dataset_id,
         pool_view_id=args.pool_view_id,
         tqcenter_path=args.tqcenter_path,
+        tq_connection_path=args.tq_connection_path,
         start_date=args.start_date,
         end_date=args.end_date,
         period=args.period,

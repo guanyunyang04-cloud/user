@@ -741,13 +741,13 @@
       ],
       "study_families": [],
       "run_tags": [],
-      "verdict": "The audit harness now exists and can compare TQ `none/front` daily bars against the BaoStock-first lake once TQ initialization is available.; This run did not prove BaoStock data is equivalent or non-equivalent to TQ, because the legacy TQ interface did not initialize.; The old `156` feature schema remains unrecovered after file-backed search, so the corrected new `[1699,2596,116]` baseline still cannot be treated as an old Stage 2.8 payload replay.; Old Stage 2.8 remains brain-confirmed historical evidence, not current file-backed replay evidence.",
+      "verdict": "TQ read-only access is available when initialized with `H:\\new_tdx64\\PYPlugins\\user\\t0_project\\tqcenter.py` before market reads.; On the 120-symbol corrected-mainboard sample, BaoStock and TQ `none` OHLC prices are close enough for next-open label semantics by p95 price diff and hit-label flip criteria.; The audit still marks OHLCV as `material_data_source_shift` because missing-rate and amount-unit differences are material, and amount-derived features may differ even when open/close labels are mostly equivalent.; The old `156` feature schema remains unrecovered after file-backed search, so the corrected new `[1699,2596,116]` baseline still cannot be treated as an old Stage 2.8 payload replay.; Old Stage 2.8 remains brain-confirmed historical evidence, not current file-backed replay evidence.",
       "blockers": [
         "Boundary: loose prose mentioning `156` features is insufficient; do not fabricate a `legacy156` profile."
       ],
       "next_allowed_actions": [
-        "Fix or document the TQ runtime initialization path for read-only data extraction only.",
-        "Rerun `tq_baostock_lineage_audit` after TQ can return `get_market_data` for daily bars.",
+        "Investigate the `Amount` unit mismatch and whether any of the missing-rate rows correspond to suspensions, listing gaps, or fill policy differences.",
+        "If extending the bridge, compare amount-derived feature columns separately and decide whether unit normalization is needed for a TQ-compatible feature profile.",
         "Continue searching external backups for a traceable `forecast_dataset_manifest.json` or complete `156` feature column list.",
         "Keep execution frozen; do not promote, rebuild production root, or write active execution strategy from this audit."
       ],

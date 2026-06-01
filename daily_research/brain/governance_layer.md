@@ -47,4 +47,4 @@
 - `rebuild_lineage_diff_audit` 只能满足“研究端差异解释”的初步证据要求；不得把该审计误读为模型胜负、short_v5b 替代、执行端解冻或 active artifact 重建授权。
 - 旧 multi-horizon / short_v5b 等价比较必须使用主板口径 pool；包含 `300/301/688/689` 创业板/科创板前缀的 new-lineage rebuild 只能作为 `wrong_universe_diagnostic`，不得作为 promotion、执行解冻或 short_v5b 等价对照证据。
 - Corrected mainboard-only baseline 若只是 `near_pass`，仍不得作为 active promotion、short_v5b 替代或执行端解冻证据；必须先处理 hit lift min negative、旧 `156` feature schema 未恢复、short_v5b payload 缺失和同协议 bridge 未完成这四类 blocker。
-- TQ vs BaoStock diff 若处于 `blocked_tq_unavailable`，不得作为数据源胜负、模型胜负、旧 Stage 2.8 失效、short_v5b 替代或执行端解冻依据。
+- TQ vs BaoStock diff 若处于 `blocked_tq_unavailable`，不得作为数据源胜负、模型胜负、旧 Stage 2.8 失效、short_v5b 替代或执行端解冻依据。若 diff 已运行且 label 等价，也只证明该抽样/口径下 next-open label 近似一致；在旧 `156` feature schema、short_v5b payload、amount/missing/fill policy 差异未闭环前，仍不得作为执行端解冻或模型替代依据。
