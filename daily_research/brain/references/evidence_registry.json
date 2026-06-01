@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 84,
+  "record_count": 85,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -173,6 +173,36 @@
         "policy_pool_view__8f9367ce305548e3ecd04feb",
         "policy_pool_view__74f45f4f83263bccd64a8027",
         "policy_input_bundle__45e3d8c059ba718426a9f887"
+      ]
+    },
+    {
+      "id": "alpha_multi_horizon_mainboard_rebuild_baseline_20260601",
+      "date": "2026-06-01",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_multi_horizon_mainboard_rebuild_baseline_20260601.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [
+        "mainboard_rebuild_baseline"
+      ],
+      "run_tags": [],
+      "verdict": "The universe error has been corrected, and the corrected mainboard-only baseline is materially healthier than the earlier wrong-universe rebuild on rank IC, spread, monthly stability, negative months, and 30d concentration.; It still cannot be declared better than old `short_v5b` or old Stage 2.8 because the old payload is not file-backed replayable and the old `156` feature schema has not been recovered.; The next research question is no longer \"is the old rebuild valid?\" It is: can the new-lineage `[1699,2596,116]` mainboard baseline repair the remaining hit-lift weakness or recover/bridge the old `156` schema under a traceable protocol?",
+      "blockers": [
+        "Blockers: none.",
+        "Failed check:",
+        "test hit lift min positive: failed, min `-0.0071560784524209`."
+      ],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
+        "policy_pool_view__74f45f4f83263bccd64a8027",
+        "policy_pool_view__8f9367ce305548e3ecd04feb"
       ]
     },
     {

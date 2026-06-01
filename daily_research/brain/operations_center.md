@@ -63,6 +63,11 @@
 - 主板口径 pool view 生成入口：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.data_lake.build_pool_view --source-market-dataset-id policy_input_bundle__45e3d8c059ba718426a9f887 --view-kind rolling_liquidity --view-name rolling_liquid500_mainboard --pool-name liquid500 --start-date 2018-01-01 --end-date 2024-12-31 --rebalance-every-days 21 --adv-window 20 --min-price 2.0 --max-price 300.0 --exclude-symbol-prefixes 300,301,688,689 --refresh`
 - 当前主板口径 pool view：`policy_pool_view__74f45f4f83263bccd64a8027`；后续 mainboard-only path_policy 重跑可直接传 `--pool-view-id policy_pool_view__74f45f4f83263bccd64a8027`，或用 `--pool-view-kind rolling_liquidity --pool-view-name rolling_liquid500_mainboard --pool-view-exclude-symbol-prefixes 300,301,688,689` 现场构建等价 view。
+- corrected mainboard-only baseline orchestration 入口：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.mainboard_rebuild_baseline --write-task-list --validate-pool --json`
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.mainboard_rebuild_baseline --run-training --json`
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.mainboard_rebuild_baseline --run-comparison --json`
+- 当前 corrected mainboard-only anchor：`mh_rebuild_mainboard_anchor_20260601_01`；seed tags 为 `mh_rebuild_mainboard_target_norm_head_constraint_raw_seed7_20260601_01`、`...seed11...`、`...seed19...`。该 anchor 是 new-lineage mainboard baseline，不是旧 Stage 2.8 payload replay；comparison 输出 `mainboard_rebuild_summary.json`、`mainboard_lineage_equivalence_audit.json`、`feature_schema_diff_report.json` 与 `mainboard_memmap_validation.json`。
 
 ## 实验预算可信度纪律
 - 启动任何会影响模型输入、架构、输出、loss、horizon grid、stage gate 或后续方向选择的实验前，必须在计划或 tag 说明中声明证据等级：`smoke_only`、`scout_only`、`evidence_grade` 或 `promotion_grade`。
