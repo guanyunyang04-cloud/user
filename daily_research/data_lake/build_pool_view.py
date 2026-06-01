@@ -33,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Build an auditable policy pool view from an existing policy input bundle.")
     parser.add_argument("--data-lake-root", default="")
     parser.add_argument("--source-market-dataset-id", required=True)
-    parser.add_argument("--view-kind", required=True, choices=("learned_all_a", "rolling_liquidity", "exchange", "static_symbols"))
+    parser.add_argument("--view-kind", required=True, choices=("learned_all_a", "rolling_liquidity", "rolling_liquidity_tradeable_mainboard", "exchange", "static_symbols"))
     parser.add_argument("--view-name", default="")
     parser.add_argument("--pool-name", default="")
     parser.add_argument("--start-date", default="")
@@ -44,6 +44,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-price", type=float, default=300.0)
     parser.add_argument("--exchange-suffix", default="")
     parser.add_argument("--symbols", default="")
+    parser.add_argument("--status-sidecar-dataset-id", default="")
+    parser.add_argument("--require-tradeable", action="store_true")
     parser.add_argument(
         "--exclude-symbol-prefixes",
         default="",
@@ -57,7 +59,7 @@ def _default_view_name(args: argparse.Namespace) -> str:
     explicit = str(args.view_name or "").strip().lower()
     if explicit:
         return explicit
-    if args.view_kind == "rolling_liquidity":
+    if args.view_kind in {"rolling_liquidity", "rolling_liquidity_tradeable_mainboard"}:
         return f"rolling_{str(args.pool_name or '').strip().lower()}"
     if args.view_kind == "exchange":
         suffix = str(args.exchange_suffix or "").strip().lower().lstrip(".")
@@ -98,6 +100,8 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         exchange_suffix=str(args.exchange_suffix or "").strip().upper(),
         symbols=symbols,
         exclude_symbol_prefixes=exclude_symbol_prefixes,
+        status_sidecar_dataset_id=str(args.status_sidecar_dataset_id or "").strip(),
+        require_tradeable=bool(args.require_tradeable),
     )
     record = build_pool_view_from_policy_bundle(lake=lake, spec=spec, reuse=not bool(args.refresh))
     manifest = {

@@ -67,6 +67,7 @@ class PitBuildConfig:
     year: int = 0
     force_refresh: bool = False
     request_interval_seconds: float = 0.0
+    discovery_mode: str = "stock-basic"
 
 
 def _cache_root(output_root: Path) -> Path:
@@ -85,8 +86,16 @@ def _security_master_cache_path(output_root: Path) -> Path:
     return _cache_root(output_root) / "security_master.parquet"
 
 
+def _stock_basic_all_cache_path(output_root: Path) -> Path:
+    return _cache_root(output_root) / "stock_basic_all.parquet"
+
+
 def _trade_dates_cache_path(output_root: Path) -> Path:
     return _cache_root(output_root) / "trade_dates.parquet"
+
+
+def _trade_dates_meta_path(output_root: Path) -> Path:
+    return _cache_root(output_root) / "cache_meta" / "trade_dates.json"
 
 
 def _progress_path(output_root: Path, year: int) -> Path:
@@ -101,10 +110,88 @@ def _daily_bars_part_cache_path(output_root: Path, year: int, batch_index: int) 
     return _cache_root(output_root) / "daily_bars" / "parts" / f"year={year}" / f"batch={batch_index:04d}.parquet"
 
 
+def _stock_list_meta_path(output_root: Path, year: int) -> Path:
+    return _cache_root(output_root) / "cache_meta" / "daily_stock_lists" / f"year={year}.json"
+
+
+def _daily_bars_meta_path(output_root: Path, year: int) -> Path:
+    return _cache_root(output_root) / "cache_meta" / "daily_bars" / f"year={year}.json"
+
+
+def _config_cache_signature(config: PitBuildConfig, *, year: int, start_date: str, end_date: str) -> dict[str, Any]:
+    return {
+        "year": year,
+        "start_date": start_date,
+        "end_date": end_date,
+        "symbols": sorted(config.symbols),
+        "max_symbols": int(config.max_symbols),
+        "discovery_mode": config.discovery_mode,
+    }
+
+
+def _read_json_or_empty(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8-sig"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _is_cache_compatible(meta: dict[str, Any], config: PitBuildConfig, *, year: int, start_date: str, end_date: str) -> bool:
+    if not meta or not meta.get("complete"):
+        return False
+    if int(meta.get("year", -1)) != int(year):
+        return False
+    cached_start = pd.Timestamp(meta.get("start_date", "1900-01-01"))
+    cached_end = pd.Timestamp(meta.get("end_date", "1900-01-01"))
+    if cached_start > pd.Timestamp(start_date) or cached_end < pd.Timestamp(end_date):
+        return False
+    if sorted(meta.get("symbols", [])) != sorted(config.symbols):
+        return False
+    if int(meta.get("max_symbols", 0) or 0) != int(config.max_symbols):
+        return False
+    if str(meta.get("discovery_mode", "")) != config.discovery_mode:
+        return False
+    return True
+
+
+def _cache_compat_summary(meta: dict[str, Any], compatible: bool) -> dict[str, Any]:
+    if compatible:
+        return {"cache_meta_compatible": 1}
+    if not meta:
+        return {"cache_meta_compatible": 0, "cache_meta_reason": "missing_or_invalid"}
+    return {
+        "cache_meta_compatible": 0,
+        "cache_meta_reason": "signature_mismatch_or_incomplete",
+        "cache_meta": meta,
+    }
+
+
+def _date_span_from_series(dates: pd.Series, fallback_start: str, fallback_end: str) -> tuple[str, str]:
+    if len(dates) == 0:
+        return fallback_start, fallback_end
+    values = pd.to_datetime(dates)
+    return str(values.min().date()), str(values.max().date())
+
+
+def _is_date_cache_compatible(meta: dict[str, Any], start_date: str, end_date: str) -> bool:
+    if not meta or not meta.get("complete"):
+        return False
+    cached_start = pd.Timestamp(meta.get("start_date", "1900-01-01"))
+    cached_end = pd.Timestamp(meta.get("end_date", "1900-01-01"))
+    return cached_start <= pd.Timestamp(start_date) and cached_end >= pd.Timestamp(end_date)
+
+
 def _read_progress(output_root: Path, year: int) -> dict[str, Any]:
     path = _progress_path(output_root, year)
     if not path.exists():
-        return {"year": year, "completed_stock_dates": [], "completed_bar_codes": [], "failures": []}
+        return _new_progress(year)
     return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
@@ -112,6 +199,17 @@ def _write_progress(output_root: Path, year: int, progress: dict[str, Any]) -> N
     path = _progress_path(output_root, year)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(progress, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _new_progress(year: int, signature: dict[str, Any] | None = None) -> dict[str, Any]:
+    progress = {"year": year, "completed_stock_dates": [], "completed_bar_codes": [], "failures": []}
+    if signature is not None:
+        progress["signature"] = signature
+    return progress
+
+
+def _progress_compatible(progress: dict[str, Any], config: PitBuildConfig, *, year: int, start_date: str, end_date: str) -> bool:
+    return progress.get("signature") == _config_cache_signature(config, year=year, start_date=start_date, end_date=end_date)
 
 
 def _baostock_to_std_code(code: str) -> str:
@@ -166,10 +264,15 @@ def _filter_dates(frame: pd.DataFrame, start_date: str, end_date: str) -> pd.Dat
 
 def _trade_dates(source: BaostockSource, config: PitBuildConfig) -> tuple[pd.DataFrame, dict[str, int]]:
     path = _trade_dates_cache_path(config.output_root)
-    cache_hit = int(path.exists() and not config.force_refresh)
+    meta_path = _trade_dates_meta_path(config.output_root)
+    meta = _read_json_or_empty(meta_path)
+    compatible = _is_date_cache_compatible(meta, config.start_date, config.end_date)
+    cache_hit = int(path.exists() and not config.force_refresh and compatible)
     if cache_hit:
         cached = pd.read_parquet(path)
         return _filter_dates(cached, config.start_date, config.end_date), {"trade_dates_cache_hit": 1, "trade_dates_cache_miss": 0}
+    if path.exists() and not compatible and not config.force_refresh:
+        path.unlink(missing_ok=True)
 
     raw = source.query_trade_dates(config.start_date, config.end_date)
     if raw.empty:
@@ -180,7 +283,74 @@ def _trade_dates(source: BaostockSource, config: PitBuildConfig) -> tuple[pd.Dat
         frame["is_trading_day"] = frame["is_trading_day"].astype(str) == "1"
         frame = frame.loc[frame["is_trading_day"], ["date", "is_trading_day"]].reset_index(drop=True)
     _write_parquet(path, frame)
+    _write_json(
+        meta_path,
+        {
+            "start_date": config.start_date,
+            "end_date": config.end_date,
+            "complete": True,
+            "row_count": int(len(frame)),
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        },
+    )
     return frame, {"trade_dates_cache_hit": 0, "trade_dates_cache_miss": 1}
+
+
+def _stock_basic_all(source: BaostockSource, config: PitBuildConfig) -> tuple[pd.DataFrame, dict[str, int]]:
+    path = _stock_basic_all_cache_path(config.output_root)
+    if path.exists() and not config.force_refresh:
+        return pd.read_parquet(path), {"stock_basic_all_cache_hit": 1, "stock_basic_all_cache_miss": 0}
+    raw = source.query_stock_basic()
+    frame = normalize_stock_basic(raw)
+    _write_parquet(path, frame)
+    return frame, {"stock_basic_all_cache_hit": 0, "stock_basic_all_cache_miss": 1}
+
+
+def normalize_stock_basic(raw: pd.DataFrame) -> pd.DataFrame:
+    if raw.empty:
+        return pd.DataFrame(columns=SECURITY_MASTER_COLUMNS)
+    frame = raw.copy()
+    frame["code"] = frame["code"].map(_baostock_to_std_code)
+    frame["baostock_code"] = raw["code"].astype(str)
+    frame["name"] = frame["code_name"].astype(str)
+    frame["ipo_date"] = frame["ipoDate"].map(_normalize_date)
+    frame["out_date"] = frame["outDate"].map(_normalize_date)
+    frame["security_type"] = frame["type"].astype(str)
+    frame["status"] = frame["status"].astype(str)
+    frame["first_seen_date"] = ""
+    frame["last_seen_date"] = ""
+    frame["basic_error"] = ""
+    return frame[SECURITY_MASTER_COLUMNS]
+
+
+def derive_stock_lists_from_basic(
+    security_master: pd.DataFrame,
+    dates: pd.Series,
+    *,
+    explicit_symbols: set[str] | None = None,
+) -> pd.DataFrame:
+    if security_master.empty or len(dates) == 0:
+        return pd.DataFrame(columns=RAW_STOCK_LIST_COLUMNS)
+    base = security_master.copy()
+    base = base[base["code"].map(is_sh_sz_mainboard_a_share)]
+    base = base[base["security_type"].astype(str) == "1"]
+    if explicit_symbols is not None:
+        base = base[base["code"].isin(explicit_symbols)]
+    if base.empty:
+        return pd.DataFrame(columns=RAW_STOCK_LIST_COLUMNS)
+    ipo = pd.to_datetime(base["ipo_date"], errors="coerce")
+    out = pd.to_datetime(base["out_date"], errors="coerce")
+    parts: list[pd.DataFrame] = []
+    for date in pd.to_datetime(dates):
+        mask = ipo.notna() & (ipo <= date) & (out.isna() | (date < out))
+        daily = base.loc[mask, ["code", "name"]].copy()
+        if daily.empty:
+            continue
+        daily["date"] = pd.Timestamp(date)
+        daily["name_on_date"] = daily["name"]
+        daily["query_all_trade_status"] = "1"
+        parts.append(daily[RAW_STOCK_LIST_COLUMNS])
+    return _concat(parts, RAW_STOCK_LIST_COLUMNS).drop_duplicates(["date", "code"]).reset_index(drop=True)
 
 
 def discover_daily_stock_lists(
@@ -190,17 +360,51 @@ def discover_daily_stock_lists(
     config: PitBuildConfig,
     year: int,
     explicit_symbols: set[str] | None,
+    security_master: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     path = _stock_list_cache_path(config.output_root, year)
+    meta_path = _stock_list_meta_path(config.output_root, year)
+    meta = _read_json_or_empty(meta_path)
+    compatible = _is_cache_compatible(meta, config, year=year, start_date=config.start_date, end_date=config.end_date)
     if path.exists() and not config.force_refresh:
-        frame = pd.read_parquet(path)
-        frame = _filter_dates(frame, config.start_date, config.end_date)
-        if explicit_symbols is not None:
-            frame = frame[frame["code"].isin(explicit_symbols)].reset_index(drop=True)
-        return frame, {"stock_list_cache_hit": 1, "stock_list_cache_miss": 0, "empty_stock_list_dates": []}
+        if compatible:
+            frame = pd.read_parquet(path)
+            frame = _filter_dates(frame, config.start_date, config.end_date)
+            if explicit_symbols is not None:
+                frame = frame[frame["code"].isin(explicit_symbols)].reset_index(drop=True)
+            return frame, {
+                "stock_list_cache_hit": 1,
+                "stock_list_cache_miss": 0,
+                "empty_stock_list_dates": [],
+                **_cache_compat_summary(meta, compatible),
+            }
+        path.unlink(missing_ok=True)
 
     parts: list[pd.DataFrame] = []
     empty_dates: list[str] = []
+    if config.discovery_mode == "stock-basic":
+        if security_master is None:
+            security_master, _ = _stock_basic_all(source, config)
+        output = derive_stock_lists_from_basic(security_master, dates, explicit_symbols=explicit_symbols)
+        _write_parquet(path, output)
+        _write_json(
+            meta_path,
+            {
+                **_config_cache_signature(config, year=year, start_date=config.start_date, end_date=config.end_date),
+                "complete": True,
+                "row_count": int(len(output)),
+                "code_count": int(output["code"].nunique()) if not output.empty else 0,
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+            },
+        )
+        return output, {
+            "stock_list_cache_hit": 0,
+            "stock_list_cache_miss": 1,
+            "empty_stock_list_dates": [],
+            "discovery_mode": "stock-basic",
+            **_cache_compat_summary(meta, compatible),
+        }
+
     if config.command == "dry-run" and explicit_symbols is not None:
         for date in dates:
             date_str = pd.Timestamp(date).strftime("%Y-%m-%d")
@@ -219,9 +423,29 @@ def discover_daily_stock_lists(
                 )
         output = _concat(parts, RAW_STOCK_LIST_COLUMNS).drop_duplicates(["date", "code"])
         _write_parquet(path, output)
-        return output, {"stock_list_cache_hit": 0, "stock_list_cache_miss": 1, "empty_stock_list_dates": [], "dry_run_symbol_mode": 1}
+        _write_json(
+            meta_path,
+            {
+                **_config_cache_signature(config, year=year, start_date=config.start_date, end_date=config.end_date),
+                "complete": True,
+                "row_count": int(len(output)),
+                "code_count": int(output["code"].nunique()) if not output.empty else 0,
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+            },
+        )
+        return output, {
+            "stock_list_cache_hit": 0,
+            "stock_list_cache_miss": 1,
+            "empty_stock_list_dates": [],
+            "dry_run_symbol_mode": 1,
+            **_cache_compat_summary(meta, compatible),
+        }
 
-    progress = {"year": year, "completed_stock_dates": [], "completed_bar_codes": [], "failures": []} if config.force_refresh else _read_progress(config.output_root, year)
+    signature = _config_cache_signature(config, year=year, start_date=config.start_date, end_date=config.end_date)
+    progress = _new_progress(year, signature) if config.force_refresh else _read_progress(config.output_root, year)
+    resume_parts = not config.force_refresh and _progress_compatible(progress, config, year=year, start_date=config.start_date, end_date=config.end_date)
+    if not resume_parts:
+        progress = _new_progress(year, signature)
     completed_dates = set(progress.get("completed_stock_dates", []))
     touched_months: set[int] = set()
     for date in dates:
@@ -244,7 +468,7 @@ def discover_daily_stock_lists(
             frame = frame[frame["code"].isin(explicit_symbols)]
         parts.append(frame)
         touched_months.add(pd.Timestamp(date).month)
-        existing_month = pd.DataFrame(columns=RAW_STOCK_LIST_COLUMNS) if config.force_refresh else _read_parquet_or_empty(month_path, RAW_STOCK_LIST_COLUMNS)
+        existing_month = _read_parquet_or_empty(month_path, RAW_STOCK_LIST_COLUMNS) if resume_parts else pd.DataFrame(columns=RAW_STOCK_LIST_COLUMNS)
         month_output = _concat([existing_month, frame], RAW_STOCK_LIST_COLUMNS).drop_duplicates(["date", "code"])
         _write_parquet(month_path, month_output)
         progress["completed_stock_dates"] = sorted(set(progress.get("completed_stock_dates", [])) | {date_str})
@@ -252,13 +476,32 @@ def discover_daily_stock_lists(
 
     months_to_read = sorted(touched_months) if config.force_refresh else list(range(1, 13))
     month_parts = [
-        _read_parquet_or_empty(_monthly_stock_list_cache_path(config.output_root, year, month), RAW_STOCK_LIST_COLUMNS)
+        (
+            _read_parquet_or_empty(_monthly_stock_list_cache_path(config.output_root, year, month), RAW_STOCK_LIST_COLUMNS)
+            if resume_parts
+            else pd.DataFrame(columns=RAW_STOCK_LIST_COLUMNS)
+        )
         for month in months_to_read
     ]
     output = _concat([*month_parts, *parts], RAW_STOCK_LIST_COLUMNS).drop_duplicates(["date", "code"])
     output = _filter_dates(output, config.start_date, config.end_date)
     _write_parquet(path, output)
-    return output, {"stock_list_cache_hit": 0, "stock_list_cache_miss": 1, "empty_stock_list_dates": empty_dates}
+    _write_json(
+        meta_path,
+        {
+            **_config_cache_signature(config, year=year, start_date=config.start_date, end_date=config.end_date),
+            "complete": True,
+            "row_count": int(len(output)),
+            "code_count": int(output["code"].nunique()) if not output.empty else 0,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        },
+    )
+    return output, {
+        "stock_list_cache_hit": 0,
+        "stock_list_cache_miss": 1,
+        "empty_stock_list_dates": empty_dates,
+        **_cache_compat_summary(meta, compatible),
+    }
 
 
 def update_security_master(
@@ -339,6 +582,27 @@ def update_security_master(
     }
 
 
+def update_security_master_from_basic(stock_lists: pd.DataFrame, security_master_all: pd.DataFrame, *, config: PitBuildConfig) -> tuple[pd.DataFrame, dict[str, Any]]:
+    path = _security_master_cache_path(config.output_root)
+    seen = _seen_ranges(stock_lists)
+    required_codes = set(seen["code"].astype(str).tolist())
+    selected = security_master_all[security_master_all["code"].isin(required_codes)].copy()
+    if not selected.empty and not seen.empty:
+        selected = selected.drop(columns=["first_seen_date", "last_seen_date"], errors="ignore").merge(seen, on="code", how="left")
+        selected["first_seen_date"] = selected["first_seen_date"].fillna("")
+        selected["last_seen_date"] = selected["last_seen_date"].fillna("")
+        selected = selected[SECURITY_MASTER_COLUMNS]
+    existing = _read_parquet_or_empty(path, SECURITY_MASTER_COLUMNS)
+    combined = _concat([existing, selected], SECURITY_MASTER_COLUMNS).drop_duplicates("code", keep="last")
+    _write_parquet(path, combined)
+    return selected.reset_index(drop=True), {
+        "security_master_cache_existing": len(existing) if not existing.empty else 0,
+        "security_master_new_queries": 0,
+        "basic_error_count": int((selected["basic_error"].fillna("") != "").sum()) if not selected.empty else 0,
+        "security_master_mode": "stock-basic-all",
+    }
+
+
 def _seen_ranges(stock_lists: pd.DataFrame) -> pd.DataFrame:
     if stock_lists.empty:
         return pd.DataFrame(columns=["code", "first_seen_date", "last_seen_date"])
@@ -358,57 +622,105 @@ def fetch_daily_bars(
     end_date: str,
 ) -> tuple[pd.DataFrame, list[dict[str, Any]], dict[str, int]]:
     path = _daily_bars_cache_path(config.output_root, year)
+    meta_path = _daily_bars_meta_path(config.output_root, year)
+    meta = _read_json_or_empty(meta_path)
+    compatible = _is_cache_compatible(meta, config, year=year, start_date=start_date, end_date=end_date)
+    expected_codes = sorted(set(codes))
+    if compatible and sorted(meta.get("codes", [])) != expected_codes:
+        compatible = False
     if path.exists() and not config.force_refresh:
-        frame = pd.read_parquet(path)
-        frame = _filter_dates(frame, start_date, end_date)
-        if config.symbols:
-            frame = frame[frame["code"].isin(set(config.symbols))].reset_index(drop=True)
-        return frame, [], {"daily_bars_cache_hit": 1, "daily_bars_cache_miss": 0}
+        if compatible:
+            frame = pd.read_parquet(path)
+            frame = _filter_dates(frame, start_date, end_date)
+            if config.symbols:
+                frame = frame[frame["code"].isin(set(config.symbols))].reset_index(drop=True)
+            return frame, [], {
+                "daily_bars_cache_hit": 1,
+                "daily_bars_cache_miss": 0,
+                **_cache_compat_summary(meta, compatible),
+            }
+        path.unlink(missing_ok=True)
 
     parts: list[pd.DataFrame] = []
     failures: list[dict[str, Any]] = []
-    progress = {"year": year, "completed_stock_dates": [], "completed_bar_codes": [], "failures": []} if config.force_refresh else _read_progress(config.output_root, year)
+    signature = _config_cache_signature(config, year=year, start_date=start_date, end_date=end_date)
+    progress = _new_progress(year, signature) if config.force_refresh else _read_progress(config.output_root, year)
+    resume_parts = not config.force_refresh and _progress_compatible(progress, config, year=year, start_date=start_date, end_date=end_date)
+    if not resume_parts:
+        progress = _new_progress(year, signature)
     completed_codes = set(progress.get("completed_bar_codes", []))
     batch_size = 50
     for batch_index, start in enumerate(range(0, len(codes), batch_size)):
         batch_codes = codes[start : start + batch_size]
         part_path = _daily_bars_part_cache_path(config.output_root, year, batch_index)
-        existing_part = pd.DataFrame(columns=DAILY_BARS_COLUMNS) if config.force_refresh else _read_parquet_or_empty(part_path, DAILY_BARS_COLUMNS)
+        existing_part = (
+            _read_parquet_or_empty(part_path, DAILY_BARS_COLUMNS)
+            if resume_parts
+            else pd.DataFrame(columns=DAILY_BARS_COLUMNS)
+        )
         batch_parts: list[pd.DataFrame] = [existing_part] if not existing_part.empty else []
         for code in batch_codes:
             if code in completed_codes and not existing_part.empty and code in set(existing_part["code"].astype(str)):
                 continue
+            progress["active_bar_code"] = code
+            _write_progress(config.output_root, year, progress)
             try:
                 raw = source.query_daily_bars(_std_to_baostock_code(code), start_date, end_date)
             except BaostockSourceError as exc:
                 failure = {"year": year, "code": code, "kind": "daily_fetch_error", "error": str(exc)}
                 failures.append(failure)
                 progress["failures"] = [*progress.get("failures", []), failure]
+                progress["active_bar_code"] = ""
                 _write_progress(config.output_root, year, progress)
                 continue
             if raw.empty:
                 failure = {"year": year, "code": code, "kind": "empty_daily_bars"}
                 failures.append(failure)
                 progress["failures"] = [*progress.get("failures", []), failure]
+                progress["active_bar_code"] = ""
                 _write_progress(config.output_root, year, progress)
                 continue
             frame = normalize_daily_bars(raw)
             batch_parts.append(frame)
+            batch_output = _concat(batch_parts, DAILY_BARS_COLUMNS).drop_duplicates(["date", "code"])
+            if not batch_output.empty:
+                _write_parquet(part_path, batch_output)
             progress["completed_bar_codes"] = sorted(set(progress.get("completed_bar_codes", [])) | {code})
+            progress["active_bar_code"] = ""
             _write_progress(config.output_root, year, progress)
         batch_output = _concat(batch_parts, DAILY_BARS_COLUMNS).drop_duplicates(["date", "code"])
         if not batch_output.empty:
             _write_parquet(part_path, batch_output)
             parts.append(batch_output)
 
-    part_paths = [] if config.force_refresh else sorted((_cache_root(config.output_root) / "daily_bars" / "parts" / f"year={year}").glob("batch=*.parquet"))
+    part_paths = (
+        []
+        if not resume_parts
+        else sorted((_cache_root(config.output_root) / "daily_bars" / "parts" / f"year={year}").glob("batch=*.parquet"))
+    )
     part_frames = [_read_parquet_or_empty(part_path, DAILY_BARS_COLUMNS) for part_path in part_paths]
     output = _concat([*part_frames, *parts], DAILY_BARS_COLUMNS).drop_duplicates(["date", "code"])
     output = _filter_dates(output, start_date, end_date)
     if codes:
         output = output[output["code"].isin(set(codes))].reset_index(drop=True)
     _write_parquet(path, output)
-    return output, failures, {"daily_bars_cache_hit": 0, "daily_bars_cache_miss": 1}
+    _write_json(
+        meta_path,
+        {
+            **_config_cache_signature(config, year=year, start_date=start_date, end_date=end_date),
+            "complete": True,
+            "codes": expected_codes,
+            "row_count": int(len(output)),
+            "code_count": int(output["code"].nunique()) if not output.empty else 0,
+            "failure_count": int(len(failures)),
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        },
+    )
+    return output, failures, {
+        "daily_bars_cache_hit": 0,
+        "daily_bars_cache_miss": 1,
+        **_cache_compat_summary(meta, compatible),
+    }
 
 
 def normalize_daily_bars(raw: pd.DataFrame) -> pd.DataFrame:
@@ -519,20 +831,34 @@ def discover(config: PitBuildConfig) -> dict[str, Any]:
     with BaostockSource(_source_config(config)) as source:
         trade_dates, trade_cache = _trade_dates(source, config)
         explicit = set(config.symbols) if config.symbols else None
+        security_master_all = None
+        basic_cache: dict[str, Any] = {}
+        if config.discovery_mode == "stock-basic":
+            security_master_all, basic_cache = _stock_basic_all(source, config)
         summaries: list[dict[str, Any]] = []
         for year in _years_between(config.start_date, config.end_date):
             start, end = _year_bounds(year, config.start_date, config.end_date)
             year_dates = _filter_dates(trade_dates, start, end)["date"]
-            stock_lists, summary = discover_daily_stock_lists(source, year_dates, config=config, year=year, explicit_symbols=explicit)
+            stock_lists, summary = discover_daily_stock_lists(
+                source,
+                year_dates,
+                config=config,
+                year=year,
+                explicit_symbols=explicit,
+                security_master=security_master_all,
+            )
             summaries.append({"year": year, "rows": len(stock_lists), **summary})
-        stock_lists = load_cached_stock_lists(config.output_root, _years_between(config.start_date, config.end_date), config.start_date, config.end_date)
-        security_master, security_summary = update_security_master(source, stock_lists, config=config)
+        stock_lists = load_cached_stock_lists(config.output_root, _years_between(config.start_date, config.end_date), config.start_date, config.end_date, config=config)
+        if security_master_all is not None:
+            security_master, security_summary = update_security_master_from_basic(stock_lists, security_master_all, config=config)
+        else:
+            security_master, security_summary = update_security_master(source, stock_lists, config=config)
         return {
             "command": "discover",
             "trade_dates": len(trade_dates),
             "stock_list_years": summaries,
             "security_master_rows": len(security_master),
-            "cache": trade_cache,
+            "cache": {**trade_cache, **basic_cache},
             "security": security_summary,
             "source_errors": source.errors,
         }
@@ -545,7 +871,7 @@ def fetch_bars(config: PitBuildConfig) -> dict[str, Any]:
         summaries: list[dict[str, Any]] = []
         for year in years:
             start, end = _year_bounds(year, config.start_date, config.end_date)
-            stock_lists = load_cached_stock_lists(config.output_root, [year], start, end)
+            stock_lists = load_cached_stock_lists(config.output_root, [year], start, end, config=config)
             codes = sorted(stock_lists["code"].unique().tolist())
             if config.max_symbols > 0:
                 codes = codes[: config.max_symbols]
@@ -571,17 +897,32 @@ def build_year(config: PitBuildConfig) -> dict[str, Any]:
         year=year,
         force_refresh=config.force_refresh,
         request_interval_seconds=config.request_interval_seconds,
+        discovery_mode=config.discovery_mode,
     )
     with BaostockSource(_source_config(year_config)) as source:
         trade_dates, trade_cache = _trade_dates(source, year_config)
         explicit = set(config.symbols) if config.symbols else None
-        stock_lists, stock_cache = discover_daily_stock_lists(source, trade_dates["date"], config=year_config, year=year, explicit_symbols=explicit)
+        security_master_all = None
+        basic_cache: dict[str, Any] = {}
+        if year_config.discovery_mode == "stock-basic":
+            security_master_all, basic_cache = _stock_basic_all(source, year_config)
+        stock_lists, stock_cache = discover_daily_stock_lists(
+            source,
+            trade_dates["date"],
+            config=year_config,
+            year=year,
+            explicit_symbols=explicit,
+            security_master=security_master_all,
+        )
         if stock_lists.empty and not trade_dates.empty:
             raise BaostockSourceError(f"empty stock list for year {year}")
         if config.max_symbols > 0:
             codes = sorted(stock_lists["code"].unique().tolist())[: config.max_symbols]
             stock_lists = stock_lists[stock_lists["code"].isin(codes)].reset_index(drop=True)
-        security_master, security_summary = update_security_master(source, stock_lists, config=year_config)
+        if security_master_all is not None:
+            security_master, security_summary = update_security_master_from_basic(stock_lists, security_master_all, config=year_config)
+        else:
+            security_master, security_summary = update_security_master(source, stock_lists, config=year_config)
         codes = sorted(stock_lists["code"].unique().tolist())
         daily_bars, failures, bar_cache = fetch_daily_bars(source, codes, config=year_config, year=year, start_date=start, end_date=end)
         _assert_failure_rate(year, len(codes), failures)
@@ -594,7 +935,7 @@ def build_year(config: PitBuildConfig) -> dict[str, Any]:
             failures=failures,
             source_version=source.version,
             source_errors=source.errors,
-            extra_quality={**trade_cache, **stock_cache, **bar_cache, **security_summary},
+            extra_quality={**trade_cache, **basic_cache, **stock_cache, **bar_cache, **security_summary},
         )
         return manifest
 
@@ -602,7 +943,7 @@ def build_year(config: PitBuildConfig) -> dict[str, Any]:
 def assemble(config: PitBuildConfig) -> dict[str, Any]:
     years = [config.year] if config.year else _years_between(config.start_date, config.end_date)
     trade_dates = _filter_dates(_read_parquet_or_empty(_trade_dates_cache_path(config.output_root), ["date", "is_trading_day"]), config.start_date, config.end_date)
-    stock_lists = load_cached_stock_lists(config.output_root, years, config.start_date, config.end_date)
+    stock_lists = load_cached_stock_lists(config.output_root, years, config.start_date, config.end_date, config=config)
     if config.max_symbols > 0:
         codes = sorted(stock_lists["code"].unique().tolist())[: config.max_symbols]
         stock_lists = stock_lists[stock_lists["code"].isin(codes)].reset_index(drop=True)
@@ -611,9 +952,10 @@ def assemble(config: PitBuildConfig) -> dict[str, Any]:
     security_master = _read_parquet_or_empty(_security_master_cache_path(config.output_root), SECURITY_MASTER_COLUMNS)
     if not stock_lists.empty:
         security_master = security_master[security_master["code"].isin(set(stock_lists["code"]))].reset_index(drop=True)
-    daily_bars = load_cached_daily_bars(config.output_root, years, config.start_date, config.end_date)
+    daily_bars = load_cached_daily_bars(config.output_root, years, config.start_date, config.end_date, config=config)
     if not stock_lists.empty:
         daily_bars = daily_bars[daily_bars["code"].isin(set(stock_lists["code"]))].reset_index(drop=True)
+    trade_dates = _repair_trade_dates_from_stock_lists(trade_dates, stock_lists, config.start_date, config.end_date)
     if trade_dates.empty:
         raise BaostockSourceError("cannot assemble: trade date cache is empty")
     if stock_lists.empty:
@@ -631,16 +973,47 @@ def assemble(config: PitBuildConfig) -> dict[str, Any]:
     )
 
 
+def _repair_trade_dates_from_stock_lists(
+    trade_dates: pd.DataFrame,
+    stock_lists: pd.DataFrame,
+    start_date: str,
+    end_date: str,
+) -> pd.DataFrame:
+    if stock_lists.empty:
+        return trade_dates
+    derived_dates = pd.Series(pd.to_datetime(stock_lists["date"]).dropna().unique())
+    derived_dates = derived_dates[(derived_dates >= pd.Timestamp(start_date)) & (derived_dates <= pd.Timestamp(end_date))]
+    if derived_dates.empty:
+        return trade_dates
+    if not trade_dates.empty:
+        cached_dates = set(pd.to_datetime(trade_dates["date"]).dt.normalize())
+        derived_set = set(pd.to_datetime(derived_dates).dt.normalize())
+        if derived_set.issubset(cached_dates):
+            return trade_dates.sort_values("date").reset_index(drop=True)
+    return pd.DataFrame({"date": pd.to_datetime(sorted(derived_dates)), "is_trading_day": True})
+
+
 def build_snapshot(config: PitBuildConfig) -> dict[str, Any]:
     with BaostockSource(_source_config(config)) as source:
         trade_dates, trade_cache = _trade_dates(source, config)
         explicit = set(config.symbols) if config.symbols else None
+        security_master_all = None
+        basic_cache: dict[str, Any] = {}
+        if config.discovery_mode == "stock-basic":
+            security_master_all, basic_cache = _stock_basic_all(source, config)
         stock_parts: list[pd.DataFrame] = []
         stock_quality: dict[str, Any] = {}
         for year in _years_between(config.start_date, config.end_date):
             start, end = _year_bounds(year, config.start_date, config.end_date)
             year_dates = _filter_dates(trade_dates, start, end)["date"]
-            stock_lists, summary = discover_daily_stock_lists(source, year_dates, config=config, year=year, explicit_symbols=explicit)
+            stock_lists, summary = discover_daily_stock_lists(
+                source,
+                year_dates,
+                config=config,
+                year=year,
+                explicit_symbols=explicit,
+                security_master=security_master_all,
+            )
             stock_quality[f"stock_list_year_{year}"] = summary
             stock_parts.append(stock_lists)
         stock_lists = _concat(stock_parts, RAW_STOCK_LIST_COLUMNS)
@@ -649,7 +1022,10 @@ def build_snapshot(config: PitBuildConfig) -> dict[str, Any]:
         if config.max_symbols > 0:
             codes = sorted(stock_lists["code"].unique().tolist())[: config.max_symbols]
             stock_lists = stock_lists[stock_lists["code"].isin(codes)].reset_index(drop=True)
-        security_master, security_summary = update_security_master(source, stock_lists, config=config)
+        if security_master_all is not None:
+            security_master, security_summary = update_security_master_from_basic(stock_lists, security_master_all, config=config)
+        else:
+            security_master, security_summary = update_security_master(source, stock_lists, config=config)
         bar_parts: list[pd.DataFrame] = []
         failures: list[dict[str, Any]] = []
         bar_quality: dict[str, Any] = {}
@@ -672,7 +1048,7 @@ def build_snapshot(config: PitBuildConfig) -> dict[str, Any]:
             failures=failures,
             source_version=source.version,
             source_errors=source.errors,
-            extra_quality={**trade_cache, **security_summary, **stock_quality, **bar_quality},
+            extra_quality={**trade_cache, **basic_cache, **security_summary, **stock_quality, **bar_quality},
         )
 
 
@@ -690,6 +1066,7 @@ def assemble_snapshot_from_frames(
 ) -> dict[str, Any]:
     if len(trade_dates) == 0:
         raise BaostockSourceError("trade date count is zero")
+    daily_bars = _filter_bars_to_stock_lists(daily_bars, stock_lists)
     daily_universe, daily_status = build_daily_universe(stock_lists, security_master, daily_bars)
     snapshot_id = config.snapshot_id or f"baostock_daily_mainboard_v2_pit_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     snapshot_root = config.output_root / snapshot_id
@@ -711,6 +1088,13 @@ def assemble_snapshot_from_frames(
     quality_report = _quality_report(daily_universe, daily_status, failures, source_errors, extra_quality)
     _write_outputs(snapshot_root, config.output_root, security_master, stock_lists, daily_universe, daily_bars, daily_status, manifest, quality_report)
     return manifest
+
+
+def _filter_bars_to_stock_lists(daily_bars: pd.DataFrame, stock_lists: pd.DataFrame) -> pd.DataFrame:
+    if daily_bars.empty or stock_lists.empty:
+        return daily_bars
+    keys = stock_lists[["date", "code"]].drop_duplicates()
+    return daily_bars.merge(keys, on=["date", "code"], how="inner").reset_index(drop=True)
 
 
 def _assert_failure_rate(year: int, code_count: int, failures: list[dict[str, Any]]) -> None:
@@ -871,13 +1255,70 @@ def _write_outputs(
     (output_root / "latest_manifest.json").write_text(json.dumps(latest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def load_cached_stock_lists(output_root: Path, years: list[int], start_date: str, end_date: str) -> pd.DataFrame:
-    parts = [_read_parquet_or_empty(_stock_list_cache_path(output_root, year), RAW_STOCK_LIST_COLUMNS) for year in years]
+def _read_validated_year_cache(
+    output_root: Path,
+    year: int,
+    start_date: str,
+    end_date: str,
+    *,
+    config: PitBuildConfig | None,
+    data_path_fn: Any,
+    meta_path_fn: Any,
+    columns: list[str],
+) -> pd.DataFrame:
+    path = data_path_fn(output_root, year)
+    if config is not None:
+        meta = _read_json_or_empty(meta_path_fn(output_root, year))
+        if not _is_cache_compatible(meta, config, year=year, start_date=start_date, end_date=end_date):
+            return pd.DataFrame(columns=columns)
+    return _read_parquet_or_empty(path, columns)
+
+
+def load_cached_stock_lists(
+    output_root: Path,
+    years: list[int],
+    start_date: str,
+    end_date: str,
+    *,
+    config: PitBuildConfig | None = None,
+) -> pd.DataFrame:
+    parts = [
+        _read_validated_year_cache(
+            output_root,
+            year,
+            max(start_date, f"{year}-01-01"),
+            min(end_date, f"{year}-12-31"),
+            config=config,
+            data_path_fn=_stock_list_cache_path,
+            meta_path_fn=_stock_list_meta_path,
+            columns=RAW_STOCK_LIST_COLUMNS,
+        )
+        for year in years
+    ]
     return _filter_dates(_concat(parts, RAW_STOCK_LIST_COLUMNS), start_date, end_date)
 
 
-def load_cached_daily_bars(output_root: Path, years: list[int], start_date: str, end_date: str) -> pd.DataFrame:
-    parts = [_read_parquet_or_empty(_daily_bars_cache_path(output_root, year), DAILY_BARS_COLUMNS) for year in years]
+def load_cached_daily_bars(
+    output_root: Path,
+    years: list[int],
+    start_date: str,
+    end_date: str,
+    *,
+    config: PitBuildConfig | None = None,
+) -> pd.DataFrame:
+    parts = [
+        _read_validated_year_cache(
+            output_root,
+            year,
+            max(start_date, f"{year}-01-01"),
+            min(end_date, f"{year}-12-31"),
+            config=config,
+            data_path_fn=_daily_bars_cache_path,
+            meta_path_fn=_daily_bars_meta_path,
+            columns=DAILY_BARS_COLUMNS,
+        )
+        for year in years
+    ]
     return _filter_dates(_concat(parts, DAILY_BARS_COLUMNS), start_date, end_date)
 
 
@@ -901,6 +1342,7 @@ def build_parser() -> argparse.ArgumentParser:
         cmd.add_argument("--year", type=int, default=0)
         cmd.add_argument("--force-refresh", action="store_true")
         cmd.add_argument("--request-interval-seconds", type=float, default=0.0)
+        cmd.add_argument("--discovery-mode", choices=["stock-basic", "daily"], default="stock-basic")
     return parser
 
 
@@ -921,6 +1363,7 @@ def main(argv: list[str] | None = None) -> int:
         year=args.year,
         force_refresh=args.force_refresh,
         request_interval_seconds=args.request_interval_seconds,
+        discovery_mode=args.discovery_mode,
     )
     if args.command in {"dry-run", "build", "refresh", "rebuild"}:
         manifest = build_snapshot(config)

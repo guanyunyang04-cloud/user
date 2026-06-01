@@ -1,16 +1,23 @@
 from __future__ import annotations
 
+import json
+
 import pandas as pd
 
 from traditional_quant_research.dataset_builder_v2 import (
     _baostock_to_std_code,
     _std_to_baostock_code,
     _assert_failure_rate,
+    _config_cache_signature,
+    _daily_bars_meta_path,
+    _stock_list_meta_path,
     BaostockSourceError,
     PitBuildConfig,
     assemble,
     build_daily_universe,
+    derive_stock_lists_from_basic,
     discover_daily_stock_lists,
+    normalize_stock_basic,
 )
 
 
@@ -19,6 +26,22 @@ def test_baostock_code_conversion_round_trip() -> None:
     assert _baostock_to_std_code("sz.000001") == "000001.SZ"
     assert _std_to_baostock_code("600000.SH") == "sh.600000"
     assert _std_to_baostock_code("000001.SZ") == "sz.000001"
+
+
+def test_stock_basic_derives_point_in_time_stock_lists() -> None:
+    raw = pd.DataFrame(
+        [
+            {"code": "sh.600000", "code_name": "浦发银行", "ipoDate": "1999-11-10", "outDate": "", "type": "1", "status": "1"},
+            {"code": "sz.300750", "code_name": "宁德时代", "ipoDate": "2018-06-11", "outDate": "", "type": "1", "status": "1"},
+            {"code": "sh.600001", "code_name": "退市样例", "ipoDate": "1990-01-01", "outDate": "2015-12-31", "type": "1", "status": "0"},
+            {"code": "sh.000001", "code_name": "上证指数", "ipoDate": "1991-07-15", "outDate": "", "type": "2", "status": "1"},
+        ]
+    )
+    basic = normalize_stock_basic(raw)
+
+    stock_lists = derive_stock_lists_from_basic(basic, pd.Series(pd.to_datetime(["2016-01-04"])))
+
+    assert stock_lists["code"].tolist() == ["600000.SH"]
 
 
 def test_build_daily_universe_marks_pit_statuses() -> None:
@@ -88,10 +111,22 @@ def test_assemble_reads_yearly_cache(tmp_path) -> None:
     cache = root / "cache"
     (cache / "daily_stock_lists").mkdir(parents=True)
     (cache / "daily_bars").mkdir(parents=True)
+    config = PitBuildConfig(output_root=root, start_date="2026-01-02", end_date="2026-01-02", snapshot_id="fixture")
     pd.DataFrame([{"date": pd.Timestamp("2026-01-02"), "is_trading_day": True}]).to_parquet(cache / "trade_dates.parquet", index=False)
     pd.DataFrame(
         [{"date": pd.Timestamp("2026-01-02"), "code": "600000.SH", "name_on_date": "浦发银行", "query_all_trade_status": "1"}]
     ).to_parquet(cache / "daily_stock_lists" / "year=2026.parquet", index=False)
+    _stock_list_meta_path(root, 2026).parent.mkdir(parents=True)
+    _stock_list_meta_path(root, 2026).write_text(
+        json.dumps(
+            {
+                **_config_cache_signature(config, year=2026, start_date="2026-01-02", end_date="2026-01-02"),
+                "complete": True,
+                "row_count": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
     pd.DataFrame(
         [
             {
@@ -125,12 +160,55 @@ def test_assemble_reads_yearly_cache(tmp_path) -> None:
             }
         ]
     ).to_parquet(cache / "daily_bars" / "year=2026.parquet", index=False)
+    _daily_bars_meta_path(root, 2026).parent.mkdir(parents=True)
+    _daily_bars_meta_path(root, 2026).write_text(
+        json.dumps(
+            {
+                **_config_cache_signature(config, year=2026, start_date="2026-01-02", end_date="2026-01-02"),
+                "complete": True,
+                "codes": ["600000.SH"],
+                "row_count": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
 
-    manifest = assemble(PitBuildConfig(output_root=root, start_date="2026-01-02", end_date="2026-01-02", snapshot_id="fixture"))
+    manifest = assemble(config)
 
     assert manifest["snapshot_id"] == "fixture"
     assert manifest["quality"]["tradeable_rows"] == 1
     assert (root / "fixture" / "daily_universe.parquet").exists()
+
+
+def test_assemble_ignores_incompatible_sample_cache(tmp_path) -> None:
+    root = tmp_path / "v2"
+    cache = root / "cache"
+    (cache / "daily_stock_lists").mkdir(parents=True)
+    (cache / "daily_bars").mkdir(parents=True)
+    full_config = PitBuildConfig(output_root=root, start_date="2026-01-02", end_date="2026-01-02")
+    sample_config = PitBuildConfig(output_root=root, start_date="2026-01-02", end_date="2026-01-02", max_symbols=20)
+    pd.DataFrame([{"date": pd.Timestamp("2026-01-02"), "is_trading_day": True}]).to_parquet(cache / "trade_dates.parquet", index=False)
+    pd.DataFrame(
+        [{"date": pd.Timestamp("2026-01-02"), "code": "600000.SH", "name_on_date": "浦发银行", "query_all_trade_status": "1"}]
+    ).to_parquet(cache / "daily_stock_lists" / "year=2026.parquet", index=False)
+    _stock_list_meta_path(root, 2026).parent.mkdir(parents=True)
+    _stock_list_meta_path(root, 2026).write_text(
+        json.dumps(
+            {
+                **_config_cache_signature(sample_config, year=2026, start_date="2026-01-02", end_date="2026-01-02"),
+                "complete": True,
+                "row_count": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        assemble(full_config)
+    except BaostockSourceError as exc:
+        assert "stock list cache is empty" in str(exc)
+    else:
+        raise AssertionError("expected incompatible sample cache to be ignored")
 
 
 class FakeStockListSource:
@@ -146,8 +224,18 @@ def test_discover_daily_stock_lists_resumes_completed_dates(tmp_path) -> None:
     root = tmp_path / "v2"
     progress = root / "cache" / "progress"
     progress.mkdir(parents=True)
+    config = PitBuildConfig(output_root=root, start_date="2026-01-02", end_date="2026-01-05", discovery_mode="daily")
     (progress / "year=2026.json").write_text(
-        '{"year": 2026, "completed_stock_dates": ["2026-01-02"], "completed_bar_codes": [], "failures": []}',
+        json.dumps(
+            {
+                "year": 2026,
+                "completed_stock_dates": ["2026-01-02"],
+                "completed_bar_codes": [],
+                "failures": [],
+                "signature": _config_cache_signature(config, year=2026, start_date="2026-01-02", end_date="2026-01-05"),
+            },
+            ensure_ascii=False,
+        ),
         encoding="utf-8",
     )
     part_dir = root / "cache" / "daily_stock_lists" / "parts" / "year=2026"
@@ -160,7 +248,7 @@ def test_discover_daily_stock_lists_resumes_completed_dates(tmp_path) -> None:
     frame, summary = discover_daily_stock_lists(
         source,
         pd.Series(pd.to_datetime(["2026-01-02", "2026-01-05"])),
-        config=PitBuildConfig(output_root=root, start_date="2026-01-02", end_date="2026-01-05"),
+        config=config,
         year=2026,
         explicit_symbols=None,
     )

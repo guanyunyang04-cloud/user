@@ -25,6 +25,8 @@ class PoolViewSpec:
     exchange_suffix: str = ""
     symbols: tuple[str, ...] = ()
     exclude_symbol_prefixes: tuple[str, ...] = ()
+    status_sidecar_dataset_id: str = ""
+    require_tradeable: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -34,6 +36,8 @@ class PoolViewSpec:
         payload["exchange_suffix"] = str(payload["exchange_suffix"] or "").strip().upper()
         payload["symbols"] = tuple(_normalize_symbols(payload.get("symbols", ())))
         payload["exclude_symbol_prefixes"] = tuple(_normalize_symbol_prefixes(payload.get("exclude_symbol_prefixes", ())))
+        payload["status_sidecar_dataset_id"] = str(payload.get("status_sidecar_dataset_id", "") or "").strip()
+        payload["require_tradeable"] = bool(payload.get("require_tradeable", False))
         payload["rebalance_every_days"] = int(payload["rebalance_every_days"] or 21)
         payload["adv_window"] = int(payload["adv_window"] or 20)
         payload["min_price"] = float(payload["min_price"])
@@ -129,6 +133,42 @@ def _pivot_market(market: pd.DataFrame, column: str) -> pd.DataFrame:
     return out
 
 
+def _read_status_sidecar_tradeable(
+    lake: ResearchDataLake,
+    dataset_id: str,
+    *,
+    source_market_dataset_id: str,
+    start_date: str,
+    end_date: str,
+) -> pd.DataFrame:
+    metadata = lake.describe_dataset(str(dataset_id))
+    parameters = dict(metadata.get("parameters", {}) or {})
+    sidecar_source_id = str(parameters.get("source_market_dataset_id", "") or "")
+    if sidecar_source_id and sidecar_source_id != str(source_market_dataset_id):
+        raise ValueError(
+            "pool_view_blocker: status sidecar source_market_dataset_id mismatch: "
+            f"status_sidecar_dataset_id={dataset_id} source_market_dataset_id={sidecar_source_id} "
+            f"expected={source_market_dataset_id}"
+        )
+    path = str(dict(metadata.get("content_paths", {}) or {}).get("silver_domain_data", "") or "")
+    if not path or not Path(path).exists():
+        raise ValueError(f"pool_view_blocker: status sidecar has no silver_domain_data: {dataset_id}")
+    frame = pd.read_parquet(path)
+    required = {"trade_date", "symbol", "is_tradeable"}
+    missing = sorted(required - set(frame.columns))
+    if missing:
+        raise ValueError(f"pool_view_blocker: status sidecar missing columns {missing}: {dataset_id}")
+    frame["trade_date"] = pd.to_datetime(frame["trade_date"], errors="coerce")
+    frame["symbol"] = frame["symbol"].astype(str).str.strip().str.upper()
+    start = pd.Timestamp(start_date or metadata.get("start_date", "") or frame["trade_date"].min())
+    end = pd.Timestamp(end_date or metadata.get("end_date", "") or frame["trade_date"].max())
+    frame = frame.loc[(frame["trade_date"] >= start) & (frame["trade_date"] <= end)].copy()
+    pivot = frame.pivot(index="trade_date", columns="symbol", values="is_tradeable").sort_index()
+    pivot.index.name = None
+    pivot.columns.name = None
+    return pivot.fillna(False).astype(bool)
+
+
 def _metadata_summary(membership: pd.DataFrame, view_name: str) -> pd.DataFrame:
     return pd.DataFrame(
         {
@@ -141,6 +181,7 @@ def _metadata_summary(membership: pd.DataFrame, view_name: str) -> pd.DataFrame:
 
 def _build_membership_for_spec(
     *,
+    lake: ResearchDataLake,
     market: pd.DataFrame,
     spec: PoolViewSpec,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, Any]]:
@@ -158,14 +199,33 @@ def _build_membership_for_spec(
         "view_name": view_name,
         "exclude_symbol_prefixes": list(payload.get("exclude_symbol_prefixes", ())),
     }
+    status_tradeable = pd.DataFrame(True, index=dates, columns=available_symbols)
+    status_sidecar_dataset_id = str(payload.get("status_sidecar_dataset_id", "") or "")
+    if status_sidecar_dataset_id:
+        status_tradeable = _read_status_sidecar_tradeable(
+            lake,
+            status_sidecar_dataset_id,
+            source_market_dataset_id=str(payload["source_market_dataset_id"]),
+            start_date=str(payload.get("start_date", "") or ""),
+            end_date=str(payload.get("end_date", "") or ""),
+        ).reindex(index=dates, columns=available_symbols, fill_value=False)
+        source_cache["status_sidecar_dataset_id"] = status_sidecar_dataset_id
+        source_cache["status_tradeable_true_cells"] = int(status_tradeable.to_numpy(dtype=bool).sum())
 
     if view_kind in {"learned_all_a", "all_a"}:
         membership = close.notna().astype(bool)
-    elif view_kind == "rolling_liquidity":
+    elif view_kind in {"rolling_liquidity", "rolling_liquidity_tradeable_mainboard"}:
         amount = _pivot_market(market, "amount").reindex(columns=available_symbols)
+        close_for_pool = close
+        amount_for_pool = amount
+        if view_kind == "rolling_liquidity_tradeable_mainboard":
+            if not status_sidecar_dataset_id:
+                raise ValueError("pool_view_blocker: rolling_liquidity_tradeable_mainboard requires status_sidecar_dataset_id")
+            close_for_pool = close.where(status_tradeable)
+            amount_for_pool = amount.where(status_tradeable)
         artifact = build_rolling_liquidity_membership(
-            close_frame=close,
-            amount_frame=amount,
+            close_frame=close_for_pool,
+            amount_frame=amount_for_pool,
             pool_name=str(payload["pool_name"] or payload["view_name"]).replace("rolling_", ""),
             signal_start_date=str(payload["start_date"] or ""),
             signal_end_date=str(payload["end_date"] or ""),
@@ -175,6 +235,8 @@ def _build_membership_for_spec(
             max_price=float(payload["max_price"]),
         )
         membership = artifact.membership_frame.reindex(index=dates, columns=available_symbols, fill_value=False).astype(bool)
+        if view_kind == "rolling_liquidity_tradeable_mainboard":
+            membership = (membership & status_tradeable.reindex(index=dates, columns=available_symbols, fill_value=False)).astype(bool)
         schedule = artifact.schedule_df
         source_cache["rolling_pool_summary"] = {
             "pool_name": artifact.pool_name,
@@ -221,7 +283,7 @@ def build_pool_view_from_policy_bundle(
         start_date=str(payload.get("start_date", "") or ""),
         end_date=str(payload.get("end_date", "") or ""),
     )
-    membership, schedule, summary, source_cache = _build_membership_for_spec(market=market, spec=resolved)
+    membership, schedule, summary, source_cache = _build_membership_for_spec(lake=lake, market=market, spec=resolved)
     return lake.save_pool_view(
         spec=payload,
         membership_frame=membership,

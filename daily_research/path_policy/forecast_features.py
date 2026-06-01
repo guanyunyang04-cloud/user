@@ -21,6 +21,7 @@ FORECAST_FEATURE_PROFILES: tuple[str, ...] = (
     "raw_kline_context_sector_relative_v1",
     "raw_kline_context_regime_v1",
     "raw_kline_context_sector_relative_regime_v1",
+    "raw_kline_context_v2_tradeable_amount_checked",
 )
 DEFAULT_FORECAST_FEATURE_PROFILE = "raw_kline_context_v1"
 DEFAULT_FORECAST_MAX_FEATURE_COLUMNS = 192
@@ -33,6 +34,7 @@ RAW_FRAME_PROFILES = {
     "raw_kline_context_sector_relative_v1",
     "raw_kline_context_regime_v1",
     "raw_kline_context_sector_relative_regime_v1",
+    "raw_kline_context_v2_tradeable_amount_checked",
 }
 CONTEXT_FRAME_PROFILES = {
     "raw_kline_context_v1",
@@ -41,11 +43,13 @@ CONTEXT_FRAME_PROFILES = {
     "raw_kline_context_sector_relative_v1",
     "raw_kline_context_regime_v1",
     "raw_kline_context_sector_relative_regime_v1",
+    "raw_kline_context_v2_tradeable_amount_checked",
 }
 HISTORY_FRAME_PROFILES = {
     "raw_kline_context_sector_relative_v1",
     "raw_kline_context_regime_v1",
     "raw_kline_context_sector_relative_regime_v1",
+    "raw_kline_context_v2_tradeable_amount_checked",
 }
 SECTOR_CONTEXT_PROFILES = {"raw_kline_context_sector_v1"}
 SECTOR_RELATIVE_PROFILES = {
@@ -55,12 +59,15 @@ SECTOR_RELATIVE_PROFILES = {
 REGIME_PROFILES = {
     "raw_kline_context_regime_v1",
     "raw_kline_context_sector_relative_regime_v1",
+    "raw_kline_context_v2_tradeable_amount_checked",
 }
+AMOUNT_CHECKED_PROFILES = {"raw_kline_context_v2_tradeable_amount_checked"}
 NO_ALPHA_CONTRACT_PROFILES = {
     "raw_kline_context_no_alpha_prior_v1",
     "raw_kline_context_sector_relative_v1",
     "raw_kline_context_regime_v1",
     "raw_kline_context_sector_relative_regime_v1",
+    "raw_kline_context_v2_tradeable_amount_checked",
 }
 
 
@@ -115,6 +122,63 @@ def _bucket_frame(frame: pd.DataFrame, buckets: int = 5) -> pd.DataFrame:
     return bucket.where(rank.notna())
 
 
+def _amount_unit_audit(amount: pd.DataFrame, close: pd.DataFrame, volume: pd.DataFrame) -> dict[str, Any]:
+    amount_float = amount.astype(float)
+    close_float = close.astype(float)
+    volume_float = volume.astype(float)
+    valid = amount_float.gt(0.0) & close_float.gt(0.0) & volume_float.gt(0.0)
+    ratio = amount_float.where(valid).div(close_float.where(valid).mul(volume_float.where(valid)))
+    clean = ratio.replace([np.inf, -np.inf], np.nan).stack().dropna()
+    if clean.empty:
+        return {
+            "amount_unit_policy": "unknown_unit",
+            "amount_unit_factor": 1.0,
+            "amount_consistency_median": 0.0,
+            "amount_consistency_p95_abs_log_error": 0.0,
+            "amount_unit_status": "blocked_no_valid_ratio",
+        }
+    median = float(clean.median())
+    factor = 1.0
+    policy = "as_is"
+    status = "ok"
+    if 0.5 <= median <= 2.0:
+        policy = "as_is"
+    elif 5000.0 <= median <= 20000.0:
+        policy = "divide_by_10000"
+        factor = 1.0 / 10000.0
+        status = "normalized"
+    elif 0.00005 <= median <= 0.0002:
+        policy = "multiply_by_10000"
+        factor = 10000.0
+        status = "normalized"
+    else:
+        policy = "unknown_unit"
+        status = "degraded_unknown_unit"
+    positive = clean.astype(float).loc[clean.astype(float) > 0.0]
+    log_error = np.log10(positive).abs().replace([np.inf, -np.inf], np.nan).dropna()
+    return {
+        "amount_unit_policy": policy,
+        "amount_unit_factor": float(factor),
+        "amount_consistency_median": median,
+        "amount_consistency_p95_abs_log_error": float(log_error.quantile(0.95)) if not log_error.empty else 0.0,
+        "amount_unit_status": status,
+    }
+
+
+def _amount_for_feature_profile(prepared: PreparedPolicyInputs, feature_profile: str) -> tuple[pd.DataFrame, dict[str, Any]]:
+    base = prepared.amount.astype(float)
+    audit = _amount_unit_audit(base, prepared.close.astype(float), prepared.volume.astype(float))
+    if str(feature_profile) in AMOUNT_CHECKED_PROFILES:
+        return base.mul(float(audit.get("amount_unit_factor", 1.0) or 1.0)), audit
+    return base, {
+        "amount_unit_policy": "not_checked_for_profile",
+        "amount_unit_factor": 1.0,
+        "amount_consistency_median": audit.get("amount_consistency_median", 0.0),
+        "amount_consistency_p95_abs_log_error": audit.get("amount_consistency_p95_abs_log_error", 0.0),
+        "amount_unit_status": "not_applied",
+    }
+
+
 def _peer_adv_context(*, returns: dict[int, pd.DataFrame], adv_bucket: pd.DataFrame) -> dict[str, pd.DataFrame]:
     out: dict[str, pd.DataFrame] = {}
     for horizon in (1, 5, 20):
@@ -155,13 +219,13 @@ def _alpha_dependent_column(column: str) -> bool:
     )
 
 
-def _raw_kline_feature_frames(prepared: PreparedPolicyInputs) -> dict[str, pd.DataFrame]:
+def _raw_kline_feature_frames(prepared: PreparedPolicyInputs, *, feature_profile: str = DEFAULT_FORECAST_FEATURE_PROFILE) -> dict[str, pd.DataFrame]:
     open_ = prepared.open_.astype(float)
     high = prepared.high.astype(float)
     low = prepared.low.astype(float)
     close = prepared.close.astype(float)
     volume = prepared.volume.astype(float)
-    amount = prepared.amount.astype(float)
+    amount, _amount_audit = _amount_for_feature_profile(prepared, feature_profile)
     prev_close = close.shift(1)
     high_low_range = high.sub(low).replace(0.0, np.nan)
     max_open_close = open_.where(open_ >= close, close)
@@ -187,9 +251,9 @@ def _raw_kline_feature_frames(prepared: PreparedPolicyInputs) -> dict[str, pd.Da
     return {key: value.replace([np.inf, -np.inf], np.nan) for key, value in frames.items()}
 
 
-def _context_feature_frames(prepared: PreparedPolicyInputs, raw_frames: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
+def _context_feature_frames(prepared: PreparedPolicyInputs, raw_frames: dict[str, pd.DataFrame], *, feature_profile: str = DEFAULT_FORECAST_FEATURE_PROFILE) -> dict[str, pd.DataFrame]:
     close = prepared.close.astype(float)
-    amount = prepared.amount.astype(float)
+    amount, _amount_audit = _amount_for_feature_profile(prepared, feature_profile)
     columns = [str(item) for item in close.columns]
     membership = prepared.membership_frame.reindex(index=close.index, columns=columns, fill_value=False).astype(bool)
     returns = {
@@ -378,9 +442,9 @@ def _sector_relative_feature_frames(prepared: PreparedPolicyInputs) -> dict[str,
     }
 
 
-def _regime_feature_frames(prepared: PreparedPolicyInputs, raw_frames: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
+def _regime_feature_frames(prepared: PreparedPolicyInputs, raw_frames: dict[str, pd.DataFrame], *, feature_profile: str = DEFAULT_FORECAST_FEATURE_PROFILE) -> dict[str, pd.DataFrame]:
     close = prepared.close.astype(float)
-    amount = prepared.amount.astype(float)
+    amount, _amount_audit = _amount_for_feature_profile(prepared, feature_profile)
     columns = [str(item).strip().upper() for item in close.columns]
     membership = prepared.membership_frame.reindex(index=close.index, columns=columns, fill_value=False).astype(bool)
     benchmark = prepared.benchmark_close.reindex(close.index).astype(float)
@@ -498,6 +562,7 @@ def _manifest_for_columns(
     column_groups: dict[str, str],
     max_feature_columns: int,
     source_sector_board_view_id: str = "",
+    feature_profile_audit: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     group_counts = {
         "state": 0,
@@ -531,6 +596,7 @@ def _manifest_for_columns(
         "alpha_prior_feature_count": int(group_counts["alpha_prior"]),
         "history_quality_feature_count": int(group_counts["history_quality"]),
         "source_sector_board_view_id": str(source_sector_board_view_id or ""),
+        "feature_profile_audit": dict(feature_profile_audit or {}),
         "feature_columns": list(selected_columns),
     }
 
@@ -589,6 +655,7 @@ def build_forecast_feature_panels(
     normalized_dates = [pd.Timestamp(dt).normalize() for dt in dates]
     state_frames = _state_frames_for_dates(prepared, normalized_dates)
     if not normalized_dates:
+        _amount_frame, amount_audit = _amount_for_feature_profile(prepared, profile)
         manifest = _manifest_for_columns(
             feature_profile=profile,
             all_columns=[],
@@ -596,6 +663,7 @@ def build_forecast_feature_panels(
             column_groups={},
             max_feature_columns=max_feature_columns,
             source_sector_board_view_id=_source_sector_board_view_id(prepared),
+            feature_profile_audit={"amount_unit": amount_audit},
         )
         return {}, [], manifest
 
@@ -605,8 +673,9 @@ def build_forecast_feature_panels(
         for column in select_feature_columns(first_state)
         if column not in NON_FORECAST_STATE_COLUMNS
     ]
-    raw_frames = _raw_kline_feature_frames(prepared) if profile in RAW_FRAME_PROFILES else {}
-    context_frames = _context_feature_frames(prepared, raw_frames) if profile in CONTEXT_FRAME_PROFILES else {}
+    _amount_frame, amount_audit = _amount_for_feature_profile(prepared, profile)
+    raw_frames = _raw_kline_feature_frames(prepared, feature_profile=profile) if profile in RAW_FRAME_PROFILES else {}
+    context_frames = _context_feature_frames(prepared, raw_frames, feature_profile=profile) if profile in CONTEXT_FRAME_PROFILES else {}
     history_frames = (
         _history_quality_feature_frames(
             prepared,
@@ -618,7 +687,7 @@ def build_forecast_feature_panels(
     )
     sector_frames = _sector_context_feature_frames(prepared) if profile in SECTOR_CONTEXT_PROFILES else {}
     sector_relative_frames = _sector_relative_feature_frames(prepared) if profile in SECTOR_RELATIVE_PROFILES else {}
-    regime_frames = _regime_feature_frames(prepared, raw_frames) if profile in REGIME_PROFILES else {}
+    regime_frames = _regime_feature_frames(prepared, raw_frames, feature_profile=profile) if profile in REGIME_PROFILES else {}
     all_columns, column_groups = _selected_columns_for_profile(
         state_columns=state_columns,
         raw_columns=list(raw_frames),
@@ -643,6 +712,7 @@ def build_forecast_feature_panels(
         column_groups=column_groups,
         max_feature_columns=cap,
         source_sector_board_view_id=_source_sector_board_view_id(prepared),
+        feature_profile_audit={"amount_unit": amount_audit},
     )
     universe = [str(stock).strip().upper() for stock in prepared.universe]
     panels: dict[pd.Timestamp, pd.DataFrame] = {}
@@ -721,6 +791,7 @@ def build_forecast_feature_store(
     universe = [str(stock).strip().upper() for stock in prepared.universe]
     feature_store_path = root / "forecast_feature_store.dat"
     if not normalized_dates:
+        _amount_frame, amount_audit = _amount_for_feature_profile(prepared, profile)
         manifest = _manifest_for_columns(
             feature_profile=profile,
             all_columns=[],
@@ -728,6 +799,7 @@ def build_forecast_feature_store(
             column_groups={},
             max_feature_columns=max_feature_columns,
             source_sector_board_view_id=_source_sector_board_view_id(prepared),
+            feature_profile_audit={"amount_unit": amount_audit},
         )
         manifest.update(
             {
@@ -753,8 +825,9 @@ def build_forecast_feature_store(
         for column in select_feature_columns(first_state)
         if column not in NON_FORECAST_STATE_COLUMNS
     ]
-    raw_frames = _raw_kline_feature_frames(prepared) if profile in RAW_FRAME_PROFILES else {}
-    context_frames = _context_feature_frames(prepared, raw_frames) if profile in CONTEXT_FRAME_PROFILES else {}
+    _amount_frame, amount_audit = _amount_for_feature_profile(prepared, profile)
+    raw_frames = _raw_kline_feature_frames(prepared, feature_profile=profile) if profile in RAW_FRAME_PROFILES else {}
+    context_frames = _context_feature_frames(prepared, raw_frames, feature_profile=profile) if profile in CONTEXT_FRAME_PROFILES else {}
     history_frames = (
         _history_quality_feature_frames(
             prepared,
@@ -766,7 +839,7 @@ def build_forecast_feature_store(
     )
     sector_frames = _sector_context_feature_frames(prepared) if profile in SECTOR_CONTEXT_PROFILES else {}
     sector_relative_frames = _sector_relative_feature_frames(prepared) if profile in SECTOR_RELATIVE_PROFILES else {}
-    regime_frames = _regime_feature_frames(prepared, raw_frames) if profile in REGIME_PROFILES else {}
+    regime_frames = _regime_feature_frames(prepared, raw_frames, feature_profile=profile) if profile in REGIME_PROFILES else {}
     all_columns, column_groups = _selected_columns_for_profile(
         state_columns=state_columns,
         raw_columns=list(raw_frames),
@@ -790,6 +863,7 @@ def build_forecast_feature_store(
         column_groups=column_groups,
         max_feature_columns=max_feature_columns,
         source_sector_board_view_id=_source_sector_board_view_id(prepared),
+        feature_profile_audit={"amount_unit": amount_audit},
     )
     shape = (int(len(normalized_dates)), int(len(universe)), int(len(selected_columns)))
     store = np.memmap(feature_store_path, dtype="float32", mode="w+", shape=shape)
@@ -856,6 +930,7 @@ def build_forecast_feature_store(
         feature_store_path=feature_store_path,
         feature_store_shape=shape,
     )
+    manifest["feature_profile_audit"]["amount_unit"] = amount_audit
     history_ratio = history_frames.get(
         "core_ohlcv_valid_ratio_252",
         pd.DataFrame(1.0, index=prepared.close.index, columns=universe, dtype=float),
@@ -879,17 +954,16 @@ def _feature_profile_audit_from_store(
             "retained_groups": {},
             "future_leakage_smoke": {"passed": True, "method": "not_applicable_empty_store"},
         }
-    store = np.memmap(feature_store_path, dtype="float32", mode="r", shape=shape)
     group_to_positions: dict[str, list[int]] = {}
     for idx, column in enumerate(selected_columns):
         group_to_positions.setdefault(column_groups.get(column, "state"), []).append(int(idx))
     group_stats: dict[str, dict[str, Any]] = {}
     for group, positions in sorted(group_to_positions.items()):
-        values = np.asarray(store[:, :, positions], dtype=float)
         group_stats[str(group)] = {
             "feature_count": int(len(positions)),
-            "non_null_ratio": float(np.isfinite(values).mean()) if values.size else 1.0,
-            "finite_ratio": float(np.isfinite(values).mean()) if values.size else 1.0,
+            "non_null_ratio": None,
+            "finite_ratio": None,
+            "audit_method": "manifest_only_group_presence",
         }
     return {
         "feature_profile": str(feature_profile),

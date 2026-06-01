@@ -55,15 +55,20 @@ class BaostockSource:
             import baostock as bs  # type: ignore[import-not-found]
         except Exception as exc:  # noqa: BLE001
             raise BaostockSourceError(f"failed to import baostock: {exc}") from exc
+        self._install_safe_socket_recv()
         login = bs.login()
         if str(login.error_code) != "0":
             raise BaostockSourceError(f"baostock login failed: {login.error_msg}")
         self._bs = bs
         self._logged_in = True
+        self._set_socket_timeout()
 
     def close(self) -> None:
         if self._bs is not None and self._logged_in:
-            self._bs.logout()
+            try:
+                self._bs.logout()
+            except Exception as exc:  # noqa: BLE001
+                self.errors.append({"query": "logout", "attempt": "0", "error": str(exc)})
         self._logged_in = False
         self._bs = None
 
@@ -127,11 +132,71 @@ class BaostockSource:
             except Exception as exc:  # noqa: BLE001
                 last_error = str(exc)
                 self.errors.append({"query": name, "attempt": str(attempt), "error": last_error})
+                self._reopen()
                 if attempt >= self.config.retry_count:
                     break
                 delay = self.config.retry_base_delay_seconds * (2 ** (attempt - 1))
                 time.sleep(delay)
         raise BaostockSourceError(f"{name} failed after {self.config.retry_count} attempts: {last_error}")
+
+    def _reopen(self) -> None:
+        if self._bs is None:
+            return
+        self.close()
+        self.open()
+
+    def _set_socket_timeout(self) -> None:
+        if self._bs is None:
+            return
+        try:
+            import baostock.common.context as context  # type: ignore[import-not-found]
+
+            default_socket = getattr(context, "default_socket", None)
+            if default_socket is not None:
+                default_socket.settimeout(self.config.timeout_seconds)
+        except Exception as exc:  # noqa: BLE001
+            self.errors.append({"query": "set_socket_timeout", "attempt": "0", "error": str(exc)})
+
+    def _install_safe_socket_recv(self) -> None:
+        try:
+            import zlib
+
+            import baostock.common.contants as cons  # type: ignore[import-not-found]
+            import baostock.common.context as context  # type: ignore[import-not-found]
+            import baostock.util.socketutil as socketutil  # type: ignore[import-not-found]
+        except Exception as exc:  # noqa: BLE001
+            self.errors.append({"query": "install_safe_socket_recv", "attempt": "0", "error": str(exc)})
+            return
+        if getattr(socketutil, "_tqr_safe_send_msg_installed", False):
+            return
+
+        def safe_send_msg(msg: str) -> str | None:
+            if not hasattr(context, "default_socket"):
+                print("you don't login.")
+                return None
+            default_socket = getattr(context, "default_socket")
+            if default_socket is None:
+                return None
+            default_socket.send(bytes(msg + "\n", encoding="utf-8"))
+            receive = b""
+            while True:
+                recv = default_socket.recv(8192)
+                if not recv:
+                    raise ConnectionError("baostock socket closed while receiving data")
+                receive += recv
+                if receive[-13:] == b"<![CDATA[]]>\n":
+                    break
+            head_bytes = receive[0 : cons.MESSAGE_HEADER_LENGTH]
+            head_str = bytes.decode(head_bytes)
+            head_arr = head_str.split(cons.MESSAGE_SPLIT)
+            if head_arr[1] in cons.COMPRESSED_MESSAGE_TYPE_TUPLE:
+                head_inner_length = int(head_arr[2])
+                body = receive[cons.MESSAGE_HEADER_LENGTH : cons.MESSAGE_HEADER_LENGTH + head_inner_length]
+                return head_str + bytes.decode(zlib.decompress(body))
+            return bytes.decode(receive)
+
+        socketutil.send_msg = safe_send_msg
+        socketutil._tqr_safe_send_msg_installed = True
 
     def _throttle(self) -> None:
         interval = self.config.request_interval_seconds

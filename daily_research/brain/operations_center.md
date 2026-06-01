@@ -71,6 +71,15 @@
 - TQ vs BaoStock lineage audit 入口：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.tq_baostock_lineage_audit --json`
 - 当前 TQ/BaoStock audit tag：`tq_baostock_lineage_audit_20260601_01`；该入口只读旧 `H:\new_tdx64\PYPlugins\user\t0_project\tqcenter.py` 的 `get_market_data`，不调用刷新、下载、交易、写板块或下单接口。TQ adapter 必须先以旧脚本路径执行 `tq.initialize(...)`；若 TQ 初始化失败，应写 `blocked_tq_unavailable`，不得手工模拟旧 TQ 数据。
+- V2 数据集合同 audit 入口：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.data_lake.v2_dataset_contract_audit --json`
+- V2 status sidecar 构建入口：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.data_lake.build_v2_status_sidecar --json`
+- V2 strict baseline orchestration 入口：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.v2_research_reset_baseline --write-task-list --validate-pool --json`
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.v2_research_reset_baseline --run-training --json`
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.v2_research_reset_baseline --run-comparison --json`
+- 当前 v2 strict baseline anchor：`mh_v2_reset_tradeable_mainboard_anchor_20260601_01`；strict pool `policy_pool_view__925e8604a91a9c07a5387fb1`；status sidecar `data_platform_v2_status_sidecar__b896a110cf7802cc1653c22a`；feature profile `raw_kline_context_v2_tradeable_amount_checked`。该 anchor 是 evidence-grade research baseline，不是 live/default 或 promotion authority。
 
 ## 实验预算可信度纪律
 - 启动任何会影响模型输入、架构、输出、loss、horizon grid、stage gate 或后续方向选择的实验前，必须在计划或 tag 说明中声明证据等级：`smoke_only`、`scout_only`、`evidence_grade` 或 `promotion_grade`。
@@ -110,7 +119,7 @@
 - Web API 热路径只读 compact daily state：`/api/daily-run/status`、`/api/daily-run/latest`、`/api/data-readiness`、`/api/system/doctor`。
 - 任务提交入口只保留单项显式动作：`/api/data-sources/refresh`、`/api/trade-plan/generate`、`/api/paper-account/apply-latest-plan` 和必要诊断/恢复入口。
 - 当前 2026-05-26 fresh verdict 为 `blocked:data_not_ready`；后续操作以手动帮助页流程为准，完整旧状态机记录见 `daily_research/brain/references/execution_daily_plan_state_machine_refactor_20260526.md`。
-- 冻结解除前置：解释 new lineage 研究结果与旧 Stage 2.8 / Stage 3G / short_v5b 证据差异；完成同口径候选 backtest 方案；明确旧 production payload 是恢复、归档为不可用，还是由新研究主线显式替代。`rebuild_lineage_diff_audit` 已完成第一项中的谱系差异解释，但后续发现旧 new-lineage pool 包含创业板/科创板，因此仍需先完成 mainboard-only rebuild baseline，再谈同口径 short_v5b backtest 或旧 production payload 路径决策。
+- 冻结解除前置：v2 strict baseline 已完成 research gate，但执行端仍需独立候选 backtest/bridge、成本与调仓规则、风险约束、payload packaging 和显式重建授权。旧 production payload 可以作为历史参考或 side bridge，不能阻塞 v2 研究，也不能被 brain 文本手工恢复。
 
 ## PathPolicy 执行异常处理口径
 - `test_forecast_dataset.py` 是慢集成测试；修改 forecast 默认先跑 selective verification 推荐的快速合同测试，完整 forecast dataset/training 测试只在长验证、发布前或风险升高时跑。

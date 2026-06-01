@@ -8,6 +8,7 @@ import pytest
 
 from daily_research.path_policy.forecast_dataset import (
     ForecastDateBatchTorchDataset,
+    _fit_memmap_train_normalization,
     build_forecast_memmap_dataset,
     build_static_context_vocab,
     load_forecast_memmap_dataset,
@@ -67,6 +68,41 @@ def test_forecast_memmap_dataset_builds_lazy_store_and_batches(tmp_path) -> None
     assert tuple(y_risk.shape) == (5, 3)
     assert int(row_idx.item()) == int(train_indices[0])
     assert torch.isfinite(x).all()
+
+
+def test_memmap_train_normalization_matches_naive_window_scan(tmp_path) -> None:
+    feature_shape = (7, 3, 4)
+    values = np.arange(np.prod(feature_shape), dtype=np.float32).reshape(feature_shape)
+    values[2, 1, 0] = np.nan
+    values[5, 2, 3] = np.nan
+    feature_store = np.memmap(tmp_path / "forecast_feature_store.dat", dtype="float32", mode="w+", shape=feature_shape)
+    feature_store[...] = values
+    feature_store.flush()
+    sample_index = __import__("pandas").DataFrame(
+        [
+            {"role": "train", "sequence_start_pos": 0, "date_pos": 2, "stock_pos": 1},
+            {"role": "train", "sequence_start_pos": 1, "date_pos": 4, "stock_pos": 1},
+            {"role": "train", "sequence_start_pos": 2, "date_pos": 6, "stock_pos": 2},
+            {"role": "validation", "sequence_start_pos": 0, "date_pos": 6, "stock_pos": 0},
+        ]
+    )
+
+    feature_mean, feature_std = _fit_memmap_train_normalization(
+        feature_store_path=tmp_path / "forecast_feature_store.dat",
+        feature_shape=feature_shape,
+        sample_index=sample_index,
+    )
+
+    windows = []
+    for row in sample_index[sample_index["role"].eq("train")].itertuples(index=False):
+        windows.append(values[int(row.sequence_start_pos) : int(row.date_pos) + 1, int(row.stock_pos), :])
+    stacked = np.concatenate(windows, axis=0)
+    expected_mean = np.nanmean(stacked, axis=0).astype(np.float32)
+    expected_std = np.nanstd(stacked, axis=0).astype(np.float32)
+    expected_std = np.where(np.isfinite(expected_std) & (np.abs(expected_std) > 1.0e-8), expected_std, 1.0).astype(np.float32)
+
+    np.testing.assert_allclose(feature_mean, expected_mean, rtol=1.0e-6, atol=1.0e-6)
+    np.testing.assert_allclose(feature_std, expected_std, rtol=1.0e-6, atol=1.0e-6)
 
 
 def test_validate_forecast_memmap_manifest_reports_ok_and_source_binding(tmp_path) -> None:

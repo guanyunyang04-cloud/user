@@ -1038,6 +1038,68 @@ def _summary_stats(values: list[float]) -> dict[str, float]:
     }
 
 
+def _write_memmap_build_progress(root: Path, stage: str, **payload: Any) -> None:
+    progress = {
+        "stage": str(stage),
+        **{str(key): _json_ready(value) for key, value in payload.items()},
+    }
+    write_json(Path(root) / "forecast_memmap_build_progress.json", progress)
+
+
+def _fit_memmap_train_normalization(
+    *,
+    feature_store_path: Path,
+    feature_shape: tuple[int, int, int],
+    sample_index: pd.DataFrame,
+) -> tuple[np.ndarray, np.ndarray]:
+    feature_count = int(feature_shape[2]) if len(feature_shape) == 3 else 0
+    feature_mean = np.zeros((feature_count,), dtype=np.float32)
+    feature_std = np.ones((feature_count,), dtype=np.float32)
+    if feature_count <= 0 or sample_index.empty:
+        return feature_mean, feature_std
+
+    train_rows = sample_index.loc[
+        sample_index["role"].astype(str).eq("train"),
+        ["sequence_start_pos", "date_pos", "stock_pos"],
+    ].copy()
+    if train_rows.empty:
+        return feature_mean, feature_std
+
+    store = np.memmap(feature_store_path, dtype="float32", mode="r", shape=feature_shape)
+    sums = np.zeros((feature_count,), dtype=np.float64)
+    sq_sums = np.zeros((feature_count,), dtype=np.float64)
+    counts = np.zeros((feature_count,), dtype=np.float64)
+    zero_row = np.zeros((1, feature_count), dtype=np.float64)
+    max_date = int(feature_shape[0])
+    max_stock = int(feature_shape[1])
+    for stock_pos, rows in train_rows.groupby("stock_pos", sort=False):
+        stock_idx = int(stock_pos)
+        if stock_idx < 0 or stock_idx >= max_stock:
+            continue
+        starts = rows["sequence_start_pos"].to_numpy(dtype=np.int64, copy=False)
+        ends = rows["date_pos"].to_numpy(dtype=np.int64, copy=False) + 1
+        valid = (starts >= 0) & (ends > starts) & (ends <= max_date)
+        if not bool(valid.any()):
+            continue
+        starts = starts[valid]
+        ends = ends[valid]
+        values = np.asarray(store[:, stock_idx, :], dtype=np.float64)
+        finite = np.isfinite(values)
+        clean = np.where(finite, values, 0.0)
+        sum_cum = np.vstack([zero_row, np.cumsum(clean, axis=0, dtype=np.float64)])
+        sq_cum = np.vstack([zero_row, np.cumsum(np.square(clean), axis=0, dtype=np.float64)])
+        count_cum = np.vstack([zero_row, np.cumsum(finite.astype(np.float64), axis=0, dtype=np.float64)])
+        sums += (sum_cum[ends] - sum_cum[starts]).sum(axis=0)
+        sq_sums += (sq_cum[ends] - sq_cum[starts]).sum(axis=0)
+        counts += (count_cum[ends] - count_cum[starts]).sum(axis=0)
+
+    feature_mean = np.divide(sums, counts, out=np.zeros_like(sums), where=counts > 0).astype(np.float32)
+    variance = np.divide(sq_sums, counts, out=np.zeros_like(sq_sums), where=counts > 0) - np.square(feature_mean.astype(np.float64))
+    feature_std = np.sqrt(np.maximum(variance, 0.0)).astype(np.float32)
+    feature_std = np.where(np.isfinite(feature_std) & (np.abs(feature_std) > 1.0e-8), feature_std, 1.0).astype(np.float32)
+    return feature_mean, feature_std
+
+
 def build_forecast_memmap_dataset(
     prepared: PreparedPolicyInputs,
     *,
@@ -1109,7 +1171,14 @@ def build_forecast_memmap_dataset(
         min_lookback_valid_ratio=float(min_lookback_valid_ratio),
     )
     feature_shape = tuple(int(item) for item in feature_manifest.get("feature_store_shape", [len(dates), len(universe), len(feature_columns)]))
+    _write_memmap_build_progress(
+        root,
+        "feature_store_done",
+        feature_store_shape=list(feature_shape),
+        feature_count=len(feature_columns),
+    )
     labels = build_path20_labels(prepared, execution_mode=execution_mode, horizon=horizon, cumulative_horizons=resolved_horizons)
+    _write_memmap_build_progress(root, "labels_done", horizon=horizon, cumulative_horizons=list(resolved_horizons))
 
     sample_rows: list[dict[str, Any]] = []
     y_daily_rows: list[list[float]] = []
@@ -1248,6 +1317,7 @@ def build_forecast_memmap_dataset(
     sample_index.to_csv(sample_index_path, index=False, encoding="utf-8-sig")
 
     row_count = int(len(sample_index))
+    _write_memmap_build_progress(root, "sample_index_done", sample_count=row_count, sample_count_by_role=sample_count_by_role)
     static_context_ids: np.memmap | None = None
     static_context_path = root / "forecast_static_context_ids.dat"
     if bool(include_static_context):
@@ -1272,27 +1342,18 @@ def build_forecast_memmap_dataset(
     y_drawdown = _write_array_memmap(root / "forecast_y_max_drawdown_20d.dat", np.asarray(y_drawdown_rows, dtype=np.float32), (row_count,))
     y_worst = _write_array_memmap(root / "forecast_y_worst_1d_20d.dat", np.asarray(y_worst_rows, dtype=np.float32), (row_count,))
     y_upside = _write_array_memmap(root / "forecast_y_upside_20d.dat", np.asarray(y_upside_rows, dtype=np.float32), (row_count,))
+    _write_memmap_build_progress(root, "target_memmaps_done", sample_count=row_count)
 
-    feature_mean = np.zeros((len(feature_columns),), dtype=np.float32)
-    feature_std = np.ones((len(feature_columns),), dtype=np.float32)
     if row_count and sample_count_by_role["train"] > 0:
-        store = np.memmap(feature_store_path, dtype="float32", mode="r", shape=feature_shape)
-        train_positions = sample_index.index[sample_index["role"].astype(str) == "train"].to_numpy(dtype=int)
-        sums = np.zeros((len(feature_columns),), dtype=np.float64)
-        sq_sums = np.zeros((len(feature_columns),), dtype=np.float64)
-        counts = np.zeros((len(feature_columns),), dtype=np.float64)
-        for row_idx in train_positions:
-            row = sample_index.iloc[int(row_idx)]
-            window = np.asarray(store[int(row["sequence_start_pos"]) : int(row["date_pos"]) + 1, int(row["stock_pos"]), :], dtype=np.float32)
-            finite = np.isfinite(window)
-            clean = np.where(finite, window, 0.0)
-            sums += clean.sum(axis=0)
-            sq_sums += np.square(clean).sum(axis=0)
-            counts += finite.sum(axis=0)
-        feature_mean = np.divide(sums, counts, out=np.zeros_like(sums), where=counts > 0).astype(np.float32)
-        variance = np.divide(sq_sums, counts, out=np.zeros_like(sq_sums), where=counts > 0) - np.square(feature_mean.astype(np.float64))
-        feature_std = np.sqrt(np.maximum(variance, 0.0)).astype(np.float32)
-        feature_std = np.where(np.isfinite(feature_std) & (np.abs(feature_std) > 1.0e-8), feature_std, 1.0).astype(np.float32)
+        feature_mean, feature_std = _fit_memmap_train_normalization(
+            feature_store_path=feature_store_path,
+            feature_shape=feature_shape,
+            sample_index=sample_index,
+        )
+    else:
+        feature_mean = np.zeros((len(feature_columns),), dtype=np.float32)
+        feature_std = np.ones((len(feature_columns),), dtype=np.float32)
+    _write_memmap_build_progress(root, "normalization_done", sample_count=row_count, feature_count=len(feature_columns))
     normalization_manifest: dict[str, Any] = {
         "fit_role": "train_only",
         "method": "zscore",
@@ -1392,6 +1453,7 @@ def build_forecast_memmap_dataset(
         manifest["reason"] = "no_forecast_samples"
     manifest_path = root / "forecast_dataset_manifest.json"
     write_json(manifest_path, _json_ready({**manifest, "manifest_json": str(manifest_path.resolve())}))
+    _write_memmap_build_progress(root, "manifest_written", manifest_json=str(manifest_path.resolve()), sample_count=row_count)
     return ForecastMemmapDataset(
         root=root,
         feature_store_path=feature_store_path,
