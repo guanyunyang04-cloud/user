@@ -41,10 +41,12 @@
 
 ## 6. 执行端冻结治理
 - 2026-06-01 起，执行端状态为 `frozen_skeleton_only / awaiting_research_rebuild`。
+- 2026-06-01 起，研究端切换为 `daily_research_v2_research_reset`；旧 Stage 2.8 / short_v5b 降级为历史参考和旁路 benchmark，不再作为当前研究必须复刻的阻塞目标。
 - 冻结期允许保留和维护执行代码骨架、只读诊断、数据 readiness、候选 backtest / trade-plan wrapper、active artifact guard 和恢复盘点。
 - 冻结期禁止 live/default、paper/live/broker 接线、正式交易计划生产、active manifest promotion、production root 重建、自动化每日执行，以及未授权删除执行合同。
-- 解冻必须满足三项前置：研究端差异解释完成；新旧模型同口径候选回测方案完成；旧 production payload 的恢复/归档/替代路径获得明确授权。
+- 解冻必须满足三项前置：v2 研究端产出 evidence-grade 候选结果；候选 backtest / execution bridge 方案完成；旧 production payload 被明确归档为历史不可用或获得单独恢复授权。
 - `rebuild_lineage_diff_audit` 只能满足“研究端差异解释”的初步证据要求；不得把该审计误读为模型胜负、short_v5b 替代、执行端解冻或 active artifact 重建授权。
 - 旧 multi-horizon / short_v5b 等价比较必须使用主板口径 pool；包含 `300/301/688/689` 创业板/科创板前缀的 new-lineage rebuild 只能作为 `wrong_universe_diagnostic`，不得作为 promotion、执行解冻或 short_v5b 等价对照证据。
 - Corrected mainboard-only baseline 若只是 `near_pass`，仍不得作为 active promotion、short_v5b 替代或执行端解冻证据；必须先处理 hit lift min negative、旧 `156` feature schema 未恢复、short_v5b payload 缺失和同协议 bridge 未完成这四类 blocker。
 - TQ vs BaoStock diff 若处于 `blocked_tq_unavailable`，不得作为数据源胜负、模型胜负、旧 Stage 2.8 失效、short_v5b 替代或执行端解冻依据。若 diff 已运行且 label 等价，也只证明该抽样/口径下 next-open label 近似一致；在旧 `156` feature schema、short_v5b payload、amount/missing/fill policy 差异未闭环前，仍不得作为执行端解冻或模型替代依据。
+- v2 研究不需要等待旧 `156` schema 或 short_v5b payload 恢复；但 v2 promotion 仍必须通过自己的 explicit dataset/pool/feature/gate/backtest/执行假设证据链，不能借旧线历史结论直接放行。

@@ -11,6 +11,7 @@
 - 当前统一权重语义是 `research_raw_target_weight`；当前统一上限语义是 `follow_research_raw_no_global_cap`。
 - 所有主线都是可显式切换的当前工作指针；切换后按切换后的主线继续，旧主线保留为历史或对照证据。
 - 多 Horizon 交易效用排序当前研究主线指针是 `alpha_multi_horizon_utility_policy_v1`；这是 research mainline，不是 live/default 或 active execution mainline。
+- 2026-06-01 起，path_policy / multi-horizon 当前新主线切换为 `daily_research_v2_research_reset`：旧 Stage 2.8 / Stage 3A-3G / short_v5b 作为历史参考和方法库保留，不再作为必须复刻的当前目标。
 - evidence registry v3 使用三层证据索引：`research_programs` 表示稳定研究主线，`study_families` 表示阶段/实验族，`run_tags` 表示物理 run 实例；registry 只输出和读取这三层，不再存在旧 `study_tags` 字段。
 - `Path20` / `alpha_path20_neural_policy_v1` 是历史证据代号和代码 namespace，不再代表当前目标定义；历史 run 仍按原字符串引用，新研究应写成多 horizon utility / ranking / calibration，而不是固定 20 日路径预测。
 - continuous_policy 的终局目标是日级连续交易执行模型，不是固定调仓或人工执行桥。
@@ -59,6 +60,8 @@
 - 滚动总览入口：`daily_research/brain/references/mainline_review_current.md`；用于检阅立项以来所有 durable 主线，但不替代 `state_center.md` 或 active artifact。
 - 完整代码库检阅 successor：`daily_research/brain/references/brain_system_full_codebase_review_20260523.md`；用于当前模块地图、全库风险和 2026-05-22 旧路径/旧主线纠偏。
 - `alpha_multi_horizon_utility_policy_v1`：当前 path_policy research pointer；目标是多 horizon 交易效用排序，首轮 horizon grid 为 `1,2,3,5,8,10,15,20,30`，当前 blocker 是 predicted best horizon 向 `30d` 塌缩。
+- `daily_research_v2_research_reset`：当前 path_policy / multi-horizon 新主线；以 BaoStock-first data lake、corrected mainboard pool、当前 `116` feature baseline 和严格 multi-seed gate 为起点，重新建设 feature/input、模型与执行候选证据。旧 `156` schema 和 short_v5b payload 若未来找回，只做旁路审计或历史 bridge，不阻塞 v2 研究推进。
+- `alpha_multi_horizon_utility_policy_v1`：v2 reset 前的 path_policy research pointer；目标是多 horizon 交易效用排序，首轮 horizon grid 为 `1,2,3,5,8,10,15,20,30`，现保留为历史方法库和 v2 可复用组件来源，不再是必须复刻的当前目标。
 - 近期 multi-horizon 阶段 family：`stage1_output_aux_grid`、`stage2_horizon_grid_calibration`、`stage25_stability_calibration`；新增 run tag 不应通过扩 evidence tag 前缀来代表新主线，必须归入既有或新声明的 `study_family`。
 - `alpha_path20_neural_policy_v1`：2026-05-17 到 2026-05-23 的 Path20 neural-policy 历史主线；其 evidence 仍有效，但新结论必须按 `alpha_multi_horizon_utility_policy_v1` 解释。
 - `alpha_path20_sequence_policy_v1`：shadow comparison / secondary research route；除非未来显式切换，不代表当前主线。
@@ -87,6 +90,7 @@
 - explicit dataset id、protocol tag、run tag 和 reference doc 优先于 loose latest。
 - 新多 horizon utility 实验必须归入明确的 `research_programs` 和 `study_families`；run tag 只表示物理实例，应显式写 pool、feature、model、seed、年份、output/loss、成本参数和 horizon grid，不得让命名把目标拉回固定 20 日路径误差。
 - 旧 multi-horizon / short_v5b 等价 universe 是沪深主板口径，必须剔除创业板和科创板；新 lake / pool view 若用于旧线复刻或同口径比较，必须显式排除 `300,301,688,689` 前缀，并在 manifest 中保留 `exclude_symbol_prefixes`。
+- v2 research reset 后，旧 Stage 2.8 / short_v5b 不再是阻塞性复刻目标；新研究必须以 explicit v2 dataset/pool/feature/profile/gate 为真源。历史旧线可以提供 prior、baseline intuition 和 side audit，但不能要求新主线回到旧 payload 才能前进。
 - corrected mainboard-only rebuild 通过 pool/memmap hard validation 后，仍必须把 `near_pass` 与 full pass 分开：rank IC、spread、monthly stability 和 concentration 过线不能抵消 hit lift min 为负；在旧 `156` feature schema 或 short_v5b payload 不可 replay 时，不得宣布新模型优于旧执行模型。
 - TQ/BaoStock lineage audit 只能回答数据与标签是否等价；TQ read-only adapter 必须先用旧脚本路径调用 `tq.initialize(...)` 再读 `get_market_data`。若 TQ runtime 初始化失败，结论必须停在 `blocked_tq_unavailable`，不能把缺失 diff 解释为 BaoStock 差、TQ 优或旧结论失效；若 label 等价但 OHLCV 有 amount/missing 差异，也不能直接宣布旧 Stage 2.8 已 file-backed replay。
 - 模型输入、架构、输出、loss、horizon grid 或训练配置的结论必须声明证据等级；低预算探索可以提出 follow-up，但不能作为“更好/更差/已失败/已通过”的稳定判断。
