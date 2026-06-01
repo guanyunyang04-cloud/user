@@ -42,6 +42,14 @@ def load_pit_manifest(root: str | Path | None = None) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
+def load_quality_report(root: str | Path | None = None) -> dict[str, Any]:
+    snapshot_root = _resolve_snapshot_root(root)
+    path = snapshot_root / "quality_report.json"
+    if not path.exists():
+        raise FileNotFoundError(f"quality report not found: {path}")
+    return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
 def load_security_master(root: str | Path | None = None) -> pd.DataFrame:
     path = _resolve_snapshot_root(root) / "security_master.parquet"
     if not path.exists():

@@ -5,13 +5,20 @@ from pathlib import Path
 
 import pandas as pd
 
-from traditional_quant_research.dataset_v2 import load_daily_universe, load_pit_daily_bars, load_pit_snapshot, load_tradeable_panel
+from traditional_quant_research.dataset_v2 import (
+    load_daily_universe,
+    load_pit_daily_bars,
+    load_pit_snapshot,
+    load_quality_report,
+    load_tradeable_panel,
+)
 
 
 def test_v2_loaders_filter_dates_symbols_and_tradeable(tmp_path: Path) -> None:
     root = tmp_path / "snapshot"
     root.mkdir()
     (root / "manifest.json").write_text(json.dumps({"schema_version": 2, "snapshot_id": "fixture"}), encoding="utf-8")
+    (root / "quality_report.json").write_text(json.dumps({"yearly_summary": [{"year": 2026}]}), encoding="utf-8")
     pd.DataFrame([{"code": "600000.SH", "name": "浦发银行"}]).to_parquet(root / "security_master.parquet", index=False)
     pd.DataFrame(
         [
@@ -35,8 +42,10 @@ def test_v2_loaders_filter_dates_symbols_and_tradeable(tmp_path: Path) -> None:
     universe = load_daily_universe(root, start_date="2026-01-02", end_date="2026-01-02", tradeable_only=True)
     bars = load_pit_daily_bars(root, symbols=["600000.SH"])
     panel = load_tradeable_panel(root)
+    quality = load_quality_report(root)
 
     assert snapshot.manifest["snapshot_id"] == "fixture"
     assert universe["code"].tolist() == ["600000.SH"]
     assert bars["code"].tolist() == ["600000.SH"]
     assert panel["code"].tolist() == ["600000.SH"]
+    assert quality["yearly_summary"] == [{"year": 2026}]

@@ -5,9 +5,12 @@ import pandas as pd
 from traditional_quant_research.dataset_builder_v2 import (
     _baostock_to_std_code,
     _std_to_baostock_code,
+    _assert_failure_rate,
+    BaostockSourceError,
     PitBuildConfig,
     assemble,
     build_daily_universe,
+    discover_daily_stock_lists,
 )
 
 
@@ -128,3 +131,50 @@ def test_assemble_reads_yearly_cache(tmp_path) -> None:
     assert manifest["snapshot_id"] == "fixture"
     assert manifest["quality"]["tradeable_rows"] == 1
     assert (root / "fixture" / "daily_universe.parquet").exists()
+
+
+class FakeStockListSource:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def query_all_stock(self, day: str) -> pd.DataFrame:
+        self.calls.append(day)
+        return pd.DataFrame([{"code": "sh.600000", "tradeStatus": "1", "code_name": "浦发银行"}])
+
+
+def test_discover_daily_stock_lists_resumes_completed_dates(tmp_path) -> None:
+    root = tmp_path / "v2"
+    progress = root / "cache" / "progress"
+    progress.mkdir(parents=True)
+    (progress / "year=2026.json").write_text(
+        '{"year": 2026, "completed_stock_dates": ["2026-01-02"], "completed_bar_codes": [], "failures": []}',
+        encoding="utf-8",
+    )
+    part_dir = root / "cache" / "daily_stock_lists" / "parts" / "year=2026"
+    part_dir.mkdir(parents=True)
+    pd.DataFrame(
+        [{"date": pd.Timestamp("2026-01-02"), "code": "600000.SH", "name_on_date": "浦发银行", "query_all_trade_status": "1"}]
+    ).to_parquet(part_dir / "month=01.parquet", index=False)
+    source = FakeStockListSource()
+
+    frame, summary = discover_daily_stock_lists(
+        source,
+        pd.Series(pd.to_datetime(["2026-01-02", "2026-01-05"])),
+        config=PitBuildConfig(output_root=root, start_date="2026-01-02", end_date="2026-01-05"),
+        year=2026,
+        explicit_symbols=None,
+    )
+
+    assert source.calls == ["2026-01-05"]
+    assert summary["stock_list_cache_miss"] == 1
+    assert set(frame["date"].dt.strftime("%Y-%m-%d")) == {"2026-01-02", "2026-01-05"}
+
+
+def test_failure_rate_threshold() -> None:
+    _assert_failure_rate(2026, 20, [{"code": "600000.SH"}])
+    try:
+        _assert_failure_rate(2026, 20, [{"code": str(index)} for index in range(2)])
+    except BaostockSourceError as exc:
+        assert "failure rate too high" in str(exc)
+    else:
+        raise AssertionError("expected BaostockSourceError")

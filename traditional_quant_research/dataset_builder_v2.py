@@ -89,6 +89,31 @@ def _trade_dates_cache_path(output_root: Path) -> Path:
     return _cache_root(output_root) / "trade_dates.parquet"
 
 
+def _progress_path(output_root: Path, year: int) -> Path:
+    return _cache_root(output_root) / "progress" / f"year={year}.json"
+
+
+def _monthly_stock_list_cache_path(output_root: Path, year: int, month: int) -> Path:
+    return _cache_root(output_root) / "daily_stock_lists" / "parts" / f"year={year}" / f"month={month:02d}.parquet"
+
+
+def _daily_bars_part_cache_path(output_root: Path, year: int, batch_index: int) -> Path:
+    return _cache_root(output_root) / "daily_bars" / "parts" / f"year={year}" / f"batch={batch_index:04d}.parquet"
+
+
+def _read_progress(output_root: Path, year: int) -> dict[str, Any]:
+    path = _progress_path(output_root, year)
+    if not path.exists():
+        return {"year": year, "completed_stock_dates": [], "completed_bar_codes": [], "failures": []}
+    return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
+def _write_progress(output_root: Path, year: int, progress: dict[str, Any]) -> None:
+    path = _progress_path(output_root, year)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(progress, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def _baostock_to_std_code(code: str) -> str:
     market, symbol = str(code).split(".", 1)
     suffix = {"sh": "SH", "sz": "SZ"}.get(market.lower(), market.upper())
@@ -196,8 +221,14 @@ def discover_daily_stock_lists(
         _write_parquet(path, output)
         return output, {"stock_list_cache_hit": 0, "stock_list_cache_miss": 1, "empty_stock_list_dates": [], "dry_run_symbol_mode": 1}
 
+    progress = {"year": year, "completed_stock_dates": [], "completed_bar_codes": [], "failures": []} if config.force_refresh else _read_progress(config.output_root, year)
+    completed_dates = set(progress.get("completed_stock_dates", []))
+    touched_months: set[int] = set()
     for date in dates:
         date_str = pd.Timestamp(date).strftime("%Y-%m-%d")
+        month_path = _monthly_stock_list_cache_path(config.output_root, year, pd.Timestamp(date).month)
+        if date_str in completed_dates and month_path.exists():
+            continue
         raw = source.query_all_stock(day=date_str)
         if raw.empty:
             empty_dates.append(date_str)
@@ -212,8 +243,20 @@ def discover_daily_stock_lists(
         if explicit_symbols is not None:
             frame = frame[frame["code"].isin(explicit_symbols)]
         parts.append(frame)
+        touched_months.add(pd.Timestamp(date).month)
+        existing_month = pd.DataFrame(columns=RAW_STOCK_LIST_COLUMNS) if config.force_refresh else _read_parquet_or_empty(month_path, RAW_STOCK_LIST_COLUMNS)
+        month_output = _concat([existing_month, frame], RAW_STOCK_LIST_COLUMNS).drop_duplicates(["date", "code"])
+        _write_parquet(month_path, month_output)
+        progress["completed_stock_dates"] = sorted(set(progress.get("completed_stock_dates", [])) | {date_str})
+        _write_progress(config.output_root, year, progress)
 
-    output = _concat(parts, RAW_STOCK_LIST_COLUMNS).drop_duplicates(["date", "code"])
+    months_to_read = sorted(touched_months) if config.force_refresh else list(range(1, 13))
+    month_parts = [
+        _read_parquet_or_empty(_monthly_stock_list_cache_path(config.output_root, year, month), RAW_STOCK_LIST_COLUMNS)
+        for month in months_to_read
+    ]
+    output = _concat([*month_parts, *parts], RAW_STOCK_LIST_COLUMNS).drop_duplicates(["date", "code"])
+    output = _filter_dates(output, config.start_date, config.end_date)
     _write_parquet(path, output)
     return output, {"stock_list_cache_hit": 0, "stock_list_cache_miss": 1, "empty_stock_list_dates": empty_dates}
 
@@ -324,19 +367,46 @@ def fetch_daily_bars(
 
     parts: list[pd.DataFrame] = []
     failures: list[dict[str, Any]] = []
-    for code in codes:
-        try:
-            raw = source.query_daily_bars(_std_to_baostock_code(code), start_date, end_date)
-        except BaostockSourceError as exc:
-            failures.append({"code": code, "kind": "daily_fetch_error", "error": str(exc)})
-            continue
-        if raw.empty:
-            failures.append({"code": code, "kind": "empty_daily_bars"})
-            continue
-        frame = normalize_daily_bars(raw)
-        parts.append(frame)
+    progress = {"year": year, "completed_stock_dates": [], "completed_bar_codes": [], "failures": []} if config.force_refresh else _read_progress(config.output_root, year)
+    completed_codes = set(progress.get("completed_bar_codes", []))
+    batch_size = 50
+    for batch_index, start in enumerate(range(0, len(codes), batch_size)):
+        batch_codes = codes[start : start + batch_size]
+        part_path = _daily_bars_part_cache_path(config.output_root, year, batch_index)
+        existing_part = pd.DataFrame(columns=DAILY_BARS_COLUMNS) if config.force_refresh else _read_parquet_or_empty(part_path, DAILY_BARS_COLUMNS)
+        batch_parts: list[pd.DataFrame] = [existing_part] if not existing_part.empty else []
+        for code in batch_codes:
+            if code in completed_codes and not existing_part.empty and code in set(existing_part["code"].astype(str)):
+                continue
+            try:
+                raw = source.query_daily_bars(_std_to_baostock_code(code), start_date, end_date)
+            except BaostockSourceError as exc:
+                failure = {"year": year, "code": code, "kind": "daily_fetch_error", "error": str(exc)}
+                failures.append(failure)
+                progress["failures"] = [*progress.get("failures", []), failure]
+                _write_progress(config.output_root, year, progress)
+                continue
+            if raw.empty:
+                failure = {"year": year, "code": code, "kind": "empty_daily_bars"}
+                failures.append(failure)
+                progress["failures"] = [*progress.get("failures", []), failure]
+                _write_progress(config.output_root, year, progress)
+                continue
+            frame = normalize_daily_bars(raw)
+            batch_parts.append(frame)
+            progress["completed_bar_codes"] = sorted(set(progress.get("completed_bar_codes", [])) | {code})
+            _write_progress(config.output_root, year, progress)
+        batch_output = _concat(batch_parts, DAILY_BARS_COLUMNS).drop_duplicates(["date", "code"])
+        if not batch_output.empty:
+            _write_parquet(part_path, batch_output)
+            parts.append(batch_output)
 
-    output = _concat(parts, DAILY_BARS_COLUMNS)
+    part_paths = [] if config.force_refresh else sorted((_cache_root(config.output_root) / "daily_bars" / "parts" / f"year={year}").glob("batch=*.parquet"))
+    part_frames = [_read_parquet_or_empty(part_path, DAILY_BARS_COLUMNS) for part_path in part_paths]
+    output = _concat([*part_frames, *parts], DAILY_BARS_COLUMNS).drop_duplicates(["date", "code"])
+    output = _filter_dates(output, start_date, end_date)
+    if codes:
+        output = output[output["code"].isin(set(codes))].reset_index(drop=True)
     _write_parquet(path, output)
     return output, failures, {"daily_bars_cache_hit": 0, "daily_bars_cache_miss": 1}
 
@@ -707,21 +777,67 @@ def _quality_report(
     source_errors: list[dict[str, str]],
     extra_quality: dict[str, Any],
 ) -> dict[str, Any]:
-    daily_counts = pd.DataFrame(columns=["date", "universe_rows", "tradeable_rows"])
+    daily_counts = pd.DataFrame(
+        columns=["date", "universe_rows", "tradeable_rows", "st_rows", "suspended_rows", "missing_bar_rows"]
+    )
     if not daily_universe.empty:
+        enriched = daily_universe.copy()
+        enriched["missing_bar"] = enriched["reject_reason"] == "missing_bar"
         daily_counts = (
-            daily_universe.groupby("date")
-            .agg(universe_rows=("code", "count"), tradeable_rows=("is_tradeable", "sum"))
+            enriched.groupby("date")
+            .agg(
+                universe_rows=("code", "count"),
+                tradeable_rows=("is_tradeable", "sum"),
+                st_rows=("is_st_on_date", "sum"),
+                suspended_rows=("is_suspended_on_date", "sum"),
+                missing_bar_rows=("missing_bar", "sum"),
+            )
             .reset_index()
         )
         daily_counts["date"] = pd.to_datetime(daily_counts["date"]).dt.strftime("%Y-%m-%d")
+    yearly_counts = pd.DataFrame(
+        columns=["year", "trade_dates", "universe_rows", "daily_bar_rows", "tradeable_rows", "st_rows", "suspended_rows", "missing_bar_rows", "failure_count"]
+    )
+    if not daily_universe.empty:
+        enriched = daily_universe.copy()
+        enriched["year"] = pd.to_datetime(enriched["date"]).dt.year
+        enriched["missing_bar"] = enriched["reject_reason"] == "missing_bar"
+        yearly_counts = (
+            enriched.groupby("year")
+            .agg(
+                trade_dates=("date", "nunique"),
+                universe_rows=("code", "count"),
+                tradeable_rows=("is_tradeable", "sum"),
+                st_rows=("is_st_on_date", "sum"),
+                suspended_rows=("is_suspended_on_date", "sum"),
+                missing_bar_rows=("missing_bar", "sum"),
+            )
+            .reset_index()
+        )
+        if not daily_status.empty:
+            bar_counts = daily_status.copy()
+            bar_counts["year"] = pd.to_datetime(bar_counts["date"]).dt.year
+            bar_counts = bar_counts.groupby("year").size().rename("daily_bar_rows").reset_index()
+            yearly_counts = yearly_counts.merge(bar_counts, on="year", how="left")
+        else:
+            yearly_counts["daily_bar_rows"] = 0
+        failure_counts = pd.DataFrame(failures)
+        if not failure_counts.empty and "year" in failure_counts.columns:
+            failure_counts = failure_counts.groupby("year").size().rename("failure_count").reset_index()
+            yearly_counts = yearly_counts.merge(failure_counts, on="year", how="left")
+        else:
+            yearly_counts["failure_count"] = 0
+        yearly_counts["daily_bar_rows"] = yearly_counts["daily_bar_rows"].fillna(0).astype(int)
+        yearly_counts["failure_count"] = yearly_counts["failure_count"].fillna(0).astype(int)
     return {
         "failure_count": len(failures),
         "failures": failures,
         "source_errors": source_errors,
-        "daily_counts": daily_counts.to_dict(orient="records"),
+        "daily_summary": daily_counts.to_dict(orient="records"),
+        "yearly_summary": yearly_counts.to_dict(orient="records"),
         "st_rows": int(daily_universe["is_st_on_date"].sum()) if not daily_universe.empty else 0,
         "suspended_like_rows": int(daily_status["is_suspended_like"].sum()) if not daily_status.empty else 0,
+        "missing_bar_rows": int((daily_universe["reject_reason"] == "missing_bar").sum()) if not daily_universe.empty else 0,
         "missing_basic_rows": int((daily_universe["reject_reason"] == "not_common_a_share").sum()) if not daily_universe.empty else 0,
         "extra": extra_quality,
     }

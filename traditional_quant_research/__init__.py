@@ -8,6 +8,7 @@ from .dataset_v2 import (
     load_pit_daily_status,
     load_pit_manifest,
     load_pit_snapshot,
+    load_quality_report,
     load_tradeable_panel,
 )
 from .factors import annualized_volatility, momentum, moving_average, simple_returns, zscore
@@ -42,6 +43,7 @@ __all__ = [
     "load_pit_daily_status",
     "load_pit_manifest",
     "load_pit_snapshot",
+    "load_quality_report",
     "load_tradeable_panel",
     "load_universe",
     "long_only_backtest",
