@@ -11,6 +11,7 @@ import json
 from daily_research.execution import app_service
 from daily_research.execution import daily_verdict
 from daily_research.execution import data_readiness
+from daily_research.execution import freeze_guard
 from daily_research.execution.web_models import (
     AccountSnapshotRequest,
     DataRefreshRequest,
@@ -50,6 +51,16 @@ def create_app() -> FastAPI:
         assets_dir = react_dist / "assets"
         if assets_dir.exists():
             app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="react-assets")
+
+    @app.exception_handler(freeze_guard.ExecutionFreezeError)
+    def execution_freeze_exception_handler(request: Request, exc: freeze_guard.ExecutionFreezeError) -> JSONResponse:
+        return JSONResponse(
+            status_code=423,
+            content={
+                "detail": str(exc),
+                "execution_freeze": freeze_guard.status_payload(),
+            },
+        )
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
@@ -126,6 +137,7 @@ def create_app() -> FastAPI:
     def api_system_doctor() -> dict[str, Any]:
         payload = app_service.build_doctor_payload()
         payload["daily_run"] = daily_verdict.daily_run_status()
+        payload["execution_freeze"] = freeze_guard.status_payload()
         return payload
 
     @app.get("/api/daily-run/status")
@@ -212,6 +224,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/trade-plan/generate")
     def api_generate_trade_plan(request: TradePlanGenerateRequest) -> JSONResponse:
+        freeze_guard.assert_write_action_allowed("trade_plan_generate")
         form_payload: dict[str, Any] = {}
         if request.candidate_profile:
             form_payload["candidate_profile"] = request.candidate_profile
@@ -258,6 +271,8 @@ def create_app() -> FastAPI:
 
     @app.post("/api/models/{model_id}/train")
     def api_model_train(model_id: str, request: ModelTrainRequest) -> JSONResponse:
+        if model_id == "production-full-fit":
+            freeze_guard.assert_write_action_allowed("production_full_fit")
         try:
             if model_id != "production-full-fit":
                 raise ValueError(f"模型 {model_id} 暂未接入执行端训练入口。")
@@ -322,6 +337,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/data-sources/refresh")
     def api_data_sources_refresh(request: DataRefreshRequest) -> JSONResponse:
+        freeze_guard.assert_write_action_allowed("data_platform_refresh")
         try:
             default_domains = list(app_service.FORMAL_DATA_PLATFORM_DOMAINS)
             current_data = app_service.data_sources_summary()
@@ -388,6 +404,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/paper-account/cash-flow")
     def api_paper_account_cash_flow(request: PaperCashFlowRequest) -> JSONResponse:
+        freeze_guard.assert_write_action_allowed("paper_account_cash_flow")
         try:
             payload = app_service.paper_account_cash_flow(
                 flow_type=request.flow_type,
@@ -400,6 +417,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/paper-account/manual-adjustment")
     def api_paper_account_manual_adjustment(request: PaperManualAdjustmentRequest) -> JSONResponse:
+        freeze_guard.assert_write_action_allowed("paper_account_manual_adjustment")
         try:
             payload = app_service.paper_account_manual_adjustment(
                 adjustment_type=request.adjustment_type,
@@ -415,6 +433,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/paper-account/apply-latest-plan")
     def api_paper_account_apply_latest_plan(request: PaperApplyLatestPlanRequest) -> JSONResponse:
+        freeze_guard.assert_write_action_allowed("paper_account_apply_latest_plan")
         try:
             payload = app_service.paper_account_apply_latest_plan(execution_date=request.execution_date)
             return JSONResponse(payload)
@@ -436,6 +455,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/account")
     def api_save_account(request: AccountSnapshotRequest) -> JSONResponse:
+        freeze_guard.assert_write_action_allowed("save_account_snapshot")
         try:
             payload = app_service.save_account_snapshot(
                 available_cash=request.available_cash,

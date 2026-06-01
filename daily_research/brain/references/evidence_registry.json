@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 81,
+  "record_count": 82,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -1559,6 +1559,26 @@
       "blockers": [],
       "next_allowed_actions": [],
       "active_artifact_impact": "guarded",
+      "dataset_ids": []
+    },
+    {
+      "id": "execution_freeze_pending_research_rebuild_20260601",
+      "date": "2026-06-01",
+      "r_id": "",
+      "path": "daily_research/brain/references/execution_freeze_pending_research_rebuild_20260601.md",
+      "tags": [
+        "execution"
+      ],
+      "workflow": "execution",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "Status: `execution_frozen_skeleton_only / awaiting_research_rebuild`.; Scope: `daily_research` execution side.; Active artifact impact: `daily_research/output/active_execution_strategy.json remains unchanged`.; User decision: execution should enter a frozen, skeleton-retained state because the research-side result differences versus prior evidence are not yet understood.",
+      "blockers": [
+        "The current new lineage research substrate exists and is usable for diagnostics, but `mh_rebuild_infra_v2_fullpool_anchor_20260531_01` failed the continuation gate because seed11 hit lift was slightly negative and max negative months was `3`."
+      ],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "unchanged",
       "dataset_ids": []
     },
     {

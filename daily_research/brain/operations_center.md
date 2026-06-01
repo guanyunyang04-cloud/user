@@ -10,6 +10,7 @@
 - `H:\new_tdx64\PYPlugins\user` 已退出本项目主链路；历史 reference 中旧路径只作历史证据，不作为当前入口。
 - 不使用 `KMP_DUPLICATE_LIB_OK` 作为默认方案。
 - 不触碰 `daily_research/output/active_execution_strategy.json`，除非有明确 promotion 决策。
+- 2026-06-01 起执行端进入冻结/保留骨架/等待重建状态：允许只读状态、数据 readiness、候选 backtest wrapper、候选 trade-plan wrapper 的研究评估用途和 payload inventory；禁止 live/default、paper/broker、正式 trade plan 生产用途、active manifest promotion、production root 重建、自动化每日执行和无授权删除执行合同。
 - 2026-05-31 恢复边界：`daily_research/output/` 与 `daily_research/cache/` 曾被误删，当前空目录骨架只保证 manifest/integrity 入口存在；不得把缺失 payload 当成近期结论失效，也不得凭 state 文本手工重造 active artifact。
 - 不把 smoke、dry-run、failed trial、interrupted outer study、realtime tail label 写成 completed evidence。
 - 长训练或 study 需要 progress JSONL、latest progress JSON、stdout/stderr log 和明确 tag。
@@ -83,6 +84,7 @@
 - 本轮不实现实盘自动交易；后续 paper/live 需要单独设计 QMT/PTrade broker adapter、风控、合规报备和 kill switch。
 
 ## Daily Execution 运行口径
+- 冻结期口径：Daily Execution 只保留骨架、只读诊断、手动流程说明和候选评估入口；不得作为生产交易计划、paper/live 或 broker 接线入口。
 - 每日任务只走手动步骤；权威状态来自 Web 帮助页当前流程、作业证据路径和只读 daily verdict，不是 Web 是否能打开、单个 job 是否 succeeded、旧 runtime state 或 latest trade plan。
 - 启动 Web：
   `conda run -n yolos python daily_research/execution/run_execution_web.py --port 8765`
@@ -94,6 +96,7 @@
 - Web API 热路径只读 compact daily state：`/api/daily-run/status`、`/api/daily-run/latest`、`/api/data-readiness`、`/api/system/doctor`。
 - 任务提交入口只保留单项显式动作：`/api/data-sources/refresh`、`/api/trade-plan/generate`、`/api/paper-account/apply-latest-plan` 和必要诊断/恢复入口。
 - 当前 2026-05-26 fresh verdict 为 `blocked:data_not_ready`；后续操作以手动帮助页流程为准，完整旧状态机记录见 `daily_research/brain/references/execution_daily_plan_state_machine_refactor_20260526.md`。
+- 冻结解除前置：解释 new lineage 研究结果与旧 Stage 2.8 / Stage 3G / short_v5b 证据差异；完成同口径候选 backtest 方案；明确旧 production payload 是恢复、归档为不可用，还是由新研究主线显式替代。
 
 ## PathPolicy 执行异常处理口径
 - `test_forecast_dataset.py` 是慢集成测试；修改 forecast 默认先跑 selective verification 推荐的快速合同测试，完整 forecast dataset/training 测试只在长验证、发布前或风险升高时跑。

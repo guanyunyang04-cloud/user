@@ -25,6 +25,7 @@ from daily_research.data_platform.provider_health import ProviderHealthConfig, r
 from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.execution import paper_trading
 from daily_research.execution import production_signal
+from daily_research.execution import freeze_guard
 from daily_research.execution.app_runtime import (
     EVENTS_PATH,
     JOBS_ROOT,
@@ -1335,6 +1336,7 @@ def sync_active_manifest_to_latest_lake_dataset(
     refresh_manifest_path: str = "",
     lake_root: Path | str | None = None,
 ) -> dict[str, Any]:
+    freeze_guard.assert_write_action_allowed("active_manifest_write")
     payload = _read_json(ACTIVE_MANIFEST_PATH)
     if not payload:
         raise FileNotFoundError(f"active execution strategy manifest 缺失：{ACTIVE_MANIFEST_PATH}")
@@ -1536,6 +1538,7 @@ def save_account_snapshot(
     positions: list[dict[str, Any]] | None,
     path: Path | None = None,
 ) -> dict[str, Any]:
+    freeze_guard.assert_write_action_allowed("save_account_snapshot")
     resolved_path = path or POSITIONS_PATH
     cash_value: float | None = None
     if available_cash not in {None, ""}:
@@ -1609,6 +1612,7 @@ def reset_account_snapshot_from_example(
 
 
 def paper_account_cash_flow(*, flow_type: str, amount: float | int | str, reason: str = "") -> dict[str, Any]:
+    freeze_guard.assert_write_action_allowed("paper_account_cash_flow")
     _ensure_paper_account()
     payload = paper_trading.record_cash_flow(
         db_path=PAPER_ACCOUNT_DB_PATH,
@@ -1630,6 +1634,7 @@ def paper_account_manual_adjustment(
     amount: float | int | str | None = None,
     reason: str = "",
 ) -> dict[str, Any]:
+    freeze_guard.assert_write_action_allowed("paper_account_manual_adjustment")
     _ensure_paper_account()
     payload = paper_trading.record_manual_adjustment(
         db_path=PAPER_ACCOUNT_DB_PATH,
@@ -1699,6 +1704,7 @@ def paper_account_register_latest_plan() -> dict[str, Any]:
 
 
 def paper_account_apply_latest_plan(*, execution_date: str = "") -> dict[str, Any]:
+    freeze_guard.assert_write_action_allowed("paper_account_apply_latest_plan")
     _ensure_paper_account()
     registration = paper_account_register_latest_plan()
     plan_summary = dict(_safe_nested(registration, "trade_plan", "summary") or {})
@@ -2384,6 +2390,7 @@ def run_task_sync(
     force_unlock: bool = False,
     echo_output: bool = True,
 ) -> dict[str, Any]:
+    freeze_guard.assert_task_allowed(task_name)
     resolved_python = resolve_project_python_executable(python_executable or sys.executable)
     clean_passthrough = sanitize_passthrough_args(passthrough_args)
     command = build_task_command(task_name=task_name, python_executable=resolved_python, passthrough_args=clean_passthrough)
@@ -2514,6 +2521,7 @@ def launch_task_async(
     job_label: str = "",
     force_unlock: bool = False,
 ) -> dict[str, Any]:
+    freeze_guard.assert_task_allowed(task_name)
     if not force_unlock and _has_active_runtime_job():
         raise ExecutionAppLockError("Execution app lock is already held by an active job.")
     resolved_python = resolve_project_python_executable(python_executable or sys.executable)

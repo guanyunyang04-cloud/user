@@ -4,6 +4,7 @@ import subprocess
 import sys
 
 from daily_research.execution.app_tasks import build_task_command, get_task_spec, list_core_frontend_task_specs, list_task_specs
+from daily_research.execution.freeze_guard import ExecutionFreezeError, assert_task_allowed
 
 
 def test_danger_tasks_are_marked_danger() -> None:
@@ -45,6 +46,20 @@ def test_task_registry_does_not_expose_automatic_daily_runner() -> None:
     task_names = {spec.name for spec in list_task_specs()}
 
     assert "daily-plan-runner" not in task_names
+
+
+def test_execution_freeze_blocks_production_tasks() -> None:
+    for task_name in ["trade-plan", "refresh-production-default", "data-platform-refresh", "activate-single-mapping"]:
+        try:
+            assert_task_allowed(task_name)
+        except ExecutionFreezeError:
+            continue
+        raise AssertionError(f"{task_name} should be blocked while execution is frozen")
+
+
+def test_execution_freeze_allows_research_candidate_evaluation_tasks() -> None:
+    for task_name in ["execution-smoke", "provider-health-check", "candidate-backtest", "candidate-trade-plan"]:
+        assert_task_allowed(task_name)
 
 
 def test_provider_health_check_runs_from_execution_task_command() -> None:

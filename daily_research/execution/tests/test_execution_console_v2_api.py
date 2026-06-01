@@ -2492,7 +2492,7 @@ def test_ui_paths_include_react_dist() -> None:
     assert payload["react_dist"].parent.name == "webapp"
 
 
-def test_trade_plan_generate_preserves_windows_paths_with_spaces(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_trade_plan_generate_is_blocked_while_execution_is_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi.testclient import TestClient
 
     from daily_research.execution import web_server
@@ -2515,15 +2515,9 @@ def test_trade_plan_generate_preserves_windows_paths_with_spaces(monkeypatch: py
         },
     )
 
-    assert response.status_code == 200
-    assert captured["passthrough_args"] == [
-        "--candidate-profile",
-        "active_execution_strategy",
-        "--positions-file",
-        "H:/quant project/current positions.csv",
-        "--cash",
-        "12345.67",
-    ]
+    assert response.status_code == 423
+    assert captured == {}
+    assert response.json()["execution_freeze"]["mode"] == "frozen_skeleton_only"
 
 
 def test_model_train_rejects_non_production_models(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2546,7 +2540,7 @@ def test_model_train_rejects_non_production_models(monkeypatch: pytest.MonkeyPat
     assert called["launch"] is False
 
 
-def test_production_model_train_preserves_explicit_window(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_production_model_train_is_blocked_while_execution_is_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi.testclient import TestClient
 
     from daily_research.execution import web_server
@@ -2565,8 +2559,36 @@ def test_production_model_train_preserves_explicit_window(monkeypatch: pytest.Mo
         json={"dataset_mode": "custom", "start_date": "20250101", "end_date": "20260522"},
     )
 
+    assert response.status_code == 423
+    assert captured == {}
+    assert response.json()["execution_freeze"]["mode"] == "frozen_skeleton_only"
+
+
+def test_candidate_backtest_task_remains_allowed_while_execution_is_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from daily_research.execution import web_server
+
+    captured: dict[str, object] = {}
+
+    def fake_launch_task_async(**kwargs):
+        captured.update(kwargs)
+        return {"job_id": "job1", "task_name": kwargs["task_name"], "status": "queued"}
+
+    monkeypatch.setattr(web_server.app_service, "launch_task_async", fake_launch_task_async)
+
+    client = TestClient(web_server.create_app())
+    response = client.post(
+        "/api/run",
+        json={
+            "task_name": "candidate-backtest",
+            "form_payload": {"candidate_profile": "active_execution_strategy"},
+            "background": True,
+        },
+    )
+
     assert response.status_code == 200
-    assert captured["passthrough_args"] == ["--start-date", "20250101", "--end-date", "20260522"]
+    assert captured["task_name"] == "candidate-backtest"
 
 
 def test_react_build_is_primary_ui_when_available(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

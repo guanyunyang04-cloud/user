@@ -38,3 +38,9 @@
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/project_consistency_check.py`
+
+## 6. 执行端冻结治理
+- 2026-06-01 起，执行端状态为 `frozen_skeleton_only / awaiting_research_rebuild`。
+- 冻结期允许保留和维护执行代码骨架、只读诊断、数据 readiness、候选 backtest / trade-plan wrapper、active artifact guard 和恢复盘点。
+- 冻结期禁止 live/default、paper/live/broker 接线、正式交易计划生产、active manifest promotion、production root 重建、自动化每日执行，以及未授权删除执行合同。
+- 解冻必须满足三项前置：研究端差异解释完成；新旧模型同口径候选回测方案完成；旧 production payload 的恢复/归档/替代路径获得明确授权。
