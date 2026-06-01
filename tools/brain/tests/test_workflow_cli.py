@@ -392,6 +392,8 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertEqual(payload["target"]["kind"], "workspace")
         self.assertEqual(payload["target"]["domain"], "workspace_governance")
         self.assertIn("workspace_governance", payload["target"]["bootstrap_aliases"])
+        self.assertFalse(payload["decision_required"])
+        self.assertEqual(payload["recommended_default"], "workspace")
 
     def test_route_cli_outputs_structured_child_target(self) -> None:
         payload = run_cli("route", "--task", "修复 daily_research execution web 控制台", "--json")
@@ -408,6 +410,16 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertEqual(payload["status"], "ambiguous")
         self.assertEqual(payload["selected_brain_id"], "")
         self.assertEqual(payload["target"]["kind"], "ambiguous")
+        self.assertTrue(payload["decision_required"])
+
+    def test_route_cli_outputs_needs_agent_decision_for_soft_terms(self) -> None:
+        payload = run_cli("route", "--task", "training 复盘", "--json")
+
+        self.assertEqual(payload["status"], "needs_agent_decision")
+        self.assertEqual(payload["selected_brain_id"], "")
+        self.assertEqual(payload["target"]["kind"], "ambiguous")
+        self.assertTrue(payload["decision_required"])
+        self.assertEqual(payload["recommended_default"], "workspace")
 
     def test_audit_brain_cli_outputs_catalog_language_and_guards(self) -> None:
         payload = run_cli("audit-brain", "--scope", "all", "--json")

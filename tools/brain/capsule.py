@@ -190,6 +190,8 @@ def _preflight_blockers(*, routing: dict[str, Any], main_context: dict[str, Any]
         blockers.append("not_on_main_for_mutation")
     if routing.get("status") == "ambiguous":
         blockers.append("ambiguous_routing")
+    if routing.get("status") == "needs_agent_decision":
+        blockers.append("route_needs_agent_decision")
     target = routing.get("target", {})
     if routing.get("status") == "selected":
         target_kind = str(target.get("kind", "") if isinstance(target, dict) else "")
@@ -346,7 +348,15 @@ def build_task_capsule(
         "task": task,
         "context_profile": context_profile,
         "summary_budget": summary_budget(context_profile),
-        "available_deep_dive_commands": deep_dive_commands(selected_brain_id=target_id, target_kind=target_kind),
+        "available_deep_dive_commands": deep_dive_commands(
+            selected_brain_id=target_id,
+            target_kind=target_kind,
+            candidate_brain_ids=[
+                str(item.get("brain_id", "") or "")
+                for item in routing.get("candidate_summary", [])
+                if isinstance(item, dict) and str(item.get("brain_id", "") or "") in child_brain_ids()
+            ],
+        ),
         "intent": str(intent or "read"),
         "mutation_allowed": bool(mutation_allowed),
         "preflight_blockers": preflight_blockers,

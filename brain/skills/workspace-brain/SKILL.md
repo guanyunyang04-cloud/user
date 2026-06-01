@@ -17,7 +17,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule -
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow route --task "<task>" --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain <workspace|workspace_governance|child_brain_id> --json
 ```
-Only read child-brain context after routing returns `status=selected` and `target.kind=child`; if multiple children match, treat `ambiguous` as a blocker.
+`route` is a sensor, not the final thinker. Only read child-brain context after routing returns `status=selected` and `target.kind=child`; if routing returns `needs_agent_decision` or `ambiguous`, inspect user intent, paths, manifest evidence, and candidates before choosing a bootstrap target. Do not read a child brain because of one generic term such as `brain`, `study`, `training`, `数据集`, or `模型`.
 
 ## Init And Register
 Initialize a project brain only when mutation is allowed and no local `brain/brain_manifest.json` exists. `--brain-id` is optional; default comes from the project directory name.

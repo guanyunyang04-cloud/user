@@ -15,7 +15,7 @@ class WorkspaceBrainSkillContractTest(unittest.TestCase):
         text = SKILL.read_text(encoding="utf-8")
 
         self.assertTrue(text.startswith("---\nname: workspace-brain"))
-        self.assertIn("description: Use the workspace main brain", text)
+        self.assertIn("description: Use when", text)
         self.assertIn("脑区", text)
         self.assertIn("agent learning", text.lower())
         self.assertIn("-m tools.brain.workflow capsule", text)
@@ -25,6 +25,13 @@ class WorkspaceBrainSkillContractTest(unittest.TestCase):
         self.assertIn("brain_runtime.py", text)
         self.assertIn("brain_runtime.py health", text)
         self.assertNotIn("r10-r52", text)
+
+    def test_skill_treats_route_as_sensor_and_agent_decision_boundary(self) -> None:
+        text = SKILL.read_text(encoding="utf-8")
+
+        self.assertIn("`route` is a sensor", text)
+        self.assertIn("needs_agent_decision", text)
+        self.assertIn("Do not read a child brain because of one generic term", text)
 
     def test_skill_keeps_manifest_as_truth_source(self) -> None:
         text = SKILL.read_text(encoding="utf-8")

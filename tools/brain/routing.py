@@ -18,6 +18,7 @@ class RouteCandidate:
     score: int
     matched_terms: list[str]
     sources: list[str]
+    evidence_strength: str = "soft"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -67,6 +68,42 @@ WORKSPACE_TERMS = (
     "workspace brain",
     "主分脑",
 )
+
+WORKSPACE_OVERRIDE_TERMS = (
+    "brain路由",
+    "路由机制",
+    "route",
+    "routing",
+    "routing policy",
+    "route_task_to_brain",
+    "catalog",
+    "brain_catalog",
+    "workspace-brain",
+    "workspace brain",
+    "brain architecture",
+    "agent learning",
+    "agent meta",
+    "skills",
+    "skill",
+    "脑区治理",
+    "主脑",
+    "分脑",
+    "脑区",
+    "项目大脑",
+    "接管规则",
+    "治理规则",
+    "主分脑",
+)
+
+SOFT_ONLY_TERMS = {
+    "brain",
+    "workspace",
+    "study",
+    "training",
+    "数据集",
+    "模型",
+    "复盘",
+}
 
 
 def _workspace_path(path: str | Path) -> Path:
@@ -182,6 +219,23 @@ def _matches(task: str, terms: list[str] | tuple[str, ...]) -> list[str]:
     return _dedupe(matches)
 
 
+def _is_soft_only_term(term: str) -> bool:
+    text = str(term or "").strip().lower()
+    if not text:
+        return True
+    if text in SOFT_ONLY_TERMS:
+        return True
+    return False
+
+
+def _split_term_strength(matches: list[str]) -> tuple[list[str], list[str]]:
+    hard: list[str] = []
+    soft: list[str] = []
+    for term in matches:
+        (soft if _is_soft_only_term(term) else hard).append(term)
+    return _dedupe(hard), _dedupe(soft)
+
+
 def _project_path_matches(task: str, descriptors: list[BrainRouteDescriptor]) -> list[RouteCandidate]:
     candidates: list[RouteCandidate] = []
     for descriptor in descriptors:
@@ -196,6 +250,7 @@ def _project_path_matches(task: str, descriptors: list[BrainRouteDescriptor]) ->
                     score=100 + len(matches),
                     matched_terms=matches,
                     sources=["path_prefix_match"],
+                    evidence_strength="hard",
                 )
             )
     return candidates
@@ -207,16 +262,23 @@ def _descriptor_term_matches(task: str, descriptors: list[BrainRouteDescriptor])
         alias_matches = _matches(task, descriptor.aliases)
         routing_matches = _matches(task, descriptor.routing_terms)
         weak_matches = _matches(task, descriptor.weak_terms)
-        if not alias_matches and not routing_matches and not weak_matches:
+        hard_routing_matches, soft_routing_matches = _split_term_strength(routing_matches)
+        if not alias_matches and not hard_routing_matches and not soft_routing_matches and not weak_matches:
             continue
         sources: list[str] = []
         score = 0
+        evidence_strength = "soft"
         if alias_matches:
             sources.append("alias_match")
             score += 20 + len(alias_matches)
-        if routing_matches:
+            evidence_strength = "hard"
+        if hard_routing_matches:
             sources.append("manifest_term_match")
-            score += 10 + len(routing_matches)
+            score += 10 + len(hard_routing_matches)
+            evidence_strength = "hard"
+        if soft_routing_matches:
+            sources.append("manifest_soft_term_match")
+            score += len(soft_routing_matches)
         if weak_matches:
             sources.append("body_map_term_match")
             score += len(weak_matches)
@@ -224,8 +286,9 @@ def _descriptor_term_matches(task: str, descriptors: list[BrainRouteDescriptor])
             RouteCandidate(
                 brain_id=descriptor.brain_id,
                 score=score,
-                matched_terms=_dedupe([*alias_matches, *routing_matches, *weak_matches]),
+                matched_terms=_dedupe([*alias_matches, *hard_routing_matches, *soft_routing_matches, *weak_matches]),
                 sources=sources,
+                evidence_strength=evidence_strength,
             )
         )
     return candidates
@@ -241,8 +304,13 @@ def _workspace_matches(task: str) -> list[RouteCandidate]:
             score=len(matches),
             matched_terms=matches,
             sources=["workspace_term_match"],
+            evidence_strength="hard" if _matches(task, WORKSPACE_OVERRIDE_TERMS) else "soft",
         )
     ]
+
+
+def _workspace_override_matches(task: str) -> list[str]:
+    return _matches(task, WORKSPACE_OVERRIDE_TERMS)
 
 
 def _registry_matches(task: str, descriptors: list[BrainRouteDescriptor]) -> list[RouteCandidate]:
@@ -254,7 +322,8 @@ def _registry_matches(task: str, descriptors: list[BrainRouteDescriptor]) -> lis
     except Exception:
         return []
     by_root = {descriptor.body_root.replace("\\", "/").strip("/"): descriptor.brain_id for descriptor in descriptors if descriptor.body_root}
-    matched: dict[str, set[str]] = {}
+    matched_hard: dict[str, set[str]] = {}
+    matched_soft: dict[str, set[str]] = {}
     for record in payload.get("records", []) or []:
         if not isinstance(record, dict):
             continue
@@ -266,42 +335,68 @@ def _registry_matches(task: str, descriptors: list[BrainRouteDescriptor]) -> lis
                 break
         if not brain_id:
             continue
-        values = [
+        hard_values = [
             str(record.get("id", "") or ""),
-            path,
-            str(record.get("workflow", "") or ""),
             *[str(item) for item in record.get("research_programs", []) or []],
             *[str(item) for item in record.get("study_families", []) or []],
             *[str(item) for item in record.get("run_tags", []) or []],
             *[str(item) for item in record.get("dataset_ids", []) or []],
         ]
-        for value in values:
-            if value and value.lower() in text.lower():
-                matched.setdefault(brain_id, set()).add(value)
-    return [
-        RouteCandidate(
-            brain_id=brain_id,
-            score=80 + len(values),
-            matched_terms=sorted(values),
-            sources=["registry_exact_match"],
+        path_values = [path, Path(path).name if path else ""]
+        soft_values = [str(record.get("workflow", "") or ""), *[str(item) for item in record.get("tags", []) or []]]
+        for value in hard_values:
+            clean = str(value or "").strip()
+            if clean and not _is_soft_only_term(clean) and clean.lower() in text.lower():
+                matched_hard.setdefault(brain_id, set()).add(clean)
+        for value in path_values:
+            clean = str(value or "").strip()
+            if clean and len(clean) >= 8 and clean.lower() in text.lower():
+                matched_hard.setdefault(brain_id, set()).add(clean)
+        for value in soft_values:
+            clean = str(value or "").strip()
+            if clean and clean.lower() in text.lower():
+                matched_soft.setdefault(brain_id, set()).add(clean)
+
+    candidates: list[RouteCandidate] = []
+    for brain_id, values in matched_hard.items():
+        candidates.append(
+            RouteCandidate(
+                brain_id=brain_id,
+                score=80 + len(values),
+                matched_terms=sorted(values),
+                sources=["registry_exact_match"],
+                evidence_strength="hard",
+            )
         )
-        for brain_id, values in matched.items()
-    ]
+    for brain_id, values in matched_soft.items():
+        candidates.append(
+            RouteCandidate(
+                brain_id=brain_id,
+                score=len(values),
+                matched_terms=sorted(values),
+                sources=["registry_soft_match"],
+                evidence_strength="soft",
+            )
+        )
+    return candidates
 
 
 def _merge_candidates(candidates: list[RouteCandidate]) -> list[RouteCandidate]:
     merged: dict[str, dict[str, Any]] = {}
     for candidate in candidates:
-        item = merged.setdefault(candidate.brain_id, {"score": 0, "matched_terms": [], "sources": []})
+        item = merged.setdefault(candidate.brain_id, {"score": 0, "matched_terms": [], "sources": [], "evidence_strength": "soft"})
         item["score"] += int(candidate.score)
         item["matched_terms"].extend(candidate.matched_terms)
         item["sources"].extend(candidate.sources)
+        if candidate.evidence_strength == "hard":
+            item["evidence_strength"] = "hard"
     return [
         RouteCandidate(
             brain_id=brain_id,
             score=int(payload["score"]),
             matched_terms=sorted(set(payload["matched_terms"])),
             sources=sorted(set(payload["sources"])),
+            evidence_strength=str(payload["evidence_strength"]),
         )
         for brain_id, payload in merged.items()
     ]
@@ -319,28 +414,65 @@ def route_task_to_brain(task: str) -> dict[str, Any]:
     candidates = _merge_candidates(raw_candidates)
     candidates = sorted(candidates, key=lambda item: (-item.score, item.brain_id))
     child_ids = {descriptor.brain_id for descriptor in descriptors}
-    strong_sources = {"path_prefix_match", "alias_match", "registry_exact_match", "manifest_term_match"}
-    positive_children = [
-        item
-        for item in candidates
-        if item.brain_id in child_ids and (strong_sources.intersection(item.sources) or item.score >= 3)
-    ]
+    hard_children = [item for item in candidates if item.brain_id in child_ids and item.evidence_strength == "hard"]
+    soft_children = [item for item in candidates if item.brain_id in child_ids and item.evidence_strength != "hard"]
+    workspace_override_matches = _workspace_override_matches(text)
+    has_workspace_candidate = any(item.brain_id == "workspace_governance" for item in candidates)
     selected = "workspace"
     target = WORKSPACE_TARGET
     status = "selected"
     reason = "no manifest, catalog, path, or registry evidence matched; default to workspace governance"
+    confidence = "medium"
+    decision_required = False
+    decision_reason = ""
+    recommended_default = "workspace"
 
-    if len(positive_children) > 1:
+    if len(hard_children) > 1:
         selected = ""
         target = _ambiguous_target()
         status = "ambiguous"
+        confidence = "low"
+        decision_required = True
+        recommended_default = "none"
         reason = "multiple child brains matched; main brain must not default to a child"
-    elif positive_children:
-        selected = positive_children[0].brain_id
+        decision_reason = "multiple child brains have hard routing evidence"
+    elif hard_children and workspace_override_matches:
+        selected = ""
+        target = _ambiguous_target()
+        status = "needs_agent_decision"
+        confidence = "medium"
+        decision_required = True
+        recommended_default = "workspace"
+        reason = "workspace governance intent and child hard evidence both matched"
+        decision_reason = "agent must decide whether this is governance about a child brain or body work inside the child"
+    elif hard_children:
+        selected = hard_children[0].brain_id
         target = _child_target(selected)
-        reason = f"task matched {selected} via {', '.join(positive_children[0].sources)}"
-    elif any(item.brain_id == "workspace_governance" for item in candidates):
+        confidence = "high"
+        recommended_default = "child"
+        reason = f"task matched {selected} via {', '.join(hard_children[0].sources)}"
+    elif workspace_override_matches or has_workspace_candidate:
+        confidence = "high" if workspace_override_matches else "medium"
         reason = "task matched workspace governance terms"
+    elif soft_children:
+        selected = ""
+        target = _ambiguous_target()
+        status = "needs_agent_decision"
+        confidence = "low"
+        decision_required = True
+        recommended_default = "workspace"
+        reason = "only soft child routing evidence matched; runtime will not choose a child"
+        decision_reason = "agent must inspect user intent before bootstrapping any child brain"
+
+    candidate_summary = [
+        {
+            "brain_id": item.brain_id,
+            "evidence_strength": item.evidence_strength,
+            "matched_terms": item.matched_terms,
+            "sources": item.sources,
+        }
+        for item in candidates
+    ]
 
     return {
         "status": status,
@@ -349,4 +481,9 @@ def route_task_to_brain(task: str) -> dict[str, Any]:
         "candidates": [item.to_dict() for item in candidates],
         "routing_sources": sorted({source for item in candidates for source in item.sources}),
         "reason": reason,
+        "confidence": confidence,
+        "decision_required": decision_required,
+        "decision_reason": decision_reason,
+        "recommended_default": recommended_default,
+        "candidate_summary": candidate_summary,
     }

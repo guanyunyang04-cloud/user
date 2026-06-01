@@ -17,12 +17,25 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertEqual(payload["target"]["kind"], "workspace")
         self.assertEqual(payload["target"]["domain"], "workspace_governance")
         self.assertIn("workspace_governance", payload["target"]["bootstrap_aliases"])
+        self.assertFalse(payload["decision_required"])
+        self.assertEqual(payload["confidence"], "high")
+
+    def test_route_brain_routing_policy_stays_workspace_despite_registry_brain_term(self) -> None:
+        payload = route_task_to_brain("brain路由机制是否应该由agent思考决定而不是根据提示词关键词决定")
+
+        self.assertEqual(payload["status"], "selected")
+        self.assertEqual(payload["selected_brain_id"], "workspace")
+        self.assertEqual(payload["target"]["kind"], "workspace")
+        self.assertFalse(payload["decision_required"])
+        self.assertEqual(payload["recommended_default"], "workspace")
 
     def test_route_path20_task_to_daily_research(self) -> None:
         payload = route_task_to_brain("Path20 多 horizon 训练计划")
 
         self.assertEqual(payload["status"], "selected")
         self.assertEqual(payload["selected_brain_id"], "daily_research")
+        self.assertFalse(payload["decision_required"])
+        self.assertEqual(payload["confidence"], "high")
 
     def test_route_multi_horizon_and_path_policy_terms_to_daily_research(self) -> None:
         cases = (
@@ -48,7 +61,6 @@ class BrainCapsuleTest(unittest.TestCase):
             "模型页 active manifest 状态",
             "daily_research/execution/app_service.py 修复",
             "production signal refresh 闭环",
-            "当前数据集不完整",
         )
         for task in cases:
             with self.subTest(task=task):
@@ -75,6 +87,19 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertEqual(payload["selected_brain_id"], "")
         self.assertEqual(payload["target"]["kind"], "ambiguous")
         self.assertEqual(payload["target"]["domain"], "")
+        self.assertTrue(payload["decision_required"])
+        self.assertEqual(payload["recommended_default"], "none")
+
+    def test_route_soft_terms_need_agent_decision(self) -> None:
+        for task in ("training 复盘", "当前数据集不完整"):
+            with self.subTest(task=task):
+                payload = route_task_to_brain(task)
+
+                self.assertEqual(payload["status"], "needs_agent_decision")
+                self.assertEqual(payload["selected_brain_id"], "")
+                self.assertEqual(payload["target"]["kind"], "ambiguous")
+                self.assertTrue(payload["decision_required"])
+                self.assertEqual(payload["recommended_default"], "workspace")
 
     def test_capsule_without_child_returns_schema_v4_workspace_context(self) -> None:
         payload = build_task_capsule(task="审阅主脑接管规则", workflow="auto")
@@ -175,6 +200,16 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertIn("workspace_context", payload)
         self.assertNotIn("summary", payload["main_context"])
         self.assertNotIn("hard_rules", payload["main_context"])
+
+    def test_capsule_needs_agent_decision_does_not_attach_child_context(self) -> None:
+        payload = build_task_capsule(task="training 复盘", workflow="auto")
+
+        self.assertEqual(payload["routing"]["status"], "needs_agent_decision")
+        self.assertEqual(payload["target_kind"], "ambiguous")
+        self.assertIn("route_needs_agent_decision", payload["preflight_blockers"])
+        self.assertNotIn("child_context", payload)
+        self.assertNotIn("workspace_context", payload)
+        self.assertTrue(any("candidate only:" in command and "daily_research" in command for command in payload["available_deep_dive_commands"]))
 
     def test_capsule_long_task_wording_stays_in_brain_handoff(self) -> None:
         payload = build_task_capsule(

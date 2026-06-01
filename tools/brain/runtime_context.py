@@ -20,7 +20,7 @@ def summary_budget(profile: str) -> dict[str, int]:
     return {"main_summary_lines": 0, "child_summary_lines": 0, "related_references": 3, "frontier_tags": 3}
 
 
-def deep_dive_commands(*, selected_brain_id: str = "", target_kind: str = "") -> list[str]:
+def deep_dive_commands(*, selected_brain_id: str = "", target_kind: str = "", candidate_brain_ids: list[str] | None = None) -> list[str]:
     if target_kind == "workspace":
         return [
             "C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py health --mode full --cwd .",
@@ -36,6 +36,10 @@ def deep_dive_commands(*, selected_brain_id: str = "", target_kind: str = "") ->
     ]
     if selected_brain_id:
         commands.append(f"C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain {selected_brain_id} --json")
+    for brain_id in candidate_brain_ids or []:
+        text = str(brain_id or "").strip()
+        if text and text != selected_brain_id:
+            commands.append(f"candidate only: C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain {text} --json")
     return commands
 
 
