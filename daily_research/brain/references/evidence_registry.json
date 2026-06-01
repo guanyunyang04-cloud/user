@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 80,
+  "record_count": 81,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -204,6 +204,54 @@
       "next_allowed_actions": [],
       "active_artifact_impact": "guarded",
       "dataset_ids": []
+    },
+    {
+      "id": "alpha_multi_horizon_research_rebuild_infra_v2_20260601",
+      "date": "2026-06-01",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_multi_horizon_research_rebuild_infra_v2_20260601.md",
+      "tags": [
+        "path_policy",
+        "data_lake"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [
+        "new_lineage_research_rebuild"
+      ],
+      "run_tags": [
+        "mh_rebuild_infra_v2_fullpool_target_norm_head_constraint_raw_seed7_20260531_01",
+        "mh_rebuild_infra_v2_fullpool_target_norm_head_constraint_raw_seed11_20260531_01",
+        "mh_rebuild_infra_v2_fullpool_target_norm_head_constraint_raw_seed19_20260531_01",
+        "mh_rebuild_infra_v2_fullpool_anchor_20260531_01"
+      ],
+      "verdict": "Status: `new_lineage_research_rebuild_completed / baseline_anchor_failed_continuation_gate / shadow-only / research-only`.; Mainline: `alpha_multi_horizon_utility_policy_v1`.; Study family: `new_lineage_research_rebuild`.; This is a new local research lineage after `daily_research/output/` and `daily_research/cache/` loss. It is not a recovery of old Stage 2.8 / Stage 3G run payloads.",
+      "blockers": [
+        "Status: `new_lineage_research_rebuild_completed / baseline_anchor_failed_continuation_gate / shadow-only / research-only`.",
+        "Audit verdict: `usable_with_warnings`, with no blockers.",
+        "Validator status: `ok`, blockers `[]`.",
+        "The failed continuation gate is a model/rebuild-anchor quality result, not a provider or data lake blocker. It says the new anchor should not be used to resume broad Stage 3 expansion without first diagnosing seed11 instability and the input/target regime issue surfaced by diagnostics.",
+        "Before continuing multi-horizon expansion, inspect why seed11 failed hit lift and monthly stability under the new lineage."
+      ],
+      "next_allowed_actions": [
+        "Keep active execution unchanged.",
+        "Treat `policy_input_bundle__45e3d8c059ba718426a9f887` and `policy_pool_view__8f9367ce305548e3ecd04feb` as the new local research substrate for diagnostics only.",
+        "Before continuing multi-horizon expansion, inspect why seed11 failed hit lift and monthly stability under the new lineage.",
+        "Prefer narrow diagnostics around target definition, regime split, feature scaling/interaction, and hit-lift-preserving rank regularization.",
+        "Do not run broad Stage 3 architecture/input expansion from this anchor until a follow-up baseline or diagnostic gate passes."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
+        "data_platform_industry_concept__11f4d7e34893ebf6edf60c3c",
+        "data_platform_security_status__1e46db76419d92a204332401",
+        "data_platform_trading_calendar__1e998f0b04c696089fab410d",
+        "data_platform_universe_snapshot__b8bc799a035012ffd404aaed",
+        "policy_pool_view__8f9367ce305548e3ecd04feb",
+        "policy_sector_board_view__49ffa8713d1b322a8c19b72b"
+      ]
     },
     {
       "id": "alpha_multi_horizon_root_cause_audit_20260524",
