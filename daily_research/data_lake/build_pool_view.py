@@ -44,6 +44,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-price", type=float, default=300.0)
     parser.add_argument("--exchange-suffix", default="")
     parser.add_argument("--symbols", default="")
+    parser.add_argument(
+        "--exclude-symbol-prefixes",
+        default="",
+        help="Comma-separated stock-code prefixes to exclude before building the view, e.g. 300,301,688,689.",
+    )
     parser.add_argument("--refresh", action="store_true")
     return parser
 
@@ -76,6 +81,9 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         raise ValueError(f"active_artifact_diff_blocker: {ACTIVE_ARTIFACT} has uncommitted diff.")
     lake = ResearchDataLake(str(args.data_lake_root or "").strip() or None)
     symbols = tuple(item.strip().upper() for item in str(args.symbols or "").split(",") if item.strip())
+    exclude_symbol_prefixes = tuple(
+        item.strip().upper() for item in str(args.exclude_symbol_prefixes or "").split(",") if item.strip()
+    )
     spec = PoolViewSpec(
         source_market_dataset_id=str(args.source_market_dataset_id).strip(),
         view_kind=str(args.view_kind).strip().lower(),
@@ -89,6 +97,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         max_price=float(args.max_price),
         exchange_suffix=str(args.exchange_suffix or "").strip().upper(),
         symbols=symbols,
+        exclude_symbol_prefixes=exclude_symbol_prefixes,
     )
     record = build_pool_view_from_policy_bundle(lake=lake, spec=spec, reuse=not bool(args.refresh))
     manifest = {

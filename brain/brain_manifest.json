@@ -151,6 +151,16 @@
       "body_root": "daily_stock_analysis-main",
       "entrypoint": "daily_stock_analysis-main/brain/identity_layer.md",
       "attach_status": "attached"
+    },
+    {
+      "id": "traditional_quant_research",
+      "path": "traditional_quant_research/brain/brain_manifest.json",
+      "role": "traditional_quant_methods_research_lab",
+      "regional_role": "traditional_quant_methods_research_lab",
+      "control_level": "managed_by_main_brain",
+      "body_root": "traditional_quant_research",
+      "entrypoint": "traditional_quant_research/brain/identity_layer.md",
+      "attach_status": "attached"
     }
   ],
   "write_routes": {

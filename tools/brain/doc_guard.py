@@ -258,6 +258,8 @@ ALLOWED_EXTERNAL_DOC_PREFIXES = (
     "daily_stock_analysis-main/docs/",
     "daily_stock_analysis-main/.github/",
     "daily_stock_analysis-main/.claude/skills/",
+    "traditional_quant_research/experiments/",
+    "traditional_quant_research/research_log/",
 )
 
 DOCUMENT_REDIRECTS = {
@@ -277,6 +279,9 @@ ALLOWED_EXTERNAL_DOCS = {
     "daily_stock_analysis-main/README.md",
     "daily_stock_analysis-main/SKILL.md",
     "daily_stock_analysis-main/strategies/README.md",
+    "traditional_quant_research/README.md",
+    "traditional_quant_research/data/README.md",
+    "traditional_quant_research/data/catalog.md",
     *DOCUMENT_REDIRECTS.keys(),
 }
 
@@ -453,6 +458,26 @@ def _default_docs() -> list[str]:
             if candidate not in docs and (WORKSPACE_ROOT / candidate).exists():
                 docs.append(candidate)
     return docs
+
+
+def _attached_brain_doc_prefixes() -> tuple[str, ...]:
+    prefixes = list(BRAIN_DOC_PREFIXES)
+    try:
+        catalog = build_brain_catalog()
+    except Exception:
+        return tuple(prefixes)
+    for item in catalog.get("brains", []):
+        if not isinstance(item, dict):
+            continue
+        if item.get("status") not in {"canonical_root", "attached"}:
+            continue
+        root = str(item.get("root", "")).strip().replace("\\", "/")
+        if not root:
+            continue
+        prefix = root.rstrip("/") + "/"
+        if prefix not in prefixes:
+            prefixes.append(prefix)
+    return tuple(prefixes)
 
 
 def _load_main_manifest() -> dict[str, Any]:
@@ -960,7 +985,7 @@ def _check_manifest_semantics(path: Path, text: str) -> list[str]:
 def _is_allowed_doc_path(relative_path: str) -> bool:
     if relative_path in ALLOWED_EXTERNAL_DOCS:
         return True
-    if relative_path.startswith(BRAIN_DOC_PREFIXES):
+    if relative_path.startswith(_attached_brain_doc_prefixes()):
         return True
     if any(part in GENERATED_DOC_PATH_PARTS for part in relative_path.split("/")):
         return True

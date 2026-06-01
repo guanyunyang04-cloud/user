@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-24",
+  "generated_at": "2026-06-01",
   "language_policy": "zh_semantic_en_identifiers_v1",
   "brains": [
     {
@@ -10,7 +10,7 @@
       "status": "canonical_root",
       "body_root": ".",
       "references_path": "brain/references",
-      "references_count": 4,
+      "references_count": 9,
       "language_policy": "zh_semantic_en_identifiers_v1",
       "last_guard_status": "ok"
     },
@@ -21,7 +21,7 @@
       "status": "attached",
       "body_root": "daily_research",
       "references_path": "daily_research/brain/references",
-      "references_count": 60,
+      "references_count": 100,
       "language_policy": "zh_semantic_en_identifiers_v1",
       "last_guard_status": "ok"
     },
@@ -44,6 +44,17 @@
       "body_root": "daily_stock_analysis-main",
       "references_path": "daily_stock_analysis-main/brain/references",
       "references_count": 1,
+      "language_policy": "zh_semantic_en_identifiers_v1",
+      "last_guard_status": "ok"
+    },
+    {
+      "brain_id": "traditional_quant_research",
+      "root": "traditional_quant_research/brain",
+      "manifest_path": "traditional_quant_research/brain/brain_manifest.json",
+      "status": "attached",
+      "body_root": "traditional_quant_research",
+      "references_path": "traditional_quant_research/brain/references",
+      "references_count": 0,
       "language_policy": "zh_semantic_en_identifiers_v1",
       "last_guard_status": "ok"
     },

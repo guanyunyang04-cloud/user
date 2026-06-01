@@ -2755,6 +2755,13 @@ def _pool_view_spec_from_args(args: argparse.Namespace, *, start_date: str, end_
     if view_kind == "exchange":
         suffix = view_name.removeprefix("exchange_")
         spec["exchange_suffix"] = f".{suffix.upper()}" if suffix else ""
+    exclude_symbol_prefixes = tuple(
+        item.strip().upper()
+        for item in str(getattr(args, "pool_view_exclude_symbol_prefixes", "") or "").split(",")
+        if item.strip()
+    )
+    if exclude_symbol_prefixes:
+        spec["exclude_symbol_prefixes"] = exclude_symbol_prefixes
     return spec
 
 
@@ -3322,6 +3329,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pool-view-id", default="", help="Optional data-lake policy_pool_view dataset id.")
     parser.add_argument("--pool-view-kind", default="", choices=("", "learned_all_a", "rolling_liquidity", "exchange", "static_symbols"))
     parser.add_argument("--pool-view-name", default="")
+    parser.add_argument(
+        "--pool-view-exclude-symbol-prefixes",
+        default="",
+        help="Comma-separated stock-code prefixes excluded before building a data-lake pool view, e.g. 300,301,688,689.",
+    )
     parser.add_argument("--sector-board-view-id", default="", help="Optional data-lake policy_sector_board_view dataset id.")
     parser.add_argument("--sector-board-view-kind", default="", choices=("", "latest_static_snapshot"))
     parser.add_argument("--sector-board-as-of-date", default="")

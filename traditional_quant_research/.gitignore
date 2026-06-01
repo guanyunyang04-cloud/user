@@ -1,0 +1,13 @@
+data/raw/
+data/vendor/
+output/
+cache/
+*.parquet
+*.feather
+*.h5
+*.db
+*.sqlite
+*.pt
+*.pkl
+__pycache__/
+.pytest_cache/

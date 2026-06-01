@@ -24,6 +24,7 @@ class PoolViewSpec:
     max_price: float = 300.0
     exchange_suffix: str = ""
     symbols: tuple[str, ...] = ()
+    exclude_symbol_prefixes: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -32,6 +33,7 @@ class PoolViewSpec:
         payload["pool_name"] = str(payload["pool_name"] or "").strip().lower()
         payload["exchange_suffix"] = str(payload["exchange_suffix"] or "").strip().upper()
         payload["symbols"] = tuple(_normalize_symbols(payload.get("symbols", ())))
+        payload["exclude_symbol_prefixes"] = tuple(_normalize_symbol_prefixes(payload.get("exclude_symbol_prefixes", ())))
         payload["rebalance_every_days"] = int(payload["rebalance_every_days"] or 21)
         payload["adv_window"] = int(payload["adv_window"] or 20)
         payload["min_price"] = float(payload["min_price"])
@@ -60,6 +62,40 @@ def _normalize_symbols(values: Iterable[str]) -> list[str]:
         if not value or value in seen:
             continue
         seen.add(value)
+        out.append(value)
+    return out
+
+
+def _normalize_symbol_prefixes(values: Iterable[str] | str) -> list[str]:
+    if isinstance(values, str):
+        raw_values = values.split(",")
+    else:
+        raw_values = list(values or ())
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_values:
+        value = str(raw or "").strip().upper()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+def _symbol_code(symbol: str) -> str:
+    return str(symbol or "").strip().upper().split(".", 1)[0]
+
+
+def _exclude_prefixed_symbols(symbols: Iterable[str], prefixes: Iterable[str]) -> list[str]:
+    normalized_prefixes = tuple(_normalize_symbol_prefixes(prefixes))
+    if not normalized_prefixes:
+        return [str(symbol).strip().upper() for symbol in symbols]
+    out: list[str] = []
+    for symbol in symbols:
+        value = str(symbol or "").strip().upper()
+        code = _symbol_code(value)
+        if any(code.startswith(prefix) for prefix in normalized_prefixes):
+            continue
         out.append(value)
     return out
 
@@ -112,19 +148,21 @@ def _build_membership_for_spec(
     view_kind = str(payload["view_kind"])
     view_name = str(payload["view_name"] or view_kind)
     close = _pivot_market(market, "close")
-    available_symbols = list(close.columns)
+    available_symbols = _exclude_prefixed_symbols(close.columns, payload.get("exclude_symbol_prefixes", ()))
+    close = close.reindex(columns=available_symbols)
     dates = close.index
     schedule = pd.DataFrame()
     source_cache: dict[str, Any] = {
         "source_market_dataset_id": payload["source_market_dataset_id"],
         "view_kind": view_kind,
         "view_name": view_name,
+        "exclude_symbol_prefixes": list(payload.get("exclude_symbol_prefixes", ())),
     }
 
     if view_kind in {"learned_all_a", "all_a"}:
         membership = close.notna().astype(bool)
     elif view_kind == "rolling_liquidity":
-        amount = _pivot_market(market, "amount")
+        amount = _pivot_market(market, "amount").reindex(columns=available_symbols)
         artifact = build_rolling_liquidity_membership(
             close_frame=close,
             amount_frame=amount,

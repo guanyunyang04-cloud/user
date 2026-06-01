@@ -45,3 +45,4 @@
 - 冻结期禁止 live/default、paper/live/broker 接线、正式交易计划生产、active manifest promotion、production root 重建、自动化每日执行，以及未授权删除执行合同。
 - 解冻必须满足三项前置：研究端差异解释完成；新旧模型同口径候选回测方案完成；旧 production payload 的恢复/归档/替代路径获得明确授权。
 - `rebuild_lineage_diff_audit` 只能满足“研究端差异解释”的初步证据要求；不得把该审计误读为模型胜负、short_v5b 替代、执行端解冻或 active artifact 重建授权。
+- 旧 multi-horizon / short_v5b 等价比较必须使用主板口径 pool；包含 `300/301/688/689` 创业板/科创板前缀的 new-lineage rebuild 只能作为 `wrong_universe_diagnostic`，不得作为 promotion、执行解冻或 short_v5b 等价对照证据。

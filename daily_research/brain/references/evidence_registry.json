@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 83,
+  "record_count": 84,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -146,6 +146,34 @@
       "next_allowed_actions": [],
       "active_artifact_impact": "unchanged",
       "dataset_ids": []
+    },
+    {
+      "id": "alpha_multi_horizon_mainboard_pool_correction_20260601",
+      "date": "2026-06-01",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_multi_horizon_mainboard_pool_correction_20260601.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "Status: `mainboard_pool_correction_applied / research-only / shadow-only`.; Mainline: `alpha_multi_horizon_utility_policy_v1`.; User-confirmed universe contract: original research universe excludes ChiNext and STAR Market.; Active artifact impact: none. `daily_research/output/active_execution_strategy.json` remains untouched.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Rebuild the alpha multi-horizon baseline using `policy_pool_view__74f45f4f83263bccd64a8027`.",
+        "Keep execution frozen until a corrected mainboard-only, same-protocol candidate passes evidence-grade gates.",
+        "Do not use `policy_pool_view__8f9367ce305548e3ecd04feb` as a short_v5b or Stage 2.8 equivalent comparison pool."
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "policy_pool_view__8f9367ce305548e3ecd04feb",
+        "policy_pool_view__74f45f4f83263bccd64a8027",
+        "policy_input_bundle__45e3d8c059ba718426a9f887"
+      ]
     },
     {
       "id": "alpha_multi_horizon_output_aux_grid_stage1_shadow_20260525",

@@ -60,6 +60,9 @@
 - rebuild 差异审计入口：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.rebuild_lineage_diff_audit`
 - 审计默认读取 `mh_rebuild_infra_v2_fullpool_anchor_20260531_01` 与 seed7/11/19 rebuild artifacts，输出 `rebuild_lineage_diff_audit.json`、`rebuild_lineage_diff_audit.md`、`rebuild_seed_monthly_spread.csv` 和 `rebuild_feature_columns.csv`；该命令只读研究 artifacts，不训练、不 promotion、不写 active/default。
+- 主板口径 pool view 生成入口：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.data_lake.build_pool_view --source-market-dataset-id policy_input_bundle__45e3d8c059ba718426a9f887 --view-kind rolling_liquidity --view-name rolling_liquid500_mainboard --pool-name liquid500 --start-date 2018-01-01 --end-date 2024-12-31 --rebalance-every-days 21 --adv-window 20 --min-price 2.0 --max-price 300.0 --exclude-symbol-prefixes 300,301,688,689 --refresh`
+- 当前主板口径 pool view：`policy_pool_view__74f45f4f83263bccd64a8027`；后续 mainboard-only path_policy 重跑可直接传 `--pool-view-id policy_pool_view__74f45f4f83263bccd64a8027`，或用 `--pool-view-kind rolling_liquidity --pool-view-name rolling_liquid500_mainboard --pool-view-exclude-symbol-prefixes 300,301,688,689` 现场构建等价 view。
 
 ## 实验预算可信度纪律
 - 启动任何会影响模型输入、架构、输出、loss、horizon grid、stage gate 或后续方向选择的实验前，必须在计划或 tag 说明中声明证据等级：`smoke_only`、`scout_only`、`evidence_grade` 或 `promotion_grade`。
@@ -99,7 +102,7 @@
 - Web API 热路径只读 compact daily state：`/api/daily-run/status`、`/api/daily-run/latest`、`/api/data-readiness`、`/api/system/doctor`。
 - 任务提交入口只保留单项显式动作：`/api/data-sources/refresh`、`/api/trade-plan/generate`、`/api/paper-account/apply-latest-plan` 和必要诊断/恢复入口。
 - 当前 2026-05-26 fresh verdict 为 `blocked:data_not_ready`；后续操作以手动帮助页流程为准，完整旧状态机记录见 `daily_research/brain/references/execution_daily_plan_state_machine_refactor_20260526.md`。
-- 冻结解除前置：解释 new lineage 研究结果与旧 Stage 2.8 / Stage 3G / short_v5b 证据差异；完成同口径候选 backtest 方案；明确旧 production payload 是恢复、归档为不可用，还是由新研究主线显式替代。`rebuild_lineage_diff_audit` 已完成第一项中的谱系差异解释，但尚未完成同口径 short_v5b backtest 或旧 production payload 路径决策。
+- 冻结解除前置：解释 new lineage 研究结果与旧 Stage 2.8 / Stage 3G / short_v5b 证据差异；完成同口径候选 backtest 方案；明确旧 production payload 是恢复、归档为不可用，还是由新研究主线显式替代。`rebuild_lineage_diff_audit` 已完成第一项中的谱系差异解释，但后续发现旧 new-lineage pool 包含创业板/科创板，因此仍需先完成 mainboard-only rebuild baseline，再谈同口径 short_v5b backtest 或旧 production payload 路径决策。
 
 ## PathPolicy 执行异常处理口径
 - `test_forecast_dataset.py` 是慢集成测试；修改 forecast 默认先跑 selective verification 推荐的快速合同测试，完整 forecast dataset/training 测试只在长验证、发布前或风险升高时跑。

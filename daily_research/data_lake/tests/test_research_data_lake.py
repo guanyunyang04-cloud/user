@@ -484,6 +484,66 @@ class ResearchDataLakeTest(unittest.TestCase):
         self.assertEqual(loaded.metadata["source_cache"]["quality_report"]["member_count_median"], 2.0)
         self.assertTrue(quality_report_exists)
 
+    def test_pool_view_rolling_liquidity_excludes_symbol_prefixes(self) -> None:
+        dates = pd.date_range("2026-01-05", periods=30, freq="B")
+        stocks = ["000001.SZ", "300001.SZ", "301001.SZ", "600000.SH", "688001.SH"]
+        close = pd.DataFrame(10.0, index=dates, columns=stocks)
+        amount = pd.DataFrame(
+            {
+                "000001.SZ": [10000.0 + row for row in range(len(dates))],
+                "300001.SZ": [90000.0 + row for row in range(len(dates))],
+                "301001.SZ": [80000.0 + row for row in range(len(dates))],
+                "600000.SH": [70000.0 + row for row in range(len(dates))],
+                "688001.SH": [95000.0 + row for row in range(len(dates))],
+            },
+            index=dates,
+        )
+        market_frames = {
+            "Open": close - 0.1,
+            "High": close + 0.2,
+            "Low": close - 0.2,
+            "Close": close,
+            "Volume": pd.DataFrame(1000.0, index=dates, columns=stocks),
+            "Amount": amount,
+        }
+
+        with TemporaryDirectory() as temp_dir:
+            lake = ResearchDataLake(Path(temp_dir))
+            market_record = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic"},
+                market_frames=market_frames,
+                benchmark_close=pd.Series(4000.0, index=dates, name="000300.SH"),
+                membership_frame=pd.DataFrame(True, index=dates, columns=stocks),
+                feature_frames={"score_none": close * 0.0, "score_v2": close * 0.0 + 0.1},
+                source="synthetic",
+            )
+            view = build_pool_view_from_policy_bundle(
+                lake=lake,
+                spec=PoolViewSpec(
+                    source_market_dataset_id=market_record.dataset_id,
+                    view_kind="rolling_liquidity",
+                    view_name="rolling_liquid2_mainboard",
+                    pool_name="liquid2",
+                    start_date="2026-01-05",
+                    end_date="2026-02-13",
+                    rebalance_every_days=5,
+                    adv_window=2,
+                    exclude_symbol_prefixes=("300", "301", "688", "689"),
+                ),
+            )
+            loaded = load_pool_view(lake=lake, pool_view_id=view.dataset_id)
+
+        self.assertEqual(set(loaded.membership_frame.columns), {"000001.SZ", "600000.SH"})
+        self.assertEqual(int(loaded.membership_frame.sum(axis=1).median()), 2)
+        self.assertEqual(
+            loaded.metadata["parameters"]["exclude_symbol_prefixes"],
+            ["300", "301", "688", "689"],
+        )
+        self.assertEqual(
+            loaded.metadata["source_cache"]["exclude_symbol_prefixes"],
+            ["300", "301", "688", "689"],
+        )
+
     def test_pool_view_exchange_filter_and_loader_pool_view_priority(self) -> None:
         dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
         stocks = ["000001.SZ", "000002.SZ", "600000.SH"]
