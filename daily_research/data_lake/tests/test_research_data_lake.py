@@ -207,6 +207,65 @@ class ResearchDataLakeTest(unittest.TestCase):
         self.assertEqual(prepared.raw_cache_meta["source"], "data_lake")
         self.assertIn("score_blend_lag1", prepared.derived_frames)
 
+    def test_lake_loader_derives_state_frames_from_market_data(self) -> None:
+        dates = pd.date_range("2026-01-05", periods=30, freq="B")
+        market_frames, membership_frame, feature_frames = _synthetic_policy_bundle_parts(dates)
+        close = market_frames["Close"]
+        benchmark_close = pd.Series([4000.0 + idx for idx in range(len(dates))], index=dates, name="000300.SH")
+
+        with TemporaryDirectory() as temp_dir:
+            lake = ResearchDataLake(Path(temp_dir))
+            record = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic"},
+                market_frames=market_frames,
+                benchmark_close=benchmark_close,
+                membership_frame=membership_frame,
+                feature_frames=feature_frames,
+                source="synthetic",
+            )
+            prepared = load_policy_inputs_from_lake(
+                lake=lake,
+                dataset_id=record.dataset_id,
+                start_date="2026-01-05",
+                end_date=dates[-1].strftime("%Y-%m-%d"),
+            )
+
+        required = {
+            "ret_1d",
+            "ret_3d",
+            "ret_5d",
+            "ret_10d",
+            "ret_20d",
+            "vol_5d",
+            "vol_20d",
+            "score_delta_1d",
+            "score_delta_5d",
+            "score_delta_accel",
+            "ret_accel_5_20",
+            "volume_ratio_5_20",
+            "distance_to_20d_high",
+            "distance_to_60d_high",
+            "distance_to_20d_low",
+            "volatility_expansion",
+            "adv_ratio_5_20",
+            "ret_1d_lag1",
+            "vol_20d_lag4",
+        }
+        self.assertTrue(required.issubset(set(prepared.derived_frames)))
+        signal_dt = dates[-1]
+        for frame_name in required:
+            prepared.derived_frames[frame_name].loc[signal_dt].reindex(prepared.universe).to_numpy(dtype=float)
+        pd.testing.assert_frame_equal(
+            prepared.derived_frames["ret_1d"],
+            close.pct_change(fill_method=None),
+            check_freq=False,
+        )
+        pd.testing.assert_frame_equal(
+            prepared.derived_frames["score_delta_1d"],
+            prepared.score_blend.diff(1),
+            check_freq=False,
+        )
+
     def test_loader_resolves_relocated_lake_content_paths(self) -> None:
         dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
         market_frames, membership_frame, feature_frames = _synthetic_policy_bundle_parts(dates)

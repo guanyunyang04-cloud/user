@@ -3,13 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from daily_research.baseline.advanced_ml_runtime import HistoryWindow
 from daily_research.continuous_policy.state_builder import (
+    STATE_SEQUENCE_BASES,
+    STATE_SEQUENCE_LAGS,
     DEFAULT_SCORE_BLEND_WEIGHTS,
     PreparedPolicyInputs,
     _build_alpha_prior_frames,
+    _safe_pct_change,
 )
 from daily_research.data_lake.catalog import ResearchDataLake
 from daily_research.data_lake.pool_views import PoolViewSpec, resolve_pool_view_for_policy_inputs
@@ -390,7 +394,14 @@ def load_policy_inputs_from_lake(
         score_panel=alpha_prior_score_panel,
         target_weight_panel=alpha_prior_target_weight_panel,
     )
-    derived_frames = {name: frame for name, frame in sliced_panels.items() if name not in {"score_none", "score_v2"}}
+    derived_frames = _build_state_derived_frames_from_market(
+        close=close,
+        volume=volume,
+        amount=amount,
+        score_blend=score_blend,
+        alpha_prior_frames=alpha_prior_frames,
+    )
+    derived_frames.update({name: frame for name, frame in sliced_panels.items() if name not in {"score_none", "score_v2"}})
     derived_frames.update(alpha_prior_frames)
     derived_frames["score_blend"] = score_blend
     metadata_frames: dict[str, pd.DataFrame] = {}
@@ -516,3 +527,46 @@ def load_policy_inputs_from_lake(
         metadata_frames=metadata_frames,
         metadata_summary=metadata_summary,
     )
+
+
+def _build_state_derived_frames_from_market(
+    *,
+    close: pd.DataFrame,
+    volume: pd.DataFrame,
+    amount: pd.DataFrame,
+    score_blend: pd.DataFrame,
+    alpha_prior_frames: dict[str, pd.DataFrame],
+) -> dict[str, pd.DataFrame]:
+    returns_1d = _safe_pct_change(close, 1)
+    rolling_high_20 = close.rolling(20, min_periods=1).max()
+    rolling_high_60 = close.rolling(60, min_periods=1).max()
+    rolling_low_20 = close.rolling(20, min_periods=1).min()
+    derived_frames: dict[str, pd.DataFrame] = {
+        "ret_1d": returns_1d,
+        "ret_3d": _safe_pct_change(close, 3),
+        "ret_5d": _safe_pct_change(close, 5),
+        "ret_10d": _safe_pct_change(close, 10),
+        "ret_20d": _safe_pct_change(close, 20),
+        "vol_5d": returns_1d.rolling(5).std(),
+        "vol_20d": returns_1d.rolling(20).std(),
+        "adv20": amount.rolling(20).mean(),
+        "volume_ratio_5_20": volume.rolling(5).mean().div(volume.rolling(20).mean().replace(0, np.nan)),
+        "score_blend": score_blend,
+        "score_delta_1d": score_blend.diff(1),
+        "score_delta_5d": score_blend.diff(5),
+        "score_delta_accel": score_blend.diff(1).sub(score_blend.diff(5).div(5.0)),
+        "ret_accel_5_20": _safe_pct_change(close, 5).sub(_safe_pct_change(close, 20).div(4.0)),
+        "distance_to_20d_high": close.div(rolling_high_20.replace(0, np.nan)).sub(1.0),
+        "distance_to_60d_high": close.div(rolling_high_60.replace(0, np.nan)).sub(1.0),
+        "distance_to_20d_low": close.div(rolling_low_20.replace(0, np.nan)).sub(1.0),
+        "volatility_expansion": returns_1d.rolling(5).std().div(returns_1d.rolling(20).std().replace(0, np.nan)).sub(1.0),
+        "adv_ratio_5_20": amount.rolling(5).mean().div(amount.rolling(20).mean().replace(0, np.nan)).sub(1.0),
+        **alpha_prior_frames,
+    }
+    for base_name in STATE_SEQUENCE_BASES:
+        frame = derived_frames.get(base_name)
+        if frame is None:
+            continue
+        for lag in STATE_SEQUENCE_LAGS:
+            derived_frames[f"{base_name}_lag{int(lag)}"] = frame.shift(int(lag))
+    return derived_frames
