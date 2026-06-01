@@ -49,18 +49,53 @@ def load_security_master(root: str | Path | None = None) -> pd.DataFrame:
     return pd.read_parquet(path)
 
 
-def load_daily_universe(root: str | Path | None = None) -> pd.DataFrame:
+def _filter_frame(
+    frame: pd.DataFrame,
+    *,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    symbols: list[str] | tuple[str, ...] | set[str] | None = None,
+) -> pd.DataFrame:
+    output = frame.copy()
+    if "date" in output.columns and (start_date is not None or end_date is not None):
+        dates = pd.to_datetime(output["date"])
+        if start_date is not None:
+            output = output.loc[dates >= pd.Timestamp(start_date)]
+            dates = pd.to_datetime(output["date"])
+        if end_date is not None:
+            output = output.loc[dates <= pd.Timestamp(end_date)]
+    if symbols is not None and "code" in output.columns:
+        output = output.loc[output["code"].isin(set(symbols))]
+    return output.reset_index(drop=True)
+
+
+def load_daily_universe(
+    root: str | Path | None = None,
+    *,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    tradeable_only: bool = False,
+) -> pd.DataFrame:
     path = _resolve_snapshot_root(root) / "daily_universe.parquet"
     if not path.exists():
         raise FileNotFoundError(f"daily universe not found: {path}")
-    return pd.read_parquet(path)
+    frame = _filter_frame(pd.read_parquet(path), start_date=start_date, end_date=end_date)
+    if tradeable_only:
+        frame = frame.loc[frame["is_tradeable"]].reset_index(drop=True)
+    return frame
 
 
-def load_pit_daily_bars(root: str | Path | None = None) -> pd.DataFrame:
+def load_pit_daily_bars(
+    root: str | Path | None = None,
+    *,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    symbols: list[str] | tuple[str, ...] | set[str] | None = None,
+) -> pd.DataFrame:
     path = _resolve_snapshot_root(root) / "daily_bars.parquet"
     if not path.exists():
         raise FileNotFoundError(f"daily bars not found: {path}")
-    return pd.read_parquet(path)
+    return _filter_frame(pd.read_parquet(path), start_date=start_date, end_date=end_date, symbols=symbols)
 
 
 def load_pit_daily_status(root: str | Path | None = None) -> pd.DataFrame:
@@ -80,3 +115,22 @@ def load_pit_snapshot(root: str | Path | None = None) -> PitDailySnapshot:
         daily_bars=load_pit_daily_bars(snapshot_root),
         daily_status=load_pit_daily_status(snapshot_root),
     )
+
+
+def load_tradeable_panel(
+    root: str | Path | None = None,
+    *,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> pd.DataFrame:
+    universe = load_daily_universe(root, start_date=start_date, end_date=end_date, tradeable_only=True)
+    if universe.empty:
+        return pd.DataFrame()
+    bars = load_pit_daily_bars(
+        root,
+        start_date=start_date,
+        end_date=end_date,
+        symbols=sorted(universe["code"].unique().tolist()),
+    )
+    panel = universe.merge(bars, on=["date", "code"], how="inner")
+    return panel.loc[panel["is_tradeable"]].sort_values(["date", "code"]).reset_index(drop=True)

@@ -2,7 +2,14 @@
 
 from .backtest import BacktestResult, long_only_backtest
 from .dataset import load_daily_bars, load_daily_snapshot, load_daily_status, load_manifest, load_universe
-from .dataset_v2 import load_daily_universe, load_pit_daily_bars, load_pit_daily_status, load_pit_manifest, load_pit_snapshot
+from .dataset_v2 import (
+    load_daily_universe,
+    load_pit_daily_bars,
+    load_pit_daily_status,
+    load_pit_manifest,
+    load_pit_snapshot,
+    load_tradeable_panel,
+)
 from .factors import annualized_volatility, momentum, moving_average, simple_returns, zscore
 from .metrics import annualized_return, max_drawdown, sharpe_ratio, volatility
 from .portfolio import equal_weight, normalize_long_only, rank_long_short
@@ -35,6 +42,7 @@ __all__ = [
     "load_pit_daily_status",
     "load_pit_manifest",
     "load_pit_snapshot",
+    "load_tradeable_panel",
     "load_universe",
     "long_only_backtest",
     "max_drawdown",
