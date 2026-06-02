@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from traditional_quant_research.diagnostics import quantile_returns, summarize_factor_ic, top_n_backtest
+from traditional_quant_research.diagnostics import assign_time_split, quantile_returns, single_factor_diagnostics, summarize_factor_ic, top_n_backtest
 from traditional_quant_research.research_panel import (
     add_baseline_score,
     add_cross_sectional_zscores,
@@ -94,3 +94,25 @@ def test_factor_diagnostics_and_top_n_backtest_are_stable() -> None:
     assert quantiles.loc[quantiles["quantile"] == 3, "mean_return"].iloc[0] == pytest.approx(0.025)
     assert backtest.daily_returns["holdings"].tolist() == [1, 1]
     assert backtest.daily_returns["net_return"].iloc[0] == pytest.approx(0.03 - 0.001)
+
+
+def test_single_factor_diagnostics_report_in_sample_and_out_of_sample() -> None:
+    frame = pd.DataFrame(
+        [
+            {"date": "2026-01-02", "code": "A", "score": 3.0, "fwd_ret_1d": 0.03},
+            {"date": "2026-01-02", "code": "B", "score": 2.0, "fwd_ret_1d": 0.02},
+            {"date": "2026-01-02", "code": "C", "score": 1.0, "fwd_ret_1d": 0.01},
+            {"date": "2026-01-05", "code": "A", "score": 1.0, "fwd_ret_1d": 0.00},
+            {"date": "2026-01-05", "code": "B", "score": 2.0, "fwd_ret_1d": 0.01},
+            {"date": "2026-01-05", "code": "C", "score": 3.0, "fwd_ret_1d": 0.02},
+        ]
+    )
+
+    split = assign_time_split(frame, split_date="2026-01-05")
+    diagnostics = single_factor_diagnostics(frame, ["score"], "fwd_ret_1d", split_date="2026-01-05", top_n=1, fee_bps=10, quantiles=3)
+
+    assert split["sample_split"].tolist() == ["in_sample", "in_sample", "in_sample", "out_of_sample", "out_of_sample", "out_of_sample"]
+    assert set(diagnostics["ic"]["sample_split"]) == {"in_sample", "out_of_sample"}
+    assert set(diagnostics["quantile"]["sample_split"]) == {"in_sample", "out_of_sample"}
+    assert set(diagnostics["top_n"]["sample_split"]) == {"in_sample", "out_of_sample"}
+    assert diagnostics["top_n"].loc[diagnostics["top_n"]["sample_split"] == "out_of_sample", "sharpe"].notna().all()

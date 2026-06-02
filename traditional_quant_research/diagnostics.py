@@ -12,6 +12,27 @@ import pandas as pd
 from .metrics import annualized_return, max_drawdown, sharpe_ratio, volatility
 
 
+def assign_time_split(
+    frame: pd.DataFrame,
+    *,
+    split_date: str | pd.Timestamp | None,
+    date_col: str = "date",
+    split_col: str = "sample_split",
+) -> pd.DataFrame:
+    """Add an in-sample/out-of-sample split column by date."""
+
+    if date_col not in frame.columns:
+        raise ValueError(f"missing required column: {date_col}")
+    output = frame.copy()
+    if split_date is None:
+        output[split_col] = "full"
+        return output
+    dates = pd.to_datetime(output[date_col])
+    boundary = pd.Timestamp(split_date)
+    output[split_col] = np.where(dates < boundary, "in_sample", "out_of_sample")
+    return output
+
+
 def ic_by_date(
     frame: pd.DataFrame,
     signal_col: str,
@@ -67,6 +88,29 @@ def summarize_factor_ic(frame: pd.DataFrame, signal_cols: Sequence[str], label_c
     return pd.DataFrame(rows)
 
 
+def summarize_factor_ic_by_split(
+    frame: pd.DataFrame,
+    signal_cols: Sequence[str],
+    label_col: str,
+    *,
+    split_col: str = "sample_split",
+) -> pd.DataFrame:
+    """Return IC summaries for each sample split."""
+
+    if split_col not in frame.columns:
+        raise ValueError(f"missing required column: {split_col}")
+    rows: list[pd.DataFrame] = []
+    for split_name, group in frame.groupby(split_col, sort=True):
+        summary = summarize_factor_ic(group, signal_cols, label_col)
+        if summary.empty:
+            continue
+        summary.insert(0, "sample_split", str(split_name))
+        rows.append(summary)
+    if not rows:
+        return pd.DataFrame()
+    return pd.concat(rows, ignore_index=True)
+
+
 def quantile_returns(
     frame: pd.DataFrame,
     signal_col: str,
@@ -110,6 +154,31 @@ def quantile_returns(
         .agg(mean_return=("mean_return", "mean"), periods=("date", "nunique"), observations=("observations", "sum"))
         .reset_index()
     )
+
+
+def quantile_returns_by_split(
+    frame: pd.DataFrame,
+    signal_col: str,
+    label_col: str,
+    *,
+    quantiles: int = 5,
+    split_col: str = "sample_split",
+) -> pd.DataFrame:
+    """Compute quantile return summaries for each sample split."""
+
+    if split_col not in frame.columns:
+        raise ValueError(f"missing required column: {split_col}")
+    rows: list[pd.DataFrame] = []
+    for split_name, group in frame.groupby(split_col, sort=True):
+        summary = quantile_returns(group, signal_col, label_col, quantiles=quantiles)
+        if summary.empty:
+            continue
+        summary.insert(0, "signal", signal_col)
+        summary.insert(0, "sample_split", str(split_name))
+        rows.append(summary)
+    if not rows:
+        return pd.DataFrame(columns=["sample_split", "signal", "quantile", "mean_return", "periods", "observations"])
+    return pd.concat(rows, ignore_index=True)
 
 
 @dataclass(frozen=True)
@@ -176,6 +245,56 @@ def top_n_backtest(
         }
     )
     return TopNBacktestResult(daily_returns=daily_returns, summary=summary)
+
+
+def top_n_backtest_by_split(
+    frame: pd.DataFrame,
+    signal_cols: Sequence[str],
+    return_col: str,
+    *,
+    top_n: int = 100,
+    fee_bps: float = 10.0,
+    split_col: str = "sample_split",
+) -> pd.DataFrame:
+    """Run Top-N diagnostics per signal and sample split."""
+
+    if split_col not in frame.columns:
+        raise ValueError(f"missing required column: {split_col}")
+    rows: list[dict[str, Any]] = []
+    for split_name, group in frame.groupby(split_col, sort=True):
+        for signal_col in signal_cols:
+            result = top_n_backtest(group, signal_col, return_col, top_n=top_n, fee_bps=fee_bps)
+            row = {"sample_split": str(split_name), "signal": signal_col}
+            row.update(result.summary)
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def single_factor_diagnostics(
+    frame: pd.DataFrame,
+    signal_cols: Sequence[str],
+    label_col: str,
+    *,
+    split_date: str | pd.Timestamp | None = None,
+    top_n: int = 100,
+    fee_bps: float = 10.0,
+    quantiles: int = 5,
+) -> dict[str, pd.DataFrame]:
+    """Generate IC, quantile, and Top-N diagnostics for signals."""
+
+    split_frame = assign_time_split(frame, split_date=split_date)
+    return {
+        "panel": split_frame,
+        "ic": summarize_factor_ic_by_split(split_frame, signal_cols, label_col),
+        "quantile": pd.concat(
+            [
+                quantile_returns_by_split(split_frame, signal_col, label_col, quantiles=quantiles)
+                for signal_col in signal_cols
+            ],
+            ignore_index=True,
+        ),
+        "top_n": top_n_backtest_by_split(split_frame, signal_cols, label_col, top_n=top_n, fee_bps=fee_bps),
+    }
 
 
 def summarize_strategy_returns(returns: Sequence[float]) -> dict[str, float]:

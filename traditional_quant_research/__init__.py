@@ -11,7 +11,14 @@ from .dataset_v2 import (
     load_quality_report,
     load_tradeable_panel,
 )
-from .diagnostics import ic_by_date, quantile_returns, summarize_factor_ic, top_n_backtest
+from .diagnostics import (
+    assign_time_split,
+    ic_by_date,
+    quantile_returns,
+    single_factor_diagnostics,
+    summarize_factor_ic,
+    top_n_backtest,
+)
 from .factors import annualized_volatility, momentum, moving_average, simple_returns, zscore
 from .metrics import annualized_return, max_drawdown, sharpe_ratio, volatility
 from .portfolio import equal_weight, normalize_long_only, rank_long_short
@@ -38,6 +45,7 @@ __all__ = [
     "add_cross_sectional_zscores",
     "annualized_return",
     "annualized_volatility",
+    "assign_time_split",
     "build_factor_label_panel",
     "default_factor_columns",
     "equal_weight",
@@ -71,6 +79,7 @@ __all__ = [
     "rank_long_short",
     "sharpe_ratio",
     "simple_returns",
+    "single_factor_diagnostics",
     "summarize_factor_ic",
     "top_n_backtest",
     "volatility",
