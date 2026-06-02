@@ -26,6 +26,11 @@
   - `git branch --show-current`
 - 如果当前分支不是 `main`，任何会修改 repo-tracked 文件的任务都必须先纠偏到 `main`，或由用户显式撤销 `main-branch-only` 规则。
 - 分支异常是 preflight blocker；不得写成研究证据、promotion 证据或分脑当前结论。
+- mutation 前将 dirty paths 分为三类：
+  - `target-scope`：当前路由项目或用户明确纳入的路径；相关变更需要按任务风险读取并协同处理。
+  - `workspace-shared`：主脑、workflow 工具、根配置、跨项目 registry 等共享路径；修改前必须单独评估影响面。
+  - `external-project`：路由范围外的项目路径；默认视为外部并行工作，只在有助于说明边界时报告，不作为 blocker，也不得回滚、修复、暂存、提交或混入当前任务。
+- 如果 `external-project` 变更与 `target-scope` 或 `workspace-shared` 变更发生真实冲突，先停止扩大操作并说明冲突点，由用户决定是否扩展任务范围。
 
 ## 4. 结构变更顺序
 - 先改 `brain/brain_architecture.md`。

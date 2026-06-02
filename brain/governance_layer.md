@@ -36,6 +36,13 @@
 - 兼容入口必须有 `owner`、`usage_evidence`、`delete_by`；没有证据的兼容入口直接删除。
 - 审计入口：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py brain-burden-audit --cwd . --mode compact`。
 
+## 2.3 并行项目所有权隔离
+- 工作区允许多个项目由不同 agent 并行开发；每次任务的可变更范围由主脑路由结果和用户显式授权共同决定。
+- 被路由任务默认只拥有目标项目范围，以及用户明确纳入的 workspace 共享文件；不得把其他项目的工作树变更自动视为当前任务的一部分。
+- 路由范围外的项目 dirty paths 默认视为外部并行工作；agent 不得回滚、修复、暂存、提交、合并或解释这些路径，除非用户明确扩展任务范围。
+- 主脑、workflow 工具、根配置、跨项目 registry 等 workspace 共享文件不自动归属任何单一项目；修改前必须单独评估影响面。
+- 若外部项目变更与当前路由任务或共享文件产生真实冲突，先报告冲突和边界，再等待用户决定是否扩展任务范围。
+
 ## 3. 守卫
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check`
