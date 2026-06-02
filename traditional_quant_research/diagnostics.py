@@ -111,6 +111,29 @@ def summarize_factor_ic_by_split(
     return pd.concat(rows, ignore_index=True)
 
 
+def summarize_factor_ic_by_group(
+    frame: pd.DataFrame,
+    signal_cols: Sequence[str],
+    label_col: str,
+    *,
+    group_col: str,
+) -> pd.DataFrame:
+    """Return IC summaries for each value of an arbitrary grouping column."""
+
+    if group_col not in frame.columns:
+        raise ValueError(f"missing required column: {group_col}")
+    rows: list[pd.DataFrame] = []
+    for group_name, group in frame.groupby(group_col, sort=True):
+        summary = summarize_factor_ic(group, signal_cols, label_col)
+        if summary.empty:
+            continue
+        summary.insert(0, group_col, group_name)
+        rows.append(summary)
+    if not rows:
+        return pd.DataFrame()
+    return pd.concat(rows, ignore_index=True)
+
+
 def quantile_returns(
     frame: pd.DataFrame,
     signal_col: str,
@@ -178,6 +201,31 @@ def quantile_returns_by_split(
         rows.append(summary)
     if not rows:
         return pd.DataFrame(columns=["sample_split", "signal", "quantile", "mean_return", "periods", "observations"])
+    return pd.concat(rows, ignore_index=True)
+
+
+def quantile_returns_by_group(
+    frame: pd.DataFrame,
+    signal_col: str,
+    label_col: str,
+    *,
+    group_col: str,
+    quantiles: int = 5,
+) -> pd.DataFrame:
+    """Compute quantile return summaries for each grouping value."""
+
+    if group_col not in frame.columns:
+        raise ValueError(f"missing required column: {group_col}")
+    rows: list[pd.DataFrame] = []
+    for group_name, group in frame.groupby(group_col, sort=True):
+        summary = quantile_returns(group, signal_col, label_col, quantiles=quantiles)
+        if summary.empty:
+            continue
+        summary.insert(0, "signal", signal_col)
+        summary.insert(0, group_col, group_name)
+        rows.append(summary)
+    if not rows:
+        return pd.DataFrame(columns=[group_col, "signal", "quantile", "mean_return", "periods", "observations"])
     return pd.concat(rows, ignore_index=True)
 
 
@@ -265,6 +313,29 @@ def top_n_backtest_by_split(
         for signal_col in signal_cols:
             result = top_n_backtest(group, signal_col, return_col, top_n=top_n, fee_bps=fee_bps)
             row = {"sample_split": str(split_name), "signal": signal_col}
+            row.update(result.summary)
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def top_n_backtest_by_group(
+    frame: pd.DataFrame,
+    signal_cols: Sequence[str],
+    return_col: str,
+    *,
+    group_col: str,
+    top_n: int = 100,
+    fee_bps: float = 10.0,
+) -> pd.DataFrame:
+    """Run Top-N diagnostics per signal and arbitrary grouping value."""
+
+    if group_col not in frame.columns:
+        raise ValueError(f"missing required column: {group_col}")
+    rows: list[dict[str, Any]] = []
+    for group_name, group in frame.groupby(group_col, sort=True):
+        for signal_col in signal_cols:
+            result = top_n_backtest(group, signal_col, return_col, top_n=top_n, fee_bps=fee_bps)
+            row = {group_col: group_name, "signal": signal_col}
             row.update(result.summary)
             rows.append(row)
     return pd.DataFrame(rows)

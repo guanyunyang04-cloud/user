@@ -1,6 +1,7 @@
 """Lightweight primitives for traditional quantitative research."""
 
 from .backtest import BacktestResult, long_only_backtest
+from .backtest_protocol import select_rebalance_dates, top_n_rebalance_backtest
 from .dataset import load_daily_bars, load_daily_snapshot, load_daily_status, load_manifest, load_universe
 from .dataset_v2 import (
     load_daily_universe,
@@ -11,6 +12,7 @@ from .dataset_v2 import (
     load_quality_report,
     load_tradeable_panel,
 )
+from .data_audit import add_forward_return_labels, audit_bar_quality, audit_label_summary, audit_v2_data_labels
 from .diagnostics import (
     assign_time_split,
     ic_by_date,
@@ -43,9 +45,13 @@ __all__ = [
     "BacktestResult",
     "add_baseline_score",
     "add_cross_sectional_zscores",
+    "add_forward_return_labels",
     "annualized_return",
     "annualized_volatility",
     "assign_time_split",
+    "audit_bar_quality",
+    "audit_label_summary",
+    "audit_v2_data_labels",
     "build_factor_label_panel",
     "default_factor_columns",
     "equal_weight",
@@ -77,11 +83,13 @@ __all__ = [
     "panel_summary",
     "quantile_returns",
     "rank_long_short",
+    "select_rebalance_dates",
     "sharpe_ratio",
     "simple_returns",
     "single_factor_diagnostics",
     "summarize_factor_ic",
     "top_n_backtest",
+    "top_n_rebalance_backtest",
     "volatility",
     "zscore",
 ]
