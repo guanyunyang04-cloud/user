@@ -62,6 +62,17 @@ def test_add_proxy_neutralized_signals_residualizes_by_date() -> None:
     assert neutral_col == "score_proxy_neutral"
     assert output[neutral_col].abs().max() < 1e-12
 
+    corr = low_corr_frontier_neutralization_audit.signal_neutralizer_correlation(
+        output,
+        ("score", neutral_col),
+        ("size",),
+    )
+    original = corr.loc[corr["signal"] == "score"].iloc[0]
+    neutralized = corr.loc[corr["signal"] == neutral_col].iloc[0]
+    assert original["mean_abs_daily_corr"] == pytest.approx(1.0)
+    assert neutralized["daily_count"] == 0
+    assert pd.isna(neutralized["mean_abs_daily_corr"])
+
 
 def test_summarize_neutralization_audit_adds_delta_vs_original() -> None:
     base = low_corr_frontier_neutralization_audit.ROLLING_IC_SIGNAL
@@ -131,6 +142,7 @@ def test_run_low_corr_frontier_neutralization_audit_writes_outputs(tmp_path: Pat
         "neutralization_trades.csv",
         "neutralization_basket_exposure.csv",
         "neutralization_signal_coverage.csv",
+        "neutralization_signal_neutralizer_correlation.csv",
         "neutralization_meta.csv",
         "summary.json",
         "summary.md",
@@ -149,3 +161,5 @@ def test_run_low_corr_frontier_neutralization_audit_writes_outputs(tmp_path: Pat
     assert set(trades["base_signal"]) == set(signals)
     coverage = pd.read_csv(run_dir / "neutralization_signal_coverage.csv")
     assert coverage["factor"].str.endswith(low_corr_frontier_neutralization_audit.NEUTRAL_SUFFIX).any()
+    corr = pd.read_csv(run_dir / "neutralization_signal_neutralizer_correlation.csv")
+    assert set(corr["neutralizer"]) == {"log_amount_mean_20d_z"}

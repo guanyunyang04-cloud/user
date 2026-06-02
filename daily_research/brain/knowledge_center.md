@@ -61,6 +61,7 @@
 - 完整代码库检阅 successor：`daily_research/brain/references/brain_system_full_codebase_review_20260523.md`；用于当前模块地图、全库风险和 2026-05-22 旧路径/旧主线纠偏。
 - `alpha_multi_horizon_utility_policy_v1`：当前 path_policy research pointer；目标是多 horizon 交易效用排序，首轮 horizon grid 为 `1,2,3,5,8,10,15,20,30`，当前 blocker 是 predicted best horizon 向 `30d` 塌缩。
 - `daily_research_v2_research_reset`：当前 path_policy / multi-horizon 新主线；以 BaoStock-first data lake、strict tradeable mainboard pool、`raw_kline_context_v2_tradeable_amount_checked` profile 和严格 multi-seed gate 为当前基线，重新建设 feature/input、模型与执行候选证据。旧 `156` schema 和 short_v5b payload 若未来找回，只做旁路审计或历史 bridge，不阻塞 v2 研究推进。
+- `daily_research_v2_research_framework_contract`：v2 reset 的默认研究框架；任何后续计划、实验和结论都应按 `research objective -> data/dataset -> pool/PIT status -> sample/label/target -> feature/model input -> architecture/implementation -> output/portfolio semantics -> loss/training objective -> evaluation/backtest/gate -> execution-candidate -> evidence governance` 拆解。
 - `daily_research_v2_traditional_pit_bridge`：v2 reset 的数据合同吸收线；只读使用 `traditional_quant_research` 已构建 PIT daily universe，将其映射为 daily_research `v2_status_sidecar` 和 strict tradeable mainboard pool。该线用于更严格 PIT/status comparison，不自动替换当前 pass-grade v2 baseline。
 - `alpha_multi_horizon_utility_policy_v1`：v2 reset 前的 path_policy research pointer；目标是多 horizon 交易效用排序，首轮 horizon grid 为 `1,2,3,5,8,10,15,20,30`，现保留为历史方法库和 v2 可复用组件来源，不再是必须复刻的当前目标。
 - 近期 multi-horizon 阶段 family：`stage1_output_aux_grid`、`stage2_horizon_grid_calibration`、`stage25_stability_calibration`；新增 run tag 不应通过扩 evidence tag 前缀来代表新主线，必须归入既有或新声明的 `study_family`。
@@ -92,6 +93,7 @@
 - 新多 horizon utility 实验必须归入明确的 `research_programs` 和 `study_families`；run tag 只表示物理实例，应显式写 pool、feature、model、seed、年份、output/loss、成本参数和 horizon grid，不得让命名把目标拉回固定 20 日路径误差。
 - 旧 multi-horizon / short_v5b 等价 universe 是沪深主板口径，必须剔除创业板和科创板；新 lake / pool view 若用于旧线复刻或同口径比较，必须显式排除 `300,301,688,689` 前缀，并在 manifest 中保留 `exclude_symbol_prefixes`。
 - v2 research reset 后，旧 Stage 2.8 / short_v5b 不再是阻塞性复刻目标；新研究必须以 explicit v2 dataset/pool/feature/profile/gate 为真源。历史旧线可以提供 prior、baseline intuition 和 side audit，但不能要求新主线回到旧 payload 才能前进。
+- v2 research framework contract 已被用户确认：模型架构只是框架中的一层，不能越过数据合同、池/状态合同、标签目标合同、模型输入合同、输出语义、loss、评估 gate、执行候选和证据治理直接宣称研究进展。
 - corrected mainboard-only rebuild 通过 pool/memmap hard validation 后，仍必须把 `near_pass` 与 full pass 分开：rank IC、spread、monthly stability 和 concentration 过线不能抵消 hit lift min 为负；在旧 `156` feature schema 或 short_v5b payload 不可 replay 时，不得宣布新模型优于旧执行模型。
 - v2 strict tradeable mainboard baseline `mh_v2_reset_tradeable_mainboard_anchor_20260601_01` 已是 evidence-grade research baseline，但不是 promotion-grade。后续 v2 改进必须相对该 strict baseline 比较；执行重建仍需要独立候选回测、成本/调仓/风险约束和显式授权。
 - traditional-PIT strict baseline `mh_v2_traditional_pit_tradeable_mainboard_anchor_20260602_01` 已完成三 seed，但因 `negative_month_count_max=3` 仅为 `near_pass`；它证明更严格 PIT/status 合同可被 daily_research 吸收并用于研究比较，但不能替代当前 pass-grade v2 anchor。

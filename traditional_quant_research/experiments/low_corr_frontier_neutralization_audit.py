@@ -130,6 +130,7 @@ def run_low_corr_frontier_neutralization_audit(
     trade_frames: list[pd.DataFrame] = []
     exposure_frames: list[pd.DataFrame] = []
     coverage_frames: list[pd.DataFrame] = []
+    correlation_frames: list[pd.DataFrame] = []
     metadata_rows: list[dict[str, Any]] = []
     manifest: Mapping[str, Any] = {}
     quality: Mapping[str, Any] = {}
@@ -170,6 +171,10 @@ def run_low_corr_frontier_neutralization_audit(
         if not coverage.empty:
             coverage.insert(0, "eval_year", int(year))
             coverage_frames.append(coverage)
+        correlation = signal_neutralizer_correlation(neutral_panel, variant_signals, neutralizers)
+        if not correlation.empty:
+            correlation.insert(0, "eval_year", int(year))
+            correlation_frames.append(correlation)
 
         available_exposures = _unique_columns([*(exposure_columns or ()), *neutralizers])
         available_exposures = [column for column in available_exposures if column in neutral_panel.columns]
@@ -271,6 +276,7 @@ def run_low_corr_frontier_neutralization_audit(
     trades = pd.concat(trade_frames, ignore_index=True) if trade_frames else pd.DataFrame()
     exposure_summary = pd.concat(exposure_frames, ignore_index=True) if exposure_frames else pd.DataFrame()
     signal_coverage = pd.concat(coverage_frames, ignore_index=True) if coverage_frames else pd.DataFrame()
+    signal_neutralizer_corr = pd.concat(correlation_frames, ignore_index=True) if correlation_frames else pd.DataFrame()
     metadata = pd.DataFrame(metadata_rows)
 
     result = {
@@ -307,9 +313,10 @@ def run_low_corr_frontier_neutralization_audit(
     trades.to_csv(run_dir / "neutralization_trades.csv", index=False, encoding="utf-8-sig")
     exposure_summary.to_csv(run_dir / "neutralization_basket_exposure.csv", index=False, encoding="utf-8-sig")
     signal_coverage.to_csv(run_dir / "neutralization_signal_coverage.csv", index=False, encoding="utf-8-sig")
+    signal_neutralizer_corr.to_csv(run_dir / "neutralization_signal_neutralizer_correlation.csv", index=False, encoding="utf-8-sig")
     metadata.to_csv(run_dir / "neutralization_meta.csv", index=False, encoding="utf-8-sig")
     (run_dir / "summary.json").write_text(json.dumps(_json_ready(result), ensure_ascii=False, indent=2), encoding="utf-8")
-    markdown = render_neutralization_markdown(result, aggregate, summary, exposure_summary)
+    markdown = render_neutralization_markdown(result, aggregate, summary, exposure_summary, signal_neutralizer_corr)
     (run_dir / "summary.md").write_text(markdown, encoding="utf-8")
     if write_research_log:
         research_log_path.write_text(markdown, encoding="utf-8")
@@ -383,6 +390,66 @@ def summarize_neutralization_audit(summary: pd.DataFrame) -> pd.DataFrame:
     return output.reset_index(drop=True)
 
 
+def signal_neutralizer_correlation(
+    frame: pd.DataFrame,
+    signal_cols: Sequence[str],
+    neutralizer_cols: Sequence[str],
+    *,
+    date_col: str = "date",
+    method: str = "pearson",
+) -> pd.DataFrame:
+    """Summarize daily cross-sectional correlations between signals and neutralizers."""
+
+    if method not in {"pearson", "spearman"}:
+        raise ValueError("method must be 'pearson' or 'spearman'")
+    signals = _normalize_tuple(signal_cols, name="signal_cols")
+    neutralizers = _normalize_tuple(neutralizer_cols, name="neutralizer_cols")
+    missing = sorted({date_col, *signals, *neutralizers} - set(frame.columns))
+    if missing:
+        raise ValueError(f"frame missing required columns: {missing}")
+    if frame.empty:
+        return pd.DataFrame(
+            columns=[
+                "signal",
+                "neutralizer",
+                "method",
+                "daily_count",
+                "mean_daily_corr",
+                "mean_abs_daily_corr",
+                "max_abs_daily_corr",
+            ]
+        )
+
+    work = frame.copy()
+    work[date_col] = pd.to_datetime(work[date_col])
+    rows: list[dict[str, Any]] = []
+    for signal in signals:
+        for neutralizer in neutralizers:
+            daily_corrs: list[float] = []
+            for _, group in work.groupby(date_col, sort=True):
+                clean = group.loc[:, [signal, neutralizer]].replace([np.inf, -np.inf], np.nan).apply(pd.to_numeric, errors="coerce").dropna()
+                if len(clean) < 2 or clean[signal].nunique() < 2 or clean[neutralizer].nunique() < 2:
+                    continue
+                if clean[signal].std(ddof=0) <= 1e-12 or clean[neutralizer].std(ddof=0) <= 1e-12:
+                    continue
+                corr = clean[signal].corr(clean[neutralizer], method=method)
+                if pd.notna(corr):
+                    daily_corrs.append(float(corr))
+            values = pd.Series(daily_corrs, dtype=float)
+            rows.append(
+                {
+                    "signal": signal,
+                    "neutralizer": neutralizer,
+                    "method": method,
+                    "daily_count": int(len(values)),
+                    "mean_daily_corr": float(values.mean()) if not values.empty else np.nan,
+                    "mean_abs_daily_corr": float(values.abs().mean()) if not values.empty else np.nan,
+                    "max_abs_daily_corr": float(values.abs().max()) if not values.empty else np.nan,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
 def best_neutralization_rows(aggregate: pd.DataFrame, *, fee_bps: float = 30.0, top: int = 12) -> list[dict[str, Any]]:
     if aggregate.empty:
         return []
@@ -400,6 +467,7 @@ def render_neutralization_markdown(
     aggregate: pd.DataFrame,
     summary: pd.DataFrame,
     exposure_summary: pd.DataFrame,
+    signal_neutralizer_corr: pd.DataFrame,
 ) -> str:
     best_rows = pd.DataFrame(result.get("best_30bps_rows") or [])
     lines = [
@@ -427,6 +495,10 @@ def render_neutralization_markdown(
         "## Basket Exposure",
         "",
         _markdown_table(exposure_summary),
+        "",
+        "## Signal-Neutralizer Correlation",
+        "",
+        _markdown_table(signal_neutralizer_corr),
         "",
     ]
     return "\n".join(lines)

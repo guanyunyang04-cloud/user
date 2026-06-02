@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 89,
+  "record_count": 90,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -1647,6 +1647,41 @@
         "policy_input_bundle__45e3d8c059ba718426a9f887",
         "data_platform_v2_status_sidecar__b896a110cf7802cc1653c22a",
         "policy_pool_view__925e8604a91a9c07a5387fb1"
+      ]
+    },
+    {
+      "id": "daily_research_v2_research_framework_contract_20260602",
+      "date": "2026-06-02",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_research_framework_contract_20260602.md",
+      "tags": [
+        "brain"
+      ],
+      "workflow": "brain",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [],
+      "run_tags": [
+        "mh_v2_reset_tradeable_mainboard_anchor_20260601_01",
+        "mh_v2_traditional_pit_tradeable_mainboard_anchor_20260602_01"
+      ],
+      "verdict": "Status: `daily_research_v2_research_framework_contract_accepted / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; User decision: the v2 research framework is the full evidence chain from data contracts to execution-candidate contracts, not only model training.; Current pass-grade research baseline: `mh_v2_reset_tradeable_mainboard_anchor_20260601_01`.",
+      "blockers": [
+        "Completed runs with insufficient seed count, insufficient epoch budget, best epoch at edge, or missing convergence evidence remain smoke/scout evidence."
+      ],
+      "next_allowed_actions": [
+        "Treat this framework as the default decomposition for all future v2 research plans.",
+        "Continue phase-2 data-contract hardening: PIT listing/delist, status source depth, missing/fill semantics, limit/industry/valuation/market-cap domains.",
+        "Run feature/model improvements as narrow matrices against the pass-grade v2 baseline and optionally the traditional-PIT strict comparison baseline.",
+        "Keep execution frozen until an explicitly approved execution-candidate bridge and rebuild plan exists."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
+        "policy_pool_view__925e8604a91a9c07a5387fb1",
+        "policy_pool_view__0af1d96b413fb8927270b680",
+        "data_platform_v2_status_sidecar__37dba59cdced261cddfedf11"
       ]
     },
     {
