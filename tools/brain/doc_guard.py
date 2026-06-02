@@ -480,6 +480,26 @@ def _attached_brain_doc_prefixes() -> tuple[str, ...]:
     return tuple(prefixes)
 
 
+def _registered_project_output_doc_prefixes() -> tuple[str, ...]:
+    prefixes: list[str] = []
+    try:
+        catalog = build_brain_catalog()
+    except Exception:
+        return ()
+    for item in catalog.get("brains", []):
+        if not isinstance(item, dict):
+            continue
+        if item.get("status") not in {"canonical_root", "attached"}:
+            continue
+        body_root = str(item.get("body_root", "") or "").strip().replace("\\", "/").strip("/")
+        if not body_root or body_root == ".":
+            continue
+        prefix = f"{body_root}/output/"
+        if prefix not in prefixes:
+            prefixes.append(prefix)
+    return tuple(prefixes)
+
+
 def _load_main_manifest() -> dict[str, Any]:
     return json.loads(_read_text(MAIN_MANIFEST))
 
@@ -986,6 +1006,8 @@ def _is_allowed_doc_path(relative_path: str) -> bool:
     if relative_path in ALLOWED_EXTERNAL_DOCS:
         return True
     if relative_path.startswith(_attached_brain_doc_prefixes()):
+        return True
+    if relative_path.startswith(_registered_project_output_doc_prefixes()):
         return True
     if any(part in GENERATED_DOC_PATH_PARTS for part in relative_path.split("/")):
         return True

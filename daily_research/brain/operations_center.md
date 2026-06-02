@@ -80,6 +80,13 @@
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.v2_research_reset_baseline --run-training --json`
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.v2_research_reset_baseline --run-comparison --json`
 - 当前 v2 strict baseline anchor：`mh_v2_reset_tradeable_mainboard_anchor_20260601_01`；strict pool `policy_pool_view__925e8604a91a9c07a5387fb1`；status sidecar `data_platform_v2_status_sidecar__b896a110cf7802cc1653c22a`；feature profile `raw_kline_context_v2_tradeable_amount_checked`。该 anchor 是 evidence-grade research baseline，不是 live/default 或 promotion authority。
+- Traditional PIT status bridge 入口：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.data_lake.import_traditional_pit_status_sidecar --json`
+- Traditional-PIT-backed v2 strict baseline 入口：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.v2_traditional_pit_baseline --write-task-list --validate-pool --json`
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.v2_traditional_pit_baseline --run-training --json`
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.v2_traditional_pit_baseline --run-comparison --json`
+- 当前 traditional-PIT strict comparison anchor：`mh_v2_traditional_pit_tradeable_mainboard_anchor_20260602_01`；strict pool `policy_pool_view__0af1d96b413fb8927270b680`；status sidecar `data_platform_v2_status_sidecar__37dba59cdced261cddfedf11`。该 anchor 是 stricter data-contract comparison baseline，gate 为 `near_pass`，不替代当前 v2 strict pass anchor。
 
 ## 实验预算可信度纪律
 - 启动任何会影响模型输入、架构、输出、loss、horizon grid、stage gate 或后续方向选择的实验前，必须在计划或 tag 说明中声明证据等级：`smoke_only`、`scout_only`、`evidence_grade` 或 `promotion_grade`。

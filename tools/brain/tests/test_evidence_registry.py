@@ -186,6 +186,25 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
 
         self.assertEqual(daily_research_evidence.run_tags(text), ["mh26_path_aux_future_family_seed7_20260601_01"])
 
+    def test_adapter_indexes_v2_program_and_seed_tags(self) -> None:
+        text = """
+        - Research program: `daily_research_v2_research_reset`.
+
+        ## Seed Tags
+
+        - `mh_v2_traditional_pit_tradeable_mainboard_seed7_20260602_01`
+        - `mh_v2_traditional_pit_tradeable_mainboard_seed11_20260602_01`
+        """
+
+        self.assertEqual(daily_research_evidence.research_programs(text), ["daily_research_v2_research_reset"])
+        self.assertEqual(
+            daily_research_evidence.run_tags(text),
+            [
+                "mh_v2_traditional_pit_tradeable_mainboard_seed7_20260602_01",
+                "mh_v2_traditional_pit_tradeable_mainboard_seed11_20260602_01",
+            ],
+        )
+
     def test_adapter_does_not_treat_research_pointers_as_run_instances(self) -> None:
         text = """
         - Current research mainline pointer: `alpha_multi_horizon_utility_policy_v1`.
@@ -240,6 +259,27 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
             path.write_text("# Execution Signal Refresh Closure\n", encoding="utf-8")
 
             self.assertTrue(daily_research_evidence.is_reference_file(path))
+
+    def test_adapter_indexes_daily_research_v2_reference_names(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "daily_research_v2_traditional_pit_bridge_20260602.md"
+            path.write_text("# Daily Research V2 Traditional PIT Bridge\n", encoding="utf-8")
+
+            self.assertTrue(daily_research_evidence.is_reference_file(path))
+
+    def test_registry_indexes_daily_research_v2_traditional_pit_bridge(self) -> None:
+        registry = build_evidence_registry()
+        matches = [
+            record
+            for record in registry["records"]
+            if record["id"] == "daily_research_v2_traditional_pit_bridge_20260602"
+        ]
+
+        self.assertEqual(len(matches), 1)
+        self.assertIn("daily_research_v2_research_reset", matches[0]["research_programs"])
+        self.assertIn("v2_traditional_pit_tradeable_mainboard_baseline", matches[0]["study_families"])
+        self.assertIn("mh_v2_traditional_pit_tradeable_mainboard_seed7_20260602_01", matches[0]["run_tags"])
+        self.assertIn("data_platform_v2_status_sidecar__37dba59cdced261cddfedf11", matches[0]["dataset_ids"])
 
     def test_registry_indexes_tdx_free_data_platform_decision(self) -> None:
         registry = build_evidence_registry()

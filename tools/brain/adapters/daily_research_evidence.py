@@ -11,14 +11,15 @@ REFERENCE_FILE_PATTERNS = (
     re.compile(r"^(r\d+[a-z]?|gpu-runtime)-.+\.md$"),
     re.compile(r"^(alpha_path20|path20|path_policy|alpha_multi_horizon)_.+\.md$"),
     re.compile(r"^data_lake_.+\.md$"),
+    re.compile(r"^daily_research_v2_.+\.md$"),
     re.compile(r"^tdx_free_data_platform_.+\.md$"),
     re.compile(r"^execution_.+\.md$"),
     re.compile(r"^(brain_native|brain_system|api_agent)_.+\.md$"),
 )
 RUN_TAG_PATTERN = re.compile(
-    r"\b(?:self_opt_study|protocol|path20|alpha_path20|mh_utility|mh_short|mh_mid|mh_long|mh_out|mh_grid|mh25)_[A-Za-z0-9_]+"
+    r"\b(?:self_opt_study|protocol|path20|alpha_path20|mh_utility|mh_short|mh_mid|mh_long|mh_out|mh_grid|mh25|mh_v2)_[A-Za-z0-9_]+"
 )
-RESEARCH_PROGRAM_PATTERN = re.compile(r"\balpha_multi_horizon_utility_policy_v\d+\b")
+RESEARCH_PROGRAM_PATTERN = re.compile(r"\b(?:alpha_multi_horizon_utility_policy_v\d+|daily_research_v2_research_reset)\b")
 EXPLICIT_STUDY_FAMILY_PATTERN = re.compile(r"(?:Study family|study_family)\s*:\s*`?([A-Za-z0-9_]+)`?", re.IGNORECASE)
 CODE_TOKEN_PATTERN = re.compile(r"`([A-Za-z][A-Za-z0-9_]*(?:_[A-Za-z0-9]+)+)`")
 RESEARCH_POINTER_PATTERN = re.compile(r"^alpha_[A-Za-z0-9_]+_policy_v\d+$")
@@ -29,6 +30,8 @@ RUN_INSTANCE_MARKER_PATTERN = re.compile(
 RUN_TAG_SECTION_HEADINGS = (
     "run tags",
     "run tag",
+    "seed tags",
+    "seed tag",
 )
 STATUS_FAMILY_MAP = (
     ("stage25_completed", "stage25_stability_calibration"),
@@ -128,7 +131,10 @@ def research_programs(text: str) -> list[str]:
     if (
         "alpha multi-horizon" in lower
         or "alpha_multi_horizon" in lower
-        or any(tag.startswith(("mh_", "mh25_")) for tag in _candidate_run_tokens(text))
+        or any(
+            tag.startswith(("mh_", "mh25_")) and not tag.startswith("mh_v2_")
+            for tag in _candidate_run_tokens(text)
+        )
     ):
         programs.append("alpha_multi_horizon_utility_policy_v1")
     return _dedupe(programs)

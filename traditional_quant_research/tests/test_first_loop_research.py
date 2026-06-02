@@ -7,6 +7,7 @@ from traditional_quant_research.diagnostics import assign_time_split, quantile_r
 from traditional_quant_research.research_panel import (
     add_baseline_score,
     add_cross_sectional_zscores,
+    add_cross_sectional_excess_return_labels,
     build_factor_label_panel,
     default_factor_columns,
 )
@@ -72,6 +73,22 @@ def test_cross_sectional_zscores_and_baseline_score_are_added() -> None:
 
     assert "baseline_score" in scored.columns
     assert scored["baseline_score"].notna().any()
+
+
+def test_cross_sectional_excess_return_labels_are_demeaned_by_date() -> None:
+    frame = pd.DataFrame(
+        [
+            {"date": "2026-01-02", "code": "A", "fwd_ret_1d": 0.03},
+            {"date": "2026-01-02", "code": "B", "fwd_ret_1d": 0.01},
+            {"date": "2026-01-05", "code": "A", "fwd_ret_1d": -0.01},
+            {"date": "2026-01-05", "code": "B", "fwd_ret_1d": 0.01},
+        ]
+    )
+
+    result = add_cross_sectional_excess_return_labels(frame, horizons=(1,))
+
+    assert result["xsec_excess_ret_1d"].tolist() == pytest.approx([0.01, -0.01, -0.01, 0.01])
+    assert result.groupby("date")["xsec_excess_ret_1d"].mean().abs().max() == pytest.approx(0.0)
 
 
 def test_factor_diagnostics_and_top_n_backtest_are_stable() -> None:

@@ -189,6 +189,29 @@ def add_baseline_score(
     return output
 
 
+def add_cross_sectional_excess_return_labels(
+    frame: pd.DataFrame,
+    *,
+    horizons: Sequence[int] = DEFAULT_HORIZONS,
+    date_col: str = "date",
+    label_prefix: str = "fwd_ret_",
+    output_prefix: str = "xsec_excess_ret_",
+) -> pd.DataFrame:
+    """Add same-date cross-sectionally demeaned forward-return labels."""
+
+    if any(horizon <= 0 for horizon in horizons):
+        raise ValueError("horizons must be positive")
+    output = frame.copy()
+    _require_columns(output, [date_col, *[f"{label_prefix}{horizon}d" for horizon in horizons]])
+    for horizon in horizons:
+        label_col = f"{label_prefix}{horizon}d"
+        output_col = f"{output_prefix}{horizon}d"
+        values = pd.to_numeric(output[label_col], errors="coerce")
+        daily_mean = values.groupby(output[date_col], sort=False).transform("mean")
+        output[output_col] = (values - daily_mean).replace([np.inf, -np.inf], np.nan)
+    return output
+
+
 def load_baseline_factor_panel(
     root: str | None = None,
     *,

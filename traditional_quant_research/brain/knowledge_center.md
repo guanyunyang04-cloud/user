@@ -9,3 +9,34 @@
 - 默认研究框架已定：研究问题 -> PIT 数据集 -> 样本构造 -> 特征/因子 -> 标签/目标 -> 模型或打分方法 -> loss/训练目标 -> 预测输出 -> 组合构建 -> 回测执行 -> 评估诊断 -> 实验记录 -> 结论分级；完整说明见 `brain/references/research_framework.md`。
 - 当前优先闭环是 v2 PIT 数据集、tradeable panel、基础传统因子、未来收益标签、IC/分组收益、简单多因子打分、Top-N 组合回测和研究日志；复杂模型架构排在基线闭环之后。
 - 第一阶段门禁规则：v2 PIT 数据、单因子和基础回测协议支持进入多因子诊断；传统 ML 需等待多因子 baseline、极端标签核查、执行约束和滚动验证协议补强后再启动。
+- 第二阶段多因子 baseline 默认先使用方向校正后的横截面 percentile rank 合成，比较 `baseline_score`、等权 rank score 和 IC 加权 rank score；该阶段结论仍归类为 `diagnostic/backtest_only`，不能直接视为策略候选。
+- 多因子和后续 ML 诊断应优先报告 `xsec_excess_ret_*` 横截面超额收益标签，同时保留原始 `fwd_ret_*` 作对照；原始收益更容易混入市场方向，超额收益更适合衡量选股排序能力。
+- 使用 `xsec_excess_ret_*` 做 Top-N 时，收益指标应解释为 alpha-style 排序诊断，不可直接等同于真实组合收益；真实策略结论仍需回到原始收益、交易约束和成本模型。
+- rolling IC 权重必须只使用评分日前的历史日期；历史不足时允许 fallback 等权，但研究日志必须记录 fallback rate，避免把冷启动期误读为训练有效。
+- 对短窗口做 rolling IC 策略评估时，应使用 `--history-start-date` 提供权重暖场历史，并把历史构造窗口和正式评估窗口分开报告；否则短窗口初期 fallback 可能污染月度/季度失效判断。
+- 低相关因子筛选是去相关的第一版，只能减少简单重复投票；它不等同于行业、市值或风格中性化。
+- 当前 proxy neutralization 默认用 `log_amount_mean_20d_z` 做流动性/规模代理残差化；它只是正式行业/市值中性化前的过渡方案。
+- 若多因子在 `xsec-excess` 标签下 IC/分位表现良好，但最佳 Top-N 信号与最佳 IC/分位信号不一致，只能升级为更强诊断证据，不能升级为策略候选。
+- 多因子候选进入下一阶段前，必须回到 raw forward return 做执行约束回测，并补充年度稳定性、成本压力、换手、涨跌停/停牌不可交易和极端标签处理。
+- 当前第二阶段核心对照组是 `multifactor_low_corr_rank_score` 与 `multifactor_rolling_ic_weighted_score`：前者代表排序诊断稳定性，后者代表 rolling 权重在 Top-N 网格中的潜在收益证据。
+- `fwd_ret_5d` 或 `fwd_ret_20d` 不能直接在 daily Top-N 中按日年化解读；这会使用重叠未来收益窗口并可能放大 PnL。进入策略候选前必须使用 horizon-aligned portfolio simulator 或明确非重叠持有期口径。
+- horizon-aligned 回测默认语义：t 日收盘后生成信号，下一可交易日开盘入场，持有到 horizon 对应可交易日收盘；多日 horizon 默认使用非重叠持有期作为保守候选筛选口径。
+- 如果 IC/分位最佳信号与 horizon-aligned Top-N 最佳信号不同，策略候选筛选应以后者为主、以前者为诊断对照；当前例子是 low-corr 排序最强，但 rolling IC 严格 Top-N 最强。
+- 候选输入必须通过年度稳定性和成本鲁棒性门禁；若信号在 2024/2025 强但 2026 成本后转负，只能列入 watchlist，不能升级为样本外支持。
+- Top-N buffer 是成本压缩工具，不是 alpha 修复工具；若 buffer 降低换手但 2026 仍转负，问题应回到权重、因子暴露和市场阶段切片分析。
+- 在 execution-constrained gate 下，如果 buffer 只降低换手但 gross return 仍为负，不能继续通过 buffer tuning 追候选；应转向暴露上限、regime filter 或因子族扩展。
+- 组合 selection filters 只能限制信号日候选，不得删除后续 entry/exit 价格路径；horizon 回测必须保留完整 tradeable panel 用于成交、停牌和延迟退出模拟。
+- 暴露上限或 selection filter 若只在同一评估窗口中改善 low-corr，不足以升级为候选；必须使用 fit/eval 分离重测。当前 2025 fit / 2026 eval 首测显示第一版规则弱于无过滤 baseline，因此同窗改善只能作为 idea/diagnostic 证据。
+- 当前 low-corr watchlist filter 是 `log_amount_mean_20d_z>=-0.8,momentum_20d_z>=-0.8`：它在 2025 fit / 2026 eval 中优于无过滤 baseline，但 30 bps 后仍为负，不能升级为候选。它说明小成交额/弱动量暴露需要控制，但下一主轴应是 regime filter，而不是继续堆 defensive caps。
+- Regime filter 必须先从完整 evaluation calendar 固定调仓日，再判断该调仓日是否允许开仓；坏 regime 日期应跳过该次调仓，不能顺延到同周或同月的前一个好日子。当前 low-corr watchlist 的最佳 regime 规则是 `market_ret_20d_mean>=-0.02,breadth_20d_positive_rate>=0.45`，0 bps 转正但 30 bps 仍为负，只能列入 watchlist。
+- 多年份 regime 规则必须同时检查弱年改善和强年损失。当前 `market_ret_20d_mean>=-0.02,breadth_20d_positive_rate>=0.45` 能改善 2024/2026 并压低回撤，但显著伤害 2025；因此静态 regime filter 不能只按均值或单年失效修复来升级。
+- 当前静态 regime 网格显示 `breadth_20d_positive_rate` 比 `market_ret_20d_mean` 更关键；`breadth_20d_positive_rate>=0.50` 是 30 bps 下最优静态规则，但仍为负收益且正收益年份只有 `1/3`。后续应转向动态仓位缩放或因子族扩展，而不是继续小幅调静态阈值。
+- 动态仓位缩放应通过组合层 `capital_col` 调整目标权重和换手成本，而不是改写信号值；同一信号日的 `capital_scale` 必须对所有候选股票一致，否则应视为组合语义错误。
+- 动态仓位若只降低弱年损失和回撤、但 30 bps 多年份均值仍为负，只能记为风险控制诊断，不能升级为策略候选。当前 `breadth_soft` 相对 full-capital baseline 有正 delta，但 2024/2025/2026 的 30 bps 均值仍为 `-0.077398`。
+- 持有期/调仓频率是组合协议的一部分，不是次要参数。当前 low-corr 信号在 5 日 weekly 协议下成本脆弱，但 `20d/monthly` 低换手协议显著更强；不同 horizon 下 stock-level selection filter 的方向可能相反。
+- 若一个协议是在观察某个评估窗口网格后被挑出，即使随后做了多年份回看，也应先标为 `candidate-frontier/backtest_only`，不能直接升级为 `out_of_sample_supported`。当前 `baseline_no_filter / horizon=20 / monthly / top_n=200 / buffer=3.0 / 30 bps` 是第一条 candidate-frontier 协议，但仍需暴露、容量、滑点和更长样本审计。
+- candidate-frontier 审计即使显示 30/60 bps 多年份为正，也不能只按收益晋级。当前 low-corr 20d/monthly/top200/buffer3 协议在 30 bps 下三年为正，但样本只有 `17` 个非重叠 monthly trades、2026 仅 `2` 个 trades，100 bps 最差年转负，且持仓持续偏低流动性和弱动量；因此仍是 `backtest_only`，下一门禁必须加入同协议信号对照、滑点/冲击和行业/规模中性化。
+- 同一组合协议下必须做信号对照，不能把组合协议优势误归因给单一信号。当前 `20d/monthly/top_n=200/buffer=3.0` 对照显示 rolling IC 是 30 bps 均值冠军，IC-weighted 是 100 bps 高成本鲁棒性最好，low-corr 只是第三；因此 candidate-frontier 应从单一 low-corr 扩展为 rolling IC、IC-weighted、low-corr 三条信号共同审计。
+- 候选输入做月度/季度失效定位时，应同步输出实际入选篮子的因子 active exposure；如果弱月份暴露结构与强月份类似但收益相反，应优先视为 regime/exposure 稳定性问题，而不是直接升级模型复杂度。
+- 策略候选 promotion 前必须通过 execution-constrained horizon backtest；第一版近似口径是涨停/不可交易不买入、跌停/不可交易延迟退出、未成交资金保留为现金。若约束后 gross return 明显恶化，应优先处理执行风险、暴露上限或 regime filter，而不是进入传统 ML。
+- 参与率冲击成本可以强化或否定 candidate-frontier，但不能单独完成候选晋级。当前 rolling IC、IC-weighted 和 low-corr 在 `30 bps / 100m / 10 bps per 1 pct participation` 下仍三年为正，但交易样本只有 `16-18` 笔、2026 只有 `2` 笔，且篮子低流动性/弱动量暴露仍在；因此该证据仍归类为 `candidate-frontier/backtest_only`。

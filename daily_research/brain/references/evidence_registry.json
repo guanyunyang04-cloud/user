@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 86,
+  "record_count": 89,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -1607,6 +1607,126 @@
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": []
+    },
+    {
+      "id": "daily_research_v2_dataset_contract_upgrade_20260602",
+      "date": "2026-06-02",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_dataset_contract_upgrade_20260602.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_tradeable_mainboard_baseline"
+      ],
+      "run_tags": [
+        "mh_v2_reset_tradeable_mainboard_anchor_20260601_01",
+        "mh_v2_reset_tradeable_mainboard_seed7_20260601_01",
+        "mh_v2_reset_tradeable_mainboard_seed11_20260601_01",
+        "mh_v2_reset_tradeable_mainboard_seed19_20260601_01"
+      ],
+      "verdict": "Status: `daily_research_v2_dataset_contract_upgrade / evidence_grade / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_tradeable_mainboard_baseline`.; Dataset id: `policy_input_bundle__45e3d8c059ba718426a9f887`.",
+      "blockers": [
+        "Shortfall dates: `718`; diagnostic only, no blocker.",
+        "Training summary status: `completed`; failed tags: `[]`.",
+        "The v2 strict tradeable mainboard input contract repairs the previous corrected mainboard `near_pass` failure shape.",
+        "Remaining data-contract blockers are now phase-2 research items, not blockers to starting v2 research:"
+      ],
+      "next_allowed_actions": [
+        "Treat `mh_v2_reset_tradeable_mainboard_anchor_20260601_01` as the v2 baseline for new research comparisons.",
+        "Continue phase-2 data contract hardening: true PIT listing/delist, stronger status sidecar sources, missing/fill semantics, limit/industry/valuation optional domains.",
+        "Run v2 feature and model improvements against this strict baseline, with explicit dataset id, pool id, feature profile, seeds, costs, and gate.",
+        "Keep execution frozen until a separately approved execution rebuild plan and candidate backtest bridge exist."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
+        "data_platform_v2_status_sidecar__b896a110cf7802cc1653c22a",
+        "policy_pool_view__925e8604a91a9c07a5387fb1"
+      ]
+    },
+    {
+      "id": "daily_research_v2_research_reset_20260601",
+      "date": "2026-06-01",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_research_reset_20260601.md",
+      "tags": [
+        "research_data_lake",
+        "data_lake"
+      ],
+      "workflow": "research_data_lake",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "The main blocker is no longer evidence that the BaoStock-first data lake is unusable.; The best current explanation for the old/new result gap is input and protocol non-equivalence: feature schema, pool/sample policy, amount unit, missing/fill policy, and unavailable old payloads.; Continuing to chase exact old replay has diminishing value because the old artifacts are missing and the old result was not necessarily a final optimum.; Old Stage 2.8 / short_v5b evidence remains useful as historical prior and benchmark context, but it is no longer the active research target.",
+      "blockers": [
+        "Corrected mainboard-only baseline is not a failure state:",
+        "Remaining blocker: hit lift min `-0.007156`.",
+        "The main blocker is no longer evidence that the BaoStock-first data lake is unusable.",
+        "If old `156` manifest or short_v5b payload is found later, use it as a side audit or historical bridge, not as a blocker to v2 progress."
+      ],
+      "next_allowed_actions": [
+        "Define the first v2 feature-input audit and candidate feature profile roadmap.",
+        "Investigate amount-unit normalization and missing/fill policy only as new-lineage feature quality issues.",
+        "Run a narrow hit-lift repair matrix on the corrected mainboard baseline.",
+        "Design the first v2 model comparison using the corrected dataset/pool and explicit gates.",
+        "Keep execution frozen until v2 has evidence-grade candidate results and a separately approved execution rebuild plan."
+      ],
+      "active_artifact_impact": "not_stated",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
+        "policy_pool_view__74f45f4f83263bccd64a8027"
+      ]
+    },
+    {
+      "id": "daily_research_v2_traditional_pit_bridge_20260602",
+      "date": "2026-06-02",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_traditional_pit_bridge_20260602.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_traditional_pit_tradeable_mainboard_baseline"
+      ],
+      "run_tags": [
+        "mh_v2_traditional_pit_tradeable_mainboard_anchor_20260602_01",
+        "mh_v2_traditional_pit_tradeable_mainboard_seed7_20260602_01",
+        "mh_v2_traditional_pit_tradeable_mainboard_seed11_20260602_01",
+        "mh_v2_traditional_pit_tradeable_mainboard_seed19_20260602_01",
+        "mh_v2_reset_tradeable_mainboard_anchor_20260601_01"
+      ],
+      "verdict": "Status: `traditional_pit_bridge_absorbed / evidence_grade / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_traditional_pit_tradeable_mainboard_baseline`.; Source market dataset: `policy_input_bundle__45e3d8c059ba718426a9f887`.",
+      "blockers": [
+        "failure count `0`;",
+        "Failed tags: `[]`.",
+        "Failed gate check:",
+        "`python -m daily_research.path_policy.v2_traditional_pit_baseline --run-training --json`: completed, failed tags `[]`.",
+        "Investigate the one failed gate dimension, `negative_month_count_max=3`, before replacing the current v2 anchor."
+      ],
+      "next_allowed_actions": [
+        "Keep `mh_v2_reset_tradeable_mainboard_anchor_20260601_01` as the current pass-grade v2 baseline.",
+        "Use `mh_v2_traditional_pit_tradeable_mainboard_anchor_20260602_01` as the stricter data-contract comparison baseline.",
+        "Investigate the one failed gate dimension, `negative_month_count_max=3`, before replacing the current v2 anchor.",
+        "Continue feature/model improvements with explicit pool/sidecar IDs and compare against both v2 strict and traditional-PIT strict baselines."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
+        "data_platform_v2_status_sidecar__37dba59cdced261cddfedf11",
+        "policy_pool_view__0af1d96b413fb8927270b680",
+        "policy_pool_view__925e8604a91a9c07a5387fb1"
+      ]
     },
     {
       "id": "data_lake_output_cache_loss_recovery_boundary_20260531",
