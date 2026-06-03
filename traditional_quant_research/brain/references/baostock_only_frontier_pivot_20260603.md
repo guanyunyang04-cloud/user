@@ -35,12 +35,27 @@ The current mainline target is no longer institutional promotion. It is to produ
 
 True-size, market-cap neutrality, institutional capacity, and production-grade promotion remain future upgrades. They must not block alpha, regime, model-fusion, portfolio construction, or personal execution research now.
 
+## 2026-06-04 Personal Candidate Closure
+
+The North Star transition has reached its first closure condition for the current goal:
+
+- Formal personal gate run: `frontier_personal_candidate_gate_20260604_004311`.
+- Source evidence: `low_corr_frontier_combined_constraint_audit_20260603_122047`.
+- Passing candidate: `multifactor_rolling_ic_weighted_score` with `constraint_variant=baseline` and `exposure_penalty_strength=0.25`.
+- Candidate id for tracking: `multifactor_rolling_ic_weighted_score_baseline_penalty_0_25`.
+- Evidence window and protocol: `2017-2026`, prior-fit / walk-forward metadata, `20d/monthly/top_n=200/buffer=3.0`, `30bps`, `100m` capital stress, `10bps per 1 pct participation` impact, Baostock-only snapshot.
+- Personal gate metrics: mean annualized return about `0.096737`, weakest annualized year about `-0.301352`, positive year rate `0.6`, worst max drawdown about `-0.138549`, total periods `60`, max proxy monthly mean abs active exposure about `1.111381`.
+- Formal paper bootstrap run: `frontier_personal_paper_tracking_bootstrap_20260604_004320`.
+- Bootstrap output: `paper_tracking_candidates.csv`, `paper_tracking_protocol.csv`, `paper_tracking_log_template.csv`, and `paper_tracking_review_rules.csv`.
+
+This closes the current objective of finding at least one Baostock-only personal `personal_backtest_candidate` that can enter paper tracking. It does not create a `personal_paper_candidate`, `strategy_candidate`, `out_of_sample_supported`, or production candidate. Future promotion requires real paper records, by default at least `6` completed rebalance periods and at least `120` calendar days, plus execution completeness, paper return sanity, drawdown control, and single-period damage review.
+
 ## Current Next Work
 
-Continue with Baostock-only weak-year rebuild and portfolio constraint research:
+Continue after this closure with Baostock-only model strengthening and paper tracking:
 
-- fixed weak years: `2017/2018/2022/2023`;
-- prior-fit rules only, with each eval year fit from earlier years;
-- no traditional ML yet;
-- no 2024-2026 frontier parameter chasing;
-- no proxy or free current quote source can make the true size gate pass.
+- start logging the formal paper tracking template for `multifactor_rolling_ic_weighted_score_baseline_penalty_0_25`;
+- test personal-sized variants such as `top_n=20/50/100` against the same long-window standard;
+- keep fixed weak years `2017/2018/2022/2023` visible in diagnostics;
+- use prior-fit rules only, with each eval year fit from earlier years;
+- keep true-size / institutional promotion as a future enhancement line.
