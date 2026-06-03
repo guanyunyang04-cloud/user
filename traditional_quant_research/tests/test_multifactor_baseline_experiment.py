@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from traditional_quant_research.experiments import multifactor_baseline
+from traditional_quant_research.research_panel import factor_columns_for_set
 
 
 def _fixture_panel() -> pd.DataFrame:
@@ -26,8 +27,10 @@ def _fixture_panel() -> pd.DataFrame:
                     "high": close + 0.20,
                     "low": close - 0.20,
                     "close": close,
-                    "volume": 1000.0,
+                    "volume": 1000.0 + len(rows) * 25.0,
                     "amount": close * 1000.0,
+                    "turn": 1.0 + len(rows) * 0.01,
+                    "pctChg": 0.1,
                 }
             )
     return pd.DataFrame(rows)
@@ -50,6 +53,7 @@ def test_run_multifactor_baseline_writes_reproducible_outputs(tmp_path, monkeypa
         end_date="2026-01-15",
         horizon=1,
         label_mode="xsec-excess",
+        factor_set="expanded",
         rolling_window=3,
         rolling_min_periods=2,
         max_factor_corr=0.75,
@@ -73,6 +77,7 @@ def test_run_multifactor_baseline_writes_reproducible_outputs(tmp_path, monkeypa
     assert result["history_panel"]["date_min"] == "2026-01-02"
     assert result["label"] == "xsec_excess_ret_1d"
     assert result["label_mode"] == "xsec-excess"
+    assert result["factor_set"] == "expanded"
     assert "alpha-style ranking diagnostics" in result["label_mode_note"]
     assert "1-day forward return" in result["backtest_return_note"]
     assert result["include_horizon_backtest"] is True
@@ -106,7 +111,9 @@ def test_run_multifactor_baseline_writes_reproducible_outputs(tmp_path, monkeypa
     assert result["horizon_backtest_period_types"] == ["monthly", "quarterly"]
     assert result["horizon_backtest_period_count"] > 0
     assert result["basket_exposure_period_types"] == ["monthly", "quarterly"]
-    assert 0 < result["basket_exposure_factor_count"] <= len(multifactor_baseline.default_factor_columns())
+    assert "reversal_1d" in result["raw_factor_columns"]
+    assert "neg_turn_mean_20d" in result["raw_factor_columns"]
+    assert 0 < result["basket_exposure_factor_count"] <= len(factor_columns_for_set("expanded"))
     assert result["rolling_weight_audit_period_types"] == ["monthly", "quarterly"]
 
 

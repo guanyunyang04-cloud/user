@@ -32,11 +32,14 @@ from traditional_quant_research.multifactor import (
     select_low_correlation_factors,
 )
 from traditional_quant_research.research_panel import (
+    DEFAULT_FACTOR_SET,
+    FACTOR_SETS,
     add_baseline_score,
     add_cross_sectional_excess_return_labels,
     add_cross_sectional_zscores,
     build_factor_label_panel,
-    default_factor_columns,
+    factor_columns_for_set,
+    normalize_factor_set,
     panel_summary,
 )
 
@@ -63,6 +66,7 @@ def run_multifactor_baseline(
     end_date: str | None = None,
     horizon: int = DEFAULT_HORIZON,
     label_mode: str = "raw",
+    factor_set: str | None = DEFAULT_FACTOR_SET,
     rolling_window: int = DEFAULT_ROLLING_WINDOW,
     rolling_min_periods: int = DEFAULT_ROLLING_MIN_PERIODS,
     max_factor_corr: float = DEFAULT_MAX_FACTOR_CORR,
@@ -86,6 +90,7 @@ def run_multifactor_baseline(
         raise ValueError("horizon must be positive")
     if label_mode not in LABEL_MODES:
         raise ValueError(f"unsupported label_mode: {label_mode}")
+    selected_factor_set = normalize_factor_set(factor_set)
     if rolling_window <= 0:
         raise ValueError("rolling_window must be positive")
     if rolling_min_periods <= 0:
@@ -112,12 +117,12 @@ def run_multifactor_baseline(
     run_dir.mkdir(parents=True, exist_ok=True)
 
     raw_panel = load_tradeable_panel(root, start_date=effective_history_start, end_date=effective_end)
-    factor_panel = build_factor_label_panel(raw_panel, horizons=tuple(sorted({1, 5, 20, horizon})))
+    factor_panel = build_factor_label_panel(raw_panel, horizons=tuple(sorted({1, 5, 20, horizon})), factor_set=selected_factor_set)
     factor_panel = add_cross_sectional_excess_return_labels(factor_panel, horizons=(horizon,))
-    raw_factor_columns = default_factor_columns()
+    raw_factor_columns = factor_columns_for_set(selected_factor_set)
     factor_panel = add_cross_sectional_zscores(factor_panel, raw_factor_columns)
-    factor_panel = add_baseline_score(factor_panel)
     signal_columns = [f"{column}_z" for column in raw_factor_columns]
+    factor_panel = add_baseline_score(factor_panel, score_columns=signal_columns)
     evaluation_panel = filter_panel_dates(factor_panel, start_date=effective_start, end_date=effective_end)
 
     if label_col not in evaluation_panel.columns:
@@ -261,6 +266,7 @@ def run_multifactor_baseline(
         "end_date": effective_end,
         "horizon": int(horizon),
         "label_mode": label_mode,
+        "factor_set": selected_factor_set,
         "raw_label": raw_label_col,
         "label": label_col,
         "label_mode_note": label_mode_note(label_mode),
@@ -1141,6 +1147,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--end-date", default=None)
     parser.add_argument("--horizon", type=int, default=DEFAULT_HORIZON)
     parser.add_argument("--label-mode", choices=LABEL_MODES, default="raw")
+    parser.add_argument("--factor-set", choices=FACTOR_SETS, default=DEFAULT_FACTOR_SET, help="Factor family to build; core preserves historical comparability, expanded adds Baostock-only price/volume/turnover factors.")
     parser.add_argument("--rolling-window", type=int, default=DEFAULT_ROLLING_WINDOW)
     parser.add_argument("--rolling-min-periods", type=int, default=DEFAULT_ROLLING_MIN_PERIODS)
     parser.add_argument("--max-factor-corr", type=float, default=DEFAULT_MAX_FACTOR_CORR)
@@ -1176,6 +1183,7 @@ def main() -> None:
         end_date=args.end_date,
         horizon=args.horizon,
         label_mode=args.label_mode,
+        factor_set=args.factor_set,
         rolling_window=args.rolling_window,
         rolling_min_periods=args.rolling_min_periods,
         max_factor_corr=args.max_factor_corr,

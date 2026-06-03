@@ -10,6 +10,7 @@ from traditional_quant_research.research_panel import (
     add_cross_sectional_excess_return_labels,
     build_factor_label_panel,
     default_factor_columns,
+    factor_columns_for_set,
 )
 
 
@@ -31,8 +32,10 @@ def _fixture_panel() -> pd.DataFrame:
                     "high": close + 0.2,
                     "low": close - 0.2,
                     "close": close,
-                    "volume": 1000.0,
+                    "volume": 1000.0 + len(rows) * 10.0,
                     "amount": close * 1000.0,
+                    "turn": 1.0 + len(rows) * 0.01,
+                    "pctChg": 0.1,
                 }
             )
     return pd.DataFrame(rows)
@@ -73,6 +76,62 @@ def test_cross_sectional_zscores_and_baseline_score_are_added() -> None:
 
     assert "baseline_score" in scored.columns
     assert scored["baseline_score"].notna().any()
+
+
+def test_factor_columns_for_set_keeps_core_default_and_adds_expanded_baostock_factors() -> None:
+    core = factor_columns_for_set("core", short_window=2, medium_window=3, volatility_window=2)
+    expanded = factor_columns_for_set("expanded", short_window=2, medium_window=3, volatility_window=2)
+
+    assert core == default_factor_columns(short_window=2, medium_window=3, volatility_window=2)
+    assert core == factor_columns_for_set(None, short_window=2, medium_window=3, volatility_window=2)
+    assert core == factor_columns_for_set("", short_window=2, medium_window=3, volatility_window=2)
+    assert set(core).issubset(set(expanded))
+    assert "reversal_1d" in expanded
+    assert "log_amount_mean_2d" in expanded
+    assert "log_amount_change_3d" in expanded
+    assert "range_position_3d" in expanded
+    assert "volume_price_corr_3d" in expanded
+    assert "neg_turn_mean_3d" in expanded
+
+
+def test_expanded_factor_panel_uses_baostock_metrics_when_available() -> None:
+    panel = _fixture_panel()
+
+    result = build_factor_label_panel(
+        panel,
+        horizons=(1,),
+        short_window=2,
+        medium_window=3,
+        volatility_window=2,
+        min_periods=2,
+        factor_set="expanded",
+    )
+    expanded = factor_columns_for_set("expanded", short_window=2, medium_window=3, volatility_window=2)
+
+    assert set(expanded).issubset(result.columns)
+    assert result["neg_turn_mean_3d"].notna().any()
+    assert result["turn_change_3d"].notna().any()
+    assert result["volume_price_corr_3d"].notna().any()
+    assert result["range_position_3d"].dropna().between(0.0, 1.0).all()
+
+
+def test_expanded_factor_panel_handles_missing_metrics_columns() -> None:
+    panel = _fixture_panel().drop(columns=["turn", "pctChg"])
+
+    result = build_factor_label_panel(
+        panel,
+        horizons=(1,),
+        short_window=2,
+        medium_window=3,
+        volatility_window=2,
+        min_periods=2,
+        factor_set="expanded",
+    )
+
+    assert "neg_turn_mean_3d" in result.columns
+    assert result["neg_turn_mean_3d"].isna().all()
+    assert "pctchg_align_gap_1d" in result.columns
+    assert result["pctchg_align_gap_1d"].isna().all()
 
 
 def test_cross_sectional_excess_return_labels_are_demeaned_by_date() -> None:

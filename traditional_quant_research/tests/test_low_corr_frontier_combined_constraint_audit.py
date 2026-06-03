@@ -119,6 +119,7 @@ def test_run_low_corr_frontier_combined_constraint_audit_writes_outputs(tmp_path
         years=(2026,),
         final_end_date="2026-06-01",
         horizon=1,
+        factor_set="expanded",
         signals=signals,
         signal_penalty_strengths={
             signals[0]: 0.25,
@@ -165,6 +166,7 @@ def test_run_low_corr_frontier_combined_constraint_audit_writes_outputs(tmp_path
     assert (tmp_path / "research_log.md").exists()
     assert result["snapshot_id"] == "fixture-snapshot"
     assert result["candidate_count"] == 0
+    assert result["factor_set"] == "expanded"
     assert result["include_metrics"] is True
     assert result["include_industry"] is True
     assert result["group_col"] == "industry"
@@ -172,6 +174,7 @@ def test_run_low_corr_frontier_combined_constraint_audit_writes_outputs(tmp_path
     assert result["exposure_constraint_cols"] == ["log_amount_mean_20d_z", "turn_xsec_z"]
     assert result["max_abs_exposure"] == pytest.approx(1.0)
     assert result["signal_penalty_strengths"][signals[0]] == pytest.approx(0.25)
+    assert captured["factor_set"] == "expanded"
     assert captured["include_industry"] is True
     assert captured["include_metrics"] is True
 
@@ -191,6 +194,7 @@ def test_run_low_corr_frontier_combined_constraint_audit_writes_outputs(tmp_path
     assert "participation_p95_10m" in liquidity.columns
     meta = pd.read_csv(run_dir / "combined_constraint_meta.csv")
     assert set(meta["group_col"]) == {"industry"}
+    assert set(meta["factor_set"]) == {"expanded"}
 
 
 def test_run_combined_constraint_audit_wires_prior_fit_weak_year_variants(tmp_path: Path, monkeypatch) -> None:

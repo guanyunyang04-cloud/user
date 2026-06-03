@@ -83,7 +83,7 @@ def test_build_candidate_protocol_signal_panel_can_include_metric_exposures(monk
             "low_corr_factor_columns": ["factor_a_z"],
         }
 
-    def fake_add_baseline_score(frame):
+    def fake_add_baseline_score(frame, **kwargs):
         output = frame.copy()
         output[low_corr_candidate_signal_comparison.BASELINE_SIGNAL] = output["factor_a_z"]
         return output
@@ -125,6 +125,7 @@ def test_build_candidate_protocol_signal_panel_can_include_metric_exposures(monk
         end_date="2026-01-31",
         horizon=1,
         label_mode="raw",
+        factor_set="expanded",
         max_factor_corr=0.75,
         rolling_window=10,
         rolling_min_periods=2,
@@ -132,7 +133,9 @@ def test_build_candidate_protocol_signal_panel_can_include_metric_exposures(monk
     )
 
     panel = built["evaluation_panel"].set_index(["date", "code"])
+    assert captured["factor_set"] == "expanded"
     assert captured["include_metrics"] is True
+    assert built["factor_set"] == "expanded"
     assert "turn_xsec_z" in built["metric_exposure_columns"]
     assert panel.loc[(pd.Timestamp("2026-01-02"), "A"), "turn_xsec_z"] == pytest.approx(-1.0)
     assert panel.loc[(pd.Timestamp("2026-01-02"), "B"), "turn_xsec_z"] == pytest.approx(1.0)
@@ -140,8 +143,10 @@ def test_build_candidate_protocol_signal_panel_can_include_metric_exposures(monk
 
 def test_run_low_corr_candidate_signal_comparison_writes_outputs(tmp_path: Path, monkeypatch) -> None:
     panel = _signal_panel()
+    captured: list[dict[str, object]] = []
 
     def fake_build_candidate_protocol_signal_panel(**kwargs):
+        captured.append(kwargs)
         return {
             "manifest": {"snapshot_id": "fixture-snapshot"},
             "quality": {"failure_count": 0, "missing_bar_rows": 0, "st_rows": 0, "suspended_like_rows": 0},
@@ -172,6 +177,7 @@ def test_run_low_corr_candidate_signal_comparison_writes_outputs(tmp_path: Path,
         years=(2026,),
         final_end_date="2026-06-01",
         horizon=1,
+        factor_set="expanded",
         signals=(low_corr_candidate_signal_comparison.EQUAL_SIGNAL, LOW_CORR_SIGNAL),
         top_n=2,
         rebalance_frequency="daily",
@@ -201,7 +207,9 @@ def test_run_low_corr_candidate_signal_comparison_writes_outputs(tmp_path: Path,
         assert (run_dir / name).exists()
     assert (tmp_path / "research_log.md").exists()
     assert result["snapshot_id"] == "fixture-snapshot"
+    assert result["factor_set"] == "expanded"
     assert result["candidate_count"] == 0
+    assert captured[0]["factor_set"] == "expanded"
 
     aggregate = pd.read_csv(run_dir / "signal_protocol_aggregate.csv")
     assert set(aggregate["signal"]) == {low_corr_candidate_signal_comparison.EQUAL_SIGNAL, LOW_CORR_SIGNAL}
@@ -209,6 +217,7 @@ def test_run_low_corr_candidate_signal_comparison_writes_outputs(tmp_path: Path,
     trades = pd.read_csv(run_dir / "signal_protocol_trades.csv")
     assert set(trades["signal"]) == {low_corr_candidate_signal_comparison.EQUAL_SIGNAL, LOW_CORR_SIGNAL}
     metadata = pd.read_csv(run_dir / "signal_comparison_meta.csv")
+    assert set(metadata["factor_set"]) == {"expanded"}
     assert metadata.iloc[0]["rolling_fallback_rate"] == pytest.approx(0.0)
 
 

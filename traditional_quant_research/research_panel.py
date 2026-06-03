@@ -15,6 +15,8 @@ DEFAULT_HORIZONS = (1, 5, 20)
 DEFAULT_SHORT_WINDOW = 5
 DEFAULT_MEDIUM_WINDOW = 20
 DEFAULT_VOLATILITY_WINDOW = 20
+DEFAULT_FACTOR_SET = "core"
+FACTOR_SETS = ("core", "expanded")
 
 
 def _require_columns(frame: pd.DataFrame, columns: Sequence[str]) -> None:
@@ -41,6 +43,40 @@ def _rolling_std_by_code(frame: pd.DataFrame, column: str, window: int, *, min_p
     )
 
 
+def _rolling_min_by_code(frame: pd.DataFrame, column: str, window: int, *, min_periods: int) -> pd.Series:
+    return (
+        frame.groupby("code", sort=False)[column]
+        .rolling(window=window, min_periods=min_periods)
+        .min()
+        .reset_index(level=0, drop=True)
+    )
+
+
+def _rolling_max_by_code(frame: pd.DataFrame, column: str, window: int, *, min_periods: int) -> pd.Series:
+    return (
+        frame.groupby("code", sort=False)[column]
+        .rolling(window=window, min_periods=min_periods)
+        .max()
+        .reset_index(level=0, drop=True)
+    )
+
+
+def _rolling_corr_by_code(
+    frame: pd.DataFrame,
+    left: str,
+    right: str,
+    window: int,
+    *,
+    min_periods: int,
+) -> pd.Series:
+    return (
+        frame.groupby("code", sort=False)
+        .apply(lambda group: group[left].rolling(window=window, min_periods=min_periods).corr(group[right]), include_groups=False)
+        .reset_index(level=0, drop=True)
+        .sort_index()
+    )
+
+
 def _replace_infinite(frame: pd.DataFrame, columns: Iterable[str]) -> None:
     for column in columns:
         if column in frame.columns:
@@ -55,6 +91,7 @@ def build_factor_label_panel(
     medium_window: int = DEFAULT_MEDIUM_WINDOW,
     volatility_window: int = DEFAULT_VOLATILITY_WINDOW,
     min_periods: int | None = None,
+    factor_set: str | None = DEFAULT_FACTOR_SET,
 ) -> pd.DataFrame:
     """Add baseline factors and future open-to-close return labels.
 
@@ -69,12 +106,14 @@ def build_factor_label_panel(
         raise ValueError("horizons must be positive")
     if short_window <= 0 or medium_window <= 0 or volatility_window <= 0:
         raise ValueError("windows must be positive")
+    selected_factor_set = normalize_factor_set(factor_set)
 
     output = panel.copy()
     output["date"] = pd.to_datetime(output["date"])
     output = output.sort_values(["code", "date"]).reset_index(drop=True)
 
     numeric_columns = ["open", "high", "low", "close", "volume", "amount"]
+    numeric_columns.extend(column for column in ("turn", "pctChg") if column in output.columns)
     for column in numeric_columns:
         output[column] = pd.to_numeric(output[column], errors="coerce")
 
@@ -84,6 +123,7 @@ def build_factor_label_panel(
     output["ret_1d"] = grouped["close"].pct_change(1)
     output[f"ret_{short_window}d"] = grouped["close"].pct_change(short_window)
     output[f"ret_{medium_window}d"] = grouped["close"].pct_change(medium_window)
+    output["reversal_1d"] = -output["ret_1d"]
     output[f"reversal_{short_window}d"] = -output[f"ret_{short_window}d"]
     output[f"momentum_{medium_window}d"] = output[f"ret_{medium_window}d"]
 
@@ -101,6 +141,10 @@ def build_factor_label_panel(
     amount_mean = _rolling_mean_by_code(output, "amount", medium_window, min_periods=min_periods)
     output[f"log_amount_mean_{medium_window}d"] = np.log1p(amount_mean.clip(lower=0))
 
+    short_amount_mean = _rolling_mean_by_code(output, "amount", short_window, min_periods=min_periods)
+    output[f"log_amount_mean_{short_window}d"] = np.log1p(short_amount_mean.clip(lower=0))
+    output[f"log_amount_change_{medium_window}d"] = output[f"log_amount_mean_{medium_window}d"] - grouped[f"log_amount_mean_{medium_window}d"].shift(medium_window)
+
     intraday_range = (output["high"] - output["low"]) / output["close"]
     output[f"amplitude_{medium_window}d"] = (
         intraday_range.groupby(output["code"], sort=False)
@@ -110,12 +154,39 @@ def build_factor_label_panel(
     )
     output[f"neg_amplitude_{medium_window}d"] = -output[f"amplitude_{medium_window}d"]
 
+    rolling_low = _rolling_min_by_code(output, "low", medium_window, min_periods=min_periods)
+    rolling_high = _rolling_max_by_code(output, "high", medium_window, min_periods=min_periods)
+    output[f"range_position_{medium_window}d"] = (output["close"] - rolling_low) / (rolling_high - rolling_low).replace(0.0, np.nan)
+    output[f"volume_price_corr_{medium_window}d"] = _rolling_corr_by_code(
+        output,
+        "ret_1d",
+        "volume",
+        medium_window,
+        min_periods=min_periods,
+    )
+
+    if "turn" in output.columns:
+        turn_mean = _rolling_mean_by_code(output, "turn", medium_window, min_periods=min_periods)
+        output[f"turn_mean_{medium_window}d"] = turn_mean
+        output[f"neg_turn_mean_{medium_window}d"] = -turn_mean
+        output[f"turn_change_{medium_window}d"] = output["turn"] - grouped["turn"].shift(medium_window)
+    else:
+        output[f"turn_mean_{medium_window}d"] = np.nan
+        output[f"neg_turn_mean_{medium_window}d"] = np.nan
+        output[f"turn_change_{medium_window}d"] = np.nan
+
+    if "pctChg" in output.columns:
+        output["pctchg_align_gap_1d"] = output["pctChg"] / 100.0 - output["ret_1d"]
+    else:
+        output["pctchg_align_gap_1d"] = np.nan
+
     next_open = grouped["open"].shift(-1)
     for horizon in horizons:
         future_close = grouped["close"].shift(-horizon)
         output[f"fwd_ret_{horizon}d"] = future_close / next_open - 1.0
 
-    factor_columns = default_factor_columns(
+    factor_columns = factor_columns_for_set(
+        selected_factor_set,
         short_window=short_window,
         medium_window=medium_window,
         volatility_window=volatility_window,
@@ -139,6 +210,71 @@ def default_factor_columns(
         f"log_amount_mean_{medium_window}d",
         f"neg_amplitude_{medium_window}d",
     ]
+
+
+def normalize_factor_set(factor_set: str | None) -> str:
+    selected = (factor_set or DEFAULT_FACTOR_SET).strip().lower()
+    if not selected:
+        selected = DEFAULT_FACTOR_SET
+    if selected not in FACTOR_SETS:
+        raise ValueError(f"unsupported factor_set: {factor_set}")
+    return selected
+
+
+def expanded_factor_columns(
+    *,
+    short_window: int = DEFAULT_SHORT_WINDOW,
+    medium_window: int = DEFAULT_MEDIUM_WINDOW,
+    volatility_window: int = DEFAULT_VOLATILITY_WINDOW,
+) -> list[str]:
+    """Return Baostock-only expanded price/volume/turnover factor columns."""
+
+    return _unique_columns(
+        [
+            *default_factor_columns(
+                short_window=short_window,
+                medium_window=medium_window,
+                volatility_window=volatility_window,
+            ),
+            "reversal_1d",
+            f"log_amount_mean_{short_window}d",
+            f"log_amount_change_{medium_window}d",
+            f"range_position_{medium_window}d",
+            f"volume_price_corr_{medium_window}d",
+            f"neg_turn_mean_{medium_window}d",
+            f"turn_change_{medium_window}d",
+            "pctchg_align_gap_1d",
+        ]
+    )
+
+
+def factor_columns_for_set(
+    factor_set: str | None = DEFAULT_FACTOR_SET,
+    *,
+    short_window: int = DEFAULT_SHORT_WINDOW,
+    medium_window: int = DEFAULT_MEDIUM_WINDOW,
+    volatility_window: int = DEFAULT_VOLATILITY_WINDOW,
+) -> list[str]:
+    selected = normalize_factor_set(factor_set)
+    if selected == "core":
+        return default_factor_columns(
+            short_window=short_window,
+            medium_window=medium_window,
+            volatility_window=volatility_window,
+        )
+    return expanded_factor_columns(
+        short_window=short_window,
+        medium_window=medium_window,
+        volatility_window=volatility_window,
+    )
+
+
+def _unique_columns(columns: Sequence[str]) -> list[str]:
+    output: list[str] = []
+    for column in columns:
+        if column and column not in output:
+            output.append(column)
+    return output
 
 
 def add_cross_sectional_zscores(
@@ -218,15 +354,17 @@ def load_baseline_factor_panel(
     start_date: str | None = None,
     end_date: str | None = None,
     horizons: Sequence[int] = DEFAULT_HORIZONS,
+    factor_set: str | None = DEFAULT_FACTOR_SET,
 ) -> pd.DataFrame:
     """Load the v2 tradeable panel and add first-loop factors and labels."""
 
     panel = load_tradeable_panel(root, start_date=start_date, end_date=end_date)
     if panel.empty:
         return panel
-    factor_panel = build_factor_label_panel(panel, horizons=horizons)
-    factor_panel = add_cross_sectional_zscores(factor_panel, default_factor_columns())
-    return add_baseline_score(factor_panel)
+    factor_panel = build_factor_label_panel(panel, horizons=horizons, factor_set=factor_set)
+    factor_columns = factor_columns_for_set(factor_set)
+    factor_panel = add_cross_sectional_zscores(factor_panel, factor_columns)
+    return add_baseline_score(factor_panel, score_columns=[f"{column}_z" for column in factor_columns])
 
 
 def panel_summary(frame: pd.DataFrame) -> dict[str, Any]:

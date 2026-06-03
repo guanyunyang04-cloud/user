@@ -42,6 +42,7 @@ from traditional_quant_research.experiments.multifactor_baseline import (
     summarize_horizon_trade_table,
 )
 from traditional_quant_research.horizon_backtest import horizon_aligned_top_n_backtest
+from traditional_quant_research.research_panel import DEFAULT_FACTOR_SET, FACTOR_SETS, normalize_factor_set
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/low_corr_frontier_combined_constraint_audit")
@@ -87,6 +88,7 @@ def run_low_corr_frontier_combined_constraint_audit(
     final_end_date: str | None = DEFAULT_FINAL_END_DATE,
     horizon: int = DEFAULT_HORIZON,
     label_mode: str = "raw",
+    factor_set: str | None = DEFAULT_FACTOR_SET,
     max_factor_corr: float = DEFAULT_MAX_FACTOR_CORR,
     rolling_window: int = DEFAULT_ROLLING_WINDOW,
     rolling_min_periods: int = DEFAULT_ROLLING_MIN_PERIODS,
@@ -123,6 +125,7 @@ def run_low_corr_frontier_combined_constraint_audit(
         raise ValueError("horizon must be positive")
     if label_mode not in LABEL_MODES:
         raise ValueError(f"unsupported label_mode: {label_mode}")
+    selected_factor_set = normalize_factor_set(factor_set)
     selected_top_n = _normalize_int_tuple(top_n_values if top_n_values is not None else (top_n,), name="top_n_values")
     if any(value <= 0 for value in selected_top_n):
         raise ValueError("top_n_values must be positive")
@@ -180,6 +183,7 @@ def run_low_corr_frontier_combined_constraint_audit(
             end_date=windows["end_date"],
             horizon=horizon,
             label_mode=label_mode,
+            factor_set=selected_factor_set,
             max_factor_corr=max_factor_corr,
             rolling_window=rolling_window,
             rolling_min_periods=rolling_min_periods,
@@ -380,6 +384,7 @@ def run_low_corr_frontier_combined_constraint_audit(
                 "fit_end_date": windows["fit_end_date"],
                 "start_date": windows["start_date"],
                 "end_date": windows["end_date"],
+                "factor_set": selected_factor_set,
                 "available_signals": json.dumps(list(selected_signals), ensure_ascii=False),
                 "top_n_values": json.dumps(list(selected_top_n), ensure_ascii=False),
                 "constraint_variants": ",".join(selected_variants),
@@ -415,6 +420,7 @@ def run_low_corr_frontier_combined_constraint_audit(
         "final_end_date": final_end_date,
         "horizon": int(horizon),
         "label_mode": label_mode,
+        "factor_set": selected_factor_set,
         "rolling_window": int(rolling_window),
         "rolling_min_periods": int(rolling_min_periods),
         "signals": list(selected_signals),
@@ -1077,6 +1083,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--final-end-date", default=DEFAULT_FINAL_END_DATE)
     parser.add_argument("--horizon", type=int, default=DEFAULT_HORIZON)
     parser.add_argument("--label-mode", choices=LABEL_MODES, default="raw")
+    parser.add_argument("--factor-set", choices=FACTOR_SETS, default=DEFAULT_FACTOR_SET)
     parser.add_argument("--max-factor-corr", type=float, default=DEFAULT_MAX_FACTOR_CORR)
     parser.add_argument("--rolling-window", type=int, default=DEFAULT_ROLLING_WINDOW)
     parser.add_argument("--rolling-min-periods", type=int, default=DEFAULT_ROLLING_MIN_PERIODS)
@@ -1115,6 +1122,7 @@ def main() -> None:
         final_end_date=args.final_end_date,
         horizon=args.horizon,
         label_mode=args.label_mode,
+        factor_set=args.factor_set,
         max_factor_corr=args.max_factor_corr,
         rolling_window=args.rolling_window,
         rolling_min_periods=args.rolling_min_periods,

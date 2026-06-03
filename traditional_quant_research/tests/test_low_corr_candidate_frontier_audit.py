@@ -139,8 +139,10 @@ def test_summarize_candidate_audit_adds_fee_stress_metrics() -> None:
 
 def test_run_low_corr_candidate_frontier_audit_writes_outputs(tmp_path: Path, monkeypatch) -> None:
     panel = _audit_panel()
+    captured: list[dict[str, object]] = []
 
     def fake_build_low_corr_signal_panel(**kwargs):
+        captured.append(kwargs)
         return {
             "manifest": {"snapshot_id": "fixture-snapshot"},
             "quality": {"failure_count": 0, "missing_bar_rows": 0, "st_rows": 0, "suspended_like_rows": 0},
@@ -167,6 +169,7 @@ def test_run_low_corr_candidate_frontier_audit_writes_outputs(tmp_path: Path, mo
         years=(2026,),
         final_end_date="2026-06-01",
         horizon=1,
+        factor_set="expanded",
         top_n=2,
         rebalance_frequency="daily",
         buffer_multiplier=1.0,
@@ -197,7 +200,9 @@ def test_run_low_corr_candidate_frontier_audit_writes_outputs(tmp_path: Path, mo
     assert (tmp_path / "research_log.md").exists()
 
     assert result["snapshot_id"] == "fixture-snapshot"
+    assert result["factor_set"] == "expanded"
     assert result["candidate_count"] == 0
+    assert captured[0]["factor_set"] == "expanded"
     aggregate = pd.read_csv(run_dir / "candidate_protocol_aggregate.csv")
     assert sorted(aggregate["fee_bps"].tolist()) == [0.0, 30.0]
     assert "mean_cost_drag_vs_0bps" in aggregate.columns
@@ -205,3 +210,5 @@ def test_run_low_corr_candidate_frontier_audit_writes_outputs(tmp_path: Path, mo
     assert set(holdings["code"]).issubset({"600000.SH", "000001.SZ", "000002.SZ"})
     liquidity = pd.read_csv(run_dir / "candidate_trade_liquidity.csv")
     assert "participation_mean_10m" in liquidity.columns
+    meta = pd.read_csv(run_dir / "candidate_low_corr_meta.csv")
+    assert set(meta["factor_set"]) == {"expanded"}

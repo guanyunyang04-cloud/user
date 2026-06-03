@@ -226,6 +226,7 @@ def test_run_frontier_personal_protocol_grid_writes_artifacts(tmp_path: Path, mo
     result = frontier_personal_protocol_grid.run_frontier_personal_protocol_grid(
         years=(2017, 2018),
         horizon=20,
+        factor_set="expanded",
         top_n_values=(20, 50),
         signals=("multifactor_rolling_ic_weighted_score", "multifactor_low_corr_rank_score"),
         signal_penalty_strengths="multifactor_rolling_ic_weighted_score=0.25,multifactor_low_corr_rank_score=1.0",
@@ -243,11 +244,13 @@ def test_run_frontier_personal_protocol_grid_writes_artifacts(tmp_path: Path, mo
     assert result["personal_backtest_candidate_count"] == 1
     assert result["personal_paper_candidate_count"] == 0
     assert result["strategy_candidate_count"] == 0
+    assert result["factor_set"] == "expanded"
     assert result["best_top_n"] == 20
     assert len(combined_calls) == 2
     assert len(gate_calls) == 1
     assert {tuple(call["years"]) for call in combined_calls} == {(2017,), (2018,)}
     assert {tuple(call["top_n_values"]) for call in combined_calls} == {(20, 50)}
+    assert {call["factor_set"] for call in combined_calls} == {"expanded"}
     assert (run_dir / "personal_protocol_grid_progress.csv").exists()
     progress = pd.read_csv(run_dir / "personal_protocol_grid_progress.csv")
     assert set(progress["status"]) == {"completed"}
@@ -259,6 +262,8 @@ def test_run_frontier_personal_protocol_grid_writes_artifacts(tmp_path: Path, mo
     ledger = pd.read_csv(run_dir / "personal_protocol_grid_ledger.csv")
     assert set(ledger["top_n"]) == {20, 50}
     assert PERSONAL_BACKTEST_PROMOTION_LEVEL in set(ledger["promotion_level"])
+    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary["factor_set"] == "expanded"
 
 
 def test_protocol_grid_rejects_invalid_top_n() -> None:
@@ -351,6 +356,7 @@ def test_run_yearly_combined_constraint_grid_resumes_completed_year(tmp_path: Pa
         final_end_date="2026-06-01",
         horizon=20,
         label_mode="raw",
+        factor_set="expanded",
         max_factor_corr=0.7,
         rolling_window=120,
         rolling_min_periods=30,
@@ -381,6 +387,7 @@ def test_run_yearly_combined_constraint_grid_resumes_completed_year(tmp_path: Pa
 
     assert [result["eval_year"] for result in results] == [2017, 2018]
     assert {tuple(call["years"]) for call in combined_calls} == {(2018,)}
+    assert {call["factor_set"] for call in combined_calls} == {"expanded"}
     progress = pd.read_csv(progress_path)
     assert progress["status"].tolist() == ["completed", "completed"]
     assert "combined_grid_2017" in progress.loc[progress["eval_year"].eq(2017), "combined_run_dir"].iloc[0]

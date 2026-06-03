@@ -48,12 +48,17 @@ from .multifactor import (
 )
 from .portfolio import equal_weight, normalize_long_only, rank_long_short
 from .research_panel import (
+    DEFAULT_FACTOR_SET,
+    FACTOR_SETS,
     add_baseline_score,
     add_cross_sectional_excess_return_labels,
     add_cross_sectional_zscores,
     build_factor_label_panel,
     default_factor_columns,
+    expanded_factor_columns,
+    factor_columns_for_set,
     load_baseline_factor_panel,
+    normalize_factor_set,
     panel_summary,
 )
 from .size_source import (
@@ -73,6 +78,8 @@ from .universe import (
 
 __all__ = [
     "BacktestResult",
+    "DEFAULT_FACTOR_SET",
+    "FACTOR_SETS",
     "HorizonBacktestResult",
     "add_baseline_score",
     "add_cross_sectional_zscores",
@@ -91,7 +98,9 @@ __all__ = [
     "build_factor_label_panel",
     "default_factor_columns",
     "equal_weight",
+    "expanded_factor_columns",
     "factor_coverage",
+    "factor_columns_for_set",
     "filter_sh_sz_a_shares",
     "filter_sh_sz_mainboard_a_shares",
     "horizon_aligned_top_n_backtest",
@@ -120,6 +129,7 @@ __all__ = [
     "max_drawdown",
     "mean_daily_factor_correlation",
     "neutralize_factors_by_date",
+    "normalize_factor_set",
     "normalize_project_symbol",
     "momentum",
     "moving_average",

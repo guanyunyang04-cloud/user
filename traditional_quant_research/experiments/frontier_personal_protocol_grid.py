@@ -49,6 +49,7 @@ from traditional_quant_research.experiments.low_corr_frontier_combined_constrain
     summarize_combined_constraint_audit,
     summarize_combined_industry_exposure,
 )
+from traditional_quant_research.research_panel import DEFAULT_FACTOR_SET, FACTOR_SETS, normalize_factor_set
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/frontier_personal_protocol_grid")
@@ -67,6 +68,7 @@ def run_frontier_personal_protocol_grid(
     final_end_date: str | None = DEFAULT_FINAL_END_DATE,
     horizon: int = DEFAULT_HORIZON,
     label_mode: str = "raw",
+    factor_set: str | None = DEFAULT_FACTOR_SET,
     max_factor_corr: float = DEFAULT_MAX_FACTOR_CORR,
     rolling_window: int = DEFAULT_ROLLING_WINDOW,
     rolling_min_periods: int = DEFAULT_ROLLING_MIN_PERIODS,
@@ -121,6 +123,7 @@ def run_frontier_personal_protocol_grid(
         raise ValueError("horizon must be positive")
     if label_mode not in LABEL_MODES:
         raise ValueError(f"unsupported label_mode: {label_mode}")
+    selected_factor_set = normalize_factor_set(factor_set)
 
     selected_signals = _parse_str_values(signals, name="signals")
     fee_values = _parse_float_values(fee_bps_values, name="fee_bps_values")
@@ -145,6 +148,7 @@ def run_frontier_personal_protocol_grid(
         final_end_date=final_end_date,
         horizon=horizon,
         label_mode=label_mode,
+        factor_set=selected_factor_set,
         max_factor_corr=max_factor_corr,
         rolling_window=rolling_window,
         rolling_min_periods=rolling_min_periods,
@@ -180,6 +184,7 @@ def run_frontier_personal_protocol_grid(
         final_end_date=final_end_date,
         horizon=horizon,
         label_mode=label_mode,
+        factor_set=selected_factor_set,
         rolling_window=rolling_window,
         rolling_min_periods=rolling_min_periods,
         signals=selected_signals,
@@ -240,6 +245,7 @@ def run_frontier_personal_protocol_grid(
         years=selected_years,
         final_end_date=final_end_date,
         horizon=horizon,
+        factor_set=selected_factor_set,
         rebalance_frequency=rebalance_frequency,
         buffer_multiplier=buffer_multiplier,
         top_n_values=selected_top_n,
@@ -267,6 +273,7 @@ def run_yearly_combined_constraint_grid(
     final_end_date: str | None,
     horizon: int,
     label_mode: str,
+    factor_set: str = DEFAULT_FACTOR_SET,
     max_factor_corr: float,
     rolling_window: int,
     rolling_min_periods: int,
@@ -332,6 +339,7 @@ def run_yearly_combined_constraint_grid(
                 final_end_date=final_end_date,
                 horizon=horizon,
                 label_mode=label_mode,
+                factor_set=factor_set,
                 max_factor_corr=max_factor_corr,
                 rolling_window=rolling_window,
                 rolling_min_periods=rolling_min_periods,
@@ -391,6 +399,7 @@ def merge_yearly_combined_constraint_runs(
     final_end_date: str | None,
     horizon: int,
     label_mode: str,
+    factor_set: str = DEFAULT_FACTOR_SET,
     rolling_window: int,
     rolling_min_periods: int,
     signals: Sequence[str],
@@ -441,6 +450,7 @@ def merge_yearly_combined_constraint_runs(
         "final_end_date": final_end_date,
         "horizon": int(horizon),
         "label_mode": label_mode,
+        "factor_set": factor_set,
         "rolling_window": int(rolling_window),
         "rolling_min_periods": int(rolling_min_periods),
         "signals": list(signals),
@@ -682,6 +692,7 @@ def summarize_personal_protocol_grid(
     years: Sequence[int],
     final_end_date: str | None,
     horizon: int,
+    factor_set: str = DEFAULT_FACTOR_SET,
     rebalance_frequency: str,
     buffer_multiplier: float,
     top_n_values: Sequence[int],
@@ -704,6 +715,7 @@ def summarize_personal_protocol_grid(
         "years": [int(value) for value in years],
         "final_end_date": final_end_date,
         "horizon": int(horizon),
+        "factor_set": factor_set,
         "rebalance_frequency": rebalance_frequency,
         "buffer_multiplier": float(buffer_multiplier),
         "top_n_values": [int(value) for value in top_n_values],
@@ -951,6 +963,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--final-end-date", default=DEFAULT_FINAL_END_DATE)
     parser.add_argument("--horizon", type=int, default=DEFAULT_HORIZON)
     parser.add_argument("--label-mode", choices=LABEL_MODES, default="raw")
+    parser.add_argument("--factor-set", choices=FACTOR_SETS, default=DEFAULT_FACTOR_SET)
     parser.add_argument("--max-factor-corr", type=float, default=DEFAULT_MAX_FACTOR_CORR)
     parser.add_argument("--rolling-window", type=int, default=DEFAULT_ROLLING_WINDOW)
     parser.add_argument("--rolling-min-periods", type=int, default=DEFAULT_ROLLING_MIN_PERIODS)
@@ -1001,6 +1014,7 @@ def main() -> None:
         final_end_date=args.final_end_date,
         horizon=args.horizon,
         label_mode=args.label_mode,
+        factor_set=args.factor_set,
         max_factor_corr=args.max_factor_corr,
         rolling_window=args.rolling_window,
         rolling_min_periods=args.rolling_min_periods,

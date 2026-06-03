@@ -30,10 +30,13 @@ from traditional_quant_research.multifactor import (
     select_low_correlation_factors,
 )
 from traditional_quant_research.research_panel import (
+    DEFAULT_FACTOR_SET,
+    FACTOR_SETS,
     add_cross_sectional_excess_return_labels,
     add_cross_sectional_zscores,
     build_factor_label_panel,
-    default_factor_columns,
+    factor_columns_for_set,
+    normalize_factor_set,
     panel_summary,
 )
 
@@ -62,6 +65,7 @@ def build_low_corr_signal_panel(
     end_date: str,
     horizon: int,
     label_mode: str,
+    factor_set: str | None = DEFAULT_FACTOR_SET,
     max_factor_corr: float,
     include_industry: bool = False,
     include_metrics: bool = False,
@@ -70,6 +74,7 @@ def build_low_corr_signal_panel(
 
     if label_mode not in LABEL_MODES:
         raise ValueError(f"unsupported label_mode: {label_mode}")
+    selected_factor_set = normalize_factor_set(factor_set)
     manifest = load_pit_manifest(root)
     quality = load_quality_report(root)
     raw_panel = load_tradeable_panel(
@@ -79,9 +84,9 @@ def build_low_corr_signal_panel(
         include_industry=include_industry,
         include_metrics=include_metrics,
     )
-    factor_panel = build_factor_label_panel(raw_panel, horizons=tuple(sorted({1, 5, 20, horizon})))
+    factor_panel = build_factor_label_panel(raw_panel, horizons=tuple(sorted({1, 5, 20, horizon})), factor_set=selected_factor_set)
     factor_panel = add_cross_sectional_excess_return_labels(factor_panel, horizons=(horizon,))
-    raw_factor_columns = default_factor_columns()
+    raw_factor_columns = factor_columns_for_set(selected_factor_set)
     factor_panel = add_cross_sectional_zscores(factor_panel, raw_factor_columns)
     signal_columns = [f"{column}_z" for column in raw_factor_columns]
     label_col = f"fwd_ret_{horizon}d" if label_mode == "raw" else f"xsec_excess_ret_{horizon}d"
@@ -116,6 +121,7 @@ def build_low_corr_signal_panel(
     return {
         "manifest": manifest,
         "quality": quality,
+        "factor_set": selected_factor_set,
         "factor_panel": factor_panel,
         "fit_panel": fit_panel,
         "evaluation_panel": evaluation_panel,
@@ -275,6 +281,7 @@ def run_low_corr_candidate_frontier_audit(
     final_end_date: str | None = DEFAULT_FINAL_END_DATE,
     horizon: int = DEFAULT_HORIZON,
     label_mode: str = "raw",
+    factor_set: str | None = DEFAULT_FACTOR_SET,
     max_factor_corr: float = DEFAULT_MAX_FACTOR_CORR,
     top_n: int = DEFAULT_TOP_N,
     rebalance_frequency: str = DEFAULT_REBALANCE_FREQUENCY,
@@ -293,6 +300,7 @@ def run_low_corr_candidate_frontier_audit(
         raise ValueError("years must not be empty")
     if horizon <= 0:
         raise ValueError("horizon must be positive")
+    selected_factor_set = normalize_factor_set(factor_set)
     if top_n <= 0:
         raise ValueError("top_n must be positive")
     if buffer_multiplier < 1.0:
@@ -326,6 +334,7 @@ def run_low_corr_candidate_frontier_audit(
             end_date=windows["end_date"],
             horizon=horizon,
             label_mode=label_mode,
+            factor_set=selected_factor_set,
             max_factor_corr=max_factor_corr,
         )
         manifest = built["manifest"]
@@ -412,6 +421,7 @@ def run_low_corr_candidate_frontier_audit(
                 "fit_end_date": windows["fit_end_date"],
                 "start_date": windows["start_date"],
                 "end_date": windows["end_date"],
+                "factor_set": selected_factor_set,
                 "low_corr_factor_columns": json.dumps(built["low_corr_factor_columns"], ensure_ascii=False),
                 "evaluation_rows": int(len(evaluation_panel)),
                 "evaluation_dates": int(evaluation_panel["date"].nunique()) if "date" in evaluation_panel.columns else 0,
@@ -435,6 +445,7 @@ def run_low_corr_candidate_frontier_audit(
         "years": [int(year) for year in years],
         "final_end_date": final_end_date,
         "horizon": int(horizon),
+        "factor_set": selected_factor_set,
         "rebalance_frequency": rebalance_frequency,
         "top_n": int(top_n),
         "buffer_multiplier": float(buffer_multiplier),
@@ -680,6 +691,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--final-end-date", default=DEFAULT_FINAL_END_DATE)
     parser.add_argument("--horizon", type=int, default=DEFAULT_HORIZON)
     parser.add_argument("--label-mode", choices=LABEL_MODES, default="raw")
+    parser.add_argument("--factor-set", choices=FACTOR_SETS, default=DEFAULT_FACTOR_SET)
     parser.add_argument("--max-factor-corr", type=float, default=DEFAULT_MAX_FACTOR_CORR)
     parser.add_argument("--top-n", type=int, default=DEFAULT_TOP_N)
     parser.add_argument("--frequency", default=DEFAULT_REBALANCE_FREQUENCY)
@@ -702,6 +714,7 @@ def main() -> None:
         final_end_date=args.final_end_date,
         horizon=args.horizon,
         label_mode=args.label_mode,
+        factor_set=args.factor_set,
         max_factor_corr=args.max_factor_corr,
         top_n=args.top_n,
         rebalance_frequency=args.frequency,
