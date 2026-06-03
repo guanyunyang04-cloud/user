@@ -1,32 +1,40 @@
 # v2.2 Daily Size Audit
 
-- run_id: `v2_daily_size_audit_20260603_103517`
+- run_id: `v2_daily_size_audit_20260603_175118`
 - snapshot_id: `baostock_v2_pit_20160101_20260601_industry_metrics_month_start_20260603`
 - status: `daily_size_absent`
 - universe_rows: `7451610`
 - tradeable_rows: `7031085`
 - size_rows: `0`
 - min_tradeable_coverage: `0.000000`
+- min_required_tradeable_coverage: `0.000000`
+- min_required_positive_rate: `0.000000`
 - required_units_present: `False`
+- source_grade_ok: `False`
+- current_cross_check_ok: `False`
 - daily_size_ready_for_research: `False`
 - candidate_count: `0`
 
 ## Field Summary
 
-| scope     | field            |   expected_rows |   size_row_coverage |   non_null_rows |   coverage_rate |   finite_rows |   positive_rows |   mean |   min |   max |
-|:----------|:-----------------|----------------:|--------------------:|----------------:|----------------:|--------------:|----------------:|-------:|------:|------:|
-| all       | total_market_cap |         7451610 |                   0 |               0 |               0 |             0 |               0 |    nan |   nan |   nan |
-| all       | float_market_cap |         7451610 |                   0 |               0 |               0 |             0 |               0 |    nan |   nan |   nan |
-| all       | total_share      |         7451610 |                   0 |               0 |               0 |             0 |               0 |    nan |   nan |   nan |
-| all       | float_share      |         7451610 |                   0 |               0 |               0 |             0 |               0 |    nan |   nan |   nan |
-| all       | free_share       |         7451610 |                   0 |               0 |               0 |             0 |               0 |    nan |   nan |   nan |
-| tradeable | total_market_cap |         7031085 |                   0 |               0 |               0 |             0 |               0 |    nan |   nan |   nan |
-| tradeable | float_market_cap |         7031085 |                   0 |               0 |               0 |             0 |               0 |    nan |   nan |   nan |
-| tradeable | total_share      |         7031085 |                   0 |               0 |               0 |             0 |               0 |    nan |   nan |   nan |
-| tradeable | float_share      |         7031085 |                   0 |               0 |               0 |             0 |               0 |    nan |   nan |   nan |
-| tradeable | free_share       |         7031085 |                   0 |               0 |               0 |             0 |               0 |    nan |   nan |   nan |
+| scope     | field            |   expected_rows |   size_row_coverage |   non_null_rows |   coverage_rate |   finite_rows |   positive_rows |   positive_rate |   mean |   min |   max |
+|:----------|:-----------------|----------------:|--------------------:|----------------:|----------------:|--------------:|----------------:|----------------:|-------:|------:|------:|
+| all       | total_market_cap |         7451610 |                   0 |               0 |               0 |             0 |               0 |               0 |    nan |   nan |   nan |
+| all       | float_market_cap |         7451610 |                   0 |               0 |               0 |             0 |               0 |               0 |    nan |   nan |   nan |
+| all       | total_share      |         7451610 |                   0 |               0 |               0 |             0 |               0 |               0 |    nan |   nan |   nan |
+| all       | float_share      |         7451610 |                   0 |               0 |               0 |             0 |               0 |               0 |    nan |   nan |   nan |
+| all       | free_share       |         7451610 |                   0 |               0 |               0 |             0 |               0 |               0 |    nan |   nan |   nan |
+| tradeable | total_market_cap |         7031085 |                   0 |               0 |               0 |             0 |               0 |               0 |    nan |   nan |   nan |
+| tradeable | float_market_cap |         7031085 |                   0 |               0 |               0 |             0 |               0 |               0 |    nan |   nan |   nan |
+| tradeable | total_share      |         7031085 |                   0 |               0 |               0 |             0 |               0 |               0 |    nan |   nan |   nan |
+| tradeable | float_share      |         7031085 |                   0 |               0 |               0 |             0 |               0 |               0 |    nan |   nan |   nan |
+| tradeable | free_share       |         7031085 |                   0 |               0 |               0 |             0 |               0 |               0 |    nan |   nan |   nan |
 
 ## Source/Unit Summary
+
+_No rows._
+
+## Current Cross-Check
 
 _No rows._
 

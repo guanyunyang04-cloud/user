@@ -32,7 +32,7 @@ def test_daily_size_audit_reports_tradeable_coverage_and_units() -> None:
                 "free_share": 7000.0,
                 "market_cap_unit": "10k CNY",
                 "share_unit": "10k shares",
-                "source": "fixture",
+                "source": "tushare.daily_basic",
             },
             {
                 "date": pd.Timestamp("2026-01-02"),
@@ -44,7 +44,7 @@ def test_daily_size_audit_reports_tradeable_coverage_and_units() -> None:
                 "free_share": None,
                 "market_cap_unit": "10k CNY",
                 "share_unit": "10k shares",
-                "source": "fixture",
+                "source": "tushare.daily_basic",
             },
         ]
     )
@@ -67,7 +67,9 @@ def test_daily_size_audit_reports_tradeable_coverage_and_units() -> None:
     assert field_summary.loc[("tradeable", "float_market_cap"), "coverage_rate"] == 0.5
     assert unit_summary["market_cap_unit"].tolist() == ["10k CNY"]
     assert summary["min_tradeable_coverage"] == 0.5
+    assert summary["min_required_tradeable_coverage"] == 0.5
     assert summary["required_units_present"] is True
+    assert summary["source_grade_ok"] is True
     assert summary["daily_size_ready_for_research"] is False
     assert summary["candidate_count"] == 0
 
@@ -93,6 +95,7 @@ def test_run_daily_size_audit_writes_absent_table_artifacts(tmp_path: Path) -> N
     assert (run_dir / "yearly_summary.csv").exists()
     assert (run_dir / "daily_summary.csv").exists()
     assert (run_dir / "source_unit_summary.csv").exists()
+    assert (run_dir / "current_cross_check_summary.csv").exists()
     assert (run_dir / "summary.md").exists()
 
 
@@ -117,7 +120,7 @@ def test_run_daily_size_audit_marks_full_fixture_ready(tmp_path: Path) -> None:
                 "free_share": 7000.0,
                 "market_cap_unit": "10k CNY",
                 "share_unit": "10k shares",
-                "source": "fixture",
+                "source": "tushare.daily_basic",
                 "source_trade_date": "20260102",
             },
         ]
@@ -133,4 +136,92 @@ def test_run_daily_size_audit_marks_full_fixture_ready(tmp_path: Path) -> None:
     assert result["status"] == "daily_size_missingness_audit"
     assert result["daily_size_ready_for_research"] is True
     assert result["min_tradeable_coverage"] == 1.0
+    assert result["source_grade_ok"] is True
+    assert result["current_cross_check_ok"] is True
     assert (tmp_path / "size_audit.md").exists()
+
+
+def test_run_daily_size_audit_blocks_proxy_source_even_with_coverage(tmp_path: Path) -> None:
+    root = tmp_path / "snapshot"
+    root.mkdir()
+    (root / "manifest.json").write_text(json.dumps({"snapshot_id": "fixture"}), encoding="utf-8")
+    pd.DataFrame(
+        [
+            {"date": pd.Timestamp("2026-01-02"), "code": "600000.SH", "is_tradeable": True},
+        ]
+    ).to_parquet(root / "daily_universe.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "date": pd.Timestamp("2026-01-02"),
+                "code": "600000.SH",
+                "total_market_cap": 1000000.0,
+                "float_market_cap": 1000000.0,
+                "total_share": None,
+                "float_share": None,
+                "free_share": None,
+                "market_cap_unit": "CNY proxy",
+                "share_unit": "not_applicable",
+                "source": "proxy.amount",
+                "source_trade_date": "20260102",
+            },
+        ]
+    ).to_parquet(root / "daily_size.parquet", index=False)
+
+    result = run_v2_daily_size_audit(root=root, output_dir=tmp_path / "output")
+
+    assert result["min_required_tradeable_coverage"] == 1.0
+    assert result["source_grade_ok"] is False
+    assert result["required_units_present"] is False
+    assert result["current_cross_check_ok"] is False
+    assert result["daily_size_ready_for_research"] is False
+
+
+def test_run_daily_size_audit_requires_cross_check_for_reconstructed_source(tmp_path: Path) -> None:
+    root = tmp_path / "snapshot"
+    root.mkdir()
+    (root / "manifest.json").write_text(json.dumps({"snapshot_id": "fixture"}), encoding="utf-8")
+    pd.DataFrame(
+        [
+            {"date": pd.Timestamp("2026-01-02"), "code": "600000.SH", "is_tradeable": True},
+            {"date": pd.Timestamp("2026-01-02"), "code": "000001.SZ", "is_tradeable": True},
+        ]
+    ).to_parquet(root / "daily_universe.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "date": pd.Timestamp("2026-01-02"),
+                "code": code,
+                "total_market_cap": 1000000.0,
+                "float_market_cap": 800000.0,
+                "total_share": 10000.0,
+                "float_share": 8000.0,
+                "free_share": 7000.0,
+                "market_cap_unit": "CNY",
+                "share_unit": "shares",
+                "source": "akshare.cninfo_reconstructed",
+                "source_trade_date": "20260102",
+            }
+            for code in ["600000.SH", "000001.SZ"]
+        ]
+    ).to_parquet(root / "daily_size.parquet", index=False)
+
+    missing_cross_check = run_v2_daily_size_audit(root=root, output_dir=tmp_path / "missing_output")
+
+    assert missing_cross_check["source_grade_ok"] is True
+    assert missing_cross_check["current_cross_check_ok"] is False
+    assert missing_cross_check["daily_size_ready_for_research"] is False
+
+    pd.DataFrame(
+        [
+            {"source": "akshare.cninfo_reconstructed", "field": "total_market_cap", "abs_relative_diff": 0.01},
+            {"source": "akshare.cninfo_reconstructed", "field": "total_market_cap", "abs_relative_diff": 0.04},
+            {"source": "akshare.cninfo_reconstructed", "field": "float_market_cap", "abs_relative_diff": 0.03},
+            {"source": "akshare.cninfo_reconstructed", "field": "float_market_cap", "abs_relative_diff": 0.08},
+        ]
+    ).to_csv(root / "daily_size_current_cross_check.csv", index=False)
+
+    with_cross_check = run_v2_daily_size_audit(root=root, output_dir=tmp_path / "checked_output")
+
+    assert with_cross_check["current_cross_check_ok"] is True
+    assert with_cross_check["daily_size_ready_for_research"] is True

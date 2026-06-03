@@ -17,8 +17,18 @@ from .dataset_v2 import DAILY_SIZE_COLUMNS
 
 
 TUSHARE_DAILY_BASIC_SOURCE = "tushare.daily_basic"
+AKSHARE_CNINFO_RECONSTRUCTED_SOURCE = "akshare.cninfo_reconstructed"
+PROXY_AMOUNT_SOURCE = "proxy.amount"
 TUSHARE_MARKET_CAP_UNIT = "10k CNY"
 TUSHARE_SHARE_UNIT = "10k shares"
+RECONSTRUCTED_MARKET_CAP_UNIT = "CNY"
+RECONSTRUCTED_SHARE_UNIT = "shares"
+PROXY_MARKET_CAP_UNIT = "CNY proxy"
+PROXY_SHARE_UNIT = "not_applicable"
+OFFICIAL_PIT_DAILY_GRADE = "official_pit_daily"
+FREE_RECONSTRUCTED_GRADE = "free_reconstructed"
+PROXY_ONLY_GRADE = "proxy_only"
+UNKNOWN_SOURCE_GRADE = "unknown"
 TUSHARE_DAILY_BASIC_SIZE_FIELDS = (
     "ts_code",
     "trade_date",
@@ -44,6 +54,18 @@ _DAILY_SIZE_NUMERIC_COLUMNS = [
     "float_share",
     "free_share",
 ]
+
+_CNINFO_DATE_ALIASES = ("变动日期", "公告日期", "截止日期", "日期", "change_date", "date", "end_date")
+_CNINFO_TOTAL_SHARE_ALIASES = ("总股本", "总股本(股)", "总股本（股）", "total_share", "total_shares")
+_CNINFO_FLOAT_SHARE_ALIASES = (
+    "流通股",
+    "流通股本",
+    "流通A股",
+    "无限售流通股",
+    "float_share",
+    "float_shares",
+)
+_CNINFO_FREE_SHARE_ALIASES = ("自由流通股", "free_share", "free_shares")
 
 
 def standardize_tushare_daily_basic_size(
@@ -75,6 +97,149 @@ def standardize_tushare_daily_basic_size(
     output["share_unit"] = TUSHARE_SHARE_UNIT
     output["source"] = source
     return standardize_daily_size_frame(output)
+
+
+def standardize_akshare_cninfo_reconstructed_size(
+    frame: pd.DataFrame | None,
+    *,
+    source: str = AKSHARE_CNINFO_RECONSTRUCTED_SOURCE,
+) -> pd.DataFrame:
+    """Map reconstructed free-source rows into the daily_size contract.
+
+    Expected input rows are date/code/close plus share-base columns in shares.
+    Market-cap columns may be supplied directly; otherwise they are computed
+    from unadjusted close * share count.
+    """
+
+    if frame is None or frame.empty:
+        return empty_daily_size_frame()
+
+    raw = frame.copy()
+    for column in ["date", "code", "close", "total_share", "float_share", "free_share", "source_trade_date"]:
+        if column not in raw.columns:
+            raw[column] = pd.NA
+    raw["close"] = pd.to_numeric(raw["close"], errors="coerce")
+    for column in ["total_share", "float_share", "free_share"]:
+        raw[column] = pd.to_numeric(raw[column], errors="coerce")
+
+    output = pd.DataFrame()
+    output["date"] = pd.to_datetime(raw["date"], errors="coerce")
+    output["code"] = raw["code"].map(normalize_project_symbol)
+    output["total_share"] = raw["total_share"]
+    output["float_share"] = raw["float_share"]
+    output["free_share"] = raw["free_share"]
+    output["total_market_cap"] = _numeric_raw_column(raw, "total_market_cap")
+    output["float_market_cap"] = _numeric_raw_column(raw, "float_market_cap")
+    output.loc[output["total_market_cap"].isna(), "total_market_cap"] = (
+        raw.loc[output["total_market_cap"].isna(), "close"] * output.loc[output["total_market_cap"].isna(), "total_share"]
+    )
+    output.loc[output["float_market_cap"].isna(), "float_market_cap"] = (
+        raw.loc[output["float_market_cap"].isna(), "close"] * output.loc[output["float_market_cap"].isna(), "float_share"]
+    )
+    output["market_cap_unit"] = RECONSTRUCTED_MARKET_CAP_UNIT
+    output["share_unit"] = RECONSTRUCTED_SHARE_UNIT
+    output["source"] = source
+    output["source_trade_date"] = raw["source_trade_date"].where(raw["source_trade_date"].notna(), raw["date"]).map(_normalize_yyyymmdd)
+    return standardize_daily_size_frame(output)
+
+
+def standardize_proxy_amount_daily_size(
+    frame: pd.DataFrame | None,
+    *,
+    source: str = PROXY_AMOUNT_SOURCE,
+) -> pd.DataFrame:
+    """Create a proxy-only daily_size-shaped table from traded amount.
+
+    This is intentionally shaped like daily_size so downstream exposure tools
+    can read it, but the source grade is always proxy_only and must not pass
+    promotion gates.
+    """
+
+    if frame is None or frame.empty:
+        return empty_daily_size_frame()
+    raw = frame.copy()
+    for column in ["date", "code", "amount"]:
+        if column not in raw.columns:
+            raw[column] = pd.NA
+    amount = pd.to_numeric(raw["amount"], errors="coerce")
+    output = pd.DataFrame()
+    output["date"] = pd.to_datetime(raw["date"], errors="coerce")
+    output["code"] = raw["code"].map(normalize_project_symbol)
+    output["total_market_cap"] = amount
+    output["float_market_cap"] = amount
+    output["total_share"] = pd.NA
+    output["float_share"] = pd.NA
+    output["free_share"] = pd.NA
+    output["market_cap_unit"] = PROXY_MARKET_CAP_UNIT
+    output["share_unit"] = PROXY_SHARE_UNIT
+    output["source"] = source
+    output["source_trade_date"] = raw["date"].map(_normalize_yyyymmdd)
+    return standardize_daily_size_frame(output)
+
+
+def normalize_cninfo_share_change_events(
+    frame: pd.DataFrame | None,
+    *,
+    code: str,
+    source: str = "akshare.stock_share_change_cninfo",
+) -> pd.DataFrame:
+    """Normalize flexible CNInfo share-change rows to date/code/share fields."""
+
+    columns = ["date", "code", "total_share", "float_share", "free_share", "source", "source_trade_date"]
+    if frame is None or frame.empty:
+        return pd.DataFrame(columns=columns)
+    raw = frame.copy()
+    date_col = _first_existing_column(raw, _CNINFO_DATE_ALIASES)
+    total_col = _first_existing_column(raw, _CNINFO_TOTAL_SHARE_ALIASES)
+    float_col = _first_existing_column(raw, _CNINFO_FLOAT_SHARE_ALIASES)
+    free_col = _first_existing_column(raw, _CNINFO_FREE_SHARE_ALIASES)
+    output = pd.DataFrame()
+    output["date"] = pd.to_datetime(raw[date_col], errors="coerce") if date_col else pd.NaT
+    output["code"] = normalize_project_symbol(code)
+    output["total_share"] = raw[total_col].map(_parse_share_count) if total_col else pd.NA
+    output["float_share"] = raw[float_col].map(_parse_share_count) if float_col else pd.NA
+    output["free_share"] = raw[free_col].map(_parse_share_count) if free_col else pd.NA
+    output["source"] = source
+    output["source_trade_date"] = output["date"].map(_normalize_yyyymmdd)
+    output = output.dropna(subset=["date"]).sort_values(["date"]).reset_index(drop=True)
+    return output.loc[:, columns]
+
+
+def reconstruct_daily_size_from_share_events(
+    daily_bars: pd.DataFrame | None,
+    share_events: pd.DataFrame | None,
+    *,
+    source: str = AKSHARE_CNINFO_RECONSTRUCTED_SOURCE,
+) -> pd.DataFrame:
+    """Forward-fill PIT share events onto daily bars and compute market cap."""
+
+    if daily_bars is None or share_events is None or daily_bars.empty or share_events.empty:
+        return empty_daily_size_frame()
+    bars = daily_bars.copy()
+    for column in ["date", "code", "close"]:
+        if column not in bars.columns:
+            bars[column] = pd.NA
+    bars["date"] = pd.to_datetime(bars["date"], errors="coerce")
+    bars["code"] = bars["code"].map(normalize_project_symbol)
+    bars["close"] = pd.to_numeric(bars["close"], errors="coerce")
+    events = share_events.copy()
+    events["date"] = pd.to_datetime(events["date"], errors="coerce")
+    events["code"] = events["code"].map(normalize_project_symbol)
+    rows: list[pd.DataFrame] = []
+    for code, code_bars in bars.dropna(subset=["date"]).groupby("code", sort=True):
+        code_events = events.loc[events["code"] == code].dropna(subset=["date"]).sort_values("date")
+        if code_events.empty:
+            continue
+        merged = pd.merge_asof(
+            code_bars.sort_values("date"),
+            code_events[["date", "total_share", "float_share", "free_share", "source_trade_date"]].sort_values("date"),
+            on="date",
+            direction="backward",
+        )
+        rows.append(merged)
+    if not rows:
+        return empty_daily_size_frame()
+    return standardize_akshare_cninfo_reconstructed_size(pd.concat(rows, ignore_index=True), source=source)
 
 
 def standardize_daily_size_frame(frame: pd.DataFrame | None) -> pd.DataFrame:
@@ -195,6 +360,25 @@ def load_cached_daily_size(
     parts = [pd.read_parquet(daily_size_cache_path(output_root, int(year))) for year in years if daily_size_cache_path(output_root, int(year)).exists()]
     frame = standardize_daily_size_frame(pd.concat(parts, ignore_index=True)) if parts else empty_daily_size_frame()
     return _filter_daily_size(frame, start_date=start_date, end_date=end_date, symbols=symbols)
+
+
+def daily_size_source_grade(source: Any) -> str:
+    """Classify daily_size source strings for audit and promotion gates."""
+
+    text = str(source or "").strip().lower()
+    if text == TUSHARE_DAILY_BASIC_SOURCE:
+        return OFFICIAL_PIT_DAILY_GRADE
+    if text == AKSHARE_CNINFO_RECONSTRUCTED_SOURCE:
+        return FREE_RECONSTRUCTED_GRADE
+    if text.startswith("proxy.") or text == PROXY_AMOUNT_SOURCE:
+        return PROXY_ONLY_GRADE
+    return UNKNOWN_SOURCE_GRADE
+
+
+def accepted_daily_size_source_grade(source: Any) -> bool:
+    """Return whether a source grade is allowed to satisfy size gates."""
+
+    return daily_size_source_grade(source) in {OFFICIAL_PIT_DAILY_GRADE, FREE_RECONSTRUCTED_GRADE}
 
 
 def fetch_tushare_daily_size_cache(
@@ -367,6 +551,45 @@ def normalize_project_symbol(value: Any) -> str:
     return text
 
 
+def _first_existing_column(frame: pd.DataFrame, aliases: Sequence[str]) -> str:
+    by_lower = {str(column).strip().lower(): str(column) for column in frame.columns}
+    for alias in aliases:
+        if alias in frame.columns:
+            return str(alias)
+        lowered = str(alias).strip().lower()
+        if lowered in by_lower:
+            return by_lower[lowered]
+    return ""
+
+
+def _parse_share_count(value: Any) -> float | None:
+    if pd.isna(value):
+        return None
+    text = str(value).strip().replace(",", "")
+    if not text or text in {"--", "-", "nan", "None"}:
+        return None
+    multiplier = 1.0
+    if "亿" in text:
+        multiplier = 100_000_000.0
+    elif "万" in text:
+        multiplier = 10_000.0
+    cleaned = (
+        text.replace("亿股", "")
+        .replace("万股", "")
+        .replace("股", "")
+        .replace("亿", "")
+        .replace("万", "")
+        .replace(" ", "")
+    )
+    try:
+        return float(cleaned) * multiplier
+    except ValueError:
+        numeric = pd.to_numeric(cleaned, errors="coerce")
+        if pd.isna(numeric):
+            return None
+        return float(numeric) * multiplier
+
+
 def _daily_size_sample_scope(*, year: int, symbols: Sequence[str] | None) -> str:
     normalized = sorted({normalize_project_symbol(symbol) for symbol in symbols or [] if normalize_project_symbol(symbol)})
     if not normalized:
@@ -391,6 +614,12 @@ def _filter_daily_size(
     if symbols:
         output = output.loc[output["code"].isin(set(symbols))]
     return output.reset_index(drop=True)
+
+
+def _numeric_raw_column(frame: pd.DataFrame, column: str) -> pd.Series:
+    if column not in frame.columns:
+        return pd.Series(pd.NA, index=frame.index, dtype="Float64")
+    return pd.to_numeric(frame[column], errors="coerce")
 
 
 def _load_tushare_module(module: Any | None) -> tuple[Any | None, str]:

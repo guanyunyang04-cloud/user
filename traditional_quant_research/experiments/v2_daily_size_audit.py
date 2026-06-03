@@ -12,16 +12,36 @@ import numpy as np
 import pandas as pd
 
 from traditional_quant_research.dataset_v2 import (
+    _resolve_snapshot_root,
     load_daily_universe,
     load_pit_daily_size,
     load_pit_manifest,
 )
+from traditional_quant_research.size_source import accepted_daily_size_source_grade, daily_size_source_grade
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/v2_daily_size_audit")
 DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-03_v2_daily_size_audit.md")
 SIZE_FIELDS = ("total_market_cap", "float_market_cap", "total_share", "float_share", "free_share")
+REQUIRED_SIZE_GATE_FIELDS = ("total_market_cap", "float_market_cap")
 UNIT_FIELDS = ("market_cap_unit", "share_unit")
+MIN_REQUIRED_COVERAGE = 0.95
+MIN_REQUIRED_POSITIVE_RATE = 0.99
+CURRENT_CROSS_CHECK_THRESHOLDS = {
+    "total_market_cap": {"median": 0.05, "p95": 0.20},
+    "float_market_cap": {"median": 0.10, "p95": 0.30},
+}
+CURRENT_CROSS_CHECK_COLUMNS = [
+    "source_scope",
+    "field",
+    "row_count",
+    "median_abs_relative_diff",
+    "p95_abs_relative_diff",
+    "median_threshold",
+    "p95_threshold",
+    "passed",
+    "status",
+]
 
 
 def run_v2_daily_size_audit(
@@ -40,7 +60,8 @@ def run_v2_daily_size_audit(
     manifest = load_pit_manifest(root)
     universe = load_daily_universe(root, start_date=start_date, end_date=end_date)
     size = load_pit_daily_size(root, start_date=start_date, end_date=end_date)
-    audit = build_daily_size_audit(universe, size)
+    current_cross_check = _load_current_cross_check(root)
+    audit = build_daily_size_audit(universe, size, current_cross_check=current_cross_check)
     summary = summarize_daily_size_audit(
         manifest=manifest,
         universe=universe,
@@ -56,6 +77,7 @@ def run_v2_daily_size_audit(
     audit["yearly_summary"].to_csv(run_dir / "yearly_summary.csv", index=False, encoding="utf-8-sig")
     audit["daily_summary"].to_csv(run_dir / "daily_summary.csv", index=False, encoding="utf-8-sig")
     audit["source_unit_summary"].to_csv(run_dir / "source_unit_summary.csv", index=False, encoding="utf-8-sig")
+    audit["current_cross_check_summary"].to_csv(run_dir / "current_cross_check_summary.csv", index=False, encoding="utf-8-sig")
     (run_dir / "summary.json").write_text(json.dumps(_json_ready(summary), ensure_ascii=False, indent=2), encoding="utf-8")
     (run_dir / "summary.md").write_text(markdown, encoding="utf-8")
     if write_research_log:
@@ -64,7 +86,12 @@ def run_v2_daily_size_audit(
     return {**summary, "run_dir": str(run_dir), "research_log": str(research_log_path) if write_research_log else None}
 
 
-def build_daily_size_audit(universe: pd.DataFrame, size: pd.DataFrame) -> dict[str, pd.DataFrame]:
+def build_daily_size_audit(
+    universe: pd.DataFrame,
+    size: pd.DataFrame,
+    *,
+    current_cross_check: pd.DataFrame | None = None,
+) -> dict[str, pd.DataFrame]:
     keys = _expected_keys(universe)
     merged = _merge_expected_size(keys, size)
     return {
@@ -72,6 +99,7 @@ def build_daily_size_audit(universe: pd.DataFrame, size: pd.DataFrame) -> dict[s
         "yearly_summary": _yearly_summary(merged),
         "daily_summary": _daily_summary(merged),
         "source_unit_summary": _source_unit_summary(merged),
+        "current_cross_check_summary": _current_cross_check_summary(size, current_cross_check),
     }
 
 
@@ -88,14 +116,53 @@ def summarize_daily_size_audit(
     field_summary = audit["field_summary"]
     tradeable = field_summary[field_summary["scope"] == "tradeable"].copy()
     min_tradeable_coverage = float(tradeable["coverage_rate"].min()) if not tradeable.empty else 0.0
+    required_tradeable = tradeable.loc[tradeable["field"].isin(REQUIRED_SIZE_GATE_FIELDS)].copy()
+    min_required_tradeable_coverage = (
+        float(required_tradeable["coverage_rate"].min()) if not required_tradeable.empty else 0.0
+    )
+    min_required_positive_rate = (
+        float(required_tradeable["positive_rate"].min()) if not required_tradeable.empty else 0.0
+    )
     source_unit_summary = audit["source_unit_summary"]
     required_units_present = bool(
         not source_unit_summary.empty
         and source_unit_summary["market_cap_unit"].notna().all()
         and source_unit_summary["share_unit"].notna().all()
+        and not source_unit_summary["market_cap_unit"].astype(str).str.contains("proxy", case=False, na=False).any()
+        and not source_unit_summary["share_unit"].astype(str).str.contains("not_applicable", case=False, na=False).any()
+    )
+    source_grade_ok = bool(
+        not source_unit_summary.empty
+        and source_unit_summary["source"].map(accepted_daily_size_source_grade).all()
+    )
+    source_grades = (
+        {
+            str(row["source"]): str(row["source_grade"])
+            for row in source_unit_summary[["source", "source_grade"]].drop_duplicates().to_dict("records")
+        }
+        if not source_unit_summary.empty
+        else {}
+    )
+    blocked_source_grades = sorted(
+        {
+            str(row["source_grade"])
+            for row in source_unit_summary.loc[~source_unit_summary["source"].map(accepted_daily_size_source_grade)].to_dict("records")
+        }
+    )
+    current_cross_check_summary = audit.get("current_cross_check_summary", pd.DataFrame(columns=CURRENT_CROSS_CHECK_COLUMNS))
+    current_cross_check_ok = bool(
+        not current_cross_check_summary.empty
+        and current_cross_check_summary["passed"].fillna(False).astype(bool).all()
     )
     table_present = bool(not size.empty)
-    ready = bool(table_present and min_tradeable_coverage >= 0.95 and required_units_present)
+    ready = bool(
+        table_present
+        and min_required_tradeable_coverage >= MIN_REQUIRED_COVERAGE
+        and min_required_positive_rate >= MIN_REQUIRED_POSITIVE_RATE
+        and required_units_present
+        and source_grade_ok
+        and current_cross_check_ok
+    )
     return {
         "run_id": run_id,
         "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -107,13 +174,22 @@ def summarize_daily_size_audit(
         "size_date_count": int(pd.to_datetime(size["date"]).nunique()) if not size.empty and "date" in size.columns else 0,
         "size_code_count": int(size["code"].nunique()) if not size.empty and "code" in size.columns else 0,
         "min_tradeable_coverage": min_tradeable_coverage,
+        "min_required_tradeable_coverage": min_required_tradeable_coverage,
+        "min_required_positive_rate": min_required_positive_rate,
         "required_units_present": required_units_present,
+        "source_grade_ok": source_grade_ok,
+        "source_grades": source_grades,
+        "blocked_source_grades": blocked_source_grades,
+        "current_cross_check_ok": current_cross_check_ok,
+        "current_cross_check_thresholds": CURRENT_CROSS_CHECK_THRESHOLDS,
         "daily_size_ready_for_research": ready,
         "candidate_count": 0,
         "status": "daily_size_missingness_audit" if table_present else "daily_size_absent",
         "limitations": [
             "Coverage and units do not prove PIT timing or revision behavior.",
-            "Size fields must come from a live-validated external source before strategy promotion.",
+            "Size fields must come from an accepted PIT or validated reconstructed source before strategy promotion.",
+            "Free reconstructed sources require current-date market-cap cross-checks before size_gate can pass.",
+            "Proxy-only or unknown daily_size sources cannot satisfy size_gate.",
             "This audit does not fetch or build daily_size; it only audits a snapshot table if present.",
         ],
     }
@@ -130,7 +206,11 @@ def render_daily_size_audit_markdown(summary: Mapping[str, Any], audit: Mapping[
         f"- tradeable_rows: `{summary.get('tradeable_rows', 0)}`",
         f"- size_rows: `{summary.get('size_rows', 0)}`",
         f"- min_tradeable_coverage: `{_fmt(summary.get('min_tradeable_coverage'))}`",
+        f"- min_required_tradeable_coverage: `{_fmt(summary.get('min_required_tradeable_coverage'))}`",
+        f"- min_required_positive_rate: `{_fmt(summary.get('min_required_positive_rate'))}`",
         f"- required_units_present: `{summary.get('required_units_present')}`",
+        f"- source_grade_ok: `{summary.get('source_grade_ok')}`",
+        f"- current_cross_check_ok: `{summary.get('current_cross_check_ok')}`",
         f"- daily_size_ready_for_research: `{summary.get('daily_size_ready_for_research')}`",
         f"- candidate_count: `{summary.get('candidate_count', 0)}`",
         "",
@@ -141,6 +221,10 @@ def render_daily_size_audit_markdown(summary: Mapping[str, Any], audit: Mapping[
         "## Source/Unit Summary",
         "",
         _markdown_table(audit["source_unit_summary"]),
+        "",
+        "## Current Cross-Check",
+        "",
+        _markdown_table(audit["current_cross_check_summary"]),
         "",
         "## Yearly Summary",
         "",
@@ -210,6 +294,7 @@ def _field_summary(merged: pd.DataFrame) -> pd.DataFrame:
                     "coverage_rate": non_null_rows / expected_rows if expected_rows else 0.0,
                     "finite_rows": finite_rows,
                     "positive_rows": positive_rows,
+                    "positive_rate": positive_rows / expected_rows if expected_rows else 0.0,
                     "mean": float(values.mean()) if non_null_rows else np.nan,
                     "min": float(values.min()) if non_null_rows else np.nan,
                     "max": float(values.max()) if non_null_rows else np.nan,
@@ -260,7 +345,7 @@ def _daily_summary(merged: pd.DataFrame) -> pd.DataFrame:
 
 def _source_unit_summary(merged: pd.DataFrame) -> pd.DataFrame:
     if merged.empty or not merged["has_size_row"].any():
-        return pd.DataFrame(columns=["source", "market_cap_unit", "share_unit", "rows", "code_count", "date_count"])
+        return pd.DataFrame(columns=["source", "source_grade", "market_cap_unit", "share_unit", "rows", "code_count", "date_count"])
     frame = merged.loc[merged["has_size_row"]].copy()
     for column in ["source", *UNIT_FIELDS]:
         if column not in frame.columns:
@@ -270,7 +355,108 @@ def _source_unit_summary(merged: pd.DataFrame) -> pd.DataFrame:
         .agg(rows=("code", "count"), code_count=("code", "nunique"), date_count=("date", "nunique"))
         .reset_index()
     )
+    grouped.insert(1, "source_grade", grouped["source"].map(daily_size_source_grade))
     return grouped
+
+
+def _current_cross_check_summary(size: pd.DataFrame, cross_check: pd.DataFrame | None) -> pd.DataFrame:
+    if size.empty or "source" not in size.columns:
+        return pd.DataFrame(columns=CURRENT_CROSS_CHECK_COLUMNS)
+    sources = sorted({str(item) for item in size["source"].dropna().astype(str).unique() if str(item)})
+    if not sources:
+        return pd.DataFrame(columns=CURRENT_CROSS_CHECK_COLUMNS)
+    if all(daily_size_source_grade(source) == "official_pit_daily" for source in sources):
+        return pd.DataFrame(
+            [
+                {
+                    "source_scope": ",".join(sources),
+                    "field": field,
+                    "row_count": 0,
+                    "median_abs_relative_diff": np.nan,
+                    "p95_abs_relative_diff": np.nan,
+                    "median_threshold": threshold["median"],
+                    "p95_threshold": threshold["p95"],
+                    "passed": True,
+                    "status": "official_pit_source",
+                }
+                for field, threshold in CURRENT_CROSS_CHECK_THRESHOLDS.items()
+            ],
+            columns=CURRENT_CROSS_CHECK_COLUMNS,
+        )
+    if cross_check is None or cross_check.empty:
+        return pd.DataFrame(
+            [
+                {
+                    "source_scope": ",".join(sources),
+                    "field": field,
+                    "row_count": 0,
+                    "median_abs_relative_diff": np.nan,
+                    "p95_abs_relative_diff": np.nan,
+                    "median_threshold": threshold["median"],
+                    "p95_threshold": threshold["p95"],
+                    "passed": False,
+                    "status": "missing_current_cross_check",
+                }
+                for field, threshold in CURRENT_CROSS_CHECK_THRESHOLDS.items()
+            ],
+            columns=CURRENT_CROSS_CHECK_COLUMNS,
+        )
+
+    rows: list[dict[str, Any]] = []
+    for field, threshold in CURRENT_CROSS_CHECK_THRESHOLDS.items():
+        values = _extract_cross_check_diff(cross_check, field=field, sources=sources)
+        median = float(values.median()) if not values.empty else np.nan
+        p95 = float(values.quantile(0.95)) if not values.empty else np.nan
+        passed = bool(not values.empty and median <= threshold["median"] and p95 <= threshold["p95"])
+        rows.append(
+            {
+                "source_scope": ",".join(sources),
+                "field": field,
+                "row_count": int(len(values)),
+                "median_abs_relative_diff": median,
+                "p95_abs_relative_diff": p95,
+                "median_threshold": threshold["median"],
+                "p95_threshold": threshold["p95"],
+                "passed": passed,
+                "status": "passed" if passed else "failed_or_missing_field_diff",
+            }
+        )
+    return pd.DataFrame(rows, columns=CURRENT_CROSS_CHECK_COLUMNS)
+
+
+def _extract_cross_check_diff(cross_check: pd.DataFrame, *, field: str, sources: list[str]) -> pd.Series:
+    frame = cross_check.copy()
+    if "source" in frame.columns:
+        scoped = frame.loc[frame["source"].astype(str).isin(set(sources))]
+        if not scoped.empty:
+            frame = scoped
+    if "field" in frame.columns:
+        frame = frame.loc[frame["field"].astype(str) == field]
+        for column in ["abs_relative_diff", "abs_rel_diff", "relative_diff_abs"]:
+            if column in frame.columns:
+                return pd.to_numeric(frame[column], errors="coerce").dropna().abs()
+    for column in [
+        f"{field}_abs_relative_diff",
+        f"{field}_abs_rel_diff",
+        f"{field}_relative_diff_abs",
+    ]:
+        if column in frame.columns:
+            return pd.to_numeric(frame[column], errors="coerce").dropna().abs()
+    return pd.Series(dtype="float64")
+
+
+def _load_current_cross_check(root: str | Path | None) -> pd.DataFrame:
+    snapshot_root = _resolve_snapshot_root(root)
+    for path in [
+        snapshot_root / "daily_size_current_cross_check.parquet",
+        snapshot_root / "daily_size_current_cross_check.csv",
+    ]:
+        if not path.exists():
+            continue
+        if path.suffix.lower() == ".parquet":
+            return pd.read_parquet(path)
+        return pd.read_csv(path)
+    return pd.DataFrame()
 
 
 def _scopes(merged: pd.DataFrame) -> list[tuple[str, pd.DataFrame]]:

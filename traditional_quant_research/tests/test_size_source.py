@@ -6,15 +6,23 @@ import pandas as pd
 
 from traditional_quant_research.dataset_v2 import DAILY_SIZE_COLUMNS, load_pit_daily_size
 from traditional_quant_research.size_source import (
+    AKSHARE_CNINFO_RECONSTRUCTED_SOURCE,
+    PROXY_AMOUNT_SOURCE,
+    accepted_daily_size_source_grade,
     daily_size_cache_path,
     daily_size_meta_path,
     daily_size_part_path,
     daily_size_progress_path,
+    daily_size_source_grade,
     empty_daily_size_frame,
     fetch_tushare_daily_size_cache,
     load_cached_daily_size,
+    normalize_cninfo_share_change_events,
     normalize_project_symbol,
+    reconstruct_daily_size_from_share_events,
+    standardize_akshare_cninfo_reconstructed_size,
     standardize_daily_size_frame,
+    standardize_proxy_amount_daily_size,
     standardize_tushare_daily_basic_size,
     write_daily_size_parquet,
 )
@@ -70,6 +78,63 @@ def test_standardize_tushare_daily_basic_empty_has_fixed_schema() -> None:
     assert size.empty
     assert list(size.columns) == DAILY_SIZE_COLUMNS
     assert list(empty_daily_size_frame().columns) == DAILY_SIZE_COLUMNS
+
+
+def test_reconstructed_size_computes_market_cap_from_close_and_shares() -> None:
+    raw = pd.DataFrame(
+        [
+            {
+                "date": "2026-06-01",
+                "code": "600000.SH",
+                "close": 10.0,
+                "total_share": 100.0,
+                "float_share": 80.0,
+                "free_share": 70.0,
+            }
+        ]
+    )
+
+    size = standardize_akshare_cninfo_reconstructed_size(raw)
+
+    assert size["total_market_cap"].tolist() == [1000.0]
+    assert size["float_market_cap"].tolist() == [800.0]
+    assert size["market_cap_unit"].tolist() == ["CNY"]
+    assert size["share_unit"].tolist() == ["shares"]
+    assert size["source"].tolist() == [AKSHARE_CNINFO_RECONSTRUCTED_SOURCE]
+    assert accepted_daily_size_source_grade(size.loc[0, "source"])
+
+
+def test_proxy_amount_daily_size_is_shaped_but_not_gate_eligible() -> None:
+    raw = pd.DataFrame([{"date": "2026-06-01", "code": "600000.SH", "amount": 12345.0}])
+
+    size = standardize_proxy_amount_daily_size(raw)
+
+    assert size["total_market_cap"].tolist() == [12345.0]
+    assert size["float_market_cap"].tolist() == [12345.0]
+    assert size["source"].tolist() == [PROXY_AMOUNT_SOURCE]
+    assert daily_size_source_grade(PROXY_AMOUNT_SOURCE) == "proxy_only"
+    assert not accepted_daily_size_source_grade(PROXY_AMOUNT_SOURCE)
+
+
+def test_cninfo_events_forward_fill_to_reconstruct_daily_size() -> None:
+    events_raw = pd.DataFrame(
+        [
+            {"变动日期": "2026-01-01", "总股本": "1万股", "流通股": "8000股"},
+        ]
+    )
+    events = normalize_cninfo_share_change_events(events_raw, code="600000.SH")
+    bars = pd.DataFrame(
+        [
+            {"date": pd.Timestamp("2026-01-02"), "code": "600000.SH", "close": 10.0},
+            {"date": pd.Timestamp("2026-01-03"), "code": "600000.SH", "close": 11.0},
+        ]
+    )
+
+    size = reconstruct_daily_size_from_share_events(bars, events)
+
+    assert size["total_share"].tolist() == [10000.0, 10000.0]
+    assert size["float_share"].tolist() == [8000.0, 8000.0]
+    assert size["total_market_cap"].tolist() == [100000.0, 110000.0]
 
 
 def test_standardize_daily_size_frame_deduplicates_and_numeric_coerces() -> None:

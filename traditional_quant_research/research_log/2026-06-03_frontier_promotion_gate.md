@@ -1,6 +1,6 @@
 # Frontier Promotion Gate
 
-- run_id: `frontier_promotion_gate_20260603_125120`
+- run_id: `frontier_promotion_gate_20260603_175222`
 - decision: `keep_candidate_frontier_backtest_only`
 - candidate_count: `0`
 - daily_size_status: `daily_size_absent`

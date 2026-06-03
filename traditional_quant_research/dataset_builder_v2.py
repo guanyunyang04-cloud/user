@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 import json
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -14,7 +16,20 @@ import pandas as pd
 
 from .baostock_source import BaostockSource, BaostockSourceConfig, BaostockSourceError
 from .dataset_v2 import DAILY_SIZE_COLUMNS, DEFAULT_V2_SNAPSHOT_ROOT
-from .size_source import fetch_tushare_daily_size_cache, load_cached_daily_size, normalize_trade_dates
+from .size_source import (
+    AKSHARE_CNINFO_RECONSTRUCTED_SOURCE,
+    PROXY_AMOUNT_SOURCE,
+    TUSHARE_DAILY_BASIC_SOURCE,
+    daily_size_cache_path,
+    daily_size_meta_path,
+    daily_size_source_grade,
+    fetch_tushare_daily_size_cache,
+    load_cached_daily_size,
+    normalize_cninfo_share_change_events,
+    normalize_trade_dates,
+    reconstruct_daily_size_from_share_events,
+    standardize_proxy_amount_daily_size,
+)
 from .universe import is_sh_sz_mainboard_a_share
 
 
@@ -66,6 +81,14 @@ DAILY_UNIVERSE_COLUMNS = [
     "reject_reason",
 ]
 DAILY_STATUS_COLUMNS = ["date", "code", "has_bar", "is_suspended_like", "is_tradeable"]
+SIZE_SOURCE_TUSHARE_DAILY_BASIC = "tushare_daily_basic"
+SIZE_SOURCE_AKSHARE_CNINFO_RECONSTRUCTED = "akshare_cninfo_reconstructed"
+SIZE_SOURCE_PROXY_AMOUNT = "proxy_amount"
+SIZE_SOURCE_CHOICES = (
+    SIZE_SOURCE_TUSHARE_DAILY_BASIC,
+    SIZE_SOURCE_AKSHARE_CNINFO_RECONSTRUCTED,
+    SIZE_SOURCE_PROXY_AMOUNT,
+)
 
 
 @dataclass(frozen=True)
@@ -86,6 +109,7 @@ class PitBuildConfig:
     industry_frequency: str = "daily"
     include_metrics: bool = False
     include_size: bool = False
+    size_source: str = SIZE_SOURCE_TUSHARE_DAILY_BASIC
     size_token: str | None = None
 
 
@@ -1438,6 +1462,13 @@ def fetch_size(config: PitBuildConfig) -> dict[str, Any]:
     """Fetch/cache external daily size fields without assembling a snapshot."""
 
     years = [config.year] if config.year else _years_between(config.start_date, config.end_date)
+    if config.size_source == SIZE_SOURCE_PROXY_AMOUNT:
+        return _fetch_proxy_amount_size(config, years)
+    if config.size_source == SIZE_SOURCE_AKSHARE_CNINFO_RECONSTRUCTED:
+        return _fetch_akshare_cninfo_reconstructed_size(config, years)
+    if config.size_source != SIZE_SOURCE_TUSHARE_DAILY_BASIC:
+        raise ValueError(f"unsupported size_source: {config.size_source}")
+
     requested_trade_dates = set(normalize_trade_dates(config.trade_dates)) if config.trade_dates else set()
     cached_trade_dates = _cached_trade_dates_for_size(config)
     summaries: list[dict[str, Any]] = []
@@ -1467,7 +1498,8 @@ def fetch_size(config: PitBuildConfig) -> dict[str, Any]:
             summaries.append(
                 {
                     "command": "fetch-size",
-                    "source": "tushare.daily_basic",
+                    "source": TUSHARE_DAILY_BASIC_SOURCE,
+                    "size_source": config.size_source,
                     "status": "failed",
                     "year": year,
                     "rows": 0,
@@ -1494,26 +1526,263 @@ def fetch_size(config: PitBuildConfig) -> dict[str, Any]:
         summaries.append(summary)
         all_failures.extend(summary.get("failures", []))
 
-    if not summaries:
-        status = "failed"
-    elif all(item.get("status") == "cache_hit" for item in summaries):
-        status = "cache_hit"
-    elif all(item.get("status") == "skipped" for item in summaries):
-        status = "skipped"
-    elif any(item.get("status") == "failed" for item in summaries):
-        status = "failed"
-    elif any(item.get("status") in {"partial", "skipped"} for item in summaries):
-        status = "partial"
-    else:
-        status = "passed"
     return {
         "command": "fetch-size",
-        "source": "tushare.daily_basic",
-        "status": status,
+        "source": TUSHARE_DAILY_BASIC_SOURCE,
+        "size_source": config.size_source,
+        "status": _fetch_size_status(summaries),
         "years": summaries,
         "failure_count": len(all_failures),
         "failures": all_failures,
     }
+
+
+def _fetch_proxy_amount_size(config: PitBuildConfig, years: list[int]) -> dict[str, Any]:
+    summaries: list[dict[str, Any]] = []
+    all_failures: list[dict[str, Any]] = []
+    for year in years:
+        start, end = _year_bounds(year, config.start_date, config.end_date)
+        bars = _filter_dates(_read_parquet_or_empty(_daily_bars_cache_path(config.output_root, year), DAILY_BARS_COLUMNS), start, end)
+        codes = _size_request_codes(config, year, start, end, bars)
+        if codes:
+            bars = bars.loc[bars["code"].isin(set(codes))].reset_index(drop=True)
+        if bars.empty:
+            failure = {
+                "year": year,
+                "trade_date": "",
+                "error_type": "missing_daily_bars",
+                "message": "proxy_amount requires cached daily_bars for the requested year/date/symbol scope.",
+            }
+            all_failures.append(failure)
+            summaries.append(_failed_size_year_summary(year, PROXY_AMOUNT_SOURCE, config.size_source, [failure], len(codes)))
+            continue
+        frame = standardize_proxy_amount_daily_size(bars[["date", "code", "amount"]])
+        path_symbols = codes if (config.symbols or config.max_symbols > 0) else None
+        path = daily_size_cache_path(config.output_root, year, symbols=path_symbols)
+        meta_path = daily_size_meta_path(config.output_root, year, symbols=path_symbols)
+        _write_parquet(path, frame)
+        _write_json(
+            meta_path,
+            {
+                "source": PROXY_AMOUNT_SOURCE,
+                "source_grade": daily_size_source_grade(PROXY_AMOUNT_SOURCE),
+                "size_source": config.size_source,
+                "year": int(year),
+                "start_date": start,
+                "end_date": end,
+                "symbols": list(path_symbols or []),
+                "complete": True,
+                "row_count": int(len(frame)),
+                "date_count": int(frame["date"].nunique()) if not frame.empty else 0,
+                "code_count": int(frame["code"].nunique()) if not frame.empty else 0,
+                "status": "passed",
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+            },
+        )
+        summaries.append(
+            {
+                "command": "fetch-size",
+                "source": PROXY_AMOUNT_SOURCE,
+                "size_source": config.size_source,
+                "source_grade": daily_size_source_grade(PROXY_AMOUNT_SOURCE),
+                "status": "passed",
+                "year": int(year),
+                "rows": int(len(frame)),
+                "date_count": int(frame["date"].nunique()) if not frame.empty else 0,
+                "code_count": int(frame["code"].nunique()) if not frame.empty else 0,
+                "failure_count": 0,
+                "failures": [],
+                "cache_path": str(path),
+                "cache_hit": 0,
+                "cache_miss": 1,
+                "promotion_eligible": False,
+            }
+        )
+    return {
+        "command": "fetch-size",
+        "source": PROXY_AMOUNT_SOURCE,
+        "size_source": config.size_source,
+        "status": _fetch_size_status(summaries),
+        "years": summaries,
+        "failure_count": len(all_failures),
+        "failures": all_failures,
+    }
+
+
+def _fetch_akshare_cninfo_reconstructed_size(config: PitBuildConfig, years: list[int]) -> dict[str, Any]:
+    try:
+        akshare_module = importlib.import_module("akshare")
+        import_error = ""
+    except Exception as exc:  # noqa: BLE001
+        akshare_module = None
+        import_error = str(exc)
+
+    summaries: list[dict[str, Any]] = []
+    all_failures: list[dict[str, Any]] = []
+    for year in years:
+        start, end = _year_bounds(year, config.start_date, config.end_date)
+        bars = _filter_dates(_read_parquet_or_empty(_daily_bars_cache_path(config.output_root, year), DAILY_BARS_COLUMNS), start, end)
+        codes = _size_request_codes(config, year, start, end, bars)
+        if codes:
+            bars = bars.loc[bars["code"].isin(set(codes))].reset_index(drop=True)
+        path_symbols = codes if (config.symbols or config.max_symbols > 0) else None
+        path = daily_size_cache_path(config.output_root, year, symbols=path_symbols)
+        if path.exists() and not config.force_refresh:
+            cached = pd.read_parquet(path)
+            summaries.append(
+                {
+                    "command": "fetch-size",
+                    "source": AKSHARE_CNINFO_RECONSTRUCTED_SOURCE,
+                    "size_source": config.size_source,
+                    "source_grade": daily_size_source_grade(AKSHARE_CNINFO_RECONSTRUCTED_SOURCE),
+                    "status": "cache_hit",
+                    "year": int(year),
+                    "rows": int(len(cached)),
+                    "date_count": int(pd.to_datetime(cached["date"]).nunique()) if not cached.empty and "date" in cached.columns else 0,
+                    "code_count": int(cached["code"].nunique()) if not cached.empty and "code" in cached.columns else 0,
+                    "failure_count": 0,
+                    "failures": [],
+                    "cache_path": str(path),
+                    "cache_hit": 1,
+                    "cache_miss": 0,
+                    "promotion_eligible": True,
+                }
+            )
+            continue
+        if akshare_module is None:
+            failure = {"year": year, "trade_date": "", "error_type": "package_missing", "message": import_error}
+            all_failures.append(failure)
+            summaries.append(_failed_size_year_summary(year, AKSHARE_CNINFO_RECONSTRUCTED_SOURCE, config.size_source, [failure], len(codes)))
+            continue
+        if bars.empty:
+            failure = {
+                "year": year,
+                "trade_date": "",
+                "error_type": "missing_daily_bars",
+                "message": "akshare_cninfo_reconstructed requires cached daily_bars close prices.",
+            }
+            all_failures.append(failure)
+            summaries.append(_failed_size_year_summary(year, AKSHARE_CNINFO_RECONSTRUCTED_SOURCE, config.size_source, [failure], len(codes)))
+            continue
+
+        event_frames: list[pd.DataFrame] = []
+        failures: list[dict[str, Any]] = []
+        for code in codes:
+            try:
+                raw = akshare_module.stock_share_change_cninfo(
+                    symbol=code.split(".", 1)[0],
+                    start_date="19000101",
+                    end_date=pd.Timestamp(end).strftime("%Y%m%d"),
+                )
+            except Exception as exc:  # noqa: BLE001
+                failures.append({"year": year, "code": code, "trade_date": "", "error_type": type(exc).__name__, "message": str(exc)})
+                continue
+            events = normalize_cninfo_share_change_events(raw, code=code)
+            if events.empty:
+                failures.append({"year": year, "code": code, "trade_date": "", "error_type": "empty_share_events", "message": "stock_share_change_cninfo returned no parseable share events."})
+                continue
+            event_frames.append(events)
+            if config.request_interval_seconds > 0:
+                time.sleep(float(config.request_interval_seconds))
+        share_events = pd.concat(event_frames, ignore_index=True) if event_frames else pd.DataFrame()
+        frame = reconstruct_daily_size_from_share_events(bars, share_events)
+        if frame.empty:
+            failure = {"year": year, "trade_date": "", "error_type": "empty_reconstructed_size", "message": "No daily_size rows could be reconstructed from share events and daily bars."}
+            failures.append(failure)
+        if not frame.empty:
+            _write_parquet(path, frame)
+            _write_json(
+                daily_size_meta_path(config.output_root, year, symbols=path_symbols),
+                {
+                    "source": AKSHARE_CNINFO_RECONSTRUCTED_SOURCE,
+                    "source_grade": daily_size_source_grade(AKSHARE_CNINFO_RECONSTRUCTED_SOURCE),
+                    "size_source": config.size_source,
+                    "year": int(year),
+                    "start_date": start,
+                    "end_date": end,
+                    "symbols": list(path_symbols or []),
+                    "complete": True,
+                    "row_count": int(len(frame)),
+                    "date_count": int(frame["date"].nunique()) if not frame.empty else 0,
+                    "code_count": int(frame["code"].nunique()) if not frame.empty else 0,
+                    "failure_count": int(len(failures)),
+                    "status": "passed" if not failures else "partial",
+                    "created_at": datetime.now().isoformat(timespec="seconds"),
+                },
+            )
+        all_failures.extend(failures)
+        summaries.append(
+            {
+                "command": "fetch-size",
+                "source": AKSHARE_CNINFO_RECONSTRUCTED_SOURCE,
+                "size_source": config.size_source,
+                "source_grade": daily_size_source_grade(AKSHARE_CNINFO_RECONSTRUCTED_SOURCE),
+                "status": "passed" if frame is not None and not frame.empty and not failures else ("partial" if frame is not None and not frame.empty else "failed"),
+                "year": int(year),
+                "rows": int(len(frame)),
+                "date_count": int(frame["date"].nunique()) if frame is not None and not frame.empty else 0,
+                "code_count": int(frame["code"].nunique()) if frame is not None and not frame.empty else 0,
+                "failure_count": int(len(failures)),
+                "failures": failures,
+                "cache_path": str(path),
+                "cache_hit": 0,
+                "cache_miss": 1,
+                "promotion_eligible": True,
+            }
+        )
+    return {
+        "command": "fetch-size",
+        "source": AKSHARE_CNINFO_RECONSTRUCTED_SOURCE,
+        "size_source": config.size_source,
+        "status": _fetch_size_status(summaries),
+        "years": summaries,
+        "failure_count": len(all_failures),
+        "failures": all_failures,
+    }
+
+
+def _size_request_codes(config: PitBuildConfig, year: int, start: str, end: str, fallback_frame: pd.DataFrame) -> list[str]:
+    stock_lists = load_cached_stock_lists(config.output_root, [year], start, end, config=None)
+    codes = sorted(stock_lists["code"].unique().tolist()) if not stock_lists.empty else sorted(fallback_frame["code"].dropna().astype(str).unique().tolist())
+    if config.max_symbols > 0:
+        codes = codes[: config.max_symbols]
+    if config.symbols:
+        codes = [code for code in codes if code in set(config.symbols)]
+    if not codes and config.symbols:
+        codes = sorted(config.symbols)
+    return codes
+
+
+def _failed_size_year_summary(year: int, source: str, size_source: str, failures: list[dict[str, Any]], code_count: int) -> dict[str, Any]:
+    return {
+        "command": "fetch-size",
+        "source": source,
+        "size_source": size_source,
+        "source_grade": daily_size_source_grade(source),
+        "status": "failed",
+        "year": int(year),
+        "rows": 0,
+        "date_count": 0,
+        "code_count": int(code_count),
+        "failure_count": int(len(failures)),
+        "failures": failures,
+        "cache_hit": 0,
+        "cache_miss": 0,
+    }
+
+
+def _fetch_size_status(summaries: list[dict[str, Any]]) -> str:
+    if not summaries:
+        return "failed"
+    if all(item.get("status") == "cache_hit" for item in summaries):
+        return "cache_hit"
+    if all(item.get("status") == "skipped" for item in summaries):
+        return "skipped"
+    if any(item.get("status") == "failed" for item in summaries):
+        return "failed"
+    if any(item.get("status") in {"partial", "skipped"} for item in summaries):
+        return "partial"
+    return "passed"
 
 
 def _cached_trade_dates_for_size(config: PitBuildConfig) -> list[str]:
@@ -1577,6 +1846,7 @@ def build_year(config: PitBuildConfig) -> dict[str, Any]:
         industry_frequency=config.industry_frequency,
         include_metrics=config.include_metrics,
         include_size=config.include_size,
+        size_source=config.size_source,
         size_token=config.size_token,
     )
     with BaostockSource(_source_config(year_config)) as source:
@@ -2281,7 +2551,13 @@ def build_parser() -> argparse.ArgumentParser:
         cmd.add_argument("--include-industry", action="store_true", help="Fetch/write optional Baostock stock_industry table.")
         cmd.add_argument("--industry-frequency", choices=["daily", "month-start"], default="daily")
         cmd.add_argument("--include-metrics", action="store_true", help="Fetch/write optional Baostock daily_metrics table.")
-        cmd.add_argument("--include-size", action="store_true", help="Read/write optional external daily_size table from cached Tushare daily_basic data.")
+        cmd.add_argument("--include-size", action="store_true", help="Read/write optional external daily_size table from cached size data.")
+        cmd.add_argument(
+            "--size-source",
+            choices=SIZE_SOURCE_CHOICES,
+            default=SIZE_SOURCE_TUSHARE_DAILY_BASIC,
+            help="Source backend for fetch-size. Tushare remains the default; free/proxy sources are diagnostic until audited.",
+        )
         cmd.add_argument("--size-token", default="", help="Tushare token for fetch-size; falls back to TUSHARE_TOKEN or TS_TOKEN.")
     return parser
 
@@ -2310,6 +2586,7 @@ def main(argv: list[str] | None = None) -> int:
         industry_frequency=args.industry_frequency,
         include_metrics=args.include_metrics,
         include_size=args.include_size,
+        size_source=args.size_source,
         size_token=args.size_token or None,
     )
     if args.command in {"dry-run", "build", "refresh", "rebuild"}:

@@ -669,3 +669,95 @@ def test_fetch_size_uses_trade_dates_and_cached_stock_list_symbols(tmp_path, mon
     assert calls[0]["trade_dates"] == ["20260601", "20260602"]
     assert calls[0]["symbols"] == ["600000.SH"]
     assert calls[0]["token"] == "token"
+
+
+def test_fetch_size_proxy_amount_writes_diagnostic_cache(tmp_path) -> None:
+    root = tmp_path / "v2"
+    cache = root / "cache"
+    (cache / "daily_bars").mkdir(parents=True)
+    pd.DataFrame(
+        [
+            {
+                "date": pd.Timestamp("2026-06-01"),
+                "code": "600000.SH",
+                "open": 10.0,
+                "high": 11.0,
+                "low": 9.0,
+                "close": 10.0,
+                "volume": 100.0,
+                "amount": 1000.0,
+                "tradestatus": "1",
+                "isST": "0",
+                "source": "fixture",
+            }
+        ]
+    ).to_parquet(cache / "daily_bars" / "year=2026.parquet", index=False)
+    config = PitBuildConfig(
+        output_root=root,
+        command="fetch-size",
+        year=2026,
+        start_date="2026-06-01",
+        end_date="2026-06-01",
+        size_source=builder_v2.SIZE_SOURCE_PROXY_AMOUNT,
+    )
+
+    result = fetch_size(config)
+
+    assert result["status"] == "passed"
+    assert result["source"] == "proxy.amount"
+    cached = builder_v2.load_cached_daily_size(root, [2026], "2026-06-01", "2026-06-01")
+    assert cached["total_market_cap"].tolist() == [1000.0]
+    meta = json.loads((cache / "cache_meta" / "daily_size" / "year=2026.json").read_text(encoding="utf-8"))
+    assert meta["source_grade"] == "proxy_only"
+
+
+def test_fetch_size_akshare_cninfo_reconstructs_from_share_events(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "v2"
+    cache = root / "cache"
+    (cache / "daily_bars").mkdir(parents=True)
+    pd.DataFrame(
+        [
+            {
+                "date": pd.Timestamp("2026-06-01"),
+                "code": "600000.SH",
+                "open": 10.0,
+                "high": 11.0,
+                "low": 9.0,
+                "close": 10.0,
+                "volume": 100.0,
+                "amount": 1000.0,
+                "tradestatus": "1",
+                "isST": "0",
+                "source": "fixture",
+            }
+        ]
+    ).to_parquet(cache / "daily_bars" / "year=2026.parquet", index=False)
+
+    class FakeAkshare:
+        @staticmethod
+        def stock_share_change_cninfo(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+            assert symbol == "600000"
+            return pd.DataFrame([{"变动日期": "2026-01-01", "总股本": "1万股", "流通股": "8000股"}])
+
+    original_import_module = builder_v2.importlib.import_module
+    monkeypatch.setattr(
+        builder_v2.importlib,
+        "import_module",
+        lambda name: FakeAkshare if name == "akshare" else original_import_module(name),
+    )
+    config = PitBuildConfig(
+        output_root=root,
+        command="fetch-size",
+        year=2026,
+        start_date="2026-06-01",
+        end_date="2026-06-01",
+        size_source=builder_v2.SIZE_SOURCE_AKSHARE_CNINFO_RECONSTRUCTED,
+    )
+
+    result = fetch_size(config)
+
+    assert result["status"] == "passed"
+    assert result["source"] == "akshare.cninfo_reconstructed"
+    cached = builder_v2.load_cached_daily_size(root, [2026], "2026-06-01", "2026-06-01", symbols=["600000.SH"])
+    assert cached["total_market_cap"].tolist() == [100000.0]
+    assert cached["float_market_cap"].tolist() == [80000.0]
