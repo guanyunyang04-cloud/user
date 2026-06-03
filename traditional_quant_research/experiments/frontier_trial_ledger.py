@@ -77,11 +77,14 @@ def build_trial_ledger(aggregate: pd.DataFrame, promotion: pd.DataFrame | None =
     columns = [
         "trial_id",
         "experiment_family",
+        "constraint_variant",
         "signal",
         "fee_bps",
         "impact_bps_per_1pct",
         "capital_amount",
         "exposure_penalty_strength",
+        "constraint_fallback_count",
+        "constraint_fallback_rate",
         "mean_annualized_return",
         "min_annualized_return",
         "positive_year_rate",
@@ -100,6 +103,8 @@ def build_trial_ledger(aggregate: pd.DataFrame, promotion: pd.DataFrame | None =
         "impact_bps_per_1pct",
         "capital_amount",
         "exposure_penalty_strength",
+        "constraint_fallback_count",
+        "constraint_fallback_rate",
         "mean_annualized_return",
         "min_annualized_return",
         "positive_year_rate",
@@ -108,24 +113,41 @@ def build_trial_ledger(aggregate: pd.DataFrame, promotion: pd.DataFrame | None =
     ]:
         if column in frame.columns:
             frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    if "constraint_variant" not in frame.columns:
+        frame["constraint_variant"] = "baseline"
+    if "constraint_fallback_count" not in frame.columns:
+        frame["constraint_fallback_count"] = 0
+    if "constraint_fallback_rate" not in frame.columns:
+        frame["constraint_fallback_rate"] = 0.0
+    if "evidence_grade" not in frame.columns:
+        frame["evidence_grade"] = "backtest_only"
     frame["trial_id"] = [
-        f"trial_{idx:04d}_{_safe_signal(row.get('signal', ''))}"
+        f"trial_{idx:04d}_{_safe_signal(row.get('constraint_variant', 'baseline'))}_{_safe_signal(row.get('signal', ''))}"
         for idx, row in enumerate(frame.to_dict("records"), start=1)
     ]
     frame["experiment_family"] = "frontier_combined_constraint"
     frame["promotion_level"] = "candidate-frontier/backtest_only"
     frame["failed_gates"] = ""
     if promotion is not None and not promotion.empty:
-        promo = promotion[["signal", "exposure_penalty_strength", "promotion_level", "failed_gates"]].copy()
+        promo = promotion.copy()
+        if "constraint_variant" not in promo.columns:
+            promo["constraint_variant"] = "baseline"
+        promo = promo[["constraint_variant", "signal", "exposure_penalty_strength", "promotion_level", "failed_gates"]].copy()
         promo["exposure_penalty_strength"] = pd.to_numeric(promo["exposure_penalty_strength"], errors="coerce")
-        frame = frame.merge(promo, on=["signal", "exposure_penalty_strength"], how="left", suffixes=("", "_gate"))
+        frame = frame.merge(
+            promo,
+            on=["constraint_variant", "signal", "exposure_penalty_strength"],
+            how="left",
+            suffixes=("", "_gate"),
+        )
         frame["promotion_level"] = frame["promotion_level_gate"].fillna(frame["promotion_level"])
         frame["failed_gates"] = frame["failed_gates_gate"].fillna("")
     selected_idx = frame["mean_annualized_return"].astype(float).idxmax()
     frame["used_for_selection"] = False
     if pd.notna(selected_idx):
         frame.loc[selected_idx, "used_for_selection"] = True
-    frame["evidence_grade"] = frame["promotion_level"].fillna("candidate-frontier/backtest_only")
+    promoted_mask = frame["promotion_level"].astype(str).eq("strategy_candidate")
+    frame.loc[promoted_mask, "evidence_grade"] = "strategy_candidate"
     return frame.reindex(columns=columns).reset_index(drop=True)
 
 

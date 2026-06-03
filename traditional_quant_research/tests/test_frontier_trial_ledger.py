@@ -12,28 +12,36 @@ def _aggregate() -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
+                "constraint_variant": "baseline",
                 "signal": "signal_a",
                 "fee_bps": 30.0,
                 "impact_bps_per_1pct": 10.0,
                 "capital_amount": 100_000_000.0,
                 "exposure_penalty_strength": 0.25,
+                "constraint_fallback_count": 0,
+                "constraint_fallback_rate": 0.0,
                 "mean_annualized_return": 0.04,
                 "min_annualized_return": -0.02,
                 "positive_year_rate": 0.8,
                 "worst_max_drawdown": -0.18,
                 "total_periods": 36,
+                "evidence_grade": "backtest_only",
             },
             {
+                "constraint_variant": "regime_gated",
                 "signal": "signal_b",
                 "fee_bps": 30.0,
                 "impact_bps_per_1pct": 10.0,
                 "capital_amount": 100_000_000.0,
                 "exposure_penalty_strength": 0.50,
+                "constraint_fallback_count": 0,
+                "constraint_fallback_rate": 0.0,
                 "mean_annualized_return": 0.16,
                 "min_annualized_return": 0.01,
                 "positive_year_rate": 1.0,
                 "worst_max_drawdown": -0.10,
                 "total_periods": 36,
+                "evidence_grade": "out_of_sample_supported",
             },
         ]
     )
@@ -43,6 +51,7 @@ def _promotion() -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
+                "constraint_variant": "regime_gated",
                 "signal": "signal_b",
                 "exposure_penalty_strength": 0.50,
                 "promotion_level": "strategy_candidate",
@@ -64,12 +73,67 @@ def test_trial_ledger_marks_best_trial_and_selection_bias() -> None:
 
     selected = ledger.loc[ledger["used_for_selection"]].iloc[0]
     assert selected["signal"] == "signal_b"
+    assert selected["constraint_variant"] == "regime_gated"
     assert selected["promotion_level"] == "strategy_candidate"
+    assert selected["evidence_grade"] == "strategy_candidate"
     assert selection.iloc[0]["trial_count"] == 2
     assert selection.iloc[0]["best_minus_median_return"] == pytest.approx(0.06)
     assert selection.iloc[0]["weak_year_count"] == 1
     readiness = maturity.loc[maturity["dimension"] == "strategy_candidate_readiness"].iloc[0]
     assert readiness["status"] == "passed"
+
+
+def test_trial_ledger_merges_promotion_by_constraint_variant() -> None:
+    aggregate = pd.DataFrame(
+        [
+            {
+                "constraint_variant": "baseline",
+                "signal": "signal_a",
+                "fee_bps": 30.0,
+                "impact_bps_per_1pct": 10.0,
+                "capital_amount": 100_000_000.0,
+                "exposure_penalty_strength": 0.25,
+                "mean_annualized_return": 0.04,
+                "min_annualized_return": 0.01,
+                "positive_year_rate": 1.0,
+                "worst_max_drawdown": -0.10,
+                "total_periods": 36,
+                "evidence_grade": "backtest_only",
+            },
+            {
+                "constraint_variant": "regime_gated",
+                "signal": "signal_a",
+                "fee_bps": 30.0,
+                "impact_bps_per_1pct": 10.0,
+                "capital_amount": 100_000_000.0,
+                "exposure_penalty_strength": 0.25,
+                "mean_annualized_return": 0.08,
+                "min_annualized_return": 0.02,
+                "positive_year_rate": 1.0,
+                "worst_max_drawdown": -0.08,
+                "total_periods": 36,
+                "evidence_grade": "out_of_sample_supported",
+            },
+        ]
+    )
+    promotion = pd.DataFrame(
+        [
+            {
+                "constraint_variant": "regime_gated",
+                "signal": "signal_a",
+                "exposure_penalty_strength": 0.25,
+                "promotion_level": "strategy_candidate",
+                "failed_gates": "",
+            }
+        ]
+    )
+
+    ledger = ledger_exp.build_trial_ledger(aggregate, promotion)
+
+    baseline = ledger.loc[ledger["constraint_variant"].eq("baseline")].iloc[0]
+    regime = ledger.loc[ledger["constraint_variant"].eq("regime_gated")].iloc[0]
+    assert baseline["promotion_level"] == "candidate-frontier/backtest_only"
+    assert regime["promotion_level"] == "strategy_candidate"
 
 
 def test_run_frontier_trial_ledger_writes_governance_artifacts(tmp_path: Path) -> None:

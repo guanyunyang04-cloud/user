@@ -105,7 +105,7 @@ def test_promotion_gate_blocks_optimizer_fallback_even_when_exposure_is_small() 
 
     row = gate.iloc[0]
     assert bool(row["promoted"]) is False
-    assert row["style_exposure_gate"] is False
+    assert bool(row["style_exposure_gate"]) is False
     assert "style_exposure_gate" in row["failed_gates"]
     assert "optimizer_fallback" in row["exposure_failures"]
     assert row["constraint_fallback_count"] == 1
@@ -141,7 +141,7 @@ def test_promotion_gate_matches_exposure_by_constraint_variant() -> None:
 
     baseline = gate.loc[gate["constraint_variant"].eq("baseline")].iloc[0]
     regime = gate.loc[gate["constraint_variant"].eq("regime_gated")].iloc[0]
-    assert baseline["style_exposure_gate"] is False
+    assert bool(baseline["style_exposure_gate"]) is False
     assert bool(regime["promoted"]) is True
 
 

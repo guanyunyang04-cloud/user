@@ -2,7 +2,7 @@
 
 ## Summary
 
-- `run_id`: `v2_tushare_size_probe_20260603_114552`
+- `run_id`: `v2_tushare_size_probe_20260603_230731`
 - `status`: `skipped`
 - `skip_reason`: `auth_missing`
 - `symbols`: `600000.SH,000001.SZ`

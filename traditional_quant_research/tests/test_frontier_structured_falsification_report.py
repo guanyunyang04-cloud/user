@@ -58,6 +58,25 @@ def test_failure_matrix_classifies_size_weak_year_and_exposure_failures() -> Non
     ].iloc[0]
 
 
+def test_failure_matrix_classifies_optimizer_fallback_separately() -> None:
+    promotion_gate = _promotion_gate().copy()
+    promotion_gate["failed_gates"] = "style_exposure_gate"
+    promotion_gate["exposure_failures"] = "optimizer_fallback"
+    promotion_gate["constraint_fallback_count"] = 2
+
+    matrix = build_failure_matrix(
+        promotion_gate,
+        size_summary={"status": "ready"},
+        failure_summary={"combined_run_dir": "combined"},
+        weak_summary={"decision": "diagnostic_rebuild_rules_ready_for_backtest"},
+    )
+
+    row = matrix.iloc[0]
+    assert row["failure_type"] == "optimizer_fallback"
+    assert "constraint_fallback_count=2" in row["evidence_detail"]
+    assert "fallback" in row["minimum_next_action"]
+
+
 def test_next_actions_are_prioritized_by_blocking_gate() -> None:
     matrix = build_failure_matrix(
         _promotion_gate(),

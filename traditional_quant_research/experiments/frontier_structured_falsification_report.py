@@ -208,6 +208,7 @@ def build_next_minimum_actions(failure_matrix: pd.DataFrame, weak_backlog: pd.Da
         "data_size_gate": 1,
         "weak_year_return_year_gate": 2,
         "style_exposure_gate": 3,
+        "optimizer_fallback": 3,
         "sample_gate": 4,
         "drawdown_gate": 5,
         "promotion_evidence_missing": 6,
@@ -458,6 +459,21 @@ def _failure_row(
             "minimum_next_action": _minimum_action_for_failure_type("weak_year_return_year_gate"),
         }
     if gate == "style_exposure_gate":
+        exposure_failures = str(promotion_row.get("exposure_failures", ""))
+        if "optimizer_fallback" in exposure_failures.split(","):
+            return {
+                "signal": signal,
+                "failed_gate": gate,
+                "failure_type": "optimizer_fallback",
+                "evidence_grade": "backtest_only",
+                "evidence_detail": (
+                    f"constraint_fallback_count={promotion_row.get('constraint_fallback_count', 0)}; "
+                    f"constraint_fallback_rate={_fmt(promotion_row.get('constraint_fallback_rate'))}; "
+                    f"exposure_failures={exposure_failures}"
+                ),
+                "blocking_artifact": str(failure_summary.get("combined_run_dir", "")),
+                "minimum_next_action": _minimum_action_for_failure_type("optimizer_fallback"),
+            }
         return {
             "signal": signal,
             "failed_gate": gate,
@@ -486,6 +502,7 @@ def _minimum_action_for_failure_type(failure_type: str) -> str:
         "data_size_gate": "Resolve PIT size evidence first: either make free current cross-check available and then build audited formal daily_size cache, or switch to an authenticated PIT size source before assemble --include-size.",
         "weak_year_return_year_gate": "Wire prior-fit weak-year regime or rebuilt factor rules into the 2017-2026 combined constraint run; do not select thresholds from eval-year returns.",
         "style_exposure_gate": "Upgrade portfolio construction from heuristic penalty to explicit exposure constraints or optimizer, then rerun basket exposure and promotion gate.",
+        "optimizer_fallback": "Fix explicit optimizer feasibility so the required basket fills without Top-N fallback; rerun combined constraint, basket exposure, promotion gate, and trial ledger.",
         "sample_gate": "Increase independent evaluation periods without changing the promotion threshold, then rerun combined constraint.",
         "drawdown_gate": "Reduce drawdown through prior-specified risk controls and rerun combined constraint.",
         "promotion_evidence_missing": "Rerun frontier_promotion_gate and frontier_trial_ledger with current artifacts.",
@@ -498,6 +515,7 @@ def _success_evidence_for_failure_type(failure_type: str) -> str:
         "data_size_gate": "v2_daily_size_audit reports daily_size_ready_for_research=True and promotion size_gate passes.",
         "weak_year_return_year_gate": "2017-2026 combined constraint has mean/min annualized return >= 0 and positive_year_rate=1.0 at required costs.",
         "style_exposure_gate": "promotion_gate_summary shows style_exposure_gate=True and monthly mean abs active exposure <= threshold.",
+        "optimizer_fallback": "promotion_gate_summary shows constraint_fallback_count=0 and style_exposure_gate=True for the required cost row.",
         "sample_gate": "promotion_gate_summary shows sample_gate=True at the default total-period threshold.",
         "drawdown_gate": "promotion_gate_summary shows drawdown_gate=True at the default drawdown threshold.",
         "promotion_evidence_missing": "promotion_gate_summary.csv exists with evaluated frontier rows and trial ledger links it.",

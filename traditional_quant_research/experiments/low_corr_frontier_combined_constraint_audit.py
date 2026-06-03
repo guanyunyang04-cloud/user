@@ -1050,6 +1050,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--impact-bps-per-1pct", default=",".join(str(value) for value in DEFAULT_IMPACT_BPS_PER_1PCT))
     parser.add_argument("--exposure-penalty-cols", default=",".join(DEFAULT_PENALTY_COLS))
     parser.add_argument("--exposure-columns", default=",".join(DEFAULT_EXPOSURE_COLUMNS))
+    parser.add_argument("--exposure-constraint-cols", default="")
+    parser.add_argument("--max-abs-exposure", type=float, default=None)
+    parser.add_argument("--weak-year-rebuild-run-dir", type=Path, default=None)
+    parser.add_argument("--constraint-variants", default=None)
     parser.add_argument("--group-col", default=DEFAULT_GROUP_COL)
     parser.add_argument("--max-group-weight", type=float, default=DEFAULT_MAX_GROUP_WEIGHT)
     parser.add_argument("--execution-constraints", action=argparse.BooleanOptionalAction, default=True)
@@ -1083,12 +1087,16 @@ def main() -> None:
         impact_bps_per_1pct_values=_normalize_float_tuple(args.impact_bps_per_1pct, name="impact_bps_per_1pct"),
         exposure_penalty_cols=_normalize_tuple(args.exposure_penalty_cols, name="exposure_penalty_cols"),
         exposure_columns=_normalize_tuple(args.exposure_columns, name="exposure_columns"),
+        exposure_constraint_cols=_normalize_optional_tuple(args.exposure_constraint_cols),
+        max_abs_exposure=args.max_abs_exposure,
         group_col=args.group_col.strip() or None,
         max_group_weight=args.max_group_weight,
         execution_constraints=args.execution_constraints,
         limit_threshold=args.limit_threshold,
         include_metrics=args.include_metrics,
         include_industry=args.include_industry,
+        weak_year_rebuild_run_dir=args.weak_year_rebuild_run_dir,
+        constraint_variants=_normalize_optional_tuple(args.constraint_variants) if args.constraint_variants is not None else None,
         output_dir=args.output_dir,
         write_research_log=args.write_research_log,
         research_log_path=args.research_log_path,
