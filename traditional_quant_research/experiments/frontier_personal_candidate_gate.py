@@ -241,8 +241,25 @@ def evaluate_personal_candidate_gates(
             exposure_fields=exposure_fields,
             max_proxy_mean_abs_active_exposure=max_proxy_mean_abs_active_exposure,
         )
+        sample_gate = int(float(row.get("eval_year_count", 0) or 0)) >= min_eval_year_count and int(
+            float(row.get("total_periods", 0) or 0)
+        ) >= min_total_periods
+        formal_profile_failures: list[str] = []
+        if not bool(formal_gate_profile) or evidence_scope != FORMAL_PERSONAL_GATE_SCOPE:
+            formal_profile_failures.append("threshold_profile")
+        if not walk_forward_gate:
+            formal_profile_failures.append("walk_forward_gate")
+        if not sample_gate:
+            formal_profile_failures.append("sample_gate")
+        row_formal_profile_gate = len(formal_profile_failures) == 0
+        row_evidence_scope = FORMAL_PERSONAL_GATE_SCOPE if row_formal_profile_gate else DIAGNOSTIC_PERSONAL_GATE_SCOPE
+        row_gate_profile_detail = (
+            gate_profile_detail
+            if row_formal_profile_gate
+            else f"{gate_profile_detail};nonformal_evidence=" + ",".join(formal_profile_failures)
+        )
         checks = {
-            "formal_profile_gate": bool(formal_gate_profile),
+            "formal_profile_gate": row_formal_profile_gate,
             "baostock_source_gate": baostock_gate,
             "walk_forward_gate": walk_forward_gate,
             "execution_gate": execution_gate,
@@ -250,8 +267,7 @@ def evaluate_personal_candidate_gates(
             "return_gate": float(row.get("mean_annualized_return", np.nan)) >= min_mean_annualized_return,
             "weak_year_damage_gate": float(row.get("min_annualized_return", np.nan)) >= min_weakest_year_annualized_return
             and float(row.get("positive_year_rate", 0.0) or 0.0) >= min_positive_year_rate,
-            "sample_gate": int(float(row.get("eval_year_count", 0) or 0)) >= min_eval_year_count
-            and int(float(row.get("total_periods", 0) or 0)) >= min_total_periods,
+            "sample_gate": sample_gate,
             "drawdown_gate": float(row.get("worst_max_drawdown", np.nan)) >= max_worst_drawdown,
             "proxy_exposure_sanity_gate": len(exposure_failures) == 0,
             "optimizer_fallback_gate": fallback_count == 0 and fallback_rate == 0.0,
@@ -278,8 +294,8 @@ def evaluate_personal_candidate_gates(
                 "eval_year_count": int(float(row.get("eval_year_count", 0) or 0)),
                 "max_proxy_mean_abs_active_exposure": max_proxy_exposure,
                 "formal_profile_gate": checks["formal_profile_gate"],
-                "evidence_scope": evidence_scope,
-                "gate_profile_detail": gate_profile_detail,
+                "evidence_scope": row_evidence_scope,
+                "gate_profile_detail": row_gate_profile_detail,
                 "baostock_source_gate": checks["baostock_source_gate"],
                 "walk_forward_gate": checks["walk_forward_gate"],
                 "execution_gate": checks["execution_gate"],
@@ -332,6 +348,11 @@ def summarize_personal_candidate_gate(
     best_row = {}
     if not gate.empty:
         best_row = gate.sort_values(["promoted", "mean_annualized_return"], ascending=[False, False]).iloc[0].to_dict()
+        evidence_scopes = sorted(gate["evidence_scope"].dropna().astype(str).unique().tolist())
+        evidence_scope = evidence_scopes[0] if len(evidence_scopes) == 1 else "mixed:" + ",".join(evidence_scopes)
+        formal_gate_profile = bool(gate["formal_profile_gate"].fillna(False).astype(bool).all())
+        details = sorted(gate["gate_profile_detail"].dropna().astype(str).unique().tolist())
+        gate_profile_detail = details[0] if len(details) == 1 else "mixed:" + " | ".join(details)
     return {
         "run_id": run_id,
         "created_at": datetime.now().isoformat(timespec="seconds"),

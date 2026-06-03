@@ -184,6 +184,36 @@ def test_personal_gate_keeps_relaxed_short_sample_diagnostic_only() -> None:
     assert row["paper_tracking_recommendation"] == "continue_research"
 
 
+def test_personal_gate_marks_short_evidence_diagnostic_even_with_formal_thresholds() -> None:
+    gate = evaluate_personal_candidate_gates(
+        _aggregate().head(1),
+        _exposure(),
+        _meta(),
+        combined_summary=_summary(),
+        required_fee_bps=30.0,
+        required_impact_bps_per_1pct=10.0,
+        personal_capital_amount=1_000_000.0,
+        min_eval_year_count=10,
+        required_start_year=2017,
+        required_end_year=2026,
+        min_total_periods=50,
+        min_mean_annualized_return=0.05,
+        min_positive_year_rate=0.60,
+        min_weakest_year_annualized_return=-0.35,
+        max_worst_drawdown=-0.25,
+        max_proxy_mean_abs_active_exposure=1.25,
+        exposure_fields=["log_amount_mean_20d_z", "neg_volatility_20d_z", "momentum_20d_z", "turn_xsec_z"],
+    )
+
+    row = gate.iloc[0]
+    assert row["promotion_level"] == PERSONAL_BACKTEST_ONLY_LEVEL
+    assert row["evidence_scope"] == DIAGNOSTIC_PERSONAL_GATE_SCOPE
+    assert bool(row["formal_profile_gate"]) is False
+    assert "formal_profile_gate" in row["failed_gates"]
+    assert "walk_forward_gate" in row["failed_gates"]
+    assert "sample_gate" in row["failed_gates"]
+
+
 def test_personal_gate_blocks_non_prior_fit_meta() -> None:
     bad_meta = pd.DataFrame([{"eval_year": 2017, "fit_end_date": "2017-01-01", "start_date": "2017-01-01"}])
     gate = evaluate_personal_candidate_gates(
