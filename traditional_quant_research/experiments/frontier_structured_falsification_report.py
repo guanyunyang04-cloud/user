@@ -11,7 +11,11 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 
-from traditional_quant_research.experiments.frontier_promotion_gate import latest_run_dir
+from traditional_quant_research.experiments.frontier_promotion_gate import (
+    BAOSTOCK_ONLY_PROMOTION_LEVEL,
+    STRATEGY_PROMOTION_LEVEL,
+    latest_run_dir,
+)
 
 
 DEFAULT_PROMOTION_OUTPUT_ROOT = Path("traditional_quant_research/output/experiments/frontier_promotion_gate")
@@ -124,7 +128,15 @@ def run_frontier_structured_falsification_report(
 
 def build_gate_status(promotion_gate: pd.DataFrame) -> pd.DataFrame:
     columns = ["gate", "passed_rows", "failed_rows", "status"]
-    gate_columns = ["size_gate", "return_gate", "year_gate", "sample_gate", "drawdown_gate", "style_exposure_gate"]
+    gate_columns = [
+        "size_gate",
+        "true_size_gate",
+        "return_gate",
+        "year_gate",
+        "sample_gate",
+        "drawdown_gate",
+        "style_exposure_gate",
+    ]
     if promotion_gate.empty:
         return pd.DataFrame(
             [{"gate": gate, "passed_rows": 0, "failed_rows": 0, "status": "missing_promotion_rows"} for gate in gate_columns],
@@ -132,6 +144,17 @@ def build_gate_status(promotion_gate: pd.DataFrame) -> pd.DataFrame:
         )
     rows: list[dict[str, Any]] = []
     for gate in gate_columns:
+        if gate == "true_size_gate" and "size_gate_required" in promotion_gate.columns:
+            required = _truthy(promotion_gate["size_gate_required"])
+            if not required.any():
+                rows.append({"gate": gate, "passed_rows": 0, "failed_rows": 0, "status": "not_required"})
+                continue
+            scoped = promotion_gate.loc[required].copy()
+            values = _truthy(scoped[gate]) if gate in scoped.columns else pd.Series(False, index=scoped.index)
+            passed = int(values.sum())
+            failed = int((~values).sum())
+            rows.append({"gate": gate, "passed_rows": passed, "failed_rows": failed, "status": "passed" if failed == 0 else "failed"})
+            continue
         values = _truthy(promotion_gate[gate]) if gate in promotion_gate.columns else pd.Series(False, index=promotion_gate.index)
         passed = int(values.sum())
         failed = int((~values).sum())
@@ -259,7 +282,7 @@ def build_evidence_manifest(
             "frontier_promotion_gate",
             promotion_dir,
             promotion_summary,
-            evidence_grade="candidate-frontier/backtest_only" if int(promotion_summary.get("candidate_count", 0) or 0) == 0 else "promotion_review_ready",
+            evidence_grade=_promotion_evidence_grade(promotion_summary),
             research_log=Path("traditional_quant_research/research_log/2026-06-03_frontier_promotion_gate.md"),
         ),
         _manifest_row(
@@ -327,9 +350,25 @@ def summarize_structured_falsification(
     weak_year_rebuild_run_dir: Path,
 ) -> dict[str, Any]:
     candidate_count = int(promotion_summary.get("candidate_count", 0) or 0)
+    strategy_candidate_count = int(promotion_summary.get("strategy_candidate_count", 0) or 0)
+    baostock_only_candidate_count = int(promotion_summary.get("baostock_only_candidate_count", 0) or 0)
+    if not strategy_candidate_count and not baostock_only_candidate_count and candidate_count:
+        if str(promotion_summary.get("decision", "")) == "promote_strategy_candidate":
+            strategy_candidate_count = candidate_count
+        else:
+            baostock_only_candidate_count = candidate_count
     structured_falsification = bool(candidate_count == 0 and not failure_matrix.empty)
     missing_logs = evidence_manifest.loc[~evidence_manifest["research_log_exists"].astype(bool), "artifact"].astype(str).tolist()
     blocking_categories = sorted(failure_matrix["failure_type"].dropna().astype(str).unique().tolist()) if not failure_matrix.empty else []
+    if strategy_candidate_count:
+        current_evidence_grade = STRATEGY_PROMOTION_LEVEL
+        decision = "promotion_review_ready"
+    elif baostock_only_candidate_count:
+        current_evidence_grade = BAOSTOCK_ONLY_PROMOTION_LEVEL
+        decision = "baostock_only_research_review_ready"
+    else:
+        current_evidence_grade = "candidate-frontier/backtest_only"
+        decision = "structured_falsification_keep_candidate_frontier_backtest_only" if structured_falsification else "promotion_review_ready"
     return {
         "run_id": run_id,
         "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -338,10 +377,13 @@ def summarize_structured_falsification(
         "size_audit_run_dir": str(size_audit_run_dir),
         "failure_run_dir": str(failure_run_dir),
         "weak_year_rebuild_run_dir": str(weak_year_rebuild_run_dir),
+        "research_mode": str(promotion_summary.get("research_mode", "")),
         "candidate_count": candidate_count,
-        "out_of_sample_supported_count": 0 if candidate_count == 0 else candidate_count,
-        "current_evidence_grade": "candidate-frontier/backtest_only" if candidate_count == 0 else "promotion_review_ready",
-        "decision": "structured_falsification_keep_candidate_frontier_backtest_only" if structured_falsification else "promotion_review_ready",
+        "strategy_candidate_count": strategy_candidate_count,
+        "baostock_only_candidate_count": baostock_only_candidate_count,
+        "out_of_sample_supported_count": strategy_candidate_count,
+        "current_evidence_grade": current_evidence_grade,
+        "decision": decision,
         "structured_falsification_complete": structured_falsification,
         "daily_size_status": str(size_summary.get("status", "")),
         "daily_size_ready_for_research": bool(size_summary.get("daily_size_ready_for_research", False)),
@@ -357,8 +399,9 @@ def summarize_structured_falsification(
         "formal_evidence_count": int(len(evidence_manifest)),
         "limitations": [
             "This report reads existing audit artifacts and does not rerun backtests.",
-            "A structured falsification is not a strategy candidate; it is the auditable stop condition for the current frontier.",
-            "Any future upgrade must rerun daily_size audit, frontier promotion gate, and trial ledger after the blocking evidence changes.",
+            "Baostock-only research candidates do not prove true market-cap or float-cap neutrality.",
+            "A structured falsification is not a strategy candidate; it is the auditable stop condition for a failed frontier.",
+            "Any future true-size upgrade must rerun daily_size audit, frontier promotion gate, and trial ledger after the blocking evidence changes.",
         ],
     }
 
@@ -380,7 +423,10 @@ def render_structured_falsification_markdown(
             f"- run_id: `{summary.get('run_id', '')}`",
             f"- decision: `{summary.get('decision', '')}`",
             f"- current_evidence_grade: `{summary.get('current_evidence_grade', '')}`",
+            f"- research_mode: `{summary.get('research_mode', '')}`",
             f"- candidate_count: `{summary.get('candidate_count', 0)}`",
+            f"- strategy_candidate_count: `{summary.get('strategy_candidate_count', 0)}`",
+            f"- baostock_only_candidate_count: `{summary.get('baostock_only_candidate_count', 0)}`",
             f"- out_of_sample_supported_count: `{summary.get('out_of_sample_supported_count', 0)}`",
             f"- daily_size_status: `{summary.get('daily_size_status', '')}`",
             f"- daily_size_ready_for_research: `{summary.get('daily_size_ready_for_research')}`",
@@ -412,9 +458,9 @@ def render_structured_falsification_markdown(
             "",
             "## Interpretation",
             "",
-            "The current frontier is structurally falsified for promotion review: no row reaches the required evidence grade, "
-            "and the blocking gates are explicit. The project remains `candidate-frontier/backtest_only` until the listed "
-            "minimum actions produce new audited evidence and the promotion gate is rerun.",
+            "The report separates Baostock-only research readiness from true-size strategy promotion. Baostock-only rows may "
+            "advance to research review, but they remain below `strategy_candidate` until true market-cap/float-cap evidence "
+            "is available and the true-size gate is rerun.",
             "",
         ]
     )
@@ -499,7 +545,7 @@ def _failure_row(
 
 def _minimum_action_for_failure_type(failure_type: str) -> str:
     mapping = {
-        "data_size_gate": "Resolve PIT size evidence first: either make free current cross-check available and then build audited formal daily_size cache, or switch to an authenticated PIT size source before assemble --include-size.",
+        "data_size_gate": "Only required for true_size mode: build audited formal daily_size cache from an authenticated PIT size source before assemble --include-size.",
         "weak_year_return_year_gate": "Wire prior-fit weak-year regime or rebuilt factor rules into the 2017-2026 combined constraint run; do not select thresholds from eval-year returns.",
         "style_exposure_gate": "Upgrade portfolio construction from heuristic penalty to explicit exposure constraints or optimizer, then rerun basket exposure and promotion gate.",
         "optimizer_fallback": "Fix explicit optimizer feasibility so the required basket fills without Top-N fallback; rerun combined constraint, basket exposure, promotion gate, and trial ledger.",
@@ -512,7 +558,7 @@ def _minimum_action_for_failure_type(failure_type: str) -> str:
 
 def _success_evidence_for_failure_type(failure_type: str) -> str:
     mapping = {
-        "data_size_gate": "v2_daily_size_audit reports daily_size_ready_for_research=True and promotion size_gate passes.",
+        "data_size_gate": "In true_size mode, v2_daily_size_audit reports daily_size_ready_for_research=True and promotion size_gate passes.",
         "weak_year_return_year_gate": "2017-2026 combined constraint has mean/min annualized return >= 0 and positive_year_rate=1.0 at required costs.",
         "style_exposure_gate": "promotion_gate_summary shows style_exposure_gate=True and monthly mean abs active exposure <= threshold.",
         "optimizer_fallback": "promotion_gate_summary shows constraint_fallback_count=0 and style_exposure_gate=True for the required cost row.",
@@ -521,6 +567,16 @@ def _success_evidence_for_failure_type(failure_type: str) -> str:
         "promotion_evidence_missing": "promotion_gate_summary.csv exists with evaluated frontier rows and trial ledger links it.",
     }
     return mapping.get(failure_type, "The responsible gate passes in frontier_promotion_gate and is recorded in trial ledger.")
+
+
+def _promotion_evidence_grade(summary: Mapping[str, Any]) -> str:
+    if int(summary.get("strategy_candidate_count", 0) or 0) > 0:
+        return STRATEGY_PROMOTION_LEVEL
+    if int(summary.get("baostock_only_candidate_count", 0) or 0) > 0:
+        return BAOSTOCK_ONLY_PROMOTION_LEVEL
+    if int(summary.get("candidate_count", 0) or 0) > 0 and str(summary.get("decision", "")) != "promote_strategy_candidate":
+        return BAOSTOCK_ONLY_PROMOTION_LEVEL
+    return "candidate-frontier/backtest_only"
 
 
 def _manifest_row(
@@ -551,7 +607,12 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _read_optional_csv(path: Path) -> pd.DataFrame:
-    return pd.read_csv(path) if path.exists() else pd.DataFrame()
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(path)
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame()
 
 
 def _truthy(series: pd.Series) -> pd.Series:

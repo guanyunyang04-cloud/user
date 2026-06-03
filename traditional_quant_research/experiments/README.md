@@ -389,13 +389,21 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.exp
 
 ## Frontier Promotion Gate
 
-frontier 候选晋级门禁入口：
+frontier 候选晋级门禁入口，默认是 Baostock-only 研究模式：
 
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.frontier_promotion_gate --write-research-log
 ```
 
-该门禁读取当前 `low_corr_frontier_combined_constraint_audit` 的结构化输出和 `v2_daily_size_audit` 的 `summary.json`，不重跑回测。默认要求 `30 bps / 100m / 10 bps per 1 pct participation` 下收益、年度稳定、回撤、最少 `24` 个非重叠 periods、真实 `daily_size` ready、以及月度篮子风格 active exposure 均通过。最新真实 run `frontier_promotion_gate_20260603_125120` 读取 2017-2026 扩展 combined constraint 输出后，三条 frontier 均通过 `sample_gate` 和 `drawdown_gate`，但全部失败于 `size_gate`、`return_gate`、`year_gate` 和 `style_exposure_gate`；best mean annualized return 为 rolling IC 的 `0.096737`，仍不能升级为策略候选。策略候选数量为 `0`。
+该门禁读取当前 `low_corr_frontier_combined_constraint_audit` 的结构化输出和 `v2_daily_size_audit` 的 `summary.json`，不重跑回测。默认 `--research-mode baostock_only` 要求 `30 bps / 100m / 10 bps per 1 pct participation` 下收益、年度稳定、回撤、最少 `24` 个非重叠 periods、以及月度篮子风格 active exposure 均通过；真实 `daily_size` readiness 会作为 `true_size_gate` 披露，但不阻塞 Baostock-only 研究审查。若这些非 true-size gate 通过，promotion level 只能是 `candidate-frontier/baostock_only`，不能计为 `strategy_candidate` 或 `out_of_sample_supported`。
+
+true-size 策略候选审查必须显式运行：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.frontier_promotion_gate --research-mode true_size --write-research-log
+```
+
+`--research-mode true_size` 仍要求 `daily_size_ready_for_research=True`，且该证据必须来自认证 PIT `daily_size` 来源；`amount`、`volume`、`turn`、`log_amount_mean_20d_z`、CNInfo/AkShare/efinance/current quote 都不能替代 true-size gate。历史真实 run `frontier_promotion_gate_20260603_125120` 读取 2017-2026 扩展 combined constraint 输出后，三条 frontier 均通过 `sample_gate` 和 `drawdown_gate`，但失败于 `size_gate`、`return_gate`、`year_gate` 和 `style_exposure_gate`；best mean annualized return 为 rolling IC 的 `0.096737`，仍不能升级为策略候选。当前 `strategy_candidate_count=0`。
 
 ## Frontier Failure Attribution
 

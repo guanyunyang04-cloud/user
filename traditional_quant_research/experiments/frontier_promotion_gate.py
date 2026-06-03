@@ -29,6 +29,12 @@ DEFAULT_MIN_ANNUALIZED_RETURN = 0.0
 DEFAULT_MIN_POSITIVE_YEAR_RATE = 1.0
 DEFAULT_MAX_WORST_DRAWDOWN = -0.25
 DEFAULT_MAX_MONTHLY_MEAN_ABS_ACTIVE_EXPOSURE = 0.50
+RESEARCH_MODE_BAOSTOCK_ONLY = "baostock_only"
+RESEARCH_MODE_TRUE_SIZE = "true_size"
+RESEARCH_MODES = (RESEARCH_MODE_BAOSTOCK_ONLY, RESEARCH_MODE_TRUE_SIZE)
+DEFAULT_RESEARCH_MODE = RESEARCH_MODE_BAOSTOCK_ONLY
+BAOSTOCK_ONLY_PROMOTION_LEVEL = "candidate-frontier/baostock_only"
+STRATEGY_PROMOTION_LEVEL = "strategy_candidate"
 DEFAULT_EXPOSURE_FIELDS = (
     "log_amount_mean_20d_z",
     "neg_volatility_20d_z",
@@ -48,6 +54,7 @@ def run_frontier_promotion_gate(
     min_total_periods: int = DEFAULT_MIN_TOTAL_PERIODS,
     max_monthly_mean_abs_active_exposure: float = DEFAULT_MAX_MONTHLY_MEAN_ABS_ACTIVE_EXPOSURE,
     exposure_fields: Sequence[str] = DEFAULT_EXPOSURE_FIELDS,
+    research_mode: str = DEFAULT_RESEARCH_MODE,
     write_research_log: bool = False,
     research_log_path: str | Path = DEFAULT_RESEARCH_LOG,
 ) -> dict[str, Any]:
@@ -63,6 +70,7 @@ def run_frontier_promotion_gate(
         aggregate,
         exposure_summary,
         size_summary=size_summary,
+        research_mode=research_mode,
         required_impact_bps=required_impact_bps,
         required_fee_bps=required_fee_bps,
         min_eval_year_count=min_eval_year_count,
@@ -78,6 +86,7 @@ def run_frontier_promotion_gate(
         size_summary=size_summary,
         required_impact_bps=required_impact_bps,
         required_fee_bps=required_fee_bps,
+        research_mode=research_mode,
         min_total_periods=min_total_periods,
         max_monthly_mean_abs_active_exposure=max_monthly_mean_abs_active_exposure,
     )
@@ -98,6 +107,7 @@ def evaluate_promotion_gates(
     exposure_summary: pd.DataFrame,
     *,
     size_summary: Mapping[str, Any],
+    research_mode: str = DEFAULT_RESEARCH_MODE,
     required_impact_bps: float,
     required_fee_bps: float,
     min_eval_year_count: int,
@@ -107,6 +117,7 @@ def evaluate_promotion_gates(
 ) -> pd.DataFrame:
     if aggregate.empty:
         return pd.DataFrame(columns=_gate_columns())
+    mode = _normalize_research_mode(research_mode)
     frame = aggregate.copy()
     for column in [
         "impact_bps_per_1pct",
@@ -134,7 +145,9 @@ def evaluate_promotion_gates(
         & np.isclose(frame.get("fee_bps", np.nan), required_fee_bps)
     ].copy()
     rows: list[dict[str, Any]] = []
-    size_gate = bool(size_summary.get("daily_size_ready_for_research", False))
+    true_size_gate = bool(size_summary.get("daily_size_ready_for_research", False))
+    size_gate_required = mode == RESEARCH_MODE_TRUE_SIZE
+    size_gate = true_size_gate if size_gate_required else True
     for row in frame.to_dict("records"):
         signal = str(row.get("signal", ""))
         constraint_variant = str(row.get("constraint_variant", "baseline") or "baseline")
@@ -164,8 +177,10 @@ def evaluate_promotion_gates(
             "style_exposure_gate": exposure_gate,
         }
         failed = [name for name, passed in checks.items() if not passed]
+        promotion_level = _promotion_level_for_mode(mode, passed=not failed)
         rows.append(
             {
+                "research_mode": mode,
                 "constraint_variant": constraint_variant,
                 "signal": signal,
                 "impact_bps_per_1pct": float(row.get("impact_bps_per_1pct", np.nan)),
@@ -179,6 +194,8 @@ def evaluate_promotion_gates(
                 "worst_max_drawdown": float(row.get("worst_max_drawdown", np.nan)),
                 "total_periods": int(float(row.get("total_periods", 0) or 0)),
                 "max_monthly_mean_abs_active_exposure": max_abs_exposure,
+                "size_gate_required": size_gate_required,
+                "true_size_gate": true_size_gate,
                 "size_gate": checks["size_gate"],
                 "return_gate": checks["return_gate"],
                 "year_gate": checks["year_gate"],
@@ -188,7 +205,7 @@ def evaluate_promotion_gates(
                 "promoted": not failed,
                 "failed_gates": ",".join(failed),
                 "exposure_failures": ",".join(exposure_failures),
-                "promotion_level": "strategy_candidate" if not failed else "candidate-frontier/backtest_only",
+                "promotion_level": promotion_level,
             }
         )
     return pd.DataFrame(rows, columns=_gate_columns())
@@ -203,10 +220,14 @@ def summarize_promotion_gate(
     size_summary: Mapping[str, Any],
     required_impact_bps: float,
     required_fee_bps: float,
+    research_mode: str,
     min_total_periods: int,
     max_monthly_mean_abs_active_exposure: float,
 ) -> dict[str, Any]:
+    mode = _normalize_research_mode(research_mode)
     promoted = gate.loc[gate["promoted"]] if not gate.empty else pd.DataFrame()
+    strategy_candidates = gate.loc[gate["promotion_level"].astype(str).eq(STRATEGY_PROMOTION_LEVEL)] if not gate.empty else pd.DataFrame()
+    baostock_only_candidates = gate.loc[gate["promotion_level"].astype(str).eq(BAOSTOCK_ONLY_PROMOTION_LEVEL)] if not gate.empty else pd.DataFrame()
     fail_counter: Counter[str] = Counter()
     if not gate.empty:
         for item in gate["failed_gates"].dropna().astype(str):
@@ -219,6 +240,7 @@ def summarize_promotion_gate(
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "combined_run_dir": str(combined_run_dir),
         "size_audit_run_dir": str(size_audit_run_dir),
+        "research_mode": mode,
         "required_impact_bps": required_impact_bps,
         "required_fee_bps": required_fee_bps,
         "min_total_periods": min_total_periods,
@@ -227,7 +249,9 @@ def summarize_promotion_gate(
         "daily_size_status": str(size_summary.get("status", "")),
         "evaluated_rows": int(len(gate)),
         "candidate_count": int(len(promoted)),
-        "decision": "promote_strategy_candidate" if len(promoted) else "keep_candidate_frontier_backtest_only",
+        "strategy_candidate_count": int(len(strategy_candidates)),
+        "baostock_only_candidate_count": int(len(baostock_only_candidates)),
+        "decision": _decision_for_mode(mode, promoted_count=len(promoted)),
         "best_signal_by_return": str(best_row.get("signal", "")),
         "best_signal_mean_annualized_return": float(best_row.get("mean_annualized_return", np.nan))
         if best_row
@@ -235,8 +259,8 @@ def summarize_promotion_gate(
         "top_failed_gates": dict(fail_counter.most_common()),
         "limitations": [
             "Promotion gate uses current structured audit outputs; it does not rerun backtests.",
-            "Passing this gate would still require independent review before production deployment.",
-            "Current true size control depends on daily_size_ready_for_research.",
+            "Baostock-only research mode does not require true market-cap or float-cap data, but it cannot prove true size neutrality.",
+            "Only true_size mode with daily_size_ready_for_research=True can produce strategy_candidate evidence.",
         ],
     }
 
@@ -247,7 +271,10 @@ def render_promotion_gate_markdown(summary: Mapping[str, Any], gate: pd.DataFram
         "",
         f"- run_id: `{summary.get('run_id', '')}`",
         f"- decision: `{summary.get('decision', '')}`",
+        f"- research_mode: `{summary.get('research_mode', '')}`",
         f"- candidate_count: `{summary.get('candidate_count', 0)}`",
+        f"- strategy_candidate_count: `{summary.get('strategy_candidate_count', 0)}`",
+        f"- baostock_only_candidate_count: `{summary.get('baostock_only_candidate_count', 0)}`",
         f"- daily_size_status: `{summary.get('daily_size_status', '')}`",
         f"- daily_size_ready_for_research: `{summary.get('daily_size_ready_for_research')}`",
         f"- required_impact_bps: `{summary.get('required_impact_bps')}`",
@@ -268,8 +295,9 @@ def render_promotion_gate_markdown(summary: Mapping[str, Any], gate: pd.DataFram
     lines.extend(["", "## Gate Summary", "", _markdown_table(gate), "", "## Interpretation", ""])
     lines.append(
         "This gate is a promotion decision layer. Positive constrained returns alone are insufficient: "
-        "the frontier must also have enough independent periods, execution/cost evidence, true size readiness, "
-        "and controlled active exposures. Rows that fail remain `candidate-frontier/backtest_only`."
+        "the frontier must also have enough independent periods, execution/cost evidence, and controlled active exposures. "
+        "In `baostock_only` mode, true size readiness is disclosed but not required; in `true_size` mode, "
+        "daily_size_ready_for_research is required for `strategy_candidate` evidence."
     )
     lines.append("")
     return "\n".join(lines)
@@ -338,8 +366,32 @@ def _style_exposure_gate(
     return len(failures) == 0, max_abs, failures
 
 
+def _normalize_research_mode(value: str) -> str:
+    mode = str(value or DEFAULT_RESEARCH_MODE).strip().lower()
+    if mode not in RESEARCH_MODES:
+        raise ValueError(f"unsupported research_mode: {value!r}")
+    return mode
+
+
+def _promotion_level_for_mode(mode: str, *, passed: bool) -> str:
+    if not passed:
+        return "candidate-frontier/backtest_only"
+    if mode == RESEARCH_MODE_TRUE_SIZE:
+        return STRATEGY_PROMOTION_LEVEL
+    return BAOSTOCK_ONLY_PROMOTION_LEVEL
+
+
+def _decision_for_mode(mode: str, *, promoted_count: int) -> str:
+    if not promoted_count:
+        return "keep_candidate_frontier_backtest_only"
+    if mode == RESEARCH_MODE_TRUE_SIZE:
+        return "promote_strategy_candidate"
+    return "promote_baostock_only_research_candidate"
+
+
 def _gate_columns() -> list[str]:
     return [
+        "research_mode",
         "constraint_variant",
         "signal",
         "impact_bps_per_1pct",
@@ -353,6 +405,8 @@ def _gate_columns() -> list[str]:
         "worst_max_drawdown",
         "total_periods",
         "max_monthly_mean_abs_active_exposure",
+        "size_gate_required",
+        "true_size_gate",
         "size_gate",
         "return_gate",
         "year_gate",
@@ -410,6 +464,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--combined-run-dir", default=None)
     parser.add_argument("--size-audit-run-dir", default=None)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--research-mode", choices=RESEARCH_MODES, default=DEFAULT_RESEARCH_MODE)
     parser.add_argument("--required-impact-bps", type=float, default=DEFAULT_REQUIRED_IMPACT_BPS)
     parser.add_argument("--required-fee-bps", type=float, default=DEFAULT_REQUIRED_FEE_BPS)
     parser.add_argument("--min-total-periods", type=int, default=DEFAULT_MIN_TOTAL_PERIODS)
@@ -431,6 +486,7 @@ def main() -> None:
         output_dir=args.output_dir,
         required_impact_bps=args.required_impact_bps,
         required_fee_bps=args.required_fee_bps,
+        research_mode=args.research_mode,
         min_total_periods=args.min_total_periods,
         max_monthly_mean_abs_active_exposure=args.max_monthly_mean_abs_active_exposure,
         write_research_log=bool(args.write_research_log),

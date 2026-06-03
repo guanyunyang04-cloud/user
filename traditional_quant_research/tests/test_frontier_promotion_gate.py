@@ -49,11 +49,12 @@ def _exposure(value: float = 0.20, constraint_variant: str = "baseline") -> pd.D
     )
 
 
-def test_promotion_gate_promotes_only_when_all_gates_pass() -> None:
+def test_promotion_gate_true_size_promotes_strategy_candidate_when_all_gates_pass() -> None:
     gate = evaluate_promotion_gates(
         _aggregate(),
         _exposure(),
         size_summary={"daily_size_ready_for_research": True},
+        research_mode="true_size",
         required_impact_bps=10.0,
         required_fee_bps=30.0,
         min_eval_year_count=3,
@@ -64,15 +65,41 @@ def test_promotion_gate_promotes_only_when_all_gates_pass() -> None:
 
     row = gate.iloc[0]
     assert bool(row["promoted"]) is True
+    assert bool(row["size_gate_required"]) is True
+    assert bool(row["true_size_gate"]) is True
     assert row["promotion_level"] == "strategy_candidate"
     assert row["failed_gates"] == ""
 
 
-def test_promotion_gate_blocks_missing_size_short_sample_and_exposure() -> None:
+def test_promotion_gate_baostock_only_allows_missing_true_size_but_discloses_it() -> None:
+    gate = evaluate_promotion_gates(
+        _aggregate(),
+        _exposure(),
+        size_summary={"daily_size_ready_for_research": False},
+        required_impact_bps=10.0,
+        required_fee_bps=30.0,
+        min_eval_year_count=3,
+        min_total_periods=24,
+        max_monthly_mean_abs_active_exposure=0.5,
+        exposure_fields=["log_amount_mean_20d_z", "neg_volatility_20d_z", "momentum_20d_z", "turn_xsec_z"],
+    )
+
+    row = gate.iloc[0]
+    assert row["research_mode"] == "baostock_only"
+    assert bool(row["promoted"]) is True
+    assert bool(row["size_gate_required"]) is False
+    assert bool(row["true_size_gate"]) is False
+    assert bool(row["size_gate"]) is True
+    assert row["promotion_level"] == "candidate-frontier/baostock_only"
+    assert row["failed_gates"] == ""
+
+
+def test_promotion_gate_true_size_blocks_missing_size_short_sample_and_exposure() -> None:
     gate = evaluate_promotion_gates(
         _aggregate(total_periods=18),
         _exposure(value=0.9),
         size_summary={"daily_size_ready_for_research": False},
+        research_mode="true_size",
         required_impact_bps=10.0,
         required_fee_bps=30.0,
         min_eval_year_count=3,
@@ -143,6 +170,7 @@ def test_promotion_gate_matches_exposure_by_constraint_variant() -> None:
     regime = gate.loc[gate["constraint_variant"].eq("regime_gated")].iloc[0]
     assert bool(baseline["style_exposure_gate"]) is False
     assert bool(regime["promoted"]) is True
+    assert regime["promotion_level"] == "candidate-frontier/baostock_only"
 
 
 def test_run_frontier_promotion_gate_writes_artifacts(tmp_path: Path) -> None:
@@ -168,7 +196,8 @@ def test_run_frontier_promotion_gate_writes_artifacts(tmp_path: Path) -> None:
     run_dir = Path(result["run_dir"])
     assert result["candidate_count"] == 0
     assert result["decision"] == "keep_candidate_frontier_backtest_only"
-    assert result["top_failed_gates"]["size_gate"] == 1
+    assert "size_gate" not in result["top_failed_gates"]
+    assert result["top_failed_gates"]["sample_gate"] == 1
     assert (run_dir / "promotion_gate_summary.csv").exists()
     assert (run_dir / "summary.json").exists()
     assert (tmp_path / "gate.md").exists()

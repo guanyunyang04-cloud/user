@@ -136,6 +136,48 @@ def test_trial_ledger_merges_promotion_by_constraint_variant() -> None:
     assert regime["promotion_level"] == "strategy_candidate"
 
 
+def test_trial_ledger_separates_baostock_only_research_from_strategy_candidate() -> None:
+    promotion = pd.DataFrame(
+        [
+            {
+                "research_mode": "baostock_only",
+                "constraint_variant": "regime_gated",
+                "signal": "signal_b",
+                "exposure_penalty_strength": 0.50,
+                "promotion_level": "candidate-frontier/baostock_only",
+                "failed_gates": "",
+                "size_gate": "True",
+                "true_size_gate": "False",
+                "promoted": "True",
+            }
+        ]
+    )
+
+    ledger = ledger_exp.build_trial_ledger(_aggregate(), promotion)
+    selection = ledger_exp.build_selection_bias_report(ledger)
+    maturity = ledger_exp.build_research_maturity_report(ledger, selection, promotion)
+    summary = ledger_exp.summarize_trial_ledger(
+        ledger,
+        selection,
+        maturity,
+        run_id="ledger",
+        combined_run_dir=Path("combined"),
+        promotion_run_dir=Path("promotion"),
+        failure_run_dir=None,
+    )
+
+    row = ledger.loc[ledger["signal"].eq("signal_b")].iloc[0]
+    assert row["research_mode"] == "baostock_only"
+    assert row["promotion_level"] == "candidate-frontier/baostock_only"
+    assert row["evidence_grade"] == "baostock_only_research_candidate"
+    assert maturity.loc[maturity["dimension"].eq("baostock_only_research_readiness"), "status"].iloc[0] == "passed"
+    assert maturity.loc[maturity["dimension"].eq("strategy_candidate_readiness"), "status"].iloc[0] == "blocked"
+    assert summary["decision"] == "baostock_only_research_review_ready"
+    assert summary["candidate_count"] == 1
+    assert summary["baostock_only_candidate_count"] == 1
+    assert summary["strategy_candidate_count"] == 0
+
+
 def test_run_frontier_trial_ledger_writes_governance_artifacts(tmp_path: Path) -> None:
     combined = tmp_path / "combined"
     promotion = tmp_path / "promotion"

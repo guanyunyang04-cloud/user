@@ -11,7 +11,11 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 
-from traditional_quant_research.experiments.frontier_promotion_gate import latest_run_dir
+from traditional_quant_research.experiments.frontier_promotion_gate import (
+    BAOSTOCK_ONLY_PROMOTION_LEVEL,
+    STRATEGY_PROMOTION_LEVEL,
+    latest_run_dir,
+)
 
 
 DEFAULT_COMBINED_OUTPUT_ROOT = Path(
@@ -77,6 +81,7 @@ def build_trial_ledger(aggregate: pd.DataFrame, promotion: pd.DataFrame | None =
     columns = [
         "trial_id",
         "experiment_family",
+        "research_mode",
         "constraint_variant",
         "signal",
         "fee_bps",
@@ -115,6 +120,8 @@ def build_trial_ledger(aggregate: pd.DataFrame, promotion: pd.DataFrame | None =
             frame[column] = pd.to_numeric(frame[column], errors="coerce")
     if "constraint_variant" not in frame.columns:
         frame["constraint_variant"] = "baseline"
+    if "research_mode" not in frame.columns:
+        frame["research_mode"] = ""
     if "constraint_fallback_count" not in frame.columns:
         frame["constraint_fallback_count"] = 0
     if "constraint_fallback_rate" not in frame.columns:
@@ -132,7 +139,18 @@ def build_trial_ledger(aggregate: pd.DataFrame, promotion: pd.DataFrame | None =
         promo = promotion.copy()
         if "constraint_variant" not in promo.columns:
             promo["constraint_variant"] = "baseline"
-        promo = promo[["constraint_variant", "signal", "exposure_penalty_strength", "promotion_level", "failed_gates"]].copy()
+        if "research_mode" not in promo.columns:
+            promo["research_mode"] = ""
+        promo = promo[
+            [
+                "research_mode",
+                "constraint_variant",
+                "signal",
+                "exposure_penalty_strength",
+                "promotion_level",
+                "failed_gates",
+            ]
+        ].copy()
         promo["exposure_penalty_strength"] = pd.to_numeric(promo["exposure_penalty_strength"], errors="coerce")
         frame = frame.merge(
             promo,
@@ -140,14 +158,17 @@ def build_trial_ledger(aggregate: pd.DataFrame, promotion: pd.DataFrame | None =
             how="left",
             suffixes=("", "_gate"),
         )
+        frame["research_mode"] = frame["research_mode_gate"].fillna(frame["research_mode"])
         frame["promotion_level"] = frame["promotion_level_gate"].fillna(frame["promotion_level"])
         frame["failed_gates"] = frame["failed_gates_gate"].fillna("")
     selected_idx = frame["mean_annualized_return"].astype(float).idxmax()
     frame["used_for_selection"] = False
     if pd.notna(selected_idx):
         frame.loc[selected_idx, "used_for_selection"] = True
-    promoted_mask = frame["promotion_level"].astype(str).eq("strategy_candidate")
+    promoted_mask = frame["promotion_level"].astype(str).eq(STRATEGY_PROMOTION_LEVEL)
     frame.loc[promoted_mask, "evidence_grade"] = "strategy_candidate"
+    baostock_mask = frame["promotion_level"].astype(str).eq(BAOSTOCK_ONLY_PROMOTION_LEVEL)
+    frame.loc[baostock_mask, "evidence_grade"] = "baostock_only_research_candidate"
     return frame.reindex(columns=columns).reset_index(drop=True)
 
 
@@ -207,8 +228,21 @@ def build_research_maturity_report(
 ) -> pd.DataFrame:
     """Score the current research program against common researcher tiers."""
 
-    size_gate = bool(promotion is not None and not promotion.empty and _truthy(promotion.get("size_gate", pd.Series(dtype=object))).any())
-    promoted = bool(promotion is not None and not promotion.empty and _truthy(promotion.get("promoted", pd.Series(dtype=object))).any())
+    true_size_gate = bool(
+        promotion is not None
+        and not promotion.empty
+        and _truthy(promotion.get("true_size_gate", pd.Series(dtype=object))).any()
+    )
+    strategy_candidate = bool(
+        promotion is not None
+        and not promotion.empty
+        and promotion.get("promotion_level", pd.Series(dtype=object)).astype(str).eq(STRATEGY_PROMOTION_LEVEL).any()
+    )
+    baostock_only_candidate = bool(
+        promotion is not None
+        and not promotion.empty
+        and promotion.get("promotion_level", pd.Series(dtype=object)).astype(str).eq(BAOSTOCK_ONLY_PROMOTION_LEVEL).any()
+    )
     trial_ledger_ready = bool(not ledger.empty)
     selection_bias_visible = bool(not selection_bias.empty)
     rows = [
@@ -224,13 +258,18 @@ def build_research_maturity_report(
         },
         {
             "dimension": "professional_quant_standard",
-            "status": "partial" if size_gate else "blocked",
+            "status": "partial" if true_size_gate else "blocked",
             "evidence": "True size/float-size, optimizer-grade risk controls and paper/live shadow evidence are not yet complete.",
         },
         {
+            "dimension": "baostock_only_research_readiness",
+            "status": "passed" if baostock_only_candidate or strategy_candidate else "blocked",
+            "evidence": "Baostock-only research can advance when return, year, sample, drawdown and proxy-style exposure gates pass; true size neutrality remains unproven.",
+        },
+        {
             "dimension": "strategy_candidate_readiness",
-            "status": "passed" if promoted else "blocked",
-            "evidence": "Promotion gate must pass all size, return, year, sample, drawdown and style-exposure gates before candidate upgrade.",
+            "status": "passed" if strategy_candidate else "blocked",
+            "evidence": "Strategy candidate readiness requires true_size mode, daily_size_ready_for_research, and all return/year/sample/drawdown/style gates.",
         },
         {
             "dimension": "governance_visibility",
@@ -251,7 +290,15 @@ def summarize_trial_ledger(
     promotion_run_dir: Path | None,
     failure_run_dir: Path | None,
 ) -> dict[str, Any]:
-    promoted_ready = bool((maturity["dimension"].eq("strategy_candidate_readiness") & maturity["status"].eq("passed")).any())
+    strategy_candidate_count = int(ledger["promotion_level"].astype(str).eq(STRATEGY_PROMOTION_LEVEL).sum()) if not ledger.empty else 0
+    baostock_only_candidate_count = int(ledger["promotion_level"].astype(str).eq(BAOSTOCK_ONLY_PROMOTION_LEVEL).sum()) if not ledger.empty else 0
+    candidate_count = strategy_candidate_count + baostock_only_candidate_count
+    if strategy_candidate_count:
+        decision = "promotion_review_ready"
+    elif baostock_only_candidate_count:
+        decision = "baostock_only_research_review_ready"
+    else:
+        decision = "keep_candidate_frontier_backtest_only"
     return {
         "run_id": run_id,
         "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -261,8 +308,10 @@ def summarize_trial_ledger(
         "trial_count": int(len(ledger)),
         "selection_bias_report_count": int(len(selection_bias)),
         "maturity_dimension_count": int(len(maturity)),
-        "candidate_count": int(promoted_ready),
-        "decision": "promotion_review_ready" if promoted_ready else "keep_candidate_frontier_backtest_only",
+        "candidate_count": candidate_count,
+        "strategy_candidate_count": strategy_candidate_count,
+        "baostock_only_candidate_count": baostock_only_candidate_count,
+        "decision": decision,
     }
 
 
@@ -279,6 +328,8 @@ def render_trial_ledger_markdown(
             f"- decision: `{summary.get('decision', '')}`",
             f"- trial_count: `{summary.get('trial_count', 0)}`",
             f"- candidate_count: `{summary.get('candidate_count', 0)}`",
+            f"- strategy_candidate_count: `{summary.get('strategy_candidate_count', 0)}`",
+            f"- baostock_only_candidate_count: `{summary.get('baostock_only_candidate_count', 0)}`",
             "",
             "## Selection Bias Report",
             "",
