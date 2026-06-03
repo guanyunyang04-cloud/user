@@ -165,6 +165,7 @@ def build_paper_tracking_candidates(
         "total_periods",
         "eval_year_count",
         "max_proxy_mean_abs_active_exposure",
+        "top_n",
     ]:
         if column in candidates.columns:
             candidates[column] = pd.to_numeric(candidates[column], errors="coerce")
@@ -174,7 +175,8 @@ def build_paper_tracking_candidates(
         signal = str(row.get("signal", ""))
         variant = str(row.get("constraint_variant", "baseline") or "baseline")
         strength = float(row.get("exposure_penalty_strength", 0.0) or 0.0)
-        candidate_id = _candidate_id(signal=signal, constraint_variant=variant, exposure_penalty_strength=strength)
+        top_n = _optional_int(row.get("top_n", combined_summary.get("top_n")))
+        candidate_id = _candidate_id(signal=signal, constraint_variant=variant, exposure_penalty_strength=strength, top_n=top_n)
         rows.append(
             {
                 "candidate_id": candidate_id,
@@ -194,7 +196,7 @@ def build_paper_tracking_candidates(
                 "personal_capital_amount": float(row.get("personal_capital_amount", np.nan)),
                 "horizon": _optional_int(combined_summary.get("horizon")),
                 "rebalance_frequency": str(combined_summary.get("rebalance_frequency", "")),
-                "top_n": _optional_int(combined_summary.get("top_n")),
+                "top_n": top_n,
                 "buffer_multiplier": _optional_float(combined_summary.get("buffer_multiplier")),
                 "mean_annualized_return": float(row.get("mean_annualized_return", np.nan)),
                 "min_annualized_return": float(row.get("min_annualized_return", np.nan)),
@@ -518,8 +520,9 @@ def _log_template_columns() -> list[str]:
     ]
 
 
-def _candidate_id(*, signal: str, constraint_variant: str, exposure_penalty_strength: float) -> str:
-    raw = f"{signal}__{constraint_variant}__penalty_{exposure_penalty_strength:g}"
+def _candidate_id(*, signal: str, constraint_variant: str, exposure_penalty_strength: float, top_n: int | None = None) -> str:
+    top_n_part = f"__top{top_n}" if top_n is not None else ""
+    raw = f"{signal}__{constraint_variant}__penalty_{exposure_penalty_strength:g}{top_n_part}"
     return _safe_token(raw)
 
 

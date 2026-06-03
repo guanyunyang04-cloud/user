@@ -25,6 +25,7 @@ def _gate(promoted: bool = True) -> pd.DataFrame:
                 "impact_bps_per_1pct": 10.0,
                 "personal_capital_amount": 1_000_000.0,
                 "exposure_penalty_strength": 0.25,
+                "top_n": 200,
                 "mean_annualized_return": 0.10,
                 "min_annualized_return": -0.30,
                 "positive_year_rate": 0.60,
@@ -66,13 +67,26 @@ def test_build_paper_tracking_candidates_from_personal_backtest_candidate() -> N
 
     assert len(candidates) == 1
     row = candidates.iloc[0]
-    assert row["candidate_id"] == "multifactor_rolling_ic_weighted_score_baseline_penalty_0_25"
+    assert row["candidate_id"] == "multifactor_rolling_ic_weighted_score_baseline_penalty_0_25_top200"
     assert row["tracking_status"] == BOOTSTRAPPED_TRACKING_STATUS
     assert row["current_level"] == "personal_backtest_candidate"
     assert row["target_next_level"] == PERSONAL_PAPER_CANDIDATE_LEVEL
     assert bool(row["paper_tracking_started"]) is False
     assert bool(row["personal_paper_candidate"]) is False
     assert bool(row["strategy_candidate"]) is False
+
+
+def test_build_paper_tracking_candidates_keeps_top_n_ids_distinct() -> None:
+    gate = pd.concat([_gate(), _gate()], ignore_index=True)
+    gate.loc[0, "top_n"] = 20
+    gate.loc[1, "top_n"] = 50
+
+    candidates = build_paper_tracking_candidates(gate, _gate_summary(), _combined_summary())
+
+    assert set(candidates["candidate_id"]) == {
+        "multifactor_rolling_ic_weighted_score_baseline_penalty_0_25_top20",
+        "multifactor_rolling_ic_weighted_score_baseline_penalty_0_25_top50",
+    }
 
 
 def test_build_paper_tracking_protocol_keeps_personal_boundary() -> None:

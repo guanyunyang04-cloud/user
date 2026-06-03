@@ -42,7 +42,12 @@ from traditional_quant_research.experiments.low_corr_frontier_combined_constrain
     DEFAULT_ROLLING_WINDOW,
     DEFAULT_SIGNAL_PENALTY_STRENGTHS,
     LABEL_MODES,
+    best_combined_rows,
+    render_combined_constraint_markdown,
     run_low_corr_frontier_combined_constraint_audit,
+    summarize_combined_basket_exposure,
+    summarize_combined_constraint_audit,
+    summarize_combined_industry_exposure,
 )
 
 
@@ -129,72 +134,95 @@ def run_frontier_personal_protocol_grid(
     run_dir = Path(output_dir) / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    protocol_runs: list[dict[str, Any]] = []
-    for top_n in selected_top_n:
-        protocol_dir = run_dir / f"top_n_{top_n}"
-        combined_output_dir = protocol_dir / "combined_constraint"
-        personal_gate_output_dir = protocol_dir / "personal_candidate_gate"
-        combined_result = run_low_corr_frontier_combined_constraint_audit(
-            root=root,
-            years=selected_years,
-            final_end_date=final_end_date,
-            horizon=horizon,
-            label_mode=label_mode,
-            max_factor_corr=max_factor_corr,
-            rolling_window=rolling_window,
-            rolling_min_periods=rolling_min_periods,
-            signals=selected_signals,
-            signal_penalty_strengths=signal_penalty_strengths,
-            top_n=int(top_n),
-            rebalance_frequency=rebalance_frequency,
-            buffer_multiplier=buffer_multiplier,
-            fee_bps_values=fee_values,
-            capital_amounts=capital_values,
-            impact_bps_per_1pct_values=impact_values,
-            exposure_penalty_cols=penalty_cols,
-            exposure_columns=exposure_cols,
-            exposure_constraint_cols=constraint_cols,
-            max_abs_exposure=max_abs_exposure,
-            group_col=group_col,
-            max_group_weight=max_group_weight,
-            execution_constraints=execution_constraints,
-            limit_threshold=limit_threshold,
-            include_metrics=include_metrics,
-            include_industry=include_industry,
-            weak_year_rebuild_run_dir=weak_year_rebuild_run_dir,
-            constraint_variants=selected_variants,
-            output_dir=combined_output_dir,
-            write_research_log=False,
-        )
-        combined_run_dir = Path(str(combined_result["output_dir"]))
-        personal_gate_result = run_frontier_personal_candidate_gate(
-            combined_run_dir=combined_run_dir,
-            output_dir=personal_gate_output_dir,
-            required_fee_bps=required_fee_bps,
-            required_impact_bps_per_1pct=required_impact_bps_per_1pct,
-            personal_capital_amount=personal_capital_amount,
-            min_eval_year_count=min_eval_year_count,
-            required_start_year=required_start_year,
-            required_end_year=required_end_year,
-            min_total_periods=min_total_periods,
-            min_mean_annualized_return=min_mean_annualized_return,
-            min_positive_year_rate=min_positive_year_rate,
-            min_weakest_year_annualized_return=min_weakest_year_annualized_return,
-            max_worst_drawdown=max_worst_drawdown,
-            max_proxy_mean_abs_active_exposure=max_proxy_mean_abs_active_exposure,
-            write_research_log=False,
-        )
-        personal_gate_run_dir = Path(str(personal_gate_result["run_dir"]))
-        gate_path = personal_gate_run_dir / "personal_candidate_gate_summary.csv"
-        gate = pd.read_csv(gate_path) if gate_path.exists() else pd.DataFrame()
-        protocol_runs.append(
-            {
-                "top_n": int(top_n),
-                "combined_result": combined_result,
-                "personal_gate_result": personal_gate_result,
-                "gate": gate,
-            }
-        )
+    yearly_results = run_yearly_combined_constraint_grid(
+        root=root,
+        years=selected_years,
+        final_end_date=final_end_date,
+        horizon=horizon,
+        label_mode=label_mode,
+        max_factor_corr=max_factor_corr,
+        rolling_window=rolling_window,
+        rolling_min_periods=rolling_min_periods,
+        signals=selected_signals,
+        signal_penalty_strengths=signal_penalty_strengths,
+        top_n_values=selected_top_n,
+        rebalance_frequency=rebalance_frequency,
+        buffer_multiplier=buffer_multiplier,
+        fee_bps_values=fee_values,
+        capital_amounts=capital_values,
+        impact_bps_per_1pct_values=impact_values,
+        exposure_penalty_cols=penalty_cols,
+        exposure_columns=exposure_cols,
+        exposure_constraint_cols=constraint_cols,
+        max_abs_exposure=max_abs_exposure,
+        group_col=group_col,
+        max_group_weight=max_group_weight,
+        execution_constraints=execution_constraints,
+        limit_threshold=limit_threshold,
+        include_metrics=include_metrics,
+        include_industry=include_industry,
+        weak_year_rebuild_run_dir=weak_year_rebuild_run_dir,
+        constraint_variants=selected_variants,
+        output_dir=run_dir / "yearly_combined_constraint",
+        progress_path=run_dir / "personal_protocol_grid_progress.csv",
+    )
+    combined_result = merge_yearly_combined_constraint_runs(
+        yearly_results,
+        output_dir=run_dir / "combined_constraint_merged",
+        run_id=f"{run_id}_combined_merged",
+        years=selected_years,
+        final_end_date=final_end_date,
+        horizon=horizon,
+        label_mode=label_mode,
+        rolling_window=rolling_window,
+        rolling_min_periods=rolling_min_periods,
+        signals=selected_signals,
+        top_n_values=selected_top_n,
+        rebalance_frequency=rebalance_frequency,
+        buffer_multiplier=buffer_multiplier,
+        fee_bps_values=fee_values,
+        capital_amounts=capital_values,
+        impact_bps_per_1pct_values=impact_values,
+        execution_constraints=execution_constraints,
+        limit_threshold=limit_threshold,
+        include_metrics=include_metrics,
+        include_industry=include_industry,
+        group_col=group_col,
+        max_group_weight=max_group_weight,
+        exposure_penalty_cols=penalty_cols,
+        exposure_constraint_cols=constraint_cols,
+        max_abs_exposure=max_abs_exposure,
+        constraint_variants=selected_variants,
+        weak_year_rebuild_run_dir=weak_year_rebuild_run_dir,
+    )
+    combined_run_dir = Path(str(combined_result["output_dir"]))
+    personal_gate_result = run_frontier_personal_candidate_gate(
+        combined_run_dir=combined_run_dir,
+        output_dir=run_dir / "personal_candidate_gate",
+        required_fee_bps=required_fee_bps,
+        required_impact_bps_per_1pct=required_impact_bps_per_1pct,
+        personal_capital_amount=personal_capital_amount,
+        min_eval_year_count=min_eval_year_count,
+        required_start_year=required_start_year,
+        required_end_year=required_end_year,
+        min_total_periods=min_total_periods,
+        min_mean_annualized_return=min_mean_annualized_return,
+        min_positive_year_rate=min_positive_year_rate,
+        min_weakest_year_annualized_return=min_weakest_year_annualized_return,
+        max_worst_drawdown=max_worst_drawdown,
+        max_proxy_mean_abs_active_exposure=max_proxy_mean_abs_active_exposure,
+        write_research_log=False,
+    )
+    personal_gate_run_dir = Path(str(personal_gate_result["run_dir"]))
+    gate_path = personal_gate_run_dir / "personal_candidate_gate_summary.csv"
+    gate = pd.read_csv(gate_path) if gate_path.exists() else pd.DataFrame()
+    protocol_runs: list[dict[str, Any]] = [
+        {
+            "combined_result": combined_result,
+            "personal_gate_result": personal_gate_result,
+            "gate": gate,
+        }
+    ]
 
     ledger = rank_protocol_ledger(build_personal_protocol_ledger(protocol_runs))
     top_n_summary = build_top_n_summary(ledger)
@@ -226,13 +254,236 @@ def run_frontier_personal_protocol_grid(
     return {**summary, "run_dir": str(run_dir), "research_log": str(research_log_path) if write_research_log else None}
 
 
+def run_yearly_combined_constraint_grid(
+    *,
+    root: str | None,
+    years: Sequence[int],
+    final_end_date: str | None,
+    horizon: int,
+    label_mode: str,
+    max_factor_corr: float,
+    rolling_window: int,
+    rolling_min_periods: int,
+    signals: Sequence[str],
+    signal_penalty_strengths: Mapping[str, float] | Sequence[str] | str,
+    top_n_values: Sequence[int],
+    rebalance_frequency: str,
+    buffer_multiplier: float,
+    fee_bps_values: Sequence[float],
+    capital_amounts: Sequence[float],
+    impact_bps_per_1pct_values: Sequence[float],
+    exposure_penalty_cols: Sequence[str],
+    exposure_columns: Sequence[str],
+    exposure_constraint_cols: Sequence[str],
+    max_abs_exposure: float | None,
+    group_col: str | None,
+    max_group_weight: float | None,
+    execution_constraints: bool,
+    limit_threshold: float,
+    include_metrics: bool,
+    include_industry: bool,
+    weak_year_rebuild_run_dir: str | Path | None,
+    constraint_variants: Sequence[str] | None,
+    output_dir: str | Path,
+    progress_path: str | Path,
+) -> list[dict[str, Any]]:
+    """Run each eval year separately so long protocol grids leave resumable evidence."""
+
+    output_root = Path(output_dir)
+    output_root.mkdir(parents=True, exist_ok=True)
+    progress = Path(progress_path)
+    rows: list[dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
+    for year in years:
+        started_at = datetime.now().isoformat(timespec="seconds")
+        rows.append(
+            {
+                "eval_year": int(year),
+                "status": "running",
+                "started_at": started_at,
+                "finished_at": "",
+                "combined_run_dir": "",
+                "error": "",
+            }
+        )
+        pd.DataFrame(rows).to_csv(progress, index=False, encoding="utf-8-sig")
+        try:
+            result = run_low_corr_frontier_combined_constraint_audit(
+                root=root,
+                years=(int(year),),
+                final_end_date=final_end_date,
+                horizon=horizon,
+                label_mode=label_mode,
+                max_factor_corr=max_factor_corr,
+                rolling_window=rolling_window,
+                rolling_min_periods=rolling_min_periods,
+                signals=signals,
+                signal_penalty_strengths=signal_penalty_strengths,
+                top_n=int(top_n_values[0]),
+                top_n_values=top_n_values,
+                rebalance_frequency=rebalance_frequency,
+                buffer_multiplier=buffer_multiplier,
+                fee_bps_values=fee_bps_values,
+                capital_amounts=capital_amounts,
+                impact_bps_per_1pct_values=impact_bps_per_1pct_values,
+                exposure_penalty_cols=exposure_penalty_cols,
+                exposure_columns=exposure_columns,
+                exposure_constraint_cols=exposure_constraint_cols,
+                max_abs_exposure=max_abs_exposure,
+                group_col=group_col,
+                max_group_weight=max_group_weight,
+                execution_constraints=execution_constraints,
+                limit_threshold=limit_threshold,
+                include_metrics=include_metrics,
+                include_industry=include_industry,
+                weak_year_rebuild_run_dir=weak_year_rebuild_run_dir,
+                constraint_variants=constraint_variants,
+                output_dir=output_root / f"year_{int(year)}",
+                write_research_log=False,
+            )
+            result = {**result, "eval_year": int(year)}
+            results.append(result)
+            rows[-1].update(
+                {
+                    "status": "completed",
+                    "finished_at": datetime.now().isoformat(timespec="seconds"),
+                    "combined_run_dir": result.get("output_dir", ""),
+                }
+            )
+            pd.DataFrame(rows).to_csv(progress, index=False, encoding="utf-8-sig")
+        except Exception as exc:
+            rows[-1].update(
+                {
+                    "status": "failed",
+                    "finished_at": datetime.now().isoformat(timespec="seconds"),
+                    "error": str(exc),
+                }
+            )
+            pd.DataFrame(rows).to_csv(progress, index=False, encoding="utf-8-sig")
+            raise
+    return results
+
+
+def merge_yearly_combined_constraint_runs(
+    yearly_results: Sequence[Mapping[str, Any]],
+    *,
+    output_dir: str | Path,
+    run_id: str,
+    years: Sequence[int],
+    final_end_date: str | None,
+    horizon: int,
+    label_mode: str,
+    rolling_window: int,
+    rolling_min_periods: int,
+    signals: Sequence[str],
+    top_n_values: Sequence[int],
+    rebalance_frequency: str,
+    buffer_multiplier: float,
+    fee_bps_values: Sequence[float],
+    capital_amounts: Sequence[float],
+    impact_bps_per_1pct_values: Sequence[float],
+    execution_constraints: bool,
+    limit_threshold: float,
+    include_metrics: bool,
+    include_industry: bool,
+    group_col: str | None,
+    max_group_weight: float | None,
+    exposure_penalty_cols: Sequence[str],
+    exposure_constraint_cols: Sequence[str],
+    max_abs_exposure: float | None,
+    constraint_variants: Sequence[str] | None,
+    weak_year_rebuild_run_dir: str | Path | None,
+) -> dict[str, Any]:
+    """Merge yearly combined-constraint runs into one standard combined evidence directory."""
+
+    if not yearly_results:
+        raise ValueError("yearly_results must not be empty")
+    run_dir = Path(output_dir) / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    yearly_dirs = [Path(str(result["output_dir"])) for result in yearly_results]
+    summary = _concat_csv(yearly_dirs, "combined_constraint_summary.csv")
+    if summary.empty:
+        raise ValueError("no yearly combined summary rows to merge")
+    aggregate = summarize_combined_constraint_audit(summary)
+    trades = _concat_csv(yearly_dirs, "combined_constraint_trades.csv")
+    liquidity = _concat_csv(yearly_dirs, "combined_constraint_liquidity.csv")
+    liquidity_summary = _concat_csv(yearly_dirs, "combined_constraint_liquidity_summary.csv")
+    exposure = _concat_csv(yearly_dirs, "combined_constraint_basket_exposure.csv")
+    exposure_summary = summarize_combined_basket_exposure(exposure)
+    industry_exposure = _concat_csv(yearly_dirs, "combined_constraint_industry_exposure.csv")
+    industry_summary = summarize_combined_industry_exposure(industry_exposure)
+    metadata = _concat_csv(yearly_dirs, "combined_constraint_meta.csv")
+
+    first = dict(yearly_results[0])
+    result = {
+        "run_id": run_id,
+        "snapshot_id": first.get("snapshot_id"),
+        "years": [int(year) for year in years],
+        "final_end_date": final_end_date,
+        "horizon": int(horizon),
+        "label_mode": label_mode,
+        "rolling_window": int(rolling_window),
+        "rolling_min_periods": int(rolling_min_periods),
+        "signals": list(signals),
+        "rebalance_frequency": rebalance_frequency,
+        "top_n": int(top_n_values[0]),
+        "top_n_values": [int(value) for value in top_n_values],
+        "buffer_multiplier": float(buffer_multiplier),
+        "fee_bps_values": [float(value) for value in fee_bps_values],
+        "capital_amounts": [float(value) for value in capital_amounts],
+        "impact_bps_per_1pct_values": [float(value) for value in impact_bps_per_1pct_values],
+        "execution_constraints": bool(execution_constraints),
+        "limit_threshold": float(limit_threshold),
+        "include_metrics": bool(include_metrics),
+        "include_industry": bool(include_industry),
+        "group_col": group_col or "",
+        "max_group_weight": float(max_group_weight) if max_group_weight is not None else None,
+        "exposure_penalty_cols": list(exposure_penalty_cols),
+        "exposure_constraint_cols": list(exposure_constraint_cols),
+        "max_abs_exposure": float(max_abs_exposure) if max_abs_exposure is not None else None,
+        "constraint_variants": list(constraint_variants or ["baseline"]),
+        "weak_year_rebuild_run_dir": str(weak_year_rebuild_run_dir or ""),
+        "yearly_run_dirs": [str(path) for path in yearly_dirs],
+        "best_30bps_100m_rows": best_combined_rows(aggregate, fee_bps=30.0, capital_amount=100_000_000.0),
+        "candidate_count": 0,
+        "assessment": "merged yearly combined constraint gate evidence only; no strategy candidate is promoted by this experiment alone",
+        "output_dir": str(run_dir),
+    }
+
+    summary.to_csv(run_dir / "combined_constraint_summary.csv", index=False, encoding="utf-8-sig")
+    aggregate.to_csv(run_dir / "combined_constraint_aggregate.csv", index=False, encoding="utf-8-sig")
+    trades.to_csv(run_dir / "combined_constraint_trades.csv", index=False, encoding="utf-8-sig")
+    liquidity.to_csv(run_dir / "combined_constraint_liquidity.csv", index=False, encoding="utf-8-sig")
+    liquidity_summary.to_csv(run_dir / "combined_constraint_liquidity_summary.csv", index=False, encoding="utf-8-sig")
+    exposure.to_csv(run_dir / "combined_constraint_basket_exposure.csv", index=False, encoding="utf-8-sig")
+    exposure_summary.to_csv(run_dir / "combined_constraint_basket_exposure_summary.csv", index=False, encoding="utf-8-sig")
+    industry_exposure.to_csv(run_dir / "combined_constraint_industry_exposure.csv", index=False, encoding="utf-8-sig")
+    industry_summary.to_csv(run_dir / "combined_constraint_industry_summary.csv", index=False, encoding="utf-8-sig")
+    metadata.to_csv(run_dir / "combined_constraint_meta.csv", index=False, encoding="utf-8-sig")
+    (run_dir / "summary.json").write_text(json.dumps(_json_ready(result), ensure_ascii=False, indent=2), encoding="utf-8")
+    markdown = render_combined_constraint_markdown(result, aggregate, exposure_summary, industry_summary, liquidity_summary)
+    (run_dir / "summary.md").write_text(markdown, encoding="utf-8")
+    return result
+
+
+def _concat_csv(run_dirs: Sequence[Path], filename: str) -> pd.DataFrame:
+    frames = []
+    for run_dir in run_dirs:
+        path = run_dir / filename
+        if path.exists():
+            frame = pd.read_csv(path)
+            if not frame.empty:
+                frames.append(frame)
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
 def build_personal_protocol_ledger(protocol_runs: Sequence[Mapping[str, Any]]) -> pd.DataFrame:
     """Flatten per-Top-N personal gate outputs into one auditable protocol ledger."""
 
     columns = _ledger_columns()
     rows: list[dict[str, Any]] = []
     for item in protocol_runs:
-        top_n = int(item.get("top_n", 0) or 0)
         combined_result = item.get("combined_result", {}) or {}
         gate_result = item.get("personal_gate_result", {}) or {}
         gate = item.get("gate", pd.DataFrame())
@@ -246,6 +497,7 @@ def build_personal_protocol_ledger(protocol_runs: Sequence[Mapping[str, Any]]) -
         for raw in gate.to_dict("records"):
             signal = str(raw.get("signal", ""))
             variant = str(raw.get("constraint_variant", "baseline") or "baseline")
+            top_n = _optional_int(raw.get("top_n", combined_result.get("top_n"))) or 0
             strength = _optional_float(raw.get("exposure_penalty_strength"))
             promoted = _truthy(raw.get("promoted", False))
             promotion_level = str(raw.get("promotion_level", ""))
@@ -276,6 +528,11 @@ def build_personal_protocol_ledger(protocol_runs: Sequence[Mapping[str, Any]]) -
                     "total_periods": _optional_int(raw.get("total_periods")),
                     "eval_year_count": _optional_int(raw.get("eval_year_count")),
                     "max_proxy_mean_abs_active_exposure": _optional_float(raw.get("max_proxy_mean_abs_active_exposure")),
+                    "formal_profile_gate": _truthy(
+                        raw.get("formal_profile_gate", promotion_level == PERSONAL_BACKTEST_PROMOTION_LEVEL)
+                    ),
+                    "evidence_scope": str(raw.get("evidence_scope", "")),
+                    "gate_profile_detail": str(raw.get("gate_profile_detail", "")),
                     "promoted": promoted,
                     "promotion_level": promotion_level,
                     "paper_tracking_recommendation": str(raw.get("paper_tracking_recommendation", "")),
@@ -383,6 +640,11 @@ def summarize_personal_protocol_grid(
 ) -> dict[str, Any]:
     candidate_count = int(ledger["promotion_level"].astype(str).eq(PERSONAL_BACKTEST_PROMOTION_LEVEL).sum()) if not ledger.empty else 0
     best_row = ledger.iloc[0].to_dict() if not ledger.empty else {}
+    evidence_scopes = (
+        sorted(ledger["evidence_scope"].dropna().astype(str).unique().tolist())
+        if "evidence_scope" in ledger.columns and not ledger.empty
+        else []
+    )
     return {
         "run_id": run_id,
         "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -399,6 +661,7 @@ def summarize_personal_protocol_grid(
         "personal_capital_amount": float(personal_capital_amount),
         "evaluated_rows": int(len(ledger)),
         "top_n_summary_count": int(len(top_n_summary)),
+        "evidence_scopes": evidence_scopes,
         "personal_backtest_candidate_count": candidate_count,
         "personal_paper_candidate_count": 0,
         "strategy_candidate_count": 0,
@@ -410,6 +673,7 @@ def summarize_personal_protocol_grid(
         "output_dir": str(run_dir),
         "limitations": [
             "This grid promotes only to personal_backtest_candidate and never to strategy_candidate.",
+            "Relaxed smoke or threshold-override runs remain diagnostic and cannot create paper-tracking candidates.",
             "Every row remains Baostock-only evidence; true market-cap and institutional capacity are future enhancement lines.",
             "Passing rows still require real paper tracking before personal_paper_candidate review.",
         ],
@@ -433,6 +697,7 @@ def render_personal_protocol_grid_markdown(
         f"- personal_backtest_candidate_count: `{summary.get('personal_backtest_candidate_count', 0)}`",
         f"- personal_paper_candidate_count: `{summary.get('personal_paper_candidate_count', 0)}`",
         f"- strategy_candidate_count: `{summary.get('strategy_candidate_count', 0)}`",
+        f"- evidence_scopes: `{summary.get('evidence_scopes', [])}`",
         f"- best_protocol_id: `{summary.get('best_protocol_id', '')}`",
         f"- Artifacts: `{summary.get('output_dir', '')}`",
         "",
@@ -474,6 +739,9 @@ def _ledger_columns() -> list[str]:
         "total_periods",
         "eval_year_count",
         "max_proxy_mean_abs_active_exposure",
+        "formal_profile_gate",
+        "evidence_scope",
+        "gate_profile_detail",
         "promoted",
         "promotion_level",
         "paper_tracking_recommendation",

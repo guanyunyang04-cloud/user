@@ -273,3 +273,59 @@ def test_run_combined_constraint_audit_wires_prior_fit_weak_year_variants(tmp_pa
     assert set(meta["constraint_variants"]) == {"baseline,regime_gated,capital_scaled,factor_blend"}
     exposure_summary = pd.read_csv(run_dir / "combined_constraint_basket_exposure_summary.csv")
     assert "constraint_variant" in exposure_summary.columns
+
+
+def test_run_combined_constraint_audit_reuses_panel_for_multiple_top_n(tmp_path: Path, monkeypatch) -> None:
+    panel = _frontier_panel()
+    signal = low_corr_frontier_combined_constraint_audit.ROLLING_IC_SIGNAL
+    build_calls: list[dict[str, object]] = []
+
+    def fake_build_candidate_protocol_signal_panel(**kwargs):
+        build_calls.append(kwargs)
+        return {
+            "manifest": {"snapshot_id": "fixture-snapshot"},
+            "quality": {"failure_count": 0, "missing_bar_rows": 0, "st_rows": 0, "suspended_like_rows": 0},
+            "evaluation_panel": panel,
+            "available_signals": [signal],
+            "rolling_fallback_rate": 0.0,
+        }
+
+    monkeypatch.setattr(
+        low_corr_frontier_combined_constraint_audit,
+        "build_candidate_protocol_signal_panel",
+        fake_build_candidate_protocol_signal_panel,
+    )
+
+    result = low_corr_frontier_combined_constraint_audit.run_low_corr_frontier_combined_constraint_audit(
+        years=(2026,),
+        final_end_date="2026-06-01",
+        horizon=1,
+        signals=(signal,),
+        signal_penalty_strengths={signal: 0.25},
+        top_n=2,
+        top_n_values=(1, 2),
+        rebalance_frequency="daily",
+        buffer_multiplier=1.0,
+        fee_bps_values=(30.0,),
+        capital_amounts=(10_000_000.0,),
+        impact_bps_per_1pct_values=(10.0,),
+        exposure_penalty_cols=("log_amount_mean_20d_z",),
+        exposure_columns=("log_amount_mean_20d_z",),
+        group_col="industry",
+        max_group_weight=0.5,
+        execution_constraints=False,
+        output_dir=tmp_path,
+    )
+
+    run_dir = tmp_path / result["run_id"]
+    assert len(build_calls) == 1
+    assert result["top_n"] == 1
+    assert result["top_n_values"] == [1, 2]
+    summary = pd.read_csv(run_dir / "combined_constraint_summary.csv")
+    aggregate = pd.read_csv(run_dir / "combined_constraint_aggregate.csv")
+    exposure_summary = pd.read_csv(run_dir / "combined_constraint_basket_exposure_summary.csv")
+    meta = pd.read_csv(run_dir / "combined_constraint_meta.csv")
+    assert set(summary["top_n"]) == {1, 2}
+    assert set(aggregate["top_n"]) == {1, 2}
+    assert set(exposure_summary["top_n"]) == {1, 2}
+    assert set(meta["top_n_values"]) == {"[1, 2]"}

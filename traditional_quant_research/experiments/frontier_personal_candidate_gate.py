@@ -23,6 +23,8 @@ DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-04_
 
 PERSONAL_BACKTEST_PROMOTION_LEVEL = "personal_backtest_candidate"
 PERSONAL_BACKTEST_ONLY_LEVEL = "personal_research/backtest_only"
+FORMAL_PERSONAL_GATE_SCOPE = "formal_personal_backtest_candidate_gate"
+DIAGNOSTIC_PERSONAL_GATE_SCOPE = "diagnostic_relaxed_personal_gate"
 
 DEFAULT_REQUIRED_FEE_BPS = 30.0
 DEFAULT_REQUIRED_IMPACT_BPS_PER_1PCT = 10.0
@@ -72,11 +74,28 @@ def run_frontier_personal_candidate_gate(
 
     combined_dir = Path(combined_run_dir) if combined_run_dir is not None else latest_run_dir(DEFAULT_COMBINED_OUTPUT_ROOT)
     aggregate, exposure_summary, meta, combined_summary = read_combined_constraint_evidence(combined_dir)
+    evidence_scope, formal_gate_profile, gate_profile_detail = infer_personal_gate_profile(
+        required_fee_bps=required_fee_bps,
+        required_impact_bps_per_1pct=required_impact_bps_per_1pct,
+        personal_capital_amount=personal_capital_amount,
+        min_eval_year_count=min_eval_year_count,
+        required_start_year=required_start_year,
+        required_end_year=required_end_year,
+        min_total_periods=min_total_periods,
+        min_mean_annualized_return=min_mean_annualized_return,
+        min_positive_year_rate=min_positive_year_rate,
+        min_weakest_year_annualized_return=min_weakest_year_annualized_return,
+        max_worst_drawdown=max_worst_drawdown,
+        max_proxy_mean_abs_active_exposure=max_proxy_mean_abs_active_exposure,
+    )
     gate = evaluate_personal_candidate_gates(
         aggregate,
         exposure_summary,
         meta,
         combined_summary=combined_summary,
+        evidence_scope=evidence_scope,
+        formal_gate_profile=formal_gate_profile,
+        gate_profile_detail=gate_profile_detail,
         required_fee_bps=required_fee_bps,
         required_impact_bps_per_1pct=required_impact_bps_per_1pct,
         personal_capital_amount=personal_capital_amount,
@@ -108,6 +127,9 @@ def run_frontier_personal_candidate_gate(
         min_weakest_year_annualized_return=min_weakest_year_annualized_return,
         max_worst_drawdown=max_worst_drawdown,
         max_proxy_mean_abs_active_exposure=max_proxy_mean_abs_active_exposure,
+        evidence_scope=evidence_scope,
+        formal_gate_profile=formal_gate_profile,
+        gate_profile_detail=gate_profile_detail,
     )
     markdown = render_personal_candidate_gate_markdown(summary, gate)
 
@@ -127,6 +149,9 @@ def evaluate_personal_candidate_gates(
     meta: pd.DataFrame,
     *,
     combined_summary: Mapping[str, Any],
+    evidence_scope: str | None = None,
+    formal_gate_profile: bool | None = None,
+    gate_profile_detail: str | None = None,
     required_fee_bps: float,
     required_impact_bps_per_1pct: float,
     personal_capital_amount: float,
@@ -143,11 +168,29 @@ def evaluate_personal_candidate_gates(
 ) -> pd.DataFrame:
     if aggregate.empty:
         return pd.DataFrame(columns=_gate_columns())
+    inferred_scope, inferred_formal_profile, inferred_profile_detail = infer_personal_gate_profile(
+        required_fee_bps=required_fee_bps,
+        required_impact_bps_per_1pct=required_impact_bps_per_1pct,
+        personal_capital_amount=personal_capital_amount,
+        min_eval_year_count=min_eval_year_count,
+        required_start_year=required_start_year,
+        required_end_year=required_end_year,
+        min_total_periods=min_total_periods,
+        min_mean_annualized_return=min_mean_annualized_return,
+        min_positive_year_rate=min_positive_year_rate,
+        min_weakest_year_annualized_return=min_weakest_year_annualized_return,
+        max_worst_drawdown=max_worst_drawdown,
+        max_proxy_mean_abs_active_exposure=max_proxy_mean_abs_active_exposure,
+    )
+    evidence_scope = evidence_scope or inferred_scope
+    formal_gate_profile = inferred_formal_profile if formal_gate_profile is None else bool(formal_gate_profile)
+    gate_profile_detail = gate_profile_detail or inferred_profile_detail
     frame = aggregate.copy()
     for column in [
         "fee_bps",
         "impact_bps_per_1pct",
         "capital_amount",
+        "top_n",
         "eval_year_count",
         "mean_annualized_return",
         "min_annualized_return",
@@ -162,6 +205,8 @@ def evaluate_personal_candidate_gates(
             frame[column] = pd.to_numeric(frame[column], errors="coerce")
     if "constraint_variant" not in frame.columns:
         frame["constraint_variant"] = "baseline"
+    if "top_n" not in frame.columns:
+        frame["top_n"] = int(combined_summary.get("top_n", 0) or 0)
     if "constraint_fallback_count" not in frame.columns:
         frame["constraint_fallback_count"] = 0
     if "constraint_fallback_rate" not in frame.columns:
@@ -183,6 +228,7 @@ def evaluate_personal_candidate_gates(
     for row in rows_to_score.to_dict("records"):
         signal = str(row.get("signal", ""))
         constraint_variant = str(row.get("constraint_variant", "baseline") or "baseline")
+        top_n = int(float(row.get("top_n", combined_summary.get("top_n", 0)) or 0))
         strength = float(row.get("exposure_penalty_strength", 0.0) or 0.0)
         fallback_count = int(float(row.get("constraint_fallback_count", 0) or 0))
         fallback_rate = float(row.get("constraint_fallback_rate", 0.0) or 0.0)
@@ -190,11 +236,13 @@ def evaluate_personal_candidate_gates(
             exposure_summary,
             signal=signal,
             constraint_variant=constraint_variant,
+            top_n=top_n,
             exposure_penalty_strength=strength,
             exposure_fields=exposure_fields,
             max_proxy_mean_abs_active_exposure=max_proxy_mean_abs_active_exposure,
         )
         checks = {
+            "formal_profile_gate": bool(formal_gate_profile),
             "baostock_source_gate": baostock_gate,
             "walk_forward_gate": walk_forward_gate,
             "execution_gate": execution_gate,
@@ -213,6 +261,7 @@ def evaluate_personal_candidate_gates(
         rows.append(
             {
                 "constraint_variant": constraint_variant,
+                "top_n": top_n,
                 "signal": signal,
                 "fee_bps": float(row.get("fee_bps", np.nan)),
                 "capital_amount": float(row.get("capital_amount", np.nan)),
@@ -228,6 +277,9 @@ def evaluate_personal_candidate_gates(
                 "total_periods": int(float(row.get("total_periods", 0) or 0)),
                 "eval_year_count": int(float(row.get("eval_year_count", 0) or 0)),
                 "max_proxy_mean_abs_active_exposure": max_proxy_exposure,
+                "formal_profile_gate": checks["formal_profile_gate"],
+                "evidence_scope": evidence_scope,
+                "gate_profile_detail": gate_profile_detail,
                 "baostock_source_gate": checks["baostock_source_gate"],
                 "walk_forward_gate": checks["walk_forward_gate"],
                 "execution_gate": checks["execution_gate"],
@@ -268,6 +320,9 @@ def summarize_personal_candidate_gate(
     min_weakest_year_annualized_return: float,
     max_worst_drawdown: float,
     max_proxy_mean_abs_active_exposure: float,
+    evidence_scope: str = FORMAL_PERSONAL_GATE_SCOPE,
+    formal_gate_profile: bool = True,
+    gate_profile_detail: str = "formal_defaults_or_stricter",
 ) -> dict[str, Any]:
     candidates = gate.loc[gate["promotion_level"].astype(str).eq(PERSONAL_BACKTEST_PROMOTION_LEVEL)] if not gate.empty else pd.DataFrame()
     fail_counter: Counter[str] = Counter()
@@ -287,6 +342,9 @@ def summarize_personal_candidate_gate(
         "required_fee_bps": required_fee_bps,
         "required_impact_bps_per_1pct": required_impact_bps_per_1pct,
         "personal_capital_amount": personal_capital_amount,
+        "evidence_scope": evidence_scope,
+        "formal_gate_profile": bool(formal_gate_profile),
+        "gate_profile_detail": gate_profile_detail,
         "min_eval_year_count": min_eval_year_count,
         "min_total_periods": min_total_periods,
         "min_mean_annualized_return": min_mean_annualized_return,
@@ -299,11 +357,13 @@ def summarize_personal_candidate_gate(
         "strategy_candidate_count": 0,
         "decision": "personal_paper_tracking_ready" if len(candidates) else "keep_personal_research_backtest_only",
         "best_signal_by_personal_gate": str(best_row.get("signal", "")),
+        "best_top_n_by_personal_gate": int(float(best_row.get("top_n", 0) or 0)) if best_row else None,
         "best_signal_mean_annualized_return": float(best_row.get("mean_annualized_return", np.nan)) if best_row else None,
         "top_failed_gates": dict(fail_counter.most_common()),
         "limitations": [
             "This gate reads existing combined-constraint artifacts and does not rerun backtests.",
             "It is a personal small-capital research gate, not an institutional promotion gate.",
+            "Relaxed smoke or threshold-override runs are diagnostic and cannot create personal_backtest_candidate rows.",
             "Baostock-only evidence can justify paper tracking, but not true market-cap neutrality or production deployment.",
         ],
     }
@@ -322,7 +382,11 @@ def render_personal_candidate_gate_markdown(summary: Mapping[str, Any], gate: pd
         f"- required_fee_bps: `{summary.get('required_fee_bps')}`",
         f"- required_impact_bps_per_1pct: `{summary.get('required_impact_bps_per_1pct')}`",
         f"- personal_capital_amount: `{summary.get('personal_capital_amount')}`",
+        f"- evidence_scope: `{summary.get('evidence_scope', '')}`",
+        f"- formal_gate_profile: `{summary.get('formal_gate_profile', '')}`",
+        f"- gate_profile_detail: `{summary.get('gate_profile_detail', '')}`",
         f"- best_signal_by_personal_gate: `{summary.get('best_signal_by_personal_gate', '')}`",
+        f"- best_top_n_by_personal_gate: `{summary.get('best_top_n_by_personal_gate', '')}`",
         f"- best_signal_mean_annualized_return: `{_fmt(summary.get('best_signal_mean_annualized_return'))}`",
         "",
         "## Failed Gates",
@@ -358,6 +422,45 @@ def read_combined_constraint_evidence(run_dir: Path) -> tuple[pd.DataFrame, pd.D
     return aggregate, exposure, meta, summary
 
 
+def infer_personal_gate_profile(
+    *,
+    required_fee_bps: float,
+    required_impact_bps_per_1pct: float,
+    personal_capital_amount: float,
+    min_eval_year_count: int,
+    required_start_year: int,
+    required_end_year: int,
+    min_total_periods: int,
+    min_mean_annualized_return: float,
+    min_positive_year_rate: float,
+    min_weakest_year_annualized_return: float,
+    max_worst_drawdown: float,
+    max_proxy_mean_abs_active_exposure: float,
+) -> tuple[str, bool, str]:
+    """Classify whether this gate run uses the formal personal promotion profile."""
+
+    checks = {
+        "required_fee_bps": float(required_fee_bps) >= DEFAULT_REQUIRED_FEE_BPS,
+        "required_impact_bps_per_1pct": float(required_impact_bps_per_1pct) >= DEFAULT_REQUIRED_IMPACT_BPS_PER_1PCT,
+        "personal_capital_amount": float(personal_capital_amount) >= DEFAULT_PERSONAL_CAPITAL_AMOUNT,
+        "min_eval_year_count": int(min_eval_year_count) >= DEFAULT_MIN_EVAL_YEAR_COUNT,
+        "required_start_year": int(required_start_year) <= DEFAULT_REQUIRED_START_YEAR,
+        "required_end_year": int(required_end_year) >= DEFAULT_REQUIRED_END_YEAR,
+        "min_total_periods": int(min_total_periods) >= DEFAULT_MIN_TOTAL_PERIODS,
+        "min_mean_annualized_return": float(min_mean_annualized_return) >= DEFAULT_MIN_MEAN_ANNUALIZED_RETURN,
+        "min_positive_year_rate": float(min_positive_year_rate) >= DEFAULT_MIN_POSITIVE_YEAR_RATE,
+        "min_weakest_year_annualized_return": float(min_weakest_year_annualized_return)
+        >= DEFAULT_MIN_WEAKEST_YEAR_ANNUALIZED_RETURN,
+        "max_worst_drawdown": float(max_worst_drawdown) >= DEFAULT_MAX_WORST_DRAWDOWN,
+        "max_proxy_mean_abs_active_exposure": float(max_proxy_mean_abs_active_exposure)
+        <= DEFAULT_MAX_PROXY_MEAN_ABS_ACTIVE_EXPOSURE,
+    }
+    relaxed = [name for name, passed in checks.items() if not passed]
+    if relaxed:
+        return DIAGNOSTIC_PERSONAL_GATE_SCOPE, False, "relaxed_or_nonformal=" + ",".join(relaxed)
+    return FORMAL_PERSONAL_GATE_SCOPE, True, "formal_defaults_or_stricter"
+
+
 def _baostock_only_source_gate(summary: Mapping[str, Any]) -> bool:
     snapshot_id = str(summary.get("snapshot_id", "")).lower()
     return "baostock" in snapshot_id
@@ -387,6 +490,7 @@ def _proxy_exposure_evidence(
     *,
     signal: str,
     constraint_variant: str,
+    top_n: int,
     exposure_penalty_strength: float,
     exposure_fields: Sequence[str],
     max_proxy_mean_abs_active_exposure: float,
@@ -396,12 +500,15 @@ def _proxy_exposure_evidence(
     frame = exposure_summary.copy()
     if "constraint_variant" not in frame.columns:
         frame["constraint_variant"] = "baseline"
+    if "top_n" not in frame.columns:
+        frame["top_n"] = int(top_n)
     for column in ["exposure_penalty_strength", "mean_abs_active_exposure"]:
         if column in frame.columns:
             frame[column] = pd.to_numeric(frame[column], errors="coerce")
     subset = frame.loc[
         (frame["signal"].astype(str) == signal)
         & (frame["constraint_variant"].astype(str) == constraint_variant)
+        & (pd.to_numeric(frame["top_n"], errors="coerce") == int(top_n))
         & np.isclose(frame["exposure_penalty_strength"], exposure_penalty_strength)
         & (frame["period_type"].astype(str) == "monthly")
         & (frame["factor"].astype(str).isin(set(exposure_fields)))
@@ -431,6 +538,7 @@ def _explainability_gate(row: Mapping[str, Any]) -> bool:
 def _gate_columns() -> list[str]:
     return [
         "constraint_variant",
+        "top_n",
         "signal",
         "fee_bps",
         "capital_amount",
@@ -446,6 +554,9 @@ def _gate_columns() -> list[str]:
         "total_periods",
         "eval_year_count",
         "max_proxy_mean_abs_active_exposure",
+        "formal_profile_gate",
+        "evidence_scope",
+        "gate_profile_detail",
         "baostock_source_gate",
         "walk_forward_gate",
         "execution_gate",

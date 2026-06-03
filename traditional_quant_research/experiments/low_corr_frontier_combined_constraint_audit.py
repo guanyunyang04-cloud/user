@@ -93,6 +93,7 @@ def run_low_corr_frontier_combined_constraint_audit(
     signals: Sequence[str] = DEFAULT_FRONTIER_SIGNALS,
     signal_penalty_strengths: Mapping[str, float] | Sequence[str] | str = DEFAULT_SIGNAL_PENALTY_STRENGTHS,
     top_n: int = DEFAULT_TOP_N,
+    top_n_values: Sequence[int] | str | None = None,
     rebalance_frequency: str = DEFAULT_REBALANCE_FREQUENCY,
     buffer_multiplier: float = DEFAULT_BUFFER_MULTIPLIER,
     fee_bps_values: Sequence[float] = DEFAULT_FEE_BPS_VALUES,
@@ -122,8 +123,9 @@ def run_low_corr_frontier_combined_constraint_audit(
         raise ValueError("horizon must be positive")
     if label_mode not in LABEL_MODES:
         raise ValueError(f"unsupported label_mode: {label_mode}")
-    if top_n <= 0:
-        raise ValueError("top_n must be positive")
+    selected_top_n = _normalize_int_tuple(top_n_values if top_n_values is not None else (top_n,), name="top_n_values")
+    if any(value <= 0 for value in selected_top_n):
+        raise ValueError("top_n_values must be positive")
     if buffer_multiplier < 1.0:
         raise ValueError("buffer_multiplier must be at least 1.0")
     if max_group_weight is not None and (max_group_weight <= 0 or max_group_weight > 1):
@@ -211,157 +213,165 @@ def run_low_corr_frontier_combined_constraint_audit(
                     rule=rule,
                     penalty_cols=penalty_cols,
                 )
-                base_backtest = horizon_aligned_top_n_backtest(
-                    variant_panel,
-                    variant_signal,
-                    horizon=horizon,
-                    top_n=top_n,
-                    fee_bps=0.0,
-                    rebalance_frequency=rebalance_frequency,
-                    buffer_multiplier=buffer_multiplier,
-                    execution_constraints=execution_constraints,
-                    limit_threshold=limit_threshold,
-                    capital_col=capital_col,
-                    group_col=group_col,
-                    max_group_weight=max_group_weight,
-                    exposure_penalty_cols=penalty_cols,
-                    exposure_penalty_strength=strength,
-                    exposure_constraint_cols=constraint_cols,
-                    max_abs_exposure=max_abs_exposure,
-                )
-                base_trades = base_backtest.trades.copy().reset_index(drop=True)
-                if base_trades.empty:
-                    continue
-                base_trades.insert(0, "trade_id", range(len(base_trades)))
-
-                selected_holdings = expand_selected_holdings(
-                    variant_panel,
-                    base_trades,
-                    extra_columns=_holding_extra_columns(variant_panel, variant_signal),
-                )
-                if selected_holdings.empty:
-                    per_trade_liquidity = _zero_liquidity_for_trades(base_trades, capital_amounts=capital_values)
-                    yearly_liquidity = pd.DataFrame()
-                else:
-                    per_trade_liquidity, yearly_liquidity = summarize_trade_liquidity(
-                        selected_holdings,
-                        capital_amounts=capital_values,
+                for current_top_n in selected_top_n:
+                    base_backtest = horizon_aligned_top_n_backtest(
+                        variant_panel,
+                        variant_signal,
+                        horizon=horizon,
+                        top_n=int(current_top_n),
+                        fee_bps=0.0,
+                        rebalance_frequency=rebalance_frequency,
+                        buffer_multiplier=buffer_multiplier,
+                        execution_constraints=execution_constraints,
+                        limit_threshold=limit_threshold,
+                        capital_col=capital_col,
+                        group_col=group_col,
+                        max_group_weight=max_group_weight,
+                        exposure_penalty_cols=penalty_cols,
+                        exposure_penalty_strength=strength,
+                        exposure_constraint_cols=constraint_cols,
+                        max_abs_exposure=max_abs_exposure,
                     )
-                if not per_trade_liquidity.empty:
-                    per_trade_liquidity.insert(0, "constraint_variant", variant)
-                    per_trade_liquidity.insert(0, "exposure_penalty_strength", strength)
-                    per_trade_liquidity.insert(0, "signal", signal)
-                    per_trade_liquidity.insert(0, "eval_year", int(year))
-                    liquidity_frames.append(per_trade_liquidity)
-                if not yearly_liquidity.empty:
-                    yearly_liquidity.insert(0, "constraint_variant", variant)
-                    yearly_liquidity.insert(0, "exposure_penalty_strength", strength)
-                    yearly_liquidity.insert(0, "signal", signal)
-                    yearly_liquidity.insert(0, "eval_year", int(year))
-                    liquidity_summary_frames.append(yearly_liquidity)
+                    base_trades = base_backtest.trades.copy().reset_index(drop=True)
+                    if base_trades.empty:
+                        continue
+                    base_trades.insert(0, "trade_id", range(len(base_trades)))
 
-                if available_exposures:
-                    exposure = selected_basket_factor_exposure(
+                    selected_holdings = expand_selected_holdings(
                         variant_panel,
                         base_trades,
-                        available_exposures,
-                        signal_col=variant_signal,
-                        horizon=horizon,
-                        rebalance_frequency=rebalance_frequency,
-                        top_n=top_n,
-                        buffer_multiplier=buffer_multiplier,
+                        extra_columns=_holding_extra_columns(variant_panel, variant_signal),
                     )
-                    if not exposure.empty:
-                        exposure.insert(0, "constraint_variant", variant)
-                        exposure.insert(0, "exposure_penalty_strength", strength)
-                        exposure.insert(0, "signal_config", signal)
-                        exposure.insert(0, "eval_year", int(year))
-                        exposure_frames.append(exposure)
-                if group_col is not None:
-                    industry_exposure = selected_basket_industry_exposure(
-                        variant_panel,
-                        base_trades,
-                        industry_col=group_col,
-                        signal_col=variant_signal,
-                        horizon=horizon,
-                        rebalance_frequency=rebalance_frequency,
-                        top_n=top_n,
-                        buffer_multiplier=buffer_multiplier,
-                    )
-                    if not industry_exposure.empty:
-                        industry_exposure.insert(0, "constraint_variant", variant)
-                        industry_exposure.insert(0, "exposure_penalty_strength", strength)
-                        industry_exposure.insert(0, "signal_config", signal)
-                        industry_exposure.insert(0, "eval_year", int(year))
-                        industry_frames.append(industry_exposure)
+                    if selected_holdings.empty:
+                        per_trade_liquidity = _zero_liquidity_for_trades(base_trades, capital_amounts=capital_values)
+                        yearly_liquidity = pd.DataFrame()
+                    else:
+                        per_trade_liquidity, yearly_liquidity = summarize_trade_liquidity(
+                            selected_holdings,
+                            capital_amounts=capital_values,
+                        )
+                    if not per_trade_liquidity.empty:
+                        per_trade_liquidity.insert(0, "top_n", int(current_top_n))
+                        per_trade_liquidity.insert(0, "constraint_variant", variant)
+                        per_trade_liquidity.insert(0, "exposure_penalty_strength", strength)
+                        per_trade_liquidity.insert(0, "signal", signal)
+                        per_trade_liquidity.insert(0, "eval_year", int(year))
+                        liquidity_frames.append(per_trade_liquidity)
+                    if not yearly_liquidity.empty:
+                        yearly_liquidity.insert(0, "top_n", int(current_top_n))
+                        yearly_liquidity.insert(0, "constraint_variant", variant)
+                        yearly_liquidity.insert(0, "exposure_penalty_strength", strength)
+                        yearly_liquidity.insert(0, "signal", signal)
+                        yearly_liquidity.insert(0, "eval_year", int(year))
+                        liquidity_summary_frames.append(yearly_liquidity)
 
-                for fee_bps in fee_values:
-                    for capital in capital_values:
-                        for impact_bps in impact_values:
-                            trades = apply_fee_and_participation_impact(
-                                base_trades,
-                                per_trade_liquidity,
-                                fee_bps=float(fee_bps),
-                                capital_amount=float(capital),
-                                impact_bps_per_1pct=float(impact_bps),
-                            )
-                            row = {
-                                "eval_year": int(year),
-                                "signal": signal,
-                                "constraint_variant": variant,
-                                "evidence_grade": variant_meta["evidence_grade"],
-                                "exposure_penalty_cols": ",".join(penalty_cols),
-                                "exposure_penalty_strength": strength,
-                                "exposure_constraint_cols": ",".join(constraint_cols),
-                                "max_abs_exposure": float(max_abs_exposure) if max_abs_exposure is not None else np.nan,
-                                "group_col": group_col or "",
-                                "max_group_weight": float(max_group_weight) if max_group_weight is not None else np.nan,
-                                "capital_amount": float(capital),
-                                "impact_bps_per_1pct": float(impact_bps),
-                                **variant_meta,
-                            }
-                            row.update(
-                                summarize_horizon_trade_table(
-                                    trades,
-                                    horizon=horizon,
-                                    rebalance_frequency=rebalance_frequency,
-                                    top_n=top_n,
+                    if available_exposures:
+                        exposure = selected_basket_factor_exposure(
+                            variant_panel,
+                            base_trades,
+                            available_exposures,
+                            signal_col=variant_signal,
+                            horizon=horizon,
+                            rebalance_frequency=rebalance_frequency,
+                            top_n=int(current_top_n),
+                            buffer_multiplier=buffer_multiplier,
+                        )
+                        if not exposure.empty:
+                            _set_or_insert(exposure, "top_n", int(current_top_n))
+                            exposure.insert(0, "constraint_variant", variant)
+                            exposure.insert(0, "exposure_penalty_strength", strength)
+                            exposure.insert(0, "signal_config", signal)
+                            exposure.insert(0, "eval_year", int(year))
+                            exposure_frames.append(exposure)
+                    if group_col is not None:
+                        industry_exposure = selected_basket_industry_exposure(
+                            variant_panel,
+                            base_trades,
+                            industry_col=group_col,
+                            signal_col=variant_signal,
+                            horizon=horizon,
+                            rebalance_frequency=rebalance_frequency,
+                            top_n=int(current_top_n),
+                            buffer_multiplier=buffer_multiplier,
+                        )
+                        if not industry_exposure.empty:
+                            _set_or_insert(industry_exposure, "top_n", int(current_top_n))
+                            industry_exposure.insert(0, "constraint_variant", variant)
+                            industry_exposure.insert(0, "exposure_penalty_strength", strength)
+                            industry_exposure.insert(0, "signal_config", signal)
+                            industry_exposure.insert(0, "eval_year", int(year))
+                            industry_frames.append(industry_exposure)
+
+                    for fee_bps in fee_values:
+                        for capital in capital_values:
+                            for impact_bps in impact_values:
+                                trades = apply_fee_and_participation_impact(
+                                    base_trades,
+                                    per_trade_liquidity,
                                     fee_bps=float(fee_bps),
-                                    buffer_multiplier=buffer_multiplier,
-                                    execution_constraints=execution_constraints,
-                                    limit_threshold=limit_threshold,
-                                    capital_col=capital_col,
+                                    capital_amount=float(capital),
+                                    impact_bps_per_1pct=float(impact_bps),
                                 )
-                            )
-                            row["constraint_variant"] = variant
-                            row["evidence_grade"] = variant_meta["evidence_grade"]
-                            row["exposure_penalty_cols"] = ",".join(penalty_cols)
-                            row["exposure_penalty_strength"] = strength
-                            row["exposure_constraint_cols"] = ",".join(constraint_cols)
-                            row["max_abs_exposure"] = float(max_abs_exposure) if max_abs_exposure is not None else np.nan
-                            row["group_col"] = group_col or ""
-                            row["max_group_weight"] = float(max_group_weight) if max_group_weight is not None else np.nan
-                            row["capital_amount"] = float(capital)
-                            row["impact_bps_per_1pct"] = float(impact_bps)
-                            row["constraint_fallback_count"] = _sum_bool_column(trades, "constraint_fallback")
-                            row["constraint_fallback_rate"] = (
-                                float(trades["constraint_fallback"].fillna(False).astype(bool).mean())
-                                if "constraint_fallback" in trades.columns and not trades.empty
-                                else 0.0
-                            )
-                            row["mean_fee_cost"] = float(trades["fee_cost"].mean())
-                            row["mean_impact_cost"] = float(trades["impact_cost"].mean())
-                            row["mean_total_cost"] = float(trades["cost"].mean())
-                            row["mean_impact_rate"] = float(trades["impact_rate"].mean())
-                            summary_rows.append(row)
-                            trades_out = trades.copy()
-                            for meta_key, meta_value in reversed(tuple(variant_meta.items())):
-                                trades_out.insert(0, meta_key, meta_value)
-                            trades_out.insert(0, "constraint_variant", variant)
-                            trades_out.insert(0, "exposure_penalty_strength", strength)
-                            trades_out.insert(0, "signal", signal)
-                            trades_out.insert(0, "eval_year", int(year))
-                            trade_frames.append(trades_out)
+                                row = {
+                                    "eval_year": int(year),
+                                    "top_n": int(current_top_n),
+                                    "signal": signal,
+                                    "constraint_variant": variant,
+                                    "evidence_grade": variant_meta["evidence_grade"],
+                                    "exposure_penalty_cols": ",".join(penalty_cols),
+                                    "exposure_penalty_strength": strength,
+                                    "exposure_constraint_cols": ",".join(constraint_cols),
+                                    "max_abs_exposure": float(max_abs_exposure) if max_abs_exposure is not None else np.nan,
+                                    "group_col": group_col or "",
+                                    "max_group_weight": float(max_group_weight) if max_group_weight is not None else np.nan,
+                                    "capital_amount": float(capital),
+                                    "impact_bps_per_1pct": float(impact_bps),
+                                    **variant_meta,
+                                }
+                                row.update(
+                                    summarize_horizon_trade_table(
+                                        trades,
+                                        horizon=horizon,
+                                        rebalance_frequency=rebalance_frequency,
+                                        top_n=int(current_top_n),
+                                        fee_bps=float(fee_bps),
+                                        buffer_multiplier=buffer_multiplier,
+                                        execution_constraints=execution_constraints,
+                                        limit_threshold=limit_threshold,
+                                        capital_col=capital_col,
+                                    )
+                                )
+                                row["top_n"] = int(current_top_n)
+                                row["constraint_variant"] = variant
+                                row["evidence_grade"] = variant_meta["evidence_grade"]
+                                row["exposure_penalty_cols"] = ",".join(penalty_cols)
+                                row["exposure_penalty_strength"] = strength
+                                row["exposure_constraint_cols"] = ",".join(constraint_cols)
+                                row["max_abs_exposure"] = float(max_abs_exposure) if max_abs_exposure is not None else np.nan
+                                row["group_col"] = group_col or ""
+                                row["max_group_weight"] = float(max_group_weight) if max_group_weight is not None else np.nan
+                                row["capital_amount"] = float(capital)
+                                row["impact_bps_per_1pct"] = float(impact_bps)
+                                row["constraint_fallback_count"] = _sum_bool_column(trades, "constraint_fallback")
+                                row["constraint_fallback_rate"] = (
+                                    float(trades["constraint_fallback"].fillna(False).astype(bool).mean())
+                                    if "constraint_fallback" in trades.columns and not trades.empty
+                                    else 0.0
+                                )
+                                row["mean_fee_cost"] = float(trades["fee_cost"].mean())
+                                row["mean_impact_cost"] = float(trades["impact_cost"].mean())
+                                row["mean_total_cost"] = float(trades["cost"].mean())
+                                row["mean_impact_rate"] = float(trades["impact_rate"].mean())
+                                summary_rows.append(row)
+                                trades_out = trades.copy()
+                                for meta_key, meta_value in reversed(tuple(variant_meta.items())):
+                                    trades_out.insert(0, meta_key, meta_value)
+                                trades_out.insert(0, "top_n", int(current_top_n))
+                                trades_out.insert(0, "constraint_variant", variant)
+                                trades_out.insert(0, "exposure_penalty_strength", strength)
+                                trades_out.insert(0, "signal", signal)
+                                trades_out.insert(0, "eval_year", int(year))
+                                trade_frames.append(trades_out)
         metadata_rows.append(
             {
                 "eval_year": int(year),
@@ -371,6 +381,7 @@ def run_low_corr_frontier_combined_constraint_audit(
                 "start_date": windows["start_date"],
                 "end_date": windows["end_date"],
                 "available_signals": json.dumps(list(selected_signals), ensure_ascii=False),
+                "top_n_values": json.dumps(list(selected_top_n), ensure_ascii=False),
                 "constraint_variants": ",".join(selected_variants),
                 "signal_penalty_strengths": json.dumps(strength_by_signal, ensure_ascii=False),
                 "exposure_penalty_cols": json.dumps(list(penalty_cols), ensure_ascii=False),
@@ -409,7 +420,8 @@ def run_low_corr_frontier_combined_constraint_audit(
         "signals": list(selected_signals),
         "signal_penalty_strengths": strength_by_signal,
         "rebalance_frequency": rebalance_frequency,
-        "top_n": int(top_n),
+        "top_n": int(selected_top_n[0]),
+        "top_n_values": [int(value) for value in selected_top_n],
         "buffer_multiplier": float(buffer_multiplier),
         "fee_bps_values": [float(value) for value in fee_values],
         "capital_amounts": [float(value) for value in capital_values],
@@ -654,6 +666,8 @@ def summarize_combined_constraint_audit(summary: pd.DataFrame) -> pd.DataFrame:
     work = summary.copy()
     if "constraint_variant" not in work.columns:
         work["constraint_variant"] = "baseline"
+    if "top_n" not in work.columns:
+        work["top_n"] = DEFAULT_TOP_N
     if "constraint_fallback_count" not in work.columns:
         work["constraint_fallback_count"] = 0
     if "constraint_fallback_rate" not in work.columns:
@@ -662,14 +676,14 @@ def summarize_combined_constraint_audit(summary: pd.DataFrame) -> pd.DataFrame:
         work["evidence_grade"] = "backtest_only"
     no_impact = work.loc[
         pd.to_numeric(work["impact_bps_per_1pct"], errors="coerce").eq(0.0),
-        ["eval_year", "signal", "constraint_variant", "fee_bps", "capital_amount", "annualized_return"],
+        ["eval_year", "top_n", "signal", "constraint_variant", "fee_bps", "capital_amount", "annualized_return"],
     ].rename(columns={"annualized_return": "annualized_return_no_impact"})
-    work = work.merge(no_impact, on=["eval_year", "signal", "constraint_variant", "fee_bps", "capital_amount"], how="left")
+    work = work.merge(no_impact, on=["eval_year", "top_n", "signal", "constraint_variant", "fee_bps", "capital_amount"], how="left")
     low_corr = work.loc[
         work["signal"] == LOW_CORR_SIGNAL,
-        ["eval_year", "constraint_variant", "fee_bps", "capital_amount", "impact_bps_per_1pct", "annualized_return"],
+        ["eval_year", "top_n", "constraint_variant", "fee_bps", "capital_amount", "impact_bps_per_1pct", "annualized_return"],
     ].rename(columns={"annualized_return": "low_corr_annualized_return"})
-    work = work.merge(low_corr, on=["eval_year", "constraint_variant", "fee_bps", "capital_amount", "impact_bps_per_1pct"], how="left")
+    work = work.merge(low_corr, on=["eval_year", "top_n", "constraint_variant", "fee_bps", "capital_amount", "impact_bps_per_1pct"], how="left")
     work["impact_drag_vs_no_impact"] = pd.to_numeric(work["annualized_return"], errors="coerce") - pd.to_numeric(
         work["annualized_return_no_impact"],
         errors="coerce",
@@ -681,6 +695,7 @@ def summarize_combined_constraint_audit(summary: pd.DataFrame) -> pd.DataFrame:
 
     rows: list[dict[str, Any]] = []
     group_cols = [
+        "top_n",
         "constraint_variant",
         "signal",
         "exposure_penalty_cols",
@@ -693,6 +708,7 @@ def summarize_combined_constraint_audit(summary: pd.DataFrame) -> pd.DataFrame:
     ]
     for keys, group in work.groupby(group_cols, sort=True, dropna=False):
         (
+            top_n,
             constraint_variant,
             signal,
             penalty_cols,
@@ -709,6 +725,7 @@ def summarize_combined_constraint_audit(summary: pd.DataFrame) -> pd.DataFrame:
         rows.append(
             {
                 "constraint_variant": constraint_variant,
+                "top_n": int(top_n),
                 "signal": signal,
                 "evidence_grade": ",".join(evidence_grades),
                 "exposure_penalty_cols": penalty_cols,
@@ -741,7 +758,7 @@ def summarize_combined_constraint_audit(summary: pd.DataFrame) -> pd.DataFrame:
     )
     if output.empty:
         return output
-    output["rank_within_stress"] = output.groupby(["fee_bps", "capital_amount", "impact_bps_per_1pct"])["mean_annualized_return"].rank(
+    output["rank_within_stress"] = output.groupby(["top_n", "fee_bps", "capital_amount", "impact_bps_per_1pct"])["mean_annualized_return"].rank(
         method="first",
         ascending=False,
     ).astype(int)
@@ -751,6 +768,7 @@ def summarize_combined_constraint_audit(summary: pd.DataFrame) -> pd.DataFrame:
 def summarize_combined_basket_exposure(exposure: pd.DataFrame) -> pd.DataFrame:
     columns = [
         "constraint_variant",
+        "top_n",
         "signal",
         "signal_config",
         "exposure_penalty_strength",
@@ -769,14 +787,17 @@ def summarize_combined_basket_exposure(exposure: pd.DataFrame) -> pd.DataFrame:
     work = exposure.copy()
     if "constraint_variant" not in work.columns:
         work["constraint_variant"] = "baseline"
+    if "top_n" not in work.columns:
+        work["top_n"] = DEFAULT_TOP_N
     work["active_exposure"] = pd.to_numeric(work["active_exposure"], errors="coerce")
     work["abs_active_exposure"] = work["active_exposure"].abs()
     rows: list[dict[str, Any]] = []
-    for keys, group in work.groupby(["constraint_variant", "signal", "signal_config", "exposure_penalty_strength", "factor", "period_type"], sort=True):
-        constraint_variant, signal, signal_config, strength, factor, period_type = keys
+    for keys, group in work.groupby(["constraint_variant", "top_n", "signal", "signal_config", "exposure_penalty_strength", "factor", "period_type"], sort=True):
+        constraint_variant, top_n, signal, signal_config, strength, factor, period_type = keys
         rows.append(
             {
                 "constraint_variant": constraint_variant,
+                "top_n": int(top_n),
                 "signal": signal,
                 "signal_config": signal_config,
                 "exposure_penalty_strength": float(strength),
@@ -794,6 +815,7 @@ def summarize_combined_basket_exposure(exposure: pd.DataFrame) -> pd.DataFrame:
 def summarize_combined_industry_exposure(industry_exposure: pd.DataFrame) -> pd.DataFrame:
     columns = [
         "constraint_variant",
+        "top_n",
         "signal",
         "signal_config",
         "exposure_penalty_strength",
@@ -810,13 +832,16 @@ def summarize_combined_industry_exposure(industry_exposure: pd.DataFrame) -> pd.
     work = industry_exposure.copy()
     if "constraint_variant" not in work.columns:
         work["constraint_variant"] = "baseline"
+    if "top_n" not in work.columns:
+        work["top_n"] = DEFAULT_TOP_N
     work["abs_active_weight"] = pd.to_numeric(work["abs_active_weight"], errors="coerce")
     rows: list[dict[str, Any]] = []
-    for keys, group in work.groupby(["constraint_variant", "signal", "signal_config", "exposure_penalty_strength", "period_type"], sort=True):
-        constraint_variant, signal, signal_config, strength, period_type = keys
+    for keys, group in work.groupby(["constraint_variant", "top_n", "signal", "signal_config", "exposure_penalty_strength", "period_type"], sort=True):
+        constraint_variant, top_n, signal, signal_config, strength, period_type = keys
         rows.append(
             {
                 "constraint_variant": constraint_variant,
+                "top_n": int(top_n),
                 "signal": signal,
                 "signal_config": signal_config,
                 "exposure_penalty_strength": float(strength),
@@ -862,7 +887,7 @@ def render_combined_constraint_markdown(
         "# Low-Corr Frontier Combined Constraint Audit",
         "",
         "- Hypothesis: frontier signals should survive a combined portfolio-construction gate, not isolated single controls.",
-        f"- Protocol: `horizon={result.get('horizon')}`, `{result.get('rebalance_frequency')}`, `top_n={result.get('top_n')}`, `buffer={result.get('buffer_multiplier')}`.",
+        f"- Protocol: `horizon={result.get('horizon')}`, `{result.get('rebalance_frequency')}`, `top_n_values={result.get('top_n_values', [result.get('top_n')])}`, `buffer={result.get('buffer_multiplier')}`.",
         f"- Signals: `{result.get('signals')}`.",
         f"- Signal penalty strengths: `{result.get('signal_penalty_strengths')}`.",
         f"- Group cap: `{result.get('group_col') or 'none'}` max weight `{result.get('max_group_weight')}`.",
@@ -950,6 +975,14 @@ def _normalize_float_tuple(values: Sequence[float] | str, *, name: str) -> tuple
     return output
 
 
+def _normalize_int_tuple(values: Sequence[int] | str, *, name: str) -> tuple[int, ...]:
+    raw_values = values.split(",") if isinstance(values, str) else values
+    output = tuple(int(str(value).strip()) for value in raw_values if str(value).strip())
+    if not output:
+        raise ValueError(f"{name} must not be empty")
+    return output
+
+
 def _unique_columns(columns: Sequence[str]) -> list[str]:
     output: list[str] = []
     for column in columns:
@@ -962,6 +995,13 @@ def _sum_bool_column(frame: pd.DataFrame, column: str) -> int:
     if frame.empty or column not in frame.columns:
         return 0
     return int(_truthy(frame[column]).sum())
+
+
+def _set_or_insert(frame: pd.DataFrame, column: str, value: Any) -> None:
+    if column in frame.columns:
+        frame[column] = value
+    else:
+        frame.insert(0, column, value)
 
 
 def _truthy(series: pd.Series) -> pd.Series:
@@ -1043,6 +1083,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--signals", default=",".join(DEFAULT_FRONTIER_SIGNALS))
     parser.add_argument("--signal-penalty-strengths", default=",".join(DEFAULT_SIGNAL_PENALTY_STRENGTHS))
     parser.add_argument("--top-n", type=int, default=DEFAULT_TOP_N)
+    parser.add_argument("--top-n-values", default=None)
     parser.add_argument("--frequency", default=DEFAULT_REBALANCE_FREQUENCY)
     parser.add_argument("--buffer-multiplier", type=float, default=DEFAULT_BUFFER_MULTIPLIER)
     parser.add_argument("--fee-bps", default=",".join(str(value) for value in DEFAULT_FEE_BPS_VALUES))
@@ -1080,6 +1121,7 @@ def main() -> None:
         signals=_normalize_tuple(args.signals, name="signals"),
         signal_penalty_strengths=args.signal_penalty_strengths,
         top_n=args.top_n,
+        top_n_values=_normalize_int_tuple(args.top_n_values, name="top_n_values") if args.top_n_values is not None else None,
         rebalance_frequency=args.frequency,
         buffer_multiplier=args.buffer_multiplier,
         fee_bps_values=_normalize_float_tuple(args.fee_bps, name="fee_bps_values"),

@@ -13,10 +13,11 @@ from traditional_quant_research.experiments.frontier_personal_candidate_gate imp
 
 
 def _gate_frame(top_n: int, *, promoted: bool) -> pd.DataFrame:
-    return pd.DataFrame(
+    frame = pd.DataFrame(
         [
             {
                 "constraint_variant": "baseline",
+                "top_n": top_n,
                 "signal": "multifactor_rolling_ic_weighted_score",
                 "fee_bps": 30.0,
                 "capital_amount": 100_000_000.0,
@@ -37,6 +38,7 @@ def _gate_frame(top_n: int, *, promoted: bool) -> pd.DataFrame:
             },
             {
                 "constraint_variant": "baseline",
+                "top_n": top_n,
                 "signal": "multifactor_low_corr_rank_score",
                 "fee_bps": 30.0,
                 "capital_amount": 100_000_000.0,
@@ -57,12 +59,12 @@ def _gate_frame(top_n: int, *, promoted: bool) -> pd.DataFrame:
             },
         ]
     )
+    return frame
 
 
 def test_build_personal_protocol_ledger_ranks_promoted_protocols() -> None:
     protocol_runs = [
         {
-            "top_n": 20,
             "combined_result": {
                 "horizon": 20,
                 "rebalance_frequency": "monthly",
@@ -73,7 +75,6 @@ def test_build_personal_protocol_ledger_ranks_promoted_protocols() -> None:
             "gate": _gate_frame(20, promoted=True),
         },
         {
-            "top_n": 50,
             "combined_result": {
                 "horizon": 20,
                 "rebalance_frequency": "monthly",
@@ -107,17 +108,71 @@ def test_run_frontier_personal_protocol_grid_writes_artifacts(tmp_path: Path, mo
     gate_calls: list[dict[str, object]] = []
 
     def fake_combined(**kwargs):
-        top_n = int(kwargs["top_n"])
         combined_calls.append(kwargs)
-        run_dir = Path(kwargs["output_dir"]) / f"combined_{top_n}"
+        run_dir = Path(kwargs["output_dir"]) / "combined_grid"
         run_dir.mkdir(parents=True)
+        rows = []
+        eval_year = int(kwargs["years"][0])
+        for top_n in kwargs["top_n_values"]:
+            rows.append(
+                {
+                    "eval_year": eval_year,
+                    "top_n": int(top_n),
+                    "signal": "multifactor_rolling_ic_weighted_score",
+                    "constraint_variant": "baseline",
+                    "evidence_grade": "backtest_only",
+                    "exposure_penalty_cols": "log_amount_mean_20d_z",
+                    "exposure_penalty_strength": 0.25,
+                    "group_col": "industry",
+                    "max_group_weight": 0.1,
+                    "fee_bps": 30.0,
+                    "capital_amount": 100_000_000.0,
+                    "impact_bps_per_1pct": 10.0,
+                    "annualized_return": 0.12 if int(top_n) == 20 else 0.03,
+                    "sharpe": 1.0,
+                    "max_drawdown": -0.14,
+                    "mean_turnover": 0.4,
+                    "mean_impact_cost": 0.001,
+                    "mean_total_cost": 0.004,
+                    "periods": 6,
+                    "constraint_fallback_count": 0,
+                    "constraint_fallback_rate": 0.0,
+                }
+            )
+            rows.append(
+                {
+                    "eval_year": eval_year,
+                    "top_n": int(top_n),
+                    "signal": "multifactor_low_corr_rank_score",
+                    "constraint_variant": "baseline",
+                    "evidence_grade": "backtest_only",
+                    "exposure_penalty_cols": "log_amount_mean_20d_z",
+                    "exposure_penalty_strength": 1.0,
+                    "group_col": "industry",
+                    "max_group_weight": 0.1,
+                    "fee_bps": 30.0,
+                    "capital_amount": 100_000_000.0,
+                    "impact_bps_per_1pct": 10.0,
+                    "annualized_return": 0.02,
+                    "sharpe": 0.3,
+                    "max_drawdown": -0.18,
+                    "mean_turnover": 0.5,
+                    "mean_impact_cost": 0.001,
+                    "mean_total_cost": 0.004,
+                    "periods": 6,
+                    "constraint_fallback_count": 0,
+                    "constraint_fallback_rate": 0.0,
+                }
+            )
+        pd.DataFrame(rows).to_csv(run_dir / "combined_constraint_summary.csv", index=False)
         (run_dir / "summary.json").write_text(
             json.dumps(
                 {
                     "snapshot_id": "baostock_v2_fixture",
                     "horizon": kwargs["horizon"],
                     "rebalance_frequency": kwargs["rebalance_frequency"],
-                    "top_n": top_n,
+                    "top_n": kwargs["top_n"],
+                    "top_n_values": list(kwargs["top_n_values"]),
                     "buffer_multiplier": kwargs["buffer_multiplier"],
                     "execution_constraints": kwargs["execution_constraints"],
                 }
@@ -125,39 +180,43 @@ def test_run_frontier_personal_protocol_grid_writes_artifacts(tmp_path: Path, mo
             encoding="utf-8",
         )
         return {
-            "run_id": f"combined_{top_n}",
+            "run_id": "combined_grid",
             "output_dir": str(run_dir),
             "snapshot_id": "baostock_v2_fixture",
             "horizon": kwargs["horizon"],
             "rebalance_frequency": kwargs["rebalance_frequency"],
-            "top_n": top_n,
+            "top_n": kwargs["top_n"],
+            "top_n_values": list(kwargs["top_n_values"]),
             "buffer_multiplier": kwargs["buffer_multiplier"],
             "execution_constraints": kwargs["execution_constraints"],
         }
 
     def fake_gate(**kwargs):
-        combined_run_dir = Path(kwargs["combined_run_dir"])
-        top_n = int(str(combined_run_dir.parent.parent.name).replace("top_n_", ""))
         gate_calls.append(kwargs)
-        promoted = top_n == 20
-        run_dir = Path(kwargs["output_dir"]) / f"gate_{top_n}"
+        run_dir = Path(kwargs["output_dir"]) / "gate_grid"
         run_dir.mkdir(parents=True)
-        _gate_frame(top_n, promoted=promoted).to_csv(run_dir / "personal_candidate_gate_summary.csv", index=False)
+        pd.concat(
+            [
+                _gate_frame(20, promoted=True),
+                _gate_frame(50, promoted=False),
+            ],
+            ignore_index=True,
+        ).to_csv(run_dir / "personal_candidate_gate_summary.csv", index=False)
         (run_dir / "summary.json").write_text(
             json.dumps(
                 {
-                    "run_id": f"gate_{top_n}",
-                    "combined_run_dir": str(combined_run_dir),
-                    "personal_backtest_candidate_count": 1 if promoted else 0,
+                    "run_id": "gate_grid",
+                    "combined_run_dir": str(kwargs["combined_run_dir"]),
+                    "personal_backtest_candidate_count": 1,
                     "strategy_candidate_count": 0,
                 }
             ),
             encoding="utf-8",
         )
         return {
-            "run_id": f"gate_{top_n}",
+            "run_id": "gate_grid",
             "run_dir": str(run_dir),
-            "personal_backtest_candidate_count": 1 if promoted else 0,
+            "personal_backtest_candidate_count": 1,
             "strategy_candidate_count": 0,
         }
 
@@ -186,8 +245,12 @@ def test_run_frontier_personal_protocol_grid_writes_artifacts(tmp_path: Path, mo
     assert result["strategy_candidate_count"] == 0
     assert result["best_top_n"] == 20
     assert len(combined_calls) == 2
-    assert len(gate_calls) == 2
-    assert {call["top_n"] for call in combined_calls} == {20, 50}
+    assert len(gate_calls) == 1
+    assert {tuple(call["years"]) for call in combined_calls} == {(2017,), (2018,)}
+    assert {tuple(call["top_n_values"]) for call in combined_calls} == {(20, 50)}
+    assert (run_dir / "personal_protocol_grid_progress.csv").exists()
+    progress = pd.read_csv(run_dir / "personal_protocol_grid_progress.csv")
+    assert set(progress["status"]) == {"completed"}
     assert (run_dir / "personal_protocol_grid_ledger.csv").exists()
     assert (run_dir / "personal_protocol_grid_top_n_summary.csv").exists()
     assert (run_dir / "summary.json").exists()
