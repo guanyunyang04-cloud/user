@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 105,
+  "record_count": 106,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -1607,6 +1607,44 @@
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": []
+    },
+    {
+      "id": "daily_research_current_frontier_compaction_20260603",
+      "date": "2026-05-31",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_current_frontier_compaction_20260603.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset",
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "study_families": [],
+      "run_tags": [
+        "mh_v2_reset_tradeable_mainboard_anchor_20260601_01",
+        "mh_v2_traditional_pit_tradeable_mainboard_anchor_20260602_01",
+        "mh_v2_local_state_loss_calibration_score_monthly_robust_v1_seed7_20260603_01",
+        "mh_v2_local_state_loss_calibration_risk_drawdown_reweighted_v1_seed7_20260603_01"
+      ],
+      "verdict": "Status: `brain_maintenance / current_frontier_compaction / research-only / shadow-only`.; Scope: `daily_research` brain hot-path maintenance, frontier freshness reconciliation, and guard readability.; Active artifact impact: `daily_research/output/active_execution_strategy.json` remains unchanged and was not restored, regenerated, or promoted.; This reference preserves details removed from `daily_research/brain/state_center.md` and `daily_research/brain/operations_center.md` during hot-path compaction.",
+      "blockers": [
+        "The 2026-05-31 `output/cache` deletion remains a file-backed replay and active inspection blocker, not a reason to invalidate user-confirmed brain conclusions.",
+        "Continuous policy recent review sequence remains shadow-only; translation closure and oracle feasibility improved, but training evidence and behavior quality are still blockers.",
+        "Long tasks must remain supervised through PID, persistent stdout/stderr, progress files, run tags, and expected artifacts; `Wait-Process -Id <pid> -Timeout 7200` is a per-window wait, not a failure threshold."
+      ],
+      "next_allowed_actions": [
+        "Rebuild `daily_research/brain/references/evidence_registry.json` after this reference is added.",
+        "Run `current-frontier --json`; expected outcome is no unregistered latest run tags for the two reconciled seed7 diagnostics.",
+        "Continue v2 research by bridging `horizon_30d_soft_penalty_v1` into research-only score backtest and comparison, without touching live/default/promotion.",
+        "Keep active artifact missing-state handling explicit and readable in guard output; do not reconstruct active artifact from brain text."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
+        "policy_pool_view__925e8604a91a9c07a5387fb1"
+      ]
     },
     {
       "id": "daily_research_v2_bad_month_attribution_20260602",

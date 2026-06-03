@@ -109,12 +109,18 @@ class BrainWorkflowCliTest(unittest.TestCase):
     def test_health_cli_aggregates_read_only_checks(self) -> None:
         payload = run_cli("health", "--json")
 
-        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["status"], "failed")
         self.assertIn("elapsed_seconds", payload)
         self.assertIn("brain_integrity", payload["checks"])
         self.assertIn("doc_guard", payload["checks"])
         self.assertIn("project_consistency", payload["checks"])
         self.assertIn("openmp_strict", payload["checks"])
+        self.assertFalse(payload["checks"]["project_consistency"]["ok"])
+        self.assertEqual(payload["checks"]["project_consistency"]["returncode"], 1)
+        self.assertIn(
+            "active_manifest_missing_due_to_execution_freeze_or_payload_loss",
+            payload["checks"]["project_consistency"]["stdout_tail"],
+        )
         for check_payload in payload["checks"].values():
             self.assertIn("elapsed_seconds", check_payload)
 
@@ -140,15 +146,17 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertIn("daily_research_state", payload["routes"])
 
     def test_status_cli_accepts_explicit_run_tag_capsule(self) -> None:
-        tag = "self_opt_study_r52_native_source_delta_closure_screening_safe_20260510_02"
+        tag = "missing_continuous_policy_fixture_20990101_01"
         payload = run_cli("status", "--workflow", "continuous_policy", "--run-tag", tag, "--json")
 
         self.assertEqual(payload["workflow_id"], "continuous_policy_result_review")
+        self.assertEqual(payload["status"], "blocked")
         self.assertIn("run_evidence", payload)
         self.assertNotIn("study_evidence", payload)
         self.assertEqual(payload["run_evidence"]["run_tag"], tag)
-        self.assertEqual(payload["run_evidence"]["completed_trial_count"], 3)
-        self.assertTrue(payload["artifact_freshness"]["is_stale_risk"])
+        self.assertEqual(payload["run_evidence"]["workflow"], "continuous_policy")
+        self.assertFalse(payload["run_evidence"]["exists"])
+        self.assertIn("study summary not found", payload["run_evidence"]["evidence_gaps"][0])
 
     def test_status_cli_rejects_removed_study_tag_option(self) -> None:
         result = subprocess.run(
@@ -173,19 +181,20 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
 
     def test_writeback_plan_run_source_is_read_only(self) -> None:
-        tag = "self_opt_study_r52_native_source_delta_closure_screening_safe_20260510_02"
-        payload = run_cli("writeback-plan", "--source", f"run:{tag}", "--json")
+        tag = "missing_continuous_policy_fixture_20990101_01"
+        payload = run_cli("writeback-plan", "--source", f"run:continuous_policy:{tag}", "--json")
 
-        self.assertEqual(payload["source"], f"run:{tag}")
+        self.assertEqual(payload["source"], f"run:continuous_policy:{tag}")
         self.assertFalse(payload["apply_brain_writeback"])
         self.assertIn("run_evidence", payload)
         self.assertNotIn("study_evidence", payload)
         self.assertEqual(payload["run_evidence"]["run_tag"], tag)
         self.assertEqual(payload["run_evidence"]["workflow"], "continuous_policy")
+        self.assertFalse(payload["run_evidence"]["exists"])
         self.assertTrue(payload["requires_explicit_apply"])
 
     def test_writeback_plan_run_source_infers_path_policy(self) -> None:
-        tag = "path20_input_ablation_no_alpha_liquid500_du_cost20_hit10_dd010_20260522_01"
+        tag = "mh_v2_horizon_30d_soft_penalty_seed7_20260603_01"
         payload = run_cli("writeback-plan", "--source", f"run:{tag}", "--json")
         evidence = payload["run_evidence"]
 
@@ -199,11 +208,11 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertEqual(evidence["status"], "completed")
         self.assertEqual(evidence["stage"], "forecast_walkforward_study")
         self.assertEqual(evidence["evidence_verdict"], "forecast_test_confirmed")
-        self.assertIn("policy_input_bundle__7c8f58d851bce8179e1e9e2d", evidence["dataset_ids"])
+        self.assertIn("policy_input_bundle__45e3d8c059ba718426a9f887", evidence["dataset_ids"])
         self.assertIn("gru_sequence_static_context", evidence["model_families"])
 
     def test_writeback_plan_run_source_accepts_explicit_path_policy(self) -> None:
-        tag = "path20_input_ablation_no_alpha_liquid500_du_cost20_hit10_dd010_20260522_01"
+        tag = "mh_v2_horizon_30d_soft_penalty_seed7_20260603_01"
         payload = run_cli("writeback-plan", "--source", f"run:path_policy:{tag}", "--json")
         evidence = payload["run_evidence"]
 

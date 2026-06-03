@@ -775,16 +775,24 @@ def _run_check(name: str, command: list[str], *, env: dict[str, str] | None = No
         capture_output=True,
         text=True,
         encoding="utf-8",
+        errors="replace",
         check=False,
         env=env,
     )
     elapsed = time.perf_counter() - started
+
+    def excerpt(text: str, *, limit: int) -> str:
+        if len(text) <= limit:
+            return text
+        half = max(int(limit / 2), 1)
+        return f"{text[:half]}\n...<truncated>...\n{text[-half:]}"
+
     return {
         "name": name,
         "returncode": result.returncode,
         "ok": result.returncode == 0,
-        "stdout_tail": (result.stdout or "")[-4000:],
-        "stderr_tail": (result.stderr or "")[-2000:],
+        "stdout_tail": excerpt(result.stdout or "", limit=4000),
+        "stderr_tail": excerpt(result.stderr or "", limit=2000),
         "elapsed_seconds": round(elapsed, 3),
     }
 

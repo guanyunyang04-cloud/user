@@ -12,6 +12,7 @@ REFERENCE_FILE_PATTERNS = (
     re.compile(r"^(alpha_path20|path20|path_policy|alpha_multi_horizon)_.+\.md$"),
     re.compile(r"^data_lake_.+\.md$"),
     re.compile(r"^daily_research_v2_.+\.md$"),
+    re.compile(r"^daily_research_current_frontier_.+\.md$"),
     re.compile(r"^tdx_free_data_platform_.+\.md$"),
     re.compile(r"^execution_.+\.md$"),
     re.compile(r"^(brain_native|brain_system|api_agent)_.+\.md$"),

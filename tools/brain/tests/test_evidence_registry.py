@@ -350,6 +350,33 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
 
             self.assertTrue(daily_research_evidence.is_reference_file(path))
 
+    def test_adapter_indexes_current_frontier_reference_names(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "daily_research_current_frontier_compaction_20260603.md"
+            path.write_text("# Daily Research Current Frontier Compaction\n", encoding="utf-8")
+
+            self.assertTrue(daily_research_evidence.is_reference_file(path))
+
+    def test_registry_indexes_current_frontier_compaction(self) -> None:
+        registry = build_evidence_registry()
+        matches = [
+            record
+            for record in registry["records"]
+            if record["id"] == "daily_research_current_frontier_compaction_20260603"
+        ]
+
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["workflow"], "path_policy")
+        self.assertIn("daily_research_v2_research_reset", matches[0]["research_programs"])
+        self.assertIn(
+            "mh_v2_local_state_loss_calibration_score_monthly_robust_v1_seed7_20260603_01",
+            matches[0]["run_tags"],
+        )
+        self.assertIn(
+            "mh_v2_local_state_loss_calibration_risk_drawdown_reweighted_v1_seed7_20260603_01",
+            matches[0]["run_tags"],
+        )
+
     def test_registry_indexes_daily_research_v2_traditional_pit_bridge(self) -> None:
         registry = build_evidence_registry()
         matches = [

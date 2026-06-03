@@ -36,6 +36,73 @@ REMOVED_WORKFLOWS = {
 }
 
 
+def _write_json(root: Path, relative_path: str, payload: dict) -> str:
+    target = root / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return relative_path
+
+
+def _write_continuous_policy_run_fixture(root: Path, tag: str) -> None:
+    trials = []
+    for trial_id in range(1, 4):
+        trial_tag = f"{tag}_trial{trial_id}"
+        base = f"daily_research/output/continuous_policy/studies/{tag}/trial_{trial_id}"
+        diagnostics_path = _write_json(
+            root,
+            f"{base}/training_diagnostics.json",
+            {
+                "sample_model_type": "temporal_day_set",
+                "portfolio_day_set_native_allocation_vector_terms": {
+                    "native_source_threshold_loss": 0.01,
+                },
+            },
+        )
+        evaluation_path = _write_json(
+            root,
+            f"{base}/evaluation_summary.json",
+            {"continuity_metrics": {"cash_timing_quality_1d": 0.1}},
+        )
+        protocol_path = _write_json(
+            root,
+            f"{base}/protocol_summary.json",
+            {
+                "run_tag": trial_tag,
+                "loss_profile": "alpha_result_value_budget_split_v37",
+                "evaluation_summary_json": evaluation_path,
+                "train": {"training_diagnostics": {"training_diagnostics_json": diagnostics_path}},
+                "training_evidence": {"status": "sufficient"},
+            },
+        )
+        trials.append(
+            {
+                "trial_id": trial_id,
+                "trial_tag": trial_tag,
+                "status": "completed",
+                "phase": "screening",
+                "protocol_summary_json": protocol_path,
+                "trial_config": {"loss_profile": "alpha_result_value_budget_split_v37"},
+                "primary_metrics": {"native_target_valid": True},
+            }
+        )
+
+    _write_json(
+        root,
+        f"daily_research/output/continuous_policy/studies/{tag}/study_summary.json",
+        {
+            "run_tag": tag,
+            "status": "completed",
+            "stage": "safe_screening",
+            "trial_count": 3,
+            "completed_trial_count": 3,
+            "failed_trial_count": 0,
+            "screening_trials": trials,
+        },
+    )
+    _write_json(root, "daily_research/output/continuous_policy/latest_study_summary.json", {"run_tag": tag})
+    _write_json(root, "daily_research/output/continuous_policy/latest_protocol_summary.json", {"protocol_tag": f"{tag}_stale"})
+
+
 class BrainPlatformTest(unittest.TestCase):
     def test_resolve_bootstrap_builds_daily_research_handoff_capsule(self) -> None:
         state = resolve_bootstrap("daily_research")
@@ -231,8 +298,16 @@ class BrainPlatformTest(unittest.TestCase):
 
     def test_explicit_run_evidence_capsule_reads_coherent_r52_trials(self) -> None:
         tag = "self_opt_study_r52_native_source_delta_closure_screening_safe_20260510_02"
-        report = resolve_run_evidence(tag)
-        payload = report.to_dict()
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_continuous_policy_run_fixture(root, tag)
+            with patch.object(brain_platform, "WORKSPACE_ROOT", root), patch.object(
+                daily_research_adapter,
+                "WORKSPACE_ROOT",
+                root,
+            ):
+                report = resolve_run_evidence(tag)
+                payload = report.to_dict()
 
         self.assertEqual(payload["run_tag"], tag)
         self.assertEqual(

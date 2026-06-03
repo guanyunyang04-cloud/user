@@ -204,6 +204,20 @@ def _check_aux_defaults(failures: list[CheckResult]) -> None:
 
 
 def _check_execution_semantics(failures: list[CheckResult]) -> None:
+    manifest_path = WORKSPACE_ROOT / "daily_research/output/active_execution_strategy.json"
+    if not manifest_path.exists():
+        failures.append(
+            CheckResult(
+                code="active_manifest_missing_due_to_execution_freeze_or_payload_loss",
+                detail=(
+                    "daily_research/output/active_execution_strategy.json is missing. "
+                    "This is an explicit execution-freeze / payload-loss blocker; "
+                    "do not reconstruct the active artifact from brain text."
+                ),
+            )
+        )
+        return
+
     manifest = _read_json("daily_research/output/active_execution_strategy.json")
     _require(
         str(manifest.get("target_weight_semantics", "")).strip() == EXPECTED_TARGET_WEIGHT_SEMANTICS,
@@ -1100,6 +1114,7 @@ def main() -> None:
         "failures": [failure.__dict__ for failure in failures],
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))
+    raise SystemExit(1 if failures else 0)
 
 
 if __name__ == "__main__":
