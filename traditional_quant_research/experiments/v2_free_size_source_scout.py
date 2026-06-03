@@ -223,12 +223,26 @@ def _probe_efinance_current_quote(module: Any | None, import_error: str, symbols
     getter = getattr(stock, "get_realtime_quotes", None)
     if getter is None:
         return _source_row("efinance.current_quote", "efinance", "stock.get_realtime_quotes", "endpoint_missing", [], "current_only", "none", False, False, "efinance.stock.get_realtime_quotes not found")
-    try:
-        frame = getter([symbol.split(".", 1)[0] for symbol in symbols])
-    except Exception as exc:  # noqa: BLE001
-        return _source_row("efinance.current_quote", "efinance", "stock.get_realtime_quotes", "failed", [], "current_only", "none", False, False, str(exc))
+    frame, error = _call_realtime_quote_getter(getter, symbols)
+    if frame is None:
+        return _source_row("efinance.current_quote", "efinance", "stock.get_realtime_quotes", "failed", [], "current_only", "none", False, False, error)
     fields = _matching_fields(frame, ("总市值", "流通市值", "市值", "流通股本"))
     return _source_row("efinance.current_quote", "efinance", "stock.get_realtime_quotes", "passed" if fields else "fields_missing", fields, "current_only", "not_pit", False, False, "Realtime/current quote endpoint; use only for cross-check.")
+
+
+def _call_realtime_quote_getter(getter: Any, symbols: Sequence[str]) -> tuple[pd.DataFrame | None, str]:
+    code_list = [symbol.split(".", 1)[0] for symbol in symbols]
+    attempts: list[tuple[Any, ...]] = [(code_list,), (",".join(code_list),), tuple()]
+    errors: list[str] = []
+    for args in attempts:
+        try:
+            frame = getter(*args)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{type(exc).__name__}: {exc}")
+            continue
+        if frame is not None and not pd.DataFrame(frame).empty:
+            return pd.DataFrame(frame), ""
+    return None, "; ".join(errors) if errors else "No realtime quote rows returned."
 
 
 def _proxy_amount_row() -> dict[str, Any]:

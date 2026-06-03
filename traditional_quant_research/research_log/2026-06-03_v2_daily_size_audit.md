@@ -1,6 +1,6 @@
 # v2.2 Daily Size Audit
 
-- run_id: `v2_daily_size_audit_20260603_175118`
+- run_id: `v2_daily_size_audit_20260603_195538`
 - snapshot_id: `baostock_v2_pit_20160101_20260601_industry_metrics_month_start_20260603`
 - status: `daily_size_absent`
 - universe_rows: `7451610`
@@ -12,6 +12,7 @@
 - required_units_present: `False`
 - source_grade_ok: `False`
 - current_cross_check_ok: `False`
+- current_cross_check_path: `traditional_quant_research/output/experiments/v2_free_size_current_cross_check/v2_free_size_current_cross_check_20260603_195515/daily_size_current_cross_check.csv`
 - daily_size_ready_for_research: `False`
 - candidate_count: `0`
 

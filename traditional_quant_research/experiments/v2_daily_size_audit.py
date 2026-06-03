@@ -49,6 +49,7 @@ def run_v2_daily_size_audit(
     root: str | Path | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
+    current_cross_check_path: str | Path | None = None,
     output_dir: Path = DEFAULT_OUTPUT_DIR,
     write_research_log: bool = False,
     research_log_path: Path = DEFAULT_RESEARCH_LOG,
@@ -60,7 +61,7 @@ def run_v2_daily_size_audit(
     manifest = load_pit_manifest(root)
     universe = load_daily_universe(root, start_date=start_date, end_date=end_date)
     size = load_pit_daily_size(root, start_date=start_date, end_date=end_date)
-    current_cross_check = _load_current_cross_check(root)
+    current_cross_check = _load_current_cross_check(root, explicit_path=current_cross_check_path)
     audit = build_daily_size_audit(universe, size, current_cross_check=current_cross_check)
     summary = summarize_daily_size_audit(
         manifest=manifest,
@@ -70,6 +71,7 @@ def run_v2_daily_size_audit(
         run_id=run_id,
         start_date=start_date,
         end_date=end_date,
+        current_cross_check_path=current_cross_check_path,
     )
     markdown = render_daily_size_audit_markdown(summary, audit)
 
@@ -112,6 +114,7 @@ def summarize_daily_size_audit(
     run_id: str,
     start_date: str | None,
     end_date: str | None,
+    current_cross_check_path: str | Path | None = None,
 ) -> dict[str, Any]:
     field_summary = audit["field_summary"]
     tradeable = field_summary[field_summary["scope"] == "tradeable"].copy()
@@ -168,6 +171,7 @@ def summarize_daily_size_audit(
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "snapshot_id": manifest.get("snapshot_id", ""),
         "date_range_requested": {"start_date": start_date, "end_date": end_date},
+        "current_cross_check_path": str(current_cross_check_path) if current_cross_check_path else "",
         "universe_rows": int(len(universe)),
         "tradeable_rows": int(universe["is_tradeable"].sum()) if "is_tradeable" in universe.columns else 0,
         "size_rows": int(len(size)),
@@ -211,6 +215,7 @@ def render_daily_size_audit_markdown(summary: Mapping[str, Any], audit: Mapping[
         f"- required_units_present: `{summary.get('required_units_present')}`",
         f"- source_grade_ok: `{summary.get('source_grade_ok')}`",
         f"- current_cross_check_ok: `{summary.get('current_cross_check_ok')}`",
+        f"- current_cross_check_path: `{summary.get('current_cross_check_path', '')}`",
         f"- daily_size_ready_for_research: `{summary.get('daily_size_ready_for_research')}`",
         f"- candidate_count: `{summary.get('candidate_count', 0)}`",
         "",
@@ -445,7 +450,14 @@ def _extract_cross_check_diff(cross_check: pd.DataFrame, *, field: str, sources:
     return pd.Series(dtype="float64")
 
 
-def _load_current_cross_check(root: str | Path | None) -> pd.DataFrame:
+def _load_current_cross_check(root: str | Path | None, *, explicit_path: str | Path | None = None) -> pd.DataFrame:
+    if explicit_path is not None:
+        path = Path(explicit_path)
+        if not path.exists():
+            return pd.DataFrame()
+        if path.suffix.lower() == ".parquet":
+            return pd.read_parquet(path)
+        return pd.read_csv(path)
     snapshot_root = _resolve_snapshot_root(root)
     for path in [
         snapshot_root / "daily_size_current_cross_check.parquet",
@@ -520,6 +532,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--root", default=None, help="Snapshot root or v2 root containing latest_manifest.json.")
     parser.add_argument("--start-date", default=None)
     parser.add_argument("--end-date", default=None)
+    parser.add_argument("--current-cross-check-path", default=None)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--write-research-log", action="store_true")
     parser.add_argument("--research-log-path", type=Path, default=DEFAULT_RESEARCH_LOG)
@@ -532,6 +545,7 @@ def main() -> None:
         root=args.root,
         start_date=args.start_date,
         end_date=args.end_date,
+        current_cross_check_path=args.current_cross_check_path,
         output_dir=args.output_dir,
         write_research_log=bool(args.write_research_log),
         research_log_path=args.research_log_path,

@@ -69,3 +69,22 @@ def test_summarize_free_size_scout_keeps_proxy_diagnostic_only() -> None:
     assert summary["usable_for_daily_size_count"] == 1
     assert summary["promotion_eligible_count"] == 0
     assert summary["recommended_size_source"] == "proxy_amount_diagnostic_only"
+
+
+class FallbackEfinanceStock:
+    @staticmethod
+    def get_realtime_quotes(*args) -> pd.DataFrame:
+        if args:
+            raise ValueError("code-list unsupported")
+        return pd.DataFrame([{"股票代码": "600000", "总市值": 1000.0, "流通市值": 800.0}])
+
+
+class FallbackEfinance:
+    stock = FallbackEfinanceStock()
+
+
+def test_efinance_probe_falls_back_to_default_quote_snapshot() -> None:
+    row = scout._probe_efinance_current_quote(FallbackEfinance, "", ["600000.SH"])
+
+    assert row["status"] == "passed"
+    assert "总市值" in row["fields_found"]

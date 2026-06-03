@@ -119,7 +119,7 @@ def test_proxy_amount_daily_size_is_shaped_but_not_gate_eligible() -> None:
 def test_cninfo_events_forward_fill_to_reconstruct_daily_size() -> None:
     events_raw = pd.DataFrame(
         [
-            {"变动日期": "2026-01-01", "总股本": "1万股", "流通股": "8000股"},
+            {"变动日期": "2026-01-01", "总股本": "1万股", "已流通股份": "8000股"},
         ]
     )
     events = normalize_cninfo_share_change_events(events_raw, code="600000.SH")

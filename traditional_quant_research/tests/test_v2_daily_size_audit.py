@@ -225,3 +225,48 @@ def test_run_daily_size_audit_requires_cross_check_for_reconstructed_source(tmp_
 
     assert with_cross_check["current_cross_check_ok"] is True
     assert with_cross_check["daily_size_ready_for_research"] is True
+
+
+def test_run_daily_size_audit_accepts_explicit_current_cross_check_path(tmp_path: Path) -> None:
+    root = tmp_path / "snapshot"
+    root.mkdir()
+    (root / "manifest.json").write_text(json.dumps({"snapshot_id": "fixture"}), encoding="utf-8")
+    pd.DataFrame(
+        [
+            {"date": pd.Timestamp("2026-01-02"), "code": "600000.SH", "is_tradeable": True},
+        ]
+    ).to_parquet(root / "daily_universe.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "date": pd.Timestamp("2026-01-02"),
+                "code": "600000.SH",
+                "total_market_cap": 1000000.0,
+                "float_market_cap": 800000.0,
+                "total_share": 10000.0,
+                "float_share": 8000.0,
+                "free_share": 7000.0,
+                "market_cap_unit": "CNY",
+                "share_unit": "shares",
+                "source": "akshare.cninfo_reconstructed",
+                "source_trade_date": "20260102",
+            },
+        ]
+    ).to_parquet(root / "daily_size.parquet", index=False)
+    explicit_cross_check = tmp_path / "cross_check.csv"
+    pd.DataFrame(
+        [
+            {"source": "akshare.cninfo_reconstructed", "field": "total_market_cap", "abs_relative_diff": 0.02},
+            {"source": "akshare.cninfo_reconstructed", "field": "float_market_cap", "abs_relative_diff": 0.05},
+        ]
+    ).to_csv(explicit_cross_check, index=False)
+
+    result = run_v2_daily_size_audit(
+        root=root,
+        current_cross_check_path=explicit_cross_check,
+        output_dir=tmp_path / "output",
+    )
+
+    assert result["current_cross_check_path"] == str(explicit_cross_check)
+    assert result["current_cross_check_ok"] is True
+    assert result["daily_size_ready_for_research"] is True

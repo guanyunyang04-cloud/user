@@ -62,6 +62,8 @@ _CNINFO_FLOAT_SHARE_ALIASES = (
     "流通股本",
     "流通A股",
     "无限售流通股",
+    "已流通股份",
+    "流通股份",
     "float_share",
     "float_shares",
 )
