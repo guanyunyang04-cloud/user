@@ -380,7 +380,7 @@ def daily_size_source_grade(source: Any) -> str:
 def accepted_daily_size_source_grade(source: Any) -> bool:
     """Return whether a source grade is allowed to satisfy size gates."""
 
-    return daily_size_source_grade(source) in {OFFICIAL_PIT_DAILY_GRADE, FREE_RECONSTRUCTED_GRADE}
+    return daily_size_source_grade(source) == OFFICIAL_PIT_DAILY_GRADE
 
 
 def fetch_tushare_daily_size_cache(

@@ -208,7 +208,8 @@ def test_run_daily_size_audit_requires_cross_check_for_reconstructed_source(tmp_
 
     missing_cross_check = run_v2_daily_size_audit(root=root, output_dir=tmp_path / "missing_output")
 
-    assert missing_cross_check["source_grade_ok"] is True
+    assert missing_cross_check["source_grade_ok"] is False
+    assert missing_cross_check["blocked_source_grades"] == ["free_reconstructed"]
     assert missing_cross_check["current_cross_check_ok"] is False
     assert missing_cross_check["daily_size_ready_for_research"] is False
 
@@ -224,7 +225,9 @@ def test_run_daily_size_audit_requires_cross_check_for_reconstructed_source(tmp_
     with_cross_check = run_v2_daily_size_audit(root=root, output_dir=tmp_path / "checked_output")
 
     assert with_cross_check["current_cross_check_ok"] is True
-    assert with_cross_check["daily_size_ready_for_research"] is True
+    assert with_cross_check["source_grade_ok"] is False
+    assert with_cross_check["blocked_source_grades"] == ["free_reconstructed"]
+    assert with_cross_check["daily_size_ready_for_research"] is False
 
 
 def test_run_daily_size_audit_accepts_explicit_current_cross_check_path(tmp_path: Path) -> None:
@@ -269,4 +272,6 @@ def test_run_daily_size_audit_accepts_explicit_current_cross_check_path(tmp_path
 
     assert result["current_cross_check_path"] == str(explicit_cross_check)
     assert result["current_cross_check_ok"] is True
-    assert result["daily_size_ready_for_research"] is True
+    assert result["source_grade_ok"] is False
+    assert result["blocked_source_grades"] == ["free_reconstructed"]
+    assert result["daily_size_ready_for_research"] is False

@@ -41,7 +41,7 @@ def test_free_size_source_scout_marks_reconstructed_source_usable_but_not_promot
 
     assert result["usable_for_daily_size_count"] >= 2
     assert result["promotion_eligible_count"] == 0
-    assert result["recommended_size_source"] == "akshare_cninfo_reconstructed"
+    assert result["recommended_size_source"] == "akshare_cninfo_reconstructed_diagnostic_only"
     assert result["candidate_count"] == 0
 
 

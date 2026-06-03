@@ -54,6 +54,8 @@ def horizon_aligned_top_n_backtest(
     max_group_weight: float | None = None,
     exposure_penalty_cols: Sequence[str] | str | None = None,
     exposure_penalty_strength: float = 0.0,
+    exposure_constraint_cols: Sequence[str] | str | None = None,
+    max_abs_exposure: float | None = None,
 ) -> HorizonBacktestResult:
     """Run an equal-weight Top-N long-only simulation aligned to a forward horizon.
 
@@ -80,8 +82,15 @@ def horizon_aligned_top_n_backtest(
     if group_col is None and max_group_weight is not None:
         raise ValueError("group_col is required when max_group_weight is set")
     exposure_cols = _normalize_optional_columns(exposure_penalty_cols)
+    constraint_cols = _normalize_optional_columns(exposure_constraint_cols)
     if exposure_penalty_strength < 0:
         raise ValueError("exposure_penalty_strength must be non-negative")
+    if max_abs_exposure is not None and max_abs_exposure <= 0:
+        raise ValueError("max_abs_exposure must be positive")
+    if constraint_cols and max_abs_exposure is None:
+        raise ValueError("max_abs_exposure is required when exposure_constraint_cols is set")
+    if not constraint_cols and max_abs_exposure is not None:
+        raise ValueError("exposure_constraint_cols is required when max_abs_exposure is set")
     if rebalance_frequency not in REBALANCE_PERIODS_PER_YEAR:
         raise ValueError(f"unsupported frequency: {rebalance_frequency}")
 
@@ -90,7 +99,8 @@ def horizon_aligned_top_n_backtest(
         required.append(capital_col)
     if group_col is not None:
         required.append(group_col)
-    required.extend(exposure_cols)
+    candidate_exposure_cols = _unique_optional_columns([*exposure_cols, *constraint_cols])
+    required.extend(candidate_exposure_cols)
     missing = [column for column in required if column not in frame.columns]
     if missing:
         raise ValueError(f"missing required columns: {missing}")
@@ -110,7 +120,7 @@ def horizon_aligned_top_n_backtest(
         limit_threshold=limit_threshold,
         capital_col=capital_col,
         group_col=group_col,
-        exposure_cols=exposure_cols,
+        exposure_cols=candidate_exposure_cols,
     )
     if candidates.empty:
         return HorizonBacktestResult(
@@ -130,6 +140,8 @@ def horizon_aligned_top_n_backtest(
                 max_group_weight=max_group_weight,
                 exposure_penalty_cols=exposure_cols,
                 exposure_penalty_strength=exposure_penalty_strength,
+                exposure_constraint_cols=constraint_cols,
+                max_abs_exposure=max_abs_exposure,
             ),
         )
 
@@ -153,6 +165,8 @@ def horizon_aligned_top_n_backtest(
                 max_group_weight=max_group_weight,
                 exposure_penalty_cols=exposure_cols,
                 exposure_penalty_strength=exposure_penalty_strength,
+                exposure_constraint_cols=constraint_cols,
+                max_abs_exposure=max_abs_exposure,
             ),
         )
 
@@ -178,7 +192,10 @@ def horizon_aligned_top_n_backtest(
             max_group_weight=max_group_weight,
             exposure_penalty_cols=exposure_cols,
             exposure_penalty_strength=exposure_penalty_strength,
+            exposure_constraint_cols=constraint_cols,
+            max_abs_exposure=max_abs_exposure,
         )
+        constraint_fallback = bool(picks.attrs.get("constraint_fallback", False))
         requested_holdings = int(len(picks))
         filled = picks.dropna(subset=["horizon_return", "entry_date", "exit_date"])
         if capital_scale == 0.0:
@@ -210,6 +227,7 @@ def horizon_aligned_top_n_backtest(
                     "buffer_multiplier": float(buffer_multiplier),
                     "execution_constraints": bool(execution_constraints),
                     "limit_threshold": float(limit_threshold),
+                    "constraint_fallback": constraint_fallback,
                     "holding_days": int(max(1, len(pd.date_range(entry_dates.min(), exit_dates.max(), freq="B")))),
                     "codes": "",
                 }
@@ -251,6 +269,7 @@ def horizon_aligned_top_n_backtest(
                 "buffer_multiplier": float(buffer_multiplier),
                 "execution_constraints": bool(execution_constraints),
                 "limit_threshold": float(limit_threshold),
+                "constraint_fallback": constraint_fallback,
                 "holding_days": int(max(1, len(pd.date_range(entry_dates.min(), exit_dates.max(), freq="B")))),
                 "codes": ",".join(str(code) for code in filled[code_col].tolist()),
             }
@@ -274,6 +293,8 @@ def horizon_aligned_top_n_backtest(
         max_group_weight=max_group_weight,
         exposure_penalty_cols=exposure_cols,
         exposure_penalty_strength=exposure_penalty_strength,
+        exposure_constraint_cols=constraint_cols,
+        max_abs_exposure=max_abs_exposure,
     )
     summary.update(
         {
@@ -288,6 +309,12 @@ def horizon_aligned_top_n_backtest(
             "entry_limit_up_count": int(trades["entry_limit_up_count"].sum()) if not trades.empty and "entry_limit_up_count" in trades.columns else 0,
             "exit_delayed_count": int(trades["exit_delayed_count"].sum()) if not trades.empty and "exit_delayed_count" in trades.columns else 0,
             "exit_limit_down_count": int(trades["exit_limit_down_count"].sum()) if not trades.empty and "exit_limit_down_count" in trades.columns else 0,
+            "constraint_fallback_count": _sum_bool_column(trades, "constraint_fallback") if not trades.empty else 0,
+            "constraint_fallback_rate": (
+                float(trades["constraint_fallback"].fillna(False).astype(bool).mean())
+                if not trades.empty and "constraint_fallback" in trades.columns
+                else 0.0
+            ),
             "group_col": group_col or "",
             "max_group_weight": float(max_group_weight) if max_group_weight is not None else np.nan,
         }
@@ -307,6 +334,8 @@ def select_buffered_top_n(
     max_group_weight: float | None = None,
     exposure_penalty_cols: Sequence[str] | str | None = None,
     exposure_penalty_strength: float = 0.0,
+    exposure_constraint_cols: Sequence[str] | str | None = None,
+    max_abs_exposure: float | None = None,
 ) -> pd.DataFrame:
     """Select Top-N while allowing prior holdings to survive inside a rank buffer."""
 
@@ -321,14 +350,90 @@ def select_buffered_top_n(
     if group_col is not None and group_col not in group.columns:
         raise ValueError(f"group column not found: {group_col}")
     exposure_cols = _normalize_optional_columns(exposure_penalty_cols)
+    constraint_cols = _normalize_optional_columns(exposure_constraint_cols)
     if exposure_penalty_strength < 0:
         raise ValueError("exposure_penalty_strength must be non-negative")
+    if max_abs_exposure is not None and max_abs_exposure <= 0:
+        raise ValueError("max_abs_exposure must be positive")
+    if constraint_cols and max_abs_exposure is None:
+        raise ValueError("max_abs_exposure is required when exposure_constraint_cols is set")
+    if not constraint_cols and max_abs_exposure is not None:
+        raise ValueError("exposure_constraint_cols is required when max_abs_exposure is set")
     missing_exposure_cols = [column for column in exposure_cols if column not in group.columns]
     if missing_exposure_cols:
         raise ValueError(f"exposure penalty columns not found: {missing_exposure_cols}")
+    missing_constraint_cols = [column for column in constraint_cols if column not in group.columns]
+    if missing_constraint_cols:
+        raise ValueError(f"exposure constraint columns not found: {missing_constraint_cols}")
     ranked = group.sort_values(signal_col, ascending=False, kind="mergesort").copy()
     if ranked.empty:
+        ranked.attrs["constraint_fallback"] = False
         return ranked
+    if constraint_cols and max_abs_exposure is not None:
+        constrained = _select_buffered_top_n_exposure_constrained(
+            ranked,
+            signal_col=signal_col,
+            code_col=code_col,
+            top_n=top_n,
+            previous_codes=previous_codes,
+            buffer_multiplier=buffer_multiplier,
+            group_col=group_col,
+            max_group_weight=max_group_weight,
+            exposure_cols=constraint_cols,
+            max_abs_exposure=max_abs_exposure,
+        )
+        if _selection_satisfies_exposure_constraint(
+            constrained,
+            exposure_cols=constraint_cols,
+            max_abs_exposure=max_abs_exposure,
+            top_n=top_n,
+        ):
+            constrained.attrs["constraint_fallback"] = False
+            return constrained
+        fallback = _select_buffered_top_n_without_explicit_constraint(
+            ranked,
+            signal_col=signal_col,
+            code_col=code_col,
+            top_n=top_n,
+            previous_codes=previous_codes,
+            buffer_multiplier=buffer_multiplier,
+            group_col=group_col,
+            max_group_weight=max_group_weight,
+            exposure_cols=exposure_cols,
+            exposure_penalty_strength=exposure_penalty_strength,
+        )
+        fallback.attrs["constraint_fallback"] = True
+        return fallback
+
+    selected = _select_buffered_top_n_without_explicit_constraint(
+        ranked,
+        signal_col=signal_col,
+        code_col=code_col,
+        top_n=top_n,
+        previous_codes=previous_codes,
+        buffer_multiplier=buffer_multiplier,
+        group_col=group_col,
+        max_group_weight=max_group_weight,
+        exposure_cols=exposure_cols,
+        exposure_penalty_strength=exposure_penalty_strength,
+    )
+    selected.attrs["constraint_fallback"] = False
+    return selected
+
+
+def _select_buffered_top_n_without_explicit_constraint(
+    ranked: pd.DataFrame,
+    *,
+    signal_col: str,
+    code_col: str,
+    top_n: int,
+    previous_codes: set[str],
+    buffer_multiplier: float,
+    group_col: str | None,
+    max_group_weight: float | None,
+    exposure_cols: Sequence[str],
+    exposure_penalty_strength: float,
+) -> pd.DataFrame:
     if exposure_cols and exposure_penalty_strength > 0:
         return _select_buffered_top_n_exposure_penalized(
             ranked,
@@ -362,6 +467,106 @@ def select_buffered_top_n(
         group_col=group_col,
         max_group_weight=max_group_weight,
     )
+
+
+def _select_buffered_top_n_exposure_constrained(
+    ranked: pd.DataFrame,
+    *,
+    signal_col: str,
+    code_col: str,
+    top_n: int,
+    previous_codes: set[str],
+    buffer_multiplier: float,
+    group_col: str | None,
+    max_group_weight: float | None,
+    exposure_cols: Sequence[str],
+    max_abs_exposure: float,
+) -> pd.DataFrame:
+    work = ranked.copy()
+    for column in exposure_cols:
+        work[column] = pd.to_numeric(work[column], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    work[signal_col] = pd.to_numeric(work[signal_col], errors="coerce").replace([np.inf, -np.inf], np.nan)
+    work = work.dropna(subset=[signal_col]).reset_index(drop=False).rename(columns={"index": "_original_index"})
+    if work.empty:
+        return ranked.iloc[0:0]
+
+    max_group_count: int | None = None
+    if group_col is not None and max_group_weight is not None:
+        max_group_count = max(1, int(np.floor(top_n * max_group_weight + 1e-12)))
+
+    codes = work[code_col].astype(str).to_numpy()
+    scores = work[signal_col].to_numpy(dtype=float)
+    exposures = work.loc[:, list(exposure_cols)].to_numpy(dtype=float)
+    original_indices = work["_original_index"].to_numpy()
+    groups = np.array([_group_key(value) for value in work[group_col]], dtype=object) if group_col is not None else None
+
+    selected_positions: list[int] = []
+    selected_mask = np.zeros(len(work), dtype=bool)
+    exposure_sums = np.zeros(len(exposure_cols), dtype=float)
+    group_counts: dict[str, int] = {}
+
+    def allowed_positions(base_mask: np.ndarray) -> np.ndarray:
+        mask = base_mask & ~selected_mask
+        if max_group_count is not None and groups is not None:
+            allowed_groups = np.array([group_counts.get(str(group), 0) < max_group_count for group in groups], dtype=bool)
+            mask &= allowed_groups
+        return np.flatnonzero(mask)
+
+    def select_from(base_mask: np.ndarray) -> bool:
+        positions = allowed_positions(base_mask)
+        if len(positions) == 0:
+            return False
+        next_count = len(selected_positions) + 1
+        candidate_means = (exposure_sums + exposures[positions]) / next_count
+        if next_count >= top_n:
+            feasible = (np.abs(candidate_means) <= max_abs_exposure + 1e-12).all(axis=1)
+            if not feasible.any():
+                return False
+            positions = positions[feasible]
+            candidate_means = candidate_means[feasible]
+        exposure_penalties = np.abs(candidate_means).sum(axis=1)
+        adjusted_scores = scores[positions] - exposure_penalties
+        best_position = int(positions[int(np.argmax(adjusted_scores))])
+        selected_mask[best_position] = True
+        selected_positions.append(best_position)
+        exposure_sums[:] = exposure_sums + exposures[best_position]
+        if max_group_count is not None and groups is not None:
+            group_key = str(groups[best_position])
+            group_counts[group_key] = group_counts.get(group_key, 0) + 1
+        return True
+
+    if previous_codes and buffer_multiplier > 1.0:
+        buffer_size = max(top_n, int(np.ceil(top_n * buffer_multiplier)))
+        prior_mask = np.zeros(len(work), dtype=bool)
+        prior_mask[: min(buffer_size, len(work))] = True
+        prior_mask &= np.isin(codes, list(previous_codes))
+        while len(selected_positions) < top_n and select_from(prior_mask):
+            pass
+
+    all_mask = np.ones(len(work), dtype=bool)
+    while len(selected_positions) < top_n:
+        if not select_from(all_mask):
+            break
+
+    selected_original_indices = [original_indices[position] for position in selected_positions]
+    return ranked.loc[selected_original_indices]
+
+
+def _selection_satisfies_exposure_constraint(
+    selected: pd.DataFrame,
+    *,
+    exposure_cols: Sequence[str],
+    max_abs_exposure: float,
+    top_n: int,
+) -> bool:
+    if len(selected) < top_n:
+        return False
+    if not exposure_cols:
+        return True
+    values = selected.loc[:, list(exposure_cols)].apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    if values.empty:
+        return False
+    return bool((values.mean(axis=0).abs() <= max_abs_exposure + 1e-12).all())
 
 
 def _select_buffered_top_n_unconstrained(
@@ -813,6 +1018,15 @@ def _normalize_optional_columns(values: Sequence[str] | str | None) -> tuple[str
     return tuple(output)
 
 
+def _unique_optional_columns(values: Sequence[str]) -> tuple[str, ...]:
+    output: list[str] = []
+    for value in values:
+        text = str(value).strip()
+        if text and text not in output:
+            output.append(text)
+    return tuple(output)
+
+
 def summarize_horizon_returns(
     returns: list[float] | tuple[float, ...],
     *,
@@ -829,6 +1043,8 @@ def summarize_horizon_returns(
     max_group_weight: float | None = None,
     exposure_penalty_cols: Sequence[str] | str | None = None,
     exposure_penalty_strength: float = 0.0,
+    exposure_constraint_cols: Sequence[str] | str | None = None,
+    max_abs_exposure: float | None = None,
 ) -> dict[str, Any]:
     periods_per_year = horizon_periods_per_year(
         horizon=horizon,
@@ -850,6 +1066,10 @@ def summarize_horizon_returns(
         "max_group_weight": float(max_group_weight) if max_group_weight is not None else np.nan,
         "exposure_penalty_cols": ",".join(_normalize_optional_columns(exposure_penalty_cols)),
         "exposure_penalty_strength": float(exposure_penalty_strength),
+        "exposure_constraint_cols": ",".join(_normalize_optional_columns(exposure_constraint_cols)),
+        "max_abs_exposure": float(max_abs_exposure) if max_abs_exposure is not None else np.nan,
+        "constraint_fallback_count": 0,
+        "constraint_fallback_rate": 0.0,
         "periods_per_year": float(periods_per_year),
         "annualized_return": float(annualized_return(values, periods_per_year=periods_per_year)),
         "volatility": float(volatility(values, periods_per_year=periods_per_year)),

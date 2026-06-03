@@ -243,6 +243,56 @@ def test_buffered_selection_uses_portfolio_exposure_penalty() -> None:
     assert penalized["style_z"].mean() == pytest.approx(0.0)
 
 
+def test_buffered_selection_uses_explicit_exposure_constraint() -> None:
+    group = pd.DataFrame(
+        [
+            {"code": "A", "score": 10.0, "style_z": 5.0},
+            {"code": "B", "score": 9.0, "style_z": 5.0},
+            {"code": "C", "score": 8.0, "style_z": -5.0},
+            {"code": "D", "score": 7.0, "style_z": -5.0},
+        ]
+    )
+
+    selected = select_buffered_top_n(
+        group,
+        "score",
+        code_col="code",
+        top_n=2,
+        previous_codes=set(),
+        buffer_multiplier=1.0,
+        exposure_constraint_cols=("style_z",),
+        max_abs_exposure=0.25,
+    )
+
+    assert selected["code"].tolist() == ["A", "C"]
+    assert selected["style_z"].mean() == pytest.approx(0.0)
+    assert selected.attrs["constraint_fallback"] is False
+
+
+def test_buffered_selection_marks_fallback_when_constraint_cannot_fill() -> None:
+    group = pd.DataFrame(
+        [
+            {"code": "A", "score": 10.0, "style_z": 5.0},
+            {"code": "B", "score": 9.0, "style_z": 4.0},
+            {"code": "C", "score": 8.0, "style_z": 3.0},
+        ]
+    )
+
+    selected = select_buffered_top_n(
+        group,
+        "score",
+        code_col="code",
+        top_n=2,
+        previous_codes=set(),
+        buffer_multiplier=1.0,
+        exposure_constraint_cols=("style_z",),
+        max_abs_exposure=0.25,
+    )
+
+    assert selected["code"].tolist() == ["A", "B"]
+    assert selected.attrs["constraint_fallback"] is True
+
+
 def test_horizon_backtest_respects_group_cap() -> None:
     dates = pd.date_range("2026-01-02", periods=3, freq="B")
     rows = []
@@ -321,6 +371,48 @@ def test_horizon_backtest_applies_portfolio_exposure_penalty() -> None:
     assert result.trades["codes"].iloc[0] == "A,C"
     assert result.summary["exposure_penalty_cols"] == "style_z"
     assert result.summary["exposure_penalty_strength"] == pytest.approx(1.0)
+
+
+def test_horizon_backtest_applies_explicit_exposure_constraint() -> None:
+    dates = pd.date_range("2026-01-02", periods=3, freq="B")
+    rows = []
+    specs = [
+        ("A", 10.0, 5.0),
+        ("B", 9.0, 5.0),
+        ("C", 8.0, -5.0),
+        ("D", 7.0, -5.0),
+    ]
+    for date_index, date in enumerate(dates):
+        for code, score, style_z in specs:
+            rows.append(
+                {
+                    "date": date,
+                    "code": code,
+                    "open": 10.0 + date_index,
+                    "close": 10.5 + date_index,
+                    "score": score,
+                    "style_z": style_z,
+                    "is_tradeable": True,
+                }
+            )
+    frame = pd.DataFrame(rows)
+
+    result = horizon_aligned_top_n_backtest(
+        frame,
+        "score",
+        horizon=1,
+        top_n=2,
+        fee_bps=0,
+        rebalance_frequency="daily",
+        exposure_constraint_cols=("style_z",),
+        max_abs_exposure=0.25,
+    )
+
+    assert result.trades["codes"].iloc[0] == "A,C"
+    assert result.trades["constraint_fallback"].tolist() == [False, False]
+    assert result.summary["exposure_constraint_cols"] == "style_z"
+    assert result.summary["max_abs_exposure"] == pytest.approx(0.25)
+    assert result.summary["constraint_fallback_count"] == 0
 
 
 def test_horizon_backtest_buffer_reduces_turnover_when_prior_holding_survives() -> None:
@@ -463,6 +555,10 @@ def test_horizon_backtest_rejects_invalid_inputs() -> None:
         horizon_aligned_top_n_backtest(frame.assign(style_z=0.0), "score", horizon=1, top_n=1, fee_bps=0, exposure_penalty_cols=("style_z",), exposure_penalty_strength=-1.0)
     with pytest.raises(ValueError, match="missing required columns"):
         horizon_aligned_top_n_backtest(frame, "score", horizon=1, top_n=1, fee_bps=0, exposure_penalty_cols=("style_z",), exposure_penalty_strength=1.0)
+    with pytest.raises(ValueError, match="max_abs_exposure must be positive"):
+        horizon_aligned_top_n_backtest(frame.assign(style_z=0.0), "score", horizon=1, top_n=1, fee_bps=0, exposure_constraint_cols=("style_z",), max_abs_exposure=0.0)
+    with pytest.raises(ValueError, match="missing required columns"):
+        horizon_aligned_top_n_backtest(frame, "score", horizon=1, top_n=1, fee_bps=0, exposure_constraint_cols=("style_z",), max_abs_exposure=0.25)
     with pytest.raises(ValueError, match="missing required columns"):
         horizon_aligned_top_n_backtest(frame.drop(columns=["open"]), "score", horizon=1, top_n=1, fee_bps=0)
 

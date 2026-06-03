@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 106,
+  "record_count": 107,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -1762,6 +1762,47 @@
       "dataset_ids": [
         "policy_input_bundle__45e3d8c059ba718426a9f887",
         "data_platform_v2_status_sidecar__b896a110cf7802cc1653c22a",
+        "policy_pool_view__925e8604a91a9c07a5387fb1"
+      ]
+    },
+    {
+      "id": "daily_research_v2_horizon_30d_soft_penalty_execution_candidate_review_20260603",
+      "date": "2026-06-03",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_horizon_30d_soft_penalty_execution_candidate_review_20260603.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [],
+      "run_tags": [
+        "mh_v2_horizon_concentration_train_contract_anchor_20260603_01",
+        "mh_v2_horizon_30d_soft_penalty_seed7_20260603_01",
+        "mh_v2_horizon_30d_soft_penalty_seed11_20260603_01",
+        "mh_v2_horizon_30d_soft_penalty_seed19_20260603_01",
+        "v2_score_backtest_bridge_horizon_30d_soft_penalty_20260603_01",
+        "v2_score_backtest_bridge_20260602_01"
+      ],
+      "verdict": "Status: `v2_horizon_30d_soft_penalty_execution_candidate_review / evidence_grade_candidate_backtest / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study families: `v2_score_backtest_bridge`, `v2_candidate_review_matrix`, `v2_bad_month_attribution`, `v2_selective_throttle_matrix`.; Source anchor: `mh_v2_horizon_concentration_train_contract_anchor_20260603_01`.",
+      "blockers": [
+        "Bad-month attribution shows the blocker is dominated by high-score / high-weight exposure interacting with local volatility and reversal states, not trading cost.",
+        "High-volatility throttle repairs the deep-bad-month and drawdown blocker.",
+        "No local risk cap was run in this pass because the post-throttle blocker is no longer target-weight concentration or deep bad month; it is residual month-win consistency and concentrated positive-month dependence."
+      ],
+      "next_allowed_actions": [
+        "Keep `horizon_30d_soft_penalty_v1` as a research-only execution-candidate branch, not a promotion candidate.",
+        "Do not run local risk cap as the immediate next step unless a new attribution pass proves target-weight concentration reappears after throttle.",
+        "Next research step should target residual month-win consistency:",
+        "month-state score calibration;",
+        "validation-selected throttle thresholds;",
+        "sector/liquidity/volatility/horizon cap diagnostics;"
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
         "policy_pool_view__925e8604a91a9c07a5387fb1"
       ]
     },

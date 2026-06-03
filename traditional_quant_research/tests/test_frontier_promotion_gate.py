@@ -11,10 +11,11 @@ from traditional_quant_research.experiments.frontier_promotion_gate import (
 )
 
 
-def _aggregate(*, total_periods: int = 30) -> pd.DataFrame:
+def _aggregate(*, total_periods: int = 30, constraint_variant: str = "baseline", fallback_count: int = 0) -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
+                "constraint_variant": constraint_variant,
                 "signal": "signal_a",
                 "exposure_penalty_strength": 0.25,
                 "fee_bps": 30.0,
@@ -25,15 +26,18 @@ def _aggregate(*, total_periods: int = 30) -> pd.DataFrame:
                 "positive_year_rate": 1.0,
                 "worst_max_drawdown": -0.10,
                 "total_periods": total_periods,
+                "constraint_fallback_count": fallback_count,
+                "constraint_fallback_rate": 1.0 if fallback_count else 0.0,
             }
         ]
     )
 
 
-def _exposure(value: float = 0.20) -> pd.DataFrame:
+def _exposure(value: float = 0.20, constraint_variant: str = "baseline") -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
+                "constraint_variant": constraint_variant,
                 "signal": "signal_a",
                 "exposure_penalty_strength": 0.25,
                 "factor": factor,
@@ -84,6 +88,61 @@ def test_promotion_gate_blocks_missing_size_short_sample_and_exposure() -> None:
     assert "style_exposure_gate" in row["failed_gates"]
     assert "log_amount_mean_20d_z" in row["exposure_failures"]
     assert row["promotion_level"] == "candidate-frontier/backtest_only"
+
+
+def test_promotion_gate_blocks_optimizer_fallback_even_when_exposure_is_small() -> None:
+    gate = evaluate_promotion_gates(
+        _aggregate(fallback_count=1),
+        _exposure(value=0.1),
+        size_summary={"daily_size_ready_for_research": True},
+        required_impact_bps=10.0,
+        required_fee_bps=30.0,
+        min_eval_year_count=3,
+        min_total_periods=24,
+        max_monthly_mean_abs_active_exposure=0.5,
+        exposure_fields=["log_amount_mean_20d_z", "neg_volatility_20d_z", "momentum_20d_z", "turn_xsec_z"],
+    )
+
+    row = gate.iloc[0]
+    assert bool(row["promoted"]) is False
+    assert row["style_exposure_gate"] is False
+    assert "style_exposure_gate" in row["failed_gates"]
+    assert "optimizer_fallback" in row["exposure_failures"]
+    assert row["constraint_fallback_count"] == 1
+
+
+def test_promotion_gate_matches_exposure_by_constraint_variant() -> None:
+    aggregate = pd.concat(
+        [
+            _aggregate(constraint_variant="baseline"),
+            _aggregate(constraint_variant="regime_gated"),
+        ],
+        ignore_index=True,
+    )
+    exposure = pd.concat(
+        [
+            _exposure(value=0.9, constraint_variant="baseline"),
+            _exposure(value=0.1, constraint_variant="regime_gated"),
+        ],
+        ignore_index=True,
+    )
+
+    gate = evaluate_promotion_gates(
+        aggregate,
+        exposure,
+        size_summary={"daily_size_ready_for_research": True},
+        required_impact_bps=10.0,
+        required_fee_bps=30.0,
+        min_eval_year_count=3,
+        min_total_periods=24,
+        max_monthly_mean_abs_active_exposure=0.5,
+        exposure_fields=["log_amount_mean_20d_z", "neg_volatility_20d_z", "momentum_20d_z", "turn_xsec_z"],
+    )
+
+    baseline = gate.loc[gate["constraint_variant"].eq("baseline")].iloc[0]
+    regime = gate.loc[gate["constraint_variant"].eq("regime_gated")].iloc[0]
+    assert baseline["style_exposure_gate"] is False
+    assert bool(regime["promoted"]) is True
 
 
 def test_run_frontier_promotion_gate_writes_artifacts(tmp_path: Path) -> None:

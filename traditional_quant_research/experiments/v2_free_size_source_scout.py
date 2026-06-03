@@ -107,11 +107,15 @@ def summarize_free_size_scout(
         "promotion_eligible_count": int(len(promotion_eligible)),
         "free_reconstructed_ready": free_reconstructed_ready,
         "decision": "free_source_scout_only",
-        "recommended_size_source": "akshare_cninfo_reconstructed" if free_reconstructed_ready else "proxy_amount_diagnostic_only",
+        "recommended_size_source": (
+            "akshare_cninfo_reconstructed_diagnostic_only"
+            if free_reconstructed_ready
+            else "proxy_amount_diagnostic_only"
+        ),
         "candidate_count": 0,
         "limitations": [
             "Realtime public quote endpoints can cross-check current market cap but cannot prove historical PIT size.",
-            "CNInfo share-change events require effective-date semantics and coverage audit before size_gate can pass.",
+            "CNInfo share-change events are diagnostic reconstruction inputs and must not satisfy promotion size_gate.",
             "Proxy amount is diagnostic only and must not satisfy promotion gates.",
         ],
     }

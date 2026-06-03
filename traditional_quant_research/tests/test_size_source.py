@@ -101,7 +101,8 @@ def test_reconstructed_size_computes_market_cap_from_close_and_shares() -> None:
     assert size["market_cap_unit"].tolist() == ["CNY"]
     assert size["share_unit"].tolist() == ["shares"]
     assert size["source"].tolist() == [AKSHARE_CNINFO_RECONSTRUCTED_SOURCE]
-    assert accepted_daily_size_source_grade(size.loc[0, "source"])
+    assert daily_size_source_grade(size.loc[0, "source"]) == "free_reconstructed"
+    assert not accepted_daily_size_source_grade(size.loc[0, "source"])
 
 
 def test_proxy_amount_daily_size_is_shaped_but_not_gate_eligible() -> None:

@@ -118,9 +118,17 @@ def evaluate_promotion_gates(
         "worst_max_drawdown",
         "total_periods",
         "exposure_penalty_strength",
+        "constraint_fallback_count",
+        "constraint_fallback_rate",
     ]:
         if column in frame.columns:
             frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    if "constraint_variant" not in frame.columns:
+        frame["constraint_variant"] = "baseline"
+    if "constraint_fallback_count" not in frame.columns:
+        frame["constraint_fallback_count"] = 0
+    if "constraint_fallback_rate" not in frame.columns:
+        frame["constraint_fallback_rate"] = 0.0
     frame = frame.loc[
         np.isclose(frame.get("impact_bps_per_1pct", np.nan), required_impact_bps)
         & np.isclose(frame.get("fee_bps", np.nan), required_fee_bps)
@@ -129,14 +137,22 @@ def evaluate_promotion_gates(
     size_gate = bool(size_summary.get("daily_size_ready_for_research", False))
     for row in frame.to_dict("records"):
         signal = str(row.get("signal", ""))
+        constraint_variant = str(row.get("constraint_variant", "baseline") or "baseline")
         strength = float(row.get("exposure_penalty_strength", 0.0) or 0.0)
+        fallback_count = int(float(row.get("constraint_fallback_count", 0) or 0))
+        fallback_rate = float(row.get("constraint_fallback_rate", 0.0) or 0.0)
         exposure_gate, max_abs_exposure, exposure_failures = _style_exposure_gate(
             exposure_summary,
             signal=signal,
+            constraint_variant=constraint_variant,
             exposure_penalty_strength=strength,
             exposure_fields=exposure_fields,
             max_monthly_mean_abs_active_exposure=max_monthly_mean_abs_active_exposure,
         )
+        if fallback_count > 0 or fallback_rate > 0:
+            exposure_gate = False
+            if "optimizer_fallback" not in exposure_failures:
+                exposure_failures.append("optimizer_fallback")
         checks = {
             "size_gate": size_gate,
             "return_gate": float(row.get("mean_annualized_return", np.nan)) >= DEFAULT_MIN_MEAN_ANNUALIZED_RETURN
@@ -150,10 +166,13 @@ def evaluate_promotion_gates(
         failed = [name for name, passed in checks.items() if not passed]
         rows.append(
             {
+                "constraint_variant": constraint_variant,
                 "signal": signal,
                 "impact_bps_per_1pct": float(row.get("impact_bps_per_1pct", np.nan)),
                 "fee_bps": float(row.get("fee_bps", np.nan)),
                 "exposure_penalty_strength": strength,
+                "constraint_fallback_count": fallback_count,
+                "constraint_fallback_rate": fallback_rate,
                 "mean_annualized_return": float(row.get("mean_annualized_return", np.nan)),
                 "min_annualized_return": float(row.get("min_annualized_return", np.nan)),
                 "positive_year_rate": float(row.get("positive_year_rate", np.nan)),
@@ -286,6 +305,7 @@ def _style_exposure_gate(
     exposure_summary: pd.DataFrame,
     *,
     signal: str,
+    constraint_variant: str,
     exposure_penalty_strength: float,
     exposure_fields: Sequence[str],
     max_monthly_mean_abs_active_exposure: float,
@@ -293,11 +313,14 @@ def _style_exposure_gate(
     if exposure_summary.empty:
         return False, np.nan, list(exposure_fields)
     frame = exposure_summary.copy()
+    if "constraint_variant" not in frame.columns:
+        frame["constraint_variant"] = "baseline"
     for column in ["exposure_penalty_strength", "mean_abs_active_exposure"]:
         if column in frame.columns:
             frame[column] = pd.to_numeric(frame[column], errors="coerce")
     subset = frame.loc[
         (frame["signal"].astype(str) == signal)
+        & (frame["constraint_variant"].astype(str) == constraint_variant)
         & np.isclose(frame["exposure_penalty_strength"], exposure_penalty_strength)
         & (frame["period_type"].astype(str) == "monthly")
         & (frame["factor"].astype(str).isin(set(exposure_fields)))
@@ -317,10 +340,13 @@ def _style_exposure_gate(
 
 def _gate_columns() -> list[str]:
     return [
+        "constraint_variant",
         "signal",
         "impact_bps_per_1pct",
         "fee_bps",
         "exposure_penalty_strength",
+        "constraint_fallback_count",
+        "constraint_fallback_rate",
         "mean_annualized_return",
         "min_annualized_return",
         "positive_year_rate",
