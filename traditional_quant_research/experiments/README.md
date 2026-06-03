@@ -425,6 +425,16 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.exp
 
 该入口读取 `frontier_personal_candidate_gate` 的结构化输出，不重跑回测、不抓取新数据、不升级候选等级。它会输出 `paper_tracking_candidates.csv`、`paper_tracking_protocol.csv`、`paper_tracking_log_template.csv`、`paper_tracking_review_rules.csv` 和 `summary.md/json`。通过 bootstrap 只代表 `paper_tracking_bootstrapped`：候选仍是 `personal_backtest_candidate`，`personal_paper_candidate_count=0`，`strategy_candidate_count=0`。默认要求未来至少记录 `6` 个完整调仓周期且不少于 `120` 个自然日；paper evidence 通过收益、回撤、单期损伤、执行记录完整性和边界审查后，才允许另行讨论 `personal_paper_candidate`。
 
+## Frontier Personal Paper Tracking Review
+
+个人 paper tracking 日志审查入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.frontier_personal_paper_tracking_review --bootstrap-run-dir traditional_quant_research/output/experiments/frontier_personal_paper_tracking_bootstrap/<run_id> --tracking-log-path <filled_paper_tracking_log.csv> --write-research-log
+```
+
+该入口读取 bootstrap 产物和已填写的 `paper_tracking_log_template.csv`，不生成信号、不重跑回测、不抓取新数据。若 paper 记录不足，decision 为 `continue_paper_tracking`，候选保持 `personal_backtest_candidate`；若完整记录通过样本数、执行完整性、paper excess return、drawdown 和单期损伤审查，才允许输出 `personal_paper_candidate`；若完整样本出现执行记录缺失、回撤破线或单期损伤破线，则输出降级建议。无论审查结果如何，`strategy_candidate_count` 固定为 `0`。
+
 ## Frontier Failure Attribution
 
 frontier 扩展样本失败归因入口：
