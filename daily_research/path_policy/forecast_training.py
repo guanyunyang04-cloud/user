@@ -20,6 +20,7 @@ from daily_research.path_policy.forecast_dataset import ForecastMemmapDataset, F
 from daily_research.path_policy.labels import PATH20_CUMULATIVE_HORIZONS, PATH20_HORIZON
 from daily_research.path_policy.models import (
     DLinearPath20Forecaster,
+    ExpertFusionPath20Forecaster,
     GRUPath20Forecaster,
     LinearPath20Forecaster,
     PatchTransformerPath20Forecaster,
@@ -45,6 +46,7 @@ FORECAST_MODEL_FAMILIES = (
     "patch_transformer_static_context",
     "stock_mixer_sequence",
     "sector_slot_mixer_sequence",
+    "hybrid_expert_fusion_static_context",
 )
 FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES = ("stock_mixer_sequence", "sector_slot_mixer_sequence")
 FORECAST_OUTPUT_PROFILES = ("forecast_path_v1", "decision_utility_v1")
@@ -631,6 +633,23 @@ def make_forecast_model(
             horizon=horizon,
             dropout=dropout,
             slot_count=slot_count,
+            output_profile=output_profile,
+            cumulative_horizons=resolved_horizons,
+        )
+    if family == "hybrid_expert_fusion_static_context":
+        return ExpertFusionPath20Forecaster(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            horizon=horizon,
+            dropout=dropout,
+            gru_layers=gru_layers,
+            transformer_layers=transformer_layers,
+            transformer_heads=transformer_heads,
+            patch_sizes=tuple(int(item) for item in patch_sizes if int(item) > 0),
+            static_context_vocab_sizes=static_context_vocab_sizes,
+            static_context_embedding_dims=static_context_embedding_dims,
+            static_context_fields=static_context_fields,
+            static_context_dropout=static_context_dropout,
             output_profile=output_profile,
             cumulative_horizons=resolved_horizons,
         )
@@ -2359,7 +2378,7 @@ def _model_config_for_training(
     static_model_options: dict[str, Any],
     output_profile: str = "forecast_path_v1",
 ) -> dict[str, Any]:
-    return {
+    config = {
         "model_family": str(family),
         "output_profile": str(output_profile or "forecast_path_v1"),
         "hidden_dim": int(hidden_dim),
@@ -2378,6 +2397,17 @@ def _model_config_for_training(
         "industry_vocab_fingerprint": str(dataset_view.industry_vocab_fingerprint),
         "board_vocab_fingerprint": str(dataset_view.board_vocab_fingerprint),
     }
+    if str(family) == "hybrid_expert_fusion_static_context":
+        config.update(
+            {
+                "fusion_version": "hybrid_expert_fusion_static_context_v1",
+                "expert_families": ["gru_sequence_static_context", "patch_transformer_static_context", "dlinear_sequence"],
+                "router_temperature": 1.0,
+                "router_entropy_loss_weight": 0.0,
+                "expert_load_balance_loss_weight": 0.0,
+            }
+        )
+    return config
 
 
 def _validation_score(

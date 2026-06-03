@@ -8,6 +8,7 @@ import torch
 
 from daily_research.path_policy.forecast_dataset import build_forecast_memmap_dataset, build_forecast_sequence_dataset
 from daily_research.path_policy.forecast_training import (
+    FORECAST_MODEL_FAMILIES,
     forecast_evidence_verdict,
     forecast_loss_profile_contract,
     forecast_prediction_metrics,
@@ -42,6 +43,7 @@ def test_forecast_model_families_emit_path20_sequence_contract() -> None:
         "patch_transformer_static_context",
         "stock_mixer_sequence",
         "sector_slot_mixer_sequence",
+        "hybrid_expert_fusion_static_context",
     ):
         model = make_forecast_model(
             family,
@@ -76,6 +78,38 @@ def test_forecast_model_families_emit_path20_sequence_contract() -> None:
         assert pred["aux"].shape == (4, path20_forecast_aux_dim(PATH20_DEFAULT_CUMULATIVE_HORIZONS))
         assert torch.all(pred["q10"] <= pred["q50"])
         assert torch.all(pred["q50"] <= pred["q90"])
+
+
+def test_make_forecast_model_registers_hybrid_expert_fusion_static_context() -> None:
+    assert "hybrid_expert_fusion_static_context" in FORECAST_MODEL_FAMILIES
+    model = make_forecast_model(
+        "hybrid_expert_fusion_static_context",
+        input_dim=5,
+        hidden_dim=12,
+        horizon=20,
+        gru_layers=1,
+        transformer_layers=1,
+        transformer_heads=3,
+        patch_sizes=(2,),
+        static_context_vocab_sizes={
+            "symbol": 8,
+            "exchange": 4,
+            "industry": 4,
+            "board": 5,
+            "liquidity_bucket": 6,
+            "price_bucket": 6,
+        },
+        static_context_embedding_dims={
+            "symbol": 4,
+            "exchange": 2,
+            "industry": 3,
+            "board": 3,
+            "liquidity_bucket": 2,
+            "price_bucket": 2,
+        },
+    )
+    pred = model(torch.randn(2, 6, 5), static_context_ids=torch.ones(2, 6, dtype=torch.long))
+    assert set(pred) == {"mu", "q10", "q50", "q90", "aux"}
 
 
 def test_train_forecast_models_accepts_dlinear_sequence_checkpoint_and_predictions(tmp_path) -> None:

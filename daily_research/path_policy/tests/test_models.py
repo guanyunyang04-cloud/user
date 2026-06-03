@@ -4,6 +4,7 @@ import torch
 
 from daily_research.path_policy.models import (
     DLinearPath20Forecaster,
+    ExpertFusionPath20Forecaster,
     GRUPath20Forecaster,
     LinearPath20Forecaster,
     NeuralTargetWeightPolicy,
@@ -143,6 +144,54 @@ def test_sequence_forecasters_use_temporal_pooling_and_position_information() ->
         ordered_prediction = transformer(ordered)["mu"]
         swapped_prediction = transformer(swapped)["mu"]
     assert not torch.allclose(ordered_prediction, swapped_prediction)
+
+
+def test_expert_fusion_forecaster_emits_path20_contract_and_router_weights() -> None:
+    model = ExpertFusionPath20Forecaster(
+        input_dim=5,
+        hidden_dim=12,
+        horizon=20,
+        dropout=0.0,
+        gru_layers=1,
+        transformer_layers=1,
+        transformer_heads=3,
+        patch_sizes=(2,),
+        static_context_vocab_sizes={
+            "symbol": 8,
+            "exchange": 4,
+            "industry": 4,
+            "board": 5,
+            "liquidity_bucket": 6,
+            "price_bucket": 6,
+        },
+        static_context_embedding_dims={
+            "symbol": 4,
+            "exchange": 2,
+            "industry": 3,
+            "board": 3,
+            "liquidity_bucket": 2,
+            "price_bucket": 2,
+        },
+    )
+    x = torch.randn(4, 6, 5)
+    static_ids = torch.tensor(
+        [
+            [1, 1, 1, 1, 1, 1],
+            [2, 2, 2, 2, 2, 2],
+            [3, 1, 0, 0, 3, 2],
+            [4, 2, 1, 3, 4, 3],
+        ],
+        dtype=torch.long,
+    )
+
+    prediction = model(x, static_context_ids=static_ids)
+    weights = model.expert_weights(x, static_context_ids=static_ids)
+
+    assert set(prediction) == {"mu", "q10", "q50", "q90", "aux"}
+    assert prediction["mu"].shape == (4, 20)
+    assert weights.shape == (4, 3)
+    assert torch.isfinite(weights).all()
+    assert torch.allclose(weights.sum(dim=-1), torch.ones(4), atol=1.0e-6)
 
 
 def test_losses_are_finite_and_allocator_respects_weight_constraints() -> None:

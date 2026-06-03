@@ -1,6 +1,6 @@
 # Frontier Trial Ledger
 
-- run_id: `frontier_trial_ledger_20260603_195644`
+- run_id: `frontier_trial_ledger_20260603_202437`
 - decision: `keep_candidate_frontier_backtest_only`
 - trial_count: `6`
 - candidate_count: `0`

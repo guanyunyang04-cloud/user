@@ -70,3 +70,4 @@
 - 免费 size 源进入晋级证据前必须同时满足覆盖率、正值率、单位、source grade 和当前日期市值交叉检查。`akshare_cninfo_reconstructed` 可作为待审计重建路径；`proxy_amount` 永远只能做 diagnostic，不能让 `size_gate=True`。
 - CNInfo 股本变动真实字段可能使用 `已流通股份` 表示流通股；标准化器和事件审计必须把它映射为 `float_share`。CNInfo 事件覆盖/公告日字段通过只说明可诊断重建，若 current quote cross-check 不可用或不达标，仍不能生成正式 `daily_size` cache 或让 promotion `size_gate=True`。
 - Trial ledger 和 weak-year rebuild 是治理/诊断 artifact，不是策略晋级 artifact。`frontier_weak_year_rebuild` 只允许用 eval 年之前的 prior 年拟合 regime 阈值，输出仍为 `diagnostic_not_backtest`；任何规则进入候选前必须再跑 `2017-2026 / 30 bps / 100m / 10 bps impact` combined constraint 和 promotion gate。
+- 结构化证伪报告是当前北极星的有效失败收口 artifact：只有当 latest size audit、promotion gate、trial ledger、failure attribution 和 weak-year rebuild 都被引用，且输出 blocking categories、next minimum actions、research log 和 evidence grade，才能把“未晋级”视为已证伪而非未完成。该结论仍保持 `candidate-frontier/backtest_only`，不是 `out_of_sample_supported`。

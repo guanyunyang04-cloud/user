@@ -546,6 +546,132 @@ class SectorSlotMixerPath20Forecaster(nn.Module):
         return _split_path20_outputs(self.head(fused), self.horizon, self.output_profile, self.cumulative_horizons)
 
 
+class ExpertFusionPath20Forecaster(nn.Module):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int = 192,
+        horizon: int = 20,
+        dropout: float = 0.15,
+        gru_layers: int = 2,
+        transformer_layers: int = 4,
+        transformer_heads: int = 4,
+        patch_sizes: tuple[int, ...] | list[int] | None = None,
+        router_temperature: float = 1.0,
+        static_context_vocab_sizes: dict[str, int] | None = None,
+        static_context_embedding_dims: dict[str, int] | None = None,
+        static_context_fields: tuple[str, ...] | list[str] | None = None,
+        static_context_dropout: float = 0.20,
+        output_profile: str = "forecast_path_v1",
+        cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
+    ) -> None:
+        super().__init__()
+        self.horizon = int(horizon)
+        self.cumulative_horizons = normalize_path20_cumulative_horizons(cumulative_horizons, horizon=self.horizon)
+        self.output_profile = normalize_path20_output_profile(output_profile)
+        self.hidden_dim = int(hidden_dim)
+        self.router_temperature = max(float(router_temperature), 1.0e-4)
+        self.expert_names = ("gru", "patch_transformer", "dlinear")
+        self.gru_encoder = GRUPath20Forecaster(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            dropout=dropout,
+            horizon=horizon,
+            num_layers=gru_layers,
+            output_profile=output_profile,
+            cumulative_horizons=self.cumulative_horizons,
+        )
+        requested_heads = max(int(transformer_heads), 1)
+        heads = requested_heads if int(hidden_dim) % requested_heads == 0 else 1
+        self.patch_encoder = PatchTransformerPath20Forecaster(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            horizon=horizon,
+            patch_sizes=tuple(int(item) for item in (patch_sizes or (4, 20)) if int(item) > 0),
+            num_layers=transformer_layers,
+            num_heads=heads,
+            dropout=dropout,
+            output_profile=output_profile,
+            cumulative_horizons=self.cumulative_horizons,
+        )
+        self.dlinear = DLinearPath20Forecaster(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            horizon=horizon,
+            output_profile=output_profile,
+            cumulative_horizons=self.cumulative_horizons,
+        )
+        self.gru_proj = nn.Linear(int(hidden_dim) * 2, int(hidden_dim))
+        self.dlinear_proj = nn.Linear(int(hidden_dim) * 2, int(hidden_dim))
+        self.static_encoder = StaticContextEncoder(
+            vocab_sizes=static_context_vocab_sizes,
+            embedding_dims=static_context_embedding_dims,
+            fields=static_context_fields,
+            dropout=static_context_dropout,
+        )
+        self.static_proj = nn.Sequential(
+            nn.LayerNorm(self.static_encoder.output_dim),
+            nn.Linear(self.static_encoder.output_dim, int(hidden_dim)),
+            nn.GELU(),
+            nn.Dropout(float(dropout)),
+        )
+        self.router = nn.Sequential(
+            nn.LayerNorm(int(hidden_dim) * 4),
+            nn.Linear(int(hidden_dim) * 4, int(hidden_dim)),
+            nn.GELU(),
+            nn.Dropout(float(dropout)),
+            nn.Linear(int(hidden_dim), len(self.expert_names)),
+        )
+        fusion_layer = nn.TransformerEncoderLayer(
+            d_model=int(hidden_dim),
+            nhead=heads,
+            dim_feedforward=int(hidden_dim) * 4,
+            dropout=float(dropout),
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
+        )
+        self.fusion_encoder = nn.TransformerEncoder(fusion_layer, num_layers=1, enable_nested_tensor=False)
+        self.head = nn.Sequential(
+            nn.LayerNorm(int(hidden_dim) * 3),
+            nn.Dropout(float(dropout)),
+            nn.Linear(int(hidden_dim) * 3, int(hidden_dim)),
+            nn.GELU(),
+            nn.Dropout(float(dropout)),
+            nn.Linear(int(hidden_dim), path20_forecast_output_dim(self.horizon, self.output_profile, self.cumulative_horizons)),
+        )
+
+    def _expert_tokens(self, x: torch.Tensor) -> torch.Tensor:
+        if x.ndim == 2:
+            x = x.unsqueeze(1)
+        gru_token = self.gru_proj(self.gru_encoder.encode(x))
+        patch_token = self.patch_encoder.encode(x)
+        trend_input = x.mean(dim=1)
+        seasonal_input = x[:, -1, :] - trend_input
+        dlinear_token = self.dlinear_proj(torch.cat([F.gelu(self.dlinear.trend(trend_input)), F.gelu(self.dlinear.seasonal(seasonal_input))], dim=-1))
+        return torch.stack([gru_token, patch_token, dlinear_token], dim=1)
+
+    def _static_hidden(self, static_context_ids: torch.Tensor | None, *, batch_size: int, device: torch.device) -> torch.Tensor:
+        static = self.static_encoder(static_context_ids, batch_size=int(batch_size), device=device)
+        return self.static_proj(static)
+
+    def expert_weights(self, x: torch.Tensor, static_context_ids: torch.Tensor | None = None) -> torch.Tensor:
+        tokens = self._expert_tokens(x)
+        static = self._static_hidden(static_context_ids, batch_size=int(tokens.shape[0]), device=tokens.device)
+        pooled = torch.cat([tokens.mean(dim=1), tokens.max(dim=1).values, tokens[:, 0, :], static], dim=-1)
+        return torch.softmax(self.router(pooled) / self.router_temperature, dim=-1)
+
+    def forward(self, x: torch.Tensor, static_context_ids: torch.Tensor | None = None) -> dict[str, torch.Tensor]:
+        tokens = self._expert_tokens(x)
+        static = self._static_hidden(static_context_ids, batch_size=int(tokens.shape[0]), device=tokens.device)
+        pooled = torch.cat([tokens.mean(dim=1), tokens.max(dim=1).values, tokens[:, 0, :], static], dim=-1)
+        weights = torch.softmax(self.router(pooled) / self.router_temperature, dim=-1)
+        weighted = tokens * weights.unsqueeze(-1)
+        fused_tokens = self.fusion_encoder(weighted)
+        fused = torch.cat([weighted.sum(dim=1), fused_tokens.mean(dim=1), static], dim=-1)
+        return _split_path20_outputs(self.head(fused), self.horizon, self.output_profile, self.cumulative_horizons)
+
+
 class NeuralTargetWeightPolicy(nn.Module):
     def __init__(self, config: PathPolicyModelConfig) -> None:
         super().__init__()
