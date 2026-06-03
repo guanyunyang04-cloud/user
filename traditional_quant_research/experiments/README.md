@@ -407,6 +407,16 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.exp
 
 该实验只读取 combined constraint 产物，不重跑回测，用于把 promotion gate 的失败拆成年度收益、成本冲击、执行阻塞、流动性和篮子 active exposure。真实 run `frontier_failure_attribution_20260603_132813` 显示三条 frontier 的 weak years 均为 `2017,2018,2022,2023`，total weak signal-years 为 `12`；rolling IC 是均值最强信号，但 positive year rate 仍为 `0.6`。结论：当前 frontier 需要重建跨阶段稳健性，不能继续按近三年强窗口微调后晋级。
 
+## Frontier Weak-Year Regime Attribution
+
+frontier 弱年份市场状态归因入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.frontier_weak_year_regime_attribution --failure-run-dir traditional_quant_research/output/experiments/frontier_failure_attribution/frontier_failure_attribution_20260603_132813 --write-research-log
+```
+
+该实验读取 failure attribution 的 `yearly_failure_attribution.csv`，再从 latest v2 PIT `tradeable panel` 重建 broad market regime，不重跑 frontier 回测。输出包括 `market_regime_daily.csv`、`yearly_market_regime.csv`、`weak_year_regime_profile.csv`、`signal_year_regime_attribution.csv`、`weak_vs_positive_regime_summary.csv` 和 `summary.md`。真实 run `frontier_weak_year_regime_attribution_20260603_134922` 确认共同弱年仍为 `2017,2018,2022,2023`；相对正收益年，弱年 `breadth_20d_positive_rate` 低约 `0.069451`，`market_ret_20d_mean` 低约 `0.025886`，`breadth_5d_positive_rate` 低约 `0.032508`。结论：frontier 失败更像广度/20日市场强度不足下的全信号共振失效，而不是单一信号、成本或样本数问题。任何由此产生的 regime rule 仍需 fit/eval 分离并重跑 full combined-constraint gate。
+
 ## V2 Industry/Size Source Audit
 
 v2 PIT 快照行业/市值字段来源审计入口：
