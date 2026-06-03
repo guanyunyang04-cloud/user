@@ -63,6 +63,8 @@ def build_low_corr_signal_panel(
     horizon: int,
     label_mode: str,
     max_factor_corr: float,
+    include_industry: bool = False,
+    include_metrics: bool = False,
 ) -> dict[str, Any]:
     """Build an evaluation panel with the low-corr score using a prior fit window."""
 
@@ -70,7 +72,13 @@ def build_low_corr_signal_panel(
         raise ValueError(f"unsupported label_mode: {label_mode}")
     manifest = load_pit_manifest(root)
     quality = load_quality_report(root)
-    raw_panel = load_tradeable_panel(root, start_date=history_start_date, end_date=end_date)
+    raw_panel = load_tradeable_panel(
+        root,
+        start_date=history_start_date,
+        end_date=end_date,
+        include_industry=include_industry,
+        include_metrics=include_metrics,
+    )
     factor_panel = build_factor_label_panel(raw_panel, horizons=tuple(sorted({1, 5, 20, horizon})))
     factor_panel = add_cross_sectional_excess_return_labels(factor_panel, horizons=(horizon,))
     raw_factor_columns = default_factor_columns()

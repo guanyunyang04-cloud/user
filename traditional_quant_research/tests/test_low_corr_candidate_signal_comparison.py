@@ -59,6 +59,85 @@ def test_summarize_signal_comparison_adds_low_corr_delta_and_fee_drag() -> None:
     assert low30["positive_delta_year_rate_vs_low_corr"] == pytest.approx(0.0)
 
 
+def test_build_candidate_protocol_signal_panel_can_include_metric_exposures(monkeypatch) -> None:
+    factor_panel = pd.DataFrame(
+        [
+            {"date": "2026-01-02", "code": "A", "factor_a_z": 0.1, "fwd_ret_1d": 0.01, "turn": 1.0, LOW_CORR_SIGNAL: 0.2},
+            {"date": "2026-01-02", "code": "B", "factor_a_z": 0.2, "fwd_ret_1d": 0.02, "turn": 3.0, LOW_CORR_SIGNAL: 0.3},
+            {"date": "2026-01-05", "code": "A", "factor_a_z": 0.3, "fwd_ret_1d": 0.03, "turn": 2.0, LOW_CORR_SIGNAL: 0.4},
+            {"date": "2026-01-05", "code": "B", "factor_a_z": 0.4, "fwd_ret_1d": 0.04, "turn": 4.0, LOW_CORR_SIGNAL: 0.5},
+        ]
+    )
+    captured: dict[str, object] = {}
+
+    def fake_build_low_corr_signal_panel(**kwargs):
+        captured.update(kwargs)
+        return {
+            "manifest": {"snapshot_id": "fixture"},
+            "quality": {},
+            "factor_panel": factor_panel,
+            "signal_columns": ["factor_a_z"],
+            "factor_directions": {"factor_a_z": 1},
+            "label": "fwd_ret_1d",
+            "single_factor_ic": pd.DataFrame(),
+            "low_corr_factor_columns": ["factor_a_z"],
+        }
+
+    def fake_add_baseline_score(frame):
+        output = frame.copy()
+        output[low_corr_candidate_signal_comparison.BASELINE_SIGNAL] = output["factor_a_z"]
+        return output
+
+    def fake_add_score(frame, *args, score_col: str, **kwargs):
+        output = frame.copy()
+        output[score_col] = output["factor_a_z"] + 0.1
+        return output
+
+    def fake_rolling_weights(frame, factor_cols, label_col, **kwargs):
+        rows = []
+        for date in pd.to_datetime(frame["date"]).unique():
+            rows.append(
+                {
+                    "date": pd.Timestamp(date),
+                    "factor": factor_cols[0],
+                    "weight": 1.0,
+                    "direction": 1,
+                    "mean_rank_ic": 0.1,
+                    "history_days": 10,
+                    "is_fallback": False,
+                }
+            )
+        return pd.DataFrame(rows)
+
+    monkeypatch.setattr(low_corr_candidate_signal_comparison, "build_low_corr_signal_panel", fake_build_low_corr_signal_panel)
+    monkeypatch.setattr(low_corr_candidate_signal_comparison, "add_baseline_score", fake_add_baseline_score)
+    monkeypatch.setattr(low_corr_candidate_signal_comparison, "add_equal_rank_score", fake_add_score)
+    monkeypatch.setattr(low_corr_candidate_signal_comparison, "add_ic_weighted_rank_score", fake_add_score)
+    monkeypatch.setattr(low_corr_candidate_signal_comparison, "add_rank_score_from_weight_table", fake_add_score)
+    monkeypatch.setattr(low_corr_candidate_signal_comparison, "rolling_ic_weights_by_date", fake_rolling_weights)
+
+    built = low_corr_candidate_signal_comparison.build_candidate_protocol_signal_panel(
+        root=None,
+        history_start_date="2026-01-01",
+        fit_start_date="2026-01-01",
+        fit_end_date="2026-01-31",
+        start_date="2026-01-01",
+        end_date="2026-01-31",
+        horizon=1,
+        label_mode="raw",
+        max_factor_corr=0.75,
+        rolling_window=10,
+        rolling_min_periods=2,
+        include_metrics=True,
+    )
+
+    panel = built["evaluation_panel"].set_index(["date", "code"])
+    assert captured["include_metrics"] is True
+    assert "turn_xsec_z" in built["metric_exposure_columns"]
+    assert panel.loc[(pd.Timestamp("2026-01-02"), "A"), "turn_xsec_z"] == pytest.approx(-1.0)
+    assert panel.loc[(pd.Timestamp("2026-01-02"), "B"), "turn_xsec_z"] == pytest.approx(1.0)
+
+
 def test_run_low_corr_candidate_signal_comparison_writes_outputs(tmp_path: Path, monkeypatch) -> None:
     panel = _signal_panel()
 

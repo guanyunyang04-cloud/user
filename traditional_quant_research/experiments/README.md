@@ -31,6 +31,36 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.exp
 
 该实验审计 v2 PIT 快照的 universe/status、OHLCV 异常、`1d/5d/20d` 未来收益标签可用率和极端收益样本。产物写入 ignored 的 `traditional_quant_research/output/experiments/v2_data_label_audit/`，摘要写入 `research_log/`。
 
+## V2.1 Daily Metrics Audit
+
+日频指标缺失审计入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.v2_daily_metrics_audit --root traditional_quant_research/data/raw/baostock_daily_mainboard_v2_pit/<snapshot_id> --start-date 2026-05-25 --end-date 2026-06-01 --write-research-log
+```
+
+该实验以 `daily_universe` 的 `date, code` 为期望键，左连接可选 `daily_metrics.parquet`，分别报告全 universe 和 `is_tradeable=True` 样本中 `turn/pctChg/peTTM/pbMRQ/psTTM/pcfNcfTTM` 的覆盖率、有限值数量、零值数量和年度覆盖率。它只判断 metrics 表是否具备进入研究输入的覆盖率基础，不验证估值字段 PIT timing，也不解决真实市值/流通市值来源问题。
+
+## V2.1 Metrics Semantics Audit
+
+日频指标语义与时点风险审计入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.v2_metrics_semantics_audit --root traditional_quant_research/data/raw/baostock_daily_mainboard_v2_pit/<snapshot_id> --start-date 2016-01-01 --end-date 2026-06-01 --write-research-log
+```
+
+该实验读取含 metrics 的 v2.1 tradeable panel，比较 `pctChg` 与逐股 `close-to-close` 收益的差异，输出差异分布和极端样本；同时统计 `peTTM/pbMRQ/psTTM/pcfNcfTTM` 的覆盖、负值、零值、日变动率以及与收盘收益的相关性。它用于证明字段语义和质量风险，不证明估值字段 PIT 发布时间；在完成独立时点验证前，估值字段应至少滞后一日使用，且不能单独支持策略候选晋级。
+
+## V2.1 Metrics Exposure Diagnostics
+
+frontier 信号 metrics 暴露诊断入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.v2_metrics_exposure_diagnostics --years 2024,2025,2026 --final-end-date 2026-06-01 --write-research-log
+```
+
+该实验在当前 `20d/monthly/top_n=200/buffer=3.0` candidate-frontier 研究上下文中，重建 rolling IC、IC-weighted 和 low-corr 三条 frontier 信号，并把 `turn/pctChg`、流动性/动量/低波动 proxy 和一日滞后估值字段加入暴露诊断。输出包括 `daily_signal_metric_correlation.csv`、`yearly_signal_metric_correlation.csv`、`basket_metric_exposure.csv`、`basket_metric_exposure_summary.csv`、`year_meta.csv` 和 `summary.md`。当前 run `v2_metrics_exposure_diagnostics_20260603_064734` 显示最大平均绝对 signal-metric 相关 `0.760402`、最大平均绝对篮子指标主动暴露 `1.170983`；高暴露集中在低波动、低流动性/小成交额、动量和换手结构。该实验是候选晋级门禁，不产生策略候选。
+
 ## Full Cycle Factor Diagnostics
 
 全周期单因子诊断入口：
@@ -294,3 +324,129 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.exp
 ```
 
 该实验固定 `20d/monthly/top_n=200/buffer=3.0/execution_constraints` 协议，对 rolling IC、IC-weighted 和 low-corr 三条 frontier 信号加入基于选中篮子 signal-date 流动性的参与率冲击成本。冲击成本使用每笔交易 p95 participation：`impact_rate = participation_p95 * impact_bps_per_1pct / 100`，再乘以换手得到额外成本。输出包括 `impact_stress_summary.csv`、`impact_stress_aggregate.csv`、冲击调整交易表、逐笔流动性、年度流动性摘要、元数据和 `summary.md`。当前 run `low_corr_frontier_impact_stress_20260602_174946` 显示三条 frontier 在 `30 bps / 100m / 10 bps per 1 pct participation` 下仍三年为正，但月度非重叠交易样本仍薄、2026 仅 `2` 笔，且低流动性/弱动量暴露仍在；因此结果只强化 `candidate-frontier/backtest_only`，策略候选数量仍为 `0`。
+
+## Low-Corr Frontier Neutralization Audit
+
+同协议候选信号 proxy/industry neutralization 审计入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.low_corr_frontier_neutralization_audit --years 2024,2025,2026 --final-end-date 2026-06-01 --horizon 20 --top-n 200 --frequency monthly --buffer-multiplier 3.0 --fee-bps 30 --neutralize-by log_amount_mean_20d_z --execution-constraints --rolling-window 252 --rolling-min-periods 60 --include-industry --industry-neutralize --industry-column industry --write-research-log
+```
+
+该实验固定 `20d/monthly/top_n=200/buffer=3.0/execution_constraints` 协议，对 rolling IC、IC-weighted 和 low-corr 三条 frontier 信号做两类控制：按日横截面对 `log_amount_mean_20d_z` 残差化，作为规模/流动性 proxy；按同日同行业对信号去均值，作为 Baostock `month-start` 行业暴露初审。输出包括 `neutralization_summary.csv`、`neutralization_aggregate.csv`、交易表、篮子因子暴露、篮子行业暴露、信号覆盖率、信号-neutralizer 相关性、信号行业暴露、元数据和 `summary.md`。当前 run `low_corr_frontier_neutralization_audit_20260602_224153` 显示三条 industry-neutral 信号在 30 bps 下仍为 `3/3` 正收益年，rolling IC 均值年化 `0.366028`、IC-weighted `0.302858`、low-corr `0.284148`；但 Top-N/buffer/execution 后仍存在行业 active weight。该结果仍是 `candidate-frontier/backtest_only`，不能替代组合层行业中性和真实市值/流通市值控制。
+
+组合层行业 cap 可通过同一入口追加：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.low_corr_frontier_neutralization_audit --years 2024,2025,2026 --final-end-date 2026-06-01 --horizon 20 --top-n 200 --frequency monthly --buffer-multiplier 3.0 --fee-bps 30 --neutralize-by log_amount_mean_20d_z --execution-constraints --rolling-window 252 --rolling-min-periods 60 --include-industry --industry-neutralize --industry-column industry --group-col industry --max-group-weight 0.10 --write-research-log
+```
+
+该 cap 在 Top-N/buffer 选股阶段限制单行业目标持仓上限。当前 run `low_corr_frontier_neutralization_audit_20260602_231532` 显示 `max_group_weight=0.10` 后，rolling IC industry-neutral 均值年化 `0.371601`、最差年 `0.094033`，IC-weighted industry-neutral `0.293380`，low-corr industry-neutral `0.271272`；但该规则只是单行业最高权重门禁，不是完整行业中性优化器，且执行约束后实际成交 holdings 少于 `top_n` 时 realized industry weight 可能略高于 cap。
+
+metrics 多指标中性化可通过同一入口追加 `--include-metrics`，并把 metrics 衍生暴露列加入 `--neutralize-by` 与 `--exposure-columns`：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.low_corr_frontier_neutralization_audit --years 2024,2025,2026 --final-end-date 2026-06-01 --horizon 20 --top-n 200 --frequency monthly --buffer-multiplier 3.0 --fee-bps 30 --neutralize-by log_amount_mean_20d_z,momentum_20d_z,neg_volatility_20d_z,turn_xsec_z --exposure-columns log_amount_mean_20d_z,momentum_20d_z,neg_volatility_20d_z,turn_xsec_z,pctChg_xsec_z --include-metrics --execution-constraints --write-research-log
+```
+
+该模式输出 `neutralization_basket_exposure_summary.csv`，用于比较中性化前后实际 Top-N 篮子的指标 active exposure。当前 run `low_corr_frontier_neutralization_audit_20260603_073116` 显示硬多指标中性化能把信号层相关性降到数值零，但 30 bps 下 rolling IC / IC-weighted / low-corr 均值年化分别从 `0.350177/0.280980/0.262745` 降到 `0.173130/0.172495/0.135335`，并提高换手、恶化回撤；篮子层 `log_amount_mean_20d_z` 和 `neg_volatility_20d_z` active exposure 只部分降低，`turn_xsec_z` active exposure 反而上升。结论：该结果是暴露诊断门禁，不是策略候选晋级证据。
+
+组合层连续暴露惩罚可通过同一入口追加：
+
+```powershell
+--portfolio-exposure-penalty-cols log_amount_mean_20d_z,neg_volatility_20d_z,momentum_20d_z,turn_xsec_z --portfolio-exposure-penalty-strength 0.25
+```
+
+该参数传入 `horizon_aligned_top_n_backtest()`，在 Top-N/buffer 选股阶段按加入候选后的篮子平均暴露偏离扣分。当前 run `low_corr_frontier_neutralization_audit_20260603_081810` 显示 `strength=0.25` 基本不伤原始 frontier，rolling IC / IC-weighted / low-corr 的 30 bps 均值年化为 `0.353015/0.277791/0.260064`；但原始篮子 active exposure 只小幅下降，尚不足以作为候选晋级门禁。strength grid 入口见下节。
+
+## Low-Corr Frontier Exposure Penalty Grid
+
+同协议组合层暴露惩罚强度网格入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.low_corr_frontier_exposure_penalty_grid --years 2024,2025,2026 --final-end-date 2026-06-01 --horizon 20 --top-n 200 --frequency monthly --buffer-multiplier 3.0 --fee-bps 30 --exposure-penalty-strengths 0,0.25,0.5,1.0 --execution-constraints --include-metrics --write-research-log
+```
+
+该实验固定 `20d/monthly/top_n=200/buffer=3.0/execution_constraints` 协议，对 rolling IC、IC-weighted 和 low-corr 三条 frontier 信号测试多档 `exposure_penalty_strength`。输出包括 `exposure_penalty_summary.csv`、`exposure_penalty_aggregate.csv`、交易明细、篮子暴露、篮子暴露汇总、元数据和 `summary.md`。当前 run `low_corr_frontier_exposure_penalty_grid_20260603_085614` 显示 rolling IC 最优为 `strength=0.25`，IC-weighted 最优是不加惩罚，low-corr 最优为 `strength=1.0`；惩罚能温和压低篮子 active exposure，但不能完成暴露中性门禁。该实验输出仍是 `candidate-frontier/backtest_only` 证据，策略候选数量为 `0`。
+
+## Low-Corr Frontier Combined Constraint Audit
+
+同协议组合约束联动门禁入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.low_corr_frontier_combined_constraint_audit --years 2024,2025,2026 --final-end-date 2026-06-01 --horizon 20 --top-n 200 --frequency monthly --buffer-multiplier 3.0 --fee-bps 30 --capital-amounts 100000000 --impact-bps-per-1pct 0,10 --signal-penalty-strengths multifactor_rolling_ic_weighted_score=0.25,multifactor_ic_weighted_score=0.0,multifactor_low_corr_rank_score=1.0 --group-col industry --max-group-weight 0.10 --execution-constraints --include-metrics --include-industry --write-research-log
+```
+
+该实验把当前 frontier 的信号特定 exposure penalty、组合层行业 cap、固定费率和参与率冲击成本放在同一门禁下评估。输出包括 `combined_constraint_summary.csv`、`combined_constraint_aggregate.csv`、交易表、流动性/参与率、篮子风格暴露、行业暴露和元数据。当前 run `low_corr_frontier_combined_constraint_audit_20260603_094139` 显示三条 frontier 在 `30 bps / 100m / 10 bps per 1 pct participation` 下仍三年为正，但交易样本仍薄，且低成交额/低波动/弱动量/换手 active exposure 仍明显。该实验强化 `candidate-frontier/backtest_only`，不产生策略候选。
+
+扩展样本门禁可用同一入口跑 2017-2026：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.low_corr_frontier_combined_constraint_audit --years 2017,2018,2019,2020,2021,2022,2023,2024,2025,2026 --final-end-date 2026-06-01 --write-research-log --research-log-path traditional_quant_research/research_log/2026-06-03_low_corr_frontier_extended_combined_constraint_audit.md
+```
+
+扩展 run `low_corr_frontier_combined_constraint_audit_20260603_122047` 显示样本数已不再是主问题：10 bps impact 下 rolling IC / low-corr / IC-weighted 的 total periods 为 `60/64/64`，但均值年化降为 `0.096737/0.056183/0.023878`，正收益年份均为 `0.6`，最差年均为负。因此该 frontier 不能按 2024-2026 强表现升级为样本外支持。
+
+## Frontier Promotion Gate
+
+frontier 候选晋级门禁入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.frontier_promotion_gate --write-research-log
+```
+
+该门禁读取当前 `low_corr_frontier_combined_constraint_audit` 的结构化输出和 `v2_daily_size_audit` 的 `summary.json`，不重跑回测。默认要求 `30 bps / 100m / 10 bps per 1 pct participation` 下收益、年度稳定、回撤、最少 `24` 个非重叠 periods、真实 `daily_size` ready、以及月度篮子风格 active exposure 均通过。最新真实 run `frontier_promotion_gate_20260603_125120` 读取 2017-2026 扩展 combined constraint 输出后，三条 frontier 均通过 `sample_gate` 和 `drawdown_gate`，但全部失败于 `size_gate`、`return_gate`、`year_gate` 和 `style_exposure_gate`；best mean annualized return 为 rolling IC 的 `0.096737`，仍不能升级为策略候选。策略候选数量为 `0`。
+
+## Frontier Failure Attribution
+
+frontier 扩展样本失败归因入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.frontier_failure_attribution --combined-run-dir traditional_quant_research/output/experiments/low_corr_frontier_combined_constraint_audit/low_corr_frontier_combined_constraint_audit_20260603_122047 --write-research-log
+```
+
+该实验只读取 combined constraint 产物，不重跑回测，用于把 promotion gate 的失败拆成年度收益、成本冲击、执行阻塞、流动性和篮子 active exposure。真实 run `frontier_failure_attribution_20260603_132813` 显示三条 frontier 的 weak years 均为 `2017,2018,2022,2023`，total weak signal-years 为 `12`；rolling IC 是均值最强信号，但 positive year rate 仍为 `0.6`。结论：当前 frontier 需要重建跨阶段稳健性，不能继续按近三年强窗口微调后晋级。
+
+## V2 Industry/Size Source Audit
+
+v2 PIT 快照行业/市值字段来源审计入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.v2_industry_size_source_audit --write-research-log
+```
+
+该实验默认只检查当前 v2 snapshot schema 和本地 Baostock 客户端能力，不做长任务网络拉取。输出包括 `snapshot_schema.csv`、`source_field_audit.csv`、`baostock_client_capabilities.csv`、`summary.json` 和 `summary.md`。
+
+若要短窗口 live probe Baostock 日线扩展字段，可运行：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.v2_industry_size_source_audit --live-history-probe --live-stock-basic-probe --history-probe-code sh.600000 --history-probe-start-date 2026-05-25 --history-probe-end-date 2026-06-01 --write-research-log
+```
+
+当前 run `v2_industry_size_source_audit_20260603_063037` 显示 latest v2.1 snapshot 已有真实行业表和 `turn` 换手率字段，但仍没有真实市值、流通市值、股本或 share-base 字段；Baostock 日线支持 `turn`、`pctChg`、`peTTM`、`pbMRQ`、`psTTM`、`pcfNcfTTM`，不支持 `turnover`/`turnover_rate`，也不接受 `totalShare/liqaShare/total_mv/float_mv/market_cap/float_market_cap`；`query_stock_basic` 只返回 `code/code_name/ipoDate/outDate/type/status`。市值/流通市值需新增外部 PIT cap/float-cap 来源，或明确保持 proxy-only。
+
+## V2.2 External Size Source Scout
+
+外部 PIT 市值/流通市值来源侦察入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.v2_external_size_source_scout --write-research-log
+```
+
+该实验生成 `local_package_capabilities.csv`、`external_size_source_candidates.csv`、`summary.json` 和 `summary.md`，把 Tushare、JoinQuant、RQData、AkShare、efinance 与 Baostock 放入同一张可复验来源矩阵。当前 run `v2_external_size_source_scout_20260603_115009` 显示本地已安装 `tushare=1.4.29`、`akshare=1.18.63`、`efinance=0.5.8`、`baostock=0.9.1`，但没有 `jqdatasdk/rqdatac`，也没有已认证并 live-probe 通过的 PIT daily cap/float-cap 来源。v2.2 首选验证对象是 Tushare `daily_basic` 的 `total_mv/circ_mv/total_share/float_share/free_share`；JoinQuant/RQData 是有订阅时的机构级备选；AkShare/efinance 只作为公开端点交叉检查，不能默认作为 PIT 主源。策略候选数量仍为 `0`。
+
+Tushare `daily_basic` 双票 live probe 入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.v2_tushare_size_probe --symbols 600000.SH,000001.SZ --trade-dates 20260525,20260601 --write-research-log
+```
+
+该 probe 输出 `tushare_daily_basic_probe.csv`、标准化 `daily_size_probe.csv/parquet`、`failures.csv`、`summary.json` 和 `summary.md`，验证 `total_mv/circ_mv/total_share/float_share/free_share` 的字段存在、非空率、双票双日期覆盖和单位假设。标准化产物由 `size_source.standardize_tushare_daily_basic_size()` 映射到项目 `daily_size` schema，可被 `dataset_v2.load_pit_daily_size()` 读取；当前 run `v2_tushare_size_probe_20260603_114552` 为 `skipped/auth_missing`，说明本地 Tushare 已安装但未配置 `TUSHARE_TOKEN/TS_TOKEN`，live probe 未实际执行；配置 token 后可直接重跑。
+
+v2.2 `daily_size.parquet` 覆盖率审计入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.v2_daily_size_audit --write-research-log
+```
+
+该审计以 `daily_universe` 的 `date, code` 为期望键，左连接可选 `daily_size.parquet`，分别报告全 universe 和 `is_tradeable=True` 样本中 `total_market_cap/float_market_cap/total_share/float_share/free_share` 的覆盖率、正值数量、年度覆盖率以及 `market_cap_unit/share_unit/source` 组合。当前 run `v2_daily_size_audit_20260603_103517` 对 latest snapshot 返回 `daily_size_absent`：`universe_rows=7451610`、`tradeable_rows=7031085`、`size_rows=0`、`min_tradeable_coverage=0.0`、`daily_size_ready_for_research=False`。这说明 v2.2 size 表尚未生成，不产生策略候选。

@@ -205,6 +205,89 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
             ],
         )
 
+    def test_registry_indexes_daily_research_v2_selective_throttle_matrix(self) -> None:
+        registry = build_evidence_registry()
+        matches = [
+            record
+            for record in registry["records"]
+            if record["id"] == "daily_research_v2_selective_throttle_matrix_20260602"
+        ]
+
+        self.assertEqual(len(matches), 1)
+        match = matches[0]
+        self.assertEqual(match["workflow"], "path_policy")
+        self.assertIn("daily_research_v2_research_reset", match["research_programs"])
+        self.assertIn("v2_selective_throttle_matrix", match["study_families"])
+        self.assertIn("v2_selective_throttle_matrix_narrow_20260602_01", match["run_tags"])
+        self.assertIn("v2_score_backtest_bridge_20260602_01", match["run_tags"])
+
+    def test_registry_indexes_daily_research_v2_state_sizing_matrix(self) -> None:
+        registry = build_evidence_registry()
+        matches = [
+            record
+            for record in registry["records"]
+            if record["id"] == "daily_research_v2_state_sizing_matrix_20260602"
+        ]
+
+        self.assertEqual(len(matches), 1)
+        match = matches[0]
+        self.assertEqual(match["workflow"], "path_policy")
+        self.assertIn("daily_research_v2_research_reset", match["research_programs"])
+        self.assertIn("v2_state_sizing_matrix", match["study_families"])
+        self.assertIn("v2_state_sizing_matrix_narrow_20260602_01", match["run_tags"])
+        self.assertIn("v2_state_sizing_matrix_light_probe_20260602_01", match["run_tags"])
+
+    def test_registry_indexes_daily_research_v2_post_throttle_bad_month_attribution(self) -> None:
+        registry = build_evidence_registry()
+        matches = [
+            record
+            for record in registry["records"]
+            if record["id"] == "daily_research_v2_post_throttle_bad_month_attribution_20260602"
+        ]
+
+        self.assertEqual(len(matches), 1)
+        match = matches[0]
+        self.assertEqual(match["workflow"], "path_policy")
+        self.assertIn("daily_research_v2_research_reset", match["research_programs"])
+        self.assertIn("v2_bad_month_attribution", match["study_families"])
+        self.assertIn("v2_post_throttle_bad_month_attribution_20240602_m202403", match["run_tags"])
+        self.assertIn("v2_post_throttle_bad_month_attribution_20240602_m202406", match["run_tags"])
+        self.assertIn("v2_post_throttle_bad_month_attribution_20240602_m202408", match["run_tags"])
+        self.assertIn("policy_input_bundle__45e3d8c059ba718426a9f887", match["dataset_ids"])
+
+    def test_registry_indexes_daily_research_v2_local_risk_cap_matrix(self) -> None:
+        registry = build_evidence_registry()
+        matches = [
+            record
+            for record in registry["records"]
+            if record["id"] == "daily_research_v2_local_risk_cap_matrix_20260602"
+        ]
+
+        self.assertEqual(len(matches), 1)
+        match = matches[0]
+        self.assertEqual(match["workflow"], "path_policy")
+        self.assertIn("daily_research_v2_research_reset", match["research_programs"])
+        self.assertIn("v2_local_risk_cap_matrix", match["study_families"])
+        self.assertIn("v2_local_risk_cap_matrix_dryrun_20260602_01", match["run_tags"])
+        self.assertIn("v2_local_risk_cap_matrix_narrow_20260602_01", match["run_tags"])
+        self.assertIn("policy_input_bundle__45e3d8c059ba718426a9f887", match["dataset_ids"])
+
+    def test_registry_indexes_daily_research_v2_local_risk_cap_targeted_matrix(self) -> None:
+        registry = build_evidence_registry()
+        matches = [
+            record
+            for record in registry["records"]
+            if record["id"] == "daily_research_v2_local_risk_cap_targeted_matrix_20260602"
+        ]
+
+        self.assertEqual(len(matches), 1)
+        match = matches[0]
+        self.assertEqual(match["workflow"], "path_policy")
+        self.assertIn("daily_research_v2_research_reset", match["research_programs"])
+        self.assertIn("v2_local_risk_cap_matrix", match["study_families"])
+        self.assertIn("v2_local_risk_cap_matrix_targeted_20260602_01", match["run_tags"])
+        self.assertIn("policy_input_bundle__45e3d8c059ba718426a9f887", match["dataset_ids"])
+
     def test_adapter_does_not_treat_research_pointers_as_run_instances(self) -> None:
         text = """
         - Current research mainline pointer: `alpha_multi_horizon_utility_policy_v1`.
@@ -280,6 +363,66 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
         self.assertIn("v2_traditional_pit_tradeable_mainboard_baseline", matches[0]["study_families"])
         self.assertIn("mh_v2_traditional_pit_tradeable_mainboard_seed7_20260602_01", matches[0]["run_tags"])
         self.assertIn("data_platform_v2_status_sidecar__37dba59cdced261cddfedf11", matches[0]["dataset_ids"])
+
+    def test_registry_indexes_daily_research_v2_score_backtest_bridge(self) -> None:
+        registry = build_evidence_registry()
+        matches = [
+            record
+            for record in registry["records"]
+            if record["id"] == "daily_research_v2_score_backtest_bridge_20260602"
+        ]
+
+        self.assertEqual(len(matches), 1)
+        self.assertIn("daily_research_v2_research_reset", matches[0]["research_programs"])
+        self.assertIn("v2_score_backtest_bridge", matches[0]["study_families"])
+        self.assertIn("v2_score_backtest_bridge_20260602_01", matches[0]["run_tags"])
+        self.assertIn("mh_v2_reset_tradeable_mainboard_seed7_20260601_01", matches[0]["run_tags"])
+        self.assertIn("policy_input_bundle__45e3d8c059ba718426a9f887", matches[0]["dataset_ids"])
+
+    def test_registry_indexes_daily_research_v2_candidate_review_matrix(self) -> None:
+        registry = build_evidence_registry()
+        matches = [
+            record
+            for record in registry["records"]
+            if record["id"] == "daily_research_v2_candidate_review_matrix_20260602"
+        ]
+
+        self.assertEqual(len(matches), 1)
+        self.assertIn("daily_research_v2_research_reset", matches[0]["research_programs"])
+        self.assertIn("v2_candidate_review_matrix", matches[0]["study_families"])
+        self.assertIn("v2_candidate_review_matrix_20260602_01", matches[0]["run_tags"])
+        self.assertIn("v2_score_backtest_bridge_20260602_01", matches[0]["run_tags"])
+        self.assertIn("policy_input_bundle__45e3d8c059ba718426a9f887", matches[0]["dataset_ids"])
+
+    def test_registry_indexes_daily_research_v2_bad_month_attribution(self) -> None:
+        registry = build_evidence_registry()
+        matches = [
+            record
+            for record in registry["records"]
+            if record["id"] == "daily_research_v2_bad_month_attribution_20260602"
+        ]
+
+        self.assertEqual(len(matches), 1)
+        self.assertIn("daily_research_v2_research_reset", matches[0]["research_programs"])
+        self.assertIn("v2_bad_month_attribution", matches[0]["study_families"])
+        self.assertIn("v2_bad_month_attribution_20260602_01", matches[0]["run_tags"])
+        self.assertIn("v2_candidate_review_matrix_20260602_01", matches[0]["run_tags"])
+        self.assertIn("policy_input_bundle__45e3d8c059ba718426a9f887", matches[0]["dataset_ids"])
+
+    def test_registry_indexes_daily_research_v2_risk_overlay_candidate_matrix(self) -> None:
+        registry = build_evidence_registry()
+        matches = [
+            record
+            for record in registry["records"]
+            if record["id"] == "daily_research_v2_risk_overlay_candidate_matrix_20260602"
+        ]
+
+        self.assertEqual(len(matches), 1)
+        self.assertIn("daily_research_v2_research_reset", matches[0]["research_programs"])
+        self.assertIn("v2_candidate_review_matrix", matches[0]["study_families"])
+        self.assertIn("v2_candidate_review_matrix_risk_overlay_20260602_01", matches[0]["run_tags"])
+        self.assertIn("v2_bad_month_attribution_20260602_01", matches[0]["run_tags"])
+        self.assertIn("policy_input_bundle__45e3d8c059ba718426a9f887", matches[0]["dataset_ids"])
 
     def test_registry_indexes_tdx_free_data_platform_decision(self) -> None:
         registry = build_evidence_registry()

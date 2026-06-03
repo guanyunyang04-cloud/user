@@ -12,6 +12,20 @@ import pandas as pd
 
 DEFAULT_V2_SNAPSHOT_ROOT = Path("traditional_quant_research/data/raw/baostock_daily_mainboard_v2_pit")
 
+DAILY_SIZE_COLUMNS = [
+    "date",
+    "code",
+    "total_market_cap",
+    "float_market_cap",
+    "total_share",
+    "float_share",
+    "free_share",
+    "market_cap_unit",
+    "share_unit",
+    "source",
+    "source_trade_date",
+]
+
 
 @dataclass(frozen=True)
 class PitDailySnapshot:
@@ -21,6 +35,9 @@ class PitDailySnapshot:
     daily_universe: pd.DataFrame
     daily_bars: pd.DataFrame
     daily_status: pd.DataFrame
+    daily_metrics: pd.DataFrame
+    stock_industry: pd.DataFrame
+    daily_size: pd.DataFrame
 
 
 def _resolve_snapshot_root(root: str | Path | None = None) -> Path:
@@ -55,6 +72,59 @@ def load_security_master(root: str | Path | None = None) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"security master not found: {path}")
     return pd.read_parquet(path)
+
+
+def load_pit_stock_industry(
+    root: str | Path | None = None,
+    *,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    symbols: list[str] | tuple[str, ...] | set[str] | None = None,
+) -> pd.DataFrame:
+    path = _resolve_snapshot_root(root) / "stock_industry.parquet"
+    columns = ["date", "code", "name_on_date", "industry", "industry_classification", "industry_update_date", "source"]
+    if not path.exists():
+        return pd.DataFrame(columns=columns)
+    frame = _filter_frame(pd.read_parquet(path), start_date=start_date, end_date=end_date, symbols=symbols)
+    for column in columns:
+        if column not in frame.columns:
+            frame[column] = pd.NA
+    return frame[columns]
+
+
+def load_pit_daily_metrics(
+    root: str | Path | None = None,
+    *,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    symbols: list[str] | tuple[str, ...] | set[str] | None = None,
+) -> pd.DataFrame:
+    path = _resolve_snapshot_root(root) / "daily_metrics.parquet"
+    columns = ["date", "code", "turn", "pctChg", "peTTM", "pbMRQ", "psTTM", "pcfNcfTTM", "source"]
+    if not path.exists():
+        return pd.DataFrame(columns=columns)
+    frame = _filter_frame(pd.read_parquet(path), start_date=start_date, end_date=end_date, symbols=symbols)
+    for column in columns:
+        if column not in frame.columns:
+            frame[column] = pd.NA
+    return frame[columns]
+
+
+def load_pit_daily_size(
+    root: str | Path | None = None,
+    *,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    symbols: list[str] | tuple[str, ...] | set[str] | None = None,
+) -> pd.DataFrame:
+    path = _resolve_snapshot_root(root) / "daily_size.parquet"
+    if not path.exists():
+        return pd.DataFrame(columns=DAILY_SIZE_COLUMNS)
+    frame = _filter_frame(pd.read_parquet(path), start_date=start_date, end_date=end_date, symbols=symbols)
+    for column in DAILY_SIZE_COLUMNS:
+        if column not in frame.columns:
+            frame[column] = pd.NA
+    return frame[DAILY_SIZE_COLUMNS]
 
 
 def _filter_frame(
@@ -122,6 +192,9 @@ def load_pit_snapshot(root: str | Path | None = None) -> PitDailySnapshot:
         daily_universe=load_daily_universe(snapshot_root),
         daily_bars=load_pit_daily_bars(snapshot_root),
         daily_status=load_pit_daily_status(snapshot_root),
+        daily_metrics=load_pit_daily_metrics(snapshot_root),
+        stock_industry=load_pit_stock_industry(snapshot_root),
+        daily_size=load_pit_daily_size(snapshot_root),
     )
 
 
@@ -130,6 +203,9 @@ def load_tradeable_panel(
     *,
     start_date: str | None = None,
     end_date: str | None = None,
+    include_industry: bool = False,
+    include_metrics: bool = False,
+    include_size: bool = False,
 ) -> pd.DataFrame:
     universe = load_daily_universe(root, start_date=start_date, end_date=end_date, tradeable_only=True)
     if universe.empty:
@@ -141,4 +217,40 @@ def load_tradeable_panel(
         symbols=sorted(universe["code"].unique().tolist()),
     )
     panel = universe.merge(bars, on=["date", "code"], how="inner")
-    return panel.loc[panel["is_tradeable"]].sort_values(["date", "code"]).reset_index(drop=True)
+    panel = panel.loc[panel["is_tradeable"]].copy()
+    if include_industry and not panel.empty:
+        industry = load_pit_stock_industry(
+            root,
+            start_date=start_date,
+            end_date=end_date,
+            symbols=sorted(panel["code"].unique().tolist()),
+        )
+        if not industry.empty:
+            industry = industry.rename(
+                columns={
+                    "name_on_date": "industry_name_on_date",
+                    "source": "industry_source",
+                }
+            )
+            panel = panel.merge(industry, on=["date", "code"], how="left")
+    if include_metrics and not panel.empty:
+        metrics = load_pit_daily_metrics(
+            root,
+            start_date=start_date,
+            end_date=end_date,
+            symbols=sorted(panel["code"].unique().tolist()),
+        )
+        if not metrics.empty:
+            metrics = metrics.rename(columns={"source": "metrics_source"})
+            panel = panel.merge(metrics, on=["date", "code"], how="left")
+    if include_size and not panel.empty:
+        size = load_pit_daily_size(
+            root,
+            start_date=start_date,
+            end_date=end_date,
+            symbols=sorted(panel["code"].unique().tolist()),
+        )
+        if not size.empty:
+            size = size.rename(columns={"source": "size_source"})
+            panel = panel.merge(size, on=["date", "code"], how="left")
+    return panel.sort_values(["date", "code"]).reset_index(drop=True)

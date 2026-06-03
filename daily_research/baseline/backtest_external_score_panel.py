@@ -47,8 +47,10 @@ def parse_args():
     parser.add_argument("--target-weight-min-weight", type=float, default=0.0, help="Optional minimum weight threshold applied to direct target-weight rows before renormalization.")
     parser.add_argument("--target-weight-power", type=float, default=1.0, help="Optional power transform applied to positive direct target weights before renormalization.")
     parser.add_argument("--target-weight-full-invest", action="store_true", help="When using direct target weights, renormalize positive rows to 100%% gross even if the source leaves cash.")
-    parser.add_argument("--data-source", choices=["tq", "csv"], default="tq")
+    parser.add_argument("--data-source", choices=["tq", "csv", "lake"], default="tq")
     parser.add_argument("--csv-folder", default=None)
+    parser.add_argument("--lake-dataset-id", default="")
+    parser.add_argument("--data-lake-root", default="")
     parser.add_argument("--stocks", default=None)
     parser.add_argument("--stocks-file", default=None, help="Optional txt/csv file containing stock codes.")
     parser.add_argument("--start-date", default="")
@@ -230,7 +232,7 @@ def main():
     file_stocks = load_stock_list_from_file(args.stocks_file)
     if stocks or file_stocks:
         stocks = list(dict.fromkeys(stocks + file_stocks))
-    elif args.data_source == "tq" and str(args.universe_scope or "").strip().lower() == "all_a":
+    elif args.data_source in {"tq", "lake"} and str(args.universe_scope or "").strip().lower() == "all_a":
         panel_stocks: list[str] = []
         for panel in input_panels:
             panel_stocks.extend(panel.columns)
@@ -287,6 +289,8 @@ def main():
         history_window=history_window,
         use_cache=not args.no_cache,
         refresh_cache=args.refresh_cache,
+        lake_dataset_id=args.lake_dataset_id,
+        data_lake_root=args.data_lake_root,
     )
     benchmark_symbol = str(args.benchmark).upper()
     benchmark_open = raw_df_dict["Open"][benchmark_symbol].copy()
@@ -373,19 +377,23 @@ def main():
         if cfg.enable_style_cap and args.data_source == "tq":
             style_map = load_style_map_from_tq(list(df_dict["Close"].columns))
 
-        target_weights = build_target_weights(aligned_score, cfg, industry_map=industry_map, style_map=style_map)
-        target_weights = apply_rebalance_frequency(
-            target_weights,
-            cfg.rebalance_freq,
-            args.rebalance_offset,
+        raw_target_weights = build_target_weights(aligned_score, cfg, industry_map=industry_map, style_map=style_map)
+        target_weights, schedule_meta = apply_rebalance_schedule(
+            raw_target_weights,
+            rebalance_freq=cfg.rebalance_freq,
+            rebalance_offset=args.rebalance_offset,
+            rebalance_offset_mode=args.rebalance_offset_mode,
             rebalance_anchor_date=args.rebalance_anchor_date,
         )
-        score_for_backtest = apply_rebalance_frequency(
+        score_for_backtest, _ = apply_rebalance_schedule(
             aligned_score.fillna(0.0),
-            cfg.rebalance_freq,
-            args.rebalance_offset,
+            rebalance_freq=cfg.rebalance_freq,
+            rebalance_offset=args.rebalance_offset,
+            rebalance_offset_mode=args.rebalance_offset_mode,
             rebalance_anchor_date=args.rebalance_anchor_date,
         )
+        bridge_meta.update(schedule_meta)
+        bridge_mode = "score_panel" if str(schedule_meta["rebalance_offset_mode"]) == "single" else "score_panel_ensemble"
 
     regime_state = compute_market_regime_state(benchmark_close, cfg)
     if cfg.enable_market_regime_filter:
@@ -448,6 +456,9 @@ def main():
             "aligned_dates": int(len(score_for_backtest.index)),
             "aligned_stocks": int(len(score_for_backtest.columns)),
             "benchmark": cfg.benchmark,
+            "data_source": str(args.data_source),
+            "lake_dataset_id": str(args.lake_dataset_id or ""),
+            "data_lake_root": str(args.data_lake_root or ""),
             "execution_mode": cfg.execution_mode,
             "rebalance_freq": cfg.rebalance_freq,
             "rebalance_offset": bridge_meta.get("rebalance_offset"),

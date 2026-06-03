@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 90,
+  "record_count": 105,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -1609,6 +1609,84 @@
       "dataset_ids": []
     },
     {
+      "id": "daily_research_v2_bad_month_attribution_20260602",
+      "date": "2026-06-02",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_bad_month_attribution_20260602.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_bad_month_attribution"
+      ],
+      "run_tags": [
+        "v2_score_backtest_bridge_20260602_01",
+        "v2_bad_month_attribution_20260602_01",
+        "v2_candidate_review_matrix_20260602_01"
+      ],
+      "verdict": "Status: `v2_bad_month_attribution / evidence_grade_candidate_diagnostic / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_bad_month_attribution`.; Attribution run tag: `v2_bad_month_attribution_20260602_01`.",
+      "blockers": [
+        "The `20` holding-count candidate's bad-month blocker is therefore more likely a high-conviction risk-state / regime / crowding / reversal problem than a simple holding-count problem."
+      ],
+      "next_allowed_actions": [
+        "Extend candidate matrix with:",
+        "max weight `0.04/0.06/0.08`;",
+        "rebalance frequency `3d/5d/10d`;",
+        "market-regime or soft-state overlays;",
+        "high-score/high-weight risk throttles;",
+        "score confidence filters and reversal/volatility guards."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
+        "policy_pool_view__925e8604a91a9c07a5387fb1"
+      ]
+    },
+    {
+      "id": "daily_research_v2_candidate_review_matrix_20260602",
+      "date": "2026-06-02",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_candidate_review_matrix_20260602.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_candidate_review_matrix"
+      ],
+      "run_tags": [
+        "v2_score_backtest_bridge_20260602_01",
+        "mh_v2_reset_tradeable_mainboard_anchor_20260601_01",
+        "v2_candidate_review_matrix_20260602_01"
+      ],
+      "verdict": "Status: `v2_candidate_review_matrix / evidence_grade_candidate_backtest / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_candidate_review_matrix`.; Source bridge: `v2_score_backtest_bridge_20260602_01`.",
+      "blockers": [
+        "The first narrow matrix shows that simply changing holding count from `10` to `20` to `30` does not repair the execution-candidate blocker.",
+        "Cost drag is visible but not the primary blocker in this narrow matrix; all three variants stay below the `0.20` annual return cost-drag gate after the collector fix.",
+        "The current blocker has moved from \"bridge not available\" to \"candidate mapping and risk/month-stability design not good enough.\""
+      ],
+      "next_allowed_actions": [
+        "Expand the matrix along dimensions more likely to affect monthly stability:",
+        "rebalance frequency `3d/5d/10d`;",
+        "max weight `0.04/0.06/0.08`;",
+        "market-regime or soft-state overlays;",
+        "score thresholding or confidence filtering;",
+        "bad-month attribution by month, sector, liquidity bucket, and horizon bucket."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
+        "policy_pool_view__925e8604a91a9c07a5387fb1"
+      ]
+    },
+    {
       "id": "daily_research_v2_dataset_contract_upgrade_20260602",
       "date": "2026-06-02",
       "r_id": "",
@@ -1646,6 +1724,313 @@
       "dataset_ids": [
         "policy_input_bundle__45e3d8c059ba718426a9f887",
         "data_platform_v2_status_sidecar__b896a110cf7802cc1653c22a",
+        "policy_pool_view__925e8604a91a9c07a5387fb1"
+      ]
+    },
+    {
+      "id": "daily_research_v2_horizon_concentration_repair_scout_20260603",
+      "date": "2026-06-03",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_horizon_concentration_repair_scout_20260603.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [],
+      "run_tags": [
+        "mh_v2_horizon_concentration_repair_anchor_20260603_01",
+        "mh_v2_local_state_loss_calibration_anchor_20260603_01",
+        "mh_v2_reset_tradeable_mainboard_anchor_20260601_01",
+        "mh_v2_local_state_input_scout_anchor_20260602_01"
+      ],
+      "verdict": "Research verdict: `daily_research/output/path_policy/studies/mh_v2_horizon_concentration_repair_anchor_20260603_01/research_verdict.md`.",
+      "blockers": [
+        "`validation_zscore_rescaled` has stronger test rank/spread/month stability (`rank_ic_mean=0.155320`, `spread_mean=0.053692`, `monthly_positive_rate_mean=0.969697`, `negative_month_count_max=1`, `30d concentration=0.175759`) but failed the validation quality-floor selection because validation hit lift fell too far versus baseline. It remains a diagnostic direction, not the selected repair.",
+        "The 30d concentration blocker is not inseparable from the signal. Simple output calibration can reduce 30d concentration below the historical Stage 2.8 limit while preserving the main research metrics."
+      ],
+      "next_allowed_actions": [
+        "Add a train-side or output-contract scout that internalizes the successful posthoc shape, for example:",
+        "`horizon_30d_soft_penalty_v1`;",
+        "`horizon_concentration_cap_v1`;",
+        "`validation_centered_horizon_head_v1`;",
+        "a calibrated decision-score head with explicit horizon exposure metadata.",
+        "Compare any train-side candidate against:"
+      ],
+      "active_artifact_impact": "not_stated",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
+        "policy_pool_view__925e8604a91a9c07a5387fb1"
+      ]
+    },
+    {
+      "id": "daily_research_v2_horizon_concentration_train_contract_scout_20260603",
+      "date": "2026-06-03",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_horizon_concentration_train_contract_scout_20260603.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_horizon_concentration_train_contract_scout"
+      ],
+      "run_tags": [
+        "mh_v2_horizon_concentration_repair_anchor_20260603_01",
+        "mh_v2_horizon_concentration_train_contract_anchor_20260603_01",
+        "mh_v2_horizon_30d_soft_penalty_seed7_20260603_01",
+        "mh_v2_local_state_input_scout_seed7_20260602_01",
+        "mh_v2_reset_tradeable_mainboard_anchor_20260601_01",
+        "mh_v2_local_state_input_scout_anchor_20260602_01",
+        "mh_v2_local_state_loss_calibration_anchor_20260603_01"
+      ],
+      "verdict": "Evidence verdict: `forecast_test_confirmed`.",
+      "blockers": [
+        "The 30d concentration blocker is strongly reduced in the seed7 train-contract branch: `0.024208` versus `0.805152` in the uncalibrated local-state loss branch and `0.109297` in the prior posthoc repair."
+      ],
+      "next_allowed_actions": [
+        "Run seed11/19 confirmation for `horizon_30d_soft_penalty_v1`.",
+        "Rebuild the 3-seed aggregate and compare against:",
+        "strict v2 baseline `mh_v2_reset_tradeable_mainboard_anchor_20260601_01`;",
+        "local-state input scout `mh_v2_local_state_input_scout_anchor_20260602_01`;",
+        "local-state loss calibration `mh_v2_local_state_loss_calibration_anchor_20260603_01`;",
+        "posthoc repair anchor `mh_v2_horizon_concentration_repair_anchor_20260603_01`."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
+        "policy_pool_view__925e8604a91a9c07a5387fb1"
+      ]
+    },
+    {
+      "id": "daily_research_v2_local_risk_cap_matrix_20260602",
+      "date": "2026-06-02",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_local_risk_cap_matrix_20260602.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_local_risk_cap_matrix"
+      ],
+      "run_tags": [
+        "v2_local_risk_cap_matrix_dryrun_20260602_01",
+        "v2_local_risk_cap_matrix_narrow_20260602_01",
+        "v2_selective_throttle_matrix_narrow_20260602_01"
+      ],
+      "verdict": "Status: `v2_local_risk_cap_matrix / evidence_grade_candidate_backtest / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_local_risk_cap_matrix`.; Dry-run tag: `v2_local_risk_cap_matrix_dryrun_20260602_01`.",
+      "blockers": [
+        "Local cap is a useful but insufficient repair.",
+        "inspect whether loss/output can penalize high-confidence adverse-local-state failures."
+      ],
+      "next_allowed_actions": [
+        "Run a targeted second local matrix with:",
+        "lower score quantile threshold `0.70`;",
+        "separate `score_reversal` and `score_volatility` instead of combined masks;",
+        "`redistribution_mode=score` versus `source_weight`;",
+        "optional month-state conditional cap only after previous-month weak state;",
+        "post-local-cap attribution on the remaining negative months."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
+        "policy_pool_view__925e8604a91a9c07a5387fb1"
+      ]
+    },
+    {
+      "id": "daily_research_v2_local_risk_cap_targeted_matrix_20260602",
+      "date": "2026-06-02",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_local_risk_cap_targeted_matrix_20260602.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_local_risk_cap_matrix"
+      ],
+      "run_tags": [
+        "v2_local_risk_cap_matrix_targeted_20260602_01",
+        "v2_local_risk_cap_matrix_narrow_20260602_01",
+        "v2_selective_throttle_matrix_narrow_20260602_01"
+      ],
+      "verdict": "Status: `v2_local_risk_cap_targeted_matrix / evidence_grade_candidate_backtest / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_local_risk_cap_matrix`.; Targeted matrix run tag: `v2_local_risk_cap_matrix_targeted_20260602_01`.",
+      "blockers": [
+        "The dominant local blocker is volatility-conditioned high-score exposure, not reversal-only exposure.",
+        "The best targeted variant improves excess Sharpe versus the previous local-cap narrow matrix best (`1.765417` vs `1.711932`) and remains close to the strongest high-volatility selective-throttle branch, but the promotion-review blockers persist:",
+        "loss / output regularization against high-confidence adverse-local-state failures;"
+      ],
+      "next_allowed_actions": [
+        "Prefer model-side or score-calibration work over more simple target-weight overlays.",
+        "Candidate next experiments:",
+        "add explicit local volatility / reversal / recent-return state to a v2 feature profile;",
+        "train a small score-calibration diagnostic that penalizes high-score high-local-volatility mistakes on validation windows;",
+        "post-targeted-cap attribution on remaining negative months to identify whether the last negative month is now benchmark/timing dominated.",
+        "Do not promote to live/default from this matrix."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
+        "policy_pool_view__925e8604a91a9c07a5387fb1"
+      ]
+    },
+    {
+      "id": "daily_research_v2_local_state_feature_profile_20260602",
+      "date": "2026-06-02",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_local_state_feature_profile_20260602.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_local_state_feature_profile"
+      ],
+      "run_tags": [
+        "mh_v2_reset_tradeable_mainboard_anchor_20260601_01"
+      ],
+      "verdict": "Status: `v2_local_state_feature_profile / input-contract-upgrade / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_local_state_feature_profile`.; New feature profile: `raw_kline_context_v2_tradeable_local_state_v1`.",
+      "blockers": [
+        "v2 bad-month attribution, selective throttle, local cap, targeted local cap, and validation-selected score-state calibration all point to the same blocker:"
+      ],
+      "next_allowed_actions": [
+        "Run a narrow v2 local-state input scout, preferably starting with seed7 and reusing the v2 strict baseline orchestration pattern.",
+        "If seed7 is promising, continue with seed11/19 and aggregate gate.",
+        "Compare against `mh_v2_reset_tradeable_mainboard_anchor_20260601_01`, not against old short_v5b.",
+        "Do not promote to live/default from this input-contract change.",
+        "Do not write or rebuild `daily_research/output/active_execution_strategy.json`."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
+        "policy_pool_view__925e8604a91a9c07a5387fb1"
+      ]
+    },
+    {
+      "id": "daily_research_v2_local_state_input_scout_20260602",
+      "date": "2026-06-02",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_local_state_input_scout_20260602.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "mh_v2_local_state_input_scout_anchor_20260602_01",
+        "mh_v2_local_state_input_scout_seed7_20260602_01",
+        "mh_v2_local_state_input_scout_seed11_20260602_01",
+        "mh_v2_local_state_input_scout_seed19_20260602_01",
+        "mh_v2_reset_tradeable_mainboard_anchor_20260601_01"
+      ],
+      "verdict": "",
+      "blockers": [
+        "Since post-hoc overlays and fixed score penalties also failed monthly stability, the next work should target loss/output calibration or horizon/month-state constraints rather than more simple overlay stacking."
+      ],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "not_stated",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
+        "policy_pool_view__925e8604a91a9c07a5387fb1"
+      ]
+    },
+    {
+      "id": "daily_research_v2_local_state_loss_calibration_scout_20260603",
+      "date": "2026-06-03",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_local_state_loss_calibration_scout_20260603.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_local_state_loss_calibration_scout"
+      ],
+      "run_tags": [
+        "mh_v2_local_state_loss_calibration_anchor_20260603_01",
+        "mh_v2_local_state_input_scout_seed7_20260602_01",
+        "mh_v2_reset_tradeable_mainboard_anchor_20260601_01",
+        "mh_v2_local_state_input_scout_anchor_20260602_01",
+        "mh_v2_local_state_loss_calibration_horizon_entropy_regularized_v1_seed7_20260603_01",
+        "mh_v2_local_state_loss_calibration_horizon_entropy_regularized_v1_seed11_20260603_01",
+        "mh_v2_local_state_loss_calibration_horizon_entropy_regularized_v1_seed19_20260603_01"
+      ],
+      "verdict": "Research verdict: `daily_research/output/path_policy/studies/mh_v2_local_state_loss_calibration_anchor_20260603_01/research_verdict.md`.",
+      "blockers": [
+        "Full gate failed only on `thirty_d_concentration_not_worse_than_stage28=false`.",
+        "Loss/output calibration is a real lever for the local-state branch. Compared with the prior local-state input scout, `horizon_entropy_regularized_v1` repaired the negative-month blocker and strengthened hit lift.",
+        "The current blocker has moved from \"local-state input hurts monthly stability\" to \"local-state plus horizon-entropy loss improves rank/spread/hit/months but over-concentrates the predicted horizon toward long/30d.\""
+      ],
+      "next_allowed_actions": [
+        "Design a narrow v2 horizon-concentration repair scout for `horizon_entropy_regularized_v1`, such as horizon share caps, horizon entropy target calibration, horizon-state penalties, or alternative horizon-grid/output calibration.",
+        "Keep comparison anchored to:",
+        "current strict v2 baseline `mh_v2_reset_tradeable_mainboard_anchor_20260601_01`;",
+        "local-state input scout `mh_v2_local_state_input_scout_anchor_20260602_01`;",
+        "this loss-calibration anchor `mh_v2_local_state_loss_calibration_anchor_20260603_01`.",
+        "Do not move this branch to score-backtest bridge or execution-candidate review until the research gate is full pass or a clearly declared diagnostic exception is approved."
+      ],
+      "active_artifact_impact": "not_stated",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
+        "policy_pool_view__925e8604a91a9c07a5387fb1"
+      ]
+    },
+    {
+      "id": "daily_research_v2_post_throttle_bad_month_attribution_20260602",
+      "date": "2026-06-02",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_post_throttle_bad_month_attribution_20260602.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_bad_month_attribution"
+      ],
+      "run_tags": [
+        "v2_post_throttle_bad_month_attribution_20240602_m202403",
+        "v2_post_throttle_bad_month_attribution_20240602_m202406",
+        "v2_post_throttle_bad_month_attribution_20240602_m202408",
+        "v2_selective_throttle_matrix_narrow_20260602_01"
+      ],
+      "verdict": "Status: `v2_post_throttle_bad_month_attribution / evidence_grade_candidate_diagnostic / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_bad_month_attribution`.; Source matrix: `v2_selective_throttle_matrix_narrow_20260602_01`.",
+      "blockers": [
+        "The remaining negative months after selective throttle are local state failures, not a general lack of signal.",
+        "`2024-08` is still the clearest high-confidence / high-weight failure: high score and high weight buckets lose heavily, with high-volatility and positive-reversal interaction buckets contributing the largest losses."
+      ],
+      "next_allowed_actions": [
+        "Build a narrow local cap matrix on top of the best selective-throttle candidate.",
+        "Candidate local rules should test:",
+        "reduce `score_q_5 x reversal_q_4/q_5`;",
+        "reduce `score_q_4/q_5 x volatility_q_4/q_5`;",
+        "reduce high recent-return buckets in June-like states;",
+        "keep gross exposure near the source candidate by redistributing released weight to lower-risk selected names."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
         "policy_pool_view__925e8604a91a9c07a5387fb1"
       ]
     },
@@ -1717,6 +2102,192 @@
       "dataset_ids": [
         "policy_input_bundle__45e3d8c059ba718426a9f887",
         "policy_pool_view__74f45f4f83263bccd64a8027"
+      ]
+    },
+    {
+      "id": "daily_research_v2_risk_overlay_candidate_matrix_20260602",
+      "date": "2026-06-02",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_risk_overlay_candidate_matrix_20260602.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_candidate_review_matrix"
+      ],
+      "run_tags": [
+        "v2_score_backtest_bridge_20260602_01",
+        "v2_candidate_review_matrix_risk_overlay_20260602_01",
+        "v2_bad_month_attribution_20260602_01"
+      ],
+      "verdict": "Status: `v2_risk_overlay_candidate_matrix / evidence_grade_candidate_backtest / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_candidate_review_matrix`.; Matrix run tag: `v2_candidate_review_matrix_risk_overlay_20260602_01`.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Implement a candidate-level high-confidence throttle or soft-state sizing variant that reduces high-score/high-weight exposure only under adverse state.",
+        "Add finer attribution dimensions before the next matrix:",
+        "sector;",
+        "liquidity bucket;",
+        "volatility bucket;",
+        "reversal / recent drawdown bucket;"
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
+        "policy_pool_view__925e8604a91a9c07a5387fb1"
+      ]
+    },
+    {
+      "id": "daily_research_v2_score_backtest_bridge_20260602",
+      "date": "2026-06-02",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_score_backtest_bridge_20260602.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_score_backtest_bridge"
+      ],
+      "run_tags": [
+        "v2_score_backtest_bridge_20260602_01",
+        "mh_v2_reset_tradeable_mainboard_anchor_20260601_01",
+        "mh_v2_reset_tradeable_mainboard_seed7_20260601_01",
+        "mh_v2_reset_tradeable_mainboard_seed11_20260601_01",
+        "mh_v2_reset_tradeable_mainboard_seed19_20260601_01",
+        "v2_score_backtest_bridge_20260602_01_shared_engine"
+      ],
+      "verdict": "Status: `daily_research_v2_score_backtest_bridge / evidence_grade_bridge / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_score_backtest_bridge`.; Bridge run tag: `v2_score_backtest_bridge_20260602_01`.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Build a v2 candidate review matrix across:",
+        "rebalance frequency and offset mode;",
+        "holding count and max weight;",
+        "cost/slippage assumptions;",
+        "optional risk overlays;",
+        "strict v2 pool versus traditional-PIT comparison pool."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
+        "policy_pool_view__925e8604a91a9c07a5387fb1"
+      ]
+    },
+    {
+      "id": "daily_research_v2_score_state_calibration_matrix_20260602",
+      "date": "2026-06-02",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_score_state_calibration_matrix_20260602.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_score_state_calibration_matrix"
+      ],
+      "run_tags": [
+        "v2_score_state_calibration_matrix_dryrun_20260602_01",
+        "v2_score_state_calibration_matrix_probe_20260602_01",
+        "v2_score_backtest_bridge_20260602_01"
+      ],
+      "verdict": "Status: `v2_score_state_calibration_matrix / validation_selected_candidate_backtest / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_score_state_calibration_matrix`.; Dry-run tag: `v2_score_state_calibration_matrix_dryrun_20260602_01`.",
+      "blockers": [
+        "The first real probe does not close the current promotion-review blocker:",
+        "loss/output regularization against high-score adverse-state failures."
+      ],
+      "next_allowed_actions": [
+        "Do not promote to live/default from this matrix.",
+        "Do not write or rebuild `daily_research/output/active_execution_strategy.json`.",
+        "Prefer the next experiment to be model-side or loss/output-side rather than another simple fixed-penalty overlay.",
+        "Candidate next steps:",
+        "add local volatility / reversal / recent-return features to a v2 input profile;",
+        "train a lightweight calibration head or calibration model with validation-only selection and no test tuning;"
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
+        "policy_pool_view__925e8604a91a9c07a5387fb1"
+      ]
+    },
+    {
+      "id": "daily_research_v2_selective_throttle_matrix_20260602",
+      "date": "2026-06-02",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_selective_throttle_matrix_20260602.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_selective_throttle_matrix"
+      ],
+      "run_tags": [
+        "v2_score_backtest_bridge_20260602_01",
+        "v2_selective_throttle_matrix_probe_20260602_01",
+        "v2_selective_throttle_matrix_narrow_20260602_01"
+      ],
+      "verdict": "Status: `v2_selective_throttle_matrix / evidence_grade_candidate_backtest / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_selective_throttle_matrix`.; Matrix run tag: `v2_selective_throttle_matrix_narrow_20260602_01`.",
+      "blockers": [
+        "Current blocker has narrowed again: the candidate signal and selective risk-state adjustment have strong excess-return evidence, but the execution candidate still needs a month-state or sizing layer that repairs one additional negative month without destroying Sharpe."
+      ],
+      "next_allowed_actions": [
+        "Add a second-stage month-state or drawdown-state sizing layer on top of selective throttle.",
+        "Test volatility throttle with lower max weight `0.06` and/or state-specific max weight only when portfolio drawdown or market breadth is adverse.",
+        "Add post-throttle bad-month attribution for:",
+        "`high_volatility_p0p05`;",
+        "`recent_runup_or_high_volatility_p0p05`.",
+        "Extend attribution dimensions to volatility bucket, recent-return bucket, sector, liquidity, and predicted horizon."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
+        "policy_pool_view__925e8604a91a9c07a5387fb1"
+      ]
+    },
+    {
+      "id": "daily_research_v2_state_sizing_matrix_20260602",
+      "date": "2026-06-02",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_state_sizing_matrix_20260602.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_state_sizing_matrix"
+      ],
+      "run_tags": [
+        "v2_state_sizing_matrix_dryrun_20260602_01",
+        "v2_state_sizing_matrix_narrow_20260602_01",
+        "v2_state_sizing_matrix_light_probe_20260602_01",
+        "v2_selective_throttle_matrix_narrow_20260602_01"
+      ],
+      "verdict": "Status: `v2_state_sizing_matrix / evidence_grade_candidate_backtest / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_state_sizing_matrix`.; Narrow matrix run tag: `v2_state_sizing_matrix_narrow_20260602_01`.",
+      "blockers": [
+        "The key blocker is now narrower: the model score and selective volatility/runup throttle are useful, but the remaining negative month is not solved by whole-portfolio lagged exposure control."
+      ],
+      "next_allowed_actions": [
+        "Next work should move from global path-state sizing to local/state-specific risk control:"
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__45e3d8c059ba718426a9f887",
+        "policy_pool_view__925e8604a91a9c07a5387fb1"
       ]
     },
     {

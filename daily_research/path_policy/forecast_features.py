@@ -22,6 +22,7 @@ FORECAST_FEATURE_PROFILES: tuple[str, ...] = (
     "raw_kline_context_regime_v1",
     "raw_kline_context_sector_relative_regime_v1",
     "raw_kline_context_v2_tradeable_amount_checked",
+    "raw_kline_context_v2_tradeable_local_state_v1",
 )
 DEFAULT_FORECAST_FEATURE_PROFILE = "raw_kline_context_v1"
 DEFAULT_FORECAST_MAX_FEATURE_COLUMNS = 192
@@ -35,6 +36,7 @@ RAW_FRAME_PROFILES = {
     "raw_kline_context_regime_v1",
     "raw_kline_context_sector_relative_regime_v1",
     "raw_kline_context_v2_tradeable_amount_checked",
+    "raw_kline_context_v2_tradeable_local_state_v1",
 }
 CONTEXT_FRAME_PROFILES = {
     "raw_kline_context_v1",
@@ -44,12 +46,14 @@ CONTEXT_FRAME_PROFILES = {
     "raw_kline_context_regime_v1",
     "raw_kline_context_sector_relative_regime_v1",
     "raw_kline_context_v2_tradeable_amount_checked",
+    "raw_kline_context_v2_tradeable_local_state_v1",
 }
 HISTORY_FRAME_PROFILES = {
     "raw_kline_context_sector_relative_v1",
     "raw_kline_context_regime_v1",
     "raw_kline_context_sector_relative_regime_v1",
     "raw_kline_context_v2_tradeable_amount_checked",
+    "raw_kline_context_v2_tradeable_local_state_v1",
 }
 SECTOR_CONTEXT_PROFILES = {"raw_kline_context_sector_v1"}
 SECTOR_RELATIVE_PROFILES = {
@@ -60,14 +64,17 @@ REGIME_PROFILES = {
     "raw_kline_context_regime_v1",
     "raw_kline_context_sector_relative_regime_v1",
     "raw_kline_context_v2_tradeable_amount_checked",
+    "raw_kline_context_v2_tradeable_local_state_v1",
 }
-AMOUNT_CHECKED_PROFILES = {"raw_kline_context_v2_tradeable_amount_checked"}
+LOCAL_STATE_PROFILES = {"raw_kline_context_v2_tradeable_local_state_v1"}
+AMOUNT_CHECKED_PROFILES = {"raw_kline_context_v2_tradeable_amount_checked", *LOCAL_STATE_PROFILES}
 NO_ALPHA_CONTRACT_PROFILES = {
     "raw_kline_context_no_alpha_prior_v1",
     "raw_kline_context_sector_relative_v1",
     "raw_kline_context_regime_v1",
     "raw_kline_context_sector_relative_regime_v1",
     "raw_kline_context_v2_tradeable_amount_checked",
+    "raw_kline_context_v2_tradeable_local_state_v1",
 }
 
 
@@ -318,6 +325,47 @@ def _context_feature_frames(prepared: PreparedPolicyInputs, raw_frames: dict[str
     return {key: value.replace([np.inf, -np.inf], np.nan) for key, value in frames.items()}
 
 
+def _local_state_feature_frames(prepared: PreparedPolicyInputs) -> dict[str, pd.DataFrame]:
+    close = prepared.close.astype(float)
+    ret_1d = close.pct_change(1).replace([np.inf, -np.inf], np.nan)
+    ret_5d = close.pct_change(5).replace([np.inf, -np.inf], np.nan)
+    ret_20d = close.pct_change(20).replace([np.inf, -np.inf], np.nan)
+    vol_5d = ret_1d.rolling(5, min_periods=2).std().replace([np.inf, -np.inf], np.nan)
+    vol_20d = ret_1d.rolling(20, min_periods=2).std().replace([np.inf, -np.inf], np.nan)
+    vol_ratio_5_20 = _safe_div(vol_5d, vol_20d).sub(1.0)
+    drawdown_20d = close.div(close.rolling(20, min_periods=1).max().replace(0.0, np.nan)).sub(1.0)
+    distance_to_low_20d = close.div(close.rolling(20, min_periods=1).min().replace(0.0, np.nan)).sub(1.0)
+    local_vol_rank = vol_20d.rank(axis=1, pct=True)
+    local_ret_5d_rank = ret_5d.rank(axis=1, pct=True)
+    local_reversal_rank = ret_1d.rank(axis=1, pct=True)
+    high_volatility = local_vol_rank.ge(0.80).astype(float).where(local_vol_rank.notna())
+    high_runup = local_ret_5d_rank.ge(0.80).astype(float).where(local_ret_5d_rank.notna())
+    high_reversal = local_reversal_rank.ge(0.80).astype(float).where(local_reversal_rank.notna())
+    low_volatility = local_vol_rank.le(0.20).astype(float).where(local_vol_rank.notna())
+    return {
+        "local_ret_1d": ret_1d,
+        "local_ret_5d": ret_5d,
+        "local_ret_20d": ret_20d,
+        "local_vol_5d": vol_5d,
+        "local_vol_20d": vol_20d,
+        "local_vol_ratio_5_20": vol_ratio_5_20,
+        "local_drawdown_20d": drawdown_20d,
+        "local_distance_to_low_20d": distance_to_low_20d,
+        "cs_rank_local_ret_5d": local_ret_5d_rank,
+        "cs_rank_local_vol_20d": local_vol_rank,
+        "cs_rank_local_reversal_1d": local_reversal_rank,
+        "cs_z_local_ret_5d": _cross_z(ret_5d),
+        "cs_z_local_vol_20d": _cross_z(vol_20d),
+        "cs_z_local_reversal_1d": _cross_z(ret_1d),
+        "local_high_volatility_flag": high_volatility,
+        "local_high_runup_flag": high_runup,
+        "local_high_reversal_flag": high_reversal,
+        "local_high_volatility_x_runup": high_volatility.mul(high_runup),
+        "local_high_volatility_x_reversal": high_volatility.mul(high_reversal),
+        "local_low_volatility_x_runup": low_volatility.mul(high_runup),
+    }
+
+
 def _metadata_industry_series(prepared: PreparedPolicyInputs, columns: list[str]) -> pd.Series:
     frame = dict(getattr(prepared, "metadata_frames", {}) or {}).get("industry_map")
     if frame is None or frame.empty or not {"symbol", "industry"}.issubset(frame.columns):
@@ -507,6 +555,7 @@ def _selected_columns_for_profile(
     sector_columns: list[str] | None = None,
     sector_relative_columns: list[str] | None = None,
     regime_columns: list[str] | None = None,
+    local_state_columns: list[str] | None = None,
     history_columns: list[str] | None = None,
     feature_profile: str,
 ) -> tuple[list[str], dict[str, str]]:
@@ -515,6 +564,7 @@ def _selected_columns_for_profile(
     sector_columns = list(sector_columns or [])
     sector_relative_columns = list(sector_relative_columns or [])
     regime_columns = list(regime_columns or [])
+    local_state_columns = list(local_state_columns or [])
     if feature_profile in RAW_FRAME_PROFILES - {"raw_kline_context_sector_v1"}:
         column_groups.update({column: "raw_kline" for column in raw_columns})
     if feature_profile == "raw_kline_context_sector_v1":
@@ -535,6 +585,8 @@ def _selected_columns_for_profile(
         column_groups.update({column: "sector_relative_context" for column in sector_relative_columns})
     if feature_profile in REGIME_PROFILES:
         column_groups.update({column: "regime_context" for column in regime_columns})
+    if feature_profile in LOCAL_STATE_PROFILES:
+        column_groups.update({column: "local_state_context" for column in local_state_columns})
     columns = [column for column in state_columns if column in column_groups]
     if feature_profile in RAW_FRAME_PROFILES:
         columns.extend([column for column in raw_columns if column in column_groups])
@@ -548,6 +600,8 @@ def _selected_columns_for_profile(
         columns.extend([column for column in sector_relative_columns if column in column_groups])
     if feature_profile in REGIME_PROFILES:
         columns.extend([column for column in regime_columns if column in column_groups])
+    if feature_profile in LOCAL_STATE_PROFILES:
+        columns.extend([column for column in local_state_columns if column in column_groups])
     if feature_profile in NO_ALPHA_CONTRACT_PROFILES:
         columns = [column for column in columns if not _alpha_dependent_column(column)]
         column_groups = {column: group for column, group in column_groups.items() if column in columns}
@@ -572,6 +626,7 @@ def _manifest_for_columns(
         "sector_context": 0,
         "sector_relative_context": 0,
         "regime_context": 0,
+        "local_state_context": 0,
         "alpha_prior": 0,
         "history_quality": 0,
     }
@@ -593,6 +648,7 @@ def _manifest_for_columns(
         "sector_context_feature_count": int(group_counts["sector_context"]),
         "sector_relative_context_feature_count": int(group_counts["sector_relative_context"]),
         "regime_context_feature_count": int(group_counts["regime_context"]),
+        "local_state_context_feature_count": int(group_counts["local_state_context"]),
         "alpha_prior_feature_count": int(group_counts["alpha_prior"]),
         "history_quality_feature_count": int(group_counts["history_quality"]),
         "source_sector_board_view_id": str(source_sector_board_view_id or ""),
@@ -621,7 +677,18 @@ def _cap_feature_columns(
         priority_groups.add("sector_relative_context")
     if feature_profile in REGIME_PROFILES:
         priority_groups.add("regime_context")
-    priority_order = ["raw_kline", "history_quality", "market_context", "peer_context", "sector_context", "sector_relative_context", "regime_context"]
+    if feature_profile in LOCAL_STATE_PROFILES:
+        priority_groups.add("local_state_context")
+    priority_order = [
+        "raw_kline",
+        "local_state_context",
+        "history_quality",
+        "market_context",
+        "peer_context",
+        "sector_context",
+        "sector_relative_context",
+        "regime_context",
+    ]
     priority_columns = [
         column
         for group in priority_order
@@ -688,6 +755,7 @@ def build_forecast_feature_panels(
     sector_frames = _sector_context_feature_frames(prepared) if profile in SECTOR_CONTEXT_PROFILES else {}
     sector_relative_frames = _sector_relative_feature_frames(prepared) if profile in SECTOR_RELATIVE_PROFILES else {}
     regime_frames = _regime_feature_frames(prepared, raw_frames, feature_profile=profile) if profile in REGIME_PROFILES else {}
+    local_state_frames = _local_state_feature_frames(prepared) if profile in LOCAL_STATE_PROFILES else {}
     all_columns, column_groups = _selected_columns_for_profile(
         state_columns=state_columns,
         raw_columns=list(raw_frames),
@@ -695,6 +763,7 @@ def build_forecast_feature_panels(
         sector_columns=list(sector_frames),
         sector_relative_columns=list(sector_relative_frames),
         regime_columns=list(regime_frames),
+        local_state_columns=list(local_state_frames),
         history_columns=list(history_frames),
         feature_profile=profile,
     )
@@ -734,6 +803,8 @@ def build_forecast_feature_panels(
                 extra_parts[column] = sector_relative_frames[column].loc[dt].reindex(universe)
             elif column in regime_frames:
                 extra_parts[column] = regime_frames[column].loc[dt].reindex(universe)
+            elif column in local_state_frames:
+                extra_parts[column] = local_state_frames[column].loc[dt].reindex(universe)
             else:
                 extra_parts[column] = pd.Series(np.nan, index=universe, dtype=float)
         panel = pd.DataFrame(extra_parts, index=universe).apply(pd.to_numeric, errors="coerce")
@@ -840,6 +911,7 @@ def build_forecast_feature_store(
     sector_frames = _sector_context_feature_frames(prepared) if profile in SECTOR_CONTEXT_PROFILES else {}
     sector_relative_frames = _sector_relative_feature_frames(prepared) if profile in SECTOR_RELATIVE_PROFILES else {}
     regime_frames = _regime_feature_frames(prepared, raw_frames, feature_profile=profile) if profile in REGIME_PROFILES else {}
+    local_state_frames = _local_state_feature_frames(prepared) if profile in LOCAL_STATE_PROFILES else {}
     all_columns, column_groups = _selected_columns_for_profile(
         state_columns=state_columns,
         raw_columns=list(raw_frames),
@@ -847,6 +919,7 @@ def build_forecast_feature_store(
         sector_columns=list(sector_frames),
         sector_relative_columns=list(sector_relative_frames),
         regime_columns=list(regime_frames),
+        local_state_columns=list(local_state_frames),
         history_columns=list(history_frames),
         feature_profile=profile,
     )
@@ -876,6 +949,7 @@ def build_forecast_feature_store(
         and column not in sector_frames
         and column not in sector_relative_frames
         and column not in regime_frames
+        and column not in local_state_frames
         for column in selected_columns
     )
     empty_state = pd.DataFrame(index=universe)
@@ -909,6 +983,8 @@ def build_forecast_feature_store(
                 extra_parts[column] = sector_relative_frames[column].loc[dt].reindex(universe)
             elif column in regime_frames:
                 extra_parts[column] = regime_frames[column].loc[dt].reindex(universe)
+            elif column in local_state_frames:
+                extra_parts[column] = local_state_frames[column].loc[dt].reindex(universe)
             else:
                 extra_parts[column] = pd.Series(np.nan, index=universe, dtype=float)
         values = pd.DataFrame(extra_parts, index=universe).reindex(columns=selected_columns).to_numpy(dtype=np.float32)

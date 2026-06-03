@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,7 +13,8 @@ from typing import Any
 import pandas as pd
 
 from .baostock_source import BaostockSource, BaostockSourceConfig, BaostockSourceError
-from .dataset_v2 import DEFAULT_V2_SNAPSHOT_ROOT
+from .dataset_v2 import DAILY_SIZE_COLUMNS, DEFAULT_V2_SNAPSHOT_ROOT
+from .size_source import fetch_tushare_daily_size_cache, load_cached_daily_size, normalize_trade_dates
 from .universe import is_sh_sz_mainboard_a_share
 
 
@@ -23,6 +25,7 @@ PIT_BIAS_STATEMENT = (
     "coverage and historical data quality."
 )
 BAOSTOCK_DAILY_FIELDS = ("date", "code", "open", "high", "low", "close", "volume", "amount", "tradestatus", "isST")
+BAOSTOCK_DAILY_METRICS_FIELDS = ("date", "code", "turn", "pctChg", "peTTM", "pbMRQ", "psTTM", "pcfNcfTTM")
 SECURITY_MASTER_COLUMNS = [
     "code",
     "baostock_code",
@@ -37,6 +40,16 @@ SECURITY_MASTER_COLUMNS = [
 ]
 RAW_STOCK_LIST_COLUMNS = ["date", "code", "name_on_date", "query_all_trade_status"]
 DAILY_BARS_COLUMNS = [*BAOSTOCK_DAILY_FIELDS, "source"]
+DAILY_METRICS_COLUMNS = [*BAOSTOCK_DAILY_METRICS_FIELDS, "source"]
+STOCK_INDUSTRY_COLUMNS = [
+    "date",
+    "code",
+    "name_on_date",
+    "industry",
+    "industry_classification",
+    "industry_update_date",
+    "source",
+]
 DAILY_UNIVERSE_COLUMNS = [
     "date",
     "code",
@@ -65,9 +78,15 @@ class PitBuildConfig:
     command: str = "build"
     snapshot_id: str = ""
     year: int = 0
+    trade_dates: tuple[str, ...] = ()
     force_refresh: bool = False
     request_interval_seconds: float = 0.0
     discovery_mode: str = "stock-basic"
+    include_industry: bool = False
+    industry_frequency: str = "daily"
+    include_metrics: bool = False
+    include_size: bool = False
+    size_token: str | None = None
 
 
 def _cache_root(output_root: Path) -> Path:
@@ -80,6 +99,24 @@ def _stock_list_cache_path(output_root: Path, year: int) -> Path:
 
 def _daily_bars_cache_path(output_root: Path, year: int) -> Path:
     return _cache_root(output_root) / "daily_bars" / f"year={year}.parquet"
+
+
+def _daily_metrics_cache_path(
+    output_root: Path,
+    year: int,
+    config: PitBuildConfig | None = None,
+    start_date: str = "",
+    end_date: str = "",
+) -> Path:
+    root = _cache_root(output_root) / "daily_metrics"
+    scope = _sample_cache_scope(config, year=year, start_date=start_date, end_date=end_date)
+    if scope:
+        return root / "samples" / scope / f"year={year}.parquet"
+    return root / f"year={year}.parquet"
+
+
+def _stock_industry_cache_path(output_root: Path, year: int) -> Path:
+    return _cache_root(output_root) / "stock_industry" / f"year={year}.parquet"
 
 
 def _security_master_cache_path(output_root: Path) -> Path:
@@ -102,12 +139,41 @@ def _progress_path(output_root: Path, year: int) -> Path:
     return _cache_root(output_root) / "progress" / f"year={year}.json"
 
 
+def _daily_metrics_progress_path(
+    output_root: Path,
+    year: int,
+    config: PitBuildConfig | None = None,
+    start_date: str = "",
+    end_date: str = "",
+) -> Path:
+    root = _cache_root(output_root) / "progress" / "daily_metrics"
+    scope = _sample_cache_scope(config, year=year, start_date=start_date, end_date=end_date)
+    if scope:
+        return root / "samples" / scope / f"year={year}.json"
+    return root / f"year={year}.json"
+
+
 def _monthly_stock_list_cache_path(output_root: Path, year: int, month: int) -> Path:
     return _cache_root(output_root) / "daily_stock_lists" / "parts" / f"year={year}" / f"month={month:02d}.parquet"
 
 
 def _daily_bars_part_cache_path(output_root: Path, year: int, batch_index: int) -> Path:
     return _cache_root(output_root) / "daily_bars" / "parts" / f"year={year}" / f"batch={batch_index:04d}.parquet"
+
+
+def _daily_metrics_part_cache_path(
+    output_root: Path,
+    year: int,
+    batch_index: int,
+    config: PitBuildConfig | None = None,
+    start_date: str = "",
+    end_date: str = "",
+) -> Path:
+    return _daily_metrics_parts_dir(output_root, year, config=config, start_date=start_date, end_date=end_date) / f"batch={batch_index:04d}.parquet"
+
+
+def _monthly_stock_industry_cache_path(output_root: Path, year: int, month: int) -> Path:
+    return _cache_root(output_root) / "stock_industry" / "parts" / f"year={year}" / f"month={month:02d}.parquet"
 
 
 def _stock_list_meta_path(output_root: Path, year: int) -> Path:
@@ -118,6 +184,53 @@ def _daily_bars_meta_path(output_root: Path, year: int) -> Path:
     return _cache_root(output_root) / "cache_meta" / "daily_bars" / f"year={year}.json"
 
 
+def _daily_metrics_meta_path(
+    output_root: Path,
+    year: int,
+    config: PitBuildConfig | None = None,
+    start_date: str = "",
+    end_date: str = "",
+) -> Path:
+    root = _cache_root(output_root) / "cache_meta" / "daily_metrics"
+    scope = _sample_cache_scope(config, year=year, start_date=start_date, end_date=end_date)
+    if scope:
+        return root / "samples" / scope / f"year={year}.json"
+    return root / f"year={year}.json"
+
+
+def _daily_metrics_parts_dir(
+    output_root: Path,
+    year: int,
+    config: PitBuildConfig | None = None,
+    start_date: str = "",
+    end_date: str = "",
+) -> Path:
+    root = _cache_root(output_root) / "daily_metrics" / "parts"
+    scope = _sample_cache_scope(config, year=year, start_date=start_date, end_date=end_date)
+    if scope:
+        return root / "samples" / scope / f"year={year}"
+    return root / f"year={year}"
+
+
+def _sample_cache_scope(config: PitBuildConfig | None, *, year: int, start_date: str, end_date: str) -> str:
+    if config is None or (not config.symbols and config.max_symbols <= 0):
+        return ""
+    payload = {
+        "year": year,
+        "start_date": start_date,
+        "end_date": end_date,
+        "symbols": sorted(config.symbols),
+        "max_symbols": int(config.max_symbols),
+        "discovery_mode": config.discovery_mode,
+    }
+    digest = hashlib.sha1(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+    return f"sample={digest}"
+
+
+def _stock_industry_meta_path(output_root: Path, year: int) -> Path:
+    return _cache_root(output_root) / "cache_meta" / "stock_industry" / f"year={year}.json"
+
+
 def _config_cache_signature(config: PitBuildConfig, *, year: int, start_date: str, end_date: str) -> dict[str, Any]:
     return {
         "year": year,
@@ -126,6 +239,13 @@ def _config_cache_signature(config: PitBuildConfig, *, year: int, start_date: st
         "symbols": sorted(config.symbols),
         "max_symbols": int(config.max_symbols),
         "discovery_mode": config.discovery_mode,
+    }
+
+
+def _industry_cache_signature(config: PitBuildConfig, *, year: int, start_date: str, end_date: str) -> dict[str, Any]:
+    return {
+        **_config_cache_signature(config, year=year, start_date=start_date, end_date=end_date),
+        "industry_frequency": config.industry_frequency,
     }
 
 
@@ -152,13 +272,47 @@ def _is_cache_compatible(meta: dict[str, Any], config: PitBuildConfig, *, year: 
     cached_end = pd.Timestamp(meta.get("end_date", "1900-01-01"))
     if cached_start > pd.Timestamp(start_date) or cached_end < pd.Timestamp(end_date):
         return False
-    if sorted(meta.get("symbols", [])) != sorted(config.symbols):
+    if not _symbols_cache_compatible(meta.get("symbols", []), config.symbols):
         return False
-    if int(meta.get("max_symbols", 0) or 0) != int(config.max_symbols):
+    if not _max_symbols_cache_compatible(int(meta.get("max_symbols", 0) or 0), int(config.max_symbols)):
         return False
     if str(meta.get("discovery_mode", "")) != config.discovery_mode:
         return False
     return True
+
+
+def _symbols_cache_compatible(cached_symbols: Any, requested_symbols: tuple[str, ...]) -> bool:
+    cached = set(str(symbol) for symbol in (cached_symbols or []))
+    requested = set(str(symbol) for symbol in requested_symbols)
+    if not requested:
+        return not cached
+    if not cached:
+        return True
+    return requested.issubset(cached)
+
+
+def _max_symbols_cache_compatible(cached_max_symbols: int, requested_max_symbols: int) -> bool:
+    if requested_max_symbols <= 0:
+        return cached_max_symbols <= 0
+    if cached_max_symbols <= 0:
+        return True
+    return cached_max_symbols >= requested_max_symbols
+
+
+def _codes_cache_compatible(cached_codes: Any, expected_codes: list[str]) -> bool:
+    cached = set(str(code) for code in (cached_codes or []))
+    expected = set(str(code) for code in expected_codes)
+    if not expected:
+        return True
+    if not cached:
+        return False
+    return expected.issubset(cached)
+
+
+def _is_industry_cache_compatible(meta: dict[str, Any], config: PitBuildConfig, *, year: int, start_date: str, end_date: str) -> bool:
+    if not _is_cache_compatible(meta, config, year=year, start_date=start_date, end_date=end_date):
+        return False
+    return str(meta.get("industry_frequency", "daily")) == config.industry_frequency
 
 
 def _cache_compat_summary(meta: dict[str, Any], compatible: bool) -> dict[str, Any]:
@@ -201,8 +355,28 @@ def _write_progress(output_root: Path, year: int, progress: dict[str, Any]) -> N
     path.write_text(json.dumps(progress, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def _read_daily_metrics_progress(config: PitBuildConfig, year: int, start_date: str, end_date: str) -> dict[str, Any]:
+    path = _daily_metrics_progress_path(config.output_root, year, config=config, start_date=start_date, end_date=end_date)
+    if not path.exists():
+        return _new_progress(year)
+    return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
+def _write_daily_metrics_progress(config: PitBuildConfig, year: int, start_date: str, end_date: str, progress: dict[str, Any]) -> None:
+    path = _daily_metrics_progress_path(config.output_root, year, config=config, start_date=start_date, end_date=end_date)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(progress, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def _new_progress(year: int, signature: dict[str, Any] | None = None) -> dict[str, Any]:
-    progress = {"year": year, "completed_stock_dates": [], "completed_bar_codes": [], "failures": []}
+    progress = {
+        "year": year,
+        "completed_stock_dates": [],
+        "completed_bar_codes": [],
+        "completed_metric_codes": [],
+        "completed_industry_dates": [],
+        "failures": [],
+    }
     if signature is not None:
         progress["signature"] = signature
     return progress
@@ -626,7 +800,7 @@ def fetch_daily_bars(
     meta = _read_json_or_empty(meta_path)
     compatible = _is_cache_compatible(meta, config, year=year, start_date=start_date, end_date=end_date)
     expected_codes = sorted(set(codes))
-    if compatible and sorted(meta.get("codes", [])) != expected_codes:
+    if compatible and not _codes_cache_compatible(meta.get("codes", []), expected_codes):
         compatible = False
     if path.exists() and not config.force_refresh:
         if compatible:
@@ -736,6 +910,326 @@ def normalize_daily_bars(raw: pd.DataFrame) -> pd.DataFrame:
     frame["isST"] = frame["isST"].fillna("0").astype(str)
     frame["source"] = "baostock"
     return frame[DAILY_BARS_COLUMNS]
+
+
+def fetch_daily_metrics(
+    source: BaostockSource,
+    codes: list[str],
+    *,
+    config: PitBuildConfig,
+    year: int,
+    start_date: str,
+    end_date: str,
+) -> tuple[pd.DataFrame, list[dict[str, Any]], dict[str, int]]:
+    path = _daily_metrics_cache_path(config.output_root, year, config=config, start_date=start_date, end_date=end_date)
+    meta_path = _daily_metrics_meta_path(config.output_root, year, config=config, start_date=start_date, end_date=end_date)
+    meta = _read_json_or_empty(meta_path)
+    compatible = _is_cache_compatible(meta, config, year=year, start_date=start_date, end_date=end_date)
+    expected_codes = sorted(set(codes))
+    if compatible and not _codes_cache_compatible(meta.get("codes", []), expected_codes):
+        compatible = False
+    if path.exists() and not config.force_refresh:
+        if compatible:
+            frame = pd.read_parquet(path)
+            frame = _filter_dates(frame, start_date, end_date)
+            if config.symbols:
+                frame = frame[frame["code"].isin(set(config.symbols))].reset_index(drop=True)
+            return frame, [], {
+                "daily_metrics_cache_hit": 1,
+                "daily_metrics_cache_miss": 0,
+                **_cache_compat_summary(meta, compatible),
+            }
+        path.unlink(missing_ok=True)
+
+    parts: list[pd.DataFrame] = []
+    failures: list[dict[str, Any]] = []
+    signature = _config_cache_signature(config, year=year, start_date=start_date, end_date=end_date)
+    progress = _new_progress(year, signature) if config.force_refresh else _read_daily_metrics_progress(config, year, start_date, end_date)
+    resume_parts = not config.force_refresh and _progress_compatible(progress, config, year=year, start_date=start_date, end_date=end_date)
+    if not resume_parts:
+        progress = _new_progress(year, signature)
+    completed_codes = set(progress.get("completed_metric_codes", []))
+    batch_size = 50
+    for batch_index, start in enumerate(range(0, len(codes), batch_size)):
+        batch_codes = codes[start : start + batch_size]
+        part_path = _daily_metrics_part_cache_path(config.output_root, year, batch_index, config=config, start_date=start_date, end_date=end_date)
+        existing_part = (
+            _read_parquet_or_empty(part_path, DAILY_METRICS_COLUMNS)
+            if resume_parts
+            else pd.DataFrame(columns=DAILY_METRICS_COLUMNS)
+        )
+        batch_parts: list[pd.DataFrame] = [existing_part] if not existing_part.empty else []
+        for code in batch_codes:
+            if code in completed_codes and not existing_part.empty and code in set(existing_part["code"].astype(str)):
+                continue
+            progress["active_metric_code"] = code
+            _write_daily_metrics_progress(config, year, start_date, end_date, progress)
+            try:
+                raw = source.query_daily_metrics(_std_to_baostock_code(code), start_date, end_date)
+            except BaostockSourceError as exc:
+                failure = {"year": year, "code": code, "kind": "daily_metrics_fetch_error", "error": str(exc)}
+                failures.append(failure)
+                progress["failures"] = [*progress.get("failures", []), failure]
+                progress["active_metric_code"] = ""
+                _write_daily_metrics_progress(config, year, start_date, end_date, progress)
+                continue
+            if raw.empty:
+                failure = {"year": year, "code": code, "kind": "empty_daily_metrics"}
+                failures.append(failure)
+                progress["failures"] = [*progress.get("failures", []), failure]
+                progress["active_metric_code"] = ""
+                _write_daily_metrics_progress(config, year, start_date, end_date, progress)
+                continue
+            frame = normalize_daily_metrics(raw)
+            batch_parts.append(frame)
+            batch_output = _concat(batch_parts, DAILY_METRICS_COLUMNS).drop_duplicates(["date", "code"])
+            if not batch_output.empty:
+                _write_parquet(part_path, batch_output)
+            progress["completed_metric_codes"] = sorted(set(progress.get("completed_metric_codes", [])) | {code})
+            progress["active_metric_code"] = ""
+            _write_daily_metrics_progress(config, year, start_date, end_date, progress)
+        batch_output = _concat(batch_parts, DAILY_METRICS_COLUMNS).drop_duplicates(["date", "code"])
+        if not batch_output.empty:
+            _write_parquet(part_path, batch_output)
+            parts.append(batch_output)
+
+    part_paths = (
+        []
+        if not resume_parts
+        else sorted(_daily_metrics_parts_dir(config.output_root, year, config=config, start_date=start_date, end_date=end_date).glob("batch=*.parquet"))
+    )
+    part_frames = [_read_parquet_or_empty(part_path, DAILY_METRICS_COLUMNS) for part_path in part_paths]
+    output = _concat([*part_frames, *parts], DAILY_METRICS_COLUMNS).drop_duplicates(["date", "code"])
+    output = _filter_dates(output, start_date, end_date)
+    if codes:
+        output = output[output["code"].isin(set(codes))].reset_index(drop=True)
+    _write_parquet(path, output)
+    _write_json(
+        meta_path,
+        {
+            **_config_cache_signature(config, year=year, start_date=start_date, end_date=end_date),
+            "complete": True,
+            "codes": expected_codes,
+            "row_count": int(len(output)),
+            "code_count": int(output["code"].nunique()) if not output.empty else 0,
+            "failure_count": int(len(failures)),
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        },
+    )
+    return output, failures, {
+        "daily_metrics_cache_hit": 0,
+        "daily_metrics_cache_miss": 1,
+        **_cache_compat_summary(meta, compatible),
+    }
+
+
+def normalize_daily_metrics(raw: pd.DataFrame) -> pd.DataFrame:
+    frame = raw.copy()
+    for column in BAOSTOCK_DAILY_METRICS_FIELDS:
+        if column not in frame.columns:
+            frame[column] = pd.NA
+    frame["code"] = frame["code"].map(_baostock_to_std_code)
+    frame["date"] = pd.to_datetime(frame["date"])
+    for field in ("turn", "pctChg", "peTTM", "pbMRQ", "psTTM", "pcfNcfTTM"):
+        frame[field] = pd.to_numeric(frame[field], errors="coerce")
+    frame["source"] = "baostock"
+    return frame[DAILY_METRICS_COLUMNS]
+
+
+def normalize_stock_industry(raw: pd.DataFrame, query_date: str) -> pd.DataFrame:
+    frame = raw.copy()
+    for column in ("updateDate", "code", "code_name", "industry", "industryClassification"):
+        if column not in frame.columns:
+            frame[column] = pd.NA
+    if frame.empty:
+        return pd.DataFrame(columns=STOCK_INDUSTRY_COLUMNS)
+    frame["date"] = pd.Timestamp(query_date)
+    frame["code"] = frame["code"].map(_baostock_to_std_code)
+    frame["name_on_date"] = frame["code_name"].fillna("").astype(str)
+    frame["industry"] = frame["industry"].fillna("").astype(str)
+    frame["industry_classification"] = frame["industryClassification"].fillna("").astype(str)
+    frame["industry_update_date"] = frame["updateDate"].map(_normalize_date)
+    frame["source"] = "baostock"
+    return frame[STOCK_INDUSTRY_COLUMNS]
+
+
+def industry_query_dates(stock_lists: pd.DataFrame, frequency: str) -> list[pd.Timestamp]:
+    if stock_lists.empty:
+        return []
+    dates = pd.Series(pd.to_datetime(stock_lists["date"]).dropna().unique()).sort_values().reset_index(drop=True)
+    if frequency == "daily":
+        return [pd.Timestamp(date) for date in dates]
+    if frequency == "month-start":
+        grouped = dates.groupby(dates.dt.to_period("M")).min()
+        return [pd.Timestamp(date) for date in grouped.tolist()]
+    raise ValueError(f"unsupported industry_frequency: {frequency}")
+
+
+def expand_stock_industry_observations(
+    observations: pd.DataFrame,
+    stock_lists: pd.DataFrame,
+    *,
+    frequency: str,
+) -> pd.DataFrame:
+    observations = _ensure_columns(observations, STOCK_INDUSTRY_COLUMNS)
+    stock_lists = _ensure_columns(stock_lists, RAW_STOCK_LIST_COLUMNS)
+    if frequency == "daily" or observations.empty or stock_lists.empty:
+        return _filter_stock_industry_to_stock_lists(observations, stock_lists)
+    keys = stock_lists[["date", "code", "name_on_date"]].drop_duplicates().copy()
+    keys["date"] = pd.to_datetime(keys["date"]).astype("datetime64[ns]")
+    obs = observations.copy()
+    obs["date"] = pd.to_datetime(obs["date"]).astype("datetime64[ns]")
+    parts: list[pd.DataFrame] = []
+    obs_by_code = {code: frame.sort_values("date") for code, frame in obs.groupby("code")}
+    for code, code_keys in keys.sort_values(["code", "date"]).groupby("code"):
+        code_obs = obs_by_code.get(code)
+        if code_obs is None or code_obs.empty:
+            empty = code_keys.copy()
+            empty["industry"] = ""
+            empty["industry_classification"] = ""
+            empty["industry_update_date"] = ""
+            empty["source"] = ""
+            parts.append(empty[STOCK_INDUSTRY_COLUMNS])
+            continue
+        merged = pd.merge_asof(
+            code_keys.sort_values("date"),
+            code_obs[["date", "industry", "industry_classification", "industry_update_date", "source"]].sort_values("date"),
+            on="date",
+            direction="backward",
+        )
+        merged["code"] = code
+        merged["industry"] = merged["industry"].fillna("")
+        merged["industry_classification"] = merged["industry_classification"].fillna("")
+        merged["industry_update_date"] = merged["industry_update_date"].fillna("")
+        merged["source"] = merged["source"].where(merged["source"].fillna("") == "", merged["source"].astype(str) + f":{frequency}-ffill")
+        merged["source"] = merged["source"].fillna("")
+        parts.append(merged[STOCK_INDUSTRY_COLUMNS])
+    return _concat(parts, STOCK_INDUSTRY_COLUMNS).sort_values(["date", "code"]).reset_index(drop=True)
+
+
+def fetch_stock_industry(
+    source: BaostockSource,
+    stock_lists: pd.DataFrame,
+    *,
+    config: PitBuildConfig,
+    year: int,
+    start_date: str,
+    end_date: str,
+) -> tuple[pd.DataFrame, list[dict[str, Any]], dict[str, int]]:
+    path = _stock_industry_cache_path(config.output_root, year)
+    meta_path = _stock_industry_meta_path(config.output_root, year)
+    meta = _read_json_or_empty(meta_path)
+    compatible = _is_industry_cache_compatible(meta, config, year=year, start_date=start_date, end_date=end_date)
+    if path.exists() and not config.force_refresh:
+        if compatible:
+            frame = _filter_stock_industry_to_stock_lists(pd.read_parquet(path), stock_lists)
+            return _filter_dates(frame, start_date, end_date), [], {
+                "stock_industry_cache_hit": 1,
+                "stock_industry_cache_miss": 0,
+                **_cache_compat_summary(meta, compatible),
+            }
+        path.unlink(missing_ok=True)
+
+    stock_lists = _filter_dates(_ensure_columns(stock_lists, RAW_STOCK_LIST_COLUMNS), start_date, end_date)
+    if stock_lists.empty:
+        return pd.DataFrame(columns=STOCK_INDUSTRY_COLUMNS), [], {
+            "stock_industry_cache_hit": 0,
+            "stock_industry_cache_miss": 1,
+            "stock_industry_empty_stock_lists": 1,
+            **_cache_compat_summary(meta, compatible),
+        }
+
+    failures: list[dict[str, Any]] = []
+    parts: list[pd.DataFrame] = []
+    signature = _config_cache_signature(config, year=year, start_date=start_date, end_date=end_date)
+    progress = _new_progress(year, signature) if config.force_refresh else _read_progress(config.output_root, year)
+    resume_parts = not config.force_refresh and _progress_compatible(progress, config, year=year, start_date=start_date, end_date=end_date)
+    if not resume_parts:
+        progress = _new_progress(year, signature)
+    completed_dates = set(progress.get("completed_industry_dates", []))
+    touched_months: set[int] = set()
+    for date in industry_query_dates(stock_lists, config.industry_frequency):
+        date_ts = pd.Timestamp(date)
+        date_str = date_ts.strftime("%Y-%m-%d")
+        month_path = _monthly_stock_industry_cache_path(config.output_root, year, date_ts.month)
+        if date_str in completed_dates and month_path.exists():
+            continue
+        progress["active_industry_date"] = date_str
+        _write_progress(config.output_root, year, progress)
+        try:
+            raw = source.query_stock_industry(date=date_str)
+        except BaostockSourceError as exc:
+            failure = {"year": year, "date": date_str, "kind": "industry_fetch_error", "error": str(exc)}
+            failures.append(failure)
+            progress["failures"] = [*progress.get("failures", []), failure]
+            progress["active_industry_date"] = ""
+            _write_progress(config.output_root, year, progress)
+            continue
+        if raw.empty:
+            failure = {"year": year, "date": date_str, "kind": "empty_stock_industry"}
+            failures.append(failure)
+            progress["failures"] = [*progress.get("failures", []), failure]
+            progress["active_industry_date"] = ""
+            _write_progress(config.output_root, year, progress)
+            continue
+        frame = normalize_stock_industry(raw, date_str)
+        frame = frame[frame["code"].map(is_sh_sz_mainboard_a_share)].reset_index(drop=True)
+        frame = _filter_stock_industry_to_stock_lists(frame, stock_lists)
+        existing_month = _read_parquet_or_empty(month_path, STOCK_INDUSTRY_COLUMNS) if resume_parts else pd.DataFrame(columns=STOCK_INDUSTRY_COLUMNS)
+        month_output = _concat([existing_month, frame], STOCK_INDUSTRY_COLUMNS).drop_duplicates(["date", "code"])
+        _write_parquet(month_path, month_output)
+        parts.append(frame)
+        touched_months.add(date_ts.month)
+        progress["completed_industry_dates"] = sorted(set(progress.get("completed_industry_dates", [])) | {date_str})
+        progress["active_industry_date"] = ""
+        _write_progress(config.output_root, year, progress)
+
+    months_to_read = sorted(touched_months) if config.force_refresh else list(range(1, 13))
+    month_parts = [
+        (
+            _read_parquet_or_empty(_monthly_stock_industry_cache_path(config.output_root, year, month), STOCK_INDUSTRY_COLUMNS)
+            if resume_parts
+            else pd.DataFrame(columns=STOCK_INDUSTRY_COLUMNS)
+        )
+        for month in months_to_read
+    ]
+    observations = _concat([*month_parts, *parts], STOCK_INDUSTRY_COLUMNS).drop_duplicates(["date", "code"])
+    observations = _filter_dates(observations, start_date, end_date)
+    output = expand_stock_industry_observations(
+        observations,
+        stock_lists,
+        frequency=config.industry_frequency,
+    )
+    _write_parquet(path, output)
+    _write_json(
+        meta_path,
+        {
+            **_industry_cache_signature(config, year=year, start_date=start_date, end_date=end_date),
+            "complete": True,
+            "row_count": int(len(output)),
+            "date_count": int(output["date"].nunique()) if not output.empty else 0,
+            "query_date_count": int(observations["date"].nunique()) if not observations.empty else 0,
+            "failure_count": int(len(failures)),
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        },
+    )
+    return output, failures, {
+        "stock_industry_cache_hit": 0,
+        "stock_industry_cache_miss": 1,
+        "stock_industry_failure_count": len(failures),
+        **_cache_compat_summary(meta, compatible),
+    }
+
+
+def _filter_stock_industry_to_stock_lists(stock_industry: pd.DataFrame, stock_lists: pd.DataFrame) -> pd.DataFrame:
+    stock_industry = _ensure_columns(stock_industry, STOCK_INDUSTRY_COLUMNS)
+    if stock_industry.empty or stock_lists.empty:
+        return stock_industry
+    keys = stock_lists[["date", "code"]].drop_duplicates().copy()
+    keys["date"] = pd.to_datetime(keys["date"]).astype("datetime64[ns]")
+    output = stock_industry.copy()
+    output["date"] = pd.to_datetime(output["date"]).astype("datetime64[ns]")
+    return output.merge(keys, on=["date", "code"], how="inner")[STOCK_INDUSTRY_COLUMNS].reset_index(drop=True)
 
 
 def build_daily_universe(
@@ -883,6 +1377,186 @@ def fetch_bars(config: PitBuildConfig) -> dict[str, Any]:
         return {"command": "fetch-bars", "years": summaries, "failure_count": len(all_failures), "failures": all_failures, "source_errors": source.errors}
 
 
+def fetch_industry(config: PitBuildConfig) -> dict[str, Any]:
+    with BaostockSource(_source_config(config)) as source:
+        years = [config.year] if config.year else _years_between(config.start_date, config.end_date)
+        all_failures: list[dict[str, Any]] = []
+        summaries: list[dict[str, Any]] = []
+        for year in years:
+            start, end = _year_bounds(year, config.start_date, config.end_date)
+            stock_lists = load_cached_stock_lists(config.output_root, [year], start, end, config=config)
+            if config.max_symbols > 0:
+                codes = sorted(stock_lists["code"].unique().tolist())[: config.max_symbols]
+                stock_lists = stock_lists[stock_lists["code"].isin(codes)].reset_index(drop=True)
+            if config.symbols:
+                stock_lists = stock_lists[stock_lists["code"].isin(set(config.symbols))].reset_index(drop=True)
+            industry, failures, cache = fetch_stock_industry(
+                source,
+                stock_lists,
+                config=config,
+                year=year,
+                start_date=start,
+                end_date=end,
+            )
+            all_failures.extend(failures)
+            summaries.append({"year": year, "dates": int(industry["date"].nunique()) if not industry.empty else 0, "rows": len(industry), "failures": len(failures), **cache})
+        return {
+            "command": "fetch-industry",
+            "years": summaries,
+            "failure_count": len(all_failures),
+            "failures": all_failures,
+            "source_errors": source.errors,
+        }
+
+
+def fetch_metrics(config: PitBuildConfig) -> dict[str, Any]:
+    with BaostockSource(_source_config(config)) as source:
+        years = [config.year] if config.year else _years_between(config.start_date, config.end_date)
+        all_failures: list[dict[str, Any]] = []
+        summaries: list[dict[str, Any]] = []
+        for year in years:
+            start, end = _year_bounds(year, config.start_date, config.end_date)
+            stock_lists = load_cached_stock_lists(config.output_root, [year], start, end, config=config)
+            codes = sorted(stock_lists["code"].unique().tolist())
+            if config.max_symbols > 0:
+                codes = codes[: config.max_symbols]
+            if config.symbols:
+                codes = [code for code in codes if code in set(config.symbols)]
+            metrics, failures, cache = fetch_daily_metrics(source, codes, config=config, year=year, start_date=start, end_date=end)
+            all_failures.extend(failures)
+            summaries.append({"year": year, "codes": len(codes), "rows": len(metrics), "failures": len(failures), **cache})
+        return {
+            "command": "fetch-metrics",
+            "years": summaries,
+            "failure_count": len(all_failures),
+            "failures": all_failures,
+            "source_errors": source.errors,
+        }
+
+
+def fetch_size(config: PitBuildConfig) -> dict[str, Any]:
+    """Fetch/cache external daily size fields without assembling a snapshot."""
+
+    years = [config.year] if config.year else _years_between(config.start_date, config.end_date)
+    requested_trade_dates = set(normalize_trade_dates(config.trade_dates)) if config.trade_dates else set()
+    cached_trade_dates = _cached_trade_dates_for_size(config)
+    summaries: list[dict[str, Any]] = []
+    all_failures: list[dict[str, Any]] = []
+
+    for year in years:
+        start, end = _year_bounds(year, config.start_date, config.end_date)
+        trade_dates = _select_size_trade_dates(
+            year=year,
+            start_date=start,
+            end_date=end,
+            requested_trade_dates=requested_trade_dates,
+            cached_trade_dates=cached_trade_dates,
+            output_root=config.output_root,
+        )
+        stock_lists = load_cached_stock_lists(config.output_root, [year], start, end, config=None)
+        codes = sorted(stock_lists["code"].unique().tolist()) if not stock_lists.empty else sorted(config.symbols)
+        if config.max_symbols > 0:
+            codes = codes[: config.max_symbols]
+        if config.symbols:
+            codes = [code for code in codes if code in set(config.symbols)]
+        if not codes and config.symbols:
+            codes = sorted(config.symbols)
+        if not trade_dates:
+            failure = {"year": year, "trade_date": "", "error_type": "missing_trade_dates", "message": "No trade dates found from --trade-dates, trade_dates cache, or daily_stock_lists cache."}
+            all_failures.append(failure)
+            summaries.append(
+                {
+                    "command": "fetch-size",
+                    "source": "tushare.daily_basic",
+                    "status": "failed",
+                    "year": year,
+                    "rows": 0,
+                    "date_count": 0,
+                    "code_count": len(codes),
+                    "failure_count": 1,
+                    "failures": [failure],
+                    "cache_hit": 0,
+                    "cache_miss": 0,
+                }
+            )
+            continue
+        summary = fetch_tushare_daily_size_cache(
+            output_root=config.output_root,
+            year=year,
+            trade_dates=trade_dates,
+            start_date=start,
+            end_date=end,
+            symbols=codes,
+            token=config.size_token,
+            force_refresh=config.force_refresh,
+            request_interval_seconds=config.request_interval_seconds,
+        )
+        summaries.append(summary)
+        all_failures.extend(summary.get("failures", []))
+
+    if not summaries:
+        status = "failed"
+    elif all(item.get("status") == "cache_hit" for item in summaries):
+        status = "cache_hit"
+    elif all(item.get("status") == "skipped" for item in summaries):
+        status = "skipped"
+    elif any(item.get("status") == "failed" for item in summaries):
+        status = "failed"
+    elif any(item.get("status") in {"partial", "skipped"} for item in summaries):
+        status = "partial"
+    else:
+        status = "passed"
+    return {
+        "command": "fetch-size",
+        "source": "tushare.daily_basic",
+        "status": status,
+        "years": summaries,
+        "failure_count": len(all_failures),
+        "failures": all_failures,
+    }
+
+
+def _cached_trade_dates_for_size(config: PitBuildConfig) -> list[str]:
+    trade_dates = _filter_dates(
+        _read_parquet_or_empty(_trade_dates_cache_path(config.output_root), ["date", "is_trading_day"]),
+        config.start_date,
+        config.end_date,
+    )
+    if not trade_dates.empty:
+        return pd.to_datetime(trade_dates["date"]).dt.strftime("%Y%m%d").sort_values().drop_duplicates().tolist()
+    stock_lists = load_cached_stock_lists(config.output_root, _years_between(config.start_date, config.end_date), config.start_date, config.end_date, config=None)
+    if stock_lists.empty:
+        return []
+    return pd.to_datetime(stock_lists["date"]).dt.strftime("%Y%m%d").sort_values().drop_duplicates().tolist()
+
+
+def _select_size_trade_dates(
+    *,
+    year: int,
+    start_date: str,
+    end_date: str,
+    requested_trade_dates: set[str],
+    cached_trade_dates: list[str],
+    output_root: Path,
+) -> list[str]:
+    if requested_trade_dates:
+        source = sorted(requested_trade_dates)
+    else:
+        source = cached_trade_dates
+    selected = [
+        item
+        for item in normalize_trade_dates(source)
+        if pd.Timestamp(start_date) <= pd.Timestamp(item) <= pd.Timestamp(end_date)
+        and pd.Timestamp(item).year == int(year)
+    ]
+    if selected:
+        return selected
+    stock_lists = _filter_dates(_read_parquet_or_empty(_stock_list_cache_path(output_root, year), RAW_STOCK_LIST_COLUMNS), start_date, end_date)
+    if stock_lists.empty:
+        return []
+    return pd.to_datetime(stock_lists["date"]).dt.strftime("%Y%m%d").sort_values().drop_duplicates().tolist()
+
+
 def build_year(config: PitBuildConfig) -> dict[str, Any]:
     year = config.year or pd.Timestamp(config.start_date).year
     start, end = _year_bounds(year, config.start_date, config.end_date)
@@ -895,9 +1569,15 @@ def build_year(config: PitBuildConfig) -> dict[str, Any]:
         command="build-year",
         snapshot_id=config.snapshot_id,
         year=year,
+        trade_dates=config.trade_dates,
         force_refresh=config.force_refresh,
         request_interval_seconds=config.request_interval_seconds,
         discovery_mode=config.discovery_mode,
+        include_industry=config.include_industry,
+        industry_frequency=config.industry_frequency,
+        include_metrics=config.include_metrics,
+        include_size=config.include_size,
+        size_token=config.size_token,
     )
     with BaostockSource(_source_config(year_config)) as source:
         trade_dates, trade_cache = _trade_dates(source, year_config)
@@ -926,16 +1606,60 @@ def build_year(config: PitBuildConfig) -> dict[str, Any]:
         codes = sorted(stock_lists["code"].unique().tolist())
         daily_bars, failures, bar_cache = fetch_daily_bars(source, codes, config=year_config, year=year, start_date=start, end_date=end)
         _assert_failure_rate(year, len(codes), failures)
+        daily_metrics = pd.DataFrame(columns=DAILY_METRICS_COLUMNS)
+        metrics_failures: list[dict[str, Any]] = []
+        metrics_cache: dict[str, Any] = {}
+        if year_config.include_metrics:
+            daily_metrics, metrics_failures, metrics_cache = fetch_daily_metrics(
+                source,
+                codes,
+                config=year_config,
+                year=year,
+                start_date=start,
+                end_date=end,
+            )
+            _assert_failure_rate(year, len(codes), metrics_failures)
+        stock_industry = pd.DataFrame(columns=STOCK_INDUSTRY_COLUMNS)
+        industry_failures: list[dict[str, Any]] = []
+        industry_cache: dict[str, Any] = {}
+        if year_config.include_industry:
+            stock_industry, industry_failures, industry_cache = fetch_stock_industry(
+                source,
+                stock_lists,
+                config=year_config,
+                year=year,
+                start_date=start,
+                end_date=end,
+            )
+        daily_size = (
+            load_cached_daily_size(year_config.output_root, [year], start, end, symbols=codes)
+            if year_config.include_size
+            else pd.DataFrame(columns=DAILY_SIZE_COLUMNS)
+        )
         manifest = assemble_snapshot_from_frames(
             config=year_config,
             trade_dates=trade_dates,
             security_master=security_master,
             stock_lists=stock_lists,
             daily_bars=daily_bars,
+            daily_metrics=daily_metrics,
+            stock_industry=stock_industry,
+            daily_size=daily_size,
             failures=failures,
             source_version=source.version,
             source_errors=source.errors,
-            extra_quality={**trade_cache, **basic_cache, **stock_cache, **bar_cache, **security_summary},
+            extra_quality={
+                **trade_cache,
+                **basic_cache,
+                **stock_cache,
+                **bar_cache,
+                **metrics_cache,
+                **industry_cache,
+                **security_summary,
+                "daily_metrics_failures": metrics_failures,
+                "stock_industry_failures": industry_failures,
+                "daily_size_rows": int(len(daily_size)),
+            },
         )
         return manifest
 
@@ -955,6 +1679,21 @@ def assemble(config: PitBuildConfig) -> dict[str, Any]:
     daily_bars = load_cached_daily_bars(config.output_root, years, config.start_date, config.end_date, config=config)
     if not stock_lists.empty:
         daily_bars = daily_bars[daily_bars["code"].isin(set(stock_lists["code"]))].reset_index(drop=True)
+    daily_metrics = (
+        load_cached_daily_metrics(config.output_root, years, config.start_date, config.end_date, config=config)
+        if config.include_metrics
+        else pd.DataFrame(columns=DAILY_METRICS_COLUMNS)
+    )
+    if not stock_lists.empty:
+        daily_metrics = daily_metrics[daily_metrics["code"].isin(set(stock_lists["code"]))].reset_index(drop=True)
+    stock_industry = load_cached_stock_industry(config.output_root, years, config.start_date, config.end_date, config=config)
+    stock_industry = _filter_stock_industry_to_stock_lists(stock_industry, stock_lists)
+    daily_size = (
+        load_cached_daily_size(config.output_root, years, config.start_date, config.end_date, symbols=sorted(stock_lists["code"].unique().tolist()))
+        if config.include_size
+        else pd.DataFrame(columns=DAILY_SIZE_COLUMNS)
+    )
+    daily_size = _filter_daily_size_to_stock_lists(daily_size, stock_lists)
     trade_dates = _repair_trade_dates_from_stock_lists(trade_dates, stock_lists, config.start_date, config.end_date)
     if trade_dates.empty:
         raise BaostockSourceError("cannot assemble: trade date cache is empty")
@@ -966,10 +1705,18 @@ def assemble(config: PitBuildConfig) -> dict[str, Any]:
         security_master=security_master,
         stock_lists=stock_lists,
         daily_bars=daily_bars,
+        daily_metrics=daily_metrics,
+        stock_industry=stock_industry,
+        daily_size=daily_size,
         failures=[],
         source_version="cache",
         source_errors=[],
-        extra_quality={"assembled_from_cache": 1},
+        extra_quality={
+            "assembled_from_cache": 1,
+            "stock_industry_rows": int(len(stock_industry)),
+            "daily_metrics_rows": int(len(daily_metrics)),
+            "daily_size_rows": int(len(daily_size)),
+        },
     )
 
 
@@ -1027,8 +1774,14 @@ def build_snapshot(config: PitBuildConfig) -> dict[str, Any]:
         else:
             security_master, security_summary = update_security_master(source, stock_lists, config=config)
         bar_parts: list[pd.DataFrame] = []
+        metric_parts: list[pd.DataFrame] = []
+        industry_parts: list[pd.DataFrame] = []
         failures: list[dict[str, Any]] = []
+        metrics_failures: list[dict[str, Any]] = []
+        industry_failures: list[dict[str, Any]] = []
         bar_quality: dict[str, Any] = {}
+        metric_quality: dict[str, Any] = {}
+        industry_quality: dict[str, Any] = {}
         for year in _years_between(config.start_date, config.end_date):
             start, end = _year_bounds(year, config.start_date, config.end_date)
             year_stock_lists = _filter_dates(stock_lists, start, end)
@@ -1038,17 +1791,69 @@ def build_snapshot(config: PitBuildConfig) -> dict[str, Any]:
             bar_parts.append(bars)
             failures.extend(year_failures)
             bar_quality[f"daily_bars_year_{year}"] = cache
+            if config.include_metrics:
+                metrics, year_metric_failures, metric_cache = fetch_daily_metrics(
+                    source,
+                    codes,
+                    config=config,
+                    year=year,
+                    start_date=start,
+                    end_date=end,
+                )
+                _assert_failure_rate(year, len(codes), year_metric_failures)
+                metric_parts.append(metrics)
+                metrics_failures.extend(year_metric_failures)
+                metric_quality[f"daily_metrics_year_{year}"] = metric_cache
+            if config.include_industry:
+                industry, year_industry_failures, industry_cache = fetch_stock_industry(
+                    source,
+                    year_stock_lists,
+                    config=config,
+                    year=year,
+                    start_date=start,
+                    end_date=end,
+                )
+                industry_parts.append(industry)
+                industry_failures.extend(year_industry_failures)
+                industry_quality[f"stock_industry_year_{year}"] = industry_cache
         daily_bars = _concat(bar_parts, DAILY_BARS_COLUMNS)
+        daily_metrics = _concat(metric_parts, DAILY_METRICS_COLUMNS)
+        stock_industry = _concat(industry_parts, STOCK_INDUSTRY_COLUMNS)
+        daily_size = (
+            load_cached_daily_size(
+                config.output_root,
+                _years_between(config.start_date, config.end_date),
+                config.start_date,
+                config.end_date,
+                symbols=sorted(stock_lists["code"].unique().tolist()),
+            )
+            if config.include_size
+            else pd.DataFrame(columns=DAILY_SIZE_COLUMNS)
+        )
         return assemble_snapshot_from_frames(
             config=config,
             trade_dates=trade_dates,
             security_master=security_master,
             stock_lists=stock_lists,
             daily_bars=daily_bars,
+            daily_metrics=daily_metrics,
+            stock_industry=stock_industry,
+            daily_size=daily_size,
             failures=failures,
             source_version=source.version,
             source_errors=source.errors,
-            extra_quality={**trade_cache, **basic_cache, **security_summary, **stock_quality, **bar_quality},
+            extra_quality={
+                **trade_cache,
+                **basic_cache,
+                **security_summary,
+                **stock_quality,
+                **bar_quality,
+                **metric_quality,
+                **industry_quality,
+                "daily_metrics_failures": metrics_failures,
+                "stock_industry_failures": industry_failures,
+                "daily_size_rows": int(len(daily_size)),
+            },
         )
 
 
@@ -1059,6 +1864,9 @@ def assemble_snapshot_from_frames(
     security_master: pd.DataFrame,
     stock_lists: pd.DataFrame,
     daily_bars: pd.DataFrame,
+    daily_metrics: pd.DataFrame,
+    stock_industry: pd.DataFrame,
+    daily_size: pd.DataFrame,
     failures: list[dict[str, Any]],
     source_version: str,
     source_errors: list[dict[str, str]],
@@ -1067,6 +1875,18 @@ def assemble_snapshot_from_frames(
     if len(trade_dates) == 0:
         raise BaostockSourceError("trade date count is zero")
     daily_bars = _filter_bars_to_stock_lists(daily_bars, stock_lists)
+    daily_metrics = _filter_metrics_to_stock_lists(
+        daily_metrics if daily_metrics is not None else pd.DataFrame(columns=DAILY_METRICS_COLUMNS),
+        stock_lists,
+    )
+    stock_industry = _filter_stock_industry_to_stock_lists(
+        stock_industry if stock_industry is not None else pd.DataFrame(columns=STOCK_INDUSTRY_COLUMNS),
+        stock_lists,
+    )
+    daily_size = _filter_daily_size_to_stock_lists(
+        daily_size if daily_size is not None else pd.DataFrame(columns=DAILY_SIZE_COLUMNS),
+        stock_lists,
+    )
     daily_universe, daily_status = build_daily_universe(stock_lists, security_master, daily_bars)
     snapshot_id = config.snapshot_id or f"baostock_daily_mainboard_v2_pit_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     snapshot_root = config.output_root / snapshot_id
@@ -1081,12 +1901,28 @@ def assemble_snapshot_from_frames(
         daily_universe=daily_universe,
         daily_bars=daily_bars,
         daily_status=daily_status,
+        daily_metrics=daily_metrics,
+        stock_industry=stock_industry,
+        daily_size=daily_size,
         failures=failures,
         source_errors=source_errors,
         extra_quality=extra_quality,
     )
     quality_report = _quality_report(daily_universe, daily_status, failures, source_errors, extra_quality)
-    _write_outputs(snapshot_root, config.output_root, security_master, stock_lists, daily_universe, daily_bars, daily_status, manifest, quality_report)
+    _write_outputs(
+        snapshot_root,
+        config.output_root,
+        security_master,
+        stock_lists,
+        daily_universe,
+        daily_bars,
+        daily_status,
+        daily_metrics,
+        stock_industry,
+        daily_size,
+        manifest,
+        quality_report,
+    )
     return manifest
 
 
@@ -1095,6 +1931,25 @@ def _filter_bars_to_stock_lists(daily_bars: pd.DataFrame, stock_lists: pd.DataFr
         return daily_bars
     keys = stock_lists[["date", "code"]].drop_duplicates()
     return daily_bars.merge(keys, on=["date", "code"], how="inner").reset_index(drop=True)
+
+
+def _filter_metrics_to_stock_lists(daily_metrics: pd.DataFrame, stock_lists: pd.DataFrame) -> pd.DataFrame:
+    daily_metrics = _ensure_columns(daily_metrics, DAILY_METRICS_COLUMNS)
+    if daily_metrics.empty or stock_lists.empty:
+        return daily_metrics
+    keys = stock_lists[["date", "code"]].drop_duplicates()
+    return daily_metrics.merge(keys, on=["date", "code"], how="inner")[DAILY_METRICS_COLUMNS].reset_index(drop=True)
+
+
+def _filter_daily_size_to_stock_lists(daily_size: pd.DataFrame, stock_lists: pd.DataFrame) -> pd.DataFrame:
+    daily_size = _ensure_columns(daily_size, DAILY_SIZE_COLUMNS)
+    if daily_size.empty or stock_lists.empty:
+        return daily_size
+    keys = stock_lists[["date", "code"]].drop_duplicates().copy()
+    keys["date"] = pd.to_datetime(keys["date"]).astype("datetime64[ns]")
+    output = daily_size.copy()
+    output["date"] = pd.to_datetime(output["date"]).astype("datetime64[ns]")
+    return output.merge(keys, on=["date", "code"], how="inner")[DAILY_SIZE_COLUMNS].reset_index(drop=True)
 
 
 def _assert_failure_rate(year: int, code_count: int, failures: list[dict[str, Any]]) -> None:
@@ -1116,6 +1971,9 @@ def _manifest(
     daily_universe: pd.DataFrame,
     daily_bars: pd.DataFrame,
     daily_status: pd.DataFrame,
+    daily_metrics: pd.DataFrame,
+    stock_industry: pd.DataFrame,
+    daily_size: pd.DataFrame,
     failures: list[dict[str, Any]],
     source_errors: list[dict[str, str]],
     extra_quality: dict[str, Any],
@@ -1140,7 +1998,13 @@ def _manifest(
             "daily_universe_rows": int(len(daily_universe)),
             "daily_bar_rows": int(len(daily_bars)),
             "daily_status_rows": int(len(daily_status)),
+            "daily_metrics_rows": int(len(daily_metrics)),
+            "stock_industry_rows": int(len(stock_industry)),
+            "daily_size_rows": int(len(daily_size)),
             "fields": list(BAOSTOCK_DAILY_FIELDS),
+            "daily_metrics_fields": DAILY_METRICS_COLUMNS,
+            "industry_fields": STOCK_INDUSTRY_COLUMNS,
+            "daily_size_fields": DAILY_SIZE_COLUMNS,
         },
         "quality": {
             "failure_count": len(failures),
@@ -1235,6 +2099,9 @@ def _write_outputs(
     daily_universe: pd.DataFrame,
     daily_bars: pd.DataFrame,
     daily_status: pd.DataFrame,
+    daily_metrics: pd.DataFrame,
+    stock_industry: pd.DataFrame,
+    daily_size: pd.DataFrame,
     manifest: dict[str, Any],
     quality_report: dict[str, Any],
 ) -> None:
@@ -1243,6 +2110,12 @@ def _write_outputs(
     daily_universe.to_parquet(snapshot_root / "daily_universe.parquet", index=False)
     daily_bars.to_parquet(snapshot_root / "daily_bars.parquet", index=False)
     daily_status.to_parquet(snapshot_root / "daily_status.parquet", index=False)
+    if not daily_metrics.empty:
+        daily_metrics.to_parquet(snapshot_root / "daily_metrics.parquet", index=False)
+    if not stock_industry.empty:
+        stock_industry.to_parquet(snapshot_root / "stock_industry.parquet", index=False)
+    if not daily_size.empty:
+        daily_size.to_parquet(snapshot_root / "daily_size.parquet", index=False)
     (snapshot_root / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (snapshot_root / "quality_report.json").write_text(json.dumps(quality_report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     latest = {
@@ -1266,12 +2139,27 @@ def _read_validated_year_cache(
     meta_path_fn: Any,
     columns: list[str],
 ) -> pd.DataFrame:
-    path = data_path_fn(output_root, year)
+    path = _call_cache_path_fn(data_path_fn, output_root, year, config=config, start_date=start_date, end_date=end_date)
     if config is not None:
-        meta = _read_json_or_empty(meta_path_fn(output_root, year))
+        meta = _read_json_or_empty(_call_cache_path_fn(meta_path_fn, output_root, year, config=config, start_date=start_date, end_date=end_date))
         if not _is_cache_compatible(meta, config, year=year, start_date=start_date, end_date=end_date):
             return pd.DataFrame(columns=columns)
     return _read_parquet_or_empty(path, columns)
+
+
+def _call_cache_path_fn(
+    path_fn: Any,
+    output_root: Path,
+    year: int,
+    *,
+    config: PitBuildConfig | None,
+    start_date: str,
+    end_date: str,
+) -> Path:
+    try:
+        return path_fn(output_root, year, config=config, start_date=start_date, end_date=end_date)
+    except TypeError:
+        return path_fn(output_root, year)
 
 
 def load_cached_stock_lists(
@@ -1322,6 +2210,52 @@ def load_cached_daily_bars(
     return _filter_dates(_concat(parts, DAILY_BARS_COLUMNS), start_date, end_date)
 
 
+def load_cached_daily_metrics(
+    output_root: Path,
+    years: list[int],
+    start_date: str,
+    end_date: str,
+    *,
+    config: PitBuildConfig | None = None,
+) -> pd.DataFrame:
+    parts = [
+        _read_validated_year_cache(
+            output_root,
+            year,
+            max(start_date, f"{year}-01-01"),
+            min(end_date, f"{year}-12-31"),
+            config=config,
+            data_path_fn=_daily_metrics_cache_path,
+            meta_path_fn=_daily_metrics_meta_path,
+            columns=DAILY_METRICS_COLUMNS,
+        )
+        for year in years
+    ]
+    return _filter_dates(_concat(parts, DAILY_METRICS_COLUMNS), start_date, end_date)
+
+
+def load_cached_stock_industry(
+    output_root: Path,
+    years: list[int],
+    start_date: str,
+    end_date: str,
+    *,
+    config: PitBuildConfig | None = None,
+) -> pd.DataFrame:
+    parts: list[pd.DataFrame] = []
+    for year in years:
+        year_start = max(start_date, f"{year}-01-01")
+        year_end = min(end_date, f"{year}-12-31")
+        path = _stock_industry_cache_path(output_root, year)
+        if config is not None:
+            meta = _read_json_or_empty(_stock_industry_meta_path(output_root, year))
+            if not _is_industry_cache_compatible(meta, config, year=year, start_date=year_start, end_date=year_end):
+                parts.append(pd.DataFrame(columns=STOCK_INDUSTRY_COLUMNS))
+                continue
+        parts.append(_read_parquet_or_empty(path, STOCK_INDUSTRY_COLUMNS))
+    return _filter_dates(_concat(parts, STOCK_INDUSTRY_COLUMNS), start_date, end_date)
+
+
 def _parse_symbols(raw: str) -> tuple[str, ...]:
     if not raw.strip():
         return ()
@@ -1331,18 +2265,24 @@ def _parse_symbols(raw: str) -> tuple[str, ...]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Build Baostock point-in-time daily research snapshots.")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("dry-run", "build", "refresh", "rebuild", "discover", "fetch-bars", "assemble", "build-year"):
+    for name in ("dry-run", "build", "refresh", "rebuild", "discover", "fetch-bars", "fetch-metrics", "fetch-industry", "fetch-size", "assemble", "build-year"):
         cmd = sub.add_parser(name)
         cmd.add_argument("--symbols", default="", help="Comma-separated symbols such as 600000.SH,000001.SZ.")
         cmd.add_argument("--max-symbols", type=int, default=0, help="Limit selected symbols after PIT universe discovery.")
         cmd.add_argument("--output-root", default=str(DEFAULT_V2_SNAPSHOT_ROOT))
         cmd.add_argument("--start-date", default="2016-01-01")
         cmd.add_argument("--end-date", default="2026-06-01")
+        cmd.add_argument("--trade-dates", default="", help="Comma-separated YYYYMMDD dates for fetch-size smoke runs.")
         cmd.add_argument("--snapshot-id", default="")
         cmd.add_argument("--year", type=int, default=0)
         cmd.add_argument("--force-refresh", action="store_true")
         cmd.add_argument("--request-interval-seconds", type=float, default=0.0)
         cmd.add_argument("--discovery-mode", choices=["stock-basic", "daily"], default="stock-basic")
+        cmd.add_argument("--include-industry", action="store_true", help="Fetch/write optional Baostock stock_industry table.")
+        cmd.add_argument("--industry-frequency", choices=["daily", "month-start"], default="daily")
+        cmd.add_argument("--include-metrics", action="store_true", help="Fetch/write optional Baostock daily_metrics table.")
+        cmd.add_argument("--include-size", action="store_true", help="Read/write optional external daily_size table from cached Tushare daily_basic data.")
+        cmd.add_argument("--size-token", default="", help="Tushare token for fetch-size; falls back to TUSHARE_TOKEN or TS_TOKEN.")
     return parser
 
 
@@ -1350,6 +2290,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     symbols = _parse_symbols(args.symbols)
+    trade_dates = tuple(item.strip() for item in args.trade_dates.split(",") if item.strip())
     if args.command == "dry-run" and not symbols and args.max_symbols <= 0:
         symbols = ("600000.SH", "000001.SZ")
     config = PitBuildConfig(
@@ -1361,9 +2302,15 @@ def main(argv: list[str] | None = None) -> int:
         command=args.command,
         snapshot_id=args.snapshot_id,
         year=args.year,
+        trade_dates=trade_dates,
         force_refresh=args.force_refresh,
         request_interval_seconds=args.request_interval_seconds,
         discovery_mode=args.discovery_mode,
+        include_industry=args.include_industry,
+        industry_frequency=args.industry_frequency,
+        include_metrics=args.include_metrics,
+        include_size=args.include_size,
+        size_token=args.size_token or None,
     )
     if args.command in {"dry-run", "build", "refresh", "rebuild"}:
         manifest = build_snapshot(config)
@@ -1372,6 +2319,12 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(discover(config), ensure_ascii=False, indent=2))
     elif args.command == "fetch-bars":
         print(json.dumps(fetch_bars(config), ensure_ascii=False, indent=2))
+    elif args.command == "fetch-metrics":
+        print(json.dumps(fetch_metrics(config), ensure_ascii=False, indent=2))
+    elif args.command == "fetch-industry":
+        print(json.dumps(fetch_industry(config), ensure_ascii=False, indent=2))
+    elif args.command == "fetch-size":
+        print(json.dumps(fetch_size(config), ensure_ascii=False, indent=2))
     elif args.command == "assemble":
         print(json.dumps(assemble(config), ensure_ascii=False, indent=2))
     elif args.command == "build-year":

@@ -65,6 +65,7 @@ FORECAST_LOSS_PROFILES = (
     "horizon_target_normalized_v1",
     "horizon_head_soft_constraint_v1",
     "target_norm_head_constraint_v1",
+    "horizon_30d_soft_penalty_v1",
 )
 FORECAST_RANKING_BASELINES = ("none", "lightgbm", "xgboost")
 FORECAST_RISK_AUX_NAMES = ("downside_floor", "worst_1d", "upside")
@@ -86,6 +87,7 @@ _FORECAST_DECISION_LOSS_PROFILES = {
     "horizon_target_normalized_v1",
     "horizon_head_soft_constraint_v1",
     "target_norm_head_constraint_v1",
+    "horizon_30d_soft_penalty_v1",
 }
 _FORECAST_LOSS_WEIGHT_PRESETS: dict[str, dict[str, float]] = {
     "default": {
@@ -310,6 +312,24 @@ _FORECAST_LOSS_WEIGHT_PRESETS: dict[str, dict[str, float]] = {
         "horizon_target_normalization": 1.0,
         "horizon_head_soft_constraint": 0.05,
     },
+    "horizon_30d_soft_penalty_v1": {
+        "path_daily": 0.60,
+        "quantile": 0.25,
+        "path_aux": 0.30,
+        "risk_aux": 0.05,
+        "rank_aux": 0.75,
+        "risk_rank_aux": 0.005,
+        "direction_aux": 0.0,
+        "downside_rank_aux": 0.0,
+        "decision_utility": 1.00,
+        "hit_aux": 0.20,
+        "horizon_classification": 0.10,
+        "decision_rank_aux": 0.20,
+        "horizon_entropy": 0.05,
+        "horizon_target_normalization": 0.0,
+        "horizon_head_soft_constraint": 0.03,
+        "calibrated_decision_rank_aux": 0.30,
+    },
 }
 
 _FORECAST_TARGET_NORMALIZED_LOSS_PROFILES = {
@@ -319,10 +339,13 @@ _FORECAST_TARGET_NORMALIZED_LOSS_PROFILES = {
 _FORECAST_HEAD_CONSTRAINT_LOSS_PROFILES = {
     "horizon_head_soft_constraint_v1",
     "target_norm_head_constraint_v1",
+    "horizon_30d_soft_penalty_v1",
 }
 _HORIZON_HEAD_CONSTRAINT_MAX_30D_PROBABILITY = 0.75
 _HORIZON_HEAD_CONSTRAINT_LONG_HORIZONS = (15, 20, 30)
 _HORIZON_HEAD_CONSTRAINT_MIN_LONG_PROBABILITY = 0.40
+_FORECAST_UTILITY_30D_SOFT_PENALTY_PROFILES = {"horizon_30d_soft_penalty_v1"}
+_HORIZON_30D_SOFT_PENALTY = 0.005
 
 
 class _EagerTorchDataset(torch.utils.data.Dataset):
@@ -631,6 +654,21 @@ def _normalize_forecast_loss_profile(loss_profile: str | None) -> str:
     return profile
 
 
+def _decision_score_calibration_contract(loss_profile: str | None) -> dict[str, Any]:
+    profile = _normalize_forecast_loss_profile(loss_profile)
+    enabled = profile in _FORECAST_UTILITY_30D_SOFT_PENALTY_PROFILES
+    return {
+        "enabled": bool(enabled),
+        "method": "max_horizon_utility_soft_penalty" if enabled else "none",
+        "penalized_horizon": 30 if enabled else None,
+        "utility_penalty": float(_HORIZON_30D_SOFT_PENALTY) if enabled else 0.0,
+        "applies_to": ["pred_decision_score", "trade_utility_score", "pred_best_horizon"] if enabled else [],
+        "source_evidence": "mh_v2_horizon_concentration_repair_anchor_20260603_01/penalty_30d_0p005"
+        if enabled
+        else "",
+    }
+
+
 def forecast_loss_profile_contract(
     loss_profile: str | None,
     *,
@@ -672,6 +710,7 @@ def forecast_loss_profile_contract(
                 "min_long_horizon_probability": _HORIZON_HEAD_CONSTRAINT_MIN_LONG_PROBABILITY,
                 "long_horizons": list(_HORIZON_HEAD_CONSTRAINT_LONG_HORIZONS),
             },
+            "decision_score_calibration": _decision_score_calibration_contract(profile),
             "shadow_only": True,
             "promotion_allowed": False,
             "active_execution_strategy_expected_diff": "none",
@@ -1095,6 +1134,17 @@ def _forecast_loss(
         loss = loss + float(weights["hit_aux"]) * F.binary_cross_entropy_with_logits(hit_logits, hit_target)
         loss = loss + float(weights["horizon_classification"]) * F.cross_entropy(horizon_logits, best_horizon_index)
         loss = loss + float(weights["decision_rank_aux"]) * pairwise_rank_loss(pred_decision_score, future_decision_score)
+        calibrated_rank_weight = float(weights.get("calibrated_decision_rank_aux", 0.0))
+        if calibrated_rank_weight > 0.0 and profile in _FORECAST_UTILITY_30D_SOFT_PENALTY_PROFILES:
+            calibrated_utility = utility_pred.clone()
+            horizon_values = torch.as_tensor(horizons, dtype=torch.long, device=utility_pred.device)
+            penalty_mask = horizon_values == int(max(horizons))
+            if bool(penalty_mask.any()):
+                calibrated_utility[:, penalty_mask] = calibrated_utility[:, penalty_mask] - (
+                    float(_HORIZON_30D_SOFT_PENALTY) * float(target_scale)
+                )
+            calibrated_decision_score = calibrated_utility.max(dim=1).values
+            loss = loss + calibrated_rank_weight * pairwise_rank_loss(calibrated_decision_score, future_decision_score)
         constraint_weight = float(weights.get("horizon_head_soft_constraint", 0.0))
         if constraint_weight > 0.0:
             probabilities = F.softmax(horizon_logits, dim=1)
@@ -1459,6 +1509,25 @@ def _top_bottom_spread_by_date(frame: pd.DataFrame, score_column: str, target_co
     return float(np.mean(values)) if values else 0.0
 
 
+def _calibrate_pred_decision_utility_np(
+    pred_utility: np.ndarray,
+    *,
+    horizons: tuple[int, ...],
+    loss_profile: str | None,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    profile = _normalize_forecast_loss_profile(loss_profile)
+    calibrated = np.asarray(pred_utility, dtype=np.float64).copy()
+    contract = _decision_score_calibration_contract(profile)
+    if not bool(contract.get("enabled", False)):
+        return calibrated, contract
+    horizon_values = np.asarray(horizons, dtype=int)
+    penalty_horizon = int(contract.get("penalized_horizon") or max(horizons))
+    mask = horizon_values == penalty_horizon
+    if mask.any():
+        calibrated[:, mask] -= float(contract.get("utility_penalty", 0.0) or 0.0)
+    return calibrated, contract
+
+
 def _add_decision_utility_columns(
     columns: dict[str, Any],
     *,
@@ -1471,6 +1540,7 @@ def _add_decision_utility_columns(
     decision_drawdown_penalty: float,
     cumulative_horizons: tuple[int, ...] | list[int] | str | None,
     max_horizon: int,
+    loss_profile: str | None = None,
 ) -> None:
     if "decision_aux" not in predictions:
         return
@@ -1479,7 +1549,12 @@ def _add_decision_utility_columns(
         return
     horizons = normalize_path20_cumulative_horizons(cumulative_horizons, horizon=int(max_horizon))
     cum_count = len(horizons)
-    pred_utility = decision_aux[:, :cum_count] / max(float(target_scale), 1.0e-8)
+    raw_pred_utility = decision_aux[:, :cum_count] / max(float(target_scale), 1.0e-8)
+    calibrated_pred_utility, calibration_contract = _calibrate_pred_decision_utility_np(
+        raw_pred_utility,
+        horizons=horizons,
+        loss_profile=loss_profile,
+    )
     hit_logits = decision_aux[:, cum_count : cum_count * 2]
     horizon_logits = decision_aux[:, cum_count * 2 : cum_count * 3]
     future = _decision_utility_targets_np(
@@ -1492,10 +1567,17 @@ def _add_decision_utility_columns(
         max_horizon=max_horizon,
     )
     pred_hit_prob = 1.0 / (1.0 + np.exp(-np.clip(hit_logits, -60.0, 60.0)))
-    pred_best_idx = np.argmax(horizon_logits, axis=1)
-    pred_score = np.max(pred_utility, axis=1)
+    if bool(calibration_contract.get("enabled", False)):
+        pred_best_idx = np.argmax(calibrated_pred_utility, axis=1)
+        pred_best_horizon_source = "calibrated_utility_argmax"
+    else:
+        pred_best_idx = np.argmax(horizon_logits, axis=1)
+        pred_best_horizon_source = "horizon_head_logits"
+    pred_score = np.max(calibrated_pred_utility, axis=1)
     for pos, horizon in enumerate(horizons):
-        columns[f"pred_decision_utility_{horizon}d"] = pred_utility[:, pos]
+        columns[f"pred_decision_utility_{horizon}d"] = raw_pred_utility[:, pos]
+        if bool(calibration_contract.get("enabled", False)):
+            columns[f"calibrated_pred_decision_utility_{horizon}d"] = calibrated_pred_utility[:, pos]
         columns[f"future_decision_utility_{horizon}d"] = future["utility"][:, pos]
         columns[f"pred_hit_prob_{horizon}d"] = pred_hit_prob[:, pos]
         columns[f"future_hit_label_{horizon}d"] = future["hit_label"][:, pos].astype(int)
@@ -1505,6 +1587,9 @@ def _add_decision_utility_columns(
     columns["pred_decision_score"] = pred_score
     columns["trade_utility_score"] = pred_score
     columns["future_decision_score"] = future["decision_score"]
+    columns["pred_best_horizon_source"] = pred_best_horizon_source
+    columns["decision_score_calibration_method"] = str(calibration_contract.get("method", "none"))
+    columns["decision_score_calibration_penalty"] = float(calibration_contract.get("utility_penalty", 0.0) or 0.0)
 
 
 def _prediction_frame(
@@ -1517,6 +1602,7 @@ def _prediction_frame(
     decision_cost_bps: float = 20.0,
     decision_hit_threshold_bps: float = 20.0,
     decision_drawdown_penalty: float = 0.25,
+    loss_profile: str | None = None,
 ) -> pd.DataFrame:
     mask = dataset.role == role
     idx = np.flatnonzero(mask)
@@ -1562,6 +1648,7 @@ def _prediction_frame(
         decision_drawdown_penalty=decision_drawdown_penalty,
         cumulative_horizons=horizons,
         max_horizon=horizon,
+        loss_profile=loss_profile,
     )
     risk_start = len(horizons)
     risk_aux = aux[:, risk_start : risk_start + len(horizons) * 3].reshape(-1, len(horizons), 3)
@@ -1590,6 +1677,7 @@ def _prediction_frame_for_indices(
     decision_cost_bps: float = 20.0,
     decision_hit_threshold_bps: float = 20.0,
     decision_drawdown_penalty: float = 0.25,
+    loss_profile: str | None = None,
 ) -> pd.DataFrame:
     if len(indices) == 0:
         return pd.DataFrame()
@@ -1634,6 +1722,7 @@ def _prediction_frame_for_indices(
         decision_drawdown_penalty=decision_drawdown_penalty,
         cumulative_horizons=horizons,
         max_horizon=horizon,
+        loss_profile=loss_profile,
     )
     risk_start = len(horizons)
     risk_aux = aux[:, risk_start : risk_start + len(horizons) * 3].reshape(-1, len(horizons), 3)
@@ -1662,6 +1751,7 @@ def _prediction_frame_for_dataset_indices(
     decision_cost_bps: float = 20.0,
     decision_hit_threshold_bps: float = 20.0,
     decision_drawdown_penalty: float = 0.25,
+    loss_profile: str | None = None,
 ) -> pd.DataFrame:
     if isinstance(dataset, ForecastMemmapDataset):
         if len(indices) == 0:
@@ -1711,6 +1801,7 @@ def _prediction_frame_for_dataset_indices(
             decision_drawdown_penalty=decision_drawdown_penalty,
             cumulative_horizons=horizons,
             max_horizon=horizon,
+            loss_profile=loss_profile,
         )
         risk_start = len(horizons)
         risk_aux = aux[:, risk_start : risk_start + len(horizons) * 3].reshape(-1, len(horizons), 3)
@@ -1736,6 +1827,7 @@ def _prediction_frame_for_dataset_indices(
         decision_cost_bps=decision_cost_bps,
         decision_hit_threshold_bps=decision_hit_threshold_bps,
         decision_drawdown_penalty=decision_drawdown_penalty,
+        loss_profile=loss_profile,
     )
 
 
@@ -3254,6 +3346,7 @@ def train_forecast_models(
                 decision_cost_bps=decision_cost_bps,
                 decision_hit_threshold_bps=decision_hit_threshold_bps,
                 decision_drawdown_penalty=decision_drawdown_penalty,
+                loss_profile=loss_profile,
             )
             test_frame = _prediction_frame_for_dataset_indices(
                 dataset,
@@ -3264,6 +3357,7 @@ def train_forecast_models(
                 decision_cost_bps=decision_cost_bps,
                 decision_hit_threshold_bps=decision_hit_threshold_bps,
                 decision_drawdown_penalty=decision_drawdown_penalty,
+                loss_profile=loss_profile,
             )
             final_validation_metrics = forecast_prediction_metrics(validation_frame)
             final_test_metrics = forecast_prediction_metrics(test_frame)
@@ -3417,6 +3511,7 @@ def train_forecast_models(
             decision_cost_bps=decision_cost_bps,
             decision_hit_threshold_bps=decision_hit_threshold_bps,
             decision_drawdown_penalty=decision_drawdown_penalty,
+            loss_profile=loss_profile,
         )
         selected_predictions_test = _prediction_frame_for_dataset_indices(
             dataset,
@@ -3427,6 +3522,7 @@ def train_forecast_models(
             decision_cost_bps=decision_cost_bps,
             decision_hit_threshold_bps=decision_hit_threshold_bps,
             decision_drawdown_penalty=decision_drawdown_penalty,
+            loss_profile=loss_profile,
         )
     else:
         selected_predictions_validation = pd.DataFrame()

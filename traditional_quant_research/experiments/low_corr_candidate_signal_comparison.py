@@ -25,6 +25,7 @@ from traditional_quant_research.experiments.low_corr_candidate_frontier_audit im
 )
 from traditional_quant_research.experiments.low_corr_exposure_grid import LOW_CORR_SIGNAL
 from traditional_quant_research.experiments.low_corr_regime_yearly_validation import year_windows
+from traditional_quant_research.experiments.v2_metrics_exposure_diagnostics import add_metric_exposure_fields
 from traditional_quant_research.experiments.multifactor_baseline import (
     apply_horizon_fee,
     filter_panel_dates,
@@ -78,6 +79,8 @@ def build_candidate_protocol_signal_panel(
     max_factor_corr: float,
     rolling_window: int,
     rolling_min_periods: int,
+    include_industry: bool = False,
+    include_metrics: bool = False,
 ) -> dict[str, Any]:
     """Build all signal variants using the same prior-year fit contract."""
 
@@ -95,6 +98,8 @@ def build_candidate_protocol_signal_panel(
         horizon=horizon,
         label_mode=label_mode,
         max_factor_corr=max_factor_corr,
+        include_industry=include_industry,
+        include_metrics=include_metrics,
     )
     factor_panel = add_baseline_score(built["factor_panel"])
     signal_columns = list(built["signal_columns"])
@@ -129,6 +134,9 @@ def build_candidate_protocol_signal_panel(
         score_col=ROLLING_IC_SIGNAL,
         min_factors=3,
     )
+    metric_exposure_columns: list[str] = []
+    if include_metrics:
+        factor_panel, metric_exposure_columns = add_metric_exposure_fields(factor_panel)
     evaluation_panel = filter_panel_dates(factor_panel, start_date=start_date, end_date=end_date)
     available_signals = [signal for signal in DEFAULT_SIGNALS if signal in evaluation_panel.columns]
     return {
@@ -140,6 +148,7 @@ def build_candidate_protocol_signal_panel(
         "rolling_weight_audit": rolling_ic_weight_audit(rolling_weights),
         "rolling_fallback_rate": rolling_fallback_rate(rolling_weights),
         "signal_coverage": factor_coverage(evaluation_panel, available_signals),
+        "metric_exposure_columns": metric_exposure_columns,
     }
 
 

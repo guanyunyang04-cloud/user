@@ -248,6 +248,7 @@ def test_auxiliary_decision_loss_profiles_record_weight_contract_and_finite_loss
         "horizon_target_normalized_v1",
         "horizon_head_soft_constraint_v1",
         "target_norm_head_constraint_v1",
+        "horizon_30d_soft_penalty_v1",
     ):
         contract = forecast_loss_profile_contract(profile, cumulative_horizons=horizons, forecast_horizon=30)
         assert contract["loss_profile"] == profile
@@ -283,6 +284,13 @@ def test_auxiliary_decision_loss_profiles_record_weight_contract_and_finite_loss
                 assert contract["target_normalization"] == "per_horizon_utility_zscore"
                 assert weights["horizon_target_normalization"] > 0.0
                 assert weights["horizon_head_soft_constraint"] > 0.0
+            if profile == "horizon_30d_soft_penalty_v1":
+                calibration = contract["decision_score_calibration"]
+                assert calibration["enabled"] is True
+                assert calibration["method"] == "max_horizon_utility_soft_penalty"
+                assert calibration["penalized_horizon"] == 30
+                assert calibration["utility_penalty"] == pytest.approx(0.005)
+                assert weights["calibrated_decision_rank_aux"] > 0.0
 
             prediction = {
                 "mu": torch.randn(6, 30) * 0.01,
@@ -305,6 +313,44 @@ def test_auxiliary_decision_loss_profiles_record_weight_contract_and_finite_loss
                 cumulative_horizons=horizons,
             )
             assert torch.isfinite(loss)
+
+
+def test_horizon_30d_soft_penalty_profile_calibrates_prediction_score_and_best_horizon() -> None:
+    from daily_research.path_policy.forecast_training import _add_decision_utility_columns
+    from daily_research.path_policy.models import path20_decision_aux_dim
+
+    horizons = (1, 2, 3, 5, 8, 10, 15, 20, 30)
+    utility = torch.zeros(2, len(horizons), dtype=torch.float32)
+    utility[:, horizons.index(20)] = 0.100
+    utility[:, horizons.index(30)] = 0.103
+    hit_logits = torch.zeros_like(utility)
+    horizon_logits = torch.zeros_like(utility)
+    horizon_logits[:, horizons.index(30)] = 4.0
+    decision_aux = torch.cat([utility, hit_logits, horizon_logits], dim=1).numpy()
+    assert decision_aux.shape[1] == path20_decision_aux_dim(horizons, horizon=30)
+
+    columns: dict[str, object] = {}
+    _add_decision_utility_columns(
+        columns,
+        predictions={"decision_aux": decision_aux},
+        y_cum=torch.zeros(2, len(horizons)).numpy(),
+        drawdown_by_horizon=torch.zeros(2, len(horizons)).numpy(),
+        target_scale=1.0,
+        decision_cost_bps=20.0,
+        decision_hit_threshold_bps=10.0,
+        decision_drawdown_penalty=0.10,
+        cumulative_horizons=horizons,
+        max_horizon=30,
+        loss_profile="horizon_30d_soft_penalty_v1",
+    )
+
+    assert list(columns["pred_best_horizon"]) == [20, 20]
+    assert columns["pred_best_horizon_source"] == "calibrated_utility_argmax"
+    assert columns["decision_score_calibration_method"] == "max_horizon_utility_soft_penalty"
+    assert columns["decision_score_calibration_penalty"] == pytest.approx(0.005)
+    assert list(columns["pred_decision_score"]) == pytest.approx([0.100, 0.100])
+    assert list(columns["pred_decision_utility_30d"]) == pytest.approx([0.103, 0.103])
+    assert list(columns["calibrated_pred_decision_utility_30d"]) == pytest.approx([0.098, 0.098])
 
 
 def test_train_forecast_models_records_auxiliary_loss_contract_in_summary_and_checkpoint(tmp_path) -> None:

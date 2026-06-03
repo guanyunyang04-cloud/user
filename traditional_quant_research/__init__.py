@@ -6,9 +6,11 @@ from .dataset import load_daily_bars, load_daily_snapshot, load_daily_status, lo
 from .dataset_v2 import (
     load_daily_universe,
     load_pit_daily_bars,
+    load_pit_daily_size,
     load_pit_daily_status,
     load_pit_manifest,
     load_pit_snapshot,
+    load_pit_stock_industry,
     load_quality_report,
     load_tradeable_panel,
 )
@@ -53,6 +55,12 @@ from .research_panel import (
     default_factor_columns,
     load_baseline_factor_panel,
     panel_summary,
+)
+from .size_source import (
+    normalize_project_symbol,
+    standardize_daily_size_frame,
+    standardize_tushare_daily_basic_size,
+    write_daily_size_parquet,
 )
 from .universe import (
     filter_sh_sz_a_shares,
@@ -100,9 +108,11 @@ __all__ = [
     "load_baseline_factor_panel",
     "load_manifest",
     "load_pit_daily_bars",
+    "load_pit_daily_size",
     "load_pit_daily_status",
     "load_pit_manifest",
     "load_pit_snapshot",
+    "load_pit_stock_industry",
     "load_quality_report",
     "load_tradeable_panel",
     "load_universe",
@@ -110,6 +120,7 @@ __all__ = [
     "max_drawdown",
     "mean_daily_factor_correlation",
     "neutralize_factors_by_date",
+    "normalize_project_symbol",
     "momentum",
     "moving_average",
     "normalize_long_only",
@@ -124,12 +135,15 @@ __all__ = [
     "sharpe_ratio",
     "simple_returns",
     "single_factor_diagnostics",
+    "standardize_daily_size_frame",
+    "standardize_tushare_daily_basic_size",
     "summarize_factor_ic",
     "summarize_horizon_returns",
     "top_n_backtest",
     "top_n_rebalance_backtest",
     "volatility",
     "weights_from_ic_summary",
+    "write_daily_size_parquet",
     "yearly_horizon_summary",
     "zscore",
 ]

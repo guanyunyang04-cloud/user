@@ -183,6 +183,146 @@ def test_buffered_selection_keeps_prior_holdings_inside_rank_buffer() -> None:
     assert selected["code"].tolist() == ["C", "A"]
 
 
+def test_buffered_selection_respects_group_cap() -> None:
+    group = pd.DataFrame(
+        [
+            {"code": "A", "score": 10.0, "industry": "Bank"},
+            {"code": "B", "score": 9.0, "industry": "Bank"},
+            {"code": "C", "score": 8.0, "industry": "Tech"},
+            {"code": "D", "score": 7.0, "industry": "Tech"},
+            {"code": "E", "score": 6.0, "industry": "RealEstate"},
+        ]
+    )
+
+    selected = select_buffered_top_n(
+        group,
+        "score",
+        code_col="code",
+        top_n=3,
+        previous_codes={"B"},
+        buffer_multiplier=2.0,
+        group_col="industry",
+        max_group_weight=0.34,
+    )
+
+    assert selected["code"].tolist() == ["B", "C", "E"]
+    assert selected["industry"].value_counts().max() == 1
+
+
+def test_buffered_selection_uses_portfolio_exposure_penalty() -> None:
+    group = pd.DataFrame(
+        [
+            {"code": "A", "score": 10.0, "style_z": 5.0},
+            {"code": "B", "score": 9.0, "style_z": 5.0},
+            {"code": "C", "score": 8.0, "style_z": -5.0},
+            {"code": "D", "score": 7.0, "style_z": -5.0},
+        ]
+    )
+
+    unconstrained = select_buffered_top_n(
+        group,
+        "score",
+        code_col="code",
+        top_n=2,
+        previous_codes=set(),
+        buffer_multiplier=1.0,
+    )
+    penalized = select_buffered_top_n(
+        group,
+        "score",
+        code_col="code",
+        top_n=2,
+        previous_codes=set(),
+        buffer_multiplier=1.0,
+        exposure_penalty_cols=("style_z",),
+        exposure_penalty_strength=1.0,
+    )
+
+    assert unconstrained["code"].tolist() == ["A", "B"]
+    assert penalized["code"].tolist() == ["A", "C"]
+    assert penalized["style_z"].mean() == pytest.approx(0.0)
+
+
+def test_horizon_backtest_respects_group_cap() -> None:
+    dates = pd.date_range("2026-01-02", periods=3, freq="B")
+    rows = []
+    specs = [
+        ("A", "Bank", 10.0),
+        ("B", "Bank", 9.0),
+        ("C", "Tech", 8.0),
+        ("D", "RealEstate", 7.0),
+    ]
+    for date_index, date in enumerate(dates):
+        for code, industry, score in specs:
+            rows.append(
+                {
+                    "date": date,
+                    "code": code,
+                    "industry": industry,
+                    "open": 10.0 + date_index,
+                    "close": 10.5 + date_index,
+                    "score": score,
+                    "is_tradeable": True,
+                }
+            )
+    frame = pd.DataFrame(rows)
+
+    result = horizon_aligned_top_n_backtest(
+        frame,
+        "score",
+        horizon=1,
+        top_n=3,
+        fee_bps=0,
+        rebalance_frequency="daily",
+        group_col="industry",
+        max_group_weight=0.34,
+    )
+
+    assert result.trades["codes"].iloc[0] == "A,C,D"
+    assert result.summary["group_col"] == "industry"
+    assert result.summary["max_group_weight"] == pytest.approx(0.34)
+
+
+def test_horizon_backtest_applies_portfolio_exposure_penalty() -> None:
+    dates = pd.date_range("2026-01-02", periods=3, freq="B")
+    rows = []
+    specs = [
+        ("A", 10.0, 5.0),
+        ("B", 9.0, 5.0),
+        ("C", 8.0, -5.0),
+        ("D", 7.0, -5.0),
+    ]
+    for date_index, date in enumerate(dates):
+        for code, score, style_z in specs:
+            rows.append(
+                {
+                    "date": date,
+                    "code": code,
+                    "open": 10.0 + date_index,
+                    "close": 10.5 + date_index,
+                    "score": score,
+                    "style_z": style_z,
+                    "is_tradeable": True,
+                }
+            )
+    frame = pd.DataFrame(rows)
+
+    result = horizon_aligned_top_n_backtest(
+        frame,
+        "score",
+        horizon=1,
+        top_n=2,
+        fee_bps=0,
+        rebalance_frequency="daily",
+        exposure_penalty_cols=("style_z",),
+        exposure_penalty_strength=1.0,
+    )
+
+    assert result.trades["codes"].iloc[0] == "A,C"
+    assert result.summary["exposure_penalty_cols"] == "style_z"
+    assert result.summary["exposure_penalty_strength"] == pytest.approx(1.0)
+
+
 def test_horizon_backtest_buffer_reduces_turnover_when_prior_holding_survives() -> None:
     frame = pd.DataFrame(
         [
@@ -315,6 +455,14 @@ def test_horizon_backtest_rejects_invalid_inputs() -> None:
         horizon_aligned_top_n_backtest(frame, "score", horizon=1, top_n=1, fee_bps=0, buffer_multiplier=0.5)
     with pytest.raises(ValueError, match="limit_threshold must be positive"):
         horizon_aligned_top_n_backtest(frame, "score", horizon=1, top_n=1, fee_bps=0, limit_threshold=0)
+    with pytest.raises(ValueError, match="group_col is required"):
+        horizon_aligned_top_n_backtest(frame, "score", horizon=1, top_n=1, fee_bps=0, max_group_weight=0.5)
+    with pytest.raises(ValueError, match="max_group_weight must be between 0 and 1"):
+        horizon_aligned_top_n_backtest(frame.assign(industry="A"), "score", horizon=1, top_n=1, fee_bps=0, group_col="industry", max_group_weight=1.5)
+    with pytest.raises(ValueError, match="exposure_penalty_strength must be non-negative"):
+        horizon_aligned_top_n_backtest(frame.assign(style_z=0.0), "score", horizon=1, top_n=1, fee_bps=0, exposure_penalty_cols=("style_z",), exposure_penalty_strength=-1.0)
+    with pytest.raises(ValueError, match="missing required columns"):
+        horizon_aligned_top_n_backtest(frame, "score", horizon=1, top_n=1, fee_bps=0, exposure_penalty_cols=("style_z",), exposure_penalty_strength=1.0)
     with pytest.raises(ValueError, match="missing required columns"):
         horizon_aligned_top_n_backtest(frame.drop(columns=["open"]), "score", horizon=1, top_n=1, fee_bps=0)
 

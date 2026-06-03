@@ -52,3 +52,21 @@
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest traditional_quant_research/tests
 ```
+
+## v2 数据入口
+
+- 默认研究数据源：Baostock PIT 日频快照，读取接口为 `dataset_v2.py`。
+- 行业表缓存：`python -m traditional_quant_research.dataset_builder_v2 fetch-industry --year 2026`。
+- 日频指标缓存：`python -m traditional_quant_research.dataset_builder_v2 fetch-metrics --year 2026 --include-metrics`。
+- 行业缓存可选 `--industry-frequency daily|month-start`；`daily` 是精确日频查询，`month-start` 是月初 PIT 行业快照向后填充，适合先做全量行业暴露审计。
+- 含行业表面板：`load_tradeable_panel(..., include_industry=True)`。
+- 含日频指标面板：`load_tradeable_panel(..., include_metrics=True)`，指标表字段为 `turn/pctChg/peTTM/pbMRQ/psTTM/pcfNcfTTM`。
+- v2.2 size 面板：`load_tradeable_panel(..., include_size=True)`，可选表字段为 `total_market_cap/float_market_cap/total_share/float_share/free_share`；旧 snapshot 或无表 snapshot 保持兼容。
+- v2.2 size ingestion 契约：`size_source.py` 可把 Tushare `daily_basic` 的 `total_mv/circ_mv/total_share/float_share/free_share` 标准化为项目 `daily_size` schema，并支持年度缓存 `cache/daily_size/year=YYYY.parquet`。
+- v2.2 size 缓存入口：`python -m traditional_quant_research.dataset_builder_v2 fetch-size --year 2026 --trade-dates 20260601 --symbols 600000.SH,000001.SZ --size-token <token>`；未传 `--trade-dates` 时优先读取 v2 交易日/股票池缓存，适合按年补数。带 `--symbols` 的 smoke 写入 `cache/daily_size/samples/sample=<hash>/`，不覆盖正式年度 cache。
+- v2.2 含 size 快照装配：`python -m traditional_quant_research.dataset_builder_v2 assemble --start-date 2016-01-01 --end-date 2026-06-01 --include-size` 会读取年度 `daily_size` 缓存，并在非空时写入 snapshot 的 `daily_size.parquet` 和 manifest 行数字段。
+- 当前限制：行业表已全量接入但口径为 `month-start` 前向填充；daily metrics 已完成全量构建、missingness 和语义审计，但估值字段 PIT 发布时间/修订行为仍未证明；真实市值、流通市值和股本仍未接入。
+- v2.2 size 来源侦察入口：`python -m traditional_quant_research.experiments.v2_external_size_source_scout --write-research-log`。当前结论是 Tushare `daily_basic` 为第一验证对象，JoinQuant/RQData 为订阅备选，AkShare/efinance 只作公开端点交叉检查；未完成 token/auth/live probe 前保持 proxy-only。
+- Tushare 双票 probe 入口：`python -m traditional_quant_research.experiments.v2_tushare_size_probe --symbols 600000.SH,000001.SZ --trade-dates 20260525,20260601 --write-research-log`。probe 会同时输出原始 `tushare_daily_basic_probe.csv` 和标准化 `daily_size_probe.csv/parquet`；当前环境已安装 `tushare=1.4.29`，但未配置 `TUSHARE_TOKEN/TS_TOKEN`，真实 probe 状态仍为 `skipped/auth_missing`。
+- `daily_size` 覆盖率审计入口：`python -m traditional_quant_research.experiments.v2_daily_size_audit --write-research-log`。当前 latest snapshot 返回 `daily_size_absent`，size 覆盖率为 `0.0`。
+- 候选晋级门禁入口：`python -m traditional_quant_research.experiments.frontier_promotion_gate --write-research-log`。当前 frontier 在扩展到 2017-2026 后已不再失败于样本数 gate，但仍失败于 size、收益/年度稳定性和风格暴露 gate，策略候选数量仍为 `0`。

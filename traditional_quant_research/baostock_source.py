@@ -25,6 +25,8 @@ TRADE_DATES_COLUMNS = ["calendar_date", "is_trading_day"]
 ALL_STOCK_COLUMNS = ["code", "tradeStatus", "code_name"]
 STOCK_BASIC_COLUMNS = ["code", "code_name", "ipoDate", "outDate", "type", "status"]
 DAILY_BAR_COLUMNS = ["date", "code", "open", "high", "low", "close", "volume", "amount", "tradestatus", "isST"]
+DAILY_METRICS_COLUMNS = ["date", "code", "turn", "pctChg", "peTTM", "pbMRQ", "psTTM", "pcfNcfTTM"]
+STOCK_INDUSTRY_COLUMNS = ["updateDate", "code", "code_name", "industry", "industryClassification"]
 
 
 class BaostockSource:
@@ -95,6 +97,13 @@ class BaostockSource:
             STOCK_BASIC_COLUMNS,
         )
 
+    def query_stock_industry(self, code: str = "", date: str = "") -> pd.DataFrame:
+        return self._query_with_retry(
+            "query_stock_industry",
+            lambda: self.bs.query_stock_industry(code=code, date=date),
+            STOCK_INDUSTRY_COLUMNS,
+        )
+
     def query_daily_bars(self, code: str, start_date: str, end_date: str) -> pd.DataFrame:
         fields = ",".join(
             [
@@ -121,6 +130,21 @@ class BaostockSource:
                 adjustflag="3",
             ),
             DAILY_BAR_COLUMNS,
+        )
+
+    def query_daily_metrics(self, code: str, start_date: str, end_date: str) -> pd.DataFrame:
+        fields = ",".join(DAILY_METRICS_COLUMNS)
+        return self._query_with_retry(
+            "query_history_k_data_plus",
+            lambda: self.bs.query_history_k_data_plus(
+                code,
+                fields,
+                start_date=start_date,
+                end_date=end_date,
+                frequency="d",
+                adjustflag="3",
+            ),
+            DAILY_METRICS_COLUMNS,
         )
 
     def _query_with_retry(self, name: str, query: Any, columns: list[str]) -> pd.DataFrame:

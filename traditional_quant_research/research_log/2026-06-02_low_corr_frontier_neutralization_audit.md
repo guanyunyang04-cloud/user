@@ -5,7 +5,7 @@
 - Signals: `['multifactor_rolling_ic_weighted_score', 'multifactor_ic_weighted_score', 'multifactor_low_corr_rank_score']`.
 - Neutralizers: `['log_amount_mean_20d_z']`.
 - Assessment: proxy neutralization evidence only; candidate count remains `0` until all promotion gates pass.
-- Artifacts: `traditional_quant_research\output\experiments\low_corr_frontier_neutralization_audit\low_corr_frontier_neutralization_audit_20260602_181517`
+- Artifacts: `traditional_quant_research\output\experiments\low_corr_frontier_neutralization_audit\low_corr_frontier_neutralization_audit_20260602_183104`
 
 ## Best 30 bps Rows
 
@@ -96,3 +96,26 @@
 |        2024 | multifactor_rolling_ic_weighted_score | multifactor_rolling_ic_weighted_score | False         | none               | multifactor_rolling_ic_weighted_score | 2024Q1   | quarterly     | neg_amplitude_20d_z   |        20 | monthly               |     200 |                   3 |             1 |              200 |        0.972075 |          0.952868 |       0.303961 |               0 |          0.972075 |
 |        2024 | multifactor_rolling_ic_weighted_score | multifactor_rolling_ic_weighted_score | False         | none               | multifactor_rolling_ic_weighted_score | 2024Q1   | quarterly     | neg_volatility_20d_z  |        20 | monthly               |     200 |                   3 |             1 |              200 |        0.893887 |          0.866393 |       0.276097 |              -0 |          0.893887 |
 |        2024 | multifactor_rolling_ic_weighted_score | multifactor_rolling_ic_weighted_score | False         | none               | multifactor_rolling_ic_weighted_score | 2024Q1   | quarterly     | reversal_5d_z         |        20 | monthly               |     200 |                   3 |             1 |              200 |       -0.304447 |         -0.357986 |       0.468387 |              -0 |         -0.304447 |
+
+## Signal-Neutralizer Correlation
+
+|   eval_year | signal                                              | neutralizer           | method   |   daily_count |   mean_daily_corr |   mean_abs_daily_corr |   max_abs_daily_corr |
+|------------:|:----------------------------------------------------|:----------------------|:---------|--------------:|------------------:|----------------------:|---------------------:|
+|        2024 | multifactor_rolling_ic_weighted_score               | log_amount_mean_20d_z | pearson  |           242 |         -0.518812 |              0.518812 |             0.752468 |
+|        2024 | multifactor_ic_weighted_score                       | log_amount_mean_20d_z | pearson  |           242 |         -0.656447 |              0.656447 |             0.779325 |
+|        2024 | multifactor_low_corr_rank_score                     | log_amount_mean_20d_z | pearson  |           242 |         -0.487873 |              0.487873 |             0.813315 |
+|        2024 | multifactor_rolling_ic_weighted_score_proxy_neutral | log_amount_mean_20d_z | pearson  |           242 |          0        |              0        |             0        |
+|        2024 | multifactor_ic_weighted_score_proxy_neutral         | log_amount_mean_20d_z | pearson  |           242 |          0        |              0        |             0        |
+|        2024 | multifactor_low_corr_rank_score_proxy_neutral       | log_amount_mean_20d_z | pearson  |           242 |         -0        |              0        |             0        |
+|        2025 | multifactor_rolling_ic_weighted_score               | log_amount_mean_20d_z | pearson  |           243 |         -0.531491 |              0.531491 |             0.736017 |
+|        2025 | multifactor_ic_weighted_score                       | log_amount_mean_20d_z | pearson  |           243 |         -0.434608 |              0.434608 |             0.659071 |
+|        2025 | multifactor_low_corr_rank_score                     | log_amount_mean_20d_z | pearson  |           243 |         -0.580037 |              0.580037 |             0.745534 |
+|        2025 | multifactor_rolling_ic_weighted_score_proxy_neutral | log_amount_mean_20d_z | pearson  |           243 |          0        |              0        |             0        |
+|        2025 | multifactor_ic_weighted_score_proxy_neutral         | log_amount_mean_20d_z | pearson  |           243 |         -0        |              0        |             0        |
+|        2025 | multifactor_low_corr_rank_score_proxy_neutral       | log_amount_mean_20d_z | pearson  |           243 |          0        |              0        |             0        |
+|        2026 | multifactor_rolling_ic_weighted_score               | log_amount_mean_20d_z | pearson  |            96 |         -0.678379 |              0.678379 |             0.756845 |
+|        2026 | multifactor_ic_weighted_score                       | log_amount_mean_20d_z | pearson  |            96 |         -0.641648 |              0.641648 |             0.750881 |
+|        2026 | multifactor_low_corr_rank_score                     | log_amount_mean_20d_z | pearson  |            96 |         -0.637318 |              0.637318 |             0.743599 |
+|        2026 | multifactor_rolling_ic_weighted_score_proxy_neutral | log_amount_mean_20d_z | pearson  |            96 |          0        |              0        |             0        |
+|        2026 | multifactor_ic_weighted_score_proxy_neutral         | log_amount_mean_20d_z | pearson  |            96 |          0        |              0        |             0        |
+|        2026 | multifactor_low_corr_rank_score_proxy_neutral       | log_amount_mean_20d_z | pearson  |            96 |          0        |              0        |             0        |
