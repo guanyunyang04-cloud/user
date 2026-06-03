@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from tools.brain.long_task_monitor import build_status, build_template, build_trace_event
+from tools.brain.long_task_monitor import build_status, build_template, build_trace_event, validate_project_namespace
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -222,6 +222,119 @@ class LongTaskMonitorTest(unittest.TestCase):
         self.assertEqual(trace_payload["task"], "long training")
         self.assertEqual(trace_payload["events"][0]["type"], "long_task_poll")
         self.assertEqual(trace_payload["events"][0]["run_tag"], "run_01")
+
+    def test_project_namespace_accepts_own_agent_run_paths(self) -> None:
+        with TemporaryDirectory() as raw_tmp:
+            run_root = Path(raw_tmp) / "traditional_quant_research/output/agent_runs/run_01"
+            progress = run_root / "progress.json"
+            stdout = run_root / "stdout.log"
+            run_root.mkdir(parents=True)
+            progress.write_text("{}", encoding="utf-8")
+            stdout.write_text("", encoding="utf-8")
+
+            payload = validate_project_namespace(
+                project_id="traditional_quant_research",
+                run_id="run_01",
+                paths=[progress, stdout],
+                workspace_root=Path(raw_tmp),
+            )
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["namespace_root"], "traditional_quant_research/output/agent_runs/run_01")
+
+    def test_project_namespace_blocks_other_project_paths_without_cross_project_lease(self) -> None:
+        with TemporaryDirectory() as raw_tmp:
+            progress = Path(raw_tmp) / "daily_research/output/agent_runs/run_01/progress.json"
+            progress.parent.mkdir(parents=True)
+            progress.write_text("{}", encoding="utf-8")
+
+            payload = validate_project_namespace(
+                project_id="traditional_quant_research",
+                run_id="run_01",
+                paths=[progress],
+                workspace_root=Path(raw_tmp),
+            )
+
+        self.assertEqual(payload["status"], "blocked")
+        self.assertEqual(payload["reason"], "project_namespace_violation")
+        self.assertIn("daily_research/output/agent_runs/run_01/progress.json", payload["violating_paths"])
+
+    def test_status_does_not_read_other_project_namespace(self) -> None:
+        with TemporaryDirectory() as raw_tmp:
+            run_root = Path(raw_tmp) / "daily_research/output/agent_runs/run_01"
+            run_root.mkdir(parents=True)
+            progress = run_root / "progress.json"
+            stdout = run_root / "stdout.log"
+            progress.write_text(json.dumps({"current_step": 1, "total_steps": 2}), encoding="utf-8")
+            stdout.write_text("external project log\n", encoding="utf-8")
+
+            payload = build_status(
+                project_id="traditional_quant_research",
+                run_id="run_01",
+                progress_path=progress,
+                stdout_path=stdout,
+                workspace_root=Path(raw_tmp),
+            )
+
+        self.assertEqual(payload["status"], "blocked")
+        self.assertEqual(payload["reason"], "project_namespace_violation")
+        self.assertEqual(payload["eta_status"], "namespace_blocked")
+        self.assertEqual(payload["decision"], "project_namespace_violation")
+        self.assertEqual(payload["last_log_lines"], [])
+
+    def test_wait_once_blocks_other_project_namespace_before_waiting(self) -> None:
+        with TemporaryDirectory() as raw_tmp:
+            progress = Path(raw_tmp) / "daily_research/output/agent_runs/run_01/progress.json"
+            progress.parent.mkdir(parents=True)
+            progress.write_text("{}", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    PYTHON,
+                    "-m",
+                    "tools.brain.long_task_monitor",
+                    "wait-once",
+                    "--pid",
+                    "999999",
+                    "--project-id",
+                    "traditional_quant_research",
+                    "--run-id",
+                    "run_01",
+                    "--progress",
+                    str(progress),
+                    "--json",
+                ],
+                cwd=str(ROOT),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+            )
+            payload = json.loads(result.stdout)
+
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(payload["status"], "blocked")
+        self.assertEqual(payload["reason"], "project_namespace_violation")
+
+    def test_trace_event_records_project_namespace(self) -> None:
+        with TemporaryDirectory() as raw_tmp:
+            run_root = Path(raw_tmp) / "traditional_quant_research/output/agent_runs/run_01"
+            run_root.mkdir(parents=True)
+            progress = run_root / "progress.json"
+            progress.write_text(json.dumps({"current_step": 1, "total_steps": 2}), encoding="utf-8")
+
+            event = build_trace_event(
+                task="traditional quant run",
+                project_id="traditional_quant_research",
+                run_id="run_01",
+                pid=999999,
+                progress_path=progress,
+                workspace_root=Path(raw_tmp),
+            )
+
+        self.assertEqual(event["project_id"], "traditional_quant_research")
+        self.assertEqual(event["run_id"], "run_01")
+        self.assertEqual(event["namespace"]["status"], "ok")
 
 
 if __name__ == "__main__":

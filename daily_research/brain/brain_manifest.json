@@ -102,6 +102,45 @@
     "gemini_frontend_cmd": "daily_research/tools/gemini_frontend.cmd",
     "gemini_frontend_ps1": "daily_research/tools/gemini_frontend.ps1"
   },
+  "project_profile": {
+    "guard_profile": {
+      "active_artifact_guard": true,
+      "artifact_freshness": true,
+      "frontier_report": true,
+      "project_consistency": true,
+      "openmp_strict": true,
+      "brain_rules": true
+    },
+    "verification_profile": {
+      "always_commands": [
+        "git diff -- daily_research/output/active_execution_strategy.json",
+        "git diff --check",
+        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check",
+        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json"
+      ],
+      "big_artifact_paths": [
+        "daily_research/output/**",
+        "daily_research/cache/**",
+        "daily_research/archive/**"
+      ]
+    },
+    "commit_policy": {
+      "auto_commit": true,
+      "message_prefix": "daily_research",
+      "allowed_prefixes": [
+        "daily_research/"
+      ],
+      "block_on_baseline_overlap": true
+    },
+    "process_namespace": {
+      "root": "daily_research/output/agent_runs",
+      "run_path_template": "daily_research/output/agent_runs/<run_id>"
+    },
+    "cross_project_policy": {
+      "allow_by_default": false,
+      "lease_root": "brain/output/resource_leases"
+    }
+  },
   "handoff_contract": {
     "derive_entry_sequence_from_shared_contract": true,
     "body_entry_priority": [

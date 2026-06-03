@@ -58,6 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
     handoff.add_argument("--write-output", action="store_true")
 
     health = sub.add_parser("health", help="Run read-only brain and environment health checks.")
+    health.add_argument("--brain", default="workspace")
     health.add_argument("--json", action="store_true")
     health.add_argument("--write-output", action="store_true")
 
@@ -136,7 +137,8 @@ def build_payload(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
     if args.command == "handoff":
         raise ValueError("handoff is removed; use bootstrap --brain <brain_id|workspace>")
     if args.command == "health":
-        return "health", check_brain_health().to_dict()
+        brain = str(getattr(args, "brain", "") or "workspace")
+        return "health", check_brain_health(None if brain == "workspace" else brain).to_dict()
     if args.command in {"status", "preflight"}:
         child_brain = resolve_workflow_child_brain(args.workflow)
         payload = build_workflow_state(

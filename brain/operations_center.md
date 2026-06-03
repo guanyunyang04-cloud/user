@@ -10,12 +10,14 @@
 - 任务路由：
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow route --task "<task>" --json`
   - workspace 治理任务返回 `target.id=workspace`、`target.kind=workspace`、`target.domain=workspace_governance`。
+  - route 是 advisory sensor；治理词不得替 agent 覆盖唯一 hard child evidence。
 - 主脑或分脑 bootstrap：
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain <brain_id|workspace> --json`
-  - `workspace_governance` 是 workspace bootstrap alias，不是分脑 id。
+  - `workspace_governance` 是 workspace bootstrap alias，不是分脑 id；读取 `project_profile` 决定 guard、verification、commit 和 process namespace。
 
 ## 2. Skills / Brain / Tools 调用顺序
 - 先运行主脑 capsule，确认事实、推断、假设、权威层级、分支纪律、active artifact 禁区和目标分脑边界。
+- capsule 输出 `agent_selected_brain_id`、`selection_reason`、`routing_evidence` 与 `project_profile`；`needs_agent_decision` 是提示，不是 preflight blocker。
 - 再调用适用的本机 skill：TDD、debugging、planning、verification、文档、前端、安全和部署等通用操作流程以 `C:/Users/ASUS/.codex/skills` 为准。
 - 最后进入被主脑路由选中的分脑，读取项目事实、项目命令、证据边界和验证矩阵。
 - 冲突时先服从项目安全边界：如果通用 skill 默认要求 worktree、commit、写 spec 或扩大执行，而 brain 明确要求 `main`、不提交、不触碰 active artifact，则以 brain 约束为准。
@@ -41,13 +43,20 @@
 ## 5. 守卫入口
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`
-- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/project_consistency_check.py`
+- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow health --brain <brain_id|workspace> --json`
+- `daily_research/tools/project_consistency_check.py` 与 OpenMP strict 只属于 daily profile，不是 workspace 或 traditional 默认守卫。
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py agent-meta-audit --cwd . --mode compact`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py brain-burden-audit --cwd . --mode compact`
 - Agent Meta Protocol 守卫确认 agent 是元能力执行者，brain 是持久化载体，tools 是传感器。
 - `agent-meta-audit` 若返回 `agent_learning.pending_approval_count > 0`，下一次实质进展更新或最终答复必须主动提示待批准 / 待跟进 proposal；若为 `0`，可简短说明当前没有待批准 proposal。
 - `brain-burden-audit` 检查热路径预算、skill 体量、冗余兼容和非源缓存；blocked 项必须先处理再继续脑区治理写回。
 - `doc_guard` 已包含主分脑完整性检查；结构变更后仍建议单独跑一次 `integrity_check` 便于快速定位。
+- 项目验证从 `project_profile.verification_profile.always_commands` 读取；`selective_verification.py --paths <paths>` 必须按路径推断项目，不得默认注入 daily active guard。
+
+## 5.1 项目提交闭环
+- 完成项目任务且验证通过后使用项目提交助手：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.project_commit --project-id <project|workspace-brain> --task-summary "<summary>" --verified <commands> --json`。
+- 提交格式为 `<project_id>: <summary>`，trailer 包含 `Project:`、`Agent-Task:`、`Verified:`。
+- 只暂存 profile 允许范围；若有 baseline dirty overlap、跨项目路径、未验证或范围冲突，返回 `project_commit_scope_conflict`，不得强行提交。
 
 ## 6. 写回路由
 - 工作区级当前状态写回 `brain/state_center.md`。
@@ -58,8 +67,9 @@
 - 项目事实、实验状态、rXX 证据和项目命令写回被路由选中的分脑。
 
 ## 7. 长时任务运行纪律
-- 项目长任务必须受监管运行，任务主进程不得脱离 PID、日志、run tag 或产物路径追踪。
-- 启动模板：用 `Start-Process -PassThru` 启动目标命令，记录 PID、stdout/stderr 日志路径、run tag、预期 summary / progress / checkpoint 路径。
+- 项目长任务必须在 `<project>/output/agent_runs/<run_id>/` 下受监管运行，记录 PID、stdout/stderr、progress、summary、run tag 和产物路径。
+- 启动模板：用 `Start-Process -PassThru` 启动目标命令，日志写入当前项目 namespace；没有显式 cross-project lease 时，不得轮询、等待或停止其他项目 PID。
+- 资源租约写入 `brain/output/resource_leases/`；GPU、端口、数据 provider 等共享资源必须先声明 lease。
 - 轮询模板：启动后先短查 PID、日志和 GPU；一旦确认 GPU 进程已正式工作，默认使用前台 `Wait-Process -Id <pid> -Timeout 7200` 轮询，除非再次出现系统崩溃或宿主不可用。
 - `7200` 秒窗口结束后，先检查 PID、exit code、日志、progress、summary / checkpoint / artifact 时间戳；若进程仍在推进且没有明确代码错误、资源危险或用户停止指令，继续下一轮 `Wait-Process -Id <pid> -Timeout 7200`，不得杀进程或把窗口耗尽写成任务失败。
 - 每轮状态必须计算已用时间和预计剩余时间；状态来源优先使用 progress、PID、日志尾部、GPU/内存与最新产物时间戳。

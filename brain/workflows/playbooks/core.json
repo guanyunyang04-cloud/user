@@ -3,26 +3,26 @@
   "workflows": {
     "brain_handoff": {
       "description": "Resolve a main-brain-first capsule before entering project body work.",
-      "preflight": ["route_task", "main_context", "active_artifact_guard"],
-      "checklist": ["run_workspace_capsule", "confirm_routing_status", "read_child_context_only_if_selected", "confirm_active_artifact_guard"],
+      "preflight": ["route_task", "main_context", "project_profile_guard"],
+      "checklist": ["run_workspace_capsule", "confirm_routing_status", "read_child_context_only_if_selected", "confirm_project_profile", "confirm_profile_validation_commands"],
       "allowed_commands": ["C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task <task> --json", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow route --task <task> --json", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain <brain_id|workspace> --json"],
       "capability_hints": ["quickly expose main-brain routing, guard state, skill sync, and child-brain handoff paths", "use deep-dive commands only when compact capsule evidence is insufficient"],
-      "risk_signals": ["ambiguous_routing", "active_artifact_dirty", "stale_or_missing_global_skill", "loose_latest_stale_requires_explicit_tag"],
-      "verification_hints": ["confirm routing status before loading child context", "make active artifact diffs visible when the task touches active promotion state"],
+      "risk_signals": ["ambiguous_routing", "profile_guard_violation", "stale_or_missing_global_skill", "loose_latest_stale_requires_explicit_tag"],
+      "verification_hints": ["confirm routing status before loading child context", "use the selected project_profile verification_profile commands instead of global project defaults"],
       "artifacts": ["brain/brain_manifest.json", "brain/workflows/registry.json"],
       "writeback_routes": {"workspace_state": "brain/state_center.md", "workspace_operations": "brain/operations_center.md", "workspace_governance": "brain/governance_layer.md"},
       "stop_conditions": [],
       "completion": ["schema_v4_capsule_returned", "agent_meta_contract_visible", "routing_target_explicit", "guards_listed"],
-      "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json"]
+      "validation_commands": ["profile:verification_profile.always_commands"]
     },
     "brain_maintenance": {
       "description": "Maintain compact workspace brain documents, references, registries, and guards without changing project runtime behavior.",
-      "preflight": ["brain_integrity", "doc_guard", "project_consistency"],
+      "preflight": ["brain_integrity", "doc_guard", "project_profile_guard"],
       "checklist": ["inspect_current_brain_docs", "keep_workspace_centers_compact", "route_project_facts_to_child_brains", "run_guards"],
-      "allowed_commands": ["C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/project_consistency_check.py"],
+      "allowed_commands": ["C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow health --brain <brain_id|workspace> --json"],
       "capability_hints": ["edit compact brain docs, workflow metadata, guards, and canonical workspace skill with focused tests", "sync installed workspace-brain skill after canonical skill changes"],
       "risk_signals": ["active_artifact_dirty", "runtime_state_confused_with_brain_truth", "stale_or_missing_global_skill", "project_fact_should_route_to_child_brain"],
-      "verification_hints": ["run doc_guard and integrity_check after brain metadata edits", "run skill_install --install then --check after canonical skill edits"],
+      "verification_hints": ["run doc_guard and integrity_check after brain metadata edits", "run selected project health/profile commands only when the task is project-scoped", "run skill_install --install then --check after canonical skill edits"],
       "artifacts": ["brain/", "brain/references/"],
       "writeback_routes": {"workspace_state": "brain/state_center.md", "workspace_knowledge": "brain/knowledge_center.md", "workspace_operations": "brain/operations_center.md"},
       "stop_conditions": [],
@@ -30,32 +30,32 @@
       "validation_commands": ["C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json"]
     },
     "brain_system_audit": {
-      "description": "Audit all workspace brain roots, routing, workflow registry state, language policy, and active-artifact guard status.",
+      "description": "Audit all workspace brain roots, routing, workflow registry state, language policy, and project profile guard status.",
       "preflight": ["brain_catalog", "doc_guard", "brain_integrity"],
-      "checklist": ["list_attached_brains", "list_noncanonical_brains", "check_core_doc_line_counts", "check_language_policy", "check_workflow_registry_mode", "check_active_artifact_diff"],
+      "checklist": ["list_attached_brains", "list_noncanonical_brains", "check_core_doc_line_counts", "check_language_policy", "check_workflow_registry_mode", "check_project_profiles"],
       "allowed_commands": ["C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow audit-brain --scope all --json", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json"],
-      "capability_hints": ["summarize catalog, language policy, workflow registry, noncanonical brain roots, and active artifact diff state", "separate actionable warnings from acknowledged non-truth tooling/cache roots"],
-      "risk_signals": ["catalog_missing", "manifest_catalog_conflict", "active_artifact_dirty", "cache_brain_misread_as_truth"],
+      "capability_hints": ["summarize catalog, language policy, workflow registry, noncanonical brain roots, and project profile guard state", "separate actionable warnings from acknowledged non-truth tooling/cache roots"],
+      "risk_signals": ["catalog_missing", "manifest_catalog_conflict", "profile_guard_violation", "cache_brain_misread_as_truth"],
       "verification_hints": ["run audit-brain for full structured context", "use doc_guard and integrity_check to confirm audit findings"],
       "artifacts": ["brain/brain_catalog.json", "brain/language_policy.md", "brain/workflows/registry.json"],
       "writeback_routes": {"workspace": "brain/", "references": "brain/references/"},
       "stop_conditions": ["catalog_missing", "manifest_catalog_conflict"],
       "completion": ["audit_verdict_reported", "noncanonical_brains_classified", "language_policy_reported"],
-      "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json"]
+      "validation_commands": ["git diff --check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json"]
     },
     "brain_architecture_refactor": {
       "description": "Execute an explicitly approved breaking brain-platform architecture migration.",
-      "preflight": ["brain_system_audit", "brain_catalog", "active_artifact_guard_clean"],
+      "preflight": ["brain_system_audit", "brain_catalog", "project_profile_guard"],
       "checklist": ["write_or_update_tests_first", "migrate_platform_entrypoints", "remove_old_compatibility_paths", "update_guards_and_docs", "write_refactor_reference", "run_full_guards"],
       "allowed_commands": ["C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow audit-brain --scope all --json", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json"],
       "capability_hints": ["make breaking brain-platform migrations test-first and remove stale paths completely when the cleanup is deterministic", "update workflow metadata, tooling, docs, and canonical skill together"],
-      "risk_signals": ["active_artifact_dirty", "tests_cannot_express_migration", "manifest_catalog_conflict_unresolved", "guard_failure"],
-      "verification_hints": ["run targeted workflow/capsule/platform tests before full guards", "make active artifact diff visible in the final verification set"],
+      "risk_signals": ["profile_guard_violation", "tests_cannot_express_migration", "manifest_catalog_conflict_unresolved", "guard_failure"],
+      "verification_hints": ["run targeted workflow/capsule/platform tests before full guards", "run the selected project profile validation commands when the refactor affects a child brain"],
       "artifacts": ["tools/brain/", "brain/workflows/", "brain/skills/workspace-brain/"],
       "writeback_routes": {"workspace": "brain/", "references": "brain/references/", "daily_research": "daily_research/brain/"},
       "stop_conditions": ["tests_cannot_express_migration", "manifest_catalog_conflict_unresolved", "guard_failure"],
       "completion": ["old_cli_paths_fail", "new_workspace_cli_works", "doc_and_integrity_guards_pass"],
-      "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json", "git diff --check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json"]
+      "validation_commands": ["git diff --check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json", "profile:verification_profile.always_commands"]
     },
     "brain_writeback": {
       "description": "Generate or apply a routed workspace/child brain writeback from verified evidence.",
@@ -74,16 +74,16 @@
     "brain_writeback_verified": {
       "description": "Write verified mainline, evidence, experiment, or contract changes back into brain references and indexes.",
       "preflight": ["verified_source_artifact", "writeback_route_selected", "doc_guard"],
-      "checklist": ["write_dated_reference_for_large_evidence", "update_compact_current_docs_only_if_needed", "rebuild_evidence_registry", "run_doc_and_brain_guards", "confirm_active_artifact_unchanged"],
+      "checklist": ["write_dated_reference_for_large_evidence", "update_compact_current_docs_only_if_needed", "rebuild_evidence_registry", "run_doc_and_brain_guards", "confirm_profile_guard_status"],
       "allowed_commands": ["C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow writeback-plan --source <source> --json", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow evidence-index --rebuild --json", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json"],
       "capability_hints": ["register verified evidence through dated references, compact current docs, and rebuilt registries", "surface source, route, and evidence gaps before applying writeback"],
-      "risk_signals": ["source_evidence_unverified", "writeback_route_unclear", "doc_or_brain_guard_fails", "active_artifact_dirty"],
-      "verification_hints": ["run writeback-plan with the explicit source before editing docs", "run evidence-index --rebuild, doc_guard, integrity_check, and diff checks after writeback"],
+      "risk_signals": ["source_evidence_unverified", "writeback_route_unclear", "doc_or_brain_guard_fails", "profile_guard_violation"],
+      "verification_hints": ["run writeback-plan with the explicit source before editing docs", "run evidence-index --rebuild, doc_guard, integrity_check, and selected profile diff checks after writeback"],
       "artifacts": ["daily_research/brain/references/evidence_registry.json"],
       "stop_conditions": ["source_evidence_unverified", "writeback_route_unclear", "doc_or_brain_guard_fails"],
       "writeback_routes": {"workspace_references": "brain/references/", "daily_research_references": "daily_research/brain/references/"},
       "completion": ["reference_docs_updated", "evidence_registry_rebuilt", "doc_guard_and_brain_integrity_ok"],
-      "validation_commands": ["git diff -- daily_research/output/active_execution_strategy.json", "git diff --check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json"]
+      "validation_commands": ["git diff --check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json", "profile:verification_profile.always_commands"]
     }
   }
 }

@@ -90,6 +90,17 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertTrue(payload["decision_required"])
         self.assertEqual(payload["recommended_default"], "none")
 
+    def test_route_governance_wording_with_single_hard_child_selects_child(self) -> None:
+        payload = route_task_to_brain("接管 traditional_quant_research，检查该分脑是否需要维护")
+
+        self.assertEqual(payload["status"], "selected")
+        self.assertEqual(payload["selected_brain_id"], "traditional_quant_research")
+        self.assertEqual(payload["target"]["kind"], "child")
+        self.assertEqual(payload["target"]["domain"], "traditional_quant_research")
+        self.assertFalse(payload["decision_required"])
+        self.assertEqual(payload["recommended_default"], "traditional_quant_research")
+        self.assertIn("workspace_governance_signal", payload)
+
     def test_route_soft_terms_need_agent_decision(self) -> None:
         for task in ("training 复盘", "当前数据集不完整"):
             with self.subTest(task=task):
@@ -206,10 +217,31 @@ class BrainCapsuleTest(unittest.TestCase):
 
         self.assertEqual(payload["routing"]["status"], "needs_agent_decision")
         self.assertEqual(payload["target_kind"], "ambiguous")
-        self.assertIn("route_needs_agent_decision", payload["preflight_blockers"])
+        self.assertNotIn("route_needs_agent_decision", payload["preflight_blockers"])
+        self.assertIn("agent_selected_brain_id", payload)
+        self.assertEqual(payload["agent_selected_brain_id"], "")
+        self.assertIn("routing_evidence", payload)
         self.assertNotIn("child_context", payload)
         self.assertNotIn("workspace_context", payload)
         self.assertTrue(any("candidate only:" in command and "daily_research" in command for command in payload["available_deep_dive_commands"]))
+
+    def test_capsule_traditional_quant_governance_wording_uses_project_profile(self) -> None:
+        payload = build_task_capsule(task="接管 traditional_quant_research，检查该分脑是否需要维护", workflow="auto")
+        encoded_guards = json.dumps(payload["guards"], ensure_ascii=False)
+        encoded_payload = json.dumps(payload, ensure_ascii=False)
+
+        self.assertEqual(payload["routing"]["status"], "selected")
+        self.assertEqual(payload["agent_selected_brain_id"], "traditional_quant_research")
+        self.assertEqual(payload["target_kind"], "child")
+        self.assertEqual(payload["workflow_domain"], "traditional_quant_research")
+        self.assertIn("child_context", payload)
+        self.assertIn("project_profile", payload)
+        self.assertEqual(payload["project_profile"]["project_id"], "traditional_quant_research")
+        self.assertNotIn("active_artifact_guard", payload["guards"])
+        self.assertNotIn("frontier_report", payload["guards"])
+        self.assertNotIn("daily_research/output/active_execution_strategy.json", encoded_guards)
+        self.assertNotIn("daily_research/output/active_execution_strategy.json", encoded_payload)
+        self.assertIn("traditional_quant_research/tests", encoded_guards)
 
     def test_capsule_long_task_wording_stays_in_brain_handoff(self) -> None:
         payload = build_task_capsule(

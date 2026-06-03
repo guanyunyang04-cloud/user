@@ -11,6 +11,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.brain.platform import PYTHON_EXECUTABLE, WORKSPACE_ROOT
+from tools.brain.project_profiles import infer_project_id_from_paths, load_project_profile
 
 
 ACTIVE_ARTIFACT = "daily_research/output/active_execution_strategy.json"
@@ -189,6 +190,14 @@ def _is_docs_only_path(path: str) -> bool:
 
 def build_verification_plan(*, paths: list[str] | None = None, base: str | None = None) -> dict[str, Any]:
     changed_paths = _unique(paths if paths is not None else _git_changed_paths(base=base))
+    project_id = infer_project_id_from_paths(changed_paths)
+    project_profile = load_project_profile(project_id if project_id != "cross_project" else "workspace")
+    verification_profile = (
+        project_profile.get("verification_profile", {}) if isinstance(project_profile.get("verification_profile"), dict) else {}
+    )
+    always_commands = list(verification_profile.get("always_commands", []) or ALWAYS_COMMANDS)
+    default_test_commands = list(verification_profile.get("default_test_commands", []) or [])
+    body_root = str(project_profile.get("body_root", "") or "").strip().replace("\\", "/")
     selected_commands: list[str] = []
     deferred_long_commands: list[str] = []
     warnings: list[str] = []
@@ -196,6 +205,13 @@ def build_verification_plan(*, paths: list[str] | None = None, base: str | None 
     manual_review_required = False
 
     for path in changed_paths:
+        if project_id not in {"daily_research", "workspace", "cross_project"} and body_root and path.startswith(f"{body_root}/"):
+            if path.endswith(".py"):
+                risk_level = _risk_max(risk_level, "medium")
+                for command in default_test_commands:
+                    _add_command(selected_commands, command)
+            continue
+
         if path == ACTIVE_ARTIFACT:
             risk_level = "critical"
             manual_review_required = True
@@ -314,8 +330,10 @@ def build_verification_plan(*, paths: list[str] | None = None, base: str | None 
         "schema_version": 1,
         "mode": "recommend_only",
         "base": str(base or ""),
+        "project_id": project_id,
+        "project_profile": project_profile,
         "changed_paths": changed_paths,
-        "always_commands": list(ALWAYS_COMMANDS),
+        "always_commands": always_commands,
         "selected_commands": selected_commands,
         "deferred_long_commands": deferred_long_commands,
         "risk_level": risk_level,
@@ -369,4 +387,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -436,21 +436,14 @@ def route_task_to_brain(task: str) -> dict[str, Any]:
         recommended_default = "none"
         reason = "multiple child brains matched; main brain must not default to a child"
         decision_reason = "multiple child brains have hard routing evidence"
-    elif hard_children and workspace_override_matches:
-        selected = ""
-        target = _ambiguous_target()
-        status = "needs_agent_decision"
-        confidence = "medium"
-        decision_required = True
-        recommended_default = "workspace"
-        reason = "workspace governance intent and child hard evidence both matched"
-        decision_reason = "agent must decide whether this is governance about a child brain or body work inside the child"
     elif hard_children:
         selected = hard_children[0].brain_id
         target = _child_target(selected)
         confidence = "high"
-        recommended_default = "child"
+        recommended_default = selected
         reason = f"task matched {selected} via {', '.join(hard_children[0].sources)}"
+        if workspace_override_matches:
+            reason += "; workspace governance terms are advisory only because a single child has hard evidence"
     elif workspace_override_matches or has_workspace_candidate:
         confidence = "high" if workspace_override_matches else "medium"
         reason = "task matched workspace governance terms"
@@ -485,5 +478,10 @@ def route_task_to_brain(task: str) -> dict[str, Any]:
         "decision_required": decision_required,
         "decision_reason": decision_reason,
         "recommended_default": recommended_default,
+        "workspace_governance_signal": {
+            "matched": bool(workspace_override_matches or has_workspace_candidate),
+            "matched_terms": workspace_override_matches,
+            "advisory_only": bool(hard_children and len(hard_children) == 1),
+        },
         "candidate_summary": candidate_summary,
     }

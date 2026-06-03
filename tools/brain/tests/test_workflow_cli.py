@@ -109,19 +109,26 @@ class BrainWorkflowCliTest(unittest.TestCase):
     def test_health_cli_aggregates_read_only_checks(self) -> None:
         payload = run_cli("health", "--json")
 
-        self.assertEqual(payload["status"], "failed")
+        self.assertIn(payload["status"], {"ok", "failed"})
         self.assertIn("elapsed_seconds", payload)
         self.assertIn("brain_integrity", payload["checks"])
         self.assertIn("doc_guard", payload["checks"])
-        self.assertIn("project_consistency", payload["checks"])
-        self.assertIn("openmp_strict", payload["checks"])
-        self.assertFalse(payload["checks"]["project_consistency"]["ok"])
-        self.assertEqual(payload["checks"]["project_consistency"]["returncode"], 1)
+        self.assertNotIn("project_consistency", payload["checks"])
+        self.assertNotIn("openmp_strict", payload["checks"])
+        for check_payload in payload["checks"].values():
+            self.assertIn("elapsed_seconds", check_payload)
+
+        daily_payload = run_cli("health", "--brain", "daily_research", "--json")
+        self.assertEqual(daily_payload["status"], "failed")
+        self.assertIn("project_consistency", daily_payload["checks"])
+        self.assertIn("openmp_strict", daily_payload["checks"])
+        self.assertFalse(daily_payload["checks"]["project_consistency"]["ok"])
+        self.assertEqual(daily_payload["checks"]["project_consistency"]["returncode"], 1)
         self.assertIn(
             "active_manifest_missing_due_to_execution_freeze_or_payload_loss",
-            payload["checks"]["project_consistency"]["stdout_tail"],
+            daily_payload["checks"]["project_consistency"]["stdout_tail"],
         )
-        for check_payload in payload["checks"].values():
+        for check_payload in daily_payload["checks"].values():
             self.assertIn("elapsed_seconds", check_payload)
 
     def test_preflight_cli_does_not_create_study_directories(self) -> None:

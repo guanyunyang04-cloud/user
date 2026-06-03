@@ -145,7 +145,22 @@ class SelectiveVerificationTest(unittest.TestCase):
         self.assertEqual(payload["changed_paths"], ["daily_research/brain/state_center.md"])
         self.assertEqual(payload["selected_commands"], [])
 
+    def test_traditional_quant_change_uses_project_profile_without_daily_active_guard(self) -> None:
+        payload = build_verification_plan(paths=["traditional_quant_research/backtest.py"])
+        encoded = json.dumps(payload, ensure_ascii=False)
+
+        self.assertEqual(payload["project_id"], "traditional_quant_research")
+        self.assertNotIn("daily_research/output/active_execution_strategy.json", encoded)
+        self.assertIn(f"{PYTHON} -m pytest traditional_quant_research/tests -q", payload["selected_commands"])
+        self.assertIn("git diff --check", payload["always_commands"])
+
+    def test_daily_change_keeps_daily_active_guard(self) -> None:
+        payload = build_verification_plan(paths=["daily_research/path_policy/forecast_features.py"])
+        encoded = json.dumps(payload, ensure_ascii=False)
+
+        self.assertEqual(payload["project_id"], "daily_research")
+        self.assertIn("daily_research/output/active_execution_strategy.json", encoded)
+
 
 if __name__ == "__main__":
     unittest.main()
-

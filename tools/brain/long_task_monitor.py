@@ -12,6 +12,7 @@ from typing import Any
 
 DEFAULT_TIMEOUT_SECONDS = 7200
 DEFAULT_STALE_AFTER_SECONDS = 3600
+DEFAULT_WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _utc_now() -> datetime:
@@ -137,6 +138,55 @@ def _parse_child_pids(value: str | list[int] | None) -> list[int]:
     return out
 
 
+def _normalize_rel_path(path: str | Path, *, workspace_root: Path) -> str:
+    candidate = Path(path)
+    try:
+        rel = candidate.resolve().relative_to(workspace_root.resolve())
+        return rel.as_posix()
+    except Exception:
+        return str(candidate).replace("\\", "/")
+
+
+def validate_project_namespace(
+    *,
+    project_id: str,
+    run_id: str,
+    paths: list[str | Path],
+    workspace_root: str | Path | None = None,
+    allow_cross_project: bool = False,
+) -> dict[str, Any]:
+    project = str(project_id or "").strip().replace("\\", "/").strip("/")
+    run = str(run_id or "").strip().replace("\\", "/").strip("/")
+    root = Path(workspace_root) if workspace_root is not None else DEFAULT_WORKSPACE_ROOT
+    namespace_root = f"{project}/output/agent_runs/{run}" if project and run else ""
+    rel_paths = [_normalize_rel_path(path, workspace_root=root) for path in paths if str(path or "").strip()]
+    if allow_cross_project or not namespace_root:
+        return {
+            "schema_version": 1,
+            "status": "ok",
+            "project_id": project,
+            "run_id": run,
+            "namespace_root": namespace_root,
+            "paths": rel_paths,
+            "violating_paths": [],
+            "allow_cross_project": bool(allow_cross_project),
+        }
+    violating = [path for path in rel_paths if path and not (path == namespace_root or path.startswith(f"{namespace_root}/"))]
+    payload = {
+        "schema_version": 1,
+        "status": "blocked" if violating else "ok",
+        "project_id": project,
+        "run_id": run,
+        "namespace_root": namespace_root,
+        "paths": rel_paths,
+        "violating_paths": violating,
+        "allow_cross_project": bool(allow_cross_project),
+    }
+    if violating:
+        payload["reason"] = "project_namespace_violation"
+    return payload
+
+
 def _progress_fraction(progress: dict[str, Any]) -> tuple[float | None, float | None, float | None]:
     current = _number(progress, "current_step", "completed_steps", "step", "global_step")
     total = _number(progress, "total_steps", "step_count", "max_steps")
@@ -200,16 +250,53 @@ def build_template(
 def build_status(
     *,
     pid: int | None = None,
+    project_id: str = "",
+    run_id: str = "",
     progress_path: str | Path | None = None,
     stdout_path: str | Path | None = None,
     stderr_path: str | Path | None = None,
     artifact_dir: str | Path | None = None,
     stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS,
+    workspace_root: str | Path | None = None,
+    allow_cross_project: bool = False,
 ) -> dict[str, Any]:
     progress_file = Path(progress_path) if progress_path else None
     stdout_file = Path(stdout_path) if stdout_path else None
     stderr_file = Path(stderr_path) if stderr_path else None
     artifact_path = Path(artifact_dir) if artifact_dir else None
+    namespace = validate_project_namespace(
+        project_id=project_id,
+        run_id=run_id,
+        paths=[path for path in (progress_file, stdout_file, stderr_file, artifact_path) if path is not None],
+        workspace_root=workspace_root,
+        allow_cross_project=allow_cross_project,
+    )
+    if namespace.get("status") == "blocked":
+        return {
+            "schema_version": 1,
+            "status": "blocked",
+            "reason": "project_namespace_violation",
+            "project_id": str(project_id or ""),
+            "run_id": str(run_id or ""),
+            "namespace": namespace,
+            "pid": pid,
+            "pid_alive": False,
+            "progress_path": str(progress_file or ""),
+            "elapsed_seconds": None,
+            "estimated_remaining_seconds": None,
+            "eta_at": "",
+            "eta_status": "namespace_blocked",
+            "progress_percent": None,
+            "current_step": None,
+            "total_steps": None,
+            "stage": "",
+            "latest_metric": {},
+            "last_log_lines": [],
+            "last_error_lines": [],
+            "artifact_mtime": "",
+            "updated_at": "",
+            "decision": "project_namespace_violation",
+        }
     now = _utc_now()
     progress = _load_json(progress_file)
     started = _started_at(progress, progress_file, now)
@@ -249,6 +336,9 @@ def build_status(
 
     return {
         "schema_version": 1,
+        "project_id": str(project_id or ""),
+        "run_id": str(run_id or ""),
+        "namespace": namespace,
         "pid": pid,
         "pid_alive": _pid_alive(pid),
         "progress_path": str(progress_file or ""),
@@ -272,6 +362,8 @@ def build_status(
 def build_trace_event(
     *,
     task: str = "",
+    project_id: str = "",
+    run_id: str = "",
     step_id: str = "",
     run_tag: str = "",
     pid: int | None = None,
@@ -283,6 +375,8 @@ def build_trace_event(
     artifact_dir: str | Path | None = None,
     stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS,
     final_verification: str = "",
+    workspace_root: str | Path | None = None,
+    allow_cross_project: bool = False,
 ) -> dict[str, Any]:
     progress_file = Path(progress_path) if progress_path else None
     stdout_file = Path(stdout_path) if stdout_path else None
@@ -290,17 +384,24 @@ def build_trace_event(
     artifact_path = Path(artifact_dir) if artifact_dir else None
     status = build_status(
         pid=pid,
+        project_id=project_id,
+        run_id=run_id,
         progress_path=progress_file,
         stdout_path=stdout_file,
         stderr_path=stderr_file,
         artifact_dir=artifact_path,
         stale_after_seconds=stale_after_seconds,
+        workspace_root=workspace_root,
+        allow_cross_project=allow_cross_project,
     )
     eta_no_eta_reason = ""
     if status.get("eta_status") not in {"estimated", "completed"}:
         eta_no_eta_reason = str(status.get("eta_status") or "progress_unavailable")
     event = {
         "type": "long_task_poll",
+        "project_id": str(project_id or ""),
+        "run_id": str(run_id or ""),
+        "namespace": dict(status.get("namespace", {}) or {}),
         "step_id": str(step_id or ""),
         "summary": f"long task poll for {run_tag or task or 'unnamed task'}",
         "evidence": (
@@ -389,26 +490,34 @@ def build_parser() -> argparse.ArgumentParser:
 
     status = sub.add_parser("status", help="Read PID, logs, progress, artifacts, and ETA.")
     status.add_argument("--pid", type=int, default=0)
+    status.add_argument("--project-id", default="")
+    status.add_argument("--run-id", default="")
     status.add_argument("--progress", default="")
     status.add_argument("--stdout", default="")
     status.add_argument("--stderr", default="")
     status.add_argument("--artifact-dir", default="")
     status.add_argument("--stale-after-seconds", type=int, default=DEFAULT_STALE_AFTER_SECONDS)
+    status.add_argument("--allow-cross-project", action="store_true")
     status.add_argument("--json", action="store_true")
 
     wait_once = sub.add_parser("wait-once", help="Run one Wait-Process window, then report status.")
     wait_once.add_argument("--pid", type=int, required=True)
+    wait_once.add_argument("--project-id", default="")
+    wait_once.add_argument("--run-id", default="")
     wait_once.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     wait_once.add_argument("--progress", default="")
     wait_once.add_argument("--stdout", default="")
     wait_once.add_argument("--stderr", default="")
     wait_once.add_argument("--artifact-dir", default="")
     wait_once.add_argument("--stale-after-seconds", type=int, default=DEFAULT_STALE_AFTER_SECONDS)
+    wait_once.add_argument("--allow-cross-project", action="store_true")
     wait_once.add_argument("--json", action="store_true")
 
     trace_poll = sub.add_parser("trace-poll", help="Build and optionally append a structured long-task poll trace event.")
     trace_poll.add_argument("--trace-json", default="")
     trace_poll.add_argument("--task", default="")
+    trace_poll.add_argument("--project-id", default="")
+    trace_poll.add_argument("--run-id", default="")
     trace_poll.add_argument("--step-id", default="")
     trace_poll.add_argument("--run-tag", default="")
     trace_poll.add_argument("--pid", type=int, default=0)
@@ -420,6 +529,7 @@ def build_parser() -> argparse.ArgumentParser:
     trace_poll.add_argument("--artifact-dir", default="")
     trace_poll.add_argument("--stale-after-seconds", type=int, default=DEFAULT_STALE_AFTER_SECONDS)
     trace_poll.add_argument("--final-verification", default="")
+    trace_poll.add_argument("--allow-cross-project", action="store_true")
     trace_poll.add_argument("--json", action="store_true")
     return parser
 
@@ -430,6 +540,33 @@ def main() -> int:
         _print_payload(build_template(timeout_seconds=args.timeout), as_json=bool(args.json))
         return 0
     if args.command == "wait-once":
+        namespace = validate_project_namespace(
+            project_id=str(getattr(args, "project_id", "") or ""),
+            run_id=str(getattr(args, "run_id", "") or ""),
+            paths=[
+                path
+                for path in (
+                    str(getattr(args, "progress", "") or ""),
+                    str(getattr(args, "stdout", "") or ""),
+                    str(getattr(args, "stderr", "") or ""),
+                    str(getattr(args, "artifact_dir", "") or ""),
+                )
+                if path
+            ],
+            allow_cross_project=bool(getattr(args, "allow_cross_project", False)),
+        )
+        if namespace.get("status") == "blocked":
+            payload = {
+                "schema_version": 1,
+                "status": "blocked",
+                "reason": "project_namespace_violation",
+                "project_id": str(getattr(args, "project_id", "") or ""),
+                "run_id": str(getattr(args, "run_id", "") or ""),
+                "namespace": namespace,
+                "pid": int(getattr(args, "pid", 0) or 0),
+            }
+            _print_payload(payload, as_json=bool(getattr(args, "json", False)))
+            return 2
         subprocess.run(
             [
                 "powershell",
@@ -442,6 +579,8 @@ def main() -> int:
     if args.command == "trace-poll":
         event = build_trace_event(
             task=str(getattr(args, "task", "") or ""),
+            project_id=str(getattr(args, "project_id", "") or ""),
+            run_id=str(getattr(args, "run_id", "") or ""),
             step_id=str(getattr(args, "step_id", "") or ""),
             run_tag=str(getattr(args, "run_tag", "") or ""),
             pid=int(getattr(args, "pid", 0) or 0),
@@ -453,6 +592,7 @@ def main() -> int:
             artifact_dir=str(getattr(args, "artifact_dir", "") or "") or None,
             stale_after_seconds=int(getattr(args, "stale_after_seconds", DEFAULT_STALE_AFTER_SECONDS)),
             final_verification=str(getattr(args, "final_verification", "") or ""),
+            allow_cross_project=bool(getattr(args, "allow_cross_project", False)),
         )
         trace_json = str(getattr(args, "trace_json", "") or "")
         if trace_json:
@@ -461,11 +601,14 @@ def main() -> int:
         return 0
     payload = build_status(
         pid=int(getattr(args, "pid", 0) or 0),
+        project_id=str(getattr(args, "project_id", "") or ""),
+        run_id=str(getattr(args, "run_id", "") or ""),
         progress_path=str(getattr(args, "progress", "") or "") or None,
         stdout_path=str(getattr(args, "stdout", "") or "") or None,
         stderr_path=str(getattr(args, "stderr", "") or "") or None,
         artifact_dir=str(getattr(args, "artifact_dir", "") or "") or None,
         stale_after_seconds=int(getattr(args, "stale_after_seconds", DEFAULT_STALE_AFTER_SECONDS)),
+        allow_cross_project=bool(getattr(args, "allow_cross_project", False)),
     )
     _print_payload(payload, as_json=bool(getattr(args, "json", False)))
     return 0

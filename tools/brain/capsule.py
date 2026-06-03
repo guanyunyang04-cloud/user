@@ -23,6 +23,7 @@ from tools.brain.platform import (
     resolve_bootstrap,
     select_workflow_for_task,
 )
+from tools.brain.project_profiles import load_project_profile
 from tools.brain.routing import route_task_to_brain
 from tools.brain.rules import run_brain_rules
 from tools.brain.runtime_context import (
@@ -190,8 +191,6 @@ def _preflight_blockers(*, routing: dict[str, Any], main_context: dict[str, Any]
         blockers.append("not_on_main_for_mutation")
     if routing.get("status") == "ambiguous":
         blockers.append("ambiguous_routing")
-    if routing.get("status") == "needs_agent_decision":
-        blockers.append("route_needs_agent_decision")
     target = routing.get("target", {})
     if routing.get("status") == "selected":
         target_kind = str(target.get("kind", "") if isinstance(target, dict) else "")
@@ -298,6 +297,11 @@ def build_task_capsule(
     target_kind = str(target.get("kind", "") or ("child" if target_id in child_brain_ids() else "workspace"))
     workflow_domain = str(target.get("domain", "") or ("workspace_governance" if target_kind == "workspace" else target_id))
     selected_brain_id = target_id if target_kind == "child" else ""
+    project_profile = load_project_profile(selected_brain_id if selected_brain_id else "workspace")
+    guard_profile = project_profile.get("guard_profile", {}) if isinstance(project_profile.get("guard_profile"), dict) else {}
+    verification_profile = (
+        project_profile.get("verification_profile", {}) if isinstance(project_profile.get("verification_profile"), dict) else {}
+    )
     selection = (
         select_workflow_for_task(task, intent=str(intent or "read"))
         if workflow == "auto"
@@ -319,20 +323,21 @@ def build_task_capsule(
         )
         risk_signals.append("long_task_without_pid_log_progress_or_eta")
         verification_hints.append("for long jobs, report PID status, elapsed time, progress, ETA, log tail, artifact mtime, and next decision after each wait window")
-    rules = run_brain_rules(has_explicit_run_tag=bool(run_tag))
+    rules = (
+        run_brain_rules(has_explicit_run_tag=bool(run_tag))
+        if bool(guard_profile.get("brain_rules"))
+        else {"status": "ok", "error_count": 0, "warning_count": 0, "findings": []}
+    )
     guards: dict[str, Any] = {
         "rule_report": rules,
-        "validation_commands": [
-            f"git diff -- {daily_research_adapter.ACTIVE_ARTIFACT.as_posix()}",
-            "git diff --check",
-            f"{PYTHON_EXECUTABLE} -m tools.brain.doc_guard check",
-            f"{PYTHON_EXECUTABLE} -m tools.brain.integrity_check --json",
-        ],
+        "validation_commands": list(verification_profile.get("always_commands", []) or []),
     }
-    if selected_brain_id == "daily_research":
+    if selected_brain_id == "daily_research" and bool(guard_profile.get("active_artifact_guard")):
         guards.update(daily_research_adapter.capsule_guard_additions(rules))
-        if "frontier_report" in guards:
+        if "frontier_report" in guards and bool(guard_profile.get("frontier_report")):
             guards["frontier_report"] = summarize_frontier(guards["frontier_report"], profile=context_profile)
+        elif "frontier_report" in guards:
+            guards.pop("frontier_report", None)
 
     raw_main_context = _main_context()
     main_context = compact_main_context(raw_main_context, profile=context_profile)
@@ -374,6 +379,16 @@ def build_task_capsule(
         "run_tag": run_tag,
         "main_context": main_context,
         "routing": routing,
+        "agent_selected_brain_id": selected_brain_id if routing.get("status") == "selected" else "",
+        "selection_reason": routing.get("reason", ""),
+        "routing_evidence": {
+            "status": routing.get("status", ""),
+            "confidence": routing.get("confidence", ""),
+            "decision_required": bool(routing.get("decision_required")),
+            "candidate_summary": routing.get("candidate_summary", []),
+            "workspace_governance_signal": routing.get("workspace_governance_signal", {}),
+        },
+        "project_profile": project_profile,
         "guards": guards,
         "next_allowed_actions": workflow_state.get("next_allowed_actions", []),
         "assumptions": [

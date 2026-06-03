@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.brain.adapters import daily_research as daily_research_adapter
+from tools.brain.project_profiles import load_project_profile
 
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
@@ -86,6 +87,7 @@ class BrainBootstrapState:
     child_optional_paths: dict[str, str] = field(default_factory=dict)
     child_write_routes: dict[str, str] = field(default_factory=dict)
     artifact_freshness: dict[str, Any] = field(default_factory=dict)
+    project_profile: dict[str, Any] = field(default_factory=dict)
     workflow_hints: dict[str, Any] = field(default_factory=dict)
     encoding_report: dict[str, Any] = field(default_factory=dict)
 
@@ -446,6 +448,18 @@ def _dedupe(paths: list[Path]) -> list[Path]:
     return out
 
 
+def _dedupe_text(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
+
+
 def _split_contract_source(source: str) -> tuple[Path, str]:
     path_text, _, key = str(source).partition("#")
     return Path(path_text), key
@@ -580,7 +594,9 @@ def resolve_bootstrap(child_id: str | None = None) -> BrainBootstrapState:
     shared_contract = _shared_contract(main_manifest)
     main_order = _build_main_order(main_manifest)
     main_paths = [path.as_posix() for path in main_order]
-    artifact_freshness = resolve_artifact_freshness().to_dict()
+    project_profile = load_project_profile(child_id or "workspace")
+    guard_profile = project_profile.get("guard_profile", {}) if isinstance(project_profile.get("guard_profile"), dict) else {}
+    artifact_freshness = resolve_artifact_freshness().to_dict() if bool(guard_profile.get("artifact_freshness")) else {}
     registry = load_workflow_registry(child_id)
 
     if child_id is None:
@@ -597,6 +613,7 @@ def resolve_bootstrap(child_id: str | None = None) -> BrainBootstrapState:
             workflow_domain="workspace_governance",
             main_optional_paths=_collect_optional_paths(main_manifest),
             artifact_freshness=artifact_freshness,
+            project_profile=project_profile,
             workflow_hints={"available_workflows": sorted(registry)},
             encoding_report=_encoding_summary(main_paths),
         )
@@ -629,6 +646,7 @@ def resolve_bootstrap(child_id: str | None = None) -> BrainBootstrapState:
         child_optional_paths=_collect_optional_paths(child_manifest),
         child_write_routes=dict(child_manifest.get("write_routes", {}) or {}),
         artifact_freshness=artifact_freshness,
+        project_profile=project_profile,
         workflow_hints={"available_workflows": sorted(registry), "recommended_default": "brain_handoff"},
         encoding_report=_encoding_summary(boot_order),
     )
@@ -797,8 +815,10 @@ def _run_check(name: str, command: list[str], *, env: dict[str, str] | None = No
     }
 
 
-def check_brain_health() -> BrainHealthReport:
+def check_brain_health(brain: str | None = None) -> BrainHealthReport:
     started = time.perf_counter()
+    profile = load_project_profile(brain or "workspace")
+    guard_profile = profile.get("guard_profile", {}) if isinstance(profile.get("guard_profile"), dict) else {}
     check_commands = {
         "brain_integrity": {
             "command": [PYTHON_EXECUTABLE, "-m", "tools.brain.integrity_check", "--json"],
@@ -808,15 +828,17 @@ def check_brain_health() -> BrainHealthReport:
             "command": [PYTHON_EXECUTABLE, "-m", "tools.brain.doc_guard", "check"],
             "env": None,
         },
-        "project_consistency": {
+    }
+    if bool(guard_profile.get("project_consistency")):
+        check_commands["project_consistency"] = {
             "command": [PYTHON_EXECUTABLE, "daily_research/tools/project_consistency_check.py"],
             "env": None,
-        },
-        "openmp_strict": {
+        }
+    if bool(guard_profile.get("openmp_strict")):
+        check_commands["openmp_strict"] = {
             "command": [PYTHON_EXECUTABLE, "daily_research/tools/openmp_runtime_check.py", "--strict"],
             "env": _openmp_strict_env(),
-        },
-    }
+        }
     checks: dict[str, dict[str, Any]] = {}
     with ThreadPoolExecutor(max_workers=len(check_commands)) as executor:
         futures = {
@@ -845,31 +867,53 @@ def _continuous_policy_evidence_gaps(freshness: ArtifactFreshnessReport) -> list
     return daily_research_adapter.artifact_freshness_evidence_gaps(freshness)
 
 
+def _profile_validation_commands(child_brain: str | None) -> list[str]:
+    profile = load_project_profile(child_brain or "workspace")
+    verification_profile = profile.get("verification_profile", {}) if isinstance(profile.get("verification_profile"), dict) else {}
+    return [str(item) for item in verification_profile.get("always_commands", []) or []]
+
+
+def _expand_profile_validation_commands(commands: list[Any], *, child_brain: str | None) -> list[str]:
+    out: list[str] = []
+    for command in commands:
+        text = str(command or "").strip()
+        if not text:
+            continue
+        if text == "profile:verification_profile.always_commands":
+            out.extend(_profile_validation_commands(child_brain))
+        else:
+            out.append(text)
+    return _dedupe_text(out)
+
+
 def build_workflow_state(workflow_id: str, *, run_tag: str | None = None, child_brain: str | None = None) -> WorkflowState:
     registry = load_workflow_registry(child_brain)
     normalized = "continuous_policy_result_review" if workflow_id == "continuous_policy" else workflow_id
     if normalized not in registry:
         raise KeyError(f"Unknown workflow: {workflow_id}")
-    freshness = resolve_artifact_freshness()
+    profile = load_project_profile(child_brain or "workspace")
+    guard_profile = profile.get("guard_profile", {}) if isinstance(profile.get("guard_profile"), dict) else {}
+    freshness = resolve_artifact_freshness() if bool(guard_profile.get("artifact_freshness")) else None
     run_evidence: dict[str, Any] = {}
     if run_tag and normalized.startswith("continuous_policy"):
         evidence = resolve_run_evidence(run_tag, workflow="continuous_policy")
         run_evidence = evidence.to_dict()
         gaps = list(evidence.evidence_gaps)
     else:
-        gaps = _continuous_policy_evidence_gaps(freshness) if normalized.startswith("continuous_policy") else []
+        gaps = _continuous_policy_evidence_gaps(freshness) if freshness is not None and normalized.startswith("continuous_policy") else []
     next_allowed = list(registry[normalized].get("allowed_commands", []) or [])
-    resource_risk = "safe" if "safe_screening" in normalized else ("stale_latest_risk" if freshness.is_stale_risk else "normal")
+    is_stale_risk = bool(freshness.is_stale_risk) if freshness is not None else False
+    resource_risk = "safe" if "safe_screening" in normalized else ("stale_latest_risk" if is_stale_risk else "normal")
     return WorkflowState(
         workflow_id=normalized,
         status="blocked" if gaps and normalized == "continuous_policy_result_review" else "ready",
         read_only=True,
         writes_tracked_files=False,
         registry_entry=registry[normalized],
-        artifact_freshness=freshness.to_dict(),
+        artifact_freshness=freshness.to_dict() if freshness is not None else {},
         evidence_gaps=gaps,
         next_allowed_actions=next_allowed,
-        resource_risk=("normal_with_stale_latest" if run_evidence and freshness.is_stale_risk else resource_risk),
+        resource_risk=("normal_with_stale_latest" if run_evidence and is_stale_risk else resource_risk),
         run_evidence=run_evidence,
     )
 
@@ -899,7 +943,10 @@ def build_workflow_guide(workflow_id: str, *, child_brain: str | None = None) ->
         "verification_hints": list(entry.get("verification_hints", []) or []),
         "stop_conditions": list(entry.get("stop_conditions", []) or []),
         "completion": list(entry.get("completion", []) or []),
-        "validation_commands": list(entry.get("validation_commands", []) or []),
+        "validation_commands": _expand_profile_validation_commands(
+            list(entry.get("validation_commands", []) or []),
+            child_brain=child_brain,
+        ),
         "writeback_routes": dict(entry.get("writeback_routes", {}) or {}),
     }
 

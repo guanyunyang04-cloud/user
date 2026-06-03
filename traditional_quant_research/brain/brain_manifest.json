@@ -130,6 +130,48 @@
       "traditional_quant_research"
     ]
   },
+  "project_profile": {
+    "guard_profile": {
+      "active_artifact_guard": false,
+      "artifact_freshness": false,
+      "frontier_report": false,
+      "project_consistency": false,
+      "openmp_strict": false,
+      "brain_rules": false
+    },
+    "verification_profile": {
+      "always_commands": [
+        "git diff --check",
+        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest traditional_quant_research/tests -q",
+        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check",
+        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json"
+      ],
+      "default_test_commands": [
+        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest traditional_quant_research/tests -q"
+      ],
+      "big_artifact_paths": [
+        "traditional_quant_research/output/**",
+        "traditional_quant_research/cache/**",
+        "traditional_quant_research/archive/**"
+      ]
+    },
+    "commit_policy": {
+      "auto_commit": true,
+      "message_prefix": "traditional_quant_research",
+      "allowed_prefixes": [
+        "traditional_quant_research/"
+      ],
+      "block_on_baseline_overlap": true
+    },
+    "process_namespace": {
+      "root": "traditional_quant_research/output/agent_runs",
+      "run_path_template": "traditional_quant_research/output/agent_runs/<run_id>"
+    },
+    "cross_project_policy": {
+      "allow_by_default": false,
+      "lease_root": "brain/output/resource_leases"
+    }
+  },
   "handoff_contract": {
     "derive_entry_sequence_from_shared_contract": true,
     "body_entry_priority": [

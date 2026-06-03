@@ -116,7 +116,23 @@ class BrainPlatformTest(unittest.TestCase):
         self.assertIn("daily_research/brain/state_center.md", payload["child_fast_handoff_paths"])
         self.assertEqual(payload["child_write_routes"]["state"], "daily_research/brain/state_center.md")
         self.assertIn("artifact_freshness", payload)
+        self.assertIn("project_profile", payload)
+        self.assertTrue(payload["project_profile"]["guard_profile"]["active_artifact_guard"])
         self.assertIn("encoding_report", payload)
+
+    def test_resolve_bootstrap_traditional_quant_uses_generic_project_profile(self) -> None:
+        payload = resolve_bootstrap("traditional_quant_research").to_dict()
+        encoded = json.dumps(payload, ensure_ascii=False)
+
+        self.assertEqual(payload["target_kind"], "child")
+        self.assertEqual(payload["workflow_domain"], "traditional_quant_research")
+        self.assertEqual(payload["child_brain"], "traditional_quant_research")
+        self.assertIn("project_profile", payload)
+        self.assertEqual(payload["project_profile"]["project_id"], "traditional_quant_research")
+        self.assertFalse(payload["project_profile"]["guard_profile"]["active_artifact_guard"])
+        self.assertEqual(payload["artifact_freshness"], {})
+        self.assertNotIn("daily_research/output/active_execution_strategy.json", encoded)
+        self.assertIn("traditional_quant_research/tests", encoded)
 
     def test_workspace_governance_alias_bootstraps_workspace(self) -> None:
         for alias in ("workspace", "workspace_root", "workspace_governance"):
@@ -403,7 +419,7 @@ class BrainPlatformTest(unittest.TestCase):
 
         with patch.dict("os.environ", {"KMP_DUPLICATE_LIB_OK": "True"}):
             with patch.object(brain_platform, "_run_check", side_effect=ok_with_env):
-                payload = check_brain_health().to_dict()
+                payload = check_brain_health("daily_research").to_dict()
 
         self.assertEqual(payload["status"], "ok")
         openmp_env = captured_envs["openmp_strict"]

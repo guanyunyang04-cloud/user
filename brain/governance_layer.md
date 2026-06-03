@@ -11,11 +11,12 @@
 ## 2. 标准闭环
 1. `Wake`：运行 `tools.brain.workflow capsule`，读取主脑上下文。
 2. `Route`：判断任务属于 workspace governance 还是某个分脑。
-3. `Choose`：选当前最该做的一件事。
-4. `Preflight`：过目标、规则、教训、依赖四检。
+3. `Select`：agent 结合 route evidence、path evidence、manifest 与用户意图写下最终 `agent_selected_brain_id`。
+4. `Preflight`：按 selected project profile 过目标、规则、教训、依赖四检。
 5. `Act`：执行动作并保留证据。
-6. `Reflect`：把结果沉淀回状态、知识、操作、治理或 reference。
-7. `Replan`：如结果改写路径，立刻更新 state 与 next step。
+6. `Complete`：验证通过后按项目范围提交；workspace 治理提交使用 `workspace-brain:` 前缀。
+7. `Reflect`：把结果沉淀回状态、知识、操作、治理或 reference。
+8. `Replan`：如结果改写路径，立刻更新 state 与 next step。
 
 ## 2.1 Agent Meta Protocol
 - 元能力属于 agent；brain 是持久化载体，负责保存协议、证据、守卫和写回路径；capsule、audit 和 guard 只是传感器。
@@ -38,10 +39,14 @@
 
 ## 2.3 并行项目所有权隔离
 - 工作区允许多个项目由不同 agent 并行开发；每次任务的可变更范围由主脑路由结果和用户显式授权共同决定。
-- 被路由任务默认只拥有目标项目范围，以及用户明确纳入的 workspace 共享文件；不得把其他项目的工作树变更自动视为当前任务的一部分。
+- 被路由任务默认只拥有目标项目范围、该项目 brain write routes，以及用户明确纳入的 workspace 共享文件；不得把其他项目的工作树变更自动视为当前任务的一部分。
 - 路由范围外的项目 dirty paths 默认视为外部并行工作；agent 不得回滚、修复、暂存、提交、合并或解释这些路径，除非用户明确扩展任务范围。
 - 主脑、workflow 工具、根配置、跨项目 registry 等 workspace 共享文件不自动归属任何单一项目；修改前必须单独评估影响面。
 - 若外部项目变更与当前路由任务或共享文件产生真实冲突，先报告冲突和边界，再等待用户决定是否扩展任务范围。
+- 每个分脑 manifest 必须能声明或继承 `guard_profile`、`verification_profile`、`commit_policy`、`process_namespace`、`cross_project_policy`；daily active artifact/freshness/project consistency 只属于 daily profile。
+- 项目 agent 完成一次任务后默认本地提交，提交助手只 stage 该项目 profile 允许路径；范围冲突返回 `project_commit_scope_conflict`，不得把多个项目混成一个提交。
+- 长任务 PID、日志和 progress 默认位于 `<project>/output/agent_runs/<run_id>/`；没有显式 cross-project lease 时，其他项目 agent 不得 wait/stop/管理该进程。
+- 共享 GPU、端口、数据 provider 等资源租约写入 `brain/output/resource_leases/`；租约不存在时按互不干扰处理。
 
 ## 3. 守卫
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
