@@ -415,6 +415,16 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.exp
 
 该门禁读取当前 `low_corr_frontier_combined_constraint_audit` 的结构化输出，不重跑回测。它面向 `Baostock-only personal quant strategy research`，不要求真实总市值/流通市值，也不输出机构级 `strategy_candidate`。默认检查：Baostock snapshot、2017-2026 walk-forward meta、`30 bps / 100m / 10 bps per 1 pct participation` 压力行覆盖个人 `1m` 小资金、执行约束启用、均值年化至少 `5%`、正收益年份率至少 `0.6`、最差年不低于 `-35%`、worst drawdown 不低于 `-25%`、非重叠 periods 至少 `50`、proxy 风格暴露不过度极端且无 optimizer fallback。通过后分级为 `personal_backtest_candidate`，建议进入 paper tracking；失败则保持 `personal_research/backtest_only`。
 
+## Frontier Personal Protocol Grid
+
+个人小资金 Top-N 协议网格入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.frontier_personal_protocol_grid --top-n-values 20,50,100 --years 2017,2018,2019,2020,2021,2022,2023,2024,2025,2026 --write-research-log
+```
+
+该实验按 `top_n` 网格逐次调用 `low_corr_frontier_combined_constraint_audit`，随后对每个 combined run 调用 `frontier_personal_candidate_gate`，最后汇总为 `personal_protocol_grid_ledger.csv` 和 `personal_protocol_grid_top_n_summary.csv`。它用于把当前 `20d/monthly/buffer=3.0` frontier 从原来的 `top_n=200` 研究协议，系统化比较到更贴近个人小资金的 `top_n=20/50/100` 协议。输出只允许产生 `personal_backtest_candidate` 或 `personal_research/backtest_only`；通过行仍必须进入 paper tracking，不能直接称为 `personal_paper_candidate`、`strategy_candidate` 或生产候选。
+
 ## Frontier Personal Paper Tracking Bootstrap
 
 个人候选进入 paper 跟踪前的准备包入口：
