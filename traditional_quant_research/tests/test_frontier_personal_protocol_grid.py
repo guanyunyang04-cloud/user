@@ -264,3 +264,124 @@ def test_run_frontier_personal_protocol_grid_writes_artifacts(tmp_path: Path, mo
 def test_protocol_grid_rejects_invalid_top_n() -> None:
     with pytest.raises(ValueError, match="top_n_values must be positive"):
         frontier_personal_protocol_grid.run_frontier_personal_protocol_grid(top_n_values=(0,))
+
+
+def test_run_yearly_combined_constraint_grid_resumes_completed_year(tmp_path: Path, monkeypatch) -> None:
+    existing_run = tmp_path / "yearly" / "year_2017" / "combined_grid_2017"
+    existing_run.mkdir(parents=True)
+    (existing_run / "summary.json").write_text(
+        json.dumps(
+            {
+                "run_id": "combined_grid_2017",
+                "output_dir": str(existing_run),
+                "snapshot_id": "baostock_v2_fixture",
+                "horizon": 20,
+            }
+        ),
+        encoding="utf-8",
+    )
+    pd.DataFrame([{"eval_year": 2017, "top_n": 20}]).to_csv(
+        existing_run / "combined_constraint_summary.csv",
+        index=False,
+    )
+    pd.DataFrame([{"eval_year": 2017, "fit_end_date": "2016-12-31", "start_date": "2017-01-01"}]).to_csv(
+        existing_run / "combined_constraint_meta.csv",
+        index=False,
+    )
+    progress_path = tmp_path / "personal_protocol_grid_progress.csv"
+    pd.DataFrame(
+        [
+            {
+                "eval_year": 2017,
+                "status": "completed",
+                "started_at": "before",
+                "finished_at": "before",
+                "combined_run_dir": str(existing_run),
+                "error": "",
+            },
+            {
+                "eval_year": 2018,
+                "status": "failed",
+                "started_at": "before",
+                "finished_at": "before",
+                "combined_run_dir": "",
+                "error": "interrupted",
+            },
+        ]
+    ).to_csv(progress_path, index=False)
+
+    combined_calls: list[dict[str, object]] = []
+
+    def fake_combined(**kwargs):
+        combined_calls.append(kwargs)
+        year = int(kwargs["years"][0])
+        run_dir = Path(kwargs["output_dir"]) / f"combined_grid_{year}"
+        run_dir.mkdir(parents=True)
+        (run_dir / "summary.json").write_text(
+            json.dumps(
+                {
+                    "run_id": f"combined_grid_{year}",
+                    "output_dir": str(run_dir),
+                    "snapshot_id": "baostock_v2_fixture",
+                    "horizon": kwargs["horizon"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        pd.DataFrame([{"eval_year": year, "top_n": int(kwargs["top_n"])}]).to_csv(
+            run_dir / "combined_constraint_summary.csv",
+            index=False,
+        )
+        pd.DataFrame([{"eval_year": year, "fit_end_date": f"{year - 1}-12-31", "start_date": f"{year}-01-01"}]).to_csv(
+            run_dir / "combined_constraint_meta.csv",
+            index=False,
+        )
+        return {
+            "run_id": f"combined_grid_{year}",
+            "output_dir": str(run_dir),
+            "snapshot_id": "baostock_v2_fixture",
+            "horizon": kwargs["horizon"],
+        }
+
+    monkeypatch.setattr(frontier_personal_protocol_grid, "run_low_corr_frontier_combined_constraint_audit", fake_combined)
+
+    results = frontier_personal_protocol_grid.run_yearly_combined_constraint_grid(
+        root=None,
+        years=(2017, 2018),
+        final_end_date="2026-06-01",
+        horizon=20,
+        label_mode="raw",
+        max_factor_corr=0.7,
+        rolling_window=120,
+        rolling_min_periods=30,
+        signals=("multifactor_rolling_ic_weighted_score",),
+        signal_penalty_strengths={"multifactor_rolling_ic_weighted_score": 0.25},
+        top_n_values=(20, 50),
+        rebalance_frequency="monthly",
+        buffer_multiplier=3.0,
+        fee_bps_values=(30.0,),
+        capital_amounts=(100_000_000.0,),
+        impact_bps_per_1pct_values=(10.0,),
+        exposure_penalty_cols=("log_amount_mean_20d_z",),
+        exposure_columns=("log_amount_mean_20d_z",),
+        exposure_constraint_cols=(),
+        max_abs_exposure=None,
+        group_col="industry",
+        max_group_weight=0.1,
+        execution_constraints=True,
+        limit_threshold=0.095,
+        include_metrics=True,
+        include_industry=True,
+        weak_year_rebuild_run_dir=None,
+        constraint_variants=None,
+        output_dir=tmp_path / "yearly",
+        progress_path=progress_path,
+        resume=True,
+    )
+
+    assert [result["eval_year"] for result in results] == [2017, 2018]
+    assert {tuple(call["years"]) for call in combined_calls} == {(2018,)}
+    progress = pd.read_csv(progress_path)
+    assert progress["status"].tolist() == ["completed", "completed"]
+    assert "combined_grid_2017" in progress.loc[progress["eval_year"].eq(2017), "combined_run_dir"].iloc[0]
+    assert "combined_grid_2018" in progress.loc[progress["eval_year"].eq(2018), "combined_run_dir"].iloc[0]

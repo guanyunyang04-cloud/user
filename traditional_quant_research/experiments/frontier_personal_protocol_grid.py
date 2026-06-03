@@ -103,6 +103,7 @@ def run_frontier_personal_protocol_grid(
     max_worst_drawdown: float = DEFAULT_MAX_WORST_DRAWDOWN,
     max_proxy_mean_abs_active_exposure: float = DEFAULT_MAX_PROXY_MEAN_ABS_ACTIVE_EXPOSURE,
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
+    resume_run_dir: str | Path | None = None,
     write_research_log: bool = False,
     research_log_path: str | Path = DEFAULT_RESEARCH_LOG,
 ) -> dict[str, Any]:
@@ -130,8 +131,12 @@ def run_frontier_personal_protocol_grid(
     constraint_cols = _parse_optional_str_values(exposure_constraint_cols)
     selected_variants = _parse_optional_str_values(constraint_variants) if constraint_variants is not None else None
 
-    run_id = f"frontier_personal_protocol_grid_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    run_dir = Path(output_dir) / run_id
+    if resume_run_dir is not None:
+        run_dir = Path(resume_run_dir)
+        run_id = run_dir.name
+    else:
+        run_id = f"frontier_personal_protocol_grid_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        run_dir = Path(output_dir) / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
     yearly_results = run_yearly_combined_constraint_grid(
@@ -165,6 +170,7 @@ def run_frontier_personal_protocol_grid(
         constraint_variants=selected_variants,
         output_dir=run_dir / "yearly_combined_constraint",
         progress_path=run_dir / "personal_protocol_grid_progress.csv",
+        resume=resume_run_dir is not None,
     )
     combined_result = merge_yearly_combined_constraint_runs(
         yearly_results,
@@ -286,26 +292,38 @@ def run_yearly_combined_constraint_grid(
     constraint_variants: Sequence[str] | None,
     output_dir: str | Path,
     progress_path: str | Path,
+    resume: bool = False,
 ) -> list[dict[str, Any]]:
     """Run each eval year separately so long protocol grids leave resumable evidence."""
 
     output_root = Path(output_dir)
     output_root.mkdir(parents=True, exist_ok=True)
     progress = Path(progress_path)
-    rows: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = _load_progress_rows(progress) if resume else []
     results: list[dict[str, Any]] = []
     for year in years:
+        existing_index = _progress_row_index(rows, int(year))
+        if resume and existing_index is not None:
+            existing = rows[existing_index]
+            combined_run_dir = str(existing.get("combined_run_dir", "")).strip()
+            if str(existing.get("status", "")).strip() == "completed" and _combined_run_complete(combined_run_dir):
+                results.append(_load_combined_result(combined_run_dir, eval_year=int(year)))
+                continue
         started_at = datetime.now().isoformat(timespec="seconds")
-        rows.append(
-            {
-                "eval_year": int(year),
-                "status": "running",
-                "started_at": started_at,
-                "finished_at": "",
-                "combined_run_dir": "",
-                "error": "",
-            }
-        )
+        row = {
+            "eval_year": int(year),
+            "status": "running",
+            "started_at": started_at,
+            "finished_at": "",
+            "combined_run_dir": "",
+            "error": "",
+        }
+        if existing_index is None:
+            rows.append(row)
+            active_index = len(rows) - 1
+        else:
+            rows[existing_index].update(row)
+            active_index = existing_index
         pd.DataFrame(rows).to_csv(progress, index=False, encoding="utf-8-sig")
         try:
             result = run_low_corr_frontier_combined_constraint_audit(
@@ -343,7 +361,7 @@ def run_yearly_combined_constraint_grid(
             )
             result = {**result, "eval_year": int(year)}
             results.append(result)
-            rows[-1].update(
+            rows[active_index].update(
                 {
                     "status": "completed",
                     "finished_at": datetime.now().isoformat(timespec="seconds"),
@@ -352,7 +370,7 @@ def run_yearly_combined_constraint_grid(
             )
             pd.DataFrame(rows).to_csv(progress, index=False, encoding="utf-8-sig")
         except Exception as exc:
-            rows[-1].update(
+            rows[active_index].update(
                 {
                     "status": "failed",
                     "finished_at": datetime.now().isoformat(timespec="seconds"),
@@ -476,6 +494,39 @@ def _concat_csv(run_dirs: Sequence[Path], filename: str) -> pd.DataFrame:
             if not frame.empty:
                 frames.append(frame)
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def _load_progress_rows(progress_path: Path) -> list[dict[str, Any]]:
+    if not progress_path.exists():
+        return []
+    frame = pd.read_csv(progress_path)
+    return frame.to_dict("records") if not frame.empty else []
+
+
+def _progress_row_index(rows: Sequence[Mapping[str, Any]], year: int) -> int | None:
+    for index, row in enumerate(rows):
+        try:
+            if int(float(row.get("eval_year", -1))) == int(year):
+                return index
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _combined_run_complete(combined_run_dir: str | Path) -> bool:
+    path = Path(str(combined_run_dir))
+    return (
+        path.exists()
+        and (path / "summary.json").exists()
+        and (path / "combined_constraint_summary.csv").exists()
+        and (path / "combined_constraint_meta.csv").exists()
+    )
+
+
+def _load_combined_result(combined_run_dir: str | Path, *, eval_year: int) -> dict[str, Any]:
+    path = Path(str(combined_run_dir))
+    summary = json.loads((path / "summary.json").read_text(encoding="utf-8-sig"))
+    return {**summary, "output_dir": str(path), "eval_year": int(eval_year)}
 
 
 def build_personal_protocol_ledger(protocol_runs: Sequence[Mapping[str, Any]]) -> pd.DataFrame:
@@ -936,6 +987,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-worst-drawdown", type=float, default=DEFAULT_MAX_WORST_DRAWDOWN)
     parser.add_argument("--max-proxy-mean-abs-active-exposure", type=float, default=DEFAULT_MAX_PROXY_MEAN_ABS_ACTIVE_EXPOSURE)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--resume-run-dir", type=Path, default=None)
     parser.add_argument("--write-research-log", action="store_true")
     parser.add_argument("--research-log-path", type=Path, default=DEFAULT_RESEARCH_LOG)
     return parser.parse_args()
@@ -985,6 +1037,7 @@ def main() -> None:
         max_worst_drawdown=args.max_worst_drawdown,
         max_proxy_mean_abs_active_exposure=args.max_proxy_mean_abs_active_exposure,
         output_dir=args.output_dir,
+        resume_run_dir=args.resume_run_dir,
         write_research_log=args.write_research_log,
         research_log_path=args.research_log_path,
     )
