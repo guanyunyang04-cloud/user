@@ -1784,6 +1784,8 @@
         "mh_v2_horizon_concentration_repair_anchor_20260603_01",
         "mh_v2_horizon_concentration_train_contract_anchor_20260603_01",
         "mh_v2_horizon_30d_soft_penalty_seed7_20260603_01",
+        "mh_v2_horizon_30d_soft_penalty_seed11_20260603_01",
+        "mh_v2_horizon_30d_soft_penalty_seed19_20260603_01",
         "mh_v2_local_state_input_scout_seed7_20260602_01",
         "mh_v2_reset_tradeable_mainboard_anchor_20260601_01",
         "mh_v2_local_state_input_scout_anchor_20260602_01",
@@ -1791,15 +1793,16 @@
       ],
       "verdict": "Evidence verdict: `forecast_test_confirmed`.",
       "blockers": [
-        "The 30d concentration blocker is strongly reduced in the seed7 train-contract branch: `0.024208` versus `0.805152` in the uncalibrated local-state loss branch and `0.109297` in the prior posthoc repair."
+        "Training summary status: `completed`; completed tags include seed7, seed11, and seed19; failed tags `[]`.",
+        "The prior 30d concentration blocker is resolved for this branch: 3-seed test 30d concentration mean is `0.042104`, versus `0.805152` in the uncalibrated local-state loss branch and `0.109297` in the prior posthoc repair."
       ],
       "next_allowed_actions": [
-        "Run seed11/19 confirmation for `horizon_30d_soft_penalty_v1`.",
-        "Rebuild the 3-seed aggregate and compare against:",
+        "Compare this 3-seed research-gate-pass candidate against:",
         "strict v2 baseline `mh_v2_reset_tradeable_mainboard_anchor_20260601_01`;",
         "local-state input scout `mh_v2_local_state_input_scout_anchor_20260602_01`;",
         "local-state loss calibration `mh_v2_local_state_loss_calibration_anchor_20260603_01`;",
-        "posthoc repair anchor `mh_v2_horizon_concentration_repair_anchor_20260603_01`."
+        "posthoc repair anchor `mh_v2_horizon_concentration_repair_anchor_20260603_01`.",
+        "Run a research-only score-backtest bridge for `horizon_30d_soft_penalty_v1` as a declared candidate."
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": [

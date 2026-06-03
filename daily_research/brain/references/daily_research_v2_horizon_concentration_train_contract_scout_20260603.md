@@ -11,7 +11,7 @@ The branch is research-only / shadow-only. It does not authorize score-backtest 
 ## Facts
 
 - Anchor run: `mh_v2_horizon_concentration_train_contract_anchor_20260603_01`.
-- Seed7 run: `mh_v2_horizon_30d_soft_penalty_seed7_20260603_01`.
+- Seed runs: `mh_v2_horizon_30d_soft_penalty_seed7_20260603_01`, `mh_v2_horizon_30d_soft_penalty_seed11_20260603_01`, `mh_v2_horizon_30d_soft_penalty_seed19_20260603_01`.
 - Research program: `daily_research_v2_research_reset`.
 - Study family: `v2_horizon_concentration_train_contract_scout`.
 - Dataset: `policy_input_bundle__45e3d8c059ba718426a9f887`.
@@ -66,18 +66,42 @@ Diagnostic score variant:
 - `short_horizon_blend` test hit lift: `0.029485`.
 - The same horizon concentration diagnostics apply because the score variants share the prediction frame horizon distribution.
 
+3-seed confirmation completed successfully:
+
+- Training summary status: `completed`; completed tags include seed7, seed11, and seed19; failed tags `[]`.
+- Comparison summary updated at `2026-06-03T15:40:15+08:00`.
+- 3-seed gate status: `pass`.
+- Gate checks:
+  - seed count `>=3`: `true`;
+  - rank IC min positive: `true`;
+  - spread min positive: `true`;
+  - hit lift min positive: `true`;
+  - mean monthly positive rate `>=0.75`: `true`;
+  - max negative months `<=2`: `true`;
+  - 30d concentration not worse than Stage 2.8: `true`.
+- Primary `pred_decision_score` 3-seed test aggregate:
+  - seed count: `3`;
+  - rank IC mean/min: `0.114866` / `0.103705`;
+  - top-bottom spread mean/min: `0.038425` / `0.034908`;
+  - hit lift mean/min: `0.023851` / `0.015980`;
+  - monthly positive rate mean/min: `0.878788` / `0.818182`;
+  - negative month count max: `2`;
+  - 30d concentration mean: `0.042104`;
+  - long horizon share mean: `0.511348`.
+- `next_stage_decision.json` sets `stage3_architecture_allowed=true`, includes `horizon_30d_soft_penalty_v1` as a stage3 candidate, and defaults the next action to `run_stage2_horizon_grid_calibration`.
+
 ## Inferences
 
-- The posthoc `penalty_30d_0p005` repair shape can be internalized into a file-backed loss/output contract.
-- The 30d concentration blocker is strongly reduced in the seed7 train-contract branch: `0.024208` versus `0.805152` in the uncalibrated local-state loss branch and `0.109297` in the prior posthoc repair.
-- Seed7 alone is not full evidence. The branch remains `scout_only` until seed11/19 confirmation completes and the 3-seed aggregate passes the normal v2 research gate.
-- The primary score has lower seed7 hit lift than the prior 3-seed posthoc repair aggregate, while the diagnostic `short_horizon_blend` is stronger. This is a clue for the next confirmation/comparison pass, not a permission to switch scoring semantics.
+- The posthoc `penalty_30d_0p005` repair shape has been internalized into a file-backed loss/output contract and confirmed across 3 seeds.
+- The prior 30d concentration blocker is resolved for this branch: 3-seed test 30d concentration mean is `0.042104`, versus `0.805152` in the uncalibrated local-state loss branch and `0.109297` in the prior posthoc repair.
+- This branch now qualifies as a research-gate-pass model candidate relative to the v2 forecast gate. It can enter the research-only score-backtest bridge as a declared candidate.
+- This is still not execution promotion. The candidate must be compared against the strict v2 baseline, local-state input/loss branches, and score-backtest/candidate-review gates before any execution rebuild decision.
 
 ## Assumptions
 
-- The seed7 scout is enough to justify seed11/19 confirmation if resources are available.
-- It is not enough to replace `mh_v2_reset_tradeable_mainboard_anchor_20260601_01`.
-- It is not enough to enter score-backtest bridge or execution-candidate review.
+- The 3-seed forecast gate pass is enough to justify a research-only score-backtest bridge candidate.
+- It is not enough by itself to replace `mh_v2_reset_tradeable_mainboard_anchor_20260601_01` as an execution candidate.
+- It is not enough to enter paper/live trading or execution-candidate promotion review without candidate backtest evidence.
 
 ## Boundaries
 
@@ -92,15 +116,17 @@ Diagnostic score variant:
 - `python -m daily_research.path_policy.v2_horizon_concentration_train_contract_scout --write-task-list --json`: completed.
 - `python -m daily_research.path_policy.v2_horizon_concentration_train_contract_scout --run-training --seeds 7 --json`: completed.
 - `python -m daily_research.path_policy.v2_horizon_concentration_train_contract_scout --run-comparison --seeds 7 --json`: completed.
+- `python -m daily_research.path_policy.v2_horizon_concentration_train_contract_scout --run-training --confirm-seeds --json`: completed; seed7 reused, seed11/19 completed.
+- `python -m daily_research.path_policy.v2_horizon_concentration_train_contract_scout --run-comparison --confirm-seeds --json`: completed; 3-seed gate `pass`.
 - `git diff -- daily_research/output/active_execution_strategy.json`: empty.
 - `git diff --check`: exit `0`, with unrelated `traditional_quant_research` CRLF warning.
 
 ## Next Work
 
-- Run seed11/19 confirmation for `horizon_30d_soft_penalty_v1`.
-- Rebuild the 3-seed aggregate and compare against:
+- Compare this 3-seed research-gate-pass candidate against:
   - strict v2 baseline `mh_v2_reset_tradeable_mainboard_anchor_20260601_01`;
   - local-state input scout `mh_v2_local_state_input_scout_anchor_20260602_01`;
   - local-state loss calibration `mh_v2_local_state_loss_calibration_anchor_20260603_01`;
   - posthoc repair anchor `mh_v2_horizon_concentration_repair_anchor_20260603_01`.
-- Only if the 3-seed branch passes the research gate should it enter score-backtest bridge as a declared research candidate.
+- Run a research-only score-backtest bridge for `horizon_30d_soft_penalty_v1` as a declared candidate.
+- Continue horizon grid calibration only after bridge comparison clarifies whether the forecast-gate improvement transfers to candidate backtest behavior.
