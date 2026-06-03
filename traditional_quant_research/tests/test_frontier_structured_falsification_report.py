@@ -252,3 +252,87 @@ def test_structured_report_treats_baostock_only_candidate_as_research_review(tmp
     assert result["structured_falsification_complete"] is False
     true_size_status = [row for row in result["gate_status"] if row["gate"] == "true_size_gate"][0]
     assert true_size_status["status"] == "not_required"
+
+
+def test_structured_report_treats_personal_candidate_as_paper_ready(tmp_path: Path) -> None:
+    promotion = tmp_path / "promotion"
+    ledger = tmp_path / "ledger"
+    size = tmp_path / "size"
+    failure = tmp_path / "failure"
+    weak = tmp_path / "weak"
+    for directory in [promotion, ledger, size, failure, weak]:
+        directory.mkdir()
+
+    pd.DataFrame(
+        [
+            {
+                "research_mode": "baostock_only",
+                "signal": "signal_a",
+                "size_gate_required": False,
+                "size_gate": True,
+                "true_size_gate": False,
+                "return_gate": True,
+                "year_gate": True,
+                "sample_gate": True,
+                "drawdown_gate": True,
+                "style_exposure_gate": True,
+                "promoted": True,
+                "failed_gates": "",
+                "promotion_level": "personal_backtest_candidate",
+            }
+        ]
+    ).to_csv(promotion / "promotion_gate_summary.csv", index=False)
+    (promotion / "summary.json").write_text(
+        json.dumps(
+            {
+                "run_id": "promotion_run",
+                "research_mode": "baostock_only",
+                "candidate_count": 1,
+                "personal_backtest_candidate_count": 1,
+                "baostock_only_candidate_count": 0,
+                "strategy_candidate_count": 0,
+                "decision": "personal_paper_tracking_ready",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (ledger / "summary.json").write_text(
+        json.dumps({"run_id": "ledger_run", "trial_count": 1, "candidate_count": 1}),
+        encoding="utf-8",
+    )
+    pd.DataFrame([{"experiment_family": "frontier", "trial_count": 1, "selection_bias_risk": "moderate"}]).to_csv(
+        ledger / "selection_bias_report.csv",
+        index=False,
+    )
+    pd.DataFrame([{"dimension": "personal_backtest_candidate_readiness", "status": "passed"}]).to_csv(
+        ledger / "research_maturity_report.csv",
+        index=False,
+    )
+    (size / "summary.json").write_text(
+        json.dumps({"run_id": "size_run", "status": "daily_size_absent", "size_rows": 0, "daily_size_ready_for_research": False}),
+        encoding="utf-8",
+    )
+    (failure / "summary.json").write_text(
+        json.dumps({"run_id": "failure_run", "total_weak_signal_years": 0, "combined_run_dir": "combined"}),
+        encoding="utf-8",
+    )
+    (weak / "summary.json").write_text(
+        json.dumps({"run_id": "weak_run", "decision": "diagnostic_rebuild_rules_ready_for_backtest"}),
+        encoding="utf-8",
+    )
+    pd.DataFrame().to_csv(weak / "rebuild_backlog.csv", index=False)
+
+    result = run_frontier_structured_falsification_report(
+        promotion_run_dir=promotion,
+        trial_ledger_run_dir=ledger,
+        size_audit_run_dir=size,
+        failure_run_dir=failure,
+        weak_year_rebuild_run_dir=weak,
+        output_dir=tmp_path / "output",
+    )
+
+    assert result["decision"] == "personal_paper_tracking_ready"
+    assert result["current_evidence_grade"] == "personal_backtest_candidate"
+    assert result["personal_backtest_candidate_count"] == 1
+    assert result["strategy_candidate_count"] == 0
+    assert result["out_of_sample_supported_count"] == 0

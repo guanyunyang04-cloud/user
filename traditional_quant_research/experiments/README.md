@@ -405,6 +405,16 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.exp
 
 `--research-mode true_size` 仍要求 `daily_size_ready_for_research=True`，且该证据必须来自认证 PIT `daily_size` 来源；`amount`、`volume`、`turn`、`log_amount_mean_20d_z`、CNInfo/AkShare/efinance/current quote 都不能替代 true-size gate。历史真实 run `frontier_promotion_gate_20260603_125120` 读取 2017-2026 扩展 combined constraint 输出后，三条 frontier 均通过 `sample_gate` 和 `drawdown_gate`，但失败于 `size_gate`、`return_gate`、`year_gate` 和 `style_exposure_gate`；best mean annualized return 为 rolling IC 的 `0.096737`，仍不能升级为策略候选。当前 `strategy_candidate_count=0`。
 
+## Frontier Personal Candidate Gate
+
+当前 North Star 的个人小资金候选门禁入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.frontier_personal_candidate_gate --write-research-log
+```
+
+该门禁读取当前 `low_corr_frontier_combined_constraint_audit` 的结构化输出，不重跑回测。它面向 `Baostock-only personal quant strategy research`，不要求真实总市值/流通市值，也不输出机构级 `strategy_candidate`。默认检查：Baostock snapshot、2017-2026 walk-forward meta、`30 bps / 100m / 10 bps per 1 pct participation` 压力行覆盖个人 `1m` 小资金、执行约束启用、均值年化至少 `5%`、正收益年份率至少 `0.6`、最差年不低于 `-35%`、worst drawdown 不低于 `-25%`、非重叠 periods 至少 `50`、proxy 风格暴露不过度极端且无 optimizer fallback。通过后分级为 `personal_backtest_candidate`，建议进入 paper tracking；失败则保持 `personal_research/backtest_only`。
+
 ## Frontier Failure Attribution
 
 frontier 扩展样本失败归因入口：

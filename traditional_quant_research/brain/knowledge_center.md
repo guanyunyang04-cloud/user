@@ -1,7 +1,8 @@
 # Traditional Quant Research 知识中枢
 
 - 稳定事实、硬规则和可复用教训写入这里；长证据和过程细节下沉到 `brain/references/`。
-- 研究结论分级：`idea`、`diagnostic`、`backtest_only`、`out_of_sample_supported`、`production_candidate`。
+- 研究结论分级分两套：个人小资金主线使用 `idea`、`diagnostic`、`personal_research/backtest_only`、`personal_backtest_candidate`、`personal_paper_candidate`、`personal_trading_candidate`；机构级/长期增强线保留 `candidate-frontier/baostock_only`、`strategy_candidate`、`out_of_sample_supported`、`production_candidate`。当前 North Star 追求的是 personal ladder，不是机构级 ladder。
+- 项目 North Star：`Baostock-only personal quant strategy research`。当前目标是用 Baostock 已有数据高效做强模型，并在 2017-2026 长样本、prior-fit / walk-forward、保守成本、涨跌停/停牌约束和个人小资金可成交假设下，找到至少一套可进入 paper 跟踪的 `personal_backtest_candidate`。
 - 因子研究默认需要：数据来源、股票池/合约池、复权口径、缺失值处理、行业/市值暴露、交易成本和换手约束。
 - 第一版股票池固定为上证主板 A 股与深证主板 A 股；默认排除创业板、科创板、北交所、ST、停牌、退市、B 股、基金/ETF、指数、可转债、期货、港股和其它非普通 A 股标的。
 - 回测默认需要：样本内/样本外切分、无未来函数检查、手续费/滑点、涨跌停/停牌处理和容量风险说明。
@@ -57,6 +58,9 @@
 - v2.2 daily size audit 以 `daily_universe` 的 `date, code` 为期望键审计 `daily_size.parquet` 覆盖率、正值数量和单位元数据；当前 latest snapshot 的真实 run 为 `daily_size_absent`，`tradeable_rows=7031085`、`size_rows=0`、`min_tradeable_coverage=0.0`。这只证明 size 表尚未生成，不能作为字段质量通过或策略候选晋级证据。
 - 当前 frontier promotion gate 默认研究模式是 `baostock_only`。在该模式下，`daily_size_ready_for_research=False` 只作为 `true_size_gate=False` 披露，不构成 Baostock-only 研究审查失败；`size_gate_required=False` 时不能把通过结果解释为真实市值/流通市值中性。
 - `candidate-frontier/baostock_only` 是 Baostock-only 研究候选分级，不是 `strategy_candidate`、不是 `out_of_sample_supported`、不是生产候选。只有显式 `research_mode=true_size`、`daily_size_ready_for_research=True` 且收益、年度稳定、样本、回撤、执行/冲击和 style exposure 全部通过，才允许生成 `strategy_candidate`。
+- `personal_backtest_candidate` 是当前主线更务实的晋级目标：它只证明 Baostock-only、小资金、成本后、walk-forward 口径下值得 paper 跟踪，不证明真实市值/流通市值中性，不证明机构容量，也不等同于 `strategy_candidate`。该分级可由 `frontier_personal_candidate_gate` 给出。
+- `frontier_personal_candidate_gate` 的底线严谨只保留会导致假盈利的部分：Baostock source、fit window 必须早于 eval window、2017-2026 或指定长样本覆盖、手续费/冲击成本、涨跌停/停牌执行约束、弱年损伤、最大回撤、样本数、proxy 暴露 sanity、optimizer fallback 和可解释性。true-size、市值中性和机构级 capacity 不再阻塞 personal candidate。
+- 当前第一条 `personal_backtest_candidate` 是 `multifactor_rolling_ic_weighted_score` 在 2017-2026 combined constraint 证据下通过 `frontier_personal_candidate_gate_20260604_001632`：30 bps、100m stress、10 bps participation impact、personal capital 1m，均值年化约 `0.096737`，最弱年约 `-0.301352`，正收益年份率 `0.6`，worst drawdown 约 `-0.138549`，total periods `60`，max proxy monthly mean abs active exposure 约 `1.111381`。这允许进入 paper tracking 准备，不允许称为 `strategy_candidate` 或生产候选。
 - v2.1 daily metrics 已完成全量构建、missingness 审计和语义审计，但在估值字段官方发布时间/修订行为验证完成前，只能作为数据底座扩展和暴露诊断候选字段；不能直接用于策略候选晋级或声称完成估值控制。`turn` 是换手率字段，不是成交额；估值字段进入因子/暴露研究前至少滞后一日。
 - 2016-2026 latest v2.1 snapshot 显示 tradeable-only 的 `turn/pctChg/peTTM/pbMRQ/psTTM/pcfNcfTTM` 覆盖率为 `1.0`，可证明全样本缺失率链路健康；`pctChg_abs_diff_p95≈0.000047` 可证明主体收益口径对齐，但 `14179` 个大偏差样本需要单独处理。估值字段仍需官方发布时间/修订行为验证后，才能纳入全周期因子/暴露研究门禁。
 - Metrics 覆盖率通过不等于 frontier 暴露门禁通过。`research_log/2026-06-03_v2_metrics_exposure_diagnostics.md` 显示三条 frontier 信号在 2024-2026 仍高度暴露于低波动、低流动性/小成交额、动量和换手结构；最大平均绝对 signal-metric 相关 `0.760402`，最大平均绝对篮子指标主动暴露 `1.170983`。因此后续候选晋级必须增加组合层暴露约束、中性化或更强 proxy/true-size 门禁，不能仅凭 backtest 收益和 metrics 缺失率通过而升级。

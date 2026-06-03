@@ -178,6 +178,43 @@ def test_trial_ledger_separates_baostock_only_research_from_strategy_candidate()
     assert summary["strategy_candidate_count"] == 0
 
 
+def test_trial_ledger_recognizes_personal_backtest_candidate() -> None:
+    promotion = pd.DataFrame(
+        [
+            {
+                "research_mode": "baostock_only",
+                "constraint_variant": "baseline",
+                "signal": "signal_a",
+                "exposure_penalty_strength": 0.25,
+                "promotion_level": "personal_backtest_candidate",
+                "failed_gates": "",
+            }
+        ]
+    )
+
+    ledger = ledger_exp.build_trial_ledger(_aggregate(), promotion)
+    selection = ledger_exp.build_selection_bias_report(ledger)
+    maturity = ledger_exp.build_research_maturity_report(ledger, selection, promotion)
+    summary = ledger_exp.summarize_trial_ledger(
+        ledger,
+        selection,
+        maturity,
+        run_id="ledger",
+        combined_run_dir=Path("combined"),
+        promotion_run_dir=Path("promotion"),
+        failure_run_dir=None,
+    )
+
+    row = ledger.loc[ledger["signal"].eq("signal_a")].iloc[0]
+    assert row["promotion_level"] == "personal_backtest_candidate"
+    assert row["evidence_grade"] == "personal_backtest_candidate"
+    assert maturity.loc[maturity["dimension"].eq("personal_backtest_candidate_readiness"), "status"].iloc[0] == "passed"
+    assert maturity.loc[maturity["dimension"].eq("strategy_candidate_readiness"), "status"].iloc[0] == "blocked"
+    assert summary["decision"] == "personal_paper_tracking_ready"
+    assert summary["personal_backtest_candidate_count"] == 1
+    assert summary["strategy_candidate_count"] == 0
+
+
 def test_run_frontier_trial_ledger_writes_governance_artifacts(tmp_path: Path) -> None:
     combined = tmp_path / "combined"
     promotion = tmp_path / "promotion"

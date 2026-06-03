@@ -16,6 +16,9 @@ from traditional_quant_research.experiments.frontier_promotion_gate import (
     STRATEGY_PROMOTION_LEVEL,
     latest_run_dir,
 )
+from traditional_quant_research.experiments.frontier_personal_candidate_gate import (
+    PERSONAL_BACKTEST_PROMOTION_LEVEL,
+)
 
 
 DEFAULT_COMBINED_OUTPUT_ROOT = Path(
@@ -169,6 +172,8 @@ def build_trial_ledger(aggregate: pd.DataFrame, promotion: pd.DataFrame | None =
     frame.loc[promoted_mask, "evidence_grade"] = "strategy_candidate"
     baostock_mask = frame["promotion_level"].astype(str).eq(BAOSTOCK_ONLY_PROMOTION_LEVEL)
     frame.loc[baostock_mask, "evidence_grade"] = "baostock_only_research_candidate"
+    personal_mask = frame["promotion_level"].astype(str).eq(PERSONAL_BACKTEST_PROMOTION_LEVEL)
+    frame.loc[personal_mask, "evidence_grade"] = PERSONAL_BACKTEST_PROMOTION_LEVEL
     return frame.reindex(columns=columns).reset_index(drop=True)
 
 
@@ -243,6 +248,11 @@ def build_research_maturity_report(
         and not promotion.empty
         and promotion.get("promotion_level", pd.Series(dtype=object)).astype(str).eq(BAOSTOCK_ONLY_PROMOTION_LEVEL).any()
     )
+    personal_candidate = bool(
+        promotion is not None
+        and not promotion.empty
+        and promotion.get("promotion_level", pd.Series(dtype=object)).astype(str).eq(PERSONAL_BACKTEST_PROMOTION_LEVEL).any()
+    )
     trial_ledger_ready = bool(not ledger.empty)
     selection_bias_visible = bool(not selection_bias.empty)
     rows = [
@@ -263,8 +273,13 @@ def build_research_maturity_report(
         },
         {
             "dimension": "baostock_only_research_readiness",
-            "status": "passed" if baostock_only_candidate or strategy_candidate else "blocked",
+            "status": "passed" if baostock_only_candidate or personal_candidate or strategy_candidate else "blocked",
             "evidence": "Baostock-only research can advance when return, year, sample, drawdown and proxy-style exposure gates pass; true size neutrality remains unproven.",
+        },
+        {
+            "dimension": "personal_backtest_candidate_readiness",
+            "status": "passed" if personal_candidate else "blocked",
+            "evidence": "Personal candidate readiness requires Baostock-only source, walk-forward evidence, cost/execution stress, drawdown/weak-year controls and paper-tracking suitability.",
         },
         {
             "dimension": "strategy_candidate_readiness",
@@ -292,9 +307,12 @@ def summarize_trial_ledger(
 ) -> dict[str, Any]:
     strategy_candidate_count = int(ledger["promotion_level"].astype(str).eq(STRATEGY_PROMOTION_LEVEL).sum()) if not ledger.empty else 0
     baostock_only_candidate_count = int(ledger["promotion_level"].astype(str).eq(BAOSTOCK_ONLY_PROMOTION_LEVEL).sum()) if not ledger.empty else 0
-    candidate_count = strategy_candidate_count + baostock_only_candidate_count
+    personal_candidate_count = int(ledger["promotion_level"].astype(str).eq(PERSONAL_BACKTEST_PROMOTION_LEVEL).sum()) if not ledger.empty else 0
+    candidate_count = strategy_candidate_count + baostock_only_candidate_count + personal_candidate_count
     if strategy_candidate_count:
         decision = "promotion_review_ready"
+    elif personal_candidate_count:
+        decision = "personal_paper_tracking_ready"
     elif baostock_only_candidate_count:
         decision = "baostock_only_research_review_ready"
     else:
@@ -311,6 +329,7 @@ def summarize_trial_ledger(
         "candidate_count": candidate_count,
         "strategy_candidate_count": strategy_candidate_count,
         "baostock_only_candidate_count": baostock_only_candidate_count,
+        "personal_backtest_candidate_count": personal_candidate_count,
         "decision": decision,
     }
 
@@ -330,6 +349,7 @@ def render_trial_ledger_markdown(
             f"- candidate_count: `{summary.get('candidate_count', 0)}`",
             f"- strategy_candidate_count: `{summary.get('strategy_candidate_count', 0)}`",
             f"- baostock_only_candidate_count: `{summary.get('baostock_only_candidate_count', 0)}`",
+            f"- personal_backtest_candidate_count: `{summary.get('personal_backtest_candidate_count', 0)}`",
             "",
             "## Selection Bias Report",
             "",

@@ -19,6 +19,22 @@ The current research mainline should stop blocking on paid or credentialed marke
 - `candidate-frontier/baostock_only` is not a `strategy_candidate`, not `out_of_sample_supported`, and not production evidence.
 - `strategy_candidate` requires `research_mode=true_size`, `daily_size_ready_for_research=True`, and all other promotion gates passing.
 
+## 2026-06-04 North Star Update
+
+The active North Star is now `Baostock-only personal quant strategy research`.
+
+The current mainline target is no longer institutional promotion. It is to produce at least one `personal_backtest_candidate` that can enter paper tracking under:
+
+- Baostock-only data;
+- 2017-2026 or equivalent long-window evidence;
+- prior-fit / walk-forward validation;
+- conservative cost and participation impact;
+- limit-up / limit-down / suspension execution constraints;
+- personal small-capital tradability assumptions;
+- understandable alpha, regime, model-fusion, and portfolio-construction logic.
+
+True-size, market-cap neutrality, institutional capacity, and production-grade promotion remain future upgrades. They must not block alpha, regime, model-fusion, portfolio construction, or personal execution research now.
+
 ## Current Next Work
 
 Continue with Baostock-only weak-year rebuild and portfolio constraint research:
