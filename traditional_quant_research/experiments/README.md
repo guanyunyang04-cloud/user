@@ -415,6 +415,16 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.exp
 
 该门禁读取当前 `low_corr_frontier_combined_constraint_audit` 的结构化输出，不重跑回测。它面向 `Baostock-only personal quant strategy research`，不要求真实总市值/流通市值，也不输出机构级 `strategy_candidate`。默认检查：Baostock snapshot、2017-2026 walk-forward meta、`30 bps / 100m / 10 bps per 1 pct participation` 压力行覆盖个人 `1m` 小资金、执行约束启用、均值年化至少 `5%`、正收益年份率至少 `0.6`、最差年不低于 `-35%`、worst drawdown 不低于 `-25%`、非重叠 periods 至少 `50`、proxy 风格暴露不过度极端且无 optimizer fallback。通过后分级为 `personal_backtest_candidate`，建议进入 paper tracking；失败则保持 `personal_research/backtest_only`。
 
+## Frontier Personal Paper Tracking Bootstrap
+
+个人候选进入 paper 跟踪前的准备包入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.frontier_personal_paper_tracking_bootstrap --personal-gate-run-dir traditional_quant_research/output/experiments/frontier_personal_candidate_gate/<run_id> --write-research-log
+```
+
+该入口读取 `frontier_personal_candidate_gate` 的结构化输出，不重跑回测、不抓取新数据、不升级候选等级。它会输出 `paper_tracking_candidates.csv`、`paper_tracking_protocol.csv`、`paper_tracking_log_template.csv`、`paper_tracking_review_rules.csv` 和 `summary.md/json`。通过 bootstrap 只代表 `paper_tracking_bootstrapped`：候选仍是 `personal_backtest_candidate`，`personal_paper_candidate_count=0`，`strategy_candidate_count=0`。默认要求未来至少记录 `6` 个完整调仓周期且不少于 `120` 个自然日；paper evidence 通过收益、回撤、单期损伤、执行记录完整性和边界审查后，才允许另行讨论 `personal_paper_candidate`。
+
 ## Frontier Failure Attribution
 
 frontier 扩展样本失败归因入口：
