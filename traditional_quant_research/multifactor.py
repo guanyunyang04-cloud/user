@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -118,6 +120,52 @@ def add_rank_score_from_weight_table(
         date_scores = weighted_sum / weight_sum.replace(0.0, np.nan)
         date_scores.loc[available < min_factors] = np.nan
         scores.loc[group.index] = date_scores
+
+    output[score_col] = scores
+    return output
+
+
+def add_prior_fit_pruned_rank_score(
+    frame: pd.DataFrame,
+    pruning_plan: pd.DataFrame,
+    *,
+    score_col: str = "factor_pruned_rank_score_h20_prior_fit",
+    date_col: str = "date",
+    min_factors: int = 1,
+) -> pd.DataFrame:
+    """Add an equal-rank score from eval-year prior-fit factor pruning rules."""
+
+    _require_columns(frame, [date_col])
+    _require_columns(pruning_plan, ["eval_year", "selected_factors", "selected_factor_directions"])
+    if min_factors <= 0:
+        raise ValueError("min_factors must be positive")
+
+    output = frame.copy()
+    output[score_col] = np.nan
+    if pruning_plan.empty:
+        return output
+
+    plan = _normalize_pruning_plan(pruning_plan)
+    missing_factors = sorted({factor for rule in plan.values() for factor in rule["factors"] if factor not in frame.columns})
+    if missing_factors:
+        raise ValueError(f"pruned factor columns not found: {missing_factors}")
+
+    working = frame.copy()
+    working[date_col] = pd.to_datetime(working[date_col])
+    scores = pd.Series(np.nan, index=working.index, dtype=float)
+    for eval_year, rule in plan.items():
+        mask = working[date_col].dt.year.eq(int(eval_year))
+        if not mask.any():
+            continue
+        factors = rule["factors"]
+        ranks = cross_sectional_factor_ranks(
+            working.loc[mask, [date_col, *factors]].copy(),
+            factors,
+            directions=rule["directions"],
+            date_col=date_col,
+        )
+        year_scores = _equal_rank_scores_from_ranks(ranks, factors, min_factors=min(min_factors, len(factors)))
+        scores.loc[working.index[mask]] = year_scores
 
     output[score_col] = scores
     return output
@@ -436,11 +484,57 @@ def _add_weighted_score(
     return output
 
 
+def _equal_rank_scores_from_ranks(ranks: pd.DataFrame, factor_cols: Sequence[str], *, min_factors: int) -> pd.Series:
+    rank_cols = [f"{factor}_rank" for factor in factor_cols]
+    available = ranks.loc[:, rank_cols].notna().sum(axis=1)
+    scores = ranks.loc[:, rank_cols].mean(axis=1)
+    scores.loc[available < min_factors] = np.nan
+    return scores
+
+
+def _normalize_pruning_plan(pruning_plan: pd.DataFrame) -> dict[int, dict[str, Any]]:
+    if "fit_uses_eval_year" in pruning_plan.columns and _truthy(pruning_plan["fit_uses_eval_year"]).any():
+        raise ValueError("pruning plan must be prior-fit; fit_uses_eval_year must be false")
+    plan = pruning_plan.copy()
+    plan["eval_year"] = pd.to_numeric(plan["eval_year"], errors="coerce")
+    plan = plan.dropna(subset=["eval_year"]).copy()
+    rules: dict[int, dict[str, Any]] = {}
+    for eval_year, group in plan.groupby(plan["eval_year"].astype(int), sort=True):
+        row = group.iloc[0]
+        factors = _parse_factor_list(row.get("selected_factors", ""))
+        if not factors:
+            continue
+        rules[int(eval_year)] = {
+            "factors": factors,
+            "directions": _parse_direction_map(row.get("selected_factor_directions", ""), factors),
+        }
+    return rules
+
+
+def _parse_factor_list(value: object) -> list[str]:
+    return [part.strip() for part in str(value or "").split(",") if part.strip()]
+
+
+def _parse_direction_map(value: object, factors: Sequence[str]) -> dict[str, int]:
+    if isinstance(value, Mapping):
+        raw = value
+    else:
+        text = str(value or "").strip()
+        raw = json.loads(text) if text else {}
+    return {factor: (-1 if float(raw.get(factor, 1)) < 0 else 1) for factor in factors}
+
+
 def _factor_direction(factor: str, directions: Mapping[str, int | float]) -> float:
     direction = float(directions.get(factor, 1.0))
     if direction == 0:
         raise ValueError(f"factor direction must be non-zero: {factor}")
     return 1.0 if direction > 0 else -1.0
+
+
+def _truthy(series: pd.Series) -> pd.Series:
+    if pd.api.types.is_bool_dtype(series):
+        return series.fillna(False)
+    return series.astype(str).str.strip().str.lower().isin({"true", "1", "yes", "y"})
 
 
 def _require_columns(frame: pd.DataFrame, columns: Sequence[str]) -> None:

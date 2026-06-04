@@ -112,6 +112,7 @@ def run_low_corr_frontier_combined_constraint_audit(
     include_metrics: bool = True,
     include_industry: bool = True,
     weak_year_rebuild_run_dir: str | Path | None = None,
+    factor_pruning_run_dir: str | Path | None = None,
     constraint_variants: Sequence[str] | str | None = None,
     output_dir: Path = DEFAULT_OUTPUT_DIR,
     write_research_log: bool = False,
@@ -189,6 +190,7 @@ def run_low_corr_frontier_combined_constraint_audit(
             rolling_min_periods=rolling_min_periods,
             include_industry=include_industry or group_col is not None,
             include_metrics=include_metrics,
+            factor_pruning_run_dir=factor_pruning_run_dir,
         )
         manifest = built["manifest"]
         quality = built["quality"]
@@ -393,6 +395,9 @@ def run_low_corr_frontier_combined_constraint_audit(
                 "exposure_constraint_cols": json.dumps(list(constraint_cols), ensure_ascii=False),
                 "max_abs_exposure": float(max_abs_exposure) if max_abs_exposure is not None else np.nan,
                 "weak_year_rebuild_run_dir": str(weak_year_rebuild_run_dir or ""),
+                "factor_pruning_run_dir": str(factor_pruning_run_dir or ""),
+                "factor_pruning_signal": str(built.get("factor_pruning_signal", "")),
+                "factor_pruning_plan_rows": int(built.get("factor_pruning_plan_rows", 0)),
                 "group_col": group_col or "",
                 "max_group_weight": float(max_group_weight) if max_group_weight is not None else np.nan,
                 "rolling_fallback_rate": float(built["rolling_fallback_rate"]),
@@ -443,6 +448,7 @@ def run_low_corr_frontier_combined_constraint_audit(
         "max_abs_exposure": float(max_abs_exposure) if max_abs_exposure is not None else None,
         "constraint_variants": list(selected_variants),
         "weak_year_rebuild_run_dir": str(weak_year_rebuild_run_dir or ""),
+        "factor_pruning_run_dir": str(factor_pruning_run_dir or ""),
         "quality": {
             "failure_count": quality.get("failure_count"),
             "missing_bar_rows": quality.get("missing_bar_rows"),
@@ -1108,6 +1114,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit-threshold", type=float, default=0.095)
     parser.add_argument("--include-metrics", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--include-industry", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--factor-pruning-run-dir", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--write-research-log", action="store_true")
     parser.add_argument("--research-log-path", type=Path, default=DEFAULT_RESEARCH_LOG)
@@ -1146,6 +1153,7 @@ def main() -> None:
         include_metrics=args.include_metrics,
         include_industry=args.include_industry,
         weak_year_rebuild_run_dir=args.weak_year_rebuild_run_dir,
+        factor_pruning_run_dir=args.factor_pruning_run_dir,
         constraint_variants=_normalize_optional_tuple(args.constraint_variants) if args.constraint_variants is not None else None,
         output_dir=args.output_dir,
         write_research_log=args.write_research_log,

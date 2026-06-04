@@ -141,6 +141,70 @@ def test_build_candidate_protocol_signal_panel_can_include_metric_exposures(monk
     assert panel.loc[(pd.Timestamp("2026-01-02"), "B"), "turn_xsec_z"] == pytest.approx(1.0)
 
 
+def test_build_candidate_protocol_signal_panel_can_include_factor_pruned_signal(tmp_path: Path, monkeypatch) -> None:
+    factor_panel = pd.DataFrame(
+        [
+            {"date": "2026-01-02", "code": "A", "value_z": 1.0, "risk_z": 3.0, "fwd_ret_1d": 0.01, LOW_CORR_SIGNAL: 0.1},
+            {"date": "2026-01-02", "code": "B", "value_z": 2.0, "risk_z": 2.0, "fwd_ret_1d": 0.02, LOW_CORR_SIGNAL: 0.2},
+            {"date": "2026-01-02", "code": "C", "value_z": 3.0, "risk_z": 1.0, "fwd_ret_1d": 0.03, LOW_CORR_SIGNAL: 0.3},
+        ]
+    )
+    pd.DataFrame(
+        [
+            {
+                "eval_year": 2026,
+                "horizon": 1,
+                "candidate_signal_name": "factor_pruned_rank_score_h1_prior_fit",
+                "selected_factors": "value_z,risk_z",
+                "selected_factor_directions": '{"value_z": 1, "risk_z": -1}',
+                "fit_uses_eval_year": False,
+            }
+        ]
+    ).to_csv(tmp_path / "factor_pruning_plan.csv", index=False)
+
+    def fake_build_low_corr_signal_panel(**kwargs):
+        return {
+            "manifest": {"snapshot_id": "fixture"},
+            "quality": {},
+            "factor_panel": factor_panel,
+            "signal_columns": ["value_z", "risk_z"],
+            "factor_directions": {"value_z": 1, "risk_z": -1},
+            "label": "fwd_ret_1d",
+            "single_factor_ic": pd.DataFrame(
+                [
+                    {"signal": "value_z", "mean_rank_ic": 0.1},
+                    {"signal": "risk_z", "mean_rank_ic": -0.1},
+                ]
+            ),
+            "low_corr_factor_columns": ["value_z"],
+        }
+
+    monkeypatch.setattr(low_corr_candidate_signal_comparison, "build_low_corr_signal_panel", fake_build_low_corr_signal_panel)
+
+    built = low_corr_candidate_signal_comparison.build_candidate_protocol_signal_panel(
+        root=None,
+        history_start_date="2026-01-01",
+        fit_start_date="2026-01-01",
+        fit_end_date="2026-01-31",
+        start_date="2026-01-01",
+        end_date="2026-01-31",
+        horizon=1,
+        label_mode="raw",
+        factor_set="core",
+        max_factor_corr=0.75,
+        rolling_window=2,
+        rolling_min_periods=1,
+        factor_pruning_run_dir=tmp_path,
+    )
+
+    signal = "factor_pruned_rank_score_h1_prior_fit"
+    panel = built["evaluation_panel"].sort_values("code")
+    assert built["factor_pruning_signal"] == signal
+    assert built["factor_pruning_plan_rows"] == 1
+    assert signal in built["available_signals"]
+    assert panel[signal].tolist() == pytest.approx([1 / 3, 2 / 3, 1.0])
+
+
 def test_run_low_corr_candidate_signal_comparison_writes_outputs(tmp_path: Path, monkeypatch) -> None:
     panel = _signal_panel()
     captured: list[dict[str, object]] = []

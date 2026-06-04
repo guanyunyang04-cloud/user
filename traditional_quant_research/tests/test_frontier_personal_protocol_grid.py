@@ -230,6 +230,7 @@ def test_run_frontier_personal_protocol_grid_writes_artifacts(tmp_path: Path, mo
         top_n_values=(20, 50),
         signals=("multifactor_rolling_ic_weighted_score", "multifactor_low_corr_rank_score"),
         signal_penalty_strengths="multifactor_rolling_ic_weighted_score=0.25,multifactor_low_corr_rank_score=1.0",
+        factor_pruning_run_dir=tmp_path / "factor_pruning",
         min_eval_year_count=2,
         required_start_year=2017,
         required_end_year=2018,
@@ -251,6 +252,7 @@ def test_run_frontier_personal_protocol_grid_writes_artifacts(tmp_path: Path, mo
     assert {tuple(call["years"]) for call in combined_calls} == {(2017,), (2018,)}
     assert {tuple(call["top_n_values"]) for call in combined_calls} == {(20, 50)}
     assert {call["factor_set"] for call in combined_calls} == {"expanded"}
+    assert {call["factor_pruning_run_dir"] for call in combined_calls} == {tmp_path / "factor_pruning"}
     assert (run_dir / "personal_protocol_grid_progress.csv").exists()
     progress = pd.read_csv(run_dir / "personal_protocol_grid_progress.csv")
     assert set(progress["status"]) == {"completed"}

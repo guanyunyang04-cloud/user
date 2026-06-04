@@ -91,6 +91,7 @@ def run_frontier_personal_protocol_grid(
     include_metrics: bool = True,
     include_industry: bool = True,
     weak_year_rebuild_run_dir: str | Path | None = None,
+    factor_pruning_run_dir: str | Path | None = None,
     constraint_variants: Sequence[str] | str | None = None,
     required_fee_bps: float = DEFAULT_REQUIRED_FEE_BPS,
     required_impact_bps_per_1pct: float = DEFAULT_REQUIRED_IMPACT_BPS_PER_1PCT,
@@ -171,6 +172,7 @@ def run_frontier_personal_protocol_grid(
         include_metrics=include_metrics,
         include_industry=include_industry,
         weak_year_rebuild_run_dir=weak_year_rebuild_run_dir,
+        factor_pruning_run_dir=factor_pruning_run_dir,
         constraint_variants=selected_variants,
         output_dir=run_dir / "yearly_combined_constraint",
         progress_path=run_dir / "personal_protocol_grid_progress.csv",
@@ -205,6 +207,7 @@ def run_frontier_personal_protocol_grid(
         max_abs_exposure=max_abs_exposure,
         constraint_variants=selected_variants,
         weak_year_rebuild_run_dir=weak_year_rebuild_run_dir,
+        factor_pruning_run_dir=factor_pruning_run_dir,
     )
     combined_run_dir = Path(str(combined_result["output_dir"]))
     personal_gate_result = run_frontier_personal_candidate_gate(
@@ -299,6 +302,7 @@ def run_yearly_combined_constraint_grid(
     constraint_variants: Sequence[str] | None,
     output_dir: str | Path,
     progress_path: str | Path,
+    factor_pruning_run_dir: str | Path | None = None,
     resume: bool = False,
 ) -> list[dict[str, Any]]:
     """Run each eval year separately so long protocol grids leave resumable evidence."""
@@ -363,6 +367,7 @@ def run_yearly_combined_constraint_grid(
                 include_metrics=include_metrics,
                 include_industry=include_industry,
                 weak_year_rebuild_run_dir=weak_year_rebuild_run_dir,
+                factor_pruning_run_dir=factor_pruning_run_dir,
                 constraint_variants=constraint_variants,
                 output_dir=output_root / f"year_{int(year)}",
                 write_research_log=False,
@@ -420,6 +425,7 @@ def merge_yearly_combined_constraint_runs(
     max_abs_exposure: float | None,
     constraint_variants: Sequence[str] | None,
     weak_year_rebuild_run_dir: str | Path | None,
+    factor_pruning_run_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Merge yearly combined-constraint runs into one standard combined evidence directory."""
 
@@ -472,6 +478,7 @@ def merge_yearly_combined_constraint_runs(
         "max_abs_exposure": float(max_abs_exposure) if max_abs_exposure is not None else None,
         "constraint_variants": list(constraint_variants or ["baseline"]),
         "weak_year_rebuild_run_dir": str(weak_year_rebuild_run_dir or ""),
+        "factor_pruning_run_dir": str(factor_pruning_run_dir or ""),
         "yearly_run_dirs": [str(path) for path in yearly_dirs],
         "best_30bps_100m_rows": best_combined_rows(aggregate, fee_bps=30.0, capital_amount=100_000_000.0),
         "candidate_count": 0,
@@ -988,6 +995,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--include-metrics", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--include-industry", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--required-fee-bps", type=float, default=DEFAULT_REQUIRED_FEE_BPS)
+    parser.add_argument("--factor-pruning-run-dir", type=Path, default=None)
     parser.add_argument("--required-impact-bps-per-1pct", type=float, default=DEFAULT_REQUIRED_IMPACT_BPS_PER_1PCT)
     parser.add_argument("--personal-capital-amount", type=float, default=DEFAULT_PERSONAL_CAPITAL_AMOUNT)
     parser.add_argument("--min-eval-year-count", type=int, default=DEFAULT_MIN_EVAL_YEAR_COUNT)
@@ -1037,6 +1045,7 @@ def main() -> None:
         include_metrics=args.include_metrics,
         include_industry=args.include_industry,
         weak_year_rebuild_run_dir=args.weak_year_rebuild_run_dir,
+        factor_pruning_run_dir=args.factor_pruning_run_dir,
         constraint_variants=_parse_optional_str_values(args.constraint_variants) if args.constraint_variants is not None else None,
         required_fee_bps=args.required_fee_bps,
         required_impact_bps_per_1pct=args.required_impact_bps_per_1pct,

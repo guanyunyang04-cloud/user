@@ -141,6 +141,7 @@ def test_run_low_corr_frontier_combined_constraint_audit_writes_outputs(tmp_path
         execution_constraints=False,
         include_metrics=True,
         include_industry=True,
+        factor_pruning_run_dir=tmp_path / "factor_pruning",
         output_dir=tmp_path,
         write_research_log=True,
         research_log_path=tmp_path / "research_log.md",
@@ -177,6 +178,7 @@ def test_run_low_corr_frontier_combined_constraint_audit_writes_outputs(tmp_path
     assert captured["factor_set"] == "expanded"
     assert captured["include_industry"] is True
     assert captured["include_metrics"] is True
+    assert captured["factor_pruning_run_dir"] == tmp_path / "factor_pruning"
 
     summary = pd.read_csv(run_dir / "combined_constraint_summary.csv")
     assert set(summary["signal"]) == set(signals)
@@ -195,6 +197,7 @@ def test_run_low_corr_frontier_combined_constraint_audit_writes_outputs(tmp_path
     meta = pd.read_csv(run_dir / "combined_constraint_meta.csv")
     assert set(meta["group_col"]) == {"industry"}
     assert set(meta["factor_set"]) == {"expanded"}
+    assert set(meta["factor_pruning_run_dir"]) == {str(tmp_path / "factor_pruning")}
 
 
 def test_run_combined_constraint_audit_wires_prior_fit_weak_year_variants(tmp_path: Path, monkeypatch) -> None:

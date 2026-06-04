@@ -37,6 +37,7 @@ from .metrics import annualized_return, max_drawdown, sharpe_ratio, volatility
 from .multifactor import (
     add_equal_rank_score,
     add_ic_weighted_rank_score,
+    add_prior_fit_pruned_rank_score,
     add_rank_score_from_weight_table,
     add_rolling_ic_weighted_rank_score,
     factor_coverage,
@@ -87,6 +88,7 @@ __all__ = [
     "add_equal_rank_score",
     "add_forward_return_labels",
     "add_ic_weighted_rank_score",
+    "add_prior_fit_pruned_rank_score",
     "add_rank_score_from_weight_table",
     "add_rolling_ic_weighted_rank_score",
     "annualized_return",

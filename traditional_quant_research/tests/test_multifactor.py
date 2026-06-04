@@ -6,6 +6,7 @@ import pytest
 from traditional_quant_research.multifactor import (
     add_equal_rank_score,
     add_ic_weighted_rank_score,
+    add_prior_fit_pruned_rank_score,
     add_rolling_ic_weighted_rank_score,
     factor_coverage,
     mean_daily_factor_correlation,
@@ -181,3 +182,46 @@ def test_rolling_ic_weighted_score_flips_negative_history_factors() -> None:
     third_day = scored.loc[scored["date"] == "2026-01-06"].sort_values("code")
 
     assert third_day["rolling_score"].tolist() == pytest.approx([1 / 3, 2 / 3, 1.0])
+
+
+def test_prior_fit_pruned_rank_score_uses_eval_year_plan_and_directions() -> None:
+    frame = pd.DataFrame(
+        [
+            {"date": "2026-01-02", "code": "A", "value_z": 1.0, "risk_z": 3.0, "noise_z": 9.0},
+            {"date": "2026-01-02", "code": "B", "value_z": 2.0, "risk_z": 2.0, "noise_z": 8.0},
+            {"date": "2026-01-02", "code": "C", "value_z": 3.0, "risk_z": 1.0, "noise_z": 7.0},
+            {"date": "2027-01-04", "code": "A", "value_z": 3.0, "risk_z": 1.0, "noise_z": 7.0},
+        ]
+    )
+    plan = pd.DataFrame(
+        [
+            {
+                "eval_year": 2026,
+                "selected_factors": "value_z,risk_z",
+                "selected_factor_directions": '{"value_z": 1, "risk_z": -1}',
+                "fit_uses_eval_year": False,
+            }
+        ]
+    )
+
+    scored = add_prior_fit_pruned_rank_score(frame, plan, score_col="pruned_score", min_factors=2)
+    first_day = scored.loc[scored["date"].eq("2026-01-02")].sort_values("code")
+
+    assert first_day["pruned_score"].tolist() == pytest.approx([1 / 3, 2 / 3, 1.0])
+    assert pd.isna(scored.loc[scored["date"].eq("2027-01-04"), "pruned_score"].iloc[0])
+
+
+def test_prior_fit_pruned_rank_score_rejects_eval_year_leakage() -> None:
+    plan = pd.DataFrame(
+        [
+            {
+                "eval_year": 2026,
+                "selected_factors": "value_z",
+                "selected_factor_directions": '{"value_z": 1}',
+                "fit_uses_eval_year": True,
+            }
+        ]
+    )
+
+    with pytest.raises(ValueError, match="prior-fit"):
+        add_prior_fit_pruned_rank_score(pd.DataFrame([{"date": "2026-01-02", "value_z": 1.0}]), plan)

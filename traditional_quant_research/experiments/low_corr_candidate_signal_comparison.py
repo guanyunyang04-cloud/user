@@ -42,6 +42,7 @@ from traditional_quant_research.horizon_backtest import (
 from traditional_quant_research.multifactor import (
     add_equal_rank_score,
     add_ic_weighted_rank_score,
+    add_prior_fit_pruned_rank_score,
     add_rank_score_from_weight_table,
     factor_coverage,
     rolling_ic_weights_by_date,
@@ -58,6 +59,7 @@ BASELINE_SIGNAL = "baseline_score"
 EQUAL_SIGNAL = "multifactor_equal_rank_score"
 IC_WEIGHTED_SIGNAL = "multifactor_ic_weighted_score"
 ROLLING_IC_SIGNAL = "multifactor_rolling_ic_weighted_score"
+PRUNED_SIGNAL_TEMPLATE = "factor_pruned_rank_score_h{horizon}_prior_fit"
 DEFAULT_SIGNALS = (
     BASELINE_SIGNAL,
     EQUAL_SIGNAL,
@@ -83,6 +85,7 @@ def build_candidate_protocol_signal_panel(
     rolling_min_periods: int,
     include_industry: bool = False,
     include_metrics: bool = False,
+    factor_pruning_run_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Build all signal variants using the same prior-year fit contract."""
 
@@ -138,11 +141,23 @@ def build_candidate_protocol_signal_panel(
         score_col=ROLLING_IC_SIGNAL,
         min_factors=3,
     )
+    pruned_signal = ""
+    pruned_plan = pd.DataFrame()
+    if factor_pruning_run_dir is not None:
+        pruned_plan = read_factor_pruning_plan(factor_pruning_run_dir, horizon=horizon)
+        pruned_signal = factor_pruning_signal_name(pruned_plan, horizon=horizon)
+        factor_panel = add_prior_fit_pruned_rank_score(
+            factor_panel,
+            pruned_plan,
+            score_col=pruned_signal,
+            min_factors=3,
+        )
     metric_exposure_columns: list[str] = []
     if include_metrics:
         factor_panel, metric_exposure_columns = add_metric_exposure_fields(factor_panel)
     evaluation_panel = filter_panel_dates(factor_panel, start_date=start_date, end_date=end_date)
-    available_signals = [signal for signal in DEFAULT_SIGNALS if signal in evaluation_panel.columns]
+    candidate_signals = [*DEFAULT_SIGNALS, *([pruned_signal] if pruned_signal else [])]
+    available_signals = [signal for signal in candidate_signals if signal in evaluation_panel.columns]
     return {
         **built,
         "factor_set": selected_factor_set,
@@ -154,7 +169,37 @@ def build_candidate_protocol_signal_panel(
         "rolling_fallback_rate": rolling_fallback_rate(rolling_weights),
         "signal_coverage": factor_coverage(evaluation_panel, available_signals),
         "metric_exposure_columns": metric_exposure_columns,
+        "factor_pruning_run_dir": str(factor_pruning_run_dir or ""),
+        "factor_pruning_signal": pruned_signal,
+        "factor_pruning_plan_rows": int(len(pruned_plan)),
     }
+
+
+def read_factor_pruning_plan(run_dir: str | Path, *, horizon: int) -> pd.DataFrame:
+    """Read the prior-fit factor pruning plan for a specific horizon."""
+
+    path = Path(run_dir) / "factor_pruning_plan.csv"
+    if not path.exists():
+        raise FileNotFoundError(f"factor pruning plan not found: {path}")
+    frame = pd.read_csv(path)
+    required = {"eval_year", "horizon", "candidate_signal_name", "selected_factors", "selected_factor_directions", "fit_uses_eval_year"}
+    if missing := sorted(required - set(frame.columns)):
+        raise ValueError(f"factor pruning plan missing required columns: {missing}")
+    output = frame.copy()
+    output["horizon"] = pd.to_numeric(output["horizon"], errors="coerce").astype("Int64")
+    output = output.loc[output["horizon"].eq(int(horizon))].copy()
+    if output.empty:
+        raise ValueError(f"factor pruning plan has no rows for horizon {horizon}")
+    if _truthy(output["fit_uses_eval_year"]).any():
+        raise ValueError("factor pruning plan must be prior-fit; fit_uses_eval_year must be false")
+    return output.reset_index(drop=True)
+
+
+def factor_pruning_signal_name(plan: pd.DataFrame, *, horizon: int) -> str:
+    if plan.empty:
+        return PRUNED_SIGNAL_TEMPLATE.format(horizon=int(horizon))
+    names = sorted(set(plan["candidate_signal_name"].dropna().astype(str)))
+    return names[0] if len(names) == 1 and names[0] else PRUNED_SIGNAL_TEMPLATE.format(horizon=int(horizon))
 
 
 def run_low_corr_candidate_signal_comparison(
@@ -175,6 +220,7 @@ def run_low_corr_candidate_signal_comparison(
     fee_bps_values: Sequence[float] = DEFAULT_FEE_BPS_VALUES,
     execution_constraints: bool = True,
     limit_threshold: float = 0.095,
+    factor_pruning_run_dir: str | Path | None = None,
     output_dir: Path = DEFAULT_OUTPUT_DIR,
     write_research_log: bool = False,
     research_log_path: Path = DEFAULT_RESEARCH_LOG,
@@ -226,6 +272,7 @@ def run_low_corr_candidate_signal_comparison(
             max_factor_corr=max_factor_corr,
             rolling_window=rolling_window,
             rolling_min_periods=rolling_min_periods,
+            factor_pruning_run_dir=factor_pruning_run_dir,
         )
         manifest = built["manifest"]
         quality = built["quality"]
@@ -331,6 +378,9 @@ def run_low_corr_candidate_signal_comparison(
                 "factor_set": selected_factor_set,
                 "available_signals": json.dumps(year_signals, ensure_ascii=False),
                 "low_corr_factor_columns": json.dumps(built["low_corr_factor_columns"], ensure_ascii=False),
+                "factor_pruning_run_dir": str(factor_pruning_run_dir or ""),
+                "factor_pruning_signal": str(built.get("factor_pruning_signal", "")),
+                "factor_pruning_plan_rows": int(built.get("factor_pruning_plan_rows", 0)),
                 "rolling_fallback_rate": float(built["rolling_fallback_rate"]),
                 "evaluation_rows": int(len(evaluation_panel)),
                 "evaluation_dates": int(evaluation_panel["date"].nunique()) if "date" in evaluation_panel.columns else 0,
@@ -365,6 +415,7 @@ def run_low_corr_candidate_signal_comparison(
         "fee_bps_values": [float(value) for value in fee_bps_values],
         "execution_constraints": bool(execution_constraints),
         "limit_threshold": float(limit_threshold),
+        "factor_pruning_run_dir": str(factor_pruning_run_dir or ""),
         "quality": {
             "failure_count": quality.get("failure_count"),
             "missing_bar_rows": quality.get("missing_bar_rows"),
@@ -517,6 +568,12 @@ def _validate_available_signals(selected: Sequence[str], available: Sequence[str
     return tuple(selected)
 
 
+def _truthy(series: pd.Series) -> pd.Series:
+    if pd.api.types.is_bool_dtype(series):
+        return series.fillna(False)
+    return series.astype(str).str.strip().str.lower().isin({"true", "1", "yes", "y"})
+
+
 def _unique_columns(columns: Sequence[str]) -> list[str]:
     output: list[str] = []
     for column in columns:
@@ -602,6 +659,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fee-bps", default=",".join(str(value) for value in DEFAULT_FEE_BPS_VALUES))
     parser.add_argument("--execution-constraints", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--limit-threshold", type=float, default=0.095)
+    parser.add_argument("--factor-pruning-run-dir", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--write-research-log", action="store_true")
     parser.add_argument("--research-log-path", type=Path, default=DEFAULT_RESEARCH_LOG)
@@ -627,6 +685,7 @@ def main() -> None:
         fee_bps_values=_parse_float_tuple(args.fee_bps),
         execution_constraints=args.execution_constraints,
         limit_threshold=args.limit_threshold,
+        factor_pruning_run_dir=args.factor_pruning_run_dir,
         output_dir=args.output_dir,
         write_research_log=args.write_research_log,
         research_log_path=args.research_log_path,
