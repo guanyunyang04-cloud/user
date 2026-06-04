@@ -140,6 +140,7 @@ class RuleSpec:
     profile: str
     diagnostic_only: bool = False
     requires_open_known: bool = False
+    executable_only: bool = False
 
 
 def run_short_open_known_factor_rebuild(
@@ -323,6 +324,9 @@ def prepare_short_factor_panel(raw_panel: pd.DataFrame) -> pd.DataFrame:
     panel = panel.sort_values(["code", "date"]).reset_index(drop=True)
     for column in ["open", "high", "low", "close", "volume", "amount", "turn", "pctChg"]:
         panel[column] = pd.to_numeric(panel[column], errors="coerce")
+    if "industry" not in panel.columns:
+        panel["industry"] = "__unknown__"
+    panel["industry"] = panel["industry"].fillna("__unknown__").astype(str)
     calendar = pd.Index(sorted(panel["date"].dropna().unique()))
     date_index = {date: idx for idx, date in enumerate(calendar)}
     panel["date_index"] = panel["date"].map(date_index).astype(int)
@@ -332,22 +336,89 @@ def prepare_short_factor_panel(raw_panel: pd.DataFrame) -> pd.DataFrame:
     panel["signal_day_ret_from_open_pct"] = (panel["close"] / panel["open"] - 1.0) * 100.0
     panel["signal_range_pct"] = (panel["high"] / panel["low"] - 1.0) * 100.0
     panel["signal_close_position"] = (panel["close"] - panel["low"]) / (panel["high"] - panel["low"]).replace(0, np.nan)
-    for window in (5, 20, 60):
+    for window in (3, 5, 10, 20, 60):
         panel[f"signal_ret{window}_before_pct"] = (panel["close"] / panel.groupby("code", sort=False)["close"].shift(window) - 1.0) * 100.0
     panel["volume_ma5_prior"] = _rolling_by_code(panel, "volume", 5, min_periods=2).groupby(panel["code"], sort=False).shift(1)
     panel["turn_ma20"] = _rolling_by_code(panel, "turn", 20, min_periods=5)
+    panel["turn_ma60"] = _rolling_by_code(panel, "turn", 60, min_periods=20)
+    panel["amount_ma20"] = _rolling_by_code(panel, "amount", 20, min_periods=5)
     panel["signal_vrat5"] = panel["volume"] / panel["volume_ma5_prior"].replace(0, np.nan)
     panel["signal_turn_x20"] = panel["turn"] / panel["turn_ma20"].replace(0, np.nan)
+    panel["turn_x60"] = panel["turn"] / panel["turn_ma60"].replace(0, np.nan)
+    panel["signal_amount_x20"] = panel["amount"] / panel["amount_ma20"].replace(0, np.nan)
     panel["signal_amount_log10"] = np.log10(panel["amount"].clip(lower=1))
+    panel["price"] = panel["close"]
+    panel["price_low_bucket"] = panel["close"] < 8.0
+    panel["price_high_bucket"] = panel["close"] > 50.0
     panel = add_kama_and_atr_features(panel)
     panel = add_limitup_features(panel)
+    panel = add_market_and_industry_features(panel)
+    return panel
+
+
+def add_market_and_industry_features(panel: pd.DataFrame) -> pd.DataFrame:
+    frame = panel.copy()
     market = panel.groupby("date", as_index=False).agg(
         market_limitup_count=("limit_up_like", "sum"),
         market_tradeable_count=("code", "count"),
+        market_breadth=("pctChg", lambda values: float((pd.to_numeric(values, errors="coerce") > 0).mean())),
     )
     market["market_limitup_rate"] = market["market_limitup_count"] / market["market_tradeable_count"].replace(0, np.nan)
-    panel = panel.merge(market[["date", "market_limitup_count", "market_limitup_rate"]], on="date", how="left")
-    return panel
+    market = market.sort_values("date")
+    market["market_limitup_count_ma5"] = market["market_limitup_count"].rolling(5, min_periods=2).mean()
+    market["market_limitup_rate_ma20"] = market["market_limitup_rate"].rolling(20, min_periods=5).mean()
+    market["market_breadth_5d"] = market["market_breadth"].rolling(5, min_periods=2).mean()
+    market["market_breadth_20d"] = market["market_breadth"].rolling(20, min_periods=5).mean()
+    frame = frame.merge(
+        market[
+            [
+                "date",
+                "market_limitup_count",
+                "market_limitup_rate",
+                "market_limitup_count_ma5",
+                "market_limitup_rate_ma20",
+                "market_breadth_5d",
+                "market_breadth_20d",
+            ]
+        ],
+        on="date",
+        how="left",
+    )
+    industry = frame.groupby(["industry", "date"], as_index=False).agg(
+        industry_limitup_count=("limit_up_like", "sum"),
+        industry_tradeable_count=("code", "count"),
+        industry_ret_mean=("pctChg", "mean"),
+    )
+    industry["industry_limitup_rate"] = industry["industry_limitup_count"] / industry["industry_tradeable_count"].replace(0, np.nan)
+    industry = industry.sort_values(["industry", "date"])
+    industry["industry_limitup_count_ma5"] = (
+        industry.groupby("industry", sort=False)["industry_limitup_count"]
+        .rolling(5, min_periods=2)
+        .mean()
+        .reset_index(level=0, drop=True)
+        .sort_index()
+    )
+    industry["industry_ret5_mean"] = (
+        industry.groupby("industry", sort=False)["industry_ret_mean"]
+        .rolling(5, min_periods=2)
+        .mean()
+        .reset_index(level=0, drop=True)
+        .sort_index()
+    )
+    return frame.merge(
+        industry[
+            [
+                "industry",
+                "date",
+                "industry_limitup_count",
+                "industry_limitup_rate",
+                "industry_limitup_count_ma5",
+                "industry_ret5_mean",
+            ]
+        ],
+        on=["industry", "date"],
+        how="left",
+    )
 
 
 def add_kama_and_atr_features(panel: pd.DataFrame) -> pd.DataFrame:
@@ -369,13 +440,32 @@ def add_kama_and_atr_features(panel: pd.DataFrame) -> pd.DataFrame:
     frame["atr14"] = _rolling_by_code(frame, "tr", 14, min_periods=7)
     frame["ema20"] = frame.groupby("code", sort=False)["close"].transform(lambda series: series.ewm(span=20, adjust=False).mean())
     frame["atr_upper"] = frame["ema20"] + 2.0 * frame["atr14"]
-    frame["ma60"] = _rolling_by_code(frame, "close", 60, min_periods=20)
-    frame["ma60_slope_pct"] = (frame["ma60"] / frame.groupby("code", sort=False)["ma60"].shift(1) - 1.0) * 100.0
+    for window, min_periods in ((5, 3), (10, 5), (20, 10), (30, 15), (60, 20)):
+        ma_col = f"ma{window}"
+        frame[ma_col] = _rolling_by_code(frame, "close", window, min_periods=min_periods)
+        frame[f"ma{window}_bias_pct"] = (frame["close"] / frame[ma_col] - 1.0) * 100.0
+        frame[f"ma{window}_slope_pct"] = (frame[ma_col] / frame.groupby("code", sort=False)[ma_col].shift(1) - 1.0) * 100.0
+    frame["ma_stack_bullish"] = (frame["ma5"] > frame["ma10"]) & (frame["ma10"] > frame["ma20"]) & (frame["ma20"] > frame["ma60"])
+    ma_stack_max = frame[["ma5", "ma10", "ma20", "ma30", "ma60"]].max(axis=1)
+    ma_stack_min = frame[["ma5", "ma10", "ma20", "ma30", "ma60"]].min(axis=1)
+    frame["ma_compression_5_60_pct"] = (ma_stack_max / ma_stack_min.replace(0, np.nan) - 1.0) * 100.0
+    frame["ma_compression_tight"] = frame["ma_compression_5_60_pct"].le(8.0)
     low60 = _rolling_min_by_code(frame, "low", 60, min_periods=20)
     high60 = _rolling_max_by_code(frame, "high", 60, min_periods=20)
+    high20 = _rolling_max_by_code(frame, "high", 20, min_periods=10)
+    high_close20 = _rolling_max_by_code(frame, "close", 20, min_periods=10)
     frame["price_position_60d"] = (frame["close"] - low60) / (high60 - low60).replace(0, np.nan)
+    frame["new_high_20"] = frame["high"] >= high20 * 0.999
+    frame["new_high_60"] = frame["high"] >= high60 * 0.999
+    frame["max_drawdown_20_before_pct"] = (frame["close"] / high_close20.replace(0, np.nan) - 1.0) * 100.0
+    frame["volatility_20_pct"] = frame.groupby("code", sort=False)["pctChg"].rolling(20, min_periods=10).std().reset_index(level=0, drop=True).sort_index()
+    frame["volatility_60_pct"] = frame.groupby("code", sort=False)["pctChg"].rolling(60, min_periods=20).std().reset_index(level=0, drop=True).sort_index()
+    frame["volatility_compression_20_60"] = frame["volatility_20_pct"] / frame["volatility_60_pct"].replace(0, np.nan)
     frame["kama_slope_positive"] = frame["kama_slope_pct"] > 0
+    frame["kama_slope_turn_positive"] = frame["kama_slope_positive"] & ~frame.groupby("code", sort=False)["kama_slope_positive"].shift(1).fillna(False)
     frame["open_below_kama_break_limitup"] = (frame["open"] < frame["kama"]) & (frame["close"] > frame["kama"])
+    frame["kama_ma20_above"] = frame["kama"] > frame["ma20"]
+    frame["kama_ma60_above"] = frame["kama"] > frame["ma60"]
     frame["kama_bias_0_3"] = frame["bias_kama_pct"].between(0, 3, inclusive="both")
     frame["kama_bias_3_8"] = frame["bias_kama_pct"].gt(3) & frame["bias_kama_pct"].le(8)
     frame["kama_bias_8_15"] = frame["bias_kama_pct"].gt(8) & frame["bias_kama_pct"].le(15)
@@ -429,6 +519,9 @@ def add_limitup_features(panel: pd.DataFrame) -> pd.DataFrame:
             values.append(current)
         streak.loc[group.index] = values
     frame["limit_up_run_ending_today"] = streak
+    frame["_prior_limit_up_like"] = frame.groupby("code", sort=False)["limit_up_like"].shift(1).fillna(False).astype(float)
+    frame["recent_limitup_count_20"] = _rolling_by_code(frame, "_prior_limit_up_like", 20, min_periods=5)
+    frame["recent_limitup_count_60"] = _rolling_by_code(frame, "_prior_limit_up_like", 60, min_periods=20)
     frame["board_stage"] = np.select(
         [
             frame["limit_up_run_ending_today"].eq(1),
@@ -439,18 +532,27 @@ def add_limitup_features(panel: pd.DataFrame) -> pd.DataFrame:
         ["first_board", "second_board", "third_board", "fourth_plus_board"],
         default="none",
     )
-    return frame
+    return frame.drop(columns=["_prior_limit_up_like"])
 
 
-def build_event_record(event: pd.Series, entry: pd.Series) -> dict[str, Any]:
+def build_event_record(event: pd.Series, entry: pd.Series, *, min_signal_amount: float = DEFAULT_MIN_SIGNAL_AMOUNT) -> dict[str, Any]:
     next_open_gap = (float(entry["open"]) / float(event["close"]) - 1.0) * 100.0
     entry_open_near_limit = next_open_gap >= 9.5
     entry_open_normal = next_open_gap < 9.5
+    entry_low_flat_small_high = -3.0 <= next_open_gap < 3.0
+    liquid_amount_ok = float(event.get("amount", 0.0) or 0.0) >= float(min_signal_amount)
+    executable_entry = (
+        (not bool(event["one_word_limit_like"]))
+        and (not bool(event["near_one_word_limit_like"]))
+        and (not bool(entry_open_near_limit))
+        and liquid_amount_ok
+    )
     return {
         "date": event["date"],
         "year": int(event["year"]),
         "code": event["code"],
         "name_on_date": event.get("name_on_date", ""),
+        "industry": event.get("industry", "__unknown__"),
         "open": event["open"],
         "high": event["high"],
         "low": event["low"],
@@ -463,10 +565,31 @@ def build_event_record(event: pd.Series, entry: pd.Series) -> dict[str, Any]:
         "near_one_word_limit_like": bool(event["near_one_word_limit_like"]),
         "limit_up_run_ending_today": int(event["limit_up_run_ending_today"]),
         "board_stage": event["board_stage"],
+        "ma5": event["ma5"],
+        "ma10": event["ma10"],
+        "ma20": event["ma20"],
+        "ma30": event["ma30"],
+        "ma60": event["ma60"],
+        "ma5_bias_pct": event["ma5_bias_pct"],
+        "ma10_bias_pct": event["ma10_bias_pct"],
+        "ma20_bias_pct": event["ma20_bias_pct"],
+        "ma30_bias_pct": event["ma30_bias_pct"],
+        "ma60_bias_pct": event["ma60_bias_pct"],
+        "ma5_slope_pct": event["ma5_slope_pct"],
+        "ma10_slope_pct": event["ma10_slope_pct"],
+        "ma20_slope_pct": event["ma20_slope_pct"],
+        "ma30_slope_pct": event["ma30_slope_pct"],
+        "ma60_slope_pct": event["ma60_slope_pct"],
+        "ma_stack_bullish": bool(event["ma_stack_bullish"]),
+        "ma_compression_5_60_pct": event["ma_compression_5_60_pct"],
+        "ma_compression_tight": bool(event["ma_compression_tight"]),
         "kama": event["kama"],
         "kama_slope_pct": event["kama_slope_pct"],
         "bias_kama_pct": event["bias_kama_pct"],
         "open_below_kama_break_limitup": bool(event["open_below_kama_break_limitup"]),
+        "kama_ma20_above": bool(event["kama_ma20_above"]),
+        "kama_ma60_above": bool(event["kama_ma60_above"]),
+        "kama_slope_turn_positive": bool(event["kama_slope_turn_positive"]),
         "kama_bias_0_3": bool(event["kama_bias_0_3"]),
         "kama_bias_3_8": bool(event["kama_bias_3_8"]),
         "kama_bias_8_15": bool(event["kama_bias_8_15"]),
@@ -484,12 +607,35 @@ def build_event_record(event: pd.Series, entry: pd.Series) -> dict[str, Any]:
         "signal_close_position": event["signal_close_position"],
         "signal_vrat5": event["signal_vrat5"],
         "signal_turn_x20": event["signal_turn_x20"],
+        "signal_amount_x20": event["signal_amount_x20"],
+        "turn_x60": event["turn_x60"],
+        "signal_ret3_before_pct": event["signal_ret3_before_pct"],
         "signal_ret5_before_pct": event["signal_ret5_before_pct"],
+        "signal_ret10_before_pct": event["signal_ret10_before_pct"],
         "signal_ret20_before_pct": event["signal_ret20_before_pct"],
         "signal_ret60_before_pct": event["signal_ret60_before_pct"],
+        "max_drawdown_20_before_pct": event["max_drawdown_20_before_pct"],
+        "volatility_20_pct": event["volatility_20_pct"],
+        "volatility_compression_20_60": event["volatility_compression_20_60"],
+        "new_high_20": bool(event["new_high_20"]),
+        "new_high_60": bool(event["new_high_60"]),
+        "recent_limitup_count_20": event["recent_limitup_count_20"],
+        "recent_limitup_count_60": event["recent_limitup_count_60"],
         "signal_amount_log10": event["signal_amount_log10"],
+        "price": event["price"],
+        "price_low_bucket": bool(event["price_low_bucket"]),
+        "price_high_bucket": bool(event["price_high_bucket"]),
+        "liquid_amount_ok": bool(liquid_amount_ok),
         "market_limitup_count": event["market_limitup_count"],
         "market_limitup_rate": event["market_limitup_rate"],
+        "market_limitup_count_ma5": event["market_limitup_count_ma5"],
+        "market_limitup_rate_ma20": event["market_limitup_rate_ma20"],
+        "market_breadth_5d": event["market_breadth_5d"],
+        "market_breadth_20d": event["market_breadth_20d"],
+        "industry_limitup_count": event["industry_limitup_count"],
+        "industry_limitup_rate": event["industry_limitup_rate"],
+        "industry_limitup_count_ma5": event["industry_limitup_count_ma5"],
+        "industry_ret5_mean": event["industry_ret5_mean"],
         "entry_date": entry["date"],
         "entry_open": entry["open"],
         "entry_high": entry["high"],
@@ -499,10 +645,60 @@ def build_event_record(event: pd.Series, entry: pd.Series) -> dict[str, Any]:
         "next_gap_bucket": bucket_next_open_gap(next_open_gap),
         "entry_open_near_limit": bool(entry_open_near_limit),
         "entry_open_normal": bool(entry_open_normal),
+        "entry_open_low_flat_small_high": bool(entry_low_flat_small_high),
+        "entry_open_above_kama": bool(float(entry["open"]) > float(event["kama"])) if pd.notna(event["kama"]) else False,
+        "entry_open_above_ma5": bool(float(entry["open"]) > float(event["ma5"])) if pd.notna(event["ma5"]) else False,
+        "entry_open_above_ma10": bool(float(entry["open"]) > float(event["ma10"])) if pd.notna(event["ma10"]) else False,
+        "executable_entry": bool(executable_entry),
         "entry_limit_up": bool(entry["limit_up_like"]),
         "entry_one_word_limit": bool(entry["one_word_limit_like"]),
         "entry_day_close_ret_pct": (float(entry["close"]) / float(entry["open"]) - 1.0) * 100.0,
     }
+
+
+def managed_exit_metrics(
+    window_frame: pd.DataFrame,
+    *,
+    entry_open: float,
+    exit_rule: str,
+    fallback_exit: pd.Series,
+) -> dict[str, float]:
+    if window_frame.empty:
+        return {"close_ret_pct": np.nan, "max_high_pct": np.nan, "min_low_pct": np.nan, "holding_days": np.nan}
+    frame = window_frame.sort_values("date_index").copy()
+    if exit_rule == "window_close":
+        exit_row = fallback_exit
+    elif exit_rule == "kama_break":
+        exit_row = _first_trigger_or_fallback(frame, frame["close"] < frame["kama"], fallback_exit)
+    elif exit_rule == "ma5_break":
+        exit_row = _first_trigger_or_fallback(frame, frame["close"] < frame["ma5"], fallback_exit)
+    elif exit_rule == "ma10_break":
+        exit_row = _first_trigger_or_fallback(frame, frame["close"] < frame["ma10"], fallback_exit)
+    elif exit_rule == "upper_shadow":
+        rng = (frame["high"] - frame["low"]).replace(0, np.nan)
+        upper = (frame["high"] - frame[["open", "close"]].max(axis=1)) / rng
+        exit_row = _first_trigger_or_fallback(frame, (upper > 0.4) & (frame["close"] <= frame["open"]), fallback_exit)
+    elif exit_rule == "weak_close":
+        close_position = (frame["close"] - frame["low"]) / (frame["high"] - frame["low"]).replace(0, np.nan)
+        weak = (frame["close"] < frame["open"]) & close_position.lt(0.35)
+        exit_row = _first_trigger_or_fallback(frame, weak, fallback_exit)
+    else:
+        raise ValueError(f"unknown exit_rule: {exit_rule}")
+    exit_date_index = int(exit_row["date_index"])
+    used_window = frame.loc[frame["date_index"].le(exit_date_index)]
+    return {
+        "close_ret_pct": (float(exit_row["close"]) / float(entry_open) - 1.0) * 100.0,
+        "max_high_pct": (float(used_window["high"].max()) / float(entry_open) - 1.0) * 100.0,
+        "min_low_pct": (float(used_window["low"].min()) / float(entry_open) - 1.0) * 100.0,
+        "holding_days": float(len(used_window)),
+    }
+
+
+def _first_trigger_or_fallback(frame: pd.DataFrame, trigger: pd.Series, fallback_exit: pd.Series) -> pd.Series:
+    hits = frame.loc[trigger.fillna(False).to_numpy()]
+    if hits.empty:
+        return fallback_exit
+    return hits.iloc[0]
 
 
 def bucket_next_open_gap(gap: float) -> str:
