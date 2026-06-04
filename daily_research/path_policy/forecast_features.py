@@ -453,9 +453,31 @@ def _metadata_board_count_series(prepared: PreparedPolicyInputs, columns: list[s
     return count.reindex(columns).fillna(0.0).astype(float)
 
 
-def _group_mean_frame(values: pd.DataFrame, group: pd.Series) -> pd.DataFrame:
+def _datewise_group_label_frame(group: pd.DataFrame, *, index: pd.Index, columns: list[str]) -> tuple[pd.DataFrame, list[str]]:
+    aligned = group.reindex(index=index, columns=columns)
+    labels = aligned.where(aligned.notna(), "").to_numpy(dtype=str)
+    labels = np.char.strip(labels)
+    label_frame = pd.DataFrame(labels, index=index, columns=columns)
+    label_names = sorted({str(item) for item in labels.ravel() if str(item)})
+    return label_frame, label_names
+
+
+def _datewise_group_mean_frame_fast(values: pd.DataFrame, group: pd.DataFrame) -> pd.DataFrame:
+    columns = list(values.columns)
+    out = pd.DataFrame(np.nan, index=values.index, columns=columns, dtype=float)
+    label_frame, labels = _datewise_group_label_frame(group, index=values.index, columns=columns)
+    for label in labels:
+        mask = label_frame.eq(label)
+        group_sum = values.where(mask).sum(axis=1, min_count=1)
+        group_count = values.where(mask).count(axis=1).replace(0, np.nan)
+        group_mean = group_sum.div(group_count)
+        out = out.where(~mask, pd.DataFrame(np.repeat(group_mean.to_numpy(dtype=float).reshape(-1, 1), len(columns), axis=1), index=values.index, columns=columns))
+    return out
+
+
+def _group_mean_frame(values: pd.DataFrame, group: pd.Series | pd.DataFrame) -> pd.DataFrame:
     if isinstance(group, pd.DataFrame):
-        return _datewise_group_mean_frame(values, group)
+        return _datewise_group_mean_frame_fast(values, group)
     out = pd.DataFrame(np.nan, index=values.index, columns=values.columns, dtype=float)
     for group_name in sorted(str(item) for item in group.dropna().unique()):
         members = [stock for stock in values.columns if str(group.get(stock, "")) == group_name]
@@ -481,9 +503,20 @@ def _datewise_group_mean_frame(values: pd.DataFrame, group: pd.DataFrame) -> pd.
     return out
 
 
+def _datewise_group_rank_frame_fast(values: pd.DataFrame, group: pd.DataFrame) -> pd.DataFrame:
+    columns = list(values.columns)
+    out = pd.DataFrame(np.nan, index=values.index, columns=columns, dtype=float)
+    label_frame, labels = _datewise_group_label_frame(group, index=values.index, columns=columns)
+    for label in labels:
+        mask = label_frame.eq(label)
+        ranks = values.where(mask).rank(axis=1, pct=True, method="average")
+        out = out.where(~mask, ranks)
+    return out
+
+
 def _group_rank_frame(values: pd.DataFrame, group: pd.Series | pd.DataFrame) -> pd.DataFrame:
     if isinstance(group, pd.DataFrame):
-        return _datewise_group_rank_frame(values, group)
+        return _datewise_group_rank_frame_fast(values, group)
     out = pd.DataFrame(np.nan, index=values.index, columns=values.columns, dtype=float)
     for group_name in sorted(str(item) for item in group.dropna().unique()):
         members = [stock for stock in values.columns if str(group.get(stock, "")) == group_name]
@@ -511,19 +544,14 @@ def _group_z_frame(values: pd.DataFrame, group: pd.Series | pd.DataFrame) -> pd.
     if isinstance(group, pd.DataFrame):
         columns = list(values.columns)
         out = pd.DataFrame(np.nan, index=values.index, columns=columns, dtype=float)
-        aligned_group = group.reindex(index=values.index, columns=columns)
-        for dt in values.index:
-            labels = aligned_group.loc[dt]
-            row = values.loc[dt].astype(float)
-            for group_name in sorted(str(item) for item in labels.dropna().unique() if str(item).strip()):
-                members = [stock for stock in columns if str(labels.get(stock, "")) == group_name]
-                if not members:
-                    continue
-                group_values = row.reindex(members).replace([np.inf, -np.inf], np.nan)
-                std = float(group_values.std(ddof=0))
-                if not np.isfinite(std) or abs(std) <= 1.0e-12:
-                    continue
-                out.loc[dt, members] = group_values.sub(float(group_values.mean())).div(std)
+        label_frame, labels = _datewise_group_label_frame(group, index=values.index, columns=columns)
+        for label in labels:
+            mask = label_frame.eq(label)
+            masked = values.where(mask).replace([np.inf, -np.inf], np.nan)
+            mean = masked.mean(axis=1)
+            std = masked.std(axis=1, ddof=0).replace(0.0, np.nan)
+            z = masked.sub(mean, axis=0).div(std, axis=0)
+            out = out.where(~mask, z)
         return out.replace([np.inf, -np.inf], np.nan)
     out = pd.DataFrame(np.nan, index=values.index, columns=values.columns, dtype=float)
     for group_name in sorted(str(item) for item in group.dropna().unique()):
@@ -539,12 +567,12 @@ def _group_z_frame(values: pd.DataFrame, group: pd.Series | pd.DataFrame) -> pd.
 
 def _group_member_count_frame(group: pd.Series | pd.DataFrame, *, index: pd.Index, columns: list[str], log: bool = False) -> pd.DataFrame:
     if isinstance(group, pd.DataFrame):
-        aligned = group.reindex(index=index, columns=columns)
         out = pd.DataFrame(0.0, index=index, columns=columns, dtype=float)
-        for dt in index:
-            labels = aligned.loc[dt].dropna().astype(str)
-            counts = labels.value_counts()
-            out.loc[dt] = aligned.loc[dt].map(counts).fillna(0.0).astype(float)
+        label_frame, labels = _datewise_group_label_frame(group, index=index, columns=columns)
+        for label in labels:
+            mask = label_frame.eq(label)
+            counts = mask.sum(axis=1).astype(float)
+            out = out.where(~mask, pd.DataFrame(np.repeat(counts.to_numpy(dtype=float).reshape(-1, 1), len(columns), axis=1), index=index, columns=columns))
     else:
         member_count = group.map(group.value_counts()).reindex(columns).fillna(0.0).astype(float)
         out = pd.DataFrame(
@@ -555,12 +583,14 @@ def _group_member_count_frame(group: pd.Series | pd.DataFrame, *, index: pd.Inde
     return np.log1p(out) if bool(log) else out
 
 
-def _sector_context_feature_frames(prepared: PreparedPolicyInputs) -> dict[str, pd.DataFrame]:
+def _sector_context_feature_frames(prepared: PreparedPolicyInputs, *, progress_root: Path | None = None) -> dict[str, pd.DataFrame]:
     close = prepared.close.astype(float)
     columns = [str(item).strip().upper() for item in close.columns]
     industry = _metadata_industry_frame(prepared, columns)
     if industry.replace("", np.nan).dropna(how="all").empty:
         return {}
+    if progress_root is not None:
+        _write_feature_store_progress(Path(progress_root), "sector_context_start", date_count=len(close.index), universe_size=len(columns))
     returns_20 = close.pct_change(20).replace([np.inf, -np.inf], np.nan)
     benchmark = prepared.benchmark_close.reindex(close.index).astype(float).pct_change(20).replace([np.inf, -np.inf], np.nan)
     industry_mean = _group_mean_frame(returns_20, industry)
@@ -568,6 +598,8 @@ def _sector_context_feature_frames(prepared: PreparedPolicyInputs) -> dict[str, 
     industry_rank = _group_rank_frame(returns_20, industry)
     member_count_frame = _group_member_count_frame(industry, index=close.index, columns=columns, log=False)
     board_count = _metadata_board_count_series(prepared, columns)
+    if progress_root is not None:
+        _write_feature_store_progress(Path(progress_root), "sector_context_done", sector_frame_count=4)
     return {
         "industry_ret_20_excess": industry_ret_excess,
         "industry_rank_ret_20": industry_rank,
@@ -580,14 +612,12 @@ def _group_share_frame(condition: pd.DataFrame, group: pd.Series | pd.DataFrame)
     if isinstance(group, pd.DataFrame):
         columns = list(condition.columns)
         out = pd.DataFrame(np.nan, index=condition.index, columns=columns, dtype=float)
-        aligned_group = group.reindex(index=condition.index, columns=columns)
-        for dt in condition.index:
-            labels = aligned_group.loc[dt]
-            row = condition.loc[dt].astype(float)
-            for group_name in sorted(str(item) for item in labels.dropna().unique() if str(item).strip()):
-                members = [stock for stock in columns if str(labels.get(stock, "")) == group_name]
-                if members:
-                    out.loc[dt, members] = float(row.reindex(members).mean())
+        label_frame, labels = _datewise_group_label_frame(group, index=condition.index, columns=columns)
+        values = condition.astype(float)
+        for label in labels:
+            mask = label_frame.eq(label)
+            share = values.where(mask).mean(axis=1)
+            out = out.where(~mask, pd.DataFrame(np.repeat(share.to_numpy(dtype=float).reshape(-1, 1), len(columns), axis=1), index=condition.index, columns=columns))
         return out
     out = pd.DataFrame(np.nan, index=condition.index, columns=condition.columns, dtype=float)
     for group_name in sorted(str(item) for item in group.dropna().unique()):
@@ -599,12 +629,14 @@ def _group_share_frame(condition: pd.DataFrame, group: pd.Series | pd.DataFrame)
     return out
 
 
-def _sector_relative_feature_frames(prepared: PreparedPolicyInputs) -> dict[str, pd.DataFrame]:
+def _sector_relative_feature_frames(prepared: PreparedPolicyInputs, *, progress_root: Path | None = None) -> dict[str, pd.DataFrame]:
     close = prepared.close.astype(float)
     columns = [str(item).strip().upper() for item in close.columns]
     industry = _metadata_industry_frame(prepared, columns)
     if industry.replace("", np.nan).dropna(how="all").empty:
         return {}
+    if progress_root is not None:
+        _write_feature_store_progress(Path(progress_root), "sector_relative_start", date_count=len(close.index), universe_size=len(columns))
     returns_5 = close.pct_change(5).replace([np.inf, -np.inf], np.nan)
     returns_20 = close.pct_change(20).replace([np.inf, -np.inf], np.nan)
     benchmark_close = prepared.benchmark_close.reindex(close.index).astype(float)
@@ -623,6 +655,8 @@ def _sector_relative_feature_frames(prepared: PreparedPolicyInputs) -> dict[str,
         index=close.index,
         columns=columns,
     )
+    if progress_root is not None:
+        _write_feature_store_progress(Path(progress_root), "sector_relative_done", sector_relative_frame_count=10)
     return {
         "industry_ret_5_excess": industry_mean_5.sub(benchmark_ret_5, axis=0),
         "industry_ret_20_excess": industry_mean_20.sub(benchmark_ret_20, axis=0),
@@ -1150,9 +1184,9 @@ def build_forecast_feature_store(
         else {}
     )
     _write_feature_store_progress(root, "history_frames_done", history_frame_count=len(history_frames))
-    sector_frames = _sector_context_feature_frames(prepared) if profile in SECTOR_CONTEXT_PROFILES else {}
+    sector_frames = _sector_context_feature_frames(prepared, progress_root=root) if profile in SECTOR_CONTEXT_PROFILES else {}
     _write_feature_store_progress(root, "sector_frames_done", sector_frame_count=len(sector_frames))
-    sector_relative_frames = _sector_relative_feature_frames(prepared) if profile in SECTOR_RELATIVE_PROFILES else {}
+    sector_relative_frames = _sector_relative_feature_frames(prepared, progress_root=root) if profile in SECTOR_RELATIVE_PROFILES else {}
     _write_feature_store_progress(root, "sector_relative_frames_done", sector_relative_frame_count=len(sector_relative_frames))
     regime_frames = _regime_feature_frames(prepared, raw_frames, feature_profile=profile) if profile in REGIME_PROFILES else {}
     _write_feature_store_progress(root, "regime_frames_done", regime_frame_count=len(regime_frames))

@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 110,
+  "record_count": 111,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -1799,6 +1799,47 @@
         "policy_input_bundle__45e3d8c059ba718426a9f887",
         "data_platform_v2_status_sidecar__b896a110cf7802cc1653c22a",
         "policy_pool_view__925e8604a91a9c07a5387fb1"
+      ]
+    },
+    {
+      "id": "daily_research_v2_high_return_augmented_pilot_20260605",
+      "date": "2026-06-05",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_high_return_augmented_pilot_20260605.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_high_return_model_discovery"
+      ],
+      "run_tags": [
+        "mh_v2_hrd_same_pilot_pilot_gru_seed7_20260604_01"
+      ],
+      "verdict": "Status: `high_return_model_discovery / augmented_full_pool_pilot_completed / feature_store_throughput_repaired / bridge_backtest_blocked_by_too_few_dates / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_high_return_model_discovery`.; Active artifact impact: `daily_research/output/active_execution_strategy.json` unchanged.",
+      "blockers": [
+        "Forecast evidence verdict: `forecast_failed`.",
+        "Bridge status: `backtest_failed`.",
+        "Shared backtest failed because the pilot test panel had only one aligned trading date:",
+        "Interpretation: this is a pilot sample-size/blocking condition, not a data import failure and not a model verdict.",
+        "The pilot remains insufficient for alpha, model-quality, or promotion evidence.",
+        "Current blocker is `formal_augmented_single_seed_multi_split_with_enough_test_dates_not_completed`."
+      ],
+      "next_allowed_actions": [
+        "Run full augmented single-seed scout with enough test dates, avoiding tiny `max_samples_per_role=8` when bridge transfer evidence is needed.",
+        "Prefer multi-split single-seed exploration before three-seed confirmation:",
+        "same-period A/B split;",
+        "long-history walk-forward splits;",
+        "quick bridge only after forecast panels contain enough dates.",
+        "Reserve seeds `7,11,19` for finalist confirmation after at least two splits show useful forecast-to-portfolio transfer."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__2082fee5bb1760972d8c9012",
+        "policy_pool_view__d7a56d5164470b590e4f5a40"
       ]
     },
     {

@@ -11,6 +11,13 @@ from daily_research.continuous_policy.portfolio_simulator import PortfolioState
 from daily_research.continuous_policy.state_builder import build_cross_section_state
 from daily_research.path_policy.forecast_features import (
     FORECAST_FEATURE_PROFILES,
+    _datewise_group_mean_frame,
+    _datewise_group_rank_frame,
+    _group_mean_frame,
+    _group_member_count_frame,
+    _group_rank_frame,
+    _group_share_frame,
+    _group_z_frame,
     audit_forecast_feature_profile,
     build_forecast_feature_panels,
     build_forecast_feature_store,
@@ -197,6 +204,47 @@ def test_sector_context_profile_records_source_view_from_raw_cache_meta() -> Non
     assert "industry_ret_20_excess" in feature_columns
     assert manifest["sector_context_feature_count"] == 4
     assert manifest["source_sector_board_view_id"] == "policy_sector_board_view__raw_cache"
+
+
+def test_datewise_industry_group_helpers_match_naive_semantics() -> None:
+    dates = pd.bdate_range("2024-01-02", periods=3)
+    columns = ["AAA", "BBB", "CCC", "DDD"]
+    values = pd.DataFrame(
+        [
+            [1.0, 3.0, 10.0, 14.0],
+            [np.nan, 4.0, 8.0, 16.0],
+            [5.0, 7.0, np.nan, 20.0],
+        ],
+        index=dates,
+        columns=columns,
+    )
+    groups = pd.DataFrame(
+        [
+            ["tech", "tech", "bank", "bank"],
+            ["bank", "tech", "tech", ""],
+            [np.nan, "tech", "tech", "bank"],
+        ],
+        index=dates,
+        columns=columns,
+    )
+    condition = values.gt(6.0)
+
+    mean_fast = _group_mean_frame(values, groups)
+    rank_fast = _group_rank_frame(values, groups)
+    z_fast = _group_z_frame(values, groups)
+    count_fast = _group_member_count_frame(groups, index=dates, columns=columns)
+    share_fast = _group_share_frame(condition, groups)
+
+    pd.testing.assert_frame_equal(mean_fast, _datewise_group_mean_frame(values, groups))
+    pd.testing.assert_frame_equal(rank_fast, _datewise_group_rank_frame(values, groups))
+    assert mean_fast.loc[dates[1], "AAA"] != mean_fast.loc[dates[1], "AAA"]
+    assert mean_fast.loc[dates[1], "BBB"] == pytest.approx(6.0)
+    assert count_fast.loc[dates[0], "AAA"] == pytest.approx(2.0)
+    assert count_fast.loc[dates[1], "DDD"] == pytest.approx(0.0)
+    assert share_fast.loc[dates[0], "AAA"] == pytest.approx(0.0)
+    assert share_fast.loc[dates[0], "CCC"] == pytest.approx(1.0)
+    assert z_fast.loc[dates[0], "AAA"] == pytest.approx(-1.0)
+    assert z_fast.loc[dates[0], "BBB"] == pytest.approx(1.0)
 
 
 def test_sector_relative_profile_uses_industry_relative_features_and_logs() -> None:
