@@ -282,6 +282,78 @@ def test_run_combined_constraint_audit_wires_prior_fit_weak_year_variants(tmp_pa
     assert "constraint_variant" in exposure_summary.columns
 
 
+def test_combined_constraint_audit_uses_generic_regime_rule_when_signal_rule_missing(tmp_path: Path, monkeypatch) -> None:
+    panel = _frontier_panel()
+    signal = low_corr_frontier_combined_constraint_audit.ROLLING_IC_SIGNAL
+    weak_run = tmp_path / "weak_rebuild"
+    weak_run.mkdir()
+    pd.DataFrame(
+        [
+            {
+                "eval_year": 2026,
+                "signal": low_corr_frontier_combined_constraint_audit.GENERIC_REGIME_SIGNAL,
+                "exposure_penalty_strength": 0.25,
+                "rule_scope": low_corr_frontier_combined_constraint_audit.GENERIC_REGIME_RULE_SCOPE,
+                "source_signal_count": 3,
+                "fit_years": "2017,2018,2022",
+                "fit_row_count": 9,
+                "metric": "breadth_20d_positive_rate",
+                "threshold": 0.45,
+                "eval_metric_value": 0.35,
+                "eval_allowed_by_rule": False,
+                "fit_uses_eval_year": False,
+                "evidence_grade": "diagnostic_not_backtest",
+            }
+        ]
+    ).to_csv(weak_run / "fit_eval_regime_candidates.csv", index=False)
+
+    def fake_build_candidate_protocol_signal_panel(**kwargs):
+        return {
+            "manifest": {"snapshot_id": "fixture-snapshot"},
+            "quality": {"failure_count": 0, "missing_bar_rows": 0, "st_rows": 0, "suspended_like_rows": 0},
+            "evaluation_panel": panel,
+            "available_signals": [signal],
+            "rolling_fallback_rate": 0.0,
+        }
+
+    monkeypatch.setattr(
+        low_corr_frontier_combined_constraint_audit,
+        "build_candidate_protocol_signal_panel",
+        fake_build_candidate_protocol_signal_panel,
+    )
+
+    result = low_corr_frontier_combined_constraint_audit.run_low_corr_frontier_combined_constraint_audit(
+        years=(2026,),
+        final_end_date="2026-06-01",
+        horizon=1,
+        signals=(signal,),
+        signal_penalty_strengths={signal: 0.25},
+        top_n=2,
+        rebalance_frequency="daily",
+        buffer_multiplier=1.0,
+        fee_bps_values=(30.0,),
+        capital_amounts=(10_000_000.0,),
+        impact_bps_per_1pct_values=(10.0,),
+        exposure_penalty_cols=("log_amount_mean_20d_z",),
+        exposure_columns=("log_amount_mean_20d_z",),
+        group_col="industry",
+        max_group_weight=0.5,
+        execution_constraints=False,
+        weak_year_rebuild_run_dir=weak_run,
+        constraint_variants=("capital_scaled",),
+        output_dir=tmp_path,
+    )
+
+    summary = pd.read_csv(Path(result["output_dir"]) / "combined_constraint_summary.csv")
+    scaled = summary.iloc[0]
+    assert scaled["constraint_variant"] == "capital_scaled"
+    assert scaled["weak_year_rule_source_signal"] == low_corr_frontier_combined_constraint_audit.GENERIC_REGIME_SIGNAL
+    assert scaled["weak_year_rule_scope"] == low_corr_frontier_combined_constraint_audit.GENERIC_REGIME_RULE_SCOPE
+    assert scaled["weak_year_rule_source_signal_count"] == 3
+    assert scaled["weak_year_rule_allowed"] == False
+    assert scaled["weak_year_capital_scale"] == pytest.approx(0.5)
+
+
 def test_run_combined_constraint_audit_reuses_panel_for_multiple_top_n(tmp_path: Path, monkeypatch) -> None:
     panel = _frontier_panel()
     signal = low_corr_frontier_combined_constraint_audit.ROLLING_IC_SIGNAL

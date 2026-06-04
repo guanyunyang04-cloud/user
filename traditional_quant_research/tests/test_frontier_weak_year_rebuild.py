@@ -44,6 +44,28 @@ def test_fit_eval_regime_candidates_use_prior_years_only() -> None:
     assert fit_eval["evidence_grade"].unique().tolist() == ["diagnostic_not_backtest"]
 
 
+def test_fit_eval_regime_candidates_can_emit_generic_market_rules() -> None:
+    yearly_failure = pd.concat(
+        [
+            _yearly_failure(),
+            _yearly_failure().assign(signal="signal_b", annualized_return=[0.04, -0.02, 0.06, -0.01]),
+        ],
+        ignore_index=True,
+    )
+    signal_year_regime = rebuild.build_signal_year_regime(yearly_failure, _yearly_regime())
+
+    fit_eval = rebuild.build_fit_eval_regime_candidates(signal_year_regime, include_generic_regime=True)
+
+    generic = fit_eval.loc[fit_eval["signal"].eq(rebuild.GENERIC_REGIME_SIGNAL)].copy()
+    assert not generic.empty
+    assert set(generic["rule_scope"]) == {rebuild.GENERIC_REGIME_RULE_SCOPE}
+    assert generic["fit_uses_eval_year"].eq(False).all()
+    row_2022 = generic.loc[generic["eval_year"].eq(2022)].iloc[0]
+    assert row_2022["fit_years"] == "2017,2018"
+    assert row_2022["source_signal_count"] == 2
+    assert "2022" not in row_2022["fit_years"]
+
+
 def test_run_frontier_weak_year_rebuild_writes_diagnostic_outputs(tmp_path: Path) -> None:
     failure = tmp_path / "failure"
     regime = tmp_path / "regime"

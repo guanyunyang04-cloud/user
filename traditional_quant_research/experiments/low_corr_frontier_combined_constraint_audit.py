@@ -79,6 +79,9 @@ DEFAULT_EXPOSURE_COLUMNS = (
 )
 DEFAULT_CONSTRAINT_VARIANTS = ("baseline", "regime_gated", "capital_scaled", "factor_blend")
 DEFAULT_BASELINE_VARIANTS = ("baseline",)
+GENERIC_REGIME_SIGNAL = "__generic_market_regime__"
+SIGNAL_SPECIFIC_RULE_SCOPE = "signal_specific"
+GENERIC_REGIME_RULE_SCOPE = "generic_market_regime"
 
 
 def run_low_corr_frontier_combined_constraint_audit(
@@ -515,6 +518,8 @@ def _read_weak_year_rules(run_dir: str | Path | None) -> pd.DataFrame:
         "eval_year",
         "signal",
         "exposure_penalty_strength",
+        "rule_scope",
+        "source_signal_count",
         "fit_years",
         "fit_row_count",
         "metric",
@@ -540,6 +545,12 @@ def _read_weak_year_rules(run_dir: str | Path | None) -> pd.DataFrame:
     output["fit_uses_eval_year"] = _truthy(output["fit_uses_eval_year"])
     if output["fit_uses_eval_year"].any():
         raise ValueError("weak-year rules must be prior-fit; fit_uses_eval_year must be false")
+    if "rule_scope" not in output.columns:
+        output["rule_scope"] = SIGNAL_SPECIFIC_RULE_SCOPE
+    output["rule_scope"] = output["rule_scope"].fillna(SIGNAL_SPECIFIC_RULE_SCOPE).astype(str)
+    if "source_signal_count" not in output.columns:
+        output["source_signal_count"] = 1
+    output["source_signal_count"] = pd.to_numeric(output["source_signal_count"], errors="coerce").fillna(1).astype(int)
     for column in columns:
         if column not in output.columns:
             output[column] = np.nan if column not in {"signal", "fit_years", "metric", "evidence_grade"} else ""
@@ -562,13 +573,28 @@ def _weak_year_rule_for(
         & work["signal"].astype(str).eq(str(signal))
         & np.isclose(strength, float(exposure_penalty_strength))
     ].copy()
+    rule_scope = SIGNAL_SPECIFIC_RULE_SCOPE
+    if subset.empty:
+        subset = work.loc[
+            pd.to_numeric(work["eval_year"], errors="coerce").eq(int(eval_year))
+            & work["signal"].astype(str).eq(GENERIC_REGIME_SIGNAL)
+            & np.isclose(strength, float(exposure_penalty_strength))
+        ].copy()
+        rule_scope = GENERIC_REGIME_RULE_SCOPE
     if subset.empty:
         return None
+    if "rule_scope" not in subset.columns:
+        subset["rule_scope"] = rule_scope
+    subset["rule_scope"] = subset["rule_scope"].fillna(rule_scope).astype(str)
+    if "source_signal_count" not in subset.columns:
+        subset["source_signal_count"] = 1
     subset["fit_row_count"] = pd.to_numeric(subset.get("fit_row_count", 0), errors="coerce").fillna(0)
     subset = subset.sort_values(["fit_row_count", "metric"], ascending=[False, True])
     row = subset.iloc[0].to_dict()
     row["eval_allowed_by_rule"] = bool(_truthy(pd.Series([row.get("eval_allowed_by_rule", False)])).iloc[0])
     row["fit_uses_eval_year"] = bool(_truthy(pd.Series([row.get("fit_uses_eval_year", False)])).iloc[0])
+    row["rule_scope"] = str(row.get("rule_scope", rule_scope) or rule_scope)
+    row["source_signal_count"] = int(float(row.get("source_signal_count", 1) or 1))
     return row
 
 
@@ -584,6 +610,9 @@ def _prepare_constraint_variant(
     allowed = bool(rule.get("eval_allowed_by_rule", True)) if rule is not None else True
     has_rule = rule is not None
     meta = {
+        "weak_year_rule_source_signal": str(rule.get("signal", "")) if rule is not None else "",
+        "weak_year_rule_scope": str(rule.get("rule_scope", "")) if rule is not None else "",
+        "weak_year_rule_source_signal_count": int(float(rule.get("source_signal_count", 0) or 0)) if rule is not None else 0,
         "weak_year_rule_metric": str(rule.get("metric", "")) if rule is not None else "",
         "weak_year_rule_threshold": float(rule.get("threshold", np.nan)) if rule is not None else np.nan,
         "weak_year_rule_allowed": allowed,

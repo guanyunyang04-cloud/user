@@ -20,6 +20,9 @@ DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/frontie
 DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-03_frontier_weak_year_rebuild.md")
 DEFAULT_REGIME_METRICS = ("breadth_20d_positive_rate", "market_ret_20d_mean", "breadth_5d_positive_rate")
 DEFAULT_WEAK_YEARS = (2017, 2018, 2022, 2023)
+GENERIC_REGIME_SIGNAL = "__generic_market_regime__"
+SIGNAL_SPECIFIC_RULE_SCOPE = "signal_specific"
+GENERIC_REGIME_RULE_SCOPE = "generic_market_regime"
 DEFAULT_THRESHOLDS = {
     "breadth_20d_positive_rate": (0.40, 0.45, 0.50, 0.55),
     "breadth_5d_positive_rate": (0.40, 0.45, 0.50),
@@ -32,6 +35,7 @@ def run_frontier_weak_year_rebuild(
     failure_run_dir: str | Path | None = None,
     regime_run_dir: str | Path | None = None,
     factor_family_run_dirs: Mapping[str, str | Path] | Sequence[str] | str | None = None,
+    include_generic_regime: bool = False,
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     write_research_log: bool = False,
     research_log_path: str | Path = DEFAULT_RESEARCH_LOG,
@@ -47,7 +51,7 @@ def run_frontier_weak_year_rebuild(
     yearly_failure = pd.read_csv(failure_dir / "yearly_failure_attribution.csv")
     yearly_regime = pd.read_csv(regime_dir / "yearly_market_regime.csv")
     signal_year_regime = build_signal_year_regime(yearly_failure, yearly_regime)
-    fit_eval = build_fit_eval_regime_candidates(signal_year_regime)
+    fit_eval = build_fit_eval_regime_candidates(signal_year_regime, include_generic_regime=include_generic_regime)
     factor_family_evidence = read_factor_family_evidence(factor_family_run_dirs)
     factor_family_fit_eval = build_fit_eval_factor_family_candidates(factor_family_evidence)
     backlog = build_rebuild_backlog()
@@ -58,6 +62,7 @@ def run_frontier_weak_year_rebuild(
         run_id=run_id,
         failure_run_dir=failure_dir,
         regime_run_dir=regime_dir,
+        include_generic_regime=include_generic_regime,
     )
     markdown = render_weak_year_rebuild_markdown(summary, fit_eval, factor_family_fit_eval, backlog)
 
@@ -102,6 +107,7 @@ def build_fit_eval_regime_candidates(
     metrics: Sequence[str] = DEFAULT_REGIME_METRICS,
     thresholds: Mapping[str, Sequence[float]] = DEFAULT_THRESHOLDS,
     max_prior_years: int = 3,
+    include_generic_regime: bool = False,
 ) -> pd.DataFrame:
     """Choose thresholds from prior years only and evaluate the current year descriptively."""
 
@@ -109,6 +115,8 @@ def build_fit_eval_regime_candidates(
         "eval_year",
         "signal",
         "exposure_penalty_strength",
+        "rule_scope",
+        "source_signal_count",
         "fit_years",
         "fit_row_count",
         "metric",
@@ -141,6 +149,8 @@ def build_fit_eval_regime_candidates(
                     "eval_year": year,
                     "signal": signal,
                     "exposure_penalty_strength": float(strength),
+                    "rule_scope": SIGNAL_SPECIFIC_RULE_SCOPE,
+                    "source_signal_count": 1,
                     "fit_years": ",".join(str(item) for item in prior_years),
                     "fit_row_count": int(len(fit_rows)),
                     "metric": best["metric"],
@@ -155,7 +165,67 @@ def build_fit_eval_regime_candidates(
                     "evidence_grade": "diagnostic_not_backtest",
                 }
             )
+    if include_generic_regime:
+        rows.extend(
+            _build_generic_regime_candidate_rows(
+                frame,
+                metrics=metrics,
+                thresholds=thresholds,
+                max_prior_years=max_prior_years,
+            )
+        )
     return pd.DataFrame(rows, columns=columns)
+
+
+def _build_generic_regime_candidate_rows(
+    signal_year_regime: pd.DataFrame,
+    *,
+    metrics: Sequence[str],
+    thresholds: Mapping[str, Sequence[float]],
+    max_prior_years: int,
+) -> list[dict[str, Any]]:
+    """Build reusable market-regime rules without binding them to one signal."""
+
+    if signal_year_regime.empty:
+        return []
+    rows: list[dict[str, Any]] = []
+    frame = signal_year_regime.copy()
+    frame["eval_year"] = pd.to_numeric(frame["eval_year"], errors="coerce").astype("Int64")
+    frame["exposure_penalty_strength"] = pd.to_numeric(frame["exposure_penalty_strength"], errors="coerce").fillna(0.0)
+    for strength, group in frame.groupby("exposure_penalty_strength", sort=True):
+        group = group.sort_values(["eval_year", "signal"])
+        years = [int(year) for year in group["eval_year"].dropna().astype(int).unique()]
+        for year in years:
+            prior_years = [candidate for candidate in years if candidate < year][-max_prior_years:]
+            fit_rows = group.loc[group["eval_year"].astype(int).isin(prior_years)].copy()
+            eval_rows = group.loc[group["eval_year"].astype(int).eq(year)].copy()
+            if fit_rows.empty or eval_rows.empty:
+                continue
+            best = _choose_prior_threshold(fit_rows, metrics=metrics, thresholds=thresholds)
+            metric_value = float(pd.to_numeric(eval_rows[best["metric"]], errors="coerce").mean())
+            eval_returns = pd.to_numeric(eval_rows["annualized_return"], errors="coerce")
+            rows.append(
+                {
+                    "eval_year": year,
+                    "signal": GENERIC_REGIME_SIGNAL,
+                    "exposure_penalty_strength": float(strength),
+                    "rule_scope": GENERIC_REGIME_RULE_SCOPE,
+                    "source_signal_count": int(fit_rows["signal"].dropna().astype(str).nunique()),
+                    "fit_years": ",".join(str(item) for item in prior_years),
+                    "fit_row_count": int(len(fit_rows)),
+                    "metric": best["metric"],
+                    "threshold": best["threshold"],
+                    "fit_mean_return_when_allowed": best["fit_mean_return_when_allowed"],
+                    "fit_positive_year_rate_when_allowed": best["fit_positive_year_rate_when_allowed"],
+                    "eval_metric_value": metric_value,
+                    "eval_allowed_by_rule": bool(metric_value >= float(best["threshold"])),
+                    "eval_annualized_return": float(eval_returns.mean()) if not eval_returns.dropna().empty else np.nan,
+                    "eval_weak_year": bool(_to_bool(eval_rows["weak_year"]).any()),
+                    "fit_uses_eval_year": False,
+                    "evidence_grade": "diagnostic_not_backtest",
+                }
+            )
+    return rows
 
 
 def read_factor_family_evidence(
@@ -348,6 +418,12 @@ def build_rebuild_backlog() -> pd.DataFrame:
                 "next_action": "Use fit_eval_regime_candidates as pre-backtest rule candidates; rerun combined constraint before any promotion.",
             },
             {
+                "path": "generic_regime_prior_fit",
+                "status": "implemented_diagnostic",
+                "blocking_gate": "",
+                "next_action": "Use explicitly tagged generic market-regime rows as fallback rules for new signals without signal-specific weak-year history; rerun formal gates before any promotion.",
+            },
+            {
                 "path": "factor_family_prior_fit",
                 "status": "implemented_diagnostic",
                 "blocking_gate": "",
@@ -377,8 +453,11 @@ def summarize_weak_year_rebuild(
     run_id: str,
     failure_run_dir: Path,
     regime_run_dir: Path,
+    include_generic_regime: bool = False,
 ) -> dict[str, Any]:
     rule_rows = int(len(fit_eval))
+    rule_scope = fit_eval.get("rule_scope", pd.Series(dtype=str)).fillna("").astype(str) if not fit_eval.empty else pd.Series(dtype=str)
+    generic_rows = int(rule_scope.eq(GENERIC_REGIME_RULE_SCOPE).sum()) if not rule_scope.empty else 0
     eval_weak_allowed = (
         int(fit_eval.loc[fit_eval["eval_weak_year"].eq(True) & fit_eval["eval_allowed_by_rule"].eq(True)].shape[0])
         if not fit_eval.empty
@@ -395,7 +474,9 @@ def summarize_weak_year_rebuild(
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "failure_run_dir": str(failure_run_dir),
         "regime_run_dir": str(regime_run_dir),
+        "include_generic_regime": bool(include_generic_regime),
         "fit_eval_candidate_rows": rule_rows,
+        "generic_regime_candidate_rows": generic_rows,
         "weak_years_allowed_by_prior_rule": eval_weak_allowed,
         "fit_uses_eval_year_count": int(fit_eval["fit_uses_eval_year"].sum()) if not fit_eval.empty else 0,
         "fit_eval_factor_family_candidate_rows": family_rows,
@@ -425,6 +506,7 @@ def render_weak_year_rebuild_markdown(
             f"- run_id: `{summary.get('run_id', '')}`",
             f"- decision: `{summary.get('decision', '')}`",
             f"- fit_eval_candidate_rows: `{summary.get('fit_eval_candidate_rows', 0)}`",
+            f"- generic_regime_candidate_rows: `{summary.get('generic_regime_candidate_rows', 0)}`",
             f"- weak_years_allowed_by_prior_rule: `{summary.get('weak_years_allowed_by_prior_rule', 0)}`",
             f"- fit_uses_eval_year_count: `{summary.get('fit_uses_eval_year_count', 0)}`",
             f"- fit_eval_factor_family_candidate_rows: `{summary.get('fit_eval_factor_family_candidate_rows', 0)}`",
@@ -470,6 +552,11 @@ def _research_interpretation_lines(
         lines.append(
             f"- Regime prior-fit produced `{len(fit_eval)}` rows; weak-year rows allowed by the prior rule: `{summary.get('weak_years_allowed_by_prior_rule', 0)}`."
         )
+        generic_rows = int(summary.get("generic_regime_candidate_rows", 0) or 0)
+        if generic_rows:
+            lines.append(
+                f"- Generic market-regime fallback rows: `{generic_rows}`. These rows can support new signals without signal-specific weak-year history, but they must remain explicitly tagged as `{GENERIC_REGIME_RULE_SCOPE}`."
+            )
     if factor_family_fit_eval.empty:
         lines.append("- No factor-family evidence was supplied.")
         return lines
@@ -691,6 +778,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--failure-run-dir", default=None)
     parser.add_argument("--regime-run-dir", default=None)
     parser.add_argument("--factor-family-run-dirs", default=None, help="Comma-separated factor family specs such as core=<dir>,expanded=<dir>.")
+    parser.add_argument("--include-generic-regime", action="store_true")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--write-research-log", action="store_true")
     parser.add_argument("--research-log-path", default=str(DEFAULT_RESEARCH_LOG))
@@ -703,6 +791,7 @@ def main() -> None:
         failure_run_dir=args.failure_run_dir,
         regime_run_dir=args.regime_run_dir,
         factor_family_run_dirs=args.factor_family_run_dirs,
+        include_generic_regime=bool(args.include_generic_regime),
         output_dir=args.output_dir,
         write_research_log=bool(args.write_research_log),
         research_log_path=args.research_log_path,
