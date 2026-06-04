@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 109,
+  "record_count": 110,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -1799,6 +1799,43 @@
         "policy_input_bundle__45e3d8c059ba718426a9f887",
         "data_platform_v2_status_sidecar__b896a110cf7802cc1653c22a",
         "policy_pool_view__925e8604a91a9c07a5387fb1"
+      ]
+    },
+    {
+      "id": "daily_research_v2_high_return_model_discovery_v1_20260604",
+      "date": "2026-06-04",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_high_return_model_discovery_v1_20260604.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_high_return_model_discovery"
+      ],
+      "run_tags": [
+        "mh_v2_hrd_smoke32_same_gru_seed7_20260604_01"
+      ],
+      "verdict": "Status: `high_return_model_discovery_v1 / orchestration_implemented / smoke32_pipeline_ok / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_high_return_model_discovery`.; Active artifact impact: `daily_research/output/active_execution_strategy.json` unchanged.",
+      "blockers": [
+        "Forecast evidence verdict: `forecast_failed`.",
+        "Current blocker is `full_augmented_memmap_throughput_and_formal_single_seed_multi_split_not_completed`."
+      ],
+      "next_allowed_actions": [
+        "Build or reuse full same-period and long-history augmented memmaps with resource-aware staging; avoid rerunning a blind full same-period build that already showed CPU-bound throughput pain.",
+        "Run Stage 1 as single-seed, multi-split scout on full augmented data, not on the smoke32 pool.",
+        "Use quick bridge for early high-return ranking, then run candidate matrix only for shortlist rows.",
+        "Reserve seeds `7,11,19` for finalist confirmation after at least two time splits show positive transfer.",
+        "Keep all results research-only until a finalist passes forecast, transfer, bad-month, and multi-seed confirmation.",
+        "Do not modify active execution strategy, production root, paper/live, broker, or promotion artifacts."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__2082fee5bb1760972d8c9012",
+        "policy_pool_view__04f11f51d7c0c7ae32038147"
       ]
     },
     {

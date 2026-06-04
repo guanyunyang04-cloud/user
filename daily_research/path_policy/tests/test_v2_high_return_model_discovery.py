@@ -67,6 +67,39 @@ def test_single_seed_requires_explicit_scout_acknowledgement() -> None:
         hrd.build_forecast_tasks(seeds=(7,), allow_single_seed_scout=False)
 
 
+def test_smoke32_tasks_reuse_prebuilt_memmap_and_stay_smoke_only(tmp_path: Path, monkeypatch) -> None:
+    studies = tmp_path / "studies"
+    monkeypatch.setattr(hrd, "STUDIES_ROOT", studies)
+    smoke_manifest = tmp_path / "smoke" / "forecast_dataset_manifest.json"
+    monkeypatch.setattr(hrd, "SMOKE32_MEMMAP_MANIFEST", smoke_manifest)
+
+    path = hrd.write_task_list(
+        output_root=tmp_path / "out",
+        datasets=("smoke32_augmented",),
+        model_families=("gru_sequence_static_context",),
+        seeds=(7,),
+        allow_single_seed_scout=True,
+        max_samples_per_role=8,
+        enforce_active_artifact_clean=False,
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    task = payload["training_tasks"][0]
+    command = task["command"]
+
+    assert payload["training_task_count"] == 1
+    assert payload["smoke_only_task_count"] == 1
+    assert payload["max_samples_per_role"] == 8
+    assert task["tag"] == "mh_v2_hrd_smoke32_same_gru_seed7_20260604_01"
+    assert task["pool_view_id"] == hrd.SMOKE32_POOL_VIEW_ID
+    assert task["evidence_grade"] == "smoke_only"
+    assert task["smoke_only"] is True
+    assert task["builds_forecast_memmap"] is False
+    assert task["reuses_forecast_memmap_manifest"] is True
+    assert task["depends_on_manifest_task_tag"] == "prebuilt_smoke32_augmented_memmap"
+    assert command[command.index("--forecast-memmap-manifest") + 1] == str(smoke_manifest)
+    assert command[command.index("--forecast-max-samples-per-role") + 1] == "8"
+
+
 def test_bridge_and_matrix_commands_are_aggressive_research_scouts(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(hrd, "STUDIES_ROOT", tmp_path / "studies")
     task = hrd.build_forecast_tasks(
@@ -161,6 +194,68 @@ def test_collect_report_ranks_completed_high_return_candidate(tmp_path: Path, mo
     assert report["bad_month_preview"][0]["tag"] == strong["tag"]
     assert report["bad_month_preview"][0]["issue_hint"] == "ordinary_bad_month_preview"
     assert report["scoring_policy"]["three_seed_required_before_model_quality_evidence"] is True
+
+
+def test_collect_report_excludes_smoke_only_rows_from_formal_shortlist(tmp_path: Path, monkeypatch) -> None:
+    studies = tmp_path / "studies"
+    monkeypatch.setattr(hrd, "STUDIES_ROOT", studies)
+    out = tmp_path / "out"
+    path = hrd.write_task_list(
+        output_root=out,
+        datasets=("smoke32_augmented",),
+        model_families=("gru_sequence_static_context",),
+        seeds=(7,),
+        allow_single_seed_scout=True,
+        enforce_active_artifact_clean=False,
+    )
+    task = json.loads(path.read_text(encoding="utf-8"))["training_tasks"][0]
+    _write_json(
+        Path(task["study_dir"]) / "study_summary.json",
+        {
+            "status": "completed",
+            "evidence_verdict": "forecast_test_confirmed",
+            "training_summary": {
+                "test_metrics": {
+                    "decision_score_rank_ic": 0.20,
+                    "decision_score_top_bottom_spread": 0.10,
+                    "decision_hit_lift_top20_mean": 0.08,
+                }
+            },
+        },
+    )
+    _write_json(
+        out / "bridges" / hrd._bridge_tag(str(task["tag"])) / "v2_score_backtest_bridge_report.json",
+        {
+            "status": "completed",
+            "shared_backtest": {
+                "status": "completed",
+                "artifacts": {
+                    "core_metrics": {
+                        "annual_return": 1.20,
+                        "excess_annual_return": 0.90,
+                        "excess_sharpe": 2.0,
+                        "max_drawdown": -0.20,
+                    },
+                    "monthly_backtest_diagnostics": {
+                        "positive_month_ratio": 0.90,
+                        "negative_month_count": 1,
+                        "worst_monthly_return": -0.03,
+                    },
+                },
+            },
+        },
+    )
+
+    report = hrd.collect_high_return_report(output_root=out, task_list_path=path)
+
+    assert report["status"] == "completed"
+    assert report["completed_forecast_count"] == 1
+    assert report["smoke_completed_forecast_count"] == 1
+    assert report["leaderboard"][0]["smoke_only"] is True
+    assert report["leaderboard"][0]["high_return_score"] > 0.0
+    assert report["shortlist"] == []
+    assert report["shortlist_count"] == 0
+    assert Path(report["outputs"]["report_md"]).exists()
 
 
 def test_run_quick_bridge_tasks_executes_only_completed_forecasts(tmp_path: Path, monkeypatch) -> None:

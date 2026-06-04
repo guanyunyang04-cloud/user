@@ -26,6 +26,11 @@ STUDY_FAMILY = "v2_high_return_model_discovery"
 TRADITIONAL_BAOSTOCK_V2_1_DATASET_ID = "policy_input_bundle__2082fee5bb1760972d8c9012"
 SAME_PERIOD_POOL_VIEW_ID = "policy_pool_view__d7a56d5164470b590e4f5a40"
 LONG_HISTORY_POOL_VIEW_ID = "policy_pool_view__eb690dd0becc330f029c21bd"
+SMOKE32_POOL_VIEW_ID = "policy_pool_view__04f11f51d7c0c7ae32038147"
+SMOKE32_MEMMAP_MANIFEST = (
+    PROJECT_ROOT
+    / "daily_research/output/path_policy/data_expansion/traditional_baostock_v2_1_augmented_memmap_smoke32_20260604_01/forecast_dataset_manifest.json"
+)
 FEATURE_PROFILE = "raw_kline_context_v2_tradeable_local_state_industry_metrics_v1"
 POOL_NAME = "rolling_liquid500_tradeable_mainboard_v2"
 BENCHMARK = "000300.SH"
@@ -94,6 +99,15 @@ DATA_SPECS: dict[str, DataSpec] = {
         end_date="20241231",
         split_keys=("a", "b", "c", "long"),
         description="2016-2024 augmented long-history substrate",
+    ),
+    "smoke32_augmented": DataSpec(
+        key="smoke32_augmented",
+        dataset_id=TRADITIONAL_BAOSTOCK_V2_1_DATASET_ID,
+        pool_view_id=SMOKE32_POOL_VIEW_ID,
+        start_date="20180101",
+        end_date="20241231",
+        split_keys=("same",),
+        description="32-symbol augmented smoke substrate, pipeline-only",
     ),
 }
 
@@ -250,7 +264,11 @@ def _tag(
     seed: int,
 ) -> str:
     model_alias = MODEL_SPECS[model_family].alias
-    data_alias = "same" if data_key == "same_period_augmented" else "long"
+    data_alias = {
+        "same_period_augmented": "same",
+        "long_history_augmented": "long",
+        "smoke32_augmented": "smoke32",
+    }.get(data_key, str(data_key).replace("_augmented", ""))
     return f"mh_v2_hrd_{data_alias}_{split_key}_{model_alias}_seed{int(seed)}_20260604_01"
 
 
@@ -273,6 +291,7 @@ def _forecast_command(
     min_epochs: int,
     patience: int,
     memmap_manifest: str | Path | None,
+    max_samples_per_role: int = 0,
 ) -> list[str]:
     command = [
         PYTHON,
@@ -322,6 +341,8 @@ def _forecast_command(
             "--forecast-include-static-context",
             "--forecast-max-feature-columns",
             "192",
+            "--forecast-max-samples-per-role",
+            str(max(int(max_samples_per_role), 0)),
             "--forecast-cumulative-horizons",
             HORIZON_GRID,
             "--forecast-horizon",
@@ -465,6 +486,7 @@ def build_forecast_tasks(
     min_epochs: int = 6,
     patience: int = 5,
     allow_single_seed_scout: bool = True,
+    max_samples_per_role: int = 0,
 ) -> list[dict[str, Any]]:
     root = _root(output_root, run_tag)
     resolved_datasets = _parse_csv_strings(datasets, ("same_period_augmented", "long_history_augmented"))
@@ -491,14 +513,17 @@ def build_forecast_tasks(
             raise ValueError(f"no_compatible_splits_for_dataset:{data_key}")
         for split_key in split_keys:
             split_spec = SPLIT_SPECS[split_key]
-            group_anchor_manifest: Path | None = None
+            group_anchor_manifest: Path | None = SMOKE32_MEMMAP_MANIFEST if data_key == "smoke32_augmented" else None
             group_anchor_tag = ""
             for model_family in resolved_models:
                 model_spec = MODEL_SPECS[model_family]
                 for seed in resolved_seeds:
                     tag = _tag(data_key=data_key, split_key=split_key, model_family=model_family, seed=int(seed))
                     study_dir = STUDIES_ROOT / tag
-                    if group_anchor_manifest is None:
+                    if data_key == "smoke32_augmented":
+                        memmap_manifest = SMOKE32_MEMMAP_MANIFEST
+                        group_anchor_tag = "prebuilt_smoke32_augmented_memmap"
+                    elif group_anchor_manifest is None:
                         memmap_manifest = None
                         group_anchor_tag = tag
                         group_anchor_manifest = study_dir / "forecast_dataset_manifest.json"
@@ -540,6 +565,7 @@ def build_forecast_tasks(
                             min_epochs=int(min_epochs),
                             patience=int(patience),
                             memmap_manifest=memmap_manifest,
+                            max_samples_per_role=max_samples_per_role,
                         ),
                         "quick_bridge_command": _quick_bridge_command(
                             forecast_tag=tag,
@@ -553,7 +579,10 @@ def build_forecast_tasks(
                         ),
                         "research_program": RESEARCH_PROGRAM,
                         "study_family": STUDY_FAMILY,
-                        "evidence_grade": "scout_only" if len(resolved_seeds) == 1 else "finalist_confirmation_input",
+                        "evidence_grade": "smoke_only"
+                        if data_key == "smoke32_augmented"
+                        else ("scout_only" if len(resolved_seeds) == 1 else "finalist_confirmation_input"),
+                        "smoke_only": data_key == "smoke32_augmented",
                         "single_seed_scout_only": len(resolved_seeds) == 1,
                         "shadow_only": True,
                         "promotion_allowed": False,
@@ -575,6 +604,7 @@ def write_task_list(
     min_epochs: int = 6,
     patience: int = 5,
     allow_single_seed_scout: bool = True,
+    max_samples_per_role: int = 0,
     enforce_active_artifact_clean: bool = True,
 ) -> Path:
     if enforce_active_artifact_clean and _active_artifact_has_diff():
@@ -591,6 +621,7 @@ def write_task_list(
         min_epochs=min_epochs,
         patience=patience,
         allow_single_seed_scout=allow_single_seed_scout,
+        max_samples_per_role=max_samples_per_role,
     )
     resolved_seeds = _parse_seeds(seeds)
     payload = {
@@ -613,6 +644,8 @@ def write_task_list(
         "training_task_count": len(tasks),
         "quick_bridge_task_count": len(tasks),
         "candidate_matrix_task_count": len(tasks),
+        "max_samples_per_role": int(max_samples_per_role),
+        "smoke_only_task_count": int(sum(1 for task in tasks if bool(task.get("smoke_only", False)))),
         "training_tasks": tasks,
         "quick_bridge_tasks": [
             {
@@ -621,6 +654,7 @@ def write_task_list(
                 "bridge_run_tag": _bridge_tag(str(task["tag"])),
                 "command": task["quick_bridge_command"],
                 "single_seed_scout_only": bool(task["single_seed_scout_only"]),
+                "smoke_only": bool(task.get("smoke_only", False)),
                 "promotion_allowed": False,
             }
             for task in tasks
@@ -632,6 +666,7 @@ def write_task_list(
                 "matrix_run_tag": _matrix_tag(str(task["tag"])),
                 "command": task["candidate_matrix_command"],
                 "single_seed_scout_only": bool(task["single_seed_scout_only"]),
+                "smoke_only": bool(task.get("smoke_only", False)),
                 "promotion_allowed": False,
             }
             for task in tasks
@@ -691,6 +726,7 @@ def run_forecast_tasks(
     allow_single_seed_scout: bool = False,
     skip_existing: bool = True,
     max_tasks: int = 0,
+    max_samples_per_role: int = 0,
 ) -> dict[str, Any]:
     if _active_artifact_has_diff():
         raise ValueError(f"active_artifact_diff_blocker: {ACTIVE_MANIFEST} has uncommitted diff.")
@@ -707,6 +743,7 @@ def run_forecast_tasks(
         min_epochs=min_epochs,
         patience=patience,
         allow_single_seed_scout=allow_single_seed_scout,
+        max_samples_per_role=max_samples_per_role,
     )
     completed: list[str] = []
     failed: list[str] = []
@@ -742,6 +779,7 @@ def run_forecast_tasks(
         "failed_tags": failed,
         "launched_task_count": int(launched),
         "max_tasks": int(max_tasks),
+        "max_samples_per_role": int(max_samples_per_role),
         "results": results,
         "boundary": {
             "research_only": True,
@@ -1081,6 +1119,66 @@ def _bad_month_preview(rows: list[dict[str, Any]], *, limit: int = 5) -> list[di
     return preview
 
 
+def _write_markdown(path: str | Path, report: dict[str, Any]) -> None:
+    leaderboard = list(report.get("leaderboard", []) or [])[:10]
+    shortlist = list(report.get("shortlist", []) or [])[:5]
+    lines = [
+        "# V2 High Return Model Discovery",
+        "",
+        f"- Status: `{report.get('status', '')}`",
+        f"- Run tag: `{report.get('run_tag', '')}`",
+        f"- Completed forecast count: `{report.get('completed_forecast_count', 0)}`",
+        f"- Completed backtest count: `{report.get('completed_backtest_count', 0)}`",
+        f"- Smoke completed forecast count: `{report.get('smoke_completed_forecast_count', 0)}`",
+        f"- Shortlist count: `{report.get('shortlist_count', 0)}`",
+        "",
+        "## Shortlist",
+        "",
+    ]
+    if shortlist:
+        for row in shortlist:
+            lines.append(
+                "- `{tag}` {dataset}/{split}/{model}: score=`{score:.6f}`, excess_return=`{excess:.6f}`, excess_sharpe=`{sharpe:.6f}`".format(
+                    tag=row.get("tag", ""),
+                    dataset=row.get("dataset_key", ""),
+                    split=row.get("split_key", ""),
+                    model=row.get("model_family", ""),
+                    score=_float_metric(row, "high_return_score"),
+                    excess=_float_metric(row, "excess_annual_return"),
+                    sharpe=_float_metric(row, "excess_sharpe"),
+                )
+            )
+    else:
+        lines.append("- No formal shortlist yet.")
+    lines.extend(["", "## Leaderboard Preview", ""])
+    for row in leaderboard:
+        lines.append(
+            "- `{tag}` {grade}: score=`{score:.6f}`, forecast=`{forecast}`, bridge=`{bridge}`, smoke=`{smoke}`".format(
+                tag=row.get("tag", ""),
+                grade=row.get("evidence_grade", ""),
+                score=_float_metric(row, "high_return_score"),
+                forecast=row.get("forecast_status", ""),
+                bridge=row.get("backtest_status", ""),
+                smoke=bool(row.get("smoke_only", False)),
+            )
+        )
+    lines.extend(
+        [
+            "",
+            "## Boundary",
+            "",
+            "- research_only: `true`",
+            "- shadow_only: `true`",
+            "- promotion_allowed: `false`",
+            "- smoke_only rows are excluded from formal shortlist and completed model-quality evidence.",
+            "- active_execution_strategy_expected_diff: `none`",
+        ]
+    )
+    resolved = Path(path)
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    resolved.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def collect_high_return_report(
     *,
     output_root: str | Path | None = None,
@@ -1120,6 +1218,8 @@ def collect_high_return_report(
             "negative_month_count": _float_metric(monthly, "negative_month_count"),
             "worst_monthly_return": _float_metric(monthly, "worst_monthly_return"),
             "single_seed_scout_only": bool(task.get("single_seed_scout_only", True)),
+            "smoke_only": bool(task.get("smoke_only", False)),
+            "evidence_grade": str(task.get("evidence_grade", "")),
         }
         row.update(_score_row(row))
         rows.append(row)
@@ -1129,9 +1229,13 @@ def collect_high_return_report(
         for row in leaderboard
         if float(row.get("high_return_score", 0.0)) > 0.0
         and (str(row.get("forecast_status")) == "completed" or str(row.get("evidence_verdict")))
+        and not bool(row.get("smoke_only", False))
     ][:3]
     completed_forecast_count = sum(1 for row in rows if str(row.get("forecast_status", "")).strip() == "completed")
     completed_backtest_count = sum(1 for row in rows if str(row.get("backtest_status", "")).strip() == "completed")
+    smoke_completed_forecast_count = sum(
+        1 for row in rows if bool(row.get("smoke_only", False)) and str(row.get("forecast_status", "")).strip() == "completed"
+    )
     status = "missing_tasks"
     if rows and completed_forecast_count <= 0:
         status = "awaiting_forecast_results"
@@ -1145,6 +1249,7 @@ def collect_high_return_report(
         "task_list_path": str(task_list_path or root / "v2_high_return_model_discovery_task_list.json"),
         "completed_forecast_count": int(completed_forecast_count),
         "completed_backtest_count": int(completed_backtest_count),
+        "smoke_completed_forecast_count": int(smoke_completed_forecast_count),
         "leaderboard": leaderboard,
         "split_consistency": _split_consistency(rows),
         "bad_month_preview": _bad_month_preview(rows),
@@ -1161,9 +1266,14 @@ def collect_high_return_report(
             "promotion_allowed": False,
             "active_execution_strategy_expected_diff": "none",
         },
+        "outputs": {
+            "report_json": str(root / "v2_high_return_model_discovery_report.json"),
+            "report_md": str(root / "v2_high_return_model_discovery_report.md"),
+        },
         "updated_at": _now(),
     }
     _write_json(root / "v2_high_return_model_discovery_report.json", report)
+    _write_markdown(root / "v2_high_return_model_discovery_report.md", report)
     return report
 
 
@@ -1186,6 +1296,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-all-matrices", action="store_true")
     parser.add_argument("--collect-report", action="store_true")
     parser.add_argument("--max-tasks", type=int, default=0)
+    parser.add_argument("--forecast-max-samples-per-role", type=int, default=0)
     parser.add_argument("--skip-existing", action="store_true", default=True)
     parser.add_argument("--no-skip-existing", dest="skip_existing", action="store_false")
     parser.add_argument("--json", action="store_true")
@@ -1205,6 +1316,7 @@ def main(argv: list[str] | None = None) -> int:
             min_epochs=int(args.min_epochs),
             patience=int(args.early_stop_patience),
             allow_single_seed_scout=bool(args.allow_single_seed_scout),
+            max_samples_per_role=int(args.forecast_max_samples_per_role),
         )
         actions["task_list"] = str(path)
     if args.run_forecast:
@@ -1221,6 +1333,7 @@ def main(argv: list[str] | None = None) -> int:
             allow_single_seed_scout=bool(args.allow_single_seed_scout),
             skip_existing=bool(args.skip_existing),
             max_tasks=int(args.max_tasks),
+            max_samples_per_role=int(args.forecast_max_samples_per_role),
         )
     if args.run_quick_bridge:
         actions["quick_bridge_run"] = run_quick_bridge_tasks(
