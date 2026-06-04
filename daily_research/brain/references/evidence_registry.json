@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 111,
+  "record_count": 112,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -1799,6 +1799,44 @@
         "policy_input_bundle__45e3d8c059ba718426a9f887",
         "data_platform_v2_status_sidecar__b896a110cf7802cc1653c22a",
         "policy_pool_view__925e8604a91a9c07a5387fb1"
+      ]
+    },
+    {
+      "id": "daily_research_v2_high_return_augmented_datecap2_scout_20260605",
+      "date": "2026-06-05",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_high_return_augmented_datecap2_scout_20260605.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_high_return_model_discovery"
+      ],
+      "run_tags": [
+        "mh_v2_hrd_same_same_gru_seed7_20260604_01"
+      ],
+      "verdict": "Status: `high_return_model_discovery / augmented_same_period_datecap2_scout_completed / quick_bridge_completed / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_high_return_model_discovery`.; Active artifact impact: `daily_research/output/active_execution_strategy.json` unchanged.",
+      "blockers": [
+        "Forecast evidence verdict: `forecast_failed`.",
+        "The task-list continuity blocker from split forecast/bridge execution is repaired.",
+        "This specific same-period augmented GRU single-seed scout is weak: forecast gate failed and bridge transfer is negative versus benchmark."
+      ],
+      "next_allowed_actions": [
+        "Continue high-return discovery with single-seed, multi-split scouts before spending three seeds:",
+        "run long-history augmented splits with the same per-date cap protocol;",
+        "compare same-period and long-history split consistency;",
+        "only promote a candidate to seeds `7,11,19` if at least two splits show useful forecast-to-portfolio transfer.",
+        "Consider raising the per-date cap after resource checks if daily cross-section breadth becomes the suspected bottleneck.",
+        "Prefer architecture/data scouting before local execution repair for this weak candidate; do not run production execution rebuild."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__2082fee5bb1760972d8c9012",
+        "policy_pool_view__d7a56d5164470b590e4f5a40"
       ]
     },
     {

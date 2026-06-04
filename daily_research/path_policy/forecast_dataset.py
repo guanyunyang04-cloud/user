@@ -505,6 +505,14 @@ def _date_role_boundaries(
     return eligible
 
 
+def _rotated_items(items: list[str] | tuple[str, ...], offset: int) -> list[str]:
+    values = list(items)
+    if not values:
+        return []
+    pivot = int(offset) % len(values)
+    return [*values[pivot:], *values[:pivot]]
+
+
 def _safe_label_value(frame: pd.DataFrame, date: pd.Timestamp, stock: str) -> float:
     try:
         value = frame.loc[date, stock]
@@ -585,6 +593,7 @@ def build_forecast_sequence_dataset(
     cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
     execution_mode: str = "next_open",
     max_samples_per_role: int = 0,
+    max_samples_per_date_per_role: int = 0,
     feature_profile: str = DEFAULT_FORECAST_FEATURE_PROFILE,
     max_feature_columns: int = DEFAULT_FORECAST_MAX_FEATURE_COLUMNS,
 ) -> ForecastSequenceDataset:
@@ -635,10 +644,14 @@ def build_forecast_sequence_dataset(
     dropped_target_nan = 0
     dropped_missing_lookback = 0
     capped = int(max_samples_per_role) > 0
+    per_date_cap = max(int(max_samples_per_date_per_role), 0)
+    capped_per_date = per_date_cap > 0
     sample_count_by_role = {"train": 0, "validation": 0, "test": 0}
 
     for role in ("train", "validation", "test"):
-        for signal_dt in eligible_dates_by_role.get(role, []):
+        for date_idx, signal_dt in enumerate(eligible_dates_by_role.get(role, [])):
+            if capped and sample_count_by_role[role] >= int(max_samples_per_role):
+                break
             signal_pos = date_to_pos.get(signal_dt)
             if signal_pos is None or signal_pos < lookback_days - 1:
                 dropped_missing_lookback += len(prepared.universe)
@@ -650,8 +663,12 @@ def build_forecast_sequence_dataset(
             sequence_dates = dates[signal_pos - lookback_days + 1 : signal_pos + 1]
             membership = prepared.membership_frame.reindex(index=[signal_dt], columns=list(prepared.universe))
             membership_row = membership.iloc[0].fillna(False) if not membership.empty else pd.Series(False, index=prepared.universe)
-            for stock in prepared.universe:
+            sample_count_this_date = 0
+            stock_iter = _rotated_items(list(prepared.universe), date_idx * max(per_date_cap, 1)) if capped_per_date else list(prepared.universe)
+            for stock in stock_iter:
                 if capped and sample_count_by_role[role] >= int(max_samples_per_role):
+                    break
+                if capped_per_date and sample_count_this_date >= per_date_cap:
                     break
                 if not bool(membership_row.get(stock, False)):
                     continue
@@ -730,6 +747,7 @@ def build_forecast_sequence_dataset(
                 sequence_start_rows.append(sequence_dates[0])
                 label_end_rows.append(dates[label_end_pos])
                 sample_count_by_role[role] += 1
+                sample_count_this_date += 1
 
     normalization_manifest: dict[str, Any] = {
         "fit_role": "train_only",
@@ -775,6 +793,7 @@ def build_forecast_sequence_dataset(
         "dropped_target_nan": int(dropped_target_nan),
         "dropped_missing_lookback": int(dropped_missing_lookback),
         "max_samples_per_role": int(max_samples_per_role),
+        "max_samples_per_date_per_role": int(max_samples_per_date_per_role),
     }
 
     if not x_rows:
@@ -1113,6 +1132,7 @@ def build_forecast_memmap_dataset(
     cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
     execution_mode: str = "next_open",
     max_samples_per_role: int = 0,
+    max_samples_per_date_per_role: int = 0,
     feature_profile: str = DEFAULT_FORECAST_FEATURE_PROFILE,
     max_feature_columns: int = DEFAULT_FORECAST_MAX_FEATURE_COLUMNS,
     min_lookback_valid_ratio: float = 0.80,
@@ -1143,6 +1163,7 @@ def build_forecast_memmap_dataset(
         feature_profile=feature_profile,
         max_feature_columns=max_feature_columns,
         max_samples_per_role=max_samples_per_role,
+        max_samples_per_date_per_role=max_samples_per_date_per_role,
     )
     date_to_pos = {dt: idx for idx, dt in enumerate(dates)}
     stock_to_pos = {stock: idx for idx, stock in enumerate(universe)}
@@ -1215,13 +1236,17 @@ def build_forecast_memmap_dataset(
     dropped_missing_lookback = 0
     dropped_low_history = 0
     capped = int(max_samples_per_role) > 0
+    per_date_cap = max(int(max_samples_per_date_per_role), 0)
+    capped_per_date = per_date_cap > 0
     sample_count_by_role = {"train": 0, "validation": 0, "test": 0}
     train_seen_stocks: set[str] = set()
 
     membership_frame = prepared.membership_frame.reindex(index=dates, columns=universe, fill_value=False).astype(bool)
     history_ratio = history_ratio.reindex(index=dates, columns=universe)
     for role in ("train", "validation", "test"):
-        for signal_dt in eligible_dates_by_role.get(role, []):
+        for date_idx, signal_dt in enumerate(eligible_dates_by_role.get(role, [])):
+            if capped and sample_count_by_role[role] >= int(max_samples_per_role):
+                break
             signal_pos = date_to_pos.get(signal_dt)
             if signal_pos is None or signal_pos < lookback_days - 1:
                 dropped_missing_lookback += len(universe)
@@ -1232,8 +1257,12 @@ def build_forecast_memmap_dataset(
                 continue
             sequence_start_pos = signal_pos - lookback_days + 1
             membership_row = membership_frame.loc[signal_dt] if signal_dt in membership_frame.index else pd.Series(False, index=universe)
-            for stock in universe:
+            sample_count_this_date = 0
+            stock_iter = _rotated_items(universe, date_idx * max(per_date_cap, 1)) if capped_per_date else universe
+            for stock in stock_iter:
                 if capped and sample_count_by_role[role] >= int(max_samples_per_role):
+                    break
+                if capped_per_date and sample_count_this_date >= per_date_cap:
                     break
                 if not bool(membership_row.get(stock, False)):
                     continue
@@ -1327,6 +1356,7 @@ def build_forecast_memmap_dataset(
                 y_worst_rows.append(worst_target)
                 y_upside_rows.append(upside_target)
                 sample_count_by_role[role] += 1
+                sample_count_this_date += 1
 
     sample_index = pd.DataFrame(sample_rows)
     if not sample_index.empty:
@@ -1439,6 +1469,7 @@ def build_forecast_memmap_dataset(
         "min_lookback_valid_ratio": float(min_lookback_valid_ratio),
         "history_valid_ratio_summary": _summary_stats(kept_history_values),
         "max_samples_per_role": int(max_samples_per_role),
+        "max_samples_per_date_per_role": int(max_samples_per_date_per_role),
         "normalization": normalization_manifest,
         "static_context_schema": {
             "enabled": bool(include_static_context),

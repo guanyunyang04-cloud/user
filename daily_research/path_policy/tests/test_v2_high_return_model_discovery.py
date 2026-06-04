@@ -80,6 +80,7 @@ def test_smoke32_tasks_reuse_prebuilt_memmap_and_stay_smoke_only(tmp_path: Path,
         seeds=(7,),
         allow_single_seed_scout=True,
         max_samples_per_role=8,
+        max_samples_per_date_per_role=2,
         enforce_active_artifact_clean=False,
     )
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -93,11 +94,13 @@ def test_smoke32_tasks_reuse_prebuilt_memmap_and_stay_smoke_only(tmp_path: Path,
     assert task["pool_view_id"] == hrd.SMOKE32_POOL_VIEW_ID
     assert task["evidence_grade"] == "smoke_only"
     assert task["smoke_only"] is True
+    assert task["max_samples_per_date_per_role"] == 2
     assert task["builds_forecast_memmap"] is False
     assert task["reuses_forecast_memmap_manifest"] is True
     assert task["depends_on_manifest_task_tag"] == "prebuilt_smoke32_augmented_memmap"
     assert command[command.index("--forecast-memmap-manifest") + 1] == str(smoke_manifest)
     assert command[command.index("--forecast-max-samples-per-role") + 1] == "8"
+    assert command[command.index("--forecast-max-samples-per-date-per-role") + 1] == "2"
 
 
 def test_full_pool_pilot_tasks_are_excluded_from_formal_shortlist(tmp_path: Path, monkeypatch) -> None:
@@ -410,6 +413,7 @@ def test_run_forecast_tasks_supports_max_tasks_for_reboot_safe_batches(tmp_path:
 
     assert summary["status"] == "completed"
     assert summary["launched_task_count"] == 1
+    assert Path(summary["task_list_path"]).exists()
     assert len(calls) == 1
     assert any(result.get("status") == "deferred_by_max_tasks" for result in summary["results"])
 

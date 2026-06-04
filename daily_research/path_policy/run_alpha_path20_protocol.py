@@ -667,6 +667,7 @@ def _run_forecast_walkforward_study(
                 feature_profile=str(args.forecast_feature_profile),
                 max_feature_columns=int(args.forecast_max_feature_columns),
                 max_samples_per_role=int(args.forecast_max_samples_per_role),
+                max_samples_per_date_per_role=int(getattr(args, "forecast_max_samples_per_date_per_role", 0)),
                 min_lookback_valid_ratio=float(args.forecast_min_lookback_valid_ratio),
                 include_static_context=bool(args.forecast_include_static_context),
                 static_context_fields=normalize_static_context_fields(str(args.forecast_static_fields)),
@@ -688,6 +689,7 @@ def _run_forecast_walkforward_study(
             feature_profile=str(args.forecast_feature_profile),
             max_feature_columns=int(args.forecast_max_feature_columns),
             max_samples_per_role=int(args.forecast_max_samples_per_role),
+            max_samples_per_date_per_role=int(getattr(args, "forecast_max_samples_per_date_per_role", 0)),
         )
         dataset_manifest = save_forecast_sequence_dataset(dataset, study_root)
     training_summary: dict[str, Any] = {"status": "not_run"}
@@ -3418,6 +3420,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--forecast-feature-profile", default=DEFAULT_FORECAST_FEATURE_PROFILE, choices=FORECAST_FEATURE_PROFILES)
     parser.add_argument("--forecast-max-feature-columns", type=int, default=DEFAULT_FORECAST_MAX_FEATURE_COLUMNS)
     parser.add_argument("--forecast-max-samples-per-role", type=int, default=0)
+    parser.add_argument("--forecast-max-samples-per-date-per-role", type=int, default=0)
     parser.add_argument("--forecast-dataset-mode", default="eager", choices=("eager", "memmap"))
     parser.add_argument("--forecast-memmap-manifest", default="", help="Reuse an existing forecast memmap dataset manifest.")
     parser.add_argument("--forecast-min-lookback-valid-ratio", type=float, default=0.80)
@@ -3553,6 +3556,8 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
             parser.error("--forecast-seeds must contain non-negative integer seeds.")
         if int(getattr(args, "forecast_max_samples_per_role", 0)) < 0:
             parser.error("--forecast-max-samples-per-role must be >= 0.")
+        if int(getattr(args, "forecast_max_samples_per_date_per_role", 0)) < 0:
+            parser.error("--forecast-max-samples-per-date-per-role must be >= 0.")
         if int(getattr(args, "forecast_max_feature_columns", DEFAULT_FORECAST_MAX_FEATURE_COLUMNS)) <= 0:
             parser.error("--forecast-max-feature-columns must be positive.")
         if not (0.0 <= float(getattr(args, "forecast_min_lookback_valid_ratio", 0.80)) <= 1.0):

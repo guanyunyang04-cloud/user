@@ -94,6 +94,30 @@ def test_forecast_memmap_dataset_writes_progress_files(tmp_path) -> None:
     assert feature_progress["feature_nan_ratio"] >= 0.0
 
 
+def test_forecast_memmap_dataset_can_cap_samples_per_date(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=820, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2018-01-02")
+    dataset = build_forecast_memmap_dataset(
+        prepared,
+        root=tmp_path,
+        train_start_year=2018,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=0,
+        max_samples_per_date_per_role=1,
+        min_lookback_valid_ratio=0.80,
+    )
+
+    assert dataset.manifest["max_samples_per_date_per_role"] == 1
+    for role in ("train", "validation", "test"):
+        rows = dataset.sample_index.loc[dataset.sample_index["role"].astype(str).eq(role)]
+        assert rows["date"].nunique() > 3
+        assert rows.groupby("date").size().max() == 1
+        assert rows["stock"].nunique() > 1
+
+
 def test_memmap_train_normalization_matches_naive_window_scan(tmp_path) -> None:
     feature_shape = (7, 3, 4)
     values = np.arange(np.prod(feature_shape), dtype=np.float32).reshape(feature_shape)

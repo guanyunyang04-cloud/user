@@ -310,6 +310,7 @@ def _forecast_command(
     patience: int,
     memmap_manifest: str | Path | None,
     max_samples_per_role: int = 0,
+    max_samples_per_date_per_role: int = 0,
 ) -> list[str]:
     command = [
         PYTHON,
@@ -361,6 +362,8 @@ def _forecast_command(
             "192",
             "--forecast-max-samples-per-role",
             str(max(int(max_samples_per_role), 0)),
+            "--forecast-max-samples-per-date-per-role",
+            str(max(int(max_samples_per_date_per_role), 0)),
             "--forecast-cumulative-horizons",
             HORIZON_GRID,
             "--forecast-horizon",
@@ -505,6 +508,7 @@ def build_forecast_tasks(
     patience: int = 5,
     allow_single_seed_scout: bool = True,
     max_samples_per_role: int = 0,
+    max_samples_per_date_per_role: int = 0,
 ) -> list[dict[str, Any]]:
     root = _root(output_root, run_tag)
     resolved_datasets = _parse_csv_strings(datasets, ("same_period_augmented", "long_history_augmented"))
@@ -584,6 +588,7 @@ def build_forecast_tasks(
                             patience=int(patience),
                             memmap_manifest=memmap_manifest,
                             max_samples_per_role=max_samples_per_role,
+                            max_samples_per_date_per_role=max_samples_per_date_per_role,
                         ),
                         "quick_bridge_command": _quick_bridge_command(
                             forecast_tag=tag,
@@ -609,6 +614,8 @@ def build_forecast_tasks(
                         "smoke_only": data_key == "smoke32_augmented",
                         "pilot_only": data_key == "same_period_augmented_pilot",
                         "single_seed_scout_only": len(resolved_seeds) == 1,
+                        "max_samples_per_role": int(max_samples_per_role),
+                        "max_samples_per_date_per_role": int(max_samples_per_date_per_role),
                         "shadow_only": True,
                         "promotion_allowed": False,
                         "active_execution_strategy_expected_diff": "none",
@@ -630,6 +637,7 @@ def write_task_list(
     patience: int = 5,
     allow_single_seed_scout: bool = True,
     max_samples_per_role: int = 0,
+    max_samples_per_date_per_role: int = 0,
     enforce_active_artifact_clean: bool = True,
 ) -> Path:
     if enforce_active_artifact_clean and _active_artifact_has_diff():
@@ -647,6 +655,7 @@ def write_task_list(
         patience=patience,
         allow_single_seed_scout=allow_single_seed_scout,
         max_samples_per_role=max_samples_per_role,
+        max_samples_per_date_per_role=max_samples_per_date_per_role,
     )
     resolved_seeds = _parse_seeds(seeds)
     payload = {
@@ -670,6 +679,7 @@ def write_task_list(
         "quick_bridge_task_count": len(tasks),
         "candidate_matrix_task_count": len(tasks),
         "max_samples_per_role": int(max_samples_per_role),
+        "max_samples_per_date_per_role": int(max_samples_per_date_per_role),
         "smoke_only_task_count": int(sum(1 for task in tasks if bool(task.get("smoke_only", False)))),
         "pilot_only_task_count": int(sum(1 for task in tasks if bool(task.get("pilot_only", False)))),
         "training_tasks": tasks,
@@ -755,6 +765,7 @@ def run_forecast_tasks(
     skip_existing: bool = True,
     max_tasks: int = 0,
     max_samples_per_role: int = 0,
+    max_samples_per_date_per_role: int = 0,
 ) -> dict[str, Any]:
     if _active_artifact_has_diff():
         raise ValueError(f"active_artifact_diff_blocker: {ACTIVE_MANIFEST} has uncommitted diff.")
@@ -772,6 +783,22 @@ def run_forecast_tasks(
         patience=patience,
         allow_single_seed_scout=allow_single_seed_scout,
         max_samples_per_role=max_samples_per_role,
+        max_samples_per_date_per_role=max_samples_per_date_per_role,
+    )
+    task_list_path = write_task_list(
+        output_root=root,
+        run_tag=run_tag,
+        datasets=datasets,
+        splits=splits,
+        model_families=model_families,
+        seeds=seeds,
+        epochs=epochs,
+        min_epochs=min_epochs,
+        patience=patience,
+        allow_single_seed_scout=allow_single_seed_scout,
+        max_samples_per_role=max_samples_per_role,
+        max_samples_per_date_per_role=max_samples_per_date_per_role,
+        enforce_active_artifact_clean=False,
     )
     completed: list[str] = []
     failed: list[str] = []
@@ -803,11 +830,13 @@ def run_forecast_tasks(
         "schema_version": 1,
         "status": "completed" if not failed else "failed",
         "run_tag": str(run_tag),
+        "task_list_path": str(task_list_path),
         "completed_tags": completed,
         "failed_tags": failed,
         "launched_task_count": int(launched),
         "max_tasks": int(max_tasks),
         "max_samples_per_role": int(max_samples_per_role),
+        "max_samples_per_date_per_role": int(max_samples_per_date_per_role),
         "results": results,
         "boundary": {
             "research_only": True,
@@ -1332,6 +1361,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--collect-report", action="store_true")
     parser.add_argument("--max-tasks", type=int, default=0)
     parser.add_argument("--forecast-max-samples-per-role", type=int, default=0)
+    parser.add_argument("--forecast-max-samples-per-date-per-role", type=int, default=0)
     parser.add_argument("--skip-existing", action="store_true", default=True)
     parser.add_argument("--no-skip-existing", dest="skip_existing", action="store_false")
     parser.add_argument("--json", action="store_true")
@@ -1352,6 +1382,7 @@ def main(argv: list[str] | None = None) -> int:
             patience=int(args.early_stop_patience),
             allow_single_seed_scout=bool(args.allow_single_seed_scout),
             max_samples_per_role=int(args.forecast_max_samples_per_role),
+            max_samples_per_date_per_role=int(args.forecast_max_samples_per_date_per_role),
         )
         actions["task_list"] = str(path)
     if args.run_forecast:
@@ -1369,6 +1400,7 @@ def main(argv: list[str] | None = None) -> int:
             skip_existing=bool(args.skip_existing),
             max_tasks=int(args.max_tasks),
             max_samples_per_role=int(args.forecast_max_samples_per_role),
+            max_samples_per_date_per_role=int(args.forecast_max_samples_per_date_per_role),
         )
     if args.run_quick_bridge:
         actions["quick_bridge_run"] = run_quick_bridge_tasks(
