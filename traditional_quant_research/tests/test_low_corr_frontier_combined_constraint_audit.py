@@ -41,7 +41,7 @@ def _frontier_panel() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def test_normalize_signal_penalty_strengths_requires_complete_mapping() -> None:
+def test_normalize_signal_penalty_strengths_defaults_missing_and_ignores_unknown() -> None:
     signals = (
         low_corr_frontier_combined_constraint_audit.ROLLING_IC_SIGNAL,
         low_corr_frontier_combined_constraint_audit.LOW_CORR_SIGNAL,
@@ -54,16 +54,18 @@ def test_normalize_signal_penalty_strengths_requires_complete_mapping() -> None:
 
     assert mapping[signals[0]] == pytest.approx(0.25)
     assert mapping[signals[1]] == pytest.approx(1.0)
-    with pytest.raises(ValueError, match="missing penalty strengths"):
-        low_corr_frontier_combined_constraint_audit.normalize_signal_penalty_strengths(
-            f"{signals[0]}=0.25",
-            signals,
-        )
-    with pytest.raises(ValueError, match="unknown signals"):
-        low_corr_frontier_combined_constraint_audit.normalize_signal_penalty_strengths(
-            f"{signals[0]}=0.25,{signals[1]}=1.0,extra=0",
-            signals,
-        )
+    defaulted = low_corr_frontier_combined_constraint_audit.normalize_signal_penalty_strengths(
+        f"{signals[0]}=0.25",
+        signals,
+    )
+    with_unknown = low_corr_frontier_combined_constraint_audit.normalize_signal_penalty_strengths(
+        f"{signals[0]}=0.25,{signals[1]}=1.0,extra=0",
+        signals,
+    )
+
+    assert defaulted[signals[0]] == pytest.approx(0.25)
+    assert defaulted[signals[1]] == pytest.approx(0.0)
+    assert with_unknown[signals[1]] == pytest.approx(1.0)
 
 
 def test_summarize_combined_constraint_audit_adds_impact_and_low_corr_deltas() -> None:
@@ -142,6 +144,7 @@ def test_run_low_corr_frontier_combined_constraint_audit_writes_outputs(tmp_path
         include_metrics=True,
         include_industry=True,
         factor_pruning_run_dir=tmp_path / "factor_pruning",
+        ml_signal_run_dir=tmp_path / "ml_signal",
         output_dir=tmp_path,
         write_research_log=True,
         research_log_path=tmp_path / "research_log.md",
@@ -174,11 +177,13 @@ def test_run_low_corr_frontier_combined_constraint_audit_writes_outputs(tmp_path
     assert result["max_group_weight"] == pytest.approx(0.5)
     assert result["exposure_constraint_cols"] == ["log_amount_mean_20d_z", "turn_xsec_z"]
     assert result["max_abs_exposure"] == pytest.approx(1.0)
+    assert result["ml_signal_run_dir"] == str(tmp_path / "ml_signal")
     assert result["signal_penalty_strengths"][signals[0]] == pytest.approx(0.25)
     assert captured["factor_set"] == "expanded"
     assert captured["include_industry"] is True
     assert captured["include_metrics"] is True
     assert captured["factor_pruning_run_dir"] == tmp_path / "factor_pruning"
+    assert captured["ml_signal_run_dir"] == tmp_path / "ml_signal"
 
     summary = pd.read_csv(run_dir / "combined_constraint_summary.csv")
     assert set(summary["signal"]) == set(signals)
@@ -198,6 +203,7 @@ def test_run_low_corr_frontier_combined_constraint_audit_writes_outputs(tmp_path
     assert set(meta["group_col"]) == {"industry"}
     assert set(meta["factor_set"]) == {"expanded"}
     assert set(meta["factor_pruning_run_dir"]) == {str(tmp_path / "factor_pruning")}
+    assert set(meta["ml_signal_run_dir"]) == {str(tmp_path / "ml_signal")}
 
 
 def test_run_combined_constraint_audit_wires_prior_fit_weak_year_variants(tmp_path: Path, monkeypatch) -> None:

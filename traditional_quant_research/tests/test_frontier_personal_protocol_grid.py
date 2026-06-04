@@ -231,6 +231,7 @@ def test_run_frontier_personal_protocol_grid_writes_artifacts(tmp_path: Path, mo
         signals=("multifactor_rolling_ic_weighted_score", "multifactor_low_corr_rank_score"),
         signal_penalty_strengths="multifactor_rolling_ic_weighted_score=0.25,multifactor_low_corr_rank_score=1.0",
         factor_pruning_run_dir=tmp_path / "factor_pruning",
+        ml_signal_run_dir=tmp_path / "ml_signal",
         min_eval_year_count=2,
         required_start_year=2017,
         required_end_year=2018,
@@ -246,6 +247,7 @@ def test_run_frontier_personal_protocol_grid_writes_artifacts(tmp_path: Path, mo
     assert result["personal_paper_candidate_count"] == 0
     assert result["strategy_candidate_count"] == 0
     assert result["factor_set"] == "expanded"
+    assert result["ml_signal_run_dir"] == str(tmp_path / "ml_signal")
     assert result["best_top_n"] == 20
     assert len(combined_calls) == 2
     assert len(gate_calls) == 1
@@ -253,6 +255,7 @@ def test_run_frontier_personal_protocol_grid_writes_artifacts(tmp_path: Path, mo
     assert {tuple(call["top_n_values"]) for call in combined_calls} == {(20, 50)}
     assert {call["factor_set"] for call in combined_calls} == {"expanded"}
     assert {call["factor_pruning_run_dir"] for call in combined_calls} == {tmp_path / "factor_pruning"}
+    assert {call["ml_signal_run_dir"] for call in combined_calls} == {tmp_path / "ml_signal"}
     assert (run_dir / "personal_protocol_grid_progress.csv").exists()
     progress = pd.read_csv(run_dir / "personal_protocol_grid_progress.csv")
     assert set(progress["status"]) == {"completed"}
@@ -266,11 +269,25 @@ def test_run_frontier_personal_protocol_grid_writes_artifacts(tmp_path: Path, mo
     assert PERSONAL_BACKTEST_PROMOTION_LEVEL in set(ledger["promotion_level"])
     summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
     assert summary["factor_set"] == "expanded"
+    assert summary["ml_signal_run_dir"] == str(tmp_path / "ml_signal")
 
 
 def test_protocol_grid_rejects_invalid_top_n() -> None:
     with pytest.raises(ValueError, match="top_n_values must be positive"):
         frontier_personal_protocol_grid.run_frontier_personal_protocol_grid(top_n_values=(0,))
+
+
+def test_ml_constraint_variants_auto_resolve_latest_weak_year_run(tmp_path: Path, monkeypatch) -> None:
+    latest = tmp_path / "frontier_weak_year_rebuild_latest"
+    monkeypatch.setattr(frontier_personal_protocol_grid, "latest_run_dir", lambda root: latest)
+
+    resolved = frontier_personal_protocol_grid._resolve_ml_weak_year_rebuild_run_dir(
+        None,
+        ml_signal_run_dir=tmp_path / "ml_signal",
+        constraint_variants=("baseline", "capital_scaled"),
+    )
+
+    assert resolved == latest
 
 
 def test_run_yearly_combined_constraint_grid_resumes_completed_year(tmp_path: Path, monkeypatch) -> None:

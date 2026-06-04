@@ -116,6 +116,7 @@ def run_low_corr_frontier_combined_constraint_audit(
     include_industry: bool = True,
     weak_year_rebuild_run_dir: str | Path | None = None,
     factor_pruning_run_dir: str | Path | None = None,
+    ml_signal_run_dir: str | Path | None = None,
     constraint_variants: Sequence[str] | str | None = None,
     output_dir: Path = DEFAULT_OUTPUT_DIR,
     write_research_log: bool = False,
@@ -194,6 +195,7 @@ def run_low_corr_frontier_combined_constraint_audit(
             include_industry=include_industry or group_col is not None,
             include_metrics=include_metrics,
             factor_pruning_run_dir=factor_pruning_run_dir,
+            ml_signal_run_dir=ml_signal_run_dir,
         )
         manifest = built["manifest"]
         quality = built["quality"]
@@ -401,6 +403,9 @@ def run_low_corr_frontier_combined_constraint_audit(
                 "factor_pruning_run_dir": str(factor_pruning_run_dir or ""),
                 "factor_pruning_signal": str(built.get("factor_pruning_signal", "")),
                 "factor_pruning_plan_rows": int(built.get("factor_pruning_plan_rows", 0)),
+                "ml_signal_run_dir": str(ml_signal_run_dir or ""),
+                "ml_signal": str(built.get("ml_signal", "")),
+                "ml_prediction_rows": int(built.get("ml_prediction_rows", 0)),
                 "group_col": group_col or "",
                 "max_group_weight": float(max_group_weight) if max_group_weight is not None else np.nan,
                 "rolling_fallback_rate": float(built["rolling_fallback_rate"]),
@@ -452,6 +457,7 @@ def run_low_corr_frontier_combined_constraint_audit(
         "constraint_variants": list(selected_variants),
         "weak_year_rebuild_run_dir": str(weak_year_rebuild_run_dir or ""),
         "factor_pruning_run_dir": str(factor_pruning_run_dir or ""),
+        "ml_signal_run_dir": str(ml_signal_run_dir or ""),
         "quality": {
             "failure_count": quality.get("failure_count"),
             "missing_bar_rows": quality.get("missing_bar_rows"),
@@ -502,15 +508,9 @@ def normalize_signal_penalty_strengths(
                 raise ValueError(f"invalid signal penalty strength spec: {text}")
             signal, strength = text.split("=", 1)
             raw[signal.strip()] = float(strength.strip())
-    missing = sorted(set(selected_signals) - set(raw))
-    if missing:
-        raise ValueError(f"missing penalty strengths for signals: {missing}")
-    unknown = sorted(set(raw) - set(selected_signals))
-    if unknown:
-        raise ValueError(f"penalty strengths contain unknown signals: {unknown}")
     if any(value < 0 for value in raw.values()):
         raise ValueError("penalty strengths must be non-negative")
-    return {signal: float(raw[signal]) for signal in selected_signals}
+    return {signal: float(raw.get(signal, 0.0)) for signal in selected_signals}
 
 
 def _read_weak_year_rules(run_dir: str | Path | None) -> pd.DataFrame:
@@ -1144,6 +1144,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--include-metrics", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--include-industry", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--factor-pruning-run-dir", type=Path, default=None)
+    parser.add_argument("--ml-signal-run-dir", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--write-research-log", action="store_true")
     parser.add_argument("--research-log-path", type=Path, default=DEFAULT_RESEARCH_LOG)
@@ -1183,6 +1184,7 @@ def main() -> None:
         include_industry=args.include_industry,
         weak_year_rebuild_run_dir=args.weak_year_rebuild_run_dir,
         factor_pruning_run_dir=args.factor_pruning_run_dir,
+        ml_signal_run_dir=args.ml_signal_run_dir,
         constraint_variants=_normalize_optional_tuple(args.constraint_variants) if args.constraint_variants is not None else None,
         output_dir=args.output_dir,
         write_research_log=args.write_research_log,

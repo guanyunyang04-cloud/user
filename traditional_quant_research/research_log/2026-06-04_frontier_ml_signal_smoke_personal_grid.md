@@ -1,0 +1,30 @@
+# Frontier Personal Protocol Grid
+
+- run_id: `frontier_personal_protocol_grid_20260604_150232`
+- north_star: `Baostock-only personal quant strategy research`
+- decision: `keep_personal_research_backtest_only`
+- top_n_values: `[100]`
+- protocol: `horizon=20`, `monthly`, `buffer=3.0`
+- required stress: `30.0` fee bps, `10.0` impact bps per 1 pct, personal capital `1000000.0`
+- personal_backtest_candidate_count: `0`
+- personal_paper_candidate_count: `0`
+- strategy_candidate_count: `0`
+- evidence_scopes: `['diagnostic_relaxed_personal_gate']`
+- best_protocol_id: `top100_ml_lgbm_xsec_excess_score_h20_prior_fit_baseline_penalty_0`
+- Artifacts: `traditional_quant_research\output\experiments\frontier_personal_protocol_grid\frontier_personal_protocol_grid_20260604_150232`
+
+## Top-N Summary
+
+|   top_n |   evaluated_rows |   personal_backtest_candidate_count | best_protocol_id                                                  | best_signal                             | best_promotion_level            |   best_mean_annualized_return |   best_min_annualized_return |   best_positive_year_rate |   best_worst_max_drawdown | decision          |
+|--------:|-----------------:|------------------------------------:|:------------------------------------------------------------------|:----------------------------------------|:--------------------------------|------------------------------:|-----------------------------:|--------------------------:|--------------------------:|:------------------|
+|     100 |                1 |                                   0 | top100_ml_lgbm_xsec_excess_score_h20_prior_fit_baseline_penalty_0 | ml_lgbm_xsec_excess_score_h20_prior_fit | personal_research/backtest_only |                      0.281347 |                     0.281347 |                         1 |                         0 | continue_research |
+
+## Protocol Ledger
+
+| protocol_id                                                       | research_track                       |   top_n |   horizon | rebalance_frequency   |   buffer_multiplier | constraint_variant   | signal                                  |   exposure_penalty_strength |   fee_bps |   capital_amount |   impact_bps_per_1pct |   personal_capital_amount |   mean_annualized_return |   min_annualized_return |   positive_year_rate |   worst_max_drawdown |   total_periods |   eval_year_count |   max_proxy_mean_abs_active_exposure | formal_profile_gate   | evidence_scope                   | gate_profile_detail                                                          | promoted   | promotion_level                 | paper_tracking_recommendation   | failed_gates                                      | evidence_grade                  | strategy_candidate   | combined_run_dir                                                                                                                                                                                                         | personal_gate_run_dir                                                                                                                                                                                  |   rank_overall |   rank_within_top_n |
+|:------------------------------------------------------------------|:-------------------------------------|--------:|----------:|:----------------------|--------------------:|:---------------------|:----------------------------------------|----------------------------:|----------:|-----------------:|----------------------:|--------------------------:|-------------------------:|------------------------:|---------------------:|---------------------:|----------------:|------------------:|-------------------------------------:|:----------------------|:---------------------------------|:-----------------------------------------------------------------------------|:-----------|:--------------------------------|:--------------------------------|:--------------------------------------------------|:--------------------------------|:---------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------:|--------------------:|
+| top100_ml_lgbm_xsec_excess_score_h20_prior_fit_baseline_penalty_0 | baostock_only_personal_protocol_grid |     100 |        20 | monthly               |                   3 | baseline             | ml_lgbm_xsec_excess_score_h20_prior_fit |                           0 |        30 |            1e+08 |                    10 |                     1e+06 |                 0.281347 |                0.281347 |                    1 |                    0 |               2 |                 1 |                              1.00724 | False                 | diagnostic_relaxed_personal_gate | formal_defaults_or_stricter;nonformal_evidence=walk_forward_gate,sample_gate | False      | personal_research/backtest_only | continue_research               | formal_profile_gate,walk_forward_gate,sample_gate | personal_research/backtest_only | False                | traditional_quant_research\output\experiments\frontier_personal_protocol_grid\frontier_personal_protocol_grid_20260604_150232\combined_constraint_merged\frontier_personal_protocol_grid_20260604_150232_combined_merged | traditional_quant_research\output\experiments\frontier_personal_protocol_grid\frontier_personal_protocol_grid_20260604_150232\personal_candidate_gate\frontier_personal_candidate_gate_20260604_165357 |              1 |                   1 |
+
+## Interpretation
+
+This experiment moves the current frontier from a single institutional-style Top-N protocol toward a personal small-capital protocol ladder. Passing rows are eligible for paper tracking only; they are not personal paper candidates or institutional strategy candidates.

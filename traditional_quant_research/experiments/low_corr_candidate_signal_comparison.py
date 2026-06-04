@@ -34,6 +34,7 @@ from traditional_quant_research.experiments.multifactor_baseline import (
     selected_basket_factor_exposure,
     summarize_horizon_trade_table,
 )
+from traditional_quant_research.experiments.frontier_ml_signal_rebuild import ML_SIGNAL_NAME_TEMPLATE
 from traditional_quant_research.horizon_backtest import (
     horizon_aligned_top_n_backtest,
     period_horizon_summary,
@@ -86,6 +87,7 @@ def build_candidate_protocol_signal_panel(
     include_industry: bool = False,
     include_metrics: bool = False,
     factor_pruning_run_dir: str | Path | None = None,
+    ml_signal_run_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Build all signal variants using the same prior-year fit contract."""
 
@@ -152,11 +154,21 @@ def build_candidate_protocol_signal_panel(
             score_col=pruned_signal,
             min_factors=3,
         )
+    ml_signal = ""
+    ml_predictions = pd.DataFrame()
+    if ml_signal_run_dir is not None:
+        ml_predictions = read_ml_signal_predictions(ml_signal_run_dir, horizon=horizon)
+        ml_signal = ml_signal_name(ml_predictions, horizon=horizon)
+        merge = ml_predictions.loc[:, ["date", "code", "score"]].rename(columns={"score": ml_signal})
+        factor_panel = factor_panel.copy()
+        factor_panel["date"] = pd.to_datetime(factor_panel["date"])
+        factor_panel["code"] = factor_panel["code"].astype(str)
+        factor_panel = factor_panel.merge(merge, on=["date", "code"], how="left")
     metric_exposure_columns: list[str] = []
     if include_metrics:
         factor_panel, metric_exposure_columns = add_metric_exposure_fields(factor_panel)
     evaluation_panel = filter_panel_dates(factor_panel, start_date=start_date, end_date=end_date)
-    candidate_signals = [*DEFAULT_SIGNALS, *([pruned_signal] if pruned_signal else [])]
+    candidate_signals = [*DEFAULT_SIGNALS, *([pruned_signal] if pruned_signal else []), *([ml_signal] if ml_signal else [])]
     available_signals = [signal for signal in candidate_signals if signal in evaluation_panel.columns]
     return {
         **built,
@@ -172,6 +184,9 @@ def build_candidate_protocol_signal_panel(
         "factor_pruning_run_dir": str(factor_pruning_run_dir or ""),
         "factor_pruning_signal": pruned_signal,
         "factor_pruning_plan_rows": int(len(pruned_plan)),
+        "ml_signal_run_dir": str(ml_signal_run_dir or ""),
+        "ml_signal": ml_signal,
+        "ml_prediction_rows": int(len(ml_predictions)),
     }
 
 
@@ -202,6 +217,45 @@ def factor_pruning_signal_name(plan: pd.DataFrame, *, horizon: int) -> str:
     return names[0] if len(names) == 1 and names[0] else PRUNED_SIGNAL_TEMPLATE.format(horizon=int(horizon))
 
 
+def read_ml_signal_predictions(run_dir: str | Path, *, horizon: int) -> pd.DataFrame:
+    """Read prior-fit ML predictions for a specific horizon."""
+
+    path = Path(run_dir) / "ml_signal_predictions.csv"
+    if not path.exists():
+        raise FileNotFoundError(f"ML signal predictions not found: {path}")
+    frame = pd.read_csv(path)
+    required = {"eval_year", "date", "code", "horizon", "ml_signal_name", "score", "fit_uses_eval_year"}
+    if missing := sorted(required - set(frame.columns)):
+        raise ValueError(f"ML signal predictions missing required columns: {missing}")
+    output = frame.copy()
+    output["horizon"] = pd.to_numeric(output["horizon"], errors="coerce").astype("Int64")
+    output = output.loc[output["horizon"].eq(int(horizon))].copy()
+    if output.empty:
+        raise ValueError(f"ML signal predictions have no rows for horizon {horizon}")
+    if _truthy(output["fit_uses_eval_year"]).any():
+        raise ValueError("ML signal predictions must be prior-fit; fit_uses_eval_year must be false")
+    output["date"] = pd.to_datetime(output["date"])
+    output["code"] = output["code"].astype(str)
+    output["score"] = pd.to_numeric(output["score"], errors="coerce")
+    output = output.dropna(subset=["date", "code", "score"]).copy()
+    if output.empty:
+        raise ValueError(f"ML signal predictions have no finite score rows for horizon {horizon}")
+    if output.duplicated(["date", "code"]).any():
+        raise ValueError("ML signal predictions must be unique by date,code after horizon filtering")
+    expected_name = ML_SIGNAL_NAME_TEMPLATE.format(horizon=int(horizon))
+    names = sorted(set(output["ml_signal_name"].dropna().astype(str)))
+    if names != [expected_name]:
+        raise ValueError(f"ML signal predictions must use {expected_name}; got {names}")
+    return output.reset_index(drop=True)
+
+
+def ml_signal_name(predictions: pd.DataFrame, *, horizon: int) -> str:
+    if predictions.empty:
+        return ML_SIGNAL_NAME_TEMPLATE.format(horizon=int(horizon))
+    names = sorted(set(predictions["ml_signal_name"].dropna().astype(str)))
+    return names[0] if len(names) == 1 else ML_SIGNAL_NAME_TEMPLATE.format(horizon=int(horizon))
+
+
 def run_low_corr_candidate_signal_comparison(
     *,
     root: str | None = None,
@@ -221,6 +275,7 @@ def run_low_corr_candidate_signal_comparison(
     execution_constraints: bool = True,
     limit_threshold: float = 0.095,
     factor_pruning_run_dir: str | Path | None = None,
+    ml_signal_run_dir: str | Path | None = None,
     output_dir: Path = DEFAULT_OUTPUT_DIR,
     write_research_log: bool = False,
     research_log_path: Path = DEFAULT_RESEARCH_LOG,
@@ -273,6 +328,7 @@ def run_low_corr_candidate_signal_comparison(
             rolling_window=rolling_window,
             rolling_min_periods=rolling_min_periods,
             factor_pruning_run_dir=factor_pruning_run_dir,
+            ml_signal_run_dir=ml_signal_run_dir,
         )
         manifest = built["manifest"]
         quality = built["quality"]
@@ -381,6 +437,9 @@ def run_low_corr_candidate_signal_comparison(
                 "factor_pruning_run_dir": str(factor_pruning_run_dir or ""),
                 "factor_pruning_signal": str(built.get("factor_pruning_signal", "")),
                 "factor_pruning_plan_rows": int(built.get("factor_pruning_plan_rows", 0)),
+                "ml_signal_run_dir": str(ml_signal_run_dir or ""),
+                "ml_signal": str(built.get("ml_signal", "")),
+                "ml_prediction_rows": int(built.get("ml_prediction_rows", 0)),
                 "rolling_fallback_rate": float(built["rolling_fallback_rate"]),
                 "evaluation_rows": int(len(evaluation_panel)),
                 "evaluation_dates": int(evaluation_panel["date"].nunique()) if "date" in evaluation_panel.columns else 0,
@@ -416,6 +475,7 @@ def run_low_corr_candidate_signal_comparison(
         "execution_constraints": bool(execution_constraints),
         "limit_threshold": float(limit_threshold),
         "factor_pruning_run_dir": str(factor_pruning_run_dir or ""),
+        "ml_signal_run_dir": str(ml_signal_run_dir or ""),
         "quality": {
             "failure_count": quality.get("failure_count"),
             "missing_bar_rows": quality.get("missing_bar_rows"),
@@ -660,6 +720,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--execution-constraints", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--limit-threshold", type=float, default=0.095)
     parser.add_argument("--factor-pruning-run-dir", type=Path, default=None)
+    parser.add_argument("--ml-signal-run-dir", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--write-research-log", action="store_true")
     parser.add_argument("--research-log-path", type=Path, default=DEFAULT_RESEARCH_LOG)
@@ -686,6 +747,7 @@ def main() -> None:
         execution_constraints=args.execution_constraints,
         limit_threshold=args.limit_threshold,
         factor_pruning_run_dir=args.factor_pruning_run_dir,
+        ml_signal_run_dir=args.ml_signal_run_dir,
         output_dir=args.output_dir,
         write_research_log=args.write_research_log,
         research_log_path=args.research_log_path,

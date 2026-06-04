@@ -205,6 +205,72 @@ def test_build_candidate_protocol_signal_panel_can_include_factor_pruned_signal(
     assert panel[signal].tolist() == pytest.approx([1 / 3, 2 / 3, 1.0])
 
 
+def test_build_candidate_protocol_signal_panel_can_include_ml_signal(tmp_path: Path, monkeypatch) -> None:
+    factor_panel = pd.DataFrame(
+        [
+            {"date": "2026-01-02", "code": "A", "value_z": 1.0, "fwd_ret_1d": 0.01, LOW_CORR_SIGNAL: 0.1},
+            {"date": "2026-01-02", "code": "B", "value_z": 2.0, "fwd_ret_1d": 0.02, LOW_CORR_SIGNAL: 0.2},
+            {"date": "2026-01-05", "code": "A", "value_z": 3.0, "fwd_ret_1d": 0.03, LOW_CORR_SIGNAL: 0.3},
+        ]
+    )
+    ml_signal = "ml_lgbm_xsec_excess_score_h1_prior_fit"
+    pd.DataFrame(
+        [
+            {"eval_year": 2026, "date": "2026-01-02", "code": "A", "horizon": 1, "ml_signal_name": ml_signal, "score": 0.7, "fit_uses_eval_year": False},
+            {"eval_year": 2026, "date": "2026-01-02", "code": "B", "horizon": 1, "ml_signal_name": ml_signal, "score": 0.4, "fit_uses_eval_year": False},
+            {"eval_year": 2026, "date": "2026-01-05", "code": "A", "horizon": 1, "ml_signal_name": ml_signal, "score": 0.2, "fit_uses_eval_year": False},
+        ]
+    ).to_csv(tmp_path / "ml_signal_predictions.csv", index=False)
+
+    def fake_build_low_corr_signal_panel(**kwargs):
+        return {
+            "manifest": {"snapshot_id": "fixture"},
+            "quality": {},
+            "factor_panel": factor_panel,
+            "signal_columns": ["value_z"],
+            "factor_directions": {"value_z": 1},
+            "label": "fwd_ret_1d",
+            "single_factor_ic": pd.DataFrame([{"signal": "value_z", "mean_rank_ic": 0.1}]),
+            "low_corr_factor_columns": ["value_z"],
+        }
+
+    monkeypatch.setattr(low_corr_candidate_signal_comparison, "build_low_corr_signal_panel", fake_build_low_corr_signal_panel)
+
+    built = low_corr_candidate_signal_comparison.build_candidate_protocol_signal_panel(
+        root=None,
+        history_start_date="2026-01-01",
+        fit_start_date="2026-01-01",
+        fit_end_date="2026-01-31",
+        start_date="2026-01-01",
+        end_date="2026-01-31",
+        horizon=1,
+        label_mode="raw",
+        factor_set="core",
+        max_factor_corr=0.75,
+        rolling_window=2,
+        rolling_min_periods=1,
+        ml_signal_run_dir=tmp_path,
+    )
+
+    panel = built["evaluation_panel"].set_index(["date", "code"])
+    assert built["ml_signal"] == ml_signal
+    assert built["ml_prediction_rows"] == 3
+    assert ml_signal in built["available_signals"]
+    assert panel.loc[(pd.Timestamp("2026-01-02"), "A"), ml_signal] == pytest.approx(0.7)
+
+
+def test_read_ml_signal_predictions_rejects_eval_year_leakage(tmp_path: Path) -> None:
+    ml_signal = "ml_lgbm_xsec_excess_score_h1_prior_fit"
+    pd.DataFrame(
+        [
+            {"eval_year": 2026, "date": "2026-01-02", "code": "A", "horizon": 1, "ml_signal_name": ml_signal, "score": 0.7, "fit_uses_eval_year": True},
+        ]
+    ).to_csv(tmp_path / "ml_signal_predictions.csv", index=False)
+
+    with pytest.raises(ValueError, match="prior-fit"):
+        low_corr_candidate_signal_comparison.read_ml_signal_predictions(tmp_path, horizon=1)
+
+
 def test_run_low_corr_candidate_signal_comparison_writes_outputs(tmp_path: Path, monkeypatch) -> None:
     panel = _signal_panel()
     captured: list[dict[str, object]] = []
@@ -248,6 +314,7 @@ def test_run_low_corr_candidate_signal_comparison_writes_outputs(tmp_path: Path,
         buffer_multiplier=1.0,
         fee_bps_values=(0.0, 30.0),
         execution_constraints=False,
+        ml_signal_run_dir=tmp_path / "ml_signal",
         output_dir=tmp_path,
         write_research_log=True,
         research_log_path=tmp_path / "research_log.md",
@@ -273,7 +340,9 @@ def test_run_low_corr_candidate_signal_comparison_writes_outputs(tmp_path: Path,
     assert result["snapshot_id"] == "fixture-snapshot"
     assert result["factor_set"] == "expanded"
     assert result["candidate_count"] == 0
+    assert result["ml_signal_run_dir"] == str(tmp_path / "ml_signal")
     assert captured[0]["factor_set"] == "expanded"
+    assert captured[0]["ml_signal_run_dir"] == tmp_path / "ml_signal"
 
     aggregate = pd.read_csv(run_dir / "signal_protocol_aggregate.csv")
     assert set(aggregate["signal"]) == {low_corr_candidate_signal_comparison.EQUAL_SIGNAL, LOW_CORR_SIGNAL}
@@ -282,6 +351,7 @@ def test_run_low_corr_candidate_signal_comparison_writes_outputs(tmp_path: Path,
     assert set(trades["signal"]) == {low_corr_candidate_signal_comparison.EQUAL_SIGNAL, LOW_CORR_SIGNAL}
     metadata = pd.read_csv(run_dir / "signal_comparison_meta.csv")
     assert set(metadata["factor_set"]) == {"expanded"}
+    assert set(metadata["ml_signal_run_dir"]) == {str(tmp_path / "ml_signal")}
     assert metadata.iloc[0]["rolling_fallback_rate"] == pytest.approx(0.0)
 
 

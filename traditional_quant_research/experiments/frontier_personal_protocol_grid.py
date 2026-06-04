@@ -27,6 +27,8 @@ from traditional_quant_research.experiments.frontier_personal_candidate_gate imp
     PERSONAL_BACKTEST_PROMOTION_LEVEL,
     run_frontier_personal_candidate_gate,
 )
+from traditional_quant_research.experiments.frontier_promotion_gate import latest_run_dir
+from traditional_quant_research.experiments.frontier_weak_year_rebuild import DEFAULT_OUTPUT_DIR as DEFAULT_WEAK_YEAR_REBUILD_OUTPUT_DIR
 from traditional_quant_research.experiments.low_corr_frontier_combined_constraint_audit import (
     DEFAULT_BUFFER_MULTIPLIER,
     DEFAULT_EXPOSURE_COLUMNS,
@@ -92,6 +94,7 @@ def run_frontier_personal_protocol_grid(
     include_industry: bool = True,
     weak_year_rebuild_run_dir: str | Path | None = None,
     factor_pruning_run_dir: str | Path | None = None,
+    ml_signal_run_dir: str | Path | None = None,
     constraint_variants: Sequence[str] | str | None = None,
     required_fee_bps: float = DEFAULT_REQUIRED_FEE_BPS,
     required_impact_bps_per_1pct: float = DEFAULT_REQUIRED_IMPACT_BPS_PER_1PCT,
@@ -134,6 +137,11 @@ def run_frontier_personal_protocol_grid(
     exposure_cols = _parse_str_values(exposure_columns, name="exposure_columns")
     constraint_cols = _parse_optional_str_values(exposure_constraint_cols)
     selected_variants = _parse_optional_str_values(constraint_variants) if constraint_variants is not None else None
+    resolved_weak_year_rebuild_run_dir = _resolve_ml_weak_year_rebuild_run_dir(
+        weak_year_rebuild_run_dir,
+        ml_signal_run_dir=ml_signal_run_dir,
+        constraint_variants=selected_variants,
+    )
 
     if resume_run_dir is not None:
         run_dir = Path(resume_run_dir)
@@ -171,8 +179,9 @@ def run_frontier_personal_protocol_grid(
         limit_threshold=limit_threshold,
         include_metrics=include_metrics,
         include_industry=include_industry,
-        weak_year_rebuild_run_dir=weak_year_rebuild_run_dir,
+        weak_year_rebuild_run_dir=resolved_weak_year_rebuild_run_dir,
         factor_pruning_run_dir=factor_pruning_run_dir,
+        ml_signal_run_dir=ml_signal_run_dir,
         constraint_variants=selected_variants,
         output_dir=run_dir / "yearly_combined_constraint",
         progress_path=run_dir / "personal_protocol_grid_progress.csv",
@@ -206,8 +215,9 @@ def run_frontier_personal_protocol_grid(
         exposure_constraint_cols=constraint_cols,
         max_abs_exposure=max_abs_exposure,
         constraint_variants=selected_variants,
-        weak_year_rebuild_run_dir=weak_year_rebuild_run_dir,
+        weak_year_rebuild_run_dir=resolved_weak_year_rebuild_run_dir,
         factor_pruning_run_dir=factor_pruning_run_dir,
+        ml_signal_run_dir=ml_signal_run_dir,
     )
     combined_run_dir = Path(str(combined_result["output_dir"]))
     personal_gate_result = run_frontier_personal_candidate_gate(
@@ -255,6 +265,7 @@ def run_frontier_personal_protocol_grid(
         required_fee_bps=required_fee_bps,
         required_impact_bps_per_1pct=required_impact_bps_per_1pct,
         personal_capital_amount=personal_capital_amount,
+        ml_signal_run_dir=ml_signal_run_dir,
     )
     markdown = render_personal_protocol_grid_markdown(summary, top_n_summary, ledger)
 
@@ -303,6 +314,7 @@ def run_yearly_combined_constraint_grid(
     output_dir: str | Path,
     progress_path: str | Path,
     factor_pruning_run_dir: str | Path | None = None,
+    ml_signal_run_dir: str | Path | None = None,
     resume: bool = False,
 ) -> list[dict[str, Any]]:
     """Run each eval year separately so long protocol grids leave resumable evidence."""
@@ -368,6 +380,7 @@ def run_yearly_combined_constraint_grid(
                 include_industry=include_industry,
                 weak_year_rebuild_run_dir=weak_year_rebuild_run_dir,
                 factor_pruning_run_dir=factor_pruning_run_dir,
+                ml_signal_run_dir=ml_signal_run_dir,
                 constraint_variants=constraint_variants,
                 output_dir=output_root / f"year_{int(year)}",
                 write_research_log=False,
@@ -426,6 +439,7 @@ def merge_yearly_combined_constraint_runs(
     constraint_variants: Sequence[str] | None,
     weak_year_rebuild_run_dir: str | Path | None,
     factor_pruning_run_dir: str | Path | None = None,
+    ml_signal_run_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Merge yearly combined-constraint runs into one standard combined evidence directory."""
 
@@ -479,6 +493,7 @@ def merge_yearly_combined_constraint_runs(
         "constraint_variants": list(constraint_variants or ["baseline"]),
         "weak_year_rebuild_run_dir": str(weak_year_rebuild_run_dir or ""),
         "factor_pruning_run_dir": str(factor_pruning_run_dir or ""),
+        "ml_signal_run_dir": str(ml_signal_run_dir or ""),
         "yearly_run_dirs": [str(path) for path in yearly_dirs],
         "best_30bps_100m_rows": best_combined_rows(aggregate, fee_bps=30.0, capital_amount=100_000_000.0),
         "candidate_count": 0,
@@ -706,6 +721,7 @@ def summarize_personal_protocol_grid(
     required_fee_bps: float,
     required_impact_bps_per_1pct: float,
     personal_capital_amount: float,
+    ml_signal_run_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     candidate_count = int(ledger["promotion_level"].astype(str).eq(PERSONAL_BACKTEST_PROMOTION_LEVEL).sum()) if not ledger.empty else 0
     best_row = ledger.iloc[0].to_dict() if not ledger.empty else {}
@@ -729,6 +745,7 @@ def summarize_personal_protocol_grid(
         "required_fee_bps": float(required_fee_bps),
         "required_impact_bps_per_1pct": float(required_impact_bps_per_1pct),
         "personal_capital_amount": float(personal_capital_amount),
+        "ml_signal_run_dir": str(ml_signal_run_dir or ""),
         "evaluated_rows": int(len(ledger)),
         "top_n_summary_count": int(len(top_n_summary)),
         "evidence_scopes": evidence_scopes,
@@ -873,6 +890,20 @@ def _parse_optional_str_values(values: Sequence[str] | str | None) -> tuple[str,
     return tuple(str(value).strip() for value in parts if str(value).strip())
 
 
+def _resolve_ml_weak_year_rebuild_run_dir(
+    weak_year_rebuild_run_dir: str | Path | None,
+    *,
+    ml_signal_run_dir: str | Path | None,
+    constraint_variants: Sequence[str] | None,
+) -> str | Path | None:
+    if weak_year_rebuild_run_dir is not None or ml_signal_run_dir is None:
+        return weak_year_rebuild_run_dir
+    variants = set(constraint_variants or ())
+    if variants & {"regime_gated", "capital_scaled", "factor_blend"}:
+        return latest_run_dir(DEFAULT_WEAK_YEAR_REBUILD_OUTPUT_DIR)
+    return weak_year_rebuild_run_dir
+
+
 def _parse_int_values(values: Sequence[int] | str, *, name: str) -> tuple[int, ...]:
     if isinstance(values, str):
         parts = values.split(",")
@@ -996,6 +1027,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--include-industry", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--required-fee-bps", type=float, default=DEFAULT_REQUIRED_FEE_BPS)
     parser.add_argument("--factor-pruning-run-dir", type=Path, default=None)
+    parser.add_argument("--ml-signal-run-dir", type=Path, default=None)
     parser.add_argument("--required-impact-bps-per-1pct", type=float, default=DEFAULT_REQUIRED_IMPACT_BPS_PER_1PCT)
     parser.add_argument("--personal-capital-amount", type=float, default=DEFAULT_PERSONAL_CAPITAL_AMOUNT)
     parser.add_argument("--min-eval-year-count", type=int, default=DEFAULT_MIN_EVAL_YEAR_COUNT)
@@ -1046,6 +1078,7 @@ def main() -> None:
         include_industry=args.include_industry,
         weak_year_rebuild_run_dir=args.weak_year_rebuild_run_dir,
         factor_pruning_run_dir=args.factor_pruning_run_dir,
+        ml_signal_run_dir=args.ml_signal_run_dir,
         constraint_variants=_parse_optional_str_values(args.constraint_variants) if args.constraint_variants is not None else None,
         required_fee_bps=args.required_fee_bps,
         required_impact_bps_per_1pct=args.required_impact_bps_per_1pct,
