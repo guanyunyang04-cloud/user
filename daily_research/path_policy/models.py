@@ -672,6 +672,259 @@ class ExpertFusionPath20Forecaster(nn.Module):
         return _split_path20_outputs(self.head(fused), self.horizon, self.output_profile, self.cumulative_horizons)
 
 
+class RegimeRoutedMultiExpertHorizonForecaster(nn.Module):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int = 384,
+        horizon: int = 20,
+        dropout: float = 0.15,
+        gru_layers: int = 2,
+        transformer_layers: int = 4,
+        transformer_heads: int = 8,
+        patch_sizes: tuple[int, ...] | list[int] | None = None,
+        fusion_layers: int = 2,
+        router_temperature: float = 1.0,
+        static_context_vocab_sizes: dict[str, int] | None = None,
+        static_context_embedding_dims: dict[str, int] | None = None,
+        static_context_fields: tuple[str, ...] | list[str] | None = None,
+        static_context_dropout: float = 0.20,
+        output_profile: str = "forecast_path_v1",
+        cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
+    ) -> None:
+        super().__init__()
+        self.horizon = int(horizon)
+        self.cumulative_horizons = normalize_path20_cumulative_horizons(cumulative_horizons, horizon=self.horizon)
+        self.output_profile = normalize_path20_output_profile(output_profile)
+        self.input_dim = int(input_dim)
+        self.hidden_dim = int(hidden_dim)
+        self.router_temperature = max(float(router_temperature), 1.0e-4)
+        self.expert_names = ("gru", "patch_transformer", "dlinear", "stock_mixer", "local_state")
+        self.input_projection = nn.Sequential(
+            nn.LayerNorm(self.input_dim),
+            nn.Linear(self.input_dim, self.hidden_dim),
+            nn.GELU(),
+            nn.Dropout(float(dropout)),
+        )
+        self.gru_encoder = GRUPath20Forecaster(
+            input_dim=self.hidden_dim,
+            hidden_dim=self.hidden_dim,
+            dropout=dropout,
+            horizon=horizon,
+            num_layers=gru_layers,
+            output_profile=output_profile,
+            cumulative_horizons=self.cumulative_horizons,
+        )
+        requested_heads = max(int(transformer_heads), 1)
+        heads = requested_heads if self.hidden_dim % requested_heads == 0 else 1
+        self.patch_encoder = PatchTransformerPath20Forecaster(
+            input_dim=self.hidden_dim,
+            hidden_dim=self.hidden_dim,
+            horizon=horizon,
+            patch_sizes=tuple(int(item) for item in (patch_sizes or (4, 10, 20)) if int(item) > 0),
+            num_layers=transformer_layers,
+            num_heads=heads,
+            dropout=dropout,
+            output_profile=output_profile,
+            cumulative_horizons=self.cumulative_horizons,
+        )
+        self.dlinear_trend = nn.Linear(self.hidden_dim, self.hidden_dim)
+        self.dlinear_seasonal = nn.Linear(self.hidden_dim, self.hidden_dim)
+        self.gru_proj = nn.Linear(self.hidden_dim * 2, self.hidden_dim)
+        self.dlinear_proj = nn.Linear(self.hidden_dim * 2, self.hidden_dim)
+        self.stock_attention = nn.MultiheadAttention(
+            embed_dim=self.hidden_dim,
+            num_heads=heads,
+            dropout=float(dropout),
+            batch_first=True,
+        )
+        self.stock_proj = nn.Sequential(
+            nn.LayerNorm(self.hidden_dim * 2),
+            nn.Linear(self.hidden_dim * 2, self.hidden_dim),
+            nn.GELU(),
+            nn.Dropout(float(dropout)),
+        )
+        self.local_state_proj = nn.Sequential(
+            nn.LayerNorm(self.input_dim * 6),
+            nn.Linear(self.input_dim * 6, self.hidden_dim),
+            nn.GELU(),
+            nn.Dropout(float(dropout)),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.GELU(),
+        )
+        self.static_encoder = StaticContextEncoder(
+            vocab_sizes=static_context_vocab_sizes,
+            embedding_dims=static_context_embedding_dims,
+            fields=static_context_fields,
+            dropout=static_context_dropout,
+        )
+        self.static_proj = nn.Sequential(
+            nn.LayerNorm(self.static_encoder.output_dim),
+            nn.Linear(self.static_encoder.output_dim, self.hidden_dim),
+            nn.GELU(),
+            nn.Dropout(float(dropout)),
+        )
+        router_input_dim = self.hidden_dim * 8
+        self.router = nn.Sequential(
+            nn.LayerNorm(router_input_dim),
+            nn.Linear(router_input_dim, self.hidden_dim),
+            nn.GELU(),
+            nn.Dropout(float(dropout)),
+            nn.Linear(self.hidden_dim, max(self.hidden_dim // 2, len(self.expert_names))),
+            nn.GELU(),
+            nn.Linear(max(self.hidden_dim // 2, len(self.expert_names)), len(self.expert_names)),
+        )
+        fusion_layer = nn.TransformerEncoderLayer(
+            d_model=self.hidden_dim,
+            nhead=heads,
+            dim_feedforward=self.hidden_dim * 4,
+            dropout=float(dropout),
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
+        )
+        self.fusion_encoder = nn.TransformerEncoder(
+            fusion_layer,
+            num_layers=max(int(fusion_layers), 1),
+            enable_nested_tensor=False,
+        )
+        self.head = nn.Sequential(
+            nn.LayerNorm(self.hidden_dim * 4),
+            nn.Dropout(float(dropout)),
+            nn.Linear(self.hidden_dim * 4, self.hidden_dim * 2),
+            nn.GELU(),
+            nn.Dropout(float(dropout)),
+            nn.Linear(self.hidden_dim * 2, self.hidden_dim),
+            nn.GELU(),
+            nn.Dropout(float(dropout)),
+            nn.Linear(self.hidden_dim, path20_forecast_output_dim(self.horizon, self.output_profile, self.cumulative_horizons)),
+        )
+
+    def _flatten_inputs(
+        self,
+        x: torch.Tensor,
+        static_context_ids: torch.Tensor | None,
+        stock_mask: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None, tuple[int, ...] | None]:
+        if x.ndim == 2:
+            x = x.unsqueeze(1)
+        if x.ndim == 3:
+            return x, static_context_ids, stock_mask, None
+        if x.ndim != 4:
+            raise ValueError("x must have shape [batch, features], [batch, steps, features], or [dates, stocks, steps, features].")
+        dates, stocks, steps, features = x.shape
+        flat_static = static_context_ids
+        if static_context_ids is not None:
+            if static_context_ids.ndim != 3:
+                raise ValueError("static_context_ids must have shape [dates, stocks, fields] for date-level batches.")
+            flat_static = static_context_ids.reshape(dates * stocks, static_context_ids.shape[-1])
+        return x.reshape(dates * stocks, steps, features), flat_static, stock_mask, (dates, stocks)
+
+    def _local_state_features(self, raw_x: torch.Tensor) -> torch.Tensor:
+        if raw_x.ndim == 2:
+            raw_x = raw_x.unsqueeze(1)
+        last = raw_x[:, -1, :]
+        mean = raw_x.mean(dim=1)
+        delta = last - raw_x[:, 0, :]
+        recent_window = raw_x[:, -min(int(raw_x.shape[1]), 5) :, :]
+        recent = recent_window.mean(dim=1) - mean
+        volatility = raw_x.std(dim=1, unbiased=False)
+        drawdown = last - raw_x.max(dim=1).values
+        return torch.cat([last, mean, delta, recent, volatility, drawdown], dim=-1)
+
+    def _static_hidden(self, static_context_ids: torch.Tensor | None, *, batch_size: int, device: torch.device) -> torch.Tensor:
+        static = self.static_encoder(static_context_ids, batch_size=int(batch_size), device=device)
+        return self.static_proj(static)
+
+    def _stock_token(self, flat_temporal: torch.Tensor, stock_mask: torch.Tensor | None, batch_shape: tuple[int, ...] | None) -> torch.Tensor:
+        if batch_shape is None:
+            tokens = flat_temporal.unsqueeze(0)
+            attended, _ = self.stock_attention(tokens, tokens, tokens, need_weights=False)
+            return self.stock_proj(torch.cat([flat_temporal, attended.squeeze(0)], dim=-1))
+        dates, stocks = int(batch_shape[0]), int(batch_shape[1])
+        tokens = flat_temporal.reshape(dates, stocks, self.hidden_dim)
+        key_padding_mask = None
+        if stock_mask is not None:
+            key_padding_mask = ~stock_mask.reshape(dates, stocks).to(device=flat_temporal.device, dtype=torch.bool)
+        attended, _ = self.stock_attention(tokens, tokens, tokens, key_padding_mask=key_padding_mask, need_weights=False)
+        return self.stock_proj(torch.cat([tokens, attended], dim=-1)).reshape(dates * stocks, self.hidden_dim)
+
+    def _expert_tokens(
+        self,
+        x: torch.Tensor,
+        static_context_ids: torch.Tensor | None = None,
+        stock_mask: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        flat_x, flat_static_ids, flat_stock_mask, batch_shape = self._flatten_inputs(x, static_context_ids, stock_mask)
+        projected = self.input_projection(flat_x)
+        gru_token = self.gru_proj(self.gru_encoder.encode(projected))
+        patch_token = self.patch_encoder.encode(projected)
+        trend_input = projected.mean(dim=1)
+        seasonal_input = projected[:, -1, :] - trend_input
+        dlinear_token = self.dlinear_proj(
+            torch.cat([F.gelu(self.dlinear_trend(trend_input)), F.gelu(self.dlinear_seasonal(seasonal_input))], dim=-1)
+        )
+        stock_token = self._stock_token(projected[:, -1, :], flat_stock_mask, batch_shape)
+        local_token = self.local_state_proj(self._local_state_features(flat_x))
+        static = self._static_hidden(flat_static_ids, batch_size=int(flat_x.shape[0]), device=flat_x.device)
+        tokens = torch.stack([gru_token, patch_token, dlinear_token, stock_token, local_token], dim=1)
+        return tokens, static, self._local_state_features(flat_x)
+
+    def _router_input(self, tokens: torch.Tensor, static: torch.Tensor, local_state: torch.Tensor) -> torch.Tensor:
+        local_summary = local_state.reshape(local_state.shape[0], 6, self.input_dim).mean(dim=-1)
+        local_summary = F.pad(local_summary, (0, max(self.hidden_dim - local_summary.shape[1], 0)))[:, : self.hidden_dim]
+        return torch.cat(
+            [
+                tokens.mean(dim=1),
+                tokens.max(dim=1).values,
+                tokens.std(dim=1, unbiased=False),
+                static,
+                tokens[:, 0, :],
+                tokens[:, 1, :],
+                tokens[:, 4, :],
+                local_summary,
+            ],
+            dim=-1,
+        )
+
+    def expert_weights(
+        self,
+        x: torch.Tensor,
+        static_context_ids: torch.Tensor | None = None,
+        stock_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        tokens, static, local_state = self._expert_tokens(x, static_context_ids=static_context_ids, stock_mask=stock_mask)
+        return torch.softmax(self.router(self._router_input(tokens, static, local_state)) / self.router_temperature, dim=-1)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        static_context_ids: torch.Tensor | None = None,
+        stock_mask: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+        tokens, static, local_state = self._expert_tokens(x, static_context_ids=static_context_ids, stock_mask=stock_mask)
+        router_logits = self.router(self._router_input(tokens, static, local_state)) / self.router_temperature
+        weights = torch.softmax(router_logits, dim=-1)
+        weighted = tokens * weights.unsqueeze(-1)
+        fused_tokens = self.fusion_encoder(torch.cat([weighted, static.unsqueeze(1)], dim=1))
+        fused = torch.cat([weighted.sum(dim=1), fused_tokens.mean(dim=1), static, tokens[:, 4, :]], dim=-1)
+        output = _split_path20_outputs(self.head(fused), self.horizon, self.output_profile, self.cumulative_horizons)
+        entropy = -(weights * torch.log(torch.clamp(weights, min=1.0e-8))).sum(dim=-1)
+        centered = tokens - tokens.mean(dim=1, keepdim=True)
+        diversity = centered.square().mean(dim=(1, 2))
+        local_view = local_state.reshape(local_state.shape[0], 6, self.input_dim)
+        bad_state_intensity = torch.sigmoid(local_view[:, 4, :].mean(dim=-1) - local_view[:, 5, :].mean(dim=-1))
+        output.update(
+            {
+                "router_weights": weights,
+                "router_entropy": entropy,
+                "expert_token_diversity": diversity,
+                "bad_state_intensity": bad_state_intensity,
+            }
+        )
+        return output
+
+
 class NeuralTargetWeightPolicy(nn.Module):
     def __init__(self, config: PathPolicyModelConfig) -> None:
         super().__init__()

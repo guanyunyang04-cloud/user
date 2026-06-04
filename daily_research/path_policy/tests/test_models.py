@@ -18,6 +18,7 @@ from daily_research.path_policy.models import (
     pairwise_rank_loss,
     pinball_loss,
     portfolio_utility_loss,
+    RegimeRoutedMultiExpertHorizonForecaster,
 )
 
 
@@ -192,6 +193,79 @@ def test_expert_fusion_forecaster_emits_path20_contract_and_router_weights() -> 
     assert weights.shape == (4, 3)
     assert torch.isfinite(weights).all()
     assert torch.allclose(weights.sum(dim=-1), torch.ones(4), atol=1.0e-6)
+
+
+def test_regime_routed_multi_expert_forecaster_emits_decision_contract_and_router_diagnostics() -> None:
+    horizons = (1, 2, 3, 5, 8, 10, 15, 20, 30)
+    model = RegimeRoutedMultiExpertHorizonForecaster(
+        input_dim=5,
+        hidden_dim=16,
+        horizon=30,
+        dropout=0.0,
+        gru_layers=1,
+        transformer_layers=1,
+        transformer_heads=4,
+        patch_sizes=(2,),
+        output_profile="decision_utility_v1",
+        cumulative_horizons=horizons,
+        static_context_vocab_sizes={
+            "symbol": 8,
+            "exchange": 4,
+            "industry": 4,
+            "liquidity_bucket": 6,
+            "price_bucket": 6,
+        },
+        static_context_embedding_dims={
+            "symbol": 4,
+            "exchange": 2,
+            "industry": 3,
+            "liquidity_bucket": 2,
+            "price_bucket": 2,
+        },
+    )
+    x = torch.randn(4, 6, 5)
+    static_ids = torch.ones(4, 5, dtype=torch.long)
+
+    prediction = model(x, static_context_ids=static_ids)
+    weights = model.expert_weights(x, static_context_ids=static_ids)
+
+    assert {"mu", "q10", "q50", "q90", "aux", "decision_aux"}.issubset(prediction)
+    assert prediction["mu"].shape == (4, 30)
+    assert prediction["aux"].shape == (4, 36)
+    assert prediction["decision_aux"].shape == (4, 27)
+    assert prediction["router_weights"].shape == (4, 5)
+    assert weights.shape == (4, 5)
+    assert torch.isfinite(prediction["router_weights"]).all()
+    assert torch.isfinite(prediction["router_entropy"]).all()
+    assert torch.isfinite(prediction["expert_token_diversity"]).all()
+    assert torch.allclose(prediction["router_weights"].sum(dim=-1), torch.ones(4), atol=1.0e-6)
+    assert torch.allclose(weights.sum(dim=-1), torch.ones(4), atol=1.0e-6)
+
+
+def test_regime_routed_multi_expert_forecaster_supports_2d_static_fallback_and_date_batches() -> None:
+    model = RegimeRoutedMultiExpertHorizonForecaster(
+        input_dim=5,
+        hidden_dim=16,
+        horizon=20,
+        dropout=0.0,
+        gru_layers=1,
+        transformer_layers=1,
+        transformer_heads=4,
+        patch_sizes=(2,),
+    )
+
+    two_dimensional = model(torch.randn(3, 5))
+    assert two_dimensional["mu"].shape == (3, 20)
+    assert two_dimensional["router_weights"].shape == (3, 5)
+
+    date_batch = torch.randn(2, 4, 6, 5)
+    static_ids = torch.ones(2, 4, 5, dtype=torch.long)
+    stock_mask = torch.tensor([[True, True, False, True], [True, False, False, True]])
+    prediction = model(date_batch, static_context_ids=static_ids, stock_mask=stock_mask)
+
+    assert prediction["mu"].shape == (8, 20)
+    assert prediction["router_weights"].shape == (8, 5)
+    assert torch.isfinite(prediction["bad_state_intensity"]).all()
 
 
 def test_losses_are_finite_and_allocator_respects_weight_constraints() -> None:

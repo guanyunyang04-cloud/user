@@ -44,6 +44,7 @@ def test_forecast_model_families_emit_path20_sequence_contract() -> None:
         "stock_mixer_sequence",
         "sector_slot_mixer_sequence",
         "hybrid_expert_fusion_static_context",
+        "regime_routed_multi_expert_horizon_v1",
     ):
         model = make_forecast_model(
             family,
@@ -71,8 +72,14 @@ def test_forecast_model_families_emit_path20_sequence_contract() -> None:
                 "price_bucket": 2,
             },
         )
-        pred = model(x, static_context_ids=static_ids) if "static_context" in family else model(x)
-        assert set(pred) == {"mu", "q10", "q50", "q90", "aux"}
+        pred = model(x, static_context_ids=static_ids) if "static_context" in family or family == "regime_routed_multi_expert_horizon_v1" else model(x)
+        expected = {"mu", "q10", "q50", "q90", "aux"}
+        if family == "regime_routed_multi_expert_horizon_v1":
+            assert expected.issubset(pred)
+            assert pred["router_weights"].shape == (4, 5)
+            assert torch.isfinite(pred["router_entropy"]).all()
+        else:
+            assert set(pred) == expected
         assert pred["mu"].shape == (4, 20)
         assert pred["q10"].shape == (4, 20)
         assert pred["aux"].shape == (4, path20_forecast_aux_dim(PATH20_DEFAULT_CUMULATIVE_HORIZONS))
@@ -110,6 +117,48 @@ def test_make_forecast_model_registers_hybrid_expert_fusion_static_context() -> 
     )
     pred = model(torch.randn(2, 6, 5), static_context_ids=torch.ones(2, 6, dtype=torch.long))
     assert set(pred) == {"mu", "q10", "q50", "q90", "aux"}
+
+
+def test_make_forecast_model_registers_regime_routed_multi_expert_horizon_v1() -> None:
+    from daily_research.path_policy.models import path20_decision_aux_dim, path20_forecast_aux_dim
+
+    horizons = (1, 2, 3, 5, 8, 10, 15, 20, 30)
+    assert "regime_routed_multi_expert_horizon_v1" in FORECAST_MODEL_FAMILIES
+    model = make_forecast_model(
+        "regime_routed_multi_expert_horizon_v1",
+        input_dim=5,
+        hidden_dim=16,
+        horizon=30,
+        gru_layers=1,
+        transformer_layers=1,
+        transformer_heads=4,
+        patch_sizes=(2,),
+        output_profile="decision_utility_v1",
+        cumulative_horizons=horizons,
+        static_context_vocab_sizes={
+            "symbol": 8,
+            "exchange": 4,
+            "industry": 4,
+            "liquidity_bucket": 6,
+            "price_bucket": 6,
+        },
+        static_context_embedding_dims={
+            "symbol": 4,
+            "exchange": 2,
+            "industry": 3,
+            "liquidity_bucket": 2,
+            "price_bucket": 2,
+        },
+    )
+
+    pred = model(torch.randn(2, 6, 5), static_context_ids=torch.ones(2, 5, dtype=torch.long))
+
+    assert {"mu", "q10", "q50", "q90", "aux", "decision_aux", "router_weights", "router_entropy"}.issubset(pred)
+    assert pred["mu"].shape == (2, 30)
+    assert pred["aux"].shape == (2, path20_forecast_aux_dim(horizons, horizon=30))
+    assert pred["decision_aux"].shape == (2, path20_decision_aux_dim(horizons, horizon=30))
+    assert pred["router_weights"].shape == (2, 5)
+    assert torch.allclose(pred["router_weights"].sum(dim=-1), torch.ones(2), atol=1.0e-6)
 
 
 def test_train_forecast_models_accepts_dlinear_sequence_checkpoint_and_predictions(tmp_path) -> None:

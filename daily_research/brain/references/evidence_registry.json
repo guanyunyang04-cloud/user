@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 107,
+  "record_count": 108,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -1645,6 +1645,42 @@
         "policy_input_bundle__45e3d8c059ba718426a9f887",
         "policy_pool_view__925e8604a91a9c07a5387fb1"
       ]
+    },
+    {
+      "id": "daily_research_v2_architecture_fusion_capacity_upgrade_20260603",
+      "date": "2026-06-03",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_architecture_fusion_capacity_upgrade_20260603.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_arch_fusion_scout"
+      ],
+      "run_tags": [
+        "mh_v2_arch_fusion_hybrid_expert_seed7_20260603_01",
+        "mh_v2_arch_fusion_hybrid_expert_seed11_20260603_01",
+        "mh_v2_arch_fusion_hybrid_expert_seed19_20260603_01",
+        "mh_v2_arch_fusion_regime_routed_multi_expert_seed7_20260603_01"
+      ],
+      "verdict": "Status: `architecture_fusion_capacity_upgrade / tier1_three_seed_reviewed / tier2_seed7_diagnostic_complete / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_arch_fusion_scout`.; Active artifact impact: `daily_research/output/active_execution_strategy.json` unchanged.",
+      "blockers": [
+        "This is not promotion evidence. Tier 1 has completed three-seed forecast comparison but failed the \"not worse than GRU-static\" expansion gate. Tier 2 has completed code, task-list, smoke, and one formal seed7 diagnostic only; seed11/19 were intentionally stopped before completion after seed7 underperformed the GRU-static seed7 baseline.",
+        "Current blocker is `score_mapping_and_router_calibration`, with secondary `resource_cost` for the default 11M-parameter Tier 2 configuration."
+      ],
+      "next_allowed_actions": [
+        "Do not bridge Tier 1 or Tier 2 into candidate review from current evidence.",
+        "Diagnose Tier 2 router/score mapping before more seeds: expert weights by month/regime, router entropy, short-horizon collapse, local-state exposure, and why 30d probability was almost eliminated.",
+        "Consider a reduced or calibrated Tier 2 revision before three-seed confirmation: lower hidden dimension or stronger score/hit calibration while keeping all five experts.",
+        "Continue the existing `horizon_30d_soft_penalty_v1` post-throttle repair line only if the user prioritizes execution-candidate transfer over architecture capacity.",
+        "Do not modify active execution strategy, production root, paper/live, broker, or promotion artifacts."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
     },
     {
       "id": "daily_research_v2_bad_month_attribution_20260602",

@@ -14,7 +14,13 @@ import pandas as pd
 
 from daily_research.path_policy import v2_research_reset_baseline as v2
 from daily_research.path_policy import v2_local_state_input_scout as local_state
-from daily_research.path_policy.forecast_training import forecast_loss_profile_contract
+from daily_research.path_policy.forecast_training import forecast_loss_profile_contract, make_forecast_model
+from daily_research.path_policy.output_aux_profile_comparison import (
+    build_output_aux_profile_comparison,
+    profile_aggregate_rows,
+    score_variant_comparison_rows,
+    write_output_aux_profile_comparison,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -23,6 +29,8 @@ RUN_TAG = "v2_arch_fusion_scout_20260603_01"
 ACTIVE_MANIFEST = PROJECT_ROOT / "daily_research/output/active_execution_strategy.json"
 DEFAULT_SCORE_COLUMN = "pred_decision_score"
 MODEL_FAMILY = "hybrid_expert_fusion_static_context"
+TIER2_MODEL_FAMILY = "regime_routed_multi_expert_horizon_v1"
+SUPPORTED_MODEL_FAMILIES = (MODEL_FAMILY, TIER2_MODEL_FAMILY)
 FEATURE_PROFILE = local_state.FEATURE_PROFILE
 OUTPUT_PROFILE = v2.OUTPUT_PROFILE
 SELECTION_PROFILE = v2.SELECTION_PROFILE
@@ -35,6 +43,46 @@ DEFAULT_EXPERTS = (
     "patch_transformer_static_context",
     "dlinear_sequence",
 )
+MODEL_FAMILY_CONFIGS: dict[str, dict[str, Any]] = {
+    MODEL_FAMILY: {
+        "tier": "tier1_hybrid_expert_fusion",
+        "fusion_version": "hybrid_expert_fusion_static_context_v1",
+        "study_tag_prefix": "mh_v2_arch_fusion_hybrid_expert",
+        "expert_families": list(DEFAULT_EXPERTS),
+        "forecast_hidden_dim": 192,
+        "forecast_gru_layers": 2,
+        "forecast_transformer_layers": 4,
+        "forecast_transformer_heads": 6,
+        "forecast_patch_sizes": "4,20",
+        "target_parameter_band": "4m_to_5m",
+    },
+    TIER2_MODEL_FAMILY: {
+        "tier": "tier2_regime_routed_multi_expert",
+        "fusion_version": "regime_routed_multi_expert_horizon_v1",
+        "study_tag_prefix": "mh_v2_arch_fusion_regime_routed_multi_expert",
+        "expert_families": [
+            "gru_path_continuity",
+            "patch_transformer_multiscale_events",
+            "dlinear_low_frequency_trend",
+            "stock_mixer_cross_section",
+            "local_state_volatility_reversal",
+        ],
+        "forecast_hidden_dim": 256,
+        "forecast_gru_layers": 2,
+        "forecast_transformer_layers": 4,
+        "forecast_transformer_heads": 8,
+        "forecast_patch_sizes": "4,10,20",
+        "target_parameter_band": "8m_to_15m",
+        "router_diagnostics": [
+            "expert_weight_by_month",
+            "expert_weight_by_regime",
+            "bad_month_expert_attribution",
+            "router_entropy",
+            "high_volatility_reversal_expert_weights",
+            "expert_collapse_check",
+        ],
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -127,8 +175,16 @@ def _anchor_root(output_root: str | Path | None = None) -> Path:
     return Path(output_root) if output_root is not None else STUDIES_ROOT / RUN_TAG
 
 
-def _study_tag(seed: int) -> str:
-    return f"mh_v2_arch_fusion_hybrid_expert_seed{int(seed)}_20260603_01"
+def _model_family_config(model_family: str | None = None) -> dict[str, Any]:
+    family = str(model_family or MODEL_FAMILY).strip()
+    if family not in SUPPORTED_MODEL_FAMILIES:
+        raise ValueError(f"Unsupported arch fusion model_family: {family}")
+    return dict(MODEL_FAMILY_CONFIGS[family])
+
+
+def _study_tag(seed: int, *, model_family: str | None = None) -> str:
+    config = _model_family_config(model_family)
+    return f"{config['study_tag_prefix']}_seed{int(seed)}_20260603_01"
 
 
 def _seed7_manifest_path() -> Path:
@@ -142,9 +198,11 @@ def _loss_contract() -> dict[str, Any]:
     return contract
 
 
-def _training_command(*, seed: int) -> list[str]:
-    tag = _study_tag(seed)
-    return [
+def _training_command(*, seed: int, model_family: str | None = None) -> list[str]:
+    family = str(model_family or MODEL_FAMILY).strip()
+    config = _model_family_config(family)
+    tag = _study_tag(seed, model_family=family)
+    command = [
         v2.PYTHON,
         "-m",
         "daily_research.path_policy.run_alpha_path20_protocol",
@@ -183,7 +241,7 @@ def _training_command(*, seed: int) -> list[str]:
         "--forecast-test-year",
         "2024",
         "--forecast-model-families",
-        MODEL_FAMILY,
+        family,
         "--forecast-feature-profile",
         FEATURE_PROFILE,
         "--forecast-include-static-context",
@@ -218,6 +276,53 @@ def _training_command(*, seed: int) -> list[str]:
         "--forecast-device",
         "cuda",
     ]
+    command.extend(
+        [
+            "--forecast-hidden-dim",
+            str(int(config["forecast_hidden_dim"])),
+            "--forecast-gru-layers",
+            str(int(config["forecast_gru_layers"])),
+            "--forecast-transformer-layers",
+            str(int(config["forecast_transformer_layers"])),
+            "--forecast-transformer-heads",
+            str(int(config["forecast_transformer_heads"])),
+            "--forecast-patch-sizes",
+            str(config["forecast_patch_sizes"]),
+        ]
+    )
+    return command
+
+
+def estimate_default_parameter_count(model_family: str | None = None) -> int:
+    family = str(model_family or MODEL_FAMILY).strip()
+    config = _model_family_config(family)
+    model = make_forecast_model(
+        family,
+        input_dim=192,
+        hidden_dim=int(config["forecast_hidden_dim"]),
+        horizon=30,
+        gru_layers=int(config["forecast_gru_layers"]),
+        transformer_layers=int(config["forecast_transformer_layers"]),
+        transformer_heads=int(config["forecast_transformer_heads"]),
+        patch_sizes=tuple(int(item) for item in str(config["forecast_patch_sizes"]).split(",") if str(item).strip()),
+        static_context_vocab_sizes={
+            "symbol": 6000,
+            "exchange": 8,
+            "industry": 128,
+            "liquidity_bucket": 6,
+            "price_bucket": 6,
+        },
+        static_context_embedding_dims={
+            "symbol": 16,
+            "exchange": 4,
+            "industry": 8,
+            "liquidity_bucket": 4,
+            "price_bucket": 4,
+        },
+        output_profile=OUTPUT_PROFILE,
+        cumulative_horizons=tuple(int(item) for item in HORIZON_GRID.split(",") if item.strip()),
+    )
+    return int(sum(parameter.numel() for parameter in model.parameters()))
 
 
 def _load_manifest(study_dir: Path) -> tuple[dict[str, Any], Path]:
@@ -383,26 +488,34 @@ def build_training_tasks(
     *,
     output_root: str | Path | None = None,
     seeds: tuple[int, ...] | list[int] | str | None = DEFAULT_SEEDS,
+    model_family: str | None = None,
 ) -> list[dict[str, Any]]:
     root = _anchor_root(output_root)
     resolved_seeds = _parse_seeds(seeds)
+    family = str(model_family or MODEL_FAMILY).strip()
+    config = _model_family_config(family)
     contract = _loss_contract()
+    parameter_count = estimate_default_parameter_count(family)
     tasks: list[dict[str, Any]] = []
     for seed in resolved_seeds:
-        tag = _study_tag(int(seed))
+        tag = _study_tag(int(seed), model_family=family)
         tasks.append(
             {
                 "tag": tag,
                 "seed": int(seed),
-                "model_family": MODEL_FAMILY,
-                "fusion_version": "hybrid_expert_fusion_static_context_v1",
-                "expert_families": list(DEFAULT_EXPERTS),
+                "model_family": family,
+                "tier": str(config["tier"]),
+                "fusion_version": str(config["fusion_version"]),
+                "expert_families": list(config["expert_families"]),
+                "target_parameter_band": str(config["target_parameter_band"]),
+                "estimated_parameter_count": int(parameter_count),
+                "router_diagnostics": list(config.get("router_diagnostics", [])),
                 "loss_profile": LOSS_PROFILE,
                 "loss_profile_contract": contract,
                 "study_dir": str(STUDIES_ROOT / tag),
                 "stdout": str(root / f"{tag}_stdout.log"),
                 "stderr": str(root / f"{tag}_stderr.log"),
-                "command": _training_command(seed=int(seed)),
+                "command": _training_command(seed=int(seed), model_family=family),
                 "research_program": v2.RESEARCH_PROGRAM,
                 "study_family": "v2_arch_fusion_scout",
                 "source_market_dataset_id": v2.DATASET_ID,
@@ -423,25 +536,34 @@ def write_task_list(
     output_root: str | Path | None = None,
     *,
     seeds: tuple[int, ...] | list[int] | str | None = DEFAULT_SEEDS,
+    model_family: str | None = None,
+    run_tag: str = RUN_TAG,
 ) -> Path:
     root = _anchor_root(output_root)
     path = root / "v2_arch_fusion_training_task_list.json"
     resolved_seeds = _parse_seeds(seeds)
+    family = str(model_family or MODEL_FAMILY).strip()
+    config = _model_family_config(family)
+    parameter_count = estimate_default_parameter_count(family)
     payload = {
         "schema_version": 1,
-        "run_tag": RUN_TAG,
+        "run_tag": str(run_tag),
         "research_program": v2.RESEARCH_PROGRAM,
         "study_family": "v2_arch_fusion_scout",
         "created_at": _now(),
         "stage": "neural_fusion",
-        "model_family": MODEL_FAMILY,
-        "fusion_version": "hybrid_expert_fusion_static_context_v1",
-        "expert_families": list(DEFAULT_EXPERTS),
+        "model_family": family,
+        "tier": str(config["tier"]),
+        "fusion_version": str(config["fusion_version"]),
+        "expert_families": list(config["expert_families"]),
+        "target_parameter_band": str(config["target_parameter_band"]),
+        "estimated_parameter_count": int(parameter_count),
+        "router_diagnostics": list(config.get("router_diagnostics", [])),
         "seeds": list(resolved_seeds),
         "loss_profile": LOSS_PROFILE,
         "loss_profile_contract": _loss_contract(),
         "training_task_count": len(resolved_seeds),
-        "training_tasks": build_training_tasks(output_root=root, seeds=resolved_seeds),
+        "training_tasks": build_training_tasks(output_root=root, seeds=resolved_seeds, model_family=family),
         "boundary": {
             "research_only": True,
             "shadow_only": True,
@@ -457,6 +579,8 @@ def run_training_tasks(
     *,
     output_root: str | Path | None = None,
     seeds: tuple[int, ...] | list[int] | str | None = DEFAULT_SEEDS,
+    model_family: str | None = None,
+    run_tag: str = RUN_TAG,
     skip_existing: bool = True,
 ) -> dict[str, Any]:
     if _active_artifact_has_diff():
@@ -466,7 +590,9 @@ def run_training_tasks(
     completed: list[str] = []
     failed: list[str] = []
     results: list[dict[str, Any]] = []
-    for task in build_training_tasks(output_root=root, seeds=seeds):
+    family = str(model_family or MODEL_FAMILY).strip()
+    config = _model_family_config(family)
+    for task in build_training_tasks(output_root=root, seeds=seeds, model_family=family):
         summary_path = Path(task["study_dir"]) / "study_summary.json"
         if skip_existing and summary_path.exists():
             completed.append(str(task["tag"]))
@@ -494,7 +620,10 @@ def run_training_tasks(
     payload = {
         "schema_version": 1,
         "status": "completed" if not failed else "failed",
-        "run_tag": RUN_TAG,
+        "run_tag": str(run_tag),
+        "model_family": family,
+        "tier": str(config["tier"]),
+        "fusion_version": str(config["fusion_version"]),
         "completed_tags": completed,
         "failed_tags": failed,
         "results": results,
@@ -515,48 +644,99 @@ def _read_study_summary(tag: str) -> dict[str, Any]:
 
 
 def _metric(summary: dict[str, Any], section: str, key: str) -> float:
-    value = dict(summary.get(section, {}) or {}).get(key, 0.0)
+    direct = summary.get(section, {})
+    nested = dict(summary.get("training_summary", {}) or {}).get(section, {})
+    value = dict(direct or nested or {}).get(key, 0.0)
     try:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
 
 
+def _summary_section(summary: dict[str, Any]) -> dict[str, Any]:
+    training = dict(summary.get("training_summary", {}) or {})
+    return training if training else summary
+
+
+def _finite_metric(value: Any, default: float = 0.0) -> float:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    return out if math.isfinite(out) else float(default)
+
+
 def run_neural_fusion_comparison(
     *,
     output_root: str | Path | None = None,
     seeds: tuple[int, ...] | list[int] | str | None = CONFIRM_SEEDS,
+    model_family: str | None = None,
+    run_tag: str = RUN_TAG,
 ) -> dict[str, Any]:
     root = _anchor_root(output_root)
     root.mkdir(parents=True, exist_ok=True)
     resolved_seeds = _parse_seeds(seeds, default=CONFIRM_SEEDS)
+    family = str(model_family or MODEL_FAMILY).strip()
+    config = _model_family_config(family)
+    study_dirs: list[Path] = []
     rows: list[dict[str, Any]] = []
     missing: list[str] = []
     for seed in resolved_seeds:
-        tag = _study_tag(int(seed))
+        tag = _study_tag(int(seed), model_family=family)
         summary = _read_study_summary(tag)
         if not summary:
             missing.append(tag)
             continue
+        study_dirs.append(STUDIES_ROOT / tag)
+        training_summary = _summary_section(summary)
         rows.append(
             {
                 "tag": tag,
                 "seed": int(seed),
                 "status": str(summary.get("status", "")),
-                "selected_model_family": str(summary.get("selected_model_family", "")),
+                "selected_model_family": str(training_summary.get("selected_model_family", "")),
                 "evidence_verdict": str(summary.get("evidence_verdict", "")),
-                "rank_ic_mean": _metric(summary, "test_metrics", "rank_ic_mean"),
-                "top_bottom_spread_mean": _metric(summary, "test_metrics", "top_bottom_spread_mean"),
-                "hit_lift_mean": _metric(summary, "test_metrics", "top20_hit_lift_mean"),
-                "monthly_positive_rate": _metric(summary, "test_metrics", "monthly_positive_rate"),
-                "negative_month_count": _metric(summary, "test_metrics", "negative_month_count"),
-                "thirty_d_concentration": _metric(summary, "test_metrics", "thirty_d_concentration"),
+                "rank_ic_mean": _metric(summary, "test_metrics", "decision_score_rank_ic"),
+                "top_bottom_spread_mean": _metric(summary, "test_metrics", "decision_score_top_bottom_spread"),
+                "hit_lift_mean": _metric(summary, "test_metrics", "decision_hit_lift_top20_mean"),
+                "monthly_positive_rate": 0.0,
+                "negative_month_count": 0.0,
+                "thirty_d_concentration": 0.0,
             }
         )
+    audit_report: dict[str, Any] = {}
+    audit_paths: dict[str, Path] = {}
+    if study_dirs:
+        audit_report = build_output_aux_profile_comparison(study_dirs, run_tag=str(run_tag))
+        audit_paths = write_output_aux_profile_comparison(audit_report, root)
+        audit_rows = {
+            (str(row.get("study_tag", "")), int(row.get("seed", 0) or 0)): row
+            for row in score_variant_comparison_rows(audit_report)
+            if row.get("role") == "test" and row.get("score_name") == DEFAULT_SCORE_COLUMN
+        }
+        for row in rows:
+            audit = audit_rows.get((str(row.get("tag", "")), int(row.get("seed", 0) or 0)))
+            if not audit:
+                continue
+            row["rank_ic_mean"] = _finite_metric(audit.get("decision_score_rank_ic"), row["rank_ic_mean"])
+            row["top_bottom_spread_mean"] = _finite_metric(
+                audit.get("decision_score_top_bottom_spread"),
+                row["top_bottom_spread_mean"],
+            )
+            row["hit_lift_mean"] = _finite_metric(audit.get("decision_hit_lift_top20_mean"), row["hit_lift_mean"])
+            row["monthly_positive_rate"] = _finite_metric(audit.get("monthly_spread_positive_rate"))
+            row["negative_month_count"] = _finite_metric(audit.get("negative_month_count"))
+            row["thirty_d_concentration"] = _finite_metric(audit.get("thirty_d_concentration"))
     frame = pd.DataFrame(rows)
     if frame.empty:
         aggregate = {"status": "blocked", "blockers": ["missing_all_neural_fusion_studies", *missing]}
     else:
+        audit_aggregates = [
+            row
+            for row in profile_aggregate_rows(audit_report)
+            if row.get("role") == "test" and row.get("score_name") == DEFAULT_SCORE_COLUMN
+        ] if audit_report else []
+        audit_aggregate = audit_aggregates[0] if audit_aggregates else {}
         aggregate = {
             "status": "completed" if not missing else "incomplete",
             "seed_count": int(len(frame)),
@@ -564,22 +744,35 @@ def run_neural_fusion_comparison(
             "rank_ic_min": float(frame["rank_ic_mean"].min()),
             "top_bottom_spread_min": float(frame["top_bottom_spread_mean"].min()),
             "hit_lift_min": float(frame["hit_lift_mean"].min()),
-            "monthly_positive_rate_mean": float(frame["monthly_positive_rate"].mean()),
-            "negative_month_count_max": float(frame["negative_month_count"].max()),
-            "thirty_d_concentration_mean": float(frame["thirty_d_concentration"].mean()),
+            "monthly_positive_rate_mean": _finite_metric(
+                audit_aggregate.get("monthly_positive_rate_mean", frame["monthly_positive_rate"].mean())
+            ),
+            "negative_month_count_max": _finite_metric(
+                audit_aggregate.get("negative_month_count_max", frame["negative_month_count"].max())
+            ),
+            "thirty_d_concentration_mean": _finite_metric(
+                audit_aggregate.get("thirty_d_concentration_mean", frame["thirty_d_concentration"].mean())
+            ),
+            "forecast_prediction_audit_status": str(audit_report.get("status", "")) if audit_report else "not_available",
         }
     if not frame.empty:
         frame.to_csv(root / "v2_arch_fusion_neural_comparison.csv", index=False, encoding="utf-8-sig")
     report = {
         "schema_version": 1,
         "status": aggregate["status"],
-        "run_tag": RUN_TAG,
+        "run_tag": str(run_tag),
         "study_family": "v2_arch_fusion_scout",
-        "fusion_version": "hybrid_expert_fusion_static_context_v1",
-        "model_family": MODEL_FAMILY,
+        "tier": str(config["tier"]),
+        "fusion_version": str(config["fusion_version"]),
+        "model_family": family,
+        "expert_families": list(config["expert_families"]),
         "seeds": list(resolved_seeds),
         "aggregate": aggregate,
         "comparison_csv": str(root / "v2_arch_fusion_neural_comparison.csv") if not frame.empty else "",
+        "forecast_prediction_audit": {
+            "status": str(audit_report.get("status", "")) if audit_report else "not_available",
+            "paths": {key: str(path) for key, path in audit_paths.items()},
+        },
         "boundary": {
             "research_only": True,
             "shadow_only": True,
@@ -717,6 +910,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expert-study-tags", default="")
     parser.add_argument("--expert-names", default=",".join(DEFAULT_EXPERTS))
     parser.add_argument("--seeds", default=",".join(str(seed) for seed in DEFAULT_SEEDS))
+    parser.add_argument("--model-family", default=MODEL_FAMILY, choices=SUPPORTED_MODEL_FAMILIES)
     parser.add_argument("--write-task-list", action="store_true")
     parser.add_argument("--run-training", action="store_true")
     parser.add_argument("--run-comparison", action="store_true")
@@ -730,7 +924,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     output_root = args.output_root or str(STUDIES_ROOT / str(args.run_tag))
-    if args.stage == "late_fusion":
+    neural_action_requested = bool(args.write_task_list or args.run_training or args.run_comparison)
+    if args.stage == "late_fusion" and not neural_action_requested:
         report = run_late_fusion(
             output_root=output_root,
             run_tag=args.run_tag,
@@ -744,24 +939,42 @@ def main(argv: list[str] | None = None) -> int:
         )
     else:
         resolved_seeds = CONFIRM_SEEDS if bool(args.confirm_seeds) else _parse_seeds(args.seeds)
+        model_family = str(args.model_family)
+        config = _model_family_config(model_family)
         actions: dict[str, Any] = {}
         if args.write_task_list or not (args.run_training or args.run_comparison):
-            actions["task_list"] = str(write_task_list(output_root=output_root, seeds=resolved_seeds))
+            actions["task_list"] = str(
+                write_task_list(
+                    output_root=output_root,
+                    seeds=resolved_seeds,
+                    model_family=model_family,
+                    run_tag=str(args.run_tag),
+                )
+            )
         if args.run_training:
             actions["training_summary"] = run_training_tasks(
                 output_root=output_root,
                 seeds=resolved_seeds,
+                model_family=model_family,
+                run_tag=str(args.run_tag),
                 skip_existing=not bool(args.no_skip_existing),
             )
         if args.run_comparison:
-            actions["comparison"] = run_neural_fusion_comparison(output_root=output_root, seeds=resolved_seeds)
+            actions["comparison"] = run_neural_fusion_comparison(
+                output_root=output_root,
+                seeds=resolved_seeds,
+                model_family=model_family,
+                run_tag=str(args.run_tag),
+            )
         report = {
             "schema_version": 1,
             "status": "completed",
             "run_tag": str(args.run_tag),
             "stage": "neural_fusion",
-            "model_family": MODEL_FAMILY,
-            "fusion_version": "hybrid_expert_fusion_static_context_v1",
+            "model_family": model_family,
+            "tier": str(config["tier"]),
+            "fusion_version": str(config["fusion_version"]),
+            "expert_families": list(config["expert_families"]),
             "seeds": list(resolved_seeds),
             "actions": actions,
             "boundary": {

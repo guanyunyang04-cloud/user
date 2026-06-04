@@ -25,6 +25,7 @@ from daily_research.path_policy.models import (
     LinearPath20Forecaster,
     PatchTransformerPath20Forecaster,
     Path20ForecasterMLP,
+    RegimeRoutedMultiExpertHorizonForecaster,
     SectorSlotMixerPath20Forecaster,
     StaticContextPath20Forecaster,
     StockMixerPath20Forecaster,
@@ -47,8 +48,13 @@ FORECAST_MODEL_FAMILIES = (
     "stock_mixer_sequence",
     "sector_slot_mixer_sequence",
     "hybrid_expert_fusion_static_context",
+    "regime_routed_multi_expert_horizon_v1",
 )
-FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES = ("stock_mixer_sequence", "sector_slot_mixer_sequence")
+FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES = (
+    "stock_mixer_sequence",
+    "sector_slot_mixer_sequence",
+    "regime_routed_multi_expert_horizon_v1",
+)
 FORECAST_OUTPUT_PROFILES = ("forecast_path_v1", "decision_utility_v1")
 FORECAST_SELECTION_PROFILES = ("multiscale", "trend20", "short_burst", "decision_utility")
 FORECAST_LOSS_PROFILES = (
@@ -331,6 +337,9 @@ _FORECAST_LOSS_WEIGHT_PRESETS: dict[str, dict[str, float]] = {
         "horizon_target_normalization": 0.0,
         "horizon_head_soft_constraint": 0.03,
         "calibrated_decision_rank_aux": 0.30,
+        "router_entropy_floor": 0.005,
+        "expert_diversity": 0.002,
+        "bad_state_calibration": 0.010,
     },
 }
 
@@ -638,6 +647,23 @@ def make_forecast_model(
         )
     if family == "hybrid_expert_fusion_static_context":
         return ExpertFusionPath20Forecaster(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            horizon=horizon,
+            dropout=dropout,
+            gru_layers=gru_layers,
+            transformer_layers=transformer_layers,
+            transformer_heads=transformer_heads,
+            patch_sizes=tuple(int(item) for item in patch_sizes if int(item) > 0),
+            static_context_vocab_sizes=static_context_vocab_sizes,
+            static_context_embedding_dims=static_context_embedding_dims,
+            static_context_fields=static_context_fields,
+            static_context_dropout=static_context_dropout,
+            output_profile=output_profile,
+            cumulative_horizons=resolved_horizons,
+        )
+    if family == "regime_routed_multi_expert_horizon_v1":
+        return RegimeRoutedMultiExpertHorizonForecaster(
             input_dim=input_dim,
             hidden_dim=hidden_dim,
             horizon=horizon,
@@ -1183,6 +1209,26 @@ def _forecast_loss(
             entropy = -(probabilities * torch.log(torch.clamp(probabilities, min=1.0e-8))).sum(dim=1)
             max_entropy = torch.log(torch.as_tensor(float(cum_count), device=entropy.device, dtype=entropy.dtype))
             loss = loss + entropy_weight * torch.clamp(max_entropy - entropy, min=0.0).mean()
+        bad_state_weight = float(weights.get("bad_state_calibration", 0.0))
+        if bad_state_weight > 0.0 and "bad_state_intensity" in prediction:
+            probabilities = F.softmax(horizon_logits, dim=1)
+            horizon_values = torch.as_tensor(horizons, dtype=torch.long, device=horizon_logits.device)
+            thirty_mask = horizon_values == int(max(horizons))
+            if bool(thirty_mask.any()):
+                thirty_probability = probabilities[:, thirty_mask].sum(dim=1)
+                bad_state = prediction["bad_state_intensity"].to(device=thirty_probability.device, dtype=thirty_probability.dtype)
+                loss = loss + bad_state_weight * (bad_state * torch.clamp(thirty_probability - 0.50, min=0.0).square()).mean()
+    router_entropy_weight = float(weights.get("router_entropy_floor", 0.0))
+    if router_entropy_weight > 0.0 and "router_entropy" in prediction and "router_weights" in prediction:
+        router_entropy = prediction["router_entropy"]
+        expert_count = int(prediction["router_weights"].shape[-1])
+        max_entropy = torch.log(torch.as_tensor(float(max(expert_count, 1)), device=router_entropy.device, dtype=router_entropy.dtype))
+        entropy_floor = max_entropy * 0.60
+        loss = loss + router_entropy_weight * torch.clamp(entropy_floor - router_entropy, min=0.0).square().mean()
+    diversity_weight = float(weights.get("expert_diversity", 0.0))
+    if diversity_weight > 0.0 and "expert_token_diversity" in prediction:
+        diversity = prediction["expert_token_diversity"]
+        loss = loss + diversity_weight * torch.clamp(0.05 - diversity, min=0.0).square().mean()
     return loss
 
 
@@ -1345,9 +1391,13 @@ def _forecast_model_forward(
     static_context_ids: torch.Tensor | None = None,
     stock_mask: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
-    if static_context_ids is not None and _forecast_model_accepts_static_context(model):
+    accepts_static = _forecast_model_accepts_static_context(model)
+    accepts_stock_mask = _forecast_model_accepts_stock_mask(model)
+    if static_context_ids is not None and stock_mask is not None and accepts_static and accepts_stock_mask:
+        return model(batch_x, static_context_ids=static_context_ids, stock_mask=stock_mask)
+    if static_context_ids is not None and accepts_static:
         return model(batch_x, static_context_ids=static_context_ids)
-    if stock_mask is not None and _forecast_model_accepts_stock_mask(model):
+    if stock_mask is not None and accepts_stock_mask:
         return model(batch_x, stock_mask=stock_mask)
     return model(batch_x)
 
@@ -1439,11 +1489,16 @@ def _predict_indices(
                 collate_fn=_collate_forecast_date_batches,
             )
             with torch.no_grad():
-                for batch_x_cpu, stock_mask_cpu, _, _, _, row_indices_cpu, _ in loader:
+                for batch_x_cpu, stock_mask_cpu, _, _, _, row_indices_cpu, static_context_ids_cpu in loader:
                     batch_x = batch_x_cpu.to(device, non_blocking=device.type == "cuda")
                     stock_mask = stock_mask_cpu.to(device, non_blocking=device.type == "cuda")
+                    static_context_ids = (
+                        static_context_ids_cpu.to(device, non_blocking=device.type == "cuda")
+                        if static_context_ids_cpu is not None
+                        else None
+                    )
                     with _autocast_context(device, amp_enabled):
-                        pred = _forecast_model_forward(model, batch_x, stock_mask=stock_mask)
+                        pred = _forecast_model_forward(model, batch_x, static_context_ids, stock_mask=stock_mask)
                     if "decision_aux" in pred and "decision_aux" not in outputs:
                         outputs["decision_aux"] = np.empty((len(ordered_indices), decision_aux_dim), dtype=np.float32)
                     valid = stock_mask.reshape(-1).detach().cpu().numpy().astype(bool)
@@ -2407,6 +2462,34 @@ def _model_config_for_training(
                 "expert_load_balance_loss_weight": 0.0,
             }
         )
+    if str(family) == "regime_routed_multi_expert_horizon_v1":
+        config.update(
+            {
+                "fusion_version": "regime_routed_multi_expert_horizon_v1",
+                "expert_families": [
+                    "gru_path_continuity",
+                    "patch_transformer_multiscale_events",
+                    "dlinear_low_frequency_trend",
+                    "stock_mixer_cross_section",
+                    "local_state_volatility_reversal",
+                ],
+                "router_inputs": [
+                    "expert_pooled_tokens",
+                    "static_context_embedding",
+                    "local_volatility",
+                    "recent_runup",
+                    "drawdown_state",
+                    "horizon_confidence_summary",
+                ],
+                "router_temperature": 1.0,
+                "router_entropy_floor_weight": 0.005,
+                "expert_diversity_weight": 0.002,
+                "bad_state_calibration_weight": 0.010,
+                "cross_section_batching_required_for_stock_mixer": True,
+                "research_only": True,
+                "promotion_allowed": False,
+            }
+        )
     return config
 
 
@@ -2451,15 +2534,20 @@ def _evaluate_loss(
                     pin_memory=device.type == "cuda",
                     collate_fn=_collate_forecast_date_batches,
                 )
-                for batch_x_cpu, stock_mask_cpu, batch_y_daily_cpu, batch_y_cum_cpu, batch_y_risk_cpu, _, _ in loader:
+                for batch_x_cpu, stock_mask_cpu, batch_y_daily_cpu, batch_y_cum_cpu, batch_y_risk_cpu, _, static_context_ids_cpu in loader:
                     batch_x = batch_x_cpu.to(device, non_blocking=device.type == "cuda")
                     stock_mask = stock_mask_cpu.to(device, non_blocking=device.type == "cuda")
                     batch_y_daily = batch_y_daily_cpu.to(device, non_blocking=device.type == "cuda")
                     batch_y_cum = batch_y_cum_cpu.to(device, non_blocking=device.type == "cuda")
                     batch_y_risk = batch_y_risk_cpu.to(device, non_blocking=device.type == "cuda")
+                    static_context_ids = (
+                        static_context_ids_cpu.to(device, non_blocking=device.type == "cuda")
+                        if static_context_ids_cpu is not None
+                        else None
+                    )
                     flat_mask = stock_mask.reshape(-1)
                     with _autocast_context(device, amp_enabled):
-                        pred = _forecast_model_forward(model, batch_x, stock_mask=stock_mask)
+                        pred = _forecast_model_forward(model, batch_x, static_context_ids, stock_mask=stock_mask)
                         loss = _forecast_loss(
                             {key: value[flat_mask] for key, value in pred.items()},
                             batch_y_daily.reshape(-1, batch_y_daily.shape[-1])[flat_mask],
@@ -3011,15 +3099,20 @@ def train_forecast_models(
                 optimizer.zero_grad(set_to_none=True)
                 for step, raw_batch in enumerate(train_loader, start=1):
                     if cross_sectional_batching:
-                        batch_x_cpu, stock_mask_cpu, batch_y_daily_cpu, batch_y_cum_cpu, batch_y_risk_cpu, _, _ = raw_batch
+                        batch_x_cpu, stock_mask_cpu, batch_y_daily_cpu, batch_y_cum_cpu, batch_y_risk_cpu, _, static_context_ids_cpu = raw_batch
                         batch_x = batch_x_cpu.to(resolved_device, non_blocking=pin_memory)
                         stock_mask = stock_mask_cpu.to(resolved_device, non_blocking=pin_memory)
                         batch_y_daily = batch_y_daily_cpu.to(resolved_device, non_blocking=pin_memory)
                         batch_y_cum = batch_y_cum_cpu.to(resolved_device, non_blocking=pin_memory)
                         batch_y_risk = batch_y_risk_cpu.to(resolved_device, non_blocking=pin_memory)
+                        static_context_ids = (
+                            static_context_ids_cpu.to(resolved_device, non_blocking=pin_memory)
+                            if static_context_ids_cpu is not None
+                            else None
+                        )
                         flat_mask = stock_mask.reshape(-1)
                         with _autocast_context(resolved_device, amp_enabled):
-                            pred = _forecast_model_forward(model, batch_x, stock_mask=stock_mask)
+                            pred = _forecast_model_forward(model, batch_x, static_context_ids, stock_mask=stock_mask)
                             loss = _forecast_loss(
                                 {key: value[flat_mask] for key, value in pred.items()},
                                 batch_y_daily.reshape(-1, batch_y_daily.shape[-1])[flat_mask],

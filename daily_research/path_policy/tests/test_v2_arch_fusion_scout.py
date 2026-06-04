@@ -58,6 +58,62 @@ def _write_expert_study(
         pd.DataFrame(rows).to_csv(study / f"forecast_predictions_{role}.csv", index=False)
 
 
+def _write_neural_study(studies_root: Path, tag: str, *, seed: int) -> None:
+    study = studies_root / tag
+    study.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for date in ["2024-01-02", "2024-02-02"]:
+        for stock, score, future, hit in (
+            ("000001.SZ", 0.30, 0.05, 1),
+            ("000002.SZ", 0.20, 0.02, 1),
+            ("600000.SH", 0.10, -0.02, 0),
+        ):
+            rows.append(
+                {
+                    "date": date,
+                    "stock": stock,
+                    "pred_decision_score": score,
+                    "trade_utility_score": score,
+                    "future_decision_score": future,
+                    "pred_best_horizon": 30,
+                    "future_best_horizon": 5,
+                    "pred_decision_utility_5d": score,
+                    "future_decision_utility_5d": future,
+                    "pred_hit_prob_5d": score,
+                    "future_hit_label_5d": hit,
+                }
+            )
+    for role in ("validation", "test"):
+        pd.DataFrame(rows).to_csv(study / f"forecast_predictions_{role}.csv", index=False)
+    training = {
+        "status": "completed",
+        "selected_model_family": "hybrid_expert_fusion_static_context",
+        "selected_seed": seed,
+        "training_config": {
+            "loss_profile": "horizon_30d_soft_penalty_v1",
+            "output_profile": "decision_utility_v1",
+            "feature_profile": "raw_kline_context_v2_tradeable_local_state_v1",
+            "forecast_horizon": 30,
+            "cumulative_horizons": [5],
+        },
+        "test_metrics": {
+            "decision_score_rank_ic": 0.0,
+            "decision_score_top_bottom_spread": 0.0,
+            "decision_hit_lift_top20_mean": 0.0,
+        },
+        "evidence_verdict": "forecast_test_confirmed",
+    }
+    _write_json(study / "forecast_training_summary.json", training)
+    _write_json(
+        study / "study_summary.json",
+        {
+            "status": "completed",
+            "evidence_verdict": "forecast_test_confirmed",
+            "training_summary": training,
+        },
+    )
+
+
 def test_late_fusion_uses_validation_weights_without_test_label_leakage(tmp_path: Path) -> None:
     studies = tmp_path / "studies"
     _write_expert_study(studies, "strong", validation_score_scale=1.0, test_reverse=True)
@@ -122,3 +178,67 @@ def test_neural_fusion_task_list_uses_hybrid_family_and_research_boundary(tmp_pa
     assert task["loss_profile"] == "horizon_30d_soft_penalty_v1"
     assert "--forecast-model-families" in task["command"]
     assert task["command"][task["command"].index("--forecast-model-families") + 1] == "hybrid_expert_fusion_static_context"
+
+
+def test_neural_fusion_comparison_uses_prediction_audit_metrics(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    studies = tmp_path / "studies"
+    tag = fusion._study_tag(7)
+    _write_neural_study(studies, tag, seed=7)
+    monkeypatch.setattr(fusion, "STUDIES_ROOT", studies)
+
+    report = fusion.run_neural_fusion_comparison(
+        output_root=tmp_path / "out",
+        seeds=(7,),
+        run_tag="unit_arch_fusion",
+    )
+
+    aggregate = report["aggregate"]
+    assert report["status"] == "completed"
+    assert report["forecast_prediction_audit"]["status"] == "completed"
+    assert aggregate["rank_ic_min"] > 0.0
+    assert aggregate["top_bottom_spread_min"] > 0.0
+    assert aggregate["hit_lift_min"] > 0.0
+    assert aggregate["monthly_positive_rate_mean"] == 1.0
+    assert aggregate["thirty_d_concentration_mean"] == 1.0
+    assert Path(report["comparison_csv"]).exists()
+
+
+def test_neural_fusion_task_list_supports_regime_routed_tier2_family(tmp_path: Path) -> None:
+    path = fusion.write_task_list(
+        output_root=tmp_path / "out",
+        seeds=(7, 11, 19),
+        model_family="regime_routed_multi_expert_horizon_v1",
+    )
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    task = payload["training_tasks"][0]
+    command = task["command"]
+
+    assert payload["model_family"] == "regime_routed_multi_expert_horizon_v1"
+    assert payload["tier"] == "tier2_regime_routed_multi_expert"
+    assert payload["fusion_version"] == "regime_routed_multi_expert_horizon_v1"
+    assert payload["target_parameter_band"] == "8m_to_15m"
+    assert 8_000_000 <= int(payload["estimated_parameter_count"]) <= 15_000_000
+    assert payload["boundary"]["promotion_allowed"] is False
+    assert payload["training_task_count"] == 3
+    assert task["tag"] == "mh_v2_arch_fusion_regime_routed_multi_expert_seed7_20260603_01"
+    assert task["model_family"] == "regime_routed_multi_expert_horizon_v1"
+    assert 8_000_000 <= int(task["estimated_parameter_count"]) <= 15_000_000
+    assert "router_entropy" in task["router_diagnostics"]
+    assert command[command.index("--forecast-model-families") + 1] == "regime_routed_multi_expert_horizon_v1"
+    assert command[command.index("--forecast-hidden-dim") + 1] == "256"
+    assert command[command.index("--forecast-transformer-heads") + 1] == "8"
+    assert command[command.index("--forecast-patch-sizes") + 1] == "4,10,20"
+
+
+def test_cli_write_task_list_routes_to_neural_fusion_even_with_default_stage(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    rc = fusion.main(["--write-task-list", "--seeds", "7,11,19", "--output-root", str(tmp_path / "out"), "--json"])
+
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+    task_list = Path(report["actions"]["task_list"])
+
+    assert rc == 0
+    assert report["stage"] == "neural_fusion"
+    assert task_list.exists()
+    assert json.loads(task_list.read_text(encoding="utf-8"))["training_task_count"] == 3
