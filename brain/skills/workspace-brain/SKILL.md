@@ -19,6 +19,12 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap
 ```
 `route` is a sensor, not the final thinker. Only read child-brain context after routing returns `status=selected` and `target.kind=child`; if routing returns `needs_agent_decision` or `ambiguous`, inspect user intent, paths, manifest evidence, and candidates before choosing a bootstrap target. Do not read a child brain because of one generic term such as `brain`, `study`, `training`, `数据集`, or `模型`.
 
+## Project Scope
+Capsule/bootstrap exposes the selected `project_profile`; use it for guard, verification, commit, and process scope.
+- Treat other project dirty paths as external parallel work unless the user explicitly expands scope.
+- After verified project work, commit with `tools.brain.project_commit` using the selected project id or `workspace-brain`.
+- Long tasks stay under `<project>/output/agent_runs/<run_id>/`; no cross-project process control without an explicit lease.
+
 ## Init And Register
 Initialize a project brain only when mutation is allowed and no local `brain/brain_manifest.json` exists. `--brain-id` is optional; default comes from the project directory name.
 ```powershell

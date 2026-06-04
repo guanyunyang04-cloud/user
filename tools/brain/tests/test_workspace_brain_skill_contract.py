@@ -40,6 +40,16 @@ class WorkspaceBrainSkillContractTest(unittest.TestCase):
         self.assertIn("contract truth", text)
         self.assertIn("manifest and catalog", text)
 
+    def test_skill_exposes_project_scope_for_parallel_agents(self) -> None:
+        text = SKILL.read_text(encoding="utf-8")
+
+        self.assertIn("Project Scope", text)
+        self.assertIn("project_profile", text)
+        self.assertIn("external parallel work", text)
+        self.assertIn("tools.brain.project_commit", text)
+        self.assertIn("<project>/output/agent_runs/<run_id>/", text)
+        self.assertIn("explicit lease", text)
+
     def test_skill_keeps_self_evolution_proposal_only(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
 
