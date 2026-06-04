@@ -1131,6 +1131,19 @@ def build_forecast_memmap_dataset(
 
     dates = [pd.Timestamp(dt).normalize() for dt in prepared.close.index]
     universe = [str(stock).strip().upper() for stock in prepared.universe]
+    _write_memmap_build_progress(
+        root,
+        "dataset_start",
+        date_count=len(dates),
+        universe_size=len(universe),
+        train_start_year=train_start_year,
+        train_end_year=train_end_year,
+        validation_year=validation_year,
+        test_year=test_year,
+        feature_profile=feature_profile,
+        max_feature_columns=max_feature_columns,
+        max_samples_per_role=max_samples_per_role,
+    )
     date_to_pos = {dt: idx for idx, dt in enumerate(dates)}
     stock_to_pos = {stock: idx for idx, stock in enumerate(universe)}
     resolved_static_fields = normalize_static_context_fields(static_context_fields)
@@ -1160,6 +1173,12 @@ def build_forecast_memmap_dataset(
         validation_year=validation_year,
         test_year=test_year,
         purge_trading_days=label_forward_offset,
+    )
+    _write_memmap_build_progress(
+        root,
+        "feature_store_start",
+        eligible_date_counts={role: len(values) for role, values in eligible_dates_by_role.items()},
+        label_forward_offset=label_forward_offset,
     )
     feature_store_path, feature_columns, feature_manifest, history_ratio = build_forecast_feature_store(
         prepared,

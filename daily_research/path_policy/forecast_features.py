@@ -10,6 +10,7 @@ import pandas as pd
 from daily_research.continuous_policy.pipeline_utils import select_feature_columns
 from daily_research.continuous_policy.portfolio_simulator import PortfolioState
 from daily_research.continuous_policy.state_builder import PreparedPolicyInputs, build_cross_section_state
+from daily_research.continuous_policy.runtime import write_json
 
 
 AUGMENTED_INDUSTRY_METRICS_PROFILE = "raw_kline_context_v2_tradeable_local_state_industry_metrics_v1"
@@ -86,6 +87,37 @@ NO_ALPHA_CONTRACT_PROFILES = {
     "raw_kline_context_v2_tradeable_local_state_v1",
     AUGMENTED_INDUSTRY_METRICS_PROFILE,
 }
+
+
+def _json_ready(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _json_ready(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_ready(item) for item in value]
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating,)):
+        value = float(value)
+        return value if np.isfinite(value) else None
+    if isinstance(value, (np.bool_,)):
+        return bool(value)
+    if isinstance(value, pd.Timestamp):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, float) and not np.isfinite(value):
+        return None
+    return value
+
+
+def _write_feature_store_progress(root: Path, stage: str, **payload: Any) -> None:
+    write_json(
+        Path(root) / "forecast_feature_store_progress.json",
+        {
+            "stage": str(stage),
+            **{str(key): _json_ready(value) for key, value in payload.items()},
+        },
+    )
 
 
 def _source_sector_board_view_id(prepared: PreparedPolicyInputs) -> str:
@@ -1057,6 +1089,14 @@ def build_forecast_feature_store(
     normalized_dates = [pd.Timestamp(dt).normalize() for dt in dates]
     universe = [str(stock).strip().upper() for stock in prepared.universe]
     feature_store_path = root / "forecast_feature_store.dat"
+    _write_feature_store_progress(
+        root,
+        "start",
+        date_count=len(normalized_dates),
+        universe_size=len(universe),
+        feature_profile=profile,
+        max_feature_columns=max_feature_columns,
+    )
     if not normalized_dates:
         _amount_frame, amount_audit = _amount_for_feature_profile(prepared, profile)
         manifest = _manifest_for_columns(
@@ -1075,6 +1115,7 @@ def build_forecast_feature_store(
                 "feature_nan_ratio": 0.0,
             }
         )
+        _write_feature_store_progress(root, "empty_dates_done", feature_store_shape=manifest["feature_store_shape"])
         return feature_store_path, [], manifest, pd.DataFrame(index=prepared.close.index, columns=universe, dtype=float)
 
     empty_portfolio = PortfolioState()
@@ -1087,14 +1128,18 @@ def build_forecast_feature_store(
         )
         first_state = build_cross_section_state(prepared, date=normalized_dates[0], portfolio_state=empty_portfolio).copy()
     first_state.index = pd.Index([str(item).strip().upper() for item in first_state["stock"].tolist()], name="stock")
+    _write_feature_store_progress(root, "first_state_done", first_date=normalized_dates[0], state_column_count=len(first_state.columns))
     state_columns = [
         column
         for column in select_feature_columns(first_state)
         if column not in NON_FORECAST_STATE_COLUMNS
     ]
+    _write_feature_store_progress(root, "amount_audit_start", state_feature_count=len(state_columns))
     _amount_frame, amount_audit = _amount_for_feature_profile(prepared, profile)
     raw_frames = _raw_kline_feature_frames(prepared, feature_profile=profile) if profile in RAW_FRAME_PROFILES else {}
+    _write_feature_store_progress(root, "raw_frames_done", raw_frame_count=len(raw_frames))
     context_frames = _context_feature_frames(prepared, raw_frames, feature_profile=profile) if profile in CONTEXT_FRAME_PROFILES else {}
+    _write_feature_store_progress(root, "context_frames_done", context_frame_count=len(context_frames))
     history_frames = (
         _history_quality_feature_frames(
             prepared,
@@ -1104,12 +1149,19 @@ def build_forecast_feature_store(
         if profile in {"raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1", "raw_kline_context_sector_v1"} or profile in HISTORY_FRAME_PROFILES
         else {}
     )
+    _write_feature_store_progress(root, "history_frames_done", history_frame_count=len(history_frames))
     sector_frames = _sector_context_feature_frames(prepared) if profile in SECTOR_CONTEXT_PROFILES else {}
+    _write_feature_store_progress(root, "sector_frames_done", sector_frame_count=len(sector_frames))
     sector_relative_frames = _sector_relative_feature_frames(prepared) if profile in SECTOR_RELATIVE_PROFILES else {}
+    _write_feature_store_progress(root, "sector_relative_frames_done", sector_relative_frame_count=len(sector_relative_frames))
     regime_frames = _regime_feature_frames(prepared, raw_frames, feature_profile=profile) if profile in REGIME_PROFILES else {}
+    _write_feature_store_progress(root, "regime_frames_done", regime_frame_count=len(regime_frames))
     local_state_frames = _local_state_feature_frames(prepared) if profile in LOCAL_STATE_PROFILES else {}
+    _write_feature_store_progress(root, "local_state_frames_done", local_state_frame_count=len(local_state_frames))
     turnover_frames = _turnover_context_feature_frames(prepared) if profile in TURNOVER_CONTEXT_PROFILES else {}
+    _write_feature_store_progress(root, "turnover_frames_done", turnover_frame_count=len(turnover_frames))
     valuation_frames = _valuation_context_feature_frames(prepared) if profile in VALUATION_CONTEXT_PROFILES else {}
+    _write_feature_store_progress(root, "valuation_frames_done", valuation_frame_count=len(valuation_frames))
     all_columns, column_groups = _selected_columns_for_profile(
         state_columns=state_columns,
         raw_columns=list(raw_frames),
@@ -1139,6 +1191,7 @@ def build_forecast_feature_store(
         feature_profile_audit={"amount_unit": amount_audit},
     )
     shape = (int(len(normalized_dates)), int(len(universe)), int(len(selected_columns)))
+    _write_feature_store_progress(root, "memmap_allocating", feature_store_shape=list(shape), selected_feature_count=len(selected_columns))
     store = np.memmap(feature_store_path, dtype="float32", mode="w+", shape=shape)
     nan_count = 0
     value_count = 0
@@ -1156,6 +1209,15 @@ def build_forecast_feature_store(
     )
     empty_state = pd.DataFrame(index=universe)
     for pos, dt in enumerate(normalized_dates):
+        if pos == 0 or (pos + 1) % 100 == 0 or pos + 1 == len(normalized_dates):
+            _write_feature_store_progress(
+                root,
+                "writing_feature_store",
+                date_pos=pos,
+                date=str(dt.date()),
+                date_count=len(normalized_dates),
+                progress_ratio=float((pos + 1) / max(len(normalized_dates), 1)),
+            )
         if needs_state_per_date:
             with warnings.catch_warnings():
                 warnings.filterwarnings(
@@ -1198,6 +1260,7 @@ def build_forecast_feature_store(
         value_count += int(values.size)
         store[pos, :, :] = values
     store.flush()
+    _write_feature_store_progress(root, "feature_store_written", feature_store_shape=list(shape), feature_store_path=feature_store_path)
     manifest.update(
         {
             "feature_store_path": str(feature_store_path.resolve()),
@@ -1213,6 +1276,7 @@ def build_forecast_feature_store(
         feature_store_shape=shape,
     )
     manifest["feature_profile_audit"]["amount_unit"] = amount_audit
+    _write_feature_store_progress(root, "feature_profile_audit_done", feature_nan_ratio=manifest["feature_nan_ratio"])
     history_ratio = history_frames.get(
         "core_ohlcv_valid_ratio_252",
         pd.DataFrame(1.0, index=prepared.close.index, columns=universe, dtype=float),

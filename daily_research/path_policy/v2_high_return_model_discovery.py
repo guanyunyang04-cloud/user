@@ -91,6 +91,15 @@ DATA_SPECS: dict[str, DataSpec] = {
         split_keys=("same",),
         description="2018-2024 augmented same-period A/B substrate",
     ),
+    "same_period_augmented_pilot": DataSpec(
+        key="same_period_augmented_pilot",
+        dataset_id=TRADITIONAL_BAOSTOCK_V2_1_DATASET_ID,
+        pool_view_id=SAME_PERIOD_POOL_VIEW_ID,
+        start_date="20220101",
+        end_date="20241231",
+        split_keys=("pilot",),
+        description="2022-2024 full-pool augmented pilot substrate, throughput-only",
+    ),
     "long_history_augmented": DataSpec(
         key="long_history_augmented",
         dataset_id=TRADITIONAL_BAOSTOCK_V2_1_DATASET_ID,
@@ -119,6 +128,14 @@ SPLIT_SPECS: dict[str, SplitSpec] = {
         validation_year=2023,
         test_year=2024,
         description="current v2 same-period A/B split",
+    ),
+    "pilot": SplitSpec(
+        key="pilot",
+        train_start_year=2022,
+        train_end_year=2022,
+        validation_year=2023,
+        test_year=2024,
+        description="short full-pool pilot split for augmented throughput diagnostics",
     ),
     "a": SplitSpec(
         key="a",
@@ -266,6 +283,7 @@ def _tag(
     model_alias = MODEL_SPECS[model_family].alias
     data_alias = {
         "same_period_augmented": "same",
+        "same_period_augmented_pilot": "same_pilot",
         "long_history_augmented": "long",
         "smoke32_augmented": "smoke32",
     }.get(data_key, str(data_key).replace("_augmented", ""))
@@ -579,10 +597,17 @@ def build_forecast_tasks(
                         ),
                         "research_program": RESEARCH_PROGRAM,
                         "study_family": STUDY_FAMILY,
-                        "evidence_grade": "smoke_only"
-                        if data_key == "smoke32_augmented"
-                        else ("scout_only" if len(resolved_seeds) == 1 else "finalist_confirmation_input"),
+                        "evidence_grade": (
+                            "smoke_only"
+                            if data_key == "smoke32_augmented"
+                            else (
+                                "pilot_only"
+                                if data_key == "same_period_augmented_pilot"
+                                else ("scout_only" if len(resolved_seeds) == 1 else "finalist_confirmation_input")
+                            )
+                        ),
                         "smoke_only": data_key == "smoke32_augmented",
+                        "pilot_only": data_key == "same_period_augmented_pilot",
                         "single_seed_scout_only": len(resolved_seeds) == 1,
                         "shadow_only": True,
                         "promotion_allowed": False,
@@ -646,6 +671,7 @@ def write_task_list(
         "candidate_matrix_task_count": len(tasks),
         "max_samples_per_role": int(max_samples_per_role),
         "smoke_only_task_count": int(sum(1 for task in tasks if bool(task.get("smoke_only", False)))),
+        "pilot_only_task_count": int(sum(1 for task in tasks if bool(task.get("pilot_only", False)))),
         "training_tasks": tasks,
         "quick_bridge_tasks": [
             {
@@ -655,6 +681,7 @@ def write_task_list(
                 "command": task["quick_bridge_command"],
                 "single_seed_scout_only": bool(task["single_seed_scout_only"]),
                 "smoke_only": bool(task.get("smoke_only", False)),
+                "pilot_only": bool(task.get("pilot_only", False)),
                 "promotion_allowed": False,
             }
             for task in tasks
@@ -667,6 +694,7 @@ def write_task_list(
                 "command": task["candidate_matrix_command"],
                 "single_seed_scout_only": bool(task["single_seed_scout_only"]),
                 "smoke_only": bool(task.get("smoke_only", False)),
+                "pilot_only": bool(task.get("pilot_only", False)),
                 "promotion_allowed": False,
             }
             for task in tasks
@@ -1130,6 +1158,7 @@ def _write_markdown(path: str | Path, report: dict[str, Any]) -> None:
         f"- Completed forecast count: `{report.get('completed_forecast_count', 0)}`",
         f"- Completed backtest count: `{report.get('completed_backtest_count', 0)}`",
         f"- Smoke completed forecast count: `{report.get('smoke_completed_forecast_count', 0)}`",
+        f"- Pilot completed forecast count: `{report.get('pilot_completed_forecast_count', 0)}`",
         f"- Shortlist count: `{report.get('shortlist_count', 0)}`",
         "",
         "## Shortlist",
@@ -1170,7 +1199,7 @@ def _write_markdown(path: str | Path, report: dict[str, Any]) -> None:
             "- research_only: `true`",
             "- shadow_only: `true`",
             "- promotion_allowed: `false`",
-            "- smoke_only rows are excluded from formal shortlist and completed model-quality evidence.",
+            "- smoke_only and pilot_only rows are excluded from formal shortlist and completed model-quality evidence.",
             "- active_execution_strategy_expected_diff: `none`",
         ]
     )
@@ -1219,6 +1248,7 @@ def collect_high_return_report(
             "worst_monthly_return": _float_metric(monthly, "worst_monthly_return"),
             "single_seed_scout_only": bool(task.get("single_seed_scout_only", True)),
             "smoke_only": bool(task.get("smoke_only", False)),
+            "pilot_only": bool(task.get("pilot_only", False)),
             "evidence_grade": str(task.get("evidence_grade", "")),
         }
         row.update(_score_row(row))
@@ -1230,11 +1260,15 @@ def collect_high_return_report(
         if float(row.get("high_return_score", 0.0)) > 0.0
         and (str(row.get("forecast_status")) == "completed" or str(row.get("evidence_verdict")))
         and not bool(row.get("smoke_only", False))
+        and not bool(row.get("pilot_only", False))
     ][:3]
     completed_forecast_count = sum(1 for row in rows if str(row.get("forecast_status", "")).strip() == "completed")
     completed_backtest_count = sum(1 for row in rows if str(row.get("backtest_status", "")).strip() == "completed")
     smoke_completed_forecast_count = sum(
         1 for row in rows if bool(row.get("smoke_only", False)) and str(row.get("forecast_status", "")).strip() == "completed"
+    )
+    pilot_completed_forecast_count = sum(
+        1 for row in rows if bool(row.get("pilot_only", False)) and str(row.get("forecast_status", "")).strip() == "completed"
     )
     status = "missing_tasks"
     if rows and completed_forecast_count <= 0:
@@ -1250,6 +1284,7 @@ def collect_high_return_report(
         "completed_forecast_count": int(completed_forecast_count),
         "completed_backtest_count": int(completed_backtest_count),
         "smoke_completed_forecast_count": int(smoke_completed_forecast_count),
+        "pilot_completed_forecast_count": int(pilot_completed_forecast_count),
         "leaderboard": leaderboard,
         "split_consistency": _split_consistency(rows),
         "bad_month_preview": _bad_month_preview(rows),

@@ -70,6 +70,30 @@ def test_forecast_memmap_dataset_builds_lazy_store_and_batches(tmp_path) -> None
     assert torch.isfinite(x).all()
 
 
+def test_forecast_memmap_dataset_writes_progress_files(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
+    build_forecast_memmap_dataset(
+        prepared,
+        root=tmp_path,
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=4,
+        min_lookback_valid_ratio=0.80,
+    )
+
+    memmap_progress = json.loads((tmp_path / "forecast_memmap_build_progress.json").read_text(encoding="utf-8"))
+    feature_progress = json.loads((tmp_path / "forecast_feature_store_progress.json").read_text(encoding="utf-8"))
+
+    assert memmap_progress["stage"] == "manifest_written"
+    assert memmap_progress["sample_count"] > 0
+    assert feature_progress["stage"] == "feature_profile_audit_done"
+    assert feature_progress["feature_nan_ratio"] >= 0.0
+
+
 def test_memmap_train_normalization_matches_naive_window_scan(tmp_path) -> None:
     feature_shape = (7, 3, 4)
     values = np.arange(np.prod(feature_shape), dtype=np.float32).reshape(feature_shape)
