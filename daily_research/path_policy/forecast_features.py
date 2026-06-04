@@ -12,6 +12,7 @@ from daily_research.continuous_policy.portfolio_simulator import PortfolioState
 from daily_research.continuous_policy.state_builder import PreparedPolicyInputs, build_cross_section_state
 
 
+AUGMENTED_INDUSTRY_METRICS_PROFILE = "raw_kline_context_v2_tradeable_local_state_industry_metrics_v1"
 FORECAST_FEATURE_PROFILES: tuple[str, ...] = (
     "state_v1",
     "raw_kline_v1",
@@ -23,6 +24,7 @@ FORECAST_FEATURE_PROFILES: tuple[str, ...] = (
     "raw_kline_context_sector_relative_regime_v1",
     "raw_kline_context_v2_tradeable_amount_checked",
     "raw_kline_context_v2_tradeable_local_state_v1",
+    AUGMENTED_INDUSTRY_METRICS_PROFILE,
 )
 DEFAULT_FORECAST_FEATURE_PROFILE = "raw_kline_context_v1"
 DEFAULT_FORECAST_MAX_FEATURE_COLUMNS = 192
@@ -37,6 +39,7 @@ RAW_FRAME_PROFILES = {
     "raw_kline_context_sector_relative_regime_v1",
     "raw_kline_context_v2_tradeable_amount_checked",
     "raw_kline_context_v2_tradeable_local_state_v1",
+    AUGMENTED_INDUSTRY_METRICS_PROFILE,
 }
 CONTEXT_FRAME_PROFILES = {
     "raw_kline_context_v1",
@@ -47,6 +50,7 @@ CONTEXT_FRAME_PROFILES = {
     "raw_kline_context_sector_relative_regime_v1",
     "raw_kline_context_v2_tradeable_amount_checked",
     "raw_kline_context_v2_tradeable_local_state_v1",
+    AUGMENTED_INDUSTRY_METRICS_PROFILE,
 }
 HISTORY_FRAME_PROFILES = {
     "raw_kline_context_sector_relative_v1",
@@ -54,19 +58,24 @@ HISTORY_FRAME_PROFILES = {
     "raw_kline_context_sector_relative_regime_v1",
     "raw_kline_context_v2_tradeable_amount_checked",
     "raw_kline_context_v2_tradeable_local_state_v1",
+    AUGMENTED_INDUSTRY_METRICS_PROFILE,
 }
-SECTOR_CONTEXT_PROFILES = {"raw_kline_context_sector_v1"}
+SECTOR_CONTEXT_PROFILES = {"raw_kline_context_sector_v1", AUGMENTED_INDUSTRY_METRICS_PROFILE}
 SECTOR_RELATIVE_PROFILES = {
     "raw_kline_context_sector_relative_v1",
     "raw_kline_context_sector_relative_regime_v1",
+    AUGMENTED_INDUSTRY_METRICS_PROFILE,
 }
 REGIME_PROFILES = {
     "raw_kline_context_regime_v1",
     "raw_kline_context_sector_relative_regime_v1",
     "raw_kline_context_v2_tradeable_amount_checked",
     "raw_kline_context_v2_tradeable_local_state_v1",
+    AUGMENTED_INDUSTRY_METRICS_PROFILE,
 }
-LOCAL_STATE_PROFILES = {"raw_kline_context_v2_tradeable_local_state_v1"}
+LOCAL_STATE_PROFILES = {"raw_kline_context_v2_tradeable_local_state_v1", AUGMENTED_INDUSTRY_METRICS_PROFILE}
+TURNOVER_CONTEXT_PROFILES = {AUGMENTED_INDUSTRY_METRICS_PROFILE}
+VALUATION_CONTEXT_PROFILES = {AUGMENTED_INDUSTRY_METRICS_PROFILE}
 AMOUNT_CHECKED_PROFILES = {"raw_kline_context_v2_tradeable_amount_checked", *LOCAL_STATE_PROFILES}
 NO_ALPHA_CONTRACT_PROFILES = {
     "raw_kline_context_no_alpha_prior_v1",
@@ -75,6 +84,7 @@ NO_ALPHA_CONTRACT_PROFILES = {
     "raw_kline_context_sector_relative_regime_v1",
     "raw_kline_context_v2_tradeable_amount_checked",
     "raw_kline_context_v2_tradeable_local_state_v1",
+    AUGMENTED_INDUSTRY_METRICS_PROFILE,
 }
 
 
@@ -376,6 +386,27 @@ def _metadata_industry_series(prepared: PreparedPolicyInputs, columns: list[str]
     return data.drop_duplicates(subset=["symbol"]).set_index("symbol")["industry"].reindex(columns)
 
 
+def _metadata_industry_frame(prepared: PreparedPolicyInputs, columns: list[str]) -> pd.DataFrame:
+    close = prepared.close
+    daily = dict(getattr(prepared, "metadata_frames", {}) or {}).get("industry_daily")
+    if daily is not None and not daily.empty and {"symbol", "trade_date", "industry"}.issubset(daily.columns):
+        data = daily.copy()
+        data["trade_date"] = pd.to_datetime(data["trade_date"], errors="coerce")
+        data["symbol"] = data["symbol"].astype(str).str.strip().str.upper()
+        data["industry"] = data["industry"].fillna("").astype(str).str.strip()
+        data = data.loc[data["trade_date"].notna() & data["symbol"].isin(set(columns)) & data["industry"].ne("")]
+        if not data.empty:
+            wide = data.pivot_table(index="trade_date", columns="symbol", values="industry", aggfunc="last")
+            wide = wide.reindex(index=close.index, columns=columns).ffill()
+            return wide
+    static = _metadata_industry_series(prepared, columns)
+    return pd.DataFrame(
+        np.repeat(static.to_numpy(dtype=object).reshape(1, -1), len(close.index), axis=0),
+        index=close.index,
+        columns=columns,
+    )
+
+
 def _metadata_board_count_series(prepared: PreparedPolicyInputs, columns: list[str]) -> pd.Series:
     frame = dict(getattr(prepared, "metadata_frames", {}) or {}).get("board_membership")
     if frame is None or frame.empty or "symbol" not in frame.columns:
@@ -391,6 +422,8 @@ def _metadata_board_count_series(prepared: PreparedPolicyInputs, columns: list[s
 
 
 def _group_mean_frame(values: pd.DataFrame, group: pd.Series) -> pd.DataFrame:
+    if isinstance(group, pd.DataFrame):
+        return _datewise_group_mean_frame(values, group)
     out = pd.DataFrame(np.nan, index=values.index, columns=values.columns, dtype=float)
     for group_name in sorted(str(item) for item in group.dropna().unique()):
         members = [stock for stock in values.columns if str(group.get(stock, "")) == group_name]
@@ -401,7 +434,24 @@ def _group_mean_frame(values: pd.DataFrame, group: pd.Series) -> pd.DataFrame:
     return out
 
 
-def _group_rank_frame(values: pd.DataFrame, group: pd.Series) -> pd.DataFrame:
+def _datewise_group_mean_frame(values: pd.DataFrame, group: pd.DataFrame) -> pd.DataFrame:
+    columns = list(values.columns)
+    out = pd.DataFrame(np.nan, index=values.index, columns=columns, dtype=float)
+    aligned_group = group.reindex(index=values.index, columns=columns)
+    for dt in values.index:
+        labels = aligned_group.loc[dt]
+        row = values.loc[dt].astype(float)
+        for group_name in sorted(str(item) for item in labels.dropna().unique() if str(item).strip()):
+            members = [stock for stock in columns if str(labels.get(stock, "")) == group_name]
+            if not members:
+                continue
+            out.loc[dt, members] = float(row.reindex(members).mean())
+    return out
+
+
+def _group_rank_frame(values: pd.DataFrame, group: pd.Series | pd.DataFrame) -> pd.DataFrame:
+    if isinstance(group, pd.DataFrame):
+        return _datewise_group_rank_frame(values, group)
     out = pd.DataFrame(np.nan, index=values.index, columns=values.columns, dtype=float)
     for group_name in sorted(str(item) for item in group.dropna().unique()):
         members = [stock for stock in values.columns if str(group.get(stock, "")) == group_name]
@@ -411,32 +461,102 @@ def _group_rank_frame(values: pd.DataFrame, group: pd.Series) -> pd.DataFrame:
     return out
 
 
+def _datewise_group_rank_frame(values: pd.DataFrame, group: pd.DataFrame) -> pd.DataFrame:
+    columns = list(values.columns)
+    out = pd.DataFrame(np.nan, index=values.index, columns=columns, dtype=float)
+    aligned_group = group.reindex(index=values.index, columns=columns)
+    for dt in values.index:
+        labels = aligned_group.loc[dt]
+        row = values.loc[dt].astype(float)
+        for group_name in sorted(str(item) for item in labels.dropna().unique() if str(item).strip()):
+            members = [stock for stock in columns if str(labels.get(stock, "")) == group_name]
+            if members:
+                out.loc[dt, members] = row.reindex(members).rank(pct=True, method="average")
+    return out
+
+
+def _group_z_frame(values: pd.DataFrame, group: pd.Series | pd.DataFrame) -> pd.DataFrame:
+    if isinstance(group, pd.DataFrame):
+        columns = list(values.columns)
+        out = pd.DataFrame(np.nan, index=values.index, columns=columns, dtype=float)
+        aligned_group = group.reindex(index=values.index, columns=columns)
+        for dt in values.index:
+            labels = aligned_group.loc[dt]
+            row = values.loc[dt].astype(float)
+            for group_name in sorted(str(item) for item in labels.dropna().unique() if str(item).strip()):
+                members = [stock for stock in columns if str(labels.get(stock, "")) == group_name]
+                if not members:
+                    continue
+                group_values = row.reindex(members).replace([np.inf, -np.inf], np.nan)
+                std = float(group_values.std(ddof=0))
+                if not np.isfinite(std) or abs(std) <= 1.0e-12:
+                    continue
+                out.loc[dt, members] = group_values.sub(float(group_values.mean())).div(std)
+        return out.replace([np.inf, -np.inf], np.nan)
+    out = pd.DataFrame(np.nan, index=values.index, columns=values.columns, dtype=float)
+    for group_name in sorted(str(item) for item in group.dropna().unique()):
+        members = [stock for stock in values.columns if str(group.get(stock, "")) == group_name]
+        if not members:
+            continue
+        group_values = values[members].replace([np.inf, -np.inf], np.nan)
+        mean = group_values.mean(axis=1)
+        std = group_values.std(axis=1, ddof=0).replace(0.0, np.nan)
+        out.loc[:, members] = group_values.sub(mean, axis=0).div(std, axis=0)
+    return out.replace([np.inf, -np.inf], np.nan)
+
+
+def _group_member_count_frame(group: pd.Series | pd.DataFrame, *, index: pd.Index, columns: list[str], log: bool = False) -> pd.DataFrame:
+    if isinstance(group, pd.DataFrame):
+        aligned = group.reindex(index=index, columns=columns)
+        out = pd.DataFrame(0.0, index=index, columns=columns, dtype=float)
+        for dt in index:
+            labels = aligned.loc[dt].dropna().astype(str)
+            counts = labels.value_counts()
+            out.loc[dt] = aligned.loc[dt].map(counts).fillna(0.0).astype(float)
+    else:
+        member_count = group.map(group.value_counts()).reindex(columns).fillna(0.0).astype(float)
+        out = pd.DataFrame(
+            np.repeat(member_count.to_numpy(dtype=float).reshape(1, -1), len(index), axis=0),
+            index=index,
+            columns=columns,
+        )
+    return np.log1p(out) if bool(log) else out
+
+
 def _sector_context_feature_frames(prepared: PreparedPolicyInputs) -> dict[str, pd.DataFrame]:
     close = prepared.close.astype(float)
     columns = [str(item).strip().upper() for item in close.columns]
-    industry = _metadata_industry_series(prepared, columns)
-    if industry.dropna().empty:
+    industry = _metadata_industry_frame(prepared, columns)
+    if industry.replace("", np.nan).dropna(how="all").empty:
         return {}
     returns_20 = close.pct_change(20).replace([np.inf, -np.inf], np.nan)
     benchmark = prepared.benchmark_close.reindex(close.index).astype(float).pct_change(20).replace([np.inf, -np.inf], np.nan)
     industry_mean = _group_mean_frame(returns_20, industry)
     industry_ret_excess = industry_mean.sub(benchmark, axis=0)
     industry_rank = _group_rank_frame(returns_20, industry)
-    member_count = industry.map(industry.value_counts()).reindex(columns).fillna(0.0).astype(float)
+    member_count_frame = _group_member_count_frame(industry, index=close.index, columns=columns, log=False)
     board_count = _metadata_board_count_series(prepared, columns)
     return {
         "industry_ret_20_excess": industry_ret_excess,
         "industry_rank_ret_20": industry_rank,
-        "industry_member_count": pd.DataFrame(
-            np.repeat(member_count.to_numpy(dtype=float).reshape(1, -1), len(close.index), axis=0),
-            index=close.index,
-            columns=columns,
-        ),
+        "industry_member_count": member_count_frame,
         "board_member_count": pd.DataFrame(np.repeat(board_count.to_numpy(dtype=float).reshape(1, -1), len(close.index), axis=0), index=close.index, columns=columns),
     }
 
 
-def _group_share_frame(condition: pd.DataFrame, group: pd.Series) -> pd.DataFrame:
+def _group_share_frame(condition: pd.DataFrame, group: pd.Series | pd.DataFrame) -> pd.DataFrame:
+    if isinstance(group, pd.DataFrame):
+        columns = list(condition.columns)
+        out = pd.DataFrame(np.nan, index=condition.index, columns=columns, dtype=float)
+        aligned_group = group.reindex(index=condition.index, columns=columns)
+        for dt in condition.index:
+            labels = aligned_group.loc[dt]
+            row = condition.loc[dt].astype(float)
+            for group_name in sorted(str(item) for item in labels.dropna().unique() if str(item).strip()):
+                members = [stock for stock in columns if str(labels.get(stock, "")) == group_name]
+                if members:
+                    out.loc[dt, members] = float(row.reindex(members).mean())
+        return out
     out = pd.DataFrame(np.nan, index=condition.index, columns=condition.columns, dtype=float)
     for group_name in sorted(str(item) for item in group.dropna().unique()):
         members = [stock for stock in condition.columns if str(group.get(stock, "")) == group_name]
@@ -450,8 +570,8 @@ def _group_share_frame(condition: pd.DataFrame, group: pd.Series) -> pd.DataFram
 def _sector_relative_feature_frames(prepared: PreparedPolicyInputs) -> dict[str, pd.DataFrame]:
     close = prepared.close.astype(float)
     columns = [str(item).strip().upper() for item in close.columns]
-    industry = _metadata_industry_series(prepared, columns)
-    if industry.dropna().empty:
+    industry = _metadata_industry_frame(prepared, columns)
+    if industry.replace("", np.nan).dropna(how="all").empty:
         return {}
     returns_5 = close.pct_change(5).replace([np.inf, -np.inf], np.nan)
     returns_20 = close.pct_change(20).replace([np.inf, -np.inf], np.nan)
@@ -464,13 +584,8 @@ def _sector_relative_feature_frames(prepared: PreparedPolicyInputs) -> dict[str,
     industry_rank_20 = _group_rank_frame(returns_20, industry)
     industry_positive_share_5 = _group_share_frame(returns_5 > 0.0, industry)
     industry_positive_share_20 = _group_share_frame(returns_20 > 0.0, industry)
-    member_count = industry.map(industry.value_counts()).reindex(columns).fillna(0.0).astype(float)
     board_count = _metadata_board_count_series(prepared, columns)
-    member_count_frame = pd.DataFrame(
-        np.repeat(np.log1p(member_count.to_numpy(dtype=float)).reshape(1, -1), len(close.index), axis=0),
-        index=close.index,
-        columns=columns,
-    )
+    member_count_frame = _group_member_count_frame(industry, index=close.index, columns=columns, log=True)
     board_count_frame = pd.DataFrame(
         np.repeat(np.log1p(board_count.to_numpy(dtype=float)).reshape(1, -1), len(close.index), axis=0),
         index=close.index,
@@ -488,6 +603,57 @@ def _sector_relative_feature_frames(prepared: PreparedPolicyInputs) -> dict[str,
         "industry_member_count_log": member_count_frame,
         "board_member_count_log": board_count_frame,
     }
+
+
+def _turnover_context_feature_frames(prepared: PreparedPolicyInputs) -> dict[str, pd.DataFrame]:
+    close = prepared.close.astype(float)
+    columns = [str(item).strip().upper() for item in close.columns]
+    turn = dict(getattr(prepared, "derived_frames", {}) or {}).get("turn")
+    if turn is None or turn.empty:
+        return {}
+    turn = turn.reindex(index=close.index, columns=columns).astype(float).replace([np.inf, -np.inf], np.nan)
+    turn_5 = turn.rolling(5, min_periods=1).mean()
+    turn_20 = turn.rolling(20, min_periods=1).mean()
+    industry = _metadata_industry_frame(prepared, columns)
+    out = {
+        "turn": turn,
+        "turn_z20": _rolling_z(turn, 20),
+        "turn_ratio_5_20": _safe_div(turn_5, turn_20).sub(1.0),
+        "cs_rank_turn": turn.rank(axis=1, pct=True),
+        "cs_z_turn": _cross_z(turn),
+    }
+    if not industry.replace("", np.nan).dropna(how="all").empty:
+        out["industry_rank_turn"] = _group_rank_frame(turn, industry)
+        out["industry_z_turn"] = _group_z_frame(turn, industry)
+    return {key: value.replace([np.inf, -np.inf], np.nan) for key, value in out.items()}
+
+
+def _valuation_context_feature_frames(prepared: PreparedPolicyInputs) -> dict[str, pd.DataFrame]:
+    close = prepared.close.astype(float)
+    columns = [str(item).strip().upper() for item in close.columns]
+    derived = dict(getattr(prepared, "derived_frames", {}) or {})
+    industry = _metadata_industry_frame(prepared, columns)
+    has_industry = not industry.replace("", np.nan).dropna(how="all").empty
+    out: dict[str, pd.DataFrame] = {}
+    for field in ("peTTM", "pbMRQ", "psTTM", "pcfNcfTTM"):
+        raw = derived.get(field)
+        if raw is None or raw.empty:
+            continue
+        lagged = raw.reindex(index=close.index, columns=columns).astype(float).replace([np.inf, -np.inf], np.nan).shift(1)
+        nonpositive = lagged.le(0.0).astype(float).where(lagged.notna())
+        missing = lagged.isna().astype(float)
+        positive = lagged.where(lagged > 0.0)
+        log_value = np.log1p(positive).replace([np.inf, -np.inf], np.nan)
+        prefix = f"valuation_{field}"
+        out[f"{prefix}_lag1_log"] = log_value
+        out[f"{prefix}_cs_rank"] = log_value.rank(axis=1, pct=True)
+        out[f"{prefix}_cs_z"] = _cross_z(log_value)
+        out[f"{prefix}_missing_flag"] = missing
+        out[f"{prefix}_nonpositive_flag"] = nonpositive
+        if has_industry:
+            out[f"{prefix}_industry_rank"] = _group_rank_frame(log_value, industry)
+            out[f"{prefix}_industry_z"] = _group_z_frame(log_value, industry)
+    return {key: value.replace([np.inf, -np.inf], np.nan) for key, value in out.items()}
 
 
 def _regime_feature_frames(prepared: PreparedPolicyInputs, raw_frames: dict[str, pd.DataFrame], *, feature_profile: str = DEFAULT_FORECAST_FEATURE_PROFILE) -> dict[str, pd.DataFrame]:
@@ -556,6 +722,8 @@ def _selected_columns_for_profile(
     sector_relative_columns: list[str] | None = None,
     regime_columns: list[str] | None = None,
     local_state_columns: list[str] | None = None,
+    turnover_columns: list[str] | None = None,
+    valuation_columns: list[str] | None = None,
     history_columns: list[str] | None = None,
     feature_profile: str,
 ) -> tuple[list[str], dict[str, str]]:
@@ -565,6 +733,8 @@ def _selected_columns_for_profile(
     sector_relative_columns = list(sector_relative_columns or [])
     regime_columns = list(regime_columns or [])
     local_state_columns = list(local_state_columns or [])
+    turnover_columns = list(turnover_columns or [])
+    valuation_columns = list(valuation_columns or [])
     if feature_profile in RAW_FRAME_PROFILES - {"raw_kline_context_sector_v1"}:
         column_groups.update({column: "raw_kline" for column in raw_columns})
     if feature_profile == "raw_kline_context_sector_v1":
@@ -587,6 +757,10 @@ def _selected_columns_for_profile(
         column_groups.update({column: "regime_context" for column in regime_columns})
     if feature_profile in LOCAL_STATE_PROFILES:
         column_groups.update({column: "local_state_context" for column in local_state_columns})
+    if feature_profile in TURNOVER_CONTEXT_PROFILES:
+        column_groups.update({column: "turnover_context" for column in turnover_columns})
+    if feature_profile in VALUATION_CONTEXT_PROFILES:
+        column_groups.update({column: "valuation_context" for column in valuation_columns})
     columns = [column for column in state_columns if column in column_groups]
     if feature_profile in RAW_FRAME_PROFILES:
         columns.extend([column for column in raw_columns if column in column_groups])
@@ -602,6 +776,10 @@ def _selected_columns_for_profile(
         columns.extend([column for column in regime_columns if column in column_groups])
     if feature_profile in LOCAL_STATE_PROFILES:
         columns.extend([column for column in local_state_columns if column in column_groups])
+    if feature_profile in TURNOVER_CONTEXT_PROFILES:
+        columns.extend([column for column in turnover_columns if column in column_groups])
+    if feature_profile in VALUATION_CONTEXT_PROFILES:
+        columns.extend([column for column in valuation_columns if column in column_groups])
     if feature_profile in NO_ALPHA_CONTRACT_PROFILES:
         columns = [column for column in columns if not _alpha_dependent_column(column)]
         column_groups = {column: group for column, group in column_groups.items() if column in columns}
@@ -627,6 +805,8 @@ def _manifest_for_columns(
         "sector_relative_context": 0,
         "regime_context": 0,
         "local_state_context": 0,
+        "turnover_context": 0,
+        "valuation_context": 0,
         "alpha_prior": 0,
         "history_quality": 0,
     }
@@ -649,6 +829,8 @@ def _manifest_for_columns(
         "sector_relative_context_feature_count": int(group_counts["sector_relative_context"]),
         "regime_context_feature_count": int(group_counts["regime_context"]),
         "local_state_context_feature_count": int(group_counts["local_state_context"]),
+        "turnover_context_feature_count": int(group_counts["turnover_context"]),
+        "valuation_context_feature_count": int(group_counts["valuation_context"]),
         "alpha_prior_feature_count": int(group_counts["alpha_prior"]),
         "history_quality_feature_count": int(group_counts["history_quality"]),
         "source_sector_board_view_id": str(source_sector_board_view_id or ""),
@@ -671,7 +853,7 @@ def _cap_feature_columns(
     priority_groups = {"raw_kline"}
     if feature_profile in CONTEXT_FRAME_PROFILES:
         priority_groups.update({"market_context", "peer_context", "history_quality"})
-    if feature_profile == "raw_kline_context_sector_v1":
+    if feature_profile in SECTOR_CONTEXT_PROFILES:
         priority_groups.add("sector_context")
     if feature_profile in SECTOR_RELATIVE_PROFILES:
         priority_groups.add("sector_relative_context")
@@ -679,6 +861,10 @@ def _cap_feature_columns(
         priority_groups.add("regime_context")
     if feature_profile in LOCAL_STATE_PROFILES:
         priority_groups.add("local_state_context")
+    if feature_profile in TURNOVER_CONTEXT_PROFILES:
+        priority_groups.add("turnover_context")
+    if feature_profile in VALUATION_CONTEXT_PROFILES:
+        priority_groups.add("valuation_context")
     priority_order = [
         "raw_kline",
         "local_state_context",
@@ -687,6 +873,8 @@ def _cap_feature_columns(
         "peer_context",
         "sector_context",
         "sector_relative_context",
+        "turnover_context",
+        "valuation_context",
         "regime_context",
     ]
     priority_columns = [
@@ -756,6 +944,8 @@ def build_forecast_feature_panels(
     sector_relative_frames = _sector_relative_feature_frames(prepared) if profile in SECTOR_RELATIVE_PROFILES else {}
     regime_frames = _regime_feature_frames(prepared, raw_frames, feature_profile=profile) if profile in REGIME_PROFILES else {}
     local_state_frames = _local_state_feature_frames(prepared) if profile in LOCAL_STATE_PROFILES else {}
+    turnover_frames = _turnover_context_feature_frames(prepared) if profile in TURNOVER_CONTEXT_PROFILES else {}
+    valuation_frames = _valuation_context_feature_frames(prepared) if profile in VALUATION_CONTEXT_PROFILES else {}
     all_columns, column_groups = _selected_columns_for_profile(
         state_columns=state_columns,
         raw_columns=list(raw_frames),
@@ -764,6 +954,8 @@ def build_forecast_feature_panels(
         sector_relative_columns=list(sector_relative_frames),
         regime_columns=list(regime_frames),
         local_state_columns=list(local_state_frames),
+        turnover_columns=list(turnover_frames),
+        valuation_columns=list(valuation_frames),
         history_columns=list(history_frames),
         feature_profile=profile,
     )
@@ -805,6 +997,10 @@ def build_forecast_feature_panels(
                 extra_parts[column] = regime_frames[column].loc[dt].reindex(universe)
             elif column in local_state_frames:
                 extra_parts[column] = local_state_frames[column].loc[dt].reindex(universe)
+            elif column in turnover_frames:
+                extra_parts[column] = turnover_frames[column].loc[dt].reindex(universe)
+            elif column in valuation_frames:
+                extra_parts[column] = valuation_frames[column].loc[dt].reindex(universe)
             else:
                 extra_parts[column] = pd.Series(np.nan, index=universe, dtype=float)
         panel = pd.DataFrame(extra_parts, index=universe).apply(pd.to_numeric, errors="coerce")
@@ -912,6 +1108,8 @@ def build_forecast_feature_store(
     sector_relative_frames = _sector_relative_feature_frames(prepared) if profile in SECTOR_RELATIVE_PROFILES else {}
     regime_frames = _regime_feature_frames(prepared, raw_frames, feature_profile=profile) if profile in REGIME_PROFILES else {}
     local_state_frames = _local_state_feature_frames(prepared) if profile in LOCAL_STATE_PROFILES else {}
+    turnover_frames = _turnover_context_feature_frames(prepared) if profile in TURNOVER_CONTEXT_PROFILES else {}
+    valuation_frames = _valuation_context_feature_frames(prepared) if profile in VALUATION_CONTEXT_PROFILES else {}
     all_columns, column_groups = _selected_columns_for_profile(
         state_columns=state_columns,
         raw_columns=list(raw_frames),
@@ -920,6 +1118,8 @@ def build_forecast_feature_store(
         sector_relative_columns=list(sector_relative_frames),
         regime_columns=list(regime_frames),
         local_state_columns=list(local_state_frames),
+        turnover_columns=list(turnover_frames),
+        valuation_columns=list(valuation_frames),
         history_columns=list(history_frames),
         feature_profile=profile,
     )
@@ -950,6 +1150,8 @@ def build_forecast_feature_store(
         and column not in sector_relative_frames
         and column not in regime_frames
         and column not in local_state_frames
+        and column not in turnover_frames
+        and column not in valuation_frames
         for column in selected_columns
     )
     empty_state = pd.DataFrame(index=universe)
@@ -985,6 +1187,10 @@ def build_forecast_feature_store(
                 extra_parts[column] = regime_frames[column].loc[dt].reindex(universe)
             elif column in local_state_frames:
                 extra_parts[column] = local_state_frames[column].loc[dt].reindex(universe)
+            elif column in turnover_frames:
+                extra_parts[column] = turnover_frames[column].loc[dt].reindex(universe)
+            elif column in valuation_frames:
+                extra_parts[column] = valuation_frames[column].loc[dt].reindex(universe)
             else:
                 extra_parts[column] = pd.Series(np.nan, index=universe, dtype=float)
         values = pd.DataFrame(extra_parts, index=universe).reindex(columns=selected_columns).to_numpy(dtype=np.float32)
@@ -1076,7 +1282,11 @@ def audit_forecast_feature_profile(
     group_counts = dict(payload.get("feature_group_counts", {}) or {})
     selected_by_group: dict[str, list[str]] = {}
     for column in feature_columns:
-        if str(column).startswith("industry_") or str(column).startswith("stock_ret_") or str(column) == "board_member_count_log":
+        if str(column).startswith("valuation_"):
+            group = "valuation_context"
+        elif str(column) in {"turn", "turn_z20", "turn_ratio_5_20", "cs_rank_turn", "cs_z_turn", "industry_rank_turn", "industry_z_turn"}:
+            group = "turnover_context"
+        elif str(column).startswith("industry_") or str(column).startswith("stock_ret_") or str(column) == "board_member_count_log":
             group = "sector_relative_context"
         elif str(column) in {"market_ret_20_z", "market_vol_20_z", "market_drawdown_20", "market_breadth_20", "market_liquidity_z20", "cross_section_ret_dispersion_20", "limit_up_down_pressure_5", "benchmark_trend_vol_interaction_20"}:
             group = "regime_context"

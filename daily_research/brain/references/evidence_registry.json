@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 108,
+  "record_count": 109,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -2406,6 +2406,48 @@
       "dataset_ids": [
         "policy_input_bundle__45e3d8c059ba718426a9f887",
         "policy_pool_view__925e8604a91a9c07a5387fb1"
+      ]
+    },
+    {
+      "id": "daily_research_v2_traditional_baostock_v2_1_data_expansion_20260604",
+      "date": "2026-06-04",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_traditional_baostock_v2_1_data_expansion_20260604.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_traditional_baostock_v2_1_data_expansion"
+      ],
+      "run_tags": [],
+      "verdict": "Status: `traditional_baostock_v2_1_data_expansion / import_complete / pool_contract_ok / smoke_memmap_ok / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_traditional_baostock_v2_1_data_expansion`.; Source project: `traditional_quant_research`.",
+      "blockers": [
+        "A full formal-pool same-period feature audit exceeded the local timeout and the residual Python process was stopped. It is a resource/throughput diagnostic only, not failed model-quality evidence.",
+        "No completed model-quality evidence should be registered from failed, timeout, smoke-only, single-seed, or shadow-only outputs.",
+        "Current blocker is `formal_augmented_memmap_and_three_seed_forecast_ab_not_completed`."
+      ],
+      "next_allowed_actions": [
+        "Build the full same-period augmented memmap with pool `policy_pool_view__d7a56d5164470b590e4f5a40` and feature profile `raw_kline_context_v2_tradeable_local_state_industry_metrics_v1`.",
+        "Run a smoke seed first and label it explicitly `smoke_only`.",
+        "If the full same-period pipeline is healthy, run three formal GRU-static seeds `7,11,19` against the current baseline years: train `2019-2022`, validation `2023`, test `2024`.",
+        "Build the long-history augmented memmap with pool `policy_pool_view__eb690dd0becc330f029c21bd`; formal long-history forecast should use train `2017-2022`, validation `2023`, test `2024`.",
+        "Only if three-seed augmented forecast is not worse than the baseline should it enter `v2_score_backtest_bridge`, `v2_candidate_review_matrix`, and `v2_bad_month_attribution`.",
+        "Only after GRU-static proves data benefit should larger architecture runs be repeated on the augmented data."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__2082fee5bb1760972d8c9012",
+        "data_platform_universe_snapshot__9042cbf5bc4e75750e187da9",
+        "data_platform_v2_status_sidecar__362fde0f9394e00c1ff9d62b",
+        "data_platform_industry_concept__b4efea14aea248d56fbb2e76",
+        "data_platform_valuation__0834d9bf877718c7c4975c18",
+        "policy_pool_view__d7a56d5164470b590e4f5a40",
+        "policy_pool_view__eb690dd0becc330f029c21bd",
+        "policy_pool_view__04f11f51d7c0c7ae32038147"
       ]
     },
     {

@@ -94,6 +94,28 @@ def _save_bundle_and_pool(temp_dir: str, *, amount_multiplier: float = 1.0) -> t
     return lake, record.dataset_id, pool.dataset_id
 
 
+def _attach_sidecar_to_bundle(lake: ResearchDataLake, dataset_id: str, domain: str, sidecar_dataset_id: str) -> None:
+    metadata = lake.describe_dataset(dataset_id)
+    parameters = dict(metadata.get("parameters", {}) or {})
+    sidecars = dict(parameters.get("sidecar_dataset_ids", {}) or {})
+    sidecars[str(domain)] = str(sidecar_dataset_id)
+    parameters["sidecar_dataset_ids"] = sidecars
+    lake._upsert_dataset(
+        dataset_id=str(metadata["dataset_id"]),
+        dataset_kind=str(metadata["dataset_kind"]),
+        domain=str(metadata.get("domain", "") or "bronze_silver"),
+        zone=str(metadata.get("zone", "") or "research"),
+        source=str(metadata.get("source", "") or "synthetic"),
+        spec=parameters,
+        label_completeness_summary=dict(metadata.get("label_completeness_summary", {}) or {}),
+        content_paths=dict(metadata.get("content_paths", {}) or {}),
+        row_counts=dict(metadata.get("row_counts", {}) or {}),
+        source_cache=dict(metadata.get("source_cache", {}) or {}),
+        fingerprint=str(metadata["fingerprint"]),
+        status=str(metadata.get("status", "") or "stored"),
+    )
+
+
 def test_amount_unit_diagnostics_flags_normal_and_scaled_units() -> None:
     normal = amount_unit_diagnostics(_market_frame(amount_multiplier=1.0))
     scaled_up = amount_unit_diagnostics(_market_frame(amount_multiplier=10000.0))
@@ -184,6 +206,85 @@ def test_v2_contract_audit_flags_active_pool_status_violations() -> None:
     assert status_report["status"] == "degraded"
     assert status_report["active_is_st_rows"] > 0
     assert "pool_status_screen" in payload["degraded"]
+
+
+def test_v2_contract_audit_prefers_explicit_v2_status_sidecar_over_global_security_status() -> None:
+    with TemporaryDirectory() as temp_dir:
+        lake, dataset_id, pool_id = _save_bundle_and_pool(temp_dir, amount_multiplier=1.0)
+        dates = pd.date_range("2026-01-05", periods=30, freq="B")
+        symbols = ["000001.SZ", "600000.SH"]
+        lake.save_domain_dataset(
+            domain="universe_snapshot",
+            frame=pd.DataFrame(
+                {
+                    "trade_date": [date.strftime("%Y-%m-%d") for date in dates for _symbol in symbols],
+                    "symbol": [symbol for _date in dates for symbol in symbols],
+                    "name": ["ok" for _date in dates for _symbol in symbols],
+                    "exchange": ["SZ" if symbol.endswith(".SZ") else "SH" for _date in dates for symbol in symbols],
+                    "board": ["main" for _date in dates for _symbol in symbols],
+                    "list_status": ["L" for _date in dates for _symbol in symbols],
+                    "list_date": ["2000-01-01" for _date in dates for _symbol in symbols],
+                    "delist_date": ["2099-12-31" for _date in dates for _symbol in symbols],
+                    "source": ["unit" for _date in dates for _symbol in symbols],
+                }
+            ),
+            spec={"dataset": "data_platform_universe_snapshot", "start_date": "2026-01-05", "end_date": "2026-02-13"},
+            source="unit",
+        )
+        lake.save_domain_dataset(
+            domain="security_status",
+            frame=pd.DataFrame(
+                {
+                    "trade_date": ["2026-01-05", "2026-01-05"],
+                    "symbol": ["000001.SZ", "600000.SH"],
+                    "is_st": [False, True],
+                    "is_suspended": [False, False],
+                    "is_delisted": [False, False],
+                    "status_reason": ["", "st"],
+                    "source": ["legacy_unit", "legacy_unit"],
+                }
+            ),
+            spec={"dataset": "data_platform_security_status", "start_date": "2026-01-05", "end_date": "2026-01-05"},
+            source="legacy_unit",
+        )
+        v2_status = lake.save_domain_dataset(
+            domain="v2_status_sidecar",
+            frame=pd.DataFrame(
+                {
+                    "trade_date": [date.strftime("%Y-%m-%d") for date in dates for _symbol in symbols],
+                    "symbol": [symbol for _date in dates for symbol in symbols],
+                    "is_listed_on_date": [True for _date in dates for _symbol in symbols],
+                    "is_mainboard": [True for _date in dates for _symbol in symbols],
+                    "is_common_a_share": [True for _date in dates for _symbol in symbols],
+                    "is_st": [False for _date in dates for _symbol in symbols],
+                    "is_suspended": [False for _date in dates for _symbol in symbols],
+                    "is_delisted": [False for _date in dates for _symbol in symbols],
+                    "is_tradeable": [True for _date in dates for _symbol in symbols],
+                    "has_bar": [True for _date in dates for _symbol in symbols],
+                    "reject_reason": ["" for _date in dates for _symbol in symbols],
+                    "source": ["explicit_v2_unit" for _date in dates for _symbol in symbols],
+                }
+            ),
+            spec={"dataset": "data_platform_v2_status_sidecar", "start_date": "2026-01-05", "end_date": "2026-02-13"},
+            source="explicit_v2_unit",
+        )
+        _attach_sidecar_to_bundle(lake, dataset_id, "v2_status_sidecar", v2_status.dataset_id)
+
+        payload = audit_v2_dataset_contract(
+            lake=lake,
+            dataset_id=dataset_id,
+            pool_view_id=pool_id,
+            start_date="2026-01-05",
+            end_date="2026-02-13",
+        )
+
+    status_report = payload["reports"]["pool_status_screen"]
+    pit_report = payload["reports"]["pit_status_source_contract"]
+    assert status_report["status"] == "ok"
+    assert status_report["status_source_kind"] == "v2_status_sidecar"
+    assert status_report["active_is_st_rows"] == 0
+    assert pit_report["status_source_kind"] == "v2_status_sidecar"
+    assert pit_report["status_source_counts"] == {"explicit_v2_unit": 60}
 
 
 def test_v2_contract_audit_flags_non_pit_status_source_contract() -> None:

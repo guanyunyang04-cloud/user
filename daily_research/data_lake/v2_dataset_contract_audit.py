@@ -17,7 +17,7 @@ if __package__ in {None, ""}:
 
 from daily_research.data_lake.catalog import ResearchDataLake
 from daily_research.data_lake.pool_views import load_pool_view
-from daily_research.data_lake.v2_status_sidecar import build_v2_status_sidecar_frame
+from daily_research.data_lake.v2_status_sidecar import build_v2_status_sidecar_frame, summarize_v2_status_sidecar
 from daily_research.data_platform.contracts import DataDomain
 
 
@@ -28,6 +28,7 @@ DEFAULT_RUN_TAG = "v2_dataset_contract_audit_20260601_01"
 DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "daily_research/output/data_lake/audits" / DEFAULT_RUN_TAG
 ACTIVE_ARTIFACT = PROJECT_ROOT / "daily_research/output/active_execution_strategy.json"
 AMOUNT_SENSITIVE_FEATURE_KEYWORDS = ("amount", "adv", "liquid", "turnover", "money")
+V2_STATUS_SIDECAR_DOMAIN = "v2_status_sidecar"
 
 
 def _now() -> str:
@@ -117,6 +118,69 @@ def _resolve_domain_sidecar_id(lake: ResearchDataLake, metadata: Mapping[str, An
     if explicit:
         return explicit
     return _first_existing_dataset(lake, f"data_platform_{domain}")
+
+
+def _resolve_explicit_sidecar_id(metadata: Mapping[str, Any], domain: str) -> str:
+    parameters = dict(metadata.get("parameters", {}) or {})
+    sidecars = dict(parameters.get("sidecar_dataset_ids", {}) or {})
+    return str(sidecars.get(str(domain), "") or "").strip()
+
+
+def _normalize_v2_status_sidecar(frame: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFrame:
+    if frame is None or frame.empty:
+        return pd.DataFrame()
+    data = frame.copy()
+    if "trade_date" not in data.columns or "symbol" not in data.columns:
+        return pd.DataFrame()
+    data["trade_date"] = pd.to_datetime(data["trade_date"], errors="coerce")
+    start = pd.Timestamp(start_date) if str(start_date or "").strip() else data["trade_date"].min()
+    end = pd.Timestamp(end_date) if str(end_date or "").strip() else data["trade_date"].max()
+    data = data.loc[(data["trade_date"] >= start) & (data["trade_date"] <= end)].copy()
+    if data.empty:
+        return data
+    data["trade_date"] = data["trade_date"].dt.strftime("%Y-%m-%d")
+    data["symbol"] = data["symbol"].astype(str).str.strip().str.upper()
+    for column in (
+        "is_listed_on_date",
+        "is_mainboard",
+        "is_common_a_share",
+        "is_st",
+        "is_suspended",
+        "is_delisted",
+        "is_tradeable",
+        "has_bar",
+    ):
+        if column not in data.columns:
+            data[column] = False
+        data[column] = data[column].fillna(False).astype(bool)
+    if "reject_reason" not in data.columns:
+        data["reject_reason"] = ""
+    if "source" not in data.columns:
+        data["source"] = "v2_status_sidecar"
+    return data
+
+
+def _market_date_bounds_text(market: pd.DataFrame) -> tuple[str, str]:
+    if market is None or market.empty or "trade_date" not in market.columns:
+        return "", ""
+    dates = pd.to_datetime(market["trade_date"], errors="coerce").dropna()
+    if dates.empty:
+        return "", ""
+    return dates.min().strftime("%Y-%m-%d"), dates.max().strftime("%Y-%m-%d")
+
+
+def _read_explicit_v2_status_sidecar(
+    *,
+    lake: ResearchDataLake,
+    metadata: Mapping[str, Any],
+    market: pd.DataFrame,
+) -> tuple[str, pd.DataFrame, dict[str, Any]]:
+    dataset_id = _resolve_explicit_sidecar_id(metadata, V2_STATUS_SIDECAR_DOMAIN)
+    if not dataset_id:
+        return "", pd.DataFrame(), {}
+    start_date, end_date = _market_date_bounds_text(market)
+    frame = _normalize_v2_status_sidecar(_read_domain_dataset(lake, dataset_id), start_date, end_date)
+    return dataset_id, frame, summarize_v2_status_sidecar(frame) if not frame.empty else {"status": "blocked", "blockers": ["empty_status_sidecar"]}
 
 
 def amount_unit_diagnostics(market: pd.DataFrame) -> dict[str, Any]:
@@ -226,31 +290,45 @@ def pool_status_screen_diagnostics(
 ) -> dict[str, Any]:
     if membership is None or membership.empty:
         return {"status": "blocked", "blockers": ["empty_membership"]}
+    v2_status_id, explicit_status_frame, explicit_status_summary = _read_explicit_v2_status_sidecar(
+        lake=lake,
+        metadata=metadata,
+        market=market,
+    )
     universe_id = _resolve_domain_sidecar_id(lake, metadata, DataDomain.UNIVERSE_SNAPSHOT)
     status_id = _resolve_domain_sidecar_id(lake, metadata, DataDomain.SECURITY_STATUS)
-    universe = _read_domain_dataset(lake, universe_id)
-    status = _read_domain_dataset(lake, status_id)
-    if universe.empty and status.empty:
-        return {
-            "status": "degraded",
-            "risk": "status_sidecars_missing",
-            "universe_snapshot_dataset_id": str(universe_id),
-            "security_status_dataset_id": str(status_id),
-            "active_checked_rows": 0,
-            "suspected_active_rows": 0,
-            "blockers": [],
-        }
-    status_frame, sidecar_summary = build_v2_status_sidecar_frame(
-        market=market,
-        universe_snapshot=universe,
-        security_status=status,
-    )
+    if not explicit_status_frame.empty:
+        status_frame = explicit_status_frame
+        sidecar_summary = explicit_status_summary
+        status_source_kind = V2_STATUS_SIDECAR_DOMAIN
+    else:
+        universe = _read_domain_dataset(lake, universe_id)
+        status = _read_domain_dataset(lake, status_id)
+        if universe.empty and status.empty:
+            return {
+                "status": "degraded",
+                "risk": "status_sidecars_missing",
+                "universe_snapshot_dataset_id": str(universe_id),
+                "security_status_dataset_id": str(status_id),
+                "v2_status_sidecar_dataset_id": str(v2_status_id),
+                "active_checked_rows": 0,
+                "suspected_active_rows": 0,
+                "blockers": [],
+            }
+        status_frame, sidecar_summary = build_v2_status_sidecar_frame(
+            market=market,
+            universe_snapshot=universe,
+            security_status=status,
+        )
+        status_source_kind = DataDomain.SECURITY_STATUS
     if status_frame.empty:
         return {
             "status": "degraded",
             "risk": "status_sidecar_empty",
             "universe_snapshot_dataset_id": str(universe_id),
             "security_status_dataset_id": str(status_id),
+            "v2_status_sidecar_dataset_id": str(v2_status_id),
+            "status_source_kind": str(status_source_kind),
             "active_checked_rows": 0,
             "suspected_active_rows": 0,
             "blockers": [],
@@ -270,6 +348,8 @@ def pool_status_screen_diagnostics(
             "risk": "no_active_membership_rows",
             "universe_snapshot_dataset_id": str(universe_id),
             "security_status_dataset_id": str(status_id),
+            "v2_status_sidecar_dataset_id": str(v2_status_id),
+            "status_source_kind": str(status_source_kind),
             "active_checked_rows": 0,
             "suspected_active_rows": 0,
             "blockers": ["no_active_membership_rows"],
@@ -290,6 +370,8 @@ def pool_status_screen_diagnostics(
         "risk": "ok" if suspected == 0 else "active_pool_status_violations",
         "universe_snapshot_dataset_id": str(universe_id),
         "security_status_dataset_id": str(status_id),
+        "v2_status_sidecar_dataset_id": str(v2_status_id),
+        "status_source_kind": str(status_source_kind),
         "status_sidecar_summary": sidecar_summary,
         "active_checked_rows": row_count,
         "suspected_active_rows": suspected,
@@ -310,10 +392,16 @@ def pit_status_source_contract_diagnostics(
     metadata: Mapping[str, Any],
     market: pd.DataFrame,
 ) -> dict[str, Any]:
+    v2_status_id, explicit_status_frame, _explicit_status_summary = _read_explicit_v2_status_sidecar(
+        lake=lake,
+        metadata=metadata,
+        market=market,
+    )
     universe_id = _resolve_domain_sidecar_id(lake, metadata, DataDomain.UNIVERSE_SNAPSHOT)
     status_id = _resolve_domain_sidecar_id(lake, metadata, DataDomain.SECURITY_STATUS)
     universe = _read_domain_dataset(lake, universe_id)
-    status = _read_domain_dataset(lake, status_id)
+    status_source_kind = V2_STATUS_SIDECAR_DOMAIN if not explicit_status_frame.empty else DataDomain.SECURITY_STATUS
+    status = explicit_status_frame if not explicit_status_frame.empty else _read_domain_dataset(lake, status_id)
     market_dates = pd.to_datetime(market.get("trade_date"), errors="coerce").dropna()
     market_trade_date_count = int(market_dates.dt.normalize().nunique()) if not market_dates.empty else 0
     risks: list[str] = []
@@ -346,7 +434,7 @@ def pit_status_source_contract_diagnostics(
             risks.append("universe_missing_delist_date")
 
     if status.empty:
-        risks.append("missing_security_status_sidecar")
+        risks.append("missing_v2_status_sidecar_rows" if v2_status_id else "missing_security_status_sidecar")
         status_date_count = 0
         status_symbol_count = 0
         status_source_counts: dict[str, int] = {}
@@ -365,7 +453,7 @@ def pit_status_source_contract_diagnostics(
         suspended_true_rows = int(status.get("is_suspended", pd.Series(False, index=status.index)).fillna(False).astype(bool).sum())
         delisted_true_rows = int(status.get("is_delisted", pd.Series(False, index=status.index)).fillna(False).astype(bool).sum())
         if market_trade_date_count > 1 and status_date_count <= 1:
-            risks.append("security_status_single_date_not_pit_daily")
+            risks.append(f"{status_source_kind}_single_date_not_pit_daily")
         if suspended_true_rows <= 0 and market_trade_date_count > 1:
             risks.append("historical_suspension_status_unavailable")
         if delisted_true_rows <= 0 and delist_date_nonblank <= 0 and market_trade_date_count > 1:
@@ -382,18 +470,29 @@ def pit_status_source_contract_diagnostics(
         "risk": "ok" if status_value == "ok" else "pit_status_source_contract_incomplete",
         "universe_snapshot_dataset_id": str(universe_id),
         "security_status_dataset_id": str(status_id),
+        "v2_status_sidecar_dataset_id": str(v2_status_id),
+        "status_source_kind": str(status_source_kind),
         "market_trade_date_count": market_trade_date_count,
         "universe_snapshot_trade_date_count": universe_date_count,
         "security_status_trade_date_count": status_date_count,
+        "status_trade_date_count": status_date_count,
         "universe_snapshot_rows": int(len(universe)),
         "security_status_rows": int(len(status)),
+        "status_rows": int(len(status)),
         "universe_symbol_count": universe_symbol_count,
         "security_status_symbol_count": status_symbol_count,
+        "status_symbol_count": status_symbol_count,
         "list_date_nonblank_rows": list_date_nonblank,
         "delist_date_nonblank_rows": delist_date_nonblank,
         "list_status_counts": list_status_counts,
         "security_status_source_counts": status_source_counts,
+        "status_source_counts": status_source_counts,
         "security_status_true_rows": {
+            "is_st": st_true_rows,
+            "is_suspended": suspended_true_rows,
+            "is_delisted": delisted_true_rows,
+        },
+        "status_true_rows": {
             "is_st": st_true_rows,
             "is_suspended": suspended_true_rows,
             "is_delisted": delisted_true_rows,

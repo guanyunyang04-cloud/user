@@ -18,6 +18,7 @@ from daily_research.continuous_policy.state_builder import (
 from daily_research.data_lake.catalog import ResearchDataLake
 from daily_research.data_lake.pool_views import PoolViewSpec, resolve_pool_view_for_policy_inputs
 from daily_research.data_lake.sector_board_views import SectorBoardViewSpec, resolve_sector_board_view_for_policy_inputs
+from daily_research.data_platform.contracts import DataDomain
 
 DEFAULT_POLICY_INPUT_LAKE_DATASET_ID = "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
 
@@ -53,6 +54,119 @@ def _load_feature_panels(feature_glob: str) -> dict[str, pd.DataFrame]:
     for path in sorted(feature_dir.glob("*.parquet")):
         frames[path.stem] = _read_feature_panel(path)
     return frames
+
+
+def _read_domain_sidecar_frame(lake: ResearchDataLake, dataset_id: str) -> tuple[pd.DataFrame, dict[str, Any]]:
+    if not str(dataset_id or "").strip():
+        return pd.DataFrame(), {}
+    metadata = lake.describe_dataset(str(dataset_id))
+    path = str(dict(metadata.get("content_paths", {}) or {}).get("silver_domain_data", "") or "")
+    if not path or not Path(path).exists():
+        return pd.DataFrame(), metadata
+    return pd.read_parquet(path), metadata
+
+
+def _sidecar_dataset_ids(metadata: dict[str, Any]) -> dict[str, str]:
+    parameters = dict(metadata.get("parameters", {}) or {})
+    sidecars = dict(parameters.get("sidecar_dataset_ids", {}) or {})
+    return {str(key): str(value) for key, value in sidecars.items() if str(value or "").strip()}
+
+
+def _load_valuation_sidecar_frames(
+    *,
+    lake: ResearchDataLake,
+    metadata: dict[str, Any],
+    universe: list[str],
+    dates: pd.Index,
+    start_date: str,
+    end_date: str,
+) -> tuple[dict[str, pd.DataFrame], pd.DataFrame, dict[str, Any]]:
+    sidecar_id = _sidecar_dataset_ids(metadata).get(DataDomain.VALUATION, "")
+    frame, sidecar_metadata = _read_domain_sidecar_frame(lake, sidecar_id)
+    if frame.empty:
+        return {}, pd.DataFrame(), {"dataset_id": str(sidecar_id), "available": False, "reason": "missing_or_empty"}
+    data = frame.copy()
+    if "trade_date" not in data.columns or "symbol" not in data.columns:
+        return {}, pd.DataFrame(), {"dataset_id": str(sidecar_id), "available": False, "reason": "missing_trade_date_or_symbol"}
+    data["trade_date"] = pd.to_datetime(data["trade_date"], errors="coerce")
+    data["symbol"] = data["symbol"].astype(str).str.strip().str.upper()
+    start = pd.Timestamp(start_date)
+    end = pd.Timestamp(end_date)
+    data = data.loc[(data["trade_date"] >= start) & (data["trade_date"] <= end) & data["symbol"].isin(set(universe))].copy()
+    if data.empty:
+        return {}, pd.DataFrame(), {"dataset_id": str(sidecar_id), "available": False, "reason": "no_overlap"}
+    metric_fields = [column for column in ("turn", "pctChg", "peTTM", "pbMRQ", "psTTM", "pcfNcfTTM") if column in data.columns]
+    frames: dict[str, pd.DataFrame] = {}
+    for column in metric_fields:
+        wide = data.pivot(index="trade_date", columns="symbol", values=column).sort_index()
+        wide.index.name = None
+        wide.columns.name = None
+        frames[column] = wide.reindex(index=dates, columns=universe)
+    row_count = max(int(len(data)), 1)
+    coverage = {
+        column: float(pd.to_numeric(data[column], errors="coerce").notna().sum() / row_count)
+        for column in metric_fields
+    }
+    summary = {
+        "dataset_id": str(sidecar_id),
+        "available": bool(frames),
+        "dataset_kind": str(sidecar_metadata.get("dataset_kind", "")),
+        "metric_fields": metric_fields,
+        "row_count": int(len(data)),
+        "symbol_count": int(data["symbol"].nunique()),
+        "trade_date_count": int(data["trade_date"].nunique()),
+        "coverage": coverage,
+        "valuation_lag_policy": str(dict(sidecar_metadata.get("parameters", {}) or {}).get("valuation_lag_policy", "")),
+    }
+    return frames, data.reset_index(drop=True), summary
+
+
+def _load_industry_sidecar_metadata(
+    *,
+    lake: ResearchDataLake,
+    metadata: dict[str, Any],
+    universe: list[str],
+    start_date: str,
+    end_date: str,
+) -> tuple[dict[str, pd.DataFrame], dict[str, Any]]:
+    sidecar_id = _sidecar_dataset_ids(metadata).get(DataDomain.INDUSTRY_CONCEPT, "")
+    frame, sidecar_metadata = _read_domain_sidecar_frame(lake, sidecar_id)
+    if frame.empty:
+        return {}, {"dataset_id": str(sidecar_id), "available": False, "reason": "missing_or_empty"}
+    data = frame.copy()
+    if "trade_date" not in data.columns or "symbol" not in data.columns or "industry" not in data.columns:
+        return {}, {"dataset_id": str(sidecar_id), "available": False, "reason": "missing_required_columns"}
+    data["trade_date"] = pd.to_datetime(data["trade_date"], errors="coerce")
+    data["symbol"] = data["symbol"].astype(str).str.strip().str.upper()
+    data["industry"] = data["industry"].fillna("").astype(str).str.strip()
+    start = pd.Timestamp(start_date)
+    end = pd.Timestamp(end_date)
+    data = data.loc[
+        (data["trade_date"] >= start)
+        & (data["trade_date"] <= end)
+        & data["symbol"].isin(set(universe))
+        & data["industry"].ne("")
+    ].copy()
+    if data.empty:
+        return {}, {"dataset_id": str(sidecar_id), "available": False, "reason": "no_overlap"}
+    data = data.sort_values(["symbol", "trade_date"]).reset_index(drop=True)
+    latest = data.drop_duplicates(subset=["symbol"], keep="last").copy()
+    latest["as_of_date"] = latest["trade_date"].dt.strftime("%Y-%m-%d")
+    latest["trade_date"] = latest["as_of_date"]
+    summary = {
+        "dataset_id": str(sidecar_id),
+        "available": True,
+        "dataset_kind": str(sidecar_metadata.get("dataset_kind", "")),
+        "row_count": int(len(data)),
+        "symbol_count": int(data["symbol"].nunique()),
+        "trade_date_count": int(data["trade_date"].nunique()),
+        "industry_count": int(data["industry"].nunique()),
+        "coverage_ratio": float(data["symbol"].nunique() / max(len(universe), 1)),
+        "industry_frequency": str(dict(sidecar_metadata.get("parameters", {}) or {}).get("industry_frequency", "")),
+        "pit_semantics": str(dict(sidecar_metadata.get("parameters", {}) or {}).get("pit_semantics", "")),
+    }
+    data["trade_date"] = data["trade_date"].dt.strftime("%Y-%m-%d")
+    return {"industry_daily": data.reset_index(drop=True), "industry_map": latest.reset_index(drop=True)}, summary
 
 
 def _normalize_symbol_list(values: list[str]) -> list[str]:
@@ -402,10 +516,33 @@ def load_policy_inputs_from_lake(
         alpha_prior_frames=alpha_prior_frames,
     )
     derived_frames.update({name: frame for name, frame in sliced_panels.items() if name not in {"score_none", "score_v2"}})
+    valuation_frames, valuation_metrics_frame, valuation_sidecar_summary = _load_valuation_sidecar_frames(
+        lake=lake,
+        metadata=metadata,
+        universe=resolved_universe,
+        dates=close.index,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    derived_frames.update(valuation_frames)
     derived_frames.update(alpha_prior_frames)
     derived_frames["score_blend"] = score_blend
     metadata_frames: dict[str, pd.DataFrame] = {}
-    metadata_summary: dict[str, Any] = {}
+    if not valuation_metrics_frame.empty:
+        metadata_frames["valuation_metrics"] = valuation_metrics_frame
+    industry_metadata_frames, industry_sidecar_summary = _load_industry_sidecar_metadata(
+        lake=lake,
+        metadata=metadata,
+        universe=resolved_universe,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    metadata_frames.update(industry_metadata_frames)
+    metadata_summary: dict[str, Any] = {
+        "sidecar_dataset_ids": _sidecar_dataset_ids(metadata),
+        "valuation_sidecar": valuation_sidecar_summary,
+        "industry_sidecar": industry_sidecar_summary,
+    }
     sector_meta_for_cache: dict[str, Any] = {}
     if sector_board_view is not None:
         universe_set = set(resolved_universe)
@@ -422,11 +559,13 @@ def load_policy_inputs_from_lake(
             keys = board_membership[["board_kind", "board_name", "board_code"]].drop_duplicates()
             if not board_summary.empty and {"board_kind", "board_name", "board_code"}.issubset(board_summary.columns):
                 board_summary = board_summary.merge(keys, on=["board_kind", "board_name", "board_code"], how="inner")
-        metadata_frames = {
-            "industry_map": industry_map,
-            "board_membership": board_membership,
-            "board_summary": board_summary,
-        }
+        metadata_frames.update(
+            {
+                "industry_map": industry_map,
+                "board_membership": board_membership,
+                "board_summary": board_summary,
+            }
+        )
         source_cache = dict(sector_board_view.metadata.get("source_cache", {}) or {})
         parameters = dict(sector_board_view.metadata.get("parameters", {}) or {})
         sector_meta_for_cache = {
@@ -439,7 +578,7 @@ def load_policy_inputs_from_lake(
             "industry_coverage": source_cache.get("industry_coverage", {}),
             "board_coverage": source_cache.get("board_coverage", {}),
         }
-        metadata_summary = {"sector_board_view": dict(sector_meta_for_cache)}
+        metadata_summary["sector_board_view"] = dict(sector_meta_for_cache)
 
     history_window = HistoryWindow(
         mode="train",

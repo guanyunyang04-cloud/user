@@ -12,6 +12,7 @@
 - stricter traditional-PIT comparison anchor `mh_v2_traditional_pit_tradeable_mainboard_anchor_20260602_01` 为 `near_pass`，不替换当前 v2 strict pass anchor。
 - v2 score bridge、candidate review、bad-month attribution、risk overlay、selective throttle、state sizing、local-state input/loss、horizon concentration repair 和 horizon train-contract 已打通为 research-only 证据链；`horizon_30d_soft_penalty_v1` 已三 seed forecast gate pass，并完成 research-only score bridge / candidate matrix / bad-month attribution / selective throttle review。结论：raw candidate matrix 为 `0/27` promotion-review eligible；high-volatility throttle 显著修复 deep bad month 与 drawdown，但仍为 `0/8` promotion-review eligible，剩余 blocker 是月度正胜率不足和收益集中，不是执行解冻依据。
 - v2 architecture fusion/capacity upgrade 已完成 Tier 1/Tier 2 初审：Tier 1 `hybrid_expert_fusion_static_context` 三 seed forecast pass 但弱于 GRU-static 主线，禁止 bridge；Tier 2 `regime_routed_multi_expert_horizon_v1` 已实现并完成 formal seed7 diagnostic，主评分 rank/spread 弱于 GRU-static seed7 且资源成本高，seed11/19 已暂停。当前 blocker 是 `score_mapping_and_router_calibration`，不是执行解冻依据。
+- Traditional Baostock v2.1 长样本数据扩充已 research-only 导入 daily_research lake：dataset `policy_input_bundle__2082fee5bb1760972d8c9012`，same-period pool `policy_pool_view__d7a56d5164470b590e4f5a40` 和 long-history pool `policy_pool_view__eb690dd0becc330f029c21bd` 均通过 v2 contract audit；augmented feature profile smoke memmap 通过，但这不是模型质量证据。
 - 2026-06-03 frontier reconciliation 已确认两个未登记 seed7 run 为 research / shadow-only forecast diagnostics，详见 `daily_research/brain/references/daily_research_current_frontier_compaction_20260603.md`。
 - continuous_policy 当前仍是 research / shadow-only；r61-r74 已解除若干 translation / oracle / lake collapse blocker，但 training evidence、feature contract health、cash timing、source quality 与 receiver-source spread 仍未闭合。
 
@@ -30,6 +31,7 @@
 - P2：保持脑区控制面简洁；长历史、完整复盘、长命令进入 `references/`。
 - P3：v2 下一步是围绕 `horizon_30d_soft_penalty_v1` 的 post-throttle 剩余负月做 month-state score calibration、validation-selected throttle thresholds、sector/liquidity/volatility/horizon cap diagnostics；只有新证据证明 target-weight concentration 重新成为主 blocker 时才跑 local risk cap。
 - P3a：模型容量路线下一步只能 research-only 做 Tier 2 router/score mapping 诊断或缩小/校准版 Tier 2；当前 Tier 1/Tier 2 均不得 bridge、promotion 或改 active artifact。
+- P3b：数据扩充路线下一步是 full augmented same-period memmap + smoke seed，再做 GRU-static 三 seed A/B；long-history formal forecast 从 2017 训练起步。smoke/timeout 不得写成 completed model-quality evidence。
 - P4：之后再推进 per-symbol reversal/volatility bucket sizing、PIT/status 合同二阶段硬化、missing/fill 语义、limit/industry/valuation optional domains。
 - P5：continuous_policy 围绕 r71/r74 继续验证 receiver/deploy 平衡、cash timing、drawdown/reversal、source quality、feature contract health 与 sufficient training evidence。
 
@@ -59,6 +61,7 @@
 - v2 latest model-side references：`daily_research/brain/references/daily_research_v2_local_state_input_scout_20260602.md`、`daily_research/brain/references/daily_research_v2_local_state_loss_calibration_scout_20260603.md`、`daily_research/brain/references/daily_research_v2_horizon_concentration_repair_scout_20260603.md`、`daily_research/brain/references/daily_research_v2_horizon_concentration_train_contract_scout_20260603.md`。
 - v2 horizon 30d soft-penalty execution-candidate review：`daily_research/brain/references/daily_research_v2_horizon_30d_soft_penalty_execution_candidate_review_20260603.md`。
 - v2 architecture fusion/capacity upgrade：`daily_research/brain/references/daily_research_v2_architecture_fusion_capacity_upgrade_20260603.md`。
+- Traditional Baostock v2.1 long-sample data expansion：`daily_research/brain/references/daily_research_v2_traditional_baostock_v2_1_data_expansion_20260604.md`。
 - continuous_policy r61-r74 证据：见 `daily_research/brain/references/r61_release_first_decision_core_v4_status_20260514.md`、`daily_research/brain/references/r65_portfolio_set_v5_status_20260514.md` 到 `daily_research/brain/references/r74_lake_behavior_quality_status_20260515.md`。
 - output/cache 误删恢复边界：`daily_research/brain/references/data_lake_output_cache_loss_recovery_boundary_20260531.md`。
 - 机器索引：`daily_research/brain/references/evidence_registry.json`。

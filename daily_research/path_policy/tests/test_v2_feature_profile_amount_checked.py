@@ -8,6 +8,8 @@ import pytest
 
 from daily_research.path_policy.forecast_features import (
     FORECAST_FEATURE_PROFILES,
+    _cap_feature_columns,
+    audit_forecast_feature_profile,
     build_forecast_feature_panels,
     build_forecast_feature_store,
 )
@@ -202,3 +204,142 @@ def test_v2_local_state_features_do_not_change_when_future_close_changes() -> No
         atol=1.0e-6,
         equal_nan=True,
     )
+
+
+def test_augmented_industry_metrics_profile_adds_sector_turnover_and_lagged_valuation() -> None:
+    prepared = make_prepared_policy_inputs(days=90, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2024-01-02")
+    dates = prepared.close.index
+    columns = list(prepared.close.columns)
+    base = pd.DataFrame(
+        np.arange(len(dates), dtype=float).reshape(-1, 1) + np.arange(len(columns), dtype=float).reshape(1, -1) + 1.0,
+        index=dates,
+        columns=columns,
+    )
+    derived = dict(prepared.derived_frames)
+    derived["turn"] = base * 0.1
+    derived["peTTM"] = base + 10.0
+    derived["pbMRQ"] = base * 0.1 + 1.0
+    derived["psTTM"] = base * 0.2 + 2.0
+    derived["pcfNcfTTM"] = base * 0.3 + 3.0
+    industry_daily = pd.DataFrame(
+        [
+            {
+                "symbol": stock,
+                "trade_date": dt.strftime("%Y-%m-%d"),
+                "industry": "tech" if stock in {"AAA", "BBB"} else "bank",
+            }
+            for dt in dates
+            for stock in columns
+        ]
+    )
+    prepared = replace(
+        prepared,
+        derived_frames=derived,
+        metadata_frames={"industry_daily": industry_daily},
+        metadata_summary={
+            "industry_sidecar": {
+                "dataset_id": "data_platform_industry_concept__unit",
+                "industry_frequency": "month-start-ffill",
+            },
+            "valuation_sidecar": {"dataset_id": "data_platform_valuation__unit"},
+        },
+    )
+    date = pd.Timestamp(dates[45]).normalize()
+
+    panels, feature_columns, manifest = build_forecast_feature_panels(
+        prepared,
+        [date],
+        feature_profile="raw_kline_context_v2_tradeable_local_state_industry_metrics_v1",
+        max_feature_columns=512,
+    )
+
+    assert "raw_kline_context_v2_tradeable_local_state_industry_metrics_v1" in FORECAST_FEATURE_PROFILES
+    assert manifest["sector_context_feature_count"] > 0
+    assert manifest["sector_relative_context_feature_count"] > 0
+    assert manifest["turnover_context_feature_count"] > 0
+    assert manifest["valuation_context_feature_count"] > 0
+    assert "turn_z20" in feature_columns
+    assert "industry_rank_turn" in feature_columns
+    assert "valuation_peTTM_lag1_log" in feature_columns
+    assert "valuation_peTTM_industry_rank" in feature_columns
+    assert not any(column.startswith("alpha_prior_") for column in feature_columns)
+    expected = np.log1p(float(derived["peTTM"].shift(1).loc[date, "AAA"]))
+    assert panels[date].loc["AAA", "valuation_peTTM_lag1_log"] == pytest.approx(expected)
+
+
+def test_augmented_profile_cap_prioritizes_sector_context() -> None:
+    state_columns = [f"state_{idx}" for idx in range(20)]
+    sector_columns = ["industry_ret_20_excess", "industry_rank_ret_20"]
+    sector_relative_columns = ["stock_ret_5_minus_industry"]
+    all_columns = [*state_columns, *sector_columns, *sector_relative_columns]
+    column_groups = {
+        **{column: "state" for column in state_columns},
+        **{column: "sector_context" for column in sector_columns},
+        **{column: "sector_relative_context" for column in sector_relative_columns},
+    }
+
+    selected = _cap_feature_columns(
+        all_columns=all_columns,
+        column_groups=column_groups,
+        feature_profile="raw_kline_context_v2_tradeable_local_state_industry_metrics_v1",
+        max_feature_columns=3,
+    )
+
+    assert sector_columns[0] in selected
+    assert sector_columns[1] in selected
+    assert sector_relative_columns[0] in selected
+
+
+def test_augmented_profile_audit_and_store_report_new_feature_groups(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=90, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2024-01-02")
+    dates = prepared.close.index
+    columns = list(prepared.close.columns)
+    metric = pd.DataFrame(5.0, index=dates, columns=columns)
+    derived = dict(prepared.derived_frames)
+    derived.update(
+        {
+            "turn": pd.DataFrame(
+                np.tile(np.linspace(1.0, 4.0, len(columns)), (len(dates), 1)),
+                index=dates,
+                columns=columns,
+            ),
+            "peTTM": metric + np.arange(len(dates), dtype=float).reshape(-1, 1) * 0.1,
+            "pbMRQ": metric + 1.0,
+            "psTTM": metric + 2.0,
+            "pcfNcfTTM": metric + 3.0,
+        }
+    )
+    industry_daily = pd.DataFrame(
+        [
+            {
+                "symbol": stock,
+                "trade_date": dt.strftime("%Y-%m-%d"),
+                "industry": "tech" if stock in {"AAA", "BBB"} else "bank",
+            }
+            for dt in dates
+            for stock in columns
+        ]
+    )
+    prepared = replace(prepared, derived_frames=derived, metadata_frames={"industry_daily": industry_daily})
+    audit_dates = [pd.Timestamp(item).normalize() for item in dates[-5:]]
+
+    audit = audit_forecast_feature_profile(
+        prepared,
+        audit_dates,
+        feature_profile="raw_kline_context_v2_tradeable_local_state_industry_metrics_v1",
+        max_feature_columns=512,
+    )
+    _path, feature_columns, manifest, _history = build_forecast_feature_store(
+        prepared,
+        audit_dates,
+        root=tmp_path,
+        feature_profile="raw_kline_context_v2_tradeable_local_state_industry_metrics_v1",
+        max_feature_columns=512,
+    )
+
+    assert audit["feature_profile_audit"]["retained_groups"]["turnover_context"] is True
+    assert audit["feature_profile_audit"]["retained_groups"]["valuation_context"] is True
+    assert audit["feature_profile_audit"]["group_stats"]["turnover_context"]["finite_ratio"] > 0.0
+    assert manifest["feature_profile_audit"]["retained_groups"]["valuation_context"] is True
+    assert manifest["feature_store_shape"][2] == manifest["feature_count_after_cap"]
+    assert "valuation_pbMRQ_missing_flag" in feature_columns
