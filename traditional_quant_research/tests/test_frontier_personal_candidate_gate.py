@@ -10,6 +10,7 @@ from traditional_quant_research.experiments.frontier_personal_candidate_gate imp
     FORMAL_PERSONAL_GATE_SCOPE,
     PERSONAL_BACKTEST_ONLY_LEVEL,
     PERSONAL_BACKTEST_PROMOTION_LEVEL,
+    POST_SELECTION_RECOMMENDATION,
     evaluate_personal_candidate_gates,
     run_frontier_personal_candidate_gate,
 )
@@ -147,7 +148,7 @@ def test_personal_gate_promotes_pragmatic_baostock_backtest_candidate() -> None:
     assert promoted["evidence_scope"] == FORMAL_PERSONAL_GATE_SCOPE
     assert bool(promoted["formal_profile_gate"]) is True
     assert promoted["top_n"] == 50
-    assert promoted["paper_tracking_recommendation"] == "start_paper_tracking"
+    assert promoted["paper_tracking_recommendation"] == POST_SELECTION_RECOMMENDATION
     assert bool(promoted["walk_forward_gate"]) is True
     assert bool(promoted["capital_stress_gate"]) is True
     assert rejected["promotion_level"] == PERSONAL_BACKTEST_ONLY_LEVEL
@@ -261,7 +262,8 @@ def test_run_frontier_personal_candidate_gate_writes_artifacts(tmp_path: Path) -
     )
 
     run_dir = Path(result["run_dir"])
-    assert result["decision"] == "personal_paper_tracking_ready"
+    assert result["decision"] == "personal_strategy_candidates_selected"
+    assert result["post_selection_boundary"] == "agent_selects_models_and_strategies_only; user_handles_risk_recording_and_live_decisions"
     assert result["evidence_scope"] == FORMAL_PERSONAL_GATE_SCOPE
     assert result["formal_gate_profile"] is True
     assert result["personal_backtest_candidate_count"] == 1

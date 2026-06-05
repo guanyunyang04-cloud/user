@@ -23,6 +23,13 @@ DATA_LAKE_ROOT = PROJECT_ROOT / "daily_research/output/research_data_lake"
 ACTIVE_MANIFEST = PROJECT_ROOT / "daily_research/output/active_execution_strategy.json"
 RUN_TAG = "v2_candidate_review_matrix_20260602_01"
 SOURCE_BRIDGE_RUN_TAG = bridge.RUN_TAG
+SMALL_CAPITAL_GATE_ID = "small_capital_balanced_return_v1"
+SMALL_CAPITAL_RESEARCH_THRESHOLDS = {
+    "excess_sharpe_min": 1.2,
+    "excess_annual_return_min": 0.25,
+    "positive_month_ratio_min": 0.60,
+    "catastrophic_worst_month_floor": -0.15,
+}
 
 
 @dataclass(frozen=True)
@@ -69,6 +76,14 @@ def _read_json(path: str | Path) -> dict[str, Any]:
         return {}
     payload = json.loads(resolved.read_text(encoding="utf-8"))
     return payload if isinstance(payload, dict) else {}
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return default
+    return out if math.isfinite(out) else default
 
 
 def _parse_ints(raw: str, default: tuple[int, ...]) -> tuple[int, ...]:
@@ -209,6 +224,66 @@ def _score_panel_dates(score_panel_csv: Path) -> tuple[str, str]:
     return dates.min().strftime("%Y-%m-%d"), dates.max().strftime("%Y-%m-%d")
 
 
+def _small_capital_gate(
+    *,
+    metrics: dict[str, Any],
+    monthly: dict[str, Any],
+    run_result: dict[str, Any] | None,
+    artifacts_available: bool,
+) -> dict[str, Any]:
+    excess_sharpe = _safe_float(metrics.get("excess_sharpe"))
+    excess_annual_return = _safe_float(metrics.get("excess_annual_return"))
+    annual_return = _safe_float(metrics.get("annual_return"))
+    max_drawdown = _safe_float(metrics.get("max_drawdown"))
+    positive_month_ratio = _safe_float(monthly.get("positive_month_ratio"))
+    worst_month = _safe_float(monthly.get("worst_monthly_excess_return", monthly.get("worst_monthly_return")))
+    completed = bool(run_result is None or int(run_result.get("returncode", 1)) == 0) and bool(artifacts_available)
+    positive_transfer = bool(completed and excess_sharpe > 0.0 and excess_annual_return > 0.0)
+    thresholds = SMALL_CAPITAL_RESEARCH_THRESHOLDS
+    checks = {
+        "backtest_completed": completed,
+        "no_obvious_data_or_execution_issue": completed,
+        "not_below_benchmark_with_negative_sharpe": not (excess_annual_return < 0.0 and excess_sharpe < 0.0),
+        "positive_transfer": positive_transfer,
+        "excess_sharpe_ge_1_2": excess_sharpe >= float(thresholds["excess_sharpe_min"]),
+        "excess_annual_return_ge_025": excess_annual_return >= float(thresholds["excess_annual_return_min"]),
+        "positive_month_ratio_ge_060": positive_month_ratio >= float(thresholds["positive_month_ratio_min"]),
+        "worst_month_not_catastrophic": worst_month >= float(thresholds["catastrophic_worst_month_floor"]),
+    }
+    drawdown_penalty = max(0.0, abs(min(max_drawdown, 0.0)) - 0.30) * 0.75
+    worst_month_penalty = max(0.0, float(thresholds["catastrophic_worst_month_floor"]) - worst_month) * 2.0
+    non_transfer_penalty = 0.50 if completed and not positive_transfer else 0.0
+    score = (
+        2.0 * max(excess_annual_return, 0.0)
+        + 0.85 * max(excess_sharpe, 0.0)
+        + 0.35 * max(positive_month_ratio, 0.0)
+        + 0.25 * max(annual_return, 0.0)
+        - drawdown_penalty
+        - worst_month_penalty
+        - non_transfer_penalty
+    )
+    research_grade_checks = [
+        checks["backtest_completed"],
+        checks["no_obvious_data_or_execution_issue"],
+        checks["positive_transfer"],
+        checks["excess_sharpe_ge_1_2"],
+        checks["excess_annual_return_ge_025"],
+        checks["positive_month_ratio_ge_060"],
+        checks["worst_month_not_catastrophic"],
+    ]
+    return {
+        "gate_id": SMALL_CAPITAL_GATE_ID,
+        "checks": checks,
+        "positive_transfer": positive_transfer,
+        "research_grade_candidate": bool(all(research_grade_checks)),
+        "balanced_return_score": float(score),
+        "worst_month_metric": {
+            "value": worst_month,
+            "source": "worst_monthly_excess_return" if "worst_monthly_excess_return" in monthly else "worst_monthly_return",
+        },
+    }
+
+
 def _variant_result(
     variant: Variant,
     *,
@@ -228,6 +303,12 @@ def _variant_result(
         "no_deep_bad_month_flag": "deep_bad_month" not in issue_flags,
         "cost_drag_le_020": float(metrics.get("annual_return_cost_drag") or 999.0) <= 0.20,
     }
+    small_capital_gate = _small_capital_gate(
+        metrics=metrics,
+        monthly=monthly,
+        run_result=run_result,
+        artifacts_available=bool(artifacts.get("available", False)),
+    )
     return {
         "variant": variant.__dict__,
         "status": "completed" if all([gate_checks["backtest_completed"]]) else "not_run_or_failed",
@@ -236,6 +317,10 @@ def _variant_result(
         "artifacts": artifacts,
         "gate_checks": gate_checks,
         "promotion_review_eligible": bool(all(gate_checks.values())),
+        "small_capital_gate": small_capital_gate,
+        "small_capital_positive_transfer": bool(small_capital_gate["positive_transfer"]),
+        "small_capital_research_grade_candidate": bool(small_capital_gate["research_grade_candidate"]),
+        "small_capital_balanced_return_score": float(small_capital_gate["balanced_return_score"]),
     }
 
 
@@ -246,11 +331,17 @@ def _summary_frame(results: list[dict[str, Any]]) -> pd.DataFrame:
         artifacts = dict(item.get("artifacts", {}) or {})
         metrics = dict(artifacts.get("core_metrics", {}) or {})
         monthly = dict(artifacts.get("monthly_backtest_diagnostics", {}) or {})
+        small_capital = dict(item.get("small_capital_gate", {}) or {})
+        worst_month_metric = dict(small_capital.get("worst_month_metric", {}) or {})
         rows.append(
             {
                 **variant,
                 "status": item.get("status", ""),
                 "promotion_review_eligible": bool(item.get("promotion_review_eligible", False)),
+                "small_capital_gate_id": small_capital.get("gate_id", SMALL_CAPITAL_GATE_ID),
+                "small_capital_positive_transfer": bool(item.get("small_capital_positive_transfer", False)),
+                "small_capital_research_grade_candidate": bool(item.get("small_capital_research_grade_candidate", False)),
+                "small_capital_balanced_return_score": item.get("small_capital_balanced_return_score"),
                 "annual_return": metrics.get("annual_return"),
                 "excess_annual_return": metrics.get("excess_annual_return"),
                 "excess_sharpe": metrics.get("excess_sharpe"),
@@ -260,10 +351,109 @@ def _summary_frame(results: list[dict[str, Any]]) -> pd.DataFrame:
                 "positive_month_ratio": monthly.get("positive_month_ratio"),
                 "negative_month_count": monthly.get("negative_month_count"),
                 "worst_monthly_return": monthly.get("worst_monthly_return"),
+                "worst_monthly_excess_return": worst_month_metric.get("value"),
+                "worst_month_metric_source": worst_month_metric.get("source", ""),
                 "issue_flags": ",".join(str(flag) for flag in list(monthly.get("issue_flags", []) or [])),
             }
         )
     return pd.DataFrame(rows)
+
+
+def _small_capital_report_payload(report: dict[str, Any]) -> dict[str, Any]:
+    summary = dict(report.get("summary", {}) or {})
+    return {
+        "schema_version": 1,
+        "status": report.get("status", ""),
+        "run_tag": report.get("run_tag", ""),
+        "study_family": "small_capital_balanced_return_v1",
+        "gate_id": SMALL_CAPITAL_GATE_ID,
+        "source_report": str(Path(str(report.get("summary_csv", ""))).with_name("v2_candidate_review_matrix_report.json")),
+        "dataset_id": report.get("dataset_id", ""),
+        "pool_view_id": report.get("pool_view_id", ""),
+        "source_bridge_run_tag": report.get("source_bridge_run_tag", ""),
+        "thresholds": dict(SMALL_CAPITAL_RESEARCH_THRESHOLDS),
+        "summary": {
+            "variant_count": int(summary.get("variant_count", 0)),
+            "completed_backtest_count": int(summary.get("completed_backtest_count", 0)),
+            "positive_transfer_count": int(summary.get("small_capital_positive_transfer_count", 0)),
+            "research_grade_candidate_count": int(summary.get("small_capital_research_grade_candidate_count", 0)),
+            "best_by_balanced_return_score": summary.get("best_by_small_capital_balanced_return_score", {}),
+            "best_research_grade_candidate": summary.get("best_small_capital_research_grade_candidate", {}),
+        },
+        "boundary": {
+            "research_only": True,
+            "shadow_only": True,
+            "promotion_allowed": False,
+            "active_execution_strategy_expected_diff": "none",
+        },
+        "updated_at": report.get("updated_at", _now()),
+    }
+
+
+def _write_small_capital_markdown(path: Path, payload: dict[str, Any]) -> None:
+    summary = dict(payload.get("summary", {}) or {})
+    best = dict(summary.get("best_by_balanced_return_score", {}) or {})
+    candidate = dict(summary.get("best_research_grade_candidate", {}) or {})
+    lines = [
+        "# Small Capital Balanced Return V1",
+        "",
+        f"- Status: `{payload.get('status', '')}`",
+        f"- Run tag: `{payload.get('run_tag', '')}`",
+        f"- Gate id: `{payload.get('gate_id', '')}`",
+        f"- Dataset: `{payload.get('dataset_id', '')}`",
+        f"- Pool: `{payload.get('pool_view_id', '')}`",
+        f"- Completed backtests: `{summary.get('completed_backtest_count', 0)}`",
+        f"- Positive-transfer variants: `{summary.get('positive_transfer_count', 0)}`",
+        f"- Research-grade candidates: `{summary.get('research_grade_candidate_count', 0)}`",
+        "",
+        "## Thresholds",
+        "",
+        "- excess_sharpe >= `1.2`",
+        "- excess_annual_return >= `0.25`",
+        "- positive_month_ratio >= `0.60`",
+        "- worst_month >= `-0.15`",
+        "- positive transfer requires positive excess annual return and positive excess Sharpe.",
+        "",
+        "## Best By Balanced Return Score",
+        "",
+    ]
+    if best:
+        lines.extend(
+            [
+                f"- Variant: `{best.get('variant_id', '')}`",
+                f"- Score: `{best.get('small_capital_balanced_return_score', '')}`",
+                f"- Excess annual return: `{best.get('excess_annual_return', '')}`",
+                f"- Excess Sharpe: `{best.get('excess_sharpe', '')}`",
+                f"- Positive month ratio: `{best.get('positive_month_ratio', '')}`",
+                f"- Worst month: `{best.get('worst_monthly_excess_return', best.get('worst_monthly_return', ''))}`",
+            ]
+        )
+    else:
+        lines.append("- No completed small-capital variant yet.")
+    if candidate:
+        lines.extend(
+            [
+                "",
+                "## Best Research-Grade Candidate",
+                "",
+                f"- Variant: `{candidate.get('variant_id', '')}`",
+                f"- Score: `{candidate.get('small_capital_balanced_return_score', '')}`",
+                f"- Excess annual return: `{candidate.get('excess_annual_return', '')}`",
+                f"- Excess Sharpe: `{candidate.get('excess_sharpe', '')}`",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "## Boundary",
+            "",
+            "- research_only: `true`",
+            "- shadow_only: `true`",
+            "- promotion_allowed: `false`",
+            "- active_execution_strategy_expected_diff: `none`",
+        ]
+    )
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _write_markdown(path: Path, report: dict[str, Any]) -> None:
@@ -279,10 +469,13 @@ def _write_markdown(path: Path, report: dict[str, Any]) -> None:
         f"- Variant count: `{summary.get('variant_count', 0)}`",
         f"- Completed backtests: `{summary.get('completed_backtest_count', 0)}`",
         f"- Promotion-review eligible variants: `{summary.get('promotion_review_eligible_count', 0)}`",
+        f"- Small-capital positive-transfer variants: `{summary.get('small_capital_positive_transfer_count', 0)}`",
+        f"- Small-capital research-grade candidates: `{summary.get('small_capital_research_grade_candidate_count', 0)}`",
         "",
         "## Boundary",
         "",
         "- research_only: `true`",
+        "- shadow_only: `true`",
         "- promotion_allowed: `false`",
         "- active_execution_strategy_expected_diff: `none`",
         "- This matrix reviews score-to-weight candidate mappings; it is not a production target-weight panel.",
@@ -296,6 +489,24 @@ def _write_markdown(path: Path, report: dict[str, Any]) -> None:
         "- no `deep_bad_month` flag",
         "- annual_return_cost_drag <= `0.20`",
     ]
+    small_best = dict(summary.get("best_by_small_capital_balanced_return_score", {}) or {})
+    if small_best:
+        lines.extend(
+            [
+                "",
+                f"## {SMALL_CAPITAL_GATE_ID}",
+                "",
+                "- This is a research-only scout gate, not a promotion gate.",
+                "- positive transfer requires excess_annual_return > `0` and excess_sharpe > `0`.",
+                "- research-grade threshold: excess_sharpe >= `1.2`, excess_annual_return >= `0.25`, positive_month_ratio >= `0.60`, worst_month >= `-0.15`.",
+                f"- Best variant: `{small_best.get('variant_id', '')}`",
+                f"- Balanced return score: `{small_best.get('small_capital_balanced_return_score', '')}`",
+                f"- Excess annual return: `{small_best.get('excess_annual_return', '')}`",
+                f"- Excess Sharpe: `{small_best.get('excess_sharpe', '')}`",
+                f"- Positive month ratio: `{small_best.get('positive_month_ratio', '')}`",
+                f"- Worst month: `{small_best.get('worst_monthly_excess_return', small_best.get('worst_monthly_return', ''))}`",
+            ]
+        )
     best = dict(summary.get("best_by_excess_sharpe", {}) or {})
     if best:
         lines.extend(
@@ -325,11 +536,11 @@ def build_candidate_review_matrix(
     data_lake_root: str | Path = DATA_LAKE_ROOT,
     benchmark: str = "000300.SH",
     holding_counts: tuple[int, ...] = (10, 20, 30),
-    max_weights: tuple[float, ...] = (0.08,),
-    rebalance_freqs: tuple[str, ...] = ("5d",),
+    max_weights: tuple[float, ...] = (0.08, 0.12, 0.16),
+    rebalance_freqs: tuple[str, ...] = ("5d", "10d", "20d"),
     rebalance_offset_modes: tuple[str, ...] = ("all",),
-    transaction_cost_bps_values: tuple[float, ...] = (3.0,),
-    slippage_bps_values: tuple[float, ...] = (7.0,),
+    transaction_cost_bps_values: tuple[float, ...] = (10.0,),
+    slippage_bps_values: tuple[float, ...] = (5.0,),
     sell_tax_bps_values: tuple[float, ...] = (10.0,),
     market_regime_filter_modes: tuple[bool, ...] = (False,),
     score_threshold: float = -999.0,
@@ -385,11 +596,37 @@ def build_candidate_review_matrix(
     best: dict[str, Any] = {}
     if not completed.empty and completed["excess_sharpe"].notna().any():
         best = completed.sort_values(["promotion_review_eligible", "excess_sharpe"], ascending=[False, False]).iloc[0].to_dict()
+    small_completed = completed.loc[completed["small_capital_positive_transfer"].astype(bool)].copy() if not completed.empty else pd.DataFrame()
+    small_best: dict[str, Any] = {}
+    if not completed.empty and completed["small_capital_balanced_return_score"].notna().any():
+        small_best = completed.sort_values(
+            ["small_capital_research_grade_candidate", "small_capital_balanced_return_score", "excess_sharpe"],
+            ascending=[False, False, False],
+        ).iloc[0].to_dict()
+    small_research_grade = (
+        completed.loc[completed["small_capital_research_grade_candidate"].astype(bool)].copy() if not completed.empty else pd.DataFrame()
+    )
+    best_small_research_grade: dict[str, Any] = {}
+    if not small_research_grade.empty:
+        best_small_research_grade = small_research_grade.sort_values(
+            ["small_capital_balanced_return_score", "excess_sharpe"],
+            ascending=[False, False],
+        ).iloc[0].to_dict()
     summary = {
         "variant_count": int(len(results)),
         "completed_backtest_count": int(frame["status"].eq("completed").sum()) if not frame.empty else 0,
         "promotion_review_eligible_count": int(frame["promotion_review_eligible"].sum()) if not frame.empty else 0,
+        "small_capital_gate_id": SMALL_CAPITAL_GATE_ID,
+        "small_capital_thresholds": dict(SMALL_CAPITAL_RESEARCH_THRESHOLDS),
+        "small_capital_positive_transfer_count": int(len(small_completed)),
+        "small_capital_research_grade_candidate_count": int(
+            frame["small_capital_research_grade_candidate"].sum()
+        )
+        if not frame.empty
+        else 0,
         "best_by_excess_sharpe": best,
+        "best_by_small_capital_balanced_return_score": small_best,
+        "best_small_capital_research_grade_candidate": best_small_research_grade,
     }
     report = {
         "schema_version": 1,
@@ -409,6 +646,7 @@ def build_candidate_review_matrix(
         "results": results,
         "boundary": {
             "research_only": True,
+            "shadow_only": True,
             "promotion_allowed": False,
             "active_execution_strategy_expected_diff": "none",
             "execution_state_required": "frozen_skeleton_only",
@@ -418,6 +656,9 @@ def build_candidate_review_matrix(
     _write_json(root / "v2_candidate_review_matrix_report.json", report)
     _write_json(root / "v2_candidate_review_matrix_manifest.json", {k: v for k, v in report.items() if k != "results"})
     _write_markdown(root / "v2_candidate_review_matrix_report.md", report)
+    small_capital_report = _small_capital_report_payload(report)
+    _write_json(root / f"{SMALL_CAPITAL_GATE_ID}_report.json", small_capital_report)
+    _write_small_capital_markdown(root / f"{SMALL_CAPITAL_GATE_ID}_report.md", small_capital_report)
     return report
 
 
@@ -432,11 +673,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--data-lake-root", default=str(DATA_LAKE_ROOT))
     parser.add_argument("--benchmark", default="000300.SH")
     parser.add_argument("--holding-counts", default="10,20,30")
-    parser.add_argument("--max-weights", default="0.08")
-    parser.add_argument("--rebalance-freqs", default="5d")
+    parser.add_argument("--max-weights", default="0.08,0.12,0.16")
+    parser.add_argument("--rebalance-freqs", default="5d,10d,20d")
     parser.add_argument("--rebalance-offset-modes", default="all")
-    parser.add_argument("--transaction-cost-bps-values", default="3")
-    parser.add_argument("--slippage-bps-values", default="7")
+    parser.add_argument("--transaction-cost-bps-values", default="10")
+    parser.add_argument("--slippage-bps-values", default="5")
     parser.add_argument("--sell-tax-bps-values", default="10")
     parser.add_argument("--market-regime-filter-modes", default="off")
     parser.add_argument("--score-threshold", type=float, default=-999.0)
@@ -460,11 +701,11 @@ def main(argv: list[str] | None = None) -> int:
         data_lake_root=args.data_lake_root,
         benchmark=args.benchmark,
         holding_counts=_parse_ints(args.holding_counts, (10, 20, 30)),
-        max_weights=_parse_floats(args.max_weights, (0.08,)),
-        rebalance_freqs=_parse_strings(args.rebalance_freqs, ("5d",)),
+        max_weights=_parse_floats(args.max_weights, (0.08, 0.12, 0.16)),
+        rebalance_freqs=_parse_strings(args.rebalance_freqs, ("5d", "10d", "20d")),
         rebalance_offset_modes=_parse_strings(args.rebalance_offset_modes, ("all",)),
-        transaction_cost_bps_values=_parse_floats(args.transaction_cost_bps_values, (3.0,)),
-        slippage_bps_values=_parse_floats(args.slippage_bps_values, (7.0,)),
+        transaction_cost_bps_values=_parse_floats(args.transaction_cost_bps_values, (10.0,)),
+        slippage_bps_values=_parse_floats(args.slippage_bps_values, (5.0,)),
         sell_tax_bps_values=_parse_floats(args.sell_tax_bps_values, (10.0,)),
         market_regime_filter_modes=regime_modes,
         score_threshold=float(args.score_threshold),

@@ -291,7 +291,7 @@ def test_structured_report_treats_personal_candidate_as_paper_ready(tmp_path: Pa
                 "personal_backtest_candidate_count": 1,
                 "baostock_only_candidate_count": 0,
                 "strategy_candidate_count": 0,
-                "decision": "personal_paper_tracking_ready",
+                "decision": "personal_strategy_candidates_selected",
             }
         ),
         encoding="utf-8",
@@ -331,7 +331,7 @@ def test_structured_report_treats_personal_candidate_as_paper_ready(tmp_path: Pa
         output_dir=tmp_path / "output",
     )
 
-    assert result["decision"] == "personal_paper_tracking_ready"
+    assert result["decision"] == "personal_strategy_candidates_selected"
     assert result["current_evidence_grade"] == "personal_backtest_candidate"
     assert result["personal_backtest_candidate_count"] == 1
     assert result["strategy_candidate_count"] == 0

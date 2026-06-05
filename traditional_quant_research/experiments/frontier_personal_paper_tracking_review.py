@@ -24,6 +24,11 @@ from traditional_quant_research.experiments.frontier_promotion_gate import lates
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/frontier_personal_paper_tracking_review")
 DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-04_frontier_personal_paper_tracking_review.md")
+PAPER_TRACKING_CANCELLED_MESSAGE = (
+    "frontier personal paper tracking review is cancelled for traditional_quant_research: "
+    "the agent's responsibility ends at selecting strong model and strategy candidates; "
+    "post-selection risk, recordkeeping, paper/live tracking, and execution decisions are user discretion."
+)
 
 
 def run_frontier_personal_paper_tracking_review(
@@ -35,6 +40,8 @@ def run_frontier_personal_paper_tracking_review(
     research_log_path: str | Path = DEFAULT_RESEARCH_LOG,
 ) -> dict[str, Any]:
     """Review a filled paper-tracking log against the bootstrap protocol."""
+
+    raise RuntimeError(PAPER_TRACKING_CANCELLED_MESSAGE)
 
     run_id = f"frontier_personal_paper_tracking_review_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     run_dir = Path(output_dir) / run_id
@@ -88,6 +95,8 @@ def read_tracking_log(path: Path) -> pd.DataFrame:
 
 
 def evaluate_paper_tracking_log(candidates: pd.DataFrame, protocol: pd.DataFrame, tracking_log: pd.DataFrame) -> pd.DataFrame:
+    raise RuntimeError(PAPER_TRACKING_CANCELLED_MESSAGE)
+
     columns = _review_columns()
     if candidates.empty:
         return pd.DataFrame(columns=columns)

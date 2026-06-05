@@ -210,7 +210,7 @@ def test_trial_ledger_recognizes_personal_backtest_candidate() -> None:
     assert row["evidence_grade"] == "personal_backtest_candidate"
     assert maturity.loc[maturity["dimension"].eq("personal_backtest_candidate_readiness"), "status"].iloc[0] == "passed"
     assert maturity.loc[maturity["dimension"].eq("strategy_candidate_readiness"), "status"].iloc[0] == "blocked"
-    assert summary["decision"] == "personal_paper_tracking_ready"
+    assert summary["decision"] == "personal_strategy_candidates_selected"
     assert summary["personal_backtest_candidate_count"] == 1
     assert summary["strategy_candidate_count"] == 0
 

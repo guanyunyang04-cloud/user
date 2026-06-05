@@ -14,6 +14,7 @@ import pandas as pd
 from traditional_quant_research.experiments.frontier_personal_paper_tracking_bootstrap import (
     BOOTSTRAPPED_TRACKING_STATUS,
     DEFAULT_OUTPUT_DIR as DEFAULT_BOOTSTRAP_OUTPUT_ROOT,
+    PAPER_TRACKING_CANCELLED_MESSAGE,
     PERSONAL_PAPER_CANDIDATE_LEVEL,
 )
 from traditional_quant_research.experiments.frontier_promotion_gate import latest_run_dir
@@ -38,6 +39,8 @@ def run_frontier_personal_paper_tracking_plan(
     research_log_path: str | Path = DEFAULT_RESEARCH_LOG,
 ) -> dict[str, Any]:
     """Build a future paper-tracking calendar and empty live log starter."""
+
+    raise RuntimeError(PAPER_TRACKING_CANCELLED_MESSAGE)
 
     if plan_periods <= 0:
         raise ValueError("plan_periods must be positive")
@@ -115,6 +118,8 @@ def read_combined_summary_from_bootstrap(bootstrap_summary: Mapping[str, Any]) -
 def build_historical_context(candidates: pd.DataFrame, bootstrap_summary: Mapping[str, Any]) -> pd.DataFrame:
     """Attach the latest historical trade metadata when combined trades are available."""
 
+    raise RuntimeError(PAPER_TRACKING_CANCELLED_MESSAGE)
+
     columns = _historical_context_columns()
     if candidates.empty:
         return pd.DataFrame(columns=columns)
@@ -172,6 +177,8 @@ def build_paper_tracking_plan_calendar(
     plan_periods: int = DEFAULT_PLAN_PERIODS,
     plan_start_date: str | None = None,
 ) -> pd.DataFrame:
+    raise RuntimeError(PAPER_TRACKING_CANCELLED_MESSAGE)
+
     columns = _plan_calendar_columns()
     if candidates.empty:
         return pd.DataFrame(columns=columns)
@@ -243,6 +250,8 @@ def build_paper_tracking_plan_calendar(
 def build_paper_tracking_live_log_starter(plan_calendar: pd.DataFrame) -> pd.DataFrame:
     """Return empty rows that are compatible with the paper-tracking review input."""
 
+    raise RuntimeError(PAPER_TRACKING_CANCELLED_MESSAGE)
+
     columns = _live_log_columns()
     if plan_calendar.empty:
         return pd.DataFrame(columns=columns)
@@ -295,6 +304,8 @@ def summarize_paper_tracking_plan(
     plan_periods: int,
     plan_start_date: str | None,
 ) -> dict[str, Any]:
+    raise RuntimeError(PAPER_TRACKING_CANCELLED_MESSAGE)
+
     candidate_ids = sorted(plan_calendar["candidate_id"].astype(str).unique().tolist()) if not plan_calendar.empty else []
     matched_context = (
         int(historical_context["historical_context_status"].astype(str).eq("matched_combined_trades").sum())
@@ -335,6 +346,8 @@ def render_paper_tracking_plan_markdown(
     plan_calendar: pd.DataFrame,
     historical_context: pd.DataFrame,
 ) -> str:
+    raise RuntimeError(PAPER_TRACKING_CANCELLED_MESSAGE)
+
     lines = [
         "# Frontier Personal Paper Tracking Plan",
         "",

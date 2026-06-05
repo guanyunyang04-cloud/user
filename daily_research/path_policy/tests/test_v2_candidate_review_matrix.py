@@ -92,8 +92,8 @@ def test_candidate_review_matrix_collects_completed_metrics(tmp_path: Path, monk
             run_dir / "metrics.json",
             {
                 "annual_return": 0.40,
-                "excess_annual_return": 0.20,
-                "excess_sharpe": 1.10,
+                "excess_annual_return": 0.30,
+                "excess_sharpe": 1.25,
                 "max_drawdown": -0.20,
                 "avg_turnover": 0.10,
                 "annual_return_cost_drag": 0.05,
@@ -102,7 +102,7 @@ def test_candidate_review_matrix_collects_completed_metrics(tmp_path: Path, monk
         _write_json(
             run_dir / "monthly_backtest_diagnostics.json",
             {
-                "positive_month_ratio": 0.80,
+                "positive_month_ratio": 0.65,
                 "negative_month_count": 2,
                 "worst_monthly_return": -0.03,
                 "issue_flags": [],
@@ -120,13 +120,25 @@ def test_candidate_review_matrix_collects_completed_metrics(tmp_path: Path, monk
         pool_view_id="pool",
         data_lake_root=tmp_path / "lake",
         holding_counts=(20,),
+        max_weights=(0.12,),
+        rebalance_freqs=("10d",),
+        transaction_cost_bps_values=(10.0,),
+        slippage_bps_values=(5.0,),
         run_backtests=True,
         enforce_active_artifact_clean=False,
     )
 
     assert report["summary"]["completed_backtest_count"] == 1
-    assert report["summary"]["promotion_review_eligible_count"] == 1
-    assert report["results"][0]["promotion_review_eligible"] is True
+    assert report["summary"]["promotion_review_eligible_count"] == 0
+    assert report["summary"]["small_capital_gate_id"] == matrix.SMALL_CAPITAL_GATE_ID
+    assert report["summary"]["small_capital_positive_transfer_count"] == 1
+    assert report["summary"]["small_capital_research_grade_candidate_count"] == 1
+    assert report["results"][0]["promotion_review_eligible"] is False
+    assert report["results"][0]["small_capital_positive_transfer"] is True
+    assert report["results"][0]["small_capital_research_grade_candidate"] is True
+    assert Path(tmp_path / "out" / f"{matrix.SMALL_CAPITAL_GATE_ID}_report.json").exists()
+    summary = pd.read_csv(report["summary_csv"])
+    assert bool(summary.loc[0, "small_capital_research_grade_candidate"]) is True
 
 
 def test_candidate_review_matrix_active_artifact_guard_blocks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

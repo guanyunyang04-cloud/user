@@ -699,7 +699,7 @@ def build_top_n_summary(ledger: pd.DataFrame) -> pd.DataFrame:
                 "best_min_annualized_return": _optional_float(best.get("min_annualized_return")),
                 "best_positive_year_rate": _optional_float(best.get("positive_year_rate")),
                 "best_worst_max_drawdown": _optional_float(best.get("worst_max_drawdown")),
-                "decision": "paper_tracking_ready" if candidate_count else "continue_research",
+                "decision": "candidate_selected" if candidate_count else "continue_research",
             }
         )
     return pd.DataFrame(rows, columns=columns)
@@ -734,7 +734,7 @@ def summarize_personal_protocol_grid(
         "run_id": run_id,
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "north_star": "Baostock-only personal quant strategy research",
-        "objective": "compare personal small-capital Top-N protocols under the same walk-forward, cost, execution, and paper-readiness gates",
+        "objective": "compare personal small-capital Top-N protocols under the same walk-forward, cost, and execution gates",
         "years": [int(value) for value in years],
         "final_end_date": final_end_date,
         "horizon": int(horizon),
@@ -752,7 +752,8 @@ def summarize_personal_protocol_grid(
         "personal_backtest_candidate_count": candidate_count,
         "personal_paper_candidate_count": 0,
         "strategy_candidate_count": 0,
-        "decision": "personal_protocol_candidates_ready" if candidate_count else "keep_personal_research_backtest_only",
+        "decision": "personal_protocol_candidates_selected" if candidate_count else "keep_personal_research_backtest_only",
+        "post_selection_boundary": "agent_selects_models_and_strategies_only; user_handles_risk_recording_and_live_decisions",
         "best_protocol_id": str(best_row.get("protocol_id", "")),
         "best_top_n": _optional_int(best_row.get("top_n")),
         "best_signal": str(best_row.get("signal", "")),
@@ -760,9 +761,9 @@ def summarize_personal_protocol_grid(
         "output_dir": str(run_dir),
         "limitations": [
             "This grid promotes only to personal_backtest_candidate and never to strategy_candidate.",
-            "Relaxed smoke or threshold-override runs remain diagnostic and cannot create paper-tracking candidates.",
+            "Relaxed smoke or threshold-override runs remain diagnostic and cannot create selected candidates.",
             "Every row remains Baostock-only evidence; true market-cap and institutional capacity are future enhancement lines.",
-            "Passing rows still require real paper tracking before personal_paper_candidate review.",
+            "Passing rows are selected model or strategy candidates for user discretion; agent-side paper tracking, risk recording, and live-decision workflows are out of scope.",
         ],
     }
 
@@ -784,6 +785,7 @@ def render_personal_protocol_grid_markdown(
         f"- personal_backtest_candidate_count: `{summary.get('personal_backtest_candidate_count', 0)}`",
         f"- personal_paper_candidate_count: `{summary.get('personal_paper_candidate_count', 0)}`",
         f"- strategy_candidate_count: `{summary.get('strategy_candidate_count', 0)}`",
+        f"- post_selection_boundary: `{summary.get('post_selection_boundary', '')}`",
         f"- evidence_scopes: `{summary.get('evidence_scopes', [])}`",
         f"- best_protocol_id: `{summary.get('best_protocol_id', '')}`",
         f"- Artifacts: `{summary.get('output_dir', '')}`",
@@ -798,7 +800,7 @@ def render_personal_protocol_grid_markdown(
         "",
         "## Interpretation",
         "",
-        "This experiment moves the current frontier from a single institutional-style Top-N protocol toward a personal small-capital protocol ladder. Passing rows are eligible for paper tracking only; they are not personal paper candidates or institutional strategy candidates.",
+        "This experiment compares the current frontier under personal small-capital assumptions. Passing rows are selected candidates for the user to judge after delivery; they are not institutional strategy candidates.",
         "",
     ]
     return "\n".join(lines)

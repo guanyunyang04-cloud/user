@@ -9,6 +9,7 @@ import pytest
 from traditional_quant_research.experiments import frontier_personal_protocol_grid
 from traditional_quant_research.experiments.frontier_personal_candidate_gate import (
     PERSONAL_BACKTEST_PROMOTION_LEVEL,
+    POST_SELECTION_RECOMMENDATION,
 )
 
 
@@ -33,7 +34,7 @@ def _gate_frame(top_n: int, *, promoted: bool) -> pd.DataFrame:
                 "max_proxy_mean_abs_active_exposure": 1.00,
                 "promoted": promoted,
                 "promotion_level": PERSONAL_BACKTEST_PROMOTION_LEVEL if promoted else "personal_research/backtest_only",
-                "paper_tracking_recommendation": "start_paper_tracking" if promoted else "continue_research",
+                "paper_tracking_recommendation": POST_SELECTION_RECOMMENDATION if promoted else "continue_research",
                 "failed_gates": "" if promoted else "return_gate,weak_year_damage_gate",
             },
             {
@@ -99,7 +100,7 @@ def test_build_personal_protocol_ledger_ranks_promoted_protocols() -> None:
     assert set(top_n_summary["top_n"]) == {20, 50}
     top20 = top_n_summary.loc[top_n_summary["top_n"].eq(20)].iloc[0]
     top50 = top_n_summary.loc[top_n_summary["top_n"].eq(50)].iloc[0]
-    assert top20["decision"] == "paper_tracking_ready"
+    assert top20["decision"] == "candidate_selected"
     assert top50["decision"] == "continue_research"
 
 
@@ -242,7 +243,7 @@ def test_run_frontier_personal_protocol_grid_writes_artifacts(tmp_path: Path, mo
     )
 
     run_dir = Path(result["run_dir"])
-    assert result["decision"] == "personal_protocol_candidates_ready"
+    assert result["decision"] == "personal_protocol_candidates_selected"
     assert result["personal_backtest_candidate_count"] == 1
     assert result["personal_paper_candidate_count"] == 0
     assert result["strategy_candidate_count"] == 0

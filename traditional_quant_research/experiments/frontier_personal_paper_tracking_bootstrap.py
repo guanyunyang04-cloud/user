@@ -30,6 +30,11 @@ DEFAULT_MIN_TRACKING_DAYS = 120
 DEFAULT_MAX_PAPER_DRAWDOWN = -0.20
 DEFAULT_MAX_SINGLE_PERIOD_LOSS = -0.12
 DEFAULT_MIN_PAPER_EXCESS_RETURN = -0.02
+PAPER_TRACKING_CANCELLED_MESSAGE = (
+    "frontier personal paper tracking is cancelled for traditional_quant_research: "
+    "the agent's responsibility ends at selecting strong model and strategy candidates; "
+    "post-selection risk, recordkeeping, paper/live tracking, and execution decisions are user discretion."
+)
 
 
 def run_frontier_personal_paper_tracking_bootstrap(
@@ -45,6 +50,8 @@ def run_frontier_personal_paper_tracking_bootstrap(
     research_log_path: str | Path = DEFAULT_RESEARCH_LOG,
 ) -> dict[str, Any]:
     """Create a reproducible paper-tracking package for personal candidates."""
+
+    raise RuntimeError(PAPER_TRACKING_CANCELLED_MESSAGE)
 
     if min_tracking_periods <= 0:
         raise ValueError("min_tracking_periods must be positive")
@@ -134,6 +141,8 @@ def build_paper_tracking_candidates(
     gate_summary: Mapping[str, Any],
     combined_summary: Mapping[str, Any],
 ) -> pd.DataFrame:
+    raise RuntimeError(PAPER_TRACKING_CANCELLED_MESSAGE)
+
     columns = _candidate_columns()
     if gate.empty:
         return pd.DataFrame(columns=columns)
@@ -223,6 +232,8 @@ def build_paper_tracking_protocol(
     max_single_period_loss: float,
     min_paper_excess_return: float,
 ) -> pd.DataFrame:
+    raise RuntimeError(PAPER_TRACKING_CANCELLED_MESSAGE)
+
     columns = _protocol_columns()
     if candidates.empty:
         return pd.DataFrame(columns=columns)
@@ -259,6 +270,8 @@ def build_paper_tracking_protocol(
 
 
 def build_paper_tracking_log_template(candidates: pd.DataFrame, combined_summary: Mapping[str, Any]) -> pd.DataFrame:
+    raise RuntimeError(PAPER_TRACKING_CANCELLED_MESSAGE)
+
     columns = _log_template_columns()
     if candidates.empty:
         return pd.DataFrame(columns=columns)
@@ -304,6 +317,8 @@ def build_paper_tracking_review_rules(
     max_single_period_loss: float,
     min_paper_excess_return: float,
 ) -> pd.DataFrame:
+    raise RuntimeError(PAPER_TRACKING_CANCELLED_MESSAGE)
+
     rows = [
         {
             "dimension": "minimum_tracking_sample",

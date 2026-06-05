@@ -12,6 +12,7 @@ from typing import Any
 import numpy as np
 
 from daily_research.path_policy import v2_research_reset_baseline as v2
+from daily_research.path_policy import v2_candidate_review_matrix as candidate_matrix
 
 
 PYTHON = v2.PYTHON
@@ -39,6 +40,9 @@ OUTPUT_PROFILE = "decision_utility_v1"
 LOSS_PROFILE = "horizon_30d_soft_penalty_v1"
 SELECTION_PROFILE = "decision_utility"
 SCORE_COLUMN = "pred_decision_score"
+SMALL_CAPITAL_GATE_ID = candidate_matrix.SMALL_CAPITAL_GATE_ID
+SCOUT_MATRIX_ENTRY_EXCESS_SHARPE_MIN = 1.0
+SCOUT_MATRIX_ENTRY_POSITIVE_MONTH_RATIO_MIN = 0.55
 
 SCOUT_SEED = 7
 CONFIRM_SEEDS = (7, 11, 19)
@@ -443,13 +447,13 @@ def _quick_bridge_command(
         "--max-weight",
         "0.12",
         "--rebalance-freq",
-        "3d",
+        "10d",
         "--rebalance-offset-mode",
         "all",
         "--transaction-cost-bps",
-        "3",
+        "10",
         "--slippage-bps",
-        "7",
+        "5",
         "--sell-tax-bps",
         "10",
         "--json",
@@ -475,17 +479,17 @@ def _candidate_matrix_command(*, forecast_tag: str, data_spec: DataSpec, output_
         "--pool-view-id",
         data_spec.pool_view_id,
         "--holding-counts",
-        "10,20",
+        "10,20,30",
         "--max-weights",
-        "0.08,0.12",
+        "0.08,0.12,0.16",
         "--rebalance-freqs",
-        "3d,5d",
+        "5d,10d,20d",
         "--rebalance-offset-modes",
         "all",
         "--transaction-cost-bps-values",
-        "3",
+        "10",
         "--slippage-bps-values",
-        "7",
+        "5",
         "--sell-tax-bps-values",
         "10",
         "--market-regime-filter-modes",
@@ -715,17 +719,27 @@ def write_task_list(
             "multi_split_before_multi_seed": True,
             "three_seed_reserved_for_finalists": True,
             "promotion_gate_deferred": True,
+            "research_gate_id": SMALL_CAPITAL_GATE_ID,
+            "benchmark": BENCHMARK,
+            "matrix_entry_thresholds": {
+                "excess_annual_return_gt": 0.0,
+                "excess_sharpe_gt": 0.0,
+                "excess_sharpe_ge": SCOUT_MATRIX_ENTRY_EXCESS_SHARPE_MIN,
+                "positive_month_ratio_ge": SCOUT_MATRIX_ENTRY_POSITIVE_MONTH_RATIO_MIN,
+            },
+            "research_grade_thresholds": dict(candidate_matrix.SMALL_CAPITAL_RESEARCH_THRESHOLDS),
             "quick_bridge_default": {
                 "holding_count": 20,
                 "max_weight": 0.12,
-                "rebalance_freq": "3d",
+                "rebalance_freq": "10d",
                 "rebalance_offset_mode": "all",
-                "costs_bps": {"transaction": 3, "slippage": 7, "sell_tax": 10},
+                "costs_bps": {"transaction": 10, "slippage": 5, "sell_tax": 10},
             },
             "candidate_matrix_grid": {
-                "holding_counts": [10, 20],
-                "max_weights": [0.08, 0.12],
-                "rebalance_freqs": ["3d", "5d"],
+                "holding_counts": [10, 20, 30],
+                "max_weights": [0.08, 0.12, 0.16],
+                "rebalance_freqs": ["5d", "10d", "20d"],
+                "costs_bps": {"transaction": 10, "slippage": 5, "sell_tax": 10},
             },
         },
         "boundary": {
@@ -1047,6 +1061,50 @@ def _load_bridge_metrics(output_root: Path, forecast_tag: str) -> dict[str, Any]
     }
 
 
+def _load_matrix_metrics(output_root: Path, forecast_tag: str) -> dict[str, Any]:
+    matrix_root = output_root / "matrices" / _matrix_tag(forecast_tag)
+    report = _read_json(matrix_root / "v2_candidate_review_matrix_report.json")
+    small_report = _read_json(matrix_root / f"{SMALL_CAPITAL_GATE_ID}_report.json")
+    summary = dict(report.get("summary", {}) or {})
+    small_summary = dict(small_report.get("summary", {}) or {})
+    best = dict(
+        small_summary.get("best_by_balanced_return_score")
+        or summary.get("best_by_small_capital_balanced_return_score")
+        or {}
+    )
+    research_grade = dict(
+        small_summary.get("best_research_grade_candidate")
+        or summary.get("best_small_capital_research_grade_candidate")
+        or {}
+    )
+    return {
+        "matrix_status": str(report.get("status", "")),
+        "matrix_report_json": str(matrix_root / "v2_candidate_review_matrix_report.json") if report else "",
+        "small_capital_gate_id": SMALL_CAPITAL_GATE_ID,
+        "small_capital_positive_transfer_count": int(
+            small_summary.get("positive_transfer_count", summary.get("small_capital_positive_transfer_count", 0)) or 0
+        ),
+        "small_capital_research_grade_candidate_count": int(
+            small_summary.get(
+                "research_grade_candidate_count",
+                summary.get("small_capital_research_grade_candidate_count", 0),
+            )
+            or 0
+        ),
+        "best_small_capital_variant_id": str(best.get("variant_id", "")),
+        "best_small_capital_balanced_return_score": _float_metric(best, "small_capital_balanced_return_score"),
+        "best_small_capital_excess_annual_return": _float_metric(best, "excess_annual_return"),
+        "best_small_capital_excess_sharpe": _float_metric(best, "excess_sharpe"),
+        "best_small_capital_positive_month_ratio": _float_metric(best, "positive_month_ratio"),
+        "best_small_capital_worst_month": _float_metric(
+            best,
+            "worst_monthly_excess_return",
+            _float_metric(best, "worst_monthly_return"),
+        ),
+        "research_grade_small_capital_variant_id": str(research_grade.get("variant_id", "")),
+    }
+
+
 def _float_metric(payload: dict[str, Any], key: str, default: float = 0.0) -> float:
     try:
         value = float(payload.get(key, default))
@@ -1055,11 +1113,28 @@ def _float_metric(payload: dict[str, Any], key: str, default: float = 0.0) -> fl
     return value if math.isfinite(value) else default
 
 
-def _score_row(row: dict[str, Any]) -> dict[str, float]:
-    has_forecast_result = str(row.get("forecast_status", "")).strip() == "completed" or bool(
-        str(row.get("evidence_verdict", "")).strip()
+def _has_forecast_result(row: dict[str, Any]) -> bool:
+    return str(row.get("forecast_status", "")).strip() == "completed" or bool(str(row.get("evidence_verdict", "")).strip())
+
+
+def _positive_transfer(row: dict[str, Any]) -> bool:
+    return (
+        str(row.get("backtest_status", "")).strip() == "completed"
+        and _float_metric(row, "excess_annual_return") > 0.0
+        and _float_metric(row, "excess_sharpe") > 0.0
     )
-    if not has_forecast_result:
+
+
+def _matrix_entry_candidate(row: dict[str, Any]) -> bool:
+    return (
+        _positive_transfer(row)
+        and _float_metric(row, "excess_sharpe") >= SCOUT_MATRIX_ENTRY_EXCESS_SHARPE_MIN
+        and _float_metric(row, "positive_month_ratio") >= SCOUT_MATRIX_ENTRY_POSITIVE_MONTH_RATIO_MIN
+    )
+
+
+def _score_row(row: dict[str, Any]) -> dict[str, float]:
+    if not _has_forecast_result(row):
         return {
             "forecast_strength_score": 0.0,
             "return_potential_score": 0.0,
@@ -1099,11 +1174,7 @@ def _score_row(row: dict[str, Any]) -> dict[str, float]:
 
 
 def _split_consistency(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    completed = [
-        row
-        for row in rows
-        if str(row.get("forecast_status", "")).strip() == "completed" or bool(str(row.get("evidence_verdict", "")).strip())
-    ]
+    completed = [row for row in rows if _has_forecast_result(row)]
     groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for row in completed:
         key = (str(row.get("dataset_key", "")), str(row.get("model_family", "")))
@@ -1122,7 +1193,11 @@ def _split_consistency(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "completed_split_count": len(items),
                 "split_keys": split_keys,
                 "positive_high_return_split_count": int(sum(1 for value in scores if value > 0.0)),
-                "positive_transfer_split_count": int(sum(1 for value in transfer_scores if value > 0.0)),
+                "positive_transfer_split_count": int(sum(1 for row in items if bool(row.get("positive_transfer", False)))),
+                "matrix_entry_split_count": int(sum(1 for row in items if bool(row.get("matrix_entry_candidate", False)))),
+                "small_capital_research_grade_split_count": int(
+                    sum(1 for row in items if int(row.get("small_capital_research_grade_candidate_count", 0) or 0) > 0)
+                ),
                 "high_return_score_mean": float(np.mean(scores)) if scores else 0.0,
                 "high_return_score_min": float(np.min(scores)) if scores else 0.0,
                 "transfer_score_mean": float(np.mean(transfer_scores)) if transfer_scores else 0.0,
@@ -1179,6 +1254,7 @@ def _bad_month_preview(rows: list[dict[str, Any]], *, limit: int = 5) -> list[di
 def _write_markdown(path: str | Path, report: dict[str, Any]) -> None:
     leaderboard = list(report.get("leaderboard", []) or [])[:10]
     shortlist = list(report.get("shortlist", []) or [])[:5]
+    small_capital = dict(report.get("small_capital_gate_summary", {}) or {})
     lines = [
         "# V2 High Return Model Discovery",
         "",
@@ -1189,6 +1265,15 @@ def _write_markdown(path: str | Path, report: dict[str, Any]) -> None:
         f"- Smoke completed forecast count: `{report.get('smoke_completed_forecast_count', 0)}`",
         f"- Pilot completed forecast count: `{report.get('pilot_completed_forecast_count', 0)}`",
         f"- Shortlist count: `{report.get('shortlist_count', 0)}`",
+        f"- Positive transfer count: `{small_capital.get('positive_transfer_count', 0)}`",
+        f"- Matrix entry candidate count: `{small_capital.get('matrix_entry_candidate_count', 0)}`",
+        f"- Small-capital research-grade matrix count: `{small_capital.get('research_grade_matrix_count', 0)}`",
+        "",
+        f"## {SMALL_CAPITAL_GATE_ID}",
+        "",
+        "- quick bridge entry requires excess_annual_return > `0` and excess_sharpe > `0`.",
+        "- candidate matrix entry requires excess_sharpe >= `1.0` and positive_month_ratio >= `0.55`.",
+        "- research-grade matrix threshold is excess_sharpe >= `1.2`, excess_annual_return >= `0.25`, positive_month_ratio >= `0.60`, worst_month >= `-0.15`.",
         "",
         "## Shortlist",
         "",
@@ -1280,14 +1365,17 @@ def collect_high_return_report(
             "pilot_only": bool(task.get("pilot_only", False)),
             "evidence_grade": str(task.get("evidence_grade", "")),
         }
+        row["positive_transfer"] = _positive_transfer(row)
+        row["matrix_entry_candidate"] = _matrix_entry_candidate(row)
+        row.update(_load_matrix_metrics(root, tag))
         row.update(_score_row(row))
         rows.append(row)
     leaderboard = sorted(rows, key=lambda item: float(item.get("high_return_score", 0.0)), reverse=True)
     shortlist = [
         row
         for row in leaderboard
-        if float(row.get("high_return_score", 0.0)) > 0.0
-        and (str(row.get("forecast_status")) == "completed" or str(row.get("evidence_verdict")))
+        if _matrix_entry_candidate(row)
+        and _has_forecast_result(row)
         and not bool(row.get("smoke_only", False))
         and not bool(row.get("pilot_only", False))
     ][:3]
@@ -1299,6 +1387,39 @@ def collect_high_return_report(
     pilot_completed_forecast_count = sum(
         1 for row in rows if bool(row.get("pilot_only", False)) and str(row.get("forecast_status", "")).strip() == "completed"
     )
+    matrix_entry_rows = [row for row in rows if bool(row.get("matrix_entry_candidate", False))]
+    research_grade_matrix_rows = [
+        row for row in rows if int(row.get("small_capital_research_grade_candidate_count", 0) or 0) > 0
+    ]
+    best_matrix_row = max(
+        matrix_entry_rows,
+        key=lambda row: (_float_metric(row, "high_return_score"), _float_metric(row, "excess_sharpe")),
+        default={},
+    )
+    best_research_grade_row = max(
+        research_grade_matrix_rows,
+        key=lambda row: (
+            _float_metric(row, "best_small_capital_balanced_return_score"),
+            _float_metric(row, "best_small_capital_excess_sharpe"),
+        ),
+        default={},
+    )
+    small_capital_gate_summary = {
+        "gate_id": SMALL_CAPITAL_GATE_ID,
+        "positive_transfer_count": int(sum(1 for row in rows if bool(row.get("positive_transfer", False)))),
+        "matrix_entry_candidate_count": int(len(matrix_entry_rows)),
+        "research_grade_matrix_count": int(len(research_grade_matrix_rows)),
+        "matrix_entry_thresholds": {
+            "excess_annual_return_gt": 0.0,
+            "excess_sharpe_gt": 0.0,
+            "excess_sharpe_ge": SCOUT_MATRIX_ENTRY_EXCESS_SHARPE_MIN,
+            "positive_month_ratio_ge": SCOUT_MATRIX_ENTRY_POSITIVE_MONTH_RATIO_MIN,
+        },
+        "research_grade_thresholds": dict(candidate_matrix.SMALL_CAPITAL_RESEARCH_THRESHOLDS),
+        "best_matrix_entry_tag": str(best_matrix_row.get("tag", "")),
+        "best_research_grade_tag": str(best_research_grade_row.get("tag", "")),
+        "best_research_grade_variant_id": str(best_research_grade_row.get("research_grade_small_capital_variant_id", "")),
+    }
     status = "missing_tasks"
     if rows and completed_forecast_count <= 0:
         status = "awaiting_forecast_results"
@@ -1319,10 +1440,15 @@ def collect_high_return_report(
         "bad_month_preview": _bad_month_preview(rows),
         "shortlist": shortlist,
         "shortlist_count": len(shortlist),
+        "small_capital_gate_summary": small_capital_gate_summary,
         "scoring_policy": {
             "intended_use": "research-only high-return scout ranking",
             "not_a_promotion_gate": True,
             "three_seed_required_before_model_quality_evidence": True,
+            "shortlist_requires_positive_transfer": True,
+            "shortlist_requires_excess_sharpe_ge": SCOUT_MATRIX_ENTRY_EXCESS_SHARPE_MIN,
+            "shortlist_requires_positive_month_ratio_ge": SCOUT_MATRIX_ENTRY_POSITIVE_MONTH_RATIO_MIN,
+            "small_capital_gate_id": SMALL_CAPITAL_GATE_ID,
         },
         "boundary": {
             "research_only": True,

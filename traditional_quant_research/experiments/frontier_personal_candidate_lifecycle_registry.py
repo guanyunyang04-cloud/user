@@ -17,6 +17,7 @@ from traditional_quant_research.experiments.frontier_personal_candidate_gate imp
 )
 from traditional_quant_research.experiments.frontier_personal_paper_tracking_bootstrap import (
     DEFAULT_OUTPUT_DIR as DEFAULT_BOOTSTRAP_OUTPUT_ROOT,
+    PAPER_TRACKING_CANCELLED_MESSAGE,
     PERSONAL_PAPER_CANDIDATE_LEVEL,
 )
 from traditional_quant_research.experiments.frontier_personal_paper_tracking_plan import (
@@ -45,6 +46,8 @@ def run_frontier_personal_candidate_lifecycle_registry(
     research_log_path: str | Path = DEFAULT_RESEARCH_LOG,
 ) -> dict[str, Any]:
     """Write a current lifecycle registry for all bootstrapped personal candidates."""
+
+    raise RuntimeError(PAPER_TRACKING_CANCELLED_MESSAGE)
 
     run_id = f"frontier_personal_candidate_lifecycle_registry_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     run_dir = Path(output_dir) / run_id
@@ -153,6 +156,8 @@ def build_lifecycle_registry(
     plan_context_status: str = "plan_missing",
     review_context_status: str = "review_missing",
 ) -> pd.DataFrame:
+    raise RuntimeError(PAPER_TRACKING_CANCELLED_MESSAGE)
+
     columns = _registry_columns()
     if candidates.empty:
         return pd.DataFrame(columns=columns)

@@ -25,6 +25,7 @@ PERSONAL_BACKTEST_PROMOTION_LEVEL = "personal_backtest_candidate"
 PERSONAL_BACKTEST_ONLY_LEVEL = "personal_research/backtest_only"
 FORMAL_PERSONAL_GATE_SCOPE = "formal_personal_backtest_candidate_gate"
 DIAGNOSTIC_PERSONAL_GATE_SCOPE = "diagnostic_relaxed_personal_gate"
+POST_SELECTION_RECOMMENDATION = "user_discretion"
 
 DEFAULT_REQUIRED_FEE_BPS = 30.0
 DEFAULT_REQUIRED_IMPACT_BPS_PER_1PCT = 10.0
@@ -312,7 +313,7 @@ def evaluate_personal_candidate_gates(
                 "exposure_failures": ",".join(exposure_failures),
                 "walk_forward_detail": walk_forward_detail,
                 "promotion_level": PERSONAL_BACKTEST_PROMOTION_LEVEL if not failed else PERSONAL_BACKTEST_ONLY_LEVEL,
-                "paper_tracking_recommendation": "start_paper_tracking" if not failed else "continue_research",
+                "paper_tracking_recommendation": POST_SELECTION_RECOMMENDATION if not failed else "continue_research",
             }
         )
     return pd.DataFrame(rows, columns=_gate_columns())
@@ -376,7 +377,8 @@ def summarize_personal_candidate_gate(
         "evaluated_rows": int(len(gate)),
         "personal_backtest_candidate_count": int(len(candidates)),
         "strategy_candidate_count": 0,
-        "decision": "personal_paper_tracking_ready" if len(candidates) else "keep_personal_research_backtest_only",
+        "decision": "personal_strategy_candidates_selected" if len(candidates) else "keep_personal_research_backtest_only",
+        "post_selection_boundary": "agent_selects_models_and_strategies_only; user_handles_risk_recording_and_live_decisions",
         "best_signal_by_personal_gate": str(best_row.get("signal", "")),
         "best_top_n_by_personal_gate": int(float(best_row.get("top_n", 0) or 0)) if best_row else None,
         "best_signal_mean_annualized_return": float(best_row.get("mean_annualized_return", np.nan)) if best_row else None,
@@ -385,7 +387,8 @@ def summarize_personal_candidate_gate(
             "This gate reads existing combined-constraint artifacts and does not rerun backtests.",
             "It is a personal small-capital research gate, not an institutional promotion gate.",
             "Relaxed smoke or threshold-override runs are diagnostic and cannot create personal_backtest_candidate rows.",
-            "Baostock-only evidence can justify paper tracking, but not true market-cap neutrality or production deployment.",
+            "Passing rows are selected model or strategy candidates for user discretion; agent-side paper tracking, risk recording, and live-decision workflows are out of scope.",
+            "Baostock-only evidence can identify candidates, but not true market-cap neutrality or production deployment.",
         ],
     }
 
@@ -399,6 +402,7 @@ def render_personal_candidate_gate_markdown(summary: Mapping[str, Any], gate: pd
         f"- decision: `{summary.get('decision', '')}`",
         f"- personal_backtest_candidate_count: `{summary.get('personal_backtest_candidate_count', 0)}`",
         f"- strategy_candidate_count: `{summary.get('strategy_candidate_count', 0)}`",
+        f"- post_selection_boundary: `{summary.get('post_selection_boundary', '')}`",
         f"- required_year_window: `{summary.get('required_year_window', '')}`",
         f"- required_fee_bps: `{summary.get('required_fee_bps')}`",
         f"- required_impact_bps_per_1pct: `{summary.get('required_impact_bps_per_1pct')}`",
@@ -423,7 +427,7 @@ def render_personal_candidate_gate_markdown(summary: Mapping[str, Any], gate: pd
     lines.append(
         "This is a pragmatic personal-trading gate. It keeps the checks that prevent fake profitability "
         "(walk-forward evidence, execution constraints, cost stress, drawdown, weak-year damage, and proxy exposure disclosure) "
-        "while explicitly not requiring true market-cap or float-cap data before paper tracking."
+        "while explicitly leaving post-selection risk, recordkeeping, and live or paper decisions to the user."
     )
     lines.append("")
     return "\n".join(lines)

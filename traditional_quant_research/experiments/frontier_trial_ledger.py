@@ -279,7 +279,7 @@ def build_research_maturity_report(
         {
             "dimension": "personal_backtest_candidate_readiness",
             "status": "passed" if personal_candidate else "blocked",
-            "evidence": "Personal candidate readiness requires Baostock-only source, walk-forward evidence, cost/execution stress, drawdown/weak-year controls and paper-tracking suitability.",
+            "evidence": "Personal candidate readiness requires Baostock-only source, walk-forward evidence, cost/execution stress, drawdown/weak-year controls and clear user-discretion boundary after selection.",
         },
         {
             "dimension": "strategy_candidate_readiness",
@@ -312,7 +312,7 @@ def summarize_trial_ledger(
     if strategy_candidate_count:
         decision = "promotion_review_ready"
     elif personal_candidate_count:
-        decision = "personal_paper_tracking_ready"
+        decision = "personal_strategy_candidates_selected"
     elif baostock_only_candidate_count:
         decision = "baostock_only_research_review_ready"
     else:

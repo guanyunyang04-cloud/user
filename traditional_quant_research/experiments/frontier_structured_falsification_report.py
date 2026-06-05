@@ -359,7 +359,10 @@ def summarize_structured_falsification(
     if not strategy_candidate_count and not baostock_only_candidate_count and not personal_candidate_count and candidate_count:
         if str(promotion_summary.get("decision", "")) == "promote_strategy_candidate":
             strategy_candidate_count = candidate_count
-        elif str(promotion_summary.get("decision", "")) == "personal_paper_tracking_ready":
+        elif str(promotion_summary.get("decision", "")) in {
+            "personal_paper_tracking_ready",
+            "personal_strategy_candidates_selected",
+        }:
             personal_candidate_count = candidate_count
         else:
             baostock_only_candidate_count = candidate_count
@@ -371,7 +374,7 @@ def summarize_structured_falsification(
         decision = "promotion_review_ready"
     elif personal_candidate_count:
         current_evidence_grade = PERSONAL_BACKTEST_PROMOTION_LEVEL
-        decision = "personal_paper_tracking_ready"
+        decision = "personal_strategy_candidates_selected"
     elif baostock_only_candidate_count:
         current_evidence_grade = BAOSTOCK_ONLY_PROMOTION_LEVEL
         decision = "baostock_only_research_review_ready"
@@ -409,7 +412,7 @@ def summarize_structured_falsification(
         "formal_evidence_count": int(len(evidence_manifest)),
         "limitations": [
             "This report reads existing audit artifacts and does not rerun backtests.",
-            "Personal backtest candidates are paper-tracking candidates, not institutional strategy candidates.",
+            "Personal backtest candidates are selected model or strategy candidates for user discretion, not institutional strategy candidates.",
             "Baostock-only research candidates do not prove true market-cap or float-cap neutrality.",
             "A structured falsification is not a strategy candidate; it is the auditable stop condition for a failed frontier.",
             "Any future true-size upgrade must rerun daily_size audit, frontier promotion gate, and trial ledger after the blocking evidence changes.",
@@ -470,8 +473,8 @@ def render_structured_falsification_markdown(
             "",
             "## Interpretation",
             "",
-            "The report separates personal paper-tracking readiness, Baostock-only research readiness, and true-size strategy "
-            "promotion. Personal rows may advance to paper tracking, but they remain below `strategy_candidate` until true "
+            "The report separates selected personal candidates, Baostock-only research readiness, and true-size strategy "
+            "promotion. Personal rows are delivered for user discretion and remain below `strategy_candidate` until true "
             "market-cap/float-cap evidence and institutional promotion gates are available.",
             "",
         ]
@@ -588,7 +591,7 @@ def _promotion_evidence_grade(summary: Mapping[str, Any]) -> str:
         return PERSONAL_BACKTEST_PROMOTION_LEVEL
     if int(summary.get("baostock_only_candidate_count", 0) or 0) > 0:
         return BAOSTOCK_ONLY_PROMOTION_LEVEL
-    if str(summary.get("decision", "")) == "personal_paper_tracking_ready":
+    if str(summary.get("decision", "")) in {"personal_paper_tracking_ready", "personal_strategy_candidates_selected"}:
         return PERSONAL_BACKTEST_PROMOTION_LEVEL
     if int(summary.get("candidate_count", 0) or 0) > 0 and str(summary.get("decision", "")) != "promote_strategy_candidate":
         return BAOSTOCK_ONLY_PROMOTION_LEVEL

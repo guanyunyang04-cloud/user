@@ -30,6 +30,12 @@ def test_task_list_defaults_to_augmented_single_seed_multi_split_research_only(t
     assert payload["evidence_grade_input_or_model_quality_pass"] is False
     assert payload["boundary"]["promotion_allowed"] is False
     assert payload["boundary"]["active_execution_strategy_expected_diff"] == "none"
+    assert payload["high_return_scout_policy"]["research_gate_id"] == hrd.SMALL_CAPITAL_GATE_ID
+    assert payload["high_return_scout_policy"]["quick_bridge_default"]["rebalance_freq"] == "10d"
+    assert payload["high_return_scout_policy"]["quick_bridge_default"]["costs_bps"] == {"transaction": 10, "slippage": 5, "sell_tax": 10}
+    assert payload["high_return_scout_policy"]["candidate_matrix_grid"]["holding_counts"] == [10, 20, 30]
+    assert payload["high_return_scout_policy"]["candidate_matrix_grid"]["max_weights"] == [0.08, 0.12, 0.16]
+    assert payload["high_return_scout_policy"]["candidate_matrix_grid"]["rebalance_freqs"] == ["5d", "10d", "20d"]
     assert payload["training_task_count"] == 15
     assert {task["seed"] for task in tasks} == {7}
     assert {task["dataset_id"] for task in tasks} == {hrd.TRADITIONAL_BAOSTOCK_V2_1_DATASET_ID}
@@ -150,14 +156,18 @@ def test_bridge_and_matrix_commands_are_aggressive_research_scouts(tmp_path: Pat
     assert bridge[bridge.index("--seed-study-tags") + 1] == task["tag"]
     assert bridge[bridge.index("--holding-count") + 1] == "20"
     assert bridge[bridge.index("--max-weight") + 1] == "0.12"
-    assert bridge[bridge.index("--rebalance-freq") + 1] == "3d"
+    assert bridge[bridge.index("--rebalance-freq") + 1] == "10d"
+    assert bridge[bridge.index("--transaction-cost-bps") + 1] == "10"
+    assert bridge[bridge.index("--slippage-bps") + 1] == "5"
 
     matrix = task["candidate_matrix_command"]
     assert matrix[matrix.index("-m") + 1] == "daily_research.path_policy.v2_candidate_review_matrix"
     assert "--run-backtests" in matrix
-    assert matrix[matrix.index("--holding-counts") + 1] == "10,20"
-    assert matrix[matrix.index("--max-weights") + 1] == "0.08,0.12"
-    assert matrix[matrix.index("--rebalance-freqs") + 1] == "3d,5d"
+    assert matrix[matrix.index("--holding-counts") + 1] == "10,20,30"
+    assert matrix[matrix.index("--max-weights") + 1] == "0.08,0.12,0.16"
+    assert matrix[matrix.index("--rebalance-freqs") + 1] == "5d,10d,20d"
+    assert matrix[matrix.index("--transaction-cost-bps-values") + 1] == "10"
+    assert matrix[matrix.index("--slippage-bps-values") + 1] == "5"
 
 
 def test_collect_report_ranks_completed_high_return_candidate(tmp_path: Path, monkeypatch) -> None:
@@ -220,9 +230,15 @@ def test_collect_report_ranks_completed_high_return_candidate(tmp_path: Path, mo
     assert report["status"] == "completed"
     assert report["leaderboard"][0]["tag"] == strong["tag"]
     assert report["leaderboard"][0]["high_return_score"] > report["leaderboard"][1]["high_return_score"]
+    assert report["leaderboard"][0]["positive_transfer"] is True
+    assert report["leaderboard"][0]["matrix_entry_candidate"] is True
     assert report["shortlist"][0]["tag"] == strong["tag"]
+    assert report["small_capital_gate_summary"]["positive_transfer_count"] == 1
+    assert report["small_capital_gate_summary"]["matrix_entry_candidate_count"] == 1
     assert report["split_consistency"][0]["model_family"] == strong["model_family"]
     assert report["split_consistency"][0]["completed_split_count"] == 1
+    assert report["split_consistency"][0]["positive_transfer_split_count"] == 1
+    assert report["split_consistency"][0]["matrix_entry_split_count"] == 1
     assert report["bad_month_preview"][0]["tag"] == strong["tag"]
     assert report["bad_month_preview"][0]["issue_hint"] == "ordinary_bad_month_preview"
     assert report["scoring_policy"]["three_seed_required_before_model_quality_evidence"] is True
