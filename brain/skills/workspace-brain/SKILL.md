@@ -33,14 +33,15 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scri
 ```
 `register` attaches the project to the workspace main manifest and catalog; do not hand-edit child lists unless the runtime cannot run.
 
-## Health And Audits
+## On-Demand Health
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py health --cwd . --mode compact
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py health --cwd . --mode full --timeout-sec 60
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py agent-meta-audit --cwd . --mode compact
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py brain-burden-audit --cwd . --mode compact
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json
 ```
-Surface proposed or approved agent-learning items when checked.
+Compact health is a fast takeover summary only; first hop stays `detect` + lite capsule. Run full health, audits, and project-profile guards only for maintenance, diagnosis, or completion verification. Surface proposed or approved agent-learning items when checked.
 
 ## Proposal-Only Evolution
 Agent Meta Protocol learning is proposal-only. Low-risk observations may create `proposed` records; protocol, workflow, skill, guard, or behavior changes require explicit user approval before implementation.

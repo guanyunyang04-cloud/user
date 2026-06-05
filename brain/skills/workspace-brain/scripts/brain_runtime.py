@@ -69,19 +69,45 @@ def _run_git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _run_command(cwd: Path, command: list[str]) -> dict[str, Any]:
-    result = subprocess.run(
-        command,
-        cwd=str(cwd),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
+def _output_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _run_command(cwd: Path, command: list[str], *, timeout_sec: float | None = None) -> dict[str, Any]:
+    try:
+        result = subprocess.run(
+            command,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=timeout_sec,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = _output_text(exc.output)
+        stderr = _output_text(exc.stderr)
+        return {
+            "command": command,
+            "returncode": 124,
+            "ok": False,
+            "timed_out": True,
+            "timeout_sec": timeout_sec,
+            "stdout": stdout,
+            "stderr": stderr,
+            "stdout_tail": stdout[-4000:],
+            "stderr_tail": stderr[-2000:],
+        }
     return {
         "command": command,
         "returncode": result.returncode,
         "ok": result.returncode == 0,
+        "timed_out": False,
+        "timeout_sec": timeout_sec,
         "stdout": result.stdout or "",
         "stderr": result.stderr or "",
         "stdout_tail": (result.stdout or "")[-4000:],
@@ -182,49 +208,81 @@ def _summary_counts(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _compact_health(full_payload: dict[str, Any]) -> dict[str, Any]:
-    detect_payload = full_payload.get("detect", {}) if isinstance(full_payload.get("detect"), dict) else {}
-    skill_sync = full_payload.get("skill_sync", {}) if isinstance(full_payload.get("skill_sync"), dict) else {}
-    doc_guard = full_payload.get("doc_guard", {}) if isinstance(full_payload.get("doc_guard"), dict) else {}
-    catalog = full_payload.get("catalog", {}) if isinstance(full_payload.get("catalog"), dict) else {}
-    frontier = full_payload.get("frontier", {}) if isinstance(full_payload.get("frontier"), dict) else {}
-    try:
-        from tools.brain.runtime_context import compact_catalog_health, compact_frontier_health
-
-        compact_catalog = compact_catalog_health(catalog)
-        compact_frontier = compact_frontier_health(frontier)
-    except Exception:
-        compact_catalog = catalog
-        compact_frontier = frontier
+def _manifest_summary(detected: dict[str, Any]) -> dict[str, Any]:
+    raw_path = str(detected.get("brain_manifest", "") or "")
+    manifest_path = Path(raw_path) if raw_path else None
+    manifest = _load_json(manifest_path) if manifest_path is not None else {}
+    read_order = manifest.get("read_order", [])
+    child_brains = manifest.get("child_brains", [])
     return {
-        "status": full_payload.get("status", "unknown"),
-        "mode": "compact",
-        "detect": {
-            "status": detect_payload.get("status", ""),
-            "cwd": detect_payload.get("cwd", ""),
-            "has_brain": bool(detect_payload.get("has_brain")),
-            "has_brain_tools": bool(detect_payload.get("has_brain_tools")),
-            "git": detect_payload.get("git", {}),
-        },
-        "skill_sync": {
-            "status": skill_sync.get("status", "unknown"),
-            "all_in_sync": bool(skill_sync.get("all_in_sync")),
-        },
-        "doc_guard_status": doc_guard.get("status", "unknown"),
-        "integrity": full_payload.get("integrity", {}),
-        "catalog": compact_catalog,
-        "frontier": compact_frontier,
-        "next_actions": list(full_payload.get("next_actions", []) or []),
+        "exists": bool(detected.get("has_brain")),
+        "path": str(manifest_path) if manifest_path is not None else "",
+        "brain_type": str(manifest.get("brain_type", "") or ""),
+        "brain_id": str(manifest.get("brain_id", "") or manifest.get("id", "") or "workspace"),
+        "entrypoint": str(manifest.get("entrypoint", "") or ""),
+        "read_order_count": len(read_order) if isinstance(read_order, list) else 0,
+        "child_brain_count": len(child_brains) if isinstance(child_brains, list) else 0,
     }
 
 
-def health(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
+def _takeover_health(cwd: Path) -> dict[str, Any]:
+    detected = detect(cwd)
+    workspace = Path(detected["brain_root"] or cwd.resolve()).resolve()
+    manifest = _manifest_summary(detected)
+    git = detected.get("git", {}) if isinstance(detected.get("git"), dict) else {}
+    next_actions: list[str] = []
+    if not detected["has_brain"]:
+        next_actions.append("init_brain")
+    elif detected["has_brain"] and not detected["has_brain_tools"]:
+        next_actions.append("register_brain")
+    else:
+        next_actions.append("run_capsule_lite")
+    return {
+        "status": "ok" if detected["status"] == "ok" else "warning",
+        "mode": "compact",
+        "health_level": "takeover",
+        "detect": {
+            "status": detected.get("status", ""),
+            "cwd": detected.get("cwd", ""),
+            "has_brain": bool(detected.get("has_brain")),
+            "brain_root": detected.get("brain_root", ""),
+            "has_brain_tools": bool(detected.get("has_brain_tools")),
+            "brain_tools_workflow": detected.get("brain_tools_workflow", ""),
+            "git": git,
+        },
+        "manifest": manifest,
+        "capsule_command": (
+            'C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule '
+            '--task "<task>" --workflow auto --intent read --verbosity lite --json'
+        ),
+        "route_command": 'C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow route --task "<task>" --json',
+        "bootstrap_command": "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain <workspace|child_brain_id> --json",
+        "full_health_command": "C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py health --cwd . --mode full --timeout-sec 60",
+        "deferred_checks": [
+            "skill_sync",
+            "doc_guard",
+            "integrity_check",
+            "brain_catalog",
+            "daily_research_frontier",
+            "project_profile_guards",
+        ],
+        "project_profile_note": "Project-specific checks are selected after capsule/bootstrap exposes the project profile.",
+        "workspace": str(workspace),
+        "next_actions": next_actions,
+    }
+
+
+def health(cwd: Path, *, mode: str = "compact", timeout_sec: float = 60.0) -> dict[str, Any]:
+    if str(mode or "compact").lower() == "compact":
+        return _takeover_health(cwd)
+
     detected = detect(cwd)
     workspace = Path(detected["brain_root"] or cwd.resolve()).resolve()
     if detected["has_brain"] and not detected["has_brain_tools"]:
         payload = {
             "status": "ok",
             "mode": "full",
+            "health_level": "deep",
             "detect": detected,
             "skill_sync": {"status": "skipped", "all_in_sync": False, "skills": []},
             "doc_guard": {"status": "skipped", "returncode": 0, "stdout_tail": "", "stderr_tail": ""},
@@ -239,21 +297,30 @@ def health(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
             },
             "next_actions": ["register_brain"],
         }
-        return payload if str(mode or "compact").lower() == "full" else _compact_health(payload)
+        return payload
     skill_sync_result = _run_command(
         workspace,
         [sys.executable, "-m", "tools.brain.skill_install", "--check"],
+        timeout_sec=timeout_sec,
     )
     integrity_result = _run_command(
         workspace,
         [sys.executable, "-m", "tools.brain.integrity_check", "--json"],
+        timeout_sec=timeout_sec,
     )
     doc_guard_result = _run_command(
         workspace,
         [sys.executable, "-m", "tools.brain.doc_guard", "check"],
+        timeout_sec=timeout_sec,
+    )
+    frontier_result = _run_command(
+        workspace,
+        [sys.executable, "-m", "tools.brain.workflow", "current-frontier", "--json"],
+        timeout_sec=timeout_sec,
     )
     skill_sync = _parse_json_stdout(skill_sync_result)
     integrity = _parse_json_stdout(integrity_result)
+    frontier = _parse_json_stdout(frontier_result)
 
     catalog_summary: dict[str, Any] = {"status": "unavailable"}
     frontier_summary: dict[str, Any] = {"status": "unavailable"}
@@ -261,7 +328,6 @@ def health(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
         if str(workspace) not in sys.path:
             sys.path.insert(0, str(workspace))
         from tools.brain.platform import build_brain_catalog
-        from tools.brain.adapters.daily_research_frontier import build_frontier_report
 
         catalog = build_brain_catalog()
         non_truth_statuses = {
@@ -285,17 +351,41 @@ def health(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
                 if isinstance(item, dict) and item.get("status") in non_truth_statuses
             ],
         }
-        frontier = build_frontier_report(workspace_root=workspace)
+    except Exception as exc:
+        catalog_summary = {"status": "error", "error": str(exc)}
+
+    if frontier_result.get("timed_out"):
+        frontier_summary = {
+            "status": "timeout",
+            "timed_out": True,
+            "timeout_sec": frontier_result.get("timeout_sec"),
+            "brain_may_be_stale": False,
+            "warnings": ["frontier_check_timed_out"],
+            "unregistered_latest_run_tags": [],
+            "unregistered_latest_run_details": [],
+            "stderr_tail": frontier_result.get("stderr_tail", ""),
+        }
+    elif frontier_result["returncode"] != 0:
+        frontier_summary = {
+            "status": "failed",
+            "timed_out": False,
+            "timeout_sec": frontier_result.get("timeout_sec"),
+            "brain_may_be_stale": False,
+            "warnings": ["frontier_check_failed"],
+            "unregistered_latest_run_tags": [],
+            "unregistered_latest_run_details": [],
+            "stderr_tail": frontier_result.get("stderr_tail", ""),
+        }
+    else:
         frontier_summary = {
             "status": "warning" if frontier.get("brain_may_be_stale") else "ok",
+            "timed_out": False,
+            "timeout_sec": frontier_result.get("timeout_sec"),
             "brain_may_be_stale": bool(frontier.get("brain_may_be_stale")),
             "warnings": list(frontier.get("warnings", []) or []),
             "unregistered_latest_run_tags": list(frontier.get("unregistered_latest_run_tags", []) or []),
             "unregistered_latest_run_details": list(frontier.get("unregistered_latest_run_details", []) or []),
         }
-    except Exception as exc:
-        catalog_summary = {"status": "error", "error": str(exc)}
-        frontier_summary = {"status": "error", "error": str(exc)}
 
     next_actions: list[str] = []
     if not detected["has_brain"]:
@@ -303,34 +393,52 @@ def health(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
     if not skill_sync.get("all_in_sync", False):
         next_actions.append("run_skill_install")
     integrity_summary = _summary_counts(integrity)
+    if integrity_result.get("timed_out"):
+        next_actions.append("rerun_integrity_with_more_time")
     if integrity_summary["error_count"]:
         next_actions.append("fix_integrity_errors")
+    if doc_guard_result.get("timed_out"):
+        next_actions.append("rerun_doc_guard_with_more_time")
+    if skill_sync_result.get("timed_out"):
+        next_actions.append("rerun_skill_sync_with_more_time")
+    if frontier_result.get("timed_out"):
+        next_actions.append("rerun_frontier_with_more_time")
     if frontier_summary.get("brain_may_be_stale"):
         next_actions.append("review_frontier_reconciliation")
     if not next_actions:
         next_actions.append("run_capsule")
 
+    timed_out = any(bool(result.get("timed_out")) for result in (skill_sync_result, integrity_result, doc_guard_result, frontier_result))
     payload = {
-        "status": "ok" if detected["status"] == "ok" and integrity_result["returncode"] == 0 else "warning",
+        "status": "ok" if detected["status"] == "ok" and integrity_result["returncode"] == 0 and not timed_out else "warning",
         "mode": "full",
+        "health_level": "deep",
         "detect": detected,
         "skill_sync": {
             "status": "ok" if skill_sync_result["returncode"] == 0 else "failed",
             "all_in_sync": bool(skill_sync.get("all_in_sync", False)),
             "skills": list(skill_sync.get("skills", []) or []),
+            "timed_out": bool(skill_sync_result.get("timed_out")),
+            "timeout_sec": skill_sync_result.get("timeout_sec"),
         },
         "doc_guard": {
             "status": "ok" if doc_guard_result["returncode"] == 0 else "failed",
             "returncode": doc_guard_result["returncode"],
+            "timed_out": bool(doc_guard_result.get("timed_out")),
+            "timeout_sec": doc_guard_result.get("timeout_sec"),
             "stdout_tail": doc_guard_result["stdout_tail"],
             "stderr_tail": doc_guard_result["stderr_tail"],
         },
-        "integrity": integrity_summary,
+        "integrity": {
+            **integrity_summary,
+            "timed_out": bool(integrity_result.get("timed_out")),
+            "timeout_sec": integrity_result.get("timeout_sec"),
+        },
         "catalog": catalog_summary,
         "frontier": frontier_summary,
         "next_actions": next_actions,
     }
-    return payload if str(mode or "compact").lower() == "full" else _compact_health(payload)
+    return payload
 
 
 def _title_from_brain_id(brain_id: str) -> str:
@@ -712,6 +820,7 @@ def build_parser() -> argparse.ArgumentParser:
     health_parser = sub.add_parser("health")
     health_parser.add_argument("--cwd", default=".")
     health_parser.add_argument("--mode", choices=("compact", "full"), default="compact")
+    health_parser.add_argument("--timeout-sec", type=float, default=60.0)
     template_parser = sub.add_parser("reflection-template")
     template_parser.add_argument("--json", action="store_true")
     proposal_parser = sub.add_parser("proposal")
@@ -761,7 +870,7 @@ def main() -> int:
         workspace_root = Path(str(args.workspace_root)).resolve() if str(args.workspace_root or "").strip() else None
         payload = register_brain(cwd, workspace_root=workspace_root, brain_id=str(args.brain_id or "") or None)
     elif args.command == "health":
-        payload = health(cwd, mode=str(args.mode or "compact"))
+        payload = health(cwd, mode=str(args.mode or "compact"), timeout_sec=float(args.timeout_sec or 60.0))
     elif args.command == "reflection-template":
         payload = reflection_template()
     elif args.command == "proposal":

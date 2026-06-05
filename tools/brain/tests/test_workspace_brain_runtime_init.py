@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+import importlib.util
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,6 +16,15 @@ ROOT = Path(__file__).resolve().parents[3]
 PYTHON = "C:/Users/ASUS/miniconda3/envs/yolos/python.exe"
 SKILL = ROOT / "brain/skills/workspace-brain/SKILL.md"
 RUNTIME = ROOT / "brain/skills/workspace-brain/scripts/brain_runtime.py"
+
+
+def load_runtime_module():
+    spec = importlib.util.spec_from_file_location("workspace_brain_runtime_under_test", RUNTIME)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("could not load workspace brain runtime")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class WorkspaceBrainRuntimeInitTest(unittest.TestCase):
@@ -69,7 +79,7 @@ class WorkspaceBrainRuntimeInitTest(unittest.TestCase):
         self.assertTrue(detected["has_brain"])
         self.assertEqual(detected["brain_manifest"], str((tmp_root / "brain/brain_manifest.json").resolve()))
 
-    def test_brain_runtime_health_reports_brain_guard_summary(self) -> None:
+    def test_brain_runtime_health_reports_takeover_summary(self) -> None:
         result = subprocess.run(
             [PYTHON, str(RUNTIME), "health", "--cwd", str(ROOT)],
             cwd=str(ROOT),
@@ -82,15 +92,29 @@ class WorkspaceBrainRuntimeInitTest(unittest.TestCase):
 
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["mode"], "compact")
+        self.assertEqual(payload["health_level"], "takeover")
         self.assertIn("detect", payload)
-        self.assertIn("skill_sync", payload)
-        self.assertIn("doc_guard_status", payload)
-        self.assertIn("integrity", payload)
-        self.assertIn("frontier", payload)
-        self.assertIn("catalog", payload)
+        self.assertIn("manifest", payload)
+        self.assertIn("capsule_command", payload)
+        self.assertIn("deferred_checks", payload)
+        self.assertIn("doc_guard", payload["deferred_checks"])
+        self.assertNotIn("skill_sync", payload)
+        self.assertNotIn("doc_guard_status", payload)
+        self.assertNotIn("integrity", payload)
+        self.assertNotIn("frontier", payload)
         self.assertIn("next_actions", payload)
 
-    def test_brain_runtime_health_compact_separates_acknowledged_info(self) -> None:
+    def test_brain_runtime_health_compact_does_not_run_deep_subprocesses(self) -> None:
+        runtime = load_runtime_module()
+        with patch.object(runtime, "_run_command", side_effect=AssertionError("compact health must not run deep checks")):
+            payload = runtime.health(ROOT, mode="compact")
+
+        self.assertEqual(payload["mode"], "compact")
+        self.assertEqual(payload["health_level"], "takeover")
+        self.assertNotIn("doc_guard", payload)
+        self.assertNotIn("frontier", payload)
+
+    def test_brain_runtime_health_compact_reports_project_profile_deferment(self) -> None:
         result = subprocess.run(
             [PYTHON, str(RUNTIME), "health", "--cwd", str(ROOT), "--mode", "compact"],
             cwd=str(ROOT),
@@ -102,26 +126,135 @@ class WorkspaceBrainRuntimeInitTest(unittest.TestCase):
         payload = json.loads(result.stdout)
 
         self.assertEqual(payload["mode"], "compact")
-        self.assertIn("catalog", payload)
-        self.assertIn("acknowledged_info", payload["catalog"])
-        self.assertEqual(payload["catalog"]["actionable_warning_count"], 0)
-        self.assertNotIn("doc_guard", payload)
-        self.assertIn("doc_guard_status", payload)
+        self.assertIn("project_profile_note", payload)
+        self.assertIn("project profile", payload["project_profile_note"])
+        self.assertIn("full_health_command", payload)
 
     def test_brain_runtime_health_full_keeps_detailed_payload(self) -> None:
-        result = subprocess.run(
-            [PYTHON, str(RUNTIME), "health", "--cwd", str(ROOT), "--mode", "full"],
-            cwd=str(ROOT),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=True,
-        )
-        payload = json.loads(result.stdout)
+        runtime = load_runtime_module()
+
+        def fake_run_command(cwd: Path, command: list[str], *, timeout_sec: float | None = None) -> dict[str, object]:
+            self.assertEqual(timeout_sec, 17)
+            joined = " ".join(command)
+            if "skill_install" in joined:
+                stdout = json.dumps({"all_in_sync": True, "skills": []})
+            elif "integrity_check" in joined:
+                stdout = json.dumps({"status": "ok", "error_count": 0, "warning_count": 0, "findings": []})
+            elif "current-frontier" in joined:
+                stdout = json.dumps(
+                    {
+                        "brain_may_be_stale": False,
+                        "warnings": [],
+                        "unregistered_latest_run_tags": [],
+                        "unregistered_latest_run_details": [{"run_tag": "kept-in-full"}],
+                    }
+                )
+            else:
+                stdout = "doc guard ok"
+            return {
+                "command": command,
+                "returncode": 0,
+                "ok": True,
+                "timed_out": False,
+                "timeout_sec": timeout_sec,
+                "stdout": stdout,
+                "stderr": "",
+                "stdout_tail": stdout,
+                "stderr_tail": "",
+            }
+
+        with (
+            patch.object(runtime, "_run_command", side_effect=fake_run_command) as run_command,
+            patch("tools.brain.platform.build_brain_catalog", return_value={"brains": [], "generated_at": "test"}),
+        ):
+            payload = runtime.health(ROOT, mode="full", timeout_sec=17)
 
         self.assertEqual(payload["mode"], "full")
         self.assertIn("doc_guard", payload)
+        self.assertIn("skill_sync", payload)
+        self.assertIn("integrity", payload)
         self.assertIn("unregistered_latest_run_details", payload["frontier"])
+        self.assertEqual(run_command.call_count, 4)
+
+    def test_brain_runtime_full_health_frontier_timeout_is_structured(self) -> None:
+        runtime = load_runtime_module()
+
+        def fake_run_command(cwd: Path, command: list[str], *, timeout_sec: float | None = None) -> dict[str, object]:
+            joined = " ".join(command)
+            if "skill_install" in joined:
+                stdout = json.dumps({"all_in_sync": True, "skills": []})
+                return {
+                    "command": command,
+                    "returncode": 0,
+                    "ok": True,
+                    "timed_out": False,
+                    "timeout_sec": timeout_sec,
+                    "stdout": stdout,
+                    "stderr": "",
+                    "stdout_tail": stdout,
+                    "stderr_tail": "",
+                }
+            if "integrity_check" in joined:
+                stdout = json.dumps({"status": "ok", "error_count": 0, "warning_count": 0, "findings": []})
+                return {
+                    "command": command,
+                    "returncode": 0,
+                    "ok": True,
+                    "timed_out": False,
+                    "timeout_sec": timeout_sec,
+                    "stdout": stdout,
+                    "stderr": "",
+                    "stdout_tail": stdout,
+                    "stderr_tail": "",
+                }
+            if "current-frontier" in joined:
+                return {
+                    "command": command,
+                    "returncode": 124,
+                    "ok": False,
+                    "timed_out": True,
+                    "timeout_sec": timeout_sec,
+                    "stdout": "",
+                    "stderr": "frontier slow",
+                    "stdout_tail": "",
+                    "stderr_tail": "frontier slow",
+                }
+            return {
+                "command": command,
+                "returncode": 0,
+                "ok": True,
+                "timed_out": False,
+                "timeout_sec": timeout_sec,
+                "stdout": "doc guard ok",
+                "stderr": "",
+                "stdout_tail": "doc guard ok",
+                "stderr_tail": "",
+            }
+
+        with (
+            patch.object(runtime, "_run_command", side_effect=fake_run_command),
+            patch("tools.brain.platform.build_brain_catalog", return_value={"brains": [], "generated_at": "test"}),
+        ):
+            payload = runtime.health(ROOT, mode="full", timeout_sec=11)
+
+        self.assertEqual(payload["status"], "warning")
+        self.assertTrue(payload["frontier"]["timed_out"])
+        self.assertEqual(payload["frontier"]["timeout_sec"], 11)
+        self.assertIn("rerun_frontier_with_more_time", payload["next_actions"])
+
+    def test_brain_runtime_deep_check_timeout_is_structured(self) -> None:
+        runtime = load_runtime_module()
+        with patch.object(
+            runtime.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired(cmd=["slow-check"], timeout=1, output="partial", stderr="still running"),
+        ):
+            result = runtime._run_command(ROOT, ["slow-check"], timeout_sec=1)
+
+        self.assertEqual(result["returncode"], 124)
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["timed_out"])
+        self.assertEqual(result["timeout_sec"], 1)
 
 
     def test_brain_runtime_init_infers_brain_id_and_health_for_standalone_project(self) -> None:
