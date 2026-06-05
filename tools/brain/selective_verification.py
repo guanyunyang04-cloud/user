@@ -28,12 +28,32 @@ ALWAYS_COMMANDS = (
     f"{PYTHON_EXECUTABLE} -m tools.brain.integrity_check --json",
 )
 
-BRAIN_TOOL_TESTS = (
+BRAIN_TOOL_FAST_TESTS = (
+    "tools/brain/tests/test_selective_verification.py",
+    "tools/brain/tests/test_project_commit.py",
+    "tools/brain/tests/test_platform.py",
+)
+
+BRAIN_TOOL_CONTRACT_TESTS = (
     "tools/brain/tests/test_capsule.py",
     "tools/brain/tests/test_evidence_registry.py",
     "tools/brain/tests/test_rules.py",
-    "tools/brain/tests/test_workflow_cli.py",
-    "tools/brain/tests/test_workspace_brain_skill.py",
+    "tools/brain/tests/test_workflow_cli.py::BrainWorkflowCliTest::test_bootstrap_cli_outputs_valid_json_capsule",
+    "tools/brain/tests/test_workflow_cli.py::BrainWorkflowCliTest::test_route_cli_outputs_structured_workspace_target",
+    "tools/brain/tests/test_workflow_cli.py::BrainWorkflowCliTest::test_verify_plan_cli_delegates_to_selective_verification",
+    "tools/brain/tests/test_workspace_brain_skill_contract.py",
+)
+
+BRAIN_TOOL_VERIFY_PLAN_TEST = "tools/brain/tests/test_workflow_cli.py::BrainWorkflowCliTest::test_verify_plan_cli_delegates_to_selective_verification"
+
+BRIDGE_MATRIX_TESTS = (
+    "daily_research/path_policy/tests/test_v2_score_backtest_bridge.py",
+    "daily_research/path_policy/tests/test_v2_candidate_review_matrix.py",
+)
+
+HIGH_RETURN_DISCOVERY_TESTS = (
+    "daily_research/path_policy/tests/test_v2_high_return_model_discovery.py",
+    *BRIDGE_MATRIX_TESTS,
 )
 
 FORECAST_TESTS = (
@@ -117,6 +137,17 @@ CONTINUOUS_LONG_TESTS = (
 )
 
 RISK_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+WORKSPACE_AREAS = (
+    "brain",
+    "tools/brain",
+    "daily_research",
+    "traditional_quant_research",
+    "daily_stock_analysis-main",
+    "t0_project",
+)
+PROJECT_FAST_TESTS = {
+    "traditional_quant_research": "traditional_quant_research/tests",
+}
 
 
 def _pytest_command(paths: Iterable[str]) -> str:
@@ -188,6 +219,81 @@ def _is_docs_only_path(path: str) -> bool:
     return path.endswith((".md", ".txt")) or path in {"README.md", "AGENTS.md", "CLAUDE.md", "SKILL.md"}
 
 
+def _area_for_path(path: str) -> str:
+    normalized = _normalize_path(path)
+    if normalized.startswith("tools/brain/"):
+        return "tools/brain"
+    if normalized.startswith("brain/"):
+        return "brain"
+    for area in WORKSPACE_AREAS:
+        if normalized == area or normalized.startswith(f"{area}/"):
+            return area
+    return normalized.split("/", 1)[0] if normalized else "workspace"
+
+
+def _is_brain_doc_path(path: str) -> bool:
+    normalized = _normalize_path(path)
+    return (
+        normalized.startswith("brain/")
+        or "/brain/" in normalized
+        or normalized.startswith("brain/workflows/")
+    ) and normalized.endswith((".md", ".json", ".txt"))
+
+
+def _minimal_blocking_guards(changed_paths: list[str], *, active_artifact_blocked: bool) -> list[str]:
+    if active_artifact_blocked or not changed_paths:
+        return []
+    commands = ["git diff --check"]
+    if any(_is_brain_doc_path(path) for path in changed_paths):
+        commands.append(f"{PYTHON_EXECUTABLE} -m tools.brain.doc_guard check")
+    return commands
+
+
+def _command_mentions_area(command: str, area: str) -> bool:
+    if area == "brain":
+        return " brain/" in command or "tools.brain.doc_guard" in command or "tools.brain.integrity_check" in command
+    return area in command
+
+
+def _skipped_reason_by_area(
+    changed_paths: list[str],
+    selected_commands: list[str],
+    deferred_commands: list[str],
+    warnings: list[str],
+) -> dict[str, str]:
+    touched_paths_by_area: dict[str, list[str]] = {}
+    for path in changed_paths:
+        touched_paths_by_area.setdefault(_area_for_path(path), []).append(path)
+    reasons: dict[str, str] = {}
+    for area in WORKSPACE_AREAS:
+        paths = touched_paths_by_area.get(area, [])
+        if not paths:
+            reasons[area] = "unchanged_area_not_tested"
+            continue
+        if any(path == ACTIVE_ARTIFACT for path in paths):
+            reasons[area] = "critical_active_artifact_blocker"
+        elif all(_is_docs_only_path(path) or _is_brain_doc_path(path) for path in paths):
+            reasons[area] = "docs_only_minimal_guards"
+        elif any(_command_mentions_area(command, area) for command in selected_commands):
+            reasons[area] = "changed_surface_selected"
+        elif any(_command_mentions_area(command, area) for command in deferred_commands):
+            reasons[area] = "changed_surface_deferred_only"
+        elif any(path in warning for path in paths for warning in warnings):
+            reasons[area] = "manual_review_required_no_direct_test"
+        else:
+            reasons[area] = "changed_surface_no_direct_test"
+    return reasons
+
+
+def _project_fast_test_command(project_id: str, default_test_commands: list[str]) -> str | None:
+    if project_id in PROJECT_FAST_TESTS:
+        return _pytest_command([PROJECT_FAST_TESTS[project_id]])
+    for command in default_test_commands:
+        if "pytest" in command:
+            return command
+    return None
+
+
 def build_verification_plan(*, paths: list[str] | None = None, base: str | None = None) -> dict[str, Any]:
     changed_paths = _unique(paths if paths is not None else _git_changed_paths(base=base))
     project_id = infer_project_id_from_paths(changed_paths)
@@ -203,18 +309,21 @@ def build_verification_plan(*, paths: list[str] | None = None, base: str | None 
     warnings: list[str] = []
     risk_level = "low"
     manual_review_required = False
+    active_artifact_blocked = False
 
     for path in changed_paths:
         if project_id not in {"daily_research", "workspace", "cross_project"} and body_root and path.startswith(f"{body_root}/"):
             if path.endswith(".py"):
                 risk_level = _risk_max(risk_level, "medium")
-                for command in default_test_commands:
+                command = _project_fast_test_command(project_id, default_test_commands)
+                if command:
                     _add_command(selected_commands, command)
             continue
 
         if path == ACTIVE_ARTIFACT:
             risk_level = "critical"
             manual_review_required = True
+            active_artifact_blocked = True
             warnings.append("active_artifact_diff_blocker: active execution artifact changed; stop and obtain promotion authority")
             continue
 
@@ -222,17 +331,31 @@ def build_verification_plan(*, paths: list[str] | None = None, base: str | None 
             risk_level = _risk_max(risk_level, "high")
             manual_review_required = True
             warnings.append(f"execution_or_active_boundary: {path} requires manual review before completion")
+            name = Path(path).name
+            test_name = f"daily_research/execution/tests/test_{name}"
+            if test_name.endswith(".py") and (WORKSPACE_ROOT / test_name).exists():
+                _add_command(selected_commands, _pytest_command([test_name]))
             continue
 
         if path.startswith("daily_research/deep_alpha/") or path.startswith("daily_research/baseline/"):
             risk_level = _risk_max(risk_level, "high")
             manual_review_required = True
             warnings.append(f"limited_test_coverage_boundary: {path} requires manual review or added tests")
+            if path.startswith("daily_research/baseline/"):
+                name = Path(path).name
+                test_name = f"daily_research/baseline/tests/test_{name}"
+                if test_name.endswith(".py") and (WORKSPACE_ROOT / test_name).exists():
+                    _add_command(selected_commands, _pytest_command([test_name]))
             continue
 
         if path.startswith("daily_research/data_lake/"):
             risk_level = _risk_max(risk_level, "medium")
             _add_command(selected_commands, _pytest_command(["daily_research/data_lake/tests"]))
+            continue
+
+        if path.startswith("daily_research/data_platform/"):
+            risk_level = _risk_max(risk_level, "medium")
+            _add_command(selected_commands, _pytest_command(["daily_research/data_platform/tests"]))
             continue
 
         if path.startswith("tools/brain/"):
@@ -242,20 +365,20 @@ def build_verification_plan(*, paths: list[str] | None = None, base: str | None 
                     selected_commands,
                     _pytest_command(
                         [
-                            "tools/brain/tests/test_selective_verification.py",
-                            "tools/brain/tests/test_workflow_cli.py",
+                            *BRAIN_TOOL_FAST_TESTS,
+                            BRAIN_TOOL_VERIFY_PLAN_TEST,
                         ]
                     ),
                 )
             elif Path(path).name in {"capsule.py", "workflow.py", "platform.py", "rules.py", "doc_guard.py", "integrity_check.py"}:
-                _add_command(selected_commands, _pytest_command(BRAIN_TOOL_TESTS))
+                _add_command(selected_commands, _pytest_command(BRAIN_TOOL_CONTRACT_TESTS))
             else:
-                _add_command(selected_commands, _pytest_command(["tools/brain/tests"]))
+                _add_command(selected_commands, _pytest_command(BRAIN_TOOL_FAST_TESTS))
             continue
 
         if path.startswith("brain/workflows/") or path.startswith("daily_research/brain/workflows/"):
             risk_level = _risk_max(risk_level, "medium")
-            _add_command(selected_commands, _pytest_command(BRAIN_TOOL_TESTS))
+            _add_command(selected_commands, _pytest_command(BRAIN_TOOL_CONTRACT_TESTS))
             continue
 
         if path in CONTINUOUS_SHARED_CORE:
@@ -298,6 +421,12 @@ def build_verification_plan(*, paths: list[str] | None = None, base: str | None 
             if name.startswith("forecast_") or "forecast" in name:
                 _add_command(selected_commands, _pytest_command(FORECAST_TESTS))
                 _add_command(deferred_long_commands, _pytest_command(FORECAST_DEFERRED_LONG_TESTS))
+            elif name == "v2_score_backtest_bridge.py":
+                _add_command(selected_commands, _pytest_command(BRIDGE_MATRIX_TESTS))
+            elif name == "v2_candidate_review_matrix.py":
+                _add_command(selected_commands, _pytest_command(["daily_research/path_policy/tests/test_v2_candidate_review_matrix.py"]))
+            elif name == "v2_high_return_model_discovery.py":
+                _add_command(selected_commands, _pytest_command(HIGH_RETURN_DISCOVERY_TESTS))
             elif name.startswith("rl_"):
                 _add_command(
                     selected_commands,
@@ -315,7 +444,8 @@ def build_verification_plan(*, paths: list[str] | None = None, base: str | None 
                 if test_name.endswith(".py") and (WORKSPACE_ROOT / test_name).exists():
                     _add_command(selected_commands, _pytest_command([test_name]))
                 else:
-                    _add_command(selected_commands, _pytest_command(["daily_research/path_policy/tests"]))
+                    manual_review_required = True
+                    warnings.append(f"unmapped_python_change: {path} has no selective verification rule")
             continue
 
         if _is_docs_only_path(path):
@@ -326,9 +456,19 @@ def build_verification_plan(*, paths: list[str] | None = None, base: str | None 
             manual_review_required = True
             warnings.append(f"unmapped_python_change: {path} has no selective verification rule")
 
+    blocking_commands = (
+        []
+        if active_artifact_blocked
+        else [
+            *_minimal_blocking_guards(changed_paths, active_artifact_blocked=active_artifact_blocked),
+            *selected_commands,
+        ]
+    )
+    deferred_commands = list(deferred_long_commands)
     return {
         "schema_version": 1,
         "mode": "recommend_only",
+        "coverage_policy": "changed_surface_only",
         "base": str(base or ""),
         "project_id": project_id,
         "project_profile": project_profile,
@@ -336,6 +476,9 @@ def build_verification_plan(*, paths: list[str] | None = None, base: str | None 
         "always_commands": always_commands,
         "selected_commands": selected_commands,
         "deferred_long_commands": deferred_long_commands,
+        "blocking_commands": blocking_commands,
+        "deferred_commands": deferred_commands,
+        "skipped_reason_by_area": _skipped_reason_by_area(changed_paths, selected_commands, deferred_commands, warnings),
         "risk_level": risk_level,
         "warnings": warnings,
         "manual_review_required": manual_review_required,
@@ -355,8 +498,14 @@ def _print_text(payload: dict[str, Any]) -> None:
     print("\nSelected commands:")
     for command in payload["selected_commands"] or ["<none>"]:
         print(f"- {command}")
+    print("\nBlocking commands:")
+    for command in payload["blocking_commands"] or ["<none>"]:
+        print(f"- {command}")
     print("\nDeferred long commands:")
     for command in payload["deferred_long_commands"] or ["<none>"]:
+        print(f"- {command}")
+    print("\nDeferred commands:")
+    for command in payload["deferred_commands"] or ["<none>"]:
         print(f"- {command}")
     if payload["warnings"]:
         print("\nWarnings:")

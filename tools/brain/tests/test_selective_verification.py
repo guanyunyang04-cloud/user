@@ -30,8 +30,16 @@ class SelectiveVerificationTest(unittest.TestCase):
         payload = build_verification_plan(paths=["daily_research/brain/operations_center.md"])
 
         self.assertEqual(payload["changed_paths"], ["daily_research/brain/operations_center.md"])
+        self.assertEqual(payload["coverage_policy"], "changed_surface_only")
         self.assertEqual(len(payload["always_commands"]), 4)
         self.assertEqual(payload["selected_commands"], [])
+        self.assertEqual(
+            payload["blocking_commands"],
+            ["git diff --check", f"{PYTHON} -m tools.brain.doc_guard check"],
+        )
+        self.assertEqual(payload["deferred_commands"], [])
+        self.assertEqual(payload["skipped_reason_by_area"]["daily_research"], "docs_only_minimal_guards")
+        self.assertEqual(payload["skipped_reason_by_area"]["tools/brain"], "unchanged_area_not_tested")
         self.assertEqual(payload["risk_level"], "low")
         self.assertFalse(payload["manual_review_required"])
 
@@ -40,8 +48,34 @@ class SelectiveVerificationTest(unittest.TestCase):
 
         joined = "\n".join(payload["selected_commands"])
         self.assertIn("tools/brain/tests/test_capsule.py", joined)
-        self.assertIn("tools/brain/tests/test_workflow_cli.py", joined)
+        self.assertIn("tools/brain/tests/test_workflow_cli.py::BrainWorkflowCliTest::test_bootstrap_cli_outputs_valid_json_capsule", joined)
+        self.assertNotIn("test_health_cli_aggregates_read_only_checks", joined)
+        self.assertEqual(payload["blocking_commands"][0], "git diff --check")
+        self.assertIn(payload["selected_commands"][0], payload["blocking_commands"])
         self.assertEqual(payload["risk_level"], "medium")
+
+    def test_selective_verification_change_uses_fast_packet_plus_verify_nodeid(self) -> None:
+        payload = build_verification_plan(paths=["tools/brain/selective_verification.py"])
+        joined = "\n".join(payload["selected_commands"])
+
+        self.assertIn("tools/brain/tests/test_selective_verification.py", joined)
+        self.assertIn("tools/brain/tests/test_project_commit.py", joined)
+        self.assertIn("tools/brain/tests/test_platform.py", joined)
+        self.assertIn(
+            "tools/brain/tests/test_workflow_cli.py::BrainWorkflowCliTest::test_verify_plan_cli_delegates_to_selective_verification",
+            joined,
+        )
+        self.assertNotIn("tools/brain/tests/test_workflow_cli.py -q", joined)
+        self.assertNotIn("test_health_cli_aggregates_read_only_checks", joined)
+
+    def test_non_core_brain_tool_change_uses_fast_default_packet(self) -> None:
+        payload = build_verification_plan(paths=["tools/brain/project_commit.py"])
+        joined = "\n".join(payload["selected_commands"])
+
+        self.assertIn("tools/brain/tests/test_selective_verification.py", joined)
+        self.assertIn("tools/brain/tests/test_project_commit.py", joined)
+        self.assertIn("tools/brain/tests/test_platform.py", joined)
+        self.assertNotIn("pytest tools/brain/tests -q", joined)
 
     def test_data_lake_change_selects_data_lake_tests(self) -> None:
         payload = build_verification_plan(paths=["daily_research/data_lake/catalog.py"])
@@ -51,6 +85,42 @@ class SelectiveVerificationTest(unittest.TestCase):
             [f"{PYTHON} -m pytest daily_research/data_lake/tests -q"],
         )
         self.assertEqual(payload["risk_level"], "medium")
+
+    def test_data_platform_change_selects_data_platform_tests(self) -> None:
+        payload = build_verification_plan(paths=["daily_research/data_platform/refresh_daily.py"])
+
+        self.assertEqual(
+            payload["selected_commands"],
+            [f"{PYTHON} -m pytest daily_research/data_platform/tests -q"],
+        )
+        self.assertEqual(payload["blocking_commands"][0], "git diff --check")
+        self.assertIn(payload["selected_commands"][0], payload["blocking_commands"])
+        self.assertEqual(payload["risk_level"], "medium")
+
+    def test_bridge_change_selects_bridge_and_candidate_matrix_tests(self) -> None:
+        payload = build_verification_plan(paths=["daily_research/path_policy/v2_score_backtest_bridge.py"])
+        joined = "\n".join(payload["selected_commands"])
+
+        self.assertIn("daily_research/path_policy/tests/test_v2_score_backtest_bridge.py", joined)
+        self.assertIn("daily_research/path_policy/tests/test_v2_candidate_review_matrix.py", joined)
+        self.assertEqual(payload["deferred_commands"], [])
+
+    def test_candidate_matrix_change_selects_candidate_matrix_test_only(self) -> None:
+        payload = build_verification_plan(paths=["daily_research/path_policy/v2_candidate_review_matrix.py"])
+
+        self.assertEqual(
+            payload["selected_commands"],
+            [f"{PYTHON} -m pytest daily_research/path_policy/tests/test_v2_candidate_review_matrix.py -q"],
+        )
+
+    def test_high_return_discovery_change_selects_discovery_bridge_and_matrix_tests(self) -> None:
+        payload = build_verification_plan(paths=["daily_research/path_policy/v2_high_return_model_discovery.py"])
+        joined = "\n".join(payload["selected_commands"])
+
+        self.assertIn("daily_research/path_policy/tests/test_v2_high_return_model_discovery.py", joined)
+        self.assertIn("daily_research/path_policy/tests/test_v2_score_backtest_bridge.py", joined)
+        self.assertIn("daily_research/path_policy/tests/test_v2_candidate_review_matrix.py", joined)
+        self.assertNotIn("daily_research/path_policy/tests -q", joined)
 
     def test_forecast_change_selects_forecast_tests_without_rl_protocol_file(self) -> None:
         payload = build_verification_plan(paths=["daily_research/path_policy/forecast_training.py"])
@@ -70,6 +140,7 @@ class SelectiveVerificationTest(unittest.TestCase):
         deferred = "\n".join(payload["deferred_long_commands"])
         self.assertIn("daily_research/path_policy/tests/test_forecast_dataset.py", deferred)
         self.assertIn("daily_research/path_policy/tests/test_forecast_training.py", deferred)
+        self.assertEqual(payload["deferred_commands"], payload["deferred_long_commands"])
 
     def test_rl_protocol_change_uses_nodeid_groups_not_whole_file(self) -> None:
         payload = build_verification_plan(paths=["daily_research/path_policy/run_alpha_path20_protocol.py"])
@@ -106,6 +177,20 @@ class SelectiveVerificationTest(unittest.TestCase):
         self.assertEqual(payload["risk_level"], "critical")
         self.assertTrue(payload["manual_review_required"])
         self.assertTrue(any("active_artifact_diff_blocker" in warning for warning in payload["warnings"]))
+        self.assertEqual(payload["blocking_commands"], [])
+        self.assertEqual(payload["skipped_reason_by_area"]["daily_research"], "critical_active_artifact_blocker")
+
+    def test_active_artifact_mixed_change_suppresses_normal_blocking_tests(self) -> None:
+        payload = build_verification_plan(
+            paths=[
+                "daily_research/output/active_execution_strategy.json",
+                "daily_research/path_policy/v2_score_backtest_bridge.py",
+            ]
+        )
+
+        self.assertEqual(payload["risk_level"], "critical")
+        self.assertEqual(payload["blocking_commands"], [])
+        self.assertTrue(any("active_artifact_diff_blocker" in warning for warning in payload["warnings"]))
 
     def test_base_diff_active_artifact_change_reports_blocker(self) -> None:
         def fake_run_git(args: list[str]) -> list[str]:
@@ -132,6 +217,9 @@ class SelectiveVerificationTest(unittest.TestCase):
         self.assertEqual(payload["changed_paths"], ["daily_research/path_policy/forecast_features.py"])
         self.assertIn("always_commands", payload)
         self.assertIn("selected_commands", payload)
+        self.assertIn("blocking_commands", payload)
+        self.assertIn("deferred_commands", payload)
+        self.assertEqual(payload["coverage_policy"], "changed_surface_only")
 
     def test_cli_paths_take_priority_over_base(self) -> None:
         payload = run_cli(

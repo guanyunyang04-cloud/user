@@ -189,7 +189,9 @@ def load_project_profile(project_id: str | None) -> dict[str, Any]:
                     f"{PYTHON_EXECUTABLE} -m tools.brain.doc_guard check",
                     f"{PYTHON_EXECUTABLE} -m tools.brain.integrity_check --json",
                 ],
-                "default_test_commands": [f"{PYTHON_EXECUTABLE} -m pytest tools/brain/tests -q"],
+                "default_test_commands": [
+                    f"{PYTHON_EXECUTABLE} -m pytest tools/brain/tests/test_selective_verification.py tools/brain/tests/test_project_commit.py tools/brain/tests/test_platform.py -q",
+                ],
                 "big_artifact_paths": ["brain/output/**"],
             },
             "commit_policy": {
