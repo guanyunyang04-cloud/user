@@ -108,10 +108,10 @@ DATA_SPECS: dict[str, DataSpec] = {
         key="long_history_augmented",
         dataset_id=TRADITIONAL_BAOSTOCK_V2_1_DATASET_ID,
         pool_view_id=LONG_HISTORY_POOL_VIEW_ID,
-        start_date="20160101",
+        start_date="20170101",
         end_date="20241231",
         split_keys=("a", "b", "c", "long"),
-        description="2016-2024 augmented long-history substrate",
+        description="2017-2024 benchmark-covered augmented long-history substrate",
     ),
     "smoke32_augmented": DataSpec(
         key="smoke32_augmented",

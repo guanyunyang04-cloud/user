@@ -247,6 +247,36 @@ def test_datewise_industry_group_helpers_match_naive_semantics() -> None:
     assert z_fast.loc[dates[0], "BBB"] == pytest.approx(1.0)
 
 
+def test_static_industry_frame_group_helpers_match_series_fast_path() -> None:
+    dates = pd.bdate_range("2024-01-02", periods=3)
+    columns = ["AAA", "BBB", "CCC", "DDD"]
+    values = pd.DataFrame(
+        [
+            [1.0, 3.0, 10.0, 14.0],
+            [np.nan, 4.0, 8.0, 16.0],
+            [5.0, 7.0, np.nan, 20.0],
+        ],
+        index=dates,
+        columns=columns,
+    )
+    group_series = pd.Series(["tech", "tech", "bank", "bank"], index=columns)
+    group_frame = pd.DataFrame(
+        np.repeat(group_series.to_numpy(dtype=object).reshape(1, -1), len(dates), axis=0),
+        index=dates,
+        columns=columns,
+    )
+    condition = values.gt(6.0)
+
+    pd.testing.assert_frame_equal(_group_mean_frame(values, group_frame), _group_mean_frame(values, group_series))
+    pd.testing.assert_frame_equal(_group_rank_frame(values, group_frame), _group_rank_frame(values, group_series))
+    pd.testing.assert_frame_equal(_group_z_frame(values, group_frame), _group_z_frame(values, group_series))
+    pd.testing.assert_frame_equal(
+        _group_member_count_frame(group_frame, index=dates, columns=columns),
+        _group_member_count_frame(group_series, index=dates, columns=columns),
+    )
+    pd.testing.assert_frame_equal(_group_share_frame(condition, group_frame), _group_share_frame(condition, group_series))
+
+
 def test_sector_relative_profile_uses_industry_relative_features_and_logs() -> None:
     prepared = make_prepared_policy_inputs(days=90, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2024-01-02")
     prepared.metadata_frames["industry_map"] = pd.DataFrame(

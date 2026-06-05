@@ -223,6 +223,17 @@ def _extend_end_date_for_labels(end_date: str, *, days: int = 60) -> str:
     return (pd.Timestamp(end_date).normalize() + pd.Timedelta(days=int(days))).strftime("%Y%m%d")
 
 
+def _date_key_yyyymmdd(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return pd.Timestamp(text).strftime("%Y%m%d")
+
+
+def _argv_has_option(argv: list[str], option: str) -> bool:
+    return any(item == option or item.startswith(f"{option}=") for item in argv)
+
+
 def _finite_mean(values: list[float]) -> float:
     finite = [float(item) for item in values if np.isfinite(float(item))]
     return float(np.mean(finite)) if finite else 0.0
@@ -3630,7 +3641,9 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
 
 def main(argv: list[str] | None = None) -> dict[str, Any]:
     parser = build_arg_parser()
-    args = parser.parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    explicit_start_date = _argv_has_option(raw_argv, "--start-date")
+    args = parser.parse_args(raw_argv)
     _validate_protocol_args(parser, args)
     tag = str(args.tag or "").strip()
     study_root = PATH_POLICY_STUDIES_ROOT / tag
@@ -3790,7 +3803,10 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     prepare_start_date = args.start_date
     prepare_end_date = args.end_date
     if args.stage in FORECAST_MAINLINE_STAGES:
-        prepare_start_date = f"{int(args.forecast_train_start_year) - 1}0101"
+        warmup_start_date = f"{int(args.forecast_train_start_year) - 1}0101"
+        prepare_start_date = warmup_start_date
+        if explicit_start_date and str(args.start_date or "").strip():
+            prepare_start_date = max(_date_key_yyyymmdd(args.start_date), _date_key_yyyymmdd(warmup_start_date))
         prepare_end_date = f"{int(args.forecast_test_year)}1231"
     prepared = prepare_policy_inputs(
         pool_name=args.pool_name,

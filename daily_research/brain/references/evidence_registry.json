@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 112,
+  "record_count": 113,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -1877,6 +1877,47 @@
       "active_artifact_impact": "unchanged",
       "dataset_ids": [
         "policy_input_bundle__2082fee5bb1760972d8c9012",
+        "policy_pool_view__d7a56d5164470b590e4f5a40"
+      ]
+    },
+    {
+      "id": "daily_research_v2_high_return_long_history_scout_20260605",
+      "date": "2026-06-05",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_high_return_long_history_scout_20260605.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_high_return_model_discovery"
+      ],
+      "run_tags": [
+        "mh_v2_hrd_long_a_gru_seed7_20260604_01",
+        "mh_v2_hrd_long_b_gru_seed7_20260604_01",
+        "mh_v2_hrd_long_c_gru_seed7_20260604_01",
+        "mh_v2_hrd_long_long_gru_seed7_20260604_01",
+        "mh_v2_hrd_same_same_gru_seed7_20260604_01"
+      ],
+      "verdict": "Status: `high_return_model_discovery / long_history_single_seed_multi_split_completed / same_period_control_completed / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_high_return_model_discovery`.; Active artifact impact: `daily_research/output/active_execution_strategy.json` unchanged.",
+      "blockers": [
+        "Same-period control failed transfer, so the apparent `long_a` strength should be treated as a useful objective/label/loss design clue rather than a model-quality pass."
+      ],
+      "next_allowed_actions": [
+        "Pivot to direct return objective / label / loss scouts, still single-seed and research-only:",
+        "top-decile / topN excess-return objective;",
+        "score-to-weight proxy loss;",
+        "bad-month-aware auxiliary loss;",
+        "local-volatility / reversal-state penalty;",
+        "high-return label variants that reduce forecast-metric-to-portfolio-return mismatch."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__2082fee5bb1760972d8c9012",
+        "policy_pool_view__eb690dd0becc330f029c21bd",
         "policy_pool_view__d7a56d5164470b590e4f5a40"
       ]
     },

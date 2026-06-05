@@ -462,17 +462,68 @@ def _datewise_group_label_frame(group: pd.DataFrame, *, index: pd.Index, columns
     return label_frame, label_names
 
 
+def _static_group_series_from_frame(group: pd.DataFrame, *, index: pd.Index, columns: list[str]) -> pd.Series | None:
+    aligned = group.reindex(index=index, columns=columns)
+    labels = aligned.where(aligned.notna(), "").to_numpy(dtype=str)
+    labels = np.char.strip(labels)
+    if len(index) == 0:
+        return pd.Series(index=columns, dtype=object)
+    first = labels[0, :]
+    if not bool(np.all(labels == first.reshape(1, -1))):
+        return None
+    series = pd.Series(first, index=columns, dtype=object)
+    return series.where(series.astype(str).str.len() > 0, np.nan)
+
+
+def _row_group_slices(labels: np.ndarray) -> list[np.ndarray]:
+    valid = labels != ""
+    if not bool(valid.any()):
+        return []
+    _unique, inverse = np.unique(labels[valid], return_inverse=True)
+    valid_positions = np.flatnonzero(valid)
+    return [valid_positions[inverse == group_idx] for group_idx in range(int(inverse.max()) + 1)]
+
+
+def _average_pct_rank(values: np.ndarray) -> np.ndarray:
+    ranks = np.full(len(values), np.nan, dtype=float)
+    valid = ~np.isnan(values)
+    if not bool(valid.any()):
+        return ranks
+    valid_positions = np.flatnonzero(valid)
+    valid_values = values[valid]
+    order = np.argsort(valid_values, kind="mergesort")
+    sorted_values = valid_values[order]
+    n = len(sorted_values)
+    start = 0
+    while start < n:
+        end = start + 1
+        while end < n and sorted_values[end] == sorted_values[start]:
+            end += 1
+        rank = (start + 1 + end) / 2.0 / n
+        ranks[valid_positions[order[start:end]]] = rank
+        start = end
+    return ranks
+
+
 def _datewise_group_mean_frame_fast(values: pd.DataFrame, group: pd.DataFrame) -> pd.DataFrame:
     columns = list(values.columns)
-    out = pd.DataFrame(np.nan, index=values.index, columns=columns, dtype=float)
+    static_group = _static_group_series_from_frame(group, index=values.index, columns=columns)
+    if static_group is not None:
+        return _group_mean_frame(values, static_group)
     label_frame, labels = _datewise_group_label_frame(group, index=values.index, columns=columns)
-    for label in labels:
-        mask = label_frame.eq(label)
-        group_sum = values.where(mask).sum(axis=1, min_count=1)
-        group_count = values.where(mask).count(axis=1).replace(0, np.nan)
-        group_mean = group_sum.div(group_count)
-        out = out.where(~mask, pd.DataFrame(np.repeat(group_mean.to_numpy(dtype=float).reshape(-1, 1), len(columns), axis=1), index=values.index, columns=columns))
-    return out
+    if not labels:
+        return pd.DataFrame(np.nan, index=values.index, columns=columns, dtype=float)
+    value_array = values.reindex(columns=columns).to_numpy(dtype=float, copy=False)
+    label_array = label_frame.to_numpy(dtype=str, copy=False)
+    out = np.full(value_array.shape, np.nan, dtype=float)
+    for row_idx in range(value_array.shape[0]):
+        row_values = value_array[row_idx]
+        for positions in _row_group_slices(label_array[row_idx]):
+            group_values = row_values[positions]
+            if np.isnan(group_values).all():
+                continue
+            out[row_idx, positions] = float(np.nanmean(group_values))
+    return pd.DataFrame(out, index=values.index, columns=columns)
 
 
 def _group_mean_frame(values: pd.DataFrame, group: pd.Series | pd.DataFrame) -> pd.DataFrame:
@@ -505,13 +556,20 @@ def _datewise_group_mean_frame(values: pd.DataFrame, group: pd.DataFrame) -> pd.
 
 def _datewise_group_rank_frame_fast(values: pd.DataFrame, group: pd.DataFrame) -> pd.DataFrame:
     columns = list(values.columns)
-    out = pd.DataFrame(np.nan, index=values.index, columns=columns, dtype=float)
+    static_group = _static_group_series_from_frame(group, index=values.index, columns=columns)
+    if static_group is not None:
+        return _group_rank_frame(values, static_group)
     label_frame, labels = _datewise_group_label_frame(group, index=values.index, columns=columns)
-    for label in labels:
-        mask = label_frame.eq(label)
-        ranks = values.where(mask).rank(axis=1, pct=True, method="average")
-        out = out.where(~mask, ranks)
-    return out
+    if not labels:
+        return pd.DataFrame(np.nan, index=values.index, columns=columns, dtype=float)
+    value_array = values.reindex(columns=columns).to_numpy(dtype=float, copy=False)
+    label_array = label_frame.to_numpy(dtype=str, copy=False)
+    out = np.full(value_array.shape, np.nan, dtype=float)
+    for row_idx in range(value_array.shape[0]):
+        row_values = value_array[row_idx]
+        for positions in _row_group_slices(label_array[row_idx]):
+            out[row_idx, positions] = _average_pct_rank(row_values[positions])
+    return pd.DataFrame(out, index=values.index, columns=columns)
 
 
 def _group_rank_frame(values: pd.DataFrame, group: pd.Series | pd.DataFrame) -> pd.DataFrame:
@@ -543,16 +601,30 @@ def _datewise_group_rank_frame(values: pd.DataFrame, group: pd.DataFrame) -> pd.
 def _group_z_frame(values: pd.DataFrame, group: pd.Series | pd.DataFrame) -> pd.DataFrame:
     if isinstance(group, pd.DataFrame):
         columns = list(values.columns)
-        out = pd.DataFrame(np.nan, index=values.index, columns=columns, dtype=float)
+        static_group = _static_group_series_from_frame(group, index=values.index, columns=columns)
+        if static_group is not None:
+            return _group_z_frame(values, static_group)
         label_frame, labels = _datewise_group_label_frame(group, index=values.index, columns=columns)
-        for label in labels:
-            mask = label_frame.eq(label)
-            masked = values.where(mask).replace([np.inf, -np.inf], np.nan)
-            mean = masked.mean(axis=1)
-            std = masked.std(axis=1, ddof=0).replace(0.0, np.nan)
-            z = masked.sub(mean, axis=0).div(std, axis=0)
-            out = out.where(~mask, z)
-        return out.replace([np.inf, -np.inf], np.nan)
+        if not labels:
+            return pd.DataFrame(np.nan, index=values.index, columns=columns, dtype=float)
+        value_array = values.reindex(columns=columns).to_numpy(dtype=float, copy=False)
+        label_array = label_frame.to_numpy(dtype=str, copy=False)
+        out = np.full(value_array.shape, np.nan, dtype=float)
+        for row_idx in range(value_array.shape[0]):
+            row_values = value_array[row_idx]
+            for positions in _row_group_slices(label_array[row_idx]):
+                group_values = row_values[positions]
+                finite = np.isfinite(group_values)
+                if not bool(finite.any()):
+                    continue
+                mean = float(np.mean(group_values[finite]))
+                std = float(np.std(group_values[finite], ddof=0))
+                if std == 0.0 or not np.isfinite(std):
+                    continue
+                z_values = (group_values - mean) / std
+                z_values[~np.isfinite(z_values)] = np.nan
+                out[row_idx, positions] = z_values
+        return pd.DataFrame(out, index=values.index, columns=columns)
     out = pd.DataFrame(np.nan, index=values.index, columns=values.columns, dtype=float)
     for group_name in sorted(str(item) for item in group.dropna().unique()):
         members = [stock for stock in values.columns if str(group.get(stock, "")) == group_name]
@@ -567,12 +639,17 @@ def _group_z_frame(values: pd.DataFrame, group: pd.Series | pd.DataFrame) -> pd.
 
 def _group_member_count_frame(group: pd.Series | pd.DataFrame, *, index: pd.Index, columns: list[str], log: bool = False) -> pd.DataFrame:
     if isinstance(group, pd.DataFrame):
-        out = pd.DataFrame(0.0, index=index, columns=columns, dtype=float)
+        static_group = _static_group_series_from_frame(group, index=index, columns=columns)
+        if static_group is not None:
+            return _group_member_count_frame(static_group, index=index, columns=columns, log=log)
         label_frame, labels = _datewise_group_label_frame(group, index=index, columns=columns)
-        for label in labels:
-            mask = label_frame.eq(label)
-            counts = mask.sum(axis=1).astype(float)
-            out = out.where(~mask, pd.DataFrame(np.repeat(counts.to_numpy(dtype=float).reshape(-1, 1), len(columns), axis=1), index=index, columns=columns))
+        out_array = np.zeros((len(index), len(columns)), dtype=float)
+        if labels:
+            label_array = label_frame.to_numpy(dtype=str, copy=False)
+            for row_idx in range(label_array.shape[0]):
+                for positions in _row_group_slices(label_array[row_idx]):
+                    out_array[row_idx, positions] = float(len(positions))
+        out = pd.DataFrame(out_array, index=index, columns=columns)
     else:
         member_count = group.map(group.value_counts()).reindex(columns).fillna(0.0).astype(float)
         out = pd.DataFrame(
@@ -611,14 +688,23 @@ def _sector_context_feature_frames(prepared: PreparedPolicyInputs, *, progress_r
 def _group_share_frame(condition: pd.DataFrame, group: pd.Series | pd.DataFrame) -> pd.DataFrame:
     if isinstance(group, pd.DataFrame):
         columns = list(condition.columns)
-        out = pd.DataFrame(np.nan, index=condition.index, columns=columns, dtype=float)
+        static_group = _static_group_series_from_frame(group, index=condition.index, columns=columns)
+        if static_group is not None:
+            return _group_share_frame(condition, static_group)
         label_frame, labels = _datewise_group_label_frame(group, index=condition.index, columns=columns)
-        values = condition.astype(float)
-        for label in labels:
-            mask = label_frame.eq(label)
-            share = values.where(mask).mean(axis=1)
-            out = out.where(~mask, pd.DataFrame(np.repeat(share.to_numpy(dtype=float).reshape(-1, 1), len(columns), axis=1), index=condition.index, columns=columns))
-        return out
+        if not labels:
+            return pd.DataFrame(np.nan, index=condition.index, columns=columns, dtype=float)
+        value_array = condition.reindex(columns=columns).astype(float).to_numpy(dtype=float, copy=False)
+        label_array = label_frame.to_numpy(dtype=str, copy=False)
+        out = np.full(value_array.shape, np.nan, dtype=float)
+        for row_idx in range(value_array.shape[0]):
+            row_values = value_array[row_idx]
+            for positions in _row_group_slices(label_array[row_idx]):
+                group_values = row_values[positions]
+                if np.isnan(group_values).all():
+                    continue
+                out[row_idx, positions] = float(np.nanmean(group_values))
+        return pd.DataFrame(out, index=condition.index, columns=columns)
     out = pd.DataFrame(np.nan, index=condition.index, columns=condition.columns, dtype=float)
     for group_name in sorted(str(item) for item in group.dropna().unique()):
         members = [stock for stock in condition.columns if str(group.get(stock, "")) == group_name]

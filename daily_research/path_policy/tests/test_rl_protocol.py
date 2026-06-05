@@ -457,6 +457,94 @@ def test_protocol_pool_view_kind_builds_explicit_spec_for_prepare(monkeypatch, t
     assert captured["pool_view_spec"]["source_market_dataset_id"] == "policy_input_bundle__fixed"
 
 
+def test_forecast_prepare_window_clamps_to_explicit_start_date(monkeypatch, tmp_path) -> None:
+    import daily_research.path_policy.run_alpha_path20_protocol as protocol
+
+    captured: dict[str, object] = {}
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2017-01-03")
+
+    def fake_prepare(**kwargs):
+        captured.update(kwargs)
+        return prepared
+
+    monkeypatch.setattr(protocol, "PATH_POLICY_STUDIES_ROOT", tmp_path / "studies")
+    monkeypatch.setattr(protocol, "prepare_policy_inputs", fake_prepare)
+    monkeypatch.setattr(protocol, "_run_forecast_walkforward_study", lambda **kwargs: {"status": "completed"})
+
+    summary = main(
+        [
+            "--stage",
+            "forecast-walkforward-study",
+            "--tag",
+            "unit_forecast_explicit_start",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--start-date",
+            "20170101",
+            "--end-date",
+            "20241231",
+            "--forecast-train-start-year",
+            "2017",
+            "--forecast-train-end-year",
+            "2020",
+            "--forecast-validation-year",
+            "2021",
+            "--forecast-test-year",
+            "2022",
+            "--forecast-dataset-mode",
+            "memmap",
+        ]
+    )
+
+    assert summary["status"] == "completed"
+    assert captured["start_date"] == "20170101"
+    assert captured["end_date"] == "20221231"
+
+
+def test_forecast_prepare_window_keeps_default_warmup_without_explicit_start(monkeypatch, tmp_path) -> None:
+    import daily_research.path_policy.run_alpha_path20_protocol as protocol
+
+    captured: dict[str, object] = {}
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2018-01-02")
+
+    def fake_prepare(**kwargs):
+        captured.update(kwargs)
+        return prepared
+
+    monkeypatch.setattr(protocol, "PATH_POLICY_STUDIES_ROOT", tmp_path / "studies")
+    monkeypatch.setattr(protocol, "prepare_policy_inputs", fake_prepare)
+    monkeypatch.setattr(protocol, "_run_forecast_walkforward_study", lambda **kwargs: {"status": "completed"})
+
+    summary = main(
+        [
+            "--stage",
+            "forecast-walkforward-study",
+            "--tag",
+            "unit_forecast_default_warmup",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-train-start-year",
+            "2019",
+            "--forecast-train-end-year",
+            "2020",
+            "--forecast-validation-year",
+            "2021",
+            "--forecast-test-year",
+            "2022",
+            "--forecast-dataset-mode",
+            "memmap",
+        ]
+    )
+
+    assert summary["status"] == "completed"
+    assert captured["start_date"] == "20180101"
+    assert captured["end_date"] == "20221231"
+
+
 def test_protocol_parser_accepts_walkforward_matrix_stage() -> None:
     args = build_arg_parser().parse_args(
         [
