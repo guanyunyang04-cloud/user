@@ -142,13 +142,10 @@
     "verification_profile": {
       "always_commands": [
         "git diff --check",
-        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest traditional_quant_research/tests -q",
         "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check",
         "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json"
       ],
-      "default_test_commands": [
-        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest traditional_quant_research/tests -q"
-      ],
+      "default_test_commands": [],
       "big_artifact_paths": [
         "traditional_quant_research/output/**",
         "traditional_quant_research/cache/**",

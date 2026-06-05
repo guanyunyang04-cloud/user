@@ -241,7 +241,8 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertNotIn("frontier_report", payload["guards"])
         self.assertNotIn("daily_research/output/active_execution_strategy.json", encoded_guards)
         self.assertNotIn("daily_research/output/active_execution_strategy.json", encoded_payload)
-        self.assertIn("traditional_quant_research/tests", encoded_guards)
+        self.assertNotIn("traditional_quant_research/tests -q", encoded_guards)
+        self.assertEqual(payload["project_profile"]["verification_profile"]["default_test_commands"], [])
 
     def test_capsule_long_task_wording_stays_in_brain_handoff(self) -> None:
         payload = build_task_capsule(

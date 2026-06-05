@@ -33,15 +33,19 @@
 - 先接 brain
 - 再看产品地图和入口边界
 - 再按 body_map 进入产品代码
+- 默认写代码采用主脑 personal researcher direct-change：内部产品脚本、旧 helper、旧测试若无真实调用证据或外部接口责任，直接改到当前合约或删除
 - 不把 `README / docs / AGENTS.md / CLAUDE.md` 当成主入口
 - README 或 docs 中出现新的稳定能力、配置字段、运行入口或验证入口时，先整合到本分脑，再保留公开文档摘要
 - 文档语言遵循 `brain/language_policy.md`：中文语义 + 英文工程标识；CLI、JSON key、路径、tag 与代码符号保留英文。
 
 ## 3. 验证入口
-- 后端验证：
+- 默认 changed-surface 验证：
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.selective_verification --paths <changed_paths> --json`
+  - 按 `blocking_commands` 执行本次最小验证；未映射 Python 改动先 manual review 或补同面测试，不默认整包跑
+- 后端收尾/发布验证：
   - `./scripts/ci_gate.sh`
   - `python -m pytest -m "not network"`
-- Web / Desktop：
+- Web / Desktop 收尾/发布验证：
   - `npm ci`
   - `npm run lint`
   - `npm run test`
@@ -53,7 +57,7 @@
   - `python scripts/check_ai_assets.py`
 - AI 兼容入口修改后：
   - 运行 `python scripts/check_ai_assets.py`
-  - 再运行工作区 `doc_guard.py check`
+  - 再运行工作区 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check`
 - README 常用用户入口：
   - 本地运行：`python main.py`
   - Web 入口：`python webui.py` 或项目中对应 Web/API 启动脚本

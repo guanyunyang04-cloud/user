@@ -331,7 +331,7 @@ REQUIRED_DOC_SNIPPETS = {
         "## 默认操作纪律",
         "## 高频 Brain 命令",
         "## Continuous Policy 运行口径",
-        "## 必跑守卫",
+        "## 验证分层",
         "## 写回路由",
         "## 历史归档入口",
         "tools.brain.workflow capsule",

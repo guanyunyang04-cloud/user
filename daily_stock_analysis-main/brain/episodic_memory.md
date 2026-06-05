@@ -31,4 +31,4 @@
   - 将稳定开发规则、验证矩阵、目录边界、策略体系边界补入 `knowledge_center.md` 与 `operations_center.md`。
 - 后续要求：
   - 修改 AI 兼容入口后必须运行 `python scripts/check_ai_assets.py`。
-  - 工作区层面还必须运行 `daily_research/tools/doc_guard.py check`，确认兼容入口没有重新漂移。
+  - 工作区层面还必须运行 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check`，确认兼容入口没有重新漂移。

@@ -132,7 +132,8 @@ class BrainPlatformTest(unittest.TestCase):
         self.assertFalse(payload["project_profile"]["guard_profile"]["active_artifact_guard"])
         self.assertEqual(payload["artifact_freshness"], {})
         self.assertNotIn("daily_research/output/active_execution_strategy.json", encoded)
-        self.assertIn("traditional_quant_research/tests", encoded)
+        self.assertNotIn("traditional_quant_research/tests -q", encoded)
+        self.assertEqual(payload["project_profile"]["verification_profile"]["default_test_commands"], [])
 
     def test_workspace_governance_alias_bootstraps_workspace(self) -> None:
         for alias in ("workspace", "workspace_root", "workspace_governance"):

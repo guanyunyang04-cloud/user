@@ -77,6 +77,21 @@ class SelectiveVerificationTest(unittest.TestCase):
         self.assertIn("tools/brain/tests/test_platform.py", joined)
         self.assertNotIn("pytest tools/brain/tests -q", joined)
 
+    def test_overlapping_brain_tool_packets_keep_only_widest_pytest_command(self) -> None:
+        payload = build_verification_plan(
+            paths=[
+                "tools/brain/selective_verification.py",
+                "tools/brain/project_profiles.py",
+            ]
+        )
+
+        self.assertEqual(len(payload["selected_commands"]), 1)
+        joined = payload["selected_commands"][0]
+        self.assertIn("tools/brain/tests/test_selective_verification.py", joined)
+        self.assertIn("tools/brain/tests/test_project_commit.py", joined)
+        self.assertIn("tools/brain/tests/test_platform.py", joined)
+        self.assertIn("test_verify_plan_cli_delegates_to_selective_verification", joined)
+
     def test_data_lake_change_selects_data_lake_tests(self) -> None:
         payload = build_verification_plan(paths=["daily_research/data_lake/catalog.py"])
 
@@ -233,14 +248,37 @@ class SelectiveVerificationTest(unittest.TestCase):
         self.assertEqual(payload["changed_paths"], ["daily_research/brain/state_center.md"])
         self.assertEqual(payload["selected_commands"], [])
 
-    def test_traditional_quant_change_uses_project_profile_without_daily_active_guard(self) -> None:
-        payload = build_verification_plan(paths=["traditional_quant_research/backtest.py"])
+    def test_traditional_quant_change_uses_same_surface_test_without_daily_active_guard(self) -> None:
+        payload = build_verification_plan(paths=["traditional_quant_research/experiments/frontier_ml_signal_rebuild.py"])
         encoded = json.dumps(payload, ensure_ascii=False)
 
         self.assertEqual(payload["project_id"], "traditional_quant_research")
         self.assertNotIn("daily_research/output/active_execution_strategy.json", encoded)
-        self.assertIn(f"{PYTHON} -m pytest traditional_quant_research/tests -q", payload["selected_commands"])
+        self.assertEqual(
+            payload["selected_commands"],
+            [f"{PYTHON} -m pytest traditional_quant_research/tests/test_frontier_ml_signal_rebuild.py -q"],
+        )
         self.assertIn("git diff --check", payload["always_commands"])
+        self.assertNotIn(f"{PYTHON} -m pytest traditional_quant_research/tests -q", payload["selected_commands"])
+
+    def test_unmapped_project_python_change_requires_manual_review_not_project_suite(self) -> None:
+        payload = build_verification_plan(paths=["traditional_quant_research/backtest.py"])
+
+        self.assertEqual(payload["project_id"], "traditional_quant_research")
+        self.assertEqual(payload["selected_commands"], [])
+        self.assertTrue(payload["manual_review_required"])
+        self.assertTrue(any("unmapped_project_python_change" in warning for warning in payload["warnings"]))
+        self.assertEqual(payload["skipped_reason_by_area"]["traditional_quant_research"], "manual_review_required_no_direct_test")
+
+    def test_project_test_file_change_runs_that_test_file_only(self) -> None:
+        payload = build_verification_plan(paths=["daily_stock_analysis-main/tests/test_config_manager.py"])
+
+        self.assertEqual(payload["project_id"], "daily_stock_analysis-main")
+        self.assertEqual(
+            payload["selected_commands"],
+            [f"{PYTHON} -m pytest daily_stock_analysis-main/tests/test_config_manager.py -q"],
+        )
+        self.assertFalse(payload["manual_review_required"])
 
     def test_daily_change_keeps_daily_active_guard(self) -> None:
         payload = build_verification_plan(paths=["daily_research/path_policy/forecast_features.py"])

@@ -35,7 +35,7 @@
 - 如果 brain 与兼容入口不同步，接管会重新分裂
 - 如果长篇审计和迁移说明继续散落在 body，brain 的中枢地位会被削弱
 - 如果公开 README 继续承载 brain 未收录的稳定配置或入口，后续维护会再次出现平行真源
-- 如果 AI 兼容入口修改后不跑 `scripts/check_ai_assets.py` 与工作区 doc guard，仓库原生 AI 入口可能与 brain 再次分裂
+- 如果 AI 兼容入口修改后不跑 `scripts/check_ai_assets.py` 与 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check`，仓库原生 AI 入口可能与 brain 再次分裂
 - `bash scripts/ci_gate.sh all` 在当前 Windows/WSL 映射下找不到 WSL 内 `python`；本机需要用 PowerShell 等价命令或修正 WSL Python 环境
 - Web 依赖审计仍提示 npm vulnerabilities，Vite build 仍提示主 chunk 偏大；这是产品/依赖升级决策，不应混入本轮行为修复
 

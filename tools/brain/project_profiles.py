@@ -86,15 +86,11 @@ def _default_commands(project_id: str, body_root: str) -> list[str]:
             f"{PYTHON_EXECUTABLE} -m tools.brain.doc_guard check",
             f"{PYTHON_EXECUTABLE} -m tools.brain.integrity_check --json",
         ]
-    tests_root = f"{body_root}/tests"
-    commands = [
+    return [
         "git diff --check",
         f"{PYTHON_EXECUTABLE} -m tools.brain.doc_guard check",
         f"{PYTHON_EXECUTABLE} -m tools.brain.integrity_check --json",
     ]
-    if _workspace_path(tests_root).exists():
-        commands.insert(1, f"{PYTHON_EXECUTABLE} -m pytest {tests_root} -q")
-    return commands
 
 
 def _default_guard_profile(project_id: str) -> dict[str, Any]:
@@ -112,11 +108,7 @@ def _default_guard_profile(project_id: str) -> dict[str, Any]:
 def _default_verification_profile(project_id: str, body_root: str) -> dict[str, Any]:
     return {
         "always_commands": _default_commands(project_id, body_root),
-        "default_test_commands": [
-            f"{PYTHON_EXECUTABLE} -m pytest {body_root}/tests -q",
-        ]
-        if project_id != "daily_research" and _workspace_path(f"{body_root}/tests").exists()
-        else [],
+        "default_test_commands": [],
         "big_artifact_paths": [
             "daily_research/output/**",
             "daily_research/cache/**",

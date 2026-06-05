@@ -71,13 +71,12 @@
 - `test_forecast_dataset.py` 是慢集成测试；修改 forecast 默认先跑 selective verification 推荐的快速合同测试。
 - pytest timeout 后先查残留 pytest 子进程和单项复现，区分时间不足、资源挤占、真实死锁、fixture 慢和代码失败；只允许按本轮 pytest 命令行匹配后清理。
 
-## 必跑守卫
-- `git diff -- daily_research/output/active_execution_strategy.json`
-- `git diff --check`
-- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py brain-burden-audit --cwd . --mode compact`
-- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow current-frontier --json`
-- brain guards：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check`；`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`
-- 修改 brain platform / workflow / registry / rules 后，跑：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest tools/brain/tests -q`
+## 验证分层
+- 默认开发验证走 changed-surface：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.selective_verification --paths <changed_paths> --json`，本次 blocking 只取 `blocking_commands`。
+- 高频硬边界：`git diff -- daily_research/output/active_execution_strategy.json` 和 `git diff --check`；active artifact 有 diff 时停止并回到 promotion authority。
+- `current-frontier` 只在回答当前研究阶段、更新 frontier 判断或写入 evidence/state 前运行。
+- `doc_guard` / `integrity_check` / `brain-burden-audit` 属于 brain 文档、workflow、registry、skill 或收尾维护守卫，不作为普通代码小改默认测试包。
+- 修改 brain platform / workflow / registry / rules 后，优先跑 selective verification 推荐的工具测试；整包 `tools/brain/tests` 只作为维护/收尾扩展。
 
 ## 写回路由
 - 当前状态和允许动作：`daily_research/brain/state_center.md`。

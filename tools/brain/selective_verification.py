@@ -145,9 +145,6 @@ WORKSPACE_AREAS = (
     "daily_stock_analysis-main",
     "t0_project",
 )
-PROJECT_FAST_TESTS = {
-    "traditional_quant_research": "traditional_quant_research/tests",
-}
 
 
 def _pytest_command(paths: Iterable[str]) -> str:
@@ -211,8 +208,28 @@ def _risk_max(current: str, candidate: str) -> str:
 
 
 def _add_command(commands: list[str], command: str) -> None:
+    new_targets = _pytest_targets(command)
+    if new_targets:
+        for index, existing in enumerate(list(commands)):
+            existing_targets = _pytest_targets(existing)
+            if not existing_targets:
+                continue
+            if new_targets <= existing_targets:
+                return
+            if existing_targets < new_targets:
+                commands[index] = command
+                return
     if command not in commands:
         commands.append(command)
+
+
+def _pytest_targets(command: str) -> set[str]:
+    prefix = f"{PYTHON_EXECUTABLE} -m pytest "
+    suffix = " -q"
+    if not command.startswith(prefix) or not command.endswith(suffix):
+        return set()
+    target_text = command[len(prefix) : -len(suffix)].strip()
+    return set(target_text.split()) if target_text else set()
 
 
 def _is_docs_only_path(path: str) -> bool:
@@ -285,12 +302,18 @@ def _skipped_reason_by_area(
     return reasons
 
 
-def _project_fast_test_command(project_id: str, default_test_commands: list[str]) -> str | None:
-    if project_id in PROJECT_FAST_TESTS:
-        return _pytest_command([PROJECT_FAST_TESTS[project_id]])
-    for command in default_test_commands:
-        if "pytest" in command:
-            return command
+def _project_changed_surface_test_command(project_id: str, body_root: str, path: str) -> str | None:
+    normalized = _normalize_path(path)
+    test_root = f"{body_root}/tests"
+    if normalized.startswith(f"{test_root}/") and normalized.endswith(".py"):
+        return _pytest_command([normalized])
+
+    stem = Path(normalized).stem
+    if not stem:
+        return None
+    candidate = f"{test_root}/test_{stem}.py"
+    if (WORKSPACE_ROOT / candidate).exists():
+        return _pytest_command([candidate])
     return None
 
 
@@ -302,7 +325,6 @@ def build_verification_plan(*, paths: list[str] | None = None, base: str | None 
         project_profile.get("verification_profile", {}) if isinstance(project_profile.get("verification_profile"), dict) else {}
     )
     always_commands = list(verification_profile.get("always_commands", []) or ALWAYS_COMMANDS)
-    default_test_commands = list(verification_profile.get("default_test_commands", []) or [])
     body_root = str(project_profile.get("body_root", "") or "").strip().replace("\\", "/")
     selected_commands: list[str] = []
     deferred_long_commands: list[str] = []
@@ -315,9 +337,12 @@ def build_verification_plan(*, paths: list[str] | None = None, base: str | None 
         if project_id not in {"daily_research", "workspace", "cross_project"} and body_root and path.startswith(f"{body_root}/"):
             if path.endswith(".py"):
                 risk_level = _risk_max(risk_level, "medium")
-                command = _project_fast_test_command(project_id, default_test_commands)
+                command = _project_changed_surface_test_command(project_id, body_root, path)
                 if command:
                     _add_command(selected_commands, command)
+                else:
+                    manual_review_required = True
+                    warnings.append(f"unmapped_project_python_change: {path} has no same-surface test mapping")
             continue
 
         if path == ACTIVE_ARTIFACT:
