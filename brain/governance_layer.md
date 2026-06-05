@@ -46,7 +46,8 @@
 - 每个分脑 manifest 必须能声明或继承 `guard_profile`、`verification_profile`、`commit_policy`、`process_namespace`、`cross_project_policy`；daily active artifact/freshness/project consistency 只属于 daily profile。
 - 项目 agent 完成一次任务后默认本地提交；提交助手只把该项目 profile 允许路径纳入 stage/commit pathspec，外部项目 dirty paths 仅作为 `ignored_external_paths` 报告，不阻塞当前项目提交。
 - 若当前提交候选路径本身越过 profile 范围，或与接管前 baseline dirty 发生目标范围内 overlap，返回 `project_commit_scope_conflict`；不得把多个项目混成一个提交。
-- 长任务 PID、日志和 progress 默认位于 `<project>/output/agent_runs/<run_id>/`；没有显式 cross-project lease 时，其他项目 agent 不得 wait/stop/管理该进程。
+- 长任务必须通过 `tools.brain.agent_run` 绑定到项目 `process_namespace`，PID、日志、progress 和 summary 默认位于 `<project>/output/agent_runs/<run_id>/`。
+- `long_task_monitor` 必须携带 `--project-id` 与 `--run-id`；没有显式 active cross-project lease 时，其他项目 agent 不得 wait/read/管理该进程。
 - 共享 GPU、端口、数据 provider 等资源租约写入 `brain/output/resource_leases/`；租约不存在时按互不干扰处理。
 
 ## 3. 守卫

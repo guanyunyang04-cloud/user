@@ -42,8 +42,8 @@
 - 脑内文档铁律：当前层标题、正文、规则、状态和复盘写回必须使用简体中文；命令、路径、指标名、tag、模型名等技术标识保留原文
 - 主分脑结构变更后必须跑 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`，确认父子附着、读序、写回路由、body 映射和编码合同仍一致
 - 主脑 `state_center.md` 只承载当前路由和跨项目边界，不再追加日期型实验日志；分脑高频入口也必须优先保留当前结论，历史细节下沉到 `episodic_memory.md` 或 `brain/references/`
-- 长任务运行纪律是受监管独立进程，不是脱管后台化：训练、评估、审计、bounded study、confirmatory rerun 与执行任务可以用 `Start-Process -PassThru` 启动，但必须记录 PID、持久 stdout/stderr、run tag 或产物路径
-- GPU 长任务运行纪律：启动前和 GPU 未确认工作前可用短状态检查；一旦确认 GPU 进程已正式工作，必须切换为前台 `Wait-Process -Id <pid> -Timeout 7200` 轮询，除非再次出现系统崩溃或宿主不可用。
+- 长任务运行纪律是受监管独立进程，不是脱管后台化：训练、评估、审计、bounded study、confirmatory rerun 与执行任务必须通过 `tools.brain.agent_run` 绑定到项目 run namespace，至少记录 PID、持久 stdout/stderr、summary、run tag 或产物路径。
+- GPU 长任务运行纪律：启动前和 GPU 未确认工作前可用短状态检查；一旦确认 GPU 进程已正式工作，必须切换为带 `--project-id` / `--run-id` 的 `long_task_monitor wait-once` 前台 `Wait-Process -Id <pid> -Timeout 7200` 轮询，除非再次出现系统崩溃或宿主不可用。
 - 若单轮等待窗口耗尽但 PID 仍存活、日志或产物仍在推进，且没有明确代码错误、资源危险或用户停止指令，必须继续下一轮 PID 绑定轮询；不得停止进程、不得把窗口耗尽写成 failed evidence
 - 固定 sleep 式轮询容易错过提前完成和混淆进程状态；长任务轮询必须绑定 PID、progress、日志、GPU/内存或最新产物时间戳，每轮状态必须计算已用时间和预计剩余时间，首个 progress 未出现或排障时才临时缩短观察窗口
 - 当前 `daily_research` 任务必须显式使用 `yolos` 环境；GPU 训练任务完成后必须核验 `training_diagnostics.json` 中 `device = cuda`、`cuda_available = true` 与 `python_executable` 指向 yolos

@@ -77,6 +77,14 @@ class SelectiveVerificationTest(unittest.TestCase):
         self.assertIn("tools/brain/tests/test_platform.py", joined)
         self.assertNotIn("pytest tools/brain/tests -q", joined)
 
+    def test_process_tool_change_selects_process_namespace_tests(self) -> None:
+        payload = build_verification_plan(paths=["tools/brain/long_task_monitor.py"])
+        joined = "\n".join(payload["selected_commands"])
+
+        self.assertIn("tools/brain/tests/test_agent_run.py", joined)
+        self.assertIn("tools/brain/tests/test_long_task_monitor.py", joined)
+        self.assertNotIn("tools/brain/tests/test_project_commit.py", joined)
+
     def test_overlapping_brain_tool_packets_keep_only_widest_pytest_command(self) -> None:
         payload = build_verification_plan(
             paths=[

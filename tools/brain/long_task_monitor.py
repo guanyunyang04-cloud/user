@@ -9,10 +9,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from tools.brain.project_profiles import load_project_profile
+
 
 DEFAULT_TIMEOUT_SECONDS = 7200
 DEFAULT_STALE_AFTER_SECONDS = 3600
 DEFAULT_WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_LEASE_ROOT = "brain/output/resource_leases"
 
 
 def _utc_now() -> datetime:
@@ -44,6 +47,18 @@ def _load_json(path: Path | None) -> dict[str, Any]:
     except Exception as exc:
         return {"_load_error": str(exc)}
     return payload if isinstance(payload, dict) else {"_load_error": "progress payload is not a JSON object"}
+
+
+def _load_lease_json(path: Path | None) -> dict[str, Any]:
+    if path is None:
+        return {}
+    if not path.exists():
+        return {"_load_error": "lease file does not exist"}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception as exc:
+        return {"_load_error": str(exc)}
+    return payload if isinstance(payload, dict) else {"_load_error": "lease payload is not a JSON object"}
 
 
 def _number(payload: dict[str, Any], *keys: str) -> float | None:
@@ -147,6 +162,177 @@ def _normalize_rel_path(path: str | Path, *, workspace_root: Path) -> str:
         return str(candidate).replace("\\", "/")
 
 
+def _as_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def _target_projects_from_paths(paths: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for path in paths:
+        parts = str(path or "").replace("\\", "/").split("/")
+        if len(parts) >= 3 and parts[0] == "brain" and parts[1] == "output" and parts[2] == "agent_runs":
+            if "workspace" not in seen:
+                seen.add("workspace")
+                out.append("workspace")
+            continue
+        if len(parts) >= 3 and parts[1] == "output" and parts[2] == "agent_runs":
+            project = parts[0].strip()
+            if project and project not in seen:
+                seen.add(project)
+                out.append(project)
+    return out
+
+
+def _lease_path(
+    lease_id: str,
+    *,
+    workspace_root: Path,
+    lease_root: str | Path = DEFAULT_LEASE_ROOT,
+) -> Path:
+    lease = str(lease_id or "").strip()
+    if not lease or "/" in lease or "\\" in lease or ".." in lease:
+        return Path("")
+    root = Path(str(lease_root))
+    if not root.is_absolute():
+        root = workspace_root / root
+    return root / f"{lease}.json"
+
+
+def _project_run_namespace_root(project_id: str, run_id: str) -> str:
+    project = str(project_id or "").strip()
+    run = str(run_id or "").strip().replace("\\", "/").strip("/")
+    if not project or not run:
+        return ""
+    try:
+        profile = load_project_profile(project)
+    except Exception:
+        profile = {}
+    namespace = profile.get("process_namespace") if isinstance(profile.get("process_namespace"), dict) else {}
+    template = str(namespace.get("run_path_template", "") or "").strip().replace("\\", "/")
+    if template:
+        return template.replace("<run_id>", run).strip("/")
+    return f"{project}/output/agent_runs/{run}"
+
+
+def validate_resource_lease(
+    *,
+    lease_id: str,
+    project_id: str,
+    target_project_ids: list[str],
+    workspace_root: str | Path | None = None,
+    lease_root: str | Path = DEFAULT_LEASE_ROOT,
+) -> dict[str, Any]:
+    requester = str(project_id or "").strip().replace("\\", "/").strip("/")
+    targets = [item for item in _as_string_list(target_project_ids) if item]
+    root = Path(workspace_root) if workspace_root is not None else DEFAULT_WORKSPACE_ROOT
+    lease_text = str(lease_id or "").strip()
+    if not lease_text or "/" in lease_text or "\\" in lease_text or ".." in lease_text:
+        return {
+            "schema_version": 1,
+            "status": "blocked",
+            "reason": "invalid_lease_id",
+            "lease_id": str(lease_id or ""),
+            "project_id": requester,
+            "target_project_ids": targets,
+            "path": "",
+        }
+    path = _lease_path(str(lease_id or ""), workspace_root=root, lease_root=lease_root)
+    payload = _load_lease_json(path)
+    if payload.get("_load_error"):
+        return {
+            "schema_version": 1,
+            "status": "blocked",
+            "reason": "lease_not_found_or_unreadable",
+            "lease_id": str(lease_id or ""),
+            "project_id": requester,
+            "target_project_ids": targets,
+            "path": _normalize_rel_path(path, workspace_root=root),
+            "error": payload.get("_load_error"),
+        }
+    status = str(payload.get("status", "") or "").strip().lower()
+    if status not in {"active", "approved", "granted"}:
+        return {
+            "schema_version": 1,
+            "status": "blocked",
+            "reason": "lease_not_active",
+            "lease_id": str(lease_id or ""),
+            "project_id": requester,
+            "target_project_ids": targets,
+            "path": _normalize_rel_path(path, workspace_root=root),
+            "lease_status": status,
+        }
+    expires_at = _parse_datetime(payload.get("expires_at") or payload.get("valid_until"))
+    if expires_at is not None and expires_at <= _utc_now():
+        return {
+            "schema_version": 1,
+            "status": "blocked",
+            "reason": "lease_expired",
+            "lease_id": str(lease_id or ""),
+            "project_id": requester,
+            "target_project_ids": targets,
+            "path": _normalize_rel_path(path, workspace_root=root),
+            "expires_at": expires_at.isoformat(),
+        }
+
+    allowed_requesters = set(
+        _as_string_list(payload.get("requester_project_id"))
+        + _as_string_list(payload.get("requester_project_ids"))
+        + _as_string_list(payload.get("granted_to_project_id"))
+        + _as_string_list(payload.get("granted_to_project_ids"))
+        + _as_string_list(payload.get("project_id"))
+        + _as_string_list(payload.get("project_ids"))
+        + _as_string_list(payload.get("allowed_project_id"))
+        + _as_string_list(payload.get("allowed_project_ids"))
+    )
+    allowed_targets = set(
+        _as_string_list(payload.get("target_project_id"))
+        + _as_string_list(payload.get("target_project_ids"))
+        + _as_string_list(payload.get("resource_project_id"))
+        + _as_string_list(payload.get("resource_project_ids"))
+        + _as_string_list(payload.get("allowed_target_project_id"))
+        + _as_string_list(payload.get("allowed_target_project_ids"))
+    )
+    requester_ok = "*" in allowed_requesters or requester in allowed_requesters
+    target_ok = "*" in allowed_targets or not targets or all(target in allowed_targets for target in targets)
+    if not requester_ok:
+        return {
+            "schema_version": 1,
+            "status": "blocked",
+            "reason": "lease_requester_not_authorized",
+            "lease_id": str(lease_id or ""),
+            "project_id": requester,
+            "target_project_ids": targets,
+            "path": _normalize_rel_path(path, workspace_root=root),
+            "allowed_requesters": sorted(allowed_requesters),
+        }
+    if not target_ok:
+        return {
+            "schema_version": 1,
+            "status": "blocked",
+            "reason": "lease_target_not_authorized",
+            "lease_id": str(lease_id or ""),
+            "project_id": requester,
+            "target_project_ids": targets,
+            "path": _normalize_rel_path(path, workspace_root=root),
+            "allowed_targets": sorted(allowed_targets),
+        }
+    return {
+        "schema_version": 1,
+        "status": "ok",
+        "lease_id": str(lease_id or ""),
+        "project_id": requester,
+        "target_project_ids": targets,
+        "path": _normalize_rel_path(path, workspace_root=root),
+        "expires_at": expires_at.isoformat() if expires_at is not None else "",
+    }
+
+
 def validate_project_namespace(
     *,
     project_id: str,
@@ -154,13 +340,79 @@ def validate_project_namespace(
     paths: list[str | Path],
     workspace_root: str | Path | None = None,
     allow_cross_project: bool = False,
+    lease_id: str = "",
+    lease_root: str | Path = DEFAULT_LEASE_ROOT,
 ) -> dict[str, Any]:
     project = str(project_id or "").strip().replace("\\", "/").strip("/")
     run = str(run_id or "").strip().replace("\\", "/").strip("/")
     root = Path(workspace_root) if workspace_root is not None else DEFAULT_WORKSPACE_ROOT
-    namespace_root = f"{project}/output/agent_runs/{run}" if project and run else ""
+    namespace_root = _project_run_namespace_root(project, run)
     rel_paths = [_normalize_rel_path(path, workspace_root=root) for path in paths if str(path or "").strip()]
-    if allow_cross_project or not namespace_root:
+    if not project or not run:
+        return {
+            "schema_version": 1,
+            "status": "blocked",
+            "reason": "project_run_identity_required",
+            "project_id": project,
+            "run_id": run,
+            "namespace_root": namespace_root,
+            "paths": rel_paths,
+            "violating_paths": rel_paths,
+            "allow_cross_project": bool(allow_cross_project),
+        }
+    if allow_cross_project:
+        cross_paths = [path for path in rel_paths if path and not (path == namespace_root or path.startswith(f"{namespace_root}/"))]
+        if not cross_paths:
+            return {
+                "schema_version": 1,
+                "status": "ok",
+                "project_id": project,
+                "run_id": run,
+                "namespace_root": namespace_root,
+                "paths": rel_paths,
+                "violating_paths": [],
+                "allow_cross_project": True,
+                "lease": {"schema_version": 1, "status": "not_required", "reason": "own_namespace_only"},
+            }
+        targets = _target_projects_from_paths(cross_paths)
+        unknown_cross_paths = [
+            path
+            for path in cross_paths
+            if path
+            and not _target_projects_from_paths([path])
+        ]
+        if unknown_cross_paths:
+            return {
+                "schema_version": 1,
+                "status": "blocked",
+                "reason": "cross_project_agent_run_path_required",
+                "project_id": project,
+                "run_id": run,
+                "namespace_root": namespace_root,
+                "paths": rel_paths,
+                "violating_paths": unknown_cross_paths,
+                "allow_cross_project": True,
+            }
+        lease = validate_resource_lease(
+            lease_id=lease_id,
+            project_id=project,
+            target_project_ids=targets,
+            workspace_root=root,
+            lease_root=lease_root,
+        )
+        if lease.get("status") != "ok":
+            return {
+                "schema_version": 1,
+                "status": "blocked",
+                "reason": "cross_project_lease_required",
+                "project_id": project,
+                "run_id": run,
+                "namespace_root": namespace_root,
+                "paths": rel_paths,
+                "violating_paths": rel_paths,
+                "allow_cross_project": True,
+                "lease": lease,
+            }
         return {
             "schema_version": 1,
             "status": "ok",
@@ -169,7 +421,8 @@ def validate_project_namespace(
             "namespace_root": namespace_root,
             "paths": rel_paths,
             "violating_paths": [],
-            "allow_cross_project": bool(allow_cross_project),
+            "allow_cross_project": True,
+            "lease": lease,
         }
     violating = [path for path in rel_paths if path and not (path == namespace_root or path.startswith(f"{namespace_root}/"))]
     payload = {
@@ -239,9 +492,9 @@ def build_template(
                 "$proc = Start-Process -FilePath <command> -ArgumentList <args> -PassThru -NoNewWindow",
                 "$taskPid = $proc.Id",
                 f"Wait-Process -Id $taskPid -Timeout {timeout}",
-                "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor status --pid $taskPid --progress <progress.json> --stdout <stdout.log> --stderr <stderr.log> --artifact-dir <artifact_dir> --json",
+                "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor status --project-id <project_id> --run-id <run_id> --pid $taskPid --progress <progress.json> --stdout <stdout.log> --stderr <stderr.log> --artifact-dir <artifact_dir> --json",
                 "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor trace-poll --trace-json <trace.json> --pid $taskPid --poll-window-seconds "
-                f"{timeout} --progress <progress.json> --stdout <stdout.log> --stderr <stderr.log> --artifact-dir <artifact_dir> --json",
+                f"{timeout} --project-id <project_id> --run-id <run_id> --progress <progress.json> --stdout <stdout.log> --stderr <stderr.log> --artifact-dir <artifact_dir> --json",
             ]
         ),
     }
@@ -259,6 +512,7 @@ def build_status(
     stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS,
     workspace_root: str | Path | None = None,
     allow_cross_project: bool = False,
+    lease_id: str = "",
 ) -> dict[str, Any]:
     progress_file = Path(progress_path) if progress_path else None
     stdout_file = Path(stdout_path) if stdout_path else None
@@ -270,12 +524,13 @@ def build_status(
         paths=[path for path in (progress_file, stdout_file, stderr_file, artifact_path) if path is not None],
         workspace_root=workspace_root,
         allow_cross_project=allow_cross_project,
+        lease_id=lease_id,
     )
     if namespace.get("status") == "blocked":
         return {
             "schema_version": 1,
             "status": "blocked",
-            "reason": "project_namespace_violation",
+            "reason": namespace.get("reason") or "project_namespace_violation",
             "project_id": str(project_id or ""),
             "run_id": str(run_id or ""),
             "namespace": namespace,
@@ -295,7 +550,7 @@ def build_status(
             "last_error_lines": [],
             "artifact_mtime": "",
             "updated_at": "",
-            "decision": "project_namespace_violation",
+            "decision": str(namespace.get("reason") or "project_namespace_violation"),
         }
     now = _utc_now()
     progress = _load_json(progress_file)
@@ -377,6 +632,7 @@ def build_trace_event(
     final_verification: str = "",
     workspace_root: str | Path | None = None,
     allow_cross_project: bool = False,
+    lease_id: str = "",
 ) -> dict[str, Any]:
     progress_file = Path(progress_path) if progress_path else None
     stdout_file = Path(stdout_path) if stdout_path else None
@@ -393,6 +649,7 @@ def build_trace_event(
         stale_after_seconds=stale_after_seconds,
         workspace_root=workspace_root,
         allow_cross_project=allow_cross_project,
+        lease_id=lease_id,
     )
     eta_no_eta_reason = ""
     if status.get("eta_status") not in {"estimated", "completed"}:
@@ -474,6 +731,9 @@ def _print_payload(payload: dict[str, Any], *, as_json: bool) -> None:
     if "powershell_template" in payload:
         print(payload["powershell_template"])
         return
+    if payload.get("status") == "blocked":
+        print(f"status=blocked reason={payload.get('reason', '')} decision={payload.get('decision', '')}")
+        return
     print(
         "pid={pid} alive={pid_alive} elapsed={elapsed_seconds}s progress={progress_percent}% "
         "eta={estimated_remaining_seconds}s eta_status={eta_status} decision={decision}".format(**payload)
@@ -498,6 +758,8 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--artifact-dir", default="")
     status.add_argument("--stale-after-seconds", type=int, default=DEFAULT_STALE_AFTER_SECONDS)
     status.add_argument("--allow-cross-project", action="store_true")
+    status.add_argument("--lease-id", default="")
+    status.add_argument("--workspace-root", default="")
     status.add_argument("--json", action="store_true")
 
     wait_once = sub.add_parser("wait-once", help="Run one Wait-Process window, then report status.")
@@ -511,6 +773,8 @@ def build_parser() -> argparse.ArgumentParser:
     wait_once.add_argument("--artifact-dir", default="")
     wait_once.add_argument("--stale-after-seconds", type=int, default=DEFAULT_STALE_AFTER_SECONDS)
     wait_once.add_argument("--allow-cross-project", action="store_true")
+    wait_once.add_argument("--lease-id", default="")
+    wait_once.add_argument("--workspace-root", default="")
     wait_once.add_argument("--json", action="store_true")
 
     trace_poll = sub.add_parser("trace-poll", help="Build and optionally append a structured long-task poll trace event.")
@@ -530,6 +794,8 @@ def build_parser() -> argparse.ArgumentParser:
     trace_poll.add_argument("--stale-after-seconds", type=int, default=DEFAULT_STALE_AFTER_SECONDS)
     trace_poll.add_argument("--final-verification", default="")
     trace_poll.add_argument("--allow-cross-project", action="store_true")
+    trace_poll.add_argument("--lease-id", default="")
+    trace_poll.add_argument("--workspace-root", default="")
     trace_poll.add_argument("--json", action="store_true")
     return parser
 
@@ -554,12 +820,14 @@ def main() -> int:
                 if path
             ],
             allow_cross_project=bool(getattr(args, "allow_cross_project", False)),
+            lease_id=str(getattr(args, "lease_id", "") or ""),
+            workspace_root=str(getattr(args, "workspace_root", "") or "") or None,
         )
         if namespace.get("status") == "blocked":
             payload = {
                 "schema_version": 1,
                 "status": "blocked",
-                "reason": "project_namespace_violation",
+                "reason": namespace.get("reason") or "project_namespace_violation",
                 "project_id": str(getattr(args, "project_id", "") or ""),
                 "run_id": str(getattr(args, "run_id", "") or ""),
                 "namespace": namespace,
@@ -577,6 +845,27 @@ def main() -> int:
             check=False,
         )
     if args.command == "trace-poll":
+        trace_json = str(getattr(args, "trace_json", "") or "")
+        trace_namespace = validate_project_namespace(
+            project_id=str(getattr(args, "project_id", "") or ""),
+            run_id=str(getattr(args, "run_id", "") or ""),
+            paths=[trace_json] if trace_json else [],
+            allow_cross_project=bool(getattr(args, "allow_cross_project", False)),
+            lease_id=str(getattr(args, "lease_id", "") or ""),
+            workspace_root=str(getattr(args, "workspace_root", "") or "") or None,
+        )
+        if trace_namespace.get("status") == "blocked":
+            payload = {
+                "schema_version": 1,
+                "status": "blocked",
+                "reason": trace_namespace.get("reason") or "project_namespace_violation",
+                "project_id": str(getattr(args, "project_id", "") or ""),
+                "run_id": str(getattr(args, "run_id", "") or ""),
+                "namespace": trace_namespace,
+                "trace_json": trace_json,
+            }
+            _print_payload(payload, as_json=bool(getattr(args, "json", False)))
+            return 2
         event = build_trace_event(
             task=str(getattr(args, "task", "") or ""),
             project_id=str(getattr(args, "project_id", "") or ""),
@@ -593,8 +882,9 @@ def main() -> int:
             stale_after_seconds=int(getattr(args, "stale_after_seconds", DEFAULT_STALE_AFTER_SECONDS)),
             final_verification=str(getattr(args, "final_verification", "") or ""),
             allow_cross_project=bool(getattr(args, "allow_cross_project", False)),
+            lease_id=str(getattr(args, "lease_id", "") or ""),
+            workspace_root=str(getattr(args, "workspace_root", "") or "") or None,
         )
-        trace_json = str(getattr(args, "trace_json", "") or "")
         if trace_json:
             append_trace_event(trace_json, event, task=str(getattr(args, "task", "") or ""))
         _print_payload({"status": "ok", "event": event, "trace_json": trace_json}, as_json=bool(getattr(args, "json", False)))
@@ -609,9 +899,11 @@ def main() -> int:
         artifact_dir=str(getattr(args, "artifact_dir", "") or "") or None,
         stale_after_seconds=int(getattr(args, "stale_after_seconds", DEFAULT_STALE_AFTER_SECONDS)),
         allow_cross_project=bool(getattr(args, "allow_cross_project", False)),
+        lease_id=str(getattr(args, "lease_id", "") or ""),
+        workspace_root=str(getattr(args, "workspace_root", "") or "") or None,
     )
     _print_payload(payload, as_json=bool(getattr(args, "json", False)))
-    return 0
+    return 2 if payload.get("status") == "blocked" else 0
 
 
 if __name__ == "__main__":

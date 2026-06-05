@@ -319,10 +319,10 @@ def build_task_capsule(
     verification_hints = list(workflow_guide.get("verification_hints", []) or [])
     if _task_has_long_task_signal(task):
         capability_hints.append(
-            f"long_task_monitor: use {PYTHON_EXECUTABLE} -m tools.brain.long_task_monitor template/status/wait-once with PID, logs, progress, artifact mtime, and ETA; after GPU is confirmed active, use a 7200s foreground Wait-Process window unless the host crashes"
+            f"agent_run: use {PYTHON_EXECUTABLE} -m tools.brain.agent_run paths/register/launch/status with --project-id and --run-id so PID/log/progress stay in the selected project namespace; long_task_monitor status/wait-once also requires project/run identity and an explicit lease for cross-project reads"
         )
         risk_signals.append("long_task_without_pid_log_progress_or_eta")
-        verification_hints.append("for long jobs, report PID status, elapsed time, progress, ETA, log tail, artifact mtime, and next decision after each wait window")
+        verification_hints.append("for long jobs, report project_id, run_id, PID status, elapsed time, progress, ETA, log tail, artifact mtime, and next decision after each wait window")
     rules = (
         run_brain_rules(has_explicit_run_tag=bool(run_tag))
         if bool(guard_profile.get("brain_rules"))

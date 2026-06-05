@@ -44,6 +44,11 @@ BRAIN_TOOL_CONTRACT_TESTS = (
     "tools/brain/tests/test_workspace_brain_skill_contract.py",
 )
 
+BRAIN_TOOL_PROCESS_TESTS = (
+    "tools/brain/tests/test_agent_run.py",
+    "tools/brain/tests/test_long_task_monitor.py",
+)
+
 BRAIN_TOOL_VERIFY_PLAN_TEST = "tools/brain/tests/test_workflow_cli.py::BrainWorkflowCliTest::test_verify_plan_cli_delegates_to_selective_verification"
 
 BRIDGE_MATRIX_TESTS = (
@@ -395,6 +400,8 @@ def build_verification_plan(*, paths: list[str] | None = None, base: str | None 
                         ]
                     ),
                 )
+            elif Path(path).name in {"agent_run.py", "long_task_monitor.py"}:
+                _add_command(selected_commands, _pytest_command(BRAIN_TOOL_PROCESS_TESTS))
             elif Path(path).name in {"capsule.py", "workflow.py", "platform.py", "rules.py", "doc_guard.py", "integrity_check.py"}:
                 _add_command(selected_commands, _pytest_command(BRAIN_TOOL_CONTRACT_TESTS))
             else:

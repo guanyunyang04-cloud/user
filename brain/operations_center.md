@@ -75,9 +75,10 @@
 - 项目事实、实验状态、rXX 证据和项目命令写回被路由选中的分脑。
 
 ## 7. 长时任务运行纪律
-- 项目长任务必须在 `<project>/output/agent_runs/<run_id>/` 下受监管运行，记录 PID、stdout/stderr、progress、summary、run tag 和产物路径。
-- 启动模板：用 `Start-Process -PassThru` 启动目标命令，日志写入当前项目 namespace；没有显式 cross-project lease 时，不得轮询、等待或停止其他项目 PID。
-- 资源租约写入 `brain/output/resource_leases/`；GPU、端口、数据 provider 等共享资源必须先声明 lease。
+- 项目长任务必须通过 `tools.brain.agent_run paths/register/launch/status --project-id <project> --run-id <run>` 建立或登记，PID、stdout/stderr、progress、summary、run tag 和产物路径写入该项目 `process_namespace`。
+- `long_task_monitor status/wait-once/trace-poll` 必须显式传 `--project-id` 与 `--run-id`；匿名 PID/日志监控直接阻塞，避免误读或误等其它项目进程。
+- 已由外部命令启动的进程必须先用 `agent_run register` 绑定到当前项目 run；新启动的长任务优先用 `agent_run launch`，不再手工拼写跨项目日志路径。
+- 资源租约写入 `brain/output/resource_leases/`；GPU、端口、数据 provider 或跨项目进程读取必须先声明 active lease，`--allow-cross-project` 只有带有效 `--lease-id` 才放行。
 - 轮询模板：启动后先短查 PID、日志和 GPU；一旦确认 GPU 进程已正式工作，默认使用前台 `Wait-Process -Id <pid> -Timeout 7200` 轮询，除非再次出现系统崩溃或宿主不可用。
 - `7200` 秒窗口结束后，先检查 PID、exit code、日志、progress、summary / checkpoint / artifact 时间戳；若进程仍在推进且没有明确代码错误、资源危险或用户停止指令，继续下一轮 `Wait-Process -Id <pid> -Timeout 7200`，不得杀进程或把窗口耗尽写成任务失败。
 - 每轮状态必须计算已用时间和预计剩余时间；状态来源优先使用 progress、PID、日志尾部、GPU/内存与最新产物时间戳。
