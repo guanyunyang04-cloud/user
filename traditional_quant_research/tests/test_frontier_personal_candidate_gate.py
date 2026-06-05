@@ -182,7 +182,7 @@ def test_personal_gate_keeps_relaxed_short_sample_diagnostic_only() -> None:
     assert row["evidence_scope"] == DIAGNOSTIC_PERSONAL_GATE_SCOPE
     assert bool(row["formal_profile_gate"]) is False
     assert "formal_profile_gate" in row["failed_gates"]
-    assert row["paper_tracking_recommendation"] == "continue_research"
+    assert row["paper_tracking_recommendation"] == "none"
 
 
 def test_personal_gate_marks_short_evidence_diagnostic_even_with_formal_thresholds() -> None:
@@ -241,6 +241,41 @@ def test_personal_gate_blocks_non_prior_fit_meta() -> None:
     assert bool(row["walk_forward_gate"]) is False
     assert "walk_forward_gate" in row["failed_gates"]
     assert row["walk_forward_detail"] == "fit_window_not_prior_to_eval"
+
+
+def test_personal_gate_blocks_optimizer_fallback_even_when_returns_pass() -> None:
+    aggregate = _formal_aggregate().head(1).copy()
+    aggregate["constraint_variant"] = "explicit_exposure_constraint"
+    aggregate["constraint_fallback_count"] = 1
+    aggregate["constraint_fallback_rate"] = 0.10
+    exposure = _exposure().loc[lambda frame: frame["signal"].eq("multifactor_rolling_ic_weighted_score")].copy()
+    exposure["constraint_variant"] = "explicit_exposure_constraint"
+
+    gate = evaluate_personal_candidate_gates(
+        aggregate,
+        exposure,
+        _formal_meta(),
+        combined_summary=_summary(),
+        required_fee_bps=30.0,
+        required_impact_bps_per_1pct=10.0,
+        personal_capital_amount=1_000_000.0,
+        min_eval_year_count=10,
+        required_start_year=2017,
+        required_end_year=2026,
+        min_total_periods=50,
+        min_mean_annualized_return=0.05,
+        min_positive_year_rate=0.60,
+        min_weakest_year_annualized_return=-0.35,
+        max_worst_drawdown=-0.25,
+        max_proxy_mean_abs_active_exposure=1.25,
+        exposure_fields=["log_amount_mean_20d_z", "neg_volatility_20d_z", "momentum_20d_z", "turn_xsec_z"],
+    )
+
+    row = gate.iloc[0]
+    assert row["promotion_level"] == PERSONAL_BACKTEST_ONLY_LEVEL
+    assert bool(row["optimizer_fallback_gate"]) is False
+    assert "optimizer_fallback_gate" in row["failed_gates"]
+    assert row["paper_tracking_recommendation"] == "none"
 
 
 def test_run_frontier_personal_candidate_gate_writes_artifacts(tmp_path: Path) -> None:

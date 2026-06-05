@@ -232,7 +232,7 @@ def summarize_factor_pruning_rebuild(
         "limitations": [
             "This experiment uses prior yearly IC only and does not rerun multifactor scores or horizon backtests.",
             "Selected factors and directions are a pruning plan, not a promoted strategy signal.",
-            "Any pruned signal must be wired into multifactor scoring and rerun through 2017-2026 personal gates before paper tracking.",
+            "Any pruned signal must be wired into multifactor scoring and rerun through the 2017-2026 formal personal gate before candidate selection.",
         ],
     }
 

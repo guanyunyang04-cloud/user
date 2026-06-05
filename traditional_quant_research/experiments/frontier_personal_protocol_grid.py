@@ -44,6 +44,7 @@ from traditional_quant_research.experiments.low_corr_frontier_combined_constrain
     DEFAULT_ROLLING_WINDOW,
     DEFAULT_SIGNAL_PENALTY_STRENGTHS,
     LABEL_MODES,
+    PORTFOLIO_CONSTRAINT_MODES,
     best_combined_rows,
     render_combined_constraint_markdown,
     run_low_corr_frontier_combined_constraint_audit,
@@ -86,6 +87,7 @@ def run_frontier_personal_protocol_grid(
     exposure_columns: Sequence[str] = DEFAULT_EXPOSURE_COLUMNS,
     exposure_constraint_cols: Sequence[str] | str | None = None,
     max_abs_exposure: float | None = None,
+    portfolio_constraint_modes: Sequence[str] | str | None = None,
     group_col: str | None = DEFAULT_GROUP_COL,
     max_group_weight: float | None = DEFAULT_MAX_GROUP_WEIGHT,
     execution_constraints: bool = True,
@@ -136,6 +138,7 @@ def run_frontier_personal_protocol_grid(
     penalty_cols = _parse_str_values(exposure_penalty_cols, name="exposure_penalty_cols")
     exposure_cols = _parse_str_values(exposure_columns, name="exposure_columns")
     constraint_cols = _parse_optional_str_values(exposure_constraint_cols)
+    selected_portfolio_modes = _validate_portfolio_constraint_modes(_parse_optional_str_values(portfolio_constraint_modes))
     selected_variants = _parse_optional_str_values(constraint_variants) if constraint_variants is not None else None
     resolved_weak_year_rebuild_run_dir = _resolve_ml_weak_year_rebuild_run_dir(
         weak_year_rebuild_run_dir,
@@ -173,6 +176,7 @@ def run_frontier_personal_protocol_grid(
         exposure_columns=exposure_cols,
         exposure_constraint_cols=constraint_cols,
         max_abs_exposure=max_abs_exposure,
+        portfolio_constraint_modes=selected_portfolio_modes or None,
         group_col=group_col,
         max_group_weight=max_group_weight,
         execution_constraints=execution_constraints,
@@ -214,6 +218,7 @@ def run_frontier_personal_protocol_grid(
         exposure_penalty_cols=penalty_cols,
         exposure_constraint_cols=constraint_cols,
         max_abs_exposure=max_abs_exposure,
+        portfolio_constraint_modes=selected_portfolio_modes or None,
         constraint_variants=selected_variants,
         weak_year_rebuild_run_dir=resolved_weak_year_rebuild_run_dir,
         factor_pruning_run_dir=factor_pruning_run_dir,
@@ -315,6 +320,7 @@ def run_yearly_combined_constraint_grid(
     progress_path: str | Path,
     factor_pruning_run_dir: str | Path | None = None,
     ml_signal_run_dir: str | Path | None = None,
+    portfolio_constraint_modes: Sequence[str] | None = None,
     resume: bool = False,
 ) -> list[dict[str, Any]]:
     """Run each eval year separately so long protocol grids leave resumable evidence."""
@@ -372,6 +378,7 @@ def run_yearly_combined_constraint_grid(
                 exposure_columns=exposure_columns,
                 exposure_constraint_cols=exposure_constraint_cols,
                 max_abs_exposure=max_abs_exposure,
+                portfolio_constraint_modes=portfolio_constraint_modes,
                 group_col=group_col,
                 max_group_weight=max_group_weight,
                 execution_constraints=execution_constraints,
@@ -440,6 +447,7 @@ def merge_yearly_combined_constraint_runs(
     weak_year_rebuild_run_dir: str | Path | None,
     factor_pruning_run_dir: str | Path | None = None,
     ml_signal_run_dir: str | Path | None = None,
+    portfolio_constraint_modes: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Merge yearly combined-constraint runs into one standard combined evidence directory."""
 
@@ -452,15 +460,30 @@ def merge_yearly_combined_constraint_runs(
     summary = _concat_csv(yearly_dirs, "combined_constraint_summary.csv")
     if summary.empty:
         raise ValueError("no yearly combined summary rows to merge")
-    aggregate = summarize_combined_constraint_audit(summary)
-    trades = _concat_csv(yearly_dirs, "combined_constraint_trades.csv")
-    liquidity = _concat_csv(yearly_dirs, "combined_constraint_liquidity.csv")
-    liquidity_summary = _concat_csv(yearly_dirs, "combined_constraint_liquidity_summary.csv")
-    exposure = _concat_csv(yearly_dirs, "combined_constraint_basket_exposure.csv")
-    exposure_summary = summarize_combined_basket_exposure(exposure)
-    industry_exposure = _concat_csv(yearly_dirs, "combined_constraint_industry_exposure.csv")
-    industry_summary = summarize_combined_industry_exposure(industry_exposure)
     metadata = _concat_csv(yearly_dirs, "combined_constraint_meta.csv")
+    resolved_portfolio_modes = _infer_portfolio_constraint_modes(
+        summary,
+        metadata,
+        fallback=portfolio_constraint_modes,
+    )
+    summary = _with_legacy_portfolio_constraint_mode(summary, resolved_portfolio_modes)
+    aggregate = summarize_combined_constraint_audit(summary)
+    trades = _with_legacy_portfolio_constraint_mode(_concat_csv(yearly_dirs, "combined_constraint_trades.csv"), resolved_portfolio_modes)
+    liquidity = _with_legacy_portfolio_constraint_mode(_concat_csv(yearly_dirs, "combined_constraint_liquidity.csv"), resolved_portfolio_modes)
+    liquidity_summary = _with_legacy_portfolio_constraint_mode(
+        _concat_csv(yearly_dirs, "combined_constraint_liquidity_summary.csv"),
+        resolved_portfolio_modes,
+    )
+    exposure = _with_legacy_portfolio_constraint_mode(
+        _concat_csv(yearly_dirs, "combined_constraint_basket_exposure.csv"),
+        resolved_portfolio_modes,
+    )
+    exposure_summary = summarize_combined_basket_exposure(exposure)
+    industry_exposure = _with_legacy_portfolio_constraint_mode(
+        _concat_csv(yearly_dirs, "combined_constraint_industry_exposure.csv"),
+        resolved_portfolio_modes,
+    )
+    industry_summary = summarize_combined_industry_exposure(industry_exposure)
 
     first = dict(yearly_results[0])
     result = {
@@ -490,6 +513,7 @@ def merge_yearly_combined_constraint_runs(
         "exposure_penalty_cols": list(exposure_penalty_cols),
         "exposure_constraint_cols": list(exposure_constraint_cols),
         "max_abs_exposure": float(max_abs_exposure) if max_abs_exposure is not None else None,
+        "portfolio_constraint_modes": list(resolved_portfolio_modes),
         "constraint_variants": list(constraint_variants or ["baseline"]),
         "weak_year_rebuild_run_dir": str(weak_year_rebuild_run_dir or ""),
         "factor_pruning_run_dir": str(factor_pruning_run_dir or ""),
@@ -580,6 +604,7 @@ def build_personal_protocol_ledger(protocol_runs: Sequence[Mapping[str, Any]]) -
         for raw in gate.to_dict("records"):
             signal = str(raw.get("signal", ""))
             variant = str(raw.get("constraint_variant", "baseline") or "baseline")
+            portfolio_mode = str(raw.get("portfolio_constraint_mode", "penalty_top_n") or "penalty_top_n")
             top_n = _optional_int(raw.get("top_n", combined_result.get("top_n"))) or 0
             strength = _optional_float(raw.get("exposure_penalty_strength"))
             promoted = _truthy(raw.get("promoted", False))
@@ -590,6 +615,7 @@ def build_personal_protocol_ledger(protocol_runs: Sequence[Mapping[str, Any]]) -
                         top_n=top_n,
                         signal=signal,
                         constraint_variant=variant,
+                        portfolio_constraint_mode=portfolio_mode,
                         exposure_penalty_strength=strength,
                     ),
                     "research_track": "baostock_only_personal_protocol_grid",
@@ -598,6 +624,7 @@ def build_personal_protocol_ledger(protocol_runs: Sequence[Mapping[str, Any]]) -
                     "rebalance_frequency": frequency,
                     "buffer_multiplier": buffer,
                     "constraint_variant": variant,
+                    "portfolio_constraint_mode": portfolio_mode,
                     "signal": signal,
                     "exposure_penalty_strength": strength,
                     "fee_bps": _optional_float(raw.get("fee_bps")),
@@ -815,6 +842,7 @@ def _ledger_columns() -> list[str]:
         "rebalance_frequency",
         "buffer_multiplier",
         "constraint_variant",
+        "portfolio_constraint_mode",
         "signal",
         "exposure_penalty_strength",
         "fee_bps",
@@ -847,12 +875,14 @@ def _protocol_id(
     top_n: int,
     signal: str,
     constraint_variant: str,
+    portfolio_constraint_mode: str,
     exposure_penalty_strength: float | None,
 ) -> str:
     return (
         f"top{int(top_n)}_"
         f"{_safe_token(signal)}_"
         f"{_safe_token(constraint_variant)}_"
+        f"{_safe_token(portfolio_constraint_mode)}_"
         f"penalty_{_strength_token(exposure_penalty_strength)}"
     )
 
@@ -901,9 +931,44 @@ def _resolve_ml_weak_year_rebuild_run_dir(
     if weak_year_rebuild_run_dir is not None or ml_signal_run_dir is None:
         return weak_year_rebuild_run_dir
     variants = set(constraint_variants or ())
-    if variants & {"regime_gated", "capital_scaled", "factor_blend"}:
+    if variants & {"regime_gated", "capital_scaled", "regime_weighted_capital_scaled", "factor_blend"}:
         return latest_run_dir(DEFAULT_WEAK_YEAR_REBUILD_OUTPUT_DIR)
     return weak_year_rebuild_run_dir
+
+
+def _infer_portfolio_constraint_modes(
+    summary: pd.DataFrame,
+    metadata: pd.DataFrame,
+    *,
+    fallback: Sequence[str] | None,
+) -> tuple[str, ...]:
+    if fallback:
+        return tuple(str(value) for value in fallback if str(value).strip())
+    modes: list[str] = []
+    if "portfolio_constraint_mode" in summary.columns:
+        modes.extend(summary["portfolio_constraint_mode"].dropna().astype(str).str.strip().tolist())
+    if "portfolio_constraint_modes" in metadata.columns:
+        for item in metadata["portfolio_constraint_modes"].dropna().astype(str):
+            modes.extend(part.strip() for part in item.split(",") if part.strip())
+    output: list[str] = []
+    for mode in modes:
+        if mode and mode not in output:
+            output.append(mode)
+    if output:
+        return tuple(output)
+    if "exposure_constraint_cols" in summary.columns:
+        has_constraint = summary["exposure_constraint_cols"].fillna("").astype(str).str.strip().ne("").any()
+        return ("hybrid_penalty_constraint",) if has_constraint else ("penalty_top_n",)
+    return ("penalty_top_n",)
+
+
+def _with_legacy_portfolio_constraint_mode(frame: pd.DataFrame, modes: Sequence[str]) -> pd.DataFrame:
+    if frame.empty or "portfolio_constraint_mode" in frame.columns:
+        return frame
+    mode = str(next(iter(modes), "penalty_top_n") or "penalty_top_n")
+    output = frame.copy()
+    output["portfolio_constraint_mode"] = mode
+    return output
 
 
 def _parse_int_values(values: Sequence[int] | str, *, name: str) -> tuple[int, ...]:
@@ -925,6 +990,14 @@ def _parse_float_values(values: Sequence[float] | str, *, name: str) -> tuple[fl
     parsed = tuple(float(str(value).strip()) for value in parts if str(value).strip())
     if not parsed:
         raise ValueError(f"{name} must not be empty")
+    return parsed
+
+
+def _validate_portfolio_constraint_modes(values: Sequence[str] | None) -> tuple[str, ...]:
+    parsed = tuple(values or ())
+    unknown = sorted(set(parsed) - set(PORTFOLIO_CONSTRAINT_MODES))
+    if unknown:
+        raise ValueError(f"unsupported portfolio constraint modes: {unknown}")
     return parsed
 
 
@@ -1019,6 +1092,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--exposure-columns", default=",".join(DEFAULT_EXPOSURE_COLUMNS))
     parser.add_argument("--exposure-constraint-cols", default="")
     parser.add_argument("--max-abs-exposure", type=float, default=None)
+    parser.add_argument("--portfolio-constraint-modes", default=None)
     parser.add_argument("--weak-year-rebuild-run-dir", type=Path, default=None)
     parser.add_argument("--constraint-variants", default=None)
     parser.add_argument("--group-col", default=DEFAULT_GROUP_COL)
@@ -1072,6 +1146,11 @@ def main() -> None:
         exposure_columns=_parse_str_values(args.exposure_columns, name="exposure_columns"),
         exposure_constraint_cols=_parse_optional_str_values(args.exposure_constraint_cols),
         max_abs_exposure=args.max_abs_exposure,
+        portfolio_constraint_modes=(
+            _parse_optional_str_values(args.portfolio_constraint_modes)
+            if args.portfolio_constraint_modes is not None
+            else None
+        ),
         group_col=args.group_col.strip() or None,
         max_group_weight=args.max_group_weight,
         execution_constraints=args.execution_constraints,

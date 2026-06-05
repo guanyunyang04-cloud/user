@@ -377,7 +377,13 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.exp
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.low_corr_frontier_combined_constraint_audit --years 2024,2025,2026 --final-end-date 2026-06-01 --horizon 20 --top-n 200 --frequency monthly --buffer-multiplier 3.0 --fee-bps 30 --capital-amounts 100000000 --impact-bps-per-1pct 0,10 --signal-penalty-strengths multifactor_rolling_ic_weighted_score=0.25,multifactor_ic_weighted_score=0.0,multifactor_low_corr_rank_score=1.0 --group-col industry --max-group-weight 0.10 --execution-constraints --include-metrics --include-industry --write-research-log
 ```
 
-该实验把当前 frontier 的信号特定 exposure penalty、组合层行业 cap、固定费率和参与率冲击成本放在同一门禁下评估。输出包括 `combined_constraint_summary.csv`、`combined_constraint_aggregate.csv`、交易表、流动性/参与率、篮子风格暴露、行业暴露和元数据。当前 run `low_corr_frontier_combined_constraint_audit_20260603_094139` 显示三条 frontier 在 `30 bps / 100m / 10 bps per 1 pct participation` 下仍三年为正，但交易样本仍薄，且低成交额/低波动/弱动量/换手 active exposure 仍明显。该实验强化 `candidate-frontier/backtest_only`，不产生策略候选。
+该实验把当前 frontier 的信号特定 exposure penalty、组合层行业 cap、固定费率和参与率冲击成本放在同一门禁下评估。`--constraint-variants` 表示 alpha/regime/capital 规则，可用 `baseline,regime_gated,capital_scaled,regime_weighted_capital_scaled,factor_blend`；`--portfolio-constraint-modes` 表示组合构建方式，可用 `penalty_top_n,explicit_exposure_constraint,hybrid_penalty_constraint`。显式约束需同时提供 `--exposure-constraint-cols` 和 `--max-abs-exposure`；若约束不可行，`constraint_fallback_count/rate` 会穿透到 aggregate 和 personal gate，不能晋级。输出包括 `combined_constraint_summary.csv`、`combined_constraint_aggregate.csv`、交易表、流动性/参与率、篮子风格暴露、行业暴露和元数据。当前 run `low_corr_frontier_combined_constraint_audit_20260603_094139` 显示三条 frontier 在 `30 bps / 100m / 10 bps per 1 pct participation` 下仍三年为正，但交易样本仍薄，且低成交额/低波动/弱动量/换手 active exposure 仍明显。该实验强化 `candidate-frontier/backtest_only`，不产生策略候选。
+
+组合构建三模式对照示例：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.low_corr_frontier_combined_constraint_audit --years 2017,2018,2019,2020,2021,2022,2023,2024,2025,2026 --top-n 200 --fee-bps 30 --capital-amounts 100000000 --impact-bps-per-1pct 10 --exposure-constraint-cols log_amount_mean_20d_z,neg_volatility_20d_z,momentum_20d_z,turn_xsec_z --max-abs-exposure 1.25 --portfolio-constraint-modes penalty_top_n,explicit_exposure_constraint,hybrid_penalty_constraint --write-research-log
+```
 
 扩展样本门禁可用同一入口跑 2017-2026：
 
@@ -413,7 +419,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.exp
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.frontier_personal_candidate_gate --write-research-log
 ```
 
-该门禁读取当前 `low_corr_frontier_combined_constraint_audit` 的结构化输出，不重跑回测。它面向 `Baostock-only personal quant strategy research`，不要求真实总市值/流通市值，也不输出机构级 `strategy_candidate`。默认检查：Baostock snapshot、2017-2026 walk-forward meta、`30 bps / 100m / 10 bps per 1 pct participation` 压力行覆盖个人 `1m` 小资金、执行约束启用、均值年化至少 `5%`、正收益年份率至少 `0.6`、最差年不低于 `-35%`、worst drawdown 不低于 `-25%`、非重叠 periods 至少 `50`、proxy 风格暴露不过度极端且无 optimizer fallback。通过后分级为 `personal_backtest_candidate`，`paper_tracking_recommendation=user_discretion`，decision 为 `personal_strategy_candidates_selected`；失败则保持 `personal_research/backtest_only`。当前边界是：agent 只负责筛出好的模型/策略候选，后续风险、记录、paper/live tracking 和执行决策由用户自行判断。
+该门禁读取当前 `low_corr_frontier_combined_constraint_audit` 的结构化输出，不重跑回测。它面向 `Baostock-only personal quant strategy research`，不要求真实总市值/流通市值，也不输出机构级 `strategy_candidate`。默认检查：Baostock snapshot、2017-2026 walk-forward meta、`30 bps / 100m / 10 bps per 1 pct participation` 压力行覆盖个人 `1m` 小资金、执行约束启用、均值年化至少 `5%`、正收益年份率至少 `0.6`、最差年不低于 `-35%`、worst drawdown 不低于 `-25%`、非重叠 periods 至少 `50`、proxy 风格暴露不过度极端且无 optimizer fallback。通过后分级为 `personal_backtest_candidate`，`paper_tracking_recommendation=user_discretion`，decision 为 `personal_strategy_candidates_selected`；失败行的 `paper_tracking_recommendation=none`，并保持 `personal_research/backtest_only` 或 diagnostic。当前边界是：agent 只负责筛出好的模型/策略候选，后续风险、记录、paper/live tracking 和执行决策由用户自行判断。
 
 ## Frontier Personal Protocol Grid
 
@@ -423,7 +429,37 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.exp
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.frontier_personal_protocol_grid --top-n-values 20,50,100 --years 2017,2018,2019,2020,2021,2022,2023,2024,2025,2026 --write-research-log
 ```
 
-该实验按 `top_n` 网格逐次调用 `low_corr_frontier_combined_constraint_audit`，随后对每个 combined run 调用 `frontier_personal_candidate_gate`，最后汇总为 `personal_protocol_grid_ledger.csv` 和 `personal_protocol_grid_top_n_summary.csv`。它用于把当前 `20d/monthly/buffer=3.0` frontier 从原来的 `top_n=200` 研究协议，系统化比较到更贴近个人小资金的 `top_n=20/50/100` 协议。输出只允许产生 `personal_backtest_candidate` 或 `personal_research/backtest_only`；通过行只表示模型/策略候选已选出，不能直接称为 `personal_paper_candidate`、`strategy_candidate` 或生产候选。后续是否记录、跟踪、实盘或做风险裁量不再由本流程判断。
+该实验按 `top_n` 网格逐次调用 `low_corr_frontier_combined_constraint_audit`，随后对每个 combined run 调用 `frontier_personal_candidate_gate`，最后汇总为 `personal_protocol_grid_ledger.csv` 和 `personal_protocol_grid_top_n_summary.csv`。它用于把当前 `20d/monthly/buffer=3.0` frontier 从原来的 `top_n=200` 研究协议，系统化比较到更贴近个人小资金的 `top_n=20/50/100` 协议，也可透传 `--constraint-variants`、`--ml-signal-run-dir`、`--portfolio-constraint-modes` 做 ML v2 和组合构建对照。ledger 保留 `constraint_variant` 与 `portfolio_constraint_mode` 两个维度，只有正式 gate 通过的行才可解释为 `personal_backtest_candidate`。输出只允许产生 `personal_backtest_candidate` 或 `personal_research/backtest_only`；通过行只表示模型/策略候选已选出，不能直接称为 `personal_paper_candidate`、`strategy_candidate` 或生产候选。后续是否记录、跟踪、实盘或做风险裁量不再由本流程判断。
+
+## Frontier ML Signal Rebuild
+
+Baostock-only LightGBM 信号重建入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.frontier_ml_signal_rebuild --years 2017,2018,2019,2020,2021,2022,2023,2024,2025,2026 --horizon 20 --factor-set expanded --training-mode baseline --write-research-log
+```
+
+`--training-mode` 支持 `baseline|weak_weighted|regime_weighted|regime_heads`。baseline 保持 v1 行为；`weak_weighted` 对历史弱年样本加权；`regime_weighted` 按 prior-fit 的 market breadth、20d market return 和 volatility regime 调整样本权重；`regime_heads` 只用 eval year 之前的数据拟合 regime 阈值和分头模型，训练不足时写为 skipped，不偷用 eval year。输出包括 `ml_signal_predictions.csv`、`ml_training_audit.csv`、`ml_regime_training_audit.csv`、`ml_feature_importance.csv` 和 `summary.json`；预测列统一为 `score`，并保留 `model_head/regime_label/sample_weight_policy`。该入口只生成 ML 信号证据，晋级仍必须接入 `frontier_personal_protocol_grid` 并通过正式 personal gate；smoke 或短样本只能解释为 `diagnostic_relaxed_personal_gate`。
+
+## Frontier Personal Candidate Selection Report
+
+候选选择证据汇总入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.frontier_personal_candidate_selection_report --write-research-log
+```
+
+该报告读取已有 `frontier_personal_protocol_grid` 和 `frontier_personal_candidate_gate` artifact，输出 `candidate_selection_summary.csv`、`candidate_selection_rejected_diagnostics.csv`、`summary.json` 和 `summary.md`。允许的选择语义只有 `personal_backtest_candidate`、`personal_research/backtest_only`、`diagnostic`；`post_selection_recommendation` 只有正式候选为 `user_discretion`，其它行为 `none`。该报告不生成 paper/live tracking 计划，不输出 `personal_paper_candidate` 或 `personal_trading_candidate`。
+
+## Short Open-Known Factor Rebuild
+
+短线可成交强势股识别入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.short_open_known_factor_rebuild --profile executable_only --years 2017,2018,2019,2020,2021,2022,2023,2024,2025,2026 --stable-cache --event-cache-dir traditional_quant_research/cache/short_open_known_events --event-panel-write-mode selected_years --write-research-log
+```
+
+当前短线线只允许把 `executable_only` 作为候选晋级 profile；`preopen_submit` 与 `open_print_filter` 主要用于诊断强度来源。`executable_only` 候选会硬排除 one-word、near-one-word 和 near-limit open entries，且必须满足 `executable_trade_rate == 1.0`、`near_limit_trade_rate == 0`、净均值为正、`payoff >= 2`、正收益年份率至少 `0.8`、最差年度不亏，才允许输出 `shortline_backtest_candidate`。当前入口保留 KAMA、MA compression、volume/amount regime、first-board/board-stage、market heat、industry heat 和允许口径下的 open gap 特征；但若收益来自难买或买不到的封板路径，只能写为 `shortline_diagnostic_only`。
 
 ## Frontier Personal Paper Tracking Bootstrap
 

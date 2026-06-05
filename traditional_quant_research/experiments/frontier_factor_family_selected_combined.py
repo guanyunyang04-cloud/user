@@ -120,7 +120,7 @@ def run_frontier_factor_family_selected_combined(
         "execution_constraints": bool(first_summary.get("execution_constraints", False)),
         "limit_threshold": first_summary.get("limit_threshold"),
         "candidate_count": 0,
-        "assessment": "prior-fit factor-family selected combined evidence only; rerun personal gate before paper tracking decisions",
+        "assessment": "prior-fit factor-family selected combined evidence only; rerun the formal personal gate before candidate selection",
         "best_30bps_100m_rows": best_combined_rows(aggregate, fee_bps=30.0, capital_amount=100_000_000.0),
         "output_dir": str(run_dir),
     }

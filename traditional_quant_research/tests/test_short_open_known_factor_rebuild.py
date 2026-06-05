@@ -269,7 +269,7 @@ def test_open_print_filter_is_marked_open_known_diagnostic() -> None:
     assert "open_known_diagnostic" in candidate["failed_gates"]
 
 
-def test_executable_only_is_marked_open_known_diagnostic_even_when_clean() -> None:
+def test_executable_only_can_be_shortline_candidate_when_clean_and_profitable() -> None:
     trades = pd.DataFrame(
         [
             {
@@ -297,8 +297,42 @@ def test_executable_only_is_marked_open_known_diagnostic_even_when_clean() -> No
         min_trades=1,
     ).iloc[0]
 
-    assert candidate["evidence_grade"] == "open_known_diagnostic"
-    assert "open_known_diagnostic" in candidate["failed_gates"]
+    assert candidate["evidence_grade"] == "shortline_backtest_candidate"
+    assert candidate["failed_gates"] == ""
+    assert candidate["executable_trade_rate"] == 1.0
+    assert candidate["near_limit_trade_rate"] == 0.0
+
+
+def test_executable_only_candidate_blocks_near_limit_and_one_word_trades() -> None:
+    trades = pd.DataFrame(
+        [
+            {
+                "eval_year": year,
+                "net_ret_pct": 5.0,
+                "diagnostic_only": False,
+                "requires_open_known": False,
+                "executable_entry": True,
+                "entry_open_near_limit": year == mod.DEFAULT_YEARS[0],
+                "one_word_limit_like": year == mod.DEFAULT_YEARS[1],
+                "near_one_word_limit_like": year == mod.DEFAULT_YEARS[2],
+            }
+            for year in mod.DEFAULT_YEARS
+        ]
+    )
+    yearly = mod.summarize_oos_yearly(trades)
+    plan = pd.DataFrame({"fit_uses_eval_year": [False]})
+
+    candidate = mod.build_candidate_strategy_summary(
+        trades,
+        yearly,
+        plan,
+        profile="executable_only",
+        expected_years=mod.DEFAULT_YEARS,
+        min_trades=1,
+    ).iloc[0]
+
+    assert candidate["evidence_grade"] == "shortline_diagnostic_only"
+    assert "contains_unfilled_near_limit_entries" in candidate["failed_gates"]
 
 
 def test_portfolio_topk_selects_highest_scored_trade_per_date() -> None:

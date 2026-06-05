@@ -206,6 +206,76 @@ def test_run_low_corr_frontier_combined_constraint_audit_writes_outputs(tmp_path
     assert set(meta["ml_signal_run_dir"]) == {str(tmp_path / "ml_signal")}
 
 
+def test_run_combined_constraint_audit_compares_portfolio_constraint_modes(tmp_path: Path, monkeypatch) -> None:
+    panel = _frontier_panel()
+    signal = low_corr_frontier_combined_constraint_audit.ROLLING_IC_SIGNAL
+
+    def fake_build_candidate_protocol_signal_panel(**kwargs):
+        return {
+            "manifest": {"snapshot_id": "fixture-snapshot"},
+            "quality": {"failure_count": 0, "missing_bar_rows": 0, "st_rows": 0, "suspended_like_rows": 0},
+            "evaluation_panel": panel,
+            "available_signals": [signal],
+            "rolling_fallback_rate": 0.0,
+        }
+
+    monkeypatch.setattr(
+        low_corr_frontier_combined_constraint_audit,
+        "build_candidate_protocol_signal_panel",
+        fake_build_candidate_protocol_signal_panel,
+    )
+
+    result = low_corr_frontier_combined_constraint_audit.run_low_corr_frontier_combined_constraint_audit(
+        years=(2026,),
+        final_end_date="2026-06-01",
+        horizon=1,
+        signals=(signal,),
+        signal_penalty_strengths={signal: 0.25},
+        top_n=2,
+        rebalance_frequency="daily",
+        buffer_multiplier=1.0,
+        fee_bps_values=(30.0,),
+        capital_amounts=(10_000_000.0,),
+        impact_bps_per_1pct_values=(10.0,),
+        exposure_penalty_cols=("log_amount_mean_20d_z", "turn_xsec_z"),
+        exposure_columns=("log_amount_mean_20d_z", "turn_xsec_z"),
+        exposure_constraint_cols=("log_amount_mean_20d_z", "turn_xsec_z"),
+        max_abs_exposure=1.0,
+        portfolio_constraint_modes=(
+            "penalty_top_n",
+            "explicit_exposure_constraint",
+            "hybrid_penalty_constraint",
+        ),
+        group_col="industry",
+        max_group_weight=0.5,
+        execution_constraints=False,
+        output_dir=tmp_path,
+    )
+
+    run_dir = Path(result["output_dir"])
+    summary = pd.read_csv(run_dir / "combined_constraint_summary.csv")
+    aggregate = pd.read_csv(run_dir / "combined_constraint_aggregate.csv")
+    exposure_summary = pd.read_csv(run_dir / "combined_constraint_basket_exposure_summary.csv")
+    meta = pd.read_csv(run_dir / "combined_constraint_meta.csv")
+    modes = {"penalty_top_n", "explicit_exposure_constraint", "hybrid_penalty_constraint"}
+
+    assert set(result["portfolio_constraint_modes"]) == modes
+    assert set(summary["portfolio_constraint_mode"]) == modes
+    assert set(aggregate["portfolio_constraint_mode"]) == modes
+    assert set(exposure_summary["portfolio_constraint_mode"]) == modes
+    assert set(meta["portfolio_constraint_modes"]) == {"penalty_top_n,explicit_exposure_constraint,hybrid_penalty_constraint"}
+    explicit = summary.loc[summary["portfolio_constraint_mode"].eq("explicit_exposure_constraint")].iloc[0]
+    penalty = summary.loc[summary["portfolio_constraint_mode"].eq("penalty_top_n")].iloc[0]
+    hybrid = summary.loc[summary["portfolio_constraint_mode"].eq("hybrid_penalty_constraint")].iloc[0]
+    assert explicit["exposure_penalty_strength"] == pytest.approx(0.0)
+    assert pd.isna(explicit["exposure_penalty_cols"]) or str(explicit["exposure_penalty_cols"]) == ""
+    assert explicit["exposure_constraint_cols"] == "log_amount_mean_20d_z,turn_xsec_z"
+    assert penalty["exposure_constraint_cols"] == "" or pd.isna(penalty["exposure_constraint_cols"])
+    assert penalty["exposure_penalty_strength"] == pytest.approx(0.25)
+    assert hybrid["exposure_constraint_cols"] == "log_amount_mean_20d_z,turn_xsec_z"
+    assert hybrid["exposure_penalty_strength"] == pytest.approx(0.25)
+
+
 def test_run_combined_constraint_audit_wires_prior_fit_weak_year_variants(tmp_path: Path, monkeypatch) -> None:
     panel = _frontier_panel()
     signal = low_corr_frontier_combined_constraint_audit.ROLLING_IC_SIGNAL
@@ -271,19 +341,34 @@ def test_run_combined_constraint_audit_wires_prior_fit_weak_year_variants(tmp_pa
 
     run_dir = tmp_path / result["run_id"]
     summary = pd.read_csv(run_dir / "combined_constraint_summary.csv")
-    assert set(summary["constraint_variant"]) == {"baseline", "regime_gated", "capital_scaled", "factor_blend"}
+    assert set(summary["constraint_variant"]) == {
+        "baseline",
+        "regime_gated",
+        "capital_scaled",
+        "regime_weighted_capital_scaled",
+        "factor_blend",
+    }
     gated = summary.loc[summary["constraint_variant"] == "regime_gated"].iloc[0]
     scaled = summary.loc[summary["constraint_variant"] == "capital_scaled"].iloc[0]
+    weighted = summary.loc[summary["constraint_variant"] == "regime_weighted_capital_scaled"].iloc[0]
     assert gated["weak_year_rule_allowed"] == False
     assert gated["weak_year_rule_fit_years"] == "2017,2018,2022"
     assert gated["weak_year_rule_fit_uses_eval_year"] == False
     assert gated["evidence_grade"] == "out_of_sample_supported"
     assert scaled["weak_year_capital_scale"] == pytest.approx(0.5)
+    assert 0.35 <= weighted["weak_year_capital_scale"] <= 0.75
+    assert weighted["weak_year_rule_scope"] == low_corr_frontier_combined_constraint_audit.SIGNAL_SPECIFIC_RULE_SCOPE
 
     aggregate = pd.read_csv(run_dir / "combined_constraint_aggregate.csv")
-    assert set(aggregate["constraint_variant"]) == {"baseline", "regime_gated", "capital_scaled", "factor_blend"}
+    assert set(aggregate["constraint_variant"]) == {
+        "baseline",
+        "regime_gated",
+        "capital_scaled",
+        "regime_weighted_capital_scaled",
+        "factor_blend",
+    }
     meta = pd.read_csv(run_dir / "combined_constraint_meta.csv")
-    assert set(meta["constraint_variants"]) == {"baseline,regime_gated,capital_scaled,factor_blend"}
+    assert set(meta["constraint_variants"]) == {"baseline,regime_gated,capital_scaled,regime_weighted_capital_scaled,factor_blend"}
     exposure_summary = pd.read_csv(run_dir / "combined_constraint_basket_exposure_summary.csv")
     assert "constraint_variant" in exposure_summary.columns
 

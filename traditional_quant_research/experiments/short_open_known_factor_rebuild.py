@@ -1560,7 +1560,7 @@ def build_candidate_strategy_summary(
         failures.append("diagnostic_or_unfilled_path")
     if near_limit_trade_rate > 0 or one_word_trade_rate > 0 or near_one_word_trade_rate > 0 or executable_trade_rate < 1.0:
         failures.append("contains_unfilled_near_limit_entries")
-    if requires_open or profile in {"open_print_filter", "executable_only"}:
+    if profile == "open_print_filter" or (requires_open and profile != "executable_only"):
         failures.append("open_known_diagnostic")
     if failures:
         grade = "open_known_diagnostic" if "open_known_diagnostic" in failures else "shortline_diagnostic_only"
@@ -1642,6 +1642,10 @@ def rules_for_profile(profile: str) -> list[RuleSpec]:
             RuleSpec("executable_first_board_kama_ma", profile, executable_only=True),
             RuleSpec("executable_atr_upper_ma_trend", profile, executable_only=True),
             RuleSpec("executable_market_industry_heat_kama", profile, executable_only=True),
+            RuleSpec("executable_market_heat_first_board_kama", profile, executable_only=True),
+            RuleSpec("executable_industry_heat_moderate_volume", profile, executable_only=True),
+            RuleSpec("executable_clean_recent_limitup_ma_compression", profile, executable_only=True),
+            RuleSpec("executable_low_position_volume_reversal", profile, executable_only=True),
             RuleSpec("executable_low_flat_open_kama", profile, requires_open_known=True, executable_only=True),
             RuleSpec("executable_near_limit_open", profile, diagnostic_only=True, requires_open_known=True, executable_only=True),
         ]
@@ -1658,7 +1662,10 @@ def evaluate_rule(events: pd.DataFrame, rule_name: str) -> pd.Series:
     board3p = board_stage.isin(["third_board", "fourth_plus_board"])
     open_0_3 = events.get("next_gap_bucket", pd.Series("", index=idx)).eq("gap_0_to_3")
     open_m3_3 = events.get("next_gap_bucket", pd.Series("", index=idx)).isin(["gap_minus3_to_0", "flat", "gap_0_to_3"])
-    executable = _bool_col(events, "executable_entry", default=True)
+    entry_open_near_limit = _bool_col(events, "entry_open_near_limit")
+    one_word = _bool_col(events, "one_word_limit_like")
+    near_one_word = _bool_col(events, "near_one_word_limit_like")
+    executable = _bool_col(events, "executable_entry", default=True) & ~entry_open_near_limit & ~one_word & ~near_one_word
     kama_break = _bool_col(events, "open_below_kama_break_limitup")
     atr_break = _bool_col(events, "close_cross_atr_upper")
     ma_stack = _bool_col(events, "ma_stack_bullish")
@@ -1697,8 +1704,8 @@ def evaluate_rule(events: pd.DataFrame, rule_name: str) -> pd.Series:
         "market_heat_kama": market_heat & kama_0_8 & not_hot,
         "industry_heat_kama": industry_heat & kama_0_8 & not_hot,
         "recent_limitup_clean_kama": clean_recent_limitup & kama_0_8 & not_hot,
-        "signal_one_word": _bool_col(events, "one_word_limit_like"),
-        "near_one_word": (_bool_col(events, "one_word_limit_like") | _bool_col(events, "near_one_word_limit_like")),
+        "signal_one_word": one_word,
+        "near_one_word": (one_word | near_one_word),
         "open_gap_0_3": open_0_3,
         "open_gap_m3_to_3": open_m3_3,
         "kama_bias_0_8_open_0_3": kama_0_8 & open_0_3,
@@ -1707,8 +1714,8 @@ def evaluate_rule(events: pd.DataFrame, rule_name: str) -> pd.Series:
         "low_flat_open_kama_ma": low_flat_open & kama_0_8 & ma_trend & not_hot,
         "low_flat_open_moderate_volume": low_flat_open & moderate_volume & not_hot,
         "board2p_open_0_3": board2p & not_hot & open_0_3,
-        "avoid_near_limit_kama": kama_0_8 & ~_bool_col(events, "entry_open_near_limit"),
-        "near_limit_open": _bool_col(events, "entry_open_near_limit"),
+        "avoid_near_limit_kama": kama_0_8 & ~entry_open_near_limit,
+        "near_limit_open": entry_open_near_limit,
         "executable_all": executable,
         "executable_kama_ma_trend": executable & kama_0_8 & ma_trend & not_hot,
         "executable_kama_break_ma_compression": executable & kama_break & ma_compression & not_hot,
@@ -1716,8 +1723,20 @@ def evaluate_rule(events: pd.DataFrame, rule_name: str) -> pd.Series:
         "executable_first_board_kama_ma": executable & first_board & kama_0_8 & ma_trend & not_hot,
         "executable_atr_upper_ma_trend": executable & atr_break & ma_trend & not_hot,
         "executable_market_industry_heat_kama": executable & (market_heat | industry_heat) & kama_0_8 & not_hot,
+        "executable_market_heat_first_board_kama": executable & market_heat & first_board & kama_0_8 & (kama_break | ma_trend) & not_hot,
+        "executable_industry_heat_moderate_volume": executable & industry_heat & moderate_volume & kama_0_8 & not_hot,
+        "executable_clean_recent_limitup_ma_compression": executable
+        & clean_recent_limitup
+        & ma_compression
+        & (kama_break | atr_break | ma_trend)
+        & not_hot,
+        "executable_low_position_volume_reversal": executable
+        & low_position
+        & moderate_volume
+        & (_bool_col(events, "kama_slope_turn_positive") | _bool_col(events, "kama_slope_positive") | kama_break)
+        & not_hot,
         "executable_low_flat_open_kama": executable & low_flat_open & kama_0_8 & not_hot,
-        "executable_near_limit_open": _bool_col(events, "entry_open_near_limit"),
+        "executable_near_limit_open": entry_open_near_limit,
     }
     if rule_name not in rules:
         raise ValueError(f"unknown rule_name: {rule_name}")

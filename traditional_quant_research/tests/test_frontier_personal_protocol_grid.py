@@ -34,7 +34,7 @@ def _gate_frame(top_n: int, *, promoted: bool) -> pd.DataFrame:
                 "max_proxy_mean_abs_active_exposure": 1.00,
                 "promoted": promoted,
                 "promotion_level": PERSONAL_BACKTEST_PROMOTION_LEVEL if promoted else "personal_research/backtest_only",
-                "paper_tracking_recommendation": POST_SELECTION_RECOMMENDATION if promoted else "continue_research",
+                "paper_tracking_recommendation": POST_SELECTION_RECOMMENDATION if promoted else "none",
                 "failed_gates": "" if promoted else "return_gate,weak_year_damage_gate",
             },
             {
@@ -55,7 +55,7 @@ def _gate_frame(top_n: int, *, promoted: bool) -> pd.DataFrame:
                 "max_proxy_mean_abs_active_exposure": 1.10,
                 "promoted": False,
                 "promotion_level": "personal_research/backtest_only",
-                "paper_tracking_recommendation": "continue_research",
+                "paper_tracking_recommendation": "none",
                 "failed_gates": "return_gate",
             },
         ]

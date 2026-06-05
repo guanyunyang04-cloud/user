@@ -206,6 +206,8 @@ def evaluate_personal_candidate_gates(
             frame[column] = pd.to_numeric(frame[column], errors="coerce")
     if "constraint_variant" not in frame.columns:
         frame["constraint_variant"] = "baseline"
+    if "portfolio_constraint_mode" not in frame.columns:
+        frame["portfolio_constraint_mode"] = _legacy_portfolio_constraint_mode(combined_summary)
     if "top_n" not in frame.columns:
         frame["top_n"] = int(combined_summary.get("top_n", 0) or 0)
     if "constraint_fallback_count" not in frame.columns:
@@ -229,6 +231,7 @@ def evaluate_personal_candidate_gates(
     for row in rows_to_score.to_dict("records"):
         signal = str(row.get("signal", ""))
         constraint_variant = str(row.get("constraint_variant", "baseline") or "baseline")
+        portfolio_constraint_mode = str(row.get("portfolio_constraint_mode", "penalty_top_n") or "penalty_top_n")
         top_n = int(float(row.get("top_n", combined_summary.get("top_n", 0)) or 0))
         strength = float(row.get("exposure_penalty_strength", 0.0) or 0.0)
         fallback_count = int(float(row.get("constraint_fallback_count", 0) or 0))
@@ -237,6 +240,7 @@ def evaluate_personal_candidate_gates(
             exposure_summary,
             signal=signal,
             constraint_variant=constraint_variant,
+            portfolio_constraint_mode=portfolio_constraint_mode,
             top_n=top_n,
             exposure_penalty_strength=strength,
             exposure_fields=exposure_fields,
@@ -278,6 +282,7 @@ def evaluate_personal_candidate_gates(
         rows.append(
             {
                 "constraint_variant": constraint_variant,
+                "portfolio_constraint_mode": portfolio_constraint_mode,
                 "top_n": top_n,
                 "signal": signal,
                 "fee_bps": float(row.get("fee_bps", np.nan)),
@@ -313,7 +318,7 @@ def evaluate_personal_candidate_gates(
                 "exposure_failures": ",".join(exposure_failures),
                 "walk_forward_detail": walk_forward_detail,
                 "promotion_level": PERSONAL_BACKTEST_PROMOTION_LEVEL if not failed else PERSONAL_BACKTEST_ONLY_LEVEL,
-                "paper_tracking_recommendation": POST_SELECTION_RECOMMENDATION if not failed else "continue_research",
+                "paper_tracking_recommendation": POST_SELECTION_RECOMMENDATION if not failed else "none",
             }
         )
     return pd.DataFrame(rows, columns=_gate_columns())
@@ -380,6 +385,7 @@ def summarize_personal_candidate_gate(
         "decision": "personal_strategy_candidates_selected" if len(candidates) else "keep_personal_research_backtest_only",
         "post_selection_boundary": "agent_selects_models_and_strategies_only; user_handles_risk_recording_and_live_decisions",
         "best_signal_by_personal_gate": str(best_row.get("signal", "")),
+        "best_portfolio_constraint_mode_by_personal_gate": str(best_row.get("portfolio_constraint_mode", "")),
         "best_top_n_by_personal_gate": int(float(best_row.get("top_n", 0) or 0)) if best_row else None,
         "best_signal_mean_annualized_return": float(best_row.get("mean_annualized_return", np.nan)) if best_row else None,
         "top_failed_gates": dict(fail_counter.most_common()),
@@ -411,6 +417,7 @@ def render_personal_candidate_gate_markdown(summary: Mapping[str, Any], gate: pd
         f"- formal_gate_profile: `{summary.get('formal_gate_profile', '')}`",
         f"- gate_profile_detail: `{summary.get('gate_profile_detail', '')}`",
         f"- best_signal_by_personal_gate: `{summary.get('best_signal_by_personal_gate', '')}`",
+        f"- best_portfolio_constraint_mode_by_personal_gate: `{summary.get('best_portfolio_constraint_mode_by_personal_gate', '')}`",
         f"- best_top_n_by_personal_gate: `{summary.get('best_top_n_by_personal_gate', '')}`",
         f"- best_signal_mean_annualized_return: `{_fmt(summary.get('best_signal_mean_annualized_return'))}`",
         "",
@@ -515,6 +522,7 @@ def _proxy_exposure_evidence(
     *,
     signal: str,
     constraint_variant: str,
+    portfolio_constraint_mode: str,
     top_n: int,
     exposure_penalty_strength: float,
     exposure_fields: Sequence[str],
@@ -525,6 +533,8 @@ def _proxy_exposure_evidence(
     frame = exposure_summary.copy()
     if "constraint_variant" not in frame.columns:
         frame["constraint_variant"] = "baseline"
+    if "portfolio_constraint_mode" not in frame.columns:
+        frame["portfolio_constraint_mode"] = portfolio_constraint_mode or "penalty_top_n"
     if "top_n" not in frame.columns:
         frame["top_n"] = int(top_n)
     for column in ["exposure_penalty_strength", "mean_abs_active_exposure"]:
@@ -533,6 +543,7 @@ def _proxy_exposure_evidence(
     subset = frame.loc[
         (frame["signal"].astype(str) == signal)
         & (frame["constraint_variant"].astype(str) == constraint_variant)
+        & (frame["portfolio_constraint_mode"].astype(str) == (portfolio_constraint_mode or "penalty_top_n"))
         & (pd.to_numeric(frame["top_n"], errors="coerce") == int(top_n))
         & np.isclose(frame["exposure_penalty_strength"], exposure_penalty_strength)
         & (frame["period_type"].astype(str) == "monthly")
@@ -551,6 +562,16 @@ def _proxy_exposure_evidence(
     return max_abs, failures
 
 
+def _legacy_portfolio_constraint_mode(combined_summary: Mapping[str, Any]) -> str:
+    constraint_cols = combined_summary.get("exposure_constraint_cols", [])
+    if isinstance(constraint_cols, str):
+        has_constraint_cols = bool(constraint_cols.strip())
+    else:
+        has_constraint_cols = bool(constraint_cols)
+    has_max_abs = combined_summary.get("max_abs_exposure") is not None
+    return "hybrid_penalty_constraint" if has_constraint_cols or has_max_abs else "penalty_top_n"
+
+
 def _explainability_gate(row: Mapping[str, Any]) -> bool:
     signal = str(row.get("signal", ""))
     return bool(signal) and (
@@ -563,6 +584,7 @@ def _explainability_gate(row: Mapping[str, Any]) -> bool:
 def _gate_columns() -> list[str]:
     return [
         "constraint_variant",
+        "portfolio_constraint_mode",
         "top_n",
         "signal",
         "fee_bps",
