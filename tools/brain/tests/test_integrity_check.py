@@ -1,19 +1,22 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
+from copy import deepcopy
 import unittest
+from unittest.mock import patch
 
+from tools.brain import integrity_check
 from tools.brain.integrity_check import run_checks
 from tools.brain.platform import load_manifest
 
 
 class BrainIntegrityCatalogTest(unittest.TestCase):
-    def test_catalog_warnings_do_not_block_attached_brain_integrity(self) -> None:
+    def test_acknowledged_non_truth_catalog_entries_do_not_warn(self) -> None:
         findings = run_checks()
         errors = [finding for finding in findings if finding.severity == "error"]
         warning_codes = {finding.code for finding in findings if finding.severity == "warning"}
 
         self.assertEqual(errors, [])
-        self.assertIn("catalog_noncanonical_brain", warning_codes)
+        self.assertNotIn("catalog_noncanonical_brain", warning_codes)
         self.assertNotIn("brain_catalog_discovered_entry_missing", warning_codes)
         self.assertNotIn("route_target_unbootstrapable", warning_codes)
         self.assertNotIn("workflow_category_matches_child_brain_id", warning_codes)
@@ -78,15 +81,32 @@ class BrainIntegrityCatalogTest(unittest.TestCase):
         self.assertNotIn("agent_meta_capsule_schema_invalid", error_codes)
         self.assertNotIn("agent_meta_legacy_capsule_field_present", error_codes)
 
-    def test_non_truth_catalog_warnings_are_acknowledged_boundaries(self) -> None:
-        findings = run_checks()
+    def test_action_needed_noncanonical_catalog_entries_still_warn(self) -> None:
+        fake_catalog = deepcopy(integrity_check._read_json(integrity_check.BRAIN_CATALOG))
+        fake_catalog["brains"].append(
+            {
+                "brain_id": "unregistered_workspace",
+                "root": "unregistered_workspace/brain",
+                "manifest_path": "",
+                "status": "missing_manifest",
+                "body_root": "unregistered_workspace",
+                "references_path": "",
+                "references_count": 0,
+                "language_policy": "zh_semantic_en_identifiers_v1",
+                "last_guard_status": "not_guarded",
+            }
+        )
+        findings: list[integrity_check.Finding] = []
+
+        with (
+            patch.object(integrity_check, "_read_json", return_value=fake_catalog),
+            patch.object(integrity_check, "build_brain_catalog", return_value=fake_catalog),
+        ):
+            integrity_check._validate_brain_catalog(findings, load_manifest("brain/brain_manifest.json"))
         warnings = [finding for finding in findings if finding.code == "catalog_noncanonical_brain"]
 
         self.assertTrue(warnings)
-        self.assertTrue(
-            all("acknowledged non-truth" in finding.detail for finding in warnings),
-            [finding.detail for finding in warnings],
-        )
+        self.assertIn("unregistered_workspace needs review", warnings[0].detail)
 
 
 if __name__ == "__main__":

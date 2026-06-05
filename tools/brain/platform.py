@@ -706,17 +706,21 @@ def audit_brain_system(*, scope: str = "all") -> dict[str, Any]:
         }
         for item in catalog["brains"]
     }
-    noncanonical_statuses = {
-        "discovered_untracked",
+    acknowledged_non_truth_statuses = {
         "cache_legacy",
-        "missing_manifest",
         "non_truth_tooling",
         "external_or_inactive_missing_manifest",
     }
-    noncanonical = [
+    action_needed_noncanonical_statuses = {"discovered_untracked", "missing_manifest"}
+    acknowledged_non_truth = [
         item
         for item in catalog["brains"]
-        if item.get("status") in noncanonical_statuses
+        if item.get("status") in acknowledged_non_truth_statuses
+    ]
+    actionable_noncanonical = [
+        item
+        for item in catalog["brains"]
+        if item.get("status") in action_needed_noncanonical_statuses
     ]
     split_exists = workspace_path(SPLIT_WORKFLOW_REGISTRY).exists()
     legacy_exists = workspace_path(WORKFLOW_REGISTRY).exists()
@@ -739,7 +743,7 @@ def audit_brain_system(*, scope: str = "all") -> dict[str, Any]:
     }
 
     warnings: list[str] = []
-    if noncanonical:
+    if actionable_noncanonical:
         warnings.append("noncanonical_brains_discovered")
     if freshness.is_stale_risk:
         warnings.append("loose_latest_stale_requires_explicit_tag")
@@ -764,7 +768,8 @@ def audit_brain_system(*, scope: str = "all") -> dict[str, Any]:
         "warnings": warnings,
         "catalog": catalog,
         "attached_brains": [item for item in catalog["brains"] if item.get("status") in {"canonical_root", "attached"}],
-        "discovered_noncanonical_brains": noncanonical,
+        "discovered_noncanonical_brains": actionable_noncanonical,
+        "acknowledged_non_truth_brains": acknowledged_non_truth,
         "brain_stats": brain_stats,
         "language": language,
         "workflow_registry": workflow_registry,

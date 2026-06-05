@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-06-01",
+  "generated_at": "2026-06-05",
   "language_policy": "zh_semantic_en_identifiers_v1",
   "brains": [
     {
@@ -65,28 +65,6 @@
       "status": "non_truth_tooling",
       "body_root": "tools",
       "references_path": "",
-      "references_count": 0,
-      "language_policy": "zh_semantic_en_identifiers_v1",
-      "last_guard_status": "not_guarded"
-    },
-    {
-      "brain_id": "daily_research_cache_legacy",
-      "root": "daily_research/cache/brain",
-      "manifest_path": "daily_research/cache/brain/brain_manifest.json",
-      "status": "cache_legacy",
-      "body_root": "daily_research/cache",
-      "references_path": "",
-      "references_count": 0,
-      "language_policy": "zh_semantic_en_identifiers_v1",
-      "last_guard_status": "not_guarded"
-    },
-    {
-      "brain_id": "a_stock_daily_selection",
-      "root": "a_stock_daily_selection/brain",
-      "manifest_path": "",
-      "status": "external_or_inactive_missing_manifest",
-      "body_root": "a_stock_daily_selection",
-      "references_path": "a_stock_daily_selection/brain/references",
       "references_count": 0,
       "language_policy": "zh_semantic_en_identifiers_v1",
       "last_guard_status": "not_guarded"

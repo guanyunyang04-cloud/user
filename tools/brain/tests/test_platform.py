@@ -310,7 +310,9 @@ class BrainPlatformTest(unittest.TestCase):
         self.assertIn("language", payload)
         self.assertIn("active_artifact_guard", payload)
         self.assertIn("loose_latest", payload)
-        self.assertTrue(payload["discovered_noncanonical_brains"])
+        self.assertNotIn("noncanonical_brains_discovered", payload["warnings"])
+        self.assertEqual(payload["discovered_noncanonical_brains"], [])
+        self.assertEqual(payload["acknowledged_non_truth_brains"][0]["brain_id"], "tools")
 
     def test_explicit_run_evidence_capsule_reads_coherent_r52_trials(self) -> None:
         tag = "self_opt_study_r52_native_source_delta_closure_screening_safe_20260510_02"
