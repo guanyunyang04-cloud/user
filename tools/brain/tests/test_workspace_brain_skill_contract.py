@@ -47,6 +47,7 @@ class WorkspaceBrainSkillContractTest(unittest.TestCase):
         self.assertIn("project_profile", text)
         self.assertIn("external parallel work", text)
         self.assertIn("tools.brain.project_commit", text)
+        self.assertIn("ignored_external_paths", text)
         self.assertIn("<project>/output/agent_runs/<run_id>/", text)
         self.assertIn("explicit lease", text)
 

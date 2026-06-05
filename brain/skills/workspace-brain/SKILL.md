@@ -22,7 +22,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap
 ## Project Scope
 Capsule/bootstrap exposes the selected `project_profile`; use it for guard, verification, commit, and process scope.
 - Treat other project dirty paths as external parallel work unless the user explicitly expands scope.
-- After verified project work, commit with `tools.brain.project_commit` using the selected project id or `workspace-brain`.
+- After verified project work, commit with `tools.brain.project_commit` using the selected project id or `workspace-brain`; external dirty paths are reported as `ignored_external_paths`, not staged.
 - Long tasks stay under `<project>/output/agent_runs/<run_id>/`; no cross-project process control without an explicit lease.
 
 ## Init And Register

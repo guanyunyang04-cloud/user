@@ -56,7 +56,8 @@
 ## 5.1 项目提交闭环
 - 完成项目任务且验证通过后使用项目提交助手：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.project_commit --project-id <project|workspace-brain> --task-summary "<summary>" --verified <commands> --json`。
 - 提交格式为 `<project_id>: <summary>`，trailer 包含 `Project:`、`Agent-Task:`、`Verified:`。
-- 只暂存 profile 允许范围；若有 baseline dirty overlap、跨项目路径、未验证或范围冲突，返回 `project_commit_scope_conflict`，不得强行提交。
+- 提交助手只把 profile 允许范围内的当前 dirty paths 纳入 candidate pathspec；路由外项目 dirty paths 输出为 `ignored_external_paths`，不作为 blocker，也不得被 stage/commit。
+- 只有当前候选路径出现 baseline dirty overlap、未验证、无项目内变更或明确范围冲突时才阻塞；不得把多个项目混成一个提交。
 
 ## 6. 写回路由
 - 工作区级当前状态写回 `brain/state_center.md`。

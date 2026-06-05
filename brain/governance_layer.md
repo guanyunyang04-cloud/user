@@ -44,7 +44,8 @@
 - 主脑、workflow 工具、根配置、跨项目 registry 等 workspace 共享文件不自动归属任何单一项目；修改前必须单独评估影响面。
 - 若外部项目变更与当前路由任务或共享文件产生真实冲突，先报告冲突和边界，再等待用户决定是否扩展任务范围。
 - 每个分脑 manifest 必须能声明或继承 `guard_profile`、`verification_profile`、`commit_policy`、`process_namespace`、`cross_project_policy`；daily active artifact/freshness/project consistency 只属于 daily profile。
-- 项目 agent 完成一次任务后默认本地提交，提交助手只 stage 该项目 profile 允许路径；范围冲突返回 `project_commit_scope_conflict`，不得把多个项目混成一个提交。
+- 项目 agent 完成一次任务后默认本地提交；提交助手只把该项目 profile 允许路径纳入 stage/commit pathspec，外部项目 dirty paths 仅作为 `ignored_external_paths` 报告，不阻塞当前项目提交。
+- 若当前提交候选路径本身越过 profile 范围，或与接管前 baseline dirty 发生目标范围内 overlap，返回 `project_commit_scope_conflict`；不得把多个项目混成一个提交。
 - 长任务 PID、日志和 progress 默认位于 `<project>/output/agent_runs/<run_id>/`；没有显式 cross-project lease 时，其他项目 agent 不得 wait/stop/管理该进程。
 - 共享 GPU、端口、数据 provider 等资源租约写入 `brain/output/resource_leases/`；租约不存在时按互不干扰处理。
 

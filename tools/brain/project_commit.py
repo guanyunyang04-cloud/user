@@ -90,6 +90,17 @@ def check_commit_scope(
     return payload
 
 
+def split_commit_paths(*, paths: list[str], allowed_prefixes: list[str]) -> tuple[list[str], list[str]]:
+    project_paths: list[str] = []
+    external_paths: list[str] = []
+    for path in _unique(paths):
+        if _path_allowed(path, allowed_prefixes):
+            project_paths.append(path)
+        else:
+            external_paths.append(path)
+    return project_paths, external_paths
+
+
 def _run_git(args: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args],
@@ -130,23 +141,25 @@ def stage_and_commit_project(
     policy = profile.get("commit_policy", {}) if isinstance(profile.get("commit_policy"), dict) else {}
     allowed_prefixes = [str(item) for item in policy.get("allowed_prefixes", []) or []]
     paths = changed_paths()
+    project_paths, ignored_external_paths = split_commit_paths(paths=paths, allowed_prefixes=allowed_prefixes)
     scope = check_commit_scope(
         project_id=project_id,
-        changed_paths=paths,
+        changed_paths=project_paths,
         allowed_prefixes=allowed_prefixes,
         baseline_dirty_paths=baseline_dirty_paths or [],
     )
+    scope["ignored_external_paths"] = ignored_external_paths
     if scope["status"] != "ok":
         return scope
     message = build_commit_message(project_id=str(policy.get("message_prefix", project_id) or project_id), task_summary=task_summary, verified=verified_commands)
+    if not project_paths:
+        return {"schema_version": 1, "status": "blocked", "reason": "no_project_changes", "scope": scope}
     if dry_run:
         return {"schema_version": 1, "status": "dry_run", "scope": scope, "commit_message": message}
-    if not paths:
-        return {"schema_version": 1, "status": "blocked", "reason": "no_project_changes", "scope": scope}
-    stage = _run_git(["add", "--", *paths])
+    stage = _run_git(["add", "--", *project_paths])
     if stage.returncode != 0:
         return {"schema_version": 1, "status": "blocked", "reason": "git_stage_failed", "stderr": stage.stderr}
-    commit = _run_git(["commit", "-m", message])
+    commit = _run_git(["commit", "-m", message, "--", *project_paths])
     if commit.returncode != 0:
         return {"schema_version": 1, "status": "blocked", "reason": "git_commit_failed", "stdout": commit.stdout, "stderr": commit.stderr}
     sha = _run_git(["rev-parse", "HEAD"]).stdout.strip()
