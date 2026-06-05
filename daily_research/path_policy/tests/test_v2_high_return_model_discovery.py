@@ -37,10 +37,13 @@ def test_task_list_defaults_to_augmented_single_seed_multi_split_research_only(t
     assert payload["high_return_scout_policy"]["candidate_matrix_grid"]["max_weights"] == [0.08, 0.12, 0.16]
     assert payload["high_return_scout_policy"]["candidate_matrix_grid"]["rebalance_freqs"] == ["5d", "10d", "20d"]
     assert payload["training_task_count"] == 15
+    assert payload["loss_profile"] == hrd.LOSS_PROFILE
+    assert payload["loss_profiles"] == [hrd.LOSS_PROFILE]
     assert {task["seed"] for task in tasks} == {7}
     assert {task["dataset_id"] for task in tasks} == {hrd.TRADITIONAL_BAOSTOCK_V2_1_DATASET_ID}
     assert {task["pool_view_id"] for task in tasks} == {hrd.SAME_PERIOD_POOL_VIEW_ID, hrd.LONG_HISTORY_POOL_VIEW_ID}
     assert {task["feature_profile"] for task in tasks} == {hrd.FEATURE_PROFILE}
+    assert {task["loss_profile"] for task in tasks} == {hrd.LOSS_PROFILE}
     assert {task["split_key"] for task in tasks} == {"same", "a", "b", "c", "long"}
     assert {task["model_family"] for task in tasks} == set(hrd.DEFAULT_MODEL_FAMILIES)
 
@@ -71,6 +74,23 @@ def test_task_list_defaults_to_augmented_single_seed_multi_split_research_only(t
 def test_single_seed_requires_explicit_scout_acknowledgement() -> None:
     with pytest.raises(ValueError, match="single_seed_scout_requires_explicit"):
         hrd.build_forecast_tasks(seeds=(7,), allow_single_seed_scout=False)
+
+
+def test_forecast_task_tag_suffix_follows_outer_run_tag(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(hrd, "STUDIES_ROOT", tmp_path / "studies")
+    task = hrd.build_forecast_tasks(
+        output_root=tmp_path / "out",
+        run_tag="v2_hrd_topn_long_mainboard_wide_gru_seed7_scout_20260605_01",
+        datasets=("long_history_augmented",),
+        splits=("a",),
+        model_families=("gru_sequence_static_context",),
+        loss_profiles=("topn_excess_rank_v1",),
+        seeds=(7,),
+        allow_single_seed_scout=True,
+    )[0]
+
+    assert task["tag"] == "mh_v2_hrd_topn_long_a_gru_seed7_20260605_01"
+    assert task["command"][task["command"].index("--tag") + 1] == task["tag"]
 
 
 def test_smoke32_tasks_reuse_prebuilt_memmap_and_stay_smoke_only(tmp_path: Path, monkeypatch) -> None:
@@ -168,6 +188,94 @@ def test_bridge_and_matrix_commands_are_aggressive_research_scouts(tmp_path: Pat
     assert matrix[matrix.index("--rebalance-freqs") + 1] == "5d,10d,20d"
     assert matrix[matrix.index("--transaction-cost-bps-values") + 1] == "10"
     assert matrix[matrix.index("--slippage-bps-values") + 1] == "5"
+
+
+def test_loss_profiles_generate_distinct_tasks_and_report_groups(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(hrd, "STUDIES_ROOT", tmp_path / "studies")
+    out = tmp_path / "out"
+    loss_profiles = ("horizon_30d_soft_penalty_v1", "topn_excess_rank_v1")
+    path = hrd.write_task_list(
+        output_root=out,
+        datasets=("same_period_augmented",),
+        splits=("same",),
+        model_families=("gru_sequence_static_context",),
+        loss_profiles=loss_profiles,
+        seeds=(7,),
+        allow_single_seed_scout=True,
+        max_samples_per_date_per_role=2,
+        enforce_active_artifact_clean=False,
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    tasks = payload["training_tasks"]
+
+    assert payload["training_task_count"] == 2
+    assert payload["loss_profile"] == ""
+    assert payload["loss_profiles"] == list(loss_profiles)
+    assert {task["loss_profile"] for task in tasks} == set(loss_profiles)
+    assert len({task["tag"] for task in tasks}) == 2
+    assert len({task["candidate_id"] for task in tasks}) == 2
+    assert all(task["output_profile"] == hrd.OUTPUT_PROFILE for task in tasks)
+    assert all(task["selection_profile"] == hrd.SELECTION_PROFILE for task in tasks)
+    assert all(task["active_execution_strategy_expected_diff"] == "none" for task in tasks)
+
+    first, second = tasks
+    assert first["builds_forecast_memmap"] is True
+    assert second["reuses_forecast_memmap_manifest"] is True
+    assert second["depends_on_manifest_task_tag"] == first["tag"]
+    for task in tasks:
+        command = task["command"]
+        assert command[command.index("--forecast-loss-profile") + 1] == task["loss_profile"]
+        assert command[command.index("--forecast-max-samples-per-date-per-role") + 1] == "2"
+        assert hrd._loss_profile_alias(task["loss_profile"]) in task["tag"]
+        assert hrd._loss_profile_alias(task["loss_profile"]) in task["candidate_id"]
+
+    for task, rank, excess in ((first, 0.02, 0.10), (second, 0.08, 0.25)):
+        _write_json(
+            Path(task["study_dir"]) / "study_summary.json",
+            {
+                "status": "completed",
+                "evidence_verdict": "forecast_test_confirmed",
+                "training_summary": {
+                    "test_metrics": {
+                        "decision_score_rank_ic": rank,
+                        "decision_score_top_bottom_spread": rank / 2.0,
+                        "decision_hit_lift_top20_mean": rank,
+                    }
+                },
+            },
+        )
+        _write_json(
+            out / "bridges" / hrd._bridge_tag(str(task["tag"])) / "v2_score_backtest_bridge_report.json",
+            {
+                "status": "completed",
+                "shared_backtest": {
+                    "status": "completed",
+                    "artifacts": {
+                        "core_metrics": {
+                            "annual_return": excess + 0.20,
+                            "excess_annual_return": excess,
+                            "excess_sharpe": 1.10 if task is first else 1.40,
+                            "max_drawdown": -0.20,
+                        },
+                        "monthly_backtest_diagnostics": {
+                            "positive_month_ratio": 0.62,
+                            "negative_month_count": 2,
+                            "worst_monthly_excess_return": -0.06,
+                        },
+                    },
+                },
+            },
+        )
+
+    report = hrd.collect_high_return_report(output_root=out, task_list_path=path)
+
+    assert report["loss_profiles"] == list(loss_profiles)
+    assert {row["loss_profile"] for row in report["leaderboard"]} == set(loss_profiles)
+    assert report["leaderboard"][0]["loss_profile"] == "topn_excess_rank_v1"
+    assert len(report["split_consistency"]) == 2
+    assert {row["loss_profile"] for row in report["split_consistency"]} == set(loss_profiles)
+    assert all(row["completed_split_count"] == 1 for row in report["split_consistency"])
+    assert {row["loss_profile"] for row in report["shortlist"]} == set(loss_profiles)
 
 
 def test_collect_report_ranks_completed_high_return_candidate(tmp_path: Path, monkeypatch) -> None:
@@ -401,6 +509,88 @@ def test_run_quick_bridge_tasks_executes_only_completed_forecasts(tmp_path: Path
     assert len(calls) == 1
     assert calls[0][calls[0].index("-m") + 1] == "daily_research.path_policy.v2_score_backtest_bridge"
     assert (out / "v2_high_return_model_discovery_quick_bridge_run_summary.json").exists()
+
+
+def test_run_candidate_matrix_tasks_executes_all_matrix_entry_candidates(tmp_path: Path, monkeypatch) -> None:
+    studies = tmp_path / "studies"
+    monkeypatch.setattr(hrd, "STUDIES_ROOT", studies)
+    monkeypatch.setattr(hrd, "_active_artifact_has_diff", lambda: False)
+    out = tmp_path / "out"
+    loss_profiles = (
+        "horizon_30d_soft_penalty_v1",
+        "score_monthly_robust_v1",
+        "risk_drawdown_reweighted_v1",
+        "horizon_entropy_regularized_v1",
+    )
+    path = hrd.write_task_list(
+        output_root=out,
+        datasets=("same_period_augmented",),
+        splits=("same",),
+        model_families=("gru_sequence_static_context",),
+        loss_profiles=loss_profiles,
+        seeds=(7,),
+        allow_single_seed_scout=True,
+        enforce_active_artifact_clean=False,
+    )
+    tasks = json.loads(path.read_text(encoding="utf-8"))["training_tasks"]
+    for idx, task in enumerate(tasks):
+        _write_json(
+            Path(task["study_dir"]) / "study_summary.json",
+            {
+                "status": "completed",
+                "evidence_verdict": "forecast_test_confirmed",
+                "training_summary": {
+                    "test_metrics": {
+                        "decision_score_rank_ic": 0.02 + idx * 0.01,
+                        "decision_score_top_bottom_spread": 0.01,
+                        "decision_hit_lift_top20_mean": 0.02,
+                    }
+                },
+            },
+        )
+        _write_json(
+            out / "bridges" / hrd._bridge_tag(str(task["tag"])) / "v2_score_backtest_bridge_report.json",
+            {
+                "status": "completed",
+                "shared_backtest": {
+                    "status": "completed",
+                    "artifacts": {
+                        "core_metrics": {
+                            "annual_return": 0.30 + idx * 0.01,
+                            "excess_annual_return": 0.18 + idx * 0.01,
+                            "excess_sharpe": 1.10 + idx * 0.05,
+                            "max_drawdown": -0.12,
+                        },
+                        "monthly_backtest_diagnostics": {
+                            "positive_month_ratio": 0.70,
+                            "negative_month_count": 2,
+                            "worst_monthly_return": -0.05,
+                        },
+                    },
+                },
+            },
+        )
+
+    report = hrd.collect_high_return_report(output_root=out, task_list_path=path)
+    assert report["shortlist_count"] == 3
+    assert report["small_capital_gate_summary"]["matrix_entry_candidate_count"] == 4
+
+    calls: list[list[str]] = []
+
+    def fake_run(command, *, stdout_path, stderr_path):
+        calls.append(list(command))
+        return {"returncode": 0, "stdout": str(stdout_path), "stderr": str(stderr_path)}
+
+    monkeypatch.setattr(hrd, "_run_command", fake_run)
+
+    summary = hrd.run_candidate_matrix_tasks(output_root=out, task_list_path=path)
+
+    assert summary["status"] == "completed"
+    assert summary["matrix_entry_only"] is True
+    assert set(summary["completed_tags"]) == {task["tag"] for task in tasks}
+    assert summary["skipped"] == []
+    assert len(calls) == 4
+    assert all(call[call.index("-m") + 1] == "daily_research.path_policy.v2_candidate_review_matrix" for call in calls)
 
 
 def test_run_forecast_tasks_supports_max_tasks_for_reboot_safe_batches(tmp_path: Path, monkeypatch) -> None:

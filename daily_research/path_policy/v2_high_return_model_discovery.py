@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime
@@ -11,6 +12,7 @@ from typing import Any
 
 import numpy as np
 
+from daily_research.path_policy.forecast_training import FORECAST_LOSS_PROFILES
 from daily_research.path_policy import v2_research_reset_baseline as v2
 from daily_research.path_policy import v2_candidate_review_matrix as candidate_matrix
 
@@ -38,6 +40,7 @@ BENCHMARK = "000300.SH"
 HORIZON_GRID = "1,2,3,5,8,10,15,20,30"
 OUTPUT_PROFILE = "decision_utility_v1"
 LOSS_PROFILE = "horizon_30d_soft_penalty_v1"
+DEFAULT_LOSS_PROFILES = (LOSS_PROFILE,)
 SELECTION_PROFILE = "decision_utility"
 SCORE_COLUMN = "pred_decision_score"
 SMALL_CAPITAL_GATE_ID = candidate_matrix.SMALL_CAPITAL_GATE_ID
@@ -257,6 +260,35 @@ def _parse_csv_strings(raw: str | tuple[str, ...] | list[str], default: tuple[st
     return tuple(out or default)
 
 
+_LOSS_PROFILE_ALIASES = {
+    "horizon_30d_soft_penalty_v1": "h30soft",
+    "score_monthly_robust_v1": "monthly_robust",
+    "risk_drawdown_reweighted_v1": "risk_dd",
+    "horizon_entropy_regularized_v1": "hentropy",
+    "topn_excess_rank_v1": "topn",
+    "score_to_weight_proxy_v1": "s2w",
+    "bad_month_aware_v1": "badmonth",
+}
+
+
+def _loss_profile_alias(loss_profile: str) -> str:
+    value = str(loss_profile or "").strip()
+    if value in _LOSS_PROFILE_ALIASES:
+        return _LOSS_PROFILE_ALIASES[value]
+    return value.replace("_v1", "").replace("horizon_", "h").replace("score_", "s").replace("risk_", "r")[:48]
+
+
+def _parse_loss_profiles(
+    raw: str | tuple[str, ...] | list[str] | None,
+    default: tuple[str, ...] = DEFAULT_LOSS_PROFILES,
+) -> tuple[str, ...]:
+    profiles = _parse_csv_strings(raw or (), default)
+    unknown = sorted(set(profiles) - set(FORECAST_LOSS_PROFILES))
+    if unknown:
+        raise ValueError(f"unknown_loss_profiles:{unknown}")
+    return profiles
+
+
 def _parse_seeds(raw: str | tuple[int, ...] | list[int] | None, default: tuple[int, ...] = (SCOUT_SEED,)) -> tuple[int, ...]:
     if raw is None:
         return tuple(default)
@@ -277,12 +309,20 @@ def _root(output_root: str | Path | None = None, run_tag: str = RUN_TAG) -> Path
     return Path(output_root) if output_root is not None else STUDIES_ROOT / str(run_tag)
 
 
+def _run_tag_suffix(run_tag: str) -> str:
+    match = re.search(r"(\d{8}_\d+)$", str(run_tag or ""))
+    return match.group(1) if match else "20260604_01"
+
+
 def _tag(
     *,
     data_key: str,
     split_key: str,
     model_family: str,
     seed: int,
+    run_tag: str = RUN_TAG,
+    loss_profile: str = LOSS_PROFILE,
+    include_loss_alias: bool = False,
 ) -> str:
     model_alias = MODEL_SPECS[model_family].alias
     data_alias = {
@@ -291,7 +331,8 @@ def _tag(
         "long_history_augmented": "long",
         "smoke32_augmented": "smoke32",
     }.get(data_key, str(data_key).replace("_augmented", ""))
-    return f"mh_v2_hrd_{data_alias}_{split_key}_{model_alias}_seed{int(seed)}_20260604_01"
+    loss_part = f"{_loss_profile_alias(loss_profile)}_" if bool(include_loss_alias) else ""
+    return f"mh_v2_hrd_{loss_part}{data_alias}_{split_key}_{model_alias}_seed{int(seed)}_{_run_tag_suffix(run_tag)}"
 
 
 def _bridge_tag(forecast_tag: str) -> str:
@@ -309,6 +350,7 @@ def _forecast_command(
     split_spec: SplitSpec,
     model_spec: ModelSpec,
     seed: int,
+    loss_profile: str,
     epochs: int,
     min_epochs: int,
     patience: int,
@@ -375,7 +417,7 @@ def _forecast_command(
             "--forecast-output-profile",
             OUTPUT_PROFILE,
             "--forecast-loss-profile",
-            LOSS_PROFILE,
+            str(loss_profile),
             "--forecast-selection-profile",
             SELECTION_PROFILE,
             "--forecast-decision-cost-bps",
@@ -506,6 +548,7 @@ def build_forecast_tasks(
     datasets: str | tuple[str, ...] | list[str] = ("same_period_augmented", "long_history_augmented"),
     splits: str | tuple[str, ...] | list[str] = (),
     model_families: str | tuple[str, ...] | list[str] = DEFAULT_MODEL_FAMILIES,
+    loss_profiles: str | tuple[str, ...] | list[str] | None = DEFAULT_LOSS_PROFILES,
     seeds: str | tuple[int, ...] | list[int] | None = (SCOUT_SEED,),
     epochs: int = 16,
     min_epochs: int = 6,
@@ -518,6 +561,7 @@ def build_forecast_tasks(
     resolved_datasets = _parse_csv_strings(datasets, ("same_period_augmented", "long_history_augmented"))
     resolved_splits = _parse_csv_strings(splits, ())
     resolved_models = _parse_csv_strings(model_families, DEFAULT_MODEL_FAMILIES)
+    resolved_loss_profiles = _parse_loss_profiles(loss_profiles, DEFAULT_LOSS_PROFILES)
     resolved_seeds = _parse_seeds(seeds)
     _validate_single_seed_policy(resolved_seeds, allow_single_seed_scout=allow_single_seed_scout)
     unknown_datasets = sorted(set(resolved_datasets) - set(DATA_SPECS))
@@ -531,6 +575,7 @@ def build_forecast_tasks(
         raise ValueError(f"unknown_splits:{unknown_splits}")
 
     tasks: list[dict[str, Any]] = []
+    include_loss_alias = len(resolved_loss_profiles) > 1 or any(profile != LOSS_PROFILE for profile in resolved_loss_profiles)
     for data_key in resolved_datasets:
         data_spec = DATA_SPECS[data_key]
         split_keys = resolved_splits or data_spec.split_keys
@@ -543,88 +588,102 @@ def build_forecast_tasks(
             group_anchor_tag = ""
             for model_family in resolved_models:
                 model_spec = MODEL_SPECS[model_family]
-                for seed in resolved_seeds:
-                    tag = _tag(data_key=data_key, split_key=split_key, model_family=model_family, seed=int(seed))
-                    study_dir = STUDIES_ROOT / tag
-                    if data_key == "smoke32_augmented":
-                        memmap_manifest = SMOKE32_MEMMAP_MANIFEST
-                        group_anchor_tag = "prebuilt_smoke32_augmented_memmap"
-                    elif group_anchor_manifest is None:
-                        memmap_manifest = None
-                        group_anchor_tag = tag
-                        group_anchor_manifest = study_dir / "forecast_dataset_manifest.json"
-                    else:
-                        memmap_manifest = group_anchor_manifest
-                    task = {
-                        "tag": tag,
-                        "candidate_id": f"{data_key}_{split_key}_{model_spec.alias}_seed{int(seed)}",
-                        "dataset_key": data_key,
-                        "dataset_id": data_spec.dataset_id,
-                        "pool_view_id": data_spec.pool_view_id,
-                        "feature_profile": FEATURE_PROFILE,
-                        "split_key": split_key,
-                        "split": {
-                            "train_start_year": split_spec.train_start_year,
-                            "train_end_year": split_spec.train_end_year,
-                            "validation_year": split_spec.validation_year,
-                            "test_year": split_spec.test_year,
-                        },
-                        "model_family": model_family,
-                        "seed": int(seed),
-                        "epochs": int(epochs),
-                        "min_epochs": int(min_epochs),
-                        "patience": int(patience),
-                        "study_dir": str(study_dir),
-                        "stdout": str(root / "logs" / f"{tag}_stdout.log"),
-                        "stderr": str(root / "logs" / f"{tag}_stderr.log"),
-                        "forecast_memmap_manifest": str(group_anchor_manifest),
-                        "builds_forecast_memmap": memmap_manifest is None,
-                        "depends_on_manifest_task_tag": "" if memmap_manifest is None else group_anchor_tag,
-                        "reuses_forecast_memmap_manifest": memmap_manifest is not None,
-                        "command": _forecast_command(
-                            tag=tag,
-                            data_spec=data_spec,
-                            split_spec=split_spec,
-                            model_spec=model_spec,
+                for loss_profile in resolved_loss_profiles:
+                    for seed in resolved_seeds:
+                        tag = _tag(
+                            data_key=data_key,
+                            split_key=split_key,
+                            model_family=model_family,
                             seed=int(seed),
-                            epochs=int(epochs),
-                            min_epochs=int(min_epochs),
-                            patience=int(patience),
-                            memmap_manifest=memmap_manifest,
-                            max_samples_per_role=max_samples_per_role,
-                            max_samples_per_date_per_role=max_samples_per_date_per_role,
-                        ),
-                        "quick_bridge_command": _quick_bridge_command(
-                            forecast_tag=tag,
-                            data_spec=data_spec,
-                            output_root=root,
-                        ),
-                        "candidate_matrix_command": _candidate_matrix_command(
-                            forecast_tag=tag,
-                            data_spec=data_spec,
-                            output_root=root,
-                        ),
-                        "research_program": RESEARCH_PROGRAM,
-                        "study_family": STUDY_FAMILY,
-                        "evidence_grade": (
-                            "smoke_only"
-                            if data_key == "smoke32_augmented"
-                            else (
-                                "pilot_only"
-                                if data_key == "same_period_augmented_pilot"
-                                else ("scout_only" if len(resolved_seeds) == 1 else "finalist_confirmation_input")
-                            )
-                        ),
-                        "smoke_only": data_key == "smoke32_augmented",
-                        "pilot_only": data_key == "same_period_augmented_pilot",
-                        "single_seed_scout_only": len(resolved_seeds) == 1,
-                        "max_samples_per_role": int(max_samples_per_role),
-                        "max_samples_per_date_per_role": int(max_samples_per_date_per_role),
-                        "shadow_only": True,
-                        "promotion_allowed": False,
-                        "active_execution_strategy_expected_diff": "none",
-                    }
-                    tasks.append(task)
+                            run_tag=run_tag,
+                            loss_profile=loss_profile,
+                            include_loss_alias=include_loss_alias,
+                        )
+                        study_dir = STUDIES_ROOT / tag
+                        if data_key == "smoke32_augmented":
+                            memmap_manifest = SMOKE32_MEMMAP_MANIFEST
+                            group_anchor_tag = "prebuilt_smoke32_augmented_memmap"
+                        elif group_anchor_manifest is None:
+                            memmap_manifest = None
+                            group_anchor_tag = tag
+                            group_anchor_manifest = study_dir / "forecast_dataset_manifest.json"
+                        else:
+                            memmap_manifest = group_anchor_manifest
+                        candidate_prefix = f"{_loss_profile_alias(loss_profile)}_" if include_loss_alias else ""
+                        task = {
+                            "tag": tag,
+                            "candidate_id": f"{candidate_prefix}{data_key}_{split_key}_{model_spec.alias}_seed{int(seed)}",
+                            "dataset_key": data_key,
+                            "dataset_id": data_spec.dataset_id,
+                            "pool_view_id": data_spec.pool_view_id,
+                            "feature_profile": FEATURE_PROFILE,
+                            "split_key": split_key,
+                            "split": {
+                                "train_start_year": split_spec.train_start_year,
+                                "train_end_year": split_spec.train_end_year,
+                                "validation_year": split_spec.validation_year,
+                                "test_year": split_spec.test_year,
+                            },
+                            "model_family": model_family,
+                            "loss_profile": loss_profile,
+                            "output_profile": OUTPUT_PROFILE,
+                            "selection_profile": SELECTION_PROFILE,
+                            "seed": int(seed),
+                            "epochs": int(epochs),
+                            "min_epochs": int(min_epochs),
+                            "patience": int(patience),
+                            "study_dir": str(study_dir),
+                            "stdout": str(root / "logs" / f"{tag}_stdout.log"),
+                            "stderr": str(root / "logs" / f"{tag}_stderr.log"),
+                            "forecast_memmap_manifest": str(group_anchor_manifest),
+                            "builds_forecast_memmap": memmap_manifest is None,
+                            "depends_on_manifest_task_tag": "" if memmap_manifest is None else group_anchor_tag,
+                            "reuses_forecast_memmap_manifest": memmap_manifest is not None,
+                            "command": _forecast_command(
+                                tag=tag,
+                                data_spec=data_spec,
+                                split_spec=split_spec,
+                                model_spec=model_spec,
+                                seed=int(seed),
+                                loss_profile=loss_profile,
+                                epochs=int(epochs),
+                                min_epochs=int(min_epochs),
+                                patience=int(patience),
+                                memmap_manifest=memmap_manifest,
+                                max_samples_per_role=max_samples_per_role,
+                                max_samples_per_date_per_role=max_samples_per_date_per_role,
+                            ),
+                            "quick_bridge_command": _quick_bridge_command(
+                                forecast_tag=tag,
+                                data_spec=data_spec,
+                                output_root=root,
+                            ),
+                            "candidate_matrix_command": _candidate_matrix_command(
+                                forecast_tag=tag,
+                                data_spec=data_spec,
+                                output_root=root,
+                            ),
+                            "research_program": RESEARCH_PROGRAM,
+                            "study_family": STUDY_FAMILY,
+                            "evidence_grade": (
+                                "smoke_only"
+                                if data_key == "smoke32_augmented"
+                                else (
+                                    "pilot_only"
+                                    if data_key == "same_period_augmented_pilot"
+                                    else ("scout_only" if len(resolved_seeds) == 1 else "finalist_confirmation_input")
+                                )
+                            ),
+                            "smoke_only": data_key == "smoke32_augmented",
+                            "pilot_only": data_key == "same_period_augmented_pilot",
+                            "single_seed_scout_only": len(resolved_seeds) == 1,
+                            "max_samples_per_role": int(max_samples_per_role),
+                            "max_samples_per_date_per_role": int(max_samples_per_date_per_role),
+                            "shadow_only": True,
+                            "promotion_allowed": False,
+                            "active_execution_strategy_expected_diff": "none",
+                        }
+                        tasks.append(task)
     return tasks
 
 
@@ -635,6 +694,7 @@ def write_task_list(
     datasets: str | tuple[str, ...] | list[str] = ("same_period_augmented", "long_history_augmented"),
     splits: str | tuple[str, ...] | list[str] = (),
     model_families: str | tuple[str, ...] | list[str] = DEFAULT_MODEL_FAMILIES,
+    loss_profiles: str | tuple[str, ...] | list[str] | None = DEFAULT_LOSS_PROFILES,
     seeds: str | tuple[int, ...] | list[int] | None = (SCOUT_SEED,),
     epochs: int = 16,
     min_epochs: int = 6,
@@ -653,6 +713,7 @@ def write_task_list(
         datasets=datasets,
         splits=splits,
         model_families=model_families,
+        loss_profiles=loss_profiles,
         seeds=seeds,
         epochs=epochs,
         min_epochs=min_epochs,
@@ -662,6 +723,7 @@ def write_task_list(
         max_samples_per_date_per_role=max_samples_per_date_per_role,
     )
     resolved_seeds = _parse_seeds(seeds)
+    resolved_loss_profiles = _parse_loss_profiles(loss_profiles, DEFAULT_LOSS_PROFILES)
     payload = {
         "schema_version": 1,
         "run_tag": str(run_tag),
@@ -673,7 +735,8 @@ def write_task_list(
         "dataset_ids": sorted({task["dataset_id"] for task in tasks}),
         "pool_view_ids": sorted({task["pool_view_id"] for task in tasks}),
         "feature_profile": FEATURE_PROFILE,
-        "loss_profile": LOSS_PROFILE,
+        "loss_profile": resolved_loss_profiles[0] if len(resolved_loss_profiles) == 1 else "",
+        "loss_profiles": list(resolved_loss_profiles),
         "output_profile": OUTPUT_PROFILE,
         "selection_profile": SELECTION_PROFILE,
         "seeds": list(resolved_seeds),
@@ -691,6 +754,9 @@ def write_task_list(
             {
                 "tag": task["tag"],
                 "candidate_id": task["candidate_id"],
+                "loss_profile": task["loss_profile"],
+                "output_profile": task["output_profile"],
+                "selection_profile": task["selection_profile"],
                 "bridge_run_tag": _bridge_tag(str(task["tag"])),
                 "command": task["quick_bridge_command"],
                 "single_seed_scout_only": bool(task["single_seed_scout_only"]),
@@ -704,6 +770,9 @@ def write_task_list(
             {
                 "tag": task["tag"],
                 "candidate_id": task["candidate_id"],
+                "loss_profile": task["loss_profile"],
+                "output_profile": task["output_profile"],
+                "selection_profile": task["selection_profile"],
                 "matrix_run_tag": _matrix_tag(str(task["tag"])),
                 "command": task["candidate_matrix_command"],
                 "single_seed_scout_only": bool(task["single_seed_scout_only"]),
@@ -771,6 +840,7 @@ def run_forecast_tasks(
     datasets: str | tuple[str, ...] | list[str] = ("same_period_augmented", "long_history_augmented"),
     splits: str | tuple[str, ...] | list[str] = (),
     model_families: str | tuple[str, ...] | list[str] = DEFAULT_MODEL_FAMILIES,
+    loss_profiles: str | tuple[str, ...] | list[str] | None = DEFAULT_LOSS_PROFILES,
     seeds: str | tuple[int, ...] | list[int] | None = (SCOUT_SEED,),
     epochs: int = 16,
     min_epochs: int = 6,
@@ -791,6 +861,7 @@ def run_forecast_tasks(
         datasets=datasets,
         splits=splits,
         model_families=model_families,
+        loss_profiles=loss_profiles,
         seeds=seeds,
         epochs=epochs,
         min_epochs=min_epochs,
@@ -805,6 +876,7 @@ def run_forecast_tasks(
         datasets=datasets,
         splits=splits,
         model_families=model_families,
+        loss_profiles=loss_profiles,
         seeds=seeds,
         epochs=epochs,
         min_epochs=min_epochs,
@@ -833,7 +905,12 @@ def run_forecast_tasks(
             stdout_path=Path(str(task["stdout"])),
             stderr_path=Path(str(task["stderr"])),
         )
-        row = {"tag": task["tag"], "candidate_id": task["candidate_id"], **result}
+        row = {
+            "tag": task["tag"],
+            "candidate_id": task["candidate_id"],
+            "loss_profile": task["loss_profile"],
+            **result,
+        }
         results.append(row)
         if int(result["returncode"]) == 0:
             completed.append(str(task["tag"]))
@@ -849,6 +926,7 @@ def run_forecast_tasks(
         "failed_tags": failed,
         "launched_task_count": int(launched),
         "max_tasks": int(max_tasks),
+        "loss_profiles": list(_parse_loss_profiles(loss_profiles, DEFAULT_LOSS_PROFILES)),
         "max_samples_per_role": int(max_samples_per_role),
         "max_samples_per_date_per_role": int(max_samples_per_date_per_role),
         "results": results,
@@ -913,7 +991,13 @@ def run_quick_bridge_tasks(
             stdout_path=root / "logs" / f"{_bridge_tag(tag)}_stdout.log",
             stderr_path=root / "logs" / f"{_bridge_tag(tag)}_stderr.log",
         )
-        row = {"tag": tag, "candidate_id": str(task.get("candidate_id", "")), **result, "report_json": str(report_path)}
+        row = {
+            "tag": tag,
+            "candidate_id": str(task.get("candidate_id", "")),
+            "loss_profile": str(task.get("loss_profile", "")),
+            **result,
+            "report_json": str(report_path),
+        }
         results.append(row)
         if int(result["returncode"]) == 0:
             completed.append(tag)
@@ -937,6 +1021,7 @@ def run_quick_bridge_tasks(
         "failed_tags": failed,
         "launched_task_count": int(launched),
         "max_tasks": int(max_tasks),
+        "loss_profiles": list(payload.get("loss_profiles", []) or []),
         "results": results,
         "boundary": {
             "research_only": True,
@@ -967,7 +1052,14 @@ def run_candidate_matrix_tasks(
     allowed_tags: set[str] | None = None
     if shortlist_only:
         report = collect_high_return_report(output_root=root, run_tag=run_tag, task_list_path=path)
-        allowed_tags = {str(row.get("tag", "")) for row in report.get("shortlist", [])}
+        allowed_tags = {
+            str(row.get("tag", ""))
+            for row in report.get("leaderboard", [])
+            if _matrix_entry_candidate(row)
+            and _has_forecast_result(row)
+            and not bool(row.get("smoke_only", False))
+            and not bool(row.get("pilot_only", False))
+        }
     completed: list[str] = []
     skipped: list[dict[str, Any]] = []
     failed: list[str] = []
@@ -979,7 +1071,7 @@ def run_candidate_matrix_tasks(
             skipped.append({"tag": tag, "reason": "deferred_by_max_tasks"})
             continue
         if allowed_tags is not None and tag not in allowed_tags:
-            skipped.append({"tag": tag, "reason": "not_in_shortlist"})
+            skipped.append({"tag": tag, "reason": "not_matrix_entry_candidate"})
             continue
         bridge_report = root / "bridges" / _bridge_tag(tag) / "v2_score_backtest_bridge_report.json"
         matrix_report = root / "matrices" / _matrix_tag(tag) / "v2_candidate_review_matrix_report.json"
@@ -996,7 +1088,13 @@ def run_candidate_matrix_tasks(
             stdout_path=root / "logs" / f"{_matrix_tag(tag)}_stdout.log",
             stderr_path=root / "logs" / f"{_matrix_tag(tag)}_stderr.log",
         )
-        row = {"tag": tag, "candidate_id": str(task.get("candidate_id", "")), **result, "report_json": str(matrix_report)}
+        row = {
+            "tag": tag,
+            "candidate_id": str(task.get("candidate_id", "")),
+            "loss_profile": str(task.get("loss_profile", "")),
+            **result,
+            "report_json": str(matrix_report),
+        }
         results.append(row)
         if int(result["returncode"]) == 0:
             completed.append(tag)
@@ -1007,7 +1105,7 @@ def run_candidate_matrix_tasks(
     if failed:
         status = "failed"
     elif not completed and shortlist_only:
-        status = "awaiting_shortlist"
+        status = "awaiting_matrix_entry_candidates"
     elif not tasks:
         status = "missing_tasks"
     summary = {
@@ -1015,12 +1113,13 @@ def run_candidate_matrix_tasks(
         "status": status,
         "run_tag": str(run_tag),
         "task_list_path": str(path),
-        "shortlist_only": bool(shortlist_only),
+        "matrix_entry_only": bool(shortlist_only),
         "completed_tags": completed,
         "skipped": skipped,
         "failed_tags": failed,
         "launched_task_count": int(launched),
         "max_tasks": int(max_tasks),
+        "loss_profiles": list(payload.get("loss_profiles", []) or []),
         "results": results,
         "boundary": {
             "research_only": True,
@@ -1175,12 +1274,16 @@ def _score_row(row: dict[str, Any]) -> dict[str, float]:
 
 def _split_consistency(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     completed = [row for row in rows if _has_forecast_result(row)]
-    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
     for row in completed:
-        key = (str(row.get("dataset_key", "")), str(row.get("model_family", "")))
+        key = (
+            str(row.get("dataset_key", "")),
+            str(row.get("model_family", "")),
+            str(row.get("loss_profile", "")),
+        )
         groups.setdefault(key, []).append(row)
     out: list[dict[str, Any]] = []
-    for (dataset_key, model_family), items in groups.items():
+    for (dataset_key, model_family, loss_profile), items in groups.items():
         scores = [_float_metric(row, "high_return_score") for row in items]
         transfer_scores = [_float_metric(row, "transfer_score") for row in items]
         split_keys = [str(row.get("split_key", "")) for row in items]
@@ -1190,6 +1293,7 @@ def _split_consistency(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             {
                 "dataset_key": dataset_key,
                 "model_family": model_family,
+                "loss_profile": loss_profile,
                 "completed_split_count": len(items),
                 "split_keys": split_keys,
                 "positive_high_return_split_count": int(sum(1 for value in scores if value > 0.0)),
@@ -1240,6 +1344,7 @@ def _bad_month_preview(rows: list[dict[str, Any]], *, limit: int = 5) -> list[di
                 "tag": str(row.get("tag", "")),
                 "candidate_id": str(row.get("candidate_id", "")),
                 "dataset_key": str(row.get("dataset_key", "")),
+                "loss_profile": str(row.get("loss_profile", "")),
                 "split_key": str(row.get("split_key", "")),
                 "model_family": str(row.get("model_family", "")),
                 "negative_month_count": _float_metric(row, "negative_month_count"),
@@ -1281,11 +1386,12 @@ def _write_markdown(path: str | Path, report: dict[str, Any]) -> None:
     if shortlist:
         for row in shortlist:
             lines.append(
-                "- `{tag}` {dataset}/{split}/{model}: score=`{score:.6f}`, excess_return=`{excess:.6f}`, excess_sharpe=`{sharpe:.6f}`".format(
+                "- `{tag}` {dataset}/{split}/{model}/{loss}: score=`{score:.6f}`, excess_return=`{excess:.6f}`, excess_sharpe=`{sharpe:.6f}`".format(
                     tag=row.get("tag", ""),
                     dataset=row.get("dataset_key", ""),
                     split=row.get("split_key", ""),
                     model=row.get("model_family", ""),
+                    loss=row.get("loss_profile", ""),
                     score=_float_metric(row, "high_return_score"),
                     excess=_float_metric(row, "excess_annual_return"),
                     sharpe=_float_metric(row, "excess_sharpe"),
@@ -1296,9 +1402,10 @@ def _write_markdown(path: str | Path, report: dict[str, Any]) -> None:
     lines.extend(["", "## Leaderboard Preview", ""])
     for row in leaderboard:
         lines.append(
-            "- `{tag}` {grade}: score=`{score:.6f}`, forecast=`{forecast}`, bridge=`{bridge}`, smoke=`{smoke}`".format(
+            "- `{tag}` {grade} loss=`{loss}`: score=`{score:.6f}`, forecast=`{forecast}`, bridge=`{bridge}`, smoke=`{smoke}`".format(
                 tag=row.get("tag", ""),
                 grade=row.get("evidence_grade", ""),
+                loss=row.get("loss_profile", ""),
                 score=_float_metric(row, "high_return_score"),
                 forecast=row.get("forecast_status", ""),
                 bridge=row.get("backtest_status", ""),
@@ -1343,9 +1450,19 @@ def collect_high_return_report(
             "tag": tag,
             "candidate_id": str(task.get("candidate_id", "")),
             "dataset_key": str(task.get("dataset_key", "")),
+            "dataset_id": str(task.get("dataset_id", "")),
+            "pool_view_id": str(task.get("pool_view_id", "")),
+            "feature_profile": str(task.get("feature_profile", "")),
             "split_key": str(task.get("split_key", "")),
             "model_family": str(task.get("model_family", "")),
+            "loss_profile": str(task.get("loss_profile", tasks_payload.get("loss_profile", LOSS_PROFILE))),
+            "output_profile": str(task.get("output_profile", tasks_payload.get("output_profile", OUTPUT_PROFILE))),
+            "selection_profile": str(task.get("selection_profile", tasks_payload.get("selection_profile", SELECTION_PROFILE))),
             "seed": int(task.get("seed", 0) or 0),
+            "max_samples_per_role": int(task.get("max_samples_per_role", tasks_payload.get("max_samples_per_role", 0)) or 0),
+            "max_samples_per_date_per_role": int(
+                task.get("max_samples_per_date_per_role", tasks_payload.get("max_samples_per_date_per_role", 0)) or 0
+            ),
             "forecast_status": str(summary.get("status", "")),
             "evidence_verdict": str(summary.get("evidence_verdict", "")),
             "rank_ic": _metric(training, "test_metrics", "decision_score_rank_ic"),
@@ -1359,7 +1476,11 @@ def collect_high_return_report(
             "max_drawdown": _float_metric(core, "max_drawdown"),
             "positive_month_ratio": _float_metric(monthly, "positive_month_ratio", _float_metric(monthly, "positive_months_ratio")),
             "negative_month_count": _float_metric(monthly, "negative_month_count"),
-            "worst_monthly_return": _float_metric(monthly, "worst_monthly_return"),
+            "worst_monthly_return": _float_metric(
+                monthly,
+                "worst_monthly_excess_return",
+                _float_metric(monthly, "worst_monthly_return"),
+            ),
             "single_seed_scout_only": bool(task.get("single_seed_scout_only", True)),
             "smoke_only": bool(task.get("smoke_only", False)),
             "pilot_only": bool(task.get("pilot_only", False)),
@@ -1431,6 +1552,7 @@ def collect_high_return_report(
         "run_tag": str(run_tag),
         "study_family": STUDY_FAMILY,
         "task_list_path": str(task_list_path or root / "v2_high_return_model_discovery_task_list.json"),
+        "loss_profiles": list(tasks_payload.get("loss_profiles", []) or []),
         "completed_forecast_count": int(completed_forecast_count),
         "completed_backtest_count": int(completed_backtest_count),
         "smoke_completed_forecast_count": int(smoke_completed_forecast_count),
@@ -1474,6 +1596,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--datasets", default="same_period_augmented,long_history_augmented")
     parser.add_argument("--splits", default="")
     parser.add_argument("--model-families", default=",".join(DEFAULT_MODEL_FAMILIES))
+    parser.add_argument("--loss-profiles", default=",".join(DEFAULT_LOSS_PROFILES))
     parser.add_argument("--seeds", default=str(SCOUT_SEED))
     parser.add_argument("--epochs", type=int, default=16)
     parser.add_argument("--min-epochs", type=int, default=6)
@@ -1502,6 +1625,7 @@ def main(argv: list[str] | None = None) -> int:
             datasets=args.datasets,
             splits=args.splits,
             model_families=args.model_families,
+            loss_profiles=args.loss_profiles,
             seeds=args.seeds,
             epochs=int(args.epochs),
             min_epochs=int(args.min_epochs),
@@ -1518,6 +1642,7 @@ def main(argv: list[str] | None = None) -> int:
             datasets=args.datasets,
             splits=args.splits,
             model_families=args.model_families,
+            loss_profiles=args.loss_profiles,
             seeds=args.seeds,
             epochs=int(args.epochs),
             min_epochs=int(args.min_epochs),

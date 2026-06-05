@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -58,8 +59,21 @@ def write_json(path: Path, payload: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_suffix(path.suffix + ".tmp")
     temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    temp_path.replace(path)
+    _replace_json_with_retry(temp_path, path)
     return path
+
+
+def _replace_json_with_retry(temp_path: Path, path: Path) -> None:
+    for attempt in range(8):
+        try:
+            temp_path.replace(path)
+            return
+        except OSError as exc:
+            transient_windows_lock = getattr(exc, "winerror", None) in {5, 32}
+            transient_posix_lock = getattr(exc, "errno", None) in {13, 32}
+            if attempt >= 7 or not (transient_windows_lock or transient_posix_lock):
+                raise
+            time.sleep(0.05 * (attempt + 1))
 
 
 def safe_print_json(payload: dict[str, Any]) -> bool:

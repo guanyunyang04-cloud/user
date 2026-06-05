@@ -335,18 +335,27 @@ def test_auxiliary_decision_loss_profiles_record_weight_contract_and_finite_loss
         "horizon_head_soft_constraint_v1",
         "target_norm_head_constraint_v1",
         "horizon_30d_soft_penalty_v1",
+        "topn_excess_rank_v1",
+        "score_to_weight_proxy_v1",
+        "bad_month_aware_v1",
     ):
         contract = forecast_loss_profile_contract(profile, cumulative_horizons=horizons, forecast_horizon=30)
         assert contract["loss_profile"] == profile
         assert contract["status"] == "active"
         assert contract["cumulative_horizons"] == list(horizons)
         assert "loss_component_weights" in contract
-        if profile.startswith("decision_utility"):
+        if contract["required_output_profile"] == "decision_utility_v1":
             weights = contract["loss_component_weights"]
             assert contract["required_output_profile"] == "decision_utility_v1"
             assert weights["decision_utility"] > weights["path_daily"]
             assert weights["decision_utility"] > weights["risk_aux"]
-            if profile != "score_monthly_robust_v1":
+            if profile not in {
+                "score_monthly_robust_v1",
+                "horizon_head_soft_constraint_v1",
+                "topn_excess_rank_v1",
+                "score_to_weight_proxy_v1",
+                "bad_month_aware_v1",
+            }:
                 assert weights["decision_utility"] > weights["rank_aux"]
             if profile == "score_monthly_robust_v1":
                 assert weights["decision_rank_aux"] > 0.45
@@ -377,6 +386,27 @@ def test_auxiliary_decision_loss_profiles_record_weight_contract_and_finite_loss
                 assert calibration["penalized_horizon"] == 30
                 assert calibration["utility_penalty"] == pytest.approx(0.005)
                 assert weights["calibrated_decision_rank_aux"] > 0.0
+            proxy = contract["high_return_proxy_objective"]
+            if profile == "topn_excess_rank_v1":
+                assert proxy["enabled"] is True
+                assert proxy["method"] == "batch_top_decile_excess_rank_surrogate"
+                assert proxy["uses_active_execution_artifact"] is False
+                assert proxy["not_a_backtest"] is True
+                assert weights["topn_excess_rank"] > 0.0
+            elif profile == "score_to_weight_proxy_v1":
+                assert proxy["enabled"] is True
+                assert proxy["method"] == "batch_soft_topn_score_to_weight_surrogate"
+                assert proxy["uses_active_execution_artifact"] is False
+                assert proxy["not_a_backtest"] is True
+                assert weights["score_to_weight_proxy"] > 0.0
+            elif profile == "bad_month_aware_v1":
+                assert proxy["enabled"] is True
+                assert proxy["method"] == "batch_downside_reweighted_score_surrogate"
+                assert proxy["uses_active_execution_artifact"] is False
+                assert proxy["not_a_backtest"] is True
+                assert weights["bad_month_aware"] > 0.0
+            else:
+                assert proxy["enabled"] is False
 
             prediction = {
                 "mu": torch.randn(6, 30) * 0.01,

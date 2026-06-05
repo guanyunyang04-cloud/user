@@ -1,9 +1,11 @@
 import json
+import errno
 import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from daily_research.continuous_policy.runtime import _replace_json_with_retry
 from daily_research.continuous_policy.runtime_progress import (
     JsonlProgressSink,
     summarize_progress_log,
@@ -11,6 +13,25 @@ from daily_research.continuous_policy.runtime_progress import (
 
 
 class RuntimeProgressTest(unittest.TestCase):
+    def test_json_replace_retries_transient_file_lock(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir) / "progress.json.tmp"
+            final_path = Path(temp_dir) / "progress.json"
+            temp_path.write_text('{"status":"ok"}', encoding="utf-8")
+            attempts = {"count": 0}
+
+            class FlakyTempPath:
+                def replace(self, target: Path) -> None:
+                    attempts["count"] += 1
+                    if attempts["count"] == 1:
+                        raise PermissionError(errno.EACCES, "temporarily locked")
+                    temp_path.replace(target)
+
+            _replace_json_with_retry(FlakyTempPath(), final_path)  # type: ignore[arg-type]
+
+            self.assertEqual(attempts["count"], 2)
+            self.assertEqual(json.loads(final_path.read_text(encoding="utf-8"))["status"], "ok")
+
     def test_jsonl_sink_updates_latest_json_and_jsonl(self) -> None:
         with TemporaryDirectory() as temp_dir:
             progress_path = Path(temp_dir) / "protocol_progress.jsonl"

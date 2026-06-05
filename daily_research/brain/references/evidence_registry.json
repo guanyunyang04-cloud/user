@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 113,
+  "record_count": 114,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -1956,6 +1956,73 @@
       "dataset_ids": [
         "policy_input_bundle__2082fee5bb1760972d8c9012",
         "policy_pool_view__04f11f51d7c0c7ae32038147"
+      ]
+    },
+    {
+      "id": "daily_research_v2_high_return_objective_loss_scout_20260605",
+      "date": "2026-06-05",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_high_return_objective_loss_scout_20260605.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_high_return_model_discovery"
+      ],
+      "run_tags": [
+        "mh_v2_hrd_h30soft_long_a_gru_seed7_20260605_01",
+        "mh_v2_hrd_h30soft_long_b_gru_seed7_20260605_01",
+        "mh_v2_hrd_h30soft_long_c_gru_seed7_20260605_01",
+        "mh_v2_hrd_h30soft_long_long_gru_seed7_20260605_01",
+        "mh_v2_hrd_monthly_robust_long_a_gru_seed7_20260605_01",
+        "mh_v2_hrd_monthly_robust_long_b_gru_seed7_20260605_01",
+        "mh_v2_hrd_monthly_robust_long_c_gru_seed7_20260605_01",
+        "mh_v2_hrd_monthly_robust_long_long_gru_seed7_20260605_01",
+        "mh_v2_hrd_risk_dd_long_a_gru_seed7_20260605_01",
+        "mh_v2_hrd_risk_dd_long_b_gru_seed7_20260605_01",
+        "mh_v2_hrd_risk_dd_long_c_gru_seed7_20260605_01",
+        "mh_v2_hrd_risk_dd_long_long_gru_seed7_20260605_01",
+        "mh_v2_hrd_hentropy_long_a_gru_seed7_20260605_01",
+        "mh_v2_hrd_hentropy_long_b_gru_seed7_20260605_01",
+        "mh_v2_hrd_hentropy_long_c_gru_seed7_20260605_01",
+        "mh_v2_hrd_hentropy_long_long_gru_seed7_20260605_01",
+        "mh_v2_hrd_topn_long_a_gru_seed7_20260605_01",
+        "mh_v2_hrd_topn_long_b_gru_seed7_20260605_01",
+        "mh_v2_hrd_topn_long_c_gru_seed7_20260605_01",
+        "mh_v2_hrd_topn_long_long_gru_seed7_20260605_01",
+        "mh_v2_hrd_s2w_long_a_gru_seed7_20260605_01",
+        "mh_v2_hrd_s2w_long_b_gru_seed7_20260605_01",
+        "mh_v2_hrd_s2w_long_c_gru_seed7_20260605_01",
+        "mh_v2_hrd_s2w_long_long_gru_seed7_20260605_01",
+        "mh_v2_hrd_badmonth_long_a_gru_seed7_20260605_01",
+        "mh_v2_hrd_badmonth_long_b_gru_seed7_20260605_01",
+        "mh_v2_hrd_badmonth_long_c_gru_seed7_20260605_01",
+        "mh_v2_hrd_badmonth_long_long_gru_seed7_20260605_01",
+        "v2_hrd_existing_loss_long_mainboard_wide_gru_seed7_scout_20260605_01",
+        "v2_hrd_existing_loss_long_mainboard_matrix_entry_20260605_01",
+        "v2_hrd_proxy_loss_long_mainboard_wide_gru_seed7_scout_20260605_01",
+        "v2_hrd_proxy_loss_long_mainboard_gru_seed7_datecap2_20260605_01"
+      ],
+      "verdict": "Status: `objective_loss_scout_completed / single_seed_multi_split / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_high_return_model_discovery`.; Active artifact impact: `daily_research/output/active_execution_strategy.json` unchanged.",
+      "blockers": [
+        "Proxy-loss scout verdict: `objective_loss_proxy_scout_failed_cross_split_transfer`."
+      ],
+      "next_allowed_actions": [
+        "Do not proceed to same-period control or three-seed for the tested objectives.",
+        "Run focused root-cause diagnostics before adding more model capacity:",
+        "compare split `a` versus `b/c/long` by market regime, volatility, reversal, liquidity, and benchmark-relative return distribution;",
+        "audit whether datecap2 symbol sampling creates a thin-scout artifact, then retest only the best diagnostic objective at datecap `5` if the root-cause read supports it;",
+        "inspect label/selection alignment for topN excess return, decision utility, and bridge score-to-weight semantics;",
+        "test local-volatility/reversal-state label or sample weighting only after the split-regime diagnosis identifies a stable hypothesis."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__2082fee5bb1760972d8c9012",
+        "policy_pool_view__eb690dd0becc330f029c21bd"
       ]
     },
     {

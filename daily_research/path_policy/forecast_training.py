@@ -74,6 +74,9 @@ FORECAST_LOSS_PROFILES = (
     "horizon_head_soft_constraint_v1",
     "target_norm_head_constraint_v1",
     "horizon_30d_soft_penalty_v1",
+    "topn_excess_rank_v1",
+    "score_to_weight_proxy_v1",
+    "bad_month_aware_v1",
 )
 FORECAST_RANKING_BASELINES = ("none", "lightgbm", "xgboost")
 FORECAST_RISK_AUX_NAMES = ("downside_floor", "worst_1d", "upside")
@@ -96,6 +99,9 @@ _FORECAST_DECISION_LOSS_PROFILES = {
     "horizon_head_soft_constraint_v1",
     "target_norm_head_constraint_v1",
     "horizon_30d_soft_penalty_v1",
+    "topn_excess_rank_v1",
+    "score_to_weight_proxy_v1",
+    "bad_month_aware_v1",
 }
 _FORECAST_LOSS_WEIGHT_PRESETS: dict[str, dict[str, float]] = {
     "default": {
@@ -341,6 +347,60 @@ _FORECAST_LOSS_WEIGHT_PRESETS: dict[str, dict[str, float]] = {
         "expert_diversity": 0.002,
         "bad_state_calibration": 0.010,
     },
+    "topn_excess_rank_v1": {
+        "path_daily": 0.45,
+        "quantile": 0.15,
+        "path_aux": 0.15,
+        "risk_aux": 0.04,
+        "rank_aux": 1.20,
+        "risk_rank_aux": 0.005,
+        "direction_aux": 0.0,
+        "downside_rank_aux": 0.0,
+        "decision_utility": 0.85,
+        "hit_aux": 0.20,
+        "horizon_classification": 0.08,
+        "decision_rank_aux": 0.35,
+        "horizon_entropy": 0.02,
+        "topn_excess_rank": 0.45,
+        "score_to_weight_proxy": 0.0,
+        "bad_month_aware": 0.0,
+    },
+    "score_to_weight_proxy_v1": {
+        "path_daily": 0.40,
+        "quantile": 0.12,
+        "path_aux": 0.12,
+        "risk_aux": 0.04,
+        "rank_aux": 0.90,
+        "risk_rank_aux": 0.005,
+        "direction_aux": 0.0,
+        "downside_rank_aux": 0.0,
+        "decision_utility": 0.80,
+        "hit_aux": 0.15,
+        "horizon_classification": 0.08,
+        "decision_rank_aux": 0.25,
+        "horizon_entropy": 0.02,
+        "topn_excess_rank": 0.25,
+        "score_to_weight_proxy": 0.55,
+        "bad_month_aware": 0.0,
+    },
+    "bad_month_aware_v1": {
+        "path_daily": 0.45,
+        "quantile": 0.15,
+        "path_aux": 0.12,
+        "risk_aux": 0.18,
+        "rank_aux": 0.95,
+        "risk_rank_aux": 0.015,
+        "direction_aux": 0.0,
+        "downside_rank_aux": 0.035,
+        "decision_utility": 0.80,
+        "hit_aux": 0.18,
+        "horizon_classification": 0.08,
+        "decision_rank_aux": 0.25,
+        "horizon_entropy": 0.02,
+        "topn_excess_rank": 0.20,
+        "score_to_weight_proxy": 0.25,
+        "bad_month_aware": 0.45,
+    },
 }
 
 _FORECAST_TARGET_NORMALIZED_LOSS_PROFILES = {
@@ -357,6 +417,7 @@ _HORIZON_HEAD_CONSTRAINT_LONG_HORIZONS = (15, 20, 30)
 _HORIZON_HEAD_CONSTRAINT_MIN_LONG_PROBABILITY = 0.40
 _FORECAST_UTILITY_30D_SOFT_PENALTY_PROFILES = {"horizon_30d_soft_penalty_v1"}
 _HORIZON_30D_SOFT_PENALTY = 0.005
+_HIGH_RETURN_PROXY_LOSS_PROFILES = {"topn_excess_rank_v1", "score_to_weight_proxy_v1", "bad_month_aware_v1"}
 
 
 class _EagerTorchDataset(torch.utils.data.Dataset):
@@ -714,6 +775,27 @@ def _decision_score_calibration_contract(loss_profile: str | None) -> dict[str, 
     }
 
 
+def _high_return_proxy_contract(loss_profile: str) -> dict[str, Any]:
+    profile = _normalize_forecast_loss_profile(loss_profile)
+    enabled = profile in _HIGH_RETURN_PROXY_LOSS_PROFILES
+    if not enabled:
+        return {"enabled": False, "method": "none", "proxy_only": True}
+    methods = {
+        "topn_excess_rank_v1": "batch_top_decile_excess_rank_surrogate",
+        "score_to_weight_proxy_v1": "batch_soft_topn_score_to_weight_surrogate",
+        "bad_month_aware_v1": "batch_downside_reweighted_score_surrogate",
+    }
+    return {
+        "enabled": True,
+        "method": methods[profile],
+        "proxy_only": True,
+        "not_a_backtest": True,
+        "uses_active_execution_artifact": False,
+        "target": "decision_score_scaled_and_future_cum_excess_return_20d",
+        "intended_use": "single-seed high-return scout objective alignment",
+    }
+
+
 def forecast_loss_profile_contract(
     loss_profile: str | None,
     *,
@@ -756,6 +838,7 @@ def forecast_loss_profile_contract(
                 "long_horizons": list(_HORIZON_HEAD_CONSTRAINT_LONG_HORIZONS),
             },
             "decision_score_calibration": _decision_score_calibration_contract(profile),
+            "high_return_proxy_objective": _high_return_proxy_contract(profile),
             "shadow_only": True,
             "promotion_allowed": False,
             "active_execution_strategy_expected_diff": "none",
@@ -1218,6 +1301,15 @@ def _forecast_loss(
                 thirty_probability = probabilities[:, thirty_mask].sum(dim=1)
                 bad_state = prediction["bad_state_intensity"].to(device=thirty_probability.device, dtype=thirty_probability.dtype)
                 loss = loss + bad_state_weight * (bad_state * torch.clamp(thirty_probability - 0.50, min=0.0).square()).mean()
+        if profile in _HIGH_RETURN_PROXY_LOSS_PROFILES:
+            loss = loss + _high_return_proxy_loss(
+                pred_decision_score=pred_decision_score,
+                y_cum_scaled=y_cum_scaled,
+                y_risk_scaled=y_risk_scaled,
+                weights=weights,
+                target_scale=float(target_scale),
+                cumulative_horizons=horizons,
+            )
     router_entropy_weight = float(weights.get("router_entropy_floor", 0.0))
     if router_entropy_weight > 0.0 and "router_entropy" in prediction and "router_weights" in prediction:
         router_entropy = prediction["router_entropy"]
@@ -1341,6 +1433,66 @@ def _decision_utility_targets_np(
         "best_horizon_index": np.argmax(utility, axis=1),
         "decision_score": np.max(utility, axis=1),
     }
+
+
+def _standardize_tensor(value: torch.Tensor) -> torch.Tensor:
+    if value.numel() <= 1:
+        return value * 0.0
+    mean = value.mean()
+    std = torch.clamp(value.std(unbiased=False), min=1.0e-6)
+    return (value - mean) / std
+
+
+def _high_return_proxy_loss(
+    *,
+    pred_decision_score: torch.Tensor,
+    y_cum_scaled: torch.Tensor,
+    y_risk_scaled: torch.Tensor,
+    weights: dict[str, float],
+    target_scale: float,
+    cumulative_horizons: tuple[int, ...],
+) -> torch.Tensor:
+    if pred_decision_score.numel() < 2:
+        return pred_decision_score.new_tensor(0.0)
+    horizon_values = tuple(int(item) for item in cumulative_horizons)
+    target_pos = horizon_values.index(20) if 20 in horizon_values else len(horizon_values) - 1
+    scale = max(float(target_scale), 1.0e-8)
+    score = _standardize_tensor(pred_decision_score)
+    target_return = y_cum_scaled[:, target_pos] / scale
+    target_rank = _standardize_tensor(target_return.detach())
+    total = pred_decision_score.new_tensor(0.0)
+
+    topn_weight = float(weights.get("topn_excess_rank", 0.0) or 0.0)
+    if topn_weight > 0.0:
+        k = max(int(round(float(pred_decision_score.numel()) * 0.20)), 1)
+        threshold = torch.topk(target_return.detach(), k=k).values.min()
+        top_label = (target_return.detach() >= threshold).to(dtype=score.dtype)
+        topn_loss = F.binary_cross_entropy_with_logits(score, top_label)
+        total = total + topn_weight * (topn_loss + 0.10 * pairwise_rank_loss(score, target_rank))
+
+    proxy_weight = float(weights.get("score_to_weight_proxy", 0.0) or 0.0)
+    if proxy_weight > 0.0:
+        score_weights = F.softmax(score / 0.50, dim=0)
+        target_weights = F.softmax(target_rank / 0.50, dim=0).detach()
+        alignment = F.kl_div(torch.log(torch.clamp(score_weights, min=1.0e-8)), target_weights, reduction="sum")
+        expected_return = torch.sum(score_weights * target_return.detach())
+        concentration = torch.sum(score_weights.square())
+        total = total + proxy_weight * (alignment - expected_return + 0.02 * concentration)
+
+    bad_weight = float(weights.get("bad_month_aware", 0.0) or 0.0)
+    if bad_weight > 0.0:
+        risk = y_risk_scaled / scale
+        if risk.ndim == 2:
+            risk = risk.reshape(risk.shape[0], 1, risk.shape[1]).expand(-1, len(horizon_values), -1)
+        local_drawdown = torch.clamp(-risk[:, target_pos, 0], min=0.0)
+        local_worst = torch.clamp(-risk[:, target_pos, 1], min=0.0)
+        negative_return = torch.clamp(-target_return, min=0.0)
+        bad_intensity = (negative_return + 0.50 * local_drawdown + 0.25 * local_worst).detach()
+        bad_intensity = _standardize_tensor(bad_intensity)
+        bad_loss = (torch.sigmoid(score) * torch.clamp(bad_intensity, min=0.0)).mean()
+        total = total + bad_weight * (bad_loss + 0.10 * pairwise_rank_loss(-score, bad_intensity))
+
+    return total
 
 
 def _collate_forecast_date_batches(batch: list[tuple[torch.Tensor, ...]]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
