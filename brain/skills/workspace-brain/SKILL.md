@@ -25,6 +25,11 @@ Capsule/bootstrap exposes the selected `project_profile`; use it for guard, veri
 - After verified project work, commit with `tools.brain.project_commit` using the selected project id or `workspace-brain`; external dirty paths are reported as `ignored_external_paths`, not staged.
 - Long tasks stay under `<project>/output/agent_runs/<run_id>/`; no cross-project process control without an explicit lease.
 
+## Personal Researcher Direct Change
+Default for internal research code and brain tooling is direct rewrite when it clarifies the current path.
+- Compatibility is evidence-gated: keep old entrypoints only with real callers, evidence value, or external interface duty.
+- Prefer deleting stale shells/tests/helpers over preserving old behavior; safety boundaries still come from `project_profile` and active-artifact guards.
+
 ## Init And Register
 Initialize a project brain only when mutation is allowed and no local `brain/brain_manifest.json` exists. `--brain-id` is optional; default comes from the project directory name.
 ```powershell

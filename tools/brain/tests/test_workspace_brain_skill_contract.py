@@ -51,6 +51,14 @@ class WorkspaceBrainSkillContractTest(unittest.TestCase):
         self.assertIn("<project>/output/agent_runs/<run_id>/", text)
         self.assertIn("explicit lease", text)
 
+    def test_skill_exposes_personal_researcher_direct_change_default(self) -> None:
+        text = SKILL.read_text(encoding="utf-8")
+
+        self.assertIn("Personal Researcher Direct Change", text)
+        self.assertIn("direct rewrite", text)
+        self.assertIn("Compatibility is evidence-gated", text)
+        self.assertIn("stale shells/tests/helpers", text)
+
     def test_skill_keeps_self_evolution_proposal_only(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
 

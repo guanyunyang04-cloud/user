@@ -57,6 +57,8 @@
 - 普通 docs-only 只需要 `git diff --check`；brain 文档变更再加 `tools.brain.doc_guard check`。单模块 Python 变更只跑对应测试或 nodeid；shared helper、protocol、schema、config、active/execution 边界变更必须扩大测试半径或进入 manual review。
 - 测试编写保持最小 fixture、最小断言面、无真实网络、无真实长训练；单测只证明数据、label、loss、bridge、gate、guard 合约，不用单测证明模型收益强。慢测必须带 `slow` / `research` / `guard` / `external` 等 marker 和明确触发条件。
 - `tools.brain.workflow health` 聚合、`doc_guard check`、`integrity_check`、`audit-brain --scope all` 属于维护/收尾守卫；不得作为每次小改默认测试包。`daily_research/output/active_execution_strategy.json` 一旦有 diff 是 critical blocker，不进入普通测试推荐。
+- 个人研究者写代码默认采用 direct-change：内部研究代码、脑区工具和项目脚本优先改当前真实入口；旧入口、旧测试、旧 helper 若无真实调用证据或证据价值，直接删除或改到新合约，不为抽象兼容留壳。
+- direct-change 的硬边界：不得静默改 active artifact、live/paper/broker 行为、PIT/no-leakage/OOS 证据边界、不可重建研究证据或路由外并行 dirty work；这些仍按项目 profile 和 manual review 处理。
 
 ## 5.1 项目提交闭环
 - 完成项目任务且验证通过后使用项目提交助手：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.project_commit --project-id <project|workspace-brain> --task-summary "<summary>" --verified <commands> --json`。
