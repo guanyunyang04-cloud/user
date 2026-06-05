@@ -26,6 +26,9 @@ from daily_research.path_policy.run_alpha_path20_protocol import (
 )
 
 
+pytestmark = [pytest.mark.research, pytest.mark.slow]
+
+
 def test_rl_protocol_parser_accepts_sequence_stage_and_rejects_latest_in_main() -> None:
     parser = build_arg_parser()
     args = parser.parse_args(

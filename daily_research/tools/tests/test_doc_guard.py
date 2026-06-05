@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 from pathlib import Path
 from unittest.mock import patch
 
-from daily_research.tools import doc_guard
+from tools.brain import doc_guard
 
 
 class DocGuardTest(unittest.TestCase):

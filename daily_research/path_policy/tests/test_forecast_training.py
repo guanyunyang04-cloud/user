@@ -20,6 +20,9 @@ from daily_research.path_policy.forecast_training import (
 from daily_research.path_policy.tests.fixtures import make_prepared_policy_inputs
 
 
+pytestmark = [pytest.mark.research, pytest.mark.slow]
+
+
 def test_forecast_model_families_emit_path20_sequence_contract() -> None:
     from daily_research.path_policy.models import PATH20_DEFAULT_CUMULATIVE_HORIZONS, path20_forecast_aux_dim
 
