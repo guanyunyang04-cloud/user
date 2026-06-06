@@ -1018,7 +1018,7 @@ def _check_document_layout() -> list[str]:
     issues: list[str] = []
     workspace_root = Path(__file__).resolve().parents[2]
 
-    for path in workspace_root.rglob("*.md"):
+    for path in _workspace_markdown_paths(workspace_root):
         relative_path = _normalized_path(path.relative_to(workspace_root))
         if _is_allowed_doc_path(relative_path):
             continue
@@ -1048,6 +1048,41 @@ def _check_document_layout() -> list[str]:
                 issues.append(f"required_doc_snippet_missing:{relative_path}:{snippet}")
 
     return issues
+
+
+def _git_markdown_paths() -> list[str]:
+    paths: list[str] = []
+    seen: set[str] = set()
+    commands = (
+        ["git", "ls-files", "--", "*.md"],
+        ["git", "ls-files", "--others", "--exclude-standard", "--", "*.md"],
+    )
+    for command in commands:
+        result = subprocess.run(
+            command,
+            cwd=str(WORKSPACE_ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        if result.returncode != 0:
+            continue
+        for line in result.stdout.splitlines():
+            relative_path = line.strip().replace("\\", "/").strip('"')
+            if not relative_path or relative_path in seen:
+                continue
+            seen.add(relative_path)
+            paths.append(relative_path)
+    return paths
+
+
+def _workspace_markdown_paths(workspace_root: Path | None = None) -> list[Path]:
+    root = workspace_root or WORKSPACE_ROOT
+    git_paths = _git_markdown_paths()
+    if git_paths:
+        return [root / relative_path for relative_path in git_paths if (root / relative_path).exists()]
+    return list(root.rglob("*.md"))
 
 
 def _git_tracked_paths() -> list[str]:

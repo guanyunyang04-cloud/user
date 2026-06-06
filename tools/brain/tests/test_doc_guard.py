@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 from tools.brain import doc_guard
 
@@ -19,6 +22,21 @@ class DocGuardTest(unittest.TestCase):
                 "unregistered_project/output/experiments/example_run/summary.md"
             )
         )
+
+    def test_workspace_markdown_paths_uses_git_list_when_available(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_root:
+            root = Path(raw_root)
+            tracked = root / "brain/state_center.md"
+            ignored = root / "node_modules/ignored.md"
+            tracked.parent.mkdir(parents=True)
+            ignored.parent.mkdir(parents=True)
+            tracked.write_text("# state\n", encoding="utf-8")
+            ignored.write_text("# ignored\n", encoding="utf-8")
+
+            with mock.patch.object(doc_guard, "_git_markdown_paths", return_value=["brain/state_center.md"]):
+                paths = doc_guard._workspace_markdown_paths(root)
+
+        self.assertEqual(paths, [tracked])
 
 
 if __name__ == "__main__":
