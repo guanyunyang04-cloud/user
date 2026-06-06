@@ -57,8 +57,9 @@
 - 普通 docs-only 只需要 `git diff --check`；brain 文档变更再加 `tools.brain.doc_guard check`。单模块 Python 变更只跑对应测试或 nodeid；shared helper、protocol、schema、config、active/execution 边界变更必须扩大测试半径或进入 manual review。
 - 测试编写保持最小 fixture、最小断言面、无真实网络、无真实长训练；单测只证明数据、label、loss、bridge、gate、guard 合约，不用单测证明模型收益强。慢测必须带 `slow` / `research` / `guard` / `external` 等 marker 和明确触发条件。
 - `tools.brain.workflow health` 聚合、`doc_guard check`、`integrity_check`、`audit-brain --scope all` 属于维护/收尾守卫；不得作为每次小改默认测试包。`daily_research/output/active_execution_strategy.json` 一旦有 diff 是 critical blocker，不进入普通测试推荐。
-- 个人研究者写代码默认采用 direct-change：内部研究代码、脑区工具和项目脚本优先改当前真实入口；旧入口、旧测试、旧 helper 若无真实调用证据或证据价值，直接删除或改到新合约，不为抽象兼容留壳。
-- direct-change 的硬边界：不得静默改 active artifact、live/paper/broker 行为、PIT/no-leakage/OOS 证据边界、不可重建研究证据或路由外并行 dirty work；这些仍按项目 profile 和 manual review 处理。
+- 默认代码改动采用 objective-first direct-change：先判断当前目标需要什么形态，再决定小改、重构、删除或重写；不为了保持旧结构、旧测试或旧入口而增加复杂度。
+- 若小补丁能干净完成目标，就小改；若小补丁会引入新分支、新 fallback、新兼容层、新配置开关或重复真源，优先收敛到单一路径并删除过时路径。
+- direct-change 的硬边界：不得静默改 active artifact、live/default/paper/broker 行为、promotion gate、PIT/no-leakage/OOS 证据边界、不可重建研究证据、secrets、外部服务状态或路由外并行 dirty work；这些仍按 project profile、manual review 和显式授权处理。
 
 ## 5.1 项目任务命名空间纪律
 - 每次任务在 mutation 前必须绑定一个明确 `project_id` / task namespace；workspace 共享脑区、workflow 工具、skill 或根配置改动使用 `workspace` / `workspace-brain` 命名空间，不挂靠任一子项目。

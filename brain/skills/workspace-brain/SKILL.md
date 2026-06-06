@@ -29,10 +29,11 @@ Capsule/bootstrap exposes the selected `project_profile`; use it for every task 
 - Short commands run from the selected project scope. Long tasks use `tools.brain.agent_run` paths/register/launch/status and stay under `<project>/output/agent_runs/<run_id>/`; `long_task_monitor` requires explicit project/run identity, and cross-project process or resource reads require an explicit lease.
 - This is an operating contract: commit and process helpers enforce their slices; ordinary shell reads/writes require the agent to honor the selected project namespace.
 
-## Personal Researcher Direct Change
-Default for internal research code and brain tooling is direct rewrite when it clarifies the current path.
-- Compatibility is evidence-gated: keep old entrypoints only with real callers, evidence value, or external interface duty.
-- Prefer deleting stale shells/tests/helpers over preserving old behavior; safety boundaries still come from `project_profile` and active-artifact guards.
+## Solo Owner Objective-First Engineering
+Internal research code, brain tooling, and project scripts default to objective-first direct change.
+- Optimize for current goal closure, system simplicity, verification, and git rollback; not for small diffs or legacy compatibility rituals.
+- Keep old entrypoints, tests, helpers, wrappers, aliases, and compatibility layers only with real callers, evidence value, or external interface duty.
+- Safety boundaries still come from `project_profile`, active/evidence guards, unrecoverable artifacts, secrets, live/default execution, and cross-project namespace rules.
 
 ## Init And Register
 Initialize a project brain only when mutation is allowed and no local `brain/brain_manifest.json` exists. `--brain-id` is optional; default comes from the project directory name.
