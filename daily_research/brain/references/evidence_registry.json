@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 114,
+  "record_count": 115,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -1959,6 +1959,36 @@
       ]
     },
     {
+      "id": "daily_research_v2_high_return_normal_sample_trial_plan_20260606",
+      "date": "2026-06-06",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_high_return_normal_sample_trial_plan_20260606.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_high_return_model_discovery"
+      ],
+      "run_tags": [
+        "v2_hrd_topn_normal_long_mainboard_wide_gru_seed7_scout_20260606_01",
+        "v2_hrd_topn_normal_long_mainboard_seed7_20260606_01"
+      ],
+      "verdict": "Status: `normal_sample_single_seed_objective_trial_launched / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_high_return_model_discovery`.; Active artifact impact: `daily_research/output/active_execution_strategy.json` unchanged.",
+      "blockers": [
+        "Datecap2 evidence is reclassified as `thin_sample_smoke_only`: useful for code path, metadata, and bridge sanity; insufficient to accept or reject objective quality."
+      ],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__2082fee5bb1760972d8c9012",
+        "policy_pool_view__eb690dd0becc330f029c21bd"
+      ]
+    },
+    {
       "id": "daily_research_v2_high_return_objective_loss_scout_20260605",
       "date": "2026-06-05",
       "r_id": "",
@@ -2007,17 +2037,16 @@
         "v2_hrd_proxy_loss_long_mainboard_wide_gru_seed7_scout_20260605_01",
         "v2_hrd_proxy_loss_long_mainboard_gru_seed7_datecap2_20260605_01"
       ],
-      "verdict": "Status: `objective_loss_scout_completed / single_seed_multi_split / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_high_return_model_discovery`.; Active artifact impact: `daily_research/output/active_execution_strategy.json` unchanged.",
+      "verdict": "Status: `objective_loss_scout_completed / thin_sample_inconclusive / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_high_return_model_discovery`.; Active artifact impact: `daily_research/output/active_execution_strategy.json` unchanged.",
       "blockers": [
-        "Proxy-loss scout verdict: `objective_loss_proxy_scout_failed_cross_split_transfer`."
+        "The correct interpretation is `thin_sample_inconclusive`, not `objective_failed`."
       ],
       "next_allowed_actions": [
-        "Do not proceed to same-period control or three-seed for the tested objectives.",
-        "Run focused root-cause diagnostics before adding more model capacity:",
-        "compare split `a` versus `b/c/long` by market regime, volatility, reversal, liquidity, and benchmark-relative return distribution;",
-        "audit whether datecap2 symbol sampling creates a thin-scout artifact, then retest only the best diagnostic objective at datecap `5` if the root-cause read supports it;",
-        "inspect label/selection alignment for topN excess return, decision utility, and bridge score-to-weight semantics;",
-        "test local-volatility/reversal-state label or sample weighting only after the split-regime diagnosis identifies a stable hypothesis."
+        "Do not proceed to same-period control or three-seed from datecap2 evidence.",
+        "Replace datecap2 as an objective gate with normal-sample single-seed objective trials.",
+        "Run one objective at a time on normal samples, first on a small key split set such as `a/b/long`; only expand if normal-sample evidence shows transfer.",
+        "Keep root-cause diagnostics shallow until normal-sample evidence exists; deep split/regime analysis before normal samples is not efficient.",
+        "Keep `small_capital_balanced_return_v1` as the fixed diagnostic shell; do not tune execution to rescue a one-split signal."
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": [

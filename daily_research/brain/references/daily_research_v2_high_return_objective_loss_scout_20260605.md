@@ -4,11 +4,11 @@ Date: `2026-06-05`
 
 ## Summary
 
-- Status: `objective_loss_scout_completed / single_seed_multi_split / research-only / execution-frozen`.
+- Status: `objective_loss_scout_completed / thin_sample_inconclusive / research-only / execution-frozen`.
 - Research program: `daily_research_v2_research_reset`.
 - Study family: `v2_high_return_model_discovery`.
 - Active artifact impact: `daily_research/output/active_execution_strategy.json` unchanged.
-- Evidence grade: `scout_only`, single seed. This is not completed model-quality evidence, not promotion evidence, and not a three-seed finalist.
+- Evidence grade: `thin_sample_smoke_only`, single seed. This is not completed model-quality evidence, not a model-direction rejection, not promotion evidence, and not a three-seed finalist.
 
 ## Facts
 
@@ -27,7 +27,7 @@ Date: `2026-06-05`
   - `score_monthly_robust_v1`;
   - `risk_drawdown_reweighted_v1`;
   - `horizon_entropy_regularized_v1`.
-- Existing-loss scout completed `16` forecasts and `16` quick bridges.
+- Existing-loss scout completed `16` forecasts and `16` quick bridges under datecap2 thin sampling.
 - Existing-loss scout ran `4` split-a matrix-entry candidates through `small_capital_balanced_return_v1`; all four loss profiles still had only `1 / 4` positive-transfer split.
 - Existing-loss split-a small-capital matrix repeated the same best variant shape:
   - variant id: `h10_mw080_rb20d_all_c10_5_10_regime_off`;
@@ -40,7 +40,7 @@ Date: `2026-06-05`
   - `topn_excess_rank_v1`;
   - `score_to_weight_proxy_v1`;
   - `bad_month_aware_v1`.
-- Proxy-loss scout completed `12` forecasts and `12` quick bridges.
+- Proxy-loss scout completed `12` forecasts and `12` quick bridges under datecap2 thin sampling.
 - Proxy-loss split consistency:
   - `topn_excess_rank_v1`: `1 / 4` positive-transfer split, best split `a`, worst split `long`;
   - `score_to_weight_proxy_v1`: `1 / 4` positive-transfer split, best split `a`, worst split `b`;
@@ -55,7 +55,7 @@ Date: `2026-06-05`
   - split `b`: excess annual return `-0.05559422712912809`, excess Sharpe `-0.40847805877439614`;
   - split `c`: excess annual return `-0.12720931902378374`, excess Sharpe `-0.5606155079781685`;
   - split `long`: excess annual return `-0.1891443933852902`, excess Sharpe `-0.7835002444851403`.
-- No proxy loss reached two positive-transfer splits or same-period eligibility.
+- No proxy loss reached two positive-transfer splits or same-period eligibility under datecap2. This does not reject the loss profiles under normal samples.
 
 ## Run Tags
 
@@ -106,15 +106,15 @@ Date: `2026-06-05`
 
 ## Inferences
 
-- The current bottleneck is not the fixed small-capital execution shell. The shell can expose a strong split-a result, but the model signal does not transfer across adjacent long-history splits.
-- The first direct objective/loss upgrade did not solve cross-split instability. It improved or preserved split-a diagnostics, but did not create a finalist.
-- Because all tested loss families converge to the same split-a-only transfer shape, the next useful work is root-cause diagnosis of split/regime/pool/label alignment rather than same-period control or three-seed confirmation.
-- The datecap2 scout remains useful for fast triage, but it is not enough evidence for model quality when the positive transfer is isolated to one split.
+- The current bottleneck is not yet proven to be the fixed small-capital execution shell. The shell can expose a strong split-a result, but datecap2 is too thin to decide whether the model signal would transfer with normal samples.
+- The first direct objective/loss upgrade proved the code path, task/report metadata, and bridge path, but it did not provide enough evidence to accept or reject the loss profiles.
+- Because datecap2 reduces each daily cross-section to only a few samples, it can distort rank/topN learning, sector/liquidity coverage, and score-to-weight alignment.
+- The correct interpretation is `thin_sample_inconclusive`, not `objective_failed`.
 
 ## Assumptions
 
 - Current goal remains small-capital high-return research-grade candidate discovery, not promotion-grade or live-ready execution.
-- Single-seed evidence is allowed only for scout triage.
+- Single-seed evidence is allowed only for scout triage; datecap2 evidence is allowed only for chain/sanity smoke.
 - At least two split / pool-view settings with positive excess return and positive excess Sharpe are still required before same-period continuation or three-seed confirmation.
 - PIT / no-leakage / explicit dataset id / explicit pool view id / clean OOS remain minimum requirements.
 
@@ -132,20 +132,18 @@ Date: `2026-06-05`
 
 ## Verdict
 
-- Existing-loss scout verdict: `weak_positive_single_split_transfer`.
-- Proxy-loss scout verdict: `objective_loss_proxy_scout_failed_cross_split_transfer`.
+- Existing-loss scout verdict: `thin_sample_single_split_positive_inconclusive`.
+- Proxy-loss scout verdict: `thin_sample_objective_loss_inconclusive`.
 - Finalist status: `not_allowed`.
 - Three-seed confirmation: `not_allowed`.
-- The correct current research state is: implementation support for configurable high-return loss profiles exists, and the first objective/loss scout has completed, but no objective has passed the cross-split transfer gate.
+- The correct current research state is: implementation support for configurable high-return loss profiles exists, and the first datecap2 objective/loss scout has completed its smoke purpose, but it must not be used to reject the objective direction.
 
 ## Next Allowed Actions
 
-- Do not proceed to same-period control or three-seed for the tested objectives.
-- Run focused root-cause diagnostics before adding more model capacity:
-  - compare split `a` versus `b/c/long` by market regime, volatility, reversal, liquidity, and benchmark-relative return distribution;
-  - audit whether datecap2 symbol sampling creates a thin-scout artifact, then retest only the best diagnostic objective at datecap `5` if the root-cause read supports it;
-  - inspect label/selection alignment for topN excess return, decision utility, and bridge score-to-weight semantics;
-  - test local-volatility/reversal-state label or sample weighting only after the split-regime diagnosis identifies a stable hypothesis.
+- Do not proceed to same-period control or three-seed from datecap2 evidence.
+- Replace datecap2 as an objective gate with normal-sample single-seed objective trials.
+- Run one objective at a time on normal samples, first on a small key split set such as `a/b/long`; only expand if normal-sample evidence shows transfer.
+- Keep root-cause diagnostics shallow until normal-sample evidence exists; deep split/regime analysis before normal samples is not efficient.
 - Keep `small_capital_balanced_return_v1` as the fixed diagnostic shell; do not tune execution to rescue a one-split signal.
 
 ## Output Artifacts
