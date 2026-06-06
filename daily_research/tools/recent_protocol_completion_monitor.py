@@ -143,7 +143,7 @@ def main() -> None:
     consistency_cmd = [python_executable, str(TOOLS_ROOT / "project_consistency_check.py")]
     _run(consistency_cmd, log_path=log_path, status_path=status_path, step="project_consistency_check")
 
-    doc_guard_cmd = [python_executable, str(TOOLS_ROOT / "doc_guard.py"), "check"]
+    doc_guard_cmd = [python_executable, "-m", "tools.brain.doc_guard", "check"]
     _run(doc_guard_cmd, log_path=log_path, status_path=status_path, step="doc_guard_check")
 
     _write_status(

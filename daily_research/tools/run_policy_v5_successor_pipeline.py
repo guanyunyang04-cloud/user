@@ -194,7 +194,7 @@ def main() -> None:
         )
 
         _run_step("project_consistency_check", [python_executable, str(TOOLS_ROOT / "project_consistency_check.py")], status)
-        _run_step("doc_guard_check", [python_executable, str(TOOLS_ROOT / "doc_guard.py"), "check"], status)
+        _run_step("doc_guard_check", [python_executable, "-m", "tools.brain.doc_guard", "check"], status)
 
         status["current_step"] = "completed"
         status["status"] = "completed"

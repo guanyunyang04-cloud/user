@@ -211,7 +211,7 @@ def main() -> None:
         )
         _run_step(
             "doc_guard_check",
-            [python_executable, str(TOOLS_ROOT / "doc_guard.py"), "check"],
+            [python_executable, "-m", "tools.brain.doc_guard", "check"],
             status,
         )
 
