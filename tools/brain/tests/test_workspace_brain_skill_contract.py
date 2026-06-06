@@ -45,11 +45,32 @@ class WorkspaceBrainSkillContractTest(unittest.TestCase):
 
         self.assertIn("Project Scope", text)
         self.assertIn("project_profile", text)
+        self.assertIn("Every task first binds to one `project_id`", text)
+        self.assertIn("temporary reports, logs, short-run artifacts, and diagnostics", text)
+        self.assertIn("status summaries", text)
+        self.assertIn("operating contract", text)
         self.assertIn("external parallel work", text)
         self.assertIn("tools.brain.project_commit", text)
         self.assertIn("ignored_external_paths", text)
         self.assertIn("<project>/output/agent_runs/<run_id>/", text)
         self.assertIn("explicit lease", text)
+
+    def test_child_brain_operations_inherit_project_namespace_contract(self) -> None:
+        child_paths = [
+            ROOT / "daily_research/brain/operations_center.md",
+            ROOT / "t0_project/brain/operations_center.md",
+            ROOT / "daily_stock_analysis-main/brain/operations_center.md",
+            ROOT / "traditional_quant_research/brain/operations_center.md",
+        ]
+        for path in child_paths:
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("项目任务命名空间", text, msg=str(path))
+            self.assertIn("不下钻", text, msg=str(path))
+            self.assertIn("lease", text, msg=str(path))
+
+        daily_ops = (ROOT / "daily_research/brain/operations_center.md").read_text(encoding="utf-8")
+        self.assertIn("tools.brain.agent_run", daily_ops)
+        self.assertNotIn("Start-Process -PassThru", daily_ops)
 
     def test_skill_exposes_personal_researcher_direct_change_default(self) -> None:
         text = SKILL.read_text(encoding="utf-8")

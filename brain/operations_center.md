@@ -60,11 +60,19 @@
 - 个人研究者写代码默认采用 direct-change：内部研究代码、脑区工具和项目脚本优先改当前真实入口；旧入口、旧测试、旧 helper 若无真实调用证据或证据价值，直接删除或改到新合约，不为抽象兼容留壳。
 - direct-change 的硬边界：不得静默改 active artifact、live/paper/broker 行为、PIT/no-leakage/OOS 证据边界、不可重建研究证据或路由外并行 dirty work；这些仍按项目 profile 和 manual review 处理。
 
-## 5.1 项目提交闭环
+## 5.1 项目任务命名空间纪律
+- 每次任务在 mutation 前必须绑定一个明确 `project_id` / task namespace；workspace 共享脑区、workflow 工具、skill 或根配置改动使用 `workspace` / `workspace-brain` 命名空间，不挂靠任一子项目。
+- 默认读写、短脚本、一次性诊断、测试、临时报告、日志、截图、JSON、cache/output 和提交候选都只属于当前 project profile 允许范围，加上用户明确纳入的路径。
+- 当前任务的临时产物优先写入当前项目的 output/cache/tmp/reports 或 `<project>/output/agent_runs/<run_id>/`；不得把其它项目 output、进程、loose latest 或 dirty paths 当作当前任务证据。
+- 其它项目正在变化的源码、研究日志、输出、进程和测试结果默认是外部并行工作；可在接管摘要中报告其存在，但不下钻内容、不等待、不停止、不清理、不复用、不提交，也不写成本任务证据，除非用户明确扩展任务范围或存在已声明 cross-project lease。
+- changed-surface 验证也受项目命名空间约束：普通项目改动只跑本项目影响面；shared tooling / schema / workflow / project profile 改动才扩大到依赖项目或 workspace 守卫。
+
+## 5.2 项目提交闭环
 - 完成项目任务且验证通过后使用项目提交助手：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.project_commit --project-id <project|workspace-brain> --task-summary "<summary>" --verified <commands> --json`。
 - 提交格式为 `<project_id>: <summary>`，trailer 包含 `Project:`、`Agent-Task:`、`Verified:`。
 - 提交助手只把 profile 允许范围内的当前 dirty paths 纳入 candidate pathspec；路由外项目 dirty paths 输出为 `ignored_external_paths`，不作为 blocker，也不得被 stage/commit。
 - 只有当前候选路径出现 baseline dirty overlap、未验证、无项目内变更或明确范围冲突时才阻塞；不得把多个项目混成一个提交。
+- 用户明确授权的跨分脑脑区治理改动，可作为 `workspace-brain` 变更提交；提交前必须显式列出 pathspec，只纳入 brain / tools/brain / child brain 文档，不纳入子项目 body dirty work。
 
 ## 6. 写回路由
 - 工作区级当前状态写回 `brain/state_center.md`。
@@ -75,6 +83,7 @@
 - 项目事实、实验状态、rXX 证据和项目命令写回被路由选中的分脑。
 
 ## 7. 长时任务运行纪律
+- 长任务继承项目任务命名空间纪律；它不是唯一需要隔离的任务，只是需要额外 PID、日志、progress、summary 和资源租约。
 - 项目长任务必须通过 `tools.brain.agent_run paths/register/launch/status --project-id <project> --run-id <run>` 建立或登记，PID、stdout/stderr、progress、summary、run tag 和产物路径写入该项目 `process_namespace`。
 - `long_task_monitor status/wait-once/trace-poll` 必须显式传 `--project-id` 与 `--run-id`；匿名 PID/日志监控直接阻塞，避免误读或误等其它项目进程。
 - 已由外部命令启动的进程必须先用 `agent_run register` 绑定到当前项目 run；新启动的长任务优先用 `agent_run launch`，不再手工拼写跨项目日志路径。

@@ -34,6 +34,7 @@
 - 再看产品地图和入口边界
 - 再按 body_map 进入产品代码
 - 默认写代码采用主脑 personal researcher direct-change：内部产品脚本、旧 helper、旧测试若无真实调用证据或外部接口责任，直接改到当前合约或删除
+- 继承主脑项目任务命名空间：普通读写、短脚本、测试、临时产物、提交和长任务默认限制在 `daily_stock_analysis-main` profile；其它项目 dirty/output/process 只作摘要报告，不下钻、不复用、不写成本任务证据，除非用户扩展范围或声明 lease
 - 不把 `README / docs / AGENTS.md / CLAUDE.md` 当成主入口
 - README 或 docs 中出现新的稳定能力、配置字段、运行入口或验证入口时，先整合到本分脑，再保留公开文档摘要
 - 文档语言遵循 `brain/language_policy.md`：中文语义 + 英文工程标识；CLI、JSON key、路径、tag 与代码符号保留英文。

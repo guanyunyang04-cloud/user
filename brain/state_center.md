@@ -26,6 +26,7 @@
 - 分脑入口必须精炼；长过程、长命令和历史证据进入 `episodic_memory.md` 或 `brain/references/`。
 - 当前所有 `daily_research` 任务必须显式使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`。
 - 后续 agent 不得从 `H:\new_tdx64\PYPlugins\user` 接管本项目；旧路径只可能出现在历史 reference 或回滚说明中。
+- 所有任务默认先绑定项目任务命名空间：普通读写、短脚本、诊断、测试、临时产物、提交和进程管理都只属于当前 `project_profile` 允许范围；其它项目 dirty paths、输出和进程是外部并行工作，可摘要报告但不下钻、不复用、不写成本任务证据，除非用户明确扩展范围或声明 lease。
 - 训练、评估、审计、bounded study、confirmatory rerun 与执行任务必须受监管运行：默认用 `tools.brain.agent_run paths/register/launch/status --project-id <project> --run-id <run>` 绑定 PID、持久 stdout/stderr、summary、run tag 和产物路径；GPU 进程确认工作后必须用带 project/run 身份的 `long_task_monitor wait-once` 执行 `Wait-Process -Id <pid> -Timeout 7200` 前台轮询，除非再次出现系统崩溃或宿主不可用。
 - 长任务禁止无 PID、无日志、无产物定位的脱管后台化；禁止用固定 sleep 替代 PID 绑定等待；每轮轮询必须报告已用时间和预计剩余时间，进程提前结束时立即解析产物；窗口耗尽但 PID / 日志 / 产物仍推进时继续下一轮轮询，不中断任务。
 
@@ -39,6 +40,7 @@
 - 如果主脑继续追加日期日志，接管会重新退化为长文扫描。
 - 如果只改分脑、不改主脑，跨项目规则会再次漂移。
 - 如果兼容入口、README 或教程保留 brain 未收录的规则，后续 agent 会绕过中枢。
+- 如果只把长任务放进命名空间，而让普通短命令、临时产物、测试或报告散落到 workspace 根和其它项目，项目并行隔离仍然不成立。
 - 如果长任务没有 PID、日志、progress、summary 或环境诊断可追溯，就不能写成正式证据；如果只有前台等待窗口耗尽而没有代码错误证据，也不能写成失败证据。
 - 如果 agent 或脚本默认落到旧通达信插件 `user` 目录，先纠偏到 `H:\quant_project`，再继续操作。
 

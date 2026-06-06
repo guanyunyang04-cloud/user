@@ -19,6 +19,7 @@
 - 先看文档归宿和 body 入口，再进代码
 - 长篇研究文档与历史说明统一收口到 `brain/references/`
 - 默认写代码采用主脑 personal researcher direct-change：实验脚本、旧 helper、旧测试若无真实调用证据或证据价值，直接改到当前合约或删除
+- 继承主脑项目任务命名空间：普通读写、短脚本、测试、临时产物、提交和长任务默认限制在 `t0_project` profile；其它项目 dirty/output/process 只作摘要报告，不下钻、不复用、不写成本任务证据，除非用户扩展范围或声明 lease
 - 默认只做离线、mock 或静态验证；连接真实通达信、券商或 live broker 前必须显式确认
 - 文档语言遵循 `brain/language_policy.md`：中文语义 + 英文工程标识；命令、路径、JSON key、workflow id 不翻译。
 

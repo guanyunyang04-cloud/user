@@ -20,10 +20,14 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap
 `route` is a sensor, not the final thinker. Only read child-brain context after routing returns `status=selected` and `target.kind=child`; if routing returns `needs_agent_decision` or `ambiguous`, inspect user intent, paths, manifest evidence, and candidates before choosing a bootstrap target. Do not read a child brain because of one generic term such as `brain`, `study`, `training`, `数据集`, or `模型`.
 
 ## Project Scope
-Capsule/bootstrap exposes the selected `project_profile`; use it for guard, verification, commit, and process scope.
+Capsule/bootstrap exposes the selected `project_profile`; use it for every task namespace: read/write scope, verification, commit, process, and temporary outputs.
+- Every task first binds to one `project_id`; use `workspace`/`workspace-brain` for shared brain or tooling changes. If routing is ambiguous, decide or ask before mutation.
+- Default write/output/test/commit scope is the selected project profile plus explicit user-added paths. Put temporary reports, logs, short-run artifacts, and diagnostics under that project/task path.
+- External project dirty/output/process paths may be reported as status summaries; do not inspect their contents, reuse them, or treat them as task evidence without explicit scope expansion or lease.
 - Treat other project dirty paths as external parallel work unless the user explicitly expands scope.
 - After verified project work, commit with `tools.brain.project_commit` using the selected project id or `workspace-brain`; external dirty paths are reported as `ignored_external_paths`, not staged.
-- Long tasks use `tools.brain.agent_run` paths/register/launch/status and stay under `<project>/output/agent_runs/<run_id>/`; `long_task_monitor` requires explicit project/run identity, and cross-project process reads require an explicit lease.
+- Short commands run from the selected project scope. Long tasks use `tools.brain.agent_run` paths/register/launch/status and stay under `<project>/output/agent_runs/<run_id>/`; `long_task_monitor` requires explicit project/run identity, and cross-project process or resource reads require an explicit lease.
+- This is an operating contract: commit and process helpers enforce their slices; ordinary shell reads/writes require the agent to honor the selected project namespace.
 
 ## Personal Researcher Direct Change
 Default for internal research code and brain tooling is direct rewrite when it clarifies the current path.
