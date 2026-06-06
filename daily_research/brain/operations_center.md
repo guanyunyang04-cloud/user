@@ -7,11 +7,9 @@
 - Python 入口固定为 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`；进入本分脑前，必须先由主脑 `tools.brain.workflow capsule` 路由到 `daily_research`。
 - `H:\new_tdx64\PYPlugins\user` 已退出本项目主链路；历史 reference 中旧路径只作历史证据，不作为当前入口。
 - 不使用 `KMP_DUPLICATE_LIB_OK` 作为默认方案。
-- 不触碰 `daily_research/output/active_execution_strategy.json`，除非有明确 promotion 决策。
 - 继承主脑项目任务命名空间：普通读写、短脚本、测试、临时产物、提交和长任务默认限制在 `daily_research` profile；其它项目 dirty/output/process 只作摘要报告，不下钻、不复用、不写成本任务证据，除非用户扩展范围或声明 lease。
 - 2026-06-01 起执行端冻结/保留骨架/等待重建：只允许只读状态、数据 readiness、候选 backtest wrapper、候选 trade-plan wrapper 的研究评估用途和 payload inventory；禁止 live/default、paper/broker、正式 trade plan、active manifest promotion、production root 重建、自动化每日执行和无授权删除执行合同。
 - 2026-05-31 恢复边界：`daily_research/output/` 与 `daily_research/cache/` 曾被误删；空目录骨架只保证 manifest/integrity 入口存在，不代表旧 payload 恢复，不得凭 brain 文本手工重造 active artifact。
-- 不把 smoke、dry-run、failed trial、interrupted outer study、realtime tail label 写成 completed evidence。
 
 ## 项目地图
 - brain 真源：`daily_research/brain/`；research data lake：`daily_research/output/research_data_lake/`。
