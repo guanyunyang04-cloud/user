@@ -8,6 +8,7 @@
 - `daily_research/brain/`：生产研究与执行主线。
 - `t0_project/brain/`：盘中执行与 RL 实验。
 - `daily_stock_analysis-main/brain/`：多市场分析产品。
+- `traditional_quant_research/brain/`：传统量化方法研究。
 
 ## 2. 接管边界
 - `main-brain-first`：主脑是 agent 接管入口。

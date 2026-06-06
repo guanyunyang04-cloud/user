@@ -6,7 +6,7 @@
 - 当前工作区根目录固定为 `H:\quant_project`。
 - 旧通达信插件目录 `H:\new_tdx64\PYPlugins\user` 不再承载本项目；它应保持为空或只保留通达信原生用户插件文件。
 - 工作区正式生产研究与执行主线仍是 `daily_research`。
-- 已接入主脑的一级分脑固定为：`daily_research`、`t0_project`、`daily_stock_analysis-main`。
+- 已接入主脑的一级分脑固定为：`daily_research`、`t0_project`、`daily_stock_analysis-main`、`traditional_quant_research`。
 - 默认接管顺序为：主脑 `identity -> state -> knowledge -> topology -> operations -> governance`，再进入目标分脑。
 - 主脑只维护跨项目边界、共享规则和路由；项目事实、实验指标、命令细节写入对应分脑。
 
@@ -19,6 +19,7 @@
 - `daily_research`：生产研究与执行主线；active 真源为 `daily_research/output/active_execution_strategy.json`；项目事实、rXX 证据、Path20 历史线 / multi_horizon_utility 当前主线 / continuous_policy / deep_alpha 当前结论以 `daily_research/brain/` 为准，主脑不展开 trial 指标、长 tag 或局部命令。
 - `t0_project`：盘中实验与 RL 原型分脑；不得替代 `daily_research` 正式执行默认。
 - `daily_stock_analysis-main`：独立产品分脑；不改写 `daily_research` active artifact 或 promotion gate。
+- `traditional_quant_research`：传统量化方法研究分脑；项目事实、研究记录、实验证据与局部命令以 `traditional_quant_research/brain/` 和对应项目产物为准。
 
 ## 当前重点
 - 保持 `daily_research` 的正式生产主线地位，同时冻结 live 默认执行的静默切换。
