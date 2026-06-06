@@ -36,6 +36,7 @@ BRAIN_TOOL_FAST_TESTS = (
 
 BRAIN_TOOL_CONTRACT_TESTS = (
     "tools/brain/tests/test_capsule.py",
+    "tools/brain/tests/test_doc_guard.py",
     "tools/brain/tests/test_evidence_registry.py",
     "tools/brain/tests/test_rules.py",
     "tools/brain/tests/test_workflow_cli.py::BrainWorkflowCliTest::test_bootstrap_cli_outputs_valid_json_capsule",

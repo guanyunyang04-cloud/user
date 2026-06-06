@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import argparse
+import functools
 import json
 import re
 import subprocess
@@ -460,6 +461,7 @@ def _default_docs() -> list[str]:
     return docs
 
 
+@functools.lru_cache(maxsize=1)
 def _attached_brain_doc_prefixes() -> tuple[str, ...]:
     prefixes = list(BRAIN_DOC_PREFIXES)
     try:
@@ -480,6 +482,7 @@ def _attached_brain_doc_prefixes() -> tuple[str, ...]:
     return tuple(prefixes)
 
 
+@functools.lru_cache(maxsize=1)
 def _registered_project_output_doc_prefixes() -> tuple[str, ...]:
     prefixes: list[str] = []
     try:
@@ -500,6 +503,7 @@ def _registered_project_output_doc_prefixes() -> tuple[str, ...]:
     return tuple(prefixes)
 
 
+@functools.lru_cache(maxsize=1)
 def _load_main_manifest() -> dict[str, Any]:
     return json.loads(_read_text(MAIN_MANIFEST))
 
@@ -641,6 +645,7 @@ def _resolve_rule(path: Path) -> DocRule | None:
     return None
 
 
+@functools.lru_cache(maxsize=1)
 def _hot_handoff_line_budgets() -> dict[str, int]:
     try:
         manifest = _load_main_manifest()
@@ -1085,6 +1090,43 @@ def _workspace_markdown_paths(workspace_root: Path | None = None) -> list[Path]:
     return list(root.rglob("*.md"))
 
 
+def _git_changed_paths() -> list[str]:
+    result = subprocess.run(
+        ["git", "status", "--short", "--untracked-files=all"],
+        cwd=str(WORKSPACE_ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if result.returncode != 0:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for line in result.stdout.splitlines():
+        if len(line) < 4:
+            continue
+        path_text = line[3:].strip()
+        if " -> " in path_text:
+            path_text = path_text.rsplit(" -> ", 1)[-1].strip()
+        relative_path = path_text.replace("\\", "/").strip().strip('"')
+        if not relative_path or relative_path in seen:
+            continue
+        seen.add(relative_path)
+        out.append(relative_path)
+    return out
+
+
+def _changed_guard_files() -> list[str]:
+    out: list[str] = []
+    for relative_path in _git_changed_paths():
+        if not relative_path.lower().endswith((".md", ".json")):
+            continue
+        if (WORKSPACE_ROOT / relative_path).exists():
+            out.append(relative_path)
+    return out
+
+
 def _git_tracked_paths() -> list[str]:
     result = subprocess.run(
         ["git", "ls-files"],
@@ -1189,134 +1231,175 @@ def _check_active_execution_brain_alignment() -> list[str]:
     return issues
 
 
-def cmd_check(args: argparse.Namespace) -> int:
+def _check_one_file(path: Path, *, tail_lines: int, show_lines: int) -> bool:
+    if not path.exists():
+        print(f"[missing] {path}")
+        return False
+
+    text = _read_text(path)
+    lines = text.splitlines()
+    line_count = len(lines)
+    replacement_count = text.count("\ufffd")
+    tail = _tail_lines(text, tail_lines)
+    tail_question_lines = _suspicious_question_lines(tail)
+    mojibake_lines = _suspicious_mojibake_lines(lines)
+    normalized = _normalized_path(path)
+    language_issues = _check_language_policy_text(text, normalized)
+    rule = _resolve_rule(path)
     has_issue = False
-    for raw in args.files:
-        path = Path(raw)
-        if not path.exists():
-            print(f"[missing] {path}")
-            has_issue = True
-            continue
 
-        text = _read_text(path)
-        lines = text.splitlines()
-        line_count = len(lines)
-        replacement_count = text.count("\ufffd")
-        tail = _tail_lines(text, args.tail_lines)
-        tail_question_lines = _suspicious_question_lines(tail)
-        mojibake_lines = _suspicious_mojibake_lines(lines)
-        normalized = _normalized_path(path)
-        language_issues = _check_language_policy_text(text, normalized)
-        rule = _resolve_rule(path)
+    print(f"[check] {path}")
+    print(f"  line_count={line_count}")
+    print(f"  replacement_char_count={replacement_count}")
+    print(f"  suspicious_question_lines_in_tail={len(tail_question_lines)}")
+    print(f"  suspicious_mojibake_lines={len(mojibake_lines)}")
+    print(f"  language_policy_issues={len(language_issues)}")
 
-        print(f"[check] {path}")
-        print(f"  line_count={line_count}")
-        print(f"  replacement_char_count={replacement_count}")
-        print(f"  suspicious_question_lines_in_tail={len(tail_question_lines)}")
-        print(f"  suspicious_mojibake_lines={len(mojibake_lines)}")
-        print(f"  language_policy_issues={len(language_issues)}")
+    if replacement_count or tail_question_lines or mojibake_lines:
+        has_issue = True
+        for line in tail_question_lines[:show_lines]:
+            print(f"    ? {line}")
+        for line in mojibake_lines[:show_lines]:
+            print(f"    ! {line}")
+    if language_issues:
+        has_issue = True
+        for issue in language_issues[:show_lines]:
+            print(f"    ! {issue}")
 
-        if replacement_count or tail_question_lines or mojibake_lines:
+    if rule and rule.warn_lines is not None and line_count > rule.warn_lines:
+        print(f"  structural_warning=line_count_exceeds_warning ({line_count} > {rule.warn_lines})")
+
+    if rule and rule.max_lines is not None and line_count > rule.max_lines:
+        has_issue = True
+        print(f"  structural_issue=line_count_exceeds_limit ({line_count} > {rule.max_lines})")
+
+    if rule:
+        for pattern, reason in rule.forbidden_heading_patterns:
+            matches = _matching_lines(lines, pattern)
+            print(f"  forbidden_heading_matches={len(matches)} for rule: {reason}")
+            if matches:
+                has_issue = True
+                for line in matches[:show_lines]:
+                    print(f"    ! {line}")
+
+        for pattern, reason in rule.forbidden_text_patterns:
+            matches = _matching_lines(lines, pattern)
+            print(f"  forbidden_text_matches={len(matches)} for rule: {reason}")
+            if matches:
+                has_issue = True
+                for line in matches[:show_lines]:
+                    print(f"    ! {line}")
+
+        if rule.enforce_non_decreasing_dated_headings:
+            headings = _dated_headings(lines)
+            out_of_order_pairs: list[tuple[tuple[int, str, str], tuple[int, str, str]]] = []
+            for previous, current in zip(headings, headings[1:]):
+                if current[1] < previous[1]:
+                    out_of_order_pairs.append((previous, current))
+
+            print(f"  dated_heading_order_issues={len(out_of_order_pairs)}")
+            if out_of_order_pairs:
+                has_issue = True
+                for previous, current in out_of_order_pairs[:show_lines]:
+                    print(f"    ! {path}:{current[0]} date {current[1]} appears after later date {previous[1]}")
+                    print(f"      prev={previous[2]}")
+                    print(f"      curr={current[2]}")
+
+    if path.suffix.lower() == ".json" and _normalized_path(path).endswith("brain_manifest.json"):
+        manifest_issues = _check_manifest_semantics(path, text)
+        print(f"  manifest_semantic_issues={len(manifest_issues)}")
+        if manifest_issues:
             has_issue = True
-            for line in tail_question_lines[: args.show_lines]:
-                print(f"    ? {line}")
-            for line in mojibake_lines[: args.show_lines]:
-                print(f"    ! {line}")
-        if language_issues:
-            has_issue = True
-            for issue in language_issues[: args.show_lines]:
+            for issue in manifest_issues[:show_lines]:
                 print(f"    ! {issue}")
 
-        if rule and rule.warn_lines is not None and line_count > rule.warn_lines:
-            print(f"  structural_warning=line_count_exceeds_warning ({line_count} > {rule.warn_lines})")
+    return not has_issue
 
-        if rule and rule.max_lines is not None and line_count > rule.max_lines:
+
+def _effective_check_scope(args: argparse.Namespace) -> str:
+    if args.scope != "auto":
+        return str(args.scope)
+    return "files" if args.files else "full"
+
+
+def _check_files_for_scope(args: argparse.Namespace, scope: str) -> list[str]:
+    if args.files:
+        return list(args.files)
+    if scope == "changed":
+        return _changed_guard_files()
+    return _default_docs()
+
+
+def _global_check_enabled(args: argparse.Namespace, *, scope: str, check_name: str) -> bool:
+    full_default = scope == "full"
+    if check_name == "layout":
+        return (full_default or bool(args.include_layout)) and not bool(args.skip_layout)
+    if check_name == "active":
+        return (full_default or bool(args.include_active_alignment)) and not bool(args.skip_active_alignment)
+    if check_name == "large":
+        return (full_default or bool(args.include_large_files)) and not bool(args.skip_large_files)
+    if check_name == "integrity":
+        return (full_default or bool(args.include_integrity)) and not bool(args.skip_integrity)
+    return False
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    scope = _effective_check_scope(args)
+    files = _check_files_for_scope(args, scope)
+    print(f"[scope] mode={scope} file_count={len(files)}")
+    if scope == "changed" and not files:
+        print("[scope] no changed markdown/json files detected")
+
+    has_issue = False
+    for raw in files:
+        path = Path(raw)
+        if not _check_one_file(path, tail_lines=args.tail_lines, show_lines=args.show_lines):
             has_issue = True
-            print(f"  structural_issue=line_count_exceeds_limit ({line_count} > {rule.max_lines})")
 
-        if rule:
-            for pattern, reason in rule.forbidden_heading_patterns:
-                matches = _matching_lines(lines, pattern)
-                print(f"  forbidden_heading_matches={len(matches)} for rule: {reason}")
-                if matches:
-                    has_issue = True
-                    for line in matches[: args.show_lines]:
-                        print(f"    ! {line}")
+    if _global_check_enabled(args, scope=scope, check_name="layout"):
+        layout_issues = _check_document_layout()
+        print(f"[layout] documentation_layout_issues={len(layout_issues)}")
+        if layout_issues:
+            has_issue = True
+            for issue in layout_issues[: args.show_lines]:
+                print(f"    ! {issue}")
+    else:
+        print("[layout] skipped")
 
-            for pattern, reason in rule.forbidden_text_patterns:
-                matches = _matching_lines(lines, pattern)
-                print(f"  forbidden_text_matches={len(matches)} for rule: {reason}")
-                if matches:
-                    has_issue = True
-                    for line in matches[: args.show_lines]:
-                        print(f"    ! {line}")
+    if _global_check_enabled(args, scope=scope, check_name="active"):
+        active_alignment_issues = _check_active_execution_brain_alignment()
+        print(f"[active-execution] brain_alignment_issues={len(active_alignment_issues)}")
+        if active_alignment_issues:
+            has_issue = True
+            for issue in active_alignment_issues[: args.show_lines]:
+                print(f"    ! {issue}")
+    else:
+        print("[active-execution] skipped")
 
-            if rule.enforce_non_decreasing_dated_headings:
-                headings = _dated_headings(lines)
-                out_of_order_pairs: list[tuple[tuple[int, str, str], tuple[int, str, str]]] = []
-                for previous, current in zip(headings, headings[1:]):
-                    if current[1] < previous[1]:
-                        out_of_order_pairs.append((previous, current))
+    if _global_check_enabled(args, scope=scope, check_name="large"):
+        tracked_large_file_issues = _check_tracked_large_files()
+        print(f"[tracked-large-files] issues={len(tracked_large_file_issues)}")
+        if tracked_large_file_issues:
+            has_issue = True
+            for issue in tracked_large_file_issues[: args.show_lines]:
+                print(f"    ! {issue}")
+    else:
+        print("[tracked-large-files] skipped")
 
-                print(f"  dated_heading_order_issues={len(out_of_order_pairs)}")
-                if out_of_order_pairs:
-                    has_issue = True
-                    for previous, current in out_of_order_pairs[: args.show_lines]:
-                        print(f"    ! {path}:{current[0]} date {current[1]} appears after later date {previous[1]}")
-                        print(f"      prev={previous[2]}")
-                        print(f"      curr={current[2]}")
-
-        if path.suffix.lower() == ".json" and _normalized_path(path).endswith("brain_manifest.json"):
-            manifest_issues = _check_manifest_semantics(path, text)
-            print(f"  manifest_semantic_issues={len(manifest_issues)}")
-            if manifest_issues:
-                has_issue = True
-                for issue in manifest_issues[: args.show_lines]:
-                    print(f"    ! {issue}")
-
-    layout_issues = _check_document_layout()
-    print(f"[layout] documentation_layout_issues={len(layout_issues)}")
-    if layout_issues:
-        has_issue = True
-        for issue in layout_issues[: args.show_lines]:
-            print(f"    ! {issue}")
-
-    active_alignment_issues = _check_active_execution_brain_alignment()
-    print(f"[active-execution] brain_alignment_issues={len(active_alignment_issues)}")
-    if active_alignment_issues:
-        has_issue = True
-        for issue in active_alignment_issues[: args.show_lines]:
-            print(f"    ! {issue}")
-
-    tracked_large_file_issues = _check_tracked_large_files()
-    print(f"[tracked-large-files] issues={len(tracked_large_file_issues)}")
-    if tracked_large_file_issues:
-        has_issue = True
-        for issue in tracked_large_file_issues[: args.show_lines]:
-            print(f"    ! {issue}")
-
-    brain_findings = run_brain_integrity_checks()
-    brain_errors = [finding for finding in brain_findings if finding.severity == "error"]
-    brain_warnings = [finding for finding in brain_findings if finding.severity == "warning"]
-    print(f"[brain-integrity] errors={len(brain_errors)} warnings={len(brain_warnings)}")
-    if brain_errors:
-        has_issue = True
-    for finding in brain_findings[: args.show_lines]:
-        path = f" path={finding.path}" if finding.path else ""
-        print(f"    ! [{finding.severity}] {finding.code}{path}: {finding.detail}")
+    if _global_check_enabled(args, scope=scope, check_name="integrity"):
+        brain_findings = run_brain_integrity_checks()
+        brain_errors = [finding for finding in brain_findings if finding.severity == "error"]
+        brain_warnings = [finding for finding in brain_findings if finding.severity == "warning"]
+        print(f"[brain-integrity] errors={len(brain_errors)} warnings={len(brain_warnings)}")
+        if brain_errors:
+            has_issue = True
+        for finding in brain_findings[: args.show_lines]:
+            path = f" path={finding.path}" if finding.path else ""
+            print(f"    ! [{finding.severity}] {finding.code}{path}: {finding.detail}")
+    else:
+        print("[brain-integrity] skipped")
 
     return 1 if has_issue else 0
-
-
-def cmd_append(args: argparse.Namespace) -> int:
-    path = Path(args.file)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    existing = _read_text(path) if path.exists() else ""
-    body = Path(args.body_file).read_text(encoding="utf-8")
-    parts = [existing.rstrip(), args.header.rstrip(), "", body.strip(), ""]
-    path.write_text("\n".join(part for part in parts if part != ""), encoding="utf-8")
-    print(f"[append] wrote UTF-8 section to {path}")
-    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1324,16 +1407,24 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     check = sub.add_parser("check", help="Check brain docs for encoding damage and structure drift.")
-    check.add_argument("--files", nargs="+", default=_default_docs())
+    check.add_argument(
+        "--scope",
+        choices=["auto", "files", "changed", "full"],
+        default="auto",
+        help="auto keeps bare check as full, but makes --files files-only; changed checks git-changed markdown/json.",
+    )
+    check.add_argument("--files", nargs="+", default=None)
     check.add_argument("--tail-lines", type=int, default=120)
     check.add_argument("--show-lines", type=int, default=12)
+    check.add_argument("--include-layout", action="store_true", help="Run global documentation layout check outside full scope.")
+    check.add_argument("--include-active-alignment", action="store_true", help="Run active-artifact brain text alignment outside full scope.")
+    check.add_argument("--include-large-files", action="store_true", help="Run tracked-large-file guard outside full scope.")
+    check.add_argument("--include-integrity", action="store_true", help="Run brain integrity check outside full scope.")
+    check.add_argument("--skip-layout", action="store_true", help="Skip global layout check even in full scope.")
+    check.add_argument("--skip-active-alignment", action="store_true", help="Skip active-artifact brain text alignment even in full scope.")
+    check.add_argument("--skip-large-files", action="store_true", help="Skip tracked-large-file guard even in full scope.")
+    check.add_argument("--skip-integrity", action="store_true", help="Skip embedded brain integrity check even in full scope.")
     check.set_defaults(func=cmd_check)
-
-    append = sub.add_parser("append", help="Append a markdown section using explicit UTF-8 writes.")
-    append.add_argument("--file", required=True)
-    append.add_argument("--header", required=True, help="Markdown header line, e.g. ## 2026-03-20 ...")
-    append.add_argument("--body-file", required=True, help="UTF-8 markdown fragment to append under the header.")
-    append.set_defaults(func=cmd_append)
 
     return parser
 

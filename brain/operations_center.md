@@ -50,7 +50,7 @@
 - Agent Meta Protocol 守卫确认 agent 是元能力执行者，brain 是持久化载体，tools 是传感器。
 - `agent-meta-audit` 若返回 `agent_learning.pending_approval_count > 0`，下一次实质进展更新或最终答复必须主动提示待批准 / 待跟进 proposal；若为 `0`，可简短说明当前没有待批准 proposal。
 - `brain-burden-audit` 检查热路径预算、skill 体量、冗余兼容和非源缓存；blocked 项必须先处理再继续脑区治理写回。
-- `doc_guard` 已包含主分脑完整性检查；结构变更后仍建议单独跑一次 `integrity_check` 便于快速定位。
+- `doc_guard check` 裸命令是全量收尾守卫；日常局部检查优先用 `doc_guard check --files <paths>` 或 `doc_guard check --scope changed`，且这两种轻量模式默认不跑 layout、active、large-file、integrity 全局检查。结构变更后仍建议单独跑一次 `integrity_check` 便于快速定位。
 - 项目验证从 `project_profile.verification_profile.always_commands` 读取；`selective_verification.py --paths <paths>` 必须按路径推断项目，不得默认注入 daily active guard。
 - 默认开发验证采用 changed-surface-only：先运行 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.selective_verification --paths <changed_paths> --json`，以 `blocking_commands` 作为本次必须通过的小验证包；未修改且未受影响区域由 `skipped_reason_by_area` 显式说明。
 - `always_commands` 保留为兼容和收尾守卫入口，不代表每次小改都要全量执行；`deferred_commands` / `deferred_long_commands` 只用于慢速、研究、维护或最终确认批次。
