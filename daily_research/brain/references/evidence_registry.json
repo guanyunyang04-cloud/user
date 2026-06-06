@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 115,
+  "record_count": 117,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -2052,6 +2052,71 @@
       "dataset_ids": [
         "policy_input_bundle__2082fee5bb1760972d8c9012",
         "policy_pool_view__eb690dd0becc330f029c21bd"
+      ]
+    },
+    {
+      "id": "daily_research_v2_high_return_topn_normal_long_history_result_20260606",
+      "date": "2026-06-06",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_high_return_topn_normal_long_history_result_20260606.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_high_return_model_discovery"
+      ],
+      "run_tags": [],
+      "verdict": "Status: `normal_sample_single_seed_topn_long_history_scout_completed / research-only / execution-frozen`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_high_return_model_discovery`.; Loss profile: `topn_excess_rank_v1`.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Run same-period normal-sample control for `topn_excess_rank_v1` before trying three seed.",
+        "If same-period is positive or at least not clearly negative, run small-capital candidate matrix on the best long-history and same-period candidates.",
+        "If same-period is negative, record this as long-history-specific transfer and try the next normal-sample objective."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__2082fee5bb1760972d8c9012",
+        "policy_pool_view__eb690dd0becc330f029c21bd"
+      ]
+    },
+    {
+      "id": "daily_research_v2_high_return_topn_normal_same_period_matrix_result_20260606",
+      "date": "2026-06-06",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_high_return_topn_normal_same_period_matrix_result_20260606.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_high_return_model_discovery"
+      ],
+      "run_tags": [
+        "mh_v2_hrd_topn_long_a_gru_seed7_20260606_01",
+        "mh_v2_hrd_topn_long_b_gru_seed7_20260606_01",
+        "mh_v2_hrd_topn_long_long_gru_seed7_20260606_01",
+        "mh_v2_hrd_topn_same_same_gru_seed7_20260606_01"
+      ],
+      "verdict": "Status: `normal_sample_topn_same_period_control_and_long_matrix_completed / finalist_three_seed_allowed / research-only`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_high_return_model_discovery`.; Loss profile: `topn_excess_rank_v1`.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Run finalist confirmation for `topn_excess_rank_v1` with seeds `7,11,19`; reuse seed `7` when possible and train only missing seeds.",
+        "Confirmation pass requires at least two seeds with positive excess return and positive excess Sharpe.",
+        "After seed confirmation, run ensemble or seed-aggregate bridge/matrix only if the tooling supports explicit seed aggregation; otherwise write seed-level evidence and implement a minimal explicit ensemble collector before claiming ensemble superiority.",
+        "If seed stability fails, diagnose split `b`, month concentration, and seed sensitivity before trying execution adaptation."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__2082fee5bb1760972d8c9012",
+        "policy_pool_view__eb690dd0becc330f029c21bd",
+        "policy_pool_view__d7a56d5164470b590e4f5a40"
       ]
     },
     {
