@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 117,
+  "record_count": 118,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -2047,6 +2047,45 @@
         "Run one objective at a time on normal samples, first on a small key split set such as `a/b/long`; only expand if normal-sample evidence shows transfer.",
         "Keep root-cause diagnostics shallow until normal-sample evidence exists; deep split/regime analysis before normal samples is not efficient.",
         "Keep `small_capital_balanced_return_v1` as the fixed diagnostic shell; do not tune execution to rescue a one-split signal."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__2082fee5bb1760972d8c9012",
+        "policy_pool_view__eb690dd0becc330f029c21bd"
+      ]
+    },
+    {
+      "id": "daily_research_v2_high_return_topn_finalist_three_seed_20260606",
+      "date": "2026-06-06",
+      "r_id": "",
+      "path": "daily_research/brain/references/daily_research_v2_high_return_topn_finalist_three_seed_20260606.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "v2_high_return_model_discovery"
+      ],
+      "run_tags": [
+        "mh_v2_hrd_topn_long_long_gru_seed7_20260606_01",
+        "mh_v2_hrd_topn_long_long_gru_seed11_20260606_01",
+        "mh_v2_hrd_topn_long_long_gru_seed19_20260606_01",
+        "v2_score_bridge_topn_finalist_seed_ensemble_20260606_01"
+      ],
+      "verdict": "Status: `normal_sample_topn_three_seed_completed / seed_level_confirmation_passed / all_seed_ensemble_not_confirmed / research-only`.; Research program: `daily_research_v2_research_reset`.; Study family: `v2_high_return_model_discovery`.; Loss profile: `topn_excess_rank_v1`.",
+      "blockers": [
+        "Three seed confirmation: `partial_pass_seed_level / ensemble_superiority_failed`.",
+        "The fixed all-seed mean ensemble does not improve over the single-seed median. Therefore the planned \"ensemble bridge better than single-seed median\" confirmation failed.",
+        "Treat `topn_excess_rank_v1` as the current best high-return model candidate, but with `seed_aggregation_blocker`."
+      ],
+      "next_allowed_actions": [
+        "Treat `topn_excess_rank_v1` as the current best high-return model candidate, but with `seed_aggregation_blocker`.",
+        "Diagnose seed aggregation before execution adaptation: compare validation-selected seed weighting, rank aggregation, topN vote aggregation, and same-period multi-seed stability.",
+        "Do not exclude seed `11` by hindsight without a validation-side selection rule.",
+        "If seed aggregation remains weak, return to objective/loss refinement or split/regime diagnostics rather than trying to rescue the candidate with production execution changes."
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": [
