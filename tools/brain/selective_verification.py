@@ -24,7 +24,7 @@ BIG_ARTIFACT_PATHS = (
 ALWAYS_COMMANDS = (
     f"git diff -- {ACTIVE_ARTIFACT}",
     "git diff --check",
-    f"{PYTHON_EXECUTABLE} -m tools.brain.doc_guard check",
+    f"{PYTHON_EXECUTABLE} -m tools.brain.doc_guard check --scope changed",
     f"{PYTHON_EXECUTABLE} -m tools.brain.integrity_check --json",
 )
 
@@ -38,6 +38,7 @@ BRAIN_TOOL_CONTRACT_TESTS = (
     "tools/brain/tests/test_capsule.py",
     "tools/brain/tests/test_doc_guard.py",
     "tools/brain/tests/test_evidence_registry.py",
+    "tools/brain/tests/test_platform.py",
     "tools/brain/tests/test_rules.py",
     "tools/brain/tests/test_workflow_cli.py::BrainWorkflowCliTest::test_bootstrap_cli_outputs_valid_json_capsule",
     "tools/brain/tests/test_workflow_cli.py::BrainWorkflowCliTest::test_route_cli_outputs_structured_workspace_target",
@@ -51,6 +52,13 @@ BRAIN_TOOL_PROCESS_TESTS = (
 )
 
 BRAIN_TOOL_VERIFY_PLAN_TEST = "tools/brain/tests/test_workflow_cli.py::BrainWorkflowCliTest::test_verify_plan_cli_delegates_to_selective_verification"
+
+DAILY_TOOL_HEALTH_GUARD_TESTS = (
+    "tools/brain/tests/test_platform.py::BrainPlatformTest::test_health_default_skips_daily_strict_lanes",
+    "tools/brain/tests/test_platform.py::BrainPlatformTest::test_health_full_daily_runs_project_and_openmp_strict_lanes",
+    "tools/brain/tests/test_platform.py::BrainPlatformTest::test_health_standard_daily_doc_guard_stays_in_project_brain",
+    "tools/brain/tests/test_workflow_cli.py::BrainWorkflowCliTest::test_health_cli_defaults_to_compact_checks",
+)
 
 BRIDGE_MATRIX_TESTS = (
     "daily_research/path_policy/tests/test_v2_score_backtest_bridge.py",
@@ -155,6 +163,10 @@ WORKSPACE_AREAS = (
 
 def _pytest_command(paths: Iterable[str]) -> str:
     return f"{PYTHON_EXECUTABLE} -m pytest {' '.join(paths)} -q"
+
+
+def _py_compile_command(paths: Iterable[str]) -> str:
+    return f"{PYTHON_EXECUTABLE} -m py_compile {' '.join(_quote_command_arg(path) for path in paths)}"
 
 
 def _normalize_path(path: str) -> str:
@@ -263,12 +275,29 @@ def _is_brain_doc_path(path: str) -> bool:
     ) and normalized.endswith((".md", ".json", ".txt"))
 
 
+def _quote_command_arg(value: str) -> str:
+    if not value:
+        return '""'
+    if any(char.isspace() for char in value):
+        return '"' + value.replace('"', '\\"') + '"'
+    return value
+
+
+def _doc_guard_files_command(changed_paths: Iterable[str]) -> str | None:
+    doc_paths = [_normalize_path(path) for path in changed_paths if _is_brain_doc_path(path)]
+    if not doc_paths:
+        return None
+    files = " ".join(_quote_command_arg(path) for path in _unique(doc_paths))
+    return f"{PYTHON_EXECUTABLE} -m tools.brain.doc_guard check --files {files}"
+
+
 def _minimal_blocking_guards(changed_paths: list[str], *, active_artifact_blocked: bool) -> list[str]:
     if active_artifact_blocked or not changed_paths:
         return []
     commands = ["git diff --check"]
-    if any(_is_brain_doc_path(path) for path in changed_paths):
-        commands.append(f"{PYTHON_EXECUTABLE} -m tools.brain.doc_guard check")
+    doc_guard_command = _doc_guard_files_command(changed_paths)
+    if doc_guard_command:
+        commands.append(doc_guard_command)
     return commands
 
 
@@ -479,6 +508,16 @@ def build_verification_plan(*, paths: list[str] | None = None, base: str | None 
                 else:
                     manual_review_required = True
                     warnings.append(f"unmapped_python_change: {path} has no selective verification rule")
+            continue
+
+        if path.startswith("daily_research/tools/"):
+            risk_level = _risk_max(risk_level, "medium")
+            name = Path(path).name
+            _add_command(selected_commands, _py_compile_command([path]))
+            if name in {"project_consistency_check.py", "openmp_runtime_check.py"}:
+                _add_command(selected_commands, _pytest_command(DAILY_TOOL_HEALTH_GUARD_TESTS))
+            elif name in {"workspace_maintenance.py"}:
+                warnings.append(f"maintenance_tool_smoke_only: {path} is maintenance-only; run explicit maintenance review before destructive cleanup")
             continue
 
         if _is_docs_only_path(path):

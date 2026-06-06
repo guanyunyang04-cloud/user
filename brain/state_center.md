@@ -46,6 +46,6 @@
 - 如果 agent 或脚本默认落到旧通达信插件 `user` 目录，先纠偏到 `H:\quant_project`，再继续操作。
 
 ## 推荐下一步
-- 结构变更先跑 `brain_integrity_check.py --json`，再跑 `doc_guard.py check` 与 `project_consistency_check.py`。
+- 结构变更先跑 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`；普通 brain 文档小改用 `tools.brain.doc_guard check --files <paths>` 或 `--scope changed`，全量维护再跑裸 `doc_guard check`；`daily_research/tools/project_consistency_check.py --mode research` 是研究态轻量守卫，`--mode execution/full` 只在执行或完整维护时跑。
 - 新状态只写当前结论；过程复盘写到目标分脑 `episodic_memory.md`。
 - 需要旧证据时从分脑 `brain/references/` 或实验产物读取，不把旧结论自动提升为当前状态。

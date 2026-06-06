@@ -257,6 +257,28 @@ class LongTaskMonitorTest(unittest.TestCase):
         self.assertEqual(event["final_verification"], "pending")
         self.assertIn("checkpoint.pt", [item["name"] for item in event["artifact_summary"]])
 
+    def test_status_marks_large_artifact_scan_as_truncated(self) -> None:
+        with TemporaryDirectory() as raw_tmp:
+            run_root = Path(raw_tmp) / "traditional_quant_research/output/agent_runs/run_01"
+            artifact_dir = run_root / "artifacts"
+            run_root.mkdir(parents=True)
+            artifact_dir.mkdir()
+            progress = run_root / "progress.json"
+            progress.write_text(json.dumps({"current_step": 1, "total_steps": 2}), encoding="utf-8")
+            for index in range(520):
+                (artifact_dir / f"part_{index:03d}.txt").write_text("x", encoding="utf-8")
+
+            payload = build_status(
+                pid=999999,
+                project_id="traditional_quant_research",
+                run_id="run_01",
+                progress_path=progress,
+                artifact_dir=artifact_dir,
+                workspace_root=Path(raw_tmp),
+            )
+
+        self.assertTrue(payload["artifact_scan_truncated"])
+
     def test_cli_trace_poll_appends_review_trace_event(self) -> None:
         with TemporaryDirectory() as raw_tmp:
             root = Path(raw_tmp) / "traditional_quant_research/output/agent_runs/run_01"

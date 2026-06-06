@@ -41,10 +41,10 @@
 - 最后改具体中枢正文、skill 入口和守卫。
 
 ## 5. 守卫入口
-- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check`
+- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed`；裸 `doc_guard check` 只作为全量收尾/维护守卫。
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`
-- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow health --brain <brain_id|workspace> --json`
-- `daily_research/tools/project_consistency_check.py` 与 OpenMP strict 只属于 daily profile，不是 workspace 或 traditional 默认守卫。
+- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow health --brain <brain_id|workspace> --mode compact --json`；`--mode full` 只用于完整维护。
+- `daily_research/tools/project_consistency_check.py --mode research` 是 daily 研究态轻量守卫；`--mode execution/full` 与 OpenMP strict 只属于执行/完整维护，不是 workspace 或 traditional 默认守卫。
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py agent-meta-audit --cwd . --mode compact`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py brain-burden-audit --cwd . --mode compact`
 - Agent Meta Protocol 守卫确认 agent 是元能力执行者，brain 是持久化载体，tools 是传感器。
@@ -54,9 +54,9 @@
 - 项目验证从 `project_profile.verification_profile.always_commands` 读取；`selective_verification.py --paths <paths>` 必须按路径推断项目，不得默认注入 daily active guard。
 - 默认开发验证采用 changed-surface-only：先运行 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.selective_verification --paths <changed_paths> --json`，以 `blocking_commands` 作为本次必须通过的小验证包；未修改且未受影响区域由 `skipped_reason_by_area` 显式说明。
 - `always_commands` 保留为兼容和收尾守卫入口，不代表每次小改都要全量执行；`deferred_commands` / `deferred_long_commands` 只用于慢速、研究、维护或最终确认批次。
-- 普通 docs-only 只需要 `git diff --check`；brain 文档变更再加 `tools.brain.doc_guard check`。单模块 Python 变更只跑对应测试或 nodeid；shared helper、protocol、schema、config、active/execution 边界变更必须扩大测试半径或进入 manual review。
+- 普通 docs-only 只需要 `git diff --check`；brain 文档变更再加 `tools.brain.doc_guard check --files <paths>` 或 `--scope changed`。单模块 Python 变更只跑对应测试或 nodeid；shared helper、protocol、schema、config、active/execution 边界变更必须扩大测试半径或进入 manual review。
 - 测试编写保持最小 fixture、最小断言面、无真实网络、无真实长训练；单测只证明数据、label、loss、bridge、gate、guard 合约，不用单测证明模型收益强。慢测必须带 `slow` / `research` / `guard` / `external` 等 marker 和明确触发条件。
-- `tools.brain.workflow health` 聚合、`doc_guard check`、`integrity_check`、`audit-brain --scope all` 属于维护/收尾守卫；不得作为每次小改默认测试包。`daily_research/output/active_execution_strategy.json` 一旦有 diff 是 critical blocker，不进入普通测试推荐。
+- `tools.brain.workflow health --mode full`、裸 `doc_guard check`、`audit-brain --scope all` 属于维护/收尾守卫；不得作为每次小改默认测试包。`integrity_check` 可作为结构改动的轻量定位守卫。`daily_research/output/active_execution_strategy.json` 一旦有 diff 是 critical blocker，不进入普通测试推荐。
 - 默认代码改动采用 objective-first direct-change：先判断当前目标需要什么形态，再决定小改、重构、删除或重写；不为了保持旧结构、旧测试或旧入口而增加复杂度。
 - 若小补丁能干净完成目标，就小改；若小补丁会引入新分支、新 fallback、新兼容层、新配置开关或重复真源，优先收敛到单一路径并删除过时路径。
 - direct-change 的硬边界：不得静默改 active artifact、live/default/paper/broker 行为、promotion gate、PIT/no-leakage/OOS 证据边界、不可重建研究证据、secrets、外部服务状态或路由外并行 dirty work；这些仍按 project profile、manual review 和显式授权处理。

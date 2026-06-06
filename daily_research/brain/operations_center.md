@@ -23,7 +23,7 @@
 - evidence registry rebuild：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow evidence-index --rebuild --json`
 - evidence query：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow query --q <r_id|tag|dataset_id> --json`
 - selective verification plan：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow verify-plan --json`
-- brain guards：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check`；`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`
+- brain guards：日常 changed-surface 用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed`；全量维护才用裸 `doc_guard check`；结构定位用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`
 - 若 `brain_may_be_stale=true`，先读 explicit output tags 与 summary，再回答当前状态或下一步。
 
 ## Continuous Policy 运行口径

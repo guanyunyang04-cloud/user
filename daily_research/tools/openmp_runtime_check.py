@@ -44,34 +44,48 @@ class ImportCase:
         }
 
 
+def _search_roots(prefix: Path) -> list[Path]:
+    candidates = [
+        prefix / "Library" / "bin",
+        prefix / "Library" / "lib",
+        prefix / "DLLs",
+        prefix / "Lib" / "site-packages" / "torch" / "lib",
+    ]
+    return [path for path in candidates if path.exists()]
+
+
 def _find_dlls(prefix: Path) -> dict[str, list[dict[str, Any]]]:
     result: dict[str, list[dict[str, Any]]] = {}
+    roots = _search_roots(prefix)
     for pattern in OPENMP_PATTERNS:
         hits: list[dict[str, Any]] = []
-        for path in sorted(prefix.rglob(pattern)):
-            if any(marker in part for part in path.parts for marker in BACKUP_DIR_MARKERS):
-                continue
-            try:
-                stat = path.stat()
-            except OSError:
-                continue
-            hits.append(
-                {
-                    "path": str(path),
-                    "size": stat.st_size,
-                    "mtime": int(stat.st_mtime),
-                }
-            )
+        for root in roots:
+            for path in sorted(root.glob(pattern)):
+                if any(marker in part for part in path.parts for marker in BACKUP_DIR_MARKERS):
+                    continue
+                try:
+                    stat = path.stat()
+                except OSError:
+                    continue
+                hits.append(
+                    {
+                        "path": str(path),
+                        "size": stat.st_size,
+                        "mtime": int(stat.st_mtime),
+                    }
+                )
         result[pattern] = hits
     return result
 
 
 def _find_backup_dlls(prefix: Path) -> list[str]:
     backups: list[str] = []
+    roots = _search_roots(prefix)
     for pattern in OPENMP_PATTERNS:
-        for path in sorted(prefix.rglob(pattern)):
-            if any(marker in part for part in path.parts for marker in BACKUP_DIR_MARKERS):
-                backups.append(str(path))
+        for root in roots:
+            for path in sorted(root.glob(pattern)):
+                if any(marker in part for part in path.parts for marker in BACKUP_DIR_MARKERS):
+                    backups.append(str(path))
     return backups
 
 
@@ -125,14 +139,21 @@ def _python_prefix(python_executable: Path, timeout: int) -> Path:
     return Path(proc.stdout.strip()).resolve()
 
 
-def _build_report(python_executable: Path, timeout: int) -> dict[str, Any]:
+def _build_report(python_executable: Path, timeout: int, *, mode: str = "summary") -> dict[str, Any]:
+    normalized_mode = str(mode or "summary").strip().lower()
+    if normalized_mode not in {"summary", "strict"}:
+        normalized_mode = "summary"
     prefix = _python_prefix(python_executable, timeout=timeout)
     dlls = _find_dlls(prefix)
     backup_dlls = _find_backup_dlls(prefix)
-    import_cases = [
-        _run_import_case(name, modules, python_executable=python_executable, timeout=timeout)
-        for name, modules in DEFAULT_IMPORT_CASES.items()
-    ]
+    import_cases = (
+        [
+            _run_import_case(name, modules, python_executable=python_executable, timeout=timeout)
+            for name, modules in DEFAULT_IMPORT_CASES.items()
+        ]
+        if normalized_mode == "strict"
+        else []
+    )
     duplicate_intel_openmp = len(dlls.get("libiomp5md.dll", [])) > 1
     mixed_openmp_runtime_families = any(
         dlls.get(pattern) for pattern in ("vcomp140.dll", "libgomp*.dll")
@@ -140,10 +161,12 @@ def _build_report(python_executable: Path, timeout: int) -> dict[str, Any]:
     import_failures = [case for case in import_cases if not case.ok]
     workaround_set = os.environ.get("KMP_DUPLICATE_LIB_OK")
     return {
+        "mode": normalized_mode,
         "python_executable": str(python_executable),
         "sys_prefix": str(prefix),
         "conda_prefix": os.environ.get("CONDA_PREFIX"),
         "kmp_duplicate_lib_ok": workaround_set,
+        "search_roots": [str(path) for path in _search_roots(prefix)],
         "openmp_runtime_dlls": dlls,
         "openmp_runtime_backup_dlls": backup_dlls,
         "duplicate_intel_openmp_runtime": duplicate_intel_openmp,
@@ -160,6 +183,7 @@ def _build_report(python_executable: Path, timeout: int) -> dict[str, Any]:
 
 
 def _print_text(report: dict[str, Any]) -> None:
+    print(f"mode: {report['mode']}")
     print(f"python: {report['python_executable']}")
     print(f"sys_prefix: {report['sys_prefix']}")
     print(f"KMP_DUPLICATE_LIB_OK: {report['kmp_duplicate_lib_ok']}")
@@ -174,13 +198,16 @@ def _print_text(report: dict[str, Any]) -> None:
         print("ignored backup DLLs:")
         for path in report["openmp_runtime_backup_dlls"]:
             print(f"  - {path}")
-    print("import cases:")
-    for case in report["import_cases"]:
-        status = "ok" if case["ok"] else f"failed:{case['returncode']}"
-        print(f"  - {case['name']}: {status}")
-        if case["stderr"]:
-            first_line = case["stderr"].splitlines()[0]
-            print(f"    stderr: {first_line}")
+    if report["import_cases"]:
+        print("import cases:")
+        for case in report["import_cases"]:
+            status = "ok" if case["ok"] else f"failed:{case['returncode']}"
+            print(f"  - {case['name']}: {status}")
+            if case["stderr"]:
+                first_line = case["stderr"].splitlines()[0]
+                print(f"    stderr: {first_line}")
+    else:
+        print("import cases: skipped (use --mode strict)")
     print(f"strict_ok: {report['strict_ok']}")
     print(f"root_fix_required: {report['root_fix_required']}")
 
@@ -201,11 +228,18 @@ def main() -> int:
         action="store_true",
         help="Exit non-zero unless no duplicate runtime, no workaround, and import checks pass.",
     )
+    parser.add_argument(
+        "--mode",
+        choices=("summary", "strict"),
+        default="summary",
+        help="summary performs bounded DLL checks only; strict also runs heavy import checks.",
+    )
     parser.add_argument("--timeout", type=int, default=60, help="Per import-case timeout in seconds.")
     args = parser.parse_args()
 
     python_executable = args.python.resolve()
-    report = _build_report(python_executable=python_executable, timeout=args.timeout)
+    mode = "strict" if args.strict else args.mode
+    report = _build_report(python_executable=python_executable, timeout=args.timeout, mode=mode)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:

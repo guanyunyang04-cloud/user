@@ -397,20 +397,48 @@ class BrainPlatformTest(unittest.TestCase):
 
         started = time.perf_counter()
         with patch.object(brain_platform, "_run_check", side_effect=slow_ok):
-            payload = check_brain_health().to_dict()
+            payload = check_brain_health(mode="standard").to_dict()
         elapsed = time.perf_counter() - started
 
         self.assertEqual(payload["status"], "ok")
         self.assertLess(elapsed, 0.45)
+        self.assertEqual(payload["mode"], "standard")
         self.assertIn("elapsed_seconds", payload)
         for check in payload["checks"].values():
             self.assertIn("elapsed_seconds", check)
 
-    def test_health_openmp_lane_sanitizes_parent_workaround_env(self) -> None:
-        captured_envs: dict[str, dict[str, str] | None] = {}
+    def test_health_default_skips_daily_strict_lanes(self) -> None:
+        from tools.brain import platform as brain_platform
 
-        def ok_with_env(name: str, _command: list[str], *, env: dict[str, str] | None = None) -> dict:
+        captured: list[str] = []
+
+        def ok_with_command(name: str, command: list[str], *, env: dict[str, str] | None = None) -> dict:
+            captured.append(name)
+            return {
+                "name": name,
+                "returncode": 0,
+                "ok": True,
+                "stdout_tail": "ok",
+                "stderr_tail": "",
+                "elapsed_seconds": 0.001,
+            }
+
+        with patch.object(brain_platform, "_run_check", side_effect=ok_with_command):
+            payload = check_brain_health("daily_research").to_dict()
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["mode"], "compact")
+        self.assertEqual(captured, ["brain_integrity"])
+        self.assertNotIn("project_consistency", payload["checks"])
+        self.assertNotIn("openmp_strict", payload["checks"])
+
+    def test_health_full_daily_runs_project_and_openmp_strict_lanes(self) -> None:
+        captured_envs: dict[str, dict[str, str] | None] = {}
+        captured_commands: dict[str, list[str]] = {}
+
+        def ok_with_env(name: str, command: list[str], *, env: dict[str, str] | None = None) -> dict:
             captured_envs[name] = env
+            captured_commands[name] = command
             return {
                 "name": name,
                 "returncode": 0,
@@ -422,13 +450,46 @@ class BrainPlatformTest(unittest.TestCase):
 
         with patch.dict("os.environ", {"KMP_DUPLICATE_LIB_OK": "True"}):
             with patch.object(brain_platform, "_run_check", side_effect=ok_with_env):
-                payload = check_brain_health("daily_research").to_dict()
+                payload = check_brain_health("daily_research", mode="full").to_dict()
 
         self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["mode"], "full")
+        self.assertIn("project_consistency", payload["checks"])
+        self.assertIn("openmp_strict", payload["checks"])
+        self.assertIn("--mode", captured_commands["project_consistency"])
+        self.assertIn("full", captured_commands["project_consistency"])
+        self.assertIn("--mode", captured_commands["openmp_strict"])
+        self.assertIn("strict", captured_commands["openmp_strict"])
         openmp_env = captured_envs["openmp_strict"]
         self.assertIsNotNone(openmp_env)
         self.assertNotIn("KMP_DUPLICATE_LIB_OK", openmp_env or {})
         self.assertEqual((openmp_env or {})["PYTHONUTF8"], "1")
+
+    def test_health_standard_daily_doc_guard_stays_in_project_brain(self) -> None:
+        from tools.brain import platform as brain_platform
+
+        captured_commands: dict[str, list[str]] = {}
+
+        def ok_with_command(name: str, command: list[str], *, env: dict[str, str] | None = None) -> dict:
+            captured_commands[name] = command
+            return {
+                "name": name,
+                "returncode": 0,
+                "ok": True,
+                "stdout_tail": "",
+                "stderr_tail": "",
+                "elapsed_seconds": 0.001,
+            }
+
+        with patch.object(brain_platform, "_run_check", side_effect=ok_with_command):
+            payload = check_brain_health("daily_research", mode="standard").to_dict()
+
+        self.assertEqual(payload["status"], "ok")
+        doc_guard_command = captured_commands["doc_guard"]
+        self.assertIn("--files", doc_guard_command)
+        self.assertIn("daily_research/brain/brain_manifest.json", doc_guard_command)
+        self.assertNotIn("--scope", doc_guard_command)
+        self.assertFalse(any("traditional_quant_research" in part for part in doc_guard_command))
 
     def test_daily_research_facts_are_served_by_adapter(self) -> None:
         freshness = daily_research_adapter.resolve_artifact_freshness().to_dict()

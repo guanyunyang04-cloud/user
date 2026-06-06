@@ -35,9 +35,10 @@
   - `episodic_memory.md`
 
 ## 5. 守卫
-- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check`
+- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`
-- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/project_consistency_check.py`
+- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/project_consistency_check.py --mode research`
+- 执行端解冻、active artifact 或 live-facing 合同变更时才跑 `project_consistency_check.py --mode execution` 或 `--mode full`。
 
 ## 6. 执行端冻结治理
 - 2026-06-01 起，执行端状态为 `frozen_skeleton_only / awaiting_research_rebuild`。

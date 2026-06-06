@@ -52,7 +52,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scri
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py brain-burden-audit --cwd . --mode compact
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json
 ```
-Compact health is a fast takeover summary only; first hop stays `detect` + lite capsule. Run full health, audits, and project-profile guards only for maintenance, diagnosis, or completion verification. Surface proposed or approved agent-learning items when checked.
+Compact health is a fast takeover summary only; first hop stays `detect` + lite capsule. `tools.brain.workflow health` defaults to compact checks; use `--mode standard` for lightweight doc scope and `--mode full` or explicit include flags for project consistency / OpenMP strict lanes. Run full health, audits, and project-profile guards only for maintenance, diagnosis, or completion verification. Surface proposed or approved agent-learning items when checked.
 
 ## Proposal-Only Evolution
 Agent Meta Protocol learning is proposal-only. Low-risk observations may create `proposed` records; protocol, workflow, skill, guard, or behavior changes require explicit user approval before implementation.
@@ -65,7 +65,8 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scri
 For brain/tooling edits, run relevant tests plus:
 ```powershell
 git diff --check
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --files <changed-brain-docs>
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json
 ```
+Bare `doc_guard check` is the full/final maintenance guard; ordinary changed-surface brain docs use `--files` or `--scope changed`. `daily_research/tools/project_consistency_check.py` defaults to `--mode research`; execution/full modes are only for execution or complete maintenance.
 Write workspace decisions to `brain/`; routed project facts to the selected child brain; long evidence to `references/`.

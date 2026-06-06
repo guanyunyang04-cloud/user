@@ -55,7 +55,7 @@
 
 ## 3. 守卫
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
-- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check`
+- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed` for ordinary changed-surface checks; bare `doc_guard check` is full/final maintenance.
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`
 - 结构升级后必须保证：
   - manifest 可解析。

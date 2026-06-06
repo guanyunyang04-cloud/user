@@ -105,6 +105,8 @@ class BrainHealthReport:
     status: str
     checks: dict[str, dict[str, Any]]
     elapsed_seconds: float
+    mode: str = "compact"
+    brain: str = "workspace"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -820,28 +822,71 @@ def _run_check(name: str, command: list[str], *, env: dict[str, str] | None = No
     }
 
 
-def check_brain_health(brain: str | None = None) -> BrainHealthReport:
+def _project_brain_doc_guard_files(profile: dict[str, Any]) -> list[str]:
+    body_root = str(profile.get("body_root", "") or "").strip().replace("\\", "/")
+    if not body_root or body_root == ".":
+        return []
+    candidates = [
+        f"{body_root}/brain/identity_layer.md",
+        f"{body_root}/brain/state_center.md",
+        f"{body_root}/brain/knowledge_center.md",
+        f"{body_root}/brain/brain_architecture.md",
+        f"{body_root}/brain/operations_center.md",
+        f"{body_root}/brain/governance_layer.md",
+        f"{body_root}/brain/brain_manifest.json",
+    ]
+    return [path for path in candidates if (WORKSPACE_ROOT / path).exists()]
+
+
+def check_brain_health(
+    brain: str | None = None,
+    *,
+    mode: str = "compact",
+    include_doc_guard: bool = False,
+    include_project_consistency: bool = False,
+    include_openmp_strict: bool = False,
+) -> BrainHealthReport:
     started = time.perf_counter()
-    profile = load_project_profile(brain or "workspace")
+    normalized_mode = str(mode or "compact").strip().lower()
+    if normalized_mode not in {"compact", "standard", "full"}:
+        normalized_mode = "compact"
+    brain_id = brain or "workspace"
+    profile = load_project_profile(brain_id)
     guard_profile = profile.get("guard_profile", {}) if isinstance(profile.get("guard_profile"), dict) else {}
     check_commands = {
         "brain_integrity": {
             "command": [PYTHON_EXECUTABLE, "-m", "tools.brain.integrity_check", "--json"],
             "env": None,
         },
-        "doc_guard": {
-            "command": [PYTHON_EXECUTABLE, "-m", "tools.brain.doc_guard", "check"],
-            "env": None,
-        },
     }
-    if bool(guard_profile.get("project_consistency")):
-        check_commands["project_consistency"] = {
-            "command": [PYTHON_EXECUTABLE, "daily_research/tools/project_consistency_check.py"],
+    should_run_doc_guard = normalized_mode in {"standard", "full"} or include_doc_guard
+    if should_run_doc_guard:
+        doc_guard_command = [PYTHON_EXECUTABLE, "-m", "tools.brain.doc_guard", "check"]
+        if normalized_mode != "full":
+            project_files = _project_brain_doc_guard_files(profile)
+            if project_files:
+                doc_guard_command.extend(["--files", *project_files])
+            else:
+                doc_guard_command.extend(["--scope", "changed"])
+        check_commands["doc_guard"] = {
+            "command": doc_guard_command,
             "env": None,
         }
-    if bool(guard_profile.get("openmp_strict")):
+    should_run_project_consistency = bool(guard_profile.get("project_consistency")) and (
+        normalized_mode == "full" or include_project_consistency
+    )
+    if should_run_project_consistency:
+        project_mode = "full" if normalized_mode == "full" else "research"
+        check_commands["project_consistency"] = {
+            "command": [PYTHON_EXECUTABLE, "daily_research/tools/project_consistency_check.py", "--mode", project_mode],
+            "env": None,
+        }
+    should_run_openmp_strict = bool(guard_profile.get("openmp_strict")) and (
+        normalized_mode == "full" or include_openmp_strict
+    )
+    if should_run_openmp_strict:
         check_commands["openmp_strict"] = {
-            "command": [PYTHON_EXECUTABLE, "daily_research/tools/openmp_runtime_check.py", "--strict"],
+            "command": [PYTHON_EXECUTABLE, "daily_research/tools/openmp_runtime_check.py", "--mode", "strict", "--strict"],
             "env": _openmp_strict_env(),
         }
     checks: dict[str, dict[str, Any]] = {}
@@ -865,7 +910,13 @@ def check_brain_health(brain: str | None = None) -> BrainHealthReport:
                 }
     checks = {name: checks[name] for name in check_commands}
     status = "ok" if all(item["ok"] for item in checks.values()) else "failed"
-    return BrainHealthReport(status=status, checks=checks, elapsed_seconds=round(time.perf_counter() - started, 3))
+    return BrainHealthReport(
+        status=status,
+        checks=checks,
+        elapsed_seconds=round(time.perf_counter() - started, 3),
+        mode=normalized_mode,
+        brain=brain_id,
+    )
 
 
 def _continuous_policy_evidence_gaps(freshness: ArtifactFreshnessReport) -> list[str]:

@@ -35,7 +35,10 @@ class SelectiveVerificationTest(unittest.TestCase):
         self.assertEqual(payload["selected_commands"], [])
         self.assertEqual(
             payload["blocking_commands"],
-            ["git diff --check", f"{PYTHON} -m tools.brain.doc_guard check"],
+            [
+                "git diff --check",
+                f"{PYTHON} -m tools.brain.doc_guard check --files daily_research/brain/operations_center.md",
+            ],
         )
         self.assertEqual(payload["deferred_commands"], [])
         self.assertEqual(payload["skipped_reason_by_area"]["daily_research"], "docs_only_minimal_guards")
@@ -294,6 +297,26 @@ class SelectiveVerificationTest(unittest.TestCase):
 
         self.assertEqual(payload["project_id"], "daily_research")
         self.assertIn("daily_research/output/active_execution_strategy.json", encoded)
+
+    def test_daily_tool_change_uses_py_compile_smoke(self) -> None:
+        payload = build_verification_plan(paths=["daily_research/tools/run_policy_v4_family_pipeline.py"])
+
+        self.assertEqual(payload["project_id"], "daily_research")
+        self.assertEqual(
+            payload["selected_commands"],
+            [f"{PYTHON} -m py_compile daily_research/tools/run_policy_v4_family_pipeline.py"],
+        )
+        self.assertFalse(payload["manual_review_required"])
+        self.assertEqual(payload["skipped_reason_by_area"]["daily_research"], "changed_surface_selected")
+
+    def test_daily_guard_tool_change_selects_health_contract_tests(self) -> None:
+        payload = build_verification_plan(paths=["daily_research/tools/openmp_runtime_check.py"])
+        joined = "\n".join(payload["selected_commands"])
+
+        self.assertIn(f"{PYTHON} -m py_compile daily_research/tools/openmp_runtime_check.py", joined)
+        self.assertIn("test_health_default_skips_daily_strict_lanes", joined)
+        self.assertIn("test_health_full_daily_runs_project_and_openmp_strict_lanes", joined)
+        self.assertFalse(payload["manual_review_required"])
 
 
 if __name__ == "__main__":

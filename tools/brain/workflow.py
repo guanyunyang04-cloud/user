@@ -59,6 +59,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     health = sub.add_parser("health", help="Run read-only brain and environment health checks.")
     health.add_argument("--brain", default="workspace")
+    health.add_argument("--mode", default="compact", choices=("compact", "standard", "full"))
+    health.add_argument("--include-doc-guard", action="store_true")
+    health.add_argument("--include-project-consistency", action="store_true")
+    health.add_argument("--include-openmp-strict", action="store_true")
     health.add_argument("--json", action="store_true")
     health.add_argument("--write-output", action="store_true")
 
@@ -138,7 +142,13 @@ def build_payload(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
         raise ValueError("handoff is removed; use bootstrap --brain <brain_id|workspace>")
     if args.command == "health":
         brain = str(getattr(args, "brain", "") or "workspace")
-        return "health", check_brain_health(None if brain == "workspace" else brain).to_dict()
+        return "health", check_brain_health(
+            None if brain == "workspace" else brain,
+            mode=str(getattr(args, "mode", "") or "compact"),
+            include_doc_guard=bool(getattr(args, "include_doc_guard", False)),
+            include_project_consistency=bool(getattr(args, "include_project_consistency", False)),
+            include_openmp_strict=bool(getattr(args, "include_openmp_strict", False)),
+        ).to_dict()
     if args.command in {"status", "preflight"}:
         child_brain = resolve_workflow_child_brain(args.workflow)
         payload = build_workflow_state(

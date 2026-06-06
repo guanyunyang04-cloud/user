@@ -142,7 +142,7 @@
     "verification_profile": {
       "always_commands": [
         "git diff --check",
-        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check",
+        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed",
         "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json"
       ],
       "default_test_commands": [],

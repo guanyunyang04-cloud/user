@@ -14,6 +14,7 @@ from tools.brain.project_profiles import load_project_profile
 
 DEFAULT_TIMEOUT_SECONDS = 7200
 DEFAULT_STALE_AFTER_SECONDS = 3600
+ARTIFACT_SCAN_FILE_LIMIT = 512
 DEFAULT_WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_LEASE_ROOT = "brain/output/resource_leases"
 
@@ -83,20 +84,38 @@ def _tail(path: Path | None, line_count: int = 12) -> list[str]:
     return lines[-line_count:]
 
 
-def _artifact_mtime(path: Path | None) -> str:
+def _artifact_files(path: Path | None, *, limit: int = ARTIFACT_SCAN_FILE_LIMIT) -> tuple[list[Path], bool]:
     if path is None or not path.exists():
-        return ""
-    candidates = [item for item in path.rglob("*") if item.is_file()] if path.is_dir() else [path]
+        return [], False
+    if path.is_file():
+        return [path], False
+    candidates: list[Path] = []
+    truncated = False
+    for item in path.rglob("*"):
+        if not item.is_file():
+            continue
+        candidates.append(item)
+        if len(candidates) >= max(1, int(limit)):
+            truncated = True
+            break
+    return candidates, truncated
+
+
+def _artifact_mtime(path: Path | None) -> str:
+    candidates, _truncated = _artifact_files(path)
     if not candidates:
         return ""
     latest = max(item.stat().st_mtime for item in candidates)
     return datetime.fromtimestamp(latest, tz=timezone.utc).isoformat()
 
 
+def _artifact_scan_truncated(path: Path | None) -> bool:
+    _candidates, truncated = _artifact_files(path)
+    return truncated
+
+
 def _artifact_summary(path: Path | None, *, limit: int = 8) -> list[dict[str, Any]]:
-    if path is None or not path.exists():
-        return []
-    candidates = [item for item in path.rglob("*") if item.is_file()] if path.is_dir() else [path]
+    candidates, _truncated = _artifact_files(path)
     candidates.sort(key=lambda item: item.stat().st_mtime, reverse=True)
     out: list[dict[str, Any]] = []
     for item in candidates[:limit]:
@@ -549,6 +568,7 @@ def build_status(
             "last_log_lines": [],
             "last_error_lines": [],
             "artifact_mtime": "",
+            "artifact_scan_truncated": False,
             "updated_at": "",
             "decision": str(namespace.get("reason") or "project_namespace_violation"),
         }
@@ -609,6 +629,7 @@ def build_status(
         "last_log_lines": _tail(stdout_file),
         "last_error_lines": _tail(stderr_file),
         "artifact_mtime": _artifact_mtime(artifact_path),
+        "artifact_scan_truncated": _artifact_scan_truncated(artifact_path),
         "updated_at": updated.isoformat() if updated is not None else "",
         "decision": decision,
     }
@@ -676,6 +697,7 @@ def build_trace_event(
         "stderr_path": str(stderr_file or ""),
         "artifact_dir": str(artifact_path or ""),
         "artifact_mtime": str(status.get("artifact_mtime") or ""),
+        "artifact_scan_truncated": bool(status.get("artifact_scan_truncated")),
         "artifact_summary": _artifact_summary(artifact_path),
         "elapsed_seconds": status.get("elapsed_seconds"),
         "estimated_remaining_seconds": status.get("estimated_remaining_seconds"),

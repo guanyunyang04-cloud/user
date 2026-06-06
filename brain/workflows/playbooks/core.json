@@ -19,15 +19,15 @@
       "description": "Maintain compact workspace brain documents, references, registries, and guards without changing project runtime behavior.",
       "preflight": ["brain_integrity", "doc_guard", "project_profile_guard"],
       "checklist": ["inspect_current_brain_docs", "keep_workspace_centers_compact", "route_project_facts_to_child_brains", "run_guards"],
-      "allowed_commands": ["C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow health --brain <brain_id|workspace> --json"],
+      "allowed_commands": ["C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow health --brain <brain_id|workspace> --mode standard --json"],
       "capability_hints": ["edit compact brain docs, workflow metadata, guards, and canonical workspace skill with focused tests", "sync installed workspace-brain skill after canonical skill changes"],
       "risk_signals": ["active_artifact_dirty", "runtime_state_confused_with_brain_truth", "stale_or_missing_global_skill", "project_fact_should_route_to_child_brain"],
-      "verification_hints": ["run doc_guard and integrity_check after brain metadata edits", "run selected project health/profile commands only when the task is project-scoped", "run skill_install --install then --check after canonical skill edits"],
+      "verification_hints": ["run doc_guard --files or --scope changed after ordinary brain metadata edits; reserve bare doc_guard check for final/full maintenance", "run selected project health/profile commands only when the task is project-scoped", "run skill_install --install then --check after canonical skill edits"],
       "artifacts": ["brain/", "brain/references/"],
       "writeback_routes": {"workspace_state": "brain/state_center.md", "workspace_knowledge": "brain/knowledge_center.md", "workspace_operations": "brain/operations_center.md"},
       "stop_conditions": [],
       "completion": ["doc_guard_ok", "brain_integrity_ok", "active_artifact_unchanged"],
-      "validation_commands": ["C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json"]
+      "validation_commands": ["git diff --check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json"]
     },
     "brain_system_audit": {
       "description": "Audit all workspace brain roots, routing, workflow registry state, language policy, and project profile guard status.",
@@ -69,7 +69,7 @@
       "writeback_routes": {"workspace_state": "brain/state_center.md", "workspace_operations": "brain/operations_center.md", "daily_research_state": "daily_research/brain/state_center.md", "daily_research_references": "daily_research/brain/references/"},
       "stop_conditions": ["writeback_source_unverified", "route_unclear"],
       "completion": ["routes_explicit", "archive_boundary_explicit", "doc_guard_ok_after_write"],
-      "validation_commands": ["C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check"]
+      "validation_commands": ["C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed"]
     },
     "brain_writeback_verified": {
       "description": "Write verified mainline, evidence, experiment, or contract changes back into brain references and indexes.",
@@ -83,7 +83,7 @@
       "stop_conditions": ["source_evidence_unverified", "writeback_route_unclear", "doc_or_brain_guard_fails"],
       "writeback_routes": {"workspace_references": "brain/references/", "daily_research_references": "daily_research/brain/references/"},
       "completion": ["reference_docs_updated", "evidence_registry_rebuilt", "doc_guard_and_brain_integrity_ok"],
-      "validation_commands": ["git diff --check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json", "profile:verification_profile.always_commands"]
+      "validation_commands": ["git diff --check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json", "profile:verification_profile.always_commands"]
     }
   }
 }

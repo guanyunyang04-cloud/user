@@ -23,6 +23,12 @@ class CheckResult:
     detail: str
 
 
+@dataclass(frozen=True)
+class BoundaryResult:
+    code: str
+    detail: str
+
+
 def _read_text(relative_path: str) -> str:
     return (WORKSPACE_ROOT / relative_path).read_text(encoding="utf-8")
 
@@ -1086,31 +1092,92 @@ def _check_no_stale_brain_phrases(failures: list[CheckResult]) -> None:
             )
 
 
-def run_checks() -> list[CheckResult]:
+RESEARCH_CHECKS = (
+    _check_train_entrypoints,
+    _check_config_dataclass_defaults,
+    _check_aux_defaults,
+    _check_environment_source_of_truth,
+    _check_no_stale_brain_phrases,
+)
+
+EXECUTION_CHECKS = (
+    _check_execution_profile_defaults,
+    _check_execution_semantics,
+    _check_no_hardcoded_operational_roots,
+    _check_execution_pipeline_consistency,
+    _check_project_python_runtime_contract,
+    _check_execution_application_contract,
+)
+
+FULL_CHECKS = (
+    _check_train_entrypoints,
+    _check_config_dataclass_defaults,
+    _check_execution_profile_defaults,
+    _check_aux_defaults,
+    _check_execution_semantics,
+    _check_no_hardcoded_operational_roots,
+    _check_execution_pipeline_consistency,
+    _check_environment_source_of_truth,
+    _check_project_python_runtime_contract,
+    _check_execution_application_contract,
+    _check_continuous_policy_training_contract,
+    _check_memory_sync,
+    _check_no_stale_brain_phrases,
+)
+
+
+def _checks_for_mode(mode: str) -> tuple:
+    normalized = str(mode or "research").strip().lower()
+    if normalized == "full":
+        return FULL_CHECKS
+    if normalized == "execution":
+        return EXECUTION_CHECKS
+    return RESEARCH_CHECKS
+
+
+def collect_boundaries(mode: str) -> list[BoundaryResult]:
+    normalized = str(mode or "research").strip().lower()
+    boundaries: list[BoundaryResult] = []
+    active_manifest = WORKSPACE_ROOT / "daily_research/output/active_execution_strategy.json"
+    if normalized == "research" and not active_manifest.exists():
+        boundaries.append(
+            BoundaryResult(
+                code="active_artifact_unavailable_in_research_mode",
+                detail=(
+                    "daily_research/output/active_execution_strategy.json is absent under the current "
+                    "execution-freeze / payload-loss boundary. Research-mode consistency does not reconstruct "
+                    "or validate this production artifact; use --mode execution or --mode full before execution work."
+                ),
+            )
+        )
+    return boundaries
+
+
+def run_checks(mode: str = "research") -> list[CheckResult]:
     failures: list[CheckResult] = []
-    _check_train_entrypoints(failures)
-    _check_config_dataclass_defaults(failures)
-    _check_execution_profile_defaults(failures)
-    _check_aux_defaults(failures)
-    _check_execution_semantics(failures)
-    _check_no_hardcoded_operational_roots(failures)
-    _check_execution_pipeline_consistency(failures)
-    _check_environment_source_of_truth(failures)
-    _check_project_python_runtime_contract(failures)
-    _check_execution_application_contract(failures)
-    _check_continuous_policy_training_contract(failures)
-    _check_memory_sync(failures)
-    _check_no_stale_brain_phrases(failures)
+    for check in _checks_for_mode(mode):
+        check(failures)
     return failures
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Check project-wide consistency rules that must not regress.")
-    parser.parse_args()
-    failures = run_checks()
+    parser.add_argument(
+        "--mode",
+        choices=("research", "execution", "full"),
+        default="research",
+        help="research is the fast default; execution/full validate frozen production and live-facing contracts.",
+    )
+    parser.add_argument("--json", action="store_true", help="Retained for callers; output is always JSON.")
+    args = parser.parse_args()
+    failures = run_checks(mode=args.mode)
+    boundaries = collect_boundaries(mode=args.mode)
     payload = {
+        "mode": args.mode,
         "status": "ok" if not failures else "failed",
         "failure_count": len(failures),
+        "boundary_count": len(boundaries),
+        "boundaries": [boundary.__dict__ for boundary in boundaries],
         "failures": [failure.__dict__ for failure in failures],
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))

@@ -55,7 +55,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule -
 真实运行时优先使用显式 `yolos` Python，例如：
 
 ```powershell
-C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research\tools\project_consistency_check.py
+C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research\tools\project_consistency_check.py --mode research
 ```
 
 ## 验证
@@ -65,9 +65,11 @@ C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research\tools\proj
 ```powershell
 python -m compileall -q daily_research
 C:\Users\ASUS\miniconda3\envs\yolos\python.exe -m tools.brain.integrity_check --json
-C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research\tools\project_consistency_check.py
-C:\Users\ASUS\miniconda3\envs\yolos\python.exe -m tools.brain.doc_guard check
+C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research\tools\project_consistency_check.py --mode research
+C:\Users\ASUS\miniconda3\envs\yolos\python.exe -m tools.brain.doc_guard check --scope changed
 ```
+
+执行端解冻、active artifact 或 live-facing 合同变更时，再显式运行 `project_consistency_check.py --mode execution` 或 `--mode full` 与裸 `doc_guard check`。
 
 ## 治理
 

@@ -83,12 +83,12 @@ def _default_commands(project_id: str, body_root: str) -> list[str]:
         return [
             f"git diff -- {DAILY_ACTIVE_ARTIFACT}",
             "git diff --check",
-            f"{PYTHON_EXECUTABLE} -m tools.brain.doc_guard check",
+            f"{PYTHON_EXECUTABLE} -m tools.brain.doc_guard check --scope changed",
             f"{PYTHON_EXECUTABLE} -m tools.brain.integrity_check --json",
         ]
     return [
         "git diff --check",
-        f"{PYTHON_EXECUTABLE} -m tools.brain.doc_guard check",
+        f"{PYTHON_EXECUTABLE} -m tools.brain.doc_guard check --scope changed",
         f"{PYTHON_EXECUTABLE} -m tools.brain.integrity_check --json",
     ]
 
@@ -178,7 +178,7 @@ def load_project_profile(project_id: str | None) -> dict[str, Any]:
             "verification_profile": {
                 "always_commands": [
                     "git diff --check",
-                    f"{PYTHON_EXECUTABLE} -m tools.brain.doc_guard check",
+                    f"{PYTHON_EXECUTABLE} -m tools.brain.doc_guard check --scope changed",
                     f"{PYTHON_EXECUTABLE} -m tools.brain.integrity_check --json",
                 ],
                 "default_test_commands": [
