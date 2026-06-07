@@ -26,8 +26,14 @@ Capsule/bootstrap exposes the selected `project_profile`; use it for every task 
 - External project dirty/output/process paths may be reported as status summaries; do not inspect their contents, reuse them, or treat them as task evidence without explicit scope expansion or lease.
 - Treat other project dirty paths as external parallel work unless the user explicitly expands scope.
 - After verified project work, commit with `tools.brain.project_commit` using the selected project id or `workspace-brain`; external dirty paths are reported as `ignored_external_paths`, not staged.
-- Short commands run from the selected project scope. Long tasks use `tools.brain.agent_run` paths/register/launch/status and stay under `<project>/output/agent_runs/<run_id>/`; `long_task_monitor` requires explicit project/run identity, and cross-project process or resource reads require an explicit lease.
+- Short synchronous commands run from the selected project scope. Polling or asynchronous tasks use the selected project namespace and the best available observable handle: PID, job/run id, logs, progress, artifact mtime, port/API status, or resource state. Use `tools.brain.agent_run` when a process must outlive the immediate shell wait or needs registered PID/log/progress; cross-project process or resource reads require an explicit lease.
 - This is an operating contract: commit and process helpers enforce their slices; ordinary shell reads/writes require the agent to honor the selected project namespace.
+
+## Adaptive Polling
+Polling cadence is an agent judgment, not a fixed sleep/window rule.
+- Shorten intervals during startup, failure triage, or dense signal changes; lengthen them for stable slow progress, expensive checks, or external rate limits.
+- Treat timeout or wait-window exhaustion as "observation window ended", not failed evidence; inspect status, logs, progress, artifacts, and resource signals before deciding.
+- Continue when signals still advance and there is no clear error, unsafe resource state, failed artifact, or user stop; stop, downgrade, or ask when failure evidence is concrete.
 
 ## Personal Researcher Direct Change
 Internal research code, brain tooling, and project scripts default to objective-first direct rewrite when that closes the current goal more simply.

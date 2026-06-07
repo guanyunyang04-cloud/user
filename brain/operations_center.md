@@ -83,15 +83,14 @@
 - 工作区级项目特例、环境与守卫入口写回 `brain/operations_center.md`。
 - 项目事实、实验状态、rXX 证据和项目命令写回被路由选中的分脑。
 
-## 7. 长时任务运行纪律
-- 长任务继承项目任务命名空间纪律；它不是唯一需要隔离的任务，只是需要额外 PID、日志、progress、summary 和资源租约。
-- 项目长任务必须通过 `tools.brain.agent_run paths/register/launch/status --project-id <project> --run-id <run>` 建立或登记，PID、stdout/stderr、progress、summary、run tag 和产物路径写入该项目 `process_namespace`。
-- `long_task_monitor status/wait-once/trace-poll` 必须显式传 `--project-id` 与 `--run-id`；匿名 PID/日志监控直接阻塞，避免误读或误等其它项目进程。
-- 已由外部命令启动的进程必须先用 `agent_run register` 绑定到当前项目 run；新启动的长任务优先用 `agent_run launch`，不再手工拼写跨项目日志路径。
-- 资源租约写入 `brain/output/resource_leases/`；GPU、端口、数据 provider 或跨项目进程读取必须先声明 active lease，`--allow-cross-project` 只有带有效 `--lease-id` 才放行。
-- 轮询模板：启动后先短查 PID、日志和 GPU；一旦确认 GPU 进程已正式工作，默认使用前台 `Wait-Process -Id <pid> -Timeout 7200` 轮询，除非再次出现系统崩溃或宿主不可用。
-- `7200` 秒窗口结束后，先检查 PID、exit code、日志、progress、summary / checkpoint / artifact 时间戳；若进程仍在推进且没有明确代码错误、资源危险或用户停止指令，继续下一轮 `Wait-Process -Id <pid> -Timeout 7200`，不得杀进程或把窗口耗尽写成任务失败。
-- 每轮状态必须计算已用时间和预计剩余时间；状态来源优先使用 progress、PID、日志尾部、GPU/内存与最新产物时间戳。
+## 7. 轮询任务运行纪律
+- 任何需要重复观察、等待外部状态或跨多轮完成的任务都继承项目任务命名空间纪律；“长任务”只是其中一种，不再作为单独治理类别。
+- 同步短命令可以直接等待结果；一旦任务需要后台进程、外部 job、服务端口、下载 / 回填、训练 / 评估、浏览器 / 部署状态或跨回合观察，就使用当前项目内最可靠的可观察 handle：PID、job id、run id、stdout/stderr、progress、summary、artifact mtime、端口 / API status 或资源状态。
+- 需要跨回合保留 PID、日志、progress 或 summary 时，优先用 `tools.brain.agent_run paths/register/launch/status --project-id <project> --run-id <run>` 绑定到当前项目 `process_namespace`；已有外部进程可登记，不要求为所有等待任务强行套同一 launcher。
+- 轮询间隔由 agent 按信号密度、阶段、成本和风险自适应调整：启动期、故障排查或快速变化时缩短；稳定慢进展、昂贵检查或外部限流时拉长；不得用固定 sleep、固定窗口或历史专用模板替代判断。
+- 每轮状态优先报告与本任务有关的最强信号；elapsed / ETA 只在有意义时给出，不能为了形式报告而制造不可靠估计。
+- 等待窗口耗尽不是失败；先检查 exit/status、日志、progress、summary、artifact、端口 / API 或资源信号。仍在推进且无明确错误、资源危险、失败产物或用户停止时继续自适应轮询；有明确失败或不安全状态时及时停止、降级或请求决策。
+- 跨项目进程、日志、端口、GPU、数据 provider 或其它共享资源读取仍需 active lease；没有 lease 时只报告外部存在，不下钻、不等待、不管理。
 
 ## 8. 工作区迁移纪律
 - 当前唯一工作区根：`H:\quant_project`。
