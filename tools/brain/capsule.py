@@ -225,18 +225,29 @@ def _dedupe_text(items: list[str]) -> list[str]:
     return out
 
 
-def _task_has_long_task_signal(task: str) -> bool:
+def _task_has_polling_signal(task: str) -> bool:
     lower = str(task or "").lower()
     signals = (
+        "轮询",
+        "异步",
+        "后台",
+        "等待",
+        "观察窗口",
         "长训练",
         "长任务",
         "训练轮询",
         "启动训练",
+        "poll",
+        "polling",
+        "async",
+        "background",
+        "wait",
         "long training",
         "long-running",
         "long running",
         "long task",
         "training",
+        "job",
         "wait-process",
         "eta",
         "pid",
@@ -317,12 +328,14 @@ def build_task_capsule(
     capability_hints = list(workflow_guide.get("capability_hints", []) or [])
     risk_signals = list(workflow_guide.get("risk_signals", []) or [])
     verification_hints = list(workflow_guide.get("verification_hints", []) or [])
-    if _task_has_long_task_signal(task):
+    if _task_has_polling_signal(task):
         capability_hints.append(
-            f"agent_run: use {PYTHON_EXECUTABLE} -m tools.brain.agent_run paths/register/launch/status with --project-id and --run-id so PID/log/progress stay in the selected project namespace; long_task_monitor status/wait-once also requires project/run identity and an explicit lease for cross-project reads"
+            f"polling/async task: use the selected project namespace and the best observable handle (PID, job/run id, logs, progress, artifacts, port/API status, or resource state); use {PYTHON_EXECUTABLE} -m tools.brain.agent_run paths/register/launch/status only when the process must outlive the immediate shell wait or needs registered PID/log/progress; cross-project reads require an explicit lease"
         )
-        risk_signals.append("long_task_without_pid_log_progress_or_eta")
-        verification_hints.append("for long jobs, report project_id, run_id, PID status, elapsed time, progress, ETA, log tail, artifact mtime, and next decision after each wait window")
+        risk_signals.append("polling_task_without_observable_handle")
+        verification_hints.append(
+            "for polling/async work, report the strongest relevant status signal and next decision; timeout or observation-window exhaustion is not failed evidence by itself"
+        )
     rules = (
         run_brain_rules(has_explicit_run_tag=bool(run_tag))
         if bool(guard_profile.get("brain_rules"))

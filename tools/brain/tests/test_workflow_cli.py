@@ -316,7 +316,14 @@ class BrainWorkflowCliTest(unittest.TestCase):
 
     def test_workflow_guide_cli_exposes_capabilities_without_training_blocks(self) -> None:
         payload = run_cli("workflow-guide", "--workflow", "brain_maintenance", "--json")
-        encoded = json.dumps(payload, ensure_ascii=False)
+        encoded = json.dumps(
+            {
+                "capability_hints": payload["capability_hints"],
+                "risk_signals": payload["risk_signals"],
+                "verification_hints": payload["verification_hints"],
+            },
+            ensure_ascii=False,
+        )
 
         self.assertEqual(payload["workflow_id"], "brain_maintenance")
         self.assertIn("capability_hints", payload)
@@ -477,7 +484,14 @@ class BrainWorkflowCliTest(unittest.TestCase):
             "mutate",
             "--json",
         )
-        encoded = json.dumps(payload, ensure_ascii=False)
+        encoded = json.dumps(
+            {
+                "capability_hints": payload["capability_hints"],
+                "risk_signals": payload["risk_signals"],
+                "verification_hints": payload["verification_hints"],
+            },
+            ensure_ascii=False,
+        )
 
         self.assertEqual(payload["schema_version"], 4)
         self.assertEqual(payload["workflow"], "brain_maintenance")
@@ -488,10 +502,11 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertIn("capability_hints", payload)
         self.assertIn("risk_signals", payload)
         self.assertIn("verification_hints", payload)
-        self.assertIn("long_task_monitor", encoded)
+        self.assertIn("polling/async task", encoded)
+        self.assertNotIn("long_task_monitor", encoded)
         self.assertNotIn("training", payload["preflight_blockers"])
 
-    def test_capsule_long_training_plan_stays_handoff_with_monitor_capability(self) -> None:
+    def test_capsule_polling_training_plan_stays_handoff_with_observable_capability(self) -> None:
         payload = run_cli(
             "capsule",
             "--task",
@@ -502,10 +517,19 @@ class BrainWorkflowCliTest(unittest.TestCase):
             "mutate",
             "--json",
         )
-        encoded = json.dumps(payload, ensure_ascii=False)
+        encoded = json.dumps(
+            {
+                "capability_hints": payload["capability_hints"],
+                "risk_signals": payload["risk_signals"],
+                "verification_hints": payload["verification_hints"],
+            },
+            ensure_ascii=False,
+        )
 
         self.assertEqual(payload["workflow"], "brain_handoff")
-        self.assertIn("long_task_monitor", encoded)
+        self.assertIn("polling/async task", encoded)
+        self.assertIn("best observable handle", encoded)
+        self.assertNotIn("long_task_monitor", encoded)
         self.assertIn("capability_hints", payload)
 
     def test_capsule_auto_workflow_keeps_mutate_plan_title_in_handoff(self) -> None:

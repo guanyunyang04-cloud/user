@@ -24,7 +24,7 @@
 - formal、recent、live、promotion 四层必须分开且始终能对齐到真源。
 - strongest-model 的 `formal winner / recent winner / promotable winner` 必须可明确区分。
 - learned-control 的 `fresh formal / constrained formal / recent` 也必须分层表述。
-- 任何正式实验都必须支持可追溯证据、前台执行、项目解释器一致性，并明确声明自己属于 `epoch formal candidate` 还是 `non-epoch shadow prototype`。
+- 任何正式实验都必须支持可追溯证据、受监管执行、可观察轮询、项目解释器一致性，并明确声明自己属于 `epoch formal candidate` 还是 `non-epoch shadow prototype`。
 - 任意新 agent 在不通读整份 `episodic_memory.md` 的前提下，也能完成接管。
 
 ## 4. 当前硬约束
@@ -34,7 +34,7 @@
 - `continuous_policy prototype_gbdt_v1` 明确属于 `non-epoch shadow prototype`：只允许 shadow / teacher / ablation，不计入 formal 完整判决，不得直接 promotion。
 - `continuous_policy formal_torch_seq_v3` 是 stronger temporal sequence branch：只在 `v2` 仍受 `hold / reduce / cash` 行为瓶颈约束时进入正式主计划，但一旦启用，仍必须遵守 `GPU only + >=32 epoch + strict resume`。
 - `continuous_policy formal_torch_hier_v4` 是 market / portfolio / cross-section interaction 的分层时序分支：一旦启用，同样必须遵守 `GPU only + >=32 epoch + strict resume`，并先以 `shadow_only` 方式验证。
-- 长实验只允许前台执行。
+- 长实验必须受监管、可观察、可恢复；是否前台等待、后台驻留或分轮轮询由 agent 根据任务阶段、资源风险和可观察信号决定。
 - 所有 `epoch formal candidate` 都必须支持同一 `experiment-tag / run_dir` 的 `strict resume`。
 - 默认终端超时预算按 `10` 小时处理。
 - 默认追求最高效、最合理，不追求最小改动。

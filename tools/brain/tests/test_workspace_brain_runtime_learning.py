@@ -287,7 +287,7 @@ class WorkspaceBrainRuntimeLearningTest(unittest.TestCase):
 
         self.assertTrue(payload["learning_candidates"])
         targets = {candidate["target_layer"] for candidate in payload["learning_candidates"]}
-        self.assertTrue({"execution_completion_gate", "long_task_execution_closure"}.intersection(targets))
+        self.assertIn("execution_completion_gate", targets)
 
     def test_brain_runtime_review_outputs_meta_question_candidates(self) -> None:
         trace_path = ROOT / "daily_research/output/test_trace_meta_question.json"

@@ -24,8 +24,12 @@ TRACE_EVENT_TYPES = (
     "human_feedback_overrode_tool_clear",
     "closure_boundary_misread",
     "research_scope_grade_mismatch",
-    "long_task_poll",
+    "polling_task_poll",
 )
+
+TRACE_EVENT_ALIASES = {
+    "long_task_poll": "polling_task_poll",
+}
 
 TRACE_OPTIONAL_EVENT_FIELDS = (
     "owner_brain",
@@ -139,6 +143,7 @@ def normalize_trace(raw: dict[str, Any]) -> dict[str, Any]:
     events: list[dict[str, Any]] = []
     for item in _list_of_dicts(trace.get("events")):
         event_type = str(item.get("type", "") or "").strip()
+        event_type = TRACE_EVENT_ALIASES.get(event_type, event_type)
         if event_type not in TRACE_EVENT_TYPES:
             continue
         event = {
@@ -151,7 +156,8 @@ def normalize_trace(raw: dict[str, Any]) -> dict[str, Any]:
         }
         for key in TRACE_OPTIONAL_EVENT_FIELDS:
             if key in item:
-                event[key] = str(item.get(key, "") or "")
+                value = item.get(key, "")
+                event[key] = "" if value is None else str(value)
         if "artifact_path" not in event:
             event["artifact_path"] = str(item.get("artifact_path", "") or "")
         events.append(event)
@@ -612,11 +618,11 @@ def analyze_freeform(*, task: str = "", observation: str = "", test_output: str 
         )
     if any(_freeform_term_present(text, term) for term in ("start-sleep", "wait-process", "长任务", "轮询", "eta")):
         add(
-            lesson="Long-task polling discipline should be verified with structured execution evidence.",
-            root_cause="freeform observation reported long-task monitor or ETA behavior gap",
+            lesson="Polling and async task discipline should be verified with structured execution evidence.",
+            root_cause="freeform observation reported polling, wait-window, or ETA behavior gap",
             target_layer="tests_guard",
-            recommended_change="collect a trace for long-task polling and guard PID/log/progress/ETA reporting",
-            suggested_tests=["freeform long-task observation returns tests_guard candidate"],
+            recommended_change="collect a polling trace and guard project namespace, observable handles, progress/log/artifact signals, and failed-evidence wording",
+            suggested_tests=["freeform polling observation returns tests_guard candidate"],
         )
     if any(term in text for term in ("计划包含训练但 agent 结束任务", "需要用户提示继续实施计划", "训练没启动", "long task step skipped", "training step skipped", "ended before training")):
         add(

@@ -244,7 +244,7 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertNotIn("traditional_quant_research/tests -q", encoded_guards)
         self.assertEqual(payload["project_profile"]["verification_profile"]["default_test_commands"], [])
 
-    def test_capsule_long_task_wording_stays_in_brain_handoff(self) -> None:
+    def test_capsule_polling_wording_stays_in_brain_handoff(self) -> None:
         payload = build_task_capsule(
             task="三组 shadow-only seed7 长训练轮询",
             workflow="auto",
@@ -257,7 +257,19 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertIn("guards", payload)
         self.assertIn("preflight_blockers", payload)
         self.assertIn("capability_hints", payload)
-        self.assertIn("long_task_monitor", json.dumps(payload, ensure_ascii=False))
+        encoded = json.dumps(
+            {
+                "capability_hints": payload["capability_hints"],
+                "risk_signals": payload["risk_signals"],
+                "verification_hints": payload["verification_hints"],
+            },
+            ensure_ascii=False,
+        )
+        self.assertIn("polling/async task", encoded)
+        self.assertIn("best observable handle", encoded)
+        self.assertIn("polling_task_without_observable_handle", encoded)
+        self.assertNotIn("long_task_monitor", encoded)
+        self.assertNotIn("Wait-Process", encoded)
 
     def test_capsule_training_mixed_with_brain_maintenance_is_not_forbidden(self) -> None:
         payload = build_task_capsule(
@@ -266,14 +278,22 @@ class BrainCapsuleTest(unittest.TestCase):
             intent="mutate",
             verbosity="lite",
         )
-        encoded = json.dumps(payload, ensure_ascii=False)
+        encoded = json.dumps(
+            {
+                "capability_hints": payload["capability_hints"],
+                "risk_signals": payload["risk_signals"],
+                "verification_hints": payload["verification_hints"],
+            },
+            ensure_ascii=False,
+        )
 
         self.assertEqual(payload["workflow"], "brain_maintenance")
         self.assertNotIn("forbidden_" + "actions", payload)
         self.assertNotIn("start_" + "training", encoded)
         self.assertIn("risk_signals", payload)
         self.assertIn("verification_hints", payload)
-        self.assertIn("long_task_monitor", encoded)
+        self.assertIn("polling/async task", encoded)
+        self.assertNotIn("long_task_monitor", encoded)
 
     def test_capsule_mutate_plan_title_stays_in_brain_handoff(self) -> None:
         payload = build_task_capsule(

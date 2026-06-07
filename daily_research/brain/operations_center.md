@@ -7,7 +7,7 @@
 - Python 入口固定为 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`；进入本分脑前，必须先由主脑 `tools.brain.workflow capsule` 路由到 `daily_research`。
 - `H:\new_tdx64\PYPlugins\user` 已退出本项目主链路；历史 reference 中旧路径只作历史证据，不作为当前入口。
 - 不使用 `KMP_DUPLICATE_LIB_OK` 作为默认方案。
-- 继承主脑项目任务命名空间：普通读写、短脚本、测试、临时产物、提交和长任务默认限制在 `daily_research` profile；其它项目 dirty/output/process 只作摘要报告，不下钻、不复用、不写成本任务证据，除非用户扩展范围或声明 lease。
+- 继承主脑项目任务命名空间：普通读写、短脚本、测试、临时产物、提交和轮询 / 异步任务默认限制在 `daily_research` profile；其它项目 dirty/output/process 只作摘要报告，不下钻、不复用、不写成本任务证据，除非用户扩展范围或声明 lease。
 - 2026-06-01 起执行端冻结/保留骨架/等待重建：只允许只读状态、数据 readiness、候选 backtest wrapper、候选 trade-plan wrapper 的研究评估用途和 payload inventory；禁止 live/default、paper/broker、正式 trade plan、active manifest promotion、production root 重建、自动化每日执行和无授权删除执行合同。
 - 2026-05-31 恢复边界：`daily_research/output/` 与 `daily_research/cache/` 曾被误删；空目录骨架只保证 manifest/integrity 入口存在，不代表旧 payload 恢复，不得凭 brain 文本手工重造 active artifact。
 
@@ -32,9 +32,9 @@
 - Study runner 是逻辑编排层：选 trial、写 plan、调用 protocol、汇总 `study_summary.json`。
 - Protocol 是单次训练/评估/shadow/export 层，写 `protocol_summary.json`。
 - 若 `protocol_summary.json` 存在但 `study_summary.json` 缺失，只能记为 protocol-level evidence。
-- 后台运行建议只把整个 study 作为一个 OS 后台进程启动；study 内部仍保持 `protocol_runner_mode=in_process`，前台只轮询 progress / PID / logs / summaries。
-- 长训练或 study 继承主脑项目任务命名空间：用 `tools.brain.agent_run paths/register/launch/status --project-id daily_research --run-id <run>` 绑定 PID、stdout/stderr、progress、summary 和明确 tag；`long_task_monitor status/wait-once/trace-poll` 必须带同一 `project_id` / `run_id`。
-- 单轮等待窗口耗尽后，若 PID、日志、progress、summary / checkpoint / artifact 仍推进且无明确代码错误、资源危险或用户停止指令，继续下一轮 PID 绑定等待，不得停止任务或写成 failed evidence。
+- 后台运行只作为 OS 级 launcher / 轮询能力；study 内部仍保持 `protocol_runner_mode=in_process`，agent 根据 progress / PID / logs / summaries / artifacts 自适应观察。
+- 训练或 study 需要跨回合观察、后台驻留或保留执行证据时，用 `tools.brain.agent_run paths/register/launch/status --project-id daily_research --run-id <run>` 绑定 PID、stdout/stderr、progress、summary 和明确 tag；不强制所有等待任务套同一 launcher 或固定 monitor。
+- 单轮观察窗口耗尽后，若 PID、日志、progress、summary / checkpoint / artifact 仍推进且无明确代码错误、资源危险或用户停止指令，继续按信号密度自适应轮询，不得停止任务或写成 failed evidence。
 
 ## Multi Horizon Utility 运行口径
 - 当前 path_policy 研究主线名：`alpha_multi_horizon_utility_policy_v1`；当前 v2 reset 主线为 `daily_research_v2_research_reset`。

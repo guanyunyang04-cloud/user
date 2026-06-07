@@ -12,7 +12,8 @@ from typing import Any
 from tools.brain.project_profiles import load_project_profile
 
 
-DEFAULT_TIMEOUT_SECONDS = 7200
+DEFAULT_POLL_WINDOW_SECONDS = 0
+DEFAULT_TIMEOUT_SECONDS = DEFAULT_POLL_WINDOW_SECONDS
 DEFAULT_STALE_AFTER_SECONDS = 3600
 ARTIFACT_SCAN_FILE_LIMIT = 512
 DEFAULT_WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
@@ -496,24 +497,26 @@ def build_template(
     *,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
-    timeout = int(timeout_seconds)
+    timeout = max(0, int(timeout_seconds))
+    window_arg = str(timeout) if timeout > 0 else "<agent_selected_seconds>"
     return {
         "schema_version": 1,
         "poll_window_seconds": timeout,
-        "monitoring_mode": "foreground_wait_process_after_gpu_start",
-        "gpu_active_wait_rule": (
-            "After a GPU task is confirmed active, use a foreground Wait-Process window unless the host crashes."
+        "poll_window_policy": "0 means no fixed default; the agent chooses cadence from signal density, cost, and risk.",
+        "monitoring_mode": "adaptive_polling",
+        "observability_rule": (
+            "Use the strongest available handle: PID, job/run id, logs, progress, artifacts, port/API status, or resource state."
         ),
-        "eta_required": True,
-        "required_wait_command": f"Wait-Process -Id <pid> -Timeout {timeout}",
+        "eta_required": False,
+        "eta_policy": "Estimate ETA when progress supports it; absence of ETA is not failure evidence.",
         "powershell_template": "\n".join(
             [
                 "$proc = Start-Process -FilePath <command> -ArgumentList <args> -PassThru -NoNewWindow",
                 "$taskPid = $proc.Id",
-                f"Wait-Process -Id $taskPid -Timeout {timeout}",
+                "# Agent selects polling cadence from observed signal density, resource cost, and risk.",
                 "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor status --project-id <project_id> --run-id <run_id> --pid $taskPid --progress <progress.json> --stdout <stdout.log> --stderr <stderr.log> --artifact-dir <artifact_dir> --json",
                 "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.long_task_monitor trace-poll --trace-json <trace.json> --pid $taskPid --poll-window-seconds "
-                f"{timeout} --project-id <project_id> --run-id <run_id> --progress <progress.json> --stdout <stdout.log> --stderr <stderr.log> --artifact-dir <artifact_dir> --json",
+                f"{window_arg} --project-id <project_id> --run-id <run_id> --progress <progress.json> --stdout <stdout.log> --stderr <stderr.log> --artifact-dir <artifact_dir> --json",
             ]
         ),
     }
@@ -603,7 +606,7 @@ def build_status(
     if eta_status == "stalled_or_waiting":
         decision = "inspect_logs_or_resources"
     elif _pid_alive(pid):
-        decision = "continue_short_polling"
+        decision = "continue_adaptive_polling"
     elif eta_status == "completed":
         decision = "verify_artifacts"
     else:
@@ -676,12 +679,12 @@ def build_trace_event(
     if status.get("eta_status") not in {"estimated", "completed"}:
         eta_no_eta_reason = str(status.get("eta_status") or "progress_unavailable")
     event = {
-        "type": "long_task_poll",
+        "type": "polling_task_poll",
         "project_id": str(project_id or ""),
         "run_id": str(run_id or ""),
         "namespace": dict(status.get("namespace", {}) or {}),
         "step_id": str(step_id or ""),
-        "summary": f"long task poll for {run_tag or task or 'unnamed task'}",
+        "summary": f"polling task observation for {run_tag or task or 'unnamed task'}",
         "evidence": (
             f"pid_alive={status.get('pid_alive')} progress_percent={status.get('progress_percent')} "
             f"eta_status={status.get('eta_status')} decision={status.get('decision')}"
@@ -763,10 +766,10 @@ def _print_payload(payload: dict[str, Any], *, as_json: bool) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Brain long-task wait/status helper.")
+    parser = argparse.ArgumentParser(description="Brain polling/async task status helper.")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    template = sub.add_parser("template", help="Print the required PowerShell long-task wait template.")
+    template = sub.add_parser("template", help="Print an adaptive polling template.")
     template.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     template.add_argument("--json", action="store_true")
 
@@ -784,7 +787,7 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--workspace-root", default="")
     status.add_argument("--json", action="store_true")
 
-    wait_once = sub.add_parser("wait-once", help="Run one Wait-Process window, then report status.")
+    wait_once = sub.add_parser("wait-once", help="Optionally run one local poll window, then report status.")
     wait_once.add_argument("--pid", type=int, required=True)
     wait_once.add_argument("--project-id", default="")
     wait_once.add_argument("--run-id", default="")
@@ -799,7 +802,7 @@ def build_parser() -> argparse.ArgumentParser:
     wait_once.add_argument("--workspace-root", default="")
     wait_once.add_argument("--json", action="store_true")
 
-    trace_poll = sub.add_parser("trace-poll", help="Build and optionally append a structured long-task poll trace event.")
+    trace_poll = sub.add_parser("trace-poll", help="Build and optionally append a structured polling trace event.")
     trace_poll.add_argument("--trace-json", default="")
     trace_poll.add_argument("--task", default="")
     trace_poll.add_argument("--project-id", default="")
@@ -857,15 +860,12 @@ def main() -> int:
             }
             _print_payload(payload, as_json=bool(getattr(args, "json", False)))
             return 2
-        subprocess.run(
-            [
-                "powershell",
-                "-NoProfile",
-                "-Command",
-                f"Wait-Process -Id {int(args.pid)} -Timeout {int(args.timeout)} -ErrorAction SilentlyContinue",
-            ],
-            check=False,
-        )
+        timeout = max(0, int(args.timeout))
+        if timeout > 0:
+            deadline = time.monotonic() + timeout
+            while _pid_alive(int(args.pid)) and time.monotonic() < deadline:
+                remaining = max(0.0, deadline - time.monotonic())
+                time.sleep(min(5.0, remaining))
     if args.command == "trace-poll":
         trace_json = str(getattr(args, "trace_json", "") or "")
         trace_namespace = validate_project_namespace(

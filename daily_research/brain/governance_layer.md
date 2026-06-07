@@ -10,7 +10,7 @@
 - 目标一致性检查
   - 这件事是否仍服务当前主问题和当前生产主线
 - 规则冲突检查
-  - 是否违反 formal / recent / live / promotion 分层、strict resume、前台执行等硬规则
+  - 是否违反 formal / recent / live / promotion 分层、strict resume、受监管执行 / 可观察轮询等硬规则
 - 经验教训检查
   - 是否踩中 `knowledge_center.md` 中已知失败模式
 - 依赖完整性检查

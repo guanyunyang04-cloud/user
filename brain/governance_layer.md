@@ -40,7 +40,7 @@
 ## 2.3 项目任务命名空间与并行所有权隔离
 - 工作区允许多个项目由不同 agent 并行开发；每次任务必须先绑定一个明确 `project_id` / task namespace，可变更范围由主脑路由结果和用户显式授权共同决定。
 - 被路由任务默认只拥有目标项目范围、该项目 brain write routes、该项目 output/cache/tmp/reports/test artifacts，以及用户明确纳入的 workspace 共享文件；不得把其他项目的工作树变更自动视为当前任务的一部分。
-- 普通读写、短脚本、一次性诊断、测试、报告、临时 JSON、日志、截图、提交和进程管理都受同一项目任务命名空间约束；长任务只是其中的受监管特例，不是唯一需要隔离的任务。
+- 普通读写、短脚本、一次性诊断、测试、报告、临时 JSON、日志、截图、提交和进程管理都受同一项目任务命名空间约束；需要轮询或异步观察的任务只是其中一种需要可观察 handle 的场景，不是唯一需要隔离的任务。
 - 路由范围外的项目 dirty paths、进程和输出默认视为外部并行工作；agent 可在接管摘要中报告其存在，但不得下钻内容、回滚、修复、暂存、提交、合并、停止、等待、复用，或把这些对象解释为当前任务证据，除非用户明确扩展任务范围。
 - 主脑、workflow 工具、根配置、跨项目 registry 等 workspace 共享文件不自动归属任何单一项目；修改前必须单独评估影响面。
 - 若外部项目变更与当前路由任务或共享文件产生真实冲突，先报告冲突和边界，再等待用户决定是否扩展任务范围。
@@ -49,8 +49,8 @@
 - 若当前提交候选路径本身越过 profile 范围，或与接管前 baseline dirty 发生目标范围内 overlap，返回 `project_commit_scope_conflict`；不得把多个项目混成一个提交。
 - 短命令与普通测试默认在被选项目的工作目录、验证 profile 和 changed-surface 范围内执行；跨项目测试、共享工具验证或下钻其它项目状态/产物必须由真实依赖、共享文件修改或用户授权触发。
 - 临时产物必须优先写入当前项目或当前 task/run 命名空间；不得把散落在 workspace 根、其它项目 output 或 loose latest 的文件当成当前任务证据。
-- 长任务必须通过 `tools.brain.agent_run` 绑定到项目 `process_namespace`，PID、日志、progress 和 summary 默认位于 `<project>/output/agent_runs/<run_id>/`。
-- `long_task_monitor` 必须携带 `--project-id` 与 `--run-id`；没有显式 active cross-project lease 时，其他项目 agent 不得 wait、tail/read 日志产物或管理该进程。
+- 需要跨回合运行、后台驻留或保留 PID / 日志 / progress / summary 的轮询任务，优先通过 `tools.brain.agent_run` 绑定到项目 `process_namespace`；短同步命令可直接等待，轮询间隔和观察窗口由 agent 按信号密度、资源成本和风险自适应决定。
+- 轮询 / 异步任务必须携带项目归属与可观察 handle；没有显式 active cross-project lease 时，其他项目 agent 不得 wait、tail/read 日志产物或管理该进程。
 - 共享 GPU、端口、数据 provider 等资源租约写入 `brain/output/resource_leases/`；租约不存在时按互不干扰处理。
 
 ## 3. 守卫

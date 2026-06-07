@@ -22,14 +22,16 @@ PYTHON = "C:/Users/ASUS/miniconda3/envs/yolos/python.exe"
 
 
 class LongTaskMonitorTest(unittest.TestCase):
-    def test_template_uses_gpu_active_wait_process_window(self) -> None:
-        payload = build_template(timeout_seconds=7200)
+    def test_template_uses_adaptive_polling_without_fixed_wait_window(self) -> None:
+        payload = build_template()
         script = payload["powershell_template"]
 
-        self.assertEqual(payload["poll_window_seconds"], 7200)
-        self.assertEqual(payload["monitoring_mode"], "foreground_wait_process_after_gpu_start")
-        self.assertEqual(payload["required_wait_command"], "Wait-Process -Id <pid> -Timeout 7200")
-        self.assertIn("Wait-Process -Id $taskPid -Timeout 7200", script)
+        self.assertEqual(payload["poll_window_seconds"], 0)
+        self.assertEqual(payload["monitoring_mode"], "adaptive_polling")
+        self.assertIn("no fixed default", payload["poll_window_policy"])
+        self.assertNotIn("required_wait_command", payload)
+        self.assertNotIn("Wait-Process", script)
+        self.assertIn("<agent_selected_seconds>", script)
         self.assertIn("$taskPid = $proc.Id", script)
         self.assertIn("--pid $taskPid", script)
         self.assertIn("--project-id <project_id>", script)
@@ -37,7 +39,7 @@ class LongTaskMonitorTest(unittest.TestCase):
         self.assertNotIn("$pid = $proc.Id", script)
         self.assertNotIn("--pid $pid", script)
         self.assertNotIn("Start-Sleep", script)
-        self.assertTrue(payload["eta_required"])
+        self.assertFalse(payload["eta_required"])
 
     def test_status_estimates_eta_from_step_progress(self) -> None:
         with TemporaryDirectory() as raw_tmp:
@@ -128,7 +130,7 @@ class LongTaskMonitorTest(unittest.TestCase):
         self.assertEqual(payload["eta_status"], "stalled_or_waiting")
         self.assertEqual(payload["decision"], "inspect_logs_or_resources")
 
-    def test_running_pid_decision_uses_short_polling_language(self) -> None:
+    def test_running_pid_decision_uses_adaptive_polling_language(self) -> None:
         with TemporaryDirectory() as raw_tmp:
             run_root = Path(raw_tmp) / "traditional_quant_research/output/agent_runs/run_01"
             run_root.mkdir(parents=True)
@@ -143,7 +145,7 @@ class LongTaskMonitorTest(unittest.TestCase):
                     workspace_root=Path(raw_tmp),
                 )
 
-        self.assertEqual(payload["decision"], "continue_short_polling")
+        self.assertEqual(payload["decision"], "continue_adaptive_polling")
 
     def test_cli_status_outputs_json(self) -> None:
         with TemporaryDirectory() as raw_tmp:
@@ -238,7 +240,7 @@ class LongTaskMonitorTest(unittest.TestCase):
                 run_tag="mh_stage32_arch_input_final_confirmation_20260528_01",
                 pid=999999,
                 child_pids=[111, 222],
-                poll_window_seconds=7200,
+                poll_window_seconds=0,
                 progress_path=progress,
                 stdout_path=stdout,
                 stderr_path=stderr,
@@ -247,11 +249,11 @@ class LongTaskMonitorTest(unittest.TestCase):
                 workspace_root=Path(raw_tmp),
             )
 
-        self.assertEqual(event["type"], "long_task_poll")
+        self.assertEqual(event["type"], "polling_task_poll")
         self.assertEqual(event["step_id"], "stage32_final")
         self.assertEqual(event["pid"], 999999)
         self.assertEqual(event["child_pids"], [111, 222])
-        self.assertEqual(event["poll_window_seconds"], 7200)
+        self.assertEqual(event["poll_window_seconds"], 0)
         self.assertEqual(event["eta_status"], "estimated")
         self.assertEqual(event["eta_no_eta_reason"], "")
         self.assertEqual(event["final_verification"], "pending")
@@ -284,7 +286,7 @@ class LongTaskMonitorTest(unittest.TestCase):
             root = Path(raw_tmp) / "traditional_quant_research/output/agent_runs/run_01"
             root.mkdir(parents=True)
             progress = root / "progress.json"
-            trace_json = root / "long_task_trace.json"
+            trace_json = root / "polling_trace.json"
             started_at = datetime.now(timezone.utc) - timedelta(minutes=10)
             progress.write_text(
                 json.dumps({"started_at": started_at.isoformat(), "current_step": 1, "total_steps": 2}),
@@ -299,7 +301,7 @@ class LongTaskMonitorTest(unittest.TestCase):
                     "--trace-json",
                     str(trace_json),
                     "--task",
-                    "long training",
+                    "polling training",
                     "--project-id",
                     "traditional_quant_research",
                     "--run-id",
@@ -311,7 +313,7 @@ class LongTaskMonitorTest(unittest.TestCase):
                     "--pid",
                     "999999",
                     "--poll-window-seconds",
-                    "7200",
+                    "0",
                     "--progress",
                     str(progress),
                     "--workspace-root",
@@ -330,8 +332,8 @@ class LongTaskMonitorTest(unittest.TestCase):
             trace_payload = json.loads(trace_json.read_text(encoding="utf-8"))
 
         self.assertEqual(payload["status"], "ok")
-        self.assertEqual(trace_payload["task"], "long training")
-        self.assertEqual(trace_payload["events"][0]["type"], "long_task_poll")
+        self.assertEqual(trace_payload["task"], "polling training")
+        self.assertEqual(trace_payload["events"][0]["type"], "polling_task_poll")
         self.assertEqual(trace_payload["events"][0]["run_tag"], "run_01")
 
     def test_cli_trace_poll_blocks_trace_writes_outside_project_namespace(self) -> None:

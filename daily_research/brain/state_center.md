@@ -47,7 +47,7 @@
 - `daily_research/output/active_execution_strategy.json` 缺失时，守卫应给出可读阻塞，不得 traceback，也不得手工从 brain 文本重造 active artifact。
 - 本地 `output/cache` 空目录骨架不等于真实 payload 恢复；guard 通过不等于旧 run 可 file-backed replay。
 - cap80、旧 replay 差异、corrected near-pass、单 seed forecast pass 或单一 candidate backtest 只能作为诊断线索，不能替代 v2 gate evidence。
-- 长任务必须绑定 PID、stdout/stderr、progress、summary / checkpoint / artifact 路径；`Wait-Process -Id <pid> -Timeout 7200` 只是单轮前台等待窗口，进程仍推进时继续轮询。
+- 轮询 / 异步任务必须绑定足够的可观察 handle，如 PID / job id / run id、stdout/stderr、progress、summary、checkpoint、artifact、端口或 API status；观察窗口耗尽只表示本轮观测结束，进程或产物仍推进时由 agent 调整节奏继续轮询。
 
 ## 当前风险
 - 文档继续堆 dated log 会削弱接管效率；当前热路径应只保留结论、边界、入口和证据索引。
