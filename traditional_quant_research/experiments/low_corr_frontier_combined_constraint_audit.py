@@ -203,6 +203,7 @@ def run_low_corr_frontier_combined_constraint_audit(
             include_metrics=include_metrics,
             factor_pruning_run_dir=factor_pruning_run_dir,
             ml_signal_run_dir=ml_signal_run_dir,
+            ml_prediction_years=(int(year),),
         )
         manifest = built["manifest"]
         quality = built["quality"]

@@ -88,6 +88,65 @@ def test_build_ml_signal_artifacts_uses_prior_years_and_label_buffer() -> None:
     assert set(regime_audit["regime_label"]) == {"weak_regime", "normal_regime"}
 
 
+def test_build_ml_signal_artifacts_can_shard_predictions_without_collecting_full_frame(tmp_path: Path) -> None:
+    shard_dir = tmp_path / "ml_signal_predictions_by_year"
+
+    plan, predictions, importance, audit, _regime_audit = frontier_ml_signal_rebuild.build_ml_signal_artifacts(
+        _ml_panel(),
+        years=(2026,),
+        final_end_date="2026-01-05",
+        horizon=2,
+        feature_columns=("feature_a_z", "feature_b_z"),
+        target_col="xsec_excess_ret_2d",
+        model_class=DummyRegressor,
+        model_params={"random_state": 42, "n_jobs": 2},
+        max_train_years=1,
+        min_train_years=1,
+        prediction_shard_dir=shard_dir,
+        collect_predictions=False,
+        ml_signal_name="ml_lgbm_xsec_excess_score_h2_prior_fit",
+    )
+
+    shard = pd.read_csv(shard_dir / "eval_year=2026.csv")
+    assert predictions.empty
+    assert len(shard) == 4
+    assert set(shard["eval_year"]) == {2026}
+    assert audit.iloc[0]["prediction_row_count"] == 4
+
+    summary = frontier_ml_signal_rebuild.summarize_ml_signal_rebuild(
+        plan,
+        predictions,
+        importance,
+        audit,
+        run_id="fixture",
+        run_dir=tmp_path,
+        manifest={"snapshot_id": "fixture"},
+        quality={},
+        raw_panel=_ml_panel(),
+        factor_panel=_ml_panel(),
+        years=(2026,),
+        final_end_date="2026-01-05",
+        horizon=2,
+        factor_set="expanded",
+        feature_columns=("feature_a_z", "feature_b_z"),
+        target_col="xsec_excess_ret_2d",
+        max_train_years=1,
+        min_train_years=1,
+        training_mode="baseline",
+        weak_years=frontier_ml_signal_rebuild.DEFAULT_WEAK_YEARS,
+        weak_sample_weight=frontier_ml_signal_rebuild.DEFAULT_WEAK_SAMPLE_WEIGHT,
+        regime_sample_weight=frontier_ml_signal_rebuild.DEFAULT_REGIME_SAMPLE_WEIGHT,
+        min_regime_head_rows=frontier_ml_signal_rebuild.DEFAULT_MIN_REGIME_HEAD_ROWS,
+        model_params={"random_state": 42, "n_jobs": 2},
+        prediction_artifact_mode="year_shards",
+        prediction_shard_dir=shard_dir,
+        write_full_prediction_csv=False,
+        ml_signal_name="ml_lgbm_xsec_excess_score_h2_prior_fit",
+    )
+    assert summary["prediction_rows"] == 4
+    assert summary["decision"] == "diagnostic_ml_signal_ready"
+
+
 def test_weak_weighted_training_passes_prior_fit_sample_weights() -> None:
     WeightedDummyRegressor.last_sample_weight = None
 

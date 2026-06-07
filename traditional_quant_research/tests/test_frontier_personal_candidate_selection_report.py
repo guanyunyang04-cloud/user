@@ -98,6 +98,26 @@ def test_selection_report_normalizes_only_formal_promotions_to_backtest_candidat
     assert selection.loc[selection["signal"].eq("ml_v2_weak_weighted"), "post_selection_recommendation"].iloc[0] == "none"
 
 
+def test_selection_report_fills_legacy_empty_portfolio_mode() -> None:
+    evidence = _evidence()
+    evidence["portfolio_constraint_mode"] = pd.NA
+
+    selection = mod.build_candidate_selection_summary(evidence)
+
+    assert set(selection["portfolio_constraint_mode"]) == {"penalty_top_n"}
+    assert "nan" not in selection["candidate_id"].str.lower().str.cat(sep="|")
+
+
+def test_selection_report_deduplicates_repeated_control_rows() -> None:
+    evidence = _evidence()
+    evidence = pd.concat([evidence, evidence.iloc[[0]].assign(source_run_dir="grid/repeated_control")], ignore_index=True)
+
+    selection = mod.build_candidate_selection_summary(evidence)
+
+    assert len(selection.loc[selection["signal"].eq("ml_v2_regime_heads")]) == 1
+    assert len(selection) == 3
+
+
 def test_selection_report_summary_keeps_paper_and_trading_counts_zero() -> None:
     selection = mod.build_candidate_selection_summary(_evidence())
     rejected = mod.build_rejected_diagnostic_summary(selection)
@@ -111,6 +131,7 @@ def test_selection_report_summary_keeps_paper_and_trading_counts_zero() -> None:
     )
 
     assert summary["personal_backtest_candidate_count"] == 1
+    assert summary["decision"] == "personal_backtest_candidates_selected"
     assert summary["personal_paper_candidate_count"] == 0
     assert summary["personal_trading_candidate_count"] == 0
     assert summary["post_selection_boundary"] == (

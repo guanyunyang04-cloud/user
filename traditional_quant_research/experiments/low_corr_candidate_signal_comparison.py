@@ -88,6 +88,7 @@ def build_candidate_protocol_signal_panel(
     include_metrics: bool = False,
     factor_pruning_run_dir: str | Path | None = None,
     ml_signal_run_dir: str | Path | None = None,
+    ml_prediction_years: Sequence[int] | None = None,
 ) -> dict[str, Any]:
     """Build all signal variants using the same prior-year fit contract."""
 
@@ -157,7 +158,7 @@ def build_candidate_protocol_signal_panel(
     ml_signal = ""
     ml_predictions = pd.DataFrame()
     if ml_signal_run_dir is not None:
-        ml_predictions = read_ml_signal_predictions(ml_signal_run_dir, horizon=horizon)
+        ml_predictions = read_ml_signal_predictions(ml_signal_run_dir, horizon=horizon, eval_years=ml_prediction_years)
         ml_signal = ml_signal_name(ml_predictions, horizon=horizon)
         merge = ml_predictions.loc[:, ["date", "code", "score"]].rename(columns={"score": ml_signal})
         factor_panel = factor_panel.copy()
@@ -217,19 +218,21 @@ def factor_pruning_signal_name(plan: pd.DataFrame, *, horizon: int) -> str:
     return names[0] if len(names) == 1 and names[0] else PRUNED_SIGNAL_TEMPLATE.format(horizon=int(horizon))
 
 
-def read_ml_signal_predictions(run_dir: str | Path, *, horizon: int) -> pd.DataFrame:
+def read_ml_signal_predictions(run_dir: str | Path, *, horizon: int, eval_years: Sequence[int] | None = None) -> pd.DataFrame:
     """Read prior-fit ML predictions for a specific horizon."""
 
-    path = Path(run_dir) / "ml_signal_predictions.csv"
-    if not path.exists():
-        raise FileNotFoundError(f"ML signal predictions not found: {path}")
-    frame = pd.read_csv(path)
+    run_path = Path(run_dir)
+    frame = _read_ml_prediction_artifact(run_path, eval_years=eval_years)
     required = {"eval_year", "date", "code", "horizon", "ml_signal_name", "score", "fit_uses_eval_year"}
     if missing := sorted(required - set(frame.columns)):
         raise ValueError(f"ML signal predictions missing required columns: {missing}")
     output = frame.copy()
     output["horizon"] = pd.to_numeric(output["horizon"], errors="coerce").astype("Int64")
     output = output.loc[output["horizon"].eq(int(horizon))].copy()
+    selected_years = _normalize_optional_years(eval_years)
+    if selected_years is not None:
+        output["eval_year"] = pd.to_numeric(output["eval_year"], errors="coerce").astype("Int64")
+        output = output.loc[output["eval_year"].isin(selected_years)].copy()
     if output.empty:
         raise ValueError(f"ML signal predictions have no rows for horizon {horizon}")
     if _truthy(output["fit_uses_eval_year"]).any():
@@ -247,6 +250,36 @@ def read_ml_signal_predictions(run_dir: str | Path, *, horizon: int) -> pd.DataF
     if names != [expected_name]:
         raise ValueError(f"ML signal predictions must use {expected_name}; got {names}")
     return output.reset_index(drop=True)
+
+
+def _read_ml_prediction_artifact(run_dir: Path, *, eval_years: Sequence[int] | None) -> pd.DataFrame:
+    shard_dir = run_dir / "ml_signal_predictions_by_year"
+    selected_years = _normalize_optional_years(eval_years)
+    if shard_dir.exists():
+        if selected_years is None:
+            shard_paths = sorted(shard_dir.glob("eval_year=*.csv"))
+        else:
+            shard_paths = [shard_dir / f"eval_year={year}.csv" for year in selected_years]
+        missing = [path for path in shard_paths if not path.exists()]
+        if missing:
+            missing_text = ", ".join(str(path) for path in missing)
+            raise FileNotFoundError(f"ML signal prediction shard(s) not found: {missing_text}")
+        if shard_paths:
+            frames = [pd.read_csv(path) for path in shard_paths]
+            return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    path = run_dir / "ml_signal_predictions.csv"
+    if not path.exists():
+        raise FileNotFoundError(f"ML signal predictions not found: {path}")
+    return pd.read_csv(path)
+
+
+def _normalize_optional_years(values: Sequence[int] | None) -> tuple[int, ...] | None:
+    if values is None:
+        return None
+    years = tuple(sorted({int(value) for value in values}))
+    if not years:
+        raise ValueError("eval_years must not be empty when provided")
+    return years
 
 
 def ml_signal_name(predictions: pd.DataFrame, *, horizon: int) -> str:
@@ -329,6 +362,7 @@ def run_low_corr_candidate_signal_comparison(
             rolling_min_periods=rolling_min_periods,
             factor_pruning_run_dir=factor_pruning_run_dir,
             ml_signal_run_dir=ml_signal_run_dir,
+            ml_prediction_years=(int(year),),
         )
         manifest = built["manifest"]
         quality = built["quality"]

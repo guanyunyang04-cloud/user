@@ -271,6 +271,28 @@ def test_read_ml_signal_predictions_rejects_eval_year_leakage(tmp_path: Path) ->
         low_corr_candidate_signal_comparison.read_ml_signal_predictions(tmp_path, horizon=1)
 
 
+def test_read_ml_signal_predictions_prefers_requested_year_shards(tmp_path: Path) -> None:
+    ml_signal = "ml_lgbm_xsec_excess_score_h1_prior_fit"
+    shard_dir = tmp_path / "ml_signal_predictions_by_year"
+    shard_dir.mkdir()
+    pd.DataFrame(
+        [
+            {"eval_year": 2025, "date": "2025-01-02", "code": "A", "horizon": 1, "ml_signal_name": ml_signal, "score": 0.1, "fit_uses_eval_year": False},
+        ]
+    ).to_csv(shard_dir / "eval_year=2025.csv", index=False)
+    pd.DataFrame(
+        [
+            {"eval_year": 2026, "date": "2026-01-02", "code": "B", "horizon": 1, "ml_signal_name": ml_signal, "score": 0.7, "fit_uses_eval_year": False},
+            {"eval_year": 2026, "date": "2026-01-05", "code": "C", "horizon": 1, "ml_signal_name": ml_signal, "score": 0.4, "fit_uses_eval_year": False},
+        ]
+    ).to_csv(shard_dir / "eval_year=2026.csv", index=False)
+
+    output = low_corr_candidate_signal_comparison.read_ml_signal_predictions(tmp_path, horizon=1, eval_years=(2026,))
+
+    assert set(output["eval_year"]) == {2026}
+    assert output["code"].tolist() == ["B", "C"]
+
+
 def test_run_low_corr_candidate_signal_comparison_writes_outputs(tmp_path: Path, monkeypatch) -> None:
     panel = _signal_panel()
     captured: list[dict[str, object]] = []

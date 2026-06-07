@@ -138,9 +138,9 @@ def build_candidate_selection_summary(evidence: pd.DataFrame) -> pd.DataFrame:
 
     rows: list[dict[str, Any]] = []
     for item in work.to_dict("records"):
-        signal = str(item.get("signal", ""))
-        variant = str(item.get("constraint_variant", "baseline") or "baseline")
-        portfolio_mode = str(item.get("portfolio_constraint_mode", "penalty_top_n") or "penalty_top_n")
+        signal = _text_or_default(item.get("signal"), "")
+        variant = _text_or_default(item.get("constraint_variant"), "baseline")
+        portfolio_mode = _text_or_default(item.get("portfolio_constraint_mode"), "penalty_top_n")
         top_n = _optional_int(item.get("top_n")) or 0
         strength = _optional_float(item.get("exposure_penalty_strength")) or 0.0
         formal = bool(item.get("formal_profile_gate", False)) and str(item.get("evidence_scope", "")) == FORMAL_PERSONAL_GATE_SCOPE
@@ -188,6 +188,28 @@ def build_candidate_selection_summary(evidence: pd.DataFrame) -> pd.DataFrame:
     frame = pd.DataFrame(rows, columns=columns)
     if frame.empty:
         return frame
+    frame = frame.drop_duplicates(
+        subset=[
+            "candidate_id",
+            "selection_status",
+            "constraint_variant",
+            "portfolio_constraint_mode",
+            "top_n",
+            "signal",
+            "exposure_penalty_strength",
+            "mean_annualized_return",
+            "min_annualized_return",
+            "positive_year_rate",
+            "worst_max_drawdown",
+            "total_periods",
+            "eval_year_count",
+            "promotion_level",
+            "evidence_scope",
+            "formal_profile_gate",
+            "failed_gates",
+        ],
+        keep="first",
+    )
     frame["_status_rank"] = frame["selection_status"].map(
         {SELECTION_CANDIDATE: 0, SELECTION_BACKTEST_ONLY: 1, SELECTION_DIAGNOSTIC: 2}
     ).fillna(9)
@@ -263,7 +285,7 @@ def summarize_candidate_selection_report(
         "best_top_n": _optional_int(best.get("top_n")),
         "best_mean_annualized_return": _optional_float(best.get("mean_annualized_return")),
         "rejected_summary_rows": int(len(rejected)),
-        "decision": "personal_strategy_candidates_selected" if not candidates.empty else "keep_personal_research_backtest_only",
+        "decision": "personal_backtest_candidates_selected" if not candidates.empty else "keep_personal_research_backtest_only",
         "post_selection_boundary": "agent_selects_models_and_strategies_only; user_handles_risk_recording_and_live_decisions",
         "allowed_selection_statuses": [SELECTION_CANDIDATE, SELECTION_BACKTEST_ONLY, SELECTION_DIAGNOSTIC],
         "disallowed_outputs": ["personal_paper_candidate", "personal_trading_candidate", "paper_or_live_tracking_plan"],
@@ -299,7 +321,7 @@ def render_candidate_selection_markdown(
             "",
             "## Interpretation",
             "",
-            "This report only summarizes selected models and strategies. Risk, recordkeeping, paper/live tracking, and execution decisions remain user discretion.",
+            "This report only summarizes selected models and strategies. Downstream risk, recordkeeping, and execution decisions remain user discretion.",
             "",
         ]
     )
@@ -337,6 +359,20 @@ def _safe_token(value: Any) -> str:
     while "__" in text:
         text = text.replace("__", "_")
     return text or "na"
+
+
+def _text_or_default(value: Any, default: str) -> str:
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except TypeError:
+        pass
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "none"}:
+        return default
+    return text
 
 
 def _strength_token(value: float | None) -> str:

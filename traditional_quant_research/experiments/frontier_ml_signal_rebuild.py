@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import inspect
 import json
 from datetime import datetime
@@ -37,6 +38,8 @@ DEFAULT_WEAK_YEARS = (2017, 2018, 2022, 2023)
 DEFAULT_WEAK_SAMPLE_WEIGHT = 2.0
 DEFAULT_REGIME_SAMPLE_WEIGHT = 1.5
 DEFAULT_MIN_REGIME_HEAD_ROWS = 100
+DEFAULT_MODEL_N_JOBS = 4
+DEFAULT_WRITE_FULL_PREDICTION_CSV = True
 ML_SIGNAL_NAME_TEMPLATE = "ml_lgbm_xsec_excess_score_h{horizon}_prior_fit"
 DEFAULT_MODEL_PARAMS: dict[str, Any] = {
     "n_estimators": 100,
@@ -46,7 +49,7 @@ DEFAULT_MODEL_PARAMS: dict[str, Any] = {
     "subsample": 0.8,
     "colsample_bytree": 0.8,
     "random_state": 42,
-    "n_jobs": -1,
+    "n_jobs": DEFAULT_MODEL_N_JOBS,
 }
 
 
@@ -64,7 +67,10 @@ def run_frontier_ml_signal_rebuild(
     weak_sample_weight: float = DEFAULT_WEAK_SAMPLE_WEIGHT,
     regime_sample_weight: float = DEFAULT_REGIME_SAMPLE_WEIGHT,
     min_regime_head_rows: int = DEFAULT_MIN_REGIME_HEAD_ROWS,
+    model_n_jobs: int | None = DEFAULT_MODEL_N_JOBS,
     model_params: Mapping[str, Any] | None = None,
+    write_prediction_shards: bool = True,
+    write_full_prediction_csv: bool = DEFAULT_WRITE_FULL_PREDICTION_CSV,
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     write_research_log: bool = False,
     research_log_path: str | Path = DEFAULT_RESEARCH_LOG,
@@ -89,6 +95,8 @@ def run_frontier_ml_signal_rebuild(
         raise ValueError("sample weights must be positive")
     if min_regime_head_rows <= 0:
         raise ValueError("min_regime_head_rows must be positive")
+    if model_n_jobs == 0:
+        raise ValueError("model_n_jobs must be non-zero or None")
     selected_factor_set = normalize_factor_set(factor_set)
     if selected_factor_set != "expanded":
         raise ValueError("frontier_ml_signal_rebuild v1 requires factor_set=expanded")
@@ -100,6 +108,8 @@ def run_frontier_ml_signal_rebuild(
     lgbm_class = model_class if model_class is not None else _load_lgbm_regressor()
     ml_signal_name = ML_SIGNAL_NAME_TEMPLATE.format(horizon=int(horizon))
     params = {**DEFAULT_MODEL_PARAMS, **dict(model_params or {})}
+    if model_n_jobs is not None:
+        params["n_jobs"] = int(model_n_jobs)
     if lgbm_class is None:
         summary = _dependency_missing_summary(
             run_id=run_id,
@@ -125,6 +135,7 @@ def run_frontier_ml_signal_rebuild(
             training_audit=pd.DataFrame(columns=_training_audit_columns()),
             regime_audit=pd.DataFrame(columns=_regime_audit_columns()),
             markdown=render_ml_signal_markdown(summary, pd.DataFrame(), pd.DataFrame(), pd.DataFrame()),
+            write_full_prediction_csv=True,
             write_research_log=write_research_log,
             research_log_path=research_log_path,
         )
@@ -140,9 +151,13 @@ def run_frontier_ml_signal_rebuild(
         end_date=panel_end,
         include_metrics=True,
     )
+    raw_panel_summary = panel_summary(raw_panel)
     factor_panel = build_ml_factor_panel(raw_panel, horizon=horizon, factor_set=selected_factor_set)
     feature_columns = [f"{column}_z" for column in factor_columns_for_set(selected_factor_set)]
     target_col = f"xsec_excess_ret_{int(horizon)}d"
+    factor_panel = reduce_ml_factor_panel_memory(factor_panel, feature_columns=feature_columns, target_col=target_col)
+    del raw_panel
+    gc.collect()
     plan, predictions, importance, training_audit, regime_audit = build_ml_signal_artifacts(
         factor_panel,
         years=selected_years,
@@ -159,6 +174,8 @@ def run_frontier_ml_signal_rebuild(
         weak_sample_weight=weak_sample_weight,
         regime_sample_weight=regime_sample_weight,
         min_regime_head_rows=min_regime_head_rows,
+        prediction_shard_dir=run_dir / "ml_signal_predictions_by_year" if write_prediction_shards else None,
+        collect_predictions=bool(write_full_prediction_csv),
         ml_signal_name=ml_signal_name,
     )
     summary = summarize_ml_signal_rebuild(
@@ -170,7 +187,7 @@ def run_frontier_ml_signal_rebuild(
         run_dir=run_dir,
         manifest=manifest,
         quality=quality,
-        raw_panel=raw_panel,
+        raw_panel=raw_panel_summary,
         factor_panel=factor_panel,
         years=selected_years,
         final_end_date=final_end_date,
@@ -186,6 +203,12 @@ def run_frontier_ml_signal_rebuild(
         regime_sample_weight=regime_sample_weight,
         min_regime_head_rows=min_regime_head_rows,
         model_params=params,
+        prediction_artifact_mode=_prediction_artifact_mode(
+            write_prediction_shards=write_prediction_shards,
+            write_full_prediction_csv=write_full_prediction_csv,
+        ),
+        prediction_shard_dir=run_dir / "ml_signal_predictions_by_year" if write_prediction_shards else None,
+        write_full_prediction_csv=write_full_prediction_csv,
         ml_signal_name=ml_signal_name,
     )
     markdown = render_ml_signal_markdown(summary, plan, predictions, training_audit)
@@ -198,6 +221,7 @@ def run_frontier_ml_signal_rebuild(
         training_audit=training_audit,
         regime_audit=regime_audit,
         markdown=markdown,
+        write_full_prediction_csv=write_full_prediction_csv,
         write_research_log=write_research_log,
         research_log_path=research_log_path,
     )
@@ -222,6 +246,36 @@ def build_ml_factor_panel(
     factor_panel = add_ml_market_regime_features(factor_panel)
     factor_panel["date"] = pd.to_datetime(factor_panel["date"])
     return factor_panel.sort_values(["date", "code"]).reset_index(drop=True)
+
+
+def reduce_ml_factor_panel_memory(
+    factor_panel: pd.DataFrame,
+    *,
+    feature_columns: Sequence[str],
+    target_col: str,
+) -> pd.DataFrame:
+    """Keep only ML-required columns and downcast numeric model inputs."""
+
+    if factor_panel.empty:
+        return factor_panel
+    keep_columns = [
+        "date",
+        "code",
+        target_col,
+        *feature_columns,
+        "ml_market_ret_20d_mean",
+        "ml_breadth_20d_positive_rate",
+        "ml_market_volatility_20d_mean",
+    ]
+    output = factor_panel.loc[:, [column for column in keep_columns if column in factor_panel.columns]].copy()
+    numeric_columns = [
+        column
+        for column in output.columns
+        if column not in {"date", "code"} and pd.api.types.is_numeric_dtype(output[column])
+    ]
+    for column in numeric_columns:
+        output[column] = pd.to_numeric(output[column], errors="coerce").astype("float32")
+    return output
 
 
 def add_ml_market_regime_features(factor_panel: pd.DataFrame) -> pd.DataFrame:
@@ -270,6 +324,8 @@ def build_ml_signal_artifacts(
     weak_sample_weight: float = DEFAULT_WEAK_SAMPLE_WEIGHT,
     regime_sample_weight: float = DEFAULT_REGIME_SAMPLE_WEIGHT,
     min_regime_head_rows: int = DEFAULT_MIN_REGIME_HEAD_ROWS,
+    prediction_shard_dir: str | Path | None = None,
+    collect_predictions: bool = True,
     ml_signal_name: str,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Return plan, predictions, feature importance, and training audit frames."""
@@ -281,6 +337,9 @@ def build_ml_signal_artifacts(
     importance_rows: list[dict[str, Any]] = []
     audit_rows: list[dict[str, Any]] = []
     regime_audit_rows: list[dict[str, Any]] = []
+    shard_dir = Path(prediction_shard_dir) if prediction_shard_dir is not None else None
+    if shard_dir is not None:
+        shard_dir.mkdir(parents=True, exist_ok=True)
     if factor_panel.empty:
         return (
             pd.DataFrame(columns=_plan_columns()),
@@ -299,6 +358,7 @@ def build_ml_signal_artifacts(
         raise ValueError(f"factor panel missing required columns: {missing}")
 
     for eval_year in years:
+        year_prediction_frames: list[pd.DataFrame] = []
         windows = _ml_year_windows(int(eval_year), final_end_date=final_end_date, max_train_years=max_train_years)
         label_cutoff = label_cutoff_date(trading_dates, windows["fit_end_date"], horizon=horizon)
         train_start = pd.Timestamp(windows["train_start_date"])
@@ -383,6 +443,12 @@ def build_ml_signal_artifacts(
         )
         if status != "ready":
             audit_rows.append(audit)
+            _write_prediction_year_shard(
+                shard_dir,
+                eval_year=int(eval_year),
+                predictions=pd.DataFrame(columns=_prediction_columns()),
+            )
+            gc.collect()
             continue
 
         x_train = train_labeled.loc[:, list(feature_columns)]
@@ -409,7 +475,7 @@ def build_ml_signal_artifacts(
                     model,
                     head_eval,
                     feature_columns=feature_columns,
-                    prediction_frames=prediction_frames,
+                    prediction_frames=year_prediction_frames,
                     importance_rows=importance_rows,
                     eval_year=int(eval_year),
                     horizon=horizon,
@@ -425,7 +491,7 @@ def build_ml_signal_artifacts(
                 model,
                 eval_labeled,
                 feature_columns=feature_columns,
-                prediction_frames=prediction_frames,
+                prediction_frames=year_prediction_frames,
                 importance_rows=importance_rows,
                 eval_year=int(eval_year),
                 horizon=horizon,
@@ -440,8 +506,13 @@ def build_ml_signal_artifacts(
         audit["sample_weight_mean"] = float(sample_weight.mean()) if sample_weight is not None and len(sample_weight) else np.nan
         audit["sample_weight_max"] = float(sample_weight.max()) if sample_weight is not None and len(sample_weight) else np.nan
         audit_rows.append(audit)
+        year_predictions = _concat_prediction_frames(year_prediction_frames)
+        _write_prediction_year_shard(shard_dir, eval_year=int(eval_year), predictions=year_predictions)
+        if collect_predictions and not year_predictions.empty:
+            prediction_frames.append(year_predictions)
+        gc.collect()
 
-    predictions = pd.concat(prediction_frames, ignore_index=True) if prediction_frames else pd.DataFrame(columns=_prediction_columns())
+    predictions = _concat_prediction_frames(prediction_frames)
     return (
         pd.DataFrame(plan_rows, columns=_plan_columns()),
         predictions.loc[:, _prediction_columns()],
@@ -685,8 +756,8 @@ def summarize_ml_signal_rebuild(
     run_dir: Path,
     manifest: Mapping[str, Any],
     quality: Mapping[str, Any],
-    raw_panel: pd.DataFrame,
-    factor_panel: pd.DataFrame,
+    raw_panel: pd.DataFrame | Mapping[str, Any],
+    factor_panel: pd.DataFrame | Mapping[str, Any],
     years: Sequence[int],
     final_end_date: str | None,
     horizon: int,
@@ -701,10 +772,16 @@ def summarize_ml_signal_rebuild(
     regime_sample_weight: float,
     min_regime_head_rows: int,
     model_params: Mapping[str, Any],
+    prediction_artifact_mode: str,
+    prediction_shard_dir: str | Path | None,
+    write_full_prediction_csv: bool,
     ml_signal_name: str,
 ) -> dict[str, Any]:
     fit_uses = int(_truthy(plan.get("fit_uses_eval_year", pd.Series(dtype=bool))).sum()) if not plan.empty else 0
     ready_years = plan.loc[plan.get("status", pd.Series(dtype=str)).astype(str).eq("ready"), "eval_year"].tolist() if not plan.empty else []
+    prediction_row_count = _prediction_row_count(predictions, training_audit)
+    raw_panel_summary = dict(raw_panel) if isinstance(raw_panel, Mapping) else panel_summary(raw_panel)
+    factor_panel_summary = dict(factor_panel) if isinstance(factor_panel, Mapping) else panel_summary(factor_panel)
     return {
         "run_id": run_id,
         "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -729,12 +806,15 @@ def summarize_ml_signal_rebuild(
         "min_train_years": int(min_train_years),
         "feature_columns": list(feature_columns),
         "feature_count": int(len(feature_columns)),
-        "raw_panel": panel_summary(raw_panel),
-        "factor_panel": panel_summary(factor_panel),
+        "raw_panel": raw_panel_summary,
+        "factor_panel": factor_panel_summary,
         "plan_rows": int(len(plan)),
         "ready_eval_years": [int(year) for year in ready_years],
         "ready_eval_year_count": int(len(ready_years)),
-        "prediction_rows": int(len(predictions)),
+        "prediction_rows": prediction_row_count,
+        "prediction_artifact_mode": prediction_artifact_mode,
+        "prediction_shard_dir": str(prediction_shard_dir or ""),
+        "write_full_prediction_csv": bool(write_full_prediction_csv),
         "feature_importance_rows": int(len(importance)),
         "training_audit_rows": int(len(training_audit)),
         "fit_uses_eval_year_count": fit_uses,
@@ -743,7 +823,7 @@ def summarize_ml_signal_rebuild(
         "personal_backtest_candidate_count": 0,
         "personal_paper_candidate_count": 0,
         "strategy_candidate_count": 0,
-        "decision": "diagnostic_ml_signal_ready" if len(predictions) > 0 and fit_uses == 0 else "diagnostic_ml_signal_not_ready",
+        "decision": "diagnostic_ml_signal_ready" if prediction_row_count > 0 and fit_uses == 0 else "diagnostic_ml_signal_not_ready",
         "evidence_grade": "diagnostic_ml_prior_fit",
         "quality": {
             "failure_count": quality.get("failure_count"),
@@ -867,11 +947,13 @@ def _write_artifacts(
     training_audit: pd.DataFrame,
     regime_audit: pd.DataFrame,
     markdown: str,
+    write_full_prediction_csv: bool,
     write_research_log: bool,
     research_log_path: str | Path,
 ) -> None:
     plan.to_csv(run_dir / "ml_signal_plan.csv", index=False, encoding="utf-8-sig")
-    predictions.to_csv(run_dir / "ml_signal_predictions.csv", index=False, encoding="utf-8-sig")
+    prediction_output = predictions if write_full_prediction_csv else pd.DataFrame(columns=_prediction_columns())
+    prediction_output.to_csv(run_dir / "ml_signal_predictions.csv", index=False, encoding="utf-8-sig")
     importance.to_csv(run_dir / "ml_feature_importance.csv", index=False, encoding="utf-8-sig")
     training_audit.to_csv(run_dir / "ml_training_audit.csv", index=False, encoding="utf-8-sig")
     regime_audit.to_csv(run_dir / "ml_regime_training_audit.csv", index=False, encoding="utf-8-sig")
@@ -1100,6 +1182,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weak-sample-weight", type=float, default=DEFAULT_WEAK_SAMPLE_WEIGHT)
     parser.add_argument("--regime-sample-weight", type=float, default=DEFAULT_REGIME_SAMPLE_WEIGHT)
     parser.add_argument("--min-regime-head-rows", type=int, default=DEFAULT_MIN_REGIME_HEAD_ROWS)
+    parser.add_argument("--model-n-jobs", type=int, default=DEFAULT_MODEL_N_JOBS)
+    parser.add_argument("--write-prediction-shards", dest="write_prediction_shards", action="store_true", default=True)
+    parser.add_argument("--no-write-prediction-shards", dest="write_prediction_shards", action="store_false")
+    parser.add_argument("--write-full-prediction-csv", dest="write_full_prediction_csv", action="store_true", default=DEFAULT_WRITE_FULL_PREDICTION_CSV)
+    parser.add_argument("--no-write-full-prediction-csv", dest="write_full_prediction_csv", action="store_false")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--write-research-log", action="store_true")
     parser.add_argument("--research-log-path", type=Path, default=DEFAULT_RESEARCH_LOG)
@@ -1121,11 +1208,44 @@ def main() -> None:
         weak_sample_weight=args.weak_sample_weight,
         regime_sample_weight=args.regime_sample_weight,
         min_regime_head_rows=args.min_regime_head_rows,
+        model_n_jobs=args.model_n_jobs,
+        write_prediction_shards=args.write_prediction_shards,
+        write_full_prediction_csv=args.write_full_prediction_csv,
         output_dir=args.output_dir,
         write_research_log=args.write_research_log,
         research_log_path=args.research_log_path,
     )
     print(json.dumps(_json_ready(result), ensure_ascii=False, indent=2))
+
+
+def _concat_prediction_frames(frames: Sequence[pd.DataFrame]) -> pd.DataFrame:
+    if not frames:
+        return pd.DataFrame(columns=_prediction_columns())
+    return pd.concat(frames, ignore_index=True).loc[:, _prediction_columns()]
+
+
+def _write_prediction_year_shard(shard_dir: Path | None, *, eval_year: int, predictions: pd.DataFrame) -> None:
+    if shard_dir is None:
+        return
+    output = predictions.loc[:, _prediction_columns()] if not predictions.empty else pd.DataFrame(columns=_prediction_columns())
+    output.to_csv(shard_dir / f"eval_year={int(eval_year)}.csv", index=False, encoding="utf-8-sig")
+
+
+def _prediction_row_count(predictions: pd.DataFrame, training_audit: pd.DataFrame) -> int:
+    if not training_audit.empty and "prediction_row_count" in training_audit.columns:
+        counts = pd.to_numeric(training_audit["prediction_row_count"], errors="coerce").fillna(0)
+        return int(counts.sum())
+    return int(len(predictions))
+
+
+def _prediction_artifact_mode(*, write_prediction_shards: bool, write_full_prediction_csv: bool) -> str:
+    if write_prediction_shards and write_full_prediction_csv:
+        return "full_csv_and_year_shards"
+    if write_prediction_shards:
+        return "year_shards"
+    if write_full_prediction_csv:
+        return "full_csv"
+    return "schema_only"
 
 
 if __name__ == "__main__":

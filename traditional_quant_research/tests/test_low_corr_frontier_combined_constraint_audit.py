@@ -184,6 +184,7 @@ def test_run_low_corr_frontier_combined_constraint_audit_writes_outputs(tmp_path
     assert captured["include_metrics"] is True
     assert captured["factor_pruning_run_dir"] == tmp_path / "factor_pruning"
     assert captured["ml_signal_run_dir"] == tmp_path / "ml_signal"
+    assert captured["ml_prediction_years"] == (2026,)
 
     summary = pd.read_csv(run_dir / "combined_constraint_summary.csv")
     assert set(summary["signal"]) == set(signals)
