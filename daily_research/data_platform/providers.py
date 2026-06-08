@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import multiprocessing
 import queue as queue_module
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any
@@ -15,6 +16,7 @@ from daily_research.data_platform.contracts import (
     DomainFetchRequest,
     FetchRequest,
     ProviderResult,
+    build_intraday_daily_feature_frame,
     normalize_domain_frame,
     normalize_market_frame,
     validate_provider_name,
@@ -32,6 +34,11 @@ FORMAL_FREE_V3_REQUIRED_DOMAINS: tuple[str, ...] = (
 FORMAL_FREE_V3_OPTIONAL_DOMAINS: tuple[str, ...] = (
     DataDomain.VALUATION,
     DataDomain.INDUSTRY_CONCEPT,
+    DataDomain.INDEX_CONSTITUENTS,
+    DataDomain.INTRADAY_DAILY_FEATURES,
+    DataDomain.FINANCIAL_QUARTERLY,
+    DataDomain.PERFORMANCE_FORECAST,
+    DataDomain.PERFORMANCE_EXPRESS,
     DataDomain.MONEY_FLOW_HOTSPOT,
 )
 FORMAL_FREE_V3_RESEARCH_FUTURE_DOMAINS: tuple[str, ...] = (
@@ -56,10 +63,16 @@ _PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
             DataDomain.SECURITY_STATUS,
             DataDomain.INDUSTRY_CONCEPT,
             DataDomain.VALUATION,
+            DataDomain.INDEX_CONSTITUENTS,
+            DataDomain.MARKET_INTRADAY_5M,
+            DataDomain.INTRADAY_DAILY_FEATURES,
+            DataDomain.FINANCIAL_QUARTERLY,
+            DataDomain.PERFORMANCE_FORECAST,
+            DataDomain.PERFORMANCE_EXPRESS,
         ),
         "requires_token": False,
         "formal_eligible": True,
-        "notes": "BaoStock-first source for research market lake daily bars, calendar, universe, status, industry and basic valuation",
+        "notes": "BaoStock-first source for daily bars, 5m-derived daily features, calendar, universe, status, industry, valuation, index constituents and conservative quarterly/event finance",
     },
     "eastmoney_efinance": {
         "domains": (DataDomain.MARKET_DAILY, DataDomain.UNIVERSE_SNAPSHOT, DataDomain.VALUATION),
@@ -110,6 +123,11 @@ _PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
             DataDomain.SECURITY_STATUS,
             DataDomain.INDUSTRY_CONCEPT,
             DataDomain.VALUATION,
+            DataDomain.INDEX_CONSTITUENTS,
+            DataDomain.INTRADAY_DAILY_FEATURES,
+            DataDomain.FINANCIAL_QUARTERLY,
+            DataDomain.PERFORMANCE_FORECAST,
+            DataDomain.PERFORMANCE_EXPRESS,
         ),
         "requires_token": False,
         "formal_eligible": True,
@@ -391,6 +409,53 @@ class BaostockProvider:
                     adjusted_flag=request.adjusted_flag,
                 )
             )
+        if request.domain == DataDomain.MARKET_INTRADAY_5M:
+            rows: list[pd.DataFrame] = []
+            errors: list[dict[str, Any]] = []
+            for idx, symbol in enumerate(request.symbols, start=1):
+                if idx == 1 or idx % 50 == 0 or idx == len(request.symbols):
+                    progress_write(f"baostock_intraday_5m={idx}/{len(request.symbols)} symbol={symbol}")
+                try:
+                    frame = _fetch_baostock_intraday_5m_frame_with_timeout(
+                        symbol=symbol,
+                        start_date=request.start_date,
+                        end_date=request.end_date,
+                        adjusted_flag=request.adjusted_flag,
+                    )
+                except Exception as exc:
+                    errors.append(_baostock_symbol_error(self.name, symbol, exc))
+                    continue
+                if not frame.empty:
+                    rows.append(frame)
+            frame = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
+            data = normalize_domain_frame(frame, domain=request.domain, source=self.name, as_of_date=request.end_date, adjusted_flag=request.adjusted_flag, require_columns=False)
+            return ProviderResult(provider=self.name, data=data, error_report=errors)
+        if request.domain == DataDomain.INTRADAY_DAILY_FEATURES:
+            rows = []
+            errors = []
+            for idx, symbol in enumerate(request.symbols, start=1):
+                if idx == 1 or idx % 50 == 0 or idx == len(request.symbols):
+                    progress_write(f"baostock_intraday_daily_features={idx}/{len(request.symbols)} symbol={symbol}")
+                try:
+                    raw_5m = _fetch_baostock_intraday_5m_frame_with_timeout(
+                        symbol=symbol,
+                        start_date=request.start_date,
+                        end_date=request.end_date,
+                        adjusted_flag=request.adjusted_flag,
+                    )
+                    frame = build_intraday_daily_feature_frame(
+                        raw_5m,
+                        source=self.name,
+                        adjusted_flag=request.adjusted_flag,
+                    )
+                except Exception as exc:
+                    errors.append(_baostock_symbol_error(self.name, symbol, exc))
+                    continue
+                if not frame.empty:
+                    rows.append(frame)
+            frame = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
+            data = normalize_domain_frame(frame, domain=request.domain, source=self.name, as_of_date=request.end_date, adjusted_flag=request.adjusted_flag, require_columns=False)
+            return ProviderResult(provider=self.name, data=data, error_report=errors)
         if request.domain == DataDomain.TRADING_CALENDAR:
             frame = _fetch_baostock_trade_calendar_frame_with_timeout(
                 start_date=request.start_date,
@@ -401,18 +466,34 @@ class BaostockProvider:
             frame = _fetch_baostock_all_stock_frame_with_timeout(domain=request.domain, trade_date=request.end_date)
         elif request.domain == DataDomain.INDUSTRY_CONCEPT:
             frame = _fetch_baostock_industry_frame_with_timeout(trade_date=request.end_date)
+        elif request.domain == DataDomain.INDEX_CONSTITUENTS:
+            frame = _fetch_baostock_index_constituents_frame_with_timeout(trade_date=request.end_date)
+        elif request.domain == DataDomain.FINANCIAL_QUARTERLY:
+            frame = _fetch_baostock_financial_quarterly_frame_with_timeout(
+                symbols=request.symbols,
+                start_date=request.start_date,
+                end_date=request.end_date,
+            )
+        elif request.domain == DataDomain.PERFORMANCE_FORECAST:
+            frame = _fetch_baostock_performance_frame_with_timeout(
+                domain=request.domain,
+                symbols=request.symbols,
+                start_date=request.start_date,
+                end_date=request.end_date,
+            )
+        elif request.domain == DataDomain.PERFORMANCE_EXPRESS:
+            frame = _fetch_baostock_performance_frame_with_timeout(
+                domain=request.domain,
+                symbols=request.symbols,
+                start_date=request.start_date,
+                end_date=request.end_date,
+            )
         elif request.domain == DataDomain.VALUATION:
-            try:
-                import baostock as bs  # type: ignore
-            except Exception as exc:
-                raise RuntimeError("baostock is not installed in the yolos environment") from exc
-            login = bs.login()
-            if getattr(login, "error_code", "1") != "0":
-                raise RuntimeError(f"baostock login failed: {getattr(login, 'error_msg', '')}")
-            try:
-                frame = _baostock_valuation_frame_from_history(bs, request)
-            finally:
-                bs.logout()
+            frame = _fetch_baostock_valuation_frame_with_timeout(
+                symbols=request.symbols,
+                start_date=request.start_date,
+                end_date=request.end_date,
+            )
         else:
             raise RuntimeError(f"unsupported_domain: {self.name} does not support {request.domain}")
         data = normalize_domain_frame(frame, domain=request.domain, source=self.name, as_of_date=request.end_date, require_columns=False)
@@ -621,6 +702,11 @@ class ResearchRebuildMinimalFreeProvider:
             DataDomain.UNIVERSE_SNAPSHOT,
             DataDomain.SECURITY_STATUS,
             DataDomain.INDUSTRY_CONCEPT,
+            DataDomain.INDEX_CONSTITUENTS,
+            DataDomain.INTRADAY_DAILY_FEATURES,
+            DataDomain.FINANCIAL_QUARTERLY,
+            DataDomain.PERFORMANCE_FORECAST,
+            DataDomain.PERFORMANCE_EXPRESS,
         }:
             return self._baostock.fetch_domain(request)
         if request.domain == DataDomain.VALUATION:
@@ -662,8 +748,12 @@ def _to_baostock_code(symbol: str) -> str:
         return f"sh.{raw[:6]}"
     if raw.endswith(".SZ"):
         return f"sz.{raw[:6]}"
+    if raw.endswith(".BJ"):
+        return f"bj.{raw[:6]}"
     if raw.startswith(("5", "6", "9")):
         return f"sh.{raw[:6]}"
+    if raw.startswith(("4", "8")):
+        return f"bj.{raw[:6]}"
     return f"sz.{raw[:6]}"
 
 
@@ -822,19 +912,16 @@ def _baostock_industry_frame(query: Any, *, trade_date: str) -> pd.DataFrame:
     ).reset_index(drop=True)
 
 
-def _baostock_valuation_frame_from_history(bs: Any, request: DomainFetchRequest) -> pd.DataFrame:
+def _baostock_valuation_frame_from_history(bs: Any, request: DomainFetchRequest, *, relogin_retries: int = 2) -> pd.DataFrame:
     request = request.normalized()
     frames: list[pd.DataFrame] = []
     for symbol in request.symbols:
-        query = bs.query_history_k_data_plus(
-            _to_baostock_code(symbol),
-            "date,code,turn,peTTM,pbMRQ",
-            start_date=request.start_date,
-            end_date=request.end_date,
-            frequency="d",
-            adjustflag="3",
+        raw = _baostock_valuation_symbol_frame_with_relogin(
+            bs,
+            symbol=symbol,
+            request=request,
+            relogin_retries=relogin_retries,
         )
-        raw = _baostock_query_to_frame(query, "baostock_valuation")
         if raw.empty:
             continue
         frames.append(
@@ -854,6 +941,44 @@ def _baostock_valuation_frame_from_history(bs: Any, request: DomainFetchRequest)
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
+def _baostock_valuation_symbol_frame_with_relogin(
+    bs: Any,
+    *,
+    symbol: str,
+    request: DomainFetchRequest,
+    relogin_retries: int,
+) -> pd.DataFrame:
+    attempts = max(1, int(relogin_retries or 0) + 1)
+    for attempt in range(1, attempts + 1):
+        query = bs.query_history_k_data_plus(
+            _to_baostock_code(symbol),
+            "date,code,turn,peTTM,pbMRQ",
+            start_date=request.start_date,
+            end_date=request.end_date,
+            frequency="d",
+            adjustflag="3",
+        )
+        try:
+            return _baostock_query_to_frame(query, "baostock_valuation")
+        except RuntimeError as exc:
+            if attempt >= attempts or not _is_baostock_not_logged_in_error(exc):
+                raise
+            try:
+                bs.logout()
+            except Exception:
+                pass
+            time.sleep(min(2.0 * attempt, 5.0))
+            login = bs.login()
+            if getattr(login, "error_code", "1") != "0" and attempt >= attempts - 1:
+                raise RuntimeError(f"baostock valuation relogin failed: {getattr(login, 'error_msg', '')}") from exc
+    return pd.DataFrame()
+
+
+def _is_baostock_not_logged_in_error(exc: BaseException) -> bool:
+    message = str(exc)
+    return "10001001" in message or "用户未登录" in message
+
+
 def _baostock_history_frame(query: Any, *, symbol: str) -> pd.DataFrame:
     raw = _baostock_query_to_frame(query, "baostock_history")
     if raw.empty:
@@ -866,6 +991,112 @@ def _baostock_history_frame(query: Any, *, symbol: str) -> pd.DataFrame:
     frame["symbol"] = str(symbol).strip().upper()
     expected = ["trade_date", "symbol", "open", "high", "low", "close", "volume", "amount"]
     return frame[[column for column in expected if column in frame.columns]]
+
+
+def _baostock_intraday_5m_frame(query: Any, *, symbol: str) -> pd.DataFrame:
+    raw = _baostock_query_to_frame(query, "baostock_intraday_5m")
+    if raw.empty:
+        return pd.DataFrame()
+    frame = raw.rename(columns={"date": "trade_date", "time": "bar_time", "code": "symbol"}).copy()
+    frame["symbol"] = str(symbol).strip().upper()
+    expected = ["trade_date", "symbol", "bar_time", "open", "high", "low", "close", "volume", "amount", "adjustflag"]
+    return frame[[column for column in expected if column in frame.columns]].rename(columns={"adjustflag": "adjusted_flag"})
+
+
+def _baostock_index_constituents_frame(bs: Any, *, trade_date: str) -> pd.DataFrame:
+    frames: list[pd.DataFrame] = []
+    specs = [
+        ("000016.SH", "SSE 50", bs.query_sz50_stocks),
+        ("000300.SH", "CSI 300", bs.query_hs300_stocks),
+        ("000905.SH", "CSI 500", bs.query_zz500_stocks),
+    ]
+    for index_symbol, index_name, query_func in specs:
+        try:
+            raw = _baostock_query_to_frame(query_func(date=trade_date), f"baostock_{index_symbol}_constituents")
+        except TypeError:
+            raw = _baostock_query_to_frame(query_func(), f"baostock_{index_symbol}_constituents")
+        if raw.empty or "code" not in raw.columns:
+            continue
+        frames.append(
+            pd.DataFrame(
+                {
+                    "index_symbol": index_symbol,
+                    "symbol": raw["code"].map(_from_baostock_code),
+                    "trade_date": raw.get("date", trade_date),
+                    "index_name": index_name,
+                    "source": "baostock",
+                }
+            )
+        )
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def _baostock_financial_quarterly_frame_from_bs(bs: Any, request: DomainFetchRequest) -> pd.DataFrame:
+    request = request.normalized()
+    rows: list[dict[str, Any]] = []
+    query_specs = [
+        ("profit", bs.query_profit_data),
+        ("operation", bs.query_operation_data),
+        ("growth", bs.query_growth_data),
+        ("balance", bs.query_balance_data),
+        ("cash_flow", bs.query_cash_flow_data),
+    ]
+    for symbol in request.symbols:
+        code = _to_baostock_code(symbol)
+        for year, quarter, report_date in _quarter_points(request.start_date, request.end_date):
+            row: dict[str, Any] = {
+                "symbol": symbol,
+                "fiscal_year": year,
+                "fiscal_quarter": quarter,
+                "report_date": report_date,
+                "publish_date": "",
+                "lag_policy": "conservative_report_date_plus_90bd_plus_1d_in_features",
+                "source": "baostock",
+            }
+            has_payload = False
+            for _label, query_func in query_specs:
+                raw = _baostock_query_to_frame(query_func(code=code, year=year, quarter=quarter), "baostock_financial_quarterly")
+                if raw.empty:
+                    continue
+                has_payload = True
+                payload = raw.iloc[-1].to_dict()
+                row.update({str(key): value for key, value in payload.items()})
+            if has_payload:
+                rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _baostock_performance_frame_from_bs(bs: Any, request: DomainFetchRequest) -> pd.DataFrame:
+    request = request.normalized()
+    rows: list[pd.DataFrame] = []
+    query_func = bs.query_forecast_report if request.domain == DataDomain.PERFORMANCE_FORECAST else bs.query_performance_express_report
+    failure_label = "baostock_performance_forecast" if request.domain == DataDomain.PERFORMANCE_FORECAST else "baostock_performance_express"
+    for symbol in request.symbols:
+        raw = _baostock_query_to_frame(
+            query_func(_to_baostock_code(symbol), start_date=request.start_date, end_date=request.end_date),
+            failure_label,
+        )
+        if raw.empty:
+            continue
+        raw = raw.copy()
+        raw["symbol"] = symbol
+        raw["source"] = "baostock"
+        rows.append(raw)
+    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
+
+
+def _quarter_points(start_date: str, end_date: str) -> list[tuple[int, int, str]]:
+    start_ts = pd.Timestamp(start_date)
+    end_ts = pd.Timestamp(end_date)
+    start_year = int(start_ts.year)
+    end_year = int(end_ts.year)
+    points: list[tuple[int, int, str]] = []
+    for year in range(start_year, end_year + 1):
+        for quarter, month_day in ((1, "03-31"), (2, "06-30"), (3, "09-30"), (4, "12-31")):
+            report_date = pd.Timestamp(f"{year}-{month_day}")
+            if start_ts <= report_date <= end_ts:
+                points.append((year, quarter, report_date.strftime("%Y-%m-%d")))
+    return points
 
 
 def _baostock_symbol_error(provider: str, symbol: str, exc: BaseException, *, first_error: BaseException | None = None) -> dict[str, Any]:
@@ -906,6 +1137,37 @@ def _baostock_history_worker(
                 adjustflag="2" if adjusted_flag in {"front", "qfq"} else "3",
             )
             frame = _baostock_history_frame(query, symbol=symbol)
+        finally:
+            bs.logout()
+        queue.put({"status": "ok", "data": frame})
+    except Exception as exc:
+        queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
+
+
+def _baostock_intraday_5m_worker(
+    queue: Any,
+    symbol: str,
+    start_date: str,
+    end_date: str,
+    adjusted_flag: str,
+) -> None:
+    try:
+        import baostock as bs  # type: ignore
+
+        login = bs.login()
+        if getattr(login, "error_code", "1") != "0":
+            queue.put({"status": "error", "error_type": "RuntimeError", "error": f"baostock login failed: {getattr(login, 'error_msg', '')}"})
+            return
+        try:
+            query = bs.query_history_k_data_plus(
+                _to_baostock_code(symbol),
+                "date,time,code,open,high,low,close,volume,amount,adjustflag",
+                start_date=start_date,
+                end_date=end_date,
+                frequency="5",
+                adjustflag="2" if adjusted_flag in {"front", "qfq"} else "3",
+            )
+            frame = _baostock_intraday_5m_frame(query, symbol=symbol)
         finally:
             bs.logout()
         queue.put({"status": "ok", "data": frame})
@@ -961,6 +1223,98 @@ def _baostock_industry_worker(queue: Any, trade_date: str) -> None:
             return
         try:
             frame = _baostock_industry_frame(bs.query_stock_industry(date=trade_date), trade_date=trade_date)
+        finally:
+            bs.logout()
+        queue.put({"status": "ok", "data": frame})
+    except Exception as exc:
+        queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
+
+
+def _baostock_index_constituents_worker(queue: Any, trade_date: str) -> None:
+    try:
+        import baostock as bs  # type: ignore
+
+        login = bs.login()
+        if getattr(login, "error_code", "1") != "0":
+            queue.put({"status": "error", "error_type": "RuntimeError", "error": f"baostock login failed: {getattr(login, 'error_msg', '')}"})
+            return
+        try:
+            frame = _baostock_index_constituents_frame(bs, trade_date=trade_date)
+        finally:
+            bs.logout()
+        queue.put({"status": "ok", "data": frame})
+    except Exception as exc:
+        queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
+
+
+def _baostock_financial_quarterly_worker(queue: Any, symbols: tuple[str, ...], start_date: str, end_date: str) -> None:
+    try:
+        import baostock as bs  # type: ignore
+
+        login = bs.login()
+        if getattr(login, "error_code", "1") != "0":
+            queue.put({"status": "error", "error_type": "RuntimeError", "error": f"baostock login failed: {getattr(login, 'error_msg', '')}"})
+            return
+        try:
+            frame = _baostock_financial_quarterly_frame_from_bs(
+                bs,
+                DomainFetchRequest(
+                    domain=DataDomain.FINANCIAL_QUARTERLY,
+                    symbols=tuple(symbols),
+                    start_date=start_date,
+                    end_date=end_date,
+                ),
+            )
+        finally:
+            bs.logout()
+        queue.put({"status": "ok", "data": frame})
+    except Exception as exc:
+        queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
+
+
+def _baostock_performance_worker(queue: Any, domain: str, symbols: tuple[str, ...], start_date: str, end_date: str) -> None:
+    try:
+        import baostock as bs  # type: ignore
+
+        login = bs.login()
+        if getattr(login, "error_code", "1") != "0":
+            queue.put({"status": "error", "error_type": "RuntimeError", "error": f"baostock login failed: {getattr(login, 'error_msg', '')}"})
+            return
+        try:
+            frame = _baostock_performance_frame_from_bs(
+                bs,
+                DomainFetchRequest(
+                    domain=domain,
+                    symbols=tuple(symbols),
+                    start_date=start_date,
+                    end_date=end_date,
+                ),
+            )
+        finally:
+            bs.logout()
+        queue.put({"status": "ok", "data": frame})
+    except Exception as exc:
+        queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
+
+
+def _baostock_valuation_worker(queue: Any, symbols: tuple[str, ...], start_date: str, end_date: str) -> None:
+    try:
+        import baostock as bs  # type: ignore
+
+        login = bs.login()
+        if getattr(login, "error_code", "1") != "0":
+            queue.put({"status": "error", "error_type": "RuntimeError", "error": f"baostock login failed: {getattr(login, 'error_msg', '')}"})
+            return
+        try:
+            frame = _baostock_valuation_frame_from_history(
+                bs,
+                DomainFetchRequest(
+                    domain=DataDomain.VALUATION,
+                    symbols=tuple(symbols),
+                    start_date=start_date,
+                    end_date=end_date,
+                ),
+            )
         finally:
             bs.logout()
         queue.put({"status": "ok", "data": frame})
@@ -1058,6 +1412,28 @@ def _fetch_baostock_history_frame_with_timeout(
     )
 
 
+def _fetch_baostock_intraday_5m_frame_with_timeout(
+    *,
+    symbol: str,
+    start_date: str,
+    end_date: str,
+    adjusted_flag: str,
+    timeout_seconds: int = 90,
+) -> pd.DataFrame:
+    return _fetch_baostock_payload_with_timeout(
+        target=_baostock_intraday_5m_worker,
+        kwargs={
+            "symbol": str(symbol),
+            "start_date": str(start_date),
+            "end_date": str(end_date),
+            "adjusted_flag": str(adjusted_flag or "none"),
+        },
+        timeout_seconds=timeout_seconds,
+        timeout_label="baostock_intraday_5m_timeout",
+        failure_label="baostock_intraday_5m",
+    )
+
+
 def _fetch_baostock_all_stock_frame_with_timeout(*, domain: str, trade_date: str, timeout_seconds: int = 60) -> pd.DataFrame:
     return _fetch_baostock_payload_with_timeout(
         target=_baostock_all_stock_worker,
@@ -1068,13 +1444,72 @@ def _fetch_baostock_all_stock_frame_with_timeout(*, domain: str, trade_date: str
     )
 
 
-def _fetch_baostock_industry_frame_with_timeout(*, trade_date: str, timeout_seconds: int = 90) -> pd.DataFrame:
+def _fetch_baostock_industry_frame_with_timeout(*, trade_date: str, timeout_seconds: int = 300) -> pd.DataFrame:
     return _fetch_baostock_payload_with_timeout(
         target=_baostock_industry_worker,
         kwargs={"trade_date": str(trade_date)},
         timeout_seconds=timeout_seconds,
         timeout_label="baostock_industry_timeout",
         failure_label="baostock_industry",
+    )
+
+
+def _fetch_baostock_index_constituents_frame_with_timeout(*, trade_date: str, timeout_seconds: int = 90) -> pd.DataFrame:
+    return _fetch_baostock_payload_with_timeout(
+        target=_baostock_index_constituents_worker,
+        kwargs={"trade_date": str(trade_date)},
+        timeout_seconds=timeout_seconds,
+        timeout_label="baostock_index_constituents_timeout",
+        failure_label="baostock_index_constituents",
+    )
+
+
+def _fetch_baostock_financial_quarterly_frame_with_timeout(
+    *,
+    symbols: tuple[str, ...],
+    start_date: str,
+    end_date: str,
+    timeout_seconds: int = 240,
+) -> pd.DataFrame:
+    return _fetch_baostock_payload_with_timeout(
+        target=_baostock_financial_quarterly_worker,
+        kwargs={"symbols": tuple(symbols), "start_date": str(start_date), "end_date": str(end_date)},
+        timeout_seconds=timeout_seconds,
+        timeout_label="baostock_financial_quarterly_timeout",
+        failure_label="baostock_financial_quarterly",
+    )
+
+
+def _fetch_baostock_performance_frame_with_timeout(
+    *,
+    domain: str,
+    symbols: tuple[str, ...],
+    start_date: str,
+    end_date: str,
+    timeout_seconds: int = 180,
+) -> pd.DataFrame:
+    return _fetch_baostock_payload_with_timeout(
+        target=_baostock_performance_worker,
+        kwargs={"domain": str(domain), "symbols": tuple(symbols), "start_date": str(start_date), "end_date": str(end_date)},
+        timeout_seconds=timeout_seconds,
+        timeout_label="baostock_performance_timeout",
+        failure_label="baostock_performance",
+    )
+
+
+def _fetch_baostock_valuation_frame_with_timeout(
+    *,
+    symbols: tuple[str, ...],
+    start_date: str,
+    end_date: str,
+    timeout_seconds: int = 600,
+) -> pd.DataFrame:
+    return _fetch_baostock_payload_with_timeout(
+        target=_baostock_valuation_worker,
+        kwargs={"symbols": tuple(symbols), "start_date": str(start_date), "end_date": str(end_date)},
+        timeout_seconds=timeout_seconds,
+        timeout_label="baostock_valuation_timeout",
+        failure_label="baostock_valuation",
     )
 
 

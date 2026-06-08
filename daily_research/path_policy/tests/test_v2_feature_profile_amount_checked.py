@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from daily_research.path_policy.forecast_features import (
+    BAOSTOCK_BEST_EFFORT_PROFILE,
     FORECAST_FEATURE_PROFILES,
     _cap_feature_columns,
     audit_forecast_feature_profile,
@@ -343,3 +344,45 @@ def test_augmented_profile_audit_and_store_report_new_feature_groups(tmp_path) -
     assert manifest["feature_profile_audit"]["retained_groups"]["valuation_context"] is True
     assert manifest["feature_store_shape"][2] == manifest["feature_count_after_cap"]
     assert "valuation_pbMRQ_missing_flag" in feature_columns
+
+
+def test_baostock_best_effort_profile_adds_intraday_finance_and_index_context() -> None:
+    prepared = make_prepared_policy_inputs(days=80, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2024-01-02")
+    dates = prepared.close.index
+    columns = list(prepared.close.columns)
+    intraday = pd.DataFrame(
+        np.tile(np.linspace(0.01, -0.02, len(columns)), (len(dates), 1)),
+        index=dates,
+        columns=columns,
+    )
+    finance = pd.DataFrame(np.nan, index=dates, columns=columns)
+    finance.loc[dates[20], :] = [0.12, 0.10, 0.08, 0.06]
+    index_member = pd.DataFrame(np.nan, index=dates, columns=columns)
+    index_member.loc[dates[20], :] = [1.0, 0.0, 1.0, 0.0]
+    derived = dict(prepared.derived_frames)
+    derived["intraday_daily_features_first_5m_ret"] = intraday
+    derived["intraday_daily_features_last_30m_ret"] = intraday * -1.0
+    derived["financial_quarterly_roe_avg"] = finance
+    derived["performance_forecast_profit_change_max"] = finance * 100.0
+    derived["index_constituents_000300_sh_member"] = index_member
+    prepared = replace(prepared, derived_frames=derived)
+    date = pd.Timestamp(dates[21]).normalize()
+
+    panels, feature_columns, manifest = build_forecast_feature_panels(
+        prepared,
+        [date],
+        feature_profile=BAOSTOCK_BEST_EFFORT_PROFILE,
+        max_feature_columns=768,
+    )
+
+    assert BAOSTOCK_BEST_EFFORT_PROFILE in FORECAST_FEATURE_PROFILES
+    assert manifest["intraday_context_feature_count"] > 0
+    assert manifest["finance_context_feature_count"] > 0
+    assert manifest["index_context_feature_count"] > 0
+    assert "intraday_first_5m_ret" in feature_columns
+    assert "finance_financial_quarterly_roe_avg_lag1" in feature_columns
+    assert "index_000300_sh_member_lag1" in feature_columns
+    assert panels[date].loc["AAA", "intraday_first_5m_ret"] == pytest.approx(float(intraday.loc[date, "AAA"]))
+    assert panels[date].loc["AAA", "finance_financial_quarterly_roe_avg_lag1"] == pytest.approx(0.12)
+    assert panels[date].loc["AAA", "index_000300_sh_member_lag1"] == pytest.approx(1.0)
+    assert not any(column.startswith("alpha_prior_") for column in feature_columns)

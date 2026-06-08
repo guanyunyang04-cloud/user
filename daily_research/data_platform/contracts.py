@@ -27,12 +27,18 @@ TDX_FAMILY_PROVIDER_NAMES = frozenset({"tq", "tqcenter", "tdx", "pytdx", "mootdx
 
 class DataDomain:
     MARKET_DAILY = "market_daily"
+    MARKET_INTRADAY_5M = "market_intraday_5m"
+    INTRADAY_DAILY_FEATURES = "intraday_daily_features"
     TRADING_CALENDAR = "trading_calendar"
     UNIVERSE_SNAPSHOT = "universe_snapshot"
     SECURITY_STATUS = "security_status"
     LIMIT_STATUS = "limit_status"
     INDUSTRY_CONCEPT = "industry_concept"
     VALUATION = "valuation"
+    INDEX_CONSTITUENTS = "index_constituents"
+    FINANCIAL_QUARTERLY = "financial_quarterly"
+    PERFORMANCE_FORECAST = "performance_forecast"
+    PERFORMANCE_EXPRESS = "performance_express"
     MONEY_FLOW_HOTSPOT = "money_flow_hotspot"
     NEWS_EVENT = "news_event"
     ANNOUNCEMENT = "announcement"
@@ -42,6 +48,50 @@ class DataDomain:
 
 DOMAIN_STANDARD_COLUMNS: dict[str, list[str]] = {
     DataDomain.MARKET_DAILY: STANDARD_MARKET_COLUMNS,
+    DataDomain.MARKET_INTRADAY_5M: [
+        "symbol",
+        "trade_date",
+        "bar_time",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "amount",
+        "source",
+        "adjusted_flag",
+    ],
+    DataDomain.INTRADAY_DAILY_FEATURES: [
+        "symbol",
+        "trade_date",
+        "first_5m_ret",
+        "first_15m_ret",
+        "first_30m_ret",
+        "first_30m_amount_share",
+        "open_gap",
+        "open_gap_first_30m_follow_through",
+        "open_gap_first_30m_reversal",
+        "last_5m_ret",
+        "last_30m_ret",
+        "last_30m_amount_share",
+        "intraday_ret",
+        "intraday_vwap",
+        "close_to_vwap",
+        "intraday_range",
+        "close_position",
+        "intraday_realized_vol",
+        "intraday_price_volume_corr",
+        "am_ret",
+        "pm_ret",
+        "am_pm_ret_spread",
+        "am_pm_vol_spread",
+        "am_amount_share",
+        "am_pm_amount_spread",
+        "early_strength_late_weak",
+        "close_pressure_30m",
+        "source",
+        "adjusted_flag",
+    ],
     DataDomain.TRADING_CALENDAR: ["trade_date", "is_open", "exchange", "source"],
     DataDomain.UNIVERSE_SNAPSHOT: [
         "symbol",
@@ -74,6 +124,59 @@ DOMAIN_STANDARD_COLUMNS: dict[str, list[str]] = {
     ],
     DataDomain.INDUSTRY_CONCEPT: ["symbol", "trade_date", "industry", "concept_tags", "source"],
     DataDomain.VALUATION: ["symbol", "trade_date", "total_mv", "circ_mv", "pe", "pb", "turnover_rate", "source"],
+    DataDomain.INDEX_CONSTITUENTS: ["index_symbol", "symbol", "trade_date", "index_name", "source"],
+    DataDomain.FINANCIAL_QUARTERLY: [
+        "symbol",
+        "trade_date",
+        "report_date",
+        "fiscal_year",
+        "fiscal_quarter",
+        "publish_date",
+        "roe_avg",
+        "net_profit_margin",
+        "gross_profit_margin",
+        "net_profit_yoy",
+        "revenue_yoy",
+        "eps",
+        "net_profit",
+        "revenue",
+        "asset_turnover",
+        "debt_to_asset",
+        "current_ratio",
+        "cash_flow_ps",
+        "lag_policy",
+        "source",
+    ],
+    DataDomain.PERFORMANCE_FORECAST: [
+        "symbol",
+        "trade_date",
+        "report_date",
+        "fiscal_year",
+        "fiscal_quarter",
+        "publish_date",
+        "forecast_type",
+        "profit_min",
+        "profit_max",
+        "profit_change_min",
+        "profit_change_max",
+        "lag_policy",
+        "source",
+    ],
+    DataDomain.PERFORMANCE_EXPRESS: [
+        "symbol",
+        "trade_date",
+        "report_date",
+        "fiscal_year",
+        "fiscal_quarter",
+        "publish_date",
+        "eps",
+        "roe",
+        "net_profit",
+        "revenue",
+        "total_assets",
+        "lag_policy",
+        "source",
+    ],
     DataDomain.MONEY_FLOW_HOTSPOT: [
         "symbol",
         "trade_date",
@@ -167,6 +270,14 @@ def normalize_domain(domain: str) -> str:
         "market": DataDomain.MARKET_DAILY,
         "market_bars": DataDomain.MARKET_DAILY,
         "daily": DataDomain.MARKET_DAILY,
+        "5m": DataDomain.MARKET_INTRADAY_5M,
+        "5min": DataDomain.MARKET_INTRADAY_5M,
+        "five_minute": DataDomain.MARKET_INTRADAY_5M,
+        "market_5m": DataDomain.MARKET_INTRADAY_5M,
+        "intraday_5m": DataDomain.MARKET_INTRADAY_5M,
+        "intraday_daily": DataDomain.INTRADAY_DAILY_FEATURES,
+        "intraday_features": DataDomain.INTRADAY_DAILY_FEATURES,
+        "intraday_daily_feature": DataDomain.INTRADAY_DAILY_FEATURES,
         "calendar": DataDomain.TRADING_CALENDAR,
         "trade_calendar": DataDomain.TRADING_CALENDAR,
         "universe": DataDomain.UNIVERSE_SNAPSHOT,
@@ -178,6 +289,19 @@ def normalize_domain(domain: str) -> str:
         "industry": DataDomain.INDUSTRY_CONCEPT,
         "concept": DataDomain.INDUSTRY_CONCEPT,
         "daily_basic": DataDomain.VALUATION,
+        "index": DataDomain.INDEX_CONSTITUENTS,
+        "index_constituent": DataDomain.INDEX_CONSTITUENTS,
+        "index_members": DataDomain.INDEX_CONSTITUENTS,
+        "financial": DataDomain.FINANCIAL_QUARTERLY,
+        "finance": DataDomain.FINANCIAL_QUARTERLY,
+        "quarterly_finance": DataDomain.FINANCIAL_QUARTERLY,
+        "financial_report": DataDomain.FINANCIAL_QUARTERLY,
+        "forecast_report": DataDomain.PERFORMANCE_FORECAST,
+        "performance_forecast": DataDomain.PERFORMANCE_FORECAST,
+        "earnings_forecast": DataDomain.PERFORMANCE_FORECAST,
+        "express_report": DataDomain.PERFORMANCE_EXPRESS,
+        "performance_express": DataDomain.PERFORMANCE_EXPRESS,
+        "earnings_express": DataDomain.PERFORMANCE_EXPRESS,
         "money_flow": DataDomain.MONEY_FLOW_HOTSPOT,
         "hotspot": DataDomain.MONEY_FLOW_HOTSPOT,
         "news": DataDomain.NEWS_EVENT,
@@ -316,6 +440,10 @@ def normalize_domain_frame(
     normalized_domain = normalize_domain(domain)
     if normalized_domain == DataDomain.MARKET_DAILY:
         return normalize_market_frame(frame, source=source, adjusted_flag=adjusted_flag, require_columns=require_columns)
+    if normalized_domain == DataDomain.MARKET_INTRADAY_5M:
+        return normalize_intraday_5m_frame(frame, source=source, adjusted_flag=adjusted_flag, require_columns=require_columns)
+    if normalized_domain == DataDomain.INTRADAY_DAILY_FEATURES:
+        return normalize_intraday_daily_features_frame(frame, source=source, adjusted_flag=adjusted_flag, require_columns=require_columns)
     if normalized_domain == DataDomain.TRADING_CALENDAR:
         return normalize_calendar_frame(frame, source=source, require_columns=require_columns)
     if normalized_domain == DataDomain.UNIVERSE_SNAPSHOT:
@@ -328,6 +456,14 @@ def normalize_domain_frame(
         return normalize_industry_concept_frame(frame, source=source, as_of_date=as_of_date, require_columns=require_columns)
     if normalized_domain == DataDomain.VALUATION:
         return normalize_valuation_frame(frame, source=source, as_of_date=as_of_date, require_columns=require_columns)
+    if normalized_domain == DataDomain.INDEX_CONSTITUENTS:
+        return normalize_index_constituents_frame(frame, source=source, as_of_date=as_of_date, require_columns=require_columns)
+    if normalized_domain == DataDomain.FINANCIAL_QUARTERLY:
+        return normalize_financial_quarterly_frame(frame, source=source, require_columns=require_columns)
+    if normalized_domain == DataDomain.PERFORMANCE_FORECAST:
+        return normalize_performance_forecast_frame(frame, source=source, require_columns=require_columns)
+    if normalized_domain == DataDomain.PERFORMANCE_EXPRESS:
+        return normalize_performance_express_frame(frame, source=source, require_columns=require_columns)
     if normalized_domain == DataDomain.MONEY_FLOW_HOTSPOT:
         return normalize_money_flow_hotspot_frame(frame, source=source, as_of_date=as_of_date, require_columns=require_columns)
     if normalized_domain in {
@@ -338,6 +474,164 @@ def normalize_domain_frame(
     }:
         return normalize_generic_text_domain_frame(frame, domain=normalized_domain, source=source, as_of_date=as_of_date, require_columns=require_columns)
     raise ValueError(f"unsupported data domain: {domain}")
+
+
+def normalize_intraday_5m_frame(
+    frame: pd.DataFrame,
+    *,
+    source: str,
+    adjusted_flag: str = "none",
+    require_columns: bool = True,
+) -> pd.DataFrame:
+    provider = validate_provider_name(source)
+    data = _prepare_domain_frame(frame, domain=DataDomain.MARKET_INTRADAY_5M, source=provider, as_of_date="", require_columns=False)
+    _rename_first(data, "bar_time", ("time", "bar_time", "minute", "bar_datetime", "时间", "分钟"))
+    if "adjusted_flag" not in data.columns:
+        data["adjusted_flag"] = str(adjusted_flag or "none")
+    _require_core_columns(data, DataDomain.MARKET_INTRADAY_5M, {"symbol", "trade_date", "bar_time"}, require_columns=require_columns)
+    data = _ensure_domain_columns(data, DataDomain.MARKET_INTRADAY_5M)
+    data["symbol"] = data["symbol"].map(_normalize_symbol)
+    data["trade_date"] = _date_series(data["trade_date"])
+    data["bar_time"] = data["bar_time"].map(_normalize_bar_time)
+    for column in NUMERIC_MARKET_COLUMNS:
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+    data["source"] = _source_series(data, provider)
+    data["adjusted_flag"] = data["adjusted_flag"].fillna(str(adjusted_flag or "none")).astype(str).str.strip().replace("", "none")
+    out = data.loc[
+        data["symbol"].astype(str).str.len().gt(0)
+        & data["trade_date"].astype(str).str.lower().ne("nat")
+        & data["bar_time"].astype(str).str.len().gt(0),
+        DOMAIN_STANDARD_COLUMNS[DataDomain.MARKET_INTRADAY_5M],
+    ]
+    return out.sort_values(["trade_date", "symbol", "bar_time", "source"]).reset_index(drop=True)
+
+
+def build_intraday_daily_feature_frame(
+    intraday_frame: pd.DataFrame,
+    *,
+    source: str = "baostock",
+    adjusted_flag: str = "none",
+) -> pd.DataFrame:
+    bars = normalize_intraday_5m_frame(
+        intraday_frame,
+        source=source,
+        adjusted_flag=adjusted_flag,
+        require_columns=False,
+    )
+    if bars.empty:
+        return pd.DataFrame(columns=DOMAIN_STANDARD_COLUMNS[DataDomain.INTRADAY_DAILY_FEATURES])
+    rows: list[dict[str, Any]] = []
+    prev_close_by_symbol: dict[str, float] = {}
+    for (trade_date, symbol), group in bars.groupby(["trade_date", "symbol"], sort=True):
+        day = group.sort_values("bar_time").copy()
+        if day.empty:
+            continue
+        open_values = pd.to_numeric(day["open"], errors="coerce")
+        high_values = pd.to_numeric(day["high"], errors="coerce")
+        low_values = pd.to_numeric(day["low"], errors="coerce")
+        close_values = pd.to_numeric(day["close"], errors="coerce")
+        volume_values = pd.to_numeric(day["volume"], errors="coerce")
+        amount_values = pd.to_numeric(day["amount"], errors="coerce")
+        total_amount = _finite_sum(amount_values)
+        total_volume = _finite_sum(volume_values)
+        first_open = _first_finite(open_values)
+        last_close = _last_finite(close_values)
+        prev_close = prev_close_by_symbol.get(str(symbol), np.nan)
+        high_max = float(high_values.max()) if high_values.notna().any() else np.nan
+        low_min = float(low_values.min()) if low_values.notna().any() else np.nan
+        first_30m_ret = _head_window_ret(day, 6)
+        last_30m_ret = _tail_window_ret(day, 6)
+        open_gap = _safe_return(first_open, prev_close)
+        amount_share_30 = _window_sum(amount_values, 6, head=True) / total_amount if total_amount > 0 else np.nan
+        last_amount_share_30 = _window_sum(amount_values, 6, head=False) / total_amount if total_amount > 0 else np.nan
+        vwap = total_amount / total_volume if total_amount > 0 and total_volume > 0 else np.nan
+        close_ret = close_values.pct_change().replace([np.inf, -np.inf], np.nan)
+        clocks = day["bar_time"].map(_bar_clock_int)
+        am_mask = clocks.le(113000)
+        pm_mask = clocks.ge(130000)
+        if not bool(am_mask.any()) and len(day) > 1:
+            am_mask = pd.Series(np.arange(len(day)) < len(day) // 2, index=day.index)
+        if not bool(pm_mask.any()) and len(day) > 1:
+            pm_mask = ~am_mask
+        am_day = day.loc[am_mask]
+        pm_day = day.loc[pm_mask]
+        am_ret = _session_return(am_day)
+        pm_ret = _session_return(pm_day)
+        am_vol = pd.to_numeric(am_day["close"], errors="coerce").pct_change().replace([np.inf, -np.inf], np.nan).std() if not am_day.empty else np.nan
+        pm_vol = pd.to_numeric(pm_day["close"], errors="coerce").pct_change().replace([np.inf, -np.inf], np.nan).std() if not pm_day.empty else np.nan
+        am_amount_share = _finite_sum(pd.to_numeric(am_day.get("amount", pd.Series(dtype=float)), errors="coerce")) / total_amount if total_amount > 0 else np.nan
+        pm_amount_share = 1.0 - am_amount_share if pd.notna(am_amount_share) else np.nan
+        close_position = (last_close - low_min) / (high_max - low_min) if pd.notna(last_close) and pd.notna(high_max) and pd.notna(low_min) and high_max > low_min else np.nan
+        price_volume_corr = close_ret.corr(volume_values) if close_ret.notna().sum() >= 2 and volume_values.notna().sum() >= 2 else np.nan
+        gap_sign = np.sign(open_gap) if pd.notna(open_gap) else np.nan
+        rows.append(
+            {
+                "symbol": symbol,
+                "trade_date": trade_date,
+                "first_5m_ret": _head_window_ret(day, 1),
+                "first_15m_ret": _head_window_ret(day, 3),
+                "first_30m_ret": first_30m_ret,
+                "first_30m_amount_share": amount_share_30,
+                "open_gap": open_gap,
+                "open_gap_first_30m_follow_through": gap_sign * first_30m_ret if pd.notna(gap_sign) and pd.notna(first_30m_ret) else np.nan,
+                "open_gap_first_30m_reversal": -gap_sign * first_30m_ret if pd.notna(gap_sign) and pd.notna(first_30m_ret) else np.nan,
+                "last_5m_ret": _tail_window_ret(day, 1),
+                "last_30m_ret": last_30m_ret,
+                "last_30m_amount_share": last_amount_share_30,
+                "intraday_ret": _safe_return(last_close, first_open),
+                "intraday_vwap": vwap,
+                "close_to_vwap": _safe_return(last_close, vwap),
+                "intraday_range": _safe_return(high_max, low_min),
+                "close_position": close_position,
+                "intraday_realized_vol": float(close_ret.std()) if close_ret.notna().sum() >= 2 else np.nan,
+                "intraday_price_volume_corr": price_volume_corr,
+                "am_ret": am_ret,
+                "pm_ret": pm_ret,
+                "am_pm_ret_spread": pm_ret - am_ret,
+                "am_pm_vol_spread": pm_vol - am_vol,
+                "am_amount_share": am_amount_share,
+                "am_pm_amount_spread": am_amount_share - pm_amount_share if pd.notna(am_amount_share) and pd.notna(pm_amount_share) else np.nan,
+                "early_strength_late_weak": first_30m_ret - last_30m_ret if pd.notna(first_30m_ret) and pd.notna(last_30m_ret) else np.nan,
+                "close_pressure_30m": last_30m_ret * last_amount_share_30 if pd.notna(last_30m_ret) and pd.notna(last_amount_share_30) else np.nan,
+                "source": source,
+                "adjusted_flag": str(adjusted_flag or "none"),
+            }
+        )
+        prev_close_by_symbol[str(symbol)] = last_close
+    return normalize_intraday_daily_features_frame(
+        pd.DataFrame(rows),
+        source=source,
+        adjusted_flag=adjusted_flag,
+        require_columns=False,
+    )
+
+
+def normalize_intraday_daily_features_frame(
+    frame: pd.DataFrame,
+    *,
+    source: str,
+    adjusted_flag: str = "none",
+    require_columns: bool = True,
+) -> pd.DataFrame:
+    provider = validate_provider_name(source)
+    data = _prepare_domain_frame(frame, domain=DataDomain.INTRADAY_DAILY_FEATURES, source=provider, as_of_date="", require_columns=False)
+    if "adjusted_flag" not in data.columns:
+        data["adjusted_flag"] = str(adjusted_flag or "none")
+    _require_core_columns(data, DataDomain.INTRADAY_DAILY_FEATURES, {"symbol", "trade_date"}, require_columns=require_columns)
+    data = _ensure_domain_columns(data, DataDomain.INTRADAY_DAILY_FEATURES)
+    data["symbol"] = data["symbol"].map(_normalize_symbol)
+    data["trade_date"] = _date_series(data["trade_date"])
+    for column in DOMAIN_STANDARD_COLUMNS[DataDomain.INTRADAY_DAILY_FEATURES]:
+        if column not in {"symbol", "trade_date", "source", "adjusted_flag"}:
+            data[column] = pd.to_numeric(data[column], errors="coerce")
+    data["source"] = _source_series(data, provider)
+    data["adjusted_flag"] = data["adjusted_flag"].fillna(str(adjusted_flag or "none")).astype(str).str.strip().replace("", "none")
+    out = data.loc[
+        data["symbol"].astype(str).str.len().gt(0)
+        & data["trade_date"].astype(str).str.lower().ne("nat"),
+        DOMAIN_STANDARD_COLUMNS[DataDomain.INTRADAY_DAILY_FEATURES],
+    ]
+    return out.drop_duplicates(subset=["trade_date", "symbol", "source"]).sort_values(["trade_date", "symbol", "source"]).reset_index(drop=True)
 
 
 def normalize_calendar_frame(frame: pd.DataFrame, *, source: str, require_columns: bool = True) -> pd.DataFrame:
@@ -452,6 +746,103 @@ def normalize_valuation_frame(frame: pd.DataFrame, *, source: str, as_of_date: s
     return data.loc[data["symbol"].astype(str).str.len() > 0, DOMAIN_STANDARD_COLUMNS[DataDomain.VALUATION]].drop_duplicates().sort_values(["trade_date", "symbol"]).reset_index(drop=True)
 
 
+def normalize_index_constituents_frame(frame: pd.DataFrame, *, source: str, as_of_date: str, require_columns: bool = True) -> pd.DataFrame:
+    provider = validate_provider_name(source)
+    data = _prepare_domain_frame(frame, domain=DataDomain.INDEX_CONSTITUENTS, source=provider, as_of_date=as_of_date, require_columns=False)
+    _rename_first(data, "index_symbol", ("index_code", "指数代码", "指数"))
+    _rename_first(data, "symbol", ("code", "stock", "stock_code", "证券代码", "股票代码"))
+    _rename_first(data, "index_name", ("index", "index_short_name", "指数名称", "指数简称"))
+    _require_domain_columns(data, DataDomain.INDEX_CONSTITUENTS, require_columns=require_columns)
+    data = _ensure_domain_columns(data, DataDomain.INDEX_CONSTITUENTS)
+    data["symbol"] = data["symbol"].map(_normalize_symbol)
+    data["index_symbol"] = data["index_symbol"].map(_normalize_symbol)
+    data["trade_date"] = _coerce_trade_date(data["trade_date"], as_of_date)
+    data["index_name"] = data["index_name"].fillna("").astype(str).str.strip()
+    data["source"] = _source_series(data, provider)
+    return (
+        data.loc[
+            data["symbol"].astype(str).str.len().gt(0)
+            & data["index_symbol"].astype(str).str.len().gt(0),
+            DOMAIN_STANDARD_COLUMNS[DataDomain.INDEX_CONSTITUENTS],
+        ]
+        .drop_duplicates(subset=["trade_date", "index_symbol", "symbol", "source"])
+        .sort_values(["trade_date", "index_symbol", "symbol"])
+        .reset_index(drop=True)
+    )
+
+
+def normalize_financial_quarterly_frame(frame: pd.DataFrame, *, source: str, require_columns: bool = True) -> pd.DataFrame:
+    provider = validate_provider_name(source)
+    data = _prepare_domain_frame(frame, domain=DataDomain.FINANCIAL_QUARTERLY, source=provider, as_of_date="", require_columns=False)
+    _rename_financial_common_columns(data)
+    _rename_first(data, "roe_avg", ("roeAvg", "roe_avg", "净资产收益率", "平均净资产收益率"))
+    _rename_first(data, "net_profit_margin", ("npMargin", "netProfitMargin", "net_profit_margin", "销售净利率"))
+    _rename_first(data, "gross_profit_margin", ("gpMargin", "grossProfitMargin", "gross_profit_margin", "销售毛利率"))
+    _rename_first(data, "net_profit_yoy", ("YOYPNI", "YOYNI", "netProfitGrowRate", "net_profit_yoy", "净利润同比增长率"))
+    _rename_first(data, "revenue_yoy", ("YOYIncome", "YOYRevenue", "revenueGrowRate", "revenue_yoy", "营业收入同比增长率"))
+    _rename_first(data, "eps", ("epsTTM", "eps", "每股收益"))
+    _rename_first(data, "net_profit", ("netProfit", "net_profit", "归属母公司股东的净利润"))
+    _rename_first(data, "revenue", ("totalShare", "revenue", "营业总收入"))
+    _rename_first(data, "asset_turnover", ("NRTurnRatio", "asset_turnover", "总资产周转率"))
+    _rename_first(data, "debt_to_asset", ("liabilityToAsset", "debt_to_asset", "资产负债率"))
+    _rename_first(data, "current_ratio", ("currentRatio", "current_ratio", "流动比率"))
+    _rename_first(data, "cash_flow_ps", ("CAToAsset", "cash_flow_ps", "每股经营现金流"))
+    _require_core_columns(data, DataDomain.FINANCIAL_QUARTERLY, {"symbol", "report_date"}, require_columns=require_columns)
+    data = _ensure_report_domain_columns(data, DataDomain.FINANCIAL_QUARTERLY, provider=provider)
+    numeric_columns = [
+        "fiscal_year",
+        "fiscal_quarter",
+        "roe_avg",
+        "net_profit_margin",
+        "gross_profit_margin",
+        "net_profit_yoy",
+        "revenue_yoy",
+        "eps",
+        "net_profit",
+        "revenue",
+        "asset_turnover",
+        "debt_to_asset",
+        "current_ratio",
+        "cash_flow_ps",
+    ]
+    for column in numeric_columns:
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+    return _finalize_report_domain_frame(data, DataDomain.FINANCIAL_QUARTERLY)
+
+
+def normalize_performance_forecast_frame(frame: pd.DataFrame, *, source: str, require_columns: bool = True) -> pd.DataFrame:
+    provider = validate_provider_name(source)
+    data = _prepare_domain_frame(frame, domain=DataDomain.PERFORMANCE_FORECAST, source=provider, as_of_date="", require_columns=False)
+    _rename_financial_common_columns(data)
+    _rename_first(data, "forecast_type", ("profitForcastType", "forecastType", "type", "业绩预告类型"))
+    _rename_first(data, "profit_min", ("profitMin", "profit_min", "预告净利润下限"))
+    _rename_first(data, "profit_max", ("profitMax", "profit_max", "预告净利润上限"))
+    _rename_first(data, "profit_change_min", ("profitForcastChgPctDwn", "profitForcastChgPctMin", "profit_change_min", "预告净利润变动下限"))
+    _rename_first(data, "profit_change_max", ("profitForcastChgPctUp", "profitForcastChgPctMax", "profit_change_max", "预告净利润变动上限"))
+    _require_core_columns(data, DataDomain.PERFORMANCE_FORECAST, {"symbol", "report_date", "publish_date"}, require_columns=require_columns)
+    data = _ensure_report_domain_columns(data, DataDomain.PERFORMANCE_FORECAST, provider=provider)
+    for column in ["fiscal_year", "fiscal_quarter", "profit_min", "profit_max", "profit_change_min", "profit_change_max"]:
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+    data["forecast_type"] = data["forecast_type"].fillna("").astype(str).str.strip()
+    return _finalize_report_domain_frame(data, DataDomain.PERFORMANCE_FORECAST)
+
+
+def normalize_performance_express_frame(frame: pd.DataFrame, *, source: str, require_columns: bool = True) -> pd.DataFrame:
+    provider = validate_provider_name(source)
+    data = _prepare_domain_frame(frame, domain=DataDomain.PERFORMANCE_EXPRESS, source=provider, as_of_date="", require_columns=False)
+    _rename_financial_common_columns(data)
+    _rename_first(data, "eps", ("performanceExpressEPSDiluted", "performanceExpressEPSBasic", "eps", "EPS", "每股收益"))
+    _rename_first(data, "roe", ("performanceExpressROEWa", "roe", "ROE", "净资产收益率"))
+    _rename_first(data, "net_profit", ("performanceExpressNetProfit", "netProfit", "net_profit", "归属母公司股东的净利润"))
+    _rename_first(data, "revenue", ("performanceExpressTotalIncome", "totalShare", "revenue", "营业总收入"))
+    _rename_first(data, "total_assets", ("performanceExpressTotalAsset", "totalAssets", "total_assets", "总资产"))
+    _require_core_columns(data, DataDomain.PERFORMANCE_EXPRESS, {"symbol", "report_date", "publish_date"}, require_columns=require_columns)
+    data = _ensure_report_domain_columns(data, DataDomain.PERFORMANCE_EXPRESS, provider=provider)
+    for column in ["fiscal_year", "fiscal_quarter", "eps", "roe", "net_profit", "revenue", "total_assets"]:
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+    return _finalize_report_domain_frame(data, DataDomain.PERFORMANCE_EXPRESS)
+
+
 def normalize_money_flow_hotspot_frame(frame: pd.DataFrame, *, source: str, as_of_date: str, require_columns: bool = True) -> pd.DataFrame:
     provider = validate_provider_name(source)
     data = _prepare_domain_frame(frame, domain=DataDomain.MONEY_FLOW_HOTSPOT, source=provider, as_of_date=as_of_date, require_columns=False)
@@ -554,6 +945,129 @@ def coverage_report_for_domain(frame: pd.DataFrame, request: DomainFetchRequest,
     }
 
 
+def _normalize_bar_time(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if len(digits) >= 9:
+        return digits[-9:]
+    if len(digits) >= 6:
+        return f"{digits[:6]}000"
+    if len(digits) == 4:
+        return f"{digits}00000"
+    return digits
+
+
+def _bar_clock_int(value: Any) -> int:
+    text = _normalize_bar_time(value)
+    try:
+        return int(text[:6])
+    except Exception:
+        return 0
+
+
+def _finite_sum(series: pd.Series) -> float:
+    values = pd.to_numeric(series, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+    return float(values.sum()) if len(values) else 0.0
+
+
+def _first_finite(series: pd.Series) -> float:
+    values = pd.to_numeric(series, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+    return float(values.iloc[0]) if len(values) else np.nan
+
+
+def _last_finite(series: pd.Series) -> float:
+    values = pd.to_numeric(series, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+    return float(values.iloc[-1]) if len(values) else np.nan
+
+
+def _window_sum(series: pd.Series, bars: int, *, head: bool) -> float:
+    data = pd.to_numeric(series, errors="coerce")
+    window = data.head(int(bars)) if head else data.tail(int(bars))
+    return _finite_sum(window)
+
+
+def _safe_return(close_value: Any, open_value: Any) -> float:
+    close_float = pd.to_numeric(pd.Series([close_value]), errors="coerce").iloc[0]
+    open_float = pd.to_numeric(pd.Series([open_value]), errors="coerce").iloc[0]
+    if pd.isna(close_float) or pd.isna(open_float) or float(open_float) <= 0.0:
+        return np.nan
+    return float(close_float) / float(open_float) - 1.0
+
+
+def _head_window_ret(day: pd.DataFrame, bars: int) -> float:
+    if len(day) < int(bars):
+        return np.nan
+    return _safe_return(day["close"].iloc[int(bars) - 1], day["open"].iloc[0])
+
+
+def _tail_window_ret(day: pd.DataFrame, bars: int) -> float:
+    if len(day) < int(bars):
+        return np.nan
+    tail = day.tail(int(bars))
+    return _safe_return(tail["close"].iloc[-1], tail["open"].iloc[0])
+
+
+def _session_return(day: pd.DataFrame) -> float:
+    if day is None or day.empty:
+        return np.nan
+    return _safe_return(day["close"].iloc[-1], day["open"].iloc[0])
+
+
+def _rename_financial_common_columns(data: pd.DataFrame) -> None:
+    _rename_first(data, "symbol", ("code", "stock", "ts_code", "股票代码", "证券代码"))
+    _rename_first(data, "report_date", ("statDate", "reportDate", "endDate", "performanceExpStatDate", "profitForcastExpStatDate", "报告日期", "统计日期"))
+    _rename_first(data, "publish_date", ("pubDate", "publishDate", "performanceExpPubDate", "performanceExpUpdateDate", "profitForcastExpPubDate", "公告日期", "发布日期", "更新日期"))
+    _rename_first(data, "fiscal_year", ("year", "fiscalYear", "报告年度"))
+    _rename_first(data, "fiscal_quarter", ("quarter", "fiscalQuarter", "报告季度"))
+
+
+def _ensure_report_domain_columns(data: pd.DataFrame, domain: str, *, provider: str) -> pd.DataFrame:
+    data = _ensure_domain_columns(data, domain)
+    data["symbol"] = data["symbol"].map(_normalize_symbol)
+    report_ts = pd.to_datetime(data["report_date"], errors="coerce")
+    publish_ts = pd.to_datetime(data["publish_date"], errors="coerce")
+    data["report_date"] = report_ts.dt.strftime("%Y-%m-%d")
+    publish = publish_ts.dt.strftime("%Y-%m-%d")
+    report_ts = pd.to_datetime(data["report_date"], errors="coerce")
+    fiscal_year = pd.to_numeric(data["fiscal_year"], errors="coerce")
+    fiscal_quarter = pd.to_numeric(data["fiscal_quarter"], errors="coerce")
+    data["fiscal_year"] = fiscal_year.where(fiscal_year.notna(), report_ts.dt.year)
+    data["fiscal_quarter"] = fiscal_quarter.where(fiscal_quarter.notna(), report_ts.dt.quarter)
+    conservative_publish = (report_ts + pd.offsets.BDay(90)).dt.strftime("%Y-%m-%d")
+    has_publish = publish_ts.notna()
+    data["publish_date"] = publish.where(has_publish, conservative_publish)
+    trade_ts = pd.to_datetime(data["trade_date"], errors="coerce")
+    data["trade_date"] = trade_ts.dt.strftime("%Y-%m-%d")
+    missing_trade_date = trade_ts.isna()
+    data.loc[missing_trade_date, "trade_date"] = data.loc[missing_trade_date, "publish_date"]
+    data["lag_policy"] = data["lag_policy"].fillna("").astype(str).str.strip()
+    inferred = data["lag_policy"].eq("")
+    policy_values = pd.Series(
+        np.where(
+            has_publish,
+            "publish_date_plus_1d_in_features",
+            "conservative_report_date_plus_90bd_plus_1d_in_features",
+        ),
+        index=data.index,
+    )
+    data.loc[inferred, "lag_policy"] = policy_values.loc[inferred]
+    data["source"] = _source_series(data, provider)
+    return data
+
+
+def _finalize_report_domain_frame(data: pd.DataFrame, domain: str) -> pd.DataFrame:
+    columns = DOMAIN_STANDARD_COLUMNS[normalize_domain(domain)]
+    out = data.loc[
+        data["symbol"].astype(str).str.len().gt(0)
+        & data["trade_date"].astype(str).str.lower().ne("nat"),
+        columns,
+    ]
+    sort_columns = [column for column in ["trade_date", "symbol", "fiscal_year", "fiscal_quarter", "source"] if column in out.columns]
+    return out.drop_duplicates(subset=sort_columns, keep="last").sort_values(sort_columns).reset_index(drop=True)
+
+
 def _normalize_date(value: Any) -> str:
     if value is None or str(value).strip() == "":
         raise ValueError("date cannot be empty")
@@ -616,10 +1130,41 @@ def _require_domain_columns(data: pd.DataFrame, domain: str, *, require_columns:
         raise ValueError(f"provider_frame_schema_error: domain={domain} missing columns {missing}")
 
 
+def _require_core_columns(data: pd.DataFrame, domain: str, required: set[str], *, require_columns: bool) -> None:
+    if not require_columns:
+        return
+    missing = sorted(set(required) - set(data.columns))
+    if missing:
+        raise ValueError(f"provider_frame_schema_error: domain={domain} missing core columns {missing}")
+
+
 def _ensure_domain_columns(data: pd.DataFrame, domain: str) -> pd.DataFrame:
+    string_columns = {
+        "symbol",
+        "trade_date",
+        "source",
+        "adjusted_flag",
+        "bar_time",
+        "name",
+        "exchange",
+        "board",
+        "list_status",
+        "list_date",
+        "delist_date",
+        "status_reason",
+        "industry",
+        "concept_tags",
+        "hotspot_tags",
+        "index_symbol",
+        "index_name",
+        "report_date",
+        "publish_date",
+        "forecast_type",
+        "lag_policy",
+    }
     for column in DOMAIN_STANDARD_COLUMNS[normalize_domain(domain)]:
         if column not in data.columns:
-            data[column] = "" if column in {"symbol", "trade_date", "source", "name", "exchange", "board", "list_status", "list_date", "delist_date", "status_reason", "industry", "concept_tags", "hotspot_tags"} else np.nan
+            data[column] = "" if column in string_columns else np.nan
     return data
 
 

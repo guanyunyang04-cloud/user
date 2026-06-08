@@ -14,6 +14,7 @@ from daily_research.continuous_policy.runtime import write_json
 
 
 AUGMENTED_INDUSTRY_METRICS_PROFILE = "raw_kline_context_v2_tradeable_local_state_industry_metrics_v1"
+BAOSTOCK_BEST_EFFORT_PROFILE = "raw_kline_context_v2_baostock_best_effort_v1"
 FORECAST_FEATURE_PROFILES: tuple[str, ...] = (
     "state_v1",
     "raw_kline_v1",
@@ -26,6 +27,7 @@ FORECAST_FEATURE_PROFILES: tuple[str, ...] = (
     "raw_kline_context_v2_tradeable_amount_checked",
     "raw_kline_context_v2_tradeable_local_state_v1",
     AUGMENTED_INDUSTRY_METRICS_PROFILE,
+    BAOSTOCK_BEST_EFFORT_PROFILE,
 )
 DEFAULT_FORECAST_FEATURE_PROFILE = "raw_kline_context_v1"
 DEFAULT_FORECAST_MAX_FEATURE_COLUMNS = 192
@@ -41,6 +43,7 @@ RAW_FRAME_PROFILES = {
     "raw_kline_context_v2_tradeable_amount_checked",
     "raw_kline_context_v2_tradeable_local_state_v1",
     AUGMENTED_INDUSTRY_METRICS_PROFILE,
+    BAOSTOCK_BEST_EFFORT_PROFILE,
 }
 CONTEXT_FRAME_PROFILES = {
     "raw_kline_context_v1",
@@ -52,6 +55,7 @@ CONTEXT_FRAME_PROFILES = {
     "raw_kline_context_v2_tradeable_amount_checked",
     "raw_kline_context_v2_tradeable_local_state_v1",
     AUGMENTED_INDUSTRY_METRICS_PROFILE,
+    BAOSTOCK_BEST_EFFORT_PROFILE,
 }
 HISTORY_FRAME_PROFILES = {
     "raw_kline_context_sector_relative_v1",
@@ -60,12 +64,14 @@ HISTORY_FRAME_PROFILES = {
     "raw_kline_context_v2_tradeable_amount_checked",
     "raw_kline_context_v2_tradeable_local_state_v1",
     AUGMENTED_INDUSTRY_METRICS_PROFILE,
+    BAOSTOCK_BEST_EFFORT_PROFILE,
 }
-SECTOR_CONTEXT_PROFILES = {"raw_kline_context_sector_v1", AUGMENTED_INDUSTRY_METRICS_PROFILE}
+SECTOR_CONTEXT_PROFILES = {"raw_kline_context_sector_v1", AUGMENTED_INDUSTRY_METRICS_PROFILE, BAOSTOCK_BEST_EFFORT_PROFILE}
 SECTOR_RELATIVE_PROFILES = {
     "raw_kline_context_sector_relative_v1",
     "raw_kline_context_sector_relative_regime_v1",
     AUGMENTED_INDUSTRY_METRICS_PROFILE,
+    BAOSTOCK_BEST_EFFORT_PROFILE,
 }
 REGIME_PROFILES = {
     "raw_kline_context_regime_v1",
@@ -73,10 +79,14 @@ REGIME_PROFILES = {
     "raw_kline_context_v2_tradeable_amount_checked",
     "raw_kline_context_v2_tradeable_local_state_v1",
     AUGMENTED_INDUSTRY_METRICS_PROFILE,
+    BAOSTOCK_BEST_EFFORT_PROFILE,
 }
-LOCAL_STATE_PROFILES = {"raw_kline_context_v2_tradeable_local_state_v1", AUGMENTED_INDUSTRY_METRICS_PROFILE}
-TURNOVER_CONTEXT_PROFILES = {AUGMENTED_INDUSTRY_METRICS_PROFILE}
-VALUATION_CONTEXT_PROFILES = {AUGMENTED_INDUSTRY_METRICS_PROFILE}
+LOCAL_STATE_PROFILES = {"raw_kline_context_v2_tradeable_local_state_v1", AUGMENTED_INDUSTRY_METRICS_PROFILE, BAOSTOCK_BEST_EFFORT_PROFILE}
+TURNOVER_CONTEXT_PROFILES = {AUGMENTED_INDUSTRY_METRICS_PROFILE, BAOSTOCK_BEST_EFFORT_PROFILE}
+VALUATION_CONTEXT_PROFILES = {AUGMENTED_INDUSTRY_METRICS_PROFILE, BAOSTOCK_BEST_EFFORT_PROFILE}
+INTRADAY_CONTEXT_PROFILES = {BAOSTOCK_BEST_EFFORT_PROFILE}
+FINANCE_CONTEXT_PROFILES = {BAOSTOCK_BEST_EFFORT_PROFILE}
+INDEX_CONTEXT_PROFILES = {BAOSTOCK_BEST_EFFORT_PROFILE}
 AMOUNT_CHECKED_PROFILES = {"raw_kline_context_v2_tradeable_amount_checked", *LOCAL_STATE_PROFILES}
 NO_ALPHA_CONTRACT_PROFILES = {
     "raw_kline_context_no_alpha_prior_v1",
@@ -86,6 +96,7 @@ NO_ALPHA_CONTRACT_PROFILES = {
     "raw_kline_context_v2_tradeable_amount_checked",
     "raw_kline_context_v2_tradeable_local_state_v1",
     AUGMENTED_INDUSTRY_METRICS_PROFILE,
+    BAOSTOCK_BEST_EFFORT_PROFILE,
 }
 
 
@@ -151,6 +162,11 @@ def _cross_z(frame: pd.DataFrame) -> pd.DataFrame:
     mean = frame.mean(axis=1)
     std = frame.std(axis=1, ddof=0).replace(0.0, np.nan)
     return frame.sub(mean, axis=0).div(std, axis=0).replace([np.inf, -np.inf], np.nan)
+
+
+def _signed_log1p(frame: pd.DataFrame) -> pd.DataFrame:
+    data = frame.astype(float).replace([np.inf, -np.inf], np.nan)
+    return np.sign(data) * np.log1p(data.abs())
 
 
 def _repeat_series_to_universe(series: pd.Series, columns: list[str]) -> pd.DataFrame:
@@ -808,6 +824,113 @@ def _valuation_context_feature_frames(prepared: PreparedPolicyInputs) -> dict[st
     return {key: value.replace([np.inf, -np.inf], np.nan) for key, value in out.items()}
 
 
+def _derived_feature_panel(prepared: PreparedPolicyInputs, key: str, *, ffill: bool = False, lag: int = 0) -> pd.DataFrame | None:
+    close = prepared.close.astype(float)
+    columns = [str(item).strip().upper() for item in close.columns]
+    raw = dict(getattr(prepared, "derived_frames", {}) or {}).get(str(key))
+    if raw is None or raw.empty:
+        return None
+    panel = raw.reindex(index=close.index, columns=columns).astype(float).replace([np.inf, -np.inf], np.nan)
+    if ffill:
+        panel = panel.ffill()
+    if int(lag) > 0:
+        panel = panel.shift(int(lag))
+    return panel.replace([np.inf, -np.inf], np.nan)
+
+
+def _intraday_context_feature_frames(prepared: PreparedPolicyInputs) -> dict[str, pd.DataFrame]:
+    out: dict[str, pd.DataFrame] = {}
+    fields = (
+        "first_5m_ret",
+        "first_15m_ret",
+        "first_30m_ret",
+        "first_30m_amount_share",
+        "open_gap",
+        "open_gap_first_30m_follow_through",
+        "open_gap_first_30m_reversal",
+        "last_5m_ret",
+        "last_30m_ret",
+        "last_30m_amount_share",
+        "intraday_ret",
+        "close_to_vwap",
+        "intraday_range",
+        "close_position",
+        "intraday_realized_vol",
+        "intraday_price_volume_corr",
+        "am_ret",
+        "pm_ret",
+        "am_pm_ret_spread",
+        "am_pm_vol_spread",
+        "am_amount_share",
+        "am_pm_amount_spread",
+        "early_strength_late_weak",
+        "close_pressure_30m",
+    )
+    for field in fields:
+        panel = _derived_feature_panel(prepared, f"intraday_daily_features_{field}")
+        if panel is None:
+            continue
+        name = f"intraday_{field}"
+        out[name] = panel
+        out[f"cs_rank_{name}"] = panel.rank(axis=1, pct=True)
+        out[f"cs_z_{name}"] = _cross_z(panel)
+    return {key: value.replace([np.inf, -np.inf], np.nan) for key, value in out.items()}
+
+
+def _finance_context_feature_frames(prepared: PreparedPolicyInputs) -> dict[str, pd.DataFrame]:
+    out: dict[str, pd.DataFrame] = {}
+    fields = (
+        "financial_quarterly_roe_avg",
+        "financial_quarterly_net_profit_margin",
+        "financial_quarterly_gross_profit_margin",
+        "financial_quarterly_net_profit_yoy",
+        "financial_quarterly_revenue_yoy",
+        "financial_quarterly_eps",
+        "financial_quarterly_net_profit",
+        "financial_quarterly_revenue",
+        "financial_quarterly_asset_turnover",
+        "financial_quarterly_debt_to_asset",
+        "financial_quarterly_current_ratio",
+        "financial_quarterly_cash_flow_ps",
+        "performance_forecast_profit_change_min",
+        "performance_forecast_profit_change_max",
+        "performance_express_eps",
+        "performance_express_roe",
+        "performance_express_net_profit",
+        "performance_express_revenue",
+        "performance_express_total_assets",
+    )
+    signed_log_fields = {
+        "financial_quarterly_net_profit",
+        "financial_quarterly_revenue",
+        "performance_express_net_profit",
+        "performance_express_revenue",
+        "performance_express_total_assets",
+    }
+    for field in fields:
+        panel = _derived_feature_panel(prepared, field, ffill=True, lag=1)
+        if panel is None:
+            continue
+        transformed = _signed_log1p(panel) if field in signed_log_fields else panel
+        name = f"finance_{field}_lag1"
+        out[name] = transformed
+        out[f"{name}_missing_flag"] = panel.isna().astype(float)
+        out[f"{name}_cs_rank"] = transformed.rank(axis=1, pct=True)
+        out[f"{name}_cs_z"] = _cross_z(transformed)
+    return {key: value.replace([np.inf, -np.inf], np.nan) for key, value in out.items()}
+
+
+def _index_context_feature_frames(prepared: PreparedPolicyInputs) -> dict[str, pd.DataFrame]:
+    derived = dict(getattr(prepared, "derived_frames", {}) or {})
+    out: dict[str, pd.DataFrame] = {}
+    for key in sorted(name for name in derived if str(name).startswith("index_constituents_") and str(name).endswith("_member")):
+        panel = _derived_feature_panel(prepared, str(key), ffill=True, lag=1)
+        if panel is None:
+            continue
+        out[f"index_{str(key).replace('index_constituents_', '')}_lag1"] = panel.fillna(0.0)
+    return out
+
+
 def _regime_feature_frames(prepared: PreparedPolicyInputs, raw_frames: dict[str, pd.DataFrame], *, feature_profile: str = DEFAULT_FORECAST_FEATURE_PROFILE) -> dict[str, pd.DataFrame]:
     close = prepared.close.astype(float)
     amount, _amount_audit = _amount_for_feature_profile(prepared, feature_profile)
@@ -876,6 +999,9 @@ def _selected_columns_for_profile(
     local_state_columns: list[str] | None = None,
     turnover_columns: list[str] | None = None,
     valuation_columns: list[str] | None = None,
+    intraday_columns: list[str] | None = None,
+    finance_columns: list[str] | None = None,
+    index_columns: list[str] | None = None,
     history_columns: list[str] | None = None,
     feature_profile: str,
 ) -> tuple[list[str], dict[str, str]]:
@@ -887,6 +1013,9 @@ def _selected_columns_for_profile(
     local_state_columns = list(local_state_columns or [])
     turnover_columns = list(turnover_columns or [])
     valuation_columns = list(valuation_columns or [])
+    intraday_columns = list(intraday_columns or [])
+    finance_columns = list(finance_columns or [])
+    index_columns = list(index_columns or [])
     if feature_profile in RAW_FRAME_PROFILES - {"raw_kline_context_sector_v1"}:
         column_groups.update({column: "raw_kline" for column in raw_columns})
     if feature_profile == "raw_kline_context_sector_v1":
@@ -913,6 +1042,12 @@ def _selected_columns_for_profile(
         column_groups.update({column: "turnover_context" for column in turnover_columns})
     if feature_profile in VALUATION_CONTEXT_PROFILES:
         column_groups.update({column: "valuation_context" for column in valuation_columns})
+    if feature_profile in INTRADAY_CONTEXT_PROFILES:
+        column_groups.update({column: "intraday_context" for column in intraday_columns})
+    if feature_profile in FINANCE_CONTEXT_PROFILES:
+        column_groups.update({column: "finance_context" for column in finance_columns})
+    if feature_profile in INDEX_CONTEXT_PROFILES:
+        column_groups.update({column: "index_context" for column in index_columns})
     columns = [column for column in state_columns if column in column_groups]
     if feature_profile in RAW_FRAME_PROFILES:
         columns.extend([column for column in raw_columns if column in column_groups])
@@ -932,6 +1067,12 @@ def _selected_columns_for_profile(
         columns.extend([column for column in turnover_columns if column in column_groups])
     if feature_profile in VALUATION_CONTEXT_PROFILES:
         columns.extend([column for column in valuation_columns if column in column_groups])
+    if feature_profile in INTRADAY_CONTEXT_PROFILES:
+        columns.extend([column for column in intraday_columns if column in column_groups])
+    if feature_profile in FINANCE_CONTEXT_PROFILES:
+        columns.extend([column for column in finance_columns if column in column_groups])
+    if feature_profile in INDEX_CONTEXT_PROFILES:
+        columns.extend([column for column in index_columns if column in column_groups])
     if feature_profile in NO_ALPHA_CONTRACT_PROFILES:
         columns = [column for column in columns if not _alpha_dependent_column(column)]
         column_groups = {column: group for column, group in column_groups.items() if column in columns}
@@ -959,6 +1100,9 @@ def _manifest_for_columns(
         "local_state_context": 0,
         "turnover_context": 0,
         "valuation_context": 0,
+        "intraday_context": 0,
+        "finance_context": 0,
+        "index_context": 0,
         "alpha_prior": 0,
         "history_quality": 0,
     }
@@ -983,6 +1127,9 @@ def _manifest_for_columns(
         "local_state_context_feature_count": int(group_counts["local_state_context"]),
         "turnover_context_feature_count": int(group_counts["turnover_context"]),
         "valuation_context_feature_count": int(group_counts["valuation_context"]),
+        "intraday_context_feature_count": int(group_counts["intraday_context"]),
+        "finance_context_feature_count": int(group_counts["finance_context"]),
+        "index_context_feature_count": int(group_counts["index_context"]),
         "alpha_prior_feature_count": int(group_counts["alpha_prior"]),
         "history_quality_feature_count": int(group_counts["history_quality"]),
         "source_sector_board_view_id": str(source_sector_board_view_id or ""),
@@ -1017,6 +1164,12 @@ def _cap_feature_columns(
         priority_groups.add("turnover_context")
     if feature_profile in VALUATION_CONTEXT_PROFILES:
         priority_groups.add("valuation_context")
+    if feature_profile in INTRADAY_CONTEXT_PROFILES:
+        priority_groups.add("intraday_context")
+    if feature_profile in FINANCE_CONTEXT_PROFILES:
+        priority_groups.add("finance_context")
+    if feature_profile in INDEX_CONTEXT_PROFILES:
+        priority_groups.add("index_context")
     priority_order = [
         "raw_kline",
         "local_state_context",
@@ -1027,6 +1180,9 @@ def _cap_feature_columns(
         "sector_relative_context",
         "turnover_context",
         "valuation_context",
+        "intraday_context",
+        "finance_context",
+        "index_context",
         "regime_context",
     ]
     priority_columns = [
@@ -1098,6 +1254,9 @@ def build_forecast_feature_panels(
     local_state_frames = _local_state_feature_frames(prepared) if profile in LOCAL_STATE_PROFILES else {}
     turnover_frames = _turnover_context_feature_frames(prepared) if profile in TURNOVER_CONTEXT_PROFILES else {}
     valuation_frames = _valuation_context_feature_frames(prepared) if profile in VALUATION_CONTEXT_PROFILES else {}
+    intraday_frames = _intraday_context_feature_frames(prepared) if profile in INTRADAY_CONTEXT_PROFILES else {}
+    finance_frames = _finance_context_feature_frames(prepared) if profile in FINANCE_CONTEXT_PROFILES else {}
+    index_frames = _index_context_feature_frames(prepared) if profile in INDEX_CONTEXT_PROFILES else {}
     all_columns, column_groups = _selected_columns_for_profile(
         state_columns=state_columns,
         raw_columns=list(raw_frames),
@@ -1108,6 +1267,9 @@ def build_forecast_feature_panels(
         local_state_columns=list(local_state_frames),
         turnover_columns=list(turnover_frames),
         valuation_columns=list(valuation_frames),
+        intraday_columns=list(intraday_frames),
+        finance_columns=list(finance_frames),
+        index_columns=list(index_frames),
         history_columns=list(history_frames),
         feature_profile=profile,
     )
@@ -1153,6 +1315,12 @@ def build_forecast_feature_panels(
                 extra_parts[column] = turnover_frames[column].loc[dt].reindex(universe)
             elif column in valuation_frames:
                 extra_parts[column] = valuation_frames[column].loc[dt].reindex(universe)
+            elif column in intraday_frames:
+                extra_parts[column] = intraday_frames[column].loc[dt].reindex(universe)
+            elif column in finance_frames:
+                extra_parts[column] = finance_frames[column].loc[dt].reindex(universe)
+            elif column in index_frames:
+                extra_parts[column] = index_frames[column].loc[dt].reindex(universe)
             else:
                 extra_parts[column] = pd.Series(np.nan, index=universe, dtype=float)
         panel = pd.DataFrame(extra_parts, index=universe).apply(pd.to_numeric, errors="coerce")
@@ -1282,6 +1450,12 @@ def build_forecast_feature_store(
     _write_feature_store_progress(root, "turnover_frames_done", turnover_frame_count=len(turnover_frames))
     valuation_frames = _valuation_context_feature_frames(prepared) if profile in VALUATION_CONTEXT_PROFILES else {}
     _write_feature_store_progress(root, "valuation_frames_done", valuation_frame_count=len(valuation_frames))
+    intraday_frames = _intraday_context_feature_frames(prepared) if profile in INTRADAY_CONTEXT_PROFILES else {}
+    _write_feature_store_progress(root, "intraday_frames_done", intraday_frame_count=len(intraday_frames))
+    finance_frames = _finance_context_feature_frames(prepared) if profile in FINANCE_CONTEXT_PROFILES else {}
+    _write_feature_store_progress(root, "finance_frames_done", finance_frame_count=len(finance_frames))
+    index_frames = _index_context_feature_frames(prepared) if profile in INDEX_CONTEXT_PROFILES else {}
+    _write_feature_store_progress(root, "index_frames_done", index_frame_count=len(index_frames))
     all_columns, column_groups = _selected_columns_for_profile(
         state_columns=state_columns,
         raw_columns=list(raw_frames),
@@ -1292,6 +1466,9 @@ def build_forecast_feature_store(
         local_state_columns=list(local_state_frames),
         turnover_columns=list(turnover_frames),
         valuation_columns=list(valuation_frames),
+        intraday_columns=list(intraday_frames),
+        finance_columns=list(finance_frames),
+        index_columns=list(index_frames),
         history_columns=list(history_frames),
         feature_profile=profile,
     )
@@ -1325,6 +1502,9 @@ def build_forecast_feature_store(
         and column not in local_state_frames
         and column not in turnover_frames
         and column not in valuation_frames
+        and column not in intraday_frames
+        and column not in finance_frames
+        and column not in index_frames
         for column in selected_columns
     )
     empty_state = pd.DataFrame(index=universe)
@@ -1373,6 +1553,12 @@ def build_forecast_feature_store(
                 extra_parts[column] = turnover_frames[column].loc[dt].reindex(universe)
             elif column in valuation_frames:
                 extra_parts[column] = valuation_frames[column].loc[dt].reindex(universe)
+            elif column in intraday_frames:
+                extra_parts[column] = intraday_frames[column].loc[dt].reindex(universe)
+            elif column in finance_frames:
+                extra_parts[column] = finance_frames[column].loc[dt].reindex(universe)
+            elif column in index_frames:
+                extra_parts[column] = index_frames[column].loc[dt].reindex(universe)
             else:
                 extra_parts[column] = pd.Series(np.nan, index=universe, dtype=float)
         values = pd.DataFrame(extra_parts, index=universe).reindex(columns=selected_columns).to_numpy(dtype=np.float32)

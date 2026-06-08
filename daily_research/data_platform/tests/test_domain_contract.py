@@ -66,6 +66,65 @@ class DataPlatformDomainContractTest(unittest.TestCase):
                     "turnover_rate": [1.2],
                 }
             ),
+            DataDomain.MARKET_INTRADAY_5M: pd.DataFrame(
+                {
+                    "code": ["sz.000001"],
+                    "date": ["2026-01-05"],
+                    "time": ["20260105093500000"],
+                    "open": [10.0],
+                    "high": [10.2],
+                    "low": [9.9],
+                    "close": [10.1],
+                    "volume": [1000],
+                    "amount": [10100],
+                }
+            ),
+            DataDomain.INTRADAY_DAILY_FEATURES: pd.DataFrame(
+                {
+                    "symbol": ["000001.SZ"],
+                    "trade_date": ["2026-01-05"],
+                    "first_5m_ret": [0.01],
+                    "last_30m_ret": [0.02],
+                    "close_pressure_30m": [0.005],
+                }
+            ),
+            DataDomain.INDEX_CONSTITUENTS: pd.DataFrame(
+                {
+                    "index_code": ["000300.SH"],
+                    "code": ["000001.SZ"],
+                    "date": ["2026-01-05"],
+                    "index": ["CSI 300"],
+                }
+            ),
+            DataDomain.FINANCIAL_QUARTERLY: pd.DataFrame(
+                {
+                    "code": ["sz.000001"],
+                    "statDate": ["2025-12-31"],
+                    "year": [2025],
+                    "quarter": [4],
+                    "roeAvg": [0.12],
+                    "YOYPNI": [0.08],
+                }
+            ),
+            DataDomain.PERFORMANCE_FORECAST: pd.DataFrame(
+                {
+                    "code": ["sz.000001"],
+                    "profitForcastExpPubDate": ["2026-01-20"],
+                    "profitForcastExpStatDate": ["2025-12-31"],
+                    "profitForcastType": ["预增"],
+                    "profitForcastChgPctDwn": [10.0],
+                    "profitForcastChgPctUp": [30.0],
+                }
+            ),
+            DataDomain.PERFORMANCE_EXPRESS: pd.DataFrame(
+                {
+                    "code": ["sz.000001"],
+                    "performanceExpPubDate": ["2026-02-20"],
+                    "performanceExpStatDate": ["2025-12-31"],
+                    "performanceExpressEPSDiluted": [1.2],
+                    "performanceExpressROEWa": [12.5],
+                }
+            ),
             DataDomain.MONEY_FLOW_HOTSPOT: pd.DataFrame(
                 {
                     "symbol": ["000001.SZ"],
@@ -100,6 +159,26 @@ class DataPlatformDomainContractTest(unittest.TestCase):
 
         self.assertTrue(result.data.empty)
         self.assertIn("unsupported_domain", {item["code"] for item in result.error_report})
+
+    def test_financial_quarterly_without_publish_date_uses_conservative_availability(self) -> None:
+        normalized = normalize_domain_frame(
+            pd.DataFrame(
+                {
+                    "code": ["sz.000001"],
+                    "statDate": ["2025-12-31"],
+                    "year": [2025],
+                    "quarter": [4],
+                    "roeAvg": [0.12],
+                }
+            ),
+            domain=DataDomain.FINANCIAL_QUARTERLY,
+            source="baostock",
+            require_columns=False,
+        )
+
+        self.assertEqual(normalized["symbol"].iloc[0], "000001.SZ")
+        self.assertGreater(pd.Timestamp(normalized["trade_date"].iloc[0]), pd.Timestamp("2025-12-31"))
+        self.assertEqual(normalized["lag_policy"].iloc[0], "conservative_report_date_plus_90bd_plus_1d_in_features")
 
 
 if __name__ == "__main__":

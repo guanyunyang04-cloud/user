@@ -1114,6 +1114,132 @@ class ResearchDataLake:
             metadata=metadata,
         )
 
+    def build_domain_dataset_identity(self, *, domain: str, spec: Mapping[str, Any]) -> dict[str, str]:
+        normalized_domain = str(domain).strip().lower()
+        dataset_kind = f"data_platform_{normalized_domain}"
+        zone = "research"
+        effective_spec = dict(spec)
+        effective_spec["domain"] = normalized_domain
+        fingerprint = _stable_hash(
+            {
+                "schema_version": DATA_LAKE_SCHEMA_VERSION,
+                "dataset_kind": dataset_kind,
+                "zone": zone,
+                "spec": effective_spec,
+            }
+        )
+        dataset_id = f"{dataset_kind}__{fingerprint}"
+        dataset_dir = self.parquet_root / "bronze_silver" / dataset_kind / fingerprint
+        return {
+            "dataset_kind": dataset_kind,
+            "zone": zone,
+            "fingerprint": fingerprint,
+            "dataset_id": dataset_id,
+            "dataset_dir": str(dataset_dir.resolve()),
+        }
+
+    def save_sharded_domain_dataset(
+        self,
+        *,
+        domain: str,
+        spec: Mapping[str, Any],
+        shard_records: Sequence[Mapping[str, Any]],
+        source: str,
+        reuse: bool = True,
+    ) -> LakeDatasetRecord:
+        normalized_domain = str(domain).strip().lower()
+        effective_spec = dict(spec)
+        effective_spec["domain"] = normalized_domain
+        effective_spec["sharded"] = True
+        identity = self.build_domain_dataset_identity(domain=normalized_domain, spec=effective_spec)
+        dataset_kind = identity["dataset_kind"]
+        zone = identity["zone"]
+        fingerprint = identity["fingerprint"]
+        dataset_id = identity["dataset_id"]
+        dataset_dir = Path(identity["dataset_dir"])
+        shard_dir = dataset_dir / "shards"
+        shard_manifest_path = dataset_dir / "shard_manifest.json"
+        content_paths = {
+            "silver_domain_data": str((shard_dir / "*.parquet").resolve()),
+            "shard_manifest": str(shard_manifest_path.resolve()),
+        }
+        existing = self._existing_by_fingerprint(fingerprint)
+        if reuse and existing is not None and shard_manifest_path.exists():
+            metadata = self.describe_dataset(str(existing["dataset_id"]))
+            return LakeDatasetRecord(
+                dataset_id=str(metadata["dataset_id"]),
+                dataset_kind=str(metadata["dataset_kind"]),
+                zone=str(metadata["zone"]),
+                fingerprint=str(metadata["fingerprint"]),
+                status="hit",
+                root=self.root,
+                content_paths=dict(metadata.get("content_paths", {}) or {}),
+                row_counts={str(key): int(value) for key, value in dict(metadata.get("row_counts", {}) or {}).items()},
+                metadata=metadata,
+            )
+
+        dataset_dir.mkdir(parents=True, exist_ok=True)
+        shard_dir.mkdir(parents=True, exist_ok=True)
+        normalized_shards = [_json_safe(dict(item)) for item in shard_records]
+        _write_json(
+            shard_manifest_path,
+            {
+                "dataset_id": dataset_id,
+                "dataset_kind": dataset_kind,
+                "domain": normalized_domain,
+                "source": str(source or ""),
+                "sharded": True,
+                "shard_count": int(len(normalized_shards)),
+                "shards": normalized_shards,
+            },
+        )
+        row_count = int(sum(int(dict(item).get("row_count", 0) or 0) for item in shard_records))
+        shard_count = int(len(shard_records))
+        stored_shard_count = int(sum(1 for item in shard_records if str(dict(item).get("status", "") or "") in {"stored", "skipped"}))
+        error_count = int(sum(int(dict(item).get("error_count", 0) or 0) for item in shard_records))
+        starts = [str(dict(item).get("start_date", "") or "") for item in shard_records if str(dict(item).get("start_date", "") or "")]
+        ends = [str(dict(item).get("end_date", "") or "") for item in shard_records if str(dict(item).get("end_date", "") or "")]
+        start_date = min(starts) if starts else ""
+        end_date = max(ends) if ends else ""
+        row_counts: dict[str, Any] = {
+            "silver_domain_data": row_count,
+            "shards": shard_count,
+            "stored_shards": stored_shard_count,
+            "error_count": error_count,
+            "_date_bounds": {"start_date": start_date, "end_date": end_date},
+        }
+        merged_spec = {
+            **effective_spec,
+            "start_date": str(effective_spec.get("start_date", "") or start_date),
+            "end_date": str(effective_spec.get("end_date", "") or end_date),
+        }
+        self._upsert_dataset(
+            dataset_id=dataset_id,
+            dataset_kind=dataset_kind,
+            domain="bronze_silver",
+            zone=zone,
+            source=str(source or ""),
+            spec=merged_spec,
+            label_completeness_summary={},
+            content_paths=content_paths,
+            row_counts=row_counts,
+            source_cache={"sharded": True, "shard_count": shard_count},
+            fingerprint=fingerprint,
+            status="stored",
+        )
+        metadata = self.describe_dataset(dataset_id)
+        return LakeDatasetRecord(
+            dataset_id=dataset_id,
+            dataset_kind=dataset_kind,
+            zone=zone,
+            fingerprint=fingerprint,
+            status="stored",
+            root=self.root,
+            content_paths=dict(metadata.get("content_paths", {}) or {}),
+            row_counts={str(key): int(value) for key, value in dict(metadata.get("row_counts", {}) or {}).items()},
+            metadata=metadata,
+        )
+
     @staticmethod
     def _field_to_column(field: str) -> str:
         normalized = str(field or "").strip().lower()

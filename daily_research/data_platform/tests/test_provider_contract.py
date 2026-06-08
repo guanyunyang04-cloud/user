@@ -30,6 +30,9 @@ from daily_research.data_platform.providers import (
     _baostock_stock_basic_frame,
     _baostock_valuation_frame_from_history,
     _baostock_history_frame,
+    _baostock_intraday_5m_frame,
+    _baostock_index_constituents_frame,
+    _to_baostock_code,
 )
 
 
@@ -417,6 +420,45 @@ class DataPlatformProviderContractTest(unittest.TestCase):
         self.assertTrue(pd.isna(frame["total_mv"].iloc[0]))
         self.assertTrue(pd.isna(frame["circ_mv"].iloc[0]))
 
+    def test_baostock_valuation_frame_relogs_in_when_session_drops(self) -> None:
+        class ErrorQuery:
+            fields: list[str] = []
+            error_code = "10001001"
+            error_msg = "用户未登录"
+
+        class GoodQuery:
+            fields = ["date", "code", "turn", "peTTM", "pbMRQ"]
+            error_code = "0"
+            error_msg = "success"
+
+            def __init__(self) -> None:
+                self._rows = [["2026-05-22", "sh.600000", "1.23", "6.5", "0.8"]]
+                self._index = -1
+
+            def next(self) -> bool:
+                self._index += 1
+                return self._index < len(self._rows)
+
+            def get_row_data(self) -> list[str]:
+                return self._rows[self._index]
+
+        fake_bs = types.SimpleNamespace(
+            query_history_k_data_plus=mock.Mock(side_effect=[ErrorQuery(), GoodQuery()]),
+            logout=mock.Mock(),
+            login=mock.Mock(return_value=types.SimpleNamespace(error_code="0", error_msg="success")),
+        )
+        request = DomainFetchRequest(domain=DataDomain.VALUATION, symbols=("600000.SH",), start_date="2026-05-22", end_date="2026-05-22")
+
+        with mock.patch("daily_research.data_platform.providers.time.sleep") as sleep:
+            frame = _baostock_valuation_frame_from_history(fake_bs, request)
+
+        self.assertEqual(fake_bs.query_history_k_data_plus.call_count, 2)
+        fake_bs.logout.assert_called_once()
+        fake_bs.login.assert_called_once()
+        sleep.assert_called_once()
+        self.assertEqual(frame["symbol"].tolist(), ["600000.SH"])
+        self.assertEqual(frame["pe"].tolist(), ["6.5"])
+
     def test_baostock_history_frame_maps_daily_market_rows(self) -> None:
         class FakeQuery:
             fields = ["date", "code", "open", "high", "low", "close", "volume", "amount"]
@@ -439,6 +481,94 @@ class DataPlatformProviderContractTest(unittest.TestCase):
         self.assertEqual(frame["trade_date"].tolist(), ["2026-05-22"])
         self.assertEqual(frame["symbol"].tolist(), ["600000.SH"])
         self.assertEqual(frame["close"].tolist(), ["10.5"])
+
+    def test_baostock_intraday_5m_frame_maps_minute_rows(self) -> None:
+        class FakeQuery:
+            fields = ["date", "time", "code", "open", "high", "low", "close", "volume", "amount", "adjustflag"]
+            error_code = "0"
+            error_msg = "success"
+
+            def __init__(self) -> None:
+                self._rows = [["2026-05-22", "20260522093500000", "sh.600000", "10", "10.2", "9.9", "10.1", "100", "1010", "3"]]
+                self._index = -1
+
+            def next(self) -> bool:
+                self._index += 1
+                return self._index < len(self._rows)
+
+            def get_row_data(self) -> list[str]:
+                return self._rows[self._index]
+
+        frame = _baostock_intraday_5m_frame(FakeQuery(), symbol="600000.SH")
+
+        self.assertEqual(frame["trade_date"].tolist(), ["2026-05-22"])
+        self.assertEqual(frame["symbol"].tolist(), ["600000.SH"])
+        self.assertEqual(frame["bar_time"].tolist(), ["20260522093500000"])
+        self.assertEqual(frame["adjusted_flag"].tolist(), ["3"])
+
+    def test_baostock_code_converter_preserves_beijing_exchange_suffix(self) -> None:
+        self.assertEqual(_to_baostock_code("430047.BJ"), "bj.430047")
+        self.assertEqual(_to_baostock_code("830799"), "bj.830799")
+
+    def test_baostock_intraday_daily_features_aggregate_5m_without_auction_process(self) -> None:
+        rows = []
+        for idx, close in enumerate([10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.4, 10.2], start=1):
+            rows.append(
+                {
+                    "symbol": "600000.SH",
+                    "trade_date": "2026-05-22",
+                    "bar_time": f"{93000 + idx * 500:06d}000",
+                    "open": 10.0 if idx == 1 else close - 0.05,
+                    "high": close + 0.1,
+                    "low": close - 0.2,
+                    "close": close,
+                    "volume": 1000 + idx,
+                    "amount": (1000 + idx) * close,
+                    "source": "baostock",
+                    "adjusted_flag": "none",
+                }
+            )
+
+        from daily_research.data_platform.contracts import build_intraday_daily_feature_frame
+
+        features = build_intraday_daily_feature_frame(pd.DataFrame(rows), source="baostock")
+
+        self.assertEqual(features["symbol"].tolist(), ["600000.SH"])
+        self.assertGreater(features["first_30m_ret"].iloc[0], 0.0)
+        self.assertLess(features["last_30m_ret"].iloc[0], 0.0)
+        self.assertIn("close_pressure_30m", features.columns)
+        self.assertIn("close_position", features.columns)
+        self.assertIn("early_strength_late_weak", features.columns)
+        self.assertIn("open_gap_first_30m_reversal", features.columns)
+        self.assertNotIn("auction", ",".join(features.columns))
+
+    def test_baostock_index_constituents_frame_combines_supported_indices(self) -> None:
+        class FakeQuery:
+            fields = ["date", "code", "code_name"]
+            error_code = "0"
+            error_msg = "success"
+
+            def __init__(self, code: str) -> None:
+                self._rows = [["2026-05-22", code, "成分股"]]
+                self._index = -1
+
+            def next(self) -> bool:
+                self._index += 1
+                return self._index < len(self._rows)
+
+            def get_row_data(self) -> list[str]:
+                return self._rows[self._index]
+
+        fake_bs = types.SimpleNamespace(
+            query_sz50_stocks=mock.Mock(return_value=FakeQuery("sh.600000")),
+            query_hs300_stocks=mock.Mock(return_value=FakeQuery("sz.000001")),
+            query_zz500_stocks=mock.Mock(return_value=FakeQuery("sz.000002")),
+        )
+
+        frame = _baostock_index_constituents_frame(fake_bs, trade_date="2026-05-22")
+
+        self.assertEqual(set(frame["index_symbol"]), {"000016.SH", "000300.SH", "000905.SH"})
+        self.assertEqual(set(frame["symbol"]), {"600000.SH", "000001.SZ", "000002.SZ"})
 
     def test_baostock_market_daily_uses_guarded_per_symbol_fetch(self) -> None:
         guarded_frames = [
@@ -655,6 +785,37 @@ class DataPlatformProviderContractTest(unittest.TestCase):
 
         guarded.assert_called_once_with(start_date="2026-05-22", end_date="2026-05-22", exchange="SSE")
         self.assertEqual(result.data["trade_date"].tolist(), ["2026-05-22"])
+        self.assertEqual(result.data["source"].tolist(), ["baostock"])
+
+    def test_baostock_valuation_uses_guarded_fetch(self) -> None:
+        guarded_frame = pd.DataFrame(
+            {
+                "symbol": ["600000.SH"],
+                "trade_date": ["2026-05-22"],
+                "total_mv": [float("nan")],
+                "circ_mv": [float("nan")],
+                "pe": ["10.5"],
+                "pb": ["1.1"],
+                "turnover_rate": ["0.8"],
+                "source": ["baostock"],
+            }
+        )
+
+        with mock.patch(
+            "daily_research.data_platform.providers._fetch_baostock_valuation_frame_with_timeout",
+            return_value=guarded_frame,
+        ) as guarded:
+            result = BaostockProvider().fetch_domain(
+                DomainFetchRequest(
+                    domain=DataDomain.VALUATION,
+                    symbols=("600000.SH",),
+                    start_date="2026-05-22",
+                    end_date="2026-05-22",
+                )
+            )
+
+        guarded.assert_called_once_with(symbols=("600000.SH",), start_date="2026-05-22", end_date="2026-05-22")
+        self.assertEqual(result.data["symbol"].tolist(), ["600000.SH"])
         self.assertEqual(result.data["source"].tolist(), ["baostock"])
 
     def test_baostock_stock_basic_guard_times_out_and_terminates_child(self) -> None:

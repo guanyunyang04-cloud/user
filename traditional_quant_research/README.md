@@ -53,6 +53,12 @@
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest traditional_quant_research/tests
 ```
 
+## 运行环境
+
+- 项目实验默认使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`；不要用 base `C:/Users/ASUS/miniconda3/python.exe` 跑 ML 实验。
+- 当前 ML 研究依赖 `lightgbm==4.6.0`、`xgboost==3.2.0` 和 `scikit-learn==1.8.0`，已在 `yolos` 环境中可用；`all_limitup_ml_strategy_research`、`all_limitup_followup_research` 和 `personal_short_event_model_zoo_research` 的真实 walk-forward/特征族消融都需要这些依赖。
+- 为控制资源占用，涨停池 ML/后续诊断默认保留至少 `1GB` 可用内存安全线，重训消融建议保持 `n_jobs<=2` 到 `4`；深模型动物园全量 run 会明显耗时，后续应优先做分支/模型增量落盘和断点续跑。
+
 ## v2 数据入口
 
 - 默认研究数据源：Baostock PIT 日频快照，读取接口为 `dataset_v2.py`。

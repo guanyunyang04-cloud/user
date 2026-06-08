@@ -14,7 +14,7 @@ import pandas as pd
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from daily_research.data_lake import ResearchDataLake
+from daily_research.data_lake.catalog import ResearchDataLake
 from daily_research.data_platform.contracts import (
     DataDomain,
     DomainFetchRequest,
@@ -886,7 +886,7 @@ def _domain_request(
     adjusted_flag: str,
 ) -> DomainFetchRequest:
     domain = normalize_domain(domain)
-    if domain in {DataDomain.TRADING_CALENDAR, DataDomain.UNIVERSE_SNAPSHOT}:
+    if domain in {DataDomain.TRADING_CALENDAR, DataDomain.UNIVERSE_SNAPSHOT, DataDomain.INDEX_CONSTITUENTS}:
         request_symbols: tuple[str, ...] = ()
     else:
         request_symbols = symbols
@@ -1013,7 +1013,16 @@ def _build_silver_domain(
     priority = {str(provider).lower(): idx for idx, provider in enumerate(provider_priority)}
     working = canonical.copy()
     working["_priority"] = working["source"].astype(str).str.lower().map(priority).fillna(9999).astype(int)
-    keys = ["trade_date", "exchange"] if domain == DataDomain.TRADING_CALENDAR else ["trade_date", "symbol"]
+    if domain == DataDomain.TRADING_CALENDAR:
+        keys = ["trade_date", "exchange"]
+    elif domain == DataDomain.MARKET_INTRADAY_5M:
+        keys = ["trade_date", "symbol", "bar_time"]
+    elif domain == DataDomain.INDEX_CONSTITUENTS:
+        keys = ["trade_date", "index_symbol", "symbol"]
+    elif domain in {DataDomain.FINANCIAL_QUARTERLY, DataDomain.PERFORMANCE_FORECAST, DataDomain.PERFORMANCE_EXPRESS}:
+        keys = ["trade_date", "symbol", "fiscal_year", "fiscal_quarter"]
+    else:
+        keys = ["trade_date", "symbol"]
     keys = [key for key in keys if key in working.columns]
     ordered = working.sort_values([*keys, "_priority"], ascending=True)
     deduped = ordered.drop_duplicates(subset=keys, keep="first").drop(columns=["_priority"], errors="ignore")
@@ -1662,6 +1671,60 @@ def _sidecar_feature_frames(
         DataDomain.SECURITY_STATUS: ["is_st", "is_suspended", "is_delisted"],
         DataDomain.LIMIT_STATUS: ["is_limit_up", "is_limit_down"],
         DataDomain.VALUATION: ["total_mv", "circ_mv", "pe", "pb", "turnover_rate"],
+        DataDomain.INTRADAY_DAILY_FEATURES: [
+            "first_5m_ret",
+            "first_15m_ret",
+            "first_30m_ret",
+            "first_30m_amount_share",
+            "open_gap",
+            "open_gap_first_30m_follow_through",
+            "open_gap_first_30m_reversal",
+            "last_5m_ret",
+            "last_30m_ret",
+            "last_30m_amount_share",
+            "intraday_ret",
+            "intraday_vwap",
+            "close_to_vwap",
+            "intraday_range",
+            "close_position",
+            "intraday_realized_vol",
+            "intraday_price_volume_corr",
+            "am_ret",
+            "pm_ret",
+            "am_pm_ret_spread",
+            "am_pm_vol_spread",
+            "am_amount_share",
+            "am_pm_amount_spread",
+            "early_strength_late_weak",
+            "close_pressure_30m",
+        ],
+        DataDomain.FINANCIAL_QUARTERLY: [
+            "roe_avg",
+            "net_profit_margin",
+            "gross_profit_margin",
+            "net_profit_yoy",
+            "revenue_yoy",
+            "eps",
+            "net_profit",
+            "revenue",
+            "asset_turnover",
+            "debt_to_asset",
+            "current_ratio",
+            "cash_flow_ps",
+        ],
+        DataDomain.PERFORMANCE_FORECAST: [
+            "profit_min",
+            "profit_max",
+            "profit_change_min",
+            "profit_change_max",
+        ],
+        DataDomain.PERFORMANCE_EXPRESS: [
+            "eps",
+            "roe",
+            "net_profit",
+            "revenue",
+            "total_assets",
+        ],
     }.items():
         frame = domain_outputs.get(domain, {}).get("canonical", pd.DataFrame())
         if frame is None or frame.empty:
@@ -1671,6 +1734,13 @@ def _sidecar_feature_frames(
                 continue
             panel = _pivot(frame.loc[frame["symbol"].isin(market_columns)], column).reindex(columns=market_columns)
             features[f"{domain}_{column}"] = panel
+    index_constituents = domain_outputs.get(DataDomain.INDEX_CONSTITUENTS, {}).get("canonical", pd.DataFrame())
+    if index_constituents is not None and not index_constituents.empty and {"symbol", "trade_date", "index_symbol"}.issubset(index_constituents.columns):
+        data = index_constituents.loc[index_constituents["symbol"].isin(market_columns)].copy()
+        data["member"] = 1.0
+        for index_symbol, group in data.groupby("index_symbol"):
+            suffix = _feature_suffix(index_symbol)
+            features[f"index_constituents_{suffix}_member"] = _pivot(group, "member").reindex(columns=market_columns).fillna(0.0)
     industry = domain_outputs.get(DataDomain.INDUSTRY_CONCEPT, {}).get("canonical", pd.DataFrame())
     if industry is not None and not industry.empty and {"symbol", "trade_date", "industry"}.issubset(industry.columns):
         coded = industry.copy()
@@ -1687,11 +1757,18 @@ def _stable_small_code(value: Any) -> float:
 
 
 def _pivot(frame: pd.DataFrame, field: str) -> pd.DataFrame:
-    out = frame.pivot(index="trade_date", columns="symbol", values=field).sort_index()
+    if frame is None or frame.empty:
+        return pd.DataFrame()
+    out = frame.pivot_table(index="trade_date", columns="symbol", values=field, aggfunc="last").sort_index()
     out.index = pd.to_datetime(out.index)
     out.index.name = None
     out.columns.name = None
     return out
+
+
+def _feature_suffix(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    return "".join(ch if ch.isalnum() else "_" for ch in text).strip("_") or "unknown"
 
 
 def _series(frame: pd.DataFrame, field: str, *, name: str) -> pd.Series:

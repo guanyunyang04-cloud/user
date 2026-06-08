@@ -461,6 +461,46 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.exp
 
 当前短线线只允许把 `executable_only` 作为候选晋级 profile；`preopen_submit` 与 `open_print_filter` 主要用于诊断强度来源。`executable_only` 候选会硬排除 one-word、near-one-word 和 near-limit open entries，且必须满足 `executable_trade_rate == 1.0`、`near_limit_trade_rate == 0`、净均值为正、`payoff >= 2`、正收益年份率至少 `0.8`、最差年度不亏，才允许输出 `shortline_backtest_candidate`。当前入口保留 KAMA、MA compression、volume/amount regime、first-board/board-stage、market heat、industry heat 和允许口径下的 open gap 特征；但若收益来自难买或买不到的封板路径，只能写为 `shortline_diagnostic_only`。
 
+## All-Limit-Up Risk-Penalized Strategy Research
+
+全涨停池 open-known ML 风险惩罚诊断入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.all_limitup_risk_penalized_strategy_research --write-research-log --min-available-memory-gb 1.0
+```
+
+该实验读取已有 `all_limitup_ml_strategy_research` 预测和 `short_open_known_factor_rebuild` 事件面板，不重新训练 LightGBM；按 eval year 只用历史年份事件分位数生成弱市场、弱行业、过度拉升、高波动、高连板、缺少 KAMA/ATR 确认、高开和低流动性风险旗标，再对原始 `ml_score` 做多组惩罚、分数阈值和 top1/top2 替补扫描。输出包括 `risk_flag_summary.csv`、`strategy_summary.csv`、`strategy_stress_summary.csv`、`strategy_yearly.csv`、`selected_trades.csv` 和 `summary.md`。当前语义是 `all_limitup_risk_penalized_diagnostic`：高阈值子集可显著提升均值和 harsh 压力表现，但交易数/覆盖率很低，不能直接升级为策略候选。
+
+## Generalized Strong-Event Pool Research
+
+涨停池泛化为强势事件池的诊断入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.generalized_strong_event_pool_research --write-research-log --min-available-memory-gb 1.0
+```
+
+该实验把全涨停核心扩展为 `near_limit`、`big_up`、`volume_atr_breakout`、`new_high_breakout`、`kama_breakout` 和 `trend_accel` 等日频强势事件，逐年缓存事件面板，加入 `primary_event_type`、事件强度和事件旗标特征，再用 LightGBM walk-forward 做 top1/top2 排序诊断。当前 run `generalized_strong_event_pool_research_20260607_222241` 覆盖 2017-2026，事件数从涨停核心 `106411` 扩到全强势事件 `312573`；但可成交 `executable_only` ML top1 为 `-0.206899%`，显著弱于此前全涨停池可成交 top1 的 `+0.6778%`。高收益 `all_strong_events` top1 主要来自近涨停开盘和不可成交样本，`near_limit_open_rate=0.892256`、`executable_rate=0.106622`，因此只能作为 `generalized_strong_event_pool_diagnostic`，不能升级为策略候选。
+
+## Personal Short-Event Fast Research
+
+个人小资金短线事件快速诊断入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.personal_short_event_fast_research --write-research-log --min-available-memory-gb 1.0
+```
+
+该实验不重新训练模型，复用全涨停 ML 和广义强势池预测，专门测试个人小资金更关心的“拒绝交易”：只有分数、风险旗标、事件池和市场状态满足门槛才开仓，否则空仓。当前 run `personal_short_event_fast_research_20260607_232419` 扫描 `7392` 条 fast diagnostic 策略，`fast_watchlist_count=30`。最佳高期望 watchlist 为 `limitup__exec_all__first_board_risk_le2__mlscore__floor_1p5__none__pos1`：`26` 笔、均值 `+4.044374%`、压力后 `+3.114677%`、选择率约 `1.46%`、可成交率 `1.0`、近涨停开盘率 `0`。更稳的中等覆盖版本是 `limitup__first_board__score_only__mlscore__floor_1p5__none__pos1`：`56` 笔、均值 `+3.640960%`、正收益年份率 `1.0`。该实验结论是：个人小资金线应优先推进涨停首板拒绝交易，而非每日强制选股；非涨停 `kama_breakout` / `big_up+kama+new_high` 支线有正向线索，但当前仍是复用广义模型，需后续单独训练验证。
+
+## Personal Short-Event Model Zoo Research
+
+个人小资金短线事件深模型动物园入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.personal_short_event_model_zoo_research --models lgbm_deep,xgb_deep,extra_trees_deep,ridge --write-research-log --min-available-memory-gb 1.0
+```
+
+该实验读取涨停事件面板和广义强势事件面板，构造 `limitup_first_board_exec`、`limitup_kama_atr_exec`、`nonlimit_kama_breakout_exec`、`nonlimit_big_new_high_exec`、`nonlimit_combo_exec` 五个可成交分支；在原 open-known 特征上追加日内截面排名、KAMA/ATR 确认、量价强度、市场/行业热度交互等事件因子；再按分支、按年份 walk-forward 独立训练深版 LightGBM、深版 XGBoost、深版 ExtraTrees 和 Ridge 对照。当前 run `personal_short_event_model_zoo_research_20260608_001434` 生成 `1,688,765` 条预测、`1000` 条策略组合。深 XGBoost 在 `nonlimit_combo_exec` 上明显胜出：`floor_2/pos1` 为 `56` 笔、均值 `+4.846906%`、轻压力后 `+3.919894%`、正收益年份率 `0.875`；`floor_1.5/pos2` 为 `106` 笔、均值 `+2.595391%`、轻压力后 `+1.623507%`。但更高频档位快速衰减：`period_count>=200` 的最好轻压力均值约 `+0.419297%`，`period_count>=300` 约 `+0.105025%`，`period_count>=500` 没有轻压力后为正的候选。结论：深模型确实提高了低频/中低频收益上限，但不能自然解决“每周都有且高期望”的问题；该入口仍是 `model_zoo_diagnostic_not_live_candidate`，下一步应做增量落盘、模型分批恢复、执行成交建模和五分钟特征接入。
+
 ## Frontier Personal Paper Tracking Bootstrap
 
 个人候选 paper tracking 准备包入口已取消：

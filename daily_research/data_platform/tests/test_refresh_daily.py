@@ -177,6 +177,74 @@ def _valuation_frame(*, provider: str, dates: list[str]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _intraday_daily_feature_frame(*, provider: str, dates: list[str]) -> pd.DataFrame:
+    rows = []
+    for idx, trade_date in enumerate(dates):
+        rows.extend(
+            [
+                {
+                    "symbol": "000001.SZ",
+                    "trade_date": trade_date,
+                    "first_5m_ret": 0.01 + idx * 0.001,
+                    "last_30m_ret": -0.02,
+                    "close_pressure_30m": -0.004,
+                    "source": provider,
+                    "adjusted_flag": "none",
+                },
+                {
+                    "symbol": "600000.SH",
+                    "trade_date": trade_date,
+                    "first_5m_ret": -0.01,
+                    "last_30m_ret": 0.02 + idx * 0.001,
+                    "close_pressure_30m": 0.004,
+                    "source": provider,
+                    "adjusted_flag": "none",
+                },
+            ]
+        )
+    return pd.DataFrame(rows)
+
+
+def _financial_quarterly_frame(*, provider: str) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "symbol": "000001.SZ",
+                "trade_date": "2026-01-05",
+                "report_date": "2025-09-30",
+                "fiscal_year": 2025,
+                "fiscal_quarter": 3,
+                "publish_date": "2026-01-05",
+                "roe_avg": 0.12,
+                "net_profit_yoy": 0.08,
+                "lag_policy": "unit",
+                "source": provider,
+            },
+            {
+                "symbol": "600000.SH",
+                "trade_date": "2026-01-05",
+                "report_date": "2025-09-30",
+                "fiscal_year": 2025,
+                "fiscal_quarter": 3,
+                "publish_date": "2026-01-05",
+                "roe_avg": 0.10,
+                "net_profit_yoy": 0.04,
+                "lag_policy": "unit",
+                "source": provider,
+            },
+        ]
+    )
+
+
+def _index_constituents_frame(*, provider: str) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {"index_symbol": "000300.SH", "symbol": "000001.SZ", "trade_date": "2026-01-05", "index_name": "CSI 300", "source": provider},
+            {"index_symbol": "000905.SH", "symbol": "600000.SH", "trade_date": "2026-01-05", "index_name": "CSI 500", "source": provider},
+        ]
+    )
+
+
 class DataPlatformRefreshDailyTest(unittest.TestCase):
     def test_refresh_cli_does_not_expose_execution_timeout_flag(self) -> None:
         parser = build_parser()
@@ -732,6 +800,55 @@ class DataPlatformRefreshDailyTest(unittest.TestCase):
         self.assertIn(DataDomain.SECURITY_STATUS, metadata["parameters"]["sidecar_domains"])
         self.assertIn("sidecar_dataset_ids", metadata["parameters"])
         self.assertIn("calendar_dataset_id", metadata["parameters"])
+
+    def test_refresh_writes_baostock_only_width_sidecar_feature_panels(self) -> None:
+        provider = InMemoryDomainProvider(
+            "baostock",
+            payloads={
+                DataDomain.MARKET_DAILY: _market_frame(dates=["2026-01-05", "2026-01-06"], provider="baostock"),
+                DataDomain.INTRADAY_DAILY_FEATURES: _intraday_daily_feature_frame(provider="baostock", dates=["2026-01-05", "2026-01-06"]),
+                DataDomain.FINANCIAL_QUARTERLY: _financial_quarterly_frame(provider="baostock"),
+                DataDomain.INDEX_CONSTITUENTS: _index_constituents_frame(provider="baostock"),
+            },
+        )
+        with TemporaryDirectory() as temp_dir:
+            result = run_refresh(
+                RefreshConfig(
+                    lake_root=Path(temp_dir),
+                    as_of_date="2026-01-06",
+                    start_date="2026-01-05",
+                    symbols=("000001.SZ", "600000.SH", "000300.SH"),
+                    domains=(
+                        DataDomain.MARKET_DAILY,
+                        DataDomain.INTRADAY_DAILY_FEATURES,
+                        DataDomain.FINANCIAL_QUARTERLY,
+                        DataDomain.INDEX_CONSTITUENTS,
+                    ),
+                    required_domains=(DataDomain.MARKET_DAILY,),
+                    provider_plan="baostock_only",
+                    benchmark="000300.SH",
+                    min_coverage_ratio=0.70,
+                ),
+                providers=[provider],
+            )
+            lake = ResearchDataLake(Path(temp_dir))
+            metadata = lake.describe_dataset(result.registered_market_dataset_id)
+            prepared = load_policy_inputs_from_lake(
+                lake=lake,
+                dataset_id=result.registered_market_dataset_id,
+                start_date="2026-01-05",
+                end_date="2026-01-06",
+                benchmark="000300.SH",
+                min_trading_days=2,
+            )
+
+        self.assertEqual(result.status, "ok")
+        self.assertIn(DataDomain.INTRADAY_DAILY_FEATURES, metadata["parameters"]["sidecar_domains"])
+        self.assertIn(DataDomain.FINANCIAL_QUARTERLY, metadata["parameters"]["sidecar_domains"])
+        self.assertIn(DataDomain.INDEX_CONSTITUENTS, metadata["parameters"]["sidecar_domains"])
+        self.assertIn("intraday_daily_features_first_5m_ret", prepared.derived_frames)
+        self.assertIn("financial_quarterly_roe_avg", prepared.derived_frames)
+        self.assertIn("index_constituents_000300_sh_member", prepared.derived_frames)
 
     def test_refresh_manifest_records_v3_domain_quality_and_optional_degradation(self) -> None:
         provider = InMemoryDomainProvider(
