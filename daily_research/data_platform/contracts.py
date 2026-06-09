@@ -27,8 +27,10 @@ TDX_FAMILY_PROVIDER_NAMES = frozenset({"tq", "tqcenter", "tdx", "pytdx", "mootdx
 
 class DataDomain:
     MARKET_DAILY = "market_daily"
+    MARKET_INTRADAY_1M = "market_intraday_1m"
     MARKET_INTRADAY_5M = "market_intraday_5m"
     INTRADAY_DAILY_FEATURES = "intraday_daily_features"
+    ADJUST_FACTOR = "adjust_factor"
     TRADING_CALENDAR = "trading_calendar"
     UNIVERSE_SNAPSHOT = "universe_snapshot"
     SECURITY_STATUS = "security_status"
@@ -48,6 +50,22 @@ class DataDomain:
 
 DOMAIN_STANDARD_COLUMNS: dict[str, list[str]] = {
     DataDomain.MARKET_DAILY: STANDARD_MARKET_COLUMNS,
+    DataDomain.MARKET_INTRADAY_1M: [
+        "symbol",
+        "trade_date",
+        "bar_time",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "amount",
+        "turnover_rate",
+        "float_share",
+        "total_share",
+        "source",
+        "adjusted_flag",
+    ],
     DataDomain.MARKET_INTRADAY_5M: [
         "symbol",
         "trade_date",
@@ -91,6 +109,16 @@ DOMAIN_STANDARD_COLUMNS: dict[str, list[str]] = {
         "close_pressure_30m",
         "source",
         "adjusted_flag",
+    ],
+    DataDomain.ADJUST_FACTOR: [
+        "symbol",
+        "trade_date",
+        "fore_adjust_factor",
+        "back_adjust_factor",
+        "adjust_factor",
+        "factor_provider",
+        "factor_semantics",
+        "source",
     ],
     DataDomain.TRADING_CALENDAR: ["trade_date", "is_open", "exchange", "source"],
     DataDomain.UNIVERSE_SNAPSHOT: [
@@ -270,6 +298,11 @@ def normalize_domain(domain: str) -> str:
         "market": DataDomain.MARKET_DAILY,
         "market_bars": DataDomain.MARKET_DAILY,
         "daily": DataDomain.MARKET_DAILY,
+        "1m": DataDomain.MARKET_INTRADAY_1M,
+        "1min": DataDomain.MARKET_INTRADAY_1M,
+        "one_minute": DataDomain.MARKET_INTRADAY_1M,
+        "market_1m": DataDomain.MARKET_INTRADAY_1M,
+        "intraday_1m": DataDomain.MARKET_INTRADAY_1M,
         "5m": DataDomain.MARKET_INTRADAY_5M,
         "5min": DataDomain.MARKET_INTRADAY_5M,
         "five_minute": DataDomain.MARKET_INTRADAY_5M,
@@ -278,6 +311,10 @@ def normalize_domain(domain: str) -> str:
         "intraday_daily": DataDomain.INTRADAY_DAILY_FEATURES,
         "intraday_features": DataDomain.INTRADAY_DAILY_FEATURES,
         "intraday_daily_feature": DataDomain.INTRADAY_DAILY_FEATURES,
+        "adjust": DataDomain.ADJUST_FACTOR,
+        "adjust_factor": DataDomain.ADJUST_FACTOR,
+        "adjustment_factor": DataDomain.ADJUST_FACTOR,
+        "复权因子": DataDomain.ADJUST_FACTOR,
         "calendar": DataDomain.TRADING_CALENDAR,
         "trade_calendar": DataDomain.TRADING_CALENDAR,
         "universe": DataDomain.UNIVERSE_SNAPSHOT,
@@ -442,8 +479,12 @@ def normalize_domain_frame(
         return normalize_market_frame(frame, source=source, adjusted_flag=adjusted_flag, require_columns=require_columns)
     if normalized_domain == DataDomain.MARKET_INTRADAY_5M:
         return normalize_intraday_5m_frame(frame, source=source, adjusted_flag=adjusted_flag, require_columns=require_columns)
+    if normalized_domain == DataDomain.MARKET_INTRADAY_1M:
+        return normalize_intraday_1m_frame(frame, source=source, adjusted_flag=adjusted_flag, require_columns=require_columns)
     if normalized_domain == DataDomain.INTRADAY_DAILY_FEATURES:
         return normalize_intraday_daily_features_frame(frame, source=source, adjusted_flag=adjusted_flag, require_columns=require_columns)
+    if normalized_domain == DataDomain.ADJUST_FACTOR:
+        return normalize_adjust_factor_frame(frame, source=source, require_columns=require_columns)
     if normalized_domain == DataDomain.TRADING_CALENDAR:
         return normalize_calendar_frame(frame, source=source, require_columns=require_columns)
     if normalized_domain == DataDomain.UNIVERSE_SNAPSHOT:
@@ -486,12 +527,15 @@ def normalize_intraday_5m_frame(
     provider = validate_provider_name(source)
     data = _prepare_domain_frame(frame, domain=DataDomain.MARKET_INTRADAY_5M, source=provider, as_of_date="", require_columns=False)
     _rename_first(data, "bar_time", ("time", "bar_time", "minute", "bar_datetime", "时间", "分钟"))
+    _rename_intraday_value_columns(data, include_share_fields=False)
+    if "bar_time" not in data.columns and "trade_date" in data.columns:
+        data["bar_time"] = ""
     if "adjusted_flag" not in data.columns:
         data["adjusted_flag"] = str(adjusted_flag or "none")
     _require_core_columns(data, DataDomain.MARKET_INTRADAY_5M, {"symbol", "trade_date", "bar_time"}, require_columns=require_columns)
     data = _ensure_domain_columns(data, DataDomain.MARKET_INTRADAY_5M)
     data["symbol"] = data["symbol"].map(_normalize_symbol)
-    data["trade_date"] = _date_series(data["trade_date"])
+    data = _split_intraday_datetime_column(data)
     data["bar_time"] = data["bar_time"].map(_normalize_bar_time)
     for column in NUMERIC_MARKET_COLUMNS:
         data[column] = pd.to_numeric(data[column], errors="coerce")
@@ -504,6 +548,107 @@ def normalize_intraday_5m_frame(
         DOMAIN_STANDARD_COLUMNS[DataDomain.MARKET_INTRADAY_5M],
     ]
     return out.sort_values(["trade_date", "symbol", "bar_time", "source"]).reset_index(drop=True)
+
+
+def normalize_intraday_1m_frame(
+    frame: pd.DataFrame,
+    *,
+    source: str,
+    adjusted_flag: str = "none",
+    require_columns: bool = True,
+) -> pd.DataFrame:
+    provider = validate_provider_name(source)
+    data = _prepare_domain_frame(frame, domain=DataDomain.MARKET_INTRADAY_1M, source=provider, as_of_date="", require_columns=False)
+    _rename_first(data, "bar_time", ("time", "bar_time", "minute", "bar_datetime", "datetime", "日期", "时间", "分钟"))
+    _rename_intraday_value_columns(data, include_share_fields=True)
+    if "bar_time" not in data.columns and "trade_date" in data.columns:
+        data["bar_time"] = ""
+    if "adjusted_flag" not in data.columns:
+        data["adjusted_flag"] = str(adjusted_flag or "none")
+    _require_core_columns(data, DataDomain.MARKET_INTRADAY_1M, {"symbol", "trade_date", "bar_time"}, require_columns=require_columns)
+    data = _ensure_domain_columns(data, DataDomain.MARKET_INTRADAY_1M)
+    data["symbol"] = data["symbol"].map(_normalize_symbol)
+    data = _split_intraday_datetime_column(data)
+    data["bar_time"] = data["bar_time"].map(_normalize_bar_time)
+    for column in ("open", "high", "low", "close", "volume", "amount", "turnover_rate", "float_share", "total_share"):
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+    data["source"] = _source_series(data, provider)
+    data["adjusted_flag"] = data["adjusted_flag"].fillna(str(adjusted_flag or "none")).astype(str).str.strip().replace("", "none")
+    out = data.loc[
+        data["symbol"].astype(str).str.len().gt(0)
+        & data["trade_date"].astype(str).str.lower().ne("nat")
+        & data["bar_time"].astype(str).str.len().gt(0),
+        DOMAIN_STANDARD_COLUMNS[DataDomain.MARKET_INTRADAY_1M],
+    ]
+    return out.drop_duplicates(subset=["trade_date", "symbol", "bar_time", "source"]).sort_values(["trade_date", "symbol", "bar_time", "source"]).reset_index(drop=True)
+
+
+def aggregate_intraday_1m_to_5m_frame(
+    frame: pd.DataFrame,
+    *,
+    source: str = "external_1m",
+    adjusted_flag: str = "none",
+) -> pd.DataFrame:
+    one_minute = normalize_intraday_1m_frame(frame, source=source, adjusted_flag=adjusted_flag, require_columns=False)
+    if one_minute.empty:
+        return pd.DataFrame(columns=DOMAIN_STANDARD_COLUMNS[DataDomain.MARKET_INTRADAY_5M])
+    data = one_minute.copy()
+    clock = data["bar_time"].map(_bar_time_to_clock)
+    stamp = pd.to_datetime(data["trade_date"].astype(str) + " " + clock.astype(str), errors="coerce")
+    data = data.loc[stamp.notna()].copy()
+    stamp = stamp.loc[data.index]
+    data["_bar_timestamp"] = stamp
+    floored = stamp.dt.floor("5min")
+    data["bar_time"] = floored.dt.strftime("%H:%M:%S")
+    for column in NUMERIC_MARKET_COLUMNS:
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+    data = data.sort_values(["trade_date", "symbol", "_bar_timestamp"])
+    grouped = data.groupby(["trade_date", "symbol", "bar_time"], sort=True, as_index=False)
+    rows = grouped.agg(
+        open=("open", "first"),
+        high=("high", "max"),
+        low=("low", "min"),
+        close=("close", "last"),
+        volume=("volume", "sum"),
+        amount=("amount", "sum"),
+    )
+    rows["source"] = f"{source}_agg_5m"
+    rows["adjusted_flag"] = str(adjusted_flag or "none")
+    return normalize_intraday_5m_frame(rows, source=f"{source}_agg_5m", adjusted_flag=adjusted_flag, require_columns=False)
+
+
+def normalize_adjust_factor_frame(
+    frame: pd.DataFrame,
+    *,
+    source: str,
+    require_columns: bool = True,
+) -> pd.DataFrame:
+    provider = validate_provider_name(source)
+    data = _prepare_domain_frame(frame, domain=DataDomain.ADJUST_FACTOR, source=provider, as_of_date="", require_columns=False)
+    _rename_first(data, "symbol", ("code", "ts_code", "股票代码", "证券代码"))
+    _rename_first(data, "trade_date", ("dividOperateDate", "date", "日期", "除权除息日"))
+    _rename_first(data, "fore_adjust_factor", ("foreAdjustFactor", "qfq_factor", "前复权因子"))
+    _rename_first(data, "back_adjust_factor", ("backAdjustFactor", "hfq_factor", "后复权因子"))
+    _rename_first(data, "adjust_factor", ("adjustFactor", "factor", "复权因子"))
+    if "factor_provider" not in data.columns:
+        data["factor_provider"] = provider
+    if "factor_semantics" not in data.columns:
+        data["factor_semantics"] = "raw_provider_factor"
+    _require_core_columns(data, DataDomain.ADJUST_FACTOR, {"symbol", "trade_date"}, require_columns=require_columns)
+    data = _ensure_domain_columns(data, DataDomain.ADJUST_FACTOR)
+    data["symbol"] = data["symbol"].map(_normalize_symbol)
+    data["trade_date"] = _date_series(data["trade_date"])
+    for column in ("fore_adjust_factor", "back_adjust_factor", "adjust_factor"):
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+    data["factor_provider"] = data["factor_provider"].fillna(provider).astype(str).str.strip().replace("", provider)
+    data["factor_semantics"] = data["factor_semantics"].fillna("raw_provider_factor").astype(str).str.strip().replace("", "raw_provider_factor")
+    data["source"] = _source_series(data, provider)
+    out = data.loc[
+        data["symbol"].astype(str).str.len().gt(0)
+        & data["trade_date"].astype(str).str.lower().ne("nat"),
+        DOMAIN_STANDARD_COLUMNS[DataDomain.ADJUST_FACTOR],
+    ]
+    return out.drop_duplicates(subset=["trade_date", "symbol", "factor_provider", "source"]).sort_values(["trade_date", "symbol", "factor_provider", "source"]).reset_index(drop=True)
 
 
 def build_intraday_daily_feature_frame(
@@ -959,6 +1104,28 @@ def _normalize_bar_time(value: Any) -> str:
     return digits
 
 
+def _bar_time_to_clock(value: Any) -> str:
+    text = _normalize_bar_time(value)
+    if len(text) >= 6:
+        return f"{text[:2]}:{text[2:4]}:{text[4:6]}"
+    return ""
+
+
+def _split_intraday_datetime_column(data: pd.DataFrame) -> pd.DataFrame:
+    trade_ts = pd.to_datetime(data["trade_date"], errors="coerce")
+    normalized_trade_date = trade_ts.dt.strftime("%Y-%m-%d")
+    data["trade_date"] = normalized_trade_date
+    bar_raw = data["bar_time"].fillna("").astype(str).str.strip()
+    missing_bar_time = bar_raw.eq("") | bar_raw.str.lower().isin({"nan", "nat", "none"})
+    parsed_has_clock = trade_ts.notna() & (
+        trade_ts.dt.hour.ne(0) | trade_ts.dt.minute.ne(0) | trade_ts.dt.second.ne(0)
+    )
+    fill_from_trade_date = missing_bar_time & parsed_has_clock
+    if bool(fill_from_trade_date.any()):
+        data.loc[fill_from_trade_date, "bar_time"] = trade_ts.loc[fill_from_trade_date].dt.strftime("%H:%M:%S")
+    return data
+
+
 def _bar_clock_int(value: Any) -> int:
     text = _normalize_bar_time(value)
     try:
@@ -1121,6 +1288,19 @@ def _rename_first(data: pd.DataFrame, canonical: str, candidates: Iterable[str])
             return
 
 
+def _rename_intraday_value_columns(data: pd.DataFrame, *, include_share_fields: bool) -> None:
+    _rename_first(data, "open", ("open", "开盘", "开盘价"))
+    _rename_first(data, "high", ("high", "最高", "最高价"))
+    _rename_first(data, "low", ("low", "最低", "最低价"))
+    _rename_first(data, "close", ("close", "收盘", "收盘价"))
+    _rename_first(data, "volume", ("volume", "vol", "成交量", "成交量(股)", "成交量（股）"))
+    _rename_first(data, "amount", ("amount", "成交额", "成交额(元)", "成交额（元）"))
+    if include_share_fields:
+        _rename_first(data, "turnover_rate", ("turnover_rate", "turnover", "换手率", "换手率(%)", "换手率（%）"))
+        _rename_first(data, "float_share", ("float_share", "float_shares", "流通股本", "流通股本(股)", "流通股本（股）"))
+        _rename_first(data, "total_share", ("total_share", "total_shares", "总股本", "总股本(股)", "总股本（股）"))
+
+
 def _require_domain_columns(data: pd.DataFrame, domain: str, *, require_columns: bool) -> None:
     if not require_columns:
         return
@@ -1161,6 +1341,8 @@ def _ensure_domain_columns(data: pd.DataFrame, domain: str) -> pd.DataFrame:
         "publish_date",
         "forecast_type",
         "lag_policy",
+        "factor_provider",
+        "factor_semantics",
     }
     for column in DOMAIN_STANDARD_COLUMNS[normalize_domain(domain)]:
         if column not in data.columns:

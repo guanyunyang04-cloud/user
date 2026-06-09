@@ -16,11 +16,21 @@ from daily_research.continuous_policy.state_builder import (
     _safe_pct_change,
 )
 from daily_research.data_lake.catalog import ResearchDataLake
+from daily_research.data_lake.canonical import DEFAULT_CANONICAL_ALIAS, resolve_canonical_dataset_id
 from daily_research.data_lake.pool_views import PoolViewSpec, resolve_pool_view_for_policy_inputs
 from daily_research.data_lake.sector_board_views import SectorBoardViewSpec, resolve_sector_board_view_for_policy_inputs
 from daily_research.data_platform.contracts import DataDomain
 
-DEFAULT_POLICY_INPUT_LAKE_DATASET_ID = "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
+LEGACY_DEFAULT_POLICY_INPUT_LAKE_DATASET_ID = "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
+DEFAULT_POLICY_INPUT_LAKE_DATASET_ID = DEFAULT_CANONICAL_ALIAS
+
+
+def resolve_policy_input_dataset_id(lake: ResearchDataLake, dataset_id: str = "") -> str:
+    requested = str(dataset_id or "").strip()
+    if requested and requested != DEFAULT_CANONICAL_ALIAS:
+        return requested
+    canonical_id = resolve_canonical_dataset_id(lake, alias=DEFAULT_CANONICAL_ALIAS)
+    return canonical_id or LEGACY_DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
 
 
 def _read_feature_panel(path: Path) -> pd.DataFrame:
@@ -318,7 +328,7 @@ def load_policy_inputs_from_lake(
     alpha_prior_target_weight_panel: str = "",
     require_benchmark_open: bool = False,
 ) -> PreparedPolicyInputs:
-    dataset_id = str(dataset_id or DEFAULT_POLICY_INPUT_LAKE_DATASET_ID)
+    dataset_id = resolve_policy_input_dataset_id(lake, dataset_id)
     metadata = lake.describe_dataset(dataset_id)
     start_date = str(start_date or metadata.get("start_date", "") or "").strip()
     end_date = str(end_date or metadata.get("end_date", "") or start_date).strip()

@@ -14,6 +14,12 @@ from typing import Any, Iterable, Mapping, Sequence
 
 import pandas as pd
 
+from daily_research.data_lake.canonical import (
+    DEFAULT_CANONICAL_ALIAS,
+    DEFAULT_CANONICAL_START_DATE,
+    build_coverage_report,
+    write_canonical_manifest,
+)
 from daily_research.data_lake.catalog import DEFAULT_DATA_LAKE_ROOT, ResearchDataLake
 from daily_research.data_platform.contracts import (
     DOMAIN_STANDARD_COLUMNS,
@@ -35,6 +41,7 @@ BAOSTOCK_FULL_DOMAINS: tuple[str, ...] = (
     DataDomain.INDUSTRY_CONCEPT,
     DataDomain.VALUATION,
     DataDomain.INDEX_CONSTITUENTS,
+    DataDomain.ADJUST_FACTOR,
     DataDomain.MARKET_DAILY,
     DataDomain.MARKET_INTRADAY_5M,
     DataDomain.INTRADAY_DAILY_FEATURES,
@@ -47,6 +54,7 @@ SYMBOL_RANGE_DOMAINS = {
     DataDomain.MARKET_DAILY,
     DataDomain.MARKET_INTRADAY_5M,
     DataDomain.INTRADAY_DAILY_FEATURES,
+    DataDomain.ADJUST_FACTOR,
     DataDomain.VALUATION,
     DataDomain.FINANCIAL_QUARTERLY,
     DataDomain.PERFORMANCE_FORECAST,
@@ -83,7 +91,7 @@ class BackfillConfig:
     lake_root: Path = DEFAULT_DATA_LAKE_ROOT
     run_id: str = ""
     domains: tuple[str, ...] = BAOSTOCK_FULL_DOMAINS
-    start_date: str = "2016-01-01"
+    start_date: str = "2010-01-01"
     end_date: str = ""
     symbols: str = "all_lake"
     benchmark: str = DEFAULT_BENCHMARK
@@ -92,6 +100,9 @@ class BackfillConfig:
     resume: bool = True
     dry_run: bool = False
     build_policy_bundle: bool = False
+    write_canonical_manifest: bool = False
+    canonical_alias: str = DEFAULT_CANONICAL_ALIAS
+    canonical_start_date: str = DEFAULT_CANONICAL_START_DATE
     exclude_index_symbols: bool = True
     derive_intraday_features_from_raw: bool = True
     chunk_size_symbols: int = 200
@@ -138,6 +149,9 @@ class BackfillConfig:
             resume=bool(self.resume),
             dry_run=bool(self.dry_run),
             build_policy_bundle=bool(self.build_policy_bundle),
+            write_canonical_manifest=bool(self.write_canonical_manifest),
+            canonical_alias=str(self.canonical_alias or DEFAULT_CANONICAL_ALIAS).strip(),
+            canonical_start_date=_normalize_date(self.canonical_start_date or DEFAULT_CANONICAL_START_DATE),
             exclude_index_symbols=bool(self.exclude_index_symbols),
             derive_intraday_features_from_raw=bool(self.derive_intraday_features_from_raw),
             chunk_size_symbols=max(1, int(self.chunk_size_symbols or 1)),
@@ -167,6 +181,7 @@ class BackfillResult:
     manifest_path: Path
     dataset_ids: dict[str, str] = field(default_factory=dict)
     policy_bundle_dataset_id: str = ""
+    canonical_manifest_path: Path | None = None
     row_counts: dict[str, int] = field(default_factory=dict)
     shard_counts: dict[str, int] = field(default_factory=dict)
     error_counts: dict[str, int] = field(default_factory=dict)
@@ -178,7 +193,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lake-root", default=str(DEFAULT_DATA_LAKE_ROOT))
     parser.add_argument("--run-id", default="")
     parser.add_argument("--domains", default="baostock_full")
-    parser.add_argument("--start-date", default="2016-01-01")
+    parser.add_argument("--start-date", default="2010-01-01")
     parser.add_argument("--end-date", default="")
     parser.add_argument("--symbols", default="all_lake")
     parser.add_argument("--benchmark", default=DEFAULT_BENCHMARK)
@@ -204,6 +219,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip BaoStock market_daily backfill and reuse the latest existing policy_input_bundle market table when building the bundle.",
     )
     parser.add_argument("--build-policy-bundle", action="store_true")
+    parser.add_argument(
+        "--write-canonical-manifest",
+        action="store_true",
+        help="After building a policy bundle, point canonical_data_v1 (or --canonical-alias) at it.",
+    )
+    parser.add_argument("--canonical-alias", default=DEFAULT_CANONICAL_ALIAS)
+    parser.add_argument("--canonical-start-date", default=DEFAULT_CANONICAL_START_DATE)
     parser.add_argument("--dry-run", action="store_true")
     resume = parser.add_mutually_exclusive_group()
     resume.add_argument("--resume", dest="resume", action="store_true", default=True)
@@ -240,6 +262,9 @@ def config_from_args(args: argparse.Namespace) -> BackfillConfig:
         resume=args.resume,
         dry_run=args.dry_run,
         build_policy_bundle=args.build_policy_bundle,
+        write_canonical_manifest=args.write_canonical_manifest,
+        canonical_alias=args.canonical_alias,
+        canonical_start_date=args.canonical_start_date,
         exclude_index_symbols=args.exclude_index_symbols,
         derive_intraday_features_from_raw=args.derive_intraday_features_from_raw,
         chunk_size_symbols=args.chunk_size_symbols,
@@ -360,6 +385,18 @@ def run_backfill(config: BackfillConfig, *, provider: Any | None = None) -> Back
     policy_bundle_dataset_id = ""
     if config.build_policy_bundle and not config.dry_run:
         policy_bundle_dataset_id = _build_policy_bundle_from_backfill(lake=lake, config=config, dataset_ids=dataset_ids)
+    canonical_manifest_output: Path | None = None
+    if config.write_canonical_manifest and policy_bundle_dataset_id and not config.dry_run:
+        canonical_manifest_output = write_canonical_manifest(
+            lake,
+            dataset_id=policy_bundle_dataset_id,
+            alias=config.canonical_alias,
+            start_date=config.canonical_start_date,
+            end_date=config.end_date,
+            sidecar_dataset_ids={key: value for key, value in dataset_ids.items() if key != DataDomain.MARKET_DAILY},
+            coverage_report=build_coverage_report(lake, start_date=config.canonical_start_date),
+            notes="Created by baostock_backfill after policy bundle build.",
+        )
 
     manifest_path = run_dir / "manifest.json"
     status = "planned" if config.dry_run else "ok"
@@ -376,22 +413,25 @@ def run_backfill(config: BackfillConfig, *, provider: Any | None = None) -> Back
             "start_date": config.start_date,
             "end_date": config.end_date,
             "raw_5m_start_date": config.raw_5m_start_date,
-        "dataset_ids": dataset_ids,
-        "policy_bundle_dataset_id": policy_bundle_dataset_id,
-        "row_counts": row_counts,
-        "shard_counts": shard_counts,
-        "error_counts": error_counts,
-        "planned_task_count": planned_task_count,
-        "task_workers": config.task_workers,
-        "industry_concept_workers": config.industry_concept_workers,
-        "valuation_workers": config.valuation_workers,
-        "failed_chunk_retries": config.failed_chunk_retries,
-        "failed_chunk_sweeps": config.failed_chunk_sweeps,
-        "retry_backoff_seconds": config.retry_backoff_seconds,
-        "retry_jitter_seconds": config.retry_jitter_seconds,
-        "reuse_existing_market_daily": config.reuse_existing_market_daily,
-        "dry_run_plan": dry_run_plan,
-    },
+            "dataset_ids": dataset_ids,
+            "policy_bundle_dataset_id": policy_bundle_dataset_id,
+            "canonical_alias": config.canonical_alias,
+            "canonical_start_date": config.canonical_start_date,
+            "canonical_manifest_path": str(canonical_manifest_output.resolve()) if canonical_manifest_output else "",
+            "row_counts": row_counts,
+            "shard_counts": shard_counts,
+            "error_counts": error_counts,
+            "planned_task_count": planned_task_count,
+            "task_workers": config.task_workers,
+            "industry_concept_workers": config.industry_concept_workers,
+            "valuation_workers": config.valuation_workers,
+            "failed_chunk_retries": config.failed_chunk_retries,
+            "failed_chunk_sweeps": config.failed_chunk_sweeps,
+            "retry_backoff_seconds": config.retry_backoff_seconds,
+            "retry_jitter_seconds": config.retry_jitter_seconds,
+            "reuse_existing_market_daily": config.reuse_existing_market_daily,
+            "dry_run_plan": dry_run_plan,
+        },
     )
     if not config.dry_run:
         lake.write_catalog_manifest()
@@ -403,6 +443,7 @@ def run_backfill(config: BackfillConfig, *, provider: Any | None = None) -> Back
         manifest_path=manifest_path,
         dataset_ids=dataset_ids,
         policy_bundle_dataset_id=policy_bundle_dataset_id,
+        canonical_manifest_path=canonical_manifest_output,
         row_counts=row_counts,
         shard_counts=shard_counts,
         error_counts=error_counts,

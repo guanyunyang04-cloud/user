@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import json
+from argparse import Namespace
 
 import numpy as np
 import torch
 import pytest
 
+from daily_research.path_policy.canonical_memmap import (
+    register_memmap_manifest,
+    resolve_registered_memmap_manifest,
+)
 from daily_research.path_policy.forecast_dataset import (
     ForecastDateBatchTorchDataset,
     _fit_memmap_train_normalization,
@@ -68,6 +73,58 @@ def test_forecast_memmap_dataset_builds_lazy_store_and_batches(tmp_path) -> None
     assert tuple(y_risk.shape) == (5, 3)
     assert int(row_idx.item()) == int(train_indices[0])
     assert torch.isfinite(x).all()
+
+
+def test_canonical_memmap_registry_resolves_matching_request(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
+    prepared.raw_cache_meta["dataset_id"] = "policy_input_bundle__unit"
+    prepared.raw_cache_meta["pool_view"] = {
+        "dataset_id": "policy_pool_view__unit",
+        "view_kind": "rolling_liquidity",
+        "view_name": "rolling_liquid500",
+        "source_market_dataset_id": "policy_input_bundle__unit",
+    }
+    dataset = build_forecast_memmap_dataset(
+        prepared,
+        root=tmp_path / "memmap",
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2020,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=8,
+        max_feature_columns=32,
+        min_lookback_valid_ratio=0.80,
+    )
+    registry_path = tmp_path / "registry.json"
+    register_memmap_manifest(tmp_path / "memmap" / "forecast_dataset_manifest.json", registry_path=registry_path)
+    args = Namespace(
+        lake_dataset_id="policy_input_bundle__unit",
+        forecast_lookback_days=5,
+        execution_mode="next_open",
+        forecast_feature_profile=dataset.manifest["feature_profile"],
+        forecast_max_feature_columns=32,
+        forecast_min_lookback_valid_ratio=0.80,
+        forecast_max_samples_per_role=8,
+        forecast_max_samples_per_date_per_role=0,
+        forecast_train_start_year=2019,
+        forecast_train_end_year=2019,
+        forecast_validation_year=2020,
+        forecast_test_year=2020,
+        forecast_include_static_context=False,
+        forecast_static_fields="symbol,exchange,industry,liquidity_bucket,price_bucket",
+    )
+
+    resolved = resolve_registered_memmap_manifest(
+        prepared=prepared,
+        args=args,
+        horizon=20,
+        cumulative_horizons=tuple(dataset.manifest["cumulative_horizons"]),
+        registry_path=registry_path,
+    )
+
+    assert resolved == tmp_path / "memmap" / "forecast_dataset_manifest.json"
 
 
 def test_forecast_memmap_dataset_writes_progress_files(tmp_path) -> None:

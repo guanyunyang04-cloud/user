@@ -23,6 +23,10 @@ _LAZY_EXPORTS: dict[str, tuple[str, str | None]] = {
         "daily_research.data_lake.gold_training_builder",
         "build_sharded_gold_training_dataset",
     ),
+    "build_lake_inventory": ("daily_research.data_lake.canonical", "build_lake_inventory"),
+    "load_canonical_manifest": ("daily_research.data_lake.canonical", "load_canonical_manifest"),
+    "resolve_canonical_dataset_id": ("daily_research.data_lake.canonical", "resolve_canonical_dataset_id"),
+    "write_canonical_manifest": ("daily_research.data_lake.canonical", "write_canonical_manifest"),
     "GoldBuildSpec": ("daily_research.data_lake.gold_training_builder", "GoldBuildSpec"),
     "DEFAULT_POLICY_INPUT_LAKE_DATASET_ID": (
         "daily_research.data_lake.policy_input_loader",
@@ -31,6 +35,10 @@ _LAZY_EXPORTS: dict[str, tuple[str, str | None]] = {
     "load_policy_inputs_from_lake": (
         "daily_research.data_lake.policy_input_loader",
         "load_policy_inputs_from_lake",
+    ),
+    "resolve_policy_input_dataset_id": (
+        "daily_research.data_lake.policy_input_loader",
+        "resolve_policy_input_dataset_id",
     ),
     "PoolViewRecord": ("daily_research.data_lake.pool_views", "PoolViewRecord"),
     "PoolViewSpec": ("daily_research.data_lake.pool_views", "PoolViewSpec"),

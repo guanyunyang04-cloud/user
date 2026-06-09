@@ -6,6 +6,7 @@ from daily_research.data_platform.contracts import (
     DataDomain,
     DomainFetchRequest,
     DOMAIN_STANDARD_COLUMNS,
+    aggregate_intraday_1m_to_5m_frame,
     normalize_domain_frame,
 )
 from daily_research.data_platform.manager import InMemoryDomainProvider, ProviderManager
@@ -79,6 +80,21 @@ class DataPlatformDomainContractTest(unittest.TestCase):
                     "amount": [10100],
                 }
             ),
+            DataDomain.MARKET_INTRADAY_1M: pd.DataFrame(
+                {
+                    "股票代码": ["000001.SZ"],
+                    "日期": ["2026-01-05 09:30:00"],
+                    "开盘": [10.0],
+                    "最高": [10.1],
+                    "最低": [9.9],
+                    "收盘": [10.05],
+                    "成交量(股)": [100],
+                    "成交额(元)": [1005],
+                    "换手率(%)": [0.01],
+                    "流通股本(股)": [1000000],
+                    "总股本(股)": [1200000],
+                }
+            ),
             DataDomain.INTRADAY_DAILY_FEATURES: pd.DataFrame(
                 {
                     "symbol": ["000001.SZ"],
@@ -134,6 +150,14 @@ class DataPlatformDomainContractTest(unittest.TestCase):
                     "hotspot_tags": ["金融,低估值"],
                 }
             ),
+            DataDomain.ADJUST_FACTOR: pd.DataFrame(
+                {
+                    "code": ["sz.000001"],
+                    "dividOperateDate": ["2026-01-05"],
+                    "foreAdjustFactor": [1.2],
+                    "backAdjustFactor": [0.8],
+                }
+            ),
         }
 
         for domain, frame in samples.items():
@@ -179,6 +203,78 @@ class DataPlatformDomainContractTest(unittest.TestCase):
         self.assertEqual(normalized["symbol"].iloc[0], "000001.SZ")
         self.assertGreater(pd.Timestamp(normalized["trade_date"].iloc[0]), pd.Timestamp("2025-12-31"))
         self.assertEqual(normalized["lag_policy"].iloc[0], "conservative_report_date_plus_90bd_plus_1d_in_features")
+
+    def test_intraday_1m_normalizer_splits_external_datetime_column(self) -> None:
+        normalized = normalize_domain_frame(
+            pd.DataFrame(
+                {
+                    "股票代码": ["000001.SZ"],
+                    "日期": ["2026-01-05 09:30:00"],
+                    "开盘": [10.0],
+                    "最高": [10.1],
+                    "最低": [9.9],
+                    "收盘": [10.05],
+                    "成交量(股)": [100],
+                    "成交额(元)": [1005],
+                    "换手率(%)": [0.01],
+                    "流通股本(股)": [1000000],
+                    "总股本(股)": [1200000],
+                }
+            ),
+            domain=DataDomain.MARKET_INTRADAY_1M,
+            source="external_1m",
+            require_columns=False,
+        )
+
+        self.assertEqual(normalized["symbol"].iloc[0], "000001.SZ")
+        self.assertEqual(normalized["trade_date"].iloc[0], "2026-01-05")
+        self.assertEqual(normalized["bar_time"].iloc[0], "093000000")
+        self.assertEqual(float(normalized["amount"].iloc[0]), 1005.0)
+
+    def test_aggregate_intraday_1m_to_5m_frame_uses_ohlcv_semantics(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "symbol": ["000001.SZ"] * 5,
+                "trade_date": ["2026-01-05"] * 5,
+                "bar_time": ["09:30:00", "09:31:00", "09:32:00", "09:33:00", "09:34:00"],
+                "open": [10.0, 10.1, 10.2, 10.3, 10.4],
+                "high": [10.2, 10.3, 10.4, 10.5, 10.6],
+                "low": [9.9, 10.0, 10.1, 10.2, 10.3],
+                "close": [10.1, 10.2, 10.3, 10.4, 10.5],
+                "volume": [100, 200, 300, 400, 500],
+                "amount": [1010, 2040, 3090, 4160, 5250],
+            }
+        )
+
+        bars = aggregate_intraday_1m_to_5m_frame(frame, source="external_1m")
+
+        self.assertEqual(len(bars), 1)
+        self.assertEqual(bars["bar_time"].iloc[0], "093000000")
+        self.assertEqual(float(bars["open"].iloc[0]), 10.0)
+        self.assertEqual(float(bars["high"].iloc[0]), 10.6)
+        self.assertEqual(float(bars["low"].iloc[0]), 9.9)
+        self.assertEqual(float(bars["close"].iloc[0]), 10.5)
+        self.assertEqual(float(bars["volume"].iloc[0]), 1500.0)
+
+    def test_adjust_factor_normalizer_keeps_provider_semantics(self) -> None:
+        normalized = normalize_domain_frame(
+            pd.DataFrame(
+                {
+                    "证券代码": ["000001.SZ"],
+                    "除权除息日": ["2026-01-05"],
+                    "复权因子": [1.234],
+                    "factor_provider": ["sina"],
+                    "factor_semantics": ["external_sina_event_factor"],
+                }
+            ),
+            domain=DataDomain.ADJUST_FACTOR,
+            source="external_adjust_factor",
+            require_columns=False,
+        )
+
+        self.assertEqual(normalized["factor_provider"].iloc[0], "sina")
+        self.assertEqual(normalized["factor_semantics"].iloc[0], "external_sina_event_factor")
+        self.assertAlmostEqual(float(normalized["adjust_factor"].iloc[0]), 1.234)
 
 
 if __name__ == "__main__":

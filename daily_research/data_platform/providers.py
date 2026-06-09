@@ -35,6 +35,7 @@ FORMAL_FREE_V3_OPTIONAL_DOMAINS: tuple[str, ...] = (
     DataDomain.VALUATION,
     DataDomain.INDUSTRY_CONCEPT,
     DataDomain.INDEX_CONSTITUENTS,
+    DataDomain.ADJUST_FACTOR,
     DataDomain.INTRADAY_DAILY_FEATURES,
     DataDomain.FINANCIAL_QUARTERLY,
     DataDomain.PERFORMANCE_FORECAST,
@@ -64,6 +65,7 @@ _PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
             DataDomain.INDUSTRY_CONCEPT,
             DataDomain.VALUATION,
             DataDomain.INDEX_CONSTITUENTS,
+            DataDomain.ADJUST_FACTOR,
             DataDomain.MARKET_INTRADAY_5M,
             DataDomain.INTRADAY_DAILY_FEATURES,
             DataDomain.FINANCIAL_QUARTERLY,
@@ -124,6 +126,7 @@ _PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
             DataDomain.INDUSTRY_CONCEPT,
             DataDomain.VALUATION,
             DataDomain.INDEX_CONSTITUENTS,
+            DataDomain.ADJUST_FACTOR,
             DataDomain.INTRADAY_DAILY_FEATURES,
             DataDomain.FINANCIAL_QUARTERLY,
             DataDomain.PERFORMANCE_FORECAST,
@@ -490,6 +493,12 @@ class BaostockProvider:
             )
         elif request.domain == DataDomain.VALUATION:
             frame = _fetch_baostock_valuation_frame_with_timeout(
+                symbols=request.symbols,
+                start_date=request.start_date,
+                end_date=request.end_date,
+            )
+        elif request.domain == DataDomain.ADJUST_FACTOR:
+            frame = _fetch_baostock_adjust_factor_frame_with_timeout(
                 symbols=request.symbols,
                 start_date=request.start_date,
                 end_date=request.end_date,
@@ -1085,6 +1094,29 @@ def _baostock_performance_frame_from_bs(bs: Any, request: DomainFetchRequest) ->
     return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
 
 
+def _baostock_adjust_factor_frame_from_bs(bs: Any, request: DomainFetchRequest) -> pd.DataFrame:
+    request = request.normalized()
+    rows: list[pd.DataFrame] = []
+    for symbol in request.symbols:
+        raw = _baostock_query_to_frame(
+            bs.query_adjust_factor(
+                code=_to_baostock_code(symbol),
+                start_date=request.start_date,
+                end_date=request.end_date,
+            ),
+            "baostock_adjust_factor",
+        )
+        if raw.empty:
+            continue
+        frame = raw.copy()
+        frame["symbol"] = symbol
+        frame["factor_provider"] = "baostock"
+        frame["factor_semantics"] = "baostock_adjust_factor"
+        frame["source"] = "baostock"
+        rows.append(frame)
+    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
+
+
 def _quarter_points(start_date: str, end_date: str) -> list[tuple[int, int, str]]:
     start_ts = pd.Timestamp(start_date)
     end_ts = pd.Timestamp(end_date)
@@ -1297,6 +1329,31 @@ def _baostock_performance_worker(queue: Any, domain: str, symbols: tuple[str, ..
         queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
 
 
+def _baostock_adjust_factor_worker(queue: Any, symbols: tuple[str, ...], start_date: str, end_date: str) -> None:
+    try:
+        import baostock as bs  # type: ignore
+
+        login = bs.login()
+        if getattr(login, "error_code", "1") != "0":
+            queue.put({"status": "error", "error_type": "RuntimeError", "error": f"baostock login failed: {getattr(login, 'error_msg', '')}"})
+            return
+        try:
+            frame = _baostock_adjust_factor_frame_from_bs(
+                bs,
+                DomainFetchRequest(
+                    domain=DataDomain.ADJUST_FACTOR,
+                    symbols=tuple(symbols),
+                    start_date=start_date,
+                    end_date=end_date,
+                ),
+            )
+        finally:
+            bs.logout()
+        queue.put({"status": "ok", "data": frame})
+    except Exception as exc:
+        queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
+
+
 def _baostock_valuation_worker(queue: Any, symbols: tuple[str, ...], start_date: str, end_date: str) -> None:
     try:
         import baostock as bs  # type: ignore
@@ -1494,6 +1551,22 @@ def _fetch_baostock_performance_frame_with_timeout(
         timeout_seconds=timeout_seconds,
         timeout_label="baostock_performance_timeout",
         failure_label="baostock_performance",
+    )
+
+
+def _fetch_baostock_adjust_factor_frame_with_timeout(
+    *,
+    symbols: tuple[str, ...],
+    start_date: str,
+    end_date: str,
+    timeout_seconds: int = 900,
+) -> pd.DataFrame:
+    return _fetch_baostock_payload_with_timeout(
+        target=_baostock_adjust_factor_worker,
+        kwargs={"symbols": tuple(symbols), "start_date": str(start_date), "end_date": str(end_date)},
+        timeout_seconds=timeout_seconds,
+        timeout_label="baostock_adjust_factor_timeout",
+        failure_label="baostock_adjust_factor",
     )
 
 

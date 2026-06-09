@@ -26,6 +26,12 @@ from daily_research.path_policy import (
     ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
 )
 from daily_research.path_policy.adapter import build_path_policy_frame
+from daily_research.path_policy.canonical_memmap import (
+    DEFAULT_CANONICAL_MEMMAP_ALIAS,
+    default_registry_path,
+    register_memmap_manifest,
+    resolve_registered_memmap_manifest,
+)
 from daily_research.path_policy.forecast_dataset import (
     build_forecast_memmap_dataset,
     build_forecast_sequence_dataset,
@@ -661,29 +667,55 @@ def _run_forecast_walkforward_study(
     dataset_mode = str(getattr(args, "forecast_dataset_mode", "eager") or "eager").strip().lower()
     if dataset_mode == "memmap":
         manifest_path = str(getattr(args, "forecast_memmap_manifest", "") or "").strip()
+        registry_hit = False
         if manifest_path:
             dataset = load_forecast_memmap_dataset(manifest_path)
         else:
-            dataset = build_forecast_memmap_dataset(
-                prepared,
-                root=study_root,
-                train_start_year=int(args.forecast_train_start_year),
-                train_end_year=int(args.forecast_train_end_year),
-                validation_year=int(args.forecast_validation_year),
-                test_year=int(args.forecast_test_year),
-                lookback_days=int(args.forecast_lookback_days),
+            registry_path = str(getattr(args, "forecast_canonical_memmap_registry", "") or "").strip()
+            alias = str(getattr(args, "forecast_canonical_memmap_alias", DEFAULT_CANONICAL_MEMMAP_ALIAS) or DEFAULT_CANONICAL_MEMMAP_ALIAS)
+            registered_manifest = resolve_registered_memmap_manifest(
+                prepared=prepared,
+                args=args,
                 horizon=forecast_horizon,
                 cumulative_horizons=cumulative_horizons,
-                execution_mode=args.execution_mode,
-                feature_profile=str(args.forecast_feature_profile),
-                max_feature_columns=int(args.forecast_max_feature_columns),
-                max_samples_per_role=int(args.forecast_max_samples_per_role),
-                max_samples_per_date_per_role=int(getattr(args, "forecast_max_samples_per_date_per_role", 0)),
-                min_lookback_valid_ratio=float(args.forecast_min_lookback_valid_ratio),
-                include_static_context=bool(args.forecast_include_static_context),
-                static_context_fields=normalize_static_context_fields(str(args.forecast_static_fields)),
+                registry_path=registry_path or None,
+                alias=alias,
             )
+            if registered_manifest is not None:
+                dataset = load_forecast_memmap_dataset(registered_manifest)
+                registry_hit = True
+            else:
+                dataset = build_forecast_memmap_dataset(
+                    prepared,
+                    root=study_root,
+                    train_start_year=int(args.forecast_train_start_year),
+                    train_end_year=int(args.forecast_train_end_year),
+                    validation_year=int(args.forecast_validation_year),
+                    test_year=int(args.forecast_test_year),
+                    lookback_days=int(args.forecast_lookback_days),
+                    horizon=forecast_horizon,
+                    cumulative_horizons=cumulative_horizons,
+                    execution_mode=args.execution_mode,
+                    feature_profile=str(args.forecast_feature_profile),
+                    max_feature_columns=int(args.forecast_max_feature_columns),
+                    max_samples_per_role=int(args.forecast_max_samples_per_role),
+                    max_samples_per_date_per_role=int(getattr(args, "forecast_max_samples_per_date_per_role", 0)),
+                    min_lookback_valid_ratio=float(args.forecast_min_lookback_valid_ratio),
+                    include_static_context=bool(args.forecast_include_static_context),
+                    static_context_fields=normalize_static_context_fields(str(args.forecast_static_fields)),
+                )
+                if bool(getattr(args, "forecast_register_canonical_memmap", False)):
+                    manifest_to_register = str(dataset.manifest.get("manifest_json", "") or (study_root / "forecast_dataset_manifest.json"))
+                    registry_out = register_memmap_manifest(
+                        manifest_to_register,
+                        registry_path=registry_path or None,
+                        alias=alias,
+                    )
+                    dataset.manifest["canonical_memmap_registry"] = str(registry_out.resolve())
+                    dataset.manifest["canonical_memmap_alias"] = alias
         dataset_manifest = dict(dataset.manifest)
+        if registry_hit:
+            dataset_manifest["canonical_memmap_registry_hit"] = True
         if not dataset_manifest.get("manifest_json"):
             dataset_manifest["manifest_json"] = str((study_root / "forecast_dataset_manifest.json").resolve())
     else:
@@ -3434,6 +3466,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--forecast-max-samples-per-date-per-role", type=int, default=0)
     parser.add_argument("--forecast-dataset-mode", default="eager", choices=("eager", "memmap"))
     parser.add_argument("--forecast-memmap-manifest", default="", help="Reuse an existing forecast memmap dataset manifest.")
+    parser.add_argument(
+        "--forecast-canonical-memmap-registry",
+        default=str(default_registry_path()),
+        help="Registry searched before building a new forecast memmap when --forecast-dataset-mode memmap and no explicit manifest is provided.",
+    )
+    parser.add_argument("--forecast-canonical-memmap-alias", default=DEFAULT_CANONICAL_MEMMAP_ALIAS)
+    parser.add_argument(
+        "--forecast-register-canonical-memmap",
+        action="store_true",
+        help="Register the newly built forecast memmap in the canonical memmap registry after a successful build.",
+    )
     parser.add_argument("--forecast-min-lookback-valid-ratio", type=float, default=0.80)
     parser.add_argument("--forecast-dataloader-num-workers", type=int, default=0)
     parser.add_argument("--forecast-prefetch-factor", type=int, default=2)
