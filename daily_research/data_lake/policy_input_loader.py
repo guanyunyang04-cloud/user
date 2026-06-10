@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import glob
+import json
 from pathlib import Path
 from typing import Any
 
@@ -70,10 +72,44 @@ def _read_domain_sidecar_frame(lake: ResearchDataLake, dataset_id: str) -> tuple
     if not str(dataset_id or "").strip():
         return pd.DataFrame(), {}
     metadata = lake.describe_dataset(str(dataset_id))
-    path = str(dict(metadata.get("content_paths", {}) or {}).get("silver_domain_data", "") or "")
-    if not path or not Path(path).exists():
-        return pd.DataFrame(), metadata
-    return pd.read_parquet(path), metadata
+    paths = dict(metadata.get("content_paths", {}) or {})
+    frame = _read_sidecar_table_paths(paths)
+    return frame, metadata
+
+
+def _read_sidecar_table_paths(paths: dict[str, Any]) -> pd.DataFrame:
+    return _read_table_paths(paths, data_key="silver_domain_data", manifest_keys=("shard_manifest",))
+
+
+def _read_table_paths(
+    paths: dict[str, Any],
+    *,
+    data_key: str,
+    manifest_keys: tuple[str, ...],
+) -> pd.DataFrame:
+    raw = str(paths.get(data_key, "") or "")
+    if raw:
+        candidates = sorted(glob.glob(raw)) if "*" in raw else [raw]
+        existing = [path for path in candidates if Path(path).exists()]
+        if existing:
+            frames = [pd.read_parquet(path) for path in existing]
+            return pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
+    for manifest_key in manifest_keys:
+        manifest_path = Path(str(paths.get(manifest_key, "") or ""))
+        if not manifest_path.exists():
+            continue
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        shard_paths = [
+            str(dict(item).get("path", "") or "")
+            for item in list(manifest.get("shards", []) or [])
+            if str(dict(item).get("status", "") or "") in {"stored", "skipped"}
+            and int(dict(item).get("row_count", 0) or 0) > 0
+        ]
+        existing = [path for path in shard_paths if Path(path).exists()]
+        if existing:
+            frames = [pd.read_parquet(path) for path in existing]
+            return pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
+    return pd.DataFrame()
 
 
 def _sidecar_dataset_ids(metadata: dict[str, Any]) -> dict[str, str]:
@@ -338,7 +374,13 @@ def load_policy_inputs_from_lake(
     market_path = str(paths.get("bronze_market_data", "") or "")
     if not market_path:
         raise ValueError(f"lake_coverage_blocker: dataset has no bronze_market_data path: {dataset_id}")
-    market = pd.read_parquet(market_path)
+    market = _read_table_paths(
+        paths,
+        data_key="bronze_market_data",
+        manifest_keys=("bronze_market_shard_manifest", "shard_manifest"),
+    )
+    if market.empty:
+        raise ValueError(f"lake_coverage_blocker: no readable bronze_market_data rows for lake dataset {dataset_id}")
     market["trade_date"] = pd.to_datetime(market["trade_date"])
     start_ts = pd.Timestamp(start_date)
     end_ts = pd.Timestamp(end_date)

@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "alias": "canonical_data_v1",
+  "status": "control_plane_ready",
+  "canonical_start_date": "2010-01-01",
+  "workspace_root": "H:/quant_project",
+  "primary_lake_root": "H:/quant_project/daily_research/output/research_data_lake",
+  "canonical_manifest": "H:/quant_project/daily_research/output/research_data_lake/canonical/canonical_manifest.json",
+  "canonical_dataset_id": "",
+  "canonical_memmap_registry": "H:/quant_project/canonical_data/registry/memmap_registry.json",
+  "source_policy": {
+    "base_pit_source": "baostock",
+    "daily_bar_fast_source": "tdx_tqcenter",
+    "external_intraday_source_root": "H:/BaiduNetdiskDownload/量化数据",
+    "tdx_tqcenter_path": "H:/new_tdx64/PYPlugins/user/t0_project/tqcenter.py"
+  },
+  "amount_unit_policy": {
+    "standard_amount_unit": "yuan",
+    "tdx_raw_amount_unit": "wan_yuan",
+    "tdx_amount_unit_factor": 10000.0
+  },
+  "storage_policy": {
+    "large_data_dirs_are_gitignored": true,
+    "raw_ohlcv_not_overwritten_by_adjusted_prices": true,
+    "cleanup_requires_dry_run_and_replacement_validation": true
+  },
+  "updated_at": "2026-06-10"
+}

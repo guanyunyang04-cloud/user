@@ -12,6 +12,7 @@ from daily_research.data_platform.baostock_backfill import (
     BackfillConfig,
     _resolve_symbols,
     _resolve_run_trade_dates,
+    _sidecar_dataset_ids_for_bundle,
     build_backfill_tasks,
     build_parser,
     config_from_args,
@@ -183,10 +184,14 @@ def test_backfill_parser_expands_baostock_full_and_raw_5m_start_date() -> None:
             "2020-01-01",
             "--task-workers",
             "3",
+            "--snapshot-workers",
+            "2",
             "--industry-concept-workers",
             "2",
             "--valuation-workers",
             "4",
+            "--market-daily-symbol-workers",
+            "1",
             "--failed-chunk-sweeps",
             "1",
             "--retry-backoff-seconds",
@@ -194,6 +199,8 @@ def test_backfill_parser_expands_baostock_full_and_raw_5m_start_date() -> None:
             "--retry-jitter-seconds",
             "0.25",
             "--reuse-existing-market-daily",
+            "--extra-sidecar-dataset-ids",
+            "market_intraday_1m=data_platform_market_intraday_1m__abc,intraday_daily_features=data_platform_intraday_daily_features__def",
         ]
     )
     config = config_from_args(args)
@@ -203,12 +210,24 @@ def test_backfill_parser_expands_baostock_full_and_raw_5m_start_date() -> None:
     assert DataDomain.FINANCIAL_QUARTERLY in config.domains
     assert config.raw_5m_start_date == "2020-01-01"
     assert config.task_workers == 3
+    assert config.snapshot_workers == 2
     assert config.industry_concept_workers == 2
     assert config.valuation_workers == 4
+    assert config.market_daily_symbol_workers == 1
     assert config.failed_chunk_sweeps == 1
     assert config.retry_backoff_seconds == 1.5
     assert config.retry_jitter_seconds == 0.25
     assert config.reuse_existing_market_daily is True
+    assert config.extra_sidecar_dataset_ids == (
+        "market_intraday_1m=data_platform_market_intraday_1m__abc",
+        "intraday_daily_features=data_platform_intraday_daily_features__def",
+    )
+    sidecars = _sidecar_dataset_ids_for_bundle(
+        config=config,
+        dataset_ids={DataDomain.INTRADAY_DAILY_FEATURES: "run_local_intraday_features"},
+    )
+    assert sidecars[DataDomain.MARKET_INTRADAY_1M] == "data_platform_market_intraday_1m__abc"
+    assert sidecars[DataDomain.INTRADAY_DAILY_FEATURES] == "data_platform_intraday_daily_features__def"
 
 
 def test_backfill_calendar_only_dry_run_does_not_require_lake_universe() -> None:

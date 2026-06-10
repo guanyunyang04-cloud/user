@@ -540,6 +540,13 @@ class DataPlatformProviderContractTest(unittest.TestCase):
         self.assertIn("close_position", features.columns)
         self.assertIn("early_strength_late_weak", features.columns)
         self.assertIn("open_gap_first_30m_reversal", features.columns)
+        self.assertIn("high_time_frac", features.columns)
+        self.assertIn("low_time_frac", features.columns)
+        self.assertIn("amount_concentration_hhi", features.columns)
+        self.assertIn("intraday_max_drawdown", features.columns)
+        self.assertGreaterEqual(features["high_time_frac"].iloc[0], 0.0)
+        self.assertLessEqual(features["high_time_frac"].iloc[0], 1.0)
+        self.assertLess(features["intraday_max_drawdown"].iloc[0], 0.0)
         self.assertNotIn("auction", ",".join(features.columns))
 
     def test_baostock_index_constituents_frame_combines_supported_indices(self) -> None:
@@ -687,6 +694,42 @@ class DataPlatformProviderContractTest(unittest.TestCase):
         self.assertEqual(set(result.data["symbol"].tolist()), {"600000.SH", "000300.SH"})
         self.assertEqual(result.error_report, [])
 
+    def test_baostock_market_daily_retries_failed_serial_symbols(self) -> None:
+        attempts: dict[str, int] = {}
+
+        def guarded_fetch(*, symbol: str, **_: object) -> pd.DataFrame:
+            attempts[symbol] = attempts.get(symbol, 0) + 1
+            if symbol == "000300.SH" and attempts[symbol] == 1:
+                raise RuntimeError("baostock_history_worker_error:RuntimeError: baostock_history_query_error:10001001: 用户未登录")
+            return pd.DataFrame(
+                {
+                    "trade_date": ["2026-05-22"],
+                    "symbol": [symbol],
+                    "open": ["10"],
+                    "high": ["11"],
+                    "low": ["9"],
+                    "close": ["10.5"],
+                    "volume": ["100"],
+                    "amount": ["1050"],
+                }
+            )
+
+        with mock.patch(
+            "daily_research.data_platform.providers._fetch_baostock_history_frame_with_timeout",
+            side_effect=guarded_fetch,
+        ):
+            result = BaostockProvider(_market_daily_max_workers=1).fetch_market_bars(
+                FetchRequest(
+                    symbols=("600000.SH", "000300.SH"),
+                    start_date="2026-05-22",
+                    end_date="2026-05-22",
+                )
+            )
+
+        self.assertEqual(attempts["000300.SH"], 2)
+        self.assertEqual(set(result.data["symbol"].tolist()), {"600000.SH", "000300.SH"})
+        self.assertEqual(result.error_report, [])
+
     def test_baostock_history_guard_times_out_and_terminates_child(self) -> None:
         from daily_research.data_platform import providers
 
@@ -817,6 +860,73 @@ class DataPlatformProviderContractTest(unittest.TestCase):
         guarded.assert_called_once_with(symbols=("600000.SH",), start_date="2026-05-22", end_date="2026-05-22")
         self.assertEqual(result.data["symbol"].tolist(), ["600000.SH"])
         self.assertEqual(result.data["source"].tolist(), ["baostock"])
+
+    def test_baostock_financial_query_relogs_in_after_not_logged_in(self) -> None:
+        from daily_research.data_platform import providers
+
+        class FakeQuery:
+            def __init__(self, *, error_code: str = "0", error_msg: str = "", fields: list[str] | None = None, rows: list[list[str]] | None = None) -> None:
+                self.error_code = error_code
+                self.error_msg = error_msg
+                self.fields = fields or []
+                self.rows = rows or []
+                self.index = 0
+
+            def next(self) -> bool:
+                self.index += 1
+                return self.index <= len(self.rows)
+
+            def get_row_data(self) -> list[str]:
+                return self.rows[self.index - 1]
+
+        class FakeBaoStock:
+            def __init__(self) -> None:
+                self.login_calls = 0
+                self.logout_calls = 0
+                self.profit_calls = 0
+
+            def login(self) -> object:
+                self.login_calls += 1
+                return types.SimpleNamespace(error_code="0", error_msg="")
+
+            def logout(self) -> None:
+                self.logout_calls += 1
+
+            def query_profit_data(self, **_: object) -> FakeQuery:
+                self.profit_calls += 1
+                if self.profit_calls == 1:
+                    return FakeQuery(error_code="10001001", error_msg="用户未登录")
+                return FakeQuery(fields=["roeAvg"], rows=[["1.25"]])
+
+            def query_operation_data(self, **_: object) -> FakeQuery:
+                return FakeQuery(fields=["NRTurnRatio"], rows=[])
+
+            def query_growth_data(self, **_: object) -> FakeQuery:
+                return FakeQuery(fields=["YOYEquity"], rows=[])
+
+            def query_balance_data(self, **_: object) -> FakeQuery:
+                return FakeQuery(fields=["totalShare"], rows=[])
+
+            def query_cash_flow_data(self, **_: object) -> FakeQuery:
+                return FakeQuery(fields=["CAToAsset"], rows=[])
+
+        fake_bs = FakeBaoStock()
+        with mock.patch("daily_research.data_platform.providers.time.sleep", return_value=None):
+            frame = providers._baostock_financial_quarterly_frame_from_bs(
+                fake_bs,
+                DomainFetchRequest(
+                    domain=DataDomain.FINANCIAL_QUARTERLY,
+                    symbols=("600000.SH",),
+                    start_date="2026-01-01",
+                    end_date="2026-03-31",
+                ),
+            )
+
+        self.assertEqual(fake_bs.profit_calls, 2)
+        self.assertEqual(fake_bs.login_calls, 1)
+        self.assertEqual(fake_bs.logout_calls, 1)
+        self.assertEqual(frame["symbol"].tolist(), ["600000.SH"])
+        self.assertEqual(frame["roeAvg"].tolist(), ["1.25"])
 
     def test_baostock_stock_basic_guard_times_out_and_terminates_child(self) -> None:
         from daily_research.data_platform import providers

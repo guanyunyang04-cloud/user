@@ -343,17 +343,21 @@ class BaostockProvider:
             return ProviderResult(provider=self.name, data=data, error_report=errors)
         with create_progress(total=len(symbols), desc="Baostock market_daily", unit="symbol", leave=False) as progress:
             if len(symbols) == 1 or max_workers <= 1:
-                iterable = ((symbol, _fetch_baostock_history_frame_with_timeout(
-                    symbol=symbol,
-                    start_date=request.start_date,
-                    end_date=request.end_date,
-                    adjusted_flag=request.adjusted_flag,
-                )) for symbol in symbols)
-                for idx, (symbol, frame) in enumerate(iterable, start=1):
+                for idx, symbol in enumerate(symbols, start=1):
                     if idx == 1 or idx % 50 == 0 or idx == len(symbols):
                         progress_write(f"baostock_market_daily={idx}/{len(symbols)} symbol={symbol}")
                     progress.set_description_str(f"Baostock market_daily {symbol}")
                     progress.update(1)
+                    try:
+                        frame = _fetch_baostock_history_frame_with_timeout(
+                            symbol=symbol,
+                            start_date=request.start_date,
+                            end_date=request.end_date,
+                            adjusted_flag=request.adjusted_flag,
+                        )
+                    except Exception as exc:
+                        failed_symbols.append((symbol, exc))
+                        continue
                     if not frame.empty:
                         rows.append(frame)
             else:
@@ -957,18 +961,39 @@ def _baostock_valuation_symbol_frame_with_relogin(
     request: DomainFetchRequest,
     relogin_retries: int,
 ) -> pd.DataFrame:
-    attempts = max(1, int(relogin_retries or 0) + 1)
-    for attempt in range(1, attempts + 1):
-        query = bs.query_history_k_data_plus(
+    return _baostock_query_to_frame_with_relogin(
+        bs,
+        lambda: bs.query_history_k_data_plus(
             _to_baostock_code(symbol),
             "date,code,turn,peTTM,pbMRQ",
             start_date=request.start_date,
             end_date=request.end_date,
             frequency="d",
             adjustflag="3",
-        )
+        ),
+        "baostock_valuation",
+        relogin_retries=relogin_retries,
+        relogin_context="valuation",
+    )
+
+
+def _is_baostock_not_logged_in_error(exc: BaseException) -> bool:
+    message = str(exc)
+    return "10001001" in message or "用户未登录" in message
+
+
+def _baostock_query_to_frame_with_relogin(
+    bs: Any,
+    query_factory: Any,
+    failure_label: str,
+    *,
+    relogin_retries: int = 2,
+    relogin_context: str = "query",
+) -> pd.DataFrame:
+    attempts = max(1, int(relogin_retries or 0) + 1)
+    for attempt in range(1, attempts + 1):
         try:
-            return _baostock_query_to_frame(query, "baostock_valuation")
+            return _baostock_query_to_frame(query_factory(), failure_label)
         except RuntimeError as exc:
             if attempt >= attempts or not _is_baostock_not_logged_in_error(exc):
                 raise
@@ -979,13 +1004,8 @@ def _baostock_valuation_symbol_frame_with_relogin(
             time.sleep(min(2.0 * attempt, 5.0))
             login = bs.login()
             if getattr(login, "error_code", "1") != "0" and attempt >= attempts - 1:
-                raise RuntimeError(f"baostock valuation relogin failed: {getattr(login, 'error_msg', '')}") from exc
+                raise RuntimeError(f"baostock {relogin_context} relogin failed: {getattr(login, 'error_msg', '')}") from exc
     return pd.DataFrame()
-
-
-def _is_baostock_not_logged_in_error(exc: BaseException) -> bool:
-    message = str(exc)
-    return "10001001" in message or "用户未登录" in message
 
 
 def _baostock_history_frame(query: Any, *, symbol: str) -> pd.DataFrame:
@@ -1040,7 +1060,7 @@ def _baostock_index_constituents_frame(bs: Any, *, trade_date: str) -> pd.DataFr
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
-def _baostock_financial_quarterly_frame_from_bs(bs: Any, request: DomainFetchRequest) -> pd.DataFrame:
+def _baostock_financial_quarterly_frame_from_bs(bs: Any, request: DomainFetchRequest, *, relogin_retries: int = 2) -> pd.DataFrame:
     request = request.normalized()
     rows: list[dict[str, Any]] = []
     query_specs = [
@@ -1064,7 +1084,13 @@ def _baostock_financial_quarterly_frame_from_bs(bs: Any, request: DomainFetchReq
             }
             has_payload = False
             for _label, query_func in query_specs:
-                raw = _baostock_query_to_frame(query_func(code=code, year=year, quarter=quarter), "baostock_financial_quarterly")
+                raw = _baostock_query_to_frame_with_relogin(
+                    bs,
+                    lambda query_func=query_func, code=code, year=year, quarter=quarter: query_func(code=code, year=year, quarter=quarter),
+                    "baostock_financial_quarterly",
+                    relogin_retries=relogin_retries,
+                    relogin_context="financial_quarterly",
+                )
                 if raw.empty:
                     continue
                 has_payload = True
@@ -1075,15 +1101,18 @@ def _baostock_financial_quarterly_frame_from_bs(bs: Any, request: DomainFetchReq
     return pd.DataFrame(rows)
 
 
-def _baostock_performance_frame_from_bs(bs: Any, request: DomainFetchRequest) -> pd.DataFrame:
+def _baostock_performance_frame_from_bs(bs: Any, request: DomainFetchRequest, *, relogin_retries: int = 2) -> pd.DataFrame:
     request = request.normalized()
     rows: list[pd.DataFrame] = []
     query_func = bs.query_forecast_report if request.domain == DataDomain.PERFORMANCE_FORECAST else bs.query_performance_express_report
     failure_label = "baostock_performance_forecast" if request.domain == DataDomain.PERFORMANCE_FORECAST else "baostock_performance_express"
     for symbol in request.symbols:
-        raw = _baostock_query_to_frame(
-            query_func(_to_baostock_code(symbol), start_date=request.start_date, end_date=request.end_date),
+        raw = _baostock_query_to_frame_with_relogin(
+            bs,
+            lambda query_func=query_func, symbol=symbol: query_func(_to_baostock_code(symbol), start_date=request.start_date, end_date=request.end_date),
             failure_label,
+            relogin_retries=relogin_retries,
+            relogin_context=request.domain,
         )
         if raw.empty:
             continue

@@ -99,6 +99,25 @@ DOMAIN_STANDARD_COLUMNS: dict[str, list[str]] = {
         "close_position",
         "intraday_realized_vol",
         "intraday_price_volume_corr",
+        "bar_count",
+        "high_time_frac",
+        "low_time_frac",
+        "high_before_low",
+        "open_to_high_ret",
+        "open_to_low_ret",
+        "high_to_close_ret",
+        "low_to_close_ret",
+        "intraday_max_drawdown",
+        "intraday_max_runup",
+        "price_above_vwap_share",
+        "cum_vwap_slope",
+        "first_5m_amount_share",
+        "last_5m_amount_share",
+        "first_30m_range",
+        "last_30m_range",
+        "amount_top_bar_share",
+        "amount_concentration_hhi",
+        "lunch_gap_ret",
         "am_ret",
         "pm_ret",
         "am_pm_ret_spread",
@@ -668,7 +687,7 @@ def build_intraday_daily_feature_frame(
     rows: list[dict[str, Any]] = []
     prev_close_by_symbol: dict[str, float] = {}
     for (trade_date, symbol), group in bars.groupby(["trade_date", "symbol"], sort=True):
-        day = group.sort_values("bar_time").copy()
+        day = group.sort_values("bar_time").reset_index(drop=True).copy()
         if day.empty:
             continue
         open_values = pd.to_numeric(day["open"], errors="coerce")
@@ -692,6 +711,21 @@ def build_intraday_daily_feature_frame(
         vwap = total_amount / total_volume if total_amount > 0 and total_volume > 0 else np.nan
         close_ret = close_values.pct_change().replace([np.inf, -np.inf], np.nan)
         clocks = day["bar_time"].map(_bar_clock_int)
+        bar_count = int(len(day))
+        high_pos = _first_extreme_position(high_values, mode="max")
+        low_pos = _first_extreme_position(low_values, mode="min")
+        high_time_frac = _position_fraction(high_pos, bar_count)
+        low_time_frac = _position_fraction(low_pos, bar_count)
+        high_before_low = (
+            float(high_pos < low_pos)
+            if high_pos >= 0 and low_pos >= 0 and high_pos != low_pos
+            else (0.5 if high_pos >= 0 and low_pos >= 0 else np.nan)
+        )
+        first_5m_amount_share = _window_sum(amount_values, 1, head=True) / total_amount if total_amount > 0 else np.nan
+        last_5m_amount_share = _window_sum(amount_values, 1, head=False) / total_amount if total_amount > 0 else np.nan
+        cum_volume = volume_values.cumsum()
+        cum_vwap = amount_values.cumsum() / cum_volume.where(cum_volume > 0)
+        amount_share = amount_values / total_amount if total_amount > 0 else pd.Series(np.nan, index=amount_values.index)
         am_mask = clocks.le(113000)
         pm_mask = clocks.ge(130000)
         if not bool(am_mask.any()) and len(day) > 1:
@@ -702,6 +736,7 @@ def build_intraday_daily_feature_frame(
         pm_day = day.loc[pm_mask]
         am_ret = _session_return(am_day)
         pm_ret = _session_return(pm_day)
+        lunch_gap_ret = _safe_return(pm_day["open"].iloc[0], am_day["close"].iloc[-1]) if not am_day.empty and not pm_day.empty else np.nan
         am_vol = pd.to_numeric(am_day["close"], errors="coerce").pct_change().replace([np.inf, -np.inf], np.nan).std() if not am_day.empty else np.nan
         pm_vol = pd.to_numeric(pm_day["close"], errors="coerce").pct_change().replace([np.inf, -np.inf], np.nan).std() if not pm_day.empty else np.nan
         am_amount_share = _finite_sum(pd.to_numeric(am_day.get("amount", pd.Series(dtype=float)), errors="coerce")) / total_amount if total_amount > 0 else np.nan
@@ -730,6 +765,25 @@ def build_intraday_daily_feature_frame(
                 "close_position": close_position,
                 "intraday_realized_vol": float(close_ret.std()) if close_ret.notna().sum() >= 2 else np.nan,
                 "intraday_price_volume_corr": price_volume_corr,
+                "bar_count": float(bar_count),
+                "high_time_frac": high_time_frac,
+                "low_time_frac": low_time_frac,
+                "high_before_low": high_before_low,
+                "open_to_high_ret": _safe_return(high_max, first_open),
+                "open_to_low_ret": _safe_return(low_min, first_open),
+                "high_to_close_ret": _safe_return(last_close, high_max),
+                "low_to_close_ret": _safe_return(last_close, low_min),
+                "intraday_max_drawdown": _max_drawdown(close_values),
+                "intraday_max_runup": _max_runup(close_values),
+                "price_above_vwap_share": _finite_ratio(close_values > vwap) if pd.notna(vwap) else np.nan,
+                "cum_vwap_slope": _linear_slope(cum_vwap),
+                "first_5m_amount_share": first_5m_amount_share,
+                "last_5m_amount_share": last_5m_amount_share,
+                "first_30m_range": _window_range(day, 6, head=True),
+                "last_30m_range": _window_range(day, 6, head=False),
+                "amount_top_bar_share": float(amount_share.max()) if amount_share.notna().any() else np.nan,
+                "amount_concentration_hhi": float((amount_share.dropna() ** 2).sum()) if amount_share.notna().any() else np.nan,
+                "lunch_gap_ret": lunch_gap_ret,
                 "am_ret": am_ret,
                 "pm_ret": pm_ret,
                 "am_pm_ret_spread": pm_ret - am_ret,
@@ -1153,6 +1207,76 @@ def _window_sum(series: pd.Series, bars: int, *, head: bool) -> float:
     data = pd.to_numeric(series, errors="coerce")
     window = data.head(int(bars)) if head else data.tail(int(bars))
     return _finite_sum(window)
+
+
+def _window_range(day: pd.DataFrame, bars: int, *, head: bool) -> float:
+    if day is None or day.empty or len(day) < int(bars):
+        return np.nan
+    window = day.head(int(bars)) if head else day.tail(int(bars))
+    high = pd.to_numeric(window["high"], errors="coerce")
+    low = pd.to_numeric(window["low"], errors="coerce")
+    if not high.notna().any() or not low.notna().any():
+        return np.nan
+    return _safe_return(float(high.max()), float(low.min()))
+
+
+def _first_extreme_position(series: pd.Series, *, mode: str) -> int:
+    data = pd.to_numeric(series, errors="coerce").replace([np.inf, -np.inf], np.nan)
+    if not data.notna().any():
+        return -1
+    target = data.max() if mode == "max" else data.min()
+    matches = data.index[data.eq(target)]
+    if len(matches) == 0:
+        return -1
+    try:
+        return int(matches[0])
+    except Exception:
+        return int(data.index.get_loc(matches[0]))
+
+
+def _position_fraction(position: int, count: int) -> float:
+    if int(position) < 0 or int(count) <= 0:
+        return np.nan
+    if int(count) == 1:
+        return 0.0
+    return float(position) / float(int(count) - 1)
+
+
+def _max_drawdown(series: pd.Series) -> float:
+    data = pd.to_numeric(series, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+    if len(data) < 2:
+        return np.nan
+    running_max = data.cummax()
+    drawdown = data / running_max - 1.0
+    return float(drawdown.min())
+
+
+def _max_runup(series: pd.Series) -> float:
+    data = pd.to_numeric(series, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+    if len(data) < 2:
+        return np.nan
+    running_min = data.cummin()
+    runup = data / running_min - 1.0
+    return float(runup.max())
+
+
+def _finite_ratio(mask: pd.Series) -> float:
+    data = pd.Series(mask).dropna()
+    if len(data) == 0:
+        return np.nan
+    return float(data.astype(bool).mean())
+
+
+def _linear_slope(series: pd.Series) -> float:
+    data = pd.to_numeric(series, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+    if len(data) < 2:
+        return np.nan
+    x = np.arange(len(data), dtype=float)
+    y = data.to_numpy(dtype=float)
+    if not np.isfinite(y).all():
+        return np.nan
+    scale = abs(float(y[0])) if float(y[0]) != 0.0 else 1.0
+    return float(np.polyfit(x, y / scale, 1)[0])
 
 
 def _safe_return(close_value: Any, open_value: Any) -> float:

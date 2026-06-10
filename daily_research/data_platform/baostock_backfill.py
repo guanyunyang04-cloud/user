@@ -114,12 +114,15 @@ class BackfillConfig:
     expected_5m_bars_per_day: int = DEFAULT_EXPECTED_5M_BARS_PER_DAY
     failed_chunk_retries: int = DEFAULT_FAILED_CHUNK_RETRIES
     task_workers: int = 1
+    snapshot_workers: int = 4
     industry_concept_workers: int = 4
     valuation_workers: int = 4
+    market_daily_symbol_workers: int = 4
     failed_chunk_sweeps: int = 0
     retry_backoff_seconds: float = 0.0
     retry_jitter_seconds: float = 0.0
     reuse_existing_market_daily: bool = False
+    extra_sidecar_dataset_ids: tuple[str, ...] = ()
 
     def normalized(self) -> "BackfillConfig":
         end_date = _normalize_date(self.end_date) if str(self.end_date or "").strip() else _today_date()
@@ -163,12 +166,15 @@ class BackfillConfig:
             expected_5m_bars_per_day=max(1, int(self.expected_5m_bars_per_day or DEFAULT_EXPECTED_5M_BARS_PER_DAY)),
             failed_chunk_retries=max(0, int(self.failed_chunk_retries or 0)),
             task_workers=max(1, int(self.task_workers or 1)),
+            snapshot_workers=max(1, int(self.snapshot_workers or 1)),
             industry_concept_workers=max(1, int(self.industry_concept_workers or 1)),
             valuation_workers=max(1, int(self.valuation_workers or 1)),
+            market_daily_symbol_workers=max(1, int(self.market_daily_symbol_workers or 1)),
             failed_chunk_sweeps=max(0, int(self.failed_chunk_sweeps or 0)),
             retry_backoff_seconds=max(0.0, float(self.retry_backoff_seconds or 0.0)),
             retry_jitter_seconds=max(0.0, float(self.retry_jitter_seconds or 0.0)),
             reuse_existing_market_daily=bool(self.reuse_existing_market_daily),
+            extra_sidecar_dataset_ids=tuple(str(item).strip() for item in self.extra_sidecar_dataset_ids if str(item).strip()),
         )
 
 
@@ -208,8 +214,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-5m-bars-per-day", type=int, default=DEFAULT_EXPECTED_5M_BARS_PER_DAY)
     parser.add_argument("--failed-chunk-retries", type=int, default=DEFAULT_FAILED_CHUNK_RETRIES)
     parser.add_argument("--task-workers", type=int, default=1)
+    parser.add_argument("--snapshot-workers", type=int, default=4)
     parser.add_argument("--industry-concept-workers", type=int, default=4)
     parser.add_argument("--valuation-workers", type=int, default=4)
+    parser.add_argument(
+        "--market-daily-symbol-workers",
+        type=int,
+        default=4,
+        help="Per market_daily chunk BaoStock symbol concurrency; total symbol pressure is roughly task-workers times this value.",
+    )
     parser.add_argument("--failed-chunk-sweeps", type=int, default=0)
     parser.add_argument("--retry-backoff-seconds", type=float, default=0.0)
     parser.add_argument("--retry-jitter-seconds", type=float, default=0.0)
@@ -217,6 +230,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--reuse-existing-market-daily",
         action="store_true",
         help="Skip BaoStock market_daily backfill and reuse the latest existing policy_input_bundle market table when building the bundle.",
+    )
+    parser.add_argument(
+        "--extra-sidecar-dataset-ids",
+        default="",
+        help="Comma separated domain=dataset_id entries to attach to the generated policy bundle.",
     )
     parser.add_argument("--build-policy-bundle", action="store_true")
     parser.add_argument(
@@ -276,19 +294,22 @@ def config_from_args(args: argparse.Namespace) -> BackfillConfig:
         expected_5m_bars_per_day=args.expected_5m_bars_per_day,
         failed_chunk_retries=args.failed_chunk_retries,
         task_workers=args.task_workers,
+        snapshot_workers=args.snapshot_workers,
         industry_concept_workers=args.industry_concept_workers,
         valuation_workers=args.valuation_workers,
+        market_daily_symbol_workers=args.market_daily_symbol_workers,
         failed_chunk_sweeps=args.failed_chunk_sweeps,
         retry_backoff_seconds=args.retry_backoff_seconds,
         retry_jitter_seconds=args.retry_jitter_seconds,
         reuse_existing_market_daily=args.reuse_existing_market_daily,
+        extra_sidecar_dataset_ids=_parse_extra_sidecar_dataset_ids(args.extra_sidecar_dataset_ids),
     ).normalized()
 
 
 def run_backfill(config: BackfillConfig, *, provider: Any | None = None) -> BackfillResult:
     config = config.normalized()
     lake = ResearchDataLake(config.lake_root)
-    provider = provider or BaostockProvider()
+    provider = provider or BaostockProvider(_market_daily_max_workers=config.market_daily_symbol_workers)
     run_dir = lake.root / "backfill_runs" / config.run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     domains = _normalize_domains(config.domains)
@@ -387,13 +408,14 @@ def run_backfill(config: BackfillConfig, *, provider: Any | None = None) -> Back
         policy_bundle_dataset_id = _build_policy_bundle_from_backfill(lake=lake, config=config, dataset_ids=dataset_ids)
     canonical_manifest_output: Path | None = None
     if config.write_canonical_manifest and policy_bundle_dataset_id and not config.dry_run:
+        sidecar_dataset_ids = _sidecar_dataset_ids_for_bundle(config=config, dataset_ids=dataset_ids)
         canonical_manifest_output = write_canonical_manifest(
             lake,
             dataset_id=policy_bundle_dataset_id,
             alias=config.canonical_alias,
             start_date=config.canonical_start_date,
             end_date=config.end_date,
-            sidecar_dataset_ids={key: value for key, value in dataset_ids.items() if key != DataDomain.MARKET_DAILY},
+            sidecar_dataset_ids={key: value for key, value in sidecar_dataset_ids.items() if key != DataDomain.MARKET_DAILY},
             coverage_report=build_coverage_report(lake, start_date=config.canonical_start_date),
             notes="Created by baostock_backfill after policy bundle build.",
         )
@@ -418,13 +440,16 @@ def run_backfill(config: BackfillConfig, *, provider: Any | None = None) -> Back
             "canonical_alias": config.canonical_alias,
             "canonical_start_date": config.canonical_start_date,
             "canonical_manifest_path": str(canonical_manifest_output.resolve()) if canonical_manifest_output else "",
+            "extra_sidecar_dataset_ids": list(config.extra_sidecar_dataset_ids),
             "row_counts": row_counts,
             "shard_counts": shard_counts,
             "error_counts": error_counts,
             "planned_task_count": planned_task_count,
             "task_workers": config.task_workers,
+            "snapshot_workers": config.snapshot_workers,
             "industry_concept_workers": config.industry_concept_workers,
             "valuation_workers": config.valuation_workers,
+            "market_daily_symbol_workers": config.market_daily_symbol_workers,
             "failed_chunk_retries": config.failed_chunk_retries,
             "failed_chunk_sweeps": config.failed_chunk_sweeps,
             "retry_backoff_seconds": config.retry_backoff_seconds,
@@ -632,6 +657,8 @@ def _worker_count_for_domain(*, domain: str, config: BackfillConfig, pending_cou
     if pending_count <= 0:
         return 1
     limit = max(1, int(config.task_workers or 1))
+    if normalize_domain(domain) in {DataDomain.UNIVERSE_SNAPSHOT, DataDomain.SECURITY_STATUS, DataDomain.INDEX_CONSTITUENTS}:
+        limit = min(limit, max(1, int(config.snapshot_workers or 1)))
     if normalize_domain(domain) == DataDomain.INDUSTRY_CONCEPT:
         limit = min(limit, max(1, int(config.industry_concept_workers or 1)))
     if normalize_domain(domain) == DataDomain.VALUATION:
@@ -860,10 +887,11 @@ def _build_policy_bundle_from_backfill(
     benchmark_open = _series_from_long(benchmark_rows, "open", name=config.benchmark)
     membership_frame = market_frames["Close"].notna()
     domain_outputs: dict[str, dict[str, Any]] = {}
+    sidecar_dataset_ids = _sidecar_dataset_ids_for_bundle(config=config, dataset_ids=dataset_ids)
     for domain in BAOSTOCK_SIDECAR_DOMAINS:
         if domain == DataDomain.MARKET_INTRADAY_5M:
             continue
-        dataset_id = dataset_ids.get(domain) or _latest_dataset_id(lake, f"data_platform_{domain}")
+        dataset_id = sidecar_dataset_ids.get(domain) or _latest_dataset_id(lake, f"data_platform_{domain}")
         if not dataset_id:
             continue
         frame = _read_domain_dataset(lake, dataset_id)
@@ -879,7 +907,8 @@ def _build_policy_bundle_from_backfill(
             "start_date": config.start_date,
             "end_date": config.end_date,
             "benchmark": config.benchmark,
-            "sidecar_dataset_ids": dict(dataset_ids),
+            "sidecar_dataset_ids": dict(sidecar_dataset_ids),
+            "extra_sidecar_dataset_ids": _extra_sidecar_dataset_id_map(config),
             "market_daily_source_dataset_id": str(market_daily_source.get("dataset_id", "") or ""),
             "market_daily_source_kind": str(market_daily_source.get("dataset_kind", "") or ""),
             "market_daily_reuse_mode": str(market_daily_source.get("reuse_mode", "") or ""),
@@ -927,6 +956,7 @@ def _domain_spec(
         "task_workers": config.task_workers,
         "industry_concept_workers": config.industry_concept_workers,
         "valuation_workers": config.valuation_workers,
+        "market_daily_symbol_workers": config.market_daily_symbol_workers,
         "failed_chunk_sweeps": config.failed_chunk_sweeps,
         "retry_backoff_seconds": config.retry_backoff_seconds,
         "retry_jitter_seconds": config.retry_jitter_seconds,
@@ -1186,6 +1216,38 @@ def _parse_domain_spec(raw: str | Iterable[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(domains))
 
 
+def _parse_extra_sidecar_dataset_ids(raw: str | Iterable[str]) -> tuple[str, ...]:
+    if isinstance(raw, str):
+        return tuple(item.strip() for item in raw.split(",") if item.strip())
+    return tuple(str(item).strip() for item in raw if str(item).strip())
+
+
+def _extra_sidecar_dataset_id_map(config: BackfillConfig) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for item in config.extra_sidecar_dataset_ids:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        if "=" in text:
+            domain, dataset_id = text.split("=", 1)
+        elif ":" in text:
+            domain, dataset_id = text.split(":", 1)
+        else:
+            raise ValueError(f"invalid_extra_sidecar_dataset_id: {text}; expected domain=dataset_id")
+        normalized_domain = normalize_domain(domain)
+        dataset_id = str(dataset_id or "").strip()
+        if not dataset_id:
+            raise ValueError(f"empty_extra_sidecar_dataset_id: {text}")
+        out[normalized_domain] = dataset_id
+    return out
+
+
+def _sidecar_dataset_ids_for_bundle(*, config: BackfillConfig, dataset_ids: Mapping[str, str]) -> dict[str, str]:
+    out = {normalize_domain(key): str(value) for key, value in dict(dataset_ids).items() if str(value or "").strip()}
+    out.update(_extra_sidecar_dataset_id_map(config))
+    return out
+
+
 def _latest_dataset_id(lake: ResearchDataLake, dataset_kind: str) -> str:
     rows = lake.list_datasets(dataset_kind=dataset_kind)
     if rows.empty:
@@ -1196,7 +1258,10 @@ def _latest_dataset_id(lake: ResearchDataLake, dataset_kind: str) -> str:
 def _read_domain_dataset(lake: ResearchDataLake, dataset_id: str) -> pd.DataFrame:
     metadata = lake.describe_dataset(dataset_id)
     paths = dict(metadata.get("content_paths", {}) or {})
-    return _read_table_path(str(paths.get("silver_domain_data", "")))
+    data = _read_table_path(str(paths.get("silver_domain_data", "")))
+    if not data.empty:
+        return data
+    return _read_shard_manifest_table(str(paths.get("shard_manifest", "")))
 
 
 def _read_table_path(path: str) -> pd.DataFrame:
@@ -1205,6 +1270,23 @@ def _read_table_path(path: str) -> pd.DataFrame:
         return pd.DataFrame()
     paths = sorted(glob.glob(raw)) if "*" in raw else [raw]
     existing = [item for item in paths if Path(item).exists()]
+    if not existing:
+        return pd.DataFrame()
+    frames = [pd.read_parquet(item) for item in existing]
+    return pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
+
+
+def _read_shard_manifest_table(path: str) -> pd.DataFrame:
+    manifest_path = Path(str(path or ""))
+    if not manifest_path.exists():
+        return pd.DataFrame()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    shard_paths = [
+        str(dict(item).get("path", "") or "")
+        for item in list(manifest.get("shards", []) or [])
+        if str(dict(item).get("status", "") or "") == "stored" and int(dict(item).get("row_count", 0) or 0) > 0
+    ]
+    existing = [item for item in shard_paths if Path(item).exists()]
     if not existing:
         return pd.DataFrame()
     frames = [pd.read_parquet(item) for item in existing]

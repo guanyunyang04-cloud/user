@@ -10,6 +10,13 @@ node_modules/
 
 brain/output/
 
+canonical_data/data/*
+!canonical_data/data/.gitkeep
+canonical_data/memmap/*
+!canonical_data/memmap/.gitkeep
+canonical_data/tmp/*
+!canonical_data/tmp/.gitkeep
+
 daily_research/cache/*
 !daily_research/cache/.gitkeep
 daily_research/output/*

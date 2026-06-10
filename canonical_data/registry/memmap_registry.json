@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "alias": "canonical_data_v1",
+  "status": "pending_build",
+  "canonical_start_date": "2010-01-01",
+  "feature_store": "",
+  "label_store": "",
+  "sample_index_policy": "experiments_build_lightweight_indices_only",
+  "replaces_old_forecast_dat_after_validation": []
+}
