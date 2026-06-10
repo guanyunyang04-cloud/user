@@ -19,7 +19,7 @@ from daily_research.data_platform.import_external_quant_zip import (
 )
 
 
-DEFAULT_RECOVERY_DOMAINS = (DataDomain.MARKET_INTRADAY_1M, DataDomain.MARKET_INTRADAY_5M)
+DEFAULT_RECOVERY_DOMAINS = (DataDomain.MARKET_INTRADAY_5M,)
 
 
 @dataclass(frozen=True)
@@ -34,7 +34,7 @@ class RecoverExternalImportConfig:
     source_years: tuple[int, ...] = ()
     shard_batch_members: int = 1
     shard_batch_rows: int = 0
-    derive_5m_from_1m: bool = True
+    derive_5m_from_1m: bool = False
     link_mode: str = "manifest"
     dry_run: bool = False
     reuse: bool = True
@@ -290,7 +290,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lake-root", default=str(DEFAULT_DATA_LAKE_ROOT))
     parser.add_argument("--source-root", default=str(DEFAULT_EXTERNAL_QUANT_DATA_ROOT))
     parser.add_argument("--progress-path", required=True)
-    parser.add_argument("--domains", default="market_intraday_1m,market_intraday_5m")
+    parser.add_argument("--domains", default="market_intraday_5m")
     parser.add_argument("--start-date", default=DEFAULT_CANONICAL_START_DATE)
     parser.add_argument("--end-date", default="")
     parser.add_argument("--years", required=True, help="Comma separated completed years to recover.")

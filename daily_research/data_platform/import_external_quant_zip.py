@@ -25,7 +25,6 @@ from daily_research.data_platform.contracts import (
 
 
 DEFAULT_DOMAINS = (
-    DataDomain.MARKET_INTRADAY_1M,
     DataDomain.MARKET_INTRADAY_5M,
     DataDomain.ADJUST_FACTOR,
 )
@@ -45,7 +44,7 @@ class ImportConfig:
     chunksize: int = 200_000
     max_files_per_zip: int = 0
     dry_run: bool = False
-    derive_5m_from_1m: bool = True
+    derive_5m_from_1m: bool = False
     hash_zips: bool = True
     reuse: bool = True
     progress_path: Path | None = None
@@ -89,10 +88,10 @@ class ImportResult:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Import external 1m/5m/adjust-factor yearly zips into the research data lake.")
+    parser = argparse.ArgumentParser(description="Import external native 5m/adjust-factor yearly zips into the research data lake.")
     parser.add_argument("--lake-root", default=str(DEFAULT_DATA_LAKE_ROOT))
     parser.add_argument("--source-root", default=str(DEFAULT_EXTERNAL_QUANT_DATA_ROOT))
-    parser.add_argument("--domains", default="market_intraday_1m,market_intraday_5m,adjust_factor")
+    parser.add_argument("--domains", default="market_intraday_5m,adjust_factor")
     parser.add_argument("--start-date", default=DEFAULT_CANONICAL_START_DATE)
     parser.add_argument("--end-date", default="")
     parser.add_argument("--years", default="", help="Comma separated years. Empty means all years >= start-date year.")
@@ -100,7 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--chunksize", type=int, default=200_000)
     parser.add_argument("--max-files-per-zip", type=int, default=0)
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--derive-5m-from-1m", dest="derive_5m_from_1m", action="store_true", default=True)
+    parser.add_argument("--derive-5m-from-1m", dest="derive_5m_from_1m", action="store_true", default=False)
     parser.add_argument("--no-derive-5m-from-1m", dest="derive_5m_from_1m", action="store_false")
     parser.add_argument("--hash-zips", dest="hash_zips", action="store_true", default=True)
     parser.add_argument("--no-hash-zips", dest="hash_zips", action="store_false")
@@ -520,6 +519,8 @@ def _dataset_spec(cfg: ImportConfig, *, domain: str) -> dict[str, Any]:
         "raw_archive_policy": "keep_2000_2009_outside_default_research_view",
         "original_ohlcv_policy": "raw_ohlcv_never_overwritten",
         "derive_5m_from_1m": bool(cfg.derive_5m_from_1m),
+        "one_minute_policy": "cold_archive_not_default_research_view",
+        "five_minute_policy": "native_5m_preferred_reuse_existing_derived_5m_if_equivalent",
         "shard_batch_members": int(cfg.shard_batch_members),
         "shard_batch_rows": int(cfg.shard_batch_rows),
     }

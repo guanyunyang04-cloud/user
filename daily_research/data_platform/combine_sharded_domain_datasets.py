@@ -25,7 +25,7 @@ class CombineShardedDomainConfig:
     years: tuple[int, ...] = ()
     shard_batch_members: int = 1
     shard_batch_rows: int = 0
-    derive_5m_from_1m: bool = True
+    derive_5m_from_1m: bool = False
     link_mode: str = "manifest"
     dry_run: bool = False
     reuse: bool = True

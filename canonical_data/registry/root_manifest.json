@@ -11,6 +11,10 @@
   "source_policy": {
     "base_pit_source": "baostock",
     "daily_bar_fast_source": "tdx_tqcenter",
+    "historical_5m_policy": "reuse_existing_aggregate_1m_to_5m_after_equivalence_audit",
+    "future_5m_policy": "native_5m_incremental_only",
+    "future_5m_fast_source": "tdx_tqcenter_period_5m",
+    "one_minute_policy": "cold_archive_not_default_research_view",
     "external_intraday_source_root": "H:/BaiduNetdiskDownload/量化数据",
     "tdx_tqcenter_path": "H:/new_tdx64/PYPlugins/user/t0_project/tqcenter.py"
   },
@@ -24,5 +28,5 @@
     "raw_ohlcv_not_overwritten_by_adjusted_prices": true,
     "cleanup_requires_dry_run_and_replacement_validation": true
   },
-  "updated_at": "2026-06-10"
+  "updated_at": "2026-06-11"
 }
