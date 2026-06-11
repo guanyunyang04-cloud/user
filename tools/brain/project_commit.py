@@ -127,6 +127,7 @@ def stage_and_commit_project(
     task_summary: str,
     verified: list[str],
     baseline_dirty_paths: list[str] | None = None,
+    expected_paths: list[str] | None = None,
     dry_run: bool = False,
 ) -> dict[str, object]:
     verified_commands = [str(item).strip() for item in (verified or []) if str(item).strip()]
@@ -142,6 +143,8 @@ def stage_and_commit_project(
     allowed_prefixes = [str(item) for item in policy.get("allowed_prefixes", []) or []]
     paths = changed_paths()
     project_paths, ignored_external_paths = split_commit_paths(paths=paths, allowed_prefixes=allowed_prefixes)
+    expected_changed = set(_unique(expected_paths or [])).intersection(_unique(paths))
+    ignored_expected_paths = [path for path in ignored_external_paths if path in expected_changed]
     scope = check_commit_scope(
         project_id=project_id,
         changed_paths=project_paths,
@@ -149,6 +152,16 @@ def stage_and_commit_project(
         baseline_dirty_paths=baseline_dirty_paths or [],
     )
     scope["ignored_external_paths"] = ignored_external_paths
+    scope["expected_paths"] = _unique(expected_paths or [])
+    scope["ignored_expected_paths"] = ignored_expected_paths
+    if ignored_expected_paths:
+        return {
+            "schema_version": 1,
+            "status": "blocked",
+            "reason": "project_commit_expected_paths_out_of_scope",
+            "project_id": project_id,
+            "scope": scope,
+        }
     if scope["status"] != "ok":
         return scope
     message = build_commit_message(project_id=str(policy.get("message_prefix", project_id) or project_id), task_summary=task_summary, verified=verified_commands)
@@ -172,6 +185,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--task-summary", default="agent task")
     parser.add_argument("--verified", nargs="*", default=[])
     parser.add_argument("--baseline-dirty-paths", nargs="*", default=[])
+    parser.add_argument("--expect-paths", nargs="*", default=[])
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
     return parser
@@ -184,6 +198,7 @@ def main() -> int:
         task_summary=str(args.task_summary),
         verified=list(args.verified or []),
         baseline_dirty_paths=list(args.baseline_dirty_paths or []),
+        expected_paths=list(args.expect_paths or []),
         dry_run=bool(args.dry_run),
     )
     if args.json:

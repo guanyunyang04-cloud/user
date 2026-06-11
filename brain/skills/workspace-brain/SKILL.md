@@ -23,6 +23,7 @@ Capsule/bootstrap exposes the selected `project_profile`; use it for every task 
 - External project dirty/output/process paths may be reported as status summaries; do not inspect their contents, reuse them, or treat them as task evidence without explicit scope expansion or lease.
 - Treat other project dirty paths as external parallel work unless the user explicitly expands scope.
 - After verified project work, commit with `tools.brain.project_commit` using the selected project id or `workspace-brain`; external dirty paths are reported as `ignored_external_paths`, not staged.
+- Before final after verified mutations, run `tools.brain.project_commit --dry-run --expect-paths <intended changed paths>` or actually commit; if intended paths are out of scope, report that blocker instead of silently stopping.
 - Short synchronous commands run from the selected project scope. Polling or asynchronous tasks use the selected project namespace and best observable handle: PID, job/run id, logs, progress, artifact mtime, port/API status, or resource state. Use `tools.brain.agent_run` under `<project>/output/agent_runs/<run_id>/` when a process must outlive the immediate shell wait or needs registered PID/log/progress; cross-project process or resource reads require an explicit lease.
 - This is an operating contract: commit and process helpers enforce their slices; ordinary shell reads/writes require the agent to honor the selected project namespace.
 ## Adaptive Polling

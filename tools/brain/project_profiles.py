@@ -69,6 +69,30 @@ def _child_manifest_paths() -> list[str]:
     return _dedupe(out)
 
 
+def _child_brain_roots() -> list[str]:
+    roots: list[str] = []
+    for path in _child_manifest_paths():
+        root = str(Path(path).parent).replace("\\", "/")
+        if root:
+            roots.append(root if root.endswith("/") else f"{root}/")
+    return _dedupe(roots)
+
+
+def _workspace_brain_allowed_prefixes() -> list[str]:
+    return _dedupe(
+        [
+            "brain/",
+            "tools/brain/",
+            "README.md",
+            ".gitignore",
+            "docs/",
+            "canonical_data/README.md",
+            "a_stock_daily_selection/README.md",
+            *_child_brain_roots(),
+        ]
+    )
+
+
 def _manifest_profile(manifest: Mapping[str, Any]) -> dict[str, Any]:
     profile = manifest.get("project_profile")
     return dict(profile) if isinstance(profile, Mapping) else {}
@@ -189,7 +213,7 @@ def load_project_profile(project_id: str | None) -> dict[str, Any]:
             "commit_policy": {
                 "auto_commit": True,
                 "message_prefix": "workspace-brain",
-                "allowed_prefixes": _dedupe(["brain/", "tools/brain/", *_child_manifest_paths()]),
+                "allowed_prefixes": _workspace_brain_allowed_prefixes(),
                 "block_on_baseline_overlap": True,
             },
             "process_namespace": _default_process_namespace("workspace", "brain"),

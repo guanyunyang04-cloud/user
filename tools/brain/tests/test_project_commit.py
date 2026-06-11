@@ -124,6 +124,37 @@ class ProjectCommitTest(unittest.TestCase):
         self.assertEqual(scope["blocked_paths"], [])
         self.assertEqual(scope["ignored_external_paths"], ["traditional_quant_research/research_log/scout.md"])
 
+    def test_stage_and_commit_blocks_when_expected_path_is_ignored(self) -> None:
+        with (
+            patch(
+                "tools.brain.project_commit.load_project_profile",
+                return_value={
+                    "commit_policy": {
+                        "allowed_prefixes": ["brain/"],
+                        "message_prefix": "workspace-brain",
+                    }
+                },
+            ),
+            patch(
+                "tools.brain.project_commit.changed_paths",
+                return_value=[
+                    "brain/state_center.md",
+                    "quant_data_platform/README.md",
+                ],
+            ),
+        ):
+            payload = stage_and_commit_project(
+                project_id="workspace-brain",
+                task_summary="register data platform",
+                verified=["git diff --check"],
+                expected_paths=["quant_data_platform/README.md"],
+                dry_run=True,
+            )
+
+        self.assertEqual(payload["status"], "blocked")
+        self.assertEqual(payload["reason"], "project_commit_expected_paths_out_of_scope")
+        self.assertEqual(payload["scope"]["ignored_expected_paths"], ["quant_data_platform/README.md"])
+
     def test_stage_and_commit_blocks_when_only_external_parallel_paths_exist(self) -> None:
         with (
             patch(
@@ -187,15 +218,19 @@ class ProjectCommitTest(unittest.TestCase):
         self.assertEqual(commit_calls[0][-2:], ["--", "daily_research/brain/state_center.md"])
         self.assertNotIn("traditional_quant_research/research_log/scout.md", commit_calls[0])
 
-    def test_workspace_brain_commit_scope_allows_child_manifest_profiles_only(self) -> None:
+    def test_workspace_brain_commit_scope_allows_root_governance_and_child_brain_docs(self) -> None:
         profile = load_project_profile("workspace-brain")
         allowed_prefixes = list(profile["commit_policy"]["allowed_prefixes"])
         payload = check_commit_scope(
             project_id="workspace-brain",
             changed_paths=[
+                ".gitignore",
+                "README.md",
+                "canonical_data/README.md",
                 "brain/workflows/playbooks/core.json",
-                "daily_research/brain/brain_manifest.json",
-                "traditional_quant_research/brain/brain_manifest.json",
+                "daily_research/brain/state_center.md",
+                "traditional_quant_research/brain/knowledge_center.md",
+                "quant_data_platform/brain/identity_layer.md",
             ],
             allowed_prefixes=allowed_prefixes,
             baseline_dirty_paths=[],

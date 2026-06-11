@@ -46,6 +46,7 @@
 - 若外部项目变更与当前路由任务或共享文件产生真实冲突，先报告冲突和边界，再等待用户决定是否扩展任务范围。
 - 每个分脑 manifest 必须能声明或继承 `guard_profile`、`verification_profile`、`commit_policy`、`process_namespace`、`cross_project_policy`；daily active artifact/freshness/project consistency 只属于 daily profile。
 - 项目 agent 完成一次任务后默认本地提交；提交助手只把该项目 profile 允许路径纳入 stage/commit pathspec，外部项目 dirty paths 仅作为 `ignored_external_paths` 报告，不阻塞当前项目提交。
+- 已验证 mutation 的最终答复前必须至少跑提交助手 dry-run 或实际提交；dry-run 要带 `--expect-paths` 覆盖本轮目标文件，避免目标文件被误判为外部并行改动。
 - 若当前提交候选路径本身越过 profile 范围，或与接管前 baseline dirty 发生目标范围内 overlap，返回 `project_commit_scope_conflict`；不得把多个项目混成一个提交。
 - 短命令与普通测试默认在被选项目的工作目录、验证 profile 和 changed-surface 范围内执行；跨项目测试、共享工具验证或下钻其它项目状态/产物必须由真实依赖、共享文件修改或用户授权触发。
 - 临时产物必须优先写入当前项目或当前 task/run 命名空间；不得把散落在 workspace 根、其它项目 output 或 loose latest 的文件当成当前任务证据。
