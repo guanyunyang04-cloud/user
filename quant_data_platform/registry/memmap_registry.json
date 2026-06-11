@@ -1,0 +1,93 @@
+{
+  "active_feature_profile": "raw_kline_context_v2_short_horizon_intraday_v1",
+  "active_feature_store_shape": [
+    1212,
+    100,
+    256
+  ],
+  "active_manifest_json": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\canonical_short_horizon_capped100_memmap_20260611_01\\forecast_dataset_manifest.json",
+  "active_role_years": {
+    "test_year": 2025,
+    "train_end_year": 2023,
+    "train_start_year": 2022,
+    "validation_year": 2024
+  },
+  "active_sample_count": 1536,
+  "active_scope": "capped_validation",
+  "active_signature_hash": "0bcec7ce9d790c0a7f6cd41f",
+  "active_source_market_dataset_id": "policy_input_bundle__002270b729a4eabe6211ff6d",
+  "alias": "canonical_data_v1",
+  "canonical_start_date": "2010-01-01",
+  "entries": [
+    {
+      "alias": "canonical_data_v1",
+      "feature_store_shape": [
+        1212,
+        100,
+        256
+      ],
+      "manifest_json": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\canonical_short_horizon_capped100_memmap_20260611_01\\forecast_dataset_manifest.json",
+      "registered_at": "2026-06-11T08:50:47+00:00",
+      "sample_count": 1536,
+      "scope": "capped_validation",
+      "signature": {
+        "cumulative_horizons": [
+          1,
+          3,
+          5,
+          10,
+          20
+        ],
+        "execution_mode": "next_open",
+        "feature_profile": "raw_kline_context_v2_short_horizon_intraday_v1",
+        "horizon": 20,
+        "lookback_days": 60,
+        "max_feature_columns": 256,
+        "max_samples_per_date_per_role": 8,
+        "max_samples_per_role": 512,
+        "min_lookback_valid_ratio": 0.8,
+        "role_years": {
+          "test_year": 2025,
+          "train_end_year": 2023,
+          "train_start_year": 2022,
+          "validation_year": 2024
+        },
+        "source_market_dataset_id": "policy_input_bundle__002270b729a4eabe6211ff6d",
+        "source_pool_view_id": "",
+        "source_sector_board_view_id": "",
+        "static_context": {
+          "enabled": false,
+          "fields": [
+            "symbol",
+            "exchange",
+            "industry",
+            "liquidity_bucket",
+            "price_bucket"
+          ]
+        },
+        "stock_universe_hash": "9ae32249e140da9e2d632c3e",
+        "universe_size": 100
+      },
+      "signature_hash": "0bcec7ce9d790c0a7f6cd41f",
+      "source_market_dataset_id": "policy_input_bundle__002270b729a4eabe6211ff6d",
+      "status": "completed"
+    }
+  ],
+  "feature_store": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\canonical_short_horizon_capped100_memmap_20260611_01\\forecast_feature_store.dat",
+  "label_store": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\canonical_short_horizon_capped100_memmap_20260611_01",
+  "last_blocked_full_build": {
+    "guard_added": true,
+    "reason": "single-process full-universe heavy memmap reached unsafe memory pressure on a 16GB-class host",
+    "recommended_next_step": "build a capped validation memmap first, then implement sharded canonical feature/label store for all-A full history",
+    "run_tag": "canonical_short_horizon_memmap_20260611_01",
+    "status": "stopped_after_memory_pressure_before_artifact",
+    "unsafe_command_pattern": "--max-universe-size 0 with raw_kline_context_v2_short_horizon_intraday_v1 and 256 feature columns"
+  },
+  "migrated_from": "H:/quant_project/canonical_data/registry/memmap_registry.json",
+  "registry_owner": "quant_data_platform",
+  "replaces_old_forecast_dat_after_validation": [],
+  "sample_index_policy": "experiments_build_lightweight_indices_only",
+  "schema_version": 1,
+  "status": "ready",
+  "updated_at": "2026-06-11T10:42:27+00:00"
+}

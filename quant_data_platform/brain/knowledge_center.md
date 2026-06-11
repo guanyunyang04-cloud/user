@@ -16,3 +16,4 @@
 - 数据基底和 memmap 不应散落在每个实验里；实验只生成轻量 sample index、normalization manifest 和训练产物。
 - 单进程全 A 巨大 memmap 在低内存机器上不稳，默认走分片 feature/label store。
 - 旧 bundle、旧 parquet、旧 `.dat` 清理必须先有 dry-run、替代指针和随机一致性验证。
+- canonical bundle ID 改变后，已有 memmap 即使文件完整也不能默认复用；必须比较 source bundle/signature，旧 memmap 只能作为历史验证样本。

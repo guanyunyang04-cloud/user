@@ -15,6 +15,8 @@
 - `quant_data_platform/tests`：平台单元与集成测试。
 
 ## 常用验证
+- `PYTHONPATH=H:/quant_project/quant_data_platform/src;H:/quant_project C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli status --json`
+- `PYTHONPATH=H:/quant_project/quant_data_platform/src;H:/quant_project C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli audit --json`
 - `git diff --check`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`
