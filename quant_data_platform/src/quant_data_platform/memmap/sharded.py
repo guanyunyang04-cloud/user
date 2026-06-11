@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import hashlib
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -24,6 +25,11 @@ from quant_data_platform.core.json_io import read_json, utc_now, write_json
 from quant_data_platform.core.paths import QdpPaths, qdp_paths
 from quant_data_platform.core.registry import load_root_manifest, write_root_manifest_update
 from quant_data_platform.features.profiles import DEFAULT_PROFILE
+
+
+_STORED_SHARD_STATUS = "completed"
+_EMPTY_SHARD_STATUSES = {"empty", "no_coverage"}
+_TERMINAL_SHARD_STATUSES = {_STORED_SHARD_STATUS, *_EMPTY_SHARD_STATUSES}
 
 
 @dataclass(frozen=True)
@@ -127,17 +133,19 @@ def build_sharded_memmap(
     existing_by_key = {
         str(item.get("shard_key", "")): dict(item)
         for item in list(existing.get("shards", []) or [])
-        if str(item.get("status", "")) == "completed"
+        if str(item.get("status", "")) in _TERMINAL_SHARD_STATUSES
     }
+    for row in _discover_existing_shards(out_root):
+        existing_by_key.setdefault(str(row.get("shard_key", "")), row)
     for year in years:
         for block_id, symbols in enumerate(blocks):
-            if cfg.max_shards > 0 and len(completed) + skipped >= cfg.max_shards:
+            if cfg.max_shards > 0 and len(completed) >= cfg.max_shards:
                 break
             shard_key = f"year={year}/block={block_id:04d}"
-            if cfg.resume and shard_key in existing_by_key and _shard_files_exist(existing_by_key[shard_key]):
+            if cfg.resume and shard_key in existing_by_key and _shard_is_resumable(existing_by_key[shard_key]):
                 row = existing_by_key[shard_key]
                 completed.append(row)
-                if not schema_hash:
+                if str(row.get("status", "")) == _STORED_SHARD_STATUS and not schema_hash:
                     schema_hash = str(row.get("feature_schema_hash", "") or "")
                     schema_columns = list(row.get("feature_columns", []) or [])
                 skipped += 1
@@ -173,11 +181,14 @@ def build_sharded_memmap(
                 completed_shards=len(completed),
                 latest_shard=shard,
             )
-        if cfg.max_shards > 0 and len(completed) + skipped >= cfg.max_shards:
+            gc.collect()
+        if cfg.max_shards > 0 and len(completed) >= cfg.max_shards:
             break
 
-    stored = [item for item in completed if str(item.get("status", "")) == "completed"]
-    status = "completed" if len(stored) == planned_count else "partial"
+    stored = [item for item in completed if str(item.get("status", "")) == _STORED_SHARD_STATUS]
+    empty = [item for item in completed if str(item.get("status", "")) in _EMPTY_SHARD_STATUSES]
+    failed = [item for item in completed if str(item.get("status", "")) not in _TERMINAL_SHARD_STATUSES]
+    status = "completed" if len(completed) == planned_count and not failed else "partial"
     scope = _scope_for_build(cfg=cfg, universe_size=len(universe), full_universe_size=_canonical_universe_size(canonical_meta), years=years, canonical_start=canonical_start, canonical_end=canonical_end)
     manifest = {
         "artifact_type": "qdp_sharded_memmap",
@@ -198,7 +209,10 @@ def build_sharded_memmap(
         "full_universe_size": int(_canonical_universe_size(canonical_meta)),
         "symbol_block_size": int(cfg.symbol_block_size),
         "planned_shard_count": planned_count,
+        "processed_shard_count": int(len(completed)),
         "stored_shard_count": int(len(stored)),
+        "empty_shard_count": int(len(empty)),
+        "failed_shard_count": int(len(failed)),
         "shards": completed,
         "lookback_days": int(cfg.lookback_days),
         "horizon": int(cfg.horizon),
@@ -210,7 +224,7 @@ def build_sharded_memmap(
         "manifest_json": str(manifest_path.resolve()),
     }
     write_json(manifest_path, manifest)
-    _write_progress(progress_path, status=status, planned_shards=planned_count, completed_shards=len(stored), latest_shard={})
+    _write_progress(progress_path, status=status, planned_shards=planned_count, completed_shards=len(completed), latest_shard={})
     _register_sharded_manifest(resolved, manifest)
     return manifest
 
@@ -225,14 +239,20 @@ def validate_sharded_memmap_manifest(manifest_path: str | Path) -> dict[str, Any
         blockers.append("not_qdp_sharded_memmap")
     shards = list(manifest.get("shards", []) or [])
     stored = [dict(item) for item in shards if str(dict(item).get("status", "")) == "completed"]
-    if not stored:
-        blockers.append("no_completed_shards")
+    empty = [dict(item) for item in shards if str(dict(item).get("status", "")) in _EMPTY_SHARD_STATUSES]
+    processed = stored + empty
+    if not processed:
+        blockers.append("no_processed_shards")
     schema = str(manifest.get("feature_schema_hash", "") or "")
     for shard in stored:
         if schema and str(shard.get("feature_schema_hash", "") or "") != schema:
             blockers.append("feature_schema_mismatch")
         if not _shard_files_exist(shard):
             blockers.append("missing_shard_file")
+    for shard in empty:
+        path = Path(str(shard.get("shard_manifest_json", "") or ""))
+        if not path.exists():
+            blockers.append("missing_empty_shard_manifest")
     return {
         "status": "ok" if not blockers else "blocked",
         "blockers": sorted(set(blockers)),
@@ -241,7 +261,9 @@ def validate_sharded_memmap_manifest(manifest_path: str | Path) -> dict[str, Any
         "canonical_dataset_id": str(manifest.get("canonical_dataset_id", "") or ""),
         "profile": str(manifest.get("profile", "") or ""),
         "planned_shard_count": int(manifest.get("planned_shard_count", 0) or 0),
+        "processed_shard_count": int(len(processed)),
         "stored_shard_count": int(len(stored)),
+        "empty_shard_count": int(len(empty)),
         "feature_count": int(manifest.get("feature_count", 0) or 0),
         "symbol_count": int(manifest.get("symbol_count", 0) or 0),
         "years": list(manifest.get("years", []) or []),
@@ -268,15 +290,39 @@ def _build_one_shard(
     shard_dir = out_root / f"year={int(year)}" / f"block={int(block_id):04d}"
     shard_dir.mkdir(parents=True, exist_ok=True)
     shard_manifest_path = shard_dir / "shard_manifest.json"
-    prepared = load_policy_inputs_from_lake(
-        lake=lake,
-        dataset_id=dataset_id,
-        start_date=context_start.strftime("%Y-%m-%d"),
-        end_date=context_end.strftime("%Y-%m-%d"),
-        universe=symbols,
-        min_trading_days=2,
-        require_benchmark_open=str(cfg.execution_mode).strip().lower() == "next_open",
-    )
+    try:
+        prepared = load_policy_inputs_from_lake(
+            lake=lake,
+            dataset_id=dataset_id,
+            start_date=context_start.strftime("%Y-%m-%d"),
+            end_date=context_end.strftime("%Y-%m-%d"),
+            universe=symbols,
+            min_trading_days=2,
+            require_benchmark_open=str(cfg.execution_mode).strip().lower() == "next_open",
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if "lake_coverage_blocker: no requested symbols are available in lake market data" not in message:
+            raise
+        shard = {
+            "status": "no_coverage",
+            "empty_reason": "no_requested_symbols_available_in_lake_market_data",
+            "shard_key": f"year={year}/block={block_id:04d}",
+            "year": int(year),
+            "block_id": int(block_id),
+            "start_date": target_start.strftime("%Y-%m-%d"),
+            "end_date": target_end.strftime("%Y-%m-%d"),
+            "context_start_date": context_start.strftime("%Y-%m-%d"),
+            "context_end_date": context_end.strftime("%Y-%m-%d"),
+            "symbol_count": int(len(symbols)),
+            "date_count": 0,
+            "sample_count": 0,
+            "shard_manifest_json": str(shard_manifest_path.resolve()),
+            "error_summary": message[:500],
+            "created_at": utc_now(),
+        }
+        write_json(shard_manifest_path, shard)
+        return shard
     target_dates = [
         pd.Timestamp(dt).normalize()
         for dt in prepared.close.index
@@ -285,12 +331,19 @@ def _build_one_shard(
     if not target_dates:
         shard = {
             "status": "empty",
+            "empty_reason": "no_target_dates",
             "shard_key": f"year={year}/block={block_id:04d}",
             "year": int(year),
             "block_id": int(block_id),
+            "start_date": target_start.strftime("%Y-%m-%d"),
+            "end_date": target_end.strftime("%Y-%m-%d"),
+            "context_start_date": context_start.strftime("%Y-%m-%d"),
+            "context_end_date": context_end.strftime("%Y-%m-%d"),
             "symbol_count": int(len(symbols)),
             "date_count": 0,
+            "sample_count": 0,
             "shard_manifest_json": str(shard_manifest_path.resolve()),
+            "created_at": utc_now(),
         }
         write_json(shard_manifest_path, shard)
         return shard
@@ -424,6 +477,7 @@ def _write_sample_index(
         arr = np.memmap(path, dtype="float32", mode="r", shape=shape)
         finite = np.isfinite(np.asarray(arr)).all(axis=2) if len(shape) == 3 else np.isfinite(np.asarray(arr))
         valid &= finite
+        del arr
     rows = []
     for date_pos, stock_pos in np.argwhere(valid):
         rows.append(
@@ -462,6 +516,7 @@ def _write_array_memmap(path: Path, array: np.ndarray) -> None:
     if array.size:
         store[...] = array
     store.flush()
+    del store
 
 
 def _canonical_universe(metadata: Mapping[str, Any]) -> list[str]:
@@ -528,6 +583,8 @@ def _register_sharded_manifest(paths: QdpPaths, manifest: Mapping[str, Any]) -> 
         "profile": str(manifest.get("profile", "") or ""),
         "feature_schema_hash": str(manifest.get("feature_schema_hash", "") or ""),
         "stored_shard_count": int(manifest.get("stored_shard_count", 0) or 0),
+        "processed_shard_count": int(manifest.get("processed_shard_count", 0) or 0),
+        "empty_shard_count": int(manifest.get("empty_shard_count", 0) or 0),
         "planned_shard_count": int(manifest.get("planned_shard_count", 0) or 0),
         "registered_at": utc_now(),
     }
@@ -556,6 +613,8 @@ def _register_sharded_manifest(paths: QdpPaths, manifest: Mapping[str, Any]) -> 
         "latest_manifest_json": str(manifest.get("manifest_json", "") or ""),
         "latest_scope": str(manifest.get("scope", "") or ""),
         "latest_stored_shard_count": int(manifest.get("stored_shard_count", 0) or 0),
+        "latest_processed_shard_count": int(manifest.get("processed_shard_count", 0) or 0),
+        "latest_empty_shard_count": int(manifest.get("empty_shard_count", 0) or 0),
         "latest_planned_shard_count": int(manifest.get("planned_shard_count", 0) or 0),
         "latest_profile": str(manifest.get("profile", "") or ""),
         "latest_canonical_dataset_id": str(manifest.get("canonical_dataset_id", "") or ""),
@@ -577,6 +636,27 @@ def _shard_files_exist(shard: Mapping[str, Any]) -> bool:
         if not path.exists():
             return False
     return True
+
+
+def _shard_is_resumable(shard: Mapping[str, Any]) -> bool:
+    status = str(shard.get("status", "") or "")
+    if status == _STORED_SHARD_STATUS:
+        return _shard_files_exist(shard)
+    if status in _EMPTY_SHARD_STATUSES:
+        path = Path(str(shard.get("shard_manifest_json", "") or ""))
+        return bool(path.exists())
+    return False
+
+
+def _discover_existing_shards(out_root: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if not out_root.exists():
+        return rows
+    for path in out_root.glob("year=*/block=*/shard_manifest.json"):
+        row = read_json(path)
+        if str(row.get("status", "")) in _TERMINAL_SHARD_STATUSES:
+            rows.append(dict(row))
+    return rows
 
 
 def _write_progress(path: Path, **payload: Any) -> None:

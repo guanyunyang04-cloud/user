@@ -53,6 +53,46 @@ def test_validate_sharded_memmap_manifest_checks_files(tmp_path) -> None:
     assert report["stored_shard_count"] == 1
 
 
+def test_validate_sharded_memmap_manifest_allows_empty_processed_shards(tmp_path) -> None:
+    shard_manifest = tmp_path / "year=2010" / "block=0001" / "shard_manifest.json"
+    write_json(
+        shard_manifest,
+        {
+            "status": "no_coverage",
+            "shard_key": "year=2010/block=0001",
+            "empty_reason": "no_requested_symbols_available_in_lake_market_data",
+        },
+    )
+    manifest = tmp_path / "sharded_memmap_manifest.json"
+    write_json(
+        manifest,
+        {
+            "artifact_type": "qdp_sharded_memmap",
+            "canonical_dataset_id": "policy_input_bundle__x",
+            "feature_schema_hash": "abc",
+            "feature_count": 4,
+            "symbol_count": 3,
+            "years": [2010],
+            "planned_shard_count": 1,
+            "processed_shard_count": 1,
+            "stored_shard_count": 0,
+            "empty_shard_count": 1,
+            "shards": [
+                {
+                    "status": "no_coverage",
+                    "shard_key": "year=2010/block=0001",
+                    "shard_manifest_json": str(shard_manifest),
+                }
+            ],
+        },
+    )
+
+    report = validate_sharded_memmap_manifest(manifest)
+    assert report["status"] == "ok"
+    assert report["processed_shard_count"] == 1
+    assert report["empty_shard_count"] == 1
+
+
 def test_cli_sharded_dry_run_writes_plan(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("QDP_WORKSPACE_ROOT", str(tmp_path))
     (tmp_path / "brain").mkdir(parents=True)
