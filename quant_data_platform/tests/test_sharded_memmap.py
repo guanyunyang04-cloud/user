@@ -5,7 +5,7 @@ import numpy as np
 from quant_data_platform.cli import main as cli_main
 from quant_data_platform.core.json_io import write_json
 from quant_data_platform.core.paths import qdp_paths
-from quant_data_platform.memmap.sharded import _symbol_blocks, validate_sharded_memmap_manifest
+from quant_data_platform.memmap.sharded import _project_feature_store_to_schema, _symbol_blocks, validate_sharded_memmap_manifest
 
 
 def test_symbol_blocks_preserve_order() -> None:
@@ -91,6 +91,28 @@ def test_validate_sharded_memmap_manifest_allows_empty_processed_shards(tmp_path
     assert report["status"] == "ok"
     assert report["processed_shard_count"] == 1
     assert report["empty_shard_count"] == 1
+
+
+def test_project_feature_store_to_schema_reorders_and_fills_missing(tmp_path) -> None:
+    path = tmp_path / "forecast_feature_store.dat"
+    store = np.memmap(path, dtype="float32", mode="w+", shape=(2, 1, 2))
+    store[:, :, :] = np.array([[[1.0, 10.0]], [[2.0, 20.0]]], dtype=np.float32)
+    store.flush()
+    del store
+
+    columns, manifest = _project_feature_store_to_schema(
+        feature_store_path=path,
+        feature_columns=["a", "b"],
+        feature_manifest={"feature_store_shape": [2, 1, 2]},
+        expected_feature_columns=["b", "c", "a"],
+    )
+
+    projected = np.memmap(path, dtype="float32", mode="r", shape=(2, 1, 3))
+    assert columns == ["b", "c", "a"]
+    assert manifest["feature_store_shape"] == [2, 1, 3]
+    np.testing.assert_allclose(np.asarray(projected)[:, 0, 0], [10.0, 20.0])
+    assert np.isnan(np.asarray(projected)[:, 0, 1]).all()
+    np.testing.assert_allclose(np.asarray(projected)[:, 0, 2], [1.0, 2.0])
 
 
 def test_cli_sharded_dry_run_writes_plan(tmp_path, monkeypatch) -> None:

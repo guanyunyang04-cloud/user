@@ -30,6 +30,8 @@ from quant_data_platform.features.profiles import DEFAULT_PROFILE
 _STORED_SHARD_STATUS = "completed"
 _EMPTY_SHARD_STATUSES = {"empty", "no_coverage"}
 _TERMINAL_SHARD_STATUSES = {_STORED_SHARD_STATUS, *_EMPTY_SHARD_STATUSES}
+_SCHEMA_CANDIDATE_STATUSES = {_STORED_SHARD_STATUS, "schema_mismatch"}
+_RESUMABLE_SHARD_STATUSES = {*_TERMINAL_SHARD_STATUSES, "schema_mismatch"}
 
 
 @dataclass(frozen=True)
@@ -137,13 +139,30 @@ def build_sharded_memmap(
     }
     for row in _discover_existing_shards(out_root):
         existing_by_key.setdefault(str(row.get("shard_key", "")), row)
+    schema_columns = _select_initial_schema_columns(existing_by_key.values())
+    if not schema_columns and cfg.max_shards <= 0:
+        reference = _build_schema_reference_shard(
+            lake=lake,
+            dataset_id=dataset_id,
+            years=years,
+            blocks=blocks,
+            canonical_start=canonical_start,
+            canonical_end=canonical_end,
+            cfg=cfg,
+            out_root=out_root,
+            cumulative_horizons=cumulative_horizons,
+        )
+        if reference:
+            existing_by_key[str(reference.get("shard_key", ""))] = reference
+            schema_columns = _select_initial_schema_columns(existing_by_key.values())
+    schema_hash = _sequence_hash(schema_columns) if schema_columns else ""
     for year in years:
         for block_id, symbols in enumerate(blocks):
             if cfg.max_shards > 0 and len(completed) >= cfg.max_shards:
                 break
             shard_key = f"year={year}/block={block_id:04d}"
             if cfg.resume and shard_key in existing_by_key and _shard_is_resumable(existing_by_key[shard_key]):
-                row = existing_by_key[shard_key]
+                row = _normalize_resumed_shard(existing_by_key[shard_key], expected_feature_columns=schema_columns)
                 completed.append(row)
                 if str(row.get("status", "")) == _STORED_SHARD_STATUS and not schema_hash:
                     schema_hash = str(row.get("feature_schema_hash", "") or "")
@@ -161,6 +180,7 @@ def build_sharded_memmap(
                 cfg=cfg,
                 out_root=out_root,
                 cumulative_horizons=cumulative_horizons,
+                expected_feature_columns=schema_columns,
             )
             if str(shard.get("status", "")) == "completed":
                 current_hash = str(shard.get("feature_schema_hash", "") or "")
@@ -282,6 +302,7 @@ def _build_one_shard(
     cfg: ShardedMemmapConfig,
     out_root: Path,
     cumulative_horizons: tuple[int, ...],
+    expected_feature_columns: list[str] | None = None,
 ) -> dict[str, Any]:
     target_start = max(pd.Timestamp(year=int(year), month=1, day=1), canonical_start)
     target_end = min(pd.Timestamp(year=int(year), month=12, day=31), canonical_end)
@@ -356,6 +377,13 @@ def _build_one_shard(
         lookback_days=int(cfg.lookback_days),
         min_lookback_valid_ratio=float(cfg.min_lookback_valid_ratio),
     )
+    if expected_feature_columns:
+        feature_columns, feature_manifest = _project_feature_store_to_schema(
+            feature_store_path=feature_store_path,
+            feature_columns=list(feature_columns),
+            feature_manifest=dict(feature_manifest),
+            expected_feature_columns=list(expected_feature_columns),
+        )
     labels = build_path20_labels(
         prepared,
         execution_mode=cfg.execution_mode,
@@ -519,6 +547,67 @@ def _write_array_memmap(path: Path, array: np.ndarray) -> None:
     del store
 
 
+def _project_feature_store_to_schema(
+    *,
+    feature_store_path: Path,
+    feature_columns: list[str],
+    feature_manifest: dict[str, Any],
+    expected_feature_columns: list[str],
+) -> tuple[list[str], dict[str, Any]]:
+    expected = list(expected_feature_columns)
+    current = list(feature_columns)
+    if current == expected:
+        return current, feature_manifest
+    shape = tuple(int(item) for item in list(feature_manifest.get("feature_store_shape", []) or []))
+    if len(shape) != 3:
+        raise ValueError(f"invalid_feature_store_shape_for_projection: {shape}")
+    rows, cols, current_count = shape
+    if int(current_count) != len(current):
+        raise ValueError(
+            "feature_store_column_count_mismatch: "
+            f"shape_count={current_count} feature_columns={len(current)} path={feature_store_path}"
+        )
+    current_store = np.memmap(feature_store_path, dtype="float32", mode="r", shape=shape)
+    projected_path = feature_store_path.with_name(f"{feature_store_path.stem}.schema_projected{feature_store_path.suffix}")
+    projected_shape = (int(rows), int(cols), int(len(expected)))
+    projected = np.memmap(projected_path, dtype="float32", mode="w+", shape=projected_shape)
+    projected[...] = np.nan
+    current_pos = {column: idx for idx, column in enumerate(current)}
+    missing: list[str] = []
+    for target_idx, column in enumerate(expected):
+        source_idx = current_pos.get(column)
+        if source_idx is None:
+            missing.append(column)
+            continue
+        projected[:, :, target_idx] = current_store[:, :, source_idx]
+    projected.flush()
+    nan_count = int(np.isnan(np.asarray(projected)).sum())
+    value_count = int(np.asarray(projected).size)
+    del projected
+    del current_store
+    projected_path.replace(feature_store_path)
+    dropped = [column for column in current if column not in set(expected)]
+    feature_manifest.update(
+        {
+            "feature_columns": list(expected),
+            "feature_count_after_cap": int(len(expected)),
+            "feature_store_shape": [int(item) for item in projected_shape],
+            "feature_nan_ratio": float(nan_count / value_count) if value_count else 0.0,
+            "schema_projection": {
+                "status": "projected_to_canonical_shard_schema",
+                "source_feature_count": int(len(current)),
+                "target_feature_count": int(len(expected)),
+                "missing_feature_count": int(len(missing)),
+                "dropped_feature_count": int(len(dropped)),
+                "missing_features": missing[:50],
+                "dropped_features": dropped[:50],
+                "created_at": utc_now(),
+            },
+        }
+    )
+    return expected, feature_manifest
+
+
 def _canonical_universe(metadata: Mapping[str, Any]) -> list[str]:
     membership_path = Path(str(dict(metadata.get("content_paths", {}) or {}).get("silver_membership", "") or ""))
     if not membership_path.exists():
@@ -642,6 +731,8 @@ def _shard_is_resumable(shard: Mapping[str, Any]) -> bool:
     status = str(shard.get("status", "") or "")
     if status == _STORED_SHARD_STATUS:
         return _shard_files_exist(shard)
+    if status == "schema_mismatch":
+        return _shard_files_exist(shard)
     if status in _EMPTY_SHARD_STATUSES:
         path = Path(str(shard.get("shard_manifest_json", "") or ""))
         return bool(path.exists())
@@ -654,9 +745,110 @@ def _discover_existing_shards(out_root: Path) -> list[dict[str, Any]]:
         return rows
     for path in out_root.glob("year=*/block=*/shard_manifest.json"):
         row = read_json(path)
-        if str(row.get("status", "")) in _TERMINAL_SHARD_STATUSES:
+        if str(row.get("status", "")) in _RESUMABLE_SHARD_STATUSES:
             rows.append(dict(row))
     return rows
+
+
+def _select_initial_schema_columns(rows: Iterable[Mapping[str, Any]]) -> list[str]:
+    candidates = [dict(row) for row in rows if str(dict(row).get("status", "")) in _SCHEMA_CANDIDATE_STATUSES and list(dict(row).get("feature_columns", []) or [])]
+    if not candidates:
+        return []
+    best = max(candidates, key=_schema_candidate_score)
+    return [str(column) for column in list(best.get("feature_columns", []) or [])]
+
+
+def _schema_candidate_score(row: Mapping[str, Any]) -> tuple[int, int, int, int, int]:
+    columns = [str(column) for column in list(row.get("feature_columns", []) or [])]
+    history_state_prefixes = (
+        "ret_",
+        "vol_",
+        "ret_accel_",
+        "volume_ratio_",
+        "adv_ratio_",
+        "volatility_expansion",
+    )
+    history_state_score = sum(1 for column in columns if column.startswith(history_state_prefixes))
+    year = int(row.get("year", 0) or 0)
+    block_id = int(row.get("block_id", 0) or 0)
+    status_score = 1 if str(row.get("status", "")) == _STORED_SHARD_STATUS else 0
+    return (history_state_score, len(columns), year, status_score, -block_id)
+
+
+def _normalize_resumed_shard(shard: Mapping[str, Any], *, expected_feature_columns: list[str]) -> dict[str, Any]:
+    row = dict(shard)
+    status = str(row.get("status", "") or "")
+    if status in _EMPTY_SHARD_STATUSES:
+        return row
+    if status not in _SCHEMA_CANDIDATE_STATUSES:
+        return row
+    if not expected_feature_columns:
+        if status == "schema_mismatch":
+            row["status"] = _STORED_SHARD_STATUS
+            row.pop("expected_feature_schema_hash", None)
+            write_json(Path(str(row["shard_manifest_json"])), row)
+        return row
+    current_columns = [str(column) for column in list(row.get("feature_columns", []) or [])]
+    if current_columns != list(expected_feature_columns):
+        feature_path = Path(str(row.get("feature_store_path", "") or ""))
+        feature_columns, feature_manifest = _project_feature_store_to_schema(
+            feature_store_path=feature_path,
+            feature_columns=current_columns,
+            feature_manifest=dict(row.get("feature_manifest", {}) or {}),
+            expected_feature_columns=list(expected_feature_columns),
+        )
+        row["feature_columns"] = list(feature_columns)
+        row["feature_manifest"] = dict(feature_manifest)
+        row["feature_store_shape"] = [int(item) for item in list(feature_manifest.get("feature_store_shape", []) or [])]
+    row["status"] = _STORED_SHARD_STATUS
+    row["feature_schema_hash"] = _sequence_hash(expected_feature_columns)
+    row.pop("expected_feature_schema_hash", None)
+    row["schema_normalized_at"] = utc_now()
+    write_json(Path(str(row["shard_manifest_json"])), row)
+    return row
+
+
+def _build_schema_reference_shard(
+    *,
+    lake: ResearchDataLake,
+    dataset_id: str,
+    years: list[int],
+    blocks: list[list[str]],
+    canonical_start: pd.Timestamp,
+    canonical_end: pd.Timestamp,
+    cfg: ShardedMemmapConfig,
+    out_root: Path,
+    cumulative_horizons: tuple[int, ...],
+) -> dict[str, Any]:
+    if not years or not blocks:
+        return {}
+    preferred_years = [year for year in years if int(year) > int(canonical_start.year)]
+    candidate_years = preferred_years + [year for year in years if year not in set(preferred_years)]
+    best: dict[str, Any] = {}
+    for year in candidate_years:
+        for block_id, symbols in enumerate(blocks):
+            shard = _build_one_shard(
+                lake=lake,
+                dataset_id=dataset_id,
+                year=int(year),
+                block_id=int(block_id),
+                symbols=list(symbols),
+                canonical_start=canonical_start,
+                canonical_end=canonical_end,
+                cfg=cfg,
+                out_root=out_root,
+                cumulative_horizons=cumulative_horizons,
+                expected_feature_columns=None,
+            )
+            if str(shard.get("status", "")) != _STORED_SHARD_STATUS:
+                continue
+            if not best or _schema_candidate_score(shard) > _schema_candidate_score(best):
+                best = dict(shard)
+            if _schema_candidate_score(best)[0] > 0:
+                return best
+        if best:
+            return best
+    return best
 
 
 def _write_progress(path: Path, **payload: Any) -> None:
