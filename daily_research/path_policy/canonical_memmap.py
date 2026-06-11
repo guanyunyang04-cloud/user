@@ -11,11 +11,12 @@ from daily_research.path_policy.forecast_dataset import normalize_static_context
 
 CANONICAL_MEMMAP_REGISTRY_SCHEMA_VERSION = 1
 DEFAULT_CANONICAL_MEMMAP_ALIAS = "canonical_data_v1"
-DEFAULT_CANONICAL_MEMMAP_REGISTRY = Path("canonical_data/registry/memmap_registry.json")
+DEFAULT_CANONICAL_MEMMAP_REGISTRY = Path("quant_data_platform/registry/memmap_registry.json")
+LEGACY_CANONICAL_MEMMAP_REGISTRY = Path("canonical_data/registry/memmap_registry.json")
 
 
 def default_registry_path() -> Path:
-    return DEFAULT_CANONICAL_MEMMAP_REGISTRY
+    return DEFAULT_CANONICAL_MEMMAP_REGISTRY if DEFAULT_CANONICAL_MEMMAP_REGISTRY.exists() else LEGACY_CANONICAL_MEMMAP_REGISTRY
 
 
 def manifest_signature(manifest: Mapping[str, Any]) -> dict[str, Any]:

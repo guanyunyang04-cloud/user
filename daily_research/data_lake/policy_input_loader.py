@@ -560,6 +560,75 @@ def _load_adjust_factor_sidecar_frames(
     return frames, summary
 
 
+def _safe_panel_suffix(value: Any) -> str:
+    text = str(value or "").strip().upper()
+    out = []
+    for char in text:
+        out.append(char if char.isalnum() else "_")
+    suffix = "".join(out).strip("_")
+    return suffix or "UNKNOWN"
+
+
+def _load_index_constituents_sidecar_frames(
+    *,
+    lake: ResearchDataLake,
+    metadata: dict[str, Any],
+    universe: list[str],
+    dates: pd.Index,
+    start_date: str,
+    end_date: str,
+) -> tuple[dict[str, pd.DataFrame], dict[str, Any]]:
+    sidecar_id = _sidecar_dataset_ids(metadata).get(DataDomain.INDEX_CONSTITUENTS, "")
+    frame, sidecar_metadata = _read_domain_sidecar_frame_filtered(
+        lake,
+        sidecar_id,
+        start_date=start_date,
+        end_date=end_date,
+        columns=["index_symbol", "index_name", "symbol", "trade_date"],
+        symbols=universe,
+    )
+    if frame.empty:
+        return {}, {"dataset_id": str(sidecar_id), "available": False, "reason": "missing_or_empty"}
+    data = frame.copy()
+    required = {"trade_date", "symbol", "index_symbol"}
+    if not required.issubset(data.columns):
+        return {}, {"dataset_id": str(sidecar_id), "available": False, "reason": "missing_required_columns"}
+    data["trade_date"] = pd.to_datetime(data["trade_date"], errors="coerce")
+    data["symbol"] = data["symbol"].astype(str).str.strip().str.upper()
+    data["index_symbol"] = data["index_symbol"].astype(str).str.strip().str.upper()
+    data = data.loc[
+        data["trade_date"].notna()
+        & data["symbol"].isin(set(universe))
+        & data["index_symbol"].ne("")
+    ].copy()
+    if data.empty:
+        return {}, {"dataset_id": str(sidecar_id), "available": False, "reason": "no_overlap"}
+    data["_member"] = 1.0
+    frames: dict[str, pd.DataFrame] = {}
+    index_symbols = sorted(data["index_symbol"].dropna().unique().tolist())
+    for index_symbol in index_symbols:
+        subset = data.loc[data["index_symbol"].eq(index_symbol)]
+        if subset.empty:
+            continue
+        wide = subset.pivot_table(index="trade_date", columns="symbol", values="_member", aggfunc="max").sort_index()
+        wide.index.name = None
+        wide.columns.name = None
+        frames[f"index_constituents_{_safe_panel_suffix(index_symbol)}_member"] = (
+            wide.reindex(index=dates, columns=universe).ffill().fillna(0.0).astype("float32")
+        )
+    summary = {
+        "dataset_id": str(sidecar_id),
+        "available": bool(frames),
+        "dataset_kind": str(sidecar_metadata.get("dataset_kind", "")),
+        "index_symbols": index_symbols,
+        "field_count": int(len(frames)),
+        "row_count": int(len(data)),
+        "symbol_count": int(data["symbol"].nunique()),
+        "trade_date_count": int(data["trade_date"].nunique()),
+    }
+    return frames, summary
+
+
 def _normalize_symbol_list(values: list[str]) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
@@ -943,6 +1012,15 @@ def load_policy_inputs_from_lake(
         end_date=end_date,
     )
     derived_frames.update(adjust_factor_frames)
+    index_constituent_frames, index_constituent_sidecar_summary = _load_index_constituents_sidecar_frames(
+        lake=lake,
+        metadata=metadata,
+        universe=resolved_universe,
+        dates=close.index,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    derived_frames.update(index_constituent_frames)
     derived_frames.update(alpha_prior_frames)
     derived_frames["score_blend"] = score_blend
     metadata_frames: dict[str, pd.DataFrame] = {}
@@ -962,6 +1040,7 @@ def load_policy_inputs_from_lake(
         "industry_sidecar": industry_sidecar_summary,
         "intraday_daily_features_sidecar": intraday_sidecar_summary,
         "adjust_factor_sidecar": adjust_factor_sidecar_summary,
+        "index_constituents_sidecar": index_constituent_sidecar_summary,
     }
     sector_meta_for_cache: dict[str, Any] = {}
     if sector_board_view is not None:
