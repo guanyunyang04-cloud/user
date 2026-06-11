@@ -1555,7 +1555,7 @@ def _fetch_baostock_financial_quarterly_frame_with_timeout(
     symbols: tuple[str, ...],
     start_date: str,
     end_date: str,
-    timeout_seconds: int = 240,
+    timeout_seconds: int = 600,
 ) -> pd.DataFrame:
     return _fetch_baostock_payload_with_timeout(
         target=_baostock_financial_quarterly_worker,
@@ -1572,7 +1572,7 @@ def _fetch_baostock_performance_frame_with_timeout(
     symbols: tuple[str, ...],
     start_date: str,
     end_date: str,
-    timeout_seconds: int = 180,
+    timeout_seconds: int = 600,
 ) -> pd.DataFrame:
     return _fetch_baostock_payload_with_timeout(
         target=_baostock_performance_worker,

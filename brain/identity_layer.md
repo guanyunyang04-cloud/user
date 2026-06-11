@@ -39,6 +39,8 @@
 
 ## 6. 当前工作区结构定位
 - 当前正式生产主线分脑：`daily_research/brain/`
+- 当前共享数据平台分脑：`quant_data_platform/brain/`
 - 当前盘中实验与 RL 分脑：`t0_project/brain/`
 - 当前独立产品分脑：`daily_stock_analysis-main/brain/`
-- 当前主脑重点不是扩 child 数量，而是先把 `daily_research` 打造成最完整的“可替换 agent / 不可替换大脑”样板。
+- 当前传统量化方法分脑：`traditional_quant_research/brain/`
+- 当前主脑重点是让每个根目录身份清晰：项目必须有分脑，主脑基础设施和过渡资产必须明示身份。

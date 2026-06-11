@@ -9,18 +9,32 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from daily_research.data_lake.canonical import DEFAULT_CANONICAL_START_DATE
 from daily_research.data_lake.catalog import DEFAULT_DATA_LAKE_ROOT, ResearchDataLake
 from daily_research.data_platform.contracts import (
     DataDomain,
-    build_intraday_daily_feature_frame,
+    DOMAIN_STANDARD_COLUMNS,
+    normalize_intraday_5m_frame,
+    normalize_intraday_daily_features_frame,
     normalize_domain,
 )
 
 
 _PROGRESS_LOCK = threading.Lock()
+_INTRADAY_5M_REQUIRED_COLUMNS = {
+    "symbol",
+    "trade_date",
+    "bar_time",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "amount",
+}
 
 
 @dataclass(frozen=True)
@@ -201,7 +215,7 @@ def _build_one_shard(
             materialization="resume_hit",
         )
     raw = pd.read_parquet(source_path)
-    features = build_intraday_daily_feature_frame(raw, source=cfg.source_name, adjusted_flag=cfg.adjusted_flag)
+    features = _build_intraday_daily_feature_frame_fast(raw, source=cfg.source_name, adjusted_flag=cfg.adjusted_flag)
     features.to_parquet(target_path, index=False)
     record = _feature_shard_record(
         target_path=target_path,
@@ -225,6 +239,299 @@ def _build_one_shard(
         },
     )
     return record
+
+
+def _build_intraday_daily_feature_frame_fast(
+    intraday_frame: pd.DataFrame,
+    *,
+    source: str,
+    adjusted_flag: str,
+) -> pd.DataFrame:
+    bars = _prepare_intraday_5m_bars(intraday_frame, source=source, adjusted_flag=adjusted_flag)
+    if bars.empty:
+        return pd.DataFrame(columns=DOMAIN_STANDARD_COLUMNS[DataDomain.INTRADAY_DAILY_FEATURES])
+
+    keys = ["trade_date", "symbol"]
+    bars = bars.sort_values(keys + ["bar_time"]).reset_index(drop=True)
+    numeric_columns = ["open", "high", "low", "close", "volume", "amount"]
+    for column in numeric_columns:
+        bars[column] = pd.to_numeric(bars[column], errors="coerce").replace([np.inf, -np.inf], np.nan)
+
+    grouped = bars.groupby(keys, sort=True, dropna=False)
+    bars["_pos"] = grouped.cumcount()
+    bars["_revpos"] = grouped.cumcount(ascending=False)
+    bars["_clock"] = pd.to_numeric(bars["bar_time"].astype(str).str[:6], errors="coerce").fillna(0).astype(int)
+
+    base = grouped.agg(
+        first_open=("open", "first"),
+        last_close=("close", "last"),
+        high_max=("high", "max"),
+        low_min=("low", "min"),
+        total_volume=("volume", "sum"),
+        total_amount=("amount", "sum"),
+        bar_count=("close", "size"),
+    )
+    out = pd.DataFrame(index=base.index)
+    out["bar_count"] = base["bar_count"].astype(float)
+    out["intraday_vwap"] = _safe_ratio(base["total_amount"], base["total_volume"])
+    out["intraday_ret"] = _safe_return_series(base["last_close"], base["first_open"])
+    out["close_to_vwap"] = _safe_return_series(base["last_close"], out["intraday_vwap"])
+    out["intraday_range"] = _safe_return_series(base["high_max"], base["low_min"])
+    out["close_position"] = (base["last_close"] - base["low_min"]) / (base["high_max"] - base["low_min"])
+    out.loc[(base["high_max"] <= base["low_min"]) | base["last_close"].isna(), "close_position"] = np.nan
+    out["open_to_high_ret"] = _safe_return_series(base["high_max"], base["first_open"])
+    out["open_to_low_ret"] = _safe_return_series(base["low_min"], base["first_open"])
+    out["high_to_close_ret"] = _safe_return_series(base["last_close"], base["high_max"])
+    out["low_to_close_ret"] = _safe_return_series(base["last_close"], base["low_min"])
+
+    pos0 = _rows_at(bars, bars["_pos"].eq(0), keys)
+    pos2 = _rows_at(bars, bars["_pos"].eq(2), keys)
+    pos5 = _rows_at(bars, bars["_pos"].eq(5), keys)
+    last = _rows_at(bars, bars["_revpos"].eq(0), keys)
+    tail5 = _rows_at(bars, bars["_revpos"].eq(5), keys)
+    out["first_5m_ret"] = _safe_return_series(pos0["close"], pos0["open"]).reindex(out.index)
+    out["first_15m_ret"] = _safe_return_series(pos2["close"], pos0["open"]).reindex(out.index)
+    out["first_30m_ret"] = _safe_return_series(pos5["close"], pos0["open"]).reindex(out.index)
+    out["last_5m_ret"] = _safe_return_series(last["close"], last["open"]).reindex(out.index)
+    out["last_30m_ret"] = _safe_return_series(last["close"], tail5["open"]).reindex(out.index)
+
+    head6 = bars.loc[bars["_pos"].lt(6)]
+    tail6 = bars.loc[bars["_revpos"].lt(6)]
+    head6_amount = head6.groupby(keys, sort=True, dropna=False)["amount"].sum().reindex(out.index)
+    tail6_amount = tail6.groupby(keys, sort=True, dropna=False)["amount"].sum().reindex(out.index)
+    first_amount = pos0["amount"].reindex(out.index)
+    last_amount = last["amount"].reindex(out.index)
+    out["first_30m_amount_share"] = _safe_ratio(head6_amount, base["total_amount"])
+    out["last_30m_amount_share"] = _safe_ratio(tail6_amount, base["total_amount"])
+    out["first_5m_amount_share"] = _safe_ratio(first_amount, base["total_amount"])
+    out["last_5m_amount_share"] = _safe_ratio(last_amount, base["total_amount"])
+
+    head_range = head6.groupby(keys, sort=True, dropna=False).agg(high=("high", "max"), low=("low", "min")).reindex(out.index)
+    tail_range = tail6.groupby(keys, sort=True, dropna=False).agg(high=("high", "max"), low=("low", "min")).reindex(out.index)
+    enough = base["bar_count"].ge(6)
+    out["first_30m_range"] = _safe_return_series(head_range["high"], head_range["low"])
+    out["last_30m_range"] = _safe_return_series(tail_range["high"], tail_range["low"])
+    out.loc[~enough, ["first_30m_range", "last_30m_range"]] = np.nan
+
+    prev_close = base["last_close"].groupby(level="symbol", sort=False).shift(1)
+    out["open_gap"] = _safe_return_series(base["first_open"], prev_close)
+    gap_sign = np.sign(out["open_gap"])
+    out["open_gap_first_30m_follow_through"] = gap_sign * out["first_30m_ret"]
+    out["open_gap_first_30m_reversal"] = -gap_sign * out["first_30m_ret"]
+    out.loc[out["open_gap"].isna() | out["first_30m_ret"].isna(), ["open_gap_first_30m_follow_through", "open_gap_first_30m_reversal"]] = np.nan
+
+    close_ret = grouped["close"].pct_change().replace([np.inf, -np.inf], np.nan)
+    bars["_close_ret"] = close_ret
+    out["intraday_realized_vol"] = close_ret.groupby([bars["trade_date"], bars["symbol"]], sort=True, dropna=False).std().reindex(out.index)
+    out["intraday_price_volume_corr"] = _group_corr(bars, keys, "_close_ret", "volume").reindex(out.index)
+
+    valid_high = bars["high"].notna()
+    valid_low = bars["low"].notna()
+    high_pos = _extreme_pos(bars.loc[valid_high], keys, "high", "max").reindex(out.index)
+    low_pos = _extreme_pos(bars.loc[valid_low], keys, "low", "min").reindex(out.index)
+    denom = (base["bar_count"] - 1).replace(0, np.nan)
+    out["high_time_frac"] = high_pos / denom
+    out["low_time_frac"] = low_pos / denom
+    out.loc[base["bar_count"].eq(1) & high_pos.notna(), "high_time_frac"] = 0.0
+    out.loc[base["bar_count"].eq(1) & low_pos.notna(), "low_time_frac"] = 0.0
+    out["high_before_low"] = np.where(
+        high_pos.notna() & low_pos.notna(),
+        np.where(high_pos.eq(low_pos), 0.5, (high_pos < low_pos).astype(float)),
+        np.nan,
+    )
+
+    valid_close_count = grouped["close"].count().reindex(out.index)
+    running_max = grouped["close"].cummax()
+    running_min = grouped["close"].cummin()
+    drawdown = bars["close"] / running_max - 1.0
+    runup = bars["close"] / running_min - 1.0
+    out["intraday_max_drawdown"] = drawdown.groupby([bars["trade_date"], bars["symbol"]], sort=True, dropna=False).min().reindex(out.index)
+    out["intraday_max_runup"] = runup.groupby([bars["trade_date"], bars["symbol"]], sort=True, dropna=False).max().reindex(out.index)
+    out.loc[valid_close_count.lt(2), ["intraday_max_drawdown", "intraday_max_runup"]] = np.nan
+
+    vwap_by_row = out["intraday_vwap"].reindex(pd.MultiIndex.from_frame(bars[keys])).to_numpy()
+    above = pd.Series(bars["close"].to_numpy() > vwap_by_row, index=bars.index)
+    out["price_above_vwap_share"] = above.groupby([bars["trade_date"], bars["symbol"]], sort=True, dropna=False).mean().reindex(out.index)
+    out.loc[out["intraday_vwap"].isna(), "price_above_vwap_share"] = np.nan
+
+    amount_share = _safe_ratio(bars["amount"], base["total_amount"].reindex(pd.MultiIndex.from_frame(bars[keys])).to_numpy())
+    bars["_amount_share"] = amount_share.to_numpy() if isinstance(amount_share, pd.Series) else amount_share
+    out["amount_top_bar_share"] = bars["_amount_share"].groupby([bars["trade_date"], bars["symbol"]], sort=True, dropna=False).max().reindex(out.index)
+    out["amount_concentration_hhi"] = (bars["_amount_share"] ** 2).groupby([bars["trade_date"], bars["symbol"]], sort=True, dropna=False).sum().reindex(out.index)
+    out.loc[base["total_amount"].le(0) | base["total_amount"].isna(), ["amount_top_bar_share", "amount_concentration_hhi"]] = np.nan
+
+    cum_amount = grouped["amount"].cumsum()
+    cum_volume = grouped["volume"].cumsum()
+    bars["_cum_vwap"] = cum_amount / cum_volume.where(cum_volume > 0)
+    out["cum_vwap_slope"] = _linear_slope_by_group(bars, keys, "_cum_vwap").reindex(out.index)
+
+    am = bars.loc[bars["_clock"].le(113000)]
+    pm = bars.loc[bars["_clock"].ge(130000)]
+    am_first = _rows_at(am.assign(_session_pos=am.groupby(keys, sort=True, dropna=False).cumcount()), am.groupby(keys, sort=True, dropna=False).cumcount().eq(0), keys)
+    am_last = _rows_at(am.assign(_session_revpos=am.groupby(keys, sort=True, dropna=False).cumcount(ascending=False)), am.groupby(keys, sort=True, dropna=False).cumcount(ascending=False).eq(0), keys)
+    pm_first = _rows_at(pm.assign(_session_pos=pm.groupby(keys, sort=True, dropna=False).cumcount()), pm.groupby(keys, sort=True, dropna=False).cumcount().eq(0), keys)
+    pm_last = _rows_at(pm.assign(_session_revpos=pm.groupby(keys, sort=True, dropna=False).cumcount(ascending=False)), pm.groupby(keys, sort=True, dropna=False).cumcount(ascending=False).eq(0), keys)
+    out["am_ret"] = _safe_return_series(am_last["close"], am_first["open"]).reindex(out.index)
+    out["pm_ret"] = _safe_return_series(pm_last["close"], pm_first["open"]).reindex(out.index)
+    out["lunch_gap_ret"] = _safe_return_series(pm_first["open"], am_last["close"]).reindex(out.index)
+    out["am_pm_ret_spread"] = out["pm_ret"] - out["am_ret"]
+    am_close_ret = am.groupby(keys, sort=True, dropna=False)["close"].pct_change().replace([np.inf, -np.inf], np.nan)
+    pm_close_ret = pm.groupby(keys, sort=True, dropna=False)["close"].pct_change().replace([np.inf, -np.inf], np.nan)
+    am_vol = am_close_ret.groupby([am["trade_date"], am["symbol"]], sort=True, dropna=False).std().reindex(out.index)
+    pm_vol = pm_close_ret.groupby([pm["trade_date"], pm["symbol"]], sort=True, dropna=False).std().reindex(out.index)
+    out["am_pm_vol_spread"] = pm_vol - am_vol
+    am_amount = am.groupby(keys, sort=True, dropna=False)["amount"].sum().reindex(out.index)
+    out["am_amount_share"] = _safe_ratio(am_amount, base["total_amount"])
+    pm_amount_share = 1.0 - out["am_amount_share"]
+    out["am_pm_amount_spread"] = out["am_amount_share"] - pm_amount_share
+
+    out["early_strength_late_weak"] = out["first_30m_ret"] - out["last_30m_ret"]
+    out["close_pressure_30m"] = out["last_30m_ret"] * out["last_30m_amount_share"]
+    out["source"] = source
+    out["adjusted_flag"] = str(adjusted_flag or "none")
+    out = out.reset_index()
+    return normalize_intraday_daily_features_frame(out, source=source, adjusted_flag=adjusted_flag, require_columns=False)
+
+
+def _prepare_intraday_5m_bars(intraday_frame: pd.DataFrame, *, source: str, adjusted_flag: str) -> pd.DataFrame:
+    if intraday_frame is None or intraday_frame.empty:
+        return pd.DataFrame(columns=list(_INTRADAY_5M_REQUIRED_COLUMNS) + ["source", "adjusted_flag"])
+    if not _INTRADAY_5M_REQUIRED_COLUMNS.issubset(set(intraday_frame.columns)):
+        return normalize_intraday_5m_frame(
+            intraday_frame,
+            source=source,
+            adjusted_flag=adjusted_flag,
+            require_columns=False,
+        )
+
+    columns = [
+        "symbol",
+        "trade_date",
+        "bar_time",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "amount",
+    ]
+    data = intraday_frame.loc[:, columns].copy()
+    data["symbol"] = data["symbol"].astype(str).str.strip().str.upper()
+    data["trade_date"] = data["trade_date"].astype(str).str.strip().str.slice(0, 10)
+    data["bar_time"] = _fast_bar_time(data["bar_time"])
+    for column in ["open", "high", "low", "close", "volume", "amount"]:
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+    data["source"] = source
+    data["adjusted_flag"] = str(adjusted_flag or "none")
+    valid = (
+        data["symbol"].str.len().gt(0)
+        & data["trade_date"].str.lower().ne("nat")
+        & data["trade_date"].str.lower().ne("nan")
+        & data["bar_time"].str.len().gt(0)
+    )
+    return data.loc[valid].drop_duplicates(["symbol", "trade_date", "bar_time", "source"]).reset_index(drop=True)
+
+
+def _fast_bar_time(values: pd.Series) -> pd.Series:
+    text = values.astype(str).str.strip()
+    has_colon = text.str.contains(":", regex=False, na=False)
+    if bool(has_colon.any()):
+        text = text.str.replace(":", "", regex=False)
+    text = text.str.replace(".", "", regex=False)
+    text = text.str.slice(0, 9)
+    short = text.str.len().eq(6)
+    if bool(short.any()):
+        text.loc[short] = text.loc[short] + "000"
+    return text.str.zfill(9)
+
+
+def _rows_at(frame: pd.DataFrame, mask: pd.Series, keys: list[str]) -> pd.DataFrame:
+    value_columns = ["open", "high", "low", "close", "volume", "amount", "_pos"]
+    if frame.empty:
+        return pd.DataFrame(columns=keys + value_columns).set_index(keys)
+    subset = frame.loc[mask, keys + value_columns].drop_duplicates(keys, keep="first")
+    return subset.set_index(keys)
+
+
+def _safe_ratio(numerator: Any, denominator: Any) -> pd.Series:
+    num = pd.Series(numerator, copy=False)
+    den = pd.Series(denominator, index=num.index if not isinstance(denominator, pd.Series) else denominator.index, copy=False)
+    if isinstance(numerator, pd.Series) and isinstance(denominator, pd.Series):
+        den = denominator.reindex(numerator.index)
+    out = pd.to_numeric(num, errors="coerce") / pd.to_numeric(den, errors="coerce")
+    out = out.replace([np.inf, -np.inf], np.nan)
+    out.loc[pd.to_numeric(den, errors="coerce").le(0) | pd.to_numeric(den, errors="coerce").isna()] = np.nan
+    return out
+
+
+def _safe_return_series(close_value: Any, open_value: Any) -> pd.Series:
+    close = pd.Series(close_value, copy=False)
+    open_ = pd.Series(open_value, index=close.index if not isinstance(open_value, pd.Series) else open_value.index, copy=False)
+    if isinstance(close_value, pd.Series) and isinstance(open_value, pd.Series):
+        open_ = open_value.reindex(close_value.index)
+    out = pd.to_numeric(close, errors="coerce") / pd.to_numeric(open_, errors="coerce") - 1.0
+    out = out.replace([np.inf, -np.inf], np.nan)
+    out.loc[pd.to_numeric(open_, errors="coerce").le(0) | pd.to_numeric(open_, errors="coerce").isna() | pd.to_numeric(close, errors="coerce").isna()] = np.nan
+    return out
+
+
+def _extreme_pos(frame: pd.DataFrame, keys: list[str], column: str, mode: str) -> pd.Series:
+    if frame.empty:
+        return pd.Series(dtype=float)
+    idx = frame.groupby(keys, sort=True, dropna=False)[column].idxmax() if mode == "max" else frame.groupby(keys, sort=True, dropna=False)[column].idxmin()
+    return frame.loc[idx.dropna().astype(int), keys + ["_pos"]].drop_duplicates(keys, keep="first").set_index(keys)["_pos"].astype(float)
+
+
+def _group_corr(frame: pd.DataFrame, keys: list[str], x_col: str, y_col: str) -> pd.Series:
+    valid = frame[[*keys, x_col, y_col]].copy()
+    valid[x_col] = pd.to_numeric(valid[x_col], errors="coerce")
+    valid[y_col] = pd.to_numeric(valid[y_col], errors="coerce")
+    valid = valid.loc[valid[x_col].notna() & valid[y_col].notna()]
+    if valid.empty:
+        return pd.Series(dtype=float)
+    valid["_xy"] = valid[x_col] * valid[y_col]
+    valid["_x2"] = valid[x_col] * valid[x_col]
+    valid["_y2"] = valid[y_col] * valid[y_col]
+    agg = valid.groupby(keys, sort=True, dropna=False).agg(
+        n=(x_col, "size"),
+        sx=(x_col, "sum"),
+        sy=(y_col, "sum"),
+        sxy=("_xy", "sum"),
+        sx2=("_x2", "sum"),
+        sy2=("_y2", "sum"),
+    )
+    num = agg["n"] * agg["sxy"] - agg["sx"] * agg["sy"]
+    den_sq = (agg["n"] * agg["sx2"] - agg["sx"] ** 2) * (agg["n"] * agg["sy2"] - agg["sy"] ** 2)
+    den = np.sqrt(den_sq.where(den_sq > 0))
+    corr = num / den
+    corr = corr.replace([np.inf, -np.inf], np.nan)
+    corr.loc[agg["n"].lt(2)] = np.nan
+    return corr
+
+
+def _linear_slope_by_group(frame: pd.DataFrame, keys: list[str], column: str) -> pd.Series:
+    valid = frame.loc[pd.to_numeric(frame[column], errors="coerce").replace([np.inf, -np.inf], np.nan).notna(), keys + [column]].copy()
+    if valid.empty:
+        return pd.Series(dtype=float)
+    grouped = valid.groupby(keys, sort=True, dropna=False)
+    valid["_x"] = grouped.cumcount().astype(float)
+    first = grouped[column].transform("first").astype(float)
+    scale = first.abs().where(first.ne(0.0), 1.0)
+    valid["_y"] = valid[column].astype(float) / scale
+    valid["_xy"] = valid["_x"] * valid["_y"]
+    valid["_x2"] = valid["_x"] * valid["_x"]
+    agg = valid.groupby(keys, sort=True, dropna=False).agg(
+        n=("_y", "size"),
+        sx=("_x", "sum"),
+        sy=("_y", "sum"),
+        sxy=("_xy", "sum"),
+        sx2=("_x2", "sum"),
+    )
+    denom = agg["n"] * agg["sx2"] - agg["sx"] ** 2
+    slope = (agg["n"] * agg["sxy"] - agg["sx"] * agg["sy"]) / denom
+    slope = slope.replace([np.inf, -np.inf], np.nan)
+    slope.loc[agg["n"].lt(2) | denom.eq(0)] = np.nan
+    return slope
 
 
 def _feature_shard_record(

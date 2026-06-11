@@ -227,6 +227,12 @@ def _read_benchmark_from_policy_bundle(
     end_date: str,
 ) -> pd.DataFrame:
     metadata = lake.describe_dataset(dataset_id)
+    if str(metadata.get("dataset_kind", "") or "") != "policy_input_bundle":
+        data = _normalize_market_frame(_read_market_dataset_frame(metadata))
+        data = data.loc[data["symbol"].astype(str).str.strip().str.upper().eq(benchmark)].copy()
+        if data.empty:
+            return pd.DataFrame()
+        return data.loc[(data["trade_date"] >= pd.Timestamp(start_date)) & (data["trade_date"] <= pd.Timestamp(end_date))].copy()
     paths = dict(metadata.get("content_paths", {}) or {})
     path = Path(str(paths.get("silver_benchmark", "") or ""))
     if not path.exists():

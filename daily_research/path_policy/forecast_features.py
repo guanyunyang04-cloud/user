@@ -15,6 +15,7 @@ from daily_research.continuous_policy.runtime import write_json
 
 AUGMENTED_INDUSTRY_METRICS_PROFILE = "raw_kline_context_v2_tradeable_local_state_industry_metrics_v1"
 BAOSTOCK_BEST_EFFORT_PROFILE = "raw_kline_context_v2_baostock_best_effort_v1"
+CANONICAL_SHORT_HORIZON_INTRADAY_PROFILE = "raw_kline_context_v2_short_horizon_intraday_v1"
 FORECAST_FEATURE_PROFILES: tuple[str, ...] = (
     "state_v1",
     "raw_kline_v1",
@@ -27,6 +28,7 @@ FORECAST_FEATURE_PROFILES: tuple[str, ...] = (
     "raw_kline_context_v2_tradeable_amount_checked",
     "raw_kline_context_v2_tradeable_local_state_v1",
     AUGMENTED_INDUSTRY_METRICS_PROFILE,
+    CANONICAL_SHORT_HORIZON_INTRADAY_PROFILE,
     BAOSTOCK_BEST_EFFORT_PROFILE,
 )
 DEFAULT_FORECAST_FEATURE_PROFILE = "raw_kline_context_v1"
@@ -43,6 +45,7 @@ RAW_FRAME_PROFILES = {
     "raw_kline_context_v2_tradeable_amount_checked",
     "raw_kline_context_v2_tradeable_local_state_v1",
     AUGMENTED_INDUSTRY_METRICS_PROFILE,
+    CANONICAL_SHORT_HORIZON_INTRADAY_PROFILE,
     BAOSTOCK_BEST_EFFORT_PROFILE,
 }
 CONTEXT_FRAME_PROFILES = {
@@ -55,6 +58,7 @@ CONTEXT_FRAME_PROFILES = {
     "raw_kline_context_v2_tradeable_amount_checked",
     "raw_kline_context_v2_tradeable_local_state_v1",
     AUGMENTED_INDUSTRY_METRICS_PROFILE,
+    CANONICAL_SHORT_HORIZON_INTRADAY_PROFILE,
     BAOSTOCK_BEST_EFFORT_PROFILE,
 }
 HISTORY_FRAME_PROFILES = {
@@ -64,6 +68,7 @@ HISTORY_FRAME_PROFILES = {
     "raw_kline_context_v2_tradeable_amount_checked",
     "raw_kline_context_v2_tradeable_local_state_v1",
     AUGMENTED_INDUSTRY_METRICS_PROFILE,
+    CANONICAL_SHORT_HORIZON_INTRADAY_PROFILE,
     BAOSTOCK_BEST_EFFORT_PROFILE,
 }
 SECTOR_CONTEXT_PROFILES = {"raw_kline_context_sector_v1", AUGMENTED_INDUSTRY_METRICS_PROFILE, BAOSTOCK_BEST_EFFORT_PROFILE}
@@ -79,12 +84,19 @@ REGIME_PROFILES = {
     "raw_kline_context_v2_tradeable_amount_checked",
     "raw_kline_context_v2_tradeable_local_state_v1",
     AUGMENTED_INDUSTRY_METRICS_PROFILE,
+    CANONICAL_SHORT_HORIZON_INTRADAY_PROFILE,
     BAOSTOCK_BEST_EFFORT_PROFILE,
 }
-LOCAL_STATE_PROFILES = {"raw_kline_context_v2_tradeable_local_state_v1", AUGMENTED_INDUSTRY_METRICS_PROFILE, BAOSTOCK_BEST_EFFORT_PROFILE}
+LOCAL_STATE_PROFILES = {
+    "raw_kline_context_v2_tradeable_local_state_v1",
+    AUGMENTED_INDUSTRY_METRICS_PROFILE,
+    CANONICAL_SHORT_HORIZON_INTRADAY_PROFILE,
+    BAOSTOCK_BEST_EFFORT_PROFILE,
+}
 TURNOVER_CONTEXT_PROFILES = {AUGMENTED_INDUSTRY_METRICS_PROFILE, BAOSTOCK_BEST_EFFORT_PROFILE}
 VALUATION_CONTEXT_PROFILES = {AUGMENTED_INDUSTRY_METRICS_PROFILE, BAOSTOCK_BEST_EFFORT_PROFILE}
-INTRADAY_CONTEXT_PROFILES = {BAOSTOCK_BEST_EFFORT_PROFILE}
+INTRADAY_CONTEXT_PROFILES = {CANONICAL_SHORT_HORIZON_INTRADAY_PROFILE, BAOSTOCK_BEST_EFFORT_PROFILE}
+ADJUST_CONTEXT_PROFILES = {CANONICAL_SHORT_HORIZON_INTRADAY_PROFILE}
 FINANCE_CONTEXT_PROFILES = {BAOSTOCK_BEST_EFFORT_PROFILE}
 INDEX_CONTEXT_PROFILES = {BAOSTOCK_BEST_EFFORT_PROFILE}
 AMOUNT_CHECKED_PROFILES = {"raw_kline_context_v2_tradeable_amount_checked", *LOCAL_STATE_PROFILES}
@@ -96,6 +108,7 @@ NO_ALPHA_CONTRACT_PROFILES = {
     "raw_kline_context_v2_tradeable_amount_checked",
     "raw_kline_context_v2_tradeable_local_state_v1",
     AUGMENTED_INDUSTRY_METRICS_PROFILE,
+    CANONICAL_SHORT_HORIZON_INTRADAY_PROFILE,
     BAOSTOCK_BEST_EFFORT_PROFILE,
 }
 
@@ -322,10 +335,10 @@ def _context_feature_frames(prepared: PreparedPolicyInputs, raw_frames: dict[str
     columns = [str(item) for item in close.columns]
     membership = prepared.membership_frame.reindex(index=close.index, columns=columns, fill_value=False).astype(bool)
     returns = {
-        1: close.pct_change(1).replace([np.inf, -np.inf], np.nan),
-        3: close.pct_change(3).replace([np.inf, -np.inf], np.nan),
-        5: close.pct_change(5).replace([np.inf, -np.inf], np.nan),
-        20: close.pct_change(20).replace([np.inf, -np.inf], np.nan),
+        1: close.pct_change(1, fill_method=None).replace([np.inf, -np.inf], np.nan),
+        3: close.pct_change(3, fill_method=None).replace([np.inf, -np.inf], np.nan),
+        5: close.pct_change(5, fill_method=None).replace([np.inf, -np.inf], np.nan),
+        20: close.pct_change(20, fill_method=None).replace([np.inf, -np.inf], np.nan),
     }
     vol20 = returns[1].rolling(20, min_periods=2).std().replace([np.inf, -np.inf], np.nan)
     adv20 = amount.rolling(20, min_periods=1).mean()
@@ -361,12 +374,12 @@ def _context_feature_frames(prepared: PreparedPolicyInputs, raw_frames: dict[str
     frames.update({name: _repeat_series_to_universe(series, columns) for name, series in market_series.items()})
 
     benchmark = prepared.benchmark_close.reindex(close.index).astype(float)
-    benchmark_returns = benchmark.pct_change()
+    benchmark_returns = benchmark.pct_change(fill_method=None)
     benchmark_series = {
-        "benchmark_ret_1d": benchmark.pct_change(1),
-        "benchmark_ret_3d": benchmark.pct_change(3),
-        "benchmark_ret_5d": benchmark.pct_change(5),
-        "benchmark_ret_20d": benchmark.pct_change(20),
+        "benchmark_ret_1d": benchmark.pct_change(1, fill_method=None),
+        "benchmark_ret_3d": benchmark.pct_change(3, fill_method=None),
+        "benchmark_ret_5d": benchmark.pct_change(5, fill_method=None),
+        "benchmark_ret_20d": benchmark.pct_change(20, fill_method=None),
         "benchmark_vol_20d": benchmark_returns.rolling(20, min_periods=2).std(),
         "benchmark_distance_to_20d_high": benchmark.div(benchmark.rolling(20, min_periods=1).max().replace(0.0, np.nan)).sub(1.0),
         "benchmark_distance_to_20d_low": benchmark.div(benchmark.rolling(20, min_periods=1).min().replace(0.0, np.nan)).sub(1.0),
@@ -385,9 +398,9 @@ def _context_feature_frames(prepared: PreparedPolicyInputs, raw_frames: dict[str
 
 def _local_state_feature_frames(prepared: PreparedPolicyInputs) -> dict[str, pd.DataFrame]:
     close = prepared.close.astype(float)
-    ret_1d = close.pct_change(1).replace([np.inf, -np.inf], np.nan)
-    ret_5d = close.pct_change(5).replace([np.inf, -np.inf], np.nan)
-    ret_20d = close.pct_change(20).replace([np.inf, -np.inf], np.nan)
+    ret_1d = close.pct_change(1, fill_method=None).replace([np.inf, -np.inf], np.nan)
+    ret_5d = close.pct_change(5, fill_method=None).replace([np.inf, -np.inf], np.nan)
+    ret_20d = close.pct_change(20, fill_method=None).replace([np.inf, -np.inf], np.nan)
     vol_5d = ret_1d.rolling(5, min_periods=2).std().replace([np.inf, -np.inf], np.nan)
     vol_20d = ret_1d.rolling(20, min_periods=2).std().replace([np.inf, -np.inf], np.nan)
     vol_ratio_5_20 = _safe_div(vol_5d, vol_20d).sub(1.0)
@@ -684,8 +697,8 @@ def _sector_context_feature_frames(prepared: PreparedPolicyInputs, *, progress_r
         return {}
     if progress_root is not None:
         _write_feature_store_progress(Path(progress_root), "sector_context_start", date_count=len(close.index), universe_size=len(columns))
-    returns_20 = close.pct_change(20).replace([np.inf, -np.inf], np.nan)
-    benchmark = prepared.benchmark_close.reindex(close.index).astype(float).pct_change(20).replace([np.inf, -np.inf], np.nan)
+    returns_20 = close.pct_change(20, fill_method=None).replace([np.inf, -np.inf], np.nan)
+    benchmark = prepared.benchmark_close.reindex(close.index).astype(float).pct_change(20, fill_method=None).replace([np.inf, -np.inf], np.nan)
     industry_mean = _group_mean_frame(returns_20, industry)
     industry_ret_excess = industry_mean.sub(benchmark, axis=0)
     industry_rank = _group_rank_frame(returns_20, industry)
@@ -739,11 +752,11 @@ def _sector_relative_feature_frames(prepared: PreparedPolicyInputs, *, progress_
         return {}
     if progress_root is not None:
         _write_feature_store_progress(Path(progress_root), "sector_relative_start", date_count=len(close.index), universe_size=len(columns))
-    returns_5 = close.pct_change(5).replace([np.inf, -np.inf], np.nan)
-    returns_20 = close.pct_change(20).replace([np.inf, -np.inf], np.nan)
+    returns_5 = close.pct_change(5, fill_method=None).replace([np.inf, -np.inf], np.nan)
+    returns_20 = close.pct_change(20, fill_method=None).replace([np.inf, -np.inf], np.nan)
     benchmark_close = prepared.benchmark_close.reindex(close.index).astype(float)
-    benchmark_ret_5 = benchmark_close.pct_change(5).replace([np.inf, -np.inf], np.nan)
-    benchmark_ret_20 = benchmark_close.pct_change(20).replace([np.inf, -np.inf], np.nan)
+    benchmark_ret_5 = benchmark_close.pct_change(5, fill_method=None).replace([np.inf, -np.inf], np.nan)
+    benchmark_ret_20 = benchmark_close.pct_change(20, fill_method=None).replace([np.inf, -np.inf], np.nan)
     industry_mean_5 = _group_mean_frame(returns_5, industry)
     industry_mean_20 = _group_mean_frame(returns_20, industry)
     industry_rank_5 = _group_rank_frame(returns_5, industry)
@@ -830,7 +843,7 @@ def _derived_feature_panel(prepared: PreparedPolicyInputs, key: str, *, ffill: b
     raw = dict(getattr(prepared, "derived_frames", {}) or {}).get(str(key))
     if raw is None or raw.empty:
         return None
-    panel = raw.reindex(index=close.index, columns=columns).astype(float).replace([np.inf, -np.inf], np.nan)
+    panel = raw.reindex(index=close.index, columns=columns).astype("float32").replace([np.inf, -np.inf], np.nan)
     if ffill:
         panel = panel.ffill()
     if int(lag) > 0:
@@ -857,6 +870,25 @@ def _intraday_context_feature_frames(prepared: PreparedPolicyInputs) -> dict[str
         "close_position",
         "intraday_realized_vol",
         "intraday_price_volume_corr",
+        "bar_count",
+        "high_time_frac",
+        "low_time_frac",
+        "high_before_low",
+        "open_to_high_ret",
+        "open_to_low_ret",
+        "high_to_close_ret",
+        "low_to_close_ret",
+        "intraday_max_drawdown",
+        "intraday_max_runup",
+        "price_above_vwap_share",
+        "cum_vwap_slope",
+        "first_5m_amount_share",
+        "last_5m_amount_share",
+        "first_30m_range",
+        "last_30m_range",
+        "amount_top_bar_share",
+        "amount_concentration_hhi",
+        "lunch_gap_ret",
         "am_ret",
         "pm_ret",
         "am_pm_ret_spread",
@@ -874,6 +906,35 @@ def _intraday_context_feature_frames(prepared: PreparedPolicyInputs) -> dict[str
         out[name] = panel
         out[f"cs_rank_{name}"] = panel.rank(axis=1, pct=True)
         out[f"cs_z_{name}"] = _cross_z(panel)
+    return {key: value.replace([np.inf, -np.inf], np.nan) for key, value in out.items()}
+
+
+def _adjust_context_feature_frames(prepared: PreparedPolicyInputs) -> dict[str, pd.DataFrame]:
+    close = prepared.close.astype(float)
+    columns = [str(item).strip().upper() for item in close.columns]
+    derived = dict(getattr(prepared, "derived_frames", {}) or {})
+    factor = derived.get("adjust_factor_fore_adjust_factor")
+    if factor is None or factor.empty:
+        factor = derived.get("adjust_factor")
+    if factor is None or factor.empty:
+        return {}
+    aligned = factor.reindex(index=close.index, columns=columns).astype("float32").replace([np.inf, -np.inf], np.nan).ffill()
+    positive_factor = aligned.where(aligned > 0.0)
+    adjusted_close = close.mul(positive_factor)
+    factor_chg = positive_factor.div(positive_factor.shift(1)).sub(1.0).replace([np.inf, -np.inf], np.nan)
+    adj_ret_1d = adjusted_close.pct_change(1, fill_method=None).replace([np.inf, -np.inf], np.nan)
+    adj_ret_5d = adjusted_close.pct_change(5, fill_method=None).replace([np.inf, -np.inf], np.nan)
+    event_flag = factor_chg.abs().gt(1.0e-8).astype(float).where(factor_chg.notna())
+    out = {
+        "adjust_adj_close_ret_1d": adj_ret_1d,
+        "adjust_adj_close_ret_5d": adj_ret_5d,
+        "adjust_factor_change_1d": factor_chg,
+        "adjust_event_flag_1d": event_flag,
+        "cs_rank_adjust_adj_close_ret_1d": adj_ret_1d.rank(axis=1, pct=True),
+        "cs_z_adjust_adj_close_ret_1d": _cross_z(adj_ret_1d),
+        "cs_rank_adjust_adj_close_ret_5d": adj_ret_5d.rank(axis=1, pct=True),
+        "cs_z_adjust_adj_close_ret_5d": _cross_z(adj_ret_5d),
+    }
     return {key: value.replace([np.inf, -np.inf], np.nan) for key, value in out.items()}
 
 
@@ -937,13 +998,13 @@ def _regime_feature_frames(prepared: PreparedPolicyInputs, raw_frames: dict[str,
     columns = [str(item).strip().upper() for item in close.columns]
     membership = prepared.membership_frame.reindex(index=close.index, columns=columns, fill_value=False).astype(bool)
     benchmark = prepared.benchmark_close.reindex(close.index).astype(float)
-    benchmark_ret_1 = benchmark.pct_change(1).replace([np.inf, -np.inf], np.nan)
-    benchmark_ret_20 = benchmark.pct_change(20).replace([np.inf, -np.inf], np.nan)
+    benchmark_ret_1 = benchmark.pct_change(1, fill_method=None).replace([np.inf, -np.inf], np.nan)
+    benchmark_ret_20 = benchmark.pct_change(20, fill_method=None).replace([np.inf, -np.inf], np.nan)
     benchmark_vol_20 = benchmark_ret_1.rolling(20, min_periods=2).std().replace([np.inf, -np.inf], np.nan)
     benchmark_roll_max_20 = benchmark.rolling(20, min_periods=1).max().replace(0.0, np.nan)
     benchmark_drawdown_20 = benchmark.div(benchmark_roll_max_20).sub(1.0).replace([np.inf, -np.inf], np.nan)
-    stock_ret_1 = close.pct_change(1).replace([np.inf, -np.inf], np.nan)
-    stock_ret_20 = close.pct_change(20).replace([np.inf, -np.inf], np.nan)
+    stock_ret_1 = close.pct_change(1, fill_method=None).replace([np.inf, -np.inf], np.nan)
+    stock_ret_20 = close.pct_change(20, fill_method=None).replace([np.inf, -np.inf], np.nan)
     market_ret_20 = stock_ret_20.where(membership).mean(axis=1)
     market_vol_20 = stock_ret_1.where(membership).std(axis=1, ddof=0)
     market_liquidity = amount.where(membership).mean(axis=1)
@@ -1000,6 +1061,7 @@ def _selected_columns_for_profile(
     turnover_columns: list[str] | None = None,
     valuation_columns: list[str] | None = None,
     intraday_columns: list[str] | None = None,
+    adjust_columns: list[str] | None = None,
     finance_columns: list[str] | None = None,
     index_columns: list[str] | None = None,
     history_columns: list[str] | None = None,
@@ -1014,6 +1076,7 @@ def _selected_columns_for_profile(
     turnover_columns = list(turnover_columns or [])
     valuation_columns = list(valuation_columns or [])
     intraday_columns = list(intraday_columns or [])
+    adjust_columns = list(adjust_columns or [])
     finance_columns = list(finance_columns or [])
     index_columns = list(index_columns or [])
     if feature_profile in RAW_FRAME_PROFILES - {"raw_kline_context_sector_v1"}:
@@ -1044,6 +1107,8 @@ def _selected_columns_for_profile(
         column_groups.update({column: "valuation_context" for column in valuation_columns})
     if feature_profile in INTRADAY_CONTEXT_PROFILES:
         column_groups.update({column: "intraday_context" for column in intraday_columns})
+    if feature_profile in ADJUST_CONTEXT_PROFILES:
+        column_groups.update({column: "adjust_context" for column in adjust_columns})
     if feature_profile in FINANCE_CONTEXT_PROFILES:
         column_groups.update({column: "finance_context" for column in finance_columns})
     if feature_profile in INDEX_CONTEXT_PROFILES:
@@ -1069,6 +1134,8 @@ def _selected_columns_for_profile(
         columns.extend([column for column in valuation_columns if column in column_groups])
     if feature_profile in INTRADAY_CONTEXT_PROFILES:
         columns.extend([column for column in intraday_columns if column in column_groups])
+    if feature_profile in ADJUST_CONTEXT_PROFILES:
+        columns.extend([column for column in adjust_columns if column in column_groups])
     if feature_profile in FINANCE_CONTEXT_PROFILES:
         columns.extend([column for column in finance_columns if column in column_groups])
     if feature_profile in INDEX_CONTEXT_PROFILES:
@@ -1101,6 +1168,7 @@ def _manifest_for_columns(
         "turnover_context": 0,
         "valuation_context": 0,
         "intraday_context": 0,
+        "adjust_context": 0,
         "finance_context": 0,
         "index_context": 0,
         "alpha_prior": 0,
@@ -1128,6 +1196,7 @@ def _manifest_for_columns(
         "turnover_context_feature_count": int(group_counts["turnover_context"]),
         "valuation_context_feature_count": int(group_counts["valuation_context"]),
         "intraday_context_feature_count": int(group_counts["intraday_context"]),
+        "adjust_context_feature_count": int(group_counts["adjust_context"]),
         "finance_context_feature_count": int(group_counts["finance_context"]),
         "index_context_feature_count": int(group_counts["index_context"]),
         "alpha_prior_feature_count": int(group_counts["alpha_prior"]),
@@ -1166,6 +1235,8 @@ def _cap_feature_columns(
         priority_groups.add("valuation_context")
     if feature_profile in INTRADAY_CONTEXT_PROFILES:
         priority_groups.add("intraday_context")
+    if feature_profile in ADJUST_CONTEXT_PROFILES:
+        priority_groups.add("adjust_context")
     if feature_profile in FINANCE_CONTEXT_PROFILES:
         priority_groups.add("finance_context")
     if feature_profile in INDEX_CONTEXT_PROFILES:
@@ -1181,6 +1252,7 @@ def _cap_feature_columns(
         "turnover_context",
         "valuation_context",
         "intraday_context",
+        "adjust_context",
         "finance_context",
         "index_context",
         "regime_context",
@@ -1255,6 +1327,7 @@ def build_forecast_feature_panels(
     turnover_frames = _turnover_context_feature_frames(prepared) if profile in TURNOVER_CONTEXT_PROFILES else {}
     valuation_frames = _valuation_context_feature_frames(prepared) if profile in VALUATION_CONTEXT_PROFILES else {}
     intraday_frames = _intraday_context_feature_frames(prepared) if profile in INTRADAY_CONTEXT_PROFILES else {}
+    adjust_frames = _adjust_context_feature_frames(prepared) if profile in ADJUST_CONTEXT_PROFILES else {}
     finance_frames = _finance_context_feature_frames(prepared) if profile in FINANCE_CONTEXT_PROFILES else {}
     index_frames = _index_context_feature_frames(prepared) if profile in INDEX_CONTEXT_PROFILES else {}
     all_columns, column_groups = _selected_columns_for_profile(
@@ -1268,6 +1341,7 @@ def build_forecast_feature_panels(
         turnover_columns=list(turnover_frames),
         valuation_columns=list(valuation_frames),
         intraday_columns=list(intraday_frames),
+        adjust_columns=list(adjust_frames),
         finance_columns=list(finance_frames),
         index_columns=list(index_frames),
         history_columns=list(history_frames),
@@ -1317,6 +1391,8 @@ def build_forecast_feature_panels(
                 extra_parts[column] = valuation_frames[column].loc[dt].reindex(universe)
             elif column in intraday_frames:
                 extra_parts[column] = intraday_frames[column].loc[dt].reindex(universe)
+            elif column in adjust_frames:
+                extra_parts[column] = adjust_frames[column].loc[dt].reindex(universe)
             elif column in finance_frames:
                 extra_parts[column] = finance_frames[column].loc[dt].reindex(universe)
             elif column in index_frames:
@@ -1452,6 +1528,8 @@ def build_forecast_feature_store(
     _write_feature_store_progress(root, "valuation_frames_done", valuation_frame_count=len(valuation_frames))
     intraday_frames = _intraday_context_feature_frames(prepared) if profile in INTRADAY_CONTEXT_PROFILES else {}
     _write_feature_store_progress(root, "intraday_frames_done", intraday_frame_count=len(intraday_frames))
+    adjust_frames = _adjust_context_feature_frames(prepared) if profile in ADJUST_CONTEXT_PROFILES else {}
+    _write_feature_store_progress(root, "adjust_frames_done", adjust_frame_count=len(adjust_frames))
     finance_frames = _finance_context_feature_frames(prepared) if profile in FINANCE_CONTEXT_PROFILES else {}
     _write_feature_store_progress(root, "finance_frames_done", finance_frame_count=len(finance_frames))
     index_frames = _index_context_feature_frames(prepared) if profile in INDEX_CONTEXT_PROFILES else {}
@@ -1467,6 +1545,7 @@ def build_forecast_feature_store(
         turnover_columns=list(turnover_frames),
         valuation_columns=list(valuation_frames),
         intraday_columns=list(intraday_frames),
+        adjust_columns=list(adjust_frames),
         finance_columns=list(finance_frames),
         index_columns=list(index_frames),
         history_columns=list(history_frames),
@@ -1503,6 +1582,7 @@ def build_forecast_feature_store(
         and column not in turnover_frames
         and column not in valuation_frames
         and column not in intraday_frames
+        and column not in adjust_frames
         and column not in finance_frames
         and column not in index_frames
         for column in selected_columns
@@ -1555,6 +1635,8 @@ def build_forecast_feature_store(
                 extra_parts[column] = valuation_frames[column].loc[dt].reindex(universe)
             elif column in intraday_frames:
                 extra_parts[column] = intraday_frames[column].loc[dt].reindex(universe)
+            elif column in adjust_frames:
+                extra_parts[column] = adjust_frames[column].loc[dt].reindex(universe)
             elif column in finance_frames:
                 extra_parts[column] = finance_frames[column].loc[dt].reindex(universe)
             elif column in index_frames:

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-06-05",
+  "generated_at": "2026-06-11",
   "language_policy": "zh_semantic_en_identifiers_v1",
   "brains": [
     {
@@ -21,7 +21,7 @@
       "status": "attached",
       "body_root": "daily_research",
       "references_path": "daily_research/brain/references",
-      "references_count": 100,
+      "references_count": 134,
       "language_policy": "zh_semantic_en_identifiers_v1",
       "last_guard_status": "ok"
     },
@@ -54,6 +54,17 @@
       "status": "attached",
       "body_root": "traditional_quant_research",
       "references_path": "traditional_quant_research/brain/references",
+      "references_count": 4,
+      "language_policy": "zh_semantic_en_identifiers_v1",
+      "last_guard_status": "ok"
+    },
+    {
+      "brain_id": "quant_data_platform",
+      "root": "quant_data_platform/brain",
+      "manifest_path": "quant_data_platform/brain/brain_manifest.json",
+      "status": "attached",
+      "body_root": "quant_data_platform",
+      "references_path": "quant_data_platform/brain/references",
       "references_count": 0,
       "language_policy": "zh_semantic_en_identifiers_v1",
       "last_guard_status": "ok"

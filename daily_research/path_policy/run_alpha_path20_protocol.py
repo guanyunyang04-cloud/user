@@ -40,6 +40,8 @@ from daily_research.path_policy.forecast_dataset import (
     save_forecast_sequence_dataset,
 )
 from daily_research.path_policy.forecast_features import (
+    BAOSTOCK_BEST_EFFORT_PROFILE,
+    CANONICAL_SHORT_HORIZON_INTRADAY_PROFILE,
     DEFAULT_FORECAST_FEATURE_PROFILE,
     DEFAULT_FORECAST_MAX_FEATURE_COLUMNS,
     FORECAST_FEATURE_PROFILES,
@@ -139,6 +141,13 @@ V5_BASELINES = (
     *V4_BASELINES,
     "v4_gru_selected_checkpoint",
 )
+LOW_MEMORY_FULL_MEMMAP_HEAVY_PROFILES = frozenset(
+    {
+        CANONICAL_SHORT_HORIZON_INTRADAY_PROFILE,
+        BAOSTOCK_BEST_EFFORT_PROFILE,
+    }
+)
+FULL_UNIVERSE_SYMBOL_ESTIMATE = 5700
 
 NON_PATH20_FEATURE_COLUMNS = {
     "date",
@@ -221,6 +230,82 @@ def _apply_stage_defaults(args: argparse.Namespace) -> argparse.Namespace:
     if getattr(args, "rl_dropout", None) is None:
         args.rl_dropout = V5_DEFAULT_DROPOUT if args.stage == "rl-v5-dt-validation-study" else 0.0
     return args
+
+
+def _physical_memory_gb() -> float:
+    try:
+        import psutil  # type: ignore
+
+        return float(psutil.virtual_memory().total) / float(1024**3)
+    except Exception:
+        pass
+    if sys.platform.startswith("win"):
+        try:
+            import ctypes
+
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            status = MEMORYSTATUSEX()
+            status.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                return float(status.ullTotalPhys) / float(1024**3)
+        except Exception:
+            return 0.0
+    return 0.0
+
+
+def _forecast_estimated_feature_store_gb(args: argparse.Namespace) -> float:
+    train_start = int(getattr(args, "forecast_train_start_year", WALKFORWARD_TRAIN_YEARS[0]))
+    test_year = int(getattr(args, "forecast_test_year", WALKFORWARD_TEST_YEARS[0]))
+    warmup_start = train_start - 1
+    year_count = max(1, test_year - warmup_start + 1)
+    trading_day_estimate = year_count * 252
+    max_universe_size = int(getattr(args, "max_universe_size", 80))
+    universe_estimate = FULL_UNIVERSE_SYMBOL_ESTIMATE if max_universe_size == 0 else max(1, max_universe_size)
+    feature_count = max(1, int(getattr(args, "forecast_max_feature_columns", DEFAULT_FORECAST_MAX_FEATURE_COLUMNS)))
+    return float(trading_day_estimate * universe_estimate * feature_count * 4) / float(1024**3)
+
+
+def _apply_forecast_full_memmap_memory_guard(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    if args.stage not in FORECAST_MAINLINE_STAGES:
+        return
+    if str(getattr(args, "forecast_memmap_manifest", "") or "").strip():
+        return
+    if str(getattr(args, "forecast_dataset_mode", "eager")) != "memmap":
+        return
+    if int(getattr(args, "max_universe_size", 80)) != 0:
+        return
+    if bool(getattr(args, "forecast_allow_low_memory_full_build", False)):
+        return
+    profile = str(getattr(args, "forecast_feature_profile", "") or "")
+    if profile not in LOW_MEMORY_FULL_MEMMAP_HEAVY_PROFILES:
+        return
+    feature_columns = int(getattr(args, "forecast_max_feature_columns", DEFAULT_FORECAST_MAX_FEATURE_COLUMNS))
+    if feature_columns < 128:
+        return
+    required_physical_gb = float(getattr(args, "forecast_min_full_memmap_physical_gb", 32.0) or 32.0)
+    physical_gb = _physical_memory_gb()
+    if physical_gb <= 0.0 or physical_gb >= required_physical_gb:
+        return
+    estimate_gb = _forecast_estimated_feature_store_gb(args)
+    parser.error(
+        "forecast_full_memmap_memory_guard: refusing to build a full-universe heavy forecast memmap on this machine; "
+        f"physical_memory_gb={physical_gb:.1f} < required_physical_gb={required_physical_gb:.1f}; "
+        f"estimated_feature_store_gb={estimate_gb:.1f}; "
+        "use a capped --max-universe-size, reduce --forecast-max-feature-columns, reuse --forecast-memmap-manifest, "
+        "or pass --forecast-allow-low-memory-full-build only for an explicit supervised run."
+    )
 
 
 def _extend_end_date_for_labels(end_date: str, *, days: int = 60) -> str:
@@ -3467,6 +3552,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--forecast-dataset-mode", default="eager", choices=("eager", "memmap"))
     parser.add_argument("--forecast-memmap-manifest", default="", help="Reuse an existing forecast memmap dataset manifest.")
     parser.add_argument(
+        "--forecast-min-full-memmap-physical-gb",
+        type=float,
+        default=32.0,
+        help="Minimum physical RAM required before building full-universe heavy forecast memmaps.",
+    )
+    parser.add_argument(
+        "--forecast-allow-low-memory-full-build",
+        action="store_true",
+        help="Explicitly override the low-memory guard for full-universe heavy forecast memmap builds.",
+    )
+    parser.add_argument(
         "--forecast-canonical-memmap-registry",
         default=str(default_registry_path()),
         help="Registry searched before building a new forecast memmap when --forecast-dataset-mode memmap and no explicit manifest is provided.",
@@ -3637,6 +3733,7 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
         invalid = sorted(set(families) - set(FORECAST_MODEL_FAMILIES))
         if invalid:
             parser.error(f"Unsupported --forecast-model-families: {', '.join(invalid)}.")
+        _apply_forecast_full_memmap_memory_guard(parser, args)
     if int(getattr(args, "rollout_chunk_days", 20)) <= 0:
         parser.error("--rollout-chunk-days must be positive.")
     if float(getattr(args, "projection_parity_max_l1", 0.02)) < 0.0:

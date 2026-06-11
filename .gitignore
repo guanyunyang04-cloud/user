@@ -17,6 +17,18 @@ canonical_data/memmap/*
 canonical_data/tmp/*
 !canonical_data/tmp/.gitkeep
 
+quant_data_platform/data/*
+!quant_data_platform/data/.gitkeep
+!quant_data_platform/data/audits/
+quant_data_platform/data/audits/*
+!quant_data_platform/data/audits/.gitkeep
+!quant_data_platform/data/memmap/
+quant_data_platform/data/memmap/*
+!quant_data_platform/data/memmap/.gitkeep
+!quant_data_platform/data/tmp/
+quant_data_platform/data/tmp/*
+!quant_data_platform/data/tmp/.gitkeep
+
 daily_research/cache/*
 !daily_research/cache/.gitkeep
 daily_research/output/*

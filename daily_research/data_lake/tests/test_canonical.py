@@ -19,9 +19,11 @@ from daily_research.data_lake.build_canonical_policy_bundle import (
 from daily_research.data_lake.catalog import ResearchDataLake
 from daily_research.data_lake.policy_input_loader import (
     LEGACY_DEFAULT_POLICY_INPUT_LAKE_DATASET_ID,
+    _shard_symbol_overlaps,
     load_policy_inputs_from_lake,
     resolve_policy_input_dataset_id,
 )
+from daily_research.data_platform.contracts import DataDomain
 
 
 def test_canonical_manifest_round_trip(tmp_path) -> None:
@@ -46,6 +48,21 @@ def test_policy_input_default_falls_back_without_canonical_manifest(tmp_path) ->
     lake = ResearchDataLake(tmp_path / "lake")
 
     assert resolve_policy_input_dataset_id(lake, "") == LEGACY_DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
+
+
+def test_sidecar_shard_symbol_filter_uses_complete_source_member_sample() -> None:
+    row = {
+        "source_member_count": 2,
+        "source_members_sample": [
+            "复权因子(同花顺)/sh600000.csv",
+            "复权因子(同花顺)/sz000001.csv",
+        ],
+    }
+
+    assert _shard_symbol_overlaps(row, symbols=["600000.SH"])
+    assert _shard_symbol_overlaps(row, symbols=["000001.SZ"])
+    assert not _shard_symbol_overlaps(row, symbols=["000002.SZ"])
+    assert _shard_symbol_overlaps({**row, "source_member_count": 3}, symbols=["000002.SZ"])
 
 
 def test_build_lake_inventory_reports_external_zips_and_memmaps(tmp_path) -> None:
@@ -163,3 +180,87 @@ def test_build_canonical_policy_bundle_references_sharded_market_manifest(tmp_pa
     assert metadata["content_paths"]["bronze_market_shard_manifest"].endswith("shard_manifest.json")
     assert prepared.universe == ("000001.SZ", "600000.SH")
     assert float(prepared.close.loc[pd.Timestamp("2010-01-05"), "000001.SZ"]) == 10.6
+
+
+def test_policy_loader_reads_intraday_and_adjust_sidecars_without_slow_domains(tmp_path) -> None:
+    lake_root = tmp_path / "lake"
+    lake = ResearchDataLake(lake_root)
+    dates = pd.bdate_range("2024-01-02", periods=8)
+    rows = []
+    for dt in dates:
+        for symbol, base in (("000001.SZ", 10.0), ("600000.SH", 20.0), ("000300.SH", 3000.0)):
+            rows.append(
+                {
+                    "trade_date": dt.strftime("%Y-%m-%d"),
+                    "symbol": symbol,
+                    "open": base,
+                    "high": base * 1.01,
+                    "low": base * 0.99,
+                    "close": base * (1.0 + 0.001 * len(rows)),
+                    "volume": 1000.0,
+                    "amount": 10000.0,
+                }
+            )
+    market_record = lake.save_domain_dataset(
+        domain=DataDomain.MARKET_DAILY,
+        frame=pd.DataFrame(rows),
+        spec={"dataset": "data_platform_market_daily", "start_date": "2024-01-02", "end_date": "2024-01-11"},
+        source="unit",
+    )
+    intraday_record = lake.save_domain_dataset(
+        domain=DataDomain.INTRADAY_DAILY_FEATURES,
+        frame=pd.DataFrame(
+            {
+                "trade_date": [dates[1].strftime("%Y-%m-%d"), dates[1].strftime("%Y-%m-%d")],
+                "symbol": ["000001.SZ", "600000.SH"],
+                "first_5m_ret": [0.01, -0.02],
+                "last_30m_ret": [0.03, -0.01],
+                "high_time_frac": [0.25, 0.75],
+            }
+        ),
+        spec={"dataset": "data_platform_intraday_daily_features", "start_date": "2024-01-02", "end_date": "2024-01-11"},
+        source="unit",
+    )
+    adjust_record = lake.save_domain_dataset(
+        domain=DataDomain.ADJUST_FACTOR,
+        frame=pd.DataFrame(
+            {
+                "trade_date": [dates[0].strftime("%Y-%m-%d"), dates[1].strftime("%Y-%m-%d")],
+                "symbol": ["000001.SZ", "000001.SZ"],
+                "fore_adjust_factor": [1.0, 0.9],
+            }
+        ),
+        spec={"dataset": "data_platform_adjust_factor", "start_date": "2024-01-02", "end_date": "2024-01-11"},
+        source="unit",
+    )
+    result = build_canonical_policy_bundle(
+        BuildCanonicalPolicyBundleConfig(
+            lake_root=lake_root,
+            market_daily_dataset_id=market_record.dataset_id,
+            sidecar_dataset_ids={
+                DataDomain.INTRADAY_DAILY_FEATURES: intraday_record.dataset_id,
+                DataDomain.ADJUST_FACTOR: adjust_record.dataset_id,
+            },
+            start_date="2024-01-02",
+            end_date="2024-01-11",
+        )
+    )
+
+    prepared = load_policy_inputs_from_lake(
+        lake=lake,
+        dataset_id=result.dataset_id,
+        start_date="2024-01-02",
+        end_date="2024-01-11",
+        universe=["000001.SZ", "600000.SH"],
+        min_trading_days=2,
+    )
+
+    assert prepared.metadata_summary["intraday_daily_features_sidecar"]["available"] is True
+    assert prepared.metadata_summary["adjust_factor_sidecar"]["available"] is True
+    assert prepared.metadata_summary["valuation_sidecar"]["available"] is False
+    assert prepared.metadata_summary["industry_sidecar"]["available"] is False
+    assert abs(float(prepared.derived_frames["intraday_daily_features_first_5m_ret"].loc[dates[1], "000001.SZ"]) - 0.01) < 1.0e-6
+    assert abs(float(prepared.derived_frames["intraday_daily_features_high_time_frac"].loc[dates[1], "600000.SH"]) - 0.75) < 1.0e-6
+    assert str(prepared.derived_frames["intraday_daily_features_high_time_frac"].dtypes["000001.SZ"]) == "float32"
+    assert abs(float(prepared.derived_frames["adjust_factor_fore_adjust_factor"].loc[dates[1], "000001.SZ"]) - 0.9) < 1.0e-6
+    assert str(prepared.derived_frames["adjust_factor_fore_adjust_factor"].dtypes["000001.SZ"]) == "float32"

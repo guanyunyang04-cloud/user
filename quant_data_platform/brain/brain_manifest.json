@@ -1,0 +1,192 @@
+{
+  "brain_type": "sub_brain",
+  "brain_id": "quant_data_platform",
+  "attach_status": "attached_to_main_brain",
+  "entrypoint": "quant_data_platform/brain/identity_layer.md",
+  "body_root": "quant_data_platform",
+  "regional_specialization": {
+    "role": "canonical_quant_data_platform_cortex",
+    "priority_regions": [
+      "orientation_system",
+      "long_term_memory",
+      "executive_control",
+      "sensorimotor_loop"
+    ],
+    "focus_modules": [
+      "state_center",
+      "knowledge_center",
+      "operations_center"
+    ],
+    "body_entry_priority": [
+      "quant_data_platform/src",
+      "quant_data_platform/configs",
+      "quant_data_platform/registry",
+      "quant_data_platform/data",
+      "quant_data_platform/docs",
+      "quant_data_platform/tests"
+    ]
+  },
+  "identity_path": "quant_data_platform/brain/identity_layer.md",
+  "state_path": "quant_data_platform/brain/state_center.md",
+  "knowledge_path": "quant_data_platform/brain/knowledge_center.md",
+  "operations_path": "quant_data_platform/brain/operations_center.md",
+  "governance_path": "quant_data_platform/brain/governance_layer.md",
+  "write_routes": {
+    "identity": "quant_data_platform/brain/identity_layer.md",
+    "state": "quant_data_platform/brain/state_center.md",
+    "knowledge": "quant_data_platform/brain/knowledge_center.md",
+    "operations": "quant_data_platform/brain/operations_center.md",
+    "governance": "quant_data_platform/brain/governance_layer.md",
+    "episodic": "quant_data_platform/brain/episodic_memory.md",
+    "brain_structure": "quant_data_platform/brain/brain_architecture.md",
+    "references": "quant_data_platform/brain/references/"
+  },
+  "body_map": {
+    "core": [
+      "quant_data_platform/src"
+    ],
+    "configs": [
+      "quant_data_platform/configs"
+    ],
+    "registry": [
+      "quant_data_platform/registry"
+    ],
+    "data_assets": [
+      "quant_data_platform/data"
+    ],
+    "docs": [
+      "quant_data_platform/docs"
+    ],
+    "tests": [
+      "quant_data_platform/tests"
+    ]
+  },
+  "modules": [
+    {
+      "id": "identity_layer",
+      "paths": [
+        "quant_data_platform/brain/identity_layer.md"
+      ]
+    },
+    {
+      "id": "state_center",
+      "paths": [
+        "quant_data_platform/brain/state_center.md"
+      ]
+    },
+    {
+      "id": "knowledge_center",
+      "paths": [
+        "quant_data_platform/brain/knowledge_center.md"
+      ]
+    },
+    {
+      "id": "brain_architecture",
+      "paths": [
+        "quant_data_platform/brain/brain_architecture.md"
+      ]
+    },
+    {
+      "id": "operations_center",
+      "paths": [
+        "quant_data_platform/brain/operations_center.md"
+      ]
+    },
+    {
+      "id": "governance_layer",
+      "paths": [
+        "quant_data_platform/brain/governance_layer.md"
+      ]
+    },
+    {
+      "id": "episodic_memory",
+      "paths": [
+        "quant_data_platform/brain/episodic_memory.md"
+      ]
+    }
+  ],
+  "routing_hints": {
+    "aliases": [
+      "quant_data_platform",
+      "qdp",
+      "quant data platform"
+    ],
+    "terms": [
+      "canonical data",
+      "canonical_data",
+      "canonical_data_v1",
+      "数据平台",
+      "数据基底",
+      "唯一数据集",
+      "共享数据集",
+      "数据集治理",
+      "memmap registry",
+      "sharded memmap",
+      "policy bundle",
+      "复权因子",
+      "5分钟数据",
+      "intraday features"
+    ],
+    "path_prefixes": [
+      "quant_data_platform"
+    ]
+  },
+  "project_profile": {
+    "guard_profile": {
+      "active_artifact_guard": false,
+      "artifact_freshness": false,
+      "frontier_report": false,
+      "project_consistency": false,
+      "openmp_strict": false,
+      "brain_rules": true
+    },
+    "verification_profile": {
+      "always_commands": [
+        "git diff --check",
+        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed",
+        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json"
+      ],
+      "default_test_commands": [
+        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest quant_data_platform/tests -q"
+      ],
+      "big_artifact_paths": [
+        "quant_data_platform/data/**"
+      ]
+    },
+    "commit_policy": {
+      "auto_commit": true,
+      "message_prefix": "quant_data_platform",
+      "allowed_prefixes": [
+        "quant_data_platform/"
+      ],
+      "block_on_baseline_overlap": true
+    },
+    "process_namespace": {
+      "root": "quant_data_platform/data/agent_runs",
+      "run_path_template": "quant_data_platform/data/agent_runs/<run_id>",
+      "pid_registry": "quant_data_platform/data/agent_runs/<run_id>/pid.json",
+      "stdout": "quant_data_platform/data/agent_runs/<run_id>/stdout.log",
+      "stderr": "quant_data_platform/data/agent_runs/<run_id>/stderr.log",
+      "progress": "quant_data_platform/data/agent_runs/<run_id>/progress.json",
+      "summary": "quant_data_platform/data/agent_runs/<run_id>/summary.json"
+    },
+    "cross_project_policy": {
+      "allow_by_default": false,
+      "lease_root": "brain/output/resource_leases"
+    }
+  },
+  "handoff_contract": {
+    "derive_entry_sequence_from_shared_contract": true,
+    "body_entry_priority": [
+      "core",
+      "configs",
+      "registry",
+      "data_assets",
+      "docs",
+      "tests"
+    ],
+    "principle": "先接入分脑，再确认 canonical 数据契约、registry、数据资产边界和验证入口，最后进入对应 body_map。"
+  },
+  "parent_brain": "brain/brain_manifest.json",
+  "shared_contract_source": "brain/brain_manifest.json#shared_regional_brain_contract"
+}

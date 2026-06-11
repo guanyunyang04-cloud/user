@@ -77,6 +77,31 @@ def _read_domain_sidecar_frame(lake: ResearchDataLake, dataset_id: str) -> tuple
     return frame, metadata
 
 
+def _read_domain_sidecar_frame_filtered(
+    lake: ResearchDataLake,
+    dataset_id: str,
+    *,
+    start_date: str,
+    end_date: str,
+    columns: list[str] | None = None,
+    symbols: list[str] | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    if not str(dataset_id or "").strip():
+        return pd.DataFrame(), {}
+    metadata = lake.describe_dataset(str(dataset_id))
+    paths = dict(metadata.get("content_paths", {}) or {})
+    frame = _read_table_paths_filtered(
+        paths,
+        data_key="silver_domain_data",
+        manifest_keys=("shard_manifest",),
+        start_date=start_date,
+        end_date=end_date,
+        columns=columns,
+        symbols=symbols,
+    )
+    return frame, metadata
+
+
 def _read_sidecar_table_paths(paths: dict[str, Any]) -> pd.DataFrame:
     return _read_table_paths(paths, data_key="silver_domain_data", manifest_keys=("shard_manifest",))
 
@@ -110,6 +135,179 @@ def _read_table_paths(
             frames = [pd.read_parquet(path) for path in existing]
             return pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
     return pd.DataFrame()
+
+
+def _read_table_paths_filtered(
+    paths: dict[str, Any],
+    *,
+    data_key: str,
+    manifest_keys: tuple[str, ...],
+    start_date: str,
+    end_date: str,
+    columns: list[str] | None = None,
+    symbols: list[str] | None = None,
+) -> pd.DataFrame:
+    start_ts = pd.Timestamp(start_date)
+    end_ts = pd.Timestamp(end_date)
+    candidates: list[str] = []
+    for manifest_key in manifest_keys:
+        manifest_raw = str(paths.get(manifest_key, "") or "").strip()
+        if not manifest_raw:
+            continue
+        manifest_path = Path(manifest_raw)
+        if not manifest_path.exists():
+            continue
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for item in list(manifest.get("shards", []) or []):
+            row = dict(item)
+            if str(row.get("status", "") or "") not in {"stored", "skipped"}:
+                continue
+            if int(row.get("row_count", 0) or 0) <= 0:
+                continue
+            if not _shard_date_overlaps(row, start_ts=start_ts, end_ts=end_ts):
+                continue
+            if symbols and not _shard_symbol_overlaps(row, symbols=symbols):
+                continue
+            path = str(row.get("path", "") or "")
+            if path:
+                candidates.append(path)
+        if candidates:
+            break
+    raw = str(paths.get(data_key, "") or "")
+    if not candidates and raw:
+        candidates.extend(sorted(glob.glob(raw)) if "*" in raw else [raw])
+    requested_columns = list(dict.fromkeys(str(column) for column in list(columns or []) if str(column).strip()))
+    if len(candidates) > 1:
+        fast = _read_table_candidates_duckdb(
+            candidates,
+            start_date=start_ts.strftime("%Y-%m-%d"),
+            end_date=end_ts.strftime("%Y-%m-%d"),
+            columns=requested_columns,
+            symbols=symbols,
+        )
+        if fast is not None:
+            return fast
+    frames: list[pd.DataFrame] = []
+    for path in candidates:
+        parquet_path = Path(path)
+        if not parquet_path.exists():
+            continue
+        try:
+            frame = pd.read_parquet(parquet_path, columns=requested_columns or None)
+        except Exception as exc:
+            message = str(exc).lower()
+            if not requested_columns or not any(token in message for token in ("no match", "not found", "missing", "fieldref")):
+                raise
+            frame = pd.read_parquet(parquet_path)
+            if requested_columns:
+                frame = frame.reindex(columns=[column for column in requested_columns if column in frame.columns])
+        if "trade_date" in frame.columns:
+            frame["trade_date"] = pd.to_datetime(frame["trade_date"], errors="coerce")
+            frame = frame.loc[(frame["trade_date"] >= start_ts) & (frame["trade_date"] <= end_ts)].copy()
+        elif "date" in frame.columns:
+            frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+            frame = frame.loc[(frame["date"] >= start_ts) & (frame["date"] <= end_ts)].copy()
+        if not frame.empty:
+            if symbols and "symbol" in frame.columns:
+                allowed = {str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()}
+                frame = frame.loc[frame["symbol"].astype(str).str.strip().str.upper().isin(allowed)].copy()
+        if not frame.empty:
+            frames.append(frame)
+    return pd.concat(frames, ignore_index=True) if len(frames) > 1 else (frames[0] if frames else pd.DataFrame())
+
+
+def _read_table_candidates_duckdb(
+    candidates: list[str],
+    *,
+    start_date: str,
+    end_date: str,
+    columns: list[str],
+    symbols: list[str] | None,
+) -> pd.DataFrame | None:
+    try:
+        import duckdb
+    except Exception:
+        return None
+    select_expr = ", ".join(_quote_sql_identifier(column) for column in columns) if columns else "*"
+    where = ["CAST(trade_date AS DATE) >= CAST(? AS DATE)", "CAST(trade_date AS DATE) <= CAST(? AS DATE)"]
+    params: list[Any] = [candidates, start_date, end_date]
+    normalized_symbols = [str(symbol).strip().upper() for symbol in list(symbols or []) if str(symbol).strip()]
+    if normalized_symbols:
+        where.append("upper(symbol) in (select upper(x) from unnest(?) as t(x))")
+        params.append(normalized_symbols)
+    sql = f"select {select_expr} from read_parquet(?, union_by_name=true) where {' and '.join(where)}"
+    try:
+        con = duckdb.connect(":memory:")
+        return con.execute(sql, params).fetchdf()
+    except Exception as exc:
+        message = str(exc).lower()
+        if columns and any(token in message for token in ("no match", "not found", "missing", "fieldref")):
+            return None
+        raise
+
+
+def _quote_sql_identifier(value: str) -> str:
+    return '"' + str(value).replace('"', '""') + '"'
+
+
+def _shard_date_overlaps(row: dict[str, Any], *, start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> bool:
+    row_start = str(row.get("start_date", "") or row.get("date_start", "") or "").strip()
+    row_end = str(row.get("end_date", "") or row.get("date_end", "") or "").strip()
+    if not row_start and not row_end:
+        return True
+    shard_start = pd.Timestamp(row_start) if row_start else pd.Timestamp.min
+    shard_end = pd.Timestamp(row_end) if row_end else pd.Timestamp.max
+    return bool(shard_start <= end_ts and shard_end >= start_ts)
+
+
+def _shard_symbol_overlaps(row: dict[str, Any], *, symbols: list[str]) -> bool:
+    requested = {str(symbol).strip().upper() for symbol in list(symbols or []) if str(symbol).strip()}
+    if not requested:
+        return True
+    parsed: set[str] = set()
+    for key in ("symbols", "symbol_sample", "symbols_sample", "source_symbols", "source_members_sample"):
+        value = row.get(key)
+        if isinstance(value, (list, tuple, set)):
+            for item in value:
+                symbol = _symbol_from_manifest_token(item)
+                if symbol:
+                    parsed.add(symbol)
+        elif isinstance(value, str):
+            symbol = _symbol_from_manifest_token(value)
+            if symbol:
+                parsed.add(symbol)
+    if not parsed:
+        return True
+    member_count = int(row.get("source_member_count", 0) or row.get("symbol_count", 0) or 0)
+    if member_count and len(parsed) < member_count:
+        return True
+    return bool(parsed & requested)
+
+
+def _symbol_from_manifest_token(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    name = Path(text.replace("\\", "/")).name
+    stem = name.rsplit(".", 1)[0].strip().upper()
+    if not stem:
+        return ""
+    if "." in stem:
+        left, right = stem.split(".", 1)
+        if left.isdigit() and right in {"SH", "SZ", "BJ"}:
+            return f"{left.zfill(6)}.{right}"
+    lower = stem.lower()
+    if len(lower) >= 8 and lower[:2] in {"sh", "sz", "bj"} and lower[2:8].isdigit():
+        suffix = {"sh": "SH", "sz": "SZ", "bj": "BJ"}[lower[:2]]
+        return f"{lower[2:8]}.{suffix}"
+    if len(stem) == 6 and stem.isdigit():
+        if stem.startswith(("60", "68", "90")):
+            return f"{stem}.SH"
+        if stem.startswith(("00", "30", "20")):
+            return f"{stem}.SZ"
+        if stem.startswith(("43", "83", "87", "88", "92")):
+            return f"{stem}.BJ"
+    return ""
 
 
 def _sidecar_dataset_ids(metadata: dict[str, Any]) -> dict[str, str]:
@@ -213,6 +411,153 @@ def _load_industry_sidecar_metadata(
     }
     data["trade_date"] = data["trade_date"].dt.strftime("%Y-%m-%d")
     return {"industry_daily": data.reset_index(drop=True), "industry_map": latest.reset_index(drop=True)}, summary
+
+
+def _load_intraday_daily_feature_sidecar_frames(
+    *,
+    lake: ResearchDataLake,
+    metadata: dict[str, Any],
+    universe: list[str],
+    dates: pd.Index,
+    start_date: str,
+    end_date: str,
+) -> tuple[dict[str, pd.DataFrame], dict[str, Any]]:
+    sidecar_id = _sidecar_dataset_ids(metadata).get(DataDomain.INTRADAY_DAILY_FEATURES, "")
+    fields = [
+        "first_5m_ret",
+        "first_15m_ret",
+        "first_30m_ret",
+        "first_30m_amount_share",
+        "open_gap",
+        "open_gap_first_30m_follow_through",
+        "open_gap_first_30m_reversal",
+        "last_5m_ret",
+        "last_30m_ret",
+        "last_30m_amount_share",
+        "intraday_ret",
+        "intraday_vwap",
+        "close_to_vwap",
+        "intraday_range",
+        "close_position",
+        "intraday_realized_vol",
+        "intraday_price_volume_corr",
+        "bar_count",
+        "high_time_frac",
+        "low_time_frac",
+        "high_before_low",
+        "open_to_high_ret",
+        "open_to_low_ret",
+        "high_to_close_ret",
+        "low_to_close_ret",
+        "intraday_max_drawdown",
+        "intraday_max_runup",
+        "price_above_vwap_share",
+        "cum_vwap_slope",
+        "first_5m_amount_share",
+        "last_5m_amount_share",
+        "first_30m_range",
+        "last_30m_range",
+        "amount_top_bar_share",
+        "amount_concentration_hhi",
+        "lunch_gap_ret",
+        "am_ret",
+        "pm_ret",
+        "am_pm_ret_spread",
+        "am_pm_vol_spread",
+        "am_amount_share",
+        "am_pm_amount_spread",
+        "early_strength_late_weak",
+        "close_pressure_30m",
+    ]
+    frame, sidecar_metadata = _read_domain_sidecar_frame_filtered(
+        lake,
+        sidecar_id,
+        start_date=start_date,
+        end_date=end_date,
+        columns=["symbol", "trade_date", *fields],
+        symbols=universe,
+    )
+    if frame.empty:
+        return {}, {"dataset_id": str(sidecar_id), "available": False, "reason": "missing_or_empty"}
+    data = frame.copy()
+    if "trade_date" not in data.columns or "symbol" not in data.columns:
+        return {}, {"dataset_id": str(sidecar_id), "available": False, "reason": "missing_trade_date_or_symbol"}
+    data["trade_date"] = pd.to_datetime(data["trade_date"], errors="coerce")
+    data["symbol"] = data["symbol"].astype(str).str.strip().str.upper()
+    data = data.loc[data["trade_date"].notna() & data["symbol"].isin(set(universe))].copy()
+    if data.empty:
+        return {}, {"dataset_id": str(sidecar_id), "available": False, "reason": "no_overlap"}
+    frames: dict[str, pd.DataFrame] = {}
+    for column in fields:
+        if column not in data.columns:
+            continue
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+        wide = data.pivot_table(index="trade_date", columns="symbol", values=column, aggfunc="last").sort_index()
+        wide.index.name = None
+        wide.columns.name = None
+        frames[f"intraday_daily_features_{column}"] = wide.reindex(index=dates, columns=universe).astype("float32")
+    summary = {
+        "dataset_id": str(sidecar_id),
+        "available": bool(frames),
+        "dataset_kind": str(sidecar_metadata.get("dataset_kind", "")),
+        "field_count": int(len(frames)),
+        "row_count": int(len(data)),
+        "symbol_count": int(data["symbol"].nunique()),
+        "trade_date_count": int(data["trade_date"].nunique()),
+    }
+    return frames, summary
+
+
+def _load_adjust_factor_sidecar_frames(
+    *,
+    lake: ResearchDataLake,
+    metadata: dict[str, Any],
+    universe: list[str],
+    dates: pd.Index,
+    start_date: str,
+    end_date: str,
+) -> tuple[dict[str, pd.DataFrame], dict[str, Any]]:
+    sidecar_id = _sidecar_dataset_ids(metadata).get(DataDomain.ADJUST_FACTOR, "")
+    fields = ["fore_adjust_factor", "back_adjust_factor", "adjust_factor"]
+    frame, sidecar_metadata = _read_domain_sidecar_frame_filtered(
+        lake,
+        sidecar_id,
+        start_date=start_date,
+        end_date=end_date,
+        columns=["symbol", "trade_date", *fields],
+        symbols=universe,
+    )
+    if frame.empty:
+        return {}, {"dataset_id": str(sidecar_id), "available": False, "reason": "missing_or_empty"}
+    data = frame.copy()
+    if "trade_date" not in data.columns or "symbol" not in data.columns:
+        return {}, {"dataset_id": str(sidecar_id), "available": False, "reason": "missing_trade_date_or_symbol"}
+    data["trade_date"] = pd.to_datetime(data["trade_date"], errors="coerce")
+    data["symbol"] = data["symbol"].astype(str).str.strip().str.upper()
+    data = data.loc[data["trade_date"].notna() & data["symbol"].isin(set(universe))].copy()
+    if data.empty:
+        return {}, {"dataset_id": str(sidecar_id), "available": False, "reason": "no_overlap"}
+    frames: dict[str, pd.DataFrame] = {}
+    for column in fields:
+        if column not in data.columns:
+            continue
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+        wide = data.pivot_table(index="trade_date", columns="symbol", values=column, aggfunc="last").sort_index()
+        wide.index.name = None
+        wide.columns.name = None
+        frames[f"adjust_factor_{column}"] = wide.reindex(index=dates, columns=universe).ffill().astype("float32")
+    if "adjust_factor_fore_adjust_factor" in frames and "adjust_factor" not in frames:
+        frames["adjust_factor"] = frames["adjust_factor_fore_adjust_factor"]
+    summary = {
+        "dataset_id": str(sidecar_id),
+        "available": bool(frames),
+        "dataset_kind": str(sidecar_metadata.get("dataset_kind", "")),
+        "field_count": int(len(frames)),
+        "row_count": int(len(data)),
+        "symbol_count": int(data["symbol"].nunique()),
+        "trade_date_count": int(data["trade_date"].nunique()),
+    }
+    return frames, summary
 
 
 def _normalize_symbol_list(values: list[str]) -> list[str]:
@@ -374,10 +719,13 @@ def load_policy_inputs_from_lake(
     market_path = str(paths.get("bronze_market_data", "") or "")
     if not market_path:
         raise ValueError(f"lake_coverage_blocker: dataset has no bronze_market_data path: {dataset_id}")
-    market = _read_table_paths(
+    market = _read_table_paths_filtered(
         paths,
         data_key="bronze_market_data",
         manifest_keys=("bronze_market_shard_manifest", "shard_manifest"),
+        start_date=start_date,
+        end_date=end_date,
+        columns=["trade_date", "symbol", "open", "high", "low", "close", "volume", "amount"],
     )
     if market.empty:
         raise ValueError(f"lake_coverage_blocker: no readable bronze_market_data rows for lake dataset {dataset_id}")
@@ -577,6 +925,24 @@ def load_policy_inputs_from_lake(
         end_date=end_date,
     )
     derived_frames.update(valuation_frames)
+    intraday_feature_frames, intraday_sidecar_summary = _load_intraday_daily_feature_sidecar_frames(
+        lake=lake,
+        metadata=metadata,
+        universe=resolved_universe,
+        dates=close.index,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    derived_frames.update(intraday_feature_frames)
+    adjust_factor_frames, adjust_factor_sidecar_summary = _load_adjust_factor_sidecar_frames(
+        lake=lake,
+        metadata=metadata,
+        universe=resolved_universe,
+        dates=close.index,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    derived_frames.update(adjust_factor_frames)
     derived_frames.update(alpha_prior_frames)
     derived_frames["score_blend"] = score_blend
     metadata_frames: dict[str, pd.DataFrame] = {}
@@ -594,6 +960,8 @@ def load_policy_inputs_from_lake(
         "sidecar_dataset_ids": _sidecar_dataset_ids(metadata),
         "valuation_sidecar": valuation_sidecar_summary,
         "industry_sidecar": industry_sidecar_summary,
+        "intraday_daily_features_sidecar": intraday_sidecar_summary,
+        "adjust_factor_sidecar": adjust_factor_sidecar_summary,
     }
     sector_meta_for_cache: dict[str, Any] = {}
     if sector_board_view is not None:

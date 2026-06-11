@@ -39,6 +39,7 @@
 - 再改 `brain/brain_manifest.json`。
 - 再改目标分脑 manifest、workflow registry 与区域特化。
 - 最后改具体中枢正文、skill 入口和守卫。
+- 新增根目录正式项目时，用 `brain_runtime.py init/register` 创建并注册分脑；除非明确要拆出外部仓库，否则不在子目录初始化独立 `.git`。
 
 ## 5. 守卫入口
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed`；裸 `doc_guard check` 只作为全量收尾/维护守卫。
@@ -95,5 +96,6 @@
 ## 8. 工作区迁移纪律
 - 当前唯一工作区根：`H:\quant_project`。
 - `H:\new_tdx64\PYPlugins\user` 只属于通达信插件用户目录，不再保存本项目代码、brain、output、cache 或 archive。
+- 根目录身份当前分为：主脑基础设施（`brain/`、`tools/`、`docs/`）、已注册分脑项目、过渡资产（`canonical_data/`）和缓存依赖（如 `node_modules/`、`.pytest_cache/`）。
 - 历史 reference 中的旧路径保留为历史事实；新命令、新文档、新产物路径必须使用 `H:\quant_project`。
 - 若需要从旧备份恢复冷数据，先复制到 `H:\quant_project`，校验后再删除旧备份；不得把旧备份目录当成当前项目根。

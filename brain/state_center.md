@@ -6,7 +6,7 @@
 - 当前工作区根目录固定为 `H:\quant_project`。
 - 旧通达信插件目录 `H:\new_tdx64\PYPlugins\user` 不再承载本项目；它应保持为空或只保留通达信原生用户插件文件。
 - 工作区正式生产研究与执行主线仍是 `daily_research`。
-- 已接入主脑的一级分脑固定为：`daily_research`、`t0_project`、`daily_stock_analysis-main`、`traditional_quant_research`。
+- 已接入主脑的一级分脑固定为：`daily_research`、`quant_data_platform`、`t0_project`、`daily_stock_analysis-main`、`traditional_quant_research`。
 - 默认接管顺序为：主脑 `identity -> state -> knowledge -> topology -> operations -> governance`，再进入目标分脑。
 - 主脑只维护跨项目边界、共享规则和路由；项目事实、实验指标、命令细节写入对应分脑。
 
@@ -17,6 +17,7 @@
 
 ## 当前分脑状态
 - `daily_research`：生产研究与执行主线；active 真源为 `daily_research/output/active_execution_strategy.json`；项目事实、rXX 证据、Path20 历史线 / multi_horizon_utility 当前主线 / continuous_policy / deep_alpha 当前结论以 `daily_research/brain/` 为准，主脑不展开 trial 指标、长 tag 或局部命令。
+- `quant_data_platform`：共享量化数据平台与 canonical 数据基底分脑；负责 registry、coverage audit、policy bundle、memmap 治理和跨项目可复用数据契约。
 - `t0_project`：盘中实验与 RL 原型分脑；不得替代 `daily_research` 正式执行默认。
 - `daily_stock_analysis-main`：独立产品分脑；不改写 `daily_research` active artifact 或 promotion gate。
 - `traditional_quant_research`：传统量化方法研究分脑；项目事实、研究记录、实验证据与局部命令以 `traditional_quant_research/brain/` 和对应项目产物为准。
@@ -26,6 +27,7 @@
 - 维护主脑作为共享脑核，不让主脑重新长成分脑实验日志。
 - 分脑入口必须精炼；长过程、长命令和历史证据进入 `episodic_memory.md` 或 `brain/references/`。
 - 当前所有 `daily_research` 任务必须显式使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`。
+- 根目录项目身份以主脑 manifest 为准：已注册分脑是项目；`brain/`、`tools/`、`docs/` 是主脑基础设施；`canonical_data/` 是过渡数据资产入口；`a_stock_daily_selection/` 当前是待整理旧目录。
 - 后续 agent 不得从 `H:\new_tdx64\PYPlugins\user` 接管本项目；旧路径只可能出现在历史 reference 或回滚说明中。
 - 所有任务默认先绑定项目任务命名空间：普通读写、短脚本、诊断、测试、临时产物、提交和进程管理都只属于当前 `project_profile` 允许范围；其它项目 dirty paths、输出和进程是外部并行工作，可摘要报告但不下钻、不复用、不写成本任务证据，除非用户明确扩展范围或声明 lease。
 - 任何需要轮询、等待外部状态或跨多轮观察的任务默认绑定 `project_profile` / task namespace，并使用可观察 handle（PID / job id / run id、日志、progress、artifact、端口 / API status 等）解释进展；轮询间隔由 agent 根据任务信号自适应调整，不把固定 sleep、固定窗口或历史固定模板当作通用规则。

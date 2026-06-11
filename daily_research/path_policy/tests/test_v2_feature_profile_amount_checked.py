@@ -8,6 +8,7 @@ import pytest
 
 from daily_research.path_policy.forecast_features import (
     BAOSTOCK_BEST_EFFORT_PROFILE,
+    CANONICAL_SHORT_HORIZON_INTRADAY_PROFILE,
     FORECAST_FEATURE_PROFILES,
     _cap_feature_columns,
     audit_forecast_feature_profile,
@@ -386,3 +387,49 @@ def test_baostock_best_effort_profile_adds_intraday_finance_and_index_context() 
     assert panels[date].loc["AAA", "finance_financial_quarterly_roe_avg_lag1"] == pytest.approx(0.12)
     assert panels[date].loc["AAA", "index_000300_sh_member_lag1"] == pytest.approx(1.0)
     assert not any(column.startswith("alpha_prior_") for column in feature_columns)
+
+
+def test_canonical_short_horizon_profile_keeps_intraday_and_adjust_without_slow_domains() -> None:
+    prepared = make_prepared_policy_inputs(days=80, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2024-01-02")
+    dates = prepared.close.index
+    columns = list(prepared.close.columns)
+    intraday = pd.DataFrame(
+        np.tile(np.linspace(0.01, -0.02, len(columns)), (len(dates), 1)),
+        index=dates,
+        columns=columns,
+    )
+    factor = pd.DataFrame(1.0, index=dates, columns=columns)
+    factor.loc[dates[20]:, "AAA"] = 0.9
+    finance = pd.DataFrame(np.nan, index=dates, columns=columns)
+    finance.loc[dates[20], :] = [0.12, 0.10, 0.08, 0.06]
+    derived = dict(prepared.derived_frames)
+    derived["intraday_daily_features_first_5m_ret"] = intraday
+    derived["intraday_daily_features_last_30m_ret"] = intraday * -1.0
+    derived["intraday_daily_features_high_time_frac"] = intraday.abs()
+    derived["adjust_factor_fore_adjust_factor"] = factor
+    derived["financial_quarterly_roe_avg"] = finance
+    derived["performance_forecast_profit_change_max"] = finance * 100.0
+    derived["index_constituents_000300_sh_member"] = finance.fillna(1.0)
+    prepared = replace(prepared, derived_frames=derived)
+    date = pd.Timestamp(dates[21]).normalize()
+
+    panels, feature_columns, manifest = build_forecast_feature_panels(
+        prepared,
+        [date],
+        feature_profile=CANONICAL_SHORT_HORIZON_INTRADAY_PROFILE,
+        max_feature_columns=768,
+    )
+
+    assert CANONICAL_SHORT_HORIZON_INTRADAY_PROFILE in FORECAST_FEATURE_PROFILES
+    assert manifest["intraday_context_feature_count"] > 0
+    assert manifest["adjust_context_feature_count"] > 0
+    assert manifest["finance_context_feature_count"] == 0
+    assert manifest["valuation_context_feature_count"] == 0
+    assert manifest["sector_context_feature_count"] == 0
+    assert manifest["sector_relative_context_feature_count"] == 0
+    assert manifest["index_context_feature_count"] == 0
+    assert "intraday_first_5m_ret" in feature_columns
+    assert "intraday_high_time_frac" in feature_columns
+    assert "adjust_adj_close_ret_1d" in feature_columns
+    assert not any(column.startswith(("finance_", "valuation_", "industry_", "index_")) for column in feature_columns)
+    assert panels[date].loc["AAA", "intraday_first_5m_ret"] == pytest.approx(float(intraday.loc[date, "AAA"]))

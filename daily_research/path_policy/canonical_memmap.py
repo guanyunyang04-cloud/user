@@ -10,8 +10,8 @@ from daily_research.path_policy.forecast_dataset import normalize_static_context
 
 
 CANONICAL_MEMMAP_REGISTRY_SCHEMA_VERSION = 1
-DEFAULT_CANONICAL_MEMMAP_ALIAS = "canonical_memmap_v1"
-DEFAULT_CANONICAL_MEMMAP_REGISTRY = Path("daily_research/output/path_policy/canonical_memmaps/registry.json")
+DEFAULT_CANONICAL_MEMMAP_ALIAS = "canonical_data_v1"
+DEFAULT_CANONICAL_MEMMAP_REGISTRY = Path("canonical_data/registry/memmap_registry.json")
 
 
 def default_registry_path() -> Path:
@@ -21,10 +21,13 @@ def default_registry_path() -> Path:
 def manifest_signature(manifest: Mapping[str, Any]) -> dict[str, Any]:
     role_years = dict(manifest.get("role_years", {}) or {})
     static_schema = dict(manifest.get("static_context_schema", {}) or {})
+    stock_values = [str(item).strip().upper() for item in list(manifest.get("stock_values", []) or []) if str(item).strip()]
     return {
         "source_market_dataset_id": str(manifest.get("source_market_dataset_id", "") or ""),
         "source_pool_view_id": str(manifest.get("source_pool_view_id", "") or ""),
         "source_sector_board_view_id": str(manifest.get("source_sector_board_view_id", "") or ""),
+        "universe_size": int(len(stock_values) or (list(manifest.get("feature_store_shape", []) or [0, 0])[1] if len(list(manifest.get("feature_store_shape", []) or [])) > 1 else 0)),
+        "stock_universe_hash": _sequence_hash(stock_values),
         "lookback_days": int(manifest.get("lookback_days", 0) or 0),
         "horizon": int(manifest.get("horizon", manifest.get("forecast_horizon", 0)) or 0),
         "cumulative_horizons": [int(item) for item in list(manifest.get("cumulative_horizons", []) or [])],
@@ -63,6 +66,7 @@ def request_signature(
     raw_cache_meta = dict(getattr(prepared, "raw_cache_meta", {}) or {}) if prepared is not None else {}
     pool_view = dict(raw_cache_meta.get("pool_view", {}) or {})
     sector_board = dict(raw_cache_meta.get("sector_board_view", {}) or {})
+    stock_values = [str(item).strip().upper() for item in list(getattr(prepared, "universe", ()) or ()) if str(item).strip()]
     source_market_dataset_id = str(
         pool_view.get("source_market_dataset_id", "")
         or raw_cache_meta.get("dataset_id", "")
@@ -73,6 +77,8 @@ def request_signature(
         "source_market_dataset_id": source_market_dataset_id,
         "source_pool_view_id": str(pool_view.get("dataset_id", "") or ""),
         "source_sector_board_view_id": str(sector_board.get("dataset_id", "") or ""),
+        "universe_size": int(len(stock_values)),
+        "stock_universe_hash": _sequence_hash(stock_values),
         "lookback_days": int(getattr(args, "forecast_lookback_days", 0) or 0),
         "horizon": int(horizon),
         "cumulative_horizons": [int(item) for item in list(cumulative_horizons or [])],
@@ -100,6 +106,11 @@ def signature_hash(signature: Mapping[str, Any]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
 
 
+def _sequence_hash(values: list[str] | tuple[str, ...]) -> str:
+    payload = json.dumps([str(item) for item in values], ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
+
+
 def register_memmap_manifest(
     manifest_path: str | Path,
     *,
@@ -117,12 +128,14 @@ def register_memmap_manifest(
     registry = _read_registry(registry_path)
     signature = manifest_signature(manifest)
     sig_hash = signature_hash(signature)
+    scope = _manifest_scope(manifest)
     entry = {
         "alias": str(alias or DEFAULT_CANONICAL_MEMMAP_ALIAS),
         "signature_hash": sig_hash,
         "signature": signature,
         "manifest_json": str(path.resolve()),
         "status": str(manifest.get("status", "") or ""),
+        "scope": scope,
         "sample_count": int(manifest.get("sample_count", 0) or 0),
         "feature_store_shape": list(manifest.get("feature_store_shape", []) or []),
         "source_market_dataset_id": str(manifest.get("source_market_dataset_id", "") or ""),
@@ -139,10 +152,37 @@ def register_memmap_manifest(
     entries.append(entry)
     registry["entries"] = sorted(entries, key=lambda item: (str(item.get("alias", "")), str(item.get("signature_hash", ""))))
     registry["schema_version"] = CANONICAL_MEMMAP_REGISTRY_SCHEMA_VERSION
+    registry["alias"] = str(registry.get("alias", "") or alias or DEFAULT_CANONICAL_MEMMAP_ALIAS)
+    registry["status"] = "ready"
+    registry["feature_store"] = str(manifest.get("feature_store_path", "") or "")
+    registry["label_store"] = str(path.resolve().parent)
+    registry["active_manifest_json"] = str(path.resolve())
+    registry["sample_index_policy"] = str(
+        registry.get("sample_index_policy", "") or "experiments_build_lightweight_indices_only"
+    )
+    registry.setdefault("replaces_old_forecast_dat_after_validation", [])
+    registry["active_signature_hash"] = sig_hash
+    registry["active_scope"] = scope
+    registry["active_sample_count"] = int(manifest.get("sample_count", 0) or 0)
+    registry["active_feature_store_shape"] = list(manifest.get("feature_store_shape", []) or [])
+    registry["active_source_market_dataset_id"] = str(manifest.get("source_market_dataset_id", "") or "")
+    registry["active_feature_profile"] = str(manifest.get("feature_profile", "") or "")
+    registry["active_role_years"] = dict(manifest.get("role_years", {}) or {})
     registry["updated_at"] = _utc_now()
     out = Path(registry_path) if registry_path else default_registry_path()
     _write_json(out, registry)
     return out
+
+
+def _manifest_scope(manifest: Mapping[str, Any]) -> str:
+    signature = manifest_signature(manifest)
+    if int(signature.get("max_samples_per_role", 0) or 0) > 0:
+        return "capped_validation"
+    if int(signature.get("max_samples_per_date_per_role", 0) or 0) > 0:
+        return "capped_validation"
+    if int(signature.get("universe_size", 0) or 0) and int(signature.get("universe_size", 0) or 0) < 5000:
+        return "capped_universe"
+    return "full_canonical_candidate"
 
 
 def resolve_registered_memmap_manifest(

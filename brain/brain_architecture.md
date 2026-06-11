@@ -21,6 +21,7 @@
 - 子脑维护本项目状态、知识、入口、证据和区域特化。
 - 共享结构只在主脑写一次；项目事实只在对应子脑写一次。
 - `daily_research/brain/brain_operating_protocol.md` 是可选补充协议，不属于核心模块。
+- 根目录一级文件夹必须有明确身份：已注册分脑项目、主脑基础设施、共享工具、工作区文档、过渡资产或缓存依赖。
 
 ## 4. 扩展原则
 - 新项目先生成 7 模块 skeleton，再通过 runtime `register` 写入主脑 child list 和 catalog。

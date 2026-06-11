@@ -28,8 +28,18 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap
 
 - `brain/`：工作区主脑，管理接管顺序、任务路由、分支纪律、全局规则和禁区。
 - `daily_research/brain/`：正式生产研究与执行主线的项目事实层。
+- `quant_data_platform/brain/`：共享量化数据平台、canonical 数据基底、registry 与 memmap 治理。
 - `t0_project/brain/`：盘中实验与 RL 原型事实层。
 - `daily_stock_analysis-main/brain/`：独立产品项目事实层。
+- `traditional_quant_research/brain/`：传统量化方法研究事实层。
+
+## 根目录身份
+
+- 分脑项目：`daily_research/`、`quant_data_platform/`、`t0_project/`、`daily_stock_analysis-main/`、`traditional_quant_research/`。
+- 主脑基础设施：`brain/`、`tools/`、`docs/`。
+- 过渡资产：`canonical_data/`，后续由 `quant_data_platform` 接管 registry 与 memmap 治理。
+- 待整理旧目录：`a_stock_daily_selection/`。
+- 缓存/依赖：`.pytest_cache/`、`.playwright-cli/`、`node_modules/`。
 
 如果 README、AGENTS、CLAUDE、SKILL 与主脑冲突，以主脑 capsule 和 `brain/` 当前文档为准。
 

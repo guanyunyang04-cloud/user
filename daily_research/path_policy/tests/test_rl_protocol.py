@@ -368,6 +368,67 @@ def test_protocol_rejects_full_universe_forecast_eager_dataset_mode() -> None:
         _validate_protocol_args(parser, args)
 
 
+def test_protocol_rejects_full_universe_heavy_memmap_on_low_memory(monkeypatch) -> None:
+    import daily_research.path_policy.run_alpha_path20_protocol as protocol
+
+    monkeypatch.setattr(protocol, "_physical_memory_gb", lambda: 16.0)
+    parser = protocol.build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-dataset",
+            "--tag",
+            "unit_forecast_full_heavy_low_memory",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-dataset-mode",
+            "memmap",
+            "--forecast-feature-profile",
+            "raw_kline_context_v2_short_horizon_intraday_v1",
+            "--forecast-max-feature-columns",
+            "256",
+            "--max-universe-size",
+            "0",
+        ]
+    )
+
+    with pytest.raises(SystemExit):
+        protocol._validate_protocol_args(parser, args)
+
+
+def test_protocol_low_memory_full_universe_heavy_memmap_requires_explicit_override(monkeypatch) -> None:
+    import daily_research.path_policy.run_alpha_path20_protocol as protocol
+
+    monkeypatch.setattr(protocol, "_physical_memory_gb", lambda: 16.0)
+    parser = protocol.build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-dataset",
+            "--tag",
+            "unit_forecast_full_heavy_override",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-dataset-mode",
+            "memmap",
+            "--forecast-feature-profile",
+            "raw_kline_context_v2_short_horizon_intraday_v1",
+            "--forecast-max-feature-columns",
+            "256",
+            "--max-universe-size",
+            "0",
+            "--forecast-allow-low-memory-full-build",
+        ]
+    )
+
+    protocol._validate_protocol_args(parser, args)
+    assert args.forecast_allow_low_memory_full_build is True
+
+
 def test_protocol_accepts_existing_forecast_memmap_manifest_path() -> None:
     parser = build_arg_parser()
     args = parser.parse_args(
