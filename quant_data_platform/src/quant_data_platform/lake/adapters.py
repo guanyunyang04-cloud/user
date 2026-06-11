@@ -221,10 +221,19 @@ def audit_inventory(paths: QdpPaths | None = None, *, write: bool = True) -> dic
 
 
 def cleanup_dry_run(paths: QdpPaths | None = None) -> dict[str, Any]:
-    inventory = audit_inventory(paths, write=True)
+    resolved = paths or qdp_paths()
+    inventory = audit_inventory(resolved, write=True)
+    root_manifest = load_root_manifest(resolved)
+    sharded_status = dict(root_manifest.get("canonical_sharded_memmap_status", {}) or {})
+    cleanup_allowed = (
+        str(sharded_status.get("status", "") or "") == "sharded_full_ready"
+        and str(sharded_status.get("latest_scope", "") or "") == "full_canonical_candidate"
+    )
     return {
         "status": "dry_run",
         "destructive_actions_performed": False,
+        "cleanup_allowed_after_validation": cleanup_allowed,
+        "cleanup_blockers": [] if cleanup_allowed else ["full_canonical_sharded_memmap_not_validated"],
         "cleanup_dry_run": dict(inventory.get("cleanup_dry_run", {}) or {}),
         "report_path": str(inventory.get("report_path", "") or ""),
     }

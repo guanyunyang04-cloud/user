@@ -5,8 +5,10 @@ from typing import Any
 
 from daily_research.path_policy.validate_forecast_memmap import validate_forecast_memmap_manifest
 
+from quant_data_platform.core.json_io import read_json
 from quant_data_platform.core.registry import load_memmap_registry, load_root_manifest
 from quant_data_platform.core.paths import QdpPaths, qdp_paths
+from quant_data_platform.memmap.sharded import validate_sharded_memmap_manifest
 
 
 def validate_active_memmap(
@@ -19,9 +21,17 @@ def validate_active_memmap(
     resolved = paths or qdp_paths()
     registry = load_memmap_registry(resolved)
     root_manifest = load_root_manifest(resolved)
-    manifest_path = Path(str(manifest or registry.get("active_manifest_json", "") or ""))
-    if not str(manifest_path):
+    raw_manifest = str(manifest or registry.get("active_manifest_json", "") or "").strip()
+    if not raw_manifest:
         return {"status": "blocked", "blockers": ["missing_active_memmap_manifest"]}
+    manifest_path = Path(raw_manifest)
+    payload = read_json(manifest_path)
+    if str(payload.get("artifact_type", "")) == "qdp_sharded_memmap":
+        report = validate_sharded_memmap_manifest(manifest_path)
+        expected = str(root_manifest.get("canonical_dataset_id", "") or "")
+        if expected and str(report.get("canonical_dataset_id", "") or "") != expected:
+            report = {**report, "status": "blocked", "blockers": sorted(set(list(report.get("blockers", []) or []) + ["source_market_dataset_mismatch"]))}
+        return report
     return validate_forecast_memmap_manifest(
         manifest=manifest_path,
         expect_source_market_dataset_id=str(root_manifest.get("canonical_dataset_id", "") or ""),

@@ -83,6 +83,8 @@ def registry_status(paths: QdpPaths | None = None) -> dict[str, Any]:
     resolved = paths or qdp_paths()
     root_manifest = load_root_manifest(resolved)
     memmap_registry = load_memmap_registry(resolved)
+    sharded_registry = read_json(resolved.registry_dir / "sharded_memmap_registry.json")
+    sharded_status = dict(root_manifest.get("canonical_sharded_memmap_status", {}) or {})
     canonical_dataset_id = str(root_manifest.get("canonical_dataset_id", "") or "")
     active_memmap_source = str(memmap_registry.get("active_source_market_dataset_id", "") or "")
     active_memmap_matches = bool(canonical_dataset_id and active_memmap_source and canonical_dataset_id == active_memmap_source)
@@ -106,4 +108,11 @@ def registry_status(paths: QdpPaths | None = None) -> dict[str, Any]:
         "active_feature_profile": str(memmap_registry.get("active_feature_profile", "") or ""),
         "active_scope": str(memmap_registry.get("active_scope", "") or ""),
         "active_sample_count": int(memmap_registry.get("active_sample_count", 0) or 0),
+        "sharded_memmap_registry_json": str((resolved.registry_dir / "sharded_memmap_registry.json").as_posix()),
+        "sharded_memmap_registry_exists": bool((resolved.registry_dir / "sharded_memmap_registry.json").exists()),
+        "latest_sharded_manifest": str(sharded_registry.get("latest_manifest_json", "") or sharded_status.get("latest_manifest_json", "") or ""),
+        "latest_sharded_scope": str(sharded_registry.get("latest_scope", "") or sharded_status.get("latest_scope", "") or ""),
+        "latest_sharded_status": str(sharded_status.get("status", "") or sharded_registry.get("status", "") or ""),
+        "latest_sharded_stored_shard_count": int(sharded_status.get("latest_stored_shard_count", 0) or 0),
+        "latest_sharded_planned_shard_count": int(sharded_status.get("latest_planned_shard_count", 0) or 0),
     }

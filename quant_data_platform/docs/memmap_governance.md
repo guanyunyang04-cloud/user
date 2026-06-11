@@ -6,6 +6,17 @@ Experiments should first try the canonical registry before building a new foreca
 
 The old capped validation memmap remains useful as a smoke-test artifact, but after the canonical bundle changes it is stale for default reuse until a new memmap is built from the current bundle.
 
-Full all-A feature storage must be sharded rather than a single huge `date x symbol x feature` file. The intended layout is yearly or year-symbol-block feature shards, separate label shards, and lightweight sample indices for experiments.
+Full all-A feature storage must be sharded rather than a single huge `date x symbol x feature` file. The implemented layout is yearly plus symbol-block feature shards, separate label shards, and lightweight sample indices for experiments.
+
+Use `qdp build-sharded-memmap` to build shards. Useful controls:
+
+- `--start-year` / `--end-year`
+- `--symbol-block-size`
+- `--max-universe-size`
+- `--max-shards`
+- `--lookback-days`
+- `--max-feature-columns`
+
+`--dry-run` writes a plan only. Without `--dry-run`, the command writes shard manifests, feature stores, label stores, sample indices, a top-level sharded manifest, and `registry/sharded_memmap_registry.json`.
 
 Cleanup stays dry-run only until the replacement bundle, registry, and memmap validation all pass.

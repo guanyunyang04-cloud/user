@@ -17,3 +17,4 @@
 - 单进程全 A 巨大 memmap 在低内存机器上不稳，默认走分片 feature/label store。
 - 旧 bundle、旧 parquet、旧 `.dat` 清理必须先有 dry-run、替代指针和随机一致性验证。
 - canonical bundle ID 改变后，已有 memmap 即使文件完整也不能默认复用；必须比较 source bundle/signature，旧 memmap 只能作为历史验证样本。
+- sharded memmap 的基本单位是 `year + symbol block`；每个 shard 独立保存 feature store、label store、sample index 和 manifest，顶层 registry 只汇总并验证 schema 一致性。

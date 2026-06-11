@@ -9,7 +9,7 @@ from quant_data_platform.core.json_io import json_safe
 from quant_data_platform.core.paths import qdp_paths
 from quant_data_platform.core.registry import migrate_legacy_registry, registry_status
 from quant_data_platform.lake.adapters import audit_inventory, build_bundle, bundle_summary_dict, cleanup_dry_run
-from quant_data_platform.memmap.sharded import write_sharded_memmap_plan
+from quant_data_platform.memmap.sharded import ShardedMemmapConfig, build_sharded_memmap, write_sharded_memmap_plan
 from quant_data_platform.memmap.validation import validate_active_memmap
 
 
@@ -50,9 +50,21 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--min-train-rows", type=int, default=0)
     validate.add_argument("--json", action="store_true")
 
-    sharded = sub.add_parser("build-sharded-memmap", help="Create the sharded memmap build plan scaffold.")
+    sharded = sub.add_parser("build-sharded-memmap", help="Build sharded canonical feature/label stores.")
     sharded.add_argument("--profile", default="short_horizon_core_v1")
+    sharded.add_argument("--start-year", type=int, default=0)
+    sharded.add_argument("--end-year", type=int, default=0)
+    sharded.add_argument("--symbol-block-size", type=int, default=300)
     sharded.add_argument("--max-universe-size", type=int, default=0)
+    sharded.add_argument("--max-shards", type=int, default=0)
+    sharded.add_argument("--lookback-days", type=int, default=60)
+    sharded.add_argument("--horizon", type=int, default=20)
+    sharded.add_argument("--cumulative-horizons", default="1,3,5,10,20")
+    sharded.add_argument("--execution-mode", default="next_open")
+    sharded.add_argument("--max-feature-columns", type=int, default=256)
+    sharded.add_argument("--min-lookback-valid-ratio", type=float, default=0.80)
+    sharded.add_argument("--tag", default="")
+    sharded.add_argument("--no-resume", action="store_true")
     sharded.add_argument("--dry-run", action="store_true")
     sharded.add_argument("--json", action="store_true")
 
@@ -98,12 +110,33 @@ def main(argv: list[str] | None = None) -> int:
         _print(report, as_json=bool(args.json))
         return 0 if str(report.get("status", "")) == "ok" else 1
     if args.command == "build-sharded-memmap":
-        payload = write_sharded_memmap_plan(
-            paths,
-            profile=str(args.profile or ""),
-            max_universe_size=int(args.max_universe_size),
-            write=not bool(args.dry_run),
-        )
+        if bool(args.dry_run):
+            payload = write_sharded_memmap_plan(
+                paths,
+                profile=str(args.profile or ""),
+                max_universe_size=int(args.max_universe_size),
+                write=True,
+            )
+        else:
+            payload = build_sharded_memmap(
+                paths,
+                config=ShardedMemmapConfig(
+                    profile=str(args.profile or ""),
+                    start_year=int(args.start_year),
+                    end_year=int(args.end_year),
+                    symbol_block_size=int(args.symbol_block_size),
+                    max_universe_size=int(args.max_universe_size),
+                    max_shards=int(args.max_shards),
+                    lookback_days=int(args.lookback_days),
+                    horizon=int(args.horizon),
+                    cumulative_horizons=str(args.cumulative_horizons or ""),
+                    execution_mode=str(args.execution_mode or ""),
+                    max_feature_columns=int(args.max_feature_columns),
+                    min_lookback_valid_ratio=float(args.min_lookback_valid_ratio),
+                    tag=str(args.tag or ""),
+                    resume=not bool(args.no_resume),
+                ),
+            )
         _print(payload, as_json=bool(args.json))
         return 0
     if args.command == "cleanup":

@@ -6,11 +6,11 @@
 - 默认研究窗口沿用工作区 canonical 决策：`2010-01-01` 起。
 - active canonical bundle 已更新为包含估值、行业、指数成分 sidecar 的 `canonical_data_v1`。
 - canonical 数据域原则：行情、5 分钟日级特征、复权因子、估值、行业、指数成分、交易日历、股票池和证券状态进入数据基底；财务季报、业绩预告/快报等慢披露数据暂不进入 v1 默认基底。
-- 旧 capped validation memmap 仍可做烟测，但它绑定旧 bundle；新 canonical bundle 的全量/分片 memmap 仍待构建。
+- 旧 capped validation memmap 仍可做烟测，但它绑定旧 bundle；新 canonical bundle 已有 `qdp_smoke_2022_10x1` 小型 sharded memmap 验证样本。
 
 ## 当前接管重点
-- 继续把 `build-sharded-memmap` 从 plan scaffold 推进为真实分片 feature/label store。
-- 构建当前 canonical bundle 对应的新 capped validation memmap 或 sharded memmap，替代旧 bundle memmap。
+- 继续把已验证的小型 sharded builder 扩展跑到 full canonical shard 集合。
+- full canonical sharded memmap 验证通过前，旧 `.dat` 和重复 parquet 只能 dry-run，不进入删除阶段。
 - 在验证通过后，再执行旧 parquet / 旧 `forecast_*.dat` 的清理 dry-run 审批链。
 
 ## 根目录关系
