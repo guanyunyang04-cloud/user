@@ -293,12 +293,12 @@ class ProjectCommitTest(unittest.TestCase):
             changed_paths=[
                 ".gitignore",
                 "README.md",
-                "canonical_data/README.md",
                 "node_modules/package.json",
                 "daily_research/README.md",
-                "daily_stock_analysis-main/docs/FAQ.md",
-                "quant_data_platform/docs/canonical_v1.md",
-                "traditional_quant_research/research_log/README.md",
+                "daily_stock_analysis-main/AGENTS.md",
+                "daily_stock_analysis-main/README.md",
+                "quant_data_platform/README.md",
+                "traditional_quant_research/README.md",
                 "brain/workflows/playbooks/core.json",
                 "daily_research/brain/state_center.md",
                 "traditional_quant_research/brain/knowledge_center.md",
@@ -312,12 +312,20 @@ class ProjectCommitTest(unittest.TestCase):
 
         blocked = check_commit_scope(
             project_id="workspace-brain",
-            changed_paths=["daily_research/tools/train.py"],
+            changed_paths=[
+                "daily_research/tools/train.py",
+                "daily_stock_analysis-main/docs/FAQ.md",
+                "traditional_quant_research/research_log/README.md",
+                "docs/testing_governance.md",
+            ],
             allowed_prefixes=allowed_prefixes,
             baseline_dirty_paths=[],
         )
         self.assertEqual(blocked["status"], "blocked")
         self.assertIn("daily_research/tools/train.py", blocked["blocked_paths"])
+        self.assertIn("daily_stock_analysis-main/docs/FAQ.md", blocked["blocked_paths"])
+        self.assertIn("traditional_quant_research/research_log/README.md", blocked["blocked_paths"])
+        self.assertIn("docs/testing_governance.md", blocked["blocked_paths"])
 
 
 if __name__ == "__main__":

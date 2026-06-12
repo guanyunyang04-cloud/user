@@ -10,7 +10,7 @@ After the 2026 monthly/quarterly horizon audit found March and May as the main w
 - History warm-up: `2025-01-01`.
 - Evaluation window: `2026-01-01` to `2026-06-01`.
 - Experiment output: `traditional_quant_research/output/experiments/multifactor_baseline/multifactor_baseline_20260602_130700`.
-- Auto research log: `traditional_quant_research/research_log/2026-06-02_multifactor_2026_basket_exposure_audit.md`.
+- Auto research log: `traditional_quant_research/brain/references/research_log/2026-06-02_multifactor_2026_basket_exposure_audit.md`.
 - New artifact: `basket_factor_exposure.csv`.
 
 The exposure table groups the actual horizon-aligned Top-N selected codes by exit month/quarter and compares selected-basket factor means with same-date tradeable-universe means. Because these factors are daily cross-sectional z-scores, universe means are approximately `0`; `active_exposure` is therefore the key reading.

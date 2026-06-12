@@ -32,3 +32,8 @@
 - 后续要求：
   - 修改 AI 兼容入口后必须运行 `python scripts/check_ai_assets.py`。
   - 工作区层面还必须运行 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check`，确认兼容入口没有重新漂移。
+
+## 2026-06-12 公开文档归脑区
+- 响应主脑“阅读性质资料统一进入脑区”的治理调整，外部 `docs/` 目录和策略 README 副本已删除。
+- `README.md` 改为薄入口，只指向 `daily_stock_analysis-main/brain/` 与 `brain/references/public_docs/`。
+- `AGENTS.md`、`.github/` 指令、`CLAUDE.md`、`SKILL.md` 继续作为工具固定入口；它们不承载长篇阅读文档。

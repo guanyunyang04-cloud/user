@@ -86,7 +86,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.exp
 阶段决策报告：
 
 ```text
-traditional_quant_research/research_log/2026-06-02_phase1_decision_report.md
+traditional_quant_research/brain/references/research_log/2026-06-02_phase1_decision_report.md
 ```
 
 结论：第一阶段支持进入多因子诊断与多因子打分基线，但不建议直接进入传统 ML 生产式建模。传统 ML 需要等待多因子 baseline、极端标签核查、执行约束和滚动验证协议补强后再启动。
@@ -124,7 +124,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.exp
 阶段解释报告：
 
 ```text
-traditional_quant_research/research_log/2026-06-02_phase2_multifactor_validation_interpretation.md
+traditional_quant_research/brain/references/research_log/2026-06-02_phase2_multifactor_validation_interpretation.md
 ```
 
 结论：多因子 rank baseline 已经显著强于第一阶段 `baseline_score`，可以进入 raw-return、年度稳定性、成本压力和执行约束更强的候选策略筛选基础设施阶段；但当前多因子结果仍属于 `diagnostic/backtest_only`，不能直接声明为策略候选，也不建议立即进入传统 ML 生产式建模。
@@ -134,7 +134,7 @@ traditional_quant_research/research_log/2026-06-02_phase2_multifactor_validation
 原始收益验证解释：
 
 ```text
-traditional_quant_research/research_log/2026-06-02_phase3_raw_return_validation_interpretation.md
+traditional_quant_research/brain/references/research_log/2026-06-02_phase3_raw_return_validation_interpretation.md
 ```
 
 结论：`raw` IC 和分位结果继续支持 `multifactor_low_corr_rank_score` 与 `multifactor_rolling_ic_weighted_score` 作为候选输入；但 `fwd_ret_5d` 搭配 daily Top-N 暴露了持有期/调仓频率错配风险，下一步必须实现 horizon-aligned portfolio simulator 后再评价真实策略收益。
@@ -164,7 +164,7 @@ from traditional_quant_research.horizon_backtest import horizon_aligned_top_n_ba
 当前解释报告：
 
 ```text
-traditional_quant_research/research_log/2026-06-02_horizon_aligned_multifactor_validation_interpretation.md
+traditional_quant_research/brain/references/research_log/2026-06-02_horizon_aligned_multifactor_validation_interpretation.md
 ```
 
 结论：`multifactor_rolling_ic_weighted_score` 是当前最强候选输入；`multifactor_low_corr_rank_score` 继续作为排序诊断对照。二者仍未升级为策略候选，下一步需要年度稳定性和执行约束压力测试。
@@ -172,7 +172,7 @@ traditional_quant_research/research_log/2026-06-02_horizon_aligned_multifactor_v
 年度稳定性解释：
 
 ```text
-traditional_quant_research/research_log/2026-06-02_horizon_aligned_yearly_stability_interpretation.md
+traditional_quant_research/brain/references/research_log/2026-06-02_horizon_aligned_yearly_stability_interpretation.md
 ```
 
 结论：rolling IC 在 2024/2025 强，但 2026 半年明显降温且成本后转负；年度稳定性和成本鲁棒性尚未通过，下一步应优先做换手/成本压缩、月度/季度切片和执行约束。
@@ -180,7 +180,7 @@ traditional_quant_research/research_log/2026-06-02_horizon_aligned_yearly_stabil
 buffer 换手压缩解释：
 
 ```text
-traditional_quant_research/research_log/2026-06-02_buffered_horizon_turnover_validation_interpretation.md
+traditional_quant_research/brain/references/research_log/2026-06-02_buffered_horizon_turnover_validation_interpretation.md
 ```
 
 结论：`buffer_multiplier=2.0` 能把 rolling IC weekly Top-100 的 mean turnover 从约 `1.3349` 降到约 `1.0027`，并改善 30 bps 下的净收益和 Sharpe；但 2026 半年仍未通过，下一步需要做 2026 月度/季度切片和 rolling IC 权重审计。
@@ -188,7 +188,7 @@ traditional_quant_research/research_log/2026-06-02_buffered_horizon_turnover_val
 2026 月度/季度切片与权重审计解释：
 
 ```text
-traditional_quant_research/research_log/2026-06-02_2026_period_weight_audit_interpretation.md
+traditional_quant_research/brain/references/research_log/2026-06-02_2026_period_weight_audit_interpretation.md
 ```
 
 结论：用 `2025-01-01` 暖场后，2026 rolling IC 失效主要集中在 March 和 May，且并非单纯成本问题；下一步应加入涨跌停/停牌执行约束和选中篮子暴露审计，再判断是否继续推进模型复杂度。
@@ -196,7 +196,7 @@ traditional_quant_research/research_log/2026-06-02_2026_period_weight_audit_inte
 2026 选中篮子暴露审计解释：
 
 ```text
-traditional_quant_research/research_log/2026-06-02_2026_basket_exposure_audit_interpretation.md
+traditional_quant_research/brain/references/research_log/2026-06-02_2026_basket_exposure_audit_interpretation.md
 ```
 
 结论：March/May 弱表现对应的实际入选篮子持续偏小成交额、弱动量、低波动/低振幅防御和短期反转暴露；问题更像当前传统因子族的 regime/exposure 失效，而不是单纯 rolling 权重或交易成本问题。
@@ -204,7 +204,7 @@ traditional_quant_research/research_log/2026-06-02_2026_basket_exposure_audit_in
 2026 执行约束审计解释：
 
 ```text
-traditional_quant_research/research_log/2026-06-02_2026_execution_constrained_audit_interpretation.md
+traditional_quant_research/brain/references/research_log/2026-06-02_2026_execution_constrained_audit_interpretation.md
 ```
 
 结论：约束版 weekly Top-100 对 rolling IC 和 low-corr 两个候选输入都进一步恶化；本次没有涨停买入阻塞，主要是跌停/不可卖导致延迟退出。执行约束后两个候选输入更明确不能升级为策略候选。
@@ -212,7 +212,7 @@ traditional_quant_research/research_log/2026-06-02_2026_execution_constrained_au
 2026 执行约束 buffer 网格解释：
 
 ```text
-traditional_quant_research/research_log/2026-06-02_2026_constrained_buffer_grid_interpretation.md
+traditional_quant_research/brain/references/research_log/2026-06-02_2026_constrained_buffer_grid_interpretation.md
 ```
 
 结论：buffer 能降低换手，但不能修复 constrained gross alpha。low-corr + buffer `2.0` 是本次相对最优设置，但 0 bps 与 30 bps 仍为负，不能升级为策略候选。下一步应转向暴露上限或 regime filter。
@@ -220,7 +220,7 @@ traditional_quant_research/research_log/2026-06-02_2026_constrained_buffer_grid_
 2026 暴露上限审计解释：
 
 ```text
-traditional_quant_research/research_log/2026-06-02_2026_exposure_cap_audit_interpretation.md
+traditional_quant_research/brain/references/research_log/2026-06-02_2026_exposure_cap_audit_interpretation.md
 ```
 
 结论：第一版暴露上限能压低小成交额、弱动量、低波动/低振幅极端暴露，并改善 low-corr，但仍未转正；rolling IC 在该约束下明显恶化。`multifactor_baseline_20260602_135636` 因错误删除未来价格路径而废弃，不作为证据。
@@ -388,7 +388,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.exp
 扩展样本门禁可用同一入口跑 2017-2026：
 
 ```powershell
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.low_corr_frontier_combined_constraint_audit --years 2017,2018,2019,2020,2021,2022,2023,2024,2025,2026 --final-end-date 2026-06-01 --write-research-log --research-log-path traditional_quant_research/research_log/2026-06-03_low_corr_frontier_extended_combined_constraint_audit.md
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.experiments.low_corr_frontier_combined_constraint_audit --years 2017,2018,2019,2020,2021,2022,2023,2024,2025,2026 --final-end-date 2026-06-01 --write-research-log --research-log-path traditional_quant_research/brain/references/research_log/2026-06-03_low_corr_frontier_extended_combined_constraint_audit.md
 ```
 
 扩展 run `low_corr_frontier_combined_constraint_audit_20260603_122047` 显示样本数已不再是主问题：10 bps impact 下 rolling IC / low-corr / IC-weighted 的 total periods 为 `60/64/64`，但均值年化降为 `0.096737/0.056183/0.023878`，正收益年份均为 `0.6`，最差年均为负。因此该 frontier 不能按 2024-2026 强表现升级为样本外支持。

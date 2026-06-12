@@ -15,7 +15,7 @@ This audit adds two missing diagnostics:
 - Evaluation window: `2026-01-01` to `2026-06-01`.
 - History warm-up window: loaded from `2025-01-01` so rolling IC weights have prior history before 2026.
 - Experiment output: `traditional_quant_research/output/experiments/multifactor_baseline/multifactor_baseline_20260602_125706`.
-- Auto research log: `traditional_quant_research/research_log/2026-06-02_multifactor_2026_warm_history_period_weight_audit.md`.
+- Auto research log: `traditional_quant_research/brain/references/research_log/2026-06-02_multifactor_2026_warm_history_period_weight_audit.md`.
 
 The earlier 2026-only run at `multifactor_baseline_20260602_125258` is not a reliable rolling-weight audit because it loaded only 2026 data. Its rolling fallback date rate was `0.6667`. With `--history-start-date 2025-01-01`, fallback rate dropped to `0.1888`, and 2026 months had `0.0` fallback.
 

@@ -19,7 +19,7 @@ This note records the v2.2 daily size infrastructure contract. It is a code/cont
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest traditional_quant_research/tests`
   - Result: `167 passed`.
 - `git diff --check -- traditional_quant_research`
-  - Result: no whitespace errors; one pre-existing CRLF warning remains for `traditional_quant_research/research_log/2026-06-02_low_corr_frontier_neutralization_audit.md`.
+  - Result: no whitespace errors; one pre-existing CRLF warning remains for `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_frontier_neutralization_audit.md`.
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.dataset_builder_v2 fetch-size --help`
   - Result: CLI exposes `fetch-size`, `--trade-dates`, `--include-size`, and `--size-token`.
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m traditional_quant_research.dataset_builder_v2 fetch-size --year 2026 --start-date 2026-06-01 --end-date 2026-06-01 --trade-dates 20260601 --symbols 600000.SH,000001.SZ --output-root traditional_quant_research/output/tmp_fetch_size_cli_smoke`

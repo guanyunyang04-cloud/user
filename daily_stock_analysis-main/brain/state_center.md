@@ -12,9 +12,9 @@
 - 公开 README 的稳定产品内容已收口进本分脑：
   - 产品定位、核心能力、模型/数据/通知生态写入 `knowledge_center.md`
   - 模块地图、验证入口、README 用户入口与配置域写入 `operations_center.md`
-- 公开 README 仍可作为用户指南存在，但不能覆盖 brain 的接管真源地位
+- 公开 README 只保留入口索引，不能覆盖 brain 的接管真源地位
 - AI 兼容入口已统一口径：
-  - `AGENTS.md`、`.github/copilot-instructions.md`、`.github/instructions/governance.instructions.md`、`SKILL.md`、`strategies/README.md` 必须指向 brain
+  - `AGENTS.md`、`.github/copilot-instructions.md`、`.github/instructions/governance.instructions.md`、`SKILL.md` 必须指向 brain
   - 这些文件中的稳定开发流程、验证矩阵和策略说明已摘要进入 `knowledge_center.md` / `operations_center.md`
   - 若产品兼容入口与工作区主脑冲突，先服从主脑，再同步本分脑与兼容入口
 - 2026-05-11 维护结论：
@@ -28,7 +28,7 @@
 - 维持产品分脑和执行主线分脑的边界
 - 维持本产品分脑与仓库原生 AI 兼容入口同步
 - 维持模块地图、产品入口和文档归宿一致
-- 后续 README / docs 内容变更必须同步评估是否需要写入 brain
+- 后续公开文档内容变更必须直接写入 `brain/references/public_docs/`，README 只同步入口索引
 - 桌面构建链路下轮优先在启用 Developer Mode 或等价 CI 环境中复验
 
 ## 4. 当前风险

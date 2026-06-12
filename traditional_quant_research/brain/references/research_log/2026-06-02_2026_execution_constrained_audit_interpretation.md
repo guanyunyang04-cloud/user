@@ -13,7 +13,7 @@ Does a first-pass execution constraint make the 2026 candidate-input failure bet
 - Portfolio: weekly Top-100, 5-day horizon, non-overlapping, buffer `1.0`.
 - Execution approximation: `limit_threshold=0.095`; next-session limit-up or non-tradeable entries are not filled, unfilled capital remains cash, target exits blocked by limit-down/non-tradeable status are delayed to the next sellable close.
 - Experiment output: `traditional_quant_research/output/experiments/multifactor_baseline/multifactor_baseline_20260602_133345`.
-- Auto research log: `traditional_quant_research/research_log/2026-06-02_multifactor_2026_execution_constrained_audit.md`.
+- Auto research log: `traditional_quant_research/brain/references/research_log/2026-06-02_multifactor_2026_execution_constrained_audit.md`.
 
 ## Result
 

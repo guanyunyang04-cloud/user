@@ -15,7 +15,7 @@ Can Top-N buffer reduce the execution-constrained 2026 damage enough to restore 
 - Fee grid: `0, 30` bps.
 - Execution approximation: `limit_threshold=0.095`.
 - Experiment output: `traditional_quant_research/output/experiments/multifactor_baseline/multifactor_baseline_20260602_134401`.
-- Auto research log: `traditional_quant_research/research_log/2026-06-02_multifactor_2026_constrained_buffer_grid.md`.
+- Auto research log: `traditional_quant_research/brain/references/research_log/2026-06-02_multifactor_2026_constrained_buffer_grid.md`.
 
 The experiment code now reuses fee-independent horizon trade paths, then reapplies fee rates to the same trades. This keeps results equivalent while reducing repeated constrained-path simulation.
 

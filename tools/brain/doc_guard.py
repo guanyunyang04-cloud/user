@@ -256,65 +256,35 @@ ALLOWED_EXTERNAL_DOC_PREFIXES = (
     "daily_research/output/",
     "daily_research/archive/output/",
     "daily_research/archive/manifests/",
-    "daily_stock_analysis-main/docs/",
     "daily_stock_analysis-main/.github/",
     "daily_stock_analysis-main/.claude/skills/",
-    "traditional_quant_research/experiments/",
-    "traditional_quant_research/research_log/",
 )
 
-DOCUMENT_REDIRECTS = {
-    "daily_research/archive/README.md": "daily_research/brain/references/archive_rules.md",
-    "t0_project/先进技术通达信TQ策略研发.md": "t0_project/brain/references/tdx_tq_strategy_research.md",
-    "t0_project/rl_agent/结合AI的通达信做T策略.md": "t0_project/brain/references/rl_t0_strategy_research.md",
-    "daily_stock_analysis-main/review.md": "daily_stock_analysis-main/brain/references/review_audit_20260319.md",
-}
+DOCUMENT_REDIRECTS: dict[str, str] = {}
 
 ALLOWED_EXTERNAL_DOCS = {
-    "docs/superpowers/plans/2026-05-12-continuous-policy-key-progress.md",
-    "docs/testing_governance.md",
     "README.md",
-    "a_stock_daily_selection/README.md",
-    "canonical_data/README.md",
     "daily_research/README.md",
-    "daily_research/execution/使用教程.md",
     "daily_stock_analysis-main/AGENTS.md",
     "daily_stock_analysis-main/CLAUDE.md",
     "daily_stock_analysis-main/README.md",
     "daily_stock_analysis-main/SKILL.md",
-    "daily_stock_analysis-main/strategies/README.md",
     "quant_data_platform/README.md",
     "traditional_quant_research/README.md",
-    "traditional_quant_research/data/README.md",
-    "traditional_quant_research/data/catalog.md",
-    *DOCUMENT_REDIRECTS.keys(),
 }
 
 EXTERNAL_DOCS_REQUIRING_CANONICAL_MARKER = {
-    "docs/superpowers/plans/2026-05-12-continuous-policy-key-progress.md",
-    "docs/testing_governance.md",
     "README.md",
-    "a_stock_daily_selection/README.md",
-    "canonical_data/README.md",
     "daily_research/README.md",
-    "daily_research/execution/使用教程.md",
     "daily_stock_analysis-main/AGENTS.md",
     "daily_stock_analysis-main/CLAUDE.md",
     "daily_stock_analysis-main/README.md",
     "daily_stock_analysis-main/SKILL.md",
-    "daily_stock_analysis-main/strategies/README.md",
     "quant_data_platform/README.md",
     "traditional_quant_research/README.md",
-    "traditional_quant_research/data/README.md",
-    "traditional_quant_research/data/catalog.md",
-    *DOCUMENT_REDIRECTS.keys(),
 }
 
-EXTERNAL_DOC_PREFIXES_REQUIRING_CANONICAL_MARKER = (
-    "daily_stock_analysis-main/docs/",
-    "traditional_quant_research/experiments/",
-    "traditional_quant_research/research_log/",
-)
+EXTERNAL_DOC_PREFIXES_REQUIRING_CANONICAL_MARKER: tuple[str, ...] = ()
 
 REQUIRED_DOC_SNIPPETS = {
     "README.md": (
@@ -335,10 +305,6 @@ REQUIRED_DOC_SNIPPETS = {
         "## 5. 当前事实入口",
         "daily_research/brain/state_center.md",
         "daily_research/output/active_execution_strategy.json",
-    ),
-    "daily_research/execution/使用教程.md": (
-        "权威操作真源",
-        "daily_research/brain/operations_center.md",
     ),
     "daily_research/brain/episodic_memory.md": (
         "## 当前结论",
@@ -420,10 +386,6 @@ REQUIRED_DOC_SNIPPETS = {
         "AGENTS.md",
     ),
     "daily_stock_analysis-main/SKILL.md": (
-        "AI 接管真源",
-        "daily_stock_analysis-main/brain/",
-    ),
-    "daily_stock_analysis-main/strategies/README.md": (
         "AI 接管真源",
         "daily_stock_analysis-main/brain/",
     ),

@@ -20,7 +20,7 @@ Can simple exposure caps repair the 2026 execution-constrained failure enough to
   - `neg_volatility_20d_z <= 1.0`
   - `neg_amplitude_20d_z <= 1.2`
 - Experiment output: `traditional_quant_research/output/experiments/multifactor_baseline/multifactor_baseline_20260602_140109`.
-- Auto research log: `traditional_quant_research/research_log/2026-06-02_multifactor_2026_exposure_cap_audit.md`.
+- Auto research log: `traditional_quant_research/brain/references/research_log/2026-06-02_multifactor_2026_exposure_cap_audit.md`.
 
 Implementation note: selection filters only make ineligible signal-date rows unselectable. They do not remove future price-path rows, so entry/exit simulation remains on the full tradeable panel. Earlier run `multifactor_baseline_20260602_135636` used filtered price paths and is invalid evidence.
 

@@ -27,6 +27,8 @@ class DocGuardTest(unittest.TestCase):
 
     def test_external_docs_require_canonical_marker(self) -> None:
         self.assertTrue(doc_guard._requires_canonical_marker("README.md"))
+        self.assertFalse(doc_guard._is_allowed_doc_path("daily_stock_analysis-main/docs/FAQ_EN.md"))
+        self.assertFalse(doc_guard._is_allowed_doc_path("traditional_quant_research/research_log/README.md"))
         self.assertEqual(
             doc_guard._canonical_marker_issue("README.md", "# Root\n"),
             "external_doc_missing_canonical_marker:README.md",
@@ -58,8 +60,8 @@ class DocGuardTest(unittest.TestCase):
         ):
             self.assertEqual(doc_guard._changed_guard_files(), ["brain/state_center.md"])
 
-    def test_public_docs_skip_strict_question_line_heuristic(self) -> None:
-        self.assertFalse(doc_guard._uses_strict_brain_text_heuristics("daily_stock_analysis-main/docs/FAQ_EN.md"))
+    def test_external_entry_docs_skip_strict_question_line_heuristic(self) -> None:
+        self.assertFalse(doc_guard._uses_strict_brain_text_heuristics("daily_stock_analysis-main/README.md"))
         self.assertTrue(doc_guard._uses_strict_brain_text_heuristics("brain/state_center.md"))
 
     def test_workspace_markdown_paths_uses_git_list_when_available(self) -> None:
