@@ -840,6 +840,12 @@ def load_policy_inputs_from_lake(
         symbols=requested_market_symbols or None,
     )
     if market.empty:
+        if requested_market_symbols:
+            missing_requested = _normalize_symbol_list(requested_market_symbols)[:10]
+            raise ValueError(
+                "lake_coverage_blocker: no requested symbols are available in lake market data; "
+                f"missing_requested={missing_requested}, missing_extras=[]"
+            )
         raise ValueError(f"lake_coverage_blocker: no readable bronze_market_data rows for lake dataset {dataset_id}")
     market["trade_date"] = pd.to_datetime(market["trade_date"])
     start_ts = pd.Timestamp(start_date)

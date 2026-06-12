@@ -414,6 +414,31 @@ class ResearchDataLakeTest(unittest.TestCase):
         self.assertEqual(tuple(prepared.universe), ("000002.SZ",))
         self.assertEqual(list(prepared.close.columns), ["000002.SZ"])
 
+    def test_policy_input_loader_symbol_pushdown_preserves_no_coverage_error(self) -> None:
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
+        stocks = ["000001.SZ"]
+        market_frames, membership_frame, feature_frames = _synthetic_policy_bundle_parts(dates, stocks=stocks)
+
+        with TemporaryDirectory() as temp_dir:
+            lake = ResearchDataLake(Path(temp_dir))
+            record = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic"},
+                market_frames=market_frames,
+                benchmark_close=pd.Series(4000.0, index=dates, name="000300.SH"),
+                membership_frame=membership_frame,
+                feature_frames=feature_frames,
+                source="synthetic",
+            )
+            with self.assertRaisesRegex(ValueError, "no requested symbols are available"):
+                load_policy_inputs_from_lake(
+                    lake=lake,
+                    dataset_id=record.dataset_id,
+                    start_date="2026-01-05",
+                    end_date="2026-01-07",
+                    universe=["999999.SZ"],
+                    min_trading_days=1,
+                )
+
     def test_prepare_policy_inputs_lake_uses_data_lake(self) -> None:
         dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
         stocks = ["000001.SZ", "000002.SZ", "000003.SZ"]

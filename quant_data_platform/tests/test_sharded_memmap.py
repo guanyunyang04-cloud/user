@@ -3,6 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from daily_research.baseline.advanced_ml_runtime import HistoryWindow
+from daily_research.continuous_policy.state_builder import PreparedPolicyInputs
 from quant_data_platform.cli import main as cli_main
 from quant_data_platform.core.json_io import read_json, write_json
 from quant_data_platform.core.paths import qdp_paths
@@ -11,6 +13,7 @@ from quant_data_platform.memmap.sharded import (
     ShardedMemmapConfig,
     _build_shards_parallel,
     _project_feature_store_to_schema,
+    _slice_prepared_for_symbols,
     _symbol_blocks,
     _write_sample_index,
     validate_sharded_memmap_manifest,
@@ -129,15 +132,76 @@ def test_cli_sharded_dry_run_writes_plan(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("QDP_WORKSPACE_ROOT", str(tmp_path))
     (tmp_path / "brain").mkdir(parents=True)
     (tmp_path / "brain" / "brain_manifest.json").write_text('{"brain_type": "main"}', encoding="utf-8")
-    assert cli_main(["build-sharded-memmap", "--dry-run", "--workers", "4", "--json"]) == 0
+    assert cli_main(["build-sharded-memmap", "--dry-run", "--workers", "4", "--year-input-cache", "--json"]) == 0
     plan = qdp_paths(tmp_path).memmap_dir / "sharded_memmap_plan.json"
     assert plan.exists()
     assert read_json(plan)["workers"] == 4
+    assert read_json(plan)["year_input_cache"] is True
 
 
 def test_sharded_config_normalizes_workers() -> None:
     assert ShardedMemmapConfig(workers=0).normalized().workers == 1
     assert ShardedMemmapConfig(workers=4).normalized().workers == 4
+    assert ShardedMemmapConfig(year_input_cache=True).normalized().year_input_cache is True
+
+
+def test_slice_prepared_for_symbols_filters_wide_frames_and_metadata() -> None:
+    dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+    symbols = ["AAA.SZ", "BBB.SZ", "CCC.SZ"]
+    close = pd.DataFrame(
+        [[1.0, 2.0, 3.0], [1.1, 2.1, 3.1]],
+        index=dates,
+        columns=symbols,
+    )
+    prepared = PreparedPolicyInputs(
+        universe=tuple(symbols),
+        pool_name="unit",
+        benchmark="000300.SH",
+        data_source="lake",
+        csv_folder="",
+        start_date="2024-01-02",
+        end_date="2024-01-03",
+        requested_start_date="20240102",
+        history_window=HistoryWindow(mode="train", requested_start_date="20240102", effective_start_date="20240102", end_date="20240103", required_trading_days=2),
+        raw_cache_meta={},
+        prepared_cache_meta={},
+        close=close,
+        open_=close + 0.1,
+        high=close + 0.2,
+        low=close - 0.2,
+        volume=close * 100,
+        amount=close * 1000,
+        benchmark_close=pd.Series([1.0, 1.1], index=dates),
+        benchmark_open=pd.Series([1.0, 1.1], index=dates),
+        score_none=close * 0.0,
+        score_v2=close * 0.0,
+        score_blend=close * 0.0,
+        feature_frames={"score": close * 2},
+        market_features={},
+        membership_frame=pd.DataFrame(True, index=dates, columns=symbols),
+        rolling_pool_summary={},
+        alpha_prior_summary={},
+        derived_frames={"ret_1d": close.pct_change()},
+        metadata_frames={
+            "industry_daily": pd.DataFrame(
+                {
+                    "trade_date": ["2024-01-02", "2024-01-02", "2024-01-02"],
+                    "symbol": symbols,
+                    "industry": ["a", "b", "c"],
+                }
+            )
+        },
+        metadata_summary={},
+    )
+
+    sliced = _slice_prepared_for_symbols(prepared, ["BBB.SZ", "MISSING.SZ"])
+
+    assert sliced is not None
+    assert sliced.universe == ("BBB.SZ",)
+    assert list(sliced.close.columns) == ["BBB.SZ"]
+    assert list(sliced.feature_frames["score"].columns) == ["BBB.SZ"]
+    assert list(sliced.derived_frames["ret_1d"].columns) == ["BBB.SZ"]
+    assert sliced.metadata_frames["industry_daily"]["symbol"].tolist() == ["BBB.SZ"]
 
 
 def test_build_shards_parallel_uses_worker_safe_shard_writes(tmp_path, monkeypatch) -> None:

@@ -71,6 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     sharded.add_argument("--min-lookback-valid-ratio", type=float, default=0.80)
     sharded.add_argument("--tag", default="")
     sharded.add_argument("--workers", type=int, default=1)
+    sharded.add_argument("--year-input-cache", action="store_true")
     sharded.add_argument("--no-resume", action="store_true")
     sharded.add_argument("--dry-run", action="store_true")
     sharded.add_argument("--json", action="store_true")
@@ -146,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
                 profile=str(args.profile or ""),
                 max_universe_size=int(args.max_universe_size),
                 workers=int(args.workers),
+                year_input_cache=bool(args.year_input_cache),
                 write=True,
             )
         else:
@@ -167,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
                     tag=str(args.tag or ""),
                     resume=not bool(args.no_resume),
                     workers=int(args.workers),
+                    year_input_cache=bool(args.year_input_cache),
                 ),
             )
         _print(payload, as_json=bool(args.json))

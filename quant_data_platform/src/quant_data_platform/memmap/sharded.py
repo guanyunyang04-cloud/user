@@ -4,7 +4,7 @@ import gc
 import hashlib
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -53,6 +53,7 @@ class ShardedMemmapConfig:
     tag: str = ""
     resume: bool = True
     workers: int = 1
+    year_input_cache: bool = False
 
     def normalized(self) -> "ShardedMemmapConfig":
         return ShardedMemmapConfig(
@@ -71,6 +72,7 @@ class ShardedMemmapConfig:
             tag=str(self.tag or "").strip(),
             resume=bool(self.resume),
             workers=max(int(self.workers or 1), 1),
+            year_input_cache=bool(self.year_input_cache),
         )
 
 
@@ -80,6 +82,7 @@ def write_sharded_memmap_plan(
     profile: str = DEFAULT_PROFILE,
     max_universe_size: int = 0,
     workers: int = 1,
+    year_input_cache: bool = False,
     write: bool = True,
 ) -> dict[str, Any]:
     resolved = paths or qdp_paths()
@@ -92,6 +95,7 @@ def write_sharded_memmap_plan(
         "shard_policy": "year_symbol_block_feature_label_shards",
         "memory_policy": "never_build_full_universe_single_process_memmap",
         "worker_policy": "single_worker_by_default_use_build_sharded_memmap_workers_for_controlled_parallelism",
+        "year_input_cache": bool(year_input_cache),
         "created_at": utc_now(),
     }
     if write:
@@ -147,7 +151,7 @@ def build_sharded_memmap(
     for row in _discover_existing_shards(out_root):
         existing_by_key.setdefault(str(row.get("shard_key", "")), row)
     schema_columns = _select_initial_schema_columns(existing_by_key.values())
-    if not schema_columns and cfg.max_shards <= 0:
+    if not schema_columns and cfg.max_shards <= 0 and not bool(cfg.year_input_cache):
         reference = _build_schema_reference_shard(
             lake=lake,
             dataset_id=dataset_id,
@@ -164,10 +168,18 @@ def build_sharded_memmap(
             schema_columns = _select_initial_schema_columns(existing_by_key.values())
     schema_hash = _sequence_hash(schema_columns) if schema_columns else ""
     pending_specs: list[dict[str, Any]] = []
-    build_mode = "parallel_threads" if int(cfg.workers) > 1 and schema_columns else "serial"
+    build_mode = "serial_year_input_cache" if bool(cfg.year_input_cache) and int(cfg.workers) <= 1 else "parallel_threads" if int(cfg.workers) > 1 and schema_columns else "serial"
     if int(cfg.workers) > 1 and not schema_columns:
         build_mode = "serial_schema_unavailable"
     for year in years:
+        year_prepared: Any | None = None
+        year_load_error = ""
+        target_start, target_end, context_start, context_end = _shard_windows(
+            year=int(year),
+            canonical_start=canonical_start,
+            canonical_end=canonical_end,
+            cfg=cfg,
+        )
         for block_id, symbols in enumerate(blocks):
             if cfg.max_shards > 0 and len(completed) + len(pending_specs) >= cfg.max_shards:
                 break
@@ -189,6 +201,84 @@ def build_sharded_memmap(
                         "symbols": list(symbols),
                     }
                 )
+                continue
+            if build_mode == "serial_year_input_cache":
+                shard_dir = out_root / f"year={int(year)}" / f"block={int(block_id):04d}"
+                shard_manifest_path = shard_dir / "shard_manifest.json"
+                if year_prepared is None and not year_load_error:
+                    try:
+                        year_prepared = load_policy_inputs_from_lake(
+                            lake=lake,
+                            dataset_id=dataset_id,
+                            start_date=context_start.strftime("%Y-%m-%d"),
+                            end_date=context_end.strftime("%Y-%m-%d"),
+                            universe=list(universe),
+                            min_trading_days=2,
+                            require_benchmark_open=str(cfg.execution_mode).strip().lower() == "next_open",
+                        )
+                    except ValueError as exc:
+                        message = str(exc)
+                        if "lake_coverage_blocker: no requested symbols are available in lake market data" not in message:
+                            raise
+                        year_load_error = message
+                if year_load_error:
+                    shard = _write_terminal_shard(
+                        shard_manifest_path=shard_manifest_path,
+                        status="no_coverage",
+                        empty_reason="no_requested_symbols_available_in_lake_market_data",
+                        year=year,
+                        block_id=block_id,
+                        symbols=list(symbols),
+                        target_start=target_start,
+                        target_end=target_end,
+                        context_start=context_start,
+                        context_end=context_end,
+                        error_summary=year_load_error,
+                    )
+                else:
+                    block_prepared = _slice_prepared_for_symbols(year_prepared, list(symbols)) if year_prepared is not None else None
+                    if block_prepared is None:
+                        shard = _write_terminal_shard(
+                            shard_manifest_path=shard_manifest_path,
+                            status="no_coverage",
+                            empty_reason="no_requested_symbols_available_in_cached_year_inputs",
+                            year=year,
+                            block_id=block_id,
+                            symbols=list(symbols),
+                            target_start=target_start,
+                            target_end=target_end,
+                            context_start=context_start,
+                            context_end=context_end,
+                            error_summary="no requested symbols remain after slicing cached year inputs",
+                        )
+                    else:
+                        shard = _build_one_shard_from_prepared(
+                            prepared=block_prepared,
+                            year=year,
+                            block_id=block_id,
+                            target_start=target_start,
+                            target_end=target_end,
+                            context_start=context_start,
+                            context_end=context_end,
+                            cfg=cfg,
+                            out_root=out_root,
+                            cumulative_horizons=cumulative_horizons,
+                            expected_feature_columns=schema_columns,
+                        )
+                schema_hash, schema_columns = _accept_shard_schema(
+                    shard=shard,
+                    schema_hash=schema_hash,
+                    schema_columns=schema_columns,
+                )
+                completed.append(shard)
+                _write_progress(
+                    progress_path,
+                    status="running",
+                    planned_shards=planned_count,
+                    completed_shards=len(completed),
+                    latest_shard=shard,
+                )
+                gc.collect()
                 continue
             shard = _build_one_shard(
                 lake=lake,
@@ -281,6 +371,9 @@ def build_sharded_memmap(
         "build_mode": build_mode,
         "requested_worker_count": int(cfg.workers),
         "effective_worker_count": int(min(max(int(cfg.workers), 1), max(len(pending_specs), 1))) if build_mode == "parallel_threads" else 1,
+        "year_input_cache_requested": bool(cfg.year_input_cache),
+        "year_input_cache_effective": bool(build_mode == "serial_year_input_cache"),
+        "year_input_cache_policy": "serial_only_full_year_prepared_inputs_sliced_by_symbol_block",
         "skipped_shard_count": int(skipped),
         "created_at": utc_now(),
         "manifest_json": str(manifest_path.resolve()),
@@ -346,10 +439,12 @@ def _build_one_shard(
     cumulative_horizons: tuple[int, ...],
     expected_feature_columns: list[str] | None = None,
 ) -> dict[str, Any]:
-    target_start = max(pd.Timestamp(year=int(year), month=1, day=1), canonical_start)
-    target_end = min(pd.Timestamp(year=int(year), month=12, day=31), canonical_end)
-    context_start = max(target_start - pd.Timedelta(days=int(cfg.lookback_days) * 3 + 45), canonical_start)
-    context_end = min(target_end + pd.Timedelta(days=int(cfg.horizon) * 4 + 21), canonical_end)
+    target_start, target_end, context_start, context_end = _shard_windows(
+        year=int(year),
+        canonical_start=canonical_start,
+        canonical_end=canonical_end,
+        cfg=cfg,
+    )
     shard_dir = out_root / f"year={int(year)}" / f"block={int(block_id):04d}"
     shard_dir.mkdir(parents=True, exist_ok=True)
     shard_manifest_path = shard_dir / "shard_manifest.json"
@@ -367,49 +462,69 @@ def _build_one_shard(
         message = str(exc)
         if "lake_coverage_blocker: no requested symbols are available in lake market data" not in message:
             raise
-        shard = {
-            "status": "no_coverage",
-            "empty_reason": "no_requested_symbols_available_in_lake_market_data",
-            "shard_key": f"year={year}/block={block_id:04d}",
-            "year": int(year),
-            "block_id": int(block_id),
-            "start_date": target_start.strftime("%Y-%m-%d"),
-            "end_date": target_end.strftime("%Y-%m-%d"),
-            "context_start_date": context_start.strftime("%Y-%m-%d"),
-            "context_end_date": context_end.strftime("%Y-%m-%d"),
-            "symbol_count": int(len(symbols)),
-            "date_count": 0,
-            "sample_count": 0,
-            "shard_manifest_json": str(shard_manifest_path.resolve()),
-            "error_summary": message[:500],
-            "created_at": utc_now(),
-        }
-        write_json(shard_manifest_path, shard)
-        return shard
+        return _write_terminal_shard(
+            shard_manifest_path=shard_manifest_path,
+            status="no_coverage",
+            empty_reason="no_requested_symbols_available_in_lake_market_data",
+            year=year,
+            block_id=block_id,
+            symbols=list(symbols),
+            target_start=target_start,
+            target_end=target_end,
+            context_start=context_start,
+            context_end=context_end,
+            error_summary=message,
+        )
+    return _build_one_shard_from_prepared(
+        prepared=prepared,
+        year=year,
+        block_id=block_id,
+        target_start=target_start,
+        target_end=target_end,
+        context_start=context_start,
+        context_end=context_end,
+        cfg=cfg,
+        out_root=out_root,
+        cumulative_horizons=cumulative_horizons,
+        expected_feature_columns=expected_feature_columns,
+    )
+
+
+def _build_one_shard_from_prepared(
+    *,
+    prepared: Any,
+    year: int,
+    block_id: int,
+    target_start: pd.Timestamp,
+    target_end: pd.Timestamp,
+    context_start: pd.Timestamp,
+    context_end: pd.Timestamp,
+    cfg: ShardedMemmapConfig,
+    out_root: Path,
+    cumulative_horizons: tuple[int, ...],
+    expected_feature_columns: list[str] | None = None,
+) -> dict[str, Any]:
+    shard_dir = out_root / f"year={int(year)}" / f"block={int(block_id):04d}"
+    shard_dir.mkdir(parents=True, exist_ok=True)
+    shard_manifest_path = shard_dir / "shard_manifest.json"
     target_dates = [
         pd.Timestamp(dt).normalize()
         for dt in prepared.close.index
         if pd.Timestamp(dt).normalize() >= target_start and pd.Timestamp(dt).normalize() <= target_end
     ]
     if not target_dates:
-        shard = {
-            "status": "empty",
-            "empty_reason": "no_target_dates",
-            "shard_key": f"year={year}/block={block_id:04d}",
-            "year": int(year),
-            "block_id": int(block_id),
-            "start_date": target_start.strftime("%Y-%m-%d"),
-            "end_date": target_end.strftime("%Y-%m-%d"),
-            "context_start_date": context_start.strftime("%Y-%m-%d"),
-            "context_end_date": context_end.strftime("%Y-%m-%d"),
-            "symbol_count": int(len(symbols)),
-            "date_count": 0,
-            "sample_count": 0,
-            "shard_manifest_json": str(shard_manifest_path.resolve()),
-            "created_at": utc_now(),
-        }
-        write_json(shard_manifest_path, shard)
-        return shard
+        return _write_terminal_shard(
+            shard_manifest_path=shard_manifest_path,
+            status="empty",
+            empty_reason="no_target_dates",
+            year=year,
+            block_id=block_id,
+            symbols=list(prepared.universe),
+            target_start=target_start,
+            target_end=target_end,
+            context_start=context_start,
+            context_end=context_end,
+        )
     feature_store_path, feature_columns, feature_manifest, history_ratio = build_forecast_feature_store(
         prepared,
         target_dates,
@@ -475,6 +590,116 @@ def _build_one_shard(
     }
     write_json(shard_manifest_path, shard)
     return shard
+
+
+def _shard_windows(
+    *,
+    year: int,
+    canonical_start: pd.Timestamp,
+    canonical_end: pd.Timestamp,
+    cfg: ShardedMemmapConfig,
+) -> tuple[pd.Timestamp, pd.Timestamp, pd.Timestamp, pd.Timestamp]:
+    target_start = max(pd.Timestamp(year=int(year), month=1, day=1), canonical_start)
+    target_end = min(pd.Timestamp(year=int(year), month=12, day=31), canonical_end)
+    context_start = max(target_start - pd.Timedelta(days=int(cfg.lookback_days) * 3 + 45), canonical_start)
+    context_end = min(target_end + pd.Timedelta(days=int(cfg.horizon) * 4 + 21), canonical_end)
+    return target_start, target_end, context_start, context_end
+
+
+def _write_terminal_shard(
+    *,
+    shard_manifest_path: Path,
+    status: str,
+    empty_reason: str,
+    year: int,
+    block_id: int,
+    symbols: list[str],
+    target_start: pd.Timestamp,
+    target_end: pd.Timestamp,
+    context_start: pd.Timestamp,
+    context_end: pd.Timestamp,
+    error_summary: str = "",
+) -> dict[str, Any]:
+    shard_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    shard: dict[str, Any] = {
+        "status": str(status),
+        "empty_reason": str(empty_reason),
+        "shard_key": f"year={int(year)}/block={int(block_id):04d}",
+        "year": int(year),
+        "block_id": int(block_id),
+        "start_date": target_start.strftime("%Y-%m-%d"),
+        "end_date": target_end.strftime("%Y-%m-%d"),
+        "context_start_date": context_start.strftime("%Y-%m-%d"),
+        "context_end_date": context_end.strftime("%Y-%m-%d"),
+        "symbol_count": int(len(symbols)),
+        "date_count": 0,
+        "sample_count": 0,
+        "shard_manifest_json": str(shard_manifest_path.resolve()),
+        "created_at": utc_now(),
+    }
+    if str(error_summary or "").strip():
+        shard["error_summary"] = str(error_summary)[:500]
+    write_json(shard_manifest_path, shard)
+    return shard
+
+
+def _slice_prepared_for_symbols(prepared: Any, symbols: list[str]) -> Any | None:
+    requested = _normalize_symbols(symbols)
+    available = set(_normalize_symbols(list(getattr(prepared, "universe", []) or [])))
+    selected = [symbol for symbol in requested if symbol in available]
+    if not selected:
+        return None
+
+    def slice_frame(frame: pd.DataFrame) -> pd.DataFrame:
+        if not isinstance(frame, pd.DataFrame) or frame.empty:
+            return frame.copy() if isinstance(frame, pd.DataFrame) else frame
+        column_map = {str(column).strip().upper(): column for column in frame.columns}
+        selected_columns = [column_map[symbol] for symbol in selected if symbol in column_map]
+        if selected_columns:
+            out = frame.reindex(columns=selected_columns).copy()
+            out.columns = [str(column).strip().upper() for column in out.columns]
+            return out
+        for symbol_column in ("symbol", "stock"):
+            if symbol_column in frame.columns:
+                out = frame.loc[frame[symbol_column].astype(str).str.strip().str.upper().isin(set(selected))].copy()
+                return out
+        return frame.copy()
+
+    def slice_frame_dict(frames: Mapping[str, Any]) -> dict[str, Any]:
+        return {
+            str(name): slice_frame(frame) if isinstance(frame, pd.DataFrame) else frame
+            for name, frame in dict(frames or {}).items()
+        }
+
+    return replace(
+        prepared,
+        universe=tuple(selected),
+        close=slice_frame(prepared.close),
+        open_=slice_frame(prepared.open_),
+        high=slice_frame(prepared.high),
+        low=slice_frame(prepared.low),
+        volume=slice_frame(prepared.volume),
+        amount=slice_frame(prepared.amount),
+        score_none=slice_frame(prepared.score_none),
+        score_v2=slice_frame(prepared.score_v2),
+        score_blend=slice_frame(prepared.score_blend),
+        feature_frames=slice_frame_dict(prepared.feature_frames),
+        membership_frame=slice_frame(prepared.membership_frame),
+        derived_frames=slice_frame_dict(prepared.derived_frames),
+        metadata_frames=slice_frame_dict(getattr(prepared, "metadata_frames", {})),
+    )
+
+
+def _normalize_symbols(symbols: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in list(symbols or []):
+        symbol = str(raw or "").strip().upper()
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        out.append(symbol)
+    return out
 
 
 def _build_shards_parallel(
