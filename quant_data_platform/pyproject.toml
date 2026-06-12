@@ -10,3 +10,11 @@ qdp = "quant_data_platform.cli:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "../"]
+markers = [
+  "unit: fast deterministic unit tests",
+  "smoke: fast changed-surface smoke tests",
+  "integration: CLI, filesystem, or cross-package contract tests",
+  "data_heavy: tests that build or validate memmap, parquet, or larger data artifacts",
+  "external: tests requiring network, live providers, or third-party services",
+  "benchmark: performance threshold tests",
+]

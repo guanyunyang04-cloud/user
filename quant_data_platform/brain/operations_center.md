@@ -23,6 +23,9 @@
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest quant_data_platform/tests -q`
+- 轻量 smoke lane：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest quant_data_platform/tests -m "smoke and not data_heavy and not external and not benchmark" -q`
+- 普通开发 lane：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest quant_data_platform/tests -m "not data_heavy and not external and not benchmark" -q`
+- `test_sharded_memmap.py` 属于 `integration + data_heavy`，改 memmap/shard/schema 时显式运行；不让它拖慢无关 brain / registry / profile 小改。
 
 ## 清理纪律
 - `qdp cleanup --dry-run` 只生成计划，不删除。
