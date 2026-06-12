@@ -160,6 +160,42 @@ WORKSPACE_AREAS = (
     "t0_project",
 )
 
+TEST_LANE_BUDGETS = {
+    "smoke": {
+        "target_minutes": 2,
+        "role": "fast changed-surface confidence for ordinary local loops",
+        "default": True,
+    },
+    "project": {
+        "target_minutes": 8,
+        "role": "normal project gate excluding slow, research, external, and benchmark work",
+        "default": False,
+    },
+    "full": {
+        "target_minutes": None,
+        "role": "all deterministic project checks, including deferred deterministic suites",
+        "default": False,
+    },
+    "research": {
+        "target_minutes": None,
+        "role": "training, backtest, model, memmap-build, and research-regression checks",
+        "default": False,
+    },
+    "external": {
+        "target_minutes": None,
+        "role": "network, live provider, third-party service, and benchmark checks",
+        "default": False,
+    },
+}
+
+TEST_BURDEN_RULES = (
+    "default gates use changed-surface commands, not whole-project suites",
+    "large memmap builds, training, full backtests, and live provider probes stay out of blocking_commands",
+    "tests should protect contracts and safety boundaries with synthetic or minimal fixtures",
+    "research evidence belongs in reports or references; tests only protect the generator contract",
+    "stale tests for removed mechanisms should be archived or deleted during project-local cleanup",
+)
+
 
 def _pytest_command(paths: Iterable[str]) -> str:
     return f"{PYTHON_EXECUTABLE} -m pytest {' '.join(paths)} -q"
@@ -299,6 +335,36 @@ def _minimal_blocking_guards(changed_paths: list[str], *, active_artifact_blocke
     if doc_guard_command:
         commands.append(doc_guard_command)
     return commands
+
+
+def _build_lane_commands(
+    *,
+    blocking_commands: list[str],
+    deferred_commands: list[str],
+    active_artifact_blocked: bool,
+) -> dict[str, list[str]]:
+    if active_artifact_blocked:
+        return {lane: [] for lane in TEST_LANE_BUDGETS}
+    return {
+        "smoke": list(blocking_commands),
+        "project": list(blocking_commands),
+        "full": _unique([*blocking_commands, *deferred_commands]),
+        "research": list(deferred_commands),
+        "external": [],
+    }
+
+
+def _test_strategy_summary(project_id: str, risk_level: str, manual_review_required: bool) -> dict[str, Any]:
+    return {
+        "default_lane": "smoke",
+        "coverage_policy": "changed_surface_only",
+        "project_id": project_id,
+        "risk_level": risk_level,
+        "manual_review_required": manual_review_required,
+        "lane_budgets": TEST_LANE_BUDGETS,
+        "burden_rules": list(TEST_BURDEN_RULES),
+        "slow_work_policy": "defer research, data-heavy, external, and benchmark checks unless explicitly requested or required by release risk",
+    }
 
 
 def _command_mentions_area(command: str, area: str) -> bool:
@@ -537,8 +603,13 @@ def build_verification_plan(*, paths: list[str] | None = None, base: str | None 
         ]
     )
     deferred_commands = list(deferred_long_commands)
+    lane_commands = _build_lane_commands(
+        blocking_commands=blocking_commands,
+        deferred_commands=deferred_commands,
+        active_artifact_blocked=active_artifact_blocked,
+    )
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "mode": "recommend_only",
         "coverage_policy": "changed_surface_only",
         "base": str(base or ""),
@@ -550,6 +621,8 @@ def build_verification_plan(*, paths: list[str] | None = None, base: str | None 
         "deferred_long_commands": deferred_long_commands,
         "blocking_commands": blocking_commands,
         "deferred_commands": deferred_commands,
+        "lane_commands": lane_commands,
+        "test_strategy": _test_strategy_summary(project_id, risk_level, manual_review_required),
         "skipped_reason_by_area": _skipped_reason_by_area(changed_paths, selected_commands, deferred_commands, warnings),
         "risk_level": risk_level,
         "warnings": warnings,
@@ -579,6 +652,12 @@ def _print_text(payload: dict[str, Any]) -> None:
     print("\nDeferred commands:")
     for command in payload["deferred_commands"] or ["<none>"]:
         print(f"- {command}")
+    print("\nTest lanes:")
+    for lane, commands in payload.get("lane_commands", {}).items():
+        budget = payload.get("test_strategy", {}).get("lane_budgets", {}).get(lane, {})
+        target = budget.get("target_minutes")
+        target_text = "unbounded" if target is None else f"<= {target} min"
+        print(f"- {lane}: {len(commands)} command(s), target {target_text}")
     if payload["warnings"]:
         print("\nWarnings:")
         for warning in payload["warnings"]:

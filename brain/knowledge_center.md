@@ -36,6 +36,9 @@
   - 本机 skills 管通用操作能力；主脑和分脑管认知治理与项目真相；项目 `tools/` 管可执行守卫。项目安全边界高于通用 skill 默认行为。
 - `root-directory-identity-rule`
   - 根目录一级文件夹必须有清晰身份：已注册分脑项目、主脑基础设施、共享工具、工作区文档、过渡资产或缓存依赖。身份不明目录不长期保留；新正式项目应初始化并注册分脑。
+- `testing-burden-rule`
+  - 默认测试走 changed-surface smoke 车道，只验证当前改动必须保护的契约和安全边界；训练、全量 memmap、长回测、外部 provider、benchmark 和历史研究回归进入显式 research/external/full 车道。
+  - 测试减负优先合并重复契约、拆出慢 nodeid、标记 slow/research/external、归档旧研究证据和删除废弃机制测试；不得削弱 canonical、PIT/no-leakage、清理边界、active artifact、项目命名空间和提交闭环保护。
 ## 2. 已验证教训
 - 如果主脑和分脑维护两套平行接管顺序，后续 agent 很快会漂移
 - 如果当前状态只写聊天或终端，不写 brain，接管可靠性会明显下降

@@ -31,6 +31,7 @@ class SelectiveVerificationTest(unittest.TestCase):
 
         self.assertEqual(payload["changed_paths"], ["daily_research/brain/operations_center.md"])
         self.assertEqual(payload["coverage_policy"], "changed_surface_only")
+        self.assertEqual(payload["schema_version"], 2)
         self.assertEqual(len(payload["always_commands"]), 4)
         self.assertEqual(payload["selected_commands"], [])
         self.assertEqual(
@@ -45,6 +46,9 @@ class SelectiveVerificationTest(unittest.TestCase):
         self.assertEqual(payload["skipped_reason_by_area"]["tools/brain"], "unchanged_area_not_tested")
         self.assertEqual(payload["risk_level"], "low")
         self.assertFalse(payload["manual_review_required"])
+        self.assertEqual(payload["test_strategy"]["default_lane"], "smoke")
+        self.assertEqual(payload["lane_commands"]["smoke"], payload["blocking_commands"])
+        self.assertEqual(payload["lane_commands"]["research"], [])
 
     def test_brain_tool_change_selects_brain_tool_tests(self) -> None:
         payload = build_verification_plan(paths=["tools/brain/capsule.py"])
@@ -167,6 +171,13 @@ class SelectiveVerificationTest(unittest.TestCase):
         self.assertIn("daily_research/path_policy/tests/test_forecast_dataset.py", deferred)
         self.assertIn("daily_research/path_policy/tests/test_forecast_training.py", deferred)
         self.assertEqual(payload["deferred_commands"], payload["deferred_long_commands"])
+        self.assertEqual(payload["lane_commands"]["smoke"], payload["blocking_commands"])
+        self.assertIn("daily_research/path_policy/tests/test_forecast_training.py", "\n".join(payload["lane_commands"]["research"]))
+        self.assertIn("daily_research/path_policy/tests/test_forecast_training.py", "\n".join(payload["lane_commands"]["full"]))
+        self.assertEqual(payload["test_strategy"]["lane_budgets"]["smoke"]["target_minutes"], 2)
+        self.assertTrue(
+            any("large memmap builds" in rule for rule in payload["test_strategy"]["burden_rules"])
+        )
 
     def test_rl_protocol_change_uses_nodeid_groups_not_whole_file(self) -> None:
         payload = build_verification_plan(paths=["daily_research/path_policy/run_alpha_path20_protocol.py"])
@@ -204,6 +215,8 @@ class SelectiveVerificationTest(unittest.TestCase):
         self.assertTrue(payload["manual_review_required"])
         self.assertTrue(any("active_artifact_diff_blocker" in warning for warning in payload["warnings"]))
         self.assertEqual(payload["blocking_commands"], [])
+        self.assertEqual(payload["lane_commands"]["smoke"], [])
+        self.assertEqual(payload["lane_commands"]["full"], [])
         self.assertEqual(payload["skipped_reason_by_area"]["daily_research"], "critical_active_artifact_blocker")
 
     def test_active_artifact_mixed_change_suppresses_normal_blocking_tests(self) -> None:
@@ -245,6 +258,8 @@ class SelectiveVerificationTest(unittest.TestCase):
         self.assertIn("selected_commands", payload)
         self.assertIn("blocking_commands", payload)
         self.assertIn("deferred_commands", payload)
+        self.assertIn("lane_commands", payload)
+        self.assertIn("test_strategy", payload)
         self.assertEqual(payload["coverage_policy"], "changed_surface_only")
 
     def test_cli_paths_take_priority_over_base(self) -> None:
