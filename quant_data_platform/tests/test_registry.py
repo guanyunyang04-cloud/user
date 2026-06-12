@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from quant_data_platform.core.paths import qdp_paths
+from quant_data_platform.core.paths import qdp_paths, workspace_root
 from quant_data_platform.core.registry import load_root_manifest, migrate_legacy_registry, registry_status
 
 
@@ -13,7 +13,7 @@ def _write(path: Path, payload: dict) -> None:
 
 
 def test_migrate_legacy_registry_writes_qdp_registry(tmp_path: Path) -> None:
-    _write(tmp_path / "brain" / "brain_manifest.json", {"schema_version": 1})
+    _write(tmp_path / "brain" / "brain_manifest.json", {"schema_version": 1, "brain_type": "main"})
     _write(
         tmp_path / "canonical_data" / "registry" / "root_manifest.json",
         {
@@ -42,7 +42,7 @@ def test_migrate_legacy_registry_writes_qdp_registry(tmp_path: Path) -> None:
 
 
 def test_registry_status_prefers_full_sharded_active_manifest(tmp_path: Path) -> None:
-    _write(tmp_path / "brain" / "brain_manifest.json", {"schema_version": 1})
+    _write(tmp_path / "brain" / "brain_manifest.json", {"schema_version": 1, "brain_type": "main"})
     paths = qdp_paths(tmp_path)
     _write(
         paths.root_manifest,
@@ -88,3 +88,13 @@ def test_registry_status_prefers_full_sharded_active_manifest(tmp_path: Path) ->
     assert status["active_feature_profile"] == "short_horizon_core_v1"
     assert status["active_scope"] == "full_canonical_candidate"
     assert status["active_sample_count"] == 0
+
+
+def test_workspace_root_skips_child_sub_brain_manifest(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("QDP_WORKSPACE_ROOT", raising=False)
+    _write(tmp_path / "brain" / "brain_manifest.json", {"schema_version": 1, "brain_type": "main"})
+    child = tmp_path / "quant_data_platform"
+    _write(child / "brain" / "brain_manifest.json", {"schema_version": 1, "brain_type": "sub_brain"})
+
+    assert workspace_root(child) == tmp_path.resolve()
+    assert qdp_paths(child).workspace_root == tmp_path.resolve()

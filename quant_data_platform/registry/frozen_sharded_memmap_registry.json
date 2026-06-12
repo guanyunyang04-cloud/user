@@ -1,0 +1,46 @@
+{
+  "active_frozen_manifest_json": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\canonical_short_horizon_core_v1_full\\sharded_memmap_manifest.json",
+  "entries": [
+    {
+      "artifact_type": "qdp_frozen_sharded_memmap",
+      "canonical_dataset_id": "policy_input_bundle__f926a496f69c61f6b92b5faf",
+      "empty_shard_count": 61,
+      "end_year": 2026,
+      "feature_count": 256,
+      "feature_schema_hash": "8942b161313ab2592fb207e7",
+      "freeze_tag": "canonical_short_horizon_core_v1_full_2010_2026",
+      "frozen_at": "2026-06-12T06:51:06+00:00",
+      "manifest_json": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\canonical_short_horizon_core_v1_full\\sharded_memmap_manifest.json",
+      "planned_shard_count": 323,
+      "profile": "short_horizon_core_v1",
+      "reuse_policy": "reuse_by_manifest_pointer_no_data_copy",
+      "start_year": 2010,
+      "status": "frozen",
+      "stored_shard_count": 262,
+      "symbol_count": 5526,
+      "years": [
+        2010,
+        2011,
+        2012,
+        2013,
+        2014,
+        2015,
+        2016,
+        2017,
+        2018,
+        2019,
+        2020,
+        2021,
+        2022,
+        2023,
+        2024,
+        2025,
+        2026
+      ]
+    }
+  ],
+  "latest_freeze_tag": "canonical_short_horizon_core_v1_full_2010_2026",
+  "schema_version": 1,
+  "status": "ready",
+  "updated_at": "2026-06-12T06:51:06+00:00"
+}

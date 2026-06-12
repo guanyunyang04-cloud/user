@@ -119,6 +119,6 @@ def test_project_feature_store_to_schema_reorders_and_fills_missing(tmp_path) ->
 def test_cli_sharded_dry_run_writes_plan(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("QDP_WORKSPACE_ROOT", str(tmp_path))
     (tmp_path / "brain").mkdir(parents=True)
-    (tmp_path / "brain" / "brain_manifest.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "brain" / "brain_manifest.json").write_text('{"brain_type": "main"}', encoding="utf-8")
     assert cli_main(["build-sharded-memmap", "--dry-run", "--json"]) == 0
     assert (qdp_paths(tmp_path).memmap_dir / "sharded_memmap_plan.json").exists()

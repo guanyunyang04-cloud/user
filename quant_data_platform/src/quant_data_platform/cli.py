@@ -9,6 +9,12 @@ from quant_data_platform.core.json_io import json_safe
 from quant_data_platform.core.paths import qdp_paths
 from quant_data_platform.core.registry import migrate_legacy_registry, registry_status
 from quant_data_platform.lake.adapters import audit_inventory, build_bundle, bundle_summary_dict, cleanup_dry_run
+from quant_data_platform.memmap.incremental import (
+    IncrementalPlanConfig,
+    compose_sharded_memmap,
+    freeze_sharded_memmap,
+    plan_incremental_memmap,
+)
 from quant_data_platform.memmap.sharded import ShardedMemmapConfig, build_sharded_memmap, write_sharded_memmap_plan
 from quant_data_platform.memmap.validation import validate_active_memmap
 
@@ -67,6 +73,29 @@ def build_parser() -> argparse.ArgumentParser:
     sharded.add_argument("--no-resume", action="store_true")
     sharded.add_argument("--dry-run", action="store_true")
     sharded.add_argument("--json", action="store_true")
+
+    freeze = sub.add_parser("freeze-sharded-memmap", help="Mark a completed sharded memmap as a reusable frozen base.")
+    freeze.add_argument("--manifest", default="")
+    freeze.add_argument("--tag", default="")
+    freeze.add_argument("--dry-run", action="store_true")
+    freeze.add_argument("--json", action="store_true")
+
+    incremental = sub.add_parser("plan-incremental-memmap", help="Plan tail-year shard rebuilds from a frozen sharded base.")
+    incremental.add_argument("--base-manifest", default="")
+    incremental.add_argument("--rebuild-start-year", type=int, default=0)
+    incremental.add_argument("--rebuild-end-year", type=int, default=0)
+    incremental.add_argument("--recent-years", type=int, default=1)
+    incremental.add_argument("--tag", default="")
+    incremental.add_argument("--no-write", action="store_true")
+    incremental.add_argument("--json", action="store_true")
+
+    compose = sub.add_parser("compose-sharded-memmap", help="Compose a frozen base and incremental shard manifests into one logical active view.")
+    compose.add_argument("--base-manifest", default="")
+    compose.add_argument("--overlay-manifest", action="append", default=[])
+    compose.add_argument("--tag", default="")
+    compose.add_argument("--activate", action="store_true")
+    compose.add_argument("--dry-run", action="store_true")
+    compose.add_argument("--json", action="store_true")
 
     cleanup = sub.add_parser("cleanup", help="Generate cleanup dry-run plan. This command never deletes files in v1.")
     cleanup.add_argument("--dry-run", action="store_true", default=True)
@@ -137,6 +166,40 @@ def main(argv: list[str] | None = None) -> int:
                     resume=not bool(args.no_resume),
                 ),
             )
+        _print(payload, as_json=bool(args.json))
+        return 0
+    if args.command == "freeze-sharded-memmap":
+        payload = freeze_sharded_memmap(
+            paths,
+            manifest=Path(args.manifest) if str(args.manifest or "").strip() else None,
+            tag=str(args.tag or ""),
+            write=not bool(args.dry_run),
+        )
+        _print(payload, as_json=bool(args.json))
+        return 0
+    if args.command == "plan-incremental-memmap":
+        payload = plan_incremental_memmap(
+            paths,
+            config=IncrementalPlanConfig(
+                base_manifest=str(args.base_manifest or ""),
+                rebuild_start_year=int(args.rebuild_start_year),
+                rebuild_end_year=int(args.rebuild_end_year),
+                recent_years=int(args.recent_years),
+                tag=str(args.tag or ""),
+            ),
+            write=not bool(args.no_write),
+        )
+        _print(payload, as_json=bool(args.json))
+        return 0
+    if args.command == "compose-sharded-memmap":
+        payload = compose_sharded_memmap(
+            paths,
+            base_manifest=Path(args.base_manifest) if str(args.base_manifest or "").strip() else None,
+            overlay_manifests=[Path(item) for item in list(args.overlay_manifest or [])],
+            tag=str(args.tag or ""),
+            activate=bool(args.activate),
+            write=not bool(args.dry_run),
+        )
         _print(payload, as_json=bool(args.json))
         return 0
     if args.command == "cleanup":

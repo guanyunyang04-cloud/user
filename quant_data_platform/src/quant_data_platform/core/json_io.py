@@ -17,7 +17,7 @@ def read_json(path: str | Path) -> dict[str, Any]:
 def write_json(path: str | Path, payload: Mapping[str, Any]) -> Path:
     resolved = Path(path)
     resolved.parent.mkdir(parents=True, exist_ok=True)
-    resolved.write_text(json.dumps(json_safe(dict(payload)), ensure_ascii=False, indent=2), encoding="utf-8")
+    resolved.write_text(json.dumps(json_safe(dict(payload)), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return resolved
 
 
