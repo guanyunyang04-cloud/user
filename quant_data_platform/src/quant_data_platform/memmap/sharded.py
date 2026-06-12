@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import gc
 import hashlib
+import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -50,6 +52,7 @@ class ShardedMemmapConfig:
     min_lookback_valid_ratio: float = 0.80
     tag: str = ""
     resume: bool = True
+    workers: int = 1
 
     def normalized(self) -> "ShardedMemmapConfig":
         return ShardedMemmapConfig(
@@ -67,6 +70,7 @@ class ShardedMemmapConfig:
             min_lookback_valid_ratio=float(self.min_lookback_valid_ratio),
             tag=str(self.tag or "").strip(),
             resume=bool(self.resume),
+            workers=max(int(self.workers or 1), 1),
         )
 
 
@@ -75,6 +79,7 @@ def write_sharded_memmap_plan(
     *,
     profile: str = DEFAULT_PROFILE,
     max_universe_size: int = 0,
+    workers: int = 1,
     write: bool = True,
 ) -> dict[str, Any]:
     resolved = paths or qdp_paths()
@@ -83,8 +88,10 @@ def write_sharded_memmap_plan(
         "artifact_type": "sharded_memmap_build_plan",
         "profile": str(profile or DEFAULT_PROFILE),
         "max_universe_size": int(max_universe_size or 0),
+        "workers": max(int(workers or 1), 1),
         "shard_policy": "year_symbol_block_feature_label_shards",
         "memory_policy": "never_build_full_universe_single_process_memmap",
+        "worker_policy": "single_worker_by_default_use_build_sharded_memmap_workers_for_controlled_parallelism",
         "created_at": utc_now(),
     }
     if write:
@@ -156,9 +163,13 @@ def build_sharded_memmap(
             existing_by_key[str(reference.get("shard_key", ""))] = reference
             schema_columns = _select_initial_schema_columns(existing_by_key.values())
     schema_hash = _sequence_hash(schema_columns) if schema_columns else ""
+    pending_specs: list[dict[str, Any]] = []
+    build_mode = "parallel_threads" if int(cfg.workers) > 1 and schema_columns else "serial"
+    if int(cfg.workers) > 1 and not schema_columns:
+        build_mode = "serial_schema_unavailable"
     for year in years:
         for block_id, symbols in enumerate(blocks):
-            if cfg.max_shards > 0 and len(completed) >= cfg.max_shards:
+            if cfg.max_shards > 0 and len(completed) + len(pending_specs) >= cfg.max_shards:
                 break
             shard_key = f"year={year}/block={block_id:04d}"
             if cfg.resume and shard_key in existing_by_key and _shard_is_resumable(existing_by_key[shard_key]):
@@ -168,6 +179,16 @@ def build_sharded_memmap(
                     schema_hash = str(row.get("feature_schema_hash", "") or "")
                     schema_columns = list(row.get("feature_columns", []) or [])
                 skipped += 1
+                continue
+            if build_mode == "parallel_threads":
+                pending_specs.append(
+                    {
+                        "shard_key": shard_key,
+                        "year": int(year),
+                        "block_id": int(block_id),
+                        "symbols": list(symbols),
+                    }
+                )
                 continue
             shard = _build_one_shard(
                 lake=lake,
@@ -182,17 +203,11 @@ def build_sharded_memmap(
                 cumulative_horizons=cumulative_horizons,
                 expected_feature_columns=schema_columns,
             )
-            if str(shard.get("status", "")) == "completed":
-                current_hash = str(shard.get("feature_schema_hash", "") or "")
-                if schema_hash and current_hash and current_hash != schema_hash:
-                    shard = {**shard, "status": "schema_mismatch", "expected_feature_schema_hash": schema_hash}
-                    write_json(Path(str(shard["shard_manifest_json"])), shard)
-                    raise ValueError(
-                        "sharded_memmap_feature_schema_mismatch: "
-                        f"expected={schema_hash} actual={current_hash} shard={shard_key}"
-                    )
-                schema_hash = schema_hash or current_hash
-                schema_columns = schema_columns or list(shard.get("feature_columns", []) or [])
+            schema_hash, schema_columns = _accept_shard_schema(
+                shard=shard,
+                schema_hash=schema_hash,
+                schema_columns=schema_columns,
+            )
             completed.append(shard)
             _write_progress(
                 progress_path,
@@ -204,6 +219,29 @@ def build_sharded_memmap(
             gc.collect()
         if cfg.max_shards > 0 and len(completed) >= cfg.max_shards:
             break
+    if pending_specs:
+        parallel_results = _build_shards_parallel(
+            lake=lake,
+            dataset_id=dataset_id,
+            shard_specs=pending_specs,
+            canonical_start=canonical_start,
+            canonical_end=canonical_end,
+            cfg=cfg,
+            out_root=out_root,
+            cumulative_horizons=cumulative_horizons,
+            expected_feature_columns=schema_columns,
+            progress_path=progress_path,
+            planned_count=planned_count,
+            completed_so_far=len(completed),
+        )
+        for spec in pending_specs:
+            shard = parallel_results[str(spec["shard_key"])]
+            schema_hash, schema_columns = _accept_shard_schema(
+                shard=shard,
+                schema_hash=schema_hash,
+                schema_columns=schema_columns,
+            )
+            completed.append(shard)
 
     stored = [item for item in completed if str(item.get("status", "")) == _STORED_SHARD_STATUS]
     empty = [item for item in completed if str(item.get("status", "")) in _EMPTY_SHARD_STATUSES]
@@ -240,6 +278,10 @@ def build_sharded_memmap(
         "execution_mode": cfg.execution_mode,
         "max_feature_columns": int(cfg.max_feature_columns),
         "min_lookback_valid_ratio": float(cfg.min_lookback_valid_ratio),
+        "build_mode": build_mode,
+        "requested_worker_count": int(cfg.workers),
+        "effective_worker_count": int(min(max(int(cfg.workers), 1), max(len(pending_specs), 1))) if build_mode == "parallel_threads" else 1,
+        "skipped_shard_count": int(skipped),
         "created_at": utc_now(),
         "manifest_json": str(manifest_path.resolve()),
     }
@@ -433,6 +475,146 @@ def _build_one_shard(
     }
     write_json(shard_manifest_path, shard)
     return shard
+
+
+def _build_shards_parallel(
+    *,
+    lake: ResearchDataLake,
+    dataset_id: str,
+    shard_specs: list[dict[str, Any]],
+    canonical_start: pd.Timestamp,
+    canonical_end: pd.Timestamp,
+    cfg: ShardedMemmapConfig,
+    out_root: Path,
+    cumulative_horizons: tuple[int, ...],
+    expected_feature_columns: list[str],
+    progress_path: Path,
+    planned_count: int,
+    completed_so_far: int,
+) -> dict[str, dict[str, Any]]:
+    if not expected_feature_columns:
+        raise ValueError("parallel_sharded_memmap_requires_locked_feature_schema")
+    worker_count = min(max(int(cfg.workers), 1), max(len(shard_specs), 1))
+    results: dict[str, dict[str, Any]] = {}
+    lake_root = Path(lake.root)
+    with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="qdp-shard") as executor:
+        futures = {
+            executor.submit(
+                _build_one_shard_worker,
+                lake_root=str(lake_root),
+                dataset_id=str(dataset_id),
+                year=int(spec["year"]),
+                block_id=int(spec["block_id"]),
+                symbols=list(spec["symbols"]),
+                canonical_start=str(pd.Timestamp(canonical_start).strftime("%Y-%m-%d")),
+                canonical_end=str(pd.Timestamp(canonical_end).strftime("%Y-%m-%d")),
+                cfg_payload=asdict(cfg),
+                out_root=str(out_root),
+                cumulative_horizons=tuple(int(item) for item in cumulative_horizons),
+                expected_feature_columns=list(expected_feature_columns),
+            ): str(spec["shard_key"])
+            for spec in shard_specs
+        }
+        for future in as_completed(futures):
+            shard_key = futures[future]
+            try:
+                shard = future.result()
+            except Exception as exc:  # pragma: no cover - exercised by integration failures.
+                shard = _failed_shard_record(
+                    shard_key=shard_key,
+                    spec=next(item for item in shard_specs if str(item["shard_key"]) == shard_key),
+                    out_root=out_root,
+                    error=exc,
+                )
+            results[shard_key] = shard
+            _write_progress(
+                progress_path,
+                status="running",
+                planned_shards=planned_count,
+                completed_shards=int(completed_so_far + len(results)),
+                latest_shard=shard,
+                worker_count=int(worker_count),
+            )
+    return results
+
+
+def _build_one_shard_worker(
+    *,
+    lake_root: str,
+    dataset_id: str,
+    year: int,
+    block_id: int,
+    symbols: list[str],
+    canonical_start: str,
+    canonical_end: str,
+    cfg_payload: Mapping[str, Any],
+    out_root: str,
+    cumulative_horizons: tuple[int, ...],
+    expected_feature_columns: list[str],
+) -> dict[str, Any]:
+    lake = ResearchDataLake(Path(lake_root))
+    cfg = _coerce_config(cfg_payload)
+    return _build_one_shard(
+        lake=lake,
+        dataset_id=str(dataset_id),
+        year=int(year),
+        block_id=int(block_id),
+        symbols=list(symbols),
+        canonical_start=pd.Timestamp(canonical_start).normalize(),
+        canonical_end=pd.Timestamp(canonical_end).normalize(),
+        cfg=cfg,
+        out_root=Path(out_root),
+        cumulative_horizons=tuple(int(item) for item in cumulative_horizons),
+        expected_feature_columns=list(expected_feature_columns),
+    )
+
+
+def _failed_shard_record(
+    *,
+    shard_key: str,
+    spec: Mapping[str, Any],
+    out_root: Path,
+    error: Exception,
+) -> dict[str, Any]:
+    year = int(spec.get("year", 0) or 0)
+    block_id = int(spec.get("block_id", 0) or 0)
+    shard_dir = out_root / f"year={year}" / f"block={block_id:04d}"
+    shard_dir.mkdir(parents=True, exist_ok=True)
+    shard_manifest_path = shard_dir / "shard_manifest.json"
+    shard = {
+        "status": "failed",
+        "shard_key": str(shard_key),
+        "year": year,
+        "block_id": block_id,
+        "symbol_count": int(len(list(spec.get("symbols", []) or []))),
+        "sample_count": 0,
+        "shard_manifest_json": str(shard_manifest_path.resolve()),
+        "error_type": type(error).__name__,
+        "error_summary": str(error)[:1000],
+        "traceback": "".join(traceback.format_exception(type(error), error, error.__traceback__))[-4000:],
+        "created_at": utc_now(),
+    }
+    write_json(shard_manifest_path, shard)
+    return shard
+
+
+def _accept_shard_schema(
+    *,
+    shard: Mapping[str, Any],
+    schema_hash: str,
+    schema_columns: list[str],
+) -> tuple[str, list[str]]:
+    if str(shard.get("status", "")) != "completed":
+        return schema_hash, schema_columns
+    current_hash = str(shard.get("feature_schema_hash", "") or "")
+    if schema_hash and current_hash and current_hash != schema_hash:
+        row = {**dict(shard), "status": "schema_mismatch", "expected_feature_schema_hash": schema_hash}
+        write_json(Path(str(row["shard_manifest_json"])), row)
+        raise ValueError(
+            "sharded_memmap_feature_schema_mismatch: "
+            f"expected={schema_hash} actual={current_hash} shard={row.get('shard_key', '')}"
+        )
+    return schema_hash or current_hash, schema_columns or list(shard.get("feature_columns", []) or [])
 
 
 def _write_label_store(

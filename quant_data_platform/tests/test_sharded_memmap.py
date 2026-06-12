@@ -3,9 +3,16 @@ from __future__ import annotations
 import numpy as np
 
 from quant_data_platform.cli import main as cli_main
-from quant_data_platform.core.json_io import write_json
+from quant_data_platform.core.json_io import read_json, write_json
 from quant_data_platform.core.paths import qdp_paths
-from quant_data_platform.memmap.sharded import _project_feature_store_to_schema, _symbol_blocks, validate_sharded_memmap_manifest
+from quant_data_platform.memmap import sharded
+from quant_data_platform.memmap.sharded import (
+    ShardedMemmapConfig,
+    _build_shards_parallel,
+    _project_feature_store_to_schema,
+    _symbol_blocks,
+    validate_sharded_memmap_manifest,
+)
 
 
 def test_symbol_blocks_preserve_order() -> None:
@@ -120,5 +127,63 @@ def test_cli_sharded_dry_run_writes_plan(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("QDP_WORKSPACE_ROOT", str(tmp_path))
     (tmp_path / "brain").mkdir(parents=True)
     (tmp_path / "brain" / "brain_manifest.json").write_text('{"brain_type": "main"}', encoding="utf-8")
-    assert cli_main(["build-sharded-memmap", "--dry-run", "--json"]) == 0
-    assert (qdp_paths(tmp_path).memmap_dir / "sharded_memmap_plan.json").exists()
+    assert cli_main(["build-sharded-memmap", "--dry-run", "--workers", "4", "--json"]) == 0
+    plan = qdp_paths(tmp_path).memmap_dir / "sharded_memmap_plan.json"
+    assert plan.exists()
+    assert read_json(plan)["workers"] == 4
+
+
+def test_sharded_config_normalizes_workers() -> None:
+    assert ShardedMemmapConfig(workers=0).normalized().workers == 1
+    assert ShardedMemmapConfig(workers=4).normalized().workers == 4
+
+
+def test_build_shards_parallel_uses_worker_safe_shard_writes(tmp_path, monkeypatch) -> None:
+    class FakeLake:
+        root = tmp_path / "lake"
+
+    def fake_worker(**kwargs):
+        year = int(kwargs["year"])
+        block_id = int(kwargs["block_id"])
+        out_root = tmp_path / "out"
+        shard_dir = out_root / f"year={year}" / f"block={block_id:04d}"
+        shard_dir.mkdir(parents=True, exist_ok=True)
+        shard_manifest = shard_dir / "shard_manifest.json"
+        payload = {
+            "status": "completed",
+            "shard_key": f"year={year}/block={block_id:04d}",
+            "year": year,
+            "block_id": block_id,
+            "feature_schema_hash": "schema",
+            "feature_columns": ["a", "b"],
+            "feature_store_path": str(shard_dir / "feature.dat"),
+            "label_manifest_json": str(shard_dir / "labels.json"),
+            "sample_index_path": str(shard_dir / "sample.parquet"),
+            "shard_manifest_json": str(shard_manifest),
+        }
+        write_json(shard_manifest, payload)
+        return payload
+
+    monkeypatch.setattr(sharded, "_build_one_shard_worker", fake_worker)
+
+    results = _build_shards_parallel(
+        lake=FakeLake(),
+        dataset_id="policy_input_bundle__x",
+        shard_specs=[
+            {"shard_key": "year=2024/block=0000", "year": 2024, "block_id": 0, "symbols": ["A"]},
+            {"shard_key": "year=2024/block=0001", "year": 2024, "block_id": 1, "symbols": ["B"]},
+        ],
+        canonical_start=np.datetime64("2024-01-01"),
+        canonical_end=np.datetime64("2024-12-31"),
+        cfg=ShardedMemmapConfig(workers=2).normalized(),
+        out_root=tmp_path / "out",
+        cumulative_horizons=(1, 3, 5),
+        expected_feature_columns=["a", "b"],
+        progress_path=tmp_path / "progress.json",
+        planned_count=2,
+        completed_so_far=0,
+    )
+
+    assert sorted(results) == ["year=2024/block=0000", "year=2024/block=0001"]
+    assert (tmp_path / "progress.json").exists()
+    assert all(item["status"] == "completed" for item in results.values())

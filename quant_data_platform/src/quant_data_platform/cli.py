@@ -70,6 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     sharded.add_argument("--max-feature-columns", type=int, default=256)
     sharded.add_argument("--min-lookback-valid-ratio", type=float, default=0.80)
     sharded.add_argument("--tag", default="")
+    sharded.add_argument("--workers", type=int, default=1)
     sharded.add_argument("--no-resume", action="store_true")
     sharded.add_argument("--dry-run", action="store_true")
     sharded.add_argument("--json", action="store_true")
@@ -144,6 +145,7 @@ def main(argv: list[str] | None = None) -> int:
                 paths,
                 profile=str(args.profile or ""),
                 max_universe_size=int(args.max_universe_size),
+                workers=int(args.workers),
                 write=True,
             )
         else:
@@ -164,6 +166,7 @@ def main(argv: list[str] | None = None) -> int:
                     min_lookback_valid_ratio=float(args.min_lookback_valid_ratio),
                     tag=str(args.tag or ""),
                     resume=not bool(args.no_resume),
+                    workers=int(args.workers),
                 ),
             )
         _print(payload, as_json=bool(args.json))
