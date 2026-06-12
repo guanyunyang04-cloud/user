@@ -58,6 +58,7 @@
 - `always_commands` 保留为兼容和收尾守卫入口，不代表每次小改都要全量执行；`deferred_commands` / `deferred_long_commands` 只用于慢速、研究、维护或最终确认批次。
 - 普通 docs-only 只需要 `git diff --check`；brain 文档变更再加 `tools.brain.doc_guard check --files <paths>` 或 `--scope changed`。单模块 Python 变更只跑对应测试或 nodeid；shared helper、protocol、schema、config、active/execution 边界变更必须扩大测试半径或进入 manual review。
 - 测试编写保持最小 fixture、最小断言面、无真实网络、无真实长训练；单测只证明数据、label、loss、bridge、gate、guard 合约，不用单测证明模型收益强。慢测必须带 `slow` / `research` / `guard` / `external` 等 marker 和明确触发条件。
+- 主脑工具轻量 lane：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest tools/brain/tests -m "smoke and not slow and not external and not benchmark" -q`；完整 `tools/brain/tests` 保留为维护 / 收尾守卫，不作为普通小改默认包。
 - `tools.brain.workflow health --mode full`、裸 `doc_guard check`、`audit-brain --scope all` 属于维护/收尾守卫；不得作为每次小改默认测试包。`integrity_check` 可作为结构改动的轻量定位守卫。`daily_research/output/active_execution_strategy.json` 一旦有 diff 是 critical blocker，不进入普通测试推荐。
 - 默认代码改动采用 objective-first direct-change：先判断当前目标需要什么形态，再决定小改、重构、删除或重写；不为了保持旧结构、旧测试或旧入口而增加复杂度。
 - 若小补丁能干净完成目标，就小改；若小补丁会引入新分支、新 fallback、新兼容层、新配置开关或重复真源，优先收敛到单一路径并删除过时路径。
