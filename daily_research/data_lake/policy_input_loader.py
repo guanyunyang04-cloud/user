@@ -106,6 +106,29 @@ def _read_sidecar_table_paths(paths: dict[str, Any]) -> pd.DataFrame:
     return _read_table_paths(paths, data_key="silver_domain_data", manifest_keys=("shard_manifest",))
 
 
+def _read_parquet_projected(path: str | Path, columns: list[str] | None = None) -> pd.DataFrame:
+    parquet_path = Path(path)
+    requested = list(dict.fromkeys(str(column) for column in list(columns or []) if str(column).strip()))
+    if not requested:
+        return pd.read_parquet(parquet_path)
+    try:
+        import pyarrow.parquet as pq
+
+        available = set(pq.read_schema(parquet_path).names)
+        selected = [column for column in requested if column in available]
+        if selected:
+            return pd.read_parquet(parquet_path, columns=selected)
+    except Exception:
+        pass
+    try:
+        return pd.read_parquet(parquet_path, columns=requested)
+    except Exception as exc:
+        message = str(exc).lower()
+        if any(token in message for token in ("no match", "not found", "missing", "fieldref")):
+            return pd.read_parquet(parquet_path)
+        raise
+
+
 def _read_table_paths(
     paths: dict[str, Any],
     *,
@@ -117,7 +140,7 @@ def _read_table_paths(
         candidates = sorted(glob.glob(raw)) if "*" in raw else [raw]
         existing = [path for path in candidates if Path(path).exists()]
         if existing:
-            frames = [pd.read_parquet(path) for path in existing]
+            frames = [_read_parquet_projected(path) for path in existing]
             return pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
     for manifest_key in manifest_keys:
         manifest_path = Path(str(paths.get(manifest_key, "") or ""))
@@ -132,7 +155,7 @@ def _read_table_paths(
         ]
         existing = [path for path in shard_paths if Path(path).exists()]
         if existing:
-            frames = [pd.read_parquet(path) for path in existing]
+            frames = [_read_parquet_projected(path) for path in existing]
             return pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
     return pd.DataFrame()
 
@@ -193,12 +216,12 @@ def _read_table_paths_filtered(
         if not parquet_path.exists():
             continue
         try:
-            frame = pd.read_parquet(parquet_path, columns=requested_columns or None)
+            frame = _read_parquet_projected(parquet_path, requested_columns or None)
         except Exception as exc:
             message = str(exc).lower()
             if not requested_columns or not any(token in message for token in ("no match", "not found", "missing", "fieldref")):
                 raise
-            frame = pd.read_parquet(parquet_path)
+            frame = _read_parquet_projected(parquet_path)
             if requested_columns:
                 frame = frame.reindex(columns=[column for column in requested_columns if column in frame.columns])
         if "trade_date" in frame.columns:
@@ -326,7 +349,15 @@ def _load_valuation_sidecar_frames(
     end_date: str,
 ) -> tuple[dict[str, pd.DataFrame], pd.DataFrame, dict[str, Any]]:
     sidecar_id = _sidecar_dataset_ids(metadata).get(DataDomain.VALUATION, "")
-    frame, sidecar_metadata = _read_domain_sidecar_frame(lake, sidecar_id)
+    metric_candidates = ["turn", "pctChg", "peTTM", "pbMRQ", "psTTM", "pcfNcfTTM"]
+    frame, sidecar_metadata = _read_domain_sidecar_frame_filtered(
+        lake,
+        sidecar_id,
+        start_date=start_date,
+        end_date=end_date,
+        columns=["symbol", "trade_date", *metric_candidates],
+        symbols=universe,
+    )
     if frame.empty:
         return {}, pd.DataFrame(), {"dataset_id": str(sidecar_id), "available": False, "reason": "missing_or_empty"}
     data = frame.copy()
@@ -339,7 +370,7 @@ def _load_valuation_sidecar_frames(
     data = data.loc[(data["trade_date"] >= start) & (data["trade_date"] <= end) & data["symbol"].isin(set(universe))].copy()
     if data.empty:
         return {}, pd.DataFrame(), {"dataset_id": str(sidecar_id), "available": False, "reason": "no_overlap"}
-    metric_fields = [column for column in ("turn", "pctChg", "peTTM", "pbMRQ", "psTTM", "pcfNcfTTM") if column in data.columns]
+    metric_fields = [column for column in metric_candidates if column in data.columns]
     frames: dict[str, pd.DataFrame] = {}
     for column in metric_fields:
         wide = data.pivot(index="trade_date", columns="symbol", values=column).sort_index()
@@ -374,7 +405,14 @@ def _load_industry_sidecar_metadata(
     end_date: str,
 ) -> tuple[dict[str, pd.DataFrame], dict[str, Any]]:
     sidecar_id = _sidecar_dataset_ids(metadata).get(DataDomain.INDUSTRY_CONCEPT, "")
-    frame, sidecar_metadata = _read_domain_sidecar_frame(lake, sidecar_id)
+    frame, sidecar_metadata = _read_domain_sidecar_frame_filtered(
+        lake,
+        sidecar_id,
+        start_date=start_date,
+        end_date=end_date,
+        columns=["symbol", "trade_date", "industry"],
+        symbols=universe,
+    )
     if frame.empty:
         return {}, {"dataset_id": str(sidecar_id), "available": False, "reason": "missing_or_empty"}
     data = frame.copy()
@@ -788,6 +826,10 @@ def load_policy_inputs_from_lake(
     market_path = str(paths.get("bronze_market_data", "") or "")
     if not market_path:
         raise ValueError(f"lake_coverage_blocker: dataset has no bronze_market_data path: {dataset_id}")
+    can_push_market_symbols = bool(universe) and not str(pool_view_id or "").strip() and pool_view_spec is None
+    requested_market_symbols = list(universe or []) if can_push_market_symbols else []
+    if requested_market_symbols and extra_stocks:
+        requested_market_symbols.extend(list(extra_stocks))
     market = _read_table_paths_filtered(
         paths,
         data_key="bronze_market_data",
@@ -795,6 +837,7 @@ def load_policy_inputs_from_lake(
         start_date=start_date,
         end_date=end_date,
         columns=["trade_date", "symbol", "open", "high", "low", "close", "volume", "amount"],
+        symbols=requested_market_symbols or None,
     )
     if market.empty:
         raise ValueError(f"lake_coverage_blocker: no readable bronze_market_data rows for lake dataset {dataset_id}")
@@ -912,7 +955,10 @@ def load_policy_inputs_from_lake(
         membership_path = str(paths.get("silver_membership", "") or "")
         if not membership_path:
             raise ValueError(f"lake_coverage_blocker: dataset has no silver_membership path: {dataset_id}")
-        membership_raw = pd.read_parquet(membership_path)
+        membership_raw = _read_parquet_projected(
+            membership_path,
+            ["date", "trade_date", "symbol", "stock", "in_pool", *resolved_universe],
+        )
         if "trade_date" in membership_raw.columns:
             membership_raw = membership_raw.rename(columns={"trade_date": "date"})
         if "date" in membership_raw.columns:

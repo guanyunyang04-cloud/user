@@ -375,6 +375,45 @@ class ResearchDataLakeTest(unittest.TestCase):
         self.assertEqual(coverage["benchmark_open_source"], "fallback_close")
         self.assertEqual(coverage["benchmark_open_rows"], 3)
 
+    def test_policy_input_loader_pushes_symbol_filters_to_market_read(self) -> None:
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
+        stocks = ["000001.SZ", "000002.SZ", "600000.SH"]
+        market_frames, membership_frame, feature_frames = _synthetic_policy_bundle_parts(dates, stocks=stocks)
+
+        with TemporaryDirectory() as temp_dir:
+            lake = ResearchDataLake(Path(temp_dir))
+            record = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic"},
+                market_frames=market_frames,
+                benchmark_close=pd.Series(4000.0, index=dates, name="000300.SH"),
+                membership_frame=membership_frame,
+                feature_frames=feature_frames,
+                source="synthetic",
+            )
+            observed: list[list[str]] = []
+            from daily_research.data_lake import policy_input_loader as loader_module
+
+            original = loader_module._read_table_paths_filtered
+
+            def spy(*args, **kwargs):
+                if kwargs.get("data_key") == "bronze_market_data":
+                    observed.append(list(kwargs.get("symbols") or []))
+                return original(*args, **kwargs)
+
+            with mock.patch.object(loader_module, "_read_table_paths_filtered", side_effect=spy):
+                prepared = load_policy_inputs_from_lake(
+                    lake=lake,
+                    dataset_id=record.dataset_id,
+                    start_date="2026-01-05",
+                    end_date="2026-01-07",
+                    universe=["000002.SZ"],
+                    min_trading_days=1,
+                )
+
+        self.assertEqual(observed, [["000002.SZ"]])
+        self.assertEqual(tuple(prepared.universe), ("000002.SZ",))
+        self.assertEqual(list(prepared.close.columns), ["000002.SZ"])
+
     def test_prepare_policy_inputs_lake_uses_data_lake(self) -> None:
         dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
         stocks = ["000001.SZ", "000002.SZ", "000003.SZ"]

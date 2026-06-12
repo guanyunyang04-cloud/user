@@ -688,18 +688,29 @@ def _write_sample_index(
         finite = np.isfinite(np.asarray(arr)).all(axis=2) if len(shape) == 3 else np.isfinite(np.asarray(arr))
         valid &= finite
         del arr
-    rows = []
-    for date_pos, stock_pos in np.argwhere(valid):
-        rows.append(
+    date_pos, stock_pos = np.nonzero(valid)
+    if len(date_pos):
+        date_values = np.asarray([pd.Timestamp(dt).strftime("%Y-%m-%d") for dt in dates], dtype=object)
+        symbol_values = np.asarray([str(symbol) for symbol in symbols], dtype=object)
+        sample_index = pd.DataFrame(
             {
-                "date": pd.Timestamp(dates[int(date_pos)]).strftime("%Y-%m-%d"),
-                "stock": str(symbols[int(stock_pos)]),
-                "date_pos": int(date_pos),
-                "stock_pos": int(stock_pos),
-                "history_valid_ratio": float(history[int(date_pos), int(stock_pos)]),
+                "date": date_values[date_pos],
+                "stock": symbol_values[stock_pos],
+                "date_pos": date_pos.astype(np.int32, copy=False),
+                "stock_pos": stock_pos.astype(np.int32, copy=False),
+                "history_valid_ratio": history[date_pos, stock_pos].astype(float, copy=False),
             }
         )
-    sample_index = pd.DataFrame(rows)
+    else:
+        sample_index = pd.DataFrame(
+            {
+                "date": pd.Series(dtype="object"),
+                "stock": pd.Series(dtype="object"),
+                "date_pos": pd.Series(dtype="int32"),
+                "stock_pos": pd.Series(dtype="int32"),
+                "history_valid_ratio": pd.Series(dtype="float64"),
+            }
+        )
     path = shard_dir / "sample_index.parquet"
     sample_index.to_parquet(path, index=False)
     return path, int(len(sample_index))

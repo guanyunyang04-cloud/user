@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 
 from quant_data_platform.cli import main as cli_main
 from quant_data_platform.core.json_io import read_json, write_json
@@ -11,6 +12,7 @@ from quant_data_platform.memmap.sharded import (
     _build_shards_parallel,
     _project_feature_store_to_schema,
     _symbol_blocks,
+    _write_sample_index,
     validate_sharded_memmap_manifest,
 )
 
@@ -187,3 +189,54 @@ def test_build_shards_parallel_uses_worker_safe_shard_writes(tmp_path, monkeypat
     assert sorted(results) == ["year=2024/block=0000", "year=2024/block=0001"]
     assert (tmp_path / "progress.json").exists()
     assert all(item["status"] == "completed" for item in results.values())
+
+
+def test_write_sample_index_vectorized_filters_valid_rows(tmp_path) -> None:
+    class Prepared:
+        membership_frame = pd.DataFrame(
+            [[True, True], [True, False]],
+            index=pd.to_datetime(["2024-01-02", "2024-01-03"]),
+            columns=["AAA.SZ", "BBB.SZ"],
+        )
+
+    dates = list(pd.to_datetime(["2024-01-02", "2024-01-03"]))
+    symbols = ["AAA.SZ", "BBB.SZ"]
+    history_ratio = pd.DataFrame(
+        [[0.9, 0.7], [0.8, 0.95]],
+        index=pd.to_datetime(["2024-01-02", "2024-01-03"]),
+        columns=symbols,
+    )
+    label_dir = tmp_path / "labels"
+    label_dir.mkdir(parents=True)
+    arrays = {}
+    for name, shape in {
+        "daily_excess_return": (2, 2, 1),
+        "cumulative_excess_return": (2, 2, 1),
+        "rank_by_horizon": (2, 2, 1),
+        "max_drawdown_20d": (2, 2),
+        "worst_1d_20d": (2, 2),
+        "upside_20d": (2, 2),
+    }.items():
+        path = label_dir / f"{name}.dat"
+        store = np.memmap(path, dtype="float32", mode="w+", shape=shape)
+        store[...] = 1.0
+        store.flush()
+        del store
+        arrays[name] = {"path": str(path), "shape": list(shape)}
+
+    sample_path, sample_count = _write_sample_index(
+        shard_dir=tmp_path,
+        prepared=Prepared(),
+        dates=dates,
+        symbols=symbols,
+        history_ratio=history_ratio,
+        label_manifest={"arrays": arrays},
+        min_lookback_valid_ratio=0.8,
+    )
+
+    frame = pd.read_parquet(sample_path)
+    assert sample_count == 2
+    assert frame[["date", "stock", "date_pos", "stock_pos"]].to_dict("records") == [
+        {"date": "2024-01-02", "stock": "AAA.SZ", "date_pos": 0, "stock_pos": 0},
+        {"date": "2024-01-03", "stock": "AAA.SZ", "date_pos": 1, "stock_pos": 0},
+    ]
