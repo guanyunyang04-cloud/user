@@ -5,6 +5,7 @@
 ## 默认操作纪律
 - 默认工作分支：`main`；当前工作区根目录：`H:\quant_project`。
 - Python 入口固定为 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`；进入本分脑前，必须先由主脑 `tools.brain.workflow capsule` 路由到 `daily_research`。
+- 继承主脑个人研究者直接行动风格：直接实现、直接重构、直接清理旧路径；验证只需足够支撑当前结论。
 - `H:\new_tdx64\PYPlugins\user` 已退出本项目主链路；历史 reference 中旧路径只作历史证据，不作为当前入口。
 - 不使用 `KMP_DUPLICATE_LIB_OK` 作为默认方案。
 - 继承主脑项目任务命名空间：普通读写、短脚本、测试、临时产物、提交和轮询 / 异步任务默认限制在 `daily_research` profile；其它项目 dirty/output/process 只作摘要报告，不下钻、不复用、不写成本任务证据，除非用户扩展范围或声明 lease。
@@ -43,6 +44,7 @@
 - 标准包入口仍是 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.run_alpha_path20_protocol`；直接脚本只作为容错 smoke。
 - V2 数据集、score bridge、candidate review、bad-month attribution、risk overlay、selective throttle、state sizing、local-state input/loss 与 horizon repair 的长命令族已下沉到 `daily_research/brain/references/daily_research_current_frontier_compaction_20260603.md` 及对应 dated references。
 - 当前下一步只允许 research-only score-backtest bridge 与候选对照；不跑 liquid800、allocator、replay、live/default、promotion，除非后续 gate 与授权明确放行。
+- 新训练默认消费 QDP canonical full sharded memmap / registry；旧每实验单体 `forecast_*.dat` builder、旧 copied manifest 兼容和旧 path_policy memmap 回归只作 legacy 参考，不进入常规研究门禁。
 
 ## 实验预算可信度纪律
 - 启动任何会影响模型输入、架构、输出、loss、horizon grid、stage gate 或后续方向选择的实验前，必须声明证据等级：`smoke_only`、`scout_only`、`evidence_grade` 或 `promotion_grade`。
@@ -75,6 +77,7 @@
 - 轻量 smoke lane：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest daily_research -m "smoke and not slow and not research and not data_heavy and not external and not benchmark" -q`。该 lane 只收集少数低成本合同测试，适合 brain / 配置 / 测试治理闭环。
 - 项目普通车道只跑非慢速测试：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest daily_research -m "not slow and not research and not data_heavy and not external and not benchmark" -q`。`forecast_training`、`forecast_memmap_dataset`、`rl_protocol` 等训练 / memmap / 研究协议测试属于 `research` 或 `data_heavy` 车道，按 explicit nodeid 或阶段收口运行。
 - `continuous_policy`、`data_lake`、`data_platform`、`execution` 的测试由根级 `daily_research/conftest.py` 自动归入 `research`、`data_heavy`、`external`、`guard`、`integration` 等 lane；新增重测试先放显式 lane，不进入默认开发闭环。
+- 旧 `path_policy/tests/test_forecast_memmap_dataset.py` 属于 legacy 单体 memmap 保护网；QDP sharded memmap 成为默认后，不作为常规 blocking 测试。
 - 高频硬边界：`git diff -- daily_research/output/active_execution_strategy.json` 和 `git diff --check`；active artifact 有 diff 时停止并回到 promotion authority。
 - `current-frontier` 只在回答当前研究阶段、更新 frontier 判断或写入 evidence/state 前运行。
 - `doc_guard` / `integrity_check` / `brain-burden-audit` 属于 brain 文档、workflow、registry、skill 或收尾维护守卫，不作为普通代码小改默认测试包。

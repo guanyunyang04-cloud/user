@@ -1,10 +1,11 @@
 # Daily Research 身份层
 
-快照日期：`2026-04-24`
+快照日期：`2026-06-12`
 
 ## 1. 我是谁
 - `daily_research` 是当前工作区的正式生产研究与执行主线。
 - 它不是单纯的研究仓库，而是一个同时负责研究、formal 验证、recent 验证、production full-fit、live 执行和接管治理的项目级大脑。
+- 在当前执行端冻结期，它首先服务个人研究推进：快速实验、数据/特征/模型重构、旧机制清理和可回滚迭代优先；团队式门禁、旧兼容和重测试不是默认目标。
 - 项目设计原则不是“某个 agent 很强”，而是：
   - `Agent 无状态，项目大脑有状态。`
 
@@ -59,3 +60,4 @@
 - 不得把可变 live 默认、最新分数或实验指标长期写在 `identity_layer.md`。
 - 不得继续把宽扫 hand-crafted repair 当默认主研究路线。
 - 不得再把 `baseline_current` 写成 strongest-model 当前 recent winner。
+- 不得让旧 Stage、旧 payload、旧单体 memmap、旧 path_policy 测试或旧兼容入口阻塞 v2 / canonical 数据基底上的新研究；有真实证据价值时只作历史对照。

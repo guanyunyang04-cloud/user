@@ -1,40 +1,39 @@
 # 主脑治理层
 
-快照日期：`2026-05-23`
+快照日期：`2026-06-12`
 
 ## 1. 治理目标
 - 保证主脑是唯一 agent 接管入口。
 - 保证任务先经主脑路由，再进入明确分脑。
-- 保证关键状态、规则、入口和风险始终外显。
+- 保证关键状态、入口、硬边界和写回位置始终外显。
 - 在结构漂移、状态过期、接管失真时先纠偏，再执行。
+- 治理服务个人研究效率；默认不制造团队式审批、兼容和测试负担。
 
 ## 2. 标准闭环
 1. `Wake`：运行 `tools.brain.workflow capsule`，读取主脑上下文。
 2. `Route`：判断任务属于 workspace governance 还是某个分脑。
 3. `Select`：agent 结合 route evidence、path evidence、manifest 与用户意图写下最终 `agent_selected_brain_id`。
-4. `Preflight`：按 selected project profile 过目标、规则、教训、依赖四检。
+4. `Preflight`：只确认目标、项目归属、少数硬边界和当前可用入口。
 5. `Act`：执行动作并保留证据。
-6. `Complete`：验证通过后按项目范围提交；workspace 治理提交使用 `workspace-brain:` 前缀。
+6. `Complete`：用足够支撑结论的轻量证据收尾；需要保存的代码变更按项目范围提交。
 7. `Reflect`：把结果沉淀回状态、知识、操作、治理或 reference。
 8. `Replan`：如结果改写路径，立刻更新 state 与 next step。
 
 ## 2.1 Agent Meta Protocol
 - 元能力属于 agent；brain 是持久化载体，负责保存协议、证据、守卫和写回路径；capsule、audit 和 guard 只是传感器。
-- 闭环为 `Brain primes agent -> Agent observes -> Detect -> Classify -> Route -> Propose -> User approves implementation -> Verify -> Brain updates -> Future agent reuses`。
-- `before_final` 是闭合边界的元问题发现，不是固定 checklist：对象层任务准备交付但 final answer 尚未发出时，agent 低噪声判断是否暴露了框架、标准、方法、权威排序、评价机制或学习显著性问题。
-- 研究 / 模型结论闭合前必须做 `scope-grade alignment`：结论层级必须匹配 evidence scope/grade，至少核对 `universe_scope`、dataset/pool 绑定、seed count、budget class、gate result、diagnostic-vs-evidence-grade status；不匹配时先降级措辞，再决定是否提出协议演化。
-- 若工具 / audit 显示 clear，但人类反馈或任务事实说明闭合判断不成立，clear 只能作为传感器信号；agent 必须优先说明元问题，并对低风险项直接生成 `proposed` agent-learning proposal。
-- 第一版权限为 `propose_only`：agent 可自动发现、分级、提示、审计和生成低风险 proposal；核心 brain docs、workflow、skill、guard、tests 写入仍需用户授权。高风险、不清晰或会改变核心行为的 proposal 创建前先询问。
-- capsule 若返回 `agent_meta.review.status != clear`，agent 必须在最终答复或后续计划中说明信号、目标层、writeback route 和验证要求。
-- 用户说“这应该学会 / 为什么没提示 / 以后都要”，或发现低预算证据污染模型质量结论时，优先创建 agent learning proposal 或运行 `brain_runtime.py agent-meta-audit --cwd . --mode compact`。
-- agent 必须主动提示待决 agent learning proposal：若队列中存在 `proposed` 或 `approved`，在下一次实质进展更新或最终答复中列出需用户批准或跟进的学习项；若已检查且没有待决项，也要简短说明当前无待批准 proposal。
-- daily_research 的低预算实验纪律由分脑知识中枢维护；主脑只保存 agent 元能力边界和路由责任。
+- 默认闭环为 `Brain primes agent -> Agent acts -> Evidence captured -> Brain updates when useful`。
+- `before_final` 不是固定 checklist；只在发现框架、权威排序、评价机制或长期记忆偏差时触发。
+- 研究 / 模型结论闭合前只做必要的证据层级对齐：不要把诊断、低预算、未完成、样本太窄的结果说成高等级结论。
+- 低风险脑区语义修正、旧流程降级和文档收敛可在用户明确“就这么办”后直接实施；不再强制 proposal 队列。
+- 高风险项才需要先停下来：改变 live/default、active artifact、不可重建数据、外部服务状态、密钥、PIT/no-leakage 规则或跨项目所有权。
+- daily_research 的实验纪律由分脑维护；主脑只保存路由、硬边界和个人研究者默认风格。
 
 ## 2.2 Brain Burden Governance
 - 规则分级为 `hard_safety`、`operating_default`、`deep_dive`、`deprecated`；安全硬规则不可自动绕过，流程默认可被 agent 临时压缩但必须说明理由。
 - 当规则冲突、文档读取成本超过任务收益、兼容入口造成歧义、测试锁住旧设计或 agent 被迫执行无关流程时，记录 `brain_rule_obstruction`，目标层为 `brain_burden_governance`。
 - 默认热路径预算由 `brain/brain_manifest.json#brain_burden_contract` 管理；超预算内容迁入 references 或 runtime help，不继续堆进 skill / state / operations。
 - 兼容入口必须有 `owner`、`usage_evidence`、`delete_by`；没有证据的兼容入口直接删除。
+- 重流程 skill、旧测试、旧 wrapper 和旧数据入口不得因“曾经存在”自动保留；当前主线不需要就清理或降级为 explicit-only。
 - 审计入口：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py brain-burden-audit --cwd . --mode compact`。
 
 ## 2.3 项目任务命名空间与并行所有权隔离

@@ -1,7 +1,7 @@
 {
   "brain_type": "sub_brain",
   "brain_id": "daily_research",
-  "brain_version": "2026-04-13",
+  "brain_version": "2026-06-12",
   "parent_brain": "brain/brain_manifest.json",
   "attach_status": "attached_to_main_brain",
   "entrypoint": "daily_research/brain/identity_layer.md",
@@ -9,6 +9,7 @@
   "shared_contract_source": "brain/brain_manifest.json#shared_regional_brain_contract",
   "regional_specialization": {
     "role": "production_research_and_execution_cortex",
+    "personal_researcher_default": "direct_action_with_live_execution_hard_boundaries",
     "priority_regions": ["orientation_system", "long_term_memory", "executive_control", "sensorimotor_loop"],
     "focus_modules": ["state_center", "knowledge_center", "operations_center"],
     "body_entry_priority": [
@@ -103,6 +104,26 @@
     "gemini_frontend_ps1": "daily_research/tools/gemini_frontend.ps1"
   },
   "project_profile": {
+    "personal_researcher_contract": {
+      "default_mode": "direct_action",
+      "legacy_policy": "old_payloads_and_legacy_memmap_tests_do_not_block_v2_or_qdp_canonical_research",
+      "test_policy": "changed_surface_or_smoke_by_default",
+      "explicit_only_skills": [
+        "subagent-driven-development",
+        "requesting-code-review",
+        "finishing-a-development-branch",
+        "using-git-worktrees",
+        "verification-before-completion",
+        "test-driven-development",
+        "testing-strategies"
+      ],
+      "hard_boundaries": [
+        "active_execution_strategy",
+        "live_default_paper_broker_or_promotion_change",
+        "pit_or_no_leakage_violation",
+        "unique_research_evidence_or_canonical_data_loss"
+      ]
+    },
     "guard_profile": {
       "active_artifact_guard": true,
       "artifact_freshness": true,

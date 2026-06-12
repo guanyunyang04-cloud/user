@@ -4,6 +4,13 @@ description: Use when the user mentions brain, 脑区, 项目大脑, 接管, cap
 ---
 
 # Workspace Brain Runtime
+## Personal Researcher Default
+This workspace is a personal research brain, not a team process gate. Default to objective-first direct action after the user approves a direction.
+- Optimize for research progress, useful artifacts, simple current architecture, and git rollback.
+- Treat rules, tests, guards, proposals, commits, and local skills as tools, not rituals.
+- Delete or rewrite stale code, tests, wrappers, compatibility paths, and old docs when they no longer serve the current system.
+- Keep only hard boundaries: canonical/unique data, PIT/no-leakage, live/default or active artifacts, secrets/external services, and cross-project dirty ownership.
+
 ## First Hop
 Use the runtime and workflow capsule as sensors; `brain/brain_manifest.json` is the contract truth.
 ```powershell
@@ -36,6 +43,7 @@ Internal research code, brain tooling, and project scripts default to objective-
 - Optimize for current goal closure, system simplicity, verification, and git rollback; not for small diffs or legacy compatibility rituals.
 - Compatibility is evidence-gated: keep old entrypoints, wrappers, aliases, and compatibility layers only with real callers, evidence value, or external interface duty.
 - Remove stale shells/tests/helpers when they no longer serve the current system.
+- Heavy workflow skills are explicit-only here: `subagent-driven-development`, `requesting-code-review`, `finishing-a-development-branch`, `using-git-worktrees`, `verification-before-completion`, `test-driven-development`, and `testing-strategies`.
 - Safety boundaries still come from `project_profile`, active/evidence guards, unrecoverable artifacts, secrets, live/default execution, and cross-project namespace rules.
 
 ## Init And Register
@@ -56,8 +64,8 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --
 ```
 Compact health is a fast takeover summary only; first hop stays `detect` + lite capsule. `tools.brain.workflow health` defaults to compact checks; use `--mode standard` for lightweight doc scope and `--mode full` or explicit include flags for project consistency / OpenMP strict lanes. Run full health, audits, and project-profile guards only for maintenance, diagnosis, or completion verification. Surface proposed or approved agent-learning items when checked.
 
-## Proposal-Only Evolution
-Agent Meta Protocol learning is proposal-only. Low-risk observations may create `proposed` records; protocol, workflow, skill, guard, or behavior changes require explicit user approval before implementation.
+## Direct Evolution
+Agent Meta Protocol remains a sensor and proposal queue for learning opportunities. Low-risk observations may be written as proposals when useful, but approved brain/tooling directions are implemented directly under the personal researcher contract. Ask first only for high-risk boundaries.
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py proposal --cwd . --title "<short>" --trigger "<fact>" --evidence "<path or observation>" --recommendation "<proposal>" --severity info --owner-brain workspace --writeback-target brain/references/
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py list-proposals --cwd .
