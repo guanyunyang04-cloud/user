@@ -27,7 +27,7 @@ from traditional_quant_research.research_panel import (
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/full_cycle_factor_diagnostics")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-02_full_cycle_factor_diagnostics.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-02_full_cycle_factor_diagnostics.md")
 DEFAULT_HORIZONS = (1, 5, 20)
 DEFAULT_TOP_N_VALUES = (50, 100, 200)
 

@@ -47,7 +47,7 @@ from traditional_quant_research.experiments.two_day_kama_atr_breakout_analysis i
 
 DEFAULT_ML_RUN_ROOT = Path("traditional_quant_research/output/experiments/all_limitup_ml_strategy_research")
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/all_limitup_followup_research")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-07_all_limitup_followup_research.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-07_all_limitup_followup_research.md")
 LABEL_WINDOWS = (1, 3, 5, 10, 20)
 PRACTICAL_POOLS = ("executable_only", "not_near_limit_open", "all_open_known")
 PRACTICAL_STRATEGY_ID = "executable_only__lgbm_risk_rank__pos1"

@@ -16,7 +16,7 @@ from traditional_quant_research.size_source import normalize_cninfo_share_change
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/v2_cninfo_size_event_audit")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-03_v2_cninfo_size_event_audit.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-03_v2_cninfo_size_event_audit.md")
 DEFAULT_SYMBOLS = ("600000.SH", "000001.SZ", "000002.SZ", "601398.SH")
 DEFAULT_YEARS = tuple(range(2016, 2027))
 

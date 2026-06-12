@@ -23,7 +23,7 @@ from traditional_quant_research.research_panel import (
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/backtest_protocol_upgrade")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-02_backtest_protocol_upgrade.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-02_backtest_protocol_upgrade.md")
 
 
 def run_backtest_protocol_upgrade(

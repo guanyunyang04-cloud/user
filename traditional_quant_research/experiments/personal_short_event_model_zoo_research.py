@@ -58,7 +58,7 @@ from traditional_quant_research.experiments.two_day_kama_atr_breakout_analysis i
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/personal_short_event_model_zoo_research")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-07_personal_short_event_model_zoo_research.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-07_personal_short_event_model_zoo_research.md")
 DEFAULT_SCORE_FLOORS = (-np.inf, 0.0, 0.5, 1.0, 1.5, 2.0)
 DEFAULT_SCORE_QUANTILES = (np.nan, 0.80, 0.90, 0.95)
 DEFAULT_MAX_POSITIONS = (1, 2)

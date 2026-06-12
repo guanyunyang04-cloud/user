@@ -25,7 +25,7 @@ from traditional_quant_research.experiments.multifactor_baseline import parse_se
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/low_corr_regime_yearly_validation")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-02_low_corr_regime_yearly_validation.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_regime_yearly_validation.md")
 DEFAULT_YEARS = (2024, 2025, 2026)
 DEFAULT_SELECTION_FILTERS = "log_amount_mean_20d_z>=-0.8,momentum_20d_z>=-0.8"
 DEFAULT_MARKET_RET_THRESHOLDS = (-0.03, -0.02, -0.01)

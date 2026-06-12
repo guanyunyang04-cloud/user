@@ -18,7 +18,7 @@ DEFAULT_EVENT_RUN_DIR = Path(
 )
 DEFAULT_EVENT_FILE = DEFAULT_EVENT_RUN_DIR / "all_limitup_events_tplus1_vector.csv"
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/short_limitup_strategy_search")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-04_short_limitup_strategy_search.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-04_short_limitup_strategy_search.md")
 
 DEFAULT_SELL_WINDOWS = (1, 3, 5, 10, 20)
 DEFAULT_STOP_LOSSES = (5.0, 7.0, 10.0)

@@ -28,7 +28,7 @@ from traditional_quant_research.experiments.multifactor_baseline import parse_se
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/low_corr_regime_capital_yearly_validation")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-02_low_corr_regime_capital_yearly_validation.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_regime_capital_yearly_validation.md")
 DEFAULT_YEARS = (2024, 2025, 2026)
 DEFAULT_FINAL_END_DATE = "2026-06-01"
 

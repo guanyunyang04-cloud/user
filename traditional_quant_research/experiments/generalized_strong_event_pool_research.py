@@ -52,7 +52,7 @@ from traditional_quant_research.experiments.two_day_kama_atr_breakout_analysis i
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/generalized_strong_event_pool_research")
 DEFAULT_CACHE_DIR = Path("traditional_quant_research/cache/generalized_strong_events")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-07_generalized_strong_event_pool_research.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-07_generalized_strong_event_pool_research.md")
 DEFAULT_YEARS = tuple(range(2017, 2027))
 DEFAULT_MODEL_PARAMS: dict[str, Any] = {
     "n_estimators": 128,

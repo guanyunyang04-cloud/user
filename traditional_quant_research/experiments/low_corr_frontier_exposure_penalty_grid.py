@@ -37,7 +37,7 @@ from traditional_quant_research.horizon_backtest import horizon_aligned_top_n_ba
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/low_corr_frontier_exposure_penalty_grid")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-03_low_corr_frontier_exposure_penalty_grid.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-03_low_corr_frontier_exposure_penalty_grid.md")
 DEFAULT_FRONTIER_SIGNALS = (
     ROLLING_IC_SIGNAL,
     IC_WEIGHTED_SIGNAL,

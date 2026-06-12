@@ -24,7 +24,7 @@ from traditional_quant_research.experiments.two_day_kama_atr_breakout_analysis i
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/all_limitup_ml_strategy_research")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-07_all_limitup_ml_strategy_research.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-07_all_limitup_ml_strategy_research.md")
 DEFAULT_EVENT_PANEL_ROOT = Path("traditional_quant_research/output/experiments/short_open_known_factor_rebuild")
 DEFAULT_PROFILE = "open_print_filter"
 DEFAULT_TARGET_WINDOW = 1

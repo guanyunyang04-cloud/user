@@ -15,7 +15,7 @@ from traditional_quant_research.data_audit import V2DataLabelAudit, audit_v2_dat
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/v2_data_label_audit")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-02_v2_data_label_audit.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-02_v2_data_label_audit.md")
 
 
 def run_v2_data_label_audit(

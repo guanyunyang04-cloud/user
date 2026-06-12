@@ -19,7 +19,7 @@ from traditional_quant_research.dataset_v2 import (
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/v2_daily_metrics_audit")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-03_v2_daily_metrics_audit.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-03_v2_daily_metrics_audit.md")
 METRIC_FIELDS = ("turn", "pctChg", "peTTM", "pbMRQ", "psTTM", "pcfNcfTTM")
 
 

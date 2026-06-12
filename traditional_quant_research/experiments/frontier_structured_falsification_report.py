@@ -27,7 +27,7 @@ DEFAULT_SIZE_AUDIT_ROOT = Path("traditional_quant_research/output/experiments/v2
 DEFAULT_FAILURE_ATTRIBUTION_ROOT = Path("traditional_quant_research/output/experiments/frontier_failure_attribution")
 DEFAULT_WEAK_YEAR_REBUILD_ROOT = Path("traditional_quant_research/output/experiments/frontier_weak_year_rebuild")
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/frontier_structured_falsification_report")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-03_frontier_structured_falsification_report.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-03_frontier_structured_falsification_report.md")
 
 
 def run_frontier_structured_falsification_report(
@@ -286,35 +286,35 @@ def build_evidence_manifest(
             promotion_dir,
             promotion_summary,
             evidence_grade=_promotion_evidence_grade(promotion_summary),
-            research_log=Path("traditional_quant_research/research_log/2026-06-03_frontier_promotion_gate.md"),
+            research_log=Path("traditional_quant_research/brain/references/research_log/2026-06-03_frontier_promotion_gate.md"),
         ),
         _manifest_row(
             "frontier_trial_ledger",
             ledger_dir,
             ledger_summary,
             evidence_grade="governance_backtest_only",
-            research_log=Path("traditional_quant_research/research_log/2026-06-03_frontier_trial_ledger.md"),
+            research_log=Path("traditional_quant_research/brain/references/research_log/2026-06-03_frontier_trial_ledger.md"),
         ),
         _manifest_row(
             "v2_daily_size_audit",
             size_dir,
             size_summary,
             evidence_grade="diagnostic" if not bool(size_summary.get("daily_size_ready_for_research", False)) else "size_ready_for_research",
-            research_log=Path("traditional_quant_research/research_log/2026-06-03_v2_daily_size_audit.md"),
+            research_log=Path("traditional_quant_research/brain/references/research_log/2026-06-03_v2_daily_size_audit.md"),
         ),
         _manifest_row(
             "frontier_failure_attribution",
             failure_dir,
             failure_summary,
             evidence_grade="diagnostic",
-            research_log=Path("traditional_quant_research/research_log/2026-06-03_frontier_failure_attribution.md"),
+            research_log=Path("traditional_quant_research/brain/references/research_log/2026-06-03_frontier_failure_attribution.md"),
         ),
         _manifest_row(
             "frontier_weak_year_rebuild",
             weak_dir,
             weak_summary,
             evidence_grade="diagnostic_not_backtest",
-            research_log=Path("traditional_quant_research/research_log/2026-06-03_frontier_weak_year_rebuild.md"),
+            research_log=Path("traditional_quant_research/brain/references/research_log/2026-06-03_frontier_weak_year_rebuild.md"),
         ),
     ]
     cross_path = Path(str(size_summary.get("current_cross_check_path", "")))
@@ -326,7 +326,7 @@ def build_evidence_manifest(
                 cross_path.parent,
                 cross_summary,
                 evidence_grade="diagnostic",
-                research_log=Path("traditional_quant_research/research_log/2026-06-03_v2_free_size_current_cross_check.md"),
+                research_log=Path("traditional_quant_research/brain/references/research_log/2026-06-03_v2_free_size_current_cross_check.md"),
             )
         )
     return pd.DataFrame(rows)

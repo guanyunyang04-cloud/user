@@ -20,7 +20,7 @@ from traditional_quant_research.experiments.frontier_promotion_gate import lates
 
 DEFAULT_PERSONAL_GATE_OUTPUT_ROOT = Path("traditional_quant_research/output/experiments/frontier_personal_candidate_gate")
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/frontier_personal_paper_tracking_bootstrap")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-04_frontier_personal_paper_tracking_bootstrap.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-04_frontier_personal_paper_tracking_bootstrap.md")
 
 PERSONAL_PAPER_CANDIDATE_LEVEL = "personal_paper_candidate"
 BOOTSTRAPPED_TRACKING_STATUS = "paper_tracking_bootstrapped"

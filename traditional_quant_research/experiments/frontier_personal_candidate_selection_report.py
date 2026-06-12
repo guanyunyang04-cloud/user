@@ -22,7 +22,7 @@ from traditional_quant_research.experiments.frontier_promotion_gate import lates
 DEFAULT_PERSONAL_PROTOCOL_GRID_ROOT = Path("traditional_quant_research/output/experiments/frontier_personal_protocol_grid")
 DEFAULT_PERSONAL_GATE_ROOT = Path("traditional_quant_research/output/experiments/frontier_personal_candidate_gate")
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/frontier_personal_candidate_selection_report")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-05_frontier_personal_candidate_selection_report.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-05_frontier_personal_candidate_selection_report.md")
 
 SELECTION_CANDIDATE = "personal_backtest_candidate"
 SELECTION_BACKTEST_ONLY = "personal_research/backtest_only"

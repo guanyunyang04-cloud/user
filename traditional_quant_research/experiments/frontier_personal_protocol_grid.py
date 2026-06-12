@@ -56,7 +56,7 @@ from traditional_quant_research.research_panel import DEFAULT_FACTOR_SET, FACTOR
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/frontier_personal_protocol_grid")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-04_frontier_personal_protocol_grid.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-04_frontier_personal_protocol_grid.md")
 DEFAULT_PERSONAL_PROTOCOL_YEARS = tuple(range(2017, 2027))
 DEFAULT_TOP_N_VALUES = (20, 50, 100)
 DEFAULT_FEE_BPS_VALUES = (DEFAULT_REQUIRED_FEE_BPS,)

@@ -16,7 +16,7 @@ from traditional_quant_research.dataset_v2 import DEFAULT_V2_SNAPSHOT_ROOT
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/v2_industry_size_source_audit")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-02_v2_industry_size_source_audit.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-02_v2_industry_size_source_audit.md")
 
 SNAPSHOT_TABLE_FILES: Mapping[str, str] = {
     "security_master": "security_master.parquet",

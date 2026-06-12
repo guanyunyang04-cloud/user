@@ -32,7 +32,7 @@ from traditional_quant_research.experiments.frontier_promotion_gate import lates
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/frontier_personal_candidate_lifecycle_registry")
 DEFAULT_RESEARCH_LOG = Path(
-    "traditional_quant_research/research_log/2026-06-04_frontier_personal_candidate_lifecycle_registry.md"
+    "traditional_quant_research/brain/references/research_log/2026-06-04_frontier_personal_candidate_lifecycle_registry.md"
 )
 
 

@@ -53,7 +53,7 @@ from traditional_quant_research.research_panel import DEFAULT_FACTOR_SET, FACTOR
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/low_corr_candidate_signal_comparison")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-02_low_corr_candidate_signal_comparison.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_candidate_signal_comparison.md")
 DEFAULT_ROLLING_WINDOW = 252
 DEFAULT_ROLLING_MIN_PERIODS = 60
 BASELINE_SIGNAL = "baseline_score"

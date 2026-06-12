@@ -18,7 +18,7 @@ DEFAULT_COMBINED_OUTPUT_ROOT = Path(
 )
 DEFAULT_SIZE_AUDIT_ROOT = Path("traditional_quant_research/output/experiments/v2_daily_size_audit")
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/frontier_promotion_gate")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-03_frontier_promotion_gate.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-03_frontier_promotion_gate.md")
 
 DEFAULT_REQUIRED_IMPACT_BPS = 10.0
 DEFAULT_REQUIRED_FEE_BPS = 30.0

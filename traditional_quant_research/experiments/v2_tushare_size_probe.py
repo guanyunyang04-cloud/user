@@ -16,7 +16,7 @@ from traditional_quant_research.size_source import standardize_tushare_daily_bas
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/v2_tushare_size_probe")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-03_v2_tushare_size_probe.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-03_v2_tushare_size_probe.md")
 DEFAULT_SYMBOLS = ("600000.SH", "000001.SZ")
 DEFAULT_TRADE_DATES = ("20260525", "20260601")
 

@@ -19,7 +19,7 @@ from traditional_quant_research.experiments.low_corr_exposure_grid import (
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/low_corr_horizon_cost_grid")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-02_low_corr_horizon_cost_grid.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_horizon_cost_grid.md")
 DEFAULT_SELECTION_FILTERS = "log_amount_mean_20d_z>=-0.8,momentum_20d_z>=-0.8"
 DEFAULT_HORIZONS = (5, 10, 20)
 DEFAULT_TOP_N_VALUES = (100, 200)

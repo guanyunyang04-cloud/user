@@ -19,7 +19,7 @@ DEFAULT_COMBINED_OUTPUT_ROOT = Path(
     "traditional_quant_research/output/experiments/low_corr_frontier_combined_constraint_audit"
 )
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/frontier_personal_candidate_gate")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-04_frontier_personal_candidate_gate.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-04_frontier_personal_candidate_gate.md")
 
 PERSONAL_BACKTEST_PROMOTION_LEVEL = "personal_backtest_candidate"
 PERSONAL_BACKTEST_ONLY_LEVEL = "personal_research/backtest_only"

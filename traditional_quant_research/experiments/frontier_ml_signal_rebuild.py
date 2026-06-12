@@ -27,7 +27,7 @@ from traditional_quant_research.research_panel import (
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/frontier_ml_signal_rebuild")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-04_frontier_ml_signal_rebuild.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-04_frontier_ml_signal_rebuild.md")
 DEFAULT_YEARS = tuple(range(2017, 2027))
 DEFAULT_FACTOR_SET = "expanded"
 DEFAULT_MAX_TRAIN_YEARS = 5

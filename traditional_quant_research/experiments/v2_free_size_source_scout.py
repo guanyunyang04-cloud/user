@@ -20,7 +20,7 @@ from traditional_quant_research.size_source import (
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/v2_free_size_source_scout")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-03_v2_free_size_source_scout.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-03_v2_free_size_source_scout.md")
 DEFAULT_SYMBOLS = ("600000.SH", "000001.SZ", "000002.SZ", "601398.SH")
 DEFAULT_TRADE_DATES = ("20170103", "20180102", "20220104", "20230103", "20260601")
 

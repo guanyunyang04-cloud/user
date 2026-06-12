@@ -17,7 +17,7 @@ from traditional_quant_research.experiments.frontier_promotion_gate import lates
 DEFAULT_FAILURE_ATTRIBUTION_ROOT = Path("traditional_quant_research/output/experiments/frontier_failure_attribution")
 DEFAULT_REGIME_ATTRIBUTION_ROOT = Path("traditional_quant_research/output/experiments/frontier_weak_year_regime_attribution")
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/frontier_weak_year_rebuild")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-03_frontier_weak_year_rebuild.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-03_frontier_weak_year_rebuild.md")
 DEFAULT_REGIME_METRICS = ("breadth_20d_positive_rate", "market_ret_20d_mean", "breadth_5d_positive_rate")
 DEFAULT_WEAK_YEARS = (2017, 2018, 2022, 2023)
 GENERIC_REGIME_SIGNAL = "__generic_market_regime__"

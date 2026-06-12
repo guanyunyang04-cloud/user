@@ -18,7 +18,7 @@ from traditional_quant_research.experiments.short_open_known_factor_rebuild impo
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/two_day_kama_atr_breakout_analysis")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-07_two_day_kama_atr_breakout_analysis.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-07_two_day_kama_atr_breakout_analysis.md")
 DEFAULT_START_DATE = "2016-01-01"
 DEFAULT_END_DATE = "2026-06-01"
 DEFAULT_HORIZONS = (1, 2, 3, 5, 10, 20, 30, 60)

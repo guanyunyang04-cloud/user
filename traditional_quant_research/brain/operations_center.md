@@ -12,5 +12,5 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.selective_verifica
 - `traditional_quant_research/tests` 整包只作为 shared core、schema、数据口径、候选 gate 或维护/收尾扩展验证；普通单文件改动不默认整包跑。
 - 项目普通车道只跑非研究/外部测试：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest traditional_quant_research -m "not research and not slow and not data_heavy and not external and not benchmark" -q`。`frontier`、`low_corr`、`v2_*_audit`、`personal`、`limitup`、`kama`、`probe` 等实验回归进入 `research` 或 `external` 车道，按 explicit nodeid 或阶段收口运行。
 - 测试瘦身清单：`traditional_quant_research/brain/references/testing_slimming_inventory_20260612.md`。取消 paper tracking / lifecycle 的小测试保留为 `smoke + guard`，用于防止旧机制复活。
-- 新实验流程：先把假设、证据等级和稳定结论写入 `brain/references/research_log/`；`research_log/` 只作为现有实验脚本兼容副本，必须声明 `Canonical brain source:`。
-- 数据接入流程：先更新 `brain/references/data_catalog.md`，确认字段、日期范围、复权口径和 survivorship bias 处理，再按需同步 `data/catalog.md` 入口副本。
+- 新实验流程：假设、证据等级、稳定结论和默认研究日志都写入 `brain/references/research_log/`；旧 `research_log/` 外部副本已废弃，不再作为脚本输出或接管入口。
+- 数据接入流程：先更新 `brain/references/data_catalog.md`，确认字段、日期范围、复权口径和 survivorship bias 处理；旧 `data/catalog.md` 外部入口已废弃。

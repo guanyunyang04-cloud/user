@@ -18,7 +18,7 @@ DEFAULT_COMBINED_OUTPUT_ROOT = Path(
     "traditional_quant_research/output/experiments/low_corr_frontier_combined_constraint_audit"
 )
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/frontier_failure_attribution")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-03_frontier_failure_attribution.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-03_frontier_failure_attribution.md")
 
 DEFAULT_REQUIRED_IMPACT_BPS = 10.0
 DEFAULT_REQUIRED_FEE_BPS = 30.0

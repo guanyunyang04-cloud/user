@@ -17,13 +17,14 @@
       "knowledge_center",
       "operations_center"
     ],
-    "body_entry_priority": [
-      "traditional_quant_research",
-      "traditional_quant_research/experiments",
-      "traditional_quant_research/research_log",
-      "traditional_quant_research/data",
-      "traditional_quant_research/tests"
-    ]
+      "body_entry_priority": [
+        "traditional_quant_research",
+        "traditional_quant_research/experiments",
+        "traditional_quant_research/brain/references/research_log",
+        "traditional_quant_research/brain/references",
+        "traditional_quant_research/data",
+        "traditional_quant_research/tests"
+      ]
   },
   "identity_path": "traditional_quant_research/brain/identity_layer.md",
   "state_path": "traditional_quant_research/brain/state_center.md",
@@ -48,10 +49,11 @@
       "traditional_quant_research/experiments"
     ],
     "research_log": [
-      "traditional_quant_research/research_log"
+      "traditional_quant_research/brain/references/research_log"
     ],
     "data_contracts": [
-      "traditional_quant_research/data"
+      "traditional_quant_research/brain/references/data_catalog.md",
+      "traditional_quant_research/brain/references/data_readme.md"
     ],
     "tests": [
       "traditional_quant_research/tests"

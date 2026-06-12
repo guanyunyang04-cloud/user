@@ -38,7 +38,7 @@ from traditional_quant_research.multifactor import factor_coverage, neutralize_f
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/low_corr_frontier_neutralization_audit")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-02_low_corr_frontier_neutralization_audit.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_frontier_neutralization_audit.md")
 DEFAULT_FRONTIER_SIGNALS = (
     ROLLING_IC_SIGNAL,
     IC_WEIGHTED_SIGNAL,

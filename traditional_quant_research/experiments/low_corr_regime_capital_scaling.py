@@ -42,7 +42,7 @@ from traditional_quant_research.research_panel import (
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/low_corr_regime_capital_scaling")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-02_low_corr_regime_capital_scaling.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_regime_capital_scaling.md")
 DEFAULT_HORIZON = 5
 DEFAULT_TOP_N_VALUES = (100,)
 DEFAULT_FEE_BPS_VALUES = (0.0, 30.0)

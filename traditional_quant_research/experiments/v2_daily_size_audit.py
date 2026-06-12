@@ -21,7 +21,7 @@ from traditional_quant_research.size_source import accepted_daily_size_source_gr
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/v2_daily_size_audit")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-03_v2_daily_size_audit.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-03_v2_daily_size_audit.md")
 SIZE_FIELDS = ("total_market_cap", "float_market_cap", "total_share", "float_share", "free_share")
 REQUIRED_SIZE_GATE_FIELDS = ("total_market_cap", "float_market_cap")
 UNIT_FIELDS = ("market_cap_unit", "share_unit")

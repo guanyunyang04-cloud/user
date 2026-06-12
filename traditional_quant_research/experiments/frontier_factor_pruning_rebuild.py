@@ -17,7 +17,7 @@ from traditional_quant_research.experiments.full_cycle_factor_diagnostics import
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/frontier_factor_pruning_rebuild")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-04_frontier_factor_pruning_rebuild.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-04_frontier_factor_pruning_rebuild.md")
 DEFAULT_HORIZON = 20
 DEFAULT_EXCLUDE_SIGNALS = ("baseline_score",)
 

@@ -29,7 +29,7 @@ from traditional_quant_research.research_panel import (
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/baseline_first_loop")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-02_first_loop_baseline.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-02_first_loop_baseline.md")
 
 
 def run_baseline_first_loop(

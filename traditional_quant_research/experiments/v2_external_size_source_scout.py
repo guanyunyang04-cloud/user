@@ -15,7 +15,7 @@ import pandas as pd
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/v2_external_size_source_scout")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-03_v2_external_size_source_scout.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-03_v2_external_size_source_scout.md")
 
 PACKAGE_NAMES = (
     "tushare",

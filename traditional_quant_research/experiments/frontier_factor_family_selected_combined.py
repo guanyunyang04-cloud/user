@@ -22,7 +22,7 @@ from traditional_quant_research.experiments.low_corr_frontier_combined_constrain
 
 DEFAULT_WEAK_YEAR_REBUILD_ROOT = Path("traditional_quant_research/output/experiments/frontier_weak_year_rebuild")
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/frontier_factor_family_selected_combined")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-04_frontier_factor_family_selected_combined.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-04_frontier_factor_family_selected_combined.md")
 DEFAULT_OUTPUT_CONSTRAINT_VARIANT = "factor_family_prior_fit"
 DEFAULT_COLD_START_FAMILY = "core"
 

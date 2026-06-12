@@ -21,7 +21,7 @@ from traditional_quant_research.experiments.frontier_promotion_gate import lates
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/frontier_personal_paper_tracking_plan")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-04_frontier_personal_paper_tracking_plan.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-04_frontier_personal_paper_tracking_plan.md")
 DEFAULT_PLAN_PERIODS = 6
 
 PLAN_STATUS_READY = "tracking_plan_scaffold_ready"

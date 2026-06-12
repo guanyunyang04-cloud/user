@@ -19,7 +19,7 @@ from traditional_quant_research.research_panel import build_factor_label_panel
 
 DEFAULT_FAILURE_ATTRIBUTION_ROOT = Path("traditional_quant_research/output/experiments/frontier_failure_attribution")
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/frontier_weak_year_regime_attribution")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-03_frontier_weak_year_regime_attribution.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-03_frontier_weak_year_regime_attribution.md")
 
 REGIME_METRIC_COLUMNS = (
     "market_ret_1d_mean",

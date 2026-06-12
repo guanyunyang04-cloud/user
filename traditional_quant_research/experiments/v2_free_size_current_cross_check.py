@@ -24,7 +24,7 @@ from traditional_quant_research.size_source import (
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/v2_free_size_current_cross_check")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-03_v2_free_size_current_cross_check.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-03_v2_free_size_current_cross_check.md")
 DEFAULT_SYMBOLS = ("600000.SH", "000001.SZ", "000002.SZ", "601398.SH")
 
 CROSS_CHECK_COLUMNS = [

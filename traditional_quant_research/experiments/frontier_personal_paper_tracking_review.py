@@ -23,7 +23,7 @@ from traditional_quant_research.experiments.frontier_promotion_gate import lates
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/frontier_personal_paper_tracking_review")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-04_frontier_personal_paper_tracking_review.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-04_frontier_personal_paper_tracking_review.md")
 PAPER_TRACKING_CANCELLED_MESSAGE = (
     "frontier personal paper tracking review is cancelled for traditional_quant_research: "
     "the agent's responsibility ends at selecting strong model and strategy candidates; "

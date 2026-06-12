@@ -42,7 +42,7 @@ from traditional_quant_research.research_panel import (
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/low_corr_candidate_frontier_audit")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-02_low_corr_candidate_frontier_audit.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_candidate_frontier_audit.md")
 DEFAULT_YEARS = (2024, 2025, 2026)
 DEFAULT_FINAL_END_DATE = "2026-06-01"
 DEFAULT_HORIZON = 20

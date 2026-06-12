@@ -15,7 +15,7 @@ from traditional_quant_research.dataset_v2 import load_pit_manifest, load_tradea
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/v2_metrics_semantics_audit")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-03_v2_metrics_semantics_audit.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-03_v2_metrics_semantics_audit.md")
 VALUATION_FIELDS = ("peTTM", "pbMRQ", "psTTM", "pcfNcfTTM")
 
 

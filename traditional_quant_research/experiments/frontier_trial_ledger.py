@@ -27,7 +27,7 @@ DEFAULT_COMBINED_OUTPUT_ROOT = Path(
 DEFAULT_PROMOTION_OUTPUT_ROOT = Path("traditional_quant_research/output/experiments/frontier_promotion_gate")
 DEFAULT_FAILURE_OUTPUT_ROOT = Path("traditional_quant_research/output/experiments/frontier_failure_attribution")
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/frontier_trial_ledger")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-03_frontier_trial_ledger.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-03_frontier_trial_ledger.md")
 
 
 def run_frontier_trial_ledger(

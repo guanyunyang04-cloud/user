@@ -47,7 +47,7 @@ from traditional_quant_research.experiments.two_day_kama_atr_breakout_analysis i
 
 
 DEFAULT_OUTPUT_DIR = Path("traditional_quant_research/output/experiments/all_limitup_risk_penalized_strategy_research")
-DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/research_log/2026-06-07_all_limitup_risk_penalized_strategy_research.md")
+DEFAULT_RESEARCH_LOG = Path("traditional_quant_research/brain/references/research_log/2026-06-07_all_limitup_risk_penalized_strategy_research.md")
 DEFAULT_MIN_SCORE_VALUES = (-np.inf, -0.5, 0.0, 0.5, 1.0)
 DEFAULT_MAX_ORIGINAL_RANK_VALUES: tuple[int | None, ...] = (1, 3, None)
 DEFAULT_MAX_POSITIONS = (1, 2)
