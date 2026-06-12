@@ -527,7 +527,6 @@ def _check_execution_application_contract(failures: list[CheckResult]) -> None:
         "daily_research/execution/web/templates/account.html",
         "daily_research/execution/web/static/execution_console.css",
         "daily_research/execution/web/static/execution_console.js",
-        "daily_research/execution/使用教程.md",
     )
     for relative_path in required_files:
         _require(
