@@ -65,14 +65,17 @@
     "unsafe_full_build_guard": "enabled"
   },
   "canonical_sharded_memmap_status": {
+    "active_manifest_json": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\canonical_short_horizon_core_v1_full\\sharded_memmap_manifest.json",
     "latest_canonical_dataset_id": "policy_input_bundle__f926a496f69c61f6b92b5faf",
-    "latest_manifest_json": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\qdp_smoke_2022_10x1\\sharded_memmap_manifest.json",
-    "latest_planned_shard_count": 1,
+    "latest_empty_shard_count": 61,
+    "latest_manifest_json": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\canonical_short_horizon_core_v1_full\\sharded_memmap_manifest.json",
+    "latest_planned_shard_count": 323,
+    "latest_processed_shard_count": 323,
     "latest_profile": "short_horizon_core_v1",
-    "latest_scope": "validation_partial",
-    "latest_stored_shard_count": 1,
-    "status": "sharded_validation_ready",
-    "updated_at": "2026-06-11T11:40:20+00:00"
+    "latest_scope": "full_canonical_candidate",
+    "latest_stored_shard_count": 262,
+    "status": "sharded_full_ready",
+    "updated_at": "2026-06-11T21:02:16+00:00"
   },
   "canonical_start_date": "2010-01-01",
   "component_coverage": {
@@ -175,7 +178,7 @@
     "industry_concept",
     "index_constituents"
   ],
-  "updated_at": "2026-06-11T11:40:20+00:00",
+  "updated_at": "2026-06-11T21:02:16+00:00",
   "v1_excluded_domains": [
     "financial_quarterly",
     "performance_forecast",

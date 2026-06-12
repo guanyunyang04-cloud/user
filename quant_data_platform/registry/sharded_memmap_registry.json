@@ -1,4 +1,5 @@
 {
+  "active_manifest_json": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\canonical_short_horizon_core_v1_full\\sharded_memmap_manifest.json",
   "entries": [
     {
       "canonical_dataset_id": "policy_input_bundle__f926a496f69c61f6b92b5faf",
@@ -10,11 +11,24 @@
       "scope": "validation_partial",
       "status": "completed",
       "stored_shard_count": 1
+    },
+    {
+      "canonical_dataset_id": "policy_input_bundle__f926a496f69c61f6b92b5faf",
+      "empty_shard_count": 61,
+      "feature_schema_hash": "8942b161313ab2592fb207e7",
+      "manifest_json": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\canonical_short_horizon_core_v1_full\\sharded_memmap_manifest.json",
+      "planned_shard_count": 323,
+      "processed_shard_count": 323,
+      "profile": "short_horizon_core_v1",
+      "registered_at": "2026-06-11T21:02:16+00:00",
+      "scope": "full_canonical_candidate",
+      "status": "completed",
+      "stored_shard_count": 262
     }
   ],
-  "latest_manifest_json": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\qdp_smoke_2022_10x1\\sharded_memmap_manifest.json",
-  "latest_scope": "validation_partial",
+  "latest_manifest_json": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\canonical_short_horizon_core_v1_full\\sharded_memmap_manifest.json",
+  "latest_scope": "full_canonical_candidate",
   "schema_version": 1,
   "status": "ready",
-  "updated_at": "2026-06-11T11:40:20+00:00"
+  "updated_at": "2026-06-11T21:02:16+00:00"
 }

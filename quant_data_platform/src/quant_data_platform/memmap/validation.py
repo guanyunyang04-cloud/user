@@ -20,8 +20,14 @@ def validate_active_memmap(
 ) -> dict[str, Any]:
     resolved = paths or qdp_paths()
     registry = load_memmap_registry(resolved)
+    sharded_registry = read_json(resolved.registry_dir / "sharded_memmap_registry.json")
     root_manifest = load_root_manifest(resolved)
-    raw_manifest = str(manifest or registry.get("active_manifest_json", "") or "").strip()
+    raw_manifest = str(
+        manifest
+        or sharded_registry.get("active_manifest_json", "")
+        or registry.get("active_manifest_json", "")
+        or ""
+    ).strip()
     if not raw_manifest:
         return {"status": "blocked", "blockers": ["missing_active_memmap_manifest"]}
     manifest_path = Path(raw_manifest)

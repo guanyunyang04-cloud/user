@@ -91,6 +91,7 @@ def test_validate_sharded_memmap_manifest_allows_empty_processed_shards(tmp_path
     assert report["status"] == "ok"
     assert report["processed_shard_count"] == 1
     assert report["empty_shard_count"] == 1
+    assert report["manifest_json"] == str(manifest.resolve())
 
 
 def test_project_feature_store_to_schema_reorders_and_fills_missing(tmp_path) -> None:

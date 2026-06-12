@@ -270,8 +270,8 @@ def validate_sharded_memmap_manifest(manifest_path: str | Path) -> dict[str, Any
         if not _shard_files_exist(shard):
             blockers.append("missing_shard_file")
     for shard in empty:
-        path = Path(str(shard.get("shard_manifest_json", "") or ""))
-        if not path.exists():
+        shard_manifest_path = Path(str(shard.get("shard_manifest_json", "") or ""))
+        if not shard_manifest_path.exists():
             blockers.append("missing_empty_shard_manifest")
     return {
         "status": "ok" if not blockers else "blocked",

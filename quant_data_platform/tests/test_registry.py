@@ -39,3 +39,52 @@ def test_migrate_legacy_registry_writes_qdp_registry(tmp_path: Path) -> None:
     status = registry_status(paths)
     assert status["legacy_fallback_used"] is False
     assert status["canonical_dataset_id"] == "policy_input_bundle__old"
+
+
+def test_registry_status_prefers_full_sharded_active_manifest(tmp_path: Path) -> None:
+    _write(tmp_path / "brain" / "brain_manifest.json", {"schema_version": 1})
+    paths = qdp_paths(tmp_path)
+    _write(
+        paths.root_manifest,
+        {
+            "schema_version": 1,
+            "alias": "canonical_data_v1",
+            "canonical_dataset_id": "policy_input_bundle__new",
+            "canonical_sharded_memmap_status": {
+                "status": "sharded_full_ready",
+                "active_manifest_json": "H:/qdp/full/sharded_memmap_manifest.json",
+                "latest_manifest_json": "H:/qdp/full/sharded_memmap_manifest.json",
+                "latest_scope": "full_canonical_candidate",
+                "latest_profile": "short_horizon_core_v1",
+                "latest_stored_shard_count": 262,
+                "latest_planned_shard_count": 323,
+            },
+        },
+    )
+    _write(
+        paths.memmap_registry,
+        {
+            "schema_version": 1,
+            "active_manifest_json": "H:/old/capped/forecast_dataset_manifest.json",
+            "active_source_market_dataset_id": "policy_input_bundle__old",
+            "active_scope": "capped_validation",
+            "active_feature_profile": "old_profile",
+        },
+    )
+    _write(
+        paths.registry_dir / "sharded_memmap_registry.json",
+        {
+            "schema_version": 1,
+            "active_manifest_json": "H:/qdp/full/sharded_memmap_manifest.json",
+            "latest_manifest_json": "H:/qdp/full/sharded_memmap_manifest.json",
+            "latest_scope": "full_canonical_candidate",
+        },
+    )
+
+    status = registry_status(paths)
+    assert status["active_memmap_manifest"] == "H:/qdp/full/sharded_memmap_manifest.json"
+    assert status["active_memmap_state"] == "current"
+    assert status["active_memmap_matches_canonical_bundle"] is True
+    assert status["active_feature_profile"] == "short_horizon_core_v1"
+    assert status["active_scope"] == "full_canonical_candidate"
+    assert status["active_sample_count"] == 0
