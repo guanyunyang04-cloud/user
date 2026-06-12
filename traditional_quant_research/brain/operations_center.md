@@ -10,5 +10,6 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.selective_verifica
 ```
 
 - `traditional_quant_research/tests` 整包只作为 shared core、schema、数据口径、候选 gate 或维护/收尾扩展验证；普通单文件改动不默认整包跑。
+- 项目普通车道只跑非研究/外部测试：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest traditional_quant_research -m "not research and not slow and not data_heavy and not external and not benchmark" -q`。`frontier`、`low_corr`、`v2_*_audit`、`personal`、`limitup`、`kama`、`probe` 等实验回归进入 `research` 或 `external` 车道，按 explicit nodeid 或阶段收口运行。
 - 新实验流程：先在 `research_log/` 写明假设和证据等级，再在 `experiments/` 建配置和入口，最后把稳定结论写回 `knowledge_center` 或 `brain/references/`。
 - 数据接入流程：先更新 `data/catalog.md`，确认字段、日期范围、复权口径和 survivorship bias 处理，再写研究代码。
