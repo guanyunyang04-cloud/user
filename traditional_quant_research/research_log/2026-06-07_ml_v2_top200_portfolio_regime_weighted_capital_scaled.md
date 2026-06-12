@@ -1,5 +1,8 @@
 # Frontier Personal Protocol Grid
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-07_ml_v2_top200_portfolio_regime_weighted_capital_scaled.md`.
+
+
 - run_id: `frontier_personal_protocol_grid_20260607_manual_ml_v2_top200_portfolio_regime_weighted_capital_scaled`
 - north_star: `Baostock-only personal quant strategy research`
 - decision: `personal_protocol_candidates_selected`

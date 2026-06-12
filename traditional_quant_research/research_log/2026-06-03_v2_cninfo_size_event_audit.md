@@ -1,5 +1,8 @@
 # V2 CNInfo Size Event Audit
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-03_v2_cninfo_size_event_audit.md`.
+
+
 - run_id: `v2_cninfo_size_event_audit_20260603_195504`
 - source_decision: `diagnostic_ready_for_cross_check`
 - evidence_grade: `diagnostic`

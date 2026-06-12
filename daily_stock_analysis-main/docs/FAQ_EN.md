@@ -1,5 +1,8 @@
 # Frequently Asked Questions (FAQ)
 
+Canonical brain source: `daily_stock_analysis-main/brain/references/public_docs/FAQ_EN.md`.
+
+
 This document compiles common issues encountered by users and their solutions.
 
 ---

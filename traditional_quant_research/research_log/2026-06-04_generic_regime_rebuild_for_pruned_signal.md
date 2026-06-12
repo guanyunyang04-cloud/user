@@ -1,5 +1,8 @@
 # Frontier Weak-Year Rebuild
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-04_generic_regime_rebuild_for_pruned_signal.md`.
+
+
 - run_id: `frontier_weak_year_rebuild_20260604_133640`
 - decision: `diagnostic_rebuild_rules_ready_for_backtest`
 - fit_eval_candidate_rows: `54`

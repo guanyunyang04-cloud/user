@@ -1,3 +1,5 @@
+Canonical brain source: `daily_stock_analysis-main/brain/references/public_docs/README_EN.md`.
+
 <div align="center">
 
 # AI Stock Analysis System

@@ -1,5 +1,8 @@
 # Low-Corr Frontier Combined Constraint Audit Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-03_low_corr_frontier_combined_constraint_audit_interpretation.md`.
+
+
 ## Summary
 
 - Run: `low_corr_frontier_combined_constraint_audit_20260603_094139`.

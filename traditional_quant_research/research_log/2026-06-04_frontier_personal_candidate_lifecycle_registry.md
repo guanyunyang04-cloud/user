@@ -1,5 +1,8 @@
 # Frontier Personal Candidate Lifecycle Registry
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-04_frontier_personal_candidate_lifecycle_registry.md`.
+
+
 - run_id: `frontier_personal_candidate_lifecycle_registry_20260604_120726`
 - decision: `continue_paper_tracking`
 - candidate_count: `3`

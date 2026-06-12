@@ -1,5 +1,8 @@
 # Personal Protocol Gate Governance
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-04_personal_protocol_gate_governance.md`.
+
+
 ## Summary
 
 This update strengthens the Baostock-only personal research ladder by separating formal personal candidate evidence from relaxed diagnostic smoke evidence.

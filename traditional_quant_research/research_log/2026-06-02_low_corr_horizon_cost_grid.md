@@ -1,5 +1,8 @@
 # Low-Corr Horizon Cost Grid
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_horizon_cost_grid.md`.
+
+
 - Hypothesis: lower-turnover holding-period and rebalance choices may improve the low-corr watchlist under 30 bps costs.
 - Horizons: `[5, 10, 20]`.
 - Filter Specs: `log_amount_mean_20d_z>=-0.8,momentum_20d_z>=-0.8`.

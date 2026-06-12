@@ -1,5 +1,8 @@
 # Frontier ML Signal Rebuild
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-05_ml_v2_baseline_formal.md`.
+
+
 - run_id: `frontier_ml_signal_rebuild_20260605_112804`
 - decision: `diagnostic_ml_signal_ready`
 - ml_signal_name: `ml_lgbm_xsec_excess_score_h20_prior_fit`

@@ -1,3 +1,5 @@
+Canonical brain source: `daily_stock_analysis-main/brain/identity_layer.md`.
+
 ---
 name: "stock_analyzer"
 description: "分析股票和市场。当用户想要分析单个或多个股票，或进行市场复盘时调用。"

@@ -1,5 +1,8 @@
 # Low-Corr Frontier Portfolio Exposure Penalty Audit Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-03_low_corr_frontier_portfolio_exposure_penalty_audit_interpretation.md`.
+
+
 ## Summary
 
 This audit adds a portfolio-level exposure penalty to the current frontier protocol. Unlike signal residualization, the penalty acts during Top-N selection: each candidate addition is scored by raw signal minus a penalty for the selected basket's mean exposure across selected style/metrics columns.

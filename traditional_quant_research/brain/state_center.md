@@ -2,7 +2,7 @@
 
 - 当前状态：新建并已挂载到 workspace 主脑。
 - 当前阶段：第一阶段研究可信度加固与基线策略评估已完成。研究范围已定为上证主板 A 股与深证主板 A 股，并剔除创业板、科创板、ST、停牌、退市等标的；v2 PIT 数据集、默认研究框架、第一条基础传统因子研究闭环、v2 数据/标签审计、全周期多 horizon 单因子诊断、基础回测协议升级和阶段决策报告已跑通。当前 North Star 已重定义为 `Baostock-only personal quant strategy research`：用 Baostock 已有数据高效研发适合个人小资金的强模型和可执行策略，agent 工作边界停在 `personal_backtest_candidate` 候选选择，不再由 agent 推进 `personal_paper_candidate` 或 `personal_trading_candidate`；true-size、真实市值/流通市值、市值中性和机构级 promotion gate 暂时降级为后续增强项。当前 v2.1 数据底座已补强到全周期含 industry+metrics snapshot，2016-2026 daily metrics 正式缓存、年度缺失率审计、全样本缺失率审计和 metrics 语义审计均已通过；真实市值/流通市值来源审计已否定 Baostock 单源可行性，Tushare `daily_basic` / JoinQuant / RQData 等认证 PIT size 来源保留为未来 true-size 升级线，而非当前研究主线阻塞项。2024-2026 frontier metrics 暴露诊断显示最强信号仍显著暴露于低波动、低流动性/小成交额、动量和换手结构；组合层 exposure penalty、strength grid、行业 cap 与冲击成本联动门禁已完成，2017-2026 扩展审计显示 frontier 样本数 gate 已通过但收益/年度稳定性和风格暴露 gate 失败；失败归因显示弱年集中在 `2017/2018/2022/2023`。2026-06-07 ML v2 正式计划已完成：四组 `top_n=200` ML v2、两组 post-model scaling、最佳信号组合构建对照和候选选择报告均跑完；当前候选池扩展为 4 条 `top_n=200` `personal_backtest_candidate`，新增第一名为 `ml_lgbm_xsec_excess_score_h20_prior_fit + capital_scaled + penalty_top_n`，均值年化约 `0.181658`、最弱年约 `-0.329566`、正收益年份率 `0.6`、worst drawdown 约 `-0.154592`。`strategy_candidate` 数量仍为 `0`。
-- 已有骨架：`traditional_quant_research/` 核心函数、`tests/` 基础测试、`experiments/` 实验入口、`research_log/` 研究日志、`data/` 数据契约。
+- 已有骨架：`traditional_quant_research/` 核心函数、`tests/` 基础测试、`experiments/` 实验入口、`data/` 数据资产与兼容入口；研究日志和数据契约的 canonical 正文已归入 `brain/references/`，`research_log/` 保留为现有实验脚本兼容副本。
 - 默认优先级：先构造沪深主板普通 A 股日频 OHLCV+复权因子数据集，再建立收益/因子/组合/回测最小基线。
 - 默认研究框架入口：`brain/references/research_framework.md`。
 - 第一条闭环入口：`experiments/baseline_first_loop.py`；首个诊断日志：`research_log/2026-06-02_first_loop_baseline.md`。

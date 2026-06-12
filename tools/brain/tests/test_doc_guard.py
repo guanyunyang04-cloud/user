@@ -25,6 +25,43 @@ class DocGuardTest(unittest.TestCase):
             )
         )
 
+    def test_external_docs_require_canonical_marker(self) -> None:
+        self.assertTrue(doc_guard._requires_canonical_marker("README.md"))
+        self.assertEqual(
+            doc_guard._canonical_marker_issue("README.md", "# Root\n"),
+            "external_doc_missing_canonical_marker:README.md",
+        )
+        self.assertEqual(
+            doc_guard._canonical_marker_issue(
+                "README.md",
+                "# Root\n\nCanonical brain source: `brain/master_brain.md`.\n",
+            ),
+            "",
+        )
+
+    def test_generated_and_output_markdown_do_not_require_canonical_marker(self) -> None:
+        self.assertFalse(
+            doc_guard._requires_canonical_marker(
+                "traditional_quant_research/output/experiments/example_run/summary.md"
+            )
+        )
+        self.assertFalse(doc_guard._requires_canonical_marker("node_modules/package/README.md"))
+
+    def test_changed_guard_files_skips_generated_dependency_deletions(self) -> None:
+        with mock.patch.object(
+            doc_guard,
+            "_git_changed_paths",
+            return_value=[
+                "node_modules/package/README.md",
+                "brain/state_center.md",
+            ],
+        ):
+            self.assertEqual(doc_guard._changed_guard_files(), ["brain/state_center.md"])
+
+    def test_public_docs_skip_strict_question_line_heuristic(self) -> None:
+        self.assertFalse(doc_guard._uses_strict_brain_text_heuristics("daily_stock_analysis-main/docs/FAQ_EN.md"))
+        self.assertTrue(doc_guard._uses_strict_brain_text_heuristics("brain/state_center.md"))
+
     def test_workspace_markdown_paths_uses_git_list_when_available(self) -> None:
         with tempfile.TemporaryDirectory() as raw_root:
             root = Path(raw_root)

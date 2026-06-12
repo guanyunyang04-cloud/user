@@ -1,5 +1,8 @@
 # Personal Short-Event Fast Research
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-07_personal_short_event_fast_research.md`.
+
+
 - run_id: `personal_short_event_fast_research_20260607_232419`
 - all_limitup_prediction_count: `92359`
 - generalized_prediction_count: `267659`

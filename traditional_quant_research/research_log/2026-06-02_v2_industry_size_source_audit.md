@@ -1,5 +1,8 @@
 # v2 Industry/Size Source Audit
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_v2_industry_size_source_audit.md`.
+
+
 - run_id: `v2_industry_size_source_audit_20260602_185451`
 - snapshot_id: `baostock_v2_pit_20160101_20260601_stockbasic_fixed`
 - snapshot_root: `traditional_quant_research\data\raw\baostock_daily_mainboard_v2_pit\baostock_v2_pit_20160101_20260601_stockbasic_fixed`

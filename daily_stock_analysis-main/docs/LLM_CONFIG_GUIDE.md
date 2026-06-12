@@ -1,5 +1,8 @@
 # LLM (大模型) 配置指南
 
+Canonical brain source: `daily_stock_analysis-main/brain/references/public_docs/LLM_CONFIG_GUIDE.md`.
+
+
 欢迎！无论你是刚接触 AI 的新手小白，还是精通各种 API 的高玩老手，这份指南都能帮你快速把大模型（LLM）跑起来。
 
 本项目的大模型接入基于强大且通用的 [LiteLLM](https://docs.litellm.ai/)，这意味着几乎市面上所有的主流大模型（官方API或中转接口）我们都支持。为了照顾不同阶段的用户，我们设计了“三层优先级”配置，按需选择最适合你的方式即可。

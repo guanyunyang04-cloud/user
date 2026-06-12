@@ -1,5 +1,8 @@
 # 2026-06-02 First Loop Baseline
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_first_loop_baseline.md`.
+
+
 - Hypothesis: 基础传统价量因子在沪深主板 PIT 可交易股票池上具有可诊断的横截面排序信息。
 - Data Scope: snapshot `baostock_v2_pit_20160101_20260601_stockbasic_fixed`, `2026-01-01` to `2026-06-01`.
 - Method: z-score baseline factors, average into `baseline_score`, evaluate `fwd_ret_1d` with IC, quantile returns, Top-100 equal-weight baseline, and IS/OOS split diagnostics.

@@ -1,5 +1,8 @@
 # Short Limit-Up Strategy Search
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-04_short_limitup_strategy_search.md`.
+
+
 ## Scope
 
 - Event file: `traditional_quant_research\output\experiments\all_limitup_event_study\all_limitup_event_study_vector_20260604_192738\all_limitup_events_tplus1_vector.csv`

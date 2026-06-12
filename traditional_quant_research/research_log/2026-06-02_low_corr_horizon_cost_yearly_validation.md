@@ -1,5 +1,8 @@
 # Low-Corr Horizon Cost Yearly Validation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_horizon_cost_yearly_validation.md`.
+
+
 - Hypothesis: 20-day or lower-turnover protocols that looked promising in 2026 should also survive prior-year-fit validation across multiple years.
 - Years: `[2024, 2025, 2026]`; final end date `2026-06-01`.
 - Horizons: `[20]`.

@@ -1,5 +1,8 @@
 # 交易策略目录
 
+Canonical brain source: `daily_stock_analysis-main/brain/references/strategies_readme.md`.
+
+
 AI 接管真源：`daily_stock_analysis-main/brain/`。本文件只说明内置策略文件的公开使用方式；策略体系的稳定边界与配置口径必须先写入 brain。
 
 本目录存放 **自然语言交易策略文件**（YAML 格式）。系统启动时自动加载此目录下所有 `.yaml` 文件。

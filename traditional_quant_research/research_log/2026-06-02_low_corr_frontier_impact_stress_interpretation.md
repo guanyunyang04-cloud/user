@@ -1,5 +1,8 @@
 # Low-Corr Frontier Impact Stress Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_frontier_impact_stress_interpretation.md`.
+
+
 ## Context
 
 - Run: `low_corr_frontier_impact_stress_20260602_174946`

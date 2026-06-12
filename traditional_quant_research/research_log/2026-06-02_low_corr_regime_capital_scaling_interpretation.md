@@ -1,5 +1,8 @@
 # 2026-06-02 Low-Corr Regime Capital Scaling Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_regime_capital_scaling_interpretation.md`.
+
+
 ## Context
 
 - Objective: test whether dynamic regime-based capital scaling can improve the current `multifactor_low_corr_rank_score` watchlist without fully skipping weak-regime rebalance dates.

@@ -1,5 +1,8 @@
 # 2026-06-02 2026 Exposure Cap Audit Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_2026_exposure_cap_audit_interpretation.md`.
+
+
 ## Question
 
 Can simple exposure caps repair the 2026 execution-constrained failure enough to produce a strategy candidate?

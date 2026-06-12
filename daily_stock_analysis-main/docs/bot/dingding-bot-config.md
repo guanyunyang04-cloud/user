@@ -1,5 +1,8 @@
 # 钉钉企业机器人配置
 
+Canonical brain source: `daily_stock_analysis-main/brain/references/public_docs/bot/dingding-bot-config.md`.
+
+
 ## 钉钉机器人
 钉钉机器人接收消息需要使用企业机器人能力
 https://open.dingtalk.com/document/dingstart/configure-the-robot-application

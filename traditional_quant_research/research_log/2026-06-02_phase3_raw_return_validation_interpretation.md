@@ -1,5 +1,8 @@
 # 2026-06-02 Phase 3 Raw-Return Validation Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_phase3_raw_return_validation_interpretation.md`.
+
+
 ## Decision
 
 原始收益口径验证结论：`multifactor_low_corr_rank_score` 和 `multifactor_rolling_ic_weighted_score` 继续保留为下一阶段重点候选输入，但当前 raw-return Top-N 结果仍不能升级为真实策略候选。

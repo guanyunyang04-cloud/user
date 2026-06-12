@@ -1,5 +1,8 @@
 # 2026-06-02 Buffered Horizon Turnover Validation Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_buffered_horizon_turnover_validation_interpretation.md`.
+
+
 ## Decision
 
 Top-N buffer 机制已验证有效：它能显著降低 `multifactor_rolling_ic_weighted_score` 的换手，并在高成本情景下改善净表现。但它没有解决 2026 半年失效问题，因此当前仍不能把该信号升级为策略候选。

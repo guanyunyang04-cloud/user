@@ -1,5 +1,8 @@
 # Two-Day KAMA + ATR-Upper Limit-Up Follow-Through Analysis
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-07_two_day_kama_atr_breakout_analysis.md`.
+
+
 - run_id: `two_day_kama_atr_breakout_analysis_20260607_163825`
 - snapshot_id: `baostock_v2_pit_20160101_20260601_industry_metrics_month_start_20260603`
 - sample_range: `2016-01-01` to `2026-06-01`

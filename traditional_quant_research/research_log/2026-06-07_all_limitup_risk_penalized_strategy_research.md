@@ -1,5 +1,8 @@
 # All-Limit-Up Risk-Penalized Strategy Research
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-07_all_limitup_risk_penalized_strategy_research.md`.
+
+
 - run_id: `all_limitup_risk_penalized_strategy_research_20260607_215055`
 - source_ml_run_dir: `traditional_quant_research\output\experiments\all_limitup_ml_strategy_research\all_limitup_ml_strategy_research_20260607_201541`
 - source_event_file: `traditional_quant_research\output\experiments\short_open_known_factor_rebuild\short_open_known_factor_rebuild_open_print_filter_20260605_003723\event_feature_panel.csv`

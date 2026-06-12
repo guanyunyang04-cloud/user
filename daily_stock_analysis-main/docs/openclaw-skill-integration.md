@@ -1,5 +1,8 @@
 # openclaw Skill 集成指南
 
+Canonical brain source: `daily_stock_analysis-main/brain/references/public_docs/openclaw-skill-integration.md`.
+
+
 本文档说明如何通过 [openclaw](https://github.com/openclaw/openclaw) Skill 调用 daily_stock_analysis 的 REST API，实现在 openclaw 对话中触发股票分析的能力。
 
 ## 概述

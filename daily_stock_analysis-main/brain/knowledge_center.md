@@ -25,11 +25,11 @@
 - `daily_stock_analysis-main/brain/` 是本产品分脑 AI 入口；工作区级规则、分脑拓扑、默认接管顺序和全局分支纪律仍以主脑 `brain/` 为准
 - `AGENTS.md / CLAUDE.md / SKILL.md` 属于兼容资产；若与主脑冲突，先服从主脑，再同步本分脑和兼容入口
 - 新增配置项时要同步更新 `.env.example` 和相关说明
-- 新增 README / docs 内容时，先判断是否为稳定事实、入口、流程或治理规则；若是，必须先写入本分脑对应中枢
+- 新增 README / docs 内容时，先判断是否为稳定事实、入口、流程或治理规则；若是，必须先写入本分脑对应中枢或 `brain/references/public_docs/`
 - 面向 AI 接管的文档默认使用简体中文；公开多语言文档只作为产品用户入口，不替代 brain
 - 本地项目提交按主脑 project profile 与 `tools.brain.project_commit` 执行；`git tag` 或 `git push` 仍需用户明确授权
 - 不写死密钥、账号、端口、模型名、绝对环境路径或环境专属分支逻辑
-- 用户可见行为、CLI/API、部署、通知或报告结构变化时，需要同步相关 docs / `docs/CHANGELOG.md`，并评估是否要写回 brain
+- 用户可见行为、CLI/API、部署、通知或报告结构变化时，需要同步相关公开 docs / `docs/CHANGELOG.md`，并把阅读正文或稳定结论写回 brain
 
 ## 3. 已验证教训
 - 如果产品 AI 兼容资产不指向本分脑，后续 agent 会优先读错入口

@@ -1,5 +1,8 @@
 # 2026-06-02 Low-Corr Compact Exposure Grid Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_compact_exposure_grid_interpretation.md`.
+
+
 ## Context
 
 - Objective: compare looser liquidity and momentum exposure filters under fit/evaluation separation.

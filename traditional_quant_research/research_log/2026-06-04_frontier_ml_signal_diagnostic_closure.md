@@ -1,5 +1,8 @@
 # Frontier ML Signal Diagnostic Closure
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-04_frontier_ml_signal_diagnostic_closure.md`.
+
+
 - ML rebuild run: `frontier_ml_signal_rebuild_20260604_165434`
 - smoke personal grid: `frontier_personal_protocol_grid_20260604_150232`
 - formal personal grid: `frontier_personal_protocol_grid_20260604_165943`

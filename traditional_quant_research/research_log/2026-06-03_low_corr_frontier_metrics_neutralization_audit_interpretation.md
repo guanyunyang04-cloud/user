@@ -1,5 +1,8 @@
 # Low-Corr Frontier Metrics Neutralization Audit Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-03_low_corr_frontier_metrics_neutralization_audit_interpretation.md`.
+
+
 ## Summary
 
 This audit tested whether the current `20d/monthly/top_n=200/buffer=3.0` frontier protocol survives hard same-day cross-sectional neutralization against the main observed metrics/style exposures.

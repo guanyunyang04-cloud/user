@@ -1,5 +1,8 @@
 # Frontier Promotion Gate
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-03_frontier_promotion_gate.md`.
+
+
 - run_id: `frontier_promotion_gate_20260603_202428`
 - decision: `keep_candidate_frontier_backtest_only`
 - candidate_count: `0`

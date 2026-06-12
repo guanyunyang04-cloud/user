@@ -1,5 +1,8 @@
 # 2026-06-02 Low-Corr Horizon Cost Yearly Validation Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_horizon_cost_yearly_validation_interpretation.md`.
+
+
 ## Context
 
 - Objective: validate the promising 20-day low-corr horizon/cost protocols across multiple years.

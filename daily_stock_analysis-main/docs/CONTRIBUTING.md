@@ -1,5 +1,8 @@
 # 贡献指南
 
+Canonical brain source: `daily_stock_analysis-main/brain/references/public_docs/CONTRIBUTING.md`.
+
+
 感谢你对本项目的关注！欢迎任何形式的贡献。
 
 ## 🐛 报告 Bug

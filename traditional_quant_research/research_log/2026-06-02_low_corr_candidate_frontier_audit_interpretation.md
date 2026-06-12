@@ -1,5 +1,8 @@
 # Low-Corr Candidate-Frontier Audit Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_candidate_frontier_audit_interpretation.md`.
+
+
 ## Question
 
 `multifactor_low_corr_rank_score / horizon=20 / monthly / top_n=200 / buffer=3.0 / baseline_no_filter` 是当前第一条 candidate-frontier 协议。本次审计问题是：它能否在执行约束、成本压力、选中篮子暴露和容量 proxy 下升级为正式策略候选。

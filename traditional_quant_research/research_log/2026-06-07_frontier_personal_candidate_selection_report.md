@@ -1,5 +1,8 @@
 # Frontier Personal Candidate Selection Report
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-07_frontier_personal_candidate_selection_report.md`.
+
+
 - run_id: `frontier_personal_candidate_selection_report_20260607_113838`
 - decision: `personal_backtest_candidates_selected`
 - personal_backtest_candidate_count: `4`

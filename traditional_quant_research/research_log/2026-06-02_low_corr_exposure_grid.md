@@ -1,5 +1,8 @@
 # Low-Corr Exposure Grid
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_exposure_grid.md`.
+
+
 - Hypothesis: low-correlation rank score may improve under explicit liquidity, momentum, volatility, and amplitude exposure controls.
 - Data Scope: snapshot `baostock_v2_pit_20160101_20260601_stockbasic_fixed`, `2026-01-01` to `2026-06-01`.
 - Fit Scope: `2025-01-01` to `2025-12-31`; label `fwd_ret_5d`.

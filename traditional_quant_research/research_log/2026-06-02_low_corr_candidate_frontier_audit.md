@@ -1,5 +1,8 @@
 # Low-Corr Candidate-Frontier Audit
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_candidate_frontier_audit.md`.
+
+
 - Hypothesis: the strongest current protocol needs exposure, liquidity, trade-count, and fee-stress auditing before promotion.
 - Protocol: `horizon=20`, `monthly`, `top_n=200`, `buffer=3.0`.
 - Years: `[2024, 2025, 2026]`; final end date `2026-06-01`.

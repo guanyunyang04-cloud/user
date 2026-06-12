@@ -1,5 +1,8 @@
 # Low-Corr Candidate Signal Comparison Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_candidate_signal_comparison_interpretation.md`.
+
+
 ## Question
 
 此前 `multifactor_low_corr_rank_score / horizon=20 / monthly / top_n=200 / buffer=3.0 / baseline_no_filter` 是第一条 candidate-frontier 协议。本次问题是：在完全相同的组合执行协议下，low-corr 是否确实优于 baseline、equal-rank、IC-weighted 和 rolling-IC 信号。

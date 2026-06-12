@@ -1,5 +1,8 @@
 # Frontier Weak-Year Rebuild
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-04_frontier_weak_year_factor_family_rebuild.md`.
+
+
 - run_id: `frontier_weak_year_rebuild_20260604_080001`
 - decision: `diagnostic_rebuild_rules_ready_for_backtest`
 - fit_eval_candidate_rows: `27`

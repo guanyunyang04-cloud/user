@@ -1,5 +1,8 @@
 # LLM Configuration Guide
 
+Canonical brain source: `daily_stock_analysis-main/brain/references/public_docs/LLM_CONFIG_GUIDE_EN.md`.
+
+
 Welcome! Whether you are a beginner newly exposed to AI or a veteran skilled with various APIs, this guide will help you set up Large Language Models (LLMs) quickly.
 
 Our LLM integration is powered by the robust and universal [LiteLLM](https://docs.litellm.ai/), which means we support almost all mainstream models on the market (both official APIs and third-party relay services). To cater to users at different experience levels, we have designed a "three-tier priority" configuration. Simply choose the method that suits you best.

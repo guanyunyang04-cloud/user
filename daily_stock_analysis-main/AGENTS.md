@@ -1,5 +1,8 @@
 # AGENTS.md
 
+Canonical brain source: `daily_stock_analysis-main/brain/operations_center.md`.
+
+
 本文件用于约束本仓库的默认开发流程，目标是减少重复沟通、减少返工，并让改动和当前项目结构保持一致。
 
 如果本文件与仓库中的脚本、工作流、代码现状不一致，以实际可执行内容为准，并在相关改动中顺手修正文档，避免规则继续漂移。

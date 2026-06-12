@@ -1,5 +1,8 @@
 # Frontier Failure Attribution
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-03_frontier_failure_attribution.md`.
+
+
 - run_id: `frontier_failure_attribution_20260603_132813`
 - decision: `keep_candidate_frontier_backtest_only_rebuild_required`
 - combined_run_dir: `traditional_quant_research\output\experiments\low_corr_frontier_combined_constraint_audit\low_corr_frontier_combined_constraint_audit_20260603_122047`

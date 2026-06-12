@@ -1,5 +1,8 @@
 # 2026-06-02 2026 Period And Rolling Weight Audit Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_2026_period_weight_audit_interpretation.md`.
+
+
 ## Question
 
 Why did the strongest phase-2/phase-3 candidate input fail the 2026 half-year stability gate?

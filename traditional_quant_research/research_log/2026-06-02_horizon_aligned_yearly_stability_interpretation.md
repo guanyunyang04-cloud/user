@@ -1,5 +1,8 @@
 # 2026-06-02 Horizon-Aligned Yearly Stability Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_horizon_aligned_yearly_stability_interpretation.md`.
+
+
 ## Decision
 
 年度稳定性验证结论：`multifactor_rolling_ic_weighted_score` 仍是当前最强候选输入，但没有通过样本外稳定门禁。它在 2024 和 2025 年表现强，2026 年明显降温，且 10 bps 成本后 2026 年转负。因此当前不能升级为策略候选，只能进入下一轮“换手/成本压缩 + 执行约束”测试。

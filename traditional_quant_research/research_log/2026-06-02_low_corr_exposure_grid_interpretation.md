@@ -1,5 +1,8 @@
 # 2026-06-02 Low-Corr Exposure Grid Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_exposure_grid_interpretation.md`.
+
+
 ## Context
 
 - Objective: test whether first-pass liquidity, momentum, volatility, and amplitude exposure caps improve the current `multifactor_low_corr_rank_score` under stricter fit/evaluation separation.

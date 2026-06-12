@@ -1,5 +1,8 @@
 # Frontier Factor-Family Selected Combined Evidence
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-04_frontier_factor_family_selected_combined.md`.
+
+
 - run_id: `frontier_factor_family_selected_combined_20260604_083314`
 - selection_method: `prior_fit_selected_factor_family`
 - output_constraint_variant: `factor_family_prior_fit`

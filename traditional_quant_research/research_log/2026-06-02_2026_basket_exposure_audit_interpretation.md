@@ -1,5 +1,8 @@
 # 2026-06-02 2026 Basket Exposure Audit Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_2026_basket_exposure_audit_interpretation.md`.
+
+
 ## Question
 
 After the 2026 monthly/quarterly horizon audit found March and May as the main weak periods, what factor exposures did the actually selected baskets carry?

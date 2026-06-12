@@ -1,5 +1,8 @@
 # Frontier Trial Ledger
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-03_frontier_trial_ledger.md`.
+
+
 - run_id: `frontier_trial_ledger_20260603_202437`
 - decision: `keep_candidate_frontier_backtest_only`
 - trial_count: `6`

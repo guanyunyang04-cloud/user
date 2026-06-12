@@ -1,5 +1,8 @@
 # 2026-06-02 Phase 2 Multifactor Validation Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_phase2_multifactor_validation_interpretation.md`.
+
+
 ## Decision
 
 第二阶段多因子验证结论：多因子 rank baseline 已经显著强于第一阶段 `baseline_score`，可以进入“候选策略筛选基础设施”阶段；但当前证据仍不能把任何信号升级为正式策略候选，也不建议立刻进入传统 ML 生产式建模。

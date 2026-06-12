@@ -1,5 +1,8 @@
 # Expanded Factor Formal 2017-2026 Protocol Grid
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-04_expanded_factor_formal_2017_2026_protocol_grid.md`.
+
+
 ## Summary
 
 Run `frontier_personal_protocol_grid_formal_2017_2026_expanded_top100_200_20260604` is the first formal long-sample personal protocol grid for `factor_set=expanded`.

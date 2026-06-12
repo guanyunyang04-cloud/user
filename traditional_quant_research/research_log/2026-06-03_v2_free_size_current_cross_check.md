@@ -1,5 +1,8 @@
 # V2 Free Size Current Cross-Check
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-03_v2_free_size_current_cross_check.md`.
+
+
 - run_id: `v2_free_size_current_cross_check_20260603_195515`
 - source_decision: `current_cross_check_unavailable`
 - evidence_grade: `diagnostic`

@@ -1,5 +1,8 @@
 # V2 External Size Source Scout
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-03_v2_external_size_source_scout.md`.
+
+
 ## Summary
 
 - `run_id`: `v2_external_size_source_scout_20260603_115009`

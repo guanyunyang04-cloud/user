@@ -1,5 +1,8 @@
 # Bot Integration Guide
 
+Canonical brain source: `daily_stock_analysis-main/brain/references/public_docs/bot-command_EN.md`.
+
+
 This document covers the bot module architecture, supported commands, webhook routes, and how to configure platform integrations.
 
 > **Glossary:** "Enterprise bot" in this context means a chatbot that receives commands via webhook from a messaging platform (Feishu / DingTalk / WeChat Work / Telegram) and calls the analysis pipeline to reply inline.

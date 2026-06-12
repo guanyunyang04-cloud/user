@@ -1,5 +1,8 @@
 # Frontier Personal Protocol Grid
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-04_frontier_weak_year_variants_formal_2017_2026.md`.
+
+
 - run_id: `frontier_personal_protocol_grid_20260604_095132`
 - north_star: `Baostock-only personal quant strategy research`
 - decision: `personal_protocol_candidates_ready`

@@ -1,5 +1,8 @@
 # V2 Free Size Source Scout
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-03_v2_free_size_source_scout.md`.
+
+
 - run_id: `v2_free_size_source_scout_20260603_195449`
 - decision: `free_source_scout_only`
 - recommended_size_source: `akshare_cninfo_reconstructed`

@@ -1,5 +1,8 @@
 # Expanded Factor Smoke And Personal Gate Scope Fix
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-04_expanded_factor_smoke_and_gate_scope_fix.md`.
+
+
 ## Summary
 
 Run `frontier_personal_protocol_grid_20260604_055649` is the first real diagnostic smoke for `factor_set=expanded`.

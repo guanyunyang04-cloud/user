@@ -1,5 +1,8 @@
 # Short Open-Known Event Cache
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-04_short_open_known_factor_cache_preopen_submit.md`.
+
+
 ## Summary
 
 - Profile: `preopen_submit`

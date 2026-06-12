@@ -1,3 +1,5 @@
+Canonical brain source: `daily_stock_analysis-main/brain/references/public_docs/README_CHT.md`.
+
 <div align="center">
 
 # 股票智能分析系統

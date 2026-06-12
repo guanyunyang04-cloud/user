@@ -1,5 +1,8 @@
 # V2 Tushare Size Probe
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-03_v2_tushare_size_probe.md`.
+
+
 ## Summary
 
 - `run_id`: `v2_tushare_size_probe_20260603_230731`

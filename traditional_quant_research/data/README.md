@@ -1,10 +1,5 @@
-# Data
+# Traditional Quant Research 数据入口
 
-本目录只保存数据契约和小型样例，不提交供应商原始数据、完整行情库或大型中间产物。
+Canonical brain source: `traditional_quant_research\brain\references\data_readme.md`.
 
-建议数据分层：
-
-- `raw/`: 原始供应商数据，本地 ignored。
-- `interim/`: 清洗中间层，本地 ignored 或按需登记。
-- `features/`: 可复验特征快照，提交前确认体积和授权边界。
-- `catalog.md`: 数据来源、字段、日期范围、复权口径和缺失值规则。
+本文件只保留外部入口；阅读、维护和写回以 canonical brain source 为准。

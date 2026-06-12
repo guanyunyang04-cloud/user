@@ -1,5 +1,8 @@
 # 桌面端打包说明 (Electron + React UI)
 
+Canonical brain source: `daily_stock_analysis-main/brain/references/public_docs/desktop-package.md`.
+
+
 本项目可打包为桌面应用，使用 Electron 作为桌面壳，`apps/dsa-web` 的 React UI 作为界面。
 
 ## 架构说明

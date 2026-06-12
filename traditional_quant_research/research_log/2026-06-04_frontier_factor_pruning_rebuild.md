@@ -1,5 +1,8 @@
 # Frontier Factor Pruning Rebuild
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-04_frontier_factor_pruning_rebuild.md`.
+
+
 - run_id: `frontier_factor_pruning_rebuild_20260604_121809`
 - decision: `diagnostic_factor_pruning_plan_ready`
 - horizon: `20`

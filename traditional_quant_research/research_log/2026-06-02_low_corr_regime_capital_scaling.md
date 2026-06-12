@@ -1,5 +1,8 @@
 # Low-Corr Regime Capital Scaling
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_regime_capital_scaling.md`.
+
+
 - Hypothesis: reducing capital in weak regimes may retain strong-year upside better than all-or-nothing regime skips.
 - Data Scope: `2026-01-01` to `2026-06-01`; fit `2025-01-01` to `2025-12-31`.
 - Stock Selection Filters: `[{'column': 'log_amount_mean_20d_z', 'operator': '>=', 'threshold': -0.8}, {'column': 'momentum_20d_z', 'operator': '>=', 'threshold': -0.8}]`.

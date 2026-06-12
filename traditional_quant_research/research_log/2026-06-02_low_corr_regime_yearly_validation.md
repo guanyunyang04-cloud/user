@@ -1,5 +1,8 @@
 # Low-Corr Regime Yearly Validation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_regime_yearly_validation.md`.
+
+
 - Hypothesis: a simple market-return and breadth regime rule should improve low-corr watchlist stability across evaluation years.
 - Years: `[2024, 2025, 2026]`; final end date `2026-06-01`.
 - Stock Selection Filter: `log_amount_mean_20d_z>=-0.8,momentum_20d_z>=-0.8`.

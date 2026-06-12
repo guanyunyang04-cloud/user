@@ -1,5 +1,8 @@
 # 2026-06-02 Multifactor Baseline
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_multifactor_2024_2026_buffered_horizon_validation.md`.
+
+
 - Hypothesis: 方向校正后的传统价量因子 rank 合成，应该比第一阶段等权 z-score `baseline_score` 更适合作为第二阶段多因子诊断基线。
 - Data Scope: snapshot `baostock_v2_pit_20160101_20260601_stockbasic_fixed`, `2024-01-01` to `2026-06-01`.
 - Panel: `1779897` rows, `581` dates, `3233` securities.

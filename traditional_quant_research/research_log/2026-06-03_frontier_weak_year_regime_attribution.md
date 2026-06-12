@@ -1,5 +1,8 @@
 # Frontier Weak-Year Regime Attribution
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-03_frontier_weak_year_regime_attribution.md`.
+
+
 - run_id: `frontier_weak_year_regime_attribution_20260603_134922`
 - decision: `keep_candidate_frontier_backtest_only_regime_rebuild_required`
 - candidate_count: `0`

@@ -1,5 +1,8 @@
 # 📖 完整配置与部署指南
 
+Canonical brain source: `daily_stock_analysis-main/brain/references/public_docs/full-guide.md`.
+
+
 本文档包含 A股智能分析系统的完整配置说明，适合需要高级功能或特殊部署方式的用户。
 
 > 💡 快速上手请参考 [README.md](../README.md)，本文档为进阶配置。

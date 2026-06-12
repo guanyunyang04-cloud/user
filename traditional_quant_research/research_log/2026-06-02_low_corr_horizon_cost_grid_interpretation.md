@@ -1,5 +1,8 @@
 # 2026-06-02 Low-Corr Horizon Cost Grid Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_horizon_cost_grid_interpretation.md`.
+
+
 ## Context
 
 - Objective: test whether lower-turnover horizon and rebalance choices can recover the low-corr signal under 30 bps costs.

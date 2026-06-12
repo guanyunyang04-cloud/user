@@ -1,5 +1,8 @@
 # Tushare 股票列表获取工具使用说明
 
+Canonical brain source: `daily_stock_analysis-main/brain/references/public_docs/TUSHARE_STOCK_LIST_GUIDE.md`.
+
+
 ## 功能概述
 
 从 Tushare Pro 获取 A股、港股、美股列表信息，保存为 CSV 文件到本地。

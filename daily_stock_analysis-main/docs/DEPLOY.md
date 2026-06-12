@@ -1,5 +1,8 @@
 # 🚀 部署指南
 
+Canonical brain source: `daily_stock_analysis-main/brain/references/public_docs/DEPLOY.md`.
+
+
 本文档介绍如何将 A股自选股智能分析系统部署到服务器。
 
 ## 📋 部署方案对比

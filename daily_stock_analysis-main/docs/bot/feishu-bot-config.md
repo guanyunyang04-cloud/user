@@ -1,5 +1,8 @@
 # 飞书机器人配置
 
+Canonical brain source: `daily_stock_analysis-main/brain/references/public_docs/bot/feishu-bot-config.md`.
+
+
 ## 创建应用
 https://open.feishu.cn/document/develop-an-echo-bot/introduction
 

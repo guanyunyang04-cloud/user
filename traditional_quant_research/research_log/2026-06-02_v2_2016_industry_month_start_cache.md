@@ -1,5 +1,8 @@
 # v2 2016 Industry Month-Start Cache
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_v2_2016_industry_month_start_cache.md`.
+
+
 日期：2026-06-02
 
 ## 目的

@@ -1,5 +1,8 @@
 # Factor-Pruned Formal Personal Grid
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-04_factor_pruned_formal_personal_grid.md`.
+
+
 - run_id: `frontier_personal_protocol_grid_20260604_124941`
 - pruning_plan_run: `frontier_factor_pruning_rebuild_20260604_121809`
 - signal: `factor_pruned_rank_score_h20_prior_fit`

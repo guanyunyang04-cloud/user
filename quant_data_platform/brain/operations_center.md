@@ -11,7 +11,8 @@
 - `quant_data_platform/configs`：canonical/profile 配置。
 - `quant_data_platform/registry`：registry、root manifest、memmap 指针。
 - `quant_data_platform/data`：大数据资产、tmp、agent_runs、sharded memmap，默认 Git 忽略。
-- `quant_data_platform/docs`：数据契约、清理策略、memmap 设计。
+- `quant_data_platform/brain/references`：数据契约、清理策略、memmap 设计的 canonical 正文。
+- `quant_data_platform/docs`：只作为公开导出或兼容入口使用，不再承载 brain 未收录的长期正文。
 - `quant_data_platform/tests`：平台单元与集成测试。
 
 ## 常用验证

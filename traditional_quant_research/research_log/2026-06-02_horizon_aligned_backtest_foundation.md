@@ -1,5 +1,8 @@
 # 2026-06-02 Horizon-Aligned Backtest Foundation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_horizon_aligned_backtest_foundation.md`.
+
+
 ## Decision
 
 已新增 horizon-aligned Top-N 回测基础模块，用于修正 `fwd_ret_5d/20d` 在 daily Top-N 中被重复年化的问题。该模块是第三阶段“多因子候选策略筛选基础设施”的协议基础，不改变旧 `backtest_protocol.py` 的诊断用途。

@@ -1,5 +1,8 @@
 # Frontier Personal Paper Tracking Plan
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-04_frontier_personal_paper_tracking_plan.md`.
+
+
 - run_id: `frontier_personal_paper_tracking_plan_20260604_115320`
 - decision: `tracking_plan_scaffold_ready`
 - candidate_count: `3`

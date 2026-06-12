@@ -1,5 +1,8 @@
 # Deployment Guide
 
+Canonical brain source: `daily_stock_analysis-main/brain/references/public_docs/DEPLOY_EN.md`.
+
+
 This document explains how to deploy the AI Stock Analysis System to a server.
 
 ## Deployment Options Comparison

@@ -1,5 +1,8 @@
 # 2026-06-02 Low-Corr Regime Yearly Validation Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_regime_yearly_validation_interpretation.md`.
+
+
 ## Context
 
 - Objective: validate whether the current best low-corr regime rule is stable across multiple evaluation years.

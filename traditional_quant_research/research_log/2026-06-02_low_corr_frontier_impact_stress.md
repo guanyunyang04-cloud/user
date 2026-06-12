@@ -1,5 +1,8 @@
 # Low-Corr Frontier Impact Stress
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_frontier_impact_stress.md`.
+
+
 - Hypothesis: frontier signals should survive participation-based impact costs, not only fixed fee bps.
 - Protocol: `horizon=20`, `monthly`, `top_n=200`, `buffer=3.0`.
 - Signals: `['multifactor_rolling_ic_weighted_score', 'multifactor_ic_weighted_score', 'multifactor_low_corr_rank_score']`.

@@ -1,5 +1,8 @@
 # Traditional Quant Research
 
+Canonical brain source: `traditional_quant_research/brain/identity_layer.md`.
+
+
 本项目用于传统方向的量化方法研究，聚焦可解释、可复现、低复杂度的研究路径。
 
 ## 研究边界

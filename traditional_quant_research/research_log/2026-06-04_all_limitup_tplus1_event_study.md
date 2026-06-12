@@ -1,5 +1,8 @@
 # 2026-06-04 All Limit-Up T+1 Event Study
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-04_all_limitup_tplus1_event_study.md`.
+
+
 ## Scope
 
 - Data snapshot: `baostock_v2_pit_20160101_20260601_industry_metrics_month_start_20260603`.

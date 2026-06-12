@@ -1,5 +1,8 @@
 # Low-Corr Regime Capital Yearly Validation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_regime_capital_yearly_validation.md`.
+
+
 - Hypothesis: dynamic capital scaling can reduce weak-regime damage without the full opportunity cost of static regime skips.
 - Years: `[2024, 2025, 2026]`; final end date `2026-06-01`.
 - Stock Selection Filter: `log_amount_mean_20d_z>=-0.8,momentum_20d_z>=-0.8`.

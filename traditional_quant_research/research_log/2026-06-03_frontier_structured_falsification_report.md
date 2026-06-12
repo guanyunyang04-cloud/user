@@ -1,5 +1,8 @@
 # Frontier Structured Falsification Report
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-03_frontier_structured_falsification_report.md`.
+
+
 - run_id: `frontier_structured_falsification_report_20260603_202448`
 - decision: `structured_falsification_keep_candidate_frontier_backtest_only`
 - current_evidence_grade: `candidate-frontier/backtest_only`

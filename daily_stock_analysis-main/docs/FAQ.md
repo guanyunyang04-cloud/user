@@ -1,5 +1,8 @@
 # ❓ 常见问题解答 (FAQ)
 
+Canonical brain source: `daily_stock_analysis-main/brain/references/public_docs/FAQ.md`.
+
+
 本文档整理了用户在使用过程中遇到的常见问题及解决方案。
 
 ---

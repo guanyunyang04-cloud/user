@@ -1,5 +1,8 @@
 # English Documentation Index
 
+Canonical brain source: `daily_stock_analysis-main/brain/references/public_docs/INDEX_EN.md`.
+
+
 > All English-language documentation for the AI Stock Analysis System.
 > 
 > For Chinese docs, see the [main README](../README.md).

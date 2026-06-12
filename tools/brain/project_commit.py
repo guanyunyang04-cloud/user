@@ -4,6 +4,7 @@ import argparse
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Iterable
 
@@ -103,7 +104,7 @@ def split_commit_paths(*, paths: list[str], allowed_prefixes: list[str]) -> tupl
 
 def _run_git(args: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", *args],
+        ["git", "-c", "core.quotepath=false", *args],
         cwd=str(WORKSPACE_ROOT),
         capture_output=True,
         text=True,
@@ -112,12 +113,41 @@ def _run_git(args: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _run_git_with_pathspec(args: list[str], paths: list[str]) -> subprocess.CompletedProcess[str]:
+    normalized_paths = _unique(paths)
+    with tempfile.NamedTemporaryFile("wb", delete=False) as raw:
+        raw.write(b"\0".join(path.encode("utf-8") for path in normalized_paths))
+        raw_path = raw.name
+    try:
+        return _run_git([*args, f"--pathspec-from-file={raw_path}", "--pathspec-file-nul"])
+    finally:
+        Path(raw_path).unlink(missing_ok=True)
+
+
+def _git_path_list(args: list[str]) -> list[str]:
+    result = _run_git(args)
+    if result.returncode != 0:
+        return []
+    return _unique(line.strip() for line in (result.stdout or "").splitlines() if line.strip())
+
+
+def _stage_project_paths(project_paths: list[str]) -> subprocess.CompletedProcess[str]:
+    project_set = set(_unique(project_paths))
+    tracked_updates = [path for path in _git_path_list(["diff", "--name-only"]) if path in project_set]
+    untracked_adds = [path for path in _git_path_list(["ls-files", "--others", "--exclude-standard"]) if path in project_set]
+    for args, paths in ((["add", "--update"], tracked_updates), (["add"], untracked_adds)):
+        if not paths:
+            continue
+        result = _run_git_with_pathspec(args, paths)
+        if result.returncode != 0:
+            return result
+    return subprocess.CompletedProcess(["stage_project_paths"], 0, stdout="", stderr="")
+
+
 def changed_paths() -> list[str]:
     paths: list[str] = []
     for args in (["diff", "--name-only"], ["diff", "--cached", "--name-only"], ["ls-files", "--others", "--exclude-standard"]):
-        result = _run_git(args)
-        if result.returncode == 0:
-            paths.extend(line.strip() for line in (result.stdout or "").splitlines() if line.strip())
+        paths.extend(_git_path_list(args))
     return _unique(paths)
 
 
@@ -169,10 +199,22 @@ def stage_and_commit_project(
         return {"schema_version": 1, "status": "blocked", "reason": "no_project_changes", "scope": scope}
     if dry_run:
         return {"schema_version": 1, "status": "dry_run", "scope": scope, "commit_message": message}
-    stage = _run_git(["add", "--", *project_paths])
+    stage = _stage_project_paths(project_paths)
     if stage.returncode != 0:
         return {"schema_version": 1, "status": "blocked", "reason": "git_stage_failed", "stderr": stage.stderr}
-    commit = _run_git(["commit", "-m", message, "--", *project_paths])
+    staged_paths = _git_path_list(["diff", "--cached", "--name-only"])
+    staged_project_paths, staged_external_paths = split_commit_paths(paths=staged_paths, allowed_prefixes=allowed_prefixes)
+    if staged_external_paths:
+        return {
+            "schema_version": 1,
+            "status": "blocked",
+            "reason": "git_staged_external_paths",
+            "project_id": project_id,
+            "staged_external_paths": staged_external_paths,
+        }
+    if not staged_project_paths:
+        return {"schema_version": 1, "status": "blocked", "reason": "no_staged_project_changes", "scope": scope}
+    commit = _run_git(["commit", "-m", message])
     if commit.returncode != 0:
         return {"schema_version": 1, "status": "blocked", "reason": "git_commit_failed", "stdout": commit.stdout, "stderr": commit.stderr}
     sha = _run_git(["rev-parse", "HEAD"]).stdout.strip()

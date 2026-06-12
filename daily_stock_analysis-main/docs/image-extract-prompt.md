@@ -1,5 +1,8 @@
 # Image Extract Prompt (Vision LLM)
 
+Canonical brain source: `daily_stock_analysis-main/brain/references/public_docs/image-extract-prompt.md`.
+
+
 本文档记录 `src/services/image_stock_extractor.py` 中 `EXTRACT_PROMPT` 的完整内容，便于 PR 审查时评估指令效果。
 
 **当修改 EXTRACT_PROMPT 时**：请同步更新此文件，并在 PR 描述中展示完整变更（before/after），以便审查者评估针对 code+name+confidence 提取的优化程度。

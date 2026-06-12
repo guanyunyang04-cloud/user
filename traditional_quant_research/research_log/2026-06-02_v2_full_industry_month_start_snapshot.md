@@ -1,5 +1,8 @@
 # v2 Full Industry Month-Start Snapshot
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_v2_full_industry_month_start_snapshot.md`.
+
+
 - Date: 2026-06-02
 - Snapshot: `baostock_v2_pit_20160101_20260601_industry_month_start_20260602`
 - Status: `data_snapshot_complete`

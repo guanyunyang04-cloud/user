@@ -1,5 +1,8 @@
 # Generalized Strong-Event Pool Research
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-07_generalized_strong_event_pool_research.md`.
+
+
 - run_id: `generalized_strong_event_pool_research_20260607_222241`
 - event_count: `312573`
 - prediction_count: `267659`

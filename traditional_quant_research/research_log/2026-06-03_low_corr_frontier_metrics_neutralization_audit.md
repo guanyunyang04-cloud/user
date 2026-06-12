@@ -1,5 +1,8 @@
 # Low-Corr Frontier Neutralization Audit
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-03_low_corr_frontier_metrics_neutralization_audit.md`.
+
+
 - Hypothesis: frontier signals should not rely entirely on same-date size/liquidity proxy or industry exposure.
 - Protocol: `horizon=20`, `monthly`, `top_n=200`, `buffer=3.0`.
 - Signals: `['multifactor_rolling_ic_weighted_score', 'multifactor_ic_weighted_score', 'multifactor_low_corr_rank_score']`.

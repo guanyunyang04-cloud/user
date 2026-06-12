@@ -1,5 +1,8 @@
 # 2026-06-02 Backtest Protocol Upgrade
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_backtest_protocol_upgrade.md`.
+
+
 - Hypothesis: `baseline_score` can support a simple Top-N protocol whose behavior changes meaningfully with rebalance frequency and transaction costs.
 - Data Scope: snapshot `baostock_v2_pit_20160101_20260601_stockbasic_fixed`, `2026-01-01` to `2026-06-01` for the smoke run.
 - Method: rank `baseline_score`, run equal-weight Top-N long-only backtests on daily/weekly/monthly rebalance schedules, compare 0/10 bps cost sensitivity, and record the best configurations.

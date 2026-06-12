@@ -1,5 +1,8 @@
 # Discord机器人配置
 
+Canonical brain source: `daily_stock_analysis-main/brain/references/public_docs/bot/discord-bot-config.md`.
+
+
 ## Discord机器人
 Discord机器人接收消息需要使用Discord Developer Portal创建机器人应用
 https://discord.com/developers/applications

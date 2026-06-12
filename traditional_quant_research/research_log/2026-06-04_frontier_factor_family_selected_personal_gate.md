@@ -1,5 +1,8 @@
 # Frontier Personal Candidate Gate
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-04_frontier_factor_family_selected_personal_gate.md`.
+
+
 - run_id: `frontier_personal_candidate_gate_20260604_083341`
 - north_star: `Baostock-only personal quant strategy research`
 - decision: `keep_personal_research_backtest_only`

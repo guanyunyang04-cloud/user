@@ -1,5 +1,8 @@
 # 云服务器 Web 界面访问指南
 
+Canonical brain source: `daily_stock_analysis-main/brain/references/public_docs/deploy-webui-cloud.md`.
+
+
 如果你已经把项目部署到云服务器，但不知道在浏览器里输入什么地址才能打开 Web 管理界面，这篇教程就是为你准备的。
 
 > 其实就两步：让服务监听外网，再在浏览器里输入地址。

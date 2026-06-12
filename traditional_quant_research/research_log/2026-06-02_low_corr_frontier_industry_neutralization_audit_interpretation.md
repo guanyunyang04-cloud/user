@@ -1,5 +1,8 @@
 # Low-Corr Frontier Industry Neutralization Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_frontier_industry_neutralization_audit_interpretation.md`.
+
+
 - Date: 2026-06-02
 - Run: `low_corr_frontier_neutralization_audit_20260602_224153`
 - Snapshot: `baostock_v2_pit_20160101_20260601_industry_month_start_20260602`

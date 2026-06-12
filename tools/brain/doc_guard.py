@@ -259,7 +259,6 @@ ALLOWED_EXTERNAL_DOC_PREFIXES = (
     "daily_stock_analysis-main/docs/",
     "daily_stock_analysis-main/.github/",
     "daily_stock_analysis-main/.claude/skills/",
-    "quant_data_platform/docs/",
     "traditional_quant_research/experiments/",
     "traditional_quant_research/research_log/",
 )
@@ -290,6 +289,32 @@ ALLOWED_EXTERNAL_DOCS = {
     "traditional_quant_research/data/catalog.md",
     *DOCUMENT_REDIRECTS.keys(),
 }
+
+EXTERNAL_DOCS_REQUIRING_CANONICAL_MARKER = {
+    "docs/superpowers/plans/2026-05-12-continuous-policy-key-progress.md",
+    "docs/testing_governance.md",
+    "README.md",
+    "a_stock_daily_selection/README.md",
+    "canonical_data/README.md",
+    "daily_research/README.md",
+    "daily_research/execution/使用教程.md",
+    "daily_stock_analysis-main/AGENTS.md",
+    "daily_stock_analysis-main/CLAUDE.md",
+    "daily_stock_analysis-main/README.md",
+    "daily_stock_analysis-main/SKILL.md",
+    "daily_stock_analysis-main/strategies/README.md",
+    "quant_data_platform/README.md",
+    "traditional_quant_research/README.md",
+    "traditional_quant_research/data/README.md",
+    "traditional_quant_research/data/catalog.md",
+    *DOCUMENT_REDIRECTS.keys(),
+}
+
+EXTERNAL_DOC_PREFIXES_REQUIRING_CANONICAL_MARKER = (
+    "daily_stock_analysis-main/docs/",
+    "traditional_quant_research/experiments/",
+    "traditional_quant_research/research_log/",
+)
 
 REQUIRED_DOC_SNIPPETS = {
     "README.md": (
@@ -625,6 +650,14 @@ def _is_core_brain_markdown(normalized: str) -> bool:
     if "/references/" in normalized or "/skills/" in normalized:
         return False
     return normalized.startswith(BRAIN_DOC_PREFIXES)
+
+
+def _is_generated_doc_path(relative_path: str) -> bool:
+    return any(part in GENERATED_DOC_PATH_PARTS for part in relative_path.split("/"))
+
+
+def _uses_strict_brain_text_heuristics(normalized: str) -> bool:
+    return _is_core_brain_markdown(normalized) or normalized in DOC_RULES
 
 
 def _check_language_policy_text(text: str, normalized: str) -> list[str]:
@@ -1019,9 +1052,28 @@ def _is_allowed_doc_path(relative_path: str) -> bool:
         return True
     if relative_path.startswith(_registered_project_output_doc_prefixes()):
         return True
-    if any(part in GENERATED_DOC_PATH_PARTS for part in relative_path.split("/")):
+    if _is_generated_doc_path(relative_path):
         return True
     return relative_path.startswith(ALLOWED_EXTERNAL_DOC_PREFIXES)
+
+
+def _requires_canonical_marker(relative_path: str) -> bool:
+    if relative_path.startswith(_attached_brain_doc_prefixes()):
+        return False
+    if relative_path.startswith(_registered_project_output_doc_prefixes()):
+        return False
+    if _is_generated_doc_path(relative_path):
+        return False
+    if relative_path in EXTERNAL_DOCS_REQUIRING_CANONICAL_MARKER:
+        return True
+    return relative_path.startswith(EXTERNAL_DOC_PREFIXES_REQUIRING_CANONICAL_MARKER)
+
+
+def _canonical_marker_issue(relative_path: str, text: str) -> str:
+    marker = "Canonical brain source:"
+    if marker not in text:
+        return f"external_doc_missing_canonical_marker:{relative_path}"
+    return ""
 
 
 def _check_document_layout() -> list[str]:
@@ -1031,6 +1083,10 @@ def _check_document_layout() -> list[str]:
     for path in _workspace_markdown_paths(workspace_root):
         relative_path = _normalized_path(path.relative_to(workspace_root))
         if _is_allowed_doc_path(relative_path):
+            if _requires_canonical_marker(relative_path):
+                issue = _canonical_marker_issue(relative_path, _read_text(path))
+                if issue:
+                    issues.append(issue)
             continue
         issues.append(f"doc_outside_brain_without_exception:{relative_path}")
 
@@ -1064,8 +1120,8 @@ def _git_markdown_paths() -> list[str]:
     paths: list[str] = []
     seen: set[str] = set()
     commands = (
-        ["git", "ls-files", "--", "*.md"],
-        ["git", "ls-files", "--others", "--exclude-standard", "--", "*.md"],
+        ["git", "-c", "core.quotepath=false", "ls-files", "--", "*.md"],
+        ["git", "-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard", "--", "*.md"],
     )
     for command in commands:
         result = subprocess.run(
@@ -1097,7 +1153,7 @@ def _workspace_markdown_paths(workspace_root: Path | None = None) -> list[Path]:
 
 def _git_changed_paths() -> list[str]:
     result = subprocess.run(
-        ["git", "status", "--short", "--untracked-files=all"],
+        ["git", "-c", "core.quotepath=false", "status", "--short", "--untracked-files=all"],
         cwd=str(WORKSPACE_ROOT),
         capture_output=True,
         text=True,
@@ -1127,6 +1183,8 @@ def _changed_guard_files() -> list[str]:
     for relative_path in _git_changed_paths():
         if not relative_path.lower().endswith((".md", ".json")):
             continue
+        if _is_generated_doc_path(relative_path):
+            continue
         if (WORKSPACE_ROOT / relative_path).exists():
             out.append(relative_path)
     return out
@@ -1134,7 +1192,7 @@ def _changed_guard_files() -> list[str]:
 
 def _git_tracked_paths() -> list[str]:
     result = subprocess.run(
-        ["git", "ls-files"],
+        ["git", "-c", "core.quotepath=false", "ls-files"],
         cwd=str(WORKSPACE_ROOT),
         capture_output=True,
         text=True,
@@ -1246,9 +1304,10 @@ def _check_one_file(path: Path, *, tail_lines: int, show_lines: int) -> bool:
     line_count = len(lines)
     replacement_count = text.count("\ufffd")
     tail = _tail_lines(text, tail_lines)
-    tail_question_lines = _suspicious_question_lines(tail)
-    mojibake_lines = _suspicious_mojibake_lines(lines)
     normalized = _normalized_path(path)
+    strict_text_heuristics = _uses_strict_brain_text_heuristics(normalized)
+    tail_question_lines = _suspicious_question_lines(tail) if strict_text_heuristics else []
+    mojibake_lines = _suspicious_mojibake_lines(lines)
     language_issues = _check_language_policy_text(text, normalized)
     rule = _resolve_rule(path)
     has_issue = False

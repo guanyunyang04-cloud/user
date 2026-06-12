@@ -1,5 +1,8 @@
 # Low-Corr Candidate Signal Comparison
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_candidate_signal_comparison.md`.
+
+
 - Hypothesis: the candidate-frontier protocol should be compared against other rank signal variants under the exact same execution protocol.
 - Protocol: `horizon=20`, `monthly`, `top_n=200`, `buffer=3.0`.
 - Years: `[2024, 2025, 2026]`; final end date `2026-06-01`.

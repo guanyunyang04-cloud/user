@@ -1,5 +1,8 @@
 # 2026-06-02 2026 Execution-Constrained Audit Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_2026_execution_constrained_audit_interpretation.md`.
+
+
 ## Question
 
 Does a first-pass execution constraint make the 2026 candidate-input failure better, worse, or merely noisier?

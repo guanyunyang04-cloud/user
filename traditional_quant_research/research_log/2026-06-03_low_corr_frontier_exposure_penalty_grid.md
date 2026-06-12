@@ -1,5 +1,8 @@
 # Low-Corr Frontier Exposure Penalty Grid
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-03_low_corr_frontier_exposure_penalty_grid.md`.
+
+
 - Hypothesis: a portfolio-level exposure penalty can reduce basket active exposure with less damage than hard signal residualization.
 - Protocol: `horizon=20`, `monthly`, `top_n=200`, `buffer=3.0`.
 - Signals: `['multifactor_rolling_ic_weighted_score', 'multifactor_ic_weighted_score', 'multifactor_low_corr_rank_score']`.

@@ -1,5 +1,8 @@
 # Personal Short-Event Model Zoo Research
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-07_personal_short_event_model_zoo_research.md`.
+
+
 - run_id: `personal_short_event_model_zoo_research_20260608_001434`
 - branch_event_count: `395279`
 - prediction_count: `1688765`

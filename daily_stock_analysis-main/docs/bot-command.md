@@ -1,3 +1,5 @@
+Canonical brain source: `daily_stock_analysis-main/brain/references/public_docs/bot-command.md`.
+
 
 
 ## 一、整体设计

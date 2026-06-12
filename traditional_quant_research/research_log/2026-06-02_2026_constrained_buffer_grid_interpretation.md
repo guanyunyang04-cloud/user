@@ -1,5 +1,8 @@
 # 2026-06-02 2026 Constrained Buffer Grid Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_2026_constrained_buffer_grid_interpretation.md`.
+
+
 ## Question
 
 Can Top-N buffer reduce the execution-constrained 2026 damage enough to restore a viable candidate input?

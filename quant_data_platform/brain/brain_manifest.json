@@ -22,7 +22,7 @@
       "quant_data_platform/configs",
       "quant_data_platform/registry",
       "quant_data_platform/data",
-      "quant_data_platform/docs",
+      "quant_data_platform/brain/references",
       "quant_data_platform/tests"
     ]
   },
@@ -54,8 +54,8 @@
     "data_assets": [
       "quant_data_platform/data"
     ],
-    "docs": [
-      "quant_data_platform/docs"
+    "knowledge_docs": [
+      "quant_data_platform/brain/references"
     ],
     "tests": [
       "quant_data_platform/tests"
@@ -182,7 +182,7 @@
       "configs",
       "registry",
       "data_assets",
-      "docs",
+      "knowledge_docs",
       "tests"
     ],
     "principle": "先接入分脑，再确认 canonical 数据契约、registry、数据资产边界和验证入口，最后进入对应 body_map。"

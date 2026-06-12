@@ -1,5 +1,8 @@
 # daily_research
 
+Canonical brain source: `daily_research/brain/identity_layer.md`.
+
+
 `daily_research` 是当前工作区的正式生产研究与执行主线，负责长期研究、连续策略、默认执行、Web 控制台、维护工具和项目分脑状态。
 
 当前工作区根目录：`H:\quant_project`。`daily_research` 不再运行在 `H:\new_tdx64\PYPlugins\user` 下，旧通达信插件用户目录不应保存本项目代码或产物。

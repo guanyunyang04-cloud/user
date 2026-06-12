@@ -1,5 +1,8 @@
 # 2026-06-02 Horizon-Aligned Multifactor Validation Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_horizon_aligned_multifactor_validation_interpretation.md`.
+
+
 ## Decision
 
 严格持有期多因子验证结论：`multifactor_rolling_ic_weighted_score` 是当前最强候选输入，可以进入下一轮年度稳定性和执行约束压力测试；`multifactor_low_corr_rank_score` 仍保留为排序诊断对照，但在本轮 horizon-aligned Top-N 中表现明显弱于 rolling IC，暂不作为主候选输入。

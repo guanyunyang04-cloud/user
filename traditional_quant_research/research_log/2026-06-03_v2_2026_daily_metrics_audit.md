@@ -1,5 +1,8 @@
 # v2.1 Daily Metrics Audit
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-03_v2_2026_daily_metrics_audit.md`.
+
+
 - run_id: `v2_daily_metrics_audit_20260603_010425`
 - snapshot_id: `baostock_v2_2026_to_0601_industry_metrics_smoke_20260603`
 - status: `metrics_missingness_audit`

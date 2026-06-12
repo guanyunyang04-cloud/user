@@ -1,5 +1,8 @@
 # 2026-06-02 Full Cycle Factor Diagnostics
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_full_cycle_factor_diagnostics.md`.
+
+
 - Data Scope: snapshot `baostock_v2_pit_20160101_20260601_stockbasic_fixed`, `2016-01-04` to `2026-06-01`.
 - Panel: `7031085` rows, `2526` dates, `3392` securities.
 - Horizons: `[1, 5, 20]`; Top-N values: `[100]`; include Top-N: `False`; fee bps: `10.0`.

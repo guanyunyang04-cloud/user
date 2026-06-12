@@ -1,5 +1,8 @@
 # Low-Corr Frontier Neutralization Audit Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_frontier_neutralization_audit_interpretation.md`.
+
+
 ## Context
 
 - Run: `low_corr_frontier_neutralization_audit_20260602_183104`

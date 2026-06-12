@@ -1,5 +1,8 @@
 # 2026-06-02 Low-Corr Regime Threshold Grid Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_regime_threshold_grid_interpretation.md`.
+
+
 ## Context
 
 - Objective: test whether a static market-return and breadth threshold grid can preserve strong-year performance while improving weak years.

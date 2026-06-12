@@ -1,5 +1,8 @@
 # Frontier Personal Paper Tracking Bootstrap
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-04_frontier_personal_paper_tracking_bootstrap.md`.
+
+
 - run_id: `frontier_personal_paper_tracking_bootstrap_20260604_004320`
 - decision: `paper_tracking_bootstrap_ready`
 - north_star: `Baostock-only personal quant strategy research`

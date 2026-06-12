@@ -1,5 +1,8 @@
 # All-Limit-Up ML Strategy Research
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-07_all_limitup_ml_strategy_research.md`.
+
+
 - run_id: `all_limitup_ml_strategy_research_20260607_201541`
 - source_event_file: `traditional_quant_research\output\experiments\short_open_known_factor_rebuild\short_open_known_factor_rebuild_open_print_filter_20260605_003723\event_feature_panel.csv`
 - event_count: `106411`

@@ -1,5 +1,8 @@
 # v2 Size/Turnover Source Audit Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_v2_size_turnover_source_audit_interpretation.md`.
+
+
 - Date: 2026-06-02
 - Run: `v2_industry_size_source_audit_20260602_235547`
 - Snapshot: `baostock_v2_pit_20160101_20260601_industry_month_start_20260602`

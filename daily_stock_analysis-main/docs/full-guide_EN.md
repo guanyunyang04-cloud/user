@@ -1,5 +1,8 @@
 # Complete Configuration & Deployment Guide
 
+Canonical brain source: `daily_stock_analysis-main/brain/references/public_docs/full-guide_EN.md`.
+
+
 This document contains the complete configuration guide for the AI Stock Analysis System, intended for users who need advanced features or special deployment methods.
 
 > Quick start guide available in [README_EN.md](README_EN.md). This document covers advanced configuration.

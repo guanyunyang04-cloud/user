@@ -1,5 +1,8 @@
 # Quant Data Platform
 
+Canonical brain source: `quant_data_platform/brain/identity_layer.md`.
+
+
 主脑管辖下的共享量化数据平台分脑。
 
 ## 定位

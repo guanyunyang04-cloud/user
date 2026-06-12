@@ -1,5 +1,8 @@
 # 2026-06-02 Phase 1 Decision Report
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_phase1_decision_report.md`.
+
+
 ## Decision
 
 第一阶段结论：可以进入第二阶段的多因子诊断与多因子打分基线，但不建议直接进入传统 ML 建模阶段。

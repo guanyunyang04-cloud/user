@@ -1,5 +1,8 @@
 # 2026-06-02 Low-Corr Regime Capital Yearly Validation Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_regime_capital_yearly_validation_interpretation.md`.
+
+
 ## Context
 
 - Objective: validate dynamic regime-based capital scaling across 2024, 2025, and 2026 using each prior year as the fit window.

@@ -1,5 +1,8 @@
 # v2 2026 Industry Cache Smoke
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_v2_2026_industry_cache_smoke.md`.
+
+
 日期：2026-06-02
 
 ## 目的

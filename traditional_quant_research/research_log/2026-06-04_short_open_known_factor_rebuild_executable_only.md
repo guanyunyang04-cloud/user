@@ -1,5 +1,8 @@
 # Short Open-Known Factor Rebuild
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-04_short_open_known_factor_rebuild_executable_only.md`.
+
+
 ## Summary
 
 - Profile: `executable_only`

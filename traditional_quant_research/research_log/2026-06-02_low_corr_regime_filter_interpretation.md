@@ -1,5 +1,8 @@
 # 2026-06-02 Low-Corr Regime Filter Interpretation
 
+Canonical brain source: `traditional_quant_research/brain/references/research_log/2026-06-02_low_corr_regime_filter_interpretation.md`.
+
+
 ## Context
 
 - Objective: test whether market-state filters can reduce the March/May weakness of the low-corr watchlist setup.
