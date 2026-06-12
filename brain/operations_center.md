@@ -54,7 +54,7 @@
 - `doc_guard check` 裸命令是全量收尾守卫；日常局部检查优先用 `doc_guard check --files <paths>` 或 `doc_guard check --scope changed`，且这两种轻量模式默认不跑 layout、active、large-file、integrity 全局检查。结构变更后仍建议单独跑一次 `integrity_check` 便于快速定位。
 - 项目验证从 `project_profile.verification_profile.always_commands` 读取；`selective_verification.py --paths <paths>` 必须按路径推断项目，不得默认注入 daily active guard。
 - 默认开发验证采用 changed-surface-only：先运行 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.selective_verification --paths <changed_paths> --json`，以 `blocking_commands` 作为本次必须通过的小验证包；`lane_commands` / `test_strategy` 说明 smoke、project、full、research、external 车道和测试预算；未修改且未受影响区域由 `skipped_reason_by_area` 显式说明。
-- 工作区测试治理与减负策略的 canonical 正文见 `brain/references/testing_governance.md`；`docs/testing_governance.md` 只保留外部入口。默认测试轻量化不等于削弱关键保护，canonical、PIT/no-leakage、清理边界、active artifact、项目命名空间和提交闭环仍属硬边界。
+- 工作区测试治理与减负策略的 canonical 正文见 `brain/references/testing_governance.md`；不再保留 `docs/testing_governance.md` 外部入口。默认测试轻量化不等于削弱关键保护，canonical、PIT/no-leakage、清理边界、active artifact、项目命名空间和提交闭环仍属硬边界。
 - `always_commands` 保留为兼容和收尾守卫入口，不代表每次小改都要全量执行；`deferred_commands` / `deferred_long_commands` 只用于慢速、研究、维护或最终确认批次。
 - 普通 docs-only 只需要 `git diff --check`；brain 文档变更再加 `tools.brain.doc_guard check --files <paths>` 或 `--scope changed`。单模块 Python 变更只跑对应测试或 nodeid；shared helper、protocol、schema、config、active/execution 边界变更必须扩大测试半径或进入 manual review。
 - 测试编写保持最小 fixture、最小断言面、无真实网络、无真实长训练；单测只证明数据、label、loss、bridge、gate、guard 合约，不用单测证明模型收益强。慢测必须带 `slow` / `research` / `guard` / `external` 等 marker 和明确触发条件。
@@ -99,6 +99,6 @@
 ## 8. 工作区迁移纪律
 - 当前唯一工作区根：`H:\quant_project`。
 - `H:\new_tdx64\PYPlugins\user` 只属于通达信插件用户目录，不再保存本项目代码、brain、output、cache 或 archive。
-- 根目录身份当前分为：主脑基础设施（`brain/`、`tools/`、少量入口型 `docs/`）、已注册分脑项目、过渡资产（`canonical_data/`）和本地缓存依赖（如未跟踪的 `node_modules/`、`.pytest_cache/`）。
+- 根目录身份当前分为：主脑基础设施（`brain/`、`tools/`）、已注册分脑项目、过渡资产（`canonical_data/`）和本地缓存依赖（如未跟踪的 `node_modules/`、`.pytest_cache/`）。
 - 历史 reference 中的旧路径保留为历史事实；新命令、新文档、新产物路径必须使用 `H:\quant_project`。
 - 若需要从旧备份恢复冷数据，先复制到 `H:\quant_project`，校验后再删除旧备份；不得把旧备份目录当成当前项目根。

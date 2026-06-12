@@ -15,4 +15,4 @@
 ## 写回
 - 项目事实写入本分脑。
 - 跨项目拓扑写入主脑。
-- 长证据、迁移审计和清理报告写入 `quant_data_platform/brain/references/`；`quant_data_platform/docs/` 只保留公开导出或兼容入口。
+- 长证据、迁移审计和清理报告写入 `quant_data_platform/brain/references/`；不再保留 `quant_data_platform/docs/` 兼容入口，只有明确发布产物才临时导出。

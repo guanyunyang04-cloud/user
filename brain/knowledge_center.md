@@ -12,7 +12,7 @@
 - `authority-matrix`
   - 主脑 `brain/` 只维护跨项目规则、分脑拓扑、默认接管顺序、全局分支纪律和执行纪律；分脑只维护项目事实、项目状态、项目命令和项目验证矩阵；body 顶层 README、AGENTS、CLAUDE、SKILL 只作为公开指南或兼容入口，不能覆盖 brain
 - `docs-into-brain`
-  - Brain canonical first：所有阅读性质文档、教程、审计、迁移说明、设计说明、研究日志和长期结论默认进入对应主脑或分脑 `references/`；body 顶层 README / docs 只作为入口、导出、工具固定位置或公开副本保留，必须标明 `Canonical brain source:`，且不能覆盖 brain
+  - Brain canonical only：所有阅读性质文档、教程、审计、迁移说明、设计说明、研究日志和长期结论默认进入对应主脑或分脑 `references/`；body 顶层 README、AGENTS、CLAUDE、SKILL 只保留必要薄入口，外部 `docs/`、`research_log/` 和重复 README 副本默认不保留，除非存在工具硬要求、明确发布产物或真实外部接口责任
 - `simplified-chinese-docs`
   - 工作区内面向人读的项目治理与接管文档默认使用简体中文；英文只保留在代码标识、命令、第三方专名、链接或产品必须的多语言公开文档中
 - `simplified-chinese-user-communication`
@@ -43,7 +43,7 @@
 - 如果主脑和分脑维护两套平行接管顺序，后续 agent 很快会漂移
 - 如果当前状态只写聊天或终端，不写 brain，接管可靠性会明显下降
 - 如果把 `episodic_memory` 当默认入口，接管速度和质量都会恶化
-- 如果长文继续散落在 body 顶层，brain 的中枢地位会被稀释
+- 如果长文继续散落在 body 顶层或旧外部 docs/research_log，brain 的中枢地位会被稀释
 - 如果 README 里保留了 brain 未收录的接管规则、命令入口或稳定结论，后续接管会重新绕过大脑
 - 如果接管入口、命令入口或写回路由已经漂移，先纠偏再重开实验，通常比直接推进更能降低误操作风险
 - 如果控制台显示疑似中文乱码，先用 UTF-8 读取工具确认真实文件内容，不能把终端编码错觉当作文件损坏来修
