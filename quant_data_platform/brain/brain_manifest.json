@@ -21,6 +21,7 @@
       "quant_data_platform/src",
       "quant_data_platform/configs",
       "quant_data_platform/registry",
+      "canonical_data/registry",
       "quant_data_platform/data",
       "quant_data_platform/brain/references",
       "quant_data_platform/tests"
@@ -49,7 +50,8 @@
       "quant_data_platform/configs"
     ],
     "registry": [
-      "quant_data_platform/registry"
+      "quant_data_platform/registry",
+      "canonical_data/registry"
     ],
     "data_assets": [
       "quant_data_platform/data"
@@ -157,7 +159,8 @@
       "auto_commit": true,
       "message_prefix": "quant_data_platform",
       "allowed_prefixes": [
-        "quant_data_platform/"
+        "quant_data_platform/",
+        "canonical_data/registry/"
       ],
       "block_on_baseline_overlap": true
     },

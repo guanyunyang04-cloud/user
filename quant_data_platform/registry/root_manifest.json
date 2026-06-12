@@ -44,38 +44,51 @@
     "valuation": "data_platform_valuation__13151c89bf9f57eda45ed76e"
   },
   "canonical_dataset_id": "policy_input_bundle__f926a496f69c61f6b92b5faf",
-  "canonical_manifest": "H:\\quant_project\\daily_research\\output\\research_data_lake\\canonical\\canonical_manifest.json",
+  "canonical_manifest": "H:/quant_project/daily_research/output/research_data_lake/canonical/canonical_manifest.json",
   "canonical_memmap_registry": "H:/quant_project/quant_data_platform/registry/memmap_registry.json",
   "canonical_memmap_status": {
-    "active_feature_store_shape": [
-      1212,
-      100,
-      256
-    ],
-    "active_manifest_json": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\canonical_short_horizon_capped100_memmap_20260611_01\\forecast_dataset_manifest.json",
-    "active_memmap_matches_canonical_bundle": false,
-    "active_sample_count": 1536,
-    "active_scope": "capped_validation",
-    "active_source_market_dataset_id": "policy_input_bundle__002270b729a4eabe6211ff6d",
-    "canonical_dataset_id": "policy_input_bundle__f926a496f69c61f6b92b5faf",
-    "guard_reason": "16GB-class host cannot safely build full-universe heavy short-horizon memmap in one process",
-    "last_full_build_attempt": "stopped_after_memory_pressure_before_artifact",
-    "safe_default_next_step": "build a new sharded or capped validation memmap from the current canonical bundle before registry reuse",
-    "status": "stale_after_bundle_rebuild_full_canonical_pending",
-    "unsafe_full_build_guard": "enabled"
+    "status": "superseded_by_qdp_sharded_memmap",
+    "superseded_by": "H:/quant_project/quant_data_platform/data/memmap/sharded/canonical_short_horizon_core_v1_full/sharded_memmap_manifest.json",
+    "previous_active_manifest_json": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\canonical_short_horizon_capped100_memmap_20260611_01\\forecast_dataset_manifest.json",
+    "previous_active_scope": "capped_validation",
+    "previous_active_source_market_dataset_id": "policy_input_bundle__002270b729a4eabe6211ff6d",
+    "note": "Legacy monolithic/capped forecast memmap registry is no longer the active training base; use canonical_sharded_memmap_status.",
+    "updated_at": "2026-06-12T06:01:19+00:00"
   },
   "canonical_sharded_memmap_status": {
-    "active_manifest_json": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\canonical_short_horizon_core_v1_full\\sharded_memmap_manifest.json",
+    "status": "sharded_full_ready",
+    "active_manifest_json": "H:/quant_project/quant_data_platform/data/memmap/sharded/canonical_short_horizon_core_v1_full/sharded_memmap_manifest.json",
+    "latest_manifest_json": "H:/quant_project/quant_data_platform/data/memmap/sharded/canonical_short_horizon_core_v1_full/sharded_memmap_manifest.json",
     "latest_canonical_dataset_id": "policy_input_bundle__f926a496f69c61f6b92b5faf",
-    "latest_empty_shard_count": 61,
-    "latest_manifest_json": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\canonical_short_horizon_core_v1_full\\sharded_memmap_manifest.json",
-    "latest_planned_shard_count": 323,
-    "latest_processed_shard_count": 323,
     "latest_profile": "short_horizon_core_v1",
     "latest_scope": "full_canonical_candidate",
+    "latest_planned_shard_count": 323,
+    "latest_processed_shard_count": 323,
     "latest_stored_shard_count": 262,
-    "status": "sharded_full_ready",
-    "updated_at": "2026-06-11T21:02:16+00:00"
+    "latest_empty_shard_count": 61,
+    "latest_failed_shard_count": 0,
+    "feature_count": 256,
+    "symbol_count": 5526,
+    "years": [
+      2010,
+      2011,
+      2012,
+      2013,
+      2014,
+      2015,
+      2016,
+      2017,
+      2018,
+      2019,
+      2020,
+      2021,
+      2022,
+      2023,
+      2024,
+      2025,
+      2026
+    ],
+    "updated_at": "2026-06-12T06:01:19+00:00"
   },
   "canonical_start_date": "2010-01-01",
   "component_coverage": {
@@ -167,7 +180,7 @@
     "one_minute_policy": "cold_archive_not_default_research_view",
     "tdx_tqcenter_path": "H:/new_tdx64/PYPlugins/user/t0_project/tqcenter.py"
   },
-  "status": "canonical_bundle_ready_full_memmap_pending",
+  "status": "canonical_bundle_ready_full_sharded_memmap_ready",
   "storage_policy": {
     "cleanup_requires_dry_run_and_replacement_validation": true,
     "large_data_dirs_are_gitignored": true,
@@ -178,7 +191,7 @@
     "industry_concept",
     "index_constituents"
   ],
-  "updated_at": "2026-06-11T21:02:16+00:00",
+  "updated_at": "2026-06-12T06:01:19+00:00",
   "v1_excluded_domains": [
     "financial_quarterly",
     "performance_forecast",

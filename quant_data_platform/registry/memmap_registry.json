@@ -1,21 +1,17 @@
 {
-  "active_feature_profile": "raw_kline_context_v2_short_horizon_intraday_v1",
-  "active_feature_store_shape": [
-    1212,
-    100,
-    256
-  ],
-  "active_manifest_json": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\canonical_short_horizon_capped100_memmap_20260611_01\\forecast_dataset_manifest.json",
+  "active_feature_profile": "short_horizon_core_v1",
+  "active_feature_store_shape": null,
+  "active_manifest_json": "H:/quant_project/quant_data_platform/data/memmap/sharded/canonical_short_horizon_core_v1_full/sharded_memmap_manifest.json",
   "active_role_years": {
     "test_year": 2025,
     "train_end_year": 2023,
     "train_start_year": 2022,
     "validation_year": 2024
   },
-  "active_sample_count": 1536,
-  "active_scope": "capped_validation",
+  "active_sample_count": null,
+  "active_scope": "full_canonical_candidate",
   "active_signature_hash": "0bcec7ce9d790c0a7f6cd41f",
-  "active_source_market_dataset_id": "policy_input_bundle__002270b729a4eabe6211ff6d",
+  "active_source_market_dataset_id": "policy_input_bundle__f926a496f69c61f6b92b5faf",
   "alias": "canonical_data_v1",
   "canonical_start_date": "2010-01-01",
   "entries": [
@@ -88,6 +84,8 @@
   "replaces_old_forecast_dat_after_validation": [],
   "sample_index_policy": "experiments_build_lightweight_indices_only",
   "schema_version": 1,
-  "status": "ready",
-  "updated_at": "2026-06-11T10:42:27+00:00"
+  "status": "superseded_by_sharded_memmap",
+  "updated_at": "2026-06-12T06:01:19+00:00",
+  "supersedes_legacy_monolithic_registry": true,
+  "sharded_memmap_registry_json": "H:/quant_project/quant_data_platform/registry/sharded_memmap_registry.json"
 }
