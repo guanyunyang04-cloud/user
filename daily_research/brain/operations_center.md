@@ -72,6 +72,7 @@
 
 ## 验证分层
 - 默认开发验证走 changed-surface：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.selective_verification --paths <changed_paths> --json`，本次 blocking 只取 `blocking_commands`。
+- 项目普通车道只跑非慢速测试：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest daily_research -m "not slow and not research and not data_heavy and not external and not benchmark" -q`。`forecast_training`、`forecast_memmap_dataset`、`rl_protocol` 等训练 / memmap / 研究协议测试属于 `research` 或 `data_heavy` 车道，按 explicit nodeid 或阶段收口运行。
 - 高频硬边界：`git diff -- daily_research/output/active_execution_strategy.json` 和 `git diff --check`；active artifact 有 diff 时停止并回到 promotion authority。
 - `current-frontier` 只在回答当前研究阶段、更新 frontier 判断或写入 evidence/state 前运行。
 - `doc_guard` / `integrity_check` / `brain-burden-audit` 属于 brain 文档、workflow、registry、skill 或收尾维护守卫，不作为普通代码小改默认测试包。
