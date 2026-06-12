@@ -306,6 +306,18 @@ class SelectiveVerificationTest(unittest.TestCase):
         )
         self.assertFalse(payload["manual_review_required"])
 
+    def test_project_conftest_change_uses_smoke_target_and_manual_review(self) -> None:
+        payload = build_verification_plan(paths=["traditional_quant_research/tests/conftest.py"])
+
+        self.assertEqual(payload["project_id"], "traditional_quant_research")
+        self.assertEqual(
+            payload["selected_commands"],
+            [f"{PYTHON} -m pytest traditional_quant_research/tests/test_traditional_quant_core.py -q"],
+        )
+        self.assertTrue(payload["manual_review_required"])
+        self.assertTrue(any("test_infrastructure_change" in warning for warning in payload["warnings"]))
+        self.assertNotIn("traditional_quant_research/tests/conftest.py -q", "\n".join(payload["selected_commands"]))
+
     def test_daily_change_keeps_daily_active_guard(self) -> None:
         payload = build_verification_plan(paths=["daily_research/path_policy/forecast_features.py"])
         encoded = json.dumps(payload, ensure_ascii=False)

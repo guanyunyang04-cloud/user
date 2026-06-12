@@ -406,6 +406,13 @@ def _skipped_reason_by_area(
 def _project_changed_surface_test_command(project_id: str, body_root: str, path: str) -> str | None:
     normalized = _normalize_path(path)
     test_root = f"{body_root}/tests"
+    if normalized == f"{test_root}/conftest.py":
+        smoke_targets = {
+            "traditional_quant_research": "traditional_quant_research/tests/test_traditional_quant_core.py",
+            "daily_stock_analysis-main": "daily_stock_analysis-main/tests/test_config_manager.py",
+        }
+        target = smoke_targets.get(project_id)
+        return _pytest_command([target]) if target and (WORKSPACE_ROOT / target).exists() else None
     if normalized.startswith(f"{test_root}/") and normalized.endswith(".py"):
         return _pytest_command([normalized])
 
@@ -441,7 +448,10 @@ def build_verification_plan(*, paths: list[str] | None = None, base: str | None 
                 command = _project_changed_surface_test_command(project_id, body_root, path)
                 if command:
                     _add_command(selected_commands, command)
-                else:
+                if path.endswith("/tests/conftest.py"):
+                    manual_review_required = True
+                    warnings.append(f"test_infrastructure_change: {path} requires marker/filter review")
+                elif not command:
                     manual_review_required = True
                     warnings.append(f"unmapped_project_python_change: {path} has no same-surface test mapping")
             continue
