@@ -43,6 +43,12 @@
 - 默认 changed-surface 验证：
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.selective_verification --paths <changed_paths> --json`
   - 按 `blocking_commands` 执行本次最小验证；未映射 Python 改动先 manual review 或补同面测试，不默认整包跑
+- 日常轻量测试 lane：
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest daily_stock_analysis-main -m "not network and not external and not benchmark and not slow" -q`
+  - `provider` 与 `llm` 是定位标签，默认不从日常 lane 排除；只在依赖、速度或稳定性证据显示负担过重时再收紧
+  - 该 lane 需要项目依赖完整；当前轻量闭环优先用 changed-surface 或 smoke lane
+- 精简脑区 / 配置类变更可用 smoke lane：
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest daily_stock_analysis-main -m "smoke and not network and not external and not benchmark and not slow" -q`
 - 后端收尾/发布验证：
   - `./scripts/ci_gate.sh`
   - `python -m pytest -m "not network"`
