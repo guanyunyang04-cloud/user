@@ -49,6 +49,17 @@ DATA_HEAVY_NAME_TOKENS = (
     "industry_size",
 )
 
+CANCELLED_GUARD_FILES = {
+    "test_frontier_personal_candidate_lifecycle_registry.py",
+    "test_frontier_personal_paper_tracking_bootstrap.py",
+    "test_frontier_personal_paper_tracking_plan.py",
+    "test_frontier_personal_paper_tracking_review.py",
+}
+
+EXTRA_RESEARCH_FILES = {
+    "test_generalized_strong_event_pool_research.py",
+}
+
 
 def pytest_configure(config) -> None:  # type: ignore[no-untyped-def]
     for marker in (
@@ -59,6 +70,7 @@ def pytest_configure(config) -> None:  # type: ignore[no-untyped-def]
         "research: experiment, backtest, scout, audit, grid, or research-regression tests",
         "data_heavy: tests that build or validate large datasets or cached research panels",
         "external: tests requiring network, real providers, live probes, or third-party services",
+        "guard: cancellation, invariants, and governance regression tests",
         "benchmark: performance threshold tests",
     ):
         config.addinivalue_line("markers", marker)
@@ -68,7 +80,11 @@ def pytest_collection_modifyitems(config, items) -> None:  # type: ignore[no-unt
     for item in items:
         filename = Path(str(item.fspath)).name.lower()
         stem = filename.removeprefix("test_").removesuffix(".py")
-        if any(token in stem for token in RESEARCH_NAME_TOKENS):
+        if filename in CANCELLED_GUARD_FILES:
+            item.add_marker(pytest.mark.smoke)
+            item.add_marker(pytest.mark.guard)
+            continue
+        if filename in EXTRA_RESEARCH_FILES or any(token in stem for token in RESEARCH_NAME_TOKENS):
             item.add_marker(pytest.mark.research)
         if any(token in stem for token in EXTERNAL_NAME_TOKENS):
             item.add_marker(pytest.mark.external)
