@@ -12,7 +12,7 @@
 - `authority-matrix`
   - 主脑 `brain/` 只维护跨项目规则、分脑拓扑、默认接管顺序、全局分支纪律和执行纪律；分脑只维护项目事实、项目状态、项目命令和项目验证矩阵；body 顶层 README、AGENTS、CLAUDE、SKILL 只作为公开指南或兼容入口，不能覆盖 brain
 - `docs-into-brain`
-  - README、教程、审计、迁移说明等文档内容必须先整合进对应主脑或分脑；body 顶层文档只保留简体中文索引、公开指南或兼容入口，不能成为平行真源
+  - 权威治理、接管规则、长期结论和证据索引必须先整合进对应主脑或分脑；body 顶层 README / docs 可作为公开说明、使用入口或兼容指南，但必须显式登记或通过守卫白名单，且不能覆盖 brain
 - `simplified-chinese-docs`
   - 工作区内面向人读的项目治理与接管文档默认使用简体中文；英文只保留在代码标识、命令、第三方专名、链接或产品必须的多语言公开文档中
 - `simplified-chinese-user-communication`

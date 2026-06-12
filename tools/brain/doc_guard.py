@@ -259,6 +259,7 @@ ALLOWED_EXTERNAL_DOC_PREFIXES = (
     "daily_stock_analysis-main/docs/",
     "daily_stock_analysis-main/.github/",
     "daily_stock_analysis-main/.claude/skills/",
+    "quant_data_platform/docs/",
     "traditional_quant_research/experiments/",
     "traditional_quant_research/research_log/",
 )
@@ -272,7 +273,10 @@ DOCUMENT_REDIRECTS = {
 
 ALLOWED_EXTERNAL_DOCS = {
     "docs/superpowers/plans/2026-05-12-continuous-policy-key-progress.md",
+    "docs/testing_governance.md",
     "README.md",
+    "a_stock_daily_selection/README.md",
+    "canonical_data/README.md",
     "daily_research/README.md",
     "daily_research/execution/使用教程.md",
     "daily_stock_analysis-main/AGENTS.md",
@@ -280,6 +284,7 @@ ALLOWED_EXTERNAL_DOCS = {
     "daily_stock_analysis-main/README.md",
     "daily_stock_analysis-main/SKILL.md",
     "daily_stock_analysis-main/strategies/README.md",
+    "quant_data_platform/README.md",
     "traditional_quant_research/README.md",
     "traditional_quant_research/data/README.md",
     "traditional_quant_research/data/catalog.md",

@@ -79,6 +79,45 @@
       "reinforcement"
     ]
   },
+  "project_profile": {
+    "guard_profile": {
+      "active_artifact_guard": false,
+      "artifact_freshness": false,
+      "frontier_report": false,
+      "project_consistency": false,
+      "openmp_strict": false,
+      "brain_rules": false
+    },
+    "verification_profile": {
+      "always_commands": [
+        "git diff --check",
+        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed",
+        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json"
+      ],
+      "default_test_commands": [],
+      "big_artifact_paths": [
+        "t0_project/output/**",
+        "t0_project/cache/**",
+        "t0_project/archive/**"
+      ]
+    },
+    "commit_policy": {
+      "auto_commit": true,
+      "message_prefix": "t0_project",
+      "allowed_prefixes": [
+        "t0_project/"
+      ],
+      "block_on_baseline_overlap": true
+    },
+    "process_namespace": {
+      "root": "t0_project/output/agent_runs",
+      "run_path_template": "t0_project/output/agent_runs/<run_id>"
+    },
+    "cross_project_policy": {
+      "allow_by_default": false,
+      "lease_root": "brain/output/resource_leases"
+    }
+  },
   "modules": [
     {
       "id": "identity_layer",

@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 118,
+  "record_count": 119,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -3012,6 +3012,35 @@
       "active_artifact_impact": "guarded",
       "dataset_ids": [
         "policy_input_bundle__0f116a9b78c92ff045a6853d"
+      ]
+    },
+    {
+      "id": "path_policy_canonical_memmap_reconciliation_20260612",
+      "date": "2021-01-01",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_canonical_memmap_reconciliation_20260612.md",
+      "tags": [
+        "research_data_lake",
+        "path_policy"
+      ],
+      "workflow": "research_data_lake",
+      "research_programs": [],
+      "study_families": [
+        "canonical_memmap_validation"
+      ],
+      "run_tags": [
+        "canonical_short_horizon_capped100_memmap_20260611_01"
+      ],
+      "verdict": "Status: `canonical_memmap_validation / completed / research-only / shadow-only`.; Scope: register the latest capped canonical memmap validation run so frontier freshness no longer treats it as an unreviewed output.; Active artifact impact: `daily_research/output/active_execution_strategy.json` remains unchanged.; Interpretation: this is dataset and memmap plumbing evidence, not model-quality evidence, not promotion evidence, and not execution unfreeze authority.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Rebuild `daily_research/brain/references/evidence_registry.json` after this reference is added.",
+        "Run `current-frontier --json`; expected outcome is no unregistered latest run tag for `canonical_short_horizon_capped100_memmap_20260611_01`.",
+        "Continue canonical data platform work in `quant_data_platform` before treating full shared memmap as the default research substrate."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__002270b729a4eabe6211ff6d"
       ]
     },
     {
