@@ -754,7 +754,15 @@ def _run_forecast_walkforward_study(
         manifest_path = str(getattr(args, "forecast_memmap_manifest", "") or "").strip()
         registry_hit = False
         if manifest_path:
-            dataset = load_forecast_memmap_dataset(manifest_path)
+            dataset = load_forecast_memmap_dataset(
+                manifest_path,
+                train_start_year=int(args.forecast_train_start_year),
+                train_end_year=int(args.forecast_train_end_year),
+                validation_year=int(args.forecast_validation_year),
+                test_year=int(args.forecast_test_year),
+                max_samples_per_role=int(args.forecast_max_samples_per_role),
+                max_samples_per_date_per_role=int(getattr(args, "forecast_max_samples_per_date_per_role", 0)),
+            )
         else:
             registry_path = str(getattr(args, "forecast_canonical_memmap_registry", "") or "").strip()
             alias = str(getattr(args, "forecast_canonical_memmap_alias", DEFAULT_CANONICAL_MEMMAP_ALIAS) or DEFAULT_CANONICAL_MEMMAP_ALIAS)
@@ -767,7 +775,15 @@ def _run_forecast_walkforward_study(
                 alias=alias,
             )
             if registered_manifest is not None:
-                dataset = load_forecast_memmap_dataset(registered_manifest)
+                dataset = load_forecast_memmap_dataset(
+                    registered_manifest,
+                    train_start_year=int(args.forecast_train_start_year),
+                    train_end_year=int(args.forecast_train_end_year),
+                    validation_year=int(args.forecast_validation_year),
+                    test_year=int(args.forecast_test_year),
+                    max_samples_per_role=int(args.forecast_max_samples_per_role),
+                    max_samples_per_date_per_role=int(getattr(args, "forecast_max_samples_per_date_per_role", 0)),
+                )
                 registry_hit = True
             else:
                 dataset = build_forecast_memmap_dataset(

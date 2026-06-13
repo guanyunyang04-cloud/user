@@ -16,6 +16,7 @@ from quant_data_platform.memmap.incremental import (
     plan_incremental_memmap,
 )
 from quant_data_platform.memmap.sharded import ShardedMemmapConfig, build_sharded_memmap, write_sharded_memmap_plan
+from quant_data_platform.memmap.training_pack import TrainingPackConfig, build_training_pack
 from quant_data_platform.memmap.validation import validate_active_memmap
 
 
@@ -102,6 +103,21 @@ def build_parser() -> argparse.ArgumentParser:
     compose.add_argument("--activate", action="store_true")
     compose.add_argument("--dry-run", action="store_true")
     compose.add_argument("--json", action="store_true")
+
+    training_pack = sub.add_parser("build-training-pack", help="Build a training-optimized pack from a QDP sharded memmap.")
+    training_pack.add_argument("--source-manifest", default="")
+    training_pack.add_argument("--output-root", default="")
+    training_pack.add_argument("--tag", default="")
+    training_pack.add_argument("--train-start-year", type=int, default=2012)
+    training_pack.add_argument("--train-end-year", type=int, default=2023)
+    training_pack.add_argument("--validation-year", type=int, default=2024)
+    training_pack.add_argument("--test-year", type=int, default=2025)
+    training_pack.add_argument("--max-samples-per-role", type=int, default=0)
+    training_pack.add_argument("--max-samples-per-date-per-role", type=int, default=0)
+    training_pack.add_argument("--feature-dtype", default="float16", choices=("float16", "float32"))
+    training_pack.add_argument("--stock-chunk-size", type=int, default=64)
+    training_pack.add_argument("--no-resume", action="store_true")
+    training_pack.add_argument("--json", action="store_true")
 
     cleanup = sub.add_parser("cleanup", help="Generate cleanup dry-run plan. This command never deletes files in v1.")
     cleanup.add_argument("--dry-run", action="store_true", default=True)
@@ -217,6 +233,25 @@ def main(argv: list[str] | None = None) -> int:
             tag=str(args.tag or ""),
             activate=bool(args.activate),
             write=not bool(args.dry_run),
+        )
+        _print(payload, as_json=bool(args.json))
+        return 0
+    if args.command == "build-training-pack":
+        payload = build_training_pack(
+            TrainingPackConfig(
+                source_manifest=str(args.source_manifest or ""),
+                output_root=str(args.output_root or ""),
+                tag=str(args.tag or ""),
+                train_start_year=int(args.train_start_year),
+                train_end_year=int(args.train_end_year),
+                validation_year=int(args.validation_year),
+                test_year=int(args.test_year),
+                max_samples_per_role=int(args.max_samples_per_role),
+                max_samples_per_date_per_role=int(args.max_samples_per_date_per_role),
+                feature_dtype=str(args.feature_dtype or "float16"),
+                stock_chunk_size=int(args.stock_chunk_size),
+                resume=not bool(args.no_resume),
+            )
         )
         _print(payload, as_json=bool(args.json))
         return 0

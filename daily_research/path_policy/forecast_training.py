@@ -16,7 +16,12 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from daily_research.continuous_policy.runtime import write_json
-from daily_research.path_policy.forecast_dataset import ForecastMemmapDataset, ForecastSequenceDataset
+from daily_research.path_policy.forecast_dataset import (
+    ForecastMemmapDataset,
+    ForecastSequenceDataset,
+    ForecastShardedMemmapDataset,
+    ForecastTrainingPackDataset,
+)
 from daily_research.path_policy.labels import PATH20_CUMULATIVE_HORIZONS, PATH20_HORIZON
 from daily_research.path_policy.models import (
     DLinearPath20Forecaster,
@@ -55,6 +60,7 @@ FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES = (
     "sector_slot_mixer_sequence",
     "regime_routed_multi_expert_horizon_v1",
 )
+FORECAST_MEMMAP_DATASET_TYPES = (ForecastMemmapDataset, ForecastShardedMemmapDataset, ForecastTrainingPackDataset)
 FORECAST_OUTPUT_PROFILES = ("forecast_path_v1", "decision_utility_v1")
 FORECAST_SELECTION_PROFILES = ("multiscale", "trend20", "short_burst", "decision_utility")
 FORECAST_LOSS_PROFILES = (
@@ -468,7 +474,7 @@ class _ForecastDatasetView:
         self.symbol_vocab_fingerprint = str(self.manifest.get("symbol_vocab_fingerprint", "") or "")
         self.industry_vocab_fingerprint = str(self.manifest.get("industry_vocab_fingerprint", "") or "")
         self.board_vocab_fingerprint = str(self.manifest.get("board_vocab_fingerprint", "") or "")
-        if isinstance(dataset, ForecastMemmapDataset):
+        if isinstance(dataset, FORECAST_MEMMAP_DATASET_TYPES):
             self.row_count = int(dataset.row_count)
             self.input_dim = int(dataset.input_dim)
             self.lookback_days = int(dataset.lookback_days)
@@ -478,17 +484,22 @@ class _ForecastDatasetView:
             self.lookback_days = int(dataset.x.shape[1]) if dataset.x.ndim == 3 else int(self.manifest.get("lookback_days", 0))
 
     def role_indices(self, role: str) -> np.ndarray:
-        if isinstance(self.dataset, ForecastMemmapDataset):
+        if isinstance(self.dataset, FORECAST_MEMMAP_DATASET_TYPES):
             return self.dataset.role_indices(role)
         return np.flatnonzero(self.dataset.role == role)
 
     def torch_dataset(self, indices: np.ndarray, *, target_scale: float) -> torch.utils.data.Dataset:
-        if isinstance(self.dataset, ForecastMemmapDataset):
+        if isinstance(self.dataset, FORECAST_MEMMAP_DATASET_TYPES):
             return self.dataset.torch_dataset(indices, target_scale=target_scale)
         return _EagerTorchDataset(self.dataset, indices, target_scale=target_scale)
 
+    def batch_torch_dataset(self, indices: np.ndarray, *, batch_size: int, target_scale: float) -> torch.utils.data.Dataset:
+        if isinstance(self.dataset, FORECAST_MEMMAP_DATASET_TYPES):
+            return self.dataset.batch_torch_dataset(indices, batch_size=batch_size, target_scale=target_scale)
+        return self.torch_dataset(indices, target_scale=target_scale)
+
     def date_batch_torch_dataset(self, indices: np.ndarray, *, target_scale: float) -> torch.utils.data.Dataset:
-        if not isinstance(self.dataset, ForecastMemmapDataset):
+        if not isinstance(self.dataset, FORECAST_MEMMAP_DATASET_TYPES):
             raise ValueError("date-level forecast batches require a memmap dataset.")
         return self.dataset.date_batch_torch_dataset(indices, target_scale=target_scale)
 
@@ -1134,6 +1145,13 @@ def _write_forecast_progress(
     learning_rows: list[dict[str, Any]],
     last_checkpoint_pt: Path | None,
     best_checkpoint_pt: Path | None,
+    phase: str = "epoch_end",
+    current_step: int = 0,
+    total_steps: int = 0,
+    samples_processed_epoch: int = 0,
+    samples_per_second: float = 0.0,
+    epoch_eta_seconds: float = 0.0,
+    throughput_meta: dict[str, Any] | None = None,
 ) -> str:
     current_rows = [
         row
@@ -1170,6 +1188,13 @@ def _write_forecast_progress(
         "eta_at": eta_at,
         "last_checkpoint_pt": str(last_checkpoint_pt.resolve()) if last_checkpoint_pt is not None else "",
         "best_checkpoint_pt": str(best_checkpoint_pt.resolve()) if best_checkpoint_pt is not None else "",
+        "phase": str(phase),
+        "current_step": int(current_step),
+        "total_steps": int(total_steps),
+        "samples_processed_epoch": int(samples_processed_epoch),
+        "samples_per_second": float(samples_per_second),
+        "epoch_eta_seconds": float(epoch_eta_seconds),
+        "throughput": _json_ready(throughput_meta or {}),
     }
     write_json(path, _json_ready(payload))
     return str(path.resolve())
@@ -1661,12 +1686,24 @@ def _predict_indices(
                             outputs[key][index_pos[int(row_id)]] = value
             return outputs
         chunks: dict[str, list[np.ndarray]] = {"mu": [], "q10": [], "q50": [], "q90": [], "aux": []}
-        loader = DataLoader(
-            dataset_view_or_x.torch_dataset(indices, target_scale=target_scale),
-            batch_size=max(int(batch_size), 1),
-            shuffle=False,
-            pin_memory=device.type == "cuda",
-        )
+        if isinstance(dataset_view_or_x.dataset, (ForecastShardedMemmapDataset, ForecastTrainingPackDataset)):
+            loader = DataLoader(
+                dataset_view_or_x.batch_torch_dataset(
+                    indices,
+                    batch_size=max(int(batch_size), 1),
+                    target_scale=target_scale,
+                ),
+                batch_size=None,
+                shuffle=False,
+                pin_memory=device.type == "cuda",
+            )
+        else:
+            loader = DataLoader(
+                dataset_view_or_x.torch_dataset(indices, target_scale=target_scale),
+                batch_size=max(int(batch_size), 1),
+                shuffle=False,
+                pin_memory=device.type == "cuda",
+            )
         with torch.no_grad():
             for raw_batch in loader:
                 batch_x, _, _, _, _, static_context_ids_cpu = _unpack_forecast_batch(raw_batch)
@@ -1979,7 +2016,7 @@ def _prediction_frame_for_dataset_indices(
     decision_drawdown_penalty: float = 0.25,
     loss_profile: str | None = None,
 ) -> pd.DataFrame:
-    if isinstance(dataset, ForecastMemmapDataset):
+    if isinstance(dataset, FORECAST_MEMMAP_DATASET_TYPES):
         if len(indices) == 0:
             return pd.DataFrame()
         scale = float(target_scale)
@@ -2306,7 +2343,7 @@ def _ranking_baseline_feature_frame(
     idx = np.asarray(indices, dtype=int)
     if len(idx) == 0:
         return pd.DataFrame(), np.empty((0,), dtype=np.float32)
-    if isinstance(dataset, ForecastMemmapDataset):
+    if isinstance(dataset, FORECAST_MEMMAP_DATASET_TYPES):
         store = dataset.open_feature_store()
         rows: list[np.ndarray] = []
         for row_idx in idx:
@@ -2382,7 +2419,7 @@ def _ranking_prediction_frame(
     horizon = int(dataset.manifest.get("horizon", PATH20_HORIZON) or PATH20_HORIZON)
     horizons = (
         dataset.cumulative_horizons
-        if isinstance(dataset, ForecastMemmapDataset)
+        if isinstance(dataset, FORECAST_MEMMAP_DATASET_TYPES)
         else normalize_path20_cumulative_horizons(dataset.manifest.get("cumulative_horizons", PATH20_CUMULATIVE_HORIZONS), horizon=horizon)
     )
     predictions = {
@@ -2518,7 +2555,7 @@ def _write_slot_diagnostics(
     slot_tensor = getattr(model, "slots", None)
     slot_count = int(slot_tensor.shape[0]) if isinstance(slot_tensor, torch.Tensor) else 0
     rows = pd.DataFrame()
-    if isinstance(dataset, ForecastMemmapDataset) and len(indices):
+    if isinstance(dataset, FORECAST_MEMMAP_DATASET_TYPES) and len(indices):
         rows = dataset.sample_index.iloc[np.asarray(indices, dtype=int)].copy()
     industry_available = "industry_id" in rows.columns and pd.to_numeric(rows["industry_id"], errors="coerce").fillna(0).ne(0).any()
     board_available = "board_id" in rows.columns and pd.to_numeric(rows["board_id"], errors="coerce").fillna(0).ne(0).any()
@@ -2716,12 +2753,24 @@ def _evaluate_loss(
                     counts.append(int(flat_mask.sum().detach().cpu()))
                 total = sum(counts)
                 return float(np.average(values, weights=counts)) if total > 0 else float("inf")
-            loader = DataLoader(
-                dataset_view_or_x.torch_dataset(indices, target_scale=target_scale),
-                batch_size=max(int(batch_size), 1),
-                shuffle=False,
-                pin_memory=device.type == "cuda",
-            )
+            if isinstance(dataset_view_or_x.dataset, (ForecastShardedMemmapDataset, ForecastTrainingPackDataset)):
+                loader = DataLoader(
+                    dataset_view_or_x.batch_torch_dataset(
+                        indices,
+                        batch_size=max(int(batch_size), 1),
+                        target_scale=target_scale,
+                    ),
+                    batch_size=None,
+                    shuffle=False,
+                    pin_memory=device.type == "cuda",
+                )
+            else:
+                loader = DataLoader(
+                    dataset_view_or_x.torch_dataset(indices, target_scale=target_scale),
+                    batch_size=max(int(batch_size), 1),
+                    shuffle=False,
+                    pin_memory=device.type == "cuda",
+                )
             for raw_batch in loader:
                 batch_x, batch_y_daily, batch_y_cum, batch_y_risk, _, static_context_ids_cpu = _unpack_forecast_batch(raw_batch)
                 batch_x = batch_x.to(device, non_blocking=device.type == "cuda")
@@ -3124,16 +3173,36 @@ def train_forecast_models(
             cross_sectional_batching = bool(
                 family in FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES and dataset_view.dataset_mode == "memmap"
             )
-            train_loader = DataLoader(
-                dataset_view.date_batch_torch_dataset(train_indices, target_scale=target_scale)
-                if cross_sectional_batching
-                else dataset_view.torch_dataset(train_indices, target_scale=target_scale),
-                batch_size=1 if cross_sectional_batching else batch_size,
-                shuffle=True,
-                generator=generator,
-                collate_fn=_collate_forecast_date_batches if cross_sectional_batching else None,
-                **loader_kwargs,
+            cache_friendly_train_order = bool(
+                isinstance(dataset_view.dataset, (ForecastShardedMemmapDataset, ForecastTrainingPackDataset)) and not cross_sectional_batching
             )
+            train_loader_indices = (
+                dataset_view.dataset.cache_friendly_indices(train_indices)
+                if cache_friendly_train_order
+                else train_indices
+            )
+            if cache_friendly_train_order:
+                train_loader = DataLoader(
+                    dataset_view.batch_torch_dataset(
+                        train_loader_indices,
+                        batch_size=batch_size,
+                        target_scale=target_scale,
+                    ),
+                    batch_size=None,
+                    shuffle=False,
+                    **loader_kwargs,
+                )
+            else:
+                train_loader = DataLoader(
+                    dataset_view.date_batch_torch_dataset(train_loader_indices, target_scale=target_scale)
+                    if cross_sectional_batching
+                    else dataset_view.torch_dataset(train_loader_indices, target_scale=target_scale),
+                    batch_size=1 if cross_sectional_batching else batch_size,
+                    shuffle=True,
+                    generator=generator,
+                    collate_fn=_collate_forecast_date_batches if cross_sectional_batching else None,
+                    **loader_kwargs,
+                )
             best_checkpoint_path = study_root / f"forecast_model_{family}_seed{int(current_seed)}_best.pt"
             last_checkpoint_path = study_root / f"forecast_model_{family}_seed{int(current_seed)}_last.pt"
             best_score = -float("inf")
@@ -3245,6 +3314,9 @@ def train_forecast_models(
                             _save_forecast_checkpoint_atomic(best_checkpoint_path, best_checkpoint_payload)
             for epoch in range(resume_start_epoch, max_epochs + 1):
                 epoch_started_monotonic = time.monotonic()
+                last_progress_monotonic = epoch_started_monotonic
+                samples_processed_epoch = 0
+                total_train_steps = int(len(train_loader))
                 model.train()
                 epoch_losses: list[float] = []
                 epoch_counts: list[int] = []
@@ -3302,10 +3374,11 @@ def train_forecast_models(
                                 decision_hit_threshold_bps=decision_hit_threshold_bps,
                                 decision_drawdown_penalty=decision_drawdown_penalty,
                                 cumulative_horizons=dataset_view.cumulative_horizons,
-                            )
+                        )
                         batch_count = int(batch_x.shape[0])
                     epoch_losses.append(float(loss.detach().cpu()))
                     epoch_counts.append(batch_count)
+                    samples_processed_epoch += int(batch_count)
                     scaler.scale(loss / float(accum_steps)).backward()
                     if step % accum_steps == 0 or step == len(train_loader):
                         scaler.unscale_(optimizer)
@@ -3313,8 +3386,83 @@ def train_forecast_models(
                         scaler.step(optimizer)
                         scaler.update()
                         optimizer.zero_grad(set_to_none=True)
+                    now_monotonic = time.monotonic()
+                    if now_monotonic - last_progress_monotonic >= 60.0 or step == len(train_loader):
+                        epoch_elapsed = max(float(now_monotonic - epoch_started_monotonic), 1.0e-6)
+                        samples_per_second = float(samples_processed_epoch) / epoch_elapsed
+                        remaining_steps = max(int(total_train_steps) - int(step), 0)
+                        seconds_per_step = epoch_elapsed / max(int(step), 1)
+                        _write_forecast_progress(
+                            progress_path,
+                            status="running",
+                            model_family=family,
+                            seed=int(current_seed),
+                            current_epoch=int(epoch),
+                            max_epochs=int(max_epochs),
+                            min_epochs=int(min_epochs),
+                            patience_limit=int(patience_limit),
+                            patience_used=int(patience_used),
+                            best_epoch=int(best_epoch),
+                            best_score=float(best_score),
+                            best_validation_loss=float(best_validation_loss),
+                            best_validation_metrics=best_validation_metrics,
+                            last_train_loss=float(np.average(epoch_losses, weights=epoch_counts)) if epoch_losses and epoch_counts else float("inf"),
+                            epoch_seconds=float(epoch_elapsed),
+                            run_started_at=run_started_at,
+                            elapsed_seconds=float(now_monotonic - run_started_monotonic),
+                            learning_rows=learning_rows,
+                            last_checkpoint_pt=last_checkpoint_path if bool(save_last_checkpoint) else None,
+                            best_checkpoint_pt=best_checkpoint_path,
+                            phase="train_epoch",
+                            current_step=int(step),
+                            total_steps=int(total_train_steps),
+                            samples_processed_epoch=int(samples_processed_epoch),
+                            samples_per_second=float(samples_per_second),
+                            epoch_eta_seconds=float(remaining_steps * seconds_per_step),
+                            throughput_meta={
+                                "batch_size": int(batch_size),
+                                "batch_count": int(batch_count),
+                                "dataset_mode": str(dataset_view.dataset_mode),
+                                "dataset_type": type(dataset_view.dataset).__name__,
+                                "cache_friendly_train_order": bool(cache_friendly_train_order),
+                            },
+                        )
+                        last_progress_monotonic = now_monotonic
                 last_train_loss = (
                     float(np.average(epoch_losses, weights=epoch_counts)) if epoch_losses and epoch_counts else float("inf")
+                )
+                validation_started_monotonic = time.monotonic()
+                _write_forecast_progress(
+                    progress_path,
+                    status="running",
+                    model_family=family,
+                    seed=int(current_seed),
+                    current_epoch=int(epoch),
+                    max_epochs=int(max_epochs),
+                    min_epochs=int(min_epochs),
+                    patience_limit=int(patience_limit),
+                    patience_used=int(patience_used),
+                    best_epoch=int(best_epoch),
+                    best_score=float(best_score),
+                    best_validation_loss=float(best_validation_loss),
+                    best_validation_metrics=best_validation_metrics,
+                    last_train_loss=float(last_train_loss),
+                    epoch_seconds=float(time.monotonic() - epoch_started_monotonic),
+                    run_started_at=run_started_at,
+                    elapsed_seconds=float(time.monotonic() - run_started_monotonic),
+                    learning_rows=learning_rows,
+                    last_checkpoint_pt=last_checkpoint_path if bool(save_last_checkpoint) else None,
+                    best_checkpoint_pt=best_checkpoint_path,
+                    phase="validation_loss",
+                    current_step=int(total_train_steps),
+                    total_steps=int(total_train_steps),
+                    samples_processed_epoch=int(samples_processed_epoch),
+                    samples_per_second=float(samples_processed_epoch / max(time.monotonic() - epoch_started_monotonic, 1.0e-6)),
+                    epoch_eta_seconds=0.0,
+                    throughput_meta={
+                        "train_epoch_seconds_so_far": float(time.monotonic() - epoch_started_monotonic),
+                        "validation_sample_count": int(len(validation_indices)),
+                    },
                 )
                 validation_loss = _evaluate_loss(
                     model,
@@ -3548,6 +3696,20 @@ def train_forecast_models(
                     learning_rows=learning_rows,
                     last_checkpoint_pt=last_checkpoint_path if bool(save_last_checkpoint) else None,
                     best_checkpoint_pt=best_checkpoint_path,
+                    phase="epoch_end",
+                    current_step=int(total_train_steps),
+                    total_steps=int(total_train_steps),
+                    samples_processed_epoch=int(samples_processed_epoch),
+                    samples_per_second=float(samples_processed_epoch / max(epoch_seconds, 1.0e-6)),
+                    epoch_eta_seconds=0.0,
+                    throughput_meta={
+                        "batch_size": int(batch_size),
+                        "dataset_mode": str(dataset_view.dataset_mode),
+                        "dataset_type": type(dataset_view.dataset).__name__,
+                        "cache_friendly_train_order": bool(cache_friendly_train_order),
+                        "validation_loss": float(validation_loss),
+                        "validation_phase_started_after_seconds": float(validation_started_monotonic - epoch_started_monotonic),
+                    },
                 )
                 if epoch >= min_epochs and patience_used >= patience_limit:
                     stopped_reason = "early_stopping_patience_exhausted"

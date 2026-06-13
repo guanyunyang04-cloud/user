@@ -4,6 +4,7 @@ import json
 from argparse import Namespace
 
 import numpy as np
+import pandas as pd
 import torch
 import pytest
 
@@ -15,12 +16,113 @@ from daily_research.path_policy.forecast_dataset import (
     ForecastDateBatchTorchDataset,
     _fit_memmap_train_normalization,
     build_forecast_memmap_dataset,
+    build_qdp_training_pack,
     build_static_context_vocab,
+    ForecastShardedMemmapDataset,
+    ForecastTrainingPackDataset,
     load_forecast_memmap_dataset,
 )
 from daily_research.path_policy.tests.fixtures import make_prepared_policy_inputs
 from daily_research.path_policy.validate_forecast_memmap import main as validate_memmap_main
 from daily_research.path_policy.validate_forecast_memmap import validate_forecast_memmap_manifest
+
+
+def _write_float_memmap(path, values: np.ndarray) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    store = np.memmap(path, dtype="float32", mode="w+", shape=values.shape)
+    store[...] = values.astype(np.float32, copy=False)
+    store.flush()
+
+
+def _write_qdp_fixture_shard(root, *, year: int, stocks: tuple[str, ...], feature_columns: list[str]) -> dict:
+    dates = [pd.Timestamp(item).strftime("%Y-%m-%d") for item in pd.bdate_range(f"{year}-01-01", periods=6)]
+    shard_dir = root / f"year={year}" / "block=0000"
+    feature_shape = (len(dates), len(stocks), len(feature_columns))
+    features = np.zeros(feature_shape, dtype=np.float32)
+    for date_pos in range(feature_shape[0]):
+        for stock_pos in range(feature_shape[1]):
+            for feature_pos in range(feature_shape[2]):
+                features[date_pos, stock_pos, feature_pos] = year * 100 + date_pos * 10 + stock_pos + feature_pos / 10.0
+    feature_path = shard_dir / "forecast_feature_store.dat"
+    _write_float_memmap(feature_path, features)
+
+    horizon = 1
+    cumulative_horizons = [1]
+    labels_dir = shard_dir / "labels"
+    arrays = {
+        "daily_excess_return": np.full((len(dates), len(stocks), horizon), 0.01, dtype=np.float32),
+        "cumulative_excess_return": np.full((len(dates), len(stocks), 1), 0.01, dtype=np.float32),
+        "rank_by_horizon": np.tile(np.arange(len(stocks), dtype=np.float32).reshape(1, len(stocks), 1), (len(dates), 1, 1)),
+        "drawdown_by_horizon": np.full((len(dates), len(stocks), 1), -0.02, dtype=np.float32),
+        "worst_by_horizon": np.full((len(dates), len(stocks), 1), -0.01, dtype=np.float32),
+        "upside_by_horizon": np.full((len(dates), len(stocks), 1), 0.03, dtype=np.float32),
+        "rank_20d": np.tile(np.arange(len(stocks), dtype=np.float32).reshape(1, len(stocks)), (len(dates), 1)),
+        "max_drawdown_20d": np.full((len(dates), len(stocks)), -0.02, dtype=np.float32),
+        "worst_1d_20d": np.full((len(dates), len(stocks)), -0.01, dtype=np.float32),
+        "upside_20d": np.full((len(dates), len(stocks)), 0.03, dtype=np.float32),
+    }
+    label_entries = {}
+    for name, values in arrays.items():
+        path = labels_dir / f"{name}.dat"
+        _write_float_memmap(path, values)
+        label_entries[name] = {"path": str(path), "shape": list(values.shape), "dtype": "float32"}
+    label_manifest = {
+        "status": "completed",
+        "date_values": dates,
+        "stock_values": list(stocks),
+        "horizon": horizon,
+        "cumulative_horizons": cumulative_horizons,
+        "arrays": label_entries,
+        "label_metadata": {"execution_mode": "next_open"},
+    }
+    label_manifest_path = shard_dir / "labels_manifest.json"
+    label_manifest_path.write_text(json.dumps(label_manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    sample_rows = []
+    for date_pos, date in enumerate(dates):
+        for stock_pos, stock in enumerate(stocks):
+            sample_rows.append(
+                {
+                    "date": date,
+                    "stock": stock,
+                    "date_pos": date_pos,
+                    "stock_pos": stock_pos,
+                    "history_valid_ratio": 1.0,
+                    "symbol_id": stock_pos + 1,
+                    "exchange_id": 1 if stock.endswith(".SH") else 2,
+                    "industry_id": stock_pos + 10,
+                }
+            )
+    sample_index_path = shard_dir / "sample_index.parquet"
+    pd.DataFrame(sample_rows).to_parquet(sample_index_path, index=False)
+    shard = {
+        "status": "completed",
+        "shard_key": f"year={year}/block=0000",
+        "year": year,
+        "block_id": 0,
+        "start_date": dates[0],
+        "end_date": dates[-1],
+        "context_start_date": dates[0],
+        "context_end_date": dates[-1],
+        "symbol_count": len(stocks),
+        "date_count": len(dates),
+        "sample_count": len(sample_rows),
+        "feature_store_path": str(feature_path),
+        "feature_store_shape": list(feature_shape),
+        "feature_columns": list(feature_columns),
+        "feature_schema_hash": "unit",
+        "label_manifest_json": str(label_manifest_path),
+        "sample_index_path": str(sample_index_path),
+        "static_context_schema": {
+            "enabled": True,
+            "fields": ["symbol", "exchange", "industry"],
+            "id_columns": ["symbol_id", "exchange_id", "industry_id"],
+            "vocab_sizes": {"symbol": 3, "exchange": 3, "industry": 12},
+        },
+        "shard_manifest_json": str(shard_dir / "shard_manifest.json"),
+    }
+    (shard_dir / "shard_manifest.json").write_text(json.dumps(shard, ensure_ascii=False, indent=2), encoding="utf-8")
+    return shard
 
 
 def test_forecast_memmap_dataset_builds_lazy_store_and_batches(tmp_path) -> None:
@@ -73,6 +175,149 @@ def test_forecast_memmap_dataset_builds_lazy_store_and_batches(tmp_path) -> None
     assert tuple(y_risk.shape) == (5, 3)
     assert int(row_idx.item()) == int(train_indices[0])
     assert torch.isfinite(x).all()
+
+
+def test_qdp_sharded_memmap_loader_builds_role_view_and_cross_year_windows(tmp_path) -> None:
+    stocks = ("AAA.SZ", "BBB.SH")
+    feature_columns = ["feature_a", "feature_b"]
+    shards = [
+        _write_qdp_fixture_shard(tmp_path, year=year, stocks=stocks, feature_columns=feature_columns)
+        for year in (2019, 2020, 2021)
+    ]
+    manifest = {
+        "artifact_type": "qdp_sharded_memmap",
+        "profile": "style_structural_v1",
+        "feature_profile": "style_structural_v1",
+        "canonical_dataset_id": "policy_input_bundle__unit",
+        "source_pool_view_id": "policy_pool_view__unit",
+        "source_pool_view_kind": "tradeable_mainboard",
+        "lookback_days": 3,
+        "horizon": 1,
+        "forecast_horizon": 1,
+        "execution_mode": "next_open",
+        "cumulative_horizons": [1],
+        "feature_columns": feature_columns,
+        "feature_count": len(feature_columns),
+        "static_context_schema": {
+            "enabled": True,
+            "fields": ["symbol", "exchange", "industry"],
+            "id_columns": ["symbol_id", "exchange_id", "industry_id"],
+            "vocab_sizes": {"symbol": 3, "exchange": 3, "industry": 12},
+            "embedding_defaults": {"symbol": 16, "exchange": 4, "industry": 8, "dropout": 0.2},
+        },
+        "shards": shards,
+    }
+    manifest_path = tmp_path / "sharded_memmap_manifest.json"
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    loaded = load_forecast_memmap_dataset(
+        manifest_path,
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        max_samples_per_role=4,
+    )
+
+    assert isinstance(loaded, ForecastShardedMemmapDataset)
+    assert loaded.manifest["qdp_sharded_memmap_reused"] is True
+    assert loaded.manifest["sample_count_by_role"] == {"train": 4, "validation": 4, "test": 4}
+    assert loaded.static_context_ids is not None
+    assert loaded.static_context_ids.shape == (loaded.row_count, 3)
+
+    validation_row = int(loaded.role_indices("validation")[0])
+    raw_window = loaded.raw_input_window(validation_row)
+    assert tuple(raw_window.shape) == (3, 2)
+    assert raw_window[:, 0].tolist() == [2019 * 100 + 40, 2019 * 100 + 50, 2020 * 100]
+    batch_rows = loaded.cache_friendly_indices(loaded.role_indices("validation")[:3])
+    batch_raw = loaded.raw_input_windows(batch_rows)
+    assert tuple(batch_raw.shape) == (3, 3, 2)
+    np.testing.assert_allclose(batch_raw[0], loaded.raw_input_window(int(batch_rows[0])), equal_nan=True)
+    batch_x = loaded.input_windows(batch_rows)
+    np.testing.assert_allclose(batch_x[0], loaded.input_window(int(batch_rows[0])), rtol=1e-6, atol=1e-6)
+
+    x, y_daily, y_cum, y_risk, row_idx, static_ids = loaded.torch_dataset(np.asarray([validation_row]), target_scale=100.0)[0]
+    assert tuple(x.shape) == (3, 2)
+    assert tuple(y_daily.shape) == (1,)
+    assert tuple(y_cum.shape) == (1,)
+    assert tuple(y_risk.shape) == (1, 3)
+    assert int(row_idx.item()) == validation_row
+    assert tuple(static_ids.shape) == (3,)
+    assert torch.isfinite(x).all()
+
+
+def test_qdp_training_pack_loads_stock_major_features_and_sample_labels(tmp_path) -> None:
+    stocks = ("AAA.SZ", "BBB.SH")
+    feature_columns = ["feature_a", "feature_b"]
+    shards = [
+        _write_qdp_fixture_shard(tmp_path, year=year, stocks=stocks, feature_columns=feature_columns)
+        for year in (2019, 2020, 2021)
+    ]
+    manifest = {
+        "artifact_type": "qdp_sharded_memmap",
+        "profile": "style_structural_v1",
+        "feature_profile": "style_structural_v1",
+        "canonical_dataset_id": "policy_input_bundle__unit",
+        "source_pool_view_id": "policy_pool_view__unit",
+        "source_pool_view_kind": "tradeable_mainboard",
+        "lookback_days": 3,
+        "horizon": 1,
+        "forecast_horizon": 1,
+        "execution_mode": "next_open",
+        "cumulative_horizons": [1],
+        "feature_columns": feature_columns,
+        "feature_count": len(feature_columns),
+        "static_context_schema": {
+            "enabled": True,
+            "fields": ["symbol", "exchange", "industry"],
+            "id_columns": ["symbol_id", "exchange_id", "industry_id"],
+            "vocab_sizes": {"symbol": 3, "exchange": 3, "industry": 12},
+            "embedding_defaults": {"symbol": 16, "exchange": 4, "industry": 8, "dropout": 0.2},
+        },
+        "shards": shards,
+    }
+    source_manifest_path = tmp_path / "sharded_memmap_manifest.json"
+    source_manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    sharded = load_forecast_memmap_dataset(
+        source_manifest_path,
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        max_samples_per_role=4,
+    )
+    pack_manifest = build_qdp_training_pack(
+        source_manifest_path,
+        output_root=tmp_path / "training_pack",
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        max_samples_per_role=4,
+        feature_dtype="float32",
+    )
+    loaded = load_forecast_memmap_dataset(pack_manifest["manifest_json"])
+
+    assert isinstance(loaded, ForecastTrainingPackDataset)
+    assert loaded.manifest["artifact_type"] == "qdp_training_pack_v1"
+    assert loaded.manifest["sample_count_by_role"] == {"train": 4, "validation": 4, "test": 4}
+    validation_row = int(loaded.role_indices("validation")[0])
+    sharded_validation_row = int(sharded.role_indices("validation")[0])
+    np.testing.assert_allclose(loaded.input_window(validation_row), sharded.input_window(sharded_validation_row), rtol=1e-6, atol=1e-6)
+    batch_rows = loaded.cache_friendly_indices(loaded.role_indices("validation")[:3])
+    assert tuple(loaded.input_windows(batch_rows).shape) == (3, 3, 2)
+    x, y_daily, y_cum, y_risk, row_idx, static_ids = loaded.batch_torch_dataset(
+        np.asarray([validation_row]),
+        batch_size=1,
+        target_scale=100.0,
+    )[0]
+    assert tuple(x.shape) == (1, 3, 2)
+    assert tuple(y_daily.shape) == (1, 1)
+    assert tuple(y_cum.shape) == (1, 1)
+    assert tuple(y_risk.shape) == (1, 1, 3)
+    assert int(row_idx[0].item()) == validation_row
+    assert tuple(static_ids.shape) == (1, 3)
 
 
 def test_canonical_memmap_registry_resolves_matching_request(tmp_path) -> None:
