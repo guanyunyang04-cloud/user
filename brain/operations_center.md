@@ -3,25 +3,19 @@
 ## 1. 默认接管入口
 - 当前工作区根目录：`H:\quant_project`。
 - 旧路径 `H:\new_tdx64\PYPlugins\user` 已退出本项目主链路，不得作为接管根目录。
-- schema v4 capsule：
+- capsule / route / bootstrap 都是可选诊断工具，不是默认流程门禁：
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
-  - 读取 `target_kind` 与 `workflow_domain` 区分 workspace governance 和 child brain body work。
-  - 读取 `agent_meta` 与 `agent_review` 执行 agent 元能力检查；brain 只提供协议和传感器结果。
-- 任务路由：
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow route --task "<task>" --json`
-  - workspace 治理任务返回 `target.id=workspace`、`target.kind=workspace`、`target.domain=workspace_governance`。
-  - route 是 advisory sensor；治理词不得替 agent 覆盖唯一 hard child evidence。
-- 主脑或分脑 bootstrap：
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain <brain_id|workspace> --json`
-  - `workspace_governance` 是 workspace bootstrap alias，不是分脑 id；读取 `project_profile` 决定 guard、verification、commit 和 process namespace。
+- 默认接管由 agent 直接根据用户目标、路径、文件内容、git diff、少数硬边界和当前记忆判断；route 输出只作提示，不替 agent 决策。
+- 稳定事实锚点：QDP 负责 canonical 数据基底、registry、policy bundle、memmap 和数据清理；daily_research 负责研究、模型、回测、执行候选和 active artifact 边界。
 
 ## 2. Skills / Brain / Tools 调用顺序
-- 先运行主脑 capsule，确认事实、推断、假设、项目归属、少数硬边界和目标分脑边界。
-- capsule 输出 `agent_selected_brain_id`、`selection_reason`、`routing_evidence` 与 `project_profile`；`needs_agent_decision` 是提示，不是 preflight blocker。
-- 再调用适用的本机 skill；skill 是工具，不是默认上级流程。个人研究者任务优先直接做、直接改、直接清理。
+- 先理解用户目标；需要时读最相关的 brain / code / output，而不是为了流程完整读取所有中心。
+- 本机 skill、capsule、route、bootstrap、health、audit 都是工具，不是上级流程。个人研究者任务优先直接做、直接改、直接清理。
 - 已禁用或降级为 explicit-only 的重流程 skill 不进入默认路径：`subagent-driven-development`、`requesting-code-review`、`finishing-a-development-branch`、`using-git-worktrees`、`verification-before-completion`、`test-driven-development`、`testing-strategies`。
 - 可默认使用的轻量 skill 只在任务真实匹配时触发：`workspace-brain`、`executing-plans`、`systematic-debugging`、`doc` / `technical-writing`、前端 / 部署 / 安全等领域 skill。
-- 最后进入被主脑路由选中的分脑，读取项目事实、项目命令、证据边界和验证矩阵。
+- 分脑读取由 agent 判断：读哪里取决于目标和事实归属，不取决于 route 是否选中。
 - 冲突时服从当前用户目标和脑区少数硬边界；如果通用 skill 要求 worktree、TDD、全量测试、PR、code review 或兼容层，而当前个人研究任务不需要，则跳过。
 
 ## 3. Mutation 前预检
@@ -30,10 +24,7 @@
   - `git branch --show-current`
 - 如果当前分支不是 `main`，任何会修改 repo-tracked 文件的任务都必须先纠偏到 `main`，或由用户显式撤销 `main-branch-only` 规则。
 - 分支异常是 preflight blocker；不得写成研究证据、promotion 证据或分脑当前结论。
-- mutation 前将 dirty paths 分为三类：
-  - `target-scope`：当前路由项目或用户明确纳入的路径；相关变更需要按任务风险读取并协同处理。
-  - `workspace-shared`：主脑、workflow 工具、根配置、跨项目 registry 等共享路径；修改前必须单独评估影响面。
-  - `external-project`：路由范围外的项目路径；默认视为外部并行工作，只在有助于说明边界时报告，不作为 blocker，也不得回滚、修复、暂存、提交或混入当前任务。
+- mutation 前按常识查看 dirty paths：本轮要改的文件要读清楚；明显无关的并行改动不回滚、不混提交；共享文件和数据/active artifact 先确认风险。
 - 如果 `external-project` 变更与 `target-scope` 或 `workspace-shared` 变更发生真实冲突，先停止扩大操作并说明冲突点，由用户决定是否扩展任务范围。
 - mutation 预检只为防止误改、误删和混提交；不得扩展成默认审查仪式。
 
@@ -55,9 +46,9 @@
 - `agent-meta-audit` 若返回 `agent_learning.pending_approval_count > 0`，下一次实质进展更新或最终答复必须主动提示待批准 / 待跟进 proposal；若为 `0`，可简短说明当前没有待批准 proposal。
 - `brain-burden-audit` 检查热路径预算、skill 体量、冗余兼容和非源缓存；blocked 项必须先处理再继续脑区治理写回。
 - `doc_guard check` 裸命令是全量收尾守卫；日常局部检查优先用 `doc_guard check --files <paths>` 或 `doc_guard check --scope changed`，且这两种轻量模式默认不跑 layout、active、large-file、integrity 全局检查。结构变更后仍建议单独跑一次 `integrity_check` 便于快速定位。
-- 项目验证从 `project_profile.verification_profile.always_commands` 读取；`selective_verification.py --paths <paths>` 必须按路径推断项目，不得默认注入 daily active guard。
-- 默认开发验证采用 changed-surface-only：先运行 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.selective_verification --paths <changed_paths> --json`，以 `blocking_commands` 作为本次必须通过的小验证包；`lane_commands` / `test_strategy` 说明 smoke、project、full、research、external 车道和测试预算；未修改且未受影响区域由 `skipped_reason_by_area` 显式说明。
-- 工作区测试治理与减负策略的 canonical 正文见 `brain/references/testing_governance.md`；不再保留 `docs/testing_governance.md` 外部入口。默认测试轻量化服务研究速度；canonical、PIT/no-leakage、清理边界、active artifact、项目命名空间和可回滚提交仍属硬边界。
+- 项目验证由 agent 根据改动面和风险选择；`selective_verification.py --paths <paths>` 可辅助推荐，不得默认注入 daily active guard。
+- 默认开发验证采用 changed-surface-only：可运行 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.selective_verification --paths <changed_paths> --json` 获取小验证包；agent 可按当前目标增减检查。
+- 工作区测试治理与减负策略的 canonical 正文见 `brain/references/testing_governance.md`；不再保留 `docs/testing_governance.md` 外部入口。默认测试轻量化服务研究速度；canonical、PIT/no-leakage、清理边界、active artifact 和可回滚性仍属硬边界。
 - `always_commands` 保留为兼容和收尾守卫入口，不代表每次小改都要全量执行；`deferred_commands` / `deferred_long_commands` 只用于慢速、研究、维护或最终确认批次。
 - 普通 docs-only 只需要 `git diff --check`；brain 文档变更再加 `tools.brain.doc_guard check --files <paths>` 或 `--scope changed`。单模块 Python 变更只跑对应测试或 nodeid；shared helper、protocol、schema、config、active/execution 边界变更必须扩大测试半径或进入 manual review。
 - 测试编写保持最小 fixture、最小断言面、无真实网络、无真实长训练；单测只证明数据、label、loss、bridge、gate、guard 合约，不用单测证明模型收益强。慢测必须带 `slow` / `research` / `guard` / `external` 等 marker 和明确触发条件。
@@ -68,20 +59,16 @@
 - direct-change 的硬边界：不得静默改 active artifact、live/default/paper/broker 行为、promotion gate、PIT/no-leakage/OOS 证据边界、不可重建研究证据、secrets、外部服务状态或路由外并行 dirty work；这些仍按 project profile、manual review 和显式授权处理。
 - 结论验证采用“足够支撑当前说法”的证据原则：能 smoke 就不全量，能抽样就不长跑，能靠文件/manifest 证明就不重新训练；不得把轻量验证伪装成强结论。
 
-## 5.1 项目任务命名空间纪律
-- 每次任务在 mutation 前必须绑定一个明确 `project_id` / task namespace；workspace 共享脑区、workflow 工具、skill 或根配置改动使用 `workspace` / `workspace-brain` 命名空间，不挂靠任一子项目。
-- 默认读写、短脚本、一次性诊断、测试、临时报告、日志、截图、JSON、cache/output 和提交候选都只属于当前 project profile 允许范围，加上用户明确纳入的路径。
-- 当前任务的临时产物优先写入当前项目的 output/cache/tmp/reports 或 `<project>/output/agent_runs/<run_id>/`；不得把其它项目 output、进程、loose latest 或 dirty paths 当作当前任务证据。
-- 其它项目正在变化的源码、研究日志、输出、进程和测试结果默认是外部并行工作；可在接管摘要中报告其存在，但不下钻内容、不等待、不停止、不清理、不复用、不提交，也不写成本任务证据，除非用户明确扩展任务范围或存在已声明 cross-project lease。
-- changed-surface 验证也受项目命名空间约束：普通项目改动只跑本项目影响面；shared tooling / schema / workflow / project profile 改动才扩大到依赖项目或 workspace 守卫。
+## 5.1 项目协作纪律
+- 不再强制每次任务绑定 `project_id`；agent 根据用户目标、路径、事实归属和风险直接判断工作范围。
+- 跨项目读取默认允许，只要服务当前目标且不把无关 output / loose latest / 并行 dirty work 误写成证据。
+- 写入、删除、清理、重建、提交和进程管理要按真实风险收敛到相关路径；QDP 数据资产、daily active artifact、secrets、外部服务状态和不可重建证据仍需特别小心。
+- 临时产物优先放到相关项目或明确 run/task 目录；不要把 workspace 根变成杂物堆。
 
 ## 5.2 项目提交闭环
-- 完成项目任务且验证通过后使用项目提交助手：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.project_commit --project-id <project|workspace-brain> --task-summary "<summary>" --verified <commands> --json`。
-- 已验证 mutation 在最终答复前至少执行一次 `project_commit --dry-run --expect-paths <本轮目标文件>` 或实际提交；如果目标文件进入 `ignored_expected_paths`，必须报告提交范围阻断并拆分或修正 scope，不得静默收尾。
-- 提交格式为 `<project_id>: <summary>`，trailer 包含 `Project:`、`Agent-Task:`、`Verified:`。
-- 提交助手只把 profile 允许范围内的当前 dirty paths 纳入 candidate pathspec；路由外项目 dirty paths 输出为 `ignored_external_paths`，不作为 blocker，也不得被 stage/commit。
-- 只有当前候选路径出现 baseline dirty overlap、未验证、无项目内变更或明确范围冲突时才阻塞；不得把多个项目混成一个提交。
-- 用户明确授权的跨分脑脑区治理改动，可作为 `workspace-brain` 变更提交；提交前必须显式列出 pathspec，只纳入 brain / tools/brain / root governance docs / child brain 文档 / 明确 root cleanup，不纳入子项目 body dirty work。
+- 提交助手是可选辅助，不是最终答复前门禁：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.project_commit --project-id <project|workspace-brain> --task-summary "<summary>" --verified <commands> --json`。
+- 需要提交时由 agent 明确 pathspec、验证证据和提交说明；不需要提交时报告改动与验证即可。
+- 不混提交无关 dirty paths；跨多个真实目标的改动可以一起说明，也可以拆分，取决于清晰度和回滚便利。
 
 ## 6. 写回路由
 - 工作区级当前状态写回 `brain/state_center.md`。
@@ -89,7 +76,7 @@
 - 工作区级拓扑写回 `brain/master_brain.md`。
 - 工作区级治理写回 `brain/governance_layer.md`。
 - 工作区级项目特例、环境与守卫入口写回 `brain/operations_center.md`。
-- 项目事实、实验状态、rXX 证据和项目命令写回被路由选中的分脑。
+- 项目事实、实验状态、rXX 证据和项目命令写回 agent 判断的相关分脑；route 不决定写回权。
 
 ## 7. 轮询任务运行纪律
 - 任何需要重复观察、等待外部状态或跨多轮完成的任务都继承项目任务命名空间纪律；“长任务”只是其中一种，不再作为单独治理类别。

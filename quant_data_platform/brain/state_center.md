@@ -5,6 +5,7 @@
 - 当前项目已具备最小可用 CLI、tests、registry 迁移、coverage/audit、bundle 构建和 memmap 验证入口。
 - 默认研究窗口沿用工作区 canonical 决策：`2010-01-01` 起。
 - active canonical bundle 已更新为包含估值、行业、指数成分 sidecar 的 `canonical_data_v1`。
+- 本分脑是工作区 canonical 数据基底、registry、policy bundle、sharded memmap 和数据清理的默认事实来源；其它研究项目可读取本分脑 status / registry / manifest 作为共享数据事实。
 - canonical 数据域原则：行情、5 分钟日级特征、复权因子、估值、行业、指数成分、交易日历、股票池和证券状态进入数据基底；财务季报、业绩预告/快报等慢披露数据暂不进入 v1 默认基底。
 - full canonical sharded memmap 已完成并冻结：`canonical_short_horizon_core_v1_full_2010_2026`，profile `short_horizon_core_v1`，2010-2026，5526 symbols，256 features，323 planned / 262 stored / 61 empty / 0 failed shards。
 - active sharded manifest：`H:/quant_project/quant_data_platform/data/memmap/sharded/canonical_short_horizon_core_v1_full/sharded_memmap_manifest.json`。

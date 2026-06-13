@@ -188,7 +188,7 @@ def detect(cwd: Path) -> dict[str, Any]:
         "has_brain_tools": bool(tools_workflow.exists()),
         "brain_tools_workflow": str(tools_workflow.resolve()) if tools_workflow.exists() else "",
         "git": git,
-        "next_actions": ["run_capsule"] if has_brain else ["init_brain_available"],
+        "next_actions": ["inspect_goal_and_relevant_context"] if has_brain else ["init_brain_available"],
     }
 
 
@@ -236,7 +236,7 @@ def _takeover_health(cwd: Path) -> dict[str, Any]:
     elif detected["has_brain"] and not detected["has_brain_tools"]:
         next_actions.append("register_brain")
     else:
-        next_actions.append("run_capsule_lite")
+        next_actions.append("inspect_goal_and_relevant_context")
     return {
         "status": "ok" if detected["status"] == "ok" else "warning",
         "mode": "compact",
@@ -264,9 +264,9 @@ def _takeover_health(cwd: Path) -> dict[str, Any]:
             "integrity_check",
             "brain_catalog",
             "daily_research_frontier",
-            "project_profile_guards",
+            "optional_project_checks",
         ],
-        "project_profile_note": "Project-specific checks are selected after capsule/bootstrap exposes the project profile.",
+        "project_checks_note": "Project-specific checks are selected by agent judgment from the current goal, risk, and changed files.",
         "workspace": str(workspace),
         "next_actions": next_actions,
     }
@@ -406,7 +406,7 @@ def health(cwd: Path, *, mode: str = "compact", timeout_sec: float = 60.0) -> di
     if frontier_summary.get("brain_may_be_stale"):
         next_actions.append("review_frontier_reconciliation")
     if not next_actions:
-        next_actions.append("run_capsule")
+        next_actions.append("inspect_goal_and_relevant_context")
 
     timed_out = any(bool(result.get("timed_out")) for result in (skill_sync_result, integrity_result, doc_guard_result, frontier_result))
     payload = {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import glob
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -80,17 +81,22 @@ def _read_domain_dataset(lake: ResearchDataLake, dataset_id: str) -> tuple[pd.Da
         return pd.DataFrame(), {}
     metadata = lake.describe_dataset(str(dataset_id))
     path = str(dict(metadata.get("content_paths", {}) or {}).get("silver_domain_data", "") or "")
-    if not path or not Path(path).exists():
+    candidates = sorted(glob.glob(path)) if "*" in path else ([path] if path else [])
+    existing = [item for item in candidates if Path(item).exists()]
+    if not existing:
         return pd.DataFrame(), metadata
-    return pd.read_parquet(path), metadata
+    frames = [pd.read_parquet(item) for item in existing]
+    return pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0], metadata
 
 
 def _read_market_dataset(lake: ResearchDataLake, dataset_id: str, start_date: str, end_date: str) -> tuple[pd.DataFrame, dict[str, Any]]:
     metadata = lake.describe_dataset(str(dataset_id))
     path = str(dict(metadata.get("content_paths", {}) or {}).get("bronze_market_data", "") or "")
-    if not path or not Path(path).exists():
+    candidates = sorted(glob.glob(path)) if "*" in path else ([path] if path else [])
+    existing = [item for item in candidates if Path(item).exists()]
+    if not existing:
         raise ValueError(f"v2_status_sidecar_blocker: missing bronze_market_data for {dataset_id}")
-    market = pd.read_parquet(path)
+    market = pd.concat([pd.read_parquet(item) for item in existing], ignore_index=True) if len(existing) > 1 else pd.read_parquet(existing[0])
     market["trade_date"] = pd.to_datetime(market["trade_date"], errors="coerce")
     start = pd.Timestamp(start_date or metadata.get("start_date", "") or market["trade_date"].min())
     end = pd.Timestamp(end_date or metadata.get("end_date", "") or market["trade_date"].max())

@@ -4,6 +4,7 @@
 - 让工作区只有一个默认数据基底入口。
 - 让数据资产、registry、coverage、memmap 和 cleanup 规则可审计、可复用、可迁移。
 - 让研究项目通过 profile 选择字段，而不是各自复制、裁剪或重建数据集。
+- 允许消费者读取本分脑公开 status / registry / manifest 作为共享数据事实；实际构建、清理、重建和 registry mutation 仍归本项目 profile。
 - 让数据平台服务个人研究效率；完整基底和 active memmap 建好后，旧路径默认退出热路径。
 
 ## 硬边界

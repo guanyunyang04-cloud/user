@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import glob
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -109,9 +110,11 @@ def _read_market_panel(lake: ResearchDataLake, dataset_id: str, start_date: str,
     if str(metadata.get("dataset_kind", "")) != "policy_input_bundle":
         raise ValueError(f"pool_view_blocker: source dataset is not policy_input_bundle: {dataset_id}")
     market_path = str(dict(metadata.get("content_paths", {}) or {}).get("bronze_market_data", "") or "")
-    if not market_path or not Path(market_path).exists():
+    candidates = sorted(glob.glob(market_path)) if "*" in market_path else ([market_path] if market_path else [])
+    existing = [item for item in candidates if Path(item).exists()]
+    if not existing:
         raise ValueError(f"pool_view_blocker: source bundle has no bronze_market_data: {dataset_id}")
-    market = pd.read_parquet(market_path)
+    market = pd.concat([pd.read_parquet(item) for item in existing], ignore_index=True) if len(existing) > 1 else pd.read_parquet(existing[0])
     if "trade_date" not in market.columns:
         raise ValueError(f"pool_view_blocker: bronze_market_data has no trade_date column: {market_path}")
     market["trade_date"] = pd.to_datetime(market["trade_date"])
@@ -214,6 +217,18 @@ def _build_membership_for_spec(
 
     if view_kind in {"learned_all_a", "all_a"}:
         membership = close.notna().astype(bool)
+    elif view_kind == "tradeable_mainboard":
+        if not status_sidecar_dataset_id:
+            raise ValueError("pool_view_blocker: tradeable_mainboard requires status_sidecar_dataset_id")
+        membership = (close.notna() & status_tradeable.reindex(index=dates, columns=available_symbols, fill_value=False)).astype(bool)
+        daily_counts = membership.sum(axis=1).astype(int)
+        source_cache["tradeable_mainboard_summary"] = {
+            "true_cells": int(membership.to_numpy(dtype=bool).sum()),
+            "active_symbol_count": int((membership.sum(axis=0) > 0).sum()),
+            "min_daily_member_count": int(daily_counts.min()) if len(daily_counts) else 0,
+            "max_daily_member_count": int(daily_counts.max()) if len(daily_counts) else 0,
+            "mean_daily_member_count": float(daily_counts.mean()) if len(daily_counts) else 0.0,
+        }
     elif view_kind in {"rolling_liquidity", "rolling_liquidity_tradeable_mainboard"}:
         amount = _pivot_market(market, "amount").reindex(columns=available_symbols)
         close_for_pool = close

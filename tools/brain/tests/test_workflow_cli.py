@@ -552,7 +552,7 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertIn("agent_review", payload)
         self.assertFalse(payload["agent_review"]["before_final_required"])
 
-    def test_capsule_writeback_workflow_requires_completion_review(self) -> None:
+    def test_capsule_writeback_workflow_does_not_force_completion_review(self) -> None:
         payload = run_cli(
             "capsule",
             "--task",
@@ -565,10 +565,10 @@ class BrainWorkflowCliTest(unittest.TestCase):
         )
 
         self.assertEqual(payload["workflow"], "brain_writeback_verified")
-        self.assertTrue(payload["agent_review"]["before_final_required"])
-        self.assertIn("workflow_completion_review", payload["agent_review"]["reason_codes"])
+        self.assertFalse(payload["agent_review"]["before_final_required"])
+        self.assertNotIn("workflow_completion_review", payload["agent_review"]["reason_codes"])
 
-    def test_capsule_brain_rule_mutation_uses_maintenance_review(self) -> None:
+    def test_capsule_brain_rule_mutation_uses_maintenance_without_forced_review(self) -> None:
         payload = run_cli(
             "capsule",
             "--task",
@@ -584,8 +584,8 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertEqual(payload["schema_version"], 4)
         self.assertEqual(payload["target_kind"], "workspace")
         self.assertEqual(payload["workflow_domain"], "workspace_governance")
-        self.assertTrue(payload["agent_review"]["before_final_required"])
-        self.assertIn("workflow_completion_review", payload["agent_review"]["reason_codes"])
+        self.assertFalse(payload["agent_review"]["before_final_required"])
+        self.assertNotIn("workflow_completion_review", payload["agent_review"]["reason_codes"])
 
     def test_capsule_cli_defaults_to_lite_context(self) -> None:
         payload = run_cli(

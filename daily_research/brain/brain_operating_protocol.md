@@ -3,23 +3,23 @@
 快照日期：`2026-05-23`
 
 ## 目的
-本协议定义主脑路由到 `daily_research` 后的项目操作方式。
+本协议定义 agent 处理 `daily_research` 相关任务时的项目操作方式。
 
-`daily_research/brain/` 保存项目事实、证据、状态和治理规则。主脑平台负责接管、路由、全局规则和守卫入口；本分脑只负责 `daily_research` 的项目事实层。
+`daily_research/brain/` 保存项目事实、证据、状态和治理规则。主脑平台负责共享事实、拓扑和少数硬边界；本分脑只负责 `daily_research` 的项目事实层。
 
 本文件是 `daily_research` 可选补充协议，不属于主脑共享 7 模块核；核心结构、读取顺序和 attach 契约以 manifest 为准。
 
-## 进入顺序
-- 重大 `daily_research` 任务开始前，先运行主脑 task capsule：
+## 进入方式
+- 重大 `daily_research` 任务开始前，可运行主脑 task capsule 辅助诊断：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
-- 只有当 `routing.selected_brain_id == "daily_research"` 且 `routing.status == "selected"` 时，才进入本分脑。
-- 在修改 tracked files、启动训练、运行 study 或写结论前，先读 capsule 的 `child_context`、`guards` 和 `workflow_guide`。
+- 只要用户目标、路径、事实或证据指向 `daily_research`，agent 可直接进入本分脑；route 不是准入条件。
+- 在修改 tracked files、启动训练、运行 study 或写结论前，读够相关 state、knowledge、operations、reference 或产物证据。
 - 若任务涉及 study、protocol、dataset 或 r-number，必须使用 explicit tag 或 reference，不直接相信 loose `latest_*`。
 
 ## API / 无插件 fallback
 - API-only 或无插件场景，使用：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --workflow auto --json`
-- 把 `workflow_selection`、`workflow_guide`、`required_checklist` 和 `stop_conditions` 作为本轮任务的操作指南。
+- 把 `workflow_selection`、`workflow_guide`、`required_checklist` 和 `stop_conditions` 作为参考提示，不替代 agent 判断。
 - 用 `workflow-guide --workflow <workflow_id> --json` 只读查看 workflow。
 - 该 fallback 只近似插件纪律；它不替代脑区真源，也不授予 active execution 权限。
 
@@ -43,7 +43,7 @@
 - active execution 变更需要未来明确 promotion authority；普通 research 必须保持 `daily_research/output/active_execution_strategy.json` 不变。
 
 ## Brain 与 Skill 分工
-- 主脑平台保存接管、路由、全局规则、守卫入口和 workspace-level workflows。
+- 主脑平台保存共享事实、拓扑、少数硬边界、守卫入口和 workspace-level workflows。
 - 本分脑保存 `daily_research` 项目真相：当前状态、规则、证据、设计合同和历史 verdict。
 - `brain/skills/workspace-brain` 是 agent 入口 skill；不再发布 `daily-research-brain` skill。
 - 文档语言遵循 `brain/language_policy.md`：中文语义 + 英文工程标识。

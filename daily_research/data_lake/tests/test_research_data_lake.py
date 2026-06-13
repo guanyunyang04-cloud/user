@@ -657,6 +657,54 @@ class ResearchDataLakeTest(unittest.TestCase):
         self.assertEqual(prepared.raw_cache_meta["pool_view"]["dataset_id"], view.dataset_id)
         self.assertTrue(prepared.membership_frame.eq(True).all().all())
 
+    def test_loader_can_intersect_pool_view_with_requested_universe(self) -> None:
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
+        stocks = ["000001.SZ", "000002.SZ", "600000.SH"]
+        close = pd.DataFrame([[10.0, 20.0, 30.0], [10.5, 20.5, 30.5], [11.0, 21.0, 31.0]], index=dates, columns=stocks)
+        market_frames = {
+            "Open": close - 0.1,
+            "High": close + 0.2,
+            "Low": close - 0.2,
+            "Close": close,
+            "Volume": pd.DataFrame(1000.0, index=dates, columns=stocks),
+            "Amount": pd.DataFrame(10000.0, index=dates, columns=stocks),
+        }
+
+        with TemporaryDirectory() as temp_dir:
+            lake = ResearchDataLake(Path(temp_dir))
+            market_record = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic"},
+                market_frames=market_frames,
+                benchmark_close=pd.Series(4000.0, index=dates, name="000300.SH"),
+                membership_frame=pd.DataFrame(True, index=dates, columns=stocks),
+                feature_frames={"score_none": close * 0.0, "score_v2": close * 0.0 + 0.1},
+                source="synthetic",
+            )
+            view = build_pool_view_from_policy_bundle(
+                lake=lake,
+                spec=PoolViewSpec(
+                    source_market_dataset_id=market_record.dataset_id,
+                    view_kind="exchange",
+                    view_name="exchange_sz",
+                    start_date="2026-01-05",
+                    end_date="2026-01-07",
+                    exchange_suffix=".SZ",
+                ),
+            )
+            prepared = load_policy_inputs_from_lake(
+                lake=lake,
+                dataset_id=market_record.dataset_id,
+                start_date="2026-01-05",
+                end_date="2026-01-07",
+                universe=["000002.SZ", "600000.SH"],
+                pool_view_id=view.dataset_id,
+                intersect_pool_view_with_universe=True,
+            )
+
+        self.assertEqual(prepared.universe, ("000002.SZ",))
+        self.assertEqual(list(prepared.close.columns), ["000002.SZ"])
+        self.assertTrue(prepared.membership_frame.eq(True).all().all())
+
     def test_build_pool_view_cli_and_prepare_policy_inputs_lake_pool_view(self) -> None:
         dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
         stocks = ["000001.SZ", "600000.SH"]

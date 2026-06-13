@@ -78,6 +78,7 @@
 - `alpha_path20_neural_policy_v1`：2026-05-17 到 2026-05-23 的 Path20 neural-policy 历史主线；其 evidence 仍有效，但新结论必须按 `alpha_multi_horizon_utility_policy_v1` 解释。
 - `alpha_path20_sequence_policy_v1`：shadow comparison / secondary research route；除非未来显式切换，不代表当前主线。
 - `data_platform_v2` / TDX-free lake-first ingestion：当前数据入口主线；provider refresh/import 才能在线取数，正式训练、评估和 diagnostics 必须读 explicit lake dataset id。
+- QDP 是共享 canonical 数据基底 owner；daily_research 只维护研究消费 lineage、模型证据和执行候选证据。回答数据集事实时先读 QDP，再读本分脑消费证据。
 - r10-r18：action/head + translation guard 改善语义，但不能替代组合资金分配本体。
 - r19-r30：receiver/source/cash ranking、listwise、teacher、release/relief 暴露 source 放宽与休眠问题。
 - r31-r39：receiver executable、source clean-pass、unified allocation、decision-focused objective，形成当前有效证据基线。

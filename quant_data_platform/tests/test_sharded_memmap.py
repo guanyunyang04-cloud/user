@@ -132,17 +132,35 @@ def test_cli_sharded_dry_run_writes_plan(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("QDP_WORKSPACE_ROOT", str(tmp_path))
     (tmp_path / "brain").mkdir(parents=True)
     (tmp_path / "brain" / "brain_manifest.json").write_text('{"brain_type": "main"}', encoding="utf-8")
-    assert cli_main(["build-sharded-memmap", "--dry-run", "--workers", "4", "--year-input-cache", "--json"]) == 0
+    assert cli_main(
+        [
+            "build-sharded-memmap",
+            "--dry-run",
+            "--workers",
+            "4",
+            "--year-input-cache",
+            "--pool-view-id",
+            "policy_pool_view__unit",
+            "--include-static-context",
+            "--static-context-fields",
+            "symbol,exchange,industry",
+            "--json",
+        ]
+    ) == 0
     plan = qdp_paths(tmp_path).memmap_dir / "sharded_memmap_plan.json"
     assert plan.exists()
     assert read_json(plan)["workers"] == 4
     assert read_json(plan)["year_input_cache"] is True
+    assert read_json(plan)["pool_view_id"] == "policy_pool_view__unit"
+    assert read_json(plan)["include_static_context"] is True
+    assert read_json(plan)["static_context_fields"] == ["symbol", "exchange", "industry"]
 
 
 def test_sharded_config_normalizes_workers() -> None:
     assert ShardedMemmapConfig(workers=0).normalized().workers == 1
     assert ShardedMemmapConfig(workers=4).normalized().workers == 4
     assert ShardedMemmapConfig(year_input_cache=True).normalized().year_input_cache is True
+    assert ShardedMemmapConfig(static_context_fields="symbol_id,exchange_id").normalized().static_context_fields == "symbol,exchange"
 
 
 def test_slice_prepared_for_symbols_filters_wide_frames_and_metadata() -> None:
@@ -245,6 +263,7 @@ def test_build_shards_parallel_uses_worker_safe_shard_writes(tmp_path, monkeypat
         out_root=tmp_path / "out",
         cumulative_horizons=(1, 3, 5),
         expected_feature_columns=["a", "b"],
+        static_schema={},
         progress_path=tmp_path / "progress.json",
         planned_count=2,
         completed_so_far=0,
@@ -304,3 +323,72 @@ def test_write_sample_index_vectorized_filters_valid_rows(tmp_path) -> None:
         {"date": "2024-01-02", "stock": "AAA.SZ", "date_pos": 0, "stock_pos": 0},
         {"date": "2024-01-03", "stock": "AAA.SZ", "date_pos": 1, "stock_pos": 0},
     ]
+
+
+def test_write_sample_index_adds_static_context_columns(tmp_path) -> None:
+    class Prepared:
+        universe = ("AAA.SZ", "BBB.SH")
+        membership_frame = pd.DataFrame(
+            [[True, True], [True, True]],
+            index=pd.to_datetime(["2024-01-02", "2024-01-03"]),
+            columns=["AAA.SZ", "BBB.SH"],
+        )
+        amount = pd.DataFrame(
+            [[100.0, 200.0], [110.0, 210.0]],
+            index=membership_frame.index,
+            columns=membership_frame.columns,
+        )
+        close = pd.DataFrame(
+            [[10.0, 20.0], [11.0, 21.0]],
+            index=membership_frame.index,
+            columns=membership_frame.columns,
+        )
+        metadata_frames = {
+            "industry_map": pd.DataFrame(
+                {
+                    "symbol": ["AAA.SZ", "BBB.SH"],
+                    "industry": ["tech", "bank"],
+                }
+            )
+        }
+
+    dates = list(pd.to_datetime(["2024-01-02", "2024-01-03"]))
+    symbols = ["AAA.SZ", "BBB.SH"]
+    history_ratio = pd.DataFrame(0.9, index=dates, columns=symbols)
+    label_dir = tmp_path / "labels"
+    label_dir.mkdir(parents=True)
+    arrays = {}
+    for name, shape in {
+        "daily_excess_return": (2, 2, 1),
+        "cumulative_excess_return": (2, 2, 1),
+        "rank_by_horizon": (2, 2, 1),
+        "max_drawdown_20d": (2, 2),
+        "worst_1d_20d": (2, 2),
+        "upside_20d": (2, 2),
+    }.items():
+        path = label_dir / f"{name}.dat"
+        store = np.memmap(path, dtype="float32", mode="w+", shape=shape)
+        store[...] = 1.0
+        store.flush()
+        del store
+        arrays[name] = {"path": str(path), "shape": list(shape)}
+    static_schema = sharded.build_static_context_vocab(Prepared(), static_context_fields=("symbol", "exchange", "industry"))
+
+    sample_path, sample_count = _write_sample_index(
+        shard_dir=tmp_path,
+        prepared=Prepared(),
+        dates=dates,
+        symbols=symbols,
+        history_ratio=history_ratio,
+        label_manifest={"arrays": arrays},
+        min_lookback_valid_ratio=0.8,
+        include_static_context=True,
+        static_schema=static_schema,
+    )
+
+    frame = pd.read_parquet(sample_path)
+    assert sample_count == 4
+    assert {"symbol_id", "exchange_id", "industry_id"}.issubset(frame.columns)
+    assert frame.loc[frame["stock"] == "AAA.SZ", "symbol_id"].nunique() == 1
+    assert int(frame.loc[frame["stock"] == "AAA.SZ", "symbol_id"].iloc[0]) > 0
+    assert int(frame.loc[frame["stock"] == "BBB.SH", "exchange_id"].iloc[0]) > 0

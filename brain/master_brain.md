@@ -20,11 +20,11 @@
 - `a_stock_daily_selection/`：待整理旧目录；当前不注册分脑，后续决定归档、合并或补脑。
 
 ## 2. 接管边界
-- `main-brain-first`：主脑是 agent 接管入口。
-- `route-before-child`：路由明确选中后才读取子脑。
+- `agent-first`：agent 先理解用户目标，再按需要读取主脑、分脑、代码和产物。
+- `route-is-optional`：route / capsule / bootstrap 只是诊断工具，不决定工作范围。
+- `qdp-data-memory`：共享数据集、canonical_data_v1、registry、policy bundle 和 sharded memmap 默认看 `quant_data_platform`；研究项目只作为消费者解释其使用证据。
 - `common-in-main`：共享结构、注册、治理规则写在主脑。
 - `local-in-child`：项目事实、项目命令、项目证据写在子脑。
-- `no-loose-default-child`：多个子脑冲突返回 `ambiguous`。
 
 ## 3. 注册原则
 新项目脑由 runtime 初始化并注册；注册结果必须进入主脑 manifest、catalog 和发现式路由链路。

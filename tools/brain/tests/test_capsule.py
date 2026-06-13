@@ -442,9 +442,9 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertEqual(payload["workflow"], "brain_maintenance")
         self.assertEqual(payload["routing"]["selected_brain_id"], "workspace")
         self.assertEqual(payload["routing"]["target"]["kind"], "workspace")
-        self.assertTrue(payload["agent_review"]["before_final_required"])
-        self.assertIn("workflow_completion_review", payload["agent_review"]["reason_codes"])
-        self.assertTrue(payload["agent_review"]["closure_meta_review_required"])
+        self.assertFalse(payload["agent_review"]["before_final_required"])
+        self.assertNotIn("workflow_completion_review", payload["agent_review"]["reason_codes"])
+        self.assertFalse(payload["agent_review"]["closure_meta_review_required"])
 
 
 if __name__ == "__main__":

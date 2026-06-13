@@ -2,6 +2,7 @@
 
 ## 稳定规则
 - canonical 数据集要完整承载可审计、可按日使用的数据基底；训练/研究 profile 决定用哪些字段。
+- `canonical_dataset` / `canonical_data_v1` / active registry / sharded memmap 的共享事实以本分脑为 owner；消费者项目只声明使用 lineage。
 - 原始 OHLCV 永远保留原始口径；复权价格、复权收益、分钟聚合特征作为派生 sidecar。
 - 估值、行业、指数成分属于 canonical 结构/风格层；短线 profile 可以不用，但数据基底必须能提供。
 - 财务季报、业绩预告/快报等慢披露或 PIT 难保证数据不进入 v1 默认基底；未来专题引入前必须先证明 `publish_date/available_date`。

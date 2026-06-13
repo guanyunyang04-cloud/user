@@ -111,6 +111,53 @@ def test_tradeable_mainboard_pool_filters_status_and_excluded_prefixes() -> None
     assert loaded.metadata["parameters"]["exclude_symbol_prefixes"] == ["300", "301", "688", "689"]
 
 
+def test_tradeable_mainboard_all_a_pool_uses_status_without_liquidity_cap() -> None:
+    with TemporaryDirectory() as temp_dir:
+        lake = ResearchDataLake(Path(temp_dir))
+        dataset_id, dates, stocks = _save_market_bundle(lake)
+        rows: list[dict[str, object]] = []
+        for date in dates:
+            for stock in stocks:
+                rows.append(
+                    {
+                        "trade_date": date.strftime("%Y-%m-%d"),
+                        "symbol": stock,
+                        "is_tradeable": stock in {"000001.SZ", "000002.SZ", "600000.SH"},
+                    }
+                )
+        sidecar = lake.save_domain_dataset(
+            domain="v2_status_sidecar",
+            frame=pd.DataFrame(rows),
+            spec={
+                "dataset": "data_platform_v2_status_sidecar",
+                "source_market_dataset_id": dataset_id,
+                "start_date": "2026-01-05",
+                "end_date": "2026-02-13",
+            },
+            source="unit",
+        )
+        view = build_pool_view_from_policy_bundle(
+            lake=lake,
+            spec=PoolViewSpec(
+                source_market_dataset_id=dataset_id,
+                view_kind="tradeable_mainboard",
+                view_name="tradeable_mainboard_all_a_v1",
+                start_date="2026-01-05",
+                end_date="2026-02-13",
+                exclude_symbol_prefixes=("300", "301", "688", "689"),
+                status_sidecar_dataset_id=sidecar.dataset_id,
+                require_tradeable=True,
+            ),
+        )
+        loaded = load_pool_view(lake=lake, pool_view_id=view.dataset_id)
+
+    assert set(loaded.membership_frame.columns) == {"000001.SZ", "000002.SZ", "600000.SH"}
+    assert int(loaded.membership_frame.sum(axis=1).min()) == 3
+    assert int(loaded.membership_frame.sum(axis=1).max()) == 3
+    assert loaded.metadata["source_cache"]["tradeable_mainboard_summary"]["active_symbol_count"] == 3
+    assert "rolling_pool_summary" not in loaded.metadata["source_cache"]
+
+
 def test_tradeable_mainboard_pool_requires_status_sidecar() -> None:
     with TemporaryDirectory() as temp_dir:
         lake = ResearchDataLake(Path(temp_dir))

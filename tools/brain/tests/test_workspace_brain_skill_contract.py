@@ -30,55 +30,42 @@ class WorkspaceBrainSkillContractTest(unittest.TestCase):
         text = SKILL.read_text(encoding="utf-8")
 
         self.assertIn("`route` is a sensor", text)
-        self.assertIn("needs_agent_decision", text)
-        self.assertIn("Do not read a child brain because of one generic term", text)
+        self.assertIn("not the final thinker", text)
+        self.assertIn("use agent judgment", text)
+        self.assertIn("no route result is required", text)
 
-    def test_skill_keeps_manifest_as_truth_source(self) -> None:
+    def test_skill_keeps_stable_workspace_memory_in_skill(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
 
-        self.assertIn("brain/brain_manifest.json", text)
-        self.assertIn("contract truth", text)
-        self.assertIn("manifest and catalog", text)
+        self.assertIn("QDP owns the shared canonical data substrate", text)
+        self.assertIn("daily_research", text)
+        self.assertIn("active artifact evidence", text)
 
-    def test_skill_exposes_project_scope_for_parallel_agents(self) -> None:
+    def test_skill_keeps_project_helpers_optional(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
 
-        self.assertIn("Project Scope", text)
-        self.assertIn("project_profile", text)
-        self.assertIn("Every task first binds to one `project_id`", text)
-        self.assertIn("temporary reports, logs, short-run artifacts, and diagnostics", text)
-        self.assertIn("status summaries", text)
-        self.assertIn("operating contract", text)
-        self.assertIn("external parallel work", text)
+        self.assertIn("Optional Diagnostics", text)
+        self.assertIn("Use these when they reduce uncertainty", text)
         self.assertIn("tools.brain.project_commit", text)
-        self.assertIn("ignored_external_paths", text)
-        self.assertIn("<project>/output/agent_runs/<run_id>/", text)
-        self.assertIn("explicit lease", text)
+        self.assertIn("optional helpers", text)
+        self.assertNotIn("Every task first binds", text)
+        self.assertNotIn("project_profile", text)
 
-    def test_child_brain_operations_inherit_project_namespace_contract(self) -> None:
-        child_paths = [
-            ROOT / "daily_research/brain/operations_center.md",
-            ROOT / "t0_project/brain/operations_center.md",
-            ROOT / "daily_stock_analysis-main/brain/operations_center.md",
-            ROOT / "traditional_quant_research/brain/operations_center.md",
-        ]
-        for path in child_paths:
-            text = path.read_text(encoding="utf-8")
-            self.assertIn("项目任务命名空间", text, msg=str(path))
-            self.assertIn("不下钻", text, msg=str(path))
-            self.assertIn("lease", text, msg=str(path))
-
+    def test_daily_and_qdp_docs_keep_minimal_fact_boundary(self) -> None:
         daily_ops = (ROOT / "daily_research/brain/operations_center.md").read_text(encoding="utf-8")
-        self.assertIn("tools.brain.agent_run", daily_ops)
+        qdp_state = (ROOT / "quant_data_platform/brain/state_center.md").read_text(encoding="utf-8")
+
+        self.assertIn("QDP", daily_ops)
+        self.assertIn("canonical", daily_ops)
+        self.assertIn("canonical", qdp_state)
         self.assertNotIn("Start-Process -PassThru", daily_ops)
 
     def test_skill_exposes_personal_researcher_direct_change_default(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
 
-        self.assertIn("Personal Researcher Direct Change", text)
-        self.assertIn("direct rewrite", text)
-        self.assertIn("Compatibility is evidence-gated", text)
-        self.assertIn("stale shells/tests/helpers", text)
+        self.assertIn("Direct Change And Verification", text)
+        self.assertIn("objective-first direct changes", text)
+        self.assertIn("wrappers, fallback modes, compatibility layers", text)
 
     def test_skill_keeps_self_evolution_proposal_only(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
@@ -95,7 +82,7 @@ class WorkspaceBrainSkillContractTest(unittest.TestCase):
         self.assertNotIn("--intent " + "long_" + "task", text)
         self.assertNotIn("Superpowers plugin body", text)
 
-    def test_workspace_brain_skill_first_move_is_lite(self) -> None:
+    def test_workspace_brain_skill_keeps_diagnostics_optional_and_light(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
         line_count = len(text.splitlines())
 
@@ -103,16 +90,14 @@ class WorkspaceBrainSkillContractTest(unittest.TestCase):
         self.assertIn("--verbosity lite", text)
         self.assertIn("health --cwd . --mode compact", text)
         self.assertIn("health --cwd . --mode full --timeout-sec 60", text)
-        self.assertIn("fast takeover summary", text)
-        self.assertIn("first hop stays `detect` + lite capsule", text)
-        self.assertIn("project-profile guards only for maintenance", text)
+        self.assertIn("Use compact health for quick orientation", text)
+        self.assertIn("not as mandatory first moves", text)
         self.assertIn("agent-meta-audit", text)
         self.assertIn("brain-burden-audit", text)
         self.assertIn("list-proposals", text)
         self.assertIn("implementation", text)
         self.assertIn("approval", text)
-        self.assertIn("proposed or approved", text)
-        self.assertLessEqual(line_count, 75)
+        self.assertLessEqual(line_count, 65)
 
     def test_workspace_brain_skill_has_no_domain_policy_bloat(self) -> None:
         text = SKILL.read_text(encoding="utf-8")

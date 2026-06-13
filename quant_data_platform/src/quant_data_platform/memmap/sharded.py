@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import gc
+import glob
 import hashlib
+import json
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, replace
@@ -12,10 +14,20 @@ import numpy as np
 import pandas as pd
 
 from daily_research.data_lake.catalog import ResearchDataLake
+from daily_research.data_lake.pool_views import load_pool_view
 from daily_research.data_lake.policy_input_loader import load_policy_inputs_from_lake
+from daily_research.data_lake.sector_board_views import load_sector_board_view
+from daily_research.data_platform.contracts import DataDomain
 from daily_research.path_policy.forecast_features import (
     DEFAULT_FORECAST_MAX_FEATURE_COLUMNS,
     build_forecast_feature_store,
+)
+from daily_research.path_policy.forecast_dataset import (
+    _cross_section_bucket,
+    _static_context_for_universe,
+    build_static_context_vocab,
+    normalize_static_context_fields,
+    static_context_id_columns,
 )
 from daily_research.path_policy.labels import (
     PATH20_HORIZON,
@@ -54,6 +66,10 @@ class ShardedMemmapConfig:
     resume: bool = True
     workers: int = 1
     year_input_cache: bool = False
+    pool_view_id: str = ""
+    sector_board_view_id: str = ""
+    include_static_context: bool = False
+    static_context_fields: str = "symbol,exchange,industry"
 
     def normalized(self) -> "ShardedMemmapConfig":
         return ShardedMemmapConfig(
@@ -73,6 +89,10 @@ class ShardedMemmapConfig:
             resume=bool(self.resume),
             workers=max(int(self.workers or 1), 1),
             year_input_cache=bool(self.year_input_cache),
+            pool_view_id=str(self.pool_view_id or "").strip(),
+            sector_board_view_id=str(self.sector_board_view_id or "").strip(),
+            include_static_context=bool(self.include_static_context),
+            static_context_fields=",".join(normalize_static_context_fields(self.static_context_fields)),
         )
 
 
@@ -83,8 +103,13 @@ def write_sharded_memmap_plan(
     max_universe_size: int = 0,
     workers: int = 1,
     year_input_cache: bool = False,
+    pool_view_id: str = "",
+    sector_board_view_id: str = "",
+    include_static_context: bool = False,
+    static_context_fields: str = "symbol,exchange,industry",
     write: bool = True,
 ) -> dict[str, Any]:
+    resolved_static_fields = normalize_static_context_fields(static_context_fields)
     resolved = paths or qdp_paths()
     payload = {
         "status": "plan_only",
@@ -96,6 +121,10 @@ def write_sharded_memmap_plan(
         "memory_policy": "never_build_full_universe_single_process_memmap",
         "worker_policy": "single_worker_by_default_use_build_sharded_memmap_workers_for_controlled_parallelism",
         "year_input_cache": bool(year_input_cache),
+        "pool_view_id": str(pool_view_id or "").strip(),
+        "sector_board_view_id": str(sector_board_view_id or "").strip(),
+        "include_static_context": bool(include_static_context),
+        "static_context_fields": list(resolved_static_fields),
         "created_at": utc_now(),
     }
     if write:
@@ -127,9 +156,21 @@ def build_sharded_memmap(
         canonical_end=canonical_end,
     )
     universe = _canonical_universe(canonical_meta)
+    source_pool_view_meta = _pool_view_meta(lake=lake, pool_view_id=cfg.pool_view_id, dataset_id=dataset_id)
+    source_sector_board_meta = _sector_board_view_meta(lake=lake, sector_board_view_id=cfg.sector_board_view_id, dataset_id=dataset_id)
+    if source_pool_view_meta:
+        universe = _filter_universe_by_pool_view(lake=lake, pool_view_id=cfg.pool_view_id, universe=universe)
     if cfg.max_universe_size > 0:
         universe = universe[: cfg.max_universe_size]
     blocks = list(_symbol_blocks(universe, cfg.symbol_block_size))
+    static_schema = _static_context_schema_for_universe(
+        lake=lake,
+        canonical_meta=canonical_meta,
+        universe=universe,
+        enabled=bool(cfg.include_static_context),
+        static_context_fields=cfg.static_context_fields,
+        sector_board_view_id=cfg.sector_board_view_id,
+    )
     tag = cfg.tag or f"{cfg.profile}_{years[0]}_{years[-1]}_{utc_now().replace(':', '').replace('-', '')}"
     out_root = resolved.memmap_dir / "sharded" / _safe_name(tag)
     out_root.mkdir(parents=True, exist_ok=True)
@@ -162,6 +203,7 @@ def build_sharded_memmap(
             cfg=cfg,
             out_root=out_root,
             cumulative_horizons=cumulative_horizons,
+            static_schema=static_schema,
         )
         if reference:
             existing_by_key[str(reference.get("shard_key", ""))] = reference
@@ -213,6 +255,9 @@ def build_sharded_memmap(
                             start_date=context_start.strftime("%Y-%m-%d"),
                             end_date=context_end.strftime("%Y-%m-%d"),
                             universe=list(universe),
+                            pool_view_id=str(cfg.pool_view_id or ""),
+                            intersect_pool_view_with_universe=bool(cfg.pool_view_id),
+                            sector_board_view_id=str(cfg.sector_board_view_id or ""),
                             min_trading_days=2,
                             require_benchmark_open=str(cfg.execution_mode).strip().lower() == "next_open",
                         )
@@ -264,6 +309,7 @@ def build_sharded_memmap(
                             out_root=out_root,
                             cumulative_horizons=cumulative_horizons,
                             expected_feature_columns=schema_columns,
+                            static_schema=static_schema,
                         )
                 schema_hash, schema_columns = _accept_shard_schema(
                     shard=shard,
@@ -292,6 +338,7 @@ def build_sharded_memmap(
                 out_root=out_root,
                 cumulative_horizons=cumulative_horizons,
                 expected_feature_columns=schema_columns,
+                static_schema=static_schema,
             )
             schema_hash, schema_columns = _accept_shard_schema(
                 shard=shard,
@@ -320,6 +367,7 @@ def build_sharded_memmap(
             out_root=out_root,
             cumulative_horizons=cumulative_horizons,
             expected_feature_columns=schema_columns,
+            static_schema=static_schema,
             progress_path=progress_path,
             planned_count=planned_count,
             completed_so_far=len(completed),
@@ -345,6 +393,13 @@ def build_sharded_memmap(
         "scope": scope,
         "canonical_dataset_id": dataset_id,
         "canonical_alias": str(root_manifest.get("alias", "canonical_data_v1") or "canonical_data_v1"),
+        "source_market_dataset_id": dataset_id,
+        "source_pool_view_id": str(source_pool_view_meta.get("dataset_id", "")),
+        "source_pool_view_kind": str(source_pool_view_meta.get("view_kind", "")),
+        "source_pool_view_name": str(source_pool_view_meta.get("view_name", "")),
+        "source_sector_board_view_id": str(source_sector_board_meta.get("dataset_id", "")),
+        "source_sector_board_view_kind": str(source_sector_board_meta.get("view_kind", "")),
+        "source_sector_board_snapshot_semantics": str(source_sector_board_meta.get("snapshot_semantics", "")),
         "profile": cfg.profile,
         "feature_profile": cfg.profile,
         "feature_schema_hash": schema_hash,
@@ -374,6 +429,8 @@ def build_sharded_memmap(
         "year_input_cache_requested": bool(cfg.year_input_cache),
         "year_input_cache_effective": bool(build_mode == "serial_year_input_cache"),
         "year_input_cache_policy": "serial_only_full_year_prepared_inputs_sliced_by_symbol_block",
+        "static_context_schema": _static_schema_manifest(static_schema, enabled=bool(cfg.include_static_context)),
+        "static_context_vocab": _static_vocab_manifest(static_schema) if bool(cfg.include_static_context) else {},
         "skipped_shard_count": int(skipped),
         "created_at": utc_now(),
         "manifest_json": str(manifest_path.resolve()),
@@ -438,6 +495,7 @@ def _build_one_shard(
     out_root: Path,
     cumulative_horizons: tuple[int, ...],
     expected_feature_columns: list[str] | None = None,
+    static_schema: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     target_start, target_end, context_start, context_end = _shard_windows(
         year=int(year),
@@ -455,6 +513,9 @@ def _build_one_shard(
             start_date=context_start.strftime("%Y-%m-%d"),
             end_date=context_end.strftime("%Y-%m-%d"),
             universe=symbols,
+            pool_view_id=str(cfg.pool_view_id or ""),
+            intersect_pool_view_with_universe=bool(cfg.pool_view_id),
+            sector_board_view_id=str(cfg.sector_board_view_id or ""),
             min_trading_days=2,
             require_benchmark_open=str(cfg.execution_mode).strip().lower() == "next_open",
         )
@@ -487,6 +548,7 @@ def _build_one_shard(
         out_root=out_root,
         cumulative_horizons=cumulative_horizons,
         expected_feature_columns=expected_feature_columns,
+        static_schema=static_schema,
     )
 
 
@@ -503,6 +565,7 @@ def _build_one_shard_from_prepared(
     out_root: Path,
     cumulative_horizons: tuple[int, ...],
     expected_feature_columns: list[str] | None = None,
+    static_schema: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     shard_dir = out_root / f"year={int(year)}" / f"block={int(block_id):04d}"
     shard_dir.mkdir(parents=True, exist_ok=True)
@@ -563,6 +626,8 @@ def _build_one_shard_from_prepared(
         history_ratio=history_ratio,
         label_manifest=label_manifest,
         min_lookback_valid_ratio=float(cfg.min_lookback_valid_ratio),
+        include_static_context=bool(cfg.include_static_context),
+        static_schema=static_schema,
     )
     feature_shape = [int(item) for item in list(feature_manifest.get("feature_store_shape", []) or [])]
     feature_schema_hash = _sequence_hash(feature_columns)
@@ -585,6 +650,7 @@ def _build_one_shard_from_prepared(
         "feature_manifest": dict(feature_manifest),
         "label_manifest_json": str((shard_dir / "labels_manifest.json").resolve()),
         "sample_index_path": str(sample_index_path.resolve()),
+        "static_context_schema": _static_schema_manifest(static_schema, enabled=bool(cfg.include_static_context)),
         "shard_manifest_json": str(shard_manifest_path.resolve()),
         "created_at": utc_now(),
     }
@@ -713,6 +779,7 @@ def _build_shards_parallel(
     out_root: Path,
     cumulative_horizons: tuple[int, ...],
     expected_feature_columns: list[str],
+    static_schema: Mapping[str, Any] | None,
     progress_path: Path,
     planned_count: int,
     completed_so_far: int,
@@ -737,6 +804,7 @@ def _build_shards_parallel(
                 out_root=str(out_root),
                 cumulative_horizons=tuple(int(item) for item in cumulative_horizons),
                 expected_feature_columns=list(expected_feature_columns),
+                static_schema=dict(static_schema or {}),
             ): str(spec["shard_key"])
             for spec in shard_specs
         }
@@ -776,6 +844,7 @@ def _build_one_shard_worker(
     out_root: str,
     cumulative_horizons: tuple[int, ...],
     expected_feature_columns: list[str],
+    static_schema: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     lake = ResearchDataLake(Path(lake_root))
     cfg = _coerce_config(cfg_payload)
@@ -791,6 +860,7 @@ def _build_one_shard_worker(
         out_root=Path(out_root),
         cumulative_horizons=tuple(int(item) for item in cumulative_horizons),
         expected_feature_columns=list(expected_feature_columns),
+        static_schema=static_schema,
     )
 
 
@@ -897,6 +967,8 @@ def _write_sample_index(
     history_ratio: pd.DataFrame,
     label_manifest: Mapping[str, Any],
     min_lookback_valid_ratio: float,
+    include_static_context: bool = False,
+    static_schema: Mapping[str, Any] | None = None,
 ) -> tuple[Path, int]:
     membership = prepared.membership_frame.reindex(index=dates, columns=symbols, fill_value=False).astype(bool).to_numpy(dtype=bool)
     history = history_ratio.reindex(index=dates, columns=symbols).to_numpy(dtype=float)
@@ -936,9 +1008,60 @@ def _write_sample_index(
                 "history_valid_ratio": pd.Series(dtype="float64"),
             }
         )
+    if bool(include_static_context):
+        sample_index = _attach_static_context_to_sample_index(
+            sample_index=sample_index,
+            prepared=prepared,
+            dates=dates,
+            symbols=symbols,
+            static_schema=static_schema,
+        )
     path = shard_dir / "sample_index.parquet"
     sample_index.to_parquet(path, index=False)
     return path, int(len(sample_index))
+
+
+def _attach_static_context_to_sample_index(
+    *,
+    sample_index: pd.DataFrame,
+    prepared: Any,
+    dates: list[pd.Timestamp],
+    symbols: list[str],
+    static_schema: Mapping[str, Any] | None,
+) -> pd.DataFrame:
+    schema = _static_schema_manifest(static_schema, enabled=True)
+    fields = normalize_static_context_fields(schema.get("fields") or None)
+    id_columns = list(static_context_id_columns(fields))
+    out = sample_index.copy()
+    for column in id_columns:
+        if column not in out.columns:
+            out[column] = pd.Series(np.zeros(len(out), dtype=np.int64), index=out.index)
+    if out.empty:
+        return out
+    vocab = dict(static_schema or {})
+    static_by_stock = _static_context_for_universe(prepared, universe=[str(symbol).strip().upper() for symbol in symbols], vocab=vocab)
+    if "stock" in out.columns:
+        stock_values = out["stock"].astype(str).str.strip().str.upper()
+        for column in id_columns:
+            if column in {"liquidity_bucket_id", "price_bucket_id"}:
+                continue
+            values = static_by_stock.reindex(stock_values)[column] if column in static_by_stock.columns else pd.Series(0, index=stock_values.index)
+            out[column] = np.asarray(values.fillna(0).astype("int64"), dtype=np.int64)
+    if "liquidity_bucket_id" in id_columns:
+        buckets = _cross_section_bucket(prepared.amount.reindex(index=dates, columns=symbols), window=20, buckets=5)
+        out["liquidity_bucket_id"] = [
+            int(buckets.get((pd.Timestamp(row["date"]), str(row["stock"]).strip().upper()), 0))
+            for _, row in out.iterrows()
+        ]
+    if "price_bucket_id" in id_columns:
+        buckets = _cross_section_bucket(prepared.close.reindex(index=dates, columns=symbols), window=20, buckets=5)
+        out["price_bucket_id"] = [
+            int(buckets.get((pd.Timestamp(row["date"]), str(row["stock"]).strip().upper()), 0))
+            for _, row in out.iterrows()
+        ]
+    for column in id_columns:
+        out[column] = out[column].fillna(0).astype("int64")
+    return out
 
 
 def _stack_panel_map(
@@ -1039,6 +1162,214 @@ def _canonical_universe_size(metadata: Mapping[str, Any]) -> int:
         return int(len(_canonical_universe(metadata)))
     except Exception:
         return 0
+
+
+def _pool_view_meta(*, lake: ResearchDataLake, pool_view_id: str, dataset_id: str) -> dict[str, Any]:
+    if not str(pool_view_id or "").strip():
+        return {}
+    view = load_pool_view(lake=lake, pool_view_id=str(pool_view_id).strip())
+    parameters = dict(view.metadata.get("parameters", {}) or {})
+    source_market_dataset_id = str(parameters.get("source_market_dataset_id", "") or "")
+    if source_market_dataset_id and source_market_dataset_id != str(dataset_id):
+        raise ValueError(
+            "pool_view_source_mismatch: "
+            f"pool_view_id={view.dataset_id} source_market_dataset_id={source_market_dataset_id} "
+            f"requested_dataset_id={dataset_id}"
+        )
+    return {
+        "dataset_id": view.dataset_id,
+        "view_kind": str(parameters.get("view_kind", "") or ""),
+        "view_name": str(parameters.get("view_name", "") or ""),
+        "source_market_dataset_id": source_market_dataset_id,
+    }
+
+
+def _sector_board_view_meta(*, lake: ResearchDataLake, sector_board_view_id: str, dataset_id: str) -> dict[str, Any]:
+    if not str(sector_board_view_id or "").strip():
+        return {}
+    view = load_sector_board_view(lake=lake, sector_board_view_id=str(sector_board_view_id).strip())
+    parameters = dict(view.metadata.get("parameters", {}) or {})
+    source_market_dataset_id = str(parameters.get("source_market_dataset_id", "") or "")
+    if source_market_dataset_id and source_market_dataset_id != str(dataset_id):
+        raise ValueError(
+            "sector_board_view_source_mismatch: "
+            f"sector_board_view_id={view.dataset_id} source_market_dataset_id={source_market_dataset_id} "
+            f"requested_dataset_id={dataset_id}"
+        )
+    source_cache = dict(view.metadata.get("source_cache", {}) or {})
+    return {
+        "dataset_id": view.dataset_id,
+        "view_kind": str(parameters.get("view_kind", "") or ""),
+        "view_name": str(parameters.get("view_name", "") or ""),
+        "source_market_dataset_id": source_market_dataset_id,
+        "snapshot_semantics": str(parameters.get("snapshot_semantics", "") or source_cache.get("snapshot_semantics", "")),
+    }
+
+
+def _filter_universe_by_pool_view(*, lake: ResearchDataLake, pool_view_id: str, universe: list[str]) -> list[str]:
+    view = load_pool_view(lake=lake, pool_view_id=str(pool_view_id).strip())
+    membership = view.membership_frame.copy()
+    membership.columns = [str(column).strip().upper() for column in membership.columns]
+    active = {str(column).strip().upper() for column in membership.columns[membership.any(axis=0)]}
+    return [symbol for symbol in _normalize_symbols(list(universe)) if symbol in active]
+
+
+def _sidecar_dataset_ids(metadata: Mapping[str, Any]) -> dict[str, str]:
+    parameters = dict(metadata.get("parameters", {}) or {})
+    sidecars = dict(parameters.get("sidecar_dataset_ids", {}) or {})
+    return {str(key): str(value) for key, value in sidecars.items() if str(value or "").strip()}
+
+
+def _static_context_schema_for_universe(
+    *,
+    lake: ResearchDataLake,
+    canonical_meta: Mapping[str, Any],
+    universe: list[str],
+    enabled: bool,
+    static_context_fields: str,
+    sector_board_view_id: str = "",
+) -> dict[str, Any]:
+    fields = normalize_static_context_fields(static_context_fields)
+    if not bool(enabled):
+        return _static_schema_disabled(fields)
+    universe = _normalize_symbols(list(universe))
+    metadata_frames = _static_metadata_frames(
+        lake=lake,
+        canonical_meta=canonical_meta,
+        universe=universe,
+        sector_board_view_id=sector_board_view_id,
+    )
+    prepared = _StaticPrepared(universe=tuple(universe), metadata_frames=metadata_frames)
+    schema = build_static_context_vocab(prepared, static_context_fields=fields)
+    schema["embedding_defaults"] = {
+        "symbol": 16,
+        "exchange": 4,
+        "industry": 8,
+        "board": 4,
+        "liquidity_bucket": 4,
+        "price_bucket": 4,
+        "dropout": 0.20,
+    }
+    return schema
+
+
+@dataclass(frozen=True)
+class _StaticPrepared:
+    universe: tuple[str, ...]
+    metadata_frames: dict[str, pd.DataFrame]
+
+
+def _static_metadata_frames(
+    *,
+    lake: ResearchDataLake,
+    canonical_meta: Mapping[str, Any],
+    universe: list[str],
+    sector_board_view_id: str = "",
+) -> dict[str, pd.DataFrame]:
+    frames: dict[str, pd.DataFrame] = {}
+    universe_set = set(_normalize_symbols(list(universe)))
+    if str(sector_board_view_id or "").strip():
+        view = load_sector_board_view(lake=lake, sector_board_view_id=str(sector_board_view_id).strip())
+        industry_map = view.industry_map_frame.copy()
+        if "symbol" in industry_map.columns:
+            industry_map["symbol"] = industry_map["symbol"].astype(str).str.strip().str.upper()
+            frames["industry_map"] = industry_map.loc[industry_map["symbol"].isin(universe_set)].reset_index(drop=True)
+        board_membership = view.board_membership_frame.copy()
+        if "symbol" in board_membership.columns:
+            board_membership["symbol"] = board_membership["symbol"].astype(str).str.strip().str.upper()
+            frames["board_membership"] = board_membership.loc[board_membership["symbol"].isin(universe_set)].reset_index(drop=True)
+        return frames
+
+    industry_id = _sidecar_dataset_ids(canonical_meta).get(DataDomain.INDUSTRY_CONCEPT, "")
+    if not industry_id:
+        return frames
+    meta = lake.describe_dataset(industry_id)
+    paths = dict(meta.get("content_paths", {}) or {})
+    candidates = _latest_sidecar_shard_paths(paths)
+    raw_path = str(paths.get("silver_domain_data", "") or "")
+    if not candidates:
+        candidates = sorted(glob.glob(raw_path)) if "*" in raw_path else ([raw_path] if raw_path else [])
+    existing = [path for path in candidates if Path(path).exists()]
+    if not existing:
+        return frames
+    columns = ["symbol", "trade_date", "industry"]
+    try:
+        industry = pd.concat([pd.read_parquet(path, columns=columns) for path in existing], ignore_index=True)
+    except Exception:
+        industry = pd.concat([pd.read_parquet(path) for path in existing], ignore_index=True)
+        industry = industry.reindex(columns=[column for column in columns if column in industry.columns])
+    if industry.empty or not {"symbol", "industry"}.issubset(industry.columns):
+        return frames
+    industry["symbol"] = industry["symbol"].astype(str).str.strip().str.upper()
+    industry["industry"] = industry["industry"].fillna("").astype(str).str.strip()
+    industry = industry.loc[industry["symbol"].isin(universe_set) & industry["industry"].ne("")].copy()
+    if industry.empty:
+        return frames
+    if "trade_date" in industry.columns:
+        industry["trade_date"] = pd.to_datetime(industry["trade_date"], errors="coerce")
+        industry = industry.sort_values(["symbol", "trade_date"])
+        latest = industry.drop_duplicates(subset=["symbol"], keep="last").copy()
+        latest["as_of_date"] = latest["trade_date"].dt.strftime("%Y-%m-%d")
+        latest["trade_date"] = latest["as_of_date"]
+    else:
+        latest = industry.drop_duplicates(subset=["symbol"], keep="last").copy()
+    frames["industry_map"] = latest.reset_index(drop=True)
+    return frames
+
+
+def _latest_sidecar_shard_paths(paths: Mapping[str, Any]) -> list[str]:
+    manifest_path = Path(str(dict(paths).get("shard_manifest", "") or ""))
+    if not manifest_path.exists():
+        return []
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    rows = [
+        dict(row)
+        for row in list(manifest.get("shards", []) or [])
+        if str(dict(row).get("status", "") or "") in {"stored", "skipped"}
+        and int(dict(row).get("row_count", 0) or 0) > 0
+        and str(dict(row).get("path", "") or "").strip()
+    ]
+    if not rows:
+        return []
+    rows = sorted(rows, key=lambda row: (str(row.get("end_date", "") or ""), str(row.get("start_date", "") or "")))
+    return [str(rows[-1].get("path", "") or "")]
+
+
+def _static_schema_disabled(fields: tuple[str, ...] | list[str] | str | None = None) -> dict[str, Any]:
+    resolved = normalize_static_context_fields(fields)
+    return {
+        "enabled": False,
+        "fields": list(resolved),
+        "id_columns": list(static_context_id_columns(resolved)),
+        "vocab_sizes": {},
+    }
+
+
+def _static_schema_manifest(schema: Mapping[str, Any] | None, *, enabled: bool) -> dict[str, Any]:
+    raw = dict(schema or {})
+    fields = normalize_static_context_fields(raw.get("fields") or None)
+    return {
+        "enabled": bool(enabled and raw.get("enabled", True)),
+        "fields": list(fields),
+        "id_columns": list(static_context_id_columns(fields)),
+        "vocab_sizes": dict(raw.get("vocab_sizes", {}) or {}),
+        "embedding_defaults": dict(raw.get("embedding_defaults", {}) or {}),
+        "symbol_vocab_fingerprint": str(raw.get("symbol_vocab_fingerprint", "") or ""),
+        "industry_vocab_fingerprint": str(raw.get("industry_vocab_fingerprint", "") or ""),
+        "board_vocab_fingerprint": str(raw.get("board_vocab_fingerprint", "") or ""),
+        "exchange_vocab_fingerprint": str(raw.get("exchange_vocab_fingerprint", "") or ""),
+        "liquidity_bucket_vocab_fingerprint": str(raw.get("liquidity_bucket_vocab_fingerprint", "") or ""),
+        "price_bucket_vocab_fingerprint": str(raw.get("price_bucket_vocab_fingerprint", "") or ""),
+    }
+
+
+def _static_vocab_manifest(schema: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw = dict(schema or {})
+    return {
+        key: value
+        for key, value in raw.items()
+        if key.endswith("_vocab") or key == "vocab_sizes"
+    }
 
 
 def _year_values(*, start_year: int, end_year: int, canonical_start: pd.Timestamp, canonical_end: pd.Timestamp) -> list[int]:
@@ -1237,11 +1568,13 @@ def _build_schema_reference_shard(
     cfg: ShardedMemmapConfig,
     out_root: Path,
     cumulative_horizons: tuple[int, ...],
+    static_schema: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not years or not blocks:
         return {}
-    preferred_years = [year for year in years if int(year) > int(canonical_start.year)]
-    candidate_years = preferred_years + [year for year in years if year not in set(preferred_years)]
+    complete_years = [year for year in sorted(years, reverse=True) if int(year) < int(canonical_end.year)]
+    tail_years = [year for year in sorted(years, reverse=True) if int(year) >= int(canonical_end.year)]
+    candidate_years = complete_years + tail_years
     best: dict[str, Any] = {}
     for year in candidate_years:
         for block_id, symbols in enumerate(blocks):
@@ -1257,6 +1590,7 @@ def _build_schema_reference_shard(
                 out_root=out_root,
                 cumulative_horizons=cumulative_horizons,
                 expected_feature_columns=None,
+                static_schema=static_schema,
             )
             if str(shard.get("status", "")) != _STORED_SHARD_STATUS:
                 continue

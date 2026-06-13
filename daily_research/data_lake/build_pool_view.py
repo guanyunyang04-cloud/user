@@ -33,7 +33,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Build an auditable policy pool view from an existing policy input bundle.")
     parser.add_argument("--data-lake-root", default="")
     parser.add_argument("--source-market-dataset-id", required=True)
-    parser.add_argument("--view-kind", required=True, choices=("learned_all_a", "rolling_liquidity", "rolling_liquidity_tradeable_mainboard", "exchange", "static_symbols"))
+    parser.add_argument(
+        "--view-kind",
+        required=True,
+        choices=("learned_all_a", "tradeable_mainboard", "rolling_liquidity", "rolling_liquidity_tradeable_mainboard", "exchange", "static_symbols"),
+    )
     parser.add_argument("--view-name", default="")
     parser.add_argument("--pool-name", default="")
     parser.add_argument("--start-date", default="")

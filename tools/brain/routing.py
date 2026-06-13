@@ -466,7 +466,6 @@ def route_task_to_brain(task: str) -> dict[str, Any]:
         }
         for item in candidates
     ]
-
     return {
         "status": status,
         "selected_brain_id": selected,

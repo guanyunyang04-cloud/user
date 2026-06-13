@@ -1,16 +1,17 @@
 # 主脑知识中枢
 
 ## 1. 固定规则
-- `brain-first`
-  - 先接主脑，再接分脑，再进 body
+- `agent-first`
+  - 先理解用户目标，再按需要读取主脑、分脑、代码和产物；capsule / route / bootstrap 只是可选诊断工具
 - `common-in-main`
   - 共享结构、共享顺序、共享治理只在主脑定义一次
 - `local-in-child`
   - 分脑只维护项目事实、当前状态和 body 入口
 - `brain-as-doc-hub`
   - 权威治理文档、接管文档和长文参考默认只留在 `brain/` 或 `brain/references/`
-- `authority-matrix`
-  - 主脑 `brain/` 只维护跨项目规则、分脑拓扑、默认接管顺序、全局分支纪律和执行纪律；分脑只维护项目事实、项目状态、项目命令和项目验证矩阵；body 顶层 README、AGENTS、CLAUDE、SKILL 只作为公开指南或兼容入口，不能覆盖 brain
+- `solo-collaboration-facts`
+  - 本仓库由个人工作者掌控，项目协作靠 agent 判断和少数事实锚点，不靠形式化路由矩阵。
+  - QDP 默认负责 canonical 数据基底、registry、policy bundle、memmap 和数据清理；daily_research 默认负责研究、模型、回测、执行候选和 active artifact 边界。
 - `docs-into-brain`
   - Brain canonical only：所有阅读性质文档、教程、审计、迁移说明、设计说明、研究日志和长期结论默认进入对应主脑或分脑 `references/`；body 顶层 README、AGENTS、CLAUDE、SKILL 只保留必要薄入口，外部 `docs/`、`research_log/` 和重复 README 副本默认不保留，除非存在工具硬要求、明确发布产物或真实外部接口责任
 - `simplified-chinese-docs`
@@ -38,7 +39,7 @@
   - 根目录一级文件夹必须有清晰身份：已注册分脑项目、主脑基础设施、共享工具、工作区文档、过渡资产或缓存依赖。身份不明目录不长期保留；新正式项目应初始化并注册分脑。
 - `testing-burden-rule`
   - 默认测试走 changed-surface smoke 车道，只验证当前改动必须保护的契约和安全边界；训练、全量 memmap、长回测、外部 provider、benchmark 和历史研究回归进入显式 research/external/full 车道。
-  - 测试减负优先合并重复契约、拆出慢 nodeid、标记 slow/research/external、归档旧研究证据和删除废弃机制测试；不得削弱 canonical、PIT/no-leakage、清理边界、active artifact、项目命名空间和提交闭环保护。
+  - 测试减负优先合并重复契约、拆出慢 nodeid、标记 slow/research/external、归档旧研究证据和删除废弃机制测试；不得削弱 canonical、PIT/no-leakage、清理边界、active artifact 和可回滚保护。
 ## 2. 已验证教训
 - 如果主脑和分脑维护两套平行接管顺序，后续 agent 很快会漂移
 - 如果当前状态只写聊天或终端，不写 brain，接管可靠性会明显下降
@@ -48,10 +49,10 @@
 - 如果接管入口、命令入口或写回路由已经漂移，先纠偏再重开实验，通常比直接推进更能降低误操作风险
 - 如果控制台显示疑似中文乱码，先用 UTF-8 读取工具确认真实文件内容，不能把终端编码错觉当作文件损坏来修
 - 脑内文档铁律：当前层标题、正文、规则、状态和复盘写回必须使用简体中文；命令、路径、指标名、tag、模型名等技术标识保留原文
-- 主分脑结构变更后必须跑 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`，确认父子附着、读序、写回路由、body 映射和编码合同仍一致
-- 主脑 `state_center.md` 只承载当前路由和跨项目边界，不再追加日期型实验日志；分脑高频入口也必须优先保留当前结论，历史细节下沉到 `episodic_memory.md` 或 `brain/references/`
+- 主分脑结构变更后优先跑 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`，确认父子附着、读序、写回、body 映射和编码合同仍一致
+- 主脑 `state_center.md` 只承载当前共享事实和硬边界，不再追加日期型实验日志；分脑高频入口也必须优先保留当前结论，历史细节下沉到 `episodic_memory.md` 或 `brain/references/`
 - 轮询任务纪律不再按“长任务 / 长训练 / 重任务”分类；凡需要等待外部状态、跨多轮观察、后台进程、服务启动、数据下载、训练、评估、审计或异步 job 的任务，都按可归属、可观察、可解释、可停止处理。
-- 轮询方式和间隔由 agent 根据任务类型、信号密度、资源成本和风险自适应选择；优先使用已有 handle（PID / job id / run id、日志、progress、artifact mtime、端口 / API status、summary），必要时用 `tools.brain.agent_run` 绑定到项目命名空间；不得把固定 sleep、固定窗口或历史固定模板当作通用规则。
+- 轮询方式和间隔由 agent 根据任务类型、信号密度、资源成本和风险自适应选择；优先使用已有 handle（PID / job id / run id、日志、progress、artifact mtime、端口 / API status、summary），必要时用 `tools.brain.agent_run` 记录到相关项目或任务目录；不得把固定 sleep、固定窗口或历史固定模板当作通用规则。
 - 等待窗口耗尽只表示观察窗口结束，不是失败证据；若可观察信号仍推进且没有明确代码错误、资源危险、停止指令或失败状态，继续自适应轮询；只有明确错误、退出状态、产物失败或用户停止才能写成 failed evidence。
 - 当前 `daily_research` 任务必须显式使用 `yolos` 环境；GPU 训练任务完成后必须核验 `training_diagnostics.json` 中 `device = cuda`、`cuda_available = true` 与 `python_executable` 指向 yolos
 - 如果本机 skill 要求建 worktree、写 spec、提交或执行默认流程，但项目脑区要求 `main`、不提交、不触碰 active artifact，则先服从项目脑区安全边界。

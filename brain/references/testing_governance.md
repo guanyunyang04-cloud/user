@@ -47,7 +47,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.selective_verifica
 - 数据清理 dry-run、路径边界和不可恢复删除保护。
 - PIT、严格滞后、未来函数、OOS/role-year 边界。
 - `daily_research/output/active_execution_strategy.json` blocker。
-- 主脑路由、项目命名空间、自动提交闭环和 doc guard。
+- workspace skill、doc guard、brain integrity 和必要的事实写回边界。
 - live/default/execution promotion 边界。
 
 ## 瘦身流程
@@ -67,4 +67,3 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.selective_verifica
 3. 对旧机制测试，先确认对应代码路径无真实调用证据。
 4. 每次清理只提交当前项目或 workspace 允许范围内的测试治理改动。
 5. 收口时至少跑本轮 `blocking_commands`、`git diff --check`、必要 brain/doc guard。
-

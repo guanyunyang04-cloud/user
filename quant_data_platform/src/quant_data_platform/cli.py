@@ -72,6 +72,10 @@ def build_parser() -> argparse.ArgumentParser:
     sharded.add_argument("--tag", default="")
     sharded.add_argument("--workers", type=int, default=1)
     sharded.add_argument("--year-input-cache", action="store_true")
+    sharded.add_argument("--pool-view-id", default="")
+    sharded.add_argument("--sector-board-view-id", default="")
+    sharded.add_argument("--include-static-context", action="store_true")
+    sharded.add_argument("--static-context-fields", default="symbol,exchange,industry")
     sharded.add_argument("--no-resume", action="store_true")
     sharded.add_argument("--dry-run", action="store_true")
     sharded.add_argument("--json", action="store_true")
@@ -148,6 +152,10 @@ def main(argv: list[str] | None = None) -> int:
                 max_universe_size=int(args.max_universe_size),
                 workers=int(args.workers),
                 year_input_cache=bool(args.year_input_cache),
+                pool_view_id=str(args.pool_view_id or ""),
+                sector_board_view_id=str(args.sector_board_view_id or ""),
+                include_static_context=bool(args.include_static_context),
+                static_context_fields=str(args.static_context_fields or ""),
                 write=True,
             )
         else:
@@ -170,6 +178,10 @@ def main(argv: list[str] | None = None) -> int:
                     resume=not bool(args.no_resume),
                     workers=int(args.workers),
                     year_input_cache=bool(args.year_input_cache),
+                    pool_view_id=str(args.pool_view_id or ""),
+                    sector_board_view_id=str(args.sector_board_view_id or ""),
+                    include_static_context=bool(args.include_static_context),
+                    static_context_fields=str(args.static_context_fields or ""),
                 ),
             )
         _print(payload, as_json=bool(args.json))

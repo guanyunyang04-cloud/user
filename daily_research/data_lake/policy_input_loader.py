@@ -806,6 +806,7 @@ def load_policy_inputs_from_lake(
     universe: list[str] | None = None,
     pool_view_id: str = "",
     pool_view_spec: PoolViewSpec | dict[str, Any] | None = None,
+    intersect_pool_view_with_universe: bool = False,
     sector_board_view_id: str = "",
     sector_board_view_spec: SectorBoardViewSpec | dict[str, Any] | None = None,
     extra_stocks: list[str] | None = None,
@@ -826,7 +827,10 @@ def load_policy_inputs_from_lake(
     market_path = str(paths.get("bronze_market_data", "") or "")
     if not market_path:
         raise ValueError(f"lake_coverage_blocker: dataset has no bronze_market_data path: {dataset_id}")
-    can_push_market_symbols = bool(universe) and not str(pool_view_id or "").strip() and pool_view_spec is None
+    can_push_market_symbols = bool(universe) and (
+        (not str(pool_view_id or "").strip() and pool_view_spec is None)
+        or bool(intersect_pool_view_with_universe)
+    )
     requested_market_symbols = list(universe or []) if can_push_market_symbols else []
     if requested_market_symbols and extra_stocks:
         requested_market_symbols.extend(list(extra_stocks))
@@ -889,6 +893,9 @@ def load_policy_inputs_from_lake(
         view_membership.index = pd.to_datetime(view_membership.index)
         view_columns = [str(column).strip().upper() for column in view_membership.columns]
         view_membership.columns = view_columns
+        if bool(intersect_pool_view_with_universe) and universe:
+            requested_set = set(_normalize_symbol_list(list(universe or [])))
+            view_columns = [symbol for symbol in view_columns if symbol in requested_set]
         view_membership = _slice_wide(
             view_membership,
             universe=[symbol for symbol in view_columns if symbol in available_set],

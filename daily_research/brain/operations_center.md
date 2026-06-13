@@ -45,6 +45,7 @@
 - V2 数据集、score bridge、candidate review、bad-month attribution、risk overlay、selective throttle、state sizing、local-state input/loss 与 horizon repair 的长命令族已下沉到 `daily_research/brain/references/daily_research_current_frontier_compaction_20260603.md` 及对应 dated references。
 - 当前下一步只允许 research-only score-backtest bridge 与候选对照；不跑 liquid800、allocator、replay、live/default、promotion，除非后续 gate 与授权明确放行。
 - 新训练默认消费 QDP canonical full sharded memmap / registry；旧每实验单体 `forecast_*.dat` builder、旧 copied manifest 兼容和旧 path_policy memmap 回归只作 legacy 参考，不进入常规研究门禁。
+- 回答“当前数据集构建怎么样”时，直接读取 QDP status / registry / sharded manifest，再说明 daily_research 对该数据基底的消费与研究证据；不得把 daily_research 旧 lake、旧 single memmap、旧 copied manifest 当作 canonical 数据集 owner。
 
 ## 实验预算可信度纪律
 - 启动任何会影响模型输入、架构、输出、loss、horizon grid、stage gate 或后续方向选择的实验前，必须声明证据等级：`smoke_only`、`scout_only`、`evidence_grade` 或 `promotion_grade`。

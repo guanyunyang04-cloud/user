@@ -1,7 +1,7 @@
 # Quant Data Platform 操作中枢
 
 ## 接管入口
-- 主脑路由：
+- 可选诊断：
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --workflow auto --intent read --verbosity lite --json`
 - 本分脑 bootstrap：
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain quant_data_platform --json`

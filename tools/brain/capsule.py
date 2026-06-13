@@ -132,9 +132,9 @@ def _main_context() -> dict[str, Any]:
             "exception_requires_user_authorization": True,
         },
         "global_boundaries": [
-            "main brain is the agent entrypoint",
-            "child brains hold project facts only after routing",
-            "local skills own general methods; brain supplies project facts, routing, guards, evidence, and writeback routes",
+            "agent judgment is the entrypoint; brain docs and tools are memory and sensors",
+            "child brains hold project facts and may be read whenever they are relevant",
+            "local skills own general methods; brain supplies project facts, hard boundaries, evidence, and writeback hints",
         ],
         "summary": _text_excerpt("brain/state_center.md"),
         "hard_rules": _text_excerpt("brain/knowledge_center.md"),
@@ -271,12 +271,6 @@ def _agent_meta_commands() -> dict[str, str]:
 
 def _build_agent_review(*, workflow_id: str, agent_meta_review: dict[str, Any]) -> dict[str, Any]:
     reason_codes: list[str] = []
-    if workflow_id in {
-        "brain_maintenance",
-        "brain_architecture_refactor",
-        "brain_writeback_verified",
-    }:
-        reason_codes.append("workflow_completion_review")
     if agent_meta_review.get("status") != "clear":
         reason_codes.append("agent_meta_opportunity")
         reason_codes.append("closure_meta_review")
@@ -406,7 +400,7 @@ def build_task_capsule(
         "next_allowed_actions": workflow_state.get("next_allowed_actions", []),
         "assumptions": [
             "Work remains on main unless the user explicitly changes branch policy",
-            "No child brain is loaded until main-brain routing selects one",
+            "Relevant child brains may be read by agent judgment; routing is optional diagnostic evidence",
         ],
     }
     if target_kind == "workspace" and routing.get("status") == "selected":
