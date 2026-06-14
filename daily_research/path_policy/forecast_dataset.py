@@ -1549,10 +1549,10 @@ def _resolve_manifest_path(value: Any, *, manifest_path: Path) -> Path:
     return path
 
 
-def _validate_memmap_file(path: Path, *, shape: tuple[int, ...], label: str) -> None:
+def _validate_memmap_file(path: Path, *, shape: tuple[int, ...], label: str, dtype: str | np.dtype = "float32") -> None:
     if not path.exists():
         raise ValueError(f"forecast memmap manifest missing {label}: {path}")
-    expected_bytes = int(np.prod(shape, dtype=np.int64)) * np.dtype("float32").itemsize
+    expected_bytes = int(np.prod(shape, dtype=np.int64)) * np.dtype(dtype).itemsize
     actual_bytes = int(path.stat().st_size)
     if actual_bytes != expected_bytes:
         raise ValueError(
@@ -1699,7 +1699,7 @@ def _open_pack_label_arrays(manifest: dict[str, Any]) -> dict[str, np.memmap]:
             path = root / path
         shape = tuple(int(item) for item in list(meta.get("shape", []) or []))
         dtype = str(meta.get("dtype", "float32") or "float32")
-        _validate_memmap_file(path, shape=shape, label=f"training_pack_label_{name}")
+        _validate_memmap_file(path, shape=shape, label=f"training_pack_label_{name}", dtype=dtype)
         arrays[str(name)] = np.memmap(path, dtype=dtype, mode="r", shape=shape)
     return arrays
 
@@ -1717,7 +1717,7 @@ def _load_training_pack_forecast_memmap_dataset(manifest_path: Path, manifest: d
         feature_panel_path = root / feature_panel_path
     feature_panel_shape = tuple(int(item) for item in list(manifest.get("feature_panel_shape", []) or []))
     feature_dtype = str(manifest.get("feature_dtype", "float16") or "float16")
-    _validate_memmap_file(feature_panel_path, shape=feature_panel_shape, label="qdp_training_pack_feature_panel")
+    _validate_memmap_file(feature_panel_path, shape=feature_panel_shape, label="qdp_training_pack_feature_panel", dtype=feature_dtype)
     static_context_ids: np.memmap | np.ndarray | None = None
     static_meta = dict(manifest.get("static_context_ids", {}) or {})
     if static_meta:
@@ -1726,7 +1726,7 @@ def _load_training_pack_forecast_memmap_dataset(manifest_path: Path, manifest: d
             static_path = root / static_path
         static_shape = tuple(int(item) for item in list(static_meta.get("shape", []) or []))
         static_dtype = str(static_meta.get("dtype", "int32") or "int32")
-        _validate_memmap_file(static_path, shape=static_shape, label="qdp_training_pack_static_context_ids")
+        _validate_memmap_file(static_path, shape=static_shape, label="qdp_training_pack_static_context_ids", dtype=static_dtype)
         static_context_ids = np.memmap(static_path, dtype=static_dtype, mode="r", shape=static_shape)
     label_arrays = _open_pack_label_arrays(manifest)
     return ForecastTrainingPackDataset(

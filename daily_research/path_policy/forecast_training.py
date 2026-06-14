@@ -1685,6 +1685,50 @@ def _predict_indices(
                         for row_id, value in zip(row_ids.tolist(), values, strict=False):
                             outputs[key][index_pos[int(row_id)]] = value
             return outputs
+        if isinstance(dataset_view_or_x.dataset, (ForecastShardedMemmapDataset, ForecastTrainingPackDataset)):
+            original_indices = np.asarray(indices, dtype=np.int64)
+            ordered_indices = dataset_view_or_x.dataset.cache_friendly_indices(original_indices)
+            index_pos = {int(row_idx): pos for pos, row_idx in enumerate(original_indices.tolist())}
+            outputs = {
+                "mu": np.empty((len(original_indices), horizon), dtype=np.float32),
+                "q10": np.empty((len(original_indices), horizon), dtype=np.float32),
+                "q50": np.empty((len(original_indices), horizon), dtype=np.float32),
+                "q90": np.empty((len(original_indices), horizon), dtype=np.float32),
+                "aux": np.empty((len(original_indices), aux_dim), dtype=np.float32),
+            }
+            if str(getattr(model, "output_profile", "") or "") == "decision_utility_v1":
+                outputs["decision_aux"] = np.empty((len(original_indices), decision_aux_dim), dtype=np.float32)
+            loader = DataLoader(
+                dataset_view_or_x.batch_torch_dataset(
+                    ordered_indices,
+                    batch_size=max(int(batch_size), 1),
+                    target_scale=target_scale,
+                ),
+                batch_size=None,
+                shuffle=False,
+                pin_memory=device.type == "cuda",
+            )
+            with torch.no_grad():
+                for raw_batch in loader:
+                    batch_x, _, _, _, row_indices_cpu, static_context_ids_cpu = _unpack_forecast_batch(raw_batch)
+                    batch = batch_x.to(device, non_blocking=device.type == "cuda")
+                    static_context_ids = (
+                        static_context_ids_cpu.to(device, non_blocking=device.type == "cuda")
+                        if static_context_ids_cpu is not None
+                        else None
+                    )
+                    with _autocast_context(device, amp_enabled):
+                        pred = _forecast_model_forward(model, batch, static_context_ids)
+                    if "decision_aux" in pred and "decision_aux" not in outputs:
+                        outputs["decision_aux"] = np.empty((len(original_indices), decision_aux_dim), dtype=np.float32)
+                    row_ids = row_indices_cpu.reshape(-1).detach().cpu().numpy().astype(int)
+                    for key in outputs:
+                        if key not in pred:
+                            continue
+                        values = pred[key].detach().cpu().numpy()
+                        for row_id, value in zip(row_ids.tolist(), values, strict=False):
+                            outputs[key][index_pos[int(row_id)]] = value
+            return outputs
         chunks: dict[str, list[np.ndarray]] = {"mu": [], "q10": [], "q50": [], "q90": [], "aux": []}
         if isinstance(dataset_view_or_x.dataset, (ForecastShardedMemmapDataset, ForecastTrainingPackDataset)):
             loader = DataLoader(
@@ -2754,9 +2798,10 @@ def _evaluate_loss(
                 total = sum(counts)
                 return float(np.average(values, weights=counts)) if total > 0 else float("inf")
             if isinstance(dataset_view_or_x.dataset, (ForecastShardedMemmapDataset, ForecastTrainingPackDataset)):
+                eval_indices = dataset_view_or_x.dataset.cache_friendly_indices(indices)
                 loader = DataLoader(
                     dataset_view_or_x.batch_torch_dataset(
-                        indices,
+                        eval_indices,
                         batch_size=max(int(batch_size), 1),
                         target_scale=target_scale,
                     ),
@@ -3585,6 +3630,9 @@ def train_forecast_models(
                         "is_best": bool(improved),
                         "patience_used": int(patience_used),
                         "epoch_seconds": float(epoch_seconds),
+                        "train_sample_count": int(samples_processed_epoch),
+                        "train_samples_per_second": float(samples_processed_epoch / max(epoch_seconds, 1.0e-6)),
+                        "dataset_type": type(dataset_view.dataset).__name__,
                     }
                 )
                 _write_learning_curve_incremental(study_root / "forecast_learning_curve.csv", learning_rows)
@@ -4091,6 +4139,17 @@ def train_forecast_models(
             learning_rows=learning_rows,
             last_checkpoint_pt=Path(selected_last_path_text) if selected_last_path_text else None,
             best_checkpoint_pt=Path(selected_checkpoint_path) if selected_checkpoint_path else None,
+            phase="completed",
+            samples_processed_epoch=int(latest_selected_row.get("train_sample_count", 0) or 0),
+            samples_per_second=float(latest_selected_row.get("train_samples_per_second", 0.0) or 0.0),
+            throughput_meta={
+                "batch_size": int(batch_size),
+                "dataset_mode": str(dataset_view.dataset_mode),
+                "dataset_type": type(dataset_view.dataset).__name__,
+                "selected_model_family": str(selected_family),
+                "final_epoch_seconds": float(latest_selected_row.get("epoch_seconds", 0.0) or 0.0),
+                "total_elapsed_seconds": float(time.monotonic() - run_started_monotonic),
+            },
         )
     summary = _json_ready(summary)
     write_json(study_root / "forecast_training_summary.json", summary)
