@@ -18,6 +18,7 @@ BAOSTOCK_BEST_EFFORT_PROFILE = "raw_kline_context_v2_baostock_best_effort_v1"
 CANONICAL_SHORT_HORIZON_INTRADAY_PROFILE = "raw_kline_context_v2_short_horizon_intraday_v1"
 SHORT_HORIZON_CORE_PROFILE = "short_horizon_core_v1"
 STYLE_STRUCTURAL_PROFILE = "style_structural_v1"
+STYLE_STRUCTURAL_ALPHA_PROFILE = "style_structural_alpha_v2"
 MEDIUM_HORIZON_PROFILE = "medium_horizon_v1"
 FORECAST_FEATURE_PROFILES: tuple[str, ...] = (
     "state_v1",
@@ -35,6 +36,7 @@ FORECAST_FEATURE_PROFILES: tuple[str, ...] = (
     BAOSTOCK_BEST_EFFORT_PROFILE,
     SHORT_HORIZON_CORE_PROFILE,
     STYLE_STRUCTURAL_PROFILE,
+    STYLE_STRUCTURAL_ALPHA_PROFILE,
     MEDIUM_HORIZON_PROFILE,
 )
 DEFAULT_FORECAST_FEATURE_PROFILE = "raw_kline_context_v1"
@@ -55,6 +57,7 @@ RAW_FRAME_PROFILES = {
     BAOSTOCK_BEST_EFFORT_PROFILE,
     SHORT_HORIZON_CORE_PROFILE,
     STYLE_STRUCTURAL_PROFILE,
+    STYLE_STRUCTURAL_ALPHA_PROFILE,
     MEDIUM_HORIZON_PROFILE,
 }
 CONTEXT_FRAME_PROFILES = {
@@ -71,6 +74,7 @@ CONTEXT_FRAME_PROFILES = {
     BAOSTOCK_BEST_EFFORT_PROFILE,
     SHORT_HORIZON_CORE_PROFILE,
     STYLE_STRUCTURAL_PROFILE,
+    STYLE_STRUCTURAL_ALPHA_PROFILE,
     MEDIUM_HORIZON_PROFILE,
 }
 HISTORY_FRAME_PROFILES = {
@@ -84,6 +88,7 @@ HISTORY_FRAME_PROFILES = {
     BAOSTOCK_BEST_EFFORT_PROFILE,
     SHORT_HORIZON_CORE_PROFILE,
     STYLE_STRUCTURAL_PROFILE,
+    STYLE_STRUCTURAL_ALPHA_PROFILE,
     MEDIUM_HORIZON_PROFILE,
 }
 SECTOR_CONTEXT_PROFILES = {
@@ -91,6 +96,7 @@ SECTOR_CONTEXT_PROFILES = {
     AUGMENTED_INDUSTRY_METRICS_PROFILE,
     BAOSTOCK_BEST_EFFORT_PROFILE,
     STYLE_STRUCTURAL_PROFILE,
+    STYLE_STRUCTURAL_ALPHA_PROFILE,
     MEDIUM_HORIZON_PROFILE,
 }
 SECTOR_RELATIVE_PROFILES = {
@@ -99,6 +105,7 @@ SECTOR_RELATIVE_PROFILES = {
     AUGMENTED_INDUSTRY_METRICS_PROFILE,
     BAOSTOCK_BEST_EFFORT_PROFILE,
     STYLE_STRUCTURAL_PROFILE,
+    STYLE_STRUCTURAL_ALPHA_PROFILE,
     MEDIUM_HORIZON_PROFILE,
 }
 REGIME_PROFILES = {
@@ -111,6 +118,7 @@ REGIME_PROFILES = {
     BAOSTOCK_BEST_EFFORT_PROFILE,
     SHORT_HORIZON_CORE_PROFILE,
     STYLE_STRUCTURAL_PROFILE,
+    STYLE_STRUCTURAL_ALPHA_PROFILE,
     MEDIUM_HORIZON_PROFILE,
 }
 LOCAL_STATE_PROFILES = {
@@ -120,18 +128,21 @@ LOCAL_STATE_PROFILES = {
     BAOSTOCK_BEST_EFFORT_PROFILE,
     SHORT_HORIZON_CORE_PROFILE,
     STYLE_STRUCTURAL_PROFILE,
+    STYLE_STRUCTURAL_ALPHA_PROFILE,
     MEDIUM_HORIZON_PROFILE,
 }
 TURNOVER_CONTEXT_PROFILES = {
     AUGMENTED_INDUSTRY_METRICS_PROFILE,
     BAOSTOCK_BEST_EFFORT_PROFILE,
     STYLE_STRUCTURAL_PROFILE,
+    STYLE_STRUCTURAL_ALPHA_PROFILE,
     MEDIUM_HORIZON_PROFILE,
 }
 VALUATION_CONTEXT_PROFILES = {
     AUGMENTED_INDUSTRY_METRICS_PROFILE,
     BAOSTOCK_BEST_EFFORT_PROFILE,
     STYLE_STRUCTURAL_PROFILE,
+    STYLE_STRUCTURAL_ALPHA_PROFILE,
     MEDIUM_HORIZON_PROFILE,
 }
 INTRADAY_CONTEXT_PROFILES = {
@@ -139,16 +150,18 @@ INTRADAY_CONTEXT_PROFILES = {
     BAOSTOCK_BEST_EFFORT_PROFILE,
     SHORT_HORIZON_CORE_PROFILE,
     STYLE_STRUCTURAL_PROFILE,
+    STYLE_STRUCTURAL_ALPHA_PROFILE,
     MEDIUM_HORIZON_PROFILE,
 }
 ADJUST_CONTEXT_PROFILES = {
     CANONICAL_SHORT_HORIZON_INTRADAY_PROFILE,
     SHORT_HORIZON_CORE_PROFILE,
     STYLE_STRUCTURAL_PROFILE,
+    STYLE_STRUCTURAL_ALPHA_PROFILE,
     MEDIUM_HORIZON_PROFILE,
 }
 FINANCE_CONTEXT_PROFILES = {BAOSTOCK_BEST_EFFORT_PROFILE}
-INDEX_CONTEXT_PROFILES = {BAOSTOCK_BEST_EFFORT_PROFILE, STYLE_STRUCTURAL_PROFILE, MEDIUM_HORIZON_PROFILE}
+INDEX_CONTEXT_PROFILES = {BAOSTOCK_BEST_EFFORT_PROFILE, STYLE_STRUCTURAL_PROFILE, STYLE_STRUCTURAL_ALPHA_PROFILE, MEDIUM_HORIZON_PROFILE}
 AMOUNT_CHECKED_PROFILES = {"raw_kline_context_v2_tradeable_amount_checked", *LOCAL_STATE_PROFILES}
 NO_ALPHA_CONTRACT_PROFILES = {
     "raw_kline_context_no_alpha_prior_v1",
@@ -162,7 +175,54 @@ NO_ALPHA_CONTRACT_PROFILES = {
     BAOSTOCK_BEST_EFFORT_PROFILE,
     SHORT_HORIZON_CORE_PROFILE,
     STYLE_STRUCTURAL_PROFILE,
+    STYLE_STRUCTURAL_ALPHA_PROFILE,
     MEDIUM_HORIZON_PROFILE,
+}
+
+ALPHA_FORECAST_CLEAN_PROFILES = {STYLE_STRUCTURAL_ALPHA_PROFILE}
+ALPHA_FORECAST_EXCLUDED_COLUMNS = {
+    "current_weight",
+    "holding_flag",
+    "hold_days",
+    "days_since_last_buy",
+    "days_since_last_sell",
+    "days_since_last_reduce",
+    "days_since_last_exit",
+    "entry_price",
+    "peak_price",
+    "unrealized_pnl",
+    "drawdown_from_peak",
+    "hold_days_clip20",
+    "holding_age_short",
+    "holding_age_swing",
+    "holding_age_extended",
+    "position_age_phase",
+    "reentry_cooldown",
+    "recent_buy_flag",
+    "recent_sell_flag",
+    "pnl_to_vol20",
+    "drawdown_to_vol20",
+    "pnl_from_entry",
+    "signal_decay_speed",
+    "pnl_rank_in_portfolio",
+    "drawdown_rank_in_portfolio",
+    "recent_reversal_count_20d",
+    "recent_reversal_rate_20d",
+    "recent_reduce_count_10d",
+    "recent_exit_count_10d",
+    "recent_add_count_10d",
+    "recent_open_count_10d",
+    "market_downside_pressure",
+    "portfolio_cash_pressure",
+    "reduce_reversal_pressure",
+    "exit_reentry_pressure",
+    "cash_regime_pressure",
+    "hold_continuity_pressure",
+    "board_member_count",
+    "board_member_count_log",
+    "intraday_bar_count",
+    "cs_rank_intraday_bar_count",
+    "cs_z_intraday_bar_count",
 }
 
 
@@ -347,6 +407,15 @@ def _alpha_dependent_column(column: str) -> bool:
         or name.startswith("score_blend_lag")
         or name.startswith("score_rank")
         or name.startswith("score_cross")
+    )
+
+
+def _alpha_forecast_excluded_column(column: str) -> bool:
+    name = str(column)
+    return bool(
+        name in ALPHA_FORECAST_EXCLUDED_COLUMNS
+        or name.startswith("portfolio_")
+        or name.startswith("last_action_is_")
     )
 
 
@@ -1195,6 +1264,9 @@ def _selected_columns_for_profile(
         columns.extend([column for column in index_columns if column in column_groups])
     if feature_profile in NO_ALPHA_CONTRACT_PROFILES:
         columns = [column for column in columns if not _alpha_dependent_column(column)]
+        column_groups = {column: group for column, group in column_groups.items() if column in columns}
+    if feature_profile in ALPHA_FORECAST_CLEAN_PROFILES:
+        columns = [column for column in columns if not _alpha_forecast_excluded_column(column)]
         column_groups = {column: group for column, group in column_groups.items() if column in columns}
     return list(dict.fromkeys(columns)), column_groups
 

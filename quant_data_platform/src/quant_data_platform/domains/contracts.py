@@ -65,6 +65,16 @@ PROFILE_DOMAIN_POLICY = {
         ),
         "exclude": EXCLUDED_V1_DOMAINS,
     },
+    "style_structural_alpha_v2": {
+        "include": (
+            DataDomain.MARKET_DAILY,
+            DataDomain.INTRADAY_DAILY_FEATURES,
+            DataDomain.ADJUST_FACTOR,
+            *STRUCTURAL_STYLE_DOMAINS,
+            *FILTER_DOMAINS,
+        ),
+        "exclude": EXCLUDED_V1_DOMAINS,
+    },
     "medium_horizon_v1": {
         "include": (
             DataDomain.MARKET_DAILY,

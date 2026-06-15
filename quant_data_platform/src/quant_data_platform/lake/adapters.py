@@ -181,8 +181,9 @@ def build_bundle(paths: QdpPaths | None = None, *, write: bool = True) -> Bundle
                 ],
                 "notes": (
                     "Canonical keeps valuation, industry, and index membership as auditable structure/style data. "
-                    "Feature profiles decide usage; short_horizon_core_v1 does not use them, style_structural_v1 and "
-                    "medium_horizon_v1 may use them. Slow disclosure financial/performance domains stay out of v1."
+                    "Feature profiles decide usage; short_horizon_core_v1 does not use them, style_structural_v1, "
+                    "style_structural_alpha_v2, and medium_horizon_v1 may use them. Slow disclosure financial/performance "
+                    "domains stay out of current v1/v2 alpha profiles."
                 ),
             },
             "v1_excluded_domains": [

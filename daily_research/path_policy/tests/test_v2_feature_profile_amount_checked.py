@@ -10,6 +10,7 @@ from daily_research.path_policy.forecast_features import (
     BAOSTOCK_BEST_EFFORT_PROFILE,
     CANONICAL_SHORT_HORIZON_INTRADAY_PROFILE,
     FORECAST_FEATURE_PROFILES,
+    STYLE_STRUCTURAL_ALPHA_PROFILE,
     _cap_feature_columns,
     audit_forecast_feature_profile,
     build_forecast_feature_panels,
@@ -345,6 +346,112 @@ def test_augmented_profile_audit_and_store_report_new_feature_groups(tmp_path) -
     assert manifest["feature_profile_audit"]["retained_groups"]["valuation_context"] is True
     assert manifest["feature_store_shape"][2] == manifest["feature_count_after_cap"]
     assert "valuation_pbMRQ_missing_flag" in feature_columns
+
+
+def test_style_structural_alpha_profile_removes_empty_policy_state_and_keeps_alpha_context() -> None:
+    prepared = make_prepared_policy_inputs(days=90, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2024-01-02")
+    dates = prepared.close.index
+    columns = list(prepared.close.columns)
+    shaped = np.tile(np.linspace(0.01, -0.02, len(columns)), (len(dates), 1))
+    factor = pd.DataFrame(1.0, index=dates, columns=columns)
+    factor.loc[dates[20]:, "AAA"] = 0.9
+    index_member = pd.DataFrame(np.nan, index=dates, columns=columns)
+    index_member.loc[dates[20], :] = [1.0, 0.0, 1.0, 0.0]
+    metric = pd.DataFrame(5.0, index=dates, columns=columns)
+    derived = dict(prepared.derived_frames)
+    derived.update(
+        {
+            "turn": pd.DataFrame(
+                np.tile(np.linspace(1.0, 4.0, len(columns)), (len(dates), 1)),
+                index=dates,
+                columns=columns,
+            ),
+            "peTTM": metric + np.arange(len(dates), dtype=float).reshape(-1, 1) * 0.1,
+            "pbMRQ": metric + 1.0,
+            "psTTM": metric + 2.0,
+            "pcfNcfTTM": metric + 3.0,
+            "intraday_daily_features_first_5m_ret": pd.DataFrame(shaped, index=dates, columns=columns),
+            "intraday_daily_features_last_30m_ret": pd.DataFrame(-shaped, index=dates, columns=columns),
+            "intraday_daily_features_bar_count": pd.DataFrame(50.0, index=dates, columns=columns),
+            "adjust_factor_fore_adjust_factor": factor,
+            "index_constituents_000300_sh_member": index_member,
+        }
+    )
+    industry_daily = pd.DataFrame(
+        [
+            {
+                "symbol": stock,
+                "trade_date": dt.strftime("%Y-%m-%d"),
+                "industry": "tech" if stock in {"AAA", "BBB"} else "bank",
+            }
+            for dt in dates
+            for stock in columns
+        ]
+    )
+    board_membership = pd.DataFrame(
+        {
+            "symbol": ["AAA", "BBB", "CCC"],
+            "board_kind": ["GN", "GN", "FG"],
+            "board_name": ["ai", "ai", "dividend"],
+            "board_code": ["880001", "880001", "880002"],
+        }
+    )
+    prepared = replace(
+        prepared,
+        derived_frames=derived,
+        metadata_frames={"industry_daily": industry_daily, "board_membership": board_membership},
+    )
+    date = pd.Timestamp(dates[45]).normalize()
+
+    panels, feature_columns, manifest = build_forecast_feature_panels(
+        prepared,
+        [date],
+        feature_profile=STYLE_STRUCTURAL_ALPHA_PROFILE,
+        max_feature_columns=768,
+    )
+
+    forbidden = {
+        "current_weight",
+        "holding_flag",
+        "hold_days",
+        "unrealized_pnl",
+        "drawdown_from_peak",
+        "recent_buy_flag",
+        "recent_sell_flag",
+        "pnl_to_vol20",
+        "portfolio_cash_weight",
+        "portfolio_gross_exposure",
+        "portfolio_holding_count",
+        "market_downside_pressure",
+        "reduce_reversal_pressure",
+        "cash_regime_pressure",
+        "board_member_count",
+        "board_member_count_log",
+        "intraday_bar_count",
+        "cs_rank_intraday_bar_count",
+        "cs_z_intraday_bar_count",
+    }
+    assert STYLE_STRUCTURAL_ALPHA_PROFILE in FORECAST_FEATURE_PROFILES
+    assert not forbidden.intersection(feature_columns)
+    assert not any(column.startswith(("portfolio_", "last_action_is_")) for column in feature_columns)
+    assert "current_price" in feature_columns
+    assert "in_pool" in feature_columns
+    assert "price_from_local_peak" in feature_columns
+    assert "raw_open_gap_1d" in feature_columns
+    assert "market_positive_share_1d" in feature_columns
+    assert "history_valid_ratio_252" in feature_columns
+    assert "industry_ret_20_excess" in feature_columns
+    assert "stock_ret_20_minus_industry" in feature_columns
+    assert "turn_z20" in feature_columns
+    assert "valuation_peTTM_lag1_log" in feature_columns
+    assert "intraday_first_5m_ret" in feature_columns
+    assert "adjust_adj_close_ret_1d" in feature_columns
+    assert "index_000300_sh_member_lag1" in feature_columns
+    assert manifest["feature_profile"] == STYLE_STRUCTURAL_ALPHA_PROFILE
+    assert manifest["valuation_context_feature_count"] > 0
+    assert manifest["intraday_context_feature_count"] > 0
+    assert manifest["index_context_feature_count"] > 0
+    assert panels[date].loc["AAA", "valuation_peTTM_lag1_log"] == pytest.approx(np.log1p(float(derived["peTTM"].shift(1).loc[date, "AAA"])))
 
 
 def test_baostock_best_effort_profile_adds_intraday_finance_and_index_context() -> None:
