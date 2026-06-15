@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import gc
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,7 @@ DEFAULT_TEST_START_YEAR = 2025
 DEFAULT_MIN_SIGNAL_AMOUNT = 1.0e8
 DEFAULT_FEE_BPS = 30.0
 DEFAULT_BIG_LOSS_THRESHOLD_PCT = -5.0
+DEFAULT_TRADITIONAL_PIT_ROOT = Path("traditional_quant_research/data/raw/baostock_daily_mainboard_v2_pit")
 
 EXECUTION_STATE_EXACT_FEATURES = {
     "current_weight",
@@ -75,6 +77,8 @@ class EventPackConfig:
     big_loss_threshold_pct: float = DEFAULT_BIG_LOSS_THRESHOLD_PCT
     feature_chunk_rows: int = 4096
     write_event_cache: bool = False
+    resume: bool = True
+    candidate_code_prefilter: bool = True
 
     def normalized(self) -> "EventPackConfig":
         start = int(self.start_year or 0)
@@ -103,6 +107,8 @@ class EventPackConfig:
             big_loss_threshold_pct=float(self.big_loss_threshold_pct),
             feature_chunk_rows=max(int(self.feature_chunk_rows or 4096), 1),
             write_event_cache=bool(self.write_event_cache),
+            resume=bool(self.resume),
+            candidate_code_prefilter=bool(self.candidate_code_prefilter),
         )
 
 
@@ -157,16 +163,23 @@ def build_traditional_event_alpha_pack(
     pack_reader = QdpTrainingPackReader(source_manifest_path, feature_columns=feature_columns)
 
     partitions: list[dict[str, Any]] = []
-    frames_for_quality: list[pd.DataFrame] = []
-    total_rows = 0
-    missing_feature_rows = 0
-    event_type_counts: dict[str, int] = {}
+    quality_accumulator = new_quality_accumulator()
     for year in years:
+        out_path = parts_dir / f"year={int(year)}" / "events.parquet"
+        if bool(cfg.resume) and out_path.exists():
+            existing = pd.read_parquet(out_path)
+            stats = summarize_event_partition(existing)
+            merge_quality_stats(quality_accumulator, stats)
+            partitions.append(partition_record(year=int(year), path=out_path, stats=stats, resumed=True))
+            del existing
+            gc.collect()
+            continue
         events = build_year_events(
             cfg,
             year=year,
             sell_windows=sell_windows,
             output_root=output_root,
+            workspace_root=resolved_paths.workspace_root,
         )
         if cfg.max_events_per_year and len(events) > int(cfg.max_events_per_year):
             events = events.sort_values(["date", "code"]).head(int(cfg.max_events_per_year)).reset_index(drop=True)
@@ -182,26 +195,13 @@ def build_traditional_event_alpha_pack(
         )
         enriched["split_role"] = split_role_for_year(int(year))
         enriched["dataset_year"] = int(year)
-        out_path = parts_dir / f"year={int(year)}" / "events.parquet"
         out_path.parent.mkdir(parents=True, exist_ok=True)
         enriched.to_parquet(out_path, index=False)
-        row_count = int(len(enriched))
-        qdp_missing = int(enriched["qdp_feature_missing"].sum()) if "qdp_feature_missing" in enriched else 0
-        missing_feature_rows += qdp_missing
-        total_rows += row_count
-        type_counts = enriched["primary_event_type"].fillna("unknown").astype(str).value_counts().to_dict()
-        for key, value in type_counts.items():
-            event_type_counts[key] = int(event_type_counts.get(key, 0) + int(value))
-        partitions.append(
-            {
-                "year": int(year),
-                "path": str(out_path),
-                "row_count": row_count,
-                "qdp_feature_missing_rows": qdp_missing,
-                "primary_event_type_counts": {str(k): int(v) for k, v in sorted(type_counts.items())},
-            }
-        )
-        frames_for_quality.append(enriched)
+        stats = summarize_event_partition(enriched)
+        merge_quality_stats(quality_accumulator, stats)
+        partitions.append(partition_record(year=int(year), path=out_path, stats=stats, resumed=False))
+        del events, enriched
+        gc.collect()
 
     feature_schema = {
         "feature_view": "traditional_event_alpha_v1_clean_qdp",
@@ -216,17 +216,14 @@ def build_traditional_event_alpha_pack(
     label_schema = build_label_schema(sell_windows=sell_windows, fee_bps=cfg.fee_bps, slippage_bps=cfg.slippage_bps)
     event_schema = build_event_schema()
     quality_report = build_quality_report(
-        frames_for_quality,
-        total_rows=total_rows,
-        missing_feature_rows=missing_feature_rows,
-        event_type_counts=event_type_counts,
+        quality_accumulator,
     )
     dataset_id = event_pack_dataset_id(
         tag=cfg.tag,
         source_training_pack=str(source_manifest_path),
         years=years,
         feature_columns=feature_columns,
-        row_count=total_rows,
+        row_count=int(quality_accumulator["total_rows"]),
     )
     manifest = {
         "artifact_type": "qdp_event_pack",
@@ -236,7 +233,7 @@ def build_traditional_event_alpha_pack(
         "created_at": utc_now(),
         "config": asdict(cfg),
         "years": [int(year) for year in years],
-        "row_count": int(total_rows),
+        "row_count": int(quality_accumulator["total_rows"]),
         "partition_count": int(len(partitions)),
         "partitions": partitions,
         "source_training_pack_manifest": str(source_manifest_path),
@@ -264,12 +261,14 @@ def build_traditional_event_alpha_pack(
         "dataset_id": dataset_id,
         "output_root": str(output_root),
         "manifest": str(output_root / "manifest.json"),
-        "row_count": int(total_rows),
+        "row_count": int(quality_accumulator["total_rows"]),
         "partition_count": int(len(partitions)),
         "qdp_feature_count": int(len(feature_columns)),
         "dropped_execution_state_feature_count": int(len(dropped_features)),
-        "qdp_feature_missing_rows": int(missing_feature_rows),
-        "primary_event_type_counts": {str(k): int(v) for k, v in sorted(event_type_counts.items())},
+        "qdp_feature_missing_rows": int(quality_accumulator["qdp_feature_missing_rows"]),
+        "primary_event_type_counts": {
+            str(k): int(v) for k, v in sorted(dict(quality_accumulator["event_type_counts"]).items())
+        },
     }
 
 
@@ -372,30 +371,251 @@ def build_year_events(
     year: int,
     sell_windows: Sequence[int],
     output_root: Path,
+    workspace_root: Path | None = None,
 ) -> pd.DataFrame:
-    from traditional_quant_research.dataset_v2 import load_tradeable_panel
     from traditional_quant_research.experiments.generalized_strong_event_pool_research import build_generalized_event_feature_panel
     from traditional_quant_research.experiments.short_open_known_factor_rebuild import DEFAULT_DATA_START_YEAR
 
     start_year = max(int(DEFAULT_DATA_START_YEAR), int(year) - int(cfg.warmup_years))
-    raw_panel = load_tradeable_panel(
+    raw_panel = load_event_tradeable_panel(
         cfg.pit_root or None,
         start_date=f"{start_year}-01-01",
         end_date=f"{int(year)}-12-31",
-        include_metrics=True,
-        include_industry=True,
+        workspace_root=workspace_root,
     )
+    market_context = build_market_industry_context(raw_panel)
+    if bool(cfg.candidate_code_prefilter):
+        candidate_codes = event_candidate_codes(raw_panel, year=year, min_signal_amount=float(cfg.min_signal_amount))
+        if not candidate_codes:
+            return pd.DataFrame()
+        raw_panel = raw_panel.loc[raw_panel["code"].isin(candidate_codes)].reset_index(drop=True)
     events = build_generalized_event_feature_panel(
         raw_panel,
         sell_windows=sell_windows,
         min_signal_amount=float(cfg.min_signal_amount),
     )
+    del raw_panel
+    gc.collect()
     events = events.loc[pd.to_datetime(events["date"]).dt.year.eq(int(year))].sort_values(["date", "code"]).reset_index(drop=True)
+    events = apply_market_industry_context(events, market_context)
     if bool(cfg.write_event_cache):
         cache_dir = output_root / "_event_cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
         events.to_parquet(cache_dir / f"events_year={int(year)}.parquet", index=False)
     return events
+
+
+def event_candidate_codes(frame: pd.DataFrame, *, year: int, min_signal_amount: float) -> set[str]:
+    if frame.empty:
+        return set()
+    dates = pd.to_datetime(frame["date"])
+    target_year = dates.dt.year.eq(int(year))
+    pct = pd.to_numeric(frame["pctChg"], errors="coerce")
+    amount = pd.to_numeric(frame["amount"], errors="coerce")
+    high = pd.to_numeric(frame["high"], errors="coerce")
+    low = pd.to_numeric(frame["low"], errors="coerce")
+    close = pd.to_numeric(frame["close"], errors="coerce")
+    close_position = (close - low) / (high - low).replace(0, np.nan)
+    limit_like = pct.ge(9.5) & close.ge(high * 0.999)
+    non_limit_candidate = amount.ge(float(min_signal_amount)) & pct.ge(3.0) & close_position.ge(0.65)
+    codes = frame.loc[target_year & (limit_like | non_limit_candidate), "code"].astype(str)
+    return set(codes.unique().tolist())
+
+
+def build_market_industry_context(frame: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    if frame.empty:
+        return {"market": pd.DataFrame(), "industry": pd.DataFrame()}
+    context = frame.loc[:, ["date", "code", "industry", "high", "close", "pctChg"]].copy()
+    context["date"] = pd.to_datetime(context["date"])
+    pct = pd.to_numeric(context["pctChg"], errors="coerce")
+    high = pd.to_numeric(context["high"], errors="coerce")
+    close = pd.to_numeric(context["close"], errors="coerce")
+    context["limit_up_like"] = pct.ge(9.5) & close.ge(high * 0.999)
+    context["pctChg"] = pct
+    market = context.groupby("date", as_index=False).agg(
+        market_limitup_count=("limit_up_like", "sum"),
+        market_tradeable_count=("code", "count"),
+        market_breadth=("pctChg", lambda values: float((pd.to_numeric(values, errors="coerce") > 0).mean())),
+    )
+    market["market_limitup_rate"] = market["market_limitup_count"] / market["market_tradeable_count"].replace(0, np.nan)
+    market = market.sort_values("date")
+    market["market_limitup_count_ma5"] = market["market_limitup_count"].rolling(5, min_periods=2).mean()
+    market["market_limitup_rate_ma20"] = market["market_limitup_rate"].rolling(20, min_periods=5).mean()
+    market["market_breadth_5d"] = market["market_breadth"].rolling(5, min_periods=2).mean()
+    market["market_breadth_20d"] = market["market_breadth"].rolling(20, min_periods=5).mean()
+    market = market[
+        [
+            "date",
+            "market_limitup_count",
+            "market_limitup_rate",
+            "market_limitup_count_ma5",
+            "market_limitup_rate_ma20",
+            "market_breadth_5d",
+            "market_breadth_20d",
+        ]
+    ]
+    industry = context.groupby(["industry", "date"], as_index=False).agg(
+        industry_limitup_count=("limit_up_like", "sum"),
+        industry_tradeable_count=("code", "count"),
+        industry_ret_mean=("pctChg", "mean"),
+    )
+    industry["industry_limitup_rate"] = industry["industry_limitup_count"] / industry["industry_tradeable_count"].replace(0, np.nan)
+    industry = industry.sort_values(["industry", "date"])
+    industry["industry_limitup_count_ma5"] = (
+        industry.groupby("industry", sort=False)["industry_limitup_count"]
+        .rolling(5, min_periods=2)
+        .mean()
+        .reset_index(level=0, drop=True)
+        .sort_index()
+    )
+    industry["industry_ret5_mean"] = (
+        industry.groupby("industry", sort=False)["industry_ret_mean"]
+        .rolling(5, min_periods=2)
+        .mean()
+        .reset_index(level=0, drop=True)
+        .sort_index()
+    )
+    industry = industry[
+        [
+            "industry",
+            "date",
+            "industry_limitup_count",
+            "industry_limitup_rate",
+            "industry_limitup_count_ma5",
+            "industry_ret5_mean",
+        ]
+    ]
+    return {"market": market, "industry": industry}
+
+
+def apply_market_industry_context(events: pd.DataFrame, context: Mapping[str, pd.DataFrame]) -> pd.DataFrame:
+    if events.empty:
+        return events
+    output = events.copy()
+    output["date"] = pd.to_datetime(output["date"])
+    market = context.get("market", pd.DataFrame())
+    if market is not None and not market.empty:
+        market_columns = [column for column in market.columns if column != "date"]
+        output = output.drop(columns=[column for column in market_columns if column in output.columns])
+        output = output.merge(market, on="date", how="left")
+    industry = context.get("industry", pd.DataFrame())
+    if industry is not None and not industry.empty and "industry" in output.columns:
+        industry_columns = [column for column in industry.columns if column not in {"date", "industry"}]
+        output = output.drop(columns=[column for column in industry_columns if column in output.columns])
+        output = output.merge(industry, on=["industry", "date"], how="left")
+    return output
+
+
+def load_event_tradeable_panel(
+    root: str | Path | None,
+    *,
+    start_date: str,
+    end_date: str,
+    workspace_root: Path | None = None,
+) -> pd.DataFrame:
+    snapshot_root = resolve_traditional_pit_root(root, workspace_root=workspace_root)
+    universe = read_parquet_date_range(
+        snapshot_root / "daily_universe.parquet",
+        columns=["date", "code", "is_tradeable"],
+        start_date=start_date,
+        end_date=end_date,
+        extra_filters=[("is_tradeable", "==", True)],
+    )
+    if universe.empty:
+        return pd.DataFrame()
+    universe = universe.loc[universe["is_tradeable"]].reset_index(drop=True)
+    bars = read_parquet_date_range(
+        snapshot_root / "daily_bars.parquet",
+        columns=["date", "code", "open", "high", "low", "close", "volume", "amount"],
+        start_date=start_date,
+        end_date=end_date,
+    )
+    metrics = read_parquet_date_range(
+        snapshot_root / "daily_metrics.parquet",
+        columns=["date", "code", "turn", "pctChg"],
+        start_date=start_date,
+        end_date=end_date,
+    )
+    panel = universe.merge(bars, on=["date", "code"], how="inner")
+    panel = panel.merge(metrics, on=["date", "code"], how="left")
+    industry_path = snapshot_root / "stock_industry.parquet"
+    if industry_path.exists():
+        industry = read_parquet_date_range(
+            industry_path,
+            columns=["date", "code", "industry"],
+            start_date=start_date,
+            end_date=end_date,
+        )
+        if not industry.empty:
+            panel = panel.merge(industry, on=["date", "code"], how="left")
+    if "industry" not in panel.columns:
+        panel["industry"] = "__unknown__"
+    numeric_columns = ["open", "high", "low", "close", "volume", "amount", "turn", "pctChg"]
+    for column in numeric_columns:
+        if column in panel.columns:
+            panel[column] = pd.to_numeric(panel[column], errors="coerce", downcast="float")
+    panel["date"] = pd.to_datetime(panel["date"])
+    panel["code"] = panel["code"].astype(str)
+    panel["industry"] = panel["industry"].fillna("__unknown__").astype(str)
+    return panel.sort_values(["date", "code"]).reset_index(drop=True)
+
+
+def resolve_traditional_pit_root(root: str | Path | None, *, workspace_root: Path | None = None) -> Path:
+    base = Path(root).expanduser() if str(root or "").strip() else DEFAULT_TRADITIONAL_PIT_ROOT
+    base = first_existing_path(base, workspace_root=workspace_root)
+    latest = base / "latest_manifest.json"
+    if latest.exists():
+        payload = json.loads(latest.read_text(encoding="utf-8-sig"))
+        snapshot_path = str(payload.get("snapshot_path") or "").strip()
+        if snapshot_path:
+            return first_existing_path(Path(snapshot_path), workspace_root=workspace_root, fallback_base=base)
+    return base.resolve()
+
+
+def first_existing_path(path: Path, *, workspace_root: Path | None = None, fallback_base: Path | None = None) -> Path:
+    candidates: list[Path] = []
+    if path.is_absolute():
+        candidates.append(path)
+    else:
+        if workspace_root is not None:
+            candidates.append(Path(workspace_root) / path)
+        candidates.append(Path.cwd() / path)
+        if fallback_base is not None:
+            candidates.append(Path(fallback_base) / path)
+        candidates.append(path)
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.resolve()
+    return candidates[0].resolve()
+
+
+def read_parquet_date_range(
+    path: Path,
+    *,
+    columns: Sequence[str],
+    start_date: str,
+    end_date: str,
+    extra_filters: Sequence[tuple[str, str, Any]] | None = None,
+) -> pd.DataFrame:
+    if not path.exists():
+        raise FileNotFoundError(f"parquet file not found: {path}")
+    start = pd.Timestamp(start_date)
+    end = pd.Timestamp(end_date)
+    filters: list[tuple[str, str, Any]] = [("date", ">=", start), ("date", "<=", end)]
+    if extra_filters:
+        filters.extend(extra_filters)
+    try:
+        frame = pd.read_parquet(path, columns=list(columns), filters=filters)
+    except (TypeError, ValueError, NotImplementedError):
+        frame = pd.read_parquet(path, columns=list(columns))
+        dates = pd.to_datetime(frame["date"])
+        frame = frame.loc[(dates >= start) & (dates <= end)].reset_index(drop=True)
+        for column, op, value in extra_filters or ():
+            if op == "==":
+                frame = frame.loc[frame[column] == value].reset_index(drop=True)
+            else:
+                raise ValueError(f"unsupported fallback parquet filter: {(column, op, value)}")
+    return frame.reset_index(drop=True)
 
 
 def add_derived_execution_labels(
@@ -503,32 +723,92 @@ def build_event_schema() -> dict[str, Any]:
 
 
 def build_quality_report(
-    frames: Sequence[pd.DataFrame],
-    *,
-    total_rows: int,
-    missing_feature_rows: int,
-    event_type_counts: Mapping[str, int],
+    accumulator: Mapping[str, Any],
 ) -> dict[str, Any]:
-    if frames:
-        frame = pd.concat(frames, ignore_index=True)
-        qdp_feature_cols = [
-            column
-            for column in frame.columns
-            if column.startswith("qdp_") and column not in {"qdp_feature_missing", "qdp_source_training_pack_manifest"}
-        ]
-        qdp_nan_ratio = float(frame[qdp_feature_cols].isna().to_numpy().mean()) if qdp_feature_cols else 1.0
-        split_counts = {str(k): int(v) for k, v in frame["split_role"].value_counts().sort_index().items()} if "split_role" in frame else {}
-    else:
-        qdp_nan_ratio = 1.0
-        split_counts = {}
+    total_rows = int(accumulator.get("total_rows", 0) or 0)
+    missing_feature_rows = int(accumulator.get("qdp_feature_missing_rows", 0) or 0)
+    qdp_cells = int(accumulator.get("qdp_feature_cells", 0) or 0)
+    qdp_nan_cells = int(accumulator.get("qdp_feature_nan_cells", 0) or 0)
+    split_counts = {str(k): int(v) for k, v in sorted(dict(accumulator.get("split_counts", {}) or {}).items())}
+    event_type_counts = dict(accumulator.get("event_type_counts", {}) or {})
     return {
         "status": "ok" if total_rows > 0 else "empty",
         "row_count": int(total_rows),
         "qdp_feature_missing_rows": int(missing_feature_rows),
         "qdp_feature_missing_rate": float(missing_feature_rows / total_rows) if total_rows else None,
-        "qdp_feature_nan_ratio": qdp_nan_ratio,
+        "qdp_feature_nan_ratio": float(qdp_nan_cells / qdp_cells) if qdp_cells else 1.0,
         "primary_event_type_counts": {str(k): int(v) for k, v in sorted(event_type_counts.items())},
         "split_role_counts": split_counts,
+    }
+
+
+def new_quality_accumulator() -> dict[str, Any]:
+    return {
+        "total_rows": 0,
+        "qdp_feature_missing_rows": 0,
+        "qdp_feature_nan_cells": 0,
+        "qdp_feature_cells": 0,
+        "event_type_counts": {},
+        "split_counts": {},
+    }
+
+
+def summarize_event_partition(frame: pd.DataFrame) -> dict[str, Any]:
+    row_count = int(len(frame))
+    qdp_missing = int(frame["qdp_feature_missing"].sum()) if "qdp_feature_missing" in frame else 0
+    event_type_counts = (
+        frame["primary_event_type"].fillna("unknown").astype(str).value_counts().to_dict()
+        if "primary_event_type" in frame
+        else {}
+    )
+    split_counts = frame["split_role"].fillna("unknown").astype(str).value_counts().to_dict() if "split_role" in frame else {}
+    qdp_feature_cols = [
+        column
+        for column in frame.columns
+        if column.startswith("qdp_") and column not in {"qdp_feature_missing", "qdp_source_training_pack_manifest"}
+    ]
+    if qdp_feature_cols:
+        qdp_values = frame[qdp_feature_cols]
+        qdp_feature_cells = int(qdp_values.shape[0] * qdp_values.shape[1])
+        qdp_feature_nan_cells = int(qdp_values.isna().to_numpy().sum())
+    else:
+        qdp_feature_cells = 0
+        qdp_feature_nan_cells = 0
+    return {
+        "row_count": row_count,
+        "qdp_feature_missing_rows": qdp_missing,
+        "qdp_feature_cells": qdp_feature_cells,
+        "qdp_feature_nan_cells": qdp_feature_nan_cells,
+        "primary_event_type_counts": {str(k): int(v) for k, v in sorted(event_type_counts.items())},
+        "split_role_counts": {str(k): int(v) for k, v in sorted(split_counts.items())},
+    }
+
+
+def merge_quality_stats(accumulator: dict[str, Any], stats: Mapping[str, Any]) -> None:
+    accumulator["total_rows"] = int(accumulator.get("total_rows", 0) or 0) + int(stats.get("row_count", 0) or 0)
+    accumulator["qdp_feature_missing_rows"] = int(accumulator.get("qdp_feature_missing_rows", 0) or 0) + int(
+        stats.get("qdp_feature_missing_rows", 0) or 0
+    )
+    accumulator["qdp_feature_cells"] = int(accumulator.get("qdp_feature_cells", 0) or 0) + int(stats.get("qdp_feature_cells", 0) or 0)
+    accumulator["qdp_feature_nan_cells"] = int(accumulator.get("qdp_feature_nan_cells", 0) or 0) + int(
+        stats.get("qdp_feature_nan_cells", 0) or 0
+    )
+    for key, value in dict(stats.get("primary_event_type_counts", {}) or {}).items():
+        accumulator["event_type_counts"][str(key)] = int(accumulator["event_type_counts"].get(str(key), 0)) + int(value)
+    for key, value in dict(stats.get("split_role_counts", {}) or {}).items():
+        accumulator["split_counts"][str(key)] = int(accumulator["split_counts"].get(str(key), 0)) + int(value)
+
+
+def partition_record(*, year: int, path: Path, stats: Mapping[str, Any], resumed: bool) -> dict[str, Any]:
+    return {
+        "year": int(year),
+        "path": str(path),
+        "row_count": int(stats.get("row_count", 0) or 0),
+        "qdp_feature_missing_rows": int(stats.get("qdp_feature_missing_rows", 0) or 0),
+        "primary_event_type_counts": {
+            str(k): int(v) for k, v in sorted(dict(stats.get("primary_event_type_counts", {}) or {}).items())
+        },
+        "resumed_existing_partition": bool(resumed),
     }
 
 

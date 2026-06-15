@@ -136,6 +136,7 @@ def build_parser() -> argparse.ArgumentParser:
     event_pack.add_argument("--big-loss-threshold-pct", type=float, default=-5.0)
     event_pack.add_argument("--feature-chunk-rows", type=int, default=4096)
     event_pack.add_argument("--write-event-cache", action="store_true")
+    event_pack.add_argument("--no-resume", action="store_true")
     event_pack.add_argument("--json", action="store_true")
 
     cleanup = sub.add_parser("cleanup", help="Generate cleanup dry-run plan. This command never deletes files in v1.")
@@ -292,6 +293,7 @@ def main(argv: list[str] | None = None) -> int:
                 big_loss_threshold_pct=float(args.big_loss_threshold_pct),
                 feature_chunk_rows=int(args.feature_chunk_rows),
                 write_event_cache=bool(args.write_event_cache),
+                resume=not bool(args.no_resume),
             ),
             paths=paths,
         )
