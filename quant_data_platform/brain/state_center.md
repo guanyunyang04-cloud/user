@@ -9,6 +9,7 @@
 - canonical 数据域原则：行情、5 分钟日级特征、复权因子、估值、行业、指数成分、交易日历、股票池和证券状态进入数据基底；财务季报、业绩预告/快报等慢披露数据暂不进入 v1 默认基底。
 - full canonical sharded memmap 已完成并冻结：`canonical_short_horizon_core_v1_full_2010_2026`，profile `short_horizon_core_v1`，2010-2026，5526 symbols，256 features，323 planned / 262 stored / 61 empty / 0 failed shards。
 - active sharded manifest：`H:/quant_project/quant_data_platform/data/memmap/sharded/canonical_short_horizon_core_v1_full/sharded_memmap_manifest.json`。
+- event pack 数据域已开始 candidate-stage 建设：`traditional_event_alpha_v1_candidate_smoke_20260615_01` 已生成 smoke 数据集，2024 年 128 行、316 个 clean QDP 特征、29 个派生标签、剔除 48 个执行/持仓/组合状态特征；该资产未注册 active，记录见 `brain/references/traditional_event_alpha_v1_candidate.md`。
 
 ## 当前接管重点
 - 默认训练入口应复用 active full sharded memmap；旧每实验单体 `forecast_*.dat` 机制不再作为默认路径维护。

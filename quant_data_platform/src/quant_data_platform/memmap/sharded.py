@@ -420,6 +420,8 @@ def build_sharded_memmap(
         "lookback_days": int(cfg.lookback_days),
         "horizon": int(cfg.horizon),
         "cumulative_horizons": [int(item) for item in cumulative_horizons],
+        "label_schema_name": "path20_basic_v2",
+        "label_schema_version": 2,
         "execution_mode": cfg.execution_mode,
         "max_feature_columns": int(cfg.max_feature_columns),
         "min_lookback_valid_ratio": float(cfg.min_lookback_valid_ratio),
@@ -924,9 +926,18 @@ def _write_label_store(
     label_dir = shard_dir / "labels"
     label_dir.mkdir(parents=True, exist_ok=True)
     arrays: dict[str, np.ndarray] = {
+        "daily_return": _stack_panel_map(labels.daily_return, range(1, int(horizon) + 1), dates=dates, symbols=symbols),
+        "benchmark_daily_return": _stack_series_map(labels.benchmark_daily_return, range(1, int(horizon) + 1), dates=dates, symbols=symbols),
         "daily_excess_return": _stack_panel_map(labels.daily_excess_return, range(1, int(horizon) + 1), dates=dates, symbols=symbols),
+        "cumulative_return": _stack_panel_map(labels.cumulative_return, cumulative_horizons, dates=dates, symbols=symbols),
+        "benchmark_cumulative_return": _stack_series_map(labels.benchmark_cumulative_return, cumulative_horizons, dates=dates, symbols=symbols),
         "cumulative_excess_return": _stack_panel_map(labels.cumulative_excess_return, cumulative_horizons, dates=dates, symbols=symbols),
+        "cumulative_return_1to20": _stack_panel_map(labels.cumulative_return_1to20, range(1, int(horizon) + 1), dates=dates, symbols=symbols),
+        "benchmark_cumulative_return_1to20": _stack_series_map(labels.benchmark_cumulative_return_1to20, range(1, int(horizon) + 1), dates=dates, symbols=symbols),
+        "cumulative_excess_return_1to20": _stack_panel_map(labels.cumulative_excess_return_1to20, range(1, int(horizon) + 1), dates=dates, symbols=symbols),
+        "rank_1to20": _stack_panel_map(labels.forward_rank_1to20, range(1, int(horizon) + 1), dates=dates, symbols=symbols),
         "rank_by_horizon": _stack_panel_map(labels.forward_rank, cumulative_horizons, dates=dates, symbols=symbols),
+        "industry_rank_by_horizon": _stack_panel_map(labels.industry_rank_by_horizon, cumulative_horizons, dates=dates, symbols=symbols),
         "drawdown_by_horizon": _stack_panel_map(labels.path_max_drawdown_by_horizon, cumulative_horizons, dates=dates, symbols=symbols),
         "worst_by_horizon": _stack_panel_map(labels.path_worst_1d_by_horizon, cumulative_horizons, dates=dates, symbols=symbols),
         "upside_by_horizon": _stack_panel_map(labels.path_upside_capture_by_horizon, cumulative_horizons, dates=dates, symbols=symbols),
@@ -934,6 +945,10 @@ def _write_label_store(
         "max_drawdown_20d": _panel_to_array(labels.path_max_drawdown_20d, dates=dates, symbols=symbols),
         "worst_1d_20d": _panel_to_array(labels.path_worst_1d_20d, dates=dates, symbols=symbols),
         "upside_20d": _panel_to_array(labels.path_upside_capture_20d, dates=dates, symbols=symbols),
+        "entry_tradeable": _panel_to_array(labels.entry_tradeable, dates=dates, symbols=symbols),
+        "entry_limit_up_buy_blocked": _panel_to_array(labels.entry_limit_up_buy_blocked, dates=dates, symbols=symbols),
+        "entry_suspended_or_no_open": _panel_to_array(labels.entry_suspended_or_no_open, dates=dates, symbols=symbols),
+        "forward_tradeable_ratio_by_horizon": _stack_panel_map(labels.forward_tradeable_ratio_by_horizon, cumulative_horizons, dates=dates, symbols=symbols),
     }
     entries: dict[str, Any] = {}
     for name, array in arrays.items():
@@ -947,6 +962,8 @@ def _write_label_store(
     manifest = {
         "status": "completed",
         "label_store_kind": "path20_sharded_daily_symbol_panels",
+        "label_schema_name": "path20_basic_v2",
+        "label_schema_version": 2,
         "date_values": [pd.Timestamp(dt).strftime("%Y-%m-%d") for dt in dates],
         "stock_values": list(symbols),
         "horizon": int(horizon),
@@ -1073,6 +1090,24 @@ def _stack_panel_map(
 ) -> np.ndarray:
     arrays = [_panel_to_array(panels[int(key)], dates=dates, symbols=symbols) for key in keys]
     return np.stack(arrays, axis=2).astype("float32") if arrays else np.empty((len(dates), len(symbols), 0), dtype="float32")
+
+
+def _stack_series_map(
+    series_by_key: Mapping[int, pd.Series],
+    keys: Iterable[int],
+    *,
+    dates: list[pd.Timestamp],
+    symbols: list[str],
+) -> np.ndarray:
+    arrays = [_series_to_symbol_array(series_by_key[int(key)], dates=dates, symbols=symbols) for key in keys]
+    return np.stack(arrays, axis=2).astype("float32") if arrays else np.empty((len(dates), len(symbols), 0), dtype="float32")
+
+
+def _series_to_symbol_array(series: pd.Series, *, dates: list[pd.Timestamp], symbols: list[str]) -> np.ndarray:
+    values = series.reindex(index=dates).to_numpy(dtype=np.float32).reshape((len(dates), 1))
+    if not symbols:
+        return np.empty((len(dates), 0), dtype=np.float32)
+    return np.broadcast_to(values, (len(dates), len(symbols))).astype("float32", copy=True)
 
 
 def _panel_to_array(panel: pd.DataFrame, *, dates: list[pd.Timestamp], symbols: list[str]) -> np.ndarray:

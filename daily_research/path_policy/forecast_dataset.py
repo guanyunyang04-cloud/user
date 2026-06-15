@@ -431,6 +431,7 @@ class ForecastShardedMemmapDataset:
             horizon=horizon,
         )
         cumulative_count = len(cumulative_horizons)
+        all_horizon = int(horizon)
         self.y_daily_excess = _QdpShardedLabelArray(self, "daily_excess_return", (horizon,))
         self.y_cum_excess = _QdpShardedLabelArray(self, "cumulative_excess_return", (cumulative_count,))
         self.y_rank_by_horizon = _QdpShardedLabelArray(self, "rank_by_horizon", (cumulative_count,))
@@ -441,6 +442,19 @@ class ForecastShardedMemmapDataset:
         self.y_max_drawdown_20d = _QdpShardedLabelArray(self, "max_drawdown_20d", ())
         self.y_worst_1d_20d = _QdpShardedLabelArray(self, "worst_1d_20d", ())
         self.y_upside_20d = _QdpShardedLabelArray(self, "upside_20d", ())
+        self.y_daily_return = _QdpShardedLabelArray(self, "daily_return", (all_horizon,))
+        self.y_benchmark_daily_return = _QdpShardedLabelArray(self, "benchmark_daily_return", (all_horizon,))
+        self.y_cum_return = _QdpShardedLabelArray(self, "cumulative_return", (cumulative_count,))
+        self.y_benchmark_cum_return = _QdpShardedLabelArray(self, "benchmark_cumulative_return", (cumulative_count,))
+        self.y_cum_return_1to20 = _QdpShardedLabelArray(self, "cumulative_return_1to20", (all_horizon,))
+        self.y_benchmark_cum_return_1to20 = _QdpShardedLabelArray(self, "benchmark_cumulative_return_1to20", (all_horizon,))
+        self.y_cum_excess_1to20 = _QdpShardedLabelArray(self, "cumulative_excess_return_1to20", (all_horizon,))
+        self.y_rank_1to20 = _QdpShardedLabelArray(self, "rank_1to20", (all_horizon,))
+        self.y_industry_rank_by_horizon = _QdpShardedLabelArray(self, "industry_rank_by_horizon", (cumulative_count,))
+        self.y_entry_tradeable = _QdpShardedLabelArray(self, "entry_tradeable", ())
+        self.y_entry_limit_up_buy_blocked = _QdpShardedLabelArray(self, "entry_limit_up_buy_blocked", ())
+        self.y_entry_suspended_or_no_open = _QdpShardedLabelArray(self, "entry_suspended_or_no_open", ())
+        self.y_forward_tradeable_ratio_by_horizon = _QdpShardedLabelArray(self, "forward_tradeable_ratio_by_horizon", (cumulative_count,))
 
     @property
     def row_count(self) -> int:
@@ -648,18 +662,7 @@ class ForecastShardedMemmapDataset:
     def _label_tail_shapes(self) -> dict[str, tuple[int, ...]]:
         horizon = int(self.manifest.get("horizon", PATH20_HORIZON) or PATH20_HORIZON)
         cumulative_count = len(self.cumulative_horizons)
-        return {
-            "daily_excess_return": (horizon,),
-            "cumulative_excess_return": (cumulative_count,),
-            "rank_by_horizon": (cumulative_count,),
-            "drawdown_by_horizon": (cumulative_count,),
-            "worst_by_horizon": (cumulative_count,),
-            "upside_by_horizon": (cumulative_count,),
-            "rank_20d": (),
-            "max_drawdown_20d": (),
-            "worst_1d_20d": (),
-            "upside_20d": (),
-        }
+        return _label_array_specs(horizon, self.cumulative_horizons)
 
     def risk_by_horizon(self, row_idx: int | np.ndarray) -> np.ndarray:
         return np.stack(
@@ -733,6 +736,7 @@ class ForecastTrainingPackDataset:
         self.date_values = np.asarray([str(item) for item in date_values], dtype=object)
         self.stock_values = np.asarray([str(item).strip().upper() for item in stock_values], dtype=object)
         self.static_context_ids = static_context_ids
+        self.label_arrays = dict(label_arrays)
         self.y_daily_excess = label_arrays["daily_excess_return"]
         self.y_cum_excess = label_arrays["cumulative_excess_return"]
         self.y_rank_by_horizon = label_arrays["rank_by_horizon"]
@@ -743,6 +747,19 @@ class ForecastTrainingPackDataset:
         self.y_max_drawdown_20d = label_arrays["max_drawdown_20d"]
         self.y_worst_1d_20d = label_arrays["worst_1d_20d"]
         self.y_upside_20d = label_arrays["upside_20d"]
+        self.y_daily_return = label_arrays.get("daily_return")
+        self.y_benchmark_daily_return = label_arrays.get("benchmark_daily_return")
+        self.y_cum_return = label_arrays.get("cumulative_return")
+        self.y_benchmark_cum_return = label_arrays.get("benchmark_cumulative_return")
+        self.y_cum_return_1to20 = label_arrays.get("cumulative_return_1to20")
+        self.y_benchmark_cum_return_1to20 = label_arrays.get("benchmark_cumulative_return_1to20")
+        self.y_cum_excess_1to20 = label_arrays.get("cumulative_excess_return_1to20")
+        self.y_rank_1to20 = label_arrays.get("rank_1to20")
+        self.y_industry_rank_by_horizon = label_arrays.get("industry_rank_by_horizon")
+        self.y_entry_tradeable = label_arrays.get("entry_tradeable")
+        self.y_entry_limit_up_buy_blocked = label_arrays.get("entry_limit_up_buy_blocked")
+        self.y_entry_suspended_or_no_open = label_arrays.get("entry_suspended_or_no_open")
+        self.y_forward_tradeable_ratio_by_horizon = label_arrays.get("forward_tradeable_ratio_by_horizon")
 
     @property
     def row_count(self) -> int:
@@ -1673,12 +1690,35 @@ def _qdp_training_pack_progress(path: Path, stage: str, **payload: Any) -> None:
     )
 
 
+_REQUIRED_QDP_LABEL_ARRAYS: tuple[str, ...] = (
+    "daily_excess_return",
+    "cumulative_excess_return",
+    "rank_by_horizon",
+    "drawdown_by_horizon",
+    "worst_by_horizon",
+    "upside_by_horizon",
+    "rank_20d",
+    "max_drawdown_20d",
+    "worst_1d_20d",
+    "upside_20d",
+)
+
+
 def _label_array_specs(horizon: int, cumulative_horizons: tuple[int, ...]) -> dict[str, tuple[int, ...]]:
     cumulative_count = len(cumulative_horizons)
     return {
+        "daily_return": (int(horizon),),
+        "benchmark_daily_return": (int(horizon),),
         "daily_excess_return": (int(horizon),),
+        "cumulative_return": (cumulative_count,),
+        "benchmark_cumulative_return": (cumulative_count,),
         "cumulative_excess_return": (cumulative_count,),
+        "cumulative_return_1to20": (int(horizon),),
+        "benchmark_cumulative_return_1to20": (int(horizon),),
+        "cumulative_excess_return_1to20": (int(horizon),),
+        "rank_1to20": (int(horizon),),
         "rank_by_horizon": (cumulative_count,),
+        "industry_rank_by_horizon": (cumulative_count,),
         "drawdown_by_horizon": (cumulative_count,),
         "worst_by_horizon": (cumulative_count,),
         "upside_by_horizon": (cumulative_count,),
@@ -1686,7 +1726,19 @@ def _label_array_specs(horizon: int, cumulative_horizons: tuple[int, ...]) -> di
         "max_drawdown_20d": (),
         "worst_1d_20d": (),
         "upside_20d": (),
+        "entry_tradeable": (),
+        "entry_limit_up_buy_blocked": (),
+        "entry_suspended_or_no_open": (),
+        "forward_tradeable_ratio_by_horizon": (cumulative_count,),
     }
+
+
+def _common_sharded_label_arrays(shards: list[dict[str, Any]]) -> set[str]:
+    names: set[str] | None = None
+    for shard in shards:
+        arrays = set(dict(dict(shard.get("label_manifest", {}) or {}).get("arrays", {}) or {}).keys())
+        names = arrays if names is None else names & arrays
+    return set() if names is None else set(names)
 
 
 def _open_pack_label_arrays(manifest: dict[str, Any]) -> dict[str, np.memmap]:
@@ -2178,7 +2230,16 @@ def build_qdp_training_pack(
 
     horizon = int(dataset.manifest.get("horizon", PATH20_HORIZON) or PATH20_HORIZON)
     cumulative_horizons = dataset.cumulative_horizons
-    label_specs = _label_array_specs(horizon, cumulative_horizons)
+    all_label_specs = _label_array_specs(horizon, cumulative_horizons)
+    common_label_arrays = _common_sharded_label_arrays(completed_shards)
+    missing_required = sorted(set(_REQUIRED_QDP_LABEL_ARRAYS) - set(common_label_arrays))
+    if missing_required:
+        raise ValueError(f"qdp_training_pack_source_missing_required_label_arrays: {missing_required}")
+    label_specs = {
+        name: shape
+        for name, shape in all_label_specs.items()
+        if name in common_label_arrays
+    }
     label_dir = root / "labels"
     label_dir.mkdir(parents=True, exist_ok=True)
     label_arrays_manifest: dict[str, dict[str, Any]] = {}
@@ -2237,6 +2298,9 @@ def build_qdp_training_pack(
         "features_are_normalized": True,
         "normalization": dict(dataset.normalization_manifest),
         "label_arrays": label_arrays_manifest,
+        "label_array_names": list(label_arrays_manifest.keys()),
+        "label_schema_name": str(source_manifest.get("label_schema_name", source_manifest.get("label_metadata", {}).get("label_schema_name", "")) or ""),
+        "label_schema_version": int(source_manifest.get("label_schema_version", source_manifest.get("label_metadata", {}).get("label_schema_version", 1)) or 1),
         "static_context_schema": dict(dataset.manifest.get("static_context_schema", {}) or {"enabled": False}),
         "static_context_ids": static_context_meta,
         "lookback_days": int(dataset.lookback_days),

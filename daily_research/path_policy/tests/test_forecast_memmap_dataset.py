@@ -34,7 +34,7 @@ def _write_float_memmap(path, values: np.ndarray) -> None:
     store.flush()
 
 
-def _write_qdp_fixture_shard(root, *, year: int, stocks: tuple[str, ...], feature_columns: list[str]) -> dict:
+def _write_qdp_fixture_shard(root, *, year: int, stocks: tuple[str, ...], feature_columns: list[str], include_label_v2: bool = False) -> dict:
     dates = [pd.Timestamp(item).strftime("%Y-%m-%d") for item in pd.bdate_range(f"{year}-01-01", periods=6)]
     shard_dir = root / f"year={year}" / "block=0000"
     feature_shape = (len(dates), len(stocks), len(feature_columns))
@@ -61,6 +61,25 @@ def _write_qdp_fixture_shard(root, *, year: int, stocks: tuple[str, ...], featur
         "worst_1d_20d": np.full((len(dates), len(stocks)), -0.01, dtype=np.float32),
         "upside_20d": np.full((len(dates), len(stocks)), 0.03, dtype=np.float32),
     }
+    if include_label_v2:
+        rank = np.tile(np.arange(len(stocks), dtype=np.float32).reshape(1, len(stocks), 1), (len(dates), 1, 1))
+        arrays.update(
+            {
+                "daily_return": np.full((len(dates), len(stocks), horizon), 0.02, dtype=np.float32),
+                "benchmark_daily_return": np.full((len(dates), len(stocks), horizon), 0.01, dtype=np.float32),
+                "cumulative_return": np.full((len(dates), len(stocks), 1), 0.02, dtype=np.float32),
+                "benchmark_cumulative_return": np.full((len(dates), len(stocks), 1), 0.01, dtype=np.float32),
+                "cumulative_return_1to20": np.full((len(dates), len(stocks), horizon), 0.02, dtype=np.float32),
+                "benchmark_cumulative_return_1to20": np.full((len(dates), len(stocks), horizon), 0.01, dtype=np.float32),
+                "cumulative_excess_return_1to20": np.full((len(dates), len(stocks), horizon), 0.01, dtype=np.float32),
+                "rank_1to20": rank,
+                "industry_rank_by_horizon": rank,
+                "entry_tradeable": np.ones((len(dates), len(stocks)), dtype=np.float32),
+                "entry_limit_up_buy_blocked": np.zeros((len(dates), len(stocks)), dtype=np.float32),
+                "entry_suspended_or_no_open": np.zeros((len(dates), len(stocks)), dtype=np.float32),
+                "forward_tradeable_ratio_by_horizon": np.ones((len(dates), len(stocks), 1), dtype=np.float32),
+            }
+        )
     label_entries = {}
     for name, values in arrays.items():
         path = labels_dir / f"{name}.dat"
@@ -73,6 +92,8 @@ def _write_qdp_fixture_shard(root, *, year: int, stocks: tuple[str, ...], featur
         "horizon": horizon,
         "cumulative_horizons": cumulative_horizons,
         "arrays": label_entries,
+        "label_schema_name": "path20_basic_v2" if include_label_v2 else "path20_legacy_v1",
+        "label_schema_version": 2 if include_label_v2 else 1,
         "label_metadata": {"execution_mode": "next_open"},
     }
     label_manifest_path = shard_dir / "labels_manifest.json"
@@ -318,6 +339,66 @@ def test_qdp_training_pack_loads_stock_major_features_and_sample_labels(tmp_path
     assert tuple(y_risk.shape) == (1, 1, 3)
     assert int(row_idx[0].item()) == validation_row
     assert tuple(static_ids.shape) == (1, 3)
+
+
+def test_qdp_training_pack_preserves_optional_basic_v2_labels(tmp_path) -> None:
+    stocks = ("AAA.SZ", "BBB.SH")
+    feature_columns = ["feature_a", "feature_b"]
+    shards = [
+        _write_qdp_fixture_shard(tmp_path, year=year, stocks=stocks, feature_columns=feature_columns, include_label_v2=True)
+        for year in (2019, 2020, 2021)
+    ]
+    manifest = {
+        "artifact_type": "qdp_sharded_memmap",
+        "profile": "style_structural_alpha_v2",
+        "feature_profile": "style_structural_alpha_v2",
+        "canonical_dataset_id": "policy_input_bundle__unit",
+        "source_pool_view_id": "policy_pool_view__unit",
+        "source_pool_view_kind": "tradeable_mainboard",
+        "lookback_days": 3,
+        "horizon": 1,
+        "forecast_horizon": 1,
+        "execution_mode": "next_open",
+        "cumulative_horizons": [1],
+        "feature_columns": feature_columns,
+        "feature_count": len(feature_columns),
+        "label_schema_name": "path20_basic_v2",
+        "label_schema_version": 2,
+        "static_context_schema": {
+            "enabled": True,
+            "fields": ["symbol", "exchange", "industry"],
+            "id_columns": ["symbol_id", "exchange_id", "industry_id"],
+            "vocab_sizes": {"symbol": 3, "exchange": 3, "industry": 12},
+            "embedding_defaults": {"symbol": 16, "exchange": 4, "industry": 8, "dropout": 0.2},
+        },
+        "shards": shards,
+    }
+    source_manifest_path = tmp_path / "sharded_memmap_manifest.json"
+    source_manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    pack_manifest = build_qdp_training_pack(
+        source_manifest_path,
+        output_root=tmp_path / "training_pack",
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        max_samples_per_role=4,
+        feature_dtype="float32",
+    )
+    loaded = load_forecast_memmap_dataset(pack_manifest["manifest_json"])
+
+    assert pack_manifest["label_schema_version"] == 2
+    assert "daily_return" in pack_manifest["label_arrays"]
+    assert "cumulative_excess_return_1to20" in pack_manifest["label_arrays"]
+    assert "entry_tradeable" in pack_manifest["label_arrays"]
+    assert isinstance(loaded, ForecastTrainingPackDataset)
+    assert loaded.y_daily_return is not None
+    assert loaded.y_cum_excess_1to20 is not None
+    assert loaded.y_entry_tradeable is not None
+    np.testing.assert_allclose(loaded.y_daily_return[0], np.asarray([0.02], dtype=np.float32))
+    np.testing.assert_allclose(loaded.y_cum_excess_1to20[0], np.asarray([0.01], dtype=np.float32))
+    assert float(loaded.y_entry_tradeable[0]) == 1.0
 
 
 def test_qdp_training_pack_loader_applies_sample_cap_without_misalignment(tmp_path) -> None:

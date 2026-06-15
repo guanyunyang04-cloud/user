@@ -5,6 +5,8 @@ import pandas as pd
 
 from daily_research.baseline.advanced_ml_runtime import HistoryWindow
 from daily_research.continuous_policy.state_builder import PreparedPolicyInputs
+from daily_research.path_policy.labels import build_path20_labels
+from daily_research.path_policy.tests.fixtures import make_prepared_policy_inputs
 from quant_data_platform.cli import main as cli_main
 from quant_data_platform.core.json_io import read_json, write_json
 from quant_data_platform.core.paths import qdp_paths
@@ -15,6 +17,7 @@ from quant_data_platform.memmap.sharded import (
     _project_feature_store_to_schema,
     _slice_prepared_for_symbols,
     _symbol_blocks,
+    _write_label_store,
     _write_sample_index,
     validate_sharded_memmap_manifest,
 )
@@ -272,6 +275,38 @@ def test_build_shards_parallel_uses_worker_safe_shard_writes(tmp_path, monkeypat
     assert sorted(results) == ["year=2024/block=0000", "year=2024/block=0001"]
     assert (tmp_path / "progress.json").exists()
     assert all(item["status"] == "completed" for item in results.values())
+
+
+def test_write_label_store_writes_basic_v2_arrays(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=30, stocks=("AAA.SZ", "BBB.SH"))
+    labels = build_path20_labels(prepared, execution_mode="next_open", horizon=3, cumulative_horizons=(1, 3))
+    dates = list(prepared.close.index[:5])
+    symbols = list(prepared.close.columns)
+
+    manifest = _write_label_store(
+        shard_dir=tmp_path,
+        labels=labels,
+        dates=dates,
+        symbols=symbols,
+        horizon=3,
+        cumulative_horizons=(1, 3),
+    )
+
+    arrays = dict(manifest["arrays"])
+    assert manifest["label_schema_version"] == 2
+    assert arrays["daily_return"]["shape"] == [5, 2, 3]
+    assert arrays["benchmark_daily_return"]["shape"] == [5, 2, 3]
+    assert arrays["cumulative_excess_return_1to20"]["shape"] == [5, 2, 3]
+    assert arrays["rank_1to20"]["shape"] == [5, 2, 3]
+    assert arrays["industry_rank_by_horizon"]["shape"] == [5, 2, 2]
+    assert arrays["entry_tradeable"]["shape"] == [5, 2]
+    benchmark = np.memmap(
+        arrays["benchmark_daily_return"]["path"],
+        dtype="float32",
+        mode="r",
+        shape=tuple(arrays["benchmark_daily_return"]["shape"]),
+    )
+    np.testing.assert_allclose(np.asarray(benchmark)[:, 0, :], np.asarray(benchmark)[:, 1, :])
 
 
 def test_write_sample_index_vectorized_filters_valid_rows(tmp_path) -> None:

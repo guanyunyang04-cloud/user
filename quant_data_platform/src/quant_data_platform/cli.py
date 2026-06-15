@@ -8,6 +8,7 @@ from typing import Any
 from quant_data_platform.core.json_io import json_safe
 from quant_data_platform.core.paths import qdp_paths
 from quant_data_platform.core.registry import migrate_legacy_registry, registry_status
+from quant_data_platform.event_packs.traditional_alpha import EventPackConfig, build_traditional_event_alpha_pack
 from quant_data_platform.lake.adapters import audit_inventory, build_bundle, bundle_summary_dict, cleanup_dry_run
 from quant_data_platform.memmap.incremental import (
     IncrementalPlanConfig,
@@ -118,6 +119,24 @@ def build_parser() -> argparse.ArgumentParser:
     training_pack.add_argument("--stock-chunk-size", type=int, default=64)
     training_pack.add_argument("--no-resume", action="store_true")
     training_pack.add_argument("--json", action="store_true")
+
+    event_pack = sub.add_parser("build-event-pack", help="Build a candidate event-level research dataset managed by QDP.")
+    event_pack.add_argument("--source-training-pack", default="")
+    event_pack.add_argument("--pit-root", default="")
+    event_pack.add_argument("--output-root", default="")
+    event_pack.add_argument("--tag", default="traditional_event_alpha_v1_candidate")
+    event_pack.add_argument("--start-year", type=int, default=2024)
+    event_pack.add_argument("--end-year", type=int, default=2024)
+    event_pack.add_argument("--max-events-per-year", type=int, default=512)
+    event_pack.add_argument("--warmup-years", type=int, default=1)
+    event_pack.add_argument("--sell-windows", default="1,3,5,10,20")
+    event_pack.add_argument("--min-signal-amount", type=float, default=1.0e8)
+    event_pack.add_argument("--fee-bps", type=float, default=30.0)
+    event_pack.add_argument("--slippage-bps", type=float, default=0.0)
+    event_pack.add_argument("--big-loss-threshold-pct", type=float, default=-5.0)
+    event_pack.add_argument("--feature-chunk-rows", type=int, default=4096)
+    event_pack.add_argument("--write-event-cache", action="store_true")
+    event_pack.add_argument("--json", action="store_true")
 
     cleanup = sub.add_parser("cleanup", help="Generate cleanup dry-run plan. This command never deletes files in v1.")
     cleanup.add_argument("--dry-run", action="store_true", default=True)
@@ -252,6 +271,29 @@ def main(argv: list[str] | None = None) -> int:
                 stock_chunk_size=int(args.stock_chunk_size),
                 resume=not bool(args.no_resume),
             )
+        )
+        _print(payload, as_json=bool(args.json))
+        return 0
+    if args.command == "build-event-pack":
+        payload = build_traditional_event_alpha_pack(
+            EventPackConfig(
+                source_training_pack=str(args.source_training_pack or ""),
+                pit_root=str(args.pit_root or ""),
+                output_root=str(args.output_root or ""),
+                tag=str(args.tag or ""),
+                start_year=int(args.start_year),
+                end_year=int(args.end_year),
+                max_events_per_year=int(args.max_events_per_year),
+                warmup_years=int(args.warmup_years),
+                sell_windows=str(args.sell_windows or ""),
+                min_signal_amount=float(args.min_signal_amount),
+                fee_bps=float(args.fee_bps),
+                slippage_bps=float(args.slippage_bps),
+                big_loss_threshold_pct=float(args.big_loss_threshold_pct),
+                feature_chunk_rows=int(args.feature_chunk_rows),
+                write_event_cache=bool(args.write_event_cache),
+            ),
+            paths=paths,
         )
         _print(payload, as_json=bool(args.json))
         return 0
