@@ -80,6 +80,36 @@ def test_validate_source_study_accepts_summary_dataset_manifest(tmp_path: Path) 
     assert payload["manifest_source"] == "study_summary_dataset_manifest"
 
 
+def test_validate_source_study_accepts_qdp_training_pack_next_open_manifest(tmp_path: Path) -> None:
+    studies = tmp_path / "studies"
+    study = studies / "seed7"
+    _write_json(
+        study / "study_summary.json",
+        {
+            "dataset_manifest": {
+                "artifact_type": "qdp_training_pack_v1",
+                "source_market_dataset_id": "dataset",
+                "source_pool_view_id": "pool",
+                "feature_profile": "feature",
+                "feature_columns": ["ret_1d"],
+                "feature_panel_shape": [3, 4, 1],
+                "execution_mode": "next_open",
+            }
+        },
+    )
+
+    payload = bridge.validate_source_study(
+        study,
+        dataset_id="dataset",
+        pool_view_id="pool",
+        feature_profile="feature",
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["label_semantics"]["label_semantics"] == "next_open_entry_to_future_open"
+    assert payload["label_semantics"]["source"] == "qdp_training_pack_execution_mode"
+
+
 def test_build_v2_score_bridge_writes_research_only_ensemble_panel(tmp_path: Path) -> None:
     studies = tmp_path / "studies"
     _write_source_study(studies, "seed7", score_shift=0.00)

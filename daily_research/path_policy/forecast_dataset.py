@@ -708,7 +708,7 @@ class ForecastTrainingPackDataset:
         feature_panel_path: Path,
         feature_panel_shape: tuple[int, int, int],
         feature_dtype: str,
-        label_arrays: dict[str, np.memmap],
+        label_arrays: dict[str, np.memmap | np.ndarray],
         normalization_manifest: dict[str, Any],
         static_context_ids: np.memmap | np.ndarray | None,
         date_values: list[str],
@@ -1704,7 +1704,31 @@ def _open_pack_label_arrays(manifest: dict[str, Any]) -> dict[str, np.memmap]:
     return arrays
 
 
-def _load_training_pack_forecast_memmap_dataset(manifest_path: Path, manifest: dict[str, Any]) -> ForecastTrainingPackDataset:
+def _slice_pack_label_arrays(
+    label_arrays: dict[str, np.memmap | np.ndarray],
+    row_indices: np.ndarray,
+) -> dict[str, np.ndarray]:
+    rows = np.asarray(row_indices, dtype=np.int64).reshape(-1)
+    return {
+        name: np.asarray(values[rows], dtype=np.float32).copy()
+        for name, values in label_arrays.items()
+    }
+
+
+def _sample_count_by_role(sample_index: pd.DataFrame) -> dict[str, int]:
+    roles = sample_index["role"].astype(str) if "role" in sample_index.columns else pd.Series(dtype=str)
+    ordered_roles = [role for role in ("train", "validation", "test") if role in set(roles.tolist())]
+    ordered_roles.extend(sorted(set(roles.tolist()) - set(ordered_roles)))
+    return {role: int((roles == role).sum()) for role in ordered_roles}
+
+
+def _load_training_pack_forecast_memmap_dataset(
+    manifest_path: Path,
+    manifest: dict[str, Any],
+    *,
+    max_samples_per_role: int = 0,
+    max_samples_per_date_per_role: int = 0,
+) -> ForecastTrainingPackDataset:
     root = manifest_path.parent
     sample_index_path = Path(str(manifest.get("sample_index_path", "") or ""))
     if not sample_index_path.is_absolute():
@@ -1712,6 +1736,7 @@ def _load_training_pack_forecast_memmap_dataset(manifest_path: Path, manifest: d
     if not sample_index_path.exists():
         raise ValueError(f"qdp training pack missing sample_index_path: {sample_index_path}")
     sample_index = pd.read_parquet(sample_index_path)
+    source_sample_count_by_role = _sample_count_by_role(sample_index)
     feature_panel_path = Path(str(manifest.get("feature_panel_path", "") or ""))
     if not feature_panel_path.is_absolute():
         feature_panel_path = root / feature_panel_path
@@ -1729,6 +1754,29 @@ def _load_training_pack_forecast_memmap_dataset(manifest_path: Path, manifest: d
         _validate_memmap_file(static_path, shape=static_shape, label="qdp_training_pack_static_context_ids", dtype=static_dtype)
         static_context_ids = np.memmap(static_path, dtype=static_dtype, mode="r", shape=static_shape)
     label_arrays = _open_pack_label_arrays(manifest)
+    role_cap = max(int(max_samples_per_role), 0)
+    per_date_cap = max(int(max_samples_per_date_per_role), 0)
+    if role_cap > 0 or per_date_cap > 0:
+        indexed_sample_index = sample_index.copy()
+        indexed_sample_index["_pack_row_idx"] = np.arange(len(indexed_sample_index), dtype=np.int64)
+        sample_index = _cap_samples_by_role(
+            indexed_sample_index,
+            max_samples_per_role=role_cap,
+            max_samples_per_date_per_role=per_date_cap,
+        ).reset_index(drop=True)
+        pack_row_indices = sample_index["_pack_row_idx"].to_numpy(dtype=np.int64, copy=False)
+        label_arrays = _slice_pack_label_arrays(label_arrays, pack_row_indices)
+        if static_context_ids is not None:
+            static_context_ids = np.asarray(static_context_ids[pack_row_indices], dtype=np.int64).copy()
+        capped_manifest = dict(manifest)
+        capped_manifest["sample_count"] = int(len(sample_index))
+        capped_manifest["sample_count_by_role"] = _sample_count_by_role(sample_index)
+        capped_manifest["qdp_training_pack_sample_cap_applied"] = True
+        capped_manifest["qdp_training_pack_source_sample_count"] = int(sum(source_sample_count_by_role.values()))
+        capped_manifest["qdp_training_pack_source_sample_count_by_role"] = source_sample_count_by_role
+        capped_manifest["max_samples_per_role"] = int(role_cap)
+        capped_manifest["max_samples_per_date_per_role"] = int(per_date_cap)
+        manifest = capped_manifest
     return ForecastTrainingPackDataset(
         root=root,
         manifest_path=manifest_path,
@@ -2228,7 +2276,12 @@ def load_forecast_memmap_dataset(
     manifest_path = Path(manifest_json)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if str(manifest.get("artifact_type", "")) == "qdp_training_pack_v1":
-        return _load_training_pack_forecast_memmap_dataset(manifest_path, manifest)
+        return _load_training_pack_forecast_memmap_dataset(
+            manifest_path,
+            manifest,
+            max_samples_per_role=int(max_samples_per_role),
+            max_samples_per_date_per_role=int(max_samples_per_date_per_role),
+        )
     if str(manifest.get("artifact_type", "")) == "qdp_sharded_memmap":
         return _load_qdp_sharded_forecast_memmap_dataset(
             manifest_path,

@@ -155,7 +155,15 @@ def validate_source_study(
     if str(manifest.get("feature_profile", "")) != str(feature_profile):
         blockers.append("feature_profile_mismatch")
     label_semantics = dict(manifest.get("label_semantics", {}) or {})
-    if str(label_semantics.get("label_semantics", "")) != "next_open_entry_to_future_open":
+    has_next_open_labels = str(label_semantics.get("label_semantics", "")) == "next_open_entry_to_future_open"
+    if not has_next_open_labels and str(manifest.get("artifact_type", "")) == "qdp_training_pack_v1":
+        has_next_open_labels = str(manifest.get("execution_mode", "")).strip().lower() in {"next_open", "next-open"}
+        if has_next_open_labels:
+            label_semantics = {
+                "label_semantics": "next_open_entry_to_future_open",
+                "source": "qdp_training_pack_execution_mode",
+            }
+    if not has_next_open_labels:
         blockers.append("label_semantics_mismatch")
     return {
         "status": "ok" if not blockers else "blocked",

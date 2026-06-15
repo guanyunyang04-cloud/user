@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -1148,6 +1149,61 @@ def test_train_forecast_models_resumes_from_strict_last_checkpoint(tmp_path) -> 
         weights_only=False,
     )
     assert resumed_last["epoch"] == 2
+
+
+def test_train_forecast_models_can_resume_for_evaluation_only_at_checkpoint_epoch(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
+    dataset = build_forecast_sequence_dataset(
+        prepared,
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=8,
+    )
+    first_summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "first",
+        model_families=("linear_last_day",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=5,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=24,
+        dropout=0.0,
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+    )
+    resume_path = first_summary["models"]["linear_last_day"]["seed_summaries"]["7"]["last_checkpoint_pt"]
+
+    eval_summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "eval_only",
+        model_families=("linear_last_day",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=5,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=24,
+        dropout=0.0,
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+        resume_from=resume_path,
+    )
+
+    seed_summary = eval_summary["models"]["linear_last_day"]["seed_summaries"]["7"]
+    assert eval_summary["status"] == "completed"
+    assert eval_summary["resume_from_checkpoint_pt"] == str(Path(resume_path).resolve())
+    assert seed_summary["resume_start_epoch"] == 2
+    assert seed_summary["epochs_ran"] == 1
+    assert seed_summary["stopped_reason"] == "resume_evaluation_only"
+    assert (tmp_path / "eval_only" / "forecast_predictions_test.csv").exists()
 
 
 def test_train_forecast_models_rejects_resume_checkpoint_contract_mismatch(tmp_path) -> None:

@@ -6,7 +6,10 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from daily_research.path_policy.personal_topk_diagnostics import build_personal_topk_diagnostics
+from daily_research.path_policy.personal_topk_diagnostics import (
+    build_personal_topk_diagnostics,
+    build_personal_topk_diagnostics_from_frame,
+)
 
 
 def test_personal_topk_diagnostics_scores_concentrated_selection(tmp_path: Path) -> None:
@@ -37,6 +40,7 @@ def test_personal_topk_diagnostics_scores_concentrated_selection(tmp_path: Path)
         score_columns=("pred_cum_mu_5d",),
         horizons=(5,),
         top_ks=(1, 2),
+        selection_min_date_count=2,
         round_trip_cost_bps=10.0,
     )
 
@@ -57,4 +61,47 @@ def test_personal_topk_diagnostics_scores_concentrated_selection(tmp_path: Path)
 
     saved = json.loads(Path(report["outputs"]["report_json"]).read_text(encoding="utf-8"))
     assert saved["contract"]["not_a_backtest"] is True
+    assert saved["contract"]["selection_profile"] == "personal_topk_v1"
     assert saved["leaderboard"][0]["top_k"] == 1
+    assert saved["selected_candidate"]["score_column"] == "pred_cum_mu_5d"
+    assert saved["selected_candidate"]["top_k"] == 1
+    assert saved["selected_candidate"]["horizon"] == 5
+    assert saved["selected_candidate"]["personal_selection_score"] > 0
+
+
+def test_personal_topk_diagnostics_from_frame_uses_selection_filters(tmp_path: Path) -> None:
+    rows = []
+    for date in ("2025-01-02", "2025-01-03", "2025-01-06"):
+        for stock, score, future, rank in [
+            ("AAA", 1.0, 0.040, 0.90),
+            ("BBB", 0.8, 0.030, 0.80),
+            ("CCC", 0.1, -0.010, 0.30),
+        ]:
+            rows.append(
+                {
+                    "date": date,
+                    "stock": stock,
+                    "pred_cum_mu_5d": score,
+                    "future_cum_excess_return_5d": future,
+                    "future_rank_5d": rank,
+                }
+            )
+    report = build_personal_topk_diagnostics_from_frame(
+        frame=pd.DataFrame(rows),
+        output_root=tmp_path / "diag_frame",
+        score_columns=("pred_cum_mu_5d",),
+        horizons=(5,),
+        top_ks=(1, 2),
+        selection_top_ks=(2,),
+        selection_horizons=(5,),
+        selection_min_date_count=2,
+        round_trip_cost_bps=10.0,
+    )
+
+    assert report["status"] == "completed"
+    assert report["selected_candidate"]["top_k"] == 2
+    summary = pd.read_csv(report["outputs"]["summary_csv"])
+    top1 = summary[summary["top_k"] == 1].iloc[0]
+    top2 = summary[summary["top_k"] == 2].iloc[0]
+    assert bool(top1["personal_selection_eligible"]) is False
+    assert bool(top2["personal_selection_eligible"]) is True

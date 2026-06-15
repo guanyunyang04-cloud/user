@@ -3189,6 +3189,8 @@ def train_forecast_models(
         prefetch_factor=int(prefetch_factor),
     )
     static_model_options = _static_context_model_options(dataset_view)
+    single_candidate_run = len(families) == 1 and len(seed_values) == 1
+    selected_output_cache: dict[str, Any] = {}
 
     for family in families:
         seed_summaries: dict[str, dict[str, Any]] = {}
@@ -3337,9 +3339,13 @@ def train_forecast_models(
                 scaler.load_state_dict(resume_payload["scaler_state_dict"])
                 _restore_forecast_rng_state(resume_payload, generator)
                 resume_from_checkpoint_pt = str(Path(resume_from).resolve()) if resume_from is not None else ""
-                resume_start_epoch = int(resume_payload.get("epoch", 0)) + 1
+                resume_checkpoint_epoch = int(resume_payload.get("epoch", 0))
+                resume_start_epoch = resume_checkpoint_epoch + 1
                 if resume_start_epoch > max_epochs:
-                    raise ValueError("--forecast-resume-from epoch must be lower than --forecast-epochs.")
+                    if resume_checkpoint_epoch == max_epochs:
+                        stopped_reason = "resume_evaluation_only"
+                    else:
+                        raise ValueError("--forecast-resume-from epoch must be lower than or equal to --forecast-epochs.")
                 best_score = float(resume_payload.get("best_score", -float("inf")) or -float("inf"))
                 best_epoch = int(resume_payload.get("best_epoch", 0) or 0)
                 best_validation_loss = float(resume_payload.get("best_validation_loss", float("inf")) or float("inf"))
@@ -3813,15 +3819,6 @@ def train_forecast_models(
                 amp_enabled=amp_enabled,
                 target_scale=target_scale,
             )
-            test_predictions = _predict_indices(
-                model,
-                dataset_view if dataset_view.dataset_mode == "memmap" else x,
-                test_indices,
-                batch_size=batch_size,
-                device=resolved_device,
-                amp_enabled=amp_enabled,
-                target_scale=target_scale,
-            )
             validation_frame = _prediction_frame_for_dataset_indices(
                 dataset,
                 indices=validation_indices,
@@ -3832,6 +3829,31 @@ def train_forecast_models(
                 decision_hit_threshold_bps=decision_hit_threshold_bps,
                 decision_drawdown_penalty=decision_drawdown_penalty,
                 loss_profile=loss_profile,
+            )
+            final_validation_metrics = forecast_prediction_metrics(validation_frame)
+            if bool(write_all_predictions):
+                _write_frame(
+                    study_root / f"forecast_predictions_validation_{family}_seed{int(current_seed)}.csv",
+                    validation_frame,
+                )
+            if single_candidate_run:
+                selected_output_cache["model_family"] = str(family)
+                selected_output_cache["seed"] = int(current_seed)
+                selected_output_cache["validation_csv"] = _write_frame(
+                    study_root / "forecast_predictions_validation.csv",
+                    validation_frame,
+                )
+                selected_output_cache["validation_stratified_metrics"] = stratified_forecast_prediction_metrics(validation_frame)
+            del validation_predictions, validation_frame
+
+            test_predictions = _predict_indices(
+                model,
+                dataset_view if dataset_view.dataset_mode == "memmap" else x,
+                test_indices,
+                batch_size=batch_size,
+                device=resolved_device,
+                amp_enabled=amp_enabled,
+                target_scale=target_scale,
             )
             test_frame = _prediction_frame_for_dataset_indices(
                 dataset,
@@ -3844,8 +3866,19 @@ def train_forecast_models(
                 decision_drawdown_penalty=decision_drawdown_penalty,
                 loss_profile=loss_profile,
             )
-            final_validation_metrics = forecast_prediction_metrics(validation_frame)
             final_test_metrics = forecast_prediction_metrics(test_frame)
+            if bool(write_all_predictions):
+                _write_frame(
+                    study_root / f"forecast_predictions_test_{family}_seed{int(current_seed)}.csv",
+                    test_frame,
+                )
+            if single_candidate_run:
+                selected_output_cache["test_csv"] = _write_frame(
+                    study_root / "forecast_predictions_test.csv",
+                    test_frame,
+                )
+                selected_output_cache["test_stratified_metrics"] = stratified_forecast_prediction_metrics(test_frame)
+            del test_predictions, test_frame
             slot_diagnostics_path = ""
             if bool(slot_diagnostics) and family == "sector_slot_mixer_sequence":
                 slot_diagnostics_path = _write_slot_diagnostics(
@@ -3869,15 +3902,6 @@ def train_forecast_models(
                 (0.65, 0.95),
                 "decision_utility",
             )
-            if bool(write_all_predictions):
-                _write_frame(
-                    study_root / f"forecast_predictions_validation_{family}_seed{int(current_seed)}.csv",
-                    validation_frame,
-                )
-                _write_frame(
-                    study_root / f"forecast_predictions_test_{family}_seed{int(current_seed)}.csv",
-                    test_frame,
-                )
             seed_summaries[str(int(current_seed))] = {
                 "status": "completed",
                 "model_family": family,
@@ -3950,9 +3974,23 @@ def train_forecast_models(
         model_summaries.get(selected_family, {}).get("seed_summaries", {}).get(str(int(selected_seed)), {})
     )
     selected_checkpoint_path = str(selected_seed_summary.get("checkpoint_pt", "") or "")
-    selected_predictions_validation: pd.DataFrame
-    selected_predictions_test: pd.DataFrame
-    if selected_family and selected_seed and selected_checkpoint_path:
+    validation_csv = ""
+    test_csv = ""
+    validation_stratified_metrics: dict[str, Any] = {}
+    test_stratified_metrics: dict[str, Any] = {}
+    cache_matches_selected = (
+        bool(selected_output_cache)
+        and str(selected_output_cache.get("model_family", "")) == str(selected_family)
+        and int(selected_output_cache.get("seed", -1)) == int(selected_seed)
+        and str(selected_output_cache.get("validation_csv", "")).strip()
+        and str(selected_output_cache.get("test_csv", "")).strip()
+    )
+    if cache_matches_selected:
+        validation_csv = str(selected_output_cache.get("validation_csv", ""))
+        test_csv = str(selected_output_cache.get("test_csv", ""))
+        validation_stratified_metrics = dict(selected_output_cache.get("validation_stratified_metrics", {}) or {})
+        test_stratified_metrics = dict(selected_output_cache.get("test_stratified_metrics", {}) or {})
+    elif selected_family and selected_seed and selected_checkpoint_path:
         selected_model = make_forecast_model(
             selected_family,
             input_dim=int(dataset_view.input_dim),
@@ -3978,15 +4016,6 @@ def train_forecast_models(
             amp_enabled=amp_enabled,
             target_scale=target_scale,
         )
-        test_predictions_np = _predict_indices(
-            selected_model,
-            dataset_view if dataset_view.dataset_mode == "memmap" else x,
-            test_indices,
-            batch_size=batch_size,
-            device=resolved_device,
-            amp_enabled=amp_enabled,
-            target_scale=target_scale,
-        )
         selected_predictions_validation = _prediction_frame_for_dataset_indices(
             dataset,
             indices=validation_indices,
@@ -3997,6 +4026,19 @@ def train_forecast_models(
             decision_hit_threshold_bps=decision_hit_threshold_bps,
             decision_drawdown_penalty=decision_drawdown_penalty,
             loss_profile=loss_profile,
+        )
+        validation_csv = _write_frame(study_root / "forecast_predictions_validation.csv", selected_predictions_validation)
+        validation_stratified_metrics = stratified_forecast_prediction_metrics(selected_predictions_validation)
+        del validation_predictions_np, selected_predictions_validation
+
+        test_predictions_np = _predict_indices(
+            selected_model,
+            dataset_view if dataset_view.dataset_mode == "memmap" else x,
+            test_indices,
+            batch_size=batch_size,
+            device=resolved_device,
+            amp_enabled=amp_enabled,
+            target_scale=target_scale,
         )
         selected_predictions_test = _prediction_frame_for_dataset_indices(
             dataset,
@@ -4009,17 +4051,12 @@ def train_forecast_models(
             decision_drawdown_penalty=decision_drawdown_penalty,
             loss_profile=loss_profile,
         )
+        test_csv = _write_frame(study_root / "forecast_predictions_test.csv", selected_predictions_test)
+        test_stratified_metrics = stratified_forecast_prediction_metrics(selected_predictions_test)
+        del test_predictions_np, selected_predictions_test
     else:
-        selected_predictions_validation = pd.DataFrame()
-        selected_predictions_test = pd.DataFrame()
-    validation_predictions = (
-        selected_predictions_validation if selected_family else pd.DataFrame()
-    )
-    test_predictions = (
-        selected_predictions_test if selected_family else pd.DataFrame()
-    )
-    validation_csv = _write_frame(study_root / "forecast_predictions_validation.csv", validation_predictions)
-    test_csv = _write_frame(study_root / "forecast_predictions_test.csv", test_predictions)
+        validation_csv = _write_frame(study_root / "forecast_predictions_validation.csv", pd.DataFrame())
+        test_csv = _write_frame(study_root / "forecast_predictions_test.csv", pd.DataFrame())
     validation_metrics = dict(selected_seed_summary.get("validation_metrics", {}))
     test_metrics = dict(selected_seed_summary.get("test_metrics", {}))
     verdict = forecast_evidence_verdict(
@@ -4104,8 +4141,8 @@ def train_forecast_models(
         "progress_json": str(progress_path.resolve()),
         "resume_from_checkpoint_pt": str(Path(resume_from).resolve()) if resume_from is not None and str(resume_from).strip() else "",
         "dataset_mode": dataset_view.dataset_mode,
-        "validation_stratified_metrics": stratified_forecast_prediction_metrics(validation_predictions),
-        "test_stratified_metrics": stratified_forecast_prediction_metrics(test_predictions),
+        "validation_stratified_metrics": validation_stratified_metrics,
+        "test_stratified_metrics": test_stratified_metrics,
         "shadow_only": True,
         "promotion_allowed": False,
         "active_execution_strategy_expected_diff": "none",

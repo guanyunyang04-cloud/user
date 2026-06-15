@@ -13,6 +13,8 @@ import pandas as pd
 
 DEFAULT_HORIZONS = (1, 3, 5, 10, 20)
 DEFAULT_TOP_KS = (1, 3, 5, 10, 20)
+DEFAULT_SELECTION_TOP_KS = (1, 3, 5)
+DEFAULT_SELECTION_HORIZONS = (5, 10, 20)
 DEFAULT_SCORE_COLUMNS = (
     "pred_decision_score",
     "pred_cum_mu_1d",
@@ -344,28 +346,111 @@ def _leaderboard(summary: pd.DataFrame, *, limit: int = 20) -> list[dict[str, An
     return [dict(row) for row in ranked.loc[:, available].to_dict(orient="records")]
 
 
-def build_personal_topk_diagnostics(
+def _finite_float(value: Any, default: float = 0.0) -> float:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    return out if math.isfinite(out) else float(default)
+
+
+def _personal_topk_score(row: pd.Series) -> float:
+    net = _finite_float(row.get("net_mean"))
+    excess = _finite_float(row.get("excess_vs_all_mean"))
+    hit_lift = _finite_float(row.get("hit_rate_mean"), 0.5) - 0.5
+    month_lift = _finite_float(row.get("positive_month_rate"), 0.5) - 0.5
+    rank_lift = _finite_float(row.get("selected_future_rank_mean"), 0.5) - 0.5
+    sharpe = max(min(_finite_float(row.get("window_sharpe_like")), 3.0), -3.0)
+    worst_month = _finite_float(row.get("worst_month_mean"))
+    net_p25 = _finite_float(row.get("net_p25"))
+    drawdown = _finite_float(row.get("selected_max_drawdown_mean"))
+    instability_penalty = (
+        0.35 * max(0.0, -worst_month)
+        + 0.15 * max(0.0, -net_p25)
+        + 0.10 * max(0.0, -drawdown - 0.05)
+    )
+    utility = (
+        net
+        + 0.50 * excess
+        + 0.020 * hit_lift
+        + 0.015 * month_lift
+        + 0.010 * rank_lift
+        + 0.001 * sharpe
+        - instability_penalty
+    )
+    return float(utility * 10000.0)
+
+
+def _add_personal_selection_scores(
+    summary: pd.DataFrame,
     *,
-    prediction_csv: str | Path,
-    output_root: str | Path | None = None,
-    run_tag: str = "personal_topk_diagnostics",
-    score_columns: str | Iterable[str] | None = None,
-    horizons: str | Iterable[int] | None = None,
-    top_ks: str | Iterable[int] | None = None,
-    round_trip_cost_bps: float = 20.0,
-    leaderboard_limit: int = 20,
+    selection_top_ks: tuple[int, ...],
+    selection_horizons: tuple[int, ...],
+    min_date_count: int,
+) -> pd.DataFrame:
+    if summary.empty:
+        return summary.copy()
+    out = summary.copy()
+    eligible = (
+        out["top_k"].astype(int).isin([int(item) for item in selection_top_ks])
+        & out["horizon"].astype(int).isin([int(item) for item in selection_horizons])
+        & (pd.to_numeric(out["date_count"], errors="coerce").fillna(0) >= int(min_date_count))
+    )
+    out["personal_selection_eligible"] = eligible.astype(bool)
+    out["personal_selection_score"] = out.apply(_personal_topk_score, axis=1)
+    out.loc[~out["personal_selection_eligible"], "personal_selection_score"] = np.nan
+    out["personal_selection_profile"] = "personal_topk_v1"
+    return out
+
+
+def _selection_leaderboard(summary: pd.DataFrame, *, limit: int = 20) -> list[dict[str, Any]]:
+    if summary.empty or "personal_selection_score" not in summary.columns:
+        return []
+    if "personal_selection_eligible" not in summary.columns:
+        return []
+    work = summary.loc[summary["personal_selection_eligible"].astype(bool)].copy()
+    work = work.loc[pd.to_numeric(work["personal_selection_score"], errors="coerce").notna()].copy()
+    if work.empty:
+        return []
+    cols = [
+        "score_column",
+        "top_k",
+        "horizon",
+        "date_count",
+        "personal_selection_score",
+        "net_mean",
+        "excess_vs_all_mean",
+        "hit_rate_mean",
+        "positive_month_rate",
+        "worst_month_mean",
+        "window_sharpe_like",
+        "selected_future_rank_mean",
+    ]
+    available = [column for column in cols if column in work.columns]
+    ranked = work.sort_values(
+        ["personal_selection_score", "net_mean", "positive_month_rate", "hit_rate_mean"],
+        ascending=[False, False, False, False],
+    ).head(int(limit))
+    return [dict(row) for row in ranked.loc[:, available].to_dict(orient="records")]
+
+
+def _build_personal_topk_report(
+    *,
+    frame: pd.DataFrame,
+    prediction_csv: str,
+    output_root: str | Path,
+    run_tag: str,
+    resolved_scores: tuple[str, ...],
+    resolved_horizons: tuple[int, ...],
+    resolved_top_ks: tuple[int, ...],
+    selection_top_ks: tuple[int, ...],
+    selection_horizons: tuple[int, ...],
+    selection_min_date_count: int,
+    round_trip_cost_bps: float,
+    leaderboard_limit: int,
 ) -> dict[str, Any]:
-    prediction_path = Path(prediction_csv)
-    resolved_horizons = _parse_csv_ints(horizons, default=DEFAULT_HORIZONS)
-    requested_scores = _parse_csv_strings(score_columns)
-    columns = _header(prediction_path)
-    resolved_scores = _available_score_columns(columns, requested_scores)
-    if not resolved_scores:
-        raise ValueError(f"no usable score columns found: requested={requested_scores or DEFAULT_SCORE_COLUMNS}")
-    resolved_top_ks = _parse_csv_ints(top_ks, default=DEFAULT_TOP_KS)
-    root = Path(output_root) if output_root is not None else prediction_path.parent / str(run_tag)
+    root = Path(output_root)
     root.mkdir(parents=True, exist_ok=True)
-    frame = _load_predictions(prediction_path, score_columns=resolved_scores, horizons=resolved_horizons)
     daily = _build_daily_rows(
         frame,
         score_columns=resolved_scores,
@@ -373,21 +458,37 @@ def build_personal_topk_diagnostics(
         top_ks=resolved_top_ks,
         round_trip_cost_bps=float(round_trip_cost_bps),
     )
-    summary = _summarize_daily(daily)
+    summary = _add_personal_selection_scores(
+        _summarize_daily(daily),
+        selection_top_ks=selection_top_ks,
+        selection_horizons=selection_horizons,
+        min_date_count=int(selection_min_date_count),
+    )
     daily_path = _write_frame(root / "personal_topk_daily.csv", daily)
     summary_path = _write_frame(root / "personal_topk_summary.csv", summary)
+    selection_leaderboard = _selection_leaderboard(summary, limit=int(leaderboard_limit))
     report = {
         "status": "completed" if not summary.empty else "empty",
         "created_at": _now(),
         "run_tag": str(run_tag),
-        "prediction_csv": str(prediction_path.resolve()),
+        "prediction_csv": str(prediction_csv),
         "output_root": str(root.resolve()),
         "contract": {
             "diagnostic_kind": "forward_selection_topk",
+            "selection_profile": "personal_topk_v1",
+            "selection_score_semantics": "validation-only personal small-capital top-K checkpoint and score-column selection score",
             "not_a_backtest": True,
             "return_semantics": "future cumulative excess return from prediction CSV labels",
             "cost_semantics": "net_forward_excess_return subtracts one approximate round-trip cost from each selected forward window",
             "round_trip_cost_bps": float(round_trip_cost_bps),
+            "selection_top_ks": [int(item) for item in selection_top_ks],
+            "selection_horizons": [int(item) for item in selection_horizons],
+            "selection_min_date_count": int(selection_min_date_count),
+            "selection_score_formula": (
+                "10000 * (net_mean + 0.50*excess_vs_all_mean + 0.020*(hit_rate_mean-0.5) "
+                "+ 0.015*(positive_month_rate-0.5) + 0.010*(selected_future_rank_mean-0.5) "
+                "+ 0.001*clip(window_sharpe_like,-3,3) - instability_penalty)"
+            ),
         },
         "input": {
             "row_count": int(len(frame)),
@@ -404,6 +505,8 @@ def build_personal_topk_diagnostics(
             "summary_csv": summary_path,
         },
         "leaderboard": _leaderboard(summary, limit=int(leaderboard_limit)),
+        "selection_leaderboard": selection_leaderboard,
+        "selected_candidate": selection_leaderboard[0] if selection_leaderboard else {},
     }
     report_path = _write_json(root / "personal_topk_report.json", report)
     report["outputs"]["report_json"] = report_path
@@ -411,6 +514,91 @@ def build_personal_topk_diagnostics(
     report["outputs"]["report_md"] = str((root / "personal_topk_report.md").resolve())
     _write_json(root / "personal_topk_report.json", report)
     return report
+
+
+def build_personal_topk_diagnostics_from_frame(
+    *,
+    frame: pd.DataFrame,
+    output_root: str | Path,
+    run_tag: str = "personal_topk_diagnostics",
+    prediction_label: str = "in_memory_prediction_frame",
+    score_columns: str | Iterable[str] | None = None,
+    horizons: str | Iterable[int] | None = None,
+    top_ks: str | Iterable[int] | None = None,
+    selection_top_ks: str | Iterable[int] | None = None,
+    selection_horizons: str | Iterable[int] | None = None,
+    selection_min_date_count: int = 20,
+    round_trip_cost_bps: float = 20.0,
+    leaderboard_limit: int = 20,
+) -> dict[str, Any]:
+    resolved_horizons = _parse_csv_ints(horizons, default=DEFAULT_HORIZONS)
+    requested_scores = _parse_csv_strings(score_columns)
+    columns = set(frame.columns)
+    resolved_scores = _available_score_columns(columns, requested_scores)
+    if not resolved_scores:
+        raise ValueError(f"no usable score columns found: requested={requested_scores or DEFAULT_SCORE_COLUMNS}")
+    resolved_top_ks = _parse_csv_ints(top_ks, default=DEFAULT_TOP_KS)
+    resolved_selection_top_ks = _parse_csv_ints(selection_top_ks, default=DEFAULT_SELECTION_TOP_KS)
+    resolved_selection_horizons = _parse_csv_ints(selection_horizons, default=DEFAULT_SELECTION_HORIZONS)
+    work = frame.copy()
+    work["date"] = pd.to_datetime(work["date"], errors="coerce")
+    work["stock"] = work["stock"].astype(str).str.strip().str.upper()
+    return _build_personal_topk_report(
+        frame=work.loc[work["date"].notna() & work["stock"].ne("")].copy(),
+        prediction_csv=str(prediction_label),
+        output_root=output_root,
+        run_tag=run_tag,
+        resolved_scores=resolved_scores,
+        resolved_horizons=resolved_horizons,
+        resolved_top_ks=resolved_top_ks,
+        selection_top_ks=resolved_selection_top_ks,
+        selection_horizons=resolved_selection_horizons,
+        selection_min_date_count=int(selection_min_date_count),
+        round_trip_cost_bps=float(round_trip_cost_bps),
+        leaderboard_limit=int(leaderboard_limit),
+    )
+
+
+def build_personal_topk_diagnostics(
+    *,
+    prediction_csv: str | Path,
+    output_root: str | Path | None = None,
+    run_tag: str = "personal_topk_diagnostics",
+    score_columns: str | Iterable[str] | None = None,
+    horizons: str | Iterable[int] | None = None,
+    top_ks: str | Iterable[int] | None = None,
+    selection_top_ks: str | Iterable[int] | None = None,
+    selection_horizons: str | Iterable[int] | None = None,
+    selection_min_date_count: int = 20,
+    round_trip_cost_bps: float = 20.0,
+    leaderboard_limit: int = 20,
+) -> dict[str, Any]:
+    prediction_path = Path(prediction_csv)
+    resolved_horizons = _parse_csv_ints(horizons, default=DEFAULT_HORIZONS)
+    requested_scores = _parse_csv_strings(score_columns)
+    columns = _header(prediction_path)
+    resolved_scores = _available_score_columns(columns, requested_scores)
+    if not resolved_scores:
+        raise ValueError(f"no usable score columns found: requested={requested_scores or DEFAULT_SCORE_COLUMNS}")
+    resolved_top_ks = _parse_csv_ints(top_ks, default=DEFAULT_TOP_KS)
+    resolved_selection_top_ks = _parse_csv_ints(selection_top_ks, default=DEFAULT_SELECTION_TOP_KS)
+    resolved_selection_horizons = _parse_csv_ints(selection_horizons, default=DEFAULT_SELECTION_HORIZONS)
+    root = Path(output_root) if output_root is not None else prediction_path.parent / str(run_tag)
+    frame = _load_predictions(prediction_path, score_columns=resolved_scores, horizons=resolved_horizons)
+    return _build_personal_topk_report(
+        frame=frame,
+        prediction_csv=str(prediction_path.resolve()),
+        output_root=root,
+        run_tag=run_tag,
+        resolved_scores=resolved_scores,
+        resolved_horizons=resolved_horizons,
+        resolved_top_ks=resolved_top_ks,
+        selection_top_ks=resolved_selection_top_ks,
+        selection_horizons=resolved_selection_horizons,
+        selection_min_date_count=int(selection_min_date_count),
+        round_trip_cost_bps=float(round_trip_cost_bps),
+        leaderboard_limit=int(leaderboard_limit),
+    )
 
 
 def _write_markdown(path: Path, report: dict[str, Any]) -> None:
@@ -435,6 +623,46 @@ def _write_markdown(path: Path, report: dict[str, Any]) -> None:
         "",
     ]
     leaderboard = list(report.get("leaderboard", []) or [])
+    selection_leaderboard = list(report.get("selection_leaderboard", []) or [])
+    selected = dict(report.get("selected_candidate", {}) or {})
+    if selected:
+        lines.extend(
+            [
+                "## Selected Candidate",
+                "",
+                "| score | top_k | horizon | personal_score | net_mean | hit_rate | month_pos |",
+                "|---|---:|---:|---:|---:|---:|---:|",
+                "| {score} | {top_k} | {horizon} | {personal:.2f} | {net:.4f} | {hit:.3f} | {month:.3f} |".format(
+                    score=selected.get("score_column", ""),
+                    top_k=int(selected.get("top_k", 0) or 0),
+                    horizon=int(selected.get("horizon", 0) or 0),
+                    personal=float(selected.get("personal_selection_score", 0.0) or 0.0),
+                    net=float(selected.get("net_mean", 0.0) or 0.0),
+                    hit=float(selected.get("hit_rate_mean", 0.0) or 0.0),
+                    month=float(selected.get("positive_month_rate", 0.0) or 0.0),
+                ),
+                "",
+            ]
+        )
+    lines.extend(["## Selection Leaderboard", ""])
+    if selection_leaderboard:
+        lines.append("| score | top_k | horizon | personal_score | net_mean | hit_rate | month_pos |")
+        lines.append("|---|---:|---:|---:|---:|---:|---:|")
+        for row in selection_leaderboard[:20]:
+            lines.append(
+                "| {score} | {top_k} | {horizon} | {personal:.2f} | {net:.4f} | {hit:.3f} | {month:.3f} |".format(
+                    score=row.get("score_column", ""),
+                    top_k=int(row.get("top_k", 0) or 0),
+                    horizon=int(row.get("horizon", 0) or 0),
+                    personal=float(row.get("personal_selection_score", 0.0) or 0.0),
+                    net=float(row.get("net_mean", 0.0) or 0.0),
+                    hit=float(row.get("hit_rate_mean", 0.0) or 0.0),
+                    month=float(row.get("positive_month_rate", 0.0) or 0.0),
+                )
+            )
+    else:
+        lines.append("- No eligible selection rows.")
+    lines.extend(["", "## Net Mean Leaderboard", ""])
     if leaderboard:
         lines.append("| score | top_k | horizon | net_mean | hit_rate | month_pos | rank_mean |")
         lines.append("|---|---:|---:|---:|---:|---:|---:|")
@@ -473,6 +701,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--score-columns", default="")
     parser.add_argument("--horizons", default="1,3,5,10,20")
     parser.add_argument("--top-ks", default="1,3,5,10,20")
+    parser.add_argument("--selection-top-ks", default="1,3,5")
+    parser.add_argument("--selection-horizons", default="5,10,20")
+    parser.add_argument("--selection-min-date-count", type=int, default=20)
     parser.add_argument("--round-trip-cost-bps", type=float, default=20.0)
     parser.add_argument("--leaderboard-limit", type=int, default=20)
     parser.add_argument("--json", action="store_true")
@@ -489,6 +720,9 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         score_columns=args.score_columns or None,
         horizons=args.horizons,
         top_ks=args.top_ks,
+        selection_top_ks=args.selection_top_ks,
+        selection_horizons=args.selection_horizons,
+        selection_min_date_count=int(args.selection_min_date_count),
         round_trip_cost_bps=float(args.round_trip_cost_bps),
         leaderboard_limit=int(args.leaderboard_limit),
     )

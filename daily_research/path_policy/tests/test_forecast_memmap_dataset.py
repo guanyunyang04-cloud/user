@@ -320,6 +320,67 @@ def test_qdp_training_pack_loads_stock_major_features_and_sample_labels(tmp_path
     assert tuple(static_ids.shape) == (1, 3)
 
 
+def test_qdp_training_pack_loader_applies_sample_cap_without_misalignment(tmp_path) -> None:
+    stocks = ("AAA.SZ", "BBB.SH")
+    feature_columns = ["feature_a", "feature_b"]
+    shards = [
+        _write_qdp_fixture_shard(tmp_path, year=year, stocks=stocks, feature_columns=feature_columns)
+        for year in (2019, 2020, 2021)
+    ]
+    manifest = {
+        "artifact_type": "qdp_sharded_memmap",
+        "profile": "style_structural_v1",
+        "feature_profile": "style_structural_v1",
+        "canonical_dataset_id": "policy_input_bundle__unit",
+        "source_pool_view_id": "policy_pool_view__unit",
+        "source_pool_view_kind": "tradeable_mainboard",
+        "lookback_days": 3,
+        "horizon": 1,
+        "forecast_horizon": 1,
+        "execution_mode": "next_open",
+        "cumulative_horizons": [1],
+        "feature_columns": feature_columns,
+        "feature_count": len(feature_columns),
+        "static_context_schema": {
+            "enabled": True,
+            "fields": ["symbol", "exchange", "industry"],
+            "id_columns": ["symbol_id", "exchange_id", "industry_id"],
+            "vocab_sizes": {"symbol": 3, "exchange": 3, "industry": 12},
+            "embedding_defaults": {"symbol": 16, "exchange": 4, "industry": 8, "dropout": 0.2},
+        },
+        "shards": shards,
+    }
+    source_manifest_path = tmp_path / "sharded_memmap_manifest.json"
+    source_manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    pack_manifest = build_qdp_training_pack(
+        source_manifest_path,
+        output_root=tmp_path / "training_pack",
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        max_samples_per_role=4,
+        feature_dtype="float32",
+    )
+
+    full = load_forecast_memmap_dataset(pack_manifest["manifest_json"])
+    capped = load_forecast_memmap_dataset(pack_manifest["manifest_json"], max_samples_per_role=2)
+
+    assert isinstance(capped, ForecastTrainingPackDataset)
+    assert capped.manifest["qdp_training_pack_sample_cap_applied"] is True
+    assert capped.manifest["sample_count_by_role"] == {"train": 2, "validation": 2, "test": 2}
+    assert capped.row_count == 6
+    assert capped.static_context_ids is not None
+    assert capped.static_context_ids.shape[0] == capped.row_count
+
+    for capped_row, source_row in enumerate(capped.sample_index["_pack_row_idx"].to_numpy(dtype=np.int64)):
+        assert capped.sample_index.iloc[capped_row]["stock"] == full.sample_index.iloc[int(source_row)]["stock"]
+        np.testing.assert_allclose(capped.input_window(capped_row), full.input_window(int(source_row)), rtol=1e-6, atol=1e-6)
+        np.testing.assert_allclose(capped.y_daily_excess[capped_row], full.y_daily_excess[int(source_row)], rtol=1e-6, atol=1e-6)
+        np.testing.assert_allclose(capped.y_rank_by_horizon[capped_row], full.y_rank_by_horizon[int(source_row)], rtol=1e-6, atol=1e-6)
+        np.testing.assert_array_equal(capped.static_context_ids[capped_row], full.static_context_ids[int(source_row)])
+
+
 def test_canonical_memmap_registry_resolves_matching_request(tmp_path) -> None:
     prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
     prepared.raw_cache_meta["dataset_id"] = "policy_input_bundle__unit"
