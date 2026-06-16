@@ -17,7 +17,12 @@ from quant_data_platform.memmap.incremental import (
     plan_incremental_memmap,
 )
 from quant_data_platform.memmap.sharded import ShardedMemmapConfig, build_sharded_memmap, write_sharded_memmap_plan
-from quant_data_platform.memmap.training_pack import TrainingPackConfig, build_training_pack
+from quant_data_platform.memmap.training_pack import (
+    RegimeTrainingPackConfig,
+    TrainingPackConfig,
+    build_regime_training_pack,
+    build_training_pack,
+)
 from quant_data_platform.memmap.validation import validate_active_memmap
 
 
@@ -119,6 +124,16 @@ def build_parser() -> argparse.ArgumentParser:
     training_pack.add_argument("--stock-chunk-size", type=int, default=64)
     training_pack.add_argument("--no-resume", action="store_true")
     training_pack.add_argument("--json", action="store_true")
+
+    regime_pack = sub.add_parser(
+        "build-regime-training-pack",
+        help="Add a date-major cross-sectional auxiliary layout to a QDP training pack.",
+    )
+    regime_pack.add_argument("--source-training-pack", default="")
+    regime_pack.add_argument("--feature-dtype", default="")
+    regime_pack.add_argument("--stock-chunk-size", type=int, default=64)
+    regime_pack.add_argument("--no-resume", action="store_true")
+    regime_pack.add_argument("--json", action="store_true")
 
     event_pack = sub.add_parser("build-event-pack", help="Build a candidate event-level research dataset managed by QDP.")
     event_pack.add_argument("--source-training-pack", default="")
@@ -269,6 +284,17 @@ def main(argv: list[str] | None = None) -> int:
                 max_samples_per_role=int(args.max_samples_per_role),
                 max_samples_per_date_per_role=int(args.max_samples_per_date_per_role),
                 feature_dtype=str(args.feature_dtype or "float16"),
+                stock_chunk_size=int(args.stock_chunk_size),
+                resume=not bool(args.no_resume),
+            )
+        )
+        _print(payload, as_json=bool(args.json))
+        return 0
+    if args.command == "build-regime-training-pack":
+        payload = build_regime_training_pack(
+            RegimeTrainingPackConfig(
+                source_training_pack=str(args.source_training_pack or ""),
+                feature_dtype=str(args.feature_dtype or ""),
                 stock_chunk_size=int(args.stock_chunk_size),
                 resume=not bool(args.no_resume),
             )

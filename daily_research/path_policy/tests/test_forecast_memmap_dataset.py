@@ -17,6 +17,7 @@ from daily_research.path_policy.forecast_dataset import (
     _fit_memmap_train_normalization,
     build_forecast_memmap_dataset,
     build_qdp_training_pack,
+    build_qdp_training_pack_date_major_layout,
     build_static_context_vocab,
     ForecastShardedMemmapDataset,
     ForecastTrainingPackDataset,
@@ -339,6 +340,80 @@ def test_qdp_training_pack_loads_stock_major_features_and_sample_labels(tmp_path
     assert tuple(y_risk.shape) == (1, 1, 3)
     assert int(row_idx[0].item()) == validation_row
     assert tuple(static_ids.shape) == (1, 3)
+
+
+def test_qdp_training_pack_date_major_layout_powers_date_batches(tmp_path) -> None:
+    stocks = ("AAA.SZ", "BBB.SH", "CCC.SZ")
+    feature_columns = ["feature_a", "feature_b"]
+    shards = [
+        _write_qdp_fixture_shard(tmp_path, year=year, stocks=stocks, feature_columns=feature_columns)
+        for year in (2019, 2020, 2021)
+    ]
+    manifest = {
+        "artifact_type": "qdp_sharded_memmap",
+        "profile": "style_structural_v1",
+        "feature_profile": "style_structural_v1",
+        "canonical_dataset_id": "policy_input_bundle__unit",
+        "source_pool_view_id": "policy_pool_view__unit",
+        "source_pool_view_kind": "tradeable_mainboard",
+        "lookback_days": 3,
+        "horizon": 1,
+        "forecast_horizon": 1,
+        "execution_mode": "next_open",
+        "cumulative_horizons": [1],
+        "feature_columns": feature_columns,
+        "feature_count": len(feature_columns),
+        "static_context_schema": {
+            "enabled": True,
+            "fields": ["symbol", "exchange", "industry"],
+            "id_columns": ["symbol_id", "exchange_id", "industry_id"],
+            "vocab_sizes": {"symbol": 4, "exchange": 3, "industry": 12},
+            "embedding_defaults": {"symbol": 16, "exchange": 4, "industry": 8, "dropout": 0.2},
+        },
+        "shards": shards,
+    }
+    source_manifest_path = tmp_path / "sharded_memmap_manifest.json"
+    source_manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    pack_manifest = build_qdp_training_pack(
+        source_manifest_path,
+        output_root=tmp_path / "training_pack",
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        max_samples_per_role=6,
+        feature_dtype="float32",
+    )
+    stock_major = load_forecast_memmap_dataset(pack_manifest["manifest_json"])
+    assert isinstance(stock_major, ForecastTrainingPackDataset)
+    validation = stock_major.sample_index.loc[stock_major.sample_index["role"].astype(str).eq("validation")]
+    rows = next(iter(validation.groupby("date", sort=True)))[1].index.to_numpy(dtype=np.int64)
+    expected = np.stack([stock_major.input_window(int(row_idx)) for row_idx in rows], axis=0)
+    np.testing.assert_allclose(stock_major.date_input_windows(rows), expected, rtol=1e-6, atol=1e-6)
+
+    updated_manifest = build_qdp_training_pack_date_major_layout(
+        pack_manifest["manifest_json"],
+        feature_dtype="float32",
+        stock_chunk_size=1,
+        resume=False,
+    )
+    loaded = load_forecast_memmap_dataset(updated_manifest["manifest_json"])
+
+    assert isinstance(loaded, ForecastTrainingPackDataset)
+    assert loaded.has_date_major_feature_panel
+    assert updated_manifest["training_pack_contract"]["date_batch_feature_layout"] == "date_stock_feature"
+    assert updated_manifest["regime_auxiliary_layout"]["enabled"] is True
+    assert (tmp_path / "training_pack" / "cross_section_index.parquet").exists()
+    np.testing.assert_allclose(loaded.date_input_windows(rows), expected, rtol=1e-6, atol=1e-6)
+    date_view = ForecastDateBatchTorchDataset(loaded, rows, target_scale=1.0)
+    x, mask, y_daily, y_cum, y_risk, row_indices, static_ids = date_view[0]
+    np.testing.assert_allclose(x.numpy(), expected, rtol=1e-6, atol=1e-6)
+    assert tuple(mask.shape) == (len(rows),)
+    assert tuple(y_daily.shape) == (len(rows), 1)
+    assert tuple(y_cum.shape) == (len(rows), 1)
+    assert tuple(y_risk.shape) == (len(rows), 1, 3)
+    assert row_indices.numpy().astype(np.int64).tolist() == rows.tolist()
+    assert tuple(static_ids.shape) == (len(rows), 3)
 
 
 def test_qdp_training_pack_preserves_optional_basic_v2_labels(tmp_path) -> None:

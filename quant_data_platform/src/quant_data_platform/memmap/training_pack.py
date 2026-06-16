@@ -21,6 +21,14 @@ class TrainingPackConfig:
     resume: bool = True
 
 
+@dataclass(frozen=True)
+class RegimeTrainingPackConfig:
+    source_training_pack: str = ""
+    feature_dtype: str = ""
+    stock_chunk_size: int = 64
+    resume: bool = True
+
+
 def build_training_pack(config: TrainingPackConfig) -> dict[str, Any]:
     from daily_research.path_policy.forecast_dataset import build_qdp_training_pack
 
@@ -39,6 +47,20 @@ def build_training_pack(config: TrainingPackConfig) -> dict[str, Any]:
         max_samples_per_role=int(config.max_samples_per_role),
         max_samples_per_date_per_role=int(config.max_samples_per_date_per_role),
         feature_dtype=str(config.feature_dtype or "float16"),
+        stock_chunk_size=int(config.stock_chunk_size),
+        resume=bool(config.resume),
+    )
+
+
+def build_regime_training_pack(config: RegimeTrainingPackConfig) -> dict[str, Any]:
+    from daily_research.path_policy.forecast_dataset import build_qdp_training_pack_date_major_layout
+
+    source_training_pack = Path(str(config.source_training_pack or "")).expanduser()
+    if not str(source_training_pack):
+        raise ValueError("--source-training-pack is required for build-regime-training-pack.")
+    return build_qdp_training_pack_date_major_layout(
+        source_training_pack,
+        feature_dtype=str(config.feature_dtype or ""),
         stock_chunk_size=int(config.stock_chunk_size),
         resume=bool(config.resume),
     )

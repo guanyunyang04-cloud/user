@@ -183,12 +183,16 @@ class ForecastDateBatchTorchDataset(Dataset):
 
     def __getitem__(self, item: int) -> tuple[torch.Tensor, ...]:
         row_indices = np.asarray(self._groups[int(item)], dtype=np.int64)
-        if self._feature_store is None:
-            self._feature_store = self.dataset.open_feature_store()
-        x = np.stack(
-            [self.dataset.input_window(int(row_idx), store=self._feature_store) for row_idx in row_indices],
-            axis=0,
-        ).astype(np.float32)
+        date_input_windows = getattr(self.dataset, "date_input_windows", None)
+        if callable(date_input_windows):
+            x = np.asarray(date_input_windows(row_indices), dtype=np.float32)
+        else:
+            if self._feature_store is None:
+                self._feature_store = self.dataset.open_feature_store()
+            x = np.stack(
+                [self.dataset.input_window(int(row_idx), store=self._feature_store) for row_idx in row_indices],
+                axis=0,
+            ).astype(np.float32)
         y_daily = np.asarray(self.dataset.y_daily_excess[row_indices], dtype=np.float32).copy() * self.target_scale
         y_cum = np.asarray(self.dataset.y_cum_excess[row_indices], dtype=np.float32).copy() * self.target_scale
         y_risk = self.dataset.risk_by_horizon(row_indices).copy() * self.target_scale
@@ -711,6 +715,9 @@ class ForecastTrainingPackDataset:
         feature_panel_path: Path,
         feature_panel_shape: tuple[int, int, int],
         feature_dtype: str,
+        date_major_feature_panel_path: Path | None = None,
+        date_major_feature_panel_shape: tuple[int, int, int] | None = None,
+        date_major_feature_dtype: str = "",
         label_arrays: dict[str, np.memmap | np.ndarray],
         normalization_manifest: dict[str, Any],
         static_context_ids: np.memmap | np.ndarray | None,
@@ -726,6 +733,14 @@ class ForecastTrainingPackDataset:
         self._feature_panel_shape = tuple(int(item) for item in feature_panel_shape)
         self._feature_dtype = str(feature_dtype or "float16")
         self._feature_panel: np.memmap | None = None
+        self.date_major_feature_panel_path = Path(date_major_feature_panel_path) if date_major_feature_panel_path else None
+        self._date_major_feature_panel_shape = (
+            tuple(int(item) for item in date_major_feature_panel_shape)
+            if date_major_feature_panel_shape is not None
+            else ()
+        )
+        self._date_major_feature_dtype = str(date_major_feature_dtype or self._feature_dtype or "float16")
+        self._date_major_feature_panel: np.memmap | None = None
         self.normalization_manifest = dict(normalization_manifest)
         self.feature_mean = np.asarray(self.normalization_manifest.get("feature_mean", []), dtype=np.float32)
         self.feature_std = np.asarray(self.normalization_manifest.get("feature_std", []), dtype=np.float32)
@@ -826,6 +841,26 @@ class ForecastTrainingPackDataset:
             )
         return self._feature_panel
 
+    @property
+    def has_date_major_feature_panel(self) -> bool:
+        return (
+            self.date_major_feature_panel_path is not None
+            and self.date_major_feature_panel_path.exists()
+            and len(self._date_major_feature_panel_shape) == 3
+        )
+
+    def open_date_major_feature_store(self) -> np.memmap:
+        if not self.has_date_major_feature_panel:
+            raise ValueError("qdp training pack does not have a date-major feature panel.")
+        if self._date_major_feature_panel is None:
+            self._date_major_feature_panel = np.memmap(
+                self.date_major_feature_panel_path,
+                dtype=self._date_major_feature_dtype,
+                mode="r",
+                shape=self._date_major_feature_panel_shape,
+            )
+        return self._date_major_feature_panel
+
     def raw_input_window(self, row_idx: int) -> np.ndarray:
         return self.raw_input_windows(np.asarray([int(row_idx)], dtype=np.int64))[0]
 
@@ -864,12 +899,67 @@ class ForecastTrainingPackDataset:
                         out[int(request_pos), target_start : target_start + (source_end - source_start), :] = matrix[source_start:source_end, :]
         return out
 
+    def raw_date_input_windows(self, row_indices: np.ndarray) -> np.ndarray:
+        rows = np.asarray(row_indices, dtype=np.int64).reshape(-1)
+        lookback = int(self.lookback_days)
+        out = np.zeros((len(rows), lookback, self.input_dim), dtype=np.float32)
+        if len(rows) == 0:
+            return out
+
+        use_date_major = self.has_date_major_feature_panel
+        if use_date_major:
+            panel = self.open_date_major_feature_store()
+            date_axis = 0
+            stock_axis = 1
+        else:
+            panel = self.open_feature_store()
+            date_axis = 1
+            stock_axis = 0
+
+        request = self.sample_index.iloc[rows][["global_stock_pos", "global_date_pos"]].copy()
+        request["_request_pos"] = np.arange(len(rows), dtype=np.int64)
+        request["global_stock_pos"] = pd.to_numeric(request["global_stock_pos"], errors="coerce").fillna(-1).astype("int64")
+        request["global_date_pos"] = pd.to_numeric(request["global_date_pos"], errors="coerce").fillna(-1).astype("int64")
+        date_count = int(panel.shape[date_axis])
+        stock_count = int(panel.shape[stock_axis])
+        for date_pos, group in request.groupby("global_date_pos", sort=False):
+            end_pos = int(date_pos) + 1
+            if end_pos <= 0:
+                continue
+            source_start = max(end_pos - lookback, 0)
+            source_end = min(end_pos, date_count)
+            if source_end <= source_start:
+                continue
+            target_start = source_start - (end_pos - lookback)
+            stock_idx = group["global_stock_pos"].to_numpy(dtype=np.int64, copy=False)
+            request_positions = group["_request_pos"].to_numpy(dtype=np.int64, copy=False)
+            valid = (stock_idx >= 0) & (stock_idx < stock_count)
+            if not np.any(valid):
+                continue
+            valid_stock_idx = stock_idx[valid]
+            valid_request_positions = request_positions[valid]
+            if use_date_major:
+                values = np.asarray(panel[source_start:source_end, valid_stock_idx, :], dtype=np.float32)
+                if values.ndim == 3 and values.shape[0] == source_end - source_start:
+                    values = np.transpose(values, (1, 0, 2))
+            else:
+                values = np.asarray(panel[valid_stock_idx, source_start:source_end, :], dtype=np.float32)
+            out[
+                valid_request_positions,
+                target_start : target_start + (source_end - source_start),
+                :,
+            ] = values
+        return out
+
     def input_window(self, row_idx: int, *, store: Any | None = None) -> np.ndarray:
         del store
         return self.raw_input_window(int(row_idx))
 
     def input_windows(self, row_indices: np.ndarray) -> np.ndarray:
         return self.raw_input_windows(row_indices)
+
+    def date_input_windows(self, row_indices: np.ndarray) -> np.ndarray:
+        return self.raw_date_input_windows(row_indices)
 
     def risk_by_horizon(self, row_idx: int | np.ndarray) -> np.ndarray:
         return np.stack(
@@ -1795,6 +1885,40 @@ def _load_training_pack_forecast_memmap_dataset(
     feature_panel_shape = tuple(int(item) for item in list(manifest.get("feature_panel_shape", []) or []))
     feature_dtype = str(manifest.get("feature_dtype", "float16") or "float16")
     _validate_memmap_file(feature_panel_path, shape=feature_panel_shape, label="qdp_training_pack_feature_panel", dtype=feature_dtype)
+    date_major_feature_panel_path: Path | None = None
+    date_major_feature_panel_shape: tuple[int, int, int] | None = None
+    date_major_feature_dtype = str(manifest.get("date_major_feature_dtype", feature_dtype) or feature_dtype)
+    date_major_meta = dict(manifest.get("date_major_feature_panel", {}) or {})
+    date_major_path_raw = str(
+        date_major_meta.get("path", "")
+        or manifest.get("date_major_feature_panel_path", "")
+        or ""
+    )
+    if date_major_path_raw.strip():
+        candidate_path = Path(date_major_path_raw)
+        if not candidate_path.is_absolute():
+            candidate_path = root / candidate_path
+        candidate_shape_raw = (
+            date_major_meta.get("shape")
+            or manifest.get("date_major_feature_panel_shape")
+            or []
+        )
+        candidate_shape = tuple(int(item) for item in list(candidate_shape_raw or []))
+        candidate_dtype = str(
+            date_major_meta.get("dtype")
+            or manifest.get("date_major_feature_dtype")
+            or feature_dtype
+        )
+        if len(candidate_shape) == 3:
+            _validate_memmap_file(
+                candidate_path,
+                shape=candidate_shape,
+                label="qdp_training_pack_date_major_feature_panel",
+                dtype=candidate_dtype,
+            )
+            date_major_feature_panel_path = candidate_path
+            date_major_feature_panel_shape = candidate_shape
+            date_major_feature_dtype = candidate_dtype
     static_context_ids: np.memmap | np.ndarray | None = None
     static_meta = dict(manifest.get("static_context_ids", {}) or {})
     if static_meta:
@@ -1838,6 +1962,9 @@ def _load_training_pack_forecast_memmap_dataset(
         feature_panel_path=feature_panel_path,
         feature_panel_shape=feature_panel_shape,
         feature_dtype=feature_dtype,
+        date_major_feature_panel_path=date_major_feature_panel_path,
+        date_major_feature_panel_shape=date_major_feature_panel_shape,
+        date_major_feature_dtype=date_major_feature_dtype,
         label_arrays=label_arrays,
         normalization_manifest=dict(manifest.get("normalization", {}) or {}),
         static_context_ids=static_context_ids,
@@ -2323,6 +2450,190 @@ def build_qdp_training_pack(
         manifest_json=str(manifest_path.resolve()),
         sample_count=int(len(sample_index)),
         feature_panel_shape=[int(item) for item in feature_shape],
+    )
+    return manifest
+
+
+def _memmap_file_matches(path: Path, *, shape: tuple[int, ...], dtype: str | np.dtype) -> bool:
+    if not path.exists():
+        return False
+    expected_bytes = int(np.prod(shape, dtype=np.int64)) * np.dtype(dtype).itemsize
+    return int(path.stat().st_size) == expected_bytes
+
+
+def build_qdp_training_pack_date_major_layout(
+    training_pack_manifest_json: str | Path,
+    *,
+    feature_dtype: str = "",
+    stock_chunk_size: int = 64,
+    resume: bool = True,
+) -> dict[str, Any]:
+    manifest_path = Path(training_pack_manifest_json)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if str(manifest.get("artifact_type", "")) != "qdp_training_pack_v1":
+        raise ValueError(f"qdp_regime_training_pack_source_must_be_qdp_training_pack_v1: {manifest_path}")
+    root = manifest_path.parent
+    source_feature_path = Path(str(manifest.get("feature_panel_path", "") or ""))
+    if not source_feature_path.is_absolute():
+        source_feature_path = root / source_feature_path
+    source_shape = tuple(int(item) for item in list(manifest.get("feature_panel_shape", []) or []))
+    if len(source_shape) != 3:
+        raise ValueError(f"qdp training pack has invalid feature_panel_shape: {manifest_path}")
+    source_dtype = str(manifest.get("feature_dtype", "float16") or "float16").strip().lower()
+    _validate_memmap_file(
+        source_feature_path,
+        shape=source_shape,
+        label="qdp_training_pack_feature_panel",
+        dtype=source_dtype,
+    )
+
+    dtype = str(feature_dtype or source_dtype or "float16").strip().lower()
+    if dtype not in {"float16", "float32"}:
+        raise ValueError("--feature-dtype must be float16 or float32.")
+    stock_count, date_count, feature_count = (int(source_shape[0]), int(source_shape[1]), int(source_shape[2]))
+    target_shape = (date_count, stock_count, feature_count)
+    target_path = root / f"feature_panel_date_stock_feature.{dtype}.dat"
+    cross_section_index_path = root / "cross_section_index.parquet"
+    companion_manifest_path = root / "qdp_regime_training_pack_manifest.json"
+    progress_path = root / "qdp_regime_training_pack_progress.json"
+    chunk = max(int(stock_chunk_size), 1)
+
+    existing_ready = (
+        bool(resume)
+        and _memmap_file_matches(target_path, shape=target_shape, dtype=dtype)
+    )
+    if not existing_ready:
+        _qdp_training_pack_progress(
+            progress_path,
+            "date_major_feature_panel_writing",
+            source_feature_panel_path=str(source_feature_path.resolve()),
+            target_feature_panel_path=str(target_path.resolve()),
+            feature_dtype=dtype,
+            source_shape=[int(item) for item in source_shape],
+            target_shape=[int(item) for item in target_shape],
+            stock_chunk_size=int(chunk),
+            completed_stocks=0,
+            total_stocks=int(stock_count),
+        )
+        source = np.memmap(source_feature_path, dtype=source_dtype, mode="r", shape=source_shape)
+        target = np.memmap(target_path, dtype=dtype, mode="w+", shape=target_shape)
+        for stock_start in range(0, stock_count, chunk):
+            stock_end = min(stock_start + chunk, stock_count)
+            values = np.asarray(source[stock_start:stock_end, :, :], dtype=dtype)
+            target[:, stock_start:stock_end, :] = np.transpose(values, (1, 0, 2))
+            if stock_start == 0 or stock_end == stock_count or (stock_end // chunk) % 10 == 0:
+                target.flush()
+                _qdp_training_pack_progress(
+                    progress_path,
+                    "date_major_feature_panel_writing",
+                    target_feature_panel_path=str(target_path.resolve()),
+                    completed_stocks=int(stock_end),
+                    total_stocks=int(stock_count),
+                    completion_ratio=float(stock_end / max(stock_count, 1)),
+                )
+        target.flush()
+
+    cross_section_rows = 0
+    sample_index_path = Path(str(manifest.get("sample_index_path", "") or ""))
+    if not sample_index_path.is_absolute():
+        sample_index_path = root / sample_index_path
+    if sample_index_path.exists():
+        columns = ["role", "date", "global_date_pos", "global_stock_pos"]
+        sample_index = pd.read_parquet(sample_index_path, columns=columns)
+        sample_index = sample_index.copy()
+        sample_index["_sample_pos"] = np.arange(len(sample_index), dtype=np.int64)
+        cross_section_index = (
+            sample_index.groupby(["role", "date", "global_date_pos"], sort=True)
+            .agg(
+                sample_count=("global_stock_pos", "count"),
+                stock_count=("global_stock_pos", "nunique"),
+                first_sample_pos=("_sample_pos", "min"),
+                last_sample_pos=("_sample_pos", "max"),
+            )
+            .reset_index()
+        )
+        cross_section_index["role"] = cross_section_index["role"].astype(str)
+        cross_section_index["date"] = pd.to_datetime(cross_section_index["date"]).dt.strftime("%Y-%m-%d")
+        cross_section_index["global_date_pos"] = pd.to_numeric(
+            cross_section_index["global_date_pos"], errors="coerce"
+        ).fillna(-1).astype("int32")
+        cross_section_index["sample_count"] = cross_section_index["sample_count"].astype("int32")
+        cross_section_index["stock_count"] = cross_section_index["stock_count"].astype("int32")
+        cross_section_index["first_sample_pos"] = cross_section_index["first_sample_pos"].astype("int64")
+        cross_section_index["last_sample_pos"] = cross_section_index["last_sample_pos"].astype("int64")
+        cross_section_index.to_parquet(cross_section_index_path, index=False)
+        cross_section_rows = int(len(cross_section_index))
+
+    training_pack_contract = dict(manifest.get("training_pack_contract", {}) or {})
+    training_pack_contract.update(
+        {
+            "date_batch_feature_layout": "date_stock_feature",
+            "date_batch_feature_dtype": dtype,
+            "date_batch_window_materialization": "precomputed_date_major_slice",
+            "cross_section_index": "role_date_group_counts",
+        }
+    )
+    regime_layout = {
+        "enabled": True,
+        "feature_layout": "date_stock_feature",
+        "feature_panel_path": str(target_path.resolve()),
+        "feature_panel_shape": [int(item) for item in target_shape],
+        "feature_dtype": dtype,
+        "source_feature_layout": "stock_date_feature",
+        "source_feature_panel_path": str(source_feature_path.resolve()),
+        "source_feature_panel_shape": [int(item) for item in source_shape],
+        "cross_section_index_path": str(cross_section_index_path.resolve()) if cross_section_index_path.exists() else "",
+        "cross_section_index_rows": int(cross_section_rows),
+        "window_materialization": "date_major_runtime_slice",
+    }
+    manifest.update(
+        {
+            "date_major_feature_panel_path": str(target_path.resolve()),
+            "date_major_feature_panel_shape": [int(item) for item in target_shape],
+            "date_major_feature_dtype": dtype,
+            "date_major_feature_layout": "date_stock_feature",
+            "date_major_feature_panel": {
+                "path": str(target_path.resolve()),
+                "shape": [int(item) for item in target_shape],
+                "dtype": dtype,
+                "layout": "date_stock_feature",
+            },
+            "cross_section_index_path": str(cross_section_index_path.resolve()) if cross_section_index_path.exists() else "",
+            "cross_section_index_rows": int(cross_section_rows),
+            "regime_auxiliary_layout": regime_layout,
+            "regime_training_pack_manifest_json": str(companion_manifest_path.resolve()),
+            "training_pack_contract": training_pack_contract,
+            "updated_at": pd.Timestamp.now(tz="Asia/Shanghai").isoformat(),
+        }
+    )
+    write_json(manifest_path, _json_ready(manifest))
+    companion_manifest = {
+        "artifact_type": "qdp_regime_training_pack_v1",
+        "status": "completed",
+        "created_at": pd.Timestamp.now(tz="Asia/Shanghai").isoformat(),
+        "source_training_pack_manifest_json": str(manifest_path.resolve()),
+        "source_artifact_type": "qdp_training_pack_v1",
+        "sample_count": int(manifest.get("sample_count", 0) or 0),
+        "sample_count_by_role": dict(manifest.get("sample_count_by_role", {}) or {}),
+        "stock_count": int(stock_count),
+        "date_count": int(date_count),
+        "feature_count": int(feature_count),
+        "lookback_days": int(manifest.get("lookback_days", 0) or 0),
+        "horizon": int(manifest.get("horizon", manifest.get("forecast_horizon", 0)) or 0),
+        "cumulative_horizons": [int(item) for item in list(manifest.get("cumulative_horizons", []) or [])],
+        "date_major_feature_panel": regime_layout,
+        "training_pack_contract": training_pack_contract,
+    }
+    write_json(companion_manifest_path, _json_ready(companion_manifest))
+    _qdp_training_pack_progress(
+        progress_path,
+        "completed",
+        source_training_pack_manifest_json=str(manifest_path.resolve()),
+        regime_training_pack_manifest_json=str(companion_manifest_path.resolve()),
+        target_feature_panel_path=str(target_path.resolve()),
+        cross_section_index_path=str(cross_section_index_path.resolve()) if cross_section_index_path.exists() else "",
+        target_shape=[int(item) for item in target_shape],
+        feature_dtype=dtype,
     )
     return manifest
 
