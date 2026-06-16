@@ -1,6 +1,6 @@
 # Daily Research 状态中枢
 
-快照日期：`2026-06-06`
+快照日期：`2026-06-16`
 
 ## 当前结论
 - `daily_research` 是当前正式生产研究与执行主线；active 执行物化真源仍是 `daily_research/output/active_execution_strategy.json`。
@@ -14,6 +14,7 @@
 - v2 architecture fusion/capacity upgrade 已完成 Tier 1/Tier 2 初审：Tier 1 `hybrid_expert_fusion_static_context` 三 seed forecast pass 但弱于 GRU-static 主线，禁止 bridge；Tier 2 `regime_routed_multi_expert_horizon_v1` 已实现并完成 formal seed7 diagnostic，主评分 rank/spread 弱于 GRU-static seed7 且资源成本高，seed11/19 已暂停。当前 blocker 是 `score_mapping_and_router_calibration`，不是执行解冻依据。
 - Traditional Baostock v2.1 长样本数据扩充已 research-only 导入 daily_research lake：dataset `policy_input_bundle__2082fee5bb1760972d8c9012`，same-period pool `policy_pool_view__d7a56d5164470b590e4f5a40` 和 long-history pool `policy_pool_view__eb690dd0becc330f029c21bd` 均通过 v2 contract audit；augmented feature profile smoke memmap 通过，但这不是模型质量证据。
 - canonical 数据集、active registry、policy bundle 和 sharded memmap 的当前事实权威已迁入 QDP；本分脑中 `policy_input_bundle__45e3d8c059ba718426a9f887`、`policy_input_bundle__2082fee5bb1760972d8c9012` 等只表示 daily_research 研究消费 lineage 或历史 explicit dataset，不代表共享数据平台 owner。
+- 2026-06-16 QDP pack frontier reconciliation 已完成：8 个 2026-06-13/14 QDP-pack / QDP-sharded runs 已登记为 `style_structural_v1` consumption evidence；最新 QDP active sharded 与 training pack 已切到 `style_structural_alpha_v2_label_v2`，feature count `307`，label schema `path20_basic_v2` version `2`，static context `symbol/exchange/industry`。`qdp_alpha_v2_label_v2_pack_consumption_smoke_20260616_01` 已用 daily protocol 快路径完成 64/64/64 role split smoke；status/training `completed`，verdict `forecast_failed` 仅表示 smoke 不证明模型强。active artifact 未触碰，执行端仍冻结。
 - v2 high-return model discovery 已完成 long-history augmented / 主板宽池 GRU seed7 datecap2 scout、same-period control、首轮 objective/loss datecap2 scout、`topn_excess_rank_v1` 正常样本 long-history/same-period/matrix、以及 finalist seeds `7,11,19` 和 all-seed ensemble bridge。datecap2 已降级为 `thin_sample_smoke_only`：只证明链路和报告可用，不作为模型方向淘汰依据。正常样本 `topn_excess_rank_v1` 当前为最佳 high-return 候选：long-history finalist `3/3` seed 正 transfer，seed7 small-capital matrix `15/27` research-grade，最佳变体 `h30_mw080_rb10d_all_c10_5_10_regime_off` 超额年化 `0.4284`、超额 Sharpe `1.7463`、月胜率 `0.7273`、最差月 `-0.0776`。但 all-seed mean ensemble 超额年化 `0.1177`、超额 Sharpe `0.4029`，弱于单 seed median；所以当前结论是 `research_grade_candidate_partial / seed_aggregation_blocker`，仍禁止 promotion、paper/live、broker 或 active change。
 - 2026-06-03 frontier reconciliation 已确认两个未登记 seed7 run 为 research / shadow-only forecast diagnostics，详见 `daily_research/brain/references/daily_research_current_frontier_compaction_20260603.md`。
 - continuous_policy 当前仍是 research / shadow-only；r61-r74 已解除若干 translation / oracle / lake collapse blocker，但 training evidence、feature contract health、cash timing、source quality 与 receiver-source spread 仍未闭合。
@@ -34,6 +35,7 @@
 - P3：v2 下一步是围绕 `horizon_30d_soft_penalty_v1` 的 post-throttle 剩余负月做 month-state score calibration、validation-selected throttle thresholds、sector/liquidity/volatility/horizon cap diagnostics；只有新证据证明 target-weight concentration 重新成为主 blocker 时才跑 local risk cap。
 - P3a：模型容量路线下一步只能 research-only 做 Tier 2 router/score mapping 诊断或缩小/校准版 Tier 2；当前 Tier 1/Tier 2 均不得 bridge、promotion 或改 active artifact。
 - P3b：数据扩充和高收益发现路线当前优先解决 `topn_excess_rank_v1` 的 seed aggregation blocker。finalist seeds `7,11,19` 已完成，`3/3` 正 excess return / excess Sharpe，但 seed7 强、seed19 正而不达 research-grade、seed11 弱；all-seed mean ensemble 没有优于单 seed median。下一步先做 validation-selected seed weighting、rank aggregation、topN vote aggregation 和 same-period multi-seed 稳定性诊断；不允许事后剔除 seed11 当作正式规则。只有 seed 聚合/稳定性重新成立后，才进入执行适配研究。smoke、pilot、datecap2、single-seed、timeout、弱 ensemble 不得写成 promotion 或 live evidence。
+- P3c：QDP alpha_v2 数据线下一步先做 `style_structural_v1` 与 `style_structural_alpha_v2_label_v2` 的同配置 research-only 对照；alpha_v2 consumption smoke 只能证明 daily protocol 可读取新 pack、feature schema、static context、label v2 和 role split，不能用于模型质量或 promotion 判断。
 - P4：之后再推进 per-symbol reversal/volatility bucket sizing、PIT/status 合同二阶段硬化、missing/fill 语义、limit/industry/valuation optional domains。
 - P5：continuous_policy 围绕 r71/r74 继续验证 receiver/deploy 平衡、cash timing、drawdown/reversal、source quality、feature contract health 与 sufficient training evidence。
 
@@ -73,6 +75,7 @@
 - V2 high-return TopN normal-sample long-history result：`daily_research/brain/references/daily_research_v2_high_return_topn_normal_long_history_result_20260606.md`。
 - V2 high-return TopN normal-sample same-period and matrix result：`daily_research/brain/references/daily_research_v2_high_return_topn_normal_same_period_matrix_result_20260606.md`。
 - V2 high-return TopN finalist three-seed and ensemble bridge：`daily_research/brain/references/daily_research_v2_high_return_topn_finalist_three_seed_20260606.md`。
+- QDP pack frontier reconciliation and alpha_v2 consumption smoke：`daily_research/brain/references/path_policy_qdp_pack_frontier_reconciliation_20260616.md`。
 - continuous_policy r61-r74 证据：见 `daily_research/brain/references/r61_release_first_decision_core_v4_status_20260514.md`、`daily_research/brain/references/r65_portfolio_set_v5_status_20260514.md` 到 `daily_research/brain/references/r74_lake_behavior_quality_status_20260515.md`。
 - output/cache 误删恢复边界：`daily_research/brain/references/data_lake_output_cache_loss_recovery_boundary_20260531.md`。
 - 机器索引：`daily_research/brain/references/evidence_registry.json`。

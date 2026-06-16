@@ -145,6 +145,27 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
 
         self.assertEqual(daily_research_evidence.run_tags(text), [])
 
+    def test_adapter_does_not_treat_path20_label_schema_as_run_tag(self) -> None:
+        text = """
+        - Label schema: `path20_basic_v2`.
+
+        ## Run Tags
+
+        - `qdp_alpha_v2_label_v2_pack_consumption_smoke_20260616_01`
+        - `qdp_pack_hybrid_topn_h256_t4_b512_full_e12_20260614_01`
+        """
+
+        tags = daily_research_evidence.run_tags(text)
+
+        self.assertNotIn("path20_basic_v2", tags)
+        self.assertEqual(
+            tags,
+            [
+                "qdp_alpha_v2_label_v2_pack_consumption_smoke_20260616_01",
+                "qdp_pack_hybrid_topn_h256_t4_b512_full_e12_20260614_01",
+            ],
+        )
+
     def test_adapter_indexes_mh_output_aux_grid_run_tags(self) -> None:
         text = """
         ## Run Tags

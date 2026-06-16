@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 119,
+  "record_count": 121,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -130,7 +130,6 @@
       ],
       "study_families": [],
       "run_tags": [
-        "path20_horizon_discovery",
         "path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01",
         "mh_utility_horizon_calibration_posthoc_20260524_01",
         "mh_utility_horizon_root_cause_audit_20260524_01"
@@ -1273,8 +1272,7 @@
       "study_families": [],
       "run_tags": [
         "alpha_path20_mainline_switch_status_20260517",
-        "alpha_path20_neural_policy_v1_tiny_smoke_20260516_01",
-        "alpha_path20_dataset__e96ad3bf15b4df878feb1aca"
+        "alpha_path20_neural_policy_v1_tiny_smoke_20260516_01"
       ],
       "verdict": "2026-05-17 route-switch update: the current Path20 research mainline pointer is switched to `alpha_path20_neural_policy_v1` by user decision. See `daily_research/brain/references/alpha_path20_mainline_switch_status_20260517.md`.; Path20 research mainline is a switchable routing state, not a permanent hierarchy.; The older 2026-05-16 status below is retained as historical context only.; Superseded 2026-05-16 status: `legacy / diagnostic-only / no-new-mainline-budget`.",
       "blockers": [
@@ -2965,6 +2963,24 @@
       ]
     },
     {
+      "id": "execution_user_guide",
+      "date": "",
+      "r_id": "",
+      "path": "daily_research/brain/references/execution_user_guide.md",
+      "tags": [
+        "research_data_lake"
+      ],
+      "workflow": "research_data_lake",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "查看最新 daily verdict、目标交易日、阻断原因、交易计划、模拟账户和最近作业。; daily verdict 是只读事实参考；今日是否可用还要结合帮助页流程和作业证据。; 查看 doctor、锁状态、latest daily verdict 和关键证据路径。",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "not_stated",
+      "dataset_ids": []
+    },
+    {
       "id": "path20_memory_safe_forecast_dataset_contract_20260518",
       "date": "2026-05-18",
       "r_id": "",
@@ -3072,6 +3088,49 @@
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": []
+    },
+    {
+      "id": "path_policy_qdp_pack_frontier_reconciliation_20260616",
+      "date": "2026-06-13",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_qdp_pack_frontier_reconciliation_20260616.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "qdp_pack_hybrid_topn_h256_t4_b512_full_e12_20260614_01",
+        "qdp_pack_hybrid_topn_h256_t4_b512_throughput_20260614_01",
+        "qdp_pack_hybrid_topn_h192_b768_pilot_20260614_01",
+        "qdp_training_pack_hybrid_full_b1024_e12_20260613_02",
+        "qdp_training_pack_progress_smoke_20260613_01",
+        "qdp_training_pack_hybrid_pilot_b512_20260613_01",
+        "qdp_sharded_hybrid_static_smoke_20260613",
+        "qdp_sharded_linear_smoke_20260613",
+        "qdp_alpha_v2_label_v2_pack_consumption_smoke_20260616_01"
+      ],
+      "verdict": "Status: `frontier_reconciled / qdp_pack_runs_registered / alpha_v2_training_pack_consumption_smoke_completed`.; Scope: reconcile 8 latest QDP-pack / QDP-sharded runs from 2026-06-13 to 2026-06-14 that were newer than the brain references, and register the latest QDP `style_structural_alpha_v2_label_v2` data state.; Active artifact impact: `daily_research/output/active_execution_strategy.json` remains unchanged; the file is still absent in the frozen execution skeleton and was not recreated.; Interpretation: the 2026-06-13/14 runs are `style_structural_v1` QDP consumption evidence; the 2026-06-16 smoke proves the daily protocol can consume the new `style_structural_alpha_v2_label_v2` training pack, feature schema, static context, label v2, and role split. It is not model-quality or promotion evidence.",
+      "blockers": [
+        "Active sharded scope/status: `full_canonical_candidate / completed`; planned/processed/stored/empty/failed shards: `187/187/183/4/0`; years `2010-2026`; lookback `252`.",
+        "`qdp_training_pack_progress_smoke_20260613_01`: completed training/protocol smoke on `style_structural_v1`, `384` samples; verdict `forecast_failed` because tiny smoke is not model-quality evidence.",
+        "`qdp_training_pack_hybrid_pilot_b512_20260613_01`: completed pilot on `style_structural_v1`, `24,576` samples; verdict `forecast_failed`.",
+        "`qdp_sharded_hybrid_static_smoke_20260613`: completed sharded memmap hybrid static smoke on `style_structural_v1`, `48` samples; verdict `forecast_failed`.",
+        "`qdp_sharded_linear_smoke_20260613`: completed sharded memmap linear smoke on `style_structural_v1`, `96` samples; verdict `forecast_failed`.",
+        "Evidence verdict: `forecast_failed`, expected for `smoke_only` with 1 epoch and 64 samples per role; this does not negate the consumption contract."
+      ],
+      "next_allowed_actions": [
+        "Rebuild `daily_research/brain/references/evidence_registry.json` after this reference is added.",
+        "Run `current-frontier --json`; expected outcome is no stale 2026-06-13/14 QDP-pack runs, with only genuinely newer output needing reconciliation.",
+        "Next model work should run same-config `style_structural_v1` versus `style_structural_alpha_v2_label_v2` comparisons before making any quality claim.",
+        "If alpha_v2 comparison is promising, move to evidence-grade multi-seed runs; do not use smoke/pilot/datecap evidence for promotion, paper/live, broker, or active artifact changes."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__f926a496f69c61f6b92b5faf",
+        "policy_pool_view__fc63d6b996abc7abde88bae7"
+      ]
     },
     {
       "id": "r50",

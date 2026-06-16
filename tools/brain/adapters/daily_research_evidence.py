@@ -25,7 +25,7 @@ EXPLICIT_STUDY_FAMILY_PATTERN = re.compile(r"(?:Study family|study_family)\s*:\s
 CODE_TOKEN_PATTERN = re.compile(r"`([A-Za-z][A-Za-z0-9_]*(?:_[A-Za-z0-9]+)+)`")
 RESEARCH_POINTER_PATTERN = re.compile(r"^alpha_[A-Za-z0-9_]+_policy_v\d+$")
 RUN_INSTANCE_MARKER_PATTERN = re.compile(
-    r"(?:20\d{6}|seed\d+|\br\d+[a-z]?\b|protocol_|study_|smoke_|dryrun_|fullgrid|daily\d|liquid\d|h\d)",
+    r"(?:20\d{6}|seed\d+|\br\d+[a-z]?\b|protocol_|study_|smoke_|dryrun_|fullgrid|daily\d|liquid\d|(?:^|_)h\d)",
     re.IGNORECASE,
 )
 RUN_TAG_SECTION_HEADINGS = (

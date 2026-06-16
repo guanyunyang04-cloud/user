@@ -1,10 +1,10 @@
 # Daily Research 操作中枢
 
-快照日期：`2026-06-03`
+快照日期：`2026-06-16`
 
 ## 默认操作纪律
 - 默认工作分支：`main`；当前工作区根目录：`H:\quant_project`。
-- Python 入口固定为 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`；进入本分脑前，必须先由主脑 `tools.brain.workflow capsule` 路由到 `daily_research`。
+- Python 入口固定为 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`；接管本分脑时优先按用户目标、显式文件、state/reference 和当前输出证据行动，主脑 `capsule` / `current-frontier` 是可选路由与新鲜度诊断，不是硬前置。
 - 继承主脑个人研究者直接行动风格：直接实现、直接重构、直接清理旧路径；验证只需足够支撑当前结论。
 - `H:\new_tdx64\PYPlugins\user` 已退出本项目主链路；历史 reference 中旧路径只作历史证据，不作为当前入口。
 - 不使用 `KMP_DUPLICATE_LIB_OK` 作为默认方案。
@@ -19,7 +19,7 @@
 - 以上 output/cache 路径在真实 payload 恢复前只代表目标位置；文件级 evidence lookup、replay、active artifact inspection 和 project consistency 结论需回到 brain references 与用户确认边界。
 
 ## 高频 Brain 命令
-- 主脑 task capsule：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
+- 可选主脑 task capsule：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
 - current frontier freshness：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow current-frontier --json`
 - evidence registry rebuild：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow evidence-index --rebuild --json`
 - evidence query：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow query --q <r_id|tag|dataset_id> --json`
