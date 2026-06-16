@@ -192,7 +192,7 @@ def build_sharded_memmap(
     for row in _discover_existing_shards(out_root):
         existing_by_key.setdefault(str(row.get("shard_key", "")), row)
     schema_columns = _select_initial_schema_columns(existing_by_key.values())
-    if not schema_columns and cfg.max_shards <= 0 and not bool(cfg.year_input_cache):
+    if not schema_columns and cfg.max_shards <= 0:
         reference = _build_schema_reference_shard(
             lake=lake,
             dataset_id=dataset_id,
