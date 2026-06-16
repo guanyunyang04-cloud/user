@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 121,
+  "record_count": 122,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -3087,6 +3087,33 @@
         "Keep standard command docs on the `-m daily_research.path_policy.run_alpha_path20_protocol` entrypoint."
       ],
       "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_qdp_alpha_v2_h256_comparison_20260616",
+      "date": "2026-06-16",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_qdp_alpha_v2_h256_comparison_20260616.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01"
+      ],
+      "verdict": "Status: `completed / forecast_test_confirmed / research_only`.; Run tag: `qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01`.; Purpose: first same-mouth strong-model comparison on the new QDP `style_structural_alpha_v2_label_v2` pack, using the old `style_structural_v1` h256/topn/hybrid setup as the closest default control.; Active artifact impact: none. `daily_research/output/active_execution_strategy.json` was not created or modified.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Since the user currently prioritizes finding a strong model, postpone multi-seed and score-backtest bridge/candidate matrix.",
+        "Next alpha_v2 model work should tune the strength route rather than execution:",
+        "try a variant that aligns decision_score with the epoch4 rank/spread signal without creating bad-month instability;",
+        "compare h192/h256 or h256 loss/output-head variants on alpha_v2;",
+        "keep `personal_topk_v1` validation selection and same-candidate test reporting as mandatory diagnostics.",
+        "Do not claim execution-candidate, live/default unfreeze, or production readiness until multi-seed stability and score-backtest bridge/candidate matrix are explicitly run later."
+      ],
+      "active_artifact_impact": "not_stated",
       "dataset_ids": []
     },
     {

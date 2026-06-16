@@ -166,6 +166,16 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
             ],
         )
 
+    def test_adapter_indexes_qdp_run_tags_in_reference_body(self) -> None:
+        text = """
+        - Run tag: `qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01`.
+        - Label schema: `path20_basic_v2`.
+        """
+
+        tags = daily_research_evidence.run_tags(text)
+
+        self.assertEqual(tags, ["qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01"])
+
     def test_adapter_indexes_mh_output_aux_grid_run_tags(self) -> None:
         text = """
         ## Run Tags
