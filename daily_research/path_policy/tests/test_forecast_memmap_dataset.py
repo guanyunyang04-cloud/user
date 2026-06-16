@@ -147,8 +147,58 @@ def _write_qdp_fixture_shard(root, *, year: int, stocks: tuple[str, ...], featur
     return shard
 
 
+def _make_fast_prepared(
+    *,
+    days: int = 170,
+    stocks: tuple[str, ...] = ("AAA", "BBB", "CCC", "DDD"),
+    start_date: str = "2019-10-15",
+):
+    return make_prepared_policy_inputs(days=days, stocks=stocks, start_date=start_date)
+
+
+def _build_fast_forecast_memmap(
+    root,
+    *,
+    prepared=None,
+    days: int = 170,
+    stocks: tuple[str, ...] = ("AAA", "BBB", "CCC", "DDD"),
+    start_date: str = "2019-10-15",
+    train_start_year: int = 2019,
+    train_end_year: int = 2019,
+    validation_year: int = 2020,
+    test_year: int = 2021,
+    lookback_days: int = 5,
+    horizon: int = 20,
+    cumulative_horizons=None,
+    max_samples_per_role: int = 8,
+    max_samples_per_date_per_role: int = 0,
+    min_lookback_valid_ratio: float = 0.80,
+    max_feature_columns: int = 32,
+    include_static_context: bool = False,
+    static_context_fields=None,
+):
+    prepared = prepared if prepared is not None else _make_fast_prepared(days=days, stocks=stocks, start_date=start_date)
+    return build_forecast_memmap_dataset(
+        prepared,
+        root=root,
+        train_start_year=train_start_year,
+        train_end_year=train_end_year,
+        validation_year=validation_year,
+        test_year=test_year,
+        lookback_days=lookback_days,
+        horizon=horizon,
+        cumulative_horizons=cumulative_horizons,
+        max_samples_per_role=max_samples_per_role,
+        max_samples_per_date_per_role=max_samples_per_date_per_role,
+        max_feature_columns=max_feature_columns,
+        min_lookback_valid_ratio=min_lookback_valid_ratio,
+        include_static_context=include_static_context,
+        static_context_fields=static_context_fields,
+    )
+
+
 def test_forecast_memmap_dataset_builds_lazy_store_and_batches(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
+    prepared = _make_fast_prepared()
     prepared.raw_cache_meta["dataset_id"] = "policy_input_bundle__unit"
     prepared.raw_cache_meta["pool_view"] = {
         "dataset_id": "policy_pool_view__unit",
@@ -157,17 +207,10 @@ def test_forecast_memmap_dataset_builds_lazy_store_and_batches(tmp_path) -> None
         "source_market_dataset_id": "policy_input_bundle__unit",
     }
 
-    dataset = build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path,
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
+    dataset = _build_fast_forecast_memmap(
+        tmp_path,
+        prepared=prepared,
         test_year=2020,
-        lookback_days=5,
-        horizon=20,
-        max_samples_per_role=8,
-        min_lookback_valid_ratio=0.80,
     )
 
     assert not hasattr(dataset, "x")
@@ -538,7 +581,7 @@ def test_qdp_training_pack_loader_applies_sample_cap_without_misalignment(tmp_pa
 
 
 def test_canonical_memmap_registry_resolves_matching_request(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
+    prepared = _make_fast_prepared()
     prepared.raw_cache_meta["dataset_id"] = "policy_input_bundle__unit"
     prepared.raw_cache_meta["pool_view"] = {
         "dataset_id": "policy_pool_view__unit",
@@ -546,18 +589,10 @@ def test_canonical_memmap_registry_resolves_matching_request(tmp_path) -> None:
         "view_name": "rolling_liquid500",
         "source_market_dataset_id": "policy_input_bundle__unit",
     }
-    dataset = build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path / "memmap",
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
+    dataset = _build_fast_forecast_memmap(
+        tmp_path / "memmap",
+        prepared=prepared,
         test_year=2020,
-        lookback_days=5,
-        horizon=20,
-        max_samples_per_role=8,
-        max_feature_columns=32,
-        min_lookback_valid_ratio=0.80,
     )
     registry_path = tmp_path / "registry.json"
     register_memmap_manifest(tmp_path / "memmap" / "forecast_dataset_manifest.json", registry_path=registry_path)
@@ -590,24 +625,16 @@ def test_canonical_memmap_registry_resolves_matching_request(tmp_path) -> None:
 
 
 def test_canonical_memmap_registry_does_not_reuse_different_universe(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
+    prepared = _make_fast_prepared()
     prepared.raw_cache_meta["dataset_id"] = "policy_input_bundle__unit"
-    dataset = build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path / "memmap",
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
+    dataset = _build_fast_forecast_memmap(
+        tmp_path / "memmap",
+        prepared=prepared,
         test_year=2020,
-        lookback_days=5,
-        horizon=20,
-        max_samples_per_role=8,
-        max_feature_columns=32,
-        min_lookback_valid_ratio=0.80,
     )
     registry_path = tmp_path / "registry.json"
     register_memmap_manifest(tmp_path / "memmap" / "forecast_dataset_manifest.json", registry_path=registry_path)
-    other_prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB"), start_date="2019-07-01")
+    other_prepared = _make_fast_prepared(stocks=("AAA", "BBB"))
     other_prepared.raw_cache_meta["dataset_id"] = "policy_input_bundle__unit"
     args = Namespace(
         lake_dataset_id="policy_input_bundle__unit",
@@ -638,18 +665,9 @@ def test_canonical_memmap_registry_does_not_reuse_different_universe(tmp_path) -
 
 
 def test_forecast_memmap_dataset_writes_progress_files(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
-    build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path,
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=20,
+    _build_fast_forecast_memmap(
+        tmp_path,
         max_samples_per_role=4,
-        min_lookback_valid_ratio=0.80,
     )
 
     memmap_progress = json.loads((tmp_path / "forecast_memmap_build_progress.json").read_text(encoding="utf-8"))
@@ -662,19 +680,16 @@ def test_forecast_memmap_dataset_writes_progress_files(tmp_path) -> None:
 
 
 def test_forecast_memmap_dataset_can_cap_samples_per_date(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=820, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2018-01-02")
-    dataset = build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path,
-        train_start_year=2018,
+    dataset = _build_fast_forecast_memmap(
+        tmp_path,
+        days=370,
+        start_date="2019-11-01",
+        train_start_year=2019,
         train_end_year=2019,
         validation_year=2020,
         test_year=2021,
-        lookback_days=5,
-        horizon=20,
         max_samples_per_role=0,
         max_samples_per_date_per_role=1,
-        min_lookback_valid_ratio=0.80,
     )
 
     assert dataset.manifest["max_samples_per_date_per_role"] == 1
@@ -721,7 +736,7 @@ def test_memmap_train_normalization_matches_naive_window_scan(tmp_path) -> None:
 
 
 def test_validate_forecast_memmap_manifest_reports_ok_and_source_binding(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
+    prepared = _make_fast_prepared()
     prepared.raw_cache_meta["dataset_id"] = "policy_input_bundle__unit"
     prepared.raw_cache_meta["pool_view"] = {
         "dataset_id": "policy_pool_view__unit",
@@ -729,17 +744,10 @@ def test_validate_forecast_memmap_manifest_reports_ok_and_source_binding(tmp_pat
         "view_name": "rolling_liquid500",
         "source_market_dataset_id": "policy_input_bundle__unit",
     }
-    build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path,
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
+    _build_fast_forecast_memmap(
+        tmp_path,
+        prepared=prepared,
         test_year=2020,
-        lookback_days=5,
-        horizon=20,
-        max_samples_per_role=8,
-        min_lookback_valid_ratio=0.80,
     )
 
     report = validate_forecast_memmap_manifest(
@@ -762,7 +770,7 @@ def test_validate_forecast_memmap_manifest_reports_ok_and_source_binding(tmp_pat
 
 
 def test_validate_forecast_memmap_manifest_blocks_pool_mismatch_and_low_train_rows(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
+    prepared = _make_fast_prepared()
     prepared.raw_cache_meta["dataset_id"] = "policy_input_bundle__unit"
     prepared.raw_cache_meta["pool_view"] = {
         "dataset_id": "policy_pool_view__unit",
@@ -770,17 +778,10 @@ def test_validate_forecast_memmap_manifest_blocks_pool_mismatch_and_low_train_ro
         "view_name": "rolling_liquid500",
         "source_market_dataset_id": "policy_input_bundle__unit",
     }
-    build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path,
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
+    _build_fast_forecast_memmap(
+        tmp_path,
+        prepared=prepared,
         test_year=2020,
-        lookback_days=5,
-        horizon=20,
-        max_samples_per_role=8,
-        min_lookback_valid_ratio=0.80,
     )
 
     report = validate_forecast_memmap_manifest(
@@ -796,19 +797,7 @@ def test_validate_forecast_memmap_manifest_blocks_pool_mismatch_and_low_train_ro
 
 
 def test_validate_forecast_memmap_cli_writes_json_and_returns_nonzero_on_blocker(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
-    build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path,
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=20,
-        max_samples_per_role=8,
-        min_lookback_valid_ratio=0.80,
-    )
+    _build_fast_forecast_memmap(tmp_path)
     json_output = tmp_path / "validator.json"
 
     with pytest.raises(SystemExit) as exc:
@@ -830,19 +819,7 @@ def test_validate_forecast_memmap_cli_writes_json_and_returns_nonzero_on_blocker
 
 
 def test_validate_forecast_memmap_manifest_classifies_missing_memmap_file(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
-    build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path,
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=20,
-        max_samples_per_role=8,
-        min_lookback_valid_ratio=0.80,
-    )
+    _build_fast_forecast_memmap(tmp_path)
     (tmp_path / "forecast_y_daily_excess.dat").unlink()
 
     report = validate_forecast_memmap_manifest(manifest=tmp_path / "forecast_dataset_manifest.json")
@@ -852,21 +829,12 @@ def test_validate_forecast_memmap_manifest_classifies_missing_memmap_file(tmp_pa
 
 
 def test_forecast_memmap_dataset_accepts_custom_horizon_grid_and_horizon_risk(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=900, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2018-01-02")
     horizons = (1, 2, 3, 5, 8, 10, 15, 20, 30)
 
-    dataset = build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path,
-        train_start_year=2018,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
+    dataset = _build_fast_forecast_memmap(
+        tmp_path,
         horizon=30,
         cumulative_horizons=horizons,
-        max_samples_per_role=8,
-        min_lookback_valid_ratio=0.80,
     )
 
     assert dataset.manifest["forecast_horizon"] == 30
@@ -889,18 +857,10 @@ def test_forecast_memmap_dataset_accepts_custom_horizon_grid_and_horizon_risk(tm
 
 
 def test_forecast_memmap_loader_resolves_copied_absolute_manifest_paths(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC"), start_date="2019-07-01")
-    dataset = build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path,
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=20,
+    dataset = _build_fast_forecast_memmap(
+        tmp_path,
+        stocks=("AAA", "BBB", "CCC"),
         max_samples_per_role=6,
-        min_lookback_valid_ratio=0.80,
     )
     manifest_path = tmp_path / "forecast_dataset_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -915,7 +875,7 @@ def test_forecast_memmap_loader_resolves_copied_absolute_manifest_paths(tmp_path
 
 
 def test_static_context_vocab_is_stable_and_memmap_samples_are_aligned(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ"), start_date="2019-07-01")
+    prepared = _make_fast_prepared(stocks=("AAA.SZ", "BBB.SH", "CCC.SZ"))
     prepared.metadata_frames["industry_map"] = __import__("pandas").DataFrame(
         {
             "symbol": ["AAA.SZ", "BBB.SH"],
@@ -937,7 +897,7 @@ def test_static_context_vocab_is_stable_and_memmap_samples_are_aligned(tmp_path)
     }
 
     first = build_static_context_vocab(prepared)
-    reversed_prepared = make_prepared_policy_inputs(days=420, stocks=("CCC.SZ", "BBB.SH", "AAA.SZ"), start_date="2019-07-01")
+    reversed_prepared = _make_fast_prepared(stocks=("CCC.SZ", "BBB.SH", "AAA.SZ"))
     reversed_prepared.metadata_frames.update(prepared.metadata_frames)
     second = build_static_context_vocab(reversed_prepared)
 
@@ -945,17 +905,10 @@ def test_static_context_vocab_is_stable_and_memmap_samples_are_aligned(tmp_path)
     assert first["industry_vocab_fingerprint"] == second["industry_vocab_fingerprint"]
     assert first["board_vocab_fingerprint"] == second["board_vocab_fingerprint"]
 
-    dataset = build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path,
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=20,
+    dataset = _build_fast_forecast_memmap(
+        tmp_path,
+        prepared=prepared,
         max_samples_per_role=6,
-        min_lookback_valid_ratio=0.80,
         include_static_context=True,
     )
 
@@ -986,7 +939,7 @@ def test_static_context_vocab_is_stable_and_memmap_samples_are_aligned(tmp_path)
 
 
 def test_static_context_can_include_stable_primary_board_id(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ"), start_date="2019-07-01")
+    prepared = _make_fast_prepared(stocks=("AAA.SZ", "BBB.SH", "CCC.SZ"))
     prepared.metadata_frames["industry_map"] = __import__("pandas").DataFrame(
         {
             "symbol": ["AAA.SZ", "BBB.SH"],
@@ -1002,17 +955,10 @@ def test_static_context_can_include_stable_primary_board_id(tmp_path) -> None:
         }
     )
 
-    dataset = build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path,
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=20,
+    dataset = _build_fast_forecast_memmap(
+        tmp_path,
+        prepared=prepared,
         max_samples_per_role=6,
-        min_lookback_valid_ratio=0.80,
         include_static_context=True,
         static_context_fields=("symbol", "exchange", "industry", "board", "liquidity_bucket", "price_bucket"),
     )
@@ -1039,18 +985,10 @@ def test_static_context_can_include_stable_primary_board_id(tmp_path) -> None:
 
 
 def test_date_batch_view_groups_memmap_samples_by_signal_date(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ"), start_date="2019-07-01")
-    dataset = build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path,
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=20,
+    dataset = _build_fast_forecast_memmap(
+        tmp_path,
+        stocks=("AAA.SZ", "BBB.SH", "CCC.SZ"),
         max_samples_per_role=9,
-        min_lookback_valid_ratio=0.80,
         include_static_context=True,
     )
 
@@ -1069,7 +1007,7 @@ def test_date_batch_view_groups_memmap_samples_by_signal_date(tmp_path) -> None:
 
 
 def test_forecast_memmap_dataset_filters_low_history_samples(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC"), start_date="2019-07-01")
+    prepared = _make_fast_prepared(stocks=("AAA", "BBB", "CCC"))
     prepared.open_.iloc[:6, prepared.open_.columns.get_loc("AAA")] = np.nan
     prepared.close.iloc[:6, prepared.close.columns.get_loc("AAA")] = np.nan
     prepared.high.iloc[:6, prepared.high.columns.get_loc("AAA")] = np.nan
@@ -1077,15 +1015,10 @@ def test_forecast_memmap_dataset_filters_low_history_samples(tmp_path) -> None:
     prepared.volume.iloc[:6, prepared.volume.columns.get_loc("AAA")] = np.nan
     prepared.amount.iloc[:6, prepared.amount.columns.get_loc("AAA")] = np.nan
 
-    dataset = build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path,
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
+    dataset = _build_fast_forecast_memmap(
+        tmp_path,
+        prepared=prepared,
         lookback_days=10,
-        horizon=20,
         max_samples_per_role=12,
         min_lookback_valid_ratio=0.90,
     )
@@ -1097,19 +1030,7 @@ def test_forecast_memmap_dataset_filters_low_history_samples(tmp_path) -> None:
 
 
 def test_forecast_memmap_dataset_loads_existing_manifest_without_rebuild(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
-    built = build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path,
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=20,
-        max_samples_per_role=8,
-        min_lookback_valid_ratio=0.80,
-    )
+    built = _build_fast_forecast_memmap(tmp_path)
     feature_store_mtime = (tmp_path / "forecast_feature_store.dat").stat().st_mtime_ns
 
     loaded = load_forecast_memmap_dataset(tmp_path / "forecast_dataset_manifest.json")
@@ -1129,19 +1050,7 @@ def test_forecast_memmap_dataset_loads_existing_manifest_without_rebuild(tmp_pat
 
 
 def test_forecast_memmap_dataset_rejects_inconsistent_reuse_manifest(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
-    built = build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path,
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=20,
-        max_samples_per_role=8,
-        min_lookback_valid_ratio=0.80,
-    )
+    built = _build_fast_forecast_memmap(tmp_path)
     manifest_path = tmp_path / "forecast_dataset_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
