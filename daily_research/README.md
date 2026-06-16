@@ -7,13 +7,13 @@ Canonical brain source: `daily_research/brain/identity_layer.md`.
 
 当前工作区根目录：`H:\quant_project`。`daily_research` 不再运行在 `H:\new_tdx64\PYPlugins\user` 下，旧通达信插件用户目录不应保存本项目代码或产物。
 
-接管必须先从工作区主脑进入：
+接管默认先从用户目标、当前 git 状态和相关主脑 / 分脑事实判断；需要机器可读上下文或守卫提示时，可从工作区主脑 capsule 获取诊断摘要：
 
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json
 ```
 
-主脑路由到 `daily_research` 后，`daily_research/brain/` 才是本项目事实层。本 README 只作为简体中文快速索引，不替代主脑或分脑中的当前状态、规则、证据和治理判断。
+确认任务属于 `daily_research` 后，`daily_research/brain/` 是本项目事实层。本 README 只作为简体中文快速索引，不替代主脑或分脑中的当前状态、规则、证据和治理判断。
 
 ## 模块地图
 
@@ -40,7 +40,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule -
 
 ## 常用入口
 
-先由主脑 capsule 确认本任务属于 `daily_research`，再使用以下项目入口：
+确认本任务属于 `daily_research` 后，再使用以下项目入口；capsule / route 可辅助判断，但不替代 agent 对用户目标和文件证据的判断：
 
 - 连续策略正式协议：
   `python daily_research/continuous_policy/run_continuous_policy_protocol.py ...`
@@ -76,7 +76,7 @@ C:\Users\ASUS\miniconda3\envs\yolos\python.exe -m tools.brain.doc_guard check --
 
 ## 治理
 
-- 先运行主脑 capsule，再按 `routing.selected_brain_id` 进入 `daily_research/brain/`。
+- 默认按用户目标、路径、文件证据和主脑边界判断是否进入 `daily_research/brain/`；capsule / route 只是可选诊断信号。
 - 工作区根 `brain/brain_manifest.json` 定义所有分脑共享的主脑合同。
 - 新的文档内容必须先整合进对应 brain；README 只保留简体中文索引和公开入口。
 - 生成实验产物应留在 `daily_research/output/`，需要复核或裁剪时使用 `workspace_maintenance.py`。

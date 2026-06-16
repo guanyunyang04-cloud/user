@@ -9,19 +9,21 @@ Canonical brain source: `brain/master_brain.md`.
 
 ## Agent 接管入口
 
-接管、路由或修改 tracked 文件前，先运行主脑 capsule：
+默认先理解用户目标、当前 git 状态和最相关的 brain / body 文件；capsule、route、bootstrap 是可选诊断入口，不是修改 tracked 文件前的固定门禁。
+
+需要机器可读接管摘要、守卫提示或跨 agent 交接时，可运行：
 
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json
 ```
 
-只需要判断任务归属时运行：
+只需要辅助判断任务归属时，可运行：
 
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow route --task "<task>" --json
 ```
 
-需要显式启动主脑或分脑上下文时运行：
+需要显式展开主脑或分脑上下文时，可运行：
 
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain <brain_id|workspace> --json
@@ -44,7 +46,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap
 - 待整理旧资产：`a_stock_daily_selection/`，仅保留历史输出，不承载阅读文档或项目事实。
 - 缓存/依赖：`.pytest_cache/`、`.playwright-cli/`、`node_modules/`。
 
-如果 README、AGENTS、CLAUDE、SKILL 与主脑冲突，以主脑 capsule 和 `brain/` 当前文档为准。
+如果 README、AGENTS、CLAUDE、SKILL 与主脑冲突，以 `brain/` 当前文档和实际工具守卫为准；capsule / route 输出只是诊断信号。
 
 ## 常用守卫
 

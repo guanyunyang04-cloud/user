@@ -289,13 +289,15 @@ EXTERNAL_DOC_PREFIXES_REQUIRING_CANONICAL_MARKER: tuple[str, ...] = ()
 REQUIRED_DOC_SNIPPETS = {
     "README.md": (
         "权威接管真源是主脑",
+        "可选诊断入口",
         "tools.brain.workflow capsule",
         "tools.brain.workflow route",
         "tools.brain.doc_guard check",
         "tools.brain.integrity_check --json",
     ),
     "daily_research/README.md": (
-        "接管必须先从工作区主脑进入",
+        "可从工作区主脑 capsule 获取诊断摘要",
+        "capsule / route 可辅助判断",
         "tools.brain.workflow capsule",
         "daily_research/brain/",
         "tools.brain.integrity_check --json",

@@ -112,6 +112,28 @@ class WorkspaceBrainSkillContractTest(unittest.TestCase):
         self.assertNotIn("\u4e0d\u5f97", text)
         self.assertNotIn("\u7981\u6b62", text)
 
+    def test_workspace_entry_docs_keep_capsule_optional(self) -> None:
+        paths = [
+            ROOT / "README.md",
+            ROOT / "daily_research/README.md",
+            ROOT / "brain/skills/workspace-brain/agents/openai.yaml",
+        ]
+
+        for path in paths:
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(path=path.relative_to(ROOT).as_posix()):
+                self.assertNotIn("Run the workspace brain capsule first", text)
+                self.assertNotIn("接管必须先从工作区主脑进入", text)
+                self.assertNotIn("先运行主脑 capsule", text)
+
+        root_readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        daily_readme = (ROOT / "daily_research/README.md").read_text(encoding="utf-8")
+        agent_prompt = (ROOT / "brain/skills/workspace-brain/agents/openai.yaml").read_text(encoding="utf-8")
+
+        self.assertIn("可选诊断入口", root_readme)
+        self.assertIn("capsule / route 可辅助判断", daily_readme)
+        self.assertIn("optional diagnostics", agent_prompt)
+
 
 
 if __name__ == "__main__":
