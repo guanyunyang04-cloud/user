@@ -174,6 +174,10 @@ def test_protocol_parser_accepts_auxiliary_decision_loss_profiles_and_sets_decis
         "horizon_target_normalized_v1",
         "horizon_head_soft_constraint_v1",
         "target_norm_head_constraint_v1",
+        "topn_excess_rank_v1",
+        "score_to_weight_proxy_v1",
+        "bad_month_aware_v1",
+        "personal_alpha_scorer_hybrid_v1",
     ):
         args = parser.parse_args(
             [

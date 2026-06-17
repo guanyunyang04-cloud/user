@@ -83,6 +83,7 @@ FORECAST_LOSS_PROFILES = (
     "topn_excess_rank_v1",
     "score_to_weight_proxy_v1",
     "bad_month_aware_v1",
+    "personal_alpha_scorer_hybrid_v1",
 )
 FORECAST_RANKING_BASELINES = ("none", "lightgbm", "xgboost")
 FORECAST_RISK_AUX_NAMES = ("downside_floor", "worst_1d", "upside")
@@ -108,6 +109,7 @@ _FORECAST_DECISION_LOSS_PROFILES = {
     "topn_excess_rank_v1",
     "score_to_weight_proxy_v1",
     "bad_month_aware_v1",
+    "personal_alpha_scorer_hybrid_v1",
 }
 _FORECAST_LOSS_WEIGHT_PRESETS: dict[str, dict[str, float]] = {
     "default": {
@@ -407,6 +409,24 @@ _FORECAST_LOSS_WEIGHT_PRESETS: dict[str, dict[str, float]] = {
         "score_to_weight_proxy": 0.25,
         "bad_month_aware": 0.45,
     },
+    "personal_alpha_scorer_hybrid_v1": {
+        "path_daily": 0.42,
+        "quantile": 0.14,
+        "path_aux": 0.14,
+        "risk_aux": 0.08,
+        "rank_aux": 1.05,
+        "risk_rank_aux": 0.010,
+        "direction_aux": 0.0,
+        "downside_rank_aux": 0.025,
+        "decision_utility": 0.85,
+        "hit_aux": 0.18,
+        "horizon_classification": 0.08,
+        "decision_rank_aux": 0.42,
+        "horizon_entropy": 0.02,
+        "topn_excess_rank": 0.30,
+        "score_to_weight_proxy": 0.20,
+        "bad_month_aware": 0.18,
+    },
 }
 
 _FORECAST_TARGET_NORMALIZED_LOSS_PROFILES = {
@@ -423,7 +443,12 @@ _HORIZON_HEAD_CONSTRAINT_LONG_HORIZONS = (15, 20, 30)
 _HORIZON_HEAD_CONSTRAINT_MIN_LONG_PROBABILITY = 0.40
 _FORECAST_UTILITY_30D_SOFT_PENALTY_PROFILES = {"horizon_30d_soft_penalty_v1"}
 _HORIZON_30D_SOFT_PENALTY = 0.005
-_HIGH_RETURN_PROXY_LOSS_PROFILES = {"topn_excess_rank_v1", "score_to_weight_proxy_v1", "bad_month_aware_v1"}
+_HIGH_RETURN_PROXY_LOSS_PROFILES = {
+    "topn_excess_rank_v1",
+    "score_to_weight_proxy_v1",
+    "bad_month_aware_v1",
+    "personal_alpha_scorer_hybrid_v1",
+}
 
 
 class _EagerTorchDataset(torch.utils.data.Dataset):
@@ -792,13 +817,24 @@ def _high_return_proxy_contract(loss_profile: str) -> dict[str, Any]:
     if not enabled:
         return {"enabled": False, "method": "none", "proxy_only": True}
     methods = {
-        "topn_excess_rank_v1": "batch_top_decile_excess_rank_surrogate",
+        "topn_excess_rank_v1": "batch_top_quintile_excess_rank_surrogate",
         "score_to_weight_proxy_v1": "batch_soft_topn_score_to_weight_surrogate",
-        "bad_month_aware_v1": "batch_downside_reweighted_score_surrogate",
+        "bad_month_aware_v1": "batch_downside_tail_reweighted_score_surrogate",
+        "personal_alpha_scorer_hybrid_v1": "hybrid_batch_top_tail_soft_weight_downside_surrogate",
+    }
+    descriptions = {
+        "topn_excess_rank_v1": "Batch-level top 20% future 20d excess-return proxy plus pairwise rank alignment.",
+        "score_to_weight_proxy_v1": "Batch-level soft score-to-weight proxy; not a real daily portfolio.",
+        "bad_month_aware_v1": "Sample-level downside-tail proxy despite legacy name; not a monthly aggregation.",
+        "personal_alpha_scorer_hybrid_v1": (
+            "Hybrid alpha-scorer proxy combining batch top-tail, soft score concentration, "
+            "and downside-tail penalties; not date-cross-sectional topK or a backtest."
+        ),
     }
     return {
         "enabled": True,
         "method": methods[profile],
+        "description": descriptions.get(profile, ""),
         "proxy_only": True,
         "not_a_backtest": True,
         "uses_active_execution_artifact": False,

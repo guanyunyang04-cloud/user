@@ -339,6 +339,7 @@ def test_auxiliary_decision_loss_profiles_record_weight_contract_and_finite_loss
         "topn_excess_rank_v1",
         "score_to_weight_proxy_v1",
         "bad_month_aware_v1",
+        "personal_alpha_scorer_hybrid_v1",
     ):
         contract = forecast_loss_profile_contract(profile, cumulative_horizons=horizons, forecast_horizon=30)
         assert contract["loss_profile"] == profile
@@ -356,6 +357,7 @@ def test_auxiliary_decision_loss_profiles_record_weight_contract_and_finite_loss
                 "topn_excess_rank_v1",
                 "score_to_weight_proxy_v1",
                 "bad_month_aware_v1",
+                "personal_alpha_scorer_hybrid_v1",
             }:
                 assert weights["decision_utility"] > weights["rank_aux"]
             if profile == "score_monthly_robust_v1":
@@ -390,7 +392,7 @@ def test_auxiliary_decision_loss_profiles_record_weight_contract_and_finite_loss
             proxy = contract["high_return_proxy_objective"]
             if profile == "topn_excess_rank_v1":
                 assert proxy["enabled"] is True
-                assert proxy["method"] == "batch_top_decile_excess_rank_surrogate"
+                assert proxy["method"] == "batch_top_quintile_excess_rank_surrogate"
                 assert proxy["uses_active_execution_artifact"] is False
                 assert proxy["not_a_backtest"] is True
                 assert weights["topn_excess_rank"] > 0.0
@@ -402,10 +404,20 @@ def test_auxiliary_decision_loss_profiles_record_weight_contract_and_finite_loss
                 assert weights["score_to_weight_proxy"] > 0.0
             elif profile == "bad_month_aware_v1":
                 assert proxy["enabled"] is True
-                assert proxy["method"] == "batch_downside_reweighted_score_surrogate"
+                assert proxy["method"] == "batch_downside_tail_reweighted_score_surrogate"
                 assert proxy["uses_active_execution_artifact"] is False
                 assert proxy["not_a_backtest"] is True
                 assert weights["bad_month_aware"] > 0.0
+            elif profile == "personal_alpha_scorer_hybrid_v1":
+                assert proxy["enabled"] is True
+                assert proxy["method"] == "hybrid_batch_top_tail_soft_weight_downside_surrogate"
+                assert "not date-cross-sectional topK" in proxy["description"]
+                assert proxy["uses_active_execution_artifact"] is False
+                assert proxy["not_a_backtest"] is True
+                assert weights["topn_excess_rank"] > 0.0
+                assert weights["score_to_weight_proxy"] > 0.0
+                assert weights["bad_month_aware"] > 0.0
+                assert weights["downside_rank_aux"] > 0.0
             else:
                 assert proxy["enabled"] is False
 

@@ -268,6 +268,7 @@ _LOSS_PROFILE_ALIASES = {
     "topn_excess_rank_v1": "topn",
     "score_to_weight_proxy_v1": "s2w",
     "bad_month_aware_v1": "badmonth",
+    "personal_alpha_scorer_hybrid_v1": "hybrid_personal",
 }
 
 
