@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 122,
+  "record_count": 123,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -3029,6 +3029,30 @@
       "dataset_ids": [
         "policy_input_bundle__0f116a9b78c92ff045a6853d"
       ]
+    },
+    {
+      "id": "path_policy_alpha_v2_strong_model_research_plan_20260617",
+      "date": "2026-06-17",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_strong_model_research_plan_20260617.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "qdp_alpha_v2_strong_model_research"
+      ],
+      "run_tags": [
+        "qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01"
+      ],
+      "verdict": "Status: `research_plan_accepted / brain_pointer / research_only / execution_frozen`.; Date: `2026-06-17`.; Research program: `daily_research_v2_research_reset`.; Study family: `qdp_alpha_v2_strong_model_research`.",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
     },
     {
       "id": "path_policy_canonical_memmap_reconciliation_20260612",
