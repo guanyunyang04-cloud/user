@@ -7,7 +7,6 @@ import pandas as pd
 import pytest
 import torch
 
-from daily_research.path_policy.forecast_dataset import build_forecast_memmap_dataset, build_forecast_sequence_dataset
 from daily_research.path_policy.forecast_training import (
     FORECAST_MODEL_FAMILIES,
     forecast_evidence_verdict,
@@ -18,7 +17,7 @@ from daily_research.path_policy.forecast_training import (
     run_forecast_ranking_baseline,
     train_forecast_models,
 )
-from daily_research.path_policy.tests.fixtures import make_prepared_policy_inputs
+from daily_research.path_policy.tests.fixtures import make_tiny_forecast_memmap_dataset, make_tiny_forecast_sequence_dataset
 
 
 pytestmark = [pytest.mark.research, pytest.mark.slow]
@@ -166,17 +165,7 @@ def test_make_forecast_model_registers_regime_routed_multi_expert_horizon_v1() -
 
 
 def test_train_forecast_models_accepts_dlinear_sequence_checkpoint_and_predictions(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
-    dataset = build_forecast_sequence_dataset(
-        prepared,
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=20,
-        max_samples_per_role=8,
-    )
+    dataset = make_tiny_forecast_sequence_dataset(lookback_days=5, horizon=20)
 
     summary = train_forecast_models(
         dataset,
@@ -208,26 +197,7 @@ def test_train_forecast_models_accepts_dlinear_sequence_checkpoint_and_predictio
 
 
 def test_train_forecast_models_static_context_checkpoint_contract(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ", "DDD.SH"), start_date="2019-07-01")
-    prepared.metadata_frames["industry_map"] = pd.DataFrame(
-        {
-            "symbol": ["AAA.SZ", "BBB.SH", "CCC.SZ"],
-            "industry": ["bank", "electronics", "healthcare"],
-        }
-    )
-    dataset = build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path / "dataset",
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=20,
-        max_samples_per_role=8,
-        min_lookback_valid_ratio=0.80,
-        include_static_context=True,
-    )
+    dataset = make_tiny_forecast_memmap_dataset(tmp_path / "dataset", lookback_days=5, horizon=20, include_static_context=True)
 
     summary = train_forecast_models(
         dataset,
@@ -279,19 +249,7 @@ def test_train_forecast_models_static_context_checkpoint_contract(tmp_path) -> N
 
 
 def test_train_forecast_models_records_loss_profile_in_summary_and_resume_contract(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ", "DDD.SH"), start_date="2019-07-01")
-    dataset = build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path / "dataset",
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=20,
-        max_samples_per_role=8,
-        min_lookback_valid_ratio=0.80,
-    )
+    dataset = make_tiny_forecast_memmap_dataset(tmp_path / "dataset", lookback_days=5, horizon=20)
 
     summary = train_forecast_models(
         dataset,
@@ -483,17 +441,7 @@ def test_horizon_30d_soft_penalty_profile_calibrates_prediction_score_and_best_h
 
 
 def test_train_forecast_models_records_auxiliary_loss_contract_in_summary_and_checkpoint(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ", "DDD.SH"), start_date="2019-07-01")
-    dataset = build_forecast_sequence_dataset(
-        prepared,
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=20,
-        max_samples_per_role=8,
-    )
+    dataset = make_tiny_forecast_sequence_dataset(lookback_days=5, horizon=20)
 
     summary = train_forecast_models(
         dataset,
@@ -575,17 +523,7 @@ def test_decision_utility_targets_and_loss_are_finite() -> None:
 
 
 def test_train_forecast_models_records_decision_output_contract_predictions_and_resume_mismatch(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
-    dataset = build_forecast_sequence_dataset(
-        prepared,
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=20,
-        max_samples_per_role=8,
-    )
+    dataset = make_tiny_forecast_sequence_dataset(lookback_days=5, horizon=20)
 
     summary = train_forecast_models(
         dataset,
@@ -659,21 +597,12 @@ def test_train_forecast_models_records_decision_output_contract_predictions_and_
 
 
 def test_train_forecast_models_accepts_custom_horizon_decision_utility_contract(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=900, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ", "DDD.SH"), start_date="2018-01-02")
     horizons = (1, 2, 3, 5, 8, 10, 15, 20, 30)
-    dataset = build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path / "dataset",
-        train_start_year=2018,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
+    dataset = make_tiny_forecast_memmap_dataset(
+        tmp_path / "dataset",
         lookback_days=5,
         horizon=30,
         cumulative_horizons=horizons,
-        feature_profile="raw_kline_context_no_alpha_prior_v1",
-        max_samples_per_role=8,
-        min_lookback_valid_ratio=0.80,
         include_static_context=True,
     )
 
@@ -750,19 +679,8 @@ def test_train_forecast_models_accepts_custom_horizon_decision_utility_contract(
 
 
 def test_train_forecast_models_accepts_daily_1_to_45_grid_feasibility_contract(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=980, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ", "DDD.SH"), start_date="2018-01-02")
     horizons = tuple(range(1, 46))
-    dataset = build_forecast_sequence_dataset(
-        prepared,
-        train_start_year=2018,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=45,
-        cumulative_horizons=horizons,
-        max_samples_per_role=8,
-    )
+    dataset = make_tiny_forecast_sequence_dataset(lookback_days=5, horizon=45, cumulative_horizons=horizons)
 
     summary = train_forecast_models(
         dataset,
@@ -802,19 +720,7 @@ def test_train_forecast_models_accepts_daily_1_to_45_grid_feasibility_contract(t
 
 
 def test_ranking_baseline_dependency_missing_reports_status(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ", "DDD.SH"), start_date="2019-07-01")
-    dataset = build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path / "dataset",
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=20,
-        max_samples_per_role=8,
-        min_lookback_valid_ratio=0.80,
-    )
+    dataset = make_tiny_forecast_memmap_dataset(tmp_path / "dataset", lookback_days=5, horizon=20)
 
     summary = run_forecast_ranking_baseline(dataset, study_root=tmp_path / "study", baseline="missing_ranker")
 
@@ -842,19 +748,7 @@ def test_ranking_relevance_labels_are_integer_deciles_by_date() -> None:
 
 
 def test_sector_slot_diagnostics_handles_missing_metadata(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ", "DDD.SH"), start_date="2019-07-01")
-    dataset = build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path / "dataset",
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=20,
-        max_samples_per_role=8,
-        min_lookback_valid_ratio=0.80,
-    )
+    dataset = make_tiny_forecast_memmap_dataset(tmp_path / "dataset", lookback_days=5, horizon=20)
 
     summary = train_forecast_models(
         dataset,
@@ -883,19 +777,7 @@ def test_sector_slot_diagnostics_handles_missing_metadata(tmp_path) -> None:
 
 
 def test_stock_mixer_uses_memmap_date_level_batching(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ", "DDD.SH"), start_date="2019-07-01")
-    dataset = build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path / "dataset",
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=20,
-        max_samples_per_role=8,
-        min_lookback_valid_ratio=0.80,
-    )
+    dataset = make_tiny_forecast_memmap_dataset(tmp_path / "dataset", lookback_days=5, horizon=20)
 
     summary = train_forecast_models(
         dataset,
@@ -922,17 +804,7 @@ def test_stock_mixer_uses_memmap_date_level_batching(tmp_path) -> None:
 
 
 def test_train_forecast_models_writes_summary_predictions_and_artifacts(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
-    dataset = build_forecast_sequence_dataset(
-        prepared,
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=20,
-        max_samples_per_role=8,
-    )
+    dataset = make_tiny_forecast_sequence_dataset(lookback_days=5, horizon=20)
 
     summary = train_forecast_models(
         dataset,
@@ -993,19 +865,7 @@ def test_train_forecast_models_writes_summary_predictions_and_artifacts(tmp_path
 
 
 def test_train_forecast_models_accepts_memmap_dataset_view(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=820, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2018-01-02")
-    dataset = build_forecast_memmap_dataset(
-        prepared,
-        root=tmp_path / "dataset",
-        train_start_year=2018,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=20,
-        max_samples_per_role=8,
-        min_lookback_valid_ratio=0.80,
-    )
+    dataset = make_tiny_forecast_memmap_dataset(tmp_path / "dataset", lookback_days=5, horizon=20)
 
     summary = train_forecast_models(
         dataset,
@@ -1032,17 +892,7 @@ def test_train_forecast_models_accepts_memmap_dataset_view(tmp_path) -> None:
 
 
 def test_train_forecast_models_writes_last_checkpoint_progress_and_incremental_curve(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
-    dataset = build_forecast_sequence_dataset(
-        prepared,
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=20,
-        max_samples_per_role=8,
-    )
+    dataset = make_tiny_forecast_sequence_dataset(lookback_days=5, horizon=20)
 
     summary = train_forecast_models(
         dataset,
@@ -1103,17 +953,7 @@ def test_train_forecast_models_writes_last_checkpoint_progress_and_incremental_c
 
 
 def test_train_forecast_models_resumes_from_strict_last_checkpoint(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
-    dataset = build_forecast_sequence_dataset(
-        prepared,
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=20,
-        max_samples_per_role=8,
-    )
+    dataset = make_tiny_forecast_sequence_dataset(lookback_days=5, horizon=20)
 
     first_summary = train_forecast_models(
         dataset,
@@ -1164,17 +1004,7 @@ def test_train_forecast_models_resumes_from_strict_last_checkpoint(tmp_path) -> 
 
 
 def test_train_forecast_models_can_resume_for_evaluation_only_at_checkpoint_epoch(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
-    dataset = build_forecast_sequence_dataset(
-        prepared,
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=20,
-        max_samples_per_role=8,
-    )
+    dataset = make_tiny_forecast_sequence_dataset(lookback_days=5, horizon=20)
     first_summary = train_forecast_models(
         dataset,
         study_root=tmp_path / "first",
@@ -1219,17 +1049,7 @@ def test_train_forecast_models_can_resume_for_evaluation_only_at_checkpoint_epoc
 
 
 def test_train_forecast_models_rejects_resume_checkpoint_contract_mismatch(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
-    dataset = build_forecast_sequence_dataset(
-        prepared,
-        train_start_year=2019,
-        train_end_year=2019,
-        validation_year=2020,
-        test_year=2021,
-        lookback_days=5,
-        horizon=20,
-        max_samples_per_role=8,
-    )
+    dataset = make_tiny_forecast_sequence_dataset(lookback_days=5, horizon=20)
     train_forecast_models(
         dataset,
         study_root=tmp_path / "first",
