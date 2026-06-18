@@ -161,6 +161,31 @@ def test_protocol_parser_accepts_decision_utility_forecast_contract() -> None:
     assert args.forecast_decision_drawdown_penalty == pytest.approx(0.4)
 
 
+def test_protocol_parser_accepts_validation_loss_time_efficient_forecast_contract() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-walkforward-study",
+            "--tag",
+            "unit_validation_loss",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-loss-profile",
+            "personal_time_efficient_topk_v1",
+            "--forecast-selection-profile",
+            "validation_loss",
+        ]
+    )
+    _validate_protocol_args(parser, args)
+
+    assert args.forecast_output_profile == "decision_utility_v1"
+    assert args.forecast_loss_profile == "personal_time_efficient_topk_v1"
+    assert args.forecast_selection_profile == "validation_loss"
+
+
 def test_protocol_parser_accepts_auxiliary_decision_loss_profiles_and_sets_decision_output() -> None:
     parser = build_arg_parser()
     for profile in (
@@ -178,6 +203,7 @@ def test_protocol_parser_accepts_auxiliary_decision_loss_profiles_and_sets_decis
         "score_to_weight_proxy_v1",
         "bad_month_aware_v1",
         "personal_alpha_scorer_hybrid_v1",
+        "personal_time_efficient_topk_v1",
     ):
         args = parser.parse_args(
             [

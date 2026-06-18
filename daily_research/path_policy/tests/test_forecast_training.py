@@ -298,6 +298,7 @@ def test_auxiliary_decision_loss_profiles_record_weight_contract_and_finite_loss
         "score_to_weight_proxy_v1",
         "bad_month_aware_v1",
         "personal_alpha_scorer_hybrid_v1",
+        "personal_time_efficient_topk_v1",
     ):
         contract = forecast_loss_profile_contract(profile, cumulative_horizons=horizons, forecast_horizon=30)
         assert contract["loss_profile"] == profile
@@ -376,6 +377,14 @@ def test_auxiliary_decision_loss_profiles_record_weight_contract_and_finite_loss
                 assert weights["score_to_weight_proxy"] > 0.0
                 assert weights["bad_month_aware"] > 0.0
                 assert weights["downside_rank_aux"] > 0.0
+            elif profile == "personal_time_efficient_topk_v1":
+                time_eff = contract["time_efficient_topk_objective"]
+                assert contract["primary_objective"] == "personal_time_efficient_topk"
+                assert contract["target_normalization"] == "per_horizon_utility_divided_by_day"
+                assert time_eff["enabled"] is True
+                assert time_eff["method"] == "max_net_utility_per_horizon_day"
+                assert weights["decision_utility"] > weights["time_eff_topk_alignment"]
+                assert weights["decision_rank_aux"] > weights["rank_aux"]
             else:
                 assert proxy["enabled"] is False
 
@@ -440,6 +449,87 @@ def test_horizon_30d_soft_penalty_profile_calibrates_prediction_score_and_best_h
     assert list(columns["calibrated_pred_decision_utility_30d"]) == pytest.approx([0.098, 0.098])
 
 
+def test_time_efficient_topk_profile_writes_prediction_columns_and_scores_metrics() -> None:
+    from daily_research.path_policy.forecast_training import _add_decision_utility_columns
+
+    horizons = (1, 3, 5, 10, 20)
+    utility = torch.tensor(
+        [
+            [0.010, 0.006, 0.005, 0.004, 0.003],
+            [0.001, 0.002, 0.003, 0.004, 0.005],
+            [-0.003, -0.002, -0.001, 0.000, 0.001],
+            [0.004, 0.003, 0.002, 0.001, 0.000],
+            [-0.004, -0.003, -0.002, -0.001, 0.000],
+        ],
+        dtype=torch.float32,
+    )
+    decision_aux = torch.cat([utility, torch.zeros_like(utility), torch.zeros_like(utility)], dim=1).numpy()
+    y_cum = torch.tensor(
+        [
+            [0.010, 0.018, 0.025, 0.040, 0.060],
+            [0.001, 0.006, 0.015, 0.040, 0.100],
+            [-0.003, -0.006, -0.005, 0.000, 0.020],
+            [0.004, 0.009, 0.010, 0.010, 0.000],
+            [-0.004, -0.009, -0.010, -0.010, 0.000],
+        ],
+        dtype=torch.float32,
+    ).numpy()
+    risk = torch.zeros((5, len(horizons)), dtype=torch.float32).numpy()
+    columns: dict[str, object] = {}
+    _add_decision_utility_columns(
+        columns,
+        predictions={"decision_aux": decision_aux},
+        y_cum=y_cum,
+        drawdown_by_horizon=risk,
+        worst_by_horizon=risk,
+        target_scale=1.0,
+        decision_cost_bps=0.0,
+        decision_hit_threshold_bps=0.0,
+        decision_drawdown_penalty=0.0,
+        cumulative_horizons=horizons,
+        max_horizon=20,
+        loss_profile="personal_time_efficient_topk_v1",
+    )
+
+    assert {
+        "pred_time_eff_utility_1d",
+        "future_time_eff_utility_20d",
+        "pred_time_eff_score",
+        "future_time_eff_score",
+        "pred_time_eff_best_horizon",
+        "future_time_eff_best_horizon",
+        "pred_decision_score",
+        "future_decision_score",
+    }.issubset(columns)
+    assert columns["decision_score_calibration_method"] == "time_efficient_per_day"
+    assert list(columns["pred_time_eff_best_horizon"]) == [1, 20, 20, 1, 20]
+    assert list(columns["future_time_eff_best_horizon"]) == [1, 20, 20, 1, 20]
+
+    frame = pd.DataFrame(
+        {
+            "date": ["2023-01-03"] * 5,
+            "stock": ["AAA", "BBB", "CCC", "DDD", "EEE"],
+            **columns,
+        }
+    )
+    for horizon in horizons:
+        frame[f"future_cum_excess_return_{horizon}d"] = y_cum[:, horizons.index(horizon)]
+        frame[f"pred_cum_mu_{horizon}d"] = utility[:, horizons.index(horizon)].numpy()
+    frame["future_path_upside_capture_20d"] = [0.02, 0.01, 0.00, -0.01, -0.02]
+    frame["pred_aux_upside_20d"] = [0.02, 0.01, 0.00, -0.01, -0.02]
+    for step in range(1, 21):
+        frame[f"target_excess_{step}d"] = [0.001, 0.001, 0.000, -0.001, -0.001]
+        frame[f"pred_q10_{step}d"] = [-0.01] * 5
+        frame[f"pred_q90_{step}d"] = [0.01] * 5
+
+    metrics = forecast_prediction_metrics(frame)
+
+    assert metrics["time_eff_score_rank_ic"] > 0.0
+    assert metrics["time_eff_score_top_bottom_spread"] > 0.0
+    assert metrics["time_eff_best_horizon_accuracy"] == pytest.approx(1.0)
+    assert metrics["time_eff_profile_status"] == "completed"
+
+
 def test_train_forecast_models_records_auxiliary_loss_contract_in_summary_and_checkpoint(tmp_path) -> None:
     dataset = make_tiny_forecast_sequence_dataset(lookback_days=5, horizon=20)
 
@@ -475,6 +565,58 @@ def test_train_forecast_models_records_auxiliary_loss_contract_in_summary_and_ch
     checkpoint = torch.load(seed_summary["last_checkpoint_pt"], map_location="cpu", weights_only=False)
     assert checkpoint["resume_contract"]["loss_profile_contract"] == contract
     assert checkpoint["training_config"]["loss_profile_contract"] == contract
+
+
+def test_train_forecast_models_selects_time_efficient_topk_by_validation_loss(tmp_path) -> None:
+    dataset = make_tiny_forecast_sequence_dataset(lookback_days=5, horizon=20)
+
+    summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "study",
+        model_families=("linear_last_day",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=5,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=24,
+        dropout=0.0,
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+        output_profile="decision_utility_v1",
+        loss_profile="personal_time_efficient_topk_v1",
+        selection_profile="validation_loss",
+        decision_cost_bps=20.0,
+        decision_hit_threshold_bps=10.0,
+        decision_drawdown_penalty=0.10,
+    )
+
+    assert summary["status"] == "completed"
+    assert summary["training_config"]["loss_profile"] == "personal_time_efficient_topk_v1"
+    assert summary["training_config"]["loss_profile_contract"]["primary_objective"] == "personal_time_efficient_topk"
+    assert summary["selection_rule"] == "lowest_validation_loss_for_training_loss_profile_then_seed_score"
+    assert summary["validation_selection_score"] == pytest.approx(-summary["models"]["linear_last_day"]["seed_summaries"]["7"]["best_validation_loss"])
+    assert summary["test_interpretable"] is True
+    assert "time_eff_score_rank_ic" in summary["validation_metrics"]
+
+    validation_predictions = pd.read_csv(tmp_path / "study" / "forecast_predictions_validation.csv")
+    assert {
+        "pred_time_eff_utility_1d",
+        "future_time_eff_utility_20d",
+        "pred_time_eff_score",
+        "future_time_eff_score",
+        "pred_time_eff_best_horizon",
+        "future_time_eff_best_horizon",
+    }.issubset(validation_predictions.columns)
+
+    checkpoint = torch.load(
+        tmp_path / "study" / "forecast_model_linear_last_day_seed7_best.pt",
+        map_location="cpu",
+        weights_only=False,
+    )
+    assert checkpoint["resume_contract"]["selection_profile"] == "validation_loss"
+    assert checkpoint["resume_contract"]["loss_profile_contract"]["primary_objective"] == "personal_time_efficient_topk"
 
 
 def test_decision_utility_targets_and_loss_are_finite() -> None:
@@ -520,6 +662,45 @@ def test_decision_utility_targets_and_loss_are_finite() -> None:
         decision_drawdown_penalty=0.25,
     )
     assert torch.isfinite(loss)
+
+
+def test_time_efficient_utility_targets_normalize_by_capital_time_and_cost() -> None:
+    from daily_research.path_policy.forecast_training import _time_efficient_utility_targets
+
+    horizons = (1, 3, 5, 10, 20)
+    y_cum = torch.tensor([[0.010, 0.030, 0.050, 0.100, 0.200]], dtype=torch.float32)
+    y_risk = torch.zeros((1, len(horizons), 3), dtype=torch.float32)
+
+    no_cost = _time_efficient_utility_targets(
+        y_cum,
+        y_risk,
+        target_scale=1.0,
+        cost_bps=0.0,
+        hit_threshold_bps=0.0,
+        drawdown_penalty=0.0,
+        worst_day_penalty=0.0,
+        cumulative_horizons=horizons,
+        max_horizon=20,
+    )
+
+    assert torch.allclose(no_cost["efficient_utility"], torch.full((1, len(horizons)), 0.010), atol=1.0e-7)
+    assert no_cost["best_horizon_index"].item() == 0
+
+    with_cost = _time_efficient_utility_targets(
+        y_cum,
+        y_risk,
+        target_scale=1.0,
+        cost_bps=20.0,
+        hit_threshold_bps=0.0,
+        drawdown_penalty=0.0,
+        worst_day_penalty=0.0,
+        cumulative_horizons=horizons,
+        max_horizon=20,
+    )
+
+    assert with_cost["efficient_utility"][0, 0] == pytest.approx(0.008)
+    assert with_cost["efficient_utility"][0, -1] == pytest.approx(0.0099)
+    assert with_cost["best_horizon_index"].item() == len(horizons) - 1
 
 
 def test_train_forecast_models_records_decision_output_contract_predictions_and_resume_mismatch(tmp_path) -> None:

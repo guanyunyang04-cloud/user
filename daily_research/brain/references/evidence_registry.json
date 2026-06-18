@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 124,
+  "record_count": 127,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -4175,6 +4175,60 @@
         "单独规划 `paper_execution -> broker_adapter -> QMT/PTrade` 自动交易主线；不要把数据平台结果直接解释为可实盘交易能力。"
       ],
       "active_artifact_impact": "guarded",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_alpha_v2_time_efficient_topk_training_contract_implementation_20260618",
+      "date": "2026-06-18",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_time_efficient_topk_training_contract_implementation_20260618.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "qdp_alpha_v2_time_efficient_topk_research"
+      ],
+      "study_families": [
+        "personal_time_efficient_topk_v1"
+      ],
+      "run_tags": [],
+      "verdict": "Status: code contract implemented / focused tests passed / research-only / execution frozen.; scope: personal_time_efficient_topk_v1 training contract, validation_loss checkpoint selection, time-efficient prediction columns and diagnostics.; active artifact impact: none.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Run the old-model validation-loss checkpoint audit if checkpoint epochs are available.",
+        "Run a small alpha_v2 smoke with personal_time_efficient_topk_v1 and validation_loss selection.",
+        "Then run the fixed h256 seed7 full experiment if smoke is clean."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_alpha_v2_time_eff_topk_contract_smoke_20260618",
+      "date": "2026-06-18",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_time_eff_topk_contract_smoke_20260618.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "qdp_alpha_v2_time_efficient_topk_research"
+      ],
+      "study_families": [
+        "personal_time_efficient_topk_v1"
+      ],
+      "run_tags": [
+        "qdp_alpha_v2_time_eff_topk_contract_smoke_20260618_01"
+      ],
+      "verdict": "Status: smoke_completed / code_path_validated / research-only / execution_frozen.; Scope: confirm the real QDP alpha_v2 label_v2 training pack can be consumed by the new personal_time_efficient_topk_v1 contract. It is not model-quality evidence.; Active artifact impact: none.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Run Stage 0 old-model validation-loss checkpoint audit.",
+        "If the audit does not reveal a higher-priority old-checkpoint issue, run the first real new-contract h256 seed7 full experiment.",
+        "Keep broad diagnostics separate from checkpoint selection."
+      ],
+      "active_artifact_impact": "unchanged",
       "dataset_ids": []
     }
   ]

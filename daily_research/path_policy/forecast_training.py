@@ -62,7 +62,7 @@ FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES = (
 )
 FORECAST_MEMMAP_DATASET_TYPES = (ForecastMemmapDataset, ForecastShardedMemmapDataset, ForecastTrainingPackDataset)
 FORECAST_OUTPUT_PROFILES = ("forecast_path_v1", "decision_utility_v1")
-FORECAST_SELECTION_PROFILES = ("multiscale", "trend20", "short_burst", "decision_utility")
+FORECAST_SELECTION_PROFILES = ("multiscale", "trend20", "short_burst", "decision_utility", "validation_loss")
 FORECAST_LOSS_PROFILES = (
     "default",
     "rank_aux",
@@ -85,6 +85,7 @@ FORECAST_LOSS_PROFILES = (
     "score_to_weight_proxy_v1",
     "bad_month_aware_v1",
     "personal_alpha_scorer_hybrid_v1",
+    "personal_time_efficient_topk_v1",
 )
 FORECAST_RANKING_BASELINES = ("none", "lightgbm", "xgboost")
 FORECAST_RISK_AUX_NAMES = ("downside_floor", "worst_1d", "upside")
@@ -112,6 +113,7 @@ _FORECAST_DECISION_LOSS_PROFILES = {
     "score_to_weight_proxy_v1",
     "bad_month_aware_v1",
     "personal_alpha_scorer_hybrid_v1",
+    "personal_time_efficient_topk_v1",
 }
 _FORECAST_LOSS_WEIGHT_PRESETS: dict[str, dict[str, float]] = {
     "default": {
@@ -448,6 +450,24 @@ _FORECAST_LOSS_WEIGHT_PRESETS: dict[str, dict[str, float]] = {
         "score_to_weight_proxy": 0.20,
         "bad_month_aware": 0.18,
     },
+    "personal_time_efficient_topk_v1": {
+        "path_daily": 0.18,
+        "quantile": 0.06,
+        "path_aux": 0.08,
+        "risk_aux": 0.05,
+        "rank_aux": 0.30,
+        "risk_rank_aux": 0.003,
+        "direction_aux": 0.0,
+        "downside_rank_aux": 0.010,
+        "decision_utility": 2.00,
+        "hit_aux": 0.25,
+        "horizon_classification": 0.20,
+        "decision_rank_aux": 1.25,
+        "horizon_entropy": 0.0,
+        "time_eff_topk_alignment": 0.35,
+        "score_to_weight_proxy": 0.0,
+        "bad_month_aware": 0.0,
+    },
 }
 
 _FORECAST_TARGET_NORMALIZED_LOSS_PROFILES = {
@@ -471,6 +491,8 @@ _HIGH_RETURN_PROXY_LOSS_PROFILES = {
     "bad_month_aware_v1",
     "personal_alpha_scorer_hybrid_v1",
 }
+_TIME_EFFICIENT_TOPK_LOSS_PROFILES = {"personal_time_efficient_topk_v1"}
+_TIME_EFFICIENT_WORST_DAY_PENALTY = 0.10
 
 
 class _EagerTorchDataset(torch.utils.data.Dataset):
@@ -833,6 +855,35 @@ def _decision_score_calibration_contract(loss_profile: str | None) -> dict[str, 
     }
 
 
+def _time_efficient_topk_contract(loss_profile: str) -> dict[str, Any]:
+    profile = _normalize_forecast_loss_profile(loss_profile)
+    enabled = profile in _TIME_EFFICIENT_TOPK_LOSS_PROFILES
+    if not enabled:
+        return {"enabled": False, "method": "none"}
+    return {
+        "enabled": True,
+        "method": "max_net_utility_per_horizon_day",
+        "future_score": "max_h((future_cumulative_excess_return_h - cost - path_risk_penalty_h) / h)",
+        "horizon_normalization": "divide_by_horizon_days",
+        "cost_semantics": "fixed round-trip cost is subtracted before horizon normalization",
+        "risk_penalty": {
+            "drawdown_penalty_source": "forecast_decision_drawdown_penalty",
+            "worst_day_penalty": float(_TIME_EFFICIENT_WORST_DAY_PENALTY),
+            "horizon_risk_scale": "sqrt(h / forecast_horizon)",
+        },
+        "prediction_slots": {
+            "decision_aux_first_block": "pred_time_eff_utility_by_horizon_scaled",
+            "decision_aux_second_block": "pred_time_eff_hit_logits_by_horizon",
+            "decision_aux_third_block": "pred_time_eff_best_horizon_logits",
+        },
+        "checkpoint_selection": "lowest_validation_loss_for_this_exact_loss_profile",
+        "uses_active_execution_artifact": False,
+        "not_a_backtest": True,
+        "shadow_only": True,
+        "promotion_allowed": False,
+    }
+
+
 def _high_return_proxy_contract(loss_profile: str) -> dict[str, Any]:
     profile = _normalize_forecast_loss_profile(loss_profile)
     enabled = profile in _HIGH_RETURN_PROXY_LOSS_PROFILES
@@ -879,6 +930,39 @@ def forecast_loss_profile_contract(
     profile = _normalize_forecast_loss_profile(loss_profile)
     horizons = normalize_path20_cumulative_horizons(cumulative_horizons, horizon=int(forecast_horizon))
     weights = dict(_FORECAST_LOSS_WEIGHT_PRESETS[profile])
+    if profile in _TIME_EFFICIENT_TOPK_LOSS_PROFILES:
+        auxiliary_objectives = [
+            key
+            for key, value in weights.items()
+            if float(value) > 0.0 and key not in {"decision_utility", "quantile"}
+        ]
+        return _json_ready(
+            {
+                "schema_version": 1,
+                "status": "active",
+                "loss_profile": profile,
+                "profile_family": "time_efficient_topk_aux",
+                "required_output_profile": "decision_utility_v1",
+                "primary_objective": "personal_time_efficient_topk",
+                "auxiliary_objectives": auxiliary_objectives,
+                "loss_component_weights": weights,
+                "forecast_horizon": int(forecast_horizon),
+                "cumulative_horizons": [int(item) for item in horizons],
+                "target_normalization": "per_horizon_utility_divided_by_day",
+                "horizon_head_constraint": {
+                    "enabled": False,
+                    "max_30d_probability": _HORIZON_HEAD_CONSTRAINT_MAX_30D_PROBABILITY,
+                    "min_long_horizon_probability": _HORIZON_HEAD_CONSTRAINT_MIN_LONG_PROBABILITY,
+                    "long_horizons": list(_HORIZON_HEAD_CONSTRAINT_LONG_HORIZONS),
+                },
+                "decision_score_calibration": _decision_score_calibration_contract(profile),
+                "time_efficient_topk_objective": _time_efficient_topk_contract(profile),
+                "high_return_proxy_objective": _high_return_proxy_contract(profile),
+                "shadow_only": True,
+                "promotion_allowed": False,
+                "active_execution_strategy_expected_diff": "none",
+            }
+        )
     return _json_ready(
         {
             "schema_version": 1,
@@ -912,6 +996,7 @@ def forecast_loss_profile_contract(
                 "long_horizons": list(_HORIZON_HEAD_CONSTRAINT_LONG_HORIZONS),
             },
             "decision_score_calibration": _decision_score_calibration_contract(profile),
+            "time_efficient_topk_objective": _time_efficient_topk_contract(profile),
             "high_return_proxy_objective": _high_return_proxy_contract(profile),
             "shadow_only": True,
             "promotion_allowed": False,
@@ -1327,17 +1412,30 @@ def _forecast_loss(
         expected_decision_width = path20_decision_aux_dim(horizons, horizon=int(y_daily_scaled.shape[1]))
         if int(decision_aux.shape[1]) != expected_decision_width:
             raise ValueError(f"decision_aux must have width {expected_decision_width}.")
-        targets = _decision_utility_targets(
-            y_cum_scaled,
-            y_risk_scaled,
-            target_scale=float(target_scale),
-            cost_bps=float(decision_cost_bps),
-            hit_threshold_bps=float(decision_hit_threshold_bps),
-            drawdown_penalty=float(decision_drawdown_penalty),
-            cumulative_horizons=horizons,
-            max_horizon=int(y_daily_scaled.shape[1]),
-            normalize_per_horizon=profile in _FORECAST_TARGET_NORMALIZED_LOSS_PROFILES,
-        )
+        if profile in _TIME_EFFICIENT_TOPK_LOSS_PROFILES:
+            targets = _time_efficient_utility_targets(
+                y_cum_scaled,
+                y_risk_scaled,
+                target_scale=float(target_scale),
+                cost_bps=float(decision_cost_bps),
+                hit_threshold_bps=float(decision_hit_threshold_bps),
+                drawdown_penalty=float(decision_drawdown_penalty),
+                worst_day_penalty=float(_TIME_EFFICIENT_WORST_DAY_PENALTY),
+                cumulative_horizons=horizons,
+                max_horizon=int(y_daily_scaled.shape[1]),
+            )
+        else:
+            targets = _decision_utility_targets(
+                y_cum_scaled,
+                y_risk_scaled,
+                target_scale=float(target_scale),
+                cost_bps=float(decision_cost_bps),
+                hit_threshold_bps=float(decision_hit_threshold_bps),
+                drawdown_penalty=float(decision_drawdown_penalty),
+                cumulative_horizons=horizons,
+                max_horizon=int(y_daily_scaled.shape[1]),
+                normalize_per_horizon=profile in _FORECAST_TARGET_NORMALIZED_LOSS_PROFILES,
+            )
         utility_pred = decision_aux[:, :cum_count]
         hit_logits = decision_aux[:, cum_count : cum_count * 2]
         horizon_logits = decision_aux[:, cum_count * 2 : cum_count * 3]
@@ -1350,6 +1448,12 @@ def _forecast_loss(
         loss = loss + float(weights["hit_aux"]) * F.binary_cross_entropy_with_logits(hit_logits, hit_target)
         loss = loss + float(weights["horizon_classification"]) * F.cross_entropy(horizon_logits, best_horizon_index)
         loss = loss + float(weights["decision_rank_aux"]) * pairwise_rank_loss(pred_decision_score, future_decision_score)
+        if profile in _TIME_EFFICIENT_TOPK_LOSS_PROFILES:
+            loss = loss + _time_efficient_topk_alignment_loss(
+                pred_score=pred_decision_score,
+                future_score=future_decision_score,
+                weight=float(weights.get("time_eff_topk_alignment", 0.0)),
+            )
         calibrated_rank_weight = float(weights.get("calibrated_decision_rank_aux", 0.0))
         if calibrated_rank_weight > 0.0 and profile in _FORECAST_UTILITY_30D_SOFT_PENALTY_PROFILES:
             calibrated_utility = utility_pred.clone()
@@ -1523,6 +1627,107 @@ def _decision_utility_targets_np(
     }
 
 
+def _time_efficient_utility_targets(
+    y_cum_scaled: torch.Tensor,
+    y_risk_scaled: torch.Tensor,
+    *,
+    target_scale: float,
+    cost_bps: float,
+    hit_threshold_bps: float,
+    drawdown_penalty: float,
+    worst_day_penalty: float = _TIME_EFFICIENT_WORST_DAY_PENALTY,
+    cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
+    max_horizon: int | None = None,
+) -> dict[str, torch.Tensor]:
+    scale = max(float(target_scale), 1.0e-8)
+    y_cum = y_cum_scaled / scale
+    resolved_horizons = normalize_path20_cumulative_horizons(
+        cumulative_horizons,
+        horizon=int(max_horizon or max(PATH20_HORIZON, y_cum_scaled.shape[1])),
+    )
+    risk = y_risk_scaled / scale
+    if risk.ndim == 2:
+        risk = risk.reshape(risk.shape[0], 1, risk.shape[1]).expand(-1, len(resolved_horizons), -1)
+    max_drawdown = risk[:, :, 0]
+    worst_day = risk[:, :, 1] if risk.shape[-1] > 1 else max_drawdown
+    horizon_values = torch.as_tensor(resolved_horizons, dtype=y_cum.dtype, device=y_cum.device).reshape(1, -1)
+    max_h = float(max(int(max_horizon or int(max(resolved_horizons))), 1))
+    horizon_risk_scale = torch.sqrt(horizon_values / max_h)
+    downside = torch.clamp(-max_drawdown, min=0.0)
+    worst_downside = torch.clamp(-worst_day, min=0.0)
+    net_utility = (
+        y_cum
+        - float(cost_bps) / 10000.0
+        - float(drawdown_penalty) * downside * horizon_risk_scale
+        - float(worst_day_penalty) * worst_downside * horizon_risk_scale
+    )
+    efficient_utility = net_utility / horizon_values
+    hit_threshold = (float(hit_threshold_bps) / 10000.0) / horizon_values
+    hit_label = efficient_utility > hit_threshold
+    best_horizon_index = torch.argmax(efficient_utility, dim=1)
+    decision_score = efficient_utility.max(dim=1).values
+    return {
+        "net_utility": net_utility,
+        "efficient_utility": efficient_utility,
+        "utility": efficient_utility,
+        "utility_scaled": efficient_utility * scale,
+        "hit_label": hit_label,
+        "hit_threshold": hit_threshold,
+        "best_horizon_index": best_horizon_index,
+        "decision_score": decision_score,
+        "decision_score_scaled": decision_score * scale,
+    }
+
+
+def _time_efficient_utility_targets_np(
+    y_cum: np.ndarray,
+    risk_by_horizon: np.ndarray,
+    *,
+    cost_bps: float,
+    hit_threshold_bps: float,
+    drawdown_penalty: float,
+    worst_day_penalty: float = _TIME_EFFICIENT_WORST_DAY_PENALTY,
+    cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
+    max_horizon: int | None = None,
+) -> dict[str, np.ndarray]:
+    y_cum_arr = np.asarray(y_cum, dtype=np.float64)
+    resolved_horizons = normalize_path20_cumulative_horizons(
+        cumulative_horizons,
+        horizon=int(max_horizon or max(PATH20_HORIZON, y_cum_arr.shape[1])),
+    )
+    risk = np.asarray(risk_by_horizon, dtype=np.float64)
+    if risk.ndim == 1:
+        risk = risk.reshape(-1, 1, 1)
+    if risk.ndim == 2:
+        if risk.shape[1] == len(resolved_horizons):
+            risk = np.stack([risk, risk, np.zeros_like(risk)], axis=-1)
+        else:
+            risk = np.repeat(risk[:, :1, None], len(resolved_horizons), axis=1)
+    if risk.shape[1] != len(resolved_horizons):
+        risk = np.repeat(risk[:, :1, :], len(resolved_horizons), axis=1)
+    max_drawdown = risk[:, :, 0]
+    worst_day = risk[:, :, 1] if risk.shape[-1] > 1 else max_drawdown
+    horizon_values = np.asarray(resolved_horizons, dtype=np.float64).reshape(1, -1)
+    horizon_risk_scale = np.sqrt(horizon_values / float(max(int(max_horizon or int(max(resolved_horizons))), 1)))
+    net_utility = (
+        y_cum_arr
+        - float(cost_bps) / 10000.0
+        - float(drawdown_penalty) * np.maximum(0.0, -max_drawdown) * horizon_risk_scale
+        - float(worst_day_penalty) * np.maximum(0.0, -worst_day) * horizon_risk_scale
+    )
+    efficient_utility = net_utility / horizon_values
+    hit_threshold = (float(hit_threshold_bps) / 10000.0) / horizon_values
+    return {
+        "net_utility": net_utility,
+        "efficient_utility": efficient_utility,
+        "utility": efficient_utility,
+        "hit_label": efficient_utility > hit_threshold,
+        "hit_threshold": hit_threshold,
+        "best_horizon_index": np.argmax(efficient_utility, axis=1),
+        "decision_score": np.max(efficient_utility, axis=1),
+    }
+
+
 def _standardize_tensor(value: torch.Tensor) -> torch.Tensor:
     if value.numel() <= 1:
         return value * 0.0
@@ -1594,6 +1799,30 @@ def _high_return_proxy_loss(
         total = total + bad_weight * (bad_loss + 0.10 * pairwise_rank_loss(-score, bad_intensity))
 
     return total
+
+
+def _time_efficient_topk_alignment_loss(
+    *,
+    pred_score: torch.Tensor,
+    future_score: torch.Tensor,
+    weight: float,
+) -> torch.Tensor:
+    if float(weight) <= 0.0 or pred_score.numel() < 2:
+        return pred_score.new_tensor(0.0)
+    score = _standardize_tensor(pred_score)
+    target = future_score.detach()
+    components: list[torch.Tensor] = []
+    for requested_k in (1, 3, 5):
+        k = min(int(requested_k), int(target.numel()))
+        if k <= 0:
+            continue
+        threshold = torch.topk(target, k=k).values.min()
+        top_label = (target >= threshold).to(dtype=score.dtype)
+        components.append(F.binary_cross_entropy_with_logits(score, top_label))
+    if not components:
+        return pred_score.new_tensor(0.0)
+    target_rank = _standardize_tensor(target)
+    return float(weight) * (torch.stack(components).mean() + 0.15 * pairwise_rank_loss(score, target_rank))
 
 
 def _collate_forecast_date_batches(batch: list[tuple[torch.Tensor, ...]]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
@@ -1917,6 +2146,7 @@ def _add_decision_utility_columns(
     predictions: dict[str, np.ndarray],
     y_cum: np.ndarray,
     drawdown_by_horizon: np.ndarray,
+    worst_by_horizon: np.ndarray | None = None,
     target_scale: float,
     decision_cost_bps: float,
     decision_hit_threshold_bps: float,
@@ -1930,16 +2160,61 @@ def _add_decision_utility_columns(
     decision_aux = np.asarray(predictions["decision_aux"], dtype=np.float64)
     if decision_aux.size == 0:
         return
+    profile = _normalize_forecast_loss_profile(loss_profile)
     horizons = normalize_path20_cumulative_horizons(cumulative_horizons, horizon=int(max_horizon))
     cum_count = len(horizons)
     raw_pred_utility = decision_aux[:, :cum_count] / max(float(target_scale), 1.0e-8)
+    hit_logits = decision_aux[:, cum_count : cum_count * 2]
+    horizon_logits = decision_aux[:, cum_count * 2 : cum_count * 3]
+    pred_hit_prob = 1.0 / (1.0 + np.exp(-np.clip(hit_logits, -60.0, 60.0)))
+    horizon_values = np.asarray(horizons, dtype=int)
+    if profile in _TIME_EFFICIENT_TOPK_LOSS_PROFILES:
+        risk_parts = [
+            np.asarray(drawdown_by_horizon, dtype=np.float64),
+            np.asarray(worst_by_horizon if worst_by_horizon is not None else drawdown_by_horizon, dtype=np.float64),
+            np.zeros_like(np.asarray(drawdown_by_horizon, dtype=np.float64)),
+        ]
+        future = _time_efficient_utility_targets_np(
+            y_cum,
+            np.stack(risk_parts, axis=-1),
+            cost_bps=float(decision_cost_bps),
+            hit_threshold_bps=float(decision_hit_threshold_bps),
+            drawdown_penalty=float(decision_drawdown_penalty),
+            worst_day_penalty=float(_TIME_EFFICIENT_WORST_DAY_PENALTY),
+            cumulative_horizons=horizons,
+            max_horizon=max_horizon,
+        )
+        pred_best_idx = np.argmax(raw_pred_utility, axis=1)
+        pred_score = np.max(raw_pred_utility, axis=1)
+        for pos, horizon in enumerate(horizons):
+            columns[f"pred_time_eff_utility_{horizon}d"] = raw_pred_utility[:, pos]
+            columns[f"future_time_eff_utility_{horizon}d"] = future["efficient_utility"][:, pos]
+            columns[f"pred_time_eff_hit_prob_{horizon}d"] = pred_hit_prob[:, pos]
+            columns[f"future_time_eff_hit_label_{horizon}d"] = future["hit_label"][:, pos].astype(int)
+            columns[f"future_time_eff_net_utility_{horizon}d"] = future["net_utility"][:, pos]
+            columns[f"pred_decision_utility_{horizon}d"] = raw_pred_utility[:, pos]
+            columns[f"future_decision_utility_{horizon}d"] = future["efficient_utility"][:, pos]
+            columns[f"pred_hit_prob_{horizon}d"] = pred_hit_prob[:, pos]
+            columns[f"future_hit_label_{horizon}d"] = future["hit_label"][:, pos].astype(int)
+        columns["pred_time_eff_best_horizon"] = horizon_values[pred_best_idx]
+        columns["future_time_eff_best_horizon"] = horizon_values[future["best_horizon_index"].astype(int)]
+        columns["pred_time_eff_score"] = pred_score
+        columns["future_time_eff_score"] = future["decision_score"]
+        columns["pred_best_horizon"] = columns["pred_time_eff_best_horizon"]
+        columns["future_best_horizon"] = columns["future_time_eff_best_horizon"]
+        columns["pred_decision_score"] = pred_score
+        columns["trade_utility_score"] = pred_score
+        columns["future_decision_score"] = future["decision_score"]
+        columns["pred_best_horizon_source"] = "time_eff_utility_argmax"
+        columns["decision_score_calibration_method"] = "time_efficient_per_day"
+        columns["decision_score_calibration_penalty"] = 0.0
+        return
+
     calibrated_pred_utility, calibration_contract = _calibrate_pred_decision_utility_np(
         raw_pred_utility,
         horizons=horizons,
-        loss_profile=loss_profile,
+        loss_profile=profile,
     )
-    hit_logits = decision_aux[:, cum_count : cum_count * 2]
-    horizon_logits = decision_aux[:, cum_count * 2 : cum_count * 3]
     future = _decision_utility_targets_np(
         y_cum,
         drawdown_by_horizon,
@@ -1949,7 +2224,6 @@ def _add_decision_utility_columns(
         cumulative_horizons=horizons,
         max_horizon=max_horizon,
     )
-    pred_hit_prob = 1.0 / (1.0 + np.exp(-np.clip(hit_logits, -60.0, 60.0)))
     if bool(calibration_contract.get("enabled", False)):
         pred_best_idx = np.argmax(calibrated_pred_utility, axis=1)
         pred_best_horizon_source = "calibrated_utility_argmax"
@@ -1964,7 +2238,6 @@ def _add_decision_utility_columns(
         columns[f"future_decision_utility_{horizon}d"] = future["utility"][:, pos]
         columns[f"pred_hit_prob_{horizon}d"] = pred_hit_prob[:, pos]
         columns[f"future_hit_label_{horizon}d"] = future["hit_label"][:, pos].astype(int)
-    horizon_values = np.asarray(horizons, dtype=int)
     columns["pred_best_horizon"] = horizon_values[pred_best_idx]
     columns["future_best_horizon"] = horizon_values[future["best_horizon_index"].astype(int)]
     columns["pred_decision_score"] = pred_score
@@ -2025,6 +2298,7 @@ def _prediction_frame(
         predictions=predictions,
         y_cum=y_cum,
         drawdown_by_horizon=dataset.y_drawdown_by_horizon[idx],
+        worst_by_horizon=dataset.y_worst_by_horizon[idx],
         target_scale=target_scale,
         decision_cost_bps=decision_cost_bps,
         decision_hit_threshold_bps=decision_hit_threshold_bps,
@@ -2099,6 +2373,7 @@ def _prediction_frame_for_indices(
         predictions=predictions,
         y_cum=y_cum,
         drawdown_by_horizon=dataset.y_drawdown_by_horizon[idx],
+        worst_by_horizon=dataset.y_worst_by_horizon[idx],
         target_scale=target_scale,
         decision_cost_bps=decision_cost_bps,
         decision_hit_threshold_bps=decision_hit_threshold_bps,
@@ -2178,6 +2453,7 @@ def _prediction_frame_for_dataset_indices(
             predictions=predictions,
             y_cum=y_cum,
             drawdown_by_horizon=dataset.y_drawdown_by_horizon[idx],
+            worst_by_horizon=dataset.y_worst_by_horizon[idx],
             target_scale=target_scale,
             decision_cost_bps=decision_cost_bps,
             decision_hit_threshold_bps=decision_hit_threshold_bps,
@@ -2334,6 +2610,46 @@ def forecast_prediction_metrics(frame: pd.DataFrame) -> dict[str, Any]:
         metrics["decision_hit_lift_top20_mean"] = 0.0
         metrics["decision_best_horizon_accuracy"] = 0.0
         metrics["decision_utility_profile_status"] = "not_available"
+    if {"pred_time_eff_score", "future_time_eff_score", "pred_time_eff_best_horizon", "future_time_eff_best_horizon"}.issubset(frame.columns):
+        metrics["time_eff_score_rank_ic"] = _rank_ic_by_date(frame, "pred_time_eff_score", "future_time_eff_score")
+        metrics["time_eff_score_top_bottom_spread"] = _top_bottom_spread_by_date(
+            frame,
+            "pred_time_eff_score",
+            "future_time_eff_score",
+        )
+        pred_horizon = pd.to_numeric(frame["pred_time_eff_best_horizon"], errors="coerce")
+        future_horizon = pd.to_numeric(frame["future_time_eff_best_horizon"], errors="coerce")
+        valid_horizon = pred_horizon.notna() & future_horizon.notna()
+        metrics["time_eff_best_horizon_accuracy"] = (
+            float((pred_horizon.loc[valid_horizon] == future_horizon.loc[valid_horizon]).mean())
+            if bool(valid_horizon.any())
+            else 0.0
+        )
+        hit_cols = [f"future_time_eff_hit_label_{int(horizon)}d" for horizon in horizons]
+        if set(hit_cols).issubset(frame.columns):
+            hit_any = frame[hit_cols].apply(pd.to_numeric, errors="coerce").max(axis=1)
+            lifts = []
+            for _, group in frame.assign(_future_time_eff_hit_any=hit_any).groupby("date", sort=True):
+                work = group[["pred_time_eff_score", "_future_time_eff_hit_any"]].copy()
+                work["pred_time_eff_score"] = pd.to_numeric(work["pred_time_eff_score"], errors="coerce")
+                work["_future_time_eff_hit_any"] = pd.to_numeric(work["_future_time_eff_hit_any"], errors="coerce")
+                work = work.dropna()
+                if len(work) < 2:
+                    continue
+                k = max(int(len(work) * 0.20), 1)
+                top_hit = float(work.nlargest(k, "pred_time_eff_score")["_future_time_eff_hit_any"].mean())
+                all_hit = float(work["_future_time_eff_hit_any"].mean())
+                lifts.append(top_hit - all_hit)
+            metrics["time_eff_hit_lift_top20_mean"] = float(np.mean(lifts)) if lifts else 0.0
+        else:
+            metrics["time_eff_hit_lift_top20_mean"] = 0.0
+        metrics["time_eff_profile_status"] = "completed"
+    else:
+        metrics["time_eff_score_rank_ic"] = 0.0
+        metrics["time_eff_score_top_bottom_spread"] = 0.0
+        metrics["time_eff_best_horizon_accuracy"] = 0.0
+        metrics["time_eff_hit_lift_top20_mean"] = 0.0
+        metrics["time_eff_profile_status"] = "not_available"
     metrics["selected_signal_profile"] = forecast_signal_profile(metrics)
     return metrics
 
@@ -2401,6 +2717,8 @@ def _profile_pass(metrics: dict[str, Any], selection_profile: str) -> bool:
             and float(metrics.get("decision_score_top_bottom_spread", 0.0) or 0.0) > 0.0
             and float(metrics.get("decision_hit_lift_top20_mean", 0.0) or 0.0) > 0.0
         )
+    if profile == "validation_loss":
+        return bool(metrics.get("status") == "completed")
     if profile == "trend20":
         return _horizon_gate(metrics, 20)
     if profile == "short_burst":
@@ -2412,6 +2730,8 @@ def _profile_score(metrics: dict[str, Any], validation_loss: float, coverage_ran
     if metrics.get("status") != "completed":
         return -float(validation_loss)
     profile = str(selection_profile or "multiscale").strip().lower()
+    if profile == "validation_loss":
+        return float(-validation_loss)
     if profile == "decision_utility":
         gate_bonus = 1_000.0 if _profile_pass(metrics, profile) and _coverage_pass(metrics, coverage_range) else 0.0
         return float(
@@ -2446,6 +2766,9 @@ def forecast_evidence_verdict(
 ) -> str:
     if validation_metrics.get("status") != "completed":
         return "insufficient_or_incomplete"
+    profile = str(selection_profile or "multiscale").strip().lower()
+    if profile == "validation_loss":
+        return "forecast_promising"
     validation_promising = _profile_pass(validation_metrics, selection_profile) and _coverage_pass(validation_metrics, coverage_range)
     if not validation_promising:
         return "forecast_failed"
@@ -2980,6 +3303,11 @@ def _family_summary(seed_summaries: dict[str, dict[str, Any]]) -> dict[str, Any]
         for item in seed_summaries.values()
         if dict(item.get("validation_metrics", {})).get("status") == "completed"
     ]
+    validation_loss_scores = [
+        float(item.get("validation_loss_score", 0.0) or 0.0)
+        for item in seed_summaries.values()
+        if dict(item.get("validation_metrics", {})).get("status") == "completed"
+    ]
     count = max(len(seed_summaries), 1)
     summary: dict[str, Any] = {
         "seed_count": int(len(seed_summaries)),
@@ -2990,6 +3318,7 @@ def _family_summary(seed_summaries: dict[str, dict[str, Any]]) -> dict[str, Any]
         "validation_trend20_score_mean": float(np.mean(trend_scores)) if trend_scores else 0.0,
         "validation_short_burst_score_mean": float(np.mean(short_scores)) if short_scores else 0.0,
         "validation_decision_utility_score_mean": float(np.mean(decision_scores)) if decision_scores else 0.0,
+        "validation_loss_score_mean": float(np.mean(validation_loss_scores)) if validation_loss_scores else 0.0,
     }
     profile_counts: dict[str, int] = {"trend_20d": 0, "short_burst": 0, "multiscale": 0, "failed": 0}
     for metrics in completed_metrics:
@@ -3038,6 +3367,8 @@ def _family_summary(seed_summaries: dict[str, dict[str, Any]]) -> dict[str, Any]
 
 def _selection_score_key(selection_profile: str) -> str:
     profile = str(selection_profile or "multiscale").strip().lower()
+    if profile == "validation_loss":
+        return "validation_loss_score"
     if profile == "decision_utility":
         return "validation_decision_utility_score"
     if profile == "trend20":
@@ -3049,6 +3380,7 @@ def _selection_score_key(selection_profile: str) -> str:
 
 def _select_family_seed(model_summaries: dict[str, dict[str, Any]], *, selection_profile: str) -> tuple[str, int]:
     score_key = _selection_score_key(selection_profile)
+    normalized_profile = str(selection_profile or "multiscale").strip().lower()
 
     def family_score(item: tuple[str, dict[str, Any]]) -> tuple[int, float, float]:
         _, summary = item
@@ -3058,7 +3390,10 @@ def _select_family_seed(model_summaries: dict[str, dict[str, Any]], *, selection
         spread = float(metrics.get("validation_top_bottom_spread_20d_mean", 0.0) or 0.0)
         q10 = float(metrics.get("validation_q10_coverage_mean", 0.0) or 0.0)
         q90 = float(metrics.get("validation_q90_coverage_mean", 0.0) or 0.0)
-        passed = 1 if score > 1_000.0 and 0.65 <= q10 <= 0.95 and 0.65 <= q90 <= 0.95 else 0
+        if normalized_profile == "validation_loss":
+            passed = 1 if np.isfinite(score) else 0
+        else:
+            passed = 1 if score > 1_000.0 and 0.65 <= q10 <= 0.95 and 0.65 <= q90 <= 0.95 else 0
         return (passed, score, rank + spread)
 
     if not model_summaries:
@@ -3072,7 +3407,7 @@ def _select_family_seed(model_summaries: dict[str, dict[str, Any]], *, selection
         _, summary = item
         validation = dict(summary.get("validation_metrics", {}))
         verdict = forecast_evidence_verdict(validation_metrics=validation, test_metrics=None, selection_profile=selection_profile)
-        passed = 1 if verdict == "forecast_promising" else 0
+        passed = 1 if (verdict == "forecast_promising" or normalized_profile == "validation_loss") else 0
         return (
             passed,
             float(summary.get(score_key, 0.0) or 0.0),
@@ -3625,6 +3960,7 @@ def train_forecast_models(
                     decision_cost_bps=decision_cost_bps,
                     decision_hit_threshold_bps=decision_hit_threshold_bps,
                     decision_drawdown_penalty=decision_drawdown_penalty,
+                    loss_profile=loss_profile,
                 )
                 validation_metrics = forecast_prediction_metrics(validation_frame)
                 score = _validation_score(validation_metrics, validation_loss, (0.65, 0.95), selection_profile)
@@ -3686,6 +4022,7 @@ def train_forecast_models(
                         "epoch": int(epoch),
                         "train_loss": float(last_train_loss),
                         "validation_loss": float(validation_loss),
+                        "validation_loss_score": float(_profile_score(validation_metrics, validation_loss, (0.65, 0.95), "validation_loss")),
                         "validation_multiscale_score": float(multiscale_score),
                         "validation_selection_score": float(score),
                         "selected_signal_profile": forecast_signal_profile(validation_metrics),
@@ -3705,6 +4042,13 @@ def train_forecast_models(
                         ),
                         "decision_hit_lift_top20_mean": float(
                             validation_metrics.get("decision_hit_lift_top20_mean", 0.0) or 0.0
+                        ),
+                        "time_eff_score_rank_ic": float(validation_metrics.get("time_eff_score_rank_ic", 0.0) or 0.0),
+                        "time_eff_score_top_bottom_spread": float(
+                            validation_metrics.get("time_eff_score_top_bottom_spread", 0.0) or 0.0
+                        ),
+                        "time_eff_hit_lift_top20_mean": float(
+                            validation_metrics.get("time_eff_hit_lift_top20_mean", 0.0) or 0.0
                         ),
                         "q10_coverage_mean": float(validation_metrics.get("q10_coverage_mean", 0.0) or 0.0),
                         "q90_coverage_mean": float(validation_metrics.get("q90_coverage_mean", 0.0) or 0.0),
@@ -3978,6 +4322,19 @@ def train_forecast_models(
                 (0.65, 0.95),
                 "decision_utility",
             )
+            final_validation_loss_score = _profile_score(
+                final_validation_metrics,
+                best_validation_loss,
+                (0.65, 0.95),
+                "validation_loss",
+            )
+            selection_score_by_profile = {
+                "multiscale": final_multiscale_score,
+                "trend20": final_trend20_score,
+                "short_burst": final_short_burst_score,
+                "decision_utility": final_decision_utility_score,
+                "validation_loss": final_validation_loss_score,
+            }
             seed_summaries[str(int(current_seed))] = {
                 "status": "completed",
                 "model_family": family,
@@ -3999,14 +4356,9 @@ def train_forecast_models(
                 "validation_trend20_score": float(final_trend20_score),
                 "validation_short_burst_score": float(final_short_burst_score),
                 "validation_decision_utility_score": float(final_decision_utility_score),
-                "validation_selection_score": float(
-                    {
-                        "multiscale": final_multiscale_score,
-                        "trend20": final_trend20_score,
-                        "short_burst": final_short_burst_score,
-                        "decision_utility": final_decision_utility_score,
-                    }[selection_profile]
-                ),
+                "validation_loss_score": float(final_validation_loss_score),
+                "validation_time_eff_score": float(final_validation_metrics.get("time_eff_score_rank_ic", 0.0) or 0.0),
+                "validation_selection_score": float(selection_score_by_profile[selection_profile]),
                 "checkpoint_pt": str(best_checkpoint_path.resolve()),
                 "last_checkpoint_pt": str(last_checkpoint_path.resolve()) if last_checkpoint_path.exists() else "",
                 "resume_from_checkpoint_pt": resume_from_checkpoint_pt,
@@ -4141,6 +4493,10 @@ def train_forecast_models(
         selection_profile=selection_profile,
     )
     selected_signal_profile = forecast_signal_profile(validation_metrics)
+    if selection_profile == "validation_loss":
+        selection_rule = "lowest_validation_loss_for_training_loss_profile_then_seed_score"
+    else:
+        selection_rule = f"{selection_profile}_validation_score_after_profile_and_coverage_gates_then_seed_score"
     summary = {
         "status": "completed",
         "stage": "forecast_train",
@@ -4196,12 +4552,13 @@ def train_forecast_models(
         "selected_model_family": selected_family,
         "selected_seed": int(selected_seed),
         "selected_checkpoint_pt": selected_checkpoint_path,
-        "selection_rule": f"{selection_profile}_validation_score_after_profile_and_coverage_gates_then_seed_score",
+        "selection_rule": selection_rule,
         "selected_signal_profile": selected_signal_profile,
         "validation_multiscale_score": float(selected_seed_summary.get("validation_multiscale_score", 0.0) or 0.0),
         "validation_decision_utility_score": float(
             selected_seed_summary.get("validation_decision_utility_score", 0.0) or 0.0
         ),
+        "validation_loss_score": float(selected_seed_summary.get("validation_loss_score", 0.0) or 0.0),
         "validation_selection_score": float(selected_seed_summary.get("validation_selection_score", 0.0) or 0.0),
         "validation_metrics": validation_metrics,
         "test_metrics": test_metrics,
@@ -4209,7 +4566,7 @@ def train_forecast_models(
         "loss_component_weights": dict(loss_profile_contract["loss_component_weights"]),
         "test_interpretable": verdict in {"forecast_test_confirmed", "forecast_promising"}
         and validation_metrics.get("status") == "completed"
-        and _profile_pass(validation_metrics, selection_profile),
+        and (selection_profile == "validation_loss" or _profile_pass(validation_metrics, selection_profile)),
         "evidence_verdict": verdict,
         "forecast_predictions_validation_csv": validation_csv,
         "forecast_predictions_test_csv": test_csv,
