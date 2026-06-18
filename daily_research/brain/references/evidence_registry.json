@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 123,
+  "record_count": 124,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -3029,6 +3029,42 @@
       "dataset_ids": [
         "policy_input_bundle__0f116a9b78c92ff045a6853d"
       ]
+    },
+    {
+      "id": "path_policy_alpha_v2_loss_alignment_stage1_20260617",
+      "date": "2026-06-17",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_loss_alignment_stage1_20260617.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [
+        "qdp_alpha_v2_strong_model_research"
+      ],
+      "run_tags": [
+        "qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01",
+        "qdp_alpha_v2_topk_align_full_seed7_20260617_02",
+        "qdp_alpha_v2_hybrid_topk_align_h256_t4_b512_seed7_20260617_01",
+        "qdp_alpha_v2_hybrid_topk_align_h256_t4_b512_seed7_misconfigured_utility_20260617_01",
+        "qdp_alpha_v2_topk_align_full_seed7_20260617_03",
+        "qdp_alpha_v2_hybrid_topk_align_h256_t4_b512_seed7_20260617_02",
+        "qdp_alpha_v2_loss_alignment_scout_20260617_02",
+        "qdp_alpha_v2_monthly_robust_full_seed7_20260618_01",
+        "qdp_alpha_v2_hybrid_monthly_robust_h256_t4_b512_seed7_20260617_02",
+        "qdp_alpha_v2_loss_alignment_scout_monthly_robust_20260618_01",
+        "qdp_alpha_v2_h30soft_full_seed7_20260618_01",
+        "qdp_alpha_v2_hybrid_h30soft_h256_t4_b512_seed7_20260617_02",
+        "qdp_alpha_v2_loss_alignment_scout_h30soft_20260618_01"
+      ],
+      "verdict": "Status: `stage1_loss_alignment_completed / no_anchor_beater / research_only`.; Date: `2026-06-17` start, completed `2026-06-18` local time.; Study family: `qdp_alpha_v2_strong_model_research`.; Active plan: `daily_research/brain/references/path_policy_alpha_v2_strong_model_research_plan_20260617.md`.",
+      "blockers": [
+        "Test rank_ic20 is close (`0.111326` vs anchor `0.115449`) and test spread20 is slightly higher (`0.024501` vs `0.023697`), but this does not rescue the candidate because validation personal-topK selection failed."
+      ],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": []
     },
     {
       "id": "path_policy_alpha_v2_strong_model_research_plan_20260617",

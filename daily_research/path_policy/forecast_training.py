@@ -81,6 +81,7 @@ FORECAST_LOSS_PROFILES = (
     "target_norm_head_constraint_v1",
     "horizon_30d_soft_penalty_v1",
     "topn_excess_rank_v1",
+    "decision_score_topk_alignment_v1",
     "score_to_weight_proxy_v1",
     "bad_month_aware_v1",
     "personal_alpha_scorer_hybrid_v1",
@@ -107,6 +108,7 @@ _FORECAST_DECISION_LOSS_PROFILES = {
     "target_norm_head_constraint_v1",
     "horizon_30d_soft_penalty_v1",
     "topn_excess_rank_v1",
+    "decision_score_topk_alignment_v1",
     "score_to_weight_proxy_v1",
     "bad_month_aware_v1",
     "personal_alpha_scorer_hybrid_v1",
@@ -373,6 +375,25 @@ _FORECAST_LOSS_WEIGHT_PRESETS: dict[str, dict[str, float]] = {
         "score_to_weight_proxy": 0.0,
         "bad_month_aware": 0.0,
     },
+    "decision_score_topk_alignment_v1": {
+        "path_daily": 0.42,
+        "quantile": 0.14,
+        "path_aux": 0.14,
+        "risk_aux": 0.05,
+        "rank_aux": 1.00,
+        "risk_rank_aux": 0.005,
+        "direction_aux": 0.0,
+        "downside_rank_aux": 0.010,
+        "decision_utility": 0.85,
+        "hit_aux": 0.18,
+        "horizon_classification": 0.08,
+        "decision_rank_aux": 0.50,
+        "horizon_entropy": 0.02,
+        "topn_excess_rank": 0.25,
+        "decision_score_topk_alignment": 0.35,
+        "score_to_weight_proxy": 0.0,
+        "bad_month_aware": 0.0,
+    },
     "score_to_weight_proxy_v1": {
         "path_daily": 0.40,
         "quantile": 0.12,
@@ -445,6 +466,7 @@ _FORECAST_UTILITY_30D_SOFT_PENALTY_PROFILES = {"horizon_30d_soft_penalty_v1"}
 _HORIZON_30D_SOFT_PENALTY = 0.005
 _HIGH_RETURN_PROXY_LOSS_PROFILES = {
     "topn_excess_rank_v1",
+    "decision_score_topk_alignment_v1",
     "score_to_weight_proxy_v1",
     "bad_month_aware_v1",
     "personal_alpha_scorer_hybrid_v1",
@@ -818,12 +840,17 @@ def _high_return_proxy_contract(loss_profile: str) -> dict[str, Any]:
         return {"enabled": False, "method": "none", "proxy_only": True}
     methods = {
         "topn_excess_rank_v1": "batch_top_quintile_excess_rank_surrogate",
+        "decision_score_topk_alignment_v1": "batch_small_topk_decision_score_alignment_surrogate",
         "score_to_weight_proxy_v1": "batch_soft_topn_score_to_weight_surrogate",
         "bad_month_aware_v1": "batch_downside_tail_reweighted_score_surrogate",
         "personal_alpha_scorer_hybrid_v1": "hybrid_batch_top_tail_soft_weight_downside_surrogate",
     }
     descriptions = {
         "topn_excess_rank_v1": "Batch-level top 20% future 20d excess-return proxy plus pairwise rank alignment.",
+        "decision_score_topk_alignment_v1": (
+            "Batch-level small topK future-return proxy for decision_score alignment; "
+            "approximates personal top1/top3/top5 but is not date-cross-sectional topK."
+        ),
         "score_to_weight_proxy_v1": "Batch-level soft score-to-weight proxy; not a real daily portfolio.",
         "bad_month_aware_v1": "Sample-level downside-tail proxy despite legacy name; not a monthly aggregation.",
         "personal_alpha_scorer_hybrid_v1": (
@@ -1530,6 +1557,19 @@ def _high_return_proxy_loss(
         top_label = (target_return.detach() >= threshold).to(dtype=score.dtype)
         topn_loss = F.binary_cross_entropy_with_logits(score, top_label)
         total = total + topn_weight * (topn_loss + 0.10 * pairwise_rank_loss(score, target_rank))
+
+    topk_alignment_weight = float(weights.get("decision_score_topk_alignment", 0.0) or 0.0)
+    if topk_alignment_weight > 0.0:
+        components: list[torch.Tensor] = []
+        for requested_k in (1, 3, 5):
+            if pred_decision_score.numel() < int(requested_k):
+                continue
+            threshold = torch.topk(target_return.detach(), k=int(requested_k)).values.min()
+            top_label = (target_return.detach() >= threshold).to(dtype=score.dtype)
+            components.append(F.binary_cross_entropy_with_logits(score, top_label))
+        if components:
+            topk_loss = torch.stack(components).mean()
+            total = total + topk_alignment_weight * (topk_loss + 0.15 * pairwise_rank_loss(score, target_rank))
 
     proxy_weight = float(weights.get("score_to_weight_proxy", 0.0) or 0.0)
     if proxy_weight > 0.0:
