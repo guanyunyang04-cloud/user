@@ -3031,6 +3031,37 @@
       ]
     },
     {
+      "id": "path_policy_alpha_v2_time_efficient_topk_training_contract_plan_20260618",
+      "date": "2026-06-18",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_time_efficient_topk_training_contract_plan_20260618.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "qdp_alpha_v2_time_efficient_topk_research"
+      ],
+      "run_tags": [
+        "qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01",
+        "qdp_alpha_v2_hybrid_topk_align_h256_t4_b512_seed7_20260617_02",
+        "qdp_alpha_v2_hybrid_monthly_robust_h256_t4_b512_seed7_20260617_02",
+        "qdp_alpha_v2_hybrid_h30soft_h256_t4_b512_seed7_20260617_02"
+      ],
+      "verdict": "Status: `plan_accepted / training_contract_redesign / research_only / execution_frozen`.; Objective: redesign alpha_v2 training so checkpoint selection follows the training objective and validation loss reflects personal small-capital time-efficient top-K utility.; Active artifact impact: none.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Run Stage 0 old checkpoint validation-loss audit without retraining or active artifact changes.",
+        "Implement `personal_time_efficient_topk_v1` target helper, loss contract, prediction columns, component loss logging, and validation-loss best selection.",
+        "Run focused tests and alpha_v2 smoke before any full seed7 run."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
       "id": "path_policy_alpha_v2_loss_alignment_stage1_20260617",
       "date": "2026-06-17",
       "r_id": "",
