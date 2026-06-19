@@ -873,6 +873,7 @@ def _run_forecast_walkforward_study(
             decision_cost_bps=float(args.forecast_decision_cost_bps),
             decision_hit_threshold_bps=float(args.forecast_decision_hit_threshold_bps),
             decision_drawdown_penalty=float(args.forecast_decision_drawdown_penalty),
+            static_context_fields_override=str(getattr(args, "forecast_train_static_fields", "") or ""),
             ranking_baseline=str(args.forecast_ranking_baseline),
             slot_diagnostics=bool(args.forecast_slot_diagnostics),
         )
@@ -3567,6 +3568,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default="symbol,exchange,industry,liquidity_bucket,price_bucket",
         help="Comma-separated static context fields: symbol,exchange,industry,board,liquidity_bucket,price_bucket.",
     )
+    parser.add_argument(
+        "--forecast-train-static-fields",
+        default="",
+        help="Optional comma-separated subset of manifest static context fields used by training, e.g. exchange,industry.",
+    )
     parser.add_argument("--forecast-ranking-baseline", default="none", choices=("none", "lightgbm", "xgboost"))
     parser.add_argument("--forecast-output-profile", default="forecast_path_v1", choices=FORECAST_OUTPUT_PROFILES)
     parser.add_argument("--forecast-loss-profile", default="default", choices=FORECAST_LOSS_PROFILES)
@@ -3702,6 +3708,12 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
             normalize_static_context_fields(str(getattr(args, "forecast_static_fields", "")))
         except ValueError as exc:
             parser.error(str(exc))
+        train_static_fields_text = str(getattr(args, "forecast_train_static_fields", "") or "").strip()
+        if train_static_fields_text:
+            try:
+                normalize_static_context_fields(train_static_fields_text)
+            except ValueError as exc:
+                parser.error(str(exc))
         try:
             loss_contract = forecast_loss_profile_contract(
                 getattr(args, "forecast_loss_profile", "default"),

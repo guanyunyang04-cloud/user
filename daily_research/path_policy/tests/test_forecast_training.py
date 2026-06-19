@@ -619,6 +619,55 @@ def test_train_forecast_models_selects_time_efficient_topk_by_validation_loss(tm
     assert checkpoint["resume_contract"]["loss_profile_contract"]["primary_objective"] == "personal_time_efficient_topk"
 
 
+def test_train_forecast_models_can_override_static_context_fields_without_rebuilding_pack(tmp_path) -> None:
+    dataset = make_tiny_forecast_sequence_dataset(lookback_days=5, horizon=20, include_static_context=True)
+    assert dataset.manifest["static_context_schema"]["fields"][:3] == ["symbol", "exchange", "industry"]
+
+    summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "study",
+        model_families=("hybrid_expert_fusion_static_context",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=5,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=12,
+        dropout=0.0,
+        gru_layers=1,
+        transformer_layers=1,
+        transformer_heads=3,
+        patch_sizes=(2,),
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+        output_profile="decision_utility_v1",
+        loss_profile="personal_time_efficient_topk_v1",
+        selection_profile="validation_loss",
+        static_context_fields_override=("exchange", "industry"),
+        per_epoch_prediction_metrics=False,
+    )
+
+    assert summary["status"] == "completed"
+    assert summary["training_config"]["static_context_source_fields"] == [
+        "symbol",
+        "exchange",
+        "industry",
+        "liquidity_bucket",
+        "price_bucket",
+    ]
+    assert summary["training_config"]["static_context_training_fields"] == ["exchange", "industry"]
+    assert summary["training_config"]["static_context_training_field_indices"] == [1, 2]
+    assert summary["training_config"]["static_context_schema"]["fields"] == ["exchange", "industry"]
+    assert summary["training_config"]["static_context_schema"]["source_fields"][0] == "symbol"
+
+    seed_summary = summary["models"]["hybrid_expert_fusion_static_context"]["seed_summaries"]["7"]
+    checkpoint = torch.load(seed_summary["last_checkpoint_pt"], map_location="cpu", weights_only=False)
+    assert checkpoint["model_config"]["static_context_fields"] == ["exchange", "industry"]
+    assert "symbol" not in checkpoint["model_config"]["static_context_vocab_sizes"]
+    assert checkpoint["resume_contract"]["static_context_schema"]["fields"] == ["exchange", "industry"]
+
+
 def test_train_forecast_models_can_defer_per_epoch_prediction_metrics(tmp_path) -> None:
     dataset = make_tiny_forecast_sequence_dataset(lookback_days=5, horizon=20)
 

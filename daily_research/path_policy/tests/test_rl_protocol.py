@@ -118,6 +118,7 @@ def test_protocol_parser_accepts_forecast_walkforward_stage_with_neural_policy_d
     assert args.forecast_checkpoint_every_n_epochs == 0
     assert args.forecast_include_static_context is False
     assert args.forecast_static_fields == "symbol,exchange,industry,liquidity_bucket,price_bucket"
+    assert args.forecast_train_static_fields == ""
     assert args.forecast_ranking_baseline == "none"
     assert args.forecast_output_profile == "forecast_path_v1"
     assert args.forecast_loss_profile == "default"
@@ -332,6 +333,32 @@ def test_protocol_accepts_static_context_forecast_family_and_dataset_flag() -> N
     assert args.forecast_model_families == "gru_sequence_static_context,stock_mixer_sequence,sector_slot_mixer_sequence"
 
 
+def test_protocol_accepts_forecast_train_static_fields_override() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-walkforward-study",
+            "--tag",
+            "unit_forecast_train_static_fields",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-dataset-mode",
+            "memmap",
+            "--forecast-model-families",
+            "hybrid_expert_fusion_static_context",
+            "--forecast-train-static-fields",
+            "exchange,industry",
+        ]
+    )
+    _validate_protocol_args(parser, args)
+
+    assert args.forecast_train_static_fields == "exchange,industry"
+    assert args.forecast_static_fields == "symbol,exchange,industry,liquidity_bucket,price_bucket"
+
+
 def test_protocol_rejects_unknown_forecast_static_field() -> None:
     parser = build_arg_parser()
     args = parser.parse_args(
@@ -349,6 +376,29 @@ def test_protocol_rejects_unknown_forecast_static_field() -> None:
             "--forecast-include-static-context",
             "--forecast-static-fields",
             "symbol,not_a_field",
+        ]
+    )
+
+    with pytest.raises(SystemExit):
+        _validate_protocol_args(parser, args)
+
+
+def test_protocol_rejects_unknown_forecast_train_static_field() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-walkforward-study",
+            "--tag",
+            "unit_forecast_bad_train_static_field",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-dataset-mode",
+            "memmap",
+            "--forecast-train-static-fields",
+            "exchange,not_a_field",
         ]
     )
 

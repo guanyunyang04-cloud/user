@@ -527,14 +527,34 @@ class _EagerTorchDataset(torch.utils.data.Dataset):
 
 
 class _ForecastDatasetView:
-    def __init__(self, dataset: ForecastSequenceDataset | ForecastMemmapDataset) -> None:
+    def __init__(
+        self,
+        dataset: ForecastSequenceDataset | ForecastMemmapDataset,
+        *,
+        static_context_fields_override: tuple[str, ...] | list[str] | str | None = None,
+    ) -> None:
         self.dataset = dataset
         self.manifest = dict(dataset.manifest)
         self.normalization_manifest = dict(dataset.normalization_manifest)
         self.feature_columns = list(dataset.feature_columns)
         self.dataset_mode = str(self.manifest.get("dataset_mode", "eager"))
-        self.static_context_schema = dict(self.manifest.get("static_context_schema", {}) or {"enabled": False})
+        self.source_static_context_schema = dict(self.manifest.get("static_context_schema", {}) or {"enabled": False})
+        self.static_context_schema = self._effective_static_context_schema(
+            self.source_static_context_schema,
+            static_context_fields_override=static_context_fields_override,
+        )
         self.static_context_vocab_sizes = dict(self.static_context_schema.get("vocab_sizes", {}) or {})
+        self.static_context_source_fields = tuple(
+            str(item) for item in self.source_static_context_schema.get("fields", []) or []
+        )
+        self.static_context_effective_fields = tuple(
+            str(item) for item in self.static_context_schema.get("fields", []) or []
+        )
+        self.static_context_field_indices = tuple(
+            self.static_context_source_fields.index(field)
+            for field in self.static_context_effective_fields
+            if field in self.static_context_source_fields
+        )
         self.horizon = int(self.manifest.get("horizon", PATH20_HORIZON) or PATH20_HORIZON)
         self.cumulative_horizons = normalize_path20_cumulative_horizons(
             self.manifest.get("cumulative_horizons", PATH20_CUMULATIVE_HORIZONS),
@@ -551,6 +571,58 @@ class _ForecastDatasetView:
             self.row_count = int(dataset.x.shape[0])
             self.input_dim = int(dataset.x.shape[-1]) if dataset.x.ndim == 3 else 0
             self.lookback_days = int(dataset.x.shape[1]) if dataset.x.ndim == 3 else int(self.manifest.get("lookback_days", 0))
+
+    @staticmethod
+    def _normalize_static_context_override(
+        fields: tuple[str, ...] | list[str] | str | None,
+    ) -> tuple[str, ...] | None:
+        if fields is None:
+            return None
+        if isinstance(fields, str):
+            parsed = tuple(str(item).strip() for item in fields.split(",") if str(item).strip())
+        else:
+            parsed = tuple(str(item).strip() for item in fields if str(item).strip())
+        return parsed or None
+
+    @classmethod
+    def _effective_static_context_schema(
+        cls,
+        schema: dict[str, Any],
+        *,
+        static_context_fields_override: tuple[str, ...] | list[str] | str | None,
+    ) -> dict[str, Any]:
+        source_schema = dict(schema or {"enabled": False})
+        if not bool(source_schema.get("enabled", False)):
+            if cls._normalize_static_context_override(static_context_fields_override):
+                raise ValueError("static_context_fields_override requires a dataset with static context enabled.")
+            return source_schema
+        override_fields = cls._normalize_static_context_override(static_context_fields_override)
+        if override_fields is None:
+            effective_schema = dict(source_schema)
+            effective_schema.setdefault("training_fields_override", [])
+            effective_schema.setdefault("source_fields", list(source_schema.get("fields", []) or []))
+            return effective_schema
+        source_fields = tuple(str(item) for item in source_schema.get("fields", []) or [])
+        missing = [field for field in override_fields if field not in source_fields]
+        if missing:
+            raise ValueError(
+                "static_context_fields_override must be a subset of manifest static fields; "
+                f"missing: {', '.join(missing)}"
+            )
+        vocab_sizes = dict(source_schema.get("vocab_sizes", {}) or {})
+        embedding_defaults = dict(source_schema.get("embedding_defaults", {}) or {})
+        effective_schema = dict(source_schema)
+        effective_schema["fields"] = list(override_fields)
+        effective_schema["id_columns"] = [f"{field}_id" for field in override_fields]
+        effective_schema["vocab_sizes"] = {field: vocab_sizes[field] for field in override_fields if field in vocab_sizes}
+        effective_schema["embedding_defaults"] = {
+            key: value
+            for key, value in embedding_defaults.items()
+            if key == "dropout" or key in set(override_fields)
+        }
+        effective_schema["source_fields"] = list(source_fields)
+        effective_schema["training_fields_override"] = list(override_fields)
+        return effective_schema
 
     def role_indices(self, role: str) -> np.ndarray:
         if isinstance(self.dataset, FORECAST_MEMMAP_DATASET_TYPES):
@@ -583,6 +655,16 @@ class _ForecastDatasetView:
     @property
     def supports_static_context(self) -> bool:
         return bool(self.static_context_schema.get("enabled", False))
+
+    def filter_static_context_ids(self, static_context_ids: torch.Tensor | None) -> torch.Tensor | None:
+        if static_context_ids is None:
+            return None
+        if not self.static_context_field_indices:
+            return static_context_ids
+        if tuple(range(len(self.static_context_source_fields))) == self.static_context_field_indices:
+            return static_context_ids
+        indices = torch.as_tensor(self.static_context_field_indices, dtype=torch.long, device=static_context_ids.device)
+        return static_context_ids.index_select(dim=-1, index=indices)
 
 
 class LinearLastDayPath20Forecaster(nn.Module):
@@ -1987,6 +2069,7 @@ def _predict_indices(
                         if static_context_ids_cpu is not None
                         else None
                     )
+                    static_context_ids = dataset_view_or_x.filter_static_context_ids(static_context_ids)
                     with _autocast_context(device, amp_enabled):
                         pred = _forecast_model_forward(model, batch_x, static_context_ids, stock_mask=stock_mask)
                     if "decision_aux" in pred and "decision_aux" not in outputs:
@@ -2030,6 +2113,7 @@ def _predict_indices(
                         if static_context_ids_cpu is not None
                         else None
                     )
+                    static_context_ids = dataset_view_or_x.filter_static_context_ids(static_context_ids)
                     with _autocast_context(device, amp_enabled):
                         pred = _forecast_model_forward(model, batch, static_context_ids)
                     if "decision_aux" in pred and "decision_aux" not in outputs:
@@ -2070,6 +2154,7 @@ def _predict_indices(
                     if static_context_ids_cpu is not None
                     else None
                 )
+                static_context_ids = dataset_view_or_x.filter_static_context_ids(static_context_ids)
                 with _autocast_context(device, amp_enabled):
                     pred = _forecast_model_forward(model, batch, static_context_ids)
                 if "decision_aux" in pred and "decision_aux" not in chunks:
@@ -3185,6 +3270,7 @@ def _evaluate_loss(
                         if static_context_ids_cpu is not None
                         else None
                     )
+                    static_context_ids = dataset_view_or_x.filter_static_context_ids(static_context_ids)
                     flat_mask = stock_mask.reshape(-1)
                     with _autocast_context(device, amp_enabled):
                         pred = _forecast_model_forward(model, batch_x, static_context_ids, stock_mask=stock_mask)
@@ -3234,6 +3320,7 @@ def _evaluate_loss(
                     if static_context_ids_cpu is not None
                     else None
                 )
+                static_context_ids = dataset_view_or_x.filter_static_context_ids(static_context_ids)
                 with _autocast_context(device, amp_enabled):
                     pred = _forecast_model_forward(model, batch_x, static_context_ids)
                     loss = _forecast_loss(
@@ -3465,6 +3552,7 @@ def train_forecast_models(
     decision_cost_bps: float = 20.0,
     decision_hit_threshold_bps: float = 20.0,
     decision_drawdown_penalty: float = 0.25,
+    static_context_fields_override: tuple[str, ...] | list[str] | str | None = None,
     ranking_baseline: str = "none",
     slot_diagnostics: bool = False,
 ) -> dict[str, Any]:
@@ -3495,7 +3583,7 @@ def train_forecast_models(
         raise ValueError(f"{loss_profile} loss requires output_profile=decision_utility_v1.")
     if selection_profile == "decision_utility" and output_profile != "decision_utility_v1":
         raise ValueError("decision_utility selection requires output_profile=decision_utility_v1.")
-    dataset_view = _ForecastDatasetView(dataset)
+    dataset_view = _ForecastDatasetView(dataset, static_context_fields_override=static_context_fields_override)
     decision_config = {
         "cost_bps": float(decision_cost_bps),
         "hit_threshold_bps": float(decision_hit_threshold_bps),
@@ -3737,6 +3825,10 @@ def train_forecast_models(
                 "slot_diagnostics": bool(slot_diagnostics),
                 "per_epoch_prediction_metrics": bool(per_epoch_prediction_metrics_enabled),
                 "static_context_schema": dict(dataset_view.static_context_schema),
+                "static_context_source_schema": dict(dataset_view.source_static_context_schema),
+                "static_context_source_fields": [str(item) for item in dataset_view.static_context_source_fields],
+                "static_context_training_fields": [str(item) for item in dataset_view.static_context_effective_fields],
+                "static_context_training_field_indices": [int(item) for item in dataset_view.static_context_field_indices],
                 "symbol_vocab_fingerprint": str(dataset_view.symbol_vocab_fingerprint),
                 "industry_vocab_fingerprint": str(dataset_view.industry_vocab_fingerprint),
                 "board_vocab_fingerprint": str(dataset_view.board_vocab_fingerprint),
@@ -3809,6 +3901,7 @@ def train_forecast_models(
                             if static_context_ids_cpu is not None
                             else None
                         )
+                        static_context_ids = dataset_view.filter_static_context_ids(static_context_ids)
                         flat_mask = stock_mask.reshape(-1)
                         with _autocast_context(resolved_device, amp_enabled):
                             pred = _forecast_model_forward(model, batch_x, static_context_ids, stock_mask=stock_mask)
@@ -3836,6 +3929,7 @@ def train_forecast_models(
                             if static_context_ids_cpu is not None
                             else None
                         )
+                        static_context_ids = dataset_view.filter_static_context_ids(static_context_ids)
                         with _autocast_context(resolved_device, amp_enabled):
                             pred = _forecast_model_forward(model, batch_x, static_context_ids)
                             loss = _forecast_loss(
@@ -4570,6 +4664,10 @@ def train_forecast_models(
             "checkpoint_every_n_epochs": int(checkpoint_interval),
             "resume_from_checkpoint_pt": str(Path(resume_from).resolve()) if resume_from is not None and str(resume_from).strip() else "",
             "static_context_schema": dict(dataset_view.static_context_schema),
+            "static_context_source_schema": dict(dataset_view.source_static_context_schema),
+            "static_context_source_fields": [str(item) for item in dataset_view.static_context_source_fields],
+            "static_context_training_fields": [str(item) for item in dataset_view.static_context_effective_fields],
+            "static_context_training_field_indices": [int(item) for item in dataset_view.static_context_field_indices],
             "symbol_vocab_fingerprint": str(dataset_view.symbol_vocab_fingerprint),
             "industry_vocab_fingerprint": str(dataset_view.industry_vocab_fingerprint),
             "board_vocab_fingerprint": str(dataset_view.board_vocab_fingerprint),
