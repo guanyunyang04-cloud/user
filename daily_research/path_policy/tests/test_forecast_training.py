@@ -619,6 +619,44 @@ def test_train_forecast_models_selects_time_efficient_topk_by_validation_loss(tm
     assert checkpoint["resume_contract"]["loss_profile_contract"]["primary_objective"] == "personal_time_efficient_topk"
 
 
+def test_train_forecast_models_can_defer_per_epoch_prediction_metrics(tmp_path) -> None:
+    dataset = make_tiny_forecast_sequence_dataset(lookback_days=5, horizon=20)
+
+    summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "study",
+        model_families=("linear_last_day",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=5,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=24,
+        dropout=0.0,
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+        output_profile="decision_utility_v1",
+        loss_profile="personal_time_efficient_topk_v1",
+        selection_profile="validation_loss",
+        per_epoch_prediction_metrics=False,
+    )
+
+    assert summary["status"] == "completed"
+    assert summary["training_config"]["per_epoch_prediction_metrics"] is False
+    assert summary["selection_rule"] == "lowest_validation_loss_for_training_loss_profile_then_seed_score"
+    assert summary["models"]["linear_last_day"]["per_epoch_prediction_metrics"] is False
+
+    learning_curve = pd.read_csv(tmp_path / "study" / "forecast_learning_curve.csv")
+    assert learning_curve.loc[0, "per_epoch_prediction_metrics"] == "validation_loss_only"
+    assert learning_curve.loc[0, "validation_selection_score"] == pytest.approx(-learning_curve.loc[0, "validation_loss"])
+
+    assert summary["validation_metrics"]["status"] == "completed"
+    assert "time_eff_score_rank_ic" in summary["validation_metrics"]
+    validation_predictions = pd.read_csv(tmp_path / "study" / "forecast_predictions_validation.csv")
+    assert "pred_time_eff_score" in validation_predictions.columns
+
+
 def test_decision_utility_targets_and_loss_are_finite() -> None:
     from daily_research.path_policy.forecast_training import _decision_utility_targets, _forecast_loss
 

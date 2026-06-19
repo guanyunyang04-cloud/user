@@ -867,6 +867,7 @@ def _run_forecast_walkforward_study(
             resume_from=str(args.forecast_resume_from or ""),
             save_last_checkpoint=bool(args.forecast_save_last),
             checkpoint_every_n_epochs=int(args.forecast_checkpoint_every_n_epochs),
+            per_epoch_prediction_metrics=bool(args.forecast_per_epoch_prediction_metrics),
             output_profile=str(args.forecast_output_profile),
             loss_profile=str(args.forecast_loss_profile),
             decision_cost_bps=float(args.forecast_decision_cost_bps),
@@ -3543,6 +3544,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--forecast-save-last", dest="forecast_save_last", action="store_true", default=True)
     parser.add_argument("--no-forecast-save-last", dest="forecast_save_last", action="store_false")
     parser.add_argument("--forecast-checkpoint-every-n-epochs", type=int, default=0)
+    parser.add_argument(
+        "--forecast-per-epoch-prediction-metrics",
+        dest="forecast_per_epoch_prediction_metrics",
+        action="store_true",
+        default=True,
+        help="Run full validation prediction metrics after every forecast epoch.",
+    )
+    parser.add_argument(
+        "--no-forecast-per-epoch-prediction-metrics",
+        dest="forecast_per_epoch_prediction_metrics",
+        action="store_false",
+        help="Use exact validation loss for checkpoint selection and defer full prediction metrics to final best-checkpoint evaluation.",
+    )
     parser.add_argument(
         "--forecast-include-static-context",
         action="store_true",

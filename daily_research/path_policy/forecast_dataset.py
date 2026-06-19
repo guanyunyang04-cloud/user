@@ -879,7 +879,7 @@ class ForecastTrainingPackDataset:
             stock_idx = int(stock_pos)
             if stock_idx < 0 or stock_idx >= int(panel.shape[0]):
                 continue
-            matrix = np.asarray(panel[stock_idx, :, :], dtype=np.float32)
+            matrix = panel[stock_idx, :, :]
             if matrix.shape[0] < lookback:
                 continue
             windows = np.lib.stride_tricks.sliding_window_view(matrix, window_shape=lookback, axis=0)

@@ -557,6 +557,14 @@ class _ForecastDatasetView:
             return self.dataset.role_indices(role)
         return np.flatnonzero(self.dataset.role == role)
 
+    def date_count_for_indices(self, indices: np.ndarray) -> int:
+        row_indices = np.asarray(indices, dtype=np.int64)
+        if row_indices.size == 0:
+            return 0
+        if isinstance(self.dataset, FORECAST_MEMMAP_DATASET_TYPES):
+            return int(pd.to_datetime(self.dataset.sample_index.iloc[row_indices]["date"]).nunique())
+        return int(pd.Series(pd.to_datetime(self.dataset.date[row_indices])).nunique())
+
     def torch_dataset(self, indices: np.ndarray, *, target_scale: float) -> torch.utils.data.Dataset:
         if isinstance(self.dataset, FORECAST_MEMMAP_DATASET_TYPES):
             return self.dataset.torch_dataset(indices, target_scale=target_scale)
@@ -3450,6 +3458,7 @@ def train_forecast_models(
     resume_from: str | Path | None = None,
     save_last_checkpoint: bool = True,
     checkpoint_every_n_epochs: int = 0,
+    per_epoch_prediction_metrics: bool = True,
     progress_json_name: str = "forecast_progress.json",
     output_profile: str = "forecast_path_v1",
     loss_profile: str = "default",
@@ -3476,6 +3485,8 @@ def train_forecast_models(
     selection_profile = str(selection_profile or "multiscale").strip().lower()
     if selection_profile not in FORECAST_SELECTION_PROFILES:
         raise ValueError(f"Unsupported forecast selection profile: {selection_profile}")
+    if not bool(per_epoch_prediction_metrics) and selection_profile != "validation_loss":
+        raise ValueError("per_epoch_prediction_metrics=False is only supported with selection_profile=validation_loss.")
     output_profile = str(output_profile or "forecast_path_v1").strip().lower()
     if output_profile not in FORECAST_OUTPUT_PROFILES:
         raise ValueError(f"Unsupported forecast output profile: {output_profile}")
@@ -3592,6 +3603,7 @@ def train_forecast_models(
     min_epochs = max(int(min_epochs), 1)
     patience_limit = max(int(early_stop_patience), 1)
     checkpoint_interval = max(int(checkpoint_every_n_epochs), 0)
+    per_epoch_prediction_metrics_enabled = bool(per_epoch_prediction_metrics)
     accum_steps = max(int(grad_accum_steps), 1)
     pin_memory = resolved_device.type == "cuda"
     loader_kwargs = _data_loader_kwargs(
@@ -3723,6 +3735,7 @@ def train_forecast_models(
                 "decision_utility": dict(decision_config),
                 "ranking_baseline": str(ranking_baseline),
                 "slot_diagnostics": bool(slot_diagnostics),
+                "per_epoch_prediction_metrics": bool(per_epoch_prediction_metrics_enabled),
                 "static_context_schema": dict(dataset_view.static_context_schema),
                 "symbol_vocab_fingerprint": str(dataset_view.symbol_vocab_fingerprint),
                 "industry_vocab_fingerprint": str(dataset_view.industry_vocab_fingerprint),
@@ -3942,27 +3955,42 @@ def train_forecast_models(
                     decision_hit_threshold_bps=decision_hit_threshold_bps,
                     decision_drawdown_penalty=decision_drawdown_penalty,
                 )
-                validation_predictions = _predict_indices(
-                    model,
-                    dataset_view if dataset_view.dataset_mode == "memmap" else x,
-                    validation_indices,
-                    batch_size=batch_size,
-                    device=resolved_device,
-                    amp_enabled=amp_enabled,
-                    target_scale=target_scale,
-                )
-                validation_frame = _prediction_frame_for_dataset_indices(
-                    dataset,
-                    indices=validation_indices,
-                    predictions=validation_predictions,
-                    family=family,
-                    target_scale=target_scale,
-                    decision_cost_bps=decision_cost_bps,
-                    decision_hit_threshold_bps=decision_hit_threshold_bps,
-                    decision_drawdown_penalty=decision_drawdown_penalty,
-                    loss_profile=loss_profile,
-                )
-                validation_metrics = forecast_prediction_metrics(validation_frame)
+                if per_epoch_prediction_metrics_enabled:
+                    validation_predictions = _predict_indices(
+                        model,
+                        dataset_view if dataset_view.dataset_mode == "memmap" else x,
+                        validation_indices,
+                        batch_size=batch_size,
+                        device=resolved_device,
+                        amp_enabled=amp_enabled,
+                        target_scale=target_scale,
+                    )
+                    validation_frame = _prediction_frame_for_dataset_indices(
+                        dataset,
+                        indices=validation_indices,
+                        predictions=validation_predictions,
+                        family=family,
+                        target_scale=target_scale,
+                        decision_cost_bps=decision_cost_bps,
+                        decision_hit_threshold_bps=decision_hit_threshold_bps,
+                        decision_drawdown_penalty=decision_drawdown_penalty,
+                        loss_profile=loss_profile,
+                    )
+                    validation_metrics = forecast_prediction_metrics(validation_frame)
+                    validation_metrics_mode = "full_prediction_metrics"
+                    del validation_predictions, validation_frame
+                else:
+                    validation_metrics = {
+                        "status": "validation_loss_only",
+                        "row_count": int(len(validation_indices)),
+                        "date_count": int(dataset_view.date_count_for_indices(validation_indices)),
+                        "forecast_horizon": int(dataset_view.horizon),
+                        "cumulative_horizons": [int(item) for item in dataset_view.cumulative_horizons],
+                        "selection_profile": str(selection_profile),
+                        "loss_profile": str(loss_profile),
+                        "reason": "per_epoch_prediction_metrics_disabled",
+                    }
+                    validation_metrics_mode = "validation_loss_only"
                 score = _validation_score(validation_metrics, validation_loss, (0.65, 0.95), selection_profile)
                 multiscale_score = _profile_score(validation_metrics, validation_loss, (0.65, 0.95), "multiscale")
                 improved = score > best_score + float(early_stop_min_delta)
@@ -4053,6 +4081,7 @@ def train_forecast_models(
                         "q10_coverage_mean": float(validation_metrics.get("q10_coverage_mean", 0.0) or 0.0),
                         "q90_coverage_mean": float(validation_metrics.get("q90_coverage_mean", 0.0) or 0.0),
                         "direction_accuracy_20d": float(validation_metrics.get("direction_accuracy_20d", 0.0) or 0.0),
+                        "per_epoch_prediction_metrics": str(validation_metrics_mode),
                         "is_best": bool(improved),
                         "patience_used": int(patience_used),
                         "epoch_seconds": float(epoch_seconds),
@@ -4383,6 +4412,7 @@ def train_forecast_models(
             "loss_component_weights": dict(loss_profile_contract["loss_component_weights"]),
             "decision_utility": dict(decision_config),
             "slot_diagnostics": bool(slot_diagnostics),
+            "per_epoch_prediction_metrics": bool(per_epoch_prediction_metrics_enabled),
             "train_rows": int(len(train_indices)),
             "validation_rows": int(len(validation_indices)),
             "test_rows": int(len(test_indices)),
@@ -4535,6 +4565,7 @@ def train_forecast_models(
             "decision_utility": dict(decision_config),
             "ranking_baseline": str(ranking_baseline),
             "slot_diagnostics": bool(slot_diagnostics),
+            "per_epoch_prediction_metrics": bool(per_epoch_prediction_metrics_enabled),
             "save_last_checkpoint": bool(save_last_checkpoint),
             "checkpoint_every_n_epochs": int(checkpoint_interval),
             "resume_from_checkpoint_pt": str(Path(resume_from).resolve()) if resume_from is not None and str(resume_from).strip() else "",

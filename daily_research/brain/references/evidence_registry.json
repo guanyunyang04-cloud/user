@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 127,
+  "record_count": 128,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -4230,6 +4230,71 @@
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": []
+    },
+    {
+      "id": "path_policy_alpha_v2_old_contract_validation_loss_audit_20260618",
+      "date": "2026-06-18",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_old_contract_validation_loss_audit_20260618.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "qdp_alpha_v2_time_efficient_topk_research"
+      ],
+      "study_families": [
+        "personal_time_efficient_topk_v1",
+        "old_contract_checkpoint_audit"
+      ],
+      "run_tags": [
+        "qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01",
+        "qdp_alpha_v2_hybrid_topk_align_h256_t4_b512_seed7_20260617_02",
+        "qdp_alpha_v2_hybrid_monthly_robust_h256_t4_b512_seed7_20260617_02",
+        "qdp_alpha_v2_hybrid_h30soft_h256_t4_b512_seed7_20260617_02"
+      ],
+      "verdict": "Status: stage0_audit_completed / old_contract_only / research_only / execution_frozen.; Old mixed validation loss, old selection score, rank/spread diagnostics, and personal_topK views do not always select the same epoch; this supports separating training objective, checkpoint selection, and evaluation views.; No old-checkpoint issue blocks the first personal_time_efficient_topk_v1 h256 seed7 full run. Anchor remains the old-contract comparison baseline only.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Run the first fixed h256 seed7 alpha_v2 full experiment with loss_profile=personal_time_efficient_topk_v1 and selection_profile=validation_loss.",
+        "Keep old runs as diagnostic comparison evidence only.",
+        "Do not start multi-seed, score-backtest bridge, candidate matrix, execution-candidate review, paper/live/broker, or active/default artifact changes from this audit."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_alpha_v2_time_eff_topk_h256_seed7_full_result_20260619",
+      "date": "2026-06-19",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_time_eff_topk_h256_seed7_full_result_20260619.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "qdp_alpha_v2_time_efficient_topk_research"
+      ],
+      "study_families": [
+        "personal_time_efficient_topk_v1",
+        "alpha_v2_h256_full"
+      ],
+      "run_tags": [
+        "qdp_alpha_v2_hybrid_time_eff_topk_h256_t4_b512_seed7_20260618_01"
+      ],
+      "verdict": "Status: completed / first_new_contract_full_run / research_only / execution_frozen.; The personal_time_efficient_topk_v1 h256 seed7 full run selected epoch1 by lowest validation loss; later epochs lowered train loss but worsened validation loss.; It validates the clean training/checkpoint contract but did not beat the old-contract alpha_v2 h256 anchor under validation-selected same-candidate personal top-K diagnostics.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Keep qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01 as the old-contract comparison anchor.",
+        "Analyze why personal_time_efficient_topk_v1 overfits after epoch1 and why same-candidate personal top-K is weak before launching another long full run.",
+        "Prefer controlled diagnostics such as component validation-loss attribution, h192 or stronger regularization, or lighter time_eff_topk_alignment / decision_rank_aux weights.",
+        "Do not enter multi-seed, score-backtest bridge, candidate matrix, execution-candidate review, paper/live/broker, or active/default artifact changes from this run."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__f926a496f69c61f6b92b5faf",
+        "policy_pool_view__fc63d6b996abc7abde88bae7"
+      ]
     }
   ]
 }
