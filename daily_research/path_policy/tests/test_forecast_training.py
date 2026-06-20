@@ -961,6 +961,81 @@ def test_train_forecast_models_records_structured_alpha_v2_contract(tmp_path) ->
     assert getattr(reloaded, "static_context_fields") == ("exchange", "industry")
 
 
+def test_train_forecast_models_uses_structured_alpha_v2_pack_feature_groups(tmp_path) -> None:
+    dataset = make_tiny_forecast_sequence_dataset(
+        lookback_days=6,
+        horizon=20,
+        feature_count=7,
+        include_static_context=True,
+    )
+    feature_columns = [
+        "raw_close",
+        "cs_rank_ret_20d",
+        "market_breadth_20",
+        "industry_momentum_20d",
+        "turn_20d",
+        "event_quality_score",
+        "intraday_first_5m_ret",
+    ]
+    manifest = dict(dataset.manifest)
+    manifest["feature_columns"] = list(feature_columns)
+    manifest["structured_alpha_v2_pack"] = {
+        "enabled": True,
+        "feature_group_indices": {
+            "daily_price_volume": [0],
+            "cross_section": [1],
+            "market_regime": [2],
+            "industry_peer": [3],
+            "valuation_liquidity": [4],
+            "event_quality": [5],
+            "intraday": [6],
+        },
+    }
+    manifest["normalization"] = dict(manifest["normalization"])
+    manifest["normalization"]["feature_columns"] = list(feature_columns)
+    dataset = replace(dataset, feature_columns=feature_columns, manifest=manifest, normalization_manifest=dict(manifest["normalization"]))
+
+    summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "study",
+        model_families=("hybrid_structured_alpha_v2",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=5,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=12,
+        dropout=0.0,
+        gru_layers=1,
+        transformer_layers=1,
+        transformer_heads=3,
+        patch_sizes=(2,),
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+        output_profile="forecast_path_v1",
+        loss_profile="hybrid_alpha_score_v2",
+        selection_profile="validation_loss",
+        static_context_fields_override=("exchange", "industry"),
+        per_epoch_prediction_metrics=False,
+    )
+
+    seed_summary = summary["models"]["hybrid_structured_alpha_v2"]["seed_summaries"]["7"]
+    checkpoint = torch.load(seed_summary["last_checkpoint_pt"], map_location="cpu", weights_only=False)
+    model_config = checkpoint["model_config"]
+
+    assert summary["status"] == "completed"
+    assert summary["training_config"]["structured_alpha_v2_feature_group_source"] == "manifest_structured_alpha_v2_pack"
+    assert model_config["feature_group_source"] == "manifest_structured_alpha_v2_pack"
+    assert model_config["feature_group_indices"]["daily_price_volume"] == [0]
+    assert model_config["feature_group_indices"]["cross_section"] == [1]
+    assert model_config["feature_group_indices"]["market_regime"] == [2]
+    assert model_config["feature_group_indices"]["industry_peer"] == [3]
+    assert model_config["feature_group_indices"]["valuation_liquidity"] == [4]
+    assert model_config["feature_group_indices"]["event_quality"] == [5]
+    assert model_config["feature_group_indices"]["intraday"] == [6]
+
+
 def test_train_forecast_models_applies_train_date_stride_without_thinning_validation_or_test(tmp_path) -> None:
     dataset = make_tiny_forecast_sequence_dataset(
         lookback_days=5,

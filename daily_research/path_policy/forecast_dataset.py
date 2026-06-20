@@ -1864,6 +1864,11 @@ def _sample_count_by_role(sample_index: pd.DataFrame) -> dict[str, int]:
     return {role: int((roles == role).sum()) for role in ordered_roles}
 
 
+def _resolve_manifest_path(root: Path, raw_path: str | Path) -> Path:
+    path = Path(str(raw_path or ""))
+    return path if path.is_absolute() else root / path
+
+
 def _load_training_pack_forecast_memmap_dataset(
     manifest_path: Path,
     manifest: dict[str, Any],
@@ -1872,16 +1877,12 @@ def _load_training_pack_forecast_memmap_dataset(
     max_samples_per_date_per_role: int = 0,
 ) -> ForecastTrainingPackDataset:
     root = manifest_path.parent
-    sample_index_path = Path(str(manifest.get("sample_index_path", "") or ""))
-    if not sample_index_path.is_absolute():
-        sample_index_path = root / sample_index_path
+    sample_index_path = _resolve_manifest_path(root, str(manifest.get("sample_index_path", "") or ""))
     if not sample_index_path.exists():
         raise ValueError(f"qdp training pack missing sample_index_path: {sample_index_path}")
     sample_index = pd.read_parquet(sample_index_path)
     source_sample_count_by_role = _sample_count_by_role(sample_index)
-    feature_panel_path = Path(str(manifest.get("feature_panel_path", "") or ""))
-    if not feature_panel_path.is_absolute():
-        feature_panel_path = root / feature_panel_path
+    feature_panel_path = _resolve_manifest_path(root, str(manifest.get("feature_panel_path", "") or ""))
     feature_panel_shape = tuple(int(item) for item in list(manifest.get("feature_panel_shape", []) or []))
     feature_dtype = str(manifest.get("feature_dtype", "float16") or "float16")
     _validate_memmap_file(feature_panel_path, shape=feature_panel_shape, label="qdp_training_pack_feature_panel", dtype=feature_dtype)
@@ -1895,9 +1896,7 @@ def _load_training_pack_forecast_memmap_dataset(
         or ""
     )
     if date_major_path_raw.strip():
-        candidate_path = Path(date_major_path_raw)
-        if not candidate_path.is_absolute():
-            candidate_path = root / candidate_path
+        candidate_path = _resolve_manifest_path(root, date_major_path_raw)
         candidate_shape_raw = (
             date_major_meta.get("shape")
             or manifest.get("date_major_feature_panel_shape")
@@ -1922,9 +1921,7 @@ def _load_training_pack_forecast_memmap_dataset(
     static_context_ids: np.memmap | np.ndarray | None = None
     static_meta = dict(manifest.get("static_context_ids", {}) or {})
     if static_meta:
-        static_path = Path(str(static_meta.get("path", "") or ""))
-        if not static_path.is_absolute():
-            static_path = root / static_path
+        static_path = _resolve_manifest_path(root, str(static_meta.get("path", "") or ""))
         static_shape = tuple(int(item) for item in list(static_meta.get("shape", []) or []))
         static_dtype = str(static_meta.get("dtype", "int32") or "int32")
         _validate_memmap_file(static_path, shape=static_shape, label="qdp_training_pack_static_context_ids", dtype=static_dtype)
@@ -2634,6 +2631,348 @@ def build_qdp_training_pack_date_major_layout(
         cross_section_index_path=str(cross_section_index_path.resolve()) if cross_section_index_path.exists() else "",
         target_shape=[int(item) for item in target_shape],
         feature_dtype=dtype,
+    )
+    return manifest
+
+
+def _structured_alpha_v2_group_name(feature_name: str) -> str:
+    name = str(feature_name or "").strip().lower()
+    if not name:
+        return "event_quality"
+    if name.startswith("intraday_") or name.startswith("cs_rank_intraday_") or name.startswith("cs_z_intraday_"):
+        return "intraday"
+    if name.startswith("market_") or name.startswith("benchmark_") or "cross_section_ret_dispersion" in name or "limit_up_down_pressure" in name:
+        return "market_regime"
+    if name.startswith("industry_") or name.startswith("peer_") or "relative_to_peer" in name or "stock_ret_" in name:
+        return "industry_peer"
+    if name.startswith("valuation_") or name.startswith("turn") or name.startswith("cs_rank_turn") or name.startswith("cs_z_turn"):
+        return "valuation_liquidity"
+    if name.startswith("cs_rank_") or name.startswith("cs_z_"):
+        return "cross_section"
+    if (
+        name.startswith("raw_")
+        or name.startswith("ret_")
+        or name.startswith("vol_")
+        or name in {"current_price", "in_pool"}
+        or "distance_to_" in name
+        or "volume_ratio" in name
+        or "adv_ratio" in name
+        or "price_from_local_peak" in name
+        or name.startswith("local_")
+    ):
+        return "daily_price_volume"
+    return "event_quality"
+
+
+def _structured_alpha_v2_feature_order(feature_columns: list[str] | tuple[str, ...]) -> tuple[list[str], dict[str, list[int]], list[int]]:
+    groups = [
+        "daily_price_volume",
+        "cross_section",
+        "market_regime",
+        "industry_peer",
+        "valuation_liquidity",
+        "event_quality",
+        "intraday",
+    ]
+    grouped: dict[str, list[int]] = {group: [] for group in groups}
+    for idx, name in enumerate(feature_columns):
+        group = _structured_alpha_v2_group_name(str(name))
+        grouped.setdefault(group, []).append(int(idx))
+    order: list[int] = []
+    group_indices: dict[str, list[int]] = {}
+    cursor = 0
+    for group in groups:
+        source_indices = grouped.get(group, [])
+        order.extend(source_indices)
+        group_indices[group] = list(range(cursor, cursor + len(source_indices)))
+        cursor += len(source_indices)
+    ordered_columns = [str(feature_columns[idx]) for idx in order]
+    return ordered_columns, group_indices, order
+
+
+def _rewrite_label_array_paths_for_sidecar(
+    label_arrays: dict[str, Any],
+    *,
+    source_root: Path,
+) -> dict[str, dict[str, Any]]:
+    rewritten: dict[str, dict[str, Any]] = {}
+    for name, raw_meta in dict(label_arrays or {}).items():
+        meta = dict(raw_meta or {})
+        raw_path = str(meta.get("path", "") or "")
+        if raw_path:
+            meta["path"] = str(_resolve_manifest_path(source_root, raw_path).resolve())
+        rewritten[str(name)] = meta
+    return rewritten
+
+
+def build_qdp_structured_alpha_v2_training_pack(
+    training_pack_manifest_json: str | Path,
+    *,
+    output_root: str | Path | None = None,
+    tag: str = "",
+    feature_dtype: str = "",
+    date_major: bool = False,
+    date_chunk_size: int = 128,
+    resume: bool = True,
+) -> dict[str, Any]:
+    """Create a lightweight structured-alpha-v2 sidecar pack from an existing QDP training pack.
+
+    The sidecar does not materialize rolling windows. It reorders feature columns into
+    structured-alpha-v2 semantic groups, narrows static context to exchange/industry, and
+    reuses sample-major labels from the source pack.
+    """
+
+    source_manifest_path = Path(training_pack_manifest_json)
+    source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
+    if str(source_manifest.get("artifact_type", "")) != "qdp_training_pack_v1":
+        raise ValueError(f"qdp_structured_alpha_v2_source_must_be_qdp_training_pack_v1: {source_manifest_path}")
+    source_root = source_manifest_path.parent
+    source_feature_path = _resolve_manifest_path(source_root, str(source_manifest.get("feature_panel_path", "") or ""))
+    source_shape = tuple(int(item) for item in list(source_manifest.get("feature_panel_shape", []) or []))
+    source_dtype = str(source_manifest.get("feature_dtype", "float16") or "float16").strip().lower()
+    if len(source_shape) != 3:
+        raise ValueError(f"qdp structured alpha v2 source has invalid feature_panel_shape: {source_manifest_path}")
+    _validate_memmap_file(source_feature_path, shape=source_shape, label="qdp_structured_alpha_v2_source_feature_panel", dtype=source_dtype)
+
+    dtype = str(feature_dtype or source_dtype or "float16").strip().lower()
+    if dtype not in {"float16", "float32"}:
+        raise ValueError("--feature-dtype must be float16 or float32.")
+    if bool(date_major):
+        raise ValueError(
+            "qdp_structured_alpha_v2_date_major_sidecar_not_supported; "
+            "build the stock-major structured sidecar first, then add a date-major companion explicitly."
+        )
+    feature_columns = [str(item) for item in list(source_manifest.get("feature_columns", []) or [])]
+    if len(feature_columns) != int(source_shape[2]):
+        raise ValueError("qdp_structured_alpha_v2_feature_column_count_mismatch")
+    ordered_columns, feature_group_indices, source_order = _structured_alpha_v2_feature_order(feature_columns)
+    source_order_array = np.asarray(source_order, dtype=np.int64)
+
+    safe_tag = "".join(
+        ch if ch.isalnum() or ch in {"-", "_"} else "_"
+        for ch in str(tag or f"{source_manifest_path.parent.name}_structured_alpha_v2")
+    ).strip("_")
+    if output_root is None:
+        root = source_root.parent / safe_tag
+    else:
+        root = Path(output_root)
+    root.mkdir(parents=True, exist_ok=True)
+    manifest_path = root / "qdp_structured_alpha_v2_training_pack_manifest.json"
+    progress_path = root / "qdp_structured_alpha_v2_training_pack_progress.json"
+    if bool(resume) and manifest_path.exists():
+        existing = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if str(existing.get("status", "")) == "completed":
+            return existing
+
+    _qdp_training_pack_progress(
+        progress_path,
+        "structured_alpha_v2_sidecar_start",
+        source_training_pack_manifest_json=str(source_manifest_path.resolve()),
+        target_manifest_json=str(manifest_path.resolve()),
+        feature_count=int(source_shape[2]),
+        feature_dtype=dtype,
+    )
+
+    feature_layout = "date_stock_feature" if bool(date_major) else "stock_date_feature"
+    if bool(date_major):
+        source_date_major_meta = dict(source_manifest.get("date_major_feature_panel", {}) or {})
+        source_date_major_path_raw = str(source_date_major_meta.get("path", "") or source_manifest.get("date_major_feature_panel_path", "") or "")
+        source_date_major_shape_raw = source_date_major_meta.get("shape") or source_manifest.get("date_major_feature_panel_shape") or []
+        source_date_major_dtype = str(
+            source_date_major_meta.get("dtype") or source_manifest.get("date_major_feature_dtype") or source_dtype
+        ).strip().lower()
+        if not source_date_major_path_raw or not source_date_major_shape_raw:
+            raise ValueError("qdp_structured_alpha_v2_date_major_requested_but_source_missing_date_major_panel")
+        source_panel_path = _resolve_manifest_path(source_root, source_date_major_path_raw)
+        source_panel_shape = tuple(int(item) for item in list(source_date_major_shape_raw or []))
+        if len(source_panel_shape) != 3:
+            raise ValueError("qdp_structured_alpha_v2_source_date_major_shape_invalid")
+        _validate_memmap_file(
+            source_panel_path,
+            shape=source_panel_shape,
+            label="qdp_structured_alpha_v2_source_date_major_feature_panel",
+            dtype=source_date_major_dtype,
+        )
+        target_shape = (int(source_panel_shape[0]), int(source_panel_shape[1]), int(len(ordered_columns)))
+        target_path = root / f"feature_panel_date_stock_feature_structured_alpha_v2.{dtype}.dat"
+        source_panel = np.memmap(source_panel_path, dtype=source_date_major_dtype, mode="r", shape=source_panel_shape)
+        target_panel = np.memmap(target_path, dtype=dtype, mode="w+", shape=target_shape)
+        chunk = max(int(date_chunk_size), 1)
+        for start in range(0, target_shape[0], chunk):
+            end = min(start + chunk, target_shape[0])
+            target_panel[start:end, :, :] = np.asarray(source_panel[start:end, :, :][:, :, source_order_array], dtype=dtype)
+            if start == 0 or end == target_shape[0] or (end // chunk) % 10 == 0:
+                target_panel.flush()
+                _qdp_training_pack_progress(
+                    progress_path,
+                    "structured_feature_panel_writing",
+                    feature_layout=feature_layout,
+                    completed_dates=int(end),
+                    total_dates=int(target_shape[0]),
+                    completion_ratio=float(end / max(target_shape[0], 1)),
+                )
+        target_panel.flush()
+        feature_panel_path = target_path
+        feature_panel_shape = target_shape
+        date_major_feature_panel = {
+            "path": str(target_path.resolve()),
+            "shape": [int(item) for item in target_shape],
+            "dtype": dtype,
+            "layout": "date_stock_feature",
+        }
+        stock_major_feature_panel_path = ""
+        stock_major_feature_panel_shape: list[int] = []
+    else:
+        target_shape = (int(source_shape[0]), int(source_shape[1]), int(len(ordered_columns)))
+        target_path = root / f"feature_panel_stock_date_feature_structured_alpha_v2.{dtype}.dat"
+        source_panel = np.memmap(source_feature_path, dtype=source_dtype, mode="r", shape=source_shape)
+        target_panel = np.memmap(target_path, dtype=dtype, mode="w+", shape=target_shape)
+        chunk = max(int(date_chunk_size), 1)
+        for start in range(0, target_shape[1], chunk):
+            end = min(start + chunk, target_shape[1])
+            target_panel[:, start:end, :] = np.asarray(source_panel[:, start:end, :][:, :, source_order_array], dtype=dtype)
+            if start == 0 or end == target_shape[1] or (end // chunk) % 10 == 0:
+                target_panel.flush()
+                _qdp_training_pack_progress(
+                    progress_path,
+                    "structured_feature_panel_writing",
+                    feature_layout=feature_layout,
+                    completed_dates=int(end),
+                    total_dates=int(target_shape[1]),
+                    completion_ratio=float(end / max(target_shape[1], 1)),
+                )
+        target_panel.flush()
+        feature_panel_path = target_path
+        feature_panel_shape = target_shape
+        date_major_feature_panel = {}
+        stock_major_feature_panel_path = str(target_path.resolve())
+        stock_major_feature_panel_shape = [int(item) for item in target_shape]
+
+    sample_index_path = _resolve_manifest_path(source_root, str(source_manifest.get("sample_index_path", "") or ""))
+    static_context_meta: dict[str, Any] = {}
+    source_static_schema = dict(source_manifest.get("static_context_schema", {}) or {})
+    source_static_fields = [str(item) for item in list(source_static_schema.get("fields", []) or [])]
+    wanted_static_fields = ["exchange", "industry"]
+    missing_static = [field for field in wanted_static_fields if field not in source_static_fields]
+    if missing_static:
+        raise ValueError(f"qdp_structured_alpha_v2_missing_static_fields: {missing_static}")
+    source_static_meta = dict(source_manifest.get("static_context_ids", {}) or {})
+    if source_static_meta:
+        source_static_path = _resolve_manifest_path(source_root, str(source_static_meta.get("path", "") or ""))
+        source_static_shape = tuple(int(item) for item in list(source_static_meta.get("shape", []) or []))
+        source_static_dtype = str(source_static_meta.get("dtype", "int32") or "int32")
+        _validate_memmap_file(
+            source_static_path,
+            shape=source_static_shape,
+            label="qdp_structured_alpha_v2_source_static_context_ids",
+            dtype=source_static_dtype,
+        )
+        field_indices = [source_static_fields.index(field) for field in wanted_static_fields]
+        source_static = np.memmap(source_static_path, dtype=source_static_dtype, mode="r", shape=source_static_shape)
+        static_values = np.asarray(source_static[:, field_indices], dtype=np.int32)
+        static_path = root / "static_context_ids_exchange_industry.int32.dat"
+        static_store = np.memmap(static_path, dtype="int32", mode="w+", shape=static_values.shape)
+        static_store[:] = static_values
+        static_store.flush()
+        static_context_meta = {
+            "path": str(static_path.resolve()),
+            "dtype": "int32",
+            "shape": [int(item) for item in static_values.shape],
+        }
+    else:
+        raise ValueError("qdp_structured_alpha_v2_requires_static_context_ids_for_exchange_industry")
+
+    source_normalization = dict(source_manifest.get("normalization", {}) or {})
+    reordered_normalization = dict(source_normalization)
+    for key in ("feature_mean", "feature_std"):
+        values = list(source_normalization.get(key, []) or [])
+        if len(values) == len(source_order):
+            reordered_normalization[key] = [values[idx] for idx in source_order]
+    if "feature_columns" in reordered_normalization:
+        reordered_normalization["feature_columns"] = ordered_columns
+
+    vocab_sizes = dict(source_static_schema.get("vocab_sizes", {}) or {})
+    embedding_defaults = dict(source_static_schema.get("embedding_defaults", {}) or {})
+    static_context_schema = {
+        **source_static_schema,
+        "enabled": True,
+        "fields": wanted_static_fields,
+        "id_columns": [f"{field}_id" for field in wanted_static_fields],
+        "source_fields": source_static_fields,
+        "source_field_indices": [int(source_static_fields.index(field)) for field in wanted_static_fields],
+        "vocab_sizes": {field: int(vocab_sizes.get(field, 1) or 1) for field in wanted_static_fields},
+        "embedding_defaults": {
+            field: int(embedding_defaults.get(field, 4 if field == "exchange" else 8) or (4 if field == "exchange" else 8))
+            for field in wanted_static_fields
+        } | {"dropout": float(embedding_defaults.get("dropout", 0.2) or 0.2)},
+    }
+
+    label_arrays = _rewrite_label_array_paths_for_sidecar(dict(source_manifest.get("label_arrays", {}) or {}), source_root=source_root)
+    manifest = {
+        **{key: value for key, value in source_manifest.items() if key not in {"manifest_json", "feature_columns", "feature_count"}},
+        "artifact_type": "qdp_training_pack_v1",
+        "derived_artifact_type": "qdp_structured_alpha_v2_training_pack_v1",
+        "status": "completed",
+        "created_at": pd.Timestamp.now(tz="Asia/Shanghai").isoformat(),
+        "dataset_mode": "memmap",
+        "manifest_json": str(manifest_path.resolve()),
+        "source_training_pack_manifest_json": str(source_manifest_path.resolve()),
+        "source_artifact_type": "qdp_training_pack_v1",
+        "source_feature_panel_path": str(source_feature_path.resolve()),
+        "source_feature_panel_shape": [int(item) for item in source_shape],
+        "source_feature_dtype": source_dtype,
+        "sample_index_path": str(sample_index_path.resolve()),
+        "feature_columns": ordered_columns,
+        "feature_count": int(len(ordered_columns)),
+        "feature_panel_path": str(feature_panel_path.resolve()) if not bool(date_major) else stock_major_feature_panel_path,
+        "feature_panel_shape": [int(item) for item in feature_panel_shape] if not bool(date_major) else stock_major_feature_panel_shape,
+        "feature_dtype": dtype,
+        "date_major_feature_panel_path": str(feature_panel_path.resolve()) if bool(date_major) else "",
+        "date_major_feature_panel_shape": [int(item) for item in feature_panel_shape] if bool(date_major) else [],
+        "date_major_feature_dtype": dtype if bool(date_major) else "",
+        "date_major_feature_panel": date_major_feature_panel,
+        "features_are_normalized": bool(source_manifest.get("features_are_normalized", True)),
+        "normalization": reordered_normalization,
+        "label_arrays": label_arrays,
+        "static_context_schema": static_context_schema,
+        "static_context_ids": static_context_meta,
+        "structured_alpha_v2_pack": {
+            "enabled": True,
+            "schema_version": 1,
+            "feature_layout": feature_layout,
+            "feature_order": "structured_alpha_v2_group_contiguous",
+            "source_feature_indices": [int(item) for item in source_order],
+            "feature_group_indices": {
+                group: [int(item) for item in indices]
+                for group, indices in feature_group_indices.items()
+            },
+            "feature_group_counts": {
+                group: int(len(indices))
+                for group, indices in feature_group_indices.items()
+            },
+            "static_context_fields": wanted_static_fields,
+            "label_strategy": "reuse_source_sample_major_label_arrays",
+            "window_materialization": "runtime_sliding_window_view",
+        },
+        "training_pack_contract": {
+            **dict(source_manifest.get("training_pack_contract", {}) or {}),
+            "feature_layout": feature_layout,
+            "feature_order": "structured_alpha_v2_group_contiguous",
+            "static_context_fields": wanted_static_fields,
+            "label_layout": "sample_major_reused_from_source",
+            "window_materialization": "runtime_sliding_window_view",
+            "full_rolling_window_cache": False,
+        },
+    }
+    write_json(manifest_path, _json_ready(manifest))
+    _qdp_training_pack_progress(
+        progress_path,
+        "completed",
+        manifest_json=str(manifest_path.resolve()),
+        source_training_pack_manifest_json=str(source_manifest_path.resolve()),
+        feature_layout=feature_layout,
+        feature_count=int(len(ordered_columns)),
+        static_context_fields=wanted_static_fields,
     )
     return manifest
 

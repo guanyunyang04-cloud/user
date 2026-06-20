@@ -16,6 +16,7 @@ from daily_research.path_policy.forecast_dataset import (
     ForecastDateBatchTorchDataset,
     _fit_memmap_train_normalization,
     build_forecast_memmap_dataset,
+    build_qdp_structured_alpha_v2_training_pack,
     build_qdp_training_pack,
     build_qdp_training_pack_date_major_layout,
     build_static_context_vocab,
@@ -517,6 +518,109 @@ def test_qdp_training_pack_preserves_optional_basic_v2_labels(tmp_path) -> None:
     np.testing.assert_allclose(loaded.y_daily_return[0], np.asarray([0.02], dtype=np.float32))
     np.testing.assert_allclose(loaded.y_cum_excess_1to20[0], np.asarray([0.01], dtype=np.float32))
     assert float(loaded.y_entry_tradeable[0]) == 1.0
+
+
+def test_qdp_structured_alpha_v2_pack_reorders_features_and_drops_symbol_static(tmp_path) -> None:
+    stocks = ("AAA.SZ", "BBB.SH")
+    feature_columns = [
+        "intraday_ret_5m_last",
+        "raw_close",
+        "cs_rank_ret_20d",
+        "market_ret_20d",
+        "industry_strength_20d",
+        "turn_20d",
+        "event_quality_score",
+    ]
+    shards = [
+        _write_qdp_fixture_shard(tmp_path, year=year, stocks=stocks, feature_columns=feature_columns, include_label_v2=True)
+        for year in (2019, 2020, 2021)
+    ]
+    manifest = {
+        "artifact_type": "qdp_sharded_memmap",
+        "profile": "style_structural_alpha_v2",
+        "feature_profile": "style_structural_alpha_v2",
+        "canonical_dataset_id": "policy_input_bundle__unit",
+        "source_pool_view_id": "policy_pool_view__unit",
+        "source_pool_view_kind": "tradeable_mainboard",
+        "lookback_days": 3,
+        "horizon": 1,
+        "forecast_horizon": 1,
+        "execution_mode": "next_open",
+        "cumulative_horizons": [1],
+        "feature_columns": feature_columns,
+        "feature_count": len(feature_columns),
+        "label_schema_name": "path20_basic_v2",
+        "label_schema_version": 2,
+        "static_context_schema": {
+            "enabled": True,
+            "fields": ["symbol", "exchange", "industry"],
+            "id_columns": ["symbol_id", "exchange_id", "industry_id"],
+            "vocab_sizes": {"symbol": 3, "exchange": 3, "industry": 12},
+            "embedding_defaults": {"symbol": 16, "exchange": 4, "industry": 8, "dropout": 0.2},
+        },
+        "shards": shards,
+    }
+    source_manifest_path = tmp_path / "sharded_memmap_manifest.json"
+    source_manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    pack_manifest = build_qdp_training_pack(
+        source_manifest_path,
+        output_root=tmp_path / "training_pack",
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        max_samples_per_role=4,
+        feature_dtype="float32",
+    )
+    sidecar_manifest = build_qdp_structured_alpha_v2_training_pack(
+        pack_manifest["manifest_json"],
+        output_root=tmp_path / "structured_alpha_v2_pack",
+        feature_dtype="float32",
+        resume=False,
+    )
+    source = load_forecast_memmap_dataset(pack_manifest["manifest_json"])
+    sidecar = load_forecast_memmap_dataset(sidecar_manifest["manifest_json"])
+
+    assert isinstance(sidecar, ForecastTrainingPackDataset)
+    assert sidecar.manifest["derived_artifact_type"] == "qdp_structured_alpha_v2_training_pack_v1"
+    assert sidecar.manifest["structured_alpha_v2_pack"]["enabled"] is True
+    assert sidecar.manifest["structured_alpha_v2_pack"]["window_materialization"] == "runtime_sliding_window_view"
+    assert sidecar.manifest["static_context_schema"]["fields"] == ["exchange", "industry"]
+    assert "symbol" not in sidecar.manifest["static_context_schema"]["fields"]
+    assert sidecar.static_context_ids is not None
+    assert sidecar.static_context_ids.shape == (sidecar.row_count, 2)
+    np.testing.assert_array_equal(sidecar.static_context_ids[:, 0], source.static_context_ids[:, 1])
+    np.testing.assert_array_equal(sidecar.static_context_ids[:, 1], source.static_context_ids[:, 2])
+
+    expected_columns = [
+        "raw_close",
+        "cs_rank_ret_20d",
+        "market_ret_20d",
+        "industry_strength_20d",
+        "turn_20d",
+        "event_quality_score",
+        "intraday_ret_5m_last",
+    ]
+    assert sidecar.feature_columns == expected_columns
+    group_indices = sidecar.manifest["structured_alpha_v2_pack"]["feature_group_indices"]
+    assert group_indices["daily_price_volume"] == [0]
+    assert group_indices["cross_section"] == [1]
+    assert group_indices["market_regime"] == [2]
+    assert group_indices["industry_peer"] == [3]
+    assert group_indices["valuation_liquidity"] == [4]
+    assert group_indices["event_quality"] == [5]
+    assert group_indices["intraday"] == [6]
+
+    row = int(sidecar.role_indices("validation")[0])
+    source_order = np.asarray(sidecar.manifest["structured_alpha_v2_pack"]["source_feature_indices"], dtype=np.int64)
+    np.testing.assert_allclose(
+        sidecar.input_window(row),
+        source.input_window(row)[:, source_order],
+        rtol=1e-6,
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(sidecar.y_daily_excess[row], source.y_daily_excess[row], rtol=1e-6, atol=1e-6)
+    np.testing.assert_allclose(sidecar.y_cum_excess_1to20[row], source.y_cum_excess_1to20[row], rtol=1e-6, atol=1e-6)
 
 
 def test_qdp_training_pack_loader_applies_sample_cap_without_misalignment(tmp_path) -> None:

@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 135,
+  "record_count": 136,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -4531,6 +4531,47 @@
         "Choose train_date_stride=1 for full train-date semantics or train_date_stride=3 for diagnostic/runtime control; keep validation/test full.",
         "Keep --no-forecast-per-epoch-prediction-metrics for speed; final best checkpoint still outputs validation/test predictions.",
         "Do not enter multi-seed, score-backtest bridge, candidate matrix, execution-candidate review, paper/live/broker, or active/default artifact changes from this smoke."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__f926a496f69c61f6b92b5faf",
+        "policy_pool_view__fc63d6b996abc7abde88bae7"
+      ]
+    },
+    {
+      "id": "path_policy_alpha_v2_structured_sidecar_pack_20260621",
+      "date": "2026-06-21",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_structured_sidecar_pack_20260621.md",
+      "tags": [
+        "path_policy",
+        "alpha_v2",
+        "training_pack",
+        "structured_alpha_v2",
+        "sidecar",
+        "smoke"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "qdp_alpha_v2_generalization_repair"
+      ],
+      "study_families": [
+        "hybrid_structured_alpha_v2",
+        "hybrid_alpha_score_v2",
+        "structured_alpha_v2_sidecar_pack"
+      ],
+      "run_tags": [
+        "qdp_alpha_v2_structured_sidecar_hybrid_alpha_score_v2_smoke_20260621_02"
+      ],
+      "verdict": "Status: sidecar_pack_completed / model_contract_validated / research_only / execution_frozen.; structured_alpha_v2 sidecar pack completed with group-contiguous 307 features, exchange/industry static context only, source label arrays reused, and training confirmed to use manifest feature_group_indices.; This is data/model contract evidence only, not model-quality evidence.",
+      "blockers": [
+        "No h192 full or stride scout launched from this evidence.",
+        "No model-quality conclusion, multi-seed evidence, bridge, candidate matrix, or execution review is authorized."
+      ],
+      "next_allowed_actions": [
+        "Run hybrid_structured_alpha_v2 + h192 + b128 + hybrid_alpha_score_v2 + exchange,industry controlled scout using the sidecar manifest explicitly.",
+        "Use train_date_stride=1 for full train-date semantics or train_date_stride=3 for diagnostic/runtime control; keep validation/test full.",
+        "Keep active/live/default/paper/broker artifacts frozen."
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": [

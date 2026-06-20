@@ -3446,6 +3446,44 @@ def _structured_alpha_v2_feature_groups(feature_columns: list[str] | tuple[str, 
     return {key: tuple(value) for key, value in groups.items()}
 
 
+def _structured_alpha_v2_feature_groups_for_dataset(
+    dataset_view: _ForecastDatasetView,
+) -> tuple[dict[str, tuple[int, ...]], str]:
+    pack_meta = dict(dataset_view.manifest.get("structured_alpha_v2_pack", {}) or {})
+    raw_groups = dict(pack_meta.get("feature_group_indices", {}) or {})
+    expected_groups = (
+        "daily_price_volume",
+        "cross_section",
+        "market_regime",
+        "industry_peer",
+        "valuation_liquidity",
+        "event_quality",
+        "intraday",
+    )
+    if raw_groups:
+        input_dim = int(dataset_view.input_dim)
+        groups: dict[str, tuple[int, ...]] = {}
+        seen: set[int] = set()
+        for group in expected_groups:
+            values = tuple(
+                int(item)
+                for item in list(raw_groups.get(group, []) or [])
+            )
+            invalid = [idx for idx in values if idx < 0 or idx >= input_dim]
+            if invalid:
+                raise ValueError(f"structured_alpha_v2_pack_feature_group_index_out_of_range: {group} {invalid[:5]}")
+            duplicates = [idx for idx in values if idx in seen]
+            if duplicates:
+                raise ValueError(f"structured_alpha_v2_pack_feature_group_index_duplicate: {group} {duplicates[:5]}")
+            seen.update(values)
+            groups[group] = values
+        missing = [idx for idx in range(input_dim) if idx not in seen]
+        if missing:
+            raise ValueError(f"structured_alpha_v2_pack_feature_group_indices_incomplete: missing {missing[:5]}")
+        return groups, "manifest_structured_alpha_v2_pack"
+    return _structured_alpha_v2_feature_groups(dataset_view.feature_columns), "column_name_inference"
+
+
 def _model_config_for_training(
     *,
     family: str,
@@ -3514,7 +3552,7 @@ def _model_config_for_training(
         fields = tuple(str(item) for item in static_model_options.get("static_context_fields", ()) or ())
         if any(item == "symbol" for item in fields):
             raise ValueError("hybrid_structured_alpha_v2 model_config requires symbol-free static context; use exchange,industry.")
-        feature_groups = _structured_alpha_v2_feature_groups(dataset_view.feature_columns)
+        feature_groups, feature_group_source = _structured_alpha_v2_feature_groups_for_dataset(dataset_view)
         config.update(
             {
                 "fusion_version": "hybrid_structured_alpha_v2",
@@ -3538,6 +3576,7 @@ def _model_config_for_training(
                     group: [dataset_view.feature_columns[int(item)] for item in indices]
                     for group, indices in feature_groups.items()
                 },
+                "feature_group_source": feature_group_source,
                 "expert_families": [
                     "gru_continuity_on_group_mixed_sequence",
                     "recency_biased_multiscale_patch_transformer",
@@ -4035,7 +4074,7 @@ def train_forecast_models(
         train_date_stride=int(train_date_stride),
     )
     intraday_indices = _intraday_feature_indices(dataset_view.feature_columns)
-    structured_alpha_v2_feature_groups = _structured_alpha_v2_feature_groups(dataset_view.feature_columns)
+    structured_alpha_v2_feature_groups, structured_alpha_v2_feature_group_source = _structured_alpha_v2_feature_groups_for_dataset(dataset_view)
     if len(train_indices) < 2 or len(validation_indices) < 1:
         summary = {
             "status": "insufficient_or_incomplete",
@@ -4197,6 +4236,7 @@ def train_forecast_models(
                 "patch_sizes": [int(item) for item in patch_sizes],
                 "feature_profile": feature_profile,
                 "feature_count": int(dataset_view.input_dim),
+                "structured_alpha_v2_feature_group_source": str(structured_alpha_v2_feature_group_source),
                 "forecast_horizon": int(dataset_view.horizon),
                 "cumulative_horizons": [int(item) for item in dataset_view.cumulative_horizons],
                 "selection_profile": selection_profile,
@@ -5039,6 +5079,7 @@ def train_forecast_models(
             "patch_sizes": [int(item) for item in patch_sizes],
             "feature_profile": feature_profile,
             "feature_count": int(dataset_view.input_dim),
+            "structured_alpha_v2_feature_group_source": str(structured_alpha_v2_feature_group_source),
             "forecast_horizon": int(dataset_view.horizon),
             "cumulative_horizons": [int(item) for item in dataset_view.cumulative_horizons],
             "selection_profile": selection_profile,
