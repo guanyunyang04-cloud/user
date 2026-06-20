@@ -459,6 +459,40 @@ def test_protocol_accepts_structured_alpha_v2_family_without_symbol_static_conte
     assert args.forecast_loss_profile == "hybrid_alpha_score_v1"
 
 
+def test_protocol_accepts_structured_alpha_v2_with_hybrid_alpha_score_v2() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-walkforward-study",
+            "--tag",
+            "unit_structured_alpha_v2_loss_v2",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-dataset-mode",
+            "memmap",
+            "--forecast-model-families",
+            "hybrid_structured_alpha_v2",
+            "--forecast-include-static-context",
+            "--forecast-train-static-fields",
+            "exchange,industry",
+            "--forecast-output-profile",
+            "forecast_path_v1",
+            "--forecast-loss-profile",
+            "hybrid_alpha_score_v2",
+            "--forecast-selection-profile",
+            "validation_loss",
+        ]
+    )
+    _validate_protocol_args(parser, args)
+
+    assert args.forecast_model_families == "hybrid_structured_alpha_v2"
+    assert args.forecast_train_static_fields == "exchange,industry"
+    assert args.forecast_loss_profile == "hybrid_alpha_score_v2"
+
+
 def test_protocol_rejects_structured_alpha_v2_symbol_static_context() -> None:
     parser = build_arg_parser()
     args = parser.parse_args(

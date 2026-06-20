@@ -3809,7 +3809,7 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
             if str(getattr(args, "forecast_loss_profile", "default")) not in _FORECAST_PREDICTION_FIRST_LOSS_PROFILES:
                 parser.error(
                     "hybrid_structured_alpha_v2 is prediction-first; use a prediction loss such as "
-                    "hybrid_alpha_score_v1 or forecast_path_v1_baseline."
+                    "hybrid_alpha_score_v2, hybrid_alpha_score_v1, or forecast_path_v1_baseline."
                 )
         _apply_forecast_full_memmap_memory_guard(parser, args)
     if int(getattr(args, "rollout_chunk_days", 20)) <= 0:

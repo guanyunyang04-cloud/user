@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 134,
+  "record_count": 135,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -4491,6 +4491,46 @@
         "Run hybrid_structured_alpha_v2 + train_date_stride=3 + h192 + b128 + hybrid_alpha_score_v1 + exchange,industry controlled scout with validation/test full.",
         "Keep --no-forecast-per-epoch-prediction-metrics for speed; final best checkpoint still outputs validation/test predictions.",
         "Do not enter multi-seed, score-backtest bridge, candidate matrix, execution-candidate review, paper/live/broker, or active/default artifact changes from this preflight."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__f926a496f69c61f6b92b5faf",
+        "policy_pool_view__fc63d6b996abc7abde88bae7"
+      ]
+    },
+    {
+      "id": "path_policy_alpha_v2_hybrid_alpha_score_v2_contract_smoke_20260621",
+      "date": "2026-06-21",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_hybrid_alpha_score_v2_contract_smoke_20260621.md",
+      "tags": [
+        "path_policy",
+        "alpha_v2",
+        "loss_contract",
+        "hybrid_alpha_score_v2",
+        "smoke"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "qdp_alpha_v2_generalization_repair"
+      ],
+      "study_families": [
+        "hybrid_structured_alpha_v2",
+        "hybrid_alpha_score_v2"
+      ],
+      "run_tags": [
+        "qdp_alpha_v2_structured_alpha_v2_alpha_score_v2_contract_smoke_20260621_01"
+      ],
+      "verdict": "Status: code_contract_implemented / focused_tests_passed / real_pack_smoked / research_only / execution_frozen.; hybrid_alpha_score_v2 is prediction-first, forecast_path_v1-only, symbol-free, no execution cost/risk utility, no batch topK alignment.; Real-pack 32/32/32 CPU smoke completed and proves code/data compatibility only, not model quality.",
+      "blockers": [
+        "No h192 no-stride or stride scout was launched from this evidence.",
+        "No model-quality conclusion, multi-seed evidence, bridge, candidate matrix, or execution review is authorized."
+      ],
+      "next_allowed_actions": [
+        "When explicitly requested, run hybrid_structured_alpha_v2 + h192 + b128 + hybrid_alpha_score_v2 + exchange,industry controlled scout.",
+        "Choose train_date_stride=1 for full train-date semantics or train_date_stride=3 for diagnostic/runtime control; keep validation/test full.",
+        "Keep --no-forecast-per-epoch-prediction-metrics for speed; final best checkpoint still outputs validation/test predictions.",
+        "Do not enter multi-seed, score-backtest bridge, candidate matrix, execution-candidate review, paper/live/broker, or active/default artifact changes from this smoke."
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": [

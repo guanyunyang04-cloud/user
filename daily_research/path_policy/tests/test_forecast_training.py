@@ -734,6 +734,94 @@ def test_train_forecast_models_supports_no_symbol_hybrid_alpha_score_loss(tmp_pa
     assert checkpoint["model_config"]["static_context_fields"] == ["exchange", "industry"]
 
 
+def test_hybrid_alpha_score_v2_contract_is_prediction_first_and_unit_time_aware() -> None:
+    contract = forecast_loss_profile_contract("hybrid_alpha_score_v2", cumulative_horizons=(1, 3, 5, 10, 20))
+
+    assert contract["loss_profile"] == "hybrid_alpha_score_v2"
+    assert contract["required_output_profile"] == "forecast_path_v1"
+    assert contract["primary_objective"] == "hybrid_alpha_score"
+    assert contract["alpha_score_objective"]["direct_train_target"] == "market_fact_alpha_score_not_execution_policy"
+    assert contract["alpha_score_objective"]["execution_cost_in_loss"] is False
+    assert contract["alpha_score_objective"]["execution_risk_penalty_in_loss"] is False
+    assert contract["alpha_score_objective"]["batch_topk_alignment_in_loss"] is False
+    assert contract["alpha_score_objective"]["unit_time_efficiency_in_loss"] is True
+    assert contract["alpha_score_objective"]["rank_horizon_bias"] == "short_mid_horizon_unit_time_tilt"
+    assert contract["loss_component_weights"]["decision_utility"] == 0.0
+    assert contract["loss_component_weights"]["time_eff_topk_alignment"] == 0.0
+    rank_weights = contract["alpha_score_objective"]["rank_loss_horizon_weights"]
+    assert rank_weights["1"] == pytest.approx(rank_weights["5"])
+    assert rank_weights["20"] < rank_weights["1"]
+
+
+def test_train_forecast_models_supports_structured_alpha_v2_with_hybrid_alpha_score_v2(tmp_path) -> None:
+    dataset = make_tiny_forecast_sequence_dataset(
+        lookback_days=6,
+        horizon=20,
+        feature_count=10,
+        include_static_context=True,
+    )
+    feature_columns = [
+        "raw_close_from_prev_close_1d",
+        "cs_rank_ret_20d",
+        "market_breadth_20",
+        "industry_momentum_20d",
+        "valuation_peTTM_cs_z",
+        "history_valid_ratio_252d",
+        "intraday_first_5m_ret",
+        "cs_z_intraday_close_to_vwap",
+        "turn",
+        "amount",
+    ]
+    manifest = dict(dataset.manifest)
+    manifest["feature_columns"] = list(feature_columns)
+    manifest["normalization"] = dict(manifest["normalization"])
+    manifest["normalization"]["feature_columns"] = list(feature_columns)
+    dataset = replace(dataset, feature_columns=feature_columns, manifest=manifest, normalization_manifest=dict(manifest["normalization"]))
+
+    summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "study",
+        model_families=("hybrid_structured_alpha_v2",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=5,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=12,
+        dropout=0.0,
+        gru_layers=1,
+        transformer_layers=1,
+        transformer_heads=3,
+        patch_sizes=(2,),
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+        output_profile="forecast_path_v1",
+        loss_profile="hybrid_alpha_score_v2",
+        selection_profile="validation_loss",
+        static_context_fields_override=("exchange", "industry"),
+        per_epoch_prediction_metrics=False,
+    )
+
+    assert summary["status"] == "completed"
+    contract = summary["training_config"]["loss_profile_contract"]
+    assert contract["loss_profile"] == "hybrid_alpha_score_v2"
+    assert contract["alpha_score_objective"]["rank_horizon_bias"] == "short_mid_horizon_unit_time_tilt"
+    assert contract["loss_component_weights"]["decision_utility"] == 0.0
+    assert summary["training_config"]["static_context_training_fields"] == ["exchange", "industry"]
+
+    validation_predictions = pd.read_csv(tmp_path / "study" / "forecast_predictions_validation.csv")
+    assert "pred_cum_mu_5d" in validation_predictions.columns
+    assert "pred_decision_score" not in validation_predictions.columns
+
+    seed_summary = summary["models"]["hybrid_structured_alpha_v2"]["seed_summaries"]["7"]
+    checkpoint = torch.load(seed_summary["last_checkpoint_pt"], map_location="cpu", weights_only=False)
+    assert checkpoint["model_config"]["fusion_version"] == "hybrid_structured_alpha_v2"
+    assert checkpoint["model_config"]["output_profile"] == "forecast_path_v1"
+    assert checkpoint["resume_contract"]["loss_profile_contract"]["loss_profile"] == "hybrid_alpha_score_v2"
+    assert checkpoint["resume_contract"]["loss_profile_contract"]["alpha_score_objective"]["execution_cost_in_loss"] is False
+
+
 def test_train_forecast_models_records_multiscale_recency_hybrid_contract(tmp_path) -> None:
     dataset = make_tiny_forecast_sequence_dataset(
         lookback_days=6,
