@@ -15,7 +15,7 @@
 - 当前执行前置：如果 `git branch --show-current` 不是 `main`，任何会修改 repo-tracked 文件的任务都必须先纠偏到 `main`，或由用户显式撤销 `main-branch-only` 规则。
 - 分支异常属于 preflight blocker，不属于研究证据、promotion 证据或分脑状态结论。
 - 当前 worktree 审计：只有 `H:\quant_project` 一个物理 worktree；不默认创建或使用 git worktree。
-- 当前非 `main` 本地分支只剩 `codex/daily-research-execution`，它是未合入的旧 execution 修复归档分支；不得整分支合入或自动删除，只能在用户明确需要 execution 修复时逐项审计。
+- 当前本地分支只剩 `main`；旧 `codex/daily-research-execution` 已按用户明确授权删除。
 
 ## 当前分脑状态
 - `daily_research`：生产研究与执行主线；active 真源为 `daily_research/output/active_execution_strategy.json`；项目事实、rXX 证据、Path20 历史线 / multi_horizon_utility 当前主线 / continuous_policy / deep_alpha 当前结论以 `daily_research/brain/` 为准，主脑不展开 trial 指标、长 tag 或局部命令。
