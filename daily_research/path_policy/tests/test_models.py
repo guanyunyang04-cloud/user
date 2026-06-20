@@ -6,6 +6,7 @@ from daily_research.path_policy.models import (
     DLinearPath20Forecaster,
     ExpertFusionPath20Forecaster,
     GRUPath20Forecaster,
+    HybridStructuredAlphaV2Forecaster,
     HybridMultiScaleRecencyAwarePath20Forecaster,
     LinearPath20Forecaster,
     NeuralTargetWeightPolicy,
@@ -225,6 +226,70 @@ def test_multiscale_recency_aware_hybrid_uses_intraday_bottleneck_and_router_wei
     assert model.main_input_dim == 5
     assert torch.isfinite(prediction["router_weights"]).all()
     assert torch.allclose(weights.sum(dim=-1), torch.ones(4), atol=1.0e-6)
+
+
+def test_structured_alpha_v2_uses_group_tokens_context_conditioning_and_intraday_residual() -> None:
+    feature_groups = {
+        "daily_price_volume": (0, 1),
+        "cross_section": (2,),
+        "market_regime": (3,),
+        "industry_peer": (4,),
+        "valuation_liquidity": (5,),
+        "event_quality": (6,),
+        "intraday": (7, 8),
+    }
+    model = HybridStructuredAlphaV2Forecaster(
+        input_dim=9,
+        hidden_dim=12,
+        horizon=20,
+        dropout=0.0,
+        gru_layers=1,
+        transformer_layers=1,
+        transformer_heads=3,
+        patch_sizes=(2,),
+        feature_group_indices=feature_groups,
+        static_context_vocab_sizes={"exchange": 4, "industry": 6},
+        static_context_embedding_dims={"exchange": 2, "industry": 3},
+        static_context_fields=("exchange", "industry"),
+    )
+    x = torch.randn(4, 6, 9)
+    static_ids = torch.tensor([[1, 1], [2, 2], [1, 3], [0, 4]], dtype=torch.long)
+
+    prediction = model(x, static_context_ids=static_ids)
+    weights = model.expert_weights(x, static_context_ids=static_ids)
+
+    assert {"mu", "q10", "q50", "q90", "aux", "router_weights", "router_entropy"}.issubset(prediction)
+    assert prediction["mu"].shape == (4, 20)
+    assert prediction["aux"].shape == (4, path20_forecast_aux_dim(PATH20_DEFAULT_CUMULATIVE_HORIZONS))
+    assert weights.shape == (4, 4)
+    assert prediction["feature_group_weights"].shape == (4, 6)
+    assert model.feature_group_counts["intraday"] == 2
+    assert model.static_context_fields == ("exchange", "industry")
+    assert torch.isfinite(prediction["intraday_residual_norm"]).all()
+    assert torch.isfinite(prediction["context_gate_abs_mean"]).all()
+    assert torch.allclose(weights.sum(dim=-1), torch.ones(4), atol=1.0e-6)
+    assert torch.allclose(prediction["feature_group_weights"].sum(dim=-1), torch.ones(4), atol=1.0e-6)
+
+
+def test_structured_alpha_v2_rejects_symbol_static_context() -> None:
+    try:
+        HybridStructuredAlphaV2Forecaster(
+            input_dim=5,
+            hidden_dim=12,
+            horizon=20,
+            dropout=0.0,
+            gru_layers=1,
+            transformer_layers=1,
+            transformer_heads=3,
+            patch_sizes=(2,),
+            static_context_vocab_sizes={"symbol": 8, "exchange": 4, "industry": 6},
+            static_context_embedding_dims={"symbol": 4, "exchange": 2, "industry": 3},
+            static_context_fields=("symbol", "exchange", "industry"),
+        )
+    except ValueError as exc:
+        assert "symbol" in str(exc)
+    else:
+        raise AssertionError("hybrid_structured_alpha_v2 must reject symbol static context")
 
 
 def test_regime_routed_multi_expert_forecaster_emits_decision_contract_and_router_diagnostics() -> None:

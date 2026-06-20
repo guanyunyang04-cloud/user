@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 133,
+  "record_count": 134,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -4447,6 +4447,49 @@
         "Run hybrid_multiscale_recency_aware_v1 + train_date_stride=3 + hybrid_alpha_score_v1 + exchange,industry scout with validation/test full.",
         "Use batch_size=512 and dataloader_num_workers=0 on current RTX 2060 setup.",
         "Keep --no-forecast-per-epoch-prediction-metrics for training speed; final best checkpoint outputs validation/test predictions.",
+        "Do not enter multi-seed, score-backtest bridge, candidate matrix, execution-candidate review, paper/live/broker, or active/default artifact changes from this preflight."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__f926a496f69c61f6b92b5faf",
+        "policy_pool_view__fc63d6b996abc7abde88bae7"
+      ]
+    },
+    {
+      "id": "path_policy_alpha_v2_structured_alpha_v2_preflight_20260621",
+      "date": "2026-06-21",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_structured_alpha_v2_preflight_20260621.md",
+      "tags": [
+        "path_policy",
+        "alpha_v2",
+        "generalization",
+        "architecture",
+        "throughput",
+        "preflight"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "qdp_alpha_v2_generalization_repair"
+      ],
+      "study_families": [
+        "hybrid_structured_alpha_v2",
+        "hybrid_alpha_score_v1",
+        "throughput_preflight"
+      ],
+      "run_tags": [
+        "qdp_alpha_v2_structured_alpha_v2_contract_smoke_20260621_03",
+        "qdp_alpha_v2_structured_alpha_v2_throughput_h192_b128_1k_20260621_01",
+        "qdp_alpha_v2_structured_alpha_v2_throughput_h192_b256_1k_20260621_01"
+      ],
+      "verdict": "Status: preflight_completed / code_contract_validated / real_pack_smoked / throughput_profiled / research_only / execution_frozen.; hybrid_structured_alpha_v2 is the current complete architecture hot path, prediction-first, no symbol_id, forecast_path_v1 only.; Real-pack smoke completed and h192 throughput profiling recommends batch_size=128 on RTX 2060.",
+      "blockers": [
+        "No full model-quality run yet for hybrid_structured_alpha_v2.",
+        "h192 full no-stride runtime is high: b128 measured 126.764 samples/s, rough train-only full epoch about 13.25h."
+      ],
+      "next_allowed_actions": [
+        "Run hybrid_structured_alpha_v2 + train_date_stride=3 + h192 + b128 + hybrid_alpha_score_v1 + exchange,industry controlled scout with validation/test full.",
+        "Keep --no-forecast-per-epoch-prediction-metrics for speed; final best checkpoint still outputs validation/test predictions.",
         "Do not enter multi-seed, score-backtest bridge, candidate matrix, execution-candidate review, paper/live/broker, or active/default artifact changes from this preflight."
       ],
       "active_artifact_impact": "unchanged",

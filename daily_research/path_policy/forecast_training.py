@@ -27,6 +27,7 @@ from daily_research.path_policy.models import (
     DLinearPath20Forecaster,
     ExpertFusionPath20Forecaster,
     GRUPath20Forecaster,
+    HybridStructuredAlphaV2Forecaster,
     HybridMultiScaleRecencyAwarePath20Forecaster,
     LinearPath20Forecaster,
     PatchTransformerPath20Forecaster,
@@ -55,6 +56,7 @@ FORECAST_MODEL_FAMILIES = (
     "sector_slot_mixer_sequence",
     "hybrid_expert_fusion_static_context",
     "hybrid_multiscale_recency_aware_v1",
+    "hybrid_structured_alpha_v2",
     "regime_routed_multi_expert_horizon_v1",
 )
 FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES = (
@@ -117,6 +119,13 @@ _FORECAST_DECISION_LOSS_PROFILES = {
     "bad_month_aware_v1",
     "personal_alpha_scorer_hybrid_v1",
     "personal_time_efficient_topk_v1",
+}
+_FORECAST_PREDICTION_FIRST_LOSS_PROFILES = {
+    "default",
+    "rank_aux",
+    "multitask_v1",
+    "forecast_path_v1_baseline",
+    "hybrid_alpha_score_v1",
 }
 _FORECAST_LOSS_WEIGHT_PRESETS: dict[str, dict[str, float]] = {
     "default": {
@@ -840,6 +849,7 @@ def make_forecast_model(
     static_context_fields: tuple[str, ...] | list[str] | None = None,
     static_context_dropout: float = 0.20,
     intraday_feature_indices: tuple[int, ...] | list[int] | None = None,
+    feature_group_indices: dict[str, tuple[int, ...] | list[int]] | None = None,
     slot_count: int = 8,
     output_profile: str = "forecast_path_v1",
 ) -> nn.Module:
@@ -990,6 +1000,29 @@ def make_forecast_model(
             static_context_fields=static_context_fields,
             static_context_dropout=static_context_dropout,
             intraday_feature_indices=tuple(int(item) for item in (intraday_feature_indices or ()) if int(item) >= 0),
+            output_profile=output_profile,
+            cumulative_horizons=resolved_horizons,
+        )
+    if family == "hybrid_structured_alpha_v2":
+        static_fields = tuple(str(item) for item in (static_context_fields or ("exchange", "industry")) if str(item))
+        if any(item == "symbol" for item in static_fields):
+            raise ValueError("hybrid_structured_alpha_v2 requires symbol-free static context; use exchange,industry.")
+        if output_profile != "forecast_path_v1":
+            raise ValueError("hybrid_structured_alpha_v2 only supports forecast_path_v1 output_profile.")
+        return HybridStructuredAlphaV2Forecaster(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            horizon=horizon,
+            dropout=dropout,
+            gru_layers=gru_layers,
+            transformer_layers=transformer_layers,
+            transformer_heads=transformer_heads,
+            patch_sizes=tuple(int(item) for item in patch_sizes if int(item) > 0),
+            static_context_vocab_sizes=static_context_vocab_sizes,
+            static_context_embedding_dims=static_context_embedding_dims,
+            static_context_fields=static_fields,
+            static_context_dropout=static_context_dropout,
+            feature_group_indices=feature_group_indices,
             output_profile=output_profile,
             cumulative_horizons=resolved_horizons,
         )
@@ -3316,6 +3349,65 @@ def _intraday_feature_indices(feature_columns: list[str] | tuple[str, ...]) -> t
     )
 
 
+def _structured_alpha_v2_feature_groups(feature_columns: list[str] | tuple[str, ...]) -> dict[str, tuple[int, ...]]:
+    groups: dict[str, list[int]] = {
+        "daily_price_volume": [],
+        "cross_section": [],
+        "market_regime": [],
+        "industry_peer": [],
+        "valuation_liquidity": [],
+        "event_quality": [],
+        "intraday": [],
+    }
+
+    def _add(group: str, idx: int) -> None:
+        groups.setdefault(group, []).append(int(idx))
+
+    for idx, raw_column in enumerate(feature_columns):
+        column = str(raw_column)
+        lower = column.lower()
+        if lower.startswith(("intraday_", "cs_rank_intraday_", "cs_z_intraday_")):
+            _add("intraday", idx)
+        elif "limit_up_down_pressure" in lower:
+            _add("market_regime", idx)
+        elif (
+            lower.startswith(("adjust_", "index_", "history_valid_", "core_ohlcv_valid_"))
+            or lower in {"in_pool", "is_low_history_like"}
+            or "adjust_" in lower
+            or "suspend" in lower
+            or "st_flag" in lower
+            or "limit_up" in lower
+            or "limit_down" in lower
+        ):
+            _add("event_quality", idx)
+        elif (
+            lower.startswith(("valuation_", "turn_", "adv_"))
+            or lower in {"turn", "turnover", "amount", "volume", "liquidity"}
+            or "amount" in lower
+            or "volume" in lower
+            or "liquidity" in lower
+            or "peer_adv_bucket_id" in lower
+            or "peer_price_bucket_id" in lower
+            or "peer_vol20_bucket_id" in lower
+            or lower.startswith(("cs_rank_turn", "cs_z_turn", "industry_rank_turn", "industry_z_turn"))
+        ):
+            _add("valuation_liquidity", idx)
+        elif lower.startswith(("market_", "benchmark_", "cross_section_")) or "limit_up_down_pressure" in lower:
+            _add("market_regime", idx)
+        elif (
+            lower.startswith(("industry_", "peer_", "relative_to_peer_"))
+            or "_minus_industry" in lower
+            or "industry_rank_" in lower
+            or "industry_z_" in lower
+        ):
+            _add("industry_peer", idx)
+        elif lower.startswith(("cs_rank_", "cs_z_")):
+            _add("cross_section", idx)
+        else:
+            _add("daily_price_volume", idx)
+    return {key: tuple(value) for key, value in groups.items()}
+
+
 def _model_config_for_training(
     *,
     family: str,
@@ -3378,6 +3470,52 @@ def _model_config_for_training(
                 "intraday_feature_count": int(len(intraday_indices)),
                 "intraday_feature_columns": [dataset_view.feature_columns[int(item)] for item in intraday_indices],
                 "main_feature_count": int(len(dataset_view.feature_columns) - len(intraday_indices)),
+            }
+        )
+    if str(family) == "hybrid_structured_alpha_v2":
+        fields = tuple(str(item) for item in static_model_options.get("static_context_fields", ()) or ())
+        if any(item == "symbol" for item in fields):
+            raise ValueError("hybrid_structured_alpha_v2 model_config requires symbol-free static context; use exchange,industry.")
+        feature_groups = _structured_alpha_v2_feature_groups(dataset_view.feature_columns)
+        config.update(
+            {
+                "fusion_version": "hybrid_structured_alpha_v2",
+                "architecture_contract": {
+                    "prediction_first": True,
+                    "execution_utility_in_model": False,
+                    "intraday_role": "residual_short_horizon_correction",
+                    "context_role": "static_and_regime_film_conditioning",
+                    "symbol_static_context_allowed": False,
+                    "default_hidden_dim": 192,
+                },
+                "feature_group_indices": {
+                    group: [int(item) for item in indices]
+                    for group, indices in feature_groups.items()
+                },
+                "feature_group_counts": {
+                    group: int(len(indices))
+                    for group, indices in feature_groups.items()
+                },
+                "feature_group_columns": {
+                    group: [dataset_view.feature_columns[int(item)] for item in indices]
+                    for group, indices in feature_groups.items()
+                },
+                "expert_families": [
+                    "gru_continuity_on_group_mixed_sequence",
+                    "recency_biased_multiscale_patch_transformer",
+                    "multi_half_life_ewma_trend",
+                    "local_dilated_tcn",
+                ],
+                "fusion_layers": 2,
+                "group_mixer_layers": 1,
+                "router_temperature": 1.0,
+                "recency_half_lives": [3.0, 5.0, 10.0, 20.0, 60.0, 120.0],
+                "patch_recency_halflife": 6.0,
+                "intraday_recency_halflife": 3.0,
+                "intraday_residual_mask": "decays_by_horizon; strongest for daily/short cumulative outputs",
+                "required_static_context_fields": ["exchange", "industry"],
+                "recommended_loss_profiles": ["hybrid_alpha_score_v1", "forecast_path_v1_baseline"],
+                "promotion_allowed": False,
             }
         )
     if str(family) == "regime_routed_multi_expert_horizon_v1":
@@ -3859,6 +3997,7 @@ def train_forecast_models(
         train_date_stride=int(train_date_stride),
     )
     intraday_indices = _intraday_feature_indices(dataset_view.feature_columns)
+    structured_alpha_v2_feature_groups = _structured_alpha_v2_feature_groups(dataset_view.feature_columns)
     if len(train_indices) < 2 or len(validation_indices) < 1:
         summary = {
             "status": "insufficient_or_incomplete",
@@ -3928,6 +4067,7 @@ def train_forecast_models(
                 cumulative_horizons=dataset_view.cumulative_horizons,
                 output_profile=output_profile,
                 intraday_feature_indices=intraday_indices,
+                feature_group_indices=structured_alpha_v2_feature_groups,
                 **static_model_options,
             ).to(resolved_device)
             optimizer = torch.optim.AdamW(model.parameters(), lr=float(lr), weight_decay=float(weight_decay))
@@ -4766,6 +4906,7 @@ def train_forecast_models(
             cumulative_horizons=dataset_view.cumulative_horizons,
             output_profile=output_profile,
             intraday_feature_indices=intraday_indices,
+            feature_group_indices=structured_alpha_v2_feature_groups,
             **static_model_options,
         ).to(resolved_device)
         checkpoint = torch.load(selected_checkpoint_path, map_location=resolved_device, weights_only=False)

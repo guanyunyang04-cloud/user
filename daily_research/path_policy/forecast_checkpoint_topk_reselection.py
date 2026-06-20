@@ -15,6 +15,7 @@ from daily_research.path_policy.forecast_dataset import load_forecast_memmap_dat
 from daily_research.path_policy.forecast_training import (
     _ForecastDatasetView,
     _intraday_feature_indices,
+    _structured_alpha_v2_feature_groups,
     _prediction_frame_for_dataset_indices,
     _predict_indices,
     forecast_prediction_metrics,
@@ -163,6 +164,12 @@ def _model_from_checkpoint(checkpoint: dict[str, Any], dataset_view: _ForecastDa
             int(item)
             for item in list(model_config.get("intraday_feature_indices", []) or _intraday_feature_indices(dataset_view.feature_columns))
         ),
+        feature_group_indices={
+            str(group): tuple(int(item) for item in list(indices or []))
+            for group, indices in dict(
+                model_config.get("feature_group_indices", {}) or _structured_alpha_v2_feature_groups(dataset_view.feature_columns)
+            ).items()
+        },
         slot_count=int(model_config.get("slot_count", 8) or 8),
     )
     model.load_state_dict(checkpoint["state_dict"])

@@ -51,6 +51,7 @@ from daily_research.path_policy.forecast_training import (
     FORECAST_MODEL_FAMILIES,
     FORECAST_OUTPUT_PROFILES,
     FORECAST_SELECTION_PROFILES,
+    _FORECAST_PREDICTION_FIRST_LOSS_PROFILES,
     forecast_loss_profile_contract,
     train_forecast_models,
 )
@@ -3784,6 +3785,32 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
         invalid = sorted(set(families) - set(FORECAST_MODEL_FAMILIES))
         if invalid:
             parser.error(f"Unsupported --forecast-model-families: {', '.join(invalid)}.")
+        if "hybrid_structured_alpha_v2" in families:
+            train_fields = tuple(
+                str(item).strip()
+                for item in str(getattr(args, "forecast_train_static_fields", "") or "").split(",")
+                if str(item).strip()
+            )
+            if not train_fields:
+                parser.error(
+                    "hybrid_structured_alpha_v2 requires --forecast-train-static-fields exchange,industry "
+                    "to avoid symbol_id static context."
+                )
+            if "symbol" in train_fields:
+                parser.error("hybrid_structured_alpha_v2 does not allow symbol in --forecast-train-static-fields.")
+            missing_required = [field for field in ("exchange", "industry") if field not in train_fields]
+            if missing_required:
+                parser.error(
+                    "hybrid_structured_alpha_v2 requires exchange and industry static context fields; "
+                    f"missing: {', '.join(missing_required)}."
+                )
+            if str(getattr(args, "forecast_output_profile", "forecast_path_v1")) != "forecast_path_v1":
+                parser.error("hybrid_structured_alpha_v2 only supports --forecast-output-profile forecast_path_v1.")
+            if str(getattr(args, "forecast_loss_profile", "default")) not in _FORECAST_PREDICTION_FIRST_LOSS_PROFILES:
+                parser.error(
+                    "hybrid_structured_alpha_v2 is prediction-first; use a prediction loss such as "
+                    "hybrid_alpha_score_v1 or forecast_path_v1_baseline."
+                )
         _apply_forecast_full_memmap_memory_guard(parser, args)
     if int(getattr(args, "rollout_chunk_days", 20)) <= 0:
         parser.error("--rollout-chunk-days must be positive.")

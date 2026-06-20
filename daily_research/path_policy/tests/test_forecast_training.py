@@ -49,8 +49,10 @@ def test_forecast_model_families_emit_path20_sequence_contract() -> None:
         "sector_slot_mixer_sequence",
         "hybrid_expert_fusion_static_context",
         "hybrid_multiscale_recency_aware_v1",
+        "hybrid_structured_alpha_v2",
         "regime_routed_multi_expert_horizon_v1",
     ):
+        static_fields = ("exchange", "industry") if family == "hybrid_structured_alpha_v2" else None
         model = make_forecast_model(
             family,
             input_dim=5,
@@ -76,6 +78,7 @@ def test_forecast_model_families_emit_path20_sequence_contract() -> None:
                 "liquidity_bucket": 2,
                 "price_bucket": 2,
             },
+            static_context_fields=static_fields,
         )
         pred = (
             model(x, static_context_ids=static_ids)
@@ -83,14 +86,15 @@ def test_forecast_model_families_emit_path20_sequence_contract() -> None:
             or family
             in {
                 "hybrid_multiscale_recency_aware_v1",
+                "hybrid_structured_alpha_v2",
                 "regime_routed_multi_expert_horizon_v1",
             }
             else model(x)
         )
         expected = {"mu", "q10", "q50", "q90", "aux"}
-        if family in {"hybrid_multiscale_recency_aware_v1", "regime_routed_multi_expert_horizon_v1"}:
+        if family in {"hybrid_multiscale_recency_aware_v1", "hybrid_structured_alpha_v2", "regime_routed_multi_expert_horizon_v1"}:
             assert expected.issubset(pred)
-            expected_router_width = 4 if family == "hybrid_multiscale_recency_aware_v1" else 5
+            expected_router_width = 5 if family == "regime_routed_multi_expert_horizon_v1" else 4
             assert pred["router_weights"].shape == (4, expected_router_width)
             assert torch.isfinite(pred["router_entropy"]).all()
         else:
@@ -789,6 +793,84 @@ def test_train_forecast_models_records_multiscale_recency_hybrid_contract(tmp_pa
     assert model_config["main_feature_count"] == 5
     assert model_config["static_context_fields"] == ["exchange", "industry"]
     assert checkpoint["resume_contract"]["model_config"]["fusion_version"] == "hybrid_multiscale_recency_aware_v1"
+
+
+def test_train_forecast_models_records_structured_alpha_v2_contract(tmp_path) -> None:
+    dataset = make_tiny_forecast_sequence_dataset(
+        lookback_days=6,
+        horizon=20,
+        feature_count=10,
+        include_static_context=True,
+    )
+    feature_columns = [
+        "raw_close_from_prev_close_1d",
+        "cs_rank_ret_20d",
+        "market_breadth_20",
+        "industry_momentum_20d",
+        "valuation_peTTM_cs_z",
+        "history_valid_ratio_252d",
+        "intraday_first_5m_ret",
+        "cs_z_intraday_close_to_vwap",
+        "turn",
+        "amount",
+    ]
+    manifest = dict(dataset.manifest)
+    manifest["feature_columns"] = list(feature_columns)
+    manifest["normalization"] = dict(manifest["normalization"])
+    manifest["normalization"]["feature_columns"] = list(feature_columns)
+    dataset = replace(dataset, feature_columns=feature_columns, manifest=manifest, normalization_manifest=dict(manifest["normalization"]))
+
+    summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "study",
+        model_families=("hybrid_structured_alpha_v2",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=5,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=12,
+        dropout=0.0,
+        gru_layers=1,
+        transformer_layers=1,
+        transformer_heads=3,
+        patch_sizes=(2,),
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+        output_profile="forecast_path_v1",
+        loss_profile="hybrid_alpha_score_v1",
+        selection_profile="validation_loss",
+        static_context_fields_override=("exchange", "industry"),
+        per_epoch_prediction_metrics=False,
+    )
+
+    assert summary["status"] == "completed"
+    model_summary = summary["models"]["hybrid_structured_alpha_v2"]
+    seed_summary = model_summary["seed_summaries"]["7"]
+    checkpoint = torch.load(seed_summary["last_checkpoint_pt"], map_location="cpu", weights_only=False)
+    model_config = checkpoint["model_config"]
+    assert model_config["fusion_version"] == "hybrid_structured_alpha_v2"
+    assert model_config["architecture_contract"]["prediction_first"] is True
+    assert model_config["architecture_contract"]["execution_utility_in_model"] is False
+    assert model_config["architecture_contract"]["intraday_role"] == "residual_short_horizon_correction"
+    assert model_config["static_context_fields"] == ["exchange", "industry"]
+    assert "symbol" not in model_config["static_context_fields"]
+    assert model_config["feature_group_counts"]["intraday"] == 2
+    assert model_config["feature_group_counts"]["valuation_liquidity"] == 3
+    assert model_config["feature_group_counts"]["cross_section"] == 1
+    assert model_config["feature_group_indices"]["intraday"] == [6, 7]
+    assert checkpoint["resume_contract"]["model_config"]["fusion_version"] == "hybrid_structured_alpha_v2"
+
+    from daily_research.path_policy.forecast_checkpoint_topk_reselection import _model_from_checkpoint
+    from daily_research.path_policy.forecast_training import _ForecastDatasetView
+
+    reloaded = _model_from_checkpoint(
+        checkpoint,
+        _ForecastDatasetView(dataset, static_context_fields_override=("exchange", "industry")),
+    )
+    assert getattr(reloaded, "feature_group_counts")["intraday"] == 2
+    assert getattr(reloaded, "static_context_fields") == ("exchange", "industry")
 
 
 def test_train_forecast_models_applies_train_date_stride_without_thinning_validation_or_test(tmp_path) -> None:
