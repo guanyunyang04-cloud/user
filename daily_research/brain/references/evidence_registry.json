@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 132,
+  "record_count": 133,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -4379,7 +4379,7 @@
       "id": "path_policy_alpha_v2_train_date_stride_tooling_20260620",
       "date": "2026-06-20",
       "r_id": "",
-      "path": "brain/references/path_policy_alpha_v2_train_date_stride_tooling_20260620.md",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_train_date_stride_tooling_20260620.md",
       "tags": [
         "daily_research",
         "path_policy",
@@ -4404,6 +4404,56 @@
       ],
       "active_artifact_impact": "none",
       "dataset_ids": []
+    },
+    {
+      "id": "path_policy_alpha_v2_multiscale_recency_hybrid_preflight_20260620",
+      "date": "2026-06-20",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_multiscale_recency_hybrid_preflight_20260620.md",
+      "tags": [
+        "path_policy",
+        "alpha_v2",
+        "generalization",
+        "architecture",
+        "throughput",
+        "preflight"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "qdp_alpha_v2_generalization_repair"
+      ],
+      "study_families": [
+        "hybrid_multiscale_recency_aware_v1",
+        "hybrid_alpha_score_v1",
+        "throughput_preflight"
+      ],
+      "run_tags": [
+        "qdp_alpha_v2_multiscale_recency_hybrid_smoke_20260620_02",
+        "qdp_alpha_v2_multiscale_recency_hybrid_throughput_w0_20260620_01",
+        "qdp_alpha_v2_multiscale_recency_hybrid_throughput_w2_20260620_01",
+        "qdp_alpha_v2_multiscale_recency_hybrid_throughput_b256_w0_20260620_01",
+        "qdp_alpha_v2_multiscale_recency_hybrid_throughput_b768_w0_20260620_01",
+        "qdp_alpha_v2_multiscale_recency_hybrid_throughput_b1024_w0_20260620_01",
+        "qdp_alpha_v2_multiscale_recency_hybrid_throughput_32k_b512_w0_20260620_01",
+        "qdp_alpha_v2_multiscale_recency_hybrid_throughput_ewmaopt_b512_w0_20260620_01",
+        "qdp_alpha_v2_multiscale_recency_hybrid_throughput_ewmaopt_32k_b512_w0_20260620_01"
+      ],
+      "verdict": "Status: preflight_completed / code_contract_validated / throughput_profiled / research_only / execution_frozen.; hybrid_multiscale_recency_aware_v1 is ready for a controlled stride3 scout, not a model-quality conclusion.; Best measured runtime config is batch_size=512, dataloader_num_workers=0; EWMA batched matmul optimization improved 32k representative throughput from 541.199 to 585.634 samples/s.",
+      "blockers": [
+        "No full model-quality run yet for hybrid_multiscale_recency_aware_v1.",
+        "Estimated full train-only epoch is about 2.87h, so a stride3 scout is preferred before a blind 12-epoch full run."
+      ],
+      "next_allowed_actions": [
+        "Run hybrid_multiscale_recency_aware_v1 + train_date_stride=3 + hybrid_alpha_score_v1 + exchange,industry scout with validation/test full.",
+        "Use batch_size=512 and dataloader_num_workers=0 on current RTX 2060 setup.",
+        "Keep --no-forecast-per-epoch-prediction-metrics for training speed; final best checkpoint outputs validation/test predictions.",
+        "Do not enter multi-seed, score-backtest bridge, candidate matrix, execution-candidate review, paper/live/broker, or active/default artifact changes from this preflight."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__f926a496f69c61f6b92b5faf",
+        "policy_pool_view__fc63d6b996abc7abde88bae7"
+      ]
     }
   ]
 }

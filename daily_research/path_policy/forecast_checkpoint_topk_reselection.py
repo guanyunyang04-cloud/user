@@ -14,6 +14,7 @@ import torch
 from daily_research.path_policy.forecast_dataset import load_forecast_memmap_dataset
 from daily_research.path_policy.forecast_training import (
     _ForecastDatasetView,
+    _intraday_feature_indices,
     _prediction_frame_for_dataset_indices,
     _predict_indices,
     forecast_prediction_metrics,
@@ -158,6 +159,10 @@ def _model_from_checkpoint(checkpoint: dict[str, Any], dataset_view: _ForecastDa
         static_context_embedding_dims=dict(model_config.get("static_context_embedding_dims", {}) or {}),
         static_context_fields=tuple(str(item) for item in list(model_config.get("static_context_fields", []) or [])),
         static_context_dropout=float(model_config.get("static_context_dropout", 0.20) or 0.20),
+        intraday_feature_indices=tuple(
+            int(item)
+            for item in list(model_config.get("intraday_feature_indices", []) or _intraday_feature_indices(dataset_view.feature_columns))
+        ),
         slot_count=int(model_config.get("slot_count", 8) or 8),
     )
     model.load_state_dict(checkpoint["state_dict"])

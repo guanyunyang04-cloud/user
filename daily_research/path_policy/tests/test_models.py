@@ -6,6 +6,7 @@ from daily_research.path_policy.models import (
     DLinearPath20Forecaster,
     ExpertFusionPath20Forecaster,
     GRUPath20Forecaster,
+    HybridMultiScaleRecencyAwarePath20Forecaster,
     LinearPath20Forecaster,
     NeuralTargetWeightPolicy,
     PATH20_DECISION_AUX_DIM,
@@ -192,6 +193,37 @@ def test_expert_fusion_forecaster_emits_path20_contract_and_router_weights() -> 
     assert prediction["mu"].shape == (4, 20)
     assert weights.shape == (4, 3)
     assert torch.isfinite(weights).all()
+    assert torch.allclose(weights.sum(dim=-1), torch.ones(4), atol=1.0e-6)
+
+
+def test_multiscale_recency_aware_hybrid_uses_intraday_bottleneck_and_router_weights() -> None:
+    model = HybridMultiScaleRecencyAwarePath20Forecaster(
+        input_dim=8,
+        hidden_dim=12,
+        horizon=20,
+        dropout=0.0,
+        gru_layers=1,
+        transformer_layers=1,
+        transformer_heads=3,
+        patch_sizes=(2,),
+        intraday_feature_indices=(1, 3, 7),
+        static_context_vocab_sizes={"exchange": 4, "industry": 6},
+        static_context_embedding_dims={"exchange": 2, "industry": 3},
+        static_context_fields=("exchange", "industry"),
+    )
+    x = torch.randn(4, 6, 8)
+    static_ids = torch.tensor([[1, 1], [2, 2], [1, 3], [0, 4]], dtype=torch.long)
+
+    prediction = model(x, static_context_ids=static_ids)
+    weights = model.expert_weights(x, static_context_ids=static_ids)
+
+    assert set(prediction) == {"mu", "q10", "q50", "q90", "aux", "router_weights", "router_entropy"}
+    assert prediction["mu"].shape == (4, 20)
+    assert prediction["aux"].shape == (4, path20_forecast_aux_dim(PATH20_DEFAULT_CUMULATIVE_HORIZONS))
+    assert weights.shape == (4, 4)
+    assert model.intraday_input_dim == 3
+    assert model.main_input_dim == 5
+    assert torch.isfinite(prediction["router_weights"]).all()
     assert torch.allclose(weights.sum(dim=-1), torch.ones(4), atol=1.0e-6)
 
 

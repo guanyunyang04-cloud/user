@@ -391,6 +391,40 @@ def test_protocol_accepts_forecast_train_static_fields_override() -> None:
     assert args.forecast_static_fields == "symbol,exchange,industry,liquidity_bucket,price_bucket"
 
 
+def test_protocol_accepts_multiscale_recency_aware_hybrid_family() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-walkforward-study",
+            "--tag",
+            "unit_multiscale_recency_hybrid",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-dataset-mode",
+            "memmap",
+            "--forecast-model-families",
+            "hybrid_multiscale_recency_aware_v1",
+            "--forecast-include-static-context",
+            "--forecast-train-static-fields",
+            "exchange,industry",
+            "--forecast-output-profile",
+            "forecast_path_v1",
+            "--forecast-loss-profile",
+            "hybrid_alpha_score_v1",
+            "--forecast-selection-profile",
+            "validation_loss",
+        ]
+    )
+    _validate_protocol_args(parser, args)
+
+    assert args.forecast_model_families == "hybrid_multiscale_recency_aware_v1"
+    assert args.forecast_train_static_fields == "exchange,industry"
+    assert args.forecast_loss_profile == "hybrid_alpha_score_v1"
+
+
 def test_protocol_rejects_unknown_forecast_static_field() -> None:
     parser = build_arg_parser()
     args = parser.parse_args(

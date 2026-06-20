@@ -27,6 +27,7 @@ from daily_research.path_policy.models import (
     DLinearPath20Forecaster,
     ExpertFusionPath20Forecaster,
     GRUPath20Forecaster,
+    HybridMultiScaleRecencyAwarePath20Forecaster,
     LinearPath20Forecaster,
     PatchTransformerPath20Forecaster,
     Path20ForecasterMLP,
@@ -53,6 +54,7 @@ FORECAST_MODEL_FAMILIES = (
     "stock_mixer_sequence",
     "sector_slot_mixer_sequence",
     "hybrid_expert_fusion_static_context",
+    "hybrid_multiscale_recency_aware_v1",
     "regime_routed_multi_expert_horizon_v1",
 )
 FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES = (
@@ -837,6 +839,7 @@ def make_forecast_model(
     static_context_embedding_dims: dict[str, int] | None = None,
     static_context_fields: tuple[str, ...] | list[str] | None = None,
     static_context_dropout: float = 0.20,
+    intraday_feature_indices: tuple[int, ...] | list[int] | None = None,
     slot_count: int = 8,
     output_profile: str = "forecast_path_v1",
 ) -> nn.Module:
@@ -969,6 +972,24 @@ def make_forecast_model(
             static_context_embedding_dims=static_context_embedding_dims,
             static_context_fields=static_context_fields,
             static_context_dropout=static_context_dropout,
+            output_profile=output_profile,
+            cumulative_horizons=resolved_horizons,
+        )
+    if family == "hybrid_multiscale_recency_aware_v1":
+        return HybridMultiScaleRecencyAwarePath20Forecaster(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            horizon=horizon,
+            dropout=dropout,
+            gru_layers=gru_layers,
+            transformer_layers=transformer_layers,
+            transformer_heads=transformer_heads,
+            patch_sizes=tuple(int(item) for item in patch_sizes if int(item) > 0),
+            static_context_vocab_sizes=static_context_vocab_sizes,
+            static_context_embedding_dims=static_context_embedding_dims,
+            static_context_fields=static_context_fields,
+            static_context_dropout=static_context_dropout,
+            intraday_feature_indices=tuple(int(item) for item in (intraday_feature_indices or ()) if int(item) >= 0),
             output_profile=output_profile,
             cumulative_horizons=resolved_horizons,
         )
@@ -3286,6 +3307,15 @@ def _static_context_model_options(dataset_view: _ForecastDatasetView) -> dict[st
     }
 
 
+def _intraday_feature_indices(feature_columns: list[str] | tuple[str, ...]) -> tuple[int, ...]:
+    intraday_prefixes = ("intraday_", "cs_rank_intraday_", "cs_z_intraday_")
+    return tuple(
+        int(idx)
+        for idx, column in enumerate(feature_columns)
+        if str(column).startswith(intraday_prefixes)
+    )
+
+
 def _model_config_for_training(
     *,
     family: str,
@@ -3326,6 +3356,28 @@ def _model_config_for_training(
                 "router_temperature": 1.0,
                 "router_entropy_loss_weight": 0.0,
                 "expert_load_balance_loss_weight": 0.0,
+            }
+        )
+    if str(family) == "hybrid_multiscale_recency_aware_v1":
+        intraday_indices = _intraday_feature_indices(dataset_view.feature_columns)
+        config.update(
+            {
+                "fusion_version": "hybrid_multiscale_recency_aware_v1",
+                "expert_families": [
+                    "gru_main_daily_context",
+                    "patch_transformer_recency_bias",
+                    "multi_half_life_ewma_trend",
+                    "intraday_short_half_life_bottleneck",
+                ],
+                "router_temperature": 1.0,
+                "recency_half_lives": [5.0, 10.0, 20.0, 60.0, 120.0],
+                "patch_recency_halflife": 8.0,
+                "intraday_recency_halflife": 5.0,
+                "intraday_bottleneck_dim": 32,
+                "intraday_feature_indices": [int(item) for item in intraday_indices],
+                "intraday_feature_count": int(len(intraday_indices)),
+                "intraday_feature_columns": [dataset_view.feature_columns[int(item)] for item in intraday_indices],
+                "main_feature_count": int(len(dataset_view.feature_columns) - len(intraday_indices)),
             }
         )
     if str(family) == "regime_routed_multi_expert_horizon_v1":
@@ -3806,6 +3858,7 @@ def train_forecast_models(
         source_train_indices,
         train_date_stride=int(train_date_stride),
     )
+    intraday_indices = _intraday_feature_indices(dataset_view.feature_columns)
     if len(train_indices) < 2 or len(validation_indices) < 1:
         summary = {
             "status": "insufficient_or_incomplete",
@@ -3874,6 +3927,7 @@ def train_forecast_models(
                 patch_sizes=tuple(int(item) for item in patch_sizes),
                 cumulative_horizons=dataset_view.cumulative_horizons,
                 output_profile=output_profile,
+                intraday_feature_indices=intraday_indices,
                 **static_model_options,
             ).to(resolved_device)
             optimizer = torch.optim.AdamW(model.parameters(), lr=float(lr), weight_decay=float(weight_decay))
@@ -4711,6 +4765,7 @@ def train_forecast_models(
             patch_sizes=tuple(int(item) for item in patch_sizes),
             cumulative_horizons=dataset_view.cumulative_horizons,
             output_profile=output_profile,
+            intraday_feature_indices=intraday_indices,
             **static_model_options,
         ).to(resolved_device)
         checkpoint = torch.load(selected_checkpoint_path, map_location=resolved_device, weights_only=False)
