@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 129,
+  "record_count": 131,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -4323,6 +4323,51 @@
         "Treat no_symbol + hybrid_alpha_score_v1 as a worthwhile prediction-first direction, not as a promoted model.",
         "Diagnose external personal top-K selection/scorer mismatch before another long full run, especially validation-selected pred_aux_cum_20d top5 h1 versus test-only pred_aux_cum_5d top3 h20.",
         "Do not enter multi-seed, score-backtest bridge, candidate matrix, execution-candidate review, paper/live/broker, or active/default artifact changes from this run."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__f926a496f69c61f6b92b5faf",
+        "policy_pool_view__fc63d6b996abc7abde88bae7"
+      ]
+    },
+    {
+      "id": "path_policy_alpha_v2_generalization_repair_plan_20260620",
+      "date": "2026-06-20",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_generalization_repair_plan_20260620.md",
+      "tags": [
+        "path_policy",
+        "alpha_v2",
+        "generalization",
+        "plan"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "qdp_alpha_v2_generalization_repair"
+      ],
+      "study_families": [
+        "hybrid_alpha_score_v1",
+        "no_symbol_static_context",
+        "overlap_aware_sampling",
+        "intraday_feature_diagnostics",
+        "capacity_regularization"
+      ],
+      "run_tags": [
+        "qdp_alpha_v2_hybrid_alpha_score_no_symbol_h256_t4_b512_seed7_20260619_01",
+        "qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01"
+      ],
+      "verdict": "Status: plan_accepted / superseding_hot_path_plan / research_only / execution_frozen.; New hot path is alpha_v2 generalization repair. Evidence shows hybrid_alpha_score_v1 no-symbol test loss is best at epoch1 and then worsens while train loss keeps falling; full-train topK posterior does not transfer reliably. Next work should prioritize overlap-aware sampling, intraday feature diagnostics, capacity/regularization controls, and rolling validation with purge/embargo before any multi-seed, bridge, candidate matrix, or execution review.",
+      "blockers": [
+        "immediate_generalization_degradation_after_epoch1_or_epoch2",
+        "full_train_posterior_topk_does_not_transfer",
+        "high_overlap_252d_windows_and_intraday_feature_granularity_unresolved"
+      ],
+      "next_allowed_actions": [
+        "Implement train_date_stride=3/5 or equivalent overlap-aware training sampling with validation/test full unchanged.",
+        "Run no_intraday, coarse_intraday, and intraday_group_dropout diagnostics before considering raw 5-minute K-line modeling.",
+        "Run h192/h128 and stronger dropout/weight_decay controls under the no-symbol prediction-first contract.",
+        "Add rolling train-internal validation with at least 20 trading days purge/embargo before using train-domain selection rules.",
+        "Do not enter multi-seed, score-backtest bridge, candidate matrix, execution-candidate review, paper/live/broker, or active/default artifact changes from this plan."
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": [
