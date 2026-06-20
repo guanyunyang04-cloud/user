@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 131,
+  "record_count": 132,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -4374,6 +4374,36 @@
         "policy_input_bundle__f926a496f69c61f6b92b5faf",
         "policy_pool_view__fc63d6b996abc7abde88bae7"
       ]
+    },
+    {
+      "id": "path_policy_alpha_v2_train_date_stride_tooling_20260620",
+      "date": "2026-06-20",
+      "r_id": "",
+      "path": "brain/references/path_policy_alpha_v2_train_date_stride_tooling_20260620.md",
+      "tags": [
+        "daily_research",
+        "path_policy",
+        "alpha_v2",
+        "generalization",
+        "tooling"
+      ],
+      "workflow": "research_tooling",
+      "research_programs": [
+        "qdp_alpha_v2_generalization_repair"
+      ],
+      "study_families": [
+        "path_policy_alpha_v2_overlap_sampling"
+      ],
+      "run_tags": [],
+      "verdict": "Stage 1 overlap-aware sampling tooling completed: --forecast-train-date-stride filters train dates only, keeps validation/test full, records sampling_config in summaries/checkpoints/resume contract; no training run or model-quality conclusion.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Run no-symbol hybrid_alpha_score_v1 train_date_stride=3 full-pack scout with validation/test full.",
+        "If stride=3 improves generalization, run train_date_stride=5; otherwise move to intraday feature-group diagnostics and regularization grid.",
+        "Keep active/live/default/paper/broker artifacts frozen."
+      ],
+      "active_artifact_impact": "none",
+      "dataset_ids": []
     }
   ]
 }

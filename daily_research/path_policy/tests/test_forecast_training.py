@@ -718,6 +718,62 @@ def test_train_forecast_models_supports_no_symbol_hybrid_alpha_score_loss(tmp_pa
     assert checkpoint["model_config"]["static_context_fields"] == ["exchange", "industry"]
 
 
+def test_train_forecast_models_applies_train_date_stride_without_thinning_validation_or_test(tmp_path) -> None:
+    dataset = make_tiny_forecast_sequence_dataset(
+        lookback_days=5,
+        horizon=20,
+        train_days=6,
+        validation_days=2,
+        test_days=2,
+        include_static_context=True,
+    )
+
+    summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "study",
+        model_families=("linear_last_day",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=5,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=24,
+        dropout=0.0,
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+        output_profile="forecast_path_v1",
+        loss_profile="hybrid_alpha_score_v1",
+        selection_profile="validation_loss",
+        train_date_stride=3,
+        per_epoch_prediction_metrics=False,
+    )
+
+    assert summary["status"] == "completed"
+    assert summary["models"]["linear_last_day"]["train_rows"] == 8
+    assert summary["models"]["linear_last_day"]["source_train_rows"] == 24
+    assert summary["models"]["linear_last_day"]["validation_rows"] == 8
+    assert summary["models"]["linear_last_day"]["test_rows"] == 8
+
+    sampling = summary["training_config"]["sampling_config"]
+    assert sampling["enabled"] is True
+    assert sampling["mode"] == "train_date_stride"
+    assert sampling["train_date_stride"] == 3
+    assert sampling["source_train_dates"] == 6
+    assert sampling["kept_train_dates"] == 2
+    assert sampling["source_train_rows"] == 24
+    assert sampling["kept_train_rows"] == 8
+    assert sampling["validation_test_full"] is True
+
+    learning_curve = pd.read_csv(tmp_path / "study" / "forecast_learning_curve.csv")
+    assert learning_curve.loc[0, "train_sample_count"] == 8
+
+    seed_summary = summary["models"]["linear_last_day"]["seed_summaries"]["7"]
+    checkpoint = torch.load(seed_summary["last_checkpoint_pt"], map_location="cpu", weights_only=False)
+    assert checkpoint["training_config"]["sampling_config"] == sampling
+    assert checkpoint["resume_contract"]["sampling_config"] == sampling
+
+
 def test_train_forecast_models_can_defer_per_epoch_prediction_metrics(tmp_path) -> None:
     dataset = make_tiny_forecast_sequence_dataset(lookback_days=5, horizon=20)
 

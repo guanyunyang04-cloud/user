@@ -3,6 +3,7 @@
 ## 1. 默认接管入口
 - 当前工作区根目录：`H:\quant_project`。
 - 旧路径 `H:\new_tdx64\PYPlugins\user` 已退出本项目主链路，不得作为接管根目录。
+- 脑区管辖项目开工前必须先使用 `workspace-brain` skill；该 skill 只负责入口校准和硬边界，不把 route / capsule 升级为必经流程。
 - capsule / route / bootstrap 都是可选诊断工具，不是默认流程门禁：
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow route --task "<task>" --json`
@@ -13,6 +14,7 @@
 ## 2. Skills / Brain / Tools 调用顺序
 - 先理解用户目标；需要时读最相关的 brain / code / output，而不是为了流程完整读取所有中心。
 - 本机 skill、capsule、route、bootstrap、health、audit 都是工具，不是上级流程。个人研究者任务优先直接做、直接改、直接清理。
+- `workspace-brain` 是所有脑区管辖项目的开工入口；其它通用 skill 可以按任务触发，但不得绕过主脑 / 分脑硬边界。
 - 已禁用或降级为 explicit-only 的重流程 skill 不进入默认路径：`subagent-driven-development`、`requesting-code-review`、`finishing-a-development-branch`、`using-git-worktrees`、`verification-before-completion`、`test-driven-development`、`testing-strategies`。
 - 可默认使用的轻量 skill 只在任务真实匹配时触发：`workspace-brain`、`executing-plans`、`systematic-debugging`、`doc` / `technical-writing`、前端 / 部署 / 安全等领域 skill。
 - 分脑读取由 agent 判断：读哪里取决于目标和事实归属，不取决于 route 是否选中。
@@ -23,6 +25,7 @@
   - `git status --short --branch --untracked-files=all`
   - `git branch --show-current`
 - 如果当前分支不是 `main`，任何会修改 repo-tracked 文件的任务都必须先纠偏到 `main`，或由用户显式撤销 `main-branch-only` 规则。
+- 不默认创建、切换或继续使用额外 git worktree；发现额外 worktree 时先做归属和合入状态审计，已合入可清理，未合入需归档或人工审计。
 - 分支异常是 preflight blocker；不得写成研究证据、promotion 证据或分脑当前结论。
 - mutation 前按常识查看 dirty paths：本轮要改的文件要读清楚；明显无关的并行改动不回滚、不混提交；共享文件和数据/active artifact 先确认风险。
 - 如果 `external-project` 变更与 `target-scope` 或 `workspace-shared` 变更发生真实冲突，先停止扩大操作并说明冲突点，由用户决定是否扩展任务范围。

@@ -11,6 +11,7 @@ This workspace is a personal research brain, not a team process gate. The agent 
 - Keep only hard boundaries: canonical/unique data, PIT/no-leakage, live/default or active artifacts, secrets/external services, and cross-project dirty ownership.
 ## Default Work Style
 - Start from the user's goal, current files, git diff, and the smallest useful evidence.
+- For any brain-governed workspace project, load this skill before repo-tracked work. Use it to confirm target ownership, branch, dirty paths, and hard boundaries.
 - Read whichever brain, code, registry, manifest, output, or reference actually helps; no route result is required before reading a relevant project.
 - QDP owns the shared canonical data substrate: `canonical_data_v1`, registry, policy bundle, memmap, coverage audit, and data cleanup.
 - `daily_research` owns research, model, backtest, execution-candidate, and active artifact evidence; it consumes QDP data.
@@ -26,6 +27,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap
 `route` is a sensor, not the final thinker. If it conflicts with user intent, file evidence, or stable workspace memory, use agent judgment and say why.
 ## Hard Boundaries
 - Check branch and dirty paths before repo-tracked mutation when risk is nontrivial.
+- This workspace defaults to `main` only. Do not create, switch to, or continue on non-`main` branches or extra git worktrees unless the user explicitly authorizes that exception for the current task.
 - Never silently change active artifacts, live/default, paper/broker behavior, promotion gates, secrets, external service state, unique data, or PIT/no-leakage rules.
 - For QDP data rebuilds, registry pointer changes, memmap cleanup, or deletion of old data, first identify replacement pointers and enough sample validation.
 - For daily execution changes, inspect `daily_research/output/active_execution_strategy.json` and promotion boundaries before touching behavior.

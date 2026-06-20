@@ -109,6 +109,7 @@ def test_protocol_parser_accepts_forecast_walkforward_stage_with_neural_policy_d
     assert args.forecast_selection_profile == "multiscale"
     assert args.forecast_feature_profile == "raw_kline_context_v1"
     assert args.forecast_max_feature_columns == 192
+    assert args.forecast_train_date_stride == 1
     assert args.forecast_dataset_mode == "eager"
     assert args.forecast_min_lookback_valid_ratio == pytest.approx(0.80)
     assert args.forecast_dataloader_num_workers == 0
@@ -205,6 +206,8 @@ def test_protocol_parser_accepts_validation_loss_hybrid_alpha_score_forecast_con
             "validation_loss",
             "--forecast-train-static-fields",
             "exchange,industry",
+            "--forecast-train-date-stride",
+            "3",
         ]
     )
     _validate_protocol_args(parser, args)
@@ -213,6 +216,7 @@ def test_protocol_parser_accepts_validation_loss_hybrid_alpha_score_forecast_con
     assert args.forecast_loss_profile == "hybrid_alpha_score_v1"
     assert args.forecast_selection_profile == "validation_loss"
     assert args.forecast_train_static_fields == "exchange,industry"
+    assert args.forecast_train_date_stride == 3
 
 
 def test_protocol_parser_accepts_auxiliary_decision_loss_profiles_and_sets_decision_output() -> None:

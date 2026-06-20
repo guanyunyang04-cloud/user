@@ -874,6 +874,7 @@ def _run_forecast_walkforward_study(
             decision_hit_threshold_bps=float(args.forecast_decision_hit_threshold_bps),
             decision_drawdown_penalty=float(args.forecast_decision_drawdown_penalty),
             static_context_fields_override=str(getattr(args, "forecast_train_static_fields", "") or ""),
+            train_date_stride=int(getattr(args, "forecast_train_date_stride", 1)),
             ranking_baseline=str(args.forecast_ranking_baseline),
             slot_diagnostics=bool(args.forecast_slot_diagnostics),
         )
@@ -3585,6 +3586,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--forecast-max-feature-columns", type=int, default=DEFAULT_FORECAST_MAX_FEATURE_COLUMNS)
     parser.add_argument("--forecast-max-samples-per-role", type=int, default=0)
     parser.add_argument("--forecast-max-samples-per-date-per-role", type=int, default=0)
+    parser.add_argument(
+        "--forecast-train-date-stride",
+        type=int,
+        default=1,
+        help="Keep every Nth train trading date while leaving validation/test roles full; used for overlap-aware diagnostics.",
+    )
     parser.add_argument("--forecast-dataset-mode", default="eager", choices=("eager", "memmap"))
     parser.add_argument("--forecast-memmap-manifest", default="", help="Reuse an existing forecast memmap dataset manifest.")
     parser.add_argument(
@@ -3750,6 +3757,8 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
             parser.error("--forecast-max-samples-per-role must be >= 0.")
         if int(getattr(args, "forecast_max_samples_per_date_per_role", 0)) < 0:
             parser.error("--forecast-max-samples-per-date-per-role must be >= 0.")
+        if int(getattr(args, "forecast_train_date_stride", 1)) <= 0:
+            parser.error("--forecast-train-date-stride must be positive.")
         if int(getattr(args, "forecast_max_feature_columns", DEFAULT_FORECAST_MAX_FEATURE_COLUMNS)) <= 0:
             parser.error("--forecast-max-feature-columns must be positive.")
         if not (0.0 <= float(getattr(args, "forecast_min_lookback_valid_ratio", 0.80)) <= 1.0):

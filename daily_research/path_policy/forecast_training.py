@@ -658,6 +658,14 @@ class _ForecastDatasetView:
             return int(pd.to_datetime(self.dataset.sample_index.iloc[row_indices]["date"]).nunique())
         return int(pd.Series(pd.to_datetime(self.dataset.date[row_indices])).nunique())
 
+    def date_values_for_indices(self, indices: np.ndarray) -> np.ndarray:
+        row_indices = np.asarray(indices, dtype=np.int64).reshape(-1)
+        if row_indices.size == 0:
+            return np.asarray([], dtype=object)
+        if isinstance(self.dataset, FORECAST_MEMMAP_DATASET_TYPES):
+            return pd.to_datetime(self.dataset.sample_index.iloc[row_indices]["date"]).to_numpy(dtype=object)
+        return pd.to_datetime(self.dataset.date[row_indices]).to_numpy(dtype=object)
+
     def torch_dataset(self, indices: np.ndarray, *, target_scale: float) -> torch.utils.data.Dataset:
         if isinstance(self.dataset, FORECAST_MEMMAP_DATASET_TYPES):
             return self.dataset.torch_dataset(indices, target_scale=target_scale)
@@ -686,6 +694,56 @@ class _ForecastDatasetView:
             return static_context_ids
         indices = torch.as_tensor(self.static_context_field_indices, dtype=torch.long, device=static_context_ids.device)
         return static_context_ids.index_select(dim=-1, index=indices)
+
+
+def _apply_train_date_stride(
+    dataset_view: _ForecastDatasetView,
+    train_indices: np.ndarray,
+    *,
+    train_date_stride: int,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    row_indices = np.asarray(train_indices, dtype=np.int64).reshape(-1)
+    stride = int(train_date_stride)
+    if stride <= 0:
+        raise ValueError("train_date_stride must be positive.")
+    source_dates = pd.Series(pd.to_datetime(dataset_view.date_values_for_indices(row_indices))).dt.normalize()
+    unique_dates = sorted(pd.Timestamp(item) for item in source_dates.dropna().unique())
+    if stride <= 1 or not unique_dates:
+        summary = {
+            "enabled": False,
+            "mode": "all_train_dates",
+            "train_date_stride": int(stride),
+            "source_train_rows": int(row_indices.size),
+            "kept_train_rows": int(row_indices.size),
+            "dropped_train_rows": 0,
+            "source_train_dates": int(len(unique_dates)),
+            "kept_train_dates": int(len(unique_dates)),
+            "dropped_train_dates": 0,
+            "first_kept_train_date": pd.Timestamp(unique_dates[0]).strftime("%Y-%m-%d") if unique_dates else "",
+            "last_kept_train_date": pd.Timestamp(unique_dates[-1]).strftime("%Y-%m-%d") if unique_dates else "",
+            "validation_test_full": True,
+        }
+        return row_indices, summary
+
+    kept_dates = unique_dates[::stride]
+    kept_date_set = {pd.Timestamp(item) for item in kept_dates}
+    keep_mask = source_dates.map(lambda item: pd.Timestamp(item) in kept_date_set if pd.notna(item) else False).to_numpy(dtype=bool)
+    filtered = row_indices[keep_mask]
+    summary = {
+        "enabled": True,
+        "mode": "train_date_stride",
+        "train_date_stride": int(stride),
+        "source_train_rows": int(row_indices.size),
+        "kept_train_rows": int(filtered.size),
+        "dropped_train_rows": int(row_indices.size - filtered.size),
+        "source_train_dates": int(len(unique_dates)),
+        "kept_train_dates": int(len(kept_dates)),
+        "dropped_train_dates": int(len(unique_dates) - len(kept_dates)),
+        "first_kept_train_date": pd.Timestamp(kept_dates[0]).strftime("%Y-%m-%d") if kept_dates else "",
+        "last_kept_train_date": pd.Timestamp(kept_dates[-1]).strftime("%Y-%m-%d") if kept_dates else "",
+        "validation_test_full": True,
+    }
+    return filtered, summary
 
 
 class LinearLastDayPath20Forecaster(nn.Module):
@@ -1178,6 +1236,7 @@ def _forecast_resume_contract(
     decision_hit_threshold_bps: float = 20.0,
     decision_drawdown_penalty: float = 0.25,
     static_context_schema: dict[str, Any] | None = None,
+    sampling_config: dict[str, Any] | None = None,
     symbol_vocab_fingerprint: str = "",
     industry_vocab_fingerprint: str = "",
     board_vocab_fingerprint: str = "",
@@ -1206,6 +1265,7 @@ def _forecast_resume_contract(
         "decision_hit_threshold_bps": float(decision_hit_threshold_bps),
         "decision_drawdown_penalty": float(decision_drawdown_penalty),
         "static_context_schema": _json_ready(static_context_schema or {"enabled": False}),
+        "sampling_config": _json_ready(sampling_config or {}),
         "symbol_vocab_fingerprint": str(symbol_vocab_fingerprint or ""),
         "industry_vocab_fingerprint": str(industry_vocab_fingerprint or ""),
         "board_vocab_fingerprint": str(board_vocab_fingerprint or ""),
@@ -1298,6 +1358,7 @@ def _forecast_checkpoint_payload(
             decision_hit_threshold_bps=decision_hit_threshold_bps,
             decision_drawdown_penalty=decision_drawdown_penalty,
             static_context_schema=static_context_schema,
+            sampling_config=dict(training_config.get("sampling_config", {}) or {}),
             symbol_vocab_fingerprint=symbol_vocab_fingerprint,
             industry_vocab_fingerprint=industry_vocab_fingerprint,
             board_vocab_fingerprint=board_vocab_fingerprint,
@@ -1362,6 +1423,7 @@ def _validate_forecast_resume_checkpoint(
     decision_cost_bps: float = 20.0,
     decision_hit_threshold_bps: float = 20.0,
     decision_drawdown_penalty: float = 0.25,
+    sampling_config: dict[str, Any] | None = None,
 ) -> None:
     expected = _forecast_resume_contract(
         model_family=model_family,
@@ -1381,6 +1443,7 @@ def _validate_forecast_resume_checkpoint(
         decision_hit_threshold_bps=decision_hit_threshold_bps,
         decision_drawdown_penalty=decision_drawdown_penalty,
         static_context_schema=dataset_view.static_context_schema,
+        sampling_config=sampling_config,
         symbol_vocab_fingerprint=dataset_view.symbol_vocab_fingerprint,
         industry_vocab_fingerprint=dataset_view.industry_vocab_fingerprint,
         board_vocab_fingerprint=dataset_view.board_vocab_fingerprint,
@@ -1389,6 +1452,10 @@ def _validate_forecast_resume_checkpoint(
     if not actual:
         raise ValueError("forecast resume checkpoint is missing resume_contract.")
     for key, expected_value in expected.items():
+        if key == "sampling_config" and key not in actual and (
+            expected_value == {} or not bool(dict(expected_value or {}).get("enabled", False))
+        ):
+            continue
         if actual.get(key) != expected_value:
             raise ValueError(
                 f"forecast resume checkpoint {key} mismatch: "
@@ -3627,6 +3694,7 @@ def train_forecast_models(
     decision_hit_threshold_bps: float = 20.0,
     decision_drawdown_penalty: float = 0.25,
     static_context_fields_override: tuple[str, ...] | list[str] | str | None = None,
+    train_date_stride: int = 1,
     ranking_baseline: str = "none",
     slot_diagnostics: bool = False,
 ) -> dict[str, Any]:
@@ -3657,6 +3725,9 @@ def train_forecast_models(
         raise ValueError(f"{loss_profile} loss requires output_profile=decision_utility_v1.")
     if selection_profile == "decision_utility" and output_profile != "decision_utility_v1":
         raise ValueError("decision_utility selection requires output_profile=decision_utility_v1.")
+    train_date_stride = int(train_date_stride)
+    if train_date_stride <= 0:
+        raise ValueError("train_date_stride must be positive.")
     dataset_view = _ForecastDatasetView(dataset, static_context_fields_override=static_context_fields_override)
     decision_config = {
         "cost_bps": float(decision_cost_bps),
@@ -3727,16 +3798,23 @@ def train_forecast_models(
             axis=-1,
         )
         y_risk = torch.as_tensor(y_risk_np * float(target_scale), dtype=torch.float32)
-    train_indices = dataset_view.role_indices("train")
+    source_train_indices = dataset_view.role_indices("train")
     validation_indices = dataset_view.role_indices("validation")
     test_indices = dataset_view.role_indices("test")
+    train_indices, sampling_config = _apply_train_date_stride(
+        dataset_view,
+        source_train_indices,
+        train_date_stride=int(train_date_stride),
+    )
     if len(train_indices) < 2 or len(validation_indices) < 1:
         summary = {
             "status": "insufficient_or_incomplete",
             "reason": "insufficient_role_samples",
             "train_rows": int(len(train_indices)),
+            "source_train_rows": int(len(source_train_indices)),
             "validation_rows": int(len(validation_indices)),
             "test_rows": int(len(test_indices)),
+            "sampling_config": dict(sampling_config),
             "models": {},
             "family_summary": {},
             "dataset_mode": dataset_view.dataset_mode,
@@ -3898,6 +3976,7 @@ def train_forecast_models(
                 "ranking_baseline": str(ranking_baseline),
                 "slot_diagnostics": bool(slot_diagnostics),
                 "per_epoch_prediction_metrics": bool(per_epoch_prediction_metrics_enabled),
+                "sampling_config": dict(sampling_config),
                 "static_context_schema": dict(dataset_view.static_context_schema),
                 "static_context_source_schema": dict(dataset_view.source_static_context_schema),
                 "static_context_source_fields": [str(item) for item in dataset_view.static_context_source_fields],
@@ -3923,6 +4002,7 @@ def train_forecast_models(
                     decision_cost_bps=decision_cost_bps,
                     decision_hit_threshold_bps=decision_hit_threshold_bps,
                     decision_drawdown_penalty=decision_drawdown_penalty,
+                    sampling_config=dict(sampling_config),
                 )
                 model.load_state_dict(resume_payload["state_dict"])
                 optimizer.load_state_dict(resume_payload["optimizer_state_dict"])
@@ -4582,8 +4662,10 @@ def train_forecast_models(
             "slot_diagnostics": bool(slot_diagnostics),
             "per_epoch_prediction_metrics": bool(per_epoch_prediction_metrics_enabled),
             "train_rows": int(len(train_indices)),
+            "source_train_rows": int(len(source_train_indices)),
             "validation_rows": int(len(validation_indices)),
             "test_rows": int(len(test_indices)),
+            "sampling_config": dict(sampling_config),
             "static_context_schema": dict(dataset_view.static_context_schema),
             "symbol_vocab_fingerprint": str(dataset_view.symbol_vocab_fingerprint),
             "industry_vocab_fingerprint": str(dataset_view.industry_vocab_fingerprint),
@@ -4737,6 +4819,7 @@ def train_forecast_models(
             "save_last_checkpoint": bool(save_last_checkpoint),
             "checkpoint_every_n_epochs": int(checkpoint_interval),
             "resume_from_checkpoint_pt": str(Path(resume_from).resolve()) if resume_from is not None and str(resume_from).strip() else "",
+            "sampling_config": dict(sampling_config),
             "static_context_schema": dict(dataset_view.static_context_schema),
             "static_context_source_schema": dict(dataset_view.source_static_context_schema),
             "static_context_source_fields": [str(item) for item in dataset_view.static_context_source_fields],

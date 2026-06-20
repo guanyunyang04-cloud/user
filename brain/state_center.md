@@ -1,19 +1,21 @@
 # 主脑状态中枢
 
-快照日期：`2026-05-23`
+快照日期：`2026-06-20`
 
 ## 当前接管摘要
 - 当前工作区根目录固定为 `H:\quant_project`。
 - 旧通达信插件目录 `H:\new_tdx64\PYPlugins\user` 不再承载本项目；它应保持为空或只保留通达信原生用户插件文件。
 - 工作区正式生产研究与执行主线仍是 `daily_research`。
 - 已接入主脑的一级分脑固定为：`daily_research`、`quant_data_platform`、`t0_project`、`daily_stock_analysis-main`、`traditional_quant_research`。
-- 默认接管方式为：agent 先理解当前目标，再按需要读取主脑、分脑、代码或产物；不再把 route / capsule 当作必经流程。
+- 默认接管方式为：先使用 `workspace-brain` skill 校准脑区入口与硬边界，再由 agent 理解当前目标，并按需要读取主脑、分脑、代码或产物；不再把 route / capsule 当作必经流程。
 - 主脑只维护少数共享事实和硬边界；项目事实、实验指标、命令细节写入对应分脑。
 
 ## 当前分支纠偏规则
 - 期望分支：所有后续代码、文档与实验工作默认在 `main` 分支展开。
 - 当前执行前置：如果 `git branch --show-current` 不是 `main`，任何会修改 repo-tracked 文件的任务都必须先纠偏到 `main`，或由用户显式撤销 `main-branch-only` 规则。
 - 分支异常属于 preflight blocker，不属于研究证据、promotion 证据或分脑状态结论。
+- 当前 worktree 审计：只有 `H:\quant_project` 一个物理 worktree；不默认创建或使用 git worktree。
+- 当前非 `main` 本地分支只剩 `codex/daily-research-execution`，它是未合入的旧 execution 修复归档分支；不得整分支合入或自动删除，只能在用户明确需要 execution 修复时逐项审计。
 
 ## 当前分脑状态
 - `daily_research`：生产研究与执行主线；active 真源为 `daily_research/output/active_execution_strategy.json`；项目事实、rXX 证据、Path20 历史线 / multi_horizon_utility 当前主线 / continuous_policy / deep_alpha 当前结论以 `daily_research/brain/` 为准，主脑不展开 trial 指标、长 tag 或局部命令。

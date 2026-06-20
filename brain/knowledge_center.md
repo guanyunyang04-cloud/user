@@ -21,6 +21,12 @@
 - `main-branch-only`
   - 所有代码、文档与实验工作默认在 `main` 分支展开；不得自行创建、切换或继续使用非 `main` 分支
   - 实际分支不为 `main` 时，任何 repo-tracked mutation 都必须先纠偏到 `main`，或取得用户对本次任务使用分支 / worktree 例外的明确授权
+- `brain-skill-first`
+  - 脑区管辖下的项目开展工作前，必须先使用 `workspace-brain` skill 入口确认目标归属、分支、dirty paths 和硬边界
+  - `workspace-brain` 是入口 skill；route / capsule / bootstrap / health 是可选诊断工具，不替代入口
+- `worktree-explicit-only`
+  - 本个人项目不默认使用 git worktree；创建、切换或继续使用额外 worktree 必须有用户对本次任务的明确授权
+  - 发现非 `main` 分支或额外 worktree 时，先判断是否为已合入可清理、未合入需归档、或必须人工审计的例外，不得自动整分支 merge
 - `skills-home-rule`
   - 通用操作技能归本机 `C:/Users/ASUS/.codex/skills` 维护；brain 不复制 skill 正文，不把 TDD、调试、计划、验证、前端、安全或部署方法写成平行技能库。
 - `brain-cognitive-rule`
@@ -56,6 +62,7 @@
 - 等待窗口耗尽只表示观察窗口结束，不是失败证据；若可观察信号仍推进且没有明确代码错误、资源危险、停止指令或失败状态，继续自适应轮询；只有明确错误、退出状态、产物失败或用户停止才能写成 failed evidence。
 - 当前 `daily_research` 任务必须显式使用 `yolos` 环境；GPU 训练任务完成后必须核验 `training_diagnostics.json` 中 `device = cuda`、`cuda_available = true` 与 `python_executable` 指向 yolos
 - 如果本机 skill 要求建 worktree、写 spec、提交或执行默认流程，但项目脑区要求 `main`、不提交、不触碰 active artifact，则先服从项目脑区安全边界。
+- 如果用户任务属于任一已注册主脑或分脑项目，但 agent 未先使用 `workspace-brain` skill 就开始修改 repo-tracked 文件，这属于入口纪律缺失；应立即停下补读入口、核对分支和 dirty paths 后再继续。
 - 如果脑区和本机 skill 对“怎么做 TDD、调试、计划或验证”有重复描述，以本机 skill 为通用操作真源；脑区只记录本工作区和项目特例。
 - agent-mediated 自进化闭环：脑区不是思考主体；agent 负责观察、判断、提出学习机会和执行授权写回，brain 负责保存协议、证据、守卫和复用入口。遇到 timeout、入口失败、残留进程、验证误选或其他可复现异常时，先定位根因并区分“时间没给足 / 慢 / 卡 / 失败 / 入口问题”；若证据表明只是时间没给足，应移除或绕开该限制并持续轮询；凡可修问题必须形成“agent 记录经验 -> 工程修复 -> 防复发测试或验证调度 -> brain 持久化”的闭环，不能只写聊天复盘，也不能把 timeout 直接当失败结论。
 - 可执行问题优先工程化：脑区记录原则和项目特例，代码或工具负责消除可重复踩坑的入口、验证选择和守卫缺口；若只能操作手动命令，必须写明安全匹配边界，避免误伤其他任务。
