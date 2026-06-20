@@ -15,6 +15,7 @@ DEFAULT_HORIZONS = (1, 3, 5, 10, 20)
 DEFAULT_TOP_KS = (1, 3, 5, 10, 20)
 DEFAULT_SELECTION_TOP_KS = (1, 3, 5)
 DEFAULT_SELECTION_HORIZONS = (5, 10, 20)
+PERSONAL_SELECTION_PROFILES = ("personal_topk_v1", "personal_time_efficiency_v2")
 DEFAULT_SCORE_COLUMNS = (
     "pred_decision_score",
     "pred_cum_mu_1d",
@@ -381,25 +382,90 @@ def _personal_topk_score(row: pd.Series) -> float:
     return float(utility * 10000.0)
 
 
+def _personal_time_efficiency_score(row: pd.Series) -> float:
+    horizon = max(int(_finite_float(row.get("horizon"), 1.0)), 1)
+    net_per_day = _finite_float(row.get("net_mean")) / float(horizon)
+    excess_per_day = _finite_float(row.get("excess_vs_all_mean")) / float(horizon)
+    hit_lift = _finite_float(row.get("hit_rate_mean"), 0.5) - 0.5
+    month_lift = _finite_float(row.get("positive_month_rate"), 0.5) - 0.5
+    rank_lift = _finite_float(row.get("selected_future_rank_mean"), 0.5) - 0.5
+    sharpe = max(min(_finite_float(row.get("window_sharpe_like")), 3.0), -3.0)
+    worst_month_per_day = _finite_float(row.get("worst_month_mean")) / float(horizon)
+    net_p25_per_day = _finite_float(row.get("net_p25")) / float(horizon)
+    drawdown = _finite_float(row.get("selected_max_drawdown_mean"))
+    instability_penalty = (
+        0.50 * max(0.0, -worst_month_per_day)
+        + 0.25 * max(0.0, -net_p25_per_day)
+        + 0.05 * max(0.0, -drawdown - 0.05)
+    )
+    utility = (
+        net_per_day
+        + 0.50 * excess_per_day
+        + 0.010 * hit_lift
+        + 0.008 * month_lift
+        + 0.004 * rank_lift
+        + 0.0005 * sharpe
+        - instability_penalty
+    )
+    return float(utility * 10000.0)
+
+
+def _selection_score_for_profile(row: pd.Series, *, profile: str) -> float:
+    normalized = str(profile or "personal_topk_v1").strip()
+    if normalized == "personal_topk_v1":
+        return _personal_topk_score(row)
+    if normalized == "personal_time_efficiency_v2":
+        return _personal_time_efficiency_score(row)
+    raise ValueError(f"unsupported personal top-K selection profile: {profile}")
+
+
+def _selection_score_formula(profile: str) -> str:
+    normalized = str(profile or "personal_topk_v1").strip()
+    if normalized == "personal_topk_v1":
+        return (
+            "10000 * (net_mean + 0.50*excess_vs_all_mean + 0.020*(hit_rate_mean-0.5) "
+            "+ 0.015*(positive_month_rate-0.5) + 0.010*(selected_future_rank_mean-0.5) "
+            "+ 0.001*clip(window_sharpe_like,-3,3) - instability_penalty)"
+        )
+    if normalized == "personal_time_efficiency_v2":
+        return (
+            "10000 * (net_mean/horizon + 0.50*excess_vs_all_mean/horizon "
+            "+ 0.010*(hit_rate_mean-0.5) + 0.008*(positive_month_rate-0.5) "
+            "+ 0.004*(selected_future_rank_mean-0.5) + 0.0005*clip(window_sharpe_like,-3,3) "
+            "- per_day_instability_penalty)"
+        )
+    raise ValueError(f"unsupported personal top-K selection profile: {profile}")
+
+
 def _add_personal_selection_scores(
     summary: pd.DataFrame,
     *,
     selection_top_ks: tuple[int, ...],
     selection_horizons: tuple[int, ...],
     min_date_count: int,
+    selection_profile: str = "personal_topk_v1",
 ) -> pd.DataFrame:
     if summary.empty:
         return summary.copy()
+    if str(selection_profile) not in PERSONAL_SELECTION_PROFILES:
+        raise ValueError(f"selection_profile must be one of {PERSONAL_SELECTION_PROFILES}: {selection_profile}")
     out = summary.copy()
+    horizon_values = pd.to_numeric(out["horizon"], errors="coerce").replace(0, np.nan)
+    out["net_mean_per_day"] = pd.to_numeric(out["net_mean"], errors="coerce") / horizon_values
+    out["gross_mean_per_day"] = pd.to_numeric(out["gross_mean"], errors="coerce") / horizon_values
+    out["excess_vs_all_mean_per_day"] = pd.to_numeric(out["excess_vs_all_mean"], errors="coerce") / horizon_values
     eligible = (
         out["top_k"].astype(int).isin([int(item) for item in selection_top_ks])
         & out["horizon"].astype(int).isin([int(item) for item in selection_horizons])
         & (pd.to_numeric(out["date_count"], errors="coerce").fillna(0) >= int(min_date_count))
     )
     out["personal_selection_eligible"] = eligible.astype(bool)
-    out["personal_selection_score"] = out.apply(_personal_topk_score, axis=1)
+    out["personal_selection_score"] = out.apply(
+        lambda row: _selection_score_for_profile(row, profile=str(selection_profile)),
+        axis=1,
+    )
     out.loc[~out["personal_selection_eligible"], "personal_selection_score"] = np.nan
-    out["personal_selection_profile"] = "personal_topk_v1"
+    out["personal_selection_profile"] = str(selection_profile)
     return out
 
 
@@ -419,7 +485,9 @@ def _selection_leaderboard(summary: pd.DataFrame, *, limit: int = 20) -> list[di
         "date_count",
         "personal_selection_score",
         "net_mean",
+        "net_mean_per_day",
         "excess_vs_all_mean",
+        "excess_vs_all_mean_per_day",
         "hit_rate_mean",
         "positive_month_rate",
         "worst_month_mean",
@@ -446,6 +514,7 @@ def _build_personal_topk_report(
     selection_top_ks: tuple[int, ...],
     selection_horizons: tuple[int, ...],
     selection_min_date_count: int,
+    selection_profile: str,
     round_trip_cost_bps: float,
     leaderboard_limit: int,
 ) -> dict[str, Any]:
@@ -463,6 +532,7 @@ def _build_personal_topk_report(
         selection_top_ks=selection_top_ks,
         selection_horizons=selection_horizons,
         min_date_count=int(selection_min_date_count),
+        selection_profile=str(selection_profile),
     )
     daily_path = _write_frame(root / "personal_topk_daily.csv", daily)
     summary_path = _write_frame(root / "personal_topk_summary.csv", summary)
@@ -475,8 +545,11 @@ def _build_personal_topk_report(
         "output_root": str(root.resolve()),
         "contract": {
             "diagnostic_kind": "forward_selection_topk",
-            "selection_profile": "personal_topk_v1",
-            "selection_score_semantics": "validation-only personal small-capital top-K checkpoint and score-column selection score",
+            "selection_profile": str(selection_profile),
+            "selection_score_semantics": (
+                "personal small-capital top-K checkpoint/score-column selection score; "
+                "personal_time_efficiency_v2 prioritizes net/excess return per holding day"
+            ),
             "not_a_backtest": True,
             "return_semantics": "future cumulative excess return from prediction CSV labels",
             "cost_semantics": "net_forward_excess_return subtracts one approximate round-trip cost from each selected forward window",
@@ -484,11 +557,7 @@ def _build_personal_topk_report(
             "selection_top_ks": [int(item) for item in selection_top_ks],
             "selection_horizons": [int(item) for item in selection_horizons],
             "selection_min_date_count": int(selection_min_date_count),
-            "selection_score_formula": (
-                "10000 * (net_mean + 0.50*excess_vs_all_mean + 0.020*(hit_rate_mean-0.5) "
-                "+ 0.015*(positive_month_rate-0.5) + 0.010*(selected_future_rank_mean-0.5) "
-                "+ 0.001*clip(window_sharpe_like,-3,3) - instability_penalty)"
-            ),
+            "selection_score_formula": _selection_score_formula(str(selection_profile)),
         },
         "input": {
             "row_count": int(len(frame)),
@@ -528,6 +597,7 @@ def build_personal_topk_diagnostics_from_frame(
     selection_top_ks: str | Iterable[int] | None = None,
     selection_horizons: str | Iterable[int] | None = None,
     selection_min_date_count: int = 20,
+    selection_profile: str = "personal_topk_v1",
     round_trip_cost_bps: float = 20.0,
     leaderboard_limit: int = 20,
 ) -> dict[str, Any]:
@@ -554,6 +624,7 @@ def build_personal_topk_diagnostics_from_frame(
         selection_top_ks=resolved_selection_top_ks,
         selection_horizons=resolved_selection_horizons,
         selection_min_date_count=int(selection_min_date_count),
+        selection_profile=str(selection_profile),
         round_trip_cost_bps=float(round_trip_cost_bps),
         leaderboard_limit=int(leaderboard_limit),
     )
@@ -570,6 +641,7 @@ def build_personal_topk_diagnostics(
     selection_top_ks: str | Iterable[int] | None = None,
     selection_horizons: str | Iterable[int] | None = None,
     selection_min_date_count: int = 20,
+    selection_profile: str = "personal_topk_v1",
     round_trip_cost_bps: float = 20.0,
     leaderboard_limit: int = 20,
 ) -> dict[str, Any]:
@@ -596,6 +668,7 @@ def build_personal_topk_diagnostics(
         selection_top_ks=resolved_selection_top_ks,
         selection_horizons=resolved_selection_horizons,
         selection_min_date_count=int(selection_min_date_count),
+        selection_profile=str(selection_profile),
         round_trip_cost_bps=float(round_trip_cost_bps),
         leaderboard_limit=int(leaderboard_limit),
     )
@@ -704,6 +777,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--selection-top-ks", default="1,3,5")
     parser.add_argument("--selection-horizons", default="5,10,20")
     parser.add_argument("--selection-min-date-count", type=int, default=20)
+    parser.add_argument("--selection-profile", default="personal_topk_v1", choices=PERSONAL_SELECTION_PROFILES)
     parser.add_argument("--round-trip-cost-bps", type=float, default=20.0)
     parser.add_argument("--leaderboard-limit", type=int, default=20)
     parser.add_argument("--json", action="store_true")
@@ -723,6 +797,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         selection_top_ks=args.selection_top_ks,
         selection_horizons=args.selection_horizons,
         selection_min_date_count=int(args.selection_min_date_count),
+        selection_profile=args.selection_profile,
         round_trip_cost_bps=float(args.round_trip_cost_bps),
         leaderboard_limit=int(args.leaderboard_limit),
     )

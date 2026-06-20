@@ -105,3 +105,48 @@ def test_personal_topk_diagnostics_from_frame_uses_selection_filters(tmp_path: P
     top2 = summary[summary["top_k"] == 2].iloc[0]
     assert bool(top1["personal_selection_eligible"]) is False
     assert bool(top2["personal_selection_eligible"]) is True
+
+
+def test_personal_time_efficiency_v2_prefers_per_day_return(tmp_path: Path) -> None:
+    rows = []
+    for date in ("2025-01-02", "2025-01-03", "2025-01-06"):
+        rows.append(
+            {
+                "date": date,
+                "stock": "FAST",
+                "pred_fast": 1.0,
+                "future_cum_excess_return_3d": 0.030,
+                "future_rank_3d": 0.90,
+                "future_cum_excess_return_20d": 0.050,
+                "future_rank_20d": 0.90,
+            }
+        )
+        rows.append(
+            {
+                "date": date,
+                "stock": "SLOW",
+                "pred_fast": 0.5,
+                "future_cum_excess_return_3d": 0.000,
+                "future_rank_3d": 0.50,
+                "future_cum_excess_return_20d": 0.040,
+                "future_rank_20d": 0.80,
+            }
+        )
+    report = build_personal_topk_diagnostics_from_frame(
+        frame=pd.DataFrame(rows),
+        output_root=tmp_path / "diag_time_eff",
+        score_columns=("pred_fast",),
+        horizons=(3, 20),
+        top_ks=(1,),
+        selection_top_ks=(1,),
+        selection_horizons=(3, 20),
+        selection_min_date_count=2,
+        selection_profile="personal_time_efficiency_v2",
+        round_trip_cost_bps=0.0,
+    )
+
+    assert report["contract"]["selection_profile"] == "personal_time_efficiency_v2"
+    assert report["selected_candidate"]["horizon"] == 3
+    assert report["selected_candidate"]["net_mean_per_day"] == pytest.approx(0.010)
+    summary = pd.read_csv(report["outputs"]["summary_csv"])
+    assert "net_mean_per_day" in summary.columns

@@ -668,6 +668,56 @@ def test_train_forecast_models_can_override_static_context_fields_without_rebuil
     assert checkpoint["resume_contract"]["static_context_schema"]["fields"] == ["exchange", "industry"]
 
 
+def test_train_forecast_models_supports_no_symbol_hybrid_alpha_score_loss(tmp_path) -> None:
+    dataset = make_tiny_forecast_sequence_dataset(lookback_days=5, horizon=20, include_static_context=True)
+
+    summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "study",
+        model_families=("hybrid_expert_fusion_static_context",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=5,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=12,
+        dropout=0.0,
+        gru_layers=1,
+        transformer_layers=1,
+        transformer_heads=3,
+        patch_sizes=(2,),
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+        output_profile="forecast_path_v1",
+        loss_profile="hybrid_alpha_score_v1",
+        selection_profile="validation_loss",
+        static_context_fields_override=("exchange", "industry"),
+        per_epoch_prediction_metrics=False,
+    )
+
+    assert summary["status"] == "completed"
+    contract = summary["training_config"]["loss_profile_contract"]
+    assert contract["loss_profile"] == "hybrid_alpha_score_v1"
+    assert contract["required_output_profile"] == "forecast_path_v1"
+    assert contract["primary_objective"] == "hybrid_alpha_score"
+    assert contract["alpha_score_objective"]["execution_cost_in_loss"] is False
+    assert contract["alpha_score_objective"]["batch_topk_alignment_in_loss"] is False
+    assert contract["loss_component_weights"]["alpha_efficiency_rank_aux"] > 0.0
+    assert contract["loss_component_weights"]["decision_utility"] == 0.0
+    assert summary["training_config"]["static_context_training_fields"] == ["exchange", "industry"]
+
+    validation_predictions = pd.read_csv(tmp_path / "study" / "forecast_predictions_validation.csv")
+    assert "pred_cum_mu_20d" in validation_predictions.columns
+    assert "pred_decision_score" not in validation_predictions.columns
+
+    seed_summary = summary["models"]["hybrid_expert_fusion_static_context"]["seed_summaries"]["7"]
+    checkpoint = torch.load(seed_summary["last_checkpoint_pt"], map_location="cpu", weights_only=False)
+    assert checkpoint["model_config"]["output_profile"] == "forecast_path_v1"
+    assert checkpoint["resume_contract"]["loss_profile_contract"]["primary_objective"] == "hybrid_alpha_score"
+    assert checkpoint["model_config"]["static_context_fields"] == ["exchange", "industry"]
+
+
 def test_train_forecast_models_can_defer_per_epoch_prediction_metrics(tmp_path) -> None:
     dataset = make_tiny_forecast_sequence_dataset(lookback_days=5, horizon=20)
 

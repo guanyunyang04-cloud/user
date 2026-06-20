@@ -86,6 +86,7 @@ FORECAST_LOSS_PROFILES = (
     "bad_month_aware_v1",
     "personal_alpha_scorer_hybrid_v1",
     "personal_time_efficient_topk_v1",
+    "hybrid_alpha_score_v1",
 )
 FORECAST_RANKING_BASELINES = ("none", "lightgbm", "xgboost")
 FORECAST_RISK_AUX_NAMES = ("downside_floor", "worst_1d", "upside")
@@ -468,6 +469,25 @@ _FORECAST_LOSS_WEIGHT_PRESETS: dict[str, dict[str, float]] = {
         "score_to_weight_proxy": 0.0,
         "bad_month_aware": 0.0,
     },
+    "hybrid_alpha_score_v1": {
+        "path_daily": 0.70,
+        "quantile": 0.25,
+        "path_aux": 0.35,
+        "risk_aux": 0.08,
+        "rank_aux": 1.35,
+        "risk_rank_aux": 0.010,
+        "direction_aux": 0.020,
+        "downside_rank_aux": 0.020,
+        "alpha_efficiency_rank_aux": 0.35,
+        "decision_utility": 0.0,
+        "hit_aux": 0.0,
+        "horizon_classification": 0.0,
+        "decision_rank_aux": 0.0,
+        "horizon_entropy": 0.0,
+        "time_eff_topk_alignment": 0.0,
+        "score_to_weight_proxy": 0.0,
+        "bad_month_aware": 0.0,
+    },
 }
 
 _FORECAST_TARGET_NORMALIZED_LOSS_PROFILES = {
@@ -492,6 +512,7 @@ _HIGH_RETURN_PROXY_LOSS_PROFILES = {
     "personal_alpha_scorer_hybrid_v1",
 }
 _TIME_EFFICIENT_TOPK_LOSS_PROFILES = {"personal_time_efficient_topk_v1"}
+_HYBRID_ALPHA_SCORE_LOSS_PROFILES = {"hybrid_alpha_score_v1"}
 _TIME_EFFICIENT_WORST_DAY_PENALTY = 0.10
 
 
@@ -1053,6 +1074,49 @@ def forecast_loss_profile_contract(
                 "active_execution_strategy_expected_diff": "none",
             }
         )
+    if profile in _HYBRID_ALPHA_SCORE_LOSS_PROFILES:
+        auxiliary_objectives = [
+            key
+            for key, value in weights.items()
+            if float(value) > 0.0 and key not in {"path_daily", "quantile"}
+        ]
+        return _json_ready(
+            {
+                "schema_version": 1,
+                "status": "active",
+                "loss_profile": profile,
+                "profile_family": "hybrid_alpha_score_forecast",
+                "required_output_profile": "forecast_path_v1",
+                "primary_objective": "hybrid_alpha_score",
+                "auxiliary_objectives": auxiliary_objectives,
+                "loss_component_weights": weights,
+                "forecast_horizon": int(forecast_horizon),
+                "cumulative_horizons": [int(item) for item in horizons],
+                "target_normalization": "market_fact_prediction_with_per_day_alpha_rank_aux",
+                "alpha_score_objective": {
+                    "enabled": True,
+                    "method": "forecast_path_plus_multi_horizon_rank_plus_per_day_alpha_efficiency_rank",
+                    "model_role": "stable_alpha_score_generator",
+                    "execution_cost_in_loss": False,
+                    "execution_risk_penalty_in_loss": False,
+                    "batch_topk_alignment_in_loss": False,
+                    "preferred_static_context": "exchange,industry",
+                    "intended_external_scorer": "personal_topk_v1_or_successor_handles_cost_risk_horizon_and_trade_constraints",
+                },
+                "horizon_head_constraint": {
+                    "enabled": False,
+                    "max_30d_probability": _HORIZON_HEAD_CONSTRAINT_MAX_30D_PROBABILITY,
+                    "min_long_horizon_probability": _HORIZON_HEAD_CONSTRAINT_MIN_LONG_PROBABILITY,
+                    "long_horizons": list(_HORIZON_HEAD_CONSTRAINT_LONG_HORIZONS),
+                },
+                "decision_score_calibration": _decision_score_calibration_contract(profile),
+                "time_efficient_topk_objective": _time_efficient_topk_contract(profile),
+                "high_return_proxy_objective": _high_return_proxy_contract(profile),
+                "shadow_only": True,
+                "promotion_allowed": False,
+                "active_execution_strategy_expected_diff": "none",
+            }
+        )
     return _json_ready(
         {
             "schema_version": 1,
@@ -1486,6 +1550,16 @@ def _forecast_loss(
         score = prediction["mu"][:, : int(horizon)].sum(dim=1)
         target = y_cum_scaled[:, pos]
         loss = loss + weight * pairwise_rank_loss(score, target)
+    efficiency_rank_weight = float(weights.get("alpha_efficiency_rank_aux", 0.0) or 0.0)
+    if efficiency_rank_weight > 0.0:
+        for pos, horizon in enumerate(horizons):
+            weight = float(FORECAST_RANK_LOSS_WEIGHTS.get(int(horizon), 0.0)) * efficiency_rank_weight
+            if weight <= 0.0:
+                continue
+            horizon_scale = float(max(int(horizon), 1))
+            score = prediction["mu"][:, : int(horizon)].sum(dim=1) / horizon_scale
+            target = y_cum_scaled[:, pos] / horizon_scale
+            loss = loss + weight * pairwise_rank_loss(score, target)
     loss = loss + float(weights["risk_rank_aux"]) * pairwise_rank_loss(risk_pred[:, -1, 2], y_risk_scaled[:, -1, 2])
     if float(weights["direction_aux"]) > 0.0:
         direction_target = (y_cum_scaled[:, -1] > 0).to(dtype=prediction["aux"].dtype)

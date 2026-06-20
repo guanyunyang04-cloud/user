@@ -186,6 +186,7 @@ def build_checkpoint_topk_reselection(
     selection_top_ks: str | Iterable[int] | None = None,
     selection_horizons: str | Iterable[int] | None = None,
     selection_min_date_count: int = 20,
+    selection_profile: str = "personal_topk_v1",
     round_trip_cost_bps: float = 20.0,
     decision_cost_bps: float = 20.0,
     decision_hit_threshold_bps: float = 20.0,
@@ -209,9 +210,9 @@ def build_checkpoint_topk_reselection(
     resolved_device = _resolve_device(device)
     amp_enabled = bool(amp) and resolved_device.type == "cuda"
     dataset = load_forecast_memmap_dataset(manifest_json, max_samples_per_role=int(max_samples_per_role))
-    dataset_view = _ForecastDatasetView(dataset)
-    role_indices = dataset_view.role_indices(role)
-    if len(role_indices) == 0:
+    base_dataset_view = _ForecastDatasetView(dataset)
+    base_role_indices = base_dataset_view.role_indices(role)
+    if len(base_role_indices) == 0:
         raise ValueError(f"dataset has no samples for role={role!r}")
 
     resolved_horizons = _parse_csv_ints(horizons, default=DEFAULT_HORIZONS)
@@ -224,6 +225,17 @@ def build_checkpoint_topk_reselection(
     reports: list[dict[str, Any]] = []
     for checkpoint_path in checkpoint_paths:
         checkpoint = _load_checkpoint(checkpoint_path)
+        checkpoint_static_fields = tuple(
+            str(item)
+            for item in list(
+                dict(checkpoint.get("model_config", {}) or {}).get("static_context_fields", []) or []
+            )
+        )
+        dataset_view = _ForecastDatasetView(
+            dataset,
+            static_context_fields_override=checkpoint_static_fields or None,
+        )
+        role_indices = dataset_view.role_indices(role)
         model = _model_from_checkpoint(checkpoint, dataset_view).to(resolved_device)
         predictions = _predict_indices(
             model,
@@ -257,6 +269,7 @@ def build_checkpoint_topk_reselection(
             selection_top_ks=resolved_selection_top_ks,
             selection_horizons=resolved_selection_horizons,
             selection_min_date_count=int(selection_min_date_count),
+            selection_profile=str(selection_profile),
             round_trip_cost_bps=float(round_trip_cost_bps),
         )
         selected = dict(report.get("selected_candidate", {}) or {})
@@ -272,8 +285,10 @@ def build_checkpoint_topk_reselection(
             "selected_top_k": selected.get("top_k", 0),
             "selected_horizon": selected.get("horizon", 0),
             "selected_net_mean": selected.get("net_mean"),
+            "selected_net_mean_per_day": selected.get("net_mean_per_day"),
             "selected_hit_rate_mean": selected.get("hit_rate_mean"),
             "selected_positive_month_rate": selected.get("positive_month_rate"),
+            "selection_profile": selected.get("personal_selection_profile", str(selection_profile)),
             "rank_ic_20d": metrics.get("rank_ic_20d"),
             "top_bottom_spread_20d": metrics.get("top_bottom_spread_20d"),
             "rank_ic_upside_20d": metrics.get("rank_ic_upside_20d"),
@@ -303,7 +318,7 @@ def build_checkpoint_topk_reselection(
         "role": str(role),
         "checkpoint_count": int(len(checkpoint_paths)),
         "contract": {
-            "selection_profile": "personal_topk_v1",
+            "selection_profile": str(selection_profile),
             "not_a_backtest": True,
             "max_samples_per_role": int(max_samples_per_role),
             "selection_top_ks": [int(item) for item in resolved_selection_top_ks],
@@ -329,7 +344,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-root", default="")
     parser.add_argument("--checkpoint-globs", default="forecast_model_*_epoch*.pt")
     parser.add_argument("--checkpoints", default="")
-    parser.add_argument("--role", choices=("validation", "test"), default="validation")
+    parser.add_argument("--role", choices=("train", "validation", "test"), default="validation")
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     parser.add_argument("--amp", dest="amp", action="store_true", default=True)
@@ -341,6 +356,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--selection-top-ks", default="1,3,5")
     parser.add_argument("--selection-horizons", default="5,10,20")
     parser.add_argument("--selection-min-date-count", type=int, default=20)
+    parser.add_argument("--selection-profile", default="personal_topk_v1")
     parser.add_argument("--round-trip-cost-bps", type=float, default=20.0)
     parser.add_argument("--decision-cost-bps", type=float, default=20.0)
     parser.add_argument("--decision-hit-threshold-bps", type=float, default=20.0)
@@ -371,6 +387,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         selection_top_ks=args.selection_top_ks,
         selection_horizons=args.selection_horizons,
         selection_min_date_count=int(args.selection_min_date_count),
+        selection_profile=args.selection_profile,
         round_trip_cost_bps=float(args.round_trip_cost_bps),
         decision_cost_bps=float(args.decision_cost_bps),
         decision_hit_threshold_bps=float(args.decision_hit_threshold_bps),

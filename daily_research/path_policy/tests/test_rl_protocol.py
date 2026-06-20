@@ -187,6 +187,34 @@ def test_protocol_parser_accepts_validation_loss_time_efficient_forecast_contrac
     assert args.forecast_selection_profile == "validation_loss"
 
 
+def test_protocol_parser_accepts_validation_loss_hybrid_alpha_score_forecast_contract() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-walkforward-study",
+            "--tag",
+            "unit_hybrid_alpha_score",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-loss-profile",
+            "hybrid_alpha_score_v1",
+            "--forecast-selection-profile",
+            "validation_loss",
+            "--forecast-train-static-fields",
+            "exchange,industry",
+        ]
+    )
+    _validate_protocol_args(parser, args)
+
+    assert args.forecast_output_profile == "forecast_path_v1"
+    assert args.forecast_loss_profile == "hybrid_alpha_score_v1"
+    assert args.forecast_selection_profile == "validation_loss"
+    assert args.forecast_train_static_fields == "exchange,industry"
+
+
 def test_protocol_parser_accepts_auxiliary_decision_loss_profiles_and_sets_decision_output() -> None:
     parser = build_arg_parser()
     for profile in (
