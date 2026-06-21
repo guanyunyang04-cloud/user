@@ -10,6 +10,8 @@ import torch
 
 from daily_research.path_policy.forecast_training import (
     FORECAST_MODEL_FAMILIES,
+    _date_grouped_forecast_loss,
+    _forecast_finite_guard,
     forecast_evidence_verdict,
     forecast_loss_profile_contract,
     forecast_prediction_metrics,
@@ -18,7 +20,13 @@ from daily_research.path_policy.forecast_training import (
     run_forecast_ranking_baseline,
     train_forecast_models,
 )
+from daily_research.path_policy.forecast_dataset import (
+    build_qdp_date_slate_training_pack,
+    build_qdp_training_pack,
+    load_forecast_memmap_dataset,
+)
 from daily_research.path_policy.tests.fixtures import make_tiny_forecast_memmap_dataset, make_tiny_forecast_sequence_dataset
+from daily_research.path_policy.tests.test_forecast_memmap_dataset import _write_qdp_fixture_shard
 
 
 pytestmark = [pytest.mark.research, pytest.mark.slow]
@@ -178,6 +186,209 @@ def test_make_forecast_model_registers_regime_routed_multi_expert_horizon_v1() -
     assert pred["decision_aux"].shape == (2, path20_decision_aux_dim(horizons, horizon=30))
     assert pred["router_weights"].shape == (2, 5)
     assert torch.allclose(pred["router_weights"].sum(dim=-1), torch.ones(2), atol=1.0e-6)
+
+
+def test_make_forecast_model_registers_date_slate_alpha_fusion_v1() -> None:
+    assert "date_slate_alpha_fusion_v1" in FORECAST_MODEL_FAMILIES
+    model = make_forecast_model(
+        "date_slate_alpha_fusion_v1",
+        input_dim=9,
+        hidden_dim=12,
+        horizon=20,
+        dropout=0.0,
+        transformer_layers=1,
+        transformer_heads=3,
+        patch_sizes=(2,),
+        output_profile="forecast_incremental_path_v2",
+        static_context_vocab_sizes={"exchange": 4, "industry": 6},
+        static_context_embedding_dims={"exchange": 2, "industry": 3},
+        static_context_fields=("exchange", "industry"),
+        feature_group_indices={
+            "daily_price_volume": (0, 1),
+            "cross_section": (2,),
+            "market_regime": (3,),
+            "industry_peer": (4,),
+            "valuation_liquidity": (5,),
+            "event_quality": (6,),
+            "intraday": (7, 8),
+        },
+    )
+    pred = model(torch.randn(2, 6, 9), static_context_ids=torch.ones(2, 2, dtype=torch.long))
+
+    assert {"mu", "q10", "q50", "q90", "aux", "derived_cum_mu", "router_weights"}.issubset(pred)
+    assert pred["mu"].shape == (2, 20)
+    assert pred["router_weights"].shape == (2, 3)
+
+
+def test_date_grouped_alpha_score_contract_and_loss_respects_date_groups() -> None:
+    contract = forecast_loss_profile_contract("date_grouped_alpha_score_v1", cumulative_horizons=(1, 3), forecast_horizon=5)
+    assert contract["required_output_profile"] == "forecast_incremental_path_v2"
+    assert contract["alpha_score_objective"]["rank_loss_scope"] == "within_same_prediction_date_only"
+    prediction = {
+        "mu": torch.tensor(
+            [
+                [0.0, 0.0, 0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0, 0.0, 0.0],
+            ],
+            dtype=torch.float32,
+        ),
+        "q10": torch.zeros(4, 5),
+        "q50": torch.zeros(4, 5),
+        "q90": torch.zeros(4, 5),
+        "aux": torch.zeros(4, 8),
+    }
+    y_daily = torch.zeros(4, 5)
+    y_cum = torch.tensor([[0.0, 0.0], [1.0, 1.0], [10.0, 10.0], [11.0, 11.0]], dtype=torch.float32)
+    y_risk = torch.zeros(4, 2, 3)
+    same_date_loss = _date_grouped_forecast_loss(
+        prediction,
+        y_daily,
+        y_cum,
+        y_risk,
+        torch.tensor([0, 0, 1, 1], dtype=torch.long),
+        loss_profile="date_grouped_alpha_score_v1",
+        cumulative_horizons=(1, 3),
+        rank_min_group_size=2,
+        rank_max_pairs_per_date=16,
+    )
+    cross_mixed_loss = _date_grouped_forecast_loss(
+        prediction,
+        y_daily,
+        y_cum,
+        y_risk,
+        torch.tensor([0, 1, 0, 1], dtype=torch.long),
+        loss_profile="date_grouped_alpha_score_v1",
+        cumulative_horizons=(1, 3),
+        rank_min_group_size=2,
+        rank_max_pairs_per_date=16,
+    )
+    assert same_date_loss < cross_mixed_loss
+
+
+def test_forecast_finite_guard_writes_bad_batch_dump(tmp_path) -> None:
+    with pytest.raises(FloatingPointError, match="forecast_nonfinite_detected"):
+        _forecast_finite_guard(
+            enabled=True,
+            dump_dir=tmp_path,
+            reason_prefix="unit",
+            model_family="linear_last_day",
+            seed=7,
+            epoch=1,
+            step=2,
+            role="train",
+            row_ids=torch.tensor([10, 11]),
+            date_group_ids=torch.tensor([0, 0]),
+            tensors={"x": torch.tensor([[1.0, float("nan")]])},
+        )
+    dumps = sorted(tmp_path.glob("bad_batch_*.json"))
+    assert len(dumps) == 1
+    payload = json.loads(dumps[0].read_text(encoding="utf-8"))
+    assert payload["status"] == "nonfinite_detected"
+    assert payload["tensor_summaries"]["x"]["nonfinite_count"] == 1
+
+
+def test_train_forecast_models_date_slate_alpha_fusion_v1_end_to_end(tmp_path) -> None:
+    stocks = ("AAA.SZ", "BBB.SH")
+    feature_columns = ["daily_price_return_1d", "cs_rank_price_return_1d", "intraday_close_last"]
+    shards = [
+        _write_qdp_fixture_shard(tmp_path / "source", year=year, stocks=stocks, feature_columns=feature_columns)
+        for year in (2019, 2020, 2021)
+    ]
+    source_manifest = {
+        "artifact_type": "qdp_sharded_memmap",
+        "profile": "style_structural_alpha_v2",
+        "feature_profile": "style_structural_alpha_v2",
+        "canonical_dataset_id": "policy_input_bundle__unit",
+        "source_pool_view_id": "policy_pool_view__unit",
+        "source_pool_view_kind": "tradeable_mainboard",
+        "lookback_days": 3,
+        "horizon": 1,
+        "forecast_horizon": 1,
+        "execution_mode": "next_open",
+        "cumulative_horizons": [1],
+        "feature_columns": feature_columns,
+        "feature_count": len(feature_columns),
+        "label_schema_name": "path20_basic_v2",
+        "label_schema_version": 2,
+        "static_context_schema": {
+            "enabled": True,
+            "fields": ["symbol", "exchange", "industry"],
+            "id_columns": ["symbol_id", "exchange_id", "industry_id"],
+            "vocab_sizes": {"symbol": 3, "exchange": 3, "industry": 12},
+            "embedding_defaults": {"symbol": 4, "exchange": 2, "industry": 3, "dropout": 0.0},
+        },
+        "shards": shards,
+    }
+    source_manifest_path = tmp_path / "qdp_sharded_manifest.json"
+    source_manifest_path.write_text(json.dumps(source_manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    training_pack = build_qdp_training_pack(
+        source_manifest_path,
+        output_root=tmp_path / "training_pack",
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        feature_dtype="float32",
+        stock_chunk_size=1,
+        resume=False,
+    )
+    date_slate_pack = build_qdp_date_slate_training_pack(
+        training_pack["manifest_json"],
+        output_root=tmp_path / "date_slate_pack",
+        feature_dtype="float32",
+        stock_chunk_size=1,
+        resume=False,
+    )
+    dataset = load_forecast_memmap_dataset(date_slate_pack["manifest_json"])
+
+    summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "study",
+        model_families=("date_slate_alpha_fusion_v1",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=2,
+        batch_size=2,
+        lr=1.0e-3,
+        hidden_dim=12,
+        dropout=0.0,
+        transformer_layers=1,
+        transformer_heads=3,
+        patch_sizes=(2,),
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+        dataloader_num_workers=0,
+        selection_profile="validation_loss",
+        output_profile="forecast_incremental_path_v2",
+        loss_profile="date_grouped_alpha_score_v1",
+        static_context_fields_override=("exchange", "industry"),
+        date_slate_dates_per_batch=1,
+        date_slate_stocks_per_date=2,
+        rank_min_group_size=2,
+        rank_max_pairs_per_date=16,
+        finite_guard=True,
+        bad_batch_dump_dir=tmp_path / "bad_batches",
+        per_epoch_prediction_metrics=False,
+    )
+
+    assert summary["status"] == "completed"
+    family_summary = summary["models"]["date_slate_alpha_fusion_v1"]
+    assert family_summary["date_slate_batching_enabled"] is True
+    assert family_summary["effective_batch_size"] == 2
+    assert family_summary["output_profile"] == "forecast_incremental_path_v2"
+    assert family_summary["loss_profile"] == "date_grouped_alpha_score_v1"
+    assert family_summary["static_context_schema"]["fields"] == ["exchange", "industry"]
+    seed_summary = family_summary["seed_summaries"]["7"]
+    assert seed_summary["best_epoch"] == 1
+    checkpoint = torch.load(seed_summary["last_checkpoint_pt"], map_location="cpu", weights_only=False)
+    assert checkpoint["resume_contract"]["output_profile"] == "forecast_incremental_path_v2"
+    assert checkpoint["resume_contract"]["loss_profile"] == "date_grouped_alpha_score_v1"
+    assert checkpoint["training_config"]["date_slate_batching_enabled"] is True
+    assert checkpoint["training_config"]["rank_min_group_size"] == 2
+    assert not list((tmp_path / "bad_batches").glob("bad_batch_*.json"))
 
 
 def test_train_forecast_models_accepts_dlinear_sequence_checkpoint_and_predictions(tmp_path) -> None:

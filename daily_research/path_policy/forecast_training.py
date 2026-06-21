@@ -25,6 +25,7 @@ from daily_research.path_policy.forecast_dataset import (
 from daily_research.path_policy.labels import PATH20_CUMULATIVE_HORIZONS, PATH20_HORIZON
 from daily_research.path_policy.models import (
     DLinearPath20Forecaster,
+    DateSlateAlphaFusionV1Forecaster,
     ExpertFusionPath20Forecaster,
     GRUPath20Forecaster,
     HybridStructuredAlphaV2Forecaster,
@@ -57,15 +58,17 @@ FORECAST_MODEL_FAMILIES = (
     "hybrid_expert_fusion_static_context",
     "hybrid_multiscale_recency_aware_v1",
     "hybrid_structured_alpha_v2",
+    "date_slate_alpha_fusion_v1",
     "regime_routed_multi_expert_horizon_v1",
 )
 FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES = (
     "stock_mixer_sequence",
     "sector_slot_mixer_sequence",
+    "date_slate_alpha_fusion_v1",
     "regime_routed_multi_expert_horizon_v1",
 )
 FORECAST_MEMMAP_DATASET_TYPES = (ForecastMemmapDataset, ForecastShardedMemmapDataset, ForecastTrainingPackDataset)
-FORECAST_OUTPUT_PROFILES = ("forecast_path_v1", "decision_utility_v1")
+FORECAST_OUTPUT_PROFILES = ("forecast_path_v1", "decision_utility_v1", "forecast_incremental_path_v2")
 FORECAST_SELECTION_PROFILES = ("multiscale", "trend20", "short_burst", "decision_utility", "validation_loss")
 FORECAST_LOSS_PROFILES = (
     "default",
@@ -92,6 +95,7 @@ FORECAST_LOSS_PROFILES = (
     "personal_time_efficient_topk_v1",
     "hybrid_alpha_score_v1",
     "hybrid_alpha_score_v2",
+    "date_grouped_alpha_score_v1",
 )
 FORECAST_RANKING_BASELINES = ("none", "lightgbm", "xgboost")
 FORECAST_RISK_AUX_NAMES = ("downside_floor", "worst_1d", "upside")
@@ -128,6 +132,7 @@ _FORECAST_PREDICTION_FIRST_LOSS_PROFILES = {
     "forecast_path_v1_baseline",
     "hybrid_alpha_score_v1",
     "hybrid_alpha_score_v2",
+    "date_grouped_alpha_score_v1",
 }
 _FORECAST_LOSS_WEIGHT_PRESETS: dict[str, dict[str, float]] = {
     "default": {
@@ -520,6 +525,27 @@ _FORECAST_LOSS_WEIGHT_PRESETS: dict[str, dict[str, float]] = {
         "score_to_weight_proxy": 0.0,
         "bad_month_aware": 0.0,
     },
+    "date_grouped_alpha_score_v1": {
+        "path_daily": 0.60,
+        "quantile": 0.18,
+        "path_aux": 0.25,
+        "risk_aux": 0.06,
+        "rank_aux": 0.0,
+        "risk_rank_aux": 0.0,
+        "direction_aux": 0.0,
+        "downside_rank_aux": 0.010,
+        "upside_rank_aux": 0.006,
+        "date_grouped_rank": 1.20,
+        "unit_time_alpha_rank": 0.70,
+        "decision_utility": 0.0,
+        "hit_aux": 0.0,
+        "horizon_classification": 0.0,
+        "decision_rank_aux": 0.0,
+        "horizon_entropy": 0.0,
+        "time_eff_topk_alignment": 0.0,
+        "score_to_weight_proxy": 0.0,
+        "bad_month_aware": 0.0,
+    },
 }
 
 _FORECAST_TARGET_NORMALIZED_LOSS_PROFILES = {
@@ -544,9 +570,10 @@ _HIGH_RETURN_PROXY_LOSS_PROFILES = {
     "personal_alpha_scorer_hybrid_v1",
 }
 _TIME_EFFICIENT_TOPK_LOSS_PROFILES = {"personal_time_efficient_topk_v1"}
-_HYBRID_ALPHA_SCORE_LOSS_PROFILES = {"hybrid_alpha_score_v1", "hybrid_alpha_score_v2"}
+_HYBRID_ALPHA_SCORE_LOSS_PROFILES = {"hybrid_alpha_score_v1", "hybrid_alpha_score_v2", "date_grouped_alpha_score_v1"}
 _FORECAST_PROFILE_RANK_LOSS_WEIGHTS: dict[str, dict[int, float]] = {
     "hybrid_alpha_score_v2": {1: 0.0100, 3: 0.0100, 5: 0.0100, 10: 0.0075, 20: 0.0050},
+    "date_grouped_alpha_score_v1": {1: 0.0100, 3: 0.0100, 5: 0.0100, 10: 0.0075, 20: 0.0050},
 }
 _TIME_EFFICIENT_WORST_DAY_PENALTY = 0.10
 
@@ -715,6 +742,27 @@ class _ForecastDatasetView:
         if not isinstance(self.dataset, FORECAST_MEMMAP_DATASET_TYPES):
             raise ValueError("date-level forecast batches require a memmap dataset.")
         return self.dataset.date_batch_torch_dataset(indices, target_scale=target_scale)
+
+    def date_slate_torch_dataset(
+        self,
+        indices: np.ndarray,
+        *,
+        dates_per_batch: int,
+        stocks_per_date: int,
+        target_scale: float,
+        shuffle_stocks: bool,
+        seed: int,
+    ) -> torch.utils.data.Dataset:
+        if not isinstance(self.dataset, ForecastTrainingPackDataset):
+            raise ValueError("date-slate forecast batches require a QDP training pack dataset.")
+        return self.dataset.date_slate_torch_dataset(
+            indices,
+            dates_per_batch=dates_per_batch,
+            stocks_per_date=stocks_per_date,
+            target_scale=target_scale,
+            shuffle_stocks=shuffle_stocks,
+            seed=seed,
+        )
 
     @property
     def supports_static_context(self) -> bool:
@@ -1050,6 +1098,31 @@ def make_forecast_model(
             output_profile=output_profile,
             cumulative_horizons=resolved_horizons,
         )
+    if family == "date_slate_alpha_fusion_v1":
+        static_fields = tuple(str(item) for item in (static_context_fields or ("exchange", "industry")) if str(item))
+        if any(item == "symbol" for item in static_fields):
+            raise ValueError("date_slate_alpha_fusion_v1 requires symbol-free static context; use exchange,industry.")
+        missing_required = [field for field in ("exchange", "industry") if field not in static_fields]
+        if missing_required:
+            raise ValueError(f"date_slate_alpha_fusion_v1 requires exchange,industry static context; missing: {missing_required}")
+        if output_profile != "forecast_incremental_path_v2":
+            raise ValueError("date_slate_alpha_fusion_v1 only supports forecast_incremental_path_v2 output_profile.")
+        return DateSlateAlphaFusionV1Forecaster(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            horizon=horizon,
+            dropout=dropout,
+            transformer_layers=transformer_layers,
+            transformer_heads=transformer_heads,
+            patch_sizes=tuple(int(item) for item in patch_sizes if int(item) > 0),
+            static_context_vocab_sizes=static_context_vocab_sizes,
+            static_context_embedding_dims=static_context_embedding_dims,
+            static_context_fields=static_fields,
+            static_context_dropout=static_context_dropout,
+            feature_group_indices=feature_group_indices,
+            output_profile=output_profile,
+            cumulative_horizons=resolved_horizons,
+        )
     if family == "regime_routed_multi_expert_horizon_v1":
         return RegimeRoutedMultiExpertHorizonForecaster(
             input_dim=input_dim,
@@ -1221,6 +1294,39 @@ def forecast_loss_profile_contract(
             for key, value in weights.items()
             if float(value) > 0.0 and key not in {"path_daily", "quantile"}
         ]
+        if profile == "date_grouped_alpha_score_v1":
+            return _json_ready(
+                {
+                    "schema_version": 1,
+                    "status": "active",
+                    "loss_profile": profile,
+                    "profile_family": "date_grouped_alpha_score_forecast",
+                    "required_output_profile": "forecast_incremental_path_v2",
+                    "primary_objective": "same_date_prediction_first_alpha_score",
+                    "auxiliary_objectives": auxiliary_objectives,
+                    "loss_component_weights": weights,
+                    "forecast_horizon": int(forecast_horizon),
+                    "cumulative_horizons": [int(item) for item in horizons],
+                    "target_normalization": "market_fact_prediction_with_same_date_rank_and_unit_time_rank",
+                    "alpha_score_objective": {
+                        "enabled": True,
+                        "method": "daily_increment_path_plus_derived_cumulative_path_plus_same_date_rank",
+                        "model_role": "stable_alpha_score_generator",
+                        "execution_cost_in_loss": False,
+                        "execution_risk_penalty_in_loss": False,
+                        "batch_topk_alignment_in_loss": False,
+                        "rank_loss_scope": "within_same_prediction_date_only",
+                        "unit_time_efficiency_in_loss": True,
+                        "rank_loss_horizon_weights": _rank_loss_weights_for_profile(profile),
+                        "direct_train_target": "market_fact_alpha_score_not_execution_policy",
+                        "required_static_context": "exchange,industry",
+                        "symbol_static_context_allowed": False,
+                    },
+                    "shadow_only": True,
+                    "promotion_allowed": False,
+                    "active_execution_strategy_expected_diff": "none",
+                }
+            )
         return _json_ready(
             {
                 "schema_version": 1,
@@ -1668,6 +1774,176 @@ def _data_loader_kwargs(*, pin_memory: bool, dataloader_num_workers: int, prefet
     return kwargs
 
 
+def _tensor_finite_summary(value: torch.Tensor) -> dict[str, Any]:
+    tensor = value.detach()
+    finite = torch.isfinite(tensor)
+    finite_count = int(finite.sum().detach().cpu())
+    total = int(tensor.numel())
+    if finite_count > 0:
+        finite_values = tensor[finite].to(dtype=torch.float32)
+        min_value = float(finite_values.min().detach().cpu())
+        max_value = float(finite_values.max().detach().cpu())
+        absmax = float(finite_values.abs().max().detach().cpu())
+        mean_value = float(finite_values.mean().detach().cpu())
+    else:
+        min_value = max_value = absmax = mean_value = 0.0
+    return {
+        "shape": [int(item) for item in tensor.shape],
+        "dtype": str(tensor.dtype),
+        "finite_count": finite_count,
+        "total_count": total,
+        "nonfinite_count": int(total - finite_count),
+        "finite_ratio": float(finite_count / max(total, 1)),
+        "min": min_value,
+        "max": max_value,
+        "absmax": absmax,
+        "mean": mean_value,
+    }
+
+
+def _first_nonfinite_tensor(name: str, value: Any) -> tuple[str, torch.Tensor] | None:
+    if isinstance(value, torch.Tensor):
+        if not bool(torch.isfinite(value).all().detach().cpu()):
+            return name, value
+        return None
+    if isinstance(value, dict):
+        for key, item in value.items():
+            found = _first_nonfinite_tensor(f"{name}.{key}", item)
+            if found is not None:
+                return found
+    return None
+
+
+def _write_forecast_bad_batch_dump(
+    dump_dir: Path,
+    *,
+    reason: str,
+    model_family: str,
+    seed: int,
+    epoch: int,
+    step: int,
+    role: str,
+    row_ids: torch.Tensor | None,
+    date_group_ids: torch.Tensor | None,
+    tensors: dict[str, Any],
+    scaler: torch.amp.GradScaler | None = None,
+) -> Path:
+    dump_dir.mkdir(parents=True, exist_ok=True)
+    path = dump_dir / f"bad_batch_{model_family}_seed{int(seed)}_e{int(epoch)}_s{int(step)}_{str(reason).replace(' ', '_')}.json"
+    row_id_values: list[int] = []
+    if isinstance(row_ids, torch.Tensor):
+        row_id_values = [int(item) for item in row_ids.detach().reshape(-1).cpu().tolist()[:256] if int(item) >= 0]
+    date_group_values: list[int] = []
+    if isinstance(date_group_ids, torch.Tensor):
+        date_group_values = [int(item) for item in date_group_ids.detach().reshape(-1).cpu().tolist()[:256]]
+    tensor_summaries: dict[str, Any] = {}
+    for key, value in tensors.items():
+        if isinstance(value, torch.Tensor):
+            tensor_summaries[key] = _tensor_finite_summary(value)
+        elif isinstance(value, dict):
+            tensor_summaries[key] = {
+                str(child_key): _tensor_finite_summary(child_value)
+                for child_key, child_value in value.items()
+                if isinstance(child_value, torch.Tensor)
+            }
+    payload = {
+        "status": "nonfinite_detected",
+        "reason": str(reason),
+        "created_at": _now_iso_seconds(),
+        "model_family": str(model_family),
+        "seed": int(seed),
+        "epoch": int(epoch),
+        "step": int(step),
+        "role": str(role),
+        "row_ids_prefix": row_id_values,
+        "date_group_ids_prefix": date_group_values,
+        "tensor_summaries": tensor_summaries,
+        "amp_scale": float(scaler.get_scale()) if scaler is not None else None,
+    }
+    write_json(path, _json_ready(payload))
+    return path
+
+
+def _forecast_finite_guard(
+    *,
+    enabled: bool,
+    dump_dir: Path,
+    reason_prefix: str,
+    model_family: str,
+    seed: int,
+    epoch: int,
+    step: int,
+    role: str,
+    row_ids: torch.Tensor | None,
+    date_group_ids: torch.Tensor | None,
+    tensors: dict[str, Any],
+    scaler: torch.amp.GradScaler | None = None,
+) -> None:
+    if not bool(enabled):
+        return
+    for key, value in tensors.items():
+        found = _first_nonfinite_tensor(key, value)
+        if found is None:
+            continue
+        found_name, _ = found
+        dump_path = _write_forecast_bad_batch_dump(
+            dump_dir,
+            reason=f"{reason_prefix}_{found_name}",
+            model_family=model_family,
+            seed=int(seed),
+            epoch=int(epoch),
+            step=int(step),
+            role=role,
+            row_ids=row_ids,
+            date_group_ids=date_group_ids,
+            tensors=tensors,
+            scaler=scaler,
+        )
+        raise FloatingPointError(f"forecast_nonfinite_detected: {reason_prefix}.{found_name}; dump={dump_path}")
+
+
+def _forecast_grad_param_finite_guard(
+    *,
+    enabled: bool,
+    dump_dir: Path,
+    model: nn.Module,
+    model_family: str,
+    seed: int,
+    epoch: int,
+    step: int,
+    role: str,
+    row_ids: torch.Tensor | None,
+    date_group_ids: torch.Tensor | None,
+    scaler: torch.amp.GradScaler | None = None,
+    check_params: bool = False,
+) -> None:
+    if not bool(enabled):
+        return
+    tensors: dict[str, torch.Tensor] = {}
+    for name, param in model.named_parameters():
+        if param.grad is not None:
+            tensors[f"grad.{name}"] = param.grad
+        if bool(check_params):
+            tensors[f"param.{name}"] = param
+    for key, tensor in tensors.items():
+        if bool(torch.isfinite(tensor).all().detach().cpu()):
+            continue
+        dump_path = _write_forecast_bad_batch_dump(
+            dump_dir,
+            reason=f"nonfinite_{key}",
+            model_family=model_family,
+            seed=int(seed),
+            epoch=int(epoch),
+            step=int(step),
+            role=role,
+            row_ids=row_ids,
+            date_group_ids=date_group_ids,
+            tensors={key: tensor},
+            scaler=scaler,
+        )
+        raise FloatingPointError(f"forecast_nonfinite_detected: {key}; dump={dump_path}")
+
+
 def _forecast_loss(
     prediction: dict[str, torch.Tensor],
     y_daily_scaled: torch.Tensor,
@@ -1825,6 +2101,118 @@ def _forecast_loss(
                 target_scale=float(target_scale),
                 cumulative_horizons=horizons,
             )
+    router_entropy_weight = float(weights.get("router_entropy_floor", 0.0))
+    if router_entropy_weight > 0.0 and "router_entropy" in prediction and "router_weights" in prediction:
+        router_entropy = prediction["router_entropy"]
+        expert_count = int(prediction["router_weights"].shape[-1])
+        max_entropy = torch.log(torch.as_tensor(float(max(expert_count, 1)), device=router_entropy.device, dtype=router_entropy.dtype))
+        entropy_floor = max_entropy * 0.60
+        loss = loss + router_entropy_weight * torch.clamp(entropy_floor - router_entropy, min=0.0).square().mean()
+    diversity_weight = float(weights.get("expert_diversity", 0.0))
+    if diversity_weight > 0.0 and "expert_token_diversity" in prediction:
+        diversity = prediction["expert_token_diversity"]
+        loss = loss + diversity_weight * torch.clamp(0.05 - diversity, min=0.0).square().mean()
+    return loss
+
+
+def _date_grouped_rank_loss(
+    score: torch.Tensor,
+    target: torch.Tensor,
+    date_group_ids: torch.Tensor,
+    *,
+    min_group_size: int = 8,
+    max_pairs_per_date: int = 4096,
+) -> torch.Tensor:
+    if date_group_ids is None:
+        return score.new_tensor(0.0)
+    groups = torch.unique(date_group_ids.detach())
+    losses: list[torch.Tensor] = []
+    for group_id in groups.tolist():
+        mask = date_group_ids == int(group_id)
+        if int(mask.sum().detach().cpu()) < int(min_group_size):
+            continue
+        losses.append(pairwise_rank_loss(score[mask], target[mask], max_pairs=int(max_pairs_per_date)))
+    if not losses:
+        return score.new_tensor(0.0)
+    return torch.stack(losses).mean()
+
+
+def _date_grouped_forecast_loss(
+    prediction: dict[str, torch.Tensor],
+    y_daily_scaled: torch.Tensor,
+    y_cum_scaled: torch.Tensor,
+    y_risk_scaled: torch.Tensor,
+    date_group_ids: torch.Tensor,
+    *,
+    loss_profile: str,
+    target_scale: float = 100.0,
+    cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
+    rank_min_group_size: int = 8,
+    rank_max_pairs_per_date: int = 4096,
+) -> torch.Tensor:
+    del target_scale
+    profile = _normalize_forecast_loss_profile(loss_profile)
+    weights = dict(_FORECAST_LOSS_WEIGHT_PRESETS[profile])
+    horizons = normalize_path20_cumulative_horizons(cumulative_horizons, horizon=int(y_daily_scaled.shape[1]))
+    cum_count = len(horizons)
+    daily_weights = torch.ones((y_daily_scaled.shape[1],), device=y_daily_scaled.device, dtype=y_daily_scaled.dtype)
+    daily_weights[:3] = 1.15
+    daily_weights[3:5] = 1.05
+    daily_loss = F.huber_loss(prediction["mu"], y_daily_scaled, reduction="none")
+    loss = float(weights["path_daily"]) * (daily_loss * daily_weights.reshape(1, -1)).mean()
+    quantile_weight = float(weights["quantile"]) / 3.0
+    loss = loss + quantile_weight * pinball_loss(prediction["q10"], y_daily_scaled, 0.10)
+    loss = loss + quantile_weight * pinball_loss(prediction["q50"], y_daily_scaled, 0.50)
+    loss = loss + quantile_weight * pinball_loss(prediction["q90"], y_daily_scaled, 0.90)
+    loss = loss + float(weights["path_aux"]) * F.huber_loss(prediction["aux"][:, :cum_count], y_cum_scaled)
+    risk_pred = prediction["aux"][:, cum_count : cum_count + cum_count * 3].reshape(-1, cum_count, 3)
+    if y_risk_scaled.ndim == 2:
+        y_risk_scaled = y_risk_scaled.reshape(y_risk_scaled.shape[0], 1, y_risk_scaled.shape[1]).expand(-1, cum_count, -1)
+    loss = loss + float(weights["risk_aux"]) * F.huber_loss(risk_pred, y_risk_scaled)
+    rank_loss_weights = _rank_loss_weights_for_profile(profile)
+    rank_weight = float(weights.get("date_grouped_rank", 0.0) or 0.0)
+    efficiency_rank_weight = float(weights.get("unit_time_alpha_rank", 0.0) or 0.0)
+    for pos, horizon in enumerate(horizons):
+        horizon_weight = float(rank_loss_weights.get(int(horizon), 0.0))
+        if horizon_weight <= 0.0:
+            continue
+        score = prediction["mu"][:, : int(horizon)].sum(dim=1)
+        target = y_cum_scaled[:, pos]
+        if rank_weight > 0.0:
+            loss = loss + rank_weight * horizon_weight * _date_grouped_rank_loss(
+                score,
+                target,
+                date_group_ids,
+                min_group_size=int(rank_min_group_size),
+                max_pairs_per_date=int(rank_max_pairs_per_date),
+            )
+        if efficiency_rank_weight > 0.0:
+            horizon_scale = float(max(int(horizon), 1))
+            loss = loss + efficiency_rank_weight * horizon_weight * _date_grouped_rank_loss(
+                score / horizon_scale,
+                target / horizon_scale,
+                date_group_ids,
+                min_group_size=int(rank_min_group_size),
+                max_pairs_per_date=int(rank_max_pairs_per_date),
+            )
+    downside_weight = float(weights.get("downside_rank_aux", 0.0) or 0.0)
+    if downside_weight > 0.0:
+        loss = loss + downside_weight * _date_grouped_rank_loss(
+            -risk_pred[:, -1, 0],
+            -y_risk_scaled[:, -1, 0],
+            date_group_ids,
+            min_group_size=int(rank_min_group_size),
+            max_pairs_per_date=int(rank_max_pairs_per_date),
+        )
+    upside_weight = float(weights.get("upside_rank_aux", 0.0) or 0.0)
+    if upside_weight > 0.0:
+        loss = loss + upside_weight * _date_grouped_rank_loss(
+            risk_pred[:, -1, 2],
+            y_risk_scaled[:, -1, 2],
+            date_group_ids,
+            min_group_size=int(rank_min_group_size),
+            max_pairs_per_date=int(rank_max_pairs_per_date),
+        )
     router_entropy_weight = float(weights.get("router_entropy_floor", 0.0))
     if router_entropy_weight > 0.0 and "router_entropy" in prediction and "router_weights" in prediction:
         router_entropy = prediction["router_entropy"]
@@ -3595,6 +3983,51 @@ def _model_config_for_training(
                 "promotion_allowed": False,
             }
         )
+    if str(family) == "date_slate_alpha_fusion_v1":
+        fields = tuple(str(item) for item in static_model_options.get("static_context_fields", ()) or ())
+        if any(item == "symbol" for item in fields):
+            raise ValueError("date_slate_alpha_fusion_v1 model_config requires symbol-free static context; use exchange,industry.")
+        feature_groups, feature_group_source = _structured_alpha_v2_feature_groups_for_dataset(dataset_view)
+        config.update(
+            {
+                "fusion_version": "date_slate_alpha_fusion_v1",
+                "architecture_contract": {
+                    "prediction_first": True,
+                    "execution_utility_in_model": False,
+                    "date_slate_rank_semantics": True,
+                    "daily_increment_outputs": True,
+                    "cumulative_outputs_derived_from_daily_mu": True,
+                    "intraday_role": "context_gated_daily_increment_residual",
+                    "symbol_static_context_allowed": False,
+                    "default_hidden_dim": 128,
+                },
+                "feature_group_indices": {
+                    group: [int(item) for item in indices]
+                    for group, indices in feature_groups.items()
+                },
+                "feature_group_counts": {
+                    group: int(len(indices))
+                    for group, indices in feature_groups.items()
+                },
+                "feature_group_columns": {
+                    group: [dataset_view.feature_columns[int(item)] for item in indices]
+                    for group, indices in feature_groups.items()
+                },
+                "feature_group_source": feature_group_source,
+                "expert_families": [
+                    "local_dilated_tcn",
+                    "recency_biased_patch_transformer",
+                    "multi_half_life_ewma_trend",
+                ],
+                "fusion_layers": 2,
+                "group_mixer_layers": 1,
+                "router_use": "residual_gate_and_pooling_bias_not_pre_fusion_hard_suppression",
+                "required_static_context_fields": ["exchange", "industry"],
+                "required_output_profile": "forecast_incremental_path_v2",
+                "recommended_loss_profiles": ["date_grouped_alpha_score_v1"],
+                "promotion_allowed": False,
+            }
+        )
     if str(family) == "regime_routed_multi_expert_horizon_v1":
         config.update(
             {
@@ -3651,6 +4084,10 @@ def _evaluate_loss(
     decision_cost_bps: float = 20.0,
     decision_hit_threshold_bps: float = 20.0,
     decision_drawdown_penalty: float = 0.25,
+    date_slate_dates_per_batch: int = 1,
+    date_slate_stocks_per_date: int = 512,
+    rank_min_group_size: int = 8,
+    rank_max_pairs_per_date: int = 4096,
 ) -> float:
     if len(indices) == 0:
         return float("inf")
@@ -3659,6 +4096,60 @@ def _evaluate_loss(
     counts: list[int] = []
     with torch.no_grad():
         if isinstance(dataset_view_or_x, _ForecastDatasetView):
+            if (
+                _normalize_forecast_loss_profile(loss_profile) == "date_grouped_alpha_score_v1"
+                and isinstance(dataset_view_or_x.dataset, ForecastTrainingPackDataset)
+            ):
+                loader = DataLoader(
+                    dataset_view_or_x.date_slate_torch_dataset(
+                        indices,
+                        dates_per_batch=max(int(date_slate_dates_per_batch), 1),
+                        stocks_per_date=max(int(date_slate_stocks_per_date), 1),
+                        target_scale=target_scale,
+                        shuffle_stocks=False,
+                        seed=0,
+                    ),
+                    batch_size=None,
+                    shuffle=False,
+                    pin_memory=device.type == "cuda",
+                )
+                for raw_batch in loader:
+                    if len(raw_batch) == 7:
+                        batch_x_cpu, batch_y_daily_cpu, batch_y_cum_cpu, batch_y_risk_cpu, _, date_group_ids_cpu, static_context_ids_cpu = raw_batch
+                    elif len(raw_batch) == 6:
+                        batch_x_cpu, batch_y_daily_cpu, batch_y_cum_cpu, batch_y_risk_cpu, _, date_group_ids_cpu = raw_batch
+                        static_context_ids_cpu = None
+                    else:
+                        raise ValueError(f"date-slate eval batch must contain 6 or 7 tensors, got {len(raw_batch)}.")
+                    batch_x = batch_x_cpu.to(device, non_blocking=device.type == "cuda")
+                    batch_y_daily = batch_y_daily_cpu.to(device, non_blocking=device.type == "cuda")
+                    batch_y_cum = batch_y_cum_cpu.to(device, non_blocking=device.type == "cuda")
+                    batch_y_risk = batch_y_risk_cpu.to(device, non_blocking=device.type == "cuda")
+                    date_group_ids = date_group_ids_cpu.to(device, non_blocking=device.type == "cuda")
+                    static_context_ids = (
+                        static_context_ids_cpu.to(device, non_blocking=device.type == "cuda")
+                        if static_context_ids_cpu is not None
+                        else None
+                    )
+                    static_context_ids = dataset_view_or_x.filter_static_context_ids(static_context_ids)
+                    with _autocast_context(device, amp_enabled):
+                        pred = _forecast_model_forward(model, batch_x, static_context_ids)
+                        loss = _date_grouped_forecast_loss(
+                            pred,
+                            batch_y_daily,
+                            batch_y_cum,
+                            batch_y_risk,
+                            date_group_ids,
+                            loss_profile=loss_profile,
+                            target_scale=target_scale,
+                            cumulative_horizons=dataset_view_or_x.cumulative_horizons,
+                            rank_min_group_size=int(rank_min_group_size),
+                            rank_max_pairs_per_date=int(rank_max_pairs_per_date),
+                        )
+                    values.append(float(loss.detach().cpu()))
+                    counts.append(int(batch_x.shape[0]))
+                total = sum(counts)
+                return float(np.average(values, weights=counts)) if total > 0 else float("inf")
             if _forecast_model_accepts_stock_mask(model) and dataset_view_or_x.dataset_mode == "memmap":
                 loader = DataLoader(
                     dataset_view_or_x.date_batch_torch_dataset(indices, target_scale=target_scale),
@@ -3922,7 +4413,7 @@ def _select_family_seed(model_summaries: dict[str, dict[str, Any]], *, selection
 
 
 def train_forecast_models(
-    dataset: ForecastSequenceDataset,
+    dataset: ForecastSequenceDataset | ForecastMemmapDataset | ForecastShardedMemmapDataset | ForecastTrainingPackDataset,
     *,
     study_root: Path,
     model_families: tuple[str, ...] | list[str] = FORECAST_MODEL_FAMILIES,
@@ -3964,6 +4455,12 @@ def train_forecast_models(
     train_date_stride: int = 1,
     ranking_baseline: str = "none",
     slot_diagnostics: bool = False,
+    finite_guard: bool = False,
+    bad_batch_dump_dir: str | Path | None = None,
+    date_slate_dates_per_batch: int = 1,
+    date_slate_stocks_per_date: int = 512,
+    rank_min_group_size: int = 8,
+    rank_max_pairs_per_date: int = 4096,
 ) -> dict[str, Any]:
     study_root.mkdir(parents=True, exist_ok=True)
     resolved_device = _resolve_device(device)
@@ -3992,9 +4489,16 @@ def train_forecast_models(
         raise ValueError(f"{loss_profile} loss requires output_profile=decision_utility_v1.")
     if selection_profile == "decision_utility" and output_profile != "decision_utility_v1":
         raise ValueError("decision_utility selection requires output_profile=decision_utility_v1.")
+    if loss_profile == "date_grouped_alpha_score_v1" and output_profile != "forecast_incremental_path_v2":
+        raise ValueError("date_grouped_alpha_score_v1 requires output_profile=forecast_incremental_path_v2.")
     train_date_stride = int(train_date_stride)
     if train_date_stride <= 0:
         raise ValueError("train_date_stride must be positive.")
+    date_slate_dates_per_batch = max(int(date_slate_dates_per_batch), 1)
+    date_slate_stocks_per_date = max(int(date_slate_stocks_per_date), 1)
+    rank_min_group_size = max(int(rank_min_group_size), 2)
+    rank_max_pairs_per_date = max(int(rank_max_pairs_per_date), 1)
+    bad_batch_dump_root = Path(bad_batch_dump_dir) if bad_batch_dump_dir is not None and str(bad_batch_dump_dir).strip() else study_root / "bad_batches"
     dataset_view = _ForecastDatasetView(dataset, static_context_fields_override=static_context_fields_override)
     decision_config = {
         "cost_bps": float(decision_cost_bps),
@@ -4154,15 +4658,36 @@ def train_forecast_models(
             cross_sectional_batching = bool(
                 family in FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES and dataset_view.dataset_mode == "memmap"
             )
+            date_slate_batching = bool(family == "date_slate_alpha_fusion_v1")
+            if date_slate_batching:
+                if not isinstance(dataset_view.dataset, ForecastTrainingPackDataset):
+                    raise ValueError("date_slate_alpha_fusion_v1 requires a QDP date-slate/training pack dataset.")
+                if not dataset_view.dataset.has_date_major_feature_panel:
+                    raise ValueError("date_slate_alpha_fusion_v1 requires a date-major feature panel; build qdp_date_slate_training_pack_v1 first.")
             cache_friendly_train_order = bool(
                 isinstance(dataset_view.dataset, (ForecastShardedMemmapDataset, ForecastTrainingPackDataset)) and not cross_sectional_batching
             )
             train_loader_indices = (
                 dataset_view.dataset.cache_friendly_indices(train_indices)
-                if cache_friendly_train_order
+                if cache_friendly_train_order and not date_slate_batching
                 else train_indices
             )
-            if cache_friendly_train_order:
+            if date_slate_batching:
+                train_loader = DataLoader(
+                    dataset_view.date_slate_torch_dataset(
+                        train_loader_indices,
+                        dates_per_batch=int(date_slate_dates_per_batch),
+                        stocks_per_date=int(date_slate_stocks_per_date),
+                        target_scale=target_scale,
+                        shuffle_stocks=True,
+                        seed=int(current_seed),
+                    ),
+                    batch_size=None,
+                    shuffle=True,
+                    generator=generator,
+                    **loader_kwargs,
+                )
+            elif cache_friendly_train_order:
                 train_loader = DataLoader(
                     dataset_view.batch_torch_dataset(
                         train_loader_indices,
@@ -4222,8 +4747,15 @@ def train_forecast_models(
                 "early_stop_patience": int(patience_limit),
                 "early_stop_min_delta": float(early_stop_min_delta),
                 "batch_size": int(batch_size),
-                "effective_batch_size": int(1 if cross_sectional_batching else batch_size),
+                "effective_batch_size": int(date_slate_dates_per_batch * date_slate_stocks_per_date if date_slate_batching else (1 if cross_sectional_batching else batch_size)),
                 "cross_section_batching_enabled": bool(cross_sectional_batching),
+                "date_slate_batching_enabled": bool(date_slate_batching),
+                "date_slate_dates_per_batch": int(date_slate_dates_per_batch),
+                "date_slate_stocks_per_date": int(date_slate_stocks_per_date),
+                "rank_min_group_size": int(rank_min_group_size),
+                "rank_max_pairs_per_date": int(rank_max_pairs_per_date),
+                "finite_guard_enabled": bool(finite_guard),
+                "bad_batch_dump_dir": str(bad_batch_dump_root.resolve()) if bool(finite_guard) else "",
                 "lr": float(lr),
                 "weight_decay": float(weight_decay),
                 "grad_clip": float(grad_clip),
@@ -4315,7 +4847,73 @@ def train_forecast_models(
                 epoch_counts: list[int] = []
                 optimizer.zero_grad(set_to_none=True)
                 for step, raw_batch in enumerate(train_loader, start=1):
-                    if cross_sectional_batching:
+                    row_ids_for_guard: torch.Tensor | None = None
+                    date_group_ids_for_guard: torch.Tensor | None = None
+                    if date_slate_batching:
+                        if len(raw_batch) == 7:
+                            batch_x_cpu, batch_y_daily_cpu, batch_y_cum_cpu, batch_y_risk_cpu, row_ids_cpu, date_group_ids_cpu, static_context_ids_cpu = raw_batch
+                        elif len(raw_batch) == 6:
+                            batch_x_cpu, batch_y_daily_cpu, batch_y_cum_cpu, batch_y_risk_cpu, row_ids_cpu, date_group_ids_cpu = raw_batch
+                            static_context_ids_cpu = None
+                        else:
+                            raise ValueError(f"date-slate forecast batch must contain 6 or 7 tensors, got {len(raw_batch)}.")
+                        batch_x = batch_x_cpu.to(resolved_device, non_blocking=pin_memory)
+                        batch_y_daily = batch_y_daily_cpu.to(resolved_device, non_blocking=pin_memory)
+                        batch_y_cum = batch_y_cum_cpu.to(resolved_device, non_blocking=pin_memory)
+                        batch_y_risk = batch_y_risk_cpu.to(resolved_device, non_blocking=pin_memory)
+                        row_ids_for_guard = row_ids_cpu
+                        date_group_ids = date_group_ids_cpu.to(resolved_device, non_blocking=pin_memory)
+                        date_group_ids_for_guard = date_group_ids
+                        static_context_ids = (
+                            static_context_ids_cpu.to(resolved_device, non_blocking=pin_memory)
+                            if static_context_ids_cpu is not None
+                            else None
+                        )
+                        static_context_ids = dataset_view.filter_static_context_ids(static_context_ids)
+                        _forecast_finite_guard(
+                            enabled=bool(finite_guard),
+                            dump_dir=bad_batch_dump_root,
+                            reason_prefix="train_input",
+                            model_family=family,
+                            seed=int(current_seed),
+                            epoch=int(epoch),
+                            step=int(step),
+                            role="train",
+                            row_ids=row_ids_for_guard,
+                            date_group_ids=date_group_ids_for_guard,
+                            tensors={"x": batch_x, "y_daily": batch_y_daily, "y_cum": batch_y_cum, "y_risk": batch_y_risk},
+                            scaler=scaler,
+                        )
+                        with _autocast_context(resolved_device, amp_enabled):
+                            pred = _forecast_model_forward(model, batch_x, static_context_ids)
+                            loss = _date_grouped_forecast_loss(
+                                pred,
+                                batch_y_daily,
+                                batch_y_cum,
+                                batch_y_risk,
+                                date_group_ids,
+                                loss_profile=loss_profile,
+                                target_scale=target_scale,
+                                cumulative_horizons=dataset_view.cumulative_horizons,
+                                rank_min_group_size=int(rank_min_group_size),
+                                rank_max_pairs_per_date=int(rank_max_pairs_per_date),
+                            )
+                        _forecast_finite_guard(
+                            enabled=bool(finite_guard),
+                            dump_dir=bad_batch_dump_root,
+                            reason_prefix="train_forward",
+                            model_family=family,
+                            seed=int(current_seed),
+                            epoch=int(epoch),
+                            step=int(step),
+                            role="train",
+                            row_ids=row_ids_for_guard,
+                            date_group_ids=date_group_ids_for_guard,
+                            tensors={"prediction": pred, "loss": loss},
+                            scaler=scaler,
+                        )
+                        batch_count = int(batch_x.shape[0])
+                    elif cross_sectional_batching:
                         batch_x_cpu, stock_mask_cpu, batch_y_daily_cpu, batch_y_cum_cpu, batch_y_risk_cpu, _, static_context_ids_cpu = raw_batch
                         batch_x = batch_x_cpu.to(resolved_device, non_blocking=pin_memory)
                         stock_mask = stock_mask_cpu.to(resolved_device, non_blocking=pin_memory)
@@ -4328,6 +4926,20 @@ def train_forecast_models(
                             else None
                         )
                         static_context_ids = dataset_view.filter_static_context_ids(static_context_ids)
+                        _forecast_finite_guard(
+                            enabled=bool(finite_guard),
+                            dump_dir=bad_batch_dump_root,
+                            reason_prefix="train_input",
+                            model_family=family,
+                            seed=int(current_seed),
+                            epoch=int(epoch),
+                            step=int(step),
+                            role="train",
+                            row_ids=None,
+                            date_group_ids=None,
+                            tensors={"x": batch_x, "y_daily": batch_y_daily, "y_cum": batch_y_cum, "y_risk": batch_y_risk},
+                            scaler=scaler,
+                        )
                         flat_mask = stock_mask.reshape(-1)
                         with _autocast_context(resolved_device, amp_enabled):
                             pred = _forecast_model_forward(model, batch_x, static_context_ids, stock_mask=stock_mask)
@@ -4343,19 +4955,48 @@ def train_forecast_models(
                                 decision_drawdown_penalty=decision_drawdown_penalty,
                                 cumulative_horizons=dataset_view.cumulative_horizons,
                             )
+                        _forecast_finite_guard(
+                            enabled=bool(finite_guard),
+                            dump_dir=bad_batch_dump_root,
+                            reason_prefix="train_forward",
+                            model_family=family,
+                            seed=int(current_seed),
+                            epoch=int(epoch),
+                            step=int(step),
+                            role="train",
+                            row_ids=None,
+                            date_group_ids=None,
+                            tensors={"prediction": pred, "loss": loss},
+                            scaler=scaler,
+                        )
                         batch_count = int(flat_mask.sum().detach().cpu())
                     else:
-                        batch_x_cpu, batch_y_daily_cpu, batch_y_cum_cpu, batch_y_risk_cpu, _, static_context_ids_cpu = _unpack_forecast_batch(raw_batch)
+                        batch_x_cpu, batch_y_daily_cpu, batch_y_cum_cpu, batch_y_risk_cpu, row_ids_cpu, static_context_ids_cpu = _unpack_forecast_batch(raw_batch)
                         batch_x = batch_x_cpu.to(resolved_device, non_blocking=pin_memory)
                         batch_y_daily = batch_y_daily_cpu.to(resolved_device, non_blocking=pin_memory)
                         batch_y_cum = batch_y_cum_cpu.to(resolved_device, non_blocking=pin_memory)
                         batch_y_risk = batch_y_risk_cpu.to(resolved_device, non_blocking=pin_memory)
+                        row_ids_for_guard = row_ids_cpu
                         static_context_ids = (
                             static_context_ids_cpu.to(resolved_device, non_blocking=pin_memory)
                             if static_context_ids_cpu is not None
                             else None
                         )
                         static_context_ids = dataset_view.filter_static_context_ids(static_context_ids)
+                        _forecast_finite_guard(
+                            enabled=bool(finite_guard),
+                            dump_dir=bad_batch_dump_root,
+                            reason_prefix="train_input",
+                            model_family=family,
+                            seed=int(current_seed),
+                            epoch=int(epoch),
+                            step=int(step),
+                            role="train",
+                            row_ids=row_ids_for_guard,
+                            date_group_ids=None,
+                            tensors={"x": batch_x, "y_daily": batch_y_daily, "y_cum": batch_y_cum, "y_risk": batch_y_risk},
+                            scaler=scaler,
+                        )
                         with _autocast_context(resolved_device, amp_enabled):
                             pred = _forecast_model_forward(model, batch_x, static_context_ids)
                             loss = _forecast_loss(
@@ -4369,6 +5010,20 @@ def train_forecast_models(
                                 decision_hit_threshold_bps=decision_hit_threshold_bps,
                                 decision_drawdown_penalty=decision_drawdown_penalty,
                                 cumulative_horizons=dataset_view.cumulative_horizons,
+                            )
+                        _forecast_finite_guard(
+                            enabled=bool(finite_guard),
+                            dump_dir=bad_batch_dump_root,
+                            reason_prefix="train_forward",
+                            model_family=family,
+                            seed=int(current_seed),
+                            epoch=int(epoch),
+                            step=int(step),
+                            role="train",
+                            row_ids=row_ids_for_guard,
+                            date_group_ids=None,
+                            tensors={"prediction": pred, "loss": loss},
+                            scaler=scaler,
                         )
                         batch_count = int(batch_x.shape[0])
                     epoch_losses.append(float(loss.detach().cpu()))
@@ -4377,9 +5032,37 @@ def train_forecast_models(
                     scaler.scale(loss / float(accum_steps)).backward()
                     if step % accum_steps == 0 or step == len(train_loader):
                         scaler.unscale_(optimizer)
+                        _forecast_grad_param_finite_guard(
+                            enabled=bool(finite_guard),
+                            dump_dir=bad_batch_dump_root,
+                            model=model,
+                            model_family=family,
+                            seed=int(current_seed),
+                            epoch=int(epoch),
+                            step=int(step),
+                            role="train",
+                            row_ids=row_ids_for_guard,
+                            date_group_ids=date_group_ids_for_guard,
+                            scaler=scaler,
+                            check_params=False,
+                        )
                         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=float(grad_clip))
                         scaler.step(optimizer)
                         scaler.update()
+                        _forecast_grad_param_finite_guard(
+                            enabled=bool(finite_guard),
+                            dump_dir=bad_batch_dump_root,
+                            model=model,
+                            model_family=family,
+                            seed=int(current_seed),
+                            epoch=int(epoch),
+                            step=int(step),
+                            role="train",
+                            row_ids=row_ids_for_guard,
+                            date_group_ids=date_group_ids_for_guard,
+                            scaler=scaler,
+                            check_params=True,
+                        )
                         optimizer.zero_grad(set_to_none=True)
                     now_monotonic = time.monotonic()
                     if now_monotonic - last_progress_monotonic >= 60.0 or step == len(train_loader):
@@ -4420,6 +5103,9 @@ def train_forecast_models(
                                 "dataset_mode": str(dataset_view.dataset_mode),
                                 "dataset_type": type(dataset_view.dataset).__name__,
                                 "cache_friendly_train_order": bool(cache_friendly_train_order),
+                                "date_slate_batching_enabled": bool(date_slate_batching),
+                                "date_slate_dates_per_batch": int(date_slate_dates_per_batch),
+                                "date_slate_stocks_per_date": int(date_slate_stocks_per_date),
                             },
                         )
                         last_progress_monotonic = now_monotonic
@@ -4474,6 +5160,10 @@ def train_forecast_models(
                     decision_cost_bps=decision_cost_bps,
                     decision_hit_threshold_bps=decision_hit_threshold_bps,
                     decision_drawdown_penalty=decision_drawdown_penalty,
+                    date_slate_dates_per_batch=int(date_slate_dates_per_batch),
+                    date_slate_stocks_per_date=int(date_slate_stocks_per_date),
+                    rank_min_group_size=int(rank_min_group_size),
+                    rank_max_pairs_per_date=int(rank_max_pairs_per_date),
                 )
                 if per_epoch_prediction_metrics_enabled:
                     validation_predictions = _predict_indices(
@@ -4921,7 +5611,17 @@ def train_forecast_models(
             "min_epochs": int(min_epochs),
             "early_stop_patience": int(patience_limit),
             "batch_size": int(batch_size),
-            "effective_batch_size": int(1 if family in FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES else batch_size),
+            "effective_batch_size": int(
+                date_slate_dates_per_batch * date_slate_stocks_per_date
+                if family == "date_slate_alpha_fusion_v1"
+                else (1 if family in FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES else batch_size)
+            ),
+            "date_slate_batching_enabled": bool(family == "date_slate_alpha_fusion_v1"),
+            "date_slate_dates_per_batch": int(date_slate_dates_per_batch),
+            "date_slate_stocks_per_date": int(date_slate_stocks_per_date),
+            "rank_min_group_size": int(rank_min_group_size),
+            "rank_max_pairs_per_date": int(rank_max_pairs_per_date),
+            "finite_guard_enabled": bool(finite_guard),
             "lr": float(lr),
             "hidden_dim": int(hidden_dim),
             "feature_count": int(dataset_view.input_dim),

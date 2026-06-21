@@ -493,6 +493,49 @@ def test_protocol_accepts_structured_alpha_v2_with_hybrid_alpha_score_v2() -> No
     assert args.forecast_loss_profile == "hybrid_alpha_score_v2"
 
 
+def test_protocol_accepts_date_slate_alpha_fusion_v1_contract() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-walkforward-study",
+            "--tag",
+            "unit_date_slate_alpha_fusion_v1",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-dataset-mode",
+            "memmap",
+            "--forecast-model-families",
+            "date_slate_alpha_fusion_v1",
+            "--forecast-train-static-fields",
+            "exchange,industry",
+            "--forecast-output-profile",
+            "forecast_incremental_path_v2",
+            "--forecast-loss-profile",
+            "date_grouped_alpha_score_v1",
+            "--forecast-selection-profile",
+            "validation_loss",
+            "--forecast-build-date-slate-pack",
+            "--forecast-dates-per-batch",
+            "2",
+            "--forecast-stocks-per-date",
+            "128",
+            "--forecast-finite-guard",
+        ]
+    )
+    _validate_protocol_args(parser, args)
+
+    assert args.forecast_model_families == "date_slate_alpha_fusion_v1"
+    assert args.forecast_train_static_fields == "exchange,industry"
+    assert args.forecast_output_profile == "forecast_incremental_path_v2"
+    assert args.forecast_loss_profile == "date_grouped_alpha_score_v1"
+    assert args.forecast_dates_per_batch == 2
+    assert args.forecast_stocks_per_date == 128
+    assert args.forecast_finite_guard is True
+
+
 def test_protocol_rejects_structured_alpha_v2_symbol_static_context() -> None:
     parser = build_arg_parser()
     args = parser.parse_args(

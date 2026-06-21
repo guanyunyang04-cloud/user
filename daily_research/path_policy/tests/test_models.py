@@ -3,6 +3,7 @@ from __future__ import annotations
 import torch
 
 from daily_research.path_policy.models import (
+    DateSlateAlphaFusionV1Forecaster,
     DLinearPath20Forecaster,
     ExpertFusionPath20Forecaster,
     GRUPath20Forecaster,
@@ -66,6 +67,25 @@ def test_forecaster_variants_emit_optional_decision_utility_head() -> None:
         assert prediction["mu"].shape == (6, 20)
         assert prediction["aux"].shape == (6, path20_forecast_aux_dim(PATH20_DEFAULT_CUMULATIVE_HORIZONS))
         assert prediction["decision_aux"].shape == (6, PATH20_DECISION_AUX_DIM)
+
+
+def test_forecast_incremental_path_v2_derives_cumulative_aux_from_daily_mu() -> None:
+    model = LinearPath20Forecaster(input_dim=5, output_profile="forecast_incremental_path_v2", cumulative_horizons=(1, 3, 5))
+    prediction = model(torch.randn(4, 5))
+
+    assert set(prediction) == {"mu", "q10", "q50", "q90", "aux", "derived_cum_mu"}
+    assert prediction["mu"].shape == (4, 20)
+    assert prediction["aux"].shape == (4, 12)
+    expected = torch.stack(
+        [
+            prediction["mu"][:, :1].sum(dim=1),
+            prediction["mu"][:, :3].sum(dim=1),
+            prediction["mu"][:, :5].sum(dim=1),
+        ],
+        dim=1,
+    )
+    assert torch.allclose(prediction["aux"][:, :3], expected)
+    assert torch.allclose(prediction["derived_cum_mu"], expected)
 
 
 def test_forecaster_variants_emit_dynamic_horizon_contract() -> None:
@@ -290,6 +310,74 @@ def test_structured_alpha_v2_rejects_symbol_static_context() -> None:
         assert "symbol" in str(exc)
     else:
         raise AssertionError("hybrid_structured_alpha_v2 must reject symbol static context")
+
+
+def test_date_slate_alpha_fusion_v1_uses_incremental_output_and_symbol_free_context() -> None:
+    feature_groups = {
+        "daily_price_volume": (0, 1),
+        "cross_section": (2,),
+        "market_regime": (3,),
+        "industry_peer": (4,),
+        "valuation_liquidity": (5,),
+        "event_quality": (6,),
+        "intraday": (7, 8),
+    }
+    model = DateSlateAlphaFusionV1Forecaster(
+        input_dim=9,
+        hidden_dim=12,
+        horizon=20,
+        dropout=0.0,
+        transformer_layers=1,
+        transformer_heads=3,
+        patch_sizes=(2,),
+        feature_group_indices=feature_groups,
+        static_context_vocab_sizes={"exchange": 4, "industry": 6},
+        static_context_embedding_dims={"exchange": 2, "industry": 3},
+        static_context_fields=("exchange", "industry"),
+        cumulative_horizons=PATH20_DEFAULT_CUMULATIVE_HORIZONS,
+    )
+    x = torch.randn(4, 6, 9)
+    static_ids = torch.tensor([[1, 1], [2, 2], [1, 3], [0, 4]], dtype=torch.long)
+
+    prediction = model(x, static_context_ids=static_ids)
+    weights = model.expert_weights(x, static_context_ids=static_ids)
+
+    assert {
+        "mu",
+        "q10",
+        "q50",
+        "q90",
+        "aux",
+        "derived_cum_mu",
+        "router_weights",
+        "router_entropy",
+        "feature_group_weights",
+        "intraday_residual_norm",
+    }.issubset(prediction)
+    assert prediction["mu"].shape == (4, 20)
+    assert prediction["aux"].shape == (4, path20_forecast_aux_dim(PATH20_DEFAULT_CUMULATIVE_HORIZONS))
+    assert weights.shape == (4, 3)
+    assert torch.isfinite(prediction["router_weights"]).all()
+    assert torch.isfinite(prediction["intraday_residual_norm"]).all()
+    assert torch.allclose(weights.sum(dim=-1), torch.ones(4), atol=1.0e-6)
+    expected = torch.stack(
+        [prediction["mu"][:, : int(horizon)].sum(dim=1) for horizon in PATH20_DEFAULT_CUMULATIVE_HORIZONS],
+        dim=1,
+    )
+    assert torch.allclose(prediction["aux"][:, : len(PATH20_DEFAULT_CUMULATIVE_HORIZONS)], expected)
+
+    try:
+        DateSlateAlphaFusionV1Forecaster(
+            input_dim=9,
+            hidden_dim=12,
+            transformer_heads=3,
+            feature_group_indices=feature_groups,
+            static_context_fields=("symbol", "exchange", "industry"),
+        )
+    except ValueError as exc:
+        assert "symbol" in str(exc)
+    else:
+        raise AssertionError("date_slate_alpha_fusion_v1 must reject symbol static context")
 
 
 def test_regime_routed_multi_expert_forecaster_emits_decision_contract_and_router_diagnostics() -> None:

@@ -35,6 +35,7 @@ from daily_research.path_policy.canonical_memmap import (
 from daily_research.path_policy.forecast_dataset import (
     build_forecast_memmap_dataset,
     build_forecast_sequence_dataset,
+    build_qdp_date_slate_training_pack,
     load_forecast_memmap_dataset,
     normalize_static_context_fields,
     save_forecast_sequence_dataset,
@@ -755,6 +756,16 @@ def _run_forecast_walkforward_study(
         manifest_path = str(getattr(args, "forecast_memmap_manifest", "") or "").strip()
         registry_hit = False
         if manifest_path:
+            if bool(getattr(args, "forecast_build_date_slate_pack", False)):
+                date_slate_manifest = build_qdp_date_slate_training_pack(
+                    manifest_path,
+                    output_root=str(getattr(args, "forecast_date_slate_output_root", "") or "") or None,
+                    tag=str(getattr(args, "forecast_date_slate_tag", "") or ""),
+                    feature_dtype=str(getattr(args, "forecast_date_slate_feature_dtype", "") or ""),
+                    stock_chunk_size=int(getattr(args, "forecast_date_slate_stock_chunk_size", 64)),
+                    resume=True,
+                )
+                manifest_path = str(date_slate_manifest.get("manifest_json", "") or manifest_path)
             dataset = load_forecast_memmap_dataset(
                 manifest_path,
                 train_start_year=int(args.forecast_train_start_year),
@@ -878,6 +889,12 @@ def _run_forecast_walkforward_study(
             train_date_stride=int(getattr(args, "forecast_train_date_stride", 1)),
             ranking_baseline=str(args.forecast_ranking_baseline),
             slot_diagnostics=bool(args.forecast_slot_diagnostics),
+            finite_guard=bool(getattr(args, "forecast_finite_guard", False)),
+            bad_batch_dump_dir=str(getattr(args, "forecast_bad_batch_dump_dir", "") or ""),
+            date_slate_dates_per_batch=int(getattr(args, "forecast_dates_per_batch", 1)),
+            date_slate_stocks_per_date=int(getattr(args, "forecast_stocks_per_date", 512)),
+            rank_min_group_size=int(getattr(args, "forecast_rank_min_group_size", 8)),
+            rank_max_pairs_per_date=int(getattr(args, "forecast_rank_max_pairs_per_date", 4096)),
         )
     status = "completed"
     if dataset_manifest.get("status") != "completed" or training_summary.get("status") in {
@@ -3620,6 +3637,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--forecast-min-lookback-valid-ratio", type=float, default=0.80)
     parser.add_argument("--forecast-dataloader-num-workers", type=int, default=0)
     parser.add_argument("--forecast-prefetch-factor", type=int, default=2)
+    parser.add_argument(
+        "--forecast-build-date-slate-pack",
+        action="store_true",
+        help="Build a qdp_date_slate_training_pack_v1 sidecar from --forecast-memmap-manifest before loading/training.",
+    )
+    parser.add_argument("--forecast-date-slate-output-root", default="", help="Optional output root for qdp_date_slate_training_pack_v1.")
+    parser.add_argument("--forecast-date-slate-tag", default="", help="Optional tag for qdp_date_slate_training_pack_v1.")
+    parser.add_argument("--forecast-date-slate-feature-dtype", default="", choices=("", "float16", "float32"))
+    parser.add_argument("--forecast-date-slate-stock-chunk-size", type=int, default=64)
+    parser.add_argument("--forecast-dates-per-batch", type=int, default=1)
+    parser.add_argument("--forecast-stocks-per-date", type=int, default=512)
+    parser.add_argument("--forecast-rank-min-group-size", type=int, default=8)
+    parser.add_argument("--forecast-rank-max-pairs-per-date", type=int, default=4096)
+    parser.add_argument("--forecast-finite-guard", action="store_true")
+    parser.add_argument("--forecast-bad-batch-dump-dir", default="")
     parser.add_argument("--sequence-length", type=int, default=20)
     parser.add_argument("--reward-profile", default=DEFAULT_RL_REWARD_PROFILE)
     parser.add_argument("--model-family", default="sequence_gru", choices=("sequence_gru", "decision_transformer", "decision_transformer_v2"))
@@ -3735,6 +3767,8 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
             or str(getattr(args, "forecast_selection_profile", "multiscale")) == "decision_utility"
         ):
             args.forecast_output_profile = "decision_utility_v1"
+        elif str(loss_contract.get("required_output_profile", "")) == "forecast_incremental_path_v2":
+            args.forecast_output_profile = "forecast_incremental_path_v2"
         if str(getattr(args, "forecast_output_profile", "forecast_path_v1")) == "decision_utility_v1" and str(
             getattr(args, "forecast_loss_profile", "default")
         ) == "default":
@@ -3768,6 +3802,16 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
             parser.error("--forecast-dataloader-num-workers must be >= 0.")
         if int(getattr(args, "forecast_prefetch_factor", 2)) <= 0:
             parser.error("--forecast-prefetch-factor must be positive.")
+        if int(getattr(args, "forecast_date_slate_stock_chunk_size", 64)) <= 0:
+            parser.error("--forecast-date-slate-stock-chunk-size must be positive.")
+        if int(getattr(args, "forecast_dates_per_batch", 1)) <= 0:
+            parser.error("--forecast-dates-per-batch must be positive.")
+        if int(getattr(args, "forecast_stocks_per_date", 512)) <= 0:
+            parser.error("--forecast-stocks-per-date must be positive.")
+        if int(getattr(args, "forecast_rank_min_group_size", 8)) <= 1:
+            parser.error("--forecast-rank-min-group-size must be greater than 1.")
+        if int(getattr(args, "forecast_rank_max_pairs_per_date", 4096)) <= 0:
+            parser.error("--forecast-rank-max-pairs-per-date must be positive.")
         if int(getattr(args, "max_universe_size", 80)) == 0 and str(getattr(args, "forecast_dataset_mode", "eager")) == "eager":
             parser.error("full_universe_requires_memmap_dataset_mode: use --forecast-dataset-mode memmap when --max-universe-size 0.")
         if str(getattr(args, "forecast_memmap_manifest", "") or "").strip() and str(getattr(args, "forecast_dataset_mode", "eager")) != "memmap":
@@ -3811,6 +3855,31 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
                     "hybrid_structured_alpha_v2 is prediction-first; use a prediction loss such as "
                     "hybrid_alpha_score_v2, hybrid_alpha_score_v1, or forecast_path_v1_baseline."
                 )
+        if "date_slate_alpha_fusion_v1" in families:
+            train_fields = tuple(
+                str(item).strip()
+                for item in str(getattr(args, "forecast_train_static_fields", "") or "").split(",")
+                if str(item).strip()
+            )
+            if not train_fields:
+                parser.error(
+                    "date_slate_alpha_fusion_v1 requires --forecast-train-static-fields exchange,industry "
+                    "to avoid symbol_id static context."
+                )
+            if "symbol" in train_fields:
+                parser.error("date_slate_alpha_fusion_v1 does not allow symbol in --forecast-train-static-fields.")
+            missing_required = [field for field in ("exchange", "industry") if field not in train_fields]
+            if missing_required:
+                parser.error(
+                    "date_slate_alpha_fusion_v1 requires exchange and industry static context fields; "
+                    f"missing: {', '.join(missing_required)}."
+                )
+            if str(getattr(args, "forecast_output_profile", "forecast_path_v1")) != "forecast_incremental_path_v2":
+                parser.error("date_slate_alpha_fusion_v1 requires --forecast-output-profile forecast_incremental_path_v2.")
+            if str(getattr(args, "forecast_loss_profile", "default")) != "date_grouped_alpha_score_v1":
+                parser.error("date_slate_alpha_fusion_v1 requires --forecast-loss-profile date_grouped_alpha_score_v1.")
+            if str(getattr(args, "forecast_dataset_mode", "eager")) != "memmap":
+                parser.error("date_slate_alpha_fusion_v1 requires --forecast-dataset-mode memmap.")
         _apply_forecast_full_memmap_memory_guard(parser, args)
     if int(getattr(args, "rollout_chunk_days", 20)) <= 0:
         parser.error("--rollout-chunk-days must be positive.")

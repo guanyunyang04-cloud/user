@@ -211,6 +211,84 @@ class ForecastDateBatchTorchDataset(Dataset):
         return items
 
 
+class ForecastDateSlateTorchDataset(Dataset):
+    """Date-slate view that keeps same-date group ids in each flattened batch."""
+
+    def __init__(
+        self,
+        dataset: "ForecastTrainingPackDataset",
+        indices: np.ndarray,
+        *,
+        dates_per_batch: int = 1,
+        stocks_per_date: int = 512,
+        target_scale: float = 100.0,
+        shuffle_stocks: bool = True,
+        seed: int = 7,
+    ) -> None:
+        self.dataset = dataset
+        self.indices = np.asarray(indices, dtype=np.int64).reshape(-1)
+        self.dates_per_batch = max(int(dates_per_batch), 1)
+        self.stocks_per_date = max(int(stocks_per_date), 1)
+        self.target_scale = float(target_scale)
+        self.shuffle_stocks = bool(shuffle_stocks)
+        self.seed = int(seed)
+        if self.indices.size:
+            frame = self.dataset.sample_index.iloc[self.indices][["date"]].copy()
+            frame["_row_idx"] = self.indices
+            frame["date"] = pd.to_datetime(frame["date"]).dt.strftime("%Y-%m-%d")
+            self._date_groups = [
+                (str(date), group["_row_idx"].to_numpy(dtype=np.int64, copy=True))
+                for date, group in frame.groupby("date", sort=True)
+            ]
+        else:
+            self._date_groups = []
+        self._batches: list[list[np.ndarray]] = []
+        for start in range(0, len(self._date_groups), self.dates_per_batch):
+            date_groups = self._date_groups[start : start + self.dates_per_batch]
+            chunks_by_date: list[list[np.ndarray]] = []
+            max_chunks = 0
+            for _, rows in date_groups:
+                row_values = np.asarray(rows, dtype=np.int64)
+                if self.shuffle_stocks and row_values.size > 1:
+                    rng = np.random.default_rng(self.seed + int(start) + int(row_values[0]))
+                    row_values = rng.permutation(row_values)
+                chunks = [
+                    row_values[pos : pos + self.stocks_per_date]
+                    for pos in range(0, row_values.size, self.stocks_per_date)
+                ]
+                chunks_by_date.append(chunks)
+                max_chunks = max(max_chunks, len(chunks))
+            for chunk_pos in range(max_chunks):
+                batch_chunks = [chunks[chunk_pos] for chunks in chunks_by_date if chunk_pos < len(chunks)]
+                if batch_chunks:
+                    self._batches.append(batch_chunks)
+
+    def __len__(self) -> int:
+        return int(len(self._batches))
+
+    def __getitem__(self, item: int) -> tuple[torch.Tensor, ...]:
+        chunks = self._batches[int(item)]
+        row_indices = np.concatenate([np.asarray(chunk, dtype=np.int64) for chunk in chunks])
+        x = np.asarray(self.dataset.date_input_windows(row_indices), dtype=np.float32)
+        y_daily = np.asarray(self.dataset.y_daily_excess[row_indices], dtype=np.float32) * self.target_scale
+        y_cum = np.asarray(self.dataset.y_cum_excess[row_indices], dtype=np.float32) * self.target_scale
+        y_risk = self.dataset.risk_by_horizon(row_indices) * self.target_scale
+        date_values = pd.to_datetime(self.dataset.sample_index.iloc[row_indices]["date"]).dt.strftime("%Y-%m-%d")
+        codes, _ = pd.factorize(date_values, sort=True)
+        items: tuple[torch.Tensor, ...] = (
+            torch.as_tensor(x, dtype=torch.float32),
+            torch.as_tensor(y_daily, dtype=torch.float32),
+            torch.as_tensor(y_cum, dtype=torch.float32),
+            torch.as_tensor(y_risk, dtype=torch.float32),
+            torch.as_tensor(row_indices, dtype=torch.long),
+            torch.as_tensor(codes.astype(np.int64), dtype=torch.long),
+        )
+        if self.dataset.static_context_ids is not None:
+            static_ids = np.asarray(self.dataset.static_context_ids[row_indices], dtype=np.int64).copy()
+            items = (*items, torch.as_tensor(static_ids, dtype=torch.long))
+        return items
+
+
 @dataclass
 class ForecastMemmapDataset:
     root: Path
@@ -319,6 +397,19 @@ class ForecastMemmapDataset:
 
     def date_batch_torch_dataset(self, indices: np.ndarray, *, target_scale: float = 100.0) -> ForecastDateBatchTorchDataset:
         return ForecastDateBatchTorchDataset(self, indices, target_scale=target_scale)
+
+    def date_slate_torch_dataset(
+        self,
+        indices: np.ndarray,
+        *,
+        dates_per_batch: int = 1,
+        stocks_per_date: int = 512,
+        target_scale: float = 100.0,
+        shuffle_stocks: bool = True,
+        seed: int = 7,
+    ) -> ForecastDateSlateTorchDataset:
+        del indices, dates_per_batch, stocks_per_date, target_scale, shuffle_stocks, seed
+        raise ValueError("date-slate training requires a QDP training pack with a date-major feature panel.")
 
 
 def _row_selector_to_indices(selector: Any, *, row_count: int) -> tuple[np.ndarray, bool]:
@@ -993,6 +1084,28 @@ class ForecastTrainingPackDataset:
     def date_batch_torch_dataset(self, indices: np.ndarray, *, target_scale: float = 100.0) -> ForecastDateBatchTorchDataset:
         return ForecastDateBatchTorchDataset(self, indices, target_scale=target_scale)
 
+    def date_slate_torch_dataset(
+        self,
+        indices: np.ndarray,
+        *,
+        dates_per_batch: int = 1,
+        stocks_per_date: int = 512,
+        target_scale: float = 100.0,
+        shuffle_stocks: bool = True,
+        seed: int = 7,
+    ) -> ForecastDateSlateTorchDataset:
+        if not self.has_date_major_feature_panel:
+            raise ValueError("date-slate training requires a date-major feature panel.")
+        return ForecastDateSlateTorchDataset(
+            self,
+            indices,
+            dates_per_batch=dates_per_batch,
+            stocks_per_date=stocks_per_date,
+            target_scale=target_scale,
+            shuffle_stocks=shuffle_stocks,
+            seed=seed,
+        )
+
 
 def _json_ready(value: Any) -> Any:
     if isinstance(value, dict):
@@ -1645,12 +1758,19 @@ def _write_array_memmap(path: Path, values: np.ndarray, shape: tuple[int, ...]) 
     return np.memmap(path, dtype="float32", mode="r", shape=shape)
 
 
-def _resolve_manifest_path(value: Any, *, manifest_path: Path) -> Path:
+def _resolve_manifest_path(value: Any, raw_path: str | Path | None = None, *, manifest_path: Path | None = None) -> Path:
+    if raw_path is not None:
+        root = Path(str(value or "."))
+        path = Path(str(raw_path or ""))
+        return path if path.is_absolute() else root / path
     path = Path(str(value or ""))
+    if manifest_path is None:
+        return path
+    manifest_root = Path(manifest_path).parent
     if not path.is_absolute():
-        path = manifest_path.parent / path
+        path = manifest_root / path
     elif not path.exists():
-        sibling = manifest_path.parent / path.name
+        sibling = manifest_root / path.name
         if sibling.exists():
             path = sibling
     return path
@@ -1862,11 +1982,6 @@ def _sample_count_by_role(sample_index: pd.DataFrame) -> dict[str, int]:
     ordered_roles = [role for role in ("train", "validation", "test") if role in set(roles.tolist())]
     ordered_roles.extend(sorted(set(roles.tolist()) - set(ordered_roles)))
     return {role: int((roles == role).sum()) for role in ordered_roles}
-
-
-def _resolve_manifest_path(root: Path, raw_path: str | Path) -> Path:
-    path = Path(str(raw_path or ""))
-    return path if path.is_absolute() else root / path
 
 
 def _load_training_pack_forecast_memmap_dataset(
@@ -2635,6 +2750,184 @@ def build_qdp_training_pack_date_major_layout(
     return manifest
 
 
+def build_qdp_date_slate_training_pack(
+    training_pack_manifest_json: str | Path,
+    *,
+    output_root: str | Path | None = None,
+    tag: str = "",
+    feature_dtype: str = "",
+    stock_chunk_size: int = 64,
+    resume: bool = True,
+) -> dict[str, Any]:
+    """Create an independent date-slate pack from a QDP training pack.
+
+    The pack materializes a date-major feature panel for efficient same-date
+    slate training, writes a date_slate_index, and reuses source sample-major
+    labels/static context. It intentionally does not materialize rolling
+    windows.
+    """
+
+    source_manifest_path = Path(training_pack_manifest_json)
+    source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
+    if str(source_manifest.get("artifact_type", "")) not in {"qdp_training_pack_v1", "qdp_date_slate_training_pack_v1"}:
+        raise ValueError(f"qdp_date_slate_source_must_be_qdp_training_pack_v1: {source_manifest_path}")
+    source_root = source_manifest_path.parent
+    source_feature_path = _resolve_manifest_path(source_root, str(source_manifest.get("feature_panel_path", "") or ""))
+    source_shape = tuple(int(item) for item in list(source_manifest.get("feature_panel_shape", []) or []))
+    source_dtype = str(source_manifest.get("feature_dtype", "float16") or "float16").strip().lower()
+    if len(source_shape) != 3:
+        raise ValueError(f"qdp date-slate source has invalid feature_panel_shape: {source_manifest_path}")
+    _validate_memmap_file(source_feature_path, shape=source_shape, label="qdp_date_slate_source_feature_panel", dtype=source_dtype)
+    dtype = str(feature_dtype or source_dtype or "float16").strip().lower()
+    if dtype not in {"float16", "float32"}:
+        raise ValueError("--feature-dtype must be float16 or float32.")
+
+    safe_tag = "".join(
+        ch if ch.isalnum() or ch in {"-", "_"} else "_"
+        for ch in str(tag or f"{source_manifest_path.parent.name}_date_slate_v1")
+    ).strip("_")
+    root = Path(output_root) if output_root is not None else source_root.parent / safe_tag
+    root.mkdir(parents=True, exist_ok=True)
+    manifest_path = root / "qdp_date_slate_training_pack_manifest.json"
+    progress_path = root / "qdp_date_slate_training_pack_progress.json"
+    if bool(resume) and manifest_path.exists():
+        existing = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if str(existing.get("status", "")) == "completed":
+            return existing
+
+    stock_count, date_count, feature_count = (int(source_shape[0]), int(source_shape[1]), int(source_shape[2]))
+    target_shape = (date_count, stock_count, feature_count)
+    target_path = root / f"feature_panel_date_stock_feature.{dtype}.dat"
+    _qdp_training_pack_progress(
+        progress_path,
+        "date_slate_feature_panel_writing",
+        source_training_pack_manifest_json=str(source_manifest_path.resolve()),
+        source_feature_panel_path=str(source_feature_path.resolve()),
+        target_feature_panel_path=str(target_path.resolve()),
+        source_shape=[int(item) for item in source_shape],
+        target_shape=[int(item) for item in target_shape],
+        feature_dtype=dtype,
+    )
+    if not (bool(resume) and _memmap_file_matches(target_path, shape=target_shape, dtype=dtype)):
+        source = np.memmap(source_feature_path, dtype=source_dtype, mode="r", shape=source_shape)
+        target = np.memmap(target_path, dtype=dtype, mode="w+", shape=target_shape)
+        chunk = max(int(stock_chunk_size), 1)
+        for stock_start in range(0, stock_count, chunk):
+            stock_end = min(stock_start + chunk, stock_count)
+            values = np.asarray(source[stock_start:stock_end, :, :], dtype=dtype)
+            target[:, stock_start:stock_end, :] = np.transpose(values, (1, 0, 2))
+            if stock_start == 0 or stock_end == stock_count or (stock_end // chunk) % 10 == 0:
+                target.flush()
+                _qdp_training_pack_progress(
+                    progress_path,
+                    "date_slate_feature_panel_writing",
+                    completed_stocks=int(stock_end),
+                    total_stocks=int(stock_count),
+                    completion_ratio=float(stock_end / max(stock_count, 1)),
+                )
+        target.flush()
+
+    sample_index_path = _resolve_manifest_path(source_root, str(source_manifest.get("sample_index_path", "") or ""))
+    if not sample_index_path.exists():
+        raise ValueError(f"qdp_date_slate_source_missing_sample_index_path: {sample_index_path}")
+    sample_index = pd.read_parquet(sample_index_path)
+    date_slate_index = sample_index.copy()
+    date_slate_index["sample_row_idx"] = np.arange(len(date_slate_index), dtype=np.int64)
+    for column in ("date", "label_end_date", "sequence_start_date"):
+        if column in date_slate_index.columns:
+            date_slate_index[column] = pd.to_datetime(date_slate_index[column]).dt.strftime("%Y-%m-%d")
+    keep_columns = [
+        column
+        for column in (
+            "sample_row_idx",
+            "role",
+            "date",
+            "global_date_pos",
+            "stock",
+            "global_stock_pos",
+            "sequence_start_date",
+            "label_end_date",
+            "stock_seen_in_train",
+            "history_valid_ratio",
+        )
+        if column in date_slate_index.columns
+    ]
+    date_slate_index = date_slate_index[keep_columns].sort_values(["role", "date", "global_stock_pos"], kind="mergesort")
+    date_slate_index_path = root / "date_slate_index.parquet"
+    date_slate_index.to_parquet(date_slate_index_path, index=False)
+
+    source_static_meta = dict(source_manifest.get("static_context_ids", {}) or {})
+    static_context_meta: dict[str, Any] = {}
+    if source_static_meta:
+        static_path = _resolve_manifest_path(source_root, str(source_static_meta.get("path", "") or ""))
+        static_context_meta = {
+            **source_static_meta,
+            "path": str(static_path.resolve()),
+        }
+    label_arrays = _rewrite_label_array_paths_for_sidecar(dict(source_manifest.get("label_arrays", {}) or {}), source_root=source_root)
+    source_contract = dict(source_manifest.get("training_pack_contract", {}) or {})
+    date_slate_contract = {
+        "artifact_type": "qdp_date_slate_training_pack_v1",
+        "feature_layout": "date_stock_feature",
+        "stock_major_feature_layout": "stock_date_feature_source_reused",
+        "rolling_window_materialization": False,
+        "window_materialization": "date_major_runtime_slice",
+        "batch_contract": "dates_per_batch_x_stocks_per_date_flattened_with_date_group_ids",
+        "rank_loss_scope": "same_prediction_date_only",
+    }
+    manifest = {
+        **{key: value for key, value in source_manifest.items() if key not in {"manifest_json"}},
+        "artifact_type": "qdp_date_slate_training_pack_v1",
+        "source_artifact_type": str(source_manifest.get("artifact_type", "")),
+        "status": "completed",
+        "created_at": pd.Timestamp.now(tz="Asia/Shanghai").isoformat(),
+        "dataset_mode": "memmap",
+        "manifest_json": str(manifest_path.resolve()),
+        "source_training_pack_manifest_json": str(source_manifest_path.resolve()),
+        "sample_index_path": str(sample_index_path.resolve()),
+        "date_slate_index_path": str(date_slate_index_path.resolve()),
+        "feature_panel_path": str(source_feature_path.resolve()),
+        "feature_panel_shape": [int(item) for item in source_shape],
+        "feature_dtype": source_dtype,
+        "date_major_feature_panel_path": str(target_path.resolve()),
+        "date_major_feature_panel_shape": [int(item) for item in target_shape],
+        "date_major_feature_dtype": dtype,
+        "date_major_feature_panel": {
+            "path": str(target_path.resolve()),
+            "shape": [int(item) for item in target_shape],
+            "dtype": dtype,
+            "layout": "date_stock_feature",
+        },
+        "label_arrays": label_arrays,
+        "static_context_ids": static_context_meta,
+        "date_slate_training_pack": {
+            "enabled": True,
+            "schema_version": 1,
+            "feature_layout": "date_stock_feature",
+            "date_slate_index_path": str(date_slate_index_path.resolve()),
+            "source_training_pack_manifest_json": str(source_manifest_path.resolve()),
+            "label_strategy": "reuse_source_sample_major_label_arrays",
+            "static_context_strategy": "reuse_source_sample_major_static_ids",
+        },
+        "training_pack_contract": {
+            **source_contract,
+            **date_slate_contract,
+        },
+    }
+    write_json(manifest_path, _json_ready(manifest))
+    _qdp_training_pack_progress(
+        progress_path,
+        "completed",
+        manifest_json=str(manifest_path.resolve()),
+        source_training_pack_manifest_json=str(source_manifest_path.resolve()),
+        target_feature_panel_path=str(target_path.resolve()),
+        date_slate_index_path=str(date_slate_index_path.resolve()),
+        target_shape=[int(item) for item in target_shape],
+        feature_dtype=dtype,
+    )
+    return manifest
+
+
 def _structured_alpha_v2_group_name(feature_name: str) -> str:
     name = str(feature_name or "").strip().lower()
     if not name:
@@ -2989,7 +3282,7 @@ def load_forecast_memmap_dataset(
 ) -> ForecastMemmapDataset | ForecastShardedMemmapDataset | ForecastTrainingPackDataset:
     manifest_path = Path(manifest_json)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if str(manifest.get("artifact_type", "")) == "qdp_training_pack_v1":
+    if str(manifest.get("artifact_type", "")) in {"qdp_training_pack_v1", "qdp_date_slate_training_pack_v1"}:
         return _load_training_pack_forecast_memmap_dataset(
             manifest_path,
             manifest,

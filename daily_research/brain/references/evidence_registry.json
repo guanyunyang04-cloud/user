@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 137,
+  "record_count": 138,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -4615,6 +4615,49 @@
       "active_artifact_impact": "unchanged",
       "dataset_ids": [
         "policy_input_bundle__f926a496f69c61f6b92b5faf"
+      ]
+    },
+    {
+      "id": "path_policy_alpha_v2_date_slate_incremental_implementation_20260621",
+      "date": "2026-06-21",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_date_slate_incremental_implementation_20260621.md",
+      "tags": [
+        "path_policy",
+        "alpha_v2",
+        "date_slate",
+        "incremental_output",
+        "implementation",
+        "smoke"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "qdp_alpha_v2_generalization_repair"
+      ],
+      "study_families": [
+        "date_slate_alpha_fusion_v1",
+        "date_grouped_alpha_score_v1",
+        "qdp_date_slate_training_pack_v1"
+      ],
+      "run_tags": [
+        "qdp_alpha_v2_date_slate_alpha_fusion_contract_smoke_20260621_01"
+      ],
+      "verdict": "Status: code_data_contract_implemented / real_pack_smoked / research_only / execution_frozen.; Implemented forecast_incremental_path_v2, date_slate_alpha_fusion_v1, date_grouped_alpha_score_v1, finite fail-fast diagnostics, date-slate pack builder/loader, and protocol wiring.; Real qdp_date_slate_training_pack_v1 built from structured_alpha_v2 sidecar with shape [3989,3150,307]; real loader/model/loss smoke finite; 16/16/16 training-contract smoke completed with best validation loss 2.1607880126684904.; This is code/data contract and smoke evidence only, not model-quality evidence.",
+      "blockers": [
+        "No CUDA throughput scout has been run yet for the new date-slate pack.",
+        "No formal single-seed model-quality run has been launched under this contract.",
+        "No multi-seed, bridge, candidate matrix, execution-candidate review, paper/live/broker, or active/default change is authorized."
+      ],
+      "next_allowed_actions": [
+        "Run real CUDA throughput scout on qdp_date_slate_training_pack_v1 with D=128, forecast_incremental_path_v2, date_grouped_alpha_score_v1, exchange/industry static context, and finite_guard enabled.",
+        "Compare date-slate shapes such as 1x256, 1x512, and 2x256 if memory permits.",
+        "If throughput and finite stability are acceptable, launch first 3-6 epoch formal research run with validation_loss selection and final validation/test predictions.",
+        "Keep active/live/default/paper/broker artifacts frozen."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__f926a496f69c61f6b92b5faf",
+        "policy_pool_view__fc63d6b996abc7abde88bae7"
       ]
     }
   ]

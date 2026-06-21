@@ -10,7 +10,7 @@ import torch.nn.functional as F
 PATH20_FORECAST_AUX_DIM = 20
 PATH20_DECISION_AUX_DIM = 15
 PATH20_DEFAULT_CUMULATIVE_HORIZONS: tuple[int, ...] = (1, 3, 5, 10, 20)
-PATH20_FORECAST_OUTPUT_PROFILES = ("forecast_path_v1", "decision_utility_v1")
+PATH20_FORECAST_OUTPUT_PROFILES = ("forecast_path_v1", "decision_utility_v1", "forecast_incremental_path_v2")
 
 
 def normalize_path20_output_profile(output_profile: str | None) -> str:
@@ -57,6 +57,8 @@ def path20_forecast_output_dim(
     cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
 ) -> int:
     profile = normalize_path20_output_profile(output_profile)
+    if profile == "forecast_incremental_path_v2":
+        return int(horizon) * 4 + len(normalize_path20_cumulative_horizons(cumulative_horizons, horizon=int(horizon))) * 3
     output_dim = int(horizon) * 4 + path20_forecast_aux_dim(cumulative_horizons, horizon=int(horizon))
     if profile == "decision_utility_v1":
         output_dim += path20_decision_aux_dim(cumulative_horizons, horizon=int(horizon))
@@ -117,8 +119,17 @@ def _split_path20_outputs(
     q_raw = raw[:, horizon : horizon * 4].reshape(raw.shape[0], horizon, 3)
     q_sorted = torch.sort(q_raw, dim=-1).values
     aux_start = horizon * 4
-    aux_end = aux_start + path20_forecast_aux_dim(resolved_horizons, horizon=horizon)
-    aux = raw[:, aux_start:aux_end]
+    if profile == "forecast_incremental_path_v2":
+        risk_width = len(resolved_horizons) * 3
+        risk_raw = raw[:, aux_start : aux_start + risk_width]
+        cumulative_path = torch.cumsum(mu, dim=1)
+        horizon_index = torch.as_tensor([int(item) - 1 for item in resolved_horizons], dtype=torch.long, device=raw.device)
+        derived_cum = cumulative_path.index_select(dim=1, index=horizon_index)
+        aux = torch.cat([derived_cum, risk_raw], dim=-1)
+        aux_end = aux_start + risk_width
+    else:
+        aux_end = aux_start + path20_forecast_aux_dim(resolved_horizons, horizon=horizon)
+        aux = raw[:, aux_start:aux_end]
     output = {
         "mu": mu,
         "q10": q_sorted[:, :, 0],
@@ -126,6 +137,8 @@ def _split_path20_outputs(
         "q90": q_sorted[:, :, 2],
         "aux": aux,
     }
+    if profile == "forecast_incremental_path_v2":
+        output["derived_cum_mu"] = aux[:, : len(resolved_horizons)]
     if profile == "decision_utility_v1":
         output["decision_aux"] = raw[:, aux_end : aux_end + path20_decision_aux_dim(resolved_horizons, horizon=horizon)]
     return output
@@ -1335,6 +1348,376 @@ class HybridStructuredAlphaV2Forecaster(nn.Module):
                 "feature_group_weights": group_weights,
                 "context_gate_abs_mean": context_gamma.abs().mean(dim=-1),
                 "intraday_residual_norm": effective_residual.norm(dim=-1) / effective_residual.shape[-1] ** 0.5,
+            }
+        )
+        return output
+
+
+class DateSlateAlphaFusionV1Forecaster(nn.Module):
+    """Prediction-first alpha model for same-date slate training.
+
+    The model keeps the structured-alpha-v2 feature groups explicit, uses only
+    exchange/industry static context, fuses non-overlapping time experts, and
+    emits daily increment forecasts whose cumulative path is derived by the
+    output splitter.
+    """
+
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int = 128,
+        horizon: int = 20,
+        dropout: float = 0.10,
+        transformer_layers: int = 2,
+        transformer_heads: int = 4,
+        patch_sizes: tuple[int, ...] | list[int] | None = None,
+        router_temperature: float = 1.0,
+        static_context_vocab_sizes: dict[str, int] | None = None,
+        static_context_embedding_dims: dict[str, int] | None = None,
+        static_context_fields: tuple[str, ...] | list[str] | None = None,
+        static_context_dropout: float = 0.20,
+        feature_group_indices: dict[str, tuple[int, ...] | list[int] | torch.Tensor] | None = None,
+        recency_half_lives: tuple[float, ...] | list[float] = (3.0, 5.0, 10.0, 20.0, 60.0, 120.0),
+        patch_recency_halflife: float = 6.0,
+        intraday_recency_halflife: float = 3.0,
+        output_profile: str = "forecast_incremental_path_v2",
+        cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
+    ) -> None:
+        super().__init__()
+        self.horizon = int(horizon)
+        self.cumulative_horizons = normalize_path20_cumulative_horizons(cumulative_horizons, horizon=self.horizon)
+        self.output_profile = normalize_path20_output_profile(output_profile)
+        if self.output_profile != "forecast_incremental_path_v2":
+            raise ValueError("date_slate_alpha_fusion_v1 requires forecast_incremental_path_v2 output_profile.")
+        self.input_dim = int(input_dim)
+        self.hidden_dim = int(hidden_dim)
+        self.router_temperature = max(float(router_temperature), 1.0e-4)
+        self.feature_group_names = STRUCTURED_ALPHA_V2_FEATURE_GROUPS
+        self.main_feature_group_names = tuple(name for name in self.feature_group_names if name != "intraday")
+        self.expert_names = ("local_tcn", "recent_patch_transformer", "multi_ewma")
+        self.intraday_recency_halflife = float(intraday_recency_halflife)
+
+        static_fields = tuple(str(item).strip() for item in (static_context_fields or ("exchange", "industry")) if str(item).strip())
+        if any(field == "symbol" for field in static_fields):
+            raise ValueError("date_slate_alpha_fusion_v1 does not accept symbol static context; use exchange,industry.")
+        missing_static = [field for field in ("exchange", "industry") if field not in static_fields]
+        if missing_static:
+            raise ValueError(f"date_slate_alpha_fusion_v1 requires exchange,industry static context; missing {missing_static}.")
+        self.static_context_fields = static_fields
+
+        provided_groups = dict(feature_group_indices or {})
+        used = torch.zeros((self.input_dim,), dtype=torch.bool)
+        group_index_tensors: list[torch.Tensor] = []
+        for group_name in self.feature_group_names:
+            idx = _as_long_index_tensor(provided_groups.get(group_name, ()))
+            idx = idx[(idx >= 0) & (idx < self.input_dim)].unique(sorted=True)
+            if idx.numel():
+                used[idx] = True
+            group_index_tensors.append(idx)
+        if not any(idx.numel() for idx in group_index_tensors):
+            group_index_tensors[0] = torch.arange(self.input_dim, dtype=torch.long)
+        elif not bool(used.all()):
+            remainder = torch.arange(self.input_dim, dtype=torch.long)[~used]
+            group_index_tensors[0] = torch.cat([group_index_tensors[0], remainder]).unique(sorted=True)
+        for group_pos, idx in enumerate(group_index_tensors):
+            self.register_buffer(f"_feature_group_indices_{group_pos}", idx, persistent=False)
+
+        self.group_encoders = nn.ModuleDict()
+        self.feature_group_counts: dict[str, int] = {}
+        for group_pos, group_name in enumerate(self.feature_group_names):
+            count = int(getattr(self, f"_feature_group_indices_{group_pos}").numel())
+            self.feature_group_counts[group_name] = count
+            if group_name == "intraday" or count <= 0:
+                continue
+            self.group_encoders[group_name] = nn.Sequential(
+                nn.LayerNorm(count),
+                nn.Linear(count, self.hidden_dim),
+                nn.GELU(),
+                nn.Dropout(float(dropout)),
+                nn.Linear(self.hidden_dim, self.hidden_dim),
+                nn.GELU(),
+            )
+        self.group_embeddings = nn.Parameter(torch.zeros(1, 1, len(self.main_feature_group_names), self.hidden_dim))
+        requested_heads = max(int(transformer_heads), 1)
+        heads = requested_heads if self.hidden_dim % requested_heads == 0 else 1
+        self.group_mixer = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(
+                d_model=self.hidden_dim,
+                nhead=heads,
+                dim_feedforward=self.hidden_dim * 2,
+                dropout=float(dropout),
+                activation="gelu",
+                batch_first=True,
+                norm_first=True,
+            ),
+            num_layers=1,
+            enable_nested_tensor=False,
+        )
+        self.group_weight_head = nn.Sequential(nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, 1))
+
+        self.static_encoder = StaticContextEncoder(
+            vocab_sizes=static_context_vocab_sizes,
+            embedding_dims=static_context_embedding_dims,
+            fields=self.static_context_fields,
+            dropout=static_context_dropout,
+        )
+        self.static_proj = nn.Sequential(
+            nn.LayerNorm(self.static_encoder.output_dim),
+            nn.Linear(self.static_encoder.output_dim, self.hidden_dim),
+            nn.GELU(),
+            nn.Dropout(float(dropout)),
+        )
+        self.context_builder = nn.Sequential(
+            nn.LayerNorm(self.hidden_dim * 4),
+            nn.Linear(self.hidden_dim * 4, self.hidden_dim),
+            nn.GELU(),
+            nn.Dropout(float(dropout)),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.GELU(),
+        )
+        self.sequence_norm = nn.LayerNorm(self.hidden_dim)
+        self.sequence_film = nn.Linear(self.hidden_dim, self.hidden_dim * 2)
+        self.sequence_rho = nn.Sequential(nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, 1), nn.Sigmoid())
+        nn.init.zeros_(self.sequence_film.weight)
+        nn.init.zeros_(self.sequence_film.bias)
+
+        self.tcn_encoder = TemporalConvAlphaEncoder(self.hidden_dim, dropout=dropout)
+        self.patch_encoder = RecencyAwarePatchTransformerPath20Encoder(
+            input_dim=self.hidden_dim,
+            hidden_dim=self.hidden_dim,
+            patch_sizes=tuple(int(item) for item in (patch_sizes or (4, 20)) if int(item) > 0),
+            num_layers=max(int(transformer_layers), 1),
+            num_heads=heads,
+            dropout=dropout,
+            recency_halflife=float(patch_recency_halflife),
+        )
+        self.ewma_encoder = MultiScaleEWMATrendEncoder(
+            self.hidden_dim,
+            self.hidden_dim,
+            half_lives=tuple(float(item) for item in recency_half_lives if float(item) > 0.0) or (3.0, 5.0, 10.0, 20.0, 60.0, 120.0),
+            dropout=dropout,
+        )
+        self.expert_id = nn.Parameter(torch.zeros(1, len(self.expert_names), self.hidden_dim))
+        self.context_token_proj = nn.Sequential(nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.hidden_dim))
+        self.router = nn.Sequential(
+            nn.LayerNorm(self.hidden_dim * 5),
+            nn.Linear(self.hidden_dim * 5, self.hidden_dim),
+            nn.GELU(),
+            nn.Dropout(float(dropout)),
+            nn.Linear(self.hidden_dim, len(self.expert_names)),
+        )
+        self.fusion_encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(
+                d_model=self.hidden_dim,
+                nhead=heads,
+                dim_feedforward=self.hidden_dim * 4,
+                dropout=float(dropout),
+                activation="gelu",
+                batch_first=True,
+                norm_first=True,
+            ),
+            num_layers=2,
+            enable_nested_tensor=False,
+        )
+        self.base_head = nn.Sequential(
+            nn.LayerNorm(self.hidden_dim * 4),
+            nn.Dropout(float(dropout)),
+            nn.Linear(self.hidden_dim * 4, self.hidden_dim),
+            nn.GELU(),
+            nn.Dropout(float(dropout)),
+            nn.Linear(self.hidden_dim, path20_forecast_output_dim(self.horizon, self.output_profile, self.cumulative_horizons)),
+        )
+
+        intraday_count = int(self.feature_group_counts.get("intraday", 0))
+        self.register_buffer("intraday_residual_enabled", torch.as_tensor(1.0 if intraday_count > 0 else 0.0), persistent=False)
+        intraday_summary_dim = max(intraday_count * 4, 1)
+        self.intraday_encoder = nn.Sequential(
+            nn.LayerNorm(intraday_summary_dim),
+            nn.Linear(intraday_summary_dim, max(self.hidden_dim // 2, 16)),
+            nn.GELU(),
+            nn.Dropout(float(dropout)),
+            nn.Linear(max(self.hidden_dim // 2, 16), self.hidden_dim),
+            nn.GELU(),
+        )
+        self.intraday_gate = nn.Sequential(
+            nn.LayerNorm(self.hidden_dim * 2),
+            nn.Linear(self.hidden_dim * 2, self.hidden_dim),
+            nn.GELU(),
+            nn.Linear(self.hidden_dim, self.horizon),
+            nn.Sigmoid(),
+        )
+        self.intraday_residual_head = nn.Sequential(
+            nn.LayerNorm(self.hidden_dim * 2),
+            nn.Linear(self.hidden_dim * 2, self.hidden_dim),
+            nn.GELU(),
+            nn.Dropout(float(dropout)),
+            nn.Linear(self.hidden_dim, self.horizon),
+        )
+        self.register_buffer("intraday_daily_decay", self._build_intraday_daily_decay(self.horizon), persistent=False)
+        nn.init.normal_(self.group_embeddings, std=0.02)
+        nn.init.normal_(self.expert_id, std=0.02)
+
+    @staticmethod
+    def _build_intraday_daily_decay(horizon: int) -> torch.Tensor:
+        days = torch.arange(1, int(horizon) + 1, dtype=torch.float32)
+        return torch.pow(torch.as_tensor(0.5, dtype=torch.float32), (days - 1.0) / 5.0).reshape(1, -1)
+
+    def _indices_for_group(self, group_name: str) -> torch.Tensor:
+        group_pos = self.feature_group_names.index(group_name)
+        return getattr(self, f"_feature_group_indices_{group_pos}")
+
+    def _select_group(self, x: torch.Tensor, group_name: str) -> torch.Tensor | None:
+        idx = self._indices_for_group(group_name)
+        if idx.numel() == 0:
+            return None
+        return torch.index_select(x, dim=-1, index=idx.to(device=x.device))
+
+    def _group_sequence(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if x.ndim == 2:
+            x = x.unsqueeze(1)
+        batch, steps, _ = x.shape
+        tokens: list[torch.Tensor] = []
+        for group_name in self.main_feature_group_names:
+            values = self._select_group(x, group_name)
+            if values is None or group_name not in self.group_encoders:
+                token = torch.zeros((batch, steps, self.hidden_dim), device=x.device, dtype=x.dtype)
+            else:
+                token = self.group_encoders[group_name](values)
+            tokens.append(token)
+        group_tokens = torch.stack(tokens, dim=2) + self.group_embeddings.to(device=x.device, dtype=x.dtype)
+        mixed = self.group_mixer(group_tokens.reshape(batch * steps, len(self.main_feature_group_names), self.hidden_dim))
+        mixed = mixed.reshape(batch, steps, len(self.main_feature_group_names), self.hidden_dim)
+        logits = self.group_weight_head(mixed).squeeze(-1)
+        weights = torch.softmax(logits, dim=-1)
+        sequence = torch.sum(mixed * weights.unsqueeze(-1), dim=2)
+        return sequence, mixed.mean(dim=1), weights.mean(dim=1)
+
+    def _static_hidden(self, static_context_ids: torch.Tensor | None, *, batch_size: int, device: torch.device) -> torch.Tensor:
+        static = self.static_encoder(static_context_ids, batch_size=int(batch_size), device=device)
+        return self.static_proj(static)
+
+    def _context_token(self, sequence: torch.Tensor, group_summary: torch.Tensor, static: torch.Tensor) -> torch.Tensor:
+        group_mean = group_summary.mean(dim=1)
+        context_positions = [
+            self.main_feature_group_names.index(name)
+            for name in ("market_regime", "industry_peer", "event_quality", "valuation_liquidity")
+            if name in self.main_feature_group_names
+        ]
+        context_group = group_summary[:, context_positions, :].mean(dim=1) if context_positions else group_mean
+        recent = sequence[:, -min(10, int(sequence.shape[1])) :, :].mean(dim=1)
+        long_mean = sequence.mean(dim=1)
+        return self.context_builder(torch.cat([static, context_group, recent, long_mean], dim=-1))
+
+    def _condition_sequence(self, sequence: torch.Tensor, context: torch.Tensor) -> torch.Tensor:
+        gamma, beta = self.sequence_film(context).chunk(2, dim=-1)
+        rho = self.sequence_rho(context).unsqueeze(1)
+        update = gamma.unsqueeze(1) * self.sequence_norm(sequence) + beta.unsqueeze(1)
+        return sequence + rho * update
+
+    def _expert_tokens(self, sequence: torch.Tensor) -> torch.Tensor:
+        return torch.stack(
+            [
+                self.tcn_encoder(sequence),
+                self.patch_encoder.encode(sequence),
+                self.ewma_encoder(sequence),
+            ],
+            dim=1,
+        )
+
+    def _router_input(self, tokens: torch.Tensor, context: torch.Tensor, group_summary: torch.Tensor) -> torch.Tensor:
+        return torch.cat(
+            [
+                tokens.mean(dim=1),
+                tokens.max(dim=1).values,
+                tokens.std(dim=1, unbiased=False),
+                context,
+                group_summary.mean(dim=1),
+            ],
+            dim=-1,
+        )
+
+    def _intraday_token(self, x: torch.Tensor, *, batch_size: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+        intraday = self._select_group(x, "intraday")
+        if intraday is None:
+            return torch.zeros((batch_size, self.hidden_dim), device=device, dtype=dtype)
+        steps = int(intraday.shape[1])
+        age = torch.arange(steps - 1, -1, -1, device=device, dtype=dtype)
+        weights = torch.pow(torch.as_tensor(0.5, device=device, dtype=dtype), age / max(self.intraday_recency_halflife, 1.0e-6))
+        weights = weights / weights.sum().clamp_min(torch.finfo(dtype).eps)
+        recent = torch.sum(intraday * weights.reshape(1, -1, 1), dim=1)
+        last = intraday[:, -1, :]
+        mean = intraday.mean(dim=1)
+        volatility = intraday.std(dim=1, unbiased=False)
+        return self.intraday_encoder(torch.cat([recent, last - mean, volatility, last], dim=-1))
+
+    @staticmethod
+    def _expert_diversity(tokens: torch.Tensor) -> torch.Tensor:
+        if int(tokens.shape[1]) < 2:
+            return tokens.new_zeros((tokens.shape[0],))
+        normed = F.normalize(tokens, dim=-1)
+        similarity = torch.matmul(normed, normed.transpose(1, 2))
+        mask = ~torch.eye(int(tokens.shape[1]), dtype=torch.bool, device=tokens.device).unsqueeze(0)
+        return (1.0 - similarity.masked_select(mask).reshape(tokens.shape[0], -1)).mean(dim=1)
+
+    def expert_weights(self, x: torch.Tensor, static_context_ids: torch.Tensor | None = None) -> torch.Tensor:
+        if x.ndim == 2:
+            x = x.unsqueeze(1)
+        sequence, group_summary, _ = self._group_sequence(x)
+        static = self._static_hidden(static_context_ids, batch_size=int(sequence.shape[0]), device=sequence.device)
+        context = self._context_token(sequence, group_summary, static)
+        tokens = self._expert_tokens(self._condition_sequence(sequence, context))
+        return torch.softmax(self.router(self._router_input(tokens, context, group_summary)) / self.router_temperature, dim=-1)
+
+    def forward(self, x: torch.Tensor, static_context_ids: torch.Tensor | None = None) -> dict[str, torch.Tensor]:
+        if x.ndim == 2:
+            x = x.unsqueeze(1)
+        sequence, group_summary, group_weights = self._group_sequence(x)
+        static = self._static_hidden(static_context_ids, batch_size=int(sequence.shape[0]), device=sequence.device)
+        context = self._context_token(sequence, group_summary, static)
+        conditioned = self._condition_sequence(sequence, context)
+        tokens = self._expert_tokens(conditioned)
+        router_weights = torch.softmax(self.router(self._router_input(tokens, context, group_summary)) / self.router_temperature, dim=-1)
+        gated_tokens = tokens * (1.0 + 0.25 * router_weights.unsqueeze(-1))
+        fusion_input = torch.cat(
+            [
+                self.context_token_proj(context).unsqueeze(1),
+                gated_tokens + self.expert_id.to(device=x.device, dtype=x.dtype),
+            ],
+            dim=1,
+        )
+        fused_tokens = self.fusion_encoder(fusion_input)
+        expert_fused = fused_tokens[:, 1:, :]
+        fused = torch.cat(
+            [
+                expert_fused.mean(dim=1),
+                torch.sum(expert_fused * router_weights.unsqueeze(-1), dim=1),
+                fused_tokens[:, 0, :],
+                group_summary.mean(dim=1),
+            ],
+            dim=-1,
+        )
+        raw = self.base_head(fused)
+        intraday_token = self._intraday_token(x, batch_size=int(x.shape[0]), device=x.device, dtype=x.dtype)
+        intraday_state = torch.cat([intraday_token, context], dim=-1)
+        intraday_gate = self.intraday_gate(intraday_state)
+        intraday_daily = (
+            self.intraday_residual_head(intraday_state)
+            * intraday_gate
+            * self.intraday_daily_decay.to(device=x.device, dtype=x.dtype)
+            * self.intraday_residual_enabled.to(device=x.device, dtype=x.dtype)
+        )
+        raw = raw.clone()
+        raw[:, : self.horizon] = raw[:, : self.horizon] + intraday_daily
+        output = _split_path20_outputs(raw, self.horizon, self.output_profile, self.cumulative_horizons)
+        entropy = -(router_weights * torch.log(torch.clamp(router_weights, min=1.0e-8))).sum(dim=-1)
+        output.update(
+            {
+                "router_weights": router_weights,
+                "router_entropy": entropy,
+                "expert_token_diversity": self._expert_diversity(tokens),
+                "feature_group_weights": group_weights,
+                "context_gate_abs_mean": self.sequence_film(context).abs().mean(dim=-1),
+                "intraday_residual_norm": intraday_daily.norm(dim=-1) / max(float(self.horizon) ** 0.5, 1.0),
             }
         )
         return output
