@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 136,
+  "record_count": 137,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -4577,6 +4577,44 @@
       "dataset_ids": [
         "policy_input_bundle__f926a496f69c61f6b92b5faf",
         "policy_pool_view__fc63d6b996abc7abde88bae7"
+      ]
+    },
+    {
+      "id": "path_policy_alpha_v2_date_slate_incremental_architecture_plan_20260621",
+      "date": "2026-06-21",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_date_slate_incremental_architecture_plan_20260621.md",
+      "tags": [
+        "path_policy",
+        "alpha_v2",
+        "date_slate",
+        "incremental_output",
+        "plan"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "qdp_alpha_v2_generalization_repair"
+      ],
+      "study_families": [
+        "date_slate_alpha_fusion_v1"
+      ],
+      "run_tags": [],
+      "verdict": "Status: `superseding_plan / implementation_not_started / research_only / execution_frozen`. Replaces the next default hot path from h192 stock-major no-stride full to date-slate pack + incremental output + prediction-first date-grouped alpha fusion. Numeric stability initially monitor/fail-fast only; no clipping/winsor/canonical mutation.",
+      "blockers": [
+        "Current stock-major batch rank loss is not same-date cross-sectional rank.",
+        "forecast_path_v1 cumulative aux and intraday residual semantics are not fully clean for the desired architecture.",
+        "h192 no-stride interrupted run produced all-NaN checkpoints; long runs need fail-fast diagnostics first.",
+        "Effective independent training evidence is closer to market dates/regimes than 6.05M IID rows."
+      ],
+      "next_allowed_actions": [
+        "Implement finite fail-fast diagnostics and bad-batch dump without changing tensor values.",
+        "Build qdp_date_slate_training_pack_v1 sidecar from the structured_alpha_v2 sidecar manifest.",
+        "Implement date-slate loader, forecast_incremental_path_v2 output profile, date_slate_alpha_fusion_v1 model, and date_grouped_alpha_score_v1 loss in phases.",
+        "Run smoke and throughput scout before any long formal run."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__f926a496f69c61f6b92b5faf"
       ]
     }
   ]
