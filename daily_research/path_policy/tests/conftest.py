@@ -11,7 +11,6 @@ DATA_HEAVY_FILES = {
 
 RESEARCH_SLOW_FILES = {
     "test_forecast_training.py",
-    "test_rl_protocol.py",
 }
 
 TRAINING_FILES = {

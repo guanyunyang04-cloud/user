@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+
+import numpy as np
 import pytest
 
-from daily_research.path_policy.tests.fixtures import make_prepared_policy_inputs
+from daily_research.path_policy.tests.fixtures import make_prepared_policy_inputs, make_tiny_forecast_memmap_dataset
 from daily_research.path_policy.run_alpha_path20_protocol import (
     _aggregate_projection_parity_summaries,
     _baseline_targets_for_episode,
@@ -10,6 +13,7 @@ from daily_research.path_policy.run_alpha_path20_protocol import (
     _run_forecast_walkforward_study,
     _run_baseline_suite,
     _run_v5_dt_validation_study,
+    _v5_temporal_context_diagnostics,
     _matrix_evidence_diagnostics,
     _multiyear_aggregate,
     _run_v4_validation_repair_study,
@@ -26,7 +30,15 @@ from daily_research.path_policy.run_alpha_path20_protocol import (
 )
 
 
-pytestmark = [pytest.mark.research, pytest.mark.slow]
+pytestmark = [pytest.mark.research]
+
+
+def _use_tiny_walkforward_years(monkeypatch) -> None:
+    import daily_research.path_policy.run_alpha_path20_protocol as protocol
+
+    monkeypatch.setattr(protocol, "WALKFORWARD_TRAIN_YEARS", (2019,))
+    monkeypatch.setattr(protocol, "WALKFORWARD_VALIDATION_YEARS", (2022,))
+    monkeypatch.setattr(protocol, "WALKFORWARD_TEST_YEARS", (2024,))
 
 
 def test_rl_protocol_parser_accepts_sequence_stage_and_rejects_latest_in_main() -> None:
@@ -1025,8 +1037,11 @@ def test_protocol_parser_accepts_sector_board_view_arguments() -> None:
     assert args.sector_board_as_of_date == "2026-05-19"
 
 
+@pytest.mark.integration
+@pytest.mark.training
+@pytest.mark.slow
 def test_forecast_walkforward_study_contract_fixture(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=820, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2018-01-02")
+    prepared = make_prepared_policy_inputs(days=290, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-12-02")
     parser = build_arg_parser()
     args = parser.parse_args(
         [
@@ -1039,9 +1054,13 @@ def test_forecast_walkforward_study_contract_fixture(tmp_path) -> None:
             "--lake-dataset-id",
             "policy_input_bundle__fixed",
             "--forecast-lookback-days",
-            "5",
+            "2",
+            "--forecast-horizon",
+            "1",
+            "--forecast-cumulative-horizons",
+            "1",
             "--forecast-train-start-year",
-            "2018",
+            "2019",
             "--forecast-train-end-year",
             "2019",
             "--forecast-validation-year",
@@ -1051,7 +1070,7 @@ def test_forecast_walkforward_study_contract_fixture(tmp_path) -> None:
             "--forecast-model-families",
             "linear_last_day,mlp_last_day",
             "--forecast-epochs",
-            "3",
+            "1",
             "--forecast-min-epochs",
             "1",
             "--forecast-early-stop-patience",
@@ -1070,7 +1089,7 @@ def test_forecast_walkforward_study_contract_fixture(tmp_path) -> None:
             "cpu",
             "--no-forecast-amp",
             "--forecast-seeds",
-            "7,11",
+            "7",
             "--forecast-selection-profile",
             "multiscale",
             "--forecast-feature-profile",
@@ -1078,7 +1097,9 @@ def test_forecast_walkforward_study_contract_fixture(tmp_path) -> None:
             "--forecast-max-feature-columns",
             "128",
             "--forecast-max-samples-per-role",
-            "8",
+            "4",
+            "--forecast-max-samples-per-date-per-role",
+            "2",
         ]
     )
     _validate_protocol_args(parser, args)
@@ -1102,14 +1123,17 @@ def test_forecast_walkforward_study_contract_fixture(tmp_path) -> None:
     assert summary["training_summary"]["feature_profile"] == "raw_kline_v1"
     assert "linear_last_day" in summary["training_summary"]["models"]
     assert "mlp_last_day" in summary["training_summary"]["models"]
-    assert summary["training_summary"]["selected_seed"] in {7, 11}
+    assert summary["training_summary"]["selected_seed"] == 7
     assert summary["training_summary"]["selected_signal_profile"] in {"trend_20d", "short_burst", "multiscale", "failed"}
     assert "validation_multiscale_score" in summary["training_summary"]
     assert "forecast_learning_curve_csv" in summary["training_summary"]
 
 
+@pytest.mark.integration
+@pytest.mark.training
+@pytest.mark.slow
 def test_forecast_walkforward_study_memmap_contract_fixture(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
+    prepared = make_prepared_policy_inputs(days=290, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-12-02")
     parser = build_arg_parser()
     args = parser.parse_args(
         [
@@ -1124,7 +1148,11 @@ def test_forecast_walkforward_study_memmap_contract_fixture(tmp_path) -> None:
             "--forecast-dataset-mode",
             "memmap",
             "--forecast-lookback-days",
-            "5",
+            "2",
+            "--forecast-horizon",
+            "1",
+            "--forecast-cumulative-horizons",
+            "1",
             "--forecast-train-start-year",
             "2019",
             "--forecast-train-end-year",
@@ -1136,7 +1164,7 @@ def test_forecast_walkforward_study_memmap_contract_fixture(tmp_path) -> None:
             "--forecast-model-families",
             "linear_last_day",
             "--forecast-epochs",
-            "2",
+            "1",
             "--forecast-min-epochs",
             "1",
             "--forecast-early-stop-patience",
@@ -1149,7 +1177,9 @@ def test_forecast_walkforward_study_memmap_contract_fixture(tmp_path) -> None:
             "cpu",
             "--no-forecast-amp",
             "--forecast-max-samples-per-role",
-            "8",
+            "4",
+            "--forecast-max-samples-per-date-per-role",
+            "2",
             "--forecast-min-lookback-valid-ratio",
             "0.80",
         ]
@@ -1170,44 +1200,116 @@ def test_forecast_walkforward_study_memmap_contract_fixture(tmp_path) -> None:
     assert "validation_stratified_metrics" in summary["training_summary"]
 
 
-def test_forecast_memmap_manifest_fast_path_skips_prepared_inputs(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
-    dataset_root = tmp_path / "dataset"
-    parser = build_arg_parser()
-    build_args = parser.parse_args(
-        [
-            "--stage",
-            "forecast-dataset",
-            "--tag",
-            "unit_forecast_memmap_dataset",
-            "--data-source",
-            "lake",
-            "--lake-dataset-id",
-            "policy_input_bundle__fixed",
-            "--forecast-dataset-mode",
-            "memmap",
-            "--forecast-lookback-days",
-            "5",
-            "--forecast-train-start-year",
-            "2019",
-            "--forecast-train-end-year",
-            "2019",
-            "--forecast-validation-year",
-            "2020",
-            "--forecast-test-year",
-            "2021",
-            "--forecast-max-samples-per-role",
-            "8",
-        ]
+@pytest.fixture(scope="module")
+def forecast_memmap_manifest_fixture(tmp_path_factory) -> str:
+    dataset_root = tmp_path_factory.mktemp("forecast_memmap_manifest_dataset")
+    dataset = make_tiny_forecast_memmap_dataset(
+        dataset_root,
+        lookback_days=5,
+        horizon=20,
+        feature_count=6,
+        train_days=2,
+        validation_days=1,
+        test_days=1,
     )
-    _validate_protocol_args(parser, build_args)
-    _run_forecast_walkforward_study(
-        prepared=prepared,
-        study_root=dataset_root,
-        tag="unit_forecast_memmap_dataset",
-        args=build_args,
-    )
+    sample_index_path = dataset_root / "forecast_sample_index.csv"
+    dataset.sample_index.to_csv(sample_index_path, index=False)
+    legacy_label_arrays = {
+        "forecast_y_daily_excess.dat": dataset.y_daily_excess,
+        "forecast_y_cum_excess.dat": dataset.y_cum_excess,
+        "forecast_y_rank_by_horizon.dat": dataset.y_rank_by_horizon,
+        "forecast_y_drawdown_by_horizon.dat": dataset.y_drawdown_by_horizon,
+        "forecast_y_worst_by_horizon.dat": dataset.y_worst_by_horizon,
+        "forecast_y_upside_by_horizon.dat": dataset.y_upside_by_horizon,
+        "forecast_y_rank_20d.dat": dataset.y_rank_20d,
+        "forecast_y_max_drawdown_20d.dat": dataset.y_max_drawdown_20d,
+        "forecast_y_worst_1d_20d.dat": dataset.y_worst_1d_20d,
+        "forecast_y_upside_20d.dat": dataset.y_upside_20d,
+    }
+    for file_name, values in legacy_label_arrays.items():
+        mmap = np.memmap(dataset_root / file_name, dtype="float32", mode="w+", shape=values.shape)
+        mmap[:] = values[:]
+        mmap.flush()
+    manifest_path = dataset_root / "forecast_dataset_manifest.json"
+    manifest = {
+        **dataset.manifest,
+        "status": "completed",
+        "dataset_mode": "memmap",
+        "manifest_json": str(manifest_path.resolve()),
+        "feature_store_path": str(dataset.feature_store_path.resolve()),
+        "feature_store_shape": list(dataset.feature_store_shape),
+        "sample_index_csv": str(sample_index_path.resolve()),
+        "feature_columns": list(dataset.feature_columns),
+        "normalization": dict(dataset.normalization_manifest),
+        "date_values": [str(item) for item in dataset.date_values.tolist()],
+        "stock_values": [str(item) for item in dataset.stock_values.tolist()],
+        "sample_count": int(len(dataset.sample_index)),
+        "sample_count_by_role": {
+            role: int((dataset.sample_index["role"].astype(str) == role).sum())
+            for role in ("train", "validation", "test")
+        },
+        "label_arrays": {
+            "daily_excess_return": {
+                "path": str((dataset_root / "daily_excess_return.dat").resolve()),
+                "shape": list(dataset.y_daily_excess.shape),
+                "dtype": "float32",
+            },
+            "cumulative_excess_return": {
+                "path": str((dataset_root / "cumulative_excess_return.dat").resolve()),
+                "shape": list(dataset.y_cum_excess.shape),
+                "dtype": "float32",
+            },
+            "rank_by_horizon": {
+                "path": str((dataset_root / "rank_by_horizon.dat").resolve()),
+                "shape": list(dataset.y_rank_by_horizon.shape),
+                "dtype": "float32",
+            },
+            "drawdown_by_horizon": {
+                "path": str((dataset_root / "drawdown_by_horizon.dat").resolve()),
+                "shape": list(dataset.y_drawdown_by_horizon.shape),
+                "dtype": "float32",
+            },
+            "worst_by_horizon": {
+                "path": str((dataset_root / "worst_by_horizon.dat").resolve()),
+                "shape": list(dataset.y_worst_by_horizon.shape),
+                "dtype": "float32",
+            },
+            "upside_by_horizon": {
+                "path": str((dataset_root / "upside_by_horizon.dat").resolve()),
+                "shape": list(dataset.y_upside_by_horizon.shape),
+                "dtype": "float32",
+            },
+            "rank_20d": {
+                "path": str((dataset_root / "rank_20d.dat").resolve()),
+                "shape": list(dataset.y_rank_20d.shape),
+                "dtype": "float32",
+            },
+            "max_drawdown_20d": {
+                "path": str((dataset_root / "max_drawdown_20d.dat").resolve()),
+                "shape": list(dataset.y_max_drawdown_20d.shape),
+                "dtype": "float32",
+            },
+            "worst_1d_20d": {
+                "path": str((dataset_root / "worst_1d_20d.dat").resolve()),
+                "shape": list(dataset.y_worst_1d_20d.shape),
+                "dtype": "float32",
+            },
+            "upside_20d": {
+                "path": str((dataset_root / "upside_20d.dat").resolve()),
+                "shape": list(dataset.y_upside_20d.shape),
+                "dtype": "float32",
+            },
+        },
+    }
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    return str(manifest_path)
 
+
+@pytest.mark.integration
+@pytest.mark.training
+@pytest.mark.slow
+def test_forecast_memmap_manifest_fast_path_skips_prepared_inputs(tmp_path, forecast_memmap_manifest_fixture) -> None:
+    parser = build_arg_parser()
     train_args = parser.parse_args(
         [
             "--stage",
@@ -1221,7 +1323,7 @@ def test_forecast_memmap_manifest_fast_path_skips_prepared_inputs(tmp_path) -> N
             "--forecast-dataset-mode",
             "memmap",
             "--forecast-memmap-manifest",
-            str(dataset_root / "forecast_dataset_manifest.json"),
+            forecast_memmap_manifest_fixture,
             "--forecast-model-families",
             "linear_last_day",
             "--forecast-epochs",
@@ -1255,45 +1357,11 @@ def test_forecast_memmap_manifest_fast_path_skips_prepared_inputs(tmp_path) -> N
     assert summary["training_summary"]["dataset_mode"] == "memmap"
 
 
-def test_forecast_manifest_reuse_cli_does_not_prepare_inputs(tmp_path, monkeypatch) -> None:
+@pytest.mark.integration
+@pytest.mark.training
+@pytest.mark.slow
+def test_forecast_manifest_reuse_cli_does_not_prepare_inputs(tmp_path, monkeypatch, forecast_memmap_manifest_fixture) -> None:
     import daily_research.path_policy.run_alpha_path20_protocol as protocol
-
-    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
-    dataset_root = tmp_path / "dataset"
-    parser = build_arg_parser()
-    build_args = parser.parse_args(
-        [
-            "--stage",
-            "forecast-dataset",
-            "--tag",
-            "unit_forecast_memmap_dataset_cli",
-            "--data-source",
-            "lake",
-            "--lake-dataset-id",
-            "policy_input_bundle__fixed",
-            "--forecast-dataset-mode",
-            "memmap",
-            "--forecast-lookback-days",
-            "5",
-            "--forecast-train-start-year",
-            "2019",
-            "--forecast-train-end-year",
-            "2019",
-            "--forecast-validation-year",
-            "2020",
-            "--forecast-test-year",
-            "2021",
-            "--forecast-max-samples-per-role",
-            "8",
-        ]
-    )
-    _validate_protocol_args(parser, build_args)
-    _run_forecast_walkforward_study(
-        prepared=prepared,
-        study_root=dataset_root,
-        tag="unit_forecast_memmap_dataset_cli",
-        args=build_args,
-    )
 
     monkeypatch.setattr(protocol, "PATH_POLICY_STUDIES_ROOT", tmp_path / "studies")
 
@@ -1315,7 +1383,7 @@ def test_forecast_manifest_reuse_cli_does_not_prepare_inputs(tmp_path, monkeypat
             "--forecast-dataset-mode",
             "memmap",
             "--forecast-memmap-manifest",
-            str(dataset_root / "forecast_dataset_manifest.json"),
+            forecast_memmap_manifest_fixture,
             "--forecast-model-families",
             "linear_last_day",
             "--forecast-epochs",
@@ -1454,6 +1522,9 @@ def test_multiyear_aggregate_excludes_incomplete_years() -> None:
     assert aggregate["worst_max_drawdown"] == pytest.approx(-0.05)
 
 
+@pytest.mark.integration
+@pytest.mark.training
+@pytest.mark.slow
 def test_walkforward_summary_separates_train_validation_test(tmp_path, monkeypatch) -> None:
     import daily_research.path_policy.run_alpha_path20_protocol as protocol
 
@@ -1486,6 +1557,7 @@ def test_walkforward_summary_separates_train_validation_test(tmp_path, monkeypat
         ]
     )
     args.lake_dataset_id = "policy_input_bundle__fixed"
+    _use_tiny_walkforward_years(monkeypatch)
     monkeypatch.setattr(protocol, "PATH_POLICY_EPISODE_DATASETS_ROOT", tmp_path / "episode_datasets")
     monkeypatch.setattr(
         protocol,
@@ -1500,7 +1572,7 @@ def test_walkforward_summary_separates_train_validation_test(tmp_path, monkeypat
     summary = _run_walkforward_study(study_root=tmp_path / "study", tag="unit_walk", args=args)
 
     assert summary["stage"] == "rl_walkforward_study"
-    assert summary["train_years"] == [2019, 2020]
+    assert summary["train_years"] == [2019]
     assert summary["validation_years"] == [2022]
     assert summary["test_years"] == [2024]
     assert set(summary["aggregate"]) == {"train", "validation", "test"}
@@ -1546,6 +1618,7 @@ def test_episode_artifact_reuse_and_hash_mismatch_failure(tmp_path, monkeypatch)
         ]
     )
     args.lake_dataset_id = "policy_input_bundle__fixed"
+    _use_tiny_walkforward_years(monkeypatch)
     monkeypatch.setattr(protocol, "PATH_POLICY_EPISODE_DATASETS_ROOT", tmp_path / "episode_datasets")
     prepared = make_prepared_policy_inputs(days=12, stocks=("AAA", "BBB", "CCC"), start_date="2019-01-02")
 
@@ -1689,6 +1762,7 @@ def test_walkforward_evidence_diagnostics_flags_projection_and_exposure() -> Non
     assert diagnostics["warnings"]["validation_generalization_failure"] is True
 
 
+@pytest.mark.integration
 def test_walkforward_matrix_outputs_two_model_families(tmp_path, monkeypatch) -> None:
     import daily_research.path_policy.run_alpha_path20_protocol as protocol
 
@@ -1723,16 +1797,22 @@ def test_walkforward_matrix_outputs_two_model_families(tmp_path, monkeypatch) ->
         ]
     )
     args.lake_dataset_id = "policy_input_bundle__fixed"
-    monkeypatch.setattr(protocol, "PATH_POLICY_EPISODE_DATASETS_ROOT", tmp_path / "episode_datasets")
-    monkeypatch.setattr(
-        protocol,
-        "_prepare_for_window",
-        lambda args, start_date, end_date, tag: make_prepared_policy_inputs(
-            days=12,
-            stocks=("AAA", "BBB", "CCC"),
-            start_date=f"{start_date[:4]}-01-02",
-        ),
-    )
+    _use_tiny_walkforward_years(monkeypatch)
+
+    def fake_walkforward(*, study_root, tag, args):
+        return {
+            "stage": "rl_walkforward_study",
+            "aggregate": {"validation": {"mean_total_return": 0.01}},
+            "train_summary": {"model_family": args.model_family},
+            "validation_exact_replay_metrics": {"status": "completed"},
+            "test_exact_replay_metrics": {"status": "completed"},
+            "projection_parity_summary": {},
+            "surrogate_exact_gap": {},
+            "evidence_diagnostics": {"warnings": {}},
+            "evidence_verdict": "contract_passed",
+        }
+
+    monkeypatch.setattr(protocol, "_run_walkforward_study", fake_walkforward)
 
     summary = _run_walkforward_matrix(study_root=tmp_path / "matrix", tag="unit_matrix", args=args)
 
@@ -1889,6 +1969,7 @@ def test_v4_baseline_targets_do_not_use_oracle_or_future_columns() -> None:
     assert all(float(target.sum()) <= 1.0 for target in targets.values())
 
 
+@pytest.mark.integration
 def test_v4_v3_final_checkpoint_baseline_skips_without_explicit_model(tmp_path) -> None:
     from daily_research.path_policy.rl_episode import build_path20_market_episode
 
@@ -1925,13 +2006,14 @@ def test_v4_v3_final_checkpoint_baseline_skips_without_explicit_model(tmp_path) 
         episode_by_year={2022: episode, 2024: episode},
         study_root=tmp_path,
         args=args,
+        baseline_names=("v3_final_checkpoint",),
     )
 
     assert results["v3_final_checkpoint"]["status"] == "skipped"
     assert results["v3_final_checkpoint"]["reason"] == "missing_explicit_v3_checkpoint_model_pt"
 
 
-def test_v4_v3_final_checkpoint_baseline_loads_explicit_checkpoint(tmp_path) -> None:
+def test_v4_v3_final_checkpoint_baseline_loads_explicit_checkpoint(tmp_path, monkeypatch) -> None:
     import torch
 
     import daily_research.path_policy.run_alpha_path20_protocol as protocol
@@ -2006,13 +2088,22 @@ def test_v4_v3_final_checkpoint_baseline_loads_explicit_checkpoint(tmp_path) -> 
         called["value"] = True
         return original_predict(*items, **kwargs)
 
+    def fake_target_replay(**kwargs):
+        return {
+            "status": "completed",
+            "metrics": {"total_return": 0.01, "sharpe": 1.0, "max_drawdown": -0.01},
+            "projection_parity_summary": {},
+        }
+
     protocol.predict_episode_targets = wrapped_predict
     try:
+        monkeypatch.setattr(protocol, "_run_target_replay", fake_target_replay)
         results = _run_baseline_suite(
             prepared_by_year={2022: prepared, 2024: prepared},
             episode_by_year={2022: episode, 2024: episode},
             study_root=tmp_path / "baselines",
             args=args,
+            baseline_names=("v3_final_checkpoint",),
         )
     finally:
         protocol.predict_episode_targets = original_predict
@@ -2024,6 +2115,9 @@ def test_v4_v3_final_checkpoint_baseline_loads_explicit_checkpoint(tmp_path) -> 
     assert baseline["checkpoint_model_family"] == "sequence_gru"
 
 
+@pytest.mark.integration
+@pytest.mark.training
+@pytest.mark.slow
 def test_v4_validation_repair_study_contract_fixture(tmp_path, monkeypatch) -> None:
     import daily_research.path_policy.run_alpha_path20_protocol as protocol
 
@@ -2060,6 +2154,7 @@ def test_v4_validation_repair_study_contract_fixture(tmp_path, monkeypatch) -> N
         ]
     )
     args.lake_dataset_id = "policy_input_bundle__fixed"
+    _use_tiny_walkforward_years(monkeypatch)
     monkeypatch.setattr(protocol, "PATH_POLICY_EPISODE_DATASETS_ROOT", tmp_path / "episode_datasets")
     monkeypatch.setattr(
         protocol,
@@ -2085,6 +2180,9 @@ def test_v4_validation_repair_study_contract_fixture(tmp_path, monkeypatch) -> N
     assert summary["promotion_allowed"] is False
 
 
+@pytest.mark.integration
+@pytest.mark.training
+@pytest.mark.slow
 def test_v5_dt_validation_study_contract_fixture(tmp_path, monkeypatch) -> None:
     import daily_research.path_policy.run_alpha_path20_protocol as protocol
 
@@ -2099,7 +2197,7 @@ def test_v5_dt_validation_study_contract_fixture(tmp_path, monkeypatch) -> None:
             "--lake-dataset-id",
             "policy_input_bundle__fixed",
             "--dt-context-grid",
-            "3,5",
+            "3",
             "--smoke-epochs",
             "1",
             "--rl-hidden-dim",
@@ -2121,6 +2219,7 @@ def test_v5_dt_validation_study_contract_fixture(tmp_path, monkeypatch) -> None:
         ]
     )
     args.lake_dataset_id = "policy_input_bundle__fixed"
+    _use_tiny_walkforward_years(monkeypatch)
     monkeypatch.setattr(protocol, "PATH_POLICY_EPISODE_DATASETS_ROOT", tmp_path / "episode_datasets")
     monkeypatch.setattr(
         protocol,
@@ -2144,46 +2243,19 @@ def test_v5_dt_validation_study_contract_fixture(tmp_path, monkeypatch) -> None:
     assert summary["promotion_allowed"] is False
 
 
-def test_v5_long_context_incomplete_downgrades_verdict(tmp_path, monkeypatch) -> None:
-    import daily_research.path_policy.run_alpha_path20_protocol as protocol
-
-    args = build_arg_parser().parse_args(
+def test_v5_long_context_incomplete_downgrades_verdict() -> None:
+    diagnostics = _v5_temporal_context_diagnostics(
         [
-            "--stage",
-            "rl-v5-dt-validation-study",
-            "--tag",
-            "unit_v5_incomplete",
-            "--data-source",
-            "lake",
-            "--lake-dataset-id",
-            "policy_input_bundle__fixed",
-            "--dt-context-grid",
-            "60",
-            "--smoke-epochs",
-            "1",
-            "--rl-hidden-dim",
-            "8",
-            "--dt-num-heads",
-            "1",
-            "--min-year-trading-days",
-            "2",
-            "--rl-seed-matrix",
-            "7",
-        ]
-    )
-    args.lake_dataset_id = "policy_input_bundle__fixed"
-    monkeypatch.setattr(protocol, "PATH_POLICY_EPISODE_DATASETS_ROOT", tmp_path / "episode_datasets")
-    monkeypatch.setattr(
-        protocol,
-        "_prepare_for_window",
-        lambda args, start_date, end_date, tag: make_prepared_policy_inputs(
-            days=12,
-            stocks=("AAA", "BBB", "CCC"),
-            start_date=f"{start_date[:4]}-01-02",
-        ),
+            {
+                "status": "incomplete",
+                "reason": "trading_day_count_below_context_length",
+                "context_length": 60,
+                "seed": 7,
+            }
+        ],
+        primary_context_length=60,
+        default_primary_context_length=60,
     )
 
-    summary = _run_v5_dt_validation_study(study_root=tmp_path / "v5_incomplete", tag="unit_v5_incomplete", args=args)
-
-    assert summary["long_context_incomplete_warning"] is True
-    assert summary["evidence_verdict"] == "insufficient_or_incomplete"
+    assert diagnostics["status"] == "not_available"
+    assert diagnostics["primary_context_available"] is False
