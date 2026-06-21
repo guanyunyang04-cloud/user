@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 138,
+  "record_count": 140,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -4652,6 +4652,82 @@
         "Run real CUDA throughput scout on qdp_date_slate_training_pack_v1 with D=128, forecast_incremental_path_v2, date_grouped_alpha_score_v1, exchange/industry static context, and finite_guard enabled.",
         "Compare date-slate shapes such as 1x256, 1x512, and 2x256 if memory permits.",
         "If throughput and finite stability are acceptable, launch first 3-6 epoch formal research run with validation_loss selection and final validation/test predictions.",
+        "Keep active/live/default/paper/broker artifacts frozen."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__f926a496f69c61f6b92b5faf",
+        "policy_pool_view__fc63d6b996abc7abde88bae7"
+      ]
+    },
+    {
+      "id": "path_policy_test_runtime_optimization_20260621",
+      "date": "2026-06-21",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_test_runtime_optimization_20260621.md",
+      "tags": [
+        "path_policy",
+        "tests",
+        "runtime",
+        "tooling"
+      ],
+      "workflow": "research_tooling",
+      "research_programs": [
+        "qdp_alpha_v2_generalization_repair"
+      ],
+      "study_families": [
+        "test_runtime_optimization"
+      ],
+      "run_tags": [],
+      "verdict": "Status: test_runtime_optimized / research_tooling / no_strategy_change.; test_rl_protocol.py full runtime improved from 440.51s to 162.22s; fast non-slow protocol loop is 13.65s; retained slow e2e smoke is 154.85s.; No model behavior, model-quality evidence, active artifact, QDP registry, live/default, paper/broker, or execution behavior changed.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Use pytest daily_research/path_policy/tests/test_rl_protocol.py -q -m \"not slow\" for fast protocol checks.",
+        "Use pytest daily_research/path_policy/tests/test_rl_protocol.py -q -m slow for retained end-to-end forecast/RL protocol smoke.",
+        "Use full test_rl_protocol.py when validating protocol/test refactors that may affect both fast contracts and slow smoke."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_alpha_v2_date_slate_cuda_throughput_scout_20260621",
+      "date": "2026-06-21",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_date_slate_cuda_throughput_scout_20260621.md",
+      "tags": [
+        "path_policy",
+        "alpha_v2",
+        "date_slate",
+        "cuda",
+        "throughput",
+        "stability"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "qdp_alpha_v2_generalization_repair"
+      ],
+      "study_families": [
+        "date_slate_alpha_fusion_v1",
+        "cuda_throughput_scout"
+      ],
+      "run_tags": [
+        "qdp_alpha_v2_date_slate_cuda_throughput_d128_1x256_20260621_01",
+        "qdp_alpha_v2_date_slate_cuda_throughput_d128_noamp_dense_stride20_1x256_20260621_01",
+        "qdp_alpha_v2_date_slate_cuda_throughput_d128_noamp_dense_stride20_1x256_b64_20260621_01",
+        "qdp_alpha_v2_date_slate_cuda_throughput_d128_noamp_dense_stride20_1x512_b64_20260621_01",
+        "qdp_alpha_v2_date_slate_cuda_throughput_d128_noamp_dense_stride20_2x256_b64_20260621_01",
+        "qdp_alpha_v2_date_slate_cuda_throughput_d128_noamp_dense_stride20_1x384_b64_20260621_01"
+      ],
+      "verdict": "Status: cuda_throughput_scout_completed / stability_constraints_found / research_only / execution_frozen.; Safe completed configuration is D=128, 1x256, no AMP, forecast_batch_size=64, finite_guard enabled, dense train_date_stride=20 with max_samples_per_date_per_role=256.; Completed run throughput: 119.615 train samples/s, epoch_seconds 310.328 for 37,120 train rows.; AMP produced nonfinite_grad.base_head.5.weight; effective batch 384/512 produced CUDA invalid configuration argument in group-mixer attention.; This is throughput/stability evidence only, not model-quality evidence.",
+      "blockers": [
+        "AMP is not safe under the current contract on RTX 2060 without scaler/normalization repair.",
+        "Effective batch size 384/512 is not safe because group-mixer attention flattens batch*steps and trips CUDA invalid configuration.",
+        "Representative formal runtime depends on whether per-date cap 256 is accepted or a fuller date-stock coverage policy is required."
+      ],
+      "next_allowed_actions": [
+        "If launching immediately, use D=128, 1x256, no AMP, forecast_batch_size=64, finite_guard enabled.",
+        "Before larger slate batches, implement or test group-mixer chunking / safer attention path.",
+        "Before using AMP, repair or bound AMP scaler/normalization stability and rerun finite-guard scout.",
         "Keep active/live/default/paper/broker artifacts frozen."
       ],
       "active_artifact_impact": "unchanged",
