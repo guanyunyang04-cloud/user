@@ -291,6 +291,44 @@ def test_structured_alpha_v2_uses_group_tokens_context_conditioning_and_intraday
     assert torch.allclose(prediction["feature_group_weights"].sum(dim=-1), torch.ones(4), atol=1.0e-6)
 
 
+def test_structured_alpha_v2_group_mixer_chunking_is_equivalent() -> None:
+    feature_groups = {
+        "daily_price_volume": (0, 1),
+        "cross_section": (2,),
+        "market_regime": (3,),
+        "industry_peer": (4,),
+        "valuation_liquidity": (5,),
+        "event_quality": (6,),
+        "intraday": (7, 8),
+    }
+    model = HybridStructuredAlphaV2Forecaster(
+        input_dim=9,
+        hidden_dim=12,
+        horizon=20,
+        dropout=0.0,
+        gru_layers=1,
+        transformer_layers=1,
+        transformer_heads=3,
+        patch_sizes=(2,),
+        feature_group_indices=feature_groups,
+        static_context_vocab_sizes={"exchange": 4, "industry": 6},
+        static_context_embedding_dims={"exchange": 2, "industry": 3},
+        static_context_fields=("exchange", "industry"),
+        group_mixer_chunk_size=1000,
+    )
+    model.eval()
+    x = torch.randn(5, 7, 9)
+
+    with torch.no_grad():
+        model.group_mixer_chunk_size = 1000
+        unchunked = model._group_sequence(x)
+        model.group_mixer_chunk_size = 3
+        chunked = model._group_sequence(x)
+
+    for left, right in zip(unchunked, chunked, strict=True):
+        assert torch.allclose(left, right, atol=1.0e-6)
+
+
 def test_structured_alpha_v2_rejects_symbol_static_context() -> None:
     try:
         HybridStructuredAlphaV2Forecaster(
@@ -378,6 +416,54 @@ def test_date_slate_alpha_fusion_v1_uses_incremental_output_and_symbol_free_cont
         assert "symbol" in str(exc)
     else:
         raise AssertionError("date_slate_alpha_fusion_v1 must reject symbol static context")
+
+
+def test_date_slate_alpha_fusion_v1_group_mixer_chunking_is_equivalent_and_large_batch_safe() -> None:
+    feature_groups = {
+        "daily_price_volume": (0, 1),
+        "cross_section": (2,),
+        "market_regime": (3,),
+        "industry_peer": (4,),
+        "valuation_liquidity": (5,),
+        "event_quality": (6,),
+        "intraday": (7, 8),
+    }
+    model = DateSlateAlphaFusionV1Forecaster(
+        input_dim=9,
+        hidden_dim=12,
+        horizon=20,
+        dropout=0.0,
+        transformer_layers=1,
+        transformer_heads=3,
+        patch_sizes=(2,),
+        feature_group_indices=feature_groups,
+        static_context_vocab_sizes={"exchange": 4, "industry": 6},
+        static_context_embedding_dims={"exchange": 2, "industry": 3},
+        static_context_fields=("exchange", "industry"),
+        cumulative_horizons=PATH20_DEFAULT_CUMULATIVE_HORIZONS,
+        group_mixer_chunk_size=1000,
+    )
+    model.eval()
+    x = torch.randn(5, 7, 9)
+
+    with torch.no_grad():
+        model.group_mixer_chunk_size = 1000
+        unchunked = model._group_sequence(x)
+        model.group_mixer_chunk_size = 3
+        chunked = model._group_sequence(x)
+
+    for left, right in zip(unchunked, chunked, strict=True):
+        assert torch.allclose(left, right, atol=1.0e-6)
+
+    large_x = torch.randn(18, 7, 9)
+    large_static_ids = torch.randint(0, 3, (18, 2), dtype=torch.long)
+    with torch.no_grad():
+        model.group_mixer_chunk_size = 5
+        large_prediction = model(large_x, static_context_ids=large_static_ids)
+
+    assert large_prediction["mu"].shape == (18, 20)
+    assert torch.isfinite(large_prediction["mu"]).all()
+    assert torch.isfinite(large_prediction["router_weights"]).all()
 
 
 def test_regime_routed_multi_expert_forecaster_emits_decision_contract_and_router_diagnostics() -> None:

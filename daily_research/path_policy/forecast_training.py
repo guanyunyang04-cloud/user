@@ -24,6 +24,7 @@ from daily_research.path_policy.forecast_dataset import (
 )
 from daily_research.path_policy.labels import PATH20_CUMULATIVE_HORIZONS, PATH20_HORIZON
 from daily_research.path_policy.models import (
+    DEFAULT_GROUP_MIXER_CHUNK_SIZE,
     DLinearPath20Forecaster,
     DateSlateAlphaFusionV1Forecaster,
     ExpertFusionPath20Forecaster,
@@ -922,6 +923,7 @@ def make_forecast_model(
     static_context_dropout: float = 0.20,
     intraday_feature_indices: tuple[int, ...] | list[int] | None = None,
     feature_group_indices: dict[str, tuple[int, ...] | list[int]] | None = None,
+    group_mixer_chunk_size: int = DEFAULT_GROUP_MIXER_CHUNK_SIZE,
     slot_count: int = 8,
     output_profile: str = "forecast_path_v1",
 ) -> nn.Module:
@@ -1095,6 +1097,7 @@ def make_forecast_model(
             static_context_fields=static_fields,
             static_context_dropout=static_context_dropout,
             feature_group_indices=feature_group_indices,
+            group_mixer_chunk_size=int(group_mixer_chunk_size),
             output_profile=output_profile,
             cumulative_horizons=resolved_horizons,
         )
@@ -1120,6 +1123,7 @@ def make_forecast_model(
             static_context_fields=static_fields,
             static_context_dropout=static_context_dropout,
             feature_group_indices=feature_group_indices,
+            group_mixer_chunk_size=int(group_mixer_chunk_size),
             output_profile=output_profile,
             cumulative_horizons=resolved_horizons,
         )
@@ -1653,6 +1657,17 @@ def _validate_forecast_resume_checkpoint(
             expected_value == {} or not bool(dict(expected_value or {}).get("enabled", False))
         ):
             continue
+        if key == "model_config":
+            actual_model_config = dict(actual.get(key, {}) or {})
+            expected_model_config = dict(expected_value or {})
+            if (
+                "group_mixer_chunk_size" not in actual_model_config
+                and int(expected_model_config.get("group_mixer_chunk_size", DEFAULT_GROUP_MIXER_CHUNK_SIZE))
+                == DEFAULT_GROUP_MIXER_CHUNK_SIZE
+            ):
+                actual_model_config["group_mixer_chunk_size"] = DEFAULT_GROUP_MIXER_CHUNK_SIZE
+            if actual_model_config == expected_model_config:
+                continue
         if actual.get(key) != expected_value:
             raise ValueError(
                 f"forecast resume checkpoint {key} mismatch: "
@@ -3973,6 +3988,7 @@ def _model_config_for_training(
                 ],
                 "fusion_layers": 2,
                 "group_mixer_layers": 1,
+                "group_mixer_chunk_size": DEFAULT_GROUP_MIXER_CHUNK_SIZE,
                 "router_temperature": 1.0,
                 "recency_half_lives": [3.0, 5.0, 10.0, 20.0, 60.0, 120.0],
                 "patch_recency_halflife": 6.0,
@@ -4021,6 +4037,7 @@ def _model_config_for_training(
                 ],
                 "fusion_layers": 2,
                 "group_mixer_layers": 1,
+                "group_mixer_chunk_size": DEFAULT_GROUP_MIXER_CHUNK_SIZE,
                 "router_use": "residual_gate_and_pooling_bias_not_pre_fusion_hard_suppression",
                 "required_static_context_fields": ["exchange", "industry"],
                 "required_output_profile": "forecast_incremental_path_v2",

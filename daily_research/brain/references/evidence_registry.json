@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 140,
+  "record_count": 141,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -4728,6 +4728,51 @@
         "If launching immediately, use D=128, 1x256, no AMP, forecast_batch_size=64, finite_guard enabled.",
         "Before larger slate batches, implement or test group-mixer chunking / safer attention path.",
         "Before using AMP, repair or bound AMP scaler/normalization stability and rerun finite-guard scout.",
+        "Keep active/live/default/paper/broker artifacts frozen."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__f926a496f69c61f6b92b5faf",
+        "policy_pool_view__fc63d6b996abc7abde88bae7"
+      ]
+    },
+    {
+      "id": "path_policy_alpha_v2_date_slate_group_mixer_chunking_20260621",
+      "date": "2026-06-21",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_date_slate_group_mixer_chunking_20260621.md",
+      "tags": [
+        "path_policy",
+        "alpha_v2",
+        "date_slate",
+        "cuda",
+        "throughput",
+        "stability",
+        "implementation"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "qdp_alpha_v2_generalization_repair"
+      ],
+      "study_families": [
+        "date_slate_alpha_fusion_v1",
+        "cuda_throughput_scout",
+        "group_mixer_chunking"
+      ],
+      "run_tags": [
+        "qdp_alpha_v2_date_slate_cuda_chunked_throughput_d128_noamp_dense_stride20_1x512_b64_20260621_01",
+        "qdp_alpha_v2_date_slate_cuda_chunked32768_throughput_d128_noamp_stride60_2x256_b64_20260621_01",
+        "qdp_alpha_v2_date_slate_cuda_chunked65000_throughput_d128_noamp_stride60_1x512_b64_20260621_01"
+      ],
+      "verdict": "Status: throughput_blocker_repaired / large_slate_shape_unblocked / throughput_not_improved / research_only / execution_frozen.; group_mixer chunking repairs CUDA invalid configuration argument for 1x512 and 2x256 by chunking only batch*steps independent rows.; 1x512 and 2x256 complete but are slower than 1x256; chunk_size 65000 OOMs on RTX 2060, so default remains 32768.; This is throughput/stability evidence only, not model-quality evidence.",
+      "blockers": [
+        "1x512 and 2x256 are not recommended as speed settings because measured throughput is below the 1x256 baseline.",
+        "group_mixer_chunk_size=65000 is unsafe on RTX 2060 6GB due CUDA OOM.",
+        "AMP remains unsafe until scaler/normalization stability is repaired and finite-guard scout passes."
+      ],
+      "next_allowed_actions": [
+        "For immediate formal research training, use D=128 / 1x256 / no AMP / forecast_batch_size=64 / finite_guard / group_mixer_chunk_size=32768.",
+        "If more speed is needed first, optimize loader locality, validation-loss evaluation batching, full-date sampling policy, or a lighter group mixer.",
         "Keep active/live/default/paper/broker artifacts frozen."
       ],
       "active_artifact_impact": "unchanged",

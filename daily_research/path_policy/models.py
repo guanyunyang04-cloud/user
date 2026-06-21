@@ -11,6 +11,7 @@ PATH20_FORECAST_AUX_DIM = 20
 PATH20_DECISION_AUX_DIM = 15
 PATH20_DEFAULT_CUMULATIVE_HORIZONS: tuple[int, ...] = (1, 3, 5, 10, 20)
 PATH20_FORECAST_OUTPUT_PROFILES = ("forecast_path_v1", "decision_utility_v1", "forecast_incremental_path_v2")
+DEFAULT_GROUP_MIXER_CHUNK_SIZE = 32768
 
 
 def normalize_path20_output_profile(output_profile: str | None) -> str:
@@ -63,6 +64,16 @@ def path20_forecast_output_dim(
     if profile == "decision_utility_v1":
         output_dim += path20_decision_aux_dim(cumulative_horizons, horizon=int(horizon))
     return output_dim
+
+
+def _chunked_sequence_module(module: nn.Module, x: torch.Tensor, *, chunk_size: int) -> torch.Tensor:
+    resolved_chunk_size = max(int(chunk_size), 1)
+    if int(x.shape[0]) <= resolved_chunk_size:
+        return module(x)
+    return torch.cat(
+        [module(x[start : start + resolved_chunk_size]) for start in range(0, int(x.shape[0]), resolved_chunk_size)],
+        dim=0,
+    )
 
 
 @dataclass(frozen=True)
@@ -970,6 +981,7 @@ class HybridStructuredAlphaV2Forecaster(nn.Module):
         transformer_heads: int = 6,
         patch_sizes: tuple[int, ...] | list[int] | None = None,
         router_temperature: float = 1.0,
+        group_mixer_chunk_size: int = DEFAULT_GROUP_MIXER_CHUNK_SIZE,
         static_context_vocab_sizes: dict[str, int] | None = None,
         static_context_embedding_dims: dict[str, int] | None = None,
         static_context_fields: tuple[str, ...] | list[str] | None = None,
@@ -990,6 +1002,7 @@ class HybridStructuredAlphaV2Forecaster(nn.Module):
         self.input_dim = int(input_dim)
         self.hidden_dim = int(hidden_dim)
         self.router_temperature = max(float(router_temperature), 1.0e-4)
+        self.group_mixer_chunk_size = max(int(group_mixer_chunk_size), 1)
         self.feature_group_names = STRUCTURED_ALPHA_V2_FEATURE_GROUPS
         self.main_feature_group_names = tuple(name for name in self.feature_group_names if name != "intraday")
         self.expert_names = ("gru_continuity", "patch_recency", "multi_ewma", "local_tcn")
@@ -1209,7 +1222,11 @@ class HybridStructuredAlphaV2Forecaster(nn.Module):
                 token = self.group_encoders[group_name](values)
             tokens.append(token)
         group_tokens = torch.stack(tokens, dim=2) + self.group_embeddings.to(device=x.device, dtype=x.dtype)
-        mixed = self.group_mixer(group_tokens.reshape(batch * steps, len(self.main_feature_group_names), self.hidden_dim))
+        mixed = _chunked_sequence_module(
+            self.group_mixer,
+            group_tokens.reshape(batch * steps, len(self.main_feature_group_names), self.hidden_dim),
+            chunk_size=self.group_mixer_chunk_size,
+        )
         mixed = mixed.reshape(batch, steps, len(self.main_feature_group_names), self.hidden_dim)
         logits = self.group_weight_head(mixed).squeeze(-1)
         weights = torch.softmax(logits, dim=-1)
@@ -1372,6 +1389,7 @@ class DateSlateAlphaFusionV1Forecaster(nn.Module):
         transformer_heads: int = 4,
         patch_sizes: tuple[int, ...] | list[int] | None = None,
         router_temperature: float = 1.0,
+        group_mixer_chunk_size: int = DEFAULT_GROUP_MIXER_CHUNK_SIZE,
         static_context_vocab_sizes: dict[str, int] | None = None,
         static_context_embedding_dims: dict[str, int] | None = None,
         static_context_fields: tuple[str, ...] | list[str] | None = None,
@@ -1392,6 +1410,7 @@ class DateSlateAlphaFusionV1Forecaster(nn.Module):
         self.input_dim = int(input_dim)
         self.hidden_dim = int(hidden_dim)
         self.router_temperature = max(float(router_temperature), 1.0e-4)
+        self.group_mixer_chunk_size = max(int(group_mixer_chunk_size), 1)
         self.feature_group_names = STRUCTURED_ALPHA_V2_FEATURE_GROUPS
         self.main_feature_group_names = tuple(name for name in self.feature_group_names if name != "intraday")
         self.expert_names = ("local_tcn", "recent_patch_transformer", "multi_ewma")
@@ -1585,7 +1604,11 @@ class DateSlateAlphaFusionV1Forecaster(nn.Module):
                 token = self.group_encoders[group_name](values)
             tokens.append(token)
         group_tokens = torch.stack(tokens, dim=2) + self.group_embeddings.to(device=x.device, dtype=x.dtype)
-        mixed = self.group_mixer(group_tokens.reshape(batch * steps, len(self.main_feature_group_names), self.hidden_dim))
+        mixed = _chunked_sequence_module(
+            self.group_mixer,
+            group_tokens.reshape(batch * steps, len(self.main_feature_group_names), self.hidden_dim),
+            chunk_size=self.group_mixer_chunk_size,
+        )
         mixed = mixed.reshape(batch, steps, len(self.main_feature_group_names), self.hidden_dim)
         logits = self.group_weight_head(mixed).squeeze(-1)
         weights = torch.softmax(logits, dim=-1)
