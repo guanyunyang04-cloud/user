@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 142,
+  "record_count": 143,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -3031,32 +3031,206 @@
       ]
     },
     {
-      "id": "path_policy_alpha_v2_time_efficient_topk_training_contract_plan_20260618",
-      "date": "2026-06-18",
+      "id": "path_policy_alpha_v2_date_slate_cross_stock_listwise_plan_20260622",
+      "date": "2026-06-22",
       "r_id": "",
-      "path": "daily_research/brain/references/path_policy_alpha_v2_time_efficient_topk_training_contract_plan_20260618.md",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_date_slate_cross_stock_listwise_plan_20260622.md",
       "tags": [
         "path_policy"
       ],
       "workflow": "path_policy",
-      "research_programs": [
-        "daily_research_v2_research_reset"
-      ],
-      "study_families": [
-        "qdp_alpha_v2_time_efficient_topk_research"
-      ],
-      "run_tags": [
-        "qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01",
-        "qdp_alpha_v2_hybrid_topk_align_h256_t4_b512_seed7_20260617_02",
-        "qdp_alpha_v2_hybrid_monthly_robust_h256_t4_b512_seed7_20260617_02",
-        "qdp_alpha_v2_hybrid_h30soft_h256_t4_b512_seed7_20260617_02"
-      ],
-      "verdict": "Status: `plan_accepted / training_contract_redesign / research_only / execution_frozen`.; Objective: redesign alpha_v2 training so checkpoint selection follows the training objective and validation loss reflects personal small-capital time-efficient top-K utility.; Active artifact impact: none.",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "Status: `implementation_in_progress / code_contract_partially_validated / research_only / execution_frozen`.; Date: `2026-06-22`.; Research program: `qdp_alpha_v2_generalization_repair`.; Scope: supersede the immediate next date-slate architecture step from `date_slate_alpha_fusion_v1` to a model-level cross-stock/listwise slate line.",
       "blockers": [],
       "next_allowed_actions": [
-        "Run Stage 0 old checkpoint validation-loss audit without retraining or active artifact changes.",
-        "Implement `personal_time_efficient_topk_v1` target helper, loss contract, prediction columns, component loss logging, and validation-loss best selection.",
-        "Run focused tests and alpha_v2 smoke before any full seed7 run."
+        "> future incremental alpha path / rankable alpha score"
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_alpha_v2_date_slate_cuda_throughput_scout_20260621",
+      "date": "2026-06-21",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_date_slate_cuda_throughput_scout_20260621.md",
+      "tags": [
+        "path_policy",
+        "gpu"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "qdp_alpha_v2_date_slate_cuda_throughput_d128_1x256_20260621_01",
+        "qdp_alpha_v2_date_slate_cuda_throughput_d128_noamp_dense_stride20_1x256_20260621_01",
+        "qdp_alpha_v2_date_slate_cuda_throughput_d128_noamp_dense_stride20_1x256_b64_20260621_01",
+        "qdp_alpha_v2_date_slate_cuda_throughput_d128_noamp_dense_stride20_1x512_b64_20260621_01",
+        "qdp_alpha_v2_date_slate_cuda_throughput_d128_noamp_dense_stride20_2x256_b64_20260621_01",
+        "qdp_alpha_v2_date_slate_cuda_throughput_d128_noamp_dense_stride20_1x384_b64_20260621_01"
+      ],
+      "verdict": "Status: `cuda_throughput_scout_completed / stability_constraints_found / research_only / execution_frozen`.; Date: `2026-06-21`.; Research program: `qdp_alpha_v2_generalization_repair`.; Model family: `date_slate_alpha_fusion_v1`.",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "not_stated",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_alpha_v2_date_slate_fast_loader_throughput_20260622",
+      "date": "2026-06-22",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_date_slate_fast_loader_throughput_20260622.md",
+      "tags": [
+        "path_policy",
+        "gpu"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "Status: `code_contract_validated / throughput_scout_completed / research_only / execution_frozen`.; Date: `2026-06-22`.; Scope: first fast date-slate loader/index implementation and CUDA throughput scout for `date_slate_cross_stock_alpha_fusion_v1`.; Active artifact impact: none. No `daily_research/output/active_execution_strategy.json`, live/default, paper/live/broker, promotion gate, QDP canonical data, QDP registry pointer, or active artifact was changed.",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__f926a496f69c61f6b92b5faf"
+      ]
+    },
+    {
+      "id": "path_policy_alpha_v2_date_slate_group_mixer_chunking_20260621",
+      "date": "2026-06-21",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_date_slate_group_mixer_chunking_20260621.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "qdp_alpha_v2_date_slate_cuda_chunked_throughput_d128_noamp_dense_stride20_1x512_b64_20260621_01",
+        "qdp_alpha_v2_date_slate_cuda_chunked32768_throughput_d128_noamp_stride60_2x256_b64_20260621_01",
+        "qdp_alpha_v2_date_slate_cuda_chunked65000_throughput_d128_noamp_stride60_1x512_b64_20260621_01",
+        "qdp_alpha_v2_date_slate_cuda_throughput_d128_noamp_dense_stride20_1x256_b64_20260621_01"
+      ],
+      "verdict": "Status: `throughput_blocker_repaired / large_slate_shape_unblocked / throughput_not_improved / research_only / execution_frozen`.; Scope: `date_slate_alpha_fusion_v1` and `hybrid_structured_alpha_v2` group-mixer forward path.; Active artifact impact: none. No `daily_research/output/active_execution_strategy.json`, live/default, paper/live/broker, score-backtest bridge, candidate matrix, execution-candidate state, QDP canonical data, or QDP registry active pointer was changed.",
+      "blockers": [
+        "Status: `throughput_blocker_repaired / large_slate_shape_unblocked / throughput_not_improved / research_only / execution_frozen`."
+      ],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_alpha_v2_date_slate_incremental_architecture_plan_20260621",
+      "date": "2026-06-21",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_date_slate_incremental_architecture_plan_20260621.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "Status: `superseding_plan / implementation_not_started / research_only / execution_frozen`.; Date: `2026-06-21`.; Research program: `qdp_alpha_v2_generalization_repair`.; Scope: replace the current hot path from `hybrid_structured_alpha_v2 h192 stock-major no-stride full` to a new date-slate, incremental-output, prediction-first alpha model line.",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_alpha_v2_date_slate_incremental_implementation_20260621",
+      "date": "2026-06-21",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_date_slate_incremental_implementation_20260621.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "qdp_alpha_v2_date_slate_alpha_fusion_contract_smoke_20260621_01"
+      ],
+      "verdict": "Status: `code_data_contract_implemented / real_pack_smoked / research_only / execution_frozen`.; Date: `2026-06-21`.; Research program: `qdp_alpha_v2_generalization_repair`.; Implemented plan: `daily_research/brain/references/path_policy_alpha_v2_date_slate_incremental_architecture_plan_20260621.md`.",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_alpha_v2_generalization_repair_plan_20260620",
+      "date": "2026-06-20",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_generalization_repair_plan_20260620.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "qdp_alpha_v2_hybrid_alpha_score_no_symbol_h256_t4_b512_seed7_20260619_01",
+        "qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01"
+      ],
+      "verdict": "Status: `plan_accepted / superseding_hot_path_plan / research_only / execution_frozen`.; Date: `2026-06-20`.; Research program: `qdp_alpha_v2_generalization_repair`.; Scope: alpha_v2 hybrid forecast model generalization, not execution promotion.",
+      "blockers": [
+        "This is stronger evidence for an early generalization failure than the previous narrower conclusion that only epoch2+ overfits.",
+        "Single-year validation is useful but insufficient for model-design decisions."
+      ],
+      "next_allowed_actions": [
+        "`train_date_stride=3`",
+        "`train_date_stride=5`",
+        "validation/test full unchanged.",
+        "no-symbol,",
+        "`hybrid_alpha_score_v1`,",
+        "h192 or h256 fixed per experiment,"
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_alpha_v2_hybrid_alpha_score_no_symbol_h256_seed7_full_result_20260620",
+      "date": "2026-06-20",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_hybrid_alpha_score_no_symbol_h256_seed7_full_result_20260620.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "qdp_alpha_v2_hybrid_alpha_score_no_symbol_h256_t4_b512_seed7_20260619_01",
+        "qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01"
+      ],
+      "verdict": "Status: `completed / no_symbol_alpha_score_full_run / research_only / execution_frozen`.; Run tag: `qdp_alpha_v2_hybrid_alpha_score_no_symbol_h256_t4_b512_seed7_20260619_01`.; Study root: `daily_research/output/path_policy/studies/qdp_alpha_v2_hybrid_alpha_score_no_symbol_h256_t4_b512_seed7_20260619_01`.; Completion artifact timestamp: `2026-06-20T09:11:10+08:00`.",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "not_stated",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_alpha_v2_hybrid_alpha_score_v2_contract_smoke_20260621",
+      "date": "2026-06-21",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_hybrid_alpha_score_v2_contract_smoke_20260621.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "qdp_alpha_v2_structured_alpha_v2_alpha_score_v2_contract_smoke_20260621_01"
+      ],
+      "verdict": "Status: `code_contract_implemented / focused_tests_passed / real_pack_smoked / research_only / execution_frozen`.; Date: `2026-06-21`.; Scope: add and validate `hybrid_alpha_score_v2` for `hybrid_structured_alpha_v2`.; Active artifact impact: none. This did not touch `daily_research/output/active_execution_strategy.json`, live/default, paper/live/broker, score-backtest bridge, candidate matrix, or execution-candidate state.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "`train_date_stride=1` preserves all train dates but is expensive.",
+        "`train_date_stride=3` remains a diagnostic shortcut, not the only valid training semantics."
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": []
@@ -3098,6 +3272,56 @@
       "dataset_ids": []
     },
     {
+      "id": "path_policy_alpha_v2_multiscale_recency_hybrid_preflight_20260620",
+      "date": "2026-06-20",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_multiscale_recency_hybrid_preflight_20260620.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "qdp_alpha_v2_multiscale_recency_hybrid_stride3_h256_t4_b512_seed7_20260620_01",
+        "qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01"
+      ],
+      "verdict": "Status: `preflight_completed / code_contract_validated / throughput_profiled / research_only / execution_frozen`.; Date: `2026-06-20`.; Research program: `qdp_alpha_v2_generalization_repair`.; Scope: prepare the multi-scale recency-aware hybrid experiment before any long formal run.",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "policy_input_bundle__f926a496f69c61f6b92b5faf"
+      ]
+    },
+    {
+      "id": "path_policy_alpha_v2_old_contract_validation_loss_audit_20260618",
+      "date": "2026-06-18",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_old_contract_validation_loss_audit_20260618.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01",
+        "qdp_alpha_v2_hybrid_topk_align_h256_t4_b512_seed7_20260617_02",
+        "qdp_alpha_v2_hybrid_monthly_robust_h256_t4_b512_seed7_20260617_02",
+        "qdp_alpha_v2_hybrid_h30soft_h256_t4_b512_seed7_20260617_02"
+      ],
+      "verdict": "Status: `stage0_audit_completed / old_contract_only / research_only / execution_frozen`.; Date: `2026-06-18`.; Research program: `qdp_alpha_v2_time_efficient_topk_research`.; Scope: audit whether old alpha_v2 h256 hybrid runs were materially misread by old checkpoint-selection semantics before starting the new `personal_time_efficient_topk_v1` full run.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Start the first full alpha_v2 h256 seed7 run under `personal_time_efficient_topk_v1` and `validation_loss`.",
+        "After completion, write a compact result reference with validation loss, component interpretation where available, time-efficient metrics, standard forecast diagnostics, and `personal_topk_v1` as an evaluation view.",
+        "Keep multi-seed, score-backtest bridge, candidate matrix, execution-candidate review, paper/live/broker, and active/default changes deferred."
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": []
+    },
+    {
       "id": "path_policy_alpha_v2_strong_model_research_plan_20260617",
       "date": "2026-06-17",
       "r_id": "",
@@ -3119,6 +3343,202 @@
       "blockers": [],
       "next_allowed_actions": [],
       "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_alpha_v2_structured_alpha_v2_preflight_20260621",
+      "date": "2026-06-21",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_structured_alpha_v2_preflight_20260621.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "qdp_alpha_v2_structured_alpha_v2_contract_smoke_20260621_03",
+        "qdp_alpha_v2_structured_alpha_v2_throughput_h192_b128_1k_20260621_01",
+        "qdp_alpha_v2_structured_alpha_v2_throughput_h192_b256_1k_20260621_01",
+        "qdp_alpha_v2_structured_alpha_v2_stride3_h192_b128_seed7_20260621_01",
+        "qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01"
+      ],
+      "verdict": "Status: `preflight_completed / code_contract_validated / real_pack_smoked / throughput_profiled / research_only / execution_frozen`.; Date: `2026-06-21`.; Research program: `qdp_alpha_v2_generalization_repair`.; New model family: `hybrid_structured_alpha_v2`.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "stage forecast-walkforward-study `",
+        "tag qdp_alpha_v2_structured_alpha_v2_stride3_h192_b128_seed7_20260621_01 `",
+        "data-source lake `",
+        "lake-dataset-id policy_input_bundle__f926a496f69c61f6b92b5faf `",
+        "execution-mode next_open `",
+        "forecast-dataset-mode memmap `"
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "policy_input_bundle__f926a496f69c61f6b92b5faf"
+      ]
+    },
+    {
+      "id": "path_policy_alpha_v2_structured_sidecar_pack_20260621",
+      "date": "2026-06-21",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_structured_sidecar_pack_20260621.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "qdp_alpha_v2_structured_sidecar_hybrid_alpha_score_v2_smoke_20260621_02"
+      ],
+      "verdict": "Status: `sidecar_pack_completed / model_contract_validated / research_only / execution_frozen`.; Date: `2026-06-21`.; Scope: build a `structured_alpha_v2` dedicated sidecar training pack for `hybrid_structured_alpha_v2`.; Active artifact impact: none. This did not touch `daily_research/output/active_execution_strategy.json`, live/default, paper/live/broker, QDP active registry pointers, score-backtest bridge, candidate matrix, or execution-candidate state.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "forecast-memmap-manifest quant_data_platform/data/memmap/training_pack/mainboard_style_structural_alpha_v2_label_v2_structured_alpha_v2_pack_20260621_01/qdp_structured_alpha_v2_training_pack_manifest.json",
+        "forecast-model-families hybrid_structured_alpha_v2",
+        "forecast-loss-profile hybrid_alpha_score_v2",
+        "forecast-output-profile forecast_path_v1",
+        "forecast-train-static-fields exchange,industry",
+        "forecast-hidden-dim 192"
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_alpha_v2_time_eff_topk_contract_smoke_20260618",
+      "date": "2026-06-18",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_time_eff_topk_contract_smoke_20260618.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "qdp_alpha_v2_time_eff_topk_contract_smoke_20260618_01"
+      ],
+      "verdict": "Status: `smoke_completed / code_path_validated / research_only / execution_frozen`.; Run tag: `qdp_alpha_v2_time_eff_topk_contract_smoke_20260618_01`.; Date: `2026-06-18`.; Study root: `daily_research/output/path_policy/studies/qdp_alpha_v2_time_eff_topk_contract_smoke_20260618_01`.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "`personal_topk_v1`",
+        "horizon rank/spread",
+        "same-candidate test",
+        "time-efficient score diagnostics"
+      ],
+      "active_artifact_impact": "not_stated",
+      "dataset_ids": [
+        "policy_input_bundle__f926a496f69c61f6b92b5faf"
+      ]
+    },
+    {
+      "id": "path_policy_alpha_v2_time_eff_topk_h256_seed7_full_result_20260619",
+      "date": "2026-06-19",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_time_eff_topk_h256_seed7_full_result_20260619.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "qdp_alpha_v2_hybrid_time_eff_topk_h256_t4_b512_seed7_20260618_01",
+        "qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01"
+      ],
+      "verdict": "Status: `completed / first_new_contract_full_run / research_only / execution_frozen`.; Run tag: `qdp_alpha_v2_hybrid_time_eff_topk_h256_t4_b512_seed7_20260618_01`.; Study root: `daily_research/output/path_policy/studies/qdp_alpha_v2_hybrid_time_eff_topk_h256_t4_b512_seed7_20260618_01`.; Completion artifact timestamp: `2026-06-19T07:56:55+08:00`.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "per-component validation-loss attribution if available or easy to add;",
+        "h192 or stronger regularization under the same contract;",
+        "lighter `time_eff_topk_alignment` / `decision_rank_aux` weighting;",
+        "then rerun one controlled h256 or h192 full candidate only if the diagnostic supports it."
+      ],
+      "active_artifact_impact": "not_stated",
+      "dataset_ids": [
+        "policy_input_bundle__f926a496f69c61f6b92b5faf",
+        "policy_pool_view__fc63d6b996abc7abde88bae7"
+      ]
+    },
+    {
+      "id": "path_policy_alpha_v2_time_efficient_topk_training_contract_implementation_20260618",
+      "date": "2026-06-18",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_time_efficient_topk_training_contract_implementation_20260618.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "qdp_alpha_v2_time_efficient_topk_research"
+      ],
+      "run_tags": [
+        "qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01"
+      ],
+      "verdict": "Status: `code_contract_implemented / focused_tests_passed / research_only / execution_frozen`.; Date: `2026-06-18`.; Research program: `daily_research_v2_research_reset`.; Study family: `qdp_alpha_v2_time_efficient_topk_research`.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "`personal_topk_v1`",
+        "rank/spread by horizon",
+        "same-candidate test",
+        "time-efficient score diagnostics"
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_alpha_v2_time_efficient_topk_training_contract_plan_20260618",
+      "date": "2026-06-18",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_time_efficient_topk_training_contract_plan_20260618.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "daily_research_v2_research_reset"
+      ],
+      "study_families": [
+        "qdp_alpha_v2_time_efficient_topk_research"
+      ],
+      "run_tags": [
+        "qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01",
+        "qdp_alpha_v2_hybrid_topk_align_h256_t4_b512_seed7_20260617_02",
+        "qdp_alpha_v2_hybrid_monthly_robust_h256_t4_b512_seed7_20260617_02",
+        "qdp_alpha_v2_hybrid_h30soft_h256_t4_b512_seed7_20260617_02"
+      ],
+      "verdict": "Status: `plan_accepted / training_contract_redesign / research_only / execution_frozen`.; Date: `2026-06-18`.; Research program: `daily_research_v2_research_reset`.; Study family: `qdp_alpha_v2_time_efficient_topk_research`.",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_alpha_v2_train_date_stride_tooling_20260620",
+      "date": "2026-06-20",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_train_date_stride_tooling_20260620.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "Status: `tooling_completed / no_training_run / research_only / execution_frozen`.; Date: `2026-06-20`.; Research program: `qdp_alpha_v2_generalization_repair`.; Stage: `Stage 1 overlap-aware sampling diagnostics`.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "no symbol static context,",
+        "`hybrid_alpha_score_v1`,",
+        "`selection_profile=validation_loss`,",
+        "`--forecast-train-date-stride 3`,",
+        "per-epoch checkpoints/loss audit as needed."
+      ],
+      "active_artifact_impact": "guarded",
       "dataset_ids": []
     },
     {
@@ -3249,6 +3669,24 @@
         "policy_input_bundle__f926a496f69c61f6b92b5faf",
         "policy_pool_view__fc63d6b996abc7abde88bae7"
       ]
+    },
+    {
+      "id": "path_policy_test_runtime_optimization_20260621",
+      "date": "2026-06-21",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_test_runtime_optimization_20260621.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "Status: `test_runtime_optimized / research_tooling / no_strategy_change`.; Date: `2026-06-21`.; Scope: `daily_research/path_policy/tests/test_rl_protocol.py` protocol test runtime optimization.; Active artifact impact: none. No `daily_research/output/active_execution_strategy.json`, live/default, paper/live/broker, score-backtest bridge, candidate matrix, execution-candidate state, QDP canonical data, or QDP registry active pointer was changed.",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": []
     },
     {
       "id": "r50",
@@ -4176,651 +4614,6 @@
       ],
       "active_artifact_impact": "guarded",
       "dataset_ids": []
-    },
-    {
-      "id": "path_policy_alpha_v2_time_efficient_topk_training_contract_implementation_20260618",
-      "date": "2026-06-18",
-      "r_id": "",
-      "path": "daily_research/brain/references/path_policy_alpha_v2_time_efficient_topk_training_contract_implementation_20260618.md",
-      "tags": [
-        "path_policy"
-      ],
-      "workflow": "path_policy",
-      "research_programs": [
-        "qdp_alpha_v2_time_efficient_topk_research"
-      ],
-      "study_families": [
-        "personal_time_efficient_topk_v1"
-      ],
-      "run_tags": [],
-      "verdict": "Status: code contract implemented / focused tests passed / research-only / execution frozen.; scope: personal_time_efficient_topk_v1 training contract, validation_loss checkpoint selection, time-efficient prediction columns and diagnostics.; active artifact impact: none.",
-      "blockers": [],
-      "next_allowed_actions": [
-        "Run the old-model validation-loss checkpoint audit if checkpoint epochs are available.",
-        "Run a small alpha_v2 smoke with personal_time_efficient_topk_v1 and validation_loss selection.",
-        "Then run the fixed h256 seed7 full experiment if smoke is clean."
-      ],
-      "active_artifact_impact": "unchanged",
-      "dataset_ids": []
-    },
-    {
-      "id": "path_policy_alpha_v2_time_eff_topk_contract_smoke_20260618",
-      "date": "2026-06-18",
-      "r_id": "",
-      "path": "daily_research/brain/references/path_policy_alpha_v2_time_eff_topk_contract_smoke_20260618.md",
-      "tags": [
-        "path_policy"
-      ],
-      "workflow": "path_policy",
-      "research_programs": [
-        "qdp_alpha_v2_time_efficient_topk_research"
-      ],
-      "study_families": [
-        "personal_time_efficient_topk_v1"
-      ],
-      "run_tags": [
-        "qdp_alpha_v2_time_eff_topk_contract_smoke_20260618_01"
-      ],
-      "verdict": "Status: smoke_completed / code_path_validated / research-only / execution_frozen.; Scope: confirm the real QDP alpha_v2 label_v2 training pack can be consumed by the new personal_time_efficient_topk_v1 contract. It is not model-quality evidence.; Active artifact impact: none.",
-      "blockers": [],
-      "next_allowed_actions": [
-        "Run Stage 0 old-model validation-loss checkpoint audit.",
-        "If the audit does not reveal a higher-priority old-checkpoint issue, run the first real new-contract h256 seed7 full experiment.",
-        "Keep broad diagnostics separate from checkpoint selection."
-      ],
-      "active_artifact_impact": "unchanged",
-      "dataset_ids": []
-    },
-    {
-      "id": "path_policy_alpha_v2_old_contract_validation_loss_audit_20260618",
-      "date": "2026-06-18",
-      "r_id": "",
-      "path": "daily_research/brain/references/path_policy_alpha_v2_old_contract_validation_loss_audit_20260618.md",
-      "tags": [
-        "path_policy"
-      ],
-      "workflow": "path_policy",
-      "research_programs": [
-        "qdp_alpha_v2_time_efficient_topk_research"
-      ],
-      "study_families": [
-        "personal_time_efficient_topk_v1",
-        "old_contract_checkpoint_audit"
-      ],
-      "run_tags": [
-        "qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01",
-        "qdp_alpha_v2_hybrid_topk_align_h256_t4_b512_seed7_20260617_02",
-        "qdp_alpha_v2_hybrid_monthly_robust_h256_t4_b512_seed7_20260617_02",
-        "qdp_alpha_v2_hybrid_h30soft_h256_t4_b512_seed7_20260617_02"
-      ],
-      "verdict": "Status: stage0_audit_completed / old_contract_only / research_only / execution_frozen.; Old mixed validation loss, old selection score, rank/spread diagnostics, and personal_topK views do not always select the same epoch; this supports separating training objective, checkpoint selection, and evaluation views.; No old-checkpoint issue blocks the first personal_time_efficient_topk_v1 h256 seed7 full run. Anchor remains the old-contract comparison baseline only.",
-      "blockers": [],
-      "next_allowed_actions": [
-        "Run the first fixed h256 seed7 alpha_v2 full experiment with loss_profile=personal_time_efficient_topk_v1 and selection_profile=validation_loss.",
-        "Keep old runs as diagnostic comparison evidence only.",
-        "Do not start multi-seed, score-backtest bridge, candidate matrix, execution-candidate review, paper/live/broker, or active/default artifact changes from this audit."
-      ],
-      "active_artifact_impact": "unchanged",
-      "dataset_ids": []
-    },
-    {
-      "id": "path_policy_alpha_v2_time_eff_topk_h256_seed7_full_result_20260619",
-      "date": "2026-06-19",
-      "r_id": "",
-      "path": "daily_research/brain/references/path_policy_alpha_v2_time_eff_topk_h256_seed7_full_result_20260619.md",
-      "tags": [
-        "path_policy"
-      ],
-      "workflow": "path_policy",
-      "research_programs": [
-        "qdp_alpha_v2_time_efficient_topk_research"
-      ],
-      "study_families": [
-        "personal_time_efficient_topk_v1",
-        "alpha_v2_h256_full"
-      ],
-      "run_tags": [
-        "qdp_alpha_v2_hybrid_time_eff_topk_h256_t4_b512_seed7_20260618_01"
-      ],
-      "verdict": "Status: completed / first_new_contract_full_run / research_only / execution_frozen.; The personal_time_efficient_topk_v1 h256 seed7 full run selected epoch1 by lowest validation loss; later epochs lowered train loss but worsened validation loss.; It validates the clean training/checkpoint contract but did not beat the old-contract alpha_v2 h256 anchor under validation-selected same-candidate personal top-K diagnostics.",
-      "blockers": [],
-      "next_allowed_actions": [
-        "Keep qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01 as the old-contract comparison anchor.",
-        "Analyze why personal_time_efficient_topk_v1 overfits after epoch1 and why same-candidate personal top-K is weak before launching another long full run.",
-        "Prefer controlled diagnostics such as component validation-loss attribution, h192 or stronger regularization, or lighter time_eff_topk_alignment / decision_rank_aux weights.",
-        "Do not enter multi-seed, score-backtest bridge, candidate matrix, execution-candidate review, paper/live/broker, or active/default artifact changes from this run."
-      ],
-      "active_artifact_impact": "unchanged",
-      "dataset_ids": [
-        "policy_input_bundle__f926a496f69c61f6b92b5faf",
-        "policy_pool_view__fc63d6b996abc7abde88bae7"
-      ]
-    },
-    {
-      "id": "path_policy_alpha_v2_hybrid_alpha_score_no_symbol_h256_seed7_full_result_20260620",
-      "date": "2026-06-20",
-      "r_id": "",
-      "path": "daily_research/brain/references/path_policy_alpha_v2_hybrid_alpha_score_no_symbol_h256_seed7_full_result_20260620.md",
-      "tags": [
-        "path_policy"
-      ],
-      "workflow": "path_policy",
-      "research_programs": [
-        "qdp_alpha_v2_hybrid_alpha_score_research"
-      ],
-      "study_families": [
-        "hybrid_alpha_score_v1",
-        "no_symbol_static_context",
-        "alpha_v2_h256_full"
-      ],
-      "run_tags": [
-        "qdp_alpha_v2_hybrid_alpha_score_no_symbol_h256_t4_b512_seed7_20260619_01"
-      ],
-      "verdict": "Status: completed / no_symbol_alpha_score_full_run / research_only / execution_frozen.; The hybrid_alpha_score_v1 no-symbol run selected epoch2 by validation loss; train loss kept falling through epoch12 but validation loss worsened after epoch2.; Removing symbol_id did not break seen/unseen-stock forecast diagnostics, and rank/spread metrics are promising, but validation-selected personal top-K same-candidate net remains small, so the old-contract anchor is not replaced.",
-      "blockers": [],
-      "next_allowed_actions": [
-        "Keep qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01 as the comparison anchor.",
-        "Treat no_symbol + hybrid_alpha_score_v1 as a worthwhile prediction-first direction, not as a promoted model.",
-        "Diagnose external personal top-K selection/scorer mismatch before another long full run, especially validation-selected pred_aux_cum_20d top5 h1 versus test-only pred_aux_cum_5d top3 h20.",
-        "Do not enter multi-seed, score-backtest bridge, candidate matrix, execution-candidate review, paper/live/broker, or active/default artifact changes from this run."
-      ],
-      "active_artifact_impact": "unchanged",
-      "dataset_ids": [
-        "policy_input_bundle__f926a496f69c61f6b92b5faf",
-        "policy_pool_view__fc63d6b996abc7abde88bae7"
-      ]
-    },
-    {
-      "id": "path_policy_alpha_v2_generalization_repair_plan_20260620",
-      "date": "2026-06-20",
-      "r_id": "",
-      "path": "daily_research/brain/references/path_policy_alpha_v2_generalization_repair_plan_20260620.md",
-      "tags": [
-        "path_policy",
-        "alpha_v2",
-        "generalization",
-        "plan"
-      ],
-      "workflow": "path_policy",
-      "research_programs": [
-        "qdp_alpha_v2_generalization_repair"
-      ],
-      "study_families": [
-        "hybrid_alpha_score_v1",
-        "no_symbol_static_context",
-        "overlap_aware_sampling",
-        "intraday_feature_diagnostics",
-        "capacity_regularization"
-      ],
-      "run_tags": [
-        "qdp_alpha_v2_hybrid_alpha_score_no_symbol_h256_t4_b512_seed7_20260619_01",
-        "qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01"
-      ],
-      "verdict": "Status: plan_accepted / superseding_hot_path_plan / research_only / execution_frozen.; New hot path is alpha_v2 generalization repair. Evidence shows hybrid_alpha_score_v1 no-symbol test loss is best at epoch1 and then worsens while train loss keeps falling; full-train topK posterior does not transfer reliably. Next work should prioritize overlap-aware sampling, intraday feature diagnostics, capacity/regularization controls, and rolling validation with purge/embargo before any multi-seed, bridge, candidate matrix, or execution review.",
-      "blockers": [
-        "immediate_generalization_degradation_after_epoch1_or_epoch2",
-        "full_train_posterior_topk_does_not_transfer",
-        "high_overlap_252d_windows_and_intraday_feature_granularity_unresolved"
-      ],
-      "next_allowed_actions": [
-        "Implement train_date_stride=3/5 or equivalent overlap-aware training sampling with validation/test full unchanged.",
-        "Run no_intraday, coarse_intraday, and intraday_group_dropout diagnostics before considering raw 5-minute K-line modeling.",
-        "Run h192/h128 and stronger dropout/weight_decay controls under the no-symbol prediction-first contract.",
-        "Add rolling train-internal validation with at least 20 trading days purge/embargo before using train-domain selection rules.",
-        "Do not enter multi-seed, score-backtest bridge, candidate matrix, execution-candidate review, paper/live/broker, or active/default artifact changes from this plan."
-      ],
-      "active_artifact_impact": "unchanged",
-      "dataset_ids": [
-        "policy_input_bundle__f926a496f69c61f6b92b5faf",
-        "policy_pool_view__fc63d6b996abc7abde88bae7"
-      ]
-    },
-    {
-      "id": "path_policy_alpha_v2_train_date_stride_tooling_20260620",
-      "date": "2026-06-20",
-      "r_id": "",
-      "path": "daily_research/brain/references/path_policy_alpha_v2_train_date_stride_tooling_20260620.md",
-      "tags": [
-        "daily_research",
-        "path_policy",
-        "alpha_v2",
-        "generalization",
-        "tooling"
-      ],
-      "workflow": "research_tooling",
-      "research_programs": [
-        "qdp_alpha_v2_generalization_repair"
-      ],
-      "study_families": [
-        "path_policy_alpha_v2_overlap_sampling"
-      ],
-      "run_tags": [],
-      "verdict": "Stage 1 overlap-aware sampling tooling completed: --forecast-train-date-stride filters train dates only, keeps validation/test full, records sampling_config in summaries/checkpoints/resume contract; no training run or model-quality conclusion.",
-      "blockers": [],
-      "next_allowed_actions": [
-        "Run no-symbol hybrid_alpha_score_v1 train_date_stride=3 full-pack scout with validation/test full.",
-        "If stride=3 improves generalization, run train_date_stride=5; otherwise move to intraday feature-group diagnostics and regularization grid.",
-        "Keep active/live/default/paper/broker artifacts frozen."
-      ],
-      "active_artifact_impact": "none",
-      "dataset_ids": []
-    },
-    {
-      "id": "path_policy_alpha_v2_multiscale_recency_hybrid_preflight_20260620",
-      "date": "2026-06-20",
-      "r_id": "",
-      "path": "daily_research/brain/references/path_policy_alpha_v2_multiscale_recency_hybrid_preflight_20260620.md",
-      "tags": [
-        "path_policy",
-        "alpha_v2",
-        "generalization",
-        "architecture",
-        "throughput",
-        "preflight"
-      ],
-      "workflow": "path_policy",
-      "research_programs": [
-        "qdp_alpha_v2_generalization_repair"
-      ],
-      "study_families": [
-        "hybrid_multiscale_recency_aware_v1",
-        "hybrid_alpha_score_v1",
-        "throughput_preflight"
-      ],
-      "run_tags": [
-        "qdp_alpha_v2_multiscale_recency_hybrid_smoke_20260620_02",
-        "qdp_alpha_v2_multiscale_recency_hybrid_throughput_w0_20260620_01",
-        "qdp_alpha_v2_multiscale_recency_hybrid_throughput_w2_20260620_01",
-        "qdp_alpha_v2_multiscale_recency_hybrid_throughput_b256_w0_20260620_01",
-        "qdp_alpha_v2_multiscale_recency_hybrid_throughput_b768_w0_20260620_01",
-        "qdp_alpha_v2_multiscale_recency_hybrid_throughput_b1024_w0_20260620_01",
-        "qdp_alpha_v2_multiscale_recency_hybrid_throughput_32k_b512_w0_20260620_01",
-        "qdp_alpha_v2_multiscale_recency_hybrid_throughput_ewmaopt_b512_w0_20260620_01",
-        "qdp_alpha_v2_multiscale_recency_hybrid_throughput_ewmaopt_32k_b512_w0_20260620_01"
-      ],
-      "verdict": "Status: preflight_completed / code_contract_validated / throughput_profiled / research_only / execution_frozen.; hybrid_multiscale_recency_aware_v1 is ready for a controlled stride3 scout, not a model-quality conclusion.; Best measured runtime config is batch_size=512, dataloader_num_workers=0; EWMA batched matmul optimization improved 32k representative throughput from 541.199 to 585.634 samples/s.",
-      "blockers": [
-        "No full model-quality run yet for hybrid_multiscale_recency_aware_v1.",
-        "Estimated full train-only epoch is about 2.87h, so a stride3 scout is preferred before a blind 12-epoch full run."
-      ],
-      "next_allowed_actions": [
-        "Run hybrid_multiscale_recency_aware_v1 + train_date_stride=3 + hybrid_alpha_score_v1 + exchange,industry scout with validation/test full.",
-        "Use batch_size=512 and dataloader_num_workers=0 on current RTX 2060 setup.",
-        "Keep --no-forecast-per-epoch-prediction-metrics for training speed; final best checkpoint outputs validation/test predictions.",
-        "Do not enter multi-seed, score-backtest bridge, candidate matrix, execution-candidate review, paper/live/broker, or active/default artifact changes from this preflight."
-      ],
-      "active_artifact_impact": "unchanged",
-      "dataset_ids": [
-        "policy_input_bundle__f926a496f69c61f6b92b5faf",
-        "policy_pool_view__fc63d6b996abc7abde88bae7"
-      ]
-    },
-    {
-      "id": "path_policy_alpha_v2_structured_alpha_v2_preflight_20260621",
-      "date": "2026-06-21",
-      "r_id": "",
-      "path": "daily_research/brain/references/path_policy_alpha_v2_structured_alpha_v2_preflight_20260621.md",
-      "tags": [
-        "path_policy",
-        "alpha_v2",
-        "generalization",
-        "architecture",
-        "throughput",
-        "preflight"
-      ],
-      "workflow": "path_policy",
-      "research_programs": [
-        "qdp_alpha_v2_generalization_repair"
-      ],
-      "study_families": [
-        "hybrid_structured_alpha_v2",
-        "hybrid_alpha_score_v1",
-        "throughput_preflight"
-      ],
-      "run_tags": [
-        "qdp_alpha_v2_structured_alpha_v2_contract_smoke_20260621_03",
-        "qdp_alpha_v2_structured_alpha_v2_throughput_h192_b128_1k_20260621_01",
-        "qdp_alpha_v2_structured_alpha_v2_throughput_h192_b256_1k_20260621_01"
-      ],
-      "verdict": "Status: preflight_completed / code_contract_validated / real_pack_smoked / throughput_profiled / research_only / execution_frozen.; hybrid_structured_alpha_v2 is the current complete architecture hot path, prediction-first, no symbol_id, forecast_path_v1 only.; Real-pack smoke completed and h192 throughput profiling recommends batch_size=128 on RTX 2060.",
-      "blockers": [
-        "No full model-quality run yet for hybrid_structured_alpha_v2.",
-        "h192 full no-stride runtime is high: b128 measured 126.764 samples/s, rough train-only full epoch about 13.25h."
-      ],
-      "next_allowed_actions": [
-        "Run hybrid_structured_alpha_v2 + train_date_stride=3 + h192 + b128 + hybrid_alpha_score_v1 + exchange,industry controlled scout with validation/test full.",
-        "Keep --no-forecast-per-epoch-prediction-metrics for speed; final best checkpoint still outputs validation/test predictions.",
-        "Do not enter multi-seed, score-backtest bridge, candidate matrix, execution-candidate review, paper/live/broker, or active/default artifact changes from this preflight."
-      ],
-      "active_artifact_impact": "unchanged",
-      "dataset_ids": [
-        "policy_input_bundle__f926a496f69c61f6b92b5faf",
-        "policy_pool_view__fc63d6b996abc7abde88bae7"
-      ]
-    },
-    {
-      "id": "path_policy_alpha_v2_hybrid_alpha_score_v2_contract_smoke_20260621",
-      "date": "2026-06-21",
-      "r_id": "",
-      "path": "daily_research/brain/references/path_policy_alpha_v2_hybrid_alpha_score_v2_contract_smoke_20260621.md",
-      "tags": [
-        "path_policy",
-        "alpha_v2",
-        "loss_contract",
-        "hybrid_alpha_score_v2",
-        "smoke"
-      ],
-      "workflow": "path_policy",
-      "research_programs": [
-        "qdp_alpha_v2_generalization_repair"
-      ],
-      "study_families": [
-        "hybrid_structured_alpha_v2",
-        "hybrid_alpha_score_v2"
-      ],
-      "run_tags": [
-        "qdp_alpha_v2_structured_alpha_v2_alpha_score_v2_contract_smoke_20260621_01"
-      ],
-      "verdict": "Status: code_contract_implemented / focused_tests_passed / real_pack_smoked / research_only / execution_frozen.; hybrid_alpha_score_v2 is prediction-first, forecast_path_v1-only, symbol-free, no execution cost/risk utility, no batch topK alignment.; Real-pack 32/32/32 CPU smoke completed and proves code/data compatibility only, not model quality.",
-      "blockers": [
-        "No h192 no-stride or stride scout was launched from this evidence.",
-        "No model-quality conclusion, multi-seed evidence, bridge, candidate matrix, or execution review is authorized."
-      ],
-      "next_allowed_actions": [
-        "When explicitly requested, run hybrid_structured_alpha_v2 + h192 + b128 + hybrid_alpha_score_v2 + exchange,industry controlled scout.",
-        "Choose train_date_stride=1 for full train-date semantics or train_date_stride=3 for diagnostic/runtime control; keep validation/test full.",
-        "Keep --no-forecast-per-epoch-prediction-metrics for speed; final best checkpoint still outputs validation/test predictions.",
-        "Do not enter multi-seed, score-backtest bridge, candidate matrix, execution-candidate review, paper/live/broker, or active/default artifact changes from this smoke."
-      ],
-      "active_artifact_impact": "unchanged",
-      "dataset_ids": [
-        "policy_input_bundle__f926a496f69c61f6b92b5faf",
-        "policy_pool_view__fc63d6b996abc7abde88bae7"
-      ]
-    },
-    {
-      "id": "path_policy_alpha_v2_structured_sidecar_pack_20260621",
-      "date": "2026-06-21",
-      "r_id": "",
-      "path": "daily_research/brain/references/path_policy_alpha_v2_structured_sidecar_pack_20260621.md",
-      "tags": [
-        "path_policy",
-        "alpha_v2",
-        "training_pack",
-        "structured_alpha_v2",
-        "sidecar",
-        "smoke"
-      ],
-      "workflow": "path_policy",
-      "research_programs": [
-        "qdp_alpha_v2_generalization_repair"
-      ],
-      "study_families": [
-        "hybrid_structured_alpha_v2",
-        "hybrid_alpha_score_v2",
-        "structured_alpha_v2_sidecar_pack"
-      ],
-      "run_tags": [
-        "qdp_alpha_v2_structured_sidecar_hybrid_alpha_score_v2_smoke_20260621_02"
-      ],
-      "verdict": "Status: sidecar_pack_completed / model_contract_validated / research_only / execution_frozen.; structured_alpha_v2 sidecar pack completed with group-contiguous 307 features, exchange/industry static context only, source label arrays reused, and training confirmed to use manifest feature_group_indices.; This is data/model contract evidence only, not model-quality evidence.",
-      "blockers": [
-        "No h192 full or stride scout launched from this evidence.",
-        "No model-quality conclusion, multi-seed evidence, bridge, candidate matrix, or execution review is authorized."
-      ],
-      "next_allowed_actions": [
-        "Run hybrid_structured_alpha_v2 + h192 + b128 + hybrid_alpha_score_v2 + exchange,industry controlled scout using the sidecar manifest explicitly.",
-        "Use train_date_stride=1 for full train-date semantics or train_date_stride=3 for diagnostic/runtime control; keep validation/test full.",
-        "Keep active/live/default/paper/broker artifacts frozen."
-      ],
-      "active_artifact_impact": "unchanged",
-      "dataset_ids": [
-        "policy_input_bundle__f926a496f69c61f6b92b5faf",
-        "policy_pool_view__fc63d6b996abc7abde88bae7"
-      ]
-    },
-    {
-      "id": "path_policy_alpha_v2_date_slate_incremental_architecture_plan_20260621",
-      "date": "2026-06-21",
-      "r_id": "",
-      "path": "daily_research/brain/references/path_policy_alpha_v2_date_slate_incremental_architecture_plan_20260621.md",
-      "tags": [
-        "path_policy",
-        "alpha_v2",
-        "date_slate",
-        "incremental_output",
-        "plan"
-      ],
-      "workflow": "path_policy",
-      "research_programs": [
-        "qdp_alpha_v2_generalization_repair"
-      ],
-      "study_families": [
-        "date_slate_alpha_fusion_v1"
-      ],
-      "run_tags": [],
-      "verdict": "Status: `superseding_plan / implementation_not_started / research_only / execution_frozen`. Replaces the next default hot path from h192 stock-major no-stride full to date-slate pack + incremental output + prediction-first date-grouped alpha fusion. Numeric stability initially monitor/fail-fast only; no clipping/winsor/canonical mutation.",
-      "blockers": [
-        "Current stock-major batch rank loss is not same-date cross-sectional rank.",
-        "forecast_path_v1 cumulative aux and intraday residual semantics are not fully clean for the desired architecture.",
-        "h192 no-stride interrupted run produced all-NaN checkpoints; long runs need fail-fast diagnostics first.",
-        "Effective independent training evidence is closer to market dates/regimes than 6.05M IID rows."
-      ],
-      "next_allowed_actions": [
-        "Implement finite fail-fast diagnostics and bad-batch dump without changing tensor values.",
-        "Build qdp_date_slate_training_pack_v1 sidecar from the structured_alpha_v2 sidecar manifest.",
-        "Implement date-slate loader, forecast_incremental_path_v2 output profile, date_slate_alpha_fusion_v1 model, and date_grouped_alpha_score_v1 loss in phases.",
-        "Run smoke and throughput scout before any long formal run."
-      ],
-      "active_artifact_impact": "unchanged",
-      "dataset_ids": [
-        "policy_input_bundle__f926a496f69c61f6b92b5faf"
-      ]
-    },
-    {
-      "id": "path_policy_alpha_v2_date_slate_incremental_implementation_20260621",
-      "date": "2026-06-21",
-      "r_id": "",
-      "path": "daily_research/brain/references/path_policy_alpha_v2_date_slate_incremental_implementation_20260621.md",
-      "tags": [
-        "path_policy",
-        "alpha_v2",
-        "date_slate",
-        "incremental_output",
-        "implementation",
-        "smoke"
-      ],
-      "workflow": "path_policy",
-      "research_programs": [
-        "qdp_alpha_v2_generalization_repair"
-      ],
-      "study_families": [
-        "date_slate_alpha_fusion_v1",
-        "date_grouped_alpha_score_v1",
-        "qdp_date_slate_training_pack_v1"
-      ],
-      "run_tags": [
-        "qdp_alpha_v2_date_slate_alpha_fusion_contract_smoke_20260621_01"
-      ],
-      "verdict": "Status: code_data_contract_implemented / real_pack_smoked / research_only / execution_frozen.; Implemented forecast_incremental_path_v2, date_slate_alpha_fusion_v1, date_grouped_alpha_score_v1, finite fail-fast diagnostics, date-slate pack builder/loader, and protocol wiring.; Real qdp_date_slate_training_pack_v1 built from structured_alpha_v2 sidecar with shape [3989,3150,307]; real loader/model/loss smoke finite; 16/16/16 training-contract smoke completed with best validation loss 2.1607880126684904.; This is code/data contract and smoke evidence only, not model-quality evidence.",
-      "blockers": [
-        "No CUDA throughput scout has been run yet for the new date-slate pack.",
-        "No formal single-seed model-quality run has been launched under this contract.",
-        "No multi-seed, bridge, candidate matrix, execution-candidate review, paper/live/broker, or active/default change is authorized."
-      ],
-      "next_allowed_actions": [
-        "Run real CUDA throughput scout on qdp_date_slate_training_pack_v1 with D=128, forecast_incremental_path_v2, date_grouped_alpha_score_v1, exchange/industry static context, and finite_guard enabled.",
-        "Compare date-slate shapes such as 1x256, 1x512, and 2x256 if memory permits.",
-        "If throughput and finite stability are acceptable, launch first 3-6 epoch formal research run with validation_loss selection and final validation/test predictions.",
-        "Keep active/live/default/paper/broker artifacts frozen."
-      ],
-      "active_artifact_impact": "unchanged",
-      "dataset_ids": [
-        "policy_input_bundle__f926a496f69c61f6b92b5faf",
-        "policy_pool_view__fc63d6b996abc7abde88bae7"
-      ]
-    },
-    {
-      "id": "path_policy_test_runtime_optimization_20260621",
-      "date": "2026-06-21",
-      "r_id": "",
-      "path": "daily_research/brain/references/path_policy_test_runtime_optimization_20260621.md",
-      "tags": [
-        "path_policy",
-        "tests",
-        "runtime",
-        "tooling"
-      ],
-      "workflow": "research_tooling",
-      "research_programs": [
-        "qdp_alpha_v2_generalization_repair"
-      ],
-      "study_families": [
-        "test_runtime_optimization"
-      ],
-      "run_tags": [],
-      "verdict": "Status: test_runtime_optimized / research_tooling / no_strategy_change.; test_rl_protocol.py full runtime improved from 440.51s to 162.22s; fast non-slow protocol loop is 13.65s; retained slow e2e smoke is 154.85s.; No model behavior, model-quality evidence, active artifact, QDP registry, live/default, paper/broker, or execution behavior changed.",
-      "blockers": [],
-      "next_allowed_actions": [
-        "Use pytest daily_research/path_policy/tests/test_rl_protocol.py -q -m \"not slow\" for fast protocol checks.",
-        "Use pytest daily_research/path_policy/tests/test_rl_protocol.py -q -m slow for retained end-to-end forecast/RL protocol smoke.",
-        "Use full test_rl_protocol.py when validating protocol/test refactors that may affect both fast contracts and slow smoke."
-      ],
-      "active_artifact_impact": "unchanged",
-      "dataset_ids": []
-    },
-    {
-      "id": "path_policy_alpha_v2_date_slate_cuda_throughput_scout_20260621",
-      "date": "2026-06-21",
-      "r_id": "",
-      "path": "daily_research/brain/references/path_policy_alpha_v2_date_slate_cuda_throughput_scout_20260621.md",
-      "tags": [
-        "path_policy",
-        "alpha_v2",
-        "date_slate",
-        "cuda",
-        "throughput",
-        "stability"
-      ],
-      "workflow": "path_policy",
-      "research_programs": [
-        "qdp_alpha_v2_generalization_repair"
-      ],
-      "study_families": [
-        "date_slate_alpha_fusion_v1",
-        "cuda_throughput_scout"
-      ],
-      "run_tags": [
-        "qdp_alpha_v2_date_slate_cuda_throughput_d128_1x256_20260621_01",
-        "qdp_alpha_v2_date_slate_cuda_throughput_d128_noamp_dense_stride20_1x256_20260621_01",
-        "qdp_alpha_v2_date_slate_cuda_throughput_d128_noamp_dense_stride20_1x256_b64_20260621_01",
-        "qdp_alpha_v2_date_slate_cuda_throughput_d128_noamp_dense_stride20_1x512_b64_20260621_01",
-        "qdp_alpha_v2_date_slate_cuda_throughput_d128_noamp_dense_stride20_2x256_b64_20260621_01",
-        "qdp_alpha_v2_date_slate_cuda_throughput_d128_noamp_dense_stride20_1x384_b64_20260621_01"
-      ],
-      "verdict": "Status: cuda_throughput_scout_completed / stability_constraints_found / research_only / execution_frozen.; Safe completed configuration is D=128, 1x256, no AMP, forecast_batch_size=64, finite_guard enabled, dense train_date_stride=20 with max_samples_per_date_per_role=256.; Completed run throughput: 119.615 train samples/s, epoch_seconds 310.328 for 37,120 train rows.; AMP produced nonfinite_grad.base_head.5.weight; effective batch 384/512 produced CUDA invalid configuration argument in group-mixer attention.; This is throughput/stability evidence only, not model-quality evidence.",
-      "blockers": [
-        "AMP is not safe under the current contract on RTX 2060 without scaler/normalization repair.",
-        "Effective batch size 384/512 is not safe because group-mixer attention flattens batch*steps and trips CUDA invalid configuration.",
-        "Representative formal runtime depends on whether per-date cap 256 is accepted or a fuller date-stock coverage policy is required."
-      ],
-      "next_allowed_actions": [
-        "If launching immediately, use D=128, 1x256, no AMP, forecast_batch_size=64, finite_guard enabled.",
-        "Before larger slate batches, implement or test group-mixer chunking / safer attention path.",
-        "Before using AMP, repair or bound AMP scaler/normalization stability and rerun finite-guard scout.",
-        "Keep active/live/default/paper/broker artifacts frozen."
-      ],
-      "active_artifact_impact": "unchanged",
-      "dataset_ids": [
-        "policy_input_bundle__f926a496f69c61f6b92b5faf",
-        "policy_pool_view__fc63d6b996abc7abde88bae7"
-      ]
-    },
-    {
-      "id": "path_policy_alpha_v2_date_slate_group_mixer_chunking_20260621",
-      "date": "2026-06-21",
-      "r_id": "",
-      "path": "daily_research/brain/references/path_policy_alpha_v2_date_slate_group_mixer_chunking_20260621.md",
-      "tags": [
-        "path_policy",
-        "alpha_v2",
-        "date_slate",
-        "cuda",
-        "throughput",
-        "stability",
-        "implementation"
-      ],
-      "workflow": "path_policy",
-      "research_programs": [
-        "qdp_alpha_v2_generalization_repair"
-      ],
-      "study_families": [
-        "date_slate_alpha_fusion_v1",
-        "cuda_throughput_scout",
-        "group_mixer_chunking"
-      ],
-      "run_tags": [
-        "qdp_alpha_v2_date_slate_cuda_chunked_throughput_d128_noamp_dense_stride20_1x512_b64_20260621_01",
-        "qdp_alpha_v2_date_slate_cuda_chunked32768_throughput_d128_noamp_stride60_2x256_b64_20260621_01",
-        "qdp_alpha_v2_date_slate_cuda_chunked65000_throughput_d128_noamp_stride60_1x512_b64_20260621_01"
-      ],
-      "verdict": "Status: throughput_blocker_repaired / large_slate_shape_unblocked / throughput_not_improved / research_only / execution_frozen.; group_mixer chunking repairs CUDA invalid configuration argument for 1x512 and 2x256 by chunking only batch*steps independent rows.; 1x512 and 2x256 complete but are slower than 1x256; chunk_size 65000 OOMs on RTX 2060, so default remains 32768.; This is throughput/stability evidence only, not model-quality evidence.",
-      "blockers": [
-        "1x512 and 2x256 are not recommended as speed settings because measured throughput is below the 1x256 baseline.",
-        "group_mixer_chunk_size=65000 is unsafe on RTX 2060 6GB due CUDA OOM.",
-        "AMP remains unsafe until scaler/normalization stability is repaired and finite-guard scout passes."
-      ],
-      "next_allowed_actions": [
-        "For immediate formal research training, use D=128 / 1x256 / no AMP / forecast_batch_size=64 / finite_guard / group_mixer_chunk_size=32768.",
-        "If more speed is needed first, optimize loader locality, validation-loss evaluation batching, full-date sampling policy, or a lighter group mixer.",
-        "Keep active/live/default/paper/broker artifacts frozen."
-      ],
-      "active_artifact_impact": "unchanged",
-      "dataset_ids": [
-        "policy_input_bundle__f926a496f69c61f6b92b5faf",
-        "policy_pool_view__fc63d6b996abc7abde88bae7"
-      ]
-    },
-    {
-      "id": "path_policy_alpha_v2_date_slate_cross_stock_listwise_plan_20260622",
-      "date": "2026-06-22",
-      "r_id": "",
-      "path": "daily_research/brain/references/path_policy_alpha_v2_date_slate_cross_stock_listwise_plan_20260622.md",
-      "tags": [
-        "path_policy",
-        "alpha_v2",
-        "date_slate",
-        "cross_stock",
-        "listwise",
-        "architecture",
-        "loss_contract"
-      ],
-      "workflow": "path_policy",
-      "research_programs": [
-        "qdp_alpha_v2_generalization_repair"
-      ],
-      "study_families": [
-        "date_slate_cross_stock_alpha_fusion_v1",
-        "date_listwise_alpha_score_v2"
-      ],
-      "run_tags": [],
-      "verdict": "Status: implementation_in_progress / code_contract_partially_validated / research_only / execution_frozen.; Added new planned hot path date_slate_cross_stock_alpha_fusion_v1 with date_group_ids-aware same-date low-rank slot/listwise mixer and date_listwise_alpha_score_v2 prediction-first loss.; Focused code contract tests passed; no real-pack smoke or model-quality evidence yet.",
-      "blockers": [
-        "No real-pack smoke yet for date_slate_cross_stock_alpha_fusion_v1 + date_listwise_alpha_score_v2.",
-        "No CUDA throughput scout yet; full-date stocks_per_date=4096 feasibility is unknown on RTX 2060.",
-        "This is not model-quality evidence, multi-seed evidence, bridge evidence, candidate matrix evidence, or execution evidence."
-      ],
-      "next_allowed_actions": [
-        "Run broader focused tests, py_compile, git diff --check, doc_guard changed, and brain integrity check.",
-        "Run real-pack CPU smoke for date_slate_cross_stock_alpha_fusion_v1 + date_listwise_alpha_score_v2.",
-        "Run CUDA throughput scout before any long formal training.",
-        "Keep active/live/default/paper/broker artifacts frozen."
-      ],
-      "active_artifact_impact": "unchanged",
-      "dataset_ids": [
-        "policy_input_bundle__f926a496f69c61f6b92b5faf",
-        "policy_pool_view__fc63d6b996abc7abde88bae7"
-      ]
     }
   ]
 }

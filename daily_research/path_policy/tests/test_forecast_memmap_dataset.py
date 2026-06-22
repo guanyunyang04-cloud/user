@@ -530,6 +530,7 @@ def test_qdp_date_slate_pack_builds_independent_manifest_and_slate_loader(tmp_pa
     np.testing.assert_allclose(loaded.date_input_windows(rows), expected, rtol=1e-6, atol=1e-6)
 
     slate = loaded.date_slate_torch_dataset(rows, dates_per_batch=1, stocks_per_date=2, target_scale=1.0, shuffle_stocks=False)
+    assert slate.fast_index_enabled is True
     x, y_daily, y_cum, y_risk, row_indices, date_group_ids, static_ids = slate[0]
     assert tuple(x.shape) == (2, 3, 2)
     assert tuple(y_daily.shape) == (2, 1)
@@ -538,6 +539,21 @@ def test_qdp_date_slate_pack_builds_independent_manifest_and_slate_loader(tmp_pa
     assert row_indices.numpy().astype(np.int64).tolist() == rows[:2].tolist()
     assert date_group_ids.numpy().astype(np.int64).tolist() == [0, 0]
     assert tuple(static_ids.shape) == (2, 3)
+
+    row_frame = loaded.sample_index.iloc[rows].copy()
+    fast = loaded.date_input_windows_from_positions(
+        rows,
+        row_frame["global_date_pos"].to_numpy(dtype=np.int64),
+        row_frame["global_stock_pos"].to_numpy(dtype=np.int64),
+    )
+    np.testing.assert_allclose(fast, expected, rtol=1e-6, atol=1e-6)
+
+    shuffled = loaded.date_slate_torch_dataset(rows, dates_per_batch=1, stocks_per_date=3, target_scale=1.0, shuffle_stocks=True, seed=17)
+    shuffled_x, _, _, _, shuffled_rows, shuffled_date_group_ids, _ = shuffled[0]
+    shuffled_row_values = shuffled_rows.numpy().astype(np.int64)
+    shuffled_expected = loaded.date_input_windows(shuffled_row_values)
+    np.testing.assert_allclose(shuffled_x.numpy(), shuffled_expected, rtol=1e-6, atol=1e-6)
+    assert shuffled_date_group_ids.numpy().astype(np.int64).tolist() == [0] * len(shuffled_row_values)
 
 
 def test_qdp_training_pack_preserves_optional_basic_v2_labels(tmp_path) -> None:

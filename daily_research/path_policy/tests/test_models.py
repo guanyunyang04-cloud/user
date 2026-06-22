@@ -531,6 +531,47 @@ def test_date_slate_cross_stock_alpha_fusion_v1_uses_same_date_context_only() ->
         raise AssertionError("date_slate_cross_stock_alpha_fusion_v1 must require date_group_ids")
 
 
+def test_date_slate_cross_stock_alpha_fusion_v1_casts_slate_context_dtype() -> None:
+    feature_groups = {
+        "daily_price_volume": (0, 1),
+        "cross_section": (2,),
+        "market_regime": (3,),
+        "industry_peer": (4,),
+        "valuation_liquidity": (5,),
+        "event_quality": (6,),
+        "intraday": (7, 8),
+    }
+    model = DateSlateCrossStockAlphaFusionV1Forecaster(
+        input_dim=9,
+        hidden_dim=12,
+        horizon=20,
+        dropout=0.0,
+        transformer_layers=1,
+        transformer_heads=3,
+        patch_sizes=(2,),
+        feature_group_indices=feature_groups,
+        static_context_vocab_sizes={"exchange": 4, "industry": 6},
+        static_context_embedding_dims={"exchange": 2, "industry": 3},
+        static_context_fields=("exchange", "industry"),
+        cumulative_horizons=PATH20_DEFAULT_CUMULATIVE_HORIZONS,
+        slate_slot_count=4,
+    )
+    model.half()
+
+    def _float32_mixer(token_h: torch.Tensor) -> torch.Tensor:
+        return torch.ones_like(token_h, dtype=torch.float32)
+
+    model._mix_one_slate = _float32_mixer  # type: ignore[method-assign]
+    fused = torch.randn(4, 48, dtype=torch.float16)
+    date_group_ids = torch.tensor([0, 0, 1, 1], dtype=torch.long)
+
+    with torch.no_grad():
+        context = model._slate_context(fused, date_group_ids)
+
+    assert context.dtype == torch.float16
+    assert torch.isfinite(context).all()
+
+
 def test_regime_routed_multi_expert_forecaster_emits_decision_contract_and_router_diagnostics() -> None:
     horizons = (1, 2, 3, 5, 8, 10, 15, 20, 30)
     model = RegimeRoutedMultiExpertHorizonForecaster(

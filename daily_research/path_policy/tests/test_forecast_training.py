@@ -497,18 +497,34 @@ def test_train_forecast_models_date_slate_alpha_fusion_v1_end_to_end(tmp_path) -
         finite_guard=True,
         bad_batch_dump_dir=tmp_path / "cross_bad_batches",
         per_epoch_prediction_metrics=False,
+        train_only=True,
+        max_train_steps_per_epoch=1,
+        skip_validation_loss=True,
     )
 
     assert cross_summary["status"] == "completed"
     cross_family_summary = cross_summary["models"]["date_slate_cross_stock_alpha_fusion_v1"]
     assert cross_family_summary["date_slate_batching_enabled"] is True
+    assert cross_family_summary["date_slate_fast_index_enabled"] is True
     assert cross_family_summary["loss_profile"] == "date_listwise_alpha_score_v2"
     assert cross_family_summary["loss_profile_contract"]["alpha_score_objective"]["requires_model_level_cross_stock_context"] is True
     cross_seed_summary = cross_family_summary["seed_summaries"]["7"]
+    assert cross_family_summary["train_only"] is True
+    assert cross_family_summary["max_train_steps_per_epoch"] == 1
+    assert cross_family_summary["skip_validation_loss"] is True
+    assert cross_seed_summary["validation_metrics"]["status"] == "train_only_skipped_prediction_metrics"
+    assert cross_seed_summary["test_metrics"]["status"] == "train_only_skipped_prediction_metrics"
+    assert not (tmp_path / "cross_study" / "forecast_predictions_validation.csv").exists()
+    assert not (tmp_path / "cross_study" / "forecast_predictions_test.csv").exists()
     cross_checkpoint = torch.load(cross_seed_summary["last_checkpoint_pt"], map_location="cpu", weights_only=False)
     assert cross_checkpoint["resume_contract"]["output_profile"] == "forecast_incremental_path_v2"
     assert cross_checkpoint["resume_contract"]["loss_profile"] == "date_listwise_alpha_score_v2"
     assert cross_checkpoint["training_config"]["date_slate_batching_enabled"] is True
+    assert cross_checkpoint["training_config"]["date_slate_loader_type"] == "ForecastDateSlateTorchDataset"
+    assert cross_checkpoint["training_config"]["date_slate_fast_index_enabled"] is True
+    assert cross_checkpoint["training_config"]["train_only"] is True
+    assert cross_checkpoint["training_config"]["max_train_steps_per_epoch"] == 1
+    assert cross_checkpoint["training_config"]["skip_validation_loss"] is True
     assert cross_checkpoint["training_config"]["date_slate_semantics"]["full_train_date_slate"] is True
     assert cross_checkpoint["training_config"]["date_slate_semantics"]["context_scope"] == "full_train_date"
     assert cross_checkpoint["training_config"]["date_slate_semantics"]["train_slate_scope_contract"] == "full_market_same_date"
@@ -578,6 +594,7 @@ def test_date_slate_semantics_marks_sampled_chunk_not_full_market(tmp_path) -> N
 
     assert summary["status"] == "completed"
     family_summary = summary["models"]["date_slate_cross_stock_alpha_fusion_v1"]
+    assert family_summary["date_slate_fast_index_enabled"] is True
     semantics = family_summary["date_slate_semantics"]
     assert semantics["max_train_stocks_per_date"] == 3
     assert semantics["requested_stocks_per_date"] == 2

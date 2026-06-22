@@ -1852,7 +1852,7 @@ class DateSlateCrossStockAlphaFusionV1Forecaster(DateSlateAlphaFusionV1Forecaste
             mask = date_group_ids == int(group_id)
             if int(mask.sum().detach().cpu()) <= 0:
                 continue
-            context[mask] = self._mix_one_slate(token_h[mask])
+            context[mask] = self._mix_one_slate(token_h[mask]).to(device=context.device, dtype=context.dtype)
         return context
 
     def forward(

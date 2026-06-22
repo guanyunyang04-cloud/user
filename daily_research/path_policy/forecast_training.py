@@ -4746,6 +4746,9 @@ def train_forecast_models(
     save_last_checkpoint: bool = True,
     checkpoint_every_n_epochs: int = 0,
     per_epoch_prediction_metrics: bool = True,
+    train_only: bool = False,
+    max_train_steps_per_epoch: int = 0,
+    skip_validation_loss: bool = False,
     progress_json_name: str = "forecast_progress.json",
     output_profile: str = "forecast_path_v1",
     loss_profile: str = "default",
@@ -4979,6 +4982,7 @@ def train_forecast_models(
 
     for family in families:
         seed_summaries: dict[str, dict[str, Any]] = {}
+        family_date_slate_fast_index_enabled = False
         for current_seed in seed_values:
             torch.manual_seed(int(current_seed))
             np.random.seed(int(current_seed))
@@ -5089,6 +5093,13 @@ def train_forecast_models(
                 static_model_options=static_model_options,
                 output_profile=output_profile,
             )
+            train_dataset_obj = getattr(train_loader, "dataset", None)
+            date_slate_fast_index_enabled = bool(
+                date_slate_batching and bool(getattr(train_dataset_obj, "fast_index_enabled", False))
+            )
+            family_date_slate_fast_index_enabled = bool(
+                family_date_slate_fast_index_enabled or date_slate_fast_index_enabled
+            )
             optimizer_config = {
                 "lr": float(lr),
                 "weight_decay": float(weight_decay),
@@ -5107,9 +5118,12 @@ def train_forecast_models(
                 "date_slate_batching_enabled": bool(date_slate_batching),
                 "date_slate_dates_per_batch": int(date_slate_dates_per_batch),
                 "date_slate_stocks_per_date": int(date_slate_stocks_per_date),
+                "date_slate_loader_type": type(train_dataset_obj).__name__ if train_dataset_obj is not None else "",
+                "date_slate_fast_index_enabled": bool(date_slate_fast_index_enabled),
                 "rank_min_group_size": int(rank_min_group_size),
                 "rank_max_pairs_per_date": int(rank_max_pairs_per_date),
                 "date_slate_semantics": dict(date_slate_semantics),
+                "train_only": bool(train_only),
                 "finite_guard_enabled": bool(finite_guard),
                 "bad_batch_dump_dir": str(bad_batch_dump_root.resolve()) if bool(finite_guard) else "",
                 "lr": float(lr),
@@ -5136,6 +5150,9 @@ def train_forecast_models(
                 "ranking_baseline": str(ranking_baseline),
                 "slot_diagnostics": bool(slot_diagnostics),
                 "per_epoch_prediction_metrics": bool(per_epoch_prediction_metrics_enabled),
+                "train_only": bool(train_only),
+                "max_train_steps_per_epoch": int(max_train_steps_per_epoch),
+                "skip_validation_loss": bool(skip_validation_loss),
                 "sampling_config": dict(sampling_config),
                 "static_context_schema": dict(dataset_view.static_context_schema),
                 "static_context_source_schema": dict(dataset_view.source_static_context_schema),
@@ -5198,6 +5215,11 @@ def train_forecast_models(
                 last_progress_monotonic = epoch_started_monotonic
                 samples_processed_epoch = 0
                 total_train_steps = int(len(train_loader))
+                effective_train_steps = (
+                    min(int(total_train_steps), int(max_train_steps_per_epoch))
+                    if int(max_train_steps_per_epoch) > 0
+                    else int(total_train_steps)
+                )
                 model.train()
                 epoch_losses: list[float] = []
                 epoch_counts: list[int] = []
@@ -5426,10 +5448,10 @@ def train_forecast_models(
                         )
                         optimizer.zero_grad(set_to_none=True)
                     now_monotonic = time.monotonic()
-                    if now_monotonic - last_progress_monotonic >= 60.0 or step == len(train_loader):
+                    if now_monotonic - last_progress_monotonic >= 60.0 or step >= int(effective_train_steps):
                         epoch_elapsed = max(float(now_monotonic - epoch_started_monotonic), 1.0e-6)
                         samples_per_second = float(samples_processed_epoch) / epoch_elapsed
-                        remaining_steps = max(int(total_train_steps) - int(step), 0)
+                        remaining_steps = max(int(effective_train_steps) - int(step), 0)
                         seconds_per_step = epoch_elapsed / max(int(step), 1)
                         _write_forecast_progress(
                             progress_path,
@@ -5454,7 +5476,7 @@ def train_forecast_models(
                             best_checkpoint_pt=best_checkpoint_path,
                             phase="train_epoch",
                             current_step=int(step),
-                            total_steps=int(total_train_steps),
+                            total_steps=int(effective_train_steps),
                             samples_processed_epoch=int(samples_processed_epoch),
                             samples_per_second=float(samples_per_second),
                             epoch_eta_seconds=float(remaining_steps * seconds_per_step),
@@ -5467,9 +5489,13 @@ def train_forecast_models(
                                 "date_slate_batching_enabled": bool(date_slate_batching),
                                 "date_slate_dates_per_batch": int(date_slate_dates_per_batch),
                                 "date_slate_stocks_per_date": int(date_slate_stocks_per_date),
+                                "date_slate_fast_index_enabled": bool(date_slate_fast_index_enabled),
+                                "max_train_steps_per_epoch": int(max_train_steps_per_epoch),
                             },
                         )
                         last_progress_monotonic = now_monotonic
+                    if int(max_train_steps_per_epoch) > 0 and int(step) >= int(max_train_steps_per_epoch):
+                        break
                 last_train_loss = (
                     float(np.average(epoch_losses, weights=epoch_counts)) if epoch_losses and epoch_counts else float("inf")
                 )
@@ -5506,27 +5532,43 @@ def train_forecast_models(
                         "validation_sample_count": int(len(validation_indices)),
                     },
                 )
-                validation_loss = _evaluate_loss(
-                    model,
-                    dataset_view if dataset_view.dataset_mode == "memmap" else x,
-                    y_daily,
-                    y_cum,
-                    y_risk,
-                    validation_indices,
-                    batch_size=batch_size,
-                    device=resolved_device,
-                    amp_enabled=amp_enabled,
-                    target_scale=target_scale,
-                    loss_profile=loss_profile,
-                    decision_cost_bps=decision_cost_bps,
-                    decision_hit_threshold_bps=decision_hit_threshold_bps,
-                    decision_drawdown_penalty=decision_drawdown_penalty,
-                    date_slate_dates_per_batch=int(date_slate_dates_per_batch),
-                    date_slate_stocks_per_date=int(date_slate_stocks_per_date),
-                    rank_min_group_size=int(rank_min_group_size),
-                    rank_max_pairs_per_date=int(rank_max_pairs_per_date),
-                )
-                if per_epoch_prediction_metrics_enabled:
+                if bool(skip_validation_loss):
+                    validation_loss = float(last_train_loss)
+                    validation_metrics = {
+                        "status": "train_only_skipped_validation_loss",
+                        "row_count": int(len(validation_indices)),
+                        "date_count": int(dataset_view.date_count_for_indices(validation_indices)),
+                        "forecast_horizon": int(dataset_view.horizon),
+                        "cumulative_horizons": [int(item) for item in dataset_view.cumulative_horizons],
+                        "selection_profile": str(selection_profile),
+                        "loss_profile": str(loss_profile),
+                        "reason": "forecast_skip_validation_loss",
+                    }
+                    validation_metrics_mode = "train_only_skipped_validation_loss"
+                else:
+                    validation_loss = _evaluate_loss(
+                        model,
+                        dataset_view if dataset_view.dataset_mode == "memmap" else x,
+                        y_daily,
+                        y_cum,
+                        y_risk,
+                        validation_indices,
+                        batch_size=batch_size,
+                        device=resolved_device,
+                        amp_enabled=amp_enabled,
+                        target_scale=target_scale,
+                        loss_profile=loss_profile,
+                        decision_cost_bps=decision_cost_bps,
+                        decision_hit_threshold_bps=decision_hit_threshold_bps,
+                        decision_drawdown_penalty=decision_drawdown_penalty,
+                        date_slate_dates_per_batch=int(date_slate_dates_per_batch),
+                        date_slate_stocks_per_date=int(date_slate_stocks_per_date),
+                        rank_min_group_size=int(rank_min_group_size),
+                        rank_max_pairs_per_date=int(rank_max_pairs_per_date),
+                    )
+                    validation_metrics = {}
+                    validation_metrics_mode = "validation_loss_pending"
+                if per_epoch_prediction_metrics_enabled and not bool(skip_validation_loss):
                     validation_predictions = _predict_indices(
                         model,
                         dataset_view if dataset_view.dataset_mode == "memmap" else x,
@@ -5550,7 +5592,7 @@ def train_forecast_models(
                     validation_metrics = forecast_prediction_metrics(validation_frame)
                     validation_metrics_mode = "full_prediction_metrics"
                     del validation_predictions, validation_frame
-                else:
+                elif not bool(skip_validation_loss):
                     validation_metrics = {
                         "status": "validation_loss_only",
                         "row_count": int(len(validation_indices)),
@@ -5771,8 +5813,8 @@ def train_forecast_models(
                     last_checkpoint_pt=last_checkpoint_path if bool(save_last_checkpoint) else None,
                     best_checkpoint_pt=best_checkpoint_path,
                     phase="epoch_end",
-                    current_step=int(total_train_steps),
-                    total_steps=int(total_train_steps),
+                    current_step=int(effective_train_steps),
+                    total_steps=int(effective_train_steps),
                     samples_processed_epoch=int(samples_processed_epoch),
                     samples_per_second=float(samples_processed_epoch / max(epoch_seconds, 1.0e-6)),
                     epoch_eta_seconds=0.0,
@@ -5781,8 +5823,11 @@ def train_forecast_models(
                         "dataset_mode": str(dataset_view.dataset_mode),
                         "dataset_type": type(dataset_view.dataset).__name__,
                         "cache_friendly_train_order": bool(cache_friendly_train_order),
+                        "date_slate_fast_index_enabled": bool(date_slate_fast_index_enabled),
                         "validation_loss": float(validation_loss),
                         "validation_phase_started_after_seconds": float(validation_started_monotonic - epoch_started_monotonic),
+                        "max_train_steps_per_epoch": int(max_train_steps_per_epoch),
+                        "skip_validation_loss": bool(skip_validation_loss),
                     },
                 )
                 if epoch >= min_epochs and patience_used >= patience_limit:
@@ -5830,75 +5875,91 @@ def train_forecast_models(
                 _save_forecast_checkpoint_atomic(best_checkpoint_path, best_checkpoint_payload)
             checkpoint = torch.load(best_checkpoint_path, map_location=resolved_device, weights_only=False)
             model.load_state_dict(checkpoint["state_dict"])
-            validation_predictions = _predict_indices(
-                model,
-                dataset_view if dataset_view.dataset_mode == "memmap" else x,
-                validation_indices,
-                batch_size=batch_size,
-                device=resolved_device,
-                amp_enabled=amp_enabled,
-                target_scale=target_scale,
-            )
-            validation_frame = _prediction_frame_for_dataset_indices(
-                dataset,
-                indices=validation_indices,
-                predictions=validation_predictions,
-                family=family,
-                target_scale=target_scale,
-                decision_cost_bps=decision_cost_bps,
-                decision_hit_threshold_bps=decision_hit_threshold_bps,
-                decision_drawdown_penalty=decision_drawdown_penalty,
-                loss_profile=loss_profile,
-            )
-            final_validation_metrics = forecast_prediction_metrics(validation_frame)
-            if bool(write_all_predictions):
-                _write_frame(
-                    study_root / f"forecast_predictions_validation_{family}_seed{int(current_seed)}.csv",
-                    validation_frame,
+            if bool(train_only):
+                final_validation_metrics = {
+                    "status": "train_only_skipped_prediction_metrics",
+                    "reason": "forecast_train_only",
+                    "best_validation_loss": float(best_validation_loss),
+                    "row_count": int(len(validation_indices)),
+                }
+                final_test_metrics = {
+                    "status": "train_only_skipped_prediction_metrics",
+                    "reason": "forecast_train_only",
+                    "row_count": int(len(test_indices)),
+                }
+                if single_candidate_run:
+                    selected_output_cache["model_family"] = str(family)
+                    selected_output_cache["seed"] = int(current_seed)
+            else:
+                validation_predictions = _predict_indices(
+                    model,
+                    dataset_view if dataset_view.dataset_mode == "memmap" else x,
+                    validation_indices,
+                    batch_size=batch_size,
+                    device=resolved_device,
+                    amp_enabled=amp_enabled,
+                    target_scale=target_scale,
                 )
-            if single_candidate_run:
-                selected_output_cache["model_family"] = str(family)
-                selected_output_cache["seed"] = int(current_seed)
-                selected_output_cache["validation_csv"] = _write_frame(
-                    study_root / "forecast_predictions_validation.csv",
-                    validation_frame,
+                validation_frame = _prediction_frame_for_dataset_indices(
+                    dataset,
+                    indices=validation_indices,
+                    predictions=validation_predictions,
+                    family=family,
+                    target_scale=target_scale,
+                    decision_cost_bps=decision_cost_bps,
+                    decision_hit_threshold_bps=decision_hit_threshold_bps,
+                    decision_drawdown_penalty=decision_drawdown_penalty,
+                    loss_profile=loss_profile,
                 )
-                selected_output_cache["validation_stratified_metrics"] = stratified_forecast_prediction_metrics(validation_frame)
-            del validation_predictions, validation_frame
+                final_validation_metrics = forecast_prediction_metrics(validation_frame)
+                if bool(write_all_predictions):
+                    _write_frame(
+                        study_root / f"forecast_predictions_validation_{family}_seed{int(current_seed)}.csv",
+                        validation_frame,
+                    )
+                if single_candidate_run:
+                    selected_output_cache["model_family"] = str(family)
+                    selected_output_cache["seed"] = int(current_seed)
+                    selected_output_cache["validation_csv"] = _write_frame(
+                        study_root / "forecast_predictions_validation.csv",
+                        validation_frame,
+                    )
+                    selected_output_cache["validation_stratified_metrics"] = stratified_forecast_prediction_metrics(validation_frame)
+                del validation_predictions, validation_frame
 
-            test_predictions = _predict_indices(
-                model,
-                dataset_view if dataset_view.dataset_mode == "memmap" else x,
-                test_indices,
-                batch_size=batch_size,
-                device=resolved_device,
-                amp_enabled=amp_enabled,
-                target_scale=target_scale,
-            )
-            test_frame = _prediction_frame_for_dataset_indices(
-                dataset,
-                indices=test_indices,
-                predictions=test_predictions,
-                family=family,
-                target_scale=target_scale,
-                decision_cost_bps=decision_cost_bps,
-                decision_hit_threshold_bps=decision_hit_threshold_bps,
-                decision_drawdown_penalty=decision_drawdown_penalty,
-                loss_profile=loss_profile,
-            )
-            final_test_metrics = forecast_prediction_metrics(test_frame)
-            if bool(write_all_predictions):
-                _write_frame(
-                    study_root / f"forecast_predictions_test_{family}_seed{int(current_seed)}.csv",
-                    test_frame,
+                test_predictions = _predict_indices(
+                    model,
+                    dataset_view if dataset_view.dataset_mode == "memmap" else x,
+                    test_indices,
+                    batch_size=batch_size,
+                    device=resolved_device,
+                    amp_enabled=amp_enabled,
+                    target_scale=target_scale,
                 )
-            if single_candidate_run:
-                selected_output_cache["test_csv"] = _write_frame(
-                    study_root / "forecast_predictions_test.csv",
-                    test_frame,
+                test_frame = _prediction_frame_for_dataset_indices(
+                    dataset,
+                    indices=test_indices,
+                    predictions=test_predictions,
+                    family=family,
+                    target_scale=target_scale,
+                    decision_cost_bps=decision_cost_bps,
+                    decision_hit_threshold_bps=decision_hit_threshold_bps,
+                    decision_drawdown_penalty=decision_drawdown_penalty,
+                    loss_profile=loss_profile,
                 )
-                selected_output_cache["test_stratified_metrics"] = stratified_forecast_prediction_metrics(test_frame)
-            del test_predictions, test_frame
+                final_test_metrics = forecast_prediction_metrics(test_frame)
+                if bool(write_all_predictions):
+                    _write_frame(
+                        study_root / f"forecast_predictions_test_{family}_seed{int(current_seed)}.csv",
+                        test_frame,
+                    )
+                if single_candidate_run:
+                    selected_output_cache["test_csv"] = _write_frame(
+                        study_root / "forecast_predictions_test.csv",
+                        test_frame,
+                    )
+                    selected_output_cache["test_stratified_metrics"] = stratified_forecast_prediction_metrics(test_frame)
+                del test_predictions, test_frame
             slot_diagnostics_path = ""
             if bool(slot_diagnostics) and family == "sector_slot_mixer_sequence":
                 slot_diagnostics_path = _write_slot_diagnostics(
@@ -5980,6 +6041,9 @@ def train_forecast_models(
             "date_slate_batching_enabled": bool(family in FORECAST_DATE_SLATE_MODEL_FAMILIES),
             "date_slate_dates_per_batch": int(date_slate_dates_per_batch),
             "date_slate_stocks_per_date": int(date_slate_stocks_per_date),
+            "date_slate_fast_index_enabled": bool(
+                family in FORECAST_DATE_SLATE_MODEL_FAMILIES and family_date_slate_fast_index_enabled
+            ),
             "date_slate_semantics": dict(date_slate_semantics),
             "rank_min_group_size": int(rank_min_group_size),
             "rank_max_pairs_per_date": int(rank_max_pairs_per_date),
@@ -5995,6 +6059,9 @@ def train_forecast_models(
             "decision_utility": dict(decision_config),
             "slot_diagnostics": bool(slot_diagnostics),
             "per_epoch_prediction_metrics": bool(per_epoch_prediction_metrics_enabled),
+            "train_only": bool(train_only),
+            "max_train_steps_per_epoch": int(max_train_steps_per_epoch),
+            "skip_validation_loss": bool(skip_validation_loss),
             "train_rows": int(len(train_indices)),
             "source_train_rows": int(len(source_train_indices)),
             "validation_rows": int(len(validation_indices)),
@@ -6030,7 +6097,10 @@ def train_forecast_models(
         and str(selected_output_cache.get("validation_csv", "")).strip()
         and str(selected_output_cache.get("test_csv", "")).strip()
     )
-    if cache_matches_selected:
+    if bool(train_only):
+        validation_csv = ""
+        test_csv = ""
+    elif cache_matches_selected:
         validation_csv = str(selected_output_cache.get("validation_csv", ""))
         test_csv = str(selected_output_cache.get("test_csv", ""))
         validation_stratified_metrics = dict(selected_output_cache.get("validation_stratified_metrics", {}) or {})
@@ -6156,6 +6226,9 @@ def train_forecast_models(
             "ranking_baseline": str(ranking_baseline),
             "slot_diagnostics": bool(slot_diagnostics),
             "per_epoch_prediction_metrics": bool(per_epoch_prediction_metrics_enabled),
+            "train_only": bool(train_only),
+            "max_train_steps_per_epoch": int(max_train_steps_per_epoch),
+            "skip_validation_loss": bool(skip_validation_loss),
             "save_last_checkpoint": bool(save_last_checkpoint),
             "checkpoint_every_n_epochs": int(checkpoint_interval),
             "resume_from_checkpoint_pt": str(Path(resume_from).resolve()) if resume_from is not None and str(resume_from).strip() else "",
@@ -6243,6 +6316,11 @@ def train_forecast_models(
                 "dataset_mode": str(dataset_view.dataset_mode),
                 "dataset_type": type(dataset_view.dataset).__name__,
                 "selected_model_family": str(selected_family),
+                "date_slate_fast_index_enabled": bool(
+                    dict(model_summaries.get(str(selected_family), {}) or {}).get("date_slate_fast_index_enabled", False)
+                ),
+                "max_train_steps_per_epoch": int(max_train_steps_per_epoch),
+                "skip_validation_loss": bool(skip_validation_loss),
                 "final_epoch_seconds": float(latest_selected_row.get("epoch_seconds", 0.0) or 0.0),
                 "total_elapsed_seconds": float(time.monotonic() - run_started_monotonic),
             },

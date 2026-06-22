@@ -880,6 +880,9 @@ def _run_forecast_walkforward_study(
             save_last_checkpoint=bool(args.forecast_save_last),
             checkpoint_every_n_epochs=int(args.forecast_checkpoint_every_n_epochs),
             per_epoch_prediction_metrics=bool(args.forecast_per_epoch_prediction_metrics),
+            train_only=bool(getattr(args, "forecast_train_only", False)),
+            max_train_steps_per_epoch=int(getattr(args, "forecast_max_train_steps_per_epoch", 0)),
+            skip_validation_loss=bool(getattr(args, "forecast_skip_validation_loss", False)),
             output_profile=str(args.forecast_output_profile),
             loss_profile=str(args.forecast_loss_profile),
             decision_cost_bps=float(args.forecast_decision_cost_bps),
@@ -3578,6 +3581,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Use exact validation loss for checkpoint selection and defer full prediction metrics to final best-checkpoint evaluation.",
     )
     parser.add_argument(
+        "--forecast-train-only",
+        action="store_true",
+        help="Skip final validation/test prediction materialization after training; intended for throughput scouts only.",
+    )
+    parser.add_argument(
+        "--forecast-max-train-steps-per-epoch",
+        type=int,
+        default=0,
+        help="Limit train steps per forecast epoch for throughput probes; 0 means full epoch.",
+    )
+    parser.add_argument(
+        "--forecast-skip-validation-loss",
+        action="store_true",
+        help="Skip epoch validation loss for train-only throughput probes.",
+    )
+    parser.add_argument(
         "--forecast-include-static-context",
         action="store_true",
         help="Write static symbol/exchange/industry ids into newly built memmap forecast datasets.",
@@ -3802,6 +3821,10 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
             parser.error("--forecast-dataloader-num-workers must be >= 0.")
         if int(getattr(args, "forecast_prefetch_factor", 2)) <= 0:
             parser.error("--forecast-prefetch-factor must be positive.")
+        if int(getattr(args, "forecast_max_train_steps_per_epoch", 0)) < 0:
+            parser.error("--forecast-max-train-steps-per-epoch must be >= 0.")
+        if bool(getattr(args, "forecast_skip_validation_loss", False)) and not bool(getattr(args, "forecast_train_only", False)):
+            parser.error("--forecast-skip-validation-loss is only valid with --forecast-train-only throughput probes.")
         if int(getattr(args, "forecast_date_slate_stock_chunk_size", 64)) <= 0:
             parser.error("--forecast-date-slate-stock-chunk-size must be positive.")
         if int(getattr(args, "forecast_dates_per_batch", 1)) <= 0:

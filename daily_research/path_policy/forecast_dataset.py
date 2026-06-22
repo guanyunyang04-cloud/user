@@ -232,28 +232,43 @@ class ForecastDateSlateTorchDataset(Dataset):
         self.target_scale = float(target_scale)
         self.shuffle_stocks = bool(shuffle_stocks)
         self.seed = int(seed)
+        self.fast_index_enabled = True
         if self.indices.size:
-            frame = self.dataset.sample_index.iloc[self.indices][["date"]].copy()
+            frame = self.dataset.sample_index.iloc[self.indices][["date", "global_date_pos", "global_stock_pos"]].copy()
             frame["_row_idx"] = self.indices
             frame["date"] = pd.to_datetime(frame["date"]).dt.strftime("%Y-%m-%d")
             self._date_groups = [
-                (str(date), group["_row_idx"].to_numpy(dtype=np.int64, copy=True))
+                (
+                    str(date),
+                    group["_row_idx"].to_numpy(dtype=np.int64, copy=True),
+                    pd.to_numeric(group["global_date_pos"], errors="coerce").fillna(-1).to_numpy(dtype=np.int64, copy=True),
+                    pd.to_numeric(group["global_stock_pos"], errors="coerce").fillna(-1).to_numpy(dtype=np.int64, copy=True),
+                )
                 for date, group in frame.groupby("date", sort=True)
             ]
         else:
             self._date_groups = []
-        self._batches: list[list[np.ndarray]] = []
+        self._batches: list[list[tuple[np.ndarray, np.ndarray, np.ndarray]]] = []
         for start in range(0, len(self._date_groups), self.dates_per_batch):
             date_groups = self._date_groups[start : start + self.dates_per_batch]
-            chunks_by_date: list[list[np.ndarray]] = []
+            chunks_by_date: list[list[tuple[np.ndarray, np.ndarray, np.ndarray]]] = []
             max_chunks = 0
-            for _, rows in date_groups:
+            for _, rows, date_pos, stock_pos in date_groups:
                 row_values = np.asarray(rows, dtype=np.int64)
+                date_pos_values = np.asarray(date_pos, dtype=np.int64)
+                stock_pos_values = np.asarray(stock_pos, dtype=np.int64)
                 if self.shuffle_stocks and row_values.size > 1:
                     rng = np.random.default_rng(self.seed + int(start) + int(row_values[0]))
-                    row_values = rng.permutation(row_values)
+                    order = rng.permutation(np.arange(row_values.size, dtype=np.int64))
+                    row_values = row_values[order]
+                    date_pos_values = date_pos_values[order]
+                    stock_pos_values = stock_pos_values[order]
                 chunks = [
-                    row_values[pos : pos + self.stocks_per_date]
+                    (
+                        row_values[pos : pos + self.stocks_per_date],
+                        date_pos_values[pos : pos + self.stocks_per_date],
+                        stock_pos_values[pos : pos + self.stocks_per_date],
+                    )
                     for pos in range(0, row_values.size, self.stocks_per_date)
                 ]
                 chunks_by_date.append(chunks)
@@ -268,20 +283,29 @@ class ForecastDateSlateTorchDataset(Dataset):
 
     def __getitem__(self, item: int) -> tuple[torch.Tensor, ...]:
         chunks = self._batches[int(item)]
-        row_indices = np.concatenate([np.asarray(chunk, dtype=np.int64) for chunk in chunks])
-        x = np.asarray(self.dataset.date_input_windows(row_indices), dtype=np.float32)
+        row_indices = np.concatenate([np.asarray(chunk[0], dtype=np.int64) for chunk in chunks])
+        date_positions = np.concatenate([np.asarray(chunk[1], dtype=np.int64) for chunk in chunks])
+        stock_positions = np.concatenate([np.asarray(chunk[2], dtype=np.int64) for chunk in chunks])
+        x = np.asarray(
+            self.dataset.date_input_windows_from_positions(row_indices, date_positions, stock_positions),
+            dtype=np.float32,
+        )
         y_daily = np.asarray(self.dataset.y_daily_excess[row_indices], dtype=np.float32) * self.target_scale
         y_cum = np.asarray(self.dataset.y_cum_excess[row_indices], dtype=np.float32) * self.target_scale
         y_risk = self.dataset.risk_by_horizon(row_indices) * self.target_scale
-        date_values = pd.to_datetime(self.dataset.sample_index.iloc[row_indices]["date"]).dt.strftime("%Y-%m-%d")
-        codes, _ = pd.factorize(date_values, sort=True)
+        codes = np.concatenate(
+            [
+                np.full((len(chunk[0]),), int(group_pos), dtype=np.int64)
+                for group_pos, chunk in enumerate(chunks)
+            ]
+        )
         items: tuple[torch.Tensor, ...] = (
             torch.as_tensor(x, dtype=torch.float32),
             torch.as_tensor(y_daily, dtype=torch.float32),
             torch.as_tensor(y_cum, dtype=torch.float32),
             torch.as_tensor(y_risk, dtype=torch.float32),
             torch.as_tensor(row_indices, dtype=torch.long),
-            torch.as_tensor(codes.astype(np.int64), dtype=torch.long),
+            torch.as_tensor(codes, dtype=torch.long),
         )
         if self.dataset.static_context_ids is not None:
             static_ids = np.asarray(self.dataset.static_context_ids[row_indices], dtype=np.int64).copy()
@@ -992,11 +1016,28 @@ class ForecastTrainingPackDataset:
 
     def raw_date_input_windows(self, row_indices: np.ndarray) -> np.ndarray:
         rows = np.asarray(row_indices, dtype=np.int64).reshape(-1)
+        if len(rows) == 0:
+            return np.zeros((0, int(self.lookback_days), self.input_dim), dtype=np.float32)
+        request = self.sample_index.iloc[rows][["global_stock_pos", "global_date_pos"]].copy()
+        stock_positions = pd.to_numeric(request["global_stock_pos"], errors="coerce").fillna(-1).to_numpy(dtype=np.int64, copy=True)
+        date_positions = pd.to_numeric(request["global_date_pos"], errors="coerce").fillna(-1).to_numpy(dtype=np.int64, copy=True)
+        return self.raw_date_input_windows_from_positions(rows, date_positions, stock_positions)
+
+    def raw_date_input_windows_from_positions(
+        self,
+        row_indices: np.ndarray,
+        global_date_pos: np.ndarray,
+        global_stock_pos: np.ndarray,
+    ) -> np.ndarray:
+        rows = np.asarray(row_indices, dtype=np.int64).reshape(-1)
+        date_positions = np.asarray(global_date_pos, dtype=np.int64).reshape(-1)
+        stock_positions = np.asarray(global_stock_pos, dtype=np.int64).reshape(-1)
+        if len(rows) != len(date_positions) or len(rows) != len(stock_positions):
+            raise ValueError("row_indices, global_date_pos, and global_stock_pos must have the same length.")
         lookback = int(self.lookback_days)
         out = np.zeros((len(rows), lookback, self.input_dim), dtype=np.float32)
         if len(rows) == 0:
             return out
-
         use_date_major = self.has_date_major_feature_panel
         if use_date_major:
             panel = self.open_date_major_feature_store()
@@ -1007,13 +1048,9 @@ class ForecastTrainingPackDataset:
             date_axis = 1
             stock_axis = 0
 
-        request = self.sample_index.iloc[rows][["global_stock_pos", "global_date_pos"]].copy()
-        request["_request_pos"] = np.arange(len(rows), dtype=np.int64)
-        request["global_stock_pos"] = pd.to_numeric(request["global_stock_pos"], errors="coerce").fillna(-1).astype("int64")
-        request["global_date_pos"] = pd.to_numeric(request["global_date_pos"], errors="coerce").fillna(-1).astype("int64")
         date_count = int(panel.shape[date_axis])
         stock_count = int(panel.shape[stock_axis])
-        for date_pos, group in request.groupby("global_date_pos", sort=False):
+        for date_pos in np.unique(date_positions):
             end_pos = int(date_pos) + 1
             if end_pos <= 0:
                 continue
@@ -1022,8 +1059,9 @@ class ForecastTrainingPackDataset:
             if source_end <= source_start:
                 continue
             target_start = source_start - (end_pos - lookback)
-            stock_idx = group["global_stock_pos"].to_numpy(dtype=np.int64, copy=False)
-            request_positions = group["_request_pos"].to_numpy(dtype=np.int64, copy=False)
+            group_mask = date_positions == int(date_pos)
+            stock_idx = stock_positions[group_mask]
+            request_positions = np.flatnonzero(group_mask).astype(np.int64, copy=False)
             valid = (stock_idx >= 0) & (stock_idx < stock_count)
             if not np.any(valid):
                 continue
@@ -1051,6 +1089,14 @@ class ForecastTrainingPackDataset:
 
     def date_input_windows(self, row_indices: np.ndarray) -> np.ndarray:
         return self.raw_date_input_windows(row_indices)
+
+    def date_input_windows_from_positions(
+        self,
+        row_indices: np.ndarray,
+        global_date_pos: np.ndarray,
+        global_stock_pos: np.ndarray,
+    ) -> np.ndarray:
+        return self.raw_date_input_windows_from_positions(row_indices, global_date_pos, global_stock_pos)
 
     def risk_by_horizon(self, row_idx: int | np.ndarray) -> np.ndarray:
         return np.stack(
