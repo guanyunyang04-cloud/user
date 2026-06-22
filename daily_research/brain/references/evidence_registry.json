@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 141,
+  "record_count": 142,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -4773,6 +4773,47 @@
       "next_allowed_actions": [
         "For immediate formal research training, use D=128 / 1x256 / no AMP / forecast_batch_size=64 / finite_guard / group_mixer_chunk_size=32768.",
         "If more speed is needed first, optimize loader locality, validation-loss evaluation batching, full-date sampling policy, or a lighter group mixer.",
+        "Keep active/live/default/paper/broker artifacts frozen."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__f926a496f69c61f6b92b5faf",
+        "policy_pool_view__fc63d6b996abc7abde88bae7"
+      ]
+    },
+    {
+      "id": "path_policy_alpha_v2_date_slate_cross_stock_listwise_plan_20260622",
+      "date": "2026-06-22",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_date_slate_cross_stock_listwise_plan_20260622.md",
+      "tags": [
+        "path_policy",
+        "alpha_v2",
+        "date_slate",
+        "cross_stock",
+        "listwise",
+        "architecture",
+        "loss_contract"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "qdp_alpha_v2_generalization_repair"
+      ],
+      "study_families": [
+        "date_slate_cross_stock_alpha_fusion_v1",
+        "date_listwise_alpha_score_v2"
+      ],
+      "run_tags": [],
+      "verdict": "Status: implementation_in_progress / code_contract_partially_validated / research_only / execution_frozen.; Added new planned hot path date_slate_cross_stock_alpha_fusion_v1 with date_group_ids-aware same-date low-rank slot/listwise mixer and date_listwise_alpha_score_v2 prediction-first loss.; Focused code contract tests passed; no real-pack smoke or model-quality evidence yet.",
+      "blockers": [
+        "No real-pack smoke yet for date_slate_cross_stock_alpha_fusion_v1 + date_listwise_alpha_score_v2.",
+        "No CUDA throughput scout yet; full-date stocks_per_date=4096 feasibility is unknown on RTX 2060.",
+        "This is not model-quality evidence, multi-seed evidence, bridge evidence, candidate matrix evidence, or execution evidence."
+      ],
+      "next_allowed_actions": [
+        "Run broader focused tests, py_compile, git diff --check, doc_guard changed, and brain integrity check.",
+        "Run real-pack CPU smoke for date_slate_cross_stock_alpha_fusion_v1 + date_listwise_alpha_score_v2.",
+        "Run CUDA throughput scout before any long formal training.",
         "Keep active/live/default/paper/broker artifacts frozen."
       ],
       "active_artifact_impact": "unchanged",

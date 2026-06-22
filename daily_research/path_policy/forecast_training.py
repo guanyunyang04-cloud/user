@@ -27,6 +27,7 @@ from daily_research.path_policy.models import (
     DEFAULT_GROUP_MIXER_CHUNK_SIZE,
     DLinearPath20Forecaster,
     DateSlateAlphaFusionV1Forecaster,
+    DateSlateCrossStockAlphaFusionV1Forecaster,
     ExpertFusionPath20Forecaster,
     GRUPath20Forecaster,
     HybridStructuredAlphaV2Forecaster,
@@ -60,14 +61,21 @@ FORECAST_MODEL_FAMILIES = (
     "hybrid_multiscale_recency_aware_v1",
     "hybrid_structured_alpha_v2",
     "date_slate_alpha_fusion_v1",
+    "date_slate_cross_stock_alpha_fusion_v1",
     "regime_routed_multi_expert_horizon_v1",
 )
 FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES = (
     "stock_mixer_sequence",
     "sector_slot_mixer_sequence",
     "date_slate_alpha_fusion_v1",
+    "date_slate_cross_stock_alpha_fusion_v1",
     "regime_routed_multi_expert_horizon_v1",
 )
+FORECAST_DATE_SLATE_MODEL_FAMILIES = (
+    "date_slate_alpha_fusion_v1",
+    "date_slate_cross_stock_alpha_fusion_v1",
+)
+FORECAST_DATE_SLATE_PREDICTION_STOCKS_PER_DATE = 4096
 FORECAST_MEMMAP_DATASET_TYPES = (ForecastMemmapDataset, ForecastShardedMemmapDataset, ForecastTrainingPackDataset)
 FORECAST_OUTPUT_PROFILES = ("forecast_path_v1", "decision_utility_v1", "forecast_incremental_path_v2")
 FORECAST_SELECTION_PROFILES = ("multiscale", "trend20", "short_burst", "decision_utility", "validation_loss")
@@ -97,6 +105,7 @@ FORECAST_LOSS_PROFILES = (
     "hybrid_alpha_score_v1",
     "hybrid_alpha_score_v2",
     "date_grouped_alpha_score_v1",
+    "date_listwise_alpha_score_v2",
 )
 FORECAST_RANKING_BASELINES = ("none", "lightgbm", "xgboost")
 FORECAST_RISK_AUX_NAMES = ("downside_floor", "worst_1d", "upside")
@@ -134,6 +143,7 @@ _FORECAST_PREDICTION_FIRST_LOSS_PROFILES = {
     "hybrid_alpha_score_v1",
     "hybrid_alpha_score_v2",
     "date_grouped_alpha_score_v1",
+    "date_listwise_alpha_score_v2",
 }
 _FORECAST_LOSS_WEIGHT_PRESETS: dict[str, dict[str, float]] = {
     "default": {
@@ -547,6 +557,33 @@ _FORECAST_LOSS_WEIGHT_PRESETS: dict[str, dict[str, float]] = {
         "score_to_weight_proxy": 0.0,
         "bad_month_aware": 0.0,
     },
+    "date_listwise_alpha_score_v2": {
+        "path_daily": 0.45,
+        "quantile": 0.12,
+        "path_aux": 0.20,
+        "risk_aux": 0.04,
+        "rank_aux": 0.0,
+        "risk_rank_aux": 0.0,
+        "direction_aux": 0.0,
+        "downside_rank_aux": 0.008,
+        "upside_rank_aux": 0.006,
+        "date_grouped_rank": 1.00,
+        "unit_time_alpha_rank": 0.90,
+        "listwise_soft_topk": 0.65,
+        "sector_neutral_rank": 0.0,
+        "base_path_aux": 0.18,
+        "base_rank_aux": 0.25,
+        "cross_residual_reg": 0.010,
+        "cross_gate_reg": 0.006,
+        "decision_utility": 0.0,
+        "hit_aux": 0.0,
+        "horizon_classification": 0.0,
+        "decision_rank_aux": 0.0,
+        "horizon_entropy": 0.0,
+        "time_eff_topk_alignment": 0.0,
+        "score_to_weight_proxy": 0.0,
+        "bad_month_aware": 0.0,
+    },
 }
 
 _FORECAST_TARGET_NORMALIZED_LOSS_PROFILES = {
@@ -571,10 +608,16 @@ _HIGH_RETURN_PROXY_LOSS_PROFILES = {
     "personal_alpha_scorer_hybrid_v1",
 }
 _TIME_EFFICIENT_TOPK_LOSS_PROFILES = {"personal_time_efficient_topk_v1"}
-_HYBRID_ALPHA_SCORE_LOSS_PROFILES = {"hybrid_alpha_score_v1", "hybrid_alpha_score_v2", "date_grouped_alpha_score_v1"}
+_HYBRID_ALPHA_SCORE_LOSS_PROFILES = {
+    "hybrid_alpha_score_v1",
+    "hybrid_alpha_score_v2",
+    "date_grouped_alpha_score_v1",
+    "date_listwise_alpha_score_v2",
+}
 _FORECAST_PROFILE_RANK_LOSS_WEIGHTS: dict[str, dict[int, float]] = {
     "hybrid_alpha_score_v2": {1: 0.0100, 3: 0.0100, 5: 0.0100, 10: 0.0075, 20: 0.0050},
     "date_grouped_alpha_score_v1": {1: 0.0100, 3: 0.0100, 5: 0.0100, 10: 0.0075, 20: 0.0050},
+    "date_listwise_alpha_score_v2": {1: 0.0120, 3: 0.0120, 5: 0.0110, 10: 0.0075, 20: 0.0040},
 }
 _TIME_EFFICIENT_WORST_DAY_PENALTY = 0.10
 
@@ -1127,6 +1170,34 @@ def make_forecast_model(
             output_profile=output_profile,
             cumulative_horizons=resolved_horizons,
         )
+    if family == "date_slate_cross_stock_alpha_fusion_v1":
+        static_fields = tuple(str(item) for item in (static_context_fields or ("exchange", "industry")) if str(item))
+        if any(item == "symbol" for item in static_fields):
+            raise ValueError("date_slate_cross_stock_alpha_fusion_v1 requires symbol-free static context; use exchange,industry.")
+        missing_required = [field for field in ("exchange", "industry") if field not in static_fields]
+        if missing_required:
+            raise ValueError(
+                f"date_slate_cross_stock_alpha_fusion_v1 requires exchange,industry static context; missing: {missing_required}"
+            )
+        if output_profile != "forecast_incremental_path_v2":
+            raise ValueError("date_slate_cross_stock_alpha_fusion_v1 only supports forecast_incremental_path_v2 output_profile.")
+        return DateSlateCrossStockAlphaFusionV1Forecaster(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            horizon=horizon,
+            dropout=dropout,
+            transformer_layers=transformer_layers,
+            transformer_heads=transformer_heads,
+            patch_sizes=tuple(int(item) for item in patch_sizes if int(item) > 0),
+            static_context_vocab_sizes=static_context_vocab_sizes,
+            static_context_embedding_dims=static_context_embedding_dims,
+            static_context_fields=static_fields,
+            static_context_dropout=static_context_dropout,
+            feature_group_indices=feature_group_indices,
+            group_mixer_chunk_size=int(group_mixer_chunk_size),
+            output_profile=output_profile,
+            cumulative_horizons=resolved_horizons,
+        )
     if family == "regime_routed_multi_expert_horizon_v1":
         return RegimeRoutedMultiExpertHorizonForecaster(
             input_dim=input_dim,
@@ -1298,15 +1369,19 @@ def forecast_loss_profile_contract(
             for key, value in weights.items()
             if float(value) > 0.0 and key not in {"path_daily", "quantile"}
         ]
-        if profile == "date_grouped_alpha_score_v1":
+        if profile in {"date_grouped_alpha_score_v1", "date_listwise_alpha_score_v2"}:
             return _json_ready(
                 {
                     "schema_version": 1,
                     "status": "active",
                     "loss_profile": profile,
-                    "profile_family": "date_grouped_alpha_score_forecast",
+                    "profile_family": "date_listwise_alpha_score_forecast"
+                    if profile == "date_listwise_alpha_score_v2"
+                    else "date_grouped_alpha_score_forecast",
                     "required_output_profile": "forecast_incremental_path_v2",
-                    "primary_objective": "same_date_prediction_first_alpha_score",
+                    "primary_objective": "same_date_listwise_alpha_score"
+                    if profile == "date_listwise_alpha_score_v2"
+                    else "same_date_prediction_first_alpha_score",
                     "auxiliary_objectives": auxiliary_objectives,
                     "loss_component_weights": weights,
                     "forecast_horizon": int(forecast_horizon),
@@ -1314,14 +1389,20 @@ def forecast_loss_profile_contract(
                     "target_normalization": "market_fact_prediction_with_same_date_rank_and_unit_time_rank",
                     "alpha_score_objective": {
                         "enabled": True,
-                        "method": "daily_increment_path_plus_derived_cumulative_path_plus_same_date_rank",
+                        "method": "daily_increment_path_plus_same_date_listwise_rank_and_soft_topk"
+                        if profile == "date_listwise_alpha_score_v2"
+                        else "daily_increment_path_plus_derived_cumulative_path_plus_same_date_rank",
                         "model_role": "stable_alpha_score_generator",
                         "execution_cost_in_loss": False,
                         "execution_risk_penalty_in_loss": False,
                         "batch_topk_alignment_in_loss": False,
+                        "same_date_soft_topk_in_loss": bool(profile == "date_listwise_alpha_score_v2"),
                         "rank_loss_scope": "within_same_prediction_date_only",
                         "unit_time_efficiency_in_loss": True,
                         "rank_loss_horizon_weights": _rank_loss_weights_for_profile(profile),
+                        "requires_model_level_cross_stock_context": bool(profile == "date_listwise_alpha_score_v2"),
+                        "base_prediction_auxiliary_loss": bool(profile == "date_listwise_alpha_score_v2"),
+                        "cross_residual_regularization": bool(profile == "date_listwise_alpha_score_v2"),
                         "direct_train_target": "market_fact_alpha_score_not_execution_policy",
                         "required_static_context": "exchange,industry",
                         "symbol_static_context_allowed": False,
@@ -2152,6 +2233,41 @@ def _date_grouped_rank_loss(
     return torch.stack(losses).mean()
 
 
+def _date_grouped_soft_topk_loss(
+    score: torch.Tensor,
+    target: torch.Tensor,
+    date_group_ids: torch.Tensor,
+    *,
+    min_group_size: int = 8,
+    top_fraction: float = 0.05,
+    max_k: int = 5,
+) -> torch.Tensor:
+    if date_group_ids is None:
+        return score.new_tensor(0.0)
+    groups = torch.unique(date_group_ids.detach())
+    losses: list[torch.Tensor] = []
+    for group_id in groups.tolist():
+        mask = date_group_ids == int(group_id)
+        group_size = int(mask.sum().detach().cpu())
+        if group_size < int(min_group_size):
+            continue
+        group_score = score[mask]
+        group_target = target[mask]
+        k = max(1, min(int(max_k), int(round(group_size * float(top_fraction)))))
+        target_weights = torch.softmax(group_target.detach(), dim=0)
+        score_weights = torch.softmax(group_score, dim=0)
+        target_top_weights = torch.zeros_like(group_target)
+        top_indices = torch.topk(group_target.detach(), k=k, largest=True).indices
+        target_top_weights[top_indices] = 1.0 / float(k)
+        mixed_target_weights = 0.5 * target_weights + 0.5 * target_top_weights
+        score_gain = torch.sum(score_weights * group_target)
+        target_gain = torch.sum(mixed_target_weights * group_target)
+        losses.append(F.smooth_l1_loss(score_gain, target_gain))
+    if not losses:
+        return score.new_tensor(0.0)
+    return torch.stack(losses).mean()
+
+
 def _date_grouped_forecast_loss(
     prediction: dict[str, torch.Tensor],
     y_daily_scaled: torch.Tensor,
@@ -2210,6 +2326,16 @@ def _date_grouped_forecast_loss(
                 min_group_size=int(rank_min_group_size),
                 max_pairs_per_date=int(rank_max_pairs_per_date),
             )
+        soft_topk_weight = float(weights.get("listwise_soft_topk", 0.0) or 0.0)
+        if soft_topk_weight > 0.0:
+            horizon_scale = float(max(int(horizon), 1))
+            loss = loss + soft_topk_weight * horizon_weight * _date_grouped_soft_topk_loss(
+                score / horizon_scale,
+                target / horizon_scale,
+                date_group_ids,
+                min_group_size=int(rank_min_group_size),
+                max_k=5,
+            )
     downside_weight = float(weights.get("downside_rank_aux", 0.0) or 0.0)
     if downside_weight > 0.0:
         loss = loss + downside_weight * _date_grouped_rank_loss(
@@ -2228,6 +2354,32 @@ def _date_grouped_forecast_loss(
             min_group_size=int(rank_min_group_size),
             max_pairs_per_date=int(rank_max_pairs_per_date),
         )
+    base_path_weight = float(weights.get("base_path_aux", 0.0) or 0.0)
+    if base_path_weight > 0.0 and "base_mu" in prediction:
+        base_daily = F.huber_loss(prediction["base_mu"], y_daily_scaled, reduction="none")
+        loss = loss + base_path_weight * (base_daily * daily_weights.reshape(1, -1)).mean()
+    base_rank_weight = float(weights.get("base_rank_aux", 0.0) or 0.0)
+    if base_rank_weight > 0.0 and "base_mu" in prediction:
+        for pos, horizon in enumerate(horizons):
+            horizon_weight = float(rank_loss_weights.get(int(horizon), 0.0))
+            if horizon_weight <= 0.0:
+                continue
+            horizon_scale = float(max(int(horizon), 1))
+            base_score = prediction["base_mu"][:, : int(horizon)].sum(dim=1)
+            target = y_cum_scaled[:, pos]
+            loss = loss + base_rank_weight * horizon_weight * _date_grouped_rank_loss(
+                base_score / horizon_scale,
+                target / horizon_scale,
+                date_group_ids,
+                min_group_size=int(rank_min_group_size),
+                max_pairs_per_date=int(rank_max_pairs_per_date),
+            )
+    cross_residual_weight = float(weights.get("cross_residual_reg", 0.0) or 0.0)
+    if cross_residual_weight > 0.0 and "cross_residual_norm" in prediction:
+        loss = loss + cross_residual_weight * prediction["cross_residual_norm"].square().mean()
+    cross_gate_weight = float(weights.get("cross_gate_reg", 0.0) or 0.0)
+    if cross_gate_weight > 0.0 and "cross_gate_mean" in prediction:
+        loss = loss + cross_gate_weight * prediction["cross_gate_mean"].square().mean()
     router_entropy_weight = float(weights.get("router_entropy_floor", 0.0))
     if router_entropy_weight > 0.0 and "router_entropy" in prediction and "router_weights" in prediction:
         router_entropy = prediction["router_entropy"]
@@ -2598,21 +2750,33 @@ def _forecast_model_forward(
     batch_x: torch.Tensor,
     static_context_ids: torch.Tensor | None = None,
     stock_mask: torch.Tensor | None = None,
+    date_group_ids: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
     accepts_static = _forecast_model_accepts_static_context(model)
     accepts_stock_mask = _forecast_model_accepts_stock_mask(model)
-    if static_context_ids is not None and stock_mask is not None and accepts_static and accepts_stock_mask:
-        return model(batch_x, static_context_ids=static_context_ids, stock_mask=stock_mask)
+    accepts_date_group_ids = _forecast_model_accepts_date_group_ids(model)
+    kwargs: dict[str, Any] = {}
     if static_context_ids is not None and accepts_static:
-        return model(batch_x, static_context_ids=static_context_ids)
+        kwargs["static_context_ids"] = static_context_ids
     if stock_mask is not None and accepts_stock_mask:
-        return model(batch_x, stock_mask=stock_mask)
+        kwargs["stock_mask"] = stock_mask
+    if date_group_ids is not None and accepts_date_group_ids:
+        kwargs["date_group_ids"] = date_group_ids
+    if kwargs:
+        return model(batch_x, **kwargs)
     return model(batch_x)
 
 
 def _forecast_model_accepts_stock_mask(model: nn.Module) -> bool:
     try:
         return "stock_mask" in inspect.signature(model.forward).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def _forecast_model_accepts_date_group_ids(model: nn.Module) -> bool:
+    try:
+        return "date_group_ids" in inspect.signature(model.forward).parameters
     except (TypeError, ValueError):
         return False
 
@@ -2677,6 +2841,66 @@ def _predict_indices(
         aux_dim = path20_forecast_aux_dim(horizons, horizon=horizon)
         decision_aux_dim = path20_decision_aux_dim(horizons, horizon=horizon)
         model.eval()
+        if _forecast_model_accepts_date_group_ids(model) and isinstance(dataset_view_or_x.dataset, ForecastTrainingPackDataset):
+            original_indices = np.asarray(indices, dtype=np.int64)
+            index_pos = {int(row_idx): pos for pos, row_idx in enumerate(original_indices.tolist())}
+            outputs = {
+                "mu": np.empty((len(original_indices), horizon), dtype=np.float32),
+                "q10": np.empty((len(original_indices), horizon), dtype=np.float32),
+                "q50": np.empty((len(original_indices), horizon), dtype=np.float32),
+                "q90": np.empty((len(original_indices), horizon), dtype=np.float32),
+                "aux": np.empty((len(original_indices), aux_dim), dtype=np.float32),
+            }
+            if str(getattr(model, "output_profile", "") or "") == "decision_utility_v1":
+                outputs["decision_aux"] = np.empty((len(original_indices), decision_aux_dim), dtype=np.float32)
+            loader = DataLoader(
+                dataset_view_or_x.date_slate_torch_dataset(
+                    original_indices,
+                    dates_per_batch=1,
+                    stocks_per_date=FORECAST_DATE_SLATE_PREDICTION_STOCKS_PER_DATE,
+                    target_scale=target_scale,
+                    shuffle_stocks=False,
+                    seed=0,
+                ),
+                batch_size=None,
+                shuffle=False,
+                pin_memory=device.type == "cuda",
+            )
+            with torch.no_grad():
+                for raw_batch in loader:
+                    if len(raw_batch) == 7:
+                        batch_x_cpu, _, _, _, row_indices_cpu, date_group_ids_cpu, static_context_ids_cpu = raw_batch
+                    elif len(raw_batch) == 6:
+                        batch_x_cpu, _, _, _, row_indices_cpu, date_group_ids_cpu = raw_batch
+                        static_context_ids_cpu = None
+                    else:
+                        raise ValueError(f"date-slate prediction batch must contain 6 or 7 tensors, got {len(raw_batch)}.")
+                    batch = batch_x_cpu.to(device, non_blocking=device.type == "cuda")
+                    date_group_ids = date_group_ids_cpu.to(device, non_blocking=device.type == "cuda")
+                    static_context_ids = (
+                        static_context_ids_cpu.to(device, non_blocking=device.type == "cuda")
+                        if static_context_ids_cpu is not None
+                        else None
+                    )
+                    static_context_ids = dataset_view_or_x.filter_static_context_ids(static_context_ids)
+                    with _autocast_context(device, amp_enabled):
+                        pred = _forecast_model_forward(
+                            model,
+                            batch,
+                            static_context_ids,
+                            date_group_ids=date_group_ids,
+                        )
+                    if "decision_aux" in pred and "decision_aux" not in outputs:
+                        outputs["decision_aux"] = np.empty((len(original_indices), decision_aux_dim), dtype=np.float32)
+                    row_ids = row_indices_cpu.reshape(-1).detach().cpu().numpy().astype(int)
+                    for key in outputs:
+                        if key not in pred:
+                            continue
+                        values = pred[key].detach().cpu().numpy()
+                        for row_id, value in zip(row_ids.tolist(), values, strict=False):
+                            if int(row_id) in index_pos:
+                                outputs[key][index_pos[int(row_id)]] = value
+            return outputs
         if _forecast_model_accepts_stock_mask(model) and dataset_view_or_x.dataset_mode == "memmap":
             ordered_indices = np.asarray(indices, dtype=np.int64)
             index_pos = {int(row_idx): pos for pos, row_idx in enumerate(ordered_indices.tolist())}
@@ -4045,6 +4269,57 @@ def _model_config_for_training(
                 "promotion_allowed": False,
             }
         )
+    if str(family) == "date_slate_cross_stock_alpha_fusion_v1":
+        fields = tuple(str(item) for item in static_model_options.get("static_context_fields", ()) or ())
+        if any(item == "symbol" for item in fields):
+            raise ValueError("date_slate_cross_stock_alpha_fusion_v1 model_config requires symbol-free static context; use exchange,industry.")
+        feature_groups, feature_group_source = _structured_alpha_v2_feature_groups_for_dataset(dataset_view)
+        config.update(
+            {
+                "fusion_version": "date_slate_cross_stock_alpha_fusion_v1",
+                "architecture_contract": {
+                    "prediction_first": True,
+                    "execution_utility_in_model": False,
+                    "date_slate_rank_semantics": True,
+                    "model_level_cross_stock_context": True,
+                    "cross_stock_mixer": "same_date_low_rank_slot_listwise_mixer",
+                    "cross_stock_scope": "date_group_ids_only_no_cross_date_attention",
+                    "cross_stock_residual_gate": "base_fused_token_plus_gate_times_cross_residual",
+                    "daily_increment_outputs": True,
+                    "cumulative_outputs_derived_from_daily_mu": True,
+                    "intraday_role": "context_gated_daily_increment_residual",
+                    "symbol_static_context_allowed": False,
+                    "default_hidden_dim": 128,
+                },
+                "feature_group_indices": {
+                    group: [int(item) for item in indices]
+                    for group, indices in feature_groups.items()
+                },
+                "feature_group_counts": {
+                    group: int(len(indices))
+                    for group, indices in feature_groups.items()
+                },
+                "feature_group_columns": {
+                    group: [dataset_view.feature_columns[int(item)] for item in indices]
+                    for group, indices in feature_groups.items()
+                },
+                "feature_group_source": feature_group_source,
+                "expert_families": [
+                    "local_dilated_tcn",
+                    "recency_biased_patch_transformer",
+                    "multi_half_life_ewma_trend",
+                    "same_date_cross_stock_slot_mixer",
+                ],
+                "fusion_layers": 2,
+                "group_mixer_layers": 1,
+                "group_mixer_chunk_size": DEFAULT_GROUP_MIXER_CHUNK_SIZE,
+                "slate_slot_count": 16,
+                "required_static_context_fields": ["exchange", "industry"],
+                "required_output_profile": "forecast_incremental_path_v2",
+                "recommended_loss_profiles": ["date_listwise_alpha_score_v2"],
+                "promotion_allowed": False,
+            }
+        )
     if str(family) == "regime_routed_multi_expert_horizon_v1":
         config.update(
             {
@@ -4114,7 +4389,7 @@ def _evaluate_loss(
     with torch.no_grad():
         if isinstance(dataset_view_or_x, _ForecastDatasetView):
             if (
-                _normalize_forecast_loss_profile(loss_profile) == "date_grouped_alpha_score_v1"
+                _normalize_forecast_loss_profile(loss_profile) in {"date_grouped_alpha_score_v1", "date_listwise_alpha_score_v2"}
                 and isinstance(dataset_view_or_x.dataset, ForecastTrainingPackDataset)
             ):
                 loader = DataLoader(
@@ -4150,7 +4425,12 @@ def _evaluate_loss(
                     )
                     static_context_ids = dataset_view_or_x.filter_static_context_ids(static_context_ids)
                     with _autocast_context(device, amp_enabled):
-                        pred = _forecast_model_forward(model, batch_x, static_context_ids)
+                        pred = _forecast_model_forward(
+                            model,
+                            batch_x,
+                            static_context_ids,
+                            date_group_ids=date_group_ids,
+                        )
                         loss = _date_grouped_forecast_loss(
                             pred,
                             batch_y_daily,
@@ -4506,8 +4786,8 @@ def train_forecast_models(
         raise ValueError(f"{loss_profile} loss requires output_profile=decision_utility_v1.")
     if selection_profile == "decision_utility" and output_profile != "decision_utility_v1":
         raise ValueError("decision_utility selection requires output_profile=decision_utility_v1.")
-    if loss_profile == "date_grouped_alpha_score_v1" and output_profile != "forecast_incremental_path_v2":
-        raise ValueError("date_grouped_alpha_score_v1 requires output_profile=forecast_incremental_path_v2.")
+    if loss_profile in {"date_grouped_alpha_score_v1", "date_listwise_alpha_score_v2"} and output_profile != "forecast_incremental_path_v2":
+        raise ValueError(f"{loss_profile} requires output_profile=forecast_incremental_path_v2.")
     train_date_stride = int(train_date_stride)
     if train_date_stride <= 0:
         raise ValueError("train_date_stride must be positive.")
@@ -4594,6 +4874,19 @@ def train_forecast_models(
         source_train_indices,
         train_date_stride=int(train_date_stride),
     )
+    train_date_counts = (
+        pd.Series(pd.to_datetime(dataset_view.date_values_for_indices(train_indices))).value_counts()
+        if len(train_indices)
+        else pd.Series(dtype="int64")
+    )
+    max_train_stocks_per_date = int(train_date_counts.max()) if len(train_date_counts) else 0
+    date_slate_semantics = {
+        "requested_dates_per_batch": int(date_slate_dates_per_batch),
+        "requested_stocks_per_date": int(date_slate_stocks_per_date),
+        "max_train_stocks_per_date": int(max_train_stocks_per_date),
+        "full_train_date_slate": bool(max_train_stocks_per_date > 0 and int(date_slate_stocks_per_date) >= int(max_train_stocks_per_date)),
+        "context_scope": "full_train_date" if max_train_stocks_per_date > 0 and int(date_slate_stocks_per_date) >= int(max_train_stocks_per_date) else "sampled_same_date_chunk",
+    }
     intraday_indices = _intraday_feature_indices(dataset_view.feature_columns)
     structured_alpha_v2_feature_groups, structured_alpha_v2_feature_group_source = _structured_alpha_v2_feature_groups_for_dataset(dataset_view)
     if len(train_indices) < 2 or len(validation_indices) < 1:
@@ -4672,15 +4965,21 @@ def train_forecast_models(
             scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
             generator = torch.Generator()
             generator.manual_seed(int(current_seed))
+            date_slate_batching = bool(family in FORECAST_DATE_SLATE_MODEL_FAMILIES)
             cross_sectional_batching = bool(
-                family in FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES and dataset_view.dataset_mode == "memmap"
+                family in FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES
+                and family not in FORECAST_DATE_SLATE_MODEL_FAMILIES
+                and dataset_view.dataset_mode == "memmap"
             )
-            date_slate_batching = bool(family == "date_slate_alpha_fusion_v1")
             if date_slate_batching:
                 if not isinstance(dataset_view.dataset, ForecastTrainingPackDataset):
-                    raise ValueError("date_slate_alpha_fusion_v1 requires a QDP date-slate/training pack dataset.")
+                    raise ValueError(f"{family} requires a QDP date-slate/training pack dataset.")
                 if not dataset_view.dataset.has_date_major_feature_panel:
-                    raise ValueError("date_slate_alpha_fusion_v1 requires a date-major feature panel; build qdp_date_slate_training_pack_v1 first.")
+                    raise ValueError(f"{family} requires a date-major feature panel; build qdp_date_slate_training_pack_v1 first.")
+                if family == "date_slate_alpha_fusion_v1" and loss_profile != "date_grouped_alpha_score_v1":
+                    raise ValueError("date_slate_alpha_fusion_v1 requires loss_profile=date_grouped_alpha_score_v1.")
+                if family == "date_slate_cross_stock_alpha_fusion_v1" and loss_profile != "date_listwise_alpha_score_v2":
+                    raise ValueError("date_slate_cross_stock_alpha_fusion_v1 requires loss_profile=date_listwise_alpha_score_v2.")
             cache_friendly_train_order = bool(
                 isinstance(dataset_view.dataset, (ForecastShardedMemmapDataset, ForecastTrainingPackDataset)) and not cross_sectional_batching
             )
@@ -4771,6 +5070,7 @@ def train_forecast_models(
                 "date_slate_stocks_per_date": int(date_slate_stocks_per_date),
                 "rank_min_group_size": int(rank_min_group_size),
                 "rank_max_pairs_per_date": int(rank_max_pairs_per_date),
+                "date_slate_semantics": dict(date_slate_semantics),
                 "finite_guard_enabled": bool(finite_guard),
                 "bad_batch_dump_dir": str(bad_batch_dump_root.resolve()) if bool(finite_guard) else "",
                 "lr": float(lr),
@@ -4902,7 +5202,12 @@ def train_forecast_models(
                             scaler=scaler,
                         )
                         with _autocast_context(resolved_device, amp_enabled):
-                            pred = _forecast_model_forward(model, batch_x, static_context_ids)
+                            pred = _forecast_model_forward(
+                                model,
+                                batch_x,
+                                static_context_ids,
+                                date_group_ids=date_group_ids,
+                            )
                             loss = _date_grouped_forecast_loss(
                                 pred,
                                 batch_y_daily,
@@ -5630,12 +5935,13 @@ def train_forecast_models(
             "batch_size": int(batch_size),
             "effective_batch_size": int(
                 date_slate_dates_per_batch * date_slate_stocks_per_date
-                if family == "date_slate_alpha_fusion_v1"
+                if family in FORECAST_DATE_SLATE_MODEL_FAMILIES
                 else (1 if family in FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES else batch_size)
             ),
-            "date_slate_batching_enabled": bool(family == "date_slate_alpha_fusion_v1"),
+            "date_slate_batching_enabled": bool(family in FORECAST_DATE_SLATE_MODEL_FAMILIES),
             "date_slate_dates_per_batch": int(date_slate_dates_per_batch),
             "date_slate_stocks_per_date": int(date_slate_stocks_per_date),
+            "date_slate_semantics": dict(date_slate_semantics),
             "rank_min_group_size": int(rank_min_group_size),
             "rank_max_pairs_per_date": int(rank_max_pairs_per_date),
             "finite_guard_enabled": bool(finite_guard),
@@ -5659,7 +5965,10 @@ def train_forecast_models(
             "symbol_vocab_fingerprint": str(dataset_view.symbol_vocab_fingerprint),
             "industry_vocab_fingerprint": str(dataset_view.industry_vocab_fingerprint),
             "board_vocab_fingerprint": str(dataset_view.board_vocab_fingerprint),
-            "cross_section_batching_enabled": bool(family in FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES),
+            "cross_section_batching_enabled": bool(
+                family in FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES
+                and family not in FORECAST_DATE_SLATE_MODEL_FAMILIES
+            ),
             "seed_summaries": seed_summaries,
             "family_summary": _family_summary(seed_summaries),
         }

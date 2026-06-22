@@ -1322,7 +1322,7 @@ class HybridStructuredAlphaV2Forecaster(nn.Module):
     def expert_weights(self, x: torch.Tensor, static_context_ids: torch.Tensor | None = None) -> torch.Tensor:
         if x.ndim == 2:
             x = x.unsqueeze(1)
-        sequence, group_summary, _ = self._group_sequence(x)
+        sequence, group_summary, group_weights = self._group_sequence(x)
         static = self._static_hidden(static_context_ids, batch_size=int(sequence.shape[0]), device=sequence.device)
         context = self._context_token(sequence, group_summary, static)
         sequence, _, _ = self._condition_sequence(sequence, context)
@@ -1682,23 +1682,13 @@ class DateSlateAlphaFusionV1Forecaster(nn.Module):
         mask = ~torch.eye(int(tokens.shape[1]), dtype=torch.bool, device=tokens.device).unsqueeze(0)
         return (1.0 - similarity.masked_select(mask).reshape(tokens.shape[0], -1)).mean(dim=1)
 
-    def expert_weights(self, x: torch.Tensor, static_context_ids: torch.Tensor | None = None) -> torch.Tensor:
-        if x.ndim == 2:
-            x = x.unsqueeze(1)
-        sequence, group_summary, _ = self._group_sequence(x)
-        static = self._static_hidden(static_context_ids, batch_size=int(sequence.shape[0]), device=sequence.device)
-        context = self._context_token(sequence, group_summary, static)
-        tokens = self._expert_tokens(self._condition_sequence(sequence, context))
-        return torch.softmax(self.router(self._router_input(tokens, context, group_summary)) / self.router_temperature, dim=-1)
-
-    def forward(self, x: torch.Tensor, static_context_ids: torch.Tensor | None = None) -> dict[str, torch.Tensor]:
+    def _base_fused_state(self, x: torch.Tensor, static_context_ids: torch.Tensor | None = None) -> dict[str, torch.Tensor]:
         if x.ndim == 2:
             x = x.unsqueeze(1)
         sequence, group_summary, group_weights = self._group_sequence(x)
         static = self._static_hidden(static_context_ids, batch_size=int(sequence.shape[0]), device=sequence.device)
         context = self._context_token(sequence, group_summary, static)
-        conditioned = self._condition_sequence(sequence, context)
-        tokens = self._expert_tokens(conditioned)
+        tokens = self._expert_tokens(self._condition_sequence(sequence, context))
         router_weights = torch.softmax(self.router(self._router_input(tokens, context, group_summary)) / self.router_temperature, dim=-1)
         gated_tokens = tokens * (1.0 + 0.25 * router_weights.unsqueeze(-1))
         fusion_input = torch.cat(
@@ -1719,6 +1709,16 @@ class DateSlateAlphaFusionV1Forecaster(nn.Module):
             ],
             dim=-1,
         )
+        return {
+            "fused": fused,
+            "context": context,
+            "tokens": tokens,
+            "router_weights": router_weights,
+            "group_summary": group_summary,
+            "group_weights": group_weights,
+        }
+
+    def _raw_from_fused(self, x: torch.Tensor, fused: torch.Tensor, context: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         raw = self.base_head(fused)
         intraday_token = self._intraday_token(x, batch_size=int(x.shape[0]), device=x.device, dtype=x.dtype)
         intraday_state = torch.cat([intraday_token, context], dim=-1)
@@ -1731,19 +1731,166 @@ class DateSlateAlphaFusionV1Forecaster(nn.Module):
         )
         raw = raw.clone()
         raw[:, : self.horizon] = raw[:, : self.horizon] + intraday_daily
+        return raw, intraday_daily
+
+    def _output_from_fused_state(
+        self,
+        x: torch.Tensor,
+        state: dict[str, torch.Tensor],
+        *,
+        fused: torch.Tensor | None = None,
+        extra_outputs: dict[str, torch.Tensor] | None = None,
+    ) -> dict[str, torch.Tensor]:
+        resolved_fused = state["fused"] if fused is None else fused
+        raw, intraday_daily = self._raw_from_fused(x, resolved_fused, state["context"])
         output = _split_path20_outputs(raw, self.horizon, self.output_profile, self.cumulative_horizons)
+        router_weights = state["router_weights"]
         entropy = -(router_weights * torch.log(torch.clamp(router_weights, min=1.0e-8))).sum(dim=-1)
         output.update(
             {
                 "router_weights": router_weights,
                 "router_entropy": entropy,
-                "expert_token_diversity": self._expert_diversity(tokens),
-                "feature_group_weights": group_weights,
-                "context_gate_abs_mean": self.sequence_film(context).abs().mean(dim=-1),
+                "expert_token_diversity": self._expert_diversity(state["tokens"]),
+                "feature_group_weights": state["group_weights"],
+                "context_gate_abs_mean": self.sequence_film(state["context"]).abs().mean(dim=-1),
                 "intraday_residual_norm": intraday_daily.norm(dim=-1) / max(float(self.horizon) ** 0.5, 1.0),
             }
         )
+        if extra_outputs:
+            output.update(extra_outputs)
         return output
+
+    def expert_weights(self, x: torch.Tensor, static_context_ids: torch.Tensor | None = None) -> torch.Tensor:
+        state = self._base_fused_state(x, static_context_ids)
+        return state["router_weights"]
+
+    def forward(self, x: torch.Tensor, static_context_ids: torch.Tensor | None = None) -> dict[str, torch.Tensor]:
+        if x.ndim == 2:
+            x = x.unsqueeze(1)
+        state = self._base_fused_state(x, static_context_ids)
+        return self._output_from_fused_state(x, state)
+
+
+class DateSlateCrossStockAlphaFusionV1Forecaster(DateSlateAlphaFusionV1Forecaster):
+    """Date-slate alpha model with model-level same-date cross-stock context.
+
+    The temporal/group experts remain per stock. After expert fusion, all stocks
+    in the same prediction date are mixed through a low-rank learned-slot slate
+    layer. The slate residual is gated and added back to the per-stock fused
+    token before the existing incremental forecast head.
+    """
+
+    def __init__(
+        self,
+        *args,
+        slate_slot_count: int = 16,
+        slate_residual_gate_bias: float = -2.0,
+        **kwargs,
+    ) -> None:
+        cross_dropout = float(kwargs.get("dropout", 0.10))
+        super().__init__(*args, **kwargs)
+        self.slate_slot_count = max(int(slate_slot_count), 1)
+        fused_dim = self.hidden_dim * 4
+        self.slate_token_proj = nn.Sequential(
+            nn.LayerNorm(fused_dim),
+            nn.Linear(fused_dim, self.hidden_dim),
+            nn.GELU(),
+        )
+        self.slate_token_norm = nn.LayerNorm(self.hidden_dim)
+        self.slate_slot_queries = nn.Parameter(torch.zeros(self.slate_slot_count, self.hidden_dim))
+        self.slate_key = nn.Linear(self.hidden_dim, self.hidden_dim)
+        self.slate_value = nn.Linear(self.hidden_dim, self.hidden_dim)
+        self.slate_query = nn.Linear(self.hidden_dim, self.hidden_dim)
+        self.slate_slot_key = nn.Linear(self.hidden_dim, self.hidden_dim)
+        self.slate_slot_value = nn.Linear(self.hidden_dim, self.hidden_dim)
+        self.slate_context_norm = nn.LayerNorm(self.hidden_dim)
+        self.cross_residual = nn.Sequential(
+            nn.LayerNorm(self.hidden_dim * 4),
+            nn.Linear(self.hidden_dim * 4, self.hidden_dim),
+            nn.GELU(),
+            nn.Dropout(cross_dropout),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.GELU(),
+        )
+        self.cross_out_proj = nn.Linear(self.hidden_dim, fused_dim)
+        self.cross_gate = nn.Sequential(
+            nn.LayerNorm(fused_dim + self.hidden_dim),
+            nn.Linear(fused_dim + self.hidden_dim, self.hidden_dim),
+            nn.GELU(),
+            nn.Linear(self.hidden_dim, 1),
+            nn.Sigmoid(),
+        )
+        nn.init.normal_(self.slate_slot_queries, std=0.02)
+        last_gate = self.cross_gate[-2]
+        if isinstance(last_gate, nn.Linear):
+            nn.init.zeros_(last_gate.weight)
+            nn.init.constant_(last_gate.bias, float(slate_residual_gate_bias))
+
+    def _mix_one_slate(self, token_h: torch.Tensor) -> torch.Tensor:
+        token_h = self.slate_token_norm(token_h)
+        slot_queries = self.slate_slot_queries.to(device=token_h.device, dtype=token_h.dtype)
+        scale = max(float(self.hidden_dim) ** 0.5, 1.0)
+        keys = self.slate_key(token_h)
+        values = self.slate_value(token_h)
+        slot_weights = torch.softmax(torch.matmul(slot_queries, keys.transpose(0, 1)) / scale, dim=-1)
+        slots = torch.matmul(slot_weights, values)
+        token_queries = self.slate_query(token_h)
+        slot_keys = self.slate_slot_key(slots)
+        slot_values = self.slate_slot_value(slots)
+        token_weights = torch.softmax(torch.matmul(token_queries, slot_keys.transpose(0, 1)) / scale, dim=-1)
+        return self.slate_context_norm(torch.matmul(token_weights, slot_values))
+
+    def _slate_context(self, fused: torch.Tensor, date_group_ids: torch.Tensor) -> torch.Tensor:
+        if date_group_ids is None:
+            raise ValueError("date_slate_cross_stock_alpha_fusion_v1 requires date_group_ids in forward().")
+        date_group_ids = date_group_ids.to(device=fused.device)
+        if int(date_group_ids.numel()) != int(fused.shape[0]):
+            raise ValueError("date_group_ids length must match flattened stock row count.")
+        token_h = self.slate_token_proj(fused)
+        context = torch.zeros_like(token_h)
+        for group_id in torch.unique(date_group_ids.detach(), sorted=True).tolist():
+            mask = date_group_ids == int(group_id)
+            if int(mask.sum().detach().cpu()) <= 0:
+                continue
+            context[mask] = self._mix_one_slate(token_h[mask])
+        return context
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        static_context_ids: torch.Tensor | None = None,
+        date_group_ids: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+        if x.ndim == 2:
+            x = x.unsqueeze(1)
+        state = self._base_fused_state(x, static_context_ids)
+        base_fused = state["fused"]
+        slate_context = self._slate_context(base_fused, date_group_ids)
+        base_token_h = self.slate_token_proj(base_fused)
+        residual_h = self.cross_residual(
+            torch.cat(
+                [
+                    base_token_h,
+                    slate_context,
+                    slate_context - base_token_h,
+                    slate_context * base_token_h,
+                ],
+                dim=-1,
+            )
+        )
+        residual = self.cross_out_proj(residual_h)
+        gate = self.cross_gate(torch.cat([base_fused, slate_context], dim=-1))
+        enhanced_fused = base_fused + gate * residual
+        base_raw, _ = self._raw_from_fused(x, base_fused, state["context"])
+        base_output = _split_path20_outputs(base_raw, self.horizon, self.output_profile, self.cumulative_horizons)
+        extra = {
+            "base_mu": base_output["mu"],
+            "base_aux": base_output["aux"],
+            "cross_gate_mean": gate.squeeze(-1),
+            "cross_residual_norm": residual.norm(dim=-1) / max(float(residual.shape[-1]) ** 0.5, 1.0),
+            "cross_context_norm": slate_context.norm(dim=-1) / max(float(slate_context.shape[-1]) ** 0.5, 1.0),
+        }
+        return self._output_from_fused_state(x, state, fused=enhanced_fused, extra_outputs=extra)
 
 
 class HybridMultiScaleRecencyAwarePath20Forecaster(nn.Module):

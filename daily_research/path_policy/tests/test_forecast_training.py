@@ -219,6 +219,38 @@ def test_make_forecast_model_registers_date_slate_alpha_fusion_v1() -> None:
     assert pred["mu"].shape == (2, 20)
     assert pred["router_weights"].shape == (2, 3)
 
+    assert "date_slate_cross_stock_alpha_fusion_v1" in FORECAST_MODEL_FAMILIES
+    cross_model = make_forecast_model(
+        "date_slate_cross_stock_alpha_fusion_v1",
+        input_dim=9,
+        hidden_dim=12,
+        horizon=20,
+        dropout=0.0,
+        transformer_layers=1,
+        transformer_heads=3,
+        patch_sizes=(2,),
+        output_profile="forecast_incremental_path_v2",
+        static_context_vocab_sizes={"exchange": 4, "industry": 6},
+        static_context_embedding_dims={"exchange": 2, "industry": 3},
+        static_context_fields=("exchange", "industry"),
+        feature_group_indices={
+            "daily_price_volume": (0, 1),
+            "cross_section": (2,),
+            "market_regime": (3,),
+            "industry_peer": (4,),
+            "valuation_liquidity": (5,),
+            "event_quality": (6,),
+            "intraday": (7, 8),
+        },
+    )
+    cross_pred = cross_model(
+        torch.randn(4, 6, 9),
+        static_context_ids=torch.ones(4, 2, dtype=torch.long),
+        date_group_ids=torch.tensor([0, 0, 1, 1], dtype=torch.long),
+    )
+    assert {"mu", "q10", "q50", "q90", "aux", "derived_cum_mu", "base_mu", "cross_gate_mean"}.issubset(cross_pred)
+    assert cross_pred["mu"].shape == (4, 20)
+
 
 def test_date_grouped_alpha_score_contract_and_loss_respects_date_groups() -> None:
     contract = forecast_loss_profile_contract("date_grouped_alpha_score_v1", cumulative_horizons=(1, 3), forecast_horizon=5)
@@ -265,6 +297,46 @@ def test_date_grouped_alpha_score_contract_and_loss_respects_date_groups() -> No
         rank_max_pairs_per_date=16,
     )
     assert same_date_loss < cross_mixed_loss
+
+
+def test_date_listwise_alpha_score_contract_and_loss_uses_cross_stock_outputs() -> None:
+    contract = forecast_loss_profile_contract("date_listwise_alpha_score_v2", cumulative_horizons=(1, 3), forecast_horizon=5)
+    assert contract["required_output_profile"] == "forecast_incremental_path_v2"
+    assert contract["alpha_score_objective"]["requires_model_level_cross_stock_context"] is True
+    prediction = {
+        "mu": torch.tensor(
+            [
+                [0.0, 0.0, 0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0, 0.0, 0.0],
+            ],
+            dtype=torch.float32,
+        ),
+        "q10": torch.zeros(4, 5),
+        "q50": torch.zeros(4, 5),
+        "q90": torch.zeros(4, 5),
+        "aux": torch.zeros(4, 8),
+        "base_mu": torch.zeros(4, 5),
+        "cross_gate_mean": torch.full((4,), 0.10),
+        "cross_residual_norm": torch.full((4,), 0.20),
+    }
+    y_daily = torch.zeros(4, 5)
+    y_cum = torch.tensor([[0.0, 0.0], [1.0, 1.0], [10.0, 10.0], [11.0, 11.0]], dtype=torch.float32)
+    y_risk = torch.zeros(4, 2, 3)
+    loss = _date_grouped_forecast_loss(
+        prediction,
+        y_daily,
+        y_cum,
+        y_risk,
+        torch.tensor([0, 0, 1, 1], dtype=torch.long),
+        loss_profile="date_listwise_alpha_score_v2",
+        cumulative_horizons=(1, 3),
+        rank_min_group_size=2,
+        rank_max_pairs_per_date=16,
+    )
+    assert torch.isfinite(loss)
+    assert loss.item() > 0.0
 
 
 def test_forecast_finite_guard_writes_bad_batch_dump(tmp_path) -> None:
@@ -389,6 +461,50 @@ def test_train_forecast_models_date_slate_alpha_fusion_v1_end_to_end(tmp_path) -
     assert checkpoint["training_config"]["date_slate_batching_enabled"] is True
     assert checkpoint["training_config"]["rank_min_group_size"] == 2
     assert not list((tmp_path / "bad_batches").glob("bad_batch_*.json"))
+
+    cross_summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "cross_study",
+        model_families=("date_slate_cross_stock_alpha_fusion_v1",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=2,
+        batch_size=2,
+        lr=1.0e-3,
+        hidden_dim=12,
+        dropout=0.0,
+        transformer_layers=1,
+        transformer_heads=3,
+        patch_sizes=(2,),
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+        dataloader_num_workers=0,
+        selection_profile="validation_loss",
+        output_profile="forecast_incremental_path_v2",
+        loss_profile="date_listwise_alpha_score_v2",
+        static_context_fields_override=("exchange", "industry"),
+        date_slate_dates_per_batch=1,
+        date_slate_stocks_per_date=2,
+        rank_min_group_size=2,
+        rank_max_pairs_per_date=16,
+        finite_guard=True,
+        bad_batch_dump_dir=tmp_path / "cross_bad_batches",
+        per_epoch_prediction_metrics=False,
+    )
+
+    assert cross_summary["status"] == "completed"
+    cross_family_summary = cross_summary["models"]["date_slate_cross_stock_alpha_fusion_v1"]
+    assert cross_family_summary["date_slate_batching_enabled"] is True
+    assert cross_family_summary["loss_profile"] == "date_listwise_alpha_score_v2"
+    assert cross_family_summary["loss_profile_contract"]["alpha_score_objective"]["requires_model_level_cross_stock_context"] is True
+    cross_seed_summary = cross_family_summary["seed_summaries"]["7"]
+    cross_checkpoint = torch.load(cross_seed_summary["last_checkpoint_pt"], map_location="cpu", weights_only=False)
+    assert cross_checkpoint["resume_contract"]["output_profile"] == "forecast_incremental_path_v2"
+    assert cross_checkpoint["resume_contract"]["loss_profile"] == "date_listwise_alpha_score_v2"
+    assert cross_checkpoint["training_config"]["date_slate_batching_enabled"] is True
+    assert cross_checkpoint["training_config"]["date_slate_semantics"]["full_train_date_slate"] is True
+    assert not list((tmp_path / "cross_bad_batches").glob("bad_batch_*.json"))
 
 
 def test_train_forecast_models_accepts_dlinear_sequence_checkpoint_and_predictions(tmp_path) -> None:

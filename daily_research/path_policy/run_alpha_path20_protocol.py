@@ -3855,7 +3855,12 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
                     "hybrid_structured_alpha_v2 is prediction-first; use a prediction loss such as "
                     "hybrid_alpha_score_v2, hybrid_alpha_score_v1, or forecast_path_v1_baseline."
                 )
-        if "date_slate_alpha_fusion_v1" in families:
+        date_slate_families = {
+            "date_slate_alpha_fusion_v1",
+            "date_slate_cross_stock_alpha_fusion_v1",
+        }
+        requested_date_slate_families = sorted(set(families) & date_slate_families)
+        if requested_date_slate_families:
             train_fields = tuple(
                 str(item).strip()
                 for item in str(getattr(args, "forecast_train_static_fields", "") or "").split(",")
@@ -3863,23 +3868,27 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
             )
             if not train_fields:
                 parser.error(
-                    "date_slate_alpha_fusion_v1 requires --forecast-train-static-fields exchange,industry "
+                    "date-slate alpha models require --forecast-train-static-fields exchange,industry "
                     "to avoid symbol_id static context."
                 )
             if "symbol" in train_fields:
-                parser.error("date_slate_alpha_fusion_v1 does not allow symbol in --forecast-train-static-fields.")
+                parser.error("date-slate alpha models do not allow symbol in --forecast-train-static-fields.")
             missing_required = [field for field in ("exchange", "industry") if field not in train_fields]
             if missing_required:
                 parser.error(
-                    "date_slate_alpha_fusion_v1 requires exchange and industry static context fields; "
+                    "date-slate alpha models require exchange and industry static context fields; "
                     f"missing: {', '.join(missing_required)}."
                 )
             if str(getattr(args, "forecast_output_profile", "forecast_path_v1")) != "forecast_incremental_path_v2":
-                parser.error("date_slate_alpha_fusion_v1 requires --forecast-output-profile forecast_incremental_path_v2.")
-            if str(getattr(args, "forecast_loss_profile", "default")) != "date_grouped_alpha_score_v1":
+                parser.error("date-slate alpha models require --forecast-output-profile forecast_incremental_path_v2.")
+            if "date_slate_alpha_fusion_v1" in requested_date_slate_families and str(getattr(args, "forecast_loss_profile", "default")) != "date_grouped_alpha_score_v1":
                 parser.error("date_slate_alpha_fusion_v1 requires --forecast-loss-profile date_grouped_alpha_score_v1.")
+            if "date_slate_cross_stock_alpha_fusion_v1" in requested_date_slate_families and str(getattr(args, "forecast_loss_profile", "default")) != "date_listwise_alpha_score_v2":
+                parser.error(
+                    "date_slate_cross_stock_alpha_fusion_v1 requires --forecast-loss-profile date_listwise_alpha_score_v2."
+                )
             if str(getattr(args, "forecast_dataset_mode", "eager")) != "memmap":
-                parser.error("date_slate_alpha_fusion_v1 requires --forecast-dataset-mode memmap.")
+                parser.error("date-slate alpha models require --forecast-dataset-mode memmap.")
         _apply_forecast_full_memmap_memory_guard(parser, args)
     if int(getattr(args, "rollout_chunk_days", 20)) <= 0:
         parser.error("--rollout-chunk-days must be positive.")

@@ -4,6 +4,7 @@ import torch
 
 from daily_research.path_policy.models import (
     DateSlateAlphaFusionV1Forecaster,
+    DateSlateCrossStockAlphaFusionV1Forecaster,
     DLinearPath20Forecaster,
     ExpertFusionPath20Forecaster,
     GRUPath20Forecaster,
@@ -464,6 +465,70 @@ def test_date_slate_alpha_fusion_v1_group_mixer_chunking_is_equivalent_and_large
     assert large_prediction["mu"].shape == (18, 20)
     assert torch.isfinite(large_prediction["mu"]).all()
     assert torch.isfinite(large_prediction["router_weights"]).all()
+
+
+def test_date_slate_cross_stock_alpha_fusion_v1_uses_same_date_context_only() -> None:
+    feature_groups = {
+        "daily_price_volume": (0, 1),
+        "cross_section": (2,),
+        "market_regime": (3,),
+        "industry_peer": (4,),
+        "valuation_liquidity": (5,),
+        "event_quality": (6,),
+        "intraday": (7, 8),
+    }
+    model = DateSlateCrossStockAlphaFusionV1Forecaster(
+        input_dim=9,
+        hidden_dim=12,
+        horizon=20,
+        dropout=0.0,
+        transformer_layers=1,
+        transformer_heads=3,
+        patch_sizes=(2,),
+        feature_group_indices=feature_groups,
+        static_context_vocab_sizes={"exchange": 4, "industry": 6},
+        static_context_embedding_dims={"exchange": 2, "industry": 3},
+        static_context_fields=("exchange", "industry"),
+        cumulative_horizons=PATH20_DEFAULT_CUMULATIVE_HORIZONS,
+        slate_slot_count=4,
+    )
+    model.eval()
+    x = torch.randn(4, 6, 9)
+    static_ids = torch.tensor([[1, 1], [1, 2], [2, 1], [2, 2]], dtype=torch.long)
+    date_group_ids = torch.tensor([0, 0, 1, 1], dtype=torch.long)
+
+    with torch.no_grad():
+        baseline = model(x, static_context_ids=static_ids, date_group_ids=date_group_ids)
+        baseline_state = model._base_fused_state(x, static_ids)
+        baseline_context = model._slate_context(baseline_state["fused"], date_group_ids)
+        changed_same_date = x.clone()
+        changed_same_date[1, :, 0] = torch.linspace(-4.0, 4.0, steps=6)
+        changed_same_date[1, :, 1] = torch.linspace(4.0, -4.0, steps=6)
+        same_date_pred = model(changed_same_date, static_context_ids=static_ids, date_group_ids=date_group_ids)
+        same_date_state = model._base_fused_state(changed_same_date, static_ids)
+        same_date_context = model._slate_context(same_date_state["fused"], date_group_ids)
+        changed_other_date = x.clone()
+        changed_other_date[3, :, 0] = torch.linspace(-4.0, 4.0, steps=6)
+        changed_other_date[3, :, 1] = torch.linspace(4.0, -4.0, steps=6)
+        other_date_pred = model(changed_other_date, static_context_ids=static_ids, date_group_ids=date_group_ids)
+        other_date_state = model._base_fused_state(changed_other_date, static_ids)
+        other_date_context = model._slate_context(other_date_state["fused"], date_group_ids)
+
+    assert baseline["mu"].shape == (4, 20)
+    assert {"base_mu", "base_aux", "cross_gate_mean", "cross_residual_norm", "cross_context_norm"}.issubset(baseline)
+    assert torch.isfinite(baseline["mu"]).all()
+    assert torch.isfinite(baseline["cross_gate_mean"]).all()
+    assert not torch.allclose(baseline_context[0], same_date_context[0])
+    assert torch.allclose(baseline_context[0], other_date_context[0], atol=1.0e-6)
+    assert same_date_pred["mu"].shape == baseline["mu"].shape
+    assert torch.allclose(baseline["mu"][0], other_date_pred["mu"][0], atol=1.0e-6)
+
+    try:
+        model(x, static_context_ids=static_ids)
+    except ValueError as exc:
+        assert "date_group_ids" in str(exc)
+    else:
+        raise AssertionError("date_slate_cross_stock_alpha_fusion_v1 must require date_group_ids")
 
 
 def test_regime_routed_multi_expert_forecaster_emits_decision_contract_and_router_diagnostics() -> None:
