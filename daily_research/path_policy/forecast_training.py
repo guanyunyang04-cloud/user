@@ -1375,11 +1375,11 @@ def forecast_loss_profile_contract(
                     "schema_version": 1,
                     "status": "active",
                     "loss_profile": profile,
-                    "profile_family": "date_listwise_alpha_score_forecast"
+                    "profile_family": "date_listwise_proxy_alpha_score_forecast"
                     if profile == "date_listwise_alpha_score_v2"
                     else "date_grouped_alpha_score_forecast",
                     "required_output_profile": "forecast_incremental_path_v2",
-                    "primary_objective": "same_date_listwise_alpha_score"
+                    "primary_objective": "same_date_listwise_proxy_alpha_score"
                     if profile == "date_listwise_alpha_score_v2"
                     else "same_date_prediction_first_alpha_score",
                     "auxiliary_objectives": auxiliary_objectives,
@@ -1389,7 +1389,7 @@ def forecast_loss_profile_contract(
                     "target_normalization": "market_fact_prediction_with_same_date_rank_and_unit_time_rank",
                     "alpha_score_objective": {
                         "enabled": True,
-                        "method": "daily_increment_path_plus_same_date_listwise_rank_and_soft_topk"
+                        "method": "daily_increment_path_plus_same_date_grouped_rank_and_soft_topk_proxy"
                         if profile == "date_listwise_alpha_score_v2"
                         else "daily_increment_path_plus_derived_cumulative_path_plus_same_date_rank",
                         "model_role": "stable_alpha_score_generator",
@@ -1397,7 +1397,9 @@ def forecast_loss_profile_contract(
                         "execution_risk_penalty_in_loss": False,
                         "batch_topk_alignment_in_loss": False,
                         "same_date_soft_topk_in_loss": bool(profile == "date_listwise_alpha_score_v2"),
-                        "rank_loss_scope": "within_same_prediction_date_only",
+                        "rank_loss_scope": "within_date_group_ids_only; full_market_only_when_date_slate_semantics.context_scope_is_full_train_date",
+                        "strict_full_market_listwise": False,
+                        "listwise_proxy_not_full_slate_n2": bool(profile == "date_listwise_alpha_score_v2"),
                         "unit_time_efficiency_in_loss": True,
                         "rank_loss_horizon_weights": _rank_loss_weights_for_profile(profile),
                         "requires_model_level_cross_stock_context": bool(profile == "date_listwise_alpha_score_v2"),
@@ -4282,8 +4284,10 @@ def _model_config_for_training(
                     "execution_utility_in_model": False,
                     "date_slate_rank_semantics": True,
                     "model_level_cross_stock_context": True,
-                    "cross_stock_mixer": "same_date_low_rank_slot_listwise_mixer",
-                    "cross_stock_scope": "date_group_ids_only_no_cross_date_attention",
+                    "cross_stock_mixer": "same_date_low_rank_slot_mixer",
+                    "cross_stock_attention_mode": "learned_low_rank_slots_not_full_self_attention",
+                    "cross_stock_scope": "date_group_ids_only_no_cross_date_attention; full_market_only_when_stocks_per_date_covers_daily_universe",
+                    "sampled_chunk_low_rank_slots_are_not_full_market": True,
                     "cross_stock_residual_gate": "base_fused_token_plus_gate_times_cross_residual",
                     "daily_increment_outputs": True,
                     "cumulative_outputs_derived_from_daily_mu": True,
@@ -4880,12 +4884,47 @@ def train_forecast_models(
         else pd.Series(dtype="int64")
     )
     max_train_stocks_per_date = int(train_date_counts.max()) if len(train_date_counts) else 0
+    full_train_date_slate = bool(
+        max_train_stocks_per_date > 0 and int(date_slate_stocks_per_date) >= int(max_train_stocks_per_date)
+    )
+    train_context_scope = "full_train_date" if full_train_date_slate else "sampled_same_date_chunk"
+    prediction_stocks_per_date = int(FORECAST_DATE_SLATE_PREDICTION_STOCKS_PER_DATE)
+    prediction_full_date_slate = bool(
+        max_train_stocks_per_date > 0 and prediction_stocks_per_date >= int(max_train_stocks_per_date)
+    )
     date_slate_semantics = {
         "requested_dates_per_batch": int(date_slate_dates_per_batch),
         "requested_stocks_per_date": int(date_slate_stocks_per_date),
         "max_train_stocks_per_date": int(max_train_stocks_per_date),
-        "full_train_date_slate": bool(max_train_stocks_per_date > 0 and int(date_slate_stocks_per_date) >= int(max_train_stocks_per_date)),
-        "context_scope": "full_train_date" if max_train_stocks_per_date > 0 and int(date_slate_stocks_per_date) >= int(max_train_stocks_per_date) else "sampled_same_date_chunk",
+        "full_train_date_slate": bool(full_train_date_slate),
+        "context_scope": str(train_context_scope),
+        "train_context_scope": str(train_context_scope),
+        "train_slate_scope_contract": "full_market_same_date"
+        if full_train_date_slate
+        else "sampled_same_date_chunk_not_full_market",
+        "full_market_semantics": bool(full_train_date_slate),
+        "sampled_chunk_semantics": bool(not full_train_date_slate),
+        "chunked_training_not_full_market_warning": (
+            ""
+            if full_train_date_slate
+            else "Training date_group_ids cover same-date chunks only; do not interpret cross-stock context or listwise proxy as full-market."
+        ),
+        "cross_stock_attention_mode": "learned_low_rank_slots_not_full_self_attention",
+        "full_self_attention_enabled": False,
+        "low_rank_slots_primary_reason": "full_date_scalability"
+        if full_train_date_slate
+        else "latent_factor_regularization_and_full_date_compatibility_not_compute_necessity",
+        "recommended_sampled_chunk_ablation": "sampled_chunk_full_self_attention"
+        if not full_train_date_slate
+        else "",
+        "prediction_stocks_per_date": int(prediction_stocks_per_date),
+        "prediction_full_date_slate_assuming_train_max": bool(prediction_full_date_slate),
+        "train_predict_scope_mismatch": bool(train_context_scope == "sampled_same_date_chunk" and prediction_full_date_slate),
+        "train_predict_scope_mismatch_warning": (
+            "Prediction may use a fuller date slate than training; treat this as scope extrapolation."
+            if train_context_scope == "sampled_same_date_chunk" and prediction_full_date_slate
+            else ""
+        ),
     }
     intraday_indices = _intraday_feature_indices(dataset_view.feature_columns)
     structured_alpha_v2_feature_groups, structured_alpha_v2_feature_group_source = _structured_alpha_v2_feature_groups_for_dataset(dataset_view)

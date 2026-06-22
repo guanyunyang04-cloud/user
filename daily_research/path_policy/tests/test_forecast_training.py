@@ -32,6 +32,41 @@ from daily_research.path_policy.tests.test_forecast_memmap_dataset import _write
 pytestmark = [pytest.mark.research, pytest.mark.slow]
 
 
+def _write_qdp_training_source_manifest(tmp_path: Path, *, stocks: tuple[str, ...], feature_columns: list[str]) -> Path:
+    shards = [
+        _write_qdp_fixture_shard(tmp_path / "source", year=year, stocks=stocks, feature_columns=feature_columns)
+        for year in (2019, 2020, 2021)
+    ]
+    source_manifest = {
+        "artifact_type": "qdp_sharded_memmap",
+        "profile": "style_structural_alpha_v2",
+        "feature_profile": "style_structural_alpha_v2",
+        "canonical_dataset_id": "policy_input_bundle__unit",
+        "source_pool_view_id": "policy_pool_view__unit",
+        "source_pool_view_kind": "tradeable_mainboard",
+        "lookback_days": 3,
+        "horizon": 1,
+        "forecast_horizon": 1,
+        "execution_mode": "next_open",
+        "cumulative_horizons": [1],
+        "feature_columns": feature_columns,
+        "feature_count": len(feature_columns),
+        "label_schema_name": "path20_basic_v2",
+        "label_schema_version": 2,
+        "static_context_schema": {
+            "enabled": True,
+            "fields": ["symbol", "exchange", "industry"],
+            "id_columns": ["symbol_id", "exchange_id", "industry_id"],
+            "vocab_sizes": {"symbol": len(stocks) + 1, "exchange": 3, "industry": 12},
+            "embedding_defaults": {"symbol": 4, "exchange": 2, "industry": 3, "dropout": 0.0},
+        },
+        "shards": shards,
+    }
+    source_manifest_path = tmp_path / "qdp_sharded_manifest.json"
+    source_manifest_path.write_text(json.dumps(source_manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    return source_manifest_path
+
+
 def test_forecast_model_families_emit_path20_sequence_contract() -> None:
     from daily_research.path_policy.models import PATH20_DEFAULT_CUMULATIVE_HORIZONS, path20_forecast_aux_dim
 
@@ -255,7 +290,8 @@ def test_make_forecast_model_registers_date_slate_alpha_fusion_v1() -> None:
 def test_date_grouped_alpha_score_contract_and_loss_respects_date_groups() -> None:
     contract = forecast_loss_profile_contract("date_grouped_alpha_score_v1", cumulative_horizons=(1, 3), forecast_horizon=5)
     assert contract["required_output_profile"] == "forecast_incremental_path_v2"
-    assert contract["alpha_score_objective"]["rank_loss_scope"] == "within_same_prediction_date_only"
+    assert "within_date_group_ids_only" in contract["alpha_score_objective"]["rank_loss_scope"]
+    assert "full_market_only_when" in contract["alpha_score_objective"]["rank_loss_scope"]
     prediction = {
         "mu": torch.tensor(
             [
@@ -364,37 +400,7 @@ def test_forecast_finite_guard_writes_bad_batch_dump(tmp_path) -> None:
 def test_train_forecast_models_date_slate_alpha_fusion_v1_end_to_end(tmp_path) -> None:
     stocks = ("AAA.SZ", "BBB.SH")
     feature_columns = ["daily_price_return_1d", "cs_rank_price_return_1d", "intraday_close_last"]
-    shards = [
-        _write_qdp_fixture_shard(tmp_path / "source", year=year, stocks=stocks, feature_columns=feature_columns)
-        for year in (2019, 2020, 2021)
-    ]
-    source_manifest = {
-        "artifact_type": "qdp_sharded_memmap",
-        "profile": "style_structural_alpha_v2",
-        "feature_profile": "style_structural_alpha_v2",
-        "canonical_dataset_id": "policy_input_bundle__unit",
-        "source_pool_view_id": "policy_pool_view__unit",
-        "source_pool_view_kind": "tradeable_mainboard",
-        "lookback_days": 3,
-        "horizon": 1,
-        "forecast_horizon": 1,
-        "execution_mode": "next_open",
-        "cumulative_horizons": [1],
-        "feature_columns": feature_columns,
-        "feature_count": len(feature_columns),
-        "label_schema_name": "path20_basic_v2",
-        "label_schema_version": 2,
-        "static_context_schema": {
-            "enabled": True,
-            "fields": ["symbol", "exchange", "industry"],
-            "id_columns": ["symbol_id", "exchange_id", "industry_id"],
-            "vocab_sizes": {"symbol": 3, "exchange": 3, "industry": 12},
-            "embedding_defaults": {"symbol": 4, "exchange": 2, "industry": 3, "dropout": 0.0},
-        },
-        "shards": shards,
-    }
-    source_manifest_path = tmp_path / "qdp_sharded_manifest.json"
-    source_manifest_path.write_text(json.dumps(source_manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    source_manifest_path = _write_qdp_training_source_manifest(tmp_path, stocks=stocks, feature_columns=feature_columns)
     training_pack = build_qdp_training_pack(
         source_manifest_path,
         output_root=tmp_path / "training_pack",
@@ -504,7 +510,86 @@ def test_train_forecast_models_date_slate_alpha_fusion_v1_end_to_end(tmp_path) -
     assert cross_checkpoint["resume_contract"]["loss_profile"] == "date_listwise_alpha_score_v2"
     assert cross_checkpoint["training_config"]["date_slate_batching_enabled"] is True
     assert cross_checkpoint["training_config"]["date_slate_semantics"]["full_train_date_slate"] is True
+    assert cross_checkpoint["training_config"]["date_slate_semantics"]["context_scope"] == "full_train_date"
+    assert cross_checkpoint["training_config"]["date_slate_semantics"]["train_slate_scope_contract"] == "full_market_same_date"
+    assert cross_checkpoint["training_config"]["date_slate_semantics"]["full_market_semantics"] is True
+    assert cross_checkpoint["training_config"]["date_slate_semantics"]["sampled_chunk_semantics"] is False
+    assert cross_checkpoint["training_config"]["date_slate_semantics"]["full_self_attention_enabled"] is False
+    assert cross_family_summary["loss_profile_contract"]["profile_family"] == "date_listwise_proxy_alpha_score_forecast"
+    assert cross_family_summary["loss_profile_contract"]["primary_objective"] == "same_date_listwise_proxy_alpha_score"
+    assert cross_family_summary["loss_profile_contract"]["alpha_score_objective"]["strict_full_market_listwise"] is False
     assert not list((tmp_path / "cross_bad_batches").glob("bad_batch_*.json"))
+
+
+def test_date_slate_semantics_marks_sampled_chunk_not_full_market(tmp_path) -> None:
+    stocks = ("AAA.SZ", "BBB.SH", "CCC.SZ")
+    feature_columns = ["daily_price_return_1d", "cs_rank_price_return_1d", "intraday_close_last"]
+    source_manifest_path = _write_qdp_training_source_manifest(tmp_path, stocks=stocks, feature_columns=feature_columns)
+    training_pack = build_qdp_training_pack(
+        source_manifest_path,
+        output_root=tmp_path / "training_pack",
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        feature_dtype="float32",
+        stock_chunk_size=1,
+        resume=False,
+    )
+    date_slate_pack = build_qdp_date_slate_training_pack(
+        training_pack["manifest_json"],
+        output_root=tmp_path / "date_slate_pack",
+        feature_dtype="float32",
+        stock_chunk_size=1,
+        resume=False,
+    )
+    dataset = load_forecast_memmap_dataset(date_slate_pack["manifest_json"])
+
+    summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "sampled_cross_study",
+        model_families=("date_slate_cross_stock_alpha_fusion_v1",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=2,
+        batch_size=2,
+        lr=1.0e-3,
+        hidden_dim=12,
+        dropout=0.0,
+        transformer_layers=1,
+        transformer_heads=3,
+        patch_sizes=(2,),
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+        dataloader_num_workers=0,
+        selection_profile="validation_loss",
+        output_profile="forecast_incremental_path_v2",
+        loss_profile="date_listwise_alpha_score_v2",
+        static_context_fields_override=("exchange", "industry"),
+        date_slate_dates_per_batch=1,
+        date_slate_stocks_per_date=2,
+        rank_min_group_size=2,
+        rank_max_pairs_per_date=16,
+        finite_guard=True,
+        bad_batch_dump_dir=tmp_path / "sampled_cross_bad_batches",
+        per_epoch_prediction_metrics=False,
+    )
+
+    assert summary["status"] == "completed"
+    family_summary = summary["models"]["date_slate_cross_stock_alpha_fusion_v1"]
+    semantics = family_summary["date_slate_semantics"]
+    assert semantics["max_train_stocks_per_date"] == 3
+    assert semantics["requested_stocks_per_date"] == 2
+    assert semantics["full_train_date_slate"] is False
+    assert semantics["context_scope"] == "sampled_same_date_chunk"
+    assert semantics["train_slate_scope_contract"] == "sampled_same_date_chunk_not_full_market"
+    assert semantics["full_market_semantics"] is False
+    assert semantics["sampled_chunk_semantics"] is True
+    assert "do not interpret" in semantics["chunked_training_not_full_market_warning"]
+    assert semantics["cross_stock_attention_mode"] == "learned_low_rank_slots_not_full_self_attention"
+    assert semantics["recommended_sampled_chunk_ablation"] == "sampled_chunk_full_self_attention"
+    assert semantics["train_predict_scope_mismatch"] is True
 
 
 def test_train_forecast_models_accepts_dlinear_sequence_checkpoint_and_predictions(tmp_path) -> None:

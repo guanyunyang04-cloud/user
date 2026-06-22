@@ -16,15 +16,15 @@ one stock 252d history -> per-stock fused token -> incremental path head
 same-date comparison only appears in the loss
 ```
 
-For personal small-capital top-K selection, that is not the full intended semantic. The desired model should directly see same-date stock context before producing alpha scores:
+For personal small-capital top-K selection, that is not the full intended semantic. The desired model should directly see same-date stock context before producing alpha scores. This is full-market only when `stocks_per_date` covers the whole trainable date universe; otherwise it is explicitly sampled-chunk context:
 
 ```text
 one stock 252d history
-+ same-date market/industry/similar-stock slate context
++ same-date chunk or full-date slate context
 -> future incremental alpha path / rankable alpha score
 ```
 
-The new line therefore adds a real model-level cross-stock slate mixer while staying prediction-first.
+The new line therefore adds a model-level same-date cross-stock slate mixer while staying prediction-first. It does not yet implement explicit market slots, industry slots, similar-stock slots, or full self-attention.
 
 ## New Model Family
 
@@ -50,7 +50,7 @@ Architecture:
 ```text
 per-stock date_slate_alpha_fusion_v1 temporal/group/intraday backbone
   -> base fused token [N, 4H]
-  -> same-date low-rank learned-slot slate mixer using date_group_ids
+  -> same-date low-rank learned-slot mixer using date_group_ids
   -> cross residual
   -> residual gate
   -> enhanced fused token = base_fused + gate * residual
@@ -63,8 +63,9 @@ Important semantics:
 1. Cross-stock context is grouped strictly by date_group_ids.
 2. No stock from date A can attend to date B.
 3. Cross-stock mixer is residual and gated, so the single-stock backbone remains protected.
-4. The mixer is low-rank/slot based, not naive N^2 full attention, to keep full-date semantics feasible on RTX 2060-class hardware.
-5. If training uses stocks_per_date below the full same-date stock count, the result is sampled-slate context, not full-market context; this is recorded in training_config.date_slate_semantics.
+4. The mixer is low-rank/slot based, not naive N^2 full attention. This is mainly justified for full-date scalability; on small sampled chunks it should be treated as a latent-factor bottleneck/regularizer, not a compute necessity.
+5. If training uses stocks_per_date below the full same-date stock count, the result is sampled-slate context, not full-market context; this is recorded in training_config.date_slate_semantics and must not be interpreted as full-market listwise evidence.
+6. For sampled-chunk experiments, a direct full self-attention chunk mixer is a more semantically honest ablation than presenting low-rank slots as full-market context.
 ```
 
 ## New Loss Profile
@@ -75,7 +76,7 @@ Implemented profile:
 date_listwise_alpha_score_v2
 ```
 
-This is not an execution utility loss. It is still prediction-first and market-fact oriented.
+This is not an execution utility loss. It is still prediction-first and market-fact oriented. Despite the historical name, it is a same-date grouped/listwise proxy, not strict full-slate ListMLE/ListNet/NDCG and not full-market top-K unless the date slate itself is full-date.
 
 Weights:
 
@@ -125,10 +126,10 @@ Key implementation points:
 
 ```text
 DateSlateAlphaFusionV1Forecaster now exposes reusable base fused state helpers.
-DateSlateCrossStockAlphaFusionV1Forecaster adds same-date slot/listwise residual mixer.
+DateSlateCrossStockAlphaFusionV1Forecaster adds same-date low-rank slot residual mixer.
 _forecast_model_forward can pass date_group_ids to models that accept it.
 date-slate train/eval loss paths pass date_group_ids to the model.
-_predict_indices uses date-slate prediction for date_group_ids-aware models.
+_predict_indices uses date-slate prediction for date_group_ids-aware models; if training was sampled-chunk and prediction uses a fuller date slate, that is a recorded scope mismatch rather than a proven-equivalent mode.
 Protocol guard requires date_slate_cross_stock_alpha_fusion_v1 + date_listwise_alpha_score_v2.
 Old date_slate_alpha_fusion_v1 remains constrained to date_grouped_alpha_score_v1.
 ```
@@ -209,4 +210,4 @@ deleting old data assets
 
 ## Current Next Action
 
-Finish validation of the code contract, then run real-pack smoke. If smoke and finite checks pass, run CUDA throughput scout to decide whether full-date `stocks_per_date=4096` is feasible or whether the first formal experiment must be declared as sampled-slate.
+Finish validation of the code contract, then run real-pack smoke. If smoke and finite checks pass, run CUDA throughput scout to decide whether full-date `stocks_per_date=4096` is feasible. If full-date is not feasible, split the path into `sampled_chunk_full_self_attention` and `sampled_chunk_low_rank_slot` diagnostics, and do not label either as full-market.
