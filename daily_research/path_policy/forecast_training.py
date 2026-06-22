@@ -5211,6 +5211,8 @@ def train_forecast_models(
                             best_checkpoint_payload = prior_best_payload
                             _save_forecast_checkpoint_atomic(best_checkpoint_path, best_checkpoint_payload)
             for epoch in range(resume_start_epoch, max_epochs + 1):
+                if date_slate_batching and hasattr(train_loader.dataset, "set_epoch"):
+                    train_loader.dataset.set_epoch(epoch)
                 epoch_started_monotonic = time.monotonic()
                 last_progress_monotonic = epoch_started_monotonic
                 samples_processed_epoch = 0

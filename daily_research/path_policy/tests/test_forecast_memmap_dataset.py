@@ -556,6 +556,81 @@ def test_qdp_date_slate_pack_builds_independent_manifest_and_slate_loader(tmp_pa
     assert shuffled_date_group_ids.numpy().astype(np.int64).tolist() == [0] * len(shuffled_row_values)
 
 
+def test_date_slate_loader_reshuffles_stock_chunks_by_epoch(tmp_path) -> None:
+    stocks = ("AAA.SZ", "BBB.SH", "CCC.SZ", "DDD.SH", "EEE.SZ", "FFF.SH")
+    feature_columns = ["feature_a", "feature_b"]
+    shards = [
+        _write_qdp_fixture_shard(tmp_path, year=year, stocks=stocks, feature_columns=feature_columns, include_label_v2=True)
+        for year in (2019, 2020, 2021)
+    ]
+    manifest = {
+        "artifact_type": "qdp_sharded_memmap",
+        "profile": "style_structural_alpha_v2",
+        "feature_profile": "style_structural_alpha_v2",
+        "canonical_dataset_id": "policy_input_bundle__unit",
+        "source_pool_view_id": "policy_pool_view__unit",
+        "source_pool_view_kind": "tradeable_mainboard",
+        "lookback_days": 3,
+        "horizon": 1,
+        "forecast_horizon": 1,
+        "execution_mode": "next_open",
+        "cumulative_horizons": [1],
+        "feature_columns": feature_columns,
+        "feature_count": len(feature_columns),
+        "label_schema_name": "path20_basic_v2",
+        "label_schema_version": 2,
+        "static_context_schema": {
+            "enabled": True,
+            "fields": ["symbol", "exchange", "industry"],
+            "id_columns": ["symbol_id", "exchange_id", "industry_id"],
+            "vocab_sizes": {"symbol": 7, "exchange": 3, "industry": 16},
+            "embedding_defaults": {"symbol": 16, "exchange": 4, "industry": 8, "dropout": 0.2},
+        },
+        "shards": shards,
+    }
+    source_manifest_path = tmp_path / "sharded_memmap_manifest.json"
+    source_manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    pack_manifest = build_qdp_training_pack(
+        source_manifest_path,
+        output_root=tmp_path / "training_pack",
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        max_samples_per_role=0,
+        feature_dtype="float32",
+    )
+    date_slate_manifest = build_qdp_date_slate_training_pack(
+        pack_manifest["manifest_json"],
+        output_root=tmp_path / "date_slate_pack",
+        feature_dtype="float32",
+        stock_chunk_size=2,
+        resume=False,
+    )
+    loaded = load_forecast_memmap_dataset(date_slate_manifest["manifest_json"])
+    assert isinstance(loaded, ForecastTrainingPackDataset)
+
+    train = loaded.sample_index.loc[loaded.sample_index["role"].astype(str).eq("train")]
+    rows = next(iter(train.groupby("date", sort=True)))[1].index.to_numpy(dtype=np.int64)
+    assert len(rows) == len(stocks)
+
+    shuffled = loaded.date_slate_torch_dataset(rows, dates_per_batch=1, stocks_per_date=2, target_scale=1.0, shuffle_stocks=True, seed=23)
+    epoch0_first = shuffled[0][4].numpy().astype(np.int64).tolist()
+    shuffled.set_epoch(1)
+    epoch1_first = shuffled[0][4].numpy().astype(np.int64).tolist()
+    shuffled.set_epoch(0)
+    epoch0_again = shuffled[0][4].numpy().astype(np.int64).tolist()
+
+    assert epoch0_first == epoch0_again
+    assert epoch0_first != epoch1_first
+
+    deterministic = loaded.date_slate_torch_dataset(rows, dates_per_batch=1, stocks_per_date=2, target_scale=1.0, shuffle_stocks=False, seed=23)
+    deterministic_epoch0 = deterministic[0][4].numpy().astype(np.int64).tolist()
+    deterministic.set_epoch(1)
+    deterministic_epoch1 = deterministic[0][4].numpy().astype(np.int64).tolist()
+    assert deterministic_epoch0 == deterministic_epoch1 == rows[:2].tolist()
+
+
 def test_qdp_training_pack_preserves_optional_basic_v2_labels(tmp_path) -> None:
     stocks = ("AAA.SZ", "BBB.SH")
     feature_columns = ["feature_a", "feature_b"]

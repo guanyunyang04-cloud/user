@@ -232,6 +232,7 @@ class ForecastDateSlateTorchDataset(Dataset):
         self.target_scale = float(target_scale)
         self.shuffle_stocks = bool(shuffle_stocks)
         self.seed = int(seed)
+        self.epoch = 0
         self.fast_index_enabled = True
         if self.indices.size:
             frame = self.dataset.sample_index.iloc[self.indices][["date", "global_date_pos", "global_stock_pos"]].copy()
@@ -249,6 +250,17 @@ class ForecastDateSlateTorchDataset(Dataset):
         else:
             self._date_groups = []
         self._batches: list[list[tuple[np.ndarray, np.ndarray, np.ndarray]]] = []
+        self._rebuild_batches()
+
+    def set_epoch(self, epoch: int) -> None:
+        resolved_epoch = max(int(epoch), 0)
+        if resolved_epoch == int(self.epoch):
+            return
+        self.epoch = resolved_epoch
+        self._rebuild_batches()
+
+    def _rebuild_batches(self) -> None:
+        self._batches = []
         for start in range(0, len(self._date_groups), self.dates_per_batch):
             date_groups = self._date_groups[start : start + self.dates_per_batch]
             chunks_by_date: list[list[tuple[np.ndarray, np.ndarray, np.ndarray]]] = []
@@ -258,7 +270,14 @@ class ForecastDateSlateTorchDataset(Dataset):
                 date_pos_values = np.asarray(date_pos, dtype=np.int64)
                 stock_pos_values = np.asarray(stock_pos, dtype=np.int64)
                 if self.shuffle_stocks and row_values.size > 1:
-                    rng = np.random.default_rng(self.seed + int(start) + int(row_values[0]))
+                    date_seed = int(date_pos_values[0]) if date_pos_values.size else int(start)
+                    rng = np.random.default_rng(
+                        int(self.seed)
+                        + int(self.epoch) * 1_000_003
+                        + int(start) * 9_176
+                        + int(date_seed) * 131
+                        + int(row_values[0])
+                    )
                     order = rng.permutation(np.arange(row_values.size, dtype=np.int64))
                     row_values = row_values[order]
                     date_pos_values = date_pos_values[order]
