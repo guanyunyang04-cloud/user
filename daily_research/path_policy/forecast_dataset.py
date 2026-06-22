@@ -224,6 +224,7 @@ class ForecastDateSlateTorchDataset(Dataset):
         target_scale: float = 100.0,
         shuffle_stocks: bool = True,
         seed: int = 7,
+        input_dtype: str | np.dtype = "float32",
     ) -> None:
         self.dataset = dataset
         self.indices = np.asarray(indices, dtype=np.int64).reshape(-1)
@@ -233,6 +234,9 @@ class ForecastDateSlateTorchDataset(Dataset):
         self.shuffle_stocks = bool(shuffle_stocks)
         self.seed = int(seed)
         self.epoch = 0
+        self.input_dtype = np.dtype(input_dtype)
+        if self.input_dtype not in {np.dtype("float16"), np.dtype("float32")}:
+            raise ValueError("date-slate input_dtype must be float16 or float32.")
         self.fast_index_enabled = True
         if self.indices.size:
             frame = self.dataset.sample_index.iloc[self.indices][["date", "global_date_pos", "global_stock_pos"]].copy()
@@ -250,6 +254,21 @@ class ForecastDateSlateTorchDataset(Dataset):
         else:
             self._date_groups = []
         self._batches: list[list[tuple[np.ndarray, np.ndarray, np.ndarray]]] = []
+        self._rebuild_batches()
+
+    def __getstate__(self) -> dict[str, Any]:
+        state = dict(self.__dict__)
+        state["_dataset_worker_state"] = self.dataset.date_slate_worker_pickle_state()
+        state["dataset"] = None
+        state["indices"] = np.asarray([], dtype=np.int64)
+        state["_batches"] = []
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        dataset_state = dict(state.pop("_dataset_worker_state"))
+        self.__dict__.update(state)
+        self.dataset = ForecastTrainingPackDataset.from_date_slate_worker_pickle_state(dataset_state)
+        self._batches = []
         self._rebuild_batches()
 
     def set_epoch(self, epoch: int) -> None:
@@ -306,8 +325,8 @@ class ForecastDateSlateTorchDataset(Dataset):
         date_positions = np.concatenate([np.asarray(chunk[1], dtype=np.int64) for chunk in chunks])
         stock_positions = np.concatenate([np.asarray(chunk[2], dtype=np.int64) for chunk in chunks])
         x = np.asarray(
-            self.dataset.date_input_windows_from_positions(row_indices, date_positions, stock_positions),
-            dtype=np.float32,
+            self.dataset.date_input_windows_from_positions(row_indices, date_positions, stock_positions, output_dtype=self.input_dtype),
+            dtype=self.input_dtype,
         )
         y_daily = np.asarray(self.dataset.y_daily_excess[row_indices], dtype=np.float32) * self.target_scale
         y_cum = np.asarray(self.dataset.y_cum_excess[row_indices], dtype=np.float32) * self.target_scale
@@ -319,7 +338,7 @@ class ForecastDateSlateTorchDataset(Dataset):
             ]
         )
         items: tuple[torch.Tensor, ...] = (
-            torch.as_tensor(x, dtype=torch.float32),
+            torch.as_tensor(x, dtype=torch.float16 if self.input_dtype == np.dtype("float16") else torch.float32),
             torch.as_tensor(y_daily, dtype=torch.float32),
             torch.as_tensor(y_cum, dtype=torch.float32),
             torch.as_tensor(y_risk, dtype=torch.float32),
@@ -450,8 +469,9 @@ class ForecastMemmapDataset:
         target_scale: float = 100.0,
         shuffle_stocks: bool = True,
         seed: int = 7,
+        input_dtype: str | np.dtype = "float32",
     ) -> ForecastDateSlateTorchDataset:
-        del indices, dates_per_batch, stocks_per_date, target_scale, shuffle_stocks, seed
+        del indices, dates_per_batch, stocks_per_date, target_scale, shuffle_stocks, seed, input_dtype
         raise ValueError("date-slate training requires a QDP training pack with a date-major feature panel.")
 
 
@@ -910,6 +930,61 @@ class ForecastTrainingPackDataset:
         self.y_entry_suspended_or_no_open = label_arrays.get("entry_suspended_or_no_open")
         self.y_forward_tradeable_ratio_by_horizon = label_arrays.get("forward_tradeable_ratio_by_horizon")
 
+    def __getstate__(self) -> dict[str, Any]:
+        state = dict(self.__dict__)
+        state["_feature_panel"] = None
+        state["_date_major_feature_panel"] = None
+        return state
+
+    def date_slate_worker_pickle_state(self) -> dict[str, Any]:
+        worker_manifest_keys = ("lookback_days", "horizon", "forecast_horizon", "cumulative_horizons")
+        worker_manifest = {key: self.manifest[key] for key in worker_manifest_keys if key in self.manifest}
+        return {
+            "root": str(self.root),
+            "manifest_path": str(self.manifest_path),
+            "manifest": worker_manifest,
+            "feature_columns": list(self.feature_columns),
+            "feature_panel_path": str(self.feature_panel_path),
+            "feature_panel_shape": tuple(int(item) for item in self._feature_panel_shape),
+            "feature_dtype": str(self._feature_dtype),
+            "date_major_feature_panel_path": str(self.date_major_feature_panel_path) if self.date_major_feature_panel_path is not None else "",
+            "date_major_feature_panel_shape": tuple(int(item) for item in self._date_major_feature_panel_shape),
+            "date_major_feature_dtype": str(self._date_major_feature_dtype),
+            "normalization_manifest": dict(self.normalization_manifest),
+            "date_values": [str(item) for item in self.date_values.tolist()],
+            "stock_values": [str(item) for item in self.stock_values.tolist()],
+            "static_context_ids": _memmap_pickle_spec(self.static_context_ids),
+            "label_arrays": {str(name): _memmap_pickle_spec(values) for name, values in self.label_arrays.items()},
+        }
+
+    @classmethod
+    def from_date_slate_worker_pickle_state(cls, state: dict[str, Any]) -> "ForecastTrainingPackDataset":
+        label_arrays = {
+            str(name): _open_memmap_pickle_spec(dict(spec))
+            for name, spec in dict(state.get("label_arrays", {}) or {}).items()
+        }
+        static_spec = state.get("static_context_ids")
+        static_context_ids = _open_memmap_pickle_spec(dict(static_spec)) if static_spec else None
+        date_major_path_raw = str(state.get("date_major_feature_panel_path", "") or "")
+        return cls(
+            root=Path(str(state["root"])),
+            manifest_path=Path(str(state["manifest_path"])),
+            manifest=dict(state.get("manifest", {}) or {}),
+            sample_index=pd.DataFrame(),
+            feature_columns=[str(item) for item in list(state.get("feature_columns", []) or [])],
+            feature_panel_path=Path(str(state["feature_panel_path"])),
+            feature_panel_shape=tuple(int(item) for item in list(state.get("feature_panel_shape", []) or [])),
+            feature_dtype=str(state.get("feature_dtype", "float16") or "float16"),
+            date_major_feature_panel_path=Path(date_major_path_raw) if date_major_path_raw else None,
+            date_major_feature_panel_shape=tuple(int(item) for item in list(state.get("date_major_feature_panel_shape", []) or [])),
+            date_major_feature_dtype=str(state.get("date_major_feature_dtype", "") or ""),
+            label_arrays=label_arrays,
+            normalization_manifest=dict(state.get("normalization_manifest", {}) or {}),
+            static_context_ids=static_context_ids,
+            date_values=[str(item) for item in list(state.get("date_values", []) or [])],
+            stock_values=[str(item) for item in list(state.get("stock_values", []) or [])],
+        )
+
     @property
     def row_count(self) -> int:
         return int(len(self.sample_index))
@@ -1047,6 +1122,8 @@ class ForecastTrainingPackDataset:
         row_indices: np.ndarray,
         global_date_pos: np.ndarray,
         global_stock_pos: np.ndarray,
+        *,
+        output_dtype: str | np.dtype = "float32",
     ) -> np.ndarray:
         rows = np.asarray(row_indices, dtype=np.int64).reshape(-1)
         date_positions = np.asarray(global_date_pos, dtype=np.int64).reshape(-1)
@@ -1054,7 +1131,10 @@ class ForecastTrainingPackDataset:
         if len(rows) != len(date_positions) or len(rows) != len(stock_positions):
             raise ValueError("row_indices, global_date_pos, and global_stock_pos must have the same length.")
         lookback = int(self.lookback_days)
-        out = np.zeros((len(rows), lookback, self.input_dim), dtype=np.float32)
+        resolved_dtype = np.dtype(output_dtype)
+        if resolved_dtype not in {np.dtype("float16"), np.dtype("float32")}:
+            raise ValueError("output_dtype must be float16 or float32.")
+        out = np.zeros((len(rows), lookback, self.input_dim), dtype=resolved_dtype)
         if len(rows) == 0:
             return out
         use_date_major = self.has_date_major_feature_panel
@@ -1087,11 +1167,11 @@ class ForecastTrainingPackDataset:
             valid_stock_idx = stock_idx[valid]
             valid_request_positions = request_positions[valid]
             if use_date_major:
-                values = np.asarray(panel[source_start:source_end, valid_stock_idx, :], dtype=np.float32)
+                values = np.asarray(panel[source_start:source_end, valid_stock_idx, :], dtype=resolved_dtype)
                 if values.ndim == 3 and values.shape[0] == source_end - source_start:
                     values = np.transpose(values, (1, 0, 2))
             else:
-                values = np.asarray(panel[valid_stock_idx, source_start:source_end, :], dtype=np.float32)
+                values = np.asarray(panel[valid_stock_idx, source_start:source_end, :], dtype=resolved_dtype)
             out[
                 valid_request_positions,
                 target_start : target_start + (source_end - source_start),
@@ -1114,8 +1194,10 @@ class ForecastTrainingPackDataset:
         row_indices: np.ndarray,
         global_date_pos: np.ndarray,
         global_stock_pos: np.ndarray,
+        *,
+        output_dtype: str | np.dtype = "float32",
     ) -> np.ndarray:
-        return self.raw_date_input_windows_from_positions(row_indices, global_date_pos, global_stock_pos)
+        return self.raw_date_input_windows_from_positions(row_indices, global_date_pos, global_stock_pos, output_dtype=output_dtype)
 
     def risk_by_horizon(self, row_idx: int | np.ndarray) -> np.ndarray:
         return np.stack(
@@ -1158,6 +1240,7 @@ class ForecastTrainingPackDataset:
         target_scale: float = 100.0,
         shuffle_stocks: bool = True,
         seed: int = 7,
+        input_dtype: str | np.dtype = "float32",
     ) -> ForecastDateSlateTorchDataset:
         if not self.has_date_major_feature_panel:
             raise ValueError("date-slate training requires a date-major feature panel.")
@@ -1169,6 +1252,7 @@ class ForecastTrainingPackDataset:
             target_scale=target_scale,
             shuffle_stocks=shuffle_stocks,
             seed=seed,
+            input_dtype=input_dtype,
         )
 
 
@@ -2029,6 +2113,41 @@ def _open_pack_label_arrays(manifest: dict[str, Any]) -> dict[str, np.memmap]:
         _validate_memmap_file(path, shape=shape, label=f"training_pack_label_{name}", dtype=dtype)
         arrays[str(name)] = np.memmap(path, dtype=dtype, mode="r", shape=shape)
     return arrays
+
+
+def _memmap_pickle_spec(values: np.memmap | np.ndarray | None) -> dict[str, Any] | None:
+    if values is None:
+        return None
+    if isinstance(values, np.memmap):
+        filename = getattr(values, "filename", "")
+        if not filename:
+            raise ValueError("cannot pickle memmap-backed training pack array without filename.")
+        return {
+            "kind": "memmap",
+            "path": str(filename),
+            "dtype": str(values.dtype),
+            "shape": [int(item) for item in values.shape],
+        }
+    return {
+        "kind": "ndarray",
+        "dtype": str(values.dtype),
+        "shape": [int(item) for item in values.shape],
+        "values": np.asarray(values).copy(),
+    }
+
+
+def _open_memmap_pickle_spec(spec: dict[str, Any]) -> np.memmap | np.ndarray:
+    kind = str(spec.get("kind", "") or "")
+    dtype = str(spec.get("dtype", "float32") or "float32")
+    shape = tuple(int(item) for item in list(spec.get("shape", []) or []))
+    if kind == "memmap":
+        path = Path(str(spec.get("path", "") or ""))
+        if not path.exists():
+            raise ValueError(f"worker memmap path does not exist: {path}")
+        return np.memmap(path, dtype=dtype, mode="r", shape=shape)
+    if kind == "ndarray":
+        return np.asarray(spec.get("values"), dtype=dtype).reshape(shape)
+    raise ValueError(f"unsupported worker array pickle spec kind: {kind}")
 
 
 def _slice_pack_label_arrays(

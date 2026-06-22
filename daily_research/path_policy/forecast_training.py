@@ -796,6 +796,7 @@ class _ForecastDatasetView:
         target_scale: float,
         shuffle_stocks: bool,
         seed: int,
+        input_dtype: str = "float32",
     ) -> torch.utils.data.Dataset:
         if not isinstance(self.dataset, ForecastTrainingPackDataset):
             raise ValueError("date-slate forecast batches require a QDP training pack dataset.")
@@ -806,6 +807,7 @@ class _ForecastDatasetView:
             target_scale=target_scale,
             shuffle_stocks=shuffle_stocks,
             seed=seed,
+            input_dtype=input_dtype,
         )
 
     @property
@@ -2863,6 +2865,7 @@ def _predict_indices(
                     target_scale=target_scale,
                     shuffle_stocks=False,
                     seed=0,
+                    input_dtype="float16" if bool(amp_enabled and device.type == "cuda") else "float32",
                 ),
                 batch_size=None,
                 shuffle=False,
@@ -4404,6 +4407,7 @@ def _evaluate_loss(
                         target_scale=target_scale,
                         shuffle_stocks=False,
                         seed=0,
+                        input_dtype="float16" if bool(amp_enabled and device.type == "cuda") else "float32",
                     ),
                     batch_size=None,
                     shuffle=False,
@@ -5009,6 +5013,7 @@ def train_forecast_models(
             generator = torch.Generator()
             generator.manual_seed(int(current_seed))
             date_slate_batching = bool(family in FORECAST_DATE_SLATE_MODEL_FAMILIES)
+            date_slate_input_dtype = "float16" if bool(date_slate_batching and amp_enabled and resolved_device.type == "cuda") else "float32"
             cross_sectional_batching = bool(
                 family in FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES
                 and family not in FORECAST_DATE_SLATE_MODEL_FAMILIES
@@ -5040,6 +5045,7 @@ def train_forecast_models(
                         target_scale=target_scale,
                         shuffle_stocks=True,
                         seed=int(current_seed),
+                        input_dtype=date_slate_input_dtype,
                     ),
                     batch_size=None,
                     shuffle=True,
@@ -5120,6 +5126,7 @@ def train_forecast_models(
                 "date_slate_stocks_per_date": int(date_slate_stocks_per_date),
                 "date_slate_loader_type": type(train_dataset_obj).__name__ if train_dataset_obj is not None else "",
                 "date_slate_fast_index_enabled": bool(date_slate_fast_index_enabled),
+                "date_slate_input_dtype": str(date_slate_input_dtype),
                 "rank_min_group_size": int(rank_min_group_size),
                 "rank_max_pairs_per_date": int(rank_max_pairs_per_date),
                 "date_slate_semantics": dict(date_slate_semantics),
