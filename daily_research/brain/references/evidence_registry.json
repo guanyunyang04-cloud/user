@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 145,
+  "record_count": 146,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -4609,6 +4609,27 @@
         "Do not launch model training before mechanism-level scorer diagnostics are available.",
         "Do not claim D+1 open to D+1 close as an executable return under A-share T+1."
       ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "shortline_stage0_fixed_next_open_diagnostic_20260624",
+      "date": "2026-06-24",
+      "r_id": "",
+      "path": "daily_research/brain/references/shortline_stage0_fixed_next_open_diagnostic_20260624.md",
+      "tags": [
+        "daily_research",
+        "shortline",
+        "after_close",
+        "research_only"
+      ],
+      "workflow": "daily_research",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "Status: `completed / research_only / shadow_only / no_active_change`.; Run tag: `shortline_stage0_full_vt_20260624_01`.; Scope: Stage 0 after-close shortline mechanism diagnostic over the existing QDP alpha_v2 label_v2 training pack.; Active artifact impact: unchanged. This run does not change `daily_research/output/active_execution_strategy.json`, live/default, paper/live/broker, score-backtest bridge, candidate matrix, execution-candidate state, or QDP registry pointers.",
+      "blockers": [],
+      "next_allowed_actions": [],
       "active_artifact_impact": "unchanged",
       "dataset_ids": []
     },
