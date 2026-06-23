@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 143,
+  "record_count": 144,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -3029,6 +3029,27 @@
       "dataset_ids": [
         "policy_input_bundle__0f116a9b78c92ff045a6853d"
       ]
+    },
+    {
+      "id": "path_policy_alpha_v2_date_slate_alpha_fusion_h192_full_result_20260623",
+      "date": "2026-06-23",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_date_slate_alpha_fusion_h192_full_result_20260623.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "qdp_alpha_v2_date_slate_alpha_fusion_v1_h192_1x256_amp_w2_full_e6_20260622_01",
+        "qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01"
+      ],
+      "verdict": "Status: `completed / research_only / shadow_only / forecast_promising_but_not_anchor_replacement`.; Date: `2026-06-23`.; Run tag: `qdp_alpha_v2_date_slate_alpha_fusion_v1_h192_1x256_amp_w2_full_e6_20260622_01`.; Study root: `daily_research/output/path_policy/studies/qdp_alpha_v2_date_slate_alpha_fusion_v1_h192_1x256_amp_w2_full_e6_20260622_01`.",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "not_stated",
+      "dataset_ids": []
     },
     {
       "id": "path_policy_alpha_v2_date_slate_cross_stock_listwise_plan_20260622",
