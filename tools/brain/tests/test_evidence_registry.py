@@ -388,6 +388,29 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
 
             self.assertTrue(daily_research_evidence.is_reference_file(path))
 
+    def test_adapter_indexes_shortline_reference_names(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "shortline_after_close_research_plan_20260624.md"
+            path.write_text("# Shortline After-Close Research Plan\n", encoding="utf-8")
+
+            self.assertTrue(daily_research_evidence.is_reference_file(path))
+
+    def test_registry_classifies_shortline_plan_as_daily_research(self) -> None:
+        registry = build_evidence_registry()
+        matches = [
+            record
+            for record in registry["records"]
+            if record["id"] == "shortline_after_close_research_plan_20260624"
+        ]
+
+        self.assertEqual(len(matches), 1)
+        match = matches[0]
+        self.assertEqual(match["workflow"], "daily_research")
+        self.assertIn("shortline", match["tags"])
+        self.assertIn("after_close", match["tags"])
+        self.assertIn("research_only", match["tags"])
+        self.assertIn("mechanism-level after-close shortline stock selection", match["verdict"])
+
     def test_registry_indexes_current_frontier_compaction(self) -> None:
         registry = build_evidence_registry()
         matches = [

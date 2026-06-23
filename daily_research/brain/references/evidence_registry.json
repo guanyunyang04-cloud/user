@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 144,
+  "record_count": 145,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -4581,6 +4581,33 @@
         "If a fresh, auditable CSV/universe source is supplied, import it through Bronze/Silver/lake first; do not train directly from scattered CSV.",
         "If a true backup exists, restoring `daily_research/output/` and `daily_research/cache/` remains the cleanest way to recover old file-backed evidence.",
         "Keep `daily_research/output/active_execution_strategy.json` untouched unless a future explicit promotion/recovery authority is given."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "shortline_after_close_research_plan_20260624",
+      "date": "2026-06-24",
+      "r_id": "",
+      "path": "daily_research/brain/references/shortline_after_close_research_plan_20260624.md",
+      "tags": [
+        "daily_research",
+        "shortline",
+        "after_close",
+        "research_only"
+      ],
+      "workflow": "daily_research",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "Status: `planned / research_only / shadow_only / no_active_change`.; Date: `2026-06-24`.; Scope: redefine the next research line as an after-close shortline stock-selection program.; Verdict: current priority is mechanism-level after-close shortline stock selection, not another path20/deep-model tuning loop.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Implement Stage 0 tooling: shortline fixed-next-open diagnostic over existing alpha_v2 pack.",
+        "Compare strong continuation, trend pullback, industry spread, and combined score.",
+        "Report top1/top3/top5, D+2/D+3/D+5 open exits, cost-adjusted net return, monthly stability, and entry blocked rate.",
+        "Do not launch model training before mechanism-level scorer diagnostics are available.",
+        "Do not claim D+1 open to D+1 close as an executable return under A-share T+1."
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": []

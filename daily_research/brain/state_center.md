@@ -1,6 +1,6 @@
 # Daily Research 状态中枢
 
-快照日期：`2026-06-23`
+快照日期：`2026-06-24`
 
 ## 当前结论
 - `daily_research` 是当前正式生产研究与执行主线；active 执行物化真源仍是 `daily_research/output/active_execution_strategy.json`。
@@ -54,6 +54,7 @@
 - P3c：QDP alpha_v2 强模型路线当前已从“执行化 loss / scorer 优先”转向“泛化修复优先”。`personal_time_efficient_topk_v1` 首个 full run 和 `hybrid_alpha_score_v1 + no_symbol` full run 均已完成；后者预测 rank/spread 更强且去掉 `symbol_id` 未损害 unseen-stock 泛化，但 all-epoch test-loss audit 显示外推 loss 从 epoch1 后基本持续恶化，full-train topK 后验也无法稳定迁移。当前 anchor 仍为 `qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01`，不进入 multi-seed、bridge、candidate matrix 或 execution review。
 - P3c-now：alpha_v2 date-slate 正式 full run 已完成，详见 `daily_research/brain/references/path_policy_alpha_v2_date_slate_alpha_fusion_h192_full_result_20260623.md`。`qdp_alpha_v2_date_slate_alpha_fusion_v1_h192_1x256_amp_w2_full_e6_20260622_01` 使用 `date_slate_alpha_fusion_v1` / `forecast_incremental_path_v2` / `date_grouped_alpha_score_v1` / `validation_loss` / h192 / `exchange,industry` / 1x256 same-date sampled chunk / AMP 跑到 early stop；best epoch `2`，best validation loss `2.581296`，epoch3-5 train loss 继续下降但 validation loss 变差。validation/test rank_ic20 `0.088489 / 0.101403`，spread20 `0.023115 / 0.019758`。`personal_topk_v1` validation 选 `pred_aux_cum_3d top1 h20`，validation net `4.73%`，同候选 test net `1.93%`，test worst month `2025-12` 为 `-24.77%`；test-only 选 `pred_aux_cum_5d top5 h5` net `1.40%` 仅作诊断。结论：forecast-promising 但不替换当前 anchor `qdp_alpha_v2_hybrid_topn_h256_t4_b512_full_e12_20260616_01`，也不进入 multi-seed、score-backtest bridge、candidate matrix、execution-candidate review 或 active/default 变更。重要语义：该 family forward 仍是逐股票预测，date_group_ids 只进入 grouped rank loss；1x256 是 sampled same-date chunk，不是 full-market listwise，也不是模型级 cross-stock attention。
 - P3c-throughput-now：date-slate CUDA throughput scout 与 group-mixer chunking 修复已完成，详见 `daily_research/brain/references/path_policy_alpha_v2_date_slate_cuda_throughput_scout_20260621.md` 和 `daily_research/brain/references/path_policy_alpha_v2_date_slate_group_mixer_chunking_20260621.md`。结论：`group_mixer` 现在按 `batch*steps` 独立行 chunk，修复了 `1x512` / `2x256` 的 CUDA `invalid configuration argument`，语义不改变 loss/output/data；但 `1x512` 吞吐约 `31.226 samples/s`、`2x256` 约 `23.535 samples/s`，均慢于原安全 `1x256` baseline `119.615 samples/s`；尝试 `group_mixer_chunk_size=65000` 会 OOM，默认保持 `32768`。下一步若立即训练，仍用 `D=128 / 1x256 / no AMP / forecast_batch_size=64 / finite_guard / group_mixer_chunk_size=32768`；若要继续提速，应优先优化 loader locality、validation-loss evaluation batching、full-date sampling policy 或更轻 group mixer，而不是使用更大 slate 或 AMP。该记录是吞吐/稳定性证据，不是模型质量结论。
+- P3d：2026-06-24 用户将下一阶段研究目标重定义为“收盘后短线选股”，详见 `daily_research/brain/references/shortline_after_close_research_plan_20260624.md`。核心工作流为 D 收盘后更新 QDP、D+1 只在入场条件满足时买入、T+1 约束下最早 D+2 卖出；研究优先级从旧 path20 复杂模型切到机制验证：强势启动/延续、强势回踩低吸、行业扩散补涨。当前判断：QDP `style_structural_alpha_v2_label_v2` 数据湖、sharded memmap 和 full pack 足够做 Stage 1 固定 next-open 短线基线，不先重建大 memmap；条件价格区间买入后续派生 `shortline_entry_label_v1`，不推翻底层 QDP。下一步只允许 research-only 实现 Stage 0 短线 diagnostics：D+1 open entry、D+2/D+3/D+5 open exit、top1/top3/top5、成本、月度稳定性、entry blocked rate；不得把 D+1 open -> D+1 close 写成可执行收益。
 - P4：之后再推进 per-symbol reversal/volatility bucket sizing、PIT/status 合同二阶段硬化、missing/fill 语义、limit/industry/valuation optional domains。
 - P5：continuous_policy 围绕 r71/r74 继续验证 receiver/deploy 平衡、cash timing、drawdown/reversal、source quality、feature contract health 与 sufficient training evidence。
 
@@ -113,6 +114,7 @@
 - QDP alpha_v2 date-slate CUDA throughput scout：`daily_research/brain/references/path_policy_alpha_v2_date_slate_cuda_throughput_scout_20260621.md`。
 - QDP alpha_v2 date-slate group-mixer chunking repair：`daily_research/brain/references/path_policy_alpha_v2_date_slate_group_mixer_chunking_20260621.md`。
 - QDP alpha_v2 date-slate alpha fusion h192 full result：`daily_research/brain/references/path_policy_alpha_v2_date_slate_alpha_fusion_h192_full_result_20260623.md`。
+- Shortline after-close stock-selection plan：`daily_research/brain/references/shortline_after_close_research_plan_20260624.md`。
 - Path policy protocol test runtime optimization：`daily_research/brain/references/path_policy_test_runtime_optimization_20260621.md`。
 - continuous_policy r61-r74 证据：见 `daily_research/brain/references/r61_release_first_decision_core_v4_status_20260514.md`、`daily_research/brain/references/r65_portfolio_set_v5_status_20260514.md` 到 `daily_research/brain/references/r74_lake_behavior_quality_status_20260515.md`。
 - output/cache 误删恢复边界：`daily_research/brain/references/data_lake_output_cache_loss_recovery_boundary_20260531.md`。

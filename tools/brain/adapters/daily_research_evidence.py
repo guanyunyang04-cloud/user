@@ -13,6 +13,7 @@ REFERENCE_FILE_PATTERNS = (
     re.compile(r"^data_lake_.+\.md$"),
     re.compile(r"^daily_research_v2_.+\.md$"),
     re.compile(r"^daily_research_current_frontier_.+\.md$"),
+    re.compile(r"^shortline_.+\.md$"),
     re.compile(r"^tdx_free_data_platform_.+\.md$"),
     re.compile(r"^execution_.+\.md$"),
     re.compile(r"^(brain_native|brain_system|api_agent)_.+\.md$"),
@@ -65,6 +66,8 @@ def owns_reference_path(path: Path, workspace_root: Path) -> bool:
 
 def workflow_from(path: Path, text: str) -> str:
     lower = f"{path.name}\n{text}".lower()
+    if path.name.startswith("shortline_"):
+        return "daily_research"
     if path.name.startswith(("brain_native", "brain_system", "api_agent")):
         return "brain"
     if "brain maintenance" in lower or "brain-skill" in lower or "brain_skill" in lower:
@@ -89,6 +92,8 @@ def workflow_from(path: Path, text: str) -> str:
 def extra_tags(path: Path, text: str, workflow: str) -> list[str]:
     haystack = f"{path.name}\n{text[:800]}".lower()
     tags: list[str] = []
+    if path.name.startswith("shortline_"):
+        return ["shortline", "after_close", "research_only"]
     if workflow == "brain":
         tags.append("brain")
         return _dedupe(tags)
