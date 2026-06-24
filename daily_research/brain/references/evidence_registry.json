@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 150,
+  "record_count": 151,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -4663,6 +4663,42 @@
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": []
+    },
+    {
+      "id": "qdp_alpha_v2_data_coverage_audit_and_backfill_plan_20260624",
+      "date": "2026-06-24",
+      "r_id": "",
+      "path": "daily_research/brain/references/qdp_alpha_v2_data_coverage_audit_and_backfill_plan_20260624.md",
+      "tags": [
+        "qdp",
+        "data_coverage",
+        "backfill",
+        "daily_research",
+        "research_only"
+      ],
+      "workflow": "quant_data_platform",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "qdp_alpha_v2_feature_coverage_audit_20260624_02"
+      ],
+      "verdict": "Status: `completed_audit / backfill_plan_ready / research_only / no_active_change`.; Run tag: `qdp_alpha_v2_feature_coverage_audit_20260624_02`.; Scope: full finite-coverage audit of current QDP `style_structural_alpha_v2_label_v2` sharded memmap.; Core verdict: current alpha_v2 memmap is a historical incomplete-version artifact; future default should be regenerated after turnover/liquidity backfill, intraday derived anomaly repair, and PIT-safe valuation backfill.",
+      "blockers": [
+        "turnover_context 2010-2015 has zero coverage.",
+        "valuation_context has early-year and pcfNcfTTM sparsity.",
+        "cs_z_intraday_last_5m_ret has derived-feature coverage anomaly."
+      ],
+      "next_allowed_actions": [
+        "Inspect QDP lake/provider availability for turn, circulating_share, float_share, float_market_cap, total_market_cap, and valuation fields.",
+        "Implement P0 turnover/liquidity backfill before new formal model training on alpha_v2 data.",
+        "Repair cs_z_intraday_last_5m_ret feature-generation anomaly.",
+        "Regenerate sharded memmap/training pack only after source-domain backfills pass coverage and sanity checks.",
+        "Clean old incomplete memmap/pack artifacts only after validated replacement and registry switch."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__f926a496f69c61f6b92b5faf"
+      ]
     },
     {
       "id": "shortline_stage0_fixed_next_open_diagnostic_20260624",

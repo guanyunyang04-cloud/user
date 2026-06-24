@@ -16,6 +16,7 @@ from quant_data_platform.memmap.incremental import (
     freeze_sharded_memmap,
     plan_incremental_memmap,
 )
+from quant_data_platform.memmap.coverage_audit import audit_sharded_memmap_feature_coverage
 from quant_data_platform.memmap.sharded import ShardedMemmapConfig, build_sharded_memmap, write_sharded_memmap_plan
 from quant_data_platform.memmap.training_pack import (
     RegimeTrainingPackConfig,
@@ -62,6 +63,25 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--min-universe-size", type=int, default=0)
     validate.add_argument("--min-train-rows", type=int, default=0)
     validate.add_argument("--json", action="store_true")
+
+    feature_coverage = sub.add_parser(
+        "audit-sharded-feature-coverage",
+        help="Audit finite feature coverage in a QDP sharded memmap without changing registries.",
+    )
+    feature_coverage.add_argument("--manifest-json", required=True)
+    feature_coverage.add_argument("--output-root", required=True)
+    feature_coverage.add_argument("--run-tag", default="qdp_sharded_feature_coverage_audit")
+    feature_coverage.add_argument("--years", default="")
+    feature_coverage.add_argument("--max-shards", type=int, default=0)
+    feature_coverage.add_argument("--chunk-features", type=int, default=32)
+    feature_coverage.add_argument("--train-year-start", type=int, default=2012)
+    feature_coverage.add_argument("--train-year-end", type=int, default=2023)
+    feature_coverage.add_argument("--recent-year-start", type=int, default=2024)
+    feature_coverage.add_argument("--recent-year-end", type=int, default=2025)
+    feature_coverage.add_argument("--low-rate-threshold", type=float, default=0.50)
+    feature_coverage.add_argument("--train-warn-threshold", type=float, default=0.75)
+    feature_coverage.add_argument("--recent-warn-threshold", type=float, default=0.90)
+    feature_coverage.add_argument("--json", action="store_true")
 
     sharded = sub.add_parser("build-sharded-memmap", help="Build sharded canonical feature/label stores.")
     sharded.add_argument("--profile", default="short_horizon_core_v1")
@@ -195,6 +215,24 @@ def main(argv: list[str] | None = None) -> int:
         )
         _print(report, as_json=bool(args.json))
         return 0 if str(report.get("status", "")) == "ok" else 1
+    if args.command == "audit-sharded-feature-coverage":
+        report = audit_sharded_memmap_feature_coverage(
+            manifest_json=Path(args.manifest_json),
+            output_root=Path(args.output_root),
+            run_tag=str(args.run_tag or ""),
+            years=str(args.years or "") or None,
+            max_shards=int(args.max_shards),
+            chunk_features=int(args.chunk_features),
+            train_year_start=int(args.train_year_start),
+            train_year_end=int(args.train_year_end),
+            recent_year_start=int(args.recent_year_start),
+            recent_year_end=int(args.recent_year_end),
+            low_rate_threshold=float(args.low_rate_threshold),
+            train_warn_threshold=float(args.train_warn_threshold),
+            recent_warn_threshold=float(args.recent_warn_threshold),
+        )
+        _print(report, as_json=bool(args.json))
+        return 0
     if args.command == "build-sharded-memmap":
         if bool(args.dry_run):
             payload = write_sharded_memmap_plan(
