@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 148,
+  "record_count": 149,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -4613,6 +4613,30 @@
       "dataset_ids": []
     },
     {
+      "id": "shortline_raw_upside_diagnostic_20260624",
+      "date": "2026-06-24",
+      "r_id": "",
+      "path": "daily_research/brain/references/shortline_raw_upside_diagnostic_20260624.md",
+      "tags": [
+        "daily_research",
+        "shortline",
+        "after_close",
+        "research_only"
+      ],
+      "workflow": "daily_research",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "shortline_raw_upside_diagnostic_full_2012_2025_20260624_01",
+        "shortline_raw_upside_diagnostic_smoke_20260624_01"
+      ],
+      "verdict": "Status: `completed / research_only / shadow_only / no_active_change`.; Run tag: `shortline_raw_upside_diagnostic_full_2012_2025_20260624_01`.; Scope: after-close shortline upside mechanism diagnostic over QDP `style_structural_alpha_v2_label_v2` sharded memmap unnormalized engineering features.; Active artifact impact: unchanged. This run does not change `daily_research/output/active_execution_strategy.json`, live/default, paper/live/broker, score-backtest bridge, candidate matrix, execution-candidate state, or QDP registry pointers.",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
       "id": "shortline_stage0_fixed_next_open_diagnostic_20260624",
       "date": "2026-06-24",
       "r_id": "",
@@ -4626,7 +4650,9 @@
       "workflow": "daily_research",
       "research_programs": [],
       "study_families": [],
-      "run_tags": [],
+      "run_tags": [
+        "shortline_stage0_full_vt_20260624_01"
+      ],
       "verdict": "Status: `completed / research_only / shadow_only / no_active_change`.; Run tag: `shortline_stage0_full_vt_20260624_01`.; Scope: Stage 0 after-close shortline mechanism diagnostic over the existing QDP alpha_v2 label_v2 training pack.; Active artifact impact: unchanged. This run does not change `daily_research/output/active_execution_strategy.json`, live/default, paper/live/broker, score-backtest bridge, candidate matrix, execution-candidate state, or QDP registry pointers.",
       "blockers": [],
       "next_allowed_actions": [],
@@ -4647,8 +4673,35 @@
       "workflow": "daily_research",
       "research_programs": [],
       "study_families": [],
-      "run_tags": [],
+      "run_tags": [
+        "shortline_upside_feature_profile_full_2012_2025_20260624_01"
+      ],
       "verdict": "Status: `completed / research_only / shadow_only / no_active_change`.; Run tag: `shortline_upside_feature_profile_full_2012_2025_20260624_01`.; Scope: full-history 307-feature profile for after-close shortline upside potential over the existing QDP alpha_v2 label_v2 training pack.; Active artifact impact: unchanged. This run does not change `daily_research/output/active_execution_strategy.json`, live/default, paper/live/broker, score-backtest bridge, candidate matrix, execution-candidate state, or QDP registry pointers.",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "shortline_upside_feature_semantics_20260624",
+      "date": "2026-06-24",
+      "r_id": "",
+      "path": "daily_research/brain/references/shortline_upside_feature_semantics_20260624.md",
+      "tags": [
+        "daily_research",
+        "shortline",
+        "after_close",
+        "research_only"
+      ],
+      "workflow": "daily_research",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "shortline_upside_feature_semantics_full_2012_2025_20260624_01",
+        "shortline_upside_feature_semantics_smoke_20260624_02",
+        "shortline_upside_feature_semantics_smoke_20260624_03"
+      ],
+      "verdict": "Status: `completed / research_only / shadow_only / no_active_change`.; Run tag: `shortline_upside_feature_semantics_full_2012_2025_20260624_01`.; Purpose: add type-aware semantics to the full 307-feature shortline upside profile so `high_is_good` / `low_is_good` is not misread as universal economic high/low meaning.; Active impact: unchanged. No `active_execution_strategy.json`, live/default, paper/live/broker, candidate matrix, score-backtest bridge, or QDP registry pointer changed.",
       "blockers": [],
       "next_allowed_actions": [],
       "active_artifact_impact": "unchanged",
@@ -4704,28 +4757,6 @@
       ],
       "active_artifact_impact": "guarded",
       "dataset_ids": []
-    },
-    {
-      "id": "shortline_upside_feature_semantics_20260624",
-      "date": "2026-06-24",
-      "r_id": "",
-      "path": "daily_research/brain/references/shortline_upside_feature_semantics_20260624.md",
-      "tags": [
-        "daily_research",
-        "shortline",
-        "after_close",
-        "feature_semantics",
-        "research_only"
-      ],
-      "workflow": "daily_research",
-      "research_programs": [],
-      "study_families": [
-        "shortline_upside_feature_profile"
-      ],
-      "run_tags": [
-        "shortline_upside_feature_semantics_full_2012_2025_20260624_01"
-      ],
-      "verdict": "Status: completed / research_only / shadow_only / no_active_change. Type-aware feature semantics added for the 307-feature shortline upside profile; common stable features are continuous/rank/zscore dominated, and normalized pack categorical outputs are diagnostic groups rather than raw flag/bucket ids."
     }
   ]
 }

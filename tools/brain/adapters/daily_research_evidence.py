@@ -19,7 +19,7 @@ REFERENCE_FILE_PATTERNS = (
     re.compile(r"^(brain_native|brain_system|api_agent)_.+\.md$"),
 )
 RUN_TAG_PATTERN = re.compile(
-    r"\b(?:self_opt_study|protocol|path20|alpha_path20|mh_utility|mh_short|mh_mid|mh_long|mh_out|mh_grid|mh25|mh_v2|v2_score|qdp)_[A-Za-z0-9_]+"
+    r"\b(?:self_opt_study|protocol|path20|alpha_path20|mh_utility|mh_short|mh_mid|mh_long|mh_out|mh_grid|mh25|mh_v2|v2_score|qdp|shortline)_[A-Za-z0-9_]+"
 )
 RESEARCH_PROGRAM_PATTERN = re.compile(r"\b(?:alpha_multi_horizon_utility_policy_v\d+|daily_research_v2_research_reset)\b")
 EXPLICIT_STUDY_FAMILY_PATTERN = re.compile(r"(?:Study family|study_family)\s*:\s*`?([A-Za-z0-9_]+)`?", re.IGNORECASE)

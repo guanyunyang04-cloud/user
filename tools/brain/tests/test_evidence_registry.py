@@ -411,6 +411,20 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
         self.assertIn("research_only", match["tags"])
         self.assertIn("mechanism-level after-close shortline stock selection", match["verdict"])
 
+    def test_registry_indexes_shortline_raw_upside_run_tag(self) -> None:
+        registry = build_evidence_registry()
+        matches = [
+            record
+            for record in registry["records"]
+            if record["id"] == "shortline_raw_upside_diagnostic_20260624"
+        ]
+
+        self.assertEqual(len(matches), 1)
+        match = matches[0]
+        self.assertEqual(match["workflow"], "daily_research")
+        self.assertIn("shortline", match["tags"])
+        self.assertIn("shortline_raw_upside_diagnostic_full_2012_2025_20260624_01", match["run_tags"])
+
     def test_registry_indexes_current_frontier_compaction(self) -> None:
         registry = build_evidence_registry()
         matches = [
