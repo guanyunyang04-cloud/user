@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 146,
+  "record_count": 148,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -4634,6 +4634,27 @@
       "dataset_ids": []
     },
     {
+      "id": "shortline_upside_feature_profile_20260624",
+      "date": "2026-06-24",
+      "r_id": "",
+      "path": "daily_research/brain/references/shortline_upside_feature_profile_20260624.md",
+      "tags": [
+        "daily_research",
+        "shortline",
+        "after_close",
+        "research_only"
+      ],
+      "workflow": "daily_research",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "Status: `completed / research_only / shadow_only / no_active_change`.; Run tag: `shortline_upside_feature_profile_full_2012_2025_20260624_01`.; Scope: full-history 307-feature profile for after-close shortline upside potential over the existing QDP alpha_v2 label_v2 training pack.; Active artifact impact: unchanged. This run does not change `daily_research/output/active_execution_strategy.json`, live/default, paper/live/broker, score-backtest bridge, candidate matrix, execution-candidate state, or QDP registry pointers.",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
       "id": "tdx_free_data_platform_decision_20260523",
       "date": "2026-05-23",
       "r_id": "",
@@ -4683,6 +4704,28 @@
       ],
       "active_artifact_impact": "guarded",
       "dataset_ids": []
+    },
+    {
+      "id": "shortline_upside_feature_semantics_20260624",
+      "date": "2026-06-24",
+      "r_id": "",
+      "path": "daily_research/brain/references/shortline_upside_feature_semantics_20260624.md",
+      "tags": [
+        "daily_research",
+        "shortline",
+        "after_close",
+        "feature_semantics",
+        "research_only"
+      ],
+      "workflow": "daily_research",
+      "research_programs": [],
+      "study_families": [
+        "shortline_upside_feature_profile"
+      ],
+      "run_tags": [
+        "shortline_upside_feature_semantics_full_2012_2025_20260624_01"
+      ],
+      "verdict": "Status: completed / research_only / shadow_only / no_active_change. Type-aware feature semantics added for the 307-feature shortline upside profile; common stable features are continuous/rank/zscore dominated, and normalized pack categorical outputs are diagnostic groups rather than raw flag/bucket ids."
     }
   ]
 }
