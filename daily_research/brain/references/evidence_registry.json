@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 149,
+  "record_count": 150,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -4633,6 +4633,34 @@
       "verdict": "Status: `completed / research_only / shadow_only / no_active_change`.; Run tag: `shortline_raw_upside_diagnostic_full_2012_2025_20260624_01`.; Scope: after-close shortline upside mechanism diagnostic over QDP `style_structural_alpha_v2_label_v2` sharded memmap unnormalized engineering features.; Active artifact impact: unchanged. This run does not change `daily_research/output/active_execution_strategy.json`, live/default, paper/live/broker, score-backtest bridge, candidate matrix, execution-candidate state, or QDP registry pointers.",
       "blockers": [],
       "next_allowed_actions": [],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "shortline_raw_condition_matrix_20260624",
+      "date": "2026-06-24",
+      "r_id": "",
+      "path": "daily_research/brain/references/shortline_raw_condition_matrix_20260624.md",
+      "tags": [
+        "daily_research",
+        "shortline",
+        "after_close",
+        "research_only"
+      ],
+      "workflow": "daily_research",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "shortline_raw_condition_matrix_full_2012_2025_20260624_01",
+        "shortline_raw_condition_matrix_smoke_20260624_01"
+      ],
+      "verdict": "Status: `completed / research_only / shadow_only / no_active_change`.; Run tag: `shortline_raw_condition_matrix_full_2012_2025_20260624_01`.; Scope: after-close shortline conditional mechanism diagnostic over QDP `style_structural_alpha_v2_label_v2` sharded memmap unnormalized engineering features.; Active artifact impact: unchanged. This run does not change `daily_research/output/active_execution_strategy.json`, live/default, paper/live/broker, score-backtest bridge, candidate matrix, execution-candidate state, or QDP registry pointers.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Use `pullback_intraday_recovery`, `market_confirmed_anti_overheat`, and `industry_not_collapsing_not_overheat` as priors for a supervised shortline upside scorer or narrower condition grid.",
+        "Do not treat this matrix as a tradable topK strategy or promotion evidence.",
+        "Do not touch active/default/live artifacts from this evidence."
+      ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": []
     },
