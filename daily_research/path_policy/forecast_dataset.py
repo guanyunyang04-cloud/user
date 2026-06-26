@@ -2507,6 +2507,16 @@ def _contiguous_slice(values: np.ndarray) -> slice | np.ndarray:
     return arr
 
 
+def _resolve_qdp_training_pack_root(source_path: Path, output_root: str | Path | None, safe_tag: str) -> Path:
+    if output_root is None:
+        memmap_root = source_path.parent.parent.parent if source_path.parent.parent.name == "sharded" else source_path.parent.parent
+        return memmap_root / "training_pack" / safe_tag
+    root = Path(output_root)
+    if str(safe_tag or "").strip() and root.name != safe_tag:
+        return root / safe_tag
+    return root
+
+
 def build_qdp_training_pack(
     source_manifest_json: str | Path,
     *,
@@ -2534,11 +2544,7 @@ def build_qdp_training_pack(
         f"{int(train_start_year)}_{int(train_end_year)}_{int(validation_year)}_{int(test_year)}_{dtype}"
     )
     safe_tag = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in str(tag or default_tag)).strip("_")
-    if output_root is None:
-        memmap_root = source_path.parent.parent.parent if source_path.parent.parent.name == "sharded" else source_path.parent.parent
-        root = memmap_root / "training_pack" / safe_tag
-    else:
-        root = Path(output_root)
+    root = _resolve_qdp_training_pack_root(source_path, output_root, safe_tag)
     root.mkdir(parents=True, exist_ok=True)
     manifest_path = root / "qdp_training_pack_manifest.json"
     progress_path = root / "qdp_training_pack_progress.json"

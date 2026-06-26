@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import glob
+import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -153,10 +154,12 @@ def _read_status_sidecar_tradeable(
             f"status_sidecar_dataset_id={dataset_id} source_market_dataset_id={sidecar_source_id} "
             f"expected={source_market_dataset_id}"
         )
-    path = str(dict(metadata.get("content_paths", {}) or {}).get("silver_domain_data", "") or "")
-    if not path or not Path(path).exists():
+    paths = dict(metadata.get("content_paths", {}) or {})
+    table_paths = _domain_table_paths(paths)
+    if not table_paths:
         raise ValueError(f"pool_view_blocker: status sidecar has no silver_domain_data: {dataset_id}")
-    frame = pd.read_parquet(path)
+    frames = [pd.read_parquet(path) for path in table_paths]
+    frame = pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
     required = {"trade_date", "symbol", "is_tradeable"}
     missing = sorted(required - set(frame.columns))
     if missing:
@@ -170,6 +173,29 @@ def _read_status_sidecar_tradeable(
     pivot.index.name = None
     pivot.columns.name = None
     return pivot.fillna(False).astype(bool)
+
+
+def _domain_table_paths(paths: Mapping[str, Any]) -> list[str]:
+    path = str(dict(paths).get("silver_domain_data", "") or "")
+    candidates = sorted(glob.glob(path)) if "*" in path else ([path] if path else [])
+    existing = [item for item in candidates if Path(item).exists()]
+    if existing:
+        return existing
+    manifest_path = Path(str(dict(paths).get("shard_manifest", "") or ""))
+    if not manifest_path.exists():
+        return []
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    shard_paths: list[str] = []
+    for item in list(manifest.get("shards", []) or []):
+        row = dict(item)
+        if str(row.get("status", "") or "") not in {"stored", "skipped"}:
+            continue
+        if int(row.get("row_count", 0) or 0) <= 0:
+            continue
+        shard_path = str(row.get("path", "") or "")
+        if shard_path and Path(shard_path).exists():
+            shard_paths.append(shard_path)
+    return shard_paths
 
 
 def _metadata_summary(membership: pd.DataFrame, view_name: str) -> pd.DataFrame:

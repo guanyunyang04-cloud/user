@@ -50,6 +50,7 @@ _RESUMABLE_SHARD_STATUSES = {*_TERMINAL_SHARD_STATUSES, "schema_mismatch"}
 
 @dataclass(frozen=True)
 class ShardedMemmapConfig:
+    canonical_dataset_id: str = ""
     profile: str = DEFAULT_PROFILE
     start_year: int = 0
     end_year: int = 0
@@ -66,6 +67,7 @@ class ShardedMemmapConfig:
     resume: bool = True
     workers: int = 1
     year_input_cache: bool = False
+    force_years: str = ""
     pool_view_id: str = ""
     sector_board_view_id: str = ""
     include_static_context: bool = False
@@ -73,6 +75,7 @@ class ShardedMemmapConfig:
 
     def normalized(self) -> "ShardedMemmapConfig":
         return ShardedMemmapConfig(
+            canonical_dataset_id=str(self.canonical_dataset_id or "").strip(),
             profile=str(self.profile or DEFAULT_PROFILE).strip(),
             start_year=max(int(self.start_year or 0), 0),
             end_year=max(int(self.end_year or 0), 0),
@@ -89,6 +92,7 @@ class ShardedMemmapConfig:
             resume=bool(self.resume),
             workers=max(int(self.workers or 1), 1),
             year_input_cache=bool(self.year_input_cache),
+            force_years=str(self.force_years or "").strip(),
             pool_view_id=str(self.pool_view_id or "").strip(),
             sector_board_view_id=str(self.sector_board_view_id or "").strip(),
             include_static_context=bool(self.include_static_context),
@@ -99,6 +103,7 @@ class ShardedMemmapConfig:
 def write_sharded_memmap_plan(
     paths: QdpPaths | None = None,
     *,
+    canonical_dataset_id: str = "",
     profile: str = DEFAULT_PROFILE,
     max_universe_size: int = 0,
     workers: int = 1,
@@ -114,6 +119,7 @@ def write_sharded_memmap_plan(
     payload = {
         "status": "plan_only",
         "artifact_type": "sharded_memmap_build_plan",
+        "canonical_dataset_id": str(canonical_dataset_id or "").strip(),
         "profile": str(profile or DEFAULT_PROFILE),
         "max_universe_size": int(max_universe_size or 0),
         "workers": max(int(workers or 1), 1),
@@ -142,7 +148,7 @@ def build_sharded_memmap(
     resolved = paths or qdp_paths()
     cfg = _coerce_config(config)
     root_manifest = load_root_manifest(resolved)
-    dataset_id = str(root_manifest.get("canonical_dataset_id", "") or "")
+    dataset_id = str(cfg.canonical_dataset_id or root_manifest.get("canonical_dataset_id", "") or "")
     if not dataset_id:
         raise ValueError("canonical_dataset_id_required")
     lake = ResearchDataLake(resolved.lake_root)
@@ -191,6 +197,13 @@ def build_sharded_memmap(
     }
     for row in _discover_existing_shards(out_root):
         existing_by_key.setdefault(str(row.get("shard_key", "")), row)
+    force_years = _parse_year_filter(cfg.force_years)
+    if force_years:
+        existing_by_key = {
+            key: row
+            for key, row in existing_by_key.items()
+            if int(row.get("year", _year_from_shard_key(key)) or 0) not in force_years
+        }
     schema_columns = _select_initial_schema_columns(existing_by_key.values())
     if not schema_columns and cfg.max_shards <= 0:
         reference = _build_schema_reference_shard(
@@ -210,12 +223,20 @@ def build_sharded_memmap(
             schema_columns = _select_initial_schema_columns(existing_by_key.values())
     schema_hash = _sequence_hash(schema_columns) if schema_columns else ""
     pending_specs: list[dict[str, Any]] = []
-    build_mode = "serial_year_input_cache" if bool(cfg.year_input_cache) and int(cfg.workers) <= 1 else "parallel_threads" if int(cfg.workers) > 1 and schema_columns else "serial"
+    if bool(cfg.year_input_cache) and int(cfg.workers) > 1 and schema_columns:
+        build_mode = "parallel_year_input_cache"
+    elif bool(cfg.year_input_cache) and int(cfg.workers) <= 1:
+        build_mode = "serial_year_input_cache"
+    elif int(cfg.workers) > 1 and schema_columns:
+        build_mode = "parallel_threads"
+    else:
+        build_mode = "serial"
     if int(cfg.workers) > 1 and not schema_columns:
         build_mode = "serial_schema_unavailable"
     for year in years:
         year_prepared: Any | None = None
         year_load_error = ""
+        year_pending_specs: list[dict[str, Any]] = []
         target_start, target_end, context_start, context_end = _shard_windows(
             year=int(year),
             canonical_start=canonical_start,
@@ -223,7 +244,7 @@ def build_sharded_memmap(
             cfg=cfg,
         )
         for block_id, symbols in enumerate(blocks):
-            if cfg.max_shards > 0 and len(completed) + len(pending_specs) >= cfg.max_shards:
+            if cfg.max_shards > 0 and len(completed) + len(pending_specs) + len(year_pending_specs) >= cfg.max_shards:
                 break
             shard_key = f"year={year}/block={block_id:04d}"
             if cfg.resume and shard_key in existing_by_key and _shard_is_resumable(existing_by_key[shard_key]):
@@ -236,6 +257,16 @@ def build_sharded_memmap(
                 continue
             if build_mode == "parallel_threads":
                 pending_specs.append(
+                    {
+                        "shard_key": shard_key,
+                        "year": int(year),
+                        "block_id": int(block_id),
+                        "symbols": list(symbols),
+                    }
+                )
+                continue
+            if build_mode == "parallel_year_input_cache":
+                year_pending_specs.append(
                     {
                         "shard_key": shard_key,
                         "year": int(year),
@@ -354,6 +385,57 @@ def build_sharded_memmap(
                 latest_shard=shard,
             )
             gc.collect()
+        if year_pending_specs:
+            worker_count = min(max(int(cfg.workers), 1), max(len(year_pending_specs), 1))
+            for year_spec_batch in _chunk_shard_specs(year_pending_specs, worker_count):
+                batch_universe = _symbols_for_shard_specs(year_spec_batch)
+                batch_prepared: Any | None = None
+                batch_load_error = ""
+                try:
+                    batch_prepared = load_policy_inputs_from_lake(
+                        lake=lake,
+                        dataset_id=dataset_id,
+                        start_date=context_start.strftime("%Y-%m-%d"),
+                        end_date=context_end.strftime("%Y-%m-%d"),
+                        universe=batch_universe,
+                        pool_view_id=str(cfg.pool_view_id or ""),
+                        intersect_pool_view_with_universe=bool(cfg.pool_view_id),
+                        sector_board_view_id=str(cfg.sector_board_view_id or ""),
+                        min_trading_days=2,
+                        require_benchmark_open=str(cfg.execution_mode).strip().lower() == "next_open",
+                    )
+                except ValueError as exc:
+                    message = str(exc)
+                    if "lake_coverage_blocker: no requested symbols are available in lake market data" not in message:
+                        raise
+                    batch_load_error = message
+                parallel_results = _build_shards_parallel_from_prepared(
+                    prepared=batch_prepared,
+                    year_load_error=batch_load_error,
+                    shard_specs=year_spec_batch,
+                    target_start=target_start,
+                    target_end=target_end,
+                    context_start=context_start,
+                    context_end=context_end,
+                    cfg=cfg,
+                    out_root=out_root,
+                    cumulative_horizons=cumulative_horizons,
+                    expected_feature_columns=schema_columns,
+                    static_schema=static_schema,
+                    progress_path=progress_path,
+                    planned_count=planned_count,
+                    completed_so_far=len(completed),
+                )
+                for spec in year_spec_batch:
+                    shard = parallel_results[str(spec["shard_key"])]
+                    schema_hash, schema_columns = _accept_shard_schema(
+                        shard=shard,
+                        schema_hash=schema_hash,
+                        schema_columns=schema_columns,
+                    )
+                    completed.append(shard)
+                del batch_prepared
+                gc.collect()
         if cfg.max_shards > 0 and len(completed) >= cfg.max_shards:
             break
     if pending_specs:
@@ -393,6 +475,7 @@ def build_sharded_memmap(
         "scope": scope,
         "canonical_dataset_id": dataset_id,
         "canonical_alias": str(root_manifest.get("alias", "canonical_data_v1") or "canonical_data_v1"),
+        "canonical_dataset_source": "config_override" if str(cfg.canonical_dataset_id or "").strip() else "root_manifest",
         "source_market_dataset_id": dataset_id,
         "source_pool_view_id": str(source_pool_view_meta.get("dataset_id", "")),
         "source_pool_view_kind": str(source_pool_view_meta.get("view_kind", "")),
@@ -427,10 +510,11 @@ def build_sharded_memmap(
         "min_lookback_valid_ratio": float(cfg.min_lookback_valid_ratio),
         "build_mode": build_mode,
         "requested_worker_count": int(cfg.workers),
-        "effective_worker_count": int(min(max(int(cfg.workers), 1), max(len(pending_specs), 1))) if build_mode == "parallel_threads" else 1,
+        "effective_worker_count": int(min(max(int(cfg.workers), 1), max(planned_count - skipped, 1))) if build_mode in {"parallel_threads", "parallel_year_input_cache"} else 1,
         "year_input_cache_requested": bool(cfg.year_input_cache),
-        "year_input_cache_effective": bool(build_mode == "serial_year_input_cache"),
-        "year_input_cache_policy": "serial_only_full_year_prepared_inputs_sliced_by_symbol_block",
+        "year_input_cache_effective": bool(build_mode in {"serial_year_input_cache", "parallel_year_input_cache"}),
+        "year_input_cache_policy": "full_year_prepared_inputs_sliced_by_symbol_block; parallel_per_year_when_workers_gt_1",
+        "force_years": [int(year) for year in sorted(force_years)],
         "static_context_schema": _static_schema_manifest(static_schema, enabled=bool(cfg.include_static_context)),
         "static_context_vocab": _static_vocab_manifest(static_schema) if bool(cfg.include_static_context) else {},
         "skipped_shard_count": int(skipped),
@@ -768,6 +852,191 @@ def _normalize_symbols(symbols: list[str]) -> list[str]:
         seen.add(symbol)
         out.append(symbol)
     return out
+
+
+def _chunk_shard_specs(shard_specs: list[dict[str, Any]], chunk_size: int) -> list[list[dict[str, Any]]]:
+    size = max(int(chunk_size or 1), 1)
+    return [list(shard_specs[index : index + size]) for index in range(0, len(shard_specs), size)]
+
+
+def _symbols_for_shard_specs(shard_specs: list[dict[str, Any]]) -> list[str]:
+    symbols: list[str] = []
+    for spec in list(shard_specs or []):
+        symbols.extend(list(spec.get("symbols", []) or []))
+    return _normalize_symbols(symbols)
+
+
+def _parse_year_filter(value: str | Iterable[int] | None) -> set[int]:
+    if value is None:
+        return set()
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return set()
+        years: set[int] = set()
+        for part in text.split(","):
+            item = part.strip()
+            if not item:
+                continue
+            if "-" in item:
+                start, end = item.split("-", 1)
+                years.update(range(int(start), int(end) + 1))
+            else:
+                years.add(int(item))
+        return years
+    return {int(item) for item in value}
+
+
+def _year_from_shard_key(shard_key: str) -> int:
+    for part in str(shard_key or "").split("/"):
+        if part.startswith("year="):
+            try:
+                return int(part.split("=", 1)[1])
+            except ValueError:
+                return 0
+    return 0
+
+
+def _build_shards_parallel_from_prepared(
+    *,
+    prepared: Any | None,
+    year_load_error: str,
+    shard_specs: list[dict[str, Any]],
+    target_start: pd.Timestamp,
+    target_end: pd.Timestamp,
+    context_start: pd.Timestamp,
+    context_end: pd.Timestamp,
+    cfg: ShardedMemmapConfig,
+    out_root: Path,
+    cumulative_horizons: tuple[int, ...],
+    expected_feature_columns: list[str],
+    static_schema: Mapping[str, Any] | None,
+    progress_path: Path,
+    planned_count: int,
+    completed_so_far: int,
+) -> dict[str, dict[str, Any]]:
+    if not expected_feature_columns:
+        raise ValueError("parallel_cached_year_sharded_memmap_requires_locked_feature_schema")
+    worker_count = min(max(int(cfg.workers), 1), max(len(shard_specs), 1))
+    results: dict[str, dict[str, Any]] = {}
+    if str(year_load_error or "").strip():
+        for spec in shard_specs:
+            year = int(spec.get("year", 0) or 0)
+            block_id = int(spec.get("block_id", 0) or 0)
+            shard = _write_terminal_shard(
+                shard_manifest_path=out_root / f"year={year}" / f"block={block_id:04d}" / "shard_manifest.json",
+                status="no_coverage",
+                empty_reason="no_requested_symbols_available_in_lake_market_data",
+                year=year,
+                block_id=block_id,
+                symbols=list(spec.get("symbols", []) or []),
+                target_start=target_start,
+                target_end=target_end,
+                context_start=context_start,
+                context_end=context_end,
+                error_summary=str(year_load_error),
+            )
+            results[str(spec["shard_key"])] = shard
+            _write_progress(
+                progress_path,
+                status="running",
+                planned_shards=planned_count,
+                completed_shards=int(completed_so_far + len(results)),
+                latest_shard=shard,
+                worker_count=int(worker_count),
+            )
+        return results
+    if prepared is None:
+        raise ValueError("prepared_year_inputs_required")
+    with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="qdp-year-shard") as executor:
+        futures = {
+            executor.submit(
+                _build_one_shard_from_cached_year_worker,
+                prepared=prepared,
+                symbols=list(spec["symbols"]),
+                year=int(spec["year"]),
+                block_id=int(spec["block_id"]),
+                target_start=target_start,
+                target_end=target_end,
+                context_start=context_start,
+                context_end=context_end,
+                cfg=cfg,
+                out_root=out_root,
+                cumulative_horizons=cumulative_horizons,
+                expected_feature_columns=expected_feature_columns,
+                static_schema=static_schema,
+            ): str(spec["shard_key"])
+            for spec in shard_specs
+        }
+        for future in as_completed(futures):
+            shard_key = futures[future]
+            spec = next(item for item in shard_specs if str(item["shard_key"]) == shard_key)
+            try:
+                shard = future.result()
+            except Exception as exc:  # pragma: no cover - exercised by integration failures.
+                shard = _failed_shard_record(
+                    shard_key=shard_key,
+                    spec=spec,
+                    out_root=out_root,
+                    error=exc,
+                )
+            results[shard_key] = shard
+            _write_progress(
+                progress_path,
+                status="running",
+                planned_shards=planned_count,
+                completed_shards=int(completed_so_far + len(results)),
+                latest_shard=shard,
+                worker_count=int(worker_count),
+            )
+    return results
+
+
+def _build_one_shard_from_cached_year_worker(
+    *,
+    prepared: Any,
+    symbols: list[str],
+    year: int,
+    block_id: int,
+    target_start: pd.Timestamp,
+    target_end: pd.Timestamp,
+    context_start: pd.Timestamp,
+    context_end: pd.Timestamp,
+    cfg: ShardedMemmapConfig,
+    out_root: Path,
+    cumulative_horizons: tuple[int, ...],
+    expected_feature_columns: list[str],
+    static_schema: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    block_prepared = _slice_prepared_for_symbols(prepared, list(symbols))
+    if block_prepared is None:
+        return _write_terminal_shard(
+            shard_manifest_path=out_root / f"year={int(year)}" / f"block={int(block_id):04d}" / "shard_manifest.json",
+            status="no_coverage",
+            empty_reason="no_requested_symbols_available_in_cached_year_inputs",
+            year=year,
+            block_id=block_id,
+            symbols=list(symbols),
+            target_start=target_start,
+            target_end=target_end,
+            context_start=context_start,
+            context_end=context_end,
+            error_summary="no requested symbols remain after slicing cached year inputs",
+        )
+    return _build_one_shard_from_prepared(
+        prepared=block_prepared,
+        year=year,
+        block_id=block_id,
+        target_start=target_start,
+        target_end=target_end,
+        context_start=context_start,
+        context_end=context_end,
+        cfg=cfg,
+        out_root=out_root,
+        cumulative_horizons=cumulative_horizons,
+        expected_feature_columns=expected_feature_columns,
+        static_schema=static_schema,
+    )
 
 
 def _build_shards_parallel(

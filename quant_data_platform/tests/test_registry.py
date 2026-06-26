@@ -56,6 +56,7 @@ def test_registry_status_prefers_full_sharded_active_manifest(tmp_path: Path) ->
                 "latest_manifest_json": "H:/qdp/full/sharded_memmap_manifest.json",
                 "latest_scope": "full_canonical_candidate",
                 "latest_profile": "short_horizon_core_v1",
+                "latest_canonical_dataset_id": "policy_input_bundle__new",
                 "latest_stored_shard_count": 262,
                 "latest_planned_shard_count": 323,
             },
@@ -83,6 +84,7 @@ def test_registry_status_prefers_full_sharded_active_manifest(tmp_path: Path) ->
 
     status = registry_status(paths)
     assert status["active_memmap_manifest"] == "H:/qdp/full/sharded_memmap_manifest.json"
+    assert status["active_memmap_source_market_dataset_id"] == "policy_input_bundle__new"
     assert status["active_memmap_state"] == "current"
     assert status["active_memmap_matches_canonical_bundle"] is True
     assert status["active_feature_profile"] == "short_horizon_core_v1"

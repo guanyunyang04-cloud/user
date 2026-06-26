@@ -7,6 +7,7 @@ from daily_research.data_platform.contracts import (
     DomainFetchRequest,
     DOMAIN_STANDARD_COLUMNS,
     aggregate_intraday_1m_to_5m_frame,
+    build_intraday_daily_feature_frame,
     normalize_domain_frame,
 )
 from daily_research.data_platform.manager import InMemoryDomainProvider, ProviderManager
@@ -255,6 +256,25 @@ class DataPlatformDomainContractTest(unittest.TestCase):
         self.assertEqual(float(bars["low"].iloc[0]), 9.9)
         self.assertEqual(float(bars["close"].iloc[0]), 10.5)
         self.assertEqual(float(bars["volume"].iloc[0]), 1500.0)
+
+    def test_intraday_last_5m_ret_uses_previous_close_for_closing_point_bar(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "symbol": ["000001.SZ"] * 3,
+                "trade_date": ["2026-01-05"] * 3,
+                "bar_time": ["14:50:00", "14:55:00", "15:00:00"],
+                "open": [10.0, 10.1, 10.3],
+                "high": [10.2, 10.2, 10.3],
+                "low": [9.9, 10.0, 10.3],
+                "close": [10.1, 10.2, 10.3],
+                "volume": [100, 200, 300],
+                "amount": [1010, 2040, 3090],
+            }
+        )
+
+        features = build_intraday_daily_feature_frame(frame, source="external_5m")
+
+        self.assertAlmostEqual(float(features["last_5m_ret"].iloc[0]), 10.3 / 10.2 - 1.0)
 
     def test_adjust_factor_normalizer_keeps_provider_semantics(self) -> None:
         normalized = normalize_domain_frame(

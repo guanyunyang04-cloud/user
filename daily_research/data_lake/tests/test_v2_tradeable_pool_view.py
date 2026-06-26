@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -7,7 +8,7 @@ import pandas as pd
 import pytest
 
 from daily_research.data_lake import ResearchDataLake
-from daily_research.data_lake.pool_views import PoolViewSpec, build_pool_view_from_policy_bundle, load_pool_view
+from daily_research.data_lake.pool_views import PoolViewSpec, _read_status_sidecar_tradeable, build_pool_view_from_policy_bundle, load_pool_view
 
 
 def _save_market_bundle(lake: ResearchDataLake, *, spec_extra: dict[str, object] | None = None) -> tuple[str, pd.DatetimeIndex, list[str]]:
@@ -248,3 +249,46 @@ def test_tradeable_mainboard_pool_blocks_when_no_tradeable_members() -> None:
                     require_tradeable=True,
                 ),
             )
+
+
+def test_status_sidecar_tradeable_reader_supports_shard_manifest_reference() -> None:
+    class FakeLake:
+        def __init__(self, metadata: dict[str, object]) -> None:
+            self.metadata = metadata
+
+        def describe_dataset(self, dataset_id: str) -> dict[str, object]:
+            assert dataset_id == "data_platform_v2_status_sidecar__unit"
+            return self.metadata
+
+    with TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        shard = root / "status.parquet"
+        pd.DataFrame(
+            {
+                "trade_date": ["2026-01-05", "2026-01-05"],
+                "symbol": ["600000.SH", "000001.SZ"],
+                "is_tradeable": [True, False],
+            }
+        ).to_parquet(shard, index=False)
+        manifest_path = root / "shard_manifest.json"
+        manifest_path.write_text(
+            json.dumps({"shards": [{"status": "stored", "row_count": 2, "path": str(shard)}]}),
+            encoding="utf-8",
+        )
+        pivot = _read_status_sidecar_tradeable(
+            FakeLake(
+                {
+                    "parameters": {"source_market_dataset_id": "policy_input_bundle__unit"},
+                    "content_paths": {"shard_manifest": str(manifest_path)},
+                    "start_date": "2026-01-05",
+                    "end_date": "2026-01-05",
+                }
+            ),
+            "data_platform_v2_status_sidecar__unit",
+            source_market_dataset_id="policy_input_bundle__unit",
+            start_date="2026-01-05",
+            end_date="2026-01-05",
+        )
+
+    assert bool(pivot.loc[pd.Timestamp("2026-01-05"), "600000.SH"]) is True
+    assert bool(pivot.loc[pd.Timestamp("2026-01-05"), "000001.SZ"]) is False

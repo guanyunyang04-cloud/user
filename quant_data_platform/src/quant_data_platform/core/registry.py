@@ -86,10 +86,20 @@ def registry_status(paths: QdpPaths | None = None) -> dict[str, Any]:
     sharded_registry = read_json(resolved.registry_dir / "sharded_memmap_registry.json")
     sharded_status = dict(root_manifest.get("canonical_sharded_memmap_status", {}) or {})
     canonical_dataset_id = str(root_manifest.get("canonical_dataset_id", "") or "")
-    active_memmap_source = str(memmap_registry.get("active_source_market_dataset_id", "") or "")
-    active_memmap_matches = bool(canonical_dataset_id and active_memmap_source and canonical_dataset_id == active_memmap_source)
     active_sharded_manifest = str(sharded_registry.get("active_manifest_json", "") or sharded_status.get("active_manifest_json", "") or "")
+    active_sharded_payload = read_json(Path(active_sharded_manifest)) if active_sharded_manifest else {}
+    active_sharded_source = str(
+        active_sharded_payload.get("canonical_dataset_id", "")
+        or sharded_status.get("latest_canonical_dataset_id", "")
+        or ""
+    )
     sharded_full_ready = bool(active_sharded_manifest and str(sharded_status.get("status", "")) == "sharded_full_ready")
+    active_memmap_source = (
+        active_sharded_source
+        if sharded_full_ready and active_sharded_source
+        else str(memmap_registry.get("active_source_market_dataset_id", "") or "")
+    )
+    active_memmap_matches = bool(canonical_dataset_id and active_memmap_source and canonical_dataset_id == active_memmap_source)
     return {
         "status": "ok" if root_manifest else "missing_root_manifest",
         "alias": str(root_manifest.get("alias", DEFAULT_ALIAS) or DEFAULT_ALIAS),
@@ -105,8 +115,8 @@ def registry_status(paths: QdpPaths | None = None) -> dict[str, Any]:
         "memmap_registry_exists": bool(resolved.memmap_registry.exists()),
         "active_memmap_manifest": active_sharded_manifest or str(memmap_registry.get("active_manifest_json", "") or ""),
         "active_memmap_source_market_dataset_id": active_memmap_source,
-        "active_memmap_matches_canonical_bundle": True if sharded_full_ready else active_memmap_matches,
-        "active_memmap_state": "current" if sharded_full_ready or active_memmap_matches else "stale_or_missing",
+        "active_memmap_matches_canonical_bundle": active_memmap_matches,
+        "active_memmap_state": "current" if active_memmap_matches else "stale_or_missing",
         "active_feature_profile": str(sharded_status.get("latest_profile", "") or memmap_registry.get("active_feature_profile", "") or ""),
         "active_scope": str(sharded_status.get("latest_scope", "") or memmap_registry.get("active_scope", "") or ""),
         "active_sample_count": 0 if sharded_full_ready else int(memmap_registry.get("active_sample_count", 0) or 0),

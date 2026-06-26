@@ -5,14 +5,86 @@ import zipfile
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from daily_research.data_lake.catalog import ResearchDataLake
 from daily_research.data_platform.contracts import DataDomain
-from daily_research.data_platform.build_intraday_daily_features import BuildIntradayDailyFeaturesConfig, build_intraday_daily_features
+from daily_research.data_platform.build_intraday_daily_features import (
+    BuildIntradayDailyFeaturesConfig,
+    INTRADAY_DAILY_FEATURE_CONTRACT_VERSION,
+    LAST_5M_RET_POLICY,
+    _build_intraday_daily_feature_frame_fast,
+    _feature_dataset_spec,
+    _shard_intersects_years,
+    build_intraday_daily_features,
+)
 from daily_research.data_platform.combine_domain_datasets import CombineDomainDatasetsConfig, combine_domain_datasets
 from daily_research.data_platform.combine_sharded_domain_datasets import CombineShardedDomainConfig, combine_sharded_domain_datasets
 from daily_research.data_platform.import_external_quant_zip import ImportConfig, run_import
 from daily_research.data_platform.recover_external_quant_zip_import import RecoverExternalImportConfig, recover_import
+
+
+def test_fast_intraday_daily_features_last_5m_ret_uses_previous_close_for_closing_point_bar() -> None:
+    frame = pd.DataFrame(
+        {
+            "symbol": ["000001.SZ"] * 3,
+            "trade_date": ["2026-01-05"] * 3,
+            "bar_time": ["14:50:00", "14:55:00", "15:00:00"],
+            "open": [10.0, 10.1, 10.3],
+            "high": [10.2, 10.2, 10.3],
+            "low": [9.9, 10.0, 10.3],
+            "close": [10.1, 10.2, 10.3],
+            "volume": [100, 200, 300],
+            "amount": [1010, 2040, 3090],
+        }
+    )
+
+    features = _build_intraday_daily_feature_frame_fast(frame, source="external_5m", adjusted_flag="none")
+
+    assert float(features["last_5m_ret"].iloc[0]) == pytest.approx(10.3 / 10.2 - 1.0)
+
+
+def test_intraday_daily_feature_dataset_spec_records_last_5m_contract(tmp_path) -> None:
+    lake = ResearchDataLake(tmp_path / "lake")
+    source_record = lake.save_sharded_domain_dataset(
+        domain=DataDomain.MARKET_INTRADAY_5M,
+        spec={
+            "domain": DataDomain.MARKET_INTRADAY_5M,
+            "dataset": "unit_5m",
+            "start_date": "2026-01-05",
+            "end_date": "2026-01-05",
+            "sharded": True,
+        },
+        shard_records=[],
+        source="unit",
+        reuse=False,
+    )
+
+    cfg = BuildIntradayDailyFeaturesConfig(
+        lake_root=tmp_path / "lake",
+        source_dataset_id=source_record.dataset_id,
+        start_date="2026-01-05",
+        end_date="2026-01-05",
+        dry_run=True,
+    )
+    result = build_intraday_daily_features(cfg)
+    spec = _feature_dataset_spec(cfg.normalized(), source_metadata=lake.describe_dataset(source_record.dataset_id))
+
+    identity = lake.build_domain_dataset_identity(
+        domain=DataDomain.INTRADAY_DAILY_FEATURES,
+        spec={**spec, "domain": DataDomain.INTRADAY_DAILY_FEATURES, "sharded": True},
+    )
+
+    assert result.status == "dry_run"
+    assert identity["dataset_id"].startswith(f"data_platform_{DataDomain.INTRADAY_DAILY_FEATURES}__")
+    assert spec["feature_contract_version"] == INTRADAY_DAILY_FEATURE_CONTRACT_VERSION
+    assert spec["last_5m_ret_policy"] == LAST_5M_RET_POLICY
+
+
+def test_intraday_daily_feature_year_filter_uses_shard_date_bounds() -> None:
+    assert _shard_intersects_years({"start_date": "2024-12-20", "end_date": "2025-01-10"}, {2025}) is True
+    assert _shard_intersects_years({"start_date": "2024-01-01", "end_date": "2024-12-31"}, {2025}) is False
+    assert _shard_intersects_years({"start_date": "", "end_date": ""}, {2025}) is True
 
 
 def test_import_external_quant_zip_streams_1m_and_derives_5m(tmp_path) -> None:

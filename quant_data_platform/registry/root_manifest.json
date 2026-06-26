@@ -24,7 +24,7 @@
     "adjust_factor": "data_platform_adjust_factor__30c0c748c33515a192346c3e",
     "index_constituents": "data_platform_index_constituents__8b781c50df0c8ce9c9676122",
     "industry_concept": "data_platform_industry_concept__4fc392be70e668d344005100",
-    "intraday_daily_features": "data_platform_intraday_daily_features__e7ee4203e25ae82160ea480e",
+    "intraday_daily_features": "data_platform_intraday_daily_features__c47f1b6372ec841be2189dab",
     "security_status": "data_platform_security_status__8ff74ecf69a77034c09c8d1b",
     "trading_calendar": "data_platform_trading_calendar__e7c13f6a5ee16a08d71d9b2c",
     "universe_snapshot": "data_platform_universe_snapshot__64012c07ea105731afcb488d",
@@ -35,7 +35,7 @@
     "benchmark_daily": "data_platform_market_daily__76a2dc61ae52a429782208e1",
     "index_constituents": "data_platform_index_constituents__8b781c50df0c8ce9c9676122",
     "industry_concept": "data_platform_industry_concept__4fc392be70e668d344005100",
-    "intraday_daily_features": "data_platform_intraday_daily_features__e7ee4203e25ae82160ea480e",
+    "intraday_daily_features": "data_platform_intraday_daily_features__c47f1b6372ec841be2189dab",
     "market_daily": "data_platform_market_daily__618db3bf9609c6e2b7673f40",
     "market_intraday_5m": "data_platform_market_intraday_5m__aa65b9aebaae19f98ece08e3",
     "security_status": "data_platform_security_status__8ff74ecf69a77034c09c8d1b",
@@ -43,7 +43,7 @@
     "universe_snapshot": "data_platform_universe_snapshot__64012c07ea105731afcb488d",
     "valuation": "data_platform_valuation__13151c89bf9f57eda45ed76e"
   },
-  "canonical_dataset_id": "policy_input_bundle__f926a496f69c61f6b92b5faf",
+  "canonical_dataset_id": "policy_input_bundle__2c27a13a7c7ae85417c36340",
   "canonical_manifest": "H:/quant_project/daily_research/output/research_data_lake/canonical/canonical_manifest.json",
   "canonical_memmap_registry": "H:/quant_project/quant_data_platform/registry/memmap_registry.json",
   "canonical_memmap_status": {
@@ -65,17 +65,17 @@
     "updated_at": "2026-06-12T06:51:06+00:00"
   },
   "canonical_sharded_memmap_status": {
-    "active_manifest_json": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\mainboard_style_structural_alpha_v2_label_v2_full_2010_2026_20260616_01\\sharded_memmap_manifest.json",
-    "latest_canonical_dataset_id": "policy_input_bundle__f926a496f69c61f6b92b5faf",
-    "latest_empty_shard_count": 4,
-    "latest_manifest_json": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\mainboard_style_structural_alpha_v2_label_v2_full_2010_2026_20260616_01\\sharded_memmap_manifest.json",
+    "active_manifest_json": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\tradeable_mainboard_style_structural_alpha_v2_label_v2_backfilled_intraday_v2_2010_2026_20260626_01\\sharded_memmap_manifest.json",
+    "latest_canonical_dataset_id": "policy_input_bundle__2c27a13a7c7ae85417c36340",
+    "latest_empty_shard_count": 14,
+    "latest_manifest_json": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\tradeable_mainboard_style_structural_alpha_v2_label_v2_backfilled_intraday_v2_2010_2026_20260626_01\\sharded_memmap_manifest.json",
     "latest_planned_shard_count": 187,
     "latest_processed_shard_count": 187,
     "latest_profile": "style_structural_alpha_v2",
     "latest_scope": "full_canonical_candidate",
-    "latest_stored_shard_count": 183,
+    "latest_stored_shard_count": 173,
     "status": "sharded_full_ready",
-    "updated_at": "2026-06-15T23:58:35+00:00"
+    "updated_at": "2026-06-26T00:21:16+00:00"
   },
   "canonical_start_date": "2010-01-01",
   "component_coverage": {
@@ -116,6 +116,29 @@
       "security_status": "2010-01-01 to 2026-06-05",
       "trading_calendar": "2010-01-01 to 2026-06-08",
       "universe_snapshot": "2010-01-01 to 2026-06-05"
+    }
+  },
+  "data_base_repair_activation_20260626": {
+    "activated_at": "2026-06-26T00:29:19+00:00",
+    "active_sharded_memmap_manifest": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\tradeable_mainboard_style_structural_alpha_v2_label_v2_backfilled_intraday_v2_2010_2026_20260626_01\\sharded_memmap_manifest.json",
+    "canonical_dataset_id": "policy_input_bundle__2c27a13a7c7ae85417c36340",
+    "coverage_audit_report": "H:\\quant_project\\quant_data_platform\\data\\audits\\qdp_alpha_v2_tradeable_mainboard_pool_filtered_coverage_20260626_01\\qdp_alpha_v2_tradeable_mainboard_pool_filtered_coverage_20260626_01\\coverage_audit_report.json",
+    "known_limitations": [
+      "security_status/universe_snapshot currently end at 2026-06-05 while market/intraday extend to 2026-06-10; tradeable-mainboard pool is intentionally capped at 2026-06-05.",
+      "valuation psTTM and pcfNcfTTM are structurally missing in early legacy years; audit keeps them PIT-safe as missing rather than backfilled heuristically."
+    ],
+    "pool_view_id": "policy_pool_view__7aca6133c8076d3c6c0cebf6",
+    "previous_canonical_dataset_id": "policy_input_bundle__f926a496f69c61f6b92b5faf",
+    "status": "activated_replacement_data_base",
+    "v2_status_sidecar_dataset_id": "data_platform_v2_status_sidecar__97bf843dbc56cbb4e1603640",
+    "validation": {
+      "empty_shard_count": 14,
+      "failed_shard_count": 0,
+      "feature_count": 307,
+      "low_level_sharded_manifest_status": "ok",
+      "planned_shard_count": 187,
+      "stored_shard_count": 173,
+      "symbol_count": 3025
     }
   },
   "default_feature_policy": {
@@ -178,7 +201,7 @@
     "industry_concept",
     "index_constituents"
   ],
-  "updated_at": "2026-06-15T23:58:35+00:00",
+  "updated_at": "2026-06-26T00:29:19+00:00",
   "v1_excluded_domains": [
     "financial_quarterly",
     "performance_forecast",

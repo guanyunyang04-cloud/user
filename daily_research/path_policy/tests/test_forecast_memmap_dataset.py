@@ -16,6 +16,7 @@ from daily_research.path_policy.canonical_memmap import (
 from daily_research.path_policy.forecast_dataset import (
     ForecastDateBatchTorchDataset,
     _fit_memmap_train_normalization,
+    _resolve_qdp_training_pack_root,
     build_forecast_memmap_dataset,
     build_qdp_date_slate_training_pack,
     build_qdp_structured_alpha_v2_training_pack,
@@ -36,6 +37,14 @@ def _write_float_memmap(path, values: np.ndarray) -> None:
     store = np.memmap(path, dtype="float32", mode="w+", shape=values.shape)
     store[...] = values.astype(np.float32, copy=False)
     store.flush()
+
+
+def test_qdp_training_pack_output_root_uses_tag_as_child_dir(tmp_path) -> None:
+    source_manifest = tmp_path / "memmap" / "sharded" / "run" / "sharded_memmap_manifest.json"
+    output_root = tmp_path / "training_pack"
+
+    assert _resolve_qdp_training_pack_root(source_manifest, output_root, "unit_tag") == output_root / "unit_tag"
+    assert _resolve_qdp_training_pack_root(source_manifest, output_root / "unit_tag", "unit_tag") == output_root / "unit_tag"
 
 
 def _write_qdp_fixture_shard(root, *, year: int, stocks: tuple[str, ...], feature_columns: list[str], include_label_v2: bool = False) -> dict:

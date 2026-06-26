@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
@@ -9,7 +10,7 @@ import pytest
 
 from daily_research.data_lake import ResearchDataLake
 from daily_research.data_lake.build_v2_status_sidecar import main as sidecar_main
-from daily_research.data_lake.v2_status_sidecar import build_v2_status_sidecar, build_v2_status_sidecar_frame, is_mainboard_symbol
+from daily_research.data_lake.v2_status_sidecar import _read_domain_dataset, build_v2_status_sidecar, build_v2_status_sidecar_frame, is_mainboard_symbol
 
 
 def _market_frame() -> pd.DataFrame:
@@ -201,6 +202,54 @@ def test_build_v2_status_sidecar_saves_file_backed_dataset() -> None:
     assert sidecar.dataset_kind == "data_platform_v2_status_sidecar"
     assert summary["source_market_dataset_id"] == record.dataset_id
     assert summary["tradeable_rows"] == len(frame)
+
+
+def test_read_domain_dataset_supports_shard_manifest_reference() -> None:
+    class FakeLake:
+        def __init__(self, metadata: dict[str, object]) -> None:
+            self.metadata = metadata
+
+        def describe_dataset(self, dataset_id: str) -> dict[str, object]:
+            assert dataset_id == "data_platform_security_status__unit"
+            return self.metadata
+
+    with TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        shard_a = root / "part_a.parquet"
+        shard_b = root / "part_b.parquet"
+        pd.DataFrame(
+            {
+                "trade_date": ["2026-01-05"],
+                "symbol": ["600000.SH"],
+                "is_st": [False],
+            }
+        ).to_parquet(shard_a, index=False)
+        pd.DataFrame(
+            {
+                "trade_date": ["2026-01-06"],
+                "symbol": ["000001.SZ"],
+                "is_st": [True],
+            }
+        ).to_parquet(shard_b, index=False)
+        manifest_path = root / "shard_manifest.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "shards": [
+                        {"status": "stored", "row_count": 1, "path": str(shard_a)},
+                        {"status": "stored", "row_count": 1, "path": str(shard_b)},
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        frame, metadata = _read_domain_dataset(
+            FakeLake({"content_paths": {"shard_manifest": str(manifest_path)}}),
+            "data_platform_security_status__unit",
+        )
+
+    assert metadata["content_paths"]["shard_manifest"] == str(manifest_path)
+    assert list(frame["symbol"]) == ["600000.SH", "000001.SZ"]
 
 
 def test_build_v2_status_sidecar_cli_blocks_active_artifact_diff() -> None:

@@ -9,11 +9,16 @@ import pandas as pd
 import pytest
 
 from daily_research.data_lake import ResearchDataLake
+from daily_research.data_lake.build_canonical_policy_bundle import (
+    BuildCanonicalPolicyBundleConfig,
+    build_canonical_policy_bundle,
+)
 from daily_research.data_lake.import_traditional_baostock_v2_snapshot import (
     import_traditional_baostock_v2_snapshot,
     main as import_main,
 )
 from daily_research.data_lake.policy_input_loader import load_policy_inputs_from_lake
+from daily_research.data_platform.contracts import DataDomain
 
 
 def _write_snapshot(root: Path) -> Path:
@@ -155,6 +160,69 @@ def test_import_traditional_baostock_v2_snapshot_registers_bundle_sidecars_and_l
     assert "industry_daily" in prepared.metadata_frames
     assert prepared.metadata_summary["valuation_sidecar"]["available"] is True
     assert prepared.metadata_summary["industry_sidecar"]["industry_frequency"] == "month-start-ffill"
+
+
+def test_policy_loader_normalizes_legacy_valuation_metric_schema(tmp_path) -> None:
+    lake = ResearchDataLake(tmp_path / "lake")
+    dates = pd.to_datetime(["2010-01-04", "2010-01-05"])
+    market_record = lake.save_domain_dataset(
+        domain=DataDomain.MARKET_DAILY,
+        frame=pd.DataFrame(
+            {
+                "trade_date": ["2010-01-04", "2010-01-04", "2010-01-04", "2010-01-05", "2010-01-05", "2010-01-05"],
+                "symbol": ["000001.SZ", "600000.SH", "000300.SH", "000001.SZ", "600000.SH", "000300.SH"],
+                "open": [10.0, 20.0, 3000.0, 10.1, 20.1, 3010.0],
+                "high": [10.2, 20.2, 3020.0, 10.3, 20.3, 3030.0],
+                "low": [9.8, 19.8, 2990.0, 10.0, 20.0, 3000.0],
+                "close": [10.1, 20.1, 3010.0, 10.2, 20.2, 3020.0],
+                "volume": [1000.0, 2000.0, 0.0, 1100.0, 2100.0, 0.0],
+                "amount": [10100.0, 40200.0, 0.0, 11220.0, 42420.0, 0.0],
+            }
+        ),
+        spec={"dataset": "data_platform_market_daily", "start_date": "2010-01-04", "end_date": "2010-01-05"},
+        source="unit",
+    )
+    valuation_record = lake.save_domain_dataset(
+        domain=DataDomain.VALUATION,
+        frame=pd.DataFrame(
+            {
+                "trade_date": ["2010-01-04", "2010-01-05"],
+                "symbol": ["000001.SZ", "000001.SZ"],
+                "turn": [None, None],
+                "turnover_rate": [1.0, 1.1],
+                "peTTM": [None, None],
+                "pe": [8.0, 8.1],
+                "pbMRQ": [None, None],
+                "pb": [1.0, 1.1],
+            }
+        ),
+        spec={"dataset": "data_platform_valuation", "start_date": "2010-01-04", "end_date": "2010-01-05"},
+        source="unit",
+    )
+    bundle = build_canonical_policy_bundle(
+        BuildCanonicalPolicyBundleConfig(
+            lake_root=tmp_path / "lake",
+            market_daily_dataset_id=market_record.dataset_id,
+            sidecar_dataset_ids={"valuation": valuation_record.dataset_id},
+            start_date="2010-01-04",
+            end_date="2010-01-05",
+        )
+    )
+    prepared = load_policy_inputs_from_lake(
+        lake=lake,
+        dataset_id=bundle.dataset_id,
+        start_date="2010-01-04",
+        end_date="2010-01-05",
+        universe=["000001.SZ", "600000.SH"],
+        min_trading_days=2,
+    )
+
+    assert "turn" in prepared.derived_frames
+    assert "peTTM" in prepared.derived_frames
+    assert "pbMRQ" in prepared.derived_frames
+    assert float(prepared.derived_frames["turn"].loc[dates[0], "000001.SZ"]) == pytest.approx(1.0)
+    assert float(prepared.derived_frames["peTTM"].loc[dates[0], "000001.SZ"]) == pytest.approx(8.0)
+    assert float(prepared.derived_frames["pbMRQ"].loc[dates[0], "000001.SZ"]) == pytest.approx(1.0)
 
 
 def test_import_traditional_baostock_v2_snapshot_cli_blocks_active_artifact_diff() -> None:

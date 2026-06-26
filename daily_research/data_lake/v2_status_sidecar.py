@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import glob
+import json
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -80,13 +81,35 @@ def _read_domain_dataset(lake: ResearchDataLake, dataset_id: str) -> tuple[pd.Da
     if not dataset_id:
         return pd.DataFrame(), {}
     metadata = lake.describe_dataset(str(dataset_id))
-    path = str(dict(metadata.get("content_paths", {}) or {}).get("silver_domain_data", "") or "")
-    candidates = sorted(glob.glob(path)) if "*" in path else ([path] if path else [])
-    existing = [item for item in candidates if Path(item).exists()]
+    paths = dict(metadata.get("content_paths", {}) or {})
+    existing = _domain_table_paths(paths)
     if not existing:
         return pd.DataFrame(), metadata
     frames = [pd.read_parquet(item) for item in existing]
     return pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0], metadata
+
+
+def _domain_table_paths(paths: Mapping[str, Any]) -> list[str]:
+    path = str(dict(paths).get("silver_domain_data", "") or "")
+    candidates = sorted(glob.glob(path)) if "*" in path else ([path] if path else [])
+    existing = [item for item in candidates if Path(item).exists()]
+    if existing:
+        return existing
+    manifest_path = Path(str(dict(paths).get("shard_manifest", "") or ""))
+    if not manifest_path.exists():
+        return []
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    shard_paths: list[str] = []
+    for item in list(manifest.get("shards", []) or []):
+        row = dict(item)
+        if str(row.get("status", "") or "") not in {"stored", "skipped"}:
+            continue
+        if int(row.get("row_count", 0) or 0) <= 0:
+            continue
+        shard_path = str(row.get("path", "") or "")
+        if shard_path and Path(shard_path).exists():
+            shard_paths.append(shard_path)
+    return shard_paths
 
 
 def _read_market_dataset(lake: ResearchDataLake, dataset_id: str, start_date: str, end_date: str) -> tuple[pd.DataFrame, dict[str, Any]]:

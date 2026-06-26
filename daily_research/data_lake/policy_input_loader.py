@@ -26,6 +26,14 @@ from daily_research.data_platform.contracts import DataDomain
 LEGACY_DEFAULT_POLICY_INPUT_LAKE_DATASET_ID = "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
 DEFAULT_POLICY_INPUT_LAKE_DATASET_ID = DEFAULT_CANONICAL_ALIAS
 
+VALUATION_METRIC_ALIASES = {
+    "turn": ("turn", "turnover_rate"),
+    "peTTM": ("peTTM", "pe_ttm", "pe"),
+    "pbMRQ": ("pbMRQ", "pb_mrq", "pb"),
+    "psTTM": ("psTTM", "ps_ttm", "ps"),
+    "pcfNcfTTM": ("pcfNcfTTM", "pcf_ncf_ttm"),
+}
+
 
 def resolve_policy_input_dataset_id(lake: ResearchDataLake, dataset_id: str = "") -> str:
     requested = str(dataset_id or "").strip()
@@ -100,6 +108,21 @@ def _read_domain_sidecar_frame_filtered(
         symbols=symbols,
     )
     return frame, metadata
+
+
+def _normalize_valuation_metric_schema(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    out = frame.copy()
+    for target, candidates in VALUATION_METRIC_ALIASES.items():
+        merged: pd.Series | None = None
+        for candidate in candidates:
+            if candidate in out.columns:
+                values = pd.to_numeric(out[candidate], errors="coerce")
+                merged = values if merged is None else merged.combine_first(values)
+        if merged is not None:
+            out[target] = merged
+    return out
 
 
 def _read_sidecar_table_paths(paths: dict[str, Any]) -> pd.DataFrame:
@@ -350,17 +373,22 @@ def _load_valuation_sidecar_frames(
 ) -> tuple[dict[str, pd.DataFrame], pd.DataFrame, dict[str, Any]]:
     sidecar_id = _sidecar_dataset_ids(metadata).get(DataDomain.VALUATION, "")
     metric_candidates = ["turn", "pctChg", "peTTM", "pbMRQ", "psTTM", "pcfNcfTTM"]
+    metric_read_columns = list(metric_candidates)
+    for aliases in VALUATION_METRIC_ALIASES.values():
+        metric_read_columns.extend(list(aliases))
+    metric_read_columns = list(dict.fromkeys(metric_read_columns))
     frame, sidecar_metadata = _read_domain_sidecar_frame_filtered(
         lake,
         sidecar_id,
         start_date=start_date,
         end_date=end_date,
-        columns=["symbol", "trade_date", *metric_candidates],
+        columns=["symbol", "trade_date", *metric_read_columns],
         symbols=universe,
     )
     if frame.empty:
         return {}, pd.DataFrame(), {"dataset_id": str(sidecar_id), "available": False, "reason": "missing_or_empty"}
     data = frame.copy()
+    data = _normalize_valuation_metric_schema(data)
     if "trade_date" not in data.columns or "symbol" not in data.columns:
         return {}, pd.DataFrame(), {"dataset_id": str(sidecar_id), "available": False, "reason": "missing_trade_date_or_symbol"}
     data["trade_date"] = pd.to_datetime(data["trade_date"], errors="coerce")

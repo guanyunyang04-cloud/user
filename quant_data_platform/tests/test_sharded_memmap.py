@@ -13,9 +13,13 @@ from quant_data_platform.core.paths import qdp_paths
 from quant_data_platform.memmap import sharded
 from quant_data_platform.memmap.sharded import (
     ShardedMemmapConfig,
+    _build_shards_parallel_from_prepared,
     _build_shards_parallel,
+    _chunk_shard_specs,
+    _parse_year_filter,
     _project_feature_store_to_schema,
     _slice_prepared_for_symbols,
+    _symbols_for_shard_specs,
     _symbol_blocks,
     _write_label_store,
     _write_sample_index,
@@ -142,6 +146,8 @@ def test_cli_sharded_dry_run_writes_plan(tmp_path, monkeypatch) -> None:
             "--workers",
             "4",
             "--year-input-cache",
+            "--canonical-dataset-id",
+            "policy_input_bundle__override",
             "--pool-view-id",
             "policy_pool_view__unit",
             "--include-static-context",
@@ -154,15 +160,18 @@ def test_cli_sharded_dry_run_writes_plan(tmp_path, monkeypatch) -> None:
     assert plan.exists()
     assert read_json(plan)["workers"] == 4
     assert read_json(plan)["year_input_cache"] is True
+    assert read_json(plan)["canonical_dataset_id"] == "policy_input_bundle__override"
     assert read_json(plan)["pool_view_id"] == "policy_pool_view__unit"
     assert read_json(plan)["include_static_context"] is True
     assert read_json(plan)["static_context_fields"] == ["symbol", "exchange", "industry"]
 
 
 def test_sharded_config_normalizes_workers() -> None:
+    assert ShardedMemmapConfig(canonical_dataset_id=" policy_input_bundle__override ").normalized().canonical_dataset_id == "policy_input_bundle__override"
     assert ShardedMemmapConfig(workers=0).normalized().workers == 1
     assert ShardedMemmapConfig(workers=4).normalized().workers == 4
     assert ShardedMemmapConfig(year_input_cache=True).normalized().year_input_cache is True
+    assert ShardedMemmapConfig(force_years=" 2010-2015 ").normalized().force_years == "2010-2015"
     assert ShardedMemmapConfig(static_context_fields="symbol_id,exchange_id").normalized().static_context_fields == "symbol,exchange"
 
 
@@ -225,6 +234,27 @@ def test_slice_prepared_for_symbols_filters_wide_frames_and_metadata() -> None:
     assert sliced.metadata_frames["industry_daily"]["symbol"].tolist() == ["BBB.SZ"]
 
 
+def test_shard_spec_batch_helpers_preserve_block_order_and_deduplicate_symbols() -> None:
+    specs = [
+        {"shard_key": "year=2024/block=0000", "symbols": ["AAA.SZ", "BBB.SH"]},
+        {"shard_key": "year=2024/block=0001", "symbols": ["BBB.SH", "CCC.SZ"]},
+        {"shard_key": "year=2024/block=0002", "symbols": ["DDD.SH"]},
+    ]
+
+    batches = _chunk_shard_specs(specs, 2)
+
+    assert [[item["shard_key"] for item in batch] for batch in batches] == [
+        ["year=2024/block=0000", "year=2024/block=0001"],
+        ["year=2024/block=0002"],
+    ]
+    assert _symbols_for_shard_specs(batches[0]) == ["AAA.SZ", "BBB.SH", "CCC.SZ"]
+
+
+def test_parse_year_filter_supports_ranges_and_commas() -> None:
+    assert _parse_year_filter("2010-2012,2024") == {2010, 2011, 2012, 2024}
+    assert _parse_year_filter("") == set()
+
+
 def test_build_shards_parallel_uses_worker_safe_shard_writes(tmp_path, monkeypatch) -> None:
     class FakeLake:
         root = tmp_path / "lake"
@@ -275,6 +305,89 @@ def test_build_shards_parallel_uses_worker_safe_shard_writes(tmp_path, monkeypat
     assert sorted(results) == ["year=2024/block=0000", "year=2024/block=0001"]
     assert (tmp_path / "progress.json").exists()
     assert all(item["status"] == "completed" for item in results.values())
+
+
+def test_build_shards_parallel_from_prepared_uses_cached_year_inputs(tmp_path, monkeypatch) -> None:
+    calls = []
+    prepared = make_prepared_policy_inputs(days=30, stocks=("AAA.SZ", "BBB.SH"))
+
+    def fake_cached_worker(**kwargs):
+        calls.append((kwargs["prepared"], tuple(kwargs["symbols"]), int(kwargs["block_id"])))
+        year = int(kwargs["year"])
+        block_id = int(kwargs["block_id"])
+        shard_dir = tmp_path / "out" / f"year={year}" / f"block={block_id:04d}"
+        shard_dir.mkdir(parents=True, exist_ok=True)
+        shard_manifest = shard_dir / "shard_manifest.json"
+        payload = {
+            "status": "completed",
+            "shard_key": f"year={year}/block={block_id:04d}",
+            "year": year,
+            "block_id": block_id,
+            "feature_schema_hash": "schema",
+            "feature_columns": ["a", "b"],
+            "feature_store_path": str(shard_dir / "feature.dat"),
+            "label_manifest_json": str(shard_dir / "labels.json"),
+            "sample_index_path": str(shard_dir / "sample.parquet"),
+            "shard_manifest_json": str(shard_manifest),
+        }
+        write_json(shard_manifest, payload)
+        return payload
+
+    monkeypatch.setattr(sharded, "_build_one_shard_from_cached_year_worker", fake_cached_worker)
+
+    results = _build_shards_parallel_from_prepared(
+        prepared=prepared,
+        year_load_error="",
+        shard_specs=[
+            {"shard_key": "year=2024/block=0000", "year": 2024, "block_id": 0, "symbols": ["AAA.SZ"]},
+            {"shard_key": "year=2024/block=0001", "year": 2024, "block_id": 1, "symbols": ["BBB.SH"]},
+        ],
+        target_start=pd.Timestamp("2024-01-01"),
+        target_end=pd.Timestamp("2024-12-31"),
+        context_start=pd.Timestamp("2023-01-01"),
+        context_end=pd.Timestamp("2025-01-31"),
+        cfg=ShardedMemmapConfig(workers=2, year_input_cache=True).normalized(),
+        out_root=tmp_path / "out",
+        cumulative_horizons=(1, 3, 5),
+        expected_feature_columns=["a", "b"],
+        static_schema={},
+        progress_path=tmp_path / "progress.json",
+        planned_count=2,
+        completed_so_far=0,
+    )
+
+    assert sorted(results) == ["year=2024/block=0000", "year=2024/block=0001"]
+    assert all(item["status"] == "completed" for item in results.values())
+    assert sorted(call[1:] for call in calls) == [(("AAA.SZ",), 0), (("BBB.SH",), 1)]
+    assert all(call[0] is prepared for call in calls)
+    assert read_json(tmp_path / "progress.json")["worker_count"] == 2
+
+
+def test_build_shards_parallel_from_prepared_writes_year_load_no_coverage(tmp_path) -> None:
+    results = _build_shards_parallel_from_prepared(
+        prepared=None,
+        year_load_error="lake_coverage_blocker: no requested symbols are available in lake market data",
+        shard_specs=[
+            {"shard_key": "year=2010/block=0000", "year": 2010, "block_id": 0, "symbols": ["AAA.SZ"]},
+            {"shard_key": "year=2010/block=0001", "year": 2010, "block_id": 1, "symbols": ["BBB.SH"]},
+        ],
+        target_start=pd.Timestamp("2010-01-01"),
+        target_end=pd.Timestamp("2010-12-31"),
+        context_start=pd.Timestamp("2010-01-01"),
+        context_end=pd.Timestamp("2011-01-31"),
+        cfg=ShardedMemmapConfig(workers=2, year_input_cache=True).normalized(),
+        out_root=tmp_path / "out",
+        cumulative_horizons=(1, 3, 5),
+        expected_feature_columns=["a", "b"],
+        static_schema={},
+        progress_path=tmp_path / "progress.json",
+        planned_count=2,
+        completed_so_far=0,
+    )
+
+    assert sorted(results) == ["year=2010/block=0000", "year=2010/block=0001"]
+    assert {item["status"] for item in results.values()} == {"no_coverage"}
+    assert read_json(tmp_path / "progress.json")["completed_shards"] == 2
 
 
 def test_write_label_store_writes_basic_v2_arrays(tmp_path) -> None:

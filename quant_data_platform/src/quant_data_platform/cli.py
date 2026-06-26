@@ -84,6 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
     feature_coverage.add_argument("--json", action="store_true")
 
     sharded = sub.add_parser("build-sharded-memmap", help="Build sharded canonical feature/label stores.")
+    sharded.add_argument("--canonical-dataset-id", default="")
     sharded.add_argument("--profile", default="short_horizon_core_v1")
     sharded.add_argument("--start-year", type=int, default=0)
     sharded.add_argument("--end-year", type=int, default=0)
@@ -99,6 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
     sharded.add_argument("--tag", default="")
     sharded.add_argument("--workers", type=int, default=1)
     sharded.add_argument("--year-input-cache", action="store_true")
+    sharded.add_argument("--force-years", default="")
     sharded.add_argument("--pool-view-id", default="")
     sharded.add_argument("--sector-board-view-id", default="")
     sharded.add_argument("--include-static-context", action="store_true")
@@ -237,6 +239,7 @@ def main(argv: list[str] | None = None) -> int:
         if bool(args.dry_run):
             payload = write_sharded_memmap_plan(
                 paths,
+                canonical_dataset_id=str(args.canonical_dataset_id or ""),
                 profile=str(args.profile or ""),
                 max_universe_size=int(args.max_universe_size),
                 workers=int(args.workers),
@@ -251,6 +254,7 @@ def main(argv: list[str] | None = None) -> int:
             payload = build_sharded_memmap(
                 paths,
                 config=ShardedMemmapConfig(
+                    canonical_dataset_id=str(args.canonical_dataset_id or ""),
                     profile=str(args.profile or ""),
                     start_year=int(args.start_year),
                     end_year=int(args.end_year),
@@ -267,6 +271,7 @@ def main(argv: list[str] | None = None) -> int:
                     resume=not bool(args.no_resume),
                     workers=int(args.workers),
                     year_input_cache=bool(args.year_input_cache),
+                    force_years=str(args.force_years or ""),
                     pool_view_id=str(args.pool_view_id or ""),
                     sector_board_view_id=str(args.sector_board_view_id or ""),
                     include_static_context=bool(args.include_static_context),

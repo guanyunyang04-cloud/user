@@ -755,7 +755,7 @@ def build_intraday_daily_feature_frame(
                 "open_gap": open_gap,
                 "open_gap_first_30m_follow_through": gap_sign * first_30m_ret if pd.notna(gap_sign) and pd.notna(first_30m_ret) else np.nan,
                 "open_gap_first_30m_reversal": -gap_sign * first_30m_ret if pd.notna(gap_sign) and pd.notna(first_30m_ret) else np.nan,
-                "last_5m_ret": _tail_window_ret(day, 1),
+                "last_5m_ret": _tail_close_to_previous_close_ret(day),
                 "last_30m_ret": last_30m_ret,
                 "last_30m_amount_share": last_amount_share_30,
                 "intraday_ret": _safe_return(last_close, first_open),
@@ -1298,6 +1298,13 @@ def _tail_window_ret(day: pd.DataFrame, bars: int) -> float:
         return np.nan
     tail = day.tail(int(bars))
     return _safe_return(tail["close"].iloc[-1], tail["open"].iloc[0])
+
+
+def _tail_close_to_previous_close_ret(day: pd.DataFrame) -> float:
+    if len(day) < 2:
+        return np.nan
+    close_values = pd.to_numeric(day["close"], errors="coerce")
+    return _safe_return(close_values.iloc[-1], close_values.iloc[-2])
 
 
 def _session_return(day: pd.DataFrame) -> float:

@@ -35,6 +35,8 @@ _INTRADAY_5M_REQUIRED_COLUMNS = {
     "volume",
     "amount",
 }
+INTRADAY_DAILY_FEATURE_CONTRACT_VERSION = "intraday_daily_features_v2"
+LAST_5M_RET_POLICY = "last_close_to_previous_5m_close_return"
 
 
 @dataclass(frozen=True)
@@ -102,6 +104,9 @@ def build_intraday_daily_features(config: BuildIntradayDailyFeaturesConfig) -> B
         for item in list(source_manifest.get("shards", []) or [])
         if str(dict(item).get("status", "") or "") == "stored" and int(dict(item).get("row_count", 0) or 0) > 0
     ]
+    if cfg.years:
+        allowed_years = set(int(item) for item in cfg.years)
+        source_shards = [record for record in source_shards if _shard_intersects_years(record, allowed_years)]
     if cfg.max_shards:
         source_shards = source_shards[: cfg.max_shards]
 
@@ -292,7 +297,7 @@ def _build_intraday_daily_feature_frame_fast(
     out["first_5m_ret"] = _safe_return_series(pos0["close"], pos0["open"]).reindex(out.index)
     out["first_15m_ret"] = _safe_return_series(pos2["close"], pos0["open"]).reindex(out.index)
     out["first_30m_ret"] = _safe_return_series(pos5["close"], pos0["open"]).reindex(out.index)
-    out["last_5m_ret"] = _safe_return_series(last["close"], last["open"]).reindex(out.index)
+    out["last_5m_ret"] = _last_close_to_previous_close_return(bars, keys).reindex(out.index)
     out["last_30m_ret"] = _safe_return_series(last["close"], tail5["open"]).reindex(out.index)
 
     head6 = bars.loc[bars["_pos"].lt(6)]
@@ -475,6 +480,16 @@ def _safe_return_series(close_value: Any, open_value: Any) -> pd.Series:
     return out
 
 
+def _last_close_to_previous_close_return(frame: pd.DataFrame, keys: list[str]) -> pd.Series:
+    if frame.empty:
+        return pd.Series(dtype=float)
+    data = frame.loc[:, [*keys, "close"]].copy()
+    data["close"] = pd.to_numeric(data["close"], errors="coerce")
+    data["_previous_close"] = data.groupby(keys, sort=True, dropna=False)["close"].shift(1)
+    last_rows = data.groupby(keys, sort=True, dropna=False).tail(1).set_index(keys)
+    return _safe_return_series(last_rows["close"], last_rows["_previous_close"])
+
+
 def _extreme_pos(frame: pd.DataFrame, keys: list[str], column: str, mode: str) -> pd.Series:
     if frame.empty:
         return pd.Series(dtype=float)
@@ -574,11 +589,27 @@ def _feature_dataset_spec(cfg: BuildIntradayDailyFeaturesConfig, *, source_metad
         "source_5m_fingerprint": str(source_metadata.get("fingerprint", "") or ""),
         "source_5m_dataset_kind": str(source_metadata.get("dataset_kind", "") or ""),
         "feature_source_name": cfg.source_name,
+        "feature_contract_version": INTRADAY_DAILY_FEATURE_CONTRACT_VERSION,
+        "last_5m_ret_policy": LAST_5M_RET_POLICY,
         "adjusted_flag": cfg.adjusted_flag,
         "raw_ohlcv_policy": "raw_ohlcv_never_overwritten",
         "auction_process_policy": "unobservable_use_open_as_opening_result_only",
         "prediction_policy": "daily_features_for_next_day_or_multi_day_prediction_not_intraday_realtime",
     }
+
+
+def _shard_intersects_years(record: dict[str, Any], years: set[int]) -> bool:
+    if not years:
+        return True
+    start = pd.to_datetime(str(record.get("start_date", "") or ""), errors="coerce")
+    end = pd.to_datetime(str(record.get("end_date", "") or ""), errors="coerce")
+    if pd.isna(start) and pd.isna(end):
+        return True
+    if pd.isna(end):
+        end = start
+    if pd.isna(start):
+        start = end
+    return any(int(start.year) <= year <= int(end.year) for year in years)
 
 
 def _safe_stem(raw: str) -> str:
