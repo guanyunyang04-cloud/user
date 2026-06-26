@@ -20,7 +20,7 @@ from daily_research.path_policy import v2_candidate_review_matrix as candidate_m
 PYTHON = v2.PYTHON
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STUDIES_ROOT = PROJECT_ROOT / "daily_research/output/path_policy/studies"
-DATA_LAKE_ROOT = PROJECT_ROOT / "daily_research/output/research_data_lake"
+DATA_LAKE_ROOT = PROJECT_ROOT / "quant_data_platform/data/lake"
 ACTIVE_MANIFEST = PROJECT_ROOT / "daily_research/output/active_execution_strategy.json"
 RUN_TAG = "v2_high_return_model_discovery_20260604_01"
 RESEARCH_PROGRAM = v2.RESEARCH_PROGRAM

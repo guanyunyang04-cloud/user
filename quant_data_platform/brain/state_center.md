@@ -6,6 +6,7 @@
 - 默认研究窗口沿用工作区 canonical 决策：`2010-01-01` 起。
 - active canonical bundle 已更新为包含估值、行业、指数成分 sidecar 的 `canonical_data_v1`。
 - 本分脑是工作区 canonical 数据基底、registry、policy bundle、sharded memmap 和数据清理的默认事实来源；其它研究项目可读取本分脑 status / registry / manifest 作为共享数据事实。
+- 2026-06-26 QDP lake 物理归属已闭环：`qdp_paths().lake_root`、`ResearchDataLake` 默认根、root manifest `primary_lake_root` 和 `canonical_manifest` 均已切到 `H:/quant_project/quant_data_platform/data/lake`；旧 `daily_research/output/research_data_lake` 已在 copy、catalog/shard path rewrite、QDP status、current_qdp provider-eval smoke、QDP tests 和 daily_research 消费侧 focused tests 通过后删除。迁移报告：`quant_data_platform/data/audits/qdp_lake_physical_migration_20260626_01.json`。
 - canonical 数据域原则：行情、5 分钟日级特征、复权因子、估值、行业、指数成分、交易日历、股票池和证券状态进入数据基底；财务季报、业绩预告/快报等慢披露数据暂不进入 v1 默认基底。
 - full canonical sharded memmap 已完成并冻结：`canonical_short_horizon_core_v1_full_2010_2026`，profile `short_horizon_core_v1`，2010-2026，5526 symbols，256 features，323 planned / 262 stored / 61 empty / 0 failed shards。
 - active sharded manifest：`H:/quant_project/quant_data_platform/data/memmap/sharded/canonical_short_horizon_core_v1_full/sharded_memmap_manifest.json`。

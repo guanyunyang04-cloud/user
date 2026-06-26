@@ -44,7 +44,7 @@
     "valuation": "data_platform_valuation__13151c89bf9f57eda45ed76e"
   },
   "canonical_dataset_id": "policy_input_bundle__2c27a13a7c7ae85417c36340",
-  "canonical_manifest": "H:/quant_project/daily_research/output/research_data_lake/canonical/canonical_manifest.json",
+  "canonical_manifest": "H:/quant_project/quant_data_platform/data/lake/canonical/canonical_manifest.json",
   "canonical_memmap_registry": "H:/quant_project/quant_data_platform/registry/memmap_registry.json",
   "canonical_memmap_status": {
     "note": "Legacy monolithic/capped forecast memmap registry is no longer the active training base; use canonical_sharded_memmap_status.",
@@ -176,7 +176,7 @@
     ]
   },
   "migrated_from": "H:/quant_project/canonical_data/registry",
-  "primary_lake_root": "H:/quant_project/daily_research/output/research_data_lake",
+  "primary_lake_root": "H:/quant_project/quant_data_platform/data/lake",
   "qdp_project_root": "H:/quant_project/quant_data_platform",
   "registry_owner": "quant_data_platform",
   "schema_version": 1,

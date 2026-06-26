@@ -36,7 +36,7 @@ from quant_data_platform.progress import StageProgress, progress_write
 
 @dataclass(frozen=True)
 class RefreshConfig:
-    lake_root: Path | str = Path("daily_research/output/research_data_lake")
+    lake_root: Path | str = Path("quant_data_platform/data/lake")
     as_of_date: str = ""
     start_date: str = ""
     start_date_explicit: bool = False
@@ -471,7 +471,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("Either --symbols or --universe is required for TDX-free refresh.")
     result = run_refresh(
         RefreshConfig(
-            lake_root=Path(args.data_lake_root) if str(args.data_lake_root or "").strip() else Path("daily_research/output/research_data_lake"),
+            lake_root=Path(args.data_lake_root) if str(args.data_lake_root or "").strip() else Path("quant_data_platform/data/lake"),
             as_of_date=args.as_of_date,
             start_date=args.start_date,
             symbols=symbols,

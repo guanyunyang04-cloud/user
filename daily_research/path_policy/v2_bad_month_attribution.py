@@ -17,7 +17,7 @@ from daily_research.path_policy import v2_research_reset_baseline as v2
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STUDIES_ROOT = PROJECT_ROOT / "daily_research/output/path_policy/studies"
-DATA_LAKE_ROOT = PROJECT_ROOT / "daily_research/output/research_data_lake"
+DATA_LAKE_ROOT = PROJECT_ROOT / "quant_data_platform/data/lake"
 ACTIVE_MANIFEST = PROJECT_ROOT / "daily_research/output/active_execution_strategy.json"
 RUN_TAG = "v2_bad_month_attribution_20260602_01"
 MATRIX_RUN_TAG = "v2_candidate_review_matrix_20260602_01"

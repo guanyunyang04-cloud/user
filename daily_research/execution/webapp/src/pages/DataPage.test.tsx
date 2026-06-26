@@ -62,7 +62,7 @@ describe("DataPage", () => {
     const api = {
       getDataSources: vi.fn().mockResolvedValue({
         status: "ok",
-        lake_root: "H:/quant_project/daily_research/output/research_data_lake",
+        lake_root: "H:/quant_project/quant_data_platform/data/lake",
         catalog_status: "ok",
         datasets: [],
         formal_provider_plan: "formal_free_v3",
@@ -189,7 +189,7 @@ describe("DataPage", () => {
     const api = {
       getDataSources: vi.fn().mockResolvedValue({
         status: "ok",
-        lake_root: "H:/quant_project/daily_research/output/research_data_lake",
+        lake_root: "H:/quant_project/quant_data_platform/data/lake",
         catalog_status: "ok",
         datasets: [
           {
@@ -253,7 +253,7 @@ describe("DataPage", () => {
     const api = {
       getDataSources: vi.fn().mockResolvedValue({
         status: "ok",
-        lake_root: "H:/quant_project/daily_research/output/research_data_lake",
+        lake_root: "H:/quant_project/quant_data_platform/data/lake",
         catalog_status: "ok",
         datasets: [],
         active_dataset_id: "policy_input_bundle__current",

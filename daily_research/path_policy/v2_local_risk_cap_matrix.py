@@ -21,7 +21,7 @@ from daily_research.path_policy import v2_state_sizing_matrix as state_sizing
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STUDIES_ROOT = PROJECT_ROOT / "daily_research/output/path_policy/studies"
-DATA_LAKE_ROOT = PROJECT_ROOT / "daily_research/output/research_data_lake"
+DATA_LAKE_ROOT = PROJECT_ROOT / "quant_data_platform/data/lake"
 ACTIVE_MANIFEST = PROJECT_ROOT / "daily_research/output/active_execution_strategy.json"
 RUN_TAG = "v2_local_risk_cap_matrix_20260602_01"
 SOURCE_MATRIX_RUN_TAG = "v2_selective_throttle_matrix_narrow_20260602_01"

@@ -25,7 +25,7 @@ from daily_research.path_policy.output_aux_profile_comparison import (
 PYTHON = v2.PYTHON
 PROJECT_ROOT = v2.PROJECT_ROOT
 STUDIES_ROOT = v2.STUDIES_ROOT
-DATA_LAKE_ROOT = PROJECT_ROOT / "daily_research/output/research_data_lake"
+DATA_LAKE_ROOT = PROJECT_ROOT / "quant_data_platform/data/lake"
 RUN_TAG = "mh_v2_local_state_input_scout_anchor_20260602_01"
 RESEARCH_PROGRAM = v2.RESEARCH_PROGRAM
 STUDY_FAMILY = "v2_local_state_input_scout"

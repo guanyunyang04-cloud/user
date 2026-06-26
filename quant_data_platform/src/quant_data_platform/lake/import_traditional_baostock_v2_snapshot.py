@@ -775,7 +775,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         run_tag=str(args.run_tag or DEFAULT_RUN_TAG).strip(),
         reuse=not bool(args.refresh),
     )
-    output_root = PROJECT_ROOT / "daily_research/output/data_lake/imports" / str(args.run_tag or DEFAULT_RUN_TAG)
+    output_root = PROJECT_ROOT / "quant_data_platform/data/imports" / str(args.run_tag or DEFAULT_RUN_TAG)
     manifest_path = output_root / "import_manifest.json"
     payload["import_manifest_path"] = str(manifest_path.resolve())
     _write_json(manifest_path, payload)

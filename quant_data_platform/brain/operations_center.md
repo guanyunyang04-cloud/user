@@ -10,12 +10,13 @@
 - `quant_data_platform/src`：平台代码。
 - `quant_data_platform/configs`：canonical/profile 配置。
 - `quant_data_platform/registry`：registry、root manifest、memmap 指针。
-- `quant_data_platform/data`：大数据资产、tmp、agent_runs、sharded memmap，默认 Git 忽略。
+- `quant_data_platform/data`：大数据资产、QDP lake、provider eval、tmp、agent_runs、sharded memmap，默认 Git 忽略。
 - `quant_data_platform/brain/references`：数据契约、清理策略、memmap 设计的 canonical 正文。
 - `quant_data_platform/tests`：平台单元与集成测试。
 
 ## 常用验证
 - `PYTHONPATH=H:/quant_project/quant_data_platform/src;H:/quant_project C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli status --json`
+- `PYTHONPATH=H:/quant_project/quant_data_platform/src;H:/quant_project C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli provider-eval --providers current_qdp --symbols 000001.SZ --windows 2024-06-03:2024-06-07 --json`
 - `PYTHONPATH=H:/quant_project/quant_data_platform/src;H:/quant_project C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli audit --json`
 - `PYTHONPATH=H:/quant_project/quant_data_platform/src;H:/quant_project C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli build-sharded-memmap --profile short_horizon_core_v1 --start-year 2022 --end-year 2022 --max-universe-size 10 --max-shards 1 --json`
 - `PYTHONPATH=H:/quant_project/quant_data_platform/src;H:/quant_project C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli validate-memmap --manifest <sharded_manifest.json> --json`

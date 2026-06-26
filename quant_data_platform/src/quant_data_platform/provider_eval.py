@@ -65,7 +65,7 @@ class ProviderEvalConfig:
     install_missing: bool = True
     python_executable: str = sys.executable
     qdp_root_manifest: Path = Path("H:/quant_project/quant_data_platform/registry/root_manifest.json")
-    canonical_manifest: Path = Path("H:/quant_project/daily_research/output/research_data_lake/canonical/canonical_manifest.json")
+    canonical_manifest: Path = Path("quant_data_platform/data/lake/canonical/canonical_manifest.json")
 
     def normalized(self) -> "ProviderEvalConfig":
         run_tag = str(self.run_tag or f"provider_eval_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}")

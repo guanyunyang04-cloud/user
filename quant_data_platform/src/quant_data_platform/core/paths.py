@@ -72,6 +72,6 @@ def qdp_paths(root: str | Path | None = None) -> QdpPaths:
         data_dir=data_dir,
         audits_dir=data_dir / "audits",
         memmap_dir=data_dir / "memmap",
-        lake_root=ws / "daily_research" / "output" / "research_data_lake",
+        lake_root=data_dir / "lake",
         legacy_registry_dir=ws / "canonical_data" / "registry",
     )

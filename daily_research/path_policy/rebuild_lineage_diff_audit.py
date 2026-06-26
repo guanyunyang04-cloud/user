@@ -12,7 +12,7 @@ import pandas as pd
 
 
 STUDIES_ROOT = Path("daily_research/output/path_policy/studies")
-DATA_LAKE_MANIFEST = Path("daily_research/output/research_data_lake/manifest_latest.json")
+DATA_LAKE_MANIFEST = Path("quant_data_platform/data/lake/manifest_latest.json")
 DEFAULT_ANCHOR_TAG = "mh_rebuild_infra_v2_fullpool_anchor_20260531_01"
 DEFAULT_NEW_SEED_TAGS = (
     "mh_rebuild_infra_v2_fullpool_target_norm_head_constraint_raw_seed7_20260531_01",

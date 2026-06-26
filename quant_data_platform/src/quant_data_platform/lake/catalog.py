@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 
-DEFAULT_DATA_LAKE_ROOT = Path("daily_research/output/research_data_lake")
+DEFAULT_DATA_LAKE_ROOT = Path("quant_data_platform/data/lake")
 DATA_LAKE_SCHEMA_VERSION = 1
 
 
@@ -219,17 +219,7 @@ class ResearchDataLake:
         return out
 
     def _resolve_content_paths(self, content_paths: dict[str, Any]) -> dict[str, str]:
-        resolved: dict[str, str] = {}
-        marker = "research_data_lake"
-        for key, value in content_paths.items():
-            raw = str(value or "")
-            if raw and not Path(raw.replace("*", "")).exists() and marker in raw:
-                suffix = raw.split(marker, 1)[1].lstrip("\\/")
-                candidate = str((self.root / Path(suffix)).resolve())
-                if "*" in raw or Path(candidate).exists():
-                    raw = candidate
-            resolved[str(key)] = raw
-        return resolved
+        return {str(key): str(value or "") for key, value in content_paths.items()}
 
     def build_catalog_manifest(self) -> dict[str, Any]:
         rows = self.list_datasets()

@@ -127,13 +127,13 @@ def test_trade_plan_parser_accepts_lake_dataset_options() -> None:
             "--lake-dataset-id",
             "policy_input_bundle__x",
             "--data-lake-root",
-            "daily_research/output/research_data_lake",
+            "quant_data_platform/data/lake",
         ]
     )
 
     assert args.data_source == "lake"
     assert args.lake_dataset_id == "policy_input_bundle__x"
-    assert args.data_lake_root == "daily_research/output/research_data_lake"
+    assert args.data_lake_root == "quant_data_platform/data/lake"
 
 
 def test_default_pool_argument_rebuilds_when_current_pool_has_invalid_stocks(monkeypatch, tmp_path: Path) -> None:

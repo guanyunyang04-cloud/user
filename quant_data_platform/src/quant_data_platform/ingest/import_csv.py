@@ -30,7 +30,7 @@ from quant_data_platform.ingest.refresh_daily import (
 @dataclass(frozen=True)
 class CsvImportConfig:
     input_path: Path | str
-    lake_root: Path | str = Path("daily_research/output/research_data_lake")
+    lake_root: Path | str = Path("quant_data_platform/data/lake")
     domain: str = DataDomain.MARKET_DAILY
     as_of_date: str = ""
     source_name: str = "manual_csv"
@@ -177,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
     result = run_import_csv(
         CsvImportConfig(
             input_path=Path(args.input),
-            lake_root=Path(args.data_lake_root) if str(args.data_lake_root or "").strip() else Path("daily_research/output/research_data_lake"),
+            lake_root=Path(args.data_lake_root) if str(args.data_lake_root or "").strip() else Path("quant_data_platform/data/lake"),
             domain=args.domain,
             as_of_date=args.as_of_date,
             source_name=args.source_name,

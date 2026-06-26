@@ -266,7 +266,7 @@ class ResearchDataLakeTest(unittest.TestCase):
             check_freq=False,
         )
 
-    def test_loader_resolves_relocated_lake_content_paths(self) -> None:
+    def test_loader_rejects_stale_lake_content_paths(self) -> None:
         dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
         market_frames, membership_frame, feature_frames = _synthetic_policy_bundle_parts(dates)
         feature_frames.update(
@@ -290,7 +290,7 @@ class ResearchDataLakeTest(unittest.TestCase):
             )
             metadata = lake.describe_dataset(record.dataset_id)
             stale_paths = {
-                key: str(value).replace(str(Path(temp_dir)), r"H:\old_project\daily_research\output\research_data_lake")
+                key: str(value).replace(str(Path(temp_dir)), r"H:\old_project\quant_data_platform\data\lake")
                 for key, value in metadata["content_paths"].items()
             }
             lake.query(
@@ -298,15 +298,13 @@ class ResearchDataLakeTest(unittest.TestCase):
                 [json.dumps(stale_paths), record.dataset_id],
             )
 
-            prepared = load_policy_inputs_from_lake(
-                lake=lake,
-                dataset_id=record.dataset_id,
-                start_date="2026-01-05",
-                end_date="2026-01-07",
-            )
-
-        self.assertEqual(prepared.raw_cache_meta["dataset_id"], record.dataset_id)
-        pd.testing.assert_frame_equal(prepared.close, market_frames["Close"])
+            with self.assertRaisesRegex(ValueError, "no readable bronze_market_data rows"):
+                load_policy_inputs_from_lake(
+                    lake=lake,
+                    dataset_id=record.dataset_id,
+                    start_date="2026-01-05",
+                    end_date="2026-01-07",
+                )
 
     def test_market_bundle_persists_benchmark_open_and_loader_uses_it(self) -> None:
         dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])

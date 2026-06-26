@@ -507,7 +507,7 @@ def build_lineage_equivalence_audit(
 ) -> dict[str, Any]:
     lake_coverage = _study_summary_lake_coverage(seed=7)
     provider_chain = []
-    lake_manifest = _read_json(PROJECT_ROOT / "daily_research/output/research_data_lake/manifest_latest.json")
+    lake_manifest = _read_json(PROJECT_ROOT / "quant_data_platform/data/lake/manifest_latest.json")
     for record in lake_manifest.get("datasets", []) or []:
         if isinstance(record, dict) and str(record.get("dataset_id", "")) == DATASET_ID:
             params = dict(record.get("parameters", {}) or {})
