@@ -4876,14 +4876,14 @@
       "run_tags": [
         "tradeable_mainboard_style_structural_alpha_v2_label_v2_backfilled_intraday_v2_2010_2026_20260626_01"
       ],
-      "verdict": "Status: replacement_data_base_activated_and_training_pack_completed / qdp_canonical_current / research_data_only.; Canonical dataset switched to policy_input_bundle__2c27a13a7c7ae85417c36340.; Active sharded memmap validate-memmap status ok: 187 processed, 173 stored, 14 empty, 0 failed, 307 features, 3025 symbols.; Replacement training pack completed with 6,992,361 samples: train 5,696,015 / validation 643,708 / test 652,638.; Coverage audit confirms turnover_context and intraday_last_5m_ret repair in replacement memmap; remaining suspicious coverage is valuation_context source gaps.",
+      "verdict": "Status: replacement_data_base_activated_and_training_pack_completed / stale_acceleration_artifacts_cleaned / qdp_canonical_current / research_data_only.; Canonical dataset switched to policy_input_bundle__2c27a13a7c7ae85417c36340.; Active sharded memmap validate-memmap status ok: 187 processed, 173 stored, 14 empty, 0 failed, 307 features, 3025 symbols.; Replacement training pack completed with 6,992,361 samples: train 5,696,015 / validation 643,708 / test 652,638.; Coverage audit confirms turnover_context and intraday_last_5m_ret repair in replacement memmap; remaining suspicious coverage is valuation_context source gaps.; 2026-06-26 cleanup removed obsolete alpha_v2 sharded memmap/training pack artifacts and untagged training_pack root files after active replacement validation; active replacement memmap/pack, canonical source data, and canonical_short_horizon_core_v1_full were kept; one already-missing qdp_smoke_2022_10x1 registry reference was removed.",
       "blockers": [
         "Not model-quality evidence; not promotion or execution thaw.",
-        "Build and validate replacement training pack before deleting old incomplete alpha_v2 packs/artifacts."
+        "Not all historical artifacts were deleted: non-alpha_v2 frozen lineage and smoke artifacts were kept intentionally."
       ],
       "next_allowed_actions": [
         "Use replacement training pack for alpha_v2 or shortline model/scorer research when repaired turnover/intraday semantics matter.",
-        "Run cleanup only through dry-run inventory and only after confirming no active/default/live dependency.",
+        "Use registry active_manifest_json or explicit replacement training-pack manifest, not deleted stale alpha_v2 artifact paths.",
         "Do not treat data activation or training pack completion as model-quality, promotion, or execution-thaw evidence."
       ],
       "active_artifact_impact": "unchanged",

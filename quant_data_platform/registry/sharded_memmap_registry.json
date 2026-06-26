@@ -3,17 +3,6 @@
   "entries": [
     {
       "canonical_dataset_id": "policy_input_bundle__f926a496f69c61f6b92b5faf",
-      "feature_schema_hash": "cf72a3f6a7f4164a82fd6881",
-      "manifest_json": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\qdp_smoke_2022_10x1\\sharded_memmap_manifest.json",
-      "planned_shard_count": 1,
-      "profile": "short_horizon_core_v1",
-      "registered_at": "2026-06-11T11:40:20+00:00",
-      "scope": "validation_partial",
-      "status": "completed",
-      "stored_shard_count": 1
-    },
-    {
-      "canonical_dataset_id": "policy_input_bundle__f926a496f69c61f6b92b5faf",
       "empty_shard_count": 61,
       "feature_schema_hash": "8942b161313ab2592fb207e7",
       "manifest_json": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\canonical_short_horizon_core_v1_full\\sharded_memmap_manifest.json",
@@ -21,32 +10,6 @@
       "processed_shard_count": 323,
       "profile": "short_horizon_core_v1",
       "registered_at": "2026-06-11T21:02:16+00:00",
-      "scope": "full_canonical_candidate",
-      "status": "completed",
-      "stored_shard_count": 262
-    },
-    {
-      "canonical_dataset_id": "policy_input_bundle__f926a496f69c61f6b92b5faf",
-      "empty_shard_count": 4,
-      "feature_schema_hash": "38a98a4a96637df6bc465837",
-      "manifest_json": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\mainboard_style_structural_alpha_v2_label_v2_full_2010_2026_20260616_01\\sharded_memmap_manifest.json",
-      "planned_shard_count": 187,
-      "processed_shard_count": 187,
-      "profile": "style_structural_alpha_v2",
-      "registered_at": "2026-06-15T23:58:35+00:00",
-      "scope": "full_canonical_candidate",
-      "status": "completed",
-      "stored_shard_count": 183
-    },
-    {
-      "canonical_dataset_id": "policy_input_bundle__2c27a13a7c7ae85417c36340",
-      "empty_shard_count": 61,
-      "feature_schema_hash": "38a98a4a96637df6bc465837",
-      "manifest_json": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\mainboard_style_structural_alpha_v2_label_v2_backfilled_intraday_v2_2010_2026_20260624_01\\sharded_memmap_manifest.json",
-      "planned_shard_count": 323,
-      "processed_shard_count": 323,
-      "profile": "style_structural_alpha_v2",
-      "registered_at": "2026-06-25T18:22:28+00:00",
       "scope": "full_canonical_candidate",
       "status": "completed",
       "stored_shard_count": 262
@@ -69,5 +32,5 @@
   "latest_scope": "full_canonical_candidate",
   "schema_version": 1,
   "status": "ready",
-  "updated_at": "2026-06-26T00:21:16+00:00"
+  "updated_at": "2026-06-26T03:45:55Z"
 }

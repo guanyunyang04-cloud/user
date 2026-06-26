@@ -187,5 +187,59 @@ During this build, a path-semantics defect was found and repaired: `build_qdp_tr
 ## Next Allowed Actions
 
 1. Use the replacement training pack for future alpha_v2 or shortline model/scorer research when repaired turnover/intraday semantics matter.
-2. Consider cleanup of old incomplete alpha_v2 memmap/training-pack artifacts only through a dry-run inventory after confirming no active/default/live dependency.
+2. Future alpha_v2 or shortline research should prefer the replacement pack rather than any deleted stale acceleration artifact.
 3. Do not interpret this data activation or training-pack build as model improvement, strategy promotion, or execution thaw.
+
+## Stale Artifact Cleanup
+
+Status after activation validation: `completed`.
+
+Deleted stale acceleration artifacts:
+
+```text
+H:\quant_project\quant_data_platform\data\memmap\sharded\mainboard_style_structural_alpha_v2_label_v2_backfilled_intraday_v2_2010_2026_20260624_01
+H:\quant_project\quant_data_platform\data\memmap\sharded\mainboard_style_structural_alpha_v2_label_v2_full_2010_2026_20260616_01
+H:\quant_project\quant_data_platform\data\memmap\training_pack\mainboard_style_structural_alpha_v2_label_v2_pack_full_2012_2025_20260616_01
+H:\quant_project\quant_data_platform\data\memmap\training_pack\mainboard_style_structural_alpha_v2_label_v2_date_slate_pack_20260621_01
+H:\quant_project\quant_data_platform\data\memmap\training_pack\mainboard_style_structural_alpha_v2_label_v2_structured_alpha_v2_pack_20260621_01
+H:\quant_project\quant_data_platform\data\memmap\training_pack\labels
+H:\quant_project\quant_data_platform\data\memmap\training_pack\feature_panel_stock_date_feature.float16.dat
+H:\quant_project\quant_data_platform\data\memmap\training_pack\qdp_training_pack_manifest.json
+H:\quant_project\quant_data_platform\data\memmap\training_pack\qdp_training_pack_progress.json
+H:\quant_project\quant_data_platform\data\memmap\training_pack\sample_index.parquet
+H:\quant_project\quant_data_platform\data\memmap\training_pack\static_context_ids.int32.dat
+```
+
+Approximate space reclaimed from the dry-run inventory: `91.8 GiB`.
+
+Registry update:
+
+```text
+quant_data_platform/registry/sharded_memmap_registry.json:
+  removed entries pointing to the two deleted style_structural_alpha_v2 sharded manifests.
+  removed one missing qdp_smoke_2022_10x1 validation_partial registry reference whose manifest was already absent.
+  active_manifest_json remains the 20260626 tradeable-mainboard replacement memmap.
+```
+
+Explicitly kept:
+
+```text
+active replacement memmap:
+  tradeable_mainboard_style_structural_alpha_v2_label_v2_backfilled_intraday_v2_2010_2026_20260626_01
+
+active replacement training pack:
+  tradeable_mainboard_style_structural_alpha_v2_label_v2_backfilled_intraday_v2_training_pack_20260626_01
+
+non-alpha_v2/frozen lineage artifacts:
+  canonical_short_horizon_core_v1_full
+
+source data:
+  canonical policy bundle, data lake, sidecars, and pool view
+```
+
+Boundary:
+
+```text
+This cleanup removes obsolete generated acceleration artifacts only.
+It does not delete canonical source data, active/default/live execution artifacts, promotion evidence, paper/live state, or broker state.
+```
