@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -175,6 +176,27 @@ def build_parser() -> argparse.ArgumentParser:
     event_pack.add_argument("--write-event-cache", action="store_true")
     event_pack.add_argument("--no-resume", action="store_true")
     event_pack.add_argument("--json", action="store_true")
+
+    provider_eval = sub.add_parser("provider-eval", help="Run read-only external provider quality probes managed by QDP.")
+    provider_eval.add_argument("--providers", default="akshare,baostock,efinance,mootdx,cninfo,current_qdp")
+    provider_eval.add_argument("--symbols", default="000001.SZ,600000.SH,300750.SZ,688001.SH,000300.SH")
+    provider_eval.add_argument(
+        "--windows",
+        default=(
+            "2010-01-04:2010-01-15,"
+            "2015-06-01:2015-06-12,"
+            "2020-03-02:2020-03-13,"
+            "2024-06-03:2024-06-14,"
+            "2025-12-01:2025-12-12,"
+            "2026-06-01:2026-06-10"
+        ),
+    )
+    provider_eval.add_argument("--run-tag", default="")
+    provider_eval.add_argument("--output-root", default="")
+    provider_eval.add_argument("--python-executable", default=sys.executable)
+    provider_eval.add_argument("--no-cache", action="store_true")
+    provider_eval.add_argument("--no-install-missing", action="store_true")
+    provider_eval.add_argument("--json", action="store_true")
 
     cleanup = sub.add_parser("cleanup", help="Generate cleanup dry-run plan. This command never deletes files in v1.")
     cleanup.add_argument("--dry-run", action="store_true", default=True)
@@ -368,10 +390,43 @@ def main(argv: list[str] | None = None) -> int:
         )
         _print(payload, as_json=bool(args.json))
         return 0
+    if args.command == "provider-eval":
+        from quant_data_platform.provider_eval import ProviderEvalConfig, run_provider_eval
+
+        payload = run_provider_eval(
+            ProviderEvalConfig(
+                providers=_split_csv(str(args.providers or "")),
+                symbols=_split_csv(str(args.symbols or "")),
+                windows=_parse_windows(str(args.windows or "")),
+                run_tag=str(args.run_tag or ""),
+                output_root=Path(args.output_root) if str(args.output_root or "").strip() else paths.data_dir / "provider_eval",
+                use_cache=not bool(args.no_cache),
+                install_missing=not bool(args.no_install_missing),
+                python_executable=str(args.python_executable or ""),
+                qdp_root_manifest=paths.root_manifest,
+                canonical_manifest=paths.lake_root / "canonical" / "canonical_manifest.json",
+            )
+        )
+        _print(payload, as_json=bool(args.json))
+        return 0 if str(payload.get("status", "")) in {"ok", "empty"} else 2
     if args.command == "cleanup":
         _print(cleanup_dry_run(paths), as_json=bool(args.json))
         return 0
     raise ValueError(f"unsupported_command: {args.command}")
+
+
+def _split_csv(value: str) -> tuple[str, ...]:
+    return tuple(item.strip() for item in str(value or "").split(",") if item.strip())
+
+
+def _parse_windows(value: str) -> tuple[tuple[str, str], ...]:
+    windows: list[tuple[str, str]] = []
+    for item in _split_csv(value):
+        if ":" not in item:
+            raise ValueError(f"window must be START:END, got {item}")
+        start, end = item.split(":", 1)
+        windows.append((start.strip(), end.strip()))
+    return tuple(windows)
 
 
 if __name__ == "__main__":  # pragma: no cover
