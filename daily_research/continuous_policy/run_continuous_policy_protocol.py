@@ -70,7 +70,7 @@ from daily_research.continuous_policy.training_contracts import (
     TRAINER_BACKEND_FORMAL_DECISION_CORE_V6,
     TRAINER_BACKEND_FORMAL_V2,
 )
-from daily_research.data_lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
+from quant_data_platform.lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
 from daily_research.execution import app_service
 
 

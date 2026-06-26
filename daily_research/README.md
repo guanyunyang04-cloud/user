@@ -20,8 +20,6 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule -
 - `baseline/`：历史研究链路与仍受支持的交易计划管线
 - `continuous_policy/`：当前连续决策策略的训练、评估、导出与协议编排
 - `path_policy/`：多 Horizon 交易效用排序、历史 Path20 预测/RL 与 shadow 对照研究
-- `data_lake/`：DuckDB/Parquet 研究数据集、显式 dataset id、pool view 与 sector/board view
-- `data_platform/`：TDX-free 在线 provider、每日 refresh、Bronze/Silver 仲裁与 lake 注册入口
 - `deep_alpha/`：更长周期的模型架构、alpha 与执行策略研究
 - `execution/`：执行应用、任务运行器、Web 控制台与 production 更新入口
 - `tools/`：守卫、报告、维护工具与一致性检查
@@ -34,9 +32,10 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule -
 
 本地数据边界：
 - `daily_research` 正式研究链路不再依赖 `t0_project/tqcenter.py`、`pytdx` 或 `mootdx`。
-- `lake` 是研究存储真源；在线 provider 每日更新必须先进入 Bronze/Silver，再注册为显式 lake dataset id。
-- `csv` 只作为入湖导入或补洞通道，不允许被正式训练/评估直接读取。
-- V2 数据平台支持 `--universe all_a|liquid500|file:<path>|symbols:<csv>`；`--symbols` 只保留为小样本/显式调试入口。
+- QDP 是共享数据基底唯一 owner；`daily_research` 只消费 QDP 输出的 lake、manifest、memmap 和 training pack。
+- 在线 provider 每日更新、CSV 导入、canonical bundle、pool/sector-board view 和数据审计都通过 `quant_data_platform` CLI/API 完成。
+- `csv` 只作为 QDP 入湖导入或补洞通道，不允许被正式训练/评估直接读取。
+- QDP 数据刷新支持 `--universe all_a|liquid500|file:<path>|symbols:<csv>`；`--symbols` 只保留为小样本/显式调试入口。
 
 ## 常用入口
 
@@ -45,9 +44,9 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule -
 - 连续策略正式协议：
   `python daily_research/continuous_policy/run_continuous_policy_protocol.py ...`
 - TDX-free V2 每日数据刷新：
-  `python -m daily_research.data_platform.refresh_daily --as-of-date YYYY-MM-DD --provider-plan default_free --universe all_a --domains market_daily,trading_calendar,universe_snapshot,security_status,limit_status,industry_concept,valuation --json`
+  `python -m quant_data_platform.cli refresh-daily --as-of-date YYYY-MM-DD --provider-plan default_free --universe all_a --domains market_daily,trading_calendar,universe_snapshot,security_status,limit_status,industry_concept,valuation --json`
 - CSV 入湖导入：
-  `python -m daily_research.data_platform.import_csv --input <csv_or_folder> --domain market_daily --as-of-date YYYY-MM-DD --source-name manual_csv --json`
+  `python -m quant_data_platform.cli import-csv --input <csv_or_folder> --domain market_daily --as-of-date YYYY-MM-DD --source-name manual_csv --json`
 - 执行应用：
   `python daily_research/execution/run_execution_app.py run --task <task-name> -- ...`
 - 执行 Web 控制台：

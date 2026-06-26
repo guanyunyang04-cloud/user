@@ -23,7 +23,7 @@ if __package__ in {None, ""}:
         if _text not in sys.path:
             sys.path.insert(0, _text)
 
-from daily_research.data_platform.contracts import (
+from quant_data_platform.domains.contracts import (
     DataDomain,
     DomainFetchRequest,
     FetchRequest,
@@ -32,7 +32,7 @@ from daily_research.data_platform.contracts import (
     normalize_domain_frame,
     normalize_market_frame,
 )
-from daily_research.data_platform.providers import (
+from quant_data_platform.providers import (
     AkshareEastmoneyProvider,
     BaostockProvider,
     EastmoneyEfinanceProvider,

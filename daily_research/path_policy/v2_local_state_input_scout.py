@@ -11,8 +11,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from daily_research.data_lake import ResearchDataLake
-from daily_research.data_lake.policy_input_loader import load_policy_inputs_from_lake
+from quant_data_platform.lake import ResearchDataLake
+from quant_data_platform.lake.policy_input_loader import load_policy_inputs_from_lake
 from daily_research.path_policy import v2_research_reset_baseline as v2
 from daily_research.path_policy.forecast_features import build_forecast_feature_panels
 from daily_research.path_policy.mainboard_rebuild_baseline import corrected_gate_status

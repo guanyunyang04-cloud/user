@@ -16,12 +16,12 @@ from typing import Any, TextIO
 import pandas as pd
 
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
-from daily_research.data_platform.providers import (
+from quant_data_platform.providers import (
     FORMAL_FREE_V3_OPTIONAL_DOMAINS,
     FORMAL_FREE_V3_REQUIRED_DOMAINS,
     provider_capability_matrix,
 )
-from daily_research.data_platform.provider_health import ProviderHealthConfig, run_provider_health
+from quant_data_platform.provider_health import ProviderHealthConfig, run_provider_health
 from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.execution import paper_trading
 from daily_research.execution import production_signal
@@ -736,7 +736,7 @@ def model_detail(model_id: str) -> dict[str, Any]:
 
 
 def data_sources_summary(*, dataset_limit: int = 60) -> dict[str, Any]:
-    from daily_research.data_lake import DEFAULT_DATA_LAKE_ROOT, ResearchDataLake
+    from quant_data_platform.lake import DEFAULT_DATA_LAKE_ROOT, ResearchDataLake
 
     lake_root = DEFAULT_DATA_LAKE_ROOT
     datasets: list[dict[str, Any]] = []
@@ -1323,7 +1323,7 @@ def _select_latest_policy_input_lake_dataset(frame: Any) -> dict[str, Any]:
 
 
 def _latest_policy_input_lake_dataset(lake_root: Path | str | None = None) -> dict[str, Any]:
-    from daily_research.data_lake import DEFAULT_DATA_LAKE_ROOT, ResearchDataLake
+    from quant_data_platform.lake import DEFAULT_DATA_LAKE_ROOT, ResearchDataLake
 
     lake = ResearchDataLake(lake_root or DEFAULT_DATA_LAKE_ROOT)
     frame = lake.list_datasets(dataset_kind="policy_input_bundle")
@@ -1657,7 +1657,7 @@ def _paper_price_lookup_for_date(as_of_date: str) -> dict[str, Any]:
         return {as_of_date: {}}
     lake_root = Path(str(active_payload.get("data_lake_root", "") or PROJECT_ROOT / "output" / "research_data_lake"))
     try:
-        from daily_research.data_lake import ResearchDataLake, load_policy_inputs_from_lake
+        from quant_data_platform.lake import ResearchDataLake, load_policy_inputs_from_lake
 
         lake = ResearchDataLake(lake_root)
         prepared = load_policy_inputs_from_lake(

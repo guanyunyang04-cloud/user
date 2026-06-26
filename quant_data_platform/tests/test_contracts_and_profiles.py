@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from daily_research.data_platform.contracts import DataDomain
+from quant_data_platform.domains.contracts import DataDomain
 from daily_research.path_policy import forecast_features as ff
 from quant_data_platform.domains.contracts import (
     CANONICAL_BUNDLE_SIDECAR_DOMAINS,

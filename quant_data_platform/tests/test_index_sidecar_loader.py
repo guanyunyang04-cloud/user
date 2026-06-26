@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from daily_research.data_lake.policy_input_loader import _load_index_constituents_sidecar_frames
-from daily_research.data_platform.contracts import DataDomain
+from quant_data_platform.lake.policy_input_loader import _load_index_constituents_sidecar_frames
+from quant_data_platform.domains.contracts import DataDomain
 
 
 class FakeLake:

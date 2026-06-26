@@ -709,6 +709,6 @@ def get_latest_completed_trading_date(
     close_time: str = "15:05",
 ) -> str:
     del market
-    from daily_research.data_platform.contracts import latest_completed_business_date
+    from quant_data_platform.domains.contracts import latest_completed_business_date
 
     return latest_completed_business_date(reference_ts=reference_ts, close_time=close_time)

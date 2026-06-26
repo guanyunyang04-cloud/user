@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from daily_research.data_lake import ResearchDataLake, load_pool_view
+from quant_data_platform.lake import ResearchDataLake, load_pool_view
 from daily_research.path_policy import v2_research_reset_baseline as v2
 from daily_research.path_policy.output_aux_profile_comparison import (
     build_output_aux_profile_comparison,

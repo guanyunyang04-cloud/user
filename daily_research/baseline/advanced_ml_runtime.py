@@ -209,8 +209,8 @@ def load_raw_data_with_cache(
         )
         raw_df_dict = slice_data_dict(raw_df_dict, history_window.effective_start_date, history_window.end_date)
     elif data_source == "lake":
-        from daily_research.data_lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID, ResearchDataLake
-        from daily_research.data_lake.policy_input_loader import load_policy_inputs_from_lake
+        from quant_data_platform.lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID, ResearchDataLake
+        from quant_data_platform.lake.policy_input_loader import load_policy_inputs_from_lake
 
         prepared = load_policy_inputs_from_lake(
             lake=ResearchDataLake(str(data_lake_root or "").strip() or None),

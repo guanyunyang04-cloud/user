@@ -8,8 +8,8 @@ from typing import Any, Callable
 import pandas as pd
 
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
-from daily_research.data_platform.contracts import DataDomain, DomainFetchRequest
-from daily_research.data_platform.providers import build_default_providers
+from quant_data_platform.domains.contracts import DataDomain, DomainFetchRequest
+from quant_data_platform.providers import build_default_providers
 from daily_research.execution.app_service import FORMAL_DATA_PLATFORM_PROVIDER_PLAN
 from daily_research.execution.app_runtime import PROJECT_ROOT, read_json_file
 

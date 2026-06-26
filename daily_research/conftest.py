@@ -7,8 +7,6 @@ import pytest
 
 
 SMOKE_FILES = {
-    "data_platform/tests/test_domain_contract.py",
-    "data_platform/tests/test_import_csv.py",
     "path_policy/tests/test_adapter.py",
     "path_policy/tests/test_labels.py",
     "tools/tests/test_doc_guard.py",
@@ -45,7 +43,6 @@ RESEARCH_NAME_TOKENS = (
 )
 
 DATA_HEAVY_PATH_PARTS = {
-    "data_lake/tests",
     "deep_alpha",
 }
 
@@ -69,7 +66,6 @@ EXTERNAL_NAME_TOKENS = (
 
 INTEGRATION_PATH_PARTS = {
     "baseline/tests",
-    "data_platform/tests",
     "execution/tests",
 }
 

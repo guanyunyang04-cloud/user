@@ -13,8 +13,6 @@
     "priority_regions": ["orientation_system", "long_term_memory", "executive_control", "sensorimotor_loop"],
     "focus_modules": ["state_center", "knowledge_center", "operations_center"],
     "body_entry_priority": [
-      "daily_research/data_platform",
-      "daily_research/data_lake",
       "daily_research/path_policy",
       "daily_research/continuous_policy",
       "daily_research/baseline",
@@ -44,8 +42,6 @@
     "research": ["daily_research/baseline"],
     "allocation_research": ["daily_research/continuous_policy"],
     "opportunity_ranking": ["daily_research/path_policy"],
-    "data_lake": ["daily_research/data_lake"],
-    "data_platform": ["daily_research/data_platform"],
     "execution": ["daily_research/execution"],
     "long_horizon_research": ["daily_research/deep_alpha"],
     "tools": ["daily_research/tools"],
@@ -74,7 +70,7 @@
       "deep_alpha",
       "study",
       "training",
-      "data lake",
+      "qdp data",
       "active_execution_strategy",
       "active manifest",
       "执行端",
@@ -165,8 +161,6 @@
   "handoff_contract": {
     "derive_entry_sequence_from_shared_contract": true,
     "body_entry_priority": [
-      "data_platform",
-      "data_lake",
       "opportunity_ranking",
       "allocation_research",
       "research",

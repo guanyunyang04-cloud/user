@@ -178,7 +178,7 @@ def load_reusable_training_dataset(
 ) -> ReusableTrainingDatasetRecord | None:
     if prefer_data_lake:
         try:
-            from daily_research.data_lake import ResearchDataLake
+            from quant_data_platform.lake import ResearchDataLake
 
             lake_record = ResearchDataLake(lake_root).find_training_dataset(spec=spec, zone=zone)
             if lake_record is not None:
@@ -212,7 +212,7 @@ def save_reusable_training_dataset(
     )
     if prefer_data_lake:
         try:
-            from daily_research.data_lake import ResearchDataLake
+            from quant_data_platform.lake import ResearchDataLake
 
             lake_record = ResearchDataLake(lake_root).save_training_dataset(
                 spec=spec,

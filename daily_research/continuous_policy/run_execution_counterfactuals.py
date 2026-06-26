@@ -33,7 +33,7 @@ from daily_research.continuous_policy.state_builder import (
     prepare_policy_inputs,
     resolve_active_policy_defaults,
 )
-from daily_research.data_lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
+from quant_data_platform.lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
 
 
 def _artifact_alpha_prior_args(args: argparse.Namespace, artifact: Any) -> dict[str, str]:

@@ -6,18 +6,18 @@ from typing import Any, Iterable, Mapping
 
 import pandas as pd
 
-from daily_research.data_lake.build_canonical_policy_bundle import (
+from quant_data_platform.lake.build_canonical_policy_bundle import (
     BuildCanonicalPolicyBundleConfig,
     build_canonical_policy_bundle,
 )
-from daily_research.data_lake.canonical import (
+from quant_data_platform.lake.canonical import (
     DEFAULT_EXTERNAL_QUANT_DATA_ROOT,
     build_lake_inventory,
     load_canonical_manifest,
     write_inventory_report,
 )
-from daily_research.data_lake.catalog import ResearchDataLake
-from daily_research.data_platform.contracts import DataDomain
+from quant_data_platform.lake.catalog import ResearchDataLake
+from quant_data_platform.domains.contracts import DataDomain
 
 from quant_data_platform.core.json_io import utc_now
 from quant_data_platform.core.paths import QdpPaths, qdp_paths

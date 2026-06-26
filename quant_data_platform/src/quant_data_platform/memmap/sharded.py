@@ -13,11 +13,11 @@ from typing import Any, Iterable, Mapping
 import numpy as np
 import pandas as pd
 
-from daily_research.data_lake.catalog import ResearchDataLake
-from daily_research.data_lake.pool_views import load_pool_view
-from daily_research.data_lake.policy_input_loader import load_policy_inputs_from_lake
-from daily_research.data_lake.sector_board_views import load_sector_board_view
-from daily_research.data_platform.contracts import DataDomain
+from quant_data_platform.lake.catalog import ResearchDataLake
+from quant_data_platform.lake.pool_views import load_pool_view
+from quant_data_platform.lake.policy_input_loader import load_policy_inputs_from_lake
+from quant_data_platform.lake.sector_board_views import load_sector_board_view
+from quant_data_platform.domains.contracts import DataDomain
 from daily_research.path_policy.forecast_features import (
     DEFAULT_FORECAST_MAX_FEATURE_COLUMNS,
     build_forecast_feature_store,

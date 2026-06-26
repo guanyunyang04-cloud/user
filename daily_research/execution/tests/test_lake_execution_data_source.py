@@ -6,7 +6,7 @@ import pandas as pd
 
 def test_lake_raw_loader_populates_benchmark_columns_from_silver_benchmark(tmp_path: Path) -> None:
     from daily_research.baseline.advanced_ml_runtime import HistoryWindow, load_raw_data_with_cache
-    from daily_research.data_lake import ResearchDataLake
+    from quant_data_platform.lake import ResearchDataLake
 
     dates = pd.to_datetime(["2026-05-20", "2026-05-21", "2026-05-22"])
     stocks = ["000001.SZ", "600000.SH"]

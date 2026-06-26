@@ -49,7 +49,7 @@
 - PathPolicy forecast dataset 全文件慢测源于完整 synthetic feature/label/horizon risk 构造；默认轻量验证应使用快速合同测试，完整慢测保留为 deferred long verification。
 - `daily_research.path_policy.run_alpha_path20_protocol` 的标准入口是 `python -m ...`；直接脚本入口允许作为容错 smoke，但新命令记录和 reference 默认写包级入口。
 - 数据集必须可复用、可审计、可查询；pickle/cache 可兼容，但新训练集应进入 DuckDB + Parquet data lake。
-- `lake` 是研究存储真源，不是在线数据源；每日更新源是 `daily_research.data_platform` 的非 TDX online providers，写入 Bronze/Silver 后才能注册为研究 lake dataset。V2 默认使用 `--universe all_a` 和真实交易日历，CSV 只能作为入湖导入/补洞通道，不能被正式研究直接读取。
+- QDP 是共享数据基底唯一 owner；每日更新、provider、入湖导入和 canonical/policy bundle 构建都走 `quant_data_platform` CLI/API。`daily_research` 只消费 QDP 输出的 lake、manifest、memmap 和 training pack，不再直接拥有在线 provider 或 lake catalog。
 - 每日任务是手动 runbook：先确认 readiness，再手动刷新数据/信号、生成交易计划、模拟账户过账、复核状态；任一步数据缺口或 blocker 都必须停下并保留证据。
 - 旧 runtime 只可归档为事故证据；测试和诊断必须使用隔离 runtime root，不能污染真实 `daily_research/output/execution_app`。
 - TDX-family 已退出正式研究主链路：`tqcenter.py`、`pytdx`、`mootdx` 不得作为 `daily_research` 默认或正式 provider；若旧脚本保留这些名字，只能视为 legacy/historical path。
@@ -77,7 +77,7 @@
 - 近期 multi-horizon 阶段 family：`stage1_output_aux_grid`、`stage2_horizon_grid_calibration`、`stage25_stability_calibration`；新增 run tag 不应通过扩 evidence tag 前缀来代表新主线，必须归入既有或新声明的 `study_family`。
 - `alpha_path20_neural_policy_v1`：2026-05-17 到 2026-05-23 的 Path20 neural-policy 历史主线；其 evidence 仍有效，但新结论必须按 `alpha_multi_horizon_utility_policy_v1` 解释。
 - `alpha_path20_sequence_policy_v1`：shadow comparison / secondary research route；除非未来显式切换，不代表当前主线。
-- `data_platform_v2` / TDX-free lake-first ingestion：当前数据入口主线；provider refresh/import 才能在线取数，正式训练、评估和 diagnostics 必须读 explicit lake dataset id。
+- QDP lake-first ingestion：当前数据入口主线；provider refresh/import 只能由 QDP 在线取数并注册，正式训练、评估和 diagnostics 必须读 QDP explicit lake dataset id、manifest、memmap 或 training pack。
 - QDP 是共享 canonical 数据基底 owner；daily_research 只维护研究消费 lineage、模型证据和执行候选证据。回答数据集事实时先读 QDP，再读本分脑消费证据。
 - r10-r18：action/head + translation guard 改善语义，但不能替代组合资金分配本体。
 - r19-r30：receiver/source/cash ranking、listwise、teacher、release/relief 暴露 source 放宽与休眠问题。

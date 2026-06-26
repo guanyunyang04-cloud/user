@@ -6,7 +6,9 @@
 本项目的区域特化是“共享数据基底治理”：
 
 - `core/`：路径、配置、registry、JSON 校验和通用 schema。
-- `lake/`：封装 data lake catalog、canonical manifest、coverage audit。
+- `providers/`：外部数据源适配、能力矩阵、provider health 与只读评估。
+- `ingest/`：refresh、CSV/TDX/external zip 导入、intraday sidecar 和 domain 合并入口。
+- `lake/`：封装 data lake catalog、canonical manifest、policy bundle、policy input loader、pool/sector-board view、coverage audit。
 - `domains/`：行情、结构风格、交易过滤等 domain contract。
 - `features/`：canonical 数据域与训练 feature profile 的分层定义。
 - `memmap/`：分片 feature store、label store、sample index、registry signature。

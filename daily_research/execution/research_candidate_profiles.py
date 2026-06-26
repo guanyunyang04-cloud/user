@@ -394,7 +394,7 @@ def _resolve_migrated_project_path(raw_path: object) -> str:
 
 def _latest_policy_input_lake_dataset_id() -> str:
     try:
-        from daily_research.data_lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID, ResearchDataLake
+        from quant_data_platform.lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID, ResearchDataLake
 
         lake = ResearchDataLake()
         frame = lake.list_datasets()
@@ -405,7 +405,7 @@ def _latest_policy_input_lake_dataset_id() -> str:
                 return str(filtered.iloc[0].get("dataset_id", "") or DEFAULT_POLICY_INPUT_LAKE_DATASET_ID)
         return str(DEFAULT_POLICY_INPUT_LAKE_DATASET_ID)
     except Exception:
-        from daily_research.data_lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
+        from quant_data_platform.lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
 
         return str(DEFAULT_POLICY_INPUT_LAKE_DATASET_ID)
 

@@ -11,7 +11,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from daily_research.data_lake import ResearchDataLake, load_pool_view
+from quant_data_platform.lake import ResearchDataLake, load_pool_view
 from daily_research.path_policy.mainboard_rebuild_baseline import corrected_gate_status
 from daily_research.path_policy.output_aux_profile_comparison import (
     build_output_aux_profile_comparison,

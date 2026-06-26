@@ -197,7 +197,7 @@ def _dataset_symbols(lake: Any, lake_dataset_id: str) -> list[str]:
 
 
 def _ensure_sector_board_view_for_dataset(*, data_lake_root: Path | str, lake_dataset_id: str) -> str:
-    from daily_research.data_lake import ResearchDataLake
+    from quant_data_platform.lake import ResearchDataLake
 
     lake = ResearchDataLake(data_lake_root)
     existing = _latest_sector_board_view_id_for_dataset(lake, lake_dataset_id)

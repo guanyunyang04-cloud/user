@@ -16,7 +16,7 @@ from daily_research.continuous_policy.pipeline_utils import BUDGET_OBJECTIVE_CHO
 from daily_research.continuous_policy.run_self_optimizing_study import _score_protocol_summary
 from daily_research.continuous_policy.runtime import timestamp_tag
 from daily_research.continuous_policy.state_builder import prepare_policy_inputs
-from daily_research.data_lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
+from quant_data_platform.lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
 
 
 TARGET_COLUMNS: tuple[str, ...] = (

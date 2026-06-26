@@ -18,7 +18,7 @@ import pandas as pd
 from daily_research.continuous_policy.pipeline_utils import select_feature_columns
 from daily_research.continuous_policy.runtime import now_iso, safe_print_json, write_json
 from daily_research.continuous_policy.state_builder import DEFAULT_ALPHA_PRIOR_SOURCE, prepare_policy_inputs
-from daily_research.data_lake.policy_input_loader import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
+from quant_data_platform.lake.policy_input_loader import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
 from daily_research.path_policy import (
     ALPHA_PATH20_POLICY_PROFILE,
     ALPHA_PATH20_POLICY_VERSION,

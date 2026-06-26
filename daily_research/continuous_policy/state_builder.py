@@ -18,7 +18,7 @@ from daily_research.baseline.advanced_ml_runtime import (
 )
 from daily_research.baseline.config import ResearchConfig
 from daily_research.baseline.data_provider import load_universe_from_tq
-from daily_research.data_platform.contracts import ensure_tdx_free_data_source
+from quant_data_platform.domains.contracts import ensure_tdx_free_data_source
 from daily_research.baseline.ml_alpha import MLAplhaConfig
 from daily_research.execution.liquidity_universe import build_rolling_liquidity_membership, get_named_pool_file
 from daily_research.execution.strategy_manifest import load_strategy_manifest
@@ -503,7 +503,7 @@ def prepare_policy_inputs(
     resolved_pool_name = normalize_policy_pool_name(pool_name)
     resolved_data_source = ensure_tdx_free_data_source(data_source or "lake")
     if resolved_data_source == "lake":
-        from daily_research.data_lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID, ResearchDataLake, load_policy_inputs_from_lake
+        from quant_data_platform.lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID, ResearchDataLake, load_policy_inputs_from_lake
 
         requested_universe: list[str] | None = None
         if resolved_pool_name and not is_learned_all_a_pool_name(resolved_pool_name):
@@ -536,7 +536,7 @@ def prepare_policy_inputs(
     raise ValueError(
         "formal daily_research policy inputs are lake-first after the TDX-free data platform migration. "
         f"Unsupported data_source={data_source!r}; refresh Bronze/Silver through "
-        "`python -m daily_research.data_platform.refresh_daily` and use data_source='lake'."
+        "`python -m quant_data_platform.ingest.refresh_daily` and use data_source='lake'."
     )
 
     universe = resolve_policy_universe(

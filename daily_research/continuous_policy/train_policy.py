@@ -69,7 +69,7 @@ from daily_research.continuous_policy.training_dataset_cache import (
     load_reusable_training_dataset,
     save_reusable_training_dataset,
 )
-from daily_research.data_lake import build_label_completeness_summary
+from quant_data_platform.lake import build_label_completeness_summary
 from daily_research.continuous_policy.training_contracts import (
     TRAINER_BACKENDS,
     TRAINER_BACKEND_FORMAL_DECISION_CORE_V6,
@@ -439,7 +439,7 @@ def main(argv: list[str] | None = None) -> int:
         direct_dataset_id = DECISION_CORE_V6_STRICT_GOLD_DATASET_ID
     if direct_dataset_id:
         try:
-            from daily_research.data_lake import ResearchDataLake
+            from quant_data_platform.lake import ResearchDataLake
 
             direct_dataset_record = ResearchDataLake(str(getattr(args, "data_lake_root", "") or "") or None).load_training_dataset(direct_dataset_id)
         except Exception:

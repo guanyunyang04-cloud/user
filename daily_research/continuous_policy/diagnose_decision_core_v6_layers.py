@@ -47,7 +47,7 @@ from daily_research.continuous_policy.portfolio_simulator import (
 )
 from daily_research.continuous_policy.runtime import STUDIES_ROOT, now_iso, safe_print_json, timestamp_tag, write_json
 from daily_research.continuous_policy.state_builder import DEFAULT_ALPHA_PRIOR_SOURCE, build_cross_section_state, build_daily_state_features, prepare_policy_inputs, resolve_active_policy_defaults
-from daily_research.data_lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
+from quant_data_platform.lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
 
 
 DIAGNOSTIC_KEYS: tuple[str, ...] = (

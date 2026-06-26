@@ -439,7 +439,7 @@ def test_data_refresh_api_runs_signal_refresh_when_data_latest_but_signal_stale(
 
 
 def test_signal_refresh_clones_latest_sector_board_view_for_current_dataset(tmp_path: Path) -> None:
-    from daily_research.data_lake import ResearchDataLake, load_policy_inputs_from_lake
+    from quant_data_platform.lake import ResearchDataLake, load_policy_inputs_from_lake
     from daily_research.execution import production_signal
 
     dates = pd.to_datetime(["2026-05-20", "2026-05-21", "2026-05-22"])
@@ -2408,7 +2408,7 @@ def test_job_stream_endpoint_emits_snapshot_incremental_stdout_and_done(tmp_path
 
 
 def test_provider_health_cli_updates_job_progress(monkeypatch: pytest.MonkeyPatch) -> None:
-    from daily_research.data_platform import provider_health
+    from quant_data_platform import provider_health
 
     updates: list[dict[str, object]] = []
 
@@ -2445,7 +2445,7 @@ def test_provider_health_cli_updates_job_progress(monkeypatch: pytest.MonkeyPatc
 
 
 def test_provider_health_progress_updates_before_each_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
-    from daily_research.data_platform import provider_health
+    from quant_data_platform import provider_health
 
     updates: list[dict[str, object]] = []
 

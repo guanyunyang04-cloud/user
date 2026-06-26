@@ -15,8 +15,8 @@ from typing import Any, Iterable, Mapping, Protocol
 import numpy as np
 import pandas as pd
 
-from daily_research.data_lake import ResearchDataLake, load_pool_view
-from daily_research.data_lake.policy_input_loader import load_policy_inputs_from_lake
+from quant_data_platform.lake import ResearchDataLake, load_pool_view
+from quant_data_platform.lake.policy_input_loader import load_policy_inputs_from_lake
 from daily_research.path_policy.decision_score_proxy import add_path_proxy_decision_scores
 from daily_research.path_policy.labels import build_path20_dataset_frame
 

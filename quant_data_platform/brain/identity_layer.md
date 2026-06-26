@@ -15,4 +15,4 @@
 - `quant_data_platform/data/` 承载大数据资产和运行产物，默认不进 Git。
 - `quant_data_platform/registry/` 承载可审计 registry、manifest 指针和治理状态，可以进入 Git。
 - `canonical_data/` 是过渡入口，不再作为长期主项目扩张。
-- `daily_research/data_platform` 与 `daily_research/data_lake` 当前保留兼容，但长期应由本分脑接管公共能力。
+- `daily_research` 不再拥有 data_platform / data_lake 公共能力；研究项目只能通过 QDP 公开 API/CLI 和已生成数据资产消费共享数据基底。

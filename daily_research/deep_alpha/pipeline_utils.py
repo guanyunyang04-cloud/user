@@ -15,7 +15,7 @@ from daily_research.deep_alpha.cache_utils import cache_key, frame_signature, ge
 from daily_research.deep_alpha.config import DeepAlphaConfig
 from daily_research.deep_alpha.market_state_model import build_state_frame, fit_market_state_model
 from daily_research.deep_alpha.sequence_dataset import build_liquidity_bucket_frame
-from daily_research.data_lake import ResearchDataLake, load_policy_inputs_from_lake
+from quant_data_platform.lake import ResearchDataLake, load_policy_inputs_from_lake
 from daily_research.execution.liquidity_universe import build_rolling_liquidity_membership, get_named_pool_file
 from daily_research.progress import progress_write
 

@@ -90,7 +90,7 @@ from daily_research.continuous_policy.research_profile_registry import (
     get_default_objective,
     get_search_profile_config,
 )
-from daily_research.data_lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
+from quant_data_platform.lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
 
 
 LATEST_STATE_PATHS: dict[str, Path] = {

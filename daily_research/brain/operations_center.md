@@ -13,7 +13,7 @@
 - 2026-05-31 恢复边界：`daily_research/output/` 与 `daily_research/cache/` 曾被误删；空目录骨架只保证 manifest/integrity 入口存在，不代表旧 payload 恢复，不得凭 brain 文本手工重造 active artifact。
 
 ## 项目地图
-- brain 真源：`daily_research/brain/`；research data lake：`daily_research/output/research_data_lake/`。
+- brain 真源：`daily_research/brain/`；共享数据基底由 `quant_data_platform` 统一拥有，`daily_research` 只消费其 lake / manifest / memmap / training pack 输出。
 - studies：`daily_research/output/path_policy/studies/`、`daily_research/output/continuous_policy/studies/`；protocols：`daily_research/output/continuous_policy/protocols/`。
 - active artifact：`daily_research/output/active_execution_strategy.json`；execution app：`daily_research/execution/run_execution_app.py`；daily verdict root：`daily_research/output/execution_app/daily_runs/`。
 - 以上 output/cache 路径在真实 payload 恢复前只代表目标位置；文件级 evidence lookup、replay、active artifact inspection 和 project consistency 结论需回到 brain references 与用户确认边界。
@@ -54,12 +54,12 @@
 - `promotion_grade` 必须在 `evidence_grade` 外再满足正式 gate、跨期/月度稳定、成本、drawdown、replay/allocator 或执行约束，并显式确认 active artifact 边界。
 - 写入 reference、state 或回答用户时，必须把“运行完成状态”和“证据可信等级”分开写；completed run 不自动等于 completed model-quality evidence。
 
-## TDX-Free Data Platform 运行口径
-- `lake` 是研究存储真源，不是在线数据源；`csv` 是导入/补洞通道。
-- 正式研究入口只使用 `--data-source lake --lake-dataset-id <explicit_id>`，不得传 `tq/tdx/pytdx/mootdx`。
-- V2 refresh / import 命令和 domain 明细见 `daily_research/brain/references/tdx_free_data_platform_v2_20260523.md` 与 `daily_research/brain/references/daily_research_v2_dataset_contract_upgrade_20260602.md`。
-- coverage 不足、缺 benchmark、空 canonical market、required domain 缺失或严重 source conflict 时，refresh 必须 `blocked`，不得注册 research lake dataset。
-- 训练、评估、diagnostics 只读已注册 lake dataset；禁止在研究流程中临时在线抓取外部行情。
+## QDP 数据基底运行口径
+- QDP 是 provider、ingestion、lake catalog、canonical bundle、policy input loader、pool/sector-board view 和 memmap/training pack 的唯一 owner。
+- 正式研究入口只读取 QDP 已生成的 explicit dataset id、manifest、sharded memmap 或 training pack；不得在 `daily_research` 研究流程中临时在线抓取外部行情。
+- provider refresh、CSV 导入、TDX/external zip 导入、domain 合并、coverage audit 和 canonical/policy bundle 构建都走 `python -m quant_data_platform.cli ...`。
+- coverage 不足、缺 benchmark、空 canonical market、required domain 缺失或严重 source conflict 时，QDP refresh 必须 `blocked`，不得注册可供研究消费的数据集。
+- 历史 `daily_research` data lake/data platform references 只作证据，不再作为当前代码入口或 owner。
 
 ## Daily Execution 运行口径
 - 冻结期 Daily Execution 只保留骨架、只读诊断、手动流程说明和候选评估入口；不得作为生产交易计划、paper/live 或 broker 接线入口。
@@ -77,7 +77,7 @@
 - 默认开发验证走 changed-surface：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.selective_verification --paths <changed_paths> --json`，本次 blocking 只取 `blocking_commands`。
 - 轻量 smoke lane：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest daily_research -m "smoke and not slow and not research and not data_heavy and not external and not benchmark" -q`。该 lane 只收集少数低成本合同测试，适合 brain / 配置 / 测试治理闭环。
 - 项目普通车道只跑非慢速测试：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest daily_research -m "not slow and not research and not data_heavy and not external and not benchmark" -q`。`forecast_training`、`forecast_memmap_dataset`、`rl_protocol` 等训练 / memmap / 研究协议测试属于 `research` 或 `data_heavy` 车道，按 explicit nodeid 或阶段收口运行。
-- `continuous_policy`、`data_lake`、`data_platform`、`execution` 的测试由根级 `daily_research/conftest.py` 自动归入 `research`、`data_heavy`、`external`、`guard`、`integration` 等 lane；新增重测试先放显式 lane，不进入默认开发闭环。
+- `continuous_policy`、`execution` 等研究/执行测试由根级 `daily_research/conftest.py` 自动归入 `research`、`data_heavy`、`external`、`guard`、`integration` 等 lane；QDP 数据基底测试在 `quant_data_platform/tests` 内维护。
 - 旧 `path_policy/tests/test_forecast_memmap_dataset.py` 属于 legacy 单体 memmap 保护网；QDP sharded memmap 成为默认后，不作为常规 blocking 测试。
 - 高频硬边界：`git diff -- daily_research/output/active_execution_strategy.json` 和 `git diff --check`；active artifact 有 diff 时停止并回到 promotion authority。
 - `current-frontier` 只在回答当前研究阶段、更新 frontier 判断或写入 evidence/state 前运行。

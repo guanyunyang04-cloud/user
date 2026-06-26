@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from daily_research.data_lake import ResearchDataLake
-from daily_research.data_lake.pool_views import PoolViewSpec, build_pool_view_from_policy_bundle
+from quant_data_platform.lake import ResearchDataLake
+from quant_data_platform.lake.pool_views import PoolViewSpec, build_pool_view_from_policy_bundle
 from daily_research.path_policy import v2_research_reset_baseline as v2
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import sys
 from pathlib import Path
@@ -26,6 +27,34 @@ from quant_data_platform.memmap.training_pack import (
     build_training_pack,
 )
 from quant_data_platform.memmap.validation import validate_active_memmap
+
+
+PASSTHROUGH_COMMAND_MODULES: dict[str, str] = {
+    "provider-health": "quant_data_platform.provider_health",
+    "refresh-daily": "quant_data_platform.ingest.refresh_daily",
+    "import-csv": "quant_data_platform.ingest.import_csv",
+    "baostock-backfill": "quant_data_platform.ingest.baostock_backfill",
+    "build-intraday-daily-features": "quant_data_platform.ingest.build_intraday_daily_features",
+    "combine-domain-datasets": "quant_data_platform.ingest.combine_domain_datasets",
+    "combine-sharded-domain-datasets": "quant_data_platform.ingest.combine_sharded_domain_datasets",
+    "import-external-quant-zip": "quant_data_platform.ingest.import_external_quant_zip",
+    "recover-external-quant-zip-import": "quant_data_platform.ingest.recover_external_quant_zip_import",
+    "import-tdx-5m": "quant_data_platform.ingest.import_tdx_5m",
+    "import-tdx-daily": "quant_data_platform.ingest.import_tdx_daily",
+    "audit-gold-dataset": "quant_data_platform.lake.audit_gold_dataset",
+    "build-canonical-policy-bundle": "quant_data_platform.lake.build_canonical_policy_bundle",
+    "build-gold-training-dataset": "quant_data_platform.lake.build_gold_training_dataset",
+    "build-pool-view": "quant_data_platform.lake.build_pool_view",
+    "build-research-database": "quant_data_platform.lake.build_research_database",
+    "build-sector-board-view": "quant_data_platform.lake.build_sector_board_view",
+    "build-v2-status-sidecar": "quant_data_platform.lake.build_v2_status_sidecar",
+    "canonical-audit": "quant_data_platform.lake.canonical_audit",
+    "import-legacy-training-caches": "quant_data_platform.lake.import_legacy_training_caches",
+    "import-traditional-baostock-v2-snapshot": "quant_data_platform.lake.import_traditional_baostock_v2_snapshot",
+    "import-traditional-pit-status-sidecar": "quant_data_platform.lake.import_traditional_pit_status_sidecar",
+    "policy-input-audit": "quant_data_platform.lake.policy_input_audit",
+    "v2-dataset-contract-audit": "quant_data_platform.lake.v2_dataset_contract_audit",
+}
 
 
 def _print(payload: dict[str, Any], *, as_json: bool) -> None:
@@ -198,6 +227,10 @@ def build_parser() -> argparse.ArgumentParser:
     provider_eval.add_argument("--no-install-missing", action="store_true")
     provider_eval.add_argument("--json", action="store_true")
 
+    for command, module_name in PASSTHROUGH_COMMAND_MODULES.items():
+        parser_for_command = sub.add_parser(command, help=f"Run {module_name}.")
+        parser_for_command.add_argument("passthrough_args", nargs=argparse.REMAINDER)
+
     cleanup = sub.add_parser("cleanup", help="Generate cleanup dry-run plan. This command never deletes files in v1.")
     cleanup.add_argument("--dry-run", action="store_true", default=True)
     cleanup.add_argument("--json", action="store_true")
@@ -205,7 +238,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    for index, item in enumerate(raw_argv):
+        if item in PASSTHROUGH_COMMAND_MODULES:
+            return _run_passthrough_command(item, raw_argv[index + 1 :])
+    args = build_parser().parse_args(raw_argv)
+    if args.command in PASSTHROUGH_COMMAND_MODULES:
+        return _run_passthrough_command(args.command, list(getattr(args, "passthrough_args", []) or []))
     paths = qdp_paths(args.workspace_root or None)
     if args.command == "status":
         _print(registry_status(paths), as_json=bool(args.json))
@@ -413,6 +452,26 @@ def main(argv: list[str] | None = None) -> int:
         _print(cleanup_dry_run(paths), as_json=bool(args.json))
         return 0
     raise ValueError(f"unsupported_command: {args.command}")
+
+
+def _run_passthrough_command(command: str, passthrough_args: list[str]) -> int:
+    module_name = PASSTHROUGH_COMMAND_MODULES[command]
+    module = importlib.import_module(module_name)
+    module_main = getattr(module, "main", None)
+    if not callable(module_main):
+        raise RuntimeError(f"{module_name} does not expose callable main(argv)")
+    forwarded = list(passthrough_args or [])
+    if forwarded and forwarded[0] == "--":
+        forwarded = forwarded[1:]
+    result = module_main(forwarded)
+    if isinstance(result, int):
+        return result
+    if isinstance(result, dict):
+        print(json.dumps(json_safe(result), ensure_ascii=False, indent=2))
+        return 0
+    if result is None:
+        return 0
+    return int(result)
 
 
 def _split_csv(value: str) -> tuple[str, ...]:

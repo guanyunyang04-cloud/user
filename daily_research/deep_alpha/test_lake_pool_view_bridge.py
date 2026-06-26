@@ -5,9 +5,9 @@ from tempfile import TemporaryDirectory
 
 import pandas as pd
 
-from daily_research.data_lake import ResearchDataLake
-from daily_research.data_lake.pool_views import PoolViewSpec, build_pool_view_from_policy_bundle
-from daily_research.data_lake.sector_board_views import SectorBoardViewSpec, build_sector_board_view_from_policy_bundle
+from quant_data_platform.lake import ResearchDataLake
+from quant_data_platform.lake.pool_views import PoolViewSpec, build_pool_view_from_policy_bundle
+from quant_data_platform.lake.sector_board_views import SectorBoardViewSpec, build_sector_board_view_from_policy_bundle
 from daily_research.deep_alpha.export_live_panels_from_run import _augment_style_map_for_feature_contract
 from daily_research.deep_alpha.pipeline_utils import load_lake_market_data_with_pool_view
 from daily_research.deep_alpha.run_deep_alpha_research import _pool_view_spec_from_args, parse_args
