@@ -4,12 +4,13 @@ description: Use when the user mentions brain, 脑区, 项目大脑, 接管, cap
 ---
 # Workspace Brain Runtime
 
-## Object-Oriented Brain
-This workspace is a personal research brain, not a team process gate. Brain docs describe objects, memory, methods, and protected invariants; tools are sensors.
+## Multi-Paradigm Brain
+This workspace is a personal research brain expressed as natural-language programming. Brain docs use objects for "what exists", procedures for "how an object method runs", and pure functions for "how task/evidence becomes a judgment". Tools are sensors.
 
 - Start from the user's goal, then identify the relevant object(s): project, data asset, artifact, evidence, tool, branch surface, or external state.
-- Activate only boundaries attached to the touched objects. Do not recite unrelated live/default, broker, registry, branch, or PIT boundaries when the task does not touch them.
-- Treat rules, tests, guards, proposals, commits, capsule, route, and local skills as methods or sensors, not rituals.
+- Use pure functions mentally: `select_relevant_objects(task)`, `activate_boundaries(objects, method)`, `classify_evidence(run)`, and `derive_next_action(state, evidence)`; use procedures only when their object and method are relevant.
+- Activate only invariants attached to the touched objects and methods. Do not recite unrelated live/default, broker, registry, branch, or PIT boundaries when the task does not touch them.
+- Treat rules, tests, guards, proposals, commits, capsule, route, and local skills as object methods or sensors.
 - Prefer research progress, useful artifacts, simple current architecture, and git rollback over compatibility ceremony.
 - Agent Meta Protocol is an experience-writeback object: use it for concrete learning opportunities, not as a fixed checklist for every task.
 

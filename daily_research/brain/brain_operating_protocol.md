@@ -1,58 +1,52 @@
-# Daily Research 脑区操作协议
+# Daily Research 操作协议对象
+快照日期：`2026-06-27`
 
-快照日期：`2026-05-23`
+本文件是 `daily_research` 的可选补充入口对象，不属于核心 7 模块核；核心结构和路由以 `brain_manifest.json` 与 7 个中枢文件为准。
 
-## 目的
-本协议定义 agent 处理 `daily_research` 相关任务时的项目操作方式。
+## object `daily_research_entry`
+`type`: optional_entry_protocol
+`definition`: 当任务指向 `daily_research`，agent 可以直接进入本分脑；route / capsule 是诊断传感器，不是准入仪式。
+`inputs`: 用户目标、显式路径、state、knowledge、operations、reference、QDP manifest、run artifact。
+`methods`: `enter_by_task(task)`；`inspect_relevant_objects(task)`；`query_evidence(claim)`；`writeback(result)`。
 
-`daily_research/brain/` 保存项目事实、证据、状态和治理规则。主脑平台负责共享事实、拓扑和少数硬边界；本分脑只负责 `daily_research` 的项目事实层。
+## object `capsule_sensor`
+`type`: optional_router
+`command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
+`api_fallback`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --workflow auto --json`
+`semantics`: 输出 workflow hints、freshness 和 checklist；它提供线索，不替代对象语义和文件证据。
 
-本文件是 `daily_research` 可选补充协议，不属于主脑共享 7 模块核；核心结构、读取顺序和 attach 契约以 manifest 为准。
+## object `evidence_query`
+`type`: evidence_lookup
+`activation`: 任务涉及 study、protocol、dataset、r-number、run tag、provider result 或模型结论。
+`truth_order`: explicit tag / manifest / summary / registry / reference 优先；loose `latest_*` 是候选线索。
+`methods`: `query_registry(q)`；`inspect_summary(path)`；`open_reference(path)`；`classify_evidence(run)`。
 
-## 进入方式
-- 重大 `daily_research` 任务开始前，可运行主脑 task capsule 辅助诊断：
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
-- 只要用户目标、路径、事实或证据指向 `daily_research`，agent 可直接进入本分脑；route 不是准入条件。
-- 在修改 tracked files、启动训练、运行 study 或写结论前，读够相关 state、knowledge、operations、reference 或产物证据。
-- 若任务涉及 study、protocol、dataset 或 r-number，必须使用 explicit tag 或 reference，不直接相信 loose `latest_*`。
+## object `mainline_pointer`
+`type`: switchable_research_pointer
+`semantics`: 每条研究主线都是可切换对象，不是永久层级；旧线保留为历史或对照，只有被任务选中时激活。
+`current_default`: 见 `state_center.md` 的 `current_research_pointer`。
+`execution_relation`: research mainline 切换不等于 live/default promotion。
 
-## API / 无插件 fallback
-- API-only 或无插件场景，使用：
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --workflow auto --json`
-- 把 `workflow_selection`、`workflow_guide`、`required_checklist` 和 `stop_conditions` 作为参考提示，不替代 agent 判断。
-- 用 `workflow-guide --workflow <workflow_id> --json` 只读查看 workflow。
-- 该 fallback 只近似插件纪律；它不替代脑区真源，也不授予 active execution 权限。
+## Procedure Entries
+### procedure `enter_daily_research`
+`input`: task
+`steps`: 识别相关对象；读取 `state_center` 和必要 reference；需要时运行 capsule；执行任务；按 `writeback_route(result)` 写回。
+`side_effects`: 取决于所选对象；默认是 research / documentation。
 
-## 行动纪律
-- 重大动作前，区分事实、推断、假设和边界。
-- 工作中优先使用主脑平台命令，避免临时解释。
-- 重大动作后运行对应 guard，并判断是否需要 brain writeback。
-- 若不需要写回，说明原因。
+### procedure `evidence_backed_answer`
+`input`: claim or status question
+`steps`: 解析 claim；查 explicit tag / registry / reference；区分事实、推断和缺口；给出当前结论和证据入口。
+`side_effects`: none unless user asks to update brain.
 
-## 主线切换
-- 每条研究主线都是可切换的当前工作指针，不是永久层级。
-- 用户或治理规则显式切换主线后，后续工作按新主线继续。
-- 旧主线证据保留为历史或对照，除非之后再次被选中。
-- research mainline 切换不等于 live/default promotion，也不允许修改 `daily_research/output/active_execution_strategy.json`。
+### procedure `mainline_switch`
+`input`: user direction or governance-level decision
+`steps`: 标记新 research pointer；保留旧线为 historical object；更新 state/reference；不自动触碰 execution surface。
+`side_effects`: brain state/reference only.
 
-## 证据规则
-- failed、interrupted、timeout、smoke、dry-run、diagnostic-only run 都不是 completed evidence。
-- timeout 首先表示外层等待或观察窗口耗尽；若 PID 仍存活、日志或产物仍在推进，且没有明确代码错误、资源危险或用户停止指令，必须继续轮询，不得把它写成 failed evidence。
-- forward outcome 未观测的 realtime tail label 不能写成 completed training evidence。
-- Full Gold 训练集声明必须引用已注册的 Gold data-lake dataset，并给出 row count、date range 和 label completeness。
-- active execution 变更需要未来明确 promotion authority；普通 research 必须保持 `daily_research/output/active_execution_strategy.json` 不变。
-
-## Brain 与 Skill 分工
-- 主脑平台保存共享事实、拓扑、少数硬边界、守卫入口和 workspace-level workflows。
-- 本分脑保存 `daily_research` 项目真相：当前状态、规则、证据、设计合同和历史 verdict。
-- `brain/skills/workspace-brain` 是 agent 入口 skill；不再发布 `daily-research-brain` skill。
-- 文档语言遵循 `brain/language_policy.md`：中文语义 + 英文工程标识。
-
-## 写回规则
-- 主中枢保持 compact/current。
-- 长 dated evidence、命令 transcript 和详细 r-number status 写入 `daily_research/brain/references/`。
-- 机器 evidence index 写入 `daily_research/brain/references/evidence_registry.json`。
-- `daily_research/brain/workflows/` 只保留 daily_research 项目 workflow；workspace governance workflow 位于 `brain/workflows/`。
-- full codebase review 后，更新 `daily_research/brain/references/full_codebase_review_20260515.md` 或明确 successor。
-- mainline review、reroute、deprecation 或 promotion analysis 后，更新 `daily_research/brain/references/mainline_review_current.md`。
-- 新增或 materially change reference review docs 后，重建 evidence registry，并运行 doc/brain guards 后再声明写回完成。
+## Writeback Targets
+- 当前对象实例：`daily_research/brain/state_center.md`
+- 长期对象和方法论：`daily_research/brain/knowledge_center.md`
+- 过程入口和命令：`daily_research/brain/operations_center.md`
+- 对象治理和 guard：`daily_research/brain/governance_layer.md`
+- 长证据和复盘：`daily_research/brain/references/`
+- 机器索引：`daily_research/brain/references/evidence_registry.json`

@@ -1,53 +1,59 @@
-# Daily Research 治理层
+# Daily Research 治理对象
+快照日期：`2026-06-27`
 
-快照日期：`2026-04-13`
+本文件描述对象级不变量、纯判断函数和治理过程。它不要求每次任务复述全部边界；agent 先选择相关对象，再激活对应治理。
 
-## 1. 治理目标
-- 防止 strongest-model、learned-control 和 live 主线发生目标偏移、上下文偏移和证据偏移
-- 强制所有正式实验都走“读取状态 -> 检查 -> 执行 -> 写回 -> 重规划”闭环
+## Governed Objects
+### object `research_surface`
+`scope`: scorer、feature、model、backtest、candidate review、research document。
+`invariants`: 结论带证据等级；数据来自 QDP explicit id / manifest / pack；低预算结果只产生候选或诊断。
+`inactive_boundaries`: live/default、broker、paper/live、active artifact。
 
-## 2. 执行前四检
-- 目标一致性检查
-  - 这件事是否仍服务当前主问题和当前生产主线
-- 规则冲突检查
-  - 是否违反 formal / recent / live / promotion 分层、strict resume、受监管执行 / 可观察轮询等硬规则
-- 经验教训检查
-  - 是否踩中 `knowledge_center.md` 中已知失败模式
-- 依赖完整性检查
-  - 数据、脚本、解释器、预算和上下文是否足够
+### object `execution_surface`
+`scope`: active/default、paper/live、broker、trade plan、execution restore、promotion。
+`state`: `frozen_skeleton_only / awaiting_research_rebuild`
+`invariants`: active artifact 只在显式授权和 promotion-grade 证据同时存在时进入变更过程；非执行任务只读或不激活。
 
-## 3. 默认接管纪律
-- 新 agent 默认先读：
-  - `identity_layer.md`
-  - `state_center.md`
-  - `knowledge_center.md`
-  - `operations_center.md`
-- `episodic_memory.md` 只在需要完整证据时再读
+### object `data_surface`
+`scope`: QDP lake、canonical、provider ingest、memmap、training pack。
+`invariants`: `daily_research` 消费 QDP，不直连在线 provider；provider 需求路由到 QDP 上游对象。
 
-## 4. 写回纪律
-- 当前状态、当前优先级、当前 handoff、当前时态：
-  - `state_center.md`
-- 稳定事实、规则、教训：
-  - `knowledge_center.md`
-- 新命令口径、入口变化、环境和流程：
-  - `operations_center.md`
-- 时间顺序过程和原始证据：
-  - `episodic_memory.md`
+### object `evidence_surface`
+`scope`: run tag、study/protocol summary、reference、registry、manifest。
+`invariants`: loose latest 是候选线索；timeout、interrupted、smoke、dry-run 和 realtime tail label 不自动升级为 completed model-quality evidence。
 
-## 5. 守卫
-- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed`
-- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`
-- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/project_consistency_check.py --mode research`
-- 执行端解冻、active artifact 或 live-facing 合同变更时才跑 `project_consistency_check.py --mode execution` 或 `--mode full`。
+## Pure Functions
+- `select_relevant_objects(task)`: 根据任务文本、路径和产物选择 research / execution / data / evidence 对象。
+- `classify_task(task)`: 返回 `research_work`、`data_substrate_work`、`execution_work`、`documentation_work` 或 `brain_maintenance`。
+- `classify_evidence(run)`: 返回 `smoke_only`、`scout_only`、`evidence_grade`、`promotion_grade`、`diagnostic_only` 或 `insufficient`。
+- `activate_execution_surface(objects, method)`: 只有对象和方法都触碰执行面时返回 true。
+- `select_validation(changed_paths, task_class)`: 从 changed-surface、doc guard、integrity、QDP validate、project consistency 中选最小充分验证。
+- `writeback_route(result)`: 当前状态写 `state_center`；长期事实写 `knowledge_center`；过程入口写 `operations_center`；长证据写 `references/`。
 
-## 6. 执行端冻结治理
-- 2026-06-01 起，执行端状态为 `frozen_skeleton_only / awaiting_research_rebuild`。
-- 2026-06-01 起，研究端切换为 `daily_research_v2_research_reset`；旧 Stage 2.8 / short_v5b 降级为历史参考和旁路 benchmark，不再作为当前研究必须复刻的阻塞目标。
-- 冻结期允许保留和维护执行代码骨架、只读诊断、数据 readiness、候选 backtest / trade-plan wrapper、active artifact guard 和恢复盘点。
-- 冻结期禁止 live/default、paper/live/broker 接线、正式交易计划生产、active manifest promotion、production root 重建、自动化每日执行，以及未授权删除执行合同。
-- 解冻必须满足三项前置：v2 研究端产出 evidence-grade 候选结果；候选 backtest / execution bridge 方案完成；旧 production payload 被明确归档为历史不可用或获得单独恢复授权。
-- `rebuild_lineage_diff_audit` 只能满足“研究端差异解释”的初步证据要求；不得把该审计误读为模型胜负、short_v5b 替代、执行端解冻或 active artifact 重建授权。
-- 旧 multi-horizon / short_v5b 等价比较必须使用主板口径 pool；包含 `300/301/688/689` 创业板/科创板前缀的 new-lineage rebuild 只能作为 `wrong_universe_diagnostic`，不得作为 promotion、执行解冻或 short_v5b 等价对照证据。
-- Corrected mainboard-only baseline 若只是 `near_pass`，仍不得作为 active promotion、short_v5b 替代或执行端解冻证据；必须先处理 hit lift min negative、旧 `156` feature schema 未恢复、short_v5b payload 缺失和同协议 bridge 未完成这四类 blocker。
-- TQ vs BaoStock diff 若处于 `blocked_tq_unavailable`，不得作为数据源胜负、模型胜负、旧 Stage 2.8 失效、short_v5b 替代或执行端解冻依据。若 diff 已运行且 label 等价，也只证明该抽样/口径下 next-open label 近似一致；在旧 `156` feature schema、short_v5b payload、amount/missing/fill policy 差异未闭环前，仍不得作为执行端解冻或模型替代依据。
-- v2 研究不需要等待旧 `156` schema 或 short_v5b payload 恢复；但 v2 promotion 仍必须通过自己的 explicit dataset/pool/feature/gate/backtest/执行假设证据链，不能借旧线历史结论直接放行。
+## Procedures
+### procedure `research_work`
+`input`: task、selected research object、QDP evidence、expected artifact
+`steps`: 读取当前对象；执行研究或分析；标注证据等级；运行最小充分验证；把摘要写回 state 或 reference。
+`side_effects`: research artifacts and brain notes；不触碰 active execution。
+
+### procedure `data_requirement`
+`input`: data need from research task
+`steps`: 转成 QDP provider/canonical requirement；在 QDP 内 ingest / audit / canonicalize；返回 explicit manifest 或 pack 给 `daily_research`。
+`side_effects`: QDP artifacts；`daily_research` 只记录消费关系。
+
+### procedure `execution_change`
+`input`: explicit user authorization、promotion-grade evidence、active artifact diff plan
+`steps`: 激活 `execution_surface`；inspect active artifact；对齐 promotion evidence；执行对象级验证；再进入 restore / activate / trade plan。
+`side_effects`: protected execution artifacts；过程需要单独说明。
+
+### procedure `brain_maintenance`
+`input`: brain docs or skill changes
+`steps`: 保持热路径 compact；把长历史下沉到 `references/`；运行 `doc_guard`、`integrity_check` 和 `brain-burden-audit`；必要时更新 skill。
+`side_effects`: brain docs, registry, skill files。
+
+## Guard Entrypoints
+- Brain docs: `python -m tools.brain.doc_guard check --scope changed`
+- Brain integrity: `python -m tools.brain.integrity_check --json`
+- Burden audit: `python brain/skills/workspace-brain/scripts/brain_runtime.py brain-burden-audit --cwd . --mode compact`
+- Research consistency: `python daily_research/tools/project_consistency_check.py --mode research`
+- Execution consistency: only when `execution_surface` is active, use `--mode execution` or `--mode full`

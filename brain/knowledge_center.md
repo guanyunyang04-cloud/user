@@ -8,7 +8,7 @@
 - 方法说明 inspect、update、validate、cleanup 等操作如何触发。
 - 保护语义只在任务触碰相关对象或方法时激活。
 
-这样可以保留硬边界，又避免在无关任务里机械复述无关风险。
+这样可以保留对象保护语义，又避免在无关任务里机械复述无关风险。
 
 ## 2. 核心对象
 
@@ -26,7 +26,7 @@
 
 ### `workspace_brain_skill`
 - 定义：脑区接管的入口提示器。
-- 不是：审批系统、固定读取顺序或完整流程模板。
+- 不是：流程控制器、固定入口顺序或完整任务模板。
 - 方法：校准目标归属、当前对象、dirty paths 和可能的受保护对象。
 - 经验：脑区管辖项目的 repo-tracked mutation 前使用它；普通分析可直接读取相关对象。
 
@@ -94,4 +94,4 @@
 ## 6. continuous_policy 边界对象
 - `daily_research` 的 continuous_policy 细节属于分脑对象；主脑只保留跨项目语义：未过正式 gate 与 stable confirm 前始终是 `research / shadow_only`。
 - rXX references、trial 指标、长 tag、局部命令、Path20 历史线、multi_horizon_utility 当前主线、continuous_policy 和 deep_alpha 结论均属于 `daily_research` 分脑事实。
-- promotion / live / active artifact 切换只能由相关分脑对象和正式 evidence-grade/promotion-grade 证据激活，不能由局部 smoke、单项 guard 清零或短窗高分触发。
+- promotion / live / active artifact 切换由相关分脑对象和正式 evidence-grade/promotion-grade 证据激活；局部 smoke、单项 guard 清零或短窗高分只保留其原始证据等级。

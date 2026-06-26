@@ -1,55 +1,53 @@
-# 主脑身份层
+# 主脑身份对象
+快照日期：`2026-06-27`
 
-快照日期：`2026-06-12`
+本文件定义 `H:\quant_project` 主脑的身份、目标函数和受保护对象类型。它不是团队流程系统；它是个人研究者的长期认知网络。
 
-## 1. 主脑是谁
-- `brain/` 是整个 `H:\quant_project` 工作区的个人研究者大脑，不是普通说明文档集合，也不是团队流程系统。
-- 这个工作区不要设计成“某个 agent 很强”，而要设计成“agent 可替换，大脑不可替换”。
-- 核心原则只有一句：
-  - `Agent 无状态，项目大脑有状态。`
-- 当前最高目标函数：服务个人研究推进、资料收录、项目接管、快速重构和直接行动。
+## object `workspace_brain`
+`type`: root_memory
+`definition`: `brain/` 是整个工作区的长期记忆、对象拓扑和接管入口。
+`principle`: Agent 无状态，项目大脑有状态。
+`goal`: 服务个人研究推进、资料收录、项目接管、快速重构和直接行动。
+`methods`: `identify_object(task)`；`route_to_child_brain(task)`；`writeback(memory)`；`protect_object(object, method)`。
 
-## 2. 主脑负责什么
-- 维护主脑与各分脑的对象拓扑、归属关系和写回位置。
-- 维护跨项目身份、目标函数、受保护对象类型和长期记忆入口。
-- 让关键状态外显，避免上下文只存在于某个 agent 的窗口里。
-- 让任何 agent 都能按目标识别相关对象，再进入对应 body 执行。
-- 把阅读材料、研究判断、项目事实、复盘和长期结论收进 brain / references，让聊天记录不再是唯一记忆。
+## object `researcher_workstyle`
+`type`: default_action_model
+`preferences`: 研究推进优先；直接实现优先；新优化、新结构、新路径优先。
+`cleanup_semantics`: 旧机制、旧测试、旧兼容入口只有在仍有活跃调用、不可替代证据价值或外部接口责任时保留。
+`validation_semantics`: 测试、审计、提交和守卫服务当前对象和当前结论，不维护过时架构惯性。
+`truth_semantics`: 量化结论区分事实、推断和猜测；收益、效率和真实可用数据是核心约束。
 
-## 3. 北极星
-- 工作区北极星不是“多 agent 并行”或“团队级流程正确”，而是“个人研究者长期可接管、可推进、可重构的认知网络”。
-- 默认行动偏好：
-  - 研究推进优先。
-  - 直接实现优先。
-  - 新优化、新结构、新路径优先。
-  - 旧机制、旧测试、旧兼容入口默认可删；只有真实活跃调用、不可替代证据价值或外部接口责任才保留。
-  - 测试、审计、提交和守卫只服务当前主线，不维护过时架构惯性。
-- 量化项目仍以收益、效率和真实可用数据为核心；任何模型结论不得混淆事实、推断和猜测。
+## object `handoff_success`
+`type`: success_criteria
+`definition`: 新 agent 不依赖隐性上下文，也能找到相关对象、当前状态、证据入口和质量底线。
+`traceability`: 关键结论能追溯到 brain object、registry、manifest、run tag、artifact 或 reference。
+`state_model`: 已验证事实、未验证推断、待验证假设分层保存。
+`long_run_model`: 长任务通过 PID/job/run id、日志、progress、summary、artifact 或 status 保持可接管。
 
-## 4. 成功标准
-- 任意新 agent 可以在不依赖隐性上下文的前提下完成接管。
-- 任意关键结论都能追溯到 brain 对象、registry、manifest、run tag 或 reference。
-- 项目状态能区分：
-  - 已验证事实
-  - 未验证推断
-  - 待验证假设
-- 轮询任务、多 agent 接力、长时间运行后，仍然能找回项目初心、当前对象和质量底线。
+## Protected Object Types
+### object `canonical_or_unique_data`
+`scope`: QDP canonical lake、registry pointer、policy bundle、memmap、唯一研究证据和不可重建资产。
+`activation`: rebuild、switch pointer、cleanup、delete、migrate。
 
-## 5. 受保护对象
-硬边界以对象属性存在，只有任务触碰相关对象时才激活：
+### object `pit_or_label_semantics`
+`scope`: PIT/no-leakage、label completeness、future availability、evidence grade。
+`activation`: dataset build、feature/label change、training、evaluation、model conclusion。
 
-- `canonical_or_unique_data`：唯一数据、active canonical 数据资产、不可重建研究证据。
-- `pit_or_label_semantics`：PIT/no-leakage、未完成标签、未来函数和证据等级。
-- `active_execution_artifact`：live/default/paper/broker、active artifact、promotion gate。
-- `secret_or_external_state`：密钥、账号、外部服务状态。
-- `cross_project_dirty_work`：其它项目的并行 dirty paths、进程和输出。
+### object `active_execution_artifact`
+`scope`: live/default/paper/broker、active artifact、promotion gate、trade plan。
+`activation`: activate、restore、update、generate trade plan、paper/live/broker wiring。
 
-这些对象的保护语义不可静默绕过；无关任务不需要反复复述它们。除受保护对象外，默认允许重构、删除、替换和直接改造，复杂兼容层不是默认美德。
+### object `secret_or_external_state`
+`scope`: secrets、accounts、external services、remote deployment、real trading state。
+`activation`: create、rotate、write、deploy、connect。
 
-## 6. 当前工作区结构定位
-- 当前正式生产主线分脑：`daily_research/brain/`
-- 当前共享数据平台分脑：`quant_data_platform/brain/`
-- 当前盘中实验与 RL 分脑：`t0_project/brain/`
-- 当前独立产品分脑：`daily_stock_analysis-main/brain/`
-- 当前传统量化方法分脑：`traditional_quant_research/brain/`
-- 当前主脑重点是让每个根目录身份清晰：项目必须有分脑，主脑基础设施和过渡资产必须明示身份。
+### object `cross_project_dirty_work`
+`scope`: unrelated dirty paths、processes、ports、GPU jobs、provider tasks、outputs。
+`activation`: manage、delete、reuse、commit、wait。
+
+## Child Brain Registry
+- `daily_research/brain/`: 正式生产研究与执行主线。
+- `quant_data_platform/brain/`: 共享数据平台、canonical 数据基底和 memmap/training pack owner。
+- `t0_project/brain/`: 盘中实验与 RL 原型。
+- `daily_stock_analysis-main/brain/`: 独立产品分脑。
+- `traditional_quant_research/brain/`: 传统量化方法研究分脑。

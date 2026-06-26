@@ -1,63 +1,53 @@
-# Daily Research 身份层
+# Daily Research 身份对象
+快照日期：`2026-06-27`
 
-快照日期：`2026-06-12`
+本文件定义 `daily_research` 这个分脑对象的身份、目标函数和长期不变量。可变状态放在 `state_center.md`，长证据放在 `references/`。
 
-## 1. 我是谁
-- `daily_research` 是当前工作区的正式生产研究与执行主线。
-- 它不是单纯的研究仓库，而是一个同时负责研究、formal 验证、recent 验证、production full-fit、live 执行和接管治理的项目级大脑。
-- 在当前执行端冻结期，它首先服务个人研究推进：快速实验、数据/特征/模型重构、旧机制清理和可回滚迭代优先；团队式门禁、旧兼容和重测试不是默认目标。
-- 项目设计原则不是“某个 agent 很强”，而是：
-  - `Agent 无状态，项目大脑有状态。`
+## object `daily_research_project`
+`type`: project_brain
+`definition`: `daily_research` 是生产研究与执行分脑，负责把研究候选、验证证据、执行候选和接管记忆连接成一套可复现系统。
+`current_role`: 当前更偏个人研究推进：快速实验、数据/特征/模型重构、旧机制清理和可回滚迭代优先。
+`memory_principle`: Agent 无状态，项目大脑有状态；会话里的关键判断最终要落到对象、证据或产物上。
+`primary_data_dependency`: QDP explicit lake dataset id、manifest、memmap、training pack。
+`methods`: `inspect_state()`；`run_research_procedure()`；`write_reference()`；`request_qdp_update()`。
 
-## 2. 我追求什么
-- 第一北极星：
-  - 在当前治理规则下持续找到更优的可执行默认链，并且只在证据充分时物化到 live。
-- 第二北极星：
-  - 让研究、执行、文档、交接和复盘形成统一真源，而不是依赖某个会话记忆。
-- 第三北极星：
-  - 让任何接管者都能先读状态、再做事、做完能写回，并把错误转化成长期资产。
-- 第四北极星：
-  - 构建一个以日为单位进行连续决策的交易执行模型，而不是继续围绕固定调仓频率、固定持有周期或人工执行桥做局部优化。
-  - 这个模型应直接从市场全局状态、个股演化路径与持仓上下文中学习 `open / hold / add / reduce / exit / cash` 的动态最优执行。
-  - 它追求的是在尽量少的人为约束下，综合权衡未来收益、风险与成本，并做出当前条件下最优的动态执行判断。
+## object `research_identity`
+`type`: objective_model
+`north_star`: 找到可执行、可验证、成本后仍有意义的交易研究链路。
+`current_focus`: 收盘后短线选股；执行侧仍是冻结骨架，当前不把 research progress 自动解释成 live/default。
+`success_shape`: 研究结论能对齐数据基底、样本池、PIT/可得性、特征语义、模型输出、回测口径、成本假设和证据等级。
+`failure_shape`: 把低预算实验、loose latest、执行骨架、历史标签或单次收益现象混成当前策略结论。
 
-## 3. 成功判定标准
-- formal、recent、live、promotion 四层必须分开且始终能对齐到真源。
-- strongest-model 的 `formal winner / recent winner / promotable winner` 必须可明确区分。
-- learned-control 的 `fresh formal / constrained formal / recent` 也必须分层表述。
-- 任何正式实验都必须支持可追溯证据、受监管执行、可观察轮询、项目解释器一致性，并明确声明自己属于 `epoch formal candidate` 还是 `non-epoch shadow prototype`。
-- 任意新 agent 在不通读整份 `episodic_memory.md` 的前提下，也能完成接管。
+## object `execution_identity`
+`type`: protected_execution_identity
+`state`: `frozen_skeleton_only / awaiting_research_rebuild`
+`material_object`: `daily_research/output/active_execution_strategy.json`
+`activation`: 只有 active/default、paper/live、broker、trade plan、execution restore 或 promotion 任务会激活。
+`invariant`: 普通 research、数据源评估、scorer 设计和文档整理不改变 active 执行物。
+`methods`: `inspect_active_artifact()`；`keep_frozen()`；`restore_or_activate(explicit_authorization, promotion_evidence)`。
 
-## 4. 当前硬约束
-- formal / recent / live / promotion 不得混写。
-- `deep_alpha` 与可 promotion 的 `continuous_policy formal_torch_v2 / formal_torch_seq_v3 / formal_torch_hier_v4` 都属于 `epoch formal candidate`：必须 GPU only。
-- `epoch formal candidate` 至少从 `32` epoch 起步；不够就沿同一 `experiment-tag / run_dir` 做 `strict resume` 续训。
-- `continuous_policy prototype_gbdt_v1` 明确属于 `non-epoch shadow prototype`：只允许 shadow / teacher / ablation，不计入 formal 完整判决，不得直接 promotion。
-- `continuous_policy formal_torch_seq_v3` 是 stronger temporal sequence branch：只在 `v2` 仍受 `hold / reduce / cash` 行为瓶颈约束时进入正式主计划，但一旦启用，仍必须遵守 `GPU only + >=32 epoch + strict resume`。
-- `continuous_policy formal_torch_hier_v4` 是 market / portfolio / cross-section interaction 的分层时序分支：一旦启用，同样必须遵守 `GPU only + >=32 epoch + strict resume`，并先以 `shadow_only` 方式验证。
-- 长实验必须受监管、可观察、可恢复；是否前台等待、后台驻留或分轮轮询由 agent 根据任务阶段、资源风险和可观察信号决定。
-- 所有 `epoch formal candidate` 都必须支持同一 `experiment-tag / run_dir` 的 `strict resume`。
-- 默认终端超时预算按 `10` 小时处理。
-- 默认追求最高效、最合理，不追求最小改动。
-- 某设定在较弱模型上失效，不等于在更强模型上永久淘汰；是否重开验证，取决于预期信息增益是否足够高。
-- `requested_recent_end_date` 与 `effective recent validation end` 必须分开记录。
-- live 默认执行不得被单次 recent 结果静默改写。
+## object `evidence_identity`
+`type`: evidence_model
+`levels`: `smoke_only`、`scout_only`、`evidence_grade`、`promotion_grade`
+`invariant`: completed run 只表示流程完成；模型质量、执行候选和 promotion 需要单独证据等级。
+`truth_sources`: explicit dataset id、manifest、run tag、protocol/study summary、reference、machine registry。
+`non_truth_sources`: loose `latest_*`、单次 recent、未观测 realtime tail label、口头记忆、孤立终端输出。
 
-## 5. 当前事实入口
-- 身份层只保留目标、边界和硬约束，不再承载可变的 live 默认、winner 数值或阶段指标。
-- 当前状态、当前优先级、当前 live 默认解释：
-  - `daily_research/brain/state_center.md`
-- 稳定事实、硬规则与长期教训：
-  - `daily_research/brain/knowledge_center.md`
-- 当前 active 执行物化真源：
-  - `daily_research/output/active_execution_strategy.json`
-- 如果身份层与上述真源冲突，以状态中枢和 active artifact 为准，并立即回写纠偏。
+## object `historical_research_identity`
+`type`: archived_lineage
+`state`: 旧 path20、alpha_v2、continuous_policy、short_v5b、v2 reset 等线保留为证据和方法库。
+`usage`: 被当前任务明确选中时才激活；默认不阻塞 QDP 数据基底上的新短线研究。
+`invariant`: 历史 active/default、历史 winner、历史 payload 不等于当前可执行策略。
 
-## 6. 当前禁区
-- 不得把 learned-control recent 胜利直接写成 promotion 结论。
-- 不得把 selected formal profile、constrained best、fresh formal best 和 live default 混写成一个“当前最强”。
-- 不得在没有写回 brain 的情况下，让关键状态只存在于终端会话里。
-- 不得把可变 live 默认、最新分数或实验指标长期写在 `identity_layer.md`。
-- 不得继续把宽扫 hand-crafted repair 当默认主研究路线。
-- 不得再把 `baseline_current` 写成 strongest-model 当前 recent winner。
-- 不得让旧 Stage、旧 payload、旧单体 memmap、旧 path_policy 测试或旧兼容入口阻塞 v2 / canonical 数据基底上的新研究；有真实证据价值时只作历史对照。
+## Pure Functions
+- `select_identity(task)`: 从任务目标选择 `research_identity`、`execution_identity`、`evidence_identity` 或历史线。
+- `is_execution_task(task)`: 任务触碰 active/default、paper/live、broker、trade plan、execution restore 或 promotion 时返回 true。
+- `classify_result(run)`: 把 completed、failed、timeout、interrupted、smoke、scout 映射到证据等级，而不是直接映射到策略好坏。
+- `resolve_truth_source(claim)`: 优先返回 explicit id / manifest / registry / reference；loose latest 只返回 candidate clue。
+
+## Routing
+- 当前状态与下一步：`daily_research/brain/state_center.md`
+- 稳定对象、长期事实和方法论：`daily_research/brain/knowledge_center.md`
+- 操作过程和验证入口：`daily_research/brain/operations_center.md`
+- 对象级不变量和激活逻辑：`daily_research/brain/governance_layer.md`
+- 长证据和历史档案：`daily_research/brain/references/`

@@ -1,55 +1,75 @@
-# 主脑状态中枢
+# 主脑状态程序
+快照日期：`2026-06-27`
 
-快照日期：`2026-06-20`
+本文件保存 `H:\quant_project` 主脑的当前运行时对象。项目细节写入对应分脑；主脑只保存跨项目拓扑、共享对象和受保护对象类型。
 
-## 当前接管摘要
-- 当前工作区根目录固定为 `H:\quant_project`。
-- 旧通达信插件目录 `H:\new_tdx64\PYPlugins\user` 不再承载本项目；它应保持为空或只保留通达信原生用户插件文件。
-- 工作区正式生产研究与执行主线仍是 `daily_research`。
-- 已接入主脑的一级分脑固定为：`daily_research`、`quant_data_platform`、`t0_project`、`daily_stock_analysis-main`、`traditional_quant_research`。
-- 默认接管方式为：先理解用户目标，再识别相关对象；`workspace-brain` skill 只帮助校准对象归属、当前状态和可能的受保护对象。
-- route / capsule / bootstrap 是可选传感器，不是必经流程。
-- 主脑只维护共享对象、项目关系和受保护对象类型；项目事实、实验指标、命令细节写入对应分脑。
+## Module Interface
+`exports`: `workspace_root = H:\quant_project`；`primary_project = daily_research`；`data_substrate = quant_data_platform`；`registered_child_brains = [daily_research, quant_data_platform, t0_project, daily_stock_analysis-main, traditional_quant_research]`。
+`sensors`: route、capsule、bootstrap、health、doc_guard、integrity_check；它们提供诊断，不是准入仪式。
 
-## 当前工作面对象
-- `workspace_git_surface`：默认工作面是 `main`；当前 worktree 审计只有 `H:\quant_project` 一个物理 worktree，当前本地分支只剩 `main`。
-- 该对象只在 repo-tracked mutation、提交、清理、迁移或分支/worktree 操作时激活；纯只读分析不需要复述分支边界。
-- 旧 `codex/daily-research-execution` 已按用户明确授权删除。
+## Object Instances
+### object `workspace_memory`
+`type`: root_brain
+`state`: 主脑维护共享对象、项目关系和受保护对象类型；项目事实、实验指标、命令细节写入分脑。
+`methods`: `identify_project(path)`；`select_child_brain(task)`；`route_writeback(result)`；`run_brain_guard(scope)`。
 
-## 当前分脑状态
-- `daily_research`：生产研究与执行主线；active 真源为 `daily_research/output/active_execution_strategy.json`；项目事实、rXX 证据、Path20 历史线 / multi_horizon_utility 当前主线 / continuous_policy / deep_alpha 当前结论以 `daily_research/brain/` 为准，主脑不展开 trial 指标、长 tag 或局部命令。
-- `quant_data_platform`：共享量化数据平台与 canonical 数据基底分脑；负责 registry、coverage audit、policy bundle、memmap 治理和跨项目可复用数据契约。
-- `t0_project`：盘中实验与 RL 原型分脑；不得替代 `daily_research` 正式执行默认。
-- `daily_stock_analysis-main`：独立产品分脑；不改写 `daily_research` active artifact 或 promotion gate。
-- `traditional_quant_research`：传统量化方法研究分脑；项目事实、研究记录、实验证据与局部命令以 `traditional_quant_research/brain/` 和对应项目产物为准。
+### object `workspace_git_surface`
+`type`: repo_surface
+`state`: 默认工作面是 `main`；当前 worktree 审计只有 `H:\quant_project` 一个物理 worktree。
+`activation`: repo-tracked mutation、提交、清理、迁移、分支或 worktree 操作。
+`methods`: `inspect_status()`；`stage_or_commit_when_requested()`；`protect_unrelated_dirty_paths()`。
 
-## 当前重点
-- 保持 `daily_research` 的正式生产主线地位，同时冻结 live 默认执行的静默切换。
-- 维护主脑作为共享脑核，不让主脑重新长成分脑实验日志。
-- 分脑入口保持精炼；长过程、长命令和历史证据进入 `episodic_memory.md` 或 `brain/references/`。
-- 当前所有 `daily_research` 任务必须显式使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`。
-- 根目录项目身份以主脑 manifest 为准：已注册分脑是项目；`brain/`、`tools/`、`docs/` 是主脑基础设施；`canonical_data/` 是过渡数据资产入口；`a_stock_daily_selection/` 当前是待整理旧目录。
-- 当前个人工作约定：canonical 数据集、`canonical_data_v1`、policy bundle、registry、sharded memmap 和数据清理默认看 `quant_data_platform`；`daily_research` 只消费数据并维护研究、模型、回测、执行候选和 active artifact 边界。
-- 后续 agent 不得从 `H:\new_tdx64\PYPlugins\user` 接管本项目；旧路径只可能出现在历史 reference 或回滚说明中。
-- 所有任务默认由 agent 自主判断对象范围：可读取相关项目事实，不混用无关 dirty/output/process；写入、清理、进程管理和提交按真实风险收敛到相关对象。
-- 任何需要轮询、等待外部状态或跨多轮观察的任务都要有可观察 handle（PID / job id / run id、日志、progress、artifact、端口 / API status 等）解释进展；轮询间隔由 agent 根据任务信号自适应调整，不把固定 sleep、固定窗口或历史固定模板当作通用规则。
-- 等待窗口耗尽不是失败证据；只有明确错误、资源危险、失败产物或用户停止才中断或写失败，仍有进展则继续自适应轮询。
+### object `daily_research_child`
+`type`: production_research_child_brain
+`path`: `daily_research/brain/`
+`state`: 正式生产研究与执行主线；当前研究指针和执行冻结状态以该分脑 `state_center.md` 为准。
+`protected_object`: `daily_research/output/active_execution_strategy.json`
 
-## 当前边界
-- 主脑不记录具体 trial 指标、训练 tag 长列表或局部实验命令；这些属于分脑对象。
-- 分脑不改写主脑共享对象、拓扑和受保护对象类型；这些属于主脑。
-- `daily_research` 的研究证据、rXX references、Path20 历史线 / multi_horizon_utility 当前主线 / continuous_policy / deep_alpha 状态和验证矩阵只读 `daily_research/brain/` 与对应实验产物；主脑只保留 promotion / live / active artifact 边界。
-- 任何疑似中文乱码，先用 UTF-8 工具复核真实文件内容，不把终端编码显示问题当作文件损坏。
+### object `quant_data_platform_child`
+`type`: shared_data_substrate_child_brain
+`path`: `quant_data_platform/brain/`
+`state`: 共享量化数据平台、provider ingest、canonical lake、registry、coverage audit、policy bundle、memmap 和 training pack owner。
 
-## 当前风险
-- 如果主脑继续追加日期日志，接管会重新退化为长文扫描。
-- 如果只改分脑、不改主脑，跨项目规则会再次漂移。
-- 如果兼容入口、README 或教程保留 brain 未收录的规则，后续 agent 会绕过中枢。
-- 如果普通短命令、临时产物、测试或报告散落到 workspace 根和无关项目，接管仍会变慢；agent 应主动保持路径整洁。
-- 如果需要轮询的任务没有可观察 handle、日志、progress、summary、artifact 或状态信号可追溯，就不能写成正式证据；如果只有观察窗口耗尽而没有明确失败信号，也不能写成失败证据。
-- 如果 agent 或脚本默认落到旧通达信插件 `user` 目录，先纠偏到 `H:\quant_project`，再继续操作。
+### object `t0_project_child`
+`type`: intraday_experiment_child_brain
+`path`: `t0_project/brain/`
+`state`: 盘中实验与 RL 原型；不替代 `daily_research` 正式执行默认。
 
-## 推荐下一步
-- 结构变更先跑 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`；普通 brain 文档小改用 `tools.brain.doc_guard check --files <paths>` 或 `--scope changed`，全量维护再跑裸 `doc_guard check`；`daily_research/tools/project_consistency_check.py --mode research` 是研究态轻量守卫，`--mode execution/full` 只在执行或完整维护时跑。
-- 新状态只写当前结论；过程复盘写到目标分脑 `episodic_memory.md`。
-- 需要旧证据时从分脑 `brain/references/` 或实验产物读取，不把旧结论自动提升为当前状态。
+### object `daily_stock_analysis_child`
+`type`: independent_product_child_brain
+`path`: `daily_stock_analysis-main/brain/`
+`state`: 独立产品分脑；不改写 `daily_research` active artifact 或 promotion gate。
+
+### object `traditional_quant_research_child`
+`type`: traditional_quant_child_brain
+`path`: `traditional_quant_research/brain/`
+`state`: 传统量化方法研究分脑；项目事实、研究记录和局部命令以该分脑和项目产物为准。
+
+### object `legacy_tdx_plugin_path`
+`type`: deprecated_external_path
+`path`: `H:\new_tdx64\PYPlugins\user`
+`state`: 不承载当前项目；只可能出现在历史 reference、回滚说明或通达信原生用户插件场景。
+
+## Pure Functions
+- `select_child_brain(task)`: 根据路径、项目名、数据资产或用户目标返回相关分脑。
+- `select_protected_objects(task)`: 只返回任务实际触碰的 canonical data、PIT/label、active execution、secret/external state 或 cross-project dirty objects。
+- `resolve_data_owner(asset)`: canonical 数据集、policy bundle、registry、sharded memmap 和数据清理默认返回 `quant_data_platform_child`。
+- `resolve_research_owner(task)`: 研究、模型、回测、执行候选和 active artifact 默认返回 `daily_research_child`。
+- `classify_polling_state(handle)`: 观察窗口耗尽、仍有进展、明确失败、资源危险、用户停止分别返回不同状态。
+
+## Procedures
+### procedure `workspace_handoff`
+`input`: user task
+`steps`: 理解目标；选择相关对象和分脑；读取最小必要 state/reference/artifact；执行任务；验证；按对象写回。
+`side_effects`: selected child brain or workspace docs only.
+
+### procedure `brain_structure_change`
+`input`: changed brain files, skill, manifest, workflow or registry
+`steps`: 保持热路径 compact；长历史进 references；运行 doc guard、integrity check 和 burden audit；必要时同步 skill。
+`validation`: `python -m tools.brain.doc_guard check --scope changed`；`python -m tools.brain.integrity_check --json`；`python brain/skills/workspace-brain/scripts/brain_runtime.py brain-burden-audit --cwd . --mode compact`。
+
+## Current Invariants
+- 主脑不展开分脑 trial 指标、长 tag 或局部实验命令。
+- 任何中文乱码疑似问题先用 UTF-8 读取复核，再判断是否是文件损坏。
+- 需要等待外部状态或跨轮观察的任务应绑定 PID / job id / run id、日志、progress、summary、artifact、端口或 API status 等可观察 handle。
+- 观察窗口耗尽不是失败证据；只有明确错误、资源危险、失败产物或用户停止才中断或写失败。

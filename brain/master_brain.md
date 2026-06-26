@@ -27,6 +27,6 @@
 - `local-in-child`：项目事实、项目命令、项目证据写在子脑。
 
 ## 3. 注册原则
-新项目脑由 runtime 初始化并注册；注册结果必须进入主脑 manifest、catalog 和发现式路由链路。
+新项目脑由 runtime 初始化并注册；注册结果写入主脑 manifest、catalog 和发现式路由链路。
 
 本文件不重复 boot order 或入口命令，避免成为 manifest 之外的第二套脑。
