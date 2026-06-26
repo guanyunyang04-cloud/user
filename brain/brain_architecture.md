@@ -1,36 +1,46 @@
 # 主脑架构
 
-## 1. 真源边界
-`brain/brain_manifest.json` 是 child list、shared contract 和注册拓扑的单一结构源。
+## 1. 架构定位
+`brain/` 是 `H:\quant_project` 的主脑：它保存跨项目对象、长期记忆、项目关系和少数保护语义。
 
-本文件只解释结构原则，不维护读取顺序、子脑清单或入口命令；这些由 manifest、catalog 和 runtime helper 生成。
+脑区不是流程审批系统。它更接近一张面向对象的自然语言认知图：每个项目、数据资产、执行物、证据集合和工具入口都是一个对象；对象自己说明定义、归属、关系、方法和触发边界。
 
-## 2. 统一 7 模块核
-主脑和附着子脑共享同一 7 模块核：
+## 2. 对象模型
+脑区对象默认使用这组属性描述：
 
-- `identity_layer.md`：身份、目标、禁区。
-- `state_center.md`：当前状态、优先级、handoff。
-- `knowledge_center.md`：稳定事实、硬规则、长期教训。
-- `brain_architecture.md`：结构解释、模块边界、扩展原则。
-- `operations_center.md`：body 地图、环境基线、命令入口、写回路由。
-- `governance_layer.md`：治理闭环、接管纪律、反偏移机制。
-- `episodic_memory.md`：时间顺序证据库，按需下钻。
+- `定义`：对象是什么，不是什么。
+- `归属`：由哪个主脑或分脑维护。
+- `消费者`：哪些项目或流程读取它。
+- `当前状态`：接管时真正需要知道的当前事实。
+- `方法`：常见操作，如 inspect、ingest、update、validate、cleanup。
+- `激活条件`：哪些任务会让这个对象相关。
+- `保护语义`：触碰该对象时需要保留的不变量。
+- `证据入口`：长报告、registry、manifest、run tag 或 reference。
 
-## 3. 主脑与子脑
-- 主脑维护共享脑核、少数硬边界、拓扑、注册和个人工作记忆。
-- 子脑维护本项目状态、知识、入口、证据和区域特化。
-- 共享结构只在主脑写一次；项目事实只在对应子脑写一次。
-- 共享领域事实以人读记忆为主：QDP 管 canonical 数据基底，daily_research 管研究/执行证据；agent 按目标自主判断读取顺序。
-- `daily_research/brain/brain_operating_protocol.md` 是可选补充协议，不属于核心模块。
-- 根目录一级文件夹必须有明确身份：已注册分脑项目、主脑基础设施、共享工具、工作区文档、过渡资产或缓存依赖。
+保护语义挂在对象上，不作为每次任务的全局口号。无关对象不激活，无关边界不复述。
 
-## 4. 扩展原则
-- 新项目先生成 7 模块 skeleton，再通过 runtime `register` 写入主脑 child list 和 catalog。
-- 新模块默认不新增；先判断能否并入现有 7 模块。
-- 长证据、命令 transcript、dated review 放入 `references/`，核心中枢只保留当前索引和稳定结论。
-- 自进化保持 proposal-only：低风险观察可进入 proposal 队列，协议或行为变更必须用户批准后实施。
+## 3. 7 个记忆区域
+主脑和分脑仍共享 7 模块核，但它们是记忆区域，不是固定读取仪式：
 
-## 5. 运行边界
-- route / capsule / bootstrap 是可选诊断工具；它们的 JSON 输出不替代 agent 判断。
-- `workspace_governance` 是 workspace workflow domain 和 bootstrap alias，不是 child brain id。
-- workflow JSON / CLI 输出是运行态传感器，不替代 Markdown、manifest、代码和实际产物证据。
+- `identity_layer.md`：对象身份、目标函数和核心角色。
+- `state_center.md`：当前活跃对象、当前状态和下一步。
+- `knowledge_center.md`：对象定义、长期事实、经验来源和稳定语义。
+- `brain_architecture.md`：对象模型、模块边界和扩展方式。
+- `operations_center.md`：对象方法入口、环境基线和验证方式。
+- `governance_layer.md`：受保护对象的不变量和激活逻辑。
+- `episodic_memory.md`：时间顺序记忆，按需回溯。
+
+## 4. 主脑与分脑
+- 主脑维护共享对象、项目拓扑、跨项目关系和全局保护对象类型。
+- 分脑维护本项目对象、当前状态、项目方法、证据索引和区域特化。
+- 项目事实写在对应分脑；共享事实写在主脑；长证据写入 `references/`。
+- `brain/brain_manifest.json` 是 child list、shared contract 和注册拓扑的结构源。
+
+## 5. 扩展原则
+- 新项目先初始化分脑对象，再注册到主脑 manifest 和 catalog。
+- 新内容优先归入现有对象或现有记忆区域；确有新对象再命名。
+- 长命令、长审计、完整实验过程和历史复盘下沉到 `references/`。
+- 低风险语义整理在用户确认方向后可直接收敛；改变 active/live/canonical/PIT/secrets/external service 等受保护对象时，需要显式授权和对象级验证。
+
+## 6. 工具地位
+route、capsule、bootstrap、health、guard 和 skill 都是传感器或方法入口，不是上级流程。它们可以帮助识别对象和风险，但最终由 agent 根据用户目标、文件证据和对象语义判断。

@@ -52,7 +52,7 @@
 - QDP 是共享数据基底唯一 owner；每日更新、provider、入湖导入和 canonical/policy bundle 构建都走 `quant_data_platform` CLI/API。`daily_research` 只消费 QDP 输出的 lake、manifest、memmap 和 training pack，不再直接拥有在线 provider 或 lake catalog。
 - 每日任务是手动 runbook：先确认 readiness，再手动刷新数据/信号、生成交易计划、模拟账户过账、复核状态；任一步数据缺口或 blocker 都必须停下并保留证据。
 - 旧 runtime 只可归档为事故证据；测试和诊断必须使用隔离 runtime root，不能污染真实 `daily_research/output/execution_app`。
-- TDX-family 已退出正式研究主链路：`tqcenter.py`、`pytdx`、`mootdx` 不得作为 `daily_research` 默认或正式 provider；若旧脚本保留这些名字，只能视为 legacy/historical path。
+- Provider 边界对象：`daily_research` 不直连任何在线 provider。`mootdx_online`、`BaoStock`、`CNInfo` 等只作为 QDP 上游 ingest / raw archive / canonical 治理对象存在；研究、训练和 diagnostics 只读取 QDP explicit lake dataset id、manifest、memmap 或 training pack。旧 `tqcenter.py`、`pytdx`、`mootdx` 若出现在 `daily_research` 脚本中，只能作为 legacy/historical path 或待迁移入口，不能绕过 QDP。
 - 工作区迁移后，旧通达信插件 `user` 路径只能出现在历史 reference 或回滚说明中；新接管、新数据、新命令必须以 `H:\quant_project` 为根。
 - 脑区是项目事实真源，skills 只是流程入口，不复制长历史。
 

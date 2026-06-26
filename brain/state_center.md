@@ -7,15 +7,14 @@
 - 旧通达信插件目录 `H:\new_tdx64\PYPlugins\user` 不再承载本项目；它应保持为空或只保留通达信原生用户插件文件。
 - 工作区正式生产研究与执行主线仍是 `daily_research`。
 - 已接入主脑的一级分脑固定为：`daily_research`、`quant_data_platform`、`t0_project`、`daily_stock_analysis-main`、`traditional_quant_research`。
-- 默认接管方式为：先使用 `workspace-brain` skill 校准脑区入口与硬边界，再由 agent 理解当前目标，并按需要读取主脑、分脑、代码或产物；不再把 route / capsule 当作必经流程。
-- 主脑只维护少数共享事实和硬边界；项目事实、实验指标、命令细节写入对应分脑。
+- 默认接管方式为：先理解用户目标，再识别相关对象；`workspace-brain` skill 只帮助校准对象归属、当前状态和可能的受保护对象。
+- route / capsule / bootstrap 是可选传感器，不是必经流程。
+- 主脑只维护共享对象、项目关系和受保护对象类型；项目事实、实验指标、命令细节写入对应分脑。
 
-## 当前分支纠偏规则
-- 期望分支：所有后续代码、文档与实验工作默认在 `main` 分支展开。
-- 当前执行前置：如果 `git branch --show-current` 不是 `main`，任何会修改 repo-tracked 文件的任务都必须先纠偏到 `main`，或由用户显式撤销 `main-branch-only` 规则。
-- 分支异常属于 preflight blocker，不属于研究证据、promotion 证据或分脑状态结论。
-- 当前 worktree 审计：只有 `H:\quant_project` 一个物理 worktree；不默认创建或使用 git worktree。
-- 当前本地分支只剩 `main`；旧 `codex/daily-research-execution` 已按用户明确授权删除。
+## 当前工作面对象
+- `workspace_git_surface`：默认工作面是 `main`；当前 worktree 审计只有 `H:\quant_project` 一个物理 worktree，当前本地分支只剩 `main`。
+- 该对象只在 repo-tracked mutation、提交、清理、迁移或分支/worktree 操作时激活；纯只读分析不需要复述分支边界。
+- 旧 `codex/daily-research-execution` 已按用户明确授权删除。
 
 ## 当前分脑状态
 - `daily_research`：生产研究与执行主线；active 真源为 `daily_research/output/active_execution_strategy.json`；项目事实、rXX 证据、Path20 历史线 / multi_horizon_utility 当前主线 / continuous_policy / deep_alpha 当前结论以 `daily_research/brain/` 为准，主脑不展开 trial 指标、长 tag 或局部命令。
@@ -27,18 +26,18 @@
 ## 当前重点
 - 保持 `daily_research` 的正式生产主线地位，同时冻结 live 默认执行的静默切换。
 - 维护主脑作为共享脑核，不让主脑重新长成分脑实验日志。
-- 分脑入口必须精炼；长过程、长命令和历史证据进入 `episodic_memory.md` 或 `brain/references/`。
+- 分脑入口保持精炼；长过程、长命令和历史证据进入 `episodic_memory.md` 或 `brain/references/`。
 - 当前所有 `daily_research` 任务必须显式使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`。
 - 根目录项目身份以主脑 manifest 为准：已注册分脑是项目；`brain/`、`tools/`、`docs/` 是主脑基础设施；`canonical_data/` 是过渡数据资产入口；`a_stock_daily_selection/` 当前是待整理旧目录。
 - 当前个人工作约定：canonical 数据集、`canonical_data_v1`、policy bundle、registry、sharded memmap 和数据清理默认看 `quant_data_platform`；`daily_research` 只消费数据并维护研究、模型、回测、执行候选和 active artifact 边界。
 - 后续 agent 不得从 `H:\new_tdx64\PYPlugins\user` 接管本项目；旧路径只可能出现在历史 reference 或回滚说明中。
-- 所有任务默认由 agent 自主判断范围：可读取相关项目事实，不混用无关 dirty/output/process；写入、清理、进程管理和提交按真实风险收敛到相关路径。
+- 所有任务默认由 agent 自主判断对象范围：可读取相关项目事实，不混用无关 dirty/output/process；写入、清理、进程管理和提交按真实风险收敛到相关对象。
 - 任何需要轮询、等待外部状态或跨多轮观察的任务都要有可观察 handle（PID / job id / run id、日志、progress、artifact、端口 / API status 等）解释进展；轮询间隔由 agent 根据任务信号自适应调整，不把固定 sleep、固定窗口或历史固定模板当作通用规则。
 - 等待窗口耗尽不是失败证据；只有明确错误、资源危险、失败产物或用户停止才中断或写失败，仍有进展则继续自适应轮询。
 
 ## 当前边界
-- 主脑不得记录具体 trial 指标、训练 tag 长列表或局部实验命令；这些属于分脑。
-- 分脑不得改写主脑少数共享事实、拓扑和硬边界；这些属于主脑。
+- 主脑不记录具体 trial 指标、训练 tag 长列表或局部实验命令；这些属于分脑对象。
+- 分脑不改写主脑共享对象、拓扑和受保护对象类型；这些属于主脑。
 - `daily_research` 的研究证据、rXX references、Path20 历史线 / multi_horizon_utility 当前主线 / continuous_policy / deep_alpha 状态和验证矩阵只读 `daily_research/brain/` 与对应实验产物；主脑只保留 promotion / live / active artifact 边界。
 - 任何疑似中文乱码，先用 UTF-8 工具复核真实文件内容，不把终端编码显示问题当作文件损坏。
 

@@ -1,81 +1,97 @@
 # 主脑知识中枢
 
-## 1. 固定规则
-- `agent-first`
-  - 先理解用户目标，再按需要读取主脑、分脑、代码和产物；capsule / route / bootstrap 只是可选诊断工具
-- `common-in-main`
-  - 共享结构、共享顺序、共享治理只在主脑定义一次
-- `local-in-child`
-  - 分脑只维护项目事实、当前状态和 body 入口
-- `brain-as-doc-hub`
-  - 权威治理文档、接管文档和长文参考默认只留在 `brain/` 或 `brain/references/`
-- `solo-collaboration-facts`
-  - 本仓库由个人工作者掌控，项目协作靠 agent 判断和少数事实锚点，不靠形式化路由矩阵。
-  - QDP 默认负责 canonical 数据基底、registry、policy bundle、memmap 和数据清理；daily_research 默认负责研究、模型、回测、执行候选和 active artifact 边界。
-- `docs-into-brain`
-  - Brain canonical only：所有阅读性质文档、教程、审计、迁移说明、设计说明、研究日志和长期结论默认进入对应主脑或分脑 `references/`；body 顶层 README、AGENTS、CLAUDE、SKILL 只保留必要薄入口，外部 `docs/`、`research_log/` 和重复 README 副本默认不保留，除非存在工具硬要求、明确发布产物或真实外部接口责任
-- `simplified-chinese-docs`
-  - 工作区内面向人读的项目治理与接管文档默认使用简体中文；英文只保留在代码标识、命令、第三方专名、链接或产品必须的多语言公开文档中
-- `simplified-chinese-user-communication`
-  - 与用户沟通默认使用简体中文；只有用户明确要求其他语言、引用外部原文、或代码 / 命令 / 专有名词需要保留原文时才切换或混用
-- `main-branch-only`
-  - 所有代码、文档与实验工作默认在 `main` 分支展开；不得自行创建、切换或继续使用非 `main` 分支
-  - 实际分支不为 `main` 时，任何 repo-tracked mutation 都必须先纠偏到 `main`，或取得用户对本次任务使用分支 / worktree 例外的明确授权
-- `brain-skill-first`
-  - 脑区管辖下的项目开展工作前，必须先使用 `workspace-brain` skill 入口确认目标归属、分支、dirty paths 和硬边界
-  - `workspace-brain` 是入口 skill；route / capsule / bootstrap / health 是可选诊断工具，不替代入口
-- `worktree-explicit-only`
-  - 本个人项目不默认使用 git worktree；创建、切换或继续使用额外 worktree 必须有用户对本次任务的明确授权
-  - 发现非 `main` 分支或额外 worktree 时，先判断是否为已合入可清理、未合入需归档、或必须人工审计的例外，不得自动整分支 merge
-- `skills-home-rule`
-  - 通用操作技能归本机 `C:/Users/ASUS/.codex/skills` 维护；brain 不复制 skill 正文，不把 TDD、调试、计划、验证、前端、安全或部署方法写成平行技能库。
-- `brain-cognitive-rule`
-  - brain 只保留事实、推断、假设、权威层级、项目状态、风险边界、证据索引、写回路由和必要命令入口；脑区不是通用操作技能仓库。
-- `decisive-cleanup-rule`
-  - 对确定性收益、低事实损失、可测试验证的清理，默认彻底移除旧路径，不保留兼容层；保守兼容只有在仍有真实外部调用者或不可替代证据价值时才成立。
-- `solo-owner-objective-first-engineering`
-  - 本工作区由个人独立掌控，内部研究代码、脑区工具和项目脚本默认以当前目标闭合、系统简洁、可验证、可回退为准；不按多人协作项目的保守兼容、迁移周期、形式小 diff 或历史包袱约束内部开发。
-  - 改动大小不是风险判断依据；是否更接近目标、是否降低长期复杂度、是否保护真实证据、是否可验证和可回退，才是判断依据。小补丁会制造 wrapper、fallback、alias、legacy mode、重复入口或额外配置时，优先直接重构、合并或删除旧路径。
-  - 兼容层、旧入口、旧测试、旧 helper、旧 adapter 只有在存在真实调用证据、不可替代证据价值或明确外部接口责任时才保留；否则默认清理，测试跟随当前真实合约。
-- `natural-actionable-boundaries`
-  - 对用户沟通和脑区写回默认少写防御性免责声明；优先写清事实、判断、行动、验证和真实边界。风险必须可定位、可执行、可验证，不把泛化保守语气当成安全。
-- `skills-brain-tools-matrix`
-  - 本机 skills 管通用操作能力；主脑和分脑管认知治理与项目真相；项目 `tools/` 管可执行守卫。项目安全边界高于通用 skill 默认行为。
-- `root-directory-identity-rule`
-  - 根目录一级文件夹必须有清晰身份：已注册分脑项目、主脑基础设施、共享工具、工作区文档、过渡资产或缓存依赖。身份不明目录不长期保留；新正式项目应初始化并注册分脑。
-- `testing-burden-rule`
-  - 默认测试走 changed-surface smoke 车道，只验证当前改动必须保护的契约和安全边界；训练、全量 memmap、长回测、外部 provider、benchmark 和历史研究回归进入显式 research/external/full 车道。
-  - 测试减负优先合并重复契约、拆出慢 nodeid、标记 slow/research/external、归档旧研究证据和删除废弃机制测试；不得削弱 canonical、PIT/no-leakage、清理边界、active artifact 和可回滚保护。
-## 2. 已验证教训
-- 如果主脑和分脑维护两套平行接管顺序，后续 agent 很快会漂移
-- 如果当前状态只写聊天或终端，不写 brain，接管可靠性会明显下降
-- 如果把 `episodic_memory` 当默认入口，接管速度和质量都会恶化
-- 如果长文继续散落在 body 顶层或旧外部 docs/research_log，brain 的中枢地位会被稀释
-- 如果 README 里保留了 brain 未收录的接管规则、命令入口或稳定结论，后续接管会重新绕过大脑
-- 如果接管入口、命令入口或写回路由已经漂移，先纠偏再重开实验，通常比直接推进更能降低误操作风险
-- 如果控制台显示疑似中文乱码，先用 UTF-8 读取工具确认真实文件内容，不能把终端编码错觉当作文件损坏来修
-- 脑内文档铁律：当前层标题、正文、规则、状态和复盘写回必须使用简体中文；命令、路径、指标名、tag、模型名等技术标识保留原文
-- 主分脑结构变更后优先跑 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`，确认父子附着、读序、写回、body 映射和编码合同仍一致
-- 主脑 `state_center.md` 只承载当前共享事实和硬边界，不再追加日期型实验日志；分脑高频入口也必须优先保留当前结论，历史细节下沉到 `episodic_memory.md` 或 `brain/references/`
-- 轮询任务纪律不再按“长任务 / 长训练 / 重任务”分类；凡需要等待外部状态、跨多轮观察、后台进程、服务启动、数据下载、训练、评估、审计或异步 job 的任务，都按可归属、可观察、可解释、可停止处理。
-- 轮询方式和间隔由 agent 根据任务类型、信号密度、资源成本和风险自适应选择；优先使用已有 handle（PID / job id / run id、日志、progress、artifact mtime、端口 / API status、summary），必要时用 `tools.brain.agent_run` 记录到相关项目或任务目录；不得把固定 sleep、固定窗口或历史固定模板当作通用规则。
-- 等待窗口耗尽只表示观察窗口结束，不是失败证据；若可观察信号仍推进且没有明确代码错误、资源危险、停止指令或失败状态，继续自适应轮询；只有明确错误、退出状态、产物失败或用户停止才能写成 failed evidence。
-- 当前 `daily_research` 任务必须显式使用 `yolos` 环境；GPU 训练任务完成后必须核验 `training_diagnostics.json` 中 `device = cuda`、`cuda_available = true` 与 `python_executable` 指向 yolos
-- 如果本机 skill 要求建 worktree、写 spec、提交或执行默认流程，但项目脑区要求 `main`、不提交、不触碰 active artifact，则先服从项目脑区安全边界。
-- 如果用户任务属于任一已注册主脑或分脑项目，但 agent 未先使用 `workspace-brain` skill 就开始修改 repo-tracked 文件，这属于入口纪律缺失；应立即停下补读入口、核对分支和 dirty paths 后再继续。
-- 如果脑区和本机 skill 对“怎么做 TDD、调试、计划或验证”有重复描述，以本机 skill 为通用操作真源；脑区只记录本工作区和项目特例。
-- agent-mediated 自进化闭环：脑区不是思考主体；agent 负责观察、判断、提出学习机会和执行授权写回，brain 负责保存协议、证据、守卫和复用入口。遇到 timeout、入口失败、残留进程、验证误选或其他可复现异常时，先定位根因并区分“时间没给足 / 慢 / 卡 / 失败 / 入口问题”；若证据表明只是时间没给足，应移除或绕开该限制并持续轮询；凡可修问题必须形成“agent 记录经验 -> 工程修复 -> 防复发测试或验证调度 -> brain 持久化”的闭环，不能只写聊天复盘，也不能把 timeout 直接当失败结论。
-- 可执行问题优先工程化：脑区记录原则和项目特例，代码或工具负责消除可重复踩坑的入口、验证选择和守卫缺口；若只能操作手动命令，必须写明安全匹配边界，避免误伤其他任务。
+## 1. 对象化原则
+脑区采用面向对象的自然语言模型。规则、习惯、工具和边界都挂在对象上：
 
-## 3. 当前长期边界
-- 主脑不是分脑事实库
-- 分脑不是跨项目规则库
-- `daily_research` 负责正式生产研究与执行主线
-- `quant_data_platform` 负责工作区共享数据平台、canonical 数据基底和 memmap 治理
-- `t0_project` 负责盘中实验与 RL 原型，不直接替代正式主线
-- `daily_stock_analysis-main` 是独立产品分脑，不改写 `daily_research` 默认执行
+- 对象先说明自己是什么、不是什么。
+- 属性说明归属、消费者、当前状态和证据入口。
+- 方法说明 inspect、update、validate、cleanup 等操作如何触发。
+- 保护语义只在任务触碰相关对象或方法时激活。
 
-## 4. daily_research continuous_policy 路由边界
-- `daily_research` 的 continuous_policy 细节只写入分脑；主脑只保留跨项目边界：该主线在未过正式 gate 与 stable confirm 前始终是 `research / shadow_only`。
-- rXX references、trial 指标、长 tag、局部命令、Path20 历史线 / multi_horizon_utility 当前主线 / continuous_policy / deep_alpha 结论均属于 `daily_research` 分脑事实；不得在主脑展开或更新。
-- 全局教训：promotion / live / active artifact 切换不能由局部研究证据、单项 smoke、局部 guard 清零或短窗高分直接触发；必须回到目标分脑的正式 gate 与 active 边界。
+这样可以保留硬边界，又避免在无关任务里机械复述无关风险。
+
+## 2. 核心对象
+
+### `workspace_memory`
+- 定义：`H:\quant_project` 的个人研究者长期记忆。
+- 归属：主脑 `brain/`。
+- 方法：identify、handoff、route_by_object、writeback。
+- 经验：先理解用户目标，再读取最小相关脑区、代码、registry、manifest、output 或 reference；route / capsule / bootstrap 是可选传感器。
+
+### `workspace_git_surface`
+- 定义：本工作区默认连续工作面。
+- 当前状态：默认分支为 `main`，不默认使用额外 git worktree。
+- 激活条件：repo-tracked mutation、提交、清理、迁移、分支或 worktree 操作。
+- 保护语义：激活时先看当前分支和 dirty paths；纯只读分析无需复述该边界。
+
+### `workspace_brain_skill`
+- 定义：脑区接管的入口提示器。
+- 不是：审批系统、固定读取顺序或完整流程模板。
+- 方法：校准目标归属、当前对象、dirty paths 和可能的受保护对象。
+- 经验：脑区管辖项目的 repo-tracked mutation 前使用它；普通分析可直接读取相关对象。
+
+### `qdp_canonical_data`
+- 定义：工作区共享数据基底对象，包括 canonical lake、registry、policy bundle、memmap、coverage audit 和数据清理。
+- 归属：`quant_data_platform`。
+- 消费者：`daily_research`、`traditional_quant_research` 和后续研究项目。
+- 保护语义：registry pointer、canonical rebuild、memmap cleanup、唯一数据删除等方法需要 replacement pointer、dry-run 或抽样验证。
+
+### `daily_research_active_artifact`
+- 定义：`daily_research` 执行状态和 active artifact 对象。
+- 何时相关：执行、paper/live、active/default、broker、交易计划或 promotion。
+- 何时无关：数据源评估、QDP provider、普通研究计划、脑区文档整理。
+- 保护语义：update/restore/activate 需要显式授权和分脑 promotion 边界；inspect 不需要。
+
+### `evidence_grade`
+- 定义：研究证据可信等级。
+- 适用：模型、策略、数据集、训练、回测、实验结论。
+- 语义：smoke 证明接线，scout 生成方向，evidence-grade 支撑比较，promotion-grade 才能触及执行边界。
+- 保护语义：不要把低预算、单 seed、短窗口、timeout 或 incomplete run 写成正式结论。
+
+### `language_and_encoding`
+- 定义：脑区人读语义和编码对象。
+- 当前策略：中文语义 + 英文工程标识。
+- 方法：写脑区文档时使用简体中文；路径、tag、dataset id、model id、CLI key 保留英文。
+- 保护语义：疑似中文乱码先用 UTF-8 读取复核，不把终端显示问题当文件损坏。
+
+## 3. 方法对象
+
+### `changed_surface_verification`
+- 来源：个人研究工作区不适合每次跑全量测试、长训练、全量 memmap 或历史回归。
+- 默认：用最小检查支撑当前结论。
+- 升级条件：shared helper、schema、registry、canonical、PIT/no-leakage、active artifact、执行边界或清理删除发生变化。
+
+### `polling_or_async_work`
+- 定义：需要等待外部状态、后台进程、下载、训练、评估、服务或跨回合观察的任务。
+- 方法：优先绑定 PID、job id、run id、stdout/stderr、progress、summary、artifact mtime、端口或 API status。
+- 经验：观察窗口耗尽只表示本轮观察结束；仍有进展且无明确失败时继续自适应轮询。
+
+### `docs_into_brain`
+- 定义：长期阅读材料、审计、迁移说明、研究日志和项目结论的归档方法。
+- 默认：对应主脑或分脑 `references/` 保存长证据；body 顶层 README、AGENTS、CLAUDE、SKILL 只保留薄入口或外部接口责任。
+
+### `decisive_cleanup`
+- 来源：个人项目比团队项目更重视简单当前架构和可回滚。
+- 默认：旧 wrapper、fallback、compatibility path、旧测试或旧入口若无真实调用证据、不可替代证据价值或外部接口责任，可直接清理或降级。
+
+## 4. 长期事实
+- `daily_research` 是正式生产研究与执行主线。
+- `quant_data_platform` 是共享数据平台、canonical 数据基底和 memmap 治理 owner。
+- `t0_project` 是盘中实验与 RL 原型，不替代正式主线。
+- `daily_stock_analysis-main` 是独立产品分脑，不改写 `daily_research` 默认执行。
+- `traditional_quant_research` 是传统量化方法研究分脑。
+- `daily_research` 任务默认使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`；GPU 训练结论需要核验训练诊断里的设备与解释器。
+- 主脑保存跨项目对象和共享边界；分脑保存项目事实；reference 保存长历史。
+
+## 5. 已验证教训
+- 如果主脑和分脑维护两套平行对象定义，后续 agent 很快会漂移。
+- 如果当前状态只写聊天或终端，不写 brain，接管可靠性会明显下降。
+- 如果把 `episodic_memory` 当默认入口，接管速度和质量都会恶化。
+- 如果长文继续散落在 body 顶层或旧外部 docs/research_log，brain 的中枢地位会被稀释。
+- 如果 README 里保留 brain 未收录的接管规则、命令入口或稳定结论，后续接管会重新绕过大脑。
+- 如果脑区和通用 skill 对 TDD、调试、计划或验证有重复描述，以通用 skill 为操作能力真源；脑区只记录本工作区对象和项目特例。
+
+## 6. continuous_policy 边界对象
+- `daily_research` 的 continuous_policy 细节属于分脑对象；主脑只保留跨项目语义：未过正式 gate 与 stable confirm 前始终是 `research / shadow_only`。
+- rXX references、trial 指标、长 tag、局部命令、Path20 历史线、multi_horizon_utility 当前主线、continuous_policy 和 deep_alpha 结论均属于 `daily_research` 分脑事实。
+- promotion / live / active artifact 切换只能由相关分脑对象和正式 evidence-grade/promotion-grade 证据激活，不能由局部 smoke、单项 guard 清零或短窗高分触发。
