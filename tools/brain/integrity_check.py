@@ -44,7 +44,7 @@ REQUIRED_HOT_HANDOFF_KEYS = (
     "workspace_default_paths",
     "child_default_modules",
     "never_default_modules",
-    "line_budgets",
+    "hot_path_semantics",
 )
 
 OPTIONAL_MAIN_PATH_KEYS = (
@@ -376,14 +376,14 @@ def _validate_main_manifest(findings: list[Finding], main_manifest: dict[str, An
             values = hot_handoff.get(key, [])
             if not isinstance(values, list) or not values:
                 findings.append(Finding("error", "main_hot_handoff_contract_invalid", f"{key} must be a non-empty list", main_path))
-        budgets = hot_handoff.get("line_budgets", {})
-        if not isinstance(budgets, dict) or not budgets:
-            findings.append(Finding("error", "main_hot_handoff_contract_invalid", "line_budgets must be a non-empty object", main_path))
+        semantics = hot_handoff.get("hot_path_semantics", {})
+        if not isinstance(semantics, dict) or not semantics:
+            findings.append(Finding("error", "main_hot_handoff_contract_invalid", "hot_path_semantics must be a non-empty object", main_path))
         else:
             for key in ("workspace_core_doc", "child_state_center", "child_operations_center"):
-                value = budgets.get(key)
-                if not isinstance(value, int) or value <= 0:
-                    findings.append(Finding("error", "main_hot_handoff_contract_invalid", f"line_budgets.{key} must be a positive integer", main_path))
+                value = semantics.get(key)
+                if not isinstance(value, str) or not value.strip():
+                    findings.append(Finding("error", "main_hot_handoff_contract_invalid", f"hot_path_semantics.{key} must be non-empty text", main_path))
 
     agent_meta = main_manifest.get("agent_meta_protocol", {})
     if not isinstance(agent_meta, dict) or not agent_meta:
@@ -488,14 +488,21 @@ def _validate_main_manifest(findings: list[Finding], main_manifest: dict[str, An
     if not isinstance(brain_burden, dict) or not brain_burden:
         findings.append(Finding("error", "main_brain_burden_contract_invalid", "brain_burden_contract must be a non-empty object", main_path))
     else:
-        expected_budgets = {
-            "workspace_skill_line_budget": 100,
-            "daily_research_state_center_line_budget": 100,
-            "daily_research_operations_center_line_budget": 120,
-        }
-        for key, value in expected_budgets.items():
-            if brain_burden.get(key) != value:
-                findings.append(Finding("error", "main_brain_burden_contract_invalid", f"{key} must be {value}", main_path))
+        hot_files = brain_burden.get("hot_path_files")
+        if not isinstance(hot_files, list) or not hot_files:
+            findings.append(Finding("error", "main_brain_burden_contract_invalid", "hot_path_files must be a non-empty list", main_path))
+        if brain_burden.get("line_count_policy") != "diagnostic_only_not_blocking":
+            findings.append(
+                Finding(
+                    "error",
+                    "main_brain_burden_contract_invalid",
+                    "line_count_policy must be diagnostic_only_not_blocking",
+                    main_path,
+                )
+            )
+        structural_signals = brain_burden.get("structural_signals")
+        if not isinstance(structural_signals, list) or "legacy_global_rule_terms" not in {str(item) for item in structural_signals}:
+            findings.append(Finding("error", "main_brain_burden_contract_invalid", "structural_signals must include legacy_global_rule_terms", main_path))
         if brain_burden.get("rule_classes") != list(REQUIRED_BRAIN_BURDEN_RULE_CLASSES):
             findings.append(
                 Finding(

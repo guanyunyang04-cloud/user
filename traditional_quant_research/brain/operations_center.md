@@ -1,16 +1,37 @@
-# Traditional Quant Research 操作中枢
+# Traditional Quant Research 过程目录
 
-- 接管入口：先运行 workspace capsule，再确认路由选中 `traditional_quant_research` 后读取本脑区。
-- 默认写代码采用主脑 personal researcher direct-change：内部研究脚本、旧 helper、旧测试若无真实调用证据或证据价值，直接改到当前合约或删除。
-- 继承主脑项目任务命名空间：普通读写、短脚本、测试、临时产物、提交和轮询 / 异步任务默认限制在 `traditional_quant_research` profile；其它项目 dirty/output/process 只作摘要报告，不下钻、不复用、不写成本任务证据，除非用户扩展范围或声明 lease。
-- 默认验证采用 changed-surface：先运行 selective verification，按 `blocking_commands` 执行本次必须验证的最小命令。
+## Body Map Objects
+- `core_surface`: `traditional_quant_research/`
+- `experiment_surface`: `traditional_quant_research/experiments/`
+- `data_surface`: `traditional_quant_research/data/`
+- `tests_surface`: `traditional_quant_research/tests/`
+- `research_logs`: `traditional_quant_research/brain/references/research_log/`
+- `data_catalog`: `traditional_quant_research/brain/references/data_catalog.md`
 
-```powershell
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.selective_verification --paths <changed_paths> --json
-```
+## Procedure Entries
+### procedure `enter_traditional_quant`
+`input`: task
+`steps`: select research object；read state/knowledge/operation and explicit research logs as needed；run scoped code or analysis；write durable conclusion to research log/reference.
 
-- `traditional_quant_research/tests` 整包只作为 shared core、schema、数据口径、候选 gate 或维护/收尾扩展验证；普通单文件改动不默认整包跑。
-- 项目普通车道只跑非研究/外部测试：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest traditional_quant_research -m "not research and not slow and not data_heavy and not external and not benchmark" -q`。`frontier`、`low_corr`、`v2_*_audit`、`personal`、`limitup`、`kama`、`probe` 等实验回归进入 `research` 或 `external` 车道，按 explicit nodeid 或阶段收口运行。
-- 测试瘦身清单：`traditional_quant_research/brain/references/testing_slimming_inventory_20260612.md`。取消 paper tracking / lifecycle 的小测试保留为 `smoke + guard`，用于防止旧机制复活。
-- 新实验流程：假设、证据等级、稳定结论和默认研究日志都写入 `brain/references/research_log/`；旧 `research_log/` 外部副本已废弃，不再作为脚本输出或接管入口。
-- 数据接入流程：先更新 `brain/references/data_catalog.md`，确认字段、日期范围、复权口径和 survivorship bias 处理；旧 `data/catalog.md` 外部入口已废弃。
+### procedure `changed_surface_validation`
+`command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.selective_verification --paths <changed_paths> --json`
+`semantics`: run returned blocking commands for the changed surface.
+
+### procedure `ordinary_test_lane`
+`command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest traditional_quant_research -m "not research and not slow and not data_heavy and not external and not benchmark" -q`
+`semantics`: shared core/schema changes; research experiments use explicit nodeid or stage-specific runs.
+
+### procedure `new_experiment`
+`input`: hypothesis, evidence grade, data contract and output location.
+`steps`: define hypothesis；write/run experiment；store result under `brain/references/research_log/`；update state only with current summary.
+
+### procedure `data_ingest_or_catalog_update`
+`input`: new field/source/data cache.
+`steps`: update `brain/references/data_catalog.md`；state field semantics, date range, adjustment, survivorship and PIT/source-grade handling；run focused audit.
+
+## Writeback Routes
+- Current candidate pool and next pointer: `state_center.md`
+- Stable methods and lessons: `knowledge_center.md`
+- Commands and procedures: `operations_center.md`
+- Evidence gating and protected objects: `governance_layer.md`
+- Long research evidence: `brain/references/research_log/`

@@ -1,99 +1,42 @@
-# Daily Stock Analysis 操作中枢
+# Daily Stock Analysis 过程目录
 
-## 1. 项目地图
-- 后端：
-  - `daily_stock_analysis-main/src`
-  - `daily_stock_analysis-main/api`
-- 前端与桌面：
-  - `daily_stock_analysis-main/apps`
-- Bot 与 Agent：
-  - `daily_stock_analysis-main/bot`
-  - `daily_stock_analysis-main/src/agent`
-- 数据源：
-  - `daily_stock_analysis-main/data_provider`
-- 运维与流水线：
-  - `daily_stock_analysis-main/scripts`
-  - `daily_stock_analysis-main/.github/workflows`
-- 测试：
-  - `daily_stock_analysis-main/tests`
-- 公开用户入口：
-  - `daily_stock_analysis-main/README.md`
-  - 详细用户文档 canonical 正文在 `daily_stock_analysis-main/brain/references/public_docs/`；旧 `docs/` 外部副本已废弃，不再作为接管或维护入口
-- AI 兼容入口：
-  - `daily_stock_analysis-main/AGENTS.md`
-  - `daily_stock_analysis-main/CLAUDE.md`
-  - `daily_stock_analysis-main/.github/copilot-instructions.md`
-  - `daily_stock_analysis-main/.github/instructions/governance.instructions.md`
-  - `daily_stock_analysis-main/SKILL.md`
-  - 这些文件必须指向 brain，不得单独漂移
+## Body Map Objects
+- `backend_surface`: `daily_stock_analysis-main/src`, `daily_stock_analysis-main/api`
+- `frontend_desktop_surface`: `daily_stock_analysis-main/apps`
+- `bot_agent_surface`: `daily_stock_analysis-main/bot`, `daily_stock_analysis-main/src/agent`
+- `data_provider_surface`: `daily_stock_analysis-main/data_provider`
+- `ops_surface`: `daily_stock_analysis-main/scripts`, `daily_stock_analysis-main/.github/workflows`
+- `tests_surface`: `daily_stock_analysis-main/tests`
+- `public_docs_surface`: `daily_stock_analysis-main/README.md`, canonical body in `brain/references/public_docs/`
+- `ai_compat_surface`: `AGENTS.md`, `CLAUDE.md`, `.github/*instructions*`, `SKILL.md`
 
-## 2. 默认操作纪律
-- 先接 brain
-- 再看产品地图和入口边界
-- 再按 body_map 进入产品代码
-- 默认写代码采用主脑 personal researcher direct-change：内部产品脚本、旧 helper、旧测试若无真实调用证据或外部接口责任，直接改到当前合约或删除
-- 继承主脑项目任务命名空间：普通读写、短脚本、测试、临时产物、提交和轮询 / 异步任务默认限制在 `daily_stock_analysis-main` profile；其它项目 dirty/output/process 只作摘要报告，不下钻、不复用、不写成本任务证据，除非用户扩展范围或声明 lease
-- 不把 `README / docs / AGENTS.md / CLAUDE.md` 当成主入口
-- README 或用户文档中出现新的稳定能力、配置字段、运行入口或验证入口时，先整合到本分脑或 `brain/references/public_docs/`；外部只保留必要的薄入口或明确发布产物
-- 文档语言遵循 `brain/language_policy.md`：中文语义 + 英文工程标识；CLI、JSON key、路径、tag 与代码符号保留英文。
+## Procedure Entries
+### procedure `enter_product_surface`
+`input`: task
+`steps`: select body surface；inspect corresponding code/docs；change scoped files；run surface validation；write durable facts when public behavior or AI entry changes.
 
-## 3. 验证入口
-- 默认 changed-surface 验证：
-  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.selective_verification --paths <changed_paths> --json`
-  - 按 `blocking_commands` 执行本次最小验证；未映射 Python 改动先 manual review 或补同面测试，不默认整包跑
-- 日常轻量测试 lane：
-  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest daily_stock_analysis-main -m "not network and not external and not benchmark and not slow" -q`
-  - `provider` 与 `llm` 是定位标签，默认不从日常 lane 排除；只在依赖、速度或稳定性证据显示负担过重时再收紧
-  - 该 lane 需要项目依赖完整；当前轻量闭环优先用 changed-surface 或 smoke lane
-- 精简脑区 / 配置类变更可用 smoke lane：
-  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest daily_stock_analysis-main -m "smoke and not network and not external and not benchmark and not slow" -q`
-- 后端收尾/发布验证：
-  - `./scripts/ci_gate.sh`
-  - `python -m pytest -m "not network"`
-- Web / Desktop 收尾/发布验证：
-  - `npm ci`
-  - `npm run lint`
-  - `npm run test`
-  - `npm run build`
-  - `npm run test:smoke`
-  - `powershell -ExecutionPolicy Bypass -File scripts/build-backend.ps1`
-  - `powershell -ExecutionPolicy Bypass -File scripts/build-desktop.ps1`
-- AI 资产检查：
-  - `python scripts/check_ai_assets.py`
-- AI 兼容入口修改后：
-  - 运行 `python scripts/check_ai_assets.py`
-  - 再运行工作区 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check`
-- README 常用用户入口：
-  - 本地运行：`python main.py`
-  - Web 入口：`python webui.py` 或项目中对应 Web/API 启动脚本
-- Docker / GitHub Actions 部署说明以 `brain/references/public_docs/` 为阅读正文；配置字段变更必须回写 brain 与 `.env.example`
+### procedure `changed_surface_validation`
+`command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.selective_verification --paths <changed_paths> --json`
+`semantics`: use returned blocking commands or focused manual validation.
 
-## 3.1 2026-05-11 验证口径补充
-- 在 Windows PowerShell 中，后端 gate 可按 `py_compile`、`python -m flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics`、`./test.sh code`、`./test.sh yfinance`、`python -m pytest -m "not network"` 分项执行。
-- 当前 `bash scripts/ci_gate.sh all` 会进入 WSL bash，若 WSL 内没有 `python` 会失败；这属于环境入口问题，不代表后端测试失败。
-- Web smoke 默认按当前后端认证状态执行：`ADMIN_AUTH_ENABLED=false` 时跳过登录页表单专项，认证开启时必须设置 `DSA_WEB_SMOKE_PASSWORD`。
+### procedure `backend_validation`
+`commands`: `python -m flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics`; `python -m pytest -m "not network"`
 
-## 4. README 稳定内容收口
-- 产品能力：
-  - 多市场股票分析、决策仪表盘、大盘复盘、历史报告、回测、持仓管理、Agent 问股、智能导入与搜索补全
-- 配置域：
-  - AI 模型、通知渠道、自选股列表、搜索源、行情源、基本面聚合、Web 认证、报告语言、定时执行、交易日检查
-- 数据源优先级与降级：
-  - 行情、新闻、基本面、板块与 TickFlow 增强均应按能力 fail-open，不应让非关键第三方能力阻断主流程
-- 公开提醒：
-  - 所有分析输出仅供参考，不构成投资建议
-- AI 协作资产稳定规则：
-  - 目录边界、验证矩阵、不提交/不推送、禁硬编码密钥、配置变更同步 `.env.example`、用户可见文档正文同步到 `brain/references/public_docs/`
-  - `AGENTS.md` 与 `.github` 指令只做仓库原生兼容入口，含义变化必须回写本分脑
+### procedure `web_desktop_validation`
+`commands`: `npm ci`; `npm run lint`; `npm run test`; `npm run build`; `npm run test:smoke`; `powershell -ExecutionPolicy Bypass -File scripts/build-backend.ps1`; `powershell -ExecutionPolicy Bypass -File scripts/build-desktop.ps1`
+`note`: desktop build may require Windows Developer Mode / electron-builder symlink support and network availability.
 
-## 5. 写回路由
-- 当前状态与近期边界：
-  - `state_center.md`
-- 稳定事实、规则、教训：
-  - `knowledge_center.md`
-- 项目地图、环境、流程和命令：
-  - `operations_center.md`
-- 治理和接管纪律：
-  - `governance_layer.md`
-- 时间顺序改动：
-  - `episodic_memory.md`
+### procedure `ai_asset_sync`
+`commands`: `python scripts/check_ai_assets.py`; `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed`
+`activation`: AI compatibility entry changes or stable AI handoff semantics change.
+
+### procedure `public_docs_sync`
+`input`: README, docs, deployment, user-visible config or feature text.
+`steps`: write durable body to `brain/references/public_docs/`；keep README as user entry；update `.env.example` when config fields change.
+
+## Writeback Routes
+- Current product objects: `state_center.md`
+- Stable product facts and lessons: `knowledge_center.md`
+- Body map, commands and validation: `operations_center.md`
+- Compatibility invariants: `governance_layer.md`
+- Chronological changes: `episodic_memory.md`

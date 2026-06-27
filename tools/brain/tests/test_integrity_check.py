@@ -32,7 +32,8 @@ class BrainIntegrityCatalogTest(unittest.TestCase):
         ])
         self.assertEqual(contract["child_default_modules"], ["state_center", "operations_center"])
         self.assertIn("episodic_memory", contract["never_default_modules"])
-        self.assertEqual(contract["line_budgets"]["workspace_core_doc"], 80)
+        self.assertIn("current workspace object interfaces", contract["hot_path_semantics"]["workspace_core_doc"])
+        self.assertIn("runtime object instances", contract["hot_path_semantics"]["child_state_center"])
 
     def test_main_manifest_declares_agent_meta_protocol(self) -> None:
         manifest = load_manifest("brain/brain_manifest.json")
@@ -66,9 +67,9 @@ class BrainIntegrityCatalogTest(unittest.TestCase):
         manifest = load_manifest("brain/brain_manifest.json")
         contract = manifest["brain_burden_contract"]
 
-        self.assertEqual(contract["workspace_skill_line_budget"], 100)
-        self.assertEqual(contract["daily_research_state_center_line_budget"], 100)
-        self.assertEqual(contract["daily_research_operations_center_line_budget"], 120)
+        self.assertIn("brain/skills/workspace-brain/SKILL.md", contract["hot_path_files"])
+        self.assertEqual(contract["line_count_policy"], "diagnostic_only_not_blocking")
+        self.assertIn("legacy_global_rule_terms", contract["structural_signals"])
         self.assertEqual(contract["rule_classes"], ["hard_safety", "operating_default", "deep_dive", "deprecated"])
         self.assertIn("owner", contract["compatibility_entry_required_fields"])
         self.assertIn("delete_by", contract["compatibility_entry_required_fields"])

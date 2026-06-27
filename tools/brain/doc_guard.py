@@ -643,46 +643,8 @@ def _resolve_rule(path: Path) -> DocRule | None:
     normalized = _normalized_path(path)
     for suffix, rule in sorted(DOC_RULES.items(), key=lambda item: len(item[0]), reverse=True):
         if normalized.endswith(suffix):
-            return _apply_hot_handoff_budget(normalized, rule)
+            return rule
     return None
-
-
-@functools.lru_cache(maxsize=1)
-def _hot_handoff_line_budgets() -> dict[str, int]:
-    try:
-        manifest = _load_main_manifest()
-    except Exception:
-        return {}
-    contract = manifest.get("hot_handoff_contract", {})
-    budgets = contract.get("line_budgets", {}) if isinstance(contract, dict) else {}
-    return {str(key): int(value) for key, value in budgets.items() if isinstance(value, int) and value > 0}
-
-
-def _apply_hot_handoff_budget(normalized: str, rule: DocRule) -> DocRule:
-    budgets = _hot_handoff_line_budgets()
-    if normalized in {
-        "brain/state_center.md",
-        "brain/operations_center.md",
-        "brain/governance_layer.md",
-    }:
-        budget = budgets.get("workspace_core_doc")
-    elif normalized.endswith("/brain/state_center.md"):
-        budget = budgets.get("child_state_center")
-    elif normalized.endswith("/brain/operations_center.md"):
-        budget = budgets.get("child_operations_center")
-    else:
-        budget = None
-    if budget is None:
-        return rule
-    # The manifest budget is a hot-path warning threshold. The existing max line
-    # remains a hard guard so current mature docs can be compacted incrementally.
-    return DocRule(
-        warn_lines=budget,
-        max_lines=rule.max_lines,
-        forbidden_heading_patterns=rule.forbidden_heading_patterns,
-        forbidden_text_patterns=rule.forbidden_text_patterns,
-        enforce_non_decreasing_dated_headings=rule.enforce_non_decreasing_dated_headings,
-    )
 
 
 def _matching_lines(lines: Iterable[str], pattern: str) -> list[str]:
@@ -782,14 +744,14 @@ def _check_manifest_semantics(path: Path, text: str) -> list[str]:
         if not isinstance(burden, dict):
             issues.append("main_brain_burden_contract_missing_or_invalid")
         else:
-            expected_budgets = {
-                "workspace_skill_line_budget": 100,
-                "daily_research_state_center_line_budget": 100,
-                "daily_research_operations_center_line_budget": 120,
-            }
-            for key, value in expected_budgets.items():
-                if burden.get(key) != value:
-                    issues.append(f"main_brain_burden_contract_{key}_must_be_{value}")
+            hot_files = burden.get("hot_path_files")
+            if not isinstance(hot_files, list) or not hot_files:
+                issues.append("main_brain_burden_contract_hot_path_files_invalid")
+            if burden.get("line_count_policy") != "diagnostic_only_not_blocking":
+                issues.append("main_brain_burden_contract_line_count_policy_invalid")
+            structural_signals = burden.get("structural_signals")
+            if not isinstance(structural_signals, list) or "legacy_global_rule_terms" not in {str(item) for item in structural_signals}:
+                issues.append("main_brain_burden_contract_structural_signals_invalid")
             if burden.get("rule_classes") != ["hard_safety", "operating_default", "deep_dive", "deprecated"]:
                 issues.append("main_brain_burden_contract_rule_classes_invalid")
             fields = burden.get("compatibility_entry_required_fields")

@@ -1,31 +1,27 @@
-# T0 Project 身份层
+# T0 Project 身份对象
 
-快照日期：`2026-04-12`
+## object `t0_project`
+`type`: intraday_experiment_brain
+`definition`: 盘中 T+0、执行抽象与 RL 原型的独立实验分脑。
+`not`: `daily_research` 正式生产执行主线。
+`principle`: Agent 无状态，项目大脑有状态。
+`north_star`: 验证盘中执行抽象是否清晰、可验证、可逐步接入真实接口。
+`staging_path`: paper -> human confirmation -> real adapter.
+`methods`: `inspect_experiment_state()`；`run_mock_or_paper_test()`；`write_experiment_evidence()`；`request_production_review()`。
 
-## 1. 我是谁
-- `t0_project` 是盘中 T+0、执行抽象与 RL 原型的独立实验分脑。
-- 它是工作区里的实验与验证分支，不是当前正式生产执行主线。
-- 这个分脑同样遵守：
-  - `Agent 无状态，项目大脑有状态。`
+## object `execution_experiment_surface`
+`type`: protected_experiment_surface
+`state`: live remains protective skeleton; paper/mock is the default experimentation mode.
+`activation`: broker, live adapter, real order, production handoff, or daily_research implication.
+`invariant`: experimental evidence does not become production default without main brain and `daily_research` review.
 
-## 2. 我追求什么
-- 验证盘中执行抽象是否足够清晰、可验证、可逐步接真实接口。
-- 在 `paper -> 人工确认 -> 真实接口` 的路径上，先把安全边界做扎实。
-- 为未来盘中执行研究保留长期可接管的脑结构，而不是靠单个 agent 记忆。
+## Pure Functions
+- `is_production_relevant(task) -> bool`
+- `select_execution_mode(task) -> offline|mock|paper|human_confirmed|real_adapter`
+- `classify_t0_result(run) -> experiment_evidence|diagnostic|production_review_required`
 
-## 3. 成功标准
-- 任何接管者都能快速知道：
-  - 这仍是实验分脑
-  - 当前不能替代 `daily_research`
-  - 当前应该先做什么，不能做什么
-- 执行抽象层、RL 分支和盘中策略边界都能被明确解释。
-
-## 4. 当前硬约束
-- 不得把 `t0_project` 实验结果静默升级为 `daily_research` 正式默认值。
-- `live` 仍是保护性骨架，不得误报成自动下单已打通。
-- 真实适配器补齐前，默认优先 `paper` 模式。
-
-## 5. 当前禁区
-- 不得把实验分支说成生产主线。
-- 不得绕过执行抽象层直接把策略逻辑绑定到真实下单。
-- 不得在没有写回 brain 的情况下，让关键盘中实验状态只存在于会话里。
+## Routing
+- Current experiment state: `state_center.md`
+- Stable lessons and object semantics: `knowledge_center.md`
+- Body map and commands: `operations_center.md`
+- Protected experiment invariants: `governance_layer.md`

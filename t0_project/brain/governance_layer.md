@@ -1,24 +1,28 @@
-# T0 Project 治理层
+# T0 Project 治理对象
 
-快照日期：`2026-04-13`
+## Governed Objects
+### object `experiment_boundary`
+`scope`: t0 experiment conclusions, RL prototypes, intraday strategy tests.
+`invariant`: experiment evidence stays inside t0 unless routed through production relevance review.
 
-## 1. 治理目标
-- 防止实验分脑越级影响正式生产主线
-- 保证实验边界、入口地图和写回纪律始终清晰
+### object `real_execution_adapter`
+`scope`: TDX terminal, broker interface, live adapter, real order path.
+`invariant`: real side effects require explicit task scope and mode classification.
 
-## 2. 默认接管纪律
-- 先读：
-  - `identity_layer.md`
-  - `state_center.md`
-  - `knowledge_center.md`
-  - `operations_center.md`
-- 需要历史证据时再读 `episodic_memory.md`
+### object `production_handoff`
+`scope`: conclusions that may affect `daily_research` production defaults or execution semantics.
+`invariant`: handoff goes through main brain and `daily_research`, with original evidence retained in t0.
 
-## 3. 写回纪律
-- 当前实验状态写回 `state_center.md`
-- 稳定边界、规则和教训写回 `knowledge_center.md`
-- 入口、环境和流程写回 `operations_center.md`
-- 单轮实验过程写回 `episodic_memory.md`
+## Pure Functions
+- `select_governed_object(task) -> experiment_boundary|real_execution_adapter|production_handoff`
+- `is_real_side_effect(task) -> bool`
+- `requires_daily_research_review(result) -> bool`
 
-## 4. 核心约束
-- 任何会影响 `daily_research` 的结论，都必须回主脑和正式分脑重确认
+## Procedures
+### procedure `experiment_work`
+`input`: t0 task and selected object
+`steps`: choose mode；execute experiment or code change；validate locally；write evidence if durable.
+
+### procedure `production_handoff_review`
+`input`: t0 result with possible production relevance
+`steps`: summarize facts and evidence grade；write t0 reference；route summary to main brain and `daily_research`.

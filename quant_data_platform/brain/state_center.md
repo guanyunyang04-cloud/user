@@ -1,29 +1,66 @@
-# Quant Data Platform 状态中枢
+# Quant Data Platform 状态程序
 
-## 当前状态
-- 分脑已由主脑 runtime 初始化并注册，body_root 为 `quant_data_platform`。
-- 当前项目已具备最小可用 CLI、tests、registry 迁移、coverage/audit、bundle 构建和 memmap 验证入口。
-- 默认研究窗口沿用工作区 canonical 决策：`2010-01-01` 起。
-- active canonical bundle 已更新为包含估值、行业、指数成分 sidecar 的 `canonical_data_v1`。
-- 本分脑是工作区 canonical 数据基底、registry、policy bundle、sharded memmap 和数据清理的默认事实来源；其它研究项目可读取本分脑 status / registry / manifest 作为共享数据事实。
-- 2026-06-26 QDP lake 物理归属已闭环：`qdp_paths().lake_root`、`ResearchDataLake` 默认根、root manifest `primary_lake_root` 和 `canonical_manifest` 均已切到 `H:/quant_project/quant_data_platform/data/lake`；旧 `daily_research/output/research_data_lake` 已在 copy、catalog/shard path rewrite、QDP status、current_qdp provider-eval smoke、QDP tests 和 daily_research 消费侧 focused tests 通过后删除。迁移报告：`quant_data_platform/data/audits/qdp_lake_physical_migration_20260626_01.json`。
-- 2026-06-26 外部数据源只读评估已完成：`provider_eval_20260626_01` 覆盖 `akshare/baostock/efinance/mootdx/cninfo/current_qdp`、5 个固定样本标的和 6 个历史窗口；输出位于 `quant_data_platform/data/provider_eval/provider_eval_20260626_01`，结论见 `quant_data_platform/brain/references/provider_eval_20260626_01.md`。评估未修改 canonical、registry、memmap、training pack 或数据湖内容；初步证据显示 `BaoStock` 基础语义规整但行情逐股历史慢，`mootdx` 行情速度强但需单位治理，`CNInfo` 适合披露探针，`akshare/efinance` 当前受 Eastmoney Proxy/JSONDecode 稳定性限制。
-- 2026-06-27 `mootdx_online` 能力上界实验已完成：`mootdx_capability_20260627_01` 覆盖 quote、股票列表、全频 K 线、日线/5m/1m 深度翻页、历史分时、历史分笔、指数、xdxr、finance、F10，并与 current QDP 做近期日线 OHLCV 对账；输出位于 `quant_data_platform/data/provider_eval/mootdx_capability_20260627_01`，解读见同目录 `mootdx_capability_interpretation_20260627_01.md`。当前对象定义：`mootdx_online` 是 QDP 上游行情对象的候选主源，适合 quote、日线 bar、分钟 bar、指数和分笔 raw candidate；`bars(frequency=9)` volume 需约 `100x` 归一化，intraday 深度必须按 symbol/endpoint 审计后生产化。
-- canonical 数据域原则：行情、5 分钟日级特征、复权因子、估值、行业、指数成分、交易日历、股票池和证券状态进入数据基底；当前 provider 分工按对象域定义，行情 bar/quote 优先治理 `mootdx_online`，基础语义继续由 `BaoStock` 承担，披露事件由 `CNInfo` 承担；财务季报、业绩预告/快报等慢披露数据暂不进入 v1 默认基底。
-- full canonical sharded memmap 已完成并冻结：`canonical_short_horizon_core_v1_full_2010_2026`，profile `short_horizon_core_v1`，2010-2026，5526 symbols，256 features，323 planned / 262 stored / 61 empty / 0 failed shards。
-- active sharded manifest：`H:/quant_project/quant_data_platform/data/memmap/sharded/canonical_short_horizon_core_v1_full/sharded_memmap_manifest.json`。
-- event pack 数据域已完成首个 full candidate：`traditional_event_alpha_v1_candidate_2017_2026_20260615_01`，2017-2026 共 268333 行、10 个年度分区、316 个 clean QDP 特征、29 个派生标签、剔除 48 个执行/持仓/组合状态特征；该资产未注册 active，记录见 `brain/references/traditional_event_alpha_v1_candidate.md`。
+## Module Interface
+`exports`: QDP status、canonical manifest、provider eval evidence、active memmap / training pack pointers。
+`consumers`: `daily_research`、`traditional_quant_research`、`t0_project`。
 
-## 当前接管重点
-- 默认训练入口应复用 active full sharded memmap；旧每实验单体 `forecast_*.dat` 机制不再作为默认路径维护。
-- 下一步重点是增量更新、当前年/尾部 shard 重建、active registry 命中、训练读取 smoke 和旧资产清理。
-- 旧 parquet / 旧 `.dat` / 旧 bundle 清理先出 dry-run 和替代指针；确认不触碰唯一数据后可直接清理，不再走重审批链。
+## Object Instances
+### object `qdp_project`
+`type`: shared_data_platform_instance
+`state`: 已由主脑 runtime 初始化并注册；具备 CLI、tests、registry 迁移、coverage/audit、bundle 构建和 memmap 验证入口。
+`default_window`: `2010-01-01` onward.
 
-## 根目录关系
-- `canonical_data/`：过渡资产入口，等待本项目稳定后退为兼容指针。
-- `daily_research/`：正式研究与执行消费者，不再长期拥有共享数据平台职责。
-- `a_stock_daily_selection/`：当前只有 output，未注册分脑，先标记为待整理旧目录。
+### object `qdp_lake_root`
+`type`: canonical_lake_root
+`state`: `qdp_paths().lake_root`、`ResearchDataLake` 默认根、root manifest `primary_lake_root` 和 `canonical_manifest` 均已切到 `H:/quant_project/quant_data_platform/data/lake`。
+`evidence`: `quant_data_platform/data/audits/qdp_lake_physical_migration_20260626_01.json`
+`retired_path`: `daily_research/output/research_data_lake` 已删除。
 
-## 默认纪律
-- repo-tracked mutation 优先在 `main` 分支执行。
-- 数据清理必须先 dry-run、再替代指针、再做足够抽样验证；目标是减少重复冗余，不为了兼容旧机制长期保留多份数据。
+### object `provider_evaluation_20260626`
+`type`: provider_eval_result
+`state`: `provider_eval_20260626_01` 已完成，覆盖 `akshare/baostock/efinance/mootdx/cninfo/current_qdp`、5 个样本标的和 6 个历史窗口。
+`evidence`: `quant_data_platform/data/provider_eval/provider_eval_20260626_01` and `quant_data_platform/brain/references/provider_eval_20260626_01.md`
+`conclusion`: `BaoStock` 语义规整但逐股历史慢；`mootdx` 行情速度强但需单位治理；`CNInfo` 适合披露探针；`AKShare/efinance` 当前受 Eastmoney 访问稳定性限制。
+
+### object `mootdx_capability_20260627`
+`type`: provider_capability_result
+`state`: `mootdx_capability_20260627_01` 覆盖 quote、股票列表、全频 K 线、日线/5m/1m 深度翻页、历史分时、历史分笔、指数、xdxr、finance、F10，并与 current QDP 做近期日线 OHLCV 对账。
+`evidence`: `quant_data_platform/data/provider_eval/mootdx_capability_20260627_01`
+`current_definition`: `mootdx_online` 是 QDP 上游行情候选主源；`bars(frequency=9)` volume 需约 `100x` 归一化，intraday 深度按 symbol/endpoint 审计后生产化。
+
+### object `canonical_domain_policy`
+`type`: current_domain_split
+`state`: 行情、5 分钟日级特征、复权因子、估值、行业、指数成分、交易日历、股票池和证券状态进入数据基底；财务季报、业绩预告/快报等慢披露数据暂不进入 v1 默认基底。
+`provider_split`: bars/quote prefer `mootdx_online`; structured daily semantics use `BaoStock`; disclosure events use `CNInfo`.
+
+### object `active_sharded_memmap`
+`type`: active_memmap_pointer
+`state`: `canonical_short_horizon_core_v1_full_2010_2026` frozen；profile `short_horizon_core_v1`；2010-2026；5526 symbols；256 features；323 planned / 262 stored / 61 empty / 0 failed shards。
+`manifest`: `H:/quant_project/quant_data_platform/data/memmap/sharded/canonical_short_horizon_core_v1_full/sharded_memmap_manifest.json`
+
+### object `traditional_event_alpha_candidate`
+`type`: event_pack_candidate
+`state`: `traditional_event_alpha_v1_candidate_2017_2026_20260615_01` completed candidate；268333 rows, 10 yearly partitions, 316 clean QDP features, 29 labels.
+`activation`: not active by default; inspect when traditional event alpha work asks for it.
+
+## Pure Functions
+- `resolve_provider_for_domain(domain)`: bars/quote -> `mootdx_online`; structure -> `BaoStock`; disclosure -> `CNInfo`.
+- `derive_next_qdp_action(state)`: current default is incremental update, tail shard rebuild, active registry hit, training read smoke, and obsolete asset cleanup.
+- `classify_cleanup(path)`: requires replacement pointer and sample validation before removal.
+- `resolve_consumer_request(task)`: returns explicit QDP dataset id, manifest, memmap or training pack.
+
+## Procedures
+### procedure `provider_to_canonical`
+`input`: provider domain requirement
+`steps`: fetch raw candidate；audit units/coverage/PIT；archive raw；canonicalize；register manifest；return explicit pointer.
+`side_effects`: QDP data and registry artifacts.
+
+### procedure `cleanup_obsolete_assets`
+`input`: old parquet, old bundle, old `.dat`, old training pack
+`steps`: generate dry-run；identify replacement pointer；sample-validate equivalence or archive value；remove only replaceable duplicates.
+`side_effects`: data cleanup plan or deletion after validation.
+
+## Evidence Entrypoints
+- Provider eval: `quant_data_platform/brain/references/provider_eval_20260626_01.md`
+- Lake migration audit: `quant_data_platform/data/audits/qdp_lake_physical_migration_20260626_01.json`
+- mootdx capability: `quant_data_platform/data/provider_eval/mootdx_capability_20260627_01`

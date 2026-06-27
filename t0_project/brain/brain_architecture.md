@@ -1,20 +1,22 @@
 # T0 项目脑架构
 
-## 1. 区域定位
-`t0_project/brain/` 是实验型分脑，负责盘中执行实验、执行抽象和 RL 原型。
+`t0_project/brain/` 继承主脑多范式自然语言程序模型：对象描述实验面和执行面，过程描述验证/运行/上行复核，函数描述任务是否触碰生产边界。
 
-## 2. 共享脑核
-本分脑采用主脑 manifest 定义的 7 模块核：identity、state、knowledge、architecture、operations、governance、episodic。
+## Object Layer
+- `t0_project`: intraday experiment brain.
+- `execution_experiment_surface`: paper/mock/live adapter boundary.
+- `production_handoff`: results that may affect `daily_research`.
 
-读取顺序、写回路由、routing hints 和 body map 由 `t0_project/brain/brain_manifest.json` 声明；本文件只解释区域特化。
+## Procedure Layer
+- `offline_static_acceptance`
+- `changed_surface_validation`
+- `real_adapter_review`
+- `production_relevance_review`
 
-## 3. 区域特化
-- `state_center`
-  - 当前实验定位、优先级和风险
-- `knowledge_center`
-  - 实验边界、硬规则、长期教训
-- `operations_center`
-  - 真实 body 入口、命令和写回路由
+## Function Layer
+- `select_execution_mode(task)`
+- `requires_production_review(result)`
+- `classify_t0_result(run)`
 
-## 4. 扩展原则
-新增实验线优先写入现有 7 模块或 `references/`；只有无法归入当前模块时才提案新增结构。
+## Body Map
+- strategies, monitor, execution, RL and gateway entries are declared in `operations_center.md`.

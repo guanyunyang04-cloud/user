@@ -83,7 +83,7 @@ class WorkspaceBrainRuntimeMetaTest(unittest.TestCase):
         self.assertIn("daily_research_evidence_quality", payload)
         self.assertIn("actionable_items", payload)
 
-    def test_brain_runtime_burden_audit_compact_reports_budget_contract(self) -> None:
+    def test_brain_runtime_burden_audit_compact_reports_structure_contract(self) -> None:
         result = subprocess.run(
             [PYTHON, str(RUNTIME), "brain-burden-audit", "--cwd", str(ROOT), "--mode", "compact"],
             cwd=str(ROOT),
@@ -97,7 +97,9 @@ class WorkspaceBrainRuntimeMetaTest(unittest.TestCase):
         self.assertEqual(payload["status"], "ok")
         self.assertIn("brain_burden", payload)
         self.assertEqual(payload["brain_burden"]["blocked_count"], 0)
-        self.assertLessEqual(payload["brain_burden"]["hot_path_files"]["brain/skills/workspace-brain/SKILL.md"]["line_count"], 100)
+        skill_entry = payload["brain_burden"]["hot_path_files"]["brain/skills/workspace-brain/SKILL.md"]
+        self.assertEqual(skill_entry["line_count_policy"], "diagnostic_only_not_blocking")
+        self.assertIn("structural_signals", skill_entry)
         self.assertIn("compatibility", payload["brain_burden"])
         self.assertIn("tracked_non_source_files", payload["brain_burden"])
 

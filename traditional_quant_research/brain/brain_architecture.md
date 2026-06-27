@@ -1,6 +1,24 @@
 # Traditional Quant Research 脑区架构
 
-- 采用统一 7 模块核：identity、state、knowledge、architecture、operations、governance、episodic。
-- 共享结构以 workspace 主脑 manifest 为准；本文件只记录区域特化。
-- 区域特化：本脑区是传统量化方法研究实验室，优先读取 `state_center`、`knowledge_center`、`operations_center` 后进入项目 body。
-- Body 分区：`traditional_quant_research/` 放可复用研究核心，`experiments/` 放实验入口，`data/` 放数据资产，`tests/` 放行为守卫；阅读性质的研究日志、数据契约和实验说明只以 `traditional_quant_research/brain/references/` 为 canonical 正文，旧 `research_log/` 和外部 README 副本不再保留。
+`traditional_quant_research/brain/` 继承主脑多范式自然语言程序模型：对象描述研究线和候选池，过程描述实验/验证/写回，函数描述证据等级和候选边界。
+
+## Object Layer
+- `traditional_quant_research`: traditional quant lab brain.
+- `data_substrate_v2_1`: Baostock-only research data substrate.
+- `frontier_personal_candidate_pool`: current personal backtest candidate set.
+- `weak_year_problem`: persistent robustness blocker.
+
+## Procedure Layer
+- `formal_personal_candidate_review`
+- `data_source_upgrade_review`
+- `new_experiment`
+- `changed_surface_validation`
+
+## Function Layer
+- `classify_research_result(run)`
+- `requires_true_size_gate(task)`
+- `classify_candidate(row)`
+- `derive_next_research_action(state)`
+
+## Body Map
+Reusable research core, experiments, data assets and tests are in the project body; long logs and data contracts live under `brain/references/`.

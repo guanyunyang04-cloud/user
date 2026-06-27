@@ -1,17 +1,24 @@
-# T0 Project 知识中枢
+# T0 Project 知识对象
 
-## 1. 稳定事实
-- `t0_project` 负责盘中实验、执行抽象与 RL 原型
-- 它的研究结果默认只在实验边界内成立
+## Object Classes
+### class `intraday_experiment`
+`definition`: 盘中策略、执行抽象、monitoring and RL prototype under experiment scope.
+`truth_scope`: conclusions hold inside t0 experiment boundary unless promoted through review.
 
-## 2. 硬规则
-- `t0_project` 的实验性结论不能直接外推为 `daily_research` 的正式默认值
-- 执行接入顺序固定为：
-  - 先 `paper`
-  - 再人工确认下单
-  - 最后才讨论真实自动交易接口
-- 若结论影响正式主线，必须同步写回主脑和 `daily_research`
+### class `execution_adapter_stage`
+`states`: offline、mock、paper、human_confirmed、real_adapter.
+`semantics`: each state describes available evidence and side effects, not model quality by itself.
 
-## 3. 已验证教训
-- 盘中实验如果没有清晰隔离边界，最容易误伤生产主线
-- 真实 body 入口和脑内地图不一致时，接管成本会上升
+### class `production_relevance`
+`trigger`: result changes `daily_research` assumptions, execution semantics, live/default, or broker wiring.
+`route`: main brain plus `daily_research`.
+
+## Long-Term Lessons
+- Intraday experiments need isolation, or they can pollute production decisions.
+- Body entrypoints and brain map must stay aligned for handoff quality.
+- Static validation is engineering evidence; real trading claims require adapter and execution evidence.
+
+## Pure Functions
+- `requires_production_review(result) -> bool`
+- `is_real_adapter_task(task) -> bool`
+- `select_t0_validation(changed_paths) -> static|mock|paper|manual_review`

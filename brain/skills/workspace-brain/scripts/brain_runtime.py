@@ -267,6 +267,7 @@ def _takeover_health(cwd: Path) -> dict[str, Any]:
             "optional_project_checks",
         ],
         "project_checks_note": "Project-specific checks are selected by agent judgment from the current goal, risk, and changed files.",
+        "project_profile_note": "project profile checks are selected by agent judgment from the current goal, risk, and changed files.",
         "workspace": str(workspace),
         "next_actions": next_actions,
     }

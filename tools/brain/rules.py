@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -84,14 +85,21 @@ def finding_for_frontier_staleness() -> BrainRuleFinding | None:
     return BrainRuleFinding("warning", "frontier_brain_may_be_stale", detail)
 
 
+def _research_data_lake_cls() -> type[Any]:
+    qdp_src = WORKSPACE_ROOT / "quant_data_platform" / "src"
+    if qdp_src.exists() and str(qdp_src) not in sys.path:
+        sys.path.insert(0, str(qdp_src))
+    from quant_data_platform.lake import ResearchDataLake
+
+    return ResearchDataLake
+
+
 def finding_for_full_gold_claim_without_catalog(text: str, *, data_lake_root: str | Path | None = None) -> BrainRuleFinding | None:
     lower = str(text or "").lower()
     if "full gold" not in lower and "全量 gold" not in lower and "full-universe gold" not in lower:
         return None
     try:
-        from daily_research.data_lake import ResearchDataLake
-
-        lake = ResearchDataLake(data_lake_root)
+        lake = _research_data_lake_cls()(data_lake_root)
         rows = lake.list_datasets(dataset_kind="continuous_policy_training_matrices", zone="strict_train")
         has_gold = any("learned_all_a" in str(row.get("universe_name", "")) for _, row in rows.iterrows())
     except Exception:

@@ -1,33 +1,48 @@
-# Quant Data Platform 操作中枢
+# Quant Data Platform 过程目录
 
-## 接管入口
-- 可选诊断：
-  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --workflow auto --intent read --verbosity lite --json`
-- 本分脑 bootstrap：
-  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain quant_data_platform --json`
+## Runtime Objects
+### object `qdp_body_map`
+`code`: `quant_data_platform/src`
+`configs`: `quant_data_platform/configs`
+`registry`: `quant_data_platform/registry`
+`data`: `quant_data_platform/data`
+`references`: `quant_data_platform/brain/references`
+`tests`: `quant_data_platform/tests`
 
-## Body Map
-- `quant_data_platform/src`：平台代码。
-- `quant_data_platform/configs`：canonical/profile 配置。
-- `quant_data_platform/registry`：registry、root manifest、memmap 指针。
-- `quant_data_platform/data`：大数据资产、QDP lake、provider eval、tmp、agent_runs、sharded memmap，默认 Git 忽略。
-- `quant_data_platform/brain/references`：数据契约、清理策略、memmap 设计的 canonical 正文。
-- `quant_data_platform/tests`：平台单元与集成测试。
+### object `qdp_python_env`
+`python`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`
+`pythonpath`: `H:/quant_project/quant_data_platform/src;H:/quant_project`
 
-## 常用验证
-- `PYTHONPATH=H:/quant_project/quant_data_platform/src;H:/quant_project C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli status --json`
-- `PYTHONPATH=H:/quant_project/quant_data_platform/src;H:/quant_project C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli provider-eval --providers current_qdp --symbols 000001.SZ --windows 2024-06-03:2024-06-07 --json`
-- `PYTHONPATH=H:/quant_project/quant_data_platform/src;H:/quant_project C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli audit --json`
-- `PYTHONPATH=H:/quant_project/quant_data_platform/src;H:/quant_project C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli build-sharded-memmap --profile short_horizon_core_v1 --start-year 2022 --end-year 2022 --max-universe-size 10 --max-shards 1 --json`
-- `PYTHONPATH=H:/quant_project/quant_data_platform/src;H:/quant_project C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli validate-memmap --manifest <sharded_manifest.json> --json`
-- `git diff --check`
-- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed`
-- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`
-- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest quant_data_platform/tests -q`
-- 轻量 smoke lane：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest quant_data_platform/tests -m "smoke and not data_heavy and not external and not benchmark" -q`
-- 普通开发 lane：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest quant_data_platform/tests -m "not data_heavy and not external and not benchmark" -q`
-- `test_sharded_memmap.py` 属于 `integration + data_heavy`，改 memmap/shard/schema 时显式运行；不让它拖慢无关 brain / registry / profile 小改。
+## Procedure Entries
+### procedure `inspect_qdp_status`
+`command`: `PYTHONPATH=H:/quant_project/quant_data_platform/src;H:/quant_project C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli status --json`
+`output`: current registry, lake, coverage and canonical status.
 
-## 清理纪律
-- `qdp cleanup --dry-run` 只生成计划，不删除。
-- 删除旧 parquet、旧 bundle 或旧 `.dat` 前，必须有 canonical bundle、canonical memmap registry、随机一致性验证和替代指针。
+### procedure `provider_eval_smoke`
+`command`: `PYTHONPATH=H:/quant_project/quant_data_platform/src;H:/quant_project C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli provider-eval --providers current_qdp --symbols 000001.SZ --windows 2024-06-03:2024-06-07 --json`
+`output`: provider connectivity / current_qdp smoke evidence.
+
+### procedure `audit_qdp`
+`command`: `PYTHONPATH=H:/quant_project/quant_data_platform/src;H:/quant_project C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli audit --json`
+
+### procedure `build_sharded_memmap_smoke`
+`command`: `PYTHONPATH=H:/quant_project/quant_data_platform/src;H:/quant_project C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli build-sharded-memmap --profile short_horizon_core_v1 --start-year 2022 --end-year 2022 --max-universe-size 10 --max-shards 1 --json`
+
+### procedure `validate_memmap`
+`command`: `PYTHONPATH=H:/quant_project/quant_data_platform/src;H:/quant_project C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli validate-memmap --manifest <sharded_manifest.json> --json`
+
+### procedure `qdp_tests`
+`smoke`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest quant_data_platform/tests -m "smoke and not data_heavy and not external and not benchmark" -q`
+`ordinary`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest quant_data_platform/tests -m "not data_heavy and not external and not benchmark" -q`
+`full`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest quant_data_platform/tests -q`
+`note`: `test_sharded_memmap.py` is integration/data_heavy and selected for memmap/shard/schema changes.
+
+### procedure `cleanup_dry_run`
+`semantics`: cleanup first creates a plan; deletion follows only after replacement pointer and enough validation.
+
+## Writeback Routes
+- Current data pointers and provider results: `state_center.md`
+- Stable source semantics and lessons: `knowledge_center.md`
+- Commands and process entries: `operations_center.md`
+- Protected data invariants: `governance_layer.md`
+- Long audits/provider reports: `references/` or `data/audits` / `data/provider_eval`

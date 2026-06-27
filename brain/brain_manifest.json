@@ -27,12 +27,12 @@
       },
       {
         "id": "long_term_memory",
-        "function": "沉淀稳定事实、硬规则和可复用教训。",
+        "function": "沉淀稳定事实、对象不变量和可复用教训。",
         "modules": ["knowledge_center"]
       },
       {
         "id": "executive_control",
-        "function": "给出当前优先级、治理闭环和执行边界。",
+        "function": "给出当前对象指针、治理函数和过程边界。",
         "modules": ["state_center", "governance_layer"]
       },
       {
@@ -46,7 +46,7 @@
         "modules": ["episodic_memory"]
       }
     ],
-    "required_preflight": ["goal_alignment", "project_scope", "hard_boundary_check"],
+    "required_preflight": ["goal_alignment", "project_scope", "protected_object_selection"],
     "post_task_writeback": ["state", "knowledge", "next_action", "governance"]
   },
   "shared_regional_brain_contract": {
@@ -68,10 +68,10 @@
     "workspace_default_paths": ["brain/state_center.md", "brain/operations_center.md", "brain/governance_layer.md"],
     "child_default_modules": ["state_center", "operations_center"],
     "never_default_modules": ["episodic_memory"],
-    "line_budgets": {
-      "workspace_core_doc": 80,
-      "child_state_center": 100,
-      "child_operations_center": 120
+    "hot_path_semantics": {
+      "workspace_core_doc": "current workspace object interfaces and routing state",
+      "child_state_center": "runtime object instances, pure functions, and current pointers",
+      "child_operations_center": "procedure catalog, command entries, and validation selection"
     }
   },
   "agent_meta_protocol": {
@@ -94,9 +94,13 @@
     "skill_sync_required": true
   },
   "brain_burden_contract": {
-    "workspace_skill_line_budget": 100,
-    "daily_research_state_center_line_budget": 100,
-    "daily_research_operations_center_line_budget": 120,
+    "hot_path_files": [
+      "brain/skills/workspace-brain/SKILL.md",
+      "daily_research/brain/state_center.md",
+      "daily_research/brain/operations_center.md"
+    ],
+    "line_count_policy": "diagnostic_only_not_blocking",
+    "structural_signals": ["legacy_global_rule_terms", "missing_object_interface", "history_log_in_hot_path", "unsupported_compatibility"],
     "rule_classes": ["hard_safety", "operating_default", "deep_dive", "deprecated"],
     "compatibility_entry_required_fields": ["owner", "usage_evidence", "delete_by"],
     "unsupported_compatibility_policy": "remove compatibility entries without owner, usage_evidence, and delete_by"
@@ -108,7 +112,7 @@
     "test_policy": "changed_surface_or_smoke_by_default",
     "legacy_policy": "delete_or_deprecate_without_active_callers",
     "explicit_only_skills": ["subagent-driven-development", "requesting-code-review", "finishing-a-development-branch", "using-git-worktrees", "verification-before-completion", "test-driven-development", "testing-strategies"],
-    "hard_boundaries": ["unique_or_canonical_data_loss", "pit_or_no_leakage_violation", "live_default_paper_broker_or_active_artifact_change", "secrets_or_external_service_state", "cross_project_dirty_work_without_scope"]
+    "protected_object_types": ["unique_or_canonical_data_loss", "pit_or_no_leakage_violation", "live_default_paper_broker_or_active_artifact_change", "secrets_or_external_service_state", "cross_project_dirty_work_without_scope"]
   },
   "brain_contract": {
     "required_sub_brain_keys": ["brain_type", "brain_id", "parent_brain", "attach_status", "entrypoint", "body_root", "shared_contract_source", "regional_specialization", "write_routes", "body_map", "modules", "handoff_contract"],

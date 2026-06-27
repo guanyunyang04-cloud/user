@@ -1,24 +1,32 @@
-# Daily Stock Analysis 治理层
+# Daily Stock Analysis 治理对象
 
-快照日期：`2026-04-13`
+## Governed Objects
+### object `product_vs_execution_boundary`
+`scope`: product analysis workflows vs `daily_research` production execution.
+`invariant`: product analysis outputs do not rewrite `daily_research` default execution.
 
-## 1. 治理目标
-- 保证产品分脑和执行主线分脑不混写
-- 保证 brain 与仓库级 AI 兼容入口始终同步
+### object `ai_compatibility_entries`
+`scope`: `AGENTS.md`, `CLAUDE.md`, `.github` instructions and `SKILL.md`.
+`invariant`: compatibility entries point to this brain and do not carry a separate truth system.
 
-## 2. 默认接管纪律
-- 先读：
-  - `identity_layer.md`
-  - `state_center.md`
-  - `knowledge_center.md`
-  - `operations_center.md`
-- 需要时间顺序证据时再读 `episodic_memory.md`
+### object `public_user_docs`
+`scope`: README, public docs, deployment and user-facing configuration text.
+`invariant`: durable product facts and stable instructions live in brain/reference first; public files stay entry-oriented.
 
-## 3. 写回纪律
-- 当前产品状态写回 `state_center.md`
-- 稳定事实、规则和教训写回 `knowledge_center.md`
-- 项目地图、环境、命令和流程写回 `operations_center.md`
-- 时间顺序变更写回 `episodic_memory.md`
+### object `secret_or_config_surface`
+`scope`: API keys, account identifiers, model endpoints, notification credentials, ports and env-specific branches.
+`invariant`: secrets and environment-specific private values stay out of brain and public docs; config fields update `.env.example`.
 
-## 4. 核心约束
-- `AGENTS.md / CLAUDE.md / .github` 只做兼容入口，不能漂移出另一套真源
+## Pure Functions
+- `select_governed_object(task) -> product_boundary|ai_compat|public_docs|secret_config`
+- `requires_ai_asset_check(change) -> bool`
+- `requires_public_docs_reference(change) -> bool`
+
+## Procedures
+### procedure `ai_compat_change`
+`input`: compatibility entry diff
+`steps`: update brain semantics；update thin entry；run `scripts/check_ai_assets.py` and doc guard.
+
+### procedure `public_docs_change`
+`input`: user-facing docs change
+`steps`: write stable content to `references/public_docs`；sync README entry；validate docs and impacted product surface.

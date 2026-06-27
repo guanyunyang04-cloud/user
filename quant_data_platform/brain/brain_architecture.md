@@ -1,20 +1,32 @@
 # Quant Data Platform 脑区架构
 
-## 结构定位
-本分脑采用主脑统一 7 模块核；共享结构以 `brain/brain_manifest.json#shared_regional_brain_contract` 为准。
+`quant_data_platform/brain/` 继承主脑多范式自然语言程序模型：对象描述数据资产和源，过程描述 ingest/canonical/memmap/cleanup 方法，函数描述从需求到 owner、domain、validation 的判断。
 
-本项目的区域特化是“共享数据基底治理”：
+## Object Layer
+- `canonical_data_substrate`: lake、registry、policy bundle、memmap、training pack。
+- `provider_ingest_surface`: mootdx、BaoStock、CNInfo、AKShare、efinance、current_qdp。
+- `consumer_project`: daily_research、traditional_quant_research、t0_project。
+- `governed_data_asset`: raw data、historical semantics、coverage status、registry pointer、cleanup target、slow disclosure domain。
 
-- `core/`：路径、配置、registry、JSON 校验和通用 schema。
-- `providers/`：外部数据源适配、能力矩阵、provider health 与只读评估。
-- `ingest/`：refresh、CSV/TDX/external zip 导入、intraday sidecar 和 domain 合并入口。
-- `lake/`：封装 data lake catalog、canonical manifest、policy bundle、policy input loader、pool/sector-board view、coverage audit。
-- `domains/`：行情、结构风格、交易过滤等 domain contract。
-- `features/`：canonical 数据域与训练 feature profile 的分层定义。
-- `memmap/`：分片 feature store、label store、sample index、registry signature。
-- `cli.py`：统一命令入口 `qdp`。
+## Procedure Layer
+- `provider_to_canonical`
+- `build_sharded_memmap_smoke`
+- `validate_memmap`
+- `cleanup_obsolete_assets`
+- `registry_pointer_change`
 
-## 归属边界
-- `quant_data_platform` 拥有跨项目共享数据工程能力。
-- `daily_research` 保留研究、训练和执行逻辑，并逐步从本项目读取数据。
-- `canonical_data` 只保留过渡 alias/registry 指针，不继续扩张成第二套平台。
+## Function Layer
+- `resolve_data_owner(asset)`
+- `classify_provider_domain(field)`
+- `select_canonical_path(requirement)`
+- `classify_cleanup_target(path)`
+
+## Body Map
+- `core/`: paths, configs, registry, schema.
+- `providers/`: external source adapters and probes.
+- `ingest/`: refresh/import/domain merge.
+- `lake/`: data lake catalog, canonical manifest, policy bundle and coverage audit.
+- `domains/`: market/structure/trading-filter contracts.
+- `features/`: canonical feature domains and profiles.
+- `memmap/`: sharded stores, labels, sample indexes and signatures.
+- `cli.py`: QDP command entry.

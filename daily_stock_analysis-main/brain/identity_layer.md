@@ -1,42 +1,25 @@
-# Daily Stock Analysis 身份层
+# Daily Stock Analysis 身份对象
 
-快照日期：`2026-04-13`
+## object `daily_stock_analysis_product`
+`type`: multi_market_product_brain
+`definition`: 独立的多市场 AI 股票分析产品分脑，覆盖 CLI、FastAPI、Web、Desktop、Bot、Agent 和多数据源。
+`not`: `daily_research` 的正式执行默认值或交易执行主线。
+`principle`: Agent 无状态，项目大脑有状态。
+`north_star`: 让复杂产品仓库在多入口、多模块条件下仍可稳定接管。
+`methods`: `inspect_product_state()`；`select_body_surface(task)`；`run_product_validation(surface)`；`sync_ai_compat_entries()`。
 
-## 1. 我是谁
-- `daily_stock_analysis-main` 是独立的多市场 AI 股票分析产品分脑。
-- 它覆盖多入口产品形态：
-  - CLI
-  - FastAPI
-  - Web
-  - Desktop
-  - Bot
-  - 多数据源
-- 它不接管 `daily_research` 的正式执行默认值。
-- 这个分脑同样遵守：
-  - `Agent 无状态，项目大脑有状态。`
+## object `ai_handoff_surface`
+`type`: compatibility_entry_surface
+`entries`: `AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.github/instructions/*.instructions.md`, `SKILL.md`
+`semantics`: repository-native AI entries point to this brain; they are thin compatibility surfaces, not parallel truth sources.
 
-## 2. 我追求什么
-- 让复杂产品仓库在多入口、多模块条件下仍可稳定接管。
-- 让 brain 成为 AI 接管真入口，而不是依赖仓库里散落的人类说明。
-- 保持 brain 作为权威接管中枢，`AGENTS.md / CLAUDE.md` 只承担仓库生态兼容入口。
+## Pure Functions
+- `select_body_surface(task) -> backend|api|web|desktop|bot|agent|data_provider|workflow|docs`
+- `is_public_docs_change(task) -> bool`
+- `requires_ai_asset_sync(change) -> bool`
 
-## 3. 成功标准
-- 任意接管者都能快速知道当前任务属于：
-  - 后端
-  - API
-  - Web
-  - Desktop
-  - Bot / Agent
-  - Data Provider
-  - Workflow
-- 不会把这个产品分脑和 `daily_research` 的正式执行主线混在一起。
-
-## 4. 当前硬约束
-- 本分脑是独立产品线，不替代 `daily_research` 的默认执行判断。
-- 重要结构调整要同时维护 brain 与仓库原生 AI 资产。
-- 默认先从 brain 进入，再定位具体 body 边界。
-
-## 5. 当前禁区
-- 不得把多入口产品仓库当成单入口脚本项目处理。
-- 不得只靠 `README` 或口头约定维持 AI 接管理解。
-- 不得在未判断边界的情况下盲改 `src / api / apps / bot / scripts`。
+## Routing
+- Current product state: `state_center.md`
+- Stable product facts and lessons: `knowledge_center.md`
+- Body map and commands: `operations_center.md`
+- Compatibility and product invariants: `governance_layer.md`

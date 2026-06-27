@@ -1,20 +1,25 @@
 # 每日股票分析脑架构
 
-## 1. 区域定位
-`daily_stock_analysis-main/brain/` 是独立产品型分脑，负责多市场 AI 股票分析产品的稳定认知、产品代码入口和仓库级 AI 接管真源。
+`daily_stock_analysis-main/brain/` 继承主脑多范式自然语言程序模型：对象描述产品面和兼容入口，过程描述验证/同步/发布步骤，函数描述任务属于哪个产品 surface。
 
-## 2. 共享脑核
-本分脑采用主脑 manifest 定义的 7 模块核：identity、state、knowledge、architecture、operations、governance、episodic。
+## Object Layer
+- `daily_stock_analysis_product`: multi-market product brain.
+- `ai_handoff_surface`: repository-native AI compatibility entries.
+- `public_docs_surface`: README and public documentation entry.
+- `product_surface`: backend, API, Web, Desktop, Bot, Agent, data provider, workflow.
 
-读取顺序、写回路由、routing hints 和 body map 由 `daily_stock_analysis-main/brain/brain_manifest.json` 声明；本文件只解释区域特化。
+## Procedure Layer
+- `enter_product_surface`
+- `changed_surface_validation`
+- `ai_asset_sync`
+- `public_docs_sync`
+- `web_desktop_validation`
 
-## 3. 区域特化
-- `state_center`
-  - 当前产品边界、优先级和 handoff
-- `knowledge_center`
-  - 产品稳定事实、硬规则和教训
-- `operations_center`
-  - 目录地图、验证入口和写回路由
+## Function Layer
+- `select_body_surface(task)`
+- `requires_ai_asset_sync(change)`
+- `requires_public_docs_reference(change)`
+- `select_validation(surface)`
 
-## 4. 扩展原则
-新产品面或外部集成优先进入 body map、operations 或 references；结构变更保持 proposal-only。
+## Expansion
+New product surfaces first extend body map, procedure entries or references; structure changes stay aligned with main brain manifest.

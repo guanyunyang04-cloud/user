@@ -1,7 +1,28 @@
-# Traditional Quant Research 治理层
+# Traditional Quant Research 治理对象
 
-- 重大动作前区分事实、推断、假设和边界。
-- Agent learning 可自动创建低风险 proposed proposal；实现协议或行为改动仍需用户确认。
-- 禁止把单次样本内回测、未扣费回测、loose latest 结果或失败/中断实验作为正式结论。
-- 研究结论必须明确证据等级；未达到样本外验证的结果只能表述为诊断或候选假设。
-- 修改数据口径、股票池/合约池、费用模型或评价指标时，必须同步记录在研究日志或脑区 references。
+## Governed Objects
+### object `research_evidence`
+`scope`: backtests, diagnostics, candidate gates, protocol grids and run summaries.
+`invariant`: evidence grade stays explicit; sample-in, no-fee, loose latest, failed or interrupted evidence remains diagnostic.
+
+### object `data_semantics`
+`scope`: data range, PIT/source grade, universe, fees/slippage, holding constraints, labels and metrics.
+`invariant`: data semantics changes create research log or reference entries.
+
+### object `candidate_boundary`
+`scope`: `personal_backtest_candidate`, `strategy_candidate`, paper/live/trading plans.
+`invariant`: agent may select personal backtest candidates; strategy/paper/live decisions are not inferred from research artifacts.
+
+## Pure Functions
+- `select_governed_object(task) -> research_evidence|data_semantics|candidate_boundary`
+- `classify_evidence(result) -> diagnostic|formal_personal|candidate|strategy`
+- `requires_research_log(change) -> bool`
+
+## Procedures
+### procedure `research_conclusion`
+`input`: result and evidence path
+`steps`: separate fact/inference/assumption；classify evidence；write summary and reference if durable.
+
+### procedure `candidate_boundary_review`
+`input`: gate output or candidate selection report
+`steps`: inspect formal profile；classify candidate status；preserve user-discretion boundary.

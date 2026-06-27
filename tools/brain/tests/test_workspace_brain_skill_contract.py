@@ -84,7 +84,6 @@ class WorkspaceBrainSkillContractTest(unittest.TestCase):
 
     def test_workspace_brain_skill_keeps_diagnostics_optional_and_light(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
-        line_count = len(text.splitlines())
 
         self.assertIn("capsule --task", text)
         self.assertIn("--verbosity lite", text)
@@ -97,7 +96,8 @@ class WorkspaceBrainSkillContractTest(unittest.TestCase):
         self.assertIn("list-proposals", text)
         self.assertIn("implementation", text)
         self.assertIn("approval", text)
-        self.assertLessEqual(line_count, 65)
+        self.assertIn("Multi-Paradigm Brain", text)
+        self.assertNotIn("line budget", text.lower())
 
     def test_workspace_brain_skill_has_no_domain_policy_bloat(self) -> None:
         text = SKILL.read_text(encoding="utf-8")

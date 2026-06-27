@@ -56,7 +56,7 @@ class BrainRulesTest(unittest.TestCase):
 
                 return pd.DataFrame([])
 
-        with patch("daily_research.data_lake.ResearchDataLake", EmptyLake):
+        with patch.object(brain_rules, "_research_data_lake_cls", return_value=EmptyLake):
             finding = finding_for_full_gold_claim_without_catalog("full Gold training dataset is complete")
 
         self.assertIsNotNone(finding)

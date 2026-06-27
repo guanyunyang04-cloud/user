@@ -1,39 +1,50 @@
-# Quant Data Platform 治理层
+# Quant Data Platform 治理对象
 
-## 治理目标
-- 让工作区只有一个默认数据基底入口。
-- 让 provider、raw archive、canonical lake、registry、coverage、memmap 和 cleanup 对象可审计、可复用、可迁移。
-- 让研究项目通过 profile 选择字段，而不是各自复制、裁剪或重建数据集。
-- 允许消费者读取本分脑公开 status / registry / manifest 作为共享数据事实；实际构建、清理、重建和 registry mutation 仍归 QDP 对象方法。
-- 让数据平台服务个人研究效率；完整基底和 active memmap 建好后，旧路径默认退出热路径。
+## Governed Objects
+### object `raw_market_data`
+`scope`: external provider raw data before/after lake archive.
+`invariant`: preserve original OHLCV units and adjustment state; derived adjusted fields are sidecars.
 
-## 保护对象
+### object `historical_semantics`
+`scope`: historical universe, industry, status, valuation, index constituents and disclosure availability.
+`invariant`: current snapshots do not backfill historical semantics without PIT/available-time proof.
 
-### `raw_market_data`
-- 定义：外部 provider 入湖前后的原始行情数据。
-- 不变量：保留原始 OHLCV 口径；复权价格、复权收益和分钟聚合特征作为 sidecar，不覆盖 raw。
+### object `coverage_status`
+`scope`: domain coverage, missing, blocked, partial and completed status.
+`invariant`: required blocked domains are visible and do not register as complete research-consumable datasets.
 
-### `historical_semantics`
-- 定义：历史日期上的 universe、行业、状态、估值、指数成分、公告可得时间等语义。
-- 不变量：不用当前行业、当前板块、当前快照或当前 F10/finance 快照回填历史。
+### object `registry_pointer`
+`scope`: active canonical, policy bundle, memmap and training pack pointers.
+`invariant`: pointer mutation records source bundle/signature, replacement pointer and sample validation.
 
-### `coverage_status`
-- 定义：domain 覆盖、缺失、blocked、partial 和 completed 状态。
-- 不变量：缺失 coverage 不静默缩短为“已完成”；required domain blocked 时不能注册为可供研究消费的完整数据集。
+### object `data_cleanup`
+`scope`: old parquet, old bundle, old `.dat`, old training pack and duplicate assets.
+`invariant`: unique data or assets without replacement remain protected; duplicates can be cleaned after dry-run and validation.
 
-### `registry_pointer`
-- 定义：active canonical、policy bundle、memmap 和 training pack 指针。
-- 不变量：pointer mutation 需要明确 source bundle/signature、替代指针和足够抽样验证。
+### object `slow_disclosure_domain`
+`scope`: financial quarters, forecasts/express reports, announcements and PDFs.
+`invariant`: model-facing use waits for `publish_date / available_date` or equivalent PIT-safe audit.
 
-### `data_cleanup`
-- 定义：旧 parquet、旧 bundle、旧 `.dat`、旧 training pack 和重复旧资产清理。
-- 不变量：不删除唯一数据或无替代指针的数据；重复旧数据在 dry-run、替代指针和抽样验证后可以清理。
+## Pure Functions
+- `select_governed_object(task) -> object`
+- `requires_replacement_pointer(object, method) -> bool`
+- `classify_domain_status(domain) -> complete|partial|blocked|exploratory`
+- `can_register_for_research(bundle) -> bool`
 
-### `slow_disclosure_domain`
-- 定义：财务季报、业绩预告/快报、公告 PDF 等披露慢域。
-- 不变量：进入模型数据前先建立 `publish_date / available_date` 或等价 PIT-safe 可得时点审计；未治理前不进入 v1 默认基底。
+## Procedures
+### procedure `registry_pointer_change`
+`input`: new pointer, source bundle/signature, validation sample.
+`steps`: inspect current pointer；compare source signature；validate sample；write registry and state summary.
 
-## 写回
-- 项目事实写入本分脑。
-- 跨项目拓扑写入主脑。
-- 长证据、迁移审计、provider 评估和清理报告写入 `quant_data_platform/brain/references/` 或对应 `data/audits` / `data/provider_eval` 目录。
+### procedure `provider_domain_promotion`
+`input`: provider probe result and target domain.
+`steps`: audit unit/PIT/coverage/stability；archive raw；define canonical transform；register domain status.
+
+### procedure `cleanup_governed_asset`
+`input`: cleanup target.
+`steps`: dry-run；replacement pointer check；sample validation；delete/archive；write audit result.
+
+## Writeback
+- Project facts: this brain.
+- Cross-project topology: main brain.
+- Long audits, provider reports and cleanup reports: `references/`, `data/audits`, or `data/provider_eval`.

@@ -23,6 +23,13 @@ def _line_count(path: Path) -> int:
         return 0
 
 
+def _read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8-sig")
+    except Exception:
+        return ""
+
+
 def _relative_path(workspace: Path, path: Path) -> str:
     try:
         return path.resolve().relative_to(workspace.resolve()).as_posix()
@@ -51,30 +58,47 @@ def brain_burden_audit(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
     workspace = (find_brain_root(cwd.resolve()) or cwd.resolve()).resolve()
     manifest = _load_json_file(workspace / "brain" / "brain_manifest.json")
     contract = manifest.get("brain_burden_contract") if isinstance(manifest.get("brain_burden_contract"), dict) else {}
-    budgets = {
-        "brain/skills/workspace-brain/SKILL.md": int(contract.get("workspace_skill_line_budget", 100) or 100),
-        "daily_research/brain/state_center.md": int(contract.get("daily_research_state_center_line_budget", 100) or 100),
-        "daily_research/brain/operations_center.md": int(contract.get("daily_research_operations_center_line_budget", 120) or 120),
-    }
+    configured_hot_paths = contract.get("hot_path_files")
+    hot_paths = (
+        [str(path) for path in configured_hot_paths if str(path).strip()]
+        if isinstance(configured_hot_paths, list)
+        else [
+            "brain/skills/workspace-brain/SKILL.md",
+            "daily_research/brain/state_center.md",
+            "daily_research/brain/operations_center.md",
+        ]
+    )
     hot_path_files: dict[str, Any] = {}
     blocked_items: list[dict[str, Any]] = []
     warning_items: list[dict[str, Any]] = []
-    for rel_path, budget in budgets.items():
+    legacy_terms = ("当前优先级", "当前边界", "规则清单", "固定读取", "审批", "禁止")
+    for rel_path in hot_paths:
         path = workspace / rel_path
+        text = _read_text(path)
         lines = _line_count(path)
-        status = "ok" if lines <= budget else "blocked"
+        structural_signals: list[str] = []
+        if any(term in text for term in legacy_terms):
+            structural_signals.append("legacy_global_rule_terms")
+        if rel_path.endswith(".md") and "SKILL.md" not in rel_path:
+            if "object `" not in text and "## Object" not in text:
+                structural_signals.append("missing_object_interface")
+            if "procedure `" not in text and "## Procedures" not in text and "Procedure Entries" not in text:
+                structural_signals.append("missing_procedure_interface")
+        if rel_path.endswith("SKILL.md") and "Multi-Paradigm Brain" not in text:
+            structural_signals.append("missing_multi_paradigm_skill_contract")
         hot_path_files[rel_path] = {
             "path": rel_path,
             "line_count": lines,
-            "budget": budget,
-            "status": status,
+            "line_count_policy": contract.get("line_count_policy", "diagnostic_only_not_blocking"),
+            "structural_signals": structural_signals,
+            "status": "ok" if not structural_signals else "warning",
         }
-        if status == "blocked":
-            blocked_items.append(
+        for signal in structural_signals:
+            warning_items.append(
                 {
-                    "type": "hot_path_budget_exceeded",
+                    "type": signal,
                     "path": rel_path,
-                    "summary": f"{rel_path} has {lines} lines over budget {budget}",
+                    "summary": f"{rel_path} has structural burden signal: {signal}",
                 }
             )
 

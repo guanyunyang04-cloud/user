@@ -1,45 +1,36 @@
-# Daily Stock Analysis 状态中枢
+# Daily Stock Analysis 状态程序
 
-快照日期：`2026-05-11`
+## Object Instances
+### object `daily_stock_analysis_product`
+`type`: multi_market_product_instance
+`state`: 独立产品分脑；不接管 `daily_research` 正式执行默认值。
+`current_truth_source`: this brain for AI handoff; main brain for workspace-level topology and cross-project governance.
 
-## 1. 当前定位
-- `daily_stock_analysis-main` 是独立的多市场 AI 股票分析产品分脑
-- 它不接管 `daily_research` 的正式执行默认值
+### object `ai_compat_entries`
+`type`: compatibility_surface
+`state`: `AGENTS.md / CLAUDE.md / SKILL.md / .github instructions` keep thin entry roles and point to brain.
+`sync_status`: 2026-05-11 AI asset check passed; no new parallel truth source found.
 
-## 2. 当前状态
-- 当前 brain 已成为 `daily_stock_analysis-main` 产品分脑 AI 接管真源；工作区级接管、跨项目边界和全局治理仍以主脑 `brain/` 为准
-- `AGENTS.md / CLAUDE.md / SKILL.md` 只保留兼容入口角色
-- 公开 README 的稳定产品内容已收口进本分脑：
-  - 产品定位、核心能力、模型/数据/通知生态写入 `knowledge_center.md`
-  - 模块地图、验证入口、README 用户入口与配置域写入 `operations_center.md`
-- 公开 README 只保留入口索引，不能覆盖 brain 的接管真源地位
-- AI 兼容入口已统一口径：
-  - `AGENTS.md`、`.github/copilot-instructions.md`、`.github/instructions/governance.instructions.md`、`SKILL.md` 必须指向 brain
-  - 这些文件中的稳定开发流程、验证矩阵和策略说明已摘要进入 `knowledge_center.md` / `operations_center.md`
-  - 若产品兼容入口与工作区主脑冲突，先服从主脑，再同步本分脑与兼容入口
-- 2026-05-11 维护结论：
-  - AI 资产检查通过，brain 仍是产品接管真源，未发现新的平行真源入口
-  - 后端 syntax、critical flake8、deterministic checks、offline pytest 均通过
-  - Web `lint / test / build / smoke` 均通过；smoke 已兼容认证关闭场景，并在无历史报告时明确跳过报告抽屉专项
-  - Windows 后端构建脚本已修正 UTF-8 依赖安装与无关 torch 可选栈干扰，后端 PyInstaller 构建通过
-  - Windows 桌面构建仍受本机 Developer Mode / electron-builder symlink 与网络下载影响，未形成通过结论
+### object `public_docs_surface`
+`type`: public_user_entry
+`state`: README keeps thin user entry, install entry and disclaimer; durable product docs live in `brain/references/public_docs/`.
+`activation`: public docs, README, installation, deployment, user-facing feature explanation.
 
-## 3. 当前优先级
-- 维持产品分脑和执行主线分脑的边界
-- 维持本产品分脑与仓库原生 AI 兼容入口同步
-- 维持模块地图、产品入口和文档归宿一致
-- 后续公开文档内容变更必须直接写入 `brain/references/public_docs/`，README 只同步入口索引
-- 桌面构建链路下轮优先在启用 Developer Mode 或等价 CI 环境中复验
+### object `validation_20260511`
+`type`: validation_evidence
+`state`: backend syntax, critical flake8, deterministic checks, offline pytest passed; Web lint/test/build/smoke passed; backend PyInstaller build passed.
+`open_issue`: Windows desktop build still depends on Developer Mode / electron-builder symlink and network download conditions.
 
-## 4. 当前风险
-- 如果 brain 与兼容入口不同步，接管会重新分裂
-- 如果长篇审计和迁移说明继续散落在 body，brain 的中枢地位会被削弱
-- 如果公开 README 继续承载 brain 未收录的稳定配置或入口，后续维护会再次出现平行真源
-- 如果 AI 兼容入口修改后不跑 `scripts/check_ai_assets.py` 与 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check`，仓库原生 AI 入口可能与 brain 再次分裂
-- `bash scripts/ci_gate.sh all` 在当前 Windows/WSL 映射下找不到 WSL 内 `python`；本机需要用 PowerShell 等价命令或修正 WSL Python 环境
-- Web 依赖审计仍提示 npm vulnerabilities，Vite build 仍提示主 chunk 偏大；这是产品/依赖升级决策，不应混入本轮行为修复
+## Pure Functions
+- `select_product_surface(task)`: maps task to backend/API/web/desktop/bot/data/docs/AI-compat.
+- `derive_next_action(state)`: keep product brain and AI compatibility entries synchronized; desktop build should be retested in Developer Mode or equivalent CI.
+- `classify_validation(result)`: separates product code validation, web validation, build environment issue and release evidence.
 
-## 5. 推荐下一步
-- 接手前先读 `identity_layer.md`、`state_center.md`、`knowledge_center.md`、`operations_center.md`
-- 重要结构变更后继续跑 AI 资产检查和文档守卫
-- 公开文档改动后先运行文档守卫，再按影响面运行产品测试
+## Procedures
+### procedure `product_change`
+`input`: task and selected product surface
+`steps`: inspect body map；change scoped files；run surface validation；write durable product facts when behavior or entrypoints change.
+
+### procedure `public_docs_change`
+`input`: README or user-facing docs change
+`steps`: update canonical public docs in `brain/references/public_docs/`；keep README as thin entry；run docs/AI guard as needed.

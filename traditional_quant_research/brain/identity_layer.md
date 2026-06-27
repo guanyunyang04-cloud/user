@@ -1,7 +1,19 @@
-# Traditional Quant Research 身份层
+# Traditional Quant Research 身份对象
 
-- 项目身份：传统量化方法研究实验室。
-- 核心目标：沉淀可解释、可复现、低复杂度的传统量化研究方法，优先服务因子研究、回测协议、组合构建和风险控制。
-- 主线方法：横截面因子、时间序列趋势/均值回复、统计套利、技术指标、事件/日历效应、组合优化和交易成本建模。
-- 边界：深度学习、强化学习和生产执行系统不是默认主线；需要进入时必须先有传统方法基线和明确对照假设。
-- 证据标准：研究结论必须绑定数据范围、样本切分、费用/滑点、持仓约束和样本外验证状态。
+## object `traditional_quant_research`
+`type`: traditional_quant_lab_brain
+`definition`: 可解释、可复现、低复杂度的传统量化方法研究实验室。
+`focus`: 因子研究、回测协议、组合构建、风险控制、成本建模、事件/日历效应和传统 ML/tabular 方法。
+`not_default`: deep learning、reinforcement learning and production execution systems.
+`north_star`: Baostock-only personal quant strategy research with explicit evidence grade and user-discretion endpoint.
+`methods`: `inspect_frontier_state()`；`run_diagnostic_or_formal_protocol()`；`update_research_log()`；`select_personal_candidate()`。
+
+## object `evidence_identity`
+`type`: research_evidence_model
+`truth_dimensions`: data range, sample split, fee/slippage, holding constraints, out-of-sample state, gate status.
+`candidate_boundary`: agent work stops at `personal_backtest_candidate`; paper/live/trading decisions belong to user discretion.
+
+## Pure Functions
+- `classify_research_result(run) -> diagnostic|personal_research|personal_backtest_candidate|strategy_candidate`
+- `requires_true_size_gate(task) -> bool`
+- `select_research_protocol(task) -> factor|backtest|frontier|ml|shortline|data_audit`
