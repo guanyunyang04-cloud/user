@@ -45,13 +45,14 @@ class RefreshConfig:
     domains: tuple[str, ...] = (DataDomain.MARKET_DAILY,)
     required_domains: tuple[str, ...] = (DataDomain.MARKET_DAILY,)
     benchmark: str = "000300.SH"
-    provider_plan: str = "default_free"
+    provider_plan: str = "qdp_production_v1"
     adjusted_flag: str = "none"
     min_coverage_ratio: float = 0.80
     conflict_tolerance_pct: float = 0.005
     severe_conflict_limit: int = 0
     allow_tdx_family: bool = False
     run_id: str = ""
+    dry_run: bool = False
 
 
 @dataclass(frozen=True)
@@ -343,7 +344,13 @@ def run_refresh(config: RefreshConfig, *, providers: Iterable[Any] | None = None
         registered_dataset_id = ""
         registered_domain_dataset_ids: dict[str, str] = {}
         status = "blocked" if blockers else "ok"
-        if not blockers:
+        if resolved.dry_run:
+            status = "dry_run_blocked" if blockers else "dry_run_ok"
+            progress.start_stage(6, "Skip lake registration", "dry-run")
+            progress.complete_stage()
+            progress.start_stage(7, "Skip policy input bundle", "dry-run")
+            progress.complete_stage()
+        elif not blockers:
             with progress.stage("Register sidecar datasets", ",".join(domain for domain in domains if domain != DataDomain.MARKET_DAILY)):
                 registered_domain_dataset_ids = _register_sidecar_domain_datasets(
                     lake=lake,
@@ -386,6 +393,7 @@ def run_refresh(config: RefreshConfig, *, providers: Iterable[Any] | None = None
                 "refresh_run_id": refresh_run_id,
                 "provider_plan": resolved.provider_plan,
                 "provider_chain": provider_chain,
+                "dry_run": bool(resolved.dry_run),
                 "domains": list(domains),
                 "required_domains": sorted(required_domains),
                 "universe": resolved.universe,
@@ -421,11 +429,19 @@ def run_refresh(config: RefreshConfig, *, providers: Iterable[Any] | None = None
                 "source_provenance": source_provenance,
                 "domain_matrix": provider_capability_matrix(resolved.provider_plan),
                 "blockers": blockers,
+                "activation_gate": {
+                    "status": "blocked" if blockers else "passed",
+                    "dry_run": bool(resolved.dry_run),
+                    "registered": bool(registered_dataset_id),
+                    "blockers": list(blockers),
+                    "note": "dry-run wrote refresh artifacts but skipped lake dataset registration" if resolved.dry_run else "",
+                },
                 "registered_market_dataset_id": registered_dataset_id,
                 "registered_domain_dataset_ids": registered_domain_dataset_ids,
             }
             _write_json(manifest_path, manifest)
-            lake.write_catalog_manifest()
+            if not resolved.dry_run:
+                lake.write_catalog_manifest()
         progress.complete()
         return RefreshResult(
             status=status,
@@ -448,7 +464,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Refresh QDP market data lake from configured providers.")
     parser.add_argument("--as-of-date", required=True)
     parser.add_argument("--start-date", default="")
-    parser.add_argument("--provider-plan", default="default_free")
+    parser.add_argument("--provider-plan", default="qdp_production_v1")
     parser.add_argument("--symbols", default="", help="Comma-separated symbols. Optional when --universe is set.")
     parser.add_argument("--universe", default="", help="all_a, liquid500, file:<path>, or symbols:<csv>.")
     parser.add_argument("--domains", default=DataDomain.MARKET_DAILY)
@@ -460,6 +476,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-coverage-ratio", type=float, default=0.80)
     parser.add_argument("--conflict-tolerance-pct", type=float, default=0.005)
     parser.add_argument("--severe-conflict-limit", type=int, default=0)
+    parser.add_argument("--dry-run", action="store_true", help="Write refresh artifacts and quality manifest, but skip lake bundle registration.")
     parser.add_argument("--json", action="store_true")
     return parser
 
@@ -485,6 +502,7 @@ def main(argv: list[str] | None = None) -> int:
             conflict_tolerance_pct=float(args.conflict_tolerance_pct),
             severe_conflict_limit=int(args.severe_conflict_limit),
             run_id=str(args.run_id or ""),
+            dry_run=bool(args.dry_run),
         )
     )
     payload = {
@@ -498,7 +516,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         print(f"{result.status}: {result.manifest_path}")
-    return 0 if result.status in {"ok", "skipped"} else 2
+    return 0 if result.status in {"ok", "skipped", "dry_run_ok"} else 2
 
 
 def _resolve_config(config: RefreshConfig) -> RefreshConfig:
@@ -523,6 +541,7 @@ def _resolve_config(config: RefreshConfig) -> RefreshConfig:
         severe_conflict_limit=int(config.severe_conflict_limit),
         allow_tdx_family=bool(config.allow_tdx_family),
         run_id=str(config.run_id or ""),
+        dry_run=bool(config.dry_run),
     )
 
 

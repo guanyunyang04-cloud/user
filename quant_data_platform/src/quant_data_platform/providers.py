@@ -17,6 +17,8 @@ from quant_data_platform.domains.contracts import (
     FetchRequest,
     ProviderResult,
     build_intraday_daily_feature_frame,
+    coverage_report_for_domain,
+    coverage_report_for_frame,
     normalize_domain_frame,
     normalize_market_frame,
     validate_provider_name,
@@ -53,9 +55,40 @@ RESEARCH_REBUILD_MINIMAL_REQUIRED_DOMAINS: tuple[str, ...] = (
     DataDomain.TRADING_CALENDAR,
     DataDomain.UNIVERSE_SNAPSHOT,
 )
+QDP_PRODUCTION_V1_REQUIRED_DOMAINS: tuple[str, ...] = (
+    DataDomain.MARKET_DAILY,
+    DataDomain.TRADING_CALENDAR,
+    DataDomain.UNIVERSE_SNAPSHOT,
+    DataDomain.SECURITY_STATUS,
+)
+QDP_PRODUCTION_V1_OPTIONAL_DOMAINS: tuple[str, ...] = (
+    DataDomain.MARKET_INTRADAY_5M,
+    DataDomain.INTRADAY_DAILY_FEATURES,
+    DataDomain.ADJUST_FACTOR,
+    DataDomain.VALUATION,
+    DataDomain.INDUSTRY_CONCEPT,
+    DataDomain.INDEX_CONSTITUENTS,
+    DataDomain.FINANCIAL_QUARTERLY,
+    DataDomain.PERFORMANCE_FORECAST,
+    DataDomain.PERFORMANCE_EXPRESS,
+)
+QDP_PRODUCTION_V1_RESEARCH_FUTURE_DOMAINS: tuple[str, ...] = (
+    DataDomain.ANNOUNCEMENT,
+)
 
 
 _PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
+    "mootdx_online": {
+        "domains": (
+            DataDomain.MARKET_DAILY,
+            DataDomain.MARKET_INTRADAY_5M,
+            DataDomain.MARKET_INTRADAY_1M,
+            DataDomain.INTRADAY_DAILY_FEATURES,
+        ),
+        "requires_token": False,
+        "formal_eligible": True,
+        "notes": "Fast online market source for recent unadjusted OHLCV; daily bars use endpoint-specific volume_factor=100",
+    },
     "baostock": {
         "domains": (
             DataDomain.MARKET_DAILY,
@@ -74,7 +107,25 @@ _PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
         ),
         "requires_token": False,
         "formal_eligible": True,
-        "notes": "BaoStock-first source for daily bars, 5m-derived daily features, calendar, universe, status, industry, valuation, index constituents and conservative quarterly/event finance",
+        "notes": "BaoStock source for structured history: calendar, universe, status, industry, valuation, index constituents, adjust factors and conservative quarterly/event finance",
+    },
+    "cninfo": {
+        "domains": (
+            DataDomain.ANNOUNCEMENT,
+        ),
+        "requires_token": False,
+        "formal_eligible": False,
+        "notes": "CNInfo announcement/disclosure source; QDP production v1 keeps it out of model features until PIT audit passes",
+    },
+    "qdp_production_v1": {
+        "domains": (
+            *QDP_PRODUCTION_V1_REQUIRED_DOMAINS,
+            *QDP_PRODUCTION_V1_OPTIONAL_DOMAINS,
+            *QDP_PRODUCTION_V1_RESEARCH_FUTURE_DOMAINS,
+        ),
+        "requires_token": False,
+        "formal_eligible": True,
+        "notes": "Router provider: mootdx_online for recent market data, BaoStock for structured history, CNInfo for raw disclosure probes",
     },
     "eastmoney_efinance": {
         "domains": (DataDomain.MARKET_DAILY, DataDomain.UNIVERSE_SNAPSHOT, DataDomain.VALUATION),
@@ -162,20 +213,47 @@ def provider_capability_matrix(provider_plan: str = "formal_free_v3") -> list[di
     plan = str(provider_plan or "formal_free_v3").strip().lower()
     if plan == "formal_free_v3":
         provider_names = ("baostock", "eastmoney_efinance", "akshare_eastmoney", "tencent_finance", "tonghuashun_hotspot", "tushare_http_optional")
+        default_domains_by_provider: dict[str, set[str]] = {}
+    elif plan == "qdp_production_v1":
+        provider_names = ("mootdx_online", "baostock", "cninfo")
+        default_domains_by_provider = {
+            "mootdx_online": {
+                DataDomain.MARKET_DAILY,
+                DataDomain.MARKET_INTRADAY_5M,
+                DataDomain.INTRADAY_DAILY_FEATURES,
+            },
+            "baostock": {
+                DataDomain.TRADING_CALENDAR,
+                DataDomain.UNIVERSE_SNAPSHOT,
+                DataDomain.SECURITY_STATUS,
+                DataDomain.ADJUST_FACTOR,
+                DataDomain.VALUATION,
+                DataDomain.INDUSTRY_CONCEPT,
+                DataDomain.INDEX_CONSTITUENTS,
+                DataDomain.FINANCIAL_QUARTERLY,
+                DataDomain.PERFORMANCE_FORECAST,
+                DataDomain.PERFORMANCE_EXPRESS,
+            },
+            "cninfo": set(),
+        }
     elif plan == "research_rebuild_minimal_free":
         provider_names = ("research_rebuild_minimal_free",)
+        default_domains_by_provider = {}
     else:
         provider_names = tuple(str(getattr(provider, "name", "")) for provider in build_default_providers(plan))
+        default_domains_by_provider = {}
     rows: list[dict[str, Any]] = []
     all_domains = (
         *FORMAL_FREE_V3_REQUIRED_DOMAINS,
         *FORMAL_FREE_V3_OPTIONAL_DOMAINS,
+        *QDP_PRODUCTION_V1_OPTIONAL_DOMAINS,
         *FORMAL_FREE_V3_RESEARCH_FUTURE_DOMAINS,
+        *QDP_PRODUCTION_V1_RESEARCH_FUTURE_DOMAINS,
     )
     for provider_name in provider_names:
         meta = _PROVIDER_CAPABILITIES.get(provider_name, {"domains": (), "requires_token": False, "formal_eligible": False, "notes": ""})
         supported = set(str(item) for item in meta.get("domains", ()))
-        for domain in all_domains:
+        for domain in tuple(dict.fromkeys(all_domains)):
             formal_refresh = bool(
                 (
                     plan == "formal_free_v3"
@@ -188,7 +266,23 @@ def provider_capability_matrix(provider_plan: str = "formal_free_v3") -> list[di
                     and domain in RESEARCH_REBUILD_MINIMAL_REQUIRED_DOMAINS
                     and domain in supported
                 )
+                or (
+                    plan == "qdp_production_v1"
+                    and domain in default_domains_by_provider.get(provider_name, set())
+                    and domain in supported
+                )
             )
+            if plan == "qdp_production_v1":
+                if domain in QDP_PRODUCTION_V1_REQUIRED_DOMAINS:
+                    requirement = "required"
+                elif domain in QDP_PRODUCTION_V1_OPTIONAL_DOMAINS:
+                    requirement = "optional"
+                elif domain in QDP_PRODUCTION_V1_RESEARCH_FUTURE_DOMAINS:
+                    requirement = "research_future"
+                else:
+                    requirement = "unsupported"
+            else:
+                requirement = _formal_requirement(domain)
             rows.append(
                 {
                     "provider": provider_name,
@@ -199,7 +293,7 @@ def provider_capability_matrix(provider_plan: str = "formal_free_v3") -> list[di
                     "formal_eligible": bool(meta.get("formal_eligible", False)),
                     "formal_default": formal_refresh,
                     "formal_refresh": formal_refresh,
-                    "requirement": _formal_requirement(domain),
+                    "requirement": requirement,
                     "notes": str(meta.get("notes", "")),
                 }
             )
@@ -323,6 +417,217 @@ class AkshareEastmoneyProvider:
             raise RuntimeError(f"unsupported_domain: {self.name} does not support {request.domain}")
         data = normalize_domain_frame(frame, domain=request.domain, source=self.name, as_of_date=request.end_date, require_columns=False)
         return ProviderResult(provider=self.name, data=data)
+
+
+@dataclass
+class MootdxOnlineProvider:
+    name: str = "mootdx_online"
+    page_size: int = 800
+    max_pages: int = 12
+    _client_factory: Any = None
+
+    def fetch_market_bars(self, request: FetchRequest) -> ProviderResult:
+        validate_provider_name(self.name)
+        request = request.normalized()
+        domain_request = DomainFetchRequest(
+            domain=DataDomain.MARKET_DAILY,
+            symbols=request.symbols,
+            start_date=request.start_date,
+            end_date=request.end_date,
+            adjusted_flag=request.adjusted_flag,
+        )
+        return self._fetch_bars_domain(
+            domain_request,
+            frequency=9,
+            endpoint="bars_frequency_9_daily",
+            volume_factor=100.0,
+            raw_volume_unit="hands",
+            canonical_volume_unit="shares",
+        )
+
+    def fetch_domain(self, request: DomainFetchRequest) -> ProviderResult:
+        request = request.normalized()
+        if request.domain == DataDomain.MARKET_DAILY:
+            return self.fetch_market_bars(
+                FetchRequest(
+                    symbols=request.symbols,
+                    start_date=request.start_date,
+                    end_date=request.end_date,
+                    adjusted_flag=request.adjusted_flag,
+                )
+            )
+        if request.domain == DataDomain.MARKET_INTRADAY_5M:
+            return self._fetch_bars_domain(
+                request,
+                frequency=0,
+                endpoint="bars_frequency_0_5m",
+                volume_factor=1.0,
+                raw_volume_unit="shares",
+                canonical_volume_unit="shares",
+            )
+        if request.domain == DataDomain.MARKET_INTRADAY_1M:
+            return self._fetch_bars_domain(
+                request,
+                frequency=8,
+                endpoint="bars_frequency_8_1m",
+                volume_factor=1.0,
+                raw_volume_unit="shares",
+                canonical_volume_unit="shares",
+            )
+        if request.domain == DataDomain.INTRADAY_DAILY_FEATURES:
+            intraday = self._fetch_bars_domain(
+                DomainFetchRequest(
+                    domain=DataDomain.MARKET_INTRADAY_5M,
+                    symbols=request.symbols,
+                    start_date=request.start_date,
+                    end_date=request.end_date,
+                    adjusted_flag=request.adjusted_flag,
+                ),
+                frequency=0,
+                endpoint="bars_frequency_0_5m",
+                volume_factor=1.0,
+                raw_volume_unit="shares",
+                canonical_volume_unit="shares",
+            )
+            features = build_intraday_daily_feature_frame(
+                intraday.data,
+                source=self.name,
+                adjusted_flag=request.adjusted_flag,
+            )
+            coverage = coverage_report_for_domain(features, request, provider=self.name)
+            coverage.update(
+                {
+                    "endpoint": "derived_from_bars_frequency_0_5m",
+                    "source_domain": DataDomain.MARKET_INTRADAY_5M,
+                    "unit_contract": "derived from canonical 5m OHLCV; no price adjustment applied",
+                }
+            )
+            return ProviderResult(
+                provider=self.name,
+                data=features,
+                coverage_report=coverage,
+                error_report=list(intraday.error_report or []),
+            )
+        raise RuntimeError(f"unsupported_domain: {self.name} does not support {request.domain}")
+
+    def fetch_quote_snapshot(self, symbols: Iterable[str]) -> ProviderResult:
+        validate_provider_name(self.name)
+        normalized_symbols = tuple(FetchRequest(symbols=tuple(symbols), start_date="2000-01-01", end_date="2000-01-01").normalized().symbols)
+        rows: list[pd.DataFrame] = []
+        errors: list[dict[str, Any]] = []
+        if not normalized_symbols:
+            return ProviderResult(provider=self.name, data=pd.DataFrame(), error_report=errors)
+        client = _open_mootdx_client(self._client_factory)
+        try:
+            payload = client.quotes(symbol=[_mootdx_symbol(symbol) for symbol in normalized_symbols])
+            frame = payload.copy() if isinstance(payload, pd.DataFrame) else pd.DataFrame(payload)
+            if not frame.empty:
+                frame = _normalize_mootdx_quote_snapshot(
+                    frame,
+                    symbols=normalized_symbols,
+                    source=self.name,
+                    volume_factor=100.0,
+                )
+                rows.append(frame)
+        except Exception as exc:
+            errors.append({"provider": self.name, "domain": "quote_snapshot", "code": "provider_exception", "error_type": type(exc).__name__, "message": str(exc)})
+        finally:
+            _close_mootdx_client(client)
+        data = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
+        return ProviderResult(
+            provider=self.name,
+            data=data,
+            coverage_report={
+                "provider": self.name,
+                "domain": "quote_snapshot",
+                "endpoint": "quotes",
+                "row_count": int(len(data)),
+                "symbol_count": int(data["symbol"].nunique()) if not data.empty and "symbol" in data.columns else 0,
+                "raw_volume_unit": "hands",
+                "canonical_volume_unit": "shares",
+                "volume_factor": 100.0,
+                "status": "ok" if len(data) else "empty",
+            },
+            error_report=errors,
+        )
+
+    def _fetch_bars_domain(
+        self,
+        request: DomainFetchRequest,
+        *,
+        frequency: int,
+        endpoint: str,
+        volume_factor: float,
+        raw_volume_unit: str,
+        canonical_volume_unit: str,
+    ) -> ProviderResult:
+        request = request.normalized()
+        rows: list[pd.DataFrame] = []
+        errors: list[dict[str, Any]] = []
+        symbols = tuple(request.symbols)
+        if not symbols:
+            data = normalize_domain_frame(pd.DataFrame(), domain=request.domain, source=self.name, as_of_date=request.end_date, adjusted_flag=request.adjusted_flag, require_columns=False)
+            return ProviderResult(provider=self.name, data=data, error_report=errors)
+        client = _open_mootdx_client(self._client_factory)
+        try:
+            for idx, symbol in enumerate(symbols, start=1):
+                if idx == 1 or idx % 50 == 0 or idx == len(symbols):
+                    progress_write(f"mootdx_online_{request.domain}={idx}/{len(symbols)} symbol={symbol}")
+                try:
+                    frame = _fetch_mootdx_bars_window(
+                        client=client,
+                        symbol=symbol,
+                        frequency=frequency,
+                        start_date=request.start_date,
+                        end_date=request.end_date,
+                        page_size=int(self.page_size),
+                        max_pages=int(self.max_pages),
+                        source=self.name,
+                        adjusted_flag=request.adjusted_flag,
+                        volume_factor=float(volume_factor),
+                    )
+                except Exception as exc:
+                    errors.append({"provider": self.name, "domain": request.domain, "symbol": symbol, "code": "symbol_fetch_error", "error_type": type(exc).__name__, "message": str(exc)})
+                    continue
+                if not frame.empty:
+                    rows.append(frame)
+        finally:
+            _close_mootdx_client(client)
+        raw = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
+        data = normalize_domain_frame(
+            raw,
+            domain=request.domain,
+            source=self.name,
+            as_of_date=request.end_date,
+            adjusted_flag=request.adjusted_flag,
+            require_columns=False,
+        )
+        data = _filter_domain_date_window(data, request.start_date, request.end_date)
+        if request.domain == DataDomain.MARKET_DAILY:
+            coverage = coverage_report_for_frame(
+                data,
+                FetchRequest(
+                    symbols=request.symbols,
+                    start_date=request.start_date,
+                    end_date=request.end_date,
+                    adjusted_flag=request.adjusted_flag,
+                ),
+                provider=self.name,
+            )
+        else:
+            coverage = coverage_report_for_domain(data, request, provider=self.name)
+        coverage.update(
+            {
+                "endpoint": endpoint,
+                "frequency": int(frequency),
+                "raw_volume_unit": raw_volume_unit,
+                "canonical_volume_unit": canonical_volume_unit,
+                "volume_factor": float(volume_factor),
+                "adjustment_semantics": "unadjusted_raw_ohlcv",
+                "source_stability_note": "online mootdx quote server; server stability must be monitored by provider-health/provider-eval",
+            }
+        )
+        return ProviderResult(provider=self.name, data=data, coverage_report=coverage, error_report=errors)
 
 
 @dataclass
@@ -730,8 +1035,93 @@ class ResearchRebuildMinimalFreeProvider:
         raise RuntimeError(f"unsupported_domain: {self.name} does not support {request.domain}")
 
 
+@dataclass
+class CninfoAnnouncementProvider:
+    name: str = "cninfo"
+    page_size: int = 30
+    max_pages: int = 3
+
+    def fetch_market_bars(self, request: FetchRequest) -> ProviderResult:
+        raise RuntimeError("cninfo only supports announcement/disclosure domains")
+
+    def fetch_domain(self, request: DomainFetchRequest) -> ProviderResult:
+        request = request.normalized()
+        if request.domain != DataDomain.ANNOUNCEMENT:
+            raise RuntimeError(f"unsupported_domain: {self.name} does not support {request.domain}")
+        frames: list[pd.DataFrame] = []
+        errors: list[dict[str, Any]] = []
+        for symbol in tuple(request.symbols or ()):
+            try:
+                frame = _fetch_cninfo_announcements(
+                    symbol=symbol,
+                    start_date=request.start_date,
+                    end_date=request.end_date,
+                    page_size=int(self.page_size),
+                    max_pages=int(self.max_pages),
+                )
+            except Exception as exc:
+                errors.append({"provider": self.name, "domain": request.domain, "symbol": symbol, "code": "symbol_fetch_error", "error_type": type(exc).__name__, "message": str(exc)})
+                continue
+            if not frame.empty:
+                frames.append(frame)
+        raw = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+        data = normalize_domain_frame(raw, domain=request.domain, source=self.name, as_of_date=request.end_date, require_columns=False)
+        coverage = coverage_report_for_domain(data, request, provider=self.name)
+        coverage.update(
+            {
+                "endpoint": "hisAnnouncement/query",
+                "raw_only_until_pit_audit": True,
+                "pit_gate": "blocked_for_model_features_until_disclosure_time_audit",
+            }
+        )
+        return ProviderResult(provider=self.name, data=data, coverage_report=coverage, error_report=errors)
+
+
+@dataclass
+class QdpProductionV1Provider:
+    name: str = "qdp_production_v1"
+
+    def __post_init__(self) -> None:
+        self._mootdx = MootdxOnlineProvider()
+        self._baostock = BaostockProvider()
+        self._cninfo = CninfoAnnouncementProvider()
+
+    def fetch_market_bars(self, request: FetchRequest) -> ProviderResult:
+        return self._mootdx.fetch_market_bars(request)
+
+    def fetch_domain(self, request: DomainFetchRequest) -> ProviderResult:
+        request = request.normalized()
+        if request.domain in {
+            DataDomain.MARKET_DAILY,
+            DataDomain.MARKET_INTRADAY_5M,
+            DataDomain.MARKET_INTRADAY_1M,
+            DataDomain.INTRADAY_DAILY_FEATURES,
+        }:
+            return self._mootdx.fetch_domain(request)
+        if request.domain in {
+            DataDomain.TRADING_CALENDAR,
+            DataDomain.UNIVERSE_SNAPSHOT,
+            DataDomain.SECURITY_STATUS,
+            DataDomain.INDUSTRY_CONCEPT,
+            DataDomain.VALUATION,
+            DataDomain.INDEX_CONSTITUENTS,
+            DataDomain.ADJUST_FACTOR,
+            DataDomain.FINANCIAL_QUARTERLY,
+            DataDomain.PERFORMANCE_FORECAST,
+            DataDomain.PERFORMANCE_EXPRESS,
+        }:
+            return self._baostock.fetch_domain(request)
+        if request.domain == DataDomain.ANNOUNCEMENT:
+            return self._cninfo.fetch_domain(request)
+        raise RuntimeError(f"unsupported_domain: {self.name} does not support {request.domain}")
+
+
 def build_default_providers(provider_plan: str = "default_free") -> list:
     plan = str(provider_plan or "default_free").strip().lower()
+    if plan == "qdp_production_v1":
+        return [QdpProductionV1Provider()]
+    if plan == "mootdx_online":
+        return [MootdxOnlineProvider()]
     if plan == "research_rebuild_minimal_free":
         return [ResearchRebuildMinimalFreeProvider()]
     if plan == "default_free":
@@ -753,6 +1143,233 @@ def build_default_providers(provider_plan: str = "default_free") -> list:
     if plan == "tushare_optional":
         return [TushareHttpOptionalProvider()]
     raise ValueError(f"Unsupported provider_plan: {provider_plan}")
+
+
+def _open_mootdx_client(client_factory: Any = None) -> Any:
+    if callable(client_factory):
+        return client_factory()
+    try:
+        from mootdx.quotes import Quotes  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("mootdx is not installed in the yolos environment") from exc
+    return Quotes.factory(market="std", multithread=True, heartbeat=True, bestip=False, timeout=15)
+
+
+def _close_mootdx_client(client: Any) -> None:
+    close = getattr(client, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            return
+
+
+def _mootdx_symbol(symbol: str) -> str:
+    raw = str(symbol or "").strip().upper()
+    if "." in raw:
+        raw = raw.split(".", 1)[0]
+    if raw.startswith(("SH", "SZ", "BJ")) and raw[2:].isdigit():
+        raw = raw[2:]
+    return raw[-6:].zfill(6)
+
+
+def _is_mootdx_index_symbol(symbol: str) -> bool:
+    raw = str(symbol or "").strip().upper()
+    code = _mootdx_symbol(raw)
+    suffix = raw.rsplit(".", 1)[1] if "." in raw else ""
+    if suffix == "SH" and code.startswith(("000", "880", "881", "882", "883", "884", "885", "886", "887", "889")):
+        return True
+    if suffix == "SZ" and code.startswith("399"):
+        return True
+    return False
+
+
+def _fetch_mootdx_bars_window(
+    *,
+    client: Any,
+    symbol: str,
+    frequency: int,
+    start_date: str,
+    end_date: str,
+    page_size: int,
+    max_pages: int,
+    source: str,
+    adjusted_flag: str,
+    volume_factor: float,
+) -> pd.DataFrame:
+    frames: list[pd.DataFrame] = []
+    start_ts = pd.Timestamp(start_date)
+    end_ts = pd.Timestamp(end_date)
+    for page in range(max(int(max_pages), 1)):
+        offset_start = int(page) * int(page_size)
+        payload = _call_mootdx_bars_endpoint(
+            client=client,
+            symbol=symbol,
+            frequency=int(frequency),
+            start=offset_start,
+            offset=int(page_size),
+        )
+        raw = _mootdx_payload_frame(payload)
+        if raw.empty:
+            break
+        prepared = _prepare_mootdx_bars_frame(
+            raw,
+            symbol=symbol,
+            source=source,
+            adjusted_flag=adjusted_flag,
+            volume_factor=float(volume_factor),
+        )
+        if prepared.empty:
+            break
+        frames.append(prepared)
+        dates = pd.to_datetime(prepared["datetime"] if "datetime" in prepared.columns else prepared["trade_date"], errors="coerce").dropna()
+        if len(dates) and pd.Timestamp(dates.min()).normalize() <= start_ts.normalize() and pd.Timestamp(dates.max()).normalize() >= end_ts.normalize():
+            break
+        if len(raw) < int(page_size):
+            break
+    if not frames:
+        return pd.DataFrame()
+    combined = pd.concat(frames, ignore_index=True)
+    return _filter_domain_date_window(combined, start_date, end_date)
+
+
+def _call_mootdx_bars_endpoint(*, client: Any, symbol: str, frequency: int, start: int, offset: int) -> Any:
+    method = getattr(client, "index_bars", None) if _is_mootdx_index_symbol(symbol) else None
+    if not callable(method):
+        method = getattr(client, "bars", None)
+    if not callable(method):
+        raise RuntimeError("mootdx client does not expose bars/index_bars")
+    return method(symbol=_mootdx_symbol(symbol), frequency=int(frequency), start=int(start), offset=int(offset))
+
+
+def _mootdx_payload_frame(payload: Any) -> pd.DataFrame:
+    if isinstance(payload, pd.DataFrame):
+        frame = payload.copy()
+    else:
+        frame = pd.DataFrame(payload)
+    if frame.empty:
+        return frame
+    if "datetime" not in frame.columns and isinstance(frame.index, pd.DatetimeIndex):
+        frame = frame.copy()
+        frame["datetime"] = frame.index
+    return frame.reset_index(drop=True)
+
+
+def _prepare_mootdx_bars_frame(
+    frame: pd.DataFrame,
+    *,
+    symbol: str,
+    source: str,
+    adjusted_flag: str,
+    volume_factor: float,
+) -> pd.DataFrame:
+    data = frame.copy()
+    data["symbol"] = str(symbol).strip().upper()
+    data["source"] = source
+    data["adjusted_flag"] = str(adjusted_flag or "none")
+    if "trade_date" not in data.columns and "datetime" in data.columns:
+        data["trade_date"] = data["datetime"]
+    volume_source = None
+    for candidate in ("volume", "vol", "成交量"):
+        if candidate in data.columns:
+            volume_source = candidate
+            break
+    if volume_source is not None:
+        data["volume"] = pd.to_numeric(data[volume_source], errors="coerce") * float(volume_factor)
+    return data
+
+
+def _normalize_mootdx_quote_snapshot(
+    frame: pd.DataFrame,
+    *,
+    symbols: tuple[str, ...],
+    source: str,
+    volume_factor: float,
+) -> pd.DataFrame:
+    data = frame.copy()
+    code_to_symbol = {_mootdx_symbol(symbol): symbol for symbol in symbols}
+    if "symbol" not in data.columns:
+        if "code" in data.columns:
+            data["symbol"] = data["code"].astype(str).str.zfill(6).map(code_to_symbol).fillna(data["code"].astype(str))
+        elif len(data) == len(symbols):
+            data["symbol"] = list(symbols)
+    data["trade_date"] = pd.Timestamp.now().strftime("%Y-%m-%d")
+    if "close" not in data.columns and "price" in data.columns:
+        data["close"] = data["price"]
+    volume_source = None
+    for candidate in ("volume", "vol", "成交量"):
+        if candidate in data.columns:
+            volume_source = candidate
+            break
+    if volume_source is not None:
+        data["volume"] = pd.to_numeric(data[volume_source], errors="coerce") * float(volume_factor)
+    data["source"] = source
+    data["adjusted_flag"] = "none"
+    return normalize_market_frame(data, source=source, adjusted_flag="none", require_columns=False)
+
+
+def _filter_domain_date_window(data: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFrame:
+    if data is None or data.empty or "trade_date" not in data.columns:
+        return data if isinstance(data, pd.DataFrame) else pd.DataFrame()
+    dates = pd.to_datetime(data["trade_date"], errors="coerce").dt.normalize()
+    mask = dates.ge(pd.Timestamp(start_date).normalize()) & dates.le(pd.Timestamp(end_date).normalize())
+    return data.loc[mask].reset_index(drop=True)
+
+
+def _fetch_cninfo_announcements(
+    *,
+    symbol: str,
+    start_date: str,
+    end_date: str,
+    page_size: int,
+    max_pages: int,
+) -> pd.DataFrame:
+    url = "http://www.cninfo.com.cn/new/hisAnnouncement/query"
+    headers = {
+        "User-Agent": "Mozilla/5.0 qdp-cninfo-provider",
+        "Referer": "http://www.cninfo.com.cn/new/commonUrl/pageOfSearch",
+    }
+    rows: list[pd.DataFrame] = []
+    for page in range(1, max(int(max_pages), 1) + 1):
+        payload = {
+            "pageNum": int(page),
+            "pageSize": int(page_size),
+            "column": "szse" if str(symbol).upper().endswith(".SZ") else "sse",
+            "tabName": "fulltext",
+            "stock": f"{_strip_suffix(symbol)},",
+            "searchkey": "",
+            "secid": "",
+            "plate": "",
+            "category": "",
+            "trade": "",
+            "seDate": f"{start_date}~{end_date}",
+            "sortName": "",
+            "sortType": "",
+            "isHLtitle": "true",
+        }
+        response = requests.post(url, headers=headers, data=payload, timeout=20)
+        if response.status_code >= 400:
+            raise RuntimeError(f"cninfo_http_{response.status_code}: {response.text[:200]}")
+        try:
+            body = response.json()
+        except Exception as exc:
+            raise RuntimeError(f"cninfo_non_json_response: {response.text[:200]}") from exc
+        announcements = body.get("announcements", []) if isinstance(body, dict) else []
+        frame = pd.DataFrame(announcements)
+        if frame.empty:
+            break
+        frame = frame.rename(columns={"announcementTitle": "title", "announcementTime": "trade_date", "adjunctUrl": "url", "announcementTypeName": "category"})
+        if "trade_date" in frame.columns:
+            values = pd.to_numeric(frame["trade_date"], errors="coerce")
+            parsed_ms = pd.to_datetime(values, unit="ms", errors="coerce")
+            parsed_text = pd.to_datetime(frame["trade_date"], errors="coerce")
+            frame["trade_date"] = parsed_ms.fillna(parsed_text).dt.strftime("%Y-%m-%d")
+        frame["symbol"] = str(symbol).strip().upper()
+        frame["source"] = "cninfo"
+        rows.append(frame)
+        if len(frame) < int(page_size):
+            break
+    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
 
 
 def _to_baostock_code(symbol: str) -> str:

@@ -300,6 +300,35 @@ class DataPlatformRefreshDailyTest(unittest.TestCase):
         self.assertTrue(result.registered_market_dataset_id.startswith("policy_input_bundle__"))
         self.assertEqual(prepared.universe, ("000001.SZ", "600000.SH"))
 
+    def test_refresh_dry_run_writes_manifest_without_registering_bundle(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            provider = InMemoryMarketProvider(
+                "mootdx_online",
+                _market_frame(dates=["2026-01-05"], provider="mootdx_online"),
+            )
+            result = run_refresh(
+                RefreshConfig(
+                    lake_root=Path(temp_dir),
+                    as_of_date="2026-01-05",
+                    start_date="2026-01-05",
+                    symbols=("000001.SZ", "600000.SH", "000300.SH"),
+                    benchmark="000300.SH",
+                    provider_plan="qdp_production_v1",
+                    dry_run=True,
+                ),
+                providers=[provider],
+            )
+            manifest = json.loads(Path(result.manifest_path).read_text(encoding="utf-8"))
+            silver_exists = Path(result.silver_market_path).exists()
+
+        self.assertEqual(result.status, "dry_run_ok")
+        self.assertEqual(result.registered_market_dataset_id, "")
+        self.assertEqual(manifest["status"], "dry_run_ok")
+        self.assertTrue(manifest["dry_run"])
+        self.assertFalse(manifest["activation_gate"]["registered"])
+        self.assertEqual(manifest["activation_gate"]["status"], "passed")
+        self.assertTrue(silver_exists)
+
     def test_second_refresh_only_fetches_missing_dates(self) -> None:
         with TemporaryDirectory() as temp_dir:
             provider = InMemoryMarketProvider(

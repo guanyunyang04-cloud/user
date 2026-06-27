@@ -17,6 +17,8 @@ from quant_data_platform.domains.contracts import (
 from quant_data_platform.provider_manager import InMemoryMarketProvider, ProviderManager
 from quant_data_platform.providers import (
     BaostockProvider,
+    MootdxOnlineProvider,
+    QdpProductionV1Provider,
     EastmoneyEfinanceProvider,
     ResearchRebuildMinimalFreeProvider,
     TushareHttpOptionalProvider,
@@ -130,10 +132,26 @@ class DataPlatformProviderContractTest(unittest.TestCase):
         default_names = [provider.name for provider in build_default_providers("default_free")]
         realtime_names = [provider.name for provider in build_default_providers("default_free_with_realtime")]
         baostock_only_names = [provider.name for provider in build_default_providers("baostock_only")]
+        production_names = [provider.name for provider in build_default_providers("qdp_production_v1")]
 
         self.assertNotIn("sina_tencent_realtime", default_names)
         self.assertIn("sina_tencent_realtime", realtime_names)
         self.assertEqual(baostock_only_names, ["baostock"])
+        self.assertEqual(production_names, ["qdp_production_v1"])
+
+    def test_qdp_production_v1_matrix_records_source_split(self) -> None:
+        matrix = provider_capability_matrix("qdp_production_v1")
+        defaults = {
+            (item["provider"], item["domain"])
+            for item in matrix
+            if item.get("formal_default") is True
+        }
+
+        self.assertIn(("mootdx_online", DataDomain.MARKET_DAILY), defaults)
+        self.assertIn(("mootdx_online", DataDomain.MARKET_INTRADAY_5M), defaults)
+        self.assertIn(("baostock", DataDomain.TRADING_CALENDAR), defaults)
+        self.assertIn(("baostock", DataDomain.UNIVERSE_SNAPSHOT), defaults)
+        self.assertNotIn(("cninfo", DataDomain.ANNOUNCEMENT), defaults)
 
     def test_formal_free_v3_provider_plan_has_required_free_domains_without_tdx(self) -> None:
         provider_names = [provider.name for provider in build_default_providers("formal_free_v3")]
@@ -213,6 +231,98 @@ class DataPlatformProviderContractTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(RuntimeError, "unsupported_domain"):
             provider.fetch_domain(DomainFetchRequest(domain=DataDomain.LIMIT_STATUS, start_date="2026-01-05", end_date="2026-01-05"))
+
+    def test_qdp_production_v1_provider_routes_domains_to_selected_sources(self) -> None:
+        provider = QdpProductionV1Provider()
+        calls: list[tuple[str, str]] = []
+
+        def fake_mootdx(request: DomainFetchRequest) -> ProviderResult:
+            calls.append(("mootdx_online", request.domain))
+            return ProviderResult(provider="mootdx_online", data=pd.DataFrame({"symbol": ["000001.SZ"], "trade_date": ["2026-01-05"], "source": ["mootdx_online"]}))
+
+        def fake_baostock(request: DomainFetchRequest) -> ProviderResult:
+            calls.append(("baostock", request.domain))
+            return ProviderResult(provider="baostock", data=pd.DataFrame({"symbol": ["000001.SZ"], "trade_date": ["2026-01-05"], "source": ["baostock"]}))
+
+        def fake_cninfo(request: DomainFetchRequest) -> ProviderResult:
+            calls.append(("cninfo", request.domain))
+            return ProviderResult(provider="cninfo", data=pd.DataFrame({"symbol": ["000001.SZ"], "trade_date": ["2026-01-05"], "source": ["cninfo"]}))
+
+        provider._mootdx.fetch_domain = fake_mootdx  # type: ignore[method-assign]
+        provider._baostock.fetch_domain = fake_baostock  # type: ignore[method-assign]
+        provider._cninfo.fetch_domain = fake_cninfo  # type: ignore[method-assign]
+
+        provider.fetch_domain(DomainFetchRequest(domain=DataDomain.MARKET_DAILY, start_date="2026-01-05", end_date="2026-01-05"))
+        provider.fetch_domain(DomainFetchRequest(domain=DataDomain.TRADING_CALENDAR, start_date="2026-01-05", end_date="2026-01-05"))
+        provider.fetch_domain(DomainFetchRequest(domain=DataDomain.ANNOUNCEMENT, start_date="2026-01-05", end_date="2026-01-05"))
+
+        self.assertEqual(
+            calls,
+            [
+                ("mootdx_online", DataDomain.MARKET_DAILY),
+                ("baostock", DataDomain.TRADING_CALENDAR),
+                ("cninfo", DataDomain.ANNOUNCEMENT),
+            ],
+        )
+
+    def test_mootdx_online_daily_bars_normalize_volume_from_hands_to_shares(self) -> None:
+        class FakeClient:
+            def bars(self, **_: object) -> pd.DataFrame:
+                return pd.DataFrame(
+                    {
+                        "open": [10.0],
+                        "high": [10.5],
+                        "low": [9.8],
+                        "close": [10.2],
+                        "vol": [1234.0],
+                        "amount": [1258680.0],
+                        "datetime": ["2026-01-05 15:00:00"],
+                    }
+                )
+
+            def close(self) -> None:
+                return None
+
+        provider = MootdxOnlineProvider(_client_factory=FakeClient, page_size=10, max_pages=1)
+        result = provider.fetch_market_bars(FetchRequest(symbols=("000001.SZ",), start_date="2026-01-05", end_date="2026-01-05"))
+
+        self.assertEqual(result.data["volume"].tolist(), [123400.0])
+        self.assertEqual(result.data["source"].tolist(), ["mootdx_online"])
+        self.assertEqual(result.coverage_report["volume_factor"], 100.0)
+        self.assertEqual(result.coverage_report["raw_volume_unit"], "hands")
+
+    def test_mootdx_online_5m_bars_keep_share_volume_unit(self) -> None:
+        class FakeClient:
+            def bars(self, **_: object) -> pd.DataFrame:
+                return pd.DataFrame(
+                    {
+                        "open": [10.0],
+                        "high": [10.5],
+                        "low": [9.8],
+                        "close": [10.2],
+                        "vol": [123400.0],
+                        "amount": [1258680.0],
+                        "datetime": ["2026-01-05 09:35:00"],
+                    }
+                )
+
+            def close(self) -> None:
+                return None
+
+        provider = MootdxOnlineProvider(_client_factory=FakeClient, page_size=10, max_pages=1)
+        result = provider.fetch_domain(
+            DomainFetchRequest(
+                domain=DataDomain.MARKET_INTRADAY_5M,
+                symbols=("000001.SZ",),
+                start_date="2026-01-05",
+                end_date="2026-01-05",
+            )
+        )
+
+        self.assertEqual(result.data["volume"].tolist(), [123400.0])
+        self.assertEqual(result.data["bar_time"].tolist(), ["093500000"])
+        self.assertEqual(result.coverage_report["volume_factor"], 1.0)
+        self.assertEqual(result.coverage_report["raw_volume_unit"], "shares")
 
     def test_research_rebuild_minimal_free_routes_universe_to_baostock_when_eastmoney_fails(self) -> None:
         provider = ResearchRebuildMinimalFreeProvider()
