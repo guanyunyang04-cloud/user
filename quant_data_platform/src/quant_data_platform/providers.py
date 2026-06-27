@@ -634,6 +634,7 @@ class MootdxOnlineProvider:
 class BaostockProvider:
     name: str = "baostock"
     _market_daily_max_workers: int = 4
+    _intraday_max_workers: int = 1
 
     def fetch_market_bars(self, request: FetchRequest) -> ProviderResult:
         validate_provider_name(self.name)
@@ -710,6 +711,72 @@ class BaostockProvider:
         data = normalize_market_frame(pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(), source=self.name, adjusted_flag=request.adjusted_flag, require_columns=False)
         return ProviderResult(provider=self.name, data=data, error_report=errors)
 
+    def _fetch_intraday_5m_frames(self, request: DomainFetchRequest, *, progress_label: str) -> tuple[list[pd.DataFrame], list[dict[str, Any]]]:
+        rows: list[pd.DataFrame] = []
+        errors: list[dict[str, Any]] = []
+        failed_symbols: list[tuple[str, BaseException]] = []
+        symbols = tuple(request.symbols)
+        max_workers = min(max(1, int(self._intraday_max_workers or 1)), len(symbols)) if symbols else 0
+        if not symbols:
+            return rows, errors
+        if len(symbols) == 1 or max_workers <= 1:
+            for idx, symbol in enumerate(symbols, start=1):
+                if idx == 1 or idx % 50 == 0 or idx == len(symbols):
+                    progress_write(f"{progress_label}={idx}/{len(symbols)} symbol={symbol}")
+                try:
+                    frame = _fetch_baostock_intraday_5m_frame_with_timeout(
+                        symbol=symbol,
+                        start_date=request.start_date,
+                        end_date=request.end_date,
+                        adjusted_flag=request.adjusted_flag,
+                    )
+                except Exception as exc:
+                    failed_symbols.append((symbol, exc))
+                    continue
+                if not frame.empty:
+                    rows.append(frame)
+        else:
+            futures: dict[Any, str] = {}
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                for idx, symbol in enumerate(symbols, start=1):
+                    if idx == 1 or idx % 50 == 0 or idx == len(symbols):
+                        progress_write(f"{progress_label}={idx}/{len(symbols)} symbol={symbol}")
+                    futures[
+                        executor.submit(
+                            _fetch_baostock_intraday_5m_frame_with_timeout,
+                            symbol=symbol,
+                            start_date=request.start_date,
+                            end_date=request.end_date,
+                            adjusted_flag=request.adjusted_flag,
+                        )
+                    ] = symbol
+                for future in as_completed(futures):
+                    symbol = futures[future]
+                    try:
+                        frame = future.result()
+                    except Exception as exc:
+                        failed_symbols.append((symbol, exc))
+                        continue
+                    if not frame.empty:
+                        rows.append(frame)
+        if failed_symbols:
+            progress_write(f"{progress_label}_retry={len(failed_symbols)}")
+            for retry_idx, (symbol, first_exc) in enumerate(failed_symbols, start=1):
+                progress_write(f"{progress_label}_retry={retry_idx}/{len(failed_symbols)} symbol={symbol}")
+                try:
+                    frame = _fetch_baostock_intraday_5m_frame_with_timeout(
+                        symbol=symbol,
+                        start_date=request.start_date,
+                        end_date=request.end_date,
+                        adjusted_flag=request.adjusted_flag,
+                    )
+                except Exception as exc:
+                    errors.append(_baostock_symbol_error(self.name, symbol, exc, first_error=first_exc))
+                    continue
+                if not frame.empty:
+                    rows.append(frame)
+        return rows, errors
+
     def fetch_domain(self, request: DomainFetchRequest) -> ProviderResult:
         request = request.normalized()
         if request.domain == DataDomain.MARKET_DAILY:
@@ -722,49 +789,21 @@ class BaostockProvider:
                 )
             )
         if request.domain == DataDomain.MARKET_INTRADAY_5M:
-            rows: list[pd.DataFrame] = []
-            errors: list[dict[str, Any]] = []
-            for idx, symbol in enumerate(request.symbols, start=1):
-                if idx == 1 or idx % 50 == 0 or idx == len(request.symbols):
-                    progress_write(f"baostock_intraday_5m={idx}/{len(request.symbols)} symbol={symbol}")
-                try:
-                    frame = _fetch_baostock_intraday_5m_frame_with_timeout(
-                        symbol=symbol,
-                        start_date=request.start_date,
-                        end_date=request.end_date,
-                        adjusted_flag=request.adjusted_flag,
-                    )
-                except Exception as exc:
-                    errors.append(_baostock_symbol_error(self.name, symbol, exc))
-                    continue
-                if not frame.empty:
-                    rows.append(frame)
+            rows, errors = self._fetch_intraday_5m_frames(request, progress_label="baostock_intraday_5m")
             frame = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
             data = normalize_domain_frame(frame, domain=request.domain, source=self.name, as_of_date=request.end_date, adjusted_flag=request.adjusted_flag, require_columns=False)
             return ProviderResult(provider=self.name, data=data, error_report=errors)
         if request.domain == DataDomain.INTRADAY_DAILY_FEATURES:
-            rows = []
-            errors = []
-            for idx, symbol in enumerate(request.symbols, start=1):
-                if idx == 1 or idx % 50 == 0 or idx == len(request.symbols):
-                    progress_write(f"baostock_intraday_daily_features={idx}/{len(request.symbols)} symbol={symbol}")
-                try:
-                    raw_5m = _fetch_baostock_intraday_5m_frame_with_timeout(
-                        symbol=symbol,
-                        start_date=request.start_date,
-                        end_date=request.end_date,
-                        adjusted_flag=request.adjusted_flag,
-                    )
-                    frame = build_intraday_daily_feature_frame(
-                        raw_5m,
-                        source=self.name,
-                        adjusted_flag=request.adjusted_flag,
-                    )
-                except Exception as exc:
-                    errors.append(_baostock_symbol_error(self.name, symbol, exc))
-                    continue
-                if not frame.empty:
-                    rows.append(frame)
+            raw_rows, errors = self._fetch_intraday_5m_frames(request, progress_label="baostock_intraday_daily_features")
+            rows = [
+                build_intraday_daily_feature_frame(
+                    raw_5m,
+                    source=self.name,
+                    adjusted_flag=request.adjusted_flag,
+                )
+                for raw_5m in raw_rows
+                if not raw_5m.empty
+            ]
             frame = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
             data = normalize_domain_frame(frame, domain=request.domain, source=self.name, as_of_date=request.end_date, adjusted_flag=request.adjusted_flag, require_columns=False)
             return ProviderResult(provider=self.name, data=data, error_report=errors)
@@ -1740,17 +1779,20 @@ def _baostock_performance_frame_from_bs(bs: Any, request: DomainFetchRequest, *,
     return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
 
 
-def _baostock_adjust_factor_frame_from_bs(bs: Any, request: DomainFetchRequest) -> pd.DataFrame:
+def _baostock_adjust_factor_frame_from_bs(bs: Any, request: DomainFetchRequest, *, relogin_retries: int = 2) -> pd.DataFrame:
     request = request.normalized()
     rows: list[pd.DataFrame] = []
     for symbol in request.symbols:
-        raw = _baostock_query_to_frame(
-            bs.query_adjust_factor(
+        raw = _baostock_query_to_frame_with_relogin(
+            bs,
+            lambda symbol=symbol: bs.query_adjust_factor(
                 code=_to_baostock_code(symbol),
                 start_date=request.start_date,
                 end_date=request.end_date,
             ),
             "baostock_adjust_factor",
+            relogin_retries=relogin_retries,
+            relogin_context="adjust_factor",
         )
         if raw.empty:
             continue

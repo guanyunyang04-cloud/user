@@ -117,7 +117,9 @@ class BackfillConfig:
     snapshot_workers: int = 4
     industry_concept_workers: int = 4
     valuation_workers: int = 4
+    adjust_factor_workers: int = 2
     market_daily_symbol_workers: int = 4
+    intraday_symbol_workers: int = 1
     failed_chunk_sweeps: int = 0
     retry_backoff_seconds: float = 0.0
     retry_jitter_seconds: float = 0.0
@@ -169,7 +171,9 @@ class BackfillConfig:
             snapshot_workers=max(1, int(self.snapshot_workers or 1)),
             industry_concept_workers=max(1, int(self.industry_concept_workers or 1)),
             valuation_workers=max(1, int(self.valuation_workers or 1)),
+            adjust_factor_workers=max(1, int(self.adjust_factor_workers or 1)),
             market_daily_symbol_workers=max(1, int(self.market_daily_symbol_workers or 1)),
+            intraday_symbol_workers=max(1, int(self.intraday_symbol_workers or 1)),
             failed_chunk_sweeps=max(0, int(self.failed_chunk_sweeps or 0)),
             retry_backoff_seconds=max(0.0, float(self.retry_backoff_seconds or 0.0)),
             retry_jitter_seconds=max(0.0, float(self.retry_jitter_seconds or 0.0)),
@@ -217,6 +221,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--snapshot-workers", type=int, default=4)
     parser.add_argument("--industry-concept-workers", type=int, default=4)
     parser.add_argument("--valuation-workers", type=int, default=4)
+    parser.add_argument("--adjust-factor-workers", type=int, default=2)
+    parser.add_argument("--intraday-symbol-workers", type=int, default=1)
     parser.add_argument(
         "--market-daily-symbol-workers",
         type=int,
@@ -297,7 +303,9 @@ def config_from_args(args: argparse.Namespace) -> BackfillConfig:
         snapshot_workers=args.snapshot_workers,
         industry_concept_workers=args.industry_concept_workers,
         valuation_workers=args.valuation_workers,
+        adjust_factor_workers=args.adjust_factor_workers,
         market_daily_symbol_workers=args.market_daily_symbol_workers,
+        intraday_symbol_workers=args.intraday_symbol_workers,
         failed_chunk_sweeps=args.failed_chunk_sweeps,
         retry_backoff_seconds=args.retry_backoff_seconds,
         retry_jitter_seconds=args.retry_jitter_seconds,
@@ -308,8 +316,13 @@ def config_from_args(args: argparse.Namespace) -> BackfillConfig:
 
 def run_backfill(config: BackfillConfig, *, provider: Any | None = None) -> BackfillResult:
     config = config.normalized()
+    run_started_at = _utc_now_iso()
+    run_t0 = time.perf_counter()
     lake = ResearchDataLake(config.lake_root)
-    provider = provider or BaostockProvider(_market_daily_max_workers=config.market_daily_symbol_workers)
+    provider = provider or BaostockProvider(
+        _market_daily_max_workers=config.market_daily_symbol_workers,
+        _intraday_max_workers=config.intraday_symbol_workers,
+    )
     run_dir = lake.root / "backfill_runs" / config.run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     domains = _normalize_domains(config.domains)
@@ -422,12 +435,17 @@ def run_backfill(config: BackfillConfig, *, provider: Any | None = None) -> Back
 
     manifest_path = run_dir / "manifest.json"
     status = "planned" if config.dry_run else "ok"
+    run_finished_at = _utc_now_iso()
+    elapsed_sec = round(time.perf_counter() - run_t0, 3)
     _write_json(
         manifest_path,
         {
             "status": status,
             "run_id": config.run_id,
-            "started_or_resumed_at": _utc_now_iso(),
+            "started_or_resumed_at": run_started_at,
+            "run_started_at": run_started_at,
+            "run_finished_at": run_finished_at,
+            "elapsed_sec": elapsed_sec,
             "lake_root": str(lake.root.resolve()),
             "domains": list(domains),
             "symbols_spec": config.symbols,
@@ -449,12 +467,15 @@ def run_backfill(config: BackfillConfig, *, provider: Any | None = None) -> Back
             "snapshot_workers": config.snapshot_workers,
             "industry_concept_workers": config.industry_concept_workers,
             "valuation_workers": config.valuation_workers,
+            "adjust_factor_workers": config.adjust_factor_workers,
             "market_daily_symbol_workers": config.market_daily_symbol_workers,
+            "intraday_symbol_workers": config.intraday_symbol_workers,
             "failed_chunk_retries": config.failed_chunk_retries,
             "failed_chunk_sweeps": config.failed_chunk_sweeps,
             "retry_backoff_seconds": config.retry_backoff_seconds,
             "retry_jitter_seconds": config.retry_jitter_seconds,
             "reuse_existing_market_daily": config.reuse_existing_market_daily,
+            "domain_timing": {domain: _shard_timing_summary(shards) for domain, shards in domain_shards.items()},
             "dry_run_plan": dry_run_plan,
         },
     )
@@ -663,6 +684,8 @@ def _worker_count_for_domain(*, domain: str, config: BackfillConfig, pending_cou
         limit = min(limit, max(1, int(config.industry_concept_workers or 1)))
     if normalize_domain(domain) == DataDomain.VALUATION:
         limit = min(limit, max(1, int(config.valuation_workers or 1)))
+    if normalize_domain(domain) == DataDomain.ADJUST_FACTOR:
+        limit = min(limit, max(1, int(config.adjust_factor_workers or 1)))
     return min(limit, pending_count)
 
 
@@ -676,15 +699,21 @@ def _fetch_and_store_domain_chunk(
     trade_dates: Sequence[str],
     config: BackfillConfig,
 ) -> dict[str, Any]:
-    data, error_report = _fetch_domain_chunk_with_retries(
+    started_at = _utc_now_iso()
+    t0 = time.perf_counter()
+    data, error_report, attempt_count = _fetch_domain_chunk_with_retries(
         provider=provider,
         request=request,
         task=task,
         config=config,
     )
+    fetch_duration = time.perf_counter() - t0
     shard_path = shard_dir / f"{task.chunk_id}.parquet"
+    store_t0 = time.perf_counter()
     data.to_parquet(shard_path, index=False)
+    store_duration = time.perf_counter() - store_t0
     audit = _chunk_audit(data=data, request=request, task=task, trade_dates=trade_dates, config=config)
+    elapsed = time.perf_counter() - t0
     record = {
         "status": "stored",
         "domain": request.domain,
@@ -698,6 +727,11 @@ def _fetch_and_store_domain_chunk(
         "error_count": int(len(error_report)),
         "error_report": error_report,
         "audit": audit,
+        "attempt_count": int(attempt_count),
+        "fetch_started_at": started_at,
+        "fetch_duration_sec": round(fetch_duration, 3),
+        "store_duration_sec": round(store_duration, 3),
+        "elapsed_sec": round(elapsed, 3),
         "stored_at": _utc_now_iso(),
     }
     _write_json(status_path, record)
@@ -710,7 +744,7 @@ def _fetch_domain_chunk_with_retries(
     request: DomainFetchRequest,
     task: BackfillChunk,
     config: BackfillConfig,
-) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
+) -> tuple[pd.DataFrame, list[dict[str, Any]], int]:
     attempts = max(1, int(config.failed_chunk_retries or 0) + 1)
     last_data = normalize_domain_frame(
         pd.DataFrame(),
@@ -762,8 +796,8 @@ def _fetch_domain_chunk_with_retries(
                 }
             ]
         if not last_errors:
-            return last_data, []
-    return last_data, last_errors
+            return last_data, [], int(attempt)
+    return last_data, last_errors, int(attempts)
 
 
 def _sleep_before_retry(*, attempt: int, config: BackfillConfig) -> None:
@@ -780,6 +814,24 @@ def _sleep_before_retry(*, attempt: int, config: BackfillConfig) -> None:
         time.sleep(delay)
 
 
+def _shard_timing_summary(shards: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    elapsed = [float(dict(item).get("elapsed_sec", 0.0) or 0.0) for item in shards]
+    fetch = [float(dict(item).get("fetch_duration_sec", 0.0) or 0.0) for item in shards]
+    store = [float(dict(item).get("store_duration_sec", 0.0) or 0.0) for item in shards]
+    stored_at = [str(dict(item).get("stored_at", "") or "") for item in shards if str(dict(item).get("stored_at", "") or "")]
+    return {
+        "chunk_count": int(len(shards)),
+        "elapsed_sec_sum": round(sum(elapsed), 3),
+        "elapsed_sec_max": round(max(elapsed), 3) if elapsed else 0.0,
+        "fetch_sec_sum": round(sum(fetch), 3),
+        "fetch_sec_max": round(max(fetch), 3) if fetch else 0.0,
+        "store_sec_sum": round(sum(store), 3),
+        "store_sec_max": round(max(store), 3) if store else 0.0,
+        "first_stored_at": min(stored_at) if stored_at else "",
+        "last_stored_at": max(stored_at) if stored_at else "",
+    }
+
+
 def _derive_intraday_feature_shards(
     *,
     lake: ResearchDataLake,
@@ -794,6 +846,8 @@ def _derive_intraday_feature_shards(
     shard_dir.mkdir(parents=True, exist_ok=True)
     feature_records: list[dict[str, Any]] = []
     for idx, raw_record in enumerate(raw_shards, start=1):
+        started_at = _utc_now_iso()
+        t0 = time.perf_counter()
         raw_chunk_id = str(raw_record.get("chunk_id", "") or f"raw_{idx:06d}")
         chunk = BackfillChunk(
             domain=domain,
@@ -811,9 +865,12 @@ def _derive_intraday_feature_shards(
         raw_path = Path(str(raw_record.get("path", "") or ""))
         errors: list[dict[str, Any]] = []
         if raw_path.exists():
+            fetch_t0 = time.perf_counter()
             raw = pd.read_parquet(raw_path)
+            fetch_duration = time.perf_counter() - fetch_t0
             features = build_intraday_daily_feature_frame(raw, source="baostock", adjusted_flag=config.adjusted_flag)
         else:
+            fetch_duration = 0.0
             features = normalize_domain_frame(
                 pd.DataFrame(),
                 domain=domain,
@@ -831,7 +888,10 @@ def _derive_intraday_feature_shards(
                 }
             )
         shard_path = shard_dir / f"{chunk.chunk_id}.parquet"
+        store_t0 = time.perf_counter()
         features.to_parquet(shard_path, index=False)
+        store_duration = time.perf_counter() - store_t0
+        elapsed = time.perf_counter() - t0
         record = {
             "status": "stored",
             "domain": domain,
@@ -846,6 +906,11 @@ def _derive_intraday_feature_shards(
             "error_count": int(len(errors)),
             "error_report": errors,
             "audit": {"status": "ok" if len(features) else "empty", "row_count": int(len(features))},
+            "attempt_count": 1,
+            "fetch_started_at": started_at,
+            "fetch_duration_sec": round(fetch_duration, 3),
+            "store_duration_sec": round(store_duration, 3),
+            "elapsed_sec": round(elapsed, 3),
             "stored_at": _utc_now_iso(),
         }
         _write_json(status_path, record)
@@ -956,7 +1021,9 @@ def _domain_spec(
         "task_workers": config.task_workers,
         "industry_concept_workers": config.industry_concept_workers,
         "valuation_workers": config.valuation_workers,
+        "adjust_factor_workers": config.adjust_factor_workers,
         "market_daily_symbol_workers": config.market_daily_symbol_workers,
+        "intraday_symbol_workers": config.intraday_symbol_workers,
         "failed_chunk_sweeps": config.failed_chunk_sweeps,
         "retry_backoff_seconds": config.retry_backoff_seconds,
         "retry_jitter_seconds": config.retry_jitter_seconds,

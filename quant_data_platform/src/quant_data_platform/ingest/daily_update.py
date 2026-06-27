@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -12,10 +13,10 @@ import pandas as pd
 from quant_data_platform.core.json_io import json_safe, read_json, utc_now, write_json
 from quant_data_platform.core.paths import QdpPaths, qdp_paths
 from quant_data_platform.core.registry import load_root_manifest, write_root_manifest_update
-from quant_data_platform.domains.contracts import DataDomain, normalize_domain
+from quant_data_platform.domains.contracts import DataDomain, build_intraday_daily_feature_frame, normalize_domain, normalize_domain_frame
 from quant_data_platform.ingest.baostock_backfill import BackfillConfig, run_backfill
 from quant_data_platform.ingest.combine_domain_datasets import CombineDomainDatasetsConfig, combine_domain_datasets
-from quant_data_platform.ingest.refresh_daily import RefreshConfig, _read_policy_market_frame, run_refresh
+from quant_data_platform.ingest.refresh_daily import RefreshConfig, run_refresh
 from quant_data_platform.lake.canonical import (
     DEFAULT_CANONICAL_ALIAS,
     DEFAULT_CANONICAL_START_DATE,
@@ -76,6 +77,7 @@ class DailyUpdateConfig:
     benchmark: str = "000300.SH"
     adjusted_flag: str = "none"
     snapshot_frequency: str = "daily"
+    intraday_features_mode: str = "auto"
     build_policy_bundle: bool = False
     build_v2_status_sidecar: bool = False
     build_memmap: bool = False
@@ -84,10 +86,16 @@ class DailyUpdateConfig:
     resume: bool = True
     chunk_size_symbols: int = 200
     chunk_size_months: int = 1
-    task_workers: int = 1
-    snapshot_workers: int = 4
-    valuation_workers: int = 4
+    task_workers: int = 2
+    snapshot_workers: int = 2
+    valuation_workers: int = 2
+    adjust_factor_workers: int = 2
     market_daily_symbol_workers: int = 4
+    intraday_symbol_workers: int = 1
+    failed_chunk_retries: int = 1
+    failed_chunk_sweeps: int = 1
+    retry_backoff_seconds: float = 1.0
+    retry_jitter_seconds: float = 0.5
     min_coverage_ratio: float = 0.80
     conflict_tolerance_pct: float = 0.005
     severe_conflict_limit: int = 0
@@ -110,6 +118,9 @@ class DailyUpdateConfig:
         readiness_mode = str(self.readiness_mode or "strict").strip().lower()
         if readiness_mode not in {"strict", "staged"}:
             raise ValueError(f"unsupported_readiness_mode: {readiness_mode}")
+        intraday_features_mode = str(self.intraday_features_mode or "auto").strip().lower()
+        if intraday_features_mode not in {"auto", "derive", "skip", "provider"}:
+            raise ValueError(f"unsupported_intraday_features_mode: {intraday_features_mode}")
         return DailyUpdateConfig(
             workspace_root=self.workspace_root,
             lake_root=Path(self.lake_root) if self.lake_root else None,
@@ -128,6 +139,7 @@ class DailyUpdateConfig:
             benchmark=str(self.benchmark or "000300.SH").strip().upper(),
             adjusted_flag=str(self.adjusted_flag or "none").strip(),
             snapshot_frequency=str(self.snapshot_frequency or "daily").strip().lower(),
+            intraday_features_mode=intraday_features_mode,
             build_policy_bundle=bool(self.build_policy_bundle),
             build_v2_status_sidecar=bool(self.build_v2_status_sidecar),
             build_memmap=bool(self.build_memmap),
@@ -139,7 +151,13 @@ class DailyUpdateConfig:
             task_workers=max(1, int(self.task_workers or 1)),
             snapshot_workers=max(1, int(self.snapshot_workers or 1)),
             valuation_workers=max(1, int(self.valuation_workers or 1)),
+            adjust_factor_workers=max(1, int(self.adjust_factor_workers or 1)),
             market_daily_symbol_workers=max(1, int(self.market_daily_symbol_workers or 1)),
+            intraday_symbol_workers=max(1, int(self.intraday_symbol_workers or 1)),
+            failed_chunk_retries=max(0, int(self.failed_chunk_retries or 0)),
+            failed_chunk_sweeps=max(0, int(self.failed_chunk_sweeps or 0)),
+            retry_backoff_seconds=max(0.0, float(self.retry_backoff_seconds or 0.0)),
+            retry_jitter_seconds=max(0.0, float(self.retry_jitter_seconds or 0.0)),
             min_coverage_ratio=float(self.min_coverage_ratio),
             conflict_tolerance_pct=float(self.conflict_tolerance_pct),
             severe_conflict_limit=int(self.severe_conflict_limit),
@@ -180,6 +198,7 @@ class DailyUpdateResult:
     before_coverage: dict[str, dict[str, Any]] = field(default_factory=dict)
     after_coverage: dict[str, dict[str, Any]] = field(default_factory=dict)
     backfill_dataset_ids: dict[str, str] = field(default_factory=dict)
+    backfill_results: dict[str, dict[str, Any]] = field(default_factory=dict)
     effective_sidecar_dataset_ids: dict[str, str] = field(default_factory=dict)
     combined_sidecar_dataset_ids: dict[str, str] = field(default_factory=dict)
     lagging_domains: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -226,6 +245,12 @@ def run_daily_update(
     )
 
     if cfg.dry_run:
+        dry_run_backfill_results = _dry_run_backfill_results(
+            cfg=cfg,
+            lake=lake,
+            active_sidecars=active_context["sidecars"],
+            domain_plans=domain_plans,
+        )
         result = DailyUpdateResult(
             status="planned",
             run_id=run_id,
@@ -234,6 +259,7 @@ def run_daily_update(
             target_date=target_date,
             domain_plans=domain_plans,
             before_coverage=before_coverage,
+            backfill_results=dry_run_backfill_results,
             effective_sidecar_dataset_ids=dict(active_context["sidecars"]),
             blockers=[],
         )
@@ -281,9 +307,63 @@ def run_daily_update(
 
     backfill_dataset_ids: dict[str, str] = {}
     backfill_results: dict[str, Any] = {}
+    lagging_annotations: dict[str, dict[str, Any]] = {}
     for domain, plan in domain_plans.items():
         if domain == DataDomain.MARKET_DAILY or not plan.needs_backfill:
             continue
+        if domain == DataDomain.INTRADAY_DAILY_FEATURES:
+            action = _resolve_intraday_features_action(
+                cfg=cfg,
+                lake=lake,
+                active_sidecars=active_context["sidecars"],
+                plan=plan,
+            )
+            if action["action"] == "skip":
+                backfill_results[domain] = action
+                lagging_annotations[domain] = {
+                    "reason": str(action.get("reason", "") or "skipped"),
+                    "action": "skipped_backfill",
+                    "mode": cfg.intraday_features_mode,
+                    "source_domain": DataDomain.MARKET_INTRADAY_5M,
+                    "source_dataset_id": str(action.get("source_dataset_id", "") or ""),
+                }
+                continue
+            if action["action"] == "derive":
+                try:
+                    derived = _derive_intraday_features_from_existing_raw(
+                        cfg=cfg,
+                        lake=lake,
+                        run_dir=run_dir,
+                        run_id=run_id,
+                        plan=plan,
+                        source_dataset_id=str(action.get("source_dataset_id", "") or ""),
+                        raw_shards=list(action.get("raw_shards", []) or []),
+                    )
+                except Exception as exc:
+                    blockers.append(f"backfill_failed:{domain}:{type(exc).__name__}:{exc}")
+                    backfill_results[domain] = {
+                        **{key: value for key, value in action.items() if key != "raw_shards"},
+                        "status": "failed",
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    }
+                    continue
+                backfill_results[domain] = {
+                    **{key: value for key, value in action.items() if key != "raw_shards"},
+                    "status": "ok",
+                    "run_id": run_id,
+                    "manifest_path": str(manifest_path),
+                    "planned_task_count": int(derived["planned_task_count"]),
+                    "row_counts": {domain: int(derived["row_count"])},
+                    "error_counts": {domain: int(derived["error_count"])},
+                    "dataset_ids": {domain: str(derived["dataset_id"])},
+                    "timing": dict(derived.get("timing", {}) or {}),
+                }
+                if str(derived.get("dataset_id", "") or ""):
+                    backfill_dataset_ids[domain] = str(derived["dataset_id"])
+                if int(derived.get("error_count", 0) or 0) > 0:
+                    blockers.append(f"backfill_errors:{domain}:{derived['error_count']}")
+                continue
         backfill_cfg = BackfillConfig(
             lake_root=lake.root,
             run_id=f"{run_id}_backfill_{_safe_name(domain)}",
@@ -300,7 +380,13 @@ def run_daily_update(
             task_workers=cfg.task_workers,
             snapshot_workers=cfg.snapshot_workers,
             valuation_workers=cfg.valuation_workers,
+            adjust_factor_workers=cfg.adjust_factor_workers,
             market_daily_symbol_workers=cfg.market_daily_symbol_workers,
+            intraday_symbol_workers=cfg.intraday_symbol_workers,
+            failed_chunk_retries=cfg.failed_chunk_retries,
+            failed_chunk_sweeps=cfg.failed_chunk_sweeps,
+            retry_backoff_seconds=cfg.retry_backoff_seconds,
+            retry_jitter_seconds=cfg.retry_jitter_seconds,
             reuse_existing_market_daily=True,
             build_policy_bundle=False,
             write_canonical_manifest=False,
@@ -353,6 +439,10 @@ def run_daily_update(
     )
     blockers.extend(readiness["blockers"])
     lagging_domains = dict(readiness["lagging_domains"])
+    for domain, annotation in lagging_annotations.items():
+        current = dict(lagging_domains.get(domain, {}) or {})
+        current.update(annotation)
+        lagging_domains[domain] = current
 
     canonical_dataset_id = ""
     canonical_manifest_path = ""
@@ -453,6 +543,7 @@ def run_daily_update(
         before_coverage=before_coverage,
         after_coverage=after_coverage,
         backfill_dataset_ids=backfill_dataset_ids,
+        backfill_results={key: dict(value) for key, value in backfill_results.items()},
         effective_sidecar_dataset_ids=effective_sidecars,
         combined_sidecar_dataset_ids=combined_sidecars,
         lagging_domains=lagging_domains,
@@ -464,9 +555,7 @@ def run_daily_update(
         memmap_manifest_path=memmap_manifest_path,
         memmap_validation=memmap_validation,
     )
-    payload = _write_run_manifest(result=result, cfg=cfg, run_dir=run_dir)
-    payload["backfill_results"] = backfill_results
-    write_json(manifest_path, payload)
+    _write_run_manifest(result=result, cfg=cfg, run_dir=run_dir)
     return result
 
 
@@ -489,12 +578,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--benchmark", default="000300.SH")
     parser.add_argument("--adjusted-flag", default="none")
     parser.add_argument("--snapshot-frequency", choices=("daily", "monthly", "quarterly", "end"), default="daily")
+    parser.add_argument(
+        "--intraday-features-mode",
+        choices=("auto", "derive", "skip", "provider"),
+        default="auto",
+        help="auto derives intraday_daily_features from existing market_intraday_5m tail when available and otherwise marks it lagging; provider explicitly allows slow BaoStock 5m downloads.",
+    )
     parser.add_argument("--chunk-size-symbols", type=int, default=200)
     parser.add_argument("--chunk-size-months", type=int, default=1)
-    parser.add_argument("--task-workers", type=int, default=1)
-    parser.add_argument("--snapshot-workers", type=int, default=4)
-    parser.add_argument("--valuation-workers", type=int, default=4)
+    parser.add_argument("--task-workers", type=int, default=2)
+    parser.add_argument("--snapshot-workers", type=int, default=2)
+    parser.add_argument("--valuation-workers", type=int, default=2)
+    parser.add_argument("--adjust-factor-workers", type=int, default=2)
     parser.add_argument("--market-daily-symbol-workers", type=int, default=4)
+    parser.add_argument("--intraday-symbol-workers", type=int, default=1)
+    parser.add_argument("--failed-chunk-retries", type=int, default=1)
+    parser.add_argument("--failed-chunk-sweeps", type=int, default=1)
+    parser.add_argument("--retry-backoff-seconds", type=float, default=1.0)
+    parser.add_argument("--retry-jitter-seconds", type=float, default=0.5)
     parser.add_argument("--min-coverage-ratio", type=float, default=0.80)
     parser.add_argument("--conflict-tolerance-pct", type=float, default=0.005)
     parser.add_argument("--severe-conflict-limit", type=int, default=0)
@@ -540,6 +641,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             benchmark=str(args.benchmark or "000300.SH"),
             adjusted_flag=str(args.adjusted_flag or "none"),
             snapshot_frequency=str(args.snapshot_frequency or "daily"),
+            intraday_features_mode=str(args.intraday_features_mode or "auto"),
             build_policy_bundle=bool(args.build_policy_bundle),
             build_v2_status_sidecar=bool(args.build_v2_status_sidecar),
             build_memmap=bool(args.build_memmap),
@@ -551,7 +653,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             task_workers=int(args.task_workers),
             snapshot_workers=int(args.snapshot_workers),
             valuation_workers=int(args.valuation_workers),
+            adjust_factor_workers=int(args.adjust_factor_workers),
             market_daily_symbol_workers=int(args.market_daily_symbol_workers),
+            intraday_symbol_workers=int(args.intraday_symbol_workers),
+            failed_chunk_retries=int(args.failed_chunk_retries),
+            failed_chunk_sweeps=int(args.failed_chunk_sweeps),
+            retry_backoff_seconds=float(args.retry_backoff_seconds),
+            retry_jitter_seconds=float(args.retry_jitter_seconds),
             min_coverage_ratio=float(args.min_coverage_ratio),
             conflict_tolerance_pct=float(args.conflict_tolerance_pct),
             severe_conflict_limit=int(args.severe_conflict_limit),
@@ -574,6 +682,247 @@ def main(argv: Sequence[str] | None = None) -> int:
         if result.blockers:
             print("blockers=" + ",".join(result.blockers))
     return 0 if result.status in {"planned", "ok", "staged", "activated"} else 2
+
+
+def _dry_run_backfill_results(
+    *,
+    cfg: DailyUpdateConfig,
+    lake: ResearchDataLake,
+    active_sidecars: Mapping[str, str],
+    domain_plans: Mapping[str, DomainUpdatePlan],
+) -> dict[str, dict[str, Any]]:
+    results: dict[str, dict[str, Any]] = {}
+    for domain, plan in domain_plans.items():
+        if domain == DataDomain.MARKET_DAILY or not plan.needs_backfill:
+            continue
+        if domain == DataDomain.INTRADAY_DAILY_FEATURES:
+            action = _resolve_intraday_features_action(cfg=cfg, lake=lake, active_sidecars=active_sidecars, plan=plan)
+            results[domain] = {key: value for key, value in action.items() if key != "raw_shards"}
+            if "raw_shards" in action:
+                results[domain]["raw_shard_count"] = len(list(action.get("raw_shards", []) or []))
+            continue
+        results[domain] = {
+            "status": "planned",
+            "action": "provider_backfill",
+            "planned_task_count": int(plan.planned_task_count),
+            "gap_start_date": plan.gap_start_date,
+            "gap_end_date": plan.gap_end_date,
+        }
+    return results
+
+
+def _resolve_intraday_features_action(
+    *,
+    cfg: DailyUpdateConfig,
+    lake: ResearchDataLake,
+    active_sidecars: Mapping[str, str],
+    plan: DomainUpdatePlan,
+) -> dict[str, Any]:
+    mode = cfg.intraday_features_mode
+    raw_dataset_id = str(active_sidecars.get(DataDomain.MARKET_INTRADAY_5M, "") or "")
+    raw_summary = _dataset_summary(lake=lake, dataset_id=raw_dataset_id) if raw_dataset_id else {"status": "missing"}
+    raw_end_date = str(raw_summary.get("end_date", "") or "")
+    raw_shards = (
+        _raw_5m_tail_shards(
+            lake=lake,
+            dataset_id=raw_dataset_id,
+            start_date=plan.gap_start_date,
+            end_date=plan.gap_end_date,
+        )
+        if raw_dataset_id
+        else []
+    )
+    raw_covers_target = bool(raw_end_date and pd.Timestamp(raw_end_date) >= pd.Timestamp(plan.gap_end_date))
+    can_derive = bool(raw_dataset_id and raw_covers_target and raw_shards)
+    base = {
+        "domain": DataDomain.INTRADAY_DAILY_FEATURES,
+        "mode": mode,
+        "gap_start_date": plan.gap_start_date,
+        "gap_end_date": plan.gap_end_date,
+        "source_domain": DataDomain.MARKET_INTRADAY_5M,
+        "source_dataset_id": raw_dataset_id,
+        "source_end_date": raw_end_date,
+    }
+    if mode == "skip":
+        return {**base, "status": "skipped", "action": "skip", "reason": "intraday_features_mode_skip"}
+    if mode in {"auto", "derive"} and can_derive:
+        return {
+            **base,
+            "status": "planned",
+            "action": "derive",
+            "reason": "derive_from_existing_market_intraday_5m_tail",
+            "raw_shards": raw_shards,
+            "raw_shard_count": len(raw_shards),
+        }
+    if mode == "provider":
+        return {**base, "status": "planned", "action": "provider", "reason": "explicit_provider_mode"}
+    reason = "market_intraday_5m_tail_missing"
+    if raw_dataset_id and raw_end_date and not raw_covers_target:
+        reason = f"market_intraday_5m_lagging:{raw_end_date}<{plan.gap_end_date}"
+    elif raw_dataset_id and raw_covers_target and not raw_shards:
+        reason = "market_intraday_5m_tail_shards_missing"
+    elif not raw_dataset_id:
+        reason = "market_intraday_5m_dataset_missing"
+    return {**base, "status": "skipped", "action": "skip", "reason": reason}
+
+
+def _raw_5m_tail_shards(*, lake: ResearchDataLake, dataset_id: str, start_date: str, end_date: str) -> list[dict[str, Any]]:
+    try:
+        metadata = lake.describe_dataset(dataset_id)
+    except Exception:
+        return []
+    manifest_text = str(dict(metadata.get("content_paths", {}) or {}).get("shard_manifest", "") or "")
+    manifest_path = Path(manifest_text) if manifest_text else Path()
+    if not manifest_text or not manifest_path.exists():
+        return []
+    manifest = read_json(manifest_path)
+    out: list[dict[str, Any]] = []
+    start = pd.Timestamp(start_date)
+    end = pd.Timestamp(end_date)
+    for item in list(manifest.get("shards", []) or []):
+        record = dict(item)
+        path = Path(str(record.get("path", "") or ""))
+        if str(record.get("status", "stored") or "stored") != "stored":
+            continue
+        if not path.exists():
+            continue
+        if int(record.get("row_count", 0) or 0) <= 0:
+            continue
+        shard_start = str(record.get("start_date", "") or "")
+        shard_end = str(record.get("end_date", "") or "")
+        if shard_start and shard_end:
+            if pd.Timestamp(shard_end) < start or pd.Timestamp(shard_start) > end:
+                continue
+        out.append(record)
+    return out
+
+
+def _derive_intraday_features_from_existing_raw(
+    *,
+    cfg: DailyUpdateConfig,
+    lake: ResearchDataLake,
+    run_dir: Path,
+    run_id: str,
+    plan: DomainUpdatePlan,
+    source_dataset_id: str,
+    raw_shards: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    domain = DataDomain.INTRADAY_DAILY_FEATURES
+    spec = {
+        "dataset": f"data_platform_{domain}",
+        "source": "daily_update_intraday_raw_derivation",
+        "provider_plan": cfg.provider_plan,
+        "daily_update_run_id": run_id,
+        "domain": domain,
+        "start_date": plan.gap_start_date,
+        "end_date": plan.gap_end_date,
+        "symbols_spec": cfg.symbols,
+        "adjusted_flag": cfg.adjusted_flag,
+        "source_domain": DataDomain.MARKET_INTRADAY_5M,
+        "source_dataset_id": source_dataset_id,
+        "derivation": "market_intraday_5m_to_intraday_daily_features",
+        "sharded": True,
+    }
+    identity = lake.build_domain_dataset_identity(domain=domain, spec=spec)
+    shard_dir = Path(identity["dataset_dir"]) / "shards"
+    shard_dir.mkdir(parents=True, exist_ok=True)
+    status_dir = run_dir / "chunks" / domain
+    status_dir.mkdir(parents=True, exist_ok=True)
+    records: list[dict[str, Any]] = []
+    start_ts = pd.Timestamp(plan.gap_start_date)
+    end_ts = pd.Timestamp(plan.gap_end_date)
+    for idx, raw_record in enumerate(raw_shards, start=1):
+        t0 = time.perf_counter()
+        raw_path = Path(str(dict(raw_record).get("path", "") or ""))
+        raw_chunk_id = str(dict(raw_record).get("chunk_id", "") or f"raw_{idx:06d}")
+        chunk_id = _safe_name(raw_chunk_id.replace(DataDomain.MARKET_INTRADAY_5M, domain))
+        status_path = status_dir / f"{chunk_id}.json"
+        cached = read_json(status_path) if cfg.resume and status_path.exists() else {}
+        if cached:
+            records.append(cached)
+            continue
+        errors: list[dict[str, Any]] = []
+        try:
+            raw = pd.read_parquet(raw_path)
+            if "trade_date" in raw.columns:
+                dates_ts = pd.to_datetime(raw["trade_date"], errors="coerce")
+                mask = (dates_ts >= start_ts) & (dates_ts <= end_ts)
+                raw = raw.loc[mask].copy()
+                raw["trade_date"] = dates_ts.loc[mask].dt.strftime("%Y-%m-%d").to_numpy()
+            features = build_intraday_daily_feature_frame(raw, source="daily_update_intraday_raw_derivation", adjusted_flag=cfg.adjusted_flag)
+            if "trade_date" in features.columns:
+                feature_dates_ts = pd.to_datetime(features["trade_date"], errors="coerce")
+                feature_mask = (feature_dates_ts >= start_ts) & (feature_dates_ts <= end_ts)
+                features = features.loc[feature_mask].copy()
+                features["trade_date"] = feature_dates_ts.loc[feature_mask].dt.strftime("%Y-%m-%d").to_numpy()
+        except Exception as exc:
+            features = normalize_domain_frame(
+                pd.DataFrame(),
+                domain=domain,
+                source="daily_update_intraday_raw_derivation",
+                as_of_date=plan.gap_end_date,
+                adjusted_flag=cfg.adjusted_flag,
+                require_columns=False,
+            )
+            errors.append(
+                {
+                    "provider": "daily_update",
+                    "domain": domain,
+                    "code": "intraday_feature_derivation_failed",
+                    "error_type": type(exc).__name__,
+                    "message": str(exc),
+                    "source_raw_path": str(raw_path),
+                }
+            )
+        shard_path = shard_dir / f"{chunk_id}.parquet"
+        store_t0 = time.perf_counter()
+        features.to_parquet(shard_path, index=False)
+        store_duration = time.perf_counter() - store_t0
+        elapsed = time.perf_counter() - t0
+        record = {
+            "status": "stored",
+            "domain": domain,
+            "chunk_id": chunk_id,
+            "task_kind": "derived_from_existing_market_intraday_5m",
+            "start_date": plan.gap_start_date,
+            "end_date": plan.gap_end_date,
+            "symbol_count": int(features["symbol"].nunique()) if "symbol" in features.columns and not features.empty else 0,
+            "row_count": int(len(features)),
+            "path": str(shard_path.resolve()),
+            "source_raw_chunk_id": raw_chunk_id,
+            "source_raw_path": str(raw_path.resolve()) if raw_path.exists() else str(raw_path),
+            "error_count": int(len(errors)),
+            "error_report": errors,
+            "audit": {"status": "ok" if len(features) else "empty", "row_count": int(len(features))},
+            "store_duration_sec": round(store_duration, 3),
+            "elapsed_sec": round(elapsed, 3),
+            "stored_at": utc_now(),
+        }
+        write_json(status_path, record)
+        records.append(record)
+    dataset = lake.save_sharded_domain_dataset(domain=domain, spec=spec, shard_records=records, source="daily_update_intraday_raw_derivation", reuse=False)
+    lake.write_catalog_manifest()
+    row_count = int(sum(int(item.get("row_count", 0) or 0) for item in records))
+    error_count = int(sum(int(item.get("error_count", 0) or 0) for item in records))
+    return {
+        "dataset_id": dataset.dataset_id,
+        "planned_task_count": len(raw_shards),
+        "row_count": row_count,
+        "error_count": error_count,
+        "timing": _shard_timing_summary(records),
+    }
+
+
+def _shard_timing_summary(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    elapsed = [float(dict(item).get("elapsed_sec", 0.0) or 0.0) for item in records]
+    stored_at = [str(dict(item).get("stored_at", "") or "") for item in records if str(dict(item).get("stored_at", "") or "")]
+    return {
+        "chunk_count": int(len(records)),
+        "elapsed_sec_sum": round(sum(elapsed), 3),
+        "elapsed_sec_max": round(max(elapsed), 3) if elapsed else 0.0,
+        "first_stored_at": min(stored_at) if stored_at else "",
+        "last_stored_at": max(stored_at) if stored_at else "",
+    }
 
 
 def _active_context(*, lake: ResearchDataLake, paths: QdpPaths) -> dict[str, Any]:
@@ -880,6 +1229,17 @@ def _write_run_manifest(*, result: DailyUpdateResult, cfg: DailyUpdateConfig, ru
         "required_pit_domains": list(cfg.required_pit_domains),
         "lag_tolerant_domains": list(cfg.lag_tolerant_domains),
         "strict_enhanced_domains": list(cfg.strict_enhanced_domains),
+        "intraday_features_mode": cfg.intraday_features_mode,
+        "task_workers": int(cfg.task_workers),
+        "snapshot_workers": int(cfg.snapshot_workers),
+        "valuation_workers": int(cfg.valuation_workers),
+        "adjust_factor_workers": int(cfg.adjust_factor_workers),
+        "market_daily_symbol_workers": int(cfg.market_daily_symbol_workers),
+        "intraday_symbol_workers": int(cfg.intraday_symbol_workers),
+        "failed_chunk_retries": int(cfg.failed_chunk_retries),
+        "failed_chunk_sweeps": int(cfg.failed_chunk_sweeps),
+        "retry_backoff_seconds": float(cfg.retry_backoff_seconds),
+        "retry_jitter_seconds": float(cfg.retry_jitter_seconds),
         "build_policy_bundle": bool(cfg.build_policy_bundle),
         "build_v2_status_sidecar": bool(cfg.build_v2_status_sidecar),
         "build_memmap": bool(cfg.build_memmap),
@@ -903,6 +1263,7 @@ def _result_payload(result: DailyUpdateResult) -> dict[str, Any]:
         "before_coverage": result.before_coverage,
         "after_coverage": result.after_coverage,
         "backfill_dataset_ids": result.backfill_dataset_ids,
+        "backfill_results": result.backfill_results,
         "effective_sidecar_dataset_ids": result.effective_sidecar_dataset_ids,
         "combined_sidecar_dataset_ids": result.combined_sidecar_dataset_ids,
         "lagging_domains": result.lagging_domains,
@@ -1127,12 +1488,42 @@ def _active_symbol_count(*, lake: ResearchDataLake, cfg: DailyUpdateConfig) -> i
             return 1
         latest = rows.iloc[-1].to_dict()
         metadata = lake.describe_dataset(str(latest.get("dataset_id", "") or ""))
-        frame = _read_policy_market_frame(metadata, columns=["symbol"])
+        frame = _read_market_symbols_frame(metadata)
         if "symbol" in frame.columns:
             return int(frame["symbol"].astype(str).str.upper().nunique())
     except Exception:
         return 1
     return 1
+
+
+def _read_market_symbols_frame(metadata: Mapping[str, Any]) -> pd.DataFrame:
+    dataset_id = str(metadata.get("dataset_id", "") or "")
+    paths = dict(metadata.get("content_paths", {}) or {})
+    path_text = str(paths.get("bronze_market_data", "") or paths.get("silver_domain_data", "") or "")
+    manifest_text = str(paths.get("bronze_market_shard_manifest", "") or paths.get("shard_manifest", "") or "")
+    candidates: list[Path] = []
+    if manifest_text and Path(manifest_text).exists():
+        manifest = read_json(Path(manifest_text))
+        candidates = [
+            Path(str(dict(item).get("path", "") or ""))
+            for item in list(manifest.get("shards", []) or [])
+            if str(dict(item).get("path", "") or "")
+        ]
+    elif "*" in path_text:
+        candidates = sorted(Path(path_text).parent.glob(Path(path_text).name))
+    elif path_text:
+        candidates = [Path(path_text)]
+    frames: list[pd.DataFrame] = []
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            frames.append(pd.read_parquet(path, columns=["symbol"]))
+        except Exception:
+            continue
+    if frames:
+        return pd.concat(frames, ignore_index=True)
+    return pd.DataFrame(columns=["symbol", "dataset_id"]).assign(dataset_id=dataset_id)
 
 
 def _normalize_domains(values: Iterable[str]) -> tuple[str, ...]:
