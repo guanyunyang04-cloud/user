@@ -61,7 +61,6 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scri
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json
 ```
 Use compact health for quick orientation and full health only for maintenance, diagnosis, or completion confidence.
-`brain-burden-audit` remains a compatibility alias for older scripts.
 
 ## Proposal-Only Evolution
 Agent Meta Protocol proposals remain useful for unclear or high-risk behavior changes: inspect with `brain_runtime.py list-proposals --cwd .`; proposed implementation still needs explicit user approval, while user-confirmed low-risk object cleanup can be implemented directly.

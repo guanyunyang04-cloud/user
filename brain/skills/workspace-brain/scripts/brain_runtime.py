@@ -18,8 +18,7 @@ from agent_learning import create_proposal as create_learning_proposal
 from agent_learning import list_proposals as list_learning_proposals
 from agent_learning import mark_proposal as mark_learning_proposal
 from agent_meta_audit import agent_meta_audit
-from brain_burden import brain_burden_audit as run_brain_burden_audit
-from brain_burden import brain_structure_audit as run_brain_structure_audit
+from brain_structure import brain_structure_audit as run_brain_structure_audit
 from reflection_learning import analyze_freeform, analyze_trace, reflection_template
 
 
@@ -861,9 +860,6 @@ def build_parser() -> argparse.ArgumentParser:
     structure_audit_parser = sub.add_parser("brain-structure-audit")
     structure_audit_parser.add_argument("--cwd", default=".")
     structure_audit_parser.add_argument("--mode", choices=("compact", "full"), default="compact")
-    burden_audit_parser = sub.add_parser("brain-burden-audit")
-    burden_audit_parser.add_argument("--cwd", default=".")
-    burden_audit_parser.add_argument("--mode", choices=("compact", "full"), default="compact")
     multi_lint_parser = sub.add_parser("multi-paradigm-lint")
     multi_lint_parser.add_argument("--cwd", default=".")
     multi_lint_parser.add_argument("--scope", choices=("attached", "all"), default="attached")
@@ -918,8 +914,6 @@ def main() -> int:
         payload = meta_audit(cwd, mode=str(args.mode or "compact"))
     elif args.command == "brain-structure-audit":
         payload = run_brain_structure_audit(cwd, mode=str(args.mode or "compact"))
-    elif args.command == "brain-burden-audit":
-        payload = run_brain_burden_audit(cwd, mode=str(args.mode or "compact"))
     elif args.command == "multi-paradigm-lint":
         payload = multi_paradigm_lint(cwd, scope=str(args.scope or "attached"))
     elif args.command == "list-proposals":

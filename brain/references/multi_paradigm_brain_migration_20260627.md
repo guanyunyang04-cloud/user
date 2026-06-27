@@ -13,7 +13,7 @@
 ## Decisions
 
 - 行数预算从硬阻断改为诊断信号：`line_count_policy = diagnostic_only_not_blocking`。长文档是否需要拆分由结构负担、重复语义、热路径噪声和维护风险判断。
-- `brain-burden-audit` 改名方向落地为 `brain-structure-audit`，旧命令作为兼容 alias 保留。
+- `brain-burden-audit` 改名方向落地为 `brain-structure-audit`；旧命令不保留兼容 alias，避免旧语义继续进入当前入口。
 - 新增 `multi-paradigm-lint`，检查当前主脑和已注册分脑是否具备 Object / Procedure / Function 三层接口。
 - 历史证据层不做机械重写：`references/`、`episodic_memory.md`、历史 `output/` 可以保留旧措辞，因为它们记录当时事实，不是当前运行语义。
 - 外部兼容入口只保留指针和路径级方法：`README.md`、`AGENTS.md`、`CLAUDE.md`、`.github` instructions、仓库 skills 不再扩展成第二套长期规则源。
@@ -32,7 +32,6 @@
 - `tools.brain.multi_paradigm_lint`: shared lint implementation.
 - `brain_runtime.py multi-paradigm-lint --cwd . --scope attached`: runtime entry.
 - `brain_runtime.py brain-structure-audit --cwd . --mode compact`: new structure audit entry.
-- `brain_runtime.py brain-burden-audit --cwd . --mode compact`: compatibility alias.
 - `tools.brain.integrity_check --json`: now includes multi-paradigm interface validation.
 
 ## Current External Entrance Audit

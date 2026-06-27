@@ -94,7 +94,7 @@ class WorkspaceBrainSkillContractTest(unittest.TestCase):
         self.assertIn("agent-meta-audit", text)
         self.assertIn("brain-structure-audit", text)
         self.assertIn("multi-paradigm-lint", text)
-        self.assertIn("brain-burden-audit", text)
+        self.assertNotIn("brain-burden-audit", text)
         self.assertIn("list-proposals", text)
         self.assertIn("implementation", text)
         self.assertIn("approval", text)

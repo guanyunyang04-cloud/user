@@ -70,9 +70,10 @@ class BrainIntegrityCatalogTest(unittest.TestCase):
         self.assertIn("brain/skills/workspace-brain/SKILL.md", contract["hot_path_files"])
         self.assertEqual(contract["line_count_policy"], "diagnostic_only_not_blocking")
         self.assertIn("legacy_global_rule_terms", contract["structural_signals"])
+        self.assertIn("unsupported_legacy_entrypoint", contract["structural_signals"])
         self.assertEqual(contract["rule_classes"], ["hard_safety", "operating_default", "deep_dive", "deprecated"])
-        self.assertIn("owner", contract["compatibility_entry_required_fields"])
-        self.assertIn("delete_by", contract["compatibility_entry_required_fields"])
+        self.assertIn("remove renamed brain tooling entrypoints", contract["legacy_entrypoint_policy"])
+        self.assertNotIn("compatibility_entry_required_fields", contract)
 
     def test_agent_meta_contract_docs_do_not_reintroduce_legacy_public_terms(self) -> None:
         findings = run_checks()

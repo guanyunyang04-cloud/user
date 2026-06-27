@@ -513,13 +513,13 @@ def _validate_main_manifest(findings: list[Finding], main_manifest: dict[str, An
                     main_path,
                 )
             )
-        fields = brain_structure.get("compatibility_entry_required_fields")
-        if not isinstance(fields, list) or not {"owner", "usage_evidence", "delete_by"}.issubset({str(item) for item in fields}):
+        policy = str(brain_structure.get("legacy_entrypoint_policy") or "")
+        if "remove" not in policy or "legacy aliases" not in policy:
             findings.append(
                 Finding(
                     "error",
                     "main_brain_structure_contract_invalid",
-                    "compatibility entries must require owner, usage_evidence, and delete_by",
+                    "legacy_entrypoint_policy must remove renamed brain tooling entrypoints instead of keeping legacy aliases",
                     main_path,
                 )
             )

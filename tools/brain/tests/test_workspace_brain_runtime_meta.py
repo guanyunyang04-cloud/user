@@ -83,27 +83,20 @@ class WorkspaceBrainRuntimeMetaTest(unittest.TestCase):
         self.assertIn("daily_research_evidence_quality", payload)
         self.assertIn("actionable_items", payload)
 
-    def test_brain_runtime_burden_audit_compact_reports_structure_contract(self) -> None:
+    def test_brain_runtime_burden_audit_command_is_removed(self) -> None:
         result = subprocess.run(
             [PYTHON, str(RUNTIME), "brain-burden-audit", "--cwd", str(ROOT), "--mode", "compact"],
             cwd=str(ROOT),
             capture_output=True,
             text=True,
             encoding="utf-8",
-            check=True,
+            check=False,
         )
-        payload = json.loads(result.stdout)
 
-        self.assertEqual(payload["status"], "ok")
-        self.assertIn("brain_burden", payload)
-        self.assertEqual(payload["brain_burden"]["blocked_count"], 0)
-        skill_entry = payload["brain_burden"]["hot_path_files"]["brain/skills/workspace-brain/SKILL.md"]
-        self.assertEqual(skill_entry["line_count_policy"], "diagnostic_only_not_blocking")
-        self.assertIn("structural_signals", skill_entry)
-        self.assertIn("compatibility", payload["brain_burden"])
-        self.assertIn("tracked_non_source_files", payload["brain_burden"])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("invalid choice", result.stderr)
 
-    def test_brain_runtime_structure_audit_compact_reports_new_alias(self) -> None:
+    def test_brain_runtime_structure_audit_compact_reports_contract(self) -> None:
         result = subprocess.run(
             [PYTHON, str(RUNTIME), "brain-structure-audit", "--cwd", str(ROOT), "--mode", "compact"],
             cwd=str(ROOT),
@@ -116,8 +109,14 @@ class WorkspaceBrainRuntimeMetaTest(unittest.TestCase):
 
         self.assertEqual(payload["status"], "ok")
         self.assertIn("brain_structure", payload)
-        self.assertIn("brain_burden", payload)
+        self.assertNotIn("brain_burden", payload)
         self.assertEqual(payload["brain_structure"]["blocked_count"], 0)
+        skill_entry = payload["brain_structure"]["hot_path_files"]["brain/skills/workspace-brain/SKILL.md"]
+        self.assertEqual(skill_entry["line_count_policy"], "diagnostic_only_not_blocking")
+        self.assertIn("structural_signals", skill_entry)
+        self.assertIn("legacy_entrypoints", payload["brain_structure"])
+        self.assertEqual(payload["brain_structure"]["legacy_entrypoints"]["unsupported_legacy_entries"], [])
+        self.assertIn("tracked_non_source_files", payload["brain_structure"])
 
     def test_brain_runtime_multi_paradigm_lint_reports_attached_brains(self) -> None:
         result = subprocess.run(

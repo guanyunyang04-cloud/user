@@ -58,8 +58,6 @@ def brain_structure_audit(cwd: Path, *, mode: str = "compact") -> dict[str, Any]
     workspace = (find_brain_root(cwd.resolve()) or cwd.resolve()).resolve()
     manifest = _load_json_file(workspace / "brain" / "brain_manifest.json")
     contract = manifest.get("brain_structure_contract") if isinstance(manifest.get("brain_structure_contract"), dict) else {}
-    if not contract:
-        contract = manifest.get("brain_burden_contract") if isinstance(manifest.get("brain_burden_contract"), dict) else {}
     configured_hot_paths = contract.get("hot_path_files")
     hot_paths = (
         [str(path) for path in configured_hot_paths if str(path).strip()]
@@ -100,7 +98,7 @@ def brain_structure_audit(cwd: Path, *, mode: str = "compact") -> dict[str, Any]
                 {
                     "type": signal,
                     "path": rel_path,
-                    "summary": f"{rel_path} has structural burden signal: {signal}",
+                    "summary": f"{rel_path} has structure signal: {signal}",
                 }
             )
 
@@ -129,19 +127,18 @@ def brain_structure_audit(cwd: Path, *, mode: str = "compact") -> dict[str, Any]
     runtime_text = (workspace / "brain" / "skills" / "workspace-brain" / "scripts" / "brain_runtime.py").read_text(
         encoding="utf-8-sig"
     )
-    compatibility = {
+    legacy_entrypoints = {
         "removed_runtime_capsule_command": "sub.add_parser(\"capsule\")" not in runtime_text and "args.command == \"capsule\"" not in runtime_text,
-        "unsupported_compatibility_entries": [],
+        "unsupported_legacy_entries": [],
     }
-    if not compatibility["removed_runtime_capsule_command"]:
+    if not legacy_entrypoints["removed_runtime_capsule_command"]:
         blocked_items.append(
             {
-                "type": "unsupported_compatibility_entry",
-                "summary": "brain_runtime.py still exposes capsule compatibility command",
+                "type": "unsupported_legacy_entrypoint",
+                "summary": "brain_runtime.py still exposes legacy capsule command",
                 "path": "brain/skills/workspace-brain/scripts/brain_runtime.py",
             }
         )
-
     tests = []
     for rel_path in _git_ls_files(workspace, "tools/brain/tests"):
         if rel_path.endswith(".py"):
@@ -162,7 +159,7 @@ def brain_structure_audit(cwd: Path, *, mode: str = "compact") -> dict[str, Any]
         "blocked_count": len(blocked_items),
         "warning_count": len(warning_items),
         "hot_path_files": hot_path_files,
-        "compatibility": compatibility,
+        "legacy_entrypoints": legacy_entrypoints,
         "tracked_non_source_files": tracked_non_source,
         "local_non_source_files": local_non_source,
         "blocked_items": blocked_items,
@@ -172,14 +169,9 @@ def brain_structure_audit(cwd: Path, *, mode: str = "compact") -> dict[str, Any]
         "status": "ok",
         "mode": str(mode or "compact"),
         "brain_structure": brain_structure,
-        "brain_burden": brain_structure,
         "next_actions": ["fix_blocked_structure_items"] if blocked_items else (["review_warning_items"] if warning_items else ["no_structure_action_needed"]),
     }
     if str(mode or "compact").lower() == "full":
         payload["brain_structure"]["tests"] = tests
         payload["brain_structure"]["contract"] = contract
     return payload
-
-
-def brain_burden_audit(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
-    return brain_structure_audit(cwd, mode=mode)

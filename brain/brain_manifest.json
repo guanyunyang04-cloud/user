@@ -100,15 +100,13 @@
       "daily_research/brain/operations_center.md"
     ],
     "line_count_policy": "diagnostic_only_not_blocking",
-    "structural_signals": ["legacy_global_rule_terms", "missing_object_interface", "history_log_in_hot_path", "unsupported_compatibility"],
+    "structural_signals": ["legacy_global_rule_terms", "missing_object_interface", "history_log_in_hot_path", "unsupported_legacy_entrypoint"],
     "rule_classes": ["hard_safety", "operating_default", "deep_dive", "deprecated"],
-    "compatibility_entry_required_fields": ["owner", "usage_evidence", "delete_by"],
-    "unsupported_compatibility_policy": "remove compatibility entries without owner, usage_evidence, and delete_by"
+    "legacy_entrypoint_policy": "remove renamed brain tooling entrypoints instead of keeping legacy aliases"
   },
   "personal_researcher_contract": {
     "default_mode": "direct_action",
     "rules_as_tools": true,
-    "compatibility_policy": "evidence_gated",
     "test_policy": "changed_surface_or_smoke_by_default",
     "legacy_policy": "delete_or_deprecate_without_active_callers",
     "explicit_only_skills": ["subagent-driven-development", "requesting-code-review", "finishing-a-development-branch", "using-git-worktrees", "verification-before-completion", "test-driven-development", "testing-strategies"],

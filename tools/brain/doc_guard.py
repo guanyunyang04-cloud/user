@@ -754,9 +754,9 @@ def _check_manifest_semantics(path: Path, text: str) -> list[str]:
                 issues.append("main_brain_structure_contract_structural_signals_invalid")
             if structure.get("rule_classes") != ["hard_safety", "operating_default", "deep_dive", "deprecated"]:
                 issues.append("main_brain_structure_contract_rule_classes_invalid")
-            fields = structure.get("compatibility_entry_required_fields")
-            if not isinstance(fields, list) or not {"owner", "usage_evidence", "delete_by"}.issubset({str(item) for item in fields}):
-                issues.append("main_brain_structure_contract_compatibility_fields_invalid")
+            policy = str(structure.get("legacy_entrypoint_policy") or "")
+            if "remove" not in policy or "legacy aliases" not in policy:
+                issues.append("main_brain_structure_contract_legacy_entrypoint_policy_invalid")
         child_brains = data.get("child_brains")
         if not isinstance(child_brains, list) or not child_brains:
             issues.append("main_manifest_child_brains_missing_or_empty")
