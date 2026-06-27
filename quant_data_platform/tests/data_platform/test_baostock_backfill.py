@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 import time
 from pathlib import Path
@@ -190,8 +191,12 @@ def test_backfill_parser_expands_baostock_full_and_raw_5m_start_date() -> None:
             "2",
             "--valuation-workers",
             "4",
+            "--adjust-factor-workers",
+            "2",
             "--market-daily-symbol-workers",
             "1",
+            "--intraday-symbol-workers",
+            "3",
             "--failed-chunk-sweeps",
             "1",
             "--retry-backoff-seconds",
@@ -213,7 +218,9 @@ def test_backfill_parser_expands_baostock_full_and_raw_5m_start_date() -> None:
     assert config.snapshot_workers == 2
     assert config.industry_concept_workers == 2
     assert config.valuation_workers == 4
+    assert config.adjust_factor_workers == 2
     assert config.market_daily_symbol_workers == 1
+    assert config.intraday_symbol_workers == 3
     assert config.failed_chunk_sweeps == 1
     assert config.retry_backoff_seconds == 1.5
     assert config.retry_jitter_seconds == 0.25
@@ -426,10 +433,11 @@ def test_backfill_resume_retries_failed_chunk() -> None:
 def test_backfill_retries_transient_chunk_error_before_storing() -> None:
     provider = FlakyBackfillProvider()
     with TemporaryDirectory() as temp_dir:
+        run_id = "unit_transient_retry"
         result = run_backfill(
             BackfillConfig(
                 lake_root=Path(temp_dir),
-                run_id="unit_transient_retry",
+                run_id=run_id,
                 domains=(DataDomain.MARKET_INTRADAY_5M,),
                 start_date="2026-01-05",
                 end_date="2026-01-05",
@@ -440,10 +448,21 @@ def test_backfill_retries_transient_chunk_error_before_storing() -> None:
             ),
             provider=provider,
         )
+        manifest = json.loads((Path(temp_dir) / "backfill_runs" / run_id / "manifest.json").read_text(encoding="utf-8"))
+        chunk_path = next((Path(temp_dir) / "backfill_runs" / run_id / "chunks" / DataDomain.MARKET_INTRADAY_5M).glob("*.json"))
+        chunk = json.loads(chunk_path.read_text(encoding="utf-8"))
 
     assert result.error_counts[DataDomain.MARKET_INTRADAY_5M] == 0
     assert result.row_counts[DataDomain.MARKET_INTRADAY_5M] == 8
     assert provider.calls == 2
+    assert manifest["run_started_at"]
+    assert manifest["run_finished_at"]
+    assert manifest["elapsed_sec"] >= 0
+    assert manifest["domain_timing"][DataDomain.MARKET_INTRADAY_5M]["chunk_count"] == 1
+    assert chunk["attempt_count"] == 2
+    assert chunk["fetch_duration_sec"] >= 0
+    assert chunk["store_duration_sec"] >= 0
+    assert chunk["elapsed_sec"] >= 0
 
 
 def test_backfill_resume_prefers_run_calendar_over_catalog_fallback() -> None:

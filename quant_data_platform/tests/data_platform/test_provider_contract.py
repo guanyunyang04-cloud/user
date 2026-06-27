@@ -31,6 +31,7 @@ from quant_data_platform.providers import (
     _baostock_status_frame_from_all_stock,
     _baostock_stock_basic_frame,
     _baostock_valuation_frame_from_history,
+    _baostock_adjust_factor_frame_from_bs,
     _baostock_history_frame,
     _baostock_intraday_5m_frame,
     _baostock_index_constituents_frame,
@@ -253,6 +254,8 @@ class DataPlatformProviderContractTest(unittest.TestCase):
         provider._cninfo.fetch_domain = fake_cninfo  # type: ignore[method-assign]
 
         provider.fetch_domain(DomainFetchRequest(domain=DataDomain.MARKET_DAILY, start_date="2026-01-05", end_date="2026-01-05"))
+        provider.fetch_domain(DomainFetchRequest(domain=DataDomain.MARKET_INTRADAY_5M, start_date="2026-01-05", end_date="2026-01-05"))
+        provider.fetch_domain(DomainFetchRequest(domain=DataDomain.INTRADAY_DAILY_FEATURES, start_date="2026-01-05", end_date="2026-01-05"))
         provider.fetch_domain(DomainFetchRequest(domain=DataDomain.TRADING_CALENDAR, start_date="2026-01-05", end_date="2026-01-05"))
         provider.fetch_domain(DomainFetchRequest(domain=DataDomain.ANNOUNCEMENT, start_date="2026-01-05", end_date="2026-01-05"))
 
@@ -260,6 +263,8 @@ class DataPlatformProviderContractTest(unittest.TestCase):
             calls,
             [
                 ("mootdx_online", DataDomain.MARKET_DAILY),
+                ("mootdx_online", DataDomain.MARKET_INTRADAY_5M),
+                ("mootdx_online", DataDomain.INTRADAY_DAILY_FEATURES),
                 ("baostock", DataDomain.TRADING_CALENDAR),
                 ("cninfo", DataDomain.ANNOUNCEMENT),
             ],
@@ -1037,6 +1042,64 @@ class DataPlatformProviderContractTest(unittest.TestCase):
         self.assertEqual(fake_bs.logout_calls, 1)
         self.assertEqual(frame["symbol"].tolist(), ["600000.SH"])
         self.assertEqual(frame["roeAvg"].tolist(), ["1.25"])
+
+    def test_baostock_adjust_factor_query_relogs_in_after_not_logged_in(self) -> None:
+        from quant_data_platform import providers
+
+        class FakeQuery:
+            def __init__(self, *, error_code: str = "0", error_msg: str = "", fields: list[str] | None = None, rows: list[list[str]] | None = None) -> None:
+                self.error_code = error_code
+                self.error_msg = error_msg
+                self.fields = fields or []
+                self.rows = rows or []
+                self.index = 0
+
+            def next(self) -> bool:
+                self.index += 1
+                return self.index <= len(self.rows)
+
+            def get_row_data(self) -> list[str]:
+                return self.rows[self.index - 1]
+
+        class FakeBaoStock:
+            def __init__(self) -> None:
+                self.login_calls = 0
+                self.logout_calls = 0
+                self.adjust_calls = 0
+
+            def login(self) -> object:
+                self.login_calls += 1
+                return types.SimpleNamespace(error_code="0", error_msg="")
+
+            def logout(self) -> None:
+                self.logout_calls += 1
+
+            def query_adjust_factor(self, **_: object) -> FakeQuery:
+                self.adjust_calls += 1
+                if self.adjust_calls == 1:
+                    return FakeQuery(error_code="10001001", error_msg="用户未登录")
+                return FakeQuery(
+                    fields=["code", "dividOperateDate", "foreAdjustFactor", "backAdjustFactor", "adjustFactor"],
+                    rows=[["sh.600000", "2026-01-05", "1.01", "0.99", "1.0"]],
+                )
+
+        fake_bs = FakeBaoStock()
+        with mock.patch("quant_data_platform.providers.time.sleep", return_value=None):
+            frame = _baostock_adjust_factor_frame_from_bs(
+                fake_bs,
+                DomainFetchRequest(
+                    domain=DataDomain.ADJUST_FACTOR,
+                    symbols=("600000.SH",),
+                    start_date="2026-01-01",
+                    end_date="2026-01-31",
+                ),
+            )
+
+        self.assertEqual(fake_bs.adjust_calls, 2)
+        self.assertEqual(fake_bs.login_calls, 1)
+        self.assertEqual(fake_bs.logout_calls, 1)
+        self.assertEqual(frame["symbol"].tolist(), ["600000.SH"])
+        self.assertEqual(frame["factor_provider"].tolist(), ["baostock"])
 
     def test_baostock_stock_basic_guard_times_out_and_terminates_child(self) -> None:
         from quant_data_platform import providers

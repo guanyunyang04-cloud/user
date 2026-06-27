@@ -8,7 +8,7 @@ import pandas as pd
 from quant_data_platform.core.paths import qdp_paths
 from quant_data_platform.core.registry import load_root_manifest, write_root_manifest_update
 from quant_data_platform.domains.contracts import DataDomain, DomainFetchRequest, ProviderResult
-from quant_data_platform.ingest.daily_update import DailyUpdateConfig, build_parser, run_daily_update
+from quant_data_platform.ingest.daily_update import DailyUpdateConfig, _read_dataset_frame, build_parser, run_daily_update
 from quant_data_platform.lake.canonical import write_canonical_manifest
 from quant_data_platform.lake.catalog import ResearchDataLake
 from quant_data_platform.provider_manager import InMemoryDomainProvider
@@ -177,6 +177,80 @@ def _save_active_bundle(lake: ResearchDataLake, paths, dates: list[str]) -> dict
     return {"bundle": bundle.dataset_id, **sidecars}
 
 
+def _raw_5m_frame(dates: list[str]) -> pd.DataFrame:
+    rows = []
+    bar_times = ["093500000", "094000000", "094500000", "095000000", "095500000", "100000000", "100500000", "101000000"]
+    for trade_date in dates:
+        for symbol in ["000001.SZ", "600000.SH"]:
+            for idx, bar_time in enumerate(bar_times, start=1):
+                close = 10.0 + idx / 100.0
+                rows.append(
+                    {
+                        "symbol": symbol,
+                        "trade_date": trade_date,
+                        "bar_time": bar_time,
+                        "open": close - 0.01,
+                        "high": close + 0.02,
+                        "low": close - 0.02,
+                        "close": close,
+                        "volume": 1000 + idx,
+                        "amount": (1000 + idx) * close,
+                        "source": "unit_raw_5m",
+                        "adjusted_flag": "none",
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def _attach_active_raw_5m_sidecar(lake: ResearchDataLake, paths, dates: list[str]) -> str:
+    spec = {
+        "dataset": "data_platform_market_intraday_5m",
+        "source": "unit_raw_5m",
+        "start_date": dates[0],
+        "end_date": dates[-1],
+        "sharded": True,
+    }
+    identity = lake.build_domain_dataset_identity(domain=DataDomain.MARKET_INTRADAY_5M, spec=spec)
+    shard_dir = Path(identity["dataset_dir"]) / "shards"
+    shard_dir.mkdir(parents=True, exist_ok=True)
+    shard_path = shard_dir / "raw_5m_tail.parquet"
+    frame = _raw_5m_frame(dates)
+    frame.to_parquet(shard_path, index=False)
+    record = lake.save_sharded_domain_dataset(
+        domain=DataDomain.MARKET_INTRADAY_5M,
+        spec=spec,
+        shard_records=[
+            {
+                "status": "stored",
+                "chunk_id": "raw_5m_tail",
+                "task_kind": "unit_raw_5m",
+                "start_date": dates[0],
+                "end_date": dates[-1],
+                "symbol_count": 2,
+                "row_count": int(len(frame)),
+                "path": str(shard_path.resolve()),
+                "error_count": 0,
+                "error_report": [],
+            }
+        ],
+        source="unit_raw_5m",
+        reuse=False,
+    )
+    root = load_root_manifest(paths)
+    sidecars = dict(root.get("canonical_bundle_sidecar_dataset_ids", {}) or {})
+    sidecars[DataDomain.MARKET_INTRADAY_5M] = record.dataset_id
+    components = dict(root.get("canonical_component_dataset_ids", {}) or {})
+    components[DataDomain.MARKET_INTRADAY_5M] = record.dataset_id
+    write_root_manifest_update(
+        {
+            "canonical_bundle_sidecar_dataset_ids": sidecars,
+            "canonical_component_dataset_ids": components,
+        },
+        paths=paths,
+    )
+    return record.dataset_id
+
+
 class DailyBackfillProvider:
     name = "baostock"
 
@@ -192,6 +266,13 @@ class DailyBackfillProvider:
         else:
             frame = pd.DataFrame()
         return ProviderResult(provider=self.name, data=frame)
+
+
+class FailingBackfillProvider:
+    name = "baostock"
+
+    def fetch_domain(self, request: DomainFetchRequest) -> ProviderResult:
+        raise AssertionError(f"daily_update should not call provider backfill for {request.domain}")
 
 
 def test_daily_update_parser_accepts_production_flags() -> None:
@@ -211,6 +292,10 @@ def test_daily_update_parser_accepts_production_flags() -> None:
     assert args.as_of_date == "2026-06-26"
     assert args.build_policy_bundle is True
     assert args.activate is True
+    assert args.intraday_features_mode == "auto"
+    assert args.task_workers == 2
+    assert args.snapshot_workers == 2
+    assert args.adjust_factor_workers == 2
 
 
 def test_daily_update_dry_run_identifies_required_pit_tail_gap(tmp_path: Path) -> None:
@@ -234,6 +319,60 @@ def test_daily_update_dry_run_identifies_required_pit_tail_gap(tmp_path: Path) -
     assert result.domain_plans[DataDomain.UNIVERSE_SNAPSHOT].planned_task_count == 2
     assert result.domain_plans[DataDomain.SECURITY_STATUS].planned_task_count == 2
     assert result.domain_plans[DataDomain.TRADING_CALENDAR].planned_task_count == 1
+
+
+def test_daily_update_auto_skips_intraday_features_when_raw_5m_tail_is_missing(tmp_path: Path) -> None:
+    paths = _make_workspace(tmp_path)
+    lake = ResearchDataLake(paths.lake_root)
+    _save_active_bundle(lake, paths, ["2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08"])
+
+    result = run_daily_update(
+        DailyUpdateConfig(
+            workspace_root=paths.workspace_root,
+            run_id="unit_intraday_skip",
+            as_of_date="2026-01-08",
+            start_date="2026-01-07",
+            domains=(DataDomain.INTRADAY_DAILY_FEATURES,),
+        ),
+        paths=paths,
+        backfill_provider=FailingBackfillProvider(),
+    )
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+
+    assert result.status == "ok"
+    assert DataDomain.INTRADAY_DAILY_FEATURES not in result.backfill_dataset_ids
+    assert result.backfill_results[DataDomain.INTRADAY_DAILY_FEATURES]["action"] == "skip"
+    assert result.lagging_domains[DataDomain.INTRADAY_DAILY_FEATURES]["reason"] == "market_intraday_5m_dataset_missing"
+    assert manifest["backfill_results"][DataDomain.INTRADAY_DAILY_FEATURES]["action"] == "skip"
+
+
+def test_daily_update_auto_derives_intraday_features_from_existing_raw_5m_tail(tmp_path: Path) -> None:
+    paths = _make_workspace(tmp_path)
+    lake = ResearchDataLake(paths.lake_root)
+    _save_active_bundle(lake, paths, ["2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08"])
+    raw_dataset_id = _attach_active_raw_5m_sidecar(lake, paths, ["2026-01-07", "2026-01-08"])
+
+    result = run_daily_update(
+        DailyUpdateConfig(
+            workspace_root=paths.workspace_root,
+            run_id="unit_intraday_derive",
+            as_of_date="2026-01-08",
+            start_date="2026-01-07",
+            domains=(DataDomain.INTRADAY_DAILY_FEATURES,),
+        ),
+        paths=paths,
+        backfill_provider=FailingBackfillProvider(),
+    )
+    dataset_id = result.backfill_dataset_ids[DataDomain.INTRADAY_DAILY_FEATURES]
+    derived = _read_dataset_frame(lake=lake, dataset_id=dataset_id)
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+
+    assert result.status == "ok"
+    assert result.backfill_results[DataDomain.INTRADAY_DAILY_FEATURES]["action"] == "derive"
+    assert result.backfill_results[DataDomain.INTRADAY_DAILY_FEATURES]["source_dataset_id"] == raw_dataset_id
+    assert not derived.empty
+    assert sorted(derived["trade_date"].unique().tolist()) == ["2026-01-07", "2026-01-08"]
+    assert manifest["backfill_results"][DataDomain.INTRADAY_DAILY_FEATURES]["timing"]["chunk_count"] == 1
 
 
 def test_daily_update_strict_activation_combines_inherited_pit_with_tail(tmp_path: Path) -> None:
