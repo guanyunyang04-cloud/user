@@ -32,6 +32,7 @@ from quant_data_platform.memmap.validation import validate_active_memmap
 PASSTHROUGH_COMMAND_MODULES: dict[str, str] = {
     "provider-health": "quant_data_platform.provider_health",
     "refresh-daily": "quant_data_platform.ingest.refresh_daily",
+    "daily-update": "quant_data_platform.ingest.daily_update",
     "import-csv": "quant_data_platform.ingest.import_csv",
     "baostock-backfill": "quant_data_platform.ingest.baostock_backfill",
     "build-intraday-daily-features": "quant_data_platform.ingest.build_intraday_daily_features",
