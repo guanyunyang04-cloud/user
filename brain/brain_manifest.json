@@ -93,7 +93,7 @@
     "pending_approval_surface_rule": "Agent must proactively surface proposed or approved agent learning proposals in the next substantial update or final answer; if none exist, say there are no pending approvals when the queue was checked.",
     "skill_sync_required": true
   },
-  "brain_burden_contract": {
+  "brain_structure_contract": {
     "hot_path_files": [
       "brain/skills/workspace-brain/SKILL.md",
       "daily_research/brain/state_center.md",

@@ -13,7 +13,7 @@ Canonical brain source: `daily_research/brain/identity_layer.md`.
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json
 ```
 
-确认任务属于 `daily_research` 后，`daily_research/brain/` 是本项目事实层。本 README 只作为简体中文快速索引，不替代主脑或分脑中的当前状态、规则、证据和治理判断。
+确认任务属于 `daily_research` 后，`daily_research/brain/` 是本项目事实层。本 README 只作为简体中文快速索引，不替代主脑或分脑中的当前对象、过程、证据和治理判断。
 
 ## 模块地图
 
@@ -23,7 +23,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule -
 - `deep_alpha/`：更长周期的模型架构、alpha 与执行策略研究
 - `execution/`：执行应用、任务运行器、Web 控制台与 production 更新入口
 - `tools/`：守卫、报告、维护工具与一致性检查
-- `brain/`：当前状态、长期知识、治理规则与过程记忆
+- `brain/`：当前对象、长期知识、治理不变量与过程记忆
 - `output/`、`cache/`、`archive/`：生成产物、热缓存与冷归档
 
 ## 环境
@@ -77,5 +77,5 @@ C:\Users\ASUS\miniconda3\envs\yolos\python.exe -m tools.brain.doc_guard check --
 
 - 默认按用户目标、路径、文件证据和主脑边界判断是否进入 `daily_research/brain/`；capsule / route 只是可选诊断信号。
 - 工作区根 `brain/brain_manifest.json` 定义所有分脑共享的主脑合同。
-- 新的文档内容必须先整合进对应 brain；README 只保留简体中文索引和公开入口。
+- 新的长期事实先整合进对应 brain；README 只保留简体中文索引和公开入口。
 - 生成实验产物应留在 `daily_research/output/`，需要复核或裁剪时使用 `workspace_maintenance.py`。

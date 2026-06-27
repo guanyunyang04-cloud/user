@@ -52,9 +52,9 @@
 `steps`: inspect object state；state replacement/recovery/evidence path；make scoped change；run object-level validation；write durable summary.
 `side_effects`: protected object artifacts or brain memory.
 
-### procedure `brain_burden_reduction`
+### procedure `brain_structure_reduction`
 `input`: brain docs, skill, manifest, workflow or registry changes.
-`steps`: keep hot-path files as object tables；move long evidence to references；remove duplicated entry rules；run burden audit.
+`steps`: keep hot-path files as object tables；move long evidence to references；remove duplicated entry rules；run structure audit and multi-paradigm lint.
 `side_effects`: brain docs, registry, skill files.
 
 ## Writeback Routes
@@ -69,4 +69,5 @@
 ## Guard Entrypoints
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`
-- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py brain-burden-audit --cwd . --mode compact`
+- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py brain-structure-audit --cwd . --mode compact`
+- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py multi-paradigm-lint --cwd . --scope attached`

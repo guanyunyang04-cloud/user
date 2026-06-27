@@ -31,7 +31,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap
 
 ## 主分脑边界
 
-- `brain/`：工作区主脑，管理接管顺序、任务路由、分支纪律、全局规则和禁区。
+- `brain/`：工作区主脑，管理接管顺序、任务路由、项目拓扑、共享对象和少数保护语义。
 - `daily_research/brain/`：正式生产研究与执行主线的项目事实层。
 - `quant_data_platform/brain/`：共享量化数据平台、canonical 数据基底、registry 与 memmap 治理。
 - `t0_project/brain/`：盘中实验与 RL 原型事实层。
@@ -57,4 +57,4 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json
 ```
 
-默认规则：在 `main` 分支继续；不经明确授权不修改 `daily_research/output/active_execution_strategy.json`；不把 loose `latest`、smoke、dry-run 或失败产物当成正式证据。
+当前对象不变量：repo-tracked mutation 默认先确认 git surface；`daily_research/output/active_execution_strategy.json` 属于 active artifact；loose `latest`、smoke、dry-run 或失败产物只保留其原始证据等级。

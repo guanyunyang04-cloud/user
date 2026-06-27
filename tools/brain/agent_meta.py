@@ -238,7 +238,7 @@ def analyze_agent_meta_signals(
         signals.append("brain_rule_obstruction")
         opportunities.append(
             _opportunity(
-                target_layer="brain_burden_governance",
+                target_layer="brain_structure_governance",
                 owner_brain="workspace",
                 confidence="high",
                 recommended_action=(

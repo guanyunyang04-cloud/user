@@ -83,7 +83,7 @@ def _build_ci_context():
     if not auto_check_result:
         return """
 ## CI 检查状态
-> ⚠️ 未获取到 CI 检查结果。审查时不得假设 CI 已通过，验证相关判断应标注为"无法确认"。
+> ⚠️ 未获取到 CI 检查结果。CI evidence 对象为空；验证相关判断标注为"无法确认"。
 """
 
     lines = ["\n## CI 检查状态（来自本次 PR 的自动化流水线）"]
@@ -129,11 +129,11 @@ def build_prompt(diff_content, files, truncated, pr_title, pr_body):
 {diff_content}
 ```
 {ci_context}
-## 必须对齐的审查规则（来自仓库 AGENTS.md）
+## 审查对象与判断函数（来自仓库 AGENTS.md）
 1. 必要性（Necessity）：是否有明确问题/业务价值，避免无效重构。
 2. 关联性（Traceability）：是否有关联 Issue（Fixes/Refs）；自然语言关联（如"关联 issue 为 #xxx"）也可接受，不因格式问题判定不通过。无 Issue 时是否给出动机与验收标准。
 3. 类型判定（Type）：fix/feat/refactor/docs/chore/test 是否匹配。
-4. 描述完整性（Description Completeness）：是否包含背景、范围、验证命令与结果、兼容性风险、回滚方案。判断验证是否充分时，必须参考上方"CI 检查状态"段落：（a）若 py_compile 和 flake8 已通过，PR 描述中可引用 CI 结果而不必贴对应本地输出；（b）`./scripts/ci_gate.sh` 不在 CI 覆盖范围，对 Python 后端改动需检查 PR 描述是否说明了该 gate 的执行情况，若未说明应列为建议项；（c）若未提供 CI 结果，则不得假设 CI 已通过，验证充分性应标注为"无法确认"。
+4. 描述完整性（Description Completeness）：是否包含背景、范围、验证命令与结果、兼容性风险、回滚方案。判断验证是否充分时，读取上方"CI 检查状态"对象：（a）若 py_compile 和 flake8 已通过，PR 描述中可引用 CI 结果而不必贴对应本地输出；（b）`./scripts/ci_gate.sh` 不在 CI 覆盖范围，对 Python 后端改动需检查 PR 描述是否说明了该 gate 的执行情况，若未说明应列为建议项；（c）若未提供 CI 结果，CI evidence 为空，验证充分性应标注为"无法确认"。
 5. 合入判定（Merge Readiness）：给出 Ready / Not Ready，并列出阻断项。
 6. 若涉及用户可见能力，检查 README.md 与 docs/CHANGELOG.md 是否同步。
 

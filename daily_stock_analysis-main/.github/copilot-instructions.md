@@ -1,37 +1,29 @@
-# 仓库协作指令
+# 仓库协作入口
 
 Canonical source: [`AGENTS.md`](../AGENTS.md)。
 兼容入口：[`AGENTS.md`](../AGENTS.md) 与 [`CLAUDE.md`](../CLAUDE.md)。
-工作区接管真源：[`brain/state_center.md`](../brain/state_center.md) 与 [`brain/operations_center.md`](../brain/operations_center.md)。
+项目分脑：[`brain/state_center.md`](../brain/state_center.md) 与 [`brain/operations_center.md`](../brain/operations_center.md)。
 
-如果本文件与 `brain/` 或 `AGENTS.md` 冲突，先按 `brain/` 纠偏，再同步兼容入口。
+本文件服务 GitHub Copilot / Coding Agent。它只描述当前入口对象和路径级方法；长期事实和边界回到 `brain/`。
 
-## 核心规则
+## Objects
 
-- 遵守目录边界：
-  - 后端：`src/`、`data_provider/`、`api/`、`bot/`
-  - Web：`apps/dsa-web/`
-  - 桌面端：`apps/dsa-desktop/`
-  - 部署与工作流：`scripts/`、`.github/workflows/`、`docker/`
-- 未经用户明确确认，不执行 `git commit`、`git tag` 或 `git push`。
-- 不写死密钥、账号、端口、模型名、绝对环境路径或环境专属分支逻辑。
-- 优先复用现有模块、配置入口、脚本和测试，不新增平行实现。
-- 用户可见行为、CLI/API、部署、通知或报告结构变化时，同步更新相关文档与 `docs/CHANGELOG.md`，并判断是否需要写回 brain。
-- `README.md` 只用于入门、运行、部署和高层能力总览；细节行为、页面交互和排障说明放到对应 `docs/*.md`。
-- 配置语义变化时，同步 `.env.example`，并评估本地运行、Docker、GitHub Actions、API、Web 与 Desktop 影响。
+- `product_repository`: 后端、Web、桌面端、脚本、工作流、Docker、测试和产品文档的实现体。
+- `ai_compat_entries`: `AGENTS.md`, `CLAUDE.md`, `.github/instructions/*.instructions.md`, `.claude/skills/`，用于把外部工具带回分脑。
+- `external_state`: commit、tag、push、merge、发布、密钥、账号和远端评论等外部状态。
+- `public_behavior_surface`: CLI/API、报告、通知、部署、配置和公开文档。
 
-## 验证
+## Procedures
 
-- 后端改动：优先运行 `./scripts/ci_gate.sh`；最低运行变更 Python 文件的 `python -m py_compile` 和最接近的确定性测试。
-- Web 改动：运行 `cd apps/dsa-web && npm ci && npm run lint && npm run build`。
-- 桌面端改动：先构建 Web，再在可行时构建桌面端。
-- Review 工作：优先读取 CI 证据，例如 `gh pr checks` 和工作流日志。
-- AI 治理资产改动：运行 `python scripts/check_ai_assets.py`。
+- `backend_change`: 读现有 services / repositories / schemas / fallback 逻辑，复用当前入口；验证优先 `./scripts/ci_gate.sh` 或最近的确定性测试。
+- `client_change`: 保持 Vite + React 与 Electron 运行假设；Web 验证用 `npm run lint` 和 `npm run build`。
+- `workflow_or_release_change`: 说明影响的流水线、发布路径、权限边界和回滚方式。
+- `ai_asset_change`: 修改协作入口后运行 `python scripts/check_ai_assets.py`。
+- `doc_change`: README 只做入门和总览；专题行为、配置和排障写入对应 `docs/*.md`。
 
-## AI 资产治理
+## Functions
 
-- `brain/` 是工作区级 handoff hub；不要发明 brain 中不存在的仓库治理规则。
-- `AGENTS.md` 是仓库原生 AI 生态的兼容入口；稳定规则必须与 brain 保持一致。
-- `CLAUDE.md` 平台允许时保持为 `AGENTS.md` 的软链接；否则保留最小 shim。
-- `.github/instructions/*.instructions.md` 用于路径级补充。
-- 仓库协作 skill 位于 `.claude/skills/`，需要与 `AGENTS.md` 和 brain 摘要保持一致。
+- `select_change_surface(task, paths)`: 根据任务和路径选择 backend / client / workflow / docs / ai_asset。
+- `select_validation(surface, risk)`: 选择能支撑结论的最小检查。
+- `activate_external_state_boundary(action)`: 外部状态动作需要用户意图明确。
+- `derive_delivery_summary(change, validation)`: 输出改动、原因、验证、缺口、风险和回滚方式。

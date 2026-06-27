@@ -8,7 +8,7 @@ Canonical brain source: `traditional_quant_research/brain/identity_layer.md`.
 
 - 项目身份：`traditional_quant_research/brain/identity_layer.md`
 - 当前状态：`traditional_quant_research/brain/state_center.md`
-- 操作规则：`traditional_quant_research/brain/operations_center.md`
+- 过程入口：`traditional_quant_research/brain/operations_center.md`
 - 研究框架：`traditional_quant_research/brain/references/research_framework.md`
 - 实验日志：`traditional_quant_research/brain/references/research_log/`
 

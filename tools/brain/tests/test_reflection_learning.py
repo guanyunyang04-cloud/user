@@ -341,7 +341,7 @@ class ReflectionLearningTest(unittest.TestCase):
 
         self.assertEqual(payload["status"], "opportunity")
         self.assertIn("brain_rule_obstruction", payload["signals"])
-        opportunity = next(item for item in payload["learning_opportunities"] if item["target_layer"] == "brain_burden_governance")
+        opportunity = next(item for item in payload["learning_opportunities"] if item["target_layer"] == "brain_structure_governance")
         self.assertEqual(opportunity["source_signal"], "brain_rule_obstruction")
         self.assertEqual(opportunity["owner_brain"], "workspace")
 

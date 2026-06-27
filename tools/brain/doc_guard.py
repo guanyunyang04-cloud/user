@@ -740,23 +740,23 @@ def _check_manifest_semantics(path: Path, text: str) -> list[str]:
             surface_rule = str(agent_meta.get("pending_approval_surface_rule", "") or "").lower()
             if "proposed" not in surface_rule or "approved" not in surface_rule or "proactively" not in surface_rule:
                 issues.append("main_agent_meta_protocol_pending_approval_surface_rule_invalid")
-        burden = data.get("brain_burden_contract")
-        if not isinstance(burden, dict):
-            issues.append("main_brain_burden_contract_missing_or_invalid")
+        structure = data.get("brain_structure_contract")
+        if not isinstance(structure, dict):
+            issues.append("main_brain_structure_contract_missing_or_invalid")
         else:
-            hot_files = burden.get("hot_path_files")
+            hot_files = structure.get("hot_path_files")
             if not isinstance(hot_files, list) or not hot_files:
-                issues.append("main_brain_burden_contract_hot_path_files_invalid")
-            if burden.get("line_count_policy") != "diagnostic_only_not_blocking":
-                issues.append("main_brain_burden_contract_line_count_policy_invalid")
-            structural_signals = burden.get("structural_signals")
+                issues.append("main_brain_structure_contract_hot_path_files_invalid")
+            if structure.get("line_count_policy") != "diagnostic_only_not_blocking":
+                issues.append("main_brain_structure_contract_line_count_policy_invalid")
+            structural_signals = structure.get("structural_signals")
             if not isinstance(structural_signals, list) or "legacy_global_rule_terms" not in {str(item) for item in structural_signals}:
-                issues.append("main_brain_burden_contract_structural_signals_invalid")
-            if burden.get("rule_classes") != ["hard_safety", "operating_default", "deep_dive", "deprecated"]:
-                issues.append("main_brain_burden_contract_rule_classes_invalid")
-            fields = burden.get("compatibility_entry_required_fields")
+                issues.append("main_brain_structure_contract_structural_signals_invalid")
+            if structure.get("rule_classes") != ["hard_safety", "operating_default", "deep_dive", "deprecated"]:
+                issues.append("main_brain_structure_contract_rule_classes_invalid")
+            fields = structure.get("compatibility_entry_required_fields")
             if not isinstance(fields, list) or not {"owner", "usage_evidence", "delete_by"}.issubset({str(item) for item in fields}):
-                issues.append("main_brain_burden_contract_compatibility_fields_invalid")
+                issues.append("main_brain_structure_contract_compatibility_fields_invalid")
         child_brains = data.get("child_brains")
         if not isinstance(child_brains, list) or not child_brains:
             issues.append("main_manifest_child_brains_missing_or_empty")

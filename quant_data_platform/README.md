@@ -2,13 +2,13 @@
 
 Canonical brain source: `quant_data_platform/brain/identity_layer.md`.
 
-主脑管辖下的共享量化数据平台分脑。本文只保留项目入口；数据契约、memmap 治理和 canonical v1 说明以 `quant_data_platform/brain/` 为准。
+主脑管辖下的共享量化数据平台分脑。本文只保留项目入口；数据契约、memmap 治理、provider 对象和 canonical v1 说明以 `quant_data_platform/brain/` 为准。
 
 ## Entry
 
 - 项目身份：`quant_data_platform/brain/identity_layer.md`
 - 当前状态：`quant_data_platform/brain/state_center.md`
-- 操作规则：`quant_data_platform/brain/operations_center.md`
+- 过程入口：`quant_data_platform/brain/operations_center.md`
 - 参考文档：`quant_data_platform/brain/references/`
 
 ## Body

@@ -19,16 +19,17 @@ from agent_learning import list_proposals as list_learning_proposals
 from agent_learning import mark_proposal as mark_learning_proposal
 from agent_meta_audit import agent_meta_audit
 from brain_burden import brain_burden_audit as run_brain_burden_audit
+from brain_burden import brain_structure_audit as run_brain_structure_audit
 from reflection_learning import analyze_freeform, analyze_trace, reflection_template
 
 
 CORE_DOCS = {
-    "identity_layer.md": "# {title} 身份层\n\n- 本项目脑区由 `workspace-brain` runtime 初始化。\n- 本文件保存项目身份、目标和边界。\n",
-    "state_center.md": "# {title} 状态中枢\n\n- 当前状态：新建脑区，等待首次接管写入事实。\n- 默认分支纪律：repo-tracked mutation 优先在 `main` 分支执行。\n",
-    "knowledge_center.md": "# {title} 知识中枢\n\n- 稳定事实、硬规则和可复用教训写入这里。\n- 长证据和过程细节下沉到 `brain/references/`。\n",
-    "brain_architecture.md": "# {title} 脑区架构\n\n- 采用统一 7 模块核：identity、state、knowledge、architecture、operations、governance、episodic。\n- 共享结构以 workspace 主脑 manifest 为准；本文件只记录区域特化。\n",
-    "operations_center.md": "# {title} 操作中枢\n\n- 接管入口：先运行 brain runtime detect，再用 workflow capsule 接管项目任务。\n",
-    "governance_layer.md": "# {title} 治理层\n\n- 重大动作前区分事实、推断、假设和边界。\n- Agent learning 可自动创建低风险 proposed proposal；实现协议或行为改动仍需用户确认。\n",
+    "identity_layer.md": "# {title} 身份层\n\n- 本项目脑区由 `workspace-brain` runtime 初始化。\n- 本文件保存项目身份、目标对象和核心角色。\n",
+    "state_center.md": "# {title} 状态中枢\n\n- 当前状态：新建脑区，等待首次接管写入对象实例。\n\n## Object Instances\n\n### object `{title}_project`\n`state`: new project brain awaiting first durable facts.\n\n## Pure Functions\n\n- `select_relevant_objects(task)`: choose project objects from user goal, paths, and evidence.\n\n## Procedures\n\n### procedure `project_handoff`\n`steps`: identify relevant objects; read minimal evidence; act; verify; write back to the right brain module.\n",
+    "knowledge_center.md": "# {title} 知识中枢\n\n- 稳定对象定义、长期事实和可复用教训写入这里。\n- 长证据和过程细节下沉到 `brain/references/`。\n",
+    "brain_architecture.md": "# {title} 脑区架构\n\n- 采用统一 7 模块核：identity、state、knowledge、architecture、operations、governance、episodic。\n- 共享结构以 workspace 主脑 manifest 为准；本文件记录区域特化和对象/过程/函数接口。\n",
+    "operations_center.md": "# {title} 操作中枢\n\n- 操作入口按任务相关对象选择；capsule、route、detect 是可选诊断工具。\n\n## Runtime Objects\n\n### object `project_runtime`\n`definition`: local commands, tests, scripts, and body paths used by this project.\n\n## Procedure Entries\n\n### procedure `changed_surface_validation`\n`steps`: identify changed surface; choose closest deterministic check; report executed and skipped checks.\n\n## Validation Selection Function\n\n- `select_validation(changed_surface, risk)`: return the smallest checks that support the delivery claim.\n",
+    "governance_layer.md": "# {title} 治理层\n\n- 治理描述对象级不变量、证据等级和外部状态保护。\n- Agent learning 是经验写回对象；行为或协议实现改动由用户确认后执行。\n\n## Governed Objects\n\n### object `protected_project_surface`\n`definition`: project data, release, secret, external state, or other surfaces whose mutation needs object-level validation.\n\n## Pure Functions\n\n- `activate_boundaries(objects, method)`: activate only invariants attached to touched objects and methods.\n\n## Procedures\n\n### procedure `protected_surface_change`\n`steps`: inspect current object state; identify replacement or rollback path; change narrowly; validate; write durable summary.\n",
     "episodic_memory.md": "# {title} 情景记忆\n\n- 时间顺序证据和长复盘写入这里或 `brain/references/`。\n",
 }
 
@@ -802,6 +803,15 @@ def meta_audit(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
     return agent_meta_audit(cwd, mode=mode)
 
 
+def multi_paradigm_lint(cwd: Path, *, scope: str = "attached") -> dict[str, Any]:
+    workspace = _find_main_workspace_root(cwd.resolve()) or _find_brain_root(cwd.resolve()) or cwd.resolve()
+    if str(workspace) not in sys.path:
+        sys.path.insert(0, str(workspace))
+    from tools.brain.multi_paradigm_lint import run_multi_paradigm_lint
+
+    return run_multi_paradigm_lint(scope=scope)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Workspace brain runtime helper.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -848,9 +858,15 @@ def build_parser() -> argparse.ArgumentParser:
     meta_audit_parser = sub.add_parser("agent-meta-audit")
     meta_audit_parser.add_argument("--cwd", default=".")
     meta_audit_parser.add_argument("--mode", choices=("compact", "full"), default="compact")
+    structure_audit_parser = sub.add_parser("brain-structure-audit")
+    structure_audit_parser.add_argument("--cwd", default=".")
+    structure_audit_parser.add_argument("--mode", choices=("compact", "full"), default="compact")
     burden_audit_parser = sub.add_parser("brain-burden-audit")
     burden_audit_parser.add_argument("--cwd", default=".")
     burden_audit_parser.add_argument("--mode", choices=("compact", "full"), default="compact")
+    multi_lint_parser = sub.add_parser("multi-paradigm-lint")
+    multi_lint_parser.add_argument("--cwd", default=".")
+    multi_lint_parser.add_argument("--scope", choices=("attached", "all"), default="attached")
     list_parser = sub.add_parser("list-proposals")
     list_parser.add_argument("--cwd", default=".")
     mark_parser = sub.add_parser("mark-proposal")
@@ -900,8 +916,12 @@ def main() -> int:
         )
     elif args.command == "agent-meta-audit":
         payload = meta_audit(cwd, mode=str(args.mode or "compact"))
+    elif args.command == "brain-structure-audit":
+        payload = run_brain_structure_audit(cwd, mode=str(args.mode or "compact"))
     elif args.command == "brain-burden-audit":
         payload = run_brain_burden_audit(cwd, mode=str(args.mode or "compact"))
+    elif args.command == "multi-paradigm-lint":
+        payload = multi_paradigm_lint(cwd, scope=str(args.scope or "attached"))
     elif args.command == "list-proposals":
         payload = list_proposals(cwd)
     elif args.command == "mark-proposal":

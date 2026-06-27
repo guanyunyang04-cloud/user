@@ -63,9 +63,9 @@ class BrainIntegrityCatalogTest(unittest.TestCase):
         self.assertIn("proposed", contract["pending_approval_surface_rule"])
         self.assertIn("approved", contract["pending_approval_surface_rule"])
 
-    def test_main_manifest_declares_brain_burden_contract(self) -> None:
+    def test_main_manifest_declares_brain_structure_contract(self) -> None:
         manifest = load_manifest("brain/brain_manifest.json")
-        contract = manifest["brain_burden_contract"]
+        contract = manifest["brain_structure_contract"]
 
         self.assertIn("brain/skills/workspace-brain/SKILL.md", contract["hot_path_files"])
         self.assertEqual(contract["line_count_policy"], "diagnostic_only_not_blocking")
@@ -81,6 +81,12 @@ class BrainIntegrityCatalogTest(unittest.TestCase):
         self.assertNotIn("agent_meta_legacy_contract_text", error_codes)
         self.assertNotIn("agent_meta_capsule_schema_invalid", error_codes)
         self.assertNotIn("agent_meta_legacy_capsule_field_present", error_codes)
+
+    def test_registered_brains_expose_multi_paradigm_interfaces(self) -> None:
+        findings = run_checks()
+        error_codes = {finding.code for finding in findings if finding.severity == "error"}
+
+        self.assertNotIn("multi_paradigm_interface_missing", error_codes)
 
     def test_action_needed_noncanonical_catalog_entries_still_warn(self) -> None:
         fake_catalog = deepcopy(integrity_check._read_json(integrity_check.BRAIN_CATALOG))

@@ -92,6 +92,8 @@ class WorkspaceBrainSkillContractTest(unittest.TestCase):
         self.assertIn("Use compact health for quick orientation", text)
         self.assertIn("not as mandatory first moves", text)
         self.assertIn("agent-meta-audit", text)
+        self.assertIn("brain-structure-audit", text)
+        self.assertIn("multi-paradigm-lint", text)
         self.assertIn("brain-burden-audit", text)
         self.assertIn("list-proposals", text)
         self.assertIn("implementation", text)

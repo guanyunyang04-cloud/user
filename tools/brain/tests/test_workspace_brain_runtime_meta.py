@@ -103,6 +103,38 @@ class WorkspaceBrainRuntimeMetaTest(unittest.TestCase):
         self.assertIn("compatibility", payload["brain_burden"])
         self.assertIn("tracked_non_source_files", payload["brain_burden"])
 
+    def test_brain_runtime_structure_audit_compact_reports_new_alias(self) -> None:
+        result = subprocess.run(
+            [PYTHON, str(RUNTIME), "brain-structure-audit", "--cwd", str(ROOT), "--mode", "compact"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        payload = json.loads(result.stdout)
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertIn("brain_structure", payload)
+        self.assertIn("brain_burden", payload)
+        self.assertEqual(payload["brain_structure"]["blocked_count"], 0)
+
+    def test_brain_runtime_multi_paradigm_lint_reports_attached_brains(self) -> None:
+        result = subprocess.run(
+            [PYTHON, str(RUNTIME), "multi-paradigm-lint", "--cwd", str(ROOT), "--scope", "attached"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        payload = json.loads(result.stdout)
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["error_count"], 0)
+        self.assertGreaterEqual(len(payload["brains"]), 6)
+        self.assertTrue(all(item["ok"] for item in payload["brains"]))
+
     def test_agent_meta_audit_reports_proposed_and_approved_learning_items(self) -> None:
         tmp_root = ROOT / "daily_research/output/test_agent_learning_pending_project"
         if tmp_root.exists():

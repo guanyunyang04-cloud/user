@@ -386,7 +386,7 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertIn("brain_rule_obstruction", review["signals"])
         opportunity = next(
             item for item in review["learning_opportunities"]
-            if item["target_layer"] == "brain_burden_governance"
+            if item["target_layer"] == "brain_structure_governance"
         )
         self.assertEqual(opportunity["owner_brain"], "workspace")
         self.assertEqual(opportunity["source_signal"], "brain_rule_obstruction")

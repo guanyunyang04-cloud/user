@@ -54,10 +54,12 @@ def _git_ls_files(workspace: Path, pathspec: str = "") -> list[str]:
     return [line.strip().replace("\\", "/") for line in result.stdout.splitlines() if line.strip()]
 
 
-def brain_burden_audit(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
+def brain_structure_audit(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
     workspace = (find_brain_root(cwd.resolve()) or cwd.resolve()).resolve()
     manifest = _load_json_file(workspace / "brain" / "brain_manifest.json")
-    contract = manifest.get("brain_burden_contract") if isinstance(manifest.get("brain_burden_contract"), dict) else {}
+    contract = manifest.get("brain_structure_contract") if isinstance(manifest.get("brain_structure_contract"), dict) else {}
+    if not contract:
+        contract = manifest.get("brain_burden_contract") if isinstance(manifest.get("brain_burden_contract"), dict) else {}
     configured_hot_paths = contract.get("hot_path_files")
     hot_paths = (
         [str(path) for path in configured_hot_paths if str(path).strip()]
@@ -154,24 +156,30 @@ def brain_burden_audit(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
                     }
                 )
 
-    burden_status = "blocked" if blocked_items else ("warning" if warning_items else "ok")
+    structure_status = "blocked" if blocked_items else ("warning" if warning_items else "ok")
+    brain_structure = {
+        "status": structure_status,
+        "blocked_count": len(blocked_items),
+        "warning_count": len(warning_items),
+        "hot_path_files": hot_path_files,
+        "compatibility": compatibility,
+        "tracked_non_source_files": tracked_non_source,
+        "local_non_source_files": local_non_source,
+        "blocked_items": blocked_items,
+        "warning_items": warning_items,
+    }
     payload: dict[str, Any] = {
         "status": "ok",
         "mode": str(mode or "compact"),
-        "brain_burden": {
-            "status": burden_status,
-            "blocked_count": len(blocked_items),
-            "warning_count": len(warning_items),
-            "hot_path_files": hot_path_files,
-            "compatibility": compatibility,
-            "tracked_non_source_files": tracked_non_source,
-            "local_non_source_files": local_non_source,
-            "blocked_items": blocked_items,
-            "warning_items": warning_items,
-        },
-        "next_actions": ["fix_blocked_burden_items"] if blocked_items else (["review_warning_items"] if warning_items else ["no_burden_action_needed"]),
+        "brain_structure": brain_structure,
+        "brain_burden": brain_structure,
+        "next_actions": ["fix_blocked_structure_items"] if blocked_items else (["review_warning_items"] if warning_items else ["no_structure_action_needed"]),
     }
     if str(mode or "compact").lower() == "full":
-        payload["brain_burden"]["tests"] = tests
-        payload["brain_burden"]["contract"] = contract
+        payload["brain_structure"]["tests"] = tests
+        payload["brain_structure"]["contract"] = contract
     return payload
+
+
+def brain_burden_audit(cwd: Path, *, mode: str = "compact") -> dict[str, Any]:
+    return brain_structure_audit(cwd, mode=mode)

@@ -65,8 +65,8 @@
 
 ### procedure `brain_structure_change`
 `input`: changed brain files, skill, manifest, workflow or registry
-`steps`: 保持热路径 compact；长历史进 references；运行 doc guard、integrity check 和 burden audit；必要时同步 skill。
-`validation`: `python -m tools.brain.doc_guard check --scope changed`；`python -m tools.brain.integrity_check --json`；`python brain/skills/workspace-brain/scripts/brain_runtime.py brain-burden-audit --cwd . --mode compact`。
+`steps`: 保持热路径 compact；长历史进 references；运行 doc guard、integrity check、structure audit 和 multi-paradigm lint；必要时同步 skill。
+`validation`: `python -m tools.brain.doc_guard check --scope changed`；`python -m tools.brain.integrity_check --json`；`python brain/skills/workspace-brain/scripts/brain_runtime.py brain-structure-audit --cwd . --mode compact`；`python brain/skills/workspace-brain/scripts/brain_runtime.py multi-paradigm-lint --cwd . --scope attached`。
 
 ## Current Invariants
 - 主脑不展开分脑 trial 指标、长 tag 或局部实验命令。

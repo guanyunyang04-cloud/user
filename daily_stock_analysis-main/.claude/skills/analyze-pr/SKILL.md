@@ -45,9 +45,9 @@ gh run view <run_id> --log-failed
 
 - 先根据 `gh pr checks`、PR diff、现有测试与工作流日志判断问题
 - 仅当 CI 未覆盖改动面、CI 结果不足以定性问题、或需要验证关键回归风险时，再补充本地最小验证
-- 不要默认切换当前分支或执行 `gh pr checkout`
+- 当前分支和工作树是外部状态对象；PR 审查默认通过远端 diff / CI 证据完成，本地 checkout 只在任务目标明确时使用
 
-如果必须补本地验证，按改动面选择最接近的检查，例如：
+如果需要补本地验证，按改动面选择最接近的检查，例如：
 
 - 后端：`./scripts/ci_gate.sh` 或 `python -m py_compile <changed_python_files>`
 - 前端：`cd apps/dsa-web && npm ci && npm run lint && npm run build`

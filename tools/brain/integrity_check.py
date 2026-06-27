@@ -15,6 +15,7 @@ if str(WORKSPACE_ROOT) not in sys.path:
 from tools.brain.platform import build_brain_catalog, check_text_encoding, read_text as platform_read_text
 from tools.brain.routing import route_task_to_brain
 from tools.brain.platform import resolve_bootstrap
+from tools.brain.multi_paradigm_lint import run_multi_paradigm_lint
 
 MAIN_MANIFEST = Path("brain/brain_manifest.json")
 BRAIN_CATALOG = Path("brain/brain_catalog.json")
@@ -30,7 +31,7 @@ REQUIRED_MAIN_KEYS = (
     SHARED_CONTRACT_KEY,
     "hot_handoff_contract",
     "agent_meta_protocol",
-    "brain_burden_contract",
+    "brain_structure_contract",
     "brain_contract",
     "child_brains",
     "write_routes",
@@ -38,7 +39,7 @@ REQUIRED_MAIN_KEYS = (
 )
 
 REQUIRED_AGENT_META_PASSES = ("task_start", "decision_boundary", "before_final")
-REQUIRED_BRAIN_BURDEN_RULE_CLASSES = ("hard_safety", "operating_default", "deep_dive", "deprecated")
+REQUIRED_BRAIN_STRUCTURE_RULE_CLASSES = ("hard_safety", "operating_default", "deep_dive", "deprecated")
 
 REQUIRED_HOT_HANDOFF_KEYS = (
     "workspace_default_paths",
@@ -484,40 +485,40 @@ def _validate_main_manifest(findings: list[Finding], main_manifest: dict[str, An
     if agent_meta.get("skill_sync_required") is not True:
         findings.append(Finding("error", "main_agent_meta_protocol_invalid", "skill_sync_required must be true", main_path))
 
-    brain_burden = main_manifest.get("brain_burden_contract", {})
-    if not isinstance(brain_burden, dict) or not brain_burden:
-        findings.append(Finding("error", "main_brain_burden_contract_invalid", "brain_burden_contract must be a non-empty object", main_path))
+    brain_structure = main_manifest.get("brain_structure_contract", {})
+    if not isinstance(brain_structure, dict) or not brain_structure:
+        findings.append(Finding("error", "main_brain_structure_contract_invalid", "brain_structure_contract must be a non-empty object", main_path))
     else:
-        hot_files = brain_burden.get("hot_path_files")
+        hot_files = brain_structure.get("hot_path_files")
         if not isinstance(hot_files, list) or not hot_files:
-            findings.append(Finding("error", "main_brain_burden_contract_invalid", "hot_path_files must be a non-empty list", main_path))
-        if brain_burden.get("line_count_policy") != "diagnostic_only_not_blocking":
+            findings.append(Finding("error", "main_brain_structure_contract_invalid", "hot_path_files must be a non-empty list", main_path))
+        if brain_structure.get("line_count_policy") != "diagnostic_only_not_blocking":
             findings.append(
                 Finding(
                     "error",
-                    "main_brain_burden_contract_invalid",
+                    "main_brain_structure_contract_invalid",
                     "line_count_policy must be diagnostic_only_not_blocking",
                     main_path,
                 )
             )
-        structural_signals = brain_burden.get("structural_signals")
+        structural_signals = brain_structure.get("structural_signals")
         if not isinstance(structural_signals, list) or "legacy_global_rule_terms" not in {str(item) for item in structural_signals}:
-            findings.append(Finding("error", "main_brain_burden_contract_invalid", "structural_signals must include legacy_global_rule_terms", main_path))
-        if brain_burden.get("rule_classes") != list(REQUIRED_BRAIN_BURDEN_RULE_CLASSES):
+            findings.append(Finding("error", "main_brain_structure_contract_invalid", "structural_signals must include legacy_global_rule_terms", main_path))
+        if brain_structure.get("rule_classes") != list(REQUIRED_BRAIN_STRUCTURE_RULE_CLASSES):
             findings.append(
                 Finding(
                     "error",
-                    "main_brain_burden_contract_invalid",
+                    "main_brain_structure_contract_invalid",
                     "rule_classes must be hard_safety, operating_default, deep_dive, deprecated",
                     main_path,
                 )
             )
-        fields = brain_burden.get("compatibility_entry_required_fields")
+        fields = brain_structure.get("compatibility_entry_required_fields")
         if not isinstance(fields, list) or not {"owner", "usage_evidence", "delete_by"}.issubset({str(item) for item in fields}):
             findings.append(
                 Finding(
                     "error",
-                    "main_brain_burden_contract_invalid",
+                    "main_brain_structure_contract_invalid",
                     "compatibility entries must require owner, usage_evidence, and delete_by",
                     main_path,
                 )
@@ -901,6 +902,18 @@ def _validate_agent_meta_contract_docs(findings: list[Finding]) -> None:
             )
 
 
+def _validate_multi_paradigm_interfaces(findings: list[Finding]) -> None:
+    payload = run_multi_paradigm_lint(scope="attached")
+    for item in payload.get("findings", []) or []:
+        if not isinstance(item, dict):
+            continue
+        severity = str(item.get("severity", "") or "error")
+        code = str(item.get("code", "") or "multi_paradigm_interface_missing")
+        detail = str(item.get("detail", "") or "multi-paradigm interface missing")
+        path = str(item.get("path", "") or "") or None
+        findings.append(Finding(severity, code, detail, path))
+
+
 def _validate_brain_catalog(findings: list[Finding], main_manifest: dict[str, Any]) -> None:
     catalog_path = _rel(BRAIN_CATALOG)
     if not _workspace_path(BRAIN_CATALOG).exists():
@@ -987,6 +1000,7 @@ def run_checks() -> list[Finding]:
     _validate_workflow_categories(findings, main_manifest)
     _validate_agent_meta_runtime_contract(findings, main_manifest)
     _validate_agent_meta_contract_docs(findings)
+    _validate_multi_paradigm_interfaces(findings)
     return findings
 
 
