@@ -1,2 +1,0 @@
-{"directory_count": 1, "domains": ["market_intraday_1m"], "dry_run": true, "event": "start", "shard_batch_members": 1, "shard_batch_rows": 0, "source_count": 1, "time": "2026-06-28T03:13:52+00:00", "workers": 1, "zip_count": 0}
-{"event": "dry_run_written", "plan_path": "H:\\quant_project\\data_lake\\canonical\\imports\\external_quant_zip_import_20260628_111352.json", "time": "2026-06-28T03:13:52+00:00"}
