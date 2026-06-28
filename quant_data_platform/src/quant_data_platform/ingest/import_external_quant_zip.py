@@ -43,7 +43,9 @@ class ImportConfig:
     csv_sep: str = ","
     chunksize: int = 200_000
     max_files_per_zip: int = 0
+    max_files_per_source: int = 0
     dry_run: bool = False
+    include_unpacked_csv: bool = False
     derive_5m_from_1m: bool = False
     hash_zips: bool = True
     reuse: bool = True
@@ -64,7 +66,9 @@ class ImportConfig:
             csv_sep=str(self.csv_sep or ","),
             chunksize=max(1, int(self.chunksize or 200_000)),
             max_files_per_zip=max(0, int(self.max_files_per_zip or 0)),
+            max_files_per_source=max(0, int(self.max_files_per_source or self.max_files_per_zip or 0)),
             dry_run=bool(self.dry_run),
+            include_unpacked_csv=bool(self.include_unpacked_csv),
             derive_5m_from_1m=bool(self.derive_5m_from_1m),
             hash_zips=bool(self.hash_zips),
             reuse=bool(self.reuse),
@@ -87,6 +91,12 @@ class ImportResult:
     plan_path: Path | None = None
 
 
+@dataclass(frozen=True)
+class ExternalSourcePath:
+    path: Path
+    kind: str
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Import external native 5m/adjust-factor yearly zips into the research data lake.")
     parser.add_argument("--lake-root", default=str(DEFAULT_DATA_LAKE_ROOT))
@@ -98,7 +108,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--csv-sep", default=",")
     parser.add_argument("--chunksize", type=int, default=200_000)
     parser.add_argument("--max-files-per-zip", type=int, default=0)
+    parser.add_argument("--max-files-per-source", type=int, default=0)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--include-unpacked-csv", action="store_true")
     parser.add_argument("--derive-5m-from-1m", dest="derive_5m_from_1m", action="store_true", default=False)
     parser.add_argument("--no-derive-5m-from-1m", dest="derive_5m_from_1m", action="store_false")
     parser.add_argument("--hash-zips", dest="hash_zips", action="store_true", default=True)
@@ -116,7 +128,51 @@ def run_import(config: ImportConfig) -> ImportResult:
     cfg = config.normalized()
     lake = ResearchDataLake(cfg.lake_root)
     progress_path = cfg.progress_path or _default_progress_path(lake)
-    zip_paths_by_domain = _zip_paths_by_domain(cfg)
+    if cfg.reuse and not cfg.dry_run:
+        reuse_hit = _existing_import_result(lake=lake, cfg=cfg)
+        expected_domains = _expected_output_domains(cfg)
+        if expected_domains and all(domain in reuse_hit["dataset_ids"] for domain in expected_domains):
+            plan = {
+                "status": "completed_reused",
+                "generated_at": _utc_now(),
+                "lake_root": str(lake.root.resolve()),
+                "source_root": str(cfg.source_root),
+                "start_date": cfg.start_date,
+                "end_date": cfg.end_date,
+                "domains": list(cfg.domains),
+                "datasets": {
+                    domain: {
+                        "dataset_id": reuse_hit["dataset_ids"][domain],
+                        "shard_count": int(reuse_hit["shard_counts"].get(domain, 0) or 0),
+                        "row_count": int(reuse_hit["row_counts"].get(domain, 0) or 0),
+                        "error_count": int(reuse_hit["error_counts"].get(domain, 0) or 0),
+                        "reuse": True,
+                    }
+                    for domain in expected_domains
+                },
+                "progress_path": str(progress_path.resolve()),
+                "reuse": True,
+            }
+            plan_path = _write_plan(lake, plan)
+            _write_progress(
+                progress_path,
+                {
+                    "event": "completed_reused",
+                    "dataset_ids": reuse_hit["dataset_ids"],
+                    "plan_path": str(plan_path.resolve()),
+                },
+            )
+            return ImportResult(
+                status="completed_reused",
+                lake_root=lake.root,
+                source_root=cfg.source_root,
+                dataset_ids=dict(reuse_hit["dataset_ids"]),
+                shard_counts=dict(reuse_hit["shard_counts"]),
+                row_counts=dict(reuse_hit["row_counts"]),
+                error_counts=dict(reuse_hit["error_counts"]),
+                plan_path=plan_path,
+            )
+    source_paths_by_domain = _source_paths_by_domain(cfg)
     plan: dict[str, Any] = {
         "status": "dry_run" if cfg.dry_run else "running",
         "generated_at": _utc_now(),
@@ -125,7 +181,15 @@ def run_import(config: ImportConfig) -> ImportResult:
         "start_date": cfg.start_date,
         "end_date": cfg.end_date,
         "domains": list(cfg.domains),
-        "zip_paths_by_domain": {domain: [str(path) for path in paths] for domain, paths in zip_paths_by_domain.items()},
+        "zip_paths_by_domain": {
+            domain: [str(item.path) for item in paths if item.kind == "zip"]
+            for domain, paths in source_paths_by_domain.items()
+        },
+        "source_paths_by_domain": {
+            domain: [{"path": str(item.path), "kind": item.kind} for item in paths]
+            for domain, paths in source_paths_by_domain.items()
+        },
+        "include_unpacked_csv": bool(cfg.include_unpacked_csv),
         "datasets": {},
         "progress_path": str(progress_path.resolve()),
     }
@@ -135,7 +199,9 @@ def run_import(config: ImportConfig) -> ImportResult:
             "event": "start",
             "dry_run": cfg.dry_run,
             "domains": list(cfg.domains),
-            "zip_count": int(sum(len(paths) for paths in zip_paths_by_domain.values())),
+            "source_count": int(sum(len(paths) for paths in source_paths_by_domain.values())),
+            "zip_count": int(sum(1 for paths in source_paths_by_domain.values() for item in paths if item.kind == "zip")),
+            "directory_count": int(sum(1 for paths in source_paths_by_domain.values() for item in paths if item.kind == "directory")),
             "workers": int(cfg.workers),
             "shard_batch_members": int(cfg.shard_batch_members),
             "shard_batch_rows": int(cfg.shard_batch_rows),
@@ -151,43 +217,44 @@ def run_import(config: ImportConfig) -> ImportResult:
         shard_records_by_domain.setdefault(DataDomain.MARKET_INTRADAY_5M, [])
 
     for domain in cfg.domains:
-        domain_zip_paths = list(zip_paths_by_domain.get(domain, []))
-        if cfg.workers <= 1 or len(domain_zip_paths) <= 1:
-            for zip_path in domain_zip_paths:
+        domain_source_paths = list(source_paths_by_domain.get(domain, []))
+        if cfg.workers <= 1 or len(domain_source_paths) <= 1:
+            for source_path in domain_source_paths:
                 _merge_shard_records(
                     shard_records_by_domain,
-                    _import_zip_for_domain(
+                    _import_source_for_domain(
                         lake=lake,
                         cfg=cfg,
                         domain=domain,
-                        zip_path=zip_path,
+                        source_path=source_path,
                         progress_path=progress_path,
                     ),
                 )
         else:
-            with ThreadPoolExecutor(max_workers=min(cfg.workers, len(domain_zip_paths))) as executor:
+            with ThreadPoolExecutor(max_workers=min(cfg.workers, len(domain_source_paths))) as executor:
                 futures = {
                     executor.submit(
-                        _import_zip_for_domain,
+                        _import_source_for_domain,
                         lake=lake,
                         cfg=cfg,
                         domain=domain,
-                        zip_path=zip_path,
+                        source_path=source_path,
                         progress_path=progress_path,
-                    ): zip_path
-                    for zip_path in domain_zip_paths
+                    ): source_path
+                    for source_path in domain_source_paths
                 }
                 for future in as_completed(futures):
-                    zip_path = futures[future]
+                    source_path = futures[future]
                     try:
                         _merge_shard_records(shard_records_by_domain, future.result())
                     except Exception as exc:
                         shard_records_by_domain.setdefault(domain, []).append(
                             _shard_record(
                                 domain=domain,
-                                zip_path=zip_path,
+                                source_path=source_path.path,
+                                source_kind=source_path.kind,
                                 member_name="",
-                                zip_sha256="",
+                                source_sha256="",
                                 status="error",
                                 row_count=0,
                                 error_count=1,
@@ -196,7 +263,13 @@ def run_import(config: ImportConfig) -> ImportResult:
                         )
                         _write_progress(
                             progress_path,
-                            {"event": "zip_error", "domain": domain, "zip_path": str(zip_path.resolve()), "error": str(exc)},
+                            {
+                                "event": "source_error",
+                                "domain": domain,
+                                "source_path": str(source_path.path.resolve()),
+                                "source_kind": source_path.kind,
+                                "error": str(exc),
+                            },
                         )
 
     dataset_ids: dict[str, str] = {}
@@ -250,17 +323,28 @@ def run_import(config: ImportConfig) -> ImportResult:
     )
 
 
-def _import_zip_for_domain(
+def _import_source_for_domain(
     *,
     lake: ResearchDataLake,
     cfg: ImportConfig,
     domain: str,
-    zip_path: Path,
+    source_path: ExternalSourcePath,
     progress_path: Path,
 ) -> dict[str, list[dict[str, Any]]]:
     shard_records_by_domain: dict[str, list[dict[str, Any]]] = {}
-    _write_progress(progress_path, {"event": "zip_start", "domain": domain, "zip_path": str(zip_path.resolve())})
-    zip_sha256 = _sha256_file(zip_path) if cfg.hash_zips else ""
+    source_container_path = source_path.path
+    source_kind = str(source_path.kind or "zip")
+    _write_progress(
+        progress_path,
+        {
+            "event": "source_start",
+            "domain": domain,
+            "source_path": str(source_container_path.resolve()),
+            "source_kind": source_kind,
+            "zip_path": str(source_container_path.resolve()) if source_kind == "zip" else "",
+        },
+    )
+    source_sha256 = _sha256_file(source_container_path) if source_kind == "zip" and cfg.hash_zips else ""
     batch_frames: dict[str, list[pd.DataFrame]] = {}
     batch_members: dict[str, list[str]] = {}
     batch_derivation: dict[str, str] = {}
@@ -276,22 +360,23 @@ def _import_zip_for_domain(
             return
         batch_index[target_domain] = int(batch_index.get(target_domain, 0)) + 1
         data = pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
-        member_label = f"{zip_path.stem}_{target_domain}_batch_{batch_index[target_domain]:05d}"
+        member_label = f"{source_container_path.stem}_{target_domain}_batch_{batch_index[target_domain]:05d}"
         shard_path = _write_domain_shard(
             lake,
             cfg,
             domain=target_domain,
             frame=data,
-            zip_path=zip_path,
+            source_path=source_container_path,
             member_name=member_label,
             suffix="derived_5m" if derivation else "",
         )
         shard_records_by_domain.setdefault(target_domain, []).append(
             _shard_record(
                 domain=target_domain,
-                zip_path=zip_path,
+                source_path=source_container_path,
+                source_kind=source_kind,
                 member_name=member_label,
-                zip_sha256=zip_sha256,
+                source_sha256=source_sha256,
                 status="stored",
                 row_count=len(data),
                 path=shard_path,
@@ -308,7 +393,9 @@ def _import_zip_for_domain(
             {
                 "event": "batch_stored",
                 "domain": target_domain,
-                "zip_path": str(zip_path.resolve()),
+                "source_path": str(source_container_path.resolve()),
+                "source_kind": source_kind,
+                "zip_path": str(source_container_path.resolve()) if source_kind == "zip" else "",
                 "batch": member_label,
                 "row_count": int(len(data)),
                 "source_member_count": int(len(members_for_batch)),
@@ -328,88 +415,157 @@ def _import_zip_for_domain(
         if member_limit_hit or row_limit_hit:
             flush_batch(target_domain)
 
-    with zipfile.ZipFile(zip_path) as archive:
-        members = [item for item in archive.infolist() if not item.is_dir() and item.filename.lower().endswith((".csv", ".txt"))]
-        members = sorted(members, key=lambda item: item.filename)
-        if cfg.max_files_per_zip:
-            members = members[: cfg.max_files_per_zip]
-        for member in members:
-            try:
-                _write_progress(progress_path, {"event": "member_start", "domain": domain, "zip_path": str(zip_path.resolve()), "member": member.filename})
-                normalized = _read_member_normalized(archive, member.filename, domain=domain, cfg=cfg, zip_path=zip_path)
-                normalized = _filter_date_window(normalized, start_date=cfg.start_date, end_date=cfg.end_date)
-                if normalized.empty:
-                    shard_records_by_domain.setdefault(domain, []).append(
-                        _shard_record(
-                            domain=domain,
-                            zip_path=zip_path,
-                            member_name=member.filename,
-                            zip_sha256=zip_sha256,
-                            status="skipped",
-                            row_count=0,
-                            error_count=0,
-                        )
-                    )
-                    _write_progress(progress_path, {"event": "member_skipped", "domain": domain, "zip_path": str(zip_path.resolve()), "member": member.filename})
-                    continue
-                add_batch_frame(domain, normalized, member_name=member.filename)
-                _write_progress(
-                    progress_path,
-                    {
-                        "event": "member_buffered",
-                        "domain": domain,
-                        "zip_path": str(zip_path.resolve()),
-                        "member": member.filename,
-                        "row_count": int(len(normalized)),
-                    },
-                )
-                if domain == DataDomain.MARKET_INTRADAY_1M and cfg.derive_5m_from_1m:
-                    derived_5m = aggregate_intraday_1m_to_5m_frame(normalized, source="external_1m", adjusted_flag="none")
-                    derived_5m = _filter_date_window(derived_5m, start_date=cfg.start_date, end_date=cfg.end_date)
-                    if not derived_5m.empty:
-                        add_batch_frame(
-                            DataDomain.MARKET_INTRADAY_5M,
-                            derived_5m,
-                            member_name=member.filename,
-                            derivation="aggregate_1m_to_5m",
-                        )
-                        _write_progress(
-                            progress_path,
-                            {
-                                "event": "member_derived_5m_buffered",
-                                "domain": DataDomain.MARKET_INTRADAY_5M,
-                                "source_domain": domain,
-                                "zip_path": str(zip_path.resolve()),
-                                "member": member.filename,
-                                "row_count": int(len(derived_5m)),
-                            },
-                        )
-            except Exception as exc:
+    def handle_member(member_name: str, open_binary: Any) -> None:
+        try:
+            _write_progress(
+                progress_path,
+                {
+                    "event": "member_start",
+                    "domain": domain,
+                    "source_path": str(source_container_path.resolve()),
+                    "source_kind": source_kind,
+                    "member": member_name,
+                },
+            )
+            normalized = _read_member_normalized(
+                open_binary,
+                member_name,
+                domain=domain,
+                cfg=cfg,
+                source_path=source_container_path,
+                source_kind=source_kind,
+            )
+            normalized = _filter_date_window(normalized, start_date=cfg.start_date, end_date=cfg.end_date)
+            if normalized.empty:
                 shard_records_by_domain.setdefault(domain, []).append(
                     _shard_record(
                         domain=domain,
-                        zip_path=zip_path,
-                        member_name=member.filename,
-                        zip_sha256=zip_sha256,
-                        status="error",
+                        source_path=source_container_path,
+                        source_kind=source_kind,
+                        member_name=member_name,
+                        source_sha256=source_sha256,
+                        status="skipped",
                         row_count=0,
-                        error_count=1,
-                        error=str(exc),
+                        error_count=0,
                     )
                 )
                 _write_progress(
                     progress_path,
                     {
-                        "event": "member_error",
+                        "event": "member_skipped",
                         "domain": domain,
-                        "zip_path": str(zip_path.resolve()),
-                        "member": member.filename,
-                        "error": str(exc),
+                        "source_path": str(source_container_path.resolve()),
+                        "source_kind": source_kind,
+                        "member": member_name,
                     },
                 )
-        for target_domain in list(batch_frames):
-            flush_batch(target_domain)
-    _write_progress(progress_path, {"event": "zip_done", "domain": domain, "zip_path": str(zip_path.resolve()), "member_count": int(len(members))})
+                return
+            add_batch_frame(domain, normalized, member_name=member_name)
+            _write_progress(
+                progress_path,
+                {
+                    "event": "member_buffered",
+                    "domain": domain,
+                    "source_path": str(source_container_path.resolve()),
+                    "source_kind": source_kind,
+                    "member": member_name,
+                    "row_count": int(len(normalized)),
+                },
+            )
+            if domain == DataDomain.MARKET_INTRADAY_1M and cfg.derive_5m_from_1m:
+                derived_5m = aggregate_intraday_1m_to_5m_frame(normalized, source="external_1m", adjusted_flag="none")
+                derived_5m = _filter_date_window(derived_5m, start_date=cfg.start_date, end_date=cfg.end_date)
+                if not derived_5m.empty:
+                    add_batch_frame(
+                        DataDomain.MARKET_INTRADAY_5M,
+                        derived_5m,
+                        member_name=member_name,
+                        derivation="aggregate_1m_to_5m",
+                    )
+                    _write_progress(
+                        progress_path,
+                        {
+                            "event": "member_derived_5m_buffered",
+                            "domain": DataDomain.MARKET_INTRADAY_5M,
+                            "source_domain": domain,
+                            "source_path": str(source_container_path.resolve()),
+                            "source_kind": source_kind,
+                            "member": member_name,
+                            "row_count": int(len(derived_5m)),
+                        },
+                    )
+        except Exception as exc:
+            shard_records_by_domain.setdefault(domain, []).append(
+                _shard_record(
+                    domain=domain,
+                    source_path=source_container_path,
+                    source_kind=source_kind,
+                    member_name=member_name,
+                    source_sha256=source_sha256,
+                    status="error",
+                    row_count=0,
+                    error_count=1,
+                    error=str(exc),
+                )
+            )
+            _write_progress(
+                progress_path,
+                {
+                    "event": "member_error",
+                    "domain": domain,
+                    "source_path": str(source_container_path.resolve()),
+                    "source_kind": source_kind,
+                    "member": member_name,
+                    "error": str(exc),
+                },
+            )
+
+    member_count = 0
+    if source_kind == "zip":
+        with zipfile.ZipFile(source_container_path) as archive:
+            members = [item.filename for item in archive.infolist() if not item.is_dir() and item.filename.lower().endswith((".csv", ".txt"))]
+            members = sorted(members)
+            if cfg.max_files_per_source:
+                members = members[: cfg.max_files_per_source]
+            member_count = len(members)
+            for member_name in members:
+                handle_member(member_name, lambda member_name=member_name: archive.open(member_name))
+    else:
+        members = [
+            path
+            for path in sorted(source_container_path.iterdir(), key=lambda item: item.name.lower())
+            if path.is_file() and path.suffix.lower() in {".csv", ".txt"}
+        ]
+        if cfg.max_files_per_source:
+            members = members[: cfg.max_files_per_source]
+        member_count = len(members)
+        for member_path in members:
+            member_name = member_path.relative_to(source_container_path).as_posix()
+            handle_member(member_name, lambda member_path=member_path: member_path.open("rb"))
+
+    for target_domain in list(batch_frames):
+        flush_batch(target_domain)
+    _write_progress(
+        progress_path,
+        {
+            "event": "source_done",
+            "domain": domain,
+            "source_path": str(source_container_path.resolve()),
+            "source_kind": source_kind,
+            "zip_path": str(source_container_path.resolve()) if source_kind == "zip" else "",
+            "member_count": int(member_count),
+        },
+    )
+    if source_kind == "zip":
+        _write_progress(
+            progress_path,
+            {
+                "event": "zip_done",
+                "domain": domain,
+                "zip_path": str(source_container_path.resolve()),
+                "member_count": int(member_count),
+            },
+        )
     return shard_records_by_domain
 
 
@@ -419,34 +575,36 @@ def _merge_shard_records(target: dict[str, list[dict[str, Any]]], source: dict[s
 
 
 def _read_member_normalized(
-    archive: zipfile.ZipFile,
+    open_binary: Any,
     member_name: str,
     *,
     domain: str,
     cfg: ImportConfig,
-    zip_path: Path,
+    source_path: Path,
+    source_kind: str,
 ) -> pd.DataFrame:
     errors: list[str] = []
     for encoding in DEFAULT_ENCODINGS:
         try:
             frames: list[pd.DataFrame] = []
-            for chunk in pd.read_csv(
-                archive.open(member_name),
-                sep=cfg.csv_sep,
-                encoding=encoding,
-                chunksize=cfg.chunksize,
-                low_memory=False,
-            ):
-                chunk = _prepare_external_chunk(chunk, domain=domain, zip_path=zip_path, member_name=member_name)
-                normalized = normalize_domain_frame(
-                    chunk,
-                    domain=domain,
-                    source="external_quant_zip",
-                    adjusted_flag="none",
-                    require_columns=False,
-                )
-                if not normalized.empty:
-                    frames.append(normalized)
+            with open_binary() as handle:
+                for chunk in pd.read_csv(
+                    handle,
+                    sep=cfg.csv_sep,
+                    encoding=encoding,
+                    chunksize=cfg.chunksize,
+                    low_memory=False,
+                ):
+                    chunk = _prepare_external_chunk(chunk, domain=domain, source_path=source_path, member_name=member_name)
+                    normalized = normalize_domain_frame(
+                        chunk,
+                        domain=domain,
+                        source=_external_source_name(source_kind),
+                        adjusted_flag="none",
+                        require_columns=False,
+                    )
+                    if not normalized.empty:
+                        frames.append(normalized)
             if not frames:
                 return pd.DataFrame()
             data = pd.concat(frames, ignore_index=True)
@@ -461,19 +619,23 @@ def _read_member_normalized(
     raise RuntimeError(f"csv_member_read_failed: member={member_name}; errors={errors}")
 
 
-def _prepare_external_chunk(chunk: pd.DataFrame, *, domain: str, zip_path: Path, member_name: str) -> pd.DataFrame:
+def _prepare_external_chunk(chunk: pd.DataFrame, *, domain: str, source_path: Path, member_name: str) -> pd.DataFrame:
     data = chunk.copy()
     if "symbol" not in {str(column).strip().lower() for column in data.columns}:
         symbol = _symbol_from_member_name(member_name)
         if symbol:
             data["symbol"] = symbol
     if domain == DataDomain.ADJUST_FACTOR:
-        provider, semantics = _adjust_factor_provider(zip_path, member_name)
+        provider, semantics = _adjust_factor_provider(source_path, member_name)
         if "factor_provider" not in data.columns:
             data["factor_provider"] = provider
         if "factor_semantics" not in data.columns:
             data["factor_semantics"] = semantics
     return data
+
+
+def _external_source_name(source_kind: str) -> str:
+    return "external_quant_csv" if str(source_kind or "").lower() == "directory" else "external_quant_zip"
 
 
 def _filter_date_window(frame: pd.DataFrame, *, start_date: str, end_date: str) -> pd.DataFrame:
@@ -492,7 +654,7 @@ def _write_domain_shard(
     *,
     domain: str,
     frame: pd.DataFrame,
-    zip_path: Path,
+    source_path: Path,
     member_name: str,
     suffix: str = "",
 ) -> str:
@@ -501,7 +663,7 @@ def _write_domain_shard(
     identity = lake.build_domain_dataset_identity(domain=domain, spec=identity_spec)
     shard_dir = Path(identity["dataset_dir"]) / "shards"
     shard_dir.mkdir(parents=True, exist_ok=True)
-    shard_name = _safe_shard_name(zip_path, member_name, suffix=suffix)
+    shard_name = _safe_shard_name(source_path, member_name, suffix=suffix)
     shard_path = shard_dir / f"{shard_name}.parquet"
     frame.to_parquet(shard_path, index=False)
     return str(shard_path.resolve())
@@ -515,23 +677,73 @@ def _dataset_spec(cfg: ImportConfig, *, domain: str) -> dict[str, Any]:
         "end_date": cfg.end_date,
         "years": list(cfg.years),
         "source_root": str(cfg.source_root),
+        "include_unpacked_csv": bool(cfg.include_unpacked_csv),
         "canonical_start_date": DEFAULT_CANONICAL_START_DATE,
         "raw_archive_policy": "keep_2000_2009_outside_default_research_view",
         "original_ohlcv_policy": "raw_ohlcv_never_overwritten",
         "derive_5m_from_1m": bool(cfg.derive_5m_from_1m),
-        "one_minute_policy": "cold_archive_not_default_research_view",
+        "one_minute_policy": "store_raw_1m_bars_preserving_source_bar_time_contract",
+        "one_minute_bar_count_contracts": {
+            "external_quant_csv": "241 bars/full trading day when 09:30 is present",
+            "external_quant_zip": "source archive convention; validated per source",
+            "mootdx_online": "240 bars/full trading day, starts at 09:31",
+        },
         "five_minute_policy": "native_5m_preferred_reuse_existing_derived_5m_if_equivalent",
         "shard_batch_members": int(cfg.shard_batch_members),
         "shard_batch_rows": int(cfg.shard_batch_rows),
     }
 
 
+def _expected_output_domains(cfg: ImportConfig) -> tuple[str, ...]:
+    domains = list(cfg.domains)
+    if cfg.derive_5m_from_1m and DataDomain.MARKET_INTRADAY_1M in domains:
+        domains.append(DataDomain.MARKET_INTRADAY_5M)
+    return tuple(dict.fromkeys(domains))
+
+
+def _existing_import_result(*, lake: ResearchDataLake, cfg: ImportConfig) -> dict[str, dict[str, Any]]:
+    dataset_ids: dict[str, str] = {}
+    shard_counts: dict[str, int] = {}
+    row_counts: dict[str, int] = {}
+    error_counts: dict[str, int] = {}
+    for domain in _expected_output_domains(cfg):
+        spec = _dataset_spec(cfg, domain=domain)
+        identity = lake.build_domain_dataset_identity(domain=domain, spec={**spec, "domain": domain, "sharded": True})
+        dataset_id = str(identity.get("dataset_id", "") or "")
+        if not dataset_id:
+            continue
+        try:
+            metadata = lake.describe_dataset(dataset_id)
+        except Exception:
+            continue
+        manifest_path = Path(str(dict(metadata.get("content_paths", {}) or {}).get("shard_manifest", "") or ""))
+        if not manifest_path.exists():
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            manifest = {}
+        row_count = int(dict(metadata.get("row_counts", {}) or {}).get("silver_domain_data", 0) or 0)
+        shards = list(manifest.get("shards", []) or [])
+        dataset_ids[domain] = dataset_id
+        shard_counts[domain] = int(len(shards))
+        row_counts[domain] = row_count
+        error_counts[domain] = int(sum(int(dict(item).get("error_count", 0) or 0) for item in shards))
+    return {
+        "dataset_ids": dataset_ids,
+        "shard_counts": shard_counts,
+        "row_counts": row_counts,
+        "error_counts": error_counts,
+    }
+
+
 def _shard_record(
     *,
     domain: str,
-    zip_path: Path,
+    source_path: Path,
+    source_kind: str,
     member_name: str,
-    zip_sha256: str,
+    source_sha256: str,
     status: str,
     row_count: int,
     path: str | Path = "",
@@ -552,8 +764,11 @@ def _shard_record(
         "start_date": str(start_date or ""),
         "end_date": str(end_date or ""),
         "symbol_count": int(symbol_count),
-        "source_zip": str(zip_path.resolve()),
-        "source_zip_sha256": str(zip_sha256 or ""),
+        "source_container": str(source_path.resolve()),
+        "source_container_kind": str(source_kind or ""),
+        "source_zip": str(source_path.resolve()) if str(source_kind or "") == "zip" else "",
+        "source_zip_sha256": str(source_sha256 or "") if str(source_kind or "") == "zip" else "",
+        "source_sha256": str(source_sha256 or ""),
         "source_member": str(member_name),
         "source_member_count": int(source_member_count),
         "source_members_sample": list(source_members_sample or []),
@@ -563,13 +778,13 @@ def _shard_record(
     }
 
 
-def _zip_paths_by_domain(cfg: ImportConfig) -> dict[str, list[Path]]:
+def _source_paths_by_domain(cfg: ImportConfig) -> dict[str, list[ExternalSourcePath]]:
     paths_by_domain = {domain: [] for domain in cfg.domains}
     if not cfg.source_root.exists():
         return paths_by_domain
     start_year = pd.Timestamp(cfg.start_date).year
     for path in sorted(cfg.source_root.rglob("*.zip")):
-        domain = _classify_zip_path(path)
+        domain = _classify_source_path(path)
         if domain not in paths_by_domain:
             continue
         year = _year_from_path(path)
@@ -577,11 +792,24 @@ def _zip_paths_by_domain(cfg: ImportConfig) -> dict[str, list[Path]]:
             continue
         if not cfg.years and year is not None and year < start_year:
             continue
-        paths_by_domain[domain].append(path)
+        paths_by_domain[domain].append(ExternalSourcePath(path=path, kind="zip"))
+    if cfg.include_unpacked_csv:
+        for path in sorted((item for item in cfg.source_root.rglob("*") if item.is_dir()), key=lambda item: str(item).lower()):
+            domain = _classify_source_path(path)
+            if domain not in paths_by_domain:
+                continue
+            year = _year_from_path(path)
+            if cfg.years and year not in cfg.years:
+                continue
+            if not cfg.years and year is not None and year < start_year:
+                continue
+            if not _directory_has_external_csv_members(path):
+                continue
+            paths_by_domain[domain].append(ExternalSourcePath(path=path, kind="directory"))
     return paths_by_domain
 
 
-def _classify_zip_path(path: Path) -> str:
+def _classify_source_path(path: Path) -> str:
     text = str(path).lower()
     if "1分钟" in text or "1min" in text or "1m" in text:
         return DataDomain.MARKET_INTRADAY_1M
@@ -590,6 +818,16 @@ def _classify_zip_path(path: Path) -> str:
     if "复权" in text or "adjust" in text:
         return DataDomain.ADJUST_FACTOR
     return ""
+
+
+def _directory_has_external_csv_members(path: Path) -> bool:
+    try:
+        for child in path.iterdir():
+            if child.is_file() and child.suffix.lower() in {".csv", ".txt"}:
+                return True
+    except OSError:
+        return False
+    return False
 
 
 def _symbol_from_member_name(member_name: str) -> str:
@@ -688,7 +926,9 @@ def main(argv: list[str] | None = None) -> int:
             csv_sep=args.csv_sep,
             chunksize=args.chunksize,
             max_files_per_zip=args.max_files_per_zip,
+            max_files_per_source=args.max_files_per_source,
             dry_run=args.dry_run,
+            include_unpacked_csv=args.include_unpacked_csv,
             derive_5m_from_1m=args.derive_5m_from_1m,
             hash_zips=args.hash_zips,
             reuse=args.reuse,

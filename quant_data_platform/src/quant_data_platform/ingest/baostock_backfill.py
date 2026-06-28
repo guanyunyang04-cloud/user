@@ -52,6 +52,7 @@ BAOSTOCK_FULL_DOMAINS: tuple[str, ...] = (
 BAOSTOCK_SIDECAR_DOMAINS: tuple[str, ...] = tuple(domain for domain in BAOSTOCK_FULL_DOMAINS if domain != DataDomain.MARKET_DAILY)
 SYMBOL_RANGE_DOMAINS = {
     DataDomain.MARKET_DAILY,
+    DataDomain.MARKET_INTRADAY_1M,
     DataDomain.MARKET_INTRADAY_5M,
     DataDomain.INTRADAY_DAILY_FEATURES,
     DataDomain.ADJUST_FACTOR,
@@ -72,6 +73,7 @@ REPORT_DOMAINS = {
     DataDomain.PERFORMANCE_EXPRESS,
 }
 DEFAULT_BENCHMARK = "000300.SH"
+DEFAULT_EXPECTED_1M_BARS_PER_DAY = 240
 DEFAULT_EXPECTED_5M_BARS_PER_DAY = 48
 DEFAULT_FAILED_CHUNK_RETRIES = 1
 
@@ -111,6 +113,7 @@ class BackfillConfig:
     snapshot_frequency: str = "daily"
     index_snapshot_frequency: str = "monthly"
     raw_5m_start_date: str = ""
+    expected_1m_bars_per_day: int = DEFAULT_EXPECTED_1M_BARS_PER_DAY
     expected_5m_bars_per_day: int = DEFAULT_EXPECTED_5M_BARS_PER_DAY
     failed_chunk_retries: int = DEFAULT_FAILED_CHUNK_RETRIES
     task_workers: int = 1
@@ -166,6 +169,7 @@ class BackfillConfig:
             snapshot_frequency=str(self.snapshot_frequency or "daily").strip().lower(),
             index_snapshot_frequency=str(self.index_snapshot_frequency or "monthly").strip().lower(),
             raw_5m_start_date=_normalize_date(self.raw_5m_start_date) if str(self.raw_5m_start_date or "").strip() else "",
+            expected_1m_bars_per_day=max(1, int(self.expected_1m_bars_per_day or DEFAULT_EXPECTED_1M_BARS_PER_DAY)),
             expected_5m_bars_per_day=max(1, int(self.expected_5m_bars_per_day or DEFAULT_EXPECTED_5M_BARS_PER_DAY)),
             failed_chunk_retries=max(0, int(self.failed_chunk_retries or 0)),
             task_workers=max(1, int(self.task_workers or 1)),
@@ -221,6 +225,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--snapshot-frequency", choices=["daily", "monthly", "quarterly", "end"], default="daily")
     parser.add_argument("--index-snapshot-frequency", choices=["daily", "monthly", "quarterly", "end"], default="monthly")
     parser.add_argument("--raw-5m-start-date", default="")
+    parser.add_argument("--expected-1m-bars-per-day", type=int, default=DEFAULT_EXPECTED_1M_BARS_PER_DAY)
     parser.add_argument("--expected-5m-bars-per-day", type=int, default=DEFAULT_EXPECTED_5M_BARS_PER_DAY)
     parser.add_argument("--failed-chunk-retries", type=int, default=DEFAULT_FAILED_CHUNK_RETRIES)
     parser.add_argument("--task-workers", type=int, default=1)
@@ -303,6 +308,7 @@ def config_from_args(args: argparse.Namespace) -> BackfillConfig:
         snapshot_frequency=args.snapshot_frequency,
         index_snapshot_frequency=args.index_snapshot_frequency,
         raw_5m_start_date=args.raw_5m_start_date,
+        expected_1m_bars_per_day=args.expected_1m_bars_per_day,
         expected_5m_bars_per_day=args.expected_5m_bars_per_day,
         failed_chunk_retries=args.failed_chunk_retries,
         task_workers=args.task_workers,
@@ -719,6 +725,8 @@ def _fetch_and_store_domain_chunk(
     data.to_parquet(shard_path, index=False)
     store_duration = time.perf_counter() - store_t0
     audit = _chunk_audit(data=data, request=request, task=task, trade_dates=trade_dates, config=config)
+    audit_error_report = _audit_error_report(audit=audit, request=request, task=task)
+    combined_error_report = [*list(error_report), *audit_error_report]
     elapsed = time.perf_counter() - t0
     record = {
         "status": "stored",
@@ -730,8 +738,8 @@ def _fetch_and_store_domain_chunk(
         "symbol_count": int(len(task.symbols)),
         "row_count": int(len(data)),
         "path": str(shard_path.resolve()),
-        "error_count": int(len(error_report)),
-        "error_report": error_report,
+        "error_count": int(len(combined_error_report)),
+        "error_report": combined_error_report,
         "audit": audit,
         "attempt_count": int(attempt_count),
         "fetch_started_at": started_at,
@@ -742,6 +750,45 @@ def _fetch_and_store_domain_chunk(
     }
     _write_json(status_path, record)
     return record
+
+
+def _audit_error_report(*, audit: Mapping[str, Any], request: DomainFetchRequest, task: BackfillChunk) -> list[dict[str, Any]]:
+    if request.domain not in {DataDomain.MARKET_INTRADAY_1M, DataDomain.MARKET_INTRADAY_5M}:
+        return []
+    expected_symbol_days = int(audit.get("expected_symbol_days", 0) or 0)
+    missing_symbol_days = int(audit.get("missing_symbol_days", 0) or 0)
+    bad_bar_count_symbol_days = int(audit.get("bad_bar_count_symbol_days", 0) or 0)
+    row_count = int(audit.get("row_count", 0) or 0)
+    expected_rows = int(audit.get("expected_rows_full_grid", 0) or 0)
+    status = str(audit.get("status", "") or "")
+    if expected_symbol_days <= 0:
+        return []
+    coverage_ratio = (float(row_count) / float(expected_rows)) if expected_rows > 0 else 1.0
+    # Missing or short symbol-days can be legitimate for suspended, newly listed,
+    # or otherwise non-tradeable names. Treat catastrophic coverage loss as an
+    # error, but keep ordinary symbol-day gaps in the audit payload for later
+    # PIT-aware validation against security_status.
+    if row_count > 0 and coverage_ratio >= 0.50:
+        return []
+    return [
+        {
+            "provider": "backfill_audit",
+            "domain": request.domain,
+            "chunk_id": task.chunk_id,
+            "code": "intraday_coverage_audit_failed",
+            "message": (
+                f"intraday coverage incomplete: status={status or 'unknown'} "
+                f"row_count={row_count} missing_symbol_days={missing_symbol_days} "
+                f"bad_bar_count_symbol_days={bad_bar_count_symbol_days}"
+            ),
+            "expected_symbol_days": expected_symbol_days,
+            "observed_symbol_days": int(audit.get("observed_symbol_days", 0) or 0),
+            "missing_symbol_days": missing_symbol_days,
+            "bad_bar_count_symbol_days": bad_bar_count_symbol_days,
+            "expected_bars_per_symbol_day": int(audit.get("expected_bars_per_symbol_day", 0) or 0),
+            "bad_bar_count_examples": list(audit.get("bad_bar_count_examples", []) or [])[:20],
+        }
+    ]
 
 
 def _fetch_domain_chunk_with_retries(
@@ -1023,6 +1070,9 @@ def _domain_spec(
         "snapshot_frequency": config.snapshot_frequency,
         "index_snapshot_frequency": config.index_snapshot_frequency,
         "raw_5m_start_date": config.raw_5m_start_date,
+        "expected_1m_bars_per_day": int(config.expected_1m_bars_per_day),
+        "expected_5m_bars_per_day": int(config.expected_5m_bars_per_day),
+        "intraday_bar_count_contract": _intraday_bar_count_contract(domain),
         "failed_chunk_retries": config.failed_chunk_retries,
         "task_workers": config.task_workers,
         "industry_concept_workers": config.industry_concept_workers,
@@ -1038,6 +1088,14 @@ def _domain_spec(
     }
 
 
+def _intraday_bar_count_contract(domain: str) -> str:
+    if domain == DataDomain.MARKET_INTRADAY_1M:
+        return "mootdx_1m_240_without_0930_by_default; external_csv_1m_may_preserve_241_with_0930"
+    if domain == DataDomain.MARKET_INTRADAY_5M:
+        return "mootdx_or_baostock_5m_48_full_trading_day"
+    return ""
+
+
 def _chunk_audit(
     *,
     data: pd.DataFrame,
@@ -1046,15 +1104,21 @@ def _chunk_audit(
     trade_dates: Sequence[str],
     config: BackfillConfig,
 ) -> dict[str, Any]:
-    if request.domain != DataDomain.MARKET_INTRADAY_5M:
+    if request.domain not in {DataDomain.MARKET_INTRADAY_1M, DataDomain.MARKET_INTRADAY_5M}:
         return coverage_report_for_domain(data, request, provider="baostock")
+    expected_bars = (
+        config.expected_1m_bars_per_day
+        if request.domain == DataDomain.MARKET_INTRADAY_1M
+        else config.expected_5m_bars_per_day
+    )
     window_dates = [date for date in trade_dates if task.start_date <= date <= task.end_date]
     expected_symbol_days = int(len(task.symbols) * len(window_dates))
-    expected_rows = int(expected_symbol_days * config.expected_5m_bars_per_day)
+    expected_rows = int(expected_symbol_days * expected_bars)
     if data.empty or not {"symbol", "trade_date"}.issubset(data.columns):
         return {
             "status": "empty",
-            "expected_rows_48bar_full_grid": expected_rows,
+            "expected_rows_full_grid": expected_rows,
+            "expected_bars_per_symbol_day": int(expected_bars),
             "row_count": 0,
             "expected_symbol_days": expected_symbol_days,
             "observed_symbol_days": 0,
@@ -1062,14 +1126,15 @@ def _chunk_audit(
             "bad_bar_count_symbol_days": 0,
         }
     grouped = data.groupby(["symbol", "trade_date"], dropna=False).size()
-    bad = grouped.loc[grouped.ne(config.expected_5m_bars_per_day)]
+    bad = grouped.loc[grouped.ne(expected_bars)]
     observed_symbol_days = int(len(grouped))
     expected_pairs = {(symbol, date) for symbol in task.symbols for date in window_dates}
     observed_pairs = {(str(symbol), str(date)) for symbol, date in grouped.index}
     missing = int(len(expected_pairs - observed_pairs)) if expected_pairs else 0
     return {
         "status": "ok" if len(data) else "empty",
-        "expected_rows_48bar_full_grid": expected_rows,
+        "expected_rows_full_grid": expected_rows,
+        "expected_bars_per_symbol_day": int(expected_bars),
         "row_count": int(len(data)),
         "expected_symbol_days": expected_symbol_days,
         "observed_symbol_days": observed_symbol_days,
@@ -1284,6 +1349,8 @@ def _parse_domain_spec(raw: str | Iterable[str]) -> tuple[str, ...]:
             domains.extend(BAOSTOCK_SIDECAR_DOMAINS)
         elif lower == "intraday":
             domains.extend((DataDomain.MARKET_INTRADAY_5M, DataDomain.INTRADAY_DAILY_FEATURES))
+        elif lower in {"intraday_full", "mootdx_intraday"}:
+            domains.extend((DataDomain.MARKET_INTRADAY_1M, DataDomain.MARKET_INTRADAY_5M, DataDomain.INTRADAY_DAILY_FEATURES))
         else:
             domains.append(normalize_domain(item))
     return tuple(dict.fromkeys(domains))

@@ -22,11 +22,11 @@
   ],
   "canonical_bundle_sidecar_dataset_ids": {
     "adjust_factor": "data_platform_adjust_factor__adfb35187548036ebb69cf8e",
-    "benchmark_daily": "data_platform_market_daily__76a2dc61ae52a429782208e1",
-    "index_constituents": "data_platform_index_constituents__8b781c50df0c8ce9c9676122",
-    "industry_concept": "data_platform_industry_concept__4fc392be70e668d344005100",
-    "intraday_daily_features": "data_platform_intraday_daily_features__c47f1b6372ec841be2189dab",
-    "market_intraday_5m": "data_platform_market_intraday_5m__aa65b9aebaae19f98ece08e3",
+    "index_constituents": "data_platform_index_constituents__e0c540aee9ceb3bab1d50515",
+    "industry_concept": "data_platform_industry_concept__401d10552d2a20a127d23697",
+    "intraday_daily_features": "data_platform_intraday_daily_features__142678d981311fd2fdad850b",
+    "market_intraday_1m": "data_platform_market_intraday_1m__2b6681a833bf349cfe6c436f",
+    "market_intraday_5m": "data_platform_market_intraday_5m__0919399f9948228755cc5b7d",
     "security_status": "data_platform_security_status__9abcdd11159abc046ebd660f",
     "trading_calendar": "data_platform_trading_calendar__03298281bc6712b72d0b5a6b",
     "universe_snapshot": "data_platform_universe_snapshot__b30f5a5d0270e9702a3977b4",
@@ -34,18 +34,18 @@
   },
   "canonical_component_dataset_ids": {
     "adjust_factor": "data_platform_adjust_factor__adfb35187548036ebb69cf8e",
-    "benchmark_daily": "data_platform_market_daily__76a2dc61ae52a429782208e1",
-    "index_constituents": "data_platform_index_constituents__8b781c50df0c8ce9c9676122",
-    "industry_concept": "data_platform_industry_concept__4fc392be70e668d344005100",
-    "intraday_daily_features": "data_platform_intraday_daily_features__c47f1b6372ec841be2189dab",
-    "market_daily": "policy_input_bundle__59ac9c0cbf7b975025933c52",
-    "market_intraday_5m": "data_platform_market_intraday_5m__aa65b9aebaae19f98ece08e3",
+    "index_constituents": "data_platform_index_constituents__e0c540aee9ceb3bab1d50515",
+    "industry_concept": "data_platform_industry_concept__401d10552d2a20a127d23697",
+    "intraday_daily_features": "data_platform_intraday_daily_features__142678d981311fd2fdad850b",
+    "market_daily": "policy_input_bundle__e622949a701bfa312ae81c66",
+    "market_intraday_1m": "data_platform_market_intraday_1m__2b6681a833bf349cfe6c436f",
+    "market_intraday_5m": "data_platform_market_intraday_5m__0919399f9948228755cc5b7d",
     "security_status": "data_platform_security_status__9abcdd11159abc046ebd660f",
     "trading_calendar": "data_platform_trading_calendar__03298281bc6712b72d0b5a6b",
     "universe_snapshot": "data_platform_universe_snapshot__b30f5a5d0270e9702a3977b4",
     "valuation": "data_platform_valuation__6c8278bf97c48606bbba4aa8"
   },
-  "canonical_dataset_id": "policy_input_bundle__a12fbe967976a3fc976db60b",
+  "canonical_dataset_id": "policy_input_bundle__e622949a701bfa312ae81c66",
   "canonical_manifest": "H:\\quant_project\\quant_data_platform\\data\\lake\\canonical\\canonical_manifest.json",
   "canonical_memmap_registry": "H:/quant_project/quant_data_platform/registry/memmap_registry.json",
   "canonical_memmap_status": {
@@ -154,9 +154,10 @@
       "index_constituents",
       "trading_calendar",
       "universe_snapshot",
-      "security_status"
+      "security_status",
+      "market_intraday_1m"
     ],
-    "notes": "Canonical keeps valuation, industry, and index membership as auditable structure/style data. Feature profiles decide usage; short_horizon_core_v1 does not use them, style_structural_v1 and medium_horizon_v1 may use them. Slow disclosure financial/performance domains stay out of v1.",
+    "notes": "Canonical stores raw intraday 1m/5m data plus derived intraday_daily_features; research feature profiles decide which derived fields to load.",
     "research_style": "profile_selected",
     "short_horizon_core_v1_domains": [
       "market_daily",
@@ -178,12 +179,12 @@
     ]
   },
   "latest_daily_update": {
-    "canonical_dataset_id": "policy_input_bundle__a12fbe967976a3fc976db60b",
+    "canonical_dataset_id": "policy_input_bundle__e622949a701bfa312ae81c66",
     "canonical_manifest": "H:\\quant_project\\quant_data_platform\\data\\lake\\canonical\\canonical_manifest.json",
-    "run_id": "daily_update_20260626_prodcheck_20260628_strict",
+    "run_id": "qdp_structural_tail_activate_20260626_v3",
     "status": "activated",
     "target_date": "2026-06-26",
-    "updated_at": "2026-06-27T19:48:13+00:00"
+    "updated_at": "2026-06-28T08:19:42+00:00"
   },
   "migrated_from": "H:/quant_project/canonical_data/registry",
   "primary_lake_root": "H:/quant_project/quant_data_platform/data/lake",
@@ -211,7 +212,7 @@
     "industry_concept",
     "index_constituents"
   ],
-  "updated_at": "2026-06-27T19:48:14+00:00",
+  "updated_at": "2026-06-28T08:19:42+00:00",
   "v1_excluded_domains": [
     "financial_quarterly",
     "performance_forecast",

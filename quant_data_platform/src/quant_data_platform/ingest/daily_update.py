@@ -4,7 +4,7 @@ import argparse
 import json
 import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -13,13 +13,22 @@ import pandas as pd
 from quant_data_platform.core.json_io import json_safe, read_json, utc_now, write_json
 from quant_data_platform.core.paths import QdpPaths, qdp_paths
 from quant_data_platform.core.registry import load_root_manifest, write_root_manifest_update
-from quant_data_platform.domains.contracts import DataDomain, build_intraday_daily_feature_frame, normalize_domain, normalize_domain_frame
+from quant_data_platform.domains.contracts import (
+    CANONICAL_BUNDLE_SIDECAR_DOMAINS,
+    DataDomain,
+    build_intraday_daily_feature_frame,
+    normalize_domain,
+    normalize_domain_frame,
+)
 from quant_data_platform.ingest.baostock_backfill import BackfillConfig, run_backfill
 from quant_data_platform.ingest.combine_domain_datasets import CombineDomainDatasetsConfig, combine_domain_datasets
+from quant_data_platform.ingest.import_external_quant_zip import ImportConfig as ExternalQuantImportConfig
+from quant_data_platform.ingest.import_external_quant_zip import run_import as run_external_quant_import
 from quant_data_platform.ingest.refresh_daily import RefreshConfig, run_refresh
 from quant_data_platform.lake.canonical import (
     DEFAULT_CANONICAL_ALIAS,
     DEFAULT_CANONICAL_START_DATE,
+    DEFAULT_EXTERNAL_QUANT_DATA_ROOT,
     build_coverage_report,
     load_canonical_manifest,
     write_canonical_manifest,
@@ -30,11 +39,15 @@ from quant_data_platform.lake.v2_status_sidecar import build_v2_status_sidecar
 
 DEFAULT_DAILY_UPDATE_DOMAINS: tuple[str, ...] = (
     DataDomain.MARKET_DAILY,
+    DataDomain.MARKET_INTRADAY_1M,
+    DataDomain.MARKET_INTRADAY_5M,
     DataDomain.TRADING_CALENDAR,
     DataDomain.UNIVERSE_SNAPSHOT,
     DataDomain.SECURITY_STATUS,
     DataDomain.ADJUST_FACTOR,
     DataDomain.VALUATION,
+    DataDomain.INDUSTRY_CONCEPT,
+    DataDomain.INDEX_CONSTITUENTS,
     DataDomain.INTRADAY_DAILY_FEATURES,
 )
 DEFAULT_REQUIRED_PIT_DOMAINS: tuple[str, ...] = (
@@ -45,13 +58,22 @@ DEFAULT_REQUIRED_PIT_DOMAINS: tuple[str, ...] = (
 DEFAULT_LAG_TOLERANT_DOMAINS: tuple[str, ...] = (
     DataDomain.ADJUST_FACTOR,
     DataDomain.VALUATION,
-    DataDomain.INTRADAY_DAILY_FEATURES,
 )
 POINT_IN_TIME_DAILY_DOMAINS = {
     DataDomain.UNIVERSE_SNAPSHOT,
     DataDomain.SECURITY_STATUS,
+    DataDomain.INDUSTRY_CONCEPT,
+}
+POINT_IN_TIME_DOMAINS = {
+    *POINT_IN_TIME_DAILY_DOMAINS,
+    DataDomain.INDEX_CONSTITUENTS,
+}
+STRUCTURAL_CARRY_FORWARD_DOMAINS = {
+    DataDomain.INDUSTRY_CONCEPT,
 }
 SYMBOL_RANGE_DOMAINS = {
+    DataDomain.MARKET_INTRADAY_1M,
+    DataDomain.MARKET_INTRADAY_5M,
     DataDomain.ADJUST_FACTOR,
     DataDomain.VALUATION,
     DataDomain.INTRADAY_DAILY_FEATURES,
@@ -78,6 +100,13 @@ class DailyUpdateConfig:
     adjusted_flag: str = "none"
     snapshot_frequency: str = "daily"
     intraday_features_mode: str = "auto"
+    external_intraday_1m_mode: str = "auto"
+    external_intraday_source_root: str | Path | None = None
+    include_unpacked_external_csv: bool = True
+    external_intraday_import_workers: int = 1
+    external_intraday_shard_batch_members: int = 32
+    external_intraday_shard_batch_rows: int = 0
+    external_intraday_max_files: int = 0
     build_policy_bundle: bool = False
     build_v2_status_sidecar: bool = False
     build_memmap: bool = False
@@ -121,6 +150,9 @@ class DailyUpdateConfig:
         intraday_features_mode = str(self.intraday_features_mode or "auto").strip().lower()
         if intraday_features_mode not in {"auto", "derive", "skip", "provider"}:
             raise ValueError(f"unsupported_intraday_features_mode: {intraday_features_mode}")
+        external_intraday_1m_mode = str(self.external_intraday_1m_mode or "auto").strip().lower()
+        if external_intraday_1m_mode not in {"auto", "skip"}:
+            raise ValueError(f"unsupported_external_intraday_1m_mode: {external_intraday_1m_mode}")
         return DailyUpdateConfig(
             workspace_root=self.workspace_root,
             lake_root=Path(self.lake_root) if self.lake_root else None,
@@ -140,6 +172,13 @@ class DailyUpdateConfig:
             adjusted_flag=str(self.adjusted_flag or "none").strip(),
             snapshot_frequency=str(self.snapshot_frequency or "daily").strip().lower(),
             intraday_features_mode=intraday_features_mode,
+            external_intraday_1m_mode=external_intraday_1m_mode,
+            external_intraday_source_root=Path(self.external_intraday_source_root) if self.external_intraday_source_root else DEFAULT_EXTERNAL_QUANT_DATA_ROOT,
+            include_unpacked_external_csv=bool(self.include_unpacked_external_csv),
+            external_intraday_import_workers=max(1, int(self.external_intraday_import_workers or 1)),
+            external_intraday_shard_batch_members=max(1, int(self.external_intraday_shard_batch_members or 1)),
+            external_intraday_shard_batch_rows=max(0, int(self.external_intraday_shard_batch_rows or 0)),
+            external_intraday_max_files=max(0, int(self.external_intraday_max_files or 0)),
             build_policy_bundle=bool(self.build_policy_bundle),
             build_v2_status_sidecar=bool(self.build_v2_status_sidecar),
             build_memmap=bool(self.build_memmap),
@@ -206,9 +245,12 @@ class DailyUpdateResult:
     refresh_result: dict[str, Any] = field(default_factory=dict)
     canonical_dataset_id: str = ""
     canonical_manifest_path: str = ""
+    canonical_activation_status: str = ""
     v2_status_sidecar_dataset_id: str = ""
     memmap_manifest_path: str = ""
     memmap_validation: dict[str, Any] = field(default_factory=dict)
+    memmap_activation_status: str = ""
+    memmap_blockers: list[str] = field(default_factory=list)
 
 
 def run_daily_update(
@@ -306,8 +348,18 @@ def run_daily_update(
         blockers.append("market_daily_dataset_id_required")
 
     backfill_dataset_ids: dict[str, str] = {}
+    backfill_dataset_parts: dict[str, list[str]] = {}
     backfill_results: dict[str, Any] = {}
     lagging_annotations: dict[str, dict[str, Any]] = {}
+    resolved_backfill_provider = backfill_provider or _build_default_backfill_provider(cfg)
+
+    def record_backfill_dataset(domain: str, dataset_id: str) -> None:
+        dataset_id = str(dataset_id or "").strip()
+        if not dataset_id:
+            return
+        backfill_dataset_parts.setdefault(domain, []).append(dataset_id)
+        backfill_dataset_ids[domain] = dataset_id
+
     for domain in cfg.domains:
         if domain == DataDomain.MARKET_DAILY:
             continue
@@ -316,11 +368,53 @@ def run_daily_update(
             continue
         if domain == DataDomain.MARKET_DAILY or not plan.needs_backfill:
             continue
+        provider_plan = plan
+        if domain == DataDomain.MARKET_INTRADAY_1M:
+            external_action = _maybe_import_external_intraday_1m_tail(
+                cfg=cfg,
+                lake=lake,
+                run_dir=run_dir,
+                run_id=run_id,
+                plan=plan,
+            )
+            if external_action:
+                backfill_results[domain] = {"status": "running", "external_intraday_1m": external_action}
+                external_dataset_id = str(external_action.get("dataset_id", "") or "")
+                if external_dataset_id:
+                    record_backfill_dataset(domain, external_dataset_id)
+                if str(external_action.get("status", "") or "") == "failed":
+                    blockers.append(f"external_intraday_1m_import_failed:{external_action.get('error_type', 'unknown')}")
+                external_errors = int(external_action.get("error_count", 0) or 0)
+                if external_errors > 0:
+                    blockers.append(f"external_intraday_1m_import_errors:{external_errors}")
+                remaining_start = str(external_action.get("remaining_provider_start_date", "") or "")
+                provider_needed = bool(external_action.get("provider_backfill_needed", True))
+                if not provider_needed:
+                    backfill_results[domain] = {
+                        "status": "ok",
+                        "action": "external_intraday_1m_only",
+                        "external_intraday_1m": external_action,
+                        "dataset_ids": {domain: external_dataset_id} if external_dataset_id else {},
+                        "row_counts": {domain: int(external_action.get("row_count", 0) or 0)},
+                        "error_counts": {domain: int(external_action.get("error_count", 0) or 0)},
+                    }
+                    continue
+                if remaining_start:
+                    remaining_trade_dates = tuple(date for date in plan.expected_trade_dates if remaining_start <= date <= plan.gap_end_date)
+                    provider_plan = replace(
+                        plan,
+                        gap_start_date=remaining_start,
+                        expected_trade_dates=remaining_trade_dates,
+                        planned_task_count=plan.planned_task_count,
+                    )
         if domain == DataDomain.INTRADAY_DAILY_FEATURES:
+            candidate_sidecars = dict(active_context["sidecars"])
+            if backfill_dataset_ids.get(DataDomain.MARKET_INTRADAY_5M):
+                candidate_sidecars[DataDomain.MARKET_INTRADAY_5M] = backfill_dataset_ids[DataDomain.MARKET_INTRADAY_5M]
             action = _resolve_intraday_features_action(
                 cfg=cfg,
                 lake=lake,
-                active_sidecars=active_context["sidecars"],
+                active_sidecars=candidate_sidecars,
                 plan=plan,
             )
             if action["action"] == "skip":
@@ -365,7 +459,7 @@ def run_daily_update(
                     "timing": dict(derived.get("timing", {}) or {}),
                 }
                 if str(derived.get("dataset_id", "") or ""):
-                    backfill_dataset_ids[domain] = str(derived["dataset_id"])
+                    record_backfill_dataset(domain, str(derived["dataset_id"]))
                 if int(derived.get("error_count", 0) or 0) > 0:
                     blockers.append(f"backfill_errors:{domain}:{derived['error_count']}")
                 continue
@@ -373,8 +467,8 @@ def run_daily_update(
             lake_root=lake.root,
             run_id=f"{run_id}_backfill_{_safe_name(domain)}",
             domains=(domain,),
-            start_date=plan.gap_start_date,
-            end_date=plan.gap_end_date,
+            start_date=provider_plan.gap_start_date,
+            end_date=provider_plan.gap_end_date,
             symbols=cfg.symbols,
             benchmark=cfg.benchmark,
             adjusted_flag=cfg.adjusted_flag,
@@ -393,16 +487,28 @@ def run_daily_update(
             retry_backoff_seconds=cfg.retry_backoff_seconds,
             retry_jitter_seconds=cfg.retry_jitter_seconds,
             reuse_existing_market_daily=True,
-            trade_dates=tuple(plan.expected_trade_dates),
+            trade_dates=tuple(provider_plan.expected_trade_dates),
             build_policy_bundle=False,
             write_canonical_manifest=False,
         )
         try:
-            backfill_result = run_backfill(backfill_cfg, provider=backfill_provider)
+            backfill_result = run_backfill(backfill_cfg, provider=resolved_backfill_provider)
         except Exception as exc:
+            fallback = _maybe_carry_forward_structural_pit_tail(
+                cfg=cfg,
+                lake=lake,
+                run_id=run_id,
+                domain=domain,
+                plan=plan,
+                reason=f"provider_exception:{type(exc).__name__}:{exc}",
+            )
+            if fallback:
+                backfill_results[domain] = fallback
+                record_backfill_dataset(domain, str(fallback.get("dataset_id", "") or ""))
+                continue
             blockers.append(f"backfill_failed:{domain}:{type(exc).__name__}:{exc}")
             continue
-        backfill_results[domain] = {
+        provider_payload = {
             "status": backfill_result.status,
             "run_id": backfill_result.run_id,
             "manifest_path": str(backfill_result.manifest_path),
@@ -411,16 +517,47 @@ def run_daily_update(
             "error_counts": dict(backfill_result.error_counts),
             "dataset_ids": dict(backfill_result.dataset_ids),
         }
+        existing_domain_result = dict(backfill_results.get(domain, {}) or {})
+        if existing_domain_result:
+            provider_payload["pre_provider_steps"] = existing_domain_result
+        backfill_results[domain] = provider_payload
         dataset_id = str(backfill_result.dataset_ids.get(domain, "") or "")
-        if dataset_id:
-            backfill_dataset_ids[domain] = dataset_id
         errors = int(backfill_result.error_counts.get(domain, 0) or 0)
         rows = int(backfill_result.row_counts.get(domain, 0) or 0)
         if errors > 0:
+            fallback = _maybe_carry_forward_structural_pit_tail(
+                cfg=cfg,
+                lake=lake,
+                run_id=run_id,
+                domain=domain,
+                plan=plan,
+                reason=f"provider_errors:{errors}",
+            )
+            if fallback:
+                existing = dict(backfill_results.get(domain, {}) or {})
+                backfill_results[domain] = {**fallback, "provider_attempt": existing}
+                record_backfill_dataset(domain, str(fallback.get("dataset_id", "") or ""))
+                continue
             blockers.append(f"backfill_errors:{domain}:{errors}")
+        if errors <= 0 and rows <= 0:
+            fallback = _maybe_carry_forward_structural_pit_tail(
+                cfg=cfg,
+                lake=lake,
+                run_id=run_id,
+                domain=domain,
+                plan=plan,
+                reason="provider_empty",
+            )
+            if fallback:
+                existing = dict(backfill_results.get(domain, {}) or {})
+                backfill_results[domain] = {**fallback, "provider_attempt": existing}
+                record_backfill_dataset(domain, str(fallback.get("dataset_id", "") or ""))
+                continue
         if domain in cfg.required_pit_domains and rows <= 0:
             blockers.append(f"required_pit_backfill_empty:{domain}")
-        if domain == DataDomain.TRADING_CALENDAR and dataset_id:
+        if errors <= 0 and rows > 0 and dataset_id:
+            record_backfill_dataset(domain, dataset_id)
+        if domain == DataDomain.TRADING_CALENDAR and dataset_id and errors <= 0 and rows > 0:
             refreshed_calendar = _effective_calendar_frame(
                 lake=lake,
                 inherited_dataset_id=active_context["sidecars"].get(DataDomain.TRADING_CALENDAR, ""),
@@ -441,6 +578,20 @@ def run_daily_update(
                     target_date=target_date,
                     expected_trade_dates=expected_trade_dates,
                 )
+
+    backfill_dataset_ids, coalesced_tail_sidecars, coalesce_blockers = _coalesce_backfill_dataset_parts(
+        cfg=cfg,
+        lake=lake,
+        domain_plans=domain_plans,
+        backfill_dataset_parts=backfill_dataset_parts,
+        target_date=target_date,
+    )
+    blockers.extend(coalesce_blockers)
+    if coalesced_tail_sidecars:
+        for domain, payload in coalesced_tail_sidecars.items():
+            existing = dict(backfill_results.get(domain, {}) or {})
+            existing["coalesced_tail"] = dict(payload)
+            backfill_results[domain] = existing
 
     effective_sidecars, combined_sidecars = _combine_effective_sidecars(
         cfg=cfg,
@@ -473,9 +624,12 @@ def run_daily_update(
 
     canonical_dataset_id = ""
     canonical_manifest_path = ""
+    canonical_activation_status = "not_requested"
     v2_status_sidecar_dataset_id = ""
     memmap_manifest_path = ""
     memmap_validation: dict[str, Any] = {}
+    memmap_blockers: list[str] = []
+    memmap_activation_status = "not_requested" if not cfg.build_memmap else "pending"
     activation_requested = (
         cfg.activate
         and cfg.readiness_mode == "strict"
@@ -514,7 +668,7 @@ def run_daily_update(
             blockers.append(f"v2_status_sidecar_{summary.get('status')}")
         lake.write_catalog_manifest()
 
-    if cfg.build_memmap and canonical_dataset_id and not blockers:
+    if cfg.build_memmap and canonical_dataset_id:
         try:
             memmap_payload = _build_and_validate_memmap(
                 cfg=cfg,
@@ -530,9 +684,12 @@ def run_daily_update(
                 "error_type": type(exc).__name__,
                 "error": str(exc),
             }
-            blockers.append(f"memmap_build_failed:{type(exc).__name__}:{exc}")
+            memmap_blockers.append(f"memmap_build_failed:{type(exc).__name__}:{exc}")
         if memmap_validation and str(memmap_validation.get("status", "") or "") != "ok":
-            blockers.append("memmap_validation_failed")
+            memmap_blockers.append("memmap_validation_failed")
+        memmap_activation_status = "ready" if str(memmap_validation.get("status", "") or "") == "ok" else "failed"
+    elif cfg.build_memmap and not canonical_dataset_id:
+        memmap_activation_status = "skipped_no_canonical_candidate"
 
     activation_allowed = activation_requested and canonical_dataset_id and not blockers
     if activation_allowed:
@@ -558,7 +715,8 @@ def run_daily_update(
             market_dataset_id=market_dataset_id,
             sidecars=effective_sidecars,
         )
-        if cfg.build_memmap and memmap_manifest_path:
+        canonical_activation_status = "activated"
+        if cfg.build_memmap and memmap_manifest_path and str(memmap_validation.get("status", "") or "") == "ok":
             from quant_data_platform.memmap.incremental import register_sharded_memmap_manifest
 
             register_sharded_memmap_manifest(
@@ -566,11 +724,20 @@ def run_daily_update(
                 manifest=memmap_manifest_path,
                 activate=True,
             )
+            memmap_activation_status = "activated"
+        elif cfg.build_memmap and memmap_activation_status == "ready":
+            memmap_activation_status = "ready_not_activated"
+    elif cfg.activate:
+        canonical_activation_status = "blocked" if blockers else "not_activated"
+    elif canonical_dataset_id:
+        canonical_activation_status = "built"
 
     if blockers:
         status = "blocked"
     elif cfg.readiness_mode == "staged":
         status = "staged"
+    elif activation_allowed and cfg.build_memmap and memmap_activation_status == "failed":
+        status = "activated_memmap_failed"
     elif activation_allowed:
         status = "activated"
     else:
@@ -594,9 +761,12 @@ def run_daily_update(
         refresh_result=refresh_payload,
         canonical_dataset_id=canonical_dataset_id,
         canonical_manifest_path=canonical_manifest_path,
+        canonical_activation_status=canonical_activation_status,
         v2_status_sidecar_dataset_id=v2_status_sidecar_dataset_id,
         memmap_manifest_path=memmap_manifest_path,
         memmap_validation=memmap_validation,
+        memmap_activation_status=memmap_activation_status,
+        memmap_blockers=memmap_blockers,
     )
     _write_run_manifest(result=result, cfg=cfg, run_dir=run_dir)
     return result
@@ -627,6 +797,19 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
         help="auto derives intraday_daily_features from existing market_intraday_5m tail when available and otherwise marks it lagging; provider explicitly allows slow BaoStock 5m downloads.",
     )
+    parser.add_argument(
+        "--external-intraday-1m-mode",
+        choices=("auto", "skip"),
+        default="auto",
+        help="auto imports the mootdx-unreachable 1m tail from external quant archives before fetching the remaining mootdx tail.",
+    )
+    parser.add_argument("--external-intraday-source-root", default=str(DEFAULT_EXTERNAL_QUANT_DATA_ROOT))
+    parser.add_argument("--include-unpacked-external-csv", dest="include_unpacked_external_csv", action="store_true", default=True)
+    parser.add_argument("--no-include-unpacked-external-csv", dest="include_unpacked_external_csv", action="store_false")
+    parser.add_argument("--external-intraday-import-workers", type=int, default=1)
+    parser.add_argument("--external-intraday-shard-batch-members", type=int, default=32)
+    parser.add_argument("--external-intraday-shard-batch-rows", type=int, default=0)
+    parser.add_argument("--external-intraday-max-files", type=int, default=0)
     parser.add_argument("--chunk-size-symbols", type=int, default=200)
     parser.add_argument("--chunk-size-months", type=int, default=1)
     parser.add_argument("--task-workers", type=int, default=2)
@@ -685,6 +868,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             adjusted_flag=str(args.adjusted_flag or "none"),
             snapshot_frequency=str(args.snapshot_frequency or "daily"),
             intraday_features_mode=str(args.intraday_features_mode or "auto"),
+            external_intraday_1m_mode=str(args.external_intraday_1m_mode or "auto"),
+            external_intraday_source_root=Path(args.external_intraday_source_root) if str(args.external_intraday_source_root or "").strip() else None,
+            include_unpacked_external_csv=bool(args.include_unpacked_external_csv),
+            external_intraday_import_workers=int(args.external_intraday_import_workers),
+            external_intraday_shard_batch_members=int(args.external_intraday_shard_batch_members),
+            external_intraday_shard_batch_rows=int(args.external_intraday_shard_batch_rows),
+            external_intraday_max_files=int(args.external_intraday_max_files),
             build_policy_bundle=bool(args.build_policy_bundle),
             build_v2_status_sidecar=bool(args.build_v2_status_sidecar),
             build_memmap=bool(args.build_memmap),
@@ -724,7 +914,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"{result.status}: {result.manifest_path}")
         if result.blockers:
             print("blockers=" + ",".join(result.blockers))
-    return 0 if result.status in {"planned", "ok", "staged", "activated"} else 2
+    return 0 if result.status in {"planned", "ok", "staged", "activated", "activated_memmap_failed"} else 2
 
 
 def _dry_run_backfill_results(
@@ -738,7 +928,41 @@ def _dry_run_backfill_results(
     for domain, plan in domain_plans.items():
         if domain == DataDomain.MARKET_DAILY or not plan.needs_backfill:
             continue
+        if domain == DataDomain.MARKET_INTRADAY_1M and cfg.external_intraday_1m_mode == "auto":
+            source_root = Path(cfg.external_intraday_source_root or DEFAULT_EXTERNAL_QUANT_DATA_ROOT)
+            results[domain] = {
+                "status": "planned",
+                "action": "external_intraday_1m_then_provider_tail",
+                "gap_start_date": plan.gap_start_date,
+                "gap_end_date": plan.gap_end_date,
+                "planned_task_count": int(plan.planned_task_count),
+                "external_intraday_1m": {
+                    "status": "planned" if source_root.exists() else "skipped",
+                    "source_root": str(source_root),
+                    "include_unpacked_csv": bool(cfg.include_unpacked_external_csv),
+                    "reason": "source_root_available" if source_root.exists() else "external_intraday_source_root_missing",
+                    "bar_count_contract": "external_1m_preserve_source_241_with_0930_when_present",
+                },
+                "provider_tail": {
+                    "provider_plan": cfg.provider_plan,
+                    "source_contract": "mootdx_1m_240_without_0930",
+                    "start_policy": "first_trade_date_after_external_import_end",
+                },
+            }
+            continue
         if domain == DataDomain.INTRADAY_DAILY_FEATURES:
+            raw_plan = domain_plans.get(DataDomain.MARKET_INTRADAY_5M)
+            if raw_plan and raw_plan.needs_backfill:
+                results[domain] = {
+                    "status": "planned",
+                    "action": "derive_after_market_intraday_5m_backfill",
+                    "reason": "same_run_market_intraday_5m_tail_planned",
+                    "planned_task_count": int(raw_plan.planned_task_count),
+                    "gap_start_date": plan.gap_start_date,
+                    "gap_end_date": plan.gap_end_date,
+                    "source_domain": DataDomain.MARKET_INTRADAY_5M,
+                }
+                continue
             action = _resolve_intraday_features_action(cfg=cfg, lake=lake, active_sidecars=active_sidecars, plan=plan)
             results[domain] = {key: value for key, value in action.items() if key != "raw_shards"}
             if "raw_shards" in action:
@@ -968,6 +1192,256 @@ def _shard_timing_summary(records: Sequence[Mapping[str, Any]]) -> dict[str, Any
     }
 
 
+def _maybe_import_external_intraday_1m_tail(
+    *,
+    cfg: DailyUpdateConfig,
+    lake: ResearchDataLake,
+    run_dir: Path,
+    run_id: str,
+    plan: DomainUpdatePlan,
+) -> dict[str, Any]:
+    if cfg.external_intraday_1m_mode == "skip":
+        return {"status": "skipped", "reason": "external_intraday_1m_mode_skip", "provider_backfill_needed": True}
+    if not plan.gap_start_date or not plan.gap_end_date:
+        return {}
+    source_root = Path(cfg.external_intraday_source_root or DEFAULT_EXTERNAL_QUANT_DATA_ROOT)
+    if not source_root.exists():
+        return {
+            "status": "skipped",
+            "reason": "external_intraday_source_root_missing",
+            "source_root": str(source_root),
+            "provider_backfill_needed": True,
+        }
+    years = _years_from_dates(plan.expected_trade_dates) or _years_from_dates((plan.gap_start_date, plan.gap_end_date))
+    progress_path = run_dir / "external_intraday_1m_import_progress.jsonl"
+    try:
+        result = run_external_quant_import(
+            ExternalQuantImportConfig(
+                lake_root=lake.root,
+                source_root=source_root,
+                domains=(DataDomain.MARKET_INTRADAY_1M,),
+                start_date=plan.gap_start_date,
+                end_date=plan.gap_end_date,
+                years=years,
+                max_files_per_source=cfg.external_intraday_max_files,
+                dry_run=False,
+                include_unpacked_csv=cfg.include_unpacked_external_csv,
+                derive_5m_from_1m=False,
+                hash_zips=False,
+                reuse=True,
+                progress_path=progress_path,
+                workers=cfg.external_intraday_import_workers,
+                shard_batch_members=cfg.external_intraday_shard_batch_members,
+                shard_batch_rows=cfg.external_intraday_shard_batch_rows,
+            )
+        )
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "reason": "external_intraday_import_exception",
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+            "source_root": str(source_root),
+            "provider_backfill_needed": True,
+            "remaining_provider_start_date": plan.gap_start_date,
+        }
+    dataset_id = str(result.dataset_ids.get(DataDomain.MARKET_INTRADAY_1M, "") or "")
+    row_count = int(result.row_counts.get(DataDomain.MARKET_INTRADAY_1M, 0) or 0)
+    error_count = int(result.error_counts.get(DataDomain.MARKET_INTRADAY_1M, 0) or 0)
+    summary = _dataset_summary(lake=lake, dataset_id=dataset_id) if dataset_id else {"status": "missing"}
+    end_date = str(summary.get("end_date", "") or "")
+    remaining_start = _next_trade_date_after(end_date, plan.expected_trade_dates) if end_date else plan.gap_start_date
+    provider_needed = bool(not end_date or (remaining_start and remaining_start <= plan.gap_end_date))
+    status = "completed" if dataset_id and row_count > 0 else "empty"
+    return {
+        "status": status,
+        "reason": "external_intraday_1m_tail_import",
+        "source_root": str(source_root),
+        "include_unpacked_csv": bool(cfg.include_unpacked_external_csv),
+        "dataset_id": dataset_id,
+        "plan_path": str(result.plan_path.resolve()) if result.plan_path else "",
+        "progress_path": str(progress_path.resolve()),
+        "row_count": row_count,
+        "shard_count": int(result.shard_counts.get(DataDomain.MARKET_INTRADAY_1M, 0) or 0),
+        "error_count": error_count,
+        "start_date": str(summary.get("start_date", "") or ""),
+        "end_date": end_date,
+        "bar_count_contract": "external_1m_preserve_source_241_with_0930_when_present",
+        "provider_backfill_needed": provider_needed,
+        "remaining_provider_start_date": remaining_start if provider_needed else "",
+        "next_step": "mootdx_provider_tail" if provider_needed else "covered_by_external_source",
+        "run_id": run_id,
+    }
+
+
+def _maybe_carry_forward_structural_pit_tail(
+    *,
+    cfg: DailyUpdateConfig,
+    lake: ResearchDataLake,
+    run_id: str,
+    domain: str,
+    plan: DomainUpdatePlan,
+    reason: str,
+) -> dict[str, Any]:
+    if domain not in STRUCTURAL_CARRY_FORWARD_DOMAINS:
+        return {}
+    if not plan.inherited_dataset_id or not plan.inherited_end_date:
+        return {}
+    trade_dates = tuple(
+        date for date in plan.expected_trade_dates if plan.gap_start_date <= date <= plan.gap_end_date
+    )
+    if not trade_dates:
+        return {}
+    source_frame = _read_dataset_frame(lake=lake, dataset_id=plan.inherited_dataset_id)
+    if source_frame.empty or "trade_date" not in source_frame.columns:
+        return {}
+    source_dates = pd.to_datetime(source_frame["trade_date"], errors="coerce")
+    source_date = pd.Timestamp(plan.inherited_end_date).strftime("%Y-%m-%d")
+    snapshot = source_frame.loc[source_dates.dt.strftime("%Y-%m-%d").eq(source_date)].copy()
+    if snapshot.empty:
+        return {}
+    frames: list[pd.DataFrame] = []
+    for trade_date in trade_dates:
+        daily = snapshot.copy()
+        daily["trade_date"] = trade_date
+        daily["source"] = "pit_carry_forward"
+        frames.append(daily)
+    tail = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    if tail.empty:
+        return {}
+    tail = normalize_domain_frame(
+        tail,
+        domain=domain,
+        source="pit_carry_forward",
+        as_of_date=trade_dates[-1],
+        adjusted_flag=cfg.adjusted_flag,
+        require_columns=False,
+    )
+    spec = {
+        "dataset": f"data_platform_{domain}",
+        "source": "pit_carry_forward",
+        "provider_plan": cfg.provider_plan,
+        "daily_update_run_id": run_id,
+        "domain": domain,
+        "start_date": trade_dates[0],
+        "end_date": trade_dates[-1],
+        "source_dataset_id": plan.inherited_dataset_id,
+        "carry_forward_from_date": source_date,
+        "carry_forward_trade_dates": list(trade_dates),
+        "carry_forward_reason": reason,
+        "carry_forward_policy": "slow_moving_structural_pit_only",
+        "provenance": {
+            "method": "copy_last_valid_snapshot_to_missing_tail_trade_dates",
+            "allowed_domains": sorted(STRUCTURAL_CARRY_FORWARD_DOMAINS),
+            "disallowed_core_pit_domains": [
+                DataDomain.TRADING_CALENDAR,
+                DataDomain.UNIVERSE_SNAPSHOT,
+                DataDomain.SECURITY_STATUS,
+            ],
+        },
+    }
+    record = lake.save_domain_dataset(
+        domain=domain,
+        frame=tail,
+        spec=spec,
+        source="pit_carry_forward",
+        reuse=True,
+    )
+    lake.write_catalog_manifest()
+    return {
+        "status": "ok",
+        "action": "pit_carry_forward",
+        "reason": reason,
+        "run_id": run_id,
+        "domain": domain,
+        "dataset_id": record.dataset_id,
+        "source_dataset_id": plan.inherited_dataset_id,
+        "source_trade_date": source_date,
+        "start_date": trade_dates[0],
+        "end_date": trade_dates[-1],
+        "trade_dates": list(trade_dates),
+        "row_count": int(len(tail)),
+        "symbol_count": int(tail["symbol"].nunique()) if "symbol" in tail.columns and not tail.empty else 0,
+        "policy": "slow_moving_structural_pit_only",
+    }
+
+
+def _coalesce_backfill_dataset_parts(
+    *,
+    cfg: DailyUpdateConfig,
+    lake: ResearchDataLake,
+    domain_plans: Mapping[str, DomainUpdatePlan],
+    backfill_dataset_parts: Mapping[str, Sequence[str]],
+    target_date: str,
+) -> tuple[dict[str, str], dict[str, dict[str, Any]], list[str]]:
+    coalesced: dict[str, str] = {}
+    payloads: dict[str, dict[str, Any]] = {}
+    blockers: list[str] = []
+    for domain, raw_parts in sorted(dict(backfill_dataset_parts).items()):
+        parts = tuple(dict.fromkeys(str(item).strip() for item in raw_parts if str(item).strip()))
+        if not parts:
+            continue
+        if len(parts) == 1:
+            coalesced[domain] = parts[0]
+            continue
+        plan = domain_plans.get(domain)
+        start_date = str(plan.gap_start_date or cfg.start_date) if plan else cfg.start_date
+        try:
+            result = combine_domain_datasets(
+                CombineDomainDatasetsConfig(
+                    lake_root=lake.root,
+                    domain=domain,
+                    source_dataset_ids=parts,
+                    start_date=start_date,
+                    end_date=target_date,
+                    source="daily_update_backfill_parts_combined",
+                    merge_policy="external_intraday_tail_plus_provider_tail" if domain == DataDomain.MARKET_INTRADAY_1M else "same_run_backfill_parts",
+                    dry_run=False,
+                    reuse=True,
+                )
+            )
+        except Exception as exc:
+            blockers.append(f"backfill_parts_coalesce_failed:{domain}:{type(exc).__name__}:{exc}")
+            payloads[domain] = {
+                "status": "failed",
+                "source_dataset_ids": list(parts),
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            }
+            continue
+        if result.dataset_id:
+            coalesced[domain] = result.dataset_id
+            payloads[domain] = {
+                "status": "completed",
+                "dataset_id": result.dataset_id,
+                "source_dataset_ids": list(parts),
+                "shard_count": int(result.shard_count),
+                "row_count": int(result.row_count),
+                "merge_policy": "external_intraday_tail_plus_provider_tail" if domain == DataDomain.MARKET_INTRADAY_1M else "same_run_backfill_parts",
+            }
+    return coalesced, payloads, blockers
+
+
+def _next_trade_date_after(date_text: str, trade_dates: Sequence[str]) -> str:
+    if not date_text:
+        return ""
+    current = pd.Timestamp(date_text)
+    for trade_date in sorted(str(item) for item in trade_dates if str(item).strip()):
+        if pd.Timestamp(trade_date) > current:
+            return trade_date
+    return ""
+
+
+def _years_from_dates(dates: Sequence[str]) -> tuple[int, ...]:
+    years: set[int] = set()
+    for item in dates:
+        try:
+            years.add(int(pd.Timestamp(item).year))
+        except Exception:
+            continue
+    return tuple(sorted(years))
+
+
 def _active_context(*, lake: ResearchDataLake, paths: QdpPaths) -> dict[str, Any]:
     root = load_root_manifest(paths)
     canonical_manifest = load_canonical_manifest(lake)
@@ -985,7 +1459,7 @@ def _active_context(*, lake: ResearchDataLake, paths: QdpPaths) -> dict[str, Any
     ):
         for key, value in dict(source or {}).items():
             domain = str(key)
-            if domain == DataDomain.MARKET_DAILY:
+            if domain == DataDomain.MARKET_DAILY or domain not in CANONICAL_BUNDLE_SIDECAR_DOMAINS:
                 continue
             if str(value or "").strip():
                 sidecars[domain] = str(value)
@@ -994,16 +1468,88 @@ def _active_context(*, lake: ResearchDataLake, paths: QdpPaths) -> dict[str, Any
             metadata = lake.describe_dataset(canonical_dataset_id)
             params = dict(metadata.get("parameters", {}) or {})
             for key, value in dict(params.get("sidecar_dataset_ids", {}) or {}).items():
-                if str(value or "").strip():
+                if str(key) in CANONICAL_BUNDLE_SIDECAR_DOMAINS and str(value or "").strip():
                     sidecars.setdefault(str(key), str(value))
         except Exception:
             pass
+    for domain in CANONICAL_BUNDLE_SIDECAR_DOMAINS:
+        latest = _latest_domain_dataset_id(lake=lake, domain=domain)
+        if not latest:
+            continue
+        current = str(sidecars.get(domain, "") or "").strip()
+        if not current:
+            sidecars[domain] = latest
+            continue
+        current_summary = _dataset_summary(lake=lake, dataset_id=current)
+        latest_summary = _dataset_summary(lake=lake, dataset_id=latest)
+        current_end = str(current_summary.get("end_date", "") or "")
+        latest_end = str(latest_summary.get("end_date", "") or "")
+        if latest_end and (not current_end or pd.Timestamp(latest_end) > pd.Timestamp(current_end)):
+            sidecars[domain] = latest
     return {
         "root_manifest": root,
         "canonical_manifest": canonical_manifest,
         "canonical_dataset_id": canonical_dataset_id,
         "sidecars": sidecars,
     }
+
+
+def _build_default_backfill_provider(cfg: DailyUpdateConfig) -> Any:
+    from quant_data_platform.providers import build_default_providers
+
+    providers = build_default_providers(cfg.provider_plan)
+    if not providers:
+        raise ValueError(f"no_default_backfill_provider: {cfg.provider_plan}")
+    return providers[0]
+
+
+def _latest_domain_dataset_id(*, lake: ResearchDataLake, domain: str) -> str:
+    dataset_kind = f"data_platform_{normalize_domain(domain)}"
+    try:
+        rows = lake.list_datasets(dataset_kind=dataset_kind)
+    except Exception:
+        return ""
+    if rows.empty or "dataset_id" not in rows.columns:
+        return ""
+    candidates: list[dict[str, str]] = []
+    for row in rows.to_dict("records"):
+        dataset_id = str(row.get("dataset_id", "") or "")
+        if not dataset_id:
+            continue
+        summary = _dataset_summary(lake=lake, dataset_id=dataset_id)
+        candidates.append(
+            {
+                "dataset_id": dataset_id,
+                "start_date": str(summary.get("start_date", "") or row.get("start_date", "") or ""),
+                "end_date": str(summary.get("end_date", "") or row.get("end_date", "") or ""),
+                "created_at": str(row.get("created_at", "") or ""),
+            }
+        )
+    if candidates:
+        parsed_starts = pd.to_datetime([item["start_date"] for item in candidates], errors="coerce")
+        valid_starts = [value for value in parsed_starts if pd.notna(value)]
+        if valid_starts:
+            earliest_start = min(valid_starts)
+            full_history_candidates = [
+                item
+                for item, parsed_start in zip(candidates, parsed_starts)
+                if pd.notna(parsed_start) and parsed_start == earliest_start
+            ]
+            if full_history_candidates:
+                candidates = full_history_candidates
+        candidates = sorted(
+            candidates,
+            key=lambda item: (
+                str(pd.to_datetime(item["end_date"], errors="coerce").strftime("%Y-%m-%d") if pd.notna(pd.to_datetime(item["end_date"], errors="coerce")) else ""),
+                str(item["created_at"]),
+                str(item["dataset_id"]),
+            ),
+        )
+        return candidates[-1]["dataset_id"]
+    sort_columns = [column for column in ("end_date", "created_at") if column in rows.columns]
+    if sort_columns:
+        rows = rows.sort_values(sort_columns)
+    return str(rows.iloc[-1]["dataset_id"] or "")
 
 
 def _build_domain_plans(
@@ -1105,6 +1651,8 @@ def _validate_readiness(
 ) -> dict[str, Any]:
     blockers: list[str] = []
     lagging: dict[str, dict[str, Any]] = {}
+    required_domains = set(cfg.required_pit_domains)
+    lag_tolerant_domains = set(cfg.lag_tolerant_domains)
     for domain in cfg.required_pit_domains:
         dataset_id = str(effective_sidecars.get(domain, "") or "")
         summary = dict(after_coverage.get(domain, {}) or {})
@@ -1129,6 +1677,23 @@ def _validate_readiness(
         duplicate_report = _duplicate_key_report(lake=lake, dataset_id=dataset_id, max_rows=cfg.max_duplicate_check_rows)
         if duplicate_report.get("duplicate_count", 0):
             blockers.append(f"required_pit_duplicate_keys:{domain}:{duplicate_report['duplicate_count']}")
+    for domain in cfg.domains:
+        if domain == DataDomain.MARKET_DAILY or domain in required_domains or domain in lag_tolerant_domains:
+            continue
+        dataset_id = str(effective_sidecars.get(domain, "") or "")
+        summary = dict(after_coverage.get(domain, {}) or {})
+        if not dataset_id:
+            blockers.append(f"required_component_missing:{domain}")
+            continue
+        if str(summary.get("status", "") or "") != "ok":
+            blockers.append(f"required_component_unavailable:{domain}")
+            continue
+        end_date = str(summary.get("end_date", "") or "")
+        if not end_date or pd.Timestamp(end_date) < pd.Timestamp(target_date):
+            blockers.append(f"required_component_lagging:{domain}:{end_date or 'missing'}<{target_date}")
+        duplicate_report = _duplicate_key_report(lake=lake, dataset_id=dataset_id, max_rows=cfg.max_duplicate_check_rows)
+        if duplicate_report.get("duplicate_count", 0):
+            blockers.append(f"required_component_duplicate_keys:{domain}:{duplicate_report['duplicate_count']}")
     for domain in cfg.lag_tolerant_domains:
         if domain not in cfg.domains:
             continue
@@ -1261,9 +1826,42 @@ def _activate_root_manifest(
     sidecars: Mapping[str, str],
 ) -> None:
     root = load_root_manifest(paths)
-    components = dict(root.get("canonical_component_dataset_ids", {}) or {})
-    components[DataDomain.MARKET_DAILY] = str(market_dataset_id)
-    components.update({str(key): str(value) for key, value in dict(sidecars).items() if str(value or "").strip()})
+    filtered_sidecars = {
+        str(key): str(value)
+        for key, value in dict(sidecars).items()
+        if str(key) in CANONICAL_BUNDLE_SIDECAR_DOMAINS and str(value or "").strip()
+    }
+    components = {DataDomain.MARKET_DAILY: str(canonical_dataset_id)}
+    components.update(filtered_sidecars)
+    default_feature_policy = dict(root.get("default_feature_policy", {}) or {})
+    included_domains = list(
+        dict.fromkeys(
+            [
+                *list(default_feature_policy.get("canonical_included_domains", []) or []),
+                DataDomain.MARKET_DAILY,
+                DataDomain.MARKET_INTRADAY_1M,
+                DataDomain.MARKET_INTRADAY_5M,
+                DataDomain.INTRADAY_DAILY_FEATURES,
+                DataDomain.ADJUST_FACTOR,
+                DataDomain.VALUATION,
+                DataDomain.INDUSTRY_CONCEPT,
+                DataDomain.INDEX_CONSTITUENTS,
+                DataDomain.TRADING_CALENDAR,
+                DataDomain.UNIVERSE_SNAPSHOT,
+                DataDomain.SECURITY_STATUS,
+            ]
+        )
+    )
+    default_feature_policy.update(
+        {
+            "research_style": str(default_feature_policy.get("research_style", "") or "profile_selected"),
+            "canonical_included_domains": included_domains,
+            "notes": (
+                "Canonical stores raw intraday 1m/5m data plus derived intraday_daily_features; "
+                "research feature profiles decide which derived fields to load."
+            ),
+        }
+    )
     write_root_manifest_update(
         {
             "status": "daily_update_canonical_ready",
@@ -1271,7 +1869,8 @@ def _activate_root_manifest(
             "canonical_manifest": str(canonical_manifest_path),
             "canonical_start_date": cfg.start_date,
             "canonical_component_dataset_ids": components,
-            "canonical_bundle_sidecar_dataset_ids": dict(sidecars),
+            "canonical_bundle_sidecar_dataset_ids": filtered_sidecars,
+            "default_feature_policy": default_feature_policy,
             "latest_daily_update": {
                 "status": "activated",
                 "run_id": run_id,
@@ -1295,6 +1894,13 @@ def _write_run_manifest(*, result: DailyUpdateResult, cfg: DailyUpdateConfig, ru
         "lag_tolerant_domains": list(cfg.lag_tolerant_domains),
         "strict_enhanced_domains": list(cfg.strict_enhanced_domains),
         "intraday_features_mode": cfg.intraday_features_mode,
+        "external_intraday_1m_mode": cfg.external_intraday_1m_mode,
+        "external_intraday_source_root": str(Path(cfg.external_intraday_source_root or DEFAULT_EXTERNAL_QUANT_DATA_ROOT)),
+        "include_unpacked_external_csv": bool(cfg.include_unpacked_external_csv),
+        "external_intraday_import_workers": int(cfg.external_intraday_import_workers),
+        "external_intraday_shard_batch_members": int(cfg.external_intraday_shard_batch_members),
+        "external_intraday_shard_batch_rows": int(cfg.external_intraday_shard_batch_rows),
+        "external_intraday_max_files": int(cfg.external_intraday_max_files),
         "task_workers": int(cfg.task_workers),
         "snapshot_workers": int(cfg.snapshot_workers),
         "valuation_workers": int(cfg.valuation_workers),
@@ -1336,9 +1942,12 @@ def _result_payload(result: DailyUpdateResult) -> dict[str, Any]:
         "refresh_result": result.refresh_result,
         "canonical_dataset_id": result.canonical_dataset_id,
         "canonical_manifest_path": result.canonical_manifest_path,
+        "canonical_activation_status": result.canonical_activation_status,
         "v2_status_sidecar_dataset_id": result.v2_status_sidecar_dataset_id,
         "memmap_manifest_path": result.memmap_manifest_path,
         "memmap_validation": result.memmap_validation,
+        "memmap_activation_status": result.memmap_activation_status,
+        "memmap_blockers": list(result.memmap_blockers),
         "generated_at": utc_now(),
     }
 
@@ -1367,15 +1976,18 @@ def _dataset_summary(*, lake: ResearchDataLake, dataset_id: str) -> dict[str, An
     except Exception as exc:
         return {"status": "missing", "dataset_id": dataset_id, "error": str(exc)}
     row_counts = dict(metadata.get("row_counts", {}) or {})
+    params = dict(metadata.get("parameters", {}) or {})
     trade_dates = _dataset_trade_dates(lake=lake, dataset_id=dataset_id, metadata=metadata)
+    start_date = trade_dates[0] if trade_dates else str(metadata.get("start_date", "") or "")
+    end_date = trade_dates[-1] if trade_dates else str(metadata.get("end_date", "") or "")
     return {
         "status": "ok",
         "dataset_id": dataset_id,
         "dataset_kind": str(metadata.get("dataset_kind", "") or ""),
-        "domain": str(metadata.get("domain", "") or ""),
+        "domain": str(params.get("domain", "") or metadata.get("domain", "") or ""),
         "source": str(metadata.get("source", "") or ""),
-        "start_date": str(metadata.get("start_date", "") or (trade_dates[0] if trade_dates else "")),
-        "end_date": str(metadata.get("end_date", "") or (trade_dates[-1] if trade_dates else "")),
+        "start_date": str(start_date),
+        "end_date": str(end_date),
         "row_count": int(row_counts.get("silver_domain_data", 0) or row_counts.get("bronze_market_data", 0) or 0),
         "trade_date_count": int(len(trade_dates)),
         "trade_dates": list(trade_dates),
@@ -1475,11 +2087,20 @@ def _duplicate_key_report(*, lake: ResearchDataLake, dataset_id: str, max_rows: 
     row_count = int(summary.get("row_count", 0) or 0)
     if max_rows > 0 and row_count > max_rows:
         return {"status": "skipped_large_dataset", "row_count": row_count, "duplicate_count": 0}
-    frame = _read_dataset_frame(lake=lake, dataset_id=dataset_id, columns=["trade_date", "symbol"])
-    if frame.empty or "trade_date" not in frame.columns or "symbol" not in frame.columns:
+    domain = str(summary.get("domain", "") or "")
+    if domain in {DataDomain.MARKET_INTRADAY_1M, DataDomain.MARKET_INTRADAY_5M}:
+        key_columns = ["trade_date", "symbol", "bar_time"]
+    elif domain == DataDomain.INDEX_CONSTITUENTS:
+        key_columns = ["trade_date", "index_symbol", "symbol"]
+    elif domain == DataDomain.TRADING_CALENDAR:
+        key_columns = ["trade_date", "exchange"]
+    else:
+        key_columns = ["trade_date", "symbol"]
+    frame = _read_dataset_frame(lake=lake, dataset_id=dataset_id, columns=key_columns)
+    if frame.empty or not set(key_columns).issubset(frame.columns):
         return {"status": "not_applicable", "row_count": row_count, "duplicate_count": 0}
-    duplicate_count = int(frame.duplicated(subset=["trade_date", "symbol"]).sum())
-    return {"status": "ok", "row_count": int(len(frame)), "duplicate_count": duplicate_count}
+    duplicate_count = int(frame.duplicated(subset=key_columns).sum())
+    return {"status": "ok", "row_count": int(len(frame)), "duplicate_count": duplicate_count, "key_columns": key_columns}
 
 
 def _resolve_target_date(as_of_date: str, calendar_frame: pd.DataFrame) -> str:
@@ -1540,8 +2161,9 @@ def _estimate_task_count(
         return 0
     if domain == DataDomain.TRADING_CALENDAR:
         return 1
-    if domain in POINT_IN_TIME_DAILY_DOMAINS:
-        if snapshot_frequency == "daily":
+    if domain in POINT_IN_TIME_DOMAINS:
+        effective_frequency = "monthly" if domain == DataDomain.INDEX_CONSTITUENTS else snapshot_frequency
+        if effective_frequency == "daily":
             return len(expected_trade_dates) or len(pd.bdate_range(start_date, end_date))
         return 1
     windows = _month_windows(start_date, end_date, chunk_size_months)

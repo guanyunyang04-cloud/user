@@ -82,10 +82,21 @@ def write_root_manifest_update(
 def registry_status(paths: QdpPaths | None = None) -> dict[str, Any]:
     resolved = paths or qdp_paths()
     root_manifest = load_root_manifest(resolved)
+    canonical_manifest_path = Path(str(root_manifest.get("canonical_manifest", "") or "")) if str(root_manifest.get("canonical_manifest", "") or "").strip() else Path()
+    canonical_manifest = read_json(canonical_manifest_path) if canonical_manifest_path and canonical_manifest_path.exists() and canonical_manifest_path.is_file() else {}
     memmap_registry = load_memmap_registry(resolved)
     sharded_registry = read_json(resolved.registry_dir / "sharded_memmap_registry.json")
     sharded_status = dict(root_manifest.get("canonical_sharded_memmap_status", {}) or {})
     canonical_dataset_id = str(root_manifest.get("canonical_dataset_id", "") or "")
+    component_coverage = _active_component_coverage(root_manifest, paths=resolved)
+    canonical_end_date = str(canonical_manifest.get("end_date", "") or root_manifest.get("canonical_end_date", "") or "")
+    lagging_components = {
+        domain: coverage
+        for domain, coverage in component_coverage.items()
+        if canonical_end_date
+        and str(coverage.get("end_date", "") or "")
+        and str(coverage.get("end_date", "") or "") < canonical_end_date
+    }
     active_sharded_manifest = str(sharded_registry.get("active_manifest_json", "") or sharded_status.get("active_manifest_json", "") or "")
     active_sharded_payload = read_json(Path(active_sharded_manifest)) if active_sharded_manifest else {}
     active_sharded_source = str(
@@ -110,7 +121,10 @@ def registry_status(paths: QdpPaths | None = None) -> dict[str, Any]:
         "canonical_dataset_id": canonical_dataset_id,
         "canonical_manifest": str(root_manifest.get("canonical_manifest", "") or ""),
         "canonical_start_date": str(root_manifest.get("canonical_start_date", "") or ""),
+        "canonical_end_date": canonical_end_date,
         "component_dataset_ids": dict(root_manifest.get("canonical_component_dataset_ids", {}) or {}),
+        "active_component_coverage": component_coverage,
+        "active_component_lagging_to_canonical_end": lagging_components,
         "memmap_registry_json": str(resolved.memmap_registry.as_posix()),
         "memmap_registry_exists": bool(resolved.memmap_registry.exists()),
         "active_memmap_manifest": active_sharded_manifest or str(memmap_registry.get("active_manifest_json", "") or ""),
@@ -128,3 +142,39 @@ def registry_status(paths: QdpPaths | None = None) -> dict[str, Any]:
         "latest_sharded_stored_shard_count": int(sharded_status.get("latest_stored_shard_count", 0) or 0),
         "latest_sharded_planned_shard_count": int(sharded_status.get("latest_planned_shard_count", 0) or 0),
     }
+
+
+def _active_component_coverage(root_manifest: Mapping[str, Any], *, paths: QdpPaths) -> dict[str, dict[str, Any]]:
+    component_ids = dict(root_manifest.get("canonical_component_dataset_ids", {}) or {})
+    if not component_ids:
+        return {}
+    try:
+        from quant_data_platform.lake.catalog import ResearchDataLake
+
+        lake_root = Path(str(root_manifest.get("primary_lake_root", "") or paths.lake_root))
+        lake = ResearchDataLake(lake_root)
+    except Exception as exc:
+        return {
+            str(domain): {"dataset_id": str(dataset_id), "status": "unavailable", "error": str(exc)}
+            for domain, dataset_id in component_ids.items()
+        }
+    coverage: dict[str, dict[str, Any]] = {}
+    for domain, dataset_id in component_ids.items():
+        domain_text = str(domain)
+        dataset_text = str(dataset_id or "")
+        if not dataset_text:
+            continue
+        try:
+            metadata = lake.describe_dataset(dataset_text)
+            row_counts = dict(metadata.get("row_counts", {}) or {})
+            coverage[domain_text] = {
+                "dataset_id": dataset_text,
+                "status": "ok",
+                "dataset_kind": str(metadata.get("dataset_kind", "") or ""),
+                "start_date": str(metadata.get("start_date", "") or ""),
+                "end_date": str(metadata.get("end_date", "") or ""),
+                "row_count": int(row_counts.get("silver_domain_data", 0) or row_counts.get("bronze_market_data", 0) or 0),
+            }
+        except Exception as exc:
+            coverage[domain_text] = {"dataset_id": dataset_text, "status": "missing", "error": str(exc)}
+    return coverage

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import math
 import multiprocessing
 import queue as queue_module
 import time
@@ -62,6 +63,7 @@ QDP_PRODUCTION_V1_REQUIRED_DOMAINS: tuple[str, ...] = (
     DataDomain.SECURITY_STATUS,
 )
 QDP_PRODUCTION_V1_OPTIONAL_DOMAINS: tuple[str, ...] = (
+    DataDomain.MARKET_INTRADAY_1M,
     DataDomain.MARKET_INTRADAY_5M,
     DataDomain.INTRADAY_DAILY_FEATURES,
     DataDomain.ADJUST_FACTOR,
@@ -219,6 +221,7 @@ def provider_capability_matrix(provider_plan: str = "formal_free_v3") -> list[di
         default_domains_by_provider = {
             "mootdx_online": {
                 DataDomain.MARKET_DAILY,
+                DataDomain.MARKET_INTRADAY_1M,
                 DataDomain.MARKET_INTRADAY_5M,
                 DataDomain.INTRADAY_DAILY_FEATURES,
             },
@@ -568,26 +571,59 @@ class MootdxOnlineProvider:
         if not symbols:
             data = normalize_domain_frame(pd.DataFrame(), domain=request.domain, source=self.name, as_of_date=request.end_date, adjusted_flag=request.adjusted_flag, require_columns=False)
             return ProviderResult(provider=self.name, data=data, error_report=errors)
-        client = _open_mootdx_client(self._client_factory)
+        try:
+            client = _open_mootdx_client(self._client_factory)
+        except Exception as exc:
+            data = normalize_domain_frame(pd.DataFrame(), domain=request.domain, source=self.name, as_of_date=request.end_date, adjusted_flag=request.adjusted_flag, require_columns=False)
+            return ProviderResult(
+                provider=self.name,
+                data=data,
+                error_report=[
+                    {
+                        "provider": self.name,
+                        "domain": request.domain,
+                        "code": "client_open_error",
+                        "error_type": type(exc).__name__,
+                        "message": str(exc),
+                    }
+                ],
+            )
         try:
             for idx, symbol in enumerate(symbols, start=1):
                 if idx == 1 or idx % 50 == 0 or idx == len(symbols):
                     progress_write(f"mootdx_online_{request.domain}={idx}/{len(symbols)} symbol={symbol}")
+                last_exc: Exception | None = None
+                frame = pd.DataFrame()
+                for attempt in range(1, 4):
+                    try:
+                        frame = _fetch_mootdx_bars_window(
+                            client=client,
+                            symbol=symbol,
+                            frequency=frequency,
+                            start_date=request.start_date,
+                            end_date=request.end_date,
+                            page_size=int(self.page_size),
+                            max_pages=int(self.max_pages),
+                            source=self.name,
+                            adjusted_flag=request.adjusted_flag,
+                            volume_factor=float(volume_factor),
+                        )
+                        last_exc = None
+                        break
+                    except Exception as exc:
+                        last_exc = exc
+                        _close_mootdx_client(client)
+                        time.sleep(min(3.0, 0.5 * attempt))
+                        try:
+                            client = _open_mootdx_client(self._client_factory)
+                        except Exception as open_exc:
+                            last_exc = open_exc
+                            time.sleep(min(3.0, 0.5 * attempt))
                 try:
-                    frame = _fetch_mootdx_bars_window(
-                        client=client,
-                        symbol=symbol,
-                        frequency=frequency,
-                        start_date=request.start_date,
-                        end_date=request.end_date,
-                        page_size=int(self.page_size),
-                        max_pages=int(self.max_pages),
-                        source=self.name,
-                        adjusted_flag=request.adjusted_flag,
-                        volume_factor=float(volume_factor),
-                    )
+                    if last_exc is not None:
+                        raise last_exc
                 except Exception as exc:
-                    errors.append({"provider": self.name, "domain": request.domain, "symbol": symbol, "code": "symbol_fetch_error", "error_type": type(exc).__name__, "message": str(exc)})
+                    errors.append({"provider": self.name, "domain": request.domain, "symbol": symbol, "code": "symbol_fetch_error", "error_type": type(exc).__name__, "message": str(exc), "attempts": 3})
                     continue
                 if not frame.empty:
                     rows.append(frame)
@@ -627,6 +663,10 @@ class MootdxOnlineProvider:
                 "source_stability_note": "online mootdx quote server; server stability must be monitored by provider-health/provider-eval",
             }
         )
+        if request.domain == DataDomain.MARKET_INTRADAY_1M:
+            coverage["bar_count_contract"] = "mootdx_1m_240_without_0930"
+        elif request.domain == DataDomain.MARKET_INTRADAY_5M:
+            coverage["bar_count_contract"] = "mootdx_5m_48_full_trading_day"
         return ProviderResult(provider=self.name, data=data, coverage_report=coverage, error_report=errors)
 
 
@@ -1191,7 +1231,49 @@ def _open_mootdx_client(client_factory: Any = None) -> Any:
         from mootdx.quotes import Quotes  # type: ignore
     except Exception as exc:
         raise RuntimeError("mootdx is not installed in the yolos environment") from exc
-    return Quotes.factory(market="std", multithread=True, heartbeat=True, bestip=False, timeout=15)
+    options = (
+        {"multithread": False, "heartbeat": False, "bestip": False, "timeout": 20},
+        {"multithread": False, "heartbeat": True, "bestip": False, "timeout": 20},
+        {"multithread": True, "heartbeat": True, "bestip": False, "timeout": 20},
+    )
+    errors: list[str] = []
+    server_candidates = _mootdx_hq_server_candidates()
+    for attempt in range(2):
+        for server in server_candidates:
+            for option in options:
+                try:
+                    return Quotes.factory(market="std", server=server, **option)
+                except Exception as exc:
+                    errors.append(f"attempt={attempt + 1} server={server} option={option}: {type(exc).__name__}: {exc}")
+                    time.sleep(0.1)
+        for option in options:
+            try:
+                return Quotes.factory(market="std", **option)
+            except Exception as exc:
+                errors.append(f"attempt={attempt + 1} server=default option={option}: {type(exc).__name__}: {exc}")
+                time.sleep(0.1)
+    raise RuntimeError("mootdx_client_open_failed: " + " | ".join(errors[-4:]))
+
+
+def _mootdx_hq_server_candidates(limit: int = 12) -> tuple[tuple[str, int], ...]:
+    try:
+        import mootdx.config as mootdx_config  # type: ignore
+
+        raw_servers = list(mootdx_config.get("SERVER.HQ") or [])
+    except Exception:
+        raw_servers = []
+    out: list[tuple[str, int]] = []
+    for item in raw_servers:
+        try:
+            if len(item) >= 3:
+                out.append((str(item[1]), int(item[2])))
+            elif len(item) >= 2:
+                out.append((str(item[0]), int(item[1])))
+        except Exception:
+            continue
+        if len(out) >= int(limit):
+            break
+    return tuple(dict.fromkeys(out))
 
 
 def _close_mootdx_client(client: Any) -> None:
@@ -1239,7 +1321,14 @@ def _fetch_mootdx_bars_window(
     frames: list[pd.DataFrame] = []
     start_ts = pd.Timestamp(start_date)
     end_ts = pd.Timestamp(end_date)
-    for page in range(max(int(max_pages), 1)):
+    expected_pages = _estimated_mootdx_pages(
+        start_date=start_date,
+        end_date=end_date,
+        frequency=int(frequency),
+        page_size=int(page_size),
+        configured_max_pages=int(max_pages),
+    )
+    for page in range(expected_pages):
         offset_start = int(page) * int(page_size)
         payload = _call_mootdx_bars_endpoint(
             client=client,
@@ -1270,6 +1359,28 @@ def _fetch_mootdx_bars_window(
         return pd.DataFrame()
     combined = pd.concat(frames, ignore_index=True)
     return _filter_domain_date_window(combined, start_date, end_date)
+
+
+def _estimated_mootdx_pages(*, start_date: str, end_date: str, frequency: int, page_size: int, configured_max_pages: int) -> int:
+    page_size = max(1, int(page_size or 1))
+    configured = max(1, int(configured_max_pages or 1))
+    if int(frequency) == 8:
+        bars_per_day = 240
+    elif int(frequency) == 0:
+        bars_per_day = 48
+    else:
+        bars_per_day = 1
+    try:
+        # mootdx bars are paged backward from the quote server's latest bar, not from
+        # the requested end_date. Historical chunks therefore need enough pages to
+        # reach start_date from "now", even when the chunk end_date is only a few
+        # days after start_date.
+        lookback_end = max(pd.Timestamp(end_date).normalize(), pd.Timestamp.today().normalize())
+        business_days = max(1, len(pd.bdate_range(pd.Timestamp(start_date), lookback_end)))
+    except Exception:
+        return configured
+    estimated_rows = int(business_days * bars_per_day)
+    return min(240, max(configured, int(math.ceil(estimated_rows / page_size)) + 2))
 
 
 def _call_mootdx_bars_endpoint(*, client: Any, symbol: str, frequency: int, start: int, offset: int) -> Any:
@@ -1308,6 +1419,10 @@ def _prepare_mootdx_bars_frame(
     data["adjusted_flag"] = str(adjusted_flag or "none")
     if "trade_date" not in data.columns and "datetime" in data.columns:
         data["trade_date"] = data["datetime"]
+    if "datetime" in data.columns:
+        parsed_datetime = pd.to_datetime(data["datetime"], errors="coerce")
+        if parsed_datetime.notna().any():
+            data["bar_time"] = parsed_datetime.dt.strftime("%H:%M:%S")
     volume_source = None
     for candidate in ("volume", "vol", "成交量"):
         if candidate in data.columns:

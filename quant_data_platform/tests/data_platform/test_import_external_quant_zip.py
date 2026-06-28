@@ -164,6 +164,125 @@ def test_import_external_quant_zip_does_not_derive_5m_from_1m_by_default(tmp_pat
     assert not list((tmp_path / "lake").glob("parquet/bronze_silver/data_platform_market_intraday_5m/*/shards/*.parquet"))
 
 
+def test_import_external_quant_zip_discovers_unpacked_csv_only_when_enabled(tmp_path) -> None:
+    source_root = tmp_path / "量化数据"
+    csv_dir = source_root / "2026" / "1分钟"
+    csv_dir.mkdir(parents=True)
+    (csv_dir / "sz000001.csv").write_text(
+        "\n".join(
+            [
+                "日期,开盘,最高,最低,收盘,成交量(股),成交额(元)",
+                "2026-01-05 09:30:00,10.0,10.2,9.9,10.1,100,1010",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    without_unpacked = run_import(
+        ImportConfig(
+            lake_root=tmp_path / "lake_without",
+            source_root=source_root,
+            domains=(DataDomain.MARKET_INTRADAY_1M,),
+            start_date="2026-01-01",
+            years=(2026,),
+            dry_run=True,
+        )
+    )
+    with_unpacked = run_import(
+        ImportConfig(
+            lake_root=tmp_path / "lake_with",
+            source_root=source_root,
+            domains=(DataDomain.MARKET_INTRADAY_1M,),
+            start_date="2026-01-01",
+            years=(2026,),
+            dry_run=True,
+            include_unpacked_csv=True,
+        )
+    )
+
+    without_plan = json.loads(Path(without_unpacked.plan_path).read_text(encoding="utf-8"))
+    with_plan = json.loads(Path(with_unpacked.plan_path).read_text(encoding="utf-8"))
+    assert without_plan["source_paths_by_domain"][DataDomain.MARKET_INTRADAY_1M] == []
+    assert with_plan["source_paths_by_domain"][DataDomain.MARKET_INTRADAY_1M] == [
+        {"path": str(csv_dir), "kind": "directory"}
+    ]
+
+
+def test_import_external_quant_zip_imports_unpacked_1m_csv_preserves_0930(tmp_path) -> None:
+    source_root = tmp_path / "量化数据"
+    csv_dir = source_root / "2026" / "1分钟"
+    csv_dir.mkdir(parents=True)
+    (csv_dir / "sz000001.csv").write_text(
+        "\n".join(
+            [
+                "日期,开盘,最高,最低,收盘,成交量(股),成交额(元)",
+                "2026-01-05 09:30:00,10.0,10.2,9.9,10.1,100,1010",
+                "2026-01-05 09:31:00,10.1,10.3,10.0,10.2,200,2040",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    lake_root = tmp_path / "lake"
+    result = run_import(
+        ImportConfig(
+            lake_root=lake_root,
+            source_root=source_root,
+            domains=(DataDomain.MARKET_INTRADAY_1M,),
+            start_date="2026-01-01",
+            end_date="2026-01-05",
+            years=(2026,),
+            include_unpacked_csv=True,
+            shard_batch_members=8,
+            hash_zips=False,
+        )
+    )
+
+    assert result.status == "completed"
+    assert result.row_counts[DataDomain.MARKET_INTRADAY_1M] == 2
+    lake = ResearchDataLake(lake_root)
+    metadata = lake.describe_dataset(result.dataset_ids[DataDomain.MARKET_INTRADAY_1M])
+    assert metadata["parameters"]["one_minute_bar_count_contracts"]["external_quant_csv"].startswith("241 bars")
+    frame = pd.read_parquet(
+        next(lake_root.glob("parquet/bronze_silver/data_platform_market_intraday_1m/*/shards/*.parquet"))
+    )
+    assert frame["symbol"].tolist() == ["000001.SZ", "000001.SZ"]
+    assert frame["bar_time"].tolist()[0] == "093000000"
+
+
+def test_import_external_quant_zip_reuses_existing_same_spec_dataset(tmp_path) -> None:
+    source_root = tmp_path / "量化数据"
+    csv_dir = source_root / "2026" / "1分钟"
+    csv_dir.mkdir(parents=True)
+    (csv_dir / "sz000001.csv").write_text(
+        "\n".join(
+            [
+                "日期,开盘,最高,最低,收盘,成交量(股),成交额(元)",
+                "2026-01-05 09:30:00,10.0,10.2,9.9,10.1,100,1010",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    cfg = ImportConfig(
+        lake_root=tmp_path / "lake",
+        source_root=source_root,
+        domains=(DataDomain.MARKET_INTRADAY_1M,),
+        start_date="2026-01-01",
+        end_date="2026-01-05",
+        years=(2026,),
+        include_unpacked_csv=True,
+        hash_zips=False,
+    )
+
+    first = run_import(cfg)
+    second = run_import(cfg)
+
+    assert first.status == "completed"
+    assert second.status == "completed_reused"
+    assert second.dataset_ids == first.dataset_ids
+    assert second.row_counts[DataDomain.MARKET_INTRADAY_1M] == 1
+
+
 def test_recover_external_quant_zip_import_links_completed_year_shards(tmp_path) -> None:
     source_root = tmp_path / "量化数据"
     zip_dir = source_root / "1分钟"

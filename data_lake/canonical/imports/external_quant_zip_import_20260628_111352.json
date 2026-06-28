@@ -1,0 +1,25 @@
+{
+  "status": "dry_run",
+  "generated_at": "2026-06-28T03:13:52+00:00",
+  "lake_root": "H:\\quant_project\\data_lake",
+  "source_root": "H:\\BaiduNetdiskDownload\\量化数据",
+  "start_date": "2026-01-01",
+  "end_date": "2026-03-27",
+  "domains": [
+    "market_intraday_1m"
+  ],
+  "zip_paths_by_domain": {
+    "market_intraday_1m": []
+  },
+  "source_paths_by_domain": {
+    "market_intraday_1m": [
+      {
+        "path": "H:\\BaiduNetdiskDownload\\量化数据\\2026_20260327_161820\\2026\\1分钟",
+        "kind": "directory"
+      }
+    ]
+  },
+  "include_unpacked_csv": true,
+  "datasets": {},
+  "progress_path": "H:\\quant_project\\data_lake\\canonical\\imports\\external_quant_zip_import_20260628_111335_progress.jsonl"
+}

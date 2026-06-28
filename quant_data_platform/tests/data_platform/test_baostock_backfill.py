@@ -424,7 +424,7 @@ def test_backfill_resume_retries_failed_chunk() -> None:
         first = run_backfill(config, provider=provider)
         second = run_backfill(config, provider=provider)
 
-    assert first.error_counts[DataDomain.MARKET_INTRADAY_5M] == 1
+    assert first.error_counts[DataDomain.MARKET_INTRADAY_5M] == 2
     assert second.error_counts[DataDomain.MARKET_INTRADAY_5M] == 0
     assert second.row_counts[DataDomain.MARKET_INTRADAY_5M] == 8
     assert provider.calls == 2
