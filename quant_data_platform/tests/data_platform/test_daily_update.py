@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
+import quant_data_platform.ingest.daily_update as daily_update_module
 from quant_data_platform.core.paths import qdp_paths
 from quant_data_platform.core.registry import load_root_manifest, write_root_manifest_update
 from quant_data_platform.domains.contracts import DataDomain, DomainFetchRequest, ProviderResult
@@ -268,6 +269,30 @@ class DailyBackfillProvider:
         return ProviderResult(provider=self.name, data=frame)
 
 
+class CalendarTailBackfillProvider:
+    name = "baostock"
+
+    def __init__(self) -> None:
+        self.snapshot_dates: dict[str, list[str]] = {
+            DataDomain.UNIVERSE_SNAPSHOT: [],
+            DataDomain.SECURITY_STATUS: [],
+        }
+
+    def fetch_domain(self, request: DomainFetchRequest) -> ProviderResult:
+        request = request.normalized()
+        if request.domain == DataDomain.TRADING_CALENDAR:
+            frame = _calendar_frame(["2026-01-07", "2026-01-09"])
+        elif request.domain == DataDomain.UNIVERSE_SNAPSHOT:
+            self.snapshot_dates[DataDomain.UNIVERSE_SNAPSHOT].append(request.end_date)
+            frame = _universe_frame([request.end_date])
+        elif request.domain == DataDomain.SECURITY_STATUS:
+            self.snapshot_dates[DataDomain.SECURITY_STATUS].append(request.end_date)
+            frame = _status_frame([request.end_date])
+        else:
+            frame = pd.DataFrame()
+        return ProviderResult(provider=self.name, data=frame)
+
+
 class FailingBackfillProvider:
     name = "baostock"
 
@@ -319,6 +344,58 @@ def test_daily_update_dry_run_identifies_required_pit_tail_gap(tmp_path: Path) -
     assert result.domain_plans[DataDomain.UNIVERSE_SNAPSHOT].planned_task_count == 2
     assert result.domain_plans[DataDomain.SECURITY_STATUS].planned_task_count == 2
     assert result.domain_plans[DataDomain.TRADING_CALENDAR].planned_task_count == 1
+
+
+def test_daily_update_recomputes_pit_dates_after_calendar_tail(tmp_path: Path) -> None:
+    paths = _make_workspace(tmp_path)
+    lake = ResearchDataLake(paths.lake_root)
+    _save_active_bundle(lake, paths, ["2026-01-05"])
+    calendar = lake.save_domain_dataset(
+        domain=DataDomain.TRADING_CALENDAR,
+        frame=_calendar_frame(["2026-01-05", "2026-01-06"]),
+        spec={"dataset": "data_platform_trading_calendar", "source": "unit", "start_date": "2026-01-05", "end_date": "2026-01-06"},
+        source="unit",
+        reuse=False,
+    )
+    root = load_root_manifest(paths)
+    sidecars = dict(root.get("canonical_bundle_sidecar_dataset_ids", {}) or {})
+    sidecars[DataDomain.TRADING_CALENDAR] = calendar.dataset_id
+    components = dict(root.get("canonical_component_dataset_ids", {}) or {})
+    components[DataDomain.TRADING_CALENDAR] = calendar.dataset_id
+    write_root_manifest_update(
+        {
+            "canonical_bundle_sidecar_dataset_ids": sidecars,
+            "canonical_component_dataset_ids": components,
+        },
+        paths=paths,
+    )
+    provider = CalendarTailBackfillProvider()
+
+    result = run_daily_update(
+        DailyUpdateConfig(
+            workspace_root=paths.workspace_root,
+            run_id="unit_calendar_tail_replan",
+            as_of_date="2026-01-09",
+            start_date="2026-01-05",
+            domains=(DataDomain.TRADING_CALENDAR, DataDomain.UNIVERSE_SNAPSHOT, DataDomain.SECURITY_STATUS),
+            required_pit_domains=(DataDomain.TRADING_CALENDAR, DataDomain.UNIVERSE_SNAPSHOT, DataDomain.SECURITY_STATUS),
+            task_workers=1,
+            snapshot_workers=1,
+            max_duplicate_check_rows=10000,
+        ),
+        paths=paths,
+        backfill_provider=provider,
+    )
+
+    expected_tail = ("2026-01-06", "2026-01-07", "2026-01-09")
+    assert result.status == "ok"
+    assert result.blockers == []
+    assert result.domain_plans[DataDomain.UNIVERSE_SNAPSHOT].expected_trade_dates == expected_tail
+    assert result.domain_plans[DataDomain.SECURITY_STATUS].expected_trade_dates == expected_tail
+    assert provider.snapshot_dates[DataDomain.UNIVERSE_SNAPSHOT] == list(expected_tail)
+    assert provider.snapshot_dates[DataDomain.SECURITY_STATUS] == list(expected_tail)
+    assert result.after_coverage[DataDomain.UNIVERSE_SNAPSHOT]["trade_date_count"] == 4
+    assert result.after_coverage[DataDomain.SECURITY_STATUS]["trade_date_count"] == 4
 
 
 def test_daily_update_auto_skips_intraday_features_when_raw_5m_tail_is_missing(tmp_path: Path) -> None:
@@ -417,3 +494,47 @@ def test_daily_update_strict_activation_combines_inherited_pit_with_tail(tmp_pat
     assert result.after_coverage[DataDomain.UNIVERSE_SNAPSHOT]["end_date"] == "2026-01-08"
     assert result.after_coverage[DataDomain.SECURITY_STATUS]["trade_date_count"] == 4
     assert manifest["combined_sidecar_dataset_ids"][DataDomain.UNIVERSE_SNAPSHOT] == result.effective_sidecar_dataset_ids[DataDomain.UNIVERSE_SNAPSHOT]
+
+
+def test_daily_update_memmap_failure_does_not_activate_canonical(tmp_path: Path, monkeypatch) -> None:
+    paths = _make_workspace(tmp_path)
+    lake = ResearchDataLake(paths.lake_root)
+    _save_active_bundle(lake, paths, ["2026-01-05", "2026-01-06"])
+    active_root = load_root_manifest(paths)
+    refresh_provider = InMemoryDomainProvider(
+        "akshare_eastmoney",
+        payloads={
+            DataDomain.TRADING_CALENDAR: _calendar_frame(["2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08"]),
+            DataDomain.UNIVERSE_SNAPSHOT: _universe_frame(["2026-01-08"]),
+            DataDomain.MARKET_DAILY: _market_frame(["2026-01-07", "2026-01-08"]),
+        },
+    )
+
+    def fail_memmap(**_kwargs):
+        raise RuntimeError("synthetic_memmap_failure")
+
+    monkeypatch.setattr(daily_update_module, "_build_and_validate_memmap", fail_memmap)
+
+    result = run_daily_update(
+        DailyUpdateConfig(
+            workspace_root=paths.workspace_root,
+            run_id="unit_memmap_failure_no_activate",
+            as_of_date="2026-01-08",
+            start_date="2026-01-05",
+            domains=(DataDomain.MARKET_DAILY, DataDomain.TRADING_CALENDAR, DataDomain.UNIVERSE_SNAPSHOT, DataDomain.SECURITY_STATUS),
+            required_pit_domains=(DataDomain.TRADING_CALENDAR, DataDomain.UNIVERSE_SNAPSHOT, DataDomain.SECURITY_STATUS),
+            build_policy_bundle=True,
+            build_memmap=True,
+            activate=True,
+            universe="all_a",
+            max_duplicate_check_rows=10000,
+        ),
+        paths=paths,
+        refresh_providers=[refresh_provider],
+        backfill_provider=DailyBackfillProvider(),
+    )
+    root = load_root_manifest(paths)
+
+    assert result.status == "blocked"
+    assert any(item.startswith("memmap_build_failed:RuntimeError") for item in result.blockers)
+    assert root["canonical_dataset_id"] == active_root["canonical_dataset_id"]

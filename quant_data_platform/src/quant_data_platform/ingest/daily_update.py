@@ -308,7 +308,12 @@ def run_daily_update(
     backfill_dataset_ids: dict[str, str] = {}
     backfill_results: dict[str, Any] = {}
     lagging_annotations: dict[str, dict[str, Any]] = {}
-    for domain, plan in domain_plans.items():
+    for domain in cfg.domains:
+        if domain == DataDomain.MARKET_DAILY:
+            continue
+        plan = domain_plans.get(domain)
+        if plan is None:
+            continue
         if domain == DataDomain.MARKET_DAILY or not plan.needs_backfill:
             continue
         if domain == DataDomain.INTRADAY_DAILY_FEATURES:
@@ -388,6 +393,7 @@ def run_daily_update(
             retry_backoff_seconds=cfg.retry_backoff_seconds,
             retry_jitter_seconds=cfg.retry_jitter_seconds,
             reuse_existing_market_daily=True,
+            trade_dates=tuple(plan.expected_trade_dates),
             build_policy_bundle=False,
             write_canonical_manifest=False,
         )
@@ -414,6 +420,27 @@ def run_daily_update(
             blockers.append(f"backfill_errors:{domain}:{errors}")
         if domain in cfg.required_pit_domains and rows <= 0:
             blockers.append(f"required_pit_backfill_empty:{domain}")
+        if domain == DataDomain.TRADING_CALENDAR and dataset_id:
+            refreshed_calendar = _effective_calendar_frame(
+                lake=lake,
+                inherited_dataset_id=active_context["sidecars"].get(DataDomain.TRADING_CALENDAR, ""),
+                tail_dataset_id=dataset_id,
+            )
+            refreshed_expected_trade_dates = _expected_trade_dates(
+                calendar_frame=refreshed_calendar,
+                start_date=cfg.start_date,
+                target_date=target_date,
+            )
+            if refreshed_expected_trade_dates:
+                expected_trade_dates = refreshed_expected_trade_dates
+                domain_plans = _build_domain_plans(
+                    cfg=cfg,
+                    lake=lake,
+                    active_sidecars=active_context["sidecars"],
+                    before_coverage=before_coverage,
+                    target_date=target_date,
+                    expected_trade_dates=expected_trade_dates,
+                )
 
     effective_sidecars, combined_sidecars = _combine_effective_sidecars(
         cfg=cfg,
@@ -487,6 +514,26 @@ def run_daily_update(
             blockers.append(f"v2_status_sidecar_{summary.get('status')}")
         lake.write_catalog_manifest()
 
+    if cfg.build_memmap and canonical_dataset_id and not blockers:
+        try:
+            memmap_payload = _build_and_validate_memmap(
+                cfg=cfg,
+                paths=resolved_paths,
+                target_date=target_date,
+                canonical_dataset_id=canonical_dataset_id,
+            )
+            memmap_manifest_path = str(memmap_payload.get("manifest_json", "") or "")
+            memmap_validation = dict(memmap_payload.get("validation", {}) or {})
+        except Exception as exc:
+            memmap_validation = {
+                "status": "failed",
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            }
+            blockers.append(f"memmap_build_failed:{type(exc).__name__}:{exc}")
+        if memmap_validation and str(memmap_validation.get("status", "") or "") != "ok":
+            blockers.append("memmap_validation_failed")
+
     activation_allowed = activation_requested and canonical_dataset_id and not blockers
     if activation_allowed:
         canonical_manifest_path = str(
@@ -511,18 +558,14 @@ def run_daily_update(
             market_dataset_id=market_dataset_id,
             sidecars=effective_sidecars,
         )
+        if cfg.build_memmap and memmap_manifest_path:
+            from quant_data_platform.memmap.incremental import register_sharded_memmap_manifest
 
-    if cfg.build_memmap and activation_allowed and canonical_dataset_id and not blockers:
-        memmap_payload = _build_and_validate_memmap(
-            cfg=cfg,
-            paths=resolved_paths,
-            target_date=target_date,
-            canonical_dataset_id=canonical_dataset_id,
-        )
-        memmap_manifest_path = str(memmap_payload.get("manifest_json", "") or "")
-        memmap_validation = dict(memmap_payload.get("validation", {}) or {})
-        if str(memmap_validation.get("status", "") or "") != "ok":
-            blockers.append("memmap_validation_failed")
+            register_sharded_memmap_manifest(
+                resolved_paths,
+                manifest=memmap_manifest_path,
+                activate=True,
+            )
 
     if blockers:
         status = "blocked"
@@ -1111,29 +1154,44 @@ def _build_and_validate_memmap(
     canonical_dataset_id: str,
 ) -> dict[str, Any]:
     from quant_data_platform.memmap.incremental import compose_sharded_memmap
-    from quant_data_platform.memmap.sharded import ShardedMemmapConfig, build_sharded_memmap
-    from quant_data_platform.memmap.validation import validate_active_memmap
+    from quant_data_platform.memmap.sharded import ShardedMemmapConfig, build_sharded_memmap, validate_sharded_memmap_manifest
 
     root = load_root_manifest(paths)
     sharded_registry = read_json(paths.registry_dir / "sharded_memmap_registry.json")
     base_manifest = str(sharded_registry.get("active_manifest_json", "") or "")
+    base_payload = read_json(Path(base_manifest)) if base_manifest and Path(base_manifest).exists() else {}
     target_year = int(pd.Timestamp(target_date).year)
     rebuild_start = cfg.memmap_rebuild_start_year or target_year
     rebuild_end = cfg.memmap_rebuild_end_year or target_year
+    base_schema_tag = str(base_payload.get("feature_schema_hash", "") or "schema")[:8]
+    memmap_tag = f"{cfg.provider_plan}_{target_date.replace('-', '')}_tail_{rebuild_start}_{rebuild_end}_{base_schema_tag}"
+    cumulative_horizons = base_payload.get("cumulative_horizons", "")
+    if isinstance(cumulative_horizons, list):
+        cumulative_horizons = ",".join(str(item) for item in cumulative_horizons)
     overlay = build_sharded_memmap(
         paths,
         config=ShardedMemmapConfig(
             canonical_dataset_id=canonical_dataset_id,
-            profile=cfg.memmap_profile or str(root.get("canonical_sharded_memmap_status", {}).get("latest_profile", "") or ""),
+            profile=cfg.memmap_profile or str(base_payload.get("profile", "") or root.get("canonical_sharded_memmap_status", {}).get("latest_profile", "") or ""),
             start_year=rebuild_start,
             end_year=rebuild_end,
             symbol_block_size=cfg.memmap_symbol_block_size,
             max_universe_size=cfg.memmap_max_universe_size,
             max_shards=cfg.memmap_max_shards,
-            tag=f"{cfg.provider_plan}_{target_date.replace('-', '')}_tail_{rebuild_start}_{rebuild_end}",
+            lookback_days=int(base_payload.get("lookback_days", 0) or 60),
+            horizon=int(base_payload.get("horizon", 0) or 20),
+            cumulative_horizons=str(cumulative_horizons or "1,3,5,10,20"),
+            execution_mode=str(base_payload.get("execution_mode", "") or "next_open"),
+            max_feature_columns=int(base_payload.get("max_feature_columns", 0) or base_payload.get("feature_count", 0) or 192),
+            min_lookback_valid_ratio=float(base_payload.get("min_lookback_valid_ratio", 0) or 0.80),
+            tag=memmap_tag,
             workers=cfg.memmap_workers,
             year_input_cache=cfg.memmap_year_input_cache,
             force_years=",".join(str(year) for year in range(rebuild_start, rebuild_end + 1)),
+            pool_view_id=str(base_payload.get("pool_view_id", "") or ""),
+            sector_board_view_id=str(base_payload.get("sector_board_view_id", "") or ""),
+            include_static_context=bool(base_payload.get("include_static_context", False) or False),
+            static_context_fields=str(base_payload.get("static_context_fields", "") or "symbol,exchange,industry"),
         ),
     )
     manifest_json = str(overlay.get("manifest_json", "") or "")
@@ -1143,12 +1201,19 @@ def _build_and_validate_memmap(
             paths,
             base_manifest=Path(base_manifest),
             overlay_manifests=[Path(manifest_json)],
-            tag=f"{cfg.provider_plan}_{target_date.replace('-', '')}_composite",
-            activate=True,
+            target_canonical_dataset_id=canonical_dataset_id,
+            tag=f"{memmap_tag}_composite",
+            activate=False,
             write=True,
         )
         manifest_json = str(composite.get("manifest_json", "") or "")
-    validation = validate_active_memmap(paths, manifest=manifest_json)
+    validation = validate_sharded_memmap_manifest(Path(manifest_json))
+    if str(validation.get("canonical_dataset_id", "") or "") != str(canonical_dataset_id):
+        validation = {
+            **dict(validation),
+            "status": "blocked",
+            "blockers": sorted(set(list(validation.get("blockers", []) or []) + ["source_market_dataset_mismatch"])),
+        }
     return {**dict(composite), "manifest_json": manifest_json, "validation": validation}
 
 
@@ -1380,6 +1445,29 @@ def _read_dataset_frame(*, lake: ResearchDataLake, dataset_id: str, columns: lis
             except Exception:
                 continue
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def _effective_calendar_frame(
+    *,
+    lake: ResearchDataLake,
+    inherited_dataset_id: str,
+    tail_dataset_id: str,
+) -> pd.DataFrame:
+    frames = [
+        _read_dataset_frame(lake=lake, dataset_id=str(inherited_dataset_id or "")),
+        _read_dataset_frame(lake=lake, dataset_id=str(tail_dataset_id or "")),
+    ]
+    frames = [frame for frame in frames if not frame.empty and "trade_date" in frame.columns]
+    if not frames:
+        return pd.DataFrame()
+    data = pd.concat(frames, ignore_index=True)
+    data["trade_date"] = pd.to_datetime(data["trade_date"], errors="coerce")
+    data = data.dropna(subset=["trade_date"]).sort_values("trade_date")
+    if data.empty:
+        return pd.DataFrame()
+    data = data.drop_duplicates(subset=["trade_date"], keep="last")
+    data["trade_date"] = data["trade_date"].dt.strftime("%Y-%m-%d")
+    return data.reset_index(drop=True)
 
 
 def _duplicate_key_report(*, lake: ResearchDataLake, dataset_id: str, max_rows: int) -> dict[str, Any]:

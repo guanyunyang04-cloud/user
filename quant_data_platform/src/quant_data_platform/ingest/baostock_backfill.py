@@ -125,6 +125,7 @@ class BackfillConfig:
     retry_jitter_seconds: float = 0.0
     reuse_existing_market_daily: bool = False
     extra_sidecar_dataset_ids: tuple[str, ...] = ()
+    trade_dates: tuple[str, ...] = ()
 
     def normalized(self) -> "BackfillConfig":
         end_date = _normalize_date(self.end_date) if str(self.end_date or "").strip() else _today_date()
@@ -179,6 +180,11 @@ class BackfillConfig:
             retry_jitter_seconds=max(0.0, float(self.retry_jitter_seconds or 0.0)),
             reuse_existing_market_daily=bool(self.reuse_existing_market_daily),
             extra_sidecar_dataset_ids=tuple(str(item).strip() for item in self.extra_sidecar_dataset_ids if str(item).strip()),
+            trade_dates=tuple(
+                _normalize_date(str(item).strip())
+                for item in self.trade_dates
+                if str(item).strip()
+            ),
         )
 
 
@@ -327,7 +333,7 @@ def run_backfill(config: BackfillConfig, *, provider: Any | None = None) -> Back
     run_dir.mkdir(parents=True, exist_ok=True)
     domains = _normalize_domains(config.domains)
     symbols = _resolve_symbols(config, lake=lake, run_dir=run_dir) if _domains_need_symbols(domains) else ()
-    trade_dates = _resolve_run_trade_dates(run_dir=run_dir, config=config) or _resolve_trade_dates(lake=lake, config=config)
+    trade_dates = tuple(config.trade_dates) or _resolve_run_trade_dates(run_dir=run_dir, config=config) or _resolve_trade_dates(lake=lake, config=config)
     dataset_ids: dict[str, str] = {}
     domain_shards: dict[str, list[dict[str, Any]]] = {}
     row_counts: dict[str, int] = {}

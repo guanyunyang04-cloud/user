@@ -21,30 +21,32 @@
     }
   ],
   "canonical_bundle_sidecar_dataset_ids": {
-    "adjust_factor": "data_platform_adjust_factor__30c0c748c33515a192346c3e",
-    "index_constituents": "data_platform_index_constituents__8b781c50df0c8ce9c9676122",
-    "industry_concept": "data_platform_industry_concept__4fc392be70e668d344005100",
-    "intraday_daily_features": "data_platform_intraday_daily_features__c47f1b6372ec841be2189dab",
-    "security_status": "data_platform_security_status__8ff74ecf69a77034c09c8d1b",
-    "trading_calendar": "data_platform_trading_calendar__e7c13f6a5ee16a08d71d9b2c",
-    "universe_snapshot": "data_platform_universe_snapshot__64012c07ea105731afcb488d",
-    "valuation": "data_platform_valuation__13151c89bf9f57eda45ed76e"
-  },
-  "canonical_component_dataset_ids": {
-    "adjust_factor": "data_platform_adjust_factor__30c0c748c33515a192346c3e",
+    "adjust_factor": "data_platform_adjust_factor__adfb35187548036ebb69cf8e",
     "benchmark_daily": "data_platform_market_daily__76a2dc61ae52a429782208e1",
     "index_constituents": "data_platform_index_constituents__8b781c50df0c8ce9c9676122",
     "industry_concept": "data_platform_industry_concept__4fc392be70e668d344005100",
     "intraday_daily_features": "data_platform_intraday_daily_features__c47f1b6372ec841be2189dab",
-    "market_daily": "data_platform_market_daily__618db3bf9609c6e2b7673f40",
     "market_intraday_5m": "data_platform_market_intraday_5m__aa65b9aebaae19f98ece08e3",
-    "security_status": "data_platform_security_status__8ff74ecf69a77034c09c8d1b",
-    "trading_calendar": "data_platform_trading_calendar__e7c13f6a5ee16a08d71d9b2c",
-    "universe_snapshot": "data_platform_universe_snapshot__64012c07ea105731afcb488d",
-    "valuation": "data_platform_valuation__13151c89bf9f57eda45ed76e"
+    "security_status": "data_platform_security_status__9abcdd11159abc046ebd660f",
+    "trading_calendar": "data_platform_trading_calendar__03298281bc6712b72d0b5a6b",
+    "universe_snapshot": "data_platform_universe_snapshot__b30f5a5d0270e9702a3977b4",
+    "valuation": "data_platform_valuation__6c8278bf97c48606bbba4aa8"
   },
-  "canonical_dataset_id": "policy_input_bundle__2c27a13a7c7ae85417c36340",
-  "canonical_manifest": "H:/quant_project/quant_data_platform/data/lake/canonical/canonical_manifest.json",
+  "canonical_component_dataset_ids": {
+    "adjust_factor": "data_platform_adjust_factor__adfb35187548036ebb69cf8e",
+    "benchmark_daily": "data_platform_market_daily__76a2dc61ae52a429782208e1",
+    "index_constituents": "data_platform_index_constituents__8b781c50df0c8ce9c9676122",
+    "industry_concept": "data_platform_industry_concept__4fc392be70e668d344005100",
+    "intraday_daily_features": "data_platform_intraday_daily_features__c47f1b6372ec841be2189dab",
+    "market_daily": "policy_input_bundle__59ac9c0cbf7b975025933c52",
+    "market_intraday_5m": "data_platform_market_intraday_5m__aa65b9aebaae19f98ece08e3",
+    "security_status": "data_platform_security_status__9abcdd11159abc046ebd660f",
+    "trading_calendar": "data_platform_trading_calendar__03298281bc6712b72d0b5a6b",
+    "universe_snapshot": "data_platform_universe_snapshot__b30f5a5d0270e9702a3977b4",
+    "valuation": "data_platform_valuation__6c8278bf97c48606bbba4aa8"
+  },
+  "canonical_dataset_id": "policy_input_bundle__a12fbe967976a3fc976db60b",
+  "canonical_manifest": "H:\\quant_project\\quant_data_platform\\data\\lake\\canonical\\canonical_manifest.json",
   "canonical_memmap_registry": "H:/quant_project/quant_data_platform/registry/memmap_registry.json",
   "canonical_memmap_status": {
     "note": "Legacy monolithic/capped forecast memmap registry is no longer the active training base; use canonical_sharded_memmap_status.",
@@ -65,17 +67,17 @@
     "updated_at": "2026-06-12T06:51:06+00:00"
   },
   "canonical_sharded_memmap_status": {
-    "active_manifest_json": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\tradeable_mainboard_style_structural_alpha_v2_label_v2_backfilled_intraday_v2_2010_2026_20260626_01\\sharded_memmap_manifest.json",
-    "latest_canonical_dataset_id": "policy_input_bundle__2c27a13a7c7ae85417c36340",
+    "active_manifest_json": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\composites\\qdp_production_v1_20260626_tail_2026_2026_38a98a4a_composite\\sharded_memmap_manifest.json",
+    "latest_canonical_dataset_id": "policy_input_bundle__a12fbe967976a3fc976db60b",
     "latest_empty_shard_count": 14,
-    "latest_manifest_json": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\tradeable_mainboard_style_structural_alpha_v2_label_v2_backfilled_intraday_v2_2010_2026_20260626_01\\sharded_memmap_manifest.json",
-    "latest_planned_shard_count": 187,
-    "latest_processed_shard_count": 187,
+    "latest_manifest_json": "H:\\quant_project\\quant_data_platform\\data\\memmap\\sharded\\composites\\qdp_production_v1_20260626_tail_2026_2026_38a98a4a_composite\\sharded_memmap_manifest.json",
+    "latest_planned_shard_count": 195,
+    "latest_processed_shard_count": 195,
     "latest_profile": "style_structural_alpha_v2",
-    "latest_scope": "full_canonical_candidate",
-    "latest_stored_shard_count": 173,
+    "latest_scope": "full_canonical_incremental_composite",
+    "latest_stored_shard_count": 181,
     "status": "sharded_full_ready",
-    "updated_at": "2026-06-26T00:21:16+00:00"
+    "updated_at": "2026-06-27T19:48:14+00:00"
   },
   "canonical_start_date": "2010-01-01",
   "component_coverage": {
@@ -175,6 +177,14 @@
       "performance_express"
     ]
   },
+  "latest_daily_update": {
+    "canonical_dataset_id": "policy_input_bundle__a12fbe967976a3fc976db60b",
+    "canonical_manifest": "H:\\quant_project\\quant_data_platform\\data\\lake\\canonical\\canonical_manifest.json",
+    "run_id": "daily_update_20260626_prodcheck_20260628_strict",
+    "status": "activated",
+    "target_date": "2026-06-26",
+    "updated_at": "2026-06-27T19:48:13+00:00"
+  },
   "migrated_from": "H:/quant_project/canonical_data/registry",
   "primary_lake_root": "H:/quant_project/quant_data_platform/data/lake",
   "qdp_project_root": "H:/quant_project/quant_data_platform",
@@ -190,7 +200,7 @@
     "one_minute_policy": "cold_archive_not_default_research_view",
     "tdx_tqcenter_path": "H:/new_tdx64/PYPlugins/user/t0_project/tqcenter.py"
   },
-  "status": "canonical_bundle_ready_full_sharded_memmap_ready",
+  "status": "daily_update_canonical_ready",
   "storage_policy": {
     "cleanup_requires_dry_run_and_replacement_validation": true,
     "large_data_dirs_are_gitignored": true,
@@ -201,7 +211,7 @@
     "industry_concept",
     "index_constituents"
   ],
-  "updated_at": "2026-06-26T00:29:19+00:00",
+  "updated_at": "2026-06-27T19:48:14+00:00",
   "v1_excluded_domains": [
     "financial_quarterly",
     "performance_forecast",

@@ -171,6 +171,7 @@ def compose_sharded_memmap(
     *,
     base_manifest: str | Path | None = None,
     overlay_manifests: Sequence[str | Path] | None = None,
+    target_canonical_dataset_id: str = "",
     tag: str = "",
     activate: bool = False,
     write: bool = True,
@@ -208,7 +209,13 @@ def compose_sharded_memmap(
     years = sorted({int(item.get("year", 0) or _year_from_key(str(item.get("shard_key", "") or "")) or 0) for item in shards})
     years = [year for year in years if year > 0]
     root = load_root_manifest(resolved)
-    target_dataset_id = str(root.get("canonical_dataset_id", "") or overlays[-1].get("canonical_dataset_id", "") or base.get("canonical_dataset_id", "") or "")
+    target_dataset_id = str(
+        target_canonical_dataset_id
+        or root.get("canonical_dataset_id", "")
+        or overlays[-1].get("canonical_dataset_id", "")
+        or base.get("canonical_dataset_id", "")
+        or ""
+    )
     base_dataset_id = str(base.get("canonical_dataset_id", "") or "")
     overlay_dataset_ids = sorted({str(item.get("canonical_dataset_id", "") or "") for item in overlays if str(item.get("canonical_dataset_id", "") or "")})
     source_equivalence_required = bool(target_dataset_id and base_dataset_id and base_dataset_id != target_dataset_id)
@@ -249,6 +256,18 @@ def compose_sharded_memmap(
         write_json(manifest_path, composite)
         _register_composite_manifest(resolved, composite, activate=bool(activate))
     return composite
+
+
+def register_sharded_memmap_manifest(
+    paths: QdpPaths | None = None,
+    *,
+    manifest: str | Path,
+    activate: bool = False,
+) -> dict[str, Any]:
+    resolved = paths or qdp_paths()
+    payload = _read_qdp_sharded_manifest(Path(manifest))
+    _register_composite_manifest(resolved, payload, activate=bool(activate))
+    return payload
 
 
 def _resolve_manifest_path(paths: QdpPaths, manifest: str | Path | None = None) -> Path:
