@@ -23,29 +23,29 @@
   "canonical_bundle_sidecar_dataset_ids": {
     "adjust_factor": "data_platform_adjust_factor__adfb35187548036ebb69cf8e",
     "index_constituents": "data_platform_index_constituents__e0c540aee9ceb3bab1d50515",
-    "industry_concept": "data_platform_industry_concept__401d10552d2a20a127d23697",
+    "industry_concept": "data_platform_industry_concept__578368469c5bd89e05f82706",
     "intraday_daily_features": "data_platform_intraday_daily_features__46b11b7cbd488492916b1e6c",
     "market_intraday_1m": "data_platform_market_intraday_1m__8800061d17b54855feddd770",
-    "market_intraday_5m": "data_platform_market_intraday_5m__0919399f9948228755cc5b7d",
-    "security_status": "data_platform_security_status__9abcdd11159abc046ebd660f",
+    "market_intraday_5m": "data_platform_market_intraday_5m__0790d38302cd0e4aae03bad4",
+    "security_status": "data_platform_security_status__c0c7df7228b45d3563e6dc13",
     "trading_calendar": "data_platform_trading_calendar__03298281bc6712b72d0b5a6b",
-    "universe_snapshot": "data_platform_universe_snapshot__b30f5a5d0270e9702a3977b4",
+    "universe_snapshot": "data_platform_universe_snapshot__7d0361a9af11039cd15b60fe",
     "valuation": "data_platform_valuation__6c8278bf97c48606bbba4aa8"
   },
   "canonical_component_dataset_ids": {
     "adjust_factor": "data_platform_adjust_factor__adfb35187548036ebb69cf8e",
     "index_constituents": "data_platform_index_constituents__e0c540aee9ceb3bab1d50515",
-    "industry_concept": "data_platform_industry_concept__401d10552d2a20a127d23697",
+    "industry_concept": "data_platform_industry_concept__578368469c5bd89e05f82706",
     "intraday_daily_features": "data_platform_intraday_daily_features__46b11b7cbd488492916b1e6c",
-    "market_daily": "policy_input_bundle__a56425b56b5958990c0ff35d",
+    "market_daily": "policy_input_bundle__eb419e9326f5db17e50683c8",
     "market_intraday_1m": "data_platform_market_intraday_1m__8800061d17b54855feddd770",
-    "market_intraday_5m": "data_platform_market_intraday_5m__0919399f9948228755cc5b7d",
-    "security_status": "data_platform_security_status__9abcdd11159abc046ebd660f",
+    "market_intraday_5m": "data_platform_market_intraday_5m__0790d38302cd0e4aae03bad4",
+    "security_status": "data_platform_security_status__c0c7df7228b45d3563e6dc13",
     "trading_calendar": "data_platform_trading_calendar__03298281bc6712b72d0b5a6b",
-    "universe_snapshot": "data_platform_universe_snapshot__b30f5a5d0270e9702a3977b4",
+    "universe_snapshot": "data_platform_universe_snapshot__7d0361a9af11039cd15b60fe",
     "valuation": "data_platform_valuation__6c8278bf97c48606bbba4aa8"
   },
-  "canonical_dataset_id": "policy_input_bundle__a56425b56b5958990c0ff35d",
+  "canonical_dataset_id": "policy_input_bundle__eb419e9326f5db17e50683c8",
   "canonical_end_date": "2026-06-26",
   "canonical_manifest": "quant_data_platform\\data\\lake\\canonical\\canonical_manifest.json",
   "canonical_memmap_registry": "H:/quant_project/quant_data_platform/registry/memmap_registry.json",
@@ -180,13 +180,13 @@
     ]
   },
   "latest_canonical_bundle_update": {
-    "canonical_dataset_id": "policy_input_bundle__a56425b56b5958990c0ff35d",
+    "canonical_dataset_id": "policy_input_bundle__eb419e9326f5db17e50683c8",
     "canonical_manifest": "quant_data_platform\\data\\lake\\canonical\\canonical_manifest.json",
     "end_date": "2026-06-26",
     "memmap_updated": false,
     "start_date": "2010-01-04",
     "status": "activated",
-    "updated_at": "2026-06-29T02:32:33+00:00"
+    "updated_at": "2026-06-29T09:57:48+00:00"
   },
   "latest_daily_update": {
     "canonical_dataset_id": "policy_input_bundle__e622949a701bfa312ae81c66",
@@ -222,7 +222,7 @@
     "industry_concept",
     "index_constituents"
   ],
-  "updated_at": "2026-06-29T02:32:33+00:00",
+  "updated_at": "2026-06-29T09:57:48+00:00",
   "v1_excluded_domains": [
     "financial_quarterly",
     "performance_forecast",

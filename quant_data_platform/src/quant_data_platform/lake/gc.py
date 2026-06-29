@@ -116,6 +116,7 @@ def _referenced_dataset_ids(lake: ResearchDataLake, *, paths: QdpPaths | None = 
             continue
         nested: set[str] = set()
         _collect_dataset_ids(metadata, nested)
+        _collect_content_path_dataset_ids(lake, metadata, nested)
         for item in nested:
             if item not in seen:
                 pending.append(item)
@@ -140,6 +141,53 @@ def _collect_dataset_ids(value: Any, out: set[str]) -> None:
         return
     if text.startswith(("data_platform_", "policy_input_bundle__", "policy_pool_view__", "policy_sector_board_view__", "gold_training_dataset__")):
         out.add(text)
+
+
+def _collect_content_path_dataset_ids(lake: ResearchDataLake, metadata: Mapping[str, Any], out: set[str]) -> None:
+    content_paths = dict(metadata.get("content_paths", {}) or {})
+    for value in content_paths.values():
+        text = str(value or "").strip()
+        if not text or "*" in text:
+            continue
+        inferred = _dataset_id_from_content_path(lake, Path(text))
+        if inferred:
+            out.add(inferred)
+    shard_manifest = str(content_paths.get("shard_manifest", "") or "").strip()
+    if not shard_manifest or not Path(shard_manifest).exists():
+        return
+    try:
+        manifest = json.loads(Path(shard_manifest).read_text(encoding="utf-8"))
+    except Exception:
+        return
+    _collect_dataset_ids(manifest, out)
+    for shard in list(manifest.get("shards", []) or []):
+        if not isinstance(shard, Mapping):
+            continue
+        for key in ("path", "file_path", "shard_path", "source_path", "source_feature_path"):
+            text = str(shard.get(key, "") or "").strip()
+            if not text:
+                continue
+            inferred = _dataset_id_from_content_path(lake, Path(text))
+            if inferred:
+                out.add(inferred)
+
+
+def _dataset_id_from_content_path(lake: ResearchDataLake, path: Path) -> str:
+    try:
+        resolved = path.resolve()
+        parquet_root = lake.parquet_root.resolve()
+        relative = resolved.relative_to(parquet_root)
+    except Exception:
+        return ""
+    parts = relative.parts
+    if len(parts) < 3:
+        return ""
+    zone = parts[0]
+    if zone in {"bronze_silver", "silver_view"}:
+        return _dataset_id_from_dir(str(parts[1]), str(parts[2]))
+    if zone == "gold" and len(parts) >= 4:
+        return _dataset_id_from_dir(str(parts[1]), str(parts[3]))
+    return ""
 
 
 def _dataset_dir_inventory(lake: ResearchDataLake, *, with_size: bool) -> list[dict[str, Any]]:
