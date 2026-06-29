@@ -16,6 +16,15 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
+def _write_parquet(path: Path, frame: pd.DataFrame) -> None:
+    import duckdb  # type: ignore
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with duckdb.connect(":memory:") as con:
+        con.register("frame_to_write", frame)
+        con.execute("copy frame_to_write to ? (format parquet)", [str(path)])
+
+
 def test_lake_gc_dry_run_reports_unreferenced_dataset_dirs(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     _write_json(workspace / "brain" / "brain_manifest.json", {"schema_version": 1, "brain_type": "main"})
@@ -50,9 +59,9 @@ def test_lake_gc_dry_run_reports_unreferenced_dataset_dirs(tmp_path: Path) -> No
     )
     orphan_dir = lake.parquet_root / "bronze_silver" / "data_platform_market_intraday_5m" / orphan.fingerprint
     (orphan_dir / "payload.parquet").parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame({"x": [1]}).to_parquet(orphan_dir / "payload.parquet", index=False)
+    _write_parquet(orphan_dir / "payload.parquet", pd.DataFrame({"x": [1]}))
     active_dir = lake.parquet_root / "bronze_silver" / "data_platform_market_intraday_1m" / active.fingerprint
-    pd.DataFrame({"x": [1]}).to_parquet(active_dir / "payload.parquet", index=False)
+    _write_parquet(active_dir / "payload.parquet", pd.DataFrame({"x": [1]}))
 
     _write_json(
         paths.root_manifest,
@@ -109,8 +118,8 @@ def test_lake_gc_delete_removes_only_unreferenced_dirs_and_catalog_rows(tmp_path
     )
     active_dir = lake.parquet_root / "bronze_silver" / "data_platform_market_intraday_1m" / active.fingerprint
     orphan_dir = lake.parquet_root / "bronze_silver" / "data_platform_market_intraday_5m" / orphan.fingerprint
-    pd.DataFrame({"x": [1]}).to_parquet(active_dir / "payload.parquet", index=False)
-    pd.DataFrame({"x": [1]}).to_parquet(orphan_dir / "payload.parquet", index=False)
+    _write_parquet(active_dir / "payload.parquet", pd.DataFrame({"x": [1]}))
+    _write_parquet(orphan_dir / "payload.parquet", pd.DataFrame({"x": [1]}))
 
     _write_json(
         paths.root_manifest,
@@ -164,8 +173,7 @@ def test_lake_gc_keeps_dataset_dirs_referenced_by_active_shard_manifest_paths(tm
     )
     source_dir = lake.parquet_root / "bronze_silver" / "data_platform_market_intraday_5m" / source.fingerprint
     source_file = source_dir / "shards" / "source.parquet"
-    source_file.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame({"symbol": ["000001.SZ"], "trade_date": ["2026-01-05"], "bar_time": ["09:35:00"]}).to_parquet(source_file, index=False)
+    _write_parquet(source_file, pd.DataFrame({"symbol": ["000001.SZ"], "trade_date": ["2026-01-05"], "bar_time": ["09:35:00"]}))
 
     active = lake.save_sharded_domain_dataset(
         domain=DataDomain.MARKET_INTRADAY_5M,

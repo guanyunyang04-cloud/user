@@ -1,0 +1,134 @@
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+from typing import Any
+
+from quant_data_platform.core.json_io import json_safe
+from quant_data_platform.qdp_v2.manifest import (
+    atomic_write_json,
+    dataset_manifest_for_id,
+    qdp_v2_root,
+    read_active_manifest,
+    read_dataset_manifest,
+    resolve_manifest_path,
+    utc_now,
+)
+from quant_data_platform.qdp_v2.status import _active_dataset_refs
+
+
+def audit_active(*, workspace_root: str | Path | None = None, write: bool = True) -> dict[str, Any]:
+    root = qdp_v2_root(workspace_root)
+    active = read_active_manifest(root)
+    if not active:
+        return {"status": "error", "qdp_v2_root": str(root.resolve()), "errors": ["active_manifest_missing"]}
+    dataset_reports: list[dict[str, Any]] = []
+    errors: list[str] = []
+    warnings: list[str] = []
+    for section, domain, dataset_id in _active_dataset_refs(active):
+        manifest_path = dataset_manifest_for_id(root, dataset_id, domain)
+        if manifest_path is None:
+            errors.append(f"dataset_manifest_missing:{section}.{domain}:{dataset_id}")
+            continue
+        manifest = read_dataset_manifest(manifest_path)
+        missing_shards: list[str] = []
+        footer_errors: list[str] = []
+        footer_rows = 0
+        for shard in manifest.shards:
+            shard_path = resolve_manifest_path(shard.path, root=root)
+            if not shard_path.exists():
+                missing_shards.append(str(shard_path))
+                continue
+            try:
+                rows = _parquet_row_count(shard_path)
+                footer_rows += int(rows)
+                if shard.row_count > 0 and rows > 0 and int(rows) != int(shard.row_count):
+                    footer_errors.append(f"row_count_mismatch:{shard.path}:manifest={shard.row_count}:footer={rows}")
+            except Exception as exc:
+                footer_errors.append(f"footer_unreadable:{shard.path}:{exc}")
+        if missing_shards:
+            errors.append(f"missing_shards:{section}.{domain}:{len(missing_shards)}")
+        if footer_errors:
+            errors.extend(footer_errors[:20])
+            if len(footer_errors) > 20:
+                warnings.append(f"footer_errors_truncated:{section}.{domain}:{len(footer_errors)}")
+        if manifest.row_count and footer_rows and int(manifest.row_count) != int(footer_rows):
+            errors.append(f"dataset_row_count_mismatch:{section}.{domain}:manifest={manifest.row_count}:footer={footer_rows}")
+        dataset_reports.append(
+            {
+                "section": section,
+                "domain": domain,
+                "dataset_id": dataset_id,
+                "manifest_path": str(manifest_path.resolve()),
+                "start_date": manifest.start_date,
+                "end_date": manifest.end_date,
+                "row_count": manifest.row_count,
+                "footer_row_count": footer_rows,
+                "shard_count": len(manifest.shards),
+                "missing_shard_count": len(missing_shards),
+                "footer_error_count": len(footer_errors),
+                "quality": manifest.quality,
+            }
+        )
+    payload = {
+        "status": "ok" if not errors else "error",
+        "qdp_v2_root": str(root.resolve()),
+        "active_manifest": str((root / "active" / "active.json").resolve()),
+        "audited_at": utc_now(),
+        "duckdb_catalog_required": False,
+        "dataset_count": len(dataset_reports),
+        "datasets": dataset_reports,
+        "warnings": warnings,
+        "errors": errors,
+    }
+    if write:
+        audit_id = f"active_audit_{utc_now().replace(':', '').replace('-', '')}"
+        path = root / "audits" / f"{audit_id}.json"
+        atomic_write_json(path, payload)
+        payload["audit_path"] = str(path.resolve())
+    return payload
+
+
+def _parquet_row_count(path: Path) -> int:
+    try:
+        import pyarrow.parquet as pq  # type: ignore
+
+        return int(pq.ParquetFile(path).metadata.num_rows)
+    except Exception:
+        import duckdb  # type: ignore
+
+        with duckdb.connect(":memory:") as con:
+            return int(con.execute("select count(*) as n from read_parquet(?)", [str(path)]).fetchone()[0])
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="qdp audit active", description="Audit qdp_v2 active manifests without DuckDB.")
+    parser.add_argument("--workspace-root", default="")
+    parser.add_argument("--no-write", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_arg_parser().parse_args(argv)
+    payload = audit_active(workspace_root=str(args.workspace_root or "") or None, write=not bool(args.no_write))
+    print(json.dumps(json_safe(payload), ensure_ascii=False, indent=2) if args.json else _format(payload))
+    return 0 if payload.get("status") == "ok" else 2
+
+
+def _format(payload: dict[str, Any]) -> str:
+    lines = [
+        f"status: {payload.get('status', '')}",
+        f"qdp_v2_root: {payload.get('qdp_v2_root', '')}",
+        f"dataset_count: {payload.get('dataset_count', 0)}",
+        f"errors: {len(payload.get('errors', []) or [])}",
+        f"warnings: {len(payload.get('warnings', []) or [])}",
+    ]
+    if payload.get("audit_path"):
+        lines.append(f"audit_path: {payload.get('audit_path')}")
+    return "\n".join(lines)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())

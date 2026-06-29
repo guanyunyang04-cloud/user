@@ -10,23 +10,6 @@ from typing import Any
 from quant_data_platform.core.json_io import json_safe
 from quant_data_platform.core.paths import qdp_paths
 from quant_data_platform.core.registry import migrate_legacy_registry, registry_status
-from quant_data_platform.event_packs.traditional_alpha import EventPackConfig, build_traditional_event_alpha_pack
-from quant_data_platform.lake.adapters import audit_inventory, build_bundle, bundle_summary_dict, cleanup_dry_run
-from quant_data_platform.memmap.incremental import (
-    IncrementalPlanConfig,
-    compose_sharded_memmap,
-    freeze_sharded_memmap,
-    plan_incremental_memmap,
-)
-from quant_data_platform.memmap.coverage_audit import audit_sharded_memmap_feature_coverage
-from quant_data_platform.memmap.sharded import ShardedMemmapConfig, build_sharded_memmap, write_sharded_memmap_plan
-from quant_data_platform.memmap.training_pack import (
-    RegimeTrainingPackConfig,
-    TrainingPackConfig,
-    build_regime_training_pack,
-    build_training_pack,
-)
-from quant_data_platform.memmap.validation import validate_active_memmap
 
 
 PASSTHROUGH_COMMAND_MODULES: dict[str, str] = {
@@ -242,6 +225,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
+    v2_result = _maybe_run_qdp_v2(raw_argv)
+    if v2_result is not None:
+        return int(v2_result)
     if len(raw_argv) >= 2 and raw_argv[0] == "lake" and raw_argv[1] == "gc":
         return _run_passthrough_module("quant_data_platform.lake.gc", raw_argv[2:])
     for index, item in enumerate(raw_argv):
@@ -258,6 +244,8 @@ def main(argv: list[str] | None = None) -> int:
         _print(migrate_legacy_registry(paths, write=not bool(args.dry_run)), as_json=bool(args.json))
         return 0
     if args.command == "audit":
+        from quant_data_platform.lake.adapters import audit_inventory
+
         inventory = audit_inventory(paths, write=not bool(args.no_write))
         summary = {
             "status": inventory.get("status", ""),
@@ -271,10 +259,14 @@ def main(argv: list[str] | None = None) -> int:
         _print(summary if not bool(args.json) else inventory, as_json=bool(args.json))
         return 0
     if args.command == "build-bundle":
+        from quant_data_platform.lake.adapters import build_bundle, bundle_summary_dict
+
         summary = build_bundle(paths, write=not bool(args.dry_run))
         _print(bundle_summary_dict(summary), as_json=bool(args.json))
         return 0
     if args.command == "validate-memmap":
+        from quant_data_platform.memmap.validation import validate_active_memmap
+
         report = validate_active_memmap(
             paths,
             manifest=Path(args.manifest) if str(args.manifest or "").strip() else None,
@@ -284,6 +276,8 @@ def main(argv: list[str] | None = None) -> int:
         _print(report, as_json=bool(args.json))
         return 0 if str(report.get("status", "")) == "ok" else 1
     if args.command == "audit-sharded-feature-coverage":
+        from quant_data_platform.memmap.coverage_audit import audit_sharded_memmap_feature_coverage
+
         report = audit_sharded_memmap_feature_coverage(
             manifest_json=Path(args.manifest_json),
             output_root=Path(args.output_root),
@@ -302,6 +296,8 @@ def main(argv: list[str] | None = None) -> int:
         _print(report, as_json=bool(args.json))
         return 0
     if args.command == "build-sharded-memmap":
+        from quant_data_platform.memmap.sharded import ShardedMemmapConfig, build_sharded_memmap, write_sharded_memmap_plan
+
         if bool(args.dry_run):
             payload = write_sharded_memmap_plan(
                 paths,
@@ -347,6 +343,8 @@ def main(argv: list[str] | None = None) -> int:
         _print(payload, as_json=bool(args.json))
         return 0
     if args.command == "freeze-sharded-memmap":
+        from quant_data_platform.memmap.incremental import freeze_sharded_memmap
+
         payload = freeze_sharded_memmap(
             paths,
             manifest=Path(args.manifest) if str(args.manifest or "").strip() else None,
@@ -356,6 +354,8 @@ def main(argv: list[str] | None = None) -> int:
         _print(payload, as_json=bool(args.json))
         return 0
     if args.command == "plan-incremental-memmap":
+        from quant_data_platform.memmap.incremental import IncrementalPlanConfig, plan_incremental_memmap
+
         payload = plan_incremental_memmap(
             paths,
             config=IncrementalPlanConfig(
@@ -370,6 +370,8 @@ def main(argv: list[str] | None = None) -> int:
         _print(payload, as_json=bool(args.json))
         return 0
     if args.command == "compose-sharded-memmap":
+        from quant_data_platform.memmap.incremental import compose_sharded_memmap
+
         payload = compose_sharded_memmap(
             paths,
             base_manifest=Path(args.base_manifest) if str(args.base_manifest or "").strip() else None,
@@ -381,6 +383,8 @@ def main(argv: list[str] | None = None) -> int:
         _print(payload, as_json=bool(args.json))
         return 0
     if args.command == "build-training-pack":
+        from quant_data_platform.memmap.training_pack import TrainingPackConfig, build_training_pack
+
         payload = build_training_pack(
             TrainingPackConfig(
                 source_manifest=str(args.source_manifest or ""),
@@ -400,6 +404,8 @@ def main(argv: list[str] | None = None) -> int:
         _print(payload, as_json=bool(args.json))
         return 0
     if args.command == "build-regime-training-pack":
+        from quant_data_platform.memmap.training_pack import RegimeTrainingPackConfig, build_regime_training_pack
+
         payload = build_regime_training_pack(
             RegimeTrainingPackConfig(
                 source_training_pack=str(args.source_training_pack or ""),
@@ -411,6 +417,8 @@ def main(argv: list[str] | None = None) -> int:
         _print(payload, as_json=bool(args.json))
         return 0
     if args.command == "build-event-pack":
+        from quant_data_platform.event_packs.traditional_alpha import EventPackConfig, build_traditional_event_alpha_pack
+
         payload = build_traditional_event_alpha_pack(
             EventPackConfig(
                 source_training_pack=str(args.source_training_pack or ""),
@@ -454,9 +462,50 @@ def main(argv: list[str] | None = None) -> int:
         _print(payload, as_json=bool(args.json))
         return 0 if str(payload.get("status", "")) in {"ok", "empty"} else 2
     if args.command == "cleanup":
+        from quant_data_platform.lake.adapters import cleanup_dry_run
+
         _print(cleanup_dry_run(paths), as_json=bool(args.json))
         return 0
     raise ValueError(f"unsupported_command: {args.command}")
+
+
+def _maybe_run_qdp_v2(raw_argv: list[str]) -> int | None:
+    if not raw_argv:
+        return None
+    workspace = _extract_workspace_root(raw_argv)
+    first = raw_argv[0]
+    route = False
+    forwarded = list(raw_argv)
+    if first in {"migrate-v2", "activate-v2", "dataset", "index", "update", "clean"}:
+        route = True
+    elif len(raw_argv) >= 2 and raw_argv[:2] in (["audit", "active"], ["provider", "benchmark"]):
+        route = True
+    elif len(raw_argv) >= 2 and raw_argv[0] == "lake" and raw_argv[1] == "gc":
+        if "--v2" in forwarded:
+            forwarded = [item for item in forwarded if item != "--v2"]
+            route = True
+        else:
+            from quant_data_platform.qdp_v2.status import v2_active_exists
+
+            route = v2_active_exists(workspace)
+    elif first == "status":
+        from quant_data_platform.qdp_v2.status import v2_active_exists
+
+        route = v2_active_exists(workspace)
+    if not route:
+        return None
+    from quant_data_platform.qdp_v2.cli import dispatch
+
+    return dispatch(forwarded)
+
+
+def _extract_workspace_root(raw_argv: list[str]) -> str:
+    for index, item in enumerate(raw_argv):
+        if item == "--workspace-root" and index + 1 < len(raw_argv):
+            return str(raw_argv[index + 1])
+        if item.startswith("--workspace-root="):
+            return item.split("=", 1)[1]
+    return ""
 
 
 def _run_passthrough_command(command: str, passthrough_args: list[str]) -> int:
