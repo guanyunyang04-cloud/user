@@ -290,6 +290,9 @@ def _dataset_plans_from_legacy(
     domain = _domain_target(legacy_domain, legacy_dataset_id)
     notes: list[str] = []
     files = _legacy_files(root=root, domain=domain, target_dataset_id=legacy_dataset_id, metadata=metadata, max_files=max_files)
+    if legacy_domain == "market_daily":
+        files = [item for item in files if item.content_key == "bronze_market_data"]
+        notes.append("legacy policy_input_bundle migrated only from bronze_market_data; run qdp clean daily-market before activation")
     plans = [
         DatasetMigrationPlan(
             legacy_dataset_id=legacy_dataset_id,
@@ -309,30 +312,6 @@ def _dataset_plans_from_legacy(
             notes=notes,
         )
     ]
-    if legacy_domain == "market_daily":
-        raw_files = [item for item in files if item.content_key == "bronze_market_data"]
-        if raw_files:
-            raw_dataset_id = f"market_daily_raw__{stable_hash({'legacy_dataset_id': legacy_dataset_id, 'content': 'bronze_market_data'})}"
-            raw_files = _retarget_files(root=root, domain="market_daily_raw", target_dataset_id=raw_dataset_id, files=raw_files)
-            plans.append(
-                DatasetMigrationPlan(
-                    legacy_dataset_id=legacy_dataset_id,
-                    target_dataset_id=raw_dataset_id,
-                    domain="market_daily_raw",
-                    layer="raw",
-                    frequency="1d",
-                    contract_version="legacy_market_daily_raw_pending_qdp_v2_split",
-                    primary_key=_default_primary_key("market_daily_raw"),
-                    source={
-                        "provider": str(metadata.get("source", "") or "legacy"),
-                        "created_by": "qdp v2 migration",
-                        "created_at": utc_now(),
-                    },
-                    legacy_metadata=_legacy_metadata_subset(metadata),
-                    files=raw_files,
-                    notes=["legacy policy_input_bundle bronze_market_data copied as pending source; run qdp clean daily-market before activation"],
-                )
-            )
     return plans
 
 
@@ -381,24 +360,23 @@ def _file_plan(
     index: int,
     metadata: Mapping[str, Any],
 ) -> LegacyFilePlan:
-    source = Path(source_path).resolve()
+    source = Path(source_path)
     rows = int(metadata.get("row_count", 0) or 0)
     if rows <= 0:
         rows = _parquet_row_count(source)
-    schema_payload = _parquet_schema(source)
     suffix = source.suffix or ".parquet"
     safe_key = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in str(content_key))
     target_name = f"part_{index:06d}_{safe_key}{suffix}"
     target_path = root / "datasets" / domain / target_dataset_id / "shards" / target_name
     return LegacyFilePlan(
         source_path=str(source),
-        target_path=str(target_path.resolve()),
+        target_path=str(target_path),
         content_key=str(content_key),
         row_count=rows,
         start_date=str(metadata.get("start_date", "") or _date_from_metadata(metadata, "start")),
         end_date=str(metadata.get("end_date", "") or _date_from_metadata(metadata, "end")),
-        source_schema_hash=schema_hash(schema_payload),
-        file_size=int(source.stat().st_size) if source.exists() else 0,
+        source_schema_hash="",
+        file_size=int(metadata.get("file_size", 0) or metadata.get("bytes", 0) or 0),
     )
 
 
@@ -410,7 +388,7 @@ def _retarget_files(*, root: Path, domain: str, target_dataset_id: str, files: l
         out.append(
             LegacyFilePlan(
                 source_path=file_plan.source_path,
-                target_path=str(target_path.resolve()),
+                target_path=str(target_path),
                 content_key=file_plan.content_key,
                 row_count=file_plan.row_count,
                 start_date=file_plan.start_date,
@@ -437,7 +415,7 @@ def _expand_content_path(value: str) -> list[Path]:
 def _first_existing_path(payload: Mapping[str, Any], keys: tuple[str, ...]) -> Path | None:
     for key in keys:
         text = str(payload.get(key, "") or "").strip()
-        if text and Path(text).exists() and Path(text).is_file():
+        if text:
             return Path(text)
     return None
 
@@ -462,8 +440,9 @@ def _verify_copy(source: Path, target: Path, *, expected_rows: int, expected_sch
     rows = _parquet_row_count(target)
     if expected_rows > 0 and int(rows) != int(expected_rows):
         raise RuntimeError(f"copied_row_count_mismatch: {target}; expected={expected_rows}; actual={rows}")
+    source_schema_hash = expected_schema_hash or schema_hash(_parquet_schema(source))
     actual_schema_hash = schema_hash(_parquet_schema(target))
-    if expected_schema_hash and actual_schema_hash != expected_schema_hash:
+    if source_schema_hash and actual_schema_hash != source_schema_hash:
         raise RuntimeError(f"copied_schema_hash_mismatch: {target}")
 
 
@@ -535,7 +514,7 @@ def _default_contract(domain: str, metadata: Mapping[str, Any]) -> str:
     if domain == "market_daily_raw":
         return "legacy_market_daily_raw_pending_qdp_v2_split"
     if domain == "market_daily_panel":
-        return "legacy_policy_bundle_research_panel_v1"
+        return "legacy_market_daily_panel_pending_qdp_v2_split"
     if domain == "valuation":
         return "legacy_valuation_pending_qdp_v2_normalization"
     return str(dict(metadata.get("parameters", {}) or {}).get("contract_version", "") or f"qdp_v2_{domain}_v1")

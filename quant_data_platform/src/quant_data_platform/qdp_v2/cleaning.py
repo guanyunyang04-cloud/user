@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import gc
 import json
 import shutil
+import time
 from pathlib import Path
 from typing import Any
 
@@ -31,49 +34,121 @@ def derive_5m_from_1m(
     source_dataset_id: str = "",
     max_shards: int = 0,
     runtime: str = "balanced",
+    workers: int = 1,
+    resume: bool = False,
+    trust_existing: bool = False,
+    duckdb_memory_limit: str = "",
+    shard_modulo: int = 0,
+    shard_remainder: int = 0,
+    stage_only: bool = False,
     activate_domain: bool = False,
 ) -> dict[str, Any]:
     root = qdp_v2_root(workspace_root)
     source_manifest = _resolve_source_manifest(root, source_dataset_id, "market_intraday_1m")
     source = read_dataset_manifest(source_manifest)
     profile = resolve_runtime_profile(runtime)
+    memory_limit = str(duckdb_memory_limit or "").strip() or profile.duckdb_memory_limit
     target_dataset_id = f"market_intraday_5m__{stable_hash({'source': source.dataset_id, 'contract': 'mootdx_5m_48_v1'})}"
     target_dir = root / "datasets" / "market_intraday_5m" / target_dataset_id
     staging = target_dir / ".staging"
-    if staging.exists():
+    if staging.exists() and not resume:
         shutil.rmtree(staging)
     staging_shards = staging / "shards"
     staging_shards.mkdir(parents=True, exist_ok=True)
-    processed = 0
-    shard_entries: list[ShardManifestEntry] = []
+    requested_workers = max(1, int(workers or 1))
+    worker_count = min(requested_workers, max(1, int(profile.duckdb_threads or 1)), max(1, len(source.shards)))
+    worker_memory_limit = _parallel_duckdb_memory_limit(memory_limit, worker_count)
+    worker_threads = max(1, min(2, int(profile.duckdb_threads or 1)))
+    shard_entries_by_index: dict[int, ShardManifestEntry] = {}
     errors: list[dict[str, Any]] = []
+    tasks: list[dict[str, Any]] = []
+    reused = 0
+    selected = 0
+    modulo = max(0, int(shard_modulo or 0))
+    remainder = int(shard_remainder or 0)
     for index, shard in enumerate(source.shards):
-        if max_shards and processed >= max_shards:
+        if modulo and index % modulo != remainder:
+            continue
+        if max_shards and selected >= max_shards:
             break
         source_path = root / shard.path if not Path(shard.path).is_absolute() else Path(shard.path)
         target_path = staging_shards / f"part_{index:06d}_5m.parquet"
-        try:
-            stats = _derive_5m_shard(source_path=source_path, target_path=target_path, memory_limit=profile.duckdb_memory_limit, threads=profile.duckdb_threads)
-            if int(stats["row_count"]) <= 0:
+        selected += 1
+        if resume and target_path.exists():
+            if trust_existing and int(target_path.stat().st_size) > 0:
+                reused += 1
                 continue
-            shard_entries.append(
-                ShardManifestEntry(
-                    path=f"datasets/market_intraday_5m/{target_dataset_id}/shards/{target_path.name}",
-                    row_count=int(stats["row_count"]),
-                    start_date=str(stats.get("start_date", "") or shard.start_date),
-                    end_date=str(stats.get("end_date", "") or shard.end_date),
-                    status="stored",
-                    file_size=int(target_path.stat().st_size),
-                    schema_hash=str(stats.get("schema_hash", "") or ""),
-                    source_path=str(source_path.resolve()),
-                    content_key="derived_from_1m_240",
-                )
-            )
-            processed += 1
-        except Exception as exc:
-            errors.append({"source_path": str(source_path), "target_path": str(target_path), "error": str(exc)})
+            try:
+                stats = _existing_5m_shard_stats(target_path)
+                if int(stats["row_count"]) > 0:
+                    shard_entries_by_index[index] = _five_minute_shard_entry(
+                        target_dataset_id=target_dataset_id,
+                        target_path=target_path,
+                        source_path=source_path,
+                        row_count=int(stats["row_count"]),
+                        schema_hash_value=str(stats.get("schema_hash", "") or ""),
+                        shard=shard,
+                    )
+                    reused += 1
+                    continue
+            except Exception:
+                try:
+                    _remove_file_with_retries(target_path)
+                except Exception as exc:
+                    errors.append({"source_path": str(source_path), "target_path": str(target_path), "error": f"remove_corrupt_resume_file_failed: {exc}"})
+                    continue
+        tasks.append(
+            {
+                "index": index,
+                "source_path": str(source_path),
+                "target_path": str(target_path),
+                "memory_limit": worker_memory_limit,
+                "threads": worker_threads,
+                "target_dataset_id": target_dataset_id,
+                "shard": shard.model_dump() if hasattr(shard, "model_dump") else shard.__dict__,
+            }
+        )
+    if worker_count <= 1 or len(tasks) <= 1:
+        for task in tasks:
+            result = _derive_5m_shard_task(task)
+            if result.get("status") == "ok":
+                shard_entries_by_index[int(result["index"])] = result["entry"]
+            elif result.get("status") != "empty":
+                errors.append(result)
+    else:
+        with ProcessPoolExecutor(max_workers=worker_count) as pool:
+            futures = [pool.submit(_derive_5m_shard_task, task) for task in tasks]
+            for future in as_completed(futures):
+                result = future.result()
+                if result.get("status") == "ok":
+                    shard_entries_by_index[int(result["index"])] = result["entry"]
+                elif result.get("status") != "empty":
+                    errors.append(result)
+    shard_entries = [shard_entries_by_index[key] for key in sorted(shard_entries_by_index)]
+    processed = len(shard_entries)
     if errors:
         return {"status": "error", "target_dataset_id": target_dataset_id, "processed_shards": processed, "errors": errors[:50], "error_count": len(errors)}
+    if stage_only:
+        payload = {
+            "status": "ok",
+            "stage_only": True,
+            "target_dataset_id": target_dataset_id,
+            "source_dataset_id": source.dataset_id,
+            "processed_shards": processed,
+            "new_shards": len(tasks),
+            "reused_shards": reused,
+            "selected_shards": selected,
+            "trust_existing": bool(trust_existing),
+            "max_shards": int(max_shards or 0),
+            "shard_modulo": modulo,
+            "shard_remainder": remainder,
+            "workers": worker_count,
+            "worker_memory_limit": worker_memory_limit,
+            "worker_threads": worker_threads,
+            "runtime_environment": runtime_environment(),
+        }
+        atomic_write_json(root / "runs" / f"derive_5m_stage_{remainder}_{utc_now().replace(':', '').replace('-', '')}.json", payload)
+        return payload
     final_shards = target_dir / "shards"
     target_dir.mkdir(parents=True, exist_ok=True)
     if final_shards.exists():
@@ -115,11 +190,16 @@ def derive_5m_from_1m(
         "manifest_path": str(manifest_path.resolve()),
         "source_dataset_id": source.dataset_id,
         "processed_shards": processed,
+        "new_shards": len(tasks),
+        "reused_shards": reused,
         "row_count": manifest.row_count,
         "start_date": manifest.start_date,
         "end_date": manifest.end_date,
         "active_manifest": active_path,
         "max_shards": int(max_shards or 0),
+        "workers": worker_count,
+        "worker_memory_limit": worker_memory_limit,
+        "worker_threads": worker_threads,
         "runtime_environment": runtime_environment(),
     }
     atomic_write_json(root / "runs" / f"derive_5m_{utc_now().replace(':', '').replace('-', '')}.json", payload)
@@ -170,8 +250,8 @@ def split_daily_market(
                 ShardManifestEntry(
                     path=f"datasets/market_daily_raw/{raw_dataset_id}/shards/{raw_path.name}",
                     row_count=int(stats["raw_row_count"]),
-                    start_date=str(stats.get("start_date", "") or shard.start_date),
-                    end_date=str(stats.get("end_date", "") or shard.end_date),
+                    start_date=shard.start_date,
+                    end_date=shard.end_date,
                     status="stored",
                     file_size=int(raw_path.stat().st_size),
                     schema_hash=schema_hash(_duckdb_schema(raw_path)),
@@ -183,8 +263,8 @@ def split_daily_market(
                 ShardManifestEntry(
                     path=f"datasets/market_daily_panel/{panel_dataset_id}/shards/{panel_path.name}",
                     row_count=int(stats["panel_row_count"]),
-                    start_date=str(stats.get("start_date", "") or shard.start_date),
-                    end_date=str(stats.get("end_date", "") or shard.end_date),
+                    start_date=shard.start_date,
+                    end_date=shard.end_date,
                     status="stored",
                     file_size=int(panel_path.stat().st_size),
                     schema_hash=schema_hash(_duckdb_schema(panel_path)),
@@ -305,8 +385,8 @@ def normalize_valuation(
                 ShardManifestEntry(
                     path=f"datasets/valuation/{target_dataset_id}/shards/{target_path.name}",
                     row_count=int(stats["row_count"]),
-                    start_date=str(stats.get("start_date", "") or shard.start_date),
-                    end_date=str(stats.get("end_date", "") or shard.end_date),
+                    start_date=shard.start_date,
+                    end_date=shard.end_date,
                     status="stored",
                     file_size=int(target_path.stat().st_size),
                     schema_hash=str(stats.get("schema_hash", "") or ""),
@@ -390,12 +470,12 @@ def _resolve_source_manifest(root: Path, dataset_id: str, domain: str) -> Path:
 
 
 def _replace_staging_shards(staging_shards: Path, final_shards: Path) -> None:
+    staging_root = staging_shards.parent
     final_shards.parent.mkdir(parents=True, exist_ok=True)
     if final_shards.exists():
         shutil.rmtree(final_shards)
     if staging_shards.exists():
         staging_shards.replace(final_shards)
-    staging_root = final_shards.parent / ".staging"
     if staging_root.exists():
         shutil.rmtree(staging_root, ignore_errors=True)
 
@@ -460,7 +540,6 @@ def _split_daily_market_shard(
                     adjusted_flag
                 from ({base_select}) base
                 where has_bar
-                order by trade_date, symbol
             ) to {raw_literal} (format parquet)
             """
         )
@@ -482,12 +561,12 @@ def _split_daily_market_shard(
                     has_bar,
                     case when has_bar then '' else 'no_bar' end as reject_reason
                 from ({base_select}) base
-                order by trade_date, symbol
             ) to {panel_literal} (format parquet)
             """
         )
-        raw_row = con.execute("select count(*) as n, min(trade_date), max(trade_date) from read_parquet(?)", [str(raw_target_path)]).fetchone()
-        panel_row = con.execute("select count(*) as n, min(trade_date), max(trade_date) from read_parquet(?)", [str(panel_target_path)]).fetchone()
+    with duckdb.connect(":memory:") as stats_con:
+        raw_row = stats_con.execute("select count(*) as n, min(trade_date), max(trade_date) from read_parquet(?)", [str(raw_target_path)]).fetchone()
+        panel_row = stats_con.execute("select count(*) as n, min(trade_date), max(trade_date) from read_parquet(?)", [str(panel_target_path)]).fetchone()
     return {
         "raw_row_count": int(raw_row[0] or 0),
         "panel_row_count": int(panel_row[0] or 0),
@@ -554,13 +633,116 @@ def _derive_5m_shard(*, source_path: Path, target_path: Path, memory_limit: str,
         ) to {target_literal} (format parquet)
         """
         con.execute(sql)
-        row = con.execute("select count(*) as n, min(trade_date) as start_date, max(trade_date) as end_date from read_parquet(?)", [str(target_path)]).fetchone()
+    with duckdb.connect(":memory:") as stats_con:
+        row = stats_con.execute("select count(*) as n, min(trade_date) as start_date, max(trade_date) as end_date from read_parquet(?)", [str(target_path)]).fetchone()
     return {
         "row_count": int(row[0] or 0),
         "start_date": str(row[1] or ""),
         "end_date": str(row[2] or ""),
         "schema_hash": schema_hash(_duckdb_schema(target_path)),
     }
+
+
+def _derive_5m_shard_task(task: dict[str, Any]) -> dict[str, Any]:
+    index = int(task["index"])
+    source_path = Path(str(task["source_path"]))
+    target_path = Path(str(task["target_path"]))
+    shard = ShardManifestEntry.from_mapping(task.get("shard", {}) or {})
+    try:
+        stats = _derive_5m_shard(
+            source_path=source_path,
+            target_path=target_path,
+            memory_limit=str(task["memory_limit"]),
+            threads=int(task["threads"]),
+        )
+        if int(stats["row_count"]) <= 0:
+            return {"status": "empty", "index": index, "source_path": str(source_path), "target_path": str(target_path)}
+        return {
+            "status": "ok",
+            "index": index,
+            "entry": _five_minute_shard_entry(
+                target_dataset_id=str(task["target_dataset_id"]),
+                target_path=target_path,
+                source_path=source_path,
+                row_count=int(stats["row_count"]),
+                schema_hash_value=str(stats.get("schema_hash", "") or ""),
+                shard=shard,
+            ),
+        }
+    except Exception as exc:
+        return {"status": "error", "index": index, "source_path": str(source_path), "target_path": str(target_path), "error": str(exc)}
+
+
+def _existing_5m_shard_stats(target_path: Path) -> dict[str, Any]:
+    try:
+        import pyarrow.parquet as pq  # type: ignore
+    except Exception:
+        import duckdb  # type: ignore
+
+        with duckdb.connect(":memory:") as con:
+            row = con.execute("select count(*) as n from read_parquet(?)", [str(target_path)]).fetchone()
+        return {"row_count": int(row[0] or 0), "schema_hash": schema_hash(_duckdb_schema(target_path))}
+
+    parquet_file = pq.ParquetFile(str(target_path))
+    row_count = int(parquet_file.metadata.num_rows)
+    arrow_schema = parquet_file.schema_arrow
+    schema = [{"name": str(field.name), "type": str(field.type)} for field in arrow_schema]
+    return {"row_count": row_count, "schema_hash": schema_hash(schema)}
+
+
+def _remove_file_with_retries(path: Path, *, attempts: int = 8, delay_seconds: float = 0.25) -> None:
+    last_error: Exception | None = None
+    for _ in range(max(1, attempts)):
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except PermissionError as exc:
+            last_error = exc
+            gc.collect()
+            time.sleep(delay_seconds)
+    if last_error is not None:
+        raise last_error
+
+
+def _five_minute_shard_entry(
+    *,
+    target_dataset_id: str,
+    target_path: Path,
+    source_path: Path,
+    row_count: int,
+    schema_hash_value: str,
+    shard: ShardManifestEntry,
+) -> ShardManifestEntry:
+    return ShardManifestEntry(
+        path=f"datasets/market_intraday_5m/{target_dataset_id}/shards/{target_path.name}",
+        row_count=int(row_count),
+        start_date=shard.start_date,
+        end_date=shard.end_date,
+        status="stored",
+        file_size=int(target_path.stat().st_size),
+        schema_hash=schema_hash_value,
+        source_path=str(source_path.resolve()),
+        content_key="derived_from_1m_240",
+    )
+
+
+def _parallel_duckdb_memory_limit(profile_limit: str, workers: int) -> str:
+    worker_count = max(1, int(workers or 1))
+    profile_gb = _memory_limit_gb(profile_limit)
+    if worker_count <= 1:
+        return f"{profile_gb}GB"
+    total_budget_gb = min(14, max(profile_gb, 12))
+    per_worker_gb = max(2, int(total_budget_gb / worker_count))
+    return f"{per_worker_gb}GB"
+
+
+def _memory_limit_gb(value: str) -> int:
+    text = str(value or "").strip().upper()
+    if text.endswith("GB"):
+        return max(1, int(float(text[:-2])))
+    if text.endswith("G"):
+        return max(1, int(float(text[:-1])))
+    return 4
 
 
 def _normalize_valuation_shard(*, source_path: Path, target_path: Path, memory_limit: str, threads: int) -> dict[str, Any]:
@@ -598,7 +780,8 @@ def _normalize_valuation_shard(*, source_path: Path, target_path: Path, memory_l
         ) to {target_literal} (format parquet)
         """
         con.execute(sql)
-        row = con.execute("select count(*) as n, min(trade_date) as start_date, max(trade_date) as end_date from read_parquet(?)", [str(target_path)]).fetchone()
+    with duckdb.connect(":memory:") as stats_con:
+        row = stats_con.execute("select count(*) as n, min(trade_date) as start_date, max(trade_date) as end_date from read_parquet(?)", [str(target_path)]).fetchone()
     return {
         "row_count": int(row[0] or 0),
         "start_date": str(row[1] or ""),
@@ -636,6 +819,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     five = sub.add_parser("5m-from-1m", help="Derive standard mootdx_5m_48_v1 shards from qdp_v2 1m 240 shards.")
     five.add_argument("--source-dataset-id", default="")
     five.add_argument("--max-shards", type=int, default=0)
+    five.add_argument("--workers", type=int, default=1)
+    five.add_argument("--resume", action="store_true")
+    five.add_argument("--trust-existing", action="store_true")
+    five.add_argument("--duckdb-memory-limit", default="")
+    five.add_argument("--shard-modulo", type=int, default=0)
+    five.add_argument("--shard-remainder", type=int, default=0)
+    five.add_argument("--stage-only", action="store_true")
     five.add_argument("--activate-domain", action="store_true")
     five.add_argument("--json", action="store_true")
     daily = sub.add_parser("daily-market", help="Split a rectangular legacy daily market panel into raw facts and research panel.")
@@ -661,6 +851,13 @@ def main(argv: list[str] | None = None) -> int:
             source_dataset_id=str(args.source_dataset_id or ""),
             max_shards=int(args.max_shards or 0),
             runtime=str(args.runtime or "balanced"),
+            workers=int(args.workers or 1),
+            resume=bool(args.resume),
+            trust_existing=bool(args.trust_existing),
+            duckdb_memory_limit=str(args.duckdb_memory_limit or ""),
+            shard_modulo=int(args.shard_modulo or 0),
+            shard_remainder=int(args.shard_remainder or 0),
+            stage_only=bool(args.stage_only),
             activate_domain=bool(args.activate_domain),
         )
     elif args.clean_command == "daily-market":
