@@ -662,7 +662,10 @@ class DataPlatformProviderContractTest(unittest.TestCase):
         self.assertGreaterEqual(features["high_time_frac"].iloc[0], 0.0)
         self.assertLessEqual(features["high_time_frac"].iloc[0], 1.0)
         self.assertLess(features["intraday_max_drawdown"].iloc[0], 0.0)
-        self.assertNotIn("auction", ",".join(features.columns))
+        self.assertIn("opening_auction_pressure", features.columns)
+        self.assertIn("closing_auction_pressure", features.columns)
+        self.assertGreater(features["opening_auction_amount"].iloc[0], 0.0)
+        self.assertGreater(features["closing_auction_amount"].iloc[0], 0.0)
 
     def test_baostock_index_constituents_frame_combines_supported_indices(self) -> None:
         class FakeQuery:

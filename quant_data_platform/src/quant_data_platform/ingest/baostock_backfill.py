@@ -1090,7 +1090,7 @@ def _domain_spec(
 
 def _intraday_bar_count_contract(domain: str) -> str:
     if domain == DataDomain.MARKET_INTRADAY_1M:
-        return "mootdx_1m_240_without_0930_by_default; external_csv_1m_may_preserve_241_with_0930"
+        return "mootdx_1m_240_without_0930_by_default; external_1m_normalized_0930_merged_into_0931"
     if domain == DataDomain.MARKET_INTRADAY_5M:
         return "mootdx_or_baostock_5m_48_full_trading_day"
     return ""

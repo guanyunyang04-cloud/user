@@ -26,6 +26,7 @@ class CombineShardedDomainConfig:
     shard_batch_members: int = 1
     shard_batch_rows: int = 0
     derive_5m_from_1m: bool = False
+    normalize_intraday_1m_to_mootdx_240: bool = True
     link_mode: str = "manifest"
     dry_run: bool = False
     reuse: bool = True
@@ -42,6 +43,7 @@ class CombineShardedDomainConfig:
             shard_batch_members=max(1, int(self.shard_batch_members or 1)),
             shard_batch_rows=max(0, int(self.shard_batch_rows or 0)),
             derive_5m_from_1m=bool(self.derive_5m_from_1m),
+            normalize_intraday_1m_to_mootdx_240=bool(self.normalize_intraday_1m_to_mootdx_240),
             link_mode=str(self.link_mode or "manifest").strip().lower(),
             dry_run=bool(self.dry_run),
             reuse=bool(self.reuse),
@@ -83,6 +85,8 @@ def combine_sharded_domain_datasets(config: CombineShardedDomainConfig) -> Combi
         source_domain = str(dict(metadata.get("parameters", {}) or {}).get("domain", "") or "")
         if normalize_domain(source_domain) != cfg.domain:
             raise ValueError(f"source_domain_mismatch: dataset_id={dataset_id} domain={source_domain} expected={cfg.domain}")
+        if cfg.domain == DataDomain.MARKET_INTRADAY_1M:
+            _require_compatible_1m_contract(metadata, dataset_id=dataset_id)
         manifest_path = Path(str(dict(metadata.get("content_paths", {}) or {}).get("shard_manifest", "") or ""))
         if not manifest_path.exists():
             raise FileNotFoundError(f"source_shard_manifest_not_found: {dataset_id} {manifest_path}")
@@ -157,6 +161,7 @@ def _target_spec(cfg: CombineShardedDomainConfig) -> dict[str, Any]:
         years=cfg.years,
         derive_5m_from_1m=cfg.derive_5m_from_1m,
         hash_zips=False,
+        normalize_intraday_1m_to_mootdx_240=bool(cfg.normalize_intraday_1m_to_mootdx_240),
         shard_batch_members=cfg.shard_batch_members,
         shard_batch_rows=cfg.shard_batch_rows,
     ).normalized()
@@ -166,15 +171,40 @@ def _target_spec(cfg: CombineShardedDomainConfig) -> dict[str, Any]:
     return spec
 
 
+def _require_compatible_1m_contract(metadata: Mapping[str, Any], *, dataset_id: str) -> None:
+    params = dict(metadata.get("parameters", {}) or {})
+    policy = str(params.get("one_minute_policy", "") or params.get("intraday_bar_count_contract", "") or "").lower()
+    expected = int(params.get("expected_1m_bars_per_day", 0) or 0)
+    normalized = bool(params.get("normalize_intraday_1m_to_mootdx_240", False))
+    is_240 = (
+        "mootdx_240" in policy
+        or "240 bars" in policy
+        or "240_without_0930" in policy
+        or expected == 240
+        or normalized
+    )
+    if not is_240:
+        raise ValueError(
+            "combine_1m_contract_blocker: source dataset is not known to be mootdx 240-bar compatible; "
+            f"run normalize-intraday-1m-contract first: {dataset_id}"
+        )
+
+
 def _dedupe_key(record: Mapping[str, Any], *, fallback: str) -> str:
-    values = [
-        str(record.get("domain", "") or ""),
+    provenance = [
         str(record.get("source_zip", "") or ""),
         str(record.get("source_member", "") or ""),
-        str(record.get("derivation", "") or ""),
+        str(record.get("chunk_id", "") or ""),
+        str(record.get("source_raw_path", "") or ""),
     ]
-    key = "|".join(values)
-    return key if any(values) else fallback
+    if any(provenance):
+        values = [
+            str(record.get("domain", "") or ""),
+            *provenance,
+            str(record.get("derivation", "") or ""),
+        ]
+        return "|".join(values)
+    return fallback
 
 
 def _materialize_shard(source_path: Path, target_path: Path, *, link_mode: str) -> str:
@@ -205,6 +235,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--years", required=True)
     parser.add_argument("--shard-batch-members", type=int, default=1)
     parser.add_argument("--shard-batch-rows", type=int, default=0)
+    parser.add_argument("--normalize-1m-to-mootdx-240", dest="normalize_intraday_1m_to_mootdx_240", action="store_true", default=True)
+    parser.add_argument("--preserve-source-1m-bars", dest="normalize_intraday_1m_to_mootdx_240", action="store_false")
     parser.add_argument("--link-mode", choices=("manifest", "hardlink", "hardlink-or-copy", "copy"), default="manifest")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--reuse", dest="reuse", action="store_true", default=True)
@@ -233,6 +265,7 @@ def main(argv: list[str] | None = None) -> int:
             years=_parse_years(args.years),
             shard_batch_members=args.shard_batch_members,
             shard_batch_rows=args.shard_batch_rows,
+            normalize_intraday_1m_to_mootdx_240=args.normalize_intraday_1m_to_mootdx_240,
             link_mode=args.link_mode,
             dry_run=args.dry_run,
             reuse=args.reuse,

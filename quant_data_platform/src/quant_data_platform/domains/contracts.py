@@ -172,6 +172,13 @@ DOMAIN_STANDARD_COLUMNS: dict[str, list[str]] = {
         "symbol",
         "trade_date",
         "first_5m_ret",
+        "opening_auction_ret",
+        "opening_auction_amount",
+        "opening_auction_volume",
+        "opening_auction_amount_share",
+        "opening_auction_range",
+        "opening_auction_vwap",
+        "opening_auction_pressure",
         "first_15m_ret",
         "first_30m_ret",
         "first_30m_amount_share",
@@ -179,6 +186,13 @@ DOMAIN_STANDARD_COLUMNS: dict[str, list[str]] = {
         "open_gap_first_30m_follow_through",
         "open_gap_first_30m_reversal",
         "last_5m_ret",
+        "closing_auction_ret",
+        "closing_auction_amount",
+        "closing_auction_volume",
+        "closing_auction_amount_share",
+        "closing_auction_range",
+        "closing_auction_vwap",
+        "closing_auction_pressure",
         "last_30m_ret",
         "last_30m_amount_share",
         "intraday_ret",
@@ -797,6 +811,14 @@ def build_intraday_daily_feature_frame(
         open_gap = _safe_return(first_open, prev_close)
         amount_share_30 = _window_sum(amount_values, 6, head=True) / total_amount if total_amount > 0 else np.nan
         last_amount_share_30 = _window_sum(amount_values, 6, head=False) / total_amount if total_amount > 0 else np.nan
+        opening_amount = _finite_sum(amount_values.head(1))
+        opening_volume = _finite_sum(volume_values.head(1))
+        closing_amount = _finite_sum(amount_values.tail(1))
+        closing_volume = _finite_sum(volume_values.tail(1))
+        opening_amount_share = opening_amount / total_amount if total_amount > 0 else np.nan
+        closing_amount_share = closing_amount / total_amount if total_amount > 0 else np.nan
+        opening_ret = _head_window_ret(day, 1)
+        closing_ret = _tail_close_to_previous_close_ret(day)
         vwap = total_amount / total_volume if total_amount > 0 and total_volume > 0 else np.nan
         close_ret = close_values.pct_change().replace([np.inf, -np.inf], np.nan)
         clocks = day["bar_time"].map(_bar_clock_int)
@@ -838,6 +860,13 @@ def build_intraday_daily_feature_frame(
                 "symbol": symbol,
                 "trade_date": trade_date,
                 "first_5m_ret": _head_window_ret(day, 1),
+                "opening_auction_ret": opening_ret,
+                "opening_auction_amount": opening_amount,
+                "opening_auction_volume": opening_volume,
+                "opening_auction_amount_share": opening_amount_share,
+                "opening_auction_range": _window_range(day, 1, head=True),
+                "opening_auction_vwap": opening_amount / opening_volume if opening_amount > 0 and opening_volume > 0 else np.nan,
+                "opening_auction_pressure": opening_ret * opening_amount_share if pd.notna(opening_ret) and pd.notna(opening_amount_share) else np.nan,
                 "first_15m_ret": _head_window_ret(day, 3),
                 "first_30m_ret": first_30m_ret,
                 "first_30m_amount_share": amount_share_30,
@@ -845,6 +874,13 @@ def build_intraday_daily_feature_frame(
                 "open_gap_first_30m_follow_through": gap_sign * first_30m_ret if pd.notna(gap_sign) and pd.notna(first_30m_ret) else np.nan,
                 "open_gap_first_30m_reversal": -gap_sign * first_30m_ret if pd.notna(gap_sign) and pd.notna(first_30m_ret) else np.nan,
                 "last_5m_ret": _tail_close_to_previous_close_ret(day),
+                "closing_auction_ret": closing_ret,
+                "closing_auction_amount": closing_amount,
+                "closing_auction_volume": closing_volume,
+                "closing_auction_amount_share": closing_amount_share,
+                "closing_auction_range": _window_range(day, 1, head=False),
+                "closing_auction_vwap": closing_amount / closing_volume if closing_amount > 0 and closing_volume > 0 else np.nan,
+                "closing_auction_pressure": closing_ret * closing_amount_share if pd.notna(closing_ret) and pd.notna(closing_amount_share) else np.nan,
                 "last_30m_ret": last_30m_ret,
                 "last_30m_amount_share": last_amount_share_30,
                 "intraday_ret": _safe_return(last_close, first_open),

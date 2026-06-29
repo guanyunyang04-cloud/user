@@ -39,6 +39,7 @@ PASSTHROUGH_COMMAND_MODULES: dict[str, str] = {
     "combine-domain-datasets": "quant_data_platform.ingest.combine_domain_datasets",
     "combine-sharded-domain-datasets": "quant_data_platform.ingest.combine_sharded_domain_datasets",
     "import-external-quant-zip": "quant_data_platform.ingest.import_external_quant_zip",
+    "normalize-intraday-1m-contract": "quant_data_platform.ingest.normalize_intraday_1m_contract",
     "recover-external-quant-zip-import": "quant_data_platform.ingest.recover_external_quant_zip_import",
     "import-tdx-5m": "quant_data_platform.ingest.import_tdx_5m",
     "import-tdx-daily": "quant_data_platform.ingest.import_tdx_daily",
@@ -50,6 +51,7 @@ PASSTHROUGH_COMMAND_MODULES: dict[str, str] = {
     "build-sector-board-view": "quant_data_platform.lake.build_sector_board_view",
     "build-v2-status-sidecar": "quant_data_platform.lake.build_v2_status_sidecar",
     "canonical-audit": "quant_data_platform.lake.canonical_audit",
+    "lake-gc": "quant_data_platform.lake.gc",
     "import-legacy-training-caches": "quant_data_platform.lake.import_legacy_training_caches",
     "import-traditional-baostock-v2-snapshot": "quant_data_platform.lake.import_traditional_baostock_v2_snapshot",
     "import-traditional-pit-status-sidecar": "quant_data_platform.lake.import_traditional_pit_status_sidecar",
@@ -240,6 +242,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if len(raw_argv) >= 2 and raw_argv[0] == "lake" and raw_argv[1] == "gc":
+        return _run_passthrough_module("quant_data_platform.lake.gc", raw_argv[2:])
     for index, item in enumerate(raw_argv):
         if item in PASSTHROUGH_COMMAND_MODULES:
             return _run_passthrough_command(item, raw_argv[index + 1 :])
@@ -457,6 +461,10 @@ def main(argv: list[str] | None = None) -> int:
 
 def _run_passthrough_command(command: str, passthrough_args: list[str]) -> int:
     module_name = PASSTHROUGH_COMMAND_MODULES[command]
+    return _run_passthrough_module(module_name, passthrough_args)
+
+
+def _run_passthrough_module(module_name: str, passthrough_args: list[str]) -> int:
     module = importlib.import_module(module_name)
     module_main = getattr(module, "main", None)
     if not callable(module_main):

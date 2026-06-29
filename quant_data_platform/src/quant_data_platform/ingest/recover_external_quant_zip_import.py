@@ -35,6 +35,7 @@ class RecoverExternalImportConfig:
     shard_batch_members: int = 1
     shard_batch_rows: int = 0
     derive_5m_from_1m: bool = False
+    normalize_intraday_1m_to_mootdx_240: bool = True
     link_mode: str = "manifest"
     dry_run: bool = False
     reuse: bool = True
@@ -52,6 +53,7 @@ class RecoverExternalImportConfig:
             shard_batch_members=max(1, int(self.shard_batch_members or 1)),
             shard_batch_rows=max(0, int(self.shard_batch_rows or 0)),
             derive_5m_from_1m=bool(self.derive_5m_from_1m),
+            normalize_intraday_1m_to_mootdx_240=bool(self.normalize_intraday_1m_to_mootdx_240),
             link_mode=str(self.link_mode or "manifest").strip().lower(),
             dry_run=bool(self.dry_run),
             reuse=bool(self.reuse),
@@ -94,6 +96,7 @@ def recover_import(config: RecoverExternalImportConfig) -> RecoverExternalImport
         end_date=cfg.end_date,
         years=cfg.source_years,
         derive_5m_from_1m=cfg.derive_5m_from_1m,
+        normalize_intraday_1m_to_mootdx_240=bool(cfg.normalize_intraday_1m_to_mootdx_240),
         hash_zips=False,
         shard_batch_members=cfg.shard_batch_members,
         shard_batch_rows=cfg.shard_batch_rows,
@@ -106,6 +109,7 @@ def recover_import(config: RecoverExternalImportConfig) -> RecoverExternalImport
         end_date=cfg.end_date,
         years=cfg.years,
         derive_5m_from_1m=cfg.derive_5m_from_1m,
+        normalize_intraday_1m_to_mootdx_240=bool(cfg.normalize_intraday_1m_to_mootdx_240),
         hash_zips=False,
         shard_batch_members=cfg.shard_batch_members,
         shard_batch_rows=cfg.shard_batch_rows,
@@ -297,6 +301,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-years", default="", help="Original import --years value. Empty matches the full-run spec.")
     parser.add_argument("--shard-batch-members", type=int, default=1)
     parser.add_argument("--shard-batch-rows", type=int, default=0)
+    parser.add_argument("--normalize-1m-to-mootdx-240", dest="normalize_intraday_1m_to_mootdx_240", action="store_true", default=True)
+    parser.add_argument("--preserve-source-1m-bars", dest="normalize_intraday_1m_to_mootdx_240", action="store_false")
     parser.add_argument("--link-mode", choices=("manifest", "hardlink", "hardlink-or-copy", "copy"), default="manifest")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--reuse", dest="reuse", action="store_true", default=True)
@@ -327,6 +333,7 @@ def main(argv: list[str] | None = None) -> int:
             source_years=_parse_years(args.source_years),
             shard_batch_members=args.shard_batch_members,
             shard_batch_rows=args.shard_batch_rows,
+            normalize_intraday_1m_to_mootdx_240=args.normalize_intraday_1m_to_mootdx_240,
             link_mode=args.link_mode,
             dry_run=args.dry_run,
             reuse=args.reuse,

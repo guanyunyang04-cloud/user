@@ -5,6 +5,9 @@ import zipfile
 
 import pandas as pd
 
+from quant_data_platform.core.json_io import write_json
+from quant_data_platform.core.paths import qdp_paths
+from quant_data_platform.core.registry import load_root_manifest
 from quant_data_platform.lake.canonical import (
     DEFAULT_CANONICAL_ALIAS,
     build_lake_inventory,
@@ -180,6 +183,82 @@ def test_build_canonical_policy_bundle_references_sharded_market_manifest(tmp_pa
     assert metadata["content_paths"]["bronze_market_shard_manifest"].endswith("shard_manifest.json")
     assert prepared.universe == ("000001.SZ", "600000.SH")
     assert float(prepared.close.loc[pd.Timestamp("2010-01-05"), "000001.SZ"]) == 10.6
+
+
+def test_build_canonical_policy_bundle_can_update_root_manifest_without_memmap(tmp_path) -> None:
+    brain = tmp_path / "brain"
+    brain.mkdir(parents=True)
+    (brain / "brain_manifest.json").write_text(json.dumps({"brain_type": "main"}), encoding="utf-8")
+    paths = qdp_paths(tmp_path)
+    paths.registry_dir.mkdir(parents=True)
+    write_json(
+        paths.root_manifest,
+        {
+            "canonical_dataset_id": "policy_input_bundle__old",
+            "canonical_component_dataset_ids": {"market_daily": "policy_input_bundle__old"},
+            "canonical_sharded_memmap_status": {
+                "active_manifest_json": "old_memmap.json",
+                "latest_canonical_dataset_id": "policy_input_bundle__old",
+            },
+            "default_feature_policy": {"canonical_included_domains": ["market_daily"]},
+        },
+    )
+    lake_root = paths.lake_root
+    lake = ResearchDataLake(lake_root)
+    market_record = lake.save_domain_dataset(
+        domain=DataDomain.MARKET_DAILY,
+        frame=pd.DataFrame(
+            {
+                "trade_date": ["2010-01-04", "2010-01-04", "2010-01-05", "2010-01-05"],
+                "symbol": ["000001.SZ", "000300.SH", "000001.SZ", "000300.SH"],
+                "open": [10.0, 3000.0, 10.2, 3010.0],
+                "high": [10.5, 3020.0, 10.8, 3030.0],
+                "low": [9.8, 2990.0, 10.0, 3005.0],
+                "close": [10.3, 3015.0, 10.6, 3025.0],
+                "volume": [1000.0, 0.0, 1100.0, 0.0],
+                "amount": [10300.0, 0.0, 11660.0, 0.0],
+            }
+        ),
+        spec={"dataset": "data_platform_market_daily", "start_date": "2010-01-01", "end_date": "2010-01-05"},
+        source="unit",
+    )
+    intraday_record = lake.save_domain_dataset(
+        domain=DataDomain.MARKET_INTRADAY_1M,
+        frame=pd.DataFrame(
+            {
+                "trade_date": ["2010-01-04"],
+                "symbol": ["000001.SZ"],
+                "bar_time": ["093100000"],
+                "open": [10.0],
+                "high": [10.1],
+                "low": [9.9],
+                "close": [10.05],
+                "volume": [100.0],
+                "amount": [1005.0],
+            }
+        ),
+        spec={"dataset": "data_platform_market_intraday_1m", "start_date": "2010-01-01", "end_date": "2010-01-05"},
+        source="unit",
+    )
+
+    result = build_canonical_policy_bundle(
+        BuildCanonicalPolicyBundleConfig(
+            lake_root=lake_root,
+            market_daily_dataset_id=market_record.dataset_id,
+            sidecar_dataset_ids={DataDomain.MARKET_INTRADAY_1M: intraday_record.dataset_id},
+            start_date="2010-01-01",
+            end_date="2010-01-05",
+            update_root_manifest=True,
+            workspace_root=tmp_path,
+        )
+    )
+
+    root = load_root_manifest(paths)
+    assert root["canonical_dataset_id"] == result.dataset_id
+    assert root["canonical_component_dataset_ids"][DataDomain.MARKET_DAILY] == result.dataset_id
+    assert root["canonical_component_dataset_ids"][DataDomain.MARKET_INTRADAY_1M] == intraday_record.dataset_id
+    assert root["latest_canonical_bundle_update"]["memmap_updated"] is False
+    assert root["canonical_sharded_memmap_status"]["active_manifest_json"] == "old_memmap.json"
 
 
 def test_policy_loader_reads_intraday_and_adjust_sidecars_without_slow_domains(tmp_path) -> None:

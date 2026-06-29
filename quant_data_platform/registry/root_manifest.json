@@ -24,8 +24,8 @@
     "adjust_factor": "data_platform_adjust_factor__adfb35187548036ebb69cf8e",
     "index_constituents": "data_platform_index_constituents__e0c540aee9ceb3bab1d50515",
     "industry_concept": "data_platform_industry_concept__401d10552d2a20a127d23697",
-    "intraday_daily_features": "data_platform_intraday_daily_features__142678d981311fd2fdad850b",
-    "market_intraday_1m": "data_platform_market_intraday_1m__2b6681a833bf349cfe6c436f",
+    "intraday_daily_features": "data_platform_intraday_daily_features__46b11b7cbd488492916b1e6c",
+    "market_intraday_1m": "data_platform_market_intraday_1m__8800061d17b54855feddd770",
     "market_intraday_5m": "data_platform_market_intraday_5m__0919399f9948228755cc5b7d",
     "security_status": "data_platform_security_status__9abcdd11159abc046ebd660f",
     "trading_calendar": "data_platform_trading_calendar__03298281bc6712b72d0b5a6b",
@@ -36,17 +36,18 @@
     "adjust_factor": "data_platform_adjust_factor__adfb35187548036ebb69cf8e",
     "index_constituents": "data_platform_index_constituents__e0c540aee9ceb3bab1d50515",
     "industry_concept": "data_platform_industry_concept__401d10552d2a20a127d23697",
-    "intraday_daily_features": "data_platform_intraday_daily_features__142678d981311fd2fdad850b",
-    "market_daily": "policy_input_bundle__e622949a701bfa312ae81c66",
-    "market_intraday_1m": "data_platform_market_intraday_1m__2b6681a833bf349cfe6c436f",
+    "intraday_daily_features": "data_platform_intraday_daily_features__46b11b7cbd488492916b1e6c",
+    "market_daily": "policy_input_bundle__a56425b56b5958990c0ff35d",
+    "market_intraday_1m": "data_platform_market_intraday_1m__8800061d17b54855feddd770",
     "market_intraday_5m": "data_platform_market_intraday_5m__0919399f9948228755cc5b7d",
     "security_status": "data_platform_security_status__9abcdd11159abc046ebd660f",
     "trading_calendar": "data_platform_trading_calendar__03298281bc6712b72d0b5a6b",
     "universe_snapshot": "data_platform_universe_snapshot__b30f5a5d0270e9702a3977b4",
     "valuation": "data_platform_valuation__6c8278bf97c48606bbba4aa8"
   },
-  "canonical_dataset_id": "policy_input_bundle__e622949a701bfa312ae81c66",
-  "canonical_manifest": "H:\\quant_project\\quant_data_platform\\data\\lake\\canonical\\canonical_manifest.json",
+  "canonical_dataset_id": "policy_input_bundle__a56425b56b5958990c0ff35d",
+  "canonical_end_date": "2026-06-26",
+  "canonical_manifest": "quant_data_platform\\data\\lake\\canonical\\canonical_manifest.json",
   "canonical_memmap_registry": "H:/quant_project/quant_data_platform/registry/memmap_registry.json",
   "canonical_memmap_status": {
     "note": "Legacy monolithic/capped forecast memmap registry is no longer the active training base; use canonical_sharded_memmap_status.",
@@ -79,7 +80,7 @@
     "status": "sharded_full_ready",
     "updated_at": "2026-06-27T19:48:14+00:00"
   },
-  "canonical_start_date": "2010-01-01",
+  "canonical_start_date": "2010-01-04",
   "component_coverage": {
     "adjust_factor": {
       "end_date": "2026-06-08",
@@ -178,6 +179,15 @@
       "performance_express"
     ]
   },
+  "latest_canonical_bundle_update": {
+    "canonical_dataset_id": "policy_input_bundle__a56425b56b5958990c0ff35d",
+    "canonical_manifest": "quant_data_platform\\data\\lake\\canonical\\canonical_manifest.json",
+    "end_date": "2026-06-26",
+    "memmap_updated": false,
+    "start_date": "2010-01-04",
+    "status": "activated",
+    "updated_at": "2026-06-29T02:32:33+00:00"
+  },
   "latest_daily_update": {
     "canonical_dataset_id": "policy_input_bundle__e622949a701bfa312ae81c66",
     "canonical_manifest": "H:\\quant_project\\quant_data_platform\\data\\lake\\canonical\\canonical_manifest.json",
@@ -201,7 +211,7 @@
     "one_minute_policy": "cold_archive_not_default_research_view",
     "tdx_tqcenter_path": "H:/new_tdx64/PYPlugins/user/t0_project/tqcenter.py"
   },
-  "status": "daily_update_canonical_ready",
+  "status": "canonical_bundle_ready_memmap_not_updated",
   "storage_policy": {
     "cleanup_requires_dry_run_and_replacement_validation": true,
     "large_data_dirs_are_gitignored": true,
@@ -212,7 +222,7 @@
     "industry_concept",
     "index_constituents"
   ],
-  "updated_at": "2026-06-28T08:19:42+00:00",
+  "updated_at": "2026-06-29T02:32:33+00:00",
   "v1_excluded_domains": [
     "financial_quarterly",
     "performance_forecast",

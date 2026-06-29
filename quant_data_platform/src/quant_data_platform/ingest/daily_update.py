@@ -941,7 +941,7 @@ def _dry_run_backfill_results(
                     "source_root": str(source_root),
                     "include_unpacked_csv": bool(cfg.include_unpacked_external_csv),
                     "reason": "source_root_available" if source_root.exists() else "external_intraday_source_root_missing",
-                    "bar_count_contract": "external_1m_preserve_source_241_with_0930_when_present",
+                    "bar_count_contract": "mootdx_240_0930_merged_into_0931",
                 },
                 "provider_tail": {
                     "provider_plan": cfg.provider_plan,
@@ -1266,7 +1266,7 @@ def _maybe_import_external_intraday_1m_tail(
         "error_count": error_count,
         "start_date": str(summary.get("start_date", "") or ""),
         "end_date": end_date,
-        "bar_count_contract": "external_1m_preserve_source_241_with_0930_when_present",
+        "bar_count_contract": "mootdx_240_0930_merged_into_0931",
         "provider_backfill_needed": provider_needed,
         "remaining_provider_start_date": remaining_start if provider_needed else "",
         "next_step": "mootdx_provider_tail" if provider_needed else "covered_by_external_source",

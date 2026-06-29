@@ -47,6 +47,7 @@ class ImportConfig:
     dry_run: bool = False
     include_unpacked_csv: bool = False
     derive_5m_from_1m: bool = False
+    normalize_intraday_1m_to_mootdx_240: bool = True
     hash_zips: bool = True
     reuse: bool = True
     progress_path: Path | None = None
@@ -70,6 +71,7 @@ class ImportConfig:
             dry_run=bool(self.dry_run),
             include_unpacked_csv=bool(self.include_unpacked_csv),
             derive_5m_from_1m=bool(self.derive_5m_from_1m),
+            normalize_intraday_1m_to_mootdx_240=bool(self.normalize_intraday_1m_to_mootdx_240),
             hash_zips=bool(self.hash_zips),
             reuse=bool(self.reuse),
             progress_path=Path(self.progress_path) if self.progress_path else None,
@@ -113,6 +115,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-unpacked-csv", action="store_true")
     parser.add_argument("--derive-5m-from-1m", dest="derive_5m_from_1m", action="store_true", default=False)
     parser.add_argument("--no-derive-5m-from-1m", dest="derive_5m_from_1m", action="store_false")
+    parser.add_argument("--normalize-1m-to-mootdx-240", dest="normalize_intraday_1m_to_mootdx_240", action="store_true", default=True)
+    parser.add_argument("--preserve-source-1m-bars", dest="normalize_intraday_1m_to_mootdx_240", action="store_false")
     parser.add_argument("--hash-zips", dest="hash_zips", action="store_true", default=True)
     parser.add_argument("--no-hash-zips", dest="hash_zips", action="store_false")
     parser.add_argument("--reuse", dest="reuse", action="store_true", default=True)
@@ -190,6 +194,7 @@ def run_import(config: ImportConfig) -> ImportResult:
             for domain, paths in source_paths_by_domain.items()
         },
         "include_unpacked_csv": bool(cfg.include_unpacked_csv),
+        "normalize_intraday_1m_to_mootdx_240": bool(cfg.normalize_intraday_1m_to_mootdx_240),
         "datasets": {},
         "progress_path": str(progress_path.resolve()),
     }
@@ -608,6 +613,8 @@ def _read_member_normalized(
             if not frames:
                 return pd.DataFrame()
             data = pd.concat(frames, ignore_index=True)
+            if domain == DataDomain.MARKET_INTRADAY_1M and cfg.normalize_intraday_1m_to_mootdx_240:
+                data = normalize_intraday_1m_to_mootdx_240_frame(data)
             sort_columns = [column for column in ("trade_date", "symbol", "bar_time", "source") if column in data.columns]
             dedupe_columns = [column for column in ("trade_date", "symbol", "bar_time", "factor_provider", "source") if column in data.columns]
             return data.drop_duplicates(subset=dedupe_columns or None, keep="last").sort_values(sort_columns).reset_index(drop=True)
@@ -632,6 +639,77 @@ def _prepare_external_chunk(chunk: pd.DataFrame, *, domain: str, source_path: Pa
         if "factor_semantics" not in data.columns:
             data["factor_semantics"] = semantics
     return data
+
+
+def normalize_intraday_1m_to_mootdx_240_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame is None or frame.empty:
+        return frame
+    required = {"trade_date", "symbol", "bar_time"}
+    if not required.issubset(set(frame.columns)):
+        return frame
+    data = frame.copy()
+    data["_qdp_original_order"] = range(len(data))
+    keys = ["trade_date", "symbol"]
+    source_like = [column for column in ("source", "adjusted_flag") if column in data.columns]
+    if source_like:
+        keys.extend(source_like)
+    data["_qdp_bar_time"] = data["bar_time"].astype(str).str.strip().str.zfill(9)
+    opening = data.loc[data["_qdp_bar_time"].eq("093000000")].drop_duplicates(keys, keep="last").copy()
+    first_continuous = data.loc[data["_qdp_bar_time"].eq("093100000")].drop_duplicates(keys, keep="last").copy()
+    if opening.empty or first_continuous.empty:
+        return data.drop(columns=["_qdp_original_order", "_qdp_bar_time"], errors="ignore")
+
+    merge_columns = keys + [column for column in frame.columns if column not in keys]
+    paired = first_continuous.loc[:, merge_columns].merge(
+        opening.loc[:, merge_columns],
+        on=keys,
+        how="inner",
+        suffixes=("_0931", "_0930"),
+    )
+    if paired.empty:
+        return data.drop(columns=["_qdp_original_order", "_qdp_bar_time"], errors="ignore")
+
+    merged = paired.loc[:, keys].copy()
+    for column in frame.columns:
+        if column in keys:
+            continue
+        c0931 = f"{column}_0931"
+        c0930 = f"{column}_0930"
+        if column == "bar_time":
+            merged[column] = "093100000"
+        elif column == "open" and c0930 in paired and c0931 in paired:
+            open_0930 = pd.to_numeric(paired[c0930], errors="coerce")
+            open_0931 = pd.to_numeric(paired[c0931], errors="coerce")
+            merged[column] = open_0930.where(open_0930.notna(), open_0931)
+        elif column == "high" and c0930 in paired and c0931 in paired:
+            merged[column] = pd.concat(
+                [pd.to_numeric(paired[c0930], errors="coerce"), pd.to_numeric(paired[c0931], errors="coerce")],
+                axis=1,
+            ).max(axis=1, skipna=True)
+        elif column == "low" and c0930 in paired and c0931 in paired:
+            merged[column] = pd.concat(
+                [pd.to_numeric(paired[c0930], errors="coerce"), pd.to_numeric(paired[c0931], errors="coerce")],
+                axis=1,
+            ).min(axis=1, skipna=True)
+        elif column in {"volume", "amount", "turnover_rate"} and c0930 in paired and c0931 in paired:
+            merged[column] = pd.to_numeric(paired[c0930], errors="coerce").fillna(0.0) + pd.to_numeric(paired[c0931], errors="coerce").fillna(0.0)
+        elif column in {"float_share", "total_share"} and c0930 in paired and c0931 in paired:
+            value_0931 = pd.to_numeric(paired[c0931], errors="coerce")
+            value_0930 = pd.to_numeric(paired[c0930], errors="coerce")
+            merged[column] = value_0931.where(value_0931.notna(), value_0930)
+        elif c0931 in paired:
+            merged[column] = paired[c0931]
+    merge_keys = paired.loc[:, keys].drop_duplicates()
+    merge_keys["_qdp_merge_pair"] = True
+    data_with_pair = data.merge(merge_keys, on=keys, how="left")
+    remove_opening = data_with_pair["_qdp_bar_time"].eq("093000000") & data_with_pair["_qdp_merge_pair"].eq(True)
+    remove_first_continuous = data_with_pair["_qdp_bar_time"].eq("093100000") & data_with_pair["_qdp_merge_pair"].eq(True)
+    output = data_with_pair.loc[~(remove_opening | remove_first_continuous), frame.columns].copy()
+    output = pd.concat([output, merged.loc[:, frame.columns]], ignore_index=True)
+    sort_columns = [column for column in ("trade_date", "symbol", "bar_time", "source") if column in output.columns]
+    if sort_columns:
+        output = output.sort_values(sort_columns)
+    return output.reset_index(drop=True)
 
 
 def _external_source_name(source_kind: str) -> str:
@@ -682,10 +760,23 @@ def _dataset_spec(cfg: ImportConfig, *, domain: str) -> dict[str, Any]:
         "raw_archive_policy": "keep_2000_2009_outside_default_research_view",
         "original_ohlcv_policy": "raw_ohlcv_never_overwritten",
         "derive_5m_from_1m": bool(cfg.derive_5m_from_1m),
-        "one_minute_policy": "store_raw_1m_bars_preserving_source_bar_time_contract",
+        "normalize_intraday_1m_to_mootdx_240": bool(cfg.normalize_intraday_1m_to_mootdx_240),
+        "one_minute_policy": (
+            "mootdx_240_0930_merged_into_0931"
+            if cfg.normalize_intraday_1m_to_mootdx_240
+            else "store_raw_1m_bars_preserving_source_bar_time_contract"
+        ),
         "one_minute_bar_count_contracts": {
-            "external_quant_csv": "241 bars/full trading day when 09:30 is present",
-            "external_quant_zip": "source archive convention; validated per source",
+            "external_quant_csv": (
+                "240 bars/full trading day; 09:30 opening auction merged into 09:31"
+                if cfg.normalize_intraday_1m_to_mootdx_240
+                else "241 bars/full trading day when 09:30 is present"
+            ),
+            "external_quant_zip": (
+                "normalized to mootdx 240 bars when 09:30 is present"
+                if cfg.normalize_intraday_1m_to_mootdx_240
+                else "source archive convention; validated per source"
+            ),
             "mootdx_online": "240 bars/full trading day, starts at 09:31",
         },
         "five_minute_policy": "native_5m_preferred_reuse_existing_derived_5m_if_equivalent",
@@ -930,6 +1021,7 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=args.dry_run,
             include_unpacked_csv=args.include_unpacked_csv,
             derive_5m_from_1m=args.derive_5m_from_1m,
+            normalize_intraday_1m_to_mootdx_240=args.normalize_intraday_1m_to_mootdx_240,
             hash_zips=args.hash_zips,
             reuse=args.reuse,
             progress_path=Path(args.progress_path) if str(args.progress_path or "").strip() else None,

@@ -898,7 +898,10 @@ def test_daily_update_imports_external_1m_then_fetches_mootdx_tail(tmp_path: Pat
     assert result.backfill_dataset_ids[DataDomain.MARKET_INTRADAY_1M] == tail_result["coalesced_tail"]["dataset_id"]
     assert len(tail_result["coalesced_tail"]["source_dataset_ids"]) == 2
     assert result.after_coverage[DataDomain.MARKET_INTRADAY_1M]["end_date"] == "2026-01-08"
-    assert "093000000" in set(effective["bar_time"].astype(str))
+    assert "093000000" not in set(effective["bar_time"].astype(str))
+    external_0931 = effective.loc[(effective["trade_date"] == "2026-01-06") & (effective["bar_time"].astype(str) == "093100000")]
+    assert not external_0931.empty
+    assert float(external_0931["volume"].iloc[0]) == 300.0
     assert sorted(effective["trade_date"].unique().tolist()) == ["2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08"]
 
 

@@ -14,13 +14,16 @@ from quant_data_platform.ingest.build_intraday_daily_features import (
     INTRADAY_DAILY_FEATURE_CONTRACT_VERSION,
     LAST_5M_RET_POLICY,
     _build_intraday_daily_feature_frame_fast,
+    _build_auction_1m_shard_index,
     _feature_dataset_spec,
+    _matching_auction_1m_shards,
     _shard_intersects_years,
     build_intraday_daily_features,
 )
 from quant_data_platform.ingest.combine_domain_datasets import CombineDomainDatasetsConfig, combine_domain_datasets
 from quant_data_platform.ingest.combine_sharded_domain_datasets import CombineShardedDomainConfig, combine_sharded_domain_datasets
 from quant_data_platform.ingest.import_external_quant_zip import ImportConfig, run_import
+from quant_data_platform.ingest.normalize_intraday_1m_contract import NormalizeIntraday1mContractConfig, normalize_intraday_1m_contract
 from quant_data_platform.ingest.recover_external_quant_zip_import import RecoverExternalImportConfig, recover_import
 
 
@@ -42,6 +45,9 @@ def test_fast_intraday_daily_features_last_5m_ret_uses_previous_close_for_closin
     features = _build_intraday_daily_feature_frame_fast(frame, source="external_5m", adjusted_flag="none")
 
     assert float(features["last_5m_ret"].iloc[0]) == pytest.approx(10.3 / 10.2 - 1.0)
+    assert float(features["opening_auction_amount"].iloc[0]) == pytest.approx(1010.0)
+    assert float(features["closing_auction_amount"].iloc[0]) == pytest.approx(3090.0)
+    assert float(features["closing_auction_ret"].iloc[0]) == pytest.approx(10.3 / 10.2 - 1.0)
 
 
 def test_intraday_daily_feature_dataset_spec_records_last_5m_contract(tmp_path) -> None:
@@ -81,6 +87,319 @@ def test_intraday_daily_feature_dataset_spec_records_last_5m_contract(tmp_path) 
     assert spec["last_5m_ret_policy"] == LAST_5M_RET_POLICY
 
 
+def test_build_intraday_daily_features_can_overlay_open_close_auction_from_1m(tmp_path) -> None:
+    lake = ResearchDataLake(tmp_path / "lake")
+    five_path = tmp_path / "five.parquet"
+    one_path = tmp_path / "one.parquet"
+    pd.DataFrame(
+        {
+            "symbol": ["000001.SZ", "000001.SZ"],
+            "trade_date": ["2026-01-05", "2026-01-05"],
+            "bar_time": ["093000000", "150000000"],
+            "open": [10.0, 10.8],
+            "high": [10.5, 10.9],
+            "low": [9.9, 10.7],
+            "close": [10.4, 10.85],
+            "volume": [1000.0, 2000.0],
+            "amount": [10400.0, 21700.0],
+            "source": ["unit_5m", "unit_5m"],
+            "adjusted_flag": ["none", "none"],
+        }
+    ).to_parquet(five_path, index=False)
+    pd.DataFrame(
+        {
+            "symbol": ["000001.SZ", "000001.SZ", "000001.SZ"],
+            "trade_date": ["2026-01-05", "2026-01-05", "2026-01-05"],
+            "bar_time": ["093100000", "093200000", "150000000"],
+            "open": [10.0, 10.2, 10.8],
+            "high": [10.2, 10.3, 10.9],
+            "low": [9.9, 10.1, 10.7],
+            "close": [10.1, 10.25, 10.88],
+            "volume": [100.0, 200.0, 300.0],
+            "amount": [1010.0, 2050.0, 3264.0],
+            "turnover_rate": [0.1, 0.2, 0.3],
+            "float_share": [1.0, 1.0, 1.0],
+            "total_share": [2.0, 2.0, 2.0],
+            "source": ["unit_1m", "unit_1m", "unit_1m"],
+            "adjusted_flag": ["none", "none", "none"],
+        }
+    ).to_parquet(one_path, index=False)
+    five = lake.save_sharded_domain_dataset(
+        domain=DataDomain.MARKET_INTRADAY_5M,
+        spec={"domain": DataDomain.MARKET_INTRADAY_5M, "start_date": "2026-01-05", "end_date": "2026-01-05", "sharded": True},
+        shard_records=[{"status": "stored", "path": str(five_path), "row_count": 2, "start_date": "2026-01-05", "end_date": "2026-01-05", "symbol_count": 1}],
+        source="unit",
+        reuse=False,
+    )
+    one = lake.save_sharded_domain_dataset(
+        domain=DataDomain.MARKET_INTRADAY_1M,
+        spec={"domain": DataDomain.MARKET_INTRADAY_1M, "start_date": "2026-01-05", "end_date": "2026-01-05", "sharded": True, "one_minute_policy": "mootdx_240_0930_merged_into_0931"},
+        shard_records=[{"status": "stored", "path": str(one_path), "row_count": 3, "start_date": "2026-01-05", "end_date": "2026-01-05", "symbol_count": 1}],
+        source="unit",
+        reuse=False,
+    )
+
+    result = build_intraday_daily_features(
+        BuildIntradayDailyFeaturesConfig(
+            lake_root=tmp_path / "lake",
+            source_dataset_id=five.dataset_id,
+            auction_1m_dataset_id=one.dataset_id,
+            start_date="2026-01-05",
+            end_date="2026-01-05",
+        )
+    )
+
+    feature_path = next((tmp_path / "lake").glob("parquet/bronze_silver/data_platform_intraday_daily_features/*/shards/*.parquet"))
+    features = pd.read_parquet(feature_path)
+    assert result.status == "completed"
+    assert float(features["first_5m_ret"].iloc[0]) == pytest.approx(10.4 / 10.0 - 1.0)
+    assert float(features["opening_auction_amount"].iloc[0]) == pytest.approx(1010.0)
+    assert float(features["closing_auction_amount"].iloc[0]) == pytest.approx(3264.0)
+    assert float(features["opening_auction_amount_share"].iloc[0]) == pytest.approx(1010.0 / (1010.0 + 2050.0 + 3264.0))
+    metadata = lake.describe_dataset(result.dataset_id)
+    assert metadata["parameters"]["auction_1m_dataset_id"] == one.dataset_id
+    assert metadata["parameters"]["auction_feature_policy"] == "override_opening_closing_auction_fields_from_mootdx_240_1m_0931_1500"
+
+
+def test_build_intraday_daily_features_can_overlay_existing_feature_sidecar_from_1m(tmp_path) -> None:
+    lake = ResearchDataLake(tmp_path / "lake")
+    feature_path = tmp_path / "feature.parquet"
+    one_path = tmp_path / "one.parquet"
+    pd.DataFrame(
+        {
+            "symbol": ["000001.SZ"],
+            "trade_date": ["2026-01-05"],
+            "first_5m_ret": [0.05],
+            "opening_auction_ret": [0.05],
+            "opening_auction_amount": [5000.0],
+            "opening_auction_volume": [500.0],
+            "opening_auction_amount_share": [0.5],
+            "opening_auction_range": [0.06],
+            "opening_auction_vwap": [10.0],
+            "opening_auction_pressure": [0.025],
+            "last_5m_ret": [0.01],
+            "closing_auction_ret": [0.01],
+            "closing_auction_amount": [8000.0],
+            "closing_auction_volume": [800.0],
+            "closing_auction_amount_share": [0.8],
+            "closing_auction_range": [0.02],
+            "closing_auction_vwap": [10.0],
+            "closing_auction_pressure": [0.008],
+            "source": ["legacy_feature"],
+            "adjusted_flag": ["none"],
+        }
+    ).to_parquet(feature_path, index=False)
+    pd.DataFrame(
+        {
+            "symbol": ["000001.SZ", "000001.SZ", "000001.SZ"],
+            "trade_date": ["2026-01-05", "2026-01-05", "2026-01-05"],
+            "bar_time": ["093100000", "093200000", "150000000"],
+            "open": [10.0, 10.2, 10.8],
+            "high": [10.2, 10.3, 10.9],
+            "low": [9.9, 10.1, 10.7],
+            "close": [10.1, 10.25, 10.88],
+            "volume": [100.0, 200.0, 300.0],
+            "amount": [1010.0, 2050.0, 3264.0],
+            "turnover_rate": [0.1, 0.2, 0.3],
+            "float_share": [1.0, 1.0, 1.0],
+            "total_share": [2.0, 2.0, 2.0],
+            "source": ["unit_1m", "unit_1m", "unit_1m"],
+            "adjusted_flag": ["none", "none", "none"],
+        }
+    ).to_parquet(one_path, index=False)
+    feature = lake.save_sharded_domain_dataset(
+        domain=DataDomain.INTRADAY_DAILY_FEATURES,
+        spec={"domain": DataDomain.INTRADAY_DAILY_FEATURES, "start_date": "2026-01-05", "end_date": "2026-01-05", "sharded": True},
+        shard_records=[
+            {
+                "status": "stored",
+                "path": str(feature_path),
+                "row_count": 1,
+                "start_date": "2026-01-05",
+                "end_date": "2026-01-05",
+                "symbol_count": 1,
+                "source_member": "2026_market_intraday_5m_batch_00001",
+            }
+        ],
+        source="unit",
+        reuse=False,
+    )
+    one = lake.save_sharded_domain_dataset(
+        domain=DataDomain.MARKET_INTRADAY_1M,
+        spec={"domain": DataDomain.MARKET_INTRADAY_1M, "start_date": "2026-01-05", "end_date": "2026-01-05", "sharded": True},
+        shard_records=[
+            {
+                "status": "stored",
+                "path": str(one_path),
+                "row_count": 3,
+                "start_date": "2026-01-05",
+                "end_date": "2026-01-05",
+                "symbol_count": 1,
+                "source_member": "2026_market_intraday_1m_batch_00001",
+            }
+        ],
+        source="unit",
+        reuse=False,
+    )
+
+    result = build_intraday_daily_features(
+        BuildIntradayDailyFeaturesConfig(
+            lake_root=tmp_path / "lake",
+            existing_feature_dataset_id=feature.dataset_id,
+            auction_1m_dataset_id=one.dataset_id,
+            start_date="2026-01-05",
+            end_date="2026-01-05",
+        )
+    )
+
+    out_path = next((tmp_path / "lake").glob("parquet/bronze_silver/data_platform_intraday_daily_features/*/shards/*auction_1m_overlay.parquet"))
+    out = pd.read_parquet(out_path)
+    assert result.status == "completed"
+    assert float(out["first_5m_ret"].iloc[0]) == pytest.approx(0.05)
+    assert float(out["opening_auction_amount"].iloc[0]) == pytest.approx(1010.0)
+    assert float(out["closing_auction_amount"].iloc[0]) == pytest.approx(3264.0)
+    assert float(out["opening_auction_amount_share"].iloc[0]) == pytest.approx(1010.0 / (1010.0 + 2050.0 + 3264.0))
+    metadata = lake.describe_dataset(result.dataset_id)
+    assert metadata["parameters"]["existing_feature_dataset_id"] == feature.dataset_id
+    assert metadata["parameters"]["auction_1m_dataset_id"] == one.dataset_id
+
+
+def test_auction_1m_overlay_matches_source_member_before_date_fallback() -> None:
+    shards = [
+        {
+            "path": "H:/lake/2016_2016_market_intraday_1m_batch_00001.parquet",
+            "source_member": "2016_market_intraday_1m_batch_00001",
+            "start_date": "2016-01-01",
+            "end_date": "2016-12-31",
+        },
+        {
+            "path": "H:/lake/2016_2016_market_intraday_1m_batch_00002.parquet",
+            "source_member": "2016_market_intraday_1m_batch_00002",
+            "start_date": "2016-01-01",
+            "end_date": "2016-12-31",
+        },
+    ]
+    index = _build_auction_1m_shard_index(shards)
+
+    matches = _matching_auction_1m_shards(
+        source_record={
+            "path": "H:/lake/2016_2016_market_intraday_5m_batch_00002_derived_5m.parquet",
+            "source_member": "2016_market_intraday_5m_batch_00002",
+            "start_date": "2016-01-01",
+            "end_date": "2016-12-31",
+        },
+        auction_1m_index=index,
+        start_date="2016-01-04",
+        end_date="2016-12-30",
+    )
+
+    assert len(matches) == 1
+    assert matches[0]["source_member"] == "2016_market_intraday_1m_batch_00002"
+
+
+def test_auction_1m_overlay_matches_mootdx_symbol_block_start() -> None:
+    index = _build_auction_1m_shard_index(
+        [
+            {
+                "path": "H:/lake/market_intraday_1m__2026-03-30_2026-06-26__s000001_0050_a71f206dc0.parquet",
+                "chunk_id": "market_intraday_1m__2026-03-30_2026-06-26__s000001_0050_a71f206dc0",
+                "start_date": "2026-03-30",
+                "end_date": "2026-06-26",
+            },
+            {
+                "path": "H:/lake/market_intraday_1m__2026-03-30_2026-06-26__s000104_0050_430d2c0790.parquet",
+                "chunk_id": "market_intraday_1m__2026-03-30_2026-06-26__s000104_0050_430d2c0790",
+                "start_date": "2026-03-30",
+                "end_date": "2026-06-26",
+            },
+            {
+                "path": "H:/lake/market_intraday_1m__2026-03-30_2026-06-26__s000105_0050_51fcd4d797.parquet",
+                "chunk_id": "market_intraday_1m__2026-03-30_2026-06-26__s000105_0050_51fcd4d797",
+                "start_date": "2026-03-30",
+                "end_date": "2026-06-26",
+            },
+        ]
+    )
+
+    matches = _matching_auction_1m_shards(
+        source_record={
+            "path": "H:/lake/market_intraday_5m__2026-06-11_2026-06-26__s000053_0008_430d2c0790.parquet",
+            "chunk_id": "market_intraday_5m__2026-06-11_2026-06-26__s000053_0008_430d2c0790",
+            "start_date": "2026-06-11",
+            "end_date": "2026-06-26",
+        },
+        auction_1m_index=index,
+        start_date="2026-06-11",
+        end_date="2026-06-26",
+    )
+
+    assert len(matches) == 1
+    assert "s000105" in matches[0]["path"]
+
+
+def test_auction_1m_overlay_prefers_source_raw_chunk_over_feature_chunk() -> None:
+    index = _build_auction_1m_shard_index(
+        [
+            {
+                "path": "H:/lake/market_intraday_1m__2026-03-30_2026-06-26__s000009_0050_bad.parquet",
+                "chunk_id": "market_intraday_1m__2026-03-30_2026-06-26__s000009_0050_bad",
+                "start_date": "2026-03-30",
+                "end_date": "2026-06-26",
+            },
+            {
+                "path": "H:/lake/market_intraday_1m__2026-03-30_2026-06-26__s000105_0008_good.parquet",
+                "chunk_id": "market_intraday_1m__2026-03-30_2026-06-26__s000105_0008_good",
+                "start_date": "2026-03-30",
+                "end_date": "2026-06-26",
+            },
+        ]
+    )
+
+    matches = _matching_auction_1m_shards(
+        source_record={
+            "chunk_id": "intraday_daily_features__2026-06-11_2026-06-26__s000053_0008_bad",
+            "source_raw_chunk_id": "market_intraday_5m__2026-06-11_2026-06-26__s000053_0008_good",
+            "start_date": "2026-06-11",
+            "end_date": "2026-06-26",
+        },
+        auction_1m_index=index,
+        start_date="2026-06-11",
+        end_date="2026-06-26",
+    )
+
+    assert len(matches) == 1
+    assert matches[0]["chunk_id"] == "market_intraday_1m__2026-03-30_2026-06-26__s000105_0008_good"
+
+
+def test_auction_1m_overlay_does_not_return_partial_incomplete_symbol_sample() -> None:
+    index = _build_auction_1m_shard_index(
+        [
+            {
+                "path": "H:/lake/partial_sample.parquet",
+                "source_members_sample": ["sz000021.csv"],
+                "source_member_count": 64,
+                "start_date": "2026-01-05",
+                "end_date": "2026-03-27",
+            },
+            {
+                "path": "H:/lake/year_candidate.parquet",
+                "start_date": "2026-01-05",
+                "end_date": "2026-03-27",
+            },
+        ]
+    )
+
+    matches = _matching_auction_1m_shards(
+        source_record={"start_date": "2026-01-05", "end_date": "2026-03-27"},
+        auction_1m_index=index,
+        start_date="2026-01-05",
+        end_date="2026-03-27",
+        feature_symbols={"000001.SZ", "000021.SZ"},
+    )
+
+    assert {item["path"] for item in matches} == {"H:/lake/partial_sample.parquet", "H:/lake/year_candidate.parquet"}
+
+
 def test_intraday_daily_feature_year_filter_uses_shard_date_bounds() -> None:
     assert _shard_intersects_years({"start_date": "2024-12-20", "end_date": "2025-01-10"}, {2025}) is True
     assert _shard_intersects_years({"start_date": "2024-01-01", "end_date": "2024-12-31"}, {2025}) is False
@@ -117,7 +436,7 @@ def test_import_external_quant_zip_streams_1m_and_derives_5m(tmp_path) -> None:
     )
 
     assert result.status == "completed"
-    assert result.row_counts[DataDomain.MARKET_INTRADAY_1M] == 5
+    assert result.row_counts[DataDomain.MARKET_INTRADAY_1M] == 4
     assert result.row_counts[DataDomain.MARKET_INTRADAY_5M] == 1
     one_minute = pd.read_parquet(
         next((tmp_path / "lake").glob("parquet/bronze_silver/data_platform_market_intraday_1m/*/shards/*.parquet"))
@@ -126,6 +445,14 @@ def test_import_external_quant_zip_streams_1m_and_derives_5m(tmp_path) -> None:
         next((tmp_path / "lake").glob("parquet/bronze_silver/data_platform_market_intraday_5m/*/shards/*.parquet"))
     )
     assert one_minute["symbol"].iloc[0] == "000001.SZ"
+    assert "093000000" not in set(one_minute["bar_time"])
+    first_bar = one_minute.loc[one_minute["bar_time"].eq("093100000")].iloc[0]
+    assert float(first_bar["open"]) == pytest.approx(10.0)
+    assert float(first_bar["high"]) == pytest.approx(10.3)
+    assert float(first_bar["low"]) == pytest.approx(9.9)
+    assert float(first_bar["close"]) == pytest.approx(10.2)
+    assert float(first_bar["volume"]) == pytest.approx(300.0)
+    assert float(first_bar["amount"]) == pytest.approx(3050.0)
     assert five_minute["bar_time"].iloc[0] == "093000000"
     assert float(five_minute["volume"].iloc[0]) == 1500.0
 
@@ -159,7 +486,7 @@ def test_import_external_quant_zip_does_not_derive_5m_from_1m_by_default(tmp_pat
     )
 
     assert result.status == "completed"
-    assert result.row_counts[DataDomain.MARKET_INTRADAY_1M] == 5
+    assert result.row_counts[DataDomain.MARKET_INTRADAY_1M] == 4
     assert DataDomain.MARKET_INTRADAY_5M not in result.row_counts
     assert not list((tmp_path / "lake").glob("parquet/bronze_silver/data_platform_market_intraday_5m/*/shards/*.parquet"))
 
@@ -208,7 +535,7 @@ def test_import_external_quant_zip_discovers_unpacked_csv_only_when_enabled(tmp_
     ]
 
 
-def test_import_external_quant_zip_imports_unpacked_1m_csv_preserves_0930(tmp_path) -> None:
+def test_import_external_quant_zip_imports_unpacked_1m_csv_normalizes_to_mootdx_240(tmp_path) -> None:
     source_root = tmp_path / "量化数据"
     csv_dir = source_root / "2026" / "1分钟"
     csv_dir.mkdir(parents=True)
@@ -239,15 +566,178 @@ def test_import_external_quant_zip_imports_unpacked_1m_csv_preserves_0930(tmp_pa
     )
 
     assert result.status == "completed"
-    assert result.row_counts[DataDomain.MARKET_INTRADAY_1M] == 2
+    assert result.row_counts[DataDomain.MARKET_INTRADAY_1M] == 1
     lake = ResearchDataLake(lake_root)
     metadata = lake.describe_dataset(result.dataset_ids[DataDomain.MARKET_INTRADAY_1M])
-    assert metadata["parameters"]["one_minute_bar_count_contracts"]["external_quant_csv"].startswith("241 bars")
+    assert metadata["parameters"]["one_minute_policy"] == "mootdx_240_0930_merged_into_0931"
     frame = pd.read_parquet(
         next(lake_root.glob("parquet/bronze_silver/data_platform_market_intraday_1m/*/shards/*.parquet"))
     )
-    assert frame["symbol"].tolist() == ["000001.SZ", "000001.SZ"]
-    assert frame["bar_time"].tolist()[0] == "093000000"
+    assert frame["symbol"].tolist() == ["000001.SZ"]
+    assert frame["bar_time"].tolist() == ["093100000"]
+    assert float(frame["open"].iloc[0]) == pytest.approx(10.0)
+    assert float(frame["volume"].iloc[0]) == pytest.approx(300.0)
+
+
+def test_import_external_quant_zip_can_preserve_source_1m_bars(tmp_path) -> None:
+    source_root = tmp_path / "量化数据"
+    csv_dir = source_root / "2026" / "1分钟"
+    csv_dir.mkdir(parents=True)
+    (csv_dir / "sz000001.csv").write_text(
+        "\n".join(
+            [
+                "日期,开盘,最高,最低,收盘,成交量(股),成交额(元)",
+                "2026-01-05 09:30:00,10.0,10.2,9.9,10.1,100,1010",
+                "2026-01-05 09:31:00,10.1,10.3,10.0,10.2,200,2040",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    lake_root = tmp_path / "lake"
+    result = run_import(
+        ImportConfig(
+            lake_root=lake_root,
+            source_root=source_root,
+            domains=(DataDomain.MARKET_INTRADAY_1M,),
+            start_date="2026-01-01",
+            end_date="2026-01-05",
+            years=(2026,),
+            include_unpacked_csv=True,
+            normalize_intraday_1m_to_mootdx_240=False,
+            hash_zips=False,
+        )
+    )
+
+    assert result.status == "completed"
+    assert result.row_counts[DataDomain.MARKET_INTRADAY_1M] == 2
+    frame = pd.read_parquet(
+        next(lake_root.glob("parquet/bronze_silver/data_platform_market_intraday_1m/*/shards/*.parquet"))
+    )
+    assert frame["bar_time"].tolist() == ["093000000", "093100000"]
+
+
+def test_normalize_intraday_1m_contract_rewrites_existing_241_shard(tmp_path) -> None:
+    lake = ResearchDataLake(tmp_path / "lake")
+    shard_dir = tmp_path / "source_shards"
+    shard_dir.mkdir()
+    raw_path = shard_dir / "raw_1m.parquet"
+    raw = pd.DataFrame(
+        {
+            "symbol": ["000001.SZ", "000001.SZ", "000001.SZ"],
+            "trade_date": ["2026-01-05", "2026-01-05", "2026-01-05"],
+            "bar_time": ["093000000", "093100000", "093200000"],
+            "open": [10.0, 10.1, 10.2],
+            "high": [10.2, 10.3, 10.4],
+            "low": [9.9, 10.0, 10.1],
+            "close": [10.1, 10.2, 10.3],
+            "volume": [100, 200, 300],
+            "amount": [1010, 2040, 3090],
+            "turnover_rate": [0.1, 0.2, 0.3],
+            "float_share": [1.0, 1.0, 1.0],
+            "total_share": [2.0, 2.0, 2.0],
+            "source": ["external_quant_zip"] * 3,
+            "adjusted_flag": ["none"] * 3,
+        }
+    )
+    raw.to_parquet(raw_path, index=False)
+    record = lake.save_sharded_domain_dataset(
+        domain=DataDomain.MARKET_INTRADAY_1M,
+        spec={
+            "domain": DataDomain.MARKET_INTRADAY_1M,
+            "start_date": "2026-01-05",
+            "end_date": "2026-01-05",
+            "sharded": True,
+            "one_minute_policy": "store_raw_1m_bars_preserving_source_bar_time_contract",
+        },
+        shard_records=[
+            {
+                "domain": DataDomain.MARKET_INTRADAY_1M,
+                "status": "stored",
+                "path": str(raw_path),
+                "row_count": 3,
+                "start_date": "2026-01-05",
+                "end_date": "2026-01-05",
+                "symbol_count": 1,
+            }
+        ],
+        source="unit",
+        reuse=False,
+    )
+
+    result = normalize_intraday_1m_contract(
+        NormalizeIntraday1mContractConfig(
+            lake_root=tmp_path / "lake",
+            source_dataset_id=record.dataset_id,
+        )
+    )
+
+    assert result.status == "completed"
+    assert result.row_count == 2
+    assert result.removed_0930_rows == 1
+    metadata = lake.describe_dataset(result.dataset_id)
+    assert metadata["parameters"]["one_minute_policy"] == "mootdx_240_0930_merged_into_0931"
+    normalized = pd.read_parquet(
+        next((tmp_path / "lake").glob("parquet/bronze_silver/data_platform_market_intraday_1m/*/shards/*mootdx_240.parquet"))
+    )
+    assert normalized["bar_time"].tolist() == ["093100000", "093200000"]
+    assert float(normalized["open"].iloc[0]) == pytest.approx(10.0)
+    assert float(normalized["volume"].iloc[0]) == pytest.approx(300.0)
+
+
+def test_normalize_intraday_1m_contract_has_stable_target_identity(tmp_path) -> None:
+    lake = ResearchDataLake(tmp_path / "lake")
+    shard_dir = tmp_path / "source_shards"
+    shard_dir.mkdir()
+    raw_path = shard_dir / "raw_1m.parquet"
+    pd.DataFrame(
+        {
+            "symbol": ["000001.SZ", "000001.SZ"],
+            "trade_date": ["2026-01-05", "2026-01-05"],
+            "bar_time": ["09:30:00", "09:31:00"],
+            "open": [10.0, 10.1],
+            "high": [10.2, 10.3],
+            "low": [9.9, 10.0],
+            "close": [10.1, 10.2],
+            "volume": [100, 200],
+            "amount": [1010, 2040],
+            "turnover_rate": [0.1, 0.2],
+            "float_share": [1.0, 1.0],
+            "total_share": [2.0, 2.0],
+            "source": ["external_quant_zip", "external_quant_zip"],
+            "adjusted_flag": ["none", "none"],
+        }
+    ).to_parquet(raw_path, index=False)
+    record = lake.save_sharded_domain_dataset(
+        domain=DataDomain.MARKET_INTRADAY_1M,
+        spec={
+            "domain": DataDomain.MARKET_INTRADAY_1M,
+            "start_date": "2026-01-05",
+            "end_date": "2026-01-05",
+            "sharded": True,
+            "one_minute_policy": "store_raw_1m_bars_preserving_source_bar_time_contract",
+        },
+        shard_records=[
+            {
+                "domain": DataDomain.MARKET_INTRADAY_1M,
+                "status": "stored",
+                "path": str(raw_path),
+                "row_count": 2,
+                "start_date": "2026-01-05",
+                "end_date": "2026-01-05",
+                "symbol_count": 1,
+            }
+        ],
+        source="unit",
+        reuse=False,
+    )
+    cfg = NormalizeIntraday1mContractConfig(lake_root=tmp_path / "lake", source_dataset_id=record.dataset_id)
+
+    first = normalize_intraday_1m_contract(cfg)
+    second = normalize_intraday_1m_contract(cfg)
+
+    assert first.dataset_id == second.dataset_id
+    assert second.row_count == 1
 
 
 def test_import_external_quant_zip_reuses_existing_same_spec_dataset(tmp_path) -> None:
@@ -329,7 +819,7 @@ def test_recover_external_quant_zip_import_links_completed_year_shards(tmp_path)
 
     assert result.status == "completed"
     assert result.completed_years == [2010]
-    assert result.row_counts[DataDomain.MARKET_INTRADAY_1M] == 5
+    assert result.row_counts[DataDomain.MARKET_INTRADAY_1M] == 4
     assert result.row_counts[DataDomain.MARKET_INTRADAY_5M] == 1
     assert result.dataset_ids[DataDomain.MARKET_INTRADAY_1M]
     assert result.dataset_ids[DataDomain.MARKET_INTRADAY_5M]
@@ -402,6 +892,70 @@ def test_combine_sharded_domain_datasets_links_source_shards(tmp_path) -> None:
     assert {item["combine_materialization"] for item in manifest["shards"]} == {"manifest_reference"}
 
 
+def test_combine_sharded_domain_datasets_keeps_chunk_id_only_shards(tmp_path) -> None:
+    lake_root = tmp_path / "lake"
+    lake = ResearchDataLake(lake_root)
+    shard_dir = tmp_path / "shards"
+    shard_dir.mkdir()
+    records = []
+    for idx in (1, 2):
+        path = shard_dir / f"market_intraday_1m__2026-03-30_2026-06-26__s{idx:06d}_0050_unit.parquet"
+        pd.DataFrame(
+            {
+                "symbol": [f"{idx:06d}.SZ"],
+                "trade_date": ["2026-03-30"],
+                "bar_time": ["093100000"],
+                "open": [10.0],
+                "high": [10.1],
+                "low": [9.9],
+                "close": [10.0],
+                "volume": [100.0],
+                "amount": [1000.0],
+            }
+        ).to_parquet(path, index=False)
+        records.append(
+            {
+                "domain": DataDomain.MARKET_INTRADAY_1M,
+                "status": "stored",
+                "path": str(path),
+                "row_count": 1,
+                "start_date": "2026-03-30",
+                "end_date": "2026-03-30",
+                "symbol_count": 1,
+                "chunk_id": path.stem,
+            }
+        )
+    source = lake.save_sharded_domain_dataset(
+        domain=DataDomain.MARKET_INTRADAY_1M,
+        spec={
+            "domain": DataDomain.MARKET_INTRADAY_1M,
+            "start_date": "2026-03-30",
+            "end_date": "2026-03-30",
+            "sharded": True,
+            "expected_1m_bars_per_day": 240,
+        },
+        shard_records=records,
+        source="unit",
+        reuse=False,
+    )
+
+    result = combine_sharded_domain_datasets(
+        CombineShardedDomainConfig(
+            lake_root=lake_root,
+            domain=DataDomain.MARKET_INTRADAY_1M,
+            source_dataset_ids=(source.dataset_id,),
+            start_date="2026-03-30",
+            end_date="2026-03-30",
+            years=(2026,),
+            reuse=False,
+        )
+    )
+
+    assert result.status == "completed"
+    assert result.shard_count == 2
+    assert result.row_count == 2
+
+
 def test_build_intraday_daily_features_from_imported_5m_dataset(tmp_path) -> None:
     source_root = tmp_path / "量化数据"
     zip_dir = source_root / "1分钟"
@@ -447,6 +1001,8 @@ def test_build_intraday_daily_features_from_imported_5m_dataset(tmp_path) -> Non
     features = pd.read_parquet(feature_path)
     assert features["symbol"].iloc[0] == "000001.SZ"
     assert "first_5m_ret" in features.columns
+    assert "opening_auction_pressure" in features.columns
+    assert "closing_auction_pressure" in features.columns
 
 
 def test_combine_domain_datasets_references_sidecar_and_policy_bundle_paths(tmp_path) -> None:

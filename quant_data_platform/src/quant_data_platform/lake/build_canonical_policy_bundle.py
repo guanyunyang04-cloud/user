@@ -8,6 +8,9 @@ from typing import Any, Mapping
 
 import pandas as pd
 
+from quant_data_platform.core.json_io import utc_now
+from quant_data_platform.core.paths import qdp_paths
+from quant_data_platform.core.registry import load_root_manifest, write_root_manifest_update
 from quant_data_platform.lake.canonical import (
     DEFAULT_CANONICAL_ALIAS,
     DEFAULT_CANONICAL_START_DATE,
@@ -23,7 +26,7 @@ from quant_data_platform.lake.catalog import (
     _write_json,
 )
 from quant_data_platform.lake.policy_input_loader import _read_table_paths
-from quant_data_platform.domains.contracts import DataDomain
+from quant_data_platform.domains.contracts import CANONICAL_BUNDLE_SIDECAR_DOMAINS, DataDomain
 
 
 @dataclass(frozen=True)
@@ -38,6 +41,8 @@ class BuildCanonicalPolicyBundleConfig:
     source: str = "canonical_data_v1"
     alias: str = DEFAULT_CANONICAL_ALIAS
     write_manifest: bool = True
+    update_root_manifest: bool = False
+    workspace_root: Path | None = None
     reuse: bool = True
 
     def normalized(self) -> "BuildCanonicalPolicyBundleConfig":
@@ -57,6 +62,8 @@ class BuildCanonicalPolicyBundleConfig:
             source=str(self.source or "canonical_data_v1"),
             alias=str(self.alias or DEFAULT_CANONICAL_ALIAS),
             write_manifest=bool(self.write_manifest),
+            update_root_manifest=bool(self.update_root_manifest),
+            workspace_root=Path(self.workspace_root) if self.workspace_root else None,
             reuse=bool(self.reuse),
         )
 
@@ -138,6 +145,16 @@ def build_canonical_policy_bundle(config: BuildCanonicalPolicyBundleConfig) -> B
                 notes="canonical policy bundle built from manifest-referenced market_daily and sidecar datasets",
             )
         )
+    if cfg.update_root_manifest:
+        if not manifest_path:
+            raise ValueError("root_manifest_update_requires_canonical_manifest")
+        _update_root_manifest_for_bundle(
+            cfg=cfg,
+            dataset_id=record.dataset_id,
+            manifest_path=manifest_path,
+            start_date=start_date,
+            end_date=end_date,
+        )
     return BuildCanonicalPolicyBundleResult(
         status=record.status,
         dataset_id=record.dataset_id,
@@ -147,6 +164,68 @@ def build_canonical_policy_bundle(config: BuildCanonicalPolicyBundleConfig) -> B
         membership_symbols=max(0, len(membership.columns) - 1),
         benchmark_rows=int(len(benchmark)),
         sidecar_dataset_ids=dict(cfg.sidecar_dataset_ids),
+    )
+
+
+def _update_root_manifest_for_bundle(
+    *,
+    cfg: BuildCanonicalPolicyBundleConfig,
+    dataset_id: str,
+    manifest_path: str,
+    start_date: str,
+    end_date: str,
+) -> None:
+    paths = qdp_paths(cfg.workspace_root) if cfg.workspace_root else qdp_paths()
+    root = load_root_manifest(paths)
+    sidecars = {
+        str(key): str(value)
+        for key, value in dict(cfg.sidecar_dataset_ids or {}).items()
+        if str(key) in CANONICAL_BUNDLE_SIDECAR_DOMAINS and str(value or "").strip()
+    }
+    components = dict(root.get("canonical_component_dataset_ids", {}) or {})
+    components.update({DataDomain.MARKET_DAILY: str(dataset_id)})
+    components.update(sidecars)
+    default_feature_policy = dict(root.get("default_feature_policy", {}) or {})
+    included_domains = list(
+        dict.fromkeys(
+            [
+                *list(default_feature_policy.get("canonical_included_domains", []) or []),
+                DataDomain.MARKET_DAILY,
+                *list(sidecars),
+            ]
+        )
+    )
+    default_feature_policy.update(
+        {
+            "research_style": str(default_feature_policy.get("research_style", "") or "profile_selected"),
+            "canonical_included_domains": included_domains,
+            "notes": str(
+                default_feature_policy.get("notes", "")
+                or "Canonical stores source data and sidecars; research feature profiles decide usage."
+            ),
+        }
+    )
+    write_root_manifest_update(
+        {
+            "status": "canonical_bundle_ready_memmap_not_updated",
+            "canonical_dataset_id": str(dataset_id),
+            "canonical_manifest": str(manifest_path),
+            "canonical_start_date": str(start_date or cfg.start_date or DEFAULT_CANONICAL_START_DATE),
+            "canonical_end_date": str(end_date or cfg.end_date or ""),
+            "canonical_component_dataset_ids": components,
+            "canonical_bundle_sidecar_dataset_ids": sidecars,
+            "default_feature_policy": default_feature_policy,
+            "latest_canonical_bundle_update": {
+                "status": "activated",
+                "canonical_dataset_id": str(dataset_id),
+                "canonical_manifest": str(manifest_path),
+                "start_date": str(start_date or ""),
+                "end_date": str(end_date or ""),
+                "memmap_updated": False,
+                "updated_at": utc_now(),
+            },
+        },
+        paths=paths,
     )
 
 
@@ -452,6 +531,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--alias", default=DEFAULT_CANONICAL_ALIAS)
     parser.add_argument("--write-canonical-manifest", dest="write_manifest", action="store_true", default=True)
     parser.add_argument("--no-write-canonical-manifest", dest="write_manifest", action="store_false")
+    parser.add_argument("--update-root-manifest", action="store_true")
+    parser.add_argument("--workspace-root", default="")
     parser.add_argument("--reuse", dest="reuse", action="store_true", default=True)
     parser.add_argument("--no-reuse", dest="reuse", action="store_false")
     return parser
@@ -471,6 +552,8 @@ def main(argv: list[str] | None = None) -> int:
             source=args.source,
             alias=args.alias,
             write_manifest=bool(args.write_manifest),
+            update_root_manifest=bool(args.update_root_manifest),
+            workspace_root=Path(args.workspace_root) if str(args.workspace_root or "").strip() else None,
             reuse=bool(args.reuse),
         )
     )

@@ -8,15 +8,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from daily_research.baseline.advanced_ml_runtime import HistoryWindow
-from daily_research.continuous_policy.state_builder import (
-    STATE_SEQUENCE_BASES,
-    STATE_SEQUENCE_LAGS,
-    DEFAULT_SCORE_BLEND_WEIGHTS,
-    PreparedPolicyInputs,
-    _build_alpha_prior_frames,
-    _safe_pct_change,
-)
 from quant_data_platform.lake.catalog import ResearchDataLake
 from quant_data_platform.lake.canonical import DEFAULT_CANONICAL_ALIAS, resolve_canonical_dataset_id
 from quant_data_platform.lake.pool_views import PoolViewSpec, resolve_pool_view_for_policy_inputs
@@ -33,6 +24,28 @@ VALUATION_METRIC_ALIASES = {
     "psTTM": ("psTTM", "ps_ttm", "ps"),
     "pcfNcfTTM": ("pcfNcfTTM", "pcf_ncf_ttm"),
 }
+
+
+def _policy_runtime_symbols() -> dict[str, Any]:
+    from daily_research.baseline.advanced_ml_runtime import HistoryWindow
+    from daily_research.continuous_policy.state_builder import (
+        STATE_SEQUENCE_BASES,
+        STATE_SEQUENCE_LAGS,
+        DEFAULT_SCORE_BLEND_WEIGHTS,
+        PreparedPolicyInputs,
+        _build_alpha_prior_frames,
+        _safe_pct_change,
+    )
+
+    return {
+        "HistoryWindow": HistoryWindow,
+        "STATE_SEQUENCE_BASES": STATE_SEQUENCE_BASES,
+        "STATE_SEQUENCE_LAGS": STATE_SEQUENCE_LAGS,
+        "DEFAULT_SCORE_BLEND_WEIGHTS": DEFAULT_SCORE_BLEND_WEIGHTS,
+        "PreparedPolicyInputs": PreparedPolicyInputs,
+        "_build_alpha_prior_frames": _build_alpha_prior_frames,
+        "_safe_pct_change": _safe_pct_change,
+    }
 
 
 def resolve_policy_input_dataset_id(lake: ResearchDataLake, dataset_id: str = "") -> str:
@@ -491,6 +504,13 @@ def _load_intraday_daily_feature_sidecar_frames(
     sidecar_id = _sidecar_dataset_ids(metadata).get(DataDomain.INTRADAY_DAILY_FEATURES, "")
     fields = [
         "first_5m_ret",
+        "opening_auction_ret",
+        "opening_auction_amount",
+        "opening_auction_volume",
+        "opening_auction_amount_share",
+        "opening_auction_range",
+        "opening_auction_vwap",
+        "opening_auction_pressure",
         "first_15m_ret",
         "first_30m_ret",
         "first_30m_amount_share",
@@ -498,6 +518,13 @@ def _load_intraday_daily_feature_sidecar_frames(
         "open_gap_first_30m_follow_through",
         "open_gap_first_30m_reversal",
         "last_5m_ret",
+        "closing_auction_ret",
+        "closing_auction_amount",
+        "closing_auction_volume",
+        "closing_auction_amount_share",
+        "closing_auction_range",
+        "closing_auction_vwap",
+        "closing_auction_pressure",
         "last_30m_ret",
         "last_30m_amount_share",
         "intraday_ret",
@@ -845,6 +872,12 @@ def load_policy_inputs_from_lake(
     alpha_prior_target_weight_panel: str = "",
     require_benchmark_open: bool = False,
 ) -> PreparedPolicyInputs:
+    runtime = _policy_runtime_symbols()
+    HistoryWindow = runtime["HistoryWindow"]
+    DEFAULT_SCORE_BLEND_WEIGHTS = runtime["DEFAULT_SCORE_BLEND_WEIGHTS"]
+    PreparedPolicyInputs = runtime["PreparedPolicyInputs"]
+    _build_alpha_prior_frames = runtime["_build_alpha_prior_frames"]
+
     dataset_id = resolve_policy_input_dataset_id(lake, dataset_id)
     metadata = lake.describe_dataset(dataset_id)
     start_date = str(start_date or metadata.get("start_date", "") or "").strip()
@@ -1262,6 +1295,11 @@ def _build_state_derived_frames_from_market(
     score_blend: pd.DataFrame,
     alpha_prior_frames: dict[str, pd.DataFrame],
 ) -> dict[str, pd.DataFrame]:
+    runtime = _policy_runtime_symbols()
+    STATE_SEQUENCE_BASES = runtime["STATE_SEQUENCE_BASES"]
+    STATE_SEQUENCE_LAGS = runtime["STATE_SEQUENCE_LAGS"]
+    _safe_pct_change = runtime["_safe_pct_change"]
+
     returns_1d = _safe_pct_change(close, 1)
     rolling_high_20 = close.rolling(20, min_periods=1).max()
     rolling_high_60 = close.rolling(60, min_periods=1).max()
