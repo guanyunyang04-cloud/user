@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from quant_data_platform.core.json_io import json_safe
+from quant_data_platform.qdp_v2.environment import runtime_environment
 from quant_data_platform.qdp_v2.manifest import (
     DatasetManifest,
     ShardManifestEntry,
@@ -119,8 +120,155 @@ def derive_5m_from_1m(
         "end_date": manifest.end_date,
         "active_manifest": active_path,
         "max_shards": int(max_shards or 0),
+        "runtime_environment": runtime_environment(),
     }
     atomic_write_json(root / "runs" / f"derive_5m_{utc_now().replace(':', '').replace('-', '')}.json", payload)
+    return payload
+
+
+def split_daily_market(
+    *,
+    workspace_root: str | Path | None = None,
+    source_dataset_id: str = "",
+    source_domain: str = "market_daily_panel",
+    max_shards: int = 0,
+    runtime: str = "balanced",
+    activate_domain: bool = False,
+) -> dict[str, Any]:
+    root = qdp_v2_root(workspace_root)
+    source_manifest = _resolve_source_manifest(root, source_dataset_id, source_domain)
+    source = read_dataset_manifest(source_manifest)
+    profile = resolve_runtime_profile(runtime)
+    raw_dataset_id = f"market_daily_raw__{stable_hash({'source': source.dataset_id, 'contract': 'qdp_v2_market_daily_raw_v1'})}"
+    panel_dataset_id = f"market_daily_panel__{stable_hash({'source': source.dataset_id, 'contract': 'qdp_v2_market_daily_panel_v1'})}"
+    raw_staging = root / "datasets" / "market_daily_raw" / raw_dataset_id / ".staging" / "shards"
+    panel_staging = root / "datasets" / "market_daily_panel" / panel_dataset_id / ".staging" / "shards"
+    for path in (raw_staging.parent, panel_staging.parent):
+        if path.exists():
+            shutil.rmtree(path)
+    raw_staging.mkdir(parents=True, exist_ok=True)
+    panel_staging.mkdir(parents=True, exist_ok=True)
+    raw_entries: list[ShardManifestEntry] = []
+    panel_entries: list[ShardManifestEntry] = []
+    errors: list[dict[str, Any]] = []
+    processed = 0
+    for index, shard in enumerate(source.shards):
+        if max_shards and processed >= max_shards:
+            break
+        source_path = root / shard.path if not Path(shard.path).is_absolute() else Path(shard.path)
+        raw_path = raw_staging / f"part_{index:06d}_daily_raw.parquet"
+        panel_path = panel_staging / f"part_{index:06d}_daily_panel.parquet"
+        try:
+            stats = _split_daily_market_shard(
+                source_path=source_path,
+                raw_target_path=raw_path,
+                panel_target_path=panel_path,
+                memory_limit=profile.duckdb_memory_limit,
+                threads=profile.duckdb_threads,
+            )
+            raw_entries.append(
+                ShardManifestEntry(
+                    path=f"datasets/market_daily_raw/{raw_dataset_id}/shards/{raw_path.name}",
+                    row_count=int(stats["raw_row_count"]),
+                    start_date=str(stats.get("start_date", "") or shard.start_date),
+                    end_date=str(stats.get("end_date", "") or shard.end_date),
+                    status="stored",
+                    file_size=int(raw_path.stat().st_size),
+                    schema_hash=schema_hash(_duckdb_schema(raw_path)),
+                    source_path=str(source_path.resolve()),
+                    content_key="market_daily_raw",
+                )
+            )
+            panel_entries.append(
+                ShardManifestEntry(
+                    path=f"datasets/market_daily_panel/{panel_dataset_id}/shards/{panel_path.name}",
+                    row_count=int(stats["panel_row_count"]),
+                    start_date=str(stats.get("start_date", "") or shard.start_date),
+                    end_date=str(stats.get("end_date", "") or shard.end_date),
+                    status="stored",
+                    file_size=int(panel_path.stat().st_size),
+                    schema_hash=schema_hash(_duckdb_schema(panel_path)),
+                    source_path=str(source_path.resolve()),
+                    content_key="market_daily_panel",
+                )
+            )
+            processed += 1
+        except Exception as exc:
+            errors.append({"source_path": str(source_path), "error": str(exc)})
+    if errors:
+        return {"status": "error", "processed_shards": processed, "errors": errors[:50], "error_count": len(errors)}
+    raw_final = root / "datasets" / "market_daily_raw" / raw_dataset_id / "shards"
+    panel_final = root / "datasets" / "market_daily_panel" / panel_dataset_id / "shards"
+    _replace_staging_shards(raw_staging, raw_final)
+    _replace_staging_shards(panel_staging, panel_final)
+    raw_schema = _duckdb_schema(raw_final / raw_entries[0].path.split("/")[-1]) if raw_entries else []
+    panel_schema = _duckdb_schema(panel_final / panel_entries[0].path.split("/")[-1]) if panel_entries else []
+    starts = [item.start_date for item in panel_entries if item.start_date]
+    ends = [item.end_date for item in panel_entries if item.end_date]
+    raw_manifest = DatasetManifest(
+        dataset_id=raw_dataset_id,
+        domain="market_daily_raw",
+        layer="raw",
+        frequency="1d",
+        contract_version="qdp_v2_market_daily_raw_v1",
+        primary_key=["trade_date", "symbol"],
+        start_date=min(starts) if starts else "",
+        end_date=max(ends) if ends else "",
+        row_count=sum(int(item.row_count) for item in raw_entries),
+        schema_hash=schema_hash(raw_schema),
+        schema=raw_schema,
+        shards=raw_entries,
+        source={"provider": "qdp_v2", "created_by": "split_daily_market", "created_at": utc_now(), "source_dataset_id": source.dataset_id},
+        quality={"path_refs_exist": True, "ohlcv_non_null": True, "primary_key_unique": "not_checked"},
+        notes=["raw daily facts filtered from legacy rectangular market panel; null OHLCV rows are excluded"],
+    )
+    panel_manifest = DatasetManifest(
+        dataset_id=panel_dataset_id,
+        domain="market_daily_panel",
+        layer="research_panel",
+        frequency="1d",
+        contract_version="qdp_v2_market_daily_panel_v1",
+        primary_key=["trade_date", "symbol"],
+        start_date=min(starts) if starts else "",
+        end_date=max(ends) if ends else "",
+        row_count=sum(int(item.row_count) for item in panel_entries),
+        schema_hash=schema_hash(panel_schema),
+        schema=panel_schema,
+        shards=panel_entries,
+        source={"provider": "qdp_v2", "created_by": "split_daily_market", "created_at": utc_now(), "source_dataset_id": source.dataset_id},
+        quality={"path_refs_exist": True, "has_bar_contract": True, "primary_key_unique": "not_checked"},
+        notes=["research panel keeps rectangular rows and marks missing bars with has_bar=false"],
+    )
+    raw_manifest_path = write_dataset_manifest(root, raw_manifest)
+    panel_manifest_path = write_dataset_manifest(root, panel_manifest)
+    active_path = ""
+    if activate_domain:
+        active = read_active_manifest(root)
+        if active:
+            raw = dict(active.get("raw", {}) or {})
+            research_panels = dict(active.get("research_panels", {}) or {})
+            raw["market_daily_raw"] = raw_dataset_id
+            research_panels["market_daily_panel"] = panel_dataset_id
+            active["raw"] = raw
+            active["research_panels"] = research_panels
+            active_path = str(write_active_manifest(root, active).resolve())
+    payload = {
+        "status": "ok",
+        "source_dataset_id": source.dataset_id,
+        "raw_dataset_id": raw_dataset_id,
+        "panel_dataset_id": panel_dataset_id,
+        "raw_manifest_path": str(raw_manifest_path.resolve()),
+        "panel_manifest_path": str(panel_manifest_path.resolve()),
+        "processed_shards": processed,
+        "raw_row_count": raw_manifest.row_count,
+        "panel_row_count": panel_manifest.row_count,
+        "start_date": panel_manifest.start_date,
+        "end_date": panel_manifest.end_date,
+        "active_manifest": active_path,
+        "max_shards": int(max_shards or 0),
+        "runtime_environment": runtime_environment(),
+    }
+    atomic_write_json(root / "runs" / f"split_daily_market_{utc_now().replace(':', '').replace('-', '')}.json", payload)
     return payload
 
 
@@ -216,6 +364,7 @@ def normalize_valuation(
         "end_date": manifest.end_date,
         "active_manifest": active_path,
         "max_shards": int(max_shards or 0),
+        "runtime_environment": runtime_environment(),
     }
     atomic_write_json(root / "runs" / f"normalize_valuation_{utc_now().replace(':', '').replace('-', '')}.json", payload)
     return payload
@@ -228,15 +377,123 @@ def _resolve_source_manifest(root: Path, dataset_id: str, domain: str) -> Path:
             raise FileNotFoundError(f"dataset_manifest_not_found:{domain}:{dataset_id}")
         return path
     active = read_active_manifest(root)
-    active_id = str(dict(active.get("raw", {}) or {}).get(domain, "") or "")
-    if active_id:
-        path = dataset_manifest_for_id(root, active_id, domain)
-        if path is not None:
-            return path
+    for section in ("raw", "derived", "research_panels"):
+        active_id = str(dict(active.get(section, {}) or {}).get(domain, "") or "")
+        if active_id:
+            path = dataset_manifest_for_id(root, active_id, domain)
+            if path is not None:
+                return path
     candidates = sorted((root / "datasets" / domain).glob("*/dataset.json"))
     if len(candidates) == 1:
         return candidates[0]
     raise FileNotFoundError(f"source_dataset_required:{domain}")
+
+
+def _replace_staging_shards(staging_shards: Path, final_shards: Path) -> None:
+    final_shards.parent.mkdir(parents=True, exist_ok=True)
+    if final_shards.exists():
+        shutil.rmtree(final_shards)
+    if staging_shards.exists():
+        staging_shards.replace(final_shards)
+    staging_root = final_shards.parent / ".staging"
+    if staging_root.exists():
+        shutil.rmtree(staging_root, ignore_errors=True)
+
+
+def _split_daily_market_shard(
+    *,
+    source_path: Path,
+    raw_target_path: Path,
+    panel_target_path: Path,
+    memory_limit: str,
+    threads: int,
+) -> dict[str, Any]:
+    import duckdb  # type: ignore
+
+    raw_target_path.parent.mkdir(parents=True, exist_ok=True)
+    panel_target_path.parent.mkdir(parents=True, exist_ok=True)
+    source_literal = _sql_literal(str(source_path))
+    raw_literal = _sql_literal(str(raw_target_path))
+    panel_literal = _sql_literal(str(panel_target_path))
+    with duckdb.connect(":memory:") as con:
+        con.execute(f"set memory_limit='{memory_limit}'")
+        con.execute(f"set threads={max(1, int(threads))}")
+        cols = {str(row[0]) for row in con.execute("describe select * from read_parquet(?)", [str(source_path)]).fetchall()}
+        symbol_expr = _column_expr(cols, "symbol", aliases=("stock", "code", "stock_code"))
+        date_expr = _column_expr(cols, "trade_date", aliases=("date",))
+        source_expr = "source" if "source" in cols else "'legacy_market_panel'"
+        adjusted_expr = "adjusted_flag" if "adjusted_flag" in cols else "''"
+        ingest_expr = "ingest_batch_id" if "ingest_batch_id" in cols else "''"
+        has_bar_expr = (
+            "open is not null and high is not null and low is not null and close is not null "
+            "and volume is not null and amount is not null"
+        )
+        base_select = f"""
+            select
+                cast({symbol_expr} as varchar) as symbol,
+                cast({date_expr} as varchar) as trade_date,
+                cast(open as double) as open,
+                cast(high as double) as high,
+                cast(low as double) as low,
+                cast(close as double) as close,
+                cast(volume as double) as volume,
+                cast(amount as double) as amount,
+                cast({source_expr} as varchar) as source,
+                cast({adjusted_expr} as varchar) as adjusted_flag,
+                cast({ingest_expr} as varchar) as ingest_batch_id,
+                ({has_bar_expr}) as has_bar
+            from read_parquet({source_literal})
+        """
+        con.execute(
+            f"""
+            copy (
+                select
+                    symbol,
+                    trade_date,
+                    open,
+                    high,
+                    low,
+                    close,
+                    volume,
+                    amount,
+                    source,
+                    adjusted_flag
+                from ({base_select}) base
+                where has_bar
+                order by trade_date, symbol
+            ) to {raw_literal} (format parquet)
+            """
+        )
+        con.execute(
+            f"""
+            copy (
+                select
+                    symbol,
+                    trade_date,
+                    open,
+                    high,
+                    low,
+                    close,
+                    volume,
+                    amount,
+                    source,
+                    adjusted_flag,
+                    ingest_batch_id,
+                    has_bar,
+                    case when has_bar then '' else 'no_bar' end as reject_reason
+                from ({base_select}) base
+                order by trade_date, symbol
+            ) to {panel_literal} (format parquet)
+            """
+        )
+        raw_row = con.execute("select count(*) as n, min(trade_date), max(trade_date) from read_parquet(?)", [str(raw_target_path)]).fetchone()
+        panel_row = con.execute("select count(*) as n, min(trade_date), max(trade_date) from read_parquet(?)", [str(panel_target_path)]).fetchone()
+    return {
+        "raw_row_count": int(raw_row[0] or 0),
+        "panel_row_count": int(panel_row[0] or 0),
+        "start_date": str(panel_row[1] or raw_row[1] or ""),
+        "end_date": str(panel_row[2] or raw_row[2] or ""),
+    }
 
 
 def _derive_5m_shard(*, source_path: Path, target_path: Path, memory_limit: str, threads: int) -> dict[str, Any]:
@@ -381,6 +638,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     five.add_argument("--max-shards", type=int, default=0)
     five.add_argument("--activate-domain", action="store_true")
     five.add_argument("--json", action="store_true")
+    daily = sub.add_parser("daily-market", help="Split a rectangular legacy daily market panel into raw facts and research panel.")
+    daily.add_argument("--source-dataset-id", default="")
+    daily.add_argument("--source-domain", default="market_daily_panel")
+    daily.add_argument("--max-shards", type=int, default=0)
+    daily.add_argument("--activate-domain", action="store_true")
+    daily.add_argument("--json", action="store_true")
     valuation = sub.add_parser("valuation", help="Normalize valuation shards to qdp_v2 valuation schema.")
     valuation.add_argument("--source-dataset-id", default="")
     valuation.add_argument("--max-shards", type=int, default=0)
@@ -396,6 +659,15 @@ def main(argv: list[str] | None = None) -> int:
         payload = derive_5m_from_1m(
             workspace_root=workspace,
             source_dataset_id=str(args.source_dataset_id or ""),
+            max_shards=int(args.max_shards or 0),
+            runtime=str(args.runtime or "balanced"),
+            activate_domain=bool(args.activate_domain),
+        )
+    elif args.clean_command == "daily-market":
+        payload = split_daily_market(
+            workspace_root=workspace,
+            source_dataset_id=str(args.source_dataset_id or ""),
+            source_domain=str(args.source_domain or "market_daily_panel"),
             max_shards=int(args.max_shards or 0),
             runtime=str(args.runtime or "balanced"),
             activate_domain=bool(args.activate_domain),

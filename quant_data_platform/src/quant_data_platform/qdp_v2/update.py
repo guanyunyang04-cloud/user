@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from quant_data_platform.core.json_io import json_safe
+from quant_data_platform.qdp_v2.environment import runtime_environment
 from quant_data_platform.qdp_v2.manifest import atomic_write_json, dataset_manifest_for_id, qdp_v2_root, read_active_manifest, read_dataset_manifest, utc_now
 from quant_data_platform.qdp_v2.runtime import resolve_runtime_profile
 from quant_data_platform.qdp_v2.status import _active_dataset_refs
@@ -45,6 +46,7 @@ def plan_update(*, as_of_date: str, runtime: str, workspace_root: str | Path | N
         "qdp_v2_root": str(root.resolve()),
         "as_of_date": target,
         "runtime": asdict(profile),
+        "runtime_environment": runtime_environment(),
         "active_as_of_date": str(active.get("active_as_of_date", "") or ""),
         "coverage": coverage,
         "gaps": gaps,

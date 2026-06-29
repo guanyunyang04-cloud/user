@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib
 from typing import Callable
 
+from quant_data_platform.qdp_v2.environment import assert_yolos_environment
+
 
 CommandMain = Callable[[list[str] | None], int]
 
@@ -20,17 +22,38 @@ COMMAND_MODULES: dict[tuple[str, ...], str] = {
     ("provider", "benchmark"): "quant_data_platform.qdp_v2.provider_benchmark",
 }
 
+ENV_GUARDED_PREFIXES = {
+    ("provider", "benchmark"),
+    ("clean",),
+}
+
 
 def dispatch(argv: list[str]) -> int | None:
     raw = list(argv or [])
     for prefix, module_name in sorted(COMMAND_MODULES.items(), key=lambda item: len(item[0]), reverse=True):
         if tuple(raw[: len(prefix)]) == prefix:
+            if _requires_yolos(prefix, raw[len(prefix) :]):
+                assert_yolos_environment(command=" ".join(prefix))
             module = importlib.import_module(module_name)
             main = getattr(module, "main", None)
             if not callable(main):
                 raise RuntimeError(f"{module_name} does not expose callable main(argv)")
             return int(main(raw[len(prefix) :]) or 0)
     return None
+
+
+def _requires_yolos(prefix: tuple[str, ...], args: list[str]) -> bool:
+    if prefix in ENV_GUARDED_PREFIXES:
+        return True
+    if prefix == ("migrate-v2",):
+        return "--move" in args
+    if prefix == ("activate-v2",):
+        return "--yes" in args
+    if prefix == ("update",):
+        return "--dry-run" not in args
+    if prefix == ("lake", "gc"):
+        return "--delete" in args
+    return False
 
 
 def main(argv: list[str] | None = None) -> int:

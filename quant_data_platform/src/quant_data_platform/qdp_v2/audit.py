@@ -55,6 +55,9 @@ def audit_active(*, workspace_root: str | Path | None = None, write: bool = True
                 warnings.append(f"footer_errors_truncated:{section}.{domain}:{len(footer_errors)}")
         if manifest.row_count and footer_rows and int(manifest.row_count) != int(footer_rows):
             errors.append(f"dataset_row_count_mismatch:{section}.{domain}:manifest={manifest.row_count}:footer={footer_rows}")
+        contract_errors, contract_warnings = _manifest_contract_findings(domain, manifest.to_dict())
+        errors.extend(contract_errors)
+        warnings.extend(contract_warnings)
         dataset_reports.append(
             {
                 "section": section,
@@ -88,6 +91,42 @@ def audit_active(*, workspace_root: str | Path | None = None, write: bool = True
         atomic_write_json(path, payload)
         payload["audit_path"] = str(path.resolve())
     return payload
+
+
+def _manifest_contract_findings(domain: str, manifest: dict[str, Any]) -> tuple[list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    contract = str(manifest.get("contract_version", "") or "")
+    dataset_id = str(manifest.get("dataset_id", "") or "")
+    quality = dict(manifest.get("quality", {}) or {})
+    schema = [str(dict(item).get("name", "") or "") for item in list(manifest.get("schema", []) or []) if isinstance(item, dict)]
+    if "pending_rebuild" in contract or "pending_qdp_v2_normalization" in contract or "pending_qdp_v2_split" in contract:
+        errors.append(f"pending_contract_active:{domain}:{dataset_id}:{contract}")
+    expected_contracts = {
+        "market_intraday_1m": "mootdx_1m_240_v1",
+        "market_intraday_5m": "mootdx_5m_48_v1",
+        "market_daily_raw": "qdp_v2_market_daily_raw_v1",
+        "market_daily_panel": "qdp_v2_market_daily_panel_v1",
+        "valuation": "qdp_v2_valuation_v1",
+    }
+    expected = expected_contracts.get(domain)
+    if expected and contract != expected:
+        errors.append(f"wrong_contract:{domain}:{dataset_id}:expected={expected}:actual={contract}")
+    if domain == "market_intraday_5m" and str(quality.get("bar_count_contract", "") or "") != "48":
+        errors.append(f"missing_5m_48_quality:{dataset_id}")
+    if domain == "market_daily_raw" and quality.get("ohlcv_non_null") is not True:
+        errors.append(f"market_daily_raw_not_marked_ohlcv_non_null:{dataset_id}")
+    if domain == "market_daily_panel" and quality.get("has_bar_contract") is not True:
+        errors.append(f"market_daily_panel_missing_has_bar_contract:{dataset_id}")
+    if domain == "valuation":
+        required = {"symbol", "trade_date", "total_mv", "circ_mv", "pe", "pb", "turnover_rate", "source"}
+        missing = sorted(required.difference(schema))
+        if missing:
+            errors.append(f"valuation_schema_missing:{dataset_id}:{','.join(missing)}")
+    if domain in {"market_daily_raw", "market_daily_panel", "market_intraday_1m", "market_intraday_5m", "valuation"}:
+        if quality.get("primary_key_unique") not in {True, "checked"}:
+            warnings.append(f"primary_key_uniqueness_not_deep_checked:{domain}:{dataset_id}")
+    return errors, warnings
 
 
 def _parquet_row_count(path: Path) -> int:

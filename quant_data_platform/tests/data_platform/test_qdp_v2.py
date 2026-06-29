@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -10,8 +11,9 @@ from quant_data_platform.domains.contracts import DataDomain
 from quant_data_platform.lake.catalog import ResearchDataLake
 from quant_data_platform.qdp_v2.activate import activate_v2
 from quant_data_platform.qdp_v2.audit import audit_active
-from quant_data_platform.qdp_v2.cleaning import derive_5m_from_1m, normalize_valuation
+from quant_data_platform.qdp_v2.cleaning import derive_5m_from_1m, normalize_valuation, split_daily_market
 from quant_data_platform.qdp_v2.dataset import validate_dataset
+from quant_data_platform.qdp_v2.environment import assert_yolos_environment, runtime_environment
 from quant_data_platform.qdp_v2.gc import lake_gc
 from quant_data_platform.qdp_v2.index import rebuild_index
 from quant_data_platform.qdp_v2.manifest import (
@@ -257,6 +259,53 @@ def test_qdp_v2_cleaning_normalizes_valuation_schema(tmp_path: Path) -> None:
     assert described["status"] == "ok"
 
 
+def test_qdp_v2_cleaning_splits_daily_market_raw_and_panel(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    root = qdp_v2_root(workspace)
+    shard = root / "datasets" / "market_daily_panel" / "market_daily_panel__legacy" / "shards" / "part.parquet"
+    _write_parquet(
+        shard,
+        pd.DataFrame(
+            {
+                "symbol": ["000001.SZ", "000002.SZ"],
+                "trade_date": ["2026-01-05", "2026-01-05"],
+                "open": [10.0, None],
+                "high": [11.0, None],
+                "low": [9.0, None],
+                "close": [10.5, None],
+                "volume": [1000.0, None],
+                "amount": [10000.0, None],
+                "source": ["unit", "unit"],
+                "ingest_batch_id": ["b1", "b1"],
+            }
+        ),
+    )
+    source = DatasetManifest(
+        dataset_id="market_daily_panel__legacy",
+        domain="market_daily_panel",
+        layer="research_panel",
+        frequency="1d",
+        contract_version="legacy_policy_bundle_research_panel_v1",
+        primary_key=["trade_date", "symbol"],
+        start_date="2026-01-05",
+        end_date="2026-01-05",
+        row_count=2,
+        schema_hash="unit",
+        shards=[ShardManifestEntry(path="datasets/market_daily_panel/market_daily_panel__legacy/shards/part.parquet", row_count=2, start_date="2026-01-05", end_date="2026-01-05")],
+        source={"provider": "unit"},
+        quality={},
+    )
+    write_dataset_manifest(root, source)
+
+    result = split_daily_market(workspace_root=workspace, source_dataset_id=source.dataset_id, max_shards=1, runtime="safe")
+
+    assert result["status"] == "ok"
+    assert result["raw_row_count"] == 1
+    assert result["panel_row_count"] == 2
+    assert validate_dataset(result["raw_dataset_id"], workspace_root=workspace, domain="market_daily_raw")["status"] == "ok"
+    assert validate_dataset(result["panel_dataset_id"], workspace_root=workspace, domain="market_daily_panel")["status"] == "ok"
+
+
 def test_qdp_v2_activate_selects_clean_contracts_and_writes_active(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     root = qdp_v2_root(workspace)
@@ -270,7 +319,7 @@ def test_qdp_v2_activate_selects_clean_contracts_and_writes_active(tmp_path: Pat
         "valuation": ("qdp_v2_valuation_v1", "valuation__ok"),
         "adjust_factor": ("qdp_v2_adjust_factor_v1", "adjust_factor__ok"),
         "intraday_daily_features": ("qdp_v2_intraday_daily_features_v1", "intraday_daily_features__ok"),
-        "market_daily_panel": ("legacy_policy_bundle_research_panel_v1", "market_daily_panel__ok"),
+        "market_daily_panel": ("qdp_v2_market_daily_panel_v1", "market_daily_panel__ok"),
     }
     for domain, (contract, dataset_id) in specs.items():
         write_dataset_manifest(
@@ -317,3 +366,62 @@ def test_qdp_v2_activate_selects_clean_contracts_and_writes_active(tmp_path: Pat
     assert written["status"] == "activated"
     assert written["active"]["raw"]["market_intraday_5m"] == "market_intraday_5m__ok"
     assert (root / "active" / "active.json").exists()
+
+
+def test_qdp_v2_activate_rejects_legacy_market_daily_panel_contract(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    root = qdp_v2_root(workspace)
+    required = {
+        "market_daily_raw": ("qdp_v2_market_daily_raw_v1", "market_daily_raw__ok"),
+        "market_intraday_1m": ("mootdx_1m_240_v1", "market_intraday_1m__ok"),
+        "market_intraday_5m": ("mootdx_5m_48_v1", "market_intraday_5m__ok"),
+        "trading_calendar": ("qdp_v2_trading_calendar_v1", "trading_calendar__ok"),
+        "universe_snapshot": ("qdp_v2_universe_snapshot_v1", "universe_snapshot__ok"),
+        "security_status": ("qdp_v2_security_status_v1", "security_status__ok"),
+        "valuation": ("qdp_v2_valuation_v1", "valuation__ok"),
+        "adjust_factor": ("qdp_v2_adjust_factor_v1", "adjust_factor__ok"),
+        "intraday_daily_features": ("qdp_v2_intraday_daily_features_v1", "intraday_daily_features__ok"),
+        "market_daily_panel": ("legacy_policy_bundle_research_panel_v1", "market_daily_panel__legacy"),
+    }
+    for domain, (contract, dataset_id) in required.items():
+        write_dataset_manifest(
+            root,
+            DatasetManifest(
+                dataset_id=dataset_id,
+                domain=domain,
+                layer="raw",
+                frequency="1d",
+                contract_version=contract,
+                primary_key=[],
+                start_date="2026-01-05",
+                end_date="2026-01-05",
+                row_count=0,
+                schema_hash="unit",
+                shards=[],
+                source={"provider": "unit"},
+                quality={},
+            ),
+        )
+
+    result = activate_v2(workspace_root=workspace, yes=True)
+
+    assert result["status"] == "blocked"
+    assert any("required_domain_wrong_contract:market_daily_panel" in item for item in result["errors"])
+
+
+def test_qdp_v2_environment_guard_requires_yolos(monkeypatch) -> None:
+    monkeypatch.delenv("QDP_ALLOW_NON_YOLOS", raising=False)
+    monkeypatch.setenv("CONDA_DEFAULT_ENV", "base")
+    monkeypatch.setattr(sys, "executable", r"C:\Users\ASUS\miniconda3\python.exe")
+
+    try:
+        assert_yolos_environment(command="provider benchmark")
+    except RuntimeError as exc:
+        assert "qdp_v2_requires_yolos_environment" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("expected environment guard failure")
+
+    monkeypatch.setenv("CONDA_DEFAULT_ENV", "yolos")
+    monkeypatch.setattr(sys, "executable", r"C:\Users\ASUS\miniconda3\envs\yolos\python.exe")
+    assert_yolos_environment(command="provider benchmark")
+    assert "python_executable" in runtime_environment()

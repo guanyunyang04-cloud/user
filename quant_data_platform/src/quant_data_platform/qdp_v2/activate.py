@@ -41,6 +41,7 @@ PREFERRED_CONTRACTS = {
     "market_intraday_5m": ("mootdx_5m_48_v1",),
     "valuation": ("qdp_v2_valuation_v1",),
     "market_daily_raw": ("qdp_v2_market_daily_raw_v1",),
+    "market_daily_panel": ("qdp_v2_market_daily_panel_v1",),
 }
 
 
@@ -82,6 +83,10 @@ def activate_v2(
             else:
                 warnings.append(f"optional_domain_pending_contract:{domain}:{candidate.get('dataset_id')}:{candidate.get('contract_version')}")
                 continue
+        preferred = set(PREFERRED_CONTRACTS.get(domain, ()))
+        if domain in REQUIRED_DOMAINS and preferred and str(candidate.get("contract_version", "") or "") not in preferred:
+            errors.append(f"required_domain_wrong_contract:{domain}:{candidate.get('dataset_id')}:{candidate.get('contract_version')}")
+            continue
         selected[domain] = str(candidate["dataset_id"])
     active_as_of = str(as_of_date or "").strip() or _infer_active_as_of(by_domain, selected)
     payload = {
@@ -122,7 +127,7 @@ def _select_candidate(domain: str, candidates: list[dict[str, Any]]) -> dict[str
 
 
 def _is_pending_contract(contract: str) -> bool:
-    return "pending_rebuild" in contract or "pending_qdp_v2_normalization" in contract
+    return "pending_rebuild" in contract or "pending_qdp_v2_normalization" in contract or "pending_qdp_v2_split" in contract
 
 
 def _infer_active_as_of(by_domain: dict[str, list[dict[str, Any]]], selected: dict[str, str]) -> str:

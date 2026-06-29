@@ -11,6 +11,7 @@ from quant_data_platform.core.json_io import json_safe, read_json
 from quant_data_platform.core.paths import qdp_paths
 from quant_data_platform.core.registry import load_root_manifest
 from quant_data_platform.lake.catalog import ResearchDataLake
+from quant_data_platform.qdp_v2.environment import runtime_environment
 from quant_data_platform.qdp_v2.manifest import (
     ACTIVE_MANIFEST_VERSION,
     DatasetManifest,
@@ -253,6 +254,7 @@ def execute_migration_plan(
         "errors": errors,
         "blockers": blockers,
         "source_parquet_preserved": True,
+        "runtime_environment": runtime_environment(),
     }
     runs = root / "runs"
     runs.mkdir(parents=True, exist_ok=True)
@@ -319,7 +321,7 @@ def _dataset_plans_from_legacy(
                     domain="market_daily_raw",
                     layer="raw",
                     frequency="1d",
-                    contract_version="qdp_v2_market_daily_raw_v1",
+                    contract_version="legacy_market_daily_raw_pending_qdp_v2_split",
                     primary_key=_default_primary_key("market_daily_raw"),
                     source={
                         "provider": str(metadata.get("source", "") or "legacy"),
@@ -328,7 +330,7 @@ def _dataset_plans_from_legacy(
                     },
                     legacy_metadata=_legacy_metadata_subset(metadata),
                     files=raw_files,
-                    notes=["split from legacy policy_input_bundle bronze_market_data"],
+                    notes=["legacy policy_input_bundle bronze_market_data copied as pending source; run qdp clean daily-market before activation"],
                 )
             )
     return plans
@@ -531,7 +533,7 @@ def _default_contract(domain: str, metadata: Mapping[str, Any]) -> str:
     if domain == "market_intraday_5m":
         return "legacy_5m_pending_rebuild_to_mootdx_5m_48_v1"
     if domain == "market_daily_raw":
-        return "qdp_v2_market_daily_raw_v1"
+        return "legacy_market_daily_raw_pending_qdp_v2_split"
     if domain == "market_daily_panel":
         return "legacy_policy_bundle_research_panel_v1"
     if domain == "valuation":
@@ -605,7 +607,7 @@ def _plan_blockers(dataset_plans: list[DatasetMigrationPlan]) -> list[str]:
     blockers: list[str] = []
     for plan in dataset_plans:
         contract = str(plan.contract_version or "")
-        if "pending_rebuild" in contract or "pending_qdp_v2_normalization" in contract:
+        if "pending_rebuild" in contract or "pending_qdp_v2_normalization" in contract or "pending_qdp_v2_split" in contract:
             blockers.append(f"{plan.domain}:{plan.target_dataset_id}:{contract}")
     return blockers
 

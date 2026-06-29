@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from quant_data_platform.core.json_io import json_safe
+from quant_data_platform.qdp_v2.environment import runtime_environment
 from quant_data_platform.qdp_v2.runtime import resolve_runtime_profile
 
 
@@ -45,6 +46,7 @@ def benchmark_providers(
     return {
         "status": "ok",
         "runtime": asdict(profile),
+        "runtime_environment": runtime_environment(),
         "live": bool(live),
         "results": results,
         "notes": [
