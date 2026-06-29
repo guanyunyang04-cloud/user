@@ -450,6 +450,77 @@ def normalize_valuation(
     return payload
 
 
+def scope_mainboard_active(
+    *,
+    workspace_root: str | Path | None = None,
+    as_of_date: str = "",
+    domains: str = "",
+    max_shards: int = 0,
+    runtime: str = "balanced",
+    workers: int = 1,
+    resume: bool = False,
+    trust_existing: bool = False,
+    duckdb_memory_limit: str = "",
+) -> dict[str, Any]:
+    root = qdp_v2_root(workspace_root)
+    active = read_active_manifest(root)
+    active_as_of = str(as_of_date or active.get("active_as_of_date", "") or "").strip()
+    if not active_as_of:
+        raise ValueError("active_as_of_date_required")
+    profile = resolve_runtime_profile(runtime)
+    memory_limit = str(duckdb_memory_limit or "").strip() or profile.duckdb_memory_limit
+    selected_domains = _scope_domain_list(domains, active)
+    scope_symbols_path, scope_stats = _write_mainboard_scope_symbols(root=root, active=active, active_as_of=active_as_of)
+    processed: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    for domain in selected_domains:
+        source_id = _active_dataset_id_for_domain(active, domain)
+        if not source_id:
+            skipped.append({"domain": domain, "reason": "domain_not_active"})
+            continue
+        manifest_path = dataset_manifest_for_id(root, source_id, domain)
+        if not manifest_path:
+            errors.append({"domain": domain, "dataset_id": source_id, "error": "manifest_not_found"})
+            continue
+        source = read_dataset_manifest(manifest_path)
+        if not _manifest_has_column(source, "symbol"):
+            skipped.append({"domain": domain, "dataset_id": source_id, "reason": "no_symbol_column"})
+            continue
+        result = _scope_dataset_by_symbols(
+            root=root,
+            source=source,
+            scope_symbols_path=scope_symbols_path,
+            scope_name="mainboard_hs_a_ex_current_st_delisted_v1",
+            active_as_of=active_as_of,
+            max_shards=max_shards,
+            memory_limit=memory_limit,
+            duckdb_threads=profile.duckdb_threads,
+            workers=workers,
+            resume=resume,
+            trust_existing=trust_existing,
+            scope_stats=scope_stats,
+        )
+        if result.get("status") == "ok":
+            processed.append(result)
+        else:
+            errors.append({"domain": domain, "dataset_id": source_id, "error": result})
+    payload = {
+        "status": "error" if errors else "ok",
+        "active_as_of_date": active_as_of,
+        "scope": "mainboard_hs_a_ex_current_st_delisted_v1",
+        "scope_symbols_path": str(scope_symbols_path.resolve()),
+        "scope_stats": scope_stats,
+        "processed": processed,
+        "skipped": skipped,
+        "errors": errors[:50],
+        "error_count": len(errors),
+        "runtime_environment": runtime_environment(),
+    }
+    atomic_write_json(root / "runs" / f"scope_mainboard_{utc_now().replace(':', '').replace('-', '')}.json", payload)
+    return payload
+
+
 def _resolve_source_manifest(root: Path, dataset_id: str, domain: str) -> Path:
     if dataset_id:
         path = dataset_manifest_for_id(root, dataset_id, domain)
@@ -478,6 +549,327 @@ def _replace_staging_shards(staging_shards: Path, final_shards: Path) -> None:
         staging_shards.replace(final_shards)
     if staging_root.exists():
         shutil.rmtree(staging_root, ignore_errors=True)
+
+
+def _scope_domain_list(domains: str, active: dict[str, Any]) -> list[str]:
+    text = str(domains or "").strip()
+    if text:
+        return [item.strip() for item in text.split(",") if item.strip()]
+    ordered: list[str] = []
+    for section in ("raw", "derived", "research_panels"):
+        for domain in dict(active.get(section, {}) or {}):
+            if domain not in ordered and domain != "trading_calendar":
+                ordered.append(domain)
+    return ordered
+
+
+def _active_dataset_id_for_domain(active: dict[str, Any], domain: str) -> str:
+    for section in ("raw", "derived", "research_panels"):
+        value = dict(active.get(section, {}) or {}).get(domain)
+        if value:
+            return str(value)
+    return ""
+
+
+def _manifest_has_column(manifest: DatasetManifest, column: str) -> bool:
+    wanted = str(column).lower()
+    return any(str(item.get("name", "")).lower() == wanted for item in manifest.schema)
+
+
+def _write_mainboard_scope_symbols(*, root: Path, active: dict[str, Any], active_as_of: str) -> tuple[Path, dict[str, Any]]:
+    import duckdb  # type: ignore
+
+    universe_id = _active_dataset_id_for_domain(active, "universe_snapshot")
+    status_id = _active_dataset_id_for_domain(active, "security_status")
+    universe = read_dataset_manifest(_require_dataset_manifest(root, universe_id, "universe_snapshot"))
+    status = read_dataset_manifest(_require_dataset_manifest(root, status_id, "security_status"))
+    universe_paths = [str(_resolve_qdp_v2_path(root, shard.path)) for shard in universe.shards]
+    status_paths = [str(_resolve_qdp_v2_path(root, shard.path)) for shard in status.shards]
+    target = root / "runs" / f"mainboard_scope_symbols_{stable_hash({'as_of': active_as_of, 'universe': universe.dataset_id, 'status': status.dataset_id})}.parquet"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with duckdb.connect(":memory:") as con:
+        con.execute("set memory_limit='2GB'")
+        con.execute("set threads=2")
+        con.execute(
+            f"""
+            copy (
+                with u as (
+                    select distinct upper(cast(symbol as varchar)) as symbol
+                    from read_parquet(?, union_by_name=true)
+                    where cast(trade_date as varchar)[:10] = ?
+                      and (
+                        regexp_matches(upper(cast(symbol as varchar)), '^(600|601|603|605)[0-9]{{3}}\\.SH$')
+                        or regexp_matches(upper(cast(symbol as varchar)), '^(000|001|002|003)[0-9]{{3}}\\.SZ$')
+                      )
+                ),
+                s as (
+                    select
+                        upper(cast(symbol as varchar)) as symbol,
+                        bool_or(coalesce(cast(is_st as boolean), false)) as is_st,
+                        bool_or(coalesce(cast(is_delisted as boolean), false)) as is_delisted
+                    from read_parquet(?, union_by_name=true)
+                    where cast(trade_date as varchar)[:10] = ?
+                    group by 1
+                )
+                select u.symbol
+                from u
+                left join s using(symbol)
+                where coalesce(s.is_st, false) = false
+                  and coalesce(s.is_delisted, false) = false
+                order by u.symbol
+            ) to {_sql_literal(str(target))} (format parquet)
+            """,
+            [universe_paths, active_as_of, status_paths, active_as_of],
+        )
+        stats = con.execute(
+            """
+            select
+                count(*) as symbol_count,
+                sum(case when symbol like '%.SH' then 1 else 0 end) as sh_count,
+                sum(case when symbol like '%.SZ' then 1 else 0 end) as sz_count
+            from read_parquet(?)
+            """,
+            [str(target)],
+        ).fetchone()
+    return target, {"symbol_count": int(stats[0] or 0), "sh_count": int(stats[1] or 0), "sz_count": int(stats[2] or 0)}
+
+
+def _require_dataset_manifest(root: Path, dataset_id: str, domain: str) -> Path:
+    path = dataset_manifest_for_id(root, dataset_id, domain)
+    if not path:
+        raise FileNotFoundError(f"dataset_manifest_not_found: {domain}:{dataset_id}")
+    return path
+
+
+def _resolve_qdp_v2_path(root: Path, path: str | Path) -> Path:
+    candidate = Path(path)
+    return candidate if candidate.is_absolute() else root / candidate
+
+
+def _scope_dataset_by_symbols(
+    *,
+    root: Path,
+    source: DatasetManifest,
+    scope_symbols_path: Path,
+    scope_name: str,
+    active_as_of: str,
+    max_shards: int,
+    memory_limit: str,
+    duckdb_threads: int,
+    workers: int,
+    resume: bool,
+    trust_existing: bool,
+    scope_stats: dict[str, Any],
+) -> dict[str, Any]:
+    target_dataset_id = f"{source.domain}__{stable_hash({'source': source.dataset_id, 'scope': scope_name, 'active_as_of': active_as_of})}"
+    target_dir = root / "datasets" / source.domain / target_dataset_id
+    staging = target_dir / ".staging"
+    if staging.exists() and not resume:
+        shutil.rmtree(staging)
+    staging_shards = staging / "shards"
+    staging_shards.mkdir(parents=True, exist_ok=True)
+    requested_workers = max(1, int(workers or 1))
+    worker_count = min(requested_workers, max(1, int(duckdb_threads or 1)), max(1, len(source.shards)))
+    worker_memory_limit = _parallel_duckdb_memory_limit(memory_limit, worker_count)
+    worker_threads = max(1, min(2, int(duckdb_threads or 1)))
+    tasks: list[dict[str, Any]] = []
+    entries_by_index: dict[int, ShardManifestEntry] = {}
+    reused = 0
+    selected = 0
+    errors: list[dict[str, Any]] = []
+    for index, shard in enumerate(source.shards):
+        if max_shards and selected >= max_shards:
+            break
+        selected += 1
+        source_path = _resolve_qdp_v2_path(root, shard.path)
+        target_path = staging_shards / f"part_{index:06d}_{_safe_file_stem(source.domain)}_mainboard.parquet"
+        if resume and target_path.exists():
+            if trust_existing and int(target_path.stat().st_size) > 0:
+                reused += 1
+                continue
+            try:
+                stats = _parquet_file_stats(target_path)
+                if int(stats["row_count"]) > 0:
+                    entries_by_index[index] = _scoped_shard_entry(
+                        source_domain=source.domain,
+                        target_dataset_id=target_dataset_id,
+                        target_path=target_path,
+                        source_path=source_path,
+                        row_count=int(stats["row_count"]),
+                        schema_hash_value=str(stats.get("schema_hash", "") or ""),
+                        shard=shard,
+                        scope_name=scope_name,
+                    )
+                    reused += 1
+                    continue
+            except Exception:
+                _remove_file_with_retries(target_path)
+        tasks.append(
+            {
+                "index": index,
+                "source_path": str(source_path),
+                "target_path": str(target_path),
+                "scope_symbols_path": str(scope_symbols_path),
+                "memory_limit": worker_memory_limit,
+                "threads": worker_threads,
+                "source_domain": source.domain,
+                "target_dataset_id": target_dataset_id,
+                "scope_name": scope_name,
+                "shard": shard.to_dict(),
+            }
+        )
+    if worker_count <= 1 or len(tasks) <= 1:
+        for task in tasks:
+            result = _filter_symbol_shard_task(task)
+            if result.get("status") == "ok":
+                entries_by_index[int(result["index"])] = result["entry"]
+            elif result.get("status") != "empty":
+                errors.append(result)
+    else:
+        with ProcessPoolExecutor(max_workers=worker_count) as pool:
+            futures = [pool.submit(_filter_symbol_shard_task, task) for task in tasks]
+            for future in as_completed(futures):
+                result = future.result()
+                if result.get("status") == "ok":
+                    entries_by_index[int(result["index"])] = result["entry"]
+                elif result.get("status") != "empty":
+                    errors.append(result)
+    if errors:
+        return {"status": "error", "domain": source.domain, "source_dataset_id": source.dataset_id, "target_dataset_id": target_dataset_id, "errors": errors[:50], "error_count": len(errors)}
+    entries = [entries_by_index[key] for key in sorted(entries_by_index)]
+    final_shards = target_dir / "shards"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    if final_shards.exists():
+        shutil.rmtree(final_shards)
+    if staging_shards.exists():
+        staging_shards.replace(final_shards)
+    if staging.exists():
+        shutil.rmtree(staging, ignore_errors=True)
+    schema = _duckdb_schema(final_shards / entries[0].path.split("/")[-1]) if entries else source.schema
+    manifest = DatasetManifest(
+        dataset_id=target_dataset_id,
+        domain=source.domain,
+        layer=source.layer,
+        frequency=source.frequency,
+        contract_version=source.contract_version,
+        primary_key=source.primary_key,
+        start_date=min([item.start_date for item in entries if item.start_date], default=source.start_date),
+        end_date=max([item.end_date for item in entries if item.end_date], default=source.end_date),
+        row_count=sum(int(item.row_count) for item in entries),
+        schema_hash=schema_hash(schema),
+        schema=schema,
+        shards=entries,
+        source={"provider": "qdp_v2", "created_by": "scope_mainboard_active", "created_at": utc_now(), "source_dataset_id": source.dataset_id, "scope": scope_name, "active_as_of_date": active_as_of},
+        quality={**source.quality, "scope": scope_name, "scope_symbol_count": int(scope_stats.get("symbol_count", 0) or 0), "path_refs_exist": True},
+        notes=[*source.notes, f"filtered to {scope_name} as of {active_as_of}"],
+    )
+    manifest_path = write_dataset_manifest(root, manifest)
+    return {
+        "status": "ok",
+        "domain": source.domain,
+        "source_dataset_id": source.dataset_id,
+        "target_dataset_id": target_dataset_id,
+        "manifest_path": str(manifest_path.resolve()),
+        "processed_shards": len(entries),
+        "new_shards": len(tasks),
+        "reused_shards": reused,
+        "row_count_before": source.row_count,
+        "row_count_after": manifest.row_count,
+        "row_count_removed": int(source.row_count) - int(manifest.row_count),
+        "size_bytes": sum(int(item.file_size) for item in entries),
+        "start_date": manifest.start_date,
+        "end_date": manifest.end_date,
+        "workers": worker_count,
+        "worker_memory_limit": worker_memory_limit,
+        "worker_threads": worker_threads,
+    }
+
+
+def _filter_symbol_shard_task(task: dict[str, Any]) -> dict[str, Any]:
+    import duckdb  # type: ignore
+
+    index = int(task["index"])
+    source_path = Path(str(task["source_path"]))
+    target_path = Path(str(task["target_path"]))
+    scope_symbols_path = Path(str(task["scope_symbols_path"]))
+    shard = ShardManifestEntry.from_mapping(task.get("shard", {}) or {})
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        with duckdb.connect(":memory:") as con:
+            con.execute(f"set memory_limit='{str(task['memory_limit'])}'")
+            con.execute(f"set threads={max(1, int(task['threads']))}")
+            con.execute(
+                f"""
+                copy (
+                    select src.*
+                    from read_parquet({_sql_literal(str(source_path))}, union_by_name=true) src
+                    inner join read_parquet({_sql_literal(str(scope_symbols_path))}) scope
+                      on upper(cast(src.symbol as varchar)) = scope.symbol
+                ) to {_sql_literal(str(target_path))} (format parquet)
+                """
+            )
+        stats = _parquet_file_stats(target_path)
+        if int(stats["row_count"]) <= 0:
+            _remove_file_with_retries(target_path)
+            return {"status": "empty", "index": index, "source_path": str(source_path)}
+        entry = _scoped_shard_entry(
+            source_domain=str(task["source_domain"]),
+            target_dataset_id=str(task["target_dataset_id"]),
+            target_path=target_path,
+            source_path=source_path,
+            row_count=int(stats["row_count"]),
+            schema_hash_value=str(stats.get("schema_hash", "") or ""),
+            shard=shard,
+            scope_name=str(task["scope_name"]),
+        )
+        return {"status": "ok", "index": index, "entry": entry}
+    except Exception as exc:
+        return {"status": "error", "index": index, "source_path": str(source_path), "target_path": str(target_path), "error": str(exc)}
+
+
+def _scoped_shard_entry(
+    *,
+    source_domain: str,
+    target_dataset_id: str,
+    target_path: Path,
+    source_path: Path,
+    row_count: int,
+    schema_hash_value: str,
+    shard: ShardManifestEntry,
+    scope_name: str,
+) -> ShardManifestEntry:
+    return ShardManifestEntry(
+        path=f"datasets/{source_domain}/{target_dataset_id}/shards/{target_path.name}",
+        row_count=int(row_count),
+        start_date=shard.start_date,
+        end_date=shard.end_date,
+        status="stored",
+        file_size=int(target_path.stat().st_size),
+        schema_hash=schema_hash_value,
+        source_path=str(source_path.resolve()),
+        content_key=scope_name,
+        metadata={"source_content_key": shard.content_key},
+    )
+
+
+def _parquet_file_stats(target_path: Path) -> dict[str, Any]:
+    try:
+        import pyarrow.parquet as pq  # type: ignore
+
+        parquet_file = pq.ParquetFile(str(target_path))
+        row_count = int(parquet_file.metadata.num_rows)
+        schema = [{"name": str(field.name), "type": str(field.type)} for field in parquet_file.schema_arrow]
+        return {"row_count": row_count, "schema_hash": schema_hash(schema)}
+    except Exception:
+        import duckdb  # type: ignore
+
+        with duckdb.connect(":memory:") as con:
+            row = con.execute("select count(*) as n from read_parquet(?)", [str(target_path)]).fetchone()
+        return {"row_count": int(row[0] or 0), "schema_hash": schema_hash(_duckdb_schema(target_path))}
+
+
+def _safe_file_stem(value: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in str(value or "dataset"))
 
 
 def _split_daily_market_shard(
@@ -839,6 +1231,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     valuation.add_argument("--max-shards", type=int, default=0)
     valuation.add_argument("--activate-domain", action="store_true")
     valuation.add_argument("--json", action="store_true")
+    scope = sub.add_parser("scope-mainboard", help="Filter active symbol datasets to Shanghai/Shenzhen mainboard A-share scope.")
+    scope.add_argument("--as-of-date", default="")
+    scope.add_argument("--domains", default="")
+    scope.add_argument("--max-shards", type=int, default=0)
+    scope.add_argument("--workers", type=int, default=1)
+    scope.add_argument("--resume", action="store_true")
+    scope.add_argument("--trust-existing", action="store_true")
+    scope.add_argument("--duckdb-memory-limit", default="")
+    scope.add_argument("--json", action="store_true")
     return parser
 
 
@@ -876,6 +1277,18 @@ def main(argv: list[str] | None = None) -> int:
             max_shards=int(args.max_shards or 0),
             runtime=str(args.runtime or "balanced"),
             activate_domain=bool(args.activate_domain),
+        )
+    elif args.clean_command == "scope-mainboard":
+        payload = scope_mainboard_active(
+            workspace_root=workspace,
+            as_of_date=str(args.as_of_date or ""),
+            domains=str(args.domains or ""),
+            max_shards=int(args.max_shards or 0),
+            runtime=str(args.runtime or "balanced"),
+            workers=int(args.workers or 1),
+            resume=bool(args.resume),
+            trust_existing=bool(args.trust_existing),
+            duckdb_memory_limit=str(args.duckdb_memory_limit or ""),
         )
     else:
         raise ValueError(f"unsupported_clean_command:{args.clean_command}")
