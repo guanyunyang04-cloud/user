@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
@@ -17,9 +18,13 @@ class LakeGcConfig:
     lake_root: Path = DEFAULT_DATA_LAKE_ROOT
     workspace_root: Path | None = None
     dry_run: bool = True
+    delete: bool = False
+    yes: bool = False
     include_referenced: bool = False
     with_size: bool = False
     max_items: int = 200
+    max_delete_items: int = 0
+    max_delete_bytes: int = 0
 
 
 @dataclass(frozen=True)
@@ -31,32 +36,61 @@ class LakeGcResult:
     unreferenced_dataset_dir_count: int
     unreferenced_bytes: int
     referenced_bytes: int
+    deleted_dataset_dir_count: int = 0
+    deleted_bytes: int = 0
     unreferenced: list[dict[str, Any]] = field(default_factory=list)
     referenced: list[dict[str, Any]] = field(default_factory=list)
+    deleted: list[dict[str, Any]] = field(default_factory=list)
 
 
 def lake_gc(config: LakeGcConfig) -> LakeGcResult:
     cfg = config
-    if not cfg.dry_run:
-        raise ValueError("lake_gc_delete_not_implemented: run with --dry-run")
+    if cfg.delete and not cfg.yes:
+        raise ValueError("lake_gc_delete_requires_yes: pass --delete --yes")
     lake = ResearchDataLake(cfg.lake_root)
     referenced = _referenced_dataset_ids(lake, paths=qdp_paths(cfg.workspace_root) if cfg.workspace_root else None)
-    inventory = _dataset_dir_inventory(lake, with_size=bool(cfg.with_size))
+    inventory = _dataset_dir_inventory(lake, with_size=bool(cfg.with_size and not cfg.delete))
     unreferenced_items = [item for item in inventory if item["dataset_id"] not in referenced]
     referenced_items = [item for item in inventory if item["dataset_id"] in referenced]
+    if cfg.delete:
+        unreferenced_items = [_with_directory_size(item) for item in unreferenced_items]
     unreferenced_items = sorted(unreferenced_items, key=lambda item: int(item["bytes"]), reverse=True)
     referenced_items = sorted(referenced_items, key=lambda item: int(item["bytes"]), reverse=True)
     max_items = max(0, int(cfg.max_items or 0))
+    deleted_items: list[dict[str, Any]] = []
+    deleted_bytes = 0
+    if cfg.delete:
+        candidates = list(unreferenced_items)
+        if cfg.max_delete_items > 0:
+            candidates = candidates[: int(cfg.max_delete_items)]
+        if cfg.max_delete_bytes > 0:
+            bounded: list[dict[str, Any]] = []
+            running = 0
+            for item in candidates:
+                size = int(item.get("bytes", 0) or 0)
+                if running + size > int(cfg.max_delete_bytes):
+                    continue
+                bounded.append(item)
+                running += size
+            candidates = bounded
+        deleted_items, deleted_bytes = _delete_unreferenced_dataset_dirs(lake, candidates)
+        if deleted_items:
+            _delete_catalog_rows(lake, deleted_items)
+            lake.write_catalog_manifest()
+
     return LakeGcResult(
-        status="dry_run",
-        destructive_actions_performed=False,
+        status="deleted" if cfg.delete else "dry_run",
+        destructive_actions_performed=bool(cfg.delete and deleted_items),
         referenced_dataset_count=len(referenced),
         dataset_dir_count=len(inventory),
         unreferenced_dataset_dir_count=len(unreferenced_items),
         unreferenced_bytes=sum(int(item["bytes"]) for item in unreferenced_items),
         referenced_bytes=sum(int(item["bytes"]) for item in referenced_items),
+        deleted_dataset_dir_count=len(deleted_items),
+        deleted_bytes=int(deleted_bytes),
         unreferenced=unreferenced_items[:max_items] if max_items else unreferenced_items,
         referenced=referenced_items[:max_items] if cfg.include_referenced and max_items else (referenced_items if cfg.include_referenced else []),
+        deleted=deleted_items[:max_items] if max_items else deleted_items,
     )
 
 
@@ -183,14 +217,65 @@ def _directory_size(path: Path) -> int:
     return total
 
 
+def _with_directory_size(item: dict[str, Any]) -> dict[str, Any]:
+    size = _directory_size(Path(str(item.get("path", "") or "")))
+    return {**item, "bytes": int(size), "gb": round(size / 1024**3, 4)}
+
+
+def _delete_unreferenced_dataset_dirs(lake: ResearchDataLake, items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    parquet_root = lake.parquet_root.resolve()
+    deleted: list[dict[str, Any]] = []
+    deleted_bytes = 0
+    for item in items:
+        path = Path(str(item.get("path", "") or "")).resolve()
+        _assert_deletable_dataset_dir(path, parquet_root)
+        size = int(item.get("bytes", 0) or 0)
+        if size <= 0:
+            size = _directory_size(path)
+            item = {**item, "bytes": size, "gb": round(size / 1024**3, 4)}
+        shutil.rmtree(path)
+        deleted.append(dict(item))
+        deleted_bytes += size
+    return deleted, deleted_bytes
+
+
+def _assert_deletable_dataset_dir(path: Path, parquet_root: Path) -> None:
+    try:
+        path.relative_to(parquet_root)
+    except ValueError as exc:
+        raise ValueError(f"lake_gc_refuses_path_outside_parquet_root: {path}") from exc
+    if path == parquet_root or path.parent == parquet_root:
+        raise ValueError(f"lake_gc_refuses_root_delete: {path}")
+    if not path.exists():
+        raise ValueError(f"lake_gc_delete_path_missing: {path}")
+    if not path.is_dir():
+        raise ValueError(f"lake_gc_delete_path_not_directory: {path}")
+
+
+def _delete_catalog_rows(lake: ResearchDataLake, items: list[dict[str, Any]]) -> None:
+    dataset_ids = sorted({str(item.get("dataset_id", "") or "") for item in items if str(item.get("dataset_id", "") or "")})
+    fingerprints = sorted({str(Path(str(item.get("path", "") or "")).name) for item in items if str(item.get("path", "") or "")})
+    if not dataset_ids and not fingerprints:
+        return
+    with lake._connect() as con:
+        for dataset_id in dataset_ids:
+            con.execute("delete from datasets where dataset_id = ?", [dataset_id])
+        for fingerprint in fingerprints:
+            con.execute("delete from datasets where fingerprint = ?", [fingerprint])
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Dry-run QDP data lake garbage collection inventory.")
+    parser = argparse.ArgumentParser(description="QDP data lake garbage collection inventory and cleanup.")
     parser.add_argument("--lake-root", default=str(DEFAULT_DATA_LAKE_ROOT))
     parser.add_argument("--workspace-root", default="")
     parser.add_argument("--dry-run", action="store_true", default=True)
+    parser.add_argument("--delete", action="store_true", help="Delete unreferenced dataset directories. Requires --yes.")
+    parser.add_argument("--yes", action="store_true", help="Confirm destructive deletion when used with --delete.")
     parser.add_argument("--include-referenced", action="store_true")
     parser.add_argument("--with-size", action="store_true", help="Recursively stat dataset directories; slow on large lakes.")
     parser.add_argument("--max-items", type=int, default=200)
+    parser.add_argument("--max-delete-items", type=int, default=0, help="Limit deleted candidates after size-desc sorting; 0 means no item limit.")
+    parser.add_argument("--max-delete-gb", type=float, default=0.0, help="Maximum total bytes to delete; 0 means no byte limit.")
     parser.add_argument("--json", action="store_true")
     return parser
 
@@ -201,10 +286,14 @@ def main(argv: list[str] | None = None) -> int:
         LakeGcConfig(
             lake_root=Path(args.lake_root),
             workspace_root=Path(args.workspace_root) if str(args.workspace_root or "").strip() else None,
-            dry_run=True,
+            dry_run=not bool(args.delete),
+            delete=bool(args.delete),
+            yes=bool(args.yes),
             include_referenced=bool(args.include_referenced),
-            with_size=bool(args.with_size),
+            with_size=bool(args.with_size or args.delete),
             max_items=int(args.max_items),
+            max_delete_items=int(args.max_delete_items),
+            max_delete_bytes=int(float(args.max_delete_gb or 0.0) * 1024**3),
         )
     )
     payload = result.__dict__
