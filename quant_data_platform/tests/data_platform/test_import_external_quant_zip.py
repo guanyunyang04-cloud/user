@@ -22,7 +22,7 @@ from quant_data_platform.ingest.build_intraday_daily_features import (
 )
 from quant_data_platform.ingest.combine_domain_datasets import CombineDomainDatasetsConfig, combine_domain_datasets
 from quant_data_platform.ingest.combine_sharded_domain_datasets import CombineShardedDomainConfig, combine_sharded_domain_datasets
-from quant_data_platform.ingest.import_external_quant_zip import ImportConfig, run_import
+from quant_data_platform.ingest.import_external_quant_zip import ImportConfig, normalize_intraday_1m_to_mootdx_240_frame, run_import
 from quant_data_platform.ingest.normalize_intraday_1m_contract import NormalizeIntraday1mContractConfig, normalize_intraday_1m_contract
 from quant_data_platform.ingest.recover_external_quant_zip_import import RecoverExternalImportConfig, recover_import
 
@@ -455,6 +455,38 @@ def test_import_external_quant_zip_streams_1m_and_derives_5m(tmp_path) -> None:
     assert float(first_bar["amount"]) == pytest.approx(3050.0)
     assert five_minute["bar_time"].iloc[0] == "093000000"
     assert float(five_minute["volume"].iloc[0]) == 1500.0
+
+
+def test_normalize_intraday_1m_to_mootdx_240_ignores_zero_opening_auction_prices() -> None:
+    frame = pd.DataFrame(
+        {
+            "symbol": ["603277.SH", "603277.SH"],
+            "trade_date": ["2026-01-06", "2026-01-06"],
+            "bar_time": ["093000000", "093100000"],
+            "open": [0.0, 16.81],
+            "high": [0.0, 16.81],
+            "low": [0.0, 16.76],
+            "close": [0.0, 16.77],
+            "volume": [0.0, 8700.0],
+            "amount": [0.0, 145947.0],
+            "turnover_rate": [0.0, 0.001427],
+            "float_share": [609746015.0, 609746015.0],
+            "total_share": [613699296.0, 613699296.0],
+            "source": ["external_quant_csv", "external_quant_csv"],
+            "adjusted_flag": ["none", "none"],
+        }
+    )
+
+    normalized = normalize_intraday_1m_to_mootdx_240_frame(frame)
+
+    assert normalized["bar_time"].tolist() == ["093100000"]
+    row = normalized.iloc[0]
+    assert float(row["open"]) == pytest.approx(16.81)
+    assert float(row["high"]) == pytest.approx(16.81)
+    assert float(row["low"]) == pytest.approx(16.76)
+    assert float(row["close"]) == pytest.approx(16.77)
+    assert float(row["volume"]) == pytest.approx(8700.0)
+    assert float(row["amount"]) == pytest.approx(145947.0)
 
 
 def test_import_external_quant_zip_does_not_derive_5m_from_1m_by_default(tmp_path) -> None:

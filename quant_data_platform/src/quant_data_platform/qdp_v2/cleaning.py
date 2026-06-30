@@ -4,6 +4,7 @@ import argparse
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import gc
 import json
+import os
 import shutil
 import time
 from pathlib import Path
@@ -25,6 +26,8 @@ from quant_data_platform.qdp_v2.manifest import (
     write_active_manifest,
     write_dataset_manifest,
 )
+from quant_data_platform.qdp_v2.intraday_repair import repair_intraday_zero_bars
+from quant_data_platform.qdp_v2.intraday_features_repair import repair_intraday_daily_features
 from quant_data_platform.qdp_v2.runtime import resolve_runtime_profile
 
 
@@ -42,6 +45,8 @@ def derive_5m_from_1m(
     shard_remainder: int = 0,
     stage_only: bool = False,
     activate_domain: bool = False,
+    reuse_from_dataset_id: str = "",
+    reuse_copy_mode: str = "hardlink",
 ) -> dict[str, Any]:
     root = qdp_v2_root(workspace_root)
     source_manifest = _resolve_source_manifest(root, source_dataset_id, "market_intraday_1m")
@@ -59,10 +64,13 @@ def derive_5m_from_1m(
     worker_count = min(requested_workers, max(1, int(profile.duckdb_threads or 1)), max(1, len(source.shards)))
     worker_memory_limit = _parallel_duckdb_memory_limit(memory_limit, worker_count)
     worker_threads = max(1, min(2, int(profile.duckdb_threads or 1)))
+    reuse_manifest = _resolve_optional_manifest(root, reuse_from_dataset_id, "market_intraday_5m")
+    reuse_source = read_dataset_manifest(reuse_manifest) if reuse_manifest is not None else None
     shard_entries_by_index: dict[int, ShardManifestEntry] = {}
     errors: list[dict[str, Any]] = []
     tasks: list[dict[str, Any]] = []
     reused = 0
+    reused_from_dataset = 0
     selected = 0
     modulo = max(0, int(shard_modulo or 0))
     remainder = int(shard_remainder or 0)
@@ -72,8 +80,31 @@ def derive_5m_from_1m(
         if max_shards and selected >= max_shards:
             break
         source_path = root / shard.path if not Path(shard.path).is_absolute() else Path(shard.path)
-        target_path = staging_shards / f"part_{index:06d}_5m.parquet"
+        reuse_shard = reuse_source.shards[index] if reuse_source is not None and index < len(reuse_source.shards) else None
+        target_name = Path(reuse_shard.path).name if reuse_shard is not None else f"part_{index:06d}_5m.parquet"
+        target_path = staging_shards / target_name
         selected += 1
+        if reuse_shard is not None and _can_reuse_5m_shard_from_prior(source_shard=shard, reuse_shard=reuse_shard):
+            try:
+                reuse_path = root / reuse_shard.path if not Path(reuse_shard.path).is_absolute() else Path(reuse_shard.path)
+                _copy_or_link_file(reuse_path, target_path, mode=reuse_copy_mode)
+                shard_entries_by_index[index] = ShardManifestEntry(
+                    path=f"datasets/market_intraday_5m/{target_dataset_id}/shards/{target_path.name}",
+                    row_count=reuse_shard.row_count,
+                    start_date=reuse_shard.start_date or shard.start_date,
+                    end_date=reuse_shard.end_date or shard.end_date,
+                    status="stored",
+                    file_size=int(target_path.stat().st_size),
+                    schema_hash=reuse_shard.schema_hash,
+                    source_path=str(reuse_path.resolve()),
+                    content_key=reuse_shard.content_key or "derived_from_1m_240",
+                    metadata={**dict(reuse_shard.metadata or {}), "reused_from_dataset_id": reuse_source.dataset_id, "source_1m_dataset_id": source.dataset_id},
+                )
+                reused_from_dataset += 1
+                continue
+            except Exception as exc:
+                errors.append({"source_path": str(source_path), "target_path": str(target_path), "error": f"reuse_5m_shard_failed: {exc}"})
+                continue
         if resume and target_path.exists():
             if trust_existing and int(target_path.stat().st_size) > 0:
                 reused += 1
@@ -137,6 +168,7 @@ def derive_5m_from_1m(
             "processed_shards": processed,
             "new_shards": len(tasks),
             "reused_shards": reused,
+            "reused_from_dataset_shards": reused_from_dataset,
             "selected_shards": selected,
             "trust_existing": bool(trust_existing),
             "max_shards": int(max_shards or 0),
@@ -192,6 +224,7 @@ def derive_5m_from_1m(
         "processed_shards": processed,
         "new_shards": len(tasks),
         "reused_shards": reused,
+        "reused_from_dataset_shards": reused_from_dataset,
         "row_count": manifest.row_count,
         "start_date": manifest.start_date,
         "end_date": manifest.end_date,
@@ -1096,6 +1129,35 @@ def _remove_file_with_retries(path: Path, *, attempts: int = 8, delay_seconds: f
         raise last_error
 
 
+def _resolve_optional_manifest(root: Path, dataset_id: str, domain: str) -> Path | None:
+    text = str(dataset_id or "").strip()
+    if not text:
+        return None
+    return dataset_manifest_for_id(root, text, domain)
+
+
+def _can_reuse_5m_shard_from_prior(*, source_shard: ShardManifestEntry, reuse_shard: ShardManifestEntry) -> bool:
+    metadata = dict(source_shard.metadata or {})
+    if metadata.get("repair") == "zero_price_intraday_bars":
+        return False
+    if int(reuse_shard.row_count or 0) <= 0:
+        return False
+    return True
+
+
+def _copy_or_link_file(source_path: Path, target_path: Path, *, mode: str) -> None:
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    if target_path.exists():
+        target_path.unlink()
+    if str(mode or "").lower() == "copy":
+        shutil.copy2(source_path, target_path)
+        return
+    try:
+        os.link(source_path, target_path)
+    except Exception:
+        shutil.copy2(source_path, target_path)
+
+
 def _five_minute_shard_entry(
     *,
     target_dataset_id: str,
@@ -1219,6 +1281,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     five.add_argument("--shard-remainder", type=int, default=0)
     five.add_argument("--stage-only", action="store_true")
     five.add_argument("--activate-domain", action="store_true")
+    five.add_argument("--reuse-from-dataset-id", default="")
+    five.add_argument("--reuse-copy-mode", default="hardlink", choices=("hardlink", "copy"))
     five.add_argument("--json", action="store_true")
     daily = sub.add_parser("daily-market", help="Split a rectangular legacy daily market panel into raw facts and research panel.")
     daily.add_argument("--source-dataset-id", default="")
@@ -1240,6 +1304,26 @@ def build_arg_parser() -> argparse.ArgumentParser:
     scope.add_argument("--trust-existing", action="store_true")
     scope.add_argument("--duckdb-memory-limit", default="")
     scope.add_argument("--json", action="store_true")
+    repair = sub.add_parser("intraday-zero-bars", help="Repair zero-price 1m bars by dropping suspended pseudo bars and replacing traded gaps.")
+    repair.add_argument("--source-dataset-id", default="")
+    repair.add_argument("--external-source-root", default=r"H:\BaiduNetdiskDownload\量化数据")
+    repair.add_argument("--years", default="2023,2024,2026")
+    repair.add_argument("--duckdb-memory-limit", default="")
+    repair.add_argument("--dry-run", action="store_true")
+    repair.add_argument("--activate-domain", action="store_true")
+    repair.add_argument("--no-mootdx", action="store_true")
+    repair.add_argument("--max-repair-symbol-days", type=int, default=0)
+    repair.add_argument("--copy-mode", default="hardlink", choices=("hardlink", "copy"))
+    repair.add_argument("--json", action="store_true")
+    feature_repair = sub.add_parser("intraday-features-repair", help="Incrementally repair intraday_daily_features after intraday raw cleanup.")
+    feature_repair.add_argument("--issue-path", required=True)
+    feature_repair.add_argument("--source-dataset-id", default="")
+    feature_repair.add_argument("--one-minute-dataset-id", default="")
+    feature_repair.add_argument("--five-minute-dataset-id", default="")
+    feature_repair.add_argument("--duckdb-memory-limit", default="")
+    feature_repair.add_argument("--activate-domain", action="store_true")
+    feature_repair.add_argument("--copy-mode", default="hardlink", choices=("hardlink", "copy"))
+    feature_repair.add_argument("--json", action="store_true")
     return parser
 
 
@@ -1260,6 +1344,8 @@ def main(argv: list[str] | None = None) -> int:
             shard_remainder=int(args.shard_remainder or 0),
             stage_only=bool(args.stage_only),
             activate_domain=bool(args.activate_domain),
+            reuse_from_dataset_id=str(args.reuse_from_dataset_id or ""),
+            reuse_copy_mode=str(args.reuse_copy_mode or "hardlink"),
         )
     elif args.clean_command == "daily-market":
         payload = split_daily_market(
@@ -1289,6 +1375,37 @@ def main(argv: list[str] | None = None) -> int:
             resume=bool(args.resume),
             trust_existing=bool(args.trust_existing),
             duckdb_memory_limit=str(args.duckdb_memory_limit or ""),
+        )
+    elif args.clean_command == "intraday-zero-bars":
+        years = tuple(
+            int(item)
+            for item in str(args.years or "").replace(";", ",").split(",")
+            if str(item).strip()
+        )
+        payload = repair_intraday_zero_bars(
+            workspace_root=workspace,
+            source_dataset_id=str(args.source_dataset_id or ""),
+            external_source_root=str(args.external_source_root or ""),
+            years=years or (2023, 2024, 2026),
+            runtime=str(args.runtime or "balanced"),
+            duckdb_memory_limit=str(args.duckdb_memory_limit or ""),
+            dry_run=bool(args.dry_run),
+            activate_domain=bool(args.activate_domain),
+            no_mootdx=bool(args.no_mootdx),
+            max_repair_symbol_days=int(args.max_repair_symbol_days or 0),
+            copy_mode=str(args.copy_mode or "hardlink"),
+        )
+    elif args.clean_command == "intraday-features-repair":
+        payload = repair_intraday_daily_features(
+            workspace_root=workspace,
+            issue_path=str(args.issue_path),
+            source_dataset_id=str(args.source_dataset_id or ""),
+            one_minute_dataset_id=str(args.one_minute_dataset_id or ""),
+            five_minute_dataset_id=str(args.five_minute_dataset_id or ""),
+            runtime=str(args.runtime or "balanced"),
+            duckdb_memory_limit=str(args.duckdb_memory_limit or ""),
+            activate_domain=bool(args.activate_domain),
+            copy_mode=str(args.copy_mode or "hardlink"),
         )
     else:
         raise ValueError(f"unsupported_clean_command:{args.clean_command}")

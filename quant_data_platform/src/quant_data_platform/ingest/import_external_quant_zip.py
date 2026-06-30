@@ -680,15 +680,19 @@ def normalize_intraday_1m_to_mootdx_240_frame(frame: pd.DataFrame) -> pd.DataFra
         elif column == "open" and c0930 in paired and c0931 in paired:
             open_0930 = pd.to_numeric(paired[c0930], errors="coerce")
             open_0931 = pd.to_numeric(paired[c0931], errors="coerce")
-            merged[column] = open_0930.where(open_0930.notna(), open_0931)
+            merged[column] = open_0930.where(open_0930.gt(0), open_0931)
         elif column == "high" and c0930 in paired and c0931 in paired:
+            high_0930 = pd.to_numeric(paired[c0930], errors="coerce")
+            high_0931 = pd.to_numeric(paired[c0931], errors="coerce")
             merged[column] = pd.concat(
-                [pd.to_numeric(paired[c0930], errors="coerce"), pd.to_numeric(paired[c0931], errors="coerce")],
+                [high_0930.where(high_0930.gt(0)), high_0931.where(high_0931.gt(0))],
                 axis=1,
             ).max(axis=1, skipna=True)
         elif column == "low" and c0930 in paired and c0931 in paired:
+            low_0930 = pd.to_numeric(paired[c0930], errors="coerce")
+            low_0931 = pd.to_numeric(paired[c0931], errors="coerce")
             merged[column] = pd.concat(
-                [pd.to_numeric(paired[c0930], errors="coerce"), pd.to_numeric(paired[c0931], errors="coerce")],
+                [low_0930.where(low_0930.gt(0)), low_0931.where(low_0931.gt(0))],
                 axis=1,
             ).min(axis=1, skipna=True)
         elif column in {"volume", "amount", "turnover_rate"} and c0930 in paired and c0931 in paired:
