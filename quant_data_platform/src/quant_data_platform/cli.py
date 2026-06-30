@@ -478,7 +478,7 @@ def _maybe_run_qdp_v2(raw_argv: list[str]) -> int | None:
     forwarded = list(raw_argv)
     if first in {"migrate-v2", "activate-v2", "dataset", "index", "update", "clean"}:
         route = True
-    elif len(raw_argv) >= 2 and raw_argv[:2] in (["audit", "active"], ["audit", "database"], ["provider", "benchmark"]):
+    elif len(raw_argv) >= 2 and raw_argv[:2] in (["audit", "active"], ["audit", "database"], ["audit", "quality"], ["provider", "benchmark"]):
         route = True
     elif len(raw_argv) >= 2 and raw_argv[0] == "lake" and raw_argv[1] == "gc":
         if "--v2" in forwarded:

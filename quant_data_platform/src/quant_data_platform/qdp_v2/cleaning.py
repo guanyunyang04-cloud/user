@@ -26,7 +26,7 @@ from quant_data_platform.qdp_v2.manifest import (
     write_active_manifest,
     write_dataset_manifest,
 )
-from quant_data_platform.qdp_v2.intraday_repair import repair_intraday_zero_bars
+from quant_data_platform.qdp_v2.intraday_repair import repair_intraday_quality_anomalies, repair_intraday_zero_bars
 from quant_data_platform.qdp_v2.intraday_features_repair import repair_intraday_daily_features
 from quant_data_platform.qdp_v2.runtime import resolve_runtime_profile
 
@@ -483,6 +483,166 @@ def normalize_valuation(
     return payload
 
 
+def repair_daily_from_intraday_missing(
+    *,
+    workspace_root: str | Path | None = None,
+    raw_dataset_id: str = "",
+    panel_dataset_id: str = "",
+    five_minute_dataset_id: str = "",
+    runtime: str = "balanced",
+    duckdb_memory_limit: str = "",
+    activate_domain: bool = False,
+) -> dict[str, Any]:
+    root = qdp_v2_root(workspace_root)
+    active = read_active_manifest(root)
+    raw_id = raw_dataset_id or str(dict(active.get("raw", {}) or {}).get("market_daily_raw", "") or "")
+    panel_id = panel_dataset_id or str(dict(active.get("research_panels", {}) or {}).get("market_daily_panel", "") or "")
+    five_id = five_minute_dataset_id or str(dict(active.get("raw", {}) or {}).get("market_intraday_5m", "") or "")
+    raw = read_dataset_manifest(_require_dataset_manifest(root, raw_id, "market_daily_raw"))
+    panel = read_dataset_manifest(_require_dataset_manifest(root, panel_id, "market_daily_panel"))
+    five = read_dataset_manifest(_require_dataset_manifest(root, five_id, "market_intraday_5m"))
+    profile = resolve_runtime_profile(runtime)
+    memory_limit = str(duckdb_memory_limit or "").strip() or profile.duckdb_memory_limit
+    missing = _daily_missing_from_intraday_rows(root=root, raw=raw, five=five, memory_limit=memory_limit, threads=profile.duckdb_threads)
+    if missing.empty:
+        return {
+            "status": "ok",
+            "message": "no_nonzero_intraday_daily_missing_rows",
+            "raw_dataset_id": raw.dataset_id,
+            "panel_dataset_id": panel.dataset_id,
+            "five_minute_dataset_id": five.dataset_id,
+        }
+    missing_hash = stable_hash({"rows": missing.to_dict("records")}, length=24)
+    raw_target_id = f"market_daily_raw__{stable_hash({'source': raw.dataset_id, 'repair': 'intraday_missing_v1', 'five': five.dataset_id, 'missing': missing_hash})}"
+    panel_target_id = f"market_daily_panel__{stable_hash({'source': panel.dataset_id, 'repair': 'intraday_missing_v1', 'five': five.dataset_id, 'missing': missing_hash})}"
+    raw_dir = root / "datasets" / "market_daily_raw" / raw_target_id
+    panel_dir = root / "datasets" / "market_daily_panel" / panel_target_id
+    raw_staging = raw_dir / ".staging" / "shards"
+    panel_staging = panel_dir / ".staging" / "shards"
+    for path in (raw_dir / ".staging", panel_dir / ".staging"):
+        if path.exists():
+            shutil.rmtree(path)
+    raw_staging.mkdir(parents=True, exist_ok=True)
+    panel_staging.mkdir(parents=True, exist_ok=True)
+    raw_target = raw_staging / "part_000000_market_daily_raw_mainboard.parquet"
+    panel_target = panel_staging / "part_000000_market_daily_panel_mainboard.parquet"
+    stats = _write_daily_missing_repair_outputs(
+        root=root,
+        raw=raw,
+        panel=panel,
+        missing=missing,
+        raw_target=raw_target,
+        panel_target=panel_target,
+        memory_limit=memory_limit,
+        threads=profile.duckdb_threads,
+    )
+    raw_final = raw_dir / "shards"
+    panel_final = panel_dir / "shards"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    panel_dir.mkdir(parents=True, exist_ok=True)
+    if raw_final.exists():
+        shutil.rmtree(raw_final)
+    if panel_final.exists():
+        shutil.rmtree(panel_final)
+    raw_staging.replace(raw_final)
+    panel_staging.replace(panel_final)
+    shutil.rmtree(raw_dir / ".staging", ignore_errors=True)
+    shutil.rmtree(panel_dir / ".staging", ignore_errors=True)
+    raw_path = raw_final / raw_target.name
+    panel_path = panel_final / panel_target.name
+    raw_schema = _duckdb_schema(raw_path)
+    panel_schema = _duckdb_schema(panel_path)
+    raw_manifest = DatasetManifest(
+        dataset_id=raw_target_id,
+        domain="market_daily_raw",
+        layer="raw",
+        frequency="1d",
+        contract_version=raw.contract_version or "qdp_v2_market_daily_raw_v1",
+        primary_key=["trade_date", "symbol"],
+        start_date=str(stats["raw_start_date"]),
+        end_date=str(stats["raw_end_date"]),
+        row_count=int(stats["raw_row_count"]),
+        schema_hash=schema_hash(raw_schema),
+        schema=raw_schema,
+        shards=[
+            ShardManifestEntry(
+                path=f"datasets/market_daily_raw/{raw_target_id}/shards/{raw_path.name}",
+                row_count=int(stats["raw_row_count"]),
+                start_date=str(stats["raw_start_date"]),
+                end_date=str(stats["raw_end_date"]),
+                status="stored",
+                file_size=int(raw_path.stat().st_size),
+                schema_hash=schema_hash(raw_schema),
+                source_path=str(_resolve_data_path(root, raw.shards[0].path).resolve()) if raw.shards else "",
+                content_key="market_daily_raw",
+                metadata={"repair": "daily_missing_from_intraday_5m"},
+            )
+        ],
+        source={"provider": "qdp_v2", "created_by": "repair_daily_from_intraday_missing", "created_at": utc_now(), "source_dataset_id": raw.dataset_id, "five_minute_dataset_id": five.dataset_id, "missing_hash": missing_hash},
+        quality={**dict(raw.quality or {}), "intraday_missing_daily_repair": "applied", "repaired_rows": int(len(missing)), "primary_key_unique": "not_checked_after_repair"},
+        notes=[*list(raw.notes or []), "nonzero intraday symbol-days missing from daily raw were filled from 5m aggregation"],
+    )
+    panel_manifest = DatasetManifest(
+        dataset_id=panel_target_id,
+        domain="market_daily_panel",
+        layer="research_panel",
+        frequency="1d",
+        contract_version=panel.contract_version or "qdp_v2_market_daily_panel_v1",
+        primary_key=["trade_date", "symbol"],
+        start_date=str(stats["panel_start_date"]),
+        end_date=str(stats["panel_end_date"]),
+        row_count=int(stats["panel_row_count"]),
+        schema_hash=schema_hash(panel_schema),
+        schema=panel_schema,
+        shards=[
+            ShardManifestEntry(
+                path=f"datasets/market_daily_panel/{panel_target_id}/shards/{panel_path.name}",
+                row_count=int(stats["panel_row_count"]),
+                start_date=str(stats["panel_start_date"]),
+                end_date=str(stats["panel_end_date"]),
+                status="stored",
+                file_size=int(panel_path.stat().st_size),
+                schema_hash=schema_hash(panel_schema),
+                source_path=str(_resolve_data_path(root, panel.shards[0].path).resolve()) if panel.shards else "",
+                content_key="market_daily_panel",
+                metadata={"repair": "daily_missing_from_intraday_5m"},
+            )
+        ],
+        source={"provider": "qdp_v2", "created_by": "repair_daily_from_intraday_missing", "created_at": utc_now(), "source_dataset_id": panel.dataset_id, "five_minute_dataset_id": five.dataset_id, "missing_hash": missing_hash},
+        quality={**dict(panel.quality or {}), "intraday_missing_daily_repair": "applied", "repaired_rows": int(len(missing)), "primary_key_unique": "not_checked_after_repair"},
+        notes=[*list(panel.notes or []), "panel no_bar rows were updated when nonzero intraday bars exist"],
+    )
+    raw_manifest_path = write_dataset_manifest(root, raw_manifest)
+    panel_manifest_path = write_dataset_manifest(root, panel_manifest)
+    active_path = ""
+    if activate_domain:
+        active = read_active_manifest(root)
+        raw_section = dict(active.get("raw", {}) or {})
+        panel_section = dict(active.get("research_panels", {}) or {})
+        raw_section["market_daily_raw"] = raw_target_id
+        panel_section["market_daily_panel"] = panel_target_id
+        active["raw"] = raw_section
+        active["research_panels"] = panel_section
+        active["updated_at"] = utc_now()
+        active_path = str(write_active_manifest(root, active).resolve())
+    payload = {
+        "status": "ok",
+        "raw_dataset_id": raw_target_id,
+        "panel_dataset_id": panel_target_id,
+        "raw_manifest_path": str(raw_manifest_path.resolve()),
+        "panel_manifest_path": str(panel_manifest_path.resolve()),
+        "five_minute_dataset_id": five.dataset_id,
+        "repaired_rows": int(len(missing)),
+        "symbols": sorted(missing["symbol"].astype(str).unique().tolist()),
+        "dates": sorted(missing["trade_date"].astype(str).unique().tolist()),
+        "raw_row_count": raw_manifest.row_count,
+        "panel_row_count": panel_manifest.row_count,
+        "active_manifest": active_path,
+    }
+    atomic_write_json(root / "runs" / f"repair_daily_from_intraday_missing_{utc_now().replace(':', '').replace('-', '')}.json", payload)
+    return payload
+
+
 def scope_mainboard_active(
     *,
     workspace_root: str | Path | None = None,
@@ -677,6 +837,168 @@ def _require_dataset_manifest(root: Path, dataset_id: str, domain: str) -> Path:
 def _resolve_qdp_v2_path(root: Path, path: str | Path) -> Path:
     candidate = Path(path)
     return candidate if candidate.is_absolute() else root / candidate
+
+
+def _resolve_data_path(root: Path, path: str | Path) -> Path:
+    return _resolve_qdp_v2_path(root, path).resolve()
+
+
+def _daily_missing_from_intraday_rows(
+    *,
+    root: Path,
+    raw: DatasetManifest,
+    five: DatasetManifest,
+    memory_limit: str,
+    threads: int,
+) -> "pd.DataFrame":
+    import duckdb  # type: ignore
+
+    raw_paths = [str(_resolve_data_path(root, item.path)) for item in raw.shards]
+    five_paths = [str(_resolve_data_path(root, item.path)) for item in five.shards]
+    with duckdb.connect(":memory:") as con:
+        con.execute(f"set memory_limit='{memory_limit}'")
+        con.execute(f"set threads={max(1, int(threads or 1))}")
+        return con.execute(
+            """
+            with intraday as (
+              select
+                symbol,
+                trade_date,
+                arg_min(open, bar_time) as open,
+                max(high) as high,
+                min(low) as low,
+                arg_max(close, bar_time) as close,
+                sum(volume) as volume,
+                sum(amount) as amount
+              from read_parquet($five_paths, union_by_name=true)
+              group by 1, 2
+            ),
+            daily as (
+              select symbol, trade_date
+              from read_parquet($raw_paths, union_by_name=true)
+              group by 1, 2
+            )
+            select
+              i.symbol,
+              i.trade_date,
+              cast(i.open as double) as open,
+              cast(i.high as double) as high,
+              cast(i.low as double) as low,
+              cast(i.close as double) as close,
+              cast(i.volume as double) as volume,
+              cast(i.amount as double) as amount,
+              'intraday_5m_missing_daily_repair' as source,
+              'none' as adjusted_flag
+            from intraday i
+            left join daily d on d.symbol = i.symbol and d.trade_date = i.trade_date
+            where d.symbol is null
+              and (abs(coalesce(i.volume, 0)) > 0.0001 or abs(coalesce(i.amount, 0)) > 0.0001)
+            order by i.trade_date, i.symbol
+            """,
+            {"five_paths": five_paths, "raw_paths": raw_paths},
+        ).fetchdf()
+
+
+def _write_daily_missing_repair_outputs(
+    *,
+    root: Path,
+    raw: DatasetManifest,
+    panel: DatasetManifest,
+    missing: "pd.DataFrame",
+    raw_target: Path,
+    panel_target: Path,
+    memory_limit: str,
+    threads: int,
+) -> dict[str, Any]:
+    import duckdb  # type: ignore
+
+    raw_paths = [str(_resolve_data_path(root, item.path)) for item in raw.shards]
+    panel_paths = [str(_resolve_data_path(root, item.path)) for item in panel.shards]
+    raw_target.parent.mkdir(parents=True, exist_ok=True)
+    panel_target.parent.mkdir(parents=True, exist_ok=True)
+    with duckdb.connect(":memory:") as con:
+        con.execute(f"set memory_limit='{memory_limit}'")
+        con.execute(f"set threads={max(1, int(threads or 1))}")
+        con.register("missing_daily", missing)
+        con.execute(
+            f"""
+            copy (
+              select symbol, trade_date, open, high, low, close, volume, amount, source, adjusted_flag
+              from read_parquet($raw_paths, union_by_name=true)
+              union all
+              select symbol, trade_date, open, high, low, close, volume, amount, source, adjusted_flag
+              from missing_daily
+              order by trade_date, symbol
+            ) to {_sql_literal(str(raw_target))} (format parquet)
+            """,
+            {"raw_paths": raw_paths},
+        )
+        con.execute(
+            f"""
+            copy (
+              with panel as (
+                select *
+                from read_parquet($panel_paths, union_by_name=true)
+              ),
+              updated as (
+                select
+                  p.symbol,
+                  p.trade_date,
+                  coalesce(m.open, p.open) as open,
+                  coalesce(m.high, p.high) as high,
+                  coalesce(m.low, p.low) as low,
+                  coalesce(m.close, p.close) as close,
+                  coalesce(m.volume, p.volume) as volume,
+                  coalesce(m.amount, p.amount) as amount,
+                  case when m.symbol is not null then m.source else p.source end as source,
+                  case when m.symbol is not null then m.adjusted_flag else p.adjusted_flag end as adjusted_flag,
+                  p.ingest_batch_id,
+                  case when m.symbol is not null then true else p.has_bar end as has_bar,
+                  case when m.symbol is not null then '' else p.reject_reason end as reject_reason
+                from panel p
+                left join missing_daily m on m.symbol = p.symbol and m.trade_date = p.trade_date
+              ),
+              appended as (
+                select
+                  m.symbol,
+                  m.trade_date,
+                  m.open,
+                  m.high,
+                  m.low,
+                  m.close,
+                  m.volume,
+                  m.amount,
+                  m.source,
+                  m.adjusted_flag,
+                  'qdp_v2_daily_from_intraday_missing' as ingest_batch_id,
+                  true as has_bar,
+                  '' as reject_reason
+                from missing_daily m
+                left join panel p on p.symbol = m.symbol and p.trade_date = m.trade_date
+                where p.symbol is null
+              )
+              select * from updated
+              union all
+              select * from appended
+              order by trade_date, symbol
+            ) to {_sql_literal(str(panel_target))} (format parquet)
+            """,
+            {"panel_paths": panel_paths},
+        )
+        raw_count = con.execute("select count(*) from read_parquet(?)", [str(raw_target)]).fetchone()
+        panel_count = con.execute("select count(*) from read_parquet(?)", [str(panel_target)]).fetchone()
+        raw_start = con.execute("select trade_date from read_parquet(?) order by trade_date asc limit 1", [str(raw_target)]).fetchone()
+        raw_end = con.execute("select trade_date from read_parquet(?) order by trade_date desc limit 1", [str(raw_target)]).fetchone()
+        panel_start = con.execute("select trade_date from read_parquet(?) order by trade_date asc limit 1", [str(panel_target)]).fetchone()
+        panel_end = con.execute("select trade_date from read_parquet(?) order by trade_date desc limit 1", [str(panel_target)]).fetchone()
+    return {
+        "raw_row_count": int(raw_count[0] or 0),
+        "raw_start_date": str(raw_start[0] if raw_start else ""),
+        "raw_end_date": str(raw_end[0] if raw_end else ""),
+        "panel_row_count": int(panel_count[0] or 0),
+        "panel_start_date": str(panel_start[0] if panel_start else ""),
+        "panel_end_date": str(panel_end[0] if panel_end else ""),
+    }
 
 
 def _scope_dataset_by_symbols(
@@ -1138,7 +1460,9 @@ def _resolve_optional_manifest(root: Path, dataset_id: str, domain: str) -> Path
 
 def _can_reuse_5m_shard_from_prior(*, source_shard: ShardManifestEntry, reuse_shard: ShardManifestEntry) -> bool:
     metadata = dict(source_shard.metadata or {})
-    if metadata.get("repair") == "zero_price_intraday_bars":
+    if metadata.get("repair") in {"zero_price_intraday_bars", "quality_intraday_bars"}:
+        return False
+    if metadata.get("quality_repair") == "applied":
         return False
     if int(reuse_shard.row_count or 0) <= 0:
         return False
@@ -1290,6 +1614,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     daily.add_argument("--max-shards", type=int, default=0)
     daily.add_argument("--activate-domain", action="store_true")
     daily.add_argument("--json", action="store_true")
+    daily_missing = sub.add_parser("daily-from-intraday-missing", help="Fill nonzero intraday symbol-days missing from daily raw and panel.")
+    daily_missing.add_argument("--raw-dataset-id", default="")
+    daily_missing.add_argument("--panel-dataset-id", default="")
+    daily_missing.add_argument("--five-minute-dataset-id", default="")
+    daily_missing.add_argument("--duckdb-memory-limit", default="")
+    daily_missing.add_argument("--activate-domain", action="store_true")
+    daily_missing.add_argument("--json", action="store_true")
     valuation = sub.add_parser("valuation", help="Normalize valuation shards to qdp_v2 valuation schema.")
     valuation.add_argument("--source-dataset-id", default="")
     valuation.add_argument("--max-shards", type=int, default=0)
@@ -1315,6 +1646,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
     repair.add_argument("--max-repair-symbol-days", type=int, default=0)
     repair.add_argument("--copy-mode", default="hardlink", choices=("hardlink", "copy"))
     repair.add_argument("--json", action="store_true")
+    quality_repair = sub.add_parser("intraday-quality-repair", help="Drop no-trade intraday pseudo bars and correct extreme high/low glitches.")
+    quality_repair.add_argument("--source-dataset-id", default="")
+    quality_repair.add_argument("--five-minute-dataset-id", default="")
+    quality_repair.add_argument("--daily-dataset-id", default="")
+    quality_repair.add_argument("--duckdb-memory-limit", default="")
+    quality_repair.add_argument("--dry-run", action="store_true")
+    quality_repair.add_argument("--activate-domain", action="store_true")
+    quality_repair.add_argument("--max-shards", type=int, default=0)
+    quality_repair.add_argument("--batch-shards", type=int, default=128)
+    quality_repair.add_argument("--price-factor", type=float, default=3.0)
+    quality_repair.add_argument("--workers", type=int, default=1)
+    quality_repair.add_argument("--copy-mode", default="hardlink", choices=("hardlink", "copy"))
+    quality_repair.add_argument("--progress-path", default="")
+    quality_repair.add_argument("--json", action="store_true")
     feature_repair = sub.add_parser("intraday-features-repair", help="Incrementally repair intraday_daily_features after intraday raw cleanup.")
     feature_repair.add_argument("--issue-path", required=True)
     feature_repair.add_argument("--source-dataset-id", default="")
@@ -1356,6 +1701,16 @@ def main(argv: list[str] | None = None) -> int:
             runtime=str(args.runtime or "balanced"),
             activate_domain=bool(args.activate_domain),
         )
+    elif args.clean_command == "daily-from-intraday-missing":
+        payload = repair_daily_from_intraday_missing(
+            workspace_root=workspace,
+            raw_dataset_id=str(args.raw_dataset_id or ""),
+            panel_dataset_id=str(args.panel_dataset_id or ""),
+            five_minute_dataset_id=str(args.five_minute_dataset_id or ""),
+            runtime=str(args.runtime or "balanced"),
+            duckdb_memory_limit=str(args.duckdb_memory_limit or ""),
+            activate_domain=bool(args.activate_domain),
+        )
     elif args.clean_command == "valuation":
         payload = normalize_valuation(
             workspace_root=workspace,
@@ -1394,6 +1749,23 @@ def main(argv: list[str] | None = None) -> int:
             no_mootdx=bool(args.no_mootdx),
             max_repair_symbol_days=int(args.max_repair_symbol_days or 0),
             copy_mode=str(args.copy_mode or "hardlink"),
+        )
+    elif args.clean_command == "intraday-quality-repair":
+        payload = repair_intraday_quality_anomalies(
+            workspace_root=workspace,
+            source_dataset_id=str(args.source_dataset_id or ""),
+            five_minute_dataset_id=str(args.five_minute_dataset_id or ""),
+            daily_dataset_id=str(args.daily_dataset_id or ""),
+            runtime=str(args.runtime or "balanced"),
+            duckdb_memory_limit=str(args.duckdb_memory_limit or ""),
+            dry_run=bool(args.dry_run),
+            activate_domain=bool(args.activate_domain),
+            max_shards=int(args.max_shards or 0),
+            batch_shards=int(args.batch_shards or 128),
+            price_factor=float(args.price_factor or 3.0),
+            workers=int(args.workers or 1),
+            copy_mode=str(args.copy_mode or "hardlink"),
+            progress_path=str(args.progress_path or "") or None,
         )
     elif args.clean_command == "intraday-features-repair":
         payload = repair_intraday_daily_features(

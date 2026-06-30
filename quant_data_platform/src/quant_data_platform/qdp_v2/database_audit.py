@@ -80,6 +80,7 @@ def audit_database(
     global_uniqueness_max_rows: int = 50_000_000,
     global_uniqueness_max_shards: int = 2_000,
     skip_cross: bool = False,
+    skip_cross_frequency: bool = False,
     progress_path: str | Path | None = None,
     write: bool = True,
 ) -> dict[str, Any]:
@@ -197,6 +198,9 @@ def audit_database(
             memory_limit=memory_limit,
             threads=thread_count,
             sample_limit=sample_limit,
+            max_shards=max_shards,
+            skip_cross_frequency=skip_cross_frequency,
+            progress_path=Path(progress_path) if progress_path else None,
         )
         findings.extend(cross_findings)
     elif deep and selected_domains:
@@ -672,6 +676,9 @@ def _cross_dataset_checks(
     memory_limit: str,
     threads: int,
     sample_limit: int,
+    max_shards: int = 0,
+    skip_cross_frequency: bool = False,
+    progress_path: Path | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     findings: list[dict[str, Any]] = []
     report: dict[str, Any] = {}
@@ -728,6 +735,59 @@ def _cross_dataset_checks(
     except Exception as exc:
         report["active_scope"] = {"status": "error", "error": str(exc)}
         findings.append(_finding("medium", "scope", "universe_snapshot/security_status", "active_scope_check_failed", {"error": str(exc)}, "Inspect active-date scope metadata and status sidecar."))
+    if skip_cross_frequency:
+        report["intraday_5m_from_1m"] = {"status": "skipped", "reason": "--skip-cross-frequency"}
+        report["intraday_vs_daily"] = {"status": "skipped", "reason": "--skip-cross-frequency"}
+        return report, findings
+    try:
+        five_from_one = _intraday_5m_from_1m_check(
+            root=root,
+            active=active,
+            memory_limit=memory_limit,
+            threads=threads,
+            sample_limit=sample_limit,
+            max_shards=max_shards,
+            progress_path=progress_path,
+        )
+        report["intraday_5m_from_1m"] = five_from_one
+        if five_from_one.get("status") not in {"ok", "skipped"}:
+            findings.append(
+                _finding(
+                    "high",
+                    "consistency",
+                    "market_intraday_1m/market_intraday_5m",
+                    "intraday_5m_not_consistent_with_1m",
+                    five_from_one,
+                    "Rebuild 5m from the active 1m dataset before using 5m bars or 5m-derived features.",
+                )
+            )
+    except Exception as exc:
+        report["intraday_5m_from_1m"] = {"status": "error", "error": str(exc)}
+        findings.append(_finding("medium", "consistency", "market_intraday_1m/market_intraday_5m", "intraday_5m_from_1m_check_failed", {"error": str(exc)}, "Inspect 1m/5m schemas and rerun the quality audit."))
+    try:
+        intraday_daily = _intraday_vs_daily_check(
+            root=root,
+            active=active,
+            memory_limit=memory_limit,
+            threads=threads,
+            sample_limit=sample_limit,
+            max_shards=max_shards,
+        )
+        report["intraday_vs_daily"] = intraday_daily
+        if intraday_daily.get("status") not in {"ok", "skipped"}:
+            findings.append(
+                _finding(
+                    "high",
+                    "consistency",
+                    "market_intraday_5m/market_daily_raw",
+                    "intraday_daily_mismatch",
+                    intraday_daily,
+                    "Classify missing symbol-days and reconcile price/volume/amount mismatches before treating cross-frequency features as fully trusted.",
+                )
+            )
+    except Exception as exc:
+        report["intraday_vs_daily"] = {"status": "error", "error": str(exc)}
+        findings.append(_finding("medium", "consistency", "market_intraday_5m/market_daily_raw", "intraday_vs_daily_check_failed", {"error": str(exc)}, "Inspect daily and intraday schemas and rerun the quality audit."))
     return report, findings
 
 
@@ -768,6 +828,365 @@ def _daily_raw_panel_check(*, root: Path, raw_id: str, panel_id: str, memory_lim
         "panel_has_bar_rows": panel_has_bar_rows,
         "raw_missing_in_panel": raw_missing,
         "panel_has_bar_missing_in_raw": panel_missing,
+    }
+
+
+def _intraday_5m_from_1m_check(
+    *,
+    root: Path,
+    active: Mapping[str, Any],
+    memory_limit: str,
+    threads: int,
+    sample_limit: int,
+    max_shards: int = 0,
+    progress_path: Path | None = None,
+) -> dict[str, Any]:
+    raw = dict(active.get("raw", {}) or {})
+    one_id = str(raw.get("market_intraday_1m", "") or "")
+    five_id = str(raw.get("market_intraday_5m", "") or "")
+    if not one_id or not five_id:
+        return {"status": "skipped", "reason": "market_intraday_1m_or_5m_missing"}
+    one_path = dataset_manifest_for_id(root, one_id, "market_intraday_1m")
+    five_path = dataset_manifest_for_id(root, five_id, "market_intraday_5m")
+    if one_path is None or five_path is None:
+        return {"status": "skipped", "reason": "market_intraday_1m_or_5m_manifest_missing"}
+    one = read_dataset_manifest(one_path)
+    five = read_dataset_manifest(five_path)
+    pairs = _paired_intraday_shards(one, five, root=root)
+    if max_shards:
+        pairs = pairs[: int(max_shards)]
+    if not pairs:
+        return {"status": "error", "reason": "no_matching_1m_5m_shard_pairs"}
+    import duckdb  # type: ignore
+
+    checked_pairs = 0
+    one_agg_rows = 0
+    five_rows = 0
+    missing_from_5m = 0
+    extra_5m_rows = 0
+    mismatched_rows = 0
+    bad_examples: list[dict[str, Any]] = []
+    with duckdb.connect(":memory:") as con:
+        _configure_duckdb(con, memory_limit=memory_limit, threads=threads)
+        for pair_index, (one_shard, five_shard) in enumerate(pairs, start=1):
+            one_sql = _sql_literal(str(one_shard))
+            five_sql = _sql_literal(str(five_shard))
+            row = con.execute(
+                f"""
+                with one_raw as (
+                  select
+                    symbol,
+                    trade_date,
+                    regexp_replace(cast(bar_time as varchar), '[^0-9]', '', 'g') as bt,
+                    open,
+                    high,
+                    low,
+                    close,
+                    volume,
+                    amount
+                  from read_parquet({one_sql})
+                ),
+                one_parsed as (
+                  select
+                    *,
+                    cast(substr(bt, 1, 2) as integer) * 60 + cast(substr(bt, 3, 2) as integer) as minute_of_day
+                  from one_raw
+                  where length(bt) >= 4
+                ),
+                one_bucketed as (
+                  select
+                    *,
+                    case
+                      when minute_of_day between 571 and 690 then 570 + cast(ceil((minute_of_day - 570) / 5.0) * 5 as integer)
+                      when minute_of_day between 781 and 900 then 780 + cast(ceil((minute_of_day - 780) / 5.0) * 5 as integer)
+                      else null
+                    end as bucket_end
+                  from one_parsed
+                ),
+                one_agg as (
+                  select
+                    symbol,
+                    trade_date,
+                    printf('%02d%02d00000', cast(floor(bucket_end / 60) as integer), cast(bucket_end % 60 as integer)) as bar_time,
+                    arg_min(open, minute_of_day) as open,
+                    max(high) as high,
+                    min(low) as low,
+                    arg_max(close, minute_of_day) as close,
+                    sum(volume) as volume,
+                    sum(amount) as amount
+                  from one_bucketed
+                  where bucket_end is not null
+                  group by symbol, trade_date, bucket_end
+                ),
+                five as (
+                  select symbol, trade_date, regexp_replace(cast(bar_time as varchar), '[^0-9]', '', 'g') as bar_time, open, high, low, close, volume, amount
+                  from read_parquet({five_sql})
+                ),
+                joined as (
+                  select
+                    coalesce(o.symbol, f.symbol) as symbol,
+                    coalesce(o.trade_date, f.trade_date) as trade_date,
+                    coalesce(o.bar_time, f.bar_time) as bar_time,
+                    o.symbol is null as extra_5m,
+                    f.symbol is null as missing_5m,
+                    { _numeric_mismatch_expr("o.open", "f.open", abs_tolerance=0.0001) } or
+                    { _numeric_mismatch_expr("o.high", "f.high", abs_tolerance=0.0001) } or
+                    { _numeric_mismatch_expr("o.low", "f.low", abs_tolerance=0.0001) } or
+                    { _numeric_mismatch_expr("o.close", "f.close", abs_tolerance=0.0001) } or
+                    { _numeric_mismatch_expr("o.volume", "f.volume", abs_tolerance=0.001) } or
+                    { _numeric_mismatch_expr("o.amount", "f.amount", abs_tolerance=1.0, rel_tolerance=0.0001) } as value_mismatch
+                  from one_agg o
+                  full outer join five f using (symbol, trade_date, bar_time)
+                )
+                select
+                  (select count(*) from one_agg) as one_agg_rows,
+                  (select count(*) from five) as five_rows,
+                  sum(case when missing_5m then 1 else 0 end) as missing_from_5m,
+                  sum(case when extra_5m then 1 else 0 end) as extra_5m_rows,
+                  sum(case when (not missing_5m) and (not extra_5m) and value_mismatch then 1 else 0 end) as mismatched_rows
+                from joined
+                """
+            ).fetchone()
+            checked_pairs += 1
+            one_agg_rows += int(row[0] or 0)
+            five_rows += int(row[1] or 0)
+            missing_from_5m += int(row[2] or 0)
+            extra_5m_rows += int(row[3] or 0)
+            mismatched_rows += int(row[4] or 0)
+            if (int(row[2] or 0) or int(row[3] or 0) or int(row[4] or 0)) and len(bad_examples) < sample_limit:
+                bad_examples.extend(
+                    _fetch_examples(
+                        con,
+                        f"""
+                        with one_raw as (
+                          select symbol, trade_date, regexp_replace(cast(bar_time as varchar), '[^0-9]', '', 'g') as bt, open, high, low, close, volume, amount
+                          from read_parquet({one_sql})
+                        ),
+                        one_parsed as (
+                          select *, cast(substr(bt, 1, 2) as integer) * 60 + cast(substr(bt, 3, 2) as integer) as minute_of_day
+                          from one_raw
+                          where length(bt) >= 4
+                        ),
+                        one_bucketed as (
+                          select *,
+                            case
+                              when minute_of_day between 571 and 690 then 570 + cast(ceil((minute_of_day - 570) / 5.0) * 5 as integer)
+                              when minute_of_day between 781 and 900 then 780 + cast(ceil((minute_of_day - 780) / 5.0) * 5 as integer)
+                              else null
+                            end as bucket_end
+                          from one_parsed
+                        ),
+                        one_agg as (
+                          select symbol, trade_date, printf('%02d%02d00000', cast(floor(bucket_end / 60) as integer), cast(bucket_end % 60 as integer)) as bar_time,
+                            arg_min(open, minute_of_day) as one_open, max(high) as one_high, min(low) as one_low, arg_max(close, minute_of_day) as one_close,
+                            sum(volume) as one_volume, sum(amount) as one_amount
+                          from one_bucketed
+                          where bucket_end is not null
+                          group by symbol, trade_date, bucket_end
+                        ),
+                        five as (
+                          select symbol, trade_date, regexp_replace(cast(bar_time as varchar), '[^0-9]', '', 'g') as bar_time,
+                            open as five_open, high as five_high, low as five_low, close as five_close, volume as five_volume, amount as five_amount
+                          from read_parquet({five_sql})
+                        )
+                        select *
+                        from one_agg o
+                        full outer join five f using (symbol, trade_date, bar_time)
+                        where o.symbol is null or f.symbol is null
+                          or { _numeric_mismatch_expr("o.one_open", "f.five_open", abs_tolerance=0.0001) }
+                          or { _numeric_mismatch_expr("o.one_high", "f.five_high", abs_tolerance=0.0001) }
+                          or { _numeric_mismatch_expr("o.one_low", "f.five_low", abs_tolerance=0.0001) }
+                          or { _numeric_mismatch_expr("o.one_close", "f.five_close", abs_tolerance=0.0001) }
+                          or { _numeric_mismatch_expr("o.one_volume", "f.five_volume", abs_tolerance=0.001) }
+                          or { _numeric_mismatch_expr("o.one_amount", "f.five_amount", abs_tolerance=1.0, rel_tolerance=0.0001) }
+                        limit {max(1, sample_limit - len(bad_examples))}
+                        """,
+                    )
+                )
+            _append_progress(
+                progress_path,
+                {
+                    "event": "cross_frequency_5m_from_1m_pair_checked",
+                    "pair_index": pair_index,
+                    "pair_count": len(pairs),
+                    "one_shard": str(one_shard),
+                    "five_shard": str(five_shard),
+                    "missing_from_5m_so_far": missing_from_5m,
+                    "extra_5m_rows_so_far": extra_5m_rows,
+                    "mismatched_rows_so_far": mismatched_rows,
+                    "timestamp": utc_now(),
+                },
+            )
+    failed = missing_from_5m or extra_5m_rows or mismatched_rows
+    return {
+        "status": "failed" if failed else "ok",
+        "method": "paired_shard_exact_aggregation",
+        "scan_limited": bool(max_shards),
+        "paired_shard_count": len(pairs),
+        "checked_pair_count": checked_pairs,
+        "one_minute_aggregated_rows": one_agg_rows,
+        "five_minute_rows": five_rows,
+        "missing_from_5m": missing_from_5m,
+        "extra_5m_rows": extra_5m_rows,
+        "mismatched_rows": mismatched_rows,
+        "examples": bad_examples[:sample_limit],
+    }
+
+
+def _intraday_vs_daily_check(
+    *,
+    root: Path,
+    active: Mapping[str, Any],
+    memory_limit: str,
+    threads: int,
+    sample_limit: int,
+    max_shards: int = 0,
+) -> dict[str, Any]:
+    raw = dict(active.get("raw", {}) or {})
+    daily_id = str(raw.get("market_daily_raw", "") or "")
+    five_id = str(raw.get("market_intraday_5m", "") or "")
+    if not daily_id or not five_id:
+        return {"status": "skipped", "reason": "market_daily_raw_or_market_intraday_5m_missing"}
+    daily_path = dataset_manifest_for_id(root, daily_id, "market_daily_raw")
+    five_path = dataset_manifest_for_id(root, five_id, "market_intraday_5m")
+    if daily_path is None or five_path is None:
+        return {"status": "skipped", "reason": "daily_or_5m_manifest_missing"}
+    daily = read_dataset_manifest(daily_path)
+    five = read_dataset_manifest(five_path)
+    daily_paths = _existing_shard_paths(daily, root=root, max_shards=0)
+    five_paths = _existing_shard_paths(five, root=root, max_shards=max_shards)
+    if not daily_paths or not five_paths:
+        return {"status": "error", "reason": "daily_or_5m_has_no_readable_shards"}
+    import duckdb  # type: ignore
+
+    scan_limited = bool(max_shards)
+    daily_missing_expr = "false" if scan_limited else "i.symbol is null"
+    example_daily_missing_clause = "" if scan_limited else " or i.symbol is null"
+    with duckdb.connect(":memory:") as con:
+        _configure_duckdb(con, memory_limit=memory_limit, threads=threads)
+        paths_sql = _path_list_sql(five_paths)
+        daily_sql = _path_list_sql(daily_paths)
+        row = con.execute(
+            f"""
+            with intra_raw as (
+              select
+                symbol,
+                trade_date,
+                regexp_replace(cast(bar_time as varchar), '[^0-9]', '', 'g') as bt,
+                open,
+                high,
+                low,
+                close,
+                volume,
+                amount
+              from read_parquet({paths_sql}, union_by_name=true)
+            ),
+            intra_parsed as (
+              select
+                *,
+                cast(substr(bt, 1, 2) as integer) * 60 + cast(substr(bt, 3, 2) as integer) as minute_of_day
+              from intra_raw
+              where length(bt) >= 4
+            ),
+            intra as (
+              select
+                symbol,
+                trade_date,
+                arg_min(open, minute_of_day) as open,
+                max(high) as high,
+                min(low) as low,
+                arg_max(close, minute_of_day) as close,
+                sum(volume) as volume,
+                sum(amount) as amount,
+                count(*) as bars
+              from intra_parsed
+              group by symbol, trade_date
+            ),
+            daily as (
+              select symbol, trade_date, open, high, low, close, volume, amount
+              from read_parquet({daily_sql}, union_by_name=true)
+            ),
+            joined as (
+              select
+                coalesce(d.symbol, i.symbol) as symbol,
+                coalesce(d.trade_date, i.trade_date) as trade_date,
+                d.symbol is null as intraday_missing_in_daily,
+                {daily_missing_expr} as daily_missing_in_intraday,
+                d.symbol is not null and i.symbol is not null as both_present,
+                { _numeric_mismatch_expr("d.open", "i.open", abs_tolerance=0.001) } or
+                { _numeric_mismatch_expr("d.high", "i.high", abs_tolerance=0.001) } or
+                { _numeric_mismatch_expr("d.low", "i.low", abs_tolerance=0.001) } or
+                { _numeric_mismatch_expr("d.close", "i.close", abs_tolerance=0.001) } as price_mismatch,
+                { _numeric_mismatch_expr("d.volume", "i.volume", abs_tolerance=1.0, rel_tolerance=0.0001) } as volume_mismatch,
+                { _numeric_mismatch_expr("d.amount", "i.amount", abs_tolerance=10.0, rel_tolerance=0.001) } as amount_mismatch
+              from daily d
+              full outer join intra i using (symbol, trade_date)
+            )
+            select
+              (select count(*) from daily) as daily_rows,
+              (select count(*) from intra) as intraday_symbol_days,
+              sum(case when daily_missing_in_intraday then 1 else 0 end) as daily_missing_in_intraday,
+              sum(case when intraday_missing_in_daily then 1 else 0 end) as intraday_missing_in_daily,
+              sum(case when both_present and price_mismatch then 1 else 0 end) as price_mismatch_rows,
+              sum(case when both_present and volume_mismatch then 1 else 0 end) as volume_mismatch_rows,
+              sum(case when both_present and amount_mismatch then 1 else 0 end) as amount_mismatch_rows
+            from joined
+            """
+        ).fetchone()
+        examples = _fetch_examples(
+            con,
+            f"""
+            with intra_raw as (
+              select symbol, trade_date, regexp_replace(cast(bar_time as varchar), '[^0-9]', '', 'g') as bt, open, high, low, close, volume, amount
+              from read_parquet({paths_sql}, union_by_name=true)
+            ),
+            intra_parsed as (
+              select *, cast(substr(bt, 1, 2) as integer) * 60 + cast(substr(bt, 3, 2) as integer) as minute_of_day
+              from intra_raw
+              where length(bt) >= 4
+            ),
+            intra as (
+              select symbol, trade_date, arg_min(open, minute_of_day) as intraday_open, max(high) as intraday_high, min(low) as intraday_low,
+                arg_max(close, minute_of_day) as intraday_close, sum(volume) as intraday_volume, sum(amount) as intraday_amount, count(*) as intraday_bars
+              from intra_parsed
+              group by symbol, trade_date
+            ),
+            daily as (
+              select symbol, trade_date, open as daily_open, high as daily_high, low as daily_low, close as daily_close, volume as daily_volume, amount as daily_amount
+              from read_parquet({daily_sql}, union_by_name=true)
+            )
+            select *
+            from daily d
+            full outer join intra i using (symbol, trade_date)
+            where d.symbol is null{example_daily_missing_clause}
+              or (
+                d.symbol is not null and i.symbol is not null and (
+                  { _numeric_mismatch_expr("d.daily_open", "i.intraday_open", abs_tolerance=0.001) }
+                  or { _numeric_mismatch_expr("d.daily_high", "i.intraday_high", abs_tolerance=0.001) }
+                  or { _numeric_mismatch_expr("d.daily_low", "i.intraday_low", abs_tolerance=0.001) }
+                  or { _numeric_mismatch_expr("d.daily_close", "i.intraday_close", abs_tolerance=0.001) }
+                  or { _numeric_mismatch_expr("d.daily_volume", "i.intraday_volume", abs_tolerance=1.0, rel_tolerance=0.0001) }
+                  or { _numeric_mismatch_expr("d.daily_amount", "i.intraday_amount", abs_tolerance=10.0, rel_tolerance=0.001) }
+                )
+              )
+            limit {sample_limit}
+            """,
+        )
+    daily_rows, intraday_symbol_days, daily_missing, intraday_missing, price_mismatch, volume_mismatch, amount_mismatch = [int(item or 0) for item in row]
+    failed = daily_missing or intraday_missing or price_mismatch or volume_mismatch or amount_mismatch
+    return {
+        "status": "failed" if failed else "ok",
+        "method": "aggregate_5m_to_daily_exact",
+        "scan_limited": scan_limited,
+        "scanned_5m_shards": len(five_paths),
+        "daily_rows": daily_rows,
+        "intraday_symbol_days": intraday_symbol_days,
+        "daily_missing_in_intraday": daily_missing,
+        "intraday_missing_in_daily": intraday_missing,
+        "price_mismatch_rows": price_mismatch,
+        "volume_mismatch_rows": volume_mismatch,
+        "amount_mismatch_rows": amount_mismatch,
+        "examples": examples[:sample_limit],
     }
 
 
@@ -1075,6 +1494,44 @@ def _existing_shard_paths(manifest: DatasetManifest, *, root: Path, max_shards: 
     return paths
 
 
+def _paired_intraday_shards(one: DatasetManifest, five: DatasetManifest, *, root: Path) -> list[tuple[Path, Path]]:
+    five_by_name: dict[str, Path] = {}
+    five_by_index: dict[str, Path] = {}
+    for shard in five.shards:
+        path = resolve_manifest_path(shard.path, root=root)
+        if not path.exists():
+            continue
+        name = path.name
+        five_by_name[name] = path
+        index = _part_index(name)
+        if index:
+            five_by_index[index] = path
+    pairs: list[tuple[Path, Path]] = []
+    used: set[Path] = set()
+    for shard in one.shards:
+        one_path = resolve_manifest_path(shard.path, root=root)
+        if not one_path.exists():
+            continue
+        expected_name = one_path.name.replace("market_intraday_1m", "market_intraday_5m")
+        five_path = five_by_name.get(expected_name)
+        if five_path is None:
+            index = _part_index(one_path.name)
+            five_path = five_by_index.get(index) if index else None
+        if five_path is None or five_path in used:
+            continue
+        pairs.append((one_path, five_path))
+        used.add(five_path)
+    return pairs
+
+
+def _part_index(name: str) -> str:
+    text = str(name)
+    if not text.startswith("part_"):
+        return ""
+    pieces = text.split("_", 2)
+    return pieces[1] if len(pieces) >= 2 and pieces[1].isdigit() else ""
+
+
 def _manifest_byte_count(manifest: DatasetManifest, *, root: Path) -> int:
     total = 0
     for shard in manifest.shards:
@@ -1127,6 +1584,17 @@ def _key_expr(cols: Iterable[str]) -> str:
 
 def _sql_literal(value: str) -> str:
     return "'" + str(value).replace("'", "''").replace("\\", "/") + "'"
+
+
+def _numeric_mismatch_expr(left: str, right: str, *, abs_tolerance: float, rel_tolerance: float = 0.0) -> str:
+    abs_tol = float(abs_tolerance)
+    rel_tol = float(rel_tolerance)
+    return (
+        f"(({left} is null) <> ({right} is null) or "
+        f"(not ({left} is null) and not ({right} is null) and "
+        f"abs(cast({left} as double) - cast({right} as double)) > "
+        f"greatest({abs_tol}, {rel_tol} * greatest(abs(cast({left} as double)), abs(cast({right} as double))))))"
+    )
 
 
 def _path_list_sql(paths: list[Path]) -> str:
@@ -1215,6 +1683,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--global-uniqueness-max-rows", type=int, default=50_000_000)
     parser.add_argument("--global-uniqueness-max-shards", type=int, default=2_000)
     parser.add_argument("--skip-cross", action="store_true", help="Skip cross-dataset consistency checks.")
+    parser.add_argument("--skip-cross-frequency", action="store_true", help="Skip 1m/5m/daily consistency checks inside cross-dataset checks.")
     parser.add_argument("--progress-path", default="", help="Optional JSONL progress path for long audits.")
     parser.add_argument("--no-write", action="store_true")
     parser.add_argument("--json", action="store_true")
@@ -1238,6 +1707,7 @@ def main(argv: list[str] | None = None) -> int:
         global_uniqueness_max_rows=int(args.global_uniqueness_max_rows or 0),
         global_uniqueness_max_shards=int(args.global_uniqueness_max_shards or 0),
         skip_cross=bool(args.skip_cross),
+        skip_cross_frequency=bool(args.skip_cross_frequency),
         progress_path=str(args.progress_path or "") or None,
         write=not bool(args.no_write),
     )

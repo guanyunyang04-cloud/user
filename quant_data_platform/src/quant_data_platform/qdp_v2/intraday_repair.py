@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import json
 import os
 import shutil
 import time
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -277,6 +279,235 @@ def repair_intraday_zero_bars(
     return payload
 
 
+def repair_intraday_quality_anomalies(
+    *,
+    workspace_root: str | Path | None = None,
+    source_dataset_id: str = "",
+    five_minute_dataset_id: str = "",
+    daily_dataset_id: str = "",
+    runtime: str = "balanced",
+    duckdb_memory_limit: str = "",
+    dry_run: bool = False,
+    activate_domain: bool = False,
+    max_shards: int = 0,
+    batch_shards: int = 128,
+    price_factor: float = 3.0,
+    workers: int = 1,
+    copy_mode: str = "hardlink",
+    progress_path: str | Path | None = None,
+) -> dict[str, Any]:
+    root = qdp_v2_root(workspace_root)
+    active = read_active_manifest(root)
+    source_manifest_path = _resolve_source_manifest(root, source_dataset_id)
+    source = read_dataset_manifest(source_manifest_path)
+    raw = dict(active.get("raw", {}) or {})
+    five_id = str(five_minute_dataset_id or raw.get("market_intraday_5m", "") or "")
+    daily_id = str(daily_dataset_id or raw.get("market_daily_raw", "") or "")
+    five_manifest_path = dataset_manifest_for_id(root, five_id, "market_intraday_5m")
+    daily_manifest_path = dataset_manifest_for_id(root, daily_id, "market_daily_raw")
+    if five_manifest_path is None:
+        raise FileNotFoundError(f"market_intraday_5m dataset manifest not found: {five_id}")
+    if daily_manifest_path is None:
+        raise FileNotFoundError(f"market_daily_raw dataset manifest not found: {daily_id}")
+    five = read_dataset_manifest(five_manifest_path)
+    daily = read_dataset_manifest(daily_manifest_path)
+    if len(source.shards) != len(five.shards):
+        raise ValueError(f"paired_intraday_shard_count_mismatch:1m={len(source.shards)}:5m={len(five.shards)}")
+    profile = resolve_runtime_profile(runtime)
+    memory_limit = str(duckdb_memory_limit or "").strip() or profile.duckdb_memory_limit
+    thread_count = max(1, int(profile.duckdb_threads or 1))
+    pairs = [
+        {
+            "index": index,
+            "one_shard": one_shard,
+            "five_shard": five_shard,
+            "one_path": _resolve_data_path(root, one_shard.path),
+            "five_path": _resolve_data_path(root, five_shard.path),
+        }
+        for index, (one_shard, five_shard) in enumerate(zip(source.shards, five.shards))
+    ]
+    if max_shards:
+        pairs = pairs[: int(max_shards)]
+    run_id = f"intraday_quality_repair_{utc_now().replace(':', '').replace('-', '')}"
+    run_dir = root / "runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    progress = Path(progress_path) if progress_path else run_dir / "progress.jsonl"
+    issues = _collect_intraday_quality_issues(
+        root=root,
+        pairs=pairs,
+        daily=daily,
+        memory_limit=memory_limit,
+        threads=thread_count,
+        batch_shards=max(1, int(batch_shards or 128)),
+        price_factor=max(1.1, float(price_factor or 3.0)),
+        progress_path=progress,
+    )
+    if issues.empty:
+        payload = {
+            "status": "ok",
+            "message": "no_intraday_quality_anomalies_found",
+            "source_dataset_id": source.dataset_id,
+            "five_minute_dataset_id": five.dataset_id,
+            "daily_dataset_id": daily.dataset_id,
+            "selected_shards": len(pairs),
+            "runtime_environment": runtime_environment(),
+        }
+        atomic_write_json(run_dir / "result.json", payload)
+        return payload
+    issue_hash = _dataframe_sha256(issues[["shard_path", "symbol", "trade_date", "repair_class", "action"]])
+    target_dataset_id = f"market_intraday_1m__{stable_hash({'source': source.dataset_id, 'repair': 'quality_v1', 'issue_hash': issue_hash})}"
+    issues_path = run_dir / "intraday_quality_issues.csv"
+    issues.to_csv(issues_path, index=False, encoding="utf-8-sig")
+    affected_shards = sorted(set(str(item) for item in issues["shard_path"].dropna().astype(str).unique()))
+    dry_payload = {
+        "status": "planned",
+        "dry_run": bool(dry_run),
+        "run_id": run_id,
+        "source_dataset_id": source.dataset_id,
+        "five_minute_dataset_id": five.dataset_id,
+        "daily_dataset_id": daily.dataset_id,
+        "target_dataset_id": target_dataset_id,
+        "selected_shards": len(pairs),
+        "affected_shards": len(affected_shards),
+        "issue_symbol_days": int(issues[["symbol", "trade_date"]].drop_duplicates().shape[0]),
+        "issues_by_class": _count_records(issues, "repair_class"),
+        "issues_by_action": _count_records(issues, "action"),
+        "drop_symbol_days": int(issues.loc[issues["action"].eq("drop"), ["symbol", "trade_date"]].drop_duplicates().shape[0]),
+        "fix_price_symbol_days": int(issues.loc[issues["action"].eq("fix_price"), ["symbol", "trade_date"]].drop_duplicates().shape[0]),
+        "issues_path": str(issues_path.resolve()),
+        "progress_path": str(progress.resolve()),
+        "runtime_environment": runtime_environment(),
+    }
+    if dry_run:
+        atomic_write_json(run_dir / "result.json", dry_payload)
+        return dry_payload
+    target_dir = root / "datasets" / "market_intraday_1m" / target_dataset_id
+    staging = target_dir / ".staging"
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging_shards = staging / "shards"
+    staging_shards.mkdir(parents=True, exist_ok=True)
+    issues_by_shard = {path: frame.copy() for path, frame in issues.groupby("shard_path", dropna=False)}
+    affected_set = set(affected_shards)
+    entries_by_index: dict[int, ShardManifestEntry] = {}
+    rewritten = 0
+    linked = 0
+    dropped_rows = 0
+    corrected_high_rows = 0
+    corrected_open_rows = 0
+    corrected_low_rows = 0
+    columns = [item["name"] for item in source.schema] or ONE_MINUTE_COLUMNS
+    task_workers = max(1, min(int(workers or 1), max(1, int(profile.duckdb_threads or 1) * 2)))
+    tasks: list[dict[str, Any]] = []
+    for index, shard in enumerate(source.shards):
+        source_path = _resolve_data_path(root, shard.path)
+        target_path = staging_shards / Path(shard.path).name
+        tasks.append(
+            {
+                "index": index,
+                "source_path": str(source_path),
+                "target_path": str(target_path),
+                "affected": str(source_path.resolve()) in affected_set,
+                "issues": issues_by_shard.get(str(source_path.resolve()), pd.DataFrame()).to_dict("records"),
+                "columns": columns,
+                "price_factor": max(1.1, float(price_factor or 3.0)),
+                "copy_mode": copy_mode,
+                "target_dataset_id": target_dataset_id,
+                "source_shard": shard.to_dict(),
+            }
+        )
+    if task_workers <= 1:
+        results = [_quality_shard_task(task) for task in tasks]
+    else:
+        results = []
+        with ProcessPoolExecutor(max_workers=task_workers) as pool:
+            futures = [pool.submit(_quality_shard_task, task) for task in tasks]
+            for future in as_completed(futures):
+                results.append(future.result())
+    for result in results:
+        if result.get("status") != "ok":
+            raise RuntimeError(f"intraday_quality_shard_rewrite_failed:{result}")
+        entries_by_index[int(result["index"])] = result["entry"]
+        if bool(result.get("affected")):
+            rewritten += 1
+            dropped_rows += int(result.get("dropped_rows", 0) or 0)
+            corrected_open_rows += int(result.get("corrected_open_rows", 0) or 0)
+            corrected_high_rows += int(result.get("corrected_high_rows", 0) or 0)
+            corrected_low_rows += int(result.get("corrected_low_rows", 0) or 0)
+        else:
+            linked += 1
+    entries = [entries_by_index[index] for index in sorted(entries_by_index)]
+    final_shards = target_dir / "shards"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    if final_shards.exists():
+        shutil.rmtree(final_shards)
+    staging_shards.replace(final_shards)
+    shutil.rmtree(staging, ignore_errors=True)
+    schema = _parquet_schema(final_shards / Path(entries[0].path).name) if entries else list(source.schema)
+    manifest = DatasetManifest(
+        dataset_id=target_dataset_id,
+        domain="market_intraday_1m",
+        layer="raw",
+        frequency="1m",
+        contract_version="mootdx_1m_240_v1",
+        primary_key=["trade_date", "symbol", "bar_time"],
+        start_date=min([item.start_date for item in entries if item.start_date], default=""),
+        end_date=max([item.end_date for item in entries if item.end_date], default=""),
+        row_count=sum(int(item.row_count) for item in entries),
+        schema_hash=schema_hash(schema),
+        schema=schema,
+        shards=entries,
+        source={
+            "provider": "qdp_v2",
+            "created_by": "repair_intraday_quality_anomalies",
+            "created_at": utc_now(),
+            "source_dataset_id": source.dataset_id,
+            "five_minute_dataset_id": five.dataset_id,
+            "daily_dataset_id": daily.dataset_id,
+            "issue_hash": issue_hash,
+        },
+        quality={
+            "path_refs_exist": True,
+            "quality_repair": "applied",
+            "pseudo_no_trade_days_dropped": int(dry_payload["drop_symbol_days"]),
+            "price_anomaly_days_fixed": int(dry_payload["fix_price_symbol_days"]),
+            "primary_key_unique": "not_checked_after_repair",
+        },
+        notes=[
+            "positive-price no-volume intraday pseudo bars without a daily fact row were removed",
+            "extreme intraday high/low glitches were corrected conservatively at row level",
+        ],
+    )
+    manifest_path = write_dataset_manifest(root, manifest)
+    active_path = ""
+    if activate_domain:
+        active = read_active_manifest(root)
+        raw = dict(active.get("raw", {}) or {})
+        raw["market_intraday_1m"] = target_dataset_id
+        active["raw"] = raw
+        active["updated_at"] = utc_now()
+        active_path = str(write_active_manifest(root, active).resolve())
+    payload = {
+        **dry_payload,
+        "status": "ok",
+        "dry_run": False,
+        "manifest_path": str(manifest_path.resolve()),
+        "row_count": manifest.row_count,
+        "start_date": manifest.start_date,
+        "end_date": manifest.end_date,
+        "rewritten_shards": rewritten,
+        "linked_shards": linked,
+        "dropped_rows": dropped_rows,
+        "corrected_open_rows": corrected_open_rows,
+        "corrected_high_rows": corrected_high_rows,
+        "corrected_low_rows": corrected_low_rows,
+        "workers": task_workers,
+        "active_manifest": active_path,
+    }
+    atomic_write_json(run_dir / "result.json", payload)
+    return payload
+
+
 def _resolve_source_manifest(root: Path, source_dataset_id: str) -> Path:
     dataset_id = str(source_dataset_id or "").strip()
     if not dataset_id:
@@ -298,6 +529,131 @@ def _select_shards_by_year(*, root: Path, manifest: DatasetManifest, years: tupl
             continue
         selected.append({"path": _resolve_data_path(root, shard.path), "shard": shard})
     return selected
+
+
+def _collect_intraday_quality_issues(
+    *,
+    root: Path,
+    pairs: list[dict[str, Any]],
+    daily: DatasetManifest,
+    memory_limit: str,
+    threads: int,
+    batch_shards: int,
+    price_factor: float,
+    progress_path: Path,
+) -> pd.DataFrame:
+    if not pairs:
+        return pd.DataFrame(columns=["shard_path", "symbol", "trade_date", "repair_class", "action"])
+    import duckdb  # type: ignore
+
+    daily_paths = [str(_resolve_data_path(root, item.path)) for item in daily.shards]
+    frames: list[pd.DataFrame] = []
+    progress_path.parent.mkdir(parents=True, exist_ok=True)
+    if progress_path.exists():
+        progress_path.unlink()
+    with duckdb.connect(":memory:") as con:
+        con.execute(f"set memory_limit='{memory_limit}'")
+        con.execute(f"set threads={max(1, int(threads or 1))}")
+        con.execute(
+            """
+            create temp table daily_keys as
+            select symbol, trade_date
+            from read_parquet($daily_paths, union_by_name=true)
+            group by 1, 2
+            """,
+            {"daily_paths": daily_paths},
+        )
+        for offset in range(0, len(pairs), max(1, int(batch_shards))):
+            batch = pairs[offset : offset + max(1, int(batch_shards))]
+            five_paths = [str(Path(item["five_path"]).resolve()) for item in batch]
+            five_to_one = {str(Path(item["five_path"]).resolve()): str(Path(item["one_path"]).resolve()) for item in batch}
+            pseudo = con.execute(
+                """
+                with intraday as (
+                  select
+                    filename as five_path,
+                    symbol,
+                    trade_date,
+                    count(*) as bars,
+                    sum(coalesce(volume, 0)) as volume_sum,
+                    sum(coalesce(amount, 0)) as amount_sum
+                  from read_parquet($five_paths, union_by_name=true, filename=true)
+                  group by 1, 2, 3
+                )
+                select
+                  i.five_path,
+                  i.symbol,
+                  i.trade_date,
+                  i.bars,
+                  i.volume_sum,
+                  i.amount_sum
+                from intraday i
+                left join daily_keys d on d.symbol = i.symbol and d.trade_date = i.trade_date
+                where d.symbol is null
+                  and abs(coalesce(volume_sum, 0)) <= 0.0001
+                  and abs(coalesce(amount_sum, 0)) <= 0.0001
+                """,
+                {"five_paths": five_paths},
+            ).fetchdf()
+            price = con.execute(
+                """
+                select
+                  filename as five_path,
+                  symbol,
+                  trade_date,
+                  count(*) as bad_5m_rows,
+                  max(high / nullif(greatest(open, low, close), 0)) as max_high_ratio,
+                  max(greatest(open, high, close) / nullif(low, 0)) as max_low_ratio
+                from read_parquet($five_paths, union_by_name=true, filename=true)
+                where open > 0 and high > 0 and low > 0 and close > 0
+                  and (
+                    high > greatest(open, low, close) * $price_factor
+                    or low * $price_factor < least(open, high, close)
+                  )
+                group by 1, 2, 3
+                """,
+                {"five_paths": five_paths, "price_factor": float(price_factor)},
+            ).fetchdf()
+            batch_frames: list[pd.DataFrame] = []
+            if not pseudo.empty:
+                pseudo["repair_class"] = "pseudo_no_trade_no_daily"
+                pseudo["action"] = "drop"
+                batch_frames.append(pseudo)
+            if not price.empty:
+                price["repair_class"] = "extreme_price_anomaly"
+                price["action"] = "fix_price"
+                batch_frames.append(price)
+            if batch_frames:
+                combined = pd.concat(batch_frames, ignore_index=True, sort=False)
+                combined["five_path"] = combined["five_path"].map(lambda value: str(Path(str(value)).resolve()))
+                combined["shard_path"] = combined["five_path"].map(five_to_one)
+                combined["symbol"] = combined["symbol"].astype(str).str.upper()
+                combined["trade_date"] = combined["trade_date"].astype(str)
+                combined["year"] = combined["trade_date"].str.slice(0, 4).astype(int)
+                frames.append(combined)
+            _append_jsonl(
+                progress_path,
+                {
+                    "event": "quality_issue_batch_scanned",
+                    "offset": offset,
+                    "batch_shards": len(batch),
+                    "pseudo_days": int(len(pseudo)),
+                    "price_anomaly_days": int(len(price)),
+                },
+            )
+    if not frames:
+        return pd.DataFrame(columns=["shard_path", "symbol", "trade_date", "repair_class", "action"])
+    issues = pd.concat(frames, ignore_index=True, sort=False)
+    # If a symbol-day is both a pseudo no-trade day and a price anomaly, dropping wins.
+    issues["_priority"] = issues["action"].map({"drop": 0, "fix_price": 1}).fillna(9)
+    issues = (
+        issues.sort_values(["shard_path", "symbol", "trade_date", "_priority"])
+        .drop_duplicates(["shard_path", "symbol", "trade_date"], keep="first")
+        .drop(columns=["_priority"])
+        .sort_values(["trade_date", "symbol", "repair_class", "shard_path"])
+        .reset_index(drop=True)
+    )
+    return issues
 
 
 def _collect_zero_price_rows(*, shard_paths: list[Path], memory_limit: str, threads: int) -> pd.DataFrame:
@@ -764,6 +1120,140 @@ def _rewrite_1m_shard(
     return {"row_count": int(len(data)), "dropped_rows": int(dropped), "inserted_rows": int(len(insert))}
 
 
+def _rewrite_1m_quality_shard(
+    *,
+    source_path: Path,
+    target_path: Path,
+    issues: pd.DataFrame,
+    columns: list[str],
+    price_factor: float,
+) -> dict[str, Any]:
+    data = pd.read_parquet(source_path)
+    for column in columns:
+        if column not in data.columns:
+            data[column] = pd.NA
+    data = data.loc[:, columns].copy()
+    for column in ("open", "high", "low", "close", "volume", "amount", "turnover_rate", "float_share", "total_share"):
+        if column in data.columns:
+            data[column] = pd.to_numeric(data[column], errors="coerce")
+    data["symbol"] = data["symbol"].astype(str).str.upper()
+    data["trade_date"] = data["trade_date"].astype(str)
+    data["bar_time"] = data["bar_time"].astype(str).str.zfill(9)
+    drop_keys = {
+        (str(row.symbol).upper(), str(row.trade_date))
+        for row in issues.loc[issues["action"].eq("drop"), ["symbol", "trade_date"]].drop_duplicates().itertuples(index=False)
+    }
+    fix_keys = {
+        (str(row.symbol).upper(), str(row.trade_date))
+        for row in issues.loc[issues["action"].eq("fix_price"), ["symbol", "trade_date"]].drop_duplicates().itertuples(index=False)
+    }
+    before = len(data)
+    if drop_keys:
+        drop_mask = pd.MultiIndex.from_frame(data[["symbol", "trade_date"]]).isin(drop_keys)
+        data = data.loc[~drop_mask].copy()
+    dropped = before - len(data)
+    corrected_high = 0
+    corrected_open = 0
+    corrected_low = 0
+    if fix_keys and set(PRICE_COLUMNS).issubset(data.columns):
+        fix_mask = pd.MultiIndex.from_frame(data[["symbol", "trade_date"]]).isin(fix_keys)
+        positive = data["open"].gt(0) & data["high"].gt(0) & data["low"].gt(0) & data["close"].gt(0)
+        open_base = data[["low", "close"]].max(axis=1)
+        open_bad = fix_mask & positive & data["open"].gt(open_base * float(price_factor))
+        if bool(open_bad.any()):
+            divided = data.loc[open_bad, "open"] / 10.0
+            base = open_base.loc[open_bad]
+            floor = data.loc[open_bad, ["low", "close"]].min(axis=1)
+            candidate = divided.where(divided.ge(floor / 1.5) & divided.le(base * 1.5), base)
+            data.loc[open_bad, "open"] = candidate
+            corrected_open = int(open_bad.sum())
+        high_base = data[["open", "low", "close"]].max(axis=1)
+        high_bad = fix_mask & positive & data["high"].gt(high_base * float(price_factor))
+        if bool(high_bad.any()):
+            divided = data.loc[high_bad, "high"] / 10.0
+            base = high_base.loc[high_bad]
+            candidate = divided.where(divided.le(base * 1.5), base)
+            data.loc[high_bad, "high"] = pd.concat([base, candidate], axis=1).max(axis=1)
+            corrected_high = int(high_bad.sum())
+        low_base = data[["open", "high", "close"]].min(axis=1)
+        low_bad = fix_mask & positive & data["low"].mul(float(price_factor)).lt(low_base)
+        if bool(low_bad.any()):
+            multiplied = data.loc[low_bad, "low"] * 10.0
+            base = low_base.loc[low_bad]
+            candidate = multiplied.where(multiplied.ge(base / 1.5), base)
+            data.loc[low_bad, "low"] = pd.concat([base, candidate], axis=1).min(axis=1)
+            corrected_low = int(low_bad.sum())
+        if corrected_open or corrected_high or corrected_low:
+            changed = fix_mask & (open_bad | high_bad | low_bad)
+            data.loc[changed, "source"] = data.loc[changed, "source"].astype(str) + "_quality_price_repaired"
+    data = data.drop_duplicates(["trade_date", "symbol", "bar_time"], keep="last").sort_values(["trade_date", "symbol", "bar_time"]).reset_index(drop=True)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    data.to_parquet(target_path, index=False)
+    return {
+        "row_count": int(len(data)),
+        "dropped_rows": int(dropped),
+        "corrected_open_rows": corrected_open,
+        "corrected_high_rows": corrected_high,
+        "corrected_low_rows": corrected_low,
+    }
+
+
+def _quality_shard_task(task: dict[str, Any]) -> dict[str, Any]:
+    try:
+        source_path = Path(str(task["source_path"]))
+        target_path = Path(str(task["target_path"]))
+        source_shard = ShardManifestEntry.from_mapping(dict(task["source_shard"]))
+        target_dataset_id = str(task["target_dataset_id"])
+        if bool(task.get("affected")):
+            stats = _rewrite_1m_quality_shard(
+                source_path=source_path,
+                target_path=target_path,
+                issues=pd.DataFrame(list(task.get("issues", []) or [])),
+                columns=[str(item) for item in list(task.get("columns", []) or [])],
+                price_factor=float(task.get("price_factor", 3.0) or 3.0),
+            )
+            entry = ShardManifestEntry(
+                path=f"datasets/market_intraday_1m/{target_dataset_id}/shards/{target_path.name}",
+                row_count=int(stats["row_count"]),
+                start_date=source_shard.start_date,
+                end_date=source_shard.end_date,
+                status="stored",
+                file_size=int(target_path.stat().st_size),
+                schema_hash=schema_hash(_parquet_schema(target_path)),
+                source_path=str(source_path.resolve()),
+                content_key=source_shard.content_key,
+                metadata={**dict(source_shard.metadata or {}), "repair": "quality_intraday_bars"},
+            )
+            return {
+                "status": "ok",
+                "index": int(task["index"]),
+                "affected": True,
+                "entry": entry,
+                **stats,
+            }
+        _copy_or_link_file(source_path, target_path, mode=str(task.get("copy_mode", "hardlink") or "hardlink"))
+        entry = ShardManifestEntry(
+            path=f"datasets/market_intraday_1m/{target_dataset_id}/shards/{target_path.name}",
+            row_count=source_shard.row_count,
+            start_date=source_shard.start_date,
+            end_date=source_shard.end_date,
+            status="stored",
+            file_size=int(target_path.stat().st_size),
+            schema_hash=source_shard.schema_hash,
+            source_path=str(source_path.resolve()),
+            content_key=source_shard.content_key,
+            metadata={**dict(source_shard.metadata or {}), "repair_copy_mode": str(task.get("copy_mode", "hardlink") or "hardlink")},
+        )
+        return {"status": "ok", "index": int(task["index"]), "affected": False, "entry": entry}
+    except Exception as exc:
+        return {
+            "status": "error",
+            "index": int(task.get("index", -1)),
+            "source_path": str(task.get("source_path", "")),
+            "error": str(exc),
+        }
+
+
 def _share_fill_values(frame: pd.DataFrame) -> dict[tuple[str, str], dict[str, Any]]:
     if frame.empty or not {"symbol", "trade_date"}.issubset(frame.columns):
         return {}
@@ -852,3 +1342,18 @@ def _count_records(frame: pd.DataFrame, column: str) -> dict[str, int]:
     if frame.empty or column not in frame.columns:
         return {}
     return {str(k): int(v) for k, v in frame[column].value_counts(dropna=False).sort_index().items()}
+
+
+def _dataframe_sha256(frame: pd.DataFrame) -> str:
+    if frame.empty:
+        return hashlib.sha256(b"").hexdigest()
+    ordered = frame.copy()
+    ordered = ordered.sort_values([column for column in ordered.columns]).reset_index(drop=True)
+    payload = ordered.to_csv(index=False, lineterminator="\n").encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(json_safe(payload), ensure_ascii=False, sort_keys=True) + "\n")

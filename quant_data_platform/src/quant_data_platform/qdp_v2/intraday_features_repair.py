@@ -54,7 +54,8 @@ def repair_intraday_daily_features(
     issues["symbol"] = issues["symbol"].astype(str).str.upper()
     issues["trade_date"] = issues["trade_date"].astype(str)
     all_keys = issues[["symbol", "trade_date"]].drop_duplicates().reset_index(drop=True)
-    replace_keys = issues.loc[issues["repair_class"].eq("traded_day_partial_zero_bars"), ["symbol", "trade_date"]].drop_duplicates().reset_index(drop=True)
+    replacement_classes = {"traded_day_partial_zero_bars", "extreme_price_anomaly", "quality_price_anomaly"}
+    replace_keys = issues.loc[issues["repair_class"].isin(replacement_classes), ["symbol", "trade_date"]].drop_duplicates().reset_index(drop=True)
     profile = resolve_runtime_profile(runtime)
     memory_limit = duckdb_memory_limit or profile.duckdb_memory_limit
     issue_hash = stable_hash({"source": source.dataset_id, "issue_path": str(issue_path), "one": one.dataset_id, "five": five.dataset_id})
@@ -209,7 +210,15 @@ def _build_feature_replacements(
 ) -> pd.DataFrame:
     if replace_keys.empty:
         return pd.DataFrame(columns=source_columns)
-    issue_paths = issues["shard_path"].dropna().astype(str).unique().tolist()
+    if replace_keys.empty:
+        return pd.DataFrame(columns=source_columns)
+    issue_paths = (
+        issues.merge(replace_keys, on=["symbol", "trade_date"], how="inner")["shard_path"]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
+    )
     five_paths = _paths_for_issue_filenames(root=root, issue_paths=issue_paths, domain_manifest=five, target_domain="market_intraday_5m")
     one_paths = _paths_for_issue_filenames(root=root, issue_paths=issue_paths, domain_manifest=one, target_domain="market_intraday_1m")
     five_rows = _read_joined_intraday(root=root, paths=five_paths, keys=replace_keys, memory_limit=memory_limit, threads=threads)

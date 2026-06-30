@@ -217,6 +217,124 @@ def test_qdp_v2_database_audit_reports_duplicate_primary_keys(tmp_path: Path) ->
     assert raw_report["checks"]["primary_key"]["duplicate_rows"] == 1
 
 
+def test_qdp_v2_database_audit_checks_intraday_cross_frequency_consistency(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    root = qdp_v2_root(workspace)
+    one_rows = []
+    for minute in range(31, 41):
+        one_rows.append(
+            {
+                "symbol": "000001.SZ",
+                "trade_date": "2026-01-05",
+                "bar_time": f"09{minute:02d}00000",
+                "open": float(minute),
+                "high": float(minute) + 0.1,
+                "low": float(minute) - 0.1,
+                "close": float(minute) + 0.05,
+                "volume": 1.0,
+                "amount": 10.0,
+            }
+        )
+    five_rows = [
+        {
+            "symbol": "000001.SZ",
+            "trade_date": "2026-01-05",
+            "bar_time": "093500000",
+            "open": 31.0,
+            "high": 35.1,
+            "low": 30.9,
+            "close": 35.05,
+            "volume": 5.0,
+            "amount": 50.0,
+        },
+        {
+            "symbol": "000001.SZ",
+            "trade_date": "2026-01-05",
+            "bar_time": "094000000",
+            "open": 36.0,
+            "high": 40.1,
+            "low": 35.9,
+            "close": 40.05,
+            "volume": 5.0,
+            "amount": 50.0,
+        },
+    ]
+    daily_rows = [
+        {
+            "symbol": "000001.SZ",
+            "trade_date": "2026-01-05",
+            "open": 31.0,
+            "high": 40.1,
+            "low": 30.9,
+            "close": 40.05,
+            "volume": 10.0,
+            "amount": 100.0,
+        }
+    ]
+    panel_rows = [{**daily_rows[0], "has_bar": True}]
+    domain_frames = {
+        "market_intraday_1m": ("market_intraday_1m__unit", pd.DataFrame(one_rows), "mootdx_1m_240_v1", ["trade_date", "symbol", "bar_time"]),
+        "market_intraday_5m": ("market_intraday_5m__unit", pd.DataFrame(five_rows), "mootdx_5m_48_v1", ["trade_date", "symbol", "bar_time"]),
+        "market_daily_raw": ("market_daily_raw__unit", pd.DataFrame(daily_rows), "qdp_v2_market_daily_raw_v1", ["trade_date", "symbol"]),
+        "market_daily_panel": ("market_daily_panel__unit", pd.DataFrame(panel_rows), "qdp_v2_market_daily_panel_v1", ["trade_date", "symbol"]),
+        "trading_calendar": ("trading_calendar__unit", pd.DataFrame({"trade_date": ["2026-01-05"], "exchange": ["SSE"], "is_open": [True]}), "qdp_v2_trading_calendar_v1", ["trade_date", "exchange"]),
+        "universe_snapshot": ("universe_snapshot__unit", pd.DataFrame({"trade_date": ["2026-01-05"], "symbol": ["000001.SZ"]}), "qdp_v2_universe_snapshot_v1", ["trade_date", "symbol"]),
+        "security_status": (
+            "security_status__unit",
+            pd.DataFrame({"trade_date": ["2026-01-05"], "symbol": ["000001.SZ"], "is_st": [False], "is_delisted": [False], "is_suspended": [False]}),
+            "qdp_v2_security_status_v1",
+            ["trade_date", "symbol"],
+        ),
+    }
+    for domain, (dataset_id, frame, contract, pk) in domain_frames.items():
+        shard = root / "datasets" / domain / dataset_id / "shards" / "part_000000_market_intraday_1m_mainboard.parquet"
+        if domain == "market_intraday_5m":
+            shard = root / "datasets" / domain / dataset_id / "shards" / "part_000000_market_intraday_5m_mainboard.parquet"
+        elif not domain.startswith("market_intraday"):
+            shard = root / "datasets" / domain / dataset_id / "shards" / "part.parquet"
+        _write_parquet(shard, frame)
+        write_dataset_manifest(
+            root,
+            DatasetManifest(
+                dataset_id=dataset_id,
+                domain=domain,
+                layer="research_panel" if domain == "market_daily_panel" else "raw",
+                frequency="",
+                contract_version=contract,
+                primary_key=pk,
+                start_date="2026-01-05",
+                end_date="2026-01-05",
+                row_count=len(frame),
+                schema_hash="unit",
+                shards=[ShardManifestEntry(path=str(shard.relative_to(root)).replace("\\", "/"), row_count=len(frame), start_date="2026-01-05", end_date="2026-01-05")],
+                source={"provider": "unit"},
+                quality={"path_refs_exist": True, "ohlcv_non_null": True, "has_bar_contract": True},
+            ),
+        )
+    write_active_manifest(
+        root,
+        {
+            "active_as_of_date": "2026-01-05",
+            "raw": {
+                "market_daily_raw": "market_daily_raw__unit",
+                "market_intraday_1m": "market_intraday_1m__unit",
+                "market_intraday_5m": "market_intraday_5m__unit",
+                "trading_calendar": "trading_calendar__unit",
+                "universe_snapshot": "universe_snapshot__unit",
+                "security_status": "security_status__unit",
+            },
+            "derived": {},
+            "research_panels": {"market_daily_panel": "market_daily_panel__unit"},
+            "memmap": {"status": "not_part_of_data_base"},
+        },
+    )
+
+    payload = audit_database(workspace_root=workspace, deep=True, max_shards=1, write=False)
+
+    assert payload["cross_dataset_checks"]["intraday_5m_from_1m"]["status"] == "ok"
+    assert payload["cross_dataset_checks"]["intraday_vs_daily"]["status"] == "ok"
+
+
 def test_qdp_v2_cleaning_derives_48_contract_5m_from_1m_shard(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     root = qdp_v2_root(workspace)
