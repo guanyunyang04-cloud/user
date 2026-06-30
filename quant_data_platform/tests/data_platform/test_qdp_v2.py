@@ -12,6 +12,7 @@ from quant_data_platform.lake.catalog import ResearchDataLake
 from quant_data_platform.qdp_v2.activate import activate_v2
 from quant_data_platform.qdp_v2.audit import audit_active
 from quant_data_platform.qdp_v2.cleaning import derive_5m_from_1m, normalize_valuation, split_daily_market
+from quant_data_platform.qdp_v2.database_audit import audit_database
 from quant_data_platform.qdp_v2.dataset import validate_dataset
 from quant_data_platform.qdp_v2.environment import assert_yolos_environment, runtime_environment
 from quant_data_platform.qdp_v2.gc import lake_gc
@@ -65,7 +66,7 @@ def test_qdp_v2_status_reads_active_and_dataset_manifests_without_catalog(tmp_pa
         schema_hash="unit",
         shards=[ShardManifestEntry(path="datasets/market_daily_raw/market_daily_raw__unit/shards/part.parquet", row_count=1, start_date="2026-01-05", end_date="2026-01-05")],
         source={"provider": "unit"},
-        quality={"path_refs_exist": True},
+        quality={"path_refs_exist": True, "ohlcv_non_null": True},
     )
     write_dataset_manifest(root, manifest)
     write_active_manifest(root, {"active_as_of_date": "2026-01-05", "raw": {"market_daily_raw": manifest.dataset_id}, "derived": {}, "research_panels": {}, "memmap": {"status": "not_part_of_data_base"}})
@@ -152,7 +153,7 @@ def test_qdp_v2_audit_validate_index_and_gc_use_manifests(tmp_path: Path) -> Non
         schema_hash="unit",
         shards=[ShardManifestEntry(path="datasets/trading_calendar/trading_calendar__active/shards/part.parquet", row_count=1, start_date="2026-01-05", end_date="2026-01-05")],
         source={"provider": "unit"},
-        quality={"path_refs_exist": True},
+        quality={"path_refs_exist": True, "ohlcv_non_null": True},
     )
     write_dataset_manifest(root, active)
     orphan_dir = root / "datasets" / "valuation" / "valuation__orphan"
@@ -169,6 +170,51 @@ def test_qdp_v2_audit_validate_index_and_gc_use_manifests(tmp_path: Path) -> Non
     assert any(item["dataset_id"] == "valuation__orphan" for item in dry["unreferenced"])
     assert any(item["dataset_id"] == "valuation__orphan" for item in deleted["deleted"])
     assert active_shard.exists() is True
+
+
+def test_qdp_v2_database_audit_reports_duplicate_primary_keys(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    root = qdp_v2_root(workspace)
+    shard = root / "datasets" / "market_daily_raw" / "market_daily_raw__dup" / "shards" / "part.parquet"
+    _write_parquet(
+        shard,
+        pd.DataFrame(
+            {
+                "symbol": ["000001.SZ", "000001.SZ", "000002.SZ"],
+                "trade_date": ["2026-01-05", "2026-01-05", "2026-01-05"],
+                "open": [10.0, 10.0, 20.0],
+                "high": [11.0, 11.0, 21.0],
+                "low": [9.0, 9.0, 19.0],
+                "close": [10.5, 10.5, 20.5],
+                "volume": [100.0, 100.0, 200.0],
+                "amount": [1000.0, 1000.0, 4000.0],
+            }
+        ),
+    )
+    manifest = DatasetManifest(
+        dataset_id="market_daily_raw__dup",
+        domain="market_daily_raw",
+        layer="raw",
+        frequency="1d",
+        contract_version="qdp_v2_market_daily_raw_v1",
+        primary_key=["trade_date", "symbol"],
+        start_date="2026-01-05",
+        end_date="2026-01-05",
+        row_count=3,
+        schema_hash="unit",
+        shards=[ShardManifestEntry(path="datasets/market_daily_raw/market_daily_raw__dup/shards/part.parquet", row_count=3, start_date="2026-01-05", end_date="2026-01-05")],
+        source={"provider": "unit"},
+        quality={"path_refs_exist": True, "ohlcv_non_null": True},
+    )
+    write_dataset_manifest(root, manifest)
+    write_active_manifest(root, {"active_as_of_date": "2026-01-05", "raw": {"market_daily_raw": manifest.dataset_id}, "derived": {}, "research_panels": {}, "memmap": {"status": "not_part_of_data_base"}})
+
+    payload = audit_database(workspace_root=workspace, deep=True, max_shards=1, write=False)
+
+    assert payload["status"] == "needs_attention"
+    assert any(item["code"] == "primary_key_duplicate_rows" for item in payload["findings"])
+    raw_report = payload["datasets"][0]
+    assert raw_report["checks"]["primary_key"]["duplicate_rows"] == 1
 
 
 def test_qdp_v2_cleaning_derives_48_contract_5m_from_1m_shard(tmp_path: Path) -> None:

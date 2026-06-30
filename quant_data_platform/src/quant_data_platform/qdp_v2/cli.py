@@ -15,6 +15,7 @@ COMMAND_MODULES: dict[tuple[str, ...], str] = {
     ("status",): "quant_data_platform.qdp_v2.status",
     ("dataset",): "quant_data_platform.qdp_v2.dataset",
     ("audit", "active"): "quant_data_platform.qdp_v2.audit",
+    ("audit", "database"): "quant_data_platform.qdp_v2.database_audit",
     ("index",): "quant_data_platform.qdp_v2.index",
     ("lake", "gc"): "quant_data_platform.qdp_v2.gc",
     ("update",): "quant_data_platform.qdp_v2.update",
