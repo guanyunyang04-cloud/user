@@ -21,6 +21,7 @@ COMMAND_MODULES: dict[tuple[str, ...], str] = {
     ("lake", "gc"): "quant_data_platform.qdp_v2.gc",
     ("update",): "quant_data_platform.qdp_v2.update",
     ("clean",): "quant_data_platform.qdp_v2.cleaning",
+    ("research-window",): "quant_data_platform.qdp_v2.research_window",
     ("provider", "benchmark"): "quant_data_platform.qdp_v2.provider_benchmark",
 }
 
@@ -53,6 +54,8 @@ def _requires_yolos(prefix: tuple[str, ...], args: list[str]) -> bool:
         return "--yes" in args
     if prefix == ("update",):
         return "--dry-run" not in args
+    if prefix == ("research-window",):
+        return "--activate" in args
     if prefix == ("lake", "gc"):
         return "--delete" in args
     return False
