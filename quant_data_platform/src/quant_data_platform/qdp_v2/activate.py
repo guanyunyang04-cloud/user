@@ -21,6 +21,13 @@ RAW_DOMAINS = (
     "industry_concept",
     "index_constituents",
     "announcement",
+    "limit_status",
+    "financial_quarterly",
+    "performance_forecast",
+    "performance_express",
+    "corporate_actions",
+    "share_capital",
+    "name_change",
 )
 DERIVED_DOMAINS = ("intraday_daily_features", "v2_status_sidecar")
 RESEARCH_PANEL_DOMAINS = ("market_daily_panel",)

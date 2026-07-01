@@ -60,6 +60,14 @@ PRIMARY_KEYS: dict[str, list[str]] = {
     "industry_concept": ["trade_date", "symbol"],
     "index_constituents": ["trade_date", "index_symbol", "symbol"],
     "intraday_daily_features": ["trade_date", "symbol"],
+    "announcement": ["trade_date", "symbol", "title", "url"],
+    "limit_status": ["trade_date", "symbol"],
+    "financial_quarterly": ["symbol", "report_date", "source"],
+    "performance_forecast": ["symbol", "report_date", "publish_date", "source"],
+    "performance_express": ["symbol", "report_date", "publish_date", "source"],
+    "corporate_actions": ["symbol", "trade_date", "action_type", "description", "source"],
+    "share_capital": ["trade_date", "symbol", "source"],
+    "name_change": ["trade_date", "symbol", "change_type", "source"],
 }
 
 PRICE_COLUMNS = ("open", "high", "low", "close")
@@ -774,7 +782,8 @@ def _cross_dataset_checks(
             max_shards=max_shards,
         )
         report["intraday_vs_daily"] = intraday_daily
-        if intraday_daily.get("status") not in {"ok", "skipped"}:
+        intraday_status = str(intraday_daily.get("status", "") or "")
+        if intraday_status == "failed":
             findings.append(
                 _finding(
                     "high",
@@ -783,6 +792,28 @@ def _cross_dataset_checks(
                     "intraday_daily_mismatch",
                     intraday_daily,
                     "Classify missing symbol-days and reconcile price/volume/amount mismatches before treating cross-frequency features as fully trusted.",
+                )
+            )
+        elif intraday_status == "needs_review":
+            findings.append(
+                _finding(
+                    "medium",
+                    "consistency",
+                    "market_intraday_5m/market_daily_raw",
+                    "intraday_daily_source_conflict",
+                    intraday_daily,
+                    "Keep daily and intraday as independent source facts; inspect major source conflicts before using cross-frequency labels.",
+                )
+            )
+        elif intraday_status not in {"ok", "skipped"}:
+            findings.append(
+                _finding(
+                    "medium",
+                    "consistency",
+                    "market_intraday_5m/market_daily_raw",
+                    "intraday_daily_check_unexpected_status",
+                    intraday_daily,
+                    "Inspect the intraday-vs-daily audit output.",
                 )
             )
     except Exception as exc:
@@ -1113,24 +1144,50 @@ def _intraday_vs_daily_check(
                 d.symbol is null as intraday_missing_in_daily,
                 {daily_missing_expr} as daily_missing_in_intraday,
                 d.symbol is not null and i.symbol is not null as both_present,
-                { _numeric_mismatch_expr("d.open", "i.open", abs_tolerance=0.001) } or
-                { _numeric_mismatch_expr("d.high", "i.high", abs_tolerance=0.001) } or
-                { _numeric_mismatch_expr("d.low", "i.low", abs_tolerance=0.001) } or
-                { _numeric_mismatch_expr("d.close", "i.close", abs_tolerance=0.001) } as price_mismatch,
-                { _numeric_mismatch_expr("d.volume", "i.volume", abs_tolerance=1.0, rel_tolerance=0.0001) } as volume_mismatch,
-                { _numeric_mismatch_expr("d.amount", "i.amount", abs_tolerance=10.0, rel_tolerance=0.001) } as amount_mismatch
+                abs(cast(d.open as double) - cast(i.open as double)) as open_diff,
+                abs(cast(d.high as double) - cast(i.high as double)) as high_diff,
+                abs(cast(d.low as double) - cast(i.low as double)) as low_diff,
+                abs(cast(d.close as double) - cast(i.close as double)) as close_diff,
+                abs(cast(d.volume as double) - cast(i.volume as double)) as volume_diff,
+                abs(cast(d.amount as double) - cast(i.amount as double)) as amount_diff,
+                case
+                  when greatest(abs(cast(d.amount as double)), abs(cast(i.amount as double))) > 0
+                  then abs(cast(d.amount as double) - cast(i.amount as double)) / greatest(abs(cast(d.amount as double)), abs(cast(i.amount as double)))
+                  else 0
+                end as amount_rel_diff
               from daily d
               full outer join intra i using (symbol, trade_date)
+            ),
+            classified as (
+              select
+                *,
+                case
+                  when both_present and (open_diff is null or high_diff is null or low_diff is null or close_diff is null) then 1000000000.0
+                  when both_present then greatest(open_diff, high_diff, low_diff, close_diff)
+                  else null
+                end as max_price_diff
+              from joined
             )
             select
               (select count(*) from daily) as daily_rows,
               (select count(*) from intra) as intraday_symbol_days,
               sum(case when daily_missing_in_intraday then 1 else 0 end) as daily_missing_in_intraday,
               sum(case when intraday_missing_in_daily then 1 else 0 end) as intraday_missing_in_daily,
-              sum(case when both_present and price_mismatch then 1 else 0 end) as price_mismatch_rows,
-              sum(case when both_present and volume_mismatch then 1 else 0 end) as volume_mismatch_rows,
-              sum(case when both_present and amount_mismatch then 1 else 0 end) as amount_mismatch_rows
-            from joined
+              sum(case when both_present and max_price_diff <= 0.001 then 1 else 0 end) as price_exact_rows,
+              sum(case when both_present and max_price_diff > 0.001 then 1 else 0 end) as price_any_diff_rows,
+              sum(case when both_present and max_price_diff > 0.001 and max_price_diff <= 0.0101 then 1 else 0 end) as price_diff_le_1tick_rows,
+              sum(case when both_present and max_price_diff > 0.0101 then 1 else 0 end) as price_diff_gt_1tick_rows,
+              sum(case when both_present and max_price_diff > 0.0501 then 1 else 0 end) as price_diff_gt_5tick_rows,
+              sum(case when both_present and open_diff > 0.0101 then 1 else 0 end) as open_diff_gt_1tick_rows,
+              sum(case when both_present and high_diff > 0.0101 then 1 else 0 end) as high_diff_gt_1tick_rows,
+              sum(case when both_present and low_diff > 0.0101 then 1 else 0 end) as low_diff_gt_1tick_rows,
+              sum(case when both_present and close_diff > 0.0101 then 1 else 0 end) as close_diff_gt_1tick_rows,
+              sum(case when both_present and volume_diff > 1.0 then 1 else 0 end) as volume_any_diff_rows,
+              sum(case when both_present and volume_diff > 100.0 then 1 else 0 end) as volume_diff_gt_100_rows,
+              sum(case when both_present and amount_diff > 10.0 then 1 else 0 end) as amount_any_diff_rows,
+              sum(case when both_present and amount_rel_diff > 0.001 then 1 else 0 end) as amount_rel_diff_gt_10bp_rows,
+              sum(case when both_present and amount_rel_diff > 0.01 then 1 else 0 end) as amount_rel_diff_gt_1pct_rows
+            from classified
             """
         ).fetchone()
         examples = _fetch_examples(
@@ -1155,37 +1212,111 @@ def _intraday_vs_daily_check(
               select symbol, trade_date, open as daily_open, high as daily_high, low as daily_low, close as daily_close, volume as daily_volume, amount as daily_amount
               from read_parquet({daily_sql}, union_by_name=true)
             )
-            select *
+            select
+              *,
+              case
+                when d.symbol is not null and i.symbol is not null then abs(cast(d.daily_open as double) - cast(i.intraday_open as double))
+                else null
+              end as open_diff,
+              case
+                when d.symbol is not null and i.symbol is not null then abs(cast(d.daily_high as double) - cast(i.intraday_high as double))
+                else null
+              end as high_diff,
+              case
+                when d.symbol is not null and i.symbol is not null then abs(cast(d.daily_low as double) - cast(i.intraday_low as double))
+                else null
+              end as low_diff,
+              case
+                when d.symbol is not null and i.symbol is not null then abs(cast(d.daily_close as double) - cast(i.intraday_close as double))
+                else null
+              end as close_diff,
+              case
+                when d.symbol is not null and i.symbol is not null then abs(cast(d.daily_volume as double) - cast(i.intraday_volume as double))
+                else null
+              end as volume_diff,
+              case
+                when d.symbol is not null and i.symbol is not null and greatest(abs(cast(d.daily_amount as double)), abs(cast(i.intraday_amount as double))) > 0
+                then abs(cast(d.daily_amount as double) - cast(i.intraday_amount as double)) / greatest(abs(cast(d.daily_amount as double)), abs(cast(i.intraday_amount as double)))
+                else null
+              end as amount_rel_diff
             from daily d
             full outer join intra i using (symbol, trade_date)
             where d.symbol is null{example_daily_missing_clause}
               or (
                 d.symbol is not null and i.symbol is not null and (
-                  { _numeric_mismatch_expr("d.daily_open", "i.intraday_open", abs_tolerance=0.001) }
-                  or { _numeric_mismatch_expr("d.daily_high", "i.intraday_high", abs_tolerance=0.001) }
-                  or { _numeric_mismatch_expr("d.daily_low", "i.intraday_low", abs_tolerance=0.001) }
-                  or { _numeric_mismatch_expr("d.daily_close", "i.intraday_close", abs_tolerance=0.001) }
-                  or { _numeric_mismatch_expr("d.daily_volume", "i.intraday_volume", abs_tolerance=1.0, rel_tolerance=0.0001) }
-                  or { _numeric_mismatch_expr("d.daily_amount", "i.intraday_amount", abs_tolerance=10.0, rel_tolerance=0.001) }
+                  greatest(
+                    abs(cast(d.daily_open as double) - cast(i.intraday_open as double)),
+                    abs(cast(d.daily_high as double) - cast(i.intraday_high as double)),
+                    abs(cast(d.daily_low as double) - cast(i.intraday_low as double)),
+                    abs(cast(d.daily_close as double) - cast(i.intraday_close as double))
+                  ) > 0.0501
+                  or abs(cast(d.daily_open as double) - cast(i.intraday_open as double)) > 0.0101
+                  or abs(cast(d.daily_close as double) - cast(i.intraday_close as double)) > 0.0101
+                  or abs(cast(d.daily_volume as double) - cast(i.intraday_volume as double)) > 100.0
+                  or (
+                    greatest(abs(cast(d.daily_amount as double)), abs(cast(i.intraday_amount as double))) > 0
+                    and abs(cast(d.daily_amount as double) - cast(i.intraday_amount as double)) / greatest(abs(cast(d.daily_amount as double)), abs(cast(i.intraday_amount as double))) > 0.01
+                  )
                 )
               )
+            order by greatest(
+              abs(cast(daily_open as double) - cast(intraday_open as double)),
+              abs(cast(daily_high as double) - cast(intraday_high as double)),
+              abs(cast(daily_low as double) - cast(intraday_low as double)),
+              abs(cast(daily_close as double) - cast(intraday_close as double))
+            ) desc nulls last
             limit {sample_limit}
             """,
         )
-    daily_rows, intraday_symbol_days, daily_missing, intraday_missing, price_mismatch, volume_mismatch, amount_mismatch = [int(item or 0) for item in row]
-    failed = daily_missing or intraday_missing or price_mismatch or volume_mismatch or amount_mismatch
+    (
+        daily_rows,
+        intraday_symbol_days,
+        daily_missing,
+        intraday_missing,
+        price_exact,
+        price_any_diff,
+        price_le_1tick,
+        price_gt_1tick,
+        price_gt_5tick,
+        open_gt_1tick,
+        high_gt_1tick,
+        low_gt_1tick,
+        close_gt_1tick,
+        volume_any_diff,
+        volume_gt_100,
+        amount_any_diff,
+        amount_rel_gt_10bp,
+        amount_rel_gt_1pct,
+    ) = [int(item or 0) for item in row]
+    coverage_failed = bool(daily_missing or intraday_missing)
+    needs_review = bool(price_gt_1tick or volume_gt_100 or amount_rel_gt_10bp)
+    status = "failed" if coverage_failed else "needs_review" if needs_review else "ok"
     return {
-        "status": "failed" if failed else "ok",
-        "method": "aggregate_5m_to_daily_exact",
+        "status": status,
+        "method": "aggregate_5m_to_daily_classified",
         "scan_limited": scan_limited,
         "scanned_5m_shards": len(five_paths),
         "daily_rows": daily_rows,
         "intraday_symbol_days": intraday_symbol_days,
         "daily_missing_in_intraday": daily_missing,
         "intraday_missing_in_daily": intraday_missing,
-        "price_mismatch_rows": price_mismatch,
-        "volume_mismatch_rows": volume_mismatch,
-        "amount_mismatch_rows": amount_mismatch,
+        "price_exact_rows": price_exact,
+        "price_any_diff_rows": price_any_diff,
+        "price_diff_le_1tick_rows": price_le_1tick,
+        "price_diff_gt_1tick_rows": price_gt_1tick,
+        "price_diff_gt_5tick_rows": price_gt_5tick,
+        "open_diff_gt_1tick_rows": open_gt_1tick,
+        "high_diff_gt_1tick_rows": high_gt_1tick,
+        "low_diff_gt_1tick_rows": low_gt_1tick,
+        "close_diff_gt_1tick_rows": close_gt_1tick,
+        "volume_any_diff_rows": volume_any_diff,
+        "volume_diff_gt_100_rows": volume_gt_100,
+        "amount_any_diff_rows": amount_any_diff,
+        "amount_rel_diff_gt_10bp_rows": amount_rel_gt_10bp,
+        "amount_rel_diff_gt_1pct_rows": amount_rel_gt_1pct,
+        "price_mismatch_rows": price_any_diff,
+        "volume_mismatch_rows": volume_any_diff,
+        "amount_mismatch_rows": amount_any_diff,
         "examples": examples[:sample_limit],
     }
 

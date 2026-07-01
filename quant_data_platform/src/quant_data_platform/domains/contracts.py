@@ -41,6 +41,9 @@ class DataDomain:
     FINANCIAL_QUARTERLY = "financial_quarterly"
     PERFORMANCE_FORECAST = "performance_forecast"
     PERFORMANCE_EXPRESS = "performance_express"
+    CORPORATE_ACTIONS = "corporate_actions"
+    SHARE_CAPITAL = "share_capital"
+    NAME_CHANGE = "name_change"
     MONEY_FLOW_HOTSPOT = "money_flow_hotspot"
     NEWS_EVENT = "news_event"
     ANNOUNCEMENT = "announcement"
@@ -327,6 +330,38 @@ DOMAIN_STANDARD_COLUMNS: dict[str, list[str]] = {
         "lag_policy",
         "source",
     ],
+    DataDomain.CORPORATE_ACTIONS: [
+        "symbol",
+        "trade_date",
+        "announcement_date",
+        "ex_date",
+        "record_date",
+        "dividend_pay_date",
+        "action_type",
+        "cash_dividend_per_10",
+        "bonus_share_per_10",
+        "transfer_share_per_10",
+        "description",
+        "source",
+    ],
+    DataDomain.SHARE_CAPITAL: [
+        "symbol",
+        "trade_date",
+        "announcement_date",
+        "change_reason",
+        "total_share",
+        "float_share",
+        "restricted_share",
+        "source",
+    ],
+    DataDomain.NAME_CHANGE: [
+        "symbol",
+        "trade_date",
+        "old_name",
+        "new_name",
+        "change_type",
+        "source",
+    ],
     DataDomain.MONEY_FLOW_HOTSPOT: [
         "symbol",
         "trade_date",
@@ -461,6 +496,13 @@ def normalize_domain(domain: str) -> str:
         "express_report": DataDomain.PERFORMANCE_EXPRESS,
         "performance_express": DataDomain.PERFORMANCE_EXPRESS,
         "earnings_express": DataDomain.PERFORMANCE_EXPRESS,
+        "corporate_action": DataDomain.CORPORATE_ACTIONS,
+        "corporate_actions": DataDomain.CORPORATE_ACTIONS,
+        "dividend": DataDomain.CORPORATE_ACTIONS,
+        "share_capital": DataDomain.SHARE_CAPITAL,
+        "capital_change": DataDomain.SHARE_CAPITAL,
+        "name_change": DataDomain.NAME_CHANGE,
+        "stock_name_change": DataDomain.NAME_CHANGE,
         "money_flow": DataDomain.MONEY_FLOW_HOTSPOT,
         "hotspot": DataDomain.MONEY_FLOW_HOTSPOT,
         "news": DataDomain.NEWS_EVENT,
@@ -627,6 +669,12 @@ def normalize_domain_frame(
         return normalize_performance_forecast_frame(frame, source=source, require_columns=require_columns)
     if normalized_domain == DataDomain.PERFORMANCE_EXPRESS:
         return normalize_performance_express_frame(frame, source=source, require_columns=require_columns)
+    if normalized_domain == DataDomain.CORPORATE_ACTIONS:
+        return normalize_corporate_actions_frame(frame, source=source, as_of_date=as_of_date, require_columns=require_columns)
+    if normalized_domain == DataDomain.SHARE_CAPITAL:
+        return normalize_share_capital_frame(frame, source=source, as_of_date=as_of_date, require_columns=require_columns)
+    if normalized_domain == DataDomain.NAME_CHANGE:
+        return normalize_name_change_frame(frame, source=source, as_of_date=as_of_date, require_columns=require_columns)
     if normalized_domain == DataDomain.MONEY_FLOW_HOTSPOT:
         return normalize_money_flow_hotspot_frame(frame, source=source, as_of_date=as_of_date, require_columns=require_columns)
     if normalized_domain in {
@@ -1167,6 +1215,102 @@ def normalize_performance_express_frame(frame: pd.DataFrame, *, source: str, req
     return _finalize_report_domain_frame(data, DataDomain.PERFORMANCE_EXPRESS)
 
 
+def normalize_corporate_actions_frame(frame: pd.DataFrame, *, source: str, as_of_date: str, require_columns: bool = True) -> pd.DataFrame:
+    provider = validate_provider_name(source)
+    data = _prepare_domain_frame(frame, domain=DataDomain.CORPORATE_ACTIONS, source=provider, as_of_date="", require_columns=False)
+    _rename_first(data, "symbol", ("code", "ts_code", "证券代码", "股票代码"))
+    _rename_first(data, "trade_date", ("ex_date", "除权日", "除权除息日", "日期"))
+    _rename_first(data, "announcement_date", ("实施方案公告日期", "公告日期", "announcement_date"))
+    _rename_first(data, "ex_date", ("除权日", "除权除息日", "ex_date"))
+    _rename_first(data, "record_date", ("股权登记日", "record_date"))
+    _rename_first(data, "dividend_pay_date", ("派息日", "dividend_pay_date"))
+    _rename_first(data, "action_type", ("分红类型", "action_type", "event_type"))
+    _rename_first(data, "cash_dividend_per_10", ("派息比例", "cash_dividend_per_10", "cash_dividend"))
+    _rename_first(data, "bonus_share_per_10", ("送股比例", "bonus_share_per_10", "bonus_share"))
+    _rename_first(data, "transfer_share_per_10", ("转增比例", "transfer_share_per_10", "transfer_share"))
+    _rename_first(data, "description", ("实施方案分红说明", "description", "方案说明"))
+    _require_core_columns(data, DataDomain.CORPORATE_ACTIONS, {"symbol"}, require_columns=require_columns)
+    data = _ensure_domain_columns(data, DataDomain.CORPORATE_ACTIONS)
+    data["symbol"] = data["symbol"].map(_normalize_symbol)
+    for column in ["trade_date", "announcement_date", "ex_date", "record_date", "dividend_pay_date"]:
+        data[column] = _date_series(data[column])
+    data["trade_date"] = data["trade_date"].replace("NaT", np.nan).fillna(data["announcement_date"]).fillna(str(as_of_date or ""))
+    for column in ["cash_dividend_per_10", "bonus_share_per_10", "transfer_share_per_10"]:
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+    data["action_type"] = data["action_type"].fillna("").astype(str).str.strip()
+    data["description"] = data["description"].fillna("").astype(str).str.strip()
+    data["source"] = _source_series(data, provider)
+    return (
+        data.loc[
+            data["symbol"].astype(str).str.len().gt(0)
+            & data["trade_date"].astype(str).str.lower().ne("nat")
+            & data["trade_date"].astype(str).str.len().gt(0),
+            DOMAIN_STANDARD_COLUMNS[DataDomain.CORPORATE_ACTIONS],
+        ]
+        .drop_duplicates()
+        .sort_values(["trade_date", "symbol", "action_type", "source"])
+        .reset_index(drop=True)
+    )
+
+
+def normalize_share_capital_frame(frame: pd.DataFrame, *, source: str, as_of_date: str, require_columns: bool = True) -> pd.DataFrame:
+    provider = validate_provider_name(source)
+    data = _prepare_domain_frame(frame, domain=DataDomain.SHARE_CAPITAL, source=provider, as_of_date="", require_columns=False)
+    _rename_first(data, "symbol", ("code", "ts_code", "证券代码", "股票代码"))
+    _rename_first(data, "trade_date", ("变动日期", "change_date", "date", "trade_date"))
+    _rename_first(data, "announcement_date", ("公告日期", "announcement_date"))
+    _rename_first(data, "change_reason", ("变动原因", "change_reason", "reason"))
+    _rename_first(data, "total_share", ("总股本", "total_share", "total_shares"))
+    _rename_first(data, "float_share", ("已流通股份", "人民币普通股", "float_share", "float_shares"))
+    _rename_first(data, "restricted_share", ("流通受限股份", "restricted_share", "restricted_shares"))
+    _require_core_columns(data, DataDomain.SHARE_CAPITAL, {"symbol", "trade_date"}, require_columns=require_columns)
+    data = _ensure_domain_columns(data, DataDomain.SHARE_CAPITAL)
+    data["symbol"] = data["symbol"].map(_normalize_symbol)
+    data["trade_date"] = _coerce_trade_date(data["trade_date"], as_of_date)
+    data["announcement_date"] = _date_series(data["announcement_date"])
+    data["change_reason"] = data["change_reason"].fillna("").astype(str).str.strip()
+    for column in ["total_share", "float_share", "restricted_share"]:
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+    data["source"] = _source_series(data, provider)
+    return (
+        data.loc[
+            data["symbol"].astype(str).str.len().gt(0)
+            & data["trade_date"].astype(str).str.lower().ne("nat"),
+            DOMAIN_STANDARD_COLUMNS[DataDomain.SHARE_CAPITAL],
+        ]
+        .drop_duplicates(subset=["trade_date", "symbol", "source"], keep="last")
+        .sort_values(["trade_date", "symbol"])
+        .reset_index(drop=True)
+    )
+
+
+def normalize_name_change_frame(frame: pd.DataFrame, *, source: str, as_of_date: str, require_columns: bool = True) -> pd.DataFrame:
+    provider = validate_provider_name(source)
+    data = _prepare_domain_frame(frame, domain=DataDomain.NAME_CHANGE, source=provider, as_of_date="", require_columns=False)
+    _rename_first(data, "symbol", ("code", "ts_code", "证券代码", "股票代码"))
+    _rename_first(data, "trade_date", ("变更日期", "change_date", "date", "trade_date"))
+    _rename_first(data, "old_name", ("变更前简称", "变更前全称", "old_name", "previous_name"))
+    _rename_first(data, "new_name", ("变更后简称", "变更后全称", "new_name", "current_name"))
+    _rename_first(data, "change_type", ("change_type", "类型", "变更类型"))
+    _require_core_columns(data, DataDomain.NAME_CHANGE, {"symbol", "trade_date"}, require_columns=require_columns)
+    data = _ensure_domain_columns(data, DataDomain.NAME_CHANGE)
+    data["symbol"] = data["symbol"].map(_normalize_symbol)
+    data["trade_date"] = _coerce_trade_date(data["trade_date"], as_of_date)
+    for column in ["old_name", "new_name", "change_type"]:
+        data[column] = data[column].fillna("").astype(str).str.strip()
+    data["source"] = _source_series(data, provider)
+    return (
+        data.loc[
+            data["symbol"].astype(str).str.len().gt(0)
+            & data["trade_date"].astype(str).str.lower().ne("nat"),
+            DOMAIN_STANDARD_COLUMNS[DataDomain.NAME_CHANGE],
+        ]
+        .drop_duplicates()
+        .sort_values(["trade_date", "symbol", "change_type"])
+        .reset_index(drop=True)
+    )
+
+
 def normalize_money_flow_hotspot_frame(frame: pd.DataFrame, *, source: str, as_of_date: str, require_columns: bool = True) -> pd.DataFrame:
     provider = validate_provider_name(source)
     data = _prepare_domain_frame(frame, domain=DataDomain.MONEY_FLOW_HOTSPOT, source=provider, as_of_date=as_of_date, require_columns=False)
@@ -1595,7 +1739,17 @@ def _ensure_domain_columns(data: pd.DataFrame, domain: str) -> pd.DataFrame:
         "index_name",
         "report_date",
         "publish_date",
+        "announcement_date",
+        "ex_date",
+        "record_date",
+        "dividend_pay_date",
         "forecast_type",
+        "action_type",
+        "description",
+        "change_reason",
+        "old_name",
+        "new_name",
+        "change_type",
         "lag_policy",
         "factor_provider",
         "factor_semantics",
