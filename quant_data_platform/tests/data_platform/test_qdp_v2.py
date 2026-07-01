@@ -6,9 +6,6 @@ from pathlib import Path
 
 import pandas as pd
 
-from quant_data_platform.core.paths import qdp_paths
-from quant_data_platform.domains.contracts import DataDomain
-from quant_data_platform.lake.catalog import ResearchDataLake
 from quant_data_platform.qdp_v2.activate import activate_v2
 from quant_data_platform.qdp_v2.audit import audit_active
 from quant_data_platform.qdp_v2.cleaning import derive_5m_from_1m, normalize_valuation, split_daily_market
@@ -16,7 +13,6 @@ from quant_data_platform.qdp_v2.database_audit import audit_database
 from quant_data_platform.qdp_v2.dataset import validate_dataset
 from quant_data_platform.qdp_v2.environment import assert_yolos_environment, runtime_environment
 from quant_data_platform.qdp_v2.gc import lake_gc
-from quant_data_platform.qdp_v2.index import rebuild_index
 from quant_data_platform.qdp_v2.manifest import (
     DatasetManifest,
     ShardManifestEntry,
@@ -24,7 +20,6 @@ from quant_data_platform.qdp_v2.manifest import (
     write_active_manifest,
     write_dataset_manifest,
 )
-from quant_data_platform.qdp_v2.migration import build_migration_plan, execute_migration_plan
 from quant_data_platform.qdp_v2.status import status_payload
 
 
@@ -70,6 +65,18 @@ def _active_domain_specs() -> dict[str, tuple[str, str]]:
     }
 
 
+def _write_active(root: Path, datasets: dict[str, str], as_of_date: str = "2026-01-05") -> None:
+    write_active_manifest(
+        root,
+        {
+            "version": 2,
+            "active_as_of_date": as_of_date,
+            "scope": {"start_date": as_of_date, "end_date": as_of_date, "universe": "unit", "symbol_start_overrides": {}},
+            "datasets": datasets,
+        },
+    )
+
+
 def test_qdp_v2_status_reads_active_and_dataset_manifests_without_catalog(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     root = qdp_v2_root(workspace)
@@ -91,73 +98,16 @@ def test_qdp_v2_status_reads_active_and_dataset_manifests_without_catalog(tmp_pa
         quality={"path_refs_exist": True, "ohlcv_non_null": True},
     )
     write_dataset_manifest(root, manifest)
-    write_active_manifest(root, {"active_as_of_date": "2026-01-05", "raw": {"market_daily_raw": manifest.dataset_id}, "derived": {}, "research_panels": {}, "memmap": {"status": "not_part_of_data_base"}})
+    _write_active(root, {"market_daily_raw": manifest.dataset_id})
 
     payload = status_payload(workspace_root=workspace)
 
     assert payload["status"] == "ok"
     assert payload["duckdb_catalog_required"] is False
-    assert payload["datasets"]["raw.market_daily_raw"]["existing_shards"] == 1
+    assert payload["datasets"]["market_daily_raw"]["existing_shards"] == 1
 
 
-def test_qdp_v2_migrate_copy_verify_activate_from_legacy_sharded_dataset(tmp_path: Path) -> None:
-    workspace = _workspace(tmp_path)
-    paths = qdp_paths(workspace)
-    lake = ResearchDataLake(paths.lake_root)
-    source_file = paths.lake_root / "source" / "intraday.parquet"
-    source_file.parent.mkdir(parents=True, exist_ok=True)
-    _write_parquet(
-        source_file,
-        pd.DataFrame(
-            {
-                "symbol": ["000001.SZ"],
-                "trade_date": ["2026-01-05"],
-                "bar_time": ["09:31:00"],
-                "open": [1.0],
-                "high": [1.1],
-                "low": [0.9],
-                "close": [1.0],
-            }
-        ),
-    )
-    record = lake.save_sharded_domain_dataset(
-        domain=DataDomain.MARKET_INTRADAY_1M,
-        spec={"start_date": "2026-01-05", "end_date": "2026-01-05"},
-        shard_records=[
-            {
-                "path": str(source_file.resolve()),
-                "row_count": 1,
-                "start_date": "2026-01-05",
-                "end_date": "2026-01-05",
-                "status": "stored",
-            }
-        ],
-        source="unit",
-        reuse=False,
-    )
-    _write_json(
-        paths.root_manifest,
-        {
-            "schema_version": 1,
-            "canonical_dataset_id": "policy_input_bundle__unit",
-            "canonical_dataset_end_date": "2026-01-05",
-            "canonical_component_dataset_ids": {DataDomain.MARKET_INTRADAY_1M: record.dataset_id},
-        },
-    )
-
-    plan = build_migration_plan(workspace_root=workspace)
-    result = execute_migration_plan(plan, verify=True, activate=True)
-    root = qdp_v2_root(workspace)
-    status = status_payload(workspace_root=workspace)
-
-    assert result["status"] == "migrated"
-    assert (root / "active" / "active.json").exists()
-    assert status["status"] == "ok"
-    assert status["datasets"]["raw.market_intraday_1m"]["row_count"] == 1
-    assert source_file.exists() is True
-
-
-def test_qdp_v2_audit_validate_index_and_gc_use_manifests(tmp_path: Path) -> None:
+def test_qdp_v2_audit_validate_and_gc_use_manifests(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     root = qdp_v2_root(workspace)
     active_shard = root / "datasets" / "trading_calendar" / "trading_calendar__active" / "shards" / "part.parquet"
@@ -181,11 +131,10 @@ def test_qdp_v2_audit_validate_index_and_gc_use_manifests(tmp_path: Path) -> Non
     orphan_dir = root / "datasets" / "valuation" / "valuation__orphan"
     orphan_dir.mkdir(parents=True, exist_ok=True)
     _write_json(orphan_dir / "dataset.json", {"dataset_id": "valuation__orphan", "domain": "valuation", "shards": [], "row_count": 0})
-    write_active_manifest(root, {"active_as_of_date": "2026-01-05", "raw": {"trading_calendar": active.dataset_id}, "derived": {}, "research_panels": {}, "memmap": {"status": "not_part_of_data_base"}})
+    _write_active(root, {"trading_calendar": active.dataset_id})
 
     assert validate_dataset(active.dataset_id, workspace_root=workspace)["status"] == "ok"
     assert audit_active(workspace_root=workspace, write=False)["status"] == "ok"
-    assert rebuild_index(workspace_root=workspace)["status"] == "ok"
     dry = lake_gc(workspace_root=workspace, with_size=True)
     deleted = lake_gc(workspace_root=workspace, delete=True, yes=True)
 
@@ -229,7 +178,7 @@ def test_qdp_v2_database_audit_reports_duplicate_primary_keys(tmp_path: Path) ->
         quality={"path_refs_exist": True, "ohlcv_non_null": True},
     )
     write_dataset_manifest(root, manifest)
-    write_active_manifest(root, {"active_as_of_date": "2026-01-05", "raw": {"market_daily_raw": manifest.dataset_id}, "derived": {}, "research_panels": {}, "memmap": {"status": "not_part_of_data_base"}})
+    _write_active(root, {"market_daily_raw": manifest.dataset_id})
 
     payload = audit_database(workspace_root=workspace, deep=True, max_shards=1, write=False)
 
@@ -333,21 +282,16 @@ def test_qdp_v2_database_audit_checks_intraday_cross_frequency_consistency(tmp_p
                 quality={"path_refs_exist": True, "ohlcv_non_null": True, "has_bar_contract": True},
             ),
         )
-    write_active_manifest(
+    _write_active(
         root,
         {
-            "active_as_of_date": "2026-01-05",
-            "raw": {
-                "market_daily_raw": "market_daily_raw__unit",
-                "market_intraday_1m": "market_intraday_1m__unit",
-                "market_intraday_5m": "market_intraday_5m__unit",
-                "trading_calendar": "trading_calendar__unit",
-                "universe_snapshot": "universe_snapshot__unit",
-                "security_status": "security_status__unit",
-            },
-            "derived": {},
-            "research_panels": {"market_daily_panel": "market_daily_panel__unit"},
-            "memmap": {"status": "not_part_of_data_base"},
+            "market_daily_raw": "market_daily_raw__unit",
+            "market_intraday_1m": "market_intraday_1m__unit",
+            "market_intraday_5m": "market_intraday_5m__unit",
+            "trading_calendar": "trading_calendar__unit",
+            "universe_snapshot": "universe_snapshot__unit",
+            "security_status": "security_status__unit",
+            "market_daily_panel": "market_daily_panel__unit",
         },
     )
 
@@ -539,7 +483,7 @@ def test_qdp_v2_activate_selects_clean_contracts_and_writes_active(tmp_path: Pat
 
     assert dry["status"] == "dry_run"
     assert written["status"] == "activated"
-    assert written["active"]["raw"]["market_intraday_5m"] == "market_intraday_5m__ok"
+    assert written["active"]["datasets"]["market_intraday_5m"] == "market_intraday_5m__ok"
     assert (root / "active" / "active.json").exists()
 
 

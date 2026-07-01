@@ -20,6 +20,7 @@ from quant_data_platform.qdp_v2.manifest import (
     utc_now,
 )
 from quant_data_platform.qdp_v2.runtime import resolve_runtime_profile
+from quant_data_platform.qdp_v2.status import active_dataset_map
 
 
 PRIMARY_KEYS = {
@@ -111,10 +112,10 @@ def _scan_domain(
     sample_limit: int,
     progress_path: Path,
 ) -> dict[str, Any]:
-    raw = dict(active.get("raw", {}) or {})
-    dataset_id = str(raw.get(domain, "") or "")
+    datasets = active_dataset_map(dict(active))
+    dataset_id = str(datasets.get(domain, "") or "")
     if not dataset_id:
-        return {"domain": domain, "status": "skipped", "reason": "not_active_raw_domain"}
+        return {"domain": domain, "status": "skipped", "reason": "not_active_domain"}
     manifest_path = dataset_manifest_for_id(root, dataset_id, domain)
     if manifest_path is None:
         return {"domain": domain, "status": "error", "reason": "dataset_manifest_missing", "dataset_id": dataset_id}
@@ -347,7 +348,7 @@ def _stamp() -> str:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="qdp audit pk-deep", description="Deep primary-key proof for large active datasets.")
+    parser = argparse.ArgumentParser(prog="qdp check pk-deep", description="Deep primary-key proof for large active datasets.")
     parser.add_argument("--workspace-root", default="")
     parser.add_argument("--domains", default="market_intraday_1m,market_intraday_5m")
     parser.add_argument("--runtime", default="balanced", choices=("safe", "balanced", "fast"))

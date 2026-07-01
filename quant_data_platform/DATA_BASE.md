@@ -6,7 +6,7 @@ This file describes the current active local data base. The source of truth is:
 2. `data/qdp_v2/datasets/<domain>/<dataset_id>/dataset.json`
 3. Parquet shards referenced by each `dataset.json`
 
-DuckDB is only a rebuildable query index. It is not required for `qdp status`, `qdp audit active`, or data validity.
+DuckDB is not part of the active data base contract. It can be rebuilt separately when ad-hoc SQL indexing is useful, but the active data base does not depend on it.
 
 ## Scope
 
@@ -16,7 +16,7 @@ DuckDB is only a rebuildable query index. It is not required for `qdp status`, `
 - Special continuity boundary: `600036.SH` starts at `2016-07-25`.
 - Active symbol scope count: about `3042`.
 - Primary use case: short-line price/volume research.
-- Memmap is not part of the data base. It is a downstream research/training artifact.
+- Memmap is not part of the data base. It is a downstream research/training artifact and is not recorded in `active.json`.
 
 ## Active Tables
 
@@ -46,14 +46,15 @@ DuckDB is only a rebuildable query index. It is not required for `qdp status`, `
 - `raw-derived` means the table is stored for speed but must be reproducible from a lower-level raw table. Current `market_intraday_5m` is derived from `market_intraday_1m`.
 - `derived` means feature tables that can be rebuilt from raw tables.
 - `cache` means a convenience table for research access. Current `market_daily_panel` should not replace `market_daily_raw` as the source fact table.
+- `active.json` is intentionally flat: `datasets.<domain> = <dataset_id>`. Layer meaning lives in each `dataset.json`.
 
 ## Quality State
 
 The current active data base has passed:
 
 - `qdp status --json`
-- `qdp audit active --json`
-- `qdp audit database --runtime fast --json`
+- `qdp check --quick --json`
+- `qdp check --full --runtime fast --json`
 - Full primary-key proof for 1m and 5m using symbol-date-bar-time overlap checks.
 - Exact primary-key checks for valuation and daily intraday feature tables.
 - Cross-frequency audit: daily rows and 1m symbol-days are aligned over the active window.
@@ -68,9 +69,9 @@ Known boundaries:
 
 ```bash
 conda run -n yolos python -m quant_data_platform.cli status
-conda run -n yolos python -m quant_data_platform.cli audit active --json
-conda run -n yolos python -m quant_data_platform.cli audit database --runtime fast --json
-conda run -n yolos python -m quant_data_platform.cli audit intraday-quality --runtime fast --json
-conda run -n yolos python -m quant_data_platform.cli lake gc --dry-run --with-size --json
+conda run -n yolos python -m quant_data_platform.cli list
+conda run -n yolos python -m quant_data_platform.cli describe market_intraday_1m
+conda run -n yolos python -m quant_data_platform.cli check --quick --json
+conda run -n yolos python -m quant_data_platform.cli check --full --runtime fast --json
+conda run -n yolos python -m quant_data_platform.cli gc --dry-run --with-size --json
 ```
-

@@ -18,7 +18,7 @@ from quant_data_platform.qdp_v2.manifest import (
     utc_now,
 )
 from quant_data_platform.qdp_v2.runtime import resolve_runtime_profile
-from quant_data_platform.qdp_v2.status import _active_dataset_refs
+from quant_data_platform.qdp_v2.status import _active_dataset_refs, active_dataset_map
 
 
 REQUIRED_DOMAINS = {
@@ -90,7 +90,7 @@ def audit_database(
             "status": "error",
             "qdp_v2_root": str(root.resolve()),
             "errors": ["active_manifest_missing"],
-            "findings": [_finding("critical", "structure", "", "active_manifest_missing", {}, "Run qdp migrate-v2/activate-v2 first.")],
+            "findings": [_finding("critical", "structure", "", "active_manifest_missing", {}, "Create data/qdp_v2/active/active.json before running checks.")],
         }
 
     profile = resolve_runtime_profile(runtime)
@@ -124,7 +124,7 @@ def audit_database(
         )
 
     dataset_reports: list[dict[str, Any]] = []
-    for section, domain, dataset_id in active_refs:
+    for _, domain, dataset_id in active_refs:
         if selected_domains and domain not in selected_domains:
             continue
         manifest_path = dataset_manifest_for_id(root, dataset_id, domain)
@@ -136,7 +136,6 @@ def audit_database(
         columns = _read_columns(paths[0]) if paths else [str(item.get("name", "")) for item in manifest.schema]
         byte_count = _manifest_byte_count(manifest, root=root)
         report: dict[str, Any] = {
-            "section": section,
             "domain": domain,
             "dataset_id": dataset_id,
             "layer": manifest.layer,
@@ -667,10 +666,9 @@ def _cross_dataset_checks(
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     findings: list[dict[str, Any]] = []
     report: dict[str, Any] = {}
-    raw = dict(active.get("raw", {}) or {})
-    panels = dict(active.get("research_panels", {}) or {})
+    datasets = active_dataset_map(dict(active))
     try:
-        daily = _daily_raw_panel_check(root=root, raw_id=str(raw.get("market_daily_raw", "") or ""), panel_id=str(panels.get("market_daily_panel", "") or ""), memory_limit=memory_limit, threads=threads)
+        daily = _daily_raw_panel_check(root=root, raw_id=str(datasets.get("market_daily_raw", "") or ""), panel_id=str(datasets.get("market_daily_panel", "") or ""), memory_limit=memory_limit, threads=threads)
         report["market_daily_raw_vs_panel"] = daily
         if daily.get("status") != "ok":
             findings.append(
@@ -849,9 +847,9 @@ def _intraday_5m_from_1m_check(
     max_shards: int = 0,
     progress_path: Path | None = None,
 ) -> dict[str, Any]:
-    raw = dict(active.get("raw", {}) or {})
-    one_id = str(raw.get("market_intraday_1m", "") or "")
-    five_id = str(raw.get("market_intraday_5m", "") or "")
+    datasets = active_dataset_map(dict(active))
+    one_id = str(datasets.get("market_intraday_1m", "") or "")
+    five_id = str(datasets.get("market_intraday_5m", "") or "")
     if not one_id or not five_id:
         return {"status": "skipped", "reason": "market_intraday_1m_or_5m_missing"}
     one_path = dataset_manifest_for_id(root, one_id, "market_intraday_1m")
@@ -1050,9 +1048,9 @@ def _intraday_vs_daily_check(
     sample_limit: int,
     max_shards: int = 0,
 ) -> dict[str, Any]:
-    raw = dict(active.get("raw", {}) or {})
-    daily_id = str(raw.get("market_daily_raw", "") or "")
-    five_id = str(raw.get("market_intraday_5m", "") or "")
+    datasets = active_dataset_map(dict(active))
+    daily_id = str(datasets.get("market_daily_raw", "") or "")
+    five_id = str(datasets.get("market_intraday_5m", "") or "")
     if not daily_id or not five_id:
         return {"status": "skipped", "reason": "market_daily_raw_or_market_intraday_5m_missing"}
     daily_path = dataset_manifest_for_id(root, daily_id, "market_daily_raw")
@@ -1306,9 +1304,9 @@ def _classify_intraday_zero_price_rows(
     memory_limit: str,
     threads: int,
 ) -> dict[str, Any]:
-    raw = dict(active.get("raw", {}) or {})
-    daily_id = str(raw.get("market_daily_raw", "") or "")
-    status_id = str(raw.get("security_status", "") or "")
+    datasets = active_dataset_map(dict(active))
+    daily_id = str(datasets.get("market_daily_raw", "") or "")
+    status_id = str(datasets.get("security_status", "") or "")
     if not daily_id or not status_id:
         return {"status": "skipped", "reason": "market_daily_raw_or_security_status_missing"}
     daily_path = dataset_manifest_for_id(root, daily_id, "market_daily_raw")
@@ -1376,10 +1374,10 @@ def _classify_intraday_zero_price_rows(
 
 
 def _pit_coverage_check(*, root: Path, active: Mapping[str, Any], memory_limit: str, threads: int, sample_limit: int) -> dict[str, Any]:
-    raw = dict(active.get("raw", {}) or {})
-    calendar_id = str(raw.get("trading_calendar", "") or "")
-    universe_id = str(raw.get("universe_snapshot", "") or "")
-    status_id = str(raw.get("security_status", "") or "")
+    datasets = active_dataset_map(dict(active))
+    calendar_id = str(datasets.get("trading_calendar", "") or "")
+    universe_id = str(datasets.get("universe_snapshot", "") or "")
+    status_id = str(datasets.get("security_status", "") or "")
     if not calendar_id or not universe_id or not status_id:
         return {"status": "skipped", "reason": "calendar/universe/status missing"}
     calendar = read_dataset_manifest(dataset_manifest_for_id(root, calendar_id, "trading_calendar") or "")
@@ -1459,9 +1457,9 @@ def _pit_coverage_check(*, root: Path, active: Mapping[str, Any], memory_limit: 
 
 
 def _active_scope_check(*, root: Path, active: Mapping[str, Any], memory_limit: str, threads: int) -> dict[str, Any]:
-    raw = dict(active.get("raw", {}) or {})
-    universe_id = str(raw.get("universe_snapshot", "") or "")
-    status_id = str(raw.get("security_status", "") or "")
+    datasets = active_dataset_map(dict(active))
+    universe_id = str(datasets.get("universe_snapshot", "") or "")
+    status_id = str(datasets.get("security_status", "") or "")
     active_date = str(active.get("active_as_of_date", "") or "")
     if not universe_id or not status_id or not active_date:
         return {"status": "skipped", "reason": "universe/status/as_of missing"}
@@ -1534,12 +1532,12 @@ def _audit_selected_active(*, root: Path, active: Mapping[str, Any], selected_do
     errors: list[str] = []
     warnings: list[str] = []
     dataset_reports: list[dict[str, Any]] = []
-    for section, domain, dataset_id in _active_dataset_refs(dict(active)):
+    for _, domain, dataset_id in _active_dataset_refs(dict(active)):
         if selected_domains and domain not in selected_domains:
             continue
         manifest_path = dataset_manifest_for_id(root, dataset_id, domain)
         if manifest_path is None:
-            errors.append(f"dataset_manifest_missing:{section}.{domain}:{dataset_id}")
+            errors.append(f"dataset_manifest_missing:{domain}:{dataset_id}")
             continue
         manifest = read_dataset_manifest(manifest_path)
         missing_shards: list[str] = []
@@ -1560,20 +1558,20 @@ def _audit_selected_active(*, root: Path, active: Mapping[str, Any], selected_do
             except Exception as exc:
                 footer_errors.append(f"footer_unreadable:{shard.path}:{exc}")
         if missing_shards:
-            errors.append(f"missing_shards:{section}.{domain}:{len(missing_shards)}")
+            errors.append(f"missing_shards:{domain}:{len(missing_shards)}")
         if footer_errors:
             errors.extend(footer_errors[:20])
             if len(footer_errors) > 20:
-                warnings.append(f"footer_errors_truncated:{section}.{domain}:{len(footer_errors)}")
+                warnings.append(f"footer_errors_truncated:{domain}:{len(footer_errors)}")
         if verify_footers and manifest.row_count and footer_rows and int(manifest.row_count) != int(footer_rows):
-            errors.append(f"dataset_row_count_mismatch:{section}.{domain}:manifest={manifest.row_count}:footer={footer_rows}")
+            errors.append(f"dataset_row_count_mismatch:{domain}:manifest={manifest.row_count}:footer={footer_rows}")
         contract_errors, contract_warnings = _manifest_contract_findings(domain, manifest.to_dict())
         errors.extend(contract_errors)
         warnings.extend(contract_warnings)
         dataset_reports.append(
             {
-                "section": section,
                 "domain": domain,
+                "layer": manifest.layer,
                 "dataset_id": dataset_id,
                 "row_count": manifest.row_count,
                 "footer_row_count": footer_rows,
@@ -1777,7 +1775,7 @@ def _format_markdown(payload: Mapping[str, Any]) -> str:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="qdp audit database", description="Run qdp_v2 manifest-first database quality audit.")
+    parser = argparse.ArgumentParser(prog="qdp check --full", description="Run qdp_v2 manifest-first database quality audit.")
     parser.add_argument("--workspace-root", default="")
     parser.add_argument("--runtime", default="balanced", choices=("safe", "balanced", "fast"))
     parser.add_argument("--duckdb-memory-limit", default="")

@@ -18,6 +18,7 @@ from quant_data_platform.qdp_v2.manifest import (
     utc_now,
 )
 from quant_data_platform.qdp_v2.runtime import resolve_runtime_profile
+from quant_data_platform.qdp_v2.status import active_dataset_map
 
 
 PRICE_TICK = 0.0101
@@ -36,9 +37,9 @@ def build_intraday_quality_report(
 ) -> dict[str, Any]:
     root = qdp_v2_root(workspace_root)
     active = read_active_manifest(root)
-    raw = dict(active.get("raw", {}) or {})
-    daily_id = str(raw.get("market_daily_raw", "") or "")
-    five_id = str(raw.get("market_intraday_5m", "") or "")
+    datasets = active_dataset_map(active)
+    daily_id = str(datasets.get("market_daily_raw", "") or "")
+    five_id = str(datasets.get("market_intraday_5m", "") or "")
     if not daily_id or not five_id:
         return {"status": "error", "errors": ["market_daily_raw_or_market_intraday_5m_missing"]}
 
@@ -439,7 +440,7 @@ def _stamp() -> str:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="qdp audit intraday-quality", description="Explain 5m/daily cross-frequency differences and amount drift.")
+    parser = argparse.ArgumentParser(prog="qdp check intraday-quality", description="Explain 5m/daily cross-frequency differences and amount drift.")
     parser.add_argument("--workspace-root", default="")
     parser.add_argument("--runtime", default="balanced", choices=("safe", "balanced", "fast"))
     parser.add_argument("--duckdb-memory-limit", default="")

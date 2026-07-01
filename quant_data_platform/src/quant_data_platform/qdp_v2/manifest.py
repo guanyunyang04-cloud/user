@@ -120,7 +120,6 @@ class DatasetManifest:
     quality: dict[str, Any]
     created_at: str = field(default_factory=utc_now)
     schema: list[dict[str, str]] = field(default_factory=list)
-    legacy: dict[str, Any] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
 
     @classmethod
@@ -141,7 +140,6 @@ class DatasetManifest:
             quality=dict(payload.get("quality", {}) or {}),
             created_at=str(payload.get("created_at", "") or utc_now()),
             schema=[{str(k): str(v) for k, v in dict(item).items()} for item in list(payload.get("schema", []) or []) if isinstance(item, Mapping)],
-            legacy=dict(payload.get("legacy", {}) or {}),
             notes=[str(item) for item in list(payload.get("notes", []) or [])],
         )
 

@@ -25,17 +25,17 @@ def status_payload(*, workspace_root: str | Path | None = None) -> dict[str, Any
     active = read_active_manifest(root)
     if not active:
         return {
-            "status": "not_migrated",
+            "status": "not_initialized",
             "qdp_v2_root": str(root.resolve()),
             "duckdb_catalog_required": False,
-            "message": "qdp_v2 active manifest not found; run qdp migrate-v2 --move --verify",
+            "message": "qdp_v2 active manifest not found.",
         }
     datasets: dict[str, Any] = {}
     missing: list[dict[str, str]] = []
-    for section, domain, dataset_id in _active_dataset_refs(active):
+    for _, domain, dataset_id in _active_dataset_refs(active):
         manifest_path = dataset_manifest_for_id(root, dataset_id, domain)
         if manifest_path is None:
-            missing.append({"section": section, "domain": domain, "dataset_id": dataset_id})
+            missing.append({"domain": domain, "dataset_id": dataset_id})
             continue
         manifest = read_dataset_manifest(manifest_path)
         shard_count = len(manifest.shards)
@@ -43,7 +43,7 @@ def status_payload(*, workspace_root: str | Path | None = None) -> dict[str, Any
         for shard in manifest.shards:
             if resolve_manifest_path(shard.path, root=root).exists():
                 existing_shards += 1
-        datasets[f"{section}.{domain}"] = {
+        datasets[domain] = {
             "dataset_id": manifest.dataset_id,
             "domain": manifest.domain,
             "layer": manifest.layer,
@@ -62,11 +62,11 @@ def status_payload(*, workspace_root: str | Path | None = None) -> dict[str, Any
         "qdp_v2_root": str(root.resolve()),
         "duckdb_catalog_required": False,
         "active_as_of_date": str(active.get("active_as_of_date", "") or ""),
+        "scope": dict(active.get("scope", {}) or {}),
         "active_manifest": str((root / "active" / "active.json").resolve()),
         "dataset_count": len(datasets),
         "missing": missing,
         "datasets": datasets,
-        "memmap": dict(active.get("memmap", {}) or {"status": "not_part_of_data_base"}),
     }
 
 
@@ -92,14 +92,22 @@ def print_status(payload: dict[str, Any], *, as_json: bool) -> None:
 
 
 def _active_dataset_refs(active: dict[str, Any]) -> list[tuple[str, str, str]]:
+    mapping = active_dataset_map(active)
+    return [("datasets", str(domain), str(dataset_id)) for domain, dataset_id in sorted(mapping.items()) if str(dataset_id or "").strip()]
+
+
+def active_dataset_map(active: dict[str, Any] | Any) -> dict[str, str]:
+    payload = dict(active or {})
+    if isinstance(payload.get("datasets"), dict):
+        return {str(domain): str(dataset_id) for domain, dataset_id in dict(payload.get("datasets", {}) or {}).items() if str(dataset_id or "").strip()}
     refs: list[tuple[str, str, str]] = []
     for section in ("raw", "derived", "research_panels"):
-        mapping = dict(active.get(section, {}) or {})
+        mapping = dict(payload.get(section, {}) or {})
         for domain, dataset_id in sorted(mapping.items()):
             text = str(dataset_id or "").strip()
             if text:
                 refs.append((section, str(domain), text))
-    return refs
+    return {domain: dataset_id for _, domain, dataset_id in refs}
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

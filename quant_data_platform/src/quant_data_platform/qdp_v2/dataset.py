@@ -10,9 +10,11 @@ from quant_data_platform.qdp_v2.manifest import (
     dataset_manifest_for_id,
     iter_dataset_manifests,
     qdp_v2_root,
+    read_active_manifest,
     read_dataset_manifest,
     resolve_manifest_path,
 )
+from quant_data_platform.qdp_v2.status import active_dataset_map
 
 
 def list_datasets(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
@@ -44,9 +46,16 @@ def list_datasets(*, workspace_root: str | Path | None = None) -> dict[str, Any]
 
 def describe_dataset(dataset_id: str, *, workspace_root: str | Path | None = None, domain: str = "") -> dict[str, Any]:
     root = qdp_v2_root(workspace_root)
-    path = dataset_manifest_for_id(root, dataset_id, domain)
+    identifier = str(dataset_id or "").strip()
+    active = read_active_manifest(root)
+    active_map = active_dataset_map(active)
+    resolved_domain = str(domain or "").strip()
+    resolved_id = active_map.get(identifier, identifier)
+    if not resolved_domain and identifier in active_map:
+        resolved_domain = identifier
+    path = dataset_manifest_for_id(root, resolved_id, resolved_domain)
     if path is None:
-        return {"status": "not_found", "dataset_id": dataset_id, "qdp_v2_root": str(root.resolve())}
+        return {"status": "not_found", "dataset_id": identifier, "qdp_v2_root": str(root.resolve())}
     manifest = read_dataset_manifest(path)
     payload = manifest.to_dict()
     payload["status"] = "ok"

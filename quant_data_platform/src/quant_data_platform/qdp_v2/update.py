@@ -22,16 +22,15 @@ def plan_update(*, as_of_date: str, runtime: str, workspace_root: str | Path | N
     target = str(as_of_date or "").strip()
     gaps: list[dict[str, Any]] = []
     coverage: list[dict[str, Any]] = []
-    for section, domain, dataset_id in _active_dataset_refs(active):
+    for _, domain, dataset_id in _active_dataset_refs(active):
         manifest_path = dataset_manifest_for_id(root, dataset_id, domain)
         if manifest_path is None:
-            gaps.append({"section": section, "domain": domain, "dataset_id": dataset_id, "gap": "manifest_missing"})
+            gaps.append({"domain": domain, "dataset_id": dataset_id, "gap": "manifest_missing"})
             continue
         manifest = read_dataset_manifest(manifest_path)
         current_end = manifest.end_date
         coverage.append(
             {
-                "section": section,
                 "domain": domain,
                 "dataset_id": dataset_id,
                 "start_date": manifest.start_date,
@@ -40,7 +39,7 @@ def plan_update(*, as_of_date: str, runtime: str, workspace_root: str | Path | N
             }
         )
         if target and current_end and current_end < target and _domain_is_date_updated(domain):
-            gaps.append({"section": section, "domain": domain, "dataset_id": dataset_id, "from_exclusive": current_end, "to_inclusive": target})
+            gaps.append({"domain": domain, "dataset_id": dataset_id, "from_exclusive": current_end, "to_inclusive": target})
     return {
         "status": "planned",
         "qdp_v2_root": str(root.resolve()),
@@ -51,7 +50,6 @@ def plan_update(*, as_of_date: str, runtime: str, workspace_root: str | Path | N
         "coverage": coverage,
         "gaps": gaps,
         "provider_execution": "not_started",
-        "memmap": "not_part_of_data_base",
     }
 
 

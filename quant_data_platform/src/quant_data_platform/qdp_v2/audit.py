@@ -26,10 +26,10 @@ def audit_active(*, workspace_root: str | Path | None = None, write: bool = True
     dataset_reports: list[dict[str, Any]] = []
     errors: list[str] = []
     warnings: list[str] = []
-    for section, domain, dataset_id in _active_dataset_refs(active):
+    for _, domain, dataset_id in _active_dataset_refs(active):
         manifest_path = dataset_manifest_for_id(root, dataset_id, domain)
         if manifest_path is None:
-            errors.append(f"dataset_manifest_missing:{section}.{domain}:{dataset_id}")
+            errors.append(f"dataset_manifest_missing:{domain}:{dataset_id}")
             continue
         manifest = read_dataset_manifest(manifest_path)
         missing_shards: list[str] = []
@@ -48,20 +48,20 @@ def audit_active(*, workspace_root: str | Path | None = None, write: bool = True
             except Exception as exc:
                 footer_errors.append(f"footer_unreadable:{shard.path}:{exc}")
         if missing_shards:
-            errors.append(f"missing_shards:{section}.{domain}:{len(missing_shards)}")
+            errors.append(f"missing_shards:{domain}:{len(missing_shards)}")
         if footer_errors:
             errors.extend(footer_errors[:20])
             if len(footer_errors) > 20:
-                warnings.append(f"footer_errors_truncated:{section}.{domain}:{len(footer_errors)}")
+                warnings.append(f"footer_errors_truncated:{domain}:{len(footer_errors)}")
         if manifest.row_count and footer_rows and int(manifest.row_count) != int(footer_rows):
-            errors.append(f"dataset_row_count_mismatch:{section}.{domain}:manifest={manifest.row_count}:footer={footer_rows}")
+            errors.append(f"dataset_row_count_mismatch:{domain}:manifest={manifest.row_count}:footer={footer_rows}")
         contract_errors, contract_warnings = _manifest_contract_findings(domain, manifest.to_dict())
         errors.extend(contract_errors)
         warnings.extend(contract_warnings)
         dataset_reports.append(
             {
-                "section": section,
                 "domain": domain,
+                "layer": manifest.layer,
                 "dataset_id": dataset_id,
                 "manifest_path": str(manifest_path.resolve()),
                 "start_date": manifest.start_date,
@@ -142,7 +142,7 @@ def _parquet_row_count(path: Path) -> int:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="qdp audit active", description="Audit qdp_v2 active manifests without DuckDB.")
+    parser = argparse.ArgumentParser(prog="qdp check --quick", description="Audit qdp_v2 active manifests without DuckDB.")
     parser.add_argument("--workspace-root", default="")
     parser.add_argument("--no-write", action="store_true")
     parser.add_argument("--json", action="store_true")

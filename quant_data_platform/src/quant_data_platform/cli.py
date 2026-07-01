@@ -470,35 +470,36 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _maybe_run_qdp_v2(raw_argv: list[str]) -> int | None:
-    if not raw_argv:
-        return None
     workspace = _extract_workspace_root(raw_argv)
-    first = raw_argv[0]
+    positional = _strip_global_options(raw_argv)
+    if not positional:
+        from quant_data_platform.qdp_v2.status import v2_active_exists
+
+        if v2_active_exists(workspace):
+            from quant_data_platform.qdp_v2.cli import dispatch
+
+            return dispatch(["--help"])
+        return None
+    first = positional[0]
     route = False
-    forwarded = list(raw_argv)
-    if first in {"migrate-v2", "activate-v2", "dataset", "index", "update", "clean", "derive", "research-window"}:
+    forwarded = list(positional)
+    if first in {"-h", "--help"}:
+        from quant_data_platform.qdp_v2.status import v2_active_exists
+
+        route = v2_active_exists(workspace)
+    if first in {"status", "list", "describe", "check", "rebuild", "gc", "update"}:
         route = True
-    elif len(raw_argv) >= 2 and raw_argv[:2] in (
-        ["audit", "active"],
-        ["audit", "database"],
-        ["audit", "quality"],
-        ["audit", "intraday-quality"],
-        ["audit", "pk-deep"],
-        ["provider", "benchmark"],
-    ):
-        route = True
-    elif len(raw_argv) >= 2 and raw_argv[0] == "lake" and raw_argv[1] == "gc":
+    elif len(positional) >= 2 and positional[0] == "lake" and positional[1] == "gc":
         if "--v2" in forwarded:
             forwarded = [item for item in forwarded if item != "--v2"]
+            forwarded = ["gc"] + forwarded[2:]
             route = True
         else:
             from quant_data_platform.qdp_v2.status import v2_active_exists
 
             route = v2_active_exists(workspace)
-    elif first == "status":
-        from quant_data_platform.qdp_v2.status import v2_active_exists
-
-        route = v2_active_exists(workspace)
+            if route:
+                forwarded = ["gc"] + forwarded[2:]
     if not route:
         return None
     from quant_data_platform.qdp_v2.cli import dispatch
@@ -513,6 +514,22 @@ def _extract_workspace_root(raw_argv: list[str]) -> str:
         if item.startswith("--workspace-root="):
             return item.split("=", 1)[1]
     return ""
+
+
+def _strip_global_options(raw_argv: list[str]) -> list[str]:
+    cleaned: list[str] = []
+    skip_next = False
+    for item in raw_argv:
+        if skip_next:
+            skip_next = False
+            continue
+        if item == "--workspace-root":
+            skip_next = True
+            continue
+        if item.startswith("--workspace-root="):
+            continue
+        cleaned.append(item)
+    return cleaned
 
 
 def _run_passthrough_command(command: str, passthrough_args: list[str]) -> int:

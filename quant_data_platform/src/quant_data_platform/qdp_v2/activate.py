@@ -9,25 +9,7 @@ from quant_data_platform.core.json_io import json_safe
 from quant_data_platform.qdp_v2.manifest import ACTIVE_MANIFEST_VERSION, iter_dataset_manifests, qdp_v2_root, read_dataset_manifest, utc_now, write_active_manifest
 
 
-RAW_DOMAINS = (
-    "market_daily_raw",
-    "market_intraday_1m",
-    "market_intraday_5m",
-    "trading_calendar",
-    "universe_snapshot",
-    "security_status",
-    "valuation",
-    "adjust_factor",
-    "industry_concept",
-    "index_constituents",
-    "limit_status",
-    "corporate_actions",
-    "share_capital",
-    "name_change",
-)
-DERIVED_DOMAINS = ("intraday_daily_features", "limit_intraday_features", "v2_status_sidecar")
-RESEARCH_PANEL_DOMAINS = ("market_daily_panel",)
-REQUIRED_DOMAINS = (
+ACTIVE_DOMAINS = (
     "market_daily_raw",
     "market_intraday_1m",
     "market_intraday_5m",
@@ -46,6 +28,13 @@ REQUIRED_DOMAINS = (
     "limit_intraday_features",
     "market_daily_panel",
 )
+REQUIRED_DOMAINS = ACTIVE_DOMAINS
+ACTIVE_SCOPE = {
+    "start_date": "2011-11-22",
+    "end_date": "2026-06-26",
+    "universe": "Shanghai and Shenzhen A-share main board; excludes ChiNext, STAR Market, ST stocks, and delisted stocks.",
+    "symbol_start_overrides": {"600036.SH": "2016-07-25"},
+}
 PREFERRED_CONTRACTS = {
     "market_intraday_1m": ("mootdx_1m_240_v1",),
     "market_intraday_5m": ("mootdx_5m_48_v1",),
@@ -81,7 +70,7 @@ def activate_v2(
     selected: dict[str, str] = {}
     errors: list[str] = []
     warnings: list[str] = []
-    for domain in (*RAW_DOMAINS, *DERIVED_DOMAINS, *RESEARCH_PANEL_DOMAINS):
+    for domain in ACTIVE_DOMAINS:
         candidates = by_domain.get(domain, [])
         if not candidates:
             if domain in REQUIRED_DOMAINS:
@@ -92,7 +81,7 @@ def activate_v2(
             if domain in REQUIRED_DOMAINS:
                 errors.append(f"required_domain_pending_contract:{domain}:{candidate.get('dataset_id')}:{candidate.get('contract_version')}")
             else:
-                warnings.append(f"optional_domain_pending_contract:{domain}:{candidate.get('dataset_id')}:{candidate.get('contract_version')}")
+                errors.append(f"active_domain_pending_contract:{domain}:{candidate.get('dataset_id')}:{candidate.get('contract_version')}")
                 continue
         preferred = set(PREFERRED_CONTRACTS.get(domain, ()))
         if domain in REQUIRED_DOMAINS and preferred and str(candidate.get("contract_version", "") or "") not in preferred:
@@ -103,10 +92,8 @@ def activate_v2(
     payload = {
         "version": ACTIVE_MANIFEST_VERSION,
         "active_as_of_date": active_as_of,
-        "raw": {domain: selected[domain] for domain in RAW_DOMAINS if domain in selected},
-        "derived": {domain: selected[domain] for domain in DERIVED_DOMAINS if domain in selected},
-        "research_panels": {domain: selected[domain] for domain in RESEARCH_PANEL_DOMAINS if domain in selected},
-        "memmap": {"active_manifest": "", "status": "not_part_of_data_base"},
+        "scope": {**ACTIVE_SCOPE, "end_date": active_as_of or ACTIVE_SCOPE["end_date"]},
+        "datasets": {domain: selected[domain] for domain in ACTIVE_DOMAINS if domain in selected},
         "source": {"created_by": "qdp activate-v2", "created_at": utc_now()},
     }
     result = {

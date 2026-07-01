@@ -112,7 +112,7 @@ def _is_inside(path: Path, root: Path) -> bool:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="qdp lake gc", description="qdp_v2 manifest-first GC.")
+    parser = argparse.ArgumentParser(prog="qdp gc", description="qdp_v2 manifest-first GC.")
     parser.add_argument("--workspace-root", default="")
     parser.add_argument("--dry-run", action="store_true", default=True)
     parser.add_argument("--delete", action="store_true")

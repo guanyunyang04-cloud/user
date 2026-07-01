@@ -25,6 +25,7 @@ from quant_data_platform.qdp_v2.manifest import (
     write_dataset_manifest,
 )
 from quant_data_platform.qdp_v2.runtime import resolve_runtime_profile
+from quant_data_platform.qdp_v2.status import active_dataset_map
 
 
 DOMAIN = "limit_intraday_features"
@@ -47,10 +48,10 @@ def build_limit_intraday_features(
 ) -> dict[str, Any]:
     root = qdp_v2_root(workspace_root)
     active = read_active_manifest(root)
-    raw = dict(active.get("raw", {}) or {})
-    one_id = source_dataset_id or str(raw.get("market_intraday_1m", "") or "")
-    daily_id = str(raw.get("market_daily_raw", "") or "")
-    status_id = str(raw.get("security_status", "") or "")
+    datasets = active_dataset_map(active)
+    one_id = source_dataset_id or str(datasets.get("market_intraday_1m", "") or "")
+    daily_id = str(datasets.get("market_daily_raw", "") or "")
+    status_id = str(datasets.get("security_status", "") or "")
     if not one_id or not daily_id or not status_id:
         return {"status": "error", "errors": ["market_intraday_1m_or_daily_or_status_missing"]}
 
@@ -203,7 +204,7 @@ def build_limit_intraday_features(
         shards=entries,
         source={
             "provider": "qdp_v2",
-            "created_by": "qdp derive limit-intraday",
+            "created_by": "qdp rebuild limit-intraday",
             "created_at": utc_now(),
             "source_1m_dataset_id": one.dataset_id,
             "daily_dataset_id": daily.dataset_id,
@@ -220,14 +221,16 @@ def build_limit_intraday_features(
     active_path = ""
     if activate:
         updated = read_active_manifest(root)
-        derived = dict(updated.get("derived", {}) or {})
-        derived[DOMAIN] = dataset_id
-        updated["derived"] = derived
+        updated_datasets = active_dataset_map(updated)
+        updated_datasets[DOMAIN] = dataset_id
+        updated["datasets"] = updated_datasets
+        for old_key in ("raw", "derived", "research_panels", "memmap"):
+            updated.pop(old_key, None)
         source = dict(updated.get("source", {}) or {})
         source["limit_intraday_features"] = {
             "updated_at": utc_now(),
             "dataset_id": dataset_id,
-            "created_by": "qdp derive limit-intraday",
+            "created_by": "qdp rebuild limit-intraday",
         }
         updated["source"] = source
         active_path = str(write_active_manifest(root, updated).resolve())
@@ -595,7 +598,7 @@ def _stamp() -> str:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="qdp derive limit-intraday", description="Derive detailed limit-up/down intraday features from active 1m bars.")
+    parser = argparse.ArgumentParser(prog="qdp rebuild limit-intraday", description="Rebuild detailed limit-up/down intraday features from active 1m bars.")
     parser.add_argument("--workspace-root", default="")
     parser.add_argument("--source-dataset-id", default="")
     parser.add_argument("--runtime", default="balanced", choices=("safe", "balanced", "fast"))
