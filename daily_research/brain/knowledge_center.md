@@ -11,11 +11,11 @@
 `environment`: `daily_research/environment.yml`；标准解释器是 `yolos` 环境。
 `deprecated_root`: `H:\new_tdx64\PYPlugins\user` 只保留为历史证据和回滚说明。
 
-### class `qdp_data_substrate`
+### class `qdp_v2_data_base`
 `owner`: `quant_data_platform`
-`products`: lake、manifest、canonical bundle、policy input loader、pool/sector-board view、memmap、training pack。
-`consumer_contract`: `daily_research` 读取 explicit dataset id、manifest、sharded memmap 或 training pack。
-`provider_contract`: `mootdx_online`、`BaoStock`、`CNInfo` 等在线源作为 QDP 上游 ingest / raw archive / canonical 治理对象。
+`products`: active tables, dataset manifests, parquet shards, rebuildable caches/features, and optional downstream packs.
+`consumer_contract`: `daily_research` 读取 explicit table/domain、dataset manifest 或 downstream pack。
+`provider_contract`: `mootdx_online`、`BaoStock`、`CNInfo` 等在线源作为 QDP 上游 ingest / raw archive / normalization 对象。
 `invariant`: 研究、训练和 diagnostics 不在 `daily_research` 中临时直连在线 provider。
 
 ### class `research_program`
@@ -36,8 +36,8 @@
 `change_method`: `governance_layer.procedure.execution_change`
 
 ## Long-Term Facts
-- `daily_research` 当前研究消费 QDP 数据基底；旧 daily_research lake / copied manifest / single memmap 不再是 canonical owner。
-- QDP replacement training pack and active memmap are recorded in `state_center.md` under `qdp_consumption`.
+- `daily_research` 当前研究消费 QDP v2 数据基底；旧 daily_research lake / copied manifest / single memmap 不再是数据 owner。
+- QDP active data base and downstream pack status are recorded in `state_center.md` under `qdp_consumption`.
 - 当前主要研究方向是收盘后短线选股；旧复杂模型线保留为历史方法库。
 - `Path20` / `alpha_path20_neural_policy_v1` 是历史证据代号和代码 namespace，不再代表当前目标定义。
 - continuous_policy 的长期思想是日级连续交易执行模型；当前不是 active/default 或执行解冻依据。
@@ -72,9 +72,9 @@
 `status`: research / shadow lineage.
 `usage`: 组合资金流、source/receiver/cash、release-first、DFL-PG、value arbitration 等经验可作为长期方法论；当前不承担执行解冻。
 
-### object `qdp_lake_first_ingestion`
+### object `qdp_v2_manifest_first_ingestion`
 `status`: current data substrate route.
-`usage`: provider refresh/import、canonical build、coverage audit、training pack production all route through QDP.
+`usage`: provider update/import、table rebuild、coverage audit and downstream pack production all route through QDP.
 
 ## Pure Functions
 - `classify_run(run)`: output status and evidence grade separately.

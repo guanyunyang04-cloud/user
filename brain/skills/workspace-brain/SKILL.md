@@ -17,8 +17,10 @@ This workspace is a personal research brain expressed as natural-language progra
 ## Default Work Style
 - Read whichever brain, code, registry, manifest, output, or reference actually helps.
 - For repo-tracked mutation in a brain-governed project, use this skill to confirm object ownership, dirty paths, and any activated protected objects.
-- QDP owns the shared canonical data substrate: `canonical_data_v1`, registry, policy bundle, memmap, coverage audit, provider ingest, and data cleanup.
-- `daily_research` owns research, model, backtest, execution-candidate, and active artifact evidence; it consumes QDP data.
+- QDP owns the shared manifest-first data base: `parquet + dataset.json + active.json`, provider ingest, active table checks, rebuildable caches/features, and data cleanup.
+- Memmaps and training packs are downstream research artifacts, not the QDP active data base.
+- `daily_research` owns research, model, backtest, execution-candidate, and active artifact evidence; it consumes QDP v2 tables or explicit downstream packs.
+- If a task changes project architecture, CLI, data pointers, data semantics, quality conclusions, or execution boundaries, sync the relevant child brain hot path or state `brain_sync=false` with a reason in the final answer.
 - Keep temporary artifacts near the relevant project or task.
 
 ## Optional Diagnostics / Sensors
@@ -33,7 +35,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap
 
 ## Protected Object Types
 - `workspace_git_surface`: activated by repo-tracked mutation, commit, cleanup, migration, branch, or worktree actions; check branch and dirty paths then.
-- `canonical_or_unique_data`: activated by QDP rebuilds, registry pointer changes, memmap cleanup, or deletion; identify replacement pointers and sample validation.
+- `active_data_base_or_unique_data`: activated by QDP active manifest changes, dataset manifest changes, raw parquet cleanup, PIT state changes, or deletion; identify replacement pointers and sample validation.
 - `pit_or_label_semantics`: activated by feature/label/data/training/evaluation conclusions; keep PIT/no-leakage and evidence-grade boundaries.
 - `active_execution_artifact`: activated by live/default, paper/broker, promotion, active artifact, or trade-plan changes; inspect daily execution boundaries before modifying.
 - `secret_or_external_state`: activated by keys, accounts, deploys, remote services, or real broker state; never treat as ordinary text.
@@ -41,7 +43,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap
 
 ## Direct Change And Verification
 - Prefer objective-first direct changes over wrappers, fallback modes, compatibility layers, or process ceremony.
-- Run the smallest checks that support the claim: `git diff --check`, focused tests, `doc_guard` for brain docs, and `integrity_check` for structure changes.
+- Run the smallest checks that support the claim: `git diff --check`, focused tests, `brain_sync_audit` for brain truth drift, `doc_guard` for brain docs, and `integrity_check` for structure changes.
 - `tools.brain.project_commit`, `agent_run`, health, audit, and resource leases are optional helpers; use them when they clarify scope, long-running state, or rollback.
 
 ## Init And Register
@@ -58,6 +60,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scri
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py agent-meta-audit --cwd . --mode compact
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py brain-structure-audit --cwd . --mode compact
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py multi-paradigm-lint --cwd . --scope attached
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.brain_sync_audit --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json
 ```
 Use compact health for quick orientation and full health only for maintenance, diagnosis, or completion confidence.

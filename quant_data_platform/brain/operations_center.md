@@ -1,48 +1,69 @@
 # Quant Data Platform 过程目录
+快照日期：`2026-07-01`
 
 ## Runtime Objects
 ### object `qdp_body_map`
 `code`: `quant_data_platform/src`
-`configs`: `quant_data_platform/configs`
-`registry`: `quant_data_platform/registry`
-`data`: `quant_data_platform/data`
+`data`: `quant_data_platform/data/qdp_v2`
 `references`: `quant_data_platform/brain/references`
 `tests`: `quant_data_platform/tests`
+`archives`: `tools/archive_v1`、`tools/archive_repair`
 
 ### object `qdp_python_env`
 `python`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`
 `pythonpath`: `H:/quant_project/quant_data_platform/src;H:/quant_project`
+`note`: prefer direct `yolos/python.exe` for brain tools when `conda run` stdout encoding is noisy.
+
+## Current Command Palette
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli status
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli list
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli describe market_intraday_1m
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli describe market_intraday_1m --full --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli check --quick --no-write
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli check --full --runtime fast --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild 5m --runtime fast --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild daily-panel --runtime fast --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild valuation --runtime fast --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild limit-intraday --runtime fast --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli gc --dry-run --with-size --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli update --as-of-date <date> --dry-run --runtime fast --json
+```
 
 ## Procedure Entries
-### procedure `inspect_qdp_status`
-`command`: `PYTHONPATH=H:/quant_project/quant_data_platform/src;H:/quant_project C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli status --json`
-`output`: current registry, lake, coverage and canonical status.
+### procedure `describe_active_table`
+`input`: table/domain name
+`steps`: run `qdp describe <table>` for human summary；run `qdp describe <table> --full --json` only for manifest internals.
+`side_effects`: none.
 
-### procedure `provider_eval_smoke`
-`command`: `PYTHONPATH=H:/quant_project/quant_data_platform/src;H:/quant_project C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli provider-eval --providers current_qdp --symbols 000001.SZ --windows 2024-06-03:2024-06-07 --json`
-`output`: provider connectivity / current_qdp smoke evidence.
+### procedure `check_active_data_base`
+`input`: quick or full mode
+`steps`: quick for manifest/footer/coverage；full for deep row/cross-frequency audit.
+`side_effects`: optional audit files only.
 
-### procedure `audit_qdp`
-`command`: `PYTHONPATH=H:/quant_project/quant_data_platform/src;H:/quant_project C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli audit --json`
+### procedure `rebuild_cache_or_feature`
+`input`: target `5m|daily-panel|valuation|limit-intraday`
+`steps`: rebuild from active raw facts or explicit input dataset；validate new manifest；activate only after audit.
+`side_effects`: new dataset manifest and optional active pointer update.
 
-### procedure `build_sharded_memmap_smoke`
-`command`: `PYTHONPATH=H:/quant_project/quant_data_platform/src;H:/quant_project C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli build-sharded-memmap --profile short_horizon_core_v1 --start-year 2022 --end-year 2022 --max-universe-size 10 --max-shards 1 --json`
+### procedure `garbage_collect_data_base`
+`input`: dry-run or explicit delete
+`steps`: traverse active manifest graph；list unreferenced dataset dirs；delete only with explicit `--delete --yes`.
+`side_effects`: none in dry-run.
 
-### procedure `validate_memmap`
-`command`: `PYTHONPATH=H:/quant_project/quant_data_platform/src;H:/quant_project C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli validate-memmap --manifest <sharded_manifest.json> --json`
+### procedure `brain_sync_after_qdp_change`
+`input`: changed QDP CLI/data scope/table semantics/quality conclusion
+`steps`: update QDP hot-path brain docs；update consumers if their data dependency wording changed；run brain sync audit and doc/integrity checks.
 
-### procedure `qdp_tests`
-`smoke`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest quant_data_platform/tests -m "smoke and not data_heavy and not external and not benchmark" -q`
-`ordinary`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest quant_data_platform/tests -m "not data_heavy and not external and not benchmark" -q`
-`full`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest quant_data_platform/tests -q`
-`note`: `test_sharded_memmap.py` is integration/data_heavy and selected for memmap/shard/schema changes.
-
-### procedure `cleanup_dry_run`
-`semantics`: cleanup first creates a plan; deletion follows only after replacement pointer and enough validation.
+## Validation Selection
+- `qdp_cli_changed -> py_compile + qdp --help + focused qdp tests`
+- `active_manifest_or_dataset_changed -> qdp status + qdp check --quick + qdp gc --dry-run`
+- `raw_data_or_cache_changed -> qdp check --full when feasible + targeted cross-frequency audit`
+- `brain_docs_changed -> brain_sync_audit + doc_guard changed + integrity_check`
 
 ## Writeback Routes
-- Current data pointers and provider results: `state_center.md`
+- Current data pointers and table status: `state_center.md`
 - Stable source semantics and lessons: `knowledge_center.md`
 - Commands and process entries: `operations_center.md`
 - Protected data invariants: `governance_layer.md`
-- Long audits/provider reports: `references/` or `data/audits` / `data/provider_eval`
+- Long audits/provider reports: `references/` or `data/audits`

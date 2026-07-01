@@ -7,17 +7,8 @@
   "regional_specialization": {
     "role": "canonical_quant_data_platform_cortex",
     "personal_researcher_default": "direct_action_single_canonical_dataset",
-    "priority_regions": [
-      "orientation_system",
-      "long_term_memory",
-      "executive_control",
-      "sensorimotor_loop"
-    ],
-    "focus_modules": [
-      "state_center",
-      "knowledge_center",
-      "operations_center"
-    ],
+    "priority_regions": ["orientation_system", "long_term_memory", "executive_control", "sensorimotor_loop"],
+    "focus_modules": ["state_center", "knowledge_center", "operations_center"],
     "body_entry_priority": [
       "quant_data_platform/src",
       "quant_data_platform/configs",
@@ -44,25 +35,12 @@
     "references": "quant_data_platform/brain/references/"
   },
   "body_map": {
-    "core": [
-      "quant_data_platform/src"
-    ],
-    "configs": [
-      "quant_data_platform/configs"
-    ],
-    "registry": [
-      "quant_data_platform/registry",
-      "canonical_data/registry"
-    ],
-    "data_assets": [
-      "quant_data_platform/data"
-    ],
-    "knowledge_docs": [
-      "quant_data_platform/brain/references"
-    ],
-    "tests": [
-      "quant_data_platform/tests"
-    ]
+    "core": ["quant_data_platform/src"],
+    "configs": ["quant_data_platform/configs"],
+    "registry": ["quant_data_platform/registry", "canonical_data/registry"],
+    "data_assets": ["quant_data_platform/data"],
+    "knowledge_docs": ["quant_data_platform/brain/references"],
+    "tests": ["quant_data_platform/tests"]
   },
   "modules": [
     {
@@ -115,19 +93,19 @@
       "quant data platform"
     ],
     "terms": [
-      "canonical data",
-      "canonical_data",
-      "canonical_data_v1",
+      "qdp_v2",
+      "manifest-first",
+      "active.json",
+      "dataset.json",
+      "parquet",
       "数据平台",
       "数据基底",
       "唯一数据集",
       "共享数据集",
       "数据集治理",
-      "memmap registry",
-      "sharded memmap",
-      "policy bundle",
       "复权因子",
       "5分钟数据",
+      "1分钟数据",
       "intraday features"
     ],
     "path_prefixes": [
@@ -137,7 +115,7 @@
   "project_profile": {
     "personal_researcher_contract": {
       "default_mode": "direct_action",
-      "legacy_policy": "cleanup_duplicate_datasets_and_old_memmaps_after_dry_run_pointer_and_sample_check",
+      "legacy_policy": "archive_old_catalog_canonical_memmap_workflows_without_active_callers",
       "test_policy": "changed_surface_or_smoke_by_default",
       "explicit_only_skills": [
         "subagent-driven-development",
@@ -148,12 +126,7 @@
         "test-driven-development",
         "testing-strategies"
       ],
-      "hard_boundaries": [
-        "canonical_or_unique_data_loss",
-        "pit_or_no_leakage_violation",
-        "raw_ohlcv_overwrite",
-        "registry_pointer_corruption"
-      ]
+      "hard_boundaries": ["active_data_base_or_unique_data_loss", "pit_or_no_leakage_violation", "raw_ohlcv_overwrite", "active_manifest_pointer_corruption"]
     },
     "guard_profile": {
       "active_artifact_guard": false,
@@ -164,25 +137,14 @@
       "brain_rules": true
     },
     "verification_profile": {
-      "always_commands": [
-        "git diff --check",
-        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed",
-        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json"
-      ],
-      "default_test_commands": [
-        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest quant_data_platform/tests -q"
-      ],
-      "big_artifact_paths": [
-        "quant_data_platform/data/**"
-      ]
+      "always_commands": ["git diff --check", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed", "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json"],
+      "default_test_commands": ["C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest quant_data_platform/tests -q"],
+      "big_artifact_paths": ["quant_data_platform/data/**"]
     },
     "commit_policy": {
       "auto_commit": true,
       "message_prefix": "quant_data_platform",
-      "allowed_prefixes": [
-        "quant_data_platform/",
-        "canonical_data/registry/"
-      ],
+      "allowed_prefixes": ["quant_data_platform/", "canonical_data/registry/"],
       "block_on_baseline_overlap": true
     },
     "process_namespace": {

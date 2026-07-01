@@ -1,33 +1,44 @@
 # Quant Data Platform 身份对象
+快照日期：`2026-07-01`
 
 ## object `quant_data_platform_project`
-`type`: shared_data_substrate_brain
-`definition`: 主脑管辖下的共享量化数据平台分脑，负责可复用数据基底、registry、coverage audit、canonical bundle、provider ingest 和 memmap/training pack 治理。
-`not`: 独立 Git 仓、团队平台项目、某个研究项目的私有数据湖。
-`north_star`: 建立唯一、可审计、可按日使用的 `canonical_data_v1` 数据基底。
+`type`: shared_manifest_first_data_base_brain
+`definition`: 主脑管辖下的共享量化数据基底分脑，负责 QDP v2 本地单机数据基底、provider ingest、数据校验、可重建缓存和数据清理。
+`not`: 旧 v1 工作流平台、下游训练产物注册中心、某个研究项目的私有数据湖。
+`north_star`: 建立简单、准确、可审计、可更新的本地数据基底。
+`truth_source`: `parquet + dataset.json + active.json`。
 `consumers`: `daily_research`、`traditional_quant_research`、`t0_project` and future research projects.
-`methods`: `inspect_status()`；`ingest_provider_data()`；`build_canonical_bundle()`；`build_memmap_or_pack()`；`audit_coverage()`；`cleanup_obsolete_assets()`。
+`public_methods`: `status()`；`list()`；`describe(table)`；`check(mode)`；`rebuild(target)`；`gc()`；`update()`。
 
-## object `canonical_data_substrate`
+## object `qdp_v2_active_data_base`
 `type`: protected_data_object
-`scope`: raw archive、canonical lake、root manifest、registry pointer、policy bundle、pool/sector-board view、sharded memmap、training pack。
-`storage`: large runtime data lives under `quant_data_platform/data/`; auditable registry and manifest pointers live under `quant_data_platform/registry/`.
-`invariant`: raw OHLCV 口径保留；复权价格、复权收益、分钟聚合、结构风格字段作为派生 sidecar。
+`active_root`: `quant_data_platform/data/qdp_v2/active/active.json`
+`datasets_root`: `quant_data_platform/data/qdp_v2/datasets/`
+`scope`: Shanghai/Shenzhen A-share main board, excluding ChiNext, STAR, ST and delisted stocks.
+`date_scope`: `2011-11-22..2026-06-26`
+`symbol_start_overrides`: `600036.SH -> 2016-07-25`
+`invariant`: raw facts remain raw；5m、daily panel and feature tables are rebuildable cache/derived tables, not second truth sources.
 
 ## object `provider_ingest_surface`
 `type`: upstream_source_surface
-`current_route`: `mootdx_online` for fast bars/quotes candidate；`BaoStock` for structured daily semantics；`CNInfo` for disclosure events.
-`exploration_route`: `AKShare` and `efinance` remain low-priority probes until network stability changes.
-`consumer_boundary`: research projects consume QDP outputs, not direct online provider calls.
+`current_route`: `mootdx` for fast daily/1m/5m market bars；`BaoStock` for calendar, universe/status and structural daily fields；`CNInfo` only if disclosure work is explicitly reactivated.
+`consumer_boundary`: research projects consume QDP outputs or explicit downstream packs, not direct online provider calls.
+
+## object `downstream_research_artifacts`
+`type`: non_active_data_base_artifact
+`examples`: memmap、training pack、research panel exports、model-ready packs。
+`boundary`: useful for research/training, but not recorded as QDP active data base state.
 
 ## Pure Functions
 - `resolve_data_owner(asset) -> quant_data_platform_project`
-- `classify_provider_domain(field) -> market_bar|quote|structure|disclosure|exploration`
-- `select_canonical_path(requirement) -> lake|bundle|memmap|training_pack`
+- `classify_table(domain) -> raw_fact|cache|derived_feature|event_fact|pit_state`
+- `select_qdp_command(requirement) -> status|list|describe|check|rebuild|gc|update`
 - `classify_cleanup_target(path) -> keep|replace_then_remove|archive_only|protected`
+- `requires_brain_writeback(change) -> bool`: true for active table, command surface, data scope, quality conclusion or governance change.
 
 ## Routing
 - Current runtime state: `state_center.md`
 - Stable object classes and source semantics: `knowledge_center.md`
 - Procedure entries and CLI commands: `operations_center.md`
 - Protected data invariants: `governance_layer.md`
+- Long audits and historical transitions: `references/`

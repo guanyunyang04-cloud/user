@@ -1,5 +1,5 @@
 # 主脑身份对象
-快照日期：`2026-06-27`
+快照日期：`2026-07-01`
 
 本文件定义 `H:\quant_project` 主脑的身份、目标函数和受保护对象类型。它不是团队流程系统；它是个人研究者的长期认知网络。
 
@@ -25,8 +25,8 @@
 `long_run_model`: 长任务通过 PID/job/run id、日志、progress、summary、artifact 或 status 保持可接管。
 
 ## Protected Object Types
-### object `canonical_or_unique_data`
-`scope`: QDP canonical lake、registry pointer、policy bundle、memmap、唯一研究证据和不可重建资产。
+### object `active_data_base_or_unique_data`
+`scope`: QDP v2 active manifest、dataset manifests、raw parquet、PIT 状态、唯一研究证据和不可重建资产。
 `activation`: rebuild、switch pointer、cleanup、delete、migrate。
 
 ### object `pit_or_label_semantics`
@@ -47,7 +47,7 @@
 
 ## Child Brain Registry
 - `daily_research/brain/`: 正式生产研究与执行主线。
-- `quant_data_platform/brain/`: 共享数据平台、canonical 数据基底和 memmap/training pack owner。
+- `quant_data_platform/brain/`: 共享 QDP v2 manifest-first 数据基底 owner。
 - `t0_project/brain/`: 盘中实验与 RL 原型。
 - `daily_stock_analysis-main/brain/`: 独立产品分脑。
 - `traditional_quant_research/brain/`: 传统量化方法研究分脑。

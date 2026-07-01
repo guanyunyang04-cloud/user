@@ -13,9 +13,9 @@
 
 ### object `qdp_dependency`
 `owner`: `quant_data_platform`
-`daily_research_role`: consumer of explicit lake dataset id、manifest、memmap、training pack。
-`provider_route`: online provider、CSV、TDX/external zip、canonical build and coverage audit all enter through QDP.
-`current_pack`: see `state_center.md` object `qdp_consumption`.
+`daily_research_role`: consumer of QDP v2 active tables, dataset manifests and explicit downstream packs.
+`provider_route`: online provider, CSV or external source work enters through QDP update/rebuild/check flows.
+`current_data_base`: see `state_center.md` object `qdp_consumption`.
 
 ### object `execution_runtime`
 `state`: frozen skeleton / read-only diagnostics / candidate wrappers.
@@ -36,8 +36,8 @@
 
 ### procedure `qdp_data_request`
 `input`: missing field, stale dataset, provider coverage gap, canonical requirement.
-`steps`: express requirement as QDP provider/canonical work；run or request `python -m quant_data_platform.cli ...`；return explicit manifest / dataset id / pack to daily research.
-`validation`: QDP coverage, manifest, `validate-memmap`, source conflict report when relevant.
+`steps`: express requirement as QDP table/update/rebuild work；run or request `python -m quant_data_platform.cli ...`；return explicit table/domain, manifest or downstream pack to daily research.
+`validation`: QDP `status`, `describe`, `check`, source conflict report when relevant.
 
 ### procedure `evidence_query`
 `input`: claim, run tag, dataset id, r-number, status question.
@@ -65,7 +65,7 @@
 
 ## Validation Selection Function
 - `brain_docs_changed -> doc_guard + integrity_check + burden_audit`
-- `qdp_artifact_changed -> QDP manifest / coverage / memmap validation`
+- `qdp_artifact_changed -> QDP status / describe / check`
 - `research_code_changed -> selective_verification blocking commands`
 - `execution_surface_active -> project_consistency execution/full + active artifact diff inspection`
 - `small_doc_or_analysis -> git diff --check + targeted guard`

@@ -26,6 +26,7 @@
   - 或 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed`
 - 结构改动：
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.brain_sync_audit --json`
 - 全量维护时才使用裸 `doc_guard check` 或 full health。
 
 ### `brain_health.inspect`
@@ -54,7 +55,7 @@
 route 不决定写回权；对象归属和证据内容决定写回位置。
 
 ## 3. 受保护方法
-- `qdp_canonical_data.switch_pointer / cleanup / rebuild`：先识别 replacement pointer、dry-run 或抽样验证。
+- `qdp_active_data_base.switch_pointer / cleanup / rebuild`：先识别 replacement pointer、dry-run 或抽样验证。
 - `daily_research_active_artifact.update / restore / activate`：先读取 active artifact 和 promotion 边界，并需要显式授权。
 - `secret_or_external_state.update`：不把密钥、账号或外部服务状态当普通文本改。
 - `cross_project_process.manage`：没有 active lease 时只报告外部存在，不下钻、不等待、不管理。

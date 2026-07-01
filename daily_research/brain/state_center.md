@@ -4,7 +4,7 @@
 本文件是 `daily_research` 的当前程序实例，不是历史长卷；它只保存接管时需要激活的对象、函数和过程入口。
 
 ## Module Interface
-`imports`: `qdp_data_substrate` from `quant_data_platform`；`evidence_registry` from `daily_research/brain/references/evidence_registry.json`；`active_execution_artifact` from `daily_research/output/active_execution_strategy.json`，只在执行相关任务中激活。
+`imports`: `qdp_v2_data_base` from `quant_data_platform`；`evidence_registry` from `daily_research/brain/references/evidence_registry.json`；`active_execution_artifact` from `daily_research/output/active_execution_strategy.json`，只在执行相关任务中激活。
 `exports`: `current_research_pointer = shortline_after_close_research`；`execution_state = frozen_skeleton_only`；`data_access_policy = qdp_only`。
 
 ## Object Instances
@@ -12,7 +12,7 @@
 `type`: project_brain
 `state`: 正式生产研究与执行主线分脑；研究端已从旧 path20 / alpha_v2 复杂模型优先，切到 QDP 数据基底上的收盘后短线选股。
 `owns`: 研究计划、模型、回测、执行候选、证据解释。
-`consumes`: QDP explicit lake dataset id、manifest、memmap、training pack。
+`consumes`: QDP v2 table/domain names, dataset manifests, and explicit downstream research packs when selected.
 `methods`: `inspect_state()`；`write_research_evidence(reference)`；`request_qdp_data_change(requirement)`。
 
 ### object `execution_surface`
@@ -23,10 +23,10 @@
 
 ### object `qdp_consumption`
 `type`: data_dependency
-`state`: QDP lake 已迁到 `quant_data_platform/data/lake`；`daily_research/output/research_data_lake` 已删除。
-`active_pack`: `quant_data_platform/data/memmap/training_pack/tradeable_mainboard_style_structural_alpha_v2_label_v2_backfilled_intraday_v2_training_pack_20260626_01/qdp_training_pack_manifest.json`
-`active_memmap`: `tradeable_mainboard_style_structural_alpha_v2_label_v2_backfilled_intraday_v2_2010_2026_20260626_01`；`qdp validate-memmap` status `ok`；feature_count `307`；symbol_count `3025`。
-`methods`: `inspect_qdp_manifest()`；`consume_training_pack(manifest)`；`request_provider_or_canonical_update(requirement) -> QDP`。
+`state`: QDP 当前 active 数据基底是 v2 manifest-first：`quant_data_platform/data/qdp_v2/active/active.json` + dataset manifests + parquet。
+`active_data_scope`: `2011-11-22..2026-06-26`；沪深 A 股主板，剔除创业板/科创板/ST/退市；`600036.SH` from `2016-07-25`。
+`downstream_pack_note`: historical memmap/training packs remain research artifacts only; they are not the QDP active data base.
+`methods`: `inspect_qdp_status()`；`consume_qdp_table(domain)`；`consume_training_pack(manifest)`；`request_qdp_update_or_table(requirement) -> QDP`。
 
 ### object `provider_boundary`
 `type`: access_policy
@@ -50,12 +50,12 @@
 - `classify_evidence(run)`: 把 smoke、dry-run、short-window、interrupted、insufficient、failed、completed run 分到对应证据等级。
 - `activate_execution_boundary(objects, method)`: 只有 `execution_surface` 的 restore/activate/trade-plan 方法被调用时返回 true。
 - `derive_next_action(shortline_state, evidence)`: 当前返回 `build_upside_or_entry_scorer_baseline()`。
-- `resolve_data_access(task)`: 任何新增数据需求都返回 QDP provider/canonical 对象，不返回 direct online provider。
+- `resolve_data_access(task)`: 任何新增数据需求都返回 QDP v2 provider/update/table request，不返回 direct online provider。
 
 ## Procedures
 ### procedure `shortline_scorer_baseline`
-`input`: QDP replacement training pack、raw/engineering feature diagnostics、shortline condition priors
-`steps`: 读取 explicit QDP pack / raw feature sidecar；构建 upside 或 entry scorer baseline；用 score decile、top-decile 期望、validation-selected same-candidate test 和成本后表现验证；结果写入 shortline reference，本文件只回写当前结论摘要。
+`input`: QDP v2 tables or explicit downstream training pack、raw/engineering feature diagnostics、shortline condition priors
+`steps`: 读取 explicit QDP table/pack；构建 upside 或 entry scorer baseline；用 score decile、top-decile 期望、validation-selected same-candidate test 和成本后表现验证；结果写入 shortline reference，本文件只回写当前结论摘要。
 `side_effects`: research artifacts only；不触碰 active/default/live。
 
 ### procedure `execution_change`
