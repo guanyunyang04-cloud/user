@@ -20,16 +20,12 @@ RAW_DOMAINS = (
     "adjust_factor",
     "industry_concept",
     "index_constituents",
-    "announcement",
     "limit_status",
-    "financial_quarterly",
-    "performance_forecast",
-    "performance_express",
     "corporate_actions",
     "share_capital",
     "name_change",
 )
-DERIVED_DOMAINS = ("intraday_daily_features", "v2_status_sidecar")
+DERIVED_DOMAINS = ("intraday_daily_features", "limit_intraday_features", "v2_status_sidecar")
 RESEARCH_PANEL_DOMAINS = ("market_daily_panel",)
 REQUIRED_DOMAINS = (
     "market_daily_raw",
@@ -41,6 +37,7 @@ REQUIRED_DOMAINS = (
     "valuation",
     "adjust_factor",
     "intraday_daily_features",
+    "limit_intraday_features",
     "market_daily_panel",
 )
 PREFERRED_CONTRACTS = {
@@ -49,6 +46,7 @@ PREFERRED_CONTRACTS = {
     "valuation": ("qdp_v2_valuation_v1",),
     "market_daily_raw": ("qdp_v2_market_daily_raw_v1",),
     "market_daily_panel": ("qdp_v2_market_daily_panel_v1",),
+    "limit_intraday_features": ("qdp_v2_limit_intraday_features_1m_v1",),
 }
 
 

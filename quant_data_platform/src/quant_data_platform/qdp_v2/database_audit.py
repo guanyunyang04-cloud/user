@@ -34,17 +34,21 @@ CORE_DOMAINS = {
     "industry_concept",
     "index_constituents",
     "intraday_daily_features",
+    "limit_intraday_features",
 }
 
 RECOMMENDED_RAW_DOMAINS = {
-    "announcement",
     "limit_status",
-    "financial_quarterly",
-    "performance_forecast",
-    "performance_express",
     "corporate_actions",
     "share_capital",
     "name_change",
+}
+
+OPTIONAL_LONG_HORIZON_DOMAINS = {
+    "announcement",
+    "financial_quarterly",
+    "performance_forecast",
+    "performance_express",
 }
 
 PRIMARY_KEYS: dict[str, list[str]] = {
@@ -60,6 +64,7 @@ PRIMARY_KEYS: dict[str, list[str]] = {
     "industry_concept": ["trade_date", "symbol"],
     "index_constituents": ["trade_date", "index_symbol", "symbol"],
     "intraday_daily_features": ["trade_date", "symbol"],
+    "limit_intraday_features": ["trade_date", "symbol"],
     "announcement": ["trade_date", "symbol", "title", "url"],
     "limit_status": ["trade_date", "symbol"],
     "financial_quarterly": ["symbol", "report_date", "source"],
@@ -240,6 +245,7 @@ def audit_database(
             "missing_core_domains": missing_core,
             "recommended_domains": sorted(RECOMMENDED_RAW_DOMAINS),
             "missing_recommended_domains": missing_recommended,
+            "optional_long_horizon_domains": sorted(OPTIONAL_LONG_HORIZON_DOMAINS),
         },
         "structural_audit": {
             "status": structural.get("status", ""),

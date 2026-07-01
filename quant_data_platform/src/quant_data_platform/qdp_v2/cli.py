@@ -17,10 +17,13 @@ COMMAND_MODULES: dict[tuple[str, ...], str] = {
     ("audit", "active"): "quant_data_platform.qdp_v2.audit",
     ("audit", "database"): "quant_data_platform.qdp_v2.database_audit",
     ("audit", "quality"): "quant_data_platform.qdp_v2.database_audit",
+    ("audit", "intraday-quality"): "quant_data_platform.qdp_v2.quality_reports",
+    ("audit", "pk-deep"): "quant_data_platform.qdp_v2.pk_deep_scan",
     ("index",): "quant_data_platform.qdp_v2.index",
     ("lake", "gc"): "quant_data_platform.qdp_v2.gc",
     ("update",): "quant_data_platform.qdp_v2.update",
     ("clean",): "quant_data_platform.qdp_v2.cleaning",
+    ("derive", "limit-intraday"): "quant_data_platform.qdp_v2.limit_intraday_features",
     ("research-window",): "quant_data_platform.qdp_v2.research_window",
     ("supplement", "recommended"): "quant_data_platform.qdp_v2.recommended_domains",
     ("provider", "benchmark"): "quant_data_platform.qdp_v2.provider_benchmark",
@@ -29,6 +32,9 @@ COMMAND_MODULES: dict[tuple[str, ...], str] = {
 ENV_GUARDED_PREFIXES = {
     ("provider", "benchmark"),
     ("clean",),
+    ("derive", "limit-intraday"),
+    ("audit", "intraday-quality"),
+    ("audit", "pk-deep"),
     ("supplement", "recommended"),
 }
 
