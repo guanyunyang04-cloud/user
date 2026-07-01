@@ -107,11 +107,12 @@ def _manifest_contract_findings(domain: str, manifest: dict[str, Any]) -> tuple[
         "market_intraday_5m": "mootdx_5m_48_v1",
         "market_daily_raw": "qdp_v2_market_daily_raw_v1",
         "market_daily_panel": "qdp_v2_market_daily_panel_v1",
-        "valuation": "qdp_v2_valuation_v1",
     }
     expected = expected_contracts.get(domain)
     if expected and contract != expected:
         errors.append(f"wrong_contract:{domain}:{dataset_id}:expected={expected}:actual={contract}")
+    if domain == "valuation" and contract not in {"qdp_v2_valuation_v1", "qdp_v2_valuation_v2"}:
+        errors.append(f"wrong_contract:{domain}:{dataset_id}:expected=qdp_v2_valuation_v1|qdp_v2_valuation_v2:actual={contract}")
     if domain == "market_intraday_5m" and str(quality.get("bar_count_contract", "") or "") != "48":
         errors.append(f"missing_5m_48_quality:{dataset_id}")
     if domain == "market_daily_raw" and quality.get("ohlcv_non_null") is not True:

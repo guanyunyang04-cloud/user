@@ -57,7 +57,7 @@ PRIMARY_KEYS: dict[str, list[str]] = {
     "limit_intraday_features": ["trade_date", "symbol"],
     "limit_status": ["trade_date", "symbol"],
     "corporate_actions": ["symbol", "trade_date", "action_type", "description", "source"],
-    "share_capital": ["trade_date", "symbol", "source"],
+    "share_capital": ["trade_date", "symbol"],
     "name_change": ["trade_date", "symbol", "change_type", "source"],
 }
 
@@ -1471,7 +1471,7 @@ def _active_scope_check(*, root: Path, active: Mapping[str, Any], memory_limit: 
         row = con.execute(
             f"""
             with universe as (
-              select symbol
+              select symbol, coalesce(cast(name as varchar), '') as name
               from read_parquet({_path_list_sql(_existing_shard_paths(universe, root=root, max_shards=0))}, union_by_name=true)
               where cast(trade_date as varchar) = {_sql_literal(active_date)}
             ),
@@ -1481,7 +1481,11 @@ def _active_scope_check(*, root: Path, active: Mapping[str, Any], memory_limit: 
               where cast(trade_date as varchar) = {_sql_literal(active_date)}
             ),
             joined as (
-              select universe.symbol, coalesce(status.is_st, false) as is_st, coalesce(status.is_delisted, false) as is_delisted
+              select
+                universe.symbol,
+                universe.name,
+                coalesce(status.is_st, false) as is_st,
+                coalesce(status.is_delisted, false) as is_delisted
               from universe left join status using (symbol)
             )
             select
@@ -1490,15 +1494,17 @@ def _active_scope_check(*, root: Path, active: Mapping[str, Any], memory_limit: 
               sum(case when regexp_matches(symbol, '^(000|001|002|003)[0-9]{{3}}\\.SZ$') then 1 else 0 end) as sz_main,
               sum(case when regexp_matches(symbol, '^(300|301)[0-9]{{3}}\\.SZ$') or regexp_matches(symbol, '^(688|689)[0-9]{{3}}\\.SH$') or regexp_matches(symbol, '^[48][0-9]{{5}}\\.(BJ|SZ|SH)$') then 1 else 0 end) as excluded_board_prefix,
               sum(case when is_st then 1 else 0 end) as st_count,
-              sum(case when is_delisted then 1 else 0 end) as delisted_count
+              sum(case when is_delisted then 1 else 0 end) as delisted_count,
+              sum(case when cast(name as varchar) like '%退市%' then 1 else 0 end) as name_delisted_count
             from joined
             """
         ).fetchone()
     excluded = int(row[3] or 0)
     st_count = int(row[4] or 0)
     delisted_count = int(row[5] or 0)
+    name_delisted_count = int(row[6] or 0)
     return {
-        "status": "ok" if excluded == 0 and st_count == 0 and delisted_count == 0 else "failed",
+        "status": "ok" if excluded == 0 and st_count == 0 and delisted_count == 0 and name_delisted_count == 0 else "failed",
         "active_as_of_date": active_date,
         "active_symbol_count": int(row[0] or 0),
         "sh_main": int(row[1] or 0),
@@ -1506,6 +1512,7 @@ def _active_scope_check(*, root: Path, active: Mapping[str, Any], memory_limit: 
         "excluded_board_prefix": excluded,
         "st_count": st_count,
         "delisted_count": delisted_count,
+        "name_delisted_count": name_delisted_count,
     }
 
 

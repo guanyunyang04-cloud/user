@@ -27,7 +27,14 @@
 
 ### class `industry_concept_complete`
 `definition`: QDP v2 active `industry_concept` is aligned exactly to `universe_snapshot` keys.
-`invariant`: one row per `(trade_date, symbol)` in universe; blank/missing source labels become explicit `UNKNOWN` values; `UNKNOWN` means missing label evidence, not a failed join.
+`invariant`: one row per `(trade_date, symbol)` in universe; blank/missing labels must be filled from same-symbol history or reliable profile metadata when available; persistent `UNKNOWN` is allowed only as explicit unavailable evidence, not as a silent join failure.
+`current_state`: active `industry` has `0` blank/UNKNOWN rows as of `2026-06-26`; `concept_tags` are intentionally blank because reliable historical concept tags are not present and are not fabricated.
+
+### class `active_scope_mainboard_non_delisted`
+`definition`: the active short-line data base covers Shanghai/Shenzhen A-share mainboard symbols after board/ST/delisting filters.
+`invariant`: current active-date names containing `退市` are excluded even if provider status flags do not mark `is_delisted=true`.
+`current_scope_name`: `mainboard_hs_a_ex_current_st_name_delisted_v2`
+`current_symbol_count`: `3037`
 
 ### class `mootdx_online`
 `domain`: fast daily/1m/5m market bars and quote-like market data.
@@ -49,6 +56,7 @@
 - 质量证明字段如 schema hash 和 audit path 应保留在 manifest，但默认 `describe` 应显示人读摘要。
 - 对复权因子不能把原始多来源 factor pool 直接当 active 真相；active 必须是标准化后的一键一行事实表。
 - PIT/meta 域的质量证明应写进 manifest：主键唯一、交易日覆盖、scope 过滤、跨域 key 对齐和显式 unknown/default 标记。
+- Scope filtering must not inherit stale nested audit blocks from source manifests; transformed datasets need fresh proof or clearly marked inherited proof.
 
 ## Pure Functions
 - `classify_provider(source) -> market|structure|disclosure|exploration|local_qdp`

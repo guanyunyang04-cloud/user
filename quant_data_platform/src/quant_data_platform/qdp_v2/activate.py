@@ -38,7 +38,7 @@ ACTIVE_SCOPE = {
 PREFERRED_CONTRACTS = {
     "market_intraday_1m": ("mootdx_1m_240_v1",),
     "market_intraday_5m": ("mootdx_5m_48_v1",),
-    "valuation": ("qdp_v2_valuation_v1",),
+    "valuation": ("qdp_v2_valuation_v1", "qdp_v2_valuation_v2"),
     "market_daily_raw": ("qdp_v2_market_daily_raw_v1",),
     "market_daily_panel": ("qdp_v2_market_daily_panel_v1",),
     "limit_intraday_features": ("qdp_v2_limit_intraday_features_1m_v1",),

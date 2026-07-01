@@ -8,7 +8,7 @@ import os
 import shutil
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from quant_data_platform.core.json_io import json_safe
 from quant_data_platform.qdp_v2.environment import runtime_environment
@@ -785,13 +785,16 @@ def _write_mainboard_scope_symbols(*, root: Path, active: dict[str, Any], active
             f"""
             copy (
                 with u as (
-                    select distinct upper(cast(symbol as varchar)) as symbol
+                    select
+                        upper(cast(symbol as varchar)) as symbol,
+                        max(coalesce(cast(name as varchar), '')) as name
                     from read_parquet(?, union_by_name=true)
                     where cast(trade_date as varchar)[:10] = ?
                       and (
                         regexp_matches(upper(cast(symbol as varchar)), '^(600|601|603|605)[0-9]{{3}}\\.SH$')
                         or regexp_matches(upper(cast(symbol as varchar)), '^(000|001|002|003)[0-9]{{3}}\\.SZ$')
                       )
+                    group by 1
                 ),
                 s as (
                     select
@@ -807,6 +810,7 @@ def _write_mainboard_scope_symbols(*, root: Path, active: dict[str, Any], active
                 left join s using(symbol)
                 where coalesce(s.is_st, false) = false
                   and coalesce(s.is_delisted, false) = false
+                  and coalesce(u.name, '') not like '%退市%'
                 order by u.symbol
             ) to {_sql_literal(str(target))} (format parquet)
             """,
@@ -1113,7 +1117,7 @@ def _scope_dataset_by_symbols(
         schema=schema,
         shards=entries,
         source={"provider": "qdp_v2", "created_by": "scope_mainboard_active", "created_at": utc_now(), "source_dataset_id": source.dataset_id, "scope": scope_name, "active_as_of_date": active_as_of},
-        quality={**source.quality, "scope": scope_name, "scope_symbol_count": int(scope_stats.get("symbol_count", 0) or 0), "path_refs_exist": True},
+        quality=_scoped_manifest_quality(source.quality, scope_name=scope_name, scope_stats=scope_stats),
         notes=[*source.notes, f"filtered to {scope_name} as of {active_as_of}"],
     )
     manifest_path = write_dataset_manifest(root, manifest)
@@ -1136,6 +1140,29 @@ def _scope_dataset_by_symbols(
         "worker_memory_limit": worker_memory_limit,
         "worker_threads": worker_threads,
     }
+
+
+def _scoped_manifest_quality(source_quality: Mapping[str, Any], *, scope_name: str, scope_stats: Mapping[str, Any]) -> dict[str, Any]:
+    stale_keys = {
+        "date_coverage_audit",
+        "meta_domain_quality",
+        "primary_key_audit",
+        "source_factor_quality",
+    }
+    quality = {str(key): value for key, value in dict(source_quality or {}).items() if str(key) not in stale_keys}
+    quality.update(
+        {
+            "scope": scope_name,
+            "scope_symbol_count": int(scope_stats.get("symbol_count", 0) or 0),
+            "path_refs_exist": True,
+            "primary_key_unique": bool(dict(source_quality or {}).get("primary_key_unique", False)),
+            "primary_key_audit": {
+                "method": "inherited_from_unique_source_after_symbol_scope_filter",
+                "status": "passed" if bool(dict(source_quality or {}).get("primary_key_unique", False)) else "not_proven",
+            },
+        }
+    )
+    return quality
 
 
 def _filter_symbol_shard_task(task: dict[str, Any]) -> dict[str, Any]:

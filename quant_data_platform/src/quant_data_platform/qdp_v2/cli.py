@@ -24,6 +24,11 @@ commands:
   rebuild valuation       Rebuild normalized valuation table.
   rebuild adjust-factor   Rebuild standard daily adjustment factor table.
   rebuild industry-concept Rebuild complete industry table with UNKNOWN gaps.
+  rebuild industry-concept-filled Fill UNKNOWN industry labels from adjacent known labels.
+  rebuild share-capital-daily Rebuild daily PIT share-capital table.
+  rebuild valuation-market-cap Rebuild valuation with market-cap fields.
+  rebuild index-constituents-daily Rebuild daily PIT index constituents.
+  rebuild scope-active    Rebuild active tables under the current mainboard non-delisted scope.
   rebuild limit-intraday  Rebuild 1m-derived limit-board features.
   gc --dry-run            Show unreferenced data directories.
   update                  Update the active data base.
@@ -42,6 +47,11 @@ targets:
   valuation          Rebuild normalized valuation table.
   adjust-factor      Rebuild one-row-per-symbol-day standard adjustment factors.
   industry-concept   Rebuild industry/concept table aligned to universe.
+  industry-concept-filled Fill UNKNOWN industry labels from same-symbol known labels.
+  share-capital-daily Rebuild one-row-per-symbol-day share-capital facts.
+  valuation-market-cap Rebuild market-cap fields from close and share capital.
+  index-constituents-daily Expand index snapshots to daily PIT membership.
+  scope-active        Rebuild all active symbol tables under current scope.
   limit-intraday     Rebuild 1m-derived limit-board features.
 """
 
@@ -59,6 +69,11 @@ COMMAND_MODULES: dict[tuple[str, ...], str] = {
     ("rebuild", "valuation"): "quant_data_platform.qdp_v2.cleaning",
     ("rebuild", "adjust-factor"): "quant_data_platform.qdp_v2.meta_quality",
     ("rebuild", "industry-concept"): "quant_data_platform.qdp_v2.meta_quality",
+    ("rebuild", "industry-concept-filled"): "quant_data_platform.qdp_v2.completion",
+    ("rebuild", "share-capital-daily"): "quant_data_platform.qdp_v2.completion",
+    ("rebuild", "valuation-market-cap"): "quant_data_platform.qdp_v2.completion",
+    ("rebuild", "index-constituents-daily"): "quant_data_platform.qdp_v2.completion",
+    ("rebuild", "scope-active"): "quant_data_platform.qdp_v2.completion",
     ("rebuild", "limit-intraday"): "quant_data_platform.qdp_v2.limit_intraday_features",
 }
 
@@ -69,6 +84,11 @@ ENV_GUARDED_PREFIXES = {
     ("rebuild", "valuation"),
     ("rebuild", "adjust-factor"),
     ("rebuild", "industry-concept"),
+    ("rebuild", "industry-concept-filled"),
+    ("rebuild", "share-capital-daily"),
+    ("rebuild", "valuation-market-cap"),
+    ("rebuild", "index-constituents-daily"),
+    ("rebuild", "scope-active"),
     ("rebuild", "limit-intraday"),
 }
 
@@ -80,6 +100,11 @@ ARG_ALIASES: dict[tuple[str, ...], list[str]] = {
     ("rebuild", "valuation"): ["valuation"],
     ("rebuild", "adjust-factor"): ["rebuild-adjust-factor"],
     ("rebuild", "industry-concept"): ["rebuild-industry-concept"],
+    ("rebuild", "industry-concept-filled"): ["industry-concept-filled"],
+    ("rebuild", "share-capital-daily"): ["share-capital-daily"],
+    ("rebuild", "valuation-market-cap"): ["valuation-market-cap"],
+    ("rebuild", "index-constituents-daily"): ["index-constituents-daily"],
+    ("rebuild", "scope-active"): ["scope-active"],
     ("check", "meta"): ["audit"],
 }
 

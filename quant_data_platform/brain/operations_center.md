@@ -21,10 +21,14 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli list
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli describe market_intraday_1m
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli describe market_intraday_1m --full --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli check --quick --no-write
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli check --full --runtime fast --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli check meta --runtime fast --duckdb-memory-limit 12GB --threads 4 --writeback --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild 5m --runtime fast --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild daily-panel --runtime fast --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild valuation --runtime fast --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild scope-active --runtime fast --workers 4 --activate --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild industry-concept-filled --runtime fast --activate --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild share-capital-daily --runtime fast --activate --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild valuation-market-cap --runtime fast --activate --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild limit-intraday --runtime fast --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli gc --dry-run --with-size --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli update --as-of-date <date> --dry-run --runtime fast --json
@@ -38,11 +42,11 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli update
 
 ### procedure `check_active_data_base`
 `input`: quick or full mode
-`steps`: quick for manifest/footer/coverage；full for deep row/cross-frequency audit.
+`steps`: quick for manifest/coverage；`check meta --writeback` for PIT/meta/factor/index exact proof；use targeted PK/cross-frequency scans for 1m/5m and daily/intraday evidence instead of routinely running monolithic `check --full`.
 `side_effects`: optional audit files only.
 
 ### procedure `rebuild_cache_or_feature`
-`input`: target `5m|daily-panel|valuation|limit-intraday`
+`input`: target `5m|daily-panel|valuation|scope-active|industry-concept-filled|share-capital-daily|valuation-market-cap|limit-intraday`
 `steps`: rebuild from active raw facts or explicit input dataset；validate new manifest；activate only after audit.
 `side_effects`: new dataset manifest and optional active pointer update.
 
@@ -58,7 +62,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli update
 ## Validation Selection
 - `qdp_cli_changed -> py_compile + qdp --help + focused qdp tests`
 - `active_manifest_or_dataset_changed -> qdp status + qdp check --quick + qdp gc --dry-run`
-- `raw_data_or_cache_changed -> qdp check --full when feasible + targeted cross-frequency audit`
+- `raw_data_or_cache_changed -> qdp check --quick + qdp check meta + targeted PK/cross-frequency audit`
 - `brain_docs_changed -> brain_sync_audit + doc_guard changed + integrity_check`
 
 ## Writeback Routes

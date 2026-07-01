@@ -818,17 +818,25 @@ def _key_alignment(con: Any, *, left_sql: str, right_sql: str) -> dict[str, Any]
 
 
 def _scope_report(con: Any, *, paths_sql: str) -> dict[str, Any]:
+    columns = {str(row[0]).lower() for row in con.execute(f"describe select * from read_parquet({paths_sql}, union_by_name=true)").fetchall()}
+    name_delisted_expr = "sum(case when cast(name as varchar) like '%退市%' then 1 else 0 end)" if "name" in columns else "0"
     row = _one(
         con,
         f"""
         select
           count(*) as row_count,
           sum(case when not ({MAINBOARD_PATTERN}) then 1 else 0 end) as non_mainboard_rows,
+          {name_delisted_expr} as name_delisted_rows,
           count(distinct symbol) as symbol_count
         from read_parquet({paths_sql}, union_by_name=true)
         """,
     )
-    return {**row, "status": "ok" if int(row["non_mainboard_rows"] or 0) == 0 else "failed"}
+    return {
+        **row,
+        "status": "ok"
+        if int(row["non_mainboard_rows"] or 0) == 0 and int(row["name_delisted_rows"] or 0) == 0
+        else "failed",
+    }
 
 
 def _override_report(con: Any, *, paths_sql: str) -> dict[str, Any]:
