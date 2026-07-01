@@ -8,6 +8,7 @@ import pandas as pd
 
 from quant_data_platform.qdp_v2.activate import activate_v2
 from quant_data_platform.qdp_v2.audit import audit_active
+from quant_data_platform.qdp_v2.check import run_check
 from quant_data_platform.qdp_v2.cleaning import derive_5m_from_1m, normalize_valuation, split_daily_market
 from quant_data_platform.qdp_v2.database_audit import audit_database
 from quant_data_platform.qdp_v2.dataset import validate_dataset
@@ -20,6 +21,7 @@ from quant_data_platform.qdp_v2.manifest import (
     write_active_manifest,
     write_dataset_manifest,
 )
+from quant_data_platform.qdp_v2.meta_quality import audit_meta_domains, rebuild_adjust_factor_standard, rebuild_industry_concept_complete
 from quant_data_platform.qdp_v2.status import status_payload
 
 
@@ -140,6 +142,37 @@ def test_qdp_v2_audit_validate_and_gc_use_manifests(tmp_path: Path) -> None:
     assert any(item["dataset_id"] == "valuation__orphan" for item in dry["unreferenced"])
     assert any(item["dataset_id"] == "valuation__orphan" for item in deleted["deleted"])
     assert active_shard.exists() is True
+
+
+def test_qdp_v2_quick_check_does_not_scan_all_parquet_footers(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    root = qdp_v2_root(workspace)
+    shard = root / "datasets" / "trading_calendar" / "trading_calendar__quick" / "shards" / "part.parquet"
+    _write_parquet(shard, pd.DataFrame({"trade_date": ["2026-01-05"], "exchange": ["SSE"], "is_open": [True]}))
+    manifest = DatasetManifest(
+        dataset_id="trading_calendar__quick",
+        domain="trading_calendar",
+        layer="raw",
+        frequency="",
+        contract_version="qdp_v2_trading_calendar_v1",
+        primary_key=["trade_date"],
+        start_date="2026-01-05",
+        end_date="2026-01-05",
+        row_count=999,
+        schema_hash="unit",
+        shards=[ShardManifestEntry(path="datasets/trading_calendar/trading_calendar__quick/shards/part.parquet", row_count=999, start_date="2026-01-05", end_date="2026-01-05")],
+        source={"provider": "unit"},
+        quality={"path_refs_exist": True},
+    )
+    write_dataset_manifest(root, manifest)
+    _write_active(root, {"trading_calendar": manifest.dataset_id})
+
+    quick = run_check(workspace_root=workspace, full=False, no_write=True)
+    active = audit_active(workspace_root=workspace, write=False, verify_footers=True)
+
+    assert quick["active"]["status"] == "ok"
+    assert active["status"] == "error"
+    assert any("row_count_mismatch" in item for item in active["errors"])
 
 
 def test_qdp_v2_database_audit_reports_duplicate_primary_keys(tmp_path: Path) -> None:
@@ -298,6 +331,101 @@ def test_qdp_v2_database_audit_checks_intraday_cross_frequency_consistency(tmp_p
 
     assert payload["cross_dataset_checks"]["intraday_5m_from_1m"]["status"] == "ok"
     assert payload["cross_dataset_checks"]["intraday_vs_daily"]["status"] == "ok"
+
+
+def test_qdp_v2_meta_quality_rebuilds_factor_and_industry_then_audits(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    root = qdp_v2_root(workspace)
+
+    def write_domain(domain: str, dataset_id: str, frame: pd.DataFrame, contract: str, pk: list[str]) -> None:
+        shard = root / "datasets" / domain / dataset_id / "shards" / "part.parquet"
+        _write_parquet(shard, frame)
+        write_dataset_manifest(
+            root,
+            DatasetManifest(
+                dataset_id=dataset_id,
+                domain=domain,
+                layer="raw",
+                frequency="1d",
+                contract_version=contract,
+                primary_key=pk,
+                start_date=str(frame["trade_date"].min()) if "trade_date" in frame.columns else "",
+                end_date=str(frame["trade_date"].max()) if "trade_date" in frame.columns else "",
+                row_count=len(frame),
+                schema_hash="unit",
+                shards=[ShardManifestEntry(path=str(shard.relative_to(root)).replace("\\", "/"), row_count=len(frame), start_date="2026-01-05", end_date="2026-01-06")],
+                source={"provider": "unit"},
+                quality={"path_refs_exist": True},
+            ),
+        )
+
+    daily = pd.DataFrame(
+        {
+            "trade_date": ["2026-01-05", "2026-01-06"],
+            "symbol": ["000001.SZ", "000001.SZ"],
+            "open": [10.0, 10.5],
+            "high": [11.0, 11.5],
+            "low": [9.5, 10.0],
+            "close": [10.8, 11.0],
+            "volume": [100.0, 120.0],
+            "amount": [1000.0, 1320.0],
+        }
+    )
+    factor_source = pd.DataFrame(
+        {
+            "trade_date": ["2026-01-05"],
+            "symbol": ["000001.SZ"],
+            "factor_provider": ["tonghuashun"],
+            "fore_adjust_factor": [-0.5],
+            "back_adjust_factor": [1.25],
+        }
+    )
+    calendar = pd.DataFrame({"trade_date": ["2026-01-05", "2026-01-06"], "is_open": [True, True]})
+    universe = pd.DataFrame({"trade_date": ["2026-01-05", "2026-01-06"], "symbol": ["000001.SZ", "000001.SZ"]})
+    status = pd.DataFrame(
+        {
+            "trade_date": ["2026-01-05", "2026-01-06"],
+            "symbol": ["000001.SZ", "000001.SZ"],
+            "is_st": [False, False],
+            "is_delisted": [False, False],
+            "is_suspended": [False, False],
+        }
+    )
+    industry = pd.DataFrame({"trade_date": ["2026-01-05"], "symbol": ["000001.SZ"], "industry": [""], "concept_tags": [""], "source": ["unit"]})
+    index = pd.DataFrame({"trade_date": ["2026-01-05"], "index_symbol": ["000300.SH"], "symbol": ["000001.SZ"]})
+
+    write_domain("market_daily_raw", "market_daily_raw__unit", daily, "qdp_v2_market_daily_raw_v1", ["trade_date", "symbol"])
+    write_domain("adjust_factor", "adjust_factor__raw", factor_source, "raw_factor_pool", ["trade_date", "symbol"])
+    write_domain("trading_calendar", "trading_calendar__unit", calendar, "qdp_v2_trading_calendar_v1", ["trade_date"])
+    write_domain("universe_snapshot", "universe_snapshot__unit", universe, "qdp_v2_universe_snapshot_v1", ["trade_date", "symbol"])
+    write_domain("security_status", "security_status__unit", status, "qdp_v2_security_status_v1", ["trade_date", "symbol"])
+    write_domain("industry_concept", "industry_concept__raw", industry, "raw_industry", ["trade_date", "symbol"])
+    write_domain("index_constituents", "index_constituents__unit", index, "qdp_v2_index_constituents_v1", ["trade_date", "index_symbol", "symbol"])
+    _write_active(
+        root,
+        {
+            "market_daily_raw": "market_daily_raw__unit",
+            "adjust_factor": "adjust_factor__raw",
+            "trading_calendar": "trading_calendar__unit",
+            "universe_snapshot": "universe_snapshot__unit",
+            "security_status": "security_status__unit",
+            "industry_concept": "industry_concept__raw",
+            "index_constituents": "index_constituents__unit",
+        },
+        as_of_date="2026-01-06",
+    )
+
+    factor = rebuild_adjust_factor_standard(workspace_root=workspace, runtime="safe", duckdb_memory_limit="1GB", threads=1, activate=True)
+    industry_result = rebuild_industry_concept_complete(workspace_root=workspace, runtime="safe", duckdb_memory_limit="1GB", threads=1, activate=True)
+    audit = audit_meta_domains(workspace_root=workspace, runtime="safe", duckdb_memory_limit="1GB", threads=1, writeback=True)
+
+    assert factor["status"] == "ok"
+    assert factor["stats"]["row_count"] == 2
+    assert factor["stats"]["non_positive_fore_rows"] == 2
+    assert industry_result["status"] == "ok"
+    assert industry_result["stats"]["unknown_industry_rows"] == 2
+    assert audit["status"] == "ok"
+    assert audit["finding_count"] == 0
 
 
 def test_qdp_v2_cleaning_derives_48_contract_5m_from_1m_shard(tmp_path: Path) -> None:

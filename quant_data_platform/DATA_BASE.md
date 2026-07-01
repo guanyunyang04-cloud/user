@@ -30,8 +30,8 @@ No separate catalog is required to know what the active data base contains.
 | `universe_snapshot` | PIT tradable universe scope | raw | 1d | 8,632,549 | 2011-11-22..2026-06-26 |
 | `security_status` | PIT listing/ST/suspension/status fields | raw | 1d | 8,632,549 | 2011-11-22..2026-06-26 |
 | `valuation` | Daily valuation fields | raw | 1d | 8,632,549 | 2011-11-22..2026-06-26 |
-| `adjust_factor` | Adjustment factors | raw | 1d | 133,686,419 | 2011-11-22..2026-06-26 |
-| `industry_concept` | Industry/concept labels | raw | daily-like | 8,621,260 | 2011-11-22..2026-06-26 |
+| `adjust_factor` | Standard daily back-adjust factors aligned to daily raw keys | raw | 1d | 8,407,233 | 2011-11-22..2026-06-26 |
+| `industry_concept` | Industry/concept labels aligned to universe, unknowns explicit | raw | 1d | 8,632,549 | 2011-11-22..2026-06-26 |
 | `index_constituents` | Index membership facts | raw | event/daily | 128,359 | 2011-11-30..2026-06-26 |
 | `limit_status` | Daily limit-up/down close status | raw-derived | 1d | 206,110 | 2011-11-23..2026-06-26 |
 | `corporate_actions` | Corporate action event facts | raw | event | 28,764 | 2011-11-28..2026-06-26 |
@@ -56,16 +56,21 @@ The current active data base has passed:
 
 - `qdp status --json`
 - `qdp check --quick --json`
+- `qdp check meta --runtime fast --duckdb-memory-limit 12GB --threads 4 --json`
+- `python -m quant_data_platform.qdp_v2.audit --json`
 - `qdp check --full --runtime fast --json`
 - Full primary-key proof for 1m and 5m using symbol-date-bar-time overlap checks.
 - Exact primary-key checks for valuation and daily intraday feature tables.
 - Cross-frequency audit: daily rows and 1m symbol-days are aligned over the active window.
+- PIT/meta/factor/index proof: calendar continuity, universe/security_status open-date coverage, scope filtering, adjustment-factor alignment to `market_daily_raw`, industry alignment to `universe_snapshot`, and index-constituent date/scope checks all pass.
 
 Known boundaries:
 
 - Price OHLC cross-frequency differences still exist historically, but the close mismatch rate is near zero and large price differences are a small minority. These are treated as provider/source口径 differences, not active file corruption.
 - `limit_intraday_features` uses only 1m OHLCV. It cannot contain L2-only fields such as order-book queue size or sealed order amount.
 - Long-horizon disclosure/fundamental datasets are not part of this short-line active data base.
+- `adjust_factor.adjust_factor` uses positive `back_adjust_factor` semantics. Source `fore_adjust_factor` is retained as evidence but may be non-positive and should not be used as a positive multiplicative factor.
+- `industry_concept.industry = UNKNOWN` is an explicit missing-label marker, not a join failure. Current unknown rows: `11,831`.
 
 ## Common Commands
 
@@ -75,6 +80,7 @@ conda run -n yolos python -m quant_data_platform.cli list
 conda run -n yolos python -m quant_data_platform.cli describe market_intraday_1m
 conda run -n yolos python -m quant_data_platform.cli describe market_intraday_1m --full --json
 conda run -n yolos python -m quant_data_platform.cli check --quick --json
+conda run -n yolos python -m quant_data_platform.cli check meta --runtime fast --json
 conda run -n yolos python -m quant_data_platform.cli check --full --runtime fast --json
 conda run -n yolos python -m quant_data_platform.cli rebuild limit-intraday --runtime fast --json
 conda run -n yolos python -m quant_data_platform.cli gc --dry-run --with-size --json

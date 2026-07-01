@@ -21,7 +21,8 @@
 `universe`: 沪深 A 股主板，剔除创业板、科创板、ST 和退市股。
 `symbol_start_overrides`: `600036.SH -> 2016-07-25`
 `active_table_count`: `17`
-`evidence`: `qdp status --json`、`qdp check --quick --no-write`、`qdp update --as-of-date 2026-06-26 --dry-run --runtime fast --json`
+`evidence`: `qdp status --json`、`qdp check --quick --json`、`qdp check meta --runtime fast --duckdb-memory-limit 12GB --threads 4 --json`、`python -m quant_data_platform.qdp_v2.audit --json`
+`meta_quality_state`: PIT/metadata/factor/index proof passed with zero findings on 2026-07-01.
 
 ### object `active_tables`
 `type`: current_table_set
@@ -30,6 +31,15 @@
 `derived_features`: `intraday_daily_features`、`limit_intraday_features`
 `derived_events`: `limit_status`
 `boundary`: 1m and daily raw are source facts; 5m/panel/features are reproducible caches or derived tables.
+
+### object `meta_domain_quality_proof`
+`type`: active_quality_evidence
+`state`: passed
+`domains`: `trading_calendar`、`universe_snapshot`、`security_status`、`adjust_factor`、`industry_concept`、`index_constituents`
+`audit_path`: `quant_data_platform/data/qdp_v2/audits/meta_domain_quality_20260701T124230+0000.json`
+`adjust_factor`: active dataset `adjust_factor__dbdfa4e10aa2ef7662014013`; one row per `market_daily_raw` key; `adjust_factor` uses positive `back_adjust_factor`; `default_factor_rows=1`; `ffilled_rows=42536`.
+`industry_concept`: active dataset `industry_concept__9b0f9e0af287e299069fdafa`; one row per universe key; blank/missing source labels are explicit `UNKNOWN` rows; `unknown_industry_rows=11831`.
+`security_status`: historical ST rows remain PIT flags; active scope has `delisted_rows=0`.
 
 ### object `archived_v1_workflows`
 `type`: archived_process_surface
@@ -54,7 +64,11 @@
 
 ### procedure `quick_quality_check`
 `command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli check --quick --no-write --json`
-`output`: manifest/footer/coverage check.
+`output`: fast manifest/contract/path check; full parquet footer proof is run explicitly through `python -m quant_data_platform.qdp_v2.audit --json`.
+
+### procedure `meta_quality_check`
+`command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli check meta --runtime fast --duckdb-memory-limit 12GB --threads 4 --json`
+`output`: global exact primary-key and coverage/alignment proof for PIT/meta/factor/index domains.
 
 ### procedure `update_dry_run`
 `command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli update --as-of-date <date> --dry-run --runtime fast --json`

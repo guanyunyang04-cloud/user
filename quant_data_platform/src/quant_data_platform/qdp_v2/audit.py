@@ -18,7 +18,7 @@ from quant_data_platform.qdp_v2.manifest import (
 from quant_data_platform.qdp_v2.status import _active_dataset_refs
 
 
-def audit_active(*, workspace_root: str | Path | None = None, write: bool = True) -> dict[str, Any]:
+def audit_active(*, workspace_root: str | Path | None = None, write: bool = True, verify_footers: bool = True) -> dict[str, Any]:
     root = qdp_v2_root(workspace_root)
     active = read_active_manifest(root)
     if not active:
@@ -40,20 +40,21 @@ def audit_active(*, workspace_root: str | Path | None = None, write: bool = True
             if not shard_path.exists():
                 missing_shards.append(str(shard_path))
                 continue
-            try:
-                rows = _parquet_row_count(shard_path)
-                footer_rows += int(rows)
-                if shard.row_count > 0 and rows > 0 and int(rows) != int(shard.row_count):
-                    footer_errors.append(f"row_count_mismatch:{shard.path}:manifest={shard.row_count}:footer={rows}")
-            except Exception as exc:
-                footer_errors.append(f"footer_unreadable:{shard.path}:{exc}")
+            if verify_footers:
+                try:
+                    rows = _parquet_row_count(shard_path)
+                    footer_rows += int(rows)
+                    if shard.row_count > 0 and rows > 0 and int(rows) != int(shard.row_count):
+                        footer_errors.append(f"row_count_mismatch:{shard.path}:manifest={shard.row_count}:footer={rows}")
+                except Exception as exc:
+                    footer_errors.append(f"footer_unreadable:{shard.path}:{exc}")
         if missing_shards:
             errors.append(f"missing_shards:{domain}:{len(missing_shards)}")
         if footer_errors:
             errors.extend(footer_errors[:20])
             if len(footer_errors) > 20:
                 warnings.append(f"footer_errors_truncated:{domain}:{len(footer_errors)}")
-        if manifest.row_count and footer_rows and int(manifest.row_count) != int(footer_rows):
+        if verify_footers and manifest.row_count and footer_rows and int(manifest.row_count) != int(footer_rows):
             errors.append(f"dataset_row_count_mismatch:{domain}:manifest={manifest.row_count}:footer={footer_rows}")
         contract_errors, contract_warnings = _manifest_contract_findings(domain, manifest.to_dict())
         errors.extend(contract_errors)

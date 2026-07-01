@@ -20,6 +20,15 @@
 `properties`: domain、endpoint、frequency、unit、adjustment semantics、coverage depth、server/source stability、PIT/available-time status。
 `methods`: `probe()`；`archive_raw()`；`normalize()`；`validate()`；`write_manifest()`。
 
+### class `adjust_factor_standard`
+`definition`: QDP v2 active `adjust_factor` is a daily dense factor table aligned exactly to `market_daily_raw` keys.
+`semantics`: `adjust_factor` equals positive `back_adjust_factor`; source `fore_adjust_factor` is retained as evidence only and may be non-positive.
+`invariant`: one row per `(trade_date, symbol)` in `market_daily_raw`; `back_adjust_factor > 0`; `adjust_factor > 0`; missing prior factors are explicit default rows, not silent joins.
+
+### class `industry_concept_complete`
+`definition`: QDP v2 active `industry_concept` is aligned exactly to `universe_snapshot` keys.
+`invariant`: one row per `(trade_date, symbol)` in universe; blank/missing source labels become explicit `UNKNOWN` values; `UNKNOWN` means missing label evidence, not a failed join.
+
 ### class `mootdx_online`
 `domain`: fast daily/1m/5m market bars and quote-like market data.
 `production_role`: preferred market bar source when coverage and unit audit pass.
@@ -38,6 +47,8 @@
 - DuckDB/catalog 类索引可以是工具，但不能成为本地数据基底唯一事实源。
 - 旧迁移、修复、兼容命令不应留在日常 CLI；保留到 archive/reference 即可。
 - 质量证明字段如 schema hash 和 audit path 应保留在 manifest，但默认 `describe` 应显示人读摘要。
+- 对复权因子不能把原始多来源 factor pool 直接当 active 真相；active 必须是标准化后的一键一行事实表。
+- PIT/meta 域的质量证明应写进 manifest：主键唯一、交易日覆盖、scope 过滤、跨域 key 对齐和显式 unknown/default 标记。
 
 ## Pure Functions
 - `classify_provider(source) -> market|structure|disclosure|exploration|local_qdp`
@@ -45,3 +56,5 @@
 - `is_rebuildable_cache(table) -> bool`
 - `requires_pit_available_time(domain) -> bool`
 - `can_delete_dataset_dir(path, active_graph) -> bool`
+- `is_standard_adjust_factor(table) -> bool`
+- `is_complete_universe_aligned_label_table(table) -> bool`

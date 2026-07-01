@@ -19,7 +19,7 @@ def run_check(
 ) -> dict[str, Any]:
     if full:
         return audit_database(workspace_root=workspace_root, deep=True, runtime=runtime, write=not no_write)
-    active = audit_active(workspace_root=workspace_root, write=not no_write)
+    active = audit_active(workspace_root=workspace_root, write=not no_write, verify_footers=False)
     database = audit_database(workspace_root=workspace_root, deep=False, runtime=runtime, write=False)
     status = "ok" if active.get("status") == "ok" and database.get("status") == "ok" else "needs_attention"
     return {
@@ -84,4 +84,3 @@ def _format(payload: dict[str, Any]) -> str:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
-
