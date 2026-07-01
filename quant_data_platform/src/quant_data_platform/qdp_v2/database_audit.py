@@ -21,7 +21,7 @@ from quant_data_platform.qdp_v2.runtime import resolve_runtime_profile
 from quant_data_platform.qdp_v2.status import _active_dataset_refs
 
 
-CORE_DOMAINS = {
+REQUIRED_DOMAINS = {
     "market_daily_raw",
     "market_daily_panel",
     "market_intraday_1m",
@@ -33,22 +33,12 @@ CORE_DOMAINS = {
     "adjust_factor",
     "industry_concept",
     "index_constituents",
-    "intraday_daily_features",
-    "limit_intraday_features",
-}
-
-RECOMMENDED_RAW_DOMAINS = {
     "limit_status",
     "corporate_actions",
     "share_capital",
     "name_change",
-}
-
-OPTIONAL_LONG_HORIZON_DOMAINS = {
-    "announcement",
-    "financial_quarterly",
-    "performance_forecast",
-    "performance_express",
+    "intraday_daily_features",
+    "limit_intraday_features",
 }
 
 PRIMARY_KEYS: dict[str, list[str]] = {
@@ -65,11 +55,7 @@ PRIMARY_KEYS: dict[str, list[str]] = {
     "index_constituents": ["trade_date", "index_symbol", "symbol"],
     "intraday_daily_features": ["trade_date", "symbol"],
     "limit_intraday_features": ["trade_date", "symbol"],
-    "announcement": ["trade_date", "symbol", "title", "url"],
     "limit_status": ["trade_date", "symbol"],
-    "financial_quarterly": ["symbol", "report_date", "source"],
-    "performance_forecast": ["symbol", "report_date", "publish_date", "source"],
-    "performance_express": ["symbol", "report_date", "publish_date", "source"],
     "corporate_actions": ["symbol", "trade_date", "action_type", "description", "source"],
     "share_capital": ["trade_date", "symbol", "source"],
     "name_change": ["trade_date", "symbol", "change_type", "source"],
@@ -124,28 +110,16 @@ def audit_database(
     for warning in list(structural.get("warnings", []) or []):
         warnings.append(str(warning))
 
-    missing_core = sorted(CORE_DOMAINS.difference(active_domains))
-    missing_recommended = sorted(RECOMMENDED_RAW_DOMAINS.difference(active_domains))
-    if missing_core:
+    missing_required = sorted(REQUIRED_DOMAINS.difference(active_domains))
+    if missing_required:
         findings.append(
             _finding(
                 "high",
                 "coverage",
                 "",
-                "core_domains_missing",
-                {"missing_domains": missing_core},
-                "Core domains should be present before treating qdp_v2 active as a complete research database.",
-            )
-        )
-    if missing_recommended:
-        findings.append(
-            _finding(
-                "medium",
-                "coverage",
-                "",
-                "recommended_domains_missing",
-                {"missing_domains": missing_recommended},
-                "Add these raw domains when expanding from market/PIT data into a fuller research database.",
+                "required_domains_missing",
+                {"missing_domains": missing_required},
+                "Required domains should be present before treating qdp_v2 active as a complete short-line research database.",
             )
         )
 
@@ -241,11 +215,8 @@ def audit_database(
         "datasets": dataset_reports,
         "coverage": {
             "active_domains": sorted(active_domains),
-            "core_domains": sorted(CORE_DOMAINS),
-            "missing_core_domains": missing_core,
-            "recommended_domains": sorted(RECOMMENDED_RAW_DOMAINS),
-            "missing_recommended_domains": missing_recommended,
-            "optional_long_horizon_domains": sorted(OPTIONAL_LONG_HORIZON_DOMAINS),
+            "required_domains": sorted(REQUIRED_DOMAINS),
+            "missing_required_domains": missing_required,
         },
         "structural_audit": {
             "status": structural.get("status", ""),

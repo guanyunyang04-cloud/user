@@ -485,7 +485,6 @@ def _maybe_run_qdp_v2(raw_argv: list[str]) -> int | None:
         ["audit", "intraday-quality"],
         ["audit", "pk-deep"],
         ["provider", "benchmark"],
-        ["supplement", "recommended"],
     ):
         route = True
     elif len(raw_argv) >= 2 and raw_argv[0] == "lake" and raw_argv[1] == "gc":

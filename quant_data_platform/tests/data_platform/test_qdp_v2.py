@@ -48,6 +48,28 @@ def _workspace(tmp_path: Path) -> Path:
     return workspace
 
 
+def _active_domain_specs() -> dict[str, tuple[str, str]]:
+    return {
+        "market_daily_raw": ("qdp_v2_market_daily_raw_v1", "market_daily_raw__ok"),
+        "market_intraday_1m": ("mootdx_1m_240_v1", "market_intraday_1m__ok"),
+        "market_intraday_5m": ("mootdx_5m_48_v1", "market_intraday_5m__ok"),
+        "trading_calendar": ("qdp_v2_trading_calendar_v1", "trading_calendar__ok"),
+        "universe_snapshot": ("qdp_v2_universe_snapshot_v1", "universe_snapshot__ok"),
+        "security_status": ("qdp_v2_security_status_v1", "security_status__ok"),
+        "valuation": ("qdp_v2_valuation_v1", "valuation__ok"),
+        "adjust_factor": ("qdp_v2_adjust_factor_v1", "adjust_factor__ok"),
+        "industry_concept": ("qdp_v2_industry_concept_v1", "industry_concept__ok"),
+        "index_constituents": ("qdp_v2_index_constituents_v1", "index_constituents__ok"),
+        "limit_status": ("qdp_v2_limit_status_events_v1", "limit_status__ok"),
+        "corporate_actions": ("qdp_v2_corporate_actions_raw_v1", "corporate_actions__ok"),
+        "share_capital": ("qdp_v2_share_capital_raw_v1", "share_capital__ok"),
+        "name_change": ("qdp_v2_name_change_raw_v1", "name_change__ok"),
+        "intraday_daily_features": ("qdp_v2_intraday_daily_features_v1", "intraday_daily_features__ok"),
+        "limit_intraday_features": ("qdp_v2_limit_intraday_features_1m_v1", "limit_intraday_features__ok"),
+        "market_daily_panel": ("qdp_v2_market_daily_panel_v1", "market_daily_panel__ok"),
+    }
+
+
 def test_qdp_v2_status_reads_active_and_dataset_manifests_without_catalog(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     root = qdp_v2_root(workspace)
@@ -473,18 +495,7 @@ def test_qdp_v2_cleaning_splits_daily_market_raw_and_panel(tmp_path: Path) -> No
 def test_qdp_v2_activate_selects_clean_contracts_and_writes_active(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     root = qdp_v2_root(workspace)
-    specs = {
-        "market_daily_raw": ("qdp_v2_market_daily_raw_v1", "market_daily_raw__ok"),
-        "market_intraday_1m": ("mootdx_1m_240_v1", "market_intraday_1m__ok"),
-        "market_intraday_5m": ("mootdx_5m_48_v1", "market_intraday_5m__ok"),
-        "trading_calendar": ("qdp_v2_trading_calendar_v1", "trading_calendar__ok"),
-        "universe_snapshot": ("qdp_v2_universe_snapshot_v1", "universe_snapshot__ok"),
-        "security_status": ("qdp_v2_security_status_v1", "security_status__ok"),
-        "valuation": ("qdp_v2_valuation_v1", "valuation__ok"),
-        "adjust_factor": ("qdp_v2_adjust_factor_v1", "adjust_factor__ok"),
-        "intraday_daily_features": ("qdp_v2_intraday_daily_features_v1", "intraday_daily_features__ok"),
-        "market_daily_panel": ("qdp_v2_market_daily_panel_v1", "market_daily_panel__ok"),
-    }
+    specs = _active_domain_specs()
     for domain, (contract, dataset_id) in specs.items():
         write_dataset_manifest(
             root,
@@ -535,18 +546,8 @@ def test_qdp_v2_activate_selects_clean_contracts_and_writes_active(tmp_path: Pat
 def test_qdp_v2_activate_rejects_legacy_market_daily_panel_contract(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     root = qdp_v2_root(workspace)
-    required = {
-        "market_daily_raw": ("qdp_v2_market_daily_raw_v1", "market_daily_raw__ok"),
-        "market_intraday_1m": ("mootdx_1m_240_v1", "market_intraday_1m__ok"),
-        "market_intraday_5m": ("mootdx_5m_48_v1", "market_intraday_5m__ok"),
-        "trading_calendar": ("qdp_v2_trading_calendar_v1", "trading_calendar__ok"),
-        "universe_snapshot": ("qdp_v2_universe_snapshot_v1", "universe_snapshot__ok"),
-        "security_status": ("qdp_v2_security_status_v1", "security_status__ok"),
-        "valuation": ("qdp_v2_valuation_v1", "valuation__ok"),
-        "adjust_factor": ("qdp_v2_adjust_factor_v1", "adjust_factor__ok"),
-        "intraday_daily_features": ("qdp_v2_intraday_daily_features_v1", "intraday_daily_features__ok"),
-        "market_daily_panel": ("legacy_policy_bundle_research_panel_v1", "market_daily_panel__legacy"),
-    }
+    required = _active_domain_specs()
+    required["market_daily_panel"] = ("legacy_policy_bundle_research_panel_v1", "market_daily_panel__legacy")
     for domain, (contract, dataset_id) in required.items():
         write_dataset_manifest(
             root,

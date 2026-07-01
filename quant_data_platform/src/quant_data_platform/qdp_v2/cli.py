@@ -25,7 +25,6 @@ COMMAND_MODULES: dict[tuple[str, ...], str] = {
     ("clean",): "quant_data_platform.qdp_v2.cleaning",
     ("derive", "limit-intraday"): "quant_data_platform.qdp_v2.limit_intraday_features",
     ("research-window",): "quant_data_platform.qdp_v2.research_window",
-    ("supplement", "recommended"): "quant_data_platform.qdp_v2.recommended_domains",
     ("provider", "benchmark"): "quant_data_platform.qdp_v2.provider_benchmark",
 }
 
@@ -35,7 +34,6 @@ ENV_GUARDED_PREFIXES = {
     ("derive", "limit-intraday"),
     ("audit", "intraday-quality"),
     ("audit", "pk-deep"),
-    ("supplement", "recommended"),
 }
 
 
