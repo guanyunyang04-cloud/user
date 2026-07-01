@@ -209,7 +209,6 @@ def audit_database(
         "runtime": profile.name,
         "duckdb_memory_limit": memory_limit,
         "duckdb_threads": thread_count,
-        "duckdb_catalog_required": False,
         "dataset_count": len(dataset_reports),
         "datasets": dataset_reports,
         "coverage": {
@@ -1520,7 +1519,7 @@ def _contract_checks(*, domain: str, manifest: DatasetManifest, columns: list[st
         required_cols = {"symbol", "trade_date", "total_mv", "circ_mv", "pe", "pb", "turnover_rate", "source"}
         missing = sorted(required_cols.difference(columns))
         if missing:
-            findings.append(_finding("critical", "schema", domain, "valuation_required_columns_missing", {"columns": missing}, "Re-run qdp clean valuation."))
+            findings.append(_finding("critical", "schema", domain, "valuation_required_columns_missing", {"columns": missing}, "Re-run qdp rebuild valuation."))
     if domain == "market_intraday_1m" and manifest.contract_version != "mootdx_1m_240_v1":
         findings.append(_finding("high", "contract", domain, "wrong_intraday_1m_contract", {"contract_version": manifest.contract_version}, "Normalize 1m to mootdx_1m_240_v1."))
     if domain == "market_intraday_5m" and manifest.contract_version != "mootdx_5m_48_v1":
@@ -1745,7 +1744,7 @@ def _format_markdown(payload: Mapping[str, Any]) -> str:
         f"- Active as of: `{payload.get('active_as_of_date', '')}`",
         f"- Deep audit: `{payload.get('deep', False)}`",
         f"- Dataset count: `{payload.get('dataset_count', 0)}`",
-        f"- DuckDB catalog required: `{payload.get('duckdb_catalog_required', False)}`",
+        "- Metadata source: `active.json + dataset.json`",
         "",
         "## Datasets",
         "",
@@ -1783,7 +1782,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--domains", default="", help="Comma-separated active domains to scan.")
     parser.add_argument("--deep", action="store_true", help="Run row-level uniqueness, validity, coverage, and consistency checks.")
     parser.add_argument("--max-shards", type=int, default=0, help="Limit scanned shards per dataset for smoke tests.")
-    parser.add_argument("--batch-shards", type=int, default=64, help="Number of parquet shards to scan per DuckDB batch.")
+    parser.add_argument("--batch-shards", type=int, default=64, help="Number of parquet shards to scan per batch.")
     parser.add_argument("--sample-limit", type=int, default=20)
     parser.add_argument("--full-global-uniqueness", action="store_true", help="Run expensive cross-shard global primary-key uniqueness checks for all datasets.")
     parser.add_argument("--global-uniqueness-max-rows", type=int, default=50_000_000)

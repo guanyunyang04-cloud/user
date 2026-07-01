@@ -27,7 +27,6 @@ def status_payload(*, workspace_root: str | Path | None = None) -> dict[str, Any
         return {
             "status": "not_initialized",
             "qdp_v2_root": str(root.resolve()),
-            "duckdb_catalog_required": False,
             "message": "qdp_v2 active manifest not found.",
         }
     datasets: dict[str, Any] = {}
@@ -54,13 +53,10 @@ def status_payload(*, workspace_root: str | Path | None = None) -> dict[str, Any
             "row_count": manifest.row_count,
             "shard_count": shard_count,
             "existing_shards": existing_shards,
-            "schema_hash": manifest.schema_hash,
-            "quality": manifest.quality,
         }
     return {
         "status": "ok" if not missing else "missing_dataset_manifest",
         "qdp_v2_root": str(root.resolve()),
-        "duckdb_catalog_required": False,
         "active_as_of_date": str(active.get("active_as_of_date", "") or ""),
         "scope": dict(active.get("scope", {}) or {}),
         "active_manifest": str((root / "active" / "active.json").resolve()),
@@ -76,7 +72,6 @@ def print_status(payload: dict[str, Any], *, as_json: bool) -> None:
         return
     print(f"status: {payload.get('status', '')}")
     print(f"qdp_v2_root: {payload.get('qdp_v2_root', '')}")
-    print(f"duckdb_catalog_required: {payload.get('duckdb_catalog_required', False)}")
     if payload.get("active_as_of_date"):
         print(f"active_as_of_date: {payload.get('active_as_of_date')}")
     print(f"dataset_count: {payload.get('dataset_count', 0)}")
@@ -111,7 +106,7 @@ def active_dataset_map(active: dict[str, Any] | Any) -> dict[str, str]:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="qdp status", description="Show qdp_v2 active data base status without DuckDB.")
+    parser = argparse.ArgumentParser(prog="qdp status", description="Show qdp_v2 active data base status.")
     parser.add_argument("--workspace-root", default="")
     parser.add_argument("--json", action="store_true")
     return parser
@@ -121,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
     payload = status_payload(workspace_root=str(args.workspace_root or "") or None)
     print_status(payload, as_json=bool(args.json))
-    return 0 if str(payload.get("status", "")) in {"ok", "not_migrated"} else 2
+    return 0 if str(payload.get("status", "")) in {"ok", "not_initialized"} else 2
 
 
 if __name__ == "__main__":  # pragma: no cover

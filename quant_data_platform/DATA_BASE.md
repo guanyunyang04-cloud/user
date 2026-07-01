@@ -6,7 +6,7 @@ This file describes the current active local data base. The source of truth is:
 2. `data/qdp_v2/datasets/<domain>/<dataset_id>/dataset.json`
 3. Parquet shards referenced by each `dataset.json`
 
-DuckDB is not part of the active data base contract. It can be rebuilt separately when ad-hoc SQL indexing is useful, but the active data base does not depend on it.
+No separate catalog is required to know what the active data base contains.
 
 ## Scope
 
@@ -47,6 +47,8 @@ DuckDB is not part of the active data base contract. It can be rebuilt separatel
 - `derived` means feature tables that can be rebuilt from raw tables.
 - `cache` means a convenience table for research access. Current `market_daily_panel` should not replace `market_daily_raw` as the source fact table.
 - `active.json` is intentionally flat: `datasets.<domain> = <dataset_id>`. Layer meaning lives in each `dataset.json`.
+- `qdp describe <table>` prints a compact human summary by default.
+- `qdp describe <table> --full --json` prints the complete `dataset.json`, including schema hashes and audit paths.
 
 ## Quality State
 
@@ -71,7 +73,9 @@ Known boundaries:
 conda run -n yolos python -m quant_data_platform.cli status
 conda run -n yolos python -m quant_data_platform.cli list
 conda run -n yolos python -m quant_data_platform.cli describe market_intraday_1m
+conda run -n yolos python -m quant_data_platform.cli describe market_intraday_1m --full --json
 conda run -n yolos python -m quant_data_platform.cli check --quick --json
 conda run -n yolos python -m quant_data_platform.cli check --full --runtime fast --json
+conda run -n yolos python -m quant_data_platform.cli rebuild limit-intraday --runtime fast --json
 conda run -n yolos python -m quant_data_platform.cli gc --dry-run --with-size --json
 ```

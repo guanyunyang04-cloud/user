@@ -79,7 +79,6 @@ def audit_active(*, workspace_root: str | Path | None = None, write: bool = True
         "qdp_v2_root": str(root.resolve()),
         "active_manifest": str((root / "active" / "active.json").resolve()),
         "audited_at": utc_now(),
-        "duckdb_catalog_required": False,
         "dataset_count": len(dataset_reports),
         "datasets": dataset_reports,
         "warnings": warnings,
@@ -142,7 +141,7 @@ def _parquet_row_count(path: Path) -> int:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="qdp check --quick", description="Audit qdp_v2 active manifests without DuckDB.")
+    parser = argparse.ArgumentParser(prog="qdp check --quick", description="Audit qdp_v2 active manifests.")
     parser.add_argument("--workspace-root", default="")
     parser.add_argument("--no-write", action="store_true")
     parser.add_argument("--json", action="store_true")

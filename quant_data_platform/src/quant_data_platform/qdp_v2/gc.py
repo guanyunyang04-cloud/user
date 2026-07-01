@@ -40,7 +40,6 @@ def lake_gc(
     return {
         "status": "deleted" if delete else "dry_run",
         "qdp_v2_root": str(root.resolve()),
-        "duckdb_catalog_required": False,
         "destructive_actions_performed": bool(delete and deleted),
         "referenced_dataset_count": len(referenced),
         "dataset_dir_count": len(inventory),

@@ -18,12 +18,26 @@ commands:
   describe <table>        Describe an active table or dataset id.
   check --quick           Fast manifest and contract check.
   check --full            Full data-quality audit.
+  rebuild 5m              Rebuild 5m cache from active 1m bars.
+  rebuild daily-panel     Rebuild daily raw/panel tables from an input panel.
+  rebuild valuation       Rebuild normalized valuation table.
   rebuild limit-intraday  Rebuild 1m-derived limit-board features.
   gc --dry-run            Show unreferenced data directories.
-  update                  Update the active data base. Dry-run by default-friendly options are supported.
+  update                  Update the active data base.
 
 The active data base is manifest-first: parquet + dataset.json + active.json.
-DuckDB indexes, memmaps, and archived repair tools are not part of active state.
+Indexes, memmaps, and archived repair tools are not part of active state.
+"""
+
+REBUILD_HELP_TEXT = """usage: qdp rebuild <target> [options]
+
+Rebuild cache and feature tables that are reproducible from active raw data.
+
+targets:
+  5m                 Rebuild 48-bar 5m cache from active 1m data.
+  daily-panel        Rebuild daily raw/panel tables from an input panel.
+  valuation          Rebuild normalized valuation table.
+  limit-intraday     Rebuild 1m-derived limit-board features.
 """
 
 
@@ -34,17 +48,26 @@ COMMAND_MODULES: dict[tuple[str, ...], str] = {
     ("check",): "quant_data_platform.qdp_v2.check",
     ("gc",): "quant_data_platform.qdp_v2.gc",
     ("update",): "quant_data_platform.qdp_v2.update",
+    ("rebuild", "5m"): "quant_data_platform.qdp_v2.cleaning",
+    ("rebuild", "daily-panel"): "quant_data_platform.qdp_v2.cleaning",
+    ("rebuild", "valuation"): "quant_data_platform.qdp_v2.cleaning",
     ("rebuild", "limit-intraday"): "quant_data_platform.qdp_v2.limit_intraday_features",
 }
 
 ENV_GUARDED_PREFIXES = {
     ("check",),
+    ("rebuild", "5m"),
+    ("rebuild", "daily-panel"),
+    ("rebuild", "valuation"),
     ("rebuild", "limit-intraday"),
 }
 
 ARG_ALIASES: dict[tuple[str, ...], list[str]] = {
     ("list",): ["list"],
     ("describe",): ["describe"],
+    ("rebuild", "5m"): ["5m-from-1m"],
+    ("rebuild", "daily-panel"): ["daily-market"],
+    ("rebuild", "valuation"): ["valuation"],
 }
 
 
@@ -52,6 +75,9 @@ def dispatch(argv: list[str]) -> int | None:
     raw = list(argv or [])
     if not raw or raw in (["-h"], ["--help"]):
         print(HELP_TEXT)
+        return 0
+    if raw[0] == "rebuild" and (len(raw) == 1 or raw[1] in {"-h", "--help"}):
+        print(REBUILD_HELP_TEXT)
         return 0
     for prefix, module_name in sorted(COMMAND_MODULES.items(), key=lambda item: len(item[0]), reverse=True):
         if tuple(raw[: len(prefix)]) == prefix:

@@ -103,7 +103,6 @@ def test_qdp_v2_status_reads_active_and_dataset_manifests_without_catalog(tmp_pa
     payload = status_payload(workspace_root=workspace)
 
     assert payload["status"] == "ok"
-    assert payload["duckdb_catalog_required"] is False
     assert payload["datasets"]["market_daily_raw"]["existing_shards"] == 1
 
 

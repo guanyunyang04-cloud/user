@@ -26,8 +26,6 @@ from quant_data_platform.qdp_v2.manifest import (
     write_active_manifest,
     write_dataset_manifest,
 )
-from quant_data_platform.qdp_v2.intraday_repair import repair_intraday_quality_anomalies, repair_intraday_zero_bars
-from quant_data_platform.qdp_v2.intraday_features_repair import repair_intraday_daily_features
 from quant_data_platform.qdp_v2.runtime import resolve_runtime_profile
 
 
@@ -1590,7 +1588,7 @@ def _duckdb_schema(path: Path) -> list[dict[str, str]]:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="qdp clean", description="qdp_v2 data cleaning and standardization commands.")
+    parser = argparse.ArgumentParser(prog="qdp rebuild", description="Rebuild qdp_v2 cache and derived tables.")
     parser.add_argument("--workspace-root", default="")
     parser.add_argument("--runtime", default="balanced", choices=("safe", "balanced", "fast"))
     sub = parser.add_subparsers(dest="clean_command", required=True)
@@ -1608,7 +1606,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     five.add_argument("--reuse-from-dataset-id", default="")
     five.add_argument("--reuse-copy-mode", default="hardlink", choices=("hardlink", "copy"))
     five.add_argument("--json", action="store_true")
-    daily = sub.add_parser("daily-market", help="Split a rectangular legacy daily market panel into raw facts and research panel.")
+    daily = sub.add_parser("daily-market", help="Rebuild raw daily facts and research panel from an input daily panel.")
     daily.add_argument("--source-dataset-id", default="")
     daily.add_argument("--source-domain", default="market_daily_panel")
     daily.add_argument("--max-shards", type=int, default=0)
@@ -1635,40 +1633,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     scope.add_argument("--trust-existing", action="store_true")
     scope.add_argument("--duckdb-memory-limit", default="")
     scope.add_argument("--json", action="store_true")
-    repair = sub.add_parser("intraday-zero-bars", help="Repair zero-price 1m bars by dropping suspended pseudo bars and replacing traded gaps.")
-    repair.add_argument("--source-dataset-id", default="")
-    repair.add_argument("--external-source-root", default=r"H:\BaiduNetdiskDownload\量化数据")
-    repair.add_argument("--years", default="2023,2024,2026")
-    repair.add_argument("--duckdb-memory-limit", default="")
-    repair.add_argument("--dry-run", action="store_true")
-    repair.add_argument("--activate-domain", action="store_true")
-    repair.add_argument("--no-mootdx", action="store_true")
-    repair.add_argument("--max-repair-symbol-days", type=int, default=0)
-    repair.add_argument("--copy-mode", default="hardlink", choices=("hardlink", "copy"))
-    repair.add_argument("--json", action="store_true")
-    quality_repair = sub.add_parser("intraday-quality-repair", help="Drop no-trade intraday pseudo bars and correct extreme high/low glitches.")
-    quality_repair.add_argument("--source-dataset-id", default="")
-    quality_repair.add_argument("--five-minute-dataset-id", default="")
-    quality_repair.add_argument("--daily-dataset-id", default="")
-    quality_repair.add_argument("--duckdb-memory-limit", default="")
-    quality_repair.add_argument("--dry-run", action="store_true")
-    quality_repair.add_argument("--activate-domain", action="store_true")
-    quality_repair.add_argument("--max-shards", type=int, default=0)
-    quality_repair.add_argument("--batch-shards", type=int, default=128)
-    quality_repair.add_argument("--price-factor", type=float, default=3.0)
-    quality_repair.add_argument("--workers", type=int, default=1)
-    quality_repair.add_argument("--copy-mode", default="hardlink", choices=("hardlink", "copy"))
-    quality_repair.add_argument("--progress-path", default="")
-    quality_repair.add_argument("--json", action="store_true")
-    feature_repair = sub.add_parser("intraday-features-repair", help="Incrementally repair intraday_daily_features after intraday raw cleanup.")
-    feature_repair.add_argument("--issue-path", required=True)
-    feature_repair.add_argument("--source-dataset-id", default="")
-    feature_repair.add_argument("--one-minute-dataset-id", default="")
-    feature_repair.add_argument("--five-minute-dataset-id", default="")
-    feature_repair.add_argument("--duckdb-memory-limit", default="")
-    feature_repair.add_argument("--activate-domain", action="store_true")
-    feature_repair.add_argument("--copy-mode", default="hardlink", choices=("hardlink", "copy"))
-    feature_repair.add_argument("--json", action="store_true")
     return parser
 
 
@@ -1730,54 +1694,6 @@ def main(argv: list[str] | None = None) -> int:
             resume=bool(args.resume),
             trust_existing=bool(args.trust_existing),
             duckdb_memory_limit=str(args.duckdb_memory_limit or ""),
-        )
-    elif args.clean_command == "intraday-zero-bars":
-        years = tuple(
-            int(item)
-            for item in str(args.years or "").replace(";", ",").split(",")
-            if str(item).strip()
-        )
-        payload = repair_intraday_zero_bars(
-            workspace_root=workspace,
-            source_dataset_id=str(args.source_dataset_id or ""),
-            external_source_root=str(args.external_source_root or ""),
-            years=years or (2023, 2024, 2026),
-            runtime=str(args.runtime or "balanced"),
-            duckdb_memory_limit=str(args.duckdb_memory_limit or ""),
-            dry_run=bool(args.dry_run),
-            activate_domain=bool(args.activate_domain),
-            no_mootdx=bool(args.no_mootdx),
-            max_repair_symbol_days=int(args.max_repair_symbol_days or 0),
-            copy_mode=str(args.copy_mode or "hardlink"),
-        )
-    elif args.clean_command == "intraday-quality-repair":
-        payload = repair_intraday_quality_anomalies(
-            workspace_root=workspace,
-            source_dataset_id=str(args.source_dataset_id or ""),
-            five_minute_dataset_id=str(args.five_minute_dataset_id or ""),
-            daily_dataset_id=str(args.daily_dataset_id or ""),
-            runtime=str(args.runtime or "balanced"),
-            duckdb_memory_limit=str(args.duckdb_memory_limit or ""),
-            dry_run=bool(args.dry_run),
-            activate_domain=bool(args.activate_domain),
-            max_shards=int(args.max_shards or 0),
-            batch_shards=int(args.batch_shards or 128),
-            price_factor=float(args.price_factor or 3.0),
-            workers=int(args.workers or 1),
-            copy_mode=str(args.copy_mode or "hardlink"),
-            progress_path=str(args.progress_path or "") or None,
-        )
-    elif args.clean_command == "intraday-features-repair":
-        payload = repair_intraday_daily_features(
-            workspace_root=workspace,
-            issue_path=str(args.issue_path),
-            source_dataset_id=str(args.source_dataset_id or ""),
-            one_minute_dataset_id=str(args.one_minute_dataset_id or ""),
-            five_minute_dataset_id=str(args.five_minute_dataset_id or ""),
-            runtime=str(args.runtime or "balanced"),
-            duckdb_memory_limit=str(args.duckdb_memory_limit or ""),
-            activate_domain=bool(args.activate_domain),
-            copy_mode=str(args.copy_mode or "hardlink"),
         )
     else:
         raise ValueError(f"unsupported_clean_command:{args.clean_command}")

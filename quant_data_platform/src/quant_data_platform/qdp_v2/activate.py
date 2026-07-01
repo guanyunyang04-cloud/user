@@ -94,7 +94,7 @@ def activate_v2(
         "active_as_of_date": active_as_of,
         "scope": {**ACTIVE_SCOPE, "end_date": active_as_of or ACTIVE_SCOPE["end_date"]},
         "datasets": {domain: selected[domain] for domain in ACTIVE_DOMAINS if domain in selected},
-        "source": {"created_by": "qdp activate-v2", "created_at": utc_now()},
+        "source": {"created_by": "qdp internal activate", "created_at": utc_now()},
     }
     result = {
         "status": "blocked" if errors else ("activated" if yes else "dry_run"),
@@ -142,7 +142,7 @@ def _infer_active_as_of(by_domain: dict[str, list[dict[str, Any]]], selected: di
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="qdp activate-v2", description="Atomically activate a qdp_v2 manifest set.")
+    parser = argparse.ArgumentParser(prog="qdp internal-activate", description="Atomically activate a qdp_v2 manifest set.")
     parser.add_argument("--workspace-root", default="")
     parser.add_argument("--as-of-date", default="")
     parser.add_argument("--yes", action="store_true", help="Write active/active.json. Without --yes this is a dry-run.")
