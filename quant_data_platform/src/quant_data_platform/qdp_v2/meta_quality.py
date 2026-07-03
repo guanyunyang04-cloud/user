@@ -367,7 +367,7 @@ def rebuild_industry_concept_complete(
     memory_limit = str(duckdb_memory_limit or "").strip() or profile.duckdb_memory_limit
     thread_count = int(threads or profile.duckdb_threads or 1)
     target_dataset_id = "industry_concept__" + stable_hash(
-        {"source": source.dataset_id, "universe": universe.dataset_id, "contract": "qdp_v2_industry_concept_complete_v2"}
+        {"source": source.dataset_id, "universe": universe.dataset_id, "contract": "qdp_v2_industry_v5_complete"}
     )
     target_dir = root / "datasets" / "industry_concept" / target_dataset_id
     staging = target_dir / ".staging"
@@ -393,7 +393,7 @@ def rebuild_industry_concept_complete(
               select trade_date, symbol from read_parquet({universe_sql}, union_by_name=true)
             ),
             i as (
-              select trade_date, symbol, industry, concept_tags, source
+              select trade_date, symbol, industry, source
               from read_parquet({source_sql}, union_by_name=true)
             )
             select
@@ -413,7 +413,7 @@ def rebuild_industry_concept_complete(
                 from read_parquet({universe_sql}, union_by_name=true)
               ),
               i as (
-                select symbol, trade_date, industry, concept_tags, source
+                select symbol, trade_date, industry, source
                 from read_parquet({source_sql}, union_by_name=true)
               )
               select
@@ -424,7 +424,6 @@ def rebuild_industry_concept_complete(
                   when i.industry is null or trim(cast(i.industry as varchar)) = '' then 'UNKNOWN'
                   else cast(i.industry as varchar)
                 end as industry,
-                coalesce(cast(i.concept_tags as varchar), '') as concept_tags,
                 case
                   when i.symbol is null then 'qdp_v2_explicit_unknown'
                   when i.industry is null or trim(cast(i.industry as varchar)) = '' then 'qdp_v2_blank_industry_marked_unknown'
@@ -487,7 +486,7 @@ def rebuild_industry_concept_complete(
         domain="industry_concept",
         layer="raw",
         frequency="1d",
-        contract_version="qdp_v2_industry_concept_v2",
+        contract_version="qdp_v2_industry_v5",
         primary_key=["trade_date", "symbol"],
         start_date=entry.start_date,
         end_date=entry.end_date,
@@ -512,7 +511,7 @@ def rebuild_industry_concept_complete(
             "source_blank_industry_rows_marked_unknown": int(before.get("blank_industry_rows", 0) or 0),
         },
         notes=[
-            "complete daily industry/concept table aligned to universe_snapshot",
+            "complete daily industry table aligned to universe_snapshot",
             "missing or blank source industry is explicitly represented as UNKNOWN",
         ],
     )

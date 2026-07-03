@@ -251,7 +251,7 @@ def _domain_role(domain: str, layer: str) -> str:
         "security_status": "PIT listing/ST/suspension status",
         "valuation": "daily valuation facts",
         "adjust_factor": "adjustment factor facts",
-        "industry_concept": "industry and concept labels",
+        "industry_concept": "industry labels",
         "index_constituents": "index constituent facts",
         "corporate_actions": "corporate-action event facts",
         "share_capital": "share-capital facts",

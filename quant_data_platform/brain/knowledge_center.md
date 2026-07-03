@@ -28,7 +28,7 @@
 ### class `industry_concept_complete`
 `definition`: QDP v2 active `industry_concept` is aligned exactly to `universe_snapshot` keys.
 `invariant`: one row per `(trade_date, symbol)` in universe; blank/missing labels must be filled from same-symbol history or reliable profile metadata when available; persistent `UNKNOWN` is allowed only as explicit unavailable evidence, not as a silent join failure.
-`current_state`: active `industry` has `0` blank/UNKNOWN rows as of `2026-06-26`; `concept_tags` are intentionally blank because reliable historical concept tags are not present and are not fabricated.
+`current_state`: active `industry` has `0` blank/UNKNOWN rows as of `2026-06-26`; concept tags are not stored in the active short-line data base because no reliable PIT concept-tag source is active.
 
 ### class `active_scope_mainboard_non_delisted`
 `definition`: the active short-line data base covers Shanghai/Shenzhen A-share mainboard symbols after board/ST/delisting filters.
@@ -41,7 +41,7 @@
 `production_role`: preferred market bar source when coverage and unit audit pass.
 
 ### class `baostock_online`
-`domain`: trading calendar, universe/listing status, security status, industry/concept, index constituents, turnover/valuation and structural daily fields.
+`domain`: trading calendar, universe/listing status, security status, industry labels, index constituents, turnover/valuation and structural daily fields.
 `bar_role`: audit/backfill/fallback only unless a task selects it.
 
 ### class `cninfo_online`

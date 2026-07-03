@@ -144,7 +144,7 @@ def rebuild_industry_concept_filled(
     )
     source = _require_manifest(root, datasets, "industry_concept")
     target_dataset_id = "industry_concept__" + stable_hash(
-        {"source": source.dataset_id, "contract": "qdp_v2_industry_concept_filled_v4"}
+        {"source": source.dataset_id, "contract": "qdp_v2_industry_v5"}
     )
     paths_sql = _path_list_sql(_shard_paths(root, source))
     target_dir, staging, target_path = _prepare_target(root, "industry_concept", target_dataset_id, "part_000000_industry_concept_filled.parquet")
@@ -168,7 +168,6 @@ def rebuild_industry_concept_filled(
                     else cast(industry as varchar)
                   end as known_industry,
                   coalesce(cast(industry as varchar), '') as original_industry,
-                  coalesce(cast(concept_tags as varchar), '') as concept_tags,
                   coalesce(cast(source as varchar), '') as original_source
                 from read_parquet({paths_sql}, union_by_name=true)
               ),
@@ -196,7 +195,6 @@ def rebuild_industry_concept_filled(
                 symbol,
                 strftime(trade_date, '%Y-%m-%d') as trade_date,
                 coalesce(known_industry, prior_industry, next_industry, 'UNKNOWN') as industry,
-                concept_tags,
                 case
                   when known_industry is not null then original_source
                   when prior_industry is not null then 'qdp_v2_industry_prior_ffill'
@@ -261,7 +259,6 @@ def rebuild_industry_concept_filled(
                       then o.profile_industry
                       else src.industry
                     end as industry,
-                    src.concept_tags,
                     case
                       when o.profile_industry is not null
                        and (src.industry = 'UNKNOWN' or src.industry is null or trim(cast(src.industry as varchar)) = '')
@@ -301,8 +298,7 @@ def rebuild_industry_concept_filled(
               sum(case when industry_fill_method = 'prior_ffill' then 1 else 0 end) as prior_ffill_rows,
               sum(case when industry_fill_method = 'initial_bfill' then 1 else 0 end) as initial_bfill_rows,
               sum(case when industry_fill_method = 'akshare_profile' then 1 else 0 end) as akshare_profile_rows,
-              sum(case when industry_fill_method = 'unknown_unresolved' then 1 else 0 end) as unresolved_rows,
-              sum(case when concept_tags is null or trim(concept_tags) = '' then 1 else 0 end) as blank_concept_tags
+              sum(case when industry_fill_method = 'unknown_unresolved' then 1 else 0 end) as unresolved_rows
             from read_parquet({_sql_literal(str(target_path))}, union_by_name=true)
             """,
         )
@@ -318,12 +314,12 @@ def rebuild_industry_concept_filled(
         dataset_id=target_dataset_id,
         layer="raw",
         frequency="1d",
-        contract_version="qdp_v2_industry_concept_filled_v4",
+        contract_version="qdp_v2_industry_v5",
         primary_key=["trade_date", "symbol"],
         stats=stats,
         schema=schema,
         final_path=final_path,
-        content_key="filled_industry_concept",
+        content_key="filled_industry",
         source={"provider": "qdp_v2", "created_by": "rebuild_industry_concept_filled", "created_at": utc_now(), "source_dataset_id": source.dataset_id},
         quality={
             "path_refs_exist": True,
@@ -334,8 +330,6 @@ def rebuild_industry_concept_filled(
             "industry_akshare_profile_rows": int(stats.get("akshare_profile_rows", 0) or 0),
             "industry_akshare_profile_symbols": sorted({str(item.get("symbol", "")) for item in profile_overrides if item.get("symbol")}),
             "industry_profile_fetch_errors": profile_errors[:50],
-            "concept_tags_available": int(stats.get("blank_concept_tags", 0) or 0) < int(stats.get("row_count", 0) or 0),
-            "concept_tags_note": "active local source has no historical concept tag values; concept_tags are not fabricated",
         },
         notes=["UNKNOWN industry values are filled from the same symbol's nearest known industry, then unresolved current symbols use AkShare/CNInfo profile industry when available."],
     )

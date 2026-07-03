@@ -15,7 +15,7 @@
 `invariant`: preserve original OHLCV units and adjustment state; derived adjusted fields or features are separate outputs.
 
 ### object `pit_historical_semantics`
-`scope`: trading calendar, universe, security status, valuation, index constituents, industry/concept and event availability.
+`scope`: trading calendar, universe, security status, valuation, index constituents, industry labels and event availability.
 `invariant`: current snapshots do not backfill historical semantics without PIT/available-time proof.
 
 ### object `rebuildable_cache`

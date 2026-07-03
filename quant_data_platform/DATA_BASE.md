@@ -32,7 +32,7 @@ No separate catalog is required to know what the active data base contains.
 | `security_status` | PIT listing/ST/suspension/status fields | raw | 1d | 8,617,077 | 2011-11-22..2026-06-26 |
 | `valuation` | Daily valuation fields with market-cap fields | raw | 1d | 8,617,077 | 2011-11-22..2026-06-26 |
 | `adjust_factor` | Standard daily back-adjust factors aligned to daily raw keys | raw | 1d | 8,392,689 | 2011-11-22..2026-06-26 |
-| `industry_concept` | Industry labels aligned to universe; concept tags not fabricated | raw | 1d | 8,617,077 | 2011-11-22..2026-06-26 |
+| `industry_concept` | Industry labels aligned to universe | raw | 1d | 8,617,077 | 2011-11-22..2026-06-26 |
 | `index_constituents` | Daily PIT-style index membership facts | raw | 1d | 2,567,239 | 2011-11-30..2026-06-26 |
 | `limit_status` | Daily limit-up/down close status | raw-derived | 1d | 205,694 | 2011-11-23..2026-06-26 |
 | `corporate_actions` | Corporate action event facts | raw | event | 28,761 | 2011-11-28..2026-06-26 |
@@ -71,7 +71,7 @@ Known boundaries:
 - Long-horizon disclosure/fundamental datasets are not part of this short-line active data base.
 - `adjust_factor.adjust_factor` uses positive `back_adjust_factor` semantics. Source `fore_adjust_factor` is retained as evidence but may be non-positive and should not be used as a positive multiplicative factor.
 - `industry_concept.industry` has no blank or `UNKNOWN` rows. The remaining new-stock gap for `001399.SZ` was filled from AkShare/CNInfo company profile industry.
-- `industry_concept.concept_tags` is currently blank because the active local source has no reliable historical concept-tag values; tags are not fabricated.
+- `industry_concept` intentionally stores only industry labels. Historical concept tags are not included because no reliable PIT concept-tag source is active.
 
 ## Common Commands
 

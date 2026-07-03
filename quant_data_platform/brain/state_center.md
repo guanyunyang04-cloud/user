@@ -39,7 +39,7 @@
 `domains`: `trading_calendar`、`universe_snapshot`、`security_status`、`adjust_factor`、`industry_concept`、`index_constituents`
 `audit_path`: `quant_data_platform/data/qdp_v2/audits/meta_domain_quality_20260701T140834+0000.json`
 `adjust_factor`: active dataset `adjust_factor__4e0e31d3c1fd34bfcfa7a7dd`; one row per `market_daily_raw` key; `adjust_factor` uses positive `back_adjust_factor`; `default_factor_rows=1`; `ffilled_rows=42474`.
-`industry_concept`: active dataset `industry_concept__9da8e8e69bbebafa996aed5f`; one row per universe key; blank/UNKNOWN industry rows are now `0`; `001399.SZ` was filled from AkShare/CNInfo profile industry; concept tags remain blank because reliable historical concept tags are not present.
+`industry_concept`: one row per universe key; blank/UNKNOWN industry rows are `0`; `001399.SZ` was filled from AkShare/CNInfo profile industry; concept tags are not part of the active short-line data base because no reliable PIT concept-tag source is active.
 `security_status`: historical ST rows remain PIT flags; active scope has `delisted_rows=0`.
 
 ### object `scope_active_rebuild_20260701`

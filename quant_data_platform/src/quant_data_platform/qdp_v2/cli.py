@@ -30,6 +30,7 @@ commands:
   rebuild index-constituents-daily Rebuild daily PIT index constituents.
   rebuild scope-active    Rebuild active tables under the current mainboard non-delisted scope.
   rebuild limit-intraday  Rebuild 1m-derived limit-board features.
+  rebuild training-pack   Build research training pack from active data.
   gc --dry-run            Show unreferenced data directories.
   update                  Update the active data base.
 
@@ -46,13 +47,14 @@ targets:
   daily-panel        Rebuild daily raw/panel tables from an input panel.
   valuation          Rebuild normalized valuation table.
   adjust-factor      Rebuild one-row-per-symbol-day standard adjustment factors.
-  industry-concept   Rebuild industry/concept table aligned to universe.
+  industry-concept   Rebuild industry table aligned to universe.
   industry-concept-filled Fill UNKNOWN industry labels from same-symbol known labels.
   share-capital-daily Rebuild one-row-per-symbol-day share-capital facts.
   valuation-market-cap Rebuild market-cap fields from close and share capital.
   index-constituents-daily Expand index snapshots to daily PIT membership.
   scope-active        Rebuild all active symbol tables under current scope.
   limit-intraday     Rebuild 1m-derived limit-board features.
+  training-pack       Build sharded memmap and training pack from active data.
 """
 
 
@@ -75,6 +77,7 @@ COMMAND_MODULES: dict[tuple[str, ...], str] = {
     ("rebuild", "index-constituents-daily"): "quant_data_platform.qdp_v2.completion",
     ("rebuild", "scope-active"): "quant_data_platform.qdp_v2.completion",
     ("rebuild", "limit-intraday"): "quant_data_platform.qdp_v2.limit_intraday_features",
+    ("rebuild", "training-pack"): "quant_data_platform.qdp_v2.training_pack",
 }
 
 ENV_GUARDED_PREFIXES = {
@@ -90,6 +93,7 @@ ENV_GUARDED_PREFIXES = {
     ("rebuild", "index-constituents-daily"),
     ("rebuild", "scope-active"),
     ("rebuild", "limit-intraday"),
+    ("rebuild", "training-pack"),
 }
 
 ARG_ALIASES: dict[tuple[str, ...], list[str]] = {

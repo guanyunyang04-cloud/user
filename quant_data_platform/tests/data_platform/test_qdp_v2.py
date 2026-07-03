@@ -55,7 +55,7 @@ def _active_domain_specs() -> dict[str, tuple[str, str]]:
         "security_status": ("qdp_v2_security_status_v1", "security_status__ok"),
         "valuation": ("qdp_v2_valuation_v1", "valuation__ok"),
         "adjust_factor": ("qdp_v2_adjust_factor_v1", "adjust_factor__ok"),
-        "industry_concept": ("qdp_v2_industry_concept_v1", "industry_concept__ok"),
+        "industry_concept": ("qdp_v2_industry_v5", "industry_concept__ok"),
         "index_constituents": ("qdp_v2_index_constituents_v1", "index_constituents__ok"),
         "limit_status": ("qdp_v2_limit_status_events_v1", "limit_status__ok"),
         "corporate_actions": ("qdp_v2_corporate_actions_raw_v1", "corporate_actions__ok"),
@@ -391,7 +391,7 @@ def test_qdp_v2_meta_quality_rebuilds_factor_and_industry_then_audits(tmp_path: 
             "is_suspended": [False, False],
         }
     )
-    industry = pd.DataFrame({"trade_date": ["2026-01-05"], "symbol": ["000001.SZ"], "industry": [""], "concept_tags": [""], "source": ["unit"]})
+    industry = pd.DataFrame({"trade_date": ["2026-01-05"], "symbol": ["000001.SZ"], "industry": [""], "source": ["unit"]})
     index = pd.DataFrame({"trade_date": ["2026-01-05"], "index_symbol": ["000300.SH"], "symbol": ["000001.SZ"]})
 
     write_domain("market_daily_raw", "market_daily_raw__unit", daily, "qdp_v2_market_daily_raw_v1", ["trade_date", "symbol"])
