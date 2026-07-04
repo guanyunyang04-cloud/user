@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import torch
 
 from daily_research.path_policy.qdp_v2_sequence_path_pack import (
@@ -10,7 +11,7 @@ from daily_research.path_policy.qdp_v2_sequence_path_pack import (
     _compute_future_path_and_masks,
     _fit_normalization,
 )
-from daily_research.path_policy.qdp_v2_sequence_path_training import SequencePathModel, _compute_loss
+from daily_research.path_policy.qdp_v2_sequence_path_training import SequencePathModel, SequencePathPackDataset, _compute_loss
 
 
 def _raw_panel(open_values: list[float], high_values: list[float], low_values: list[float], close_values: list[float]) -> np.ndarray:
@@ -131,3 +132,73 @@ def test_sequence_path_model_outputs_path_summary_and_score() -> None:
     assert out["score"].shape == (4,)
     assert torch.isfinite(loss)
     assert set(parts) == {"loss", "path_loss", "summary_loss", "value_loss", "rank_loss"}
+
+
+def test_sequence_pack_dataset_get_batch_reads_date_grouped_windows(tmp_path) -> None:
+    def write_memmap(path, array: np.ndarray) -> None:
+        mm = np.memmap(path, dtype="float32", mode="w+", shape=array.shape)
+        mm[:] = array[:]
+        mm.flush()
+
+    panels = tmp_path / "panels"
+    labels = tmp_path / "labels"
+    panels.mkdir()
+    labels.mkdir()
+    channel_specs = {
+        "daily_raw": 2,
+        "daily_state": 1,
+        "intraday_summary": 1,
+        "limit_structure": 1,
+    }
+    feature_channels = {}
+    for channel_idx, (name, feature_count) in enumerate(channel_specs.items()):
+        values = np.zeros((5, 2, feature_count), dtype=np.float32)
+        for date_idx in range(5):
+            for symbol_idx in range(2):
+                values[date_idx, symbol_idx, :] = 100 * channel_idx + 10 * date_idx + symbol_idx
+        path = panels / f"{name}.float32.dat"
+        write_memmap(path, values)
+        feature_channels[name] = {
+            "path": str(path),
+            "shape": list(values.shape),
+            "columns": [f"{name}_{idx}" for idx in range(feature_count)],
+        }
+
+    future_path = np.ones((5, 2, 20, 4), dtype=np.float32)
+    path_summary = np.ones((5, 2, len(PATH_SUMMARY_COLUMNS)), dtype=np.float32)
+    future_path_path = labels / "future_ohlc_path.float32.dat"
+    path_summary_path = labels / "path_summary.float32.dat"
+    write_memmap(future_path_path, future_path)
+    write_memmap(path_summary_path, path_summary)
+    sample_index_path = tmp_path / "sample_index.parquet"
+    pd.DataFrame(
+        [
+            {"split": "train", "date_idx": 2, "symbol_idx": 0, "trade_date": "2024-01-03", "symbol": "000001.SZ"},
+            {"split": "train", "date_idx": 2, "symbol_idx": 1, "trade_date": "2024-01-03", "symbol": "000002.SZ"},
+        ]
+    ).to_parquet(sample_index_path, index=False)
+    manifest = {
+        "lookback_days": 3,
+        "forward_days": 20,
+        "sample_index_path": str(sample_index_path),
+        "feature_channels": feature_channels,
+        "label_arrays": {
+            "future_ohlc_path": {"path": str(future_path_path), "shape": list(future_path.shape)},
+            "path_summary": {"path": str(path_summary_path), "shape": list(path_summary.shape), "columns": PATH_SUMMARY_COLUMNS},
+        },
+        "normalization": {
+            name: {"mean": [0.0] * feature_count, "std": [1.0] * feature_count}
+            for name, feature_count in channel_specs.items()
+        },
+    }
+
+    dataset = SequencePathPackDataset(manifest, split="train")
+    batch = dataset.get_batch([0, 1])
+
+    assert batch["x"].shape == (2, 3, 5)
+    assert batch["y_path"].shape == (2, 20, 4)
+    assert batch["y_summary"].shape == (2, len(PATH_SUMMARY_COLUMNS))
+    assert batch["trade_date"] == ["2024-01-03", "2024-01-03"]
+    # First channel, first feature: dates 0..2 for symbol 0 and 1.
+    assert torch.equal(batch["x"][0, :, 0], torch.tensor([0.0, 10.0, 20.0]))
+    assert torch.equal(batch["x"][1, :, 0], torch.tensor([1.0, 11.0, 21.0]))

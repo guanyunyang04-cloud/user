@@ -15,7 +15,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import BatchSampler, DataLoader, Dataset, Sampler
+from torch.utils.data import BatchSampler, Dataset
 
 from daily_research.path_policy.qdp_v2_sequence_path_pack import (
     DEFAULT_FORWARD_DAYS,
@@ -80,6 +80,10 @@ class SequencePathPackDataset(Dataset):
         self.sample_index = sample_index[sample_index["split"].astype(str).eq(str(split))].reset_index(drop=True)
         if int(max_samples) > 0 and len(self.sample_index) > int(max_samples):
             self.sample_index = self.sample_index.head(int(max_samples)).reset_index(drop=True)
+        self.date_idx_values = self.sample_index["date_idx"].astype(np.int32).to_numpy(copy=True)
+        self.symbol_idx_values = self.sample_index["symbol_idx"].astype(np.int32).to_numpy(copy=True)
+        self.trade_date_values = self.sample_index["trade_date"].astype(str).to_numpy(copy=True)
+        self.symbol_values = self.sample_index["symbol"].astype(str).to_numpy(copy=True)
         self.split = str(split)
         channels = dict(self.manifest.get("feature_channels", {}) or {})
         self.channel_order = ["daily_raw", "daily_state", "intraday_summary", "limit_structure"]
@@ -103,6 +107,13 @@ class SequencePathPackDataset(Dataset):
         out = (values.astype(np.float32, copy=False) - mean.reshape(1, -1)) / np.maximum(std.reshape(1, -1), 1.0e-6)
         return np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32, copy=False)
 
+    def _normalize_batch(self, name: str, values: np.ndarray) -> np.ndarray:
+        stats = dict(self.normalization.get(name, {}) or {})
+        mean = np.asarray(stats.get("mean", [0.0] * values.shape[-1]), dtype=np.float32)
+        std = np.asarray(stats.get("std", [1.0] * values.shape[-1]), dtype=np.float32)
+        out = (values.astype(np.float32, copy=False) - mean.reshape(1, 1, -1)) / np.maximum(std.reshape(1, 1, -1), 1.0e-6)
+        return np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32, copy=False)
+
     def __getitem__(self, idx: int) -> dict[str, Any]:
         row = self.sample_index.iloc[int(idx)]
         date_idx = int(row["date_idx"])
@@ -124,6 +135,38 @@ class SequencePathPackDataset(Dataset):
             "symbol_idx": int(symbol_idx),
             "trade_date": str(row["trade_date"]),
             "symbol": str(row["symbol"]),
+        }
+
+    def get_batch(self, indices: list[int] | np.ndarray) -> dict[str, Any]:
+        idx = np.asarray(indices, dtype=np.int64)
+        if idx.ndim != 1 or idx.size == 0:
+            raise ValueError("batch indices must be a non-empty 1D array")
+        date_idx = self.date_idx_values[idx].astype(np.int64, copy=False)
+        symbol_idx = self.symbol_idx_values[idx].astype(np.int64, copy=False)
+        batch_size = int(idx.size)
+        channel_parts: list[np.ndarray] = []
+        for name in self.channel_order:
+            feature_count = len(self.feature_columns[name])
+            values = np.empty((batch_size, self.lookback_days, feature_count), dtype=np.float32)
+            for current_date in np.unique(date_idx):
+                mask = date_idx == int(current_date)
+                symbols = symbol_idx[mask]
+                start = int(current_date) - self.lookback_days + 1
+                end = int(current_date) + 1
+                block = np.asarray(self.feature_arrays[name][start:end, symbols, :], dtype=np.float32)
+                values[mask, :, :] = np.transpose(block, (1, 0, 2))
+            channel_parts.append(self._normalize_batch(name, values))
+        x = np.concatenate(channel_parts, axis=2).astype(np.float32, copy=False)
+        y_path = np.asarray(self.future_path[date_idx, symbol_idx, :, :], dtype=np.float32).copy()
+        y_summary = np.asarray(self.path_summary[date_idx, symbol_idx, :], dtype=np.float32).copy()
+        return {
+            "x": torch.from_numpy(x),
+            "y_path": torch.from_numpy(y_path),
+            "y_summary": torch.from_numpy(y_summary),
+            "date_idx": torch.from_numpy(date_idx.astype(np.int64, copy=False)),
+            "symbol_idx": torch.from_numpy(symbol_idx.astype(np.int64, copy=False)),
+            "trade_date": [str(item) for item in self.trade_date_values[idx]],
+            "symbol": [str(item) for item in self.symbol_values[idx]],
         }
 
 
@@ -246,6 +289,11 @@ def _batch_to_device(batch: Mapping[str, Any], device: torch.device) -> tuple[to
     return x, y_path, y_summary, date_idx
 
 
+def _iter_index_batches(dataset: SequencePathPackDataset, *, batch_size: int, shuffle: bool, seed: int) -> Iterator[list[int]]:
+    sampler = DateGroupedBatchSampler(dataset.sample_index, batch_size=int(batch_size), shuffle=bool(shuffle), seed=int(seed))
+    yield from sampler
+
+
 def _daily_spearman(frame: pd.DataFrame, *, score_col: str, target_col: str) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     for trade_date, group in frame.groupby("trade_date", sort=True):
@@ -318,7 +366,6 @@ def _predict_split(
     top_k: tuple[int, ...],
     write_predictions: bool,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
-    loader = DataLoader(dataset, batch_size=max(int(batch_size), 1), shuffle=False, num_workers=0, pin_memory=device.type == "cuda")
     pred_dir = output_dir / "predictions"
     if write_predictions:
         pred_dir.mkdir(parents=True, exist_ok=True)
@@ -328,7 +375,8 @@ def _predict_split(
     summary_rows: list[pd.DataFrame] = []
     first_write = True
     model.eval()
-    for batch in loader:
+    for batch_indices in _iter_index_batches(dataset, batch_size=int(batch_size), shuffle=False, seed=0):
+        batch = dataset.get_batch(batch_indices)
         x, y_path, y_summary, _date_idx = _batch_to_device(batch, device)
         with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
             out = model(x)
@@ -469,8 +517,6 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     train_ds = SequencePathPackDataset(manifest, split="train", max_samples=int(config.max_samples_per_split))
     val_ds = SequencePathPackDataset(manifest, split="validation", max_samples=int(config.max_samples_per_split))
     test_ds = SequencePathPackDataset(manifest, split="test", max_samples=int(config.max_samples_per_split))
-    train_sampler = DateGroupedBatchSampler(train_ds.sample_index, batch_size=int(config.batch_size), shuffle=True, seed=int(config.seed))
-    train_loader = DataLoader(train_ds, batch_sampler=train_sampler, num_workers=0, pin_memory=device.type == "cuda")
     model = SequencePathModel(
         input_dim=train_ds.input_dim,
         hidden_dim=int(config.hidden_dim),
@@ -490,7 +536,15 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         loss_totals: dict[str, float] = {"loss": 0.0, "path_loss": 0.0, "summary_loss": 0.0, "value_loss": 0.0, "rank_loss": 0.0}
         batch_count = 0
         sample_count = 0
-        for batch in train_loader:
+        train_batches = DateGroupedBatchSampler(
+            train_ds.sample_index,
+            batch_size=int(config.batch_size),
+            shuffle=True,
+            seed=int(config.seed) + int(epoch) * 1009,
+        )
+        total_batches = len(train_batches)
+        for batch_indices in train_batches:
+            batch = train_ds.get_batch(batch_indices)
             x, y_path, y_summary, date_idx = _batch_to_device(batch, device)
             optimizer.zero_grad(set_to_none=True)
             with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
@@ -505,6 +559,18 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 loss_totals[key] += float(value)
             batch_count += 1
             sample_count += int(x.shape[0])
+            if batch_count == 1 or batch_count % 200 == 0:
+                _write_json(
+                    progress_path,
+                    {
+                        "status": "training",
+                        "epoch": int(epoch),
+                        "batch": int(batch_count),
+                        "total_batches": int(total_batches),
+                        "sample_count": int(sample_count),
+                        "updated_at": _now(),
+                    },
+                )
             del x, y_path, y_summary, date_idx, out, loss
         train_row = {
             "epoch": int(epoch),
