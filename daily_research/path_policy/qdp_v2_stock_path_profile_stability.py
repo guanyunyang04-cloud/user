@@ -20,10 +20,14 @@ import pandas as pd
 
 from daily_research.path_policy.qdp_v2_stock_path_profile_atlas import (
     PATH_CLUSTER_FEATURES,
+    DEFAULT_FORWARD_DAYS,
+    _horizon_col,
     _json_default,
     _label_clusters,
     _write_csv,
     _write_json,
+    path_cluster_features,
+    path_summary_metrics,
 )
 
 
@@ -36,30 +40,23 @@ DEFAULT_CLUSTER_COUNTS = (6, 8, 10, 12)
 DEFAULT_SEED = 7
 DEFAULT_REPRO_SEEDS = (7, 17, 29)
 
-SUMMARY_METRICS = [
-    "buyable_rate",
-    "future_max_return_60d",
-    "future_min_return_60d",
-    "future_final_return_60d",
-    "future_peak_day_60d",
-    "future_trough_day_60d",
-    "drawdown_after_peak_60d",
-    "runup_after_trough_60d",
-    "path_range_60d",
-    "path_efficiency_60d",
-    "path_trade_value_60d",
-    "time_above_zero_60d",
-    "time_below_zero_60d",
-]
+SUMMARY_METRICS = path_summary_metrics(DEFAULT_FORWARD_DAYS)
 
-READ_COLUMNS = [
-    *PATH_CLUSTER_FEATURES,
-    "path_valid_60d",
-    "entry_valid",
-    "entry_buyable",
-    "year",
-    *[col for col in SUMMARY_METRICS if col != "buyable_rate"],
-]
+
+def _summary_metrics(forward_days: int) -> list[str]:
+    return path_summary_metrics(forward_days)
+
+
+def _read_columns(forward_days: int) -> list[str]:
+    metrics = _summary_metrics(forward_days)
+    return [
+        *path_cluster_features(forward_days),
+        _horizon_col("path_valid", forward_days),
+        "entry_valid",
+        "entry_buyable",
+        "year",
+        *[col for col in metrics if col != "buyable_rate"],
+    ]
 
 
 def _now() -> str:
@@ -99,9 +96,9 @@ def _read_metric_frame(path: Path, *, columns: list[str] | None = None) -> pd.Da
     return frame
 
 
-def _valid_mask(frame: pd.DataFrame, values: np.ndarray) -> np.ndarray:
+def _valid_mask(frame: pd.DataFrame, values: np.ndarray, *, forward_days: int) -> np.ndarray:
     return (
-        frame["path_valid_60d"].astype(bool).to_numpy()
+        frame[_horizon_col("path_valid", forward_days)].astype(bool).to_numpy()
         & frame["entry_valid"].astype(bool).to_numpy()
         & np.isfinite(values).all(axis=1)
     )
@@ -135,6 +132,7 @@ def _fit_model(
     seed: int,
     batch_size: int,
     epochs: int,
+    forward_days: int,
     progress_path: Path,
 ) -> tuple[Any, Any, int]:
     from sklearn.cluster import MiniBatchKMeans
@@ -142,11 +140,12 @@ def _fit_model(
 
     scaler = StandardScaler()
     fitted_rows = 0
-    read_cols = [*PATH_CLUSTER_FEATURES, "path_valid_60d", "entry_valid"]
+    feature_cols = path_cluster_features(forward_days)
+    read_cols = [*feature_cols, _horizon_col("path_valid", forward_days), "entry_valid"]
     for path in shard_paths:
         frame = _read_metric_frame(path, columns=read_cols)
-        values = frame[PATH_CLUSTER_FEATURES].to_numpy(dtype=np.float32, copy=True)
-        valid = _valid_mask(frame, values)
+        values = frame[feature_cols].to_numpy(dtype=np.float32, copy=True)
+        valid = _valid_mask(frame, values, forward_days=forward_days)
         if valid.any():
             scaler.partial_fit(values[valid])
             fitted_rows += int(valid.sum())
@@ -175,8 +174,8 @@ def _fit_model(
         epoch_rows = 0
         for path in shard_paths:
             frame = _read_metric_frame(path, columns=read_cols)
-            values = frame[PATH_CLUSTER_FEATURES].to_numpy(dtype=np.float32, copy=True)
-            valid = _valid_mask(frame, values)
+            values = frame[feature_cols].to_numpy(dtype=np.float32, copy=True)
+            valid = _valid_mask(frame, values, forward_days=forward_days)
             if valid.any():
                 model.partial_fit(scaler.transform(values[valid]))
                 epoch_rows += int(valid.sum())
@@ -206,17 +205,20 @@ def _aggregate_assignment(
     cluster_count: int,
     seed: int,
     collect_labels: bool,
+    forward_days: int,
     progress_path: Path,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, np.ndarray | None]:
     cluster_frames: list[pd.DataFrame] = []
     year_cluster_frames: list[pd.DataFrame] = []
     label_parts: list[np.ndarray] = []
 
-    read_cols = list(dict.fromkeys(READ_COLUMNS))
+    feature_cols = path_cluster_features(forward_days)
+    metrics = _summary_metrics(forward_days)
+    read_cols = list(dict.fromkeys(_read_columns(forward_days)))
     for path in shard_paths:
         frame = _read_metric_frame(path, columns=read_cols)
-        values = frame[PATH_CLUSTER_FEATURES].to_numpy(dtype=np.float32, copy=True)
-        valid = _valid_mask(frame, values)
+        values = frame[feature_cols].to_numpy(dtype=np.float32, copy=True)
+        valid = _valid_mask(frame, values, forward_days=forward_days)
         clusters = np.full(len(frame), -1, dtype=np.int16)
         if valid.any():
             clusters[valid] = model.predict(scaler.transform(values[valid])).astype(np.int16)
@@ -230,35 +232,13 @@ def _aggregate_assignment(
             agg = work.groupby("path_cluster", sort=True).agg(
                 sample_count=("path_cluster", "size"),
                 buyable_rate=("entry_buyable", "mean"),
-                future_max_return_60d=("future_max_return_60d", "mean"),
-                future_min_return_60d=("future_min_return_60d", "mean"),
-                future_final_return_60d=("future_final_return_60d", "mean"),
-                future_peak_day_60d=("future_peak_day_60d", "mean"),
-                future_trough_day_60d=("future_trough_day_60d", "mean"),
-                drawdown_after_peak_60d=("drawdown_after_peak_60d", "mean"),
-                runup_after_trough_60d=("runup_after_trough_60d", "mean"),
-                path_range_60d=("path_range_60d", "mean"),
-                path_efficiency_60d=("path_efficiency_60d", "mean"),
-                path_trade_value_60d=("path_trade_value_60d", "mean"),
-                time_above_zero_60d=("time_above_zero_60d", "mean"),
-                time_below_zero_60d=("time_below_zero_60d", "mean"),
+                **{metric: (metric, "mean") for metric in metrics if metric != "buyable_rate"},
             ).reset_index()
             cluster_frames.append(agg)
             year_agg = work.groupby(["year", "path_cluster"], sort=True).agg(
                 sample_count=("path_cluster", "size"),
                 buyable_rate=("entry_buyable", "mean"),
-                future_max_return_60d=("future_max_return_60d", "mean"),
-                future_min_return_60d=("future_min_return_60d", "mean"),
-                future_final_return_60d=("future_final_return_60d", "mean"),
-                future_peak_day_60d=("future_peak_day_60d", "mean"),
-                future_trough_day_60d=("future_trough_day_60d", "mean"),
-                drawdown_after_peak_60d=("drawdown_after_peak_60d", "mean"),
-                runup_after_trough_60d=("runup_after_trough_60d", "mean"),
-                path_range_60d=("path_range_60d", "mean"),
-                path_efficiency_60d=("path_efficiency_60d", "mean"),
-                path_trade_value_60d=("path_trade_value_60d", "mean"),
-                time_above_zero_60d=("time_above_zero_60d", "mean"),
-                time_below_zero_60d=("time_below_zero_60d", "mean"),
+                **{metric: (metric, "mean") for metric in metrics if metric != "buyable_rate"},
             ).reset_index()
             year_cluster_frames.append(year_agg)
 
@@ -280,42 +260,45 @@ def _aggregate_assignment(
     if cluster_summary.empty:
         return cluster_summary, pd.DataFrame(), pd.DataFrame(), None
 
-    labels = _label_clusters(cluster_summary.rename(columns={metric: f"{metric}_mean" for metric in SUMMARY_METRICS if metric != "buyable_rate"}))
+    labels = _label_clusters(
+        cluster_summary.rename(columns={metric: f"{metric}_mean" for metric in metrics if metric != "buyable_rate"}),
+        forward_days=forward_days,
+    )
     # _label_clusters expects *_mean names for all path metrics except sample_count.
     if not labels:
         rename_for_label = cluster_summary.rename(
             columns={metric: f"{metric}_mean" for metric in cluster_summary.columns if metric not in {"path_cluster", "sample_count"}}
         )
-        labels = _label_clusters(rename_for_label)
+        labels = _label_clusters(rename_for_label, forward_days=forward_days)
 
     cluster_summary["cluster_count"] = int(cluster_count)
     cluster_summary["seed"] = int(seed)
     cluster_summary["path_type"] = cluster_summary["path_cluster"].map(labels).fillna("unknown")
-    cluster_summary = cluster_summary.rename(columns={metric: f"{metric}_mean" for metric in SUMMARY_METRICS})
+    cluster_summary = cluster_summary.rename(columns={metric: f"{metric}_mean" for metric in metrics})
 
     raw_year_cluster = pd.concat(year_cluster_frames, ignore_index=True) if year_cluster_frames else pd.DataFrame()
     year_cluster_summary = _weighted_rows(raw_year_cluster, ["year", "path_cluster"])
     year_cluster_summary["cluster_count"] = int(cluster_count)
     year_cluster_summary["seed"] = int(seed)
     year_cluster_summary["path_type"] = year_cluster_summary["path_cluster"].map(labels).fillna("unknown")
-    year_cluster_summary = year_cluster_summary.rename(columns={metric: f"{metric}_mean" for metric in SUMMARY_METRICS})
+    year_cluster_summary = year_cluster_summary.rename(columns={metric: f"{metric}_mean" for metric in metrics})
 
-    type_work = cluster_summary.rename(columns={f"{metric}_mean": metric for metric in SUMMARY_METRICS})
+    type_work = cluster_summary.rename(columns={f"{metric}_mean": metric for metric in metrics})
     type_summary = _weighted_rows(type_work, ["path_type"])
     total_count = float(type_summary["sample_count"].sum()) if not type_summary.empty else 0.0
     type_summary["sample_share"] = np.where(total_count > 0, type_summary["sample_count"] / total_count, np.nan)
     type_summary["cluster_count"] = int(cluster_count)
     type_summary["seed"] = int(seed)
-    type_summary = type_summary.rename(columns={metric: f"{metric}_mean" for metric in SUMMARY_METRICS})
+    type_summary = type_summary.rename(columns={metric: f"{metric}_mean" for metric in metrics})
 
-    year_type_work = year_cluster_summary.rename(columns={f"{metric}_mean": metric for metric in SUMMARY_METRICS})
+    year_type_work = year_cluster_summary.rename(columns={f"{metric}_mean": metric for metric in metrics})
     year_type = _weighted_rows(year_type_work, ["year", "path_type"])
     year_totals = year_type.groupby("year", sort=True)["sample_count"].sum().rename("year_total").reset_index()
     year_type = year_type.merge(year_totals, on="year", how="left", validate="many_to_one")
     year_type["year_share"] = np.where(year_type["year_total"] > 0, year_type["sample_count"] / year_type["year_total"], np.nan)
     year_type["cluster_count"] = int(cluster_count)
     year_type["seed"] = int(seed)
-    year_type = year_type.rename(columns={metric: f"{metric}_mean" for metric in SUMMARY_METRICS})
+    year_type = year_type.rename(columns={metric: f"{metric}_mean" for metric in metrics})
 
     labels_array = np.concatenate(label_parts).astype(np.int16, copy=False) if collect_labels and label_parts else None
     return cluster_summary, type_summary, year_type, labels_array
@@ -354,6 +337,7 @@ def _plot_outputs(
     cluster_summary: pd.DataFrame,
     reference_cluster_count: int,
     reference_seed: int,
+    forward_days: int,
 ) -> list[str]:
     chart_dir = output_dir / "charts"
     chart_dir.mkdir(parents=True, exist_ok=True)
@@ -408,12 +392,15 @@ def _plot_outputs(
         cluster_summary["cluster_count"].eq(int(reference_cluster_count)) & cluster_summary["seed"].eq(int(reference_seed))
     ].copy()
     if not ref_cluster.empty:
-        frame = ref_cluster.sort_values("future_final_return_60d_mean")
+        final_col = f"{_horizon_col('future_final_return', forward_days)}_mean"
+        max_col = f"{_horizon_col('future_max_return', forward_days)}_mean"
+        min_col = f"{_horizon_col('future_min_return', forward_days)}_mean"
+        frame = ref_cluster.sort_values(final_col)
         labels = [f"{int(row.path_cluster)}:{row.path_type}" for row in frame.itertuples()]
         fig, ax = plt.subplots(figsize=(10, 5))
-        ax.bar(labels, frame["future_final_return_60d_mean"] * 100.0, label="final")
-        ax.scatter(labels, frame["future_max_return_60d_mean"] * 100.0, color="#c44e52", label="max high", zorder=3)
-        ax.scatter(labels, frame["future_min_return_60d_mean"] * 100.0, color="#4c72b0", label="min low", zorder=3)
+        ax.bar(labels, frame[final_col] * 100.0, label="final")
+        ax.scatter(labels, frame[max_col] * 100.0, color="#c44e52", label="max high", zorder=3)
+        ax.scatter(labels, frame[min_col] * 100.0, color="#4c72b0", label="min low", zorder=3)
         ax.axhline(0.0, color="#777777", linewidth=0.8)
         ax.set_title(f"Reference path outcomes (k={reference_cluster_count}, seed={reference_seed})")
         ax.set_ylabel("Return (%)")
@@ -439,6 +426,7 @@ def _build_report(
 ) -> str:
     reference_cluster_count = int(summary["reference_cluster_count"])
     reference_seed = int(summary["reference_seed"])
+    forward_days = int(summary.get("forward_days", DEFAULT_FORWARD_DAYS))
     ref = type_summary[
         type_summary["cluster_count"].eq(reference_cluster_count) & type_summary["seed"].eq(reference_seed)
     ].copy()
@@ -464,13 +452,17 @@ def _build_report(
     lines.append("## Reference Path Types")
     lines.append("")
     if not ref.empty:
-        for row in ref.sort_values("future_final_return_60d_mean", ascending=False).to_dict("records"):
+        final_col = f"{_horizon_col('future_final_return', forward_days)}_mean"
+        max_col = f"{_horizon_col('future_max_return', forward_days)}_mean"
+        min_col = f"{_horizon_col('future_min_return', forward_days)}_mean"
+        value_col = f"{_horizon_col('path_trade_value', forward_days)}_mean"
+        for row in ref.sort_values(final_col, ascending=False).to_dict("records"):
             lines.append(
                 f"- {row['path_type']}: share={row['sample_share'] * 100:.2f}%, "
-                f"max={row['future_max_return_60d_mean'] * 100:.2f}%, "
-                f"final={row['future_final_return_60d_mean'] * 100:.2f}%, "
-                f"min={row['future_min_return_60d_mean'] * 100:.2f}%, "
-                f"trade_value={row['path_trade_value_60d_mean'] * 100:.2f}%"
+                f"max={row[max_col] * 100:.2f}%, "
+                f"final={row[final_col] * 100:.2f}%, "
+                f"min={row[min_col] * 100:.2f}%, "
+                f"trade_value={row[value_col] * 100:.2f}%"
             )
     lines.append("")
     lines.append("## Seed Reproducibility")
@@ -522,6 +514,7 @@ class StabilityConfig:
     seed: int
     seed_reproducibility_seeds: tuple[int, ...]
     reference_cluster_count: int
+    forward_days: int
     batch_size: int
     epochs: int
 
@@ -554,6 +547,7 @@ def build_stock_path_profile_stability(config: StabilityConfig) -> dict[str, Any
             seed=int(seed),
             batch_size=int(config.batch_size),
             epochs=int(config.epochs),
+            forward_days=int(config.forward_days),
             progress_path=progress_path,
         )
         clustered_rows = max(clustered_rows, int(fitted_rows))
@@ -564,6 +558,7 @@ def build_stock_path_profile_stability(config: StabilityConfig) -> dict[str, Any
             cluster_count=int(cluster_count),
             seed=int(seed),
             collect_labels=bool(collect_labels),
+            forward_days=int(config.forward_days),
             progress_path=progress_path,
         )
         cluster_frames.append(cluster_summary)
@@ -606,6 +601,7 @@ def build_stock_path_profile_stability(config: StabilityConfig) -> dict[str, Any
         cluster_summary=cluster_summary,
         reference_cluster_count=int(config.reference_cluster_count),
         reference_seed=int(config.seed),
+        forward_days=int(config.forward_days),
     )
 
     outputs = {
@@ -628,6 +624,7 @@ def build_stock_path_profile_stability(config: StabilityConfig) -> dict[str, Any
         "reference_seed": int(config.seed),
         "seed_reproducibility_seeds": list(repro_seeds),
         "reference_cluster_count": int(config.reference_cluster_count),
+        "forward_days": int(config.forward_days),
         "batch_size": int(config.batch_size),
         "epochs": int(config.epochs),
         "outputs": outputs,
@@ -656,6 +653,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--seed-reproducibility-seeds", default=",".join(str(v) for v in DEFAULT_REPRO_SEEDS))
     parser.add_argument("--reference-cluster-count", type=int, default=8)
+    parser.add_argument("--forward-days", type=int, default=DEFAULT_FORWARD_DAYS)
     parser.add_argument("--batch-size", type=int, default=65536)
     parser.add_argument("--epochs", type=int, default=2)
     parser.add_argument("--json", action="store_true")
@@ -674,6 +672,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
             seed=int(args.seed),
             seed_reproducibility_seeds=_parse_int_list(str(args.seed_reproducibility_seeds), default=DEFAULT_REPRO_SEEDS),
             reference_cluster_count=int(args.reference_cluster_count),
+            forward_days=int(args.forward_days),
             batch_size=int(args.batch_size),
             epochs=int(args.epochs),
         )

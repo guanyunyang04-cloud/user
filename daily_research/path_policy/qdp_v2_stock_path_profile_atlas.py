@@ -41,19 +41,66 @@ DEFAULT_CLUSTER_COUNT = 8
 DEFAULT_RANDOM_SEED = 7
 
 
-PATH_CLUSTER_FEATURES = [
-    "future_max_return_60d",
-    "future_min_return_60d",
-    "future_final_return_60d",
-    "future_peak_day_60d",
-    "future_trough_day_60d",
-    "drawdown_after_peak_60d",
-    "runup_after_trough_60d",
-    "path_range_60d",
-    "path_efficiency_60d",
-    "time_above_zero_60d",
-    "time_below_zero_60d",
+PATH_CLUSTER_BASE_FEATURES = [
+    "future_max_return",
+    "future_min_return",
+    "future_final_return",
+    "future_peak_day",
+    "future_trough_day",
+    "drawdown_after_peak",
+    "runup_after_trough",
+    "path_range",
+    "path_efficiency",
+    "time_above_zero",
+    "time_below_zero",
 ]
+
+
+def _horizon_suffix(forward_days: int) -> str:
+    return f"{int(forward_days)}d"
+
+
+def _horizon_col(name: str, forward_days: int) -> str:
+    return f"{name}_{_horizon_suffix(forward_days)}"
+
+
+def path_cluster_features(forward_days: int) -> list[str]:
+    return [_horizon_col(name, forward_days) for name in PATH_CLUSTER_BASE_FEATURES]
+
+
+def path_summary_metrics(forward_days: int) -> list[str]:
+    return [
+        "buyable_rate",
+        _horizon_col("future_max_return", forward_days),
+        _horizon_col("future_min_return", forward_days),
+        _horizon_col("future_final_return", forward_days),
+        _horizon_col("future_peak_day", forward_days),
+        _horizon_col("future_trough_day", forward_days),
+        _horizon_col("drawdown_after_peak", forward_days),
+        _horizon_col("runup_after_trough", forward_days),
+        _horizon_col("path_range", forward_days),
+        _horizon_col("path_efficiency", forward_days),
+        _horizon_col("path_trade_value", forward_days),
+        _horizon_col("time_above_zero", forward_days),
+        _horizon_col("time_below_zero", forward_days),
+    ]
+
+
+def path_target_columns(forward_days: int) -> list[str]:
+    return [
+        _horizon_col("future_max_return", forward_days),
+        _horizon_col("future_min_return", forward_days),
+        _horizon_col("future_final_return", forward_days),
+        _horizon_col("drawdown_after_peak", forward_days),
+        _horizon_col("path_trade_value", forward_days),
+        _horizon_col("future_peak_day", forward_days),
+        "time_to_profit_5pct",
+        "time_to_profit_10pct",
+        "time_to_loss_5pct",
+    ]
+
+
+PATH_CLUSTER_FEATURES = path_cluster_features(DEFAULT_FORWARD_DAYS)
 
 
 def _now() -> str:
@@ -129,6 +176,9 @@ def _read_dataset_date_range(root: Path, active: Mapping[str, Any], domain: str,
 def _load_daily_base(root: Path, active: Mapping[str, Any]) -> tuple[pd.DataFrame, np.ndarray, np.ndarray]:
     daily = _read_dataset(root, active, "market_daily_raw", DAILY_RAW_COLUMNS)
     daily = daily[(daily["trade_date"] >= "2011-11-22") & (daily["trade_date"] <= "2026-06-26")].copy()
+    for col in ["open", "high", "low", "close", "volume", "amount"]:
+        if col in daily.columns:
+            daily[col] = pd.to_numeric(daily[col], errors="coerce").astype("float32")
     daily = daily.sort_values(["symbol", "trade_date"], kind="mergesort").reset_index(drop=True)
     daily["_row_pos"] = np.arange(len(daily), dtype=np.int64)
     calendar = _read_dataset(root, active, "trading_calendar", ["trade_date", "is_open"])
@@ -218,6 +268,7 @@ def _compute_path_metrics(
     root: Path,
     active: Mapping[str, Any],
 ) -> tuple[pd.DataFrame, np.ndarray, np.ndarray, np.ndarray]:
+    horizon = int(forward_days)
     mask = (
         daily["trade_date"].str.slice(0, 4).astype(int).eq(int(year))
         & (daily["trade_date"] >= str(event_start))
@@ -231,10 +282,10 @@ def _compute_path_metrics(
         row_pos=row_pos,
         symbol_codes=symbol_codes,
         calendar_pos=calendar_pos,
-        forward_days=forward_days,
+        forward_days=horizon,
     )
     observed = np.isfinite(close_ret).sum(axis=1).astype(np.int16)
-    valid_path = (observed == int(forward_days)) & np.isfinite(high_ret).all(axis=1) & np.isfinite(low_ret).all(axis=1)
+    valid_path = (observed == horizon) & np.isfinite(high_ret).all(axis=1) & np.isfinite(low_ret).all(axis=1)
     high_filled = np.where(np.isfinite(high_ret), high_ret, -np.inf)
     low_filled = np.where(np.isfinite(low_ret), low_ret, np.inf)
     close_finite = np.isfinite(close_ret)
@@ -248,10 +299,10 @@ def _compute_path_metrics(
     trough_day = trough_idx + 1
     peak_day[observed == 0] = 0
     trough_day[observed == 0] = 0
-    final_ret = close_ret[:, int(forward_days) - 1].astype(np.float32)
+    final_ret = close_ret[:, horizon - 1].astype(np.float32)
     min_after_peak = np.full(len(base), np.inf, dtype=np.float32)
     max_after_trough = np.full(len(base), -np.inf, dtype=np.float32)
-    for idx in range(int(forward_days)):
+    for idx in range(horizon):
         low_values = low_ret[:, idx]
         high_values = high_ret[:, idx]
         min_after_peak = np.where((peak_idx <= idx) & np.isfinite(low_values), np.minimum(min_after_peak, low_values), min_after_peak)
@@ -266,15 +317,15 @@ def _compute_path_metrics(
     time_below = np.divide((close_ret < 0).sum(axis=1), np.maximum(observed, 1), out=np.zeros(len(base), dtype=np.float64), where=observed > 0)
     for col, values in [
         ("entry_open_next", entry_open),
-        ("future_max_return_60d", max_ret),
-        ("future_min_return_60d", min_ret),
-        ("future_final_return_60d", final_ret),
-        ("drawdown_after_peak_60d", drawdown_after_peak),
-        ("runup_after_trough_60d", runup_after_trough),
-        ("path_range_60d", path_range),
-        ("path_efficiency_60d", path_efficiency),
-        ("time_above_zero_60d", time_above),
-        ("time_below_zero_60d", time_below),
+        (_horizon_col("future_max_return", horizon), max_ret),
+        (_horizon_col("future_min_return", horizon), min_ret),
+        (_horizon_col("future_final_return", horizon), final_ret),
+        (_horizon_col("drawdown_after_peak", horizon), drawdown_after_peak),
+        (_horizon_col("runup_after_trough", horizon), runup_after_trough),
+        (_horizon_col("path_range", horizon), path_range),
+        (_horizon_col("path_efficiency", horizon), path_efficiency),
+        (_horizon_col("time_above_zero", horizon), time_above),
+        (_horizon_col("time_below_zero", horizon), time_below),
     ]:
         base[col] = values
     base["year"] = int(year)
@@ -283,10 +334,10 @@ def _compute_path_metrics(
     safe_entry_dates = np.full(len(base), "", dtype=object)
     safe_entry_dates[entry_valid] = trade_dates[entry_target[entry_valid]]
     base["entry_trade_date"] = safe_entry_dates
-    base["observed_future_days_60d"] = observed
-    base["path_valid_60d"] = valid_path
-    base["future_peak_day_60d"] = peak_day
-    base["future_trough_day_60d"] = trough_day
+    base[_horizon_col("observed_future_days", horizon)] = observed
+    base[_horizon_col("path_valid", horizon)] = valid_path
+    base[_horizon_col("future_peak_day", horizon)] = peak_day
+    base[_horizon_col("future_trough_day", horizon)] = trough_day
     base["time_to_profit_3pct"] = _first_hit_day(high_ret, 0.03, direction="up")
     base["time_to_profit_5pct"] = _first_hit_day(high_ret, 0.05, direction="up")
     base["time_to_profit_10pct"] = _first_hit_day(high_ret, 0.10, direction="up")
@@ -294,11 +345,11 @@ def _compute_path_metrics(
     base["time_to_loss_3pct"] = _first_hit_day(low_ret, 0.03, direction="down")
     base["time_to_loss_5pct"] = _first_hit_day(low_ret, 0.05, direction="down")
     base["time_to_loss_10pct"] = _first_hit_day(low_ret, 0.10, direction="down")
-    base["path_trade_value_60d"] = (
-        base["future_final_return_60d"].astype("float64")
-        + 0.50 * base["future_max_return_60d"].astype("float64")
-        + 0.35 * base["future_min_return_60d"].astype("float64")
-        + 0.20 * base["drawdown_after_peak_60d"].astype("float64")
+    base[_horizon_col("path_trade_value", horizon)] = (
+        base[_horizon_col("future_final_return", horizon)].astype("float64")
+        + 0.50 * base[_horizon_col("future_max_return", horizon)].astype("float64")
+        + 0.35 * base[_horizon_col("future_min_return", horizon)].astype("float64")
+        + 0.20 * base[_horizon_col("drawdown_after_peak", horizon)].astype("float64")
     ).astype("float32")
 
     limit_status = _read_dataset_date_range(root, active, "limit_status", ["symbol", "trade_date", "up_limit"], f"{year}-01-01", f"{year + 1}-03-31")
@@ -354,16 +405,25 @@ def _write_year_path_metrics(
     return paths
 
 
-def _fit_path_clusters(shard_paths: list[Path], *, cluster_count: int, seed: int, progress_path: Path) -> tuple[Any, Any]:
+def _fit_path_clusters(
+    shard_paths: list[Path],
+    *,
+    cluster_count: int,
+    seed: int,
+    progress_path: Path,
+    forward_days: int,
+) -> tuple[Any, Any]:
     from sklearn.cluster import MiniBatchKMeans
     from sklearn.preprocessing import StandardScaler
 
+    feature_cols = path_cluster_features(forward_days)
+    valid_col = _horizon_col("path_valid", forward_days)
     scaler = StandardScaler()
     fitted_rows = 0
     for path in shard_paths:
-        frame = pd.read_parquet(path, columns=[*PATH_CLUSTER_FEATURES, "path_valid_60d", "entry_valid"])
-        frame = frame[frame["path_valid_60d"].astype(bool) & frame["entry_valid"].astype(bool)]
-        values = frame[PATH_CLUSTER_FEATURES].to_numpy(dtype=np.float32, copy=True)
+        frame = pd.read_parquet(path, columns=[*feature_cols, valid_col, "entry_valid"])
+        frame = frame[frame[valid_col].astype(bool) & frame["entry_valid"].astype(bool)]
+        values = frame[feature_cols].to_numpy(dtype=np.float32, copy=True)
         finite = np.isfinite(values).all(axis=1)
         if np.any(finite):
             scaler.partial_fit(values[finite])
@@ -373,9 +433,9 @@ def _fit_path_clusters(shard_paths: list[Path], *, cluster_count: int, seed: int
     for epoch in range(2):
         trained_rows = 0
         for path in shard_paths:
-            frame = pd.read_parquet(path, columns=[*PATH_CLUSTER_FEATURES, "path_valid_60d", "entry_valid"])
-            frame = frame[frame["path_valid_60d"].astype(bool) & frame["entry_valid"].astype(bool)]
-            values = frame[PATH_CLUSTER_FEATURES].to_numpy(dtype=np.float32, copy=True)
+            frame = pd.read_parquet(path, columns=[*feature_cols, valid_col, "entry_valid"])
+            frame = frame[frame[valid_col].astype(bool) & frame["entry_valid"].astype(bool)]
+            values = frame[feature_cols].to_numpy(dtype=np.float32, copy=True)
             finite = np.isfinite(values).all(axis=1)
             if np.any(finite):
                 model.partial_fit(scaler.transform(values[finite]))
@@ -384,40 +444,47 @@ def _fit_path_clusters(shard_paths: list[Path], *, cluster_count: int, seed: int
     return scaler, model
 
 
-def _label_clusters(summary: pd.DataFrame) -> dict[int, str]:
+def _label_clusters(summary: pd.DataFrame, *, forward_days: int = DEFAULT_FORWARD_DAYS) -> dict[int, str]:
     if summary.empty:
         return {}
     frame = summary.set_index("path_cluster")
-    final_q75 = frame["future_final_return_60d_mean"].quantile(0.75)
-    final_q25 = frame["future_final_return_60d_mean"].quantile(0.25)
-    max_q75 = frame["future_max_return_60d_mean"].quantile(0.75)
-    max_mid = frame["future_max_return_60d_mean"].median()
-    min_q25 = frame["future_min_return_60d_mean"].quantile(0.25)
-    range_q75 = frame["path_range_60d_mean"].quantile(0.75)
-    range_q25 = frame["path_range_60d_mean"].quantile(0.25)
-    draw_q25 = frame["drawdown_after_peak_60d_mean"].quantile(0.25)
+    final_col = f"{_horizon_col('future_final_return', forward_days)}_mean"
+    max_col = f"{_horizon_col('future_max_return', forward_days)}_mean"
+    min_col = f"{_horizon_col('future_min_return', forward_days)}_mean"
+    range_col = f"{_horizon_col('path_range', forward_days)}_mean"
+    draw_col = f"{_horizon_col('drawdown_after_peak', forward_days)}_mean"
+    peak_col = f"{_horizon_col('future_peak_day', forward_days)}_mean"
+    trough_col = f"{_horizon_col('future_trough_day', forward_days)}_mean"
+    final_q75 = frame[final_col].quantile(0.75)
+    final_q25 = frame[final_col].quantile(0.25)
+    max_q75 = frame[max_col].quantile(0.75)
+    max_mid = frame[max_col].median()
+    min_q25 = frame[min_col].quantile(0.25)
+    range_q75 = frame[range_col].quantile(0.75)
+    range_q25 = frame[range_col].quantile(0.25)
+    draw_q25 = frame[draw_col].quantile(0.25)
     labels: dict[int, str] = {}
     for cluster, row in frame.iterrows():
-        final = float(row["future_final_return_60d_mean"])
-        max_ret = float(row["future_max_return_60d_mean"])
-        min_ret = float(row["future_min_return_60d_mean"])
-        path_range = float(row["path_range_60d_mean"])
-        draw = float(row["drawdown_after_peak_60d_mean"])
-        peak_day = float(row["future_peak_day_60d_mean"])
-        trough_day = float(row["future_trough_day_60d_mean"])
+        final = float(row[final_col])
+        max_ret = float(row[max_col])
+        min_ret = float(row[min_col])
+        path_range = float(row[range_col])
+        draw = float(row[draw_col])
+        peak_day = float(row[peak_col])
+        trough_day = float(row[trough_col])
         if final >= final_q75 and max_ret >= max_mid and draw > draw_q25:
             label = "persistent_up"
         elif max_ret >= max_q75 and (draw <= draw_q25 or final < max_ret * 0.45):
             label = "spike_fade"
-        elif final >= frame["future_final_return_60d_mean"].median() and max_ret >= max_mid:
+        elif final >= frame[final_col].median() and max_ret >= max_mid:
             label = "trend_up"
         elif final <= final_q25 and min_ret <= min_q25 and trough_day <= peak_day:
             label = "downtrend"
         elif final <= final_q25 and min_ret <= min_q25:
             label = "late_down"
-        elif path_range >= range_q75 and abs(final) <= abs(frame["future_final_return_60d_mean"]).median():
+        elif path_range >= range_q75 and abs(final) <= abs(frame[final_col]).median():
             label = "volatile_chop"
-        elif path_range <= range_q25 and abs(final) <= abs(frame["future_final_return_60d_mean"]).median():
+        elif path_range <= range_q25 and abs(final) <= abs(frame[final_col]).median():
             label = "sideways_compression"
         else:
             label = "mixed_path"
@@ -432,7 +499,10 @@ def _assign_clusters(
     model: Any,
     output_dir: Path,
     progress_path: Path,
+    forward_days: int,
 ) -> tuple[list[Path], pd.DataFrame, dict[int, str]]:
+    feature_cols = path_cluster_features(forward_days)
+    valid_col = _horizon_col("path_valid", forward_days)
     assigned_dir = output_dir / "assigned_path_shards"
     assigned_dir.mkdir(parents=True, exist_ok=True)
     assigned_paths: list[Path] = []
@@ -440,8 +510,8 @@ def _assign_clusters(
     for path in shard_paths:
         frame = pd.read_parquet(path)
         cluster = np.full(len(frame), -1, dtype=np.int16)
-        values = frame[PATH_CLUSTER_FEATURES].to_numpy(dtype=np.float32, copy=True)
-        finite = frame["path_valid_60d"].astype(bool).to_numpy() & frame["entry_valid"].astype(bool).to_numpy() & np.isfinite(values).all(axis=1)
+        values = frame[feature_cols].to_numpy(dtype=np.float32, copy=True)
+        finite = frame[valid_col].astype(bool).to_numpy() & frame["entry_valid"].astype(bool).to_numpy() & np.isfinite(values).all(axis=1)
         if np.any(finite):
             cluster[finite] = model.predict(scaler.transform(values[finite])).astype(np.int16)
         frame["path_cluster"] = cluster
@@ -450,18 +520,7 @@ def _assign_clusters(
             agg = valid.groupby("path_cluster", sort=True).agg(
                 sample_count=("path_cluster", "size"),
                 buyable_rate=("entry_buyable", "mean"),
-                future_max_return_60d_mean=("future_max_return_60d", "mean"),
-                future_min_return_60d_mean=("future_min_return_60d", "mean"),
-                future_final_return_60d_mean=("future_final_return_60d", "mean"),
-                future_peak_day_60d_mean=("future_peak_day_60d", "mean"),
-                future_trough_day_60d_mean=("future_trough_day_60d", "mean"),
-                drawdown_after_peak_60d_mean=("drawdown_after_peak_60d", "mean"),
-                runup_after_trough_60d_mean=("runup_after_trough_60d", "mean"),
-                path_range_60d_mean=("path_range_60d", "mean"),
-                path_efficiency_60d_mean=("path_efficiency_60d", "mean"),
-                path_trade_value_60d_mean=("path_trade_value_60d", "mean"),
-                time_above_zero_60d_mean=("time_above_zero_60d", "mean"),
-                time_below_zero_60d_mean=("time_below_zero_60d", "mean"),
+                **{f"{metric}_mean": (metric, "mean") for metric in path_summary_metrics(forward_days) if metric != "buyable_rate"},
             ).reset_index()
             summary_frames.append(agg)
         out_path = assigned_dir / path.name.replace("path_metrics_", "assigned_paths_")
@@ -477,7 +536,7 @@ def _assign_clusters(
             row[col] = float(np.average(group[col].to_numpy(dtype=np.float64), weights=weights))
         weighted_rows.append(row)
     summary = pd.DataFrame(weighted_rows).sort_values("path_cluster", kind="mergesort")
-    labels = _label_clusters(summary)
+    labels = _label_clusters(summary, forward_days=forward_days)
     summary["path_type"] = summary["path_cluster"].map(labels)
     for path in assigned_paths:
         frame = pd.read_parquet(path)
@@ -627,6 +686,9 @@ def _build_profiles(
     progress_path: Path,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     daily = _add_raw_daily_signals(daily)
+    for col in [*RAW_SIGNAL_COLUMNS, "open", "high", "low", "close", "volume", "amount"]:
+        if col in daily.columns:
+            daily[col] = pd.to_numeric(daily[col], errors="coerce").astype("float32")
     daily["_row_pos"] = np.arange(len(daily), dtype=np.int64)
     raw_cols = [col for col in RAW_SIGNAL_COLUMNS if col in daily.columns]
     intraday_cols = [col for col in INTRADAY_COLUMNS if col in {"symbol", "trade_date"} or col in INTRADAY_SIGNAL_COLUMNS]
@@ -701,7 +763,16 @@ def _build_profiles(
     return feature_profile, past_profile, future_profile, type_year_counts
 
 
-def _plot_outputs(output_dir: Path, cluster_summary: pd.DataFrame, past_profile: pd.DataFrame, future_profile: pd.DataFrame, feature_profile: pd.DataFrame) -> list[str]:
+def _plot_outputs(
+    output_dir: Path,
+    cluster_summary: pd.DataFrame,
+    past_profile: pd.DataFrame,
+    future_profile: pd.DataFrame,
+    feature_profile: pd.DataFrame,
+    *,
+    pre_days: int,
+    forward_days: int,
+) -> list[str]:
     chart_dir = output_dir / "charts"
     chart_dir.mkdir(parents=True, exist_ok=True)
     outputs: list[str] = []
@@ -713,7 +784,7 @@ def _plot_outputs(output_dir: Path, cluster_summary: pd.DataFrame, past_profile:
                 group = group.sort_values("step")
                 ax.plot(group["step"], group["mean"] * 100.0, label=path_type)
             ax.axhline(0.0, color="#777777", linewidth=0.8)
-            ax.set_title("Future 60-day close path by learned path type")
+            ax.set_title(f"Future {int(forward_days)}-day close path by learned path type")
             ax.set_xlabel("Future trading day")
             ax.set_ylabel("Return from next open (%)")
             ax.grid(True, alpha=0.25)
@@ -731,7 +802,7 @@ def _plot_outputs(output_dir: Path, cluster_summary: pd.DataFrame, past_profile:
                 group = group.sort_values("step")
                 ax.plot(group["step"], group["mean"] * 100.0, label=path_type)
             ax.axhline(0.0, color="#777777", linewidth=0.8)
-            ax.set_title("Past 60-day close path before signal day")
+            ax.set_title(f"Past {int(pre_days)}-day close path before signal day")
             ax.set_xlabel("Trading day offset")
             ax.set_ylabel("Return to signal close (%)")
             ax.grid(True, alpha=0.25)
@@ -742,12 +813,15 @@ def _plot_outputs(output_dir: Path, cluster_summary: pd.DataFrame, past_profile:
             plt.close(fig)
             outputs.append(str(path.resolve()))
     if not cluster_summary.empty:
+        final_col = f"{_horizon_col('future_final_return', forward_days)}_mean"
+        max_col = f"{_horizon_col('future_max_return', forward_days)}_mean"
+        min_col = f"{_horizon_col('future_min_return', forward_days)}_mean"
         frame = cluster_summary.sort_values("path_cluster")
         fig, ax = plt.subplots(figsize=(10, 5))
         labels = [f"{int(row.path_cluster)}:{row.path_type}" for row in frame.itertuples()]
-        ax.bar(labels, frame["future_final_return_60d_mean"] * 100.0, label="final")
-        ax.scatter(labels, frame["future_max_return_60d_mean"] * 100.0, color="#c44e52", label="max high")
-        ax.scatter(labels, frame["future_min_return_60d_mean"] * 100.0, color="#4c72b0", label="min low")
+        ax.bar(labels, frame[final_col] * 100.0, label="final")
+        ax.scatter(labels, frame[max_col] * 100.0, color="#c44e52", label="max high")
+        ax.scatter(labels, frame[min_col] * 100.0, color="#4c72b0", label="min low")
         ax.axhline(0.0, color="#777777", linewidth=0.8)
         ax.set_title("Path type future outcome summary")
         ax.set_ylabel("Return (%)")
@@ -793,7 +867,9 @@ def _build_report(
     lines.append("")
     lines.append("## Method")
     lines.append("")
-    lines.append("This atlas profiles all stock future paths, not only winners. It computes next-open anchored future 1-60 day path metrics, clusters those full path metrics, then describes each path type using only pre-signal raw daily paths, intraday summaries, and limit-board structure.")
+    forward_days = int(summary.get("forward_days", DEFAULT_FORWARD_DAYS))
+    pre_days = int(summary.get("pre_days", DEFAULT_PRE_DAYS))
+    lines.append(f"This atlas profiles all stock future paths, not only winners. It computes next-open anchored future 1-{forward_days} day path metrics, clusters those full path metrics, then describes each path type using only pre-signal past {pre_days}-day raw daily paths, intraday summaries, and limit-board structure.")
     lines.append("")
     lines.append("## Scope")
     lines.append("")
@@ -805,15 +881,20 @@ def _build_report(
     lines.append("## Learned Future Path Types")
     lines.append("")
     if not cluster_summary.empty:
+        max_col = f"{_horizon_col('future_max_return', forward_days)}_mean"
+        final_col = f"{_horizon_col('future_final_return', forward_days)}_mean"
+        min_col = f"{_horizon_col('future_min_return', forward_days)}_mean"
+        peak_col = f"{_horizon_col('future_peak_day', forward_days)}_mean"
+        draw_col = f"{_horizon_col('drawdown_after_peak', forward_days)}_mean"
         for row in cluster_summary.sort_values("path_cluster").to_dict("records"):
             lines.append(
                 f"- cluster {int(row['path_cluster'])} / {row['path_type']}: "
                 f"n={int(row['sample_count']):,}, "
-                f"max={row['future_max_return_60d_mean'] * 100:.2f}%, "
-                f"final={row['future_final_return_60d_mean'] * 100:.2f}%, "
-                f"min={row['future_min_return_60d_mean'] * 100:.2f}%, "
-                f"peak_day={row['future_peak_day_60d_mean']:.1f}, "
-                f"drawdown_after_peak={row['drawdown_after_peak_60d_mean'] * 100:.2f}%"
+                f"max={row[max_col] * 100:.2f}%, "
+                f"final={row[final_col] * 100:.2f}%, "
+                f"min={row[min_col] * 100:.2f}%, "
+                f"peak_day={row[peak_col]:.1f}, "
+                f"drawdown_after_peak={row[draw_col] * 100:.2f}%"
             )
     lines.append("")
     lines.append("## Strongest Pre-Signal Profile Differences")
@@ -838,7 +919,7 @@ def _build_report(
     lines.append("")
     lines.append("- Path types are learned from future paths, so they are for market-structure understanding, not directly tradable labels.")
     lines.append("- This is not a trained selector. It is the prerequisite atlas for defining path-value targets and model inputs.")
-    lines.append("- Entry anchoring uses next open; rows with incomplete 60-day future paths are kept in shards but excluded from clustering.")
+    lines.append(f"- Entry anchoring uses next open; rows with incomplete {forward_days}-day future paths are kept in shards but excluded from clustering.")
     path = output_dir / "stock_path_profile_atlas_report.md"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return str(path.resolve())
@@ -880,8 +961,21 @@ def build_stock_path_profile_atlas(config: AtlasConfig) -> dict[str, Any]:
         output_dir=output_dir,
         progress_path=progress_path,
     )
-    scaler, model = _fit_path_clusters(path_shards, cluster_count=config.cluster_count, seed=config.seed, progress_path=progress_path)
-    assigned_paths, cluster_summary, cluster_labels = _assign_clusters(path_shards, scaler=scaler, model=model, output_dir=output_dir, progress_path=progress_path)
+    scaler, model = _fit_path_clusters(
+        path_shards,
+        cluster_count=config.cluster_count,
+        seed=config.seed,
+        progress_path=progress_path,
+        forward_days=config.forward_days,
+    )
+    assigned_paths, cluster_summary, cluster_labels = _assign_clusters(
+        path_shards,
+        scaler=scaler,
+        model=model,
+        output_dir=output_dir,
+        progress_path=progress_path,
+        forward_days=config.forward_days,
+    )
     type_order = sorted({value for value in cluster_labels.values()})
     feature_profile, past_profile, future_profile, type_year_counts = _build_profiles(
         root=root,
@@ -904,7 +998,15 @@ def build_stock_path_profile_atlas(config: AtlasConfig) -> dict[str, Any]:
         "path_metric_shards": [str(path.resolve()) for path in path_shards],
         "assigned_path_shards": [str(path.resolve()) for path in assigned_paths],
     }
-    chart_paths = _plot_outputs(output_dir, cluster_summary, past_profile, future_profile, feature_profile)
+    chart_paths = _plot_outputs(
+        output_dir,
+        cluster_summary,
+        past_profile,
+        future_profile,
+        feature_profile,
+        pre_days=config.pre_days,
+        forward_days=config.forward_days,
+    )
     outputs["charts"] = chart_paths
     candidate_count = int(sum(int(pd.read_parquet(path, columns=["symbol"]).shape[0]) for path in path_shards))
     clustered_count = int(cluster_summary["sample_count"].sum()) if not cluster_summary.empty else 0
@@ -923,7 +1025,7 @@ def build_stock_path_profile_atlas(config: AtlasConfig) -> dict[str, Any]:
         "forward_days": int(config.forward_days),
         "pre_days": int(config.pre_days),
         "cluster_count": int(config.cluster_count),
-        "path_cluster_features": list(PATH_CLUSTER_FEATURES),
+        "path_cluster_features": path_cluster_features(config.forward_days),
         "cluster_labels": cluster_labels,
         "outputs": outputs,
     }

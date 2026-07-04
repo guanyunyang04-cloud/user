@@ -28,10 +28,13 @@ from daily_research.path_policy.qdp_v2_raw_rising_path_atlas import (
     _write_json,
 )
 from daily_research.path_policy.qdp_v2_stock_path_profile_atlas import (
+    DEFAULT_FORWARD_DAYS,
     DEFAULT_QDP_ROOT,
+    _horizon_col,
     _json_default,
     _read_active,
     _read_dataset_date_range,
+    path_target_columns,
 )
 
 
@@ -46,19 +49,10 @@ DEFAULT_TEST_YEARS = (2025,)
 DEFAULT_TOP_K = (20, 50, 100)
 DEFAULT_SEED = 7
 
-PAST_PATH_LAGS = (1, 2, 3, 5, 10, 20, 40, 60)
-TARGET_COLUMN = "path_trade_value_60d"
-TARGET_COLUMNS = [
-    "future_max_return_60d",
-    "future_min_return_60d",
-    "future_final_return_60d",
-    "drawdown_after_peak_60d",
-    "path_trade_value_60d",
-    "future_peak_day_60d",
-    "time_to_profit_5pct",
-    "time_to_profit_10pct",
-    "time_to_loss_5pct",
-]
+PAST_CLOSE_DAYS = 100
+PAST_LIQUIDITY_LAGS = (1, 2, 3, 5, 10, 20, 40, 60, 100)
+TARGET_COLUMN = _horizon_col("path_trade_value", DEFAULT_FORWARD_DAYS)
+TARGET_COLUMNS = path_target_columns(DEFAULT_FORWARD_DAYS)
 
 
 def _now() -> str:
@@ -97,27 +91,33 @@ def _path_metric_shards(atlas_dir: Path) -> list[Path]:
     return paths
 
 
-def _add_past_path_features(daily: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+def _add_past_path_features(daily: pd.DataFrame, *, past_close_days: int = PAST_CLOSE_DAYS) -> tuple[pd.DataFrame, list[str]]:
     daily = daily.sort_values(["symbol", "trade_date"], kind="mergesort").reset_index(drop=True)
-    groups = daily.groupby("symbol", sort=False, group_keys=False)
+    symbol_key = daily["symbol"]
     close = pd.to_numeric(daily["close"], errors="coerce").astype("float64")
     amount = pd.to_numeric(daily["amount"], errors="coerce").astype("float64")
     volume = pd.to_numeric(daily["volume"], errors="coerce").astype("float64")
     out_cols = ["amount_log", "volume_log"]
-    daily["amount_log"] = np.log1p(amount)
-    daily["volume_log"] = np.log1p(volume)
-    for lag in PAST_PATH_LAGS:
-        close_lag = groups["close"].shift(int(lag)).astype("float64")
-        amount_lag = groups["amount"].shift(int(lag)).astype("float64")
-        volume_lag = groups["volume"].shift(int(lag)).astype("float64")
+    feature_data: dict[str, pd.Series | np.ndarray] = {
+        "amount_log": np.log1p(amount),
+        "volume_log": np.log1p(volume),
+    }
+    for lag in range(1, int(past_close_days) + 1):
+        close_lag = close.groupby(symbol_key, sort=False).shift(int(lag)).astype("float64")
         c_name = f"past_close_ret_{int(lag)}d"
+        feature_data[c_name] = close.div(close_lag.replace(0.0, np.nan)).sub(1.0)
+        out_cols.append(c_name)
+    for lag in PAST_LIQUIDITY_LAGS:
+        amount_lag = amount.groupby(symbol_key, sort=False).shift(int(lag)).astype("float64")
+        volume_lag = volume.groupby(symbol_key, sort=False).shift(int(lag)).astype("float64")
         a_name = f"past_amount_log_{int(lag)}d"
         v_name = f"past_volume_log_{int(lag)}d"
-        daily[c_name] = close.div(close_lag.replace(0.0, np.nan)).sub(1.0)
-        daily[a_name] = np.log1p(amount_lag)
-        daily[v_name] = np.log1p(volume_lag)
-        out_cols.extend([c_name, a_name, v_name])
-    return daily.replace([np.inf, -np.inf], np.nan), out_cols
+        feature_data[a_name] = np.log1p(amount_lag)
+        feature_data[v_name] = np.log1p(volume_lag)
+        out_cols.extend([a_name, v_name])
+    feature_frame = pd.DataFrame(feature_data, index=daily.index).replace([np.inf, -np.inf], np.nan)
+    feature_frame = feature_frame.astype("float32")
+    return pd.concat([daily, feature_frame], axis=1, copy=False), out_cols
 
 
 def _to_numeric_feature_frame(frame: pd.DataFrame, feature_cols: list[str]) -> pd.DataFrame:
@@ -135,17 +135,22 @@ def _build_feature_shards(
     output_dir: Path,
     progress_path: Path,
     years: tuple[int, ...],
+    forward_days: int,
+    past_close_days: int,
 ) -> tuple[list[Path], list[str]]:
     root = qdp_root.resolve()
     active = _read_active(root)
     _warmup_daily = pd.DataFrame(columns=DAILY_RAW_COLUMNS)
-    _warmup_daily, past_path_cols = _add_past_path_features(_warmup_daily)
+    _warmup_daily, past_path_cols = _add_past_path_features(_warmup_daily, past_close_days=past_close_days)
     daily_feature_cols = list(dict.fromkeys([*RAW_SIGNAL_COLUMNS, *past_path_cols]))
     feature_cols = list(dict.fromkeys([*daily_feature_cols, *INTRADAY_SIGNAL_COLUMNS, *LIMIT_SIGNAL_COLUMNS]))
     shard_dir = output_dir / "feature_shards"
     shard_dir.mkdir(parents=True, exist_ok=True)
     out_paths: list[Path] = []
     path_shards = _path_metric_shards(atlas_dir)
+    target_column = _horizon_col("path_trade_value", forward_days)
+    target_columns = path_target_columns(forward_days)
+    valid_col = _horizon_col("path_valid", forward_days)
     for shard_path in path_shards:
         year = int(shard_path.stem.rsplit("_", 1)[-1])
         if year not in years:
@@ -156,17 +161,17 @@ def _build_feature_shards(
             "trade_date",
             "entry_buyable",
             "entry_valid",
-            "path_valid_60d",
-            *TARGET_COLUMNS,
+            valid_col,
+            *target_columns,
         ]
         metrics = pd.read_parquet(shard_path, columns=metric_cols)
         metrics["trade_date"] = metrics["trade_date"].astype(str)
         metrics["symbol"] = metrics["symbol"].astype(str).str.upper().str.strip()
         metrics = metrics[
             metrics["entry_valid"].astype(bool)
-            & metrics["path_valid_60d"].astype(bool)
+            & metrics[valid_col].astype(bool)
             & metrics["entry_buyable"].astype(bool)
-            & pd.to_numeric(metrics[TARGET_COLUMN], errors="coerce").notna()
+            & pd.to_numeric(metrics[target_column], errors="coerce").notna()
         ].copy()
         # Compute rolling and lagged daily features on a small warmup window rather
         # than expanding the entire daily history into a wide in-memory table.
@@ -174,7 +179,7 @@ def _build_feature_shards(
         daily_end = f"{year}-12-31"
         daily_window = _read_dataset_date_range(root, active, "market_daily_raw", DAILY_RAW_COLUMNS, daily_start, daily_end)
         daily_window = _add_raw_daily_signals(daily_window)
-        daily_window, _past_cols = _add_past_path_features(daily_window)
+        daily_window, _past_cols = _add_past_path_features(daily_window, past_close_days=past_close_days)
         daily_window["year"] = daily_window["trade_date"].str.slice(0, 4).astype("int16")
         base = daily_window[daily_window["year"].eq(int(year))][["symbol", "trade_date", *daily_feature_cols]].copy()
         frame = metrics.merge(base, on=["symbol", "trade_date"], how="left", validate="one_to_one")
@@ -187,9 +192,9 @@ def _build_feature_shards(
             frame = frame.merge(limit, on=["symbol", "trade_date"], how="left", validate="one_to_one")
         frame["year"] = int(year)
         frame = _to_numeric_feature_frame(frame, feature_cols)
-        for col in TARGET_COLUMNS:
+        for col in target_columns:
             frame[col] = pd.to_numeric(frame[col], errors="coerce").astype("float32")
-        keep_cols = ["symbol", "trade_date", "year", *TARGET_COLUMNS, *feature_cols]
+        keep_cols = ["symbol", "trade_date", "year", *target_columns, *feature_cols]
         out_path = shard_dir / f"path_value_features_year_{year}.parquet"
         frame[keep_cols].to_parquet(out_path, index=False)
         out_paths.append(out_path)
@@ -203,17 +208,19 @@ def _load_split(
     *,
     years: tuple[int, ...],
     feature_cols: list[str],
+    target_column: str,
+    target_columns: list[str],
 ) -> tuple[pd.DataFrame, np.ndarray, np.ndarray]:
     frames: list[pd.DataFrame] = []
     for path in shard_paths:
         year = int(path.stem.rsplit("_", 1)[-1])
         if year in years:
-            frames.append(pd.read_parquet(path, columns=["symbol", "trade_date", "year", *TARGET_COLUMNS, *feature_cols]))
+            frames.append(pd.read_parquet(path, columns=["symbol", "trade_date", "year", *target_columns, *feature_cols]))
     if not frames:
         raise ValueError(f"no feature shards for years={years}")
     meta = pd.concat(frames, ignore_index=True)
     values = meta[feature_cols].replace([np.inf, -np.inf], np.nan).to_numpy(dtype=np.float32, copy=True)
-    target = pd.to_numeric(meta[TARGET_COLUMN], errors="coerce").to_numpy(dtype=np.float32, copy=True)
+    target = pd.to_numeric(meta[target_column], errors="coerce").to_numpy(dtype=np.float32, copy=True)
     valid = np.isfinite(target)
     meta = meta.loc[valid].reset_index(drop=True)
     values = values[valid]
@@ -226,12 +233,13 @@ def _load_xy_split(
     *,
     years: tuple[int, ...],
     feature_cols: list[str],
+    target_column: str,
 ) -> tuple[int, np.ndarray, np.ndarray]:
     selected_paths = [path for path in shard_paths if int(path.stem.rsplit("_", 1)[-1]) in years]
     row_count = 0
     for path in selected_paths:
-        target_only = pd.read_parquet(path, columns=[TARGET_COLUMN])
-        target = pd.to_numeric(target_only[TARGET_COLUMN], errors="coerce").to_numpy(dtype=np.float32, copy=True)
+        target_only = pd.read_parquet(path, columns=[target_column])
+        target = pd.to_numeric(target_only[target_column], errors="coerce").to_numpy(dtype=np.float32, copy=True)
         row_count += int(np.isfinite(target).sum())
         del target_only, target
         gc.collect()
@@ -243,9 +251,9 @@ def _load_xy_split(
     cursor = 0
     for path in selected_paths:
         year = int(path.stem.rsplit("_", 1)[-1])
-        frame = pd.read_parquet(path, columns=[TARGET_COLUMN, *feature_cols])
+        frame = pd.read_parquet(path, columns=[target_column, *feature_cols])
         values = frame[feature_cols].replace([np.inf, -np.inf], np.nan).to_numpy(dtype=np.float32, copy=True)
-        target = pd.to_numeric(frame[TARGET_COLUMN], errors="coerce").to_numpy(dtype=np.float32, copy=True)
+        target = pd.to_numeric(frame[target_column], errors="coerce").to_numpy(dtype=np.float32, copy=True)
         valid = np.isfinite(target)
         if valid.any():
             n = int(valid.sum())
@@ -270,14 +278,14 @@ def _daily_spearman(frame: pd.DataFrame, *, score_col: str, target_col: str) -> 
     return pd.DataFrame(rows)
 
 
-def _topk_metrics(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], score_col: str) -> pd.DataFrame:
+def _topk_metrics(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], score_col: str, forward_days: int) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     metric_cols = [
-        "future_max_return_60d",
-        "future_min_return_60d",
-        "future_final_return_60d",
-        "drawdown_after_peak_60d",
-        "path_trade_value_60d",
+        _horizon_col("future_max_return", forward_days),
+        _horizon_col("future_min_return", forward_days),
+        _horizon_col("future_final_return", forward_days),
+        _horizon_col("drawdown_after_peak", forward_days),
+        _horizon_col("path_trade_value", forward_days),
     ]
     for top_k in top_k_values:
         daily_rows: list[dict[str, Any]] = []
@@ -290,9 +298,9 @@ def _topk_metrics(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], score_c
                 row[f"selected_{col}"] = float(pd.to_numeric(top[col], errors="coerce").mean())
                 row[f"universe_{col}"] = float(pd.to_numeric(group[col], errors="coerce").mean())
                 row[f"alpha_{col}"] = row[f"selected_{col}"] - row[f"universe_{col}"]
-            row["selected_positive_final_rate"] = float((pd.to_numeric(top["future_final_return_60d"], errors="coerce") > 0).mean())
-            row["selected_hit_10pct_rate"] = float((pd.to_numeric(top["future_max_return_60d"], errors="coerce") >= 0.10).mean())
-            row["selected_loss_5pct_rate"] = float((pd.to_numeric(top["future_min_return_60d"], errors="coerce") <= -0.05).mean())
+            row["selected_positive_final_rate"] = float((pd.to_numeric(top[_horizon_col("future_final_return", forward_days)], errors="coerce") > 0).mean())
+            row["selected_hit_10pct_rate"] = float((pd.to_numeric(top[_horizon_col("future_max_return", forward_days)], errors="coerce") >= 0.10).mean())
+            row["selected_loss_5pct_rate"] = float((pd.to_numeric(top[_horizon_col("future_min_return", forward_days)], errors="coerce") <= -0.05).mean())
             daily_rows.append(row)
         daily = pd.DataFrame(daily_rows)
         if daily.empty:
@@ -304,11 +312,20 @@ def _topk_metrics(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], score_c
     return pd.DataFrame(rows)
 
 
-def _evaluate_split(meta: pd.DataFrame, pred: np.ndarray, *, split: str, top_k_values: tuple[int, ...]) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
-    frame = meta[["symbol", "trade_date", "year", *TARGET_COLUMNS]].copy()
+def _evaluate_split(
+    meta: pd.DataFrame,
+    pred: np.ndarray,
+    *,
+    split: str,
+    top_k_values: tuple[int, ...],
+    target_column: str,
+    target_columns: list[str],
+    forward_days: int,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    frame = meta[["symbol", "trade_date", "year", *target_columns]].copy()
     frame["score"] = pred.astype("float32")
-    ic = _daily_spearman(frame, score_col="score", target_col=TARGET_COLUMN)
-    topk = _topk_metrics(frame, top_k_values=top_k_values, score_col="score")
+    ic = _daily_spearman(frame, score_col="score", target_col=target_column)
+    topk = _topk_metrics(frame, top_k_values=top_k_values, score_col="score", forward_days=forward_days)
     if not topk.empty:
         topk.insert(0, "split", split)
     metrics = {
@@ -318,18 +335,27 @@ def _evaluate_split(meta: pd.DataFrame, pred: np.ndarray, *, split: str, top_k_v
         "rank_ic_mean": float(ic["rank_ic"].mean()) if not ic.empty else np.nan,
         "rank_ic_median": float(ic["rank_ic"].median()) if not ic.empty else np.nan,
         "rank_ic_positive_day_rate": float((ic["rank_ic"] > 0).mean()) if not ic.empty else np.nan,
-        "target_mean": float(frame[TARGET_COLUMN].mean()),
+        "target_mean": float(frame[target_column].mean()),
         "prediction_mean": float(frame["score"].mean()),
     }
     return ic, topk, metrics
 
 
-def _plot_outputs(output_dir: Path, topk: pd.DataFrame, feature_importance: pd.DataFrame) -> list[str]:
+def _predict_with_feature_names(model: Any, values: np.ndarray, feature_cols: list[str]) -> np.ndarray:
+    frame = pd.DataFrame(values, columns=feature_cols, copy=False)
+    return model.predict(frame, num_iteration=model.best_iteration_).astype("float32")
+
+
+def _plot_outputs(output_dir: Path, topk: pd.DataFrame, feature_importance: pd.DataFrame, *, forward_days: int) -> list[str]:
     chart_dir = output_dir / "charts"
     chart_dir.mkdir(parents=True, exist_ok=True)
     outputs: list[str] = []
     if not topk.empty:
-        for metric in ["alpha_path_trade_value_60d", "alpha_future_final_return_60d", "alpha_future_max_return_60d"]:
+        for metric in [
+            f"alpha_{_horizon_col('path_trade_value', forward_days)}",
+            f"alpha_{_horizon_col('future_final_return', forward_days)}",
+            f"alpha_{_horizon_col('future_max_return', forward_days)}",
+        ]:
             col = metric if metric in topk.columns else f"{metric}"
             if col not in topk.columns:
                 continue
@@ -372,14 +398,18 @@ def _build_report(
     feature_importance: pd.DataFrame,
     chart_paths: list[str],
 ) -> str:
+    forward_days = int(summary.get("forward_days", DEFAULT_FORWARD_DAYS))
+    value_alpha_col = f"alpha_{_horizon_col('path_trade_value', forward_days)}"
+    final_alpha_col = f"alpha_{_horizon_col('future_final_return', forward_days)}"
+    max_alpha_col = f"alpha_{_horizon_col('future_max_return', forward_days)}"
     lines: list[str] = []
     lines.append("# QDP v2 Path Value Predictability Baseline")
     lines.append("")
     lines.append("## Method")
     lines.append("")
     lines.append(
-        "This baseline predicts next-open anchored future 60-day path_trade_value from pre-signal daily state, "
-        "past path samples, intraday summaries, and limit-board structure. It is a predictability bridge, not the final raw sequence model."
+        f"This baseline predicts next-open anchored future {forward_days}-day path_trade_value from pre-signal daily state, "
+        "full past close-path lags, intraday summaries, and limit-board structure. It is a predictability bridge, not the final raw sequence model."
     )
     lines.append("")
     lines.append("## Scope")
@@ -407,9 +437,9 @@ def _build_report(
         for row in focus.sort_values(["split", "top_k"]).to_dict("records"):
             lines.append(
                 f"- {row['split']} top{int(row['top_k'])}: "
-                f"path_value_alpha={row['alpha_path_trade_value_60d'] * 100:.2f}%, "
-                f"final_alpha={row['alpha_future_final_return_60d'] * 100:.2f}%, "
-                f"max_alpha={row['alpha_future_max_return_60d'] * 100:.2f}%, "
+                f"path_value_alpha={row[value_alpha_col] * 100:.2f}%, "
+                f"final_alpha={row[final_alpha_col] * 100:.2f}%, "
+                f"max_alpha={row[max_alpha_col] * 100:.2f}%, "
                 f"hit10={row['selected_hit_10pct_rate']:.2%}, "
                 f"loss5={row['selected_loss_5pct_rate']:.2%}"
             )
@@ -445,6 +475,8 @@ class BaselineConfig:
     test_years: tuple[int, ...]
     top_k: tuple[int, ...]
     seed: int
+    forward_days: int
+    past_close_days: int
     n_estimators: int
     learning_rate: float
     num_leaves: int
@@ -457,17 +489,21 @@ def build_path_value_predictability_baseline(config: BaselineConfig) -> dict[str
     progress_path = output_dir / "progress.json"
     _write_json(progress_path, {"status": "started", "updated_at": _now()})
     all_years = tuple(sorted(set(config.train_years + config.validation_years + config.test_years)))
+    target_column = _horizon_col("path_trade_value", config.forward_days)
+    target_columns = path_target_columns(config.forward_days)
     shard_paths, feature_cols = _build_feature_shards(
         qdp_root=config.qdp_root,
         atlas_dir=config.atlas_dir,
         output_dir=output_dir,
         progress_path=progress_path,
         years=all_years,
+        forward_days=config.forward_days,
+        past_close_days=config.past_close_days,
     )
     _write_json(progress_path, {"status": "loading_splits", "updated_at": _now()})
-    train_row_count, x_train, y_train = _load_xy_split(shard_paths, years=config.train_years, feature_cols=feature_cols)
-    val_meta, x_val, y_val = _load_split(shard_paths, years=config.validation_years, feature_cols=feature_cols)
-    test_meta, x_test, y_test = _load_split(shard_paths, years=config.test_years, feature_cols=feature_cols)
+    train_row_count, x_train, y_train = _load_xy_split(shard_paths, years=config.train_years, feature_cols=feature_cols, target_column=target_column)
+    val_meta, x_val, y_val = _load_split(shard_paths, years=config.validation_years, feature_cols=feature_cols, target_column=target_column, target_columns=target_columns)
+    test_meta, x_test, y_test = _load_split(shard_paths, years=config.test_years, feature_cols=feature_cols, target_column=target_column, target_columns=target_columns)
 
     from lightgbm import LGBMRegressor, early_stopping, log_evaluation
 
@@ -507,11 +543,27 @@ def build_path_value_predictability_baseline(config: BaselineConfig) -> dict[str
     }
     del x_train, y_train
     gc.collect()
-    pred_val = model.predict(x_val, num_iteration=model.best_iteration_).astype("float32")
-    pred_test = model.predict(x_test, num_iteration=model.best_iteration_).astype("float32")
+    pred_val = _predict_with_feature_names(model, x_val, feature_cols)
+    pred_test = _predict_with_feature_names(model, x_test, feature_cols)
 
-    val_ic, val_topk, val_metrics = _evaluate_split(val_meta, pred_val, split="validation", top_k_values=config.top_k)
-    test_ic, test_topk, test_metrics = _evaluate_split(test_meta, pred_test, split="test", top_k_values=config.top_k)
+    val_ic, val_topk, val_metrics = _evaluate_split(
+        val_meta,
+        pred_val,
+        split="validation",
+        top_k_values=config.top_k,
+        target_column=target_column,
+        target_columns=target_columns,
+        forward_days=config.forward_days,
+    )
+    test_ic, test_topk, test_metrics = _evaluate_split(
+        test_meta,
+        pred_test,
+        split="test",
+        top_k_values=config.top_k,
+        target_column=target_column,
+        target_columns=target_columns,
+        forward_days=config.forward_days,
+    )
     split_metrics = pd.DataFrame([train_metrics, val_metrics, test_metrics])
     topk = pd.concat([val_topk, test_topk], ignore_index=True)
     daily_ic = pd.concat(
@@ -531,9 +583,9 @@ def build_path_value_predictability_baseline(config: BaselineConfig) -> dict[str
 
     pred_dir = output_dir / "predictions"
     pred_dir.mkdir(parents=True, exist_ok=True)
-    val_pred = val_meta[["symbol", "trade_date", "year", *TARGET_COLUMNS]].copy()
+    val_pred = val_meta[["symbol", "trade_date", "year", *target_columns]].copy()
     val_pred["score"] = pred_val
-    test_pred = test_meta[["symbol", "trade_date", "year", *TARGET_COLUMNS]].copy()
+    test_pred = test_meta[["symbol", "trade_date", "year", *target_columns]].copy()
     test_pred["score"] = pred_test
     outputs = {
         "split_metrics_csv": _write_csv(output_dir / "split_metrics.csv", split_metrics),
@@ -544,7 +596,7 @@ def build_path_value_predictability_baseline(config: BaselineConfig) -> dict[str
         "test_predictions_csv": _write_csv(pred_dir / "test_predictions.csv", test_pred),
         "feature_shards": [str(path.resolve()) for path in shard_paths],
     }
-    chart_paths = _plot_outputs(output_dir, topk, feature_importance)
+    chart_paths = _plot_outputs(output_dir, topk, feature_importance, forward_days=config.forward_days)
     outputs["charts"] = chart_paths
     summary: dict[str, Any] = {
         "artifact_type": "qdp_v2_path_value_predictability_baseline",
@@ -555,7 +607,9 @@ def build_path_value_predictability_baseline(config: BaselineConfig) -> dict[str
         "train_years": list(config.train_years),
         "validation_years": list(config.validation_years),
         "test_years": list(config.test_years),
-        "target": TARGET_COLUMN,
+        "target": target_column,
+        "forward_days": int(config.forward_days),
+        "past_close_days": int(config.past_close_days),
         "feature_count": int(len(feature_cols)),
         "features": feature_cols,
         "model": {
@@ -595,6 +649,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--test-years", default="2025")
     parser.add_argument("--top-k", default=",".join(str(v) for v in DEFAULT_TOP_K))
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    parser.add_argument("--forward-days", type=int, default=DEFAULT_FORWARD_DAYS)
+    parser.add_argument("--past-close-days", type=int, default=PAST_CLOSE_DAYS)
     parser.add_argument("--n-estimators", type=int, default=800)
     parser.add_argument("--learning-rate", type=float, default=0.035)
     parser.add_argument("--num-leaves", type=int, default=63)
@@ -617,6 +673,8 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
             test_years=_parse_years(str(args.test_years), default=DEFAULT_TEST_YEARS),
             top_k=_parse_int_list(str(args.top_k), default=DEFAULT_TOP_K),
             seed=int(args.seed),
+            forward_days=int(args.forward_days),
+            past_close_days=int(args.past_close_days),
             n_estimators=int(args.n_estimators),
             learning_rate=float(args.learning_rate),
             num_leaves=int(args.num_leaves),
