@@ -393,7 +393,7 @@ def _daily_spearman(frame: pd.DataFrame, *, score_col: str, target_col: str) -> 
     return pd.DataFrame(rows)
 
 
-def _topk_metrics(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forward_days: int, value_column: str) -> pd.DataFrame:
+def _topk_daily_rows(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forward_days: int, value_column: str) -> list[dict[str, Any]]:
     suffix = f"{int(forward_days)}d"
     rows: list[dict[str, Any]] = []
     metric_cols = [
@@ -408,7 +408,6 @@ def _topk_metrics(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forward
         f"pre_exit_max_drawdown_{suffix}",
     ]
     for top_k in top_k_values:
-        daily_rows: list[dict[str, Any]] = []
         for trade_date, group in frame.groupby("trade_date", sort=True):
             group = group.dropna(subset=["score", value_column])
             if group.empty:
@@ -434,14 +433,26 @@ def _topk_metrics(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forward
                 row["selected_pre_exit_max_drawdown_mean"] = float(
                     pd.to_numeric(top[f"pre_exit_max_drawdown_{suffix}"], errors="coerce").mean()
                 )
-            daily_rows.append(row)
-        daily = pd.DataFrame(daily_rows)
-        if daily.empty:
-            continue
-        out: dict[str, Any] = {"top_k": int(top_k), "day_count": int(len(daily))}
-        for col in [c for c in daily.columns if c not in {"trade_date", "top_k"}]:
-            out[col] = float(pd.to_numeric(daily[col], errors="coerce").mean())
-        rows.append(out)
+            rows.append(row)
+    return rows
+
+
+def _aggregate_topk_daily_rows(rows: list[dict[str, Any]]) -> pd.DataFrame:
+    daily = pd.DataFrame(rows)
+    if daily.empty:
+        return pd.DataFrame()
+    out_rows: list[dict[str, Any]] = []
+    for top_k, group in daily.groupby("top_k", sort=True):
+        out: dict[str, Any] = {"top_k": int(top_k), "day_count": int(len(group))}
+        for col in [c for c in group.columns if c not in {"trade_date", "top_k"}]:
+            out[col] = float(pd.to_numeric(group[col], errors="coerce").mean())
+        out_rows.append(out)
+    return pd.DataFrame(out_rows)
+
+
+def _topk_metrics(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forward_days: int, value_column: str) -> pd.DataFrame:
+    rows = _topk_daily_rows(frame, top_k_values=top_k_values, forward_days=forward_days, value_column=value_column)
+    return _aggregate_topk_daily_rows(rows)
     return pd.DataFrame(rows)
 
 
@@ -632,9 +643,35 @@ def _predict_split(
     pred_path = pred_dir / f"{split}_predictions.csv"
     if write_predictions and pred_path.exists():
         pred_path.unlink()
-    summary_rows: list[pd.DataFrame] = []
+    uses_derived_path_value = bool(getattr(model, "uses_derived_path_value", False))
+    summary_columns = derived_path_summary_columns(dataset.forward_days) if uses_derived_path_value else list(dataset.path_summary_columns)
+    value_column = path_value_v2_column(dataset.forward_days) if uses_derived_path_value else str(dataset.value_column)
+    pending_date: str | None = None
+    pending_frames: list[pd.DataFrame] = []
+    ic_rows: list[dict[str, Any]] = []
+    topk_daily_rows: list[dict[str, Any]] = []
+    row_count = 0
+    date_values: set[str] = set()
+    target_sum = 0.0
+    prediction_sum = 0.0
+    finite_target_count = 0
+    finite_prediction_count = 0
     first_write = True
     model.eval()
+
+    def flush_pending_date() -> None:
+        nonlocal pending_date, pending_frames
+        if not pending_frames:
+            pending_date = None
+            return
+        date_frame = pd.concat(pending_frames, ignore_index=True, copy=False)
+        ic_rows.extend(_daily_spearman(date_frame, score_col="score", target_col=value_column).to_dict("records"))
+        topk_daily_rows.extend(
+            _topk_daily_rows(date_frame, top_k_values=top_k, forward_days=dataset.forward_days, value_column=value_column)
+        )
+        pending_frames = []
+        pending_date = None
+
     for batch_indices in _iter_index_batches(dataset, batch_size=int(batch_size), shuffle=False, seed=0):
         batch = dataset.get_batch(batch_indices)
         x, y_path, y_summary, _date_idx, symbol_idx = _batch_to_device(batch, device)
@@ -643,14 +680,10 @@ def _predict_split(
         pred_path_np = out["future_path"].detach().float().cpu().numpy()
         true_path_np = y_path.detach().float().cpu().numpy()
         if "score" in out:
-            summary_columns = list(dataset.path_summary_columns)
-            value_column = str(dataset.value_column)
             pred_summary_np = out["path_summary"].detach().float().cpu().numpy()
             score_np = out["score"].detach().float().cpu().numpy()
             true_summary_np = y_summary.detach().float().cpu().numpy()
         else:
-            summary_columns = derived_path_summary_columns(dataset.forward_days)
-            value_column = path_value_v2_column(dataset.forward_days)
             pred_summary_np = _derive_path_summary_numpy(pred_path_np)
             true_summary_np = _derive_path_summary_numpy(true_path_np)
             score_np = pred_summary_np[:, summary_columns.index(value_column)]
@@ -675,23 +708,37 @@ def _predict_split(
             first_write = False
         metric_frame = chunk[["trade_date", "symbol", "score", *[f"true_{c}" for c in summary_columns]]].copy()
         metric_frame = metric_frame.rename(columns={f"true_{c}": c for c in summary_columns})
-        summary_rows.append(metric_frame)
-        del x, y_path, y_summary, symbol_idx, out, pred_path_np, pred_summary_np, score_np, true_path_np, true_summary_np, chunk
+        row_count += int(len(metric_frame))
+        date_values.update(str(item) for item in metric_frame["trade_date"].unique())
+        target_values = pd.to_numeric(metric_frame[value_column], errors="coerce").to_numpy(dtype=np.float64, copy=False)
+        prediction_values = pd.to_numeric(metric_frame["score"], errors="coerce").to_numpy(dtype=np.float64, copy=False)
+        target_mask = np.isfinite(target_values)
+        prediction_mask = np.isfinite(prediction_values)
+        target_sum += float(np.nansum(target_values[target_mask]))
+        prediction_sum += float(np.nansum(prediction_values[prediction_mask]))
+        finite_target_count += int(target_mask.sum())
+        finite_prediction_count += int(prediction_mask.sum())
+        for trade_date, date_frame in metric_frame.groupby("trade_date", sort=False):
+            current_date = str(trade_date)
+            if pending_date is not None and current_date != pending_date:
+                flush_pending_date()
+            pending_date = current_date
+            pending_frames.append(date_frame.reset_index(drop=True))
+        del x, y_path, y_summary, symbol_idx, out, pred_path_np, pred_summary_np, score_np, true_path_np, true_summary_np, chunk, metric_frame
         gc.collect()
-    frame = pd.concat(summary_rows, ignore_index=True)
-    value_column = path_value_v2_column(dataset.forward_days) if bool(getattr(model, "uses_derived_path_value", False)) else dataset.value_column
-    ic = _daily_spearman(frame, score_col="score", target_col=value_column)
-    topk = _topk_metrics(frame, top_k_values=top_k, forward_days=dataset.forward_days, value_column=value_column)
+    flush_pending_date()
+    ic = pd.DataFrame(ic_rows)
+    topk = _aggregate_topk_daily_rows(topk_daily_rows)
     metrics = {
         "split": split,
-        "row_count": int(len(frame)),
-        "date_count": int(frame["trade_date"].nunique()),
+        "row_count": int(row_count),
+        "date_count": int(len(date_values)),
         "rank_ic_mean": float(ic["rank_ic"].mean()) if not ic.empty else np.nan,
         "rank_ic_median": float(ic["rank_ic"].median()) if not ic.empty else np.nan,
         "rank_ic_positive_day_rate": float((ic["rank_ic"] > 0).mean()) if not ic.empty else np.nan,
         "value_column": str(value_column),
-        "target_mean": float(frame[value_column].mean()),
-        "prediction_mean": float(frame["score"].mean()),
+        "target_mean": float(target_sum / max(finite_target_count, 1)),
+        "prediction_mean": float(prediction_sum / max(finite_prediction_count, 1)),
         "prediction_csv": str(pred_path.resolve()) if write_predictions else "",
     }
     return ic, topk, metrics
@@ -720,6 +767,12 @@ def _write_report(
         f"This model reads past 100-day multi-channel sequences from QDP v2 and predicts future {forward_days}-day OHLC paths. "
         "Path summaries and ranking values are derived from the predicted path when using a path-value model."
     )
+    early = dict(summary.get("early_stopping", {}) or {})
+    if early:
+        lines.append(
+            f"Early stopping monitors {early.get('metric', 'validation_rank_ic_mean')} with "
+            f"patience={int(early.get('patience', 0))}, min_delta={float(early.get('min_delta', 0.0)):.4g}."
+        )
     lines.append("")
     lines.append("## Split Metrics")
     lines.append("")
@@ -797,6 +850,8 @@ class TrainConfig:
     top_k: tuple[int, ...]
     max_samples_per_split: int
     prediction_mode: str
+    early_stopping_patience: int
+    early_stopping_min_delta: float
 
 
 def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
@@ -825,6 +880,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(config.learning_rate), weight_decay=float(config.weight_decay))
     scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
     best_val_ic = -1e9
+    best_epoch = 0
+    epochs_without_improvement = 0
     best_path = output_dir / "best_model.pt"
     history: list[dict[str, Any]] = []
     for epoch in range(1, int(config.epochs) + 1):
@@ -898,11 +955,14 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             write_predictions=False,
             write_path_predictions=False,
         )
-        train_row["validation_rank_ic_mean"] = float(val_metrics["rank_ic_mean"])
-        history.append(train_row)
-        pd.DataFrame(history).to_csv(output_dir / "training_history_partial.csv", index=False, encoding="utf-8-sig")
-        if float(val_metrics["rank_ic_mean"]) > best_val_ic:
-            best_val_ic = float(val_metrics["rank_ic_mean"])
+        current_val_ic = float(val_metrics["rank_ic_mean"])
+        improved = bool(np.isfinite(current_val_ic) and current_val_ic > best_val_ic + float(config.early_stopping_min_delta))
+        train_row["validation_rank_ic_mean"] = current_val_ic
+        train_row["is_best"] = bool(improved)
+        if improved:
+            best_val_ic = current_val_ic
+            best_epoch = int(epoch)
+            epochs_without_improvement = 0
             torch.save(
                 {
                     "model_state_dict": model.state_dict(),
@@ -915,6 +975,11 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 },
                 best_path,
             )
+        else:
+            epochs_without_improvement += 1
+        train_row["early_stopping_wait"] = int(epochs_without_improvement)
+        history.append(train_row)
+        pd.DataFrame(history).to_csv(output_dir / "training_history_partial.csv", index=False, encoding="utf-8-sig")
         _write_json(
             progress_path,
             {
@@ -922,6 +987,9 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 "epoch": int(epoch),
                 "validation_rank_ic_mean": float(val_metrics["rank_ic_mean"]),
                 "best_validation_rank_ic_mean": float(best_val_ic),
+                "best_epoch": int(best_epoch),
+                "early_stopping_wait": int(epochs_without_improvement),
+                "early_stopping_patience": int(config.early_stopping_patience),
                 "updated_at": _now(),
             },
         )
@@ -929,6 +997,19 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         if device.type == "cuda":
             torch.cuda.empty_cache()
         gc.collect()
+        if int(config.early_stopping_patience) > 0 and epochs_without_improvement >= int(config.early_stopping_patience):
+            _write_json(
+                progress_path,
+                {
+                    "status": "early_stopped",
+                    "epoch": int(epoch),
+                    "best_epoch": int(best_epoch),
+                    "best_validation_rank_ic_mean": float(best_val_ic),
+                    "early_stopping_wait": int(epochs_without_improvement),
+                    "updated_at": _now(),
+                },
+            )
+            break
     if best_path.exists():
         payload = torch.load(best_path, map_location=device, weights_only=False)
         model.load_state_dict(payload["model_state_dict"])
@@ -987,6 +1068,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         "device": str(device),
         "amp_enabled": bool(amp_enabled),
         "epochs": int(config.epochs),
+        "completed_epochs": int(len(history)),
+        "best_epoch": int(best_epoch),
         "batch_size": int(config.batch_size),
         "max_samples_per_split": int(config.max_samples_per_split),
         "prediction_mode": str(config.prediction_mode),
@@ -1006,6 +1089,12 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "value": float(config.value_loss_weight),
             "rank": float(config.rank_loss_weight),
             "rank_max_per_side": int(config.rank_max_per_side),
+        },
+        "early_stopping": {
+            "metric": "validation_rank_ic_mean",
+            "patience": int(config.early_stopping_patience),
+            "min_delta": float(config.early_stopping_min_delta),
+            "stopped_early": bool(int(config.early_stopping_patience) > 0 and len(history) < int(config.epochs)),
         },
         "best_checkpoint": str(best_path.resolve()),
         "history": history,
@@ -1056,6 +1145,8 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument("--top-k", default="5,10,20,50,100")
     train.add_argument("--max-samples-per-split", type=int, default=0)
     train.add_argument("--prediction-mode", default="full", choices=("full", "compact", "none"))
+    train.add_argument("--early-stopping-patience", type=int, default=0)
+    train.add_argument("--early-stopping-min-delta", type=float, default=0.0)
     train.add_argument("--json", action="store_true")
     return parser
 
@@ -1087,6 +1178,8 @@ def main(argv: list[str] | None = None) -> int:
         top_k=_parse_int_list(args.top_k, default=DEFAULT_TOP_K),
         max_samples_per_split=int(args.max_samples_per_split),
         prediction_mode=str(args.prediction_mode),
+        early_stopping_patience=int(args.early_stopping_patience),
+        early_stopping_min_delta=float(args.early_stopping_min_delta),
     )
     result = train_sequence_path_model(cfg)
     print(json.dumps(result, ensure_ascii=False, indent=2, default=_json_default) if bool(args.json) else result)
