@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import gc
 import json
 import math
@@ -36,7 +37,22 @@ PATH_VALUE_V2_WAITING_PENALTY = 0.04
 PATH_VALUE_V2_DRAWDOWN_PENALTY = 0.60
 PATH_VALUE_V2_TRANSACTION_COST = 0.002
 PATH_VALUE_V2_TEMPERATURE = 0.03
-PATH_VALUE_MODEL_TYPES = {"gru_path_value", "gru_path_value_symbol"}
+PATH_VALUE_MODEL_TYPES = {"gru_path_value", "gru_path_value_symbol", "gru_path_value_residual"}
+RESIDUAL_MODEL_TYPES = {"gru_path_value_residual"}
+
+
+def _trim_working_set() -> None:
+    if not hasattr(ctypes, "WinDLL"):
+        return
+    try:
+        kernel32 = ctypes.WinDLL("kernel32.dll", use_last_error=True)
+        psapi = ctypes.WinDLL("psapi.dll", use_last_error=True)
+        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        psapi.EmptyWorkingSet.argtypes = [ctypes.c_void_p]
+        psapi.EmptyWorkingSet.restype = ctypes.c_bool
+        psapi.EmptyWorkingSet(kernel32.GetCurrentProcess())
+    except Exception:
+        return
 
 
 def _now() -> str:
@@ -225,11 +241,14 @@ class SequencePathModel(nn.Module):
     ) -> None:
         super().__init__()
         normalized_model_type = str(model_type or "gru_last").strip().lower()
-        if normalized_model_type not in {"gru_last", "gru_attention", "gru_path_value", "gru_path_value_symbol"}:
-            raise ValueError("model_type must be gru_last, gru_attention, gru_path_value, or gru_path_value_symbol")
+        if normalized_model_type not in {"gru_last", "gru_attention", "gru_path_value", "gru_path_value_symbol", "gru_path_value_residual"}:
+            raise ValueError(
+                "model_type must be gru_last, gru_attention, gru_path_value, gru_path_value_symbol, or gru_path_value_residual"
+            )
         self.model_type = normalized_model_type
         self.uses_derived_path_value = normalized_model_type in PATH_VALUE_MODEL_TYPES
         self.uses_symbol_embedding = normalized_model_type == "gru_path_value_symbol"
+        self.uses_residual_score = normalized_model_type in RESIDUAL_MODEL_TYPES
         self.input_norm = nn.LayerNorm(input_dim)
         self.proj = nn.Linear(input_dim, hidden_dim)
         self.encoder = nn.GRU(
@@ -260,6 +279,7 @@ class SequencePathModel(nn.Module):
         else:
             self.summary_head = nn.Linear(head_dim, int(summary_dim))
             self.score_head = nn.Linear(head_dim, 1)
+        self.residual_score_head = nn.Linear(head_dim, 1) if self.uses_residual_score else None
         self.forward_days = int(forward_days)
         self.summary_dim = int(summary_dim)
 
@@ -280,7 +300,11 @@ class SequencePathModel(nn.Module):
             pooled = torch.cat([pooled, embedded], dim=1)
         future_path = self.path_head(pooled).view(-1, self.forward_days, 4)
         if self.uses_derived_path_value:
-            return {"future_path": future_path}
+            outputs = {"future_path": future_path}
+            if self.uses_residual_score:
+                assert self.residual_score_head is not None
+                outputs["residual_score"] = self.residual_score_head(pooled).squeeze(-1)
+            return outputs
         assert self.summary_head is not None
         assert self.score_head is not None
         return {
@@ -336,8 +360,11 @@ def _compute_loss(
     value_weight: float = 0.15,
     rank_weight: float = 0.15,
     rank_max_per_side: int = 64,
+    residual_weight: float = 0.25,
+    residual_penalty_weight: float = 0.01,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     path_loss = _finite_smooth_l1(outputs["future_path"], y_path)
+    residual_penalty = outputs["future_path"].sum() * 0.0
     if "score" in outputs:
         summary_loss = _finite_smooth_l1(outputs["path_summary"], y_summary)
         value_target = y_summary[:, int(value_index)]
@@ -351,14 +378,26 @@ def _compute_loss(
             _derived_summary_loss_indices(int(outputs["future_path"].shape[1])),
         )
         value_target = target_summary[:, -1]
-        score = pred_summary[:, -1]
-    value_loss = _finite_smooth_l1(score, value_target)
+        path_value_score = pred_summary[:, -1]
+        path_value_loss = _finite_smooth_l1(path_value_score, value_target)
+        if "residual_score" in outputs:
+            residual_score = outputs["residual_score"]
+            score = path_value_score + float(residual_weight) * residual_score
+            residual_penalty = torch.mean(torch.square(residual_score))
+            final_value_loss = _finite_smooth_l1(score, value_target)
+            value_loss = 0.5 * (path_value_loss + final_value_loss)
+        else:
+            score = path_value_score
+            value_loss = path_value_loss
+    if "score" in outputs:
+        value_loss = _finite_smooth_l1(score, value_target)
     rank_loss = _rank_loss_by_date(score, value_target, date_idx, max_per_side=int(rank_max_per_side))
     total = (
         float(path_weight) * path_loss
         + float(summary_weight) * summary_loss
         + float(value_weight) * value_loss
         + float(rank_weight) * rank_loss
+        + float(residual_penalty_weight) * residual_penalty
     )
     return total, {
         "loss": float(total.detach().cpu().item()),
@@ -366,6 +405,7 @@ def _compute_loss(
         "summary_loss": float(summary_loss.detach().cpu().item()),
         "value_loss": float(value_loss.detach().cpu().item()),
         "rank_loss": float(rank_loss.detach().cpu().item()),
+        "residual_penalty": float(residual_penalty.detach().cpu().item()),
     }
 
 
@@ -453,6 +493,35 @@ def _aggregate_topk_daily_rows(rows: list[dict[str, Any]]) -> pd.DataFrame:
 def _topk_metrics(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forward_days: int, value_column: str) -> pd.DataFrame:
     rows = _topk_daily_rows(frame, top_k_values=top_k_values, forward_days=forward_days, value_column=value_column)
     return _aggregate_topk_daily_rows(rows)
+
+
+def _split_metrics_for_score(
+    frame: pd.DataFrame,
+    *,
+    split: str,
+    score_col: str,
+    value_column: str,
+    prediction_csv: str,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    ic = _daily_spearman(frame, score_col=score_col, target_col=value_column)
+    target_values = pd.to_numeric(frame[value_column], errors="coerce").to_numpy(dtype=np.float64, copy=False)
+    prediction_values = pd.to_numeric(frame[score_col], errors="coerce").to_numpy(dtype=np.float64, copy=False)
+    target_mask = np.isfinite(target_values)
+    prediction_mask = np.isfinite(prediction_values)
+    metrics = {
+        "split": split,
+        "row_count": int(len(frame)),
+        "date_count": int(frame["trade_date"].nunique()),
+        "rank_ic_mean": float(ic["rank_ic"].mean()) if not ic.empty else np.nan,
+        "rank_ic_median": float(ic["rank_ic"].median()) if not ic.empty else np.nan,
+        "rank_ic_positive_day_rate": float((ic["rank_ic"] > 0).mean()) if not ic.empty else np.nan,
+        "value_column": str(value_column),
+        "score_column": str(score_col),
+        "target_mean": float(np.nansum(target_values[target_mask]) / max(int(target_mask.sum()), 1)),
+        "prediction_mean": float(np.nansum(prediction_values[prediction_mask]) / max(int(prediction_mask.sum()), 1)),
+        "prediction_csv": str(prediction_csv),
+    }
+    return ic, metrics
     return pd.DataFrame(rows)
 
 
@@ -648,33 +717,55 @@ def _predict_split(
     value_column = path_value_v2_column(dataset.forward_days) if uses_derived_path_value else str(dataset.value_column)
     pending_date: str | None = None
     pending_frames: list[pd.DataFrame] = []
-    ic_rows: list[dict[str, Any]] = []
-    topk_daily_rows: list[dict[str, Any]] = []
+    ic_rows_by_score: dict[str, list[dict[str, Any]]] = {"score": []}
+    topk_daily_rows_by_score: dict[str, list[dict[str, Any]]] = {"score": []}
     row_count = 0
     date_values: set[str] = set()
     target_sum = 0.0
-    prediction_sum = 0.0
-    finite_target_count = 0
-    finite_prediction_count = 0
+    target_count = 0
+    prediction_sums: dict[str, float] = {"score": 0.0}
+    prediction_counts: dict[str, int] = {"score": 0}
     first_write = True
     model.eval()
 
     def flush_pending_date() -> None:
-        nonlocal pending_date, pending_frames
+        nonlocal pending_date, pending_frames, ic_rows_by_score, topk_daily_rows_by_score
         if not pending_frames:
             pending_date = None
             return
         date_frame = pd.concat(pending_frames, ignore_index=True, copy=False)
-        ic_rows.extend(_daily_spearman(date_frame, score_col="score", target_col=value_column).to_dict("records"))
-        topk_daily_rows.extend(
-            _topk_daily_rows(date_frame, top_k_values=top_k, forward_days=dataset.forward_days, value_column=value_column)
-        )
+        score_columns = ["score"]
+        for optional_score in ["path_value_score", "residual_score"]:
+            if optional_score in date_frame.columns:
+                score_columns.append(optional_score)
+        for score_col in score_columns:
+            ic_rows_by_score.setdefault(score_col, []).extend(
+                _daily_spearman(date_frame, score_col=score_col, target_col=value_column).to_dict("records")
+            )
+            score_frame = date_frame
+            if score_col != "score":
+                score_frame = date_frame.copy()
+                score_frame["score"] = score_frame[score_col].to_numpy(copy=False)
+            topk_daily_rows_by_score.setdefault(score_col, []).extend(
+                _topk_daily_rows(
+                    score_frame,
+                    top_k_values=top_k,
+                    forward_days=dataset.forward_days,
+                    value_column=value_column,
+                )
+            )
         pending_frames = []
         pending_date = None
 
-    for batch_indices in _iter_index_batches(dataset, batch_size=int(batch_size), shuffle=False, seed=0):
+    for predict_batch_count, batch_indices in enumerate(
+        _iter_index_batches(dataset, batch_size=int(batch_size), shuffle=False, seed=0),
+        start=1,
+    ):
         batch = dataset.get_batch(batch_indices)
         x, y_path, y_summary, _date_idx, symbol_idx = _batch_to_device(batch, device)
+        trade_dates = list(batch["trade_date"])
+        symbols = list(batch["symbol"])
+        del batch
         with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
             out = model(x, symbol_idx=symbol_idx)
         pred_path_np = out["future_path"].detach().float().cpu().numpy()
@@ -686,12 +777,22 @@ def _predict_split(
         else:
             pred_summary_np = _derive_path_summary_numpy(pred_path_np)
             true_summary_np = _derive_path_summary_numpy(true_path_np)
-            score_np = pred_summary_np[:, summary_columns.index(value_column)]
+            path_value_score_np = pred_summary_np[:, summary_columns.index(value_column)]
+            if "residual_score" in out:
+                residual_np = out["residual_score"].detach().float().cpu().numpy()
+                score_np = path_value_score_np + float(getattr(model, "residual_weight", 0.25)) * residual_np
+            else:
+                residual_np = None
+                score_np = path_value_score_np
         rows: dict[str, Any] = {
-            "trade_date": list(batch["trade_date"]),
-            "symbol": list(batch["symbol"]),
+            "trade_date": trade_dates,
+            "symbol": symbols,
             "score": score_np,
         }
+        if "score" not in out:
+            rows["path_value_score"] = path_value_score_np
+            if residual_np is not None:
+                rows["residual_score"] = residual_np
         for idx, col in enumerate(summary_columns):
             rows[f"true_{col}"] = true_summary_np[:, idx]
             rows[f"pred_{col}"] = pred_summary_np[:, idx]
@@ -707,28 +808,40 @@ def _predict_split(
             chunk.to_csv(pred_path, index=False, mode="w" if first_write else "a", header=first_write, encoding="utf-8-sig")
             first_write = False
         metric_frame = chunk[["trade_date", "symbol", "score", *[f"true_{c}" for c in summary_columns]]].copy()
+        for optional_score in ["path_value_score", "residual_score"]:
+            if optional_score in chunk.columns:
+                metric_frame[optional_score] = chunk[optional_score].to_numpy(copy=False)
         metric_frame = metric_frame.rename(columns={f"true_{c}": c for c in summary_columns})
         row_count += int(len(metric_frame))
         date_values.update(str(item) for item in metric_frame["trade_date"].unique())
         target_values = pd.to_numeric(metric_frame[value_column], errors="coerce").to_numpy(dtype=np.float64, copy=False)
-        prediction_values = pd.to_numeric(metric_frame["score"], errors="coerce").to_numpy(dtype=np.float64, copy=False)
         target_mask = np.isfinite(target_values)
-        prediction_mask = np.isfinite(prediction_values)
         target_sum += float(np.nansum(target_values[target_mask]))
-        prediction_sum += float(np.nansum(prediction_values[prediction_mask]))
-        finite_target_count += int(target_mask.sum())
-        finite_prediction_count += int(prediction_mask.sum())
+        target_count += int(target_mask.sum())
+        for score_col in [col for col in ["score", "path_value_score", "residual_score"] if col in metric_frame.columns]:
+            prediction_values = pd.to_numeric(metric_frame[score_col], errors="coerce").to_numpy(dtype=np.float64, copy=False)
+            prediction_mask = np.isfinite(prediction_values)
+            prediction_sums[score_col] = prediction_sums.get(score_col, 0.0) + float(np.nansum(prediction_values[prediction_mask]))
+            prediction_counts[score_col] = prediction_counts.get(score_col, 0) + int(prediction_mask.sum())
         for trade_date, date_frame in metric_frame.groupby("trade_date", sort=False):
             current_date = str(trade_date)
             if pending_date is not None and current_date != pending_date:
                 flush_pending_date()
             pending_date = current_date
             pending_frames.append(date_frame.reset_index(drop=True))
+        if "residual_np" in locals():
+            del residual_np
+        if "path_value_score_np" in locals():
+            del path_value_score_np
         del x, y_path, y_summary, symbol_idx, out, pred_path_np, pred_summary_np, score_np, true_path_np, true_summary_np, chunk, metric_frame
-        gc.collect()
+        del trade_dates, symbols
+        if predict_batch_count % 100 == 0:
+            gc.collect()
+            _trim_working_set()
     flush_pending_date()
-    ic = pd.DataFrame(ic_rows)
-    topk = _aggregate_topk_daily_rows(topk_daily_rows)
+    ic = pd.DataFrame(ic_rows_by_score.get("score", []))
+    topk = _aggregate_topk_daily_rows(topk_daily_rows_by_score.get("score", []))
+    prediction_csv = str(pred_path.resolve()) if write_predictions else ""
     metrics = {
         "split": split,
         "row_count": int(row_count),
@@ -737,10 +850,23 @@ def _predict_split(
         "rank_ic_median": float(ic["rank_ic"].median()) if not ic.empty else np.nan,
         "rank_ic_positive_day_rate": float((ic["rank_ic"] > 0).mean()) if not ic.empty else np.nan,
         "value_column": str(value_column),
-        "target_mean": float(target_sum / max(finite_target_count, 1)),
-        "prediction_mean": float(prediction_sum / max(finite_prediction_count, 1)),
-        "prediction_csv": str(pred_path.resolve()) if write_predictions else "",
+        "score_column": "score",
+        "target_mean": float(target_sum / max(target_count, 1)),
+        "prediction_mean": float(prediction_sums.get("score", 0.0) / max(prediction_counts.get("score", 0), 1)),
+        "prediction_csv": prediction_csv,
     }
+    diagnostics: dict[str, dict[str, Any]] = {}
+    for score_col, rows_for_score in ic_rows_by_score.items():
+        score_ic = pd.DataFrame(rows_for_score)
+        score_topk = _aggregate_topk_daily_rows(topk_daily_rows_by_score.get(score_col, []))
+        diagnostics[score_col] = {
+            "rank_ic_mean": float(score_ic["rank_ic"].mean()) if not score_ic.empty else np.nan,
+            "rank_ic_median": float(score_ic["rank_ic"].median()) if not score_ic.empty else np.nan,
+            "rank_ic_positive_day_rate": float((score_ic["rank_ic"] > 0).mean()) if not score_ic.empty else np.nan,
+            "prediction_mean": float(prediction_sums.get(score_col, 0.0) / max(prediction_counts.get(score_col, 0), 1)),
+            "topk": score_topk.to_dict("records"),
+        }
+    metrics["score_diagnostics"] = diagnostics
     return ic, topk, metrics
 
 
@@ -843,6 +969,8 @@ class TrainConfig:
     summary_loss_weight: float
     value_loss_weight: float
     rank_loss_weight: float
+    residual_score_weight: float
+    residual_penalty_weight: float
     rank_max_per_side: int
     device: str
     amp: bool
@@ -877,6 +1005,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         symbol_count=int(train_ds.symbol_count),
         symbol_embedding_dim=int(config.symbol_embedding_dim),
     ).to(device)
+    model.residual_weight = float(config.residual_score_weight)
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(config.learning_rate), weight_decay=float(config.weight_decay))
     scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
     best_val_ic = -1e9
@@ -887,7 +1016,14 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     for epoch in range(1, int(config.epochs) + 1):
         _write_json(progress_path, {"status": "training", "epoch": epoch, "updated_at": _now()})
         model.train()
-        loss_totals: dict[str, float] = {"loss": 0.0, "path_loss": 0.0, "summary_loss": 0.0, "value_loss": 0.0, "rank_loss": 0.0}
+        loss_totals: dict[str, float] = {
+            "loss": 0.0,
+            "path_loss": 0.0,
+            "summary_loss": 0.0,
+            "value_loss": 0.0,
+            "rank_loss": 0.0,
+            "residual_penalty": 0.0,
+        }
         batch_count = 0
         sample_count = 0
         train_batches = DateGroupedBatchSampler(
@@ -900,6 +1036,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         for batch_indices in train_batches:
             batch = train_ds.get_batch(batch_indices)
             x, y_path, y_summary, date_idx, symbol_idx = _batch_to_device(batch, device)
+            del batch
             optimizer.zero_grad(set_to_none=True)
             with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
                 out = model(x, symbol_idx=symbol_idx)
@@ -914,6 +1051,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     value_weight=float(config.value_loss_weight),
                     rank_weight=float(config.rank_loss_weight),
                     rank_max_per_side=int(config.rank_max_per_side),
+                    residual_weight=float(config.residual_score_weight),
+                    residual_penalty_weight=float(config.residual_penalty_weight),
                 )
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
@@ -936,7 +1075,10 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                         "updated_at": _now(),
                     },
                 )
-            del x, y_path, y_summary, date_idx, symbol_idx, out, loss
+            del x, y_path, y_summary, date_idx, symbol_idx, out, loss, parts
+            if batch_count % 200 == 0:
+                gc.collect()
+                _trim_working_set()
         train_row = {
             "epoch": int(epoch),
             "train_sample_count": int(sample_count),
@@ -997,6 +1139,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         if device.type == "cuda":
             torch.cuda.empty_cache()
         gc.collect()
+        _trim_working_set()
         if int(config.early_stopping_patience) > 0 and epochs_without_improvement >= int(config.early_stopping_patience):
             _write_json(
                 progress_path,
@@ -1081,13 +1224,17 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "dropout": float(config.dropout),
             "uses_derived_path_value": bool(getattr(model, "uses_derived_path_value", False)),
             "uses_symbol_embedding": bool(getattr(model, "uses_symbol_embedding", False)),
+            "uses_residual_score": bool(getattr(model, "uses_residual_score", False)),
             "symbol_embedding_dim": int(config.symbol_embedding_dim) if bool(getattr(model, "uses_symbol_embedding", False)) else 0,
+            "residual_score_weight": float(config.residual_score_weight) if bool(getattr(model, "uses_residual_score", False)) else 0.0,
         },
         "loss_weights": {
             "path": float(config.path_loss_weight),
             "summary": float(config.summary_loss_weight),
             "value": float(config.value_loss_weight),
             "rank": float(config.rank_loss_weight),
+            "residual_score_weight": float(config.residual_score_weight),
+            "residual_penalty": float(config.residual_penalty_weight),
             "rank_max_per_side": int(config.rank_max_per_side),
         },
         "early_stopping": {
@@ -1126,7 +1273,11 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument("--run-tag", default="qdp_v2_seq100_path20_model_v1")
     train.add_argument("--epochs", type=int, default=10)
     train.add_argument("--batch-size", type=int, default=512)
-    train.add_argument("--model-type", default="gru_last", choices=("gru_last", "gru_attention", "gru_path_value", "gru_path_value_symbol"))
+    train.add_argument(
+        "--model-type",
+        default="gru_last",
+        choices=("gru_last", "gru_attention", "gru_path_value", "gru_path_value_symbol", "gru_path_value_residual"),
+    )
     train.add_argument("--hidden-dim", type=int, default=128)
     train.add_argument("--layers", type=int, default=2)
     train.add_argument("--dropout", type=float, default=0.10)
@@ -1137,6 +1288,8 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument("--summary-loss-weight", type=float, default=0.20)
     train.add_argument("--value-loss-weight", type=float, default=0.20)
     train.add_argument("--rank-loss-weight", type=float, default=0.15)
+    train.add_argument("--residual-score-weight", type=float, default=0.25)
+    train.add_argument("--residual-penalty-weight", type=float, default=0.01)
     train.add_argument("--rank-max-per-side", type=int, default=64)
     train.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     train.add_argument("--amp", dest="amp", action="store_true", default=True)
@@ -1171,6 +1324,8 @@ def main(argv: list[str] | None = None) -> int:
         summary_loss_weight=float(args.summary_loss_weight),
         value_loss_weight=float(args.value_loss_weight),
         rank_loss_weight=float(args.rank_loss_weight),
+        residual_score_weight=float(args.residual_score_weight),
+        residual_penalty_weight=float(args.residual_penalty_weight),
         rank_max_per_side=int(args.rank_max_per_side),
         device=str(args.device),
         amp=bool(args.amp),
