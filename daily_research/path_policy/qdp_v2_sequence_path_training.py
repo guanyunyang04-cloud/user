@@ -203,8 +203,22 @@ class DateGroupedBatchSampler(BatchSampler):
 
 
 class SequencePathModel(nn.Module):
-    def __init__(self, *, input_dim: int, hidden_dim: int, layers: int, forward_days: int, summary_dim: int, dropout: float) -> None:
+    def __init__(
+        self,
+        *,
+        input_dim: int,
+        hidden_dim: int,
+        layers: int,
+        forward_days: int,
+        summary_dim: int,
+        dropout: float,
+        model_type: str = "gru_last",
+    ) -> None:
         super().__init__()
+        normalized_model_type = str(model_type or "gru_last").strip().lower()
+        if normalized_model_type not in {"gru_last", "gru_attention"}:
+            raise ValueError("model_type must be gru_last or gru_attention")
+        self.model_type = normalized_model_type
         self.input_norm = nn.LayerNorm(input_dim)
         self.proj = nn.Linear(input_dim, hidden_dim)
         self.encoder = nn.GRU(
@@ -215,6 +229,11 @@ class SequencePathModel(nn.Module):
             dropout=float(dropout) if int(layers) > 1 else 0.0,
         )
         self.dropout = nn.Dropout(float(dropout))
+        self.attention = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, 1),
+        )
         self.path_head = nn.Linear(hidden_dim, int(forward_days) * 4)
         self.summary_head = nn.Linear(hidden_dim, int(summary_dim))
         self.score_head = nn.Linear(hidden_dim, 1)
@@ -225,7 +244,12 @@ class SequencePathModel(nn.Module):
         z = self.input_norm(x)
         z = F.gelu(self.proj(z))
         encoded, _ = self.encoder(z)
-        pooled = self.dropout(encoded[:, -1, :])
+        if self.model_type == "gru_attention":
+            weights = torch.softmax(self.attention(encoded).squeeze(-1), dim=1)
+            pooled = torch.sum(encoded * weights.unsqueeze(-1), dim=1)
+        else:
+            pooled = encoded[:, -1, :]
+        pooled = self.dropout(pooled)
         return {
             "future_path": self.path_head(pooled).view(-1, self.forward_days, 4),
             "path_summary": self.summary_head(pooled).view(-1, self.summary_dim),
@@ -267,13 +291,23 @@ def _compute_loss(
     date_idx: torch.Tensor,
     *,
     value_index: int,
+    path_weight: float = 0.35,
+    summary_weight: float = 0.35,
+    value_weight: float = 0.15,
+    rank_weight: float = 0.15,
+    rank_max_per_side: int = 64,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     path_loss = _finite_smooth_l1(outputs["future_path"], y_path)
     summary_loss = _finite_smooth_l1(outputs["path_summary"], y_summary)
     value_target = y_summary[:, int(value_index)]
     value_loss = _finite_smooth_l1(outputs["score"], value_target)
-    rank_loss = _rank_loss_by_date(outputs["score"], value_target, date_idx)
-    total = 0.35 * path_loss + 0.35 * summary_loss + 0.15 * value_loss + 0.15 * rank_loss
+    rank_loss = _rank_loss_by_date(outputs["score"], value_target, date_idx, max_per_side=int(rank_max_per_side))
+    total = (
+        float(path_weight) * path_loss
+        + float(summary_weight) * summary_loss
+        + float(value_weight) * value_loss
+        + float(rank_weight) * rank_loss
+    )
     return total, {
         "loss": float(total.detach().cpu().item()),
         "path_loss": float(path_loss.detach().cpu().item()),
@@ -379,6 +413,7 @@ def _predict_split(
     amp_enabled: bool,
     top_k: tuple[int, ...],
     write_predictions: bool,
+    write_path_predictions: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     pred_dir = output_dir / "predictions"
     if write_predictions:
@@ -409,12 +444,13 @@ def _predict_split(
             rows[f"pred_{col}"] = pred_summary_np[:, idx]
         chunk = pd.DataFrame(rows)
         if write_predictions:
-            path_rows: dict[str, Any] = {}
-            for day in range(dataset.forward_days):
-                for field_idx, field in enumerate(PATH_OHLC_FIELDS):
-                    path_rows[f"true_{field}_ret_d{day + 1}"] = true_path_np[:, day, field_idx]
-                    path_rows[f"pred_{field}_ret_d{day + 1}"] = pred_path_np[:, day, field_idx]
-            chunk = pd.concat([chunk, pd.DataFrame(path_rows)], axis=1, copy=False)
+            if bool(write_path_predictions):
+                path_rows: dict[str, Any] = {}
+                for day in range(dataset.forward_days):
+                    for field_idx, field in enumerate(PATH_OHLC_FIELDS):
+                        path_rows[f"true_{field}_ret_d{day + 1}"] = true_path_np[:, day, field_idx]
+                        path_rows[f"pred_{field}_ret_d{day + 1}"] = pred_path_np[:, day, field_idx]
+                chunk = pd.concat([chunk, pd.DataFrame(path_rows)], axis=1, copy=False)
             chunk.to_csv(pred_path, index=False, mode="w" if first_write else "a", header=first_write, encoding="utf-8-sig")
             first_write = False
         metric_frame = chunk[["trade_date", "symbol", "score", *[f"true_{c}" for c in dataset.path_summary_columns]]].copy()
@@ -512,16 +548,23 @@ class TrainConfig:
     run_tag: str
     epochs: int
     batch_size: int
+    model_type: str
     hidden_dim: int
     layers: int
     dropout: float
     learning_rate: float
     weight_decay: float
+    path_loss_weight: float
+    summary_loss_weight: float
+    value_loss_weight: float
+    rank_loss_weight: float
+    rank_max_per_side: int
     device: str
     amp: bool
     seed: int
     top_k: tuple[int, ...]
     max_samples_per_split: int
+    prediction_mode: str
 
 
 def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
@@ -543,6 +586,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         forward_days=train_ds.forward_days,
         summary_dim=len(train_ds.path_summary_columns),
         dropout=float(config.dropout),
+        model_type=str(config.model_type),
     ).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(config.learning_rate), weight_decay=float(config.weight_decay))
     scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
@@ -568,7 +612,18 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             optimizer.zero_grad(set_to_none=True)
             with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
                 out = model(x)
-                loss, parts = _compute_loss(out, y_path, y_summary, date_idx, value_index=train_ds.value_index)
+                loss, parts = _compute_loss(
+                    out,
+                    y_path,
+                    y_summary,
+                    date_idx,
+                    value_index=train_ds.value_index,
+                    path_weight=float(config.path_loss_weight),
+                    summary_weight=float(config.summary_loss_weight),
+                    value_weight=float(config.value_loss_weight),
+                    rank_weight=float(config.rank_loss_weight),
+                    rank_max_per_side=int(config.rank_max_per_side),
+                )
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -596,6 +651,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "train_sample_count": int(sample_count),
             **{key: float(value / max(batch_count, 1)) for key, value in loss_totals.items()},
         }
+        _write_json(progress_path, {"status": "validating_epoch", "epoch": int(epoch), "updated_at": _now()})
         val_ic, val_topk, val_metrics = _predict_split(
             model=model,
             dataset=val_ds,
@@ -604,11 +660,13 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             split="validation",
             batch_size=int(config.batch_size),
             amp_enabled=amp_enabled,
-            top_k=config.top_k,
-            write_predictions=False,
-        )
+        top_k=config.top_k,
+        write_predictions=False,
+        write_path_predictions=False,
+    )
         train_row["validation_rank_ic_mean"] = float(val_metrics["rank_ic_mean"])
         history.append(train_row)
+        pd.DataFrame(history).to_csv(output_dir / "training_history_partial.csv", index=False, encoding="utf-8-sig")
         if float(val_metrics["rank_ic_mean"]) > best_val_ic:
             best_val_ic = float(val_metrics["rank_ic_mean"])
             torch.save(
@@ -623,7 +681,19 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 },
                 best_path,
             )
+        _write_json(
+            progress_path,
+            {
+                "status": "epoch_completed",
+                "epoch": int(epoch),
+                "validation_rank_ic_mean": float(val_metrics["rank_ic_mean"]),
+                "best_validation_rank_ic_mean": float(best_val_ic),
+                "updated_at": _now(),
+            },
+        )
         del val_ic, val_topk
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
         gc.collect()
     if best_path.exists():
         payload = torch.load(best_path, map_location=device, weights_only=False)
@@ -638,7 +708,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         batch_size=int(config.batch_size),
         amp_enabled=amp_enabled,
         top_k=config.top_k,
-        write_predictions=True,
+        write_predictions=str(config.prediction_mode) != "none",
+        write_path_predictions=str(config.prediction_mode) == "full",
     )
     test_ic, test_topk, test_metrics = _predict_split(
         model=model,
@@ -649,7 +720,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         batch_size=int(config.batch_size),
         amp_enabled=amp_enabled,
         top_k=config.top_k,
-        write_predictions=True,
+        write_predictions=str(config.prediction_mode) != "none",
+        write_path_predictions=str(config.prediction_mode) == "full",
     )
     split_metrics = pd.DataFrame([val_metrics, test_metrics])
     topk = pd.concat([val_topk.assign(split="validation"), test_topk.assign(split="test")], ignore_index=True)
@@ -677,12 +749,20 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         "epochs": int(config.epochs),
         "batch_size": int(config.batch_size),
         "max_samples_per_split": int(config.max_samples_per_split),
+        "prediction_mode": str(config.prediction_mode),
         "model": {
-            "type": "SequencePathModel_GRU",
+            "type": f"SequencePathModel_{str(config.model_type)}",
             "input_dim": int(train_ds.input_dim),
             "hidden_dim": int(config.hidden_dim),
             "layers": int(config.layers),
             "dropout": float(config.dropout),
+        },
+        "loss_weights": {
+            "path": float(config.path_loss_weight),
+            "summary": float(config.summary_loss_weight),
+            "value": float(config.value_loss_weight),
+            "rank": float(config.rank_loss_weight),
+            "rank_max_per_side": int(config.rank_max_per_side),
         },
         "best_checkpoint": str(best_path.resolve()),
         "history": history,
@@ -714,17 +794,24 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument("--run-tag", default="qdp_v2_seq100_path20_model_v1")
     train.add_argument("--epochs", type=int, default=10)
     train.add_argument("--batch-size", type=int, default=512)
+    train.add_argument("--model-type", default="gru_last", choices=("gru_last", "gru_attention"))
     train.add_argument("--hidden-dim", type=int, default=128)
     train.add_argument("--layers", type=int, default=2)
     train.add_argument("--dropout", type=float, default=0.10)
     train.add_argument("--learning-rate", type=float, default=1.0e-3)
     train.add_argument("--weight-decay", type=float, default=1.0e-4)
+    train.add_argument("--path-loss-weight", type=float, default=0.35)
+    train.add_argument("--summary-loss-weight", type=float, default=0.35)
+    train.add_argument("--value-loss-weight", type=float, default=0.15)
+    train.add_argument("--rank-loss-weight", type=float, default=0.15)
+    train.add_argument("--rank-max-per-side", type=int, default=64)
     train.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     train.add_argument("--amp", dest="amp", action="store_true", default=True)
     train.add_argument("--no-amp", dest="amp", action="store_false")
     train.add_argument("--seed", type=int, default=DEFAULT_SEED)
     train.add_argument("--top-k", default="5,10,20,50,100")
     train.add_argument("--max-samples-per-split", type=int, default=0)
+    train.add_argument("--prediction-mode", default="full", choices=("full", "compact", "none"))
     train.add_argument("--json", action="store_true")
     return parser
 
@@ -738,16 +825,23 @@ def main(argv: list[str] | None = None) -> int:
         run_tag=str(args.run_tag),
         epochs=int(args.epochs),
         batch_size=int(args.batch_size),
+        model_type=str(args.model_type),
         hidden_dim=int(args.hidden_dim),
         layers=int(args.layers),
         dropout=float(args.dropout),
         learning_rate=float(args.learning_rate),
         weight_decay=float(args.weight_decay),
+        path_loss_weight=float(args.path_loss_weight),
+        summary_loss_weight=float(args.summary_loss_weight),
+        value_loss_weight=float(args.value_loss_weight),
+        rank_loss_weight=float(args.rank_loss_weight),
+        rank_max_per_side=int(args.rank_max_per_side),
         device=str(args.device),
         amp=bool(args.amp),
         seed=int(args.seed),
         top_k=_parse_int_list(args.top_k, default=DEFAULT_TOP_K),
         max_samples_per_split=int(args.max_samples_per_split),
+        prediction_mode=str(args.prediction_mode),
     )
     result = train_sequence_path_model(cfg)
     print(json.dumps(result, ensure_ascii=False, indent=2, default=_json_default) if bool(args.json) else result)

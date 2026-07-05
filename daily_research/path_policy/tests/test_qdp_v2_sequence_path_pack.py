@@ -13,6 +13,7 @@ from daily_research.path_policy.qdp_v2_sequence_path_pack import (
     path_summary_columns,
     path_value_column,
 )
+from daily_research.path_policy.qdp_v2_sequence_flat_lgbm import _feature_names, _select_indices
 from daily_research.path_policy.qdp_v2_sequence_path_training import SequencePathModel, SequencePathPackDataset, _compute_loss
 
 
@@ -136,6 +137,42 @@ def test_sequence_path_model_outputs_path_summary_and_score() -> None:
     assert set(parts) == {"loss", "path_loss", "summary_loss", "value_loss", "rank_loss"}
 
 
+def test_sequence_path_attention_model_outputs_path_summary_and_score() -> None:
+    model = SequencePathModel(
+        input_dim=6,
+        hidden_dim=8,
+        layers=1,
+        forward_days=60,
+        summary_dim=9,
+        dropout=0.0,
+        model_type="gru_attention",
+    )
+    x = torch.randn(4, 100, 6)
+    y_path = torch.randn(4, 60, 4) * 0.01
+    y_summary = torch.randn(4, 9) * 0.01
+    date_idx = torch.tensor([1, 1, 1, 1])
+
+    out = model(x)
+    loss, parts = _compute_loss(
+        out,
+        y_path,
+        y_summary,
+        date_idx,
+        value_index=8,
+        path_weight=0.20,
+        summary_weight=0.20,
+        value_weight=0.20,
+        rank_weight=0.40,
+        rank_max_per_side=2,
+    )
+
+    assert out["future_path"].shape == (4, 60, 4)
+    assert out["path_summary"].shape == (4, 9)
+    assert out["score"].shape == (4,)
+    assert torch.isfinite(loss)
+    assert parts["rank_loss"] >= 0.0
+
+
 def test_sequence_pack_dataset_get_batch_reads_date_grouped_windows(tmp_path) -> None:
     def write_memmap(path, array: np.ndarray) -> None:
         mm = np.memmap(path, dtype="float32", mode="w+", shape=array.shape)
@@ -204,6 +241,11 @@ def test_sequence_pack_dataset_get_batch_reads_date_grouped_windows(tmp_path) ->
     # First channel, first feature: dates 0..2 for symbol 0 and 1.
     assert torch.equal(batch["x"][0, :, 0], torch.tensor([0.0, 10.0, 20.0]))
     assert torch.equal(batch["x"][1, :, 0], torch.tensor([1.0, 11.0, 21.0]))
+    names = _feature_names(dataset)
+    assert len(names) == 15
+    assert names[0] == "t-2__daily_raw__daily_raw_0"
+    selected = _select_indices(dataset, samples_per_date=1, max_samples=0, seed=7)
+    assert selected.shape == (1,)
 
 
 def test_future_path_columns_support_sixty_day_horizon() -> None:
