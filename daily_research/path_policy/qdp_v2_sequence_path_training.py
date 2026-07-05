@@ -789,10 +789,9 @@ def _predict_split(
             "symbol": symbols,
             "score": score_np,
         }
-        if "score" not in out:
+        if "score" not in out and residual_np is not None:
             rows["path_value_score"] = path_value_score_np
-            if residual_np is not None:
-                rows["residual_score"] = residual_np
+            rows["residual_score"] = residual_np
         for idx, col in enumerate(summary_columns):
             rows[f"true_{col}"] = true_summary_np[:, idx]
             rows[f"pred_{col}"] = pred_summary_np[:, idx]
@@ -1233,8 +1232,6 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "summary": float(config.summary_loss_weight),
             "value": float(config.value_loss_weight),
             "rank": float(config.rank_loss_weight),
-            "residual_score_weight": float(config.residual_score_weight),
-            "residual_penalty": float(config.residual_penalty_weight),
             "rank_max_per_side": int(config.rank_max_per_side),
         },
         "early_stopping": {
@@ -1256,6 +1253,9 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         },
         "baseline_feature_summary": baseline_summary.get("output_dir", ""),
     }
+    if bool(getattr(model, "uses_residual_score", False)):
+        summary["loss_weights"]["residual_score_weight"] = float(config.residual_score_weight)
+        summary["loss_weights"]["residual_penalty"] = float(config.residual_penalty_weight)
     report_path = _write_report(output_dir, summary=summary, split_metrics=split_metrics, topk=topk, baseline_summary=baseline_summary)
     summary["outputs"]["report_md"] = report_path
     summary_path = output_dir / "sequence_path_training_summary.json"
@@ -1270,14 +1270,22 @@ def _build_parser() -> argparse.ArgumentParser:
     train = sub.add_parser("train")
     train.add_argument("--pack-manifest", type=Path, required=True)
     train.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
-    train.add_argument("--run-tag", default="qdp_v2_seq100_path20_model_v1")
+    train.add_argument("--run-tag", default="qdp_v2_sequence_path_gru_path_value")
     train.add_argument("--epochs", type=int, default=10)
     train.add_argument("--batch-size", type=int, default=512)
     train.add_argument(
         "--model-type",
-        default="gru_last",
+        default="",
         choices=("gru_last", "gru_attention", "gru_path_value", "gru_path_value_symbol", "gru_path_value_residual"),
+        help=argparse.SUPPRESS,
     )
+    train.add_argument(
+        "--experimental-model-type",
+        default="",
+        choices=("gru_last", "gru_attention", "gru_path_value_residual"),
+        help=argparse.SUPPRESS,
+    )
+    train.add_argument("--with-symbol", action="store_true", help="Use symbol identity embedding with the path-value model.")
     train.add_argument("--hidden-dim", type=int, default=128)
     train.add_argument("--layers", type=int, default=2)
     train.add_argument("--dropout", type=float, default=0.10)
@@ -1288,8 +1296,8 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument("--summary-loss-weight", type=float, default=0.20)
     train.add_argument("--value-loss-weight", type=float, default=0.20)
     train.add_argument("--rank-loss-weight", type=float, default=0.15)
-    train.add_argument("--residual-score-weight", type=float, default=0.25)
-    train.add_argument("--residual-penalty-weight", type=float, default=0.01)
+    train.add_argument("--residual-score-weight", type=float, default=0.25, help=argparse.SUPPRESS)
+    train.add_argument("--residual-penalty-weight", type=float, default=0.01, help=argparse.SUPPRESS)
     train.add_argument("--rank-max-per-side", type=int, default=64)
     train.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     train.add_argument("--amp", dest="amp", action="store_true", default=True)
@@ -1307,13 +1315,20 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    model_type = str(args.experimental_model_type or args.model_type or "").strip()
+    if not model_type:
+        model_type = "gru_path_value_symbol" if bool(args.with_symbol) else "gru_path_value"
+    elif bool(args.with_symbol):
+        if model_type not in {"gru_path_value", "gru_path_value_symbol"}:
+            raise SystemExit("--with-symbol can only be combined with the path-value model")
+        model_type = "gru_path_value_symbol"
     cfg = TrainConfig(
         pack_manifest=Path(args.pack_manifest),
         output_root=Path(args.output_root),
         run_tag=str(args.run_tag),
         epochs=int(args.epochs),
         batch_size=int(args.batch_size),
-        model_type=str(args.model_type),
+        model_type=model_type,
         hidden_dim=int(args.hidden_dim),
         layers=int(args.layers),
         dropout=float(args.dropout),

@@ -19,7 +19,6 @@ class RuntimeProfile:
     cninfo_timeout_seconds: int
     cninfo_retry: int
     cninfo_backoff_seconds: tuple[int, ...]
-    max_task_rss_gb: int = 12
 
 
 RUNTIME_PROFILES: dict[str, RuntimeProfile] = {
