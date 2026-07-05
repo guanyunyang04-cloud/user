@@ -15,6 +15,12 @@ from daily_research.path_policy.qdp_v2_sequence_path_pack import (
 )
 from daily_research.path_policy.qdp_v2_sequence_flat_lgbm import _feature_names, _select_indices
 from daily_research.path_policy.qdp_v2_sequence_path_training import SequencePathModel, SequencePathPackDataset, _compute_loss
+from daily_research.path_policy.qdp_v2_sequence_path_training import (
+    _derive_path_summary_numpy,
+    _derive_path_summary_torch,
+    derived_path_summary_columns,
+    path_value_v2_column,
+)
 
 
 def _raw_panel(open_values: list[float], high_values: list[float], low_values: list[float], close_values: list[float]) -> np.ndarray:
@@ -171,6 +177,92 @@ def test_sequence_path_attention_model_outputs_path_summary_and_score() -> None:
     assert out["score"].shape == (4,)
     assert torch.isfinite(loss)
     assert parts["rank_loss"] >= 0.0
+
+
+def test_path_value_v2_numpy_and_torch_match() -> None:
+    path = np.zeros((2, 4, 4), dtype=np.float32)
+    path[:, :, 0] = 0.0
+    path[0, :, 1] = [0.02, 0.05, 0.04, 0.03]
+    path[0, :, 2] = [-0.01, 0.00, 0.01, 0.00]
+    path[0, :, 3] = [0.01, 0.04, 0.03, 0.02]
+    path[1, :, 1] = [0.01, 0.02, 0.03, 0.06]
+    path[1, :, 2] = [-0.02, -0.03, -0.01, 0.00]
+    path[1, :, 3] = [0.00, 0.01, 0.02, 0.05]
+
+    np_summary = _derive_path_summary_numpy(path)
+    torch_summary = _derive_path_summary_torch(torch.from_numpy(path), smooth_value=False).detach().numpy()
+
+    assert derived_path_summary_columns(4)[-1] == path_value_v2_column(4)
+    assert np.allclose(np_summary, torch_summary, atol=1.0e-6)
+
+
+def test_path_value_v2_penalizes_later_same_return() -> None:
+    early = np.zeros((1, 4, 4), dtype=np.float32)
+    late = np.zeros((1, 4, 4), dtype=np.float32)
+    early[0, :, 1] = 0.05
+    early[0, :, 2] = 0.0
+    early[0, :, 3] = [0.05, 0.05, 0.05, 0.05]
+    late[0, :, 1] = [0.00, 0.00, 0.00, 0.05]
+    late[0, :, 2] = 0.0
+    late[0, :, 3] = [0.00, 0.00, 0.00, 0.05]
+
+    early_value = _derive_path_summary_numpy(early)[0, -1]
+    late_value = _derive_path_summary_numpy(late)[0, -1]
+
+    assert early_value > late_value
+
+
+def test_path_value_v2_penalizes_drawdown_before_exit() -> None:
+    smooth = np.zeros((1, 4, 4), dtype=np.float32)
+    volatile = np.zeros((1, 4, 4), dtype=np.float32)
+    smooth[0, :, 1] = 0.05
+    smooth[0, :, 2] = 0.0
+    smooth[0, :, 3] = [0.01, 0.03, 0.05, 0.05]
+    volatile[0, :, 1] = 0.05
+    volatile[0, :, 2] = [-0.10, -0.10, -0.10, -0.10]
+    volatile[0, :, 3] = [0.01, 0.03, 0.05, 0.05]
+
+    smooth_value = _derive_path_summary_numpy(smooth)[0, -1]
+    volatile_value = _derive_path_summary_numpy(volatile)[0, -1]
+
+    assert smooth_value > volatile_value
+
+
+def test_gru_path_value_model_outputs_only_future_path_and_loss_uses_derived_score() -> None:
+    model = SequencePathModel(input_dim=6, hidden_dim=8, layers=1, forward_days=20, summary_dim=9, dropout=0.0, model_type="gru_path_value")
+    x = torch.randn(4, 100, 6)
+    y_path = torch.randn(4, 20, 4) * 0.01
+    y_summary = torch.randn(4, 9) * 0.01
+    date_idx = torch.tensor([1, 1, 1, 1])
+
+    out = model(x)
+    loss, parts = _compute_loss(out, y_path, y_summary, date_idx, value_index=8)
+
+    assert set(out) == {"future_path"}
+    assert out["future_path"].shape == (4, 20, 4)
+    assert torch.isfinite(loss)
+    assert set(parts) == {"loss", "path_loss", "summary_loss", "value_loss", "rank_loss"}
+
+
+def test_gru_path_value_symbol_model_uses_symbol_embedding() -> None:
+    model = SequencePathModel(
+        input_dim=6,
+        hidden_dim=8,
+        layers=1,
+        forward_days=20,
+        summary_dim=9,
+        dropout=0.0,
+        model_type="gru_path_value_symbol",
+        symbol_count=3,
+        symbol_embedding_dim=4,
+    )
+    x = torch.randn(4, 100, 6)
+    symbol_idx = torch.tensor([0, 1, 2, 1])
+    out = model(x, symbol_idx=symbol_idx)
+
+    assert set(out) == {"future_path"}
+    assert out["future_path"].shape == (4, 20, 4)
+    assert model.symbol_embedding.weight.shape == (3, 4)
 
 
 def test_sequence_pack_dataset_get_batch_reads_date_grouped_windows(tmp_path) -> None:

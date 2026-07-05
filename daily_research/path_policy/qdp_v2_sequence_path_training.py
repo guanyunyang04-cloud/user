@@ -32,6 +32,11 @@ from daily_research.path_policy.qdp_v2_sequence_path_pack import (
 DEFAULT_OUTPUT_ROOT = Path("daily_research/output/path_policy/sequence_path_training")
 DEFAULT_TOP_K = (5, 10, 20, 50, 100)
 DEFAULT_SEED = 7
+PATH_VALUE_V2_WAITING_PENALTY = 0.04
+PATH_VALUE_V2_DRAWDOWN_PENALTY = 0.60
+PATH_VALUE_V2_TRANSACTION_COST = 0.002
+PATH_VALUE_V2_TEMPERATURE = 0.03
+PATH_VALUE_MODEL_TYPES = {"gru_path_value", "gru_path_value_symbol"}
 
 
 def _now() -> str:
@@ -98,6 +103,8 @@ class SequencePathPackDataset(Dataset):
         self.value_column = path_value_column(self.forward_days)
         self.value_index = self.path_summary_columns.index(self.value_column)
         self.input_dim = int(sum(len(self.feature_columns[name]) for name in self.channel_order))
+        manifest_symbols = list(self.manifest.get("symbol_values", []) or [])
+        self.symbol_count = int(len(manifest_symbols)) or int(self.sample_index["symbol_idx"].astype(int).max() + 1)
 
     def __len__(self) -> int:
         return int(len(self.sample_index))
@@ -213,12 +220,16 @@ class SequencePathModel(nn.Module):
         summary_dim: int,
         dropout: float,
         model_type: str = "gru_last",
+        symbol_count: int = 0,
+        symbol_embedding_dim: int = 16,
     ) -> None:
         super().__init__()
         normalized_model_type = str(model_type or "gru_last").strip().lower()
-        if normalized_model_type not in {"gru_last", "gru_attention"}:
-            raise ValueError("model_type must be gru_last or gru_attention")
+        if normalized_model_type not in {"gru_last", "gru_attention", "gru_path_value", "gru_path_value_symbol"}:
+            raise ValueError("model_type must be gru_last, gru_attention, gru_path_value, or gru_path_value_symbol")
         self.model_type = normalized_model_type
+        self.uses_derived_path_value = normalized_model_type in PATH_VALUE_MODEL_TYPES
+        self.uses_symbol_embedding = normalized_model_type == "gru_path_value_symbol"
         self.input_norm = nn.LayerNorm(input_dim)
         self.proj = nn.Linear(input_dim, hidden_dim)
         self.encoder = nn.GRU(
@@ -234,13 +245,25 @@ class SequencePathModel(nn.Module):
             nn.Tanh(),
             nn.Linear(hidden_dim, 1),
         )
-        self.path_head = nn.Linear(hidden_dim, int(forward_days) * 4)
-        self.summary_head = nn.Linear(hidden_dim, int(summary_dim))
-        self.score_head = nn.Linear(hidden_dim, 1)
+        self.symbol_embedding_dim = int(symbol_embedding_dim) if self.uses_symbol_embedding else 0
+        if self.uses_symbol_embedding:
+            if int(symbol_count) <= 0:
+                raise ValueError("symbol_count must be positive when model_type=gru_path_value_symbol")
+            self.symbol_embedding = nn.Embedding(int(symbol_count), self.symbol_embedding_dim)
+        else:
+            self.symbol_embedding = None
+        head_dim = int(hidden_dim) + self.symbol_embedding_dim
+        self.path_head = nn.Linear(head_dim, int(forward_days) * 4)
+        if self.uses_derived_path_value:
+            self.summary_head = None
+            self.score_head = None
+        else:
+            self.summary_head = nn.Linear(head_dim, int(summary_dim))
+            self.score_head = nn.Linear(head_dim, 1)
         self.forward_days = int(forward_days)
         self.summary_dim = int(summary_dim)
 
-    def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward(self, x: torch.Tensor, symbol_idx: torch.Tensor | None = None) -> dict[str, torch.Tensor]:
         z = self.input_norm(x)
         z = F.gelu(self.proj(z))
         encoded, _ = self.encoder(z)
@@ -250,8 +273,18 @@ class SequencePathModel(nn.Module):
         else:
             pooled = encoded[:, -1, :]
         pooled = self.dropout(pooled)
+        if self.uses_symbol_embedding:
+            if symbol_idx is None:
+                raise ValueError("symbol_idx is required when model_type=gru_path_value_symbol")
+            embedded = self.symbol_embedding(symbol_idx.to(device=pooled.device, dtype=torch.long))
+            pooled = torch.cat([pooled, embedded], dim=1)
+        future_path = self.path_head(pooled).view(-1, self.forward_days, 4)
+        if self.uses_derived_path_value:
+            return {"future_path": future_path}
+        assert self.summary_head is not None
+        assert self.score_head is not None
         return {
-            "future_path": self.path_head(pooled).view(-1, self.forward_days, 4),
+            "future_path": future_path,
             "path_summary": self.summary_head(pooled).view(-1, self.summary_dim),
             "score": self.score_head(pooled).squeeze(-1),
         }
@@ -262,6 +295,13 @@ def _finite_smooth_l1(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     if not bool(mask.any()):
         return pred.sum() * 0.0
     return F.smooth_l1_loss(pred[mask], target[mask], reduction="mean")
+
+
+def _finite_smooth_l1_columns(pred: torch.Tensor, target: torch.Tensor, columns: list[int]) -> torch.Tensor:
+    if not columns:
+        return pred.sum() * 0.0
+    index = torch.as_tensor(columns, device=pred.device, dtype=torch.long)
+    return _finite_smooth_l1(pred.index_select(1, index), target.index_select(1, index))
 
 
 def _rank_loss_by_date(score: torch.Tensor, target: torch.Tensor, date_idx: torch.Tensor, *, max_per_side: int = 64) -> torch.Tensor:
@@ -298,10 +338,22 @@ def _compute_loss(
     rank_max_per_side: int = 64,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     path_loss = _finite_smooth_l1(outputs["future_path"], y_path)
-    summary_loss = _finite_smooth_l1(outputs["path_summary"], y_summary)
-    value_target = y_summary[:, int(value_index)]
-    value_loss = _finite_smooth_l1(outputs["score"], value_target)
-    rank_loss = _rank_loss_by_date(outputs["score"], value_target, date_idx, max_per_side=int(rank_max_per_side))
+    if "score" in outputs:
+        summary_loss = _finite_smooth_l1(outputs["path_summary"], y_summary)
+        value_target = y_summary[:, int(value_index)]
+        score = outputs["score"]
+    else:
+        target_summary = _derive_path_summary_torch(y_path, smooth_value=False).detach()
+        pred_summary = _derive_path_summary_torch(outputs["future_path"], smooth_value=True)
+        summary_loss = _finite_smooth_l1_columns(
+            pred_summary,
+            target_summary,
+            _derived_summary_loss_indices(int(outputs["future_path"].shape[1])),
+        )
+        value_target = target_summary[:, -1]
+        score = pred_summary[:, -1]
+    value_loss = _finite_smooth_l1(score, value_target)
+    rank_loss = _rank_loss_by_date(score, value_target, date_idx, max_per_side=int(rank_max_per_side))
     total = (
         float(path_weight) * path_loss
         + float(summary_weight) * summary_loss
@@ -317,12 +369,13 @@ def _compute_loss(
     }
 
 
-def _batch_to_device(batch: Mapping[str, Any], device: torch.device) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+def _batch_to_device(batch: Mapping[str, Any], device: torch.device) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     x = batch["x"].to(device, non_blocking=device.type == "cuda")
     y_path = batch["y_path"].to(device, non_blocking=device.type == "cuda")
     y_summary = batch["y_summary"].to(device, non_blocking=device.type == "cuda")
     date_idx = batch["date_idx"].to(device, non_blocking=device.type == "cuda")
-    return x, y_path, y_summary, date_idx
+    symbol_idx = batch["symbol_idx"].to(device, non_blocking=device.type == "cuda")
+    return x, y_path, y_summary, date_idx, symbol_idx
 
 
 def _iter_index_batches(dataset: SequencePathPackDataset, *, batch_size: int, shuffle: bool, seed: int) -> Iterator[list[int]]:
@@ -350,6 +403,10 @@ def _topk_metrics(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forward
         f"drawdown_after_peak_{suffix}",
         value_column,
     ]
+    optional_metric_cols = [
+        f"best_exit_close_return_{suffix}",
+        f"pre_exit_max_drawdown_{suffix}",
+    ]
     for top_k in top_k_values:
         daily_rows: list[dict[str, Any]] = []
         for trade_date, group in frame.groupby("trade_date", sort=True):
@@ -358,7 +415,7 @@ def _topk_metrics(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forward
                 continue
             top = group.sort_values("score", ascending=False, kind="mergesort").head(int(top_k))
             row: dict[str, Any] = {"trade_date": str(trade_date), "top_k": int(top_k)}
-            for col in metric_cols:
+            for col in [*metric_cols, *[col for col in optional_metric_cols if col in group.columns]]:
                 universe_mean = pd.to_numeric(group[col], errors="coerce").mean()
                 selected_mean = pd.to_numeric(top[col], errors="coerce").mean()
                 row[f"selected_{col}"] = float(selected_mean)
@@ -371,6 +428,12 @@ def _topk_metrics(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forward
             row["selected_loss_5pct_rate"] = float((pd.to_numeric(top[f"future_min_return_{suffix}"], errors="coerce") <= -0.05).mean())
             row["selected_loss_10pct_rate"] = float((pd.to_numeric(top[f"future_min_return_{suffix}"], errors="coerce") <= -0.10).mean())
             row["selected_peak_day_mean"] = float(pd.to_numeric(top[f"future_peak_day_{suffix}"], errors="coerce").mean())
+            if f"best_exit_day_{suffix}" in top.columns:
+                row["selected_best_exit_day_mean"] = float(pd.to_numeric(top[f"best_exit_day_{suffix}"], errors="coerce").mean())
+            if f"pre_exit_max_drawdown_{suffix}" in top.columns:
+                row["selected_pre_exit_max_drawdown_mean"] = float(
+                    pd.to_numeric(top[f"pre_exit_max_drawdown_{suffix}"], errors="coerce").mean()
+                )
             daily_rows.append(row)
         daily = pd.DataFrame(daily_rows)
         if daily.empty:
@@ -401,6 +464,154 @@ def _find_latest_baseline_summary(forward_days: int) -> dict[str, Any]:
     return sorted(matches, key=lambda item: item[0])[-1][2]
 
 
+def path_value_v2_column(forward_days: int) -> str:
+    return f"path_trade_value_v2_{int(forward_days)}d"
+
+
+def derived_path_summary_columns(forward_days: int) -> list[str]:
+    suffix = f"{int(forward_days)}d"
+    return [
+        f"future_max_return_{suffix}",
+        f"future_min_return_{suffix}",
+        f"future_final_return_{suffix}",
+        f"future_peak_day_{suffix}",
+        f"future_trough_day_{suffix}",
+        f"drawdown_after_peak_{suffix}",
+        f"time_above_zero_{suffix}",
+        f"time_below_zero_{suffix}",
+        f"best_exit_day_{suffix}",
+        f"best_exit_close_return_{suffix}",
+        f"pre_exit_max_drawdown_{suffix}",
+        path_value_v2_column(forward_days),
+    ]
+
+
+def _derived_summary_loss_indices(forward_days: int) -> list[int]:
+    columns = derived_path_summary_columns(forward_days)
+    keep = {
+        f"future_max_return_{int(forward_days)}d",
+        f"future_min_return_{int(forward_days)}d",
+        f"future_final_return_{int(forward_days)}d",
+        f"drawdown_after_peak_{int(forward_days)}d",
+        f"best_exit_close_return_{int(forward_days)}d",
+        f"pre_exit_max_drawdown_{int(forward_days)}d",
+    }
+    return [idx for idx, col in enumerate(columns) if col in keep]
+
+
+def _candidate_path_values_torch(path: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    forward_days = int(path.shape[1])
+    close_ret = path[:, :, 3]
+    low_ret = path[:, :, 2]
+    worst_low_so_far = torch.cummin(low_ret, dim=1).values
+    pre_exit_drawdown = torch.clamp(-worst_low_so_far, min=0.0)
+    day = torch.arange(forward_days, device=path.device, dtype=path.dtype)
+    waiting = torch.sqrt((day + 1.0) / max(float(forward_days), 1.0)).view(1, -1)
+    candidate = (
+        close_ret
+        - float(PATH_VALUE_V2_DRAWDOWN_PENALTY) * pre_exit_drawdown
+        - float(PATH_VALUE_V2_WAITING_PENALTY) * waiting
+        - float(PATH_VALUE_V2_TRANSACTION_COST)
+    )
+    return candidate, pre_exit_drawdown
+
+
+def _derive_path_summary_torch(path: torch.Tensor, *, smooth_value: bool) -> torch.Tensor:
+    forward_days = int(path.shape[1])
+    high_ret = path[:, :, 1]
+    low_ret = path[:, :, 2]
+    close_ret = path[:, :, 3]
+    max_ret, peak_idx = torch.max(high_ret, dim=1)
+    min_ret, trough_idx = torch.min(low_ret, dim=1)
+    final_ret = close_ret[:, -1]
+    day_idx = torch.arange(forward_days, device=path.device).view(1, -1)
+    after_peak = day_idx >= peak_idx.view(-1, 1)
+    low_after_peak = torch.where(after_peak, low_ret, torch.full_like(low_ret, float("inf")))
+    min_after_peak = torch.min(low_after_peak, dim=1).values
+    drawdown_after_peak = (1.0 + min_after_peak) / torch.clamp(1.0 + max_ret, min=1.0e-6) - 1.0
+    time_above = (close_ret > 0.0).to(path.dtype).mean(dim=1)
+    time_below = (close_ret < 0.0).to(path.dtype).mean(dim=1)
+    candidate, pre_exit_drawdown = _candidate_path_values_torch(path)
+    best_value_hard, best_idx = torch.max(candidate, dim=1)
+    if smooth_value:
+        temperature = max(float(PATH_VALUE_V2_TEMPERATURE), 1.0e-6)
+        best_value = temperature * torch.logsumexp(candidate / temperature, dim=1)
+    else:
+        best_value = best_value_hard
+    best_exit_close = close_ret.gather(1, best_idx.view(-1, 1)).squeeze(1)
+    best_pre_exit_drawdown = pre_exit_drawdown.gather(1, best_idx.view(-1, 1)).squeeze(1)
+    return torch.stack(
+        [
+            max_ret,
+            min_ret,
+            final_ret,
+            peak_idx.to(path.dtype) + 1.0,
+            trough_idx.to(path.dtype) + 1.0,
+            drawdown_after_peak,
+            time_above,
+            time_below,
+            best_idx.to(path.dtype) + 1.0,
+            best_exit_close,
+            best_pre_exit_drawdown,
+            best_value,
+        ],
+        dim=1,
+    )
+
+
+def _derive_path_summary_numpy(path: np.ndarray) -> np.ndarray:
+    values = np.asarray(path, dtype=np.float32)
+    if values.ndim != 3 or values.shape[2] != 4:
+        raise ValueError("path must have shape [batch, forward_days, 4]")
+    forward_days = int(values.shape[1])
+    high_ret = values[:, :, 1].astype(np.float64, copy=False)
+    low_ret = values[:, :, 2].astype(np.float64, copy=False)
+    close_ret = values[:, :, 3].astype(np.float64, copy=False)
+    max_ret = np.nanmax(high_ret, axis=1)
+    min_ret = np.nanmin(low_ret, axis=1)
+    final_ret = close_ret[:, -1]
+    peak_idx = np.nanargmax(np.where(np.isfinite(high_ret), high_ret, -np.inf), axis=1)
+    trough_idx = np.nanargmin(np.where(np.isfinite(low_ret), low_ret, np.inf), axis=1)
+    min_after_peak = np.full(values.shape[0], np.nan, dtype=np.float64)
+    for row_idx, pidx in enumerate(peak_idx):
+        min_after_peak[row_idx] = np.nanmin(low_ret[row_idx, int(pidx) :])
+    drawdown_after_peak = (1.0 + min_after_peak) / np.maximum(1.0 + max_ret, 1.0e-6) - 1.0
+    time_above = np.nanmean(close_ret > 0.0, axis=1)
+    time_below = np.nanmean(close_ret < 0.0, axis=1)
+    worst_low_so_far = np.minimum.accumulate(low_ret, axis=1)
+    pre_exit_drawdown = np.maximum(-worst_low_so_far, 0.0)
+    day = np.arange(forward_days, dtype=np.float64)
+    waiting = np.sqrt((day + 1.0) / max(float(forward_days), 1.0))
+    candidate = (
+        close_ret
+        - float(PATH_VALUE_V2_DRAWDOWN_PENALTY) * pre_exit_drawdown
+        - float(PATH_VALUE_V2_WAITING_PENALTY) * waiting.reshape(1, -1)
+        - float(PATH_VALUE_V2_TRANSACTION_COST)
+    )
+    best_idx = np.nanargmax(np.where(np.isfinite(candidate), candidate, -np.inf), axis=1)
+    row = np.arange(values.shape[0])
+    best_exit_close = close_ret[row, best_idx]
+    best_pre_exit_drawdown = pre_exit_drawdown[row, best_idx]
+    best_value = candidate[row, best_idx]
+    summary = np.column_stack(
+        [
+            max_ret,
+            min_ret,
+            final_ret,
+            peak_idx + 1,
+            trough_idx + 1,
+            drawdown_after_peak,
+            time_above,
+            time_below,
+            best_idx + 1,
+            best_exit_close,
+            best_pre_exit_drawdown,
+            best_value,
+        ]
+    )
+    return summary.astype(np.float32, copy=False)
+
+
 @torch.no_grad()
 def _predict_split(
     *,
@@ -426,20 +637,29 @@ def _predict_split(
     model.eval()
     for batch_indices in _iter_index_batches(dataset, batch_size=int(batch_size), shuffle=False, seed=0):
         batch = dataset.get_batch(batch_indices)
-        x, y_path, y_summary, _date_idx = _batch_to_device(batch, device)
+        x, y_path, y_summary, _date_idx, symbol_idx = _batch_to_device(batch, device)
         with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
-            out = model(x)
+            out = model(x, symbol_idx=symbol_idx)
         pred_path_np = out["future_path"].detach().float().cpu().numpy()
-        pred_summary_np = out["path_summary"].detach().float().cpu().numpy()
-        score_np = out["score"].detach().float().cpu().numpy()
         true_path_np = y_path.detach().float().cpu().numpy()
-        true_summary_np = y_summary.detach().float().cpu().numpy()
+        if "score" in out:
+            summary_columns = list(dataset.path_summary_columns)
+            value_column = str(dataset.value_column)
+            pred_summary_np = out["path_summary"].detach().float().cpu().numpy()
+            score_np = out["score"].detach().float().cpu().numpy()
+            true_summary_np = y_summary.detach().float().cpu().numpy()
+        else:
+            summary_columns = derived_path_summary_columns(dataset.forward_days)
+            value_column = path_value_v2_column(dataset.forward_days)
+            pred_summary_np = _derive_path_summary_numpy(pred_path_np)
+            true_summary_np = _derive_path_summary_numpy(true_path_np)
+            score_np = pred_summary_np[:, summary_columns.index(value_column)]
         rows: dict[str, Any] = {
             "trade_date": list(batch["trade_date"]),
             "symbol": list(batch["symbol"]),
             "score": score_np,
         }
-        for idx, col in enumerate(dataset.path_summary_columns):
+        for idx, col in enumerate(summary_columns):
             rows[f"true_{col}"] = true_summary_np[:, idx]
             rows[f"pred_{col}"] = pred_summary_np[:, idx]
         chunk = pd.DataFrame(rows)
@@ -453,14 +673,15 @@ def _predict_split(
                 chunk = pd.concat([chunk, pd.DataFrame(path_rows)], axis=1, copy=False)
             chunk.to_csv(pred_path, index=False, mode="w" if first_write else "a", header=first_write, encoding="utf-8-sig")
             first_write = False
-        metric_frame = chunk[["trade_date", "symbol", "score", *[f"true_{c}" for c in dataset.path_summary_columns]]].copy()
-        metric_frame = metric_frame.rename(columns={f"true_{c}": c for c in dataset.path_summary_columns})
+        metric_frame = chunk[["trade_date", "symbol", "score", *[f"true_{c}" for c in summary_columns]]].copy()
+        metric_frame = metric_frame.rename(columns={f"true_{c}": c for c in summary_columns})
         summary_rows.append(metric_frame)
-        del x, y_path, y_summary, out, pred_path_np, pred_summary_np, score_np, true_path_np, true_summary_np, chunk
+        del x, y_path, y_summary, symbol_idx, out, pred_path_np, pred_summary_np, score_np, true_path_np, true_summary_np, chunk
         gc.collect()
     frame = pd.concat(summary_rows, ignore_index=True)
-    ic = _daily_spearman(frame, score_col="score", target_col=dataset.value_column)
-    topk = _topk_metrics(frame, top_k_values=top_k, forward_days=dataset.forward_days, value_column=dataset.value_column)
+    value_column = path_value_v2_column(dataset.forward_days) if bool(getattr(model, "uses_derived_path_value", False)) else dataset.value_column
+    ic = _daily_spearman(frame, score_col="score", target_col=value_column)
+    topk = _topk_metrics(frame, top_k_values=top_k, forward_days=dataset.forward_days, value_column=value_column)
     metrics = {
         "split": split,
         "row_count": int(len(frame)),
@@ -468,7 +689,8 @@ def _predict_split(
         "rank_ic_mean": float(ic["rank_ic"].mean()) if not ic.empty else np.nan,
         "rank_ic_median": float(ic["rank_ic"].median()) if not ic.empty else np.nan,
         "rank_ic_positive_day_rate": float((ic["rank_ic"] > 0).mean()) if not ic.empty else np.nan,
-        "target_mean": float(frame[dataset.value_column].mean()),
+        "value_column": str(value_column),
+        "target_mean": float(frame[value_column].mean()),
         "prediction_mean": float(frame["score"].mean()),
         "prediction_csv": str(pred_path.resolve()) if write_predictions else "",
     }
@@ -485,16 +707,18 @@ def _write_report(
 ) -> str:
     forward_days = int(summary.get("forward_days", DEFAULT_FORWARD_DAYS) or DEFAULT_FORWARD_DAYS)
     suffix = f"{forward_days}d"
-    value_col = path_value_column(forward_days)
+    value_col = str(summary.get("value_column", "") or path_value_column(forward_days))
     max_col = f"future_max_return_{suffix}"
     final_col = f"future_final_return_{suffix}"
+    best_exit_col = f"best_exit_close_return_{suffix}"
     lines: list[str] = []
     lines.append("# QDP v2 Sequence Path Model")
     lines.append("")
     lines.append("## Method")
     lines.append("")
     lines.append(
-        f"This model reads past 100-day multi-channel sequences from QDP v2 and predicts future {forward_days}-day OHLC paths, path summaries, and a path value score."
+        f"This model reads past 100-day multi-channel sequences from QDP v2 and predicts future {forward_days}-day OHLC paths. "
+        "Path summaries and ranking values are derived from the predicted path when using a path-value model."
     )
     lines.append("")
     lines.append("## Split Metrics")
@@ -511,14 +735,18 @@ def _write_report(
     lines.append("")
     if not topk.empty:
         for row in topk.sort_values(["split", "top_k"]).to_dict("records"):
-            lines.append(
+            detail = (
                 f"- {row['split']} top{int(row['top_k'])}: "
                 f"path_value_alpha={row[f'alpha_{value_col}'] * 100:.2f}%, "
                 f"max_alpha={row[f'alpha_{max_col}'] * 100:.2f}%, "
                 f"final_alpha={row[f'alpha_{final_col}'] * 100:.2f}%, "
-                f"hit10={row['selected_hit_10pct_rate']:.2%}, "
-                f"loss5={row['selected_loss_5pct_rate']:.2%}"
             )
+            if f"alpha_{best_exit_col}" in row:
+                detail += f"best_exit_alpha={row[f'alpha_{best_exit_col}'] * 100:.2f}%, "
+            if "selected_best_exit_day_mean" in row:
+                detail += f"best_exit_day={row['selected_best_exit_day_mean']:.1f}, "
+            detail += f"hit10={row['selected_hit_10pct_rate']:.2%}, loss5={row['selected_loss_5pct_rate']:.2%}"
+            lines.append(detail)
     if baseline_summary:
         lines.append("")
         lines.append("## Baseline")
@@ -533,7 +761,10 @@ def _write_report(
     lines.append("")
     lines.append("## Boundaries")
     lines.append("")
-    lines.append("- No symbol id or symbol embedding is used.")
+    if str(summary.get("model", {}).get("uses_symbol_embedding", "")).lower() == "true":
+        lines.append("- Symbol embedding is used as a controlled identity-memory experiment.")
+    else:
+        lines.append("- No symbol id or symbol embedding is used.")
     lines.append("- Path types are explanation labels; the model trains on numeric paths and path value.")
     lines.append("- This is a first sequence model; failed improvement over baseline should be diagnosed, not hidden by test-set tuning.")
     path = output_dir / "sequence_path_training_report.md"
@@ -552,6 +783,7 @@ class TrainConfig:
     hidden_dim: int
     layers: int
     dropout: float
+    symbol_embedding_dim: int
     learning_rate: float
     weight_decay: float
     path_loss_weight: float
@@ -587,6 +819,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         summary_dim=len(train_ds.path_summary_columns),
         dropout=float(config.dropout),
         model_type=str(config.model_type),
+        symbol_count=int(train_ds.symbol_count),
+        symbol_embedding_dim=int(config.symbol_embedding_dim),
     ).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(config.learning_rate), weight_decay=float(config.weight_decay))
     scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
@@ -608,10 +842,10 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         total_batches = len(train_batches)
         for batch_indices in train_batches:
             batch = train_ds.get_batch(batch_indices)
-            x, y_path, y_summary, date_idx = _batch_to_device(batch, device)
+            x, y_path, y_summary, date_idx, symbol_idx = _batch_to_device(batch, device)
             optimizer.zero_grad(set_to_none=True)
             with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
-                out = model(x)
+                out = model(x, symbol_idx=symbol_idx)
                 loss, parts = _compute_loss(
                     out,
                     y_path,
@@ -645,7 +879,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                         "updated_at": _now(),
                     },
                 )
-            del x, y_path, y_summary, date_idx, out, loss
+            del x, y_path, y_summary, date_idx, symbol_idx, out, loss
         train_row = {
             "epoch": int(epoch),
             "train_sample_count": int(sample_count),
@@ -660,10 +894,10 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             split="validation",
             batch_size=int(config.batch_size),
             amp_enabled=amp_enabled,
-        top_k=config.top_k,
-        write_predictions=False,
-        write_path_predictions=False,
-    )
+            top_k=config.top_k,
+            write_predictions=False,
+            write_path_predictions=False,
+        )
         train_row["validation_rank_ic_mean"] = float(val_metrics["rank_ic_mean"])
         history.append(train_row)
         pd.DataFrame(history).to_csv(output_dir / "training_history_partial.csv", index=False, encoding="utf-8-sig")
@@ -735,6 +969,12 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     daily_ic.to_csv(daily_ic_path, index=False, encoding="utf-8-sig")
     pd.DataFrame(history).to_csv(history_path, index=False, encoding="utf-8-sig")
     baseline_summary = _find_latest_baseline_summary(train_ds.forward_days)
+    active_value_column = path_value_v2_column(train_ds.forward_days) if bool(getattr(model, "uses_derived_path_value", False)) else train_ds.value_column
+    active_summary_columns = (
+        derived_path_summary_columns(train_ds.forward_days)
+        if bool(getattr(model, "uses_derived_path_value", False))
+        else list(train_ds.path_summary_columns)
+    )
     summary = {
         "artifact_type": "qdp_v2_sequence_path_training",
         "generated_at": _now(),
@@ -742,8 +982,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         "output_dir": str(output_dir.resolve()),
         "lookback_days": int(train_ds.lookback_days),
         "forward_days": int(train_ds.forward_days),
-        "value_column": str(train_ds.value_column),
-        "path_summary_columns": list(train_ds.path_summary_columns),
+        "value_column": str(active_value_column),
+        "path_summary_columns": list(active_summary_columns),
         "device": str(device),
         "amp_enabled": bool(amp_enabled),
         "epochs": int(config.epochs),
@@ -756,6 +996,9 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "hidden_dim": int(config.hidden_dim),
             "layers": int(config.layers),
             "dropout": float(config.dropout),
+            "uses_derived_path_value": bool(getattr(model, "uses_derived_path_value", False)),
+            "uses_symbol_embedding": bool(getattr(model, "uses_symbol_embedding", False)),
+            "symbol_embedding_dim": int(config.symbol_embedding_dim) if bool(getattr(model, "uses_symbol_embedding", False)) else 0,
         },
         "loss_weights": {
             "path": float(config.path_loss_weight),
@@ -794,15 +1037,16 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument("--run-tag", default="qdp_v2_seq100_path20_model_v1")
     train.add_argument("--epochs", type=int, default=10)
     train.add_argument("--batch-size", type=int, default=512)
-    train.add_argument("--model-type", default="gru_last", choices=("gru_last", "gru_attention"))
+    train.add_argument("--model-type", default="gru_last", choices=("gru_last", "gru_attention", "gru_path_value", "gru_path_value_symbol"))
     train.add_argument("--hidden-dim", type=int, default=128)
     train.add_argument("--layers", type=int, default=2)
     train.add_argument("--dropout", type=float, default=0.10)
+    train.add_argument("--symbol-embedding-dim", type=int, default=16)
     train.add_argument("--learning-rate", type=float, default=1.0e-3)
     train.add_argument("--weight-decay", type=float, default=1.0e-4)
-    train.add_argument("--path-loss-weight", type=float, default=0.35)
-    train.add_argument("--summary-loss-weight", type=float, default=0.35)
-    train.add_argument("--value-loss-weight", type=float, default=0.15)
+    train.add_argument("--path-loss-weight", type=float, default=0.45)
+    train.add_argument("--summary-loss-weight", type=float, default=0.20)
+    train.add_argument("--value-loss-weight", type=float, default=0.20)
     train.add_argument("--rank-loss-weight", type=float, default=0.15)
     train.add_argument("--rank-max-per-side", type=int, default=64)
     train.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
@@ -829,6 +1073,7 @@ def main(argv: list[str] | None = None) -> int:
         hidden_dim=int(args.hidden_dim),
         layers=int(args.layers),
         dropout=float(args.dropout),
+        symbol_embedding_dim=int(args.symbol_embedding_dim),
         learning_rate=float(args.learning_rate),
         weight_decay=float(args.weight_decay),
         path_loss_weight=float(args.path_loss_weight),
