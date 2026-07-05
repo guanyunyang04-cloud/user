@@ -50,17 +50,28 @@ DAILY_RAW_FEATURES = [
 ]
 
 PATH_OHLC_FIELDS = ["open", "high", "low", "close"]
-PATH_SUMMARY_COLUMNS = [
-    "future_max_return_20d",
-    "future_min_return_20d",
-    "future_final_return_20d",
-    "future_peak_day_20d",
-    "future_trough_day_20d",
-    "drawdown_after_peak_20d",
-    "time_above_zero_20d",
-    "time_below_zero_20d",
-    "path_trade_value_20d",
-]
+
+
+def path_summary_columns(forward_days: int) -> list[str]:
+    suffix = f"{int(forward_days)}d"
+    return [
+        f"future_max_return_{suffix}",
+        f"future_min_return_{suffix}",
+        f"future_final_return_{suffix}",
+        f"future_peak_day_{suffix}",
+        f"future_trough_day_{suffix}",
+        f"drawdown_after_peak_{suffix}",
+        f"time_above_zero_{suffix}",
+        f"time_below_zero_{suffix}",
+        f"path_trade_value_{suffix}",
+    ]
+
+
+def path_value_column(forward_days: int) -> str:
+    return f"path_trade_value_{int(forward_days)}d"
+
+
+PATH_SUMMARY_COLUMNS = path_summary_columns(DEFAULT_FORWARD_DAYS)
 
 
 def _now() -> str:
@@ -225,6 +236,8 @@ def _compute_future_path_and_masks(
     up_limit_panel: np.ndarray,
     lookback_days: int,
     forward_days: int,
+    future_path_out: np.ndarray | None = None,
+    path_summary_out: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     open_panel = raw_panel[:, :, DAILY_RAW_FEATURES.index("open")]
     high_panel = raw_panel[:, :, DAILY_RAW_FEATURES.index("high")]
@@ -234,8 +247,19 @@ def _compute_future_path_and_masks(
     input_valid = np.zeros((n_dates, n_symbols), dtype=bool)
     entry_buyable = np.zeros((n_dates, n_symbols), dtype=bool)
     label_valid = np.zeros((n_dates, n_symbols), dtype=bool)
-    future_path = np.full((n_dates, n_symbols, forward_days, 4), np.nan, dtype=np.float32)
-    path_summary = np.full((n_dates, n_symbols, len(PATH_SUMMARY_COLUMNS)), np.nan, dtype=np.float32)
+    summary_columns = path_summary_columns(forward_days)
+    future_path = (
+        future_path_out
+        if future_path_out is not None
+        else np.full((n_dates, n_symbols, forward_days, 4), np.nan, dtype=np.float32)
+    )
+    path_summary = (
+        path_summary_out
+        if path_summary_out is not None
+        else np.full((n_dates, n_symbols, len(summary_columns)), np.nan, dtype=np.float32)
+    )
+    future_path[:] = np.nan
+    path_summary[:] = np.nan
     finite_close = np.isfinite(close_panel)
     for date_idx in range(n_dates):
         start = date_idx - int(lookback_days) + 1
@@ -389,8 +413,6 @@ class SequencePackConfig:
 
 
 def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
-    if int(config.forward_days) != 20:
-        raise ValueError("qdp_v2_sequence_path_pack currently requires --forward-days 20")
     root = config.qdp_root.resolve()
     active = _read_active(root)
     active_scope = dict(active.get("scope", {}) or {})
@@ -466,21 +488,26 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         gc.collect()
 
     _write_json(progress_path, {"status": "computing_labels", "updated_at": _now()})
+    summary_columns = path_summary_columns(config.forward_days)
+    future_path_store = _fill_float_memmap(
+        label_dir / "future_ohlc_path.float32.dat",
+        (n_dates, n_symbols, int(config.forward_days), 4),
+        fill_value=np.nan,
+    )
+    path_summary_store = _fill_float_memmap(
+        label_dir / "path_summary.float32.dat",
+        (n_dates, n_symbols, len(summary_columns)),
+        fill_value=np.nan,
+    )
     future_path, path_summary, input_valid, entry_buyable, label_valid = _compute_future_path_and_masks(
         raw_panel=daily_raw,
         up_limit_panel=up_limit_panel,
         lookback_days=int(config.lookback_days),
         forward_days=int(config.forward_days),
+        future_path_out=future_path_store,
+        path_summary_out=path_summary_store,
     )
-    future_path_store = _fill_float_memmap(
-        label_dir / "future_ohlc_path.float32.dat",
-        tuple(int(item) for item in future_path.shape),
-        fill_value=np.nan,
-    )
-    future_path_store[:] = future_path
-    future_path_store.flush()
-    path_summary_store = _fill_float_memmap(label_dir / "path_summary.float32.dat", tuple(int(item) for item in path_summary.shape), fill_value=np.nan)
-    path_summary_store[:] = path_summary
+    future_path.flush()
     path_summary_store.flush()
     input_valid_store = _fill_bool_memmap(mask_dir / "input_valid.bool.dat", tuple(int(item) for item in input_valid.shape))
     entry_buyable_store = _fill_bool_memmap(mask_dir / "entry_buyable.bool.dat", tuple(int(item) for item in entry_buyable.shape))
@@ -563,8 +590,8 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             },
             "path_summary": {
                 "path": str((label_dir / "path_summary.float32.dat").resolve()),
-                "shape": [n_dates, n_symbols, len(PATH_SUMMARY_COLUMNS)],
-                "columns": PATH_SUMMARY_COLUMNS,
+                "shape": [n_dates, n_symbols, len(summary_columns)],
+                "columns": summary_columns,
             },
         },
         "masks": {
@@ -576,7 +603,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         "normalization": normalization,
         "label_semantics": {
             "entry_anchor": "signal day close decision, next calendar trading day open entry",
-            "path_trade_value_20d": "future_final_return + 0.50*future_max_return + 0.35*future_min_return + 0.20*drawdown_after_peak",
+            path_value_column(config.forward_days): "future_final_return + 0.50*future_max_return + 0.35*future_min_return + 0.20*drawdown_after_peak",
             "path_type_labels": "derived_explanation_only_not_primary_training_target",
         },
     }

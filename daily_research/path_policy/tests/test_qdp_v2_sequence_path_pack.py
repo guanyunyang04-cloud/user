@@ -10,6 +10,8 @@ from daily_research.path_policy.qdp_v2_sequence_path_pack import (
     _build_sample_index,
     _compute_future_path_and_masks,
     _fit_normalization,
+    path_summary_columns,
+    path_value_column,
 )
 from daily_research.path_policy.qdp_v2_sequence_path_training import SequencePathModel, SequencePathPackDataset, _compute_loss
 
@@ -202,3 +204,80 @@ def test_sequence_pack_dataset_get_batch_reads_date_grouped_windows(tmp_path) ->
     # First channel, first feature: dates 0..2 for symbol 0 and 1.
     assert torch.equal(batch["x"][0, :, 0], torch.tensor([0.0, 10.0, 20.0]))
     assert torch.equal(batch["x"][1, :, 0], torch.tensor([1.0, 11.0, 21.0]))
+
+
+def test_future_path_columns_support_sixty_day_horizon() -> None:
+    cols = path_summary_columns(60)
+    assert cols == [
+        "future_max_return_60d",
+        "future_min_return_60d",
+        "future_final_return_60d",
+        "future_peak_day_60d",
+        "future_trough_day_60d",
+        "drawdown_after_peak_60d",
+        "time_above_zero_60d",
+        "time_below_zero_60d",
+        "path_trade_value_60d",
+    ]
+    assert path_value_column(60) == "path_trade_value_60d"
+
+
+def test_sequence_pack_dataset_get_batch_supports_sixty_day_labels(tmp_path) -> None:
+    def write_memmap(path, array: np.ndarray) -> None:
+        mm = np.memmap(path, dtype="float32", mode="w+", shape=array.shape)
+        mm[:] = array[:]
+        mm.flush()
+
+    panels = tmp_path / "panels60"
+    labels = tmp_path / "labels60"
+    panels.mkdir()
+    labels.mkdir()
+    channel_specs = {
+        "daily_raw": 1,
+        "daily_state": 1,
+        "intraday_summary": 1,
+        "limit_structure": 1,
+    }
+    feature_channels = {}
+    for name, feature_count in channel_specs.items():
+        values = np.ones((4, 1, feature_count), dtype=np.float32)
+        path = panels / f"{name}.float32.dat"
+        write_memmap(path, values)
+        feature_channels[name] = {
+            "path": str(path),
+            "shape": list(values.shape),
+            "columns": [f"{name}_{idx}" for idx in range(feature_count)],
+        }
+    columns = path_summary_columns(60)
+    future_path = np.ones((4, 1, 60, 4), dtype=np.float32)
+    path_summary = np.ones((4, 1, len(columns)), dtype=np.float32)
+    future_path_path = labels / "future_ohlc_path.float32.dat"
+    path_summary_path = labels / "path_summary.float32.dat"
+    write_memmap(future_path_path, future_path)
+    write_memmap(path_summary_path, path_summary)
+    sample_index_path = tmp_path / "sample_index60.parquet"
+    pd.DataFrame(
+        [{"split": "train", "date_idx": 2, "symbol_idx": 0, "trade_date": "2024-01-03", "symbol": "000001.SZ"}]
+    ).to_parquet(sample_index_path, index=False)
+    manifest = {
+        "lookback_days": 3,
+        "forward_days": 60,
+        "sample_index_path": str(sample_index_path),
+        "feature_channels": feature_channels,
+        "label_arrays": {
+            "future_ohlc_path": {"path": str(future_path_path), "shape": list(future_path.shape)},
+            "path_summary": {"path": str(path_summary_path), "shape": list(path_summary.shape), "columns": columns},
+        },
+        "normalization": {
+            name: {"mean": [0.0] * feature_count, "std": [1.0] * feature_count}
+            for name, feature_count in channel_specs.items()
+        },
+    }
+
+    dataset = SequencePathPackDataset(manifest, split="train")
+    batch = dataset.get_batch([0])
+
+    assert dataset.value_column == "path_trade_value_60d"
+    assert batch["x"].shape == (1, 3, 4)
+    assert batch["y_path"].shape == (1, 60, 4)
+    assert batch["y_summary"].shape == (1, len(columns))

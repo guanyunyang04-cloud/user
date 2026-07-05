@@ -24,13 +24,14 @@ from daily_research.path_policy.qdp_v2_sequence_path_pack import (
     PATH_SUMMARY_COLUMNS,
     _json_default,
     _write_json,
+    path_summary_columns,
+    path_value_column,
 )
 
 
 DEFAULT_OUTPUT_ROOT = Path("daily_research/output/path_policy/sequence_path_training")
-DEFAULT_TOP_K = (20, 50, 100)
+DEFAULT_TOP_K = (5, 10, 20, 50, 100)
 DEFAULT_SEED = 7
-VALUE_COLUMN = "path_trade_value_20d"
 
 
 def _now() -> str:
@@ -93,8 +94,9 @@ class SequencePathPackDataset(Dataset):
         labels = dict(self.manifest.get("label_arrays", {}) or {})
         self.future_path = _open_memmap(labels["future_ohlc_path"], dtype="float32")
         self.path_summary = _open_memmap(labels["path_summary"], dtype="float32")
-        self.path_summary_columns = list(labels["path_summary"].get("columns", []) or PATH_SUMMARY_COLUMNS)
-        self.value_index = self.path_summary_columns.index(VALUE_COLUMN)
+        self.path_summary_columns = list(labels["path_summary"].get("columns", []) or path_summary_columns(self.forward_days))
+        self.value_column = path_value_column(self.forward_days)
+        self.value_index = self.path_summary_columns.index(self.value_column)
         self.input_dim = int(sum(len(self.feature_columns[name]) for name in self.channel_order))
 
     def __len__(self) -> int:
@@ -304,19 +306,20 @@ def _daily_spearman(frame: pd.DataFrame, *, score_col: str, target_col: str) -> 
     return pd.DataFrame(rows)
 
 
-def _topk_metrics(frame: pd.DataFrame, *, top_k_values: tuple[int, ...]) -> pd.DataFrame:
+def _topk_metrics(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forward_days: int, value_column: str) -> pd.DataFrame:
+    suffix = f"{int(forward_days)}d"
     rows: list[dict[str, Any]] = []
     metric_cols = [
-        "future_max_return_20d",
-        "future_min_return_20d",
-        "future_final_return_20d",
-        "drawdown_after_peak_20d",
-        "path_trade_value_20d",
+        f"future_max_return_{suffix}",
+        f"future_min_return_{suffix}",
+        f"future_final_return_{suffix}",
+        f"drawdown_after_peak_{suffix}",
+        value_column,
     ]
     for top_k in top_k_values:
         daily_rows: list[dict[str, Any]] = []
         for trade_date, group in frame.groupby("trade_date", sort=True):
-            group = group.dropna(subset=["score", VALUE_COLUMN])
+            group = group.dropna(subset=["score", value_column])
             if group.empty:
                 continue
             top = group.sort_values("score", ascending=False, kind="mergesort").head(int(top_k))
@@ -327,13 +330,13 @@ def _topk_metrics(frame: pd.DataFrame, *, top_k_values: tuple[int, ...]) -> pd.D
                 row[f"selected_{col}"] = float(selected_mean)
                 row[f"universe_{col}"] = float(universe_mean)
                 row[f"alpha_{col}"] = float(selected_mean - universe_mean)
-            row["selected_hit_5pct_rate"] = float((pd.to_numeric(top["future_max_return_20d"], errors="coerce") >= 0.05).mean())
-            row["selected_hit_10pct_rate"] = float((pd.to_numeric(top["future_max_return_20d"], errors="coerce") >= 0.10).mean())
-            row["selected_hit_20pct_rate"] = float((pd.to_numeric(top["future_max_return_20d"], errors="coerce") >= 0.20).mean())
-            row["selected_loss_3pct_rate"] = float((pd.to_numeric(top["future_min_return_20d"], errors="coerce") <= -0.03).mean())
-            row["selected_loss_5pct_rate"] = float((pd.to_numeric(top["future_min_return_20d"], errors="coerce") <= -0.05).mean())
-            row["selected_loss_10pct_rate"] = float((pd.to_numeric(top["future_min_return_20d"], errors="coerce") <= -0.10).mean())
-            row["selected_peak_day_mean"] = float(pd.to_numeric(top["future_peak_day_20d"], errors="coerce").mean())
+            row["selected_hit_5pct_rate"] = float((pd.to_numeric(top[f"future_max_return_{suffix}"], errors="coerce") >= 0.05).mean())
+            row["selected_hit_10pct_rate"] = float((pd.to_numeric(top[f"future_max_return_{suffix}"], errors="coerce") >= 0.10).mean())
+            row["selected_hit_20pct_rate"] = float((pd.to_numeric(top[f"future_max_return_{suffix}"], errors="coerce") >= 0.20).mean())
+            row["selected_loss_3pct_rate"] = float((pd.to_numeric(top[f"future_min_return_{suffix}"], errors="coerce") <= -0.03).mean())
+            row["selected_loss_5pct_rate"] = float((pd.to_numeric(top[f"future_min_return_{suffix}"], errors="coerce") <= -0.05).mean())
+            row["selected_loss_10pct_rate"] = float((pd.to_numeric(top[f"future_min_return_{suffix}"], errors="coerce") <= -0.10).mean())
+            row["selected_peak_day_mean"] = float(pd.to_numeric(top[f"future_peak_day_{suffix}"], errors="coerce").mean())
             daily_rows.append(row)
         daily = pd.DataFrame(daily_rows)
         if daily.empty:
@@ -345,12 +348,23 @@ def _topk_metrics(frame: pd.DataFrame, *, top_k_values: tuple[int, ...]) -> pd.D
     return pd.DataFrame(rows)
 
 
-def _find_latest_baseline_summary() -> dict[str, Any]:
+def _find_latest_baseline_summary(forward_days: int) -> dict[str, Any]:
     root = Path("daily_research/output/path_policy/path_value_predictability")
-    paths = sorted(root.glob("qdp_v2_path20_value_predictability_lookback100_full_*/path_value_predictability_summary.json"))
-    if not paths:
+    matches: list[tuple[float, Path, dict[str, Any]]] = []
+    for path in sorted(root.glob("*/path_value_predictability_summary.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        detected = payload.get("forward_days")
+        if detected is None:
+            text = json.dumps(payload, ensure_ascii=False)
+            detected = 60 if "60-day" in text or "_60d" in text or "path60" in str(path) else None
+        if detected is not None and int(detected) == int(forward_days):
+            matches.append((path.stat().st_mtime, path, payload))
+    if not matches:
         return {}
-    return json.loads(paths[-1].read_text(encoding="utf-8"))
+    return sorted(matches, key=lambda item: item[0])[-1][2]
 
 
 @torch.no_grad()
@@ -409,8 +423,8 @@ def _predict_split(
         del x, y_path, y_summary, out, pred_path_np, pred_summary_np, score_np, true_path_np, true_summary_np, chunk
         gc.collect()
     frame = pd.concat(summary_rows, ignore_index=True)
-    ic = _daily_spearman(frame, score_col="score", target_col=VALUE_COLUMN)
-    topk = _topk_metrics(frame, top_k_values=top_k)
+    ic = _daily_spearman(frame, score_col="score", target_col=dataset.value_column)
+    topk = _topk_metrics(frame, top_k_values=top_k, forward_days=dataset.forward_days, value_column=dataset.value_column)
     metrics = {
         "split": split,
         "row_count": int(len(frame)),
@@ -418,7 +432,7 @@ def _predict_split(
         "rank_ic_mean": float(ic["rank_ic"].mean()) if not ic.empty else np.nan,
         "rank_ic_median": float(ic["rank_ic"].median()) if not ic.empty else np.nan,
         "rank_ic_positive_day_rate": float((ic["rank_ic"] > 0).mean()) if not ic.empty else np.nan,
-        "target_mean": float(frame[VALUE_COLUMN].mean()),
+        "target_mean": float(frame[dataset.value_column].mean()),
         "prediction_mean": float(frame["score"].mean()),
         "prediction_csv": str(pred_path.resolve()) if write_predictions else "",
     }
@@ -433,13 +447,18 @@ def _write_report(
     topk: pd.DataFrame,
     baseline_summary: Mapping[str, Any],
 ) -> str:
+    forward_days = int(summary.get("forward_days", DEFAULT_FORWARD_DAYS) or DEFAULT_FORWARD_DAYS)
+    suffix = f"{forward_days}d"
+    value_col = path_value_column(forward_days)
+    max_col = f"future_max_return_{suffix}"
+    final_col = f"future_final_return_{suffix}"
     lines: list[str] = []
     lines.append("# QDP v2 Sequence Path Model")
     lines.append("")
     lines.append("## Method")
     lines.append("")
     lines.append(
-        "This model reads past 100-day multi-channel sequences from QDP v2 and predicts future 20-day OHLC paths, path summaries, and a path value score."
+        f"This model reads past 100-day multi-channel sequences from QDP v2 and predicts future {forward_days}-day OHLC paths, path summaries, and a path value score."
     )
     lines.append("")
     lines.append("## Split Metrics")
@@ -458,9 +477,9 @@ def _write_report(
         for row in topk.sort_values(["split", "top_k"]).to_dict("records"):
             lines.append(
                 f"- {row['split']} top{int(row['top_k'])}: "
-                f"path_value_alpha={row['alpha_path_trade_value_20d'] * 100:.2f}%, "
-                f"max_alpha={row['alpha_future_max_return_20d'] * 100:.2f}%, "
-                f"final_alpha={row['alpha_future_final_return_20d'] * 100:.2f}%, "
+                f"path_value_alpha={row[f'alpha_{value_col}'] * 100:.2f}%, "
+                f"max_alpha={row[f'alpha_{max_col}'] * 100:.2f}%, "
+                f"final_alpha={row[f'alpha_{final_col}'] * 100:.2f}%, "
                 f"hit10={row['selected_hit_10pct_rate']:.2%}, "
                 f"loss5={row['selected_loss_5pct_rate']:.2%}"
             )
@@ -468,7 +487,7 @@ def _write_report(
         lines.append("")
         lines.append("## Baseline")
         lines.append("")
-        lines.append(f"- 191-feature baseline summary: `{baseline_summary.get('output_dir', '')}`")
+        lines.append(f"- matching feature baseline summary: `{baseline_summary.get('output_dir', '')}`")
         for item in list(baseline_summary.get("split_metrics", []) or []):
             if str(item.get("split", "")) in {"validation", "test"}:
                 lines.append(
@@ -643,12 +662,16 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     topk.to_csv(topk_path, index=False, encoding="utf-8-sig")
     daily_ic.to_csv(daily_ic_path, index=False, encoding="utf-8-sig")
     pd.DataFrame(history).to_csv(history_path, index=False, encoding="utf-8-sig")
-    baseline_summary = _find_latest_baseline_summary()
+    baseline_summary = _find_latest_baseline_summary(train_ds.forward_days)
     summary = {
         "artifact_type": "qdp_v2_sequence_path_training",
         "generated_at": _now(),
         "pack_manifest": str(Path(config.pack_manifest).resolve()),
         "output_dir": str(output_dir.resolve()),
+        "lookback_days": int(train_ds.lookback_days),
+        "forward_days": int(train_ds.forward_days),
+        "value_column": str(train_ds.value_column),
+        "path_summary_columns": list(train_ds.path_summary_columns),
         "device": str(device),
         "amp_enabled": bool(amp_enabled),
         "epochs": int(config.epochs),
@@ -672,7 +695,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "validation_predictions_csv": str((output_dir / "predictions" / "validation_predictions.csv").resolve()),
             "test_predictions_csv": str((output_dir / "predictions" / "test_predictions.csv").resolve()),
         },
-        "baseline_191_feature_summary": baseline_summary.get("output_dir", ""),
+        "baseline_feature_summary": baseline_summary.get("output_dir", ""),
     }
     report_path = _write_report(output_dir, summary=summary, split_metrics=split_metrics, topk=topk, baseline_summary=baseline_summary)
     summary["outputs"]["report_md"] = report_path
@@ -700,7 +723,7 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument("--amp", dest="amp", action="store_true", default=True)
     train.add_argument("--no-amp", dest="amp", action="store_false")
     train.add_argument("--seed", type=int, default=DEFAULT_SEED)
-    train.add_argument("--top-k", default="20,50,100")
+    train.add_argument("--top-k", default="5,10,20,50,100")
     train.add_argument("--max-samples-per-split", type=int, default=0)
     train.add_argument("--json", action="store_true")
     return parser
