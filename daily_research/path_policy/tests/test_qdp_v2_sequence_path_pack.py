@@ -140,7 +140,7 @@ def test_sequence_path_model_outputs_path_summary_and_score() -> None:
     assert out["path_summary"].shape == (4, 9)
     assert out["score"].shape == (4,)
     assert torch.isfinite(loss)
-    assert set(parts) == {"loss", "path_loss", "summary_loss", "value_loss", "rank_loss", "residual_penalty"}
+    assert set(parts) == {"loss", "path_loss", "summary_loss", "richer_loss", "value_loss", "rank_loss", "residual_penalty"}
 
 
 def test_sequence_path_attention_model_outputs_path_summary_and_score() -> None:
@@ -241,7 +241,7 @@ def test_gru_path_value_model_outputs_only_future_path_and_loss_uses_derived_sco
     assert set(out) == {"future_path"}
     assert out["future_path"].shape == (4, 20, 4)
     assert torch.isfinite(loss)
-    assert set(parts) == {"loss", "path_loss", "summary_loss", "value_loss", "rank_loss", "residual_penalty"}
+    assert set(parts) == {"loss", "path_loss", "summary_loss", "richer_loss", "value_loss", "rank_loss", "residual_penalty"}
 
 
 def test_gru_path_value_symbol_model_uses_symbol_embedding() -> None:
@@ -296,6 +296,42 @@ def test_gru_path_value_residual_model_outputs_residual_score() -> None:
     assert out["residual_score"].shape == (4,)
     assert torch.isfinite(loss)
     assert parts["residual_penalty"] >= 0.0
+
+
+def test_gru_richer_path_value_model_outputs_richer_path_and_uses_auxiliary_loss() -> None:
+    model = SequencePathModel(
+        input_dim=6,
+        hidden_dim=8,
+        layers=1,
+        forward_days=20,
+        summary_dim=9,
+        dropout=0.0,
+        model_type="gru_richer_path_value",
+        richer_path_dim=12,
+    )
+    x = torch.randn(4, 100, 6)
+    y_path = torch.randn(4, 20, 4) * 0.01
+    y_richer_path = torch.randn(4, 20, 12) * 0.01
+    y_richer_path[:, :, :4] = y_path
+    y_summary = torch.randn(4, 9) * 0.01
+    date_idx = torch.tensor([1, 1, 1, 1])
+
+    out = model(x)
+    loss, parts = _compute_loss(
+        out,
+        y_path,
+        y_summary,
+        date_idx,
+        y_richer_path=y_richer_path,
+        value_index=8,
+        richer_weight=0.10,
+    )
+
+    assert set(out) == {"future_path", "future_richer_path"}
+    assert out["future_path"].shape == (4, 20, 4)
+    assert out["future_richer_path"].shape == (4, 20, 12)
+    assert torch.isfinite(loss)
+    assert parts["richer_loss"] >= 0.0
 
 
 def test_sequence_pack_dataset_get_batch_reads_date_grouped_windows(tmp_path) -> None:

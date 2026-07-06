@@ -37,8 +37,94 @@ PATH_VALUE_V2_WAITING_PENALTY = 0.04
 PATH_VALUE_V2_DRAWDOWN_PENALTY = 0.60
 PATH_VALUE_V2_TRANSACTION_COST = 0.002
 PATH_VALUE_V2_TEMPERATURE = 0.03
-PATH_VALUE_MODEL_TYPES = {"gru_path_value", "gru_path_value_symbol", "gru_path_value_residual"}
+RICHER_MODEL_TYPES = {"gru_richer_path_value", "gru_richer_path_value_symbol"}
+PATH_VALUE_MODEL_TYPES = {
+    "gru_path_value",
+    "gru_path_value_symbol",
+    "gru_path_value_residual",
+    *RICHER_MODEL_TYPES,
+}
 RESIDUAL_MODEL_TYPES = {"gru_path_value_residual"}
+RICHER_DAILY_RAW_TARGETS = [
+    "open_ret_prev_close",
+    "high_ret_prev_close",
+    "low_ret_prev_close",
+    "close_ret_prev_close",
+    "volume_log",
+    "amount_log",
+    "intraday_range_raw",
+]
+RICHER_DAILY_STATE_TARGETS = [
+    "ret_1d",
+    "ret_3d",
+    "ret_5d",
+    "ret_10d",
+    "ret_20d",
+    "volatility_20d",
+    "amount_ratio_5_20",
+    "volume_ratio_5_20",
+    "distance_to_20d_high",
+    "distance_to_60d_high",
+    "drawdown_from_20d_high",
+    "range_1d",
+    "body_to_range_1d",
+    "upper_shadow_to_range_1d",
+    "lower_shadow_to_range_1d",
+    "open_gap_1d",
+    "close_to_open_1d",
+]
+RICHER_INTRADAY_TARGETS = [
+    "first_5m_ret",
+    "opening_auction_ret",
+    "opening_auction_amount_share",
+    "first_30m_ret",
+    "first_30m_amount_share",
+    "last_5m_ret",
+    "closing_auction_ret",
+    "closing_auction_amount_share",
+    "last_30m_ret",
+    "last_30m_amount_share",
+    "intraday_ret",
+    "close_to_vwap",
+    "intraday_range",
+    "close_position",
+    "intraday_realized_vol",
+    "intraday_price_volume_corr",
+    "high_time_frac",
+    "low_time_frac",
+    "high_before_low",
+    "open_to_high_ret",
+    "open_to_low_ret",
+    "high_to_close_ret",
+    "low_to_close_ret",
+    "intraday_max_drawdown",
+    "intraday_max_runup",
+    "price_above_vwap_share",
+    "cum_vwap_slope",
+    "amount_top_bar_share",
+    "amount_concentration_hhi",
+    "am_ret",
+    "pm_ret",
+    "am_pm_ret_spread",
+    "am_pm_vol_spread",
+    "am_amount_share",
+    "am_pm_amount_spread",
+    "early_strength_late_weak",
+    "close_pressure_30m",
+]
+RICHER_LIMIT_TARGETS = [
+    "is_open_limit_up",
+    "is_close_limit_up",
+    "touch_limit_up",
+    "is_one_word_limit_up",
+    "opened_after_limit_up",
+    "close_sealed_up",
+    "limit_up_touch_minutes",
+    "limit_up_close_minutes",
+    "break_limit_up_count",
+    "sealed_up_minutes_to_close",
+    "limit_up_strength_score",
+]
 
 
 def _trim_working_set() -> None:
@@ -119,6 +205,32 @@ class SequencePathPackDataset(Dataset):
         self.value_column = path_value_column(self.forward_days)
         self.value_index = self.path_summary_columns.index(self.value_column)
         self.input_dim = int(sum(len(self.feature_columns[name]) for name in self.channel_order))
+        requested_richer_targets = {
+            "daily_raw": RICHER_DAILY_RAW_TARGETS,
+            "daily_state": RICHER_DAILY_STATE_TARGETS,
+            "intraday_summary": RICHER_INTRADAY_TARGETS,
+            "limit_structure": RICHER_LIMIT_TARGETS,
+        }
+        self.richer_target_columns = {
+            name: [col for col in requested if col in self.feature_columns.get(name, [])]
+            for name, requested in requested_richer_targets.items()
+        }
+        self.richer_target_indices = {
+            name: [self.feature_columns[name].index(col) for col in columns]
+            for name, columns in self.richer_target_columns.items()
+        }
+        self.richer_path_fields = [
+            "open_ret_from_entry_open",
+            "high_ret_from_entry_open",
+            "low_ret_from_entry_open",
+            "close_ret_from_entry_open",
+            *[
+                f"{channel}:{column}"
+                for channel in self.channel_order
+                for column in self.richer_target_columns.get(channel, [])
+            ],
+        ]
+        self.richer_path_dim = int(len(self.richer_path_fields))
         manifest_symbols = list(self.manifest.get("symbol_values", []) or [])
         self.symbol_count = int(len(manifest_symbols)) or int(self.sample_index["symbol_idx"].astype(int).max() + 1)
 
@@ -139,6 +251,41 @@ class SequencePathPackDataset(Dataset):
         out = (values.astype(np.float32, copy=False) - mean.reshape(1, 1, -1)) / np.maximum(std.reshape(1, 1, -1), 1.0e-6)
         return np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32, copy=False)
 
+    def _normalize_selected_future_batch(self, name: str, values: np.ndarray, indices: list[int]) -> np.ndarray:
+        stats = dict(self.normalization.get(name, {}) or {})
+        mean_all = np.asarray(stats.get("mean", [0.0] * len(self.feature_columns[name])), dtype=np.float32)
+        std_all = np.asarray(stats.get("std", [1.0] * len(self.feature_columns[name])), dtype=np.float32)
+        mean = mean_all[np.asarray(indices, dtype=np.int64)]
+        std = np.maximum(std_all[np.asarray(indices, dtype=np.int64)], 1.0e-6)
+        return (values.astype(np.float32, copy=False) - mean.reshape(1, 1, -1)) / std.reshape(1, 1, -1)
+
+    def _future_channel_values(self, name: str, date_idx: np.ndarray, symbol_idx: np.ndarray, columns: list[str]) -> np.ndarray:
+        indices = self.richer_target_indices.get(name, [])
+        values = np.full((int(date_idx.size), self.forward_days, len(columns)), np.nan, dtype=np.float32)
+        if not indices:
+            return values
+        for current_date in np.unique(date_idx):
+            mask = date_idx == int(current_date)
+            symbols = symbol_idx[mask]
+            start = int(current_date) + 1
+            end = start + int(self.forward_days)
+            available_end = min(end, int(self.feature_arrays[name].shape[0]))
+            if start >= available_end:
+                continue
+            block = np.asarray(self.feature_arrays[name][start:available_end, symbols, :], dtype=np.float32)
+            selected = np.transpose(block[:, :, indices], (1, 0, 2))
+            values[np.flatnonzero(mask), : selected.shape[1], :] = selected
+        return self._normalize_selected_future_batch(name, values, indices)
+
+    def _future_richer_path_batch(self, y_path: np.ndarray, date_idx: np.ndarray, symbol_idx: np.ndarray) -> np.ndarray:
+        parts = [np.asarray(y_path, dtype=np.float32)]
+        for name in self.channel_order:
+            columns = self.richer_target_columns.get(name, [])
+            if columns:
+                parts.append(self._future_channel_values(name, date_idx, symbol_idx, columns))
+        out = np.concatenate(parts, axis=2).astype(np.float32, copy=False)
+        return out
+
     def __getitem__(self, idx: int) -> dict[str, Any]:
         row = self.sample_index.iloc[int(idx)]
         date_idx = int(row["date_idx"])
@@ -152,9 +299,15 @@ class SequencePathPackDataset(Dataset):
         x = np.concatenate(parts, axis=1).astype(np.float32, copy=False)
         y_path = np.asarray(self.future_path[date_idx, symbol_idx, :, :], dtype=np.float32).copy()
         y_summary = np.asarray(self.path_summary[date_idx, symbol_idx, :], dtype=np.float32).copy()
+        y_richer_path = self._future_richer_path_batch(
+            y_path.reshape(1, self.forward_days, 4),
+            np.asarray([date_idx], dtype=np.int64),
+            np.asarray([symbol_idx], dtype=np.int64),
+        )[0]
         return {
             "x": torch.from_numpy(x),
             "y_path": torch.from_numpy(y_path),
+            "y_richer_path": torch.from_numpy(y_richer_path),
             "y_summary": torch.from_numpy(y_summary),
             "date_idx": int(date_idx),
             "symbol_idx": int(symbol_idx),
@@ -183,10 +336,12 @@ class SequencePathPackDataset(Dataset):
             channel_parts.append(self._normalize_batch(name, values))
         x = np.concatenate(channel_parts, axis=2).astype(np.float32, copy=False)
         y_path = np.asarray(self.future_path[date_idx, symbol_idx, :, :], dtype=np.float32).copy()
+        y_richer_path = self._future_richer_path_batch(y_path, date_idx, symbol_idx)
         y_summary = np.asarray(self.path_summary[date_idx, symbol_idx, :], dtype=np.float32).copy()
         return {
             "x": torch.from_numpy(x),
             "y_path": torch.from_numpy(y_path),
+            "y_richer_path": torch.from_numpy(y_richer_path),
             "y_summary": torch.from_numpy(y_summary),
             "date_idx": torch.from_numpy(date_idx.astype(np.int64, copy=False)),
             "symbol_idx": torch.from_numpy(symbol_idx.astype(np.int64, copy=False)),
@@ -238,17 +393,29 @@ class SequencePathModel(nn.Module):
         model_type: str = "gru_last",
         symbol_count: int = 0,
         symbol_embedding_dim: int = 16,
+        richer_path_dim: int = 4,
     ) -> None:
         super().__init__()
         normalized_model_type = str(model_type or "gru_last").strip().lower()
-        if normalized_model_type not in {"gru_last", "gru_attention", "gru_path_value", "gru_path_value_symbol", "gru_path_value_residual"}:
+        allowed_model_types = {
+            "gru_last",
+            "gru_attention",
+            "gru_path_value",
+            "gru_path_value_symbol",
+            "gru_path_value_residual",
+            "gru_richer_path_value",
+            "gru_richer_path_value_symbol",
+        }
+        if normalized_model_type not in allowed_model_types:
             raise ValueError(
-                "model_type must be gru_last, gru_attention, gru_path_value, gru_path_value_symbol, or gru_path_value_residual"
+                "model_type must be gru_last, gru_attention, gru_path_value, gru_path_value_symbol, "
+                "gru_path_value_residual, gru_richer_path_value, or gru_richer_path_value_symbol"
             )
         self.model_type = normalized_model_type
         self.uses_derived_path_value = normalized_model_type in PATH_VALUE_MODEL_TYPES
-        self.uses_symbol_embedding = normalized_model_type == "gru_path_value_symbol"
+        self.uses_symbol_embedding = normalized_model_type in {"gru_path_value_symbol", "gru_richer_path_value_symbol"}
         self.uses_residual_score = normalized_model_type in RESIDUAL_MODEL_TYPES
+        self.uses_richer_path = normalized_model_type in RICHER_MODEL_TYPES
         self.input_norm = nn.LayerNorm(input_dim)
         self.proj = nn.Linear(input_dim, hidden_dim)
         self.encoder = nn.GRU(
@@ -272,7 +439,8 @@ class SequencePathModel(nn.Module):
         else:
             self.symbol_embedding = None
         head_dim = int(hidden_dim) + self.symbol_embedding_dim
-        self.path_head = nn.Linear(head_dim, int(forward_days) * 4)
+        self.richer_path_dim = int(max(4, richer_path_dim)) if self.uses_richer_path else 4
+        self.path_head = nn.Linear(head_dim, int(forward_days) * self.richer_path_dim)
         if self.uses_derived_path_value:
             self.summary_head = None
             self.score_head = None
@@ -298,9 +466,12 @@ class SequencePathModel(nn.Module):
                 raise ValueError("symbol_idx is required when model_type=gru_path_value_symbol")
             embedded = self.symbol_embedding(symbol_idx.to(device=pooled.device, dtype=torch.long))
             pooled = torch.cat([pooled, embedded], dim=1)
-        future_path = self.path_head(pooled).view(-1, self.forward_days, 4)
+        path_output = self.path_head(pooled).view(-1, self.forward_days, self.richer_path_dim)
+        future_path = path_output[:, :, :4] if self.uses_richer_path else path_output
         if self.uses_derived_path_value:
             outputs = {"future_path": future_path}
+            if self.uses_richer_path:
+                outputs["future_richer_path"] = path_output
             if self.uses_residual_score:
                 assert self.residual_score_head is not None
                 outputs["residual_score"] = self.residual_score_head(pooled).squeeze(-1)
@@ -354,16 +525,27 @@ def _compute_loss(
     y_summary: torch.Tensor,
     date_idx: torch.Tensor,
     *,
+    y_richer_path: torch.Tensor | None = None,
     value_index: int,
     path_weight: float = 0.35,
     summary_weight: float = 0.35,
     value_weight: float = 0.15,
     rank_weight: float = 0.15,
+    richer_weight: float = 0.0,
     rank_max_per_side: int = 64,
     residual_weight: float = 0.25,
     residual_penalty_weight: float = 0.01,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     path_loss = _finite_smooth_l1(outputs["future_path"], y_path)
+    richer_loss = outputs["future_path"].sum() * 0.0
+    if y_richer_path is not None and "future_richer_path" in outputs:
+        predicted_richer = outputs["future_richer_path"]
+        if int(predicted_richer.shape[-1]) != int(y_richer_path.shape[-1]):
+            raise ValueError(f"richer path dim mismatch: predicted={predicted_richer.shape[-1]} target={y_richer_path.shape[-1]}")
+        if int(predicted_richer.shape[-1]) > 4:
+            richer_loss = _finite_smooth_l1(predicted_richer[:, :, 4:], y_richer_path[:, :, 4:])
+        else:
+            richer_loss = _finite_smooth_l1(predicted_richer, y_richer_path)
     residual_penalty = outputs["future_path"].sum() * 0.0
     if "score" in outputs:
         summary_loss = _finite_smooth_l1(outputs["path_summary"], y_summary)
@@ -397,25 +579,30 @@ def _compute_loss(
         + float(summary_weight) * summary_loss
         + float(value_weight) * value_loss
         + float(rank_weight) * rank_loss
+        + float(richer_weight) * richer_loss
         + float(residual_penalty_weight) * residual_penalty
     )
     return total, {
         "loss": float(total.detach().cpu().item()),
         "path_loss": float(path_loss.detach().cpu().item()),
         "summary_loss": float(summary_loss.detach().cpu().item()),
+        "richer_loss": float(richer_loss.detach().cpu().item()),
         "value_loss": float(value_loss.detach().cpu().item()),
         "rank_loss": float(rank_loss.detach().cpu().item()),
         "residual_penalty": float(residual_penalty.detach().cpu().item()),
     }
 
 
-def _batch_to_device(batch: Mapping[str, Any], device: torch.device) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+def _batch_to_device(
+    batch: Mapping[str, Any], device: torch.device
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     x = batch["x"].to(device, non_blocking=device.type == "cuda")
     y_path = batch["y_path"].to(device, non_blocking=device.type == "cuda")
+    y_richer_path = batch["y_richer_path"].to(device, non_blocking=device.type == "cuda")
     y_summary = batch["y_summary"].to(device, non_blocking=device.type == "cuda")
     date_idx = batch["date_idx"].to(device, non_blocking=device.type == "cuda")
     symbol_idx = batch["symbol_idx"].to(device, non_blocking=device.type == "cuda")
-    return x, y_path, y_summary, date_idx, symbol_idx
+    return x, y_path, y_richer_path, y_summary, date_idx, symbol_idx
 
 
 def _iter_index_batches(dataset: SequencePathPackDataset, *, batch_size: int, shuffle: bool, seed: int) -> Iterator[list[int]]:
@@ -762,7 +949,7 @@ def _predict_split(
         start=1,
     ):
         batch = dataset.get_batch(batch_indices)
-        x, y_path, y_summary, _date_idx, symbol_idx = _batch_to_device(batch, device)
+        x, y_path, _y_richer_path, y_summary, _date_idx, symbol_idx = _batch_to_device(batch, device)
         trade_dates = list(batch["trade_date"])
         symbols = list(batch["symbol"])
         del batch
@@ -832,7 +1019,7 @@ def _predict_split(
             del residual_np
         if "path_value_score_np" in locals():
             del path_value_score_np
-        del x, y_path, y_summary, symbol_idx, out, pred_path_np, pred_summary_np, score_np, true_path_np, true_summary_np, chunk, metric_frame
+        del x, y_path, _y_richer_path, y_summary, symbol_idx, out, pred_path_np, pred_summary_np, score_np, true_path_np, true_summary_np, chunk, metric_frame
         del trade_dates, symbols
         if predict_batch_count % 100 == 0:
             gc.collect()
@@ -966,6 +1153,7 @@ class TrainConfig:
     weight_decay: float
     path_loss_weight: float
     summary_loss_weight: float
+    richer_loss_weight: float
     value_loss_weight: float
     rank_loss_weight: float
     residual_score_weight: float
@@ -1003,6 +1191,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         model_type=str(config.model_type),
         symbol_count=int(train_ds.symbol_count),
         symbol_embedding_dim=int(config.symbol_embedding_dim),
+        richer_path_dim=int(train_ds.richer_path_dim),
     ).to(device)
     model.residual_weight = float(config.residual_score_weight)
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(config.learning_rate), weight_decay=float(config.weight_decay))
@@ -1019,6 +1208,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "loss": 0.0,
             "path_loss": 0.0,
             "summary_loss": 0.0,
+            "richer_loss": 0.0,
             "value_loss": 0.0,
             "rank_loss": 0.0,
             "residual_penalty": 0.0,
@@ -1034,7 +1224,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         total_batches = len(train_batches)
         for batch_indices in train_batches:
             batch = train_ds.get_batch(batch_indices)
-            x, y_path, y_summary, date_idx, symbol_idx = _batch_to_device(batch, device)
+            x, y_path, y_richer_path, y_summary, date_idx, symbol_idx = _batch_to_device(batch, device)
             del batch
             optimizer.zero_grad(set_to_none=True)
             with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
@@ -1044,11 +1234,13 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     y_path,
                     y_summary,
                     date_idx,
+                    y_richer_path=y_richer_path,
                     value_index=train_ds.value_index,
                     path_weight=float(config.path_loss_weight),
                     summary_weight=float(config.summary_loss_weight),
                     value_weight=float(config.value_loss_weight),
                     rank_weight=float(config.rank_loss_weight),
+                    richer_weight=float(config.richer_loss_weight),
                     rank_max_per_side=int(config.rank_max_per_side),
                     residual_weight=float(config.residual_score_weight),
                     residual_penalty_weight=float(config.residual_penalty_weight),
@@ -1074,7 +1266,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                         "updated_at": _now(),
                     },
                 )
-            del x, y_path, y_summary, date_idx, symbol_idx, out, loss, parts
+            del x, y_path, y_richer_path, y_summary, date_idx, symbol_idx, out, loss, parts
             if batch_count % 200 == 0:
                 gc.collect()
                 _trim_working_set()
@@ -1224,12 +1416,16 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "uses_derived_path_value": bool(getattr(model, "uses_derived_path_value", False)),
             "uses_symbol_embedding": bool(getattr(model, "uses_symbol_embedding", False)),
             "uses_residual_score": bool(getattr(model, "uses_residual_score", False)),
+            "uses_richer_path": bool(getattr(model, "uses_richer_path", False)),
+            "richer_path_dim": int(getattr(model, "richer_path_dim", 4)),
+            "richer_path_fields": list(train_ds.richer_path_fields) if bool(getattr(model, "uses_richer_path", False)) else [],
             "symbol_embedding_dim": int(config.symbol_embedding_dim) if bool(getattr(model, "uses_symbol_embedding", False)) else 0,
             "residual_score_weight": float(config.residual_score_weight) if bool(getattr(model, "uses_residual_score", False)) else 0.0,
         },
         "loss_weights": {
             "path": float(config.path_loss_weight),
             "summary": float(config.summary_loss_weight),
+            "richer": float(config.richer_loss_weight) if bool(getattr(model, "uses_richer_path", False)) else 0.0,
             "value": float(config.value_loss_weight),
             "rank": float(config.rank_loss_weight),
             "rank_max_per_side": int(config.rank_max_per_side),
@@ -1276,7 +1472,15 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument(
         "--model-type",
         default="",
-        choices=("gru_last", "gru_attention", "gru_path_value", "gru_path_value_symbol", "gru_path_value_residual"),
+        choices=(
+            "gru_last",
+            "gru_attention",
+            "gru_path_value",
+            "gru_path_value_symbol",
+            "gru_path_value_residual",
+            "gru_richer_path_value",
+            "gru_richer_path_value_symbol",
+        ),
         help=argparse.SUPPRESS,
     )
     train.add_argument(
@@ -1286,6 +1490,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help=argparse.SUPPRESS,
     )
     train.add_argument("--with-symbol", action="store_true", help="Use symbol identity embedding with the path-value model.")
+    train.add_argument("--richer-path", action="store_true", help="Predict price, volume, intraday, and limit-structure future paths.")
     train.add_argument("--hidden-dim", type=int, default=128)
     train.add_argument("--layers", type=int, default=2)
     train.add_argument("--dropout", type=float, default=0.10)
@@ -1294,6 +1499,7 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument("--weight-decay", type=float, default=1.0e-4)
     train.add_argument("--path-loss-weight", type=float, default=0.45)
     train.add_argument("--summary-loss-weight", type=float, default=0.20)
+    train.add_argument("--richer-loss-weight", type=float, default=0.10)
     train.add_argument("--value-loss-weight", type=float, default=0.20)
     train.add_argument("--rank-loss-weight", type=float, default=0.15)
     train.add_argument("--residual-score-weight", type=float, default=0.25, help=argparse.SUPPRESS)
@@ -1317,11 +1523,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     model_type = str(args.experimental_model_type or args.model_type or "").strip()
     if not model_type:
-        model_type = "gru_path_value_symbol" if bool(args.with_symbol) else "gru_path_value"
+        if bool(args.richer_path):
+            model_type = "gru_richer_path_value_symbol" if bool(args.with_symbol) else "gru_richer_path_value"
+        else:
+            model_type = "gru_path_value_symbol" if bool(args.with_symbol) else "gru_path_value"
     elif bool(args.with_symbol):
-        if model_type not in {"gru_path_value", "gru_path_value_symbol"}:
+        if model_type not in {"gru_path_value", "gru_path_value_symbol", "gru_richer_path_value", "gru_richer_path_value_symbol"}:
             raise SystemExit("--with-symbol can only be combined with the path-value model")
-        model_type = "gru_path_value_symbol"
+        model_type = "gru_richer_path_value_symbol" if model_type.startswith("gru_richer_") else "gru_path_value_symbol"
     cfg = TrainConfig(
         pack_manifest=Path(args.pack_manifest),
         output_root=Path(args.output_root),
@@ -1337,6 +1546,7 @@ def main(argv: list[str] | None = None) -> int:
         weight_decay=float(args.weight_decay),
         path_loss_weight=float(args.path_loss_weight),
         summary_loss_weight=float(args.summary_loss_weight),
+        richer_loss_weight=float(args.richer_loss_weight),
         value_loss_weight=float(args.value_loss_weight),
         rank_loss_weight=float(args.rank_loss_weight),
         residual_score_weight=float(args.residual_score_weight),
