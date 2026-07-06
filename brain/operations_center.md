@@ -13,6 +13,7 @@
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain <brain_id|workspace> --json`
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow closure-check --task "<task>" --paths <changed_paths> --json`
 - `brain/object_registry.json` 是对象归属、路由词、路径前缀、写回目标和验证入口的机器可读表；不要在 route / closure 工具里继续散落同类硬编码。
+- 传感器职责只保留一条链路：`object_registry` 识别对象；`route` 选 primary/supporting brain；`capsule` 读启动上下文；`verify-plan` 选代码测试；`closure-check` 选收尾写回和 guard；`writeback-plan` 只服务证据写回，不承担通用闭环判断。
 
 ### `workspace_git_surface.inspect`
 - repo-tracked mutation、提交、清理或迁移前查看：

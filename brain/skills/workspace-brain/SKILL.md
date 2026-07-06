@@ -10,6 +10,7 @@ This workspace is a personal research brain expressed as natural-language progra
 - Start from the user's goal, then identify the relevant object(s): project, data asset, artifact, evidence, tool, branch surface, or external state.
 - Use pure functions mentally: `select_relevant_objects(task)`, `activate_boundaries(objects, method)`, `classify_evidence(run)`, and `derive_next_action(state, evidence)`; use procedures only when their object and method are relevant.
 - Activate only invariants attached to the touched objects and methods. Do not recite unrelated live/default, broker, registry, branch, or PIT boundaries when the task does not touch them.
+- Keep the command model slim: object registry identifies objects; route chooses primary/supporting brain; capsule reads startup context; verify-plan chooses code tests; closure-check chooses writeback/guards; writeback-plan is for evidence writeback only.
 - Treat rules, tests, guards, proposals, commits, capsule, route, and local skills as object methods or sensors.
 - Prefer research progress, useful artifacts, simple current architecture, and git rollback over compatibility ceremony.
 - Agent Meta Protocol is an experience-writeback object: use it for concrete learning opportunities, not as a fixed checklist for every task.

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import subprocess
@@ -6,10 +6,9 @@ import unittest
 from pathlib import Path
 
 from tools.brain.platform import load_workflow_registry
+from tools.brain.tests.workflow_cli_helpers import PYTHON, ROOT, run_cli, run_script_cli
 
 
-ROOT = Path(__file__).resolve().parents[3]
-PYTHON = "C:/Users/ASUS/miniconda3/envs/yolos/python.exe"
 REMOVED_WORKFLOWS = {
     "brainstorming_" + "design",
     "writing_" + "plan",
@@ -18,43 +17,6 @@ REMOVED_WORKFLOWS = {
     "verification_before_" + "completion",
     "long_task",
 }
-
-
-def run_cli(*args: str) -> dict:
-    result = subprocess.run(
-        [PYTHON, "-m", "tools.brain.workflow", *args],
-        cwd=str(ROOT),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=True,
-    )
-    return json.loads(result.stdout)
-
-
-def run_cli_failure(*args: str) -> dict:
-    result = subprocess.run(
-        [PYTHON, "-m", "tools.brain.workflow", *args],
-        cwd=str(ROOT),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
-    assert result.returncode != 0
-    return json.loads(result.stdout)
-
-
-def run_script_cli(*args: str) -> dict:
-    result = subprocess.run(
-        [PYTHON, "tools/brain/workflow.py", *args],
-        cwd=str(ROOT),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=True,
-    )
-    return json.loads(result.stdout)
 
 
 class BrainWorkflowCliTest(unittest.TestCase):
@@ -69,15 +31,7 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertIn("workflow_hints", payload)
 
     def test_workspace_bootstrap_json_includes_platform_fields(self) -> None:
-        result = subprocess.run(
-            [PYTHON, "-m", "tools.brain.workflow", "bootstrap", "--brain", "workspace", "--json"],
-            cwd=str(ROOT),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=True,
-        )
-        payload = json.loads(result.stdout)
+        payload = run_cli("bootstrap", "--brain", "workspace", "--json")
 
         self.assertEqual(payload["main_manifest"], "brain/brain_manifest.json")
         self.assertIn("artifact_freshness", payload)
@@ -140,33 +94,6 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertTrue(payload["read_only"])
         self.assertFalse(payload["writes_tracked_files"])
 
-    def test_writeback_plan_cli_only_returns_routes_by_default(self) -> None:
-        payload = run_cli("writeback-plan", "--source", "latest", "--json")
-
-        self.assertEqual(payload["source"], "latest")
-        self.assertFalse(payload["apply_brain_writeback"])
-        self.assertIn("routes", payload)
-        self.assertIn("workspace_state", payload["routes"])
-        self.assertIn("daily_research_state", payload["routes"])
-
-    def test_writeback_plan_cli_uses_task_orchestration_routes(self) -> None:
-        payload = run_cli(
-            "writeback-plan",
-            "--source",
-            "latest",
-            "--task",
-            "qdp_v2 sequence pack GRU 训练",
-            "--json",
-        )
-
-        self.assertEqual(payload["task"], "qdp_v2 sequence pack GRU 训练")
-        self.assertEqual(payload["brain_orchestration"]["primary_brain_id"], "daily_research")
-        self.assertIn("quant_data_platform", payload["brain_orchestration"]["supporting_brain_ids"])
-        self.assertIn("daily_research_state", payload["routes"])
-        self.assertIn("daily_research_references", payload["routes"])
-        self.assertIn("workspace_state", payload["routes"])
-        self.assertNotIn("quant_data_platform_state", payload["routes"])
-
     def test_status_cli_accepts_explicit_run_tag_capsule(self) -> None:
         tag = "missing_continuous_policy_fixture_20990101_01"
         payload = run_cli("status", "--workflow", "continuous_policy", "--run-tag", tag, "--json")
@@ -201,70 +128,6 @@ class BrainWorkflowCliTest(unittest.TestCase):
         )
 
         self.assertNotEqual(result.returncode, 0)
-
-    def test_writeback_plan_run_source_is_read_only(self) -> None:
-        tag = "missing_continuous_policy_fixture_20990101_01"
-        payload = run_cli("writeback-plan", "--source", f"run:continuous_policy:{tag}", "--json")
-
-        self.assertEqual(payload["source"], f"run:continuous_policy:{tag}")
-        self.assertFalse(payload["apply_brain_writeback"])
-        self.assertIn("run_evidence", payload)
-        self.assertNotIn("study_evidence", payload)
-        self.assertEqual(payload["run_evidence"]["run_tag"], tag)
-        self.assertEqual(payload["run_evidence"]["workflow"], "continuous_policy")
-        self.assertFalse(payload["run_evidence"]["exists"])
-        self.assertTrue(payload["requires_explicit_apply"])
-
-    def test_writeback_plan_run_source_infers_path_policy(self) -> None:
-        tag = "mh_v2_horizon_30d_soft_penalty_seed7_20260603_01"
-        payload = run_cli("writeback-plan", "--source", f"run:{tag}", "--json")
-        evidence = payload["run_evidence"]
-
-        self.assertEqual(evidence["run_tag"], tag)
-        self.assertEqual(evidence["workflow"], "path_policy")
-        self.assertEqual(
-            evidence["run_summary_json"],
-            f"daily_research/output/path_policy/studies/{tag}/study_summary.json",
-        )
-        self.assertTrue(evidence["exists"])
-        self.assertEqual(evidence["status"], "completed")
-        self.assertEqual(evidence["stage"], "forecast_walkforward_study")
-        self.assertEqual(evidence["evidence_verdict"], "forecast_test_confirmed")
-        self.assertIn("policy_input_bundle__45e3d8c059ba718426a9f887", evidence["dataset_ids"])
-        self.assertIn("gru_sequence_static_context", evidence["model_families"])
-
-    def test_writeback_plan_run_source_accepts_explicit_path_policy(self) -> None:
-        tag = "mh_v2_horizon_30d_soft_penalty_seed7_20260603_01"
-        payload = run_cli("writeback-plan", "--source", f"run:path_policy:{tag}", "--json")
-        evidence = payload["run_evidence"]
-
-        self.assertEqual(payload["source"], f"run:path_policy:{tag}")
-        self.assertEqual(evidence["run_tag"], tag)
-        self.assertEqual(evidence["workflow"], "path_policy")
-        self.assertTrue(evidence["exists"])
-
-    def test_writeback_plan_missing_run_reports_all_searched_paths(self) -> None:
-        tag = "missing_study_for_writeback_plan_regression_20990101_01"
-        payload = run_cli("writeback-plan", "--source", f"run:{tag}", "--json")
-        evidence = payload["run_evidence"]
-
-        self.assertEqual(evidence["run_tag"], tag)
-        self.assertFalse(evidence["exists"])
-        self.assertIn(
-            f"daily_research/output/path_policy/studies/{tag}/study_summary.json",
-            evidence["searched_paths"],
-        )
-        self.assertIn(
-            f"daily_research/output/continuous_policy/studies/{tag}/study_summary.json",
-            evidence["searched_paths"],
-        )
-
-    def test_writeback_plan_unsupported_run_workflow_returns_evidence_gap(self) -> None:
-        payload = run_cli("writeback-plan", "--source", "run:unknown_workflow:any_tag", "--json")
-        evidence = payload["run_evidence"]
-
-        self.assertFalse(evidence["exists"])
-        self.assertIn("unsupported_run_workflow: unknown_workflow", evidence["evidence_gaps"])
 
     def test_script_path_cli_imports_package_root(self) -> None:
         payload = run_script_cli("status", "--workflow", "continuous_policy", "--json")
@@ -311,7 +174,16 @@ class BrainWorkflowCliTest(unittest.TestCase):
     def test_workflow_guide_cli_rejects_removed_generic_workflows(self) -> None:
         for workflow_id in ("executing_" + "plan", "writing_" + "plan", "long_task"):
             with self.subTest(workflow_id=workflow_id):
-                payload = run_cli_failure("workflow-guide", "--workflow", workflow_id, "--json")
+                result = subprocess.run(
+                    [PYTHON, "-m", "tools.brain.workflow", "workflow-guide", "--workflow", workflow_id, "--json"],
+                    cwd=str(ROOT),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    check=False,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                payload = json.loads(result.stdout)
                 self.assertEqual(payload["status"], "error")
                 self.assertIn("Unknown workflow", payload["error"])
 
@@ -421,44 +293,6 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertEqual(payload["selected_workflow"], "brain_writeback_verified")
         self.assertIn("writeback", payload["matched_terms"])
 
-    def test_route_cli_outputs_structured_workspace_target(self) -> None:
-        payload = run_cli("route", "--task", "清理脑区治理规则", "--json")
-
-        self.assertEqual(payload["status"], "selected")
-        self.assertEqual(payload["selected_brain_id"], "workspace")
-        self.assertEqual(payload["target"]["id"], "workspace")
-        self.assertEqual(payload["target"]["kind"], "workspace")
-        self.assertEqual(payload["target"]["domain"], "workspace_governance")
-        self.assertIn("workspace_governance", payload["target"]["bootstrap_aliases"])
-        self.assertFalse(payload["decision_required"])
-        self.assertEqual(payload["recommended_default"], "workspace")
-
-    def test_route_cli_outputs_structured_child_target(self) -> None:
-        payload = run_cli("route", "--task", "修复 daily_research execution web 控制台", "--json")
-
-        self.assertEqual(payload["status"], "selected")
-        self.assertEqual(payload["selected_brain_id"], "daily_research")
-        self.assertEqual(payload["target"]["id"], "daily_research")
-        self.assertEqual(payload["target"]["kind"], "child")
-        self.assertEqual(payload["target"]["domain"], "daily_research")
-
-    def test_route_cli_keeps_ambiguous_target(self) -> None:
-        payload = run_cli("route", "--task", "Path20 和盘中 RL 联合接管", "--json")
-
-        self.assertEqual(payload["status"], "ambiguous")
-        self.assertEqual(payload["selected_brain_id"], "")
-        self.assertEqual(payload["target"]["kind"], "ambiguous")
-        self.assertTrue(payload["decision_required"])
-
-    def test_route_cli_outputs_needs_agent_decision_for_soft_terms(self) -> None:
-        payload = run_cli("route", "--task", "training 复盘", "--json")
-
-        self.assertEqual(payload["status"], "needs_agent_decision")
-        self.assertEqual(payload["selected_brain_id"], "")
-        self.assertEqual(payload["target"]["kind"], "ambiguous")
-        self.assertTrue(payload["decision_required"])
-        self.assertEqual(payload["recommended_default"], "workspace")
-
     def test_audit_brain_cli_outputs_catalog_language_and_guards(self) -> None:
         payload = run_cli("audit-brain", "--scope", "all", "--json")
 
@@ -468,186 +302,6 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertIn("workflow_registry", payload)
         self.assertIn("active_artifact_guard", payload)
         self.assertIn("loose_latest", payload)
-
-    def test_capsule_auto_workflow_keeps_generic_plan_task_in_handoff(self) -> None:
-        payload = run_cli(
-            "capsule",
-            "--task",
-            "继续实施计划",
-            "--workflow",
-            "auto",
-            "--json",
-        )
-
-        self.assertEqual(payload["schema_version"], 4)
-        self.assertEqual(payload["workflow_selection"]["selected_workflow"], "brain_handoff")
-        self.assertEqual(payload["workflow"], "brain_handoff")
-        self.assertIn("workflow_guide", payload)
-        self.assertIn("required_checklist", payload)
-        self.assertIn("capability_hints", payload)
-        self.assertIn("risk_signals", payload)
-        self.assertIn("verification_hints", payload)
-        self.assertIn("stop_conditions", payload)
-        self.assertNotIn("forbidden_" + "actions", payload)
-        self.assertEqual(payload["workflow_guide"]["workflow_id"], "brain_handoff")
-
-    def test_capsule_does_not_treat_training_as_brain_workflow_blocker(self) -> None:
-        payload = run_cli(
-            "capsule",
-            "--task",
-            "修改脑区规则并启动训练",
-            "--workflow",
-            "auto",
-            "--intent",
-            "mutate",
-            "--json",
-        )
-        encoded = json.dumps(
-            {
-                "capability_hints": payload["capability_hints"],
-                "risk_signals": payload["risk_signals"],
-                "verification_hints": payload["verification_hints"],
-            },
-            ensure_ascii=False,
-        )
-
-        self.assertEqual(payload["schema_version"], 4)
-        self.assertEqual(payload["workflow"], "brain_maintenance")
-        self.assertEqual(payload["target_kind"], "workspace")
-        self.assertEqual(payload["workflow_domain"], "workspace_governance")
-        self.assertNotIn("forbidden_" + "actions", payload)
-        self.assertNotIn("start_" + "training", encoded)
-        self.assertIn("capability_hints", payload)
-        self.assertIn("risk_signals", payload)
-        self.assertIn("verification_hints", payload)
-        self.assertIn("polling/async task", encoded)
-        self.assertNotIn("long_task_monitor", encoded)
-        self.assertNotIn("training", payload["preflight_blockers"])
-
-    def test_capsule_polling_training_plan_stays_handoff_with_observable_capability(self) -> None:
-        payload = run_cli(
-            "capsule",
-            "--task",
-            "继续实施计划，到最后启动长训练",
-            "--workflow",
-            "auto",
-            "--intent",
-            "mutate",
-            "--json",
-        )
-        encoded = json.dumps(
-            {
-                "capability_hints": payload["capability_hints"],
-                "risk_signals": payload["risk_signals"],
-                "verification_hints": payload["verification_hints"],
-            },
-            ensure_ascii=False,
-        )
-
-        self.assertEqual(payload["workflow"], "brain_handoff")
-        self.assertIn("polling/async task", encoded)
-        self.assertIn("best observable handle", encoded)
-        self.assertNotIn("long_task_monitor", encoded)
-        self.assertIn("capability_hints", payload)
-
-    def test_capsule_auto_workflow_keeps_mutate_plan_title_in_handoff(self) -> None:
-        payload = run_cli(
-            "capsule",
-            "--task",
-            "将所有未完成计划结合在一起，全部完成",
-            "--workflow",
-            "auto",
-            "--intent",
-            "mutate",
-            "--json",
-        )
-
-        self.assertEqual(payload["workflow"], "brain_handoff")
-        self.assertIn("external_skill_signal", payload["workflow_selection"]["decision_sources"])
-        self.assertNotIn("self_" + "evolution_hooks", payload)
-        self.assertNotIn("runtime_learning_hooks", payload)
-        self.assertIn("agent_meta", payload)
-        self.assertIn("agent_review", payload)
-        self.assertFalse(payload["agent_review"]["before_final_required"])
-
-    def test_capsule_writeback_workflow_does_not_force_completion_review(self) -> None:
-        payload = run_cli(
-            "capsule",
-            "--task",
-            "更新脑区和 evidence registry",
-            "--workflow",
-            "auto",
-            "--intent",
-            "writeback",
-            "--json",
-        )
-
-        self.assertEqual(payload["workflow"], "brain_writeback_verified")
-        self.assertFalse(payload["agent_review"]["before_final_required"])
-        self.assertNotIn("workflow_completion_review", payload["agent_review"]["reason_codes"])
-
-    def test_capsule_brain_rule_mutation_uses_maintenance_without_forced_review(self) -> None:
-        payload = run_cli(
-            "capsule",
-            "--task",
-            "修改脑区规则",
-            "--workflow",
-            "auto",
-            "--intent",
-            "mutate",
-            "--json",
-        )
-
-        self.assertEqual(payload["workflow"], "brain_maintenance")
-        self.assertEqual(payload["schema_version"], 4)
-        self.assertEqual(payload["target_kind"], "workspace")
-        self.assertEqual(payload["workflow_domain"], "workspace_governance")
-        self.assertFalse(payload["agent_review"]["before_final_required"])
-        self.assertNotIn("workflow_completion_review", payload["agent_review"]["reason_codes"])
-
-    def test_capsule_cli_defaults_to_lite_context(self) -> None:
-        payload = run_cli(
-            "capsule",
-            "--task",
-            "Path20 当前到哪了",
-            "--json",
-        )
-
-        self.assertEqual(payload["context_profile"], "lite")
-        self.assertIn("frontier_report", payload["guards"])
-        self.assertNotIn("latest_output_runs", payload["guards"]["frontier_report"])
-
-    def test_capsule_cli_full_context_keeps_frontier_details(self) -> None:
-        payload = run_cli(
-            "capsule",
-            "--task",
-            "Path20 当前到哪了",
-            "--verbosity",
-            "full",
-            "--json",
-        )
-
-        self.assertEqual(payload["context_profile"], "full")
-        self.assertIn("latest_output_runs", payload["guards"]["frontier_report"])
-
-    def test_capsule_intent_mutate_blocks_non_main_branch(self) -> None:
-        payload = run_cli(
-            "capsule",
-            "--task",
-            "实现脑区 Runtime Skill 计划",
-            "--workflow",
-            "auto",
-            "--intent",
-            "mutate",
-        )
-
-        self.assertIn("mutation_allowed", payload)
-        if payload["main_context"]["git"]["on_main"]:
-            self.assertTrue(payload["mutation_allowed"])
-            self.assertNotIn("not_on_main_for_mutation", payload["preflight_blockers"])
-        else:
-            self.assertFalse(payload["mutation_allowed"])
-            self.assertIn("not_on_main_for_mutation", payload["preflight_blockers"])
 
     def test_verify_plan_cli_delegates_to_selective_verification(self) -> None:
         payload = run_cli(
@@ -662,64 +316,6 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertIn("daily_research/path_policy/tests/test_forecast_features.py", joined)
         self.assertIn("always_commands", payload)
 
-    def test_closure_check_cli_reports_cross_project_object_routes(self) -> None:
-        payload = run_cli(
-            "closure-check",
-            "--task",
-            "qdp_v2 sequence pack GRU 训练",
-            "--paths",
-            "brain/object_registry.json",
-            "tools/brain/routing.py",
-            "--json",
-        )
-
-        self.assertEqual(payload["schema_version"], 1)
-        self.assertEqual(payload["routing"]["primary_brain_id"], "daily_research")
-        self.assertIn("quant_data_platform", payload["routing"]["supporting_brain_ids"])
-        object_ids = {item["object"] for item in payload["object_routes"]}
-        self.assertIn("qdp_v2_active_data_base", object_ids)
-        self.assertIn("sequence_training_pack", object_ids)
-        self.assertTrue(payload["brain_sync_required"])
-        self.assertIn("brain_surface_changed", payload["reason_codes"])
-        self.assertIn("cross_project_orchestration", payload["reason_codes"])
-        joined = "\n".join(payload["validation_commands"])
-        self.assertIn("tools/brain/tests -q", joined)
-        self.assertIn("doc_guard", joined)
-        self.assertIn("integrity_check", joined)
-
-    def test_closure_check_cli_reports_qdp_active_writeback_for_active_path(self) -> None:
-        payload = run_cli(
-            "closure-check",
-            "--paths",
-            "quant_data_platform/data/qdp_v2/active/active.json",
-            "--json",
-        )
-
-        self.assertTrue(payload["brain_sync_required"])
-        self.assertIn("qdp_active_data_base_touched", payload["reason_codes"])
-        self.assertIn("quant_data_platform/brain/state_center.md", payload["writeback_targets"])
-        self.assertTrue(
-            any(
-                item["object"] == "qdp_v2_active_data_base"
-                and item["owner"] == "quant_data_platform"
-                and item["mode"] == "write"
-                for item in payload["object_routes"]
-            )
-        )
-        self.assertIn("qdp check --quick --json", payload["validation_commands"])
-
-    def test_closure_check_cli_reports_active_artifact_guard(self) -> None:
-        payload = run_cli(
-            "closure-check",
-            "--paths",
-            "daily_research/output/active_execution_strategy.json",
-            "--json",
-        )
-
-        self.assertTrue(payload["active_artifact_guard_required"])
-        self.assertIn("active_execution_artifact_touched", payload["reason_codes"])
-        self.assertIn("git diff -- daily_research/output/active_execution_strategy.json", payload["validation_commands"])
-
     def test_current_frontier_cli_outputs_stable_json(self) -> None:
         payload = run_cli("current-frontier", "--json")
 
@@ -727,18 +323,6 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertIn("latest_brain_reference_time", payload)
         self.assertIn("unregistered_latest_run_tags", payload)
         self.assertIn("brain_may_be_stale", payload)
-
-    def test_capsule_includes_current_frontier_report(self) -> None:
-        payload = run_cli(
-            "capsule",
-            "--task",
-            "Path20 当前到哪了",
-            "--json",
-        )
-
-        self.assertIn("child_context", payload)
-        self.assertIn("frontier_report", payload["guards"])
-        self.assertIn("brain_may_be_stale", payload["guards"]["frontier_report"])
 
 
 if __name__ == "__main__":
