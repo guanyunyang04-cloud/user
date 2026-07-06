@@ -37,8 +37,13 @@
 `methods`: `sync()`；`audit()`；`archive_history()`。
 `invariant`: stable project fact changes require hot-path writeback or an explicit `brain_sync=false` reason in final.
 
+### object `object_registry`
+`scope`: `brain/object_registry.json` plus loader and CLI consumers.
+`methods`: `match_task()`；`match_paths()`；`derive_writeback_targets()`；`derive_validation_commands()`。
+`invariant`: object ownership, routing terms, path prefixes and closure validation hints should live in the registry first; code may still apply judgment, but should not duplicate the same object table in multiple modules.
+
 ## Pure Functions
-- `select_governed_objects(task)`: returns only objects touched by the task and method.
+- `select_governed_objects(task, paths)`: returns only objects touched by the task and method, using `brain/object_registry.json` when machine-readable evidence is available.
 - `select_validation(task, changed_paths)`: chooses the smallest validation that can support the conclusion.
 - `route_writeback(result)`: maps current state, stable facts, procedure entries, governance, project facts and long evidence to their files.
 - `classify_change_risk(object, method)`: returns ordinary, shared, protected, destructive or external-state risk.
@@ -61,6 +66,7 @@
 `side_effects`: brain docs, registry, skill files.
 
 ## Guard Entrypoints
+- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow closure-check --task "<task>" --paths <changed_paths> --json`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.brain_sync_audit --json`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`

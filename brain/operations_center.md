@@ -11,6 +11,8 @@
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow route --task "<task>" --json`
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain <brain_id|workspace> --json`
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow closure-check --task "<task>" --paths <changed_paths> --json`
+- `brain/object_registry.json` 是对象归属、路由词、路径前缀、写回目标和验证入口的机器可读表；不要在 route / closure 工具里继续散落同类硬编码。
 
 ### `workspace_git_surface.inspect`
 - repo-tracked mutation、提交、清理或迁移前查看：
@@ -39,6 +41,7 @@
 ### `project_test.select`
 - 项目验证由当前对象、改动面和风险决定。
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.selective_verification --paths <changed_paths> --json` 可辅助推荐。
+- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow closure-check --paths <changed_paths> --json` 可辅助判断 brain writeback、active artifact guard 和对象级验证。
 - 单模块 Python 变更跑对应测试；shared helper、schema、registry、PIT、active/execution 边界扩大验证。
 - 测试只证明合约和边界，不用单测证明模型收益强。
 

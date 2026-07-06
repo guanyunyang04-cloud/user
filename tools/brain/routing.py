@@ -6,6 +6,12 @@ from pathlib import Path
 from typing import Any
 
 from tools.brain.evidence_registry import load_evidence_registry
+from tools.brain.object_registry import (
+    match_objects_for_task,
+    object_matched,
+    object_write_matched,
+    owner_matched,
+)
 
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
@@ -105,68 +111,9 @@ SOFT_ONLY_TERMS = {
     "复盘",
 }
 
-QDP_OBJECT_TERMS = (
-    "qdp",
-    "qdp_v2",
-    "active.json",
-    "dataset.json",
-    "manifest-first",
-    "provider ingest",
-    "provider",
-    "qdp check",
-    "qdp update",
-    "parquet active dataset",
-    "parquet",
-    "数据基底",
-    "数据平台",
-    "数据质量",
-    "复权因子",
-    "1分钟数据",
-    "5分钟数据",
-)
-
-QDP_WRITE_TERMS = (
-    "provider ingest",
-    "qdp update",
-    "update",
-    "ingest",
-    "active pointer",
-    "active manifest pointer",
-    "active.json 指针",
-    "重建数据基底",
-    "数据更新",
-)
-
-DAILY_RESEARCH_OBJECT_TERMS = (
-    "daily_research",
-    "daily research",
-    "path_policy",
-    "sequence_pack",
-    "sequence pack",
-    "sequence_path_training",
-    "training pack",
-    "训练包",
-    "research pack",
-    "research_store",
-    "memmap",
-    "gru",
-    "base gru",
-    "path-only",
-    "path_value",
-    "path value",
-    "residual-score",
-    "residual_score",
-    "ohlcva",
-    "today-close",
-    "todayclose",
-    "loss",
-    "backtest",
-    "回测",
-    "stock profile",
-    "股票画像",
-    "模型训练",
-    "训练实验",
-)
+QDP_OBJECT_ID = "qdp_v2_active_data_base"
+QDP_OWNER = "quant_data_platform"
+DAILY_RESEARCH_OWNER = "daily_research"
 
 
 def _workspace_path(path: str | Path) -> Path:
@@ -465,7 +412,7 @@ def _merge_candidates(candidates: list[RouteCandidate]) -> list[RouteCandidate]:
     ]
 
 
-def _has_any_match(task: str, terms: tuple[str, ...]) -> bool:
+def _has_any_match(task: str, terms: list[str] | tuple[str, ...]) -> bool:
     return bool(_matches(task, terms))
 
 
@@ -481,25 +428,38 @@ def _has_hard_candidate(candidates: list[RouteCandidate], brain_id: str) -> bool
     return bool(candidate and candidate.evidence_strength == "hard")
 
 
+def _qdp_object_matched(task: str) -> bool:
+    return object_matched(task, QDP_OBJECT_ID)
+
+
+def _qdp_write_matched(task: str) -> bool:
+    return object_write_matched(task, QDP_OBJECT_ID)
+
+
+def _daily_research_object_matched(task: str) -> bool:
+    return owner_matched(task, DAILY_RESEARCH_OWNER)
+
+
 def _object_routes_for_task(task: str, *, primary_brain_id: str) -> list[dict[str, str]]:
-    qdp_matched = _has_any_match(task, QDP_OBJECT_TERMS)
-    research_matched = _has_any_match(task, DAILY_RESEARCH_OBJECT_TERMS)
+    registry_matches = match_objects_for_task(task)
+    qdp_matched = any(item.object_id == QDP_OBJECT_ID for item in registry_matches)
+    research_matched = any(item.owner == DAILY_RESEARCH_OWNER for item in registry_matches)
     object_routes: list[dict[str, str]] = []
     if qdp_matched:
-        qdp_mode = "read_only" if primary_brain_id == "daily_research" else ("write" if _has_any_match(task, QDP_WRITE_TERMS) else "read_only")
+        qdp_mode = "read_only" if primary_brain_id == DAILY_RESEARCH_OWNER else ("write" if _qdp_write_matched(task) else "read_only")
         object_routes.append(
             {
-                "object": "qdp_v2_active_data_base",
-                "owner": "quant_data_platform",
+                "object": QDP_OBJECT_ID,
+                "owner": QDP_OWNER,
                 "mode": qdp_mode,
                 "reason": "source facts" if qdp_mode == "read_only" else "data base maintenance",
             }
         )
-    if research_matched or primary_brain_id == "daily_research":
+    if research_matched or primary_brain_id == DAILY_RESEARCH_OWNER:
         object_routes.append(
             {
                 "object": "sequence_training_pack",
-                "owner": "daily_research",
+                "owner": DAILY_RESEARCH_OWNER,
                 "mode": "write",
                 "reason": "research artifact",
             }
@@ -507,7 +467,7 @@ def _object_routes_for_task(task: str, *, primary_brain_id: str) -> list[dict[st
         object_routes.append(
             {
                 "object": "model_research_evidence",
-                "owner": "daily_research",
+                "owner": DAILY_RESEARCH_OWNER,
                 "mode": "write",
                 "reason": "model, loss, evaluation, or research conclusion",
             }
@@ -530,13 +490,13 @@ def _writeback_targets_for_task(*, primary_brain_id: str, supporting_brain_ids: 
 
 def _routing_orchestration(task: str, *, selected: str, status: str, candidates: list[RouteCandidate]) -> dict[str, Any]:
     primary_brain_id = selected if status == "selected" else ""
-    qdp_matched = _has_any_match(task, QDP_OBJECT_TERMS) or _has_hard_candidate(candidates, "quant_data_platform")
-    research_matched = _has_any_match(task, DAILY_RESEARCH_OBJECT_TERMS) or _has_hard_candidate(candidates, "daily_research")
+    qdp_matched = _qdp_object_matched(task) or _has_hard_candidate(candidates, QDP_OWNER)
+    research_matched = _daily_research_object_matched(task) or _has_hard_candidate(candidates, DAILY_RESEARCH_OWNER)
     supporting_brain_ids: list[str] = []
-    if primary_brain_id == "daily_research" and qdp_matched:
-        supporting_brain_ids.append("quant_data_platform")
-    elif primary_brain_id == "quant_data_platform" and research_matched:
-        supporting_brain_ids.append("daily_research")
+    if primary_brain_id == DAILY_RESEARCH_OWNER and qdp_matched:
+        supporting_brain_ids.append(QDP_OWNER)
+    elif primary_brain_id == QDP_OWNER and research_matched:
+        supporting_brain_ids.append(DAILY_RESEARCH_OWNER)
     object_routes = _object_routes_for_task(task, primary_brain_id=primary_brain_id)
     writeback_targets = _writeback_targets_for_task(
         primary_brain_id=primary_brain_id,
@@ -575,23 +535,23 @@ def route_task_to_brain(task: str) -> dict[str, Any]:
     decision_required = False
     decision_reason = ""
     recommended_default = "workspace"
-    qdp_data_mutation = _has_any_match(text, QDP_OBJECT_TERMS) and _has_any_match(text, QDP_WRITE_TERMS) and "quant_data_platform" in child_ids
+    qdp_data_mutation = _qdp_object_matched(text) and _qdp_write_matched(text) and QDP_OWNER in child_ids
     qdp_research_mix = (
-        _has_any_match(text, QDP_OBJECT_TERMS)
-        and _has_any_match(text, DAILY_RESEARCH_OBJECT_TERMS)
-        and not _has_any_match(text, QDP_WRITE_TERMS)
-        and "daily_research" in child_ids
-        and "quant_data_platform" in child_ids
+        _qdp_object_matched(text)
+        and _daily_research_object_matched(text)
+        and not _qdp_write_matched(text)
+        and DAILY_RESEARCH_OWNER in child_ids
+        and QDP_OWNER in child_ids
     )
 
     if qdp_data_mutation:
-        selected = "quant_data_platform"
+        selected = QDP_OWNER
         target = _child_target(selected)
         confidence = "high"
         recommended_default = selected
         reason = "task changes or prepares QDP active data/provider state; primary owner is quant_data_platform"
     elif qdp_research_mix:
-        selected = "daily_research"
+        selected = DAILY_RESEARCH_OWNER
         target = _child_target(selected)
         confidence = "high"
         recommended_default = selected

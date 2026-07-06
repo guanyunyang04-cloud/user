@@ -17,6 +17,7 @@ This workspace is a personal research brain expressed as natural-language progra
 ## Default Work Style
 - Read whichever brain, code, registry, manifest, output, or reference actually helps.
 - For repo-tracked mutation in a brain-governed project, use this skill to confirm object ownership, dirty paths, and any activated protected objects.
+- Use `brain/object_registry.json` as the machine-readable object ownership map when route, closure, or writeback behavior depends on QDP/daily_research/workspace object boundaries.
 - QDP owns the shared canonical data substrate / manifest-first data base: `parquet + dataset.json + active.json`, provider ingest, active table checks, rebuildable caches/features, and data cleanup.
 - Memmaps and training packs are downstream research artifacts, not the QDP active data base.
 - `daily_research` owns research, model, backtest, execution-candidate, and active artifact evidence; it consumes QDP v2 tables or explicit downstream packs.
@@ -32,9 +33,11 @@ Use these when they reduce uncertainty, not as mandatory first moves:
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py detect --cwd .
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --workflow auto --intent <read|mutate|writeback> --verbosity lite --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow route --task "<task>" --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow closure-check --task "<task>" --paths <changed_paths> --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain <workspace|workspace_governance|child_brain_id> --json
 ```
 `route` is a sensor, not the final thinker; no route result is required. If it conflicts with user intent, file evidence, or stable memory, use agent judgment and say why.
+`closure-check` is a read-only close-out sensor for object routes, writeback targets, active artifact guard, and validation commands; use it when changed paths or durable project facts make closure uncertain.
 
 ## Protected Object Types
 - `workspace_git_surface`: activated by repo-tracked mutation, commit, cleanup, migration, branch, or worktree actions; check branch and dirty paths then.

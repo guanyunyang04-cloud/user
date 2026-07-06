@@ -5,7 +5,7 @@
 
 ## Module Interface
 `exports`: `workspace_root = H:\quant_project`；`primary_project = daily_research`；`data_base_owner = quant_data_platform`；`registered_child_brains = [daily_research, quant_data_platform, t0_project, daily_stock_analysis-main, traditional_quant_research]`。
-`sensors`: route、capsule、bootstrap、health、brain_sync_audit、doc_guard、integrity_check；传感器提供证据，不替代用户目标和文件事实。
+`sensors`: route、capsule、bootstrap、closure-check、health、brain_sync_audit、doc_guard、integrity_check；传感器提供证据，不替代用户目标和文件事实。
 
 ## Object Instances
 ### object `workspace_memory`
@@ -33,10 +33,12 @@
 
 ### object `cross_project_orchestration`
 `type`: task_orchestration_policy
+`registry`: `brain/object_registry.json`
 `state`: route/capsule now expose `primary_brain_id`、`supporting_brain_ids`、`object_routes` and `writeback_targets`; selected child is the primary owner, not the only project an agent may inspect.
 `rule`: QDP active data base objects are owned by `quant_data_platform`; research artifacts, sequence packs, models, losses, evaluations, stock profiles and backtests are owned by `daily_research`.
 `example`: QDP v2 data used for GRU/path-value training returns primary `daily_research` with supporting read-only `quant_data_platform`.
 `artifact_default`: new model-ready training datasets should enter `daily_research/data/research_store/<artifact_id>/`; old `quant_data_platform/data/qdp_v2/research/sequence_pack/` artifacts remain compatibility research artifacts, not QDP active data base.
+`closure_sensor`: `tools.brain.workflow closure-check` maps task and changed paths back to object routes, writeback targets and validation commands before final response.
 
 ### object `t0_project_child`
 `type`: intraday_experiment_child_brain
@@ -54,6 +56,7 @@
 `state`: 传统量化方法研究分脑；项目事实、研究记录和局部命令以该分脑和项目产物为准。
 
 ## Pure Functions
+- `select_relevant_objects(task, paths)`: 从 `brain/object_registry.json` 和文件路径识别对象、owner、读写模式、受保护状态和验证入口。
 - `orchestrate_task(task)`: 根据路径、项目名、数据资产和用户目标返回 primary brain、supporting brains、object routes、读写模式和写回目标。
 - `select_protected_objects(task)`: 只返回任务实际触碰的 active data base、PIT/label、active execution、secret/external state 或 cross-project dirty objects。
 - `resolve_data_owner(asset)`: QDP v2 active data base、dataset manifests、raw parquet、provider ingest 和数据清理返回 `quant_data_platform_child`；研究 pack/memmap 返回其生成项目或显式 owner。
@@ -68,7 +71,7 @@
 
 ### procedure `brain_sync_closure`
 `input`: changed files and task result
-`steps`: 判断是否改变 durable project fact；若改变，更新对应分脑 hot path 或写 reference；运行 `brain_sync_audit`、doc guard 和必要结构检查；final 明确同步状态。
+`steps`: 需要时运行 `tools.brain.workflow closure-check --task "<task>" --paths <changed_paths> --json`；判断是否改变 durable project fact；若改变，更新对应分脑 hot path 或写 reference；运行 `brain_sync_audit`、doc guard 和必要结构检查；final 明确同步状态。
 `side_effects`: brain docs or references.
 
 ## Current Invariants

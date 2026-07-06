@@ -21,6 +21,7 @@ from tools.brain.platform import (
     write_workflow_output,
 )
 from tools.brain.capsule import build_task_capsule
+from tools.brain.closure_check import build_closure_check
 from tools.brain.evidence_registry import (
     build_evidence_registry,
     query_evidence_registry,
@@ -130,6 +131,12 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--paths", nargs="*", default=None)
     verify.add_argument("--json", action="store_true")
     verify.add_argument("--write-output", action="store_true")
+
+    closure = sub.add_parser("closure-check", help="Inspect object routes, writeback targets, and validation needed before closing a task.")
+    closure.add_argument("--task", default="")
+    closure.add_argument("--paths", nargs="*", default=None)
+    closure.add_argument("--json", action="store_true")
+    closure.add_argument("--write-output", action="store_true")
     return parser
 
 
@@ -205,6 +212,11 @@ def build_payload(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
         return "verify_plan", build_verification_plan(
             paths=list(args.paths) if getattr(args, "paths", None) is not None else None,
             base=str(getattr(args, "base", "") or "") or None,
+        )
+    if args.command == "closure-check":
+        return "closure_check", build_closure_check(
+            task=str(getattr(args, "task", "") or ""),
+            paths=list(args.paths) if getattr(args, "paths", None) is not None else None,
         )
     raise ValueError(f"Unsupported command: {args.command}")
 
