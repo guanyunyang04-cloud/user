@@ -86,6 +86,33 @@ def test_future_path_anchors_on_next_calendar_trading_day_open() -> None:
     assert np.isclose(summary[1, 0, max_idx], 0.40)
 
 
+def test_future_path_can_anchor_on_signal_day_close() -> None:
+    raw = _raw_panel(
+        open_values=[8.0, 9.0, 10.0, 12.0, 13.0],
+        high_values=[8.5, 9.5, 11.0, 14.0, 13.5],
+        low_values=[7.5, 8.5, 9.5, 11.0, 12.5],
+        close_values=[8.2, 9.2, 10.5, 13.0, 13.2],
+    )
+    up_limit = np.full((5, 1), np.nan, dtype=np.float32)
+
+    future_path, future_ohlcva_path, _summary, input_valid, entry_buyable, label_valid = _compute_future_path_and_masks(
+        raw_panel=raw,
+        up_limit_panel=up_limit,
+        lookback_days=2,
+        forward_days=2,
+        price_anchor="today_close",
+    )
+
+    assert input_valid[1, 0]
+    assert entry_buyable[1, 0]
+    assert label_valid[1, 0]
+    # Signal date index 1 close = 9.2, so the next open gap is preserved.
+    assert np.isclose(future_path[1, 0, 0, 0], 10.0 / 9.2 - 1.0)
+    assert np.isclose(future_path[1, 0, 0, 3], 10.5 / 9.2 - 1.0)
+    assert np.isclose(future_path[1, 0, 1, 3], 13.0 / 9.2 - 1.0)
+    assert np.isclose(future_ohlcva_path[1, 0, 0, 0], future_path[1, 0, 0, 0])
+
+
 def test_entry_buyable_blocks_next_open_limit_up() -> None:
     raw = _raw_panel(
         open_values=[8.0, 9.0, 10.0, 12.0],
@@ -242,6 +269,33 @@ def test_path_value_v2_numpy_and_torch_match() -> None:
 
     assert derived_path_summary_columns(4)[-1] == path_value_v2_column(4)
     assert np.allclose(np_summary, torch_summary, atol=1.0e-6)
+
+
+def test_today_close_anchor_path_value_matches_next_open_anchor() -> None:
+    today_close = 100.0
+    next_open = 110.0
+    future_prices = np.asarray(
+        [
+            [110.0, 116.0, 108.0, 112.0],
+            [113.0, 125.0, 111.0, 121.0],
+            [120.0, 126.0, 118.0, 119.0],
+            [118.0, 124.0, 115.0, 123.0],
+        ],
+        dtype=np.float32,
+    )
+    next_open_path = (future_prices / next_open - 1.0).reshape(1, 4, 4)
+    today_close_path = (future_prices / today_close - 1.0).reshape(1, 4, 4)
+
+    next_summary = _derive_path_summary_numpy(next_open_path)
+    today_summary = _derive_path_summary_numpy(today_close_path, price_anchor="today_close")
+    torch_summary = _derive_path_summary_torch(
+        torch.from_numpy(today_close_path),
+        smooth_value=False,
+        price_anchor="today_close",
+    ).detach().numpy()
+
+    assert np.allclose(today_summary, next_summary, atol=1.0e-6)
+    assert np.allclose(torch_summary, next_summary, atol=1.0e-6)
 
 
 def test_path_value_v2_penalizes_later_same_return() -> None:

@@ -4,6 +4,7 @@ import argparse
 import gc
 import json
 import math
+import os
 import warnings
 from dataclasses import dataclass
 from datetime import datetime
@@ -327,6 +328,7 @@ def _compute_future_path_and_masks(
     up_limit_panel: np.ndarray,
     lookback_days: int,
     forward_days: int,
+    price_anchor: str = "next_open",
     future_path_out: np.ndarray | None = None,
     future_ohlcva_path_out: np.ndarray | None = None,
     path_summary_out: np.ndarray | None = None,
@@ -375,6 +377,7 @@ def _compute_future_path_and_masks(
         if end_idx > n_dates:
             continue
         entry_open = open_panel[entry_idx].astype("float64", copy=False)
+        signal_close = close_panel[date_idx].astype("float64", copy=False)
         entry_up_limit = up_limit_panel[entry_idx].astype("float64", copy=False)
         entry_ok = np.isfinite(entry_open)
         limit_blocked = np.isfinite(entry_up_limit) & entry_ok & (entry_open >= entry_up_limit * 0.999)
@@ -401,8 +404,14 @@ def _compute_future_path_and_masks(
             & np.isfinite(trailing_amount_log)
             & entry_ok
         )
+        if str(price_anchor) == "today_close":
+            denom = np.where(signal_close != 0.0, signal_close, np.nan)
+            path_ok &= np.isfinite(denom)
+        elif str(price_anchor) == "next_open":
+            denom = np.where(entry_open != 0.0, entry_open, np.nan)
+        else:
+            raise ValueError(f"unsupported price_anchor: {price_anchor}")
         label_valid[date_idx] = path_ok
-        denom = np.where(entry_open != 0.0, entry_open, np.nan)
         paths = [
             fut_open.T / denom[:, None] - 1.0,
             fut_high.T / denom[:, None] - 1.0,
@@ -418,9 +427,14 @@ def _compute_future_path_and_masks(
         ).astype(np.float32, copy=False)
         _label_set_date(future_path, date_idx, stacked)
         _label_set_date(future_ohlcva_path, date_idx, stacked_ohlcva)
-        high_ret = stacked[:, :, 1].astype("float64", copy=False)
-        low_ret = stacked[:, :, 2].astype("float64", copy=False)
-        close_ret = stacked[:, :, 3].astype("float64", copy=False)
+        if str(price_anchor) == "today_close":
+            entry_anchor = np.maximum(1.0 + stacked[:, :1, 0].astype("float64", copy=False), 1.0e-6)
+            summary_stacked = (1.0 + stacked.astype("float64", copy=False)) / entry_anchor[:, :, None] - 1.0
+        else:
+            summary_stacked = stacked.astype("float64", copy=False)
+        high_ret = summary_stacked[:, :, 1]
+        low_ret = summary_stacked[:, :, 2]
+        close_ret = summary_stacked[:, :, 3]
         max_ret = np.max(np.where(np.isfinite(high_ret), high_ret, -np.inf), axis=1)
         min_ret = np.min(np.where(np.isfinite(low_ret), low_ret, np.inf), axis=1)
         max_ret[~np.isfinite(max_ret)] = np.nan
@@ -541,6 +555,7 @@ class SequencePackConfig:
     test_years: tuple[int, ...]
     write_legacy_ohlc_label: bool = True
     label_shard_size: int = 0
+    price_anchor: str = "next_open"
 
 
 def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
@@ -654,6 +669,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         up_limit_panel=up_limit_panel,
         lookback_days=int(config.lookback_days),
         forward_days=int(config.forward_days),
+        price_anchor=str(config.price_anchor),
         future_path_out=future_path_store,
         future_ohlcva_path_out=future_ohlcva_path_store,
         path_summary_out=path_summary_store,
@@ -700,18 +716,23 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
 
     active_dataset_ids = dict(active.get("datasets", {}) or {})
     split_counts = sample_index["split"].value_counts().to_dict() if not sample_index.empty else {}
+    path_anchor_name = "signal_day_close" if str(config.price_anchor) == "today_close" else "next_calendar_trading_day_open"
     if isinstance(future_ohlcva_path_store, DateShardedFloatStore):
         future_ohlcva_meta = future_ohlcva_path_store.manifest(
             fields=PATH_OHLCVA_FIELDS,
-            anchor="next_calendar_trading_day_open",
-            extra={"volume_amount_transform": "log1p(future_value) - trailing_20d_mean_log1p(value)_through_signal_date"},
+            anchor=path_anchor_name,
+            extra={
+                "price_anchor": str(config.price_anchor),
+                "volume_amount_transform": "log1p(future_value) - trailing_20d_mean_log1p(value)_through_signal_date",
+            },
         )
     else:
         future_ohlcva_meta = {
             "path": str((label_dir / "future_ohlcva_path.float32.dat").resolve()),
             "shape": [n_dates, n_symbols, int(config.forward_days), 6],
             "fields": PATH_OHLCVA_FIELDS,
-            "anchor": "next_calendar_trading_day_open",
+            "anchor": path_anchor_name,
+            "price_anchor": str(config.price_anchor),
             "volume_amount_transform": "log1p(future_value) - trailing_20d_mean_log1p(value)_through_signal_date",
         }
     label_arrays = {
@@ -728,7 +749,8 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
                 "path": str((label_dir / "future_ohlc_path.float32.dat").resolve()),
                 "shape": [n_dates, n_symbols, int(config.forward_days), 4],
                 "fields": PATH_OHLC_FIELDS,
-                "anchor": "next_calendar_trading_day_open",
+                "anchor": path_anchor_name,
+                "price_anchor": str(config.price_anchor),
             },
             **label_arrays,
         }
@@ -777,11 +799,185 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         "normalization": normalization,
         "label_semantics": {
             "entry_anchor": "signal day close decision, next calendar trading day open entry",
-            "future_ohlcva_path": "OHLC returns are relative to next trading day open; volume and amount are log-relative to trailing 20 trading days ending on signal date.",
+            "price_anchor": str(config.price_anchor),
+            "future_ohlc_path": f"OHLC returns are relative to {path_anchor_name}.",
+            "future_ohlcva_path": f"OHLC returns are relative to {path_anchor_name}; volume and amount are log-relative to trailing 20 trading days ending on signal date.",
+            "path_trade_value_v2": "derived from next calendar trading day open entry even when price_anchor=today_close",
             path_value_column(config.forward_days): "future_final_return + 0.50*future_max_return + 0.35*future_min_return + 0.20*drawdown_after_peak",
             "path_type_labels": "derived_explanation_only_not_primary_training_target",
         },
     }
+    manifest_path = output_dir / "manifest.json"
+    _write_json(manifest_path, manifest)
+    _write_json(progress_path, {"status": "completed", "manifest_json": str(manifest_path.resolve()), "updated_at": _now()})
+    return manifest
+
+
+def _hardlink_file(source: Path, target: Path, *, overwrite: bool = False) -> Path:
+    source = source.resolve()
+    target = target.resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        if not overwrite:
+            return target
+        target.unlink()
+    try:
+        os.link(source, target)
+        return target
+    except OSError:
+        return source
+
+
+def reanchor_sequence_pack(
+    *,
+    source_manifest: str | Path,
+    output_root: Path,
+    run_tag: str,
+    price_anchor: str,
+    write_legacy_ohlc_label: bool = True,
+    label_shard_size: int = 0,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    source_path = Path(source_manifest).resolve()
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    if source.get("artifact_type") != "qdp_v2_sequence_path_pack":
+        raise ValueError(f"not a sequence path pack manifest: {source_path}")
+    output_dir = output_root / str(run_tag)
+    if output_dir.exists() and any(output_dir.iterdir()) and not bool(overwrite):
+        raise FileExistsError(f"output directory already exists: {output_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    progress_path = output_dir / "progress.json"
+    _write_json(progress_path, {"status": "started", "source_manifest": str(source_path), "updated_at": _now()})
+    n_dates = int(source["date_count"])
+    n_symbols = int(source["symbol_count"])
+    forward_days = int(source["forward_days"])
+    lookback_days = int(source["lookback_days"])
+    panel_dir = output_dir / "panels"
+    mask_dir = output_dir / "masks"
+    label_dir = output_dir / "labels"
+
+    _write_json(progress_path, {"status": "linking_inputs", "updated_at": _now()})
+    feature_channels: dict[str, Any] = {}
+    for name, meta in dict(source.get("feature_channels", {}) or {}).items():
+        src = Path(str(meta["path"]))
+        dst = _hardlink_file(src, panel_dir / src.name, overwrite=overwrite)
+        copied = dict(meta)
+        copied["path"] = str(dst.resolve())
+        feature_channels[str(name)] = copied
+    masks: dict[str, Any] = {}
+    for name, meta in dict(source.get("masks", {}) or {}).items():
+        src = Path(str(meta["path"]))
+        dst = _hardlink_file(src, mask_dir / src.name, overwrite=overwrite)
+        copied = dict(meta)
+        copied["path"] = str(dst.resolve())
+        masks[str(name)] = copied
+    sample_index_src = Path(str(source["sample_index_path"]))
+    sample_index_path = _hardlink_file(sample_index_src, output_dir / "sample_index.parquet", overwrite=overwrite)
+    source_label_dir = Path(str(source_path.parent / "labels"))
+    entry_up_limit_src = source_label_dir / "entry_up_limit.float32.dat"
+    if not entry_up_limit_src.exists():
+        raise FileNotFoundError(f"source pack is missing entry_up_limit label: {entry_up_limit_src}")
+    entry_up_limit_path = _hardlink_file(entry_up_limit_src, label_dir / "entry_up_limit.float32.dat", overwrite=overwrite)
+
+    daily_raw_meta = feature_channels["daily_raw"]
+    raw_panel = np.memmap(
+        daily_raw_meta["path"],
+        dtype="float32",
+        mode="r",
+        shape=tuple(int(item) for item in daily_raw_meta["shape"]),
+    )
+    up_limit_panel = np.memmap(entry_up_limit_path, dtype="float32", mode="r", shape=(n_dates, n_symbols))
+
+    _write_json(progress_path, {"status": "computing_labels", "updated_at": _now()})
+    summary_columns = path_summary_columns(forward_days)
+    future_path_store = (
+        _fill_float_memmap(label_dir / "future_ohlc_path.float32.dat", (n_dates, n_symbols, forward_days, 4), fill_value=np.nan)
+        if bool(write_legacy_ohlc_label)
+        else None
+    )
+    future_ohlcva_shape = (n_dates, n_symbols, forward_days, 6)
+    future_ohlcva_path_store = (
+        DateShardedFloatStore(
+            directory=label_dir / "future_ohlcva_path_shards",
+            name="future_ohlcva_path",
+            shape=future_ohlcva_shape,
+            shard_size=int(label_shard_size),
+        )
+        if int(label_shard_size) > 0
+        else _fill_float_memmap(label_dir / "future_ohlcva_path.float32.dat", future_ohlcva_shape, fill_value=np.nan)
+    )
+    path_summary_store = _fill_float_memmap(label_dir / "path_summary.float32.dat", (n_dates, n_symbols, len(summary_columns)), fill_value=np.nan)
+    future_path, future_ohlcva_path, path_summary, _input_valid, _entry_buyable, _label_valid = _compute_future_path_and_masks(
+        raw_panel=raw_panel,
+        up_limit_panel=up_limit_panel,
+        lookback_days=lookback_days,
+        forward_days=forward_days,
+        price_anchor=str(price_anchor),
+        future_path_out=future_path_store,
+        future_ohlcva_path_out=future_ohlcva_path_store,
+        path_summary_out=path_summary_store,
+        write_legacy_ohlc_path=bool(write_legacy_ohlc_label),
+    )
+    if future_path is not None:
+        future_path.flush()
+    future_ohlcva_path.flush()
+    path_summary.flush()
+    path_anchor_name = "signal_day_close" if str(price_anchor) == "today_close" else "next_calendar_trading_day_open"
+    if isinstance(future_ohlcva_path_store, DateShardedFloatStore):
+        future_ohlcva_meta = future_ohlcva_path_store.manifest(
+            fields=PATH_OHLCVA_FIELDS,
+            anchor=path_anchor_name,
+            extra={
+                "price_anchor": str(price_anchor),
+                "volume_amount_transform": "log1p(future_value) - trailing_20d_mean_log1p(value)_through_signal_date",
+            },
+        )
+    else:
+        future_ohlcva_meta = {
+            "path": str((label_dir / "future_ohlcva_path.float32.dat").resolve()),
+            "shape": [n_dates, n_symbols, forward_days, 6],
+            "fields": PATH_OHLCVA_FIELDS,
+            "anchor": path_anchor_name,
+            "price_anchor": str(price_anchor),
+            "volume_amount_transform": "log1p(future_value) - trailing_20d_mean_log1p(value)_through_signal_date",
+        }
+    label_arrays: dict[str, Any] = {
+        "future_ohlcva_path": future_ohlcva_meta,
+        "path_summary": {
+            "path": str((label_dir / "path_summary.float32.dat").resolve()),
+            "shape": [n_dates, n_symbols, len(summary_columns)],
+            "columns": summary_columns,
+        },
+    }
+    if bool(write_legacy_ohlc_label):
+        label_arrays = {
+            "future_ohlc_path": {
+                "path": str((label_dir / "future_ohlc_path.float32.dat").resolve()),
+                "shape": [n_dates, n_symbols, forward_days, 4],
+                "fields": PATH_OHLC_FIELDS,
+                "anchor": path_anchor_name,
+                "price_anchor": str(price_anchor),
+            },
+            **label_arrays,
+        }
+    manifest = dict(source)
+    manifest.update(
+        {
+            "created_at": _now(),
+            "derived_from_pack_manifest": str(source_path),
+            "sample_index_path": str(sample_index_path.resolve()),
+            "feature_channels": feature_channels,
+            "label_arrays": label_arrays,
+            "masks": masks,
+            "label_semantics": {
+                **dict(source.get("label_semantics", {}) or {}),
+                "price_anchor": str(price_anchor),
+                "future_ohlc_path": f"OHLC returns are relative to {path_anchor_name}.",
+                "future_ohlcva_path": f"OHLC returns are relative to {path_anchor_name}; volume and amount are log-relative to trailing 20 trading days ending on signal date.",
+                "path_trade_value_v2": "derived from next calendar trading day open entry even when price_anchor=today_close",
+            },
+        }
+    )
     manifest_path = output_dir / "manifest.json"
     _write_json(manifest_path, manifest)
     _write_json(progress_path, {"status": "completed", "manifest_json": str(manifest_path.resolve()), "updated_at": _now()})
@@ -847,7 +1043,27 @@ def _build_parser() -> argparse.ArgumentParser:
     build.add_argument("--test-years", default="2025")
     build.add_argument("--no-legacy-ohlc-label", action="store_true", help="Do not write the separate future_ohlc_path label; OHLC is available as the first four OHLCVA fields.")
     build.add_argument("--label-shard-size", type=int, default=0, help="Write future_ohlcva_path as date shards of this many dates; 0 writes a single memmap file.")
+    build.add_argument(
+        "--price-anchor",
+        choices=("next_open", "today_close"),
+        default="next_open",
+        help="Anchor future OHLC labels to next trading day open or signal-day close.",
+    )
     build.add_argument("--json", action="store_true")
+    reanchor = sub.add_parser("reanchor")
+    reanchor.add_argument("--source-manifest", type=Path, required=True)
+    reanchor.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
+    reanchor.add_argument("--run-tag", required=True)
+    reanchor.add_argument(
+        "--price-anchor",
+        choices=("next_open", "today_close"),
+        required=True,
+        help="New future OHLC label anchor.",
+    )
+    reanchor.add_argument("--no-legacy-ohlc-label", action="store_true")
+    reanchor.add_argument("--label-shard-size", type=int, default=0)
+    reanchor.add_argument("--overwrite", action="store_true")
+    reanchor.add_argument("--json", action="store_true")
     validate = sub.add_parser("validate")
     validate.add_argument("--manifest", type=Path, required=True)
     validate.add_argument("--json", action="store_true")
@@ -871,14 +1087,25 @@ def main(argv: list[str] | None = None) -> int:
             test_years=_parse_years(args.test_years, default=DEFAULT_TEST_YEARS),
             write_legacy_ohlc_label=not bool(args.no_legacy_ohlc_label),
             label_shard_size=int(args.label_shard_size),
+            price_anchor=str(args.price_anchor),
         )
         result = build_sequence_pack(cfg)
+    elif args.command == "reanchor":
+        result = reanchor_sequence_pack(
+            source_manifest=Path(args.source_manifest),
+            output_root=Path(args.output_root),
+            run_tag=str(args.run_tag),
+            price_anchor=str(args.price_anchor),
+            write_legacy_ohlc_label=not bool(args.no_legacy_ohlc_label),
+            label_shard_size=int(args.label_shard_size),
+            overwrite=bool(args.overwrite),
+        )
     else:
         result = validate_sequence_pack(args.manifest)
     if bool(getattr(args, "json", False)):
         print(json.dumps(result, ensure_ascii=False, indent=2, default=_json_default))
     else:
-        if args.command == "build":
+        if args.command in {"build", "reanchor"}:
             payload = {
                 "status": "completed",
                 "manifest_json": str((Path(args.output_root) / str(args.run_tag) / "manifest.json").resolve()),

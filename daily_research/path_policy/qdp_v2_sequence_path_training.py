@@ -235,6 +235,17 @@ def _open_label_array(meta: Mapping[str, Any], *, dtype: str) -> np.memmap | Sha
     return _open_memmap(meta, dtype=dtype)
 
 
+def _normalize_price_anchor(meta: Mapping[str, Any] | None) -> str:
+    payload = dict(meta or {})
+    explicit = str(payload.get("price_anchor", "") or "").strip()
+    if explicit in {"next_open", "today_close"}:
+        return explicit
+    anchor = str(payload.get("anchor", "") or "").strip()
+    if anchor in {"signal_day_close", "today_close"}:
+        return "today_close"
+    return "next_open"
+
+
 class SequencePathPackDataset(Dataset):
     def __init__(self, manifest: Mapping[str, Any], *, split: str, max_samples: int = 0) -> None:
         self.manifest = dict(manifest)
@@ -259,6 +270,8 @@ class SequencePathPackDataset(Dataset):
         self.future_path = _open_label_array(labels["future_ohlc_path"], dtype="float32") if "future_ohlc_path" in labels else None
         if self.future_path is None and self.future_ohlcva_path is None:
             raise KeyError("pack label_arrays must include future_ohlc_path or future_ohlcva_path")
+        label_meta = labels.get("future_ohlc_path") or labels.get("future_ohlcva_path") or {}
+        self.price_anchor = _normalize_price_anchor(label_meta)
         self.has_ohlcva_path = self.future_ohlcva_path is not None
         self.ohlcva_path_fields = list(labels.get("future_ohlcva_path", {}).get("fields", []) or PATH_OHLCVA_FIELDS)
         self.path_summary = _open_memmap(labels["path_summary"], dtype="float32")
@@ -619,6 +632,7 @@ def _compute_loss(
     rank_max_per_side: int = 64,
     residual_weight: float = 0.25,
     residual_penalty_weight: float = 0.01,
+    price_anchor: str = "next_open",
 ) -> tuple[torch.Tensor, dict[str, float]]:
     path_loss = _finite_smooth_l1(outputs["future_path"], y_path)
     richer_loss = outputs["future_path"].sum() * 0.0
@@ -637,8 +651,8 @@ def _compute_loss(
         score = outputs["score"]
     else:
         path_dim = int(outputs["future_path"].shape[2])
-        target_summary = _derive_path_summary_torch(y_path, smooth_value=False).detach()
-        pred_summary = _derive_path_summary_torch(outputs["future_path"], smooth_value=True)
+        target_summary = _derive_path_summary_torch(y_path, smooth_value=False, price_anchor=price_anchor).detach()
+        pred_summary = _derive_path_summary_torch(outputs["future_path"], smooth_value=True, price_anchor=price_anchor)
         summary_loss = _finite_smooth_l1_columns(
             pred_summary,
             target_summary,
@@ -924,6 +938,22 @@ def _derived_summary_loss_indices(forward_days: int, *, path_dim: int = 4) -> li
     return [idx for idx, col in enumerate(columns) if col in keep]
 
 
+def _legacy_entry_relative_path_torch(path: torch.Tensor, *, price_anchor: str) -> torch.Tensor:
+    if str(price_anchor) != "today_close":
+        return path
+    entry_open = path[:, :1, 0:1]
+    return (1.0 + path) / torch.clamp(1.0 + entry_open, min=1.0e-6) - 1.0
+
+
+def _legacy_entry_relative_path_numpy(path: np.ndarray, *, price_anchor: str) -> np.ndarray:
+    values = np.asarray(path, dtype=np.float32)
+    if str(price_anchor) != "today_close":
+        return values
+    entry_open = values[:, :1, 0:1].astype(np.float64, copy=False)
+    converted = (1.0 + values.astype(np.float64, copy=False)) / np.maximum(1.0 + entry_open, 1.0e-6) - 1.0
+    return converted.astype(np.float32, copy=False)
+
+
 def _candidate_path_values_torch(path: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     forward_days = int(path.shape[1])
     close_ret = path[:, :, 3]
@@ -1060,9 +1090,10 @@ def _derive_unified_path_summary_torch(path: torch.Tensor, *, smooth_value: bool
     )
 
 
-def _derive_path_summary_torch(path: torch.Tensor, *, smooth_value: bool) -> torch.Tensor:
+def _derive_path_summary_torch(path: torch.Tensor, *, smooth_value: bool, price_anchor: str = "next_open") -> torch.Tensor:
     if int(path.shape[2]) >= 6:
         return _derive_unified_path_summary_torch(path, smooth_value=smooth_value)
+    path = _legacy_entry_relative_path_torch(path, price_anchor=price_anchor)
     forward_days = int(path.shape[1])
     high_ret = path[:, :, 1]
     low_ret = path[:, :, 2]
@@ -1105,12 +1136,13 @@ def _derive_path_summary_torch(path: torch.Tensor, *, smooth_value: bool) -> tor
     )
 
 
-def _derive_path_summary_numpy(path: np.ndarray) -> np.ndarray:
+def _derive_path_summary_numpy(path: np.ndarray, *, price_anchor: str = "next_open") -> np.ndarray:
     values = np.asarray(path, dtype=np.float32)
     if values.ndim != 3 or values.shape[2] not in {4, 6}:
         raise ValueError("path must have shape [batch, forward_days, 4 or 6]")
     if values.shape[2] >= 6:
         return _derive_unified_path_summary_numpy(values)
+    values = _legacy_entry_relative_path_numpy(values, price_anchor=price_anchor)
     forward_days = int(values.shape[1])
     high_ret = values[:, :, 1].astype(np.float64, copy=False)
     low_ret = values[:, :, 2].astype(np.float64, copy=False)
@@ -1428,8 +1460,8 @@ def _predict_split(
             score_np = out["score"].detach().float().cpu().numpy()
             true_summary_np = y_summary.detach().float().cpu().numpy()
         else:
-            pred_summary_np = _derive_path_summary_numpy(pred_path_np)
-            true_summary_np = _derive_path_summary_numpy(true_path_np)
+            pred_summary_np = _derive_path_summary_numpy(pred_path_np, price_anchor=dataset.price_anchor)
+            true_summary_np = _derive_path_summary_numpy(true_path_np, price_anchor=dataset.price_anchor)
             path_value_score_np = pred_summary_np[:, summary_columns.index(value_column)]
             if "residual_score" in out:
                 residual_np = out["residual_score"].detach().float().cpu().numpy()
@@ -1719,6 +1751,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     rank_max_per_side=int(config.rank_max_per_side),
                     residual_weight=float(config.residual_score_weight),
                     residual_penalty_weight=float(config.residual_penalty_weight),
+                    price_anchor=train_ds.price_anchor,
                 )
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
@@ -1877,6 +1910,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         "output_dir": str(output_dir.resolve()),
         "lookback_days": int(train_ds.lookback_days),
         "forward_days": int(train_ds.forward_days),
+        "price_anchor": str(train_ds.price_anchor),
         "value_column": str(active_value_column),
         "path_summary_columns": list(active_summary_columns),
         "device": str(device),
