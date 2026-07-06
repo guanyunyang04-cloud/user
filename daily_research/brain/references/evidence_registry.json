@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 153,
+  "record_count": 154,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -4893,6 +4893,44 @@
         "policy_pool_view__7aca6133c8076d3c6c0cebf6",
         "qdp_training_pack_manifest:tradeable_mainboard_style_structural_alpha_v2_label_v2_backfilled_intraday_v2_training_pack_20260626_01"
       ]
+    },
+    {
+      "id": "seq100_path_value_research_orchestration_20260706",
+      "date": "2026-07-06",
+      "r_id": "",
+      "path": "daily_research/brain/references/seq100_path_value_research_orchestration_20260706.md",
+      "tags": [
+        "daily_research",
+        "path_policy",
+        "seq100",
+        "path_value",
+        "brain_orchestration",
+        "research_only"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [
+        "seq100_path_value_research"
+      ],
+      "study_families": [
+        "sequence_path_training"
+      ],
+      "run_tags": [
+        "qdp_v2_seq100_path60_todayclose_path_value_v1_20260706_203647",
+        "qdp_v2_seq100_path60_full",
+        "qdp_v2_seq100_path60_todayclose_full"
+      ],
+      "verdict": "Status: research_only / brain_orchestration_updated / no_active_change.; Owner: daily_research owns seq100 path-value research artifacts, models, loss, evaluation and path-value semantics; quant_data_platform owns QDP v2 active source data and quality proof.; Current evidence: today-close anchor improved test rank IC versus next-open path-only, while topK concentration remains not decisive.; Active artifact impact: unchanged.",
+      "blockers": [
+        "Not promotion evidence and not an execution thaw.",
+        "Old sequence packs under quant_data_platform/data/qdp_v2/research/sequence_pack are compatibility research artifacts, not QDP active data base."
+      ],
+      "next_allowed_actions": [
+        "Use primary daily_research with supporting read-only quant_data_platform for mixed QDP + model/research tasks.",
+        "Write new model-ready artifacts under daily_research/data/research_store/<artifact_id>/ by default.",
+        "Run research pack GC as dry-run before deleting smoke, partial or duplicate artifacts."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
     }
   ]
 }

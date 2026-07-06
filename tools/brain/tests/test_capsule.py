@@ -54,6 +54,68 @@ class BrainCapsuleTest(unittest.TestCase):
                 self.assertEqual(payload["target"]["domain"], "daily_research")
                 self.assertTrue(payload.get("routing_sources"))
 
+    def test_route_qdp_research_pack_training_to_daily_research_with_qdp_support(self) -> None:
+        payload = route_task_to_brain("qdp_v2 sequence pack GRU 训练")
+
+        self.assertEqual(payload["status"], "selected")
+        self.assertEqual(payload["selected_brain_id"], "daily_research")
+        self.assertEqual(payload["primary_brain_id"], "daily_research")
+        self.assertIn("quant_data_platform", payload["supporting_brain_ids"])
+        self.assertIn("daily_research/brain/state_center.md", payload["writeback_targets"])
+        self.assertIn("brain/state_center.md", payload["writeback_targets"])
+        self.assertIn(
+            {
+                "object": "qdp_v2_active_data_base",
+                "owner": "quant_data_platform",
+                "mode": "read_only",
+                "reason": "source facts",
+            },
+            payload["object_routes"],
+        )
+        self.assertTrue(
+            any(
+                item["object"] == "sequence_training_pack"
+                and item["owner"] == "daily_research"
+                and item["mode"] == "write"
+                for item in payload["object_routes"]
+            )
+        )
+
+    def test_route_pure_qdp_quality_task_stays_qdp(self) -> None:
+        payload = route_task_to_brain("qdp check active.json dataset quality")
+
+        self.assertEqual(payload["status"], "selected")
+        self.assertEqual(payload["selected_brain_id"], "quant_data_platform")
+        self.assertEqual(payload["primary_brain_id"], "quant_data_platform")
+        self.assertNotIn("daily_research", payload["supporting_brain_ids"])
+
+    def test_route_qdp_update_stays_qdp_even_when_research_is_mentioned(self) -> None:
+        payload = route_task_to_brain("qdp update provider ingest for daily_research sequence pack")
+
+        self.assertEqual(payload["status"], "selected")
+        self.assertEqual(payload["selected_brain_id"], "quant_data_platform")
+        self.assertEqual(payload["primary_brain_id"], "quant_data_platform")
+        self.assertTrue(
+            any(
+                item["owner"] == "quant_data_platform" and item["mode"] == "write"
+                for item in payload["object_routes"]
+            )
+        )
+
+    def test_route_daily_research_model_using_qdp_active_data_is_cross_project(self) -> None:
+        payload = route_task_to_brain("daily_research 模型使用 QDP active 数据")
+
+        self.assertEqual(payload["status"], "selected")
+        self.assertEqual(payload["selected_brain_id"], "daily_research")
+        self.assertEqual(payload["primary_brain_id"], "daily_research")
+        self.assertIn("quant_data_platform", payload["supporting_brain_ids"])
+        self.assertTrue(
+            any(
+                item["owner"] == "quant_data_platform" and item["mode"] == "read_only"
+                for item in payload["object_routes"]
+            )
+        )
+
     def test_route_daily_research_execution_terms(self) -> None:
         cases = (
             "执行端交易计划没有动作",
@@ -163,6 +225,23 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertNotIn("state_summary", payload["child_context"])
         self.assertNotIn("hard_rules", payload["child_context"])
         self.assertNotIn("latest_output_runs", payload["guards"].get("frontier_report", {}))
+
+    def test_capsule_qdp_research_task_exposes_brain_orchestration(self) -> None:
+        payload = build_task_capsule(task="qdp_v2 sequence pack GRU 训练", workflow="auto")
+
+        self.assertEqual(payload["routing"]["selected_brain_id"], "daily_research")
+        self.assertEqual(payload["brain_orchestration"]["primary_brain_id"], "daily_research")
+        self.assertIn("quant_data_platform", payload["brain_orchestration"]["supporting_brain_ids"])
+        self.assertIn("child_context", payload)
+        self.assertEqual(payload["child_context"]["brain_id"], "daily_research")
+        self.assertIn("supporting_contexts", payload)
+        self.assertTrue(any(item["brain_id"] == "quant_data_platform" for item in payload["supporting_contexts"]))
+        self.assertTrue(
+            any(
+                item["owner"] == "quant_data_platform" and item["mode"] == "read_only"
+                for item in payload["brain_orchestration"]["object_routes"]
+            )
+        )
 
     def test_capsule_multi_horizon_registry_fallback_attaches_daily_research_child_context(self) -> None:
         payload = build_task_capsule(task="alpha_multi_horizon_utility_policy_v1 根因审计", workflow="auto")

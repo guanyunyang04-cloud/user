@@ -297,6 +297,12 @@ def build_task_capsule(
 ) -> dict[str, Any]:
     context_profile = normalize_verbosity(verbosity)
     routing = route_task_to_brain(task)
+    brain_orchestration = {
+        "primary_brain_id": str(routing.get("primary_brain_id", "") or ""),
+        "supporting_brain_ids": list(routing.get("supporting_brain_ids", []) or []),
+        "object_routes": list(routing.get("object_routes", []) or []),
+        "writeback_targets": list(routing.get("writeback_targets", []) or []),
+    }
     target = routing.get("target", {}) if isinstance(routing.get("target", {}), dict) else {}
     target_id = str(target.get("id", "") or str(routing.get("selected_brain_id", "") or ""))
     target_kind = str(target.get("kind", "") or ("child" if target_id in child_brain_ids() else "workspace"))
@@ -386,6 +392,7 @@ def build_task_capsule(
         "run_tag": run_tag,
         "main_context": main_context,
         "routing": routing,
+        "brain_orchestration": brain_orchestration,
         "agent_selected_brain_id": selected_brain_id if routing.get("status") == "selected" else "",
         "selection_reason": routing.get("reason", ""),
         "routing_evidence": {
@@ -408,6 +415,21 @@ def build_task_capsule(
     if target_kind == "child" and selected_brain_id in child_brain_ids() and routing.get("status") == "selected":
         raw_child_context = _child_context(selected_brain_id, task, workflow_id, run_tag)
         payload["child_context"] = compact_child_context(raw_child_context, profile=context_profile)
+    supporting_contexts: list[dict[str, Any]] = []
+    for brain_id in brain_orchestration["supporting_brain_ids"]:
+        text = str(brain_id or "").strip()
+        if not text or text == selected_brain_id or text not in child_brain_ids():
+            continue
+        supporting_contexts.append(
+            {
+                "brain_id": text,
+                "role": "supporting",
+                "context_policy": "boundary_summary_only",
+                "bootstrap_command": f"{PYTHON_EXECUTABLE} -m tools.brain.workflow bootstrap --brain {text} --json",
+            }
+        )
+    if supporting_contexts:
+        payload["supporting_contexts"] = supporting_contexts
     agent_meta_review = analyze_agent_meta_signals(
         task=task,
         capsule_context={

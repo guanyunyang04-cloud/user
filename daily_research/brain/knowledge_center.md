@@ -1,5 +1,5 @@
 # Daily Research 知识对象
-快照日期：`2026-06-27`
+快照日期：`2026-07-06`
 
 本文件保存稳定对象类、长期事实和方法论。它不承载当前状态长卷，也不复刻历史证据；完整 rXX、长命令和 dated review 在 `references/`。
 
@@ -13,10 +13,17 @@
 
 ### class `qdp_v2_data_base`
 `owner`: `quant_data_platform`
-`products`: active tables, dataset manifests, parquet shards, rebuildable caches/features, and optional downstream packs.
+`products`: active tables, dataset manifests, parquet shards, rebuildable caches/features, provider ingest outputs and quality proofs.
 `consumer_contract`: `daily_research` 读取 explicit table/domain、dataset manifest 或 downstream pack。
 `provider_contract`: `mootdx_online`、`BaoStock`、`CNInfo` 等在线源作为 QDP 上游 ingest / raw archive / normalization 对象。
 `invariant`: 研究、训练和 diagnostics 不在 `daily_research` 中临时直连在线 provider。
+
+### class `research_artifact_store`
+`owner`: `daily_research`
+`products`: sequence packs、memmaps、normalization、sample_index、labels、model outputs、prediction CSVs、study summaries and evaluation reports.
+`preferred_root`: `daily_research/data/research_store`
+`compatibility_roots`: old artifacts under `quant_data_platform/data/qdp_v2/research/sequence_pack/` remain readable but are not QDP active data base.
+`invariant`: artifact manifests should declare owner project, source data base, artifact type, lifecycle and retention policy.
 
 ### class `research_program`
 `properties`: objective、data contract、pool/PIT status、sample/label/target、features、model input、architecture、output semantics、loss、evaluation gate、execution-candidate bridge、evidence grade。
@@ -38,7 +45,8 @@
 ## Long-Term Facts
 - `daily_research` 当前研究消费 QDP v2 数据基底；旧 daily_research lake / copied manifest / single memmap 不再是数据 owner。
 - QDP active data base and downstream pack status are recorded in `state_center.md` under `qdp_consumption`.
-- 当前主要研究方向是收盘后短线选股；旧复杂模型线保留为历史方法库。
+- 当前主要研究方向是 `seq100_path_value_research`：用过去 100 日路径和状态序列预测未来路径，路径摘要和 path value 从预测路径派生；收盘后短线选股经验保留为可复用研究线。
+- Today-close anchor improves path-only test rank IC versus next-open anchor, but topK concentration is not yet decisive; treat as promising research evidence, not promotion evidence.
 - `Path20` / `alpha_path20_neural_policy_v1` 是历史证据代号和代码 namespace，不再代表当前目标定义。
 - continuous_policy 的长期思想是日级连续交易执行模型；当前不是 active/default 或执行解冻依据。
 - daily execution 的事实层是手动流程、作业证据和只读 daily verdict；Web 可运行或旧 runtime state 只提供辅助线索。
@@ -52,7 +60,8 @@
 - 固定 horizon 不是目标本体；判断重点是赚钱相关排序、spread、hit lift、月稳和 calibration。
 - 工程复杂度会制造循环；runner、profile、loss、diagnostics 应服务明确阻塞点。
 - 执行异常不是研究结论；timeout、脚本入口失败、残留进程或资源挤占先归因，再决定证据等级。
-- 数据集要可复用、可审计、可查询；新训练集优先进入 QDP lake / canonical / memmap / pack。
+- 数据资产要可复用、可审计、可查询；事实数据进入 QDP active data base，model-ready 训练 artifacts 进入 `daily_research/data/research_store`。
+- 训练用数据集不是事实源；新 model-ready training artifacts 优先进入 `daily_research/data/research_store`，QDP active data base 只保存共享事实和质量证明。
 
 ## Research Line Index
 ### object `shortline_after_close_research`

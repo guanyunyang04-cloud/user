@@ -1165,9 +1165,42 @@ def select_workflow_for_task(task: str, *, intent: str = "read") -> dict[str, An
     }
 
 
-def build_writeback_plan(source: str, *, apply_brain_writeback: bool = False) -> dict[str, Any]:
+def _routes_from_writeback_targets(targets: list[str]) -> dict[str, str]:
+    routes: dict[str, str] = {}
+    for target in targets:
+        text = str(target or "").strip().replace("\\", "/")
+        if not text:
+            continue
+        if text == "brain/state_center.md":
+            routes["workspace_state"] = text
+        elif text == "brain/references/":
+            routes["workspace_references"] = text
+        elif text == "daily_research/brain/state_center.md":
+            routes["daily_research_state"] = text
+        elif text == "daily_research/brain/references/":
+            routes["daily_research_references"] = text
+        elif text == "quant_data_platform/brain/state_center.md":
+            routes["quant_data_platform_state"] = text
+        elif text == "quant_data_platform/brain/references/":
+            routes["quant_data_platform_references"] = text
+        else:
+            key = text.strip("/").replace("/", "_").replace(".", "_").replace("-", "_")
+            routes[key] = text
+    return routes
+
+
+def build_writeback_plan(source: str, *, task: str | None = None, apply_brain_writeback: bool = False) -> dict[str, Any]:
     registry = load_workflow_registry()
     routes = dict(registry["brain_writeback"].get("writeback_routes", {}) or {})
+    task_text = str(task or "").strip()
+    routing: dict[str, Any] = {}
+    if task_text:
+        from tools.brain.routing import route_task_to_brain
+
+        routing = route_task_to_brain(task_text)
+        task_routes = _routes_from_writeback_targets(list(routing.get("writeback_targets", []) or []))
+        if task_routes:
+            routes = task_routes
     freshness = resolve_artifact_freshness().to_dict()
     source_text = str(source or "latest").strip() or "latest"
     run_evidence: dict[str, Any] = {}
@@ -1180,8 +1213,15 @@ def build_writeback_plan(source: str, *, apply_brain_writeback: bool = False) ->
         run_evidence = resolve_run_evidence(run_tag, workflow=workflow).to_dict()
     return {
         "source": source_text,
+        "task": task_text,
         "apply_brain_writeback": bool(apply_brain_writeback),
         "routes": routes,
+        "brain_orchestration": {
+            "primary_brain_id": str(routing.get("primary_brain_id", "") or ""),
+            "supporting_brain_ids": list(routing.get("supporting_brain_ids", []) or []),
+            "object_routes": list(routing.get("object_routes", []) or []),
+            "writeback_targets": list(routing.get("writeback_targets", []) or []),
+        } if routing else {},
         "artifact_freshness": freshness,
         "run_evidence": run_evidence,
         "planned_updates": [

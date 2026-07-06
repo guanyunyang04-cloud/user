@@ -120,6 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     writeback = sub.add_parser("writeback-plan", help="Generate a routed brain writeback plan.")
     writeback.add_argument("--source", default="latest")
+    writeback.add_argument("--task", default="")
     writeback.add_argument("--json", action="store_true")
     writeback.add_argument("--write-output", action="store_true")
     writeback.add_argument("--apply-brain-writeback", action="store_true")
@@ -195,7 +196,11 @@ def build_payload(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
     if args.command == "audit-brain":
         return "audit_brain", audit_brain_system(scope=str(getattr(args, "scope", "") or "all"))
     if args.command == "writeback-plan":
-        return "writeback_plan", build_writeback_plan(args.source, apply_brain_writeback=args.apply_brain_writeback)
+        return "writeback_plan", build_writeback_plan(
+            args.source,
+            task=str(getattr(args, "task", "") or ""),
+            apply_brain_writeback=args.apply_brain_writeback,
+        )
     if args.command == "verify-plan":
         return "verify_plan", build_verification_plan(
             paths=list(args.paths) if getattr(args, "paths", None) is not None else None,

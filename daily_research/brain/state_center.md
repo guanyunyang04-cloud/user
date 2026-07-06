@@ -1,11 +1,11 @@
 # Daily Research 状态程序
-快照日期：`2026-06-27`
+快照日期：`2026-07-06`
 
 本文件是 `daily_research` 的当前程序实例，不是历史长卷；它只保存接管时需要激活的对象、函数和过程入口。
 
 ## Module Interface
 `imports`: `qdp_v2_data_base` from `quant_data_platform`；`evidence_registry` from `daily_research/brain/references/evidence_registry.json`；`active_execution_artifact` from `daily_research/output/active_execution_strategy.json`，只在执行相关任务中激活。
-`exports`: `current_research_pointer = shortline_after_close_research`；`execution_state = frozen_skeleton_only`；`data_access_policy = qdp_only`。
+`exports`: `current_research_pointer = seq100_path_value_research`；`execution_state = frozen_skeleton_only`；`data_access_policy = qdp_only`。
 
 ## Object Instances
 ### object `daily_research_project`
@@ -25,7 +25,7 @@
 `type`: data_dependency
 `state`: QDP 当前 active 数据基底是 v2 manifest-first：`quant_data_platform/data/qdp_v2/active/active.json` + dataset manifests + parquet。
 `active_data_scope`: `2011-11-22..2026-06-26`；沪深 A 股主板，剔除创业板/科创板/ST/退市；`600036.SH` from `2016-07-25`。
-`downstream_pack_note`: historical memmap/training packs remain research artifacts only; they are not the QDP active data base.
+`downstream_pack_note`: memmap、sequence pack、normalization、sample_index、labels and model-ready panels are `daily_research` research artifacts even when physically stored under `quant_data_platform/data/qdp_v2/research/`; they are not the QDP active data base.
 `methods`: `inspect_qdp_status()`；`consume_qdp_table(domain)`；`consume_training_pack(manifest)`；`request_qdp_update_or_table(requirement) -> QDP`。
 
 ### object `provider_boundary`
@@ -40,6 +40,18 @@
 `facts`: Stage 0 固定 D+1 open 诊断未通过 validation-selected same-candidate test；307 特征画像和 raw 特征诊断支持 anti-overheat / anti-chase；`pullback_intraday_recovery` 是当前最强条件族。
 `methods`: `build_upside_or_entry_scorer_baseline()`；`validate_scorer_by_decile_and_topk()`；`narrow_condition_matrix(priors)`。
 `next_method`: `build_upside_or_entry_scorer_baseline()`
+
+### object `seq100_path_value_research`
+`type`: active_research_program
+`state`: 当前研究主线；用 QDP v2 active 数据构造 model-ready research artifacts，由 `daily_research` 拥有和解释。
+`input_principle`: 过去 100 日 daily raw、daily state、intraday summary、limit structure 序列；不使用 symbol embedding 作为默认主线。
+`output_principle`: 预测未来路径；路径摘要和 path trade value 从预测路径派生，排序使用预测路径价值而不是独立固定标签。
+`current_comparisons`: base GRU、path-only GRU、residual-score、OHLCVA、today-close anchor。
+`current_evidence`: today-close anchor improved test rank IC versus next-open path-only, but topK concentration is not yet decisive; keep as promising research evidence, not promotion evidence.
+`artifact_owner`: `daily_research`; preferred new root is `daily_research/data/research_store/<artifact_id>/`.
+`historical_artifacts`: old full and smoke packs under `quant_data_platform/data/qdp_v2/research/sequence_pack/` are compatibility research artifacts and should not be described as QDP active data base.
+`resource_state`: H: pressure is driven mainly by repeated research packs and `daily_research/output/path_policy/studies`, not by the QDP active data base itself.
+`next_method`: `unify_research_store_and_run_gc_dry_run()`；`continue_path_value_model_comparison()`
 
 ### object `alpha_v2_history`
 `type`: archived_research_line
@@ -65,6 +77,7 @@
 
 ## Evidence Entrypoints
 - QDP replacement activation：`daily_research/brain/references/qdp_alpha_v2_replacement_data_base_activation_20260626.md`
+- Seq100 path-value orchestration：`daily_research/brain/references/seq100_path_value_research_orchestration_20260706.md`
 - Shortline plan：`daily_research/brain/references/shortline_after_close_research_plan_20260624.md`
 - Stage 0 diagnostic：`daily_research/brain/references/shortline_stage0_fixed_next_open_diagnostic_20260624.md`
 - Feature profile / semantics：`daily_research/brain/references/shortline_upside_feature_profile_20260624.md`、`daily_research/brain/references/shortline_upside_feature_semantics_20260624.md`

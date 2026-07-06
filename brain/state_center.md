@@ -11,7 +11,7 @@
 ### object `workspace_memory`
 `type`: root_brain
 `state`: 主脑维护共享对象、项目关系、写回规则和受保护对象类型；项目事实、命令细节、研究指标写入分脑。
-`methods`: `select_child_brain(task)`；`route_writeback(result)`；`run_brain_sync_audit()`。
+`methods`: `orchestrate_task(task)`；`route_writeback(result)`；`run_brain_sync_audit()`。
 
 ### object `workspace_git_surface`
 `type`: repo_surface
@@ -31,6 +31,13 @@
 `state`: 正式生产研究与执行主线；消费 QDP v2 数据基底或显式下游研究产物。执行面以该分脑 `state_center.md` 为准。
 `protected_object`: `daily_research/output/active_execution_strategy.json`
 
+### object `cross_project_orchestration`
+`type`: task_orchestration_policy
+`state`: route/capsule now expose `primary_brain_id`、`supporting_brain_ids`、`object_routes` and `writeback_targets`; selected child is the primary owner, not the only project an agent may inspect.
+`rule`: QDP active data base objects are owned by `quant_data_platform`; research artifacts, sequence packs, models, losses, evaluations, stock profiles and backtests are owned by `daily_research`.
+`example`: QDP v2 data used for GRU/path-value training returns primary `daily_research` with supporting read-only `quant_data_platform`.
+`artifact_default`: new model-ready training datasets should enter `daily_research/data/research_store/<artifact_id>/`; old `quant_data_platform/data/qdp_v2/research/sequence_pack/` artifacts remain compatibility research artifacts, not QDP active data base.
+
 ### object `t0_project_child`
 `type`: intraday_experiment_child_brain
 `path`: `t0_project/brain/`
@@ -47,7 +54,7 @@
 `state`: 传统量化方法研究分脑；项目事实、研究记录和局部命令以该分脑和项目产物为准。
 
 ## Pure Functions
-- `select_child_brain(task)`: 根据路径、项目名、数据资产或用户目标返回相关分脑。
+- `orchestrate_task(task)`: 根据路径、项目名、数据资产和用户目标返回 primary brain、supporting brains、object routes、读写模式和写回目标。
 - `select_protected_objects(task)`: 只返回任务实际触碰的 active data base、PIT/label、active execution、secret/external state 或 cross-project dirty objects。
 - `resolve_data_owner(asset)`: QDP v2 active data base、dataset manifests、raw parquet、provider ingest 和数据清理返回 `quant_data_platform_child`；研究 pack/memmap 返回其生成项目或显式 owner。
 - `resolve_research_owner(task)`: 研究、模型、回测、执行候选和 active artifact 默认返回 `daily_research_child`。

@@ -17,9 +17,12 @@ This workspace is a personal research brain expressed as natural-language progra
 ## Default Work Style
 - Read whichever brain, code, registry, manifest, output, or reference actually helps.
 - For repo-tracked mutation in a brain-governed project, use this skill to confirm object ownership, dirty paths, and any activated protected objects.
-- QDP owns the shared manifest-first data base: `parquet + dataset.json + active.json`, provider ingest, active table checks, rebuildable caches/features, and data cleanup.
+- QDP owns the shared canonical data substrate / manifest-first data base: `parquet + dataset.json + active.json`, provider ingest, active table checks, rebuildable caches/features, and data cleanup.
 - Memmaps and training packs are downstream research artifacts, not the QDP active data base.
 - `daily_research` owns research, model, backtest, execution-candidate, and active artifact evidence; it consumes QDP v2 tables or explicit downstream packs.
+- For cross-project tasks, identify objects before choosing a brain: QDP active data base objects are owned by `quant_data_platform`; sequence packs, memmaps, normalization, labels, model outputs, losses, evaluations, stock profiles, and backtests are owned by `daily_research`.
+- Treat route/capsule as primary-owner sensors, not exclusive project locks. Mixed QDP + research/model tasks should normally use primary `daily_research` with supporting read-only `quant_data_platform`, unless the task actually changes active QDP datasets or quality facts.
+- New model-ready training artifacts default to `daily_research/data/research_store/<artifact_id>/`; old `quant_data_platform/data/qdp_v2/research/sequence_pack/` artifacts are compatibility research artifacts, not QDP active data base.
 - If a task changes project architecture, CLI, data pointers, data semantics, quality conclusions, or execution boundaries, sync the relevant child brain hot path or state `brain_sync=false` with a reason in the final answer.
 - Keep temporary artifacts near the relevant project or task.
 

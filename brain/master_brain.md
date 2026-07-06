@@ -22,9 +22,10 @@
 
 ## 2. 接管边界
 - `agent-first`: agent 先理解用户目标，再按需要读取主脑、分脑、代码和产物。
-- `route-is-sensor`: route / capsule / bootstrap 是诊断工具，不决定工作范围。
+- `route-is-sensor`: route / capsule / bootstrap 是诊断工具；route 给出 primary owner、supporting brains、object routes 和写回目标，不是唯一操作边界。
 - `qdp-data-memory`: 共享数据基底默认看 `quant_data_platform`；当前事实源是 `data/qdp_v2/active/active.json`、各 `dataset.json` 和 parquet shards。
 - `research-consumer`: 研究项目只消费 QDP 显式数据基底或下游研究产物，不在 hot path 内复制 QDP 数据事实。
+- `cross-project-orchestration`: QDP active 数据对象归 `quant_data_platform`；sequence pack、memmap、模型、loss、画像、回测和评估归 `daily_research`。混合任务以研究 owner 为 primary，QDP 作为 supporting read-only，除非任务实际改变 active 数据基底。
 - `brain-sync`: 项目架构、CLI、active pointer、数据语义、质量结论或执行边界变化后，同步对应分脑 hot path。
 
 ## 3. 注册原则

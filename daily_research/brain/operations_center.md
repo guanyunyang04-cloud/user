@@ -1,5 +1,5 @@
 # Daily Research 过程目录
-快照日期：`2026-06-27`
+快照日期：`2026-07-06`
 
 本文件保存可调用过程、环境基线、命令入口和验证选择。它描述“怎么做”，不承担当前事实长卷；当前对象实例见 `state_center.md`。
 
@@ -17,6 +17,12 @@
 `provider_route`: online provider, CSV or external source work enters through QDP update/rebuild/check flows.
 `current_data_base`: see `state_center.md` object `qdp_consumption`.
 
+### object `research_store`
+`owner`: `daily_research`
+`preferred_root`: `daily_research/data/research_store`
+`compat_roots`: `quant_data_platform/data/qdp_v2/research/sequence_pack`
+`rule`: new sequence packs, memmaps, labels, normalization and sample indexes are research artifacts; QDP active data remains read-only source unless a task explicitly changes active datasets.
+
 ### object `execution_runtime`
 `state`: frozen skeleton / read-only diagnostics / candidate wrappers.
 `app_entry`: `conda run -n yolos python daily_research/execution/run_execution_app.py web --port 8765`
@@ -33,6 +39,11 @@
 `input`: QDP pack / manifest, feature diagnostics, shortline condition priors.
 `steps`: read explicit QDP artifacts；build or inspect scorer / feature / candidate evidence；classify evidence；write current summary to state and durable details to reference.
 `validation`: score decile, top-k / top-decile expectation, validation-selected same-candidate test, cost-aware backtest where applicable.
+
+### procedure `seq100_path_value_research_work`
+`input`: QDP v2 active tables or existing compatibility sequence pack, model/loss/value-function change, evaluation request.
+`steps`: route task as primary `daily_research` with supporting read-only `quant_data_platform` when QDP data is referenced；write new model-ready artifacts to `daily_research/data/research_store/<artifact_id>/` unless explicitly reusing old compatibility packs；train/evaluate models；write compact current conclusion to `state_center.md` and dated evidence to `references/`.
+`validation`: no PIT leakage, manifest/schema consistency, validation/test predictions, rank IC, topK realized/path value metrics, comparison against current base GRU/path-only/residual/OHLCVA anchors.
 
 ### procedure `qdp_data_request`
 `input`: missing field, stale dataset, provider coverage gap, canonical requirement.

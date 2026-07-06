@@ -149,6 +149,24 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertIn("workspace_state", payload["routes"])
         self.assertIn("daily_research_state", payload["routes"])
 
+    def test_writeback_plan_cli_uses_task_orchestration_routes(self) -> None:
+        payload = run_cli(
+            "writeback-plan",
+            "--source",
+            "latest",
+            "--task",
+            "qdp_v2 sequence pack GRU 训练",
+            "--json",
+        )
+
+        self.assertEqual(payload["task"], "qdp_v2 sequence pack GRU 训练")
+        self.assertEqual(payload["brain_orchestration"]["primary_brain_id"], "daily_research")
+        self.assertIn("quant_data_platform", payload["brain_orchestration"]["supporting_brain_ids"])
+        self.assertIn("daily_research_state", payload["routes"])
+        self.assertIn("daily_research_references", payload["routes"])
+        self.assertIn("workspace_state", payload["routes"])
+        self.assertNotIn("quant_data_platform_state", payload["routes"])
+
     def test_status_cli_accepts_explicit_run_tag_capsule(self) -> None:
         tag = "missing_continuous_policy_fixture_20990101_01"
         payload = run_cli("status", "--workflow", "continuous_policy", "--run-tag", tag, "--json")
