@@ -21,6 +21,7 @@ from torch.utils.data import BatchSampler, Dataset
 from daily_research.path_policy.qdp_v2_sequence_path_pack import (
     DEFAULT_FORWARD_DAYS,
     DEFAULT_LOOKBACK_DAYS,
+    PATH_OHLCVA_FIELDS,
     PATH_OHLC_FIELDS,
     PATH_SUMMARY_COLUMNS,
     _json_default,
@@ -37,11 +38,19 @@ PATH_VALUE_V2_WAITING_PENALTY = 0.04
 PATH_VALUE_V2_DRAWDOWN_PENALTY = 0.60
 PATH_VALUE_V2_TRANSACTION_COST = 0.002
 PATH_VALUE_V2_TEMPERATURE = 0.03
+UNIFIED_VALUE_WAIT_PENALTY = 0.015
+UNIFIED_VALUE_HOLD_PENALTY = 0.025
+UNIFIED_VALUE_DRAWDOWN_PENALTY = 0.60
+UNIFIED_VALUE_LIQUIDITY_PENALTY = 0.02
+UNIFIED_VALUE_TRANSACTION_COST = 0.002
+UNIFIED_VALUE_TEMPERATURE = 0.03
 RICHER_MODEL_TYPES = {"gru_richer_path_value", "gru_richer_path_value_symbol"}
+OHLCVA_MODEL_TYPES = {"gru_ohlcva_path_value"}
 PATH_VALUE_MODEL_TYPES = {
     "gru_path_value",
     "gru_path_value_symbol",
     "gru_path_value_residual",
+    *OHLCVA_MODEL_TYPES,
     *RICHER_MODEL_TYPES,
 }
 RESIDUAL_MODEL_TYPES = {"gru_path_value_residual"}
@@ -179,6 +188,53 @@ def _open_memmap(meta: Mapping[str, Any], *, dtype: str) -> np.memmap:
     return np.memmap(path, dtype=dtype, mode="r", shape=shape)
 
 
+class ShardedLabelReader:
+    def __init__(self, meta: Mapping[str, Any], *, dtype: str) -> None:
+        self.meta = dict(meta)
+        self.shape = tuple(int(item) for item in list(meta.get("shape", []) or []))
+        self.shards: list[dict[str, Any]] = []
+        for shard in list(meta.get("shards", []) or []):
+            path = Path(str(shard.get("path", "") or ""))
+            shape = tuple(int(item) for item in list(shard.get("shape", []) or []))
+            self.shards.append(
+                {
+                    "start": int(shard.get("date_start_idx", 0)),
+                    "end": int(shard.get("date_end_idx", -1)),
+                    "array": np.memmap(path, dtype=dtype, mode="r", shape=shape),
+                }
+            )
+        self.shards.sort(key=lambda item: int(item["start"]))
+
+    def take(self, date_idx: np.ndarray, symbol_idx: np.ndarray, *, field_slice: slice | None = None) -> np.ndarray:
+        date_idx = np.asarray(date_idx, dtype=np.int64)
+        symbol_idx = np.asarray(symbol_idx, dtype=np.int64)
+        tail_shape = self.shape[2:] if field_slice is None else (*self.shape[2:-1], len(range(*field_slice.indices(self.shape[-1]))))
+        out = np.empty((int(date_idx.size), *tail_shape), dtype=np.float32)
+        for shard in self.shards:
+            mask = (date_idx >= int(shard["start"])) & (date_idx <= int(shard["end"]))
+            if not bool(mask.any()):
+                continue
+            local_date = date_idx[mask] - int(shard["start"])
+            values = np.asarray(shard["array"][local_date, symbol_idx[mask], :, :], dtype=np.float32)
+            if field_slice is not None:
+                values = values[:, :, field_slice]
+            out[np.flatnonzero(mask)] = values
+        return out
+
+    def __getitem__(self, key: Any) -> np.ndarray:
+        date_idx, symbol_idx = key[0], key[1]
+        field_slice = key[3] if len(key) > 3 and isinstance(key[3], slice) else None
+        if np.isscalar(date_idx):
+            return self.take(np.asarray([date_idx]), np.asarray([symbol_idx]), field_slice=field_slice)[0]
+        return self.take(np.asarray(date_idx), np.asarray(symbol_idx), field_slice=field_slice)
+
+
+def _open_label_array(meta: Mapping[str, Any], *, dtype: str) -> np.memmap | ShardedLabelReader:
+    if list(meta.get("shards", []) or []):
+        return ShardedLabelReader(meta, dtype=dtype)
+    return _open_memmap(meta, dtype=dtype)
+
+
 class SequencePathPackDataset(Dataset):
     def __init__(self, manifest: Mapping[str, Any], *, split: str, max_samples: int = 0) -> None:
         self.manifest = dict(manifest)
@@ -199,7 +255,12 @@ class SequencePathPackDataset(Dataset):
         self.feature_columns = {name: list(channels[name].get("columns", []) or []) for name in self.channel_order}
         self.normalization = dict(self.manifest.get("normalization", {}) or {})
         labels = dict(self.manifest.get("label_arrays", {}) or {})
-        self.future_path = _open_memmap(labels["future_ohlc_path"], dtype="float32")
+        self.future_ohlcva_path = _open_label_array(labels["future_ohlcva_path"], dtype="float32") if "future_ohlcva_path" in labels else None
+        self.future_path = _open_label_array(labels["future_ohlc_path"], dtype="float32") if "future_ohlc_path" in labels else None
+        if self.future_path is None and self.future_ohlcva_path is None:
+            raise KeyError("pack label_arrays must include future_ohlc_path or future_ohlcva_path")
+        self.has_ohlcva_path = self.future_ohlcva_path is not None
+        self.ohlcva_path_fields = list(labels.get("future_ohlcva_path", {}).get("fields", []) or PATH_OHLCVA_FIELDS)
         self.path_summary = _open_memmap(labels["path_summary"], dtype="float32")
         self.path_summary_columns = list(labels["path_summary"].get("columns", []) or path_summary_columns(self.forward_days))
         self.value_column = path_value_column(self.forward_days)
@@ -297,7 +358,16 @@ class SequencePathPackDataset(Dataset):
             for name in self.channel_order
         ]
         x = np.concatenate(parts, axis=1).astype(np.float32, copy=False)
-        y_path = np.asarray(self.future_path[date_idx, symbol_idx, :, :], dtype=np.float32).copy()
+        y_path = (
+            np.asarray(self.future_path[date_idx, symbol_idx, :, :], dtype=np.float32).copy()
+            if self.future_path is not None
+            else np.asarray(self.future_ohlcva_path[date_idx, symbol_idx, :, :4], dtype=np.float32).copy()
+        )
+        y_ohlcva_path = (
+            np.asarray(self.future_ohlcva_path[date_idx, symbol_idx, :, :], dtype=np.float32).copy()
+            if self.future_ohlcva_path is not None
+            else y_path.copy()
+        )
         y_summary = np.asarray(self.path_summary[date_idx, symbol_idx, :], dtype=np.float32).copy()
         y_richer_path = self._future_richer_path_batch(
             y_path.reshape(1, self.forward_days, 4),
@@ -307,6 +377,7 @@ class SequencePathPackDataset(Dataset):
         return {
             "x": torch.from_numpy(x),
             "y_path": torch.from_numpy(y_path),
+            "y_ohlcva_path": torch.from_numpy(y_ohlcva_path),
             "y_richer_path": torch.from_numpy(y_richer_path),
             "y_summary": torch.from_numpy(y_summary),
             "date_idx": int(date_idx),
@@ -335,12 +406,22 @@ class SequencePathPackDataset(Dataset):
                 values[mask, :, :] = np.transpose(block, (1, 0, 2))
             channel_parts.append(self._normalize_batch(name, values))
         x = np.concatenate(channel_parts, axis=2).astype(np.float32, copy=False)
-        y_path = np.asarray(self.future_path[date_idx, symbol_idx, :, :], dtype=np.float32).copy()
+        y_path = (
+            np.asarray(self.future_path[date_idx, symbol_idx, :, :], dtype=np.float32).copy()
+            if self.future_path is not None
+            else np.asarray(self.future_ohlcva_path[date_idx, symbol_idx, :, :4], dtype=np.float32).copy()
+        )
+        y_ohlcva_path = (
+            np.asarray(self.future_ohlcva_path[date_idx, symbol_idx, :, :], dtype=np.float32).copy()
+            if self.future_ohlcva_path is not None
+            else y_path.copy()
+        )
         y_richer_path = self._future_richer_path_batch(y_path, date_idx, symbol_idx)
         y_summary = np.asarray(self.path_summary[date_idx, symbol_idx, :], dtype=np.float32).copy()
         return {
             "x": torch.from_numpy(x),
             "y_path": torch.from_numpy(y_path),
+            "y_ohlcva_path": torch.from_numpy(y_ohlcva_path),
             "y_richer_path": torch.from_numpy(y_richer_path),
             "y_summary": torch.from_numpy(y_summary),
             "date_idx": torch.from_numpy(date_idx.astype(np.int64, copy=False)),
@@ -403,19 +484,21 @@ class SequencePathModel(nn.Module):
             "gru_path_value",
             "gru_path_value_symbol",
             "gru_path_value_residual",
+            "gru_ohlcva_path_value",
             "gru_richer_path_value",
             "gru_richer_path_value_symbol",
         }
         if normalized_model_type not in allowed_model_types:
             raise ValueError(
                 "model_type must be gru_last, gru_attention, gru_path_value, gru_path_value_symbol, "
-                "gru_path_value_residual, gru_richer_path_value, or gru_richer_path_value_symbol"
+                "gru_path_value_residual, gru_ohlcva_path_value, gru_richer_path_value, or gru_richer_path_value_symbol"
             )
         self.model_type = normalized_model_type
         self.uses_derived_path_value = normalized_model_type in PATH_VALUE_MODEL_TYPES
         self.uses_symbol_embedding = normalized_model_type in {"gru_path_value_symbol", "gru_richer_path_value_symbol"}
         self.uses_residual_score = normalized_model_type in RESIDUAL_MODEL_TYPES
         self.uses_richer_path = normalized_model_type in RICHER_MODEL_TYPES
+        self.uses_ohlcva_path = normalized_model_type in OHLCVA_MODEL_TYPES
         self.input_norm = nn.LayerNorm(input_dim)
         self.proj = nn.Linear(input_dim, hidden_dim)
         self.encoder = nn.GRU(
@@ -439,7 +522,8 @@ class SequencePathModel(nn.Module):
         else:
             self.symbol_embedding = None
         head_dim = int(hidden_dim) + self.symbol_embedding_dim
-        self.richer_path_dim = int(max(4, richer_path_dim)) if self.uses_richer_path else 4
+        self.path_dim = 6 if self.uses_ohlcva_path else 4
+        self.richer_path_dim = int(max(4, richer_path_dim)) if self.uses_richer_path else self.path_dim
         self.path_head = nn.Linear(head_dim, int(forward_days) * self.richer_path_dim)
         if self.uses_derived_path_value:
             self.summary_head = None
@@ -467,7 +551,7 @@ class SequencePathModel(nn.Module):
             embedded = self.symbol_embedding(symbol_idx.to(device=pooled.device, dtype=torch.long))
             pooled = torch.cat([pooled, embedded], dim=1)
         path_output = self.path_head(pooled).view(-1, self.forward_days, self.richer_path_dim)
-        future_path = path_output[:, :, :4] if self.uses_richer_path else path_output
+        future_path = path_output[:, :, : self.path_dim] if self.uses_richer_path else path_output
         if self.uses_derived_path_value:
             outputs = {"future_path": future_path}
             if self.uses_richer_path:
@@ -552,12 +636,13 @@ def _compute_loss(
         value_target = y_summary[:, int(value_index)]
         score = outputs["score"]
     else:
+        path_dim = int(outputs["future_path"].shape[2])
         target_summary = _derive_path_summary_torch(y_path, smooth_value=False).detach()
         pred_summary = _derive_path_summary_torch(outputs["future_path"], smooth_value=True)
         summary_loss = _finite_smooth_l1_columns(
             pred_summary,
             target_summary,
-            _derived_summary_loss_indices(int(outputs["future_path"].shape[1])),
+            _derived_summary_loss_indices(int(outputs["future_path"].shape[1]), path_dim=path_dim),
         )
         value_target = target_summary[:, -1]
         path_value_score = pred_summary[:, -1]
@@ -595,14 +680,15 @@ def _compute_loss(
 
 def _batch_to_device(
     batch: Mapping[str, Any], device: torch.device
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     x = batch["x"].to(device, non_blocking=device.type == "cuda")
     y_path = batch["y_path"].to(device, non_blocking=device.type == "cuda")
+    y_ohlcva_path = batch["y_ohlcva_path"].to(device, non_blocking=device.type == "cuda")
     y_richer_path = batch["y_richer_path"].to(device, non_blocking=device.type == "cuda")
     y_summary = batch["y_summary"].to(device, non_blocking=device.type == "cuda")
     date_idx = batch["date_idx"].to(device, non_blocking=device.type == "cuda")
     symbol_idx = batch["symbol_idx"].to(device, non_blocking=device.type == "cuda")
-    return x, y_path, y_richer_path, y_summary, date_idx, symbol_idx
+    return x, y_path, y_ohlcva_path, y_richer_path, y_summary, date_idx, symbol_idx
 
 
 def _iter_index_batches(dataset: SequencePathPackDataset, *, batch_size: int, shuffle: bool, seed: int) -> Iterator[list[int]]:
@@ -633,6 +719,23 @@ def _topk_daily_rows(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forw
     optional_metric_cols = [
         f"best_exit_close_return_{suffix}",
         f"pre_exit_max_drawdown_{suffix}",
+        f"volume_expansion_peak_{suffix}",
+        f"amount_expansion_peak_{suffix}",
+        f"price_volume_confirmation_{suffix}",
+        f"path_volatility_{suffix}",
+        f"best_entry_day_{suffix}",
+        f"best_entry_price_{suffix}",
+        f"best_exit_price_{suffix}",
+        f"best_holding_days_{suffix}",
+        f"pre_entry_wait_days_{suffix}",
+        f"in_trade_max_drawdown_{suffix}",
+        f"entry_amount_condition_{suffix}",
+        "realized_fill",
+        "realized_trade_return",
+        "realized_in_trade_drawdown",
+        "missed_opportunity",
+        "realized_entry_day",
+        "realized_exit_day",
     ]
     for top_k in top_k_values:
         for trade_date, group in frame.groupby("trade_date", sort=True):
@@ -660,6 +763,16 @@ def _topk_daily_rows(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forw
                 row["selected_pre_exit_max_drawdown_mean"] = float(
                     pd.to_numeric(top[f"pre_exit_max_drawdown_{suffix}"], errors="coerce").mean()
                 )
+            if f"best_entry_day_{suffix}" in top.columns:
+                row["selected_best_entry_day_mean"] = float(pd.to_numeric(top[f"best_entry_day_{suffix}"], errors="coerce").mean())
+            if f"best_holding_days_{suffix}" in top.columns:
+                row["selected_best_holding_days_mean"] = float(pd.to_numeric(top[f"best_holding_days_{suffix}"], errors="coerce").mean())
+            if f"in_trade_max_drawdown_{suffix}" in top.columns:
+                row["selected_in_trade_max_drawdown_mean"] = float(pd.to_numeric(top[f"in_trade_max_drawdown_{suffix}"], errors="coerce").mean())
+            if "realized_fill" in top.columns:
+                row["selected_realized_fill_rate"] = float(pd.to_numeric(top["realized_fill"], errors="coerce").mean())
+            if "missed_opportunity" in top.columns:
+                row["selected_missed_opportunity_rate"] = float(pd.to_numeric(top["missed_opportunity"], errors="coerce").mean())
             rows.append(row)
     return rows
 
@@ -735,7 +848,11 @@ def path_value_v2_column(forward_days: int) -> str:
     return f"path_trade_value_v2_{int(forward_days)}d"
 
 
-def derived_path_summary_columns(forward_days: int) -> list[str]:
+def unified_path_value_column(forward_days: int) -> str:
+    return f"unified_path_trade_value_{int(forward_days)}d"
+
+
+def legacy_derived_path_summary_columns(forward_days: int) -> list[str]:
     suffix = f"{int(forward_days)}d"
     return [
         f"future_max_return_{suffix}",
@@ -753,8 +870,43 @@ def derived_path_summary_columns(forward_days: int) -> list[str]:
     ]
 
 
-def _derived_summary_loss_indices(forward_days: int) -> list[int]:
-    columns = derived_path_summary_columns(forward_days)
+def unified_path_summary_columns(forward_days: int) -> list[str]:
+    suffix = f"{int(forward_days)}d"
+    return [
+        f"future_max_return_{suffix}",
+        f"future_min_return_{suffix}",
+        f"future_final_return_{suffix}",
+        f"future_peak_day_{suffix}",
+        f"future_trough_day_{suffix}",
+        f"drawdown_after_peak_{suffix}",
+        f"time_above_zero_{suffix}",
+        f"time_below_zero_{suffix}",
+        f"volume_expansion_peak_{suffix}",
+        f"amount_expansion_peak_{suffix}",
+        f"price_volume_confirmation_{suffix}",
+        f"path_volatility_{suffix}",
+        f"best_entry_day_{suffix}",
+        f"best_entry_price_{suffix}",
+        f"best_exit_day_{suffix}",
+        f"best_exit_price_{suffix}",
+        f"best_holding_days_{suffix}",
+        f"pre_entry_wait_days_{suffix}",
+        f"in_trade_max_drawdown_{suffix}",
+        f"entry_amount_condition_{suffix}",
+        unified_path_value_column(forward_days),
+    ]
+
+
+def derived_path_summary_columns(forward_days: int, *, path_dim: int = 4) -> list[str]:
+    return unified_path_summary_columns(forward_days) if int(path_dim) >= 6 else legacy_derived_path_summary_columns(forward_days)
+
+
+def value_column_for_path(forward_days: int, *, path_dim: int = 4) -> str:
+    return unified_path_value_column(forward_days) if int(path_dim) >= 6 else path_value_v2_column(forward_days)
+
+
+def _derived_summary_loss_indices(forward_days: int, *, path_dim: int = 4) -> list[int]:
+    columns = derived_path_summary_columns(forward_days, path_dim=path_dim)
     keep = {
         f"future_max_return_{int(forward_days)}d",
         f"future_min_return_{int(forward_days)}d",
@@ -762,6 +914,12 @@ def _derived_summary_loss_indices(forward_days: int) -> list[int]:
         f"drawdown_after_peak_{int(forward_days)}d",
         f"best_exit_close_return_{int(forward_days)}d",
         f"pre_exit_max_drawdown_{int(forward_days)}d",
+        f"volume_expansion_peak_{int(forward_days)}d",
+        f"amount_expansion_peak_{int(forward_days)}d",
+        f"price_volume_confirmation_{int(forward_days)}d",
+        f"path_volatility_{int(forward_days)}d",
+        f"in_trade_max_drawdown_{int(forward_days)}d",
+        f"entry_amount_condition_{int(forward_days)}d",
     }
     return [idx for idx, col in enumerate(columns) if col in keep]
 
@@ -783,7 +941,128 @@ def _candidate_path_values_torch(path: torch.Tensor) -> tuple[torch.Tensor, torc
     return candidate, pre_exit_drawdown
 
 
+def _entry_exit_ret_torch(path: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    open_ret = path[:, :, 0]
+    high_ret = path[:, :, 1]
+    low_ret = path[:, :, 2]
+    close_ret = path[:, :, 3]
+    entry_ret = 0.50 * low_ret + 0.25 * open_ret + 0.25 * close_ret
+    exit_ret = 0.50 * high_ret + 0.25 * open_ret + 0.25 * close_ret
+    return entry_ret, exit_ret
+
+
+def _unified_trade_candidates_torch(path: torch.Tensor) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    forward_days = int(path.shape[1])
+    low_ret = path[:, :, 2]
+    amount_rel = path[:, :, 5]
+    entry_ret, exit_ret = _entry_exit_ret_torch(path)
+    batch_size = int(path.shape[0])
+    entry_matrix = entry_ret.unsqueeze(2)
+    exit_matrix = exit_ret.unsqueeze(1)
+    trade_return = (1.0 + exit_matrix) / torch.clamp(1.0 + entry_matrix, min=1.0e-6) - 1.0
+    low_between = torch.full((batch_size, forward_days, forward_days), float("inf"), device=path.device, dtype=path.dtype)
+    amount_mean = torch.full_like(low_between, float("nan"))
+    for entry_day in range(forward_days):
+        low_cum = torch.cummin(low_ret[:, entry_day:], dim=1).values
+        low_between[:, entry_day, entry_day:] = low_cum
+        amount_cum = torch.cumsum(amount_rel[:, entry_day:], dim=1)
+        denom = torch.arange(1, forward_days - entry_day + 1, device=path.device, dtype=path.dtype).view(1, -1)
+        amount_mean[:, entry_day, entry_day:] = amount_cum / denom
+    in_trade_drawdown = torch.clamp(1.0 - (1.0 + low_between) / torch.clamp(1.0 + entry_matrix, min=1.0e-6), min=0.0)
+    day = torch.arange(forward_days, device=path.device, dtype=path.dtype)
+    entry_day = day.view(1, forward_days, 1)
+    exit_day = day.view(1, 1, forward_days)
+    holding_days = exit_day - entry_day
+    wait_penalty = float(UNIFIED_VALUE_WAIT_PENALTY) * torch.sqrt((entry_day + 1.0) / max(float(forward_days), 1.0))
+    hold_penalty = float(UNIFIED_VALUE_HOLD_PENALTY) * torch.sqrt((holding_days + 1.0) / max(float(forward_days), 1.0))
+    liquidity_penalty = float(UNIFIED_VALUE_LIQUIDITY_PENALTY) * torch.relu(-amount_mean)
+    candidate = (
+        trade_return
+        - wait_penalty
+        - hold_penalty
+        - float(UNIFIED_VALUE_DRAWDOWN_PENALTY) * in_trade_drawdown
+        - liquidity_penalty
+        - float(UNIFIED_VALUE_TRANSACTION_COST)
+    )
+    valid = holding_days > 0.0
+    candidate = torch.where(valid, candidate, torch.full_like(candidate, float("-inf")))
+    return candidate, {
+        "entry_ret": entry_ret,
+        "exit_ret": exit_ret,
+        "trade_return": trade_return,
+        "in_trade_drawdown": in_trade_drawdown,
+        "amount_mean": amount_mean,
+    }
+
+
+def _derive_unified_path_summary_torch(path: torch.Tensor, *, smooth_value: bool) -> torch.Tensor:
+    forward_days = int(path.shape[1])
+    high_ret = path[:, :, 1]
+    low_ret = path[:, :, 2]
+    close_ret = path[:, :, 3]
+    volume_rel = path[:, :, 4]
+    amount_rel = path[:, :, 5]
+    max_ret, peak_idx = torch.max(high_ret, dim=1)
+    min_ret, trough_idx = torch.min(low_ret, dim=1)
+    final_ret = close_ret[:, -1]
+    day_idx = torch.arange(forward_days, device=path.device).view(1, -1)
+    after_peak = day_idx >= peak_idx.view(-1, 1)
+    low_after_peak = torch.where(after_peak, low_ret, torch.full_like(low_ret, float("inf")))
+    min_after_peak = torch.min(low_after_peak, dim=1).values
+    drawdown_after_peak = (1.0 + min_after_peak) / torch.clamp(1.0 + max_ret, min=1.0e-6) - 1.0
+    time_above = (close_ret > 0.0).to(path.dtype).mean(dim=1)
+    time_below = (close_ret < 0.0).to(path.dtype).mean(dim=1)
+    volume_peak = torch.max(volume_rel, dim=1).values
+    amount_peak = torch.max(amount_rel, dim=1).values
+    price_volume_confirmation = torch.mean(torch.relu(close_ret) * torch.relu(amount_rel), dim=1)
+    path_volatility = torch.std(close_ret, dim=1, unbiased=False)
+    candidate, aux = _unified_trade_candidates_torch(path)
+    flat = candidate.view(candidate.shape[0], -1)
+    hard_value, flat_idx = torch.max(flat, dim=1)
+    if smooth_value:
+        temperature = max(float(UNIFIED_VALUE_TEMPERATURE), 1.0e-6)
+        best_value = temperature * torch.logsumexp(flat / temperature, dim=1)
+    else:
+        best_value = hard_value
+    best_entry_idx = torch.div(flat_idx, forward_days, rounding_mode="floor")
+    best_exit_idx = flat_idx % forward_days
+    row = torch.arange(path.shape[0], device=path.device)
+    best_entry_price = aux["entry_ret"][row, best_entry_idx]
+    best_exit_price = aux["exit_ret"][row, best_exit_idx]
+    best_holding_days = (best_exit_idx - best_entry_idx).to(path.dtype)
+    best_drawdown = aux["in_trade_drawdown"][row, best_entry_idx, best_exit_idx]
+    entry_amount_condition = amount_rel[row, best_entry_idx]
+    return torch.stack(
+        [
+            max_ret,
+            min_ret,
+            final_ret,
+            peak_idx.to(path.dtype) + 1.0,
+            trough_idx.to(path.dtype) + 1.0,
+            drawdown_after_peak,
+            time_above,
+            time_below,
+            volume_peak,
+            amount_peak,
+            price_volume_confirmation,
+            path_volatility,
+            best_entry_idx.to(path.dtype) + 1.0,
+            best_entry_price,
+            best_exit_idx.to(path.dtype) + 1.0,
+            best_exit_price,
+            best_holding_days,
+            best_entry_idx.to(path.dtype),
+            best_drawdown,
+            entry_amount_condition,
+            best_value,
+        ],
+        dim=1,
+    )
+
+
 def _derive_path_summary_torch(path: torch.Tensor, *, smooth_value: bool) -> torch.Tensor:
+    if int(path.shape[2]) >= 6:
+        return _derive_unified_path_summary_torch(path, smooth_value=smooth_value)
     forward_days = int(path.shape[1])
     high_ret = path[:, :, 1]
     low_ret = path[:, :, 2]
@@ -828,8 +1107,10 @@ def _derive_path_summary_torch(path: torch.Tensor, *, smooth_value: bool) -> tor
 
 def _derive_path_summary_numpy(path: np.ndarray) -> np.ndarray:
     values = np.asarray(path, dtype=np.float32)
-    if values.ndim != 3 or values.shape[2] != 4:
-        raise ValueError("path must have shape [batch, forward_days, 4]")
+    if values.ndim != 3 or values.shape[2] not in {4, 6}:
+        raise ValueError("path must have shape [batch, forward_days, 4 or 6]")
+    if values.shape[2] >= 6:
+        return _derive_unified_path_summary_numpy(values)
     forward_days = int(values.shape[1])
     high_ret = values[:, :, 1].astype(np.float64, copy=False)
     low_ret = values[:, :, 2].astype(np.float64, copy=False)
@@ -879,6 +1160,184 @@ def _derive_path_summary_numpy(path: np.ndarray) -> np.ndarray:
     return summary.astype(np.float32, copy=False)
 
 
+def _entry_exit_ret_numpy(path: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    open_ret = path[:, :, 0].astype(np.float64, copy=False)
+    high_ret = path[:, :, 1].astype(np.float64, copy=False)
+    low_ret = path[:, :, 2].astype(np.float64, copy=False)
+    close_ret = path[:, :, 3].astype(np.float64, copy=False)
+    entry_ret = 0.50 * low_ret + 0.25 * open_ret + 0.25 * close_ret
+    exit_ret = 0.50 * high_ret + 0.25 * open_ret + 0.25 * close_ret
+    return entry_ret, exit_ret
+
+
+def _unified_trade_candidates_numpy(path: np.ndarray) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    values = np.asarray(path, dtype=np.float64)
+    batch_size, forward_days, _ = values.shape
+    low_ret = values[:, :, 2]
+    amount_rel = values[:, :, 5]
+    entry_ret, exit_ret = _entry_exit_ret_numpy(values)
+    candidate = np.full((batch_size, forward_days, forward_days), -np.inf, dtype=np.float64)
+    trade_return = np.full_like(candidate, np.nan)
+    in_trade_drawdown = np.full_like(candidate, np.nan)
+    amount_mean = np.full_like(candidate, np.nan)
+    for entry_day in range(forward_days):
+        entry = entry_ret[:, entry_day]
+        for exit_day in range(entry_day + 1, forward_days):
+            exit_value = exit_ret[:, exit_day]
+            ret = (1.0 + exit_value) / np.maximum(1.0 + entry, 1.0e-6) - 1.0
+            low_between = np.nanmin(low_ret[:, entry_day : exit_day + 1], axis=1)
+            drawdown = np.maximum(1.0 - (1.0 + low_between) / np.maximum(1.0 + entry, 1.0e-6), 0.0)
+            amount_avg = np.nanmean(amount_rel[:, entry_day : exit_day + 1], axis=1)
+            wait_penalty = float(UNIFIED_VALUE_WAIT_PENALTY) * math.sqrt((entry_day + 1.0) / max(float(forward_days), 1.0))
+            hold_penalty = float(UNIFIED_VALUE_HOLD_PENALTY) * math.sqrt((exit_day - entry_day + 1.0) / max(float(forward_days), 1.0))
+            liquidity_penalty = float(UNIFIED_VALUE_LIQUIDITY_PENALTY) * np.maximum(-amount_avg, 0.0)
+            value = (
+                ret
+                - wait_penalty
+                - hold_penalty
+                - float(UNIFIED_VALUE_DRAWDOWN_PENALTY) * drawdown
+                - liquidity_penalty
+                - float(UNIFIED_VALUE_TRANSACTION_COST)
+            )
+            trade_return[:, entry_day, exit_day] = ret
+            in_trade_drawdown[:, entry_day, exit_day] = drawdown
+            amount_mean[:, entry_day, exit_day] = amount_avg
+            candidate[:, entry_day, exit_day] = value
+    return candidate, {
+        "entry_ret": entry_ret,
+        "exit_ret": exit_ret,
+        "trade_return": trade_return,
+        "in_trade_drawdown": in_trade_drawdown,
+        "amount_mean": amount_mean,
+    }
+
+
+def _derive_unified_path_summary_numpy(path: np.ndarray) -> np.ndarray:
+    values = np.asarray(path, dtype=np.float64)
+    if values.ndim != 3 or values.shape[2] < 6:
+        raise ValueError("OHLCVA path must have shape [batch, forward_days, 6]")
+    forward_days = int(values.shape[1])
+    high_ret = values[:, :, 1]
+    low_ret = values[:, :, 2]
+    close_ret = values[:, :, 3]
+    volume_rel = values[:, :, 4]
+    amount_rel = values[:, :, 5]
+    max_ret = np.nanmax(high_ret, axis=1)
+    min_ret = np.nanmin(low_ret, axis=1)
+    final_ret = close_ret[:, -1]
+    peak_idx = np.nanargmax(np.where(np.isfinite(high_ret), high_ret, -np.inf), axis=1)
+    trough_idx = np.nanargmin(np.where(np.isfinite(low_ret), low_ret, np.inf), axis=1)
+    min_after_peak = np.full(values.shape[0], np.nan, dtype=np.float64)
+    for row_idx, pidx in enumerate(peak_idx):
+        min_after_peak[row_idx] = np.nanmin(low_ret[row_idx, int(pidx) :])
+    drawdown_after_peak = (1.0 + min_after_peak) / np.maximum(1.0 + max_ret, 1.0e-6) - 1.0
+    time_above = np.nanmean(close_ret > 0.0, axis=1)
+    time_below = np.nanmean(close_ret < 0.0, axis=1)
+    volume_peak = np.nanmax(volume_rel, axis=1)
+    amount_peak = np.nanmax(amount_rel, axis=1)
+    price_volume_confirmation = np.nanmean(np.maximum(close_ret, 0.0) * np.maximum(amount_rel, 0.0), axis=1)
+    path_volatility = np.nanstd(close_ret, axis=1)
+    candidate, aux = _unified_trade_candidates_numpy(values)
+    flat = candidate.reshape(candidate.shape[0], -1)
+    best_flat = np.nanargmax(np.where(np.isfinite(flat), flat, -np.inf), axis=1)
+    best_entry_idx = best_flat // forward_days
+    best_exit_idx = best_flat % forward_days
+    row = np.arange(values.shape[0])
+    best_entry_price = aux["entry_ret"][row, best_entry_idx]
+    best_exit_price = aux["exit_ret"][row, best_exit_idx]
+    best_holding_days = best_exit_idx - best_entry_idx
+    best_drawdown = aux["in_trade_drawdown"][row, best_entry_idx, best_exit_idx]
+    entry_amount_condition = amount_rel[row, best_entry_idx]
+    best_value = candidate[row, best_entry_idx, best_exit_idx]
+    summary = np.column_stack(
+        [
+            max_ret,
+            min_ret,
+            final_ret,
+            peak_idx + 1,
+            trough_idx + 1,
+            drawdown_after_peak,
+            time_above,
+            time_below,
+            volume_peak,
+            amount_peak,
+            price_volume_confirmation,
+            path_volatility,
+            best_entry_idx + 1,
+            best_entry_price,
+            best_exit_idx + 1,
+            best_exit_price,
+            best_holding_days,
+            best_entry_idx,
+            best_drawdown,
+            entry_amount_condition,
+            best_value,
+        ]
+    )
+    return summary.astype(np.float32, copy=False)
+
+
+def _realize_predicted_plan_numpy(pred_summary: np.ndarray, true_path: np.ndarray, *, forward_days: int) -> dict[str, np.ndarray]:
+    values = np.asarray(true_path, dtype=np.float64)
+    summary = np.asarray(pred_summary, dtype=np.float64)
+    columns = unified_path_summary_columns(forward_days)
+    entry_day_idx = columns.index(f"best_entry_day_{int(forward_days)}d")
+    entry_price_idx = columns.index(f"best_entry_price_{int(forward_days)}d")
+    exit_day_idx = columns.index(f"best_exit_day_{int(forward_days)}d")
+    exit_price_idx = columns.index(f"best_exit_price_{int(forward_days)}d")
+    value_idx = columns.index(unified_path_value_column(forward_days))
+    n = int(values.shape[0])
+    filled = np.zeros(n, dtype=np.float32)
+    realized_return = np.full(n, np.nan, dtype=np.float32)
+    realized_drawdown = np.full(n, np.nan, dtype=np.float32)
+    missed = np.zeros(n, dtype=np.float32)
+    realized_entry_day = np.full(n, np.nan, dtype=np.float32)
+    realized_exit_day = np.full(n, np.nan, dtype=np.float32)
+    true_oracle = _derive_unified_path_summary_numpy(values)[:, value_idx]
+    for row in range(n):
+        entry_day = int(round(summary[row, entry_day_idx])) - 1
+        exit_day = int(round(summary[row, exit_day_idx])) - 1
+        if entry_day < 0 or exit_day <= entry_day or exit_day >= int(forward_days):
+            missed[row] = 1.0 if true_oracle[row] > 0.0 else 0.0
+            continue
+        entry_limit = float(summary[row, entry_price_idx])
+        exit_limit = float(summary[row, exit_price_idx])
+        true_open = values[row, :, 0]
+        true_high = values[row, :, 1]
+        true_low = values[row, :, 2]
+        true_close = values[row, :, 3]
+        if not np.isfinite(entry_limit) or not np.isfinite(exit_limit):
+            missed[row] = 1.0 if true_oracle[row] > 0.0 else 0.0
+            continue
+        if not np.isfinite(true_low[entry_day]) or true_low[entry_day] > entry_limit:
+            missed[row] = 1.0 if true_oracle[row] > 0.0 else 0.0
+            continue
+        entry_fill = min(float(true_open[entry_day]), entry_limit) if np.isfinite(true_open[entry_day]) and true_open[entry_day] <= entry_limit else entry_limit
+        if np.isfinite(true_open[exit_day]) and true_open[exit_day] >= exit_limit:
+            exit_fill = float(true_open[exit_day])
+        elif np.isfinite(true_high[exit_day]) and true_high[exit_day] >= exit_limit:
+            exit_fill = exit_limit
+        else:
+            exit_fill = float(true_close[exit_day])
+        if not np.isfinite(entry_fill) or not np.isfinite(exit_fill):
+            missed[row] = 1.0 if true_oracle[row] > 0.0 else 0.0
+            continue
+        filled[row] = 1.0
+        realized_entry_day[row] = float(entry_day + 1)
+        realized_exit_day[row] = float(exit_day + 1)
+        realized_return[row] = np.float32((1.0 + exit_fill) / max(1.0 + entry_fill, 1.0e-6) - 1.0 - float(UNIFIED_VALUE_TRANSACTION_COST))
+        low_between = np.nanmin(true_low[entry_day : exit_day + 1])
+        realized_drawdown[row] = np.float32(max(1.0 - (1.0 + low_between) / max(1.0 + entry_fill, 1.0e-6), 0.0))
+    return {
+        "realized_fill": filled,
+        "realized_trade_return": realized_return,
+        "realized_in_trade_drawdown": realized_drawdown,
+        "missed_opportunity": missed,
+        "realized_entry_day": realized_entry_day,
+        "realized_exit_day": realized_exit_day,
+    }
+
+
 @torch.no_grad()
 def _predict_split(
     *,
@@ -900,8 +1359,14 @@ def _predict_split(
     if write_predictions and pred_path.exists():
         pred_path.unlink()
     uses_derived_path_value = bool(getattr(model, "uses_derived_path_value", False))
-    summary_columns = derived_path_summary_columns(dataset.forward_days) if uses_derived_path_value else list(dataset.path_summary_columns)
-    value_column = path_value_v2_column(dataset.forward_days) if uses_derived_path_value else str(dataset.value_column)
+    output_path_dim = 6 if bool(getattr(model, "uses_ohlcva_path", False)) else 4
+    output_path_fields = PATH_OHLCVA_FIELDS if output_path_dim >= 6 else PATH_OHLC_FIELDS
+    summary_columns = (
+        derived_path_summary_columns(dataset.forward_days, path_dim=output_path_dim)
+        if uses_derived_path_value
+        else list(dataset.path_summary_columns)
+    )
+    value_column = value_column_for_path(dataset.forward_days, path_dim=output_path_dim) if uses_derived_path_value else str(dataset.value_column)
     pending_date: str | None = None
     pending_frames: list[pd.DataFrame] = []
     ic_rows_by_score: dict[str, list[dict[str, Any]]] = {"score": []}
@@ -949,14 +1414,15 @@ def _predict_split(
         start=1,
     ):
         batch = dataset.get_batch(batch_indices)
-        x, y_path, _y_richer_path, y_summary, _date_idx, symbol_idx = _batch_to_device(batch, device)
+        x, y_path, y_ohlcva_path, _y_richer_path, y_summary, _date_idx, symbol_idx = _batch_to_device(batch, device)
+        target_path = y_ohlcva_path if output_path_dim >= 6 else y_path
         trade_dates = list(batch["trade_date"])
         symbols = list(batch["symbol"])
         del batch
         with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
             out = model(x, symbol_idx=symbol_idx)
         pred_path_np = out["future_path"].detach().float().cpu().numpy()
-        true_path_np = y_path.detach().float().cpu().numpy()
+        true_path_np = target_path.detach().float().cpu().numpy()
         if "score" in out:
             pred_summary_np = out["path_summary"].detach().float().cpu().numpy()
             score_np = out["score"].detach().float().cpu().numpy()
@@ -982,18 +1448,24 @@ def _predict_split(
         for idx, col in enumerate(summary_columns):
             rows[f"true_{col}"] = true_summary_np[:, idx]
             rows[f"pred_{col}"] = pred_summary_np[:, idx]
+        realized_cols: list[str] = []
+        if output_path_dim >= 6:
+            realized = _realize_predicted_plan_numpy(pred_summary_np, true_path_np, forward_days=dataset.forward_days)
+            for col, values in realized.items():
+                rows[col] = values
+                realized_cols.append(col)
         chunk = pd.DataFrame(rows)
         if write_predictions:
             if bool(write_path_predictions):
                 path_rows: dict[str, Any] = {}
                 for day in range(dataset.forward_days):
-                    for field_idx, field in enumerate(PATH_OHLC_FIELDS):
+                    for field_idx, field in enumerate(output_path_fields):
                         path_rows[f"true_{field}_ret_d{day + 1}"] = true_path_np[:, day, field_idx]
                         path_rows[f"pred_{field}_ret_d{day + 1}"] = pred_path_np[:, day, field_idx]
                 chunk = pd.concat([chunk, pd.DataFrame(path_rows)], axis=1, copy=False)
             chunk.to_csv(pred_path, index=False, mode="w" if first_write else "a", header=first_write, encoding="utf-8-sig")
             first_write = False
-        metric_frame = chunk[["trade_date", "symbol", "score", *[f"true_{c}" for c in summary_columns]]].copy()
+        metric_frame = chunk[["trade_date", "symbol", "score", *[f"true_{c}" for c in summary_columns], *realized_cols]].copy()
         for optional_score in ["path_value_score", "residual_score"]:
             if optional_score in chunk.columns:
                 metric_frame[optional_score] = chunk[optional_score].to_numpy(copy=False)
@@ -1019,7 +1491,7 @@ def _predict_split(
             del residual_np
         if "path_value_score_np" in locals():
             del path_value_score_np
-        del x, y_path, _y_richer_path, y_summary, symbol_idx, out, pred_path_np, pred_summary_np, score_np, true_path_np, true_summary_np, chunk, metric_frame
+        del x, y_path, y_ohlcva_path, _y_richer_path, y_summary, target_path, symbol_idx, out, pred_path_np, pred_summary_np, score_np, true_path_np, true_summary_np, chunk, metric_frame
         del trade_dates, symbols
         if predict_batch_count % 100 == 0:
             gc.collect()
@@ -1181,6 +1653,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     train_ds = SequencePathPackDataset(manifest, split="train", max_samples=int(config.max_samples_per_split))
     val_ds = SequencePathPackDataset(manifest, split="validation", max_samples=int(config.max_samples_per_split))
     test_ds = SequencePathPackDataset(manifest, split="test", max_samples=int(config.max_samples_per_split))
+    if str(config.model_type) in OHLCVA_MODEL_TYPES and not bool(train_ds.has_ohlcva_path):
+        raise ValueError("model_type=gru_ohlcva_path_value requires a pack with label_arrays.future_ohlcva_path")
     model = SequencePathModel(
         input_dim=train_ds.input_dim,
         hidden_dim=int(config.hidden_dim),
@@ -1224,14 +1698,15 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         total_batches = len(train_batches)
         for batch_indices in train_batches:
             batch = train_ds.get_batch(batch_indices)
-            x, y_path, y_richer_path, y_summary, date_idx, symbol_idx = _batch_to_device(batch, device)
+            x, y_path, y_ohlcva_path, y_richer_path, y_summary, date_idx, symbol_idx = _batch_to_device(batch, device)
+            target_path = y_ohlcva_path if bool(getattr(model, "uses_ohlcva_path", False)) else y_path
             del batch
             optimizer.zero_grad(set_to_none=True)
             with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
                 out = model(x, symbol_idx=symbol_idx)
                 loss, parts = _compute_loss(
                     out,
-                    y_path,
+                    target_path,
                     y_summary,
                     date_idx,
                     y_richer_path=y_richer_path,
@@ -1266,7 +1741,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                         "updated_at": _now(),
                     },
                 )
-            del x, y_path, y_richer_path, y_summary, date_idx, symbol_idx, out, loss, parts
+            del x, y_path, y_ohlcva_path, y_richer_path, target_path, y_summary, date_idx, symbol_idx, out, loss, parts
             if batch_count % 200 == 0:
                 gc.collect()
                 _trim_working_set()
@@ -1384,9 +1859,14 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     daily_ic.to_csv(daily_ic_path, index=False, encoding="utf-8-sig")
     pd.DataFrame(history).to_csv(history_path, index=False, encoding="utf-8-sig")
     baseline_summary = _find_latest_baseline_summary(train_ds.forward_days)
-    active_value_column = path_value_v2_column(train_ds.forward_days) if bool(getattr(model, "uses_derived_path_value", False)) else train_ds.value_column
+    active_path_dim = 6 if bool(getattr(model, "uses_ohlcva_path", False)) else 4
+    active_value_column = (
+        value_column_for_path(train_ds.forward_days, path_dim=active_path_dim)
+        if bool(getattr(model, "uses_derived_path_value", False))
+        else train_ds.value_column
+    )
     active_summary_columns = (
-        derived_path_summary_columns(train_ds.forward_days)
+        derived_path_summary_columns(train_ds.forward_days, path_dim=active_path_dim)
         if bool(getattr(model, "uses_derived_path_value", False))
         else list(train_ds.path_summary_columns)
     )
@@ -1417,6 +1897,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "uses_symbol_embedding": bool(getattr(model, "uses_symbol_embedding", False)),
             "uses_residual_score": bool(getattr(model, "uses_residual_score", False)),
             "uses_richer_path": bool(getattr(model, "uses_richer_path", False)),
+            "uses_ohlcva_path": bool(getattr(model, "uses_ohlcva_path", False)),
+            "path_dim": int(getattr(model, "path_dim", 4)),
             "richer_path_dim": int(getattr(model, "richer_path_dim", 4)),
             "richer_path_fields": list(train_ds.richer_path_fields) if bool(getattr(model, "uses_richer_path", False)) else [],
             "symbol_embedding_dim": int(config.symbol_embedding_dim) if bool(getattr(model, "uses_symbol_embedding", False)) else 0,
@@ -1478,6 +1960,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "gru_path_value",
             "gru_path_value_symbol",
             "gru_path_value_residual",
+            "gru_ohlcva_path_value",
             "gru_richer_path_value",
             "gru_richer_path_value_symbol",
         ),
@@ -1497,10 +1980,10 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument("--symbol-embedding-dim", type=int, default=16)
     train.add_argument("--learning-rate", type=float, default=1.0e-3)
     train.add_argument("--weight-decay", type=float, default=1.0e-4)
-    train.add_argument("--path-loss-weight", type=float, default=0.45)
+    train.add_argument("--path-loss-weight", type=float, default=0.40)
     train.add_argument("--summary-loss-weight", type=float, default=0.20)
     train.add_argument("--richer-loss-weight", type=float, default=0.10)
-    train.add_argument("--value-loss-weight", type=float, default=0.20)
+    train.add_argument("--value-loss-weight", type=float, default=0.25)
     train.add_argument("--rank-loss-weight", type=float, default=0.15)
     train.add_argument("--residual-score-weight", type=float, default=0.25, help=argparse.SUPPRESS)
     train.add_argument("--residual-penalty-weight", type=float, default=0.01, help=argparse.SUPPRESS)

@@ -4,6 +4,7 @@ import argparse
 import gc
 import json
 import math
+import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -50,6 +51,7 @@ DAILY_RAW_FEATURES = [
 ]
 
 PATH_OHLC_FIELDS = ["open", "high", "low", "close"]
+PATH_OHLCVA_FIELDS = ["open", "high", "low", "close", "volume", "amount"]
 
 
 def path_summary_columns(forward_days: int) -> list[str]:
@@ -186,6 +188,95 @@ def _fill_bool_memmap(path: Path, shape: tuple[int, ...], *, fill_value: bool = 
     return arr
 
 
+class DateShardedFloatStore:
+    def __init__(self, *, directory: Path, name: str, shape: tuple[int, int, int, int], shard_size: int) -> None:
+        self.directory = directory
+        self.name = str(name)
+        self.shape = tuple(int(item) for item in shape)
+        self.shard_size = max(int(shard_size), 1)
+        self.directory.mkdir(parents=True, exist_ok=True)
+        self._shards: dict[int, tuple[int, int, np.memmap, Path]] = {}
+        self.shard_metas: list[dict[str, Any]] = []
+
+    def _open_shard(self, date_idx: int) -> tuple[int, int, np.memmap, Path]:
+        start = (int(date_idx) // self.shard_size) * self.shard_size
+        end = min(start + self.shard_size, self.shape[0])
+        if start in self._shards:
+            return self._shards[start]
+        path = self.directory / f"{self.name}.{start:06d}_{end - 1:06d}.float32.dat"
+        arr = np.memmap(path, dtype="float32", mode="w+", shape=(end - start, *self.shape[1:]))
+        arr[:] = np.nan
+        arr.flush()
+        item = (start, end, arr, path)
+        self._shards[start] = item
+        self.shard_metas.append(
+            {
+                "path": str(path.resolve()),
+                "date_start_idx": int(start),
+                "date_end_idx": int(end - 1),
+                "shape": [int(end - start), *[int(dim) for dim in self.shape[1:]]],
+            }
+        )
+        return item
+
+    def set_date(self, date_idx: int, values: np.ndarray) -> None:
+        start, _end, arr, _path = self._open_shard(int(date_idx))
+        arr[int(date_idx) - start] = values
+
+    def mask_date(self, date_idx: int, mask: np.ndarray) -> None:
+        start, _end, arr, _path = self._open_shard(int(date_idx))
+        arr[int(date_idx) - start, ~mask, :, :] = np.nan
+
+    def flush(self) -> None:
+        for _start, _end, arr, _path in self._shards.values():
+            arr.flush()
+
+    def manifest(self, *, fields: list[str], anchor: str, extra: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "shape": [int(dim) for dim in self.shape],
+            "fields": list(fields),
+            "anchor": str(anchor),
+            "shard_size": int(self.shard_size),
+            "shards": sorted(self.shard_metas, key=lambda item: int(item["date_start_idx"])),
+        }
+        if extra:
+            payload.update(dict(extra))
+        return payload
+
+
+def _label_fill_nan(store: Any) -> None:
+    if store is None:
+        return
+    if isinstance(store, DateShardedFloatStore):
+        return
+    store[:] = np.nan
+
+
+def _label_set_date(store: Any, date_idx: int, values: np.ndarray) -> None:
+    if store is None:
+        return
+    if isinstance(store, DateShardedFloatStore):
+        store.set_date(date_idx, values)
+    else:
+        store[date_idx] = values
+
+
+def _label_mask_date(store: Any, date_idx: int, mask: np.ndarray) -> None:
+    if store is None:
+        return
+    if isinstance(store, DateShardedFloatStore):
+        store.mask_date(date_idx, mask)
+    else:
+        store[date_idx, ~mask, :, :] = np.nan
+
+
+def _label_flush(store: Any) -> None:
+    if store is None:
+        return
+    if hasattr(store, "flush"):
+        store.flush()
+
+
 def _index_frame(frame: pd.DataFrame, date_to_idx: Mapping[str, int], symbol_to_idx: Mapping[str, int]) -> pd.DataFrame:
     out = frame.copy()
     out["_date_idx"] = out["trade_date"].map(date_to_idx)
@@ -237,28 +328,41 @@ def _compute_future_path_and_masks(
     lookback_days: int,
     forward_days: int,
     future_path_out: np.ndarray | None = None,
+    future_ohlcva_path_out: np.ndarray | None = None,
     path_summary_out: np.ndarray | None = None,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    flush_every_dates: int = 8,
+    write_legacy_ohlc_path: bool = True,
+) -> tuple[np.ndarray | None, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     open_panel = raw_panel[:, :, DAILY_RAW_FEATURES.index("open")]
     high_panel = raw_panel[:, :, DAILY_RAW_FEATURES.index("high")]
     low_panel = raw_panel[:, :, DAILY_RAW_FEATURES.index("low")]
     close_panel = raw_panel[:, :, DAILY_RAW_FEATURES.index("close")]
+    volume_log_panel = raw_panel[:, :, DAILY_RAW_FEATURES.index("volume_log")]
+    amount_log_panel = raw_panel[:, :, DAILY_RAW_FEATURES.index("amount_log")]
     n_dates, n_symbols = open_panel.shape
     input_valid = np.zeros((n_dates, n_symbols), dtype=bool)
     entry_buyable = np.zeros((n_dates, n_symbols), dtype=bool)
     label_valid = np.zeros((n_dates, n_symbols), dtype=bool)
     summary_columns = path_summary_columns(forward_days)
-    future_path = (
-        future_path_out
-        if future_path_out is not None
-        else np.full((n_dates, n_symbols, forward_days, 4), np.nan, dtype=np.float32)
+    future_path = None
+    if bool(write_legacy_ohlc_path):
+        future_path = (
+            future_path_out
+            if future_path_out is not None
+            else np.full((n_dates, n_symbols, forward_days, 4), np.nan, dtype=np.float32)
+        )
+    future_ohlcva_path = (
+        future_ohlcva_path_out
+        if future_ohlcva_path_out is not None
+        else np.full((n_dates, n_symbols, forward_days, 6), np.nan, dtype=np.float32)
     )
     path_summary = (
         path_summary_out
         if path_summary_out is not None
         else np.full((n_dates, n_symbols, len(summary_columns)), np.nan, dtype=np.float32)
     )
-    future_path[:] = np.nan
+    _label_fill_nan(future_path)
+    _label_fill_nan(future_ohlcva_path)
     path_summary[:] = np.nan
     finite_close = np.isfinite(close_panel)
     for date_idx in range(n_dates):
@@ -279,11 +383,22 @@ def _compute_future_path_and_masks(
         fut_high = high_panel[entry_idx:end_idx]
         fut_low = low_panel[entry_idx:end_idx]
         fut_close = close_panel[entry_idx:end_idx]
+        fut_volume_log = volume_log_panel[entry_idx:end_idx]
+        fut_amount_log = amount_log_panel[entry_idx:end_idx]
+        history_start = max(0, date_idx - 19)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            trailing_volume_log = np.nanmean(volume_log_panel[history_start : date_idx + 1], axis=0)
+            trailing_amount_log = np.nanmean(amount_log_panel[history_start : date_idx + 1], axis=0)
         path_ok = (
             np.isfinite(fut_open).all(axis=0)
             & np.isfinite(fut_high).all(axis=0)
             & np.isfinite(fut_low).all(axis=0)
             & np.isfinite(fut_close).all(axis=0)
+            & np.isfinite(fut_volume_log).all(axis=0)
+            & np.isfinite(fut_amount_log).all(axis=0)
+            & np.isfinite(trailing_volume_log)
+            & np.isfinite(trailing_amount_log)
             & entry_ok
         )
         label_valid[date_idx] = path_ok
@@ -295,7 +410,14 @@ def _compute_future_path_and_masks(
             fut_close.T / denom[:, None] - 1.0,
         ]
         stacked = np.stack(paths, axis=2).astype(np.float32, copy=False)
-        future_path[date_idx] = stacked
+        volume_rel = (fut_volume_log.T - trailing_volume_log[:, None]).astype(np.float32, copy=False)
+        amount_rel = (fut_amount_log.T - trailing_amount_log[:, None]).astype(np.float32, copy=False)
+        stacked_ohlcva = np.concatenate(
+            [stacked, volume_rel[:, :, None], amount_rel[:, :, None]],
+            axis=2,
+        ).astype(np.float32, copy=False)
+        _label_set_date(future_path, date_idx, stacked)
+        _label_set_date(future_ohlcva_path, date_idx, stacked_ohlcva)
         high_ret = stacked[:, :, 1].astype("float64", copy=False)
         low_ret = stacked[:, :, 2].astype("float64", copy=False)
         close_ret = stacked[:, :, 3].astype("float64", copy=False)
@@ -330,9 +452,16 @@ def _compute_future_path_and_masks(
             ]
         ).astype(np.float32, copy=False)
         summary[~path_ok, :] = np.nan
-        future_path[date_idx, ~path_ok, :, :] = np.nan
+        _label_mask_date(future_path, date_idx, path_ok)
+        _label_mask_date(future_ohlcva_path, date_idx, path_ok)
         path_summary[date_idx] = summary
-    return future_path, path_summary, input_valid, entry_buyable, label_valid
+        if int(flush_every_dates) > 0 and (date_idx + 1) % int(flush_every_dates) == 0:
+            _label_flush(future_path)
+            _label_flush(future_ohlcva_path)
+            if isinstance(path_summary, np.memmap):
+                path_summary.flush()
+            gc.collect()
+    return future_path, future_ohlcva_path, path_summary, input_valid, entry_buyable, label_valid
 
 
 def _fit_normalization(panel: np.ndarray, train_date_mask: np.ndarray) -> dict[str, list[float]]:
@@ -410,6 +539,8 @@ class SequencePackConfig:
     train_years: tuple[int, ...]
     validation_years: tuple[int, ...]
     test_years: tuple[int, ...]
+    write_legacy_ohlc_label: bool = True
+    label_shard_size: int = 0
 
 
 def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
@@ -489,25 +620,48 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
 
     _write_json(progress_path, {"status": "computing_labels", "updated_at": _now()})
     summary_columns = path_summary_columns(config.forward_days)
-    future_path_store = _fill_float_memmap(
-        label_dir / "future_ohlc_path.float32.dat",
-        (n_dates, n_symbols, int(config.forward_days), 4),
-        fill_value=np.nan,
+    future_path_store = (
+        _fill_float_memmap(
+            label_dir / "future_ohlc_path.float32.dat",
+            (n_dates, n_symbols, int(config.forward_days), 4),
+            fill_value=np.nan,
+        )
+        if bool(config.write_legacy_ohlc_label)
+        else None
+    )
+    future_ohlcva_shape = (n_dates, n_symbols, int(config.forward_days), 6)
+    future_ohlcva_path_store = (
+        DateShardedFloatStore(
+            directory=label_dir / "future_ohlcva_path_shards",
+            name="future_ohlcva_path",
+            shape=future_ohlcva_shape,
+            shard_size=int(config.label_shard_size),
+        )
+        if int(config.label_shard_size) > 0
+        else _fill_float_memmap(
+            label_dir / "future_ohlcva_path.float32.dat",
+            future_ohlcva_shape,
+            fill_value=np.nan,
+        )
     )
     path_summary_store = _fill_float_memmap(
         label_dir / "path_summary.float32.dat",
         (n_dates, n_symbols, len(summary_columns)),
         fill_value=np.nan,
     )
-    future_path, path_summary, input_valid, entry_buyable, label_valid = _compute_future_path_and_masks(
+    future_path, future_ohlcva_path, path_summary, input_valid, entry_buyable, label_valid = _compute_future_path_and_masks(
         raw_panel=daily_raw,
         up_limit_panel=up_limit_panel,
         lookback_days=int(config.lookback_days),
         forward_days=int(config.forward_days),
         future_path_out=future_path_store,
+        future_ohlcva_path_out=future_ohlcva_path_store,
         path_summary_out=path_summary_store,
+        write_legacy_ohlc_path=bool(config.write_legacy_ohlc_label),
     )
-    future_path.flush()
+    if future_path is not None:
+        future_path.flush()
+    future_ohlcva_path.flush()
     path_summary_store.flush()
     input_valid_store = _fill_bool_memmap(mask_dir / "input_valid.bool.dat", tuple(int(item) for item in input_valid.shape))
     entry_buyable_store = _fill_bool_memmap(mask_dir / "entry_buyable.bool.dat", tuple(int(item) for item in entry_buyable.shape))
@@ -546,6 +700,38 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
 
     active_dataset_ids = dict(active.get("datasets", {}) or {})
     split_counts = sample_index["split"].value_counts().to_dict() if not sample_index.empty else {}
+    if isinstance(future_ohlcva_path_store, DateShardedFloatStore):
+        future_ohlcva_meta = future_ohlcva_path_store.manifest(
+            fields=PATH_OHLCVA_FIELDS,
+            anchor="next_calendar_trading_day_open",
+            extra={"volume_amount_transform": "log1p(future_value) - trailing_20d_mean_log1p(value)_through_signal_date"},
+        )
+    else:
+        future_ohlcva_meta = {
+            "path": str((label_dir / "future_ohlcva_path.float32.dat").resolve()),
+            "shape": [n_dates, n_symbols, int(config.forward_days), 6],
+            "fields": PATH_OHLCVA_FIELDS,
+            "anchor": "next_calendar_trading_day_open",
+            "volume_amount_transform": "log1p(future_value) - trailing_20d_mean_log1p(value)_through_signal_date",
+        }
+    label_arrays = {
+        "future_ohlcva_path": future_ohlcva_meta,
+        "path_summary": {
+            "path": str((label_dir / "path_summary.float32.dat").resolve()),
+            "shape": [n_dates, n_symbols, len(summary_columns)],
+            "columns": summary_columns,
+        },
+    }
+    if bool(config.write_legacy_ohlc_label):
+        label_arrays = {
+            "future_ohlc_path": {
+                "path": str((label_dir / "future_ohlc_path.float32.dat").resolve()),
+                "shape": [n_dates, n_symbols, int(config.forward_days), 4],
+                "fields": PATH_OHLC_FIELDS,
+                "anchor": "next_calendar_trading_day_open",
+            },
+            **label_arrays,
+        }
     manifest = {
         "artifact_type": "qdp_v2_sequence_path_pack",
         "created_at": _now(),
@@ -581,19 +767,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
                 "columns": LIMIT_SIGNAL_COLUMNS,
             },
         },
-        "label_arrays": {
-            "future_ohlc_path": {
-                "path": str((label_dir / "future_ohlc_path.float32.dat").resolve()),
-                "shape": [n_dates, n_symbols, int(config.forward_days), 4],
-                "fields": PATH_OHLC_FIELDS,
-                "anchor": "next_calendar_trading_day_open",
-            },
-            "path_summary": {
-                "path": str((label_dir / "path_summary.float32.dat").resolve()),
-                "shape": [n_dates, n_symbols, len(summary_columns)],
-                "columns": summary_columns,
-            },
-        },
+        "label_arrays": label_arrays,
         "masks": {
             "input_valid": {"path": str((mask_dir / "input_valid.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
             "entry_buyable": {"path": str((mask_dir / "entry_buyable.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
@@ -603,6 +777,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         "normalization": normalization,
         "label_semantics": {
             "entry_anchor": "signal day close decision, next calendar trading day open entry",
+            "future_ohlcva_path": "OHLC returns are relative to next trading day open; volume and amount are log-relative to trailing 20 trading days ending on signal date.",
             path_value_column(config.forward_days): "future_final_return + 0.50*future_max_return + 0.35*future_min_return + 0.20*drawdown_after_peak",
             "path_type_labels": "derived_explanation_only_not_primary_training_target",
         },
@@ -621,12 +796,25 @@ def validate_sequence_pack(manifest_path: str | Path) -> dict[str, Any]:
         blockers.append("not_qdp_v2_sequence_path_pack")
     for section in ["feature_channels", "label_arrays", "masks"]:
         for name, meta in dict(manifest.get(section, {}) or {}).items():
+            dtype = "bool" if section == "masks" else "float32"
+            shards = list(meta.get("shards", []) or [])
+            if shards:
+                for shard in shards:
+                    file_path = Path(str(shard.get("path", "") or ""))
+                    shape = tuple(int(item) for item in list(shard.get("shape", []) or []))
+                    if not file_path.exists():
+                        blockers.append(f"missing_{section}_{name}_shard")
+                        continue
+                    expected = int(np.prod(shape)) * np.dtype(dtype).itemsize
+                    actual = int(file_path.stat().st_size)
+                    if actual != expected:
+                        blockers.append(f"size_mismatch_{section}_{name}_shard:{actual}!={expected}")
+                continue
             file_path = Path(str(meta.get("path", "") or ""))
             shape = tuple(int(item) for item in list(meta.get("shape", []) or []))
             if not file_path.exists():
                 blockers.append(f"missing_{section}_{name}")
                 continue
-            dtype = "bool" if section == "masks" else "float32"
             expected = int(np.prod(shape)) * np.dtype(dtype).itemsize
             actual = int(file_path.stat().st_size)
             if actual != expected:
@@ -657,6 +845,8 @@ def _build_parser() -> argparse.ArgumentParser:
     build.add_argument("--train-years", default="2012-2023")
     build.add_argument("--validation-years", default="2024")
     build.add_argument("--test-years", default="2025")
+    build.add_argument("--no-legacy-ohlc-label", action="store_true", help="Do not write the separate future_ohlc_path label; OHLC is available as the first four OHLCVA fields.")
+    build.add_argument("--label-shard-size", type=int, default=0, help="Write future_ohlcva_path as date shards of this many dates; 0 writes a single memmap file.")
     build.add_argument("--json", action="store_true")
     validate = sub.add_parser("validate")
     validate.add_argument("--manifest", type=Path, required=True)
@@ -679,6 +869,8 @@ def main(argv: list[str] | None = None) -> int:
             train_years=_parse_years(args.train_years, default=DEFAULT_TRAIN_YEARS),
             validation_years=_parse_years(args.validation_years, default=DEFAULT_VALIDATION_YEARS),
             test_years=_parse_years(args.test_years, default=DEFAULT_TEST_YEARS),
+            write_legacy_ohlc_label=not bool(args.no_legacy_ohlc_label),
+            label_shard_size=int(args.label_shard_size),
         )
         result = build_sequence_pack(cfg)
     else:
