@@ -6,6 +6,7 @@ import torch
 
 from daily_research.path_policy.qdp_v2_sequence_path_pack import (
     DAILY_RAW_FEATURES,
+    DEFAULT_OUTPUT_ROOT,
     PATH_OHLCVA_FIELDS,
     PATH_SUMMARY_COLUMNS,
     _build_sample_index,
@@ -24,6 +25,10 @@ from daily_research.path_policy.qdp_v2_sequence_path_training import (
     path_value_v2_column,
     unified_path_value_column,
 )
+
+
+def test_sequence_pack_default_output_root_is_daily_research_store() -> None:
+    assert DEFAULT_OUTPUT_ROOT.as_posix() == "daily_research/data/research_store/sequence_pack"
 
 
 def _raw_panel(

@@ -1,5 +1,5 @@
 # Daily Research 过程目录
-快照日期：`2026-07-06`
+快照日期：`2026-07-07`
 
 本文件保存可调用过程、环境基线、命令入口和验证选择。它描述“怎么做”，不承担当前事实长卷；当前对象实例见 `state_center.md`。
 
@@ -45,6 +45,13 @@
 `steps`: route task as primary `daily_research` with supporting read-only `quant_data_platform` when QDP data is referenced；write new model-ready artifacts to `daily_research/data/research_store/<artifact_id>/` unless explicitly reusing old compatibility packs；train/evaluate models；write compact current conclusion to `state_center.md` and dated evidence to `references/`.
 `validation`: no PIT leakage, manifest/schema consistency, validation/test predictions, rank IC, topK realized/path value metrics, comparison against current base GRU/path-only/residual/OHLCVA anchors.
 
+### procedure `research_store_gc`
+`input`: H: space pressure, repeated sequence packs, smoke/partial packs, large prediction outputs, or research artifact cleanup request.
+`steps`: run dry-run scan；review safe directory candidates and prediction trim candidates；never delete QDP active datasets from this procedure；only execute deletion with explicit confirmation token after the dry-run report is reviewed.
+`commands`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.research_store_gc scan --write-report --json`
+`delete_guard`: deletion requires `--delete --confirm-delete DELETE_RESEARCH_ARTIFACTS`; safe directory deletion is limited to unreferenced smoke/partial/interrupted artifacts under configured research roots.
+`validation`: inspect JSON/Markdown report；confirm active QDP paths are absent from delete candidates；run `git diff --check` after code/doc changes.
+
 ### procedure `qdp_data_request`
 `input`: missing field, stale dataset, provider coverage gap, canonical requirement.
 `steps`: express requirement as QDP table/update/rebuild work；run or request `python -m quant_data_platform.cli ...`；return explicit table/domain, manifest or downstream pack to daily research.
@@ -69,6 +76,7 @@
 - Task capsule sensor: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
 - Current frontier sensor: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow current-frontier --json`
 - Evidence registry rebuild: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow evidence-index --rebuild --json`
+- Research artifact GC dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.research_store_gc scan --write-report --json`
 - Selective verification: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.selective_verification --paths <changed_paths> --json`
 - Brain doc guard: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed`
 - Brain integrity: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`

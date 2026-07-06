@@ -1,5 +1,5 @@
 # Daily Research 状态程序
-快照日期：`2026-07-06`
+快照日期：`2026-07-07`
 
 本文件是 `daily_research` 的当前程序实例，不是历史长卷；它只保存接管时需要激活的对象、函数和过程入口。
 
@@ -50,8 +50,9 @@
 `current_evidence`: today-close anchor improved test rank IC versus next-open path-only, but topK concentration is not yet decisive; keep as promising research evidence, not promotion evidence.
 `artifact_owner`: `daily_research`; preferred new root is `daily_research/data/research_store/<artifact_id>/`.
 `historical_artifacts`: old full and smoke packs under `quant_data_platform/data/qdp_v2/research/sequence_pack/` are compatibility research artifacts and should not be described as QDP active data base.
-`resource_state`: H: pressure is driven mainly by repeated research packs and `daily_research/output/path_policy/studies`, not by the QDP active data base itself.
-`next_method`: `unify_research_store_and_run_gc_dry_run()`；`continue_path_value_model_comparison()`
+`resource_state`: H: pressure is driven mainly by repeated research packs and `daily_research/output/path_policy/studies`, not by the QDP active data base itself. GC dry-run `20260707_014121` scanned 231 research artifacts / 149.36GB; safe directory candidates are 74 / 14.41GB, prediction-output trim candidates are 46 / 63.55GB. No deletion has been executed.
+`gc_report`: `daily_research/output/path_policy/research_gc/research_gc_dry_run_20260707_014121.md`
+`next_method`: `review_research_gc_dry_run_before_delete()`；`continue_path_value_model_comparison()`
 
 ### object `alpha_v2_history`
 `type`: archived_research_line

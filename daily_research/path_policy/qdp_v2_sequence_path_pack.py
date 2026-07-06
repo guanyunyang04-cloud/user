@@ -25,7 +25,7 @@ from daily_research.path_policy.qdp_v2_raw_rising_path_atlas import (
 
 
 DEFAULT_QDP_ROOT = Path("quant_data_platform/data/qdp_v2")
-DEFAULT_OUTPUT_ROOT = Path("quant_data_platform/data/qdp_v2/research/sequence_pack")
+DEFAULT_OUTPUT_ROOT = Path("daily_research/data/research_store/sequence_pack")
 DEFAULT_LOOKBACK_DAYS = 100
 DEFAULT_FORWARD_DAYS = 20
 DEFAULT_START_DATE = "2012-01-01"

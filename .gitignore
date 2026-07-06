@@ -31,6 +31,8 @@ quant_data_platform/data/tmp/*
 
 daily_research/cache/*
 !daily_research/cache/.gitkeep
+daily_research/data/research_store/*
+!daily_research/data/research_store/.gitkeep
 daily_research/output/*
 !daily_research/output/.gitkeep
 daily_research/execution/output/
