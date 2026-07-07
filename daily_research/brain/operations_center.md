@@ -49,6 +49,7 @@
 `input`: H: space pressure, repeated sequence packs, smoke/partial packs, large prediction outputs, or research artifact cleanup request.
 `steps`: run dry-run scan；review safe directory candidates and prediction trim candidates；never delete QDP active datasets from this procedure；only execute deletion with explicit confirmation token after the dry-run report is reviewed.
 `commands`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.research_store_gc scan --write-report --json`
+`view_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.research_store_gc register-legacy-views --write-report --json`
 `delete_guard`: deletion requires `--delete --confirm-delete DELETE_RESEARCH_ARTIFACTS`; safe directory deletion is limited to unreferenced smoke/partial/interrupted artifacts under configured research roots.
 `validation`: inspect JSON/Markdown report；confirm active QDP paths are absent from delete candidates；run `git diff --check` after code/doc changes.
 

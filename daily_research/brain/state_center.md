@@ -50,9 +50,10 @@
 `current_evidence`: today-close anchor improved test rank IC versus next-open path-only, but topK concentration is not yet decisive; keep as promising research evidence, not promotion evidence.
 `artifact_owner`: `daily_research`; preferred new root is `daily_research/data/research_store/<artifact_id>/`.
 `historical_artifacts`: old full and smoke packs under `quant_data_platform/data/qdp_v2/research/sequence_pack/` are compatibility research artifacts and should not be described as QDP active data base.
-`resource_state`: H: pressure is driven mainly by repeated research packs and `daily_research/output/path_policy/studies`, not by the QDP active data base itself. GC dry-run `20260707_014121` scanned 231 research artifacts / 149.36GB; safe directory candidates are 74 / 14.41GB, prediction-output trim candidates are 46 / 63.55GB. No deletion has been executed.
-`gc_report`: `daily_research/output/path_policy/research_gc/research_gc_dry_run_20260707_014121.md`
-`next_method`: `review_research_gc_dry_run_before_delete()`；`continue_path_value_model_comparison()`
+`resource_state`: H: pressure is driven mainly by repeated research packs and `daily_research/output/path_policy/studies`, not by the QDP active data base itself. On 2026-07-07, guarded research GC deleted 74 unreferenced smoke/partial/interrupted artifacts and reclaimed 14.41GB; post-cleanup dry-run scanned 161 artifacts / 134.95GB with zero safe directory candidates and 46 prediction-output trim candidates / 63.55GB.
+`gc_report`: `daily_research/output/path_policy/research_gc/research_gc_dry_run_20260707_080253.md`
+`research_store_views`: legacy full/view sequence packs are registered as zero-copy manifests under `daily_research/data/research_store/sequence_pack/`; arrays remain in the old compatibility root until physical migration or rebuild.
+`next_method`: `add_prediction_output_trim_guard()`；`continue_path_value_model_comparison()`
 
 ### object `alpha_v2_history`
 `type`: archived_research_line

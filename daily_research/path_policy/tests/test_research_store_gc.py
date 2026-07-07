@@ -184,3 +184,84 @@ def test_delete_safe_candidates_deletes_only_allowed_safe_directories(workspace:
     assert not safe.exists()
     assert outside.exists()
     assert result["skipped"][0]["reason"] == "outside_allowed_roots"
+
+
+def test_register_sequence_pack_view_preserves_source_paths(workspace: Path) -> None:
+    source = workspace / "quant_data_platform/data/qdp_v2/research/sequence_pack/qdp_v2_seq100_path60_full"
+    array_path = source / "panels/daily_raw.float32.dat"
+    array_path.parent.mkdir(parents=True)
+    array_path.write_bytes(b"1234")
+    _write_json(
+        source / "manifest.json",
+        {
+            "artifact_type": "qdp_v2_sequence_path_pack",
+            "feature_channels": {"daily_raw": {"path": str(array_path), "shape": [1], "features": ["x"]}},
+            "label_arrays": {},
+            "masks": {},
+            "sample_index_path": str(source / "sample_index.parquet"),
+        },
+    )
+
+    result = gc.register_sequence_pack_view(source / "manifest.json")
+
+    assert result["status"] == "created"
+    view_manifest = workspace / result["view_manifest"]
+    payload = json.loads(view_manifest.read_text(encoding="utf-8"))
+    assert payload["artifact_type"] == "qdp_v2_sequence_path_pack"
+    assert payload["feature_channels"]["daily_raw"]["path"] == str(array_path)
+    assert payload["artifact_view"]["storage_policy"] == "zero_copy"
+    assert (view_manifest.parent / "VIEW.md").exists()
+
+
+def test_register_sequence_pack_view_is_idempotent_without_overwrite(workspace: Path) -> None:
+    source = workspace / "quant_data_platform/data/qdp_v2/research/sequence_pack/qdp_v2_seq100_path60_full"
+    _write_json(
+        source / "manifest.json",
+        {
+            "artifact_type": "qdp_v2_sequence_path_pack",
+            "feature_channels": {},
+            "label_arrays": {},
+            "masks": {},
+            "sample_index_path": str(source / "sample_index.parquet"),
+        },
+    )
+
+    first = gc.register_sequence_pack_view(source / "manifest.json")
+    second = gc.register_sequence_pack_view(source / "manifest.json")
+
+    assert first["status"] == "created"
+    assert second["status"] == "exists"
+    assert first["view_manifest"] == second["view_manifest"]
+
+
+def test_register_legacy_sequence_pack_views_registers_only_kept_packs(workspace: Path) -> None:
+    root = workspace / "quant_data_platform/data/qdp_v2/research/sequence_pack"
+    full = root / "qdp_v2_seq100_path60_full"
+    _write_json(
+        full / "manifest.json",
+        {
+            "artifact_type": "qdp_v2_sequence_path_pack",
+            "feature_channels": {},
+            "label_arrays": {},
+            "masks": {},
+            "sample_index_path": str(full / "sample_index.parquet"),
+        },
+    )
+    smoke = root / "smoke_seq100_path60"
+    _write_json(
+        smoke / "manifest.json",
+        {
+            "artifact_type": "qdp_v2_sequence_path_pack",
+            "feature_channels": {},
+            "label_arrays": {},
+            "masks": {},
+            "sample_index_path": str(smoke / "sample_index.parquet"),
+        },
+    )
+
+    report = gc.register_legacy_sequence_pack_views(source_roots=[root], reference_roots=[])
+
+    assert report["created_or_existing_count"] == 1
+    assert report["views"][0]["view_manifest"].endswith("qdp_v2_seq100_path60_full/manifest.json")
+    assert report["skipped_count"] == 1
+    assert report["skipped"][0]["classification"] == "smoke_sequence_pack"

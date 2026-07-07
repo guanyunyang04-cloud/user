@@ -69,3 +69,94 @@ No data was deleted during this run.
 
 ## Next Method
 Review the generated dry-run report before deletion. If accepted, run only the guarded directory-delete path for safe candidates first. Add a separate `trim-predictions` command before removing large prediction outputs.
+
+## Executed Cleanup
+User approved the guarded cleanup path on 2026-07-07.
+
+Executed command:
+
+```powershell
+conda run -n yolos python -m daily_research.path_policy.research_store_gc scan --write-report --max-items 1000 --delete --confirm-delete DELETE_RESEARCH_ARTIFACTS --json
+```
+
+Result:
+
+```text
+deleted_count: 74
+deleted_size: 14.4109 GB
+```
+
+Deleted artifact classes:
+
+```text
+unreferenced smoke sequence packs
+unreferenced smoke/throughput studies
+unreferenced partial/intermediate studies
+```
+
+The deleted sequence packs were only smoke packs:
+
+```text
+smoke_seq100_ohlcva_path60_trainvaltest_codex
+smoke_seq100_ohlcva_path60_codex
+smoke_seq100_path60_trainable
+smoke_seq100_path60
+smoke_seq100_path20
+```
+
+Post-delete dry-run:
+
+```text
+daily_research/output/path_policy/research_gc/research_gc_dry_run_20260707_075934.md
+artifact_count: 157
+total_size: 134.9540 GB
+safe_delete_candidate_count: 0
+prediction_trim_candidate_count: 46
+prediction_trim_candidate_size: 63.5546 GB
+```
+
+## Zero-Copy Legacy Views
+Created daily_research-owned view manifests for kept legacy sequence packs. This did not copy large arrays and did not move physical data.
+
+Command:
+
+```powershell
+conda run -n yolos python -m daily_research.path_policy.research_store_gc register-legacy-views --write-report --json
+```
+
+View registration report:
+
+```text
+daily_research/output/path_policy/research_gc/legacy_sequence_pack_views_20260707_080158.json
+```
+
+Views:
+
+```text
+daily_research/data/research_store/sequence_pack/qdp_v2_seq100_ohlcva_path60_full/manifest.json
+daily_research/data/research_store/sequence_pack/qdp_v2_seq100_path20_full/manifest.json
+daily_research/data/research_store/sequence_pack/qdp_v2_seq100_path60_full/manifest.json
+daily_research/data/research_store/sequence_pack/qdp_v2_seq100_path60_todayclose_full/manifest.json
+```
+
+Validation:
+
+```text
+qdp_v2_seq100_ohlcva_path60_full: ok / 6,398,421 samples
+qdp_v2_seq100_path20_full: ok / 6,620,640 samples
+qdp_v2_seq100_path60_full: ok / 6,398,421 samples
+qdp_v2_seq100_path60_todayclose_full: ok / 6,398,421 samples
+```
+
+Final dry-run after view registration:
+
+```text
+daily_research/output/path_policy/research_gc/research_gc_dry_run_20260707_080253.md
+artifact_count: 161
+total_size: 134.9545 GB
+safe_delete_candidate_count: 0
+prediction_trim_candidate_count: 46
+prediction_trim_candidate_size: 63.5546 GB
+```
+
+Next cleanup method: add a separate prediction-output trim guard that preserves summary, metrics, best checkpoints and reports before deleting large forecast CSV/parquet files.
