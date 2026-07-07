@@ -14,7 +14,7 @@
 ## object `research_identity`
 `type`: objective_model
 `north_star`: 找到可执行、可验证、成本后仍有意义的交易研究链路。
-`current_focus`: 收盘后短线选股；执行侧仍是冻结骨架，当前不把 research progress 自动解释成 live/default。
+`current_focus`: seq100 today-close path-value research mainline；执行侧仍是冻结骨架，当前不把 research progress 自动解释成 live/default。
 `success_shape`: 研究结论能对齐数据基底、样本池、PIT/可得性、特征语义、模型输出、回测口径、成本假设和证据等级。
 `failure_shape`: 把低预算实验、loose latest、执行骨架、历史标签或单次收益现象混成当前策略结论。
 
@@ -36,7 +36,7 @@
 ## object `historical_research_identity`
 `type`: archived_lineage
 `state`: 旧 path20、alpha_v2、continuous_policy、short_v5b、v2 reset 等线保留为证据和方法库。
-`usage`: 被当前任务明确选中时才激活；默认不阻塞 QDP 数据基底上的新短线研究。
+`usage`: 被当前任务明确选中时才激活；默认不阻塞 QDP 数据基底上的 seq100 today-close path-value research。
 `invariant`: 历史 active/default、历史 winner、历史 payload 不等于当前可执行策略。
 
 ## Pure Functions

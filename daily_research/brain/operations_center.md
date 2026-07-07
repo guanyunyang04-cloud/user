@@ -23,6 +23,13 @@
 `compat_roots`: none active; old `quant_data_platform/data/qdp_v2/research/` artifacts were physically migrated or deleted on 2026-07-07.
 `rule`: model-ready data uses shared `panel_store`、`label_store`、`sample_index` and lightweight `views`; QDP active data remains read-only source unless a task explicitly changes active datasets.
 
+### object `seq100_mainline`
+`owner`: `daily_research`
+`contract`: `daily_research/brain/references/path_policy_seq100_mainline_slimming_contract_20260707.md`
+`cli`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline`
+`default_view`: `daily_research/data/research_store/views/seq100_path60_todayclose_ohlcva.json`
+`rule`: default work uses the fixed today-close path-only profile; richer, residual, symbol, OHLCVA-unified and rank-heavy variants are comparison/archived surfaces unless explicitly requested.
+
 ### object `execution_runtime`
 `state`: frozen skeleton / read-only diagnostics / candidate wrappers.
 `app_entry`: `conda run -n yolos python daily_research/execution/run_execution_app.py web --port 8765`
@@ -42,8 +49,17 @@
 
 ### procedure `seq100_path_value_research_work`
 `input`: QDP v2 active tables or existing compatibility sequence pack, model/loss/value-function change, evaluation request.
-`steps`: route task as primary `daily_research` with supporting read-only `quant_data_platform` when QDP data is referenced；prefer `--store-view daily_research/data/research_store/views/<view>.json` over self-contained full packs；write new reusable arrays to `panel_store` or `label_store` and new experiment semantics as lightweight views；train/evaluate models；write compact current conclusion to `state_center.md` and dated evidence to `references/`.
-`validation`: no PIT leakage, manifest/schema consistency, validation/test predictions, rank IC, topK realized/path value metrics, comparison against current base GRU/path-only/residual/OHLCVA anchors.
+`steps`: route task as primary `daily_research` with supporting read-only `quant_data_platform` when QDP data is referenced；start from `seq100_mainline` unless the user explicitly asks for a comparison branch；prefer `--store-view daily_research/data/research_store/views/<view>.json` over self-contained full packs；train/evaluate models；write compact current conclusion to `state_center.md` and dated evidence to `references/`.
+`validation`: no PIT leakage, manifest/schema consistency, validation/test predictions, rank IC, topK realized/path value spread, comparison only against named baseline surfaces.
+
+### procedure `seq100_mainline_default`
+`input`: train/evaluate/summarize the current seq100 path-value mainline.
+`train_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train --json`
+`contract_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline contract --json`
+`dry_run_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train --dry-run --json`
+`summary_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline summarize --run-dir <run_dir> --json`
+`fixed_profile`: `store_view=seq100_path60_todayclose_ohlcva`；`model_type=gru_path_value`；`loss=path0.45/summary0.20/value0.20/rank0.15`；`top_k=1,3,5,10,20,50,100`；`prediction_mode=compact`。
+`side_effects`: research artifacts only；does not activate execution surface.
 
 ### procedure `research_store_gc`
 `input`: H: space pressure, repeated sequence packs, smoke/partial packs, large prediction outputs, or research artifact cleanup request.
@@ -81,6 +97,8 @@
 ## Command Palette
 - Task capsule sensor: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
 - Current frontier sensor: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow current-frontier --json`
+- Seq100 mainline contract: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline contract --json`
+- Seq100 mainline dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train --dry-run --json`
 - Evidence registry rebuild: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow evidence-index --rebuild --json`
 - Research artifact GC dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.research_store_gc scan --write-report --json`
 - Selective verification: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.selective_verification --paths <changed_paths> --json`

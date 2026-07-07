@@ -46,8 +46,10 @@
 - `daily_research` 当前研究消费 QDP v2 数据基底；旧 daily_research lake / copied manifest / single memmap 不再是数据 owner。
 - QDP active data base and downstream pack status are recorded in `state_center.md` under `qdp_consumption`.
 - 当前主要研究方向是 `seq100_path_value_research`：用过去 100 日路径和状态序列预测未来路径，路径摘要和 path value 从预测路径派生；收盘后短线选股经验保留为可复用研究线。
-- Today-close anchor improves path-only test rank IC versus next-open anchor, but topK concentration is not yet decisive; treat as promising research evidence, not promotion evidence.
+- 当前默认主线已瘦身为 `seq100_todayclose_path_only`：`research_store_view -> seq100_x84_input -> today_close_anchor -> future60_ohlc_path -> path_trade_value_v2 -> path_value_spread`。
+- Today-close path-only is the default research mainline; topK path-value spread remains research evidence, not promotion evidence.
 - `Path20` / `alpha_path20_neural_policy_v1` 是历史证据代号和代码 namespace，不再代表当前目标定义。
+- `symbol_embedding`、`residual_score`、`richer_target`、`ohlcva_unified` and `rank_heavy_top1` are comparison or paused surfaces, not default concepts.
 - continuous_policy 的长期思想是日级连续交易执行模型；当前不是 active/default 或执行解冻依据。
 - daily execution 的事实层是手动流程、作业证据和只读 daily verdict；Web 可运行或旧 runtime state 只提供辅助线索。
 - evidence registry v3 使用 `research_programs`、`study_families`、`run_tags` 三层索引。
@@ -64,9 +66,13 @@
 - 训练用数据集不是事实源；新 model-ready training artifacts 优先进入 `daily_research/data/research_store`，QDP active data base 只保存共享事实和质量证明。
 
 ## Research Line Index
+### object `seq100_todayclose_path_only`
+`status`: current primary research mainline.
+`usage`: 默认训练、评估和接管解释都从 `daily_research.path_policy.seq100_mainline` 进入；只有用户显式要求时才展开 comparison branch。
+
 ### object `shortline_after_close_research`
-`status`: current active research pointer.
-`purpose`: 收盘后短线选股，围绕 D 收盘后更新、D+1 入场、T+1 约束下 D+2+ 退出的研究链。
+`status`: supporting research prior.
+`purpose`: 收盘后短线选股，围绕 D 收盘后更新、D+1 入场、T+1 约束下 D+2+ 退出的研究链；当前主要复用为执行层评估和条件入场先验。
 `evidence`: see `state_center.md` and shortline references.
 
 ### object `alpha_v2_and_v2_reset_history`

@@ -53,6 +53,12 @@
     "terms": [
       "path20",
       "path_policy",
+      "seq100",
+      "seq100_todayclose_path_only",
+      "seq100_mainline",
+      "path_value",
+      "path_trade_value_v2",
+      "research_store_view",
       "alpha_path20",
       "alpha_multi_horizon",
       "alpha_multi_horizon_utility_policy_v1",
