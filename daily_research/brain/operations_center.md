@@ -47,10 +47,13 @@
 
 ### procedure `research_store_gc`
 `input`: H: space pressure, repeated sequence packs, smoke/partial packs, large prediction outputs, or research artifact cleanup request.
-`steps`: run dry-run scan；review safe directory candidates and prediction trim candidates；never delete QDP active datasets from this procedure；only execute deletion with explicit confirmation token after the dry-run report is reviewed.
+`steps`: run dry-run scan；review safe directory candidates and prediction trim candidates；never delete QDP active datasets from this procedure；only execute directory deletion or prediction-output trim with explicit confirmation token after the dry-run report is reviewed.
 `commands`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.research_store_gc scan --write-report --json`
 `migration_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.research_store_gc migrate-legacy-packs --write-report --json`
+`trim_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.research_store_gc trim-predictions --write-report --json`
 `delete_guard`: deletion requires `--delete --confirm-delete DELETE_RESEARCH_ARTIFACTS`; safe directory deletion is limited to unreferenced smoke/partial/interrupted artifacts under configured research roots.
+`trim_guard`: prediction trim requires `--delete --confirm-trim TRIM_PREDICTION_OUTPUTS`; it deletes only large prediction CSV/parquet/feather files under the studies root and retains summary JSON, metrics CSV, reports and checkpoints.
+`prevention_rule`: sequence path training defaults to `--prediction-mode compact`; full path-level prediction CSVs require explicit `--prediction-mode full --allow-large-predictions`. Flat LightGBM does not write predictions unless `--write-predictions` is provided.
 `validation`: inspect JSON/Markdown report；confirm active QDP paths are absent from delete candidates；run `git diff --check` after code/doc changes.
 
 ### procedure `qdp_data_request`

@@ -50,10 +50,10 @@
 `current_evidence`: today-close anchor improved test rank IC versus next-open path-only, but topK concentration is not yet decisive; keep as promising research evidence, not promotion evidence.
 `artifact_owner`: `daily_research`; preferred new root is `daily_research/data/research_store/<artifact_id>/`.
 `historical_artifacts`: old QDP research artifacts were physically migrated or deleted on 2026-07-07; `quant_data_platform/data/qdp_v2/research/` no longer exists as a training-pack location.
-`resource_state`: H: pressure is driven mainly by repeated research packs and `daily_research/output/path_policy/studies`, not by the QDP active data base itself. On 2026-07-07, guarded research GC deleted 74 unreferenced smoke/partial/interrupted artifacts and reclaimed 14.41GB; old full sequence packs, sharded memmap, and training pack were physically moved to `daily_research/data/research_store/`. Post-migration dry-run scanned 157 sequence/study artifacts / 134.95GB with zero safe directory candidates and 46 prediction-output trim candidates / 63.55GB.
-`gc_report`: `daily_research/output/path_policy/research_gc/research_gc_dry_run_20260707_082023.md`
+`resource_state`: H: pressure is driven mainly by repeated research packs and `daily_research/output/path_policy/studies`, not by the QDP active data base itself. On 2026-07-07, guarded research GC deleted 74 unreferenced smoke/partial/interrupted artifacts and reclaimed 14.41GB; old full sequence packs, sharded memmap, and training pack were physically moved to `daily_research/data/research_store/`. Prediction output trim then deleted 92 large forecast CSV files across 46 studies and reclaimed 63.55GB, preserving summaries, metrics, checkpoints and reports. Post-trim dry-run scanned 157 sequence/study artifacts / 71.40GB with zero safe directory candidates and zero prediction trim candidates.
+`gc_report`: `daily_research/output/path_policy/research_gc/research_gc_dry_run_20260707_085231.md`
 `research_store_physical`: sequence packs live under `daily_research/data/research_store/sequence_pack/`; old alpha_v2 sharded memmap and training pack live under `daily_research/data/research_store/sharded_memmap/` and `daily_research/data/research_store/training_pack/`.
-`next_method`: `add_prediction_output_trim_guard()`；`continue_path_value_model_comparison()`
+`next_method`: `continue_path_value_model_comparison()`
 
 ### object `alpha_v2_history`
 `type`: archived_research_line

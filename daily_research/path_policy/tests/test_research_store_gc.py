@@ -105,6 +105,19 @@ def test_study_large_prediction_file_is_trim_candidate_not_directory_delete(work
     assert any(file_item["kind"] == "prediction_output" for file_item in item.large_files)
 
 
+def test_sequence_training_summary_counts_as_study_summary(workspace: Path) -> None:
+    study = workspace / "daily_research/output/path_policy/studies/qdp_v2_seq100_path60_gru"
+    _write_json(study / "sequence_path_training_summary.json", {"run_tag": "qdp_v2_seq100_path60_gru"})
+    prediction = study / "predictions/test_predictions.csv"
+    prediction.parent.mkdir(parents=True)
+    prediction.write_bytes(b"1234567890")
+
+    item = gc.classify_study(study, reference_text="", large_file_threshold_bytes=1)
+
+    assert item.classification == "study_with_large_prediction_outputs"
+    assert item.summary_path.endswith("sequence_path_training_summary.json")
+
+
 def test_build_report_groups_safe_delete_and_trim_candidates(workspace: Path) -> None:
     pack_root = workspace / "daily_research/data/research_store/sequence_pack"
     smoke = pack_root / "smoke_seq100_path20"
@@ -128,6 +141,80 @@ def test_build_report_groups_safe_delete_and_trim_candidates(workspace: Path) ->
     assert report["totals"]["safe_delete_candidate_count"] == 1
     assert report["totals"]["prediction_trim_candidate_count"] == 1
     assert report["safe_delete_candidates"][0]["name"] == "smoke_seq100_path20"
+
+
+def test_trim_prediction_outputs_dry_run_does_not_delete(workspace: Path) -> None:
+    studies = workspace / "daily_research/output/path_policy/studies"
+    study = studies / "qdp_v2_seq100_path60_model"
+    _write_json(study / "study_summary.json", {"run_tag": "qdp_v2_seq100_path60_model"})
+    prediction = study / "forecast_predictions_test.csv"
+    prediction.write_bytes(b"1234567890")
+    metrics = study / "topk_metrics.csv"
+    metrics.write_text("top_k,value\n10,1\n", encoding="utf-8")
+
+    result = gc.trim_prediction_outputs(
+        studies_root=studies,
+        reference_roots=[],
+        large_file_threshold_mb=0.000001,
+        delete=False,
+    )
+
+    assert result["status"] == "dry_run"
+    assert result["totals"]["candidate_file_count"] == 1
+    assert prediction.exists()
+    assert metrics.exists()
+    assert not (study / "prediction_trim_manifest.json").exists()
+
+
+def test_trim_prediction_outputs_requires_confirmation(workspace: Path) -> None:
+    studies = workspace / "daily_research/output/path_policy/studies"
+    study = studies / "qdp_v2_seq100_path60_model"
+    _write_json(study / "study_summary.json", {"run_tag": "qdp_v2_seq100_path60_model"})
+    prediction = study / "forecast_predictions_test.csv"
+    prediction.write_bytes(b"1234567890")
+
+    with pytest.raises(ValueError):
+        gc.trim_prediction_outputs(
+            studies_root=studies,
+            reference_roots=[],
+            large_file_threshold_mb=0.000001,
+            delete=True,
+            confirm_trim="",
+        )
+
+    assert prediction.exists()
+
+
+def test_trim_prediction_outputs_deletes_only_prediction_files_and_marks_summary(workspace: Path) -> None:
+    studies = workspace / "daily_research/output/path_policy/studies"
+    study = studies / "qdp_v2_seq100_path60_model"
+    _write_json(study / "study_summary.json", {"run_tag": "qdp_v2_seq100_path60_model"})
+    prediction = study / "forecast_predictions_test.csv"
+    prediction.write_bytes(b"1234567890")
+    metrics = study / "topk_metrics.csv"
+    metrics.write_text("top_k,value\n10,1\n", encoding="utf-8")
+    checkpoint = study / "best_model.pt"
+    checkpoint.write_bytes(b"checkpoint")
+
+    result = gc.trim_prediction_outputs(
+        studies_root=studies,
+        reference_roots=[],
+        large_file_threshold_mb=0.000001,
+        delete=True,
+        confirm_trim=gc.TRIM_CONFIRMATION,
+    )
+
+    assert result["status"] == "trim_executed"
+    assert result["totals"]["deleted_file_count"] == 1
+    assert not prediction.exists()
+    assert metrics.exists()
+    assert checkpoint.exists()
+    manifest = json.loads((study / "prediction_trim_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["deleted_file_count"] == 1
+    assert manifest["retained_files"]
+    summary = json.loads((study / "study_summary.json").read_text(encoding="utf-8"))
+    assert summary["prediction_outputs_trimmed"] is True
+    assert summary["prediction_trim_manifest"].endswith("prediction_trim_manifest.json")
 
 
 def test_delete_safe_candidates_requires_confirmation(workspace: Path) -> None:

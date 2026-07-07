@@ -386,7 +386,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--n-jobs", type=int, default=4)
     parser.add_argument("--max-dense-matrix-gb", type=float, default=8.0)
     parser.add_argument("--allow-full-flat-train", action="store_true")
-    parser.add_argument("--write-predictions", dest="write_predictions", action="store_true", default=True)
+    parser.add_argument("--write-predictions", dest="write_predictions", action="store_true", default=False)
     parser.add_argument("--no-predictions", dest="write_predictions", action="store_false")
     parser.add_argument("--json", action="store_true")
     return parser

@@ -24,6 +24,12 @@ DEFAULT_REFERENCE_ROOTS = (
 )
 DEFAULT_REPORT_ROOT = Path("daily_research/output/path_policy/research_gc")
 DELETE_CONFIRMATION = "DELETE_RESEARCH_ARTIFACTS"
+TRIM_CONFIRMATION = "TRIM_PREDICTION_OUTPUTS"
+SUMMARY_FILE_NAMES = (
+    "study_summary.json",
+    "sequence_path_training_summary.json",
+    "sequence_flat_lgbm_summary.json",
+)
 
 
 @dataclass(frozen=True)
@@ -179,6 +185,7 @@ def _large_files(path: str | Path, *, threshold_bytes: int, max_files: int) -> l
                     "path": _relative(file_path),
                     "size_bytes": int(stat.st_size),
                     "size_gb": round(float(stat.st_size) / 1024**3, 4),
+                    "mtime": _format_mtime(float(stat.st_mtime)),
                     "suffix": file_path.suffix.lower(),
                     "kind": _large_file_kind(file_path),
                 }
@@ -197,6 +204,45 @@ def _large_file_kind(path: Path) -> str:
     if path.suffix.lower() in {".csv", ".parquet"}:
         return "tabular_output"
     return "large_file"
+
+
+def _study_summary_paths(path: str | Path) -> list[Path]:
+    artifact_dir = _workspace_path(path)
+    return [artifact_dir / name for name in SUMMARY_FILE_NAMES if (artifact_dir / name).exists()]
+
+
+def _primary_study_summary_path(path: str | Path) -> Path:
+    summaries = _study_summary_paths(path)
+    return summaries[0] if summaries else _workspace_path(path) / "study_summary.json"
+
+
+def _large_prediction_files(path: str | Path, *, threshold_bytes: int) -> list[dict[str, Any]]:
+    root = _workspace_path(path)
+    out: list[dict[str, Any]] = []
+    if not root.exists():
+        return out
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for name in filenames:
+            file_path = Path(dirpath) / name
+            if _large_file_kind(file_path) != "prediction_output":
+                continue
+            try:
+                stat = file_path.stat()
+            except OSError:
+                continue
+            if stat.st_size < threshold_bytes:
+                continue
+            out.append(
+                {
+                    "path": _relative(file_path),
+                    "size_bytes": int(stat.st_size),
+                    "size_gb": round(float(stat.st_size) / 1024**3, 4),
+                    "mtime": _format_mtime(float(stat.st_mtime)),
+                    "suffix": file_path.suffix.lower(),
+                    "kind": "prediction_output",
+                }
+            )
+    return sorted(out, key=lambda item: int(item["size_bytes"]), reverse=True)
 
 
 def _manifest_references_outside_dir(manifest: Mapping[str, Any], artifact_dir: Path) -> bool:
@@ -303,7 +349,7 @@ def classify_sequence_pack(path: str | Path, *, reference_text: str, large_file_
 def classify_study(path: str | Path, *, reference_text: str, large_file_threshold_bytes: int) -> ArtifactItem:
     artifact_dir = _workspace_path(path)
     name = artifact_dir.name
-    summary_path = artifact_dir / "study_summary.json"
+    summary_path = _primary_study_summary_path(artifact_dir)
     size = _directory_size(artifact_dir)
     referenced = _is_referenced(name, reference_text)
     large_files = _large_files(artifact_dir, threshold_bytes=large_file_threshold_bytes, max_files=12)
@@ -419,7 +465,7 @@ def build_research_gc_report(
             "deletes_active_qdp_data": False,
             "delete_requires": ["--delete", f"--confirm-delete {DELETE_CONFIRMATION}"],
             "safe_delete_directory_rule": "only unreferenced smoke/partial/interrupted artifacts under allowed research roots",
-            "prediction_trim_rule": "reported only; not deleted by directory GC",
+            "prediction_trim_rule": f"use trim-predictions --delete --confirm-trim {TRIM_CONFIRMATION}; directory GC does not delete whole studies for prediction bloat",
         },
         "roots": {
             "sequence_pack_roots": [_relative(path) for path in sequence_pack_roots],
@@ -461,7 +507,7 @@ def write_markdown_report(path: str | Path, report: Mapping[str, Any]) -> Path:
         "",
         "- Active QDP datasets are not delete candidates.",
         "- Directory deletion requires explicit delete flags and only applies to unreferenced smoke/partial/interrupted research artifacts.",
-        "- Large prediction output trimming is reported but not deleted by directory GC.",
+        "- Large prediction output trimming uses the separate `trim-predictions` command; directory GC does not delete whole studies for prediction bloat.",
         "",
         "## Largest Artifacts",
         "",
@@ -479,6 +525,42 @@ def write_markdown_report(path: str | Path, report: Mapping[str, Any]) -> Path:
             f"| {item.get('size_gb', 0)} | {item.get('artifact_type', '')} | {', '.join(item.get('reasons', []))} | `{item.get('path', '')}` |"
         )
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return target
+
+
+def write_prediction_trim_markdown_report(path: str | Path, report: Mapping[str, Any]) -> Path:
+    target = _workspace_path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    totals = dict(report.get("totals", {}) or {})
+    lines = [
+        "# Prediction Output Trim Report",
+        "",
+        f"- Generated at: `{report.get('generated_at', '')}`",
+        f"- Status: `{report.get('status', '')}`",
+        f"- Candidate studies: `{totals.get('candidate_study_count', 0)}`",
+        f"- Candidate files: `{totals.get('candidate_file_count', 0)}`",
+        f"- Candidate size: `{totals.get('candidate_size_gb', 0)} GB`",
+        f"- Deleted files: `{totals.get('deleted_file_count', 0)}`",
+        f"- Reclaimed size: `{totals.get('deleted_size_gb', 0)} GB`",
+        "",
+        "## Policy",
+        "",
+        "- Only large prediction CSV/parquet/feather outputs under the configured studies root are candidates.",
+        "- Summary JSON, metrics CSV, reports and checkpoints are retained.",
+        "- Delete mode requires `--delete --confirm-trim TRIM_PREDICTION_OUTPUTS`.",
+        "",
+        "## Candidates",
+        "",
+        "| Size GB | Files | Deleted | Study |",
+        "|---:|---:|---:|---|",
+    ]
+    for item in list(report.get("candidates", []) or [])[:100]:
+        lines.append(
+            f"| {item.get('candidate_size_gb', 0)} | {item.get('candidate_file_count', 0)} | "
+            f"{item.get('deleted_file_count', 0)} | `{item.get('study_path', '')}` |"
+        )
+    lines.append("")
+    target.write_text("\n".join(lines), encoding="utf-8")
     return target
 
 
@@ -635,6 +717,185 @@ def delete_safe_candidates(report: Mapping[str, Any], *, allowed_roots: Iterable
     }
 
 
+def _retained_study_files(study_dir: Path) -> list[str]:
+    retained: list[str] = []
+    exact_names = {
+        *SUMMARY_FILE_NAMES,
+        "split_metrics.csv",
+        "topk_metrics.csv",
+        "daily_rank_ic.csv",
+        "training_history.csv",
+        "sequence_path_training_report.md",
+        "sequence_flat_lgbm_summary.json",
+        "feature_importance.csv",
+        "best_model.pt",
+    }
+    for path in sorted(study_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        if path.name in exact_names or path.suffix.lower() in {".pt", ".md"}:
+            retained.append(_relative(path))
+    return retained[:200]
+
+
+def _write_prediction_trim_manifest(
+    study_dir: Path,
+    *,
+    candidate_files: list[dict[str, Any]],
+    deleted_files: list[dict[str, Any]],
+    skipped_files: list[dict[str, Any]],
+) -> Path:
+    manifest_path = study_dir / "prediction_trim_manifest.json"
+    payload = {
+        "schema_version": 1,
+        "generated_at": _now(),
+        "study_path": _relative(study_dir),
+        "policy": {
+            "trimmed_kind": "prediction_output",
+            "retained": "summary JSON, metrics CSV, reports and checkpoints",
+            "regeneration_note": "Full prediction rows were removed to control research-output bloat; regenerate explicitly from the pack/checkpoint only when needed.",
+        },
+        "candidate_file_count": len(candidate_files),
+        "deleted_file_count": len(deleted_files),
+        "deleted_size_bytes": sum(int(item.get("size_bytes", 0) or 0) for item in deleted_files),
+        "deleted_size_gb": round(
+            sum(int(item.get("size_bytes", 0) or 0) for item in deleted_files) / 1024**3,
+            4,
+        ),
+        "candidate_files": candidate_files,
+        "deleted_files": deleted_files,
+        "skipped_files": skipped_files,
+        "retained_files": _retained_study_files(study_dir),
+    }
+    return _write_json(manifest_path, payload)
+
+
+def _mark_summaries_prediction_trimmed(study_dir: Path, manifest_path: Path, *, deleted_files: list[dict[str, Any]]) -> None:
+    trimmed_size = sum(int(item.get("size_bytes", 0) or 0) for item in deleted_files)
+    for summary_path in _study_summary_paths(study_dir):
+        payload = _read_json(summary_path)
+        if not payload:
+            continue
+        payload["prediction_outputs_trimmed"] = True
+        payload["prediction_trimmed_at"] = _now()
+        payload["prediction_trim_manifest"] = _relative(manifest_path)
+        payload["prediction_trimmed_file_count"] = len(deleted_files)
+        payload["prediction_trimmed_size_bytes"] = trimmed_size
+        payload["prediction_trimmed_size_gb"] = round(float(trimmed_size) / 1024**3, 4)
+        _write_json(summary_path, payload)
+
+
+def trim_prediction_outputs(
+    *,
+    studies_root: str | Path = DEFAULT_STUDIES_ROOT,
+    reference_roots: Iterable[str | Path] = DEFAULT_REFERENCE_ROOTS,
+    large_file_threshold_mb: float = 256.0,
+    max_items: int = 1000,
+    delete: bool = False,
+    confirm_trim: str = "",
+) -> dict[str, Any]:
+    if delete and str(confirm_trim or "") != TRIM_CONFIRMATION:
+        raise ValueError(f"prediction trim requires --confirm-trim {TRIM_CONFIRMATION}")
+    threshold_bytes = max(int(float(large_file_threshold_mb) * 1024 * 1024), 1)
+    root = _workspace_path(studies_root)
+    reference_text = _collect_reference_text(reference_roots)
+    candidates: list[dict[str, Any]] = []
+    totals = {
+        "candidate_study_count": 0,
+        "candidate_file_count": 0,
+        "candidate_size_bytes": 0,
+        "candidate_size_gb": 0.0,
+        "deleted_file_count": 0,
+        "deleted_size_bytes": 0,
+        "deleted_size_gb": 0.0,
+        "skipped_file_count": 0,
+    }
+    for study_dir in _scan_child_dirs([root]):
+        item = classify_study(study_dir, reference_text=reference_text, large_file_threshold_bytes=threshold_bytes)
+        if item.cleanup_action != "trim_large_prediction_files":
+            continue
+        files = _large_prediction_files(study_dir, threshold_bytes=threshold_bytes)
+        if not files:
+            continue
+        candidate_size = sum(int(file_item.get("size_bytes", 0) or 0) for file_item in files)
+        deleted_files: list[dict[str, Any]] = []
+        skipped_files: list[dict[str, Any]] = []
+        manifest_path = ""
+        if delete:
+            if not _path_is_inside(study_dir, [root]):
+                skipped_files.append({"path": _relative(study_dir), "reason": "study_outside_allowed_root"})
+            else:
+                for file_item in files:
+                    file_path = _workspace_path(str(file_item.get("path", "") or ""))
+                    if not _path_is_inside(file_path, [study_dir]):
+                        skipped_files.append({**file_item, "reason": "file_outside_study_dir"})
+                        continue
+                    if not file_path.exists() or not file_path.is_file():
+                        skipped_files.append({**file_item, "reason": "missing_or_not_file"})
+                        continue
+                    try:
+                        file_path.unlink()
+                    except OSError as exc:
+                        skipped_files.append({**file_item, "reason": f"unlink_failed:{exc.__class__.__name__}"})
+                        continue
+                    deleted_files.append(file_item)
+                manifest_path_obj = _write_prediction_trim_manifest(
+                    study_dir,
+                    candidate_files=files,
+                    deleted_files=deleted_files,
+                    skipped_files=skipped_files,
+                )
+                manifest_path = _relative(manifest_path_obj)
+                if deleted_files:
+                    _mark_summaries_prediction_trimmed(study_dir, manifest_path_obj, deleted_files=deleted_files)
+        deleted_size = sum(int(file_item.get("size_bytes", 0) or 0) for file_item in deleted_files)
+        candidates.append(
+            {
+                "study_name": item.name,
+                "study_path": item.path,
+                "summary_path": item.summary_path,
+                "referenced_by_brain": item.referenced_by_brain,
+                "candidate_file_count": len(files),
+                "candidate_size_bytes": candidate_size,
+                "candidate_size_gb": round(float(candidate_size) / 1024**3, 4),
+                "deleted_file_count": len(deleted_files),
+                "deleted_size_bytes": deleted_size,
+                "deleted_size_gb": round(float(deleted_size) / 1024**3, 4),
+                "skipped_file_count": len(skipped_files),
+                "trim_manifest": manifest_path,
+                "files": files[:20],
+                "skipped_files": skipped_files,
+            }
+        )
+        totals["candidate_study_count"] += 1
+        totals["candidate_file_count"] += len(files)
+        totals["candidate_size_bytes"] += candidate_size
+        totals["deleted_file_count"] += len(deleted_files)
+        totals["deleted_size_bytes"] += deleted_size
+        totals["skipped_file_count"] += len(skipped_files)
+    totals["candidate_size_gb"] = round(float(totals["candidate_size_bytes"]) / 1024**3, 4)
+    totals["deleted_size_gb"] = round(float(totals["deleted_size_bytes"]) / 1024**3, 4)
+    candidates = sorted(candidates, key=lambda row: int(row.get("candidate_size_bytes", 0)), reverse=True)
+    return {
+        "schema_version": 1,
+        "status": "trim_executed" if delete else "dry_run",
+        "generated_at": _now(),
+        "workspace_root": str(WORKSPACE_ROOT.resolve()),
+        "policy": {
+            "deletes_active_qdp_data": False,
+            "delete_requires": ["--delete", f"--confirm-trim {TRIM_CONFIRMATION}"],
+            "trim_rule": "delete only large prediction_output files under studies root; keep summaries, metrics, reports and checkpoints",
+            "large_file_threshold_mb": float(large_file_threshold_mb),
+        },
+        "roots": {
+            "studies_root": _relative(root),
+            "reference_roots": [_relative(path) for path in reference_roots],
+        },
+        "totals": totals,
+        "candidates": candidates[:max(int(max_items), 1)],
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Dry-run and guarded cleanup for daily_research model-ready artifacts.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -656,6 +917,16 @@ def build_parser() -> argparse.ArgumentParser:
     migrate.add_argument("--write-report", action="store_true")
     migrate.add_argument("--report-root", type=Path, default=DEFAULT_REPORT_ROOT)
     migrate.add_argument("--json", action="store_true")
+    trim = sub.add_parser("trim-predictions", help="Dry-run or delete large prediction output files while keeping study summaries and metrics.")
+    trim.add_argument("--studies-root", type=Path, default=DEFAULT_STUDIES_ROOT)
+    trim.add_argument("--reference-root", action="append", type=Path, default=None)
+    trim.add_argument("--large-file-threshold-mb", type=float, default=256.0)
+    trim.add_argument("--max-items", type=int, default=1000)
+    trim.add_argument("--write-report", action="store_true")
+    trim.add_argument("--report-root", type=Path, default=DEFAULT_REPORT_ROOT)
+    trim.add_argument("--delete", action="store_true")
+    trim.add_argument("--confirm-trim", default="")
+    trim.add_argument("--json", action="store_true")
     return parser
 
 
@@ -700,6 +971,25 @@ def main(argv: list[str] | None = None) -> int:
             report_path = _write_json(args.report_root / f"legacy_sequence_pack_migration_{stamp}.json", report)
             report = dict(report)
             report["report_path"] = _relative(report_path)
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "trim-predictions":
+        reference_roots = tuple(args.reference_root) if args.reference_root else DEFAULT_REFERENCE_ROOTS
+        report = trim_prediction_outputs(
+            studies_root=args.studies_root,
+            reference_roots=reference_roots,
+            large_file_threshold_mb=float(args.large_file_threshold_mb),
+            max_items=max(int(args.max_items), 1),
+            delete=bool(args.delete),
+            confirm_trim=str(args.confirm_trim or ""),
+        )
+        if args.write_report:
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            prefix = "prediction_trim_execute" if bool(args.delete) else "prediction_trim_dry_run"
+            json_path = _write_json(args.report_root / f"{prefix}_{stamp}.json", report)
+            md_path = write_prediction_trim_markdown_report(args.report_root / f"{prefix}_{stamp}.md", report)
+            report = dict(report)
+            report["report_paths"] = {"json": _relative(json_path), "markdown": _relative(md_path)}
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0
     raise ValueError(f"unsupported command: {args.command}")

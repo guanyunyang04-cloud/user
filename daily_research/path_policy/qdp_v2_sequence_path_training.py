@@ -1915,6 +1915,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         "path_summary_columns": list(active_summary_columns),
         "device": str(device),
         "amp_enabled": bool(amp_enabled),
+        "prediction_mode": str(config.prediction_mode),
         "epochs": int(config.epochs),
         "completed_epochs": int(len(history)),
         "best_epoch": int(best_epoch),
@@ -1960,8 +1961,12 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "topk_metrics_csv": str(topk_path.resolve()),
             "daily_rank_ic_csv": str(daily_ic_path.resolve()),
             "training_history_csv": str(history_path.resolve()),
-            "validation_predictions_csv": str((output_dir / "predictions" / "validation_predictions.csv").resolve()),
-            "test_predictions_csv": str((output_dir / "predictions" / "test_predictions.csv").resolve()),
+            "validation_predictions_csv": str((output_dir / "predictions" / "validation_predictions.csv").resolve())
+            if str(config.prediction_mode) != "none"
+            else "",
+            "test_predictions_csv": str((output_dir / "predictions" / "test_predictions.csv").resolve())
+            if str(config.prediction_mode) != "none"
+            else "",
         },
         "baseline_feature_summary": baseline_summary.get("output_dir", ""),
     }
@@ -2028,7 +2033,12 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument("--seed", type=int, default=DEFAULT_SEED)
     train.add_argument("--top-k", default="5,10,20,50,100")
     train.add_argument("--max-samples-per-split", type=int, default=0)
-    train.add_argument("--prediction-mode", default="full", choices=("full", "compact", "none"))
+    train.add_argument("--prediction-mode", default="compact", choices=("full", "compact", "none"))
+    train.add_argument(
+        "--allow-large-predictions",
+        action="store_true",
+        help="Allow prediction-mode=full to write wide per-day path prediction CSVs.",
+    )
     train.add_argument("--early-stopping-patience", type=int, default=0)
     train.add_argument("--early-stopping-min-delta", type=float, default=0.0)
     train.add_argument("--json", action="store_true")
@@ -2038,6 +2048,8 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    if str(args.prediction_mode) == "full" and not bool(args.allow_large_predictions):
+        raise SystemExit("--prediction-mode full writes large path-level prediction CSVs; add --allow-large-predictions to opt in.")
     model_type = str(args.experimental_model_type or args.model_type or "").strip()
     if not model_type:
         if bool(args.richer_path):

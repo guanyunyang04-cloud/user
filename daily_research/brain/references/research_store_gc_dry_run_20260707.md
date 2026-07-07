@@ -174,4 +174,62 @@ prediction_trim_candidate_count: 46
 prediction_trim_candidate_size: 63.5546 GB
 ```
 
-Next cleanup method: add a separate prediction-output trim guard that preserves summary, metrics, best checkpoints and reports before deleting large forecast CSV/parquet files.
+## Prediction Output Trim
+The separate prediction-output trim guard was implemented and executed on 2026-07-07.
+
+Dry-run command:
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.research_store_gc trim-predictions --write-report --json
+```
+
+Dry-run result:
+
+```text
+daily_research/output/path_policy/research_gc/prediction_trim_dry_run_20260707_085158.md
+candidate_study_count: 46
+candidate_file_count: 92
+candidate_size: 63.5546 GB
+```
+
+Executed command:
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.research_store_gc trim-predictions --delete --confirm-trim TRIM_PREDICTION_OUTPUTS --write-report --json
+```
+
+Executed result:
+
+```text
+daily_research/output/path_policy/research_gc/prediction_trim_execute_20260707_085215.md
+deleted_file_count: 92
+deleted_size: 63.5546 GB
+skipped_file_count: 0
+```
+
+Scope:
+
+```text
+deleted: large prediction CSV/parquet/feather outputs under daily_research/output/path_policy/studies
+retained: study summaries, split/topK/daily IC metrics, training history, reports, checkpoints
+per-study evidence: prediction_trim_manifest.json
+```
+
+Post-trim dry-run:
+
+```text
+daily_research/output/path_policy/research_gc/research_gc_dry_run_20260707_085231.md
+artifact_count: 157
+total_size: 71.3996 GB
+safe_delete_candidate_count: 0
+prediction_trim_candidate_count: 0
+prediction_trim_candidate_size: 0 GB
+```
+
+Prevention changes:
+
+```text
+qdp_v2_sequence_path_training default prediction mode: compact
+full path-level prediction CSVs now require: --prediction-mode full --allow-large-predictions
+qdp_v2_sequence_flat_lgbm no longer writes predictions by default; requires --write-predictions
+```
