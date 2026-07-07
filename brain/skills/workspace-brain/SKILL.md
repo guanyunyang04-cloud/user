@@ -24,7 +24,7 @@ This workspace is a personal research brain expressed as natural-language progra
 - `daily_research` owns research, model, backtest, execution-candidate, and active artifact evidence; it consumes QDP v2 tables or explicit downstream packs.
 - For cross-project tasks, identify objects before choosing a brain: QDP active data base objects are owned by `quant_data_platform`; sequence packs, memmaps, normalization, labels, model outputs, losses, evaluations, stock profiles, and backtests are owned by `daily_research`.
 - Treat route/capsule as primary-owner sensors, not exclusive project locks. Mixed QDP + research/model tasks should normally use primary `daily_research` with supporting read-only `quant_data_platform`, unless the task actually changes active QDP datasets or quality facts.
-- New model-ready training artifacts default to `daily_research/data/research_store/<artifact_id>/`; old `quant_data_platform/data/qdp_v2/research/sequence_pack/` artifacts are compatibility research artifacts, not QDP active data base.
+- Model-ready training artifacts belong under `daily_research/data/research_store/<artifact_id>/`; old `quant_data_platform/data/qdp_v2/research/` artifacts were migrated or deleted and are not valid active entrypoints.
 - If a task changes project architecture, CLI, data pointers, data semantics, quality conclusions, or execution boundaries, sync the relevant child brain hot path or state `brain_sync=false` with a reason in the final answer.
 - Keep temporary artifacts near the relevant project or task.
 

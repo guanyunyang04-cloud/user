@@ -19,8 +19,8 @@
 
 - QDP active data base: `quant_data_platform/data/qdp_v2/active/active.json`, dataset manifests, parquet shards, provider ingest and quality proofs.
 - Research artifacts: sequence packs, memmaps, normalization, sample index, labels, model outputs, prediction CSVs, summaries and evaluations.
-- Preferred future root: `daily_research/data/research_store/<artifact_id>/`.
-- Compatibility root: `quant_data_platform/data/qdp_v2/research/sequence_pack/`; these artifacts remain readable but are not QDP active data base.
+- Artifact root: `daily_research/data/research_store/<artifact_id>/`.
+- Legacy QDP research roots were physically migrated or deleted on 2026-07-07; they are not valid active entrypoints.
 
 ## Resource Decision
 

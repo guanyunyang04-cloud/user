@@ -4922,7 +4922,7 @@
       "verdict": "Status: research_only / brain_orchestration_updated / no_active_change.; Owner: daily_research owns seq100 path-value research artifacts, models, loss, evaluation and path-value semantics; quant_data_platform owns QDP v2 active source data and quality proof.; Current evidence: today-close anchor improved test rank IC versus next-open path-only, while topK concentration remains not decisive.; Active artifact impact: unchanged.",
       "blockers": [
         "Not promotion evidence and not an execution thaw.",
-        "Old sequence packs under quant_data_platform/data/qdp_v2/research/sequence_pack are compatibility research artifacts, not QDP active data base."
+        "Old QDP research artifacts were physically migrated to daily_research/data/research_store or deleted; quant_data_platform/data/qdp_v2/research is not a valid training-pack entrypoint."
       ],
       "next_allowed_actions": [
         "Use primary daily_research with supporting read-only quant_data_platform for mixed QDP + model/research tasks.",

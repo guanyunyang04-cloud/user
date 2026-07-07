@@ -14,7 +14,6 @@ WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RESEARCH_STORE_ROOT = Path("daily_research/data/research_store")
 DEFAULT_SEQUENCE_PACK_ROOTS = (
     DEFAULT_RESEARCH_STORE_ROOT / "sequence_pack",
-    Path("quant_data_platform/data/qdp_v2/research/sequence_pack"),
 )
 DEFAULT_STUDIES_ROOT = Path("daily_research/output/path_policy/studies")
 DEFAULT_REFERENCE_ROOTS = (
@@ -483,75 +482,106 @@ def write_markdown_report(path: str | Path, report: Mapping[str, Any]) -> Path:
     return target
 
 
-def register_sequence_pack_view(
-    source_manifest: str | Path,
-    *,
-    view_root: str | Path = DEFAULT_RESEARCH_STORE_ROOT / "sequence_pack",
-    overwrite: bool = False,
-) -> dict[str, Any]:
-    source = _workspace_path(source_manifest)
-    if not source.exists():
-        raise FileNotFoundError(source)
-    manifest = _read_json(source)
-    if manifest.get("artifact_type") != "qdp_v2_sequence_path_pack":
-        raise ValueError(f"not a qdp_v2 sequence path pack manifest: {source}")
-    view_dir = _workspace_path(view_root) / source.parent.name
-    view_manifest = view_dir / "manifest.json"
-    if view_manifest.exists() and not overwrite:
-        return {
-            "status": "exists",
-            "source_manifest": _relative(source),
-            "view_manifest": _relative(view_manifest),
-            "view_dir": _relative(view_dir),
-        }
+def _rewrite_path_string(value: str, replacements: Mapping[str, str]) -> str:
+    out = value
+    for old, new in replacements.items():
+        out = out.replace(old, new)
+    return out
 
-    payload = dict(manifest)
-    payload["artifact_view"] = {
-        "schema_version": 1,
-        "view_type": "legacy_sequence_pack_zero_copy",
-        "created_at": _now(),
-        "owner": "daily_research",
-        "source_manifest": str(source.resolve()),
-        "source_artifact_root": str(source.parent.resolve()),
-        "view_dir": str(view_dir.resolve()),
-        "storage_policy": "zero_copy",
-        "note": "Array paths intentionally remain in the source compatibility location; this view changes ownership/entrypoint, not physical storage.",
+
+def _rewrite_json_strings(value: Any, replacements: Mapping[str, str]) -> Any:
+    if isinstance(value, str):
+        return _rewrite_path_string(value, replacements)
+    if isinstance(value, list):
+        return [_rewrite_json_strings(item, replacements) for item in value]
+    if isinstance(value, dict):
+        return {key: _rewrite_json_strings(item, replacements) for key, item in value.items()}
+    return value
+
+
+def _path_replacements(source_root: Path, target_root: Path) -> dict[str, str]:
+    source_abs = str(source_root.resolve())
+    target_abs = str(target_root.resolve())
+    source_rel = _relative(source_root)
+    target_rel = _relative(target_root)
+    return {
+        source_abs: target_abs,
+        source_abs.replace("\\", "/"): target_abs.replace("\\", "/"),
+        source_rel: target_rel,
+        source_rel.replace("/", "\\"): target_rel.replace("/", "\\"),
     }
-    _write_json(view_manifest, payload)
-    (view_dir / "VIEW.md").write_text(
-        "\n".join(
-            [
-                "# Zero-Copy Sequence Pack View",
-                "",
-                f"- Source manifest: `{_relative(source)}`",
-                "- Owner: `daily_research`",
-                "- Storage policy: `zero_copy`",
-                "- The manifest is readable by existing training code because array paths are preserved.",
-                "- Do not delete or move the source artifact until a physical migration or rebuild replaces these paths.",
-                "",
-            ]
-        ),
-        encoding="utf-8",
+
+
+def _rewrite_pack_json_files(pack_dir: Path, *, source_root: Path, target_root: Path, source_dir: Path, target_dir: Path) -> None:
+    replacements = {
+        **_path_replacements(source_root, target_root),
+        **_path_replacements(source_dir, target_dir),
+    }
+    for json_path in [path for path in pack_dir.rglob("*.json") if path.is_file()]:
+        payload = _read_json(json_path)
+        if not payload:
+            continue
+        payload = _rewrite_json_strings(payload, replacements)
+        if json_path.name == "manifest.json":
+            payload.pop("artifact_view", None)
+            payload["artifact_migration"] = {
+                "schema_version": 1,
+                "migrated_at": _now(),
+                "owner": "daily_research",
+                "storage_policy": "physical",
+                "artifact_name": target_dir.name,
+                "reason": "sequence packs are daily_research research artifacts, not QDP active data base",
+            }
+        _write_json(json_path, payload)
+
+
+def migrate_legacy_sequence_pack(
+    source_dir: str | Path,
+    *,
+    source_root: str | Path = Path("quant_data_platform/data/qdp_v2/research/sequence_pack"),
+    target_root: str | Path = DEFAULT_RESEARCH_STORE_ROOT / "sequence_pack",
+) -> dict[str, Any]:
+    source_root_path = _workspace_path(source_root).resolve()
+    target_root_path = _workspace_path(target_root).resolve()
+    source_path = _workspace_path(source_dir).resolve()
+    source_path.relative_to(source_root_path)
+    target_root_path.relative_to(WORKSPACE_ROOT.resolve())
+    target_path = target_root_path / source_path.name
+    if not source_path.exists() or not source_path.is_dir():
+        raise FileNotFoundError(source_path)
+    if not (source_path / "manifest.json").exists():
+        raise ValueError(f"source pack has no manifest.json: {source_path}")
+    if target_path.exists():
+        raise FileExistsError(target_path)
+    target_root_path.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(source_path), str(target_path))
+    _rewrite_pack_json_files(
+        target_path,
+        source_root=source_root_path,
+        target_root=target_root_path,
+        source_dir=source_path,
+        target_dir=target_path,
     )
     return {
-        "status": "created",
-        "source_manifest": _relative(source),
-        "view_manifest": _relative(view_manifest),
-        "view_dir": _relative(view_dir),
+        "status": "migrated",
+        "source_dir": _relative(source_path),
+        "target_dir": _relative(target_path),
+        "manifest_path": _relative(target_path / "manifest.json"),
     }
 
 
-def register_legacy_sequence_pack_views(
+def migrate_legacy_sequence_packs(
     *,
-    source_roots: Iterable[str | Path] = (Path("quant_data_platform/data/qdp_v2/research/sequence_pack"),),
-    view_root: str | Path = DEFAULT_RESEARCH_STORE_ROOT / "sequence_pack",
+    source_root: str | Path = Path("quant_data_platform/data/qdp_v2/research/sequence_pack"),
+    target_root: str | Path = DEFAULT_RESEARCH_STORE_ROOT / "sequence_pack",
     reference_roots: Iterable[str | Path] = DEFAULT_REFERENCE_ROOTS,
-    overwrite: bool = False,
 ) -> dict[str, Any]:
+    source_root_path = _workspace_path(source_root)
+    target_root_path = _workspace_path(target_root)
     reference_text = _collect_reference_text(reference_roots)
-    created: list[dict[str, Any]] = []
+    migrated: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
-    for artifact_dir in _scan_child_dirs(source_roots):
+    for artifact_dir in _scan_child_dirs([source_root_path]):
         item = classify_sequence_pack(artifact_dir, reference_text=reference_text, large_file_threshold_bytes=1024**4)
         if item.classification not in {"full_sequence_pack", "view_or_reanchor_sequence_pack"}:
             skipped.append(
@@ -562,22 +592,18 @@ def register_legacy_sequence_pack_views(
                 }
             )
             continue
-        result = register_sequence_pack_view(
-            artifact_dir / "manifest.json",
-            view_root=view_root,
-            overwrite=overwrite,
-        )
+        result = migrate_legacy_sequence_pack(artifact_dir, source_root=source_root_path, target_root=target_root_path)
         result["classification"] = item.classification
-        created.append(result)
+        migrated.append(result)
     return {
         "schema_version": 1,
         "status": "ok",
         "generated_at": _now(),
-        "source_roots": [_relative(path) for path in source_roots],
-        "view_root": _relative(view_root),
-        "created_or_existing_count": len(created),
+        "source_root": _relative(source_root_path),
+        "target_root": _relative(target_root_path),
+        "migrated_count": len(migrated),
         "skipped_count": len(skipped),
-        "views": created,
+        "migrated": migrated,
         "skipped": skipped,
     }
 
@@ -623,14 +649,13 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--delete", action="store_true")
     scan.add_argument("--confirm-delete", default="")
     scan.add_argument("--json", action="store_true")
-    views = sub.add_parser("register-legacy-views", help="Create zero-copy daily_research view manifests for legacy sequence packs.")
-    views.add_argument("--source-root", action="append", type=Path, default=None)
-    views.add_argument("--view-root", type=Path, default=DEFAULT_RESEARCH_STORE_ROOT / "sequence_pack")
-    views.add_argument("--reference-root", action="append", type=Path, default=None)
-    views.add_argument("--overwrite", action="store_true")
-    views.add_argument("--write-report", action="store_true")
-    views.add_argument("--report-root", type=Path, default=DEFAULT_REPORT_ROOT)
-    views.add_argument("--json", action="store_true")
+    migrate = sub.add_parser("migrate-legacy-packs", help="Physically move kept legacy sequence packs into daily_research research_store and rewrite manifests.")
+    migrate.add_argument("--source-root", type=Path, default=Path("quant_data_platform/data/qdp_v2/research/sequence_pack"))
+    migrate.add_argument("--target-root", type=Path, default=DEFAULT_RESEARCH_STORE_ROOT / "sequence_pack")
+    migrate.add_argument("--reference-root", action="append", type=Path, default=None)
+    migrate.add_argument("--write-report", action="store_true")
+    migrate.add_argument("--report-root", type=Path, default=DEFAULT_REPORT_ROOT)
+    migrate.add_argument("--json", action="store_true")
     return parser
 
 
@@ -663,18 +688,16 @@ def main(argv: list[str] | None = None) -> int:
             report["delete_result"] = delete_result
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0
-    if args.command == "register-legacy-views":
-        source_roots = tuple(args.source_root) if args.source_root else (Path("quant_data_platform/data/qdp_v2/research/sequence_pack"),)
+    if args.command == "migrate-legacy-packs":
         reference_roots = tuple(args.reference_root) if args.reference_root else DEFAULT_REFERENCE_ROOTS
-        report = register_legacy_sequence_pack_views(
-            source_roots=source_roots,
-            view_root=args.view_root,
+        report = migrate_legacy_sequence_packs(
+            source_root=args.source_root,
+            target_root=args.target_root,
             reference_roots=reference_roots,
-            overwrite=bool(args.overwrite),
         )
         if args.write_report:
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            report_path = _write_json(args.report_root / f"legacy_sequence_pack_views_{stamp}.json", report)
+            report_path = _write_json(args.report_root / f"legacy_sequence_pack_migration_{stamp}.json", report)
             report = dict(report)
             report["report_path"] = _relative(report_path)
         print(json.dumps(report, ensure_ascii=False, indent=2))

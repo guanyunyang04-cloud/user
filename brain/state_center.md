@@ -37,7 +37,7 @@
 `state`: route/capsule now expose `primary_brain_id`、`supporting_brain_ids`、`object_routes` and `writeback_targets`; selected child is the primary owner, not the only project an agent may inspect.
 `rule`: QDP active data base objects are owned by `quant_data_platform`; research artifacts, sequence packs, models, losses, evaluations, stock profiles and backtests are owned by `daily_research`.
 `example`: QDP v2 data used for GRU/path-value training returns primary `daily_research` with supporting read-only `quant_data_platform`.
-`artifact_default`: new model-ready training datasets should enter `daily_research/data/research_store/<artifact_id>/`; old `quant_data_platform/data/qdp_v2/research/sequence_pack/` artifacts remain compatibility research artifacts, not QDP active data base.
+`artifact_default`: model-ready training datasets belong under `daily_research/data/research_store/<artifact_id>/`; old `quant_data_platform/data/qdp_v2/research/` artifacts were migrated or deleted and are not valid active entrypoints.
 `closure_sensor`: `tools.brain.workflow closure-check` maps task and changed paths back to object routes, writeback targets and validation commands before final response.
 
 ### object `t0_project_child`

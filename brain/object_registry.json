@@ -73,8 +73,7 @@
         "research_store",
         "memmap",
         "path_policy",
-        "daily_research/data/research_store",
-        "quant_data_platform/data/qdp_v2/research/sequence_pack"
+        "daily_research/data/research_store"
       ],
       "write_terms": [
         "build",
@@ -86,8 +85,7 @@
       ],
       "path_prefixes": [
         "daily_research/data/research_store/",
-        "daily_research/path_policy/",
-        "quant_data_platform/data/qdp_v2/research/sequence_pack/"
+        "daily_research/path_policy/"
       ],
       "default_mode": "write",
       "write_reason": "research artifact",

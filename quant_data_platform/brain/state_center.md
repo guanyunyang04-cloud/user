@@ -1,5 +1,5 @@
 # Quant Data Platform 状态程序
-快照日期：`2026-07-06`
+快照日期：`2026-07-07`
 
 ## Module Interface
 `exports`: QDP v2 active data base status、active table list、dataset manifest summaries、quality/audit entrypoints。
@@ -64,10 +64,10 @@
 
 ### object `downstream_research_artifact_boundary`
 `type`: ownership_boundary
-`state`: `quant_data_platform/data/qdp_v2/research/sequence_pack/` is a compatibility location for historical `daily_research` model-ready artifacts, not part of the QDP active data base.
+`state`: downstream model-ready artifacts are no longer stored under `quant_data_platform/data/qdp_v2/research/`; that legacy research root was physically migrated or deleted on 2026-07-07.
 `owner`: `daily_research`
-`qdp_role`: provide source active tables, dataset manifests, quality proofs and stable data scope; do not own model loss, path value, normalization, sample index or training result semantics.
-`future_default`: new sequence packs and model-ready datasets should be written under `daily_research/data/research_store/<artifact_id>/` unless a task explicitly chooses a workspace shared artifact store.
+`qdp_role`: provide source active tables, dataset manifests, quality proofs and stable data scope; do not own model loss, path value, normalization, sample index, memmap or training result semantics.
+`artifact_root`: `daily_research/data/research_store/<artifact_id>/`
 
 ### object `provider_runtime`
 `type`: upstream_ingest_runtime

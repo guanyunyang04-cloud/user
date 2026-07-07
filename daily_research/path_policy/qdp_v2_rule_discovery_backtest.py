@@ -18,7 +18,7 @@ import pandas as pd
 
 
 DEFAULT_TRAINING_PACK_MANIFEST = Path(
-    "quant_data_platform/data/qdp_v2/research/training_pack/"
+    "daily_research/data/research_store/training_pack/"
     "qdp_v2_alpha_v2_full_contract_2012_2025_20260702_01_training_pack/"
     "qdp_training_pack_manifest.json"
 )

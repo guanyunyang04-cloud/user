@@ -1,5 +1,5 @@
 # Daily Research 知识对象
-快照日期：`2026-07-06`
+快照日期：`2026-07-07`
 
 本文件保存稳定对象类、长期事实和方法论。它不承载当前状态长卷，也不复刻历史证据；完整 rXX、长命令和 dated review 在 `references/`。
 
@@ -22,7 +22,7 @@
 `owner`: `daily_research`
 `products`: sequence packs、memmaps、normalization、sample_index、labels、model outputs、prediction CSVs、study summaries and evaluation reports.
 `preferred_root`: `daily_research/data/research_store`
-`compatibility_roots`: old artifacts under `quant_data_platform/data/qdp_v2/research/sequence_pack/` remain readable but are not QDP active data base.
+`compatibility_roots`: none active; old `quant_data_platform/data/qdp_v2/research/` artifacts were physically migrated or deleted on 2026-07-07.
 `invariant`: artifact manifests should declare owner project, source data base, artifact type, lifecycle and retention policy.
 
 ### class `research_program`

@@ -9,11 +9,7 @@ New model-ready artifacts now default to:
 daily_research/data/research_store/sequence_pack
 ```
 
-Historical sequence packs under this compatibility root remain readable but are not QDP active data base objects:
-
-```text
-quant_data_platform/data/qdp_v2/research/sequence_pack
-```
+Historical research artifacts under `quant_data_platform/data/qdp_v2/research/` were wrong-owner model-ready artifacts. They have been physically migrated to `daily_research/data/research_store/` or deleted when they were smoke/partial artifacts.
 
 ## Implemented Controls
 - Added `daily_research.path_policy.research_store_gc`.
@@ -115,45 +111,64 @@ prediction_trim_candidate_count: 46
 prediction_trim_candidate_size: 63.5546 GB
 ```
 
-## Zero-Copy Legacy Views
-Created daily_research-owned view manifests for kept legacy sequence packs. This did not copy large arrays and did not move physical data.
+## Physical Legacy Migration
+The temporary view step was superseded by physical migration because training artifacts should live where their owner lives.
 
 Command:
 
 ```powershell
-conda run -n yolos python -m daily_research.path_policy.research_store_gc register-legacy-views --write-report --json
+conda run -n yolos python -m daily_research.path_policy.research_store_gc migrate-legacy-packs --write-report --json
 ```
 
-View registration report:
+Sequence pack migration report:
 
 ```text
-daily_research/output/path_policy/research_gc/legacy_sequence_pack_views_20260707_080158.json
+daily_research/output/path_policy/research_gc/legacy_sequence_pack_migration_20260707_081550.json
 ```
 
-Views:
+Migrated sequence packs:
 
 ```text
-daily_research/data/research_store/sequence_pack/qdp_v2_seq100_ohlcva_path60_full/manifest.json
-daily_research/data/research_store/sequence_pack/qdp_v2_seq100_path20_full/manifest.json
-daily_research/data/research_store/sequence_pack/qdp_v2_seq100_path60_full/manifest.json
-daily_research/data/research_store/sequence_pack/qdp_v2_seq100_path60_todayclose_full/manifest.json
+qdp_v2_seq100_ohlcva_path60_full
+qdp_v2_seq100_path20_full
+qdp_v2_seq100_path60_full
+qdp_v2_seq100_path60_todayclose_full
 ```
 
-Validation:
+The old alpha_v2 sharded memmap and training pack were also physically moved:
+
+```text
+daily_research/data/research_store/sharded_memmap/qdp_v2_alpha_v2_full_contract_2012_2025_20260702_01
+daily_research/data/research_store/training_pack/qdp_v2_alpha_v2_full_contract_2012_2025_20260702_01_training_pack
+```
+
+Deleted smoke artifacts from the old QDP research root:
+
+```text
+qdp_v2_alpha_v2_smoke_pack_contract_20260702_01
+qdp_v2_alpha_v2_smoke_shard_20260702_01
+qdp_v2_alpha_v2_smoke_shard_contract_20260702_01
+qdp_v2_alpha_v2_smoke_pack_contract_20260702_01_training_pack
+```
+
+Validation after physical migration:
 
 ```text
 qdp_v2_seq100_ohlcva_path60_full: ok / 6,398,421 samples
 qdp_v2_seq100_path20_full: ok / 6,620,640 samples
 qdp_v2_seq100_path60_full: ok / 6,398,421 samples
 qdp_v2_seq100_path60_todayclose_full: ok / 6,398,421 samples
+actual pathlike strings under daily_research/data/research_store: 5,220 checked / 0 missing
+old QDP research root: missing
+old QDP research path strings under research_store: 0
 ```
 
-Final dry-run after view registration:
+Final dry-run after physical migration:
 
 ```text
-daily_research/output/path_policy/research_gc/research_gc_dry_run_20260707_080253.md
-artifact_count: 161
-total_size: 134.9545 GB
+daily_research/output/path_policy/research_gc/research_gc_dry_run_20260707_082023.md
+artifact_count: 157
+total_size: 134.9540 GB
 safe_delete_candidate_count: 0
 prediction_trim_candidate_count: 46
 prediction_trim_candidate_size: 63.5546 GB
