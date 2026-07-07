@@ -49,7 +49,7 @@
 - 当前默认主线已瘦身为 `seq100_todayclose_path_only`：`research_store_view -> seq100_x84_input -> today_close_anchor -> future60_ohlc_path -> path_trade_value_v2 -> path_value_spread`。
 - Today-close path-only is the default research mainline; topK path-value spread remains research evidence, not promotion evidence.
 - `Path20` / `alpha_path20_neural_policy_v1` 是历史证据代号和代码 namespace，不再代表当前目标定义。
-- `summary_v2_multi_horizon_ohlc` is an explicit comparison profile that keeps OHLC output and only expands OHLC-derived summary-loss constraints.
+- `summary_v2_multi_horizon_ohlc` is an explicit comparison profile that keeps OHLC output and only expands OHLC-derived summary-loss constraints; its narrow CLI default uses `early_stopping_patience=2`, and the multi-horizon loss is vectorized without changing the per-horizon objective.
 - `symbol_embedding`、`residual_score`、`richer_target`、`ohlcva_unified` and `rank_heavy_top1` are comparison or paused surfaces, not default concepts.
 - continuous_policy 的长期思想是日级连续交易执行模型；当前不是 active/default 或执行解冻依据。
 - daily execution 的事实层是手动流程、作业证据和只读 daily verdict；Web 可运行或旧 runtime state 只提供辅助线索。

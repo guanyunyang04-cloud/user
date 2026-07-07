@@ -21,6 +21,8 @@ from daily_research.path_policy.qdp_v2_sequence_path_training import (
     SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
     _derive_path_summary_numpy,
     _derive_path_summary_torch,
+    _multi_horizon_ohlc_summary_loss_loop,
+    _multi_horizon_ohlc_summary_loss_vectorized,
     _realize_predicted_plan_numpy,
     _summary_loss_windows,
     derived_path_summary_columns,
@@ -318,6 +320,18 @@ def test_multi_horizon_ohlc_summary_loss_uses_available_windows() -> None:
     assert torch.isfinite(perturbed_loss)
     assert exact_parts["summary_loss"] == 0.0
     assert perturbed_parts["summary_loss"] > exact_parts["summary_loss"]
+
+
+def test_multi_horizon_ohlc_summary_loss_vectorized_matches_loop() -> None:
+    generator = torch.Generator().manual_seed(20260707)
+    target_path = torch.randn((6, 60, 4), generator=generator) * 0.03
+    pred_path = target_path + torch.randn((6, 60, 4), generator=generator) * 0.01
+
+    for price_anchor in ("next_open", "today_close"):
+        loop_loss = _multi_horizon_ohlc_summary_loss_loop(pred_path, target_path, price_anchor=price_anchor)
+        vectorized_loss = _multi_horizon_ohlc_summary_loss_vectorized(pred_path, target_path, price_anchor=price_anchor)
+
+        assert torch.allclose(vectorized_loss, loop_loss, atol=1.0e-7)
 
 
 def test_today_close_anchor_path_value_matches_next_open_anchor() -> None:

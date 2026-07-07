@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import daily_research.path_policy as path_policy
@@ -11,6 +12,7 @@ from daily_research.path_policy.seq100_mainline import (
     TodayClosePathOnlyProfile,
     build_todayclose_summary_v2_train_argv,
     build_todayclose_path_only_train_argv,
+    main,
     mainline_contract,
     summarize_sequence_run,
 )
@@ -22,7 +24,9 @@ def test_mainline_contract_keeps_default_surface_small() -> None:
     assert contract["mainline_id"] == "seq100_todayclose_path_only"
     assert contract["default_store_view"] == str(DEFAULT_STORE_VIEW)
     assert set(contract["active_concepts"]) == set(ACTIVE_CONCEPTS)
+    assert contract["default_train_profile"]["early_stopping_patience"] == 3
     assert contract["summary_v2_train_profile"]["summary_loss_profile"] == "multi_horizon_ohlc"
+    assert contract["summary_v2_train_profile"]["early_stopping_patience"] == 2
     assert "symbol_embedding" in ARCHIVED_CONCEPTS
     assert "active_execution_strategy.json" in contract["evidence_boundary"]
 
@@ -56,16 +60,31 @@ def test_todayclose_summary_v2_train_argv_changes_only_summary_profile() -> None
         epochs=1,
         max_samples_per_split=32,
         device="cpu",
+        early_stopping_patience=2,
     )
     argv = build_todayclose_summary_v2_train_argv(profile)
 
     assert argv[argv.index("--run-tag") + 1] == DEFAULT_SUMMARY_V2_RUN_TAG
     assert argv[argv.index("--model-type") + 1] == "gru_path_value"
     assert argv[argv.index("--summary-loss-profile") + 1] == "multi_horizon_ohlc"
+    assert argv[argv.index("--early-stopping-patience") + 1] == "2"
     assert "--with-symbol" not in argv
     assert "--richer-path" not in argv
     assert "gru_path_value_residual" not in argv
     assert "gru_ohlcva_path_value" not in argv
+
+
+def test_train_summary_v2_cli_defaults_patience_to_two(capsys) -> None:
+    assert main(["train", "--dry-run", "--json"]) == 0
+    base = json.loads(capsys.readouterr().out)
+    assert base["profile"]["early_stopping_patience"] == 3
+    assert base["argv"][base["argv"].index("--early-stopping-patience") + 1] == "3"
+
+    assert main(["train-summary-v2", "--dry-run", "--json"]) == 0
+    summary_v2 = json.loads(capsys.readouterr().out)
+    assert summary_v2["profile"]["early_stopping_patience"] == 2
+    assert summary_v2["profile"]["summary_loss_profile"] == "multi_horizon_ohlc"
+    assert summary_v2["argv"][summary_v2["argv"].index("--early-stopping-patience") + 1] == "2"
 
 
 def test_summarize_sequence_run_reads_only_compact_metrics(tmp_path: Path) -> None:

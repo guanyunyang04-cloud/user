@@ -644,6 +644,113 @@ def _rank_loss_by_date(score: torch.Tensor, target: torch.Tensor, date_idx: torc
     return torch.stack(losses).mean()
 
 
+def _multi_horizon_ohlc_summary_loss_loop(pred_path: torch.Tensor, target_path: torch.Tensor, *, price_anchor: str) -> torch.Tensor:
+    losses: list[torch.Tensor] = []
+    for window in _summary_loss_windows(int(pred_path.shape[1])):
+        target_summary = _derive_path_summary_torch(
+            target_path[:, :window, :4],
+            smooth_value=False,
+            price_anchor=price_anchor,
+        ).detach()
+        pred_summary = _derive_path_summary_torch(
+            pred_path[:, :window, :4],
+            smooth_value=True,
+            price_anchor=price_anchor,
+        )
+        losses.append(
+            _finite_smooth_l1_columns(
+                pred_summary,
+                target_summary,
+                _derived_summary_loss_indices(int(window), path_dim=4),
+            )
+        )
+    if not losses:
+        return pred_path.sum() * 0.0
+    return torch.stack(losses).mean()
+
+
+def _multi_horizon_ohlc_summary_features(path: torch.Tensor, *, price_anchor: str) -> torch.Tensor:
+    path = _legacy_entry_relative_path_torch(path[:, :, :4], price_anchor=price_anchor)
+    batch_size = int(path.shape[0])
+    forward_days = int(path.shape[1])
+    windows = _summary_loss_windows(forward_days)
+    horizon_idx = torch.as_tensor([window - 1 for window in windows], device=path.device, dtype=torch.long)
+    horizon_values = horizon_idx.to(dtype=path.dtype) + 1.0
+    day_idx = torch.arange(forward_days, device=path.device, dtype=torch.long)
+    day_float = day_idx.to(dtype=path.dtype) + 1.0
+
+    high_ret = path[:, :, 1]
+    low_ret = path[:, :, 2]
+    close_ret = path[:, :, 3]
+
+    max_ret = torch.cummax(high_ret, dim=1).values.index_select(1, horizon_idx)
+    min_ret = torch.cummin(low_ret, dim=1).values.index_select(1, horizon_idx)
+    final_ret = close_ret.index_select(1, horizon_idx)
+
+    valid_by_horizon = day_idx.view(1, forward_days, 1) <= horizon_idx.view(1, 1, -1)
+    high_for_peak = torch.where(
+        valid_by_horizon,
+        high_ret.unsqueeze(2),
+        torch.full((batch_size, forward_days, len(windows)), float("-inf"), device=path.device, dtype=path.dtype),
+    )
+    peak_idx = torch.argmax(high_for_peak, dim=1)
+    after_peak = day_idx.view(1, forward_days, 1) >= peak_idx.view(batch_size, 1, len(windows))
+    low_after_peak = torch.where(
+        valid_by_horizon & after_peak,
+        low_ret.unsqueeze(2),
+        torch.full((batch_size, forward_days, len(windows)), float("inf"), device=path.device, dtype=path.dtype),
+    )
+    min_after_peak = torch.min(low_after_peak, dim=1).values
+    drawdown_after_peak = (1.0 + min_after_peak) / torch.clamp(1.0 + max_ret, min=1.0e-6) - 1.0
+
+    pre_exit_drawdown = torch.clamp(-torch.cummin(low_ret, dim=1).values, min=0.0)
+    waiting = torch.sqrt(day_float.view(forward_days, 1) / torch.clamp(horizon_values.view(1, -1), min=1.0))
+    candidate = (
+        close_ret.unsqueeze(2)
+        - float(PATH_VALUE_V2_DRAWDOWN_PENALTY) * pre_exit_drawdown.unsqueeze(2)
+        - float(PATH_VALUE_V2_WAITING_PENALTY) * waiting.unsqueeze(0)
+        - float(PATH_VALUE_V2_TRANSACTION_COST)
+    )
+    candidate = torch.where(valid_by_horizon, candidate, torch.full_like(candidate, float("-inf")))
+    best_idx = torch.argmax(candidate, dim=1)
+    best_exit_close = torch.gather(close_ret, 1, best_idx)
+    best_pre_exit_drawdown = torch.gather(pre_exit_drawdown, 1, best_idx)
+
+    return torch.stack(
+        [
+            max_ret,
+            min_ret,
+            final_ret,
+            drawdown_after_peak,
+            best_exit_close,
+            best_pre_exit_drawdown,
+        ],
+        dim=2,
+    )
+
+
+def _multi_horizon_ohlc_summary_loss_vectorized(
+    pred_path: torch.Tensor,
+    target_path: torch.Tensor,
+    *,
+    price_anchor: str,
+) -> torch.Tensor:
+    target_features = _multi_horizon_ohlc_summary_features(target_path, price_anchor=price_anchor).detach()
+    pred_features = _multi_horizon_ohlc_summary_features(pred_path, price_anchor=price_anchor)
+    if int(pred_features.shape[1]) == 0:
+        return pred_path.sum() * 0.0
+    finite_target = torch.isfinite(target_features)
+    raw_loss = F.smooth_l1_loss(pred_features, target_features, reduction="none")
+    masked_loss = torch.where(finite_target, raw_loss, torch.zeros_like(raw_loss))
+    horizon_counts = finite_target.sum(dim=(0, 2))
+    horizon_loss = torch.where(
+        horizon_counts > 0,
+        masked_loss.sum(dim=(0, 2)) / torch.clamp(horizon_counts.to(dtype=pred_features.dtype), min=1.0),
+        torch.zeros_like(horizon_counts, dtype=pred_features.dtype),
+    )
+    return horizon_loss.mean()
+
+
 def _derived_summary_loss(
     pred_path: torch.Tensor,
     target_path: torch.Tensor,
@@ -657,36 +764,14 @@ def _derived_summary_loss(
     path_dim = int(pred_path.shape[2])
 
     if profile == SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC and path_dim == 4:
-        losses: list[torch.Tensor] = []
-        first_target_summary: torch.Tensor | None = None
-        first_pred_summary: torch.Tensor | None = None
-        for window in _summary_loss_windows(int(pred_path.shape[1])):
-            target_summary = _derive_path_summary_torch(
-                target_path[:, :window, :4],
-                smooth_value=False,
-                price_anchor=price_anchor,
-            ).detach()
-            pred_summary = _derive_path_summary_torch(
-                pred_path[:, :window, :4],
-                smooth_value=True,
-                price_anchor=price_anchor,
-            )
-            if int(window) == int(pred_path.shape[1]):
-                first_target_summary = target_summary
-                first_pred_summary = pred_summary
-            losses.append(
-                _finite_smooth_l1_columns(
-                    pred_summary,
-                    target_summary,
-                    _derived_summary_loss_indices(int(window), path_dim=4),
-                )
-            )
-        if not losses:
-            return pred_path.sum() * 0.0, pred_path.sum() * 0.0, pred_path.sum() * 0.0
-        if first_target_summary is None or first_pred_summary is None:
-            first_target_summary = target_summary
-            first_pred_summary = pred_summary
-        return torch.stack(losses).mean(), first_target_summary, first_pred_summary
+        summary_loss = _multi_horizon_ohlc_summary_loss_vectorized(
+            pred_path,
+            target_path,
+            price_anchor=price_anchor,
+        )
+        target_summary = _derive_path_summary_torch(target_path, smooth_value=False, price_anchor=price_anchor).detach()
+        pred_summary = _derive_path_summary_torch(pred_path, smooth_value=True, price_anchor=price_anchor)
+        return summary_loss, target_summary, pred_summary
 
     target_summary = _derive_path_summary_torch(target_path, smooth_value=False, price_anchor=price_anchor).detach()
     pred_summary = _derive_path_summary_torch(pred_path, smooth_value=True, price_anchor=price_anchor)

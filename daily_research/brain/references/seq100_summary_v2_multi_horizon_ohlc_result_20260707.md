@@ -21,6 +21,8 @@ The experiment improved validation IC and validation TopK path-value spread, but
 
 The comparison profile kept the concept surface slim: no symbol embedding, no residual score, no OHLCVA output, no richer future target head.
 
+Post-result implementation note: after this completed run, the `train-summary-v2` narrow CLI default was changed to `early_stopping_patience=2`, and the multi-horizon OHLC summary-loss derivation was vectorized with equivalent per-horizon loss semantics. This note does not change the metrics below.
+
 ## Results
 
 | model | split | rank IC | positive IC day rate | Top1 PV alpha | Top3 PV alpha | Top10 PV alpha |
@@ -40,4 +42,3 @@ The comparison profile kept the concept surface slim: no symbol embedding, no re
 ## Boundary
 
 This is research evidence only. It does not change `daily_research/output/active_execution_strategy.json`, live/default, paper/live, broker state, trade plans, QDP active dataset pointers, or QDP provider state.
-

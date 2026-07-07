@@ -61,7 +61,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq
 - Output: predicted future `60` day OHLC path
 - No symbol embedding, residual score, OHLCVA output, or richer target head
 
-It changes only `summary_loss_profile` from `base` to `multi_horizon_ohlc`. The summary loss then constrains OHLC-derived summaries over available `5/10/20/40/60` day windows while preserving the same top-level loss weights.
+It changes `summary_loss_profile` from `base` to `multi_horizon_ohlc` and defaults `early_stopping_patience` to `2` in the narrow CLI. The summary loss constrains OHLC-derived summaries over available `5/10/20/40/60` day windows while preserving the same top-level loss weights; its implementation is vectorized but keeps the previous equal-weight per-horizon objective.
 
 Command:
 

@@ -60,7 +60,8 @@
 `summary_v2_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2 --json`
 `summary_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline summarize --run-dir <run_dir> --json`
 `fixed_profile`: `store_view=seq100_path60_todayclose_ohlcva`；`model_type=gru_path_value`；`loss=path0.45/summary0.20/value0.20/rank0.15`；`top_k=1,3,5,10,20,50,100`；`prediction_mode=compact`。
-`comparison_profile`: `summary_v2_multi_horizon_ohlc` keeps `model_type=gru_path_value` and `path_dim=4`, but changes `summary_loss_profile=multi_horizon_ohlc` to constrain OHLC-derived 5/10/20/40/60-day summaries.
+`comparison_profile`: `summary_v2_multi_horizon_ohlc` keeps `model_type=gru_path_value` and `path_dim=4`, but changes `summary_loss_profile=multi_horizon_ohlc` to constrain OHLC-derived 5/10/20/40/60-day summaries; the narrow CLI default uses `early_stopping_patience=2`.
+`implementation_note`: multi-horizon OHLC summary-loss derivation is vectorized in training while preserving the old per-horizon equal-weight loss semantics.
 `side_effects`: research artifacts only；does not activate execution surface.
 
 ### procedure `research_store_gc`

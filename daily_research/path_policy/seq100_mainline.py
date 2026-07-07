@@ -167,6 +167,7 @@ def mainline_contract() -> dict[str, Any]:
         "summary_v2_train_profile": asdict(
             TodayClosePathOnlyProfile(
                 run_tag=DEFAULT_SUMMARY_V2_RUN_TAG,
+                early_stopping_patience=2,
                 summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
             )
         ),
@@ -256,13 +257,13 @@ def _build_parser() -> argparse.ArgumentParser:
     contract.add_argument("--json", action="store_true")
 
     train = sub.add_parser("train", help="Train the fixed today-close path-only mainline.")
-    _add_train_args(train, default_run_tag=DEFAULT_RUN_TAG)
+    _add_train_args(train, default_run_tag=DEFAULT_RUN_TAG, default_early_stopping_patience=3)
 
     train_summary_v2 = sub.add_parser(
         "train-summary-v2",
         help="Train the explicit multi-horizon OHLC summary-loss experiment.",
     )
-    _add_train_args(train_summary_v2, default_run_tag=DEFAULT_SUMMARY_V2_RUN_TAG)
+    _add_train_args(train_summary_v2, default_run_tag=DEFAULT_SUMMARY_V2_RUN_TAG, default_early_stopping_patience=2)
 
     summarize = sub.add_parser("summarize", help="Print a compact sequence run summary.")
     summarize.add_argument("--run-dir", type=Path, required=True)
@@ -270,7 +271,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _add_train_args(parser: argparse.ArgumentParser, *, default_run_tag: str) -> None:
+def _add_train_args(parser: argparse.ArgumentParser, *, default_run_tag: str, default_early_stopping_patience: int) -> None:
     parser.add_argument("--store-view", type=Path, default=DEFAULT_STORE_VIEW)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--run-tag", default=default_run_tag)
@@ -278,6 +279,8 @@ def _add_train_args(parser: argparse.ArgumentParser, *, default_run_tag: str) ->
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     parser.add_argument("--max-samples-per-split", type=int, default=0)
+    parser.add_argument("--early-stopping-patience", type=int, default=int(default_early_stopping_patience))
+    parser.add_argument("--early-stopping-min-delta", type=float, default=0.0)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
 
@@ -303,6 +306,8 @@ def main(argv: list[str] | None = None) -> int:
             batch_size=int(args.batch_size),
             device=str(args.device),
             max_samples_per_split=int(args.max_samples_per_split),
+            early_stopping_patience=int(args.early_stopping_patience),
+            early_stopping_min_delta=float(args.early_stopping_min_delta),
             summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC
             if args.command == "train-summary-v2"
             else SUMMARY_LOSS_PROFILE_BASE,
