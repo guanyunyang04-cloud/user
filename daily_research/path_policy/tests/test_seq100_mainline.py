@@ -7,7 +7,9 @@ from daily_research.path_policy.seq100_mainline import (
     ACTIVE_CONCEPTS,
     ARCHIVED_CONCEPTS,
     DEFAULT_STORE_VIEW,
+    DEFAULT_SUMMARY_V2_RUN_TAG,
     TodayClosePathOnlyProfile,
+    build_todayclose_summary_v2_train_argv,
     build_todayclose_path_only_train_argv,
     mainline_contract,
     summarize_sequence_run,
@@ -20,6 +22,7 @@ def test_mainline_contract_keeps_default_surface_small() -> None:
     assert contract["mainline_id"] == "seq100_todayclose_path_only"
     assert contract["default_store_view"] == str(DEFAULT_STORE_VIEW)
     assert set(contract["active_concepts"]) == set(ACTIVE_CONCEPTS)
+    assert contract["summary_v2_train_profile"]["summary_loss_profile"] == "multi_horizon_ohlc"
     assert "symbol_embedding" in ARCHIVED_CONCEPTS
     assert "active_execution_strategy.json" in contract["evidence_boundary"]
 
@@ -38,8 +41,27 @@ def test_todayclose_path_only_train_argv_has_no_experimental_branches() -> None:
     assert argv[argv.index("--model-type") + 1] == "gru_path_value"
     assert argv[argv.index("--path-loss-weight") + 1] == "0.45"
     assert argv[argv.index("--rank-loss-weight") + 1] == "0.15"
+    assert argv[argv.index("--summary-loss-profile") + 1] == "base"
     assert argv[argv.index("--prediction-mode") + 1] == "compact"
     assert argv[argv.index("--top-k") + 1] == "1,3,5,10,20,50,100"
+    assert "--with-symbol" not in argv
+    assert "--richer-path" not in argv
+    assert "gru_path_value_residual" not in argv
+    assert "gru_ohlcva_path_value" not in argv
+
+
+def test_todayclose_summary_v2_train_argv_changes_only_summary_profile() -> None:
+    profile = TodayClosePathOnlyProfile(
+        run_tag=DEFAULT_SUMMARY_V2_RUN_TAG,
+        epochs=1,
+        max_samples_per_split=32,
+        device="cpu",
+    )
+    argv = build_todayclose_summary_v2_train_argv(profile)
+
+    assert argv[argv.index("--run-tag") + 1] == DEFAULT_SUMMARY_V2_RUN_TAG
+    assert argv[argv.index("--model-type") + 1] == "gru_path_value"
+    assert argv[argv.index("--summary-loss-profile") + 1] == "multi_horizon_ohlc"
     assert "--with-symbol" not in argv
     assert "--richer-path" not in argv
     assert "gru_path_value_residual" not in argv

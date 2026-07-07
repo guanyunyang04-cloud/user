@@ -7,11 +7,16 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from daily_research.path_policy.qdp_v2_sequence_path_training import main as sequence_training_main
+from daily_research.path_policy.qdp_v2_sequence_path_training import (
+    SUMMARY_LOSS_PROFILE_BASE,
+    SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
+    main as sequence_training_main,
+)
 
 DEFAULT_STORE_VIEW = Path("daily_research/data/research_store/views/seq100_path60_todayclose_ohlcva.json")
 DEFAULT_OUTPUT_ROOT = Path("daily_research/output/path_policy/sequence_path_training")
 DEFAULT_RUN_TAG = "seq100_todayclose_path_only_mainline"
+DEFAULT_SUMMARY_V2_RUN_TAG = "seq100_todayclose_path_only_summary_v2"
 DEFAULT_TOP_K = "1,3,5,10,20,50,100"
 
 ACTIVE_CONCEPTS = {
@@ -27,6 +32,7 @@ COMPARISON_CONCEPTS = {
     "table_path60_baseline": "Tabular LightGBM-style baseline for aligned path60 comparison.",
     "path_only_next_open": "Retained anchor comparison; not the default mainline.",
     "rank_heavy_top1": "Observation branch for narrow Top1 behavior; not the default ranking objective.",
+    "summary_v2_multi_horizon_ohlc": "Explicit experiment that keeps OHLC output but expands summary loss to OHLC-derived 5/10/20/40/60-day constraints.",
 }
 
 ARCHIVED_CONCEPTS = {
@@ -63,6 +69,7 @@ class TodayClosePathOnlyProfile:
     early_stopping_min_delta: float = 0.0
     top_k: str = DEFAULT_TOP_K
     max_samples_per_split: int = 0
+    summary_loss_profile: str = SUMMARY_LOSS_PROFILE_BASE
 
 
 def build_todayclose_path_only_train_argv(profile: TodayClosePathOnlyProfile) -> list[str]:
@@ -100,6 +107,8 @@ def build_todayclose_path_only_train_argv(profile: TodayClosePathOnlyProfile) ->
         str(profile.value_loss_weight),
         "--rank-loss-weight",
         str(profile.rank_loss_weight),
+        "--summary-loss-profile",
+        profile.summary_loss_profile,
         "--rank-max-per-side",
         str(profile.rank_max_per_side),
         "--device",
@@ -117,6 +126,35 @@ def build_todayclose_path_only_train_argv(profile: TodayClosePathOnlyProfile) ->
     ]
 
 
+def build_todayclose_summary_v2_train_argv(profile: TodayClosePathOnlyProfile) -> list[str]:
+    summary_profile = TodayClosePathOnlyProfile(
+        store_view=profile.store_view,
+        output_root=profile.output_root,
+        run_tag=profile.run_tag,
+        epochs=profile.epochs,
+        batch_size=profile.batch_size,
+        hidden_dim=profile.hidden_dim,
+        layers=profile.layers,
+        dropout=profile.dropout,
+        learning_rate=profile.learning_rate,
+        weight_decay=profile.weight_decay,
+        path_loss_weight=profile.path_loss_weight,
+        summary_loss_weight=profile.summary_loss_weight,
+        richer_loss_weight=profile.richer_loss_weight,
+        value_loss_weight=profile.value_loss_weight,
+        rank_loss_weight=profile.rank_loss_weight,
+        rank_max_per_side=profile.rank_max_per_side,
+        device=profile.device,
+        prediction_mode=profile.prediction_mode,
+        early_stopping_patience=profile.early_stopping_patience,
+        early_stopping_min_delta=profile.early_stopping_min_delta,
+        top_k=profile.top_k,
+        max_samples_per_split=profile.max_samples_per_split,
+        summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
+    )
+    return build_todayclose_path_only_train_argv(summary_profile)
+
+
 def mainline_contract() -> dict[str, Any]:
     return {
         "schema_version": 1,
@@ -126,6 +164,12 @@ def mainline_contract() -> dict[str, Any]:
         "comparison_concepts": COMPARISON_CONCEPTS,
         "archived_concepts": ARCHIVED_CONCEPTS,
         "default_train_profile": asdict(TodayClosePathOnlyProfile()),
+        "summary_v2_train_profile": asdict(
+            TodayClosePathOnlyProfile(
+                run_tag=DEFAULT_SUMMARY_V2_RUN_TAG,
+                summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
+            )
+        ),
         "evidence_boundary": (
             "Sequence path-value metrics are research evidence. They do not activate "
             "active_execution_strategy.json, live/default, broker, or trade-plan changes."
@@ -212,20 +256,30 @@ def _build_parser() -> argparse.ArgumentParser:
     contract.add_argument("--json", action="store_true")
 
     train = sub.add_parser("train", help="Train the fixed today-close path-only mainline.")
-    train.add_argument("--store-view", type=Path, default=DEFAULT_STORE_VIEW)
-    train.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
-    train.add_argument("--run-tag", default=DEFAULT_RUN_TAG)
-    train.add_argument("--epochs", type=int, default=10)
-    train.add_argument("--batch-size", type=int, default=512)
-    train.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
-    train.add_argument("--max-samples-per-split", type=int, default=0)
-    train.add_argument("--dry-run", action="store_true")
-    train.add_argument("--json", action="store_true")
+    _add_train_args(train, default_run_tag=DEFAULT_RUN_TAG)
+
+    train_summary_v2 = sub.add_parser(
+        "train-summary-v2",
+        help="Train the explicit multi-horizon OHLC summary-loss experiment.",
+    )
+    _add_train_args(train_summary_v2, default_run_tag=DEFAULT_SUMMARY_V2_RUN_TAG)
 
     summarize = sub.add_parser("summarize", help="Print a compact sequence run summary.")
     summarize.add_argument("--run-dir", type=Path, required=True)
     summarize.add_argument("--json", action="store_true")
     return parser
+
+
+def _add_train_args(parser: argparse.ArgumentParser, *, default_run_tag: str) -> None:
+    parser.add_argument("--store-view", type=Path, default=DEFAULT_STORE_VIEW)
+    parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
+    parser.add_argument("--run-tag", default=default_run_tag)
+    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--batch-size", type=int, default=512)
+    parser.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
+    parser.add_argument("--max-samples-per-split", type=int, default=0)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--json", action="store_true")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -240,7 +294,7 @@ def main(argv: list[str] | None = None) -> int:
         _print_payload(summarize_sequence_run(Path(args.run_dir)), as_json=bool(args.json))
         return 0
 
-    if args.command == "train":
+    if args.command in {"train", "train-summary-v2"}:
         profile = TodayClosePathOnlyProfile(
             store_view=Path(args.store_view),
             output_root=Path(args.output_root),
@@ -249,8 +303,15 @@ def main(argv: list[str] | None = None) -> int:
             batch_size=int(args.batch_size),
             device=str(args.device),
             max_samples_per_split=int(args.max_samples_per_split),
+            summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC
+            if args.command == "train-summary-v2"
+            else SUMMARY_LOSS_PROFILE_BASE,
         )
-        train_argv = build_todayclose_path_only_train_argv(profile)
+        train_argv = (
+            build_todayclose_summary_v2_train_argv(profile)
+            if args.command == "train-summary-v2"
+            else build_todayclose_path_only_train_argv(profile)
+        )
         if bool(args.dry_run):
             _print_payload({"profile": asdict(profile), "argv": train_argv}, as_json=bool(args.json))
             return 0

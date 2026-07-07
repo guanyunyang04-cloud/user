@@ -38,6 +38,10 @@ PATH_VALUE_V2_WAITING_PENALTY = 0.04
 PATH_VALUE_V2_DRAWDOWN_PENALTY = 0.60
 PATH_VALUE_V2_TRANSACTION_COST = 0.002
 PATH_VALUE_V2_TEMPERATURE = 0.03
+SUMMARY_LOSS_PROFILE_BASE = "base"
+SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC = "multi_horizon_ohlc"
+SUMMARY_LOSS_PROFILES = (SUMMARY_LOSS_PROFILE_BASE, SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC)
+MULTI_HORIZON_OHLC_WINDOWS = (5, 10, 20, 40, 60)
 UNIFIED_VALUE_WAIT_PENALTY = 0.015
 UNIFIED_VALUE_HOLD_PENALTY = 0.025
 UNIFIED_VALUE_DRAWDOWN_PENALTY = 0.60
@@ -640,6 +644,60 @@ def _rank_loss_by_date(score: torch.Tensor, target: torch.Tensor, date_idx: torc
     return torch.stack(losses).mean()
 
 
+def _derived_summary_loss(
+    pred_path: torch.Tensor,
+    target_path: torch.Tensor,
+    *,
+    summary_loss_profile: str,
+    price_anchor: str,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    profile = str(summary_loss_profile or SUMMARY_LOSS_PROFILE_BASE).strip().lower()
+    if profile not in SUMMARY_LOSS_PROFILES:
+        raise ValueError(f"summary_loss_profile must be one of {SUMMARY_LOSS_PROFILES}")
+    path_dim = int(pred_path.shape[2])
+
+    if profile == SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC and path_dim == 4:
+        losses: list[torch.Tensor] = []
+        first_target_summary: torch.Tensor | None = None
+        first_pred_summary: torch.Tensor | None = None
+        for window in _summary_loss_windows(int(pred_path.shape[1])):
+            target_summary = _derive_path_summary_torch(
+                target_path[:, :window, :4],
+                smooth_value=False,
+                price_anchor=price_anchor,
+            ).detach()
+            pred_summary = _derive_path_summary_torch(
+                pred_path[:, :window, :4],
+                smooth_value=True,
+                price_anchor=price_anchor,
+            )
+            if int(window) == int(pred_path.shape[1]):
+                first_target_summary = target_summary
+                first_pred_summary = pred_summary
+            losses.append(
+                _finite_smooth_l1_columns(
+                    pred_summary,
+                    target_summary,
+                    _derived_summary_loss_indices(int(window), path_dim=4),
+                )
+            )
+        if not losses:
+            return pred_path.sum() * 0.0, pred_path.sum() * 0.0, pred_path.sum() * 0.0
+        if first_target_summary is None or first_pred_summary is None:
+            first_target_summary = target_summary
+            first_pred_summary = pred_summary
+        return torch.stack(losses).mean(), first_target_summary, first_pred_summary
+
+    target_summary = _derive_path_summary_torch(target_path, smooth_value=False, price_anchor=price_anchor).detach()
+    pred_summary = _derive_path_summary_torch(pred_path, smooth_value=True, price_anchor=price_anchor)
+    summary_loss = _finite_smooth_l1_columns(
+        pred_summary,
+        target_summary,
+        _derived_summary_loss_indices(int(pred_path.shape[1]), path_dim=path_dim),
+    )
+    return summary_loss, target_summary, pred_summary
+
+
 def _compute_loss(
     outputs: Mapping[str, torch.Tensor],
     y_path: torch.Tensor,
@@ -657,6 +715,7 @@ def _compute_loss(
     residual_weight: float = 0.25,
     residual_penalty_weight: float = 0.01,
     price_anchor: str = "next_open",
+    summary_loss_profile: str = SUMMARY_LOSS_PROFILE_BASE,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     path_loss = _finite_smooth_l1(outputs["future_path"], y_path)
     richer_loss = outputs["future_path"].sum() * 0.0
@@ -674,13 +733,11 @@ def _compute_loss(
         value_target = y_summary[:, int(value_index)]
         score = outputs["score"]
     else:
-        path_dim = int(outputs["future_path"].shape[2])
-        target_summary = _derive_path_summary_torch(y_path, smooth_value=False, price_anchor=price_anchor).detach()
-        pred_summary = _derive_path_summary_torch(outputs["future_path"], smooth_value=True, price_anchor=price_anchor)
-        summary_loss = _finite_smooth_l1_columns(
-            pred_summary,
-            target_summary,
-            _derived_summary_loss_indices(int(outputs["future_path"].shape[1]), path_dim=path_dim),
+        summary_loss, target_summary, pred_summary = _derived_summary_loss(
+            outputs["future_path"],
+            y_path,
+            summary_loss_profile=summary_loss_profile,
+            price_anchor=price_anchor,
         )
         value_target = target_summary[:, -1]
         path_value_score = pred_summary[:, -1]
@@ -960,6 +1017,14 @@ def _derived_summary_loss_indices(forward_days: int, *, path_dim: int = 4) -> li
         f"entry_amount_condition_{int(forward_days)}d",
     }
     return [idx for idx, col in enumerate(columns) if col in keep]
+
+
+def _summary_loss_windows(forward_days: int) -> tuple[int, ...]:
+    horizon = int(forward_days)
+    windows = [int(window) for window in MULTI_HORIZON_OHLC_WINDOWS if int(window) <= horizon]
+    if horizon not in windows:
+        windows.append(horizon)
+    return tuple(sorted(set(windows)))
 
 
 def _legacy_entry_relative_path_torch(path: torch.Tensor, *, price_anchor: str) -> torch.Tensor:
@@ -1607,6 +1672,8 @@ def _write_report(
         f"This model reads past 100-day multi-channel sequences from QDP v2 and predicts future {forward_days}-day OHLC paths. "
         "Path summaries and ranking values are derived from the predicted path when using a path-value model."
     )
+    if str(summary.get("loss_weights", {}).get("summary_profile", "")) == SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC:
+        lines.append("Summary loss uses multi-horizon OHLC-derived constraints while the model output remains the future OHLC path.")
     early = dict(summary.get("early_stopping", {}) or {})
     if early:
         lines.append(
@@ -1686,6 +1753,7 @@ class TrainConfig:
     rank_loss_weight: float
     residual_score_weight: float
     residual_penalty_weight: float
+    summary_loss_profile: str
     rank_max_per_side: int
     device: str
     amp: bool
@@ -1776,6 +1844,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     residual_weight=float(config.residual_score_weight),
                     residual_penalty_weight=float(config.residual_penalty_weight),
                     price_anchor=train_ds.price_anchor,
+                    summary_loss_profile=str(config.summary_loss_profile),
                 )
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
@@ -1970,6 +2039,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "value": float(config.value_loss_weight),
             "rank": float(config.rank_loss_weight),
             "rank_max_per_side": int(config.rank_max_per_side),
+            "summary_profile": str(config.summary_loss_profile),
         },
         "early_stopping": {
             "metric": "validation_rank_ic_mean",
@@ -2051,6 +2121,12 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument("--rank-loss-weight", type=float, default=0.15)
     train.add_argument("--residual-score-weight", type=float, default=0.25, help=argparse.SUPPRESS)
     train.add_argument("--residual-penalty-weight", type=float, default=0.01, help=argparse.SUPPRESS)
+    train.add_argument(
+        "--summary-loss-profile",
+        default=SUMMARY_LOSS_PROFILE_BASE,
+        choices=SUMMARY_LOSS_PROFILES,
+        help="Summary loss profile: base full-horizon constraints or multi-horizon OHLC-derived constraints.",
+    )
     train.add_argument("--rank-max-per-side", type=int, default=64)
     train.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     train.add_argument("--amp", dest="amp", action="store_true", default=True)
@@ -2108,6 +2184,7 @@ def main(argv: list[str] | None = None) -> int:
         rank_loss_weight=float(args.rank_loss_weight),
         residual_score_weight=float(args.residual_score_weight),
         residual_penalty_weight=float(args.residual_penalty_weight),
+        summary_loss_profile=str(args.summary_loss_profile),
         rank_max_per_side=int(args.rank_max_per_side),
         device=str(args.device),
         amp=bool(args.amp),

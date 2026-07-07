@@ -45,6 +45,8 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule -
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline contract --json`
 - 当前主线训练入口：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train --json`
+- 当前主线 summary_v2 对照入口：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2 --json`
 - 连续策略正式协议：
   `python daily_research/continuous_policy/run_continuous_policy_protocol.py ...`
 - TDX-free V2 每日数据刷新：
@@ -58,7 +60,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule -
 - 工作区维护报告：
   `python daily_research/tools/workspace_maintenance.py report`
 
-当前默认研究概念面已收窄为 `seq100_x84_input -> today_close_anchor -> future60_ohlc_path -> path_trade_value_v2 -> path_value_spread`。`alpha_v2`、`path20`、`symbol_embedding`、`residual_score`、`richer_target`、`ohlcva_unified` 和 `rank_heavy_top1` 默认只作为历史、对照或暂停分支。
+当前默认研究概念面已收窄为 `seq100_x84_input -> today_close_anchor -> future60_ohlc_path -> path_trade_value_v2 -> path_value_spread`。`summary_v2_multi_horizon_ohlc` 是显式对照实验，只扩展 OHLC 派生 summary loss；`alpha_v2`、`path20`、`symbol_embedding`、`residual_score`、`richer_target`、`ohlcva_unified` 和 `rank_heavy_top1` 默认只作为历史、对照或暂停分支。
 
 真实运行时优先使用显式 `yolos` Python，例如：
 

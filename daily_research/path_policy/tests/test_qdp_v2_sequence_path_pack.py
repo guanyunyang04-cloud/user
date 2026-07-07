@@ -18,9 +18,11 @@ from daily_research.path_policy.qdp_v2_sequence_path_pack import (
 from daily_research.path_policy.qdp_v2_sequence_flat_lgbm import _feature_names, _select_indices
 from daily_research.path_policy.qdp_v2_sequence_path_training import SequencePathModel, SequencePathPackDataset, _compute_loss
 from daily_research.path_policy.qdp_v2_sequence_path_training import (
+    SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
     _derive_path_summary_numpy,
     _derive_path_summary_torch,
     _realize_predicted_plan_numpy,
+    _summary_loss_windows,
     derived_path_summary_columns,
     path_value_v2_column,
     unified_path_value_column,
@@ -274,6 +276,48 @@ def test_path_value_v2_numpy_and_torch_match() -> None:
 
     assert derived_path_summary_columns(4)[-1] == path_value_v2_column(4)
     assert np.allclose(np_summary, torch_summary, atol=1.0e-6)
+
+
+def test_multi_horizon_ohlc_summary_loss_uses_available_windows() -> None:
+    assert _summary_loss_windows(20) == (5, 10, 20)
+    assert _summary_loss_windows(60) == (5, 10, 20, 40, 60)
+
+    true_path = torch.zeros(4, 60, 4)
+    pred_path = true_path.clone()
+    perturbed_path = true_path.clone()
+    perturbed_path[:, :10, 3] = 0.05
+    y_summary = torch.zeros(4, 12)
+    date_idx = torch.tensor([1, 1, 1, 1])
+
+    exact_loss, exact_parts = _compute_loss(
+        {"future_path": pred_path},
+        true_path,
+        y_summary,
+        date_idx,
+        value_index=11,
+        path_weight=0.0,
+        summary_weight=1.0,
+        value_weight=0.0,
+        rank_weight=0.0,
+        summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
+    )
+    perturbed_loss, perturbed_parts = _compute_loss(
+        {"future_path": perturbed_path},
+        true_path,
+        y_summary,
+        date_idx,
+        value_index=11,
+        path_weight=0.0,
+        summary_weight=1.0,
+        value_weight=0.0,
+        rank_weight=0.0,
+        summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
+    )
+
+    assert torch.isfinite(exact_loss)
+    assert torch.isfinite(perturbed_loss)
+    assert exact_parts["summary_loss"] == 0.0
+    assert perturbed_parts["summary_loss"] > exact_parts["summary_loss"]
 
 
 def test_today_close_anchor_path_value_matches_next_open_anchor() -> None:

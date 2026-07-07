@@ -52,6 +52,23 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq
 - TopK report: `1,3,5,10,20,50,100`
 - Prediction mode: `compact`
 
+## Explicit Comparison Profile
+
+`summary_v2_multi_horizon_ohlc` is an explicit comparison profile, not the default mainline. It keeps:
+
+- Store view: `daily_research/data/research_store/views/seq100_path60_todayclose_ohlcva.json`
+- Model type: `gru_path_value`
+- Output: predicted future `60` day OHLC path
+- No symbol embedding, residual score, OHLCVA output, or richer target head
+
+It changes only `summary_loss_profile` from `base` to `multi_horizon_ohlc`. The summary loss then constrains OHLC-derived summaries over available `5/10/20/40/60` day windows while preserving the same top-level loss weights.
+
+Command:
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2 --json
+```
+
 ## Concept Demotion
 
 These surfaces are no longer default concepts:
@@ -69,6 +86,7 @@ These comparison surfaces remain named, but must not be mixed into the default p
 - `table_path60_baseline`
 - `path_only_next_open`
 - `rank_heavy_top1`
+- `summary_v2_multi_horizon_ohlc`
 
 The old phrase `LightGBM 191` is not a default baseline name because it mixes horizon, feature count, and model family. Use explicit names such as `table_path60_baseline`, `table_path20_191_baseline`, or `sequence_flat_lgbm_8400_sampled`.
 
