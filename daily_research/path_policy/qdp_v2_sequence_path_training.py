@@ -257,6 +257,11 @@ class SequencePathPackDataset(Dataset):
             self.sample_index = self.sample_index.head(int(max_samples)).reset_index(drop=True)
         self.date_idx_values = self.sample_index["date_idx"].astype(np.int32).to_numpy(copy=True)
         self.symbol_idx_values = self.sample_index["symbol_idx"].astype(np.int32).to_numpy(copy=True)
+        self.label_symbol_idx_values = (
+            self.sample_index["label_symbol_idx"].astype(np.int32).to_numpy(copy=True)
+            if "label_symbol_idx" in self.sample_index.columns
+            else self.symbol_idx_values.copy()
+        )
         self.trade_date_values = self.sample_index["trade_date"].astype(str).to_numpy(copy=True)
         self.symbol_values = self.sample_index["symbol"].astype(str).to_numpy(copy=True)
         self.split = str(split)
@@ -274,9 +279,18 @@ class SequencePathPackDataset(Dataset):
         self.price_anchor = _normalize_price_anchor(label_meta)
         self.has_ohlcva_path = self.future_ohlcva_path is not None
         self.ohlcva_path_fields = list(labels.get("future_ohlcva_path", {}).get("fields", []) or PATH_OHLCVA_FIELDS)
-        self.path_summary = _open_memmap(labels["path_summary"], dtype="float32")
-        self.path_summary_columns = list(labels["path_summary"].get("columns", []) or path_summary_columns(self.forward_days))
-        self.value_column = path_value_column(self.forward_days)
+        output_path_dim = 6 if self.future_ohlcva_path is not None else 4
+        self.path_summary = _open_memmap(labels["path_summary"], dtype="float32") if "path_summary" in labels else None
+        self.path_summary_columns = (
+            list(labels["path_summary"].get("columns", []) or path_summary_columns(self.forward_days))
+            if "path_summary" in labels
+            else derived_path_summary_columns(self.forward_days, path_dim=output_path_dim)
+        )
+        self.value_column = (
+            path_value_column(self.forward_days)
+            if "path_summary" in labels
+            else value_column_for_path(self.forward_days, path_dim=output_path_dim)
+        )
         self.value_index = self.path_summary_columns.index(self.value_column)
         self.input_dim = int(sum(len(self.feature_columns[name]) for name in self.channel_order))
         requested_richer_targets = {
@@ -364,6 +378,7 @@ class SequencePathPackDataset(Dataset):
         row = self.sample_index.iloc[int(idx)]
         date_idx = int(row["date_idx"])
         symbol_idx = int(row["symbol_idx"])
+        label_symbol_idx = int(row["label_symbol_idx"]) if "label_symbol_idx" in row.index else symbol_idx
         start = date_idx - self.lookback_days + 1
         end = date_idx + 1
         parts = [
@@ -372,16 +387,20 @@ class SequencePathPackDataset(Dataset):
         ]
         x = np.concatenate(parts, axis=1).astype(np.float32, copy=False)
         y_path = (
-            np.asarray(self.future_path[date_idx, symbol_idx, :, :], dtype=np.float32).copy()
+            np.asarray(self.future_path[date_idx, label_symbol_idx, : self.forward_days, :4], dtype=np.float32).copy()
             if self.future_path is not None
-            else np.asarray(self.future_ohlcva_path[date_idx, symbol_idx, :, :4], dtype=np.float32).copy()
+            else np.asarray(self.future_ohlcva_path[date_idx, label_symbol_idx, : self.forward_days, :4], dtype=np.float32).copy()
         )
         y_ohlcva_path = (
-            np.asarray(self.future_ohlcva_path[date_idx, symbol_idx, :, :], dtype=np.float32).copy()
+            np.asarray(self.future_ohlcva_path[date_idx, label_symbol_idx, : self.forward_days, :], dtype=np.float32).copy()
             if self.future_ohlcva_path is not None
             else y_path.copy()
         )
-        y_summary = np.asarray(self.path_summary[date_idx, symbol_idx, :], dtype=np.float32).copy()
+        y_summary = (
+            np.asarray(self.path_summary[date_idx, label_symbol_idx, :], dtype=np.float32).copy()
+            if self.path_summary is not None
+            else _derive_path_summary_numpy(y_ohlcva_path.reshape(1, self.forward_days, y_ohlcva_path.shape[-1]), price_anchor=self.price_anchor)[0]
+        )
         y_richer_path = self._future_richer_path_batch(
             y_path.reshape(1, self.forward_days, 4),
             np.asarray([date_idx], dtype=np.int64),
@@ -405,6 +424,7 @@ class SequencePathPackDataset(Dataset):
             raise ValueError("batch indices must be a non-empty 1D array")
         date_idx = self.date_idx_values[idx].astype(np.int64, copy=False)
         symbol_idx = self.symbol_idx_values[idx].astype(np.int64, copy=False)
+        label_symbol_idx = self.label_symbol_idx_values[idx].astype(np.int64, copy=False)
         batch_size = int(idx.size)
         channel_parts: list[np.ndarray] = []
         for name in self.channel_order:
@@ -420,17 +440,21 @@ class SequencePathPackDataset(Dataset):
             channel_parts.append(self._normalize_batch(name, values))
         x = np.concatenate(channel_parts, axis=2).astype(np.float32, copy=False)
         y_path = (
-            np.asarray(self.future_path[date_idx, symbol_idx, :, :], dtype=np.float32).copy()
+            np.asarray(self.future_path[date_idx, label_symbol_idx, : self.forward_days, :4], dtype=np.float32).copy()
             if self.future_path is not None
-            else np.asarray(self.future_ohlcva_path[date_idx, symbol_idx, :, :4], dtype=np.float32).copy()
+            else np.asarray(self.future_ohlcva_path[date_idx, label_symbol_idx, : self.forward_days, :4], dtype=np.float32).copy()
         )
         y_ohlcva_path = (
-            np.asarray(self.future_ohlcva_path[date_idx, symbol_idx, :, :], dtype=np.float32).copy()
+            np.asarray(self.future_ohlcva_path[date_idx, label_symbol_idx, : self.forward_days, :], dtype=np.float32).copy()
             if self.future_ohlcva_path is not None
             else y_path.copy()
         )
         y_richer_path = self._future_richer_path_batch(y_path, date_idx, symbol_idx)
-        y_summary = np.asarray(self.path_summary[date_idx, symbol_idx, :], dtype=np.float32).copy()
+        y_summary = (
+            np.asarray(self.path_summary[date_idx, label_symbol_idx, :], dtype=np.float32).copy()
+            if self.path_summary is not None
+            else _derive_path_summary_numpy(y_ohlcva_path, price_anchor=self.price_anchor)
+        )
         return {
             "x": torch.from_numpy(x),
             "y_path": torch.from_numpy(y_path),
@@ -1985,7 +2009,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train QDP v2 sequence path models.")
     sub = parser.add_subparsers(dest="command", required=True)
     train = sub.add_parser("train")
-    train.add_argument("--pack-manifest", type=Path, required=True)
+    train.add_argument("--pack-manifest", type=Path, default=None)
+    train.add_argument("--store-view", type=Path, default=None, help="Alias for a lightweight research_store view manifest.")
     train.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     train.add_argument("--run-tag", default="qdp_v2_sequence_path_gru_path_value")
     train.add_argument("--epochs", type=int, default=10)
@@ -2050,6 +2075,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if str(args.prediction_mode) == "full" and not bool(args.allow_large_predictions):
         raise SystemExit("--prediction-mode full writes large path-level prediction CSVs; add --allow-large-predictions to opt in.")
+    manifest_path = Path(args.store_view or args.pack_manifest) if (args.store_view or args.pack_manifest) else None
+    if manifest_path is None:
+        raise SystemExit("train requires --pack-manifest or --store-view")
     model_type = str(args.experimental_model_type or args.model_type or "").strip()
     if not model_type:
         if bool(args.richer_path):
@@ -2061,7 +2089,7 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("--with-symbol can only be combined with the path-value model")
         model_type = "gru_richer_path_value_symbol" if model_type.startswith("gru_richer_") else "gru_path_value_symbol"
     cfg = TrainConfig(
-        pack_manifest=Path(args.pack_manifest),
+        pack_manifest=manifest_path,
         output_root=Path(args.output_root),
         run_tag=str(args.run_tag),
         epochs=int(args.epochs),

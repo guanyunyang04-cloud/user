@@ -233,3 +233,73 @@ qdp_v2_sequence_path_training default prediction mode: compact
 full path-level prediction CSVs now require: --prediction-mode full --allow-large-predictions
 qdp_v2_sequence_flat_lgbm no longer writes predictions by default; requires --write-predictions
 ```
+
+## Unified Research Store Views
+The old self-contained sequence packs were replaced by shared store components and lightweight view manifests on 2026-07-07.
+
+Commands:
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.research_store_view build-from-legacy-packs --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.research_store_view verify --max-checks 256 --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.research_store_view delete-replaced-legacy-packs --confirm-delete DELETE_REPLACED_SEQUENCE_PACKS --json
+```
+
+New entrypoints:
+
+```text
+daily_research/data/research_store/views/seq100_path60_nextopen_ohlc.json
+daily_research/data/research_store/views/seq100_path60_nextopen_ohlcva.json
+daily_research/data/research_store/views/seq100_path60_todayclose_ohlcva.json
+daily_research/data/research_store/views/seq100_path20_nextopen_ohlc_from_path60.json
+```
+
+Storage layout:
+
+```text
+panel_store: shared historical input panels and masks
+label_store: path60 next-open OHLC, path60 next-open OHLCVA, path60 today-close OHLCVA, path20 next-open OHLC
+sample_index: path60 sample index and path20 sample index remapped onto the shared panel store
+views: lightweight trainable manifests
+```
+
+Important semantic finding:
+
+```text
+path20 cannot be fully replaced by slicing path60 labels.
+Reason: early path20-valid samples, starting around date_idx=99 / 2012-04-23, have finite 20-day labels while the path60 label array is still NaN for those rows.
+Resolution: path20 view shares input panels but keeps an independent path20 label store and uses label_symbol_idx for label lookup.
+```
+
+Validation:
+
+```text
+research_store_view verify: ok
+path20 equivalence checks: 256
+path20 sample_count: 6,620,640
+path20 label source: moved_label_store
+SequencePathPackDataset smoke:
+  path20 view -> x [2,100,84], y_path [2,20,4], y_summary [2,12]
+  todayclose OHLCVA view -> x [2,100,84], y_ohlcva [2,60,6]
+```
+
+Deleted legacy full pack directories:
+
+```text
+qdp_v2_seq100_path60_full
+qdp_v2_seq100_ohlcva_path60_full
+qdp_v2_seq100_path60_todayclose_full
+qdp_v2_seq100_path20_full
+```
+
+Post-unification scan:
+
+```text
+daily_research/output/path_policy/research_gc/research_gc_dry_run_20260707_091946.md
+artifact_count: 162
+total_size: 94.2894 GB
+research_store_shared_component: 75.1106 GB
+safe_delete_candidate_count: 0
+prediction_trim_candidate_count: 0
+H: free space after cleanup/unification: about 567.21 GB
+```

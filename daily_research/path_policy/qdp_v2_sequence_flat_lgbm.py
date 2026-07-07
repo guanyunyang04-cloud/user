@@ -369,7 +369,8 @@ def train_sequence_flat_lgbm(config: FlatLgbmConfig) -> dict[str, Any]:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train a flat LightGBM baseline from QDP v2 sequence pack inputs.")
-    parser.add_argument("--pack-manifest", type=Path, required=True)
+    parser.add_argument("--pack-manifest", type=Path, default=None)
+    parser.add_argument("--store-view", type=Path, default=None, help="Alias for a lightweight research_store view manifest.")
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--run-tag", default="qdp_v2_sequence_flat_lgbm")
     parser.add_argument("--train-samples-per-date", type=int, default=64)
@@ -395,9 +396,12 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    manifest_path = Path(args.store_view or args.pack_manifest) if (args.store_view or args.pack_manifest) else None
+    if manifest_path is None:
+        raise SystemExit("requires --pack-manifest or --store-view")
     summary = train_sequence_flat_lgbm(
         FlatLgbmConfig(
-            pack_manifest=Path(args.pack_manifest),
+            pack_manifest=manifest_path,
             output_root=Path(args.output_root),
             run_tag=str(args.run_tag),
             train_samples_per_date=int(args.train_samples_per_date),

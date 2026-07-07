@@ -21,7 +21,7 @@
 `owner`: `daily_research`
 `preferred_root`: `daily_research/data/research_store`
 `compat_roots`: none active; old `quant_data_platform/data/qdp_v2/research/` artifacts were physically migrated or deleted on 2026-07-07.
-`rule`: sequence packs, memmaps, labels, normalization and sample indexes are research artifacts; QDP active data remains read-only source unless a task explicitly changes active datasets.
+`rule`: model-ready data uses shared `panel_store`、`label_store`、`sample_index` and lightweight `views`; QDP active data remains read-only source unless a task explicitly changes active datasets.
 
 ### object `execution_runtime`
 `state`: frozen skeleton / read-only diagnostics / candidate wrappers.
@@ -42,7 +42,7 @@
 
 ### procedure `seq100_path_value_research_work`
 `input`: QDP v2 active tables or existing compatibility sequence pack, model/loss/value-function change, evaluation request.
-`steps`: route task as primary `daily_research` with supporting read-only `quant_data_platform` when QDP data is referenced；write new model-ready artifacts to `daily_research/data/research_store/<artifact_id>/`；train/evaluate models；write compact current conclusion to `state_center.md` and dated evidence to `references/`.
+`steps`: route task as primary `daily_research` with supporting read-only `quant_data_platform` when QDP data is referenced；prefer `--store-view daily_research/data/research_store/views/<view>.json` over self-contained full packs；write new reusable arrays to `panel_store` or `label_store` and new experiment semantics as lightweight views；train/evaluate models；write compact current conclusion to `state_center.md` and dated evidence to `references/`.
 `validation`: no PIT leakage, manifest/schema consistency, validation/test predictions, rank IC, topK realized/path value metrics, comparison against current base GRU/path-only/residual/OHLCVA anchors.
 
 ### procedure `research_store_gc`
@@ -51,6 +51,8 @@
 `commands`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.research_store_gc scan --write-report --json`
 `migration_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.research_store_gc migrate-legacy-packs --write-report --json`
 `trim_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.research_store_gc trim-predictions --write-report --json`
+`view_build_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.research_store_view build-from-legacy-packs --json`
+`view_verify_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.research_store_view verify --json`
 `delete_guard`: deletion requires `--delete --confirm-delete DELETE_RESEARCH_ARTIFACTS`; safe directory deletion is limited to unreferenced smoke/partial/interrupted artifacts under configured research roots.
 `trim_guard`: prediction trim requires `--delete --confirm-trim TRIM_PREDICTION_OUTPUTS`; it deletes only large prediction CSV/parquet/feather files under the studies root and retains summary JSON, metrics CSV, reports and checkpoints.
 `prevention_rule`: sequence path training defaults to `--prediction-mode compact`; full path-level prediction CSVs require explicit `--prediction-mode full --allow-large-predictions`. Flat LightGBM does not write predictions unless `--write-predictions` is provided.

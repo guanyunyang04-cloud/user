@@ -15,6 +15,14 @@ DEFAULT_RESEARCH_STORE_ROOT = Path("daily_research/data/research_store")
 DEFAULT_SEQUENCE_PACK_ROOTS = (
     DEFAULT_RESEARCH_STORE_ROOT / "sequence_pack",
 )
+DEFAULT_RESEARCH_STORE_COMPONENT_ROOTS = (
+    DEFAULT_RESEARCH_STORE_ROOT / "panel_store",
+    DEFAULT_RESEARCH_STORE_ROOT / "label_store",
+    DEFAULT_RESEARCH_STORE_ROOT / "sample_index",
+    DEFAULT_RESEARCH_STORE_ROOT / "views",
+    DEFAULT_RESEARCH_STORE_ROOT / "sharded_memmap",
+    DEFAULT_RESEARCH_STORE_ROOT / "training_pack",
+)
 DEFAULT_STUDIES_ROOT = Path("daily_research/output/path_policy/studies")
 DEFAULT_REFERENCE_ROOTS = (
     Path("daily_research/brain"),
@@ -406,6 +414,28 @@ def classify_study(path: str | Path, *, reference_text: str, large_file_threshol
     )
 
 
+def classify_research_store_component(path: str | Path, *, large_file_threshold_bytes: int) -> ArtifactItem:
+    artifact_dir = _workspace_path(path)
+    size = _directory_size(artifact_dir)
+    return ArtifactItem(
+        artifact_type="research_store_component",
+        name=artifact_dir.name,
+        path=_relative(artifact_dir),
+        size_bytes=size.size_bytes,
+        file_count=size.file_count,
+        size_gb=round(float(size.size_bytes) / 1024**3, 4),
+        last_modified=_format_mtime(size.latest_mtime),
+        classification="research_store_shared_component",
+        recommendation="keep_managed_by_view_manifest",
+        cleanup_action="keep",
+        safe_to_delete_directory=False,
+        referenced_by_brain=False,
+        reasons=["shared_store_component"],
+        manifest_path=_relative(artifact_dir / "manifest.json") if (artifact_dir / "manifest.json").exists() else "",
+        large_files=_large_files(artifact_dir, threshold_bytes=large_file_threshold_bytes, max_files=12),
+    )
+
+
 def _scan_child_dirs(roots: Iterable[str | Path]) -> list[Path]:
     out: list[Path] = []
     for root in roots:
@@ -430,6 +460,7 @@ def _group_totals(items: Iterable[ArtifactItem]) -> dict[str, dict[str, Any]]:
 def build_research_gc_report(
     *,
     sequence_pack_roots: Iterable[str | Path] = DEFAULT_SEQUENCE_PACK_ROOTS,
+    research_store_component_roots: Iterable[str | Path] = DEFAULT_RESEARCH_STORE_COMPONENT_ROOTS,
     studies_root: str | Path = DEFAULT_STUDIES_ROOT,
     reference_roots: Iterable[str | Path] = DEFAULT_REFERENCE_ROOTS,
     large_file_threshold_mb: float = 256.0,
@@ -445,7 +476,20 @@ def build_research_gc_report(
         classify_study(path, reference_text=reference_text, large_file_threshold_bytes=threshold_bytes)
         for path in _scan_child_dirs([studies_root])
     ]
-    all_items = sorted([*sequence_items, *study_items], key=lambda item: item.size_bytes, reverse=True)
+    component_items: list[ArtifactItem] = []
+    for root in research_store_component_roots:
+        base = _workspace_path(root)
+        if not base.exists():
+            continue
+        children = [path for path in sorted(base.iterdir()) if path.is_dir()]
+        if children:
+            component_items.extend(
+                classify_research_store_component(path, large_file_threshold_bytes=threshold_bytes)
+                for path in children
+            )
+        else:
+            component_items.append(classify_research_store_component(base, large_file_threshold_bytes=threshold_bytes))
+    all_items = sorted([*sequence_items, *component_items, *study_items], key=lambda item: item.size_bytes, reverse=True)
     safe_delete = [item for item in all_items if item.safe_to_delete_directory]
     trim_candidates = [item for item in all_items if item.cleanup_action == "trim_large_prediction_files"]
     total_size = sum(item.size_bytes for item in all_items)
@@ -469,6 +513,7 @@ def build_research_gc_report(
         },
         "roots": {
             "sequence_pack_roots": [_relative(path) for path in sequence_pack_roots],
+            "research_store_component_roots": [_relative(path) for path in research_store_component_roots],
             "studies_root": _relative(studies_root),
             "reference_roots": [_relative(path) for path in reference_roots],
             "preferred_research_store_root": _relative(DEFAULT_RESEARCH_STORE_ROOT),
