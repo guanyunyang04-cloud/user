@@ -7,9 +7,11 @@ import daily_research.path_policy as path_policy
 from daily_research.path_policy.seq100_mainline import (
     ACTIVE_CONCEPTS,
     ARCHIVED_CONCEPTS,
+    DEFAULT_DAILY_ONLY_RUN_TAG,
     DEFAULT_STORE_VIEW,
     DEFAULT_SUMMARY_V2_RUN_TAG,
     TodayClosePathOnlyProfile,
+    build_todayclose_daily_only_train_argv,
     build_todayclose_summary_v2_train_argv,
     build_todayclose_path_only_train_argv,
     main,
@@ -27,6 +29,8 @@ def test_mainline_contract_keeps_default_surface_small() -> None:
     assert contract["default_train_profile"]["early_stopping_patience"] == 3
     assert contract["summary_v2_train_profile"]["summary_loss_profile"] == "multi_horizon_ohlc"
     assert contract["summary_v2_train_profile"]["early_stopping_patience"] == 2
+    assert contract["daily_only_train_profile"]["input_channel_profile"] == "daily_only"
+    assert contract["daily_only_train_profile"]["early_stopping_patience"] == 2
     assert "symbol_embedding" in ARCHIVED_CONCEPTS
     assert "active_execution_strategy.json" in contract["evidence_boundary"]
 
@@ -46,6 +50,7 @@ def test_todayclose_path_only_train_argv_has_no_experimental_branches() -> None:
     assert argv[argv.index("--path-loss-weight") + 1] == "0.45"
     assert argv[argv.index("--rank-loss-weight") + 1] == "0.15"
     assert argv[argv.index("--summary-loss-profile") + 1] == "base"
+    assert argv[argv.index("--input-channel-profile") + 1] == "all"
     assert argv[argv.index("--prediction-mode") + 1] == "compact"
     assert argv[argv.index("--top-k") + 1] == "1,3,5,10,20,50,100"
     assert "--with-symbol" not in argv
@@ -67,11 +72,31 @@ def test_todayclose_summary_v2_train_argv_changes_only_summary_profile() -> None
     assert argv[argv.index("--run-tag") + 1] == DEFAULT_SUMMARY_V2_RUN_TAG
     assert argv[argv.index("--model-type") + 1] == "gru_path_value"
     assert argv[argv.index("--summary-loss-profile") + 1] == "multi_horizon_ohlc"
+    assert argv[argv.index("--input-channel-profile") + 1] == "all"
     assert argv[argv.index("--early-stopping-patience") + 1] == "2"
     assert "--with-symbol" not in argv
     assert "--richer-path" not in argv
     assert "gru_path_value_residual" not in argv
     assert "gru_ohlcva_path_value" not in argv
+
+
+def test_todayclose_daily_only_train_argv_removes_minute_channels() -> None:
+    profile = TodayClosePathOnlyProfile(
+        run_tag=DEFAULT_DAILY_ONLY_RUN_TAG,
+        epochs=1,
+        max_samples_per_split=32,
+        device="cpu",
+        early_stopping_patience=2,
+    )
+    argv = build_todayclose_daily_only_train_argv(profile)
+
+    assert argv[argv.index("--run-tag") + 1] == DEFAULT_DAILY_ONLY_RUN_TAG
+    assert argv[argv.index("--model-type") + 1] == "gru_path_value"
+    assert argv[argv.index("--summary-loss-profile") + 1] == "base"
+    assert argv[argv.index("--input-channel-profile") + 1] == "daily_only"
+    assert argv[argv.index("--early-stopping-patience") + 1] == "2"
+    assert "--with-symbol" not in argv
+    assert "--richer-path" not in argv
 
 
 def test_train_summary_v2_cli_defaults_patience_to_two(capsys) -> None:
@@ -85,6 +110,12 @@ def test_train_summary_v2_cli_defaults_patience_to_two(capsys) -> None:
     assert summary_v2["profile"]["early_stopping_patience"] == 2
     assert summary_v2["profile"]["summary_loss_profile"] == "multi_horizon_ohlc"
     assert summary_v2["argv"][summary_v2["argv"].index("--early-stopping-patience") + 1] == "2"
+
+    assert main(["train-daily-only", "--dry-run", "--json"]) == 0
+    daily_only = json.loads(capsys.readouterr().out)
+    assert daily_only["profile"]["early_stopping_patience"] == 2
+    assert daily_only["profile"]["input_channel_profile"] == "daily_only"
+    assert daily_only["argv"][daily_only["argv"].index("--input-channel-profile") + 1] == "daily_only"
 
 
 def test_summarize_sequence_run_reads_only_compact_metrics(tmp_path: Path) -> None:

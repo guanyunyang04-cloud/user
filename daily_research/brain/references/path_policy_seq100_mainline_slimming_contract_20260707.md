@@ -69,6 +69,14 @@ Command:
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2 --json
 ```
 
+`daily_only_no_minute` is an explicit input ablation profile, not the default mainline. It keeps the same labels, model type, output, loss weights, price anchor, split and TopK report, but changes `input_channel_profile` from `all` to `daily_only`. This removes `intraday_summary` and `limit_structure`, leaving `daily_raw + daily_state` as `32` input features. The narrow CLI defaults `early_stopping_patience` to `2`.
+
+Command:
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-daily-only --json
+```
+
 ## Concept Demotion
 
 These surfaces are no longer default concepts:
@@ -87,6 +95,7 @@ These comparison surfaces remain named, but must not be mixed into the default p
 - `path_only_next_open`
 - `rank_heavy_top1`
 - `summary_v2_multi_horizon_ohlc`
+- `daily_only_no_minute`
 
 The old phrase `LightGBM 191` is not a default baseline name because it mixes horizon, feature count, and model family. Use explicit names such as `table_path60_baseline`, `table_path20_191_baseline`, or `sequence_flat_lgbm_8400_sampled`.
 

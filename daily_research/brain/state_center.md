@@ -49,9 +49,9 @@
 `input_principle`: 过去 100 日 daily raw、daily state、intraday summary、limit structure 序列；不使用 symbol embedding 作为默认主线。
 `output_principle`: 预测未来路径；路径摘要和 path trade value 从预测路径派生，排序使用预测路径价值而不是独立固定标签。
 `default_entry`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train --json`。
-`comparison_surface`: `table_path60_baseline`、`path_only_next_open`、`rank_heavy_top1`、`summary_v2_multi_horizon_ohlc`。
+`comparison_surface`: `table_path60_baseline`、`path_only_next_open`、`rank_heavy_top1`、`summary_v2_multi_horizon_ohlc`、`daily_only_no_minute`。
 `archived_or_paused_surface`: `alpha_v2`、`path20`、`symbol_embedding`、`residual_score`、`richer_target`、`ohlcva_unified`。
-`current_evidence`: today-close path-only is the default research mainline; summary_v2 multi-horizon OHLC improved validation and test Top1 but lowered test IC and broad TopK, so it remains comparison evidence; current summary_v2 CLI defaults to `early_stopping_patience=2` and uses vectorized multi-horizon summary loss with unchanged objective; all path-value spread remains research evidence, not promotion evidence.
+`current_evidence`: today-close path-only is the default research mainline; summary_v2 multi-horizon OHLC improved validation and test Top1 but lowered test IC and broad TopK, so it remains comparison evidence; current summary_v2 CLI defaults to `early_stopping_patience=2` and uses vectorized multi-horizon summary loss with unchanged objective; daily-only no-minute improved test IC and Top1/Top3 but weakened test Top10, so minute-derived inputs are not clearly necessary but may support wider TopK breadth; all path-value spread remains research evidence, not promotion evidence.
 `artifact_owner`: `daily_research`; preferred new root is `daily_research/data/research_store/<artifact_id>/`.
 `historical_artifacts`: old QDP research artifacts were physically migrated or deleted on 2026-07-07; `quant_data_platform/data/qdp_v2/research/` no longer exists as a training-pack location.
 `resource_state`: H: pressure is driven mainly by repeated research packs and `daily_research/output/path_policy/studies`, not by the QDP active data base itself. On 2026-07-07, guarded research GC deleted 74 unreferenced smoke/partial/interrupted artifacts and reclaimed 14.41GB; prediction output trim deleted 92 large forecast CSV files across 46 studies and reclaimed 63.55GB. The old self-contained full sequence packs were replaced by a unified research store: shared panel_store + label_store + sample_index + lightweight views. Post-unification GC scan sees 162 artifacts / 94.29GB, including 75.11GB shared research_store components, with zero safe directory candidates and zero prediction trim candidates.
@@ -88,6 +88,7 @@
 - Seq100 path-value orchestration：`daily_research/brain/references/seq100_path_value_research_orchestration_20260706.md`
 - Seq100 mainline slimming contract：`daily_research/brain/references/path_policy_seq100_mainline_slimming_contract_20260707.md`
 - Seq100 summary_v2 result：`daily_research/brain/references/seq100_summary_v2_multi_horizon_ohlc_result_20260707.md`
+- Seq100 daily-only no-minute result：`daily_research/brain/references/seq100_daily_only_no_minute_result_20260708.md`
 - Shortline plan：`daily_research/brain/references/shortline_after_close_research_plan_20260624.md`
 - Stage 0 diagnostic：`daily_research/brain/references/shortline_stage0_fixed_next_open_diagnostic_20260624.md`
 - Feature profile / semantics：`daily_research/brain/references/shortline_upside_feature_profile_20260624.md`、`daily_research/brain/references/shortline_upside_feature_semantics_20260624.md`

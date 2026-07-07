@@ -42,6 +42,13 @@ SUMMARY_LOSS_PROFILE_BASE = "base"
 SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC = "multi_horizon_ohlc"
 SUMMARY_LOSS_PROFILES = (SUMMARY_LOSS_PROFILE_BASE, SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC)
 MULTI_HORIZON_OHLC_WINDOWS = (5, 10, 20, 40, 60)
+INPUT_CHANNEL_PROFILE_ALL = "all"
+INPUT_CHANNEL_PROFILE_DAILY_ONLY = "daily_only"
+INPUT_CHANNEL_PROFILES = (INPUT_CHANNEL_PROFILE_ALL, INPUT_CHANNEL_PROFILE_DAILY_ONLY)
+INPUT_CHANNEL_PROFILE_ORDERS = {
+    INPUT_CHANNEL_PROFILE_ALL: ("daily_raw", "daily_state", "intraday_summary", "limit_structure"),
+    INPUT_CHANNEL_PROFILE_DAILY_ONLY: ("daily_raw", "daily_state"),
+}
 UNIFIED_VALUE_WAIT_PENALTY = 0.015
 UNIFIED_VALUE_HOLD_PENALTY = 0.025
 UNIFIED_VALUE_DRAWDOWN_PENALTY = 0.60
@@ -250,9 +257,24 @@ def _normalize_price_anchor(meta: Mapping[str, Any] | None) -> str:
     return "next_open"
 
 
+def _input_channel_order(profile: str) -> list[str]:
+    value = str(profile or INPUT_CHANNEL_PROFILE_ALL).strip().lower()
+    if value not in INPUT_CHANNEL_PROFILE_ORDERS:
+        raise ValueError(f"input_channel_profile must be one of {INPUT_CHANNEL_PROFILES}")
+    return list(INPUT_CHANNEL_PROFILE_ORDERS[value])
+
+
 class SequencePathPackDataset(Dataset):
-    def __init__(self, manifest: Mapping[str, Any], *, split: str, max_samples: int = 0) -> None:
+    def __init__(
+        self,
+        manifest: Mapping[str, Any],
+        *,
+        split: str,
+        max_samples: int = 0,
+        input_channel_profile: str = INPUT_CHANNEL_PROFILE_ALL,
+    ) -> None:
         self.manifest = dict(manifest)
+        self.input_channel_profile = str(input_channel_profile or INPUT_CHANNEL_PROFILE_ALL).strip().lower()
         self.lookback_days = int(self.manifest.get("lookback_days", DEFAULT_LOOKBACK_DAYS) or DEFAULT_LOOKBACK_DAYS)
         self.forward_days = int(self.manifest.get("forward_days", DEFAULT_FORWARD_DAYS) or DEFAULT_FORWARD_DAYS)
         sample_index = pd.read_parquet(str(self.manifest["sample_index_path"]))
@@ -270,7 +292,7 @@ class SequencePathPackDataset(Dataset):
         self.symbol_values = self.sample_index["symbol"].astype(str).to_numpy(copy=True)
         self.split = str(split)
         channels = dict(self.manifest.get("feature_channels", {}) or {})
-        self.channel_order = ["daily_raw", "daily_state", "intraday_summary", "limit_structure"]
+        self.channel_order = _input_channel_order(self.input_channel_profile)
         self.feature_arrays = {name: _open_memmap(channels[name], dtype="float32") for name in self.channel_order}
         self.feature_columns = {name: list(channels[name].get("columns", []) or []) for name in self.channel_order}
         self.normalization = dict(self.manifest.get("normalization", {}) or {})
@@ -1839,6 +1861,7 @@ class TrainConfig:
     residual_score_weight: float
     residual_penalty_weight: float
     summary_loss_profile: str
+    input_channel_profile: str
     rank_max_per_side: int
     device: str
     amp: bool
@@ -1859,9 +1882,24 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     progress_path = output_dir / "progress.json"
     _write_json(progress_path, {"status": "loading_datasets", "updated_at": _now()})
-    train_ds = SequencePathPackDataset(manifest, split="train", max_samples=int(config.max_samples_per_split))
-    val_ds = SequencePathPackDataset(manifest, split="validation", max_samples=int(config.max_samples_per_split))
-    test_ds = SequencePathPackDataset(manifest, split="test", max_samples=int(config.max_samples_per_split))
+    train_ds = SequencePathPackDataset(
+        manifest,
+        split="train",
+        max_samples=int(config.max_samples_per_split),
+        input_channel_profile=str(config.input_channel_profile),
+    )
+    val_ds = SequencePathPackDataset(
+        manifest,
+        split="validation",
+        max_samples=int(config.max_samples_per_split),
+        input_channel_profile=str(config.input_channel_profile),
+    )
+    test_ds = SequencePathPackDataset(
+        manifest,
+        split="test",
+        max_samples=int(config.max_samples_per_split),
+        input_channel_profile=str(config.input_channel_profile),
+    )
     if str(config.model_type) in OHLCVA_MODEL_TYPES and not bool(train_ds.has_ohlcva_path):
         raise ValueError("model_type=gru_ohlcva_path_value requires a pack with label_arrays.future_ohlcva_path")
     model = SequencePathModel(
@@ -2100,6 +2138,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         "batch_size": int(config.batch_size),
         "max_samples_per_split": int(config.max_samples_per_split),
         "prediction_mode": str(config.prediction_mode),
+        "input_channel_profile": str(train_ds.input_channel_profile),
+        "input_channels": list(train_ds.channel_order),
         "model": {
             "type": f"SequencePathModel_{str(config.model_type)}",
             "input_dim": int(train_ds.input_dim),
@@ -2212,6 +2252,12 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=SUMMARY_LOSS_PROFILES,
         help="Summary loss profile: base full-horizon constraints or multi-horizon OHLC-derived constraints.",
     )
+    train.add_argument(
+        "--input-channel-profile",
+        default=INPUT_CHANNEL_PROFILE_ALL,
+        choices=INPUT_CHANNEL_PROFILES,
+        help="Input channel profile: all channels or daily_only without minute-derived intraday/limit channels.",
+    )
     train.add_argument("--rank-max-per-side", type=int, default=64)
     train.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     train.add_argument("--amp", dest="amp", action="store_true", default=True)
@@ -2270,6 +2316,7 @@ def main(argv: list[str] | None = None) -> int:
         residual_score_weight=float(args.residual_score_weight),
         residual_penalty_weight=float(args.residual_penalty_weight),
         summary_loss_profile=str(args.summary_loss_profile),
+        input_channel_profile=str(args.input_channel_profile),
         rank_max_per_side=int(args.rank_max_per_side),
         device=str(args.device),
         amp=bool(args.amp),

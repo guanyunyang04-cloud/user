@@ -58,9 +58,11 @@
 `contract_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline contract --json`
 `dry_run_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train --dry-run --json`
 `summary_v2_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2 --json`
+`daily_only_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-daily-only --json`
 `summary_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline summarize --run-dir <run_dir> --json`
 `fixed_profile`: `store_view=seq100_path60_todayclose_ohlcva`；`model_type=gru_path_value`；`loss=path0.45/summary0.20/value0.20/rank0.15`；`top_k=1,3,5,10,20,50,100`；`prediction_mode=compact`。
 `comparison_profile`: `summary_v2_multi_horizon_ohlc` keeps `model_type=gru_path_value` and `path_dim=4`, but changes `summary_loss_profile=multi_horizon_ohlc` to constrain OHLC-derived 5/10/20/40/60-day summaries; the narrow CLI default uses `early_stopping_patience=2`.
+`input_ablation_profile`: `daily_only_no_minute` keeps labels/loss/splits fixed but uses `input_channel_profile=daily_only`, removing `intraday_summary` and `limit_structure`; the narrow CLI default uses `early_stopping_patience=2`.
 `implementation_note`: multi-horizon OHLC summary-loss derivation is vectorized in training while preserving the old per-horizon equal-weight loss semantics.
 `side_effects`: research artifacts only；does not activate execution surface.
 
@@ -103,6 +105,7 @@
 - Seq100 mainline contract: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline contract --json`
 - Seq100 mainline dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train --dry-run --json`
 - Seq100 summary_v2 dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2 --dry-run --json`
+- Seq100 daily-only dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-daily-only --dry-run --json`
 - Evidence registry rebuild: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow evidence-index --rebuild --json`
 - Research artifact GC dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.research_store_gc scan --write-report --json`
 - Selective verification: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.selective_verification --paths <changed_paths> --json`

@@ -18,6 +18,7 @@ from daily_research.path_policy.qdp_v2_sequence_path_pack import (
 from daily_research.path_policy.qdp_v2_sequence_flat_lgbm import _feature_names, _select_indices
 from daily_research.path_policy.qdp_v2_sequence_path_training import SequencePathModel, SequencePathPackDataset, _compute_loss
 from daily_research.path_policy.qdp_v2_sequence_path_training import (
+    INPUT_CHANNEL_PROFILE_DAILY_ONLY,
     SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
     _derive_path_summary_numpy,
     _derive_path_summary_torch,
@@ -646,6 +647,17 @@ def test_sequence_pack_dataset_get_batch_reads_date_grouped_windows(tmp_path) ->
     assert names[0] == "t-2__daily_raw__daily_raw_0"
     selected = _select_indices(dataset, samples_per_date=1, max_samples=0, seed=7)
     assert selected.shape == (1,)
+
+    daily_only = SequencePathPackDataset(manifest, split="train", input_channel_profile=INPUT_CHANNEL_PROFILE_DAILY_ONLY)
+    daily_only_batch = daily_only.get_batch([0, 1])
+
+    assert daily_only.channel_order == ["daily_raw", "daily_state"]
+    assert daily_only.input_dim == 3
+    assert daily_only_batch["x"].shape == (2, 3, 3)
+    daily_only_names = _feature_names(daily_only)
+    assert len(daily_only_names) == 9
+    assert all("__intraday_summary__" not in name for name in daily_only_names)
+    assert all("__limit_structure__" not in name for name in daily_only_names)
 
 
 def test_future_path_columns_support_sixty_day_horizon() -> None:

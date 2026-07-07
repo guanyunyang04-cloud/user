@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from daily_research.path_policy.qdp_v2_sequence_path_training import (
+    INPUT_CHANNEL_PROFILE_ALL,
+    INPUT_CHANNEL_PROFILE_DAILY_ONLY,
     SUMMARY_LOSS_PROFILE_BASE,
     SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
     main as sequence_training_main,
@@ -17,6 +19,7 @@ DEFAULT_STORE_VIEW = Path("daily_research/data/research_store/views/seq100_path6
 DEFAULT_OUTPUT_ROOT = Path("daily_research/output/path_policy/sequence_path_training")
 DEFAULT_RUN_TAG = "seq100_todayclose_path_only_mainline"
 DEFAULT_SUMMARY_V2_RUN_TAG = "seq100_todayclose_path_only_summary_v2"
+DEFAULT_DAILY_ONLY_RUN_TAG = "seq100_todayclose_path_only_daily_only"
 DEFAULT_TOP_K = "1,3,5,10,20,50,100"
 
 ACTIVE_CONCEPTS = {
@@ -33,6 +36,7 @@ COMPARISON_CONCEPTS = {
     "path_only_next_open": "Retained anchor comparison; not the default mainline.",
     "rank_heavy_top1": "Observation branch for narrow Top1 behavior; not the default ranking objective.",
     "summary_v2_multi_horizon_ohlc": "Explicit experiment that keeps OHLC output but expands summary loss to OHLC-derived 5/10/20/40/60-day constraints.",
+    "daily_only_no_minute": "Explicit input ablation that keeps labels/loss fixed but removes intraday_summary and limit_structure input channels.",
 }
 
 ARCHIVED_CONCEPTS = {
@@ -70,6 +74,7 @@ class TodayClosePathOnlyProfile:
     top_k: str = DEFAULT_TOP_K
     max_samples_per_split: int = 0
     summary_loss_profile: str = SUMMARY_LOSS_PROFILE_BASE
+    input_channel_profile: str = INPUT_CHANNEL_PROFILE_ALL
 
 
 def build_todayclose_path_only_train_argv(profile: TodayClosePathOnlyProfile) -> list[str]:
@@ -109,6 +114,8 @@ def build_todayclose_path_only_train_argv(profile: TodayClosePathOnlyProfile) ->
         str(profile.rank_loss_weight),
         "--summary-loss-profile",
         profile.summary_loss_profile,
+        "--input-channel-profile",
+        profile.input_channel_profile,
         "--rank-max-per-side",
         str(profile.rank_max_per_side),
         "--device",
@@ -151,8 +158,39 @@ def build_todayclose_summary_v2_train_argv(profile: TodayClosePathOnlyProfile) -
         top_k=profile.top_k,
         max_samples_per_split=profile.max_samples_per_split,
         summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
+        input_channel_profile=profile.input_channel_profile,
     )
     return build_todayclose_path_only_train_argv(summary_profile)
+
+
+def build_todayclose_daily_only_train_argv(profile: TodayClosePathOnlyProfile) -> list[str]:
+    daily_only_profile = TodayClosePathOnlyProfile(
+        store_view=profile.store_view,
+        output_root=profile.output_root,
+        run_tag=profile.run_tag,
+        epochs=profile.epochs,
+        batch_size=profile.batch_size,
+        hidden_dim=profile.hidden_dim,
+        layers=profile.layers,
+        dropout=profile.dropout,
+        learning_rate=profile.learning_rate,
+        weight_decay=profile.weight_decay,
+        path_loss_weight=profile.path_loss_weight,
+        summary_loss_weight=profile.summary_loss_weight,
+        richer_loss_weight=profile.richer_loss_weight,
+        value_loss_weight=profile.value_loss_weight,
+        rank_loss_weight=profile.rank_loss_weight,
+        rank_max_per_side=profile.rank_max_per_side,
+        device=profile.device,
+        prediction_mode=profile.prediction_mode,
+        early_stopping_patience=profile.early_stopping_patience,
+        early_stopping_min_delta=profile.early_stopping_min_delta,
+        top_k=profile.top_k,
+        max_samples_per_split=profile.max_samples_per_split,
+        summary_loss_profile=SUMMARY_LOSS_PROFILE_BASE,
+        input_channel_profile=INPUT_CHANNEL_PROFILE_DAILY_ONLY,
+    )
+    return build_todayclose_path_only_train_argv(daily_only_profile)
 
 
 def mainline_contract() -> dict[str, Any]:
@@ -169,6 +207,13 @@ def mainline_contract() -> dict[str, Any]:
                 run_tag=DEFAULT_SUMMARY_V2_RUN_TAG,
                 early_stopping_patience=2,
                 summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
+            )
+        ),
+        "daily_only_train_profile": asdict(
+            TodayClosePathOnlyProfile(
+                run_tag=DEFAULT_DAILY_ONLY_RUN_TAG,
+                early_stopping_patience=2,
+                input_channel_profile=INPUT_CHANNEL_PROFILE_DAILY_ONLY,
             )
         ),
         "evidence_boundary": (
@@ -232,6 +277,9 @@ def summarize_sequence_run(run_dir: Path) -> dict[str, Any]:
         "run_dir": str(run_dir),
         "generated_at": summary.get("generated_at", ""),
         "pack_manifest": summary.get("pack_manifest", ""),
+        "input_channel_profile": summary.get("input_channel_profile", ""),
+        "input_channels": summary.get("input_channels", []),
+        "model_input_dim": dict(summary.get("model", {}) or {}).get("input_dim", ""),
         "price_anchor": summary.get("price_anchor", ""),
         "value_column": summary.get("value_column", ""),
         "best_epoch": summary.get("best_epoch", ""),
@@ -265,6 +313,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_train_args(train_summary_v2, default_run_tag=DEFAULT_SUMMARY_V2_RUN_TAG, default_early_stopping_patience=2)
 
+    train_daily_only = sub.add_parser(
+        "train-daily-only",
+        help="Train the explicit no-minute daily-only input ablation.",
+    )
+    _add_train_args(train_daily_only, default_run_tag=DEFAULT_DAILY_ONLY_RUN_TAG, default_early_stopping_patience=2)
+
     summarize = sub.add_parser("summarize", help="Print a compact sequence run summary.")
     summarize.add_argument("--run-dir", type=Path, required=True)
     summarize.add_argument("--json", action="store_true")
@@ -297,7 +351,7 @@ def main(argv: list[str] | None = None) -> int:
         _print_payload(summarize_sequence_run(Path(args.run_dir)), as_json=bool(args.json))
         return 0
 
-    if args.command in {"train", "train-summary-v2"}:
+    if args.command in {"train", "train-summary-v2", "train-daily-only"}:
         profile = TodayClosePathOnlyProfile(
             store_view=Path(args.store_view),
             output_root=Path(args.output_root),
@@ -311,12 +365,16 @@ def main(argv: list[str] | None = None) -> int:
             summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC
             if args.command == "train-summary-v2"
             else SUMMARY_LOSS_PROFILE_BASE,
+            input_channel_profile=INPUT_CHANNEL_PROFILE_DAILY_ONLY
+            if args.command == "train-daily-only"
+            else INPUT_CHANNEL_PROFILE_ALL,
         )
-        train_argv = (
-            build_todayclose_summary_v2_train_argv(profile)
-            if args.command == "train-summary-v2"
-            else build_todayclose_path_only_train_argv(profile)
-        )
+        if args.command == "train-summary-v2":
+            train_argv = build_todayclose_summary_v2_train_argv(profile)
+        elif args.command == "train-daily-only":
+            train_argv = build_todayclose_daily_only_train_argv(profile)
+        else:
+            train_argv = build_todayclose_path_only_train_argv(profile)
         if bool(args.dry_run):
             _print_payload({"profile": asdict(profile), "argv": train_argv}, as_json=bool(args.json))
             return 0
