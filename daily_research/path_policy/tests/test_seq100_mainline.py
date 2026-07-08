@@ -8,6 +8,7 @@ from daily_research.path_policy.seq100_mainline import (
     ACTIVE_CONCEPTS,
     ARCHIVED_CONCEPTS,
     DEFAULT_DAILY_ONLY_RUN_TAG,
+    DEFAULT_DAILY_ONLY_SUMMARY_V2_OHLCVA_AUX_RUN_TAG,
     DEFAULT_DAILY_ONLY_SUMMARY_V2_RUN_TAG,
     DEFAULT_DIRECT_VALUE_5D_RUN_TAG,
     DEFAULT_NO_INTRADAY_RUN_TAG,
@@ -18,6 +19,7 @@ from daily_research.path_policy.seq100_mainline import (
     LEGACY_ALL_CHANNELS_BASE_RUN_TAG,
     TodayClosePathOnlyProfile,
     build_todayclose_daily_only_train_argv,
+    build_todayclose_daily_only_summary_v2_ohlcva_aux_train_argv,
     build_todayclose_daily_only_summary_v2_train_argv,
     build_todayclose_direct_value_train_argv,
     build_todayclose_legacy_all_channels_base_train_argv,
@@ -53,6 +55,11 @@ def test_mainline_contract_keeps_default_surface_small() -> None:
     assert contract["daily_only_summary_v2_train_profile"]["input_channel_profile"] == "daily_only"
     assert contract["daily_only_summary_v2_train_profile"]["summary_loss_profile"] == "multi_horizon_ohlc"
     assert contract["daily_only_summary_v2_train_profile"]["early_stopping_patience"] == 2
+    assert contract["daily_only_summary_v2_ohlcva_aux_train_profile"]["model_type"] == "gru_ohlcva_aux_path_value"
+    assert contract["daily_only_summary_v2_ohlcva_aux_train_profile"]["input_channel_profile"] == "daily_only"
+    assert contract["daily_only_summary_v2_ohlcva_aux_train_profile"]["summary_loss_profile"] == "multi_horizon_ohlc"
+    assert contract["daily_only_summary_v2_ohlcva_aux_train_profile"]["va_level_loss_weight"] == 0.05
+    assert contract["daily_only_summary_v2_ohlcva_aux_train_profile"]["va_delta_loss_weight"] == 0.02
     assert contract["input_ablation_train_profiles"]["no_intraday_summary"]["input_channel_profile"] == "no_intraday_summary"
     assert contract["input_ablation_train_profiles"]["no_limit_structure"]["input_channel_profile"] == "no_limit_structure"
     assert contract["direct_value_train_profiles"]["5d"]["model_type"] == "gru_direct_value"
@@ -188,6 +195,29 @@ def test_todayclose_daily_only_summary_v2_train_argv_combines_daily_inputs_and_s
     assert "--richer-path" not in argv
 
 
+def test_todayclose_daily_only_summary_v2_ohlcva_aux_train_argv_adds_va_aux_only() -> None:
+    profile = TodayClosePathOnlyProfile(
+        run_tag=DEFAULT_DAILY_ONLY_SUMMARY_V2_OHLCVA_AUX_RUN_TAG,
+        epochs=1,
+        max_samples_per_split=32,
+        device="cpu",
+        early_stopping_patience=2,
+        model_type="gru_ohlcva_aux_path_value",
+        va_level_loss_weight=0.05,
+        va_delta_loss_weight=0.02,
+    )
+    argv = build_todayclose_daily_only_summary_v2_ohlcva_aux_train_argv(profile)
+
+    assert argv[argv.index("--run-tag") + 1] == DEFAULT_DAILY_ONLY_SUMMARY_V2_OHLCVA_AUX_RUN_TAG
+    assert argv[argv.index("--model-type") + 1] == "gru_ohlcva_aux_path_value"
+    assert argv[argv.index("--summary-loss-profile") + 1] == "multi_horizon_ohlc"
+    assert argv[argv.index("--input-channel-profile") + 1] == "daily_only"
+    assert argv[argv.index("--va-level-loss-weight") + 1] == "0.05"
+    assert argv[argv.index("--va-delta-loss-weight") + 1] == "0.02"
+    assert argv[argv.index("--early-stopping-patience") + 1] == "2"
+    assert "gru_ohlcva_path_value" not in argv
+
+
 def test_todayclose_partial_input_ablation_train_argv_removes_one_channel_family() -> None:
     no_intraday_profile = TodayClosePathOnlyProfile(
         run_tag=DEFAULT_NO_INTRADAY_RUN_TAG,
@@ -287,6 +317,18 @@ def test_train_cli_profiles_default_and_comparisons(capsys) -> None:
         daily_only_summary_v2["argv"][daily_only_summary_v2["argv"].index("--summary-loss-profile") + 1]
         == "multi_horizon_ohlc"
     )
+
+    assert main(["train-daily-only-summary-v2-ohlcva-aux", "--dry-run", "--json"]) == 0
+    ohlcva_aux = json.loads(capsys.readouterr().out)
+    assert ohlcva_aux["profile"]["early_stopping_patience"] == 2
+    assert ohlcva_aux["profile"]["input_channel_profile"] == "daily_only"
+    assert ohlcva_aux["profile"]["summary_loss_profile"] == "multi_horizon_ohlc"
+    assert ohlcva_aux["profile"]["model_type"] == "gru_ohlcva_aux_path_value"
+    assert ohlcva_aux["profile"]["va_level_loss_weight"] == 0.05
+    assert ohlcva_aux["profile"]["va_delta_loss_weight"] == 0.02
+    assert ohlcva_aux["argv"][ohlcva_aux["argv"].index("--model-type") + 1] == "gru_ohlcva_aux_path_value"
+    assert ohlcva_aux["argv"][ohlcva_aux["argv"].index("--va-level-loss-weight") + 1] == "0.05"
+    assert ohlcva_aux["argv"][ohlcva_aux["argv"].index("--va-delta-loss-weight") + 1] == "0.02"
 
     assert main(["train-no-intraday-summary", "--dry-run", "--json"]) == 0
     no_intraday = json.loads(capsys.readouterr().out)

@@ -228,7 +228,17 @@ def test_sequence_path_model_outputs_path_summary_and_score() -> None:
     assert out["path_summary"].shape == (4, 9)
     assert out["score"].shape == (4,)
     assert torch.isfinite(loss)
-    assert set(parts) == {"loss", "path_loss", "summary_loss", "richer_loss", "value_loss", "rank_loss", "residual_penalty"}
+    assert set(parts) == {
+        "loss",
+        "path_loss",
+        "summary_loss",
+        "richer_loss",
+        "va_level_loss",
+        "va_delta_loss",
+        "value_loss",
+        "rank_loss",
+        "residual_penalty",
+    }
 
 
 def test_sequence_path_attention_model_outputs_path_summary_and_score() -> None:
@@ -515,7 +525,17 @@ def test_gru_path_value_model_outputs_only_future_path_and_loss_uses_derived_sco
     assert set(out) == {"future_path"}
     assert out["future_path"].shape == (4, 20, 4)
     assert torch.isfinite(loss)
-    assert set(parts) == {"loss", "path_loss", "summary_loss", "richer_loss", "value_loss", "rank_loss", "residual_penalty"}
+    assert set(parts) == {
+        "loss",
+        "path_loss",
+        "summary_loss",
+        "richer_loss",
+        "va_level_loss",
+        "va_delta_loss",
+        "value_loss",
+        "rank_loss",
+        "residual_penalty",
+    }
 
 
 def test_gru_direct_value_model_outputs_only_score_and_loss_uses_direct_horizon() -> None:
@@ -607,6 +627,45 @@ def test_gru_ohlcva_path_value_model_outputs_six_dim_path_and_unified_loss() -> 
     assert out["future_path"].shape == (4, 20, 6)
     assert model.uses_ohlcva_path
     assert torch.isfinite(loss)
+    assert parts["value_loss"] >= 0.0
+
+
+def test_gru_ohlcva_aux_path_value_keeps_price_value_path_and_adds_va_losses() -> None:
+    model = SequencePathModel(
+        input_dim=6,
+        hidden_dim=8,
+        layers=1,
+        forward_days=20,
+        summary_dim=9,
+        dropout=0.0,
+        model_type="gru_ohlcva_aux_path_value",
+    )
+    x = torch.randn(4, 100, 6)
+    y_path = torch.randn(4, 20, 4) * 0.01
+    y_ohlcva_path = torch.randn(4, 20, 6) * 0.01
+    date_idx = torch.tensor([1, 1, 1, 1])
+
+    out = model(x)
+    loss, parts = _compute_loss(
+        out,
+        y_path,
+        torch.empty(4, 0),
+        date_idx,
+        y_ohlcva_path=y_ohlcva_path,
+        value_index=8,
+        va_level_weight=0.05,
+        va_delta_weight=0.02,
+    )
+
+    assert set(out) == {"future_path", "future_ohlcva_aux_path"}
+    assert out["future_path"].shape == (4, 20, 4)
+    assert out["future_ohlcva_aux_path"].shape == (4, 20, 6)
+    assert model.uses_derived_path_value
+    assert model.uses_ohlcva_aux_path
+    assert not model.uses_ohlcva_path
+    assert torch.isfinite(loss)
+    assert parts["va_level_loss"] >= 0.0
+    assert parts["va_delta_loss"] >= 0.0
     assert parts["value_loss"] >= 0.0
 
 

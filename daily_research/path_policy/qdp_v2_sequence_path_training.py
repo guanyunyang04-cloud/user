@@ -72,12 +72,14 @@ UNIFIED_VALUE_TRANSACTION_COST = 0.002
 UNIFIED_VALUE_TEMPERATURE = 0.03
 RICHER_MODEL_TYPES = {"gru_richer_path_value", "gru_richer_path_value_symbol"}
 OHLCVA_MODEL_TYPES = {"gru_ohlcva_path_value"}
+OHLCVA_AUX_MODEL_TYPES = {"gru_ohlcva_aux_path_value"}
 DIRECT_VALUE_MODEL_TYPES = {"gru_direct_value"}
 PATH_VALUE_MODEL_TYPES = {
     "gru_path_value",
     "gru_path_value_symbol",
     "gru_path_value_residual",
     *OHLCVA_MODEL_TYPES,
+    *OHLCVA_AUX_MODEL_TYPES,
     *RICHER_MODEL_TYPES,
 }
 RESIDUAL_MODEL_TYPES = {"gru_path_value_residual"}
@@ -619,6 +621,7 @@ class SequencePathModel(nn.Module):
             "gru_path_value_symbol",
             "gru_path_value_residual",
             "gru_ohlcva_path_value",
+            "gru_ohlcva_aux_path_value",
             "gru_richer_path_value",
             "gru_richer_path_value_symbol",
             "gru_direct_value",
@@ -626,7 +629,7 @@ class SequencePathModel(nn.Module):
         if normalized_model_type not in allowed_model_types:
             raise ValueError(
                 "model_type must be gru_last, gru_attention, gru_path_value, gru_path_value_symbol, "
-                "gru_path_value_residual, gru_ohlcva_path_value, gru_richer_path_value, "
+                "gru_path_value_residual, gru_ohlcva_path_value, gru_ohlcva_aux_path_value, gru_richer_path_value, "
                 "gru_richer_path_value_symbol, or gru_direct_value"
             )
         self.model_type = normalized_model_type
@@ -636,6 +639,7 @@ class SequencePathModel(nn.Module):
         self.uses_residual_score = normalized_model_type in RESIDUAL_MODEL_TYPES
         self.uses_richer_path = normalized_model_type in RICHER_MODEL_TYPES
         self.uses_ohlcva_path = normalized_model_type in OHLCVA_MODEL_TYPES
+        self.uses_ohlcva_aux_path = normalized_model_type in OHLCVA_AUX_MODEL_TYPES
         self.input_norm = nn.LayerNorm(input_dim)
         self.proj = nn.Linear(input_dim, hidden_dim)
         self.encoder = nn.GRU(
@@ -660,7 +664,13 @@ class SequencePathModel(nn.Module):
             self.symbol_embedding = None
         head_dim = int(hidden_dim) + self.symbol_embedding_dim
         self.path_dim = 6 if self.uses_ohlcva_path else 4
-        self.richer_path_dim = int(max(4, richer_path_dim)) if self.uses_richer_path else self.path_dim
+        self.richer_path_dim = (
+            int(max(4, richer_path_dim))
+            if self.uses_richer_path
+            else 6
+            if self.uses_ohlcva_aux_path
+            else self.path_dim
+        )
         self.path_head = None if self.uses_direct_value else nn.Linear(head_dim, int(forward_days) * self.richer_path_dim)
         if self.uses_derived_path_value:
             self.summary_head = None
@@ -695,11 +705,13 @@ class SequencePathModel(nn.Module):
             return {"score": self.score_head(pooled).squeeze(-1)}
         assert self.path_head is not None
         path_output = self.path_head(pooled).view(-1, self.forward_days, self.richer_path_dim)
-        future_path = path_output[:, :, : self.path_dim] if self.uses_richer_path else path_output
+        future_path = path_output[:, :, : self.path_dim] if (self.uses_richer_path or self.uses_ohlcva_aux_path) else path_output
         if self.uses_derived_path_value:
             outputs = {"future_path": future_path}
             if self.uses_richer_path:
                 outputs["future_richer_path"] = path_output
+            if self.uses_ohlcva_aux_path:
+                outputs["future_ohlcva_aux_path"] = path_output
             if self.uses_residual_score:
                 assert self.residual_score_head is not None
                 outputs["residual_score"] = self.residual_score_head(pooled).squeeze(-1)
@@ -745,6 +757,12 @@ def _rank_loss_by_date(score: torch.Tensor, target: torch.Tensor, date_idx: torc
     if not losses:
         return score.sum() * 0.0
     return torch.stack(losses).mean()
+
+
+def _delta_along_days(path: torch.Tensor) -> torch.Tensor:
+    if int(path.shape[1]) < 2:
+        return path[:, :0]
+    return path[:, 1:] - path[:, :-1]
 
 
 def _multi_horizon_ohlc_summary_loss_loop(pred_path: torch.Tensor, target_path: torch.Tensor, *, price_anchor: str) -> torch.Tensor:
@@ -919,6 +937,7 @@ def _compute_loss(
     y_summary: torch.Tensor,
     date_idx: torch.Tensor,
     *,
+    y_ohlcva_path: torch.Tensor | None = None,
     y_richer_path: torch.Tensor | None = None,
     value_index: int,
     path_weight: float = 0.35,
@@ -927,6 +946,8 @@ def _compute_loss(
     rank_weight: float = 0.15,
     richer_weight: float = 0.0,
     rank_max_per_side: int = 64,
+    va_level_weight: float = 0.0,
+    va_delta_weight: float = 0.0,
     residual_weight: float = 0.25,
     residual_penalty_weight: float = 0.01,
     price_anchor: str = "next_open",
@@ -948,6 +969,8 @@ def _compute_loss(
         path_loss = score.sum() * 0.0
         summary_loss = score.sum() * 0.0
         richer_loss = score.sum() * 0.0
+        va_level_loss = score.sum() * 0.0
+        va_delta_loss = score.sum() * 0.0
         residual_penalty = score.sum() * 0.0
         value_loss = _finite_smooth_l1(score, value_target)
         rank_loss = _rank_loss_by_date(score, value_target, date_idx, max_per_side=int(rank_max_per_side))
@@ -957,6 +980,8 @@ def _compute_loss(
             + float(path_weight) * path_loss
             + float(summary_weight) * summary_loss
             + float(richer_weight) * richer_loss
+            + float(va_level_weight) * va_level_loss
+            + float(va_delta_weight) * va_delta_loss
             + float(residual_penalty_weight) * residual_penalty
         )
         return total, {
@@ -964,12 +989,25 @@ def _compute_loss(
             "path_loss": float(path_loss.detach().cpu().item()),
             "summary_loss": float(summary_loss.detach().cpu().item()),
             "richer_loss": float(richer_loss.detach().cpu().item()),
+            "va_level_loss": float(va_level_loss.detach().cpu().item()),
+            "va_delta_loss": float(va_delta_loss.detach().cpu().item()),
             "value_loss": float(value_loss.detach().cpu().item()),
             "rank_loss": float(rank_loss.detach().cpu().item()),
             "residual_penalty": float(residual_penalty.detach().cpu().item()),
         }
 
     path_loss = _finite_smooth_l1(outputs["future_path"], y_path)
+    va_level_loss = outputs["future_path"].sum() * 0.0
+    va_delta_loss = outputs["future_path"].sum() * 0.0
+    if y_ohlcva_path is not None and "future_ohlcva_aux_path" in outputs:
+        predicted_aux = outputs["future_ohlcva_aux_path"]
+        if int(predicted_aux.shape[-1]) < 6 or int(y_ohlcva_path.shape[-1]) < 6:
+            raise ValueError("future_ohlcva_aux_path requires 6-dimensional OHLCVA targets")
+        va_level_loss = _finite_smooth_l1(predicted_aux[:, :, 4:6], y_ohlcva_path[:, :, 4:6])
+        va_delta_loss = _finite_smooth_l1(
+            _delta_along_days(predicted_aux[:, :, 4:6]),
+            _delta_along_days(y_ohlcva_path[:, :, 4:6]),
+        )
     richer_loss = outputs["future_path"].sum() * 0.0
     if y_richer_path is not None and "future_richer_path" in outputs:
         predicted_richer = outputs["future_richer_path"]
@@ -1012,6 +1050,8 @@ def _compute_loss(
         + float(value_weight) * value_loss
         + float(rank_weight) * rank_loss
         + float(richer_weight) * richer_loss
+        + float(va_level_weight) * va_level_loss
+        + float(va_delta_weight) * va_delta_loss
         + float(residual_penalty_weight) * residual_penalty
     )
     return total, {
@@ -1019,6 +1059,8 @@ def _compute_loss(
         "path_loss": float(path_loss.detach().cpu().item()),
         "summary_loss": float(summary_loss.detach().cpu().item()),
         "richer_loss": float(richer_loss.detach().cpu().item()),
+        "va_level_loss": float(va_level_loss.detach().cpu().item()),
+        "va_delta_loss": float(va_delta_loss.detach().cpu().item()),
         "value_loss": float(value_loss.detach().cpu().item()),
         "rank_loss": float(rank_loss.detach().cpu().item()),
         "residual_penalty": float(residual_penalty.detach().cpu().item()),
@@ -1762,6 +1804,7 @@ def _predict_split(
         else int(dataset.forward_days)
     )
     output_path_dim = 6 if bool(getattr(model, "uses_ohlcva_path", False)) else 4
+    uses_ohlcva_aux_path = bool(getattr(model, "uses_ohlcva_aux_path", False))
     output_path_fields = PATH_OHLCVA_FIELDS if output_path_dim >= 6 else PATH_OHLC_FIELDS
     if uses_direct_value:
         summary_columns = derived_path_summary_columns(eval_forward_days, path_dim=4)
@@ -1783,6 +1826,10 @@ def _predict_split(
     target_count = 0
     prediction_sums: dict[str, float] = {"score": 0.0}
     prediction_counts: dict[str, int] = {"score": 0}
+    va_abs_sum = 0.0
+    va_abs_count = 0
+    va_delta_abs_sum = 0.0
+    va_delta_abs_count = 0
     first_write = True
     model.eval()
 
@@ -1821,7 +1868,7 @@ def _predict_split(
     ):
         batch = dataset.get_batch(
             batch_indices,
-            include_ohlcva_path=bool(output_path_dim >= 6),
+            include_ohlcva_path=bool(output_path_dim >= 6 or uses_ohlcva_aux_path),
             include_richer_path=False,
             include_summary=not bool(uses_derived_path_value or uses_direct_value),
         )
@@ -1830,6 +1877,7 @@ def _predict_split(
         trade_dates = list(batch["trade_date"])
         symbols = list(batch["symbol"])
         del batch
+        pred_aux_np = None
         with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
             out = model(x, symbol_idx=symbol_idx)
         true_path_np = target_path.detach().float().cpu().numpy()
@@ -1858,6 +1906,21 @@ def _predict_split(
             else:
                 residual_np = None
                 score_np = path_value_score_np
+        if uses_ohlcva_aux_path and y_ohlcva_path is not None and "future_ohlcva_aux_path" in out:
+            pred_aux_np = out["future_ohlcva_aux_path"].detach().float().cpu().numpy()
+            true_ohlcva_np = y_ohlcva_path.detach().float().cpu().numpy()
+            pred_va = pred_aux_np[:, :, 4:6]
+            true_va = true_ohlcva_np[:, :, 4:6]
+            finite_va = np.isfinite(true_va)
+            if bool(finite_va.any()):
+                va_abs_sum += float(np.abs(pred_va[finite_va] - true_va[finite_va]).sum())
+                va_abs_count += int(finite_va.sum())
+            pred_va_delta = np.diff(pred_va, axis=1)
+            true_va_delta = np.diff(true_va, axis=1)
+            finite_va_delta = np.isfinite(true_va_delta)
+            if bool(finite_va_delta.any()):
+                va_delta_abs_sum += float(np.abs(pred_va_delta[finite_va_delta] - true_va_delta[finite_va_delta]).sum())
+                va_delta_abs_count += int(finite_va_delta.sum())
         rows: dict[str, Any] = {
             "trade_date": trade_dates,
             "symbol": symbols,
@@ -1912,6 +1975,8 @@ def _predict_split(
             del residual_np
         if "path_value_score_np" in locals():
             del path_value_score_np
+        if pred_aux_np is not None:
+            del pred_aux_np, true_ohlcva_np, pred_va, true_va, finite_va, pred_va_delta, true_va_delta, finite_va_delta
         del x, y_path, y_ohlcva_path, _y_richer_path, y_summary, target_path, symbol_idx, out, pred_path_np, pred_summary_np, score_np, true_path_np, true_summary_np, chunk, metric_frame
         del trade_dates, symbols
         if predict_batch_count % 100 == 0:
@@ -1932,6 +1997,8 @@ def _predict_split(
         "score_column": "score",
         "target_mean": float(target_sum / max(target_count, 1)),
         "prediction_mean": float(prediction_sums.get("score", 0.0) / max(prediction_counts.get("score", 0), 1)),
+        "va_level_mae": float(va_abs_sum / va_abs_count) if va_abs_count > 0 else np.nan,
+        "va_delta_mae": float(va_delta_abs_sum / va_delta_abs_count) if va_delta_abs_count > 0 else np.nan,
         "prediction_csv": prediction_csv,
     }
     diagnostics: dict[str, dict[str, Any]] = {}
@@ -2064,6 +2131,8 @@ class TrainConfig:
     path_loss_weight: float
     summary_loss_weight: float
     richer_loss_weight: float
+    va_level_loss_weight: float
+    va_delta_loss_weight: float
     value_loss_weight: float
     rank_loss_weight: float
     residual_score_weight: float
@@ -2109,8 +2178,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         max_samples=int(config.max_samples_per_split),
         input_channel_profile=str(config.input_channel_profile),
     )
-    if str(config.model_type) in OHLCVA_MODEL_TYPES and not bool(train_ds.has_ohlcva_path):
-        raise ValueError("model_type=gru_ohlcva_path_value requires a pack with label_arrays.future_ohlcva_path")
+    if str(config.model_type) in (OHLCVA_MODEL_TYPES | OHLCVA_AUX_MODEL_TYPES) and not bool(train_ds.has_ohlcva_path):
+        raise ValueError(f"model_type={config.model_type} requires a pack with label_arrays.future_ohlcva_path")
     model = SequencePathModel(
         input_dim=train_ds.input_dim,
         hidden_dim=int(config.hidden_dim),
@@ -2127,6 +2196,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     uses_direct_value = bool(getattr(model, "uses_direct_value", False))
     uses_derived_path_value = bool(getattr(model, "uses_derived_path_value", False))
     uses_ohlcva_path = bool(getattr(model, "uses_ohlcva_path", False))
+    uses_ohlcva_aux_path = bool(getattr(model, "uses_ohlcva_aux_path", False))
     uses_richer_path = bool(getattr(model, "uses_richer_path", False))
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(config.learning_rate), weight_decay=float(config.weight_decay))
     scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
@@ -2143,6 +2213,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "path_loss": 0.0,
             "summary_loss": 0.0,
             "richer_loss": 0.0,
+            "va_level_loss": 0.0,
+            "va_delta_loss": 0.0,
             "value_loss": 0.0,
             "rank_loss": 0.0,
             "residual_penalty": 0.0,
@@ -2160,7 +2232,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             batch_start = time.perf_counter()
             batch = train_ds.get_batch(
                 batch_indices,
-                include_ohlcva_path=uses_ohlcva_path,
+                include_ohlcva_path=bool(uses_ohlcva_path or uses_ohlcva_aux_path),
                 include_richer_path=uses_richer_path,
                 include_summary=not bool(uses_derived_path_value or uses_direct_value),
             )
@@ -2175,6 +2247,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     target_path,
                     y_summary,
                     date_idx,
+                    y_ohlcva_path=y_ohlcva_path,
                     y_richer_path=y_richer_path,
                     value_index=train_ds.value_index,
                     path_weight=float(config.path_loss_weight),
@@ -2183,6 +2256,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     rank_weight=float(config.rank_loss_weight),
                     richer_weight=float(config.richer_loss_weight),
                     rank_max_per_side=int(config.rank_max_per_side),
+                    va_level_weight=float(config.va_level_loss_weight),
+                    va_delta_weight=float(config.va_delta_loss_weight),
                     residual_weight=float(config.residual_score_weight),
                     residual_penalty_weight=float(config.residual_penalty_weight),
                     price_anchor=train_ds.price_anchor,
@@ -2384,6 +2459,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "uses_residual_score": bool(getattr(model, "uses_residual_score", False)),
             "uses_richer_path": bool(getattr(model, "uses_richer_path", False)),
             "uses_ohlcva_path": bool(getattr(model, "uses_ohlcva_path", False)),
+            "uses_ohlcva_aux_path": bool(getattr(model, "uses_ohlcva_aux_path", False)),
             "path_dim": int(getattr(model, "path_dim", 4)),
             "richer_path_dim": int(getattr(model, "richer_path_dim", 4)),
             "richer_path_fields": list(train_ds.richer_path_fields) if bool(getattr(model, "uses_richer_path", False)) else [],
@@ -2398,6 +2474,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "rank": float(config.rank_loss_weight),
             "rank_max_per_side": int(config.rank_max_per_side),
             "summary_profile": str(config.summary_loss_profile),
+            "va_level": float(config.va_level_loss_weight),
+            "va_delta": float(config.va_delta_loss_weight),
         },
         "early_stopping": {
             "metric": "validation_rank_ic_mean",
@@ -2453,6 +2531,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "gru_path_value_symbol",
             "gru_path_value_residual",
             "gru_ohlcva_path_value",
+            "gru_ohlcva_aux_path_value",
             "gru_richer_path_value",
             "gru_richer_path_value_symbol",
             "gru_direct_value",
@@ -2476,6 +2555,8 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument("--path-loss-weight", type=float, default=0.40)
     train.add_argument("--summary-loss-weight", type=float, default=0.20)
     train.add_argument("--richer-loss-weight", type=float, default=0.10)
+    train.add_argument("--va-level-loss-weight", type=float, default=0.0)
+    train.add_argument("--va-delta-loss-weight", type=float, default=0.0)
     train.add_argument("--value-loss-weight", type=float, default=0.25)
     train.add_argument("--rank-loss-weight", type=float, default=0.15)
     train.add_argument("--direct-value-horizon", type=int, default=0)
@@ -2548,6 +2629,8 @@ def main(argv: list[str] | None = None) -> int:
         path_loss_weight=float(args.path_loss_weight),
         summary_loss_weight=float(args.summary_loss_weight),
         richer_loss_weight=float(args.richer_loss_weight),
+        va_level_loss_weight=float(args.va_level_loss_weight),
+        va_delta_loss_weight=float(args.va_delta_loss_weight),
         value_loss_weight=float(args.value_loss_weight),
         rank_loss_weight=float(args.rank_loss_weight),
         residual_score_weight=float(args.residual_score_weight),
