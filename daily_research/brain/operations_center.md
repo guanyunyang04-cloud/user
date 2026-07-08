@@ -58,14 +58,18 @@
 `contract_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline contract --json`
 `dry_run_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train --dry-run --json`
 `summary_v2_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2 --json`
+`summary_v2_no60_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2-no60 --json`
 `daily_only_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-daily-only --json`
+`no_intraday_summary_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-no-intraday-summary --json`
+`no_limit_structure_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-no-limit-structure --json`
 `direct_value_5d_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-direct-value-5d --json`
 `direct_value_10d_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-direct-value-10d --json`
 `direct_value_60d_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-direct-value-60d --json`
 `summary_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline summarize --run-dir <run_dir> --json`
 `fixed_profile`: `store_view=seq100_path60_todayclose_ohlcva`；`model_type=gru_path_value`；`loss=path0.45/summary0.20/value0.20/rank0.15`；`top_k=1,3,5,10,20,50,100`；`prediction_mode=compact`。
 `comparison_profile`: `summary_v2_multi_horizon_ohlc` keeps `model_type=gru_path_value` and `path_dim=4`, but changes `summary_loss_profile=multi_horizon_ohlc` to constrain OHLC-derived 5/10/20/40/60-day summaries; the narrow CLI default uses `early_stopping_patience=2`.
-`input_ablation_profile`: `daily_only_no_minute` keeps labels/loss/splits fixed but uses `input_channel_profile=daily_only`, removing `intraday_summary` and `limit_structure`; the narrow CLI default uses `early_stopping_patience=2`.
+`summary_control_profile`: `summary_v2_no60` keeps the same OHLC-derived summary family and loss weight as `summary_v2_multi_horizon_ohlc`, but changes `summary_loss_profile=multi_horizon_ohlc_no60`, using windows `5/10/20/40` only. It is a single-factor control and must not include new shape summaries.
+`input_ablation_profile`: `daily_only_no_minute` keeps labels/loss/splits fixed but uses `input_channel_profile=daily_only`, removing `intraday_summary` and `limit_structure`; `no_intraday_summary` keeps `daily_raw + daily_state + limit_structure`; `no_limit_structure` keeps `daily_raw + daily_state + intraday_summary`; the narrow CLIs default to `early_stopping_patience=2`.
 `direct_value_profile`: `direct_value_rank_5d/10d/60d` uses `model_type=gru_direct_value`, outputs only `score`, uses `loss=value0.50/rank0.50`, sets path/summary/richer loss to zero, and derives the supervised target from true future OHLC labels at the requested horizon; it is a comparison profile, not the default mainline.
 `implementation_note`: multi-horizon OHLC summary-loss derivation is vectorized in training while preserving the old per-horizon equal-weight loss semantics.
 `side_effects`: research artifacts only；does not activate execution surface.
@@ -109,7 +113,10 @@
 - Seq100 mainline contract: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline contract --json`
 - Seq100 mainline dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train --dry-run --json`
 - Seq100 summary_v2 dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2 --dry-run --json`
+- Seq100 summary_v2 no60 dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2-no60 --dry-run --json`
 - Seq100 daily-only dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-daily-only --dry-run --json`
+- Seq100 no-intraday-summary dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-no-intraday-summary --dry-run --json`
+- Seq100 no-limit-structure dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-no-limit-structure --dry-run --json`
 - Seq100 direct-value 5d dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-direct-value-5d --dry-run --json`
 - Seq100 direct-value 10d dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-direct-value-10d --dry-run --json`
 - Seq100 direct-value 60d dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-direct-value-60d --dry-run --json`

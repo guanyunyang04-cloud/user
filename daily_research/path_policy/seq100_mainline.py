@@ -10,7 +10,10 @@ from typing import Any
 from daily_research.path_policy.qdp_v2_sequence_path_training import (
     INPUT_CHANNEL_PROFILE_ALL,
     INPUT_CHANNEL_PROFILE_DAILY_ONLY,
+    INPUT_CHANNEL_PROFILE_NO_INTRADAY_SUMMARY,
+    INPUT_CHANNEL_PROFILE_NO_LIMIT_STRUCTURE,
     SUMMARY_LOSS_PROFILE_BASE,
+    SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC_NO60,
     SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
     main as sequence_training_main,
 )
@@ -19,7 +22,10 @@ DEFAULT_STORE_VIEW = Path("daily_research/data/research_store/views/seq100_path6
 DEFAULT_OUTPUT_ROOT = Path("daily_research/output/path_policy/sequence_path_training")
 DEFAULT_RUN_TAG = "seq100_todayclose_path_only_mainline"
 DEFAULT_SUMMARY_V2_RUN_TAG = "seq100_todayclose_path_only_summary_v2"
+DEFAULT_SUMMARY_V2_NO60_RUN_TAG = "seq100_todayclose_path_only_summary_v2_no60"
 DEFAULT_DAILY_ONLY_RUN_TAG = "seq100_todayclose_path_only_daily_only"
+DEFAULT_NO_INTRADAY_RUN_TAG = "seq100_todayclose_path_only_no_intraday_summary"
+DEFAULT_NO_LIMIT_RUN_TAG = "seq100_todayclose_path_only_no_limit_structure"
 DEFAULT_DIRECT_VALUE_5D_RUN_TAG = "seq100_direct_value_5d"
 DEFAULT_DIRECT_VALUE_10D_RUN_TAG = "seq100_direct_value_10d"
 DEFAULT_DIRECT_VALUE_60D_RUN_TAG = "seq100_direct_value_60d"
@@ -39,7 +45,10 @@ COMPARISON_CONCEPTS = {
     "path_only_next_open": "Retained anchor comparison; not the default mainline.",
     "rank_heavy_top1": "Observation branch for narrow Top1 behavior; not the default ranking objective.",
     "summary_v2_multi_horizon_ohlc": "Explicit experiment that keeps OHLC output but expands summary loss to OHLC-derived 5/10/20/40/60-day constraints.",
+    "summary_v2_no60": "Explicit single-factor experiment that keeps summary_v2 OHLC constraints but removes the full 60-day window.",
     "daily_only_no_minute": "Explicit input ablation that keeps labels/loss fixed but removes intraday_summary and limit_structure input channels.",
+    "no_intraday_summary": "Explicit input ablation that removes intraday_summary while retaining limit_structure.",
+    "no_limit_structure": "Explicit input ablation that removes limit_structure while retaining intraday_summary.",
     "direct_value_rank_5d": "Explicit sequence ranker that directly learns 5-day path_trade_value_v2 instead of predicting future OHLC.",
     "direct_value_rank_10d": "Explicit sequence ranker that directly learns 10-day path_trade_value_v2 instead of predicting future OHLC.",
     "direct_value_rank_60d": "Explicit sequence ranker that directly learns 60-day path_trade_value_v2 instead of predicting future OHLC.",
@@ -175,6 +184,102 @@ def build_todayclose_summary_v2_train_argv(profile: TodayClosePathOnlyProfile) -
     return build_todayclose_path_only_train_argv(summary_profile)
 
 
+def build_todayclose_summary_v2_no60_train_argv(profile: TodayClosePathOnlyProfile) -> list[str]:
+    summary_profile = TodayClosePathOnlyProfile(
+        store_view=profile.store_view,
+        output_root=profile.output_root,
+        run_tag=profile.run_tag,
+        epochs=profile.epochs,
+        batch_size=profile.batch_size,
+        hidden_dim=profile.hidden_dim,
+        layers=profile.layers,
+        dropout=profile.dropout,
+        learning_rate=profile.learning_rate,
+        weight_decay=profile.weight_decay,
+        path_loss_weight=profile.path_loss_weight,
+        summary_loss_weight=profile.summary_loss_weight,
+        richer_loss_weight=profile.richer_loss_weight,
+        value_loss_weight=profile.value_loss_weight,
+        rank_loss_weight=profile.rank_loss_weight,
+        rank_max_per_side=profile.rank_max_per_side,
+        device=profile.device,
+        prediction_mode=profile.prediction_mode,
+        early_stopping_patience=profile.early_stopping_patience,
+        early_stopping_min_delta=profile.early_stopping_min_delta,
+        top_k=profile.top_k,
+        max_samples_per_split=profile.max_samples_per_split,
+        summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC_NO60,
+        input_channel_profile=profile.input_channel_profile,
+        model_type=profile.model_type,
+        direct_value_horizon=profile.direct_value_horizon,
+    )
+    return build_todayclose_path_only_train_argv(summary_profile)
+
+
+def build_todayclose_no_intraday_summary_train_argv(profile: TodayClosePathOnlyProfile) -> list[str]:
+    ablation_profile = TodayClosePathOnlyProfile(
+        store_view=profile.store_view,
+        output_root=profile.output_root,
+        run_tag=profile.run_tag,
+        epochs=profile.epochs,
+        batch_size=profile.batch_size,
+        hidden_dim=profile.hidden_dim,
+        layers=profile.layers,
+        dropout=profile.dropout,
+        learning_rate=profile.learning_rate,
+        weight_decay=profile.weight_decay,
+        path_loss_weight=profile.path_loss_weight,
+        summary_loss_weight=profile.summary_loss_weight,
+        richer_loss_weight=profile.richer_loss_weight,
+        value_loss_weight=profile.value_loss_weight,
+        rank_loss_weight=profile.rank_loss_weight,
+        rank_max_per_side=profile.rank_max_per_side,
+        device=profile.device,
+        prediction_mode=profile.prediction_mode,
+        early_stopping_patience=profile.early_stopping_patience,
+        early_stopping_min_delta=profile.early_stopping_min_delta,
+        top_k=profile.top_k,
+        max_samples_per_split=profile.max_samples_per_split,
+        summary_loss_profile=SUMMARY_LOSS_PROFILE_BASE,
+        input_channel_profile=INPUT_CHANNEL_PROFILE_NO_INTRADAY_SUMMARY,
+        model_type=profile.model_type,
+        direct_value_horizon=profile.direct_value_horizon,
+    )
+    return build_todayclose_path_only_train_argv(ablation_profile)
+
+
+def build_todayclose_no_limit_structure_train_argv(profile: TodayClosePathOnlyProfile) -> list[str]:
+    ablation_profile = TodayClosePathOnlyProfile(
+        store_view=profile.store_view,
+        output_root=profile.output_root,
+        run_tag=profile.run_tag,
+        epochs=profile.epochs,
+        batch_size=profile.batch_size,
+        hidden_dim=profile.hidden_dim,
+        layers=profile.layers,
+        dropout=profile.dropout,
+        learning_rate=profile.learning_rate,
+        weight_decay=profile.weight_decay,
+        path_loss_weight=profile.path_loss_weight,
+        summary_loss_weight=profile.summary_loss_weight,
+        richer_loss_weight=profile.richer_loss_weight,
+        value_loss_weight=profile.value_loss_weight,
+        rank_loss_weight=profile.rank_loss_weight,
+        rank_max_per_side=profile.rank_max_per_side,
+        device=profile.device,
+        prediction_mode=profile.prediction_mode,
+        early_stopping_patience=profile.early_stopping_patience,
+        early_stopping_min_delta=profile.early_stopping_min_delta,
+        top_k=profile.top_k,
+        max_samples_per_split=profile.max_samples_per_split,
+        summary_loss_profile=SUMMARY_LOSS_PROFILE_BASE,
+        input_channel_profile=INPUT_CHANNEL_PROFILE_NO_LIMIT_STRUCTURE,
+        model_type=profile.model_type,
+        direct_value_horizon=profile.direct_value_horizon,
+    )
+    return build_todayclose_path_only_train_argv(ablation_profile)
+
+
 def build_todayclose_daily_only_train_argv(profile: TodayClosePathOnlyProfile) -> list[str]:
     daily_only_profile = TodayClosePathOnlyProfile(
         store_view=profile.store_view,
@@ -255,6 +360,13 @@ def mainline_contract() -> dict[str, Any]:
                 summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
             )
         ),
+        "summary_v2_no60_train_profile": asdict(
+            TodayClosePathOnlyProfile(
+                run_tag=DEFAULT_SUMMARY_V2_NO60_RUN_TAG,
+                early_stopping_patience=2,
+                summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC_NO60,
+            )
+        ),
         "daily_only_train_profile": asdict(
             TodayClosePathOnlyProfile(
                 run_tag=DEFAULT_DAILY_ONLY_RUN_TAG,
@@ -262,6 +374,22 @@ def mainline_contract() -> dict[str, Any]:
                 input_channel_profile=INPUT_CHANNEL_PROFILE_DAILY_ONLY,
             )
         ),
+        "input_ablation_train_profiles": {
+            "no_intraday_summary": asdict(
+                TodayClosePathOnlyProfile(
+                    run_tag=DEFAULT_NO_INTRADAY_RUN_TAG,
+                    early_stopping_patience=2,
+                    input_channel_profile=INPUT_CHANNEL_PROFILE_NO_INTRADAY_SUMMARY,
+                )
+            ),
+            "no_limit_structure": asdict(
+                TodayClosePathOnlyProfile(
+                    run_tag=DEFAULT_NO_LIMIT_RUN_TAG,
+                    early_stopping_patience=2,
+                    input_channel_profile=INPUT_CHANNEL_PROFILE_NO_LIMIT_STRUCTURE,
+                )
+            ),
+        },
         "direct_value_train_profiles": {
             "5d": asdict(
                 TodayClosePathOnlyProfile(
@@ -402,11 +530,29 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_train_args(train_summary_v2, default_run_tag=DEFAULT_SUMMARY_V2_RUN_TAG, default_early_stopping_patience=2)
 
+    train_summary_v2_no60 = sub.add_parser(
+        "train-summary-v2-no60",
+        help="Train the summary_v2 single-factor experiment without the full 60-day window.",
+    )
+    _add_train_args(train_summary_v2_no60, default_run_tag=DEFAULT_SUMMARY_V2_NO60_RUN_TAG, default_early_stopping_patience=2)
+
     train_daily_only = sub.add_parser(
         "train-daily-only",
         help="Train the explicit no-minute daily-only input ablation.",
     )
     _add_train_args(train_daily_only, default_run_tag=DEFAULT_DAILY_ONLY_RUN_TAG, default_early_stopping_patience=2)
+
+    train_no_intraday = sub.add_parser(
+        "train-no-intraday-summary",
+        help="Train the input ablation that removes intraday_summary only.",
+    )
+    _add_train_args(train_no_intraday, default_run_tag=DEFAULT_NO_INTRADAY_RUN_TAG, default_early_stopping_patience=2)
+
+    train_no_limit = sub.add_parser(
+        "train-no-limit-structure",
+        help="Train the input ablation that removes limit_structure only.",
+    )
+    _add_train_args(train_no_limit, default_run_tag=DEFAULT_NO_LIMIT_RUN_TAG, default_early_stopping_patience=2)
 
     direct_value_5d = sub.add_parser("train-direct-value-5d", help="Train the direct 5-day path-value ranker.")
     _add_train_args(
@@ -475,7 +621,25 @@ def main(argv: list[str] | None = None) -> int:
         "train-direct-value-10d": 10,
         "train-direct-value-60d": 60,
     }
-    if args.command in {"train", "train-summary-v2", "train-daily-only", *direct_horizon_by_command}:
+    input_profile_by_command = {
+        "train-daily-only": INPUT_CHANNEL_PROFILE_DAILY_ONLY,
+        "train-no-intraday-summary": INPUT_CHANNEL_PROFILE_NO_INTRADAY_SUMMARY,
+        "train-no-limit-structure": INPUT_CHANNEL_PROFILE_NO_LIMIT_STRUCTURE,
+    }
+    summary_profile_by_command = {
+        "train-summary-v2": SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
+        "train-summary-v2-no60": SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC_NO60,
+    }
+    train_commands = {
+        "train",
+        "train-summary-v2",
+        "train-summary-v2-no60",
+        "train-daily-only",
+        "train-no-intraday-summary",
+        "train-no-limit-structure",
+        *direct_horizon_by_command,
+    }
+    if args.command in train_commands:
         direct_horizon = int(direct_horizon_by_command.get(args.command, 0))
         profile = TodayClosePathOnlyProfile(
             store_view=Path(args.store_view),
@@ -492,19 +656,21 @@ def main(argv: list[str] | None = None) -> int:
             rank_loss_weight=0.50 if int(direct_horizon) > 0 else 0.15,
             early_stopping_patience=int(args.early_stopping_patience),
             early_stopping_min_delta=float(args.early_stopping_min_delta),
-            summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC
-            if args.command == "train-summary-v2"
-            else SUMMARY_LOSS_PROFILE_BASE,
-            input_channel_profile=INPUT_CHANNEL_PROFILE_DAILY_ONLY
-            if args.command == "train-daily-only"
-            else INPUT_CHANNEL_PROFILE_ALL,
+            summary_loss_profile=str(summary_profile_by_command.get(args.command, SUMMARY_LOSS_PROFILE_BASE)),
+            input_channel_profile=str(input_profile_by_command.get(args.command, INPUT_CHANNEL_PROFILE_ALL)),
             model_type="gru_direct_value" if direct_horizon > 0 else "gru_path_value",
             direct_value_horizon=direct_horizon,
         )
         if args.command == "train-summary-v2":
             train_argv = build_todayclose_summary_v2_train_argv(profile)
+        elif args.command == "train-summary-v2-no60":
+            train_argv = build_todayclose_summary_v2_no60_train_argv(profile)
         elif args.command == "train-daily-only":
             train_argv = build_todayclose_daily_only_train_argv(profile)
+        elif args.command == "train-no-intraday-summary":
+            train_argv = build_todayclose_no_intraday_summary_train_argv(profile)
+        elif args.command == "train-no-limit-structure":
+            train_argv = build_todayclose_no_limit_structure_train_argv(profile)
         elif direct_horizon > 0:
             train_argv = build_todayclose_direct_value_train_argv(profile, horizon=direct_horizon)
         else:

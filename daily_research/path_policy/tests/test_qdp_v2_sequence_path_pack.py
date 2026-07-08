@@ -19,6 +19,9 @@ from daily_research.path_policy.qdp_v2_sequence_flat_lgbm import _feature_names,
 from daily_research.path_policy.qdp_v2_sequence_path_training import DateGroupedBatchSampler, SequencePathModel, SequencePathPackDataset, _compute_loss
 from daily_research.path_policy.qdp_v2_sequence_path_training import (
     INPUT_CHANNEL_PROFILE_DAILY_ONLY,
+    INPUT_CHANNEL_PROFILE_NO_INTRADAY_SUMMARY,
+    INPUT_CHANNEL_PROFILE_NO_LIMIT_STRUCTURE,
+    SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC_NO60,
     SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
     _derive_path_summary_numpy,
     _derive_path_summary_torch,
@@ -284,6 +287,7 @@ def test_path_value_v2_numpy_and_torch_match() -> None:
 def test_multi_horizon_ohlc_summary_loss_uses_available_windows() -> None:
     assert _summary_loss_windows(20) == (5, 10, 20)
     assert _summary_loss_windows(60) == (5, 10, 20, 40, 60)
+    assert _summary_loss_windows(60, include_full_horizon=False) == (5, 10, 20, 40)
 
     true_path = torch.zeros(4, 60, 4)
     pred_path = true_path.clone()
@@ -321,6 +325,61 @@ def test_multi_horizon_ohlc_summary_loss_uses_available_windows() -> None:
     assert torch.isfinite(perturbed_loss)
     assert exact_parts["summary_loss"] == 0.0
     assert perturbed_parts["summary_loss"] > exact_parts["summary_loss"]
+
+
+def test_multi_horizon_summary_loss_no60_excludes_full_horizon_window() -> None:
+    true_path = torch.zeros(4, 60, 4)
+    exact_path = true_path.clone()
+    early_perturbed_path = true_path.clone()
+    late_perturbed_path = true_path.clone()
+    early_perturbed_path[:, :10, 3] = 0.05
+    late_perturbed_path[:, 59, 3] = 0.05
+    y_summary = torch.zeros(4, 12)
+    date_idx = torch.tensor([1, 1, 1, 1])
+
+    exact_loss, exact_parts = _compute_loss(
+        {"future_path": exact_path},
+        true_path,
+        y_summary,
+        date_idx,
+        value_index=11,
+        path_weight=0.0,
+        summary_weight=1.0,
+        value_weight=0.0,
+        rank_weight=0.0,
+        summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC_NO60,
+    )
+    early_loss, early_parts = _compute_loss(
+        {"future_path": early_perturbed_path},
+        true_path,
+        y_summary,
+        date_idx,
+        value_index=11,
+        path_weight=0.0,
+        summary_weight=1.0,
+        value_weight=0.0,
+        rank_weight=0.0,
+        summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC_NO60,
+    )
+    late_loss, late_parts = _compute_loss(
+        {"future_path": late_perturbed_path},
+        true_path,
+        y_summary,
+        date_idx,
+        value_index=11,
+        path_weight=0.0,
+        summary_weight=1.0,
+        value_weight=0.0,
+        rank_weight=0.0,
+        summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC_NO60,
+    )
+
+    assert torch.isfinite(exact_loss)
+    assert torch.isfinite(early_loss)
+    assert torch.isfinite(late_loss)
+    assert exact_parts["summary_loss"] == 0.0
+    assert early_parts["summary_loss"] > exact_parts["summary_loss"]
+    assert late_parts["summary_loss"] == exact_parts["summary_loss"]
 
 
 def test_multi_horizon_ohlc_summary_loss_vectorized_matches_loop() -> None:
@@ -735,6 +794,22 @@ def test_sequence_pack_dataset_get_batch_reads_date_grouped_windows(tmp_path) ->
     assert len(daily_only_names) == 9
     assert all("__intraday_summary__" not in name for name in daily_only_names)
     assert all("__limit_structure__" not in name for name in daily_only_names)
+
+    no_intraday = SequencePathPackDataset(manifest, split="train", input_channel_profile=INPUT_CHANNEL_PROFILE_NO_INTRADAY_SUMMARY)
+    no_intraday_names = _feature_names(no_intraday)
+    assert no_intraday.channel_order == ["daily_raw", "daily_state", "limit_structure"]
+    assert no_intraday.input_dim == 4
+    assert len(no_intraday_names) == 12
+    assert all("__intraday_summary__" not in name for name in no_intraday_names)
+    assert any("__limit_structure__" in name for name in no_intraday_names)
+
+    no_limit = SequencePathPackDataset(manifest, split="train", input_channel_profile=INPUT_CHANNEL_PROFILE_NO_LIMIT_STRUCTURE)
+    no_limit_names = _feature_names(no_limit)
+    assert no_limit.channel_order == ["daily_raw", "daily_state", "intraday_summary"]
+    assert no_limit.input_dim == 4
+    assert len(no_limit_names) == 12
+    assert any("__intraday_summary__" in name for name in no_limit_names)
+    assert all("__limit_structure__" not in name for name in no_limit_names)
 
 
 def test_date_grouped_batch_sampler_merges_small_dates_without_losing_date_groups() -> None:

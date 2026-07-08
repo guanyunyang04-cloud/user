@@ -69,12 +69,29 @@ Command:
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2 --json
 ```
 
+`summary_v2_no60` is a strict single-factor control for `summary_v2_multi_horizon_ohlc`, not a new summary family. It keeps the same OHLC-derived summary constraints, input channels, output path and loss weights, but removes only the full 60-day window, leaving `5/10/20/40`. New shape summaries belong to a future `summary_v3` experiment and must not be mixed into this control.
+
+Command:
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2-no60 --json
+```
+
 `daily_only_no_minute` is an explicit input ablation profile, not the default mainline. It keeps the same labels, model type, output, loss weights, price anchor, split and TopK report, but changes `input_channel_profile` from `all` to `daily_only`. This removes `intraday_summary` and `limit_structure`, leaving `daily_raw + daily_state` as `32` input features. The narrow CLI defaults `early_stopping_patience` to `2`.
 
 Command:
 
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-daily-only --json
+```
+
+`no_intraday_summary` and `no_limit_structure` are partial input ablations. They keep labels, model type, output, loss weights, price anchor, split and TopK report aligned with the default, while removing exactly one minute-derived channel family.
+
+Commands:
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-no-intraday-summary --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-no-limit-structure --json
 ```
 
 `direct_value_rank_5d/10d/60d` are explicit ranking comparison profiles, not the default mainline. They keep the same store view, input channels, split, price anchor and TopK report, but change `model_type` to `gru_direct_value`. The model emits only one scalar `score`; it does not emit future OHLC, path summary, OHLCVA, symbol embedding, residual score, or richer target outputs. Training derives `path_trade_value_v2_{horizon}d` from true future OHLC labels during loss calculation and uses `value=0.50 / rank=0.50` with path/summary/richer loss set to zero. The narrow CLI defaults `early_stopping_patience` to `2` and `batch_size` to `2048`.
@@ -105,7 +122,10 @@ These comparison surfaces remain named, but must not be mixed into the default p
 - `path_only_next_open`
 - `rank_heavy_top1`
 - `summary_v2_multi_horizon_ohlc`
+- `summary_v2_no60`
 - `daily_only_no_minute`
+- `no_intraday_summary`
+- `no_limit_structure`
 - `direct_value_rank_5d`
 - `direct_value_rank_10d`
 - `direct_value_rank_60d`

@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 154,
+  "record_count": 152,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -3692,6 +3692,28 @@
       ]
     },
     {
+      "id": "path_policy_seq100_mainline_slimming_contract_20260707",
+      "date": "2026-07-07",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_seq100_mainline_slimming_contract_20260707.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "Status: `process_complexity_slimmed / concept_surface_narrowed / research_only / no_active_change`.; Mainline: `seq100_todayclose_path_only` is the only default seq100 path-value research surface.; Active artifact impact: unchanged. This does not touch `daily_research/output/active_execution_strategy.json`, live/default, paper/live, broker, trade plans, QDP active dataset pointers, or QDP provider state.; Concept decision: `alpha_v2`, `path20`, `symbol_embedding`, `residual_score`, `richer_target`, `ohlcva_unified`, and `rank_heavy_top1` are no longer default concepts.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Next allowed action: use `daily_research.path_policy.seq100_mainline` for default train/contract/summarize operations.",
+        "Next allowed action: run execution-layer backtest before any strategy or execution-candidate claim.",
+        "Next allowed action: keep old branches as explicit comparison or archived evidence only."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
       "id": "path_policy_test_runtime_optimization_20260621",
       "date": "2026-06-21",
       "r_id": "",
@@ -4586,6 +4608,31 @@
       "dataset_ids": []
     },
     {
+      "id": "research_store_gc_dry_run_20260707",
+      "date": "2026-07-07",
+      "r_id": "",
+      "path": "daily_research/brain/references/research_store_gc_dry_run_20260707.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "qdp_v2_alpha_v2_full_contract_2012_2025_20260702_01",
+        "qdp_v2_alpha_v2_full_contract_2012_2025_20260702_01_training_pack",
+        "qdp_v2_alpha_v2_smoke_pack_contract_20260702_01",
+        "qdp_v2_alpha_v2_smoke_shard_20260702_01",
+        "qdp_v2_alpha_v2_smoke_shard_contract_20260702_01",
+        "qdp_v2_alpha_v2_smoke_pack_contract_20260702_01_training_pack"
+      ],
+      "verdict": "",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "not_stated",
+      "dataset_ids": []
+    },
+    {
       "id": "shortline_after_close_research_plan_20260624",
       "date": "2026-06-24",
       "r_id": "",
@@ -4613,6 +4660,35 @@
       "dataset_ids": []
     },
     {
+      "id": "shortline_raw_condition_matrix_20260624",
+      "date": "2026-06-24",
+      "r_id": "",
+      "path": "daily_research/brain/references/shortline_raw_condition_matrix_20260624.md",
+      "tags": [
+        "daily_research",
+        "shortline",
+        "after_close",
+        "research_only"
+      ],
+      "workflow": "daily_research",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "shortline_raw_condition_matrix_full_2012_2025_20260624_01",
+        "shortline_raw_condition_matrix_smoke_20260624_01"
+      ],
+      "verdict": "Status: `completed / research_only / shadow_only / no_active_change`.; Run tag: `shortline_raw_condition_matrix_full_2012_2025_20260624_01`.; Scope: after-close shortline conditional mechanism diagnostic over QDP `style_structural_alpha_v2_label_v2` sharded memmap unnormalized engineering features.; Active artifact impact: unchanged. This run does not change `daily_research/output/active_execution_strategy.json`, live/default, paper/live/broker, score-backtest bridge, candidate matrix, execution-candidate state, or QDP registry pointers.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Use `pullback_intraday_recovery`, `market_confirmed_anti_overheat`, and `industry_not_collapsing_not_overheat` as candidate priors for the next shortline scorer.",
+        "Add stricter subconditions around pullback repair, because the current selected set is still too broad for topK execution.",
+        "Evaluate score deciles and topK only after the scorer is trained or condition grid is narrowed.",
+        "Do not promote, bridge, candidate-matrix, or touch active/default/live artifacts from this evidence alone."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
       "id": "shortline_raw_upside_diagnostic_20260624",
       "date": "2026-06-24",
       "r_id": "",
@@ -4635,104 +4711,6 @@
       "next_allowed_actions": [],
       "active_artifact_impact": "unchanged",
       "dataset_ids": []
-    },
-    {
-      "id": "shortline_raw_condition_matrix_20260624",
-      "date": "2026-06-24",
-      "r_id": "",
-      "path": "daily_research/brain/references/shortline_raw_condition_matrix_20260624.md",
-      "tags": [
-        "daily_research",
-        "shortline",
-        "after_close",
-        "research_only"
-      ],
-      "workflow": "daily_research",
-      "research_programs": [],
-      "study_families": [],
-      "run_tags": [
-        "shortline_raw_condition_matrix_full_2012_2025_20260624_01",
-        "shortline_raw_condition_matrix_smoke_20260624_01"
-      ],
-      "verdict": "Status: `completed / research_only / shadow_only / no_active_change`.; Run tag: `shortline_raw_condition_matrix_full_2012_2025_20260624_01`.; Scope: after-close shortline conditional mechanism diagnostic over QDP `style_structural_alpha_v2_label_v2` sharded memmap unnormalized engineering features.; Active artifact impact: unchanged. This run does not change `daily_research/output/active_execution_strategy.json`, live/default, paper/live/broker, score-backtest bridge, candidate matrix, execution-candidate state, or QDP registry pointers.",
-      "blockers": [],
-      "next_allowed_actions": [
-        "Use `pullback_intraday_recovery`, `market_confirmed_anti_overheat`, and `industry_not_collapsing_not_overheat` as priors for a supervised shortline upside scorer or narrower condition grid.",
-        "Do not treat this matrix as a tradable topK strategy or promotion evidence.",
-        "Do not touch active/default/live artifacts from this evidence."
-      ],
-      "active_artifact_impact": "unchanged",
-      "dataset_ids": []
-    },
-    {
-      "id": "qdp_alpha_v2_data_coverage_audit_and_backfill_plan_20260624",
-      "date": "2026-06-24",
-      "r_id": "",
-      "path": "daily_research/brain/references/qdp_alpha_v2_data_coverage_audit_and_backfill_plan_20260624.md",
-      "tags": [
-        "qdp",
-        "data_coverage",
-        "backfill",
-        "daily_research",
-        "research_only"
-      ],
-      "workflow": "quant_data_platform",
-      "research_programs": [],
-      "study_families": [],
-      "run_tags": [
-        "qdp_alpha_v2_feature_coverage_audit_20260624_02"
-      ],
-      "verdict": "Status: `completed_audit / backfill_plan_ready / research_only / no_active_change`.; Run tag: `qdp_alpha_v2_feature_coverage_audit_20260624_02`.; Scope: full finite-coverage audit of current QDP `style_structural_alpha_v2_label_v2` sharded memmap.; Core verdict: current alpha_v2 memmap is a historical incomplete-version artifact; future default should be regenerated after turnover/liquidity backfill, intraday derived anomaly repair, and PIT-safe valuation backfill.",
-      "blockers": [
-        "turnover_context 2010-2015 has zero coverage.",
-        "valuation_context has early-year and pcfNcfTTM sparsity.",
-        "cs_z_intraday_last_5m_ret has derived-feature coverage anomaly."
-      ],
-      "next_allowed_actions": [
-        "Inspect QDP lake/provider availability for turn, circulating_share, float_share, float_market_cap, total_market_cap, and valuation fields.",
-        "Implement P0 turnover/liquidity backfill before new formal model training on alpha_v2 data.",
-        "Repair cs_z_intraday_last_5m_ret feature-generation anomaly.",
-        "Regenerate sharded memmap/training pack only after source-domain backfills pass coverage and sanity checks.",
-        "Clean old incomplete memmap/pack artifacts only after validated replacement and registry switch."
-      ],
-      "active_artifact_impact": "unchanged",
-      "dataset_ids": [
-        "policy_input_bundle__f926a496f69c61f6b92b5faf"
-      ]
-    },
-    {
-      "id": "qdp_alpha_v2_data_base_repair_20260624",
-      "date": "2026-06-24",
-      "r_id": "",
-      "path": "daily_research/brain/references/qdp_alpha_v2_data_base_repair_20260624.md",
-      "tags": [
-        "qdp",
-        "data_repair",
-        "data_coverage",
-        "daily_research",
-        "research_only"
-      ],
-      "workflow": "quant_data_platform",
-      "research_programs": [],
-      "study_families": [],
-      "run_tags": [],
-      "verdict": "Status: `partial_code_repair_completed / research_only / no_active_change`.; Scope: first data-base repair patches after `qdp_alpha_v2_feature_coverage_audit_20260624_02`.; Core verdict: legacy valuation sidecar alias normalization and intraday `last_5m_ret` semantic repair are implemented; QDP sharded builder now supports explicit `--canonical-dataset-id` replacement builds; P0 turnover 2010-2015 gap is primarily schema mismatch, but existing alpha_v2 sharded memmap/training pack remain stale until regenerated.",
-      "blockers": [
-        "Existing alpha_v2 sharded memmap and training pack still contain old generated values.",
-        "Early-year psTTM/pcfNcfTTM remains a real source gap or unimported source gap and needs a PIT-safe decision.",
-        "Registry/canonical/memmap/training-pack pointers must not be switched until replacement artifacts pass coverage audit."
-      ],
-      "next_allowed_actions": [
-        "Decide whether early-year psTTM/pcfNcfTTM should remain missing/PIT-safe or be backfilled from a safe source.",
-        "Regenerate intraday daily feature sidecars with the repaired `last_5m_ret` definition.",
-        "Build a new backfilled alpha_v2 sharded memmap/training pack as a new data product.",
-        "Run coverage audit on the replacement before any registry switch or cleanup.",
-        "Clean old incomplete generated artifacts only after replacement validation and pointer switch."
-      ],
-      "active_artifact_impact": "unchanged",
-      "dataset_ids": [
-        "policy_input_bundle__f926a496f69c61f6b92b5faf"
-      ]
     },
     {
       "id": "shortline_stage0_fixed_next_open_diagnostic_20260624",
@@ -4854,82 +4832,6 @@
         "单独规划 `paper_execution -> broker_adapter -> QMT/PTrade` 自动交易主线；不要把数据平台结果直接解释为可实盘交易能力。"
       ],
       "active_artifact_impact": "guarded",
-      "dataset_ids": []
-    },
-    {
-      "id": "qdp_alpha_v2_replacement_data_base_activation_20260626",
-      "date": "2026-06-26",
-      "r_id": "",
-      "path": "daily_research/brain/references/qdp_alpha_v2_replacement_data_base_activation_20260626.md",
-      "tags": [
-        "qdp",
-        "alpha_v2",
-        "data_base",
-        "memmap",
-        "path_policy"
-      ],
-      "workflow": "qdp_data_base",
-      "research_programs": [
-        "qdp_alpha_v2_data_base_repair"
-      ],
-      "study_families": [],
-      "run_tags": [
-        "tradeable_mainboard_style_structural_alpha_v2_label_v2_backfilled_intraday_v2_2010_2026_20260626_01"
-      ],
-      "verdict": "Status: replacement_data_base_activated_and_training_pack_completed / stale_acceleration_artifacts_cleaned / qdp_canonical_current / research_data_only.; Canonical dataset switched to policy_input_bundle__2c27a13a7c7ae85417c36340.; Active sharded memmap validate-memmap status ok: 187 processed, 173 stored, 14 empty, 0 failed, 307 features, 3025 symbols.; Replacement training pack completed with 6,992,361 samples: train 5,696,015 / validation 643,708 / test 652,638.; Coverage audit confirms turnover_context and intraday_last_5m_ret repair in replacement memmap; remaining suspicious coverage is valuation_context source gaps.; 2026-06-26 cleanup removed obsolete alpha_v2 sharded memmap/training pack artifacts and untagged training_pack root files after active replacement validation; active replacement memmap/pack, canonical source data, and canonical_short_horizon_core_v1_full were kept; one already-missing qdp_smoke_2022_10x1 registry reference was removed.",
-      "blockers": [
-        "Not model-quality evidence; not promotion or execution thaw.",
-        "Not all historical artifacts were deleted: non-alpha_v2 frozen lineage and smoke artifacts were kept intentionally."
-      ],
-      "next_allowed_actions": [
-        "Use replacement training pack for alpha_v2 or shortline model/scorer research when repaired turnover/intraday semantics matter.",
-        "Use registry active_manifest_json or explicit replacement training-pack manifest, not deleted stale alpha_v2 artifact paths.",
-        "Do not treat data activation or training pack completion as model-quality, promotion, or execution-thaw evidence."
-      ],
-      "active_artifact_impact": "unchanged",
-      "dataset_ids": [
-        "policy_input_bundle__2c27a13a7c7ae85417c36340",
-        "data_platform_v2_status_sidecar__97bf843dbc56cbb4e1603640",
-        "policy_pool_view__7aca6133c8076d3c6c0cebf6",
-        "qdp_training_pack_manifest:tradeable_mainboard_style_structural_alpha_v2_label_v2_backfilled_intraday_v2_training_pack_20260626_01"
-      ]
-    },
-    {
-      "id": "seq100_path_value_research_orchestration_20260706",
-      "date": "2026-07-06",
-      "r_id": "",
-      "path": "daily_research/brain/references/seq100_path_value_research_orchestration_20260706.md",
-      "tags": [
-        "daily_research",
-        "path_policy",
-        "seq100",
-        "path_value",
-        "brain_orchestration",
-        "research_only"
-      ],
-      "workflow": "path_policy",
-      "research_programs": [
-        "seq100_path_value_research"
-      ],
-      "study_families": [
-        "sequence_path_training"
-      ],
-      "run_tags": [
-        "qdp_v2_seq100_path60_todayclose_path_value_v1_20260706_203647",
-        "qdp_v2_seq100_path60_full",
-        "qdp_v2_seq100_path60_todayclose_full"
-      ],
-      "verdict": "Status: research_only / brain_orchestration_updated / no_active_change.; Owner: daily_research owns seq100 path-value research artifacts, models, loss, evaluation and path-value semantics; quant_data_platform owns QDP v2 active source data and quality proof.; Current evidence: today-close anchor improved test rank IC versus next-open path-only, while topK concentration remains not decisive.; Active artifact impact: unchanged.",
-      "blockers": [
-        "Not promotion evidence and not an execution thaw.",
-        "Old QDP research artifacts were physically migrated to daily_research/data/research_store or deleted; quant_data_platform/data/qdp_v2/research is not a valid training-pack entrypoint."
-      ],
-      "next_allowed_actions": [
-        "Use primary daily_research with supporting read-only quant_data_platform for mixed QDP + model/research tasks.",
-        "Write new model-ready artifacts under daily_research/data/research_store/<artifact_id>/ by default.",
-        "Run research pack GC as dry-run before deleting smoke, partial or duplicate artifacts."
-      ],
-      "active_artifact_impact": "unchanged",
       "dataset_ids": []
     }
   ]

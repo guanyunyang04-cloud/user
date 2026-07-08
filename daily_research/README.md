@@ -47,8 +47,13 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule -
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train --json`
 - 当前主线 summary_v2 对照入口：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2 --json`
+- 当前主线 summary_v2 no60 严格对照入口：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2-no60 --json`
 - 当前主线 daily-only no-minute 输入消融入口：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-daily-only --json`
+- 当前主线部分分钟线输入消融入口：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-no-intraday-summary --json`
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-no-limit-structure --json`
 - 当前主线 direct-value 排序对照入口：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-direct-value-5d --json`
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-direct-value-10d --json`
@@ -66,7 +71,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule -
 - 工作区维护报告：
   `python daily_research/tools/workspace_maintenance.py report`
 
-当前默认研究概念面已收窄为 `seq100_x84_input -> today_close_anchor -> future60_ohlc_path -> path_trade_value_v2 -> path_value_spread`。`summary_v2_multi_horizon_ohlc` 是显式对照实验，只扩展 OHLC 派生 summary loss，窄入口默认 `early_stopping_patience=2`；`daily_only_no_minute` 是显式输入消融，只保留 `daily_raw + daily_state` 32 维日线输入；`direct_value_rank_5d/10d/60d` 是显式排序对照，只输出 score 并直接学习未来 path value，不替代默认 OHLC path-output 主线；`alpha_v2`、`path20`、`symbol_embedding`、`residual_score`、`richer_target`、`ohlcva_unified` 和 `rank_heavy_top1` 默认只作为历史、对照或暂停分支。
+当前默认研究概念面已收窄为 `seq100_x84_input -> today_close_anchor -> future60_ohlc_path -> path_trade_value_v2 -> path_value_spread`。`summary_v2_multi_horizon_ohlc` 是显式对照实验，只扩展 OHLC 派生 summary loss，窄入口默认 `early_stopping_patience=2`；`summary_v2_no60` 是严格单因素对照，只从 summary_v2 中去掉完整 60 日窗口，不新增摘要约束；`daily_only_no_minute`、`no_intraday_summary`、`no_limit_structure` 是显式输入消融；`direct_value_rank_5d/10d/60d` 是显式排序对照，只输出 score 并直接学习未来 path value，不替代默认 OHLC path-output 主线；`alpha_v2`、`path20`、`symbol_embedding`、`residual_score`、`richer_target`、`ohlcva_unified` 和 `rank_heavy_top1` 默认只作为历史、对照或暂停分支。
 
 真实运行时优先使用显式 `yolos` Python，例如：
 

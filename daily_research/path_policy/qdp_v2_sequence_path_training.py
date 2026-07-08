@@ -41,14 +41,28 @@ PATH_VALUE_V2_TRANSACTION_COST = 0.002
 PATH_VALUE_V2_TEMPERATURE = 0.03
 SUMMARY_LOSS_PROFILE_BASE = "base"
 SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC = "multi_horizon_ohlc"
-SUMMARY_LOSS_PROFILES = (SUMMARY_LOSS_PROFILE_BASE, SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC)
+SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC_NO60 = "multi_horizon_ohlc_no60"
+SUMMARY_LOSS_PROFILES = (
+    SUMMARY_LOSS_PROFILE_BASE,
+    SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
+    SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC_NO60,
+)
 MULTI_HORIZON_OHLC_WINDOWS = (5, 10, 20, 40, 60)
 INPUT_CHANNEL_PROFILE_ALL = "all"
 INPUT_CHANNEL_PROFILE_DAILY_ONLY = "daily_only"
-INPUT_CHANNEL_PROFILES = (INPUT_CHANNEL_PROFILE_ALL, INPUT_CHANNEL_PROFILE_DAILY_ONLY)
+INPUT_CHANNEL_PROFILE_NO_INTRADAY_SUMMARY = "no_intraday_summary"
+INPUT_CHANNEL_PROFILE_NO_LIMIT_STRUCTURE = "no_limit_structure"
+INPUT_CHANNEL_PROFILES = (
+    INPUT_CHANNEL_PROFILE_ALL,
+    INPUT_CHANNEL_PROFILE_DAILY_ONLY,
+    INPUT_CHANNEL_PROFILE_NO_INTRADAY_SUMMARY,
+    INPUT_CHANNEL_PROFILE_NO_LIMIT_STRUCTURE,
+)
 INPUT_CHANNEL_PROFILE_ORDERS = {
     INPUT_CHANNEL_PROFILE_ALL: ("daily_raw", "daily_state", "intraday_summary", "limit_structure"),
     INPUT_CHANNEL_PROFILE_DAILY_ONLY: ("daily_raw", "daily_state"),
+    INPUT_CHANNEL_PROFILE_NO_INTRADAY_SUMMARY: ("daily_raw", "daily_state", "limit_structure"),
+    INPUT_CHANNEL_PROFILE_NO_LIMIT_STRUCTURE: ("daily_raw", "daily_state", "intraday_summary"),
 }
 UNIFIED_VALUE_WAIT_PENALTY = 0.015
 UNIFIED_VALUE_HOLD_PENALTY = 0.025
@@ -758,11 +772,18 @@ def _multi_horizon_ohlc_summary_loss_loop(pred_path: torch.Tensor, target_path: 
     return torch.stack(losses).mean()
 
 
-def _multi_horizon_ohlc_summary_features(path: torch.Tensor, *, price_anchor: str) -> torch.Tensor:
+def _multi_horizon_ohlc_summary_features(
+    path: torch.Tensor,
+    *,
+    price_anchor: str,
+    include_full_horizon: bool = True,
+) -> torch.Tensor:
     path = _legacy_entry_relative_path_torch(path[:, :, :4], price_anchor=price_anchor)
     batch_size = int(path.shape[0])
     forward_days = int(path.shape[1])
-    windows = _summary_loss_windows(forward_days)
+    windows = _summary_loss_windows(forward_days, include_full_horizon=bool(include_full_horizon))
+    if not windows:
+        return path.new_empty((batch_size, 0, 6))
     horizon_idx = torch.as_tensor([window - 1 for window in windows], device=path.device, dtype=torch.long)
     horizon_values = horizon_idx.to(dtype=path.dtype) + 1.0
     day_idx = torch.arange(forward_days, device=path.device, dtype=torch.long)
@@ -823,9 +844,18 @@ def _multi_horizon_ohlc_summary_loss_vectorized(
     target_path: torch.Tensor,
     *,
     price_anchor: str,
+    include_full_horizon: bool = True,
 ) -> torch.Tensor:
-    target_features = _multi_horizon_ohlc_summary_features(target_path, price_anchor=price_anchor).detach()
-    pred_features = _multi_horizon_ohlc_summary_features(pred_path, price_anchor=price_anchor)
+    target_features = _multi_horizon_ohlc_summary_features(
+        target_path,
+        price_anchor=price_anchor,
+        include_full_horizon=bool(include_full_horizon),
+    ).detach()
+    pred_features = _multi_horizon_ohlc_summary_features(
+        pred_path,
+        price_anchor=price_anchor,
+        include_full_horizon=bool(include_full_horizon),
+    )
     if int(pred_features.shape[1]) == 0:
         return pred_path.sum() * 0.0
     finite_target = torch.isfinite(target_features)
@@ -857,6 +887,17 @@ def _derived_summary_loss(
             pred_path,
             target_path,
             price_anchor=price_anchor,
+        )
+        target_summary = _derive_path_summary_torch(target_path, smooth_value=False, price_anchor=price_anchor).detach()
+        pred_summary = _derive_path_summary_torch(pred_path, smooth_value=True, price_anchor=price_anchor)
+        return summary_loss, target_summary, pred_summary
+
+    if profile == SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC_NO60 and path_dim == 4:
+        summary_loss = _multi_horizon_ohlc_summary_loss_vectorized(
+            pred_path,
+            target_path,
+            price_anchor=price_anchor,
+            include_full_horizon=False,
         )
         target_summary = _derive_path_summary_torch(target_path, smooth_value=False, price_anchor=price_anchor).detach()
         pred_summary = _derive_path_summary_torch(pred_path, smooth_value=True, price_anchor=price_anchor)
@@ -1250,11 +1291,13 @@ def _derived_summary_loss_indices(forward_days: int, *, path_dim: int = 4) -> li
     return [idx for idx, col in enumerate(columns) if col in keep]
 
 
-def _summary_loss_windows(forward_days: int) -> tuple[int, ...]:
+def _summary_loss_windows(forward_days: int, *, include_full_horizon: bool = True) -> tuple[int, ...]:
     horizon = int(forward_days)
     windows = [int(window) for window in MULTI_HORIZON_OHLC_WINDOWS if int(window) <= horizon]
-    if horizon not in windows:
+    if bool(include_full_horizon) and horizon not in windows:
         windows.append(horizon)
+    if not bool(include_full_horizon):
+        windows = [int(window) for window in windows if int(window) < horizon]
     return tuple(sorted(set(windows)))
 
 
@@ -1939,8 +1982,13 @@ def _write_report(
             f"This model reads past 100-day multi-channel sequences from QDP v2 and predicts future {forward_days}-day OHLC paths. "
             "Path summaries and ranking values are derived from the predicted path when using a path-value model."
         )
-    if str(summary.get("loss_weights", {}).get("summary_profile", "")) == SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC:
+    summary_profile = str(summary.get("loss_weights", {}).get("summary_profile", ""))
+    if summary_profile == SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC:
         lines.append("Summary loss uses multi-horizon OHLC-derived constraints while the model output remains the future OHLC path.")
+    elif summary_profile == SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC_NO60:
+        lines.append(
+            "Summary loss uses the same OHLC-derived constraints as multi-horizon summary v2, excluding the full-horizon window."
+        )
     early = dict(summary.get("early_stopping", {}) or {})
     if early:
         lines.append(

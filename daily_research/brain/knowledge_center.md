@@ -50,7 +50,8 @@
 - Today-close path-only is the default research mainline; topK path-value spread remains research evidence, not promotion evidence.
 - `Path20` / `alpha_path20_neural_policy_v1` 是历史证据代号和代码 namespace，不再代表当前目标定义。
 - `summary_v2_multi_horizon_ohlc` is an explicit comparison profile that keeps OHLC output and only expands OHLC-derived summary-loss constraints; its narrow CLI default uses `early_stopping_patience=2`, and the multi-horizon loss is vectorized without changing the per-horizon objective.
-- `daily_only_no_minute` is an explicit input ablation profile that removes minute-derived `intraday_summary` and `limit_structure` inputs while keeping daily labels, splits, loss and model output semantics aligned with the default mainline.
+- `summary_v2_no60` is a strict control profile for `summary_v2_multi_horizon_ohlc`: it keeps the same OHLC-derived summary family and removes only the full 60-day window. It is not `summary_v3`; adding new shape summaries must be a separate experiment.
+- `daily_only_no_minute`、`no_intraday_summary` and `no_limit_structure` are explicit input ablation profiles that keep daily labels, splits, loss and model output semantics aligned with the default mainline while removing minute-derived channel families.
 - `direct_value_rank_5d/10d/60d` are explicit comparison profiles that output only a scalar score and directly learn true future OHLC-derived `path_trade_value_v2_{horizon}d`; they are useful ranking evidence but do not replace the default OHLC path-output mainline.
 - `symbol_embedding`、`residual_score`、`richer_target`、`ohlcva_unified` and `rank_heavy_top1` are comparison or paused surfaces, not default concepts.
 - continuous_policy 的长期思想是日级连续交易执行模型；当前不是 active/default 或执行解冻依据。

@@ -9,11 +9,17 @@ from daily_research.path_policy.seq100_mainline import (
     ARCHIVED_CONCEPTS,
     DEFAULT_DAILY_ONLY_RUN_TAG,
     DEFAULT_DIRECT_VALUE_5D_RUN_TAG,
+    DEFAULT_NO_INTRADAY_RUN_TAG,
+    DEFAULT_NO_LIMIT_RUN_TAG,
     DEFAULT_STORE_VIEW,
     DEFAULT_SUMMARY_V2_RUN_TAG,
+    DEFAULT_SUMMARY_V2_NO60_RUN_TAG,
     TodayClosePathOnlyProfile,
     build_todayclose_daily_only_train_argv,
     build_todayclose_direct_value_train_argv,
+    build_todayclose_no_intraday_summary_train_argv,
+    build_todayclose_no_limit_structure_train_argv,
+    build_todayclose_summary_v2_no60_train_argv,
     build_todayclose_summary_v2_train_argv,
     build_todayclose_path_only_train_argv,
     main,
@@ -31,8 +37,12 @@ def test_mainline_contract_keeps_default_surface_small() -> None:
     assert contract["default_train_profile"]["early_stopping_patience"] == 3
     assert contract["summary_v2_train_profile"]["summary_loss_profile"] == "multi_horizon_ohlc"
     assert contract["summary_v2_train_profile"]["early_stopping_patience"] == 2
+    assert contract["summary_v2_no60_train_profile"]["summary_loss_profile"] == "multi_horizon_ohlc_no60"
+    assert contract["summary_v2_no60_train_profile"]["early_stopping_patience"] == 2
     assert contract["daily_only_train_profile"]["input_channel_profile"] == "daily_only"
     assert contract["daily_only_train_profile"]["early_stopping_patience"] == 2
+    assert contract["input_ablation_train_profiles"]["no_intraday_summary"]["input_channel_profile"] == "no_intraday_summary"
+    assert contract["input_ablation_train_profiles"]["no_limit_structure"]["input_channel_profile"] == "no_limit_structure"
     assert contract["direct_value_train_profiles"]["5d"]["model_type"] == "gru_direct_value"
     assert contract["direct_value_train_profiles"]["5d"]["direct_value_horizon"] == 5
     assert contract["direct_value_train_profiles"]["5d"]["batch_size"] == 2048
@@ -88,6 +98,27 @@ def test_todayclose_summary_v2_train_argv_changes_only_summary_profile() -> None
     assert "gru_ohlcva_path_value" not in argv
 
 
+def test_todayclose_summary_v2_no60_train_argv_changes_only_summary_profile() -> None:
+    profile = TodayClosePathOnlyProfile(
+        run_tag=DEFAULT_SUMMARY_V2_NO60_RUN_TAG,
+        epochs=1,
+        max_samples_per_split=32,
+        device="cpu",
+        early_stopping_patience=2,
+    )
+    argv = build_todayclose_summary_v2_no60_train_argv(profile)
+
+    assert argv[argv.index("--run-tag") + 1] == DEFAULT_SUMMARY_V2_NO60_RUN_TAG
+    assert argv[argv.index("--model-type") + 1] == "gru_path_value"
+    assert argv[argv.index("--summary-loss-profile") + 1] == "multi_horizon_ohlc_no60"
+    assert argv[argv.index("--input-channel-profile") + 1] == "all"
+    assert argv[argv.index("--early-stopping-patience") + 1] == "2"
+    assert "--with-symbol" not in argv
+    assert "--richer-path" not in argv
+    assert "gru_path_value_residual" not in argv
+    assert "gru_ohlcva_path_value" not in argv
+
+
 def test_todayclose_daily_only_train_argv_removes_minute_channels() -> None:
     profile = TodayClosePathOnlyProfile(
         run_tag=DEFAULT_DAILY_ONLY_RUN_TAG,
@@ -105,6 +136,36 @@ def test_todayclose_daily_only_train_argv_removes_minute_channels() -> None:
     assert argv[argv.index("--early-stopping-patience") + 1] == "2"
     assert "--with-symbol" not in argv
     assert "--richer-path" not in argv
+
+
+def test_todayclose_partial_input_ablation_train_argv_removes_one_channel_family() -> None:
+    no_intraday_profile = TodayClosePathOnlyProfile(
+        run_tag=DEFAULT_NO_INTRADAY_RUN_TAG,
+        epochs=1,
+        max_samples_per_split=32,
+        device="cpu",
+        early_stopping_patience=2,
+    )
+    no_intraday_argv = build_todayclose_no_intraday_summary_train_argv(no_intraday_profile)
+
+    assert no_intraday_argv[no_intraday_argv.index("--run-tag") + 1] == DEFAULT_NO_INTRADAY_RUN_TAG
+    assert no_intraday_argv[no_intraday_argv.index("--summary-loss-profile") + 1] == "base"
+    assert no_intraday_argv[no_intraday_argv.index("--input-channel-profile") + 1] == "no_intraday_summary"
+    assert no_intraday_argv[no_intraday_argv.index("--early-stopping-patience") + 1] == "2"
+
+    no_limit_profile = TodayClosePathOnlyProfile(
+        run_tag=DEFAULT_NO_LIMIT_RUN_TAG,
+        epochs=1,
+        max_samples_per_split=32,
+        device="cpu",
+        early_stopping_patience=2,
+    )
+    no_limit_argv = build_todayclose_no_limit_structure_train_argv(no_limit_profile)
+
+    assert no_limit_argv[no_limit_argv.index("--run-tag") + 1] == DEFAULT_NO_LIMIT_RUN_TAG
+    assert no_limit_argv[no_limit_argv.index("--summary-loss-profile") + 1] == "base"
+    assert no_limit_argv[no_limit_argv.index("--input-channel-profile") + 1] == "no_limit_structure"
+    assert no_limit_argv[no_limit_argv.index("--early-stopping-patience") + 1] == "2"
 
 
 def test_todayclose_direct_value_train_argv_switches_to_score_ranker() -> None:
@@ -142,11 +203,29 @@ def test_train_summary_v2_cli_defaults_patience_to_two(capsys) -> None:
     assert summary_v2["profile"]["summary_loss_profile"] == "multi_horizon_ohlc"
     assert summary_v2["argv"][summary_v2["argv"].index("--early-stopping-patience") + 1] == "2"
 
+    assert main(["train-summary-v2-no60", "--dry-run", "--json"]) == 0
+    summary_v2_no60 = json.loads(capsys.readouterr().out)
+    assert summary_v2_no60["profile"]["early_stopping_patience"] == 2
+    assert summary_v2_no60["profile"]["summary_loss_profile"] == "multi_horizon_ohlc_no60"
+    assert summary_v2_no60["argv"][summary_v2_no60["argv"].index("--summary-loss-profile") + 1] == "multi_horizon_ohlc_no60"
+
     assert main(["train-daily-only", "--dry-run", "--json"]) == 0
     daily_only = json.loads(capsys.readouterr().out)
     assert daily_only["profile"]["early_stopping_patience"] == 2
     assert daily_only["profile"]["input_channel_profile"] == "daily_only"
     assert daily_only["argv"][daily_only["argv"].index("--input-channel-profile") + 1] == "daily_only"
+
+    assert main(["train-no-intraday-summary", "--dry-run", "--json"]) == 0
+    no_intraday = json.loads(capsys.readouterr().out)
+    assert no_intraday["profile"]["early_stopping_patience"] == 2
+    assert no_intraday["profile"]["input_channel_profile"] == "no_intraday_summary"
+    assert no_intraday["argv"][no_intraday["argv"].index("--input-channel-profile") + 1] == "no_intraday_summary"
+
+    assert main(["train-no-limit-structure", "--dry-run", "--json"]) == 0
+    no_limit = json.loads(capsys.readouterr().out)
+    assert no_limit["profile"]["early_stopping_patience"] == 2
+    assert no_limit["profile"]["input_channel_profile"] == "no_limit_structure"
+    assert no_limit["argv"][no_limit["argv"].index("--input-channel-profile") + 1] == "no_limit_structure"
 
     assert main(["train-direct-value-5d", "--dry-run", "--json"]) == 0
     direct_5d = json.loads(capsys.readouterr().out)
