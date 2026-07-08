@@ -46,12 +46,12 @@
 - `daily_research` 当前研究消费 QDP v2 数据基底；旧 daily_research lake / copied manifest / single memmap 不再是数据 owner。
 - QDP active data base and downstream pack status are recorded in `state_center.md` under `qdp_consumption`.
 - 当前主要研究方向是 `seq100_path_value_research`：用过去 100 日路径和状态序列预测未来路径，路径摘要和 path value 从预测路径派生；收盘后短线选股经验保留为可复用研究线。
-- 当前默认主线已瘦身为 `seq100_todayclose_path_only`：`research_store_view -> seq100_x84_input -> today_close_anchor -> future60_ohlc_path -> path_trade_value_v2 -> path_value_spread`。
-- Today-close path-only is the default research mainline; topK path-value spread remains research evidence, not promotion evidence.
+- 当前默认主线已升级为 `seq100_todayclose_path_only/daily_only_summary_v2`：`research_store_view -> seq100_x32_daily_input -> today_close_anchor -> future60_ohlc_path -> summary_v2_multi_horizon_ohlc -> path_trade_value_v2 -> path_value_spread`。
+- Today-close daily-only summary_v2 is the default research mainline; old all-channel base summary remains a broad-TopK baseline, and topK path-value spread remains research evidence, not promotion evidence.
 - `Path20` / `alpha_path20_neural_policy_v1` 是历史证据代号和代码 namespace，不再代表当前目标定义。
 - `summary_v2_multi_horizon_ohlc` is an explicit comparison profile that keeps OHLC output and only expands OHLC-derived summary-loss constraints; its narrow CLI default uses `early_stopping_patience=2`, and the multi-horizon loss is vectorized without changing the per-horizon objective.
 - `summary_v2_no60` is a strict control profile for `summary_v2_multi_horizon_ohlc`: it keeps the same OHLC-derived summary family and removes only the full 60-day window. It is not `summary_v3`; adding new shape summaries must be a separate experiment.
-- `daily_only_no_minute`、`no_intraday_summary` and `no_limit_structure` are explicit input ablation profiles that keep daily labels, splits, loss and model output semantics aligned with the default mainline while removing minute-derived channel families.
+- `daily_only_no_minute`、`daily_only_summary_v2`、`no_intraday_summary` and `no_limit_structure` are explicit input ablation or combination profiles that keep daily labels, splits, loss and model output semantics aligned with the default mainline while changing input channel families and/or summary_v2 constraints.
 - `direct_value_rank_5d/10d/60d` are explicit comparison profiles that output only a scalar score and directly learn true future OHLC-derived `path_trade_value_v2_{horizon}d`; they are useful ranking evidence but do not replace the default OHLC path-output mainline.
 - `symbol_embedding`、`residual_score`、`richer_target`、`ohlcva_unified` and `rank_heavy_top1` are comparison or paused surfaces, not default concepts.
 - continuous_policy 的长期思想是日级连续交易执行模型；当前不是 active/default 或执行解冻依据。
@@ -72,7 +72,7 @@
 ## Research Line Index
 ### object `seq100_todayclose_path_only`
 `status`: current primary research mainline.
-`usage`: 默认训练、评估和接管解释都从 `daily_research.path_policy.seq100_mainline` 进入；只有用户显式要求时才展开 comparison branch。
+`usage`: 默认训练、评估和接管解释都从 `daily_research.path_policy.seq100_mainline train` 进入，其 profile 是 `daily_only_summary_v2`；只有用户显式要求时才展开 comparison branch。
 
 ### object `shortline_after_close_research`
 `status`: supporting research prior.

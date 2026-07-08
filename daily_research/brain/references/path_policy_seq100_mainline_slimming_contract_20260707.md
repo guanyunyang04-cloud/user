@@ -11,7 +11,7 @@ This contract turns the current seq100 path-value research into a narrow default
 ## Verdict
 
 - Status: `process_complexity_slimmed / concept_surface_narrowed / research_only / no_active_change`.
-- Mainline: `seq100_todayclose_path_only` is the only default seq100 path-value research surface.
+- Mainline: `seq100_todayclose_path_only/daily_only_summary_v2` is the default seq100 path-value research surface.
 - Active artifact impact: unchanged. This does not touch `daily_research/output/active_execution_strategy.json`, live/default, paper/live, broker, trade plans, QDP active dataset pointers, or QDP provider state.
 - Concept decision: `alpha_v2`, `path20`, `symbol_embedding`, `residual_score`, `richer_target`, `ohlcva_unified`, and `rank_heavy_top1` are no longer default concepts.
 
@@ -21,9 +21,10 @@ The default research line is:
 
 ```text
 research_store_view
--> seq100_x84_input
+-> seq100_x32_daily_input
 -> today_close_anchor
 -> future60_ohlc_path
+-> summary_v2_multi_horizon_ohlc
 -> path_trade_value_v2
 -> path_value_spread
 ```
@@ -45,14 +46,24 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq
 
 - Store view: `daily_research/data/research_store/views/seq100_path60_todayclose_ohlcva.json`
 - Model type: `gru_path_value`
-- Input: past `100 x 84` daily path/state tensor
+- Input: past `100 x 32` `daily_raw + daily_state` tensor
 - Output: predicted future `60` day OHLC path
+- Summary loss: `multi_horizon_ohlc` over `5/10/20/40/60` day OHLC-derived windows
 - Value: `path_trade_value_v2` derived from predicted path
 - Loss weights: `path=0.45 / summary=0.20 / value=0.20 / rank=0.15`
 - TopK report: `1,3,5,10,20,50,100`
 - Prediction mode: `compact`
+- Early stopping: `patience=2`
 
 ## Explicit Comparison Profile
+
+`all_channels_base_summary` is the legacy broad-TopK baseline. It keeps the old all-channel input surface and base 60-day summary loss, and remains useful because its test Top3/Top10 stayed stronger than the new default.
+
+Command:
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-legacy-all-channels-base --json
+```
 
 `summary_v2_multi_horizon_ohlc` is an explicit comparison profile, not the default mainline. It keeps:
 
@@ -83,6 +94,14 @@ Command:
 
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-daily-only --json
+```
+
+`daily_only_summary_v2` was promoted to the default research profile on 2026-07-08. The explicit command remains available for clarity and is equivalent to `train` unless overridden by flags.
+
+Command:
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-daily-only-summary-v2 --json
 ```
 
 `no_intraday_summary` and `no_limit_structure` are partial input ablations. They keep labels, model type, output, loss weights, price anchor, split and TopK report aligned with the default, while removing exactly one minute-derived channel family.
@@ -121,6 +140,7 @@ These comparison surfaces remain named, but must not be mixed into the default p
 - `table_path60_baseline`
 - `path_only_next_open`
 - `rank_heavy_top1`
+- `all_channels_base_summary`
 - `summary_v2_multi_horizon_ohlc`
 - `summary_v2_no60`
 - `daily_only_no_minute`
