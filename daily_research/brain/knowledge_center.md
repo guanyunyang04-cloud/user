@@ -1,5 +1,5 @@
 # Daily Research 知识对象
-快照日期：`2026-07-07`
+快照日期：`2026-07-08`
 
 本文件保存稳定对象类、长期事实和方法论。它不承载当前状态长卷，也不复刻历史证据；完整 rXX、长命令和 dated review 在 `references/`。
 
@@ -51,6 +51,7 @@
 - `Path20` / `alpha_path20_neural_policy_v1` 是历史证据代号和代码 namespace，不再代表当前目标定义。
 - `summary_v2_multi_horizon_ohlc` is an explicit comparison profile that keeps OHLC output and only expands OHLC-derived summary-loss constraints; its narrow CLI default uses `early_stopping_patience=2`, and the multi-horizon loss is vectorized without changing the per-horizon objective.
 - `daily_only_no_minute` is an explicit input ablation profile that removes minute-derived `intraday_summary` and `limit_structure` inputs while keeping daily labels, splits, loss and model output semantics aligned with the default mainline.
+- `direct_value_rank_5d/10d/60d` are explicit comparison profiles that output only a scalar score and directly learn true future OHLC-derived `path_trade_value_v2_{horizon}d`; they are useful ranking evidence but do not replace the default OHLC path-output mainline.
 - `symbol_embedding`、`residual_score`、`richer_target`、`ohlcva_unified` and `rank_heavy_top1` are comparison or paused surfaces, not default concepts.
 - continuous_policy 的长期思想是日级连续交易执行模型；当前不是 active/default 或执行解冻依据。
 - daily execution 的事实层是手动流程、作业证据和只读 daily verdict；Web 可运行或旧 runtime state 只提供辅助线索。

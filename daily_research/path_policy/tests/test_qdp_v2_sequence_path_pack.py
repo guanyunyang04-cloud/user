@@ -16,7 +16,7 @@ from daily_research.path_policy.qdp_v2_sequence_path_pack import (
     path_value_column,
 )
 from daily_research.path_policy.qdp_v2_sequence_flat_lgbm import _feature_names, _select_indices
-from daily_research.path_policy.qdp_v2_sequence_path_training import SequencePathModel, SequencePathPackDataset, _compute_loss
+from daily_research.path_policy.qdp_v2_sequence_path_training import DateGroupedBatchSampler, SequencePathModel, SequencePathPackDataset, _compute_loss
 from daily_research.path_policy.qdp_v2_sequence_path_training import (
     INPUT_CHANNEL_PROFILE_DAILY_ONLY,
     SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
@@ -459,6 +459,73 @@ def test_gru_path_value_model_outputs_only_future_path_and_loss_uses_derived_sco
     assert set(parts) == {"loss", "path_loss", "summary_loss", "richer_loss", "value_loss", "rank_loss", "residual_penalty"}
 
 
+def test_gru_direct_value_model_outputs_only_score_and_loss_uses_direct_horizon() -> None:
+    model = SequencePathModel(
+        input_dim=6,
+        hidden_dim=8,
+        layers=1,
+        forward_days=60,
+        summary_dim=9,
+        dropout=0.0,
+        model_type="gru_direct_value",
+    )
+    x = torch.randn(4, 100, 6)
+    y_path = torch.zeros(4, 60, 4)
+    y_path[:, :5, 3] = torch.tensor([0.01, 0.02, 0.03, 0.04, 0.05])
+    y_path[:, 5:10, 3] = 0.20
+    y_summary = torch.zeros(4, 9)
+    date_idx = torch.tensor([1, 1, 1, 1])
+
+    out = model(x)
+    loss, parts = _compute_loss(
+        out,
+        y_path,
+        y_summary,
+        date_idx,
+        value_index=8,
+        path_weight=0.0,
+        summary_weight=0.0,
+        value_weight=0.50,
+        rank_weight=0.50,
+        direct_value_horizon=5,
+    )
+
+    assert set(out) == {"score"}
+    assert out["score"].shape == (4,)
+    assert torch.isfinite(loss)
+    assert parts["path_loss"] == 0.0
+    assert parts["summary_loss"] == 0.0
+    assert parts["richer_loss"] == 0.0
+    assert parts["value_loss"] >= 0.0
+    assert parts["rank_loss"] >= 0.0
+
+
+def test_direct_value_loss_targets_requested_horizon_not_full_path() -> None:
+    y_path = torch.zeros(4, 60, 4)
+    y_path[:, :5, 3] = 0.05
+    y_path[:, 5:60, 3] = -0.20
+    y_summary = torch.zeros(4, 9)
+    date_idx = torch.tensor([1, 1, 1, 1])
+    target_5d = _derive_path_summary_torch(y_path[:, :5, :4], smooth_value=False)[:, -1].detach()
+
+    loss, parts = _compute_loss(
+        {"score": target_5d},
+        y_path,
+        y_summary,
+        date_idx,
+        value_index=8,
+        path_weight=0.0,
+        summary_weight=0.0,
+        value_weight=1.0,
+        rank_weight=0.0,
+        direct_value_horizon=5,
+    )
+
+    assert torch.isfinite(loss)
+    assert loss.item() == 0.0
+    assert parts["value_loss"] == 0.0
+
+
 def test_gru_ohlcva_path_value_model_outputs_six_dim_path_and_unified_loss() -> None:
     model = SequencePathModel(
         input_dim=6,
@@ -639,6 +706,16 @@ def test_sequence_pack_dataset_get_batch_reads_date_grouped_windows(tmp_path) ->
     assert batch["y_path"].shape == (2, 20, 4)
     assert batch["y_summary"].shape == (2, len(PATH_SUMMARY_COLUMNS))
     assert batch["trade_date"] == ["2024-01-03", "2024-01-03"]
+    lean_batch = dataset.get_batch(
+        [0, 1],
+        include_ohlcva_path=False,
+        include_richer_path=False,
+        include_summary=False,
+    )
+    assert lean_batch["y_path"].shape == (2, 20, 4)
+    assert lean_batch["y_ohlcva_path"] is None
+    assert lean_batch["y_richer_path"] is None
+    assert lean_batch["y_summary"] is None
     # First channel, first feature: dates 0..2 for symbol 0 and 1.
     assert torch.equal(batch["x"][0, :, 0], torch.tensor([0.0, 10.0, 20.0]))
     assert torch.equal(batch["x"][1, :, 0], torch.tensor([1.0, 11.0, 21.0]))
@@ -658,6 +735,25 @@ def test_sequence_pack_dataset_get_batch_reads_date_grouped_windows(tmp_path) ->
     assert len(daily_only_names) == 9
     assert all("__intraday_summary__" not in name for name in daily_only_names)
     assert all("__limit_structure__" not in name for name in daily_only_names)
+
+
+def test_date_grouped_batch_sampler_merges_small_dates_without_losing_date_groups() -> None:
+    sample_index = pd.DataFrame(
+        [
+            {"date_idx": 1},
+            {"date_idx": 1},
+            {"date_idx": 2},
+            {"date_idx": 2},
+            {"date_idx": 3},
+            {"date_idx": 3},
+        ]
+    )
+    sampler = DateGroupedBatchSampler(sample_index, batch_size=4, shuffle=False, seed=7)
+
+    batches = list(sampler)
+
+    assert len(sampler) == 2
+    assert batches == [[0, 1, 2, 3], [4, 5]]
 
 
 def test_future_path_columns_support_sixty_day_horizon() -> None:

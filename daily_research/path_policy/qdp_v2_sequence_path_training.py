@@ -6,6 +6,7 @@ import gc
 import json
 import math
 import random
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -57,6 +58,7 @@ UNIFIED_VALUE_TRANSACTION_COST = 0.002
 UNIFIED_VALUE_TEMPERATURE = 0.03
 RICHER_MODEL_TYPES = {"gru_richer_path_value", "gru_richer_path_value_symbol"}
 OHLCVA_MODEL_TYPES = {"gru_ohlcva_path_value"}
+DIRECT_VALUE_MODEL_TYPES = {"gru_direct_value"}
 PATH_VALUE_MODEL_TYPES = {
     "gru_path_value",
     "gru_path_value_symbol",
@@ -444,7 +446,14 @@ class SequencePathPackDataset(Dataset):
             "symbol": str(row["symbol"]),
         }
 
-    def get_batch(self, indices: list[int] | np.ndarray) -> dict[str, Any]:
+    def get_batch(
+        self,
+        indices: list[int] | np.ndarray,
+        *,
+        include_ohlcva_path: bool = True,
+        include_richer_path: bool = True,
+        include_summary: bool = True,
+    ) -> dict[str, Any]:
         idx = np.asarray(indices, dtype=np.int64)
         if idx.ndim != 1 or idx.size == 0:
             raise ValueError("batch indices must be a non-empty 1D array")
@@ -470,28 +479,36 @@ class SequencePathPackDataset(Dataset):
             if self.future_path is not None
             else np.asarray(self.future_ohlcva_path[date_idx, label_symbol_idx, : self.forward_days, :4], dtype=np.float32).copy()
         )
-        y_ohlcva_path = (
-            np.asarray(self.future_ohlcva_path[date_idx, label_symbol_idx, : self.forward_days, :], dtype=np.float32).copy()
-            if self.future_ohlcva_path is not None
-            else y_path.copy()
-        )
-        y_richer_path = self._future_richer_path_batch(y_path, date_idx, symbol_idx)
-        y_summary = (
-            np.asarray(self.path_summary[date_idx, label_symbol_idx, :], dtype=np.float32).copy()
-            if self.path_summary is not None
-            else _derive_path_summary_numpy(y_ohlcva_path, price_anchor=self.price_anchor)
-        )
-        return {
+        y_ohlcva_path = None
+        if bool(include_ohlcva_path):
+            y_ohlcva_path = (
+                np.asarray(self.future_ohlcva_path[date_idx, label_symbol_idx, : self.forward_days, :], dtype=np.float32).copy()
+                if self.future_ohlcva_path is not None
+                else y_path.copy()
+            )
+        y_richer_path = self._future_richer_path_batch(y_path, date_idx, symbol_idx) if bool(include_richer_path) else None
+        y_summary = None
+        if bool(include_summary):
+            y_summary = (
+                np.asarray(self.path_summary[date_idx, label_symbol_idx, :], dtype=np.float32).copy()
+                if self.path_summary is not None
+                else _derive_path_summary_numpy(
+                    y_ohlcva_path if y_ohlcva_path is not None else y_path,
+                    price_anchor=self.price_anchor,
+                )
+            )
+        batch = {
             "x": torch.from_numpy(x),
             "y_path": torch.from_numpy(y_path),
-            "y_ohlcva_path": torch.from_numpy(y_ohlcva_path),
-            "y_richer_path": torch.from_numpy(y_richer_path),
-            "y_summary": torch.from_numpy(y_summary),
             "date_idx": torch.from_numpy(date_idx.astype(np.int64, copy=False)),
             "symbol_idx": torch.from_numpy(symbol_idx.astype(np.int64, copy=False)),
             "trade_date": [str(item) for item in self.trade_date_values[idx]],
             "symbol": [str(item) for item in self.symbol_values[idx]],
         }
+        batch["y_ohlcva_path"] = torch.from_numpy(y_ohlcva_path) if y_ohlcva_path is not None else None
+        batch["y_richer_path"] = torch.from_numpy(y_richer_path) if y_richer_path is not None else None
+        batch["y_summary"] = torch.from_numpy(y_summary) if y_summary is not None else None
+        return batch
 
 
 class DateGroupedBatchSampler(BatchSampler):
@@ -505,23 +522,63 @@ class DateGroupedBatchSampler(BatchSampler):
             groups.setdefault(int(date_idx), []).append(int(idx))
         self.groups = groups
         self.date_indices = list(groups.keys())
-        self._length = sum((len(items) + self.batch_size - 1) // self.batch_size for items in self.groups.values())
+
+    def _date_order(self, epoch: int) -> list[int]:
+        dates = list(self.date_indices)
+        if self.shuffle:
+            rng = np.random.default_rng(self.seed + int(epoch))
+            rng.shuffle(dates)
+        return dates
+
+    def _count_batches(self, dates: list[int]) -> int:
+        count = 0
+        pending_count = 0
+        for date_idx in dates:
+            item_count = len(self.groups[date_idx])
+            full_chunks, remainder = divmod(item_count, self.batch_size)
+            if full_chunks:
+                if pending_count:
+                    count += 1
+                    pending_count = 0
+                count += int(full_chunks)
+            if remainder:
+                if pending_count + remainder > self.batch_size:
+                    count += 1
+                    pending_count = 0
+                pending_count += int(remainder)
+                if pending_count == self.batch_size:
+                    count += 1
+                    pending_count = 0
+        if pending_count:
+            count += 1
+        return int(count)
 
     def __iter__(self) -> Iterator[list[int]]:
         rng = np.random.default_rng(self.seed + self.epoch)
+        dates = self._date_order(self.epoch)
         self.epoch += 1
-        dates = list(self.date_indices)
-        if self.shuffle:
-            rng.shuffle(dates)
+        pending: list[int] = []
         for date_idx in dates:
             items = list(self.groups[date_idx])
             if self.shuffle:
                 rng.shuffle(items)
             for start in range(0, len(items), self.batch_size):
-                yield items[start : start + self.batch_size]
+                chunk = items[start : start + self.batch_size]
+                if len(chunk) == self.batch_size:
+                    if pending:
+                        yield pending
+                        pending = []
+                    yield chunk
+                    continue
+                if pending and len(pending) + len(chunk) > self.batch_size:
+                    yield pending
+                    pending = []
+                pending.extend(chunk)
+        if pending:
+            yield pending
 
     def __len__(self) -> int:
-        return int(self._length)
+        return self._count_batches(self._date_order(self.epoch))
 
 
 class SequencePathModel(nn.Module):
@@ -550,14 +607,17 @@ class SequencePathModel(nn.Module):
             "gru_ohlcva_path_value",
             "gru_richer_path_value",
             "gru_richer_path_value_symbol",
+            "gru_direct_value",
         }
         if normalized_model_type not in allowed_model_types:
             raise ValueError(
                 "model_type must be gru_last, gru_attention, gru_path_value, gru_path_value_symbol, "
-                "gru_path_value_residual, gru_ohlcva_path_value, gru_richer_path_value, or gru_richer_path_value_symbol"
+                "gru_path_value_residual, gru_ohlcva_path_value, gru_richer_path_value, "
+                "gru_richer_path_value_symbol, or gru_direct_value"
             )
         self.model_type = normalized_model_type
         self.uses_derived_path_value = normalized_model_type in PATH_VALUE_MODEL_TYPES
+        self.uses_direct_value = normalized_model_type in DIRECT_VALUE_MODEL_TYPES
         self.uses_symbol_embedding = normalized_model_type in {"gru_path_value_symbol", "gru_richer_path_value_symbol"}
         self.uses_residual_score = normalized_model_type in RESIDUAL_MODEL_TYPES
         self.uses_richer_path = normalized_model_type in RICHER_MODEL_TYPES
@@ -587,10 +647,13 @@ class SequencePathModel(nn.Module):
         head_dim = int(hidden_dim) + self.symbol_embedding_dim
         self.path_dim = 6 if self.uses_ohlcva_path else 4
         self.richer_path_dim = int(max(4, richer_path_dim)) if self.uses_richer_path else self.path_dim
-        self.path_head = nn.Linear(head_dim, int(forward_days) * self.richer_path_dim)
+        self.path_head = None if self.uses_direct_value else nn.Linear(head_dim, int(forward_days) * self.richer_path_dim)
         if self.uses_derived_path_value:
             self.summary_head = None
             self.score_head = None
+        elif self.uses_direct_value:
+            self.summary_head = None
+            self.score_head = nn.Linear(head_dim, 1)
         else:
             self.summary_head = nn.Linear(head_dim, int(summary_dim))
             self.score_head = nn.Linear(head_dim, 1)
@@ -613,6 +676,10 @@ class SequencePathModel(nn.Module):
                 raise ValueError("symbol_idx is required when model_type=gru_path_value_symbol")
             embedded = self.symbol_embedding(symbol_idx.to(device=pooled.device, dtype=torch.long))
             pooled = torch.cat([pooled, embedded], dim=1)
+        if self.uses_direct_value:
+            assert self.score_head is not None
+            return {"score": self.score_head(pooled).squeeze(-1)}
+        assert self.path_head is not None
         path_output = self.path_head(pooled).view(-1, self.forward_days, self.richer_path_dim)
         future_path = path_output[:, :, : self.path_dim] if self.uses_richer_path else path_output
         if self.uses_derived_path_value:
@@ -823,7 +890,44 @@ def _compute_loss(
     residual_penalty_weight: float = 0.01,
     price_anchor: str = "next_open",
     summary_loss_profile: str = SUMMARY_LOSS_PROFILE_BASE,
+    direct_value_horizon: int = 0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
+    if "future_path" not in outputs and "score" in outputs:
+        score = outputs["score"]
+        horizon = int(direct_value_horizon) if int(direct_value_horizon) > 0 else int(y_path.shape[1])
+        horizon = max(1, min(horizon, int(y_path.shape[1])))
+        target_summary = _derive_path_summary_torch(
+            y_path[:, :horizon, :4],
+            smooth_value=False,
+            price_anchor=price_anchor,
+        ).detach()
+        value_column = value_column_for_path(horizon, path_dim=4)
+        value_index = derived_path_summary_columns(horizon, path_dim=4).index(value_column)
+        value_target = target_summary[:, int(value_index)]
+        path_loss = score.sum() * 0.0
+        summary_loss = score.sum() * 0.0
+        richer_loss = score.sum() * 0.0
+        residual_penalty = score.sum() * 0.0
+        value_loss = _finite_smooth_l1(score, value_target)
+        rank_loss = _rank_loss_by_date(score, value_target, date_idx, max_per_side=int(rank_max_per_side))
+        total = (
+            float(value_weight) * value_loss
+            + float(rank_weight) * rank_loss
+            + float(path_weight) * path_loss
+            + float(summary_weight) * summary_loss
+            + float(richer_weight) * richer_loss
+            + float(residual_penalty_weight) * residual_penalty
+        )
+        return total, {
+            "loss": float(total.detach().cpu().item()),
+            "path_loss": float(path_loss.detach().cpu().item()),
+            "summary_loss": float(summary_loss.detach().cpu().item()),
+            "richer_loss": float(richer_loss.detach().cpu().item()),
+            "value_loss": float(value_loss.detach().cpu().item()),
+            "rank_loss": float(rank_loss.detach().cpu().item()),
+            "residual_penalty": float(residual_penalty.detach().cpu().item()),
+        }
+
     path_loss = _finite_smooth_l1(outputs["future_path"], y_path)
     richer_loss = outputs["future_path"].sum() * 0.0
     if y_richer_path is not None and "future_richer_path" in outputs:
@@ -882,12 +986,32 @@ def _compute_loss(
 
 def _batch_to_device(
     batch: Mapping[str, Any], device: torch.device
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor | None,
+    torch.Tensor | None,
+    torch.Tensor | None,
+    torch.Tensor,
+    torch.Tensor,
+]:
     x = batch["x"].to(device, non_blocking=device.type == "cuda")
     y_path = batch["y_path"].to(device, non_blocking=device.type == "cuda")
-    y_ohlcva_path = batch["y_ohlcva_path"].to(device, non_blocking=device.type == "cuda")
-    y_richer_path = batch["y_richer_path"].to(device, non_blocking=device.type == "cuda")
-    y_summary = batch["y_summary"].to(device, non_blocking=device.type == "cuda")
+    y_ohlcva_path = (
+        batch["y_ohlcva_path"].to(device, non_blocking=device.type == "cuda")
+        if batch.get("y_ohlcva_path") is not None
+        else None
+    )
+    y_richer_path = (
+        batch["y_richer_path"].to(device, non_blocking=device.type == "cuda")
+        if batch.get("y_richer_path") is not None
+        else None
+    )
+    y_summary = (
+        batch["y_summary"].to(device, non_blocking=device.type == "cuda")
+        if batch.get("y_summary") is not None
+        else None
+    )
     date_idx = batch["date_idx"].to(device, non_blocking=device.type == "cuda")
     symbol_idx = batch["symbol_idx"].to(device, non_blocking=device.type == "cuda")
     return x, y_path, y_ohlcva_path, y_richer_path, y_summary, date_idx, symbol_idx
@@ -1579,6 +1703,7 @@ def _predict_split(
     top_k: tuple[int, ...],
     write_predictions: bool,
     write_path_predictions: bool = True,
+    direct_value_horizon: int = 0,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     pred_dir = output_dir / "predictions"
     if write_predictions:
@@ -1587,14 +1712,24 @@ def _predict_split(
     if write_predictions and pred_path.exists():
         pred_path.unlink()
     uses_derived_path_value = bool(getattr(model, "uses_derived_path_value", False))
+    uses_direct_value = bool(getattr(model, "uses_direct_value", False))
+    eval_forward_days = (
+        max(1, min(int(direct_value_horizon), int(dataset.forward_days)))
+        if uses_direct_value and int(direct_value_horizon) > 0
+        else int(dataset.forward_days)
+    )
     output_path_dim = 6 if bool(getattr(model, "uses_ohlcva_path", False)) else 4
     output_path_fields = PATH_OHLCVA_FIELDS if output_path_dim >= 6 else PATH_OHLC_FIELDS
-    summary_columns = (
-        derived_path_summary_columns(dataset.forward_days, path_dim=output_path_dim)
-        if uses_derived_path_value
-        else list(dataset.path_summary_columns)
-    )
-    value_column = value_column_for_path(dataset.forward_days, path_dim=output_path_dim) if uses_derived_path_value else str(dataset.value_column)
+    if uses_direct_value:
+        summary_columns = derived_path_summary_columns(eval_forward_days, path_dim=4)
+        value_column = value_column_for_path(eval_forward_days, path_dim=4)
+    else:
+        summary_columns = (
+            derived_path_summary_columns(dataset.forward_days, path_dim=output_path_dim)
+            if uses_derived_path_value
+            else list(dataset.path_summary_columns)
+        )
+        value_column = value_column_for_path(dataset.forward_days, path_dim=output_path_dim) if uses_derived_path_value else str(dataset.value_column)
     pending_date: str | None = None
     pending_frames: list[pd.DataFrame] = []
     ic_rows_by_score: dict[str, list[dict[str, Any]]] = {"score": []}
@@ -1630,7 +1765,7 @@ def _predict_split(
                 _topk_daily_rows(
                     score_frame,
                     top_k_values=top_k,
-                    forward_days=dataset.forward_days,
+                    forward_days=eval_forward_days,
                     value_column=value_column,
                 )
             )
@@ -1641,21 +1776,36 @@ def _predict_split(
         _iter_index_batches(dataset, batch_size=int(batch_size), shuffle=False, seed=0),
         start=1,
     ):
-        batch = dataset.get_batch(batch_indices)
+        batch = dataset.get_batch(
+            batch_indices,
+            include_ohlcva_path=bool(output_path_dim >= 6),
+            include_richer_path=False,
+            include_summary=not bool(uses_derived_path_value or uses_direct_value),
+        )
         x, y_path, y_ohlcva_path, _y_richer_path, y_summary, _date_idx, symbol_idx = _batch_to_device(batch, device)
-        target_path = y_ohlcva_path if output_path_dim >= 6 else y_path
+        target_path = y_ohlcva_path if output_path_dim >= 6 and y_ohlcva_path is not None else y_path
         trade_dates = list(batch["trade_date"])
         symbols = list(batch["symbol"])
         del batch
         with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
             out = model(x, symbol_idx=symbol_idx)
-        pred_path_np = out["future_path"].detach().float().cpu().numpy()
         true_path_np = target_path.detach().float().cpu().numpy()
-        if "score" in out:
+        if uses_direct_value:
+            score_np = out["score"].detach().float().cpu().numpy()
+            eval_true_path_np = true_path_np[:, :eval_forward_days, :4]
+            true_summary_np = _derive_path_summary_numpy(eval_true_path_np, price_anchor=dataset.price_anchor)
+            pred_summary_np = np.full_like(true_summary_np, np.nan)
+            pred_summary_np[:, summary_columns.index(value_column)] = score_np
+            pred_path_np = np.empty((int(score_np.shape[0]), 0, 4), dtype=np.float32)
+            residual_np = None
+            path_value_score_np = score_np
+        elif "score" in out:
+            pred_path_np = out["future_path"].detach().float().cpu().numpy()
             pred_summary_np = out["path_summary"].detach().float().cpu().numpy()
             score_np = out["score"].detach().float().cpu().numpy()
             true_summary_np = y_summary.detach().float().cpu().numpy()
         else:
+            pred_path_np = out["future_path"].detach().float().cpu().numpy()
             pred_summary_np = _derive_path_summary_numpy(pred_path_np, price_anchor=dataset.price_anchor)
             true_summary_np = _derive_path_summary_numpy(true_path_np, price_anchor=dataset.price_anchor)
             path_value_score_np = pred_summary_np[:, summary_columns.index(value_column)]
@@ -1684,7 +1834,7 @@ def _predict_split(
                 realized_cols.append(col)
         chunk = pd.DataFrame(rows)
         if write_predictions:
-            if bool(write_path_predictions):
+            if bool(write_path_predictions) and not uses_direct_value:
                 path_rows: dict[str, Any] = {}
                 for day in range(dataset.forward_days):
                     for field_idx, field in enumerate(output_path_fields):
@@ -1765,20 +1915,30 @@ def _write_report(
     baseline_summary: Mapping[str, Any],
 ) -> str:
     forward_days = int(summary.get("forward_days", DEFAULT_FORWARD_DAYS) or DEFAULT_FORWARD_DAYS)
-    suffix = f"{forward_days}d"
-    value_col = str(summary.get("value_column", "") or path_value_column(forward_days))
+    direct_value_horizon = int(summary.get("direct_value_horizon", 0) or 0)
+    report_days = direct_value_horizon if direct_value_horizon > 0 else forward_days
+    suffix = f"{report_days}d"
+    value_col = str(summary.get("value_column", "") or path_value_column(report_days))
     max_col = f"future_max_return_{suffix}"
     final_col = f"future_final_return_{suffix}"
     best_exit_col = f"best_exit_close_return_{suffix}"
+    uses_direct_value = bool(dict(summary.get("model", {}) or {}).get("uses_direct_value", False))
     lines: list[str] = []
     lines.append("# QDP v2 Sequence Path Model")
     lines.append("")
     lines.append("## Method")
     lines.append("")
-    lines.append(
-        f"This model reads past 100-day multi-channel sequences from QDP v2 and predicts future {forward_days}-day OHLC paths. "
-        "Path summaries and ranking values are derived from the predicted path when using a path-value model."
-    )
+    if uses_direct_value:
+        lines.append(
+            f"This model reads past 100-day multi-channel sequences from QDP v2 and directly predicts the "
+            f"{report_days}-day path-value ranking score. It does not emit a future OHLC path."
+        )
+        lines.append("The supervised target and Top-K diagnostics are derived from true future OHLC labels.")
+    else:
+        lines.append(
+            f"This model reads past 100-day multi-channel sequences from QDP v2 and predicts future {forward_days}-day OHLC paths. "
+            "Path summaries and ranking values are derived from the predicted path when using a path-value model."
+        )
     if str(summary.get("loss_weights", {}).get("summary_profile", "")) == SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC:
         lines.append("Summary loss uses multi-horizon OHLC-derived constraints while the model output remains the future OHLC path.")
     early = dict(summary.get("early_stopping", {}) or {})
@@ -1862,6 +2022,7 @@ class TrainConfig:
     residual_penalty_weight: float
     summary_loss_profile: str
     input_channel_profile: str
+    direct_value_horizon: int
     rank_max_per_side: int
     device: str
     amp: bool
@@ -1915,6 +2076,10 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         richer_path_dim=int(train_ds.richer_path_dim),
     ).to(device)
     model.residual_weight = float(config.residual_score_weight)
+    uses_direct_value = bool(getattr(model, "uses_direct_value", False))
+    uses_derived_path_value = bool(getattr(model, "uses_derived_path_value", False))
+    uses_ohlcva_path = bool(getattr(model, "uses_ohlcva_path", False))
+    uses_richer_path = bool(getattr(model, "uses_richer_path", False))
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(config.learning_rate), weight_decay=float(config.weight_decay))
     scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
     best_val_ic = -1e9
@@ -1944,9 +2109,15 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         )
         total_batches = len(train_batches)
         for batch_indices in train_batches:
-            batch = train_ds.get_batch(batch_indices)
+            batch_start = time.perf_counter()
+            batch = train_ds.get_batch(
+                batch_indices,
+                include_ohlcva_path=uses_ohlcva_path,
+                include_richer_path=uses_richer_path,
+                include_summary=not bool(uses_derived_path_value or uses_direct_value),
+            )
             x, y_path, y_ohlcva_path, y_richer_path, y_summary, date_idx, symbol_idx = _batch_to_device(batch, device)
-            target_path = y_ohlcva_path if bool(getattr(model, "uses_ohlcva_path", False)) else y_path
+            target_path = y_ohlcva_path if uses_ohlcva_path and y_ohlcva_path is not None else y_path
             del batch
             optimizer.zero_grad(set_to_none=True)
             with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
@@ -1968,6 +2139,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     residual_penalty_weight=float(config.residual_penalty_weight),
                     price_anchor=train_ds.price_anchor,
                     summary_loss_profile=str(config.summary_loss_profile),
+                    direct_value_horizon=int(config.direct_value_horizon),
                 )
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
@@ -1978,7 +2150,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 loss_totals[key] += float(value)
             batch_count += 1
             sample_count += int(x.shape[0])
-            if batch_count == 1 or batch_count % 200 == 0:
+            batch_seconds = float(time.perf_counter() - batch_start)
+            if batch_count == 1 or batch_count % 25 == 0:
                 _write_json(
                     progress_path,
                     {
@@ -1987,6 +2160,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                         "batch": int(batch_count),
                         "total_batches": int(total_batches),
                         "sample_count": int(sample_count),
+                        "last_batch_seconds": batch_seconds,
                         "updated_at": _now(),
                     },
                 )
@@ -2011,6 +2185,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             top_k=config.top_k,
             write_predictions=False,
             write_path_predictions=False,
+            direct_value_horizon=int(config.direct_value_horizon),
         )
         current_val_ic = float(val_metrics["rank_ic_mean"])
         improved = bool(np.isfinite(current_val_ic) and current_val_ic > best_val_ic + float(config.early_stopping_min_delta))
@@ -2083,6 +2258,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         top_k=config.top_k,
         write_predictions=str(config.prediction_mode) != "none",
         write_path_predictions=str(config.prediction_mode) == "full",
+        direct_value_horizon=int(config.direct_value_horizon),
     )
     test_ic, test_topk, test_metrics = _predict_split(
         model=model,
@@ -2095,6 +2271,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         top_k=config.top_k,
         write_predictions=str(config.prediction_mode) != "none",
         write_path_predictions=str(config.prediction_mode) == "full",
+        direct_value_horizon=int(config.direct_value_horizon),
     )
     split_metrics = pd.DataFrame([val_metrics, test_metrics])
     topk = pd.concat([val_topk.assign(split="validation"), test_topk.assign(split="test")], ignore_index=True)
@@ -2107,15 +2284,21 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     topk.to_csv(topk_path, index=False, encoding="utf-8-sig")
     daily_ic.to_csv(daily_ic_path, index=False, encoding="utf-8-sig")
     pd.DataFrame(history).to_csv(history_path, index=False, encoding="utf-8-sig")
-    baseline_summary = _find_latest_baseline_summary(train_ds.forward_days)
+    uses_direct_value = bool(getattr(model, "uses_direct_value", False))
+    baseline_forward_days = int(config.direct_value_horizon) if uses_direct_value else int(train_ds.forward_days)
+    baseline_summary = _find_latest_baseline_summary(baseline_forward_days)
     active_path_dim = 6 if bool(getattr(model, "uses_ohlcva_path", False)) else 4
     active_value_column = (
-        value_column_for_path(train_ds.forward_days, path_dim=active_path_dim)
+        value_column_for_path(int(config.direct_value_horizon), path_dim=4)
+        if uses_direct_value
+        else value_column_for_path(train_ds.forward_days, path_dim=active_path_dim)
         if bool(getattr(model, "uses_derived_path_value", False))
         else train_ds.value_column
     )
     active_summary_columns = (
-        derived_path_summary_columns(train_ds.forward_days, path_dim=active_path_dim)
+        derived_path_summary_columns(int(config.direct_value_horizon), path_dim=4)
+        if uses_direct_value
+        else derived_path_summary_columns(train_ds.forward_days, path_dim=active_path_dim)
         if bool(getattr(model, "uses_derived_path_value", False))
         else list(train_ds.path_summary_columns)
     )
@@ -2129,6 +2312,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         "price_anchor": str(train_ds.price_anchor),
         "value_column": str(active_value_column),
         "path_summary_columns": list(active_summary_columns),
+        "direct_value_horizon": int(config.direct_value_horizon) if uses_direct_value else 0,
         "device": str(device),
         "amp_enabled": bool(amp_enabled),
         "prediction_mode": str(config.prediction_mode),
@@ -2147,6 +2331,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "layers": int(config.layers),
             "dropout": float(config.dropout),
             "uses_derived_path_value": bool(getattr(model, "uses_derived_path_value", False)),
+            "uses_direct_value": bool(getattr(model, "uses_direct_value", False)),
             "uses_symbol_embedding": bool(getattr(model, "uses_symbol_embedding", False)),
             "uses_residual_score": bool(getattr(model, "uses_residual_score", False)),
             "uses_richer_path": bool(getattr(model, "uses_richer_path", False)),
@@ -2222,6 +2407,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "gru_ohlcva_path_value",
             "gru_richer_path_value",
             "gru_richer_path_value_symbol",
+            "gru_direct_value",
         ),
         help=argparse.SUPPRESS,
     )
@@ -2244,6 +2430,7 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument("--richer-loss-weight", type=float, default=0.10)
     train.add_argument("--value-loss-weight", type=float, default=0.25)
     train.add_argument("--rank-loss-weight", type=float, default=0.15)
+    train.add_argument("--direct-value-horizon", type=int, default=0)
     train.add_argument("--residual-score-weight", type=float, default=0.25, help=argparse.SUPPRESS)
     train.add_argument("--residual-penalty-weight", type=float, default=0.01, help=argparse.SUPPRESS)
     train.add_argument(
@@ -2295,6 +2482,8 @@ def main(argv: list[str] | None = None) -> int:
         if model_type not in {"gru_path_value", "gru_path_value_symbol", "gru_richer_path_value", "gru_richer_path_value_symbol"}:
             raise SystemExit("--with-symbol can only be combined with the path-value model")
         model_type = "gru_richer_path_value_symbol" if model_type.startswith("gru_richer_") else "gru_path_value_symbol"
+    if model_type in DIRECT_VALUE_MODEL_TYPES and int(args.direct_value_horizon) <= 0:
+        raise SystemExit("--direct-value-horizon must be positive when model-type=gru_direct_value")
     cfg = TrainConfig(
         pack_manifest=manifest_path,
         output_root=Path(args.output_root),
@@ -2317,6 +2506,7 @@ def main(argv: list[str] | None = None) -> int:
         residual_penalty_weight=float(args.residual_penalty_weight),
         summary_loss_profile=str(args.summary_loss_profile),
         input_channel_profile=str(args.input_channel_profile),
+        direct_value_horizon=int(args.direct_value_horizon),
         rank_max_per_side=int(args.rank_max_per_side),
         device=str(args.device),
         amp=bool(args.amp),

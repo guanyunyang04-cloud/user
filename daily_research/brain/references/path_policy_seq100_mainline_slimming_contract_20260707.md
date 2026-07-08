@@ -77,6 +77,16 @@ Command:
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-daily-only --json
 ```
 
+`direct_value_rank_5d/10d/60d` are explicit ranking comparison profiles, not the default mainline. They keep the same store view, input channels, split, price anchor and TopK report, but change `model_type` to `gru_direct_value`. The model emits only one scalar `score`; it does not emit future OHLC, path summary, OHLCVA, symbol embedding, residual score, or richer target outputs. Training derives `path_trade_value_v2_{horizon}d` from true future OHLC labels during loss calculation and uses `value=0.50 / rank=0.50` with path/summary/richer loss set to zero. The narrow CLI defaults `early_stopping_patience` to `2` and `batch_size` to `2048`.
+
+Commands:
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-direct-value-5d --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-direct-value-10d --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-direct-value-60d --json
+```
+
 ## Concept Demotion
 
 These surfaces are no longer default concepts:
@@ -96,6 +106,9 @@ These comparison surfaces remain named, but must not be mixed into the default p
 - `rank_heavy_top1`
 - `summary_v2_multi_horizon_ohlc`
 - `daily_only_no_minute`
+- `direct_value_rank_5d`
+- `direct_value_rank_10d`
+- `direct_value_rank_60d`
 
 The old phrase `LightGBM 191` is not a default baseline name because it mixes horizon, feature count, and model family. Use explicit names such as `table_path60_baseline`, `table_path20_191_baseline`, or `sequence_flat_lgbm_8400_sampled`.
 
