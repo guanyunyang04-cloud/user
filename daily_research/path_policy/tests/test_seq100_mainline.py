@@ -8,7 +8,10 @@ from daily_research.path_policy.seq100_mainline import (
     ACTIVE_CONCEPTS,
     ARCHIVED_CONCEPTS,
     DEFAULT_DAILY_ONLY_RUN_TAG,
+    DEFAULT_DAILY_ONLY_SUMMARY_V2_OHLCVA_AUX_LOW_PRICE_DELTA_RUN_TAG,
+    DEFAULT_DAILY_ONLY_SUMMARY_V2_OHLCVA_AUX_LOW_RUN_TAG,
     DEFAULT_DAILY_ONLY_SUMMARY_V2_OHLCVA_AUX_RUN_TAG,
+    DEFAULT_DAILY_ONLY_SUMMARY_V2_PRICE_DELTA_RUN_TAG,
     DEFAULT_DAILY_ONLY_SUMMARY_V2_RUN_TAG,
     DEFAULT_DIRECT_VALUE_5D_RUN_TAG,
     DEFAULT_NO_INTRADAY_RUN_TAG,
@@ -19,7 +22,10 @@ from daily_research.path_policy.seq100_mainline import (
     LEGACY_ALL_CHANNELS_BASE_RUN_TAG,
     TodayClosePathOnlyProfile,
     build_todayclose_daily_only_train_argv,
+    build_todayclose_daily_only_summary_v2_ohlcva_aux_low_price_delta_train_argv,
+    build_todayclose_daily_only_summary_v2_ohlcva_aux_low_train_argv,
     build_todayclose_daily_only_summary_v2_ohlcva_aux_train_argv,
+    build_todayclose_daily_only_summary_v2_price_delta_train_argv,
     build_todayclose_daily_only_summary_v2_train_argv,
     build_todayclose_direct_value_train_argv,
     build_todayclose_legacy_all_channels_base_train_argv,
@@ -55,11 +61,18 @@ def test_mainline_contract_keeps_default_surface_small() -> None:
     assert contract["daily_only_summary_v2_train_profile"]["input_channel_profile"] == "daily_only"
     assert contract["daily_only_summary_v2_train_profile"]["summary_loss_profile"] == "multi_horizon_ohlc"
     assert contract["daily_only_summary_v2_train_profile"]["early_stopping_patience"] == 2
+    assert contract["daily_only_summary_v2_price_delta_train_profile"]["model_type"] == "gru_path_value"
+    assert contract["daily_only_summary_v2_price_delta_train_profile"]["price_delta_loss_weight"] == 0.03
     assert contract["daily_only_summary_v2_ohlcva_aux_train_profile"]["model_type"] == "gru_ohlcva_aux_path_value"
     assert contract["daily_only_summary_v2_ohlcva_aux_train_profile"]["input_channel_profile"] == "daily_only"
     assert contract["daily_only_summary_v2_ohlcva_aux_train_profile"]["summary_loss_profile"] == "multi_horizon_ohlc"
     assert contract["daily_only_summary_v2_ohlcva_aux_train_profile"]["va_level_loss_weight"] == 0.05
     assert contract["daily_only_summary_v2_ohlcva_aux_train_profile"]["va_delta_loss_weight"] == 0.02
+    assert contract["daily_only_summary_v2_ohlcva_aux_low_train_profile"]["va_level_loss_weight"] == 0.02
+    assert contract["daily_only_summary_v2_ohlcva_aux_low_train_profile"]["va_delta_loss_weight"] == 0.01
+    assert contract["daily_only_summary_v2_ohlcva_aux_low_price_delta_train_profile"]["price_delta_loss_weight"] == 0.03
+    assert contract["daily_only_summary_v2_ohlcva_aux_low_price_delta_train_profile"]["va_level_loss_weight"] == 0.02
+    assert contract["daily_only_summary_v2_ohlcva_aux_low_price_delta_train_profile"]["va_delta_loss_weight"] == 0.01
     assert contract["input_ablation_train_profiles"]["no_intraday_summary"]["input_channel_profile"] == "no_intraday_summary"
     assert contract["input_ablation_train_profiles"]["no_limit_structure"]["input_channel_profile"] == "no_limit_structure"
     assert contract["direct_value_train_profiles"]["5d"]["model_type"] == "gru_direct_value"
@@ -218,6 +231,60 @@ def test_todayclose_daily_only_summary_v2_ohlcva_aux_train_argv_adds_va_aux_only
     assert "gru_ohlcva_path_value" not in argv
 
 
+def test_todayclose_daily_only_summary_v2_price_delta_and_low_aux_profiles() -> None:
+    price_delta_profile = TodayClosePathOnlyProfile(
+        run_tag=DEFAULT_DAILY_ONLY_SUMMARY_V2_PRICE_DELTA_RUN_TAG,
+        epochs=1,
+        max_samples_per_split=32,
+        device="cpu",
+        early_stopping_patience=2,
+        price_delta_loss_weight=0.03,
+    )
+    price_delta_argv = build_todayclose_daily_only_summary_v2_price_delta_train_argv(price_delta_profile)
+
+    assert price_delta_argv[price_delta_argv.index("--run-tag") + 1] == DEFAULT_DAILY_ONLY_SUMMARY_V2_PRICE_DELTA_RUN_TAG
+    assert price_delta_argv[price_delta_argv.index("--model-type") + 1] == "gru_path_value"
+    assert price_delta_argv[price_delta_argv.index("--price-delta-loss-weight") + 1] == "0.03"
+    assert price_delta_argv[price_delta_argv.index("--va-level-loss-weight") + 1] == "0.0"
+
+    low_aux_profile = TodayClosePathOnlyProfile(
+        run_tag=DEFAULT_DAILY_ONLY_SUMMARY_V2_OHLCVA_AUX_LOW_RUN_TAG,
+        epochs=1,
+        max_samples_per_split=32,
+        device="cpu",
+        early_stopping_patience=2,
+        model_type="gru_ohlcva_aux_path_value",
+        va_level_loss_weight=0.02,
+        va_delta_loss_weight=0.01,
+    )
+    low_aux_argv = build_todayclose_daily_only_summary_v2_ohlcva_aux_low_train_argv(low_aux_profile)
+
+    assert low_aux_argv[low_aux_argv.index("--run-tag") + 1] == DEFAULT_DAILY_ONLY_SUMMARY_V2_OHLCVA_AUX_LOW_RUN_TAG
+    assert low_aux_argv[low_aux_argv.index("--model-type") + 1] == "gru_ohlcva_aux_path_value"
+    assert low_aux_argv[low_aux_argv.index("--price-delta-loss-weight") + 1] == "0.0"
+    assert low_aux_argv[low_aux_argv.index("--va-level-loss-weight") + 1] == "0.02"
+    assert low_aux_argv[low_aux_argv.index("--va-delta-loss-weight") + 1] == "0.01"
+
+    combined_profile = TodayClosePathOnlyProfile(
+        run_tag=DEFAULT_DAILY_ONLY_SUMMARY_V2_OHLCVA_AUX_LOW_PRICE_DELTA_RUN_TAG,
+        epochs=1,
+        max_samples_per_split=32,
+        device="cpu",
+        early_stopping_patience=2,
+        model_type="gru_ohlcva_aux_path_value",
+        price_delta_loss_weight=0.03,
+        va_level_loss_weight=0.02,
+        va_delta_loss_weight=0.01,
+    )
+    combined_argv = build_todayclose_daily_only_summary_v2_ohlcva_aux_low_price_delta_train_argv(combined_profile)
+
+    assert combined_argv[combined_argv.index("--run-tag") + 1] == DEFAULT_DAILY_ONLY_SUMMARY_V2_OHLCVA_AUX_LOW_PRICE_DELTA_RUN_TAG
+    assert combined_argv[combined_argv.index("--model-type") + 1] == "gru_ohlcva_aux_path_value"
+    assert combined_argv[combined_argv.index("--price-delta-loss-weight") + 1] == "0.03"
+    assert combined_argv[combined_argv.index("--va-level-loss-weight") + 1] == "0.02"
+    assert combined_argv[combined_argv.index("--va-delta-loss-weight") + 1] == "0.01"
+
+
 def test_todayclose_partial_input_ablation_train_argv_removes_one_channel_family() -> None:
     no_intraday_profile = TodayClosePathOnlyProfile(
         run_tag=DEFAULT_NO_INTRADAY_RUN_TAG,
@@ -318,6 +385,16 @@ def test_train_cli_profiles_default_and_comparisons(capsys) -> None:
         == "multi_horizon_ohlc"
     )
 
+    assert main(["train-daily-only-summary-v2-price-delta", "--dry-run", "--json"]) == 0
+    price_delta = json.loads(capsys.readouterr().out)
+    assert price_delta["profile"]["early_stopping_patience"] == 2
+    assert price_delta["profile"]["input_channel_profile"] == "daily_only"
+    assert price_delta["profile"]["summary_loss_profile"] == "multi_horizon_ohlc"
+    assert price_delta["profile"]["model_type"] == "gru_path_value"
+    assert price_delta["profile"]["price_delta_loss_weight"] == 0.03
+    assert price_delta["profile"]["va_level_loss_weight"] == 0.0
+    assert price_delta["argv"][price_delta["argv"].index("--price-delta-loss-weight") + 1] == "0.03"
+
     assert main(["train-daily-only-summary-v2-ohlcva-aux", "--dry-run", "--json"]) == 0
     ohlcva_aux = json.loads(capsys.readouterr().out)
     assert ohlcva_aux["profile"]["early_stopping_patience"] == 2
@@ -329,6 +406,20 @@ def test_train_cli_profiles_default_and_comparisons(capsys) -> None:
     assert ohlcva_aux["argv"][ohlcva_aux["argv"].index("--model-type") + 1] == "gru_ohlcva_aux_path_value"
     assert ohlcva_aux["argv"][ohlcva_aux["argv"].index("--va-level-loss-weight") + 1] == "0.05"
     assert ohlcva_aux["argv"][ohlcva_aux["argv"].index("--va-delta-loss-weight") + 1] == "0.02"
+
+    assert main(["train-daily-only-summary-v2-ohlcva-aux-low", "--dry-run", "--json"]) == 0
+    ohlcva_aux_low = json.loads(capsys.readouterr().out)
+    assert ohlcva_aux_low["profile"]["model_type"] == "gru_ohlcva_aux_path_value"
+    assert ohlcva_aux_low["profile"]["price_delta_loss_weight"] == 0.0
+    assert ohlcva_aux_low["profile"]["va_level_loss_weight"] == 0.02
+    assert ohlcva_aux_low["profile"]["va_delta_loss_weight"] == 0.01
+
+    assert main(["train-daily-only-summary-v2-ohlcva-aux-low-price-delta", "--dry-run", "--json"]) == 0
+    ohlcva_aux_low_delta = json.loads(capsys.readouterr().out)
+    assert ohlcva_aux_low_delta["profile"]["model_type"] == "gru_ohlcva_aux_path_value"
+    assert ohlcva_aux_low_delta["profile"]["price_delta_loss_weight"] == 0.03
+    assert ohlcva_aux_low_delta["profile"]["va_level_loss_weight"] == 0.02
+    assert ohlcva_aux_low_delta["profile"]["va_delta_loss_weight"] == 0.01
 
     assert main(["train-no-intraday-summary", "--dry-run", "--json"]) == 0
     no_intraday = json.loads(capsys.readouterr().out)

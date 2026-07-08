@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 152,
+  "record_count": 153,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -3703,13 +3703,35 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [],
-      "verdict": "Status: `process_complexity_slimmed / concept_surface_narrowed / research_only / no_active_change`.; Mainline: `seq100_todayclose_path_only` is the only default seq100 path-value research surface.; Active artifact impact: unchanged. This does not touch `daily_research/output/active_execution_strategy.json`, live/default, paper/live, broker, trade plans, QDP active dataset pointers, or QDP provider state.; Concept decision: `alpha_v2`, `path20`, `symbol_embedding`, `residual_score`, `richer_target`, `ohlcva_unified`, and `rank_heavy_top1` are no longer default concepts.",
+      "verdict": "Status: `process_complexity_slimmed / concept_surface_narrowed / research_only / no_active_change`.; Mainline: `seq100_todayclose_path_only/daily_only_summary_v2` is the default seq100 path-value research surface.; Active artifact impact: unchanged. This does not touch `daily_research/output/active_execution_strategy.json`, live/default, paper/live, broker, trade plans, QDP active dataset pointers, or QDP provider state.; Concept decision: `alpha_v2`, `path20`, `symbol_embedding`, `residual_score`, `richer_target`, `ohlcva_unified`, and `rank_heavy_top1` are no longer default concepts.",
       "blockers": [],
       "next_allowed_actions": [
         "Next allowed action: use `daily_research.path_policy.seq100_mainline` for default train/contract/summarize operations.",
         "Next allowed action: run execution-layer backtest before any strategy or execution-candidate claim.",
         "Next allowed action: keep old branches as explicit comparison or archived evidence only."
       ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_seq100_price_delta_ohlcva_aux_low_result_20260709",
+      "date": "2026-07-09",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_seq100_price_delta_ohlcva_aux_low_result_20260709.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "seq100_todayclose_path_only_daily_only_summary_v2_price_delta_20260708_234224",
+        "seq100_todayclose_path_only_daily_only_summary_v2_ohlcva_aux_low_20260709_004303",
+        "seq100_todayclose_path_only_daily_only_summary_v2_ohlcva_aux_low_price_delta_20260709_014409"
+      ],
+      "verdict": "Status: `completed / explicit_comparison / research_only / no_active_change`.; `daily_only_summary_v2_price_delta` completed with close-to-close log-delta price rhythm supervision. It improved validation/test IC versus the current default, but did not improve the narrow Top1 path-value spread.; `daily_only_summary_v2_ohlcva_aux_low` completed with lower VA auxiliary weights. It produced the best validation IC among this comparison set and the strongest test Top1/Top3 path-value spread.; `daily_only_summary_v2_ohlcva_aux_low_price_delta` completed, but the combined constraints were weaker than either single addition on test IC and TopK.",
+      "blockers": [],
+      "next_allowed_actions": [],
       "active_artifact_impact": "unchanged",
       "dataset_ids": []
     },

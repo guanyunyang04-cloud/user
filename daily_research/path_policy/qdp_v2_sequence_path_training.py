@@ -765,6 +765,13 @@ def _delta_along_days(path: torch.Tensor) -> torch.Tensor:
     return path[:, 1:] - path[:, :-1]
 
 
+def _close_log_delta_from_anchor(path: torch.Tensor) -> torch.Tensor:
+    close_ret = path[:, :, 3]
+    close_log_level = torch.log(torch.clamp(1.0 + close_ret, min=1.0e-6))
+    anchor = torch.zeros((int(close_log_level.shape[0]), 1), device=path.device, dtype=path.dtype)
+    return torch.cat([close_log_level[:, :1] - anchor, close_log_level[:, 1:] - close_log_level[:, :-1]], dim=1)
+
+
 def _multi_horizon_ohlc_summary_loss_loop(pred_path: torch.Tensor, target_path: torch.Tensor, *, price_anchor: str) -> torch.Tensor:
     losses: list[torch.Tensor] = []
     for window in _summary_loss_windows(int(pred_path.shape[1])):
@@ -946,6 +953,7 @@ def _compute_loss(
     rank_weight: float = 0.15,
     richer_weight: float = 0.0,
     rank_max_per_side: int = 64,
+    price_delta_weight: float = 0.0,
     va_level_weight: float = 0.0,
     va_delta_weight: float = 0.0,
     residual_weight: float = 0.25,
@@ -969,6 +977,7 @@ def _compute_loss(
         path_loss = score.sum() * 0.0
         summary_loss = score.sum() * 0.0
         richer_loss = score.sum() * 0.0
+        price_delta_loss = score.sum() * 0.0
         va_level_loss = score.sum() * 0.0
         va_delta_loss = score.sum() * 0.0
         residual_penalty = score.sum() * 0.0
@@ -980,6 +989,7 @@ def _compute_loss(
             + float(path_weight) * path_loss
             + float(summary_weight) * summary_loss
             + float(richer_weight) * richer_loss
+            + float(price_delta_weight) * price_delta_loss
             + float(va_level_weight) * va_level_loss
             + float(va_delta_weight) * va_delta_loss
             + float(residual_penalty_weight) * residual_penalty
@@ -989,6 +999,7 @@ def _compute_loss(
             "path_loss": float(path_loss.detach().cpu().item()),
             "summary_loss": float(summary_loss.detach().cpu().item()),
             "richer_loss": float(richer_loss.detach().cpu().item()),
+            "price_delta_loss": float(price_delta_loss.detach().cpu().item()),
             "va_level_loss": float(va_level_loss.detach().cpu().item()),
             "va_delta_loss": float(va_delta_loss.detach().cpu().item()),
             "value_loss": float(value_loss.detach().cpu().item()),
@@ -997,6 +1008,10 @@ def _compute_loss(
         }
 
     path_loss = _finite_smooth_l1(outputs["future_path"], y_path)
+    price_delta_loss = _finite_smooth_l1(
+        _close_log_delta_from_anchor(outputs["future_path"]),
+        _close_log_delta_from_anchor(y_path),
+    )
     va_level_loss = outputs["future_path"].sum() * 0.0
     va_delta_loss = outputs["future_path"].sum() * 0.0
     if y_ohlcva_path is not None and "future_ohlcva_aux_path" in outputs:
@@ -1050,6 +1065,7 @@ def _compute_loss(
         + float(value_weight) * value_loss
         + float(rank_weight) * rank_loss
         + float(richer_weight) * richer_loss
+        + float(price_delta_weight) * price_delta_loss
         + float(va_level_weight) * va_level_loss
         + float(va_delta_weight) * va_delta_loss
         + float(residual_penalty_weight) * residual_penalty
@@ -1059,6 +1075,7 @@ def _compute_loss(
         "path_loss": float(path_loss.detach().cpu().item()),
         "summary_loss": float(summary_loss.detach().cpu().item()),
         "richer_loss": float(richer_loss.detach().cpu().item()),
+        "price_delta_loss": float(price_delta_loss.detach().cpu().item()),
         "va_level_loss": float(va_level_loss.detach().cpu().item()),
         "va_delta_loss": float(va_delta_loss.detach().cpu().item()),
         "value_loss": float(value_loss.detach().cpu().item()),
@@ -2131,6 +2148,7 @@ class TrainConfig:
     path_loss_weight: float
     summary_loss_weight: float
     richer_loss_weight: float
+    price_delta_loss_weight: float
     va_level_loss_weight: float
     va_delta_loss_weight: float
     value_loss_weight: float
@@ -2213,6 +2231,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "path_loss": 0.0,
             "summary_loss": 0.0,
             "richer_loss": 0.0,
+            "price_delta_loss": 0.0,
             "va_level_loss": 0.0,
             "va_delta_loss": 0.0,
             "value_loss": 0.0,
@@ -2256,6 +2275,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     rank_weight=float(config.rank_loss_weight),
                     richer_weight=float(config.richer_loss_weight),
                     rank_max_per_side=int(config.rank_max_per_side),
+                    price_delta_weight=float(config.price_delta_loss_weight),
                     va_level_weight=float(config.va_level_loss_weight),
                     va_delta_weight=float(config.va_delta_loss_weight),
                     residual_weight=float(config.residual_score_weight),
@@ -2470,6 +2490,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "path": float(config.path_loss_weight),
             "summary": float(config.summary_loss_weight),
             "richer": float(config.richer_loss_weight) if bool(getattr(model, "uses_richer_path", False)) else 0.0,
+            "price_delta": float(config.price_delta_loss_weight),
             "value": float(config.value_loss_weight),
             "rank": float(config.rank_loss_weight),
             "rank_max_per_side": int(config.rank_max_per_side),
@@ -2555,6 +2576,7 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument("--path-loss-weight", type=float, default=0.40)
     train.add_argument("--summary-loss-weight", type=float, default=0.20)
     train.add_argument("--richer-loss-weight", type=float, default=0.10)
+    train.add_argument("--price-delta-loss-weight", type=float, default=0.0)
     train.add_argument("--va-level-loss-weight", type=float, default=0.0)
     train.add_argument("--va-delta-loss-weight", type=float, default=0.0)
     train.add_argument("--value-loss-weight", type=float, default=0.25)
@@ -2629,6 +2651,7 @@ def main(argv: list[str] | None = None) -> int:
         path_loss_weight=float(args.path_loss_weight),
         summary_loss_weight=float(args.summary_loss_weight),
         richer_loss_weight=float(args.richer_loss_weight),
+        price_delta_loss_weight=float(args.price_delta_loss_weight),
         va_level_loss_weight=float(args.va_level_loss_weight),
         va_delta_loss_weight=float(args.va_delta_loss_weight),
         value_loss_weight=float(args.value_loss_weight),

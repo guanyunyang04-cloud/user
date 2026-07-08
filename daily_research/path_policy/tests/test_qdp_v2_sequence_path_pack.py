@@ -233,6 +233,7 @@ def test_sequence_path_model_outputs_path_summary_and_score() -> None:
         "path_loss",
         "summary_loss",
         "richer_loss",
+        "price_delta_loss",
         "va_level_loss",
         "va_delta_loss",
         "value_loss",
@@ -275,6 +276,32 @@ def test_sequence_path_attention_model_outputs_path_summary_and_score() -> None:
     assert out["score"].shape == (4,)
     assert torch.isfinite(loss)
     assert parts["rank_loss"] >= 0.0
+
+
+def test_price_delta_loss_penalizes_close_path_rhythm() -> None:
+    true_path = torch.zeros(4, 5, 4)
+    pred_path = true_path.clone()
+    true_path[:, :, 3] = torch.tensor([0.00, 0.01, 0.02, 0.03, 0.04])
+    pred_path[:, :, 3] = torch.tensor([0.00, 0.02, 0.02, 0.04, 0.04])
+    y_summary = torch.zeros(4, 12)
+    date_idx = torch.tensor([1, 1, 1, 1])
+
+    loss, parts = _compute_loss(
+        {"future_path": pred_path},
+        true_path,
+        y_summary,
+        date_idx,
+        value_index=11,
+        path_weight=0.0,
+        summary_weight=0.0,
+        value_weight=0.0,
+        rank_weight=0.0,
+        price_delta_weight=1.0,
+    )
+
+    assert torch.isfinite(loss)
+    assert parts["price_delta_loss"] > 0.0
+    assert parts["path_loss"] > 0.0
 
 
 def test_path_value_v2_numpy_and_torch_match() -> None:
@@ -530,6 +557,7 @@ def test_gru_path_value_model_outputs_only_future_path_and_loss_uses_derived_sco
         "path_loss",
         "summary_loss",
         "richer_loss",
+        "price_delta_loss",
         "va_level_loss",
         "va_delta_loss",
         "value_loss",
@@ -664,6 +692,7 @@ def test_gru_ohlcva_aux_path_value_keeps_price_value_path_and_adds_va_losses() -
     assert model.uses_ohlcva_aux_path
     assert not model.uses_ohlcva_path
     assert torch.isfinite(loss)
+    assert parts["price_delta_loss"] >= 0.0
     assert parts["va_level_loss"] >= 0.0
     assert parts["va_delta_loss"] >= 0.0
     assert parts["value_loss"] >= 0.0
