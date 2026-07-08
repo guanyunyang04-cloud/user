@@ -241,11 +241,23 @@ def test_todayclose_direct_value_train_argv_switches_to_score_ranker() -> None:
     assert "--richer-path" not in argv
 
 
-def test_train_summary_v2_cli_defaults_patience_to_two(capsys) -> None:
+def test_train_cli_profiles_default_and_comparisons(capsys) -> None:
     assert main(["train", "--dry-run", "--json"]) == 0
     base = json.loads(capsys.readouterr().out)
-    assert base["profile"]["early_stopping_patience"] == 3
-    assert base["argv"][base["argv"].index("--early-stopping-patience") + 1] == "3"
+    assert base["profile"]["early_stopping_patience"] == 2
+    assert base["profile"]["input_channel_profile"] == "daily_only"
+    assert base["profile"]["summary_loss_profile"] == "multi_horizon_ohlc"
+    assert base["argv"][base["argv"].index("--early-stopping-patience") + 1] == "2"
+    assert base["argv"][base["argv"].index("--input-channel-profile") + 1] == "daily_only"
+    assert base["argv"][base["argv"].index("--summary-loss-profile") + 1] == "multi_horizon_ohlc"
+
+    assert main(["train-legacy-all-channels-base", "--dry-run", "--json"]) == 0
+    legacy = json.loads(capsys.readouterr().out)
+    assert legacy["profile"]["early_stopping_patience"] == 2
+    assert legacy["profile"]["input_channel_profile"] == "all"
+    assert legacy["profile"]["summary_loss_profile"] == "base"
+    assert legacy["argv"][legacy["argv"].index("--input-channel-profile") + 1] == "all"
+    assert legacy["argv"][legacy["argv"].index("--summary-loss-profile") + 1] == "base"
 
     assert main(["train-summary-v2", "--dry-run", "--json"]) == 0
     summary_v2 = json.loads(capsys.readouterr().out)
