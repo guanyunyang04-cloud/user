@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 153,
+  "record_count": 154,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -3710,6 +3710,24 @@
         "Next allowed action: run execution-layer backtest before any strategy or execution-candidate claim.",
         "Next allowed action: keep old branches as explicit comparison or archived evidence only."
       ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_seq100_ohlcva_path_equal_result_20260709",
+      "date": "2026-07-09",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_seq100_ohlcva_path_equal_result_20260709.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "Status: `completed / explicit_comparison / research_only / no_active_change`.; `daily_only_summary_v2_ohlcva_path_equal` completed as the strict test requested: OHLCVA six fields enter the main `path_loss` equally, while summary/value/rank still use price-only OHLC-derived `path_trade_value_v2_60d`.; Result: isolated test Top1 PV alpha improved to `26.20%`, the strongest current single-run Top1. However test IC fell to `0.1434`, and test Top3/Top10 were only `11.65%/6.34%`.; Current judgment: keep as Top1-biased comparison evidence. It does not replace the default mainline, and it is less balanced than `daily_only_summary_v2_ohlcva_aux_low`.",
+      "blockers": [],
+      "next_allowed_actions": [],
       "active_artifact_impact": "unchanged",
       "dataset_ids": []
     },

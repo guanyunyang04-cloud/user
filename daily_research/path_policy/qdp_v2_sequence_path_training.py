@@ -47,6 +47,12 @@ SUMMARY_LOSS_PROFILES = (
     SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
     SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC_NO60,
 )
+PATH_LOSS_PROFILE_DEFAULT = "default"
+PATH_LOSS_PROFILE_OHLCVA_EQUAL = "ohlcva_equal"
+PATH_LOSS_PROFILES = (
+    PATH_LOSS_PROFILE_DEFAULT,
+    PATH_LOSS_PROFILE_OHLCVA_EQUAL,
+)
 MULTI_HORIZON_OHLC_WINDOWS = (5, 10, 20, 40, 60)
 INPUT_CHANNEL_PROFILE_ALL = "all"
 INPUT_CHANNEL_PROFILE_DAILY_ONLY = "daily_only"
@@ -732,6 +738,21 @@ def _finite_smooth_l1(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     return F.smooth_l1_loss(pred[mask], target[mask], reduction="mean")
 
 
+def _finite_smooth_l1_fields_equal(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    if int(pred.shape[-1]) != int(target.shape[-1]):
+        raise ValueError(f"field dim mismatch: predicted={pred.shape[-1]} target={target.shape[-1]}")
+    losses: list[torch.Tensor] = []
+    for field_idx in range(int(target.shape[-1])):
+        field_target = target[:, :, field_idx]
+        field_pred = pred[:, :, field_idx]
+        mask = torch.isfinite(field_target)
+        if bool(mask.any()):
+            losses.append(F.smooth_l1_loss(field_pred[mask], field_target[mask], reduction="mean"))
+    if not losses:
+        return pred.sum() * 0.0
+    return torch.stack(losses).mean()
+
+
 def _finite_smooth_l1_columns(pred: torch.Tensor, target: torch.Tensor, columns: list[int]) -> torch.Tensor:
     if not columns:
         return pred.sum() * 0.0
@@ -960,8 +981,12 @@ def _compute_loss(
     residual_penalty_weight: float = 0.01,
     price_anchor: str = "next_open",
     summary_loss_profile: str = SUMMARY_LOSS_PROFILE_BASE,
+    path_loss_profile: str = PATH_LOSS_PROFILE_DEFAULT,
     direct_value_horizon: int = 0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
+    normalized_path_loss_profile = str(path_loss_profile or PATH_LOSS_PROFILE_DEFAULT).strip().lower()
+    if normalized_path_loss_profile not in PATH_LOSS_PROFILES:
+        raise ValueError(f"path_loss_profile must be one of {PATH_LOSS_PROFILES}")
     if "future_path" not in outputs and "score" in outputs:
         score = outputs["score"]
         horizon = int(direct_value_horizon) if int(direct_value_horizon) > 0 else int(y_path.shape[1])
@@ -1007,7 +1032,15 @@ def _compute_loss(
             "residual_penalty": float(residual_penalty.detach().cpu().item()),
         }
 
-    path_loss = _finite_smooth_l1(outputs["future_path"], y_path)
+    if normalized_path_loss_profile == PATH_LOSS_PROFILE_OHLCVA_EQUAL:
+        if y_ohlcva_path is None:
+            raise ValueError("path_loss_profile=ohlcva_equal requires y_ohlcva_path")
+        predicted_ohlcva = outputs.get("future_ohlcva_aux_path", outputs["future_path"])
+        if int(predicted_ohlcva.shape[-1]) < 6 or int(y_ohlcva_path.shape[-1]) < 6:
+            raise ValueError("path_loss_profile=ohlcva_equal requires 6-dimensional OHLCVA predictions and targets")
+        path_loss = _finite_smooth_l1_fields_equal(predicted_ohlcva[:, :, :6], y_ohlcva_path[:, :, :6])
+    else:
+        path_loss = _finite_smooth_l1(outputs["future_path"], y_path)
     price_delta_loss = _finite_smooth_l1(
         _close_log_delta_from_anchor(outputs["future_path"]),
         _close_log_delta_from_anchor(y_path),
@@ -2146,6 +2179,7 @@ class TrainConfig:
     learning_rate: float
     weight_decay: float
     path_loss_weight: float
+    path_loss_profile: str
     summary_loss_weight: float
     richer_loss_weight: float
     price_delta_loss_weight: float
@@ -2270,6 +2304,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     y_richer_path=y_richer_path,
                     value_index=train_ds.value_index,
                     path_weight=float(config.path_loss_weight),
+                    path_loss_profile=str(config.path_loss_profile),
                     summary_weight=float(config.summary_loss_weight),
                     value_weight=float(config.value_loss_weight),
                     rank_weight=float(config.rank_loss_weight),
@@ -2488,6 +2523,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         },
         "loss_weights": {
             "path": float(config.path_loss_weight),
+            "path_profile": str(config.path_loss_profile),
             "summary": float(config.summary_loss_weight),
             "richer": float(config.richer_loss_weight) if bool(getattr(model, "uses_richer_path", False)) else 0.0,
             "price_delta": float(config.price_delta_loss_weight),
@@ -2574,6 +2610,12 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument("--learning-rate", type=float, default=1.0e-3)
     train.add_argument("--weight-decay", type=float, default=1.0e-4)
     train.add_argument("--path-loss-weight", type=float, default=0.40)
+    train.add_argument(
+        "--path-loss-profile",
+        default=PATH_LOSS_PROFILE_DEFAULT,
+        choices=PATH_LOSS_PROFILES,
+        help="Path reconstruction loss profile: default tensor mean or equal-weight OHLCVA field loss.",
+    )
     train.add_argument("--summary-loss-weight", type=float, default=0.20)
     train.add_argument("--richer-loss-weight", type=float, default=0.10)
     train.add_argument("--price-delta-loss-weight", type=float, default=0.0)
@@ -2649,6 +2691,7 @@ def main(argv: list[str] | None = None) -> int:
         learning_rate=float(args.learning_rate),
         weight_decay=float(args.weight_decay),
         path_loss_weight=float(args.path_loss_weight),
+        path_loss_profile=str(args.path_loss_profile),
         summary_loss_weight=float(args.summary_loss_weight),
         richer_loss_weight=float(args.richer_loss_weight),
         price_delta_loss_weight=float(args.price_delta_loss_weight),

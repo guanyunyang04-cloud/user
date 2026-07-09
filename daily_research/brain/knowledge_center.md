@@ -1,5 +1,5 @@
 # Daily Research 知识对象
-快照日期：`2026-07-08`
+快照日期：`2026-07-09`
 
 本文件保存稳定对象类、长期事实和方法论。它不承载当前状态长卷，也不复刻历史证据；完整 rXX、长命令和 dated review 在 `references/`。
 
@@ -55,6 +55,7 @@
 - `daily_only_summary_v2_price_delta` is an explicit close-rhythm auxiliary profile: it supervises first differences of anchored close log returns with `price_delta_loss`, while keeping OHLC path output and price-only `path_trade_value_v2`.
 - `daily_only_summary_v2_ohlcva_aux` and `daily_only_summary_v2_ohlcva_aux_low` are explicit volume/amount auxiliary-supervision profiles: they predict a 6D OHLCVA auxiliary path but keep `future_path` as 4D OHLC and keep summary/value/rank on price-only `path_trade_value_v2`.
 - Current low-VA evidence says volume/amount auxiliary supervision can help narrow Top1/Top3 selection as a representation regularizer, but VA forecast MAE is not itself the decision metric; combining low VA and `price_delta_loss` was not additive in the 2026-07-09 comparison.
+- `daily_only_summary_v2_ohlcva_path_equal` is a stricter OHLCVA reconstruction comparison: OHLCVA six fields enter main `path_loss` equally, but summary/value/rank still use price-only OHLC-derived `path_trade_value_v2`; 2026-07-09 evidence says it can produce the strongest isolated test Top1 but hurts IC and broader TopK versus low-weight VA auxiliary.
 - `direct_value_rank_5d/10d/60d` are explicit comparison profiles that output only a scalar score and directly learn true future OHLC-derived `path_trade_value_v2_{horizon}d`; they are useful ranking evidence but do not replace the default OHLC path-output mainline.
 - `symbol_embedding`、`residual_score`、`richer_target`、`ohlcva_unified` and `rank_heavy_top1` are comparison or paused surfaces, not default concepts.
 - continuous_policy 的长期思想是日级连续交易执行模型；当前不是 active/default 或执行解冻依据。

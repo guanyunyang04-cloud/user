@@ -21,6 +21,7 @@ from daily_research.path_policy.qdp_v2_sequence_path_training import (
     INPUT_CHANNEL_PROFILE_DAILY_ONLY,
     INPUT_CHANNEL_PROFILE_NO_INTRADAY_SUMMARY,
     INPUT_CHANNEL_PROFILE_NO_LIMIT_STRUCTURE,
+    PATH_LOSS_PROFILE_OHLCVA_EQUAL,
     SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC_NO60,
     SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
     _derive_path_summary_numpy,
@@ -696,6 +697,57 @@ def test_gru_ohlcva_aux_path_value_keeps_price_value_path_and_adds_va_losses() -
     assert parts["va_level_loss"] >= 0.0
     assert parts["va_delta_loss"] >= 0.0
     assert parts["value_loss"] >= 0.0
+
+
+def test_ohlcva_equal_path_loss_uses_six_fields_but_price_only_value() -> None:
+    pred_price = torch.zeros(4, 20, 4)
+    pred_ohlcva = torch.zeros(4, 20, 6)
+    true_price = torch.zeros(4, 20, 4)
+    true_ohlcva = torch.zeros(4, 20, 6)
+    true_ohlcva[:, :, 4] = 0.60
+    true_ohlcva[:, :, 5] = -0.20
+    date_idx = torch.tensor([1, 1, 1, 1])
+
+    loss, parts = _compute_loss(
+        {"future_path": pred_price, "future_ohlcva_aux_path": pred_ohlcva},
+        true_price,
+        torch.empty(4, 0),
+        date_idx,
+        y_ohlcva_path=true_ohlcva,
+        value_index=8,
+        path_weight=1.0,
+        summary_weight=0.0,
+        value_weight=0.0,
+        rank_weight=0.0,
+        va_level_weight=0.0,
+        va_delta_weight=0.0,
+        path_loss_profile=PATH_LOSS_PROFILE_OHLCVA_EQUAL,
+    )
+    _base_loss, base_parts = _compute_loss(
+        {"future_path": pred_price, "future_ohlcva_aux_path": pred_ohlcva},
+        true_price,
+        torch.empty(4, 0),
+        date_idx,
+        y_ohlcva_path=torch.zeros_like(true_ohlcva),
+        value_index=8,
+        path_weight=1.0,
+        summary_weight=0.0,
+        value_weight=0.0,
+        rank_weight=0.0,
+        va_level_weight=0.0,
+        va_delta_weight=0.0,
+        path_loss_profile=PATH_LOSS_PROFILE_OHLCVA_EQUAL,
+    )
+    expected_fields = []
+    for field_idx in range(6):
+        expected_fields.append(torch.nn.functional.smooth_l1_loss(pred_ohlcva[:, :, field_idx], true_ohlcva[:, :, field_idx]))
+    expected_path_loss = torch.stack(expected_fields).mean()
+
+    assert torch.isclose(loss, expected_path_loss)
+    assert np.isclose(parts["path_loss"], float(expected_path_loss.item()))
+    assert np.isclose(parts["value_loss"], base_parts["value_loss"])
+    assert np.isclose(parts["summary_loss"], base_parts["summary_loss"])
+    assert parts["va_level_loss"] > 0.0
 
 
 def test_gru_path_value_symbol_model_uses_symbol_embedding() -> None:
