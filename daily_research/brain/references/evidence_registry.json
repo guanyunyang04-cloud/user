@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 154,
+  "record_count": 155,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -3748,6 +3748,24 @@
         "seq100_todayclose_path_only_daily_only_summary_v2_ohlcva_aux_low_price_delta_20260709_014409"
       ],
       "verdict": "Status: `completed / explicit_comparison / research_only / no_active_change`.; `daily_only_summary_v2_price_delta` completed with close-to-close log-delta price rhythm supervision. It improved validation/test IC versus the current default, but did not improve the narrow Top1 path-value spread.; `daily_only_summary_v2_ohlcva_aux_low` completed with lower VA auxiliary weights. It produced the best validation IC among this comparison set and the strongest test Top1/Top3 path-value spread.; `daily_only_summary_v2_ohlcva_aux_low_price_delta` completed, but the combined constraints were weaker than either single addition on test IC and TopK.",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_seq100_rollforward_2025_result_20260709",
+      "date": "2026-07-09",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_seq100_rollforward_2025_result_20260709.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "Status: `completed / roll_forward_test / research_only / no_active_change`.; The old `2012-2023 train / 2024 validation / 2025 test` results should be treated as stale-train forward checks. They are useful, but they do not answer the user's production-like question: \"after one more year of data is available, what happens if the model is retrained through 2024 and tested on 2025?\"; The formal roll-forward test in this reference uses `2012-2024` as train, refits normalization on train-year dates through 2024, fixes `epochs=1`, and reports 2025 `test` split metrics.; Current judgment: low-weight OHLCVA auxiliary is the best balanced roll-forward candidate because it has the strongest 2025 IC (`0.1927`). Equal OHLCVA path-loss remains Top1-biased: it has strongest Top1/Top10 but weakest IC.",
       "blockers": [],
       "next_allowed_actions": [],
       "active_artifact_impact": "unchanged",

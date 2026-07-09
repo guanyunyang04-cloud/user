@@ -28,6 +28,7 @@
 `contract`: `daily_research/brain/references/path_policy_seq100_mainline_slimming_contract_20260707.md`
 `cli`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline`
 `default_view`: `daily_research/data/research_store/views/seq100_path60_todayclose_ohlcva.json`
+`rollforward_2025_view`: `daily_research/data/research_store/views/seq100_path60_todayclose_ohlcva_train2012_2024_val2025_test2025.json`
 `rule`: default work uses the today-close daily-only summary_v2 profile; legacy all-channel base, richer, residual, symbol, OHLCVA-unified and rank-heavy variants are comparison/archived surfaces unless explicitly requested.
 
 ### object `execution_runtime`
@@ -81,6 +82,8 @@
 `price_delta_profile`: `daily_only_summary_v2_price_delta` keeps `model_type=gru_path_value`, `input_channel_profile=daily_only`, `summary_loss_profile=multi_horizon_ohlc`, and adds `price_delta0.03` auxiliary SmoothL1 on first differences of anchored close log returns.
 `ohlcva_aux_profile`: `daily_only_summary_v2_ohlcva_aux` uses `model_type=gru_ohlcva_aux_path_value`, keeps `input_channel_profile=daily_only` and `summary_loss_profile=multi_horizon_ohlc`, keeps price-only `path_trade_value_v2` for summary/value/rank, and adds `va_level0.05/va_delta0.02` auxiliary losses plus split metrics `va_level_mae/va_delta_mae`; `daily_only_summary_v2_ohlcva_aux_low` lowers these to `va_level0.02/va_delta0.01`; `daily_only_summary_v2_ohlcva_aux_low_price_delta` combines the low VA weights with `price_delta0.03`.
 `ohlcva_path_equal_profile`: `daily_only_summary_v2_ohlcva_path_equal` uses `model_type=gru_ohlcva_aux_path_value`, sets `path_loss_profile=ohlcva_equal`, averages SmoothL1 over OHLCVA six fields inside main `path_loss`, keeps `future_path` as 4D OHLC for summary/value/rank, and sets `price_delta/va_level/va_delta` auxiliary weights to zero.
+`primary_evaluation_rule`: compare seq100 profiles mainly on `2024 validation` plus `2025 train-through-2024 forward test`; use 2024 validation for profile selection/training stability, and use 2025 forward test for the recent production-like out-of-sample check. Do not treat the old 2012-2023-trained 2025 test as the primary test口径.
+`rollforward_2025_profile`: use `--store-view daily_research/data/research_store/views/seq100_path60_todayclose_ohlcva_train2012_2024_val2025_test2025.json --epochs 1 --early-stopping-patience 0`; the view labels 2012-2024 as train and duplicates 2025 as validation/test only to satisfy the trainer, so formal interpretation uses the `test` split.
 `direct_value_profile`: `direct_value_rank_5d/10d/60d` uses `model_type=gru_direct_value`, outputs only `score`, uses `loss=value0.50/rank0.50`, sets path/summary/richer loss to zero, and derives the supervised target from true future OHLC labels at the requested horizon; it is a comparison profile, not the default mainline.
 `implementation_note`: multi-horizon OHLC summary-loss derivation is vectorized in training while preserving the old per-horizon equal-weight loss semantics.
 `side_effects`: research artifacts only；does not activate execution surface.
