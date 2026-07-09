@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 155,
+  "record_count": 156,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -3692,6 +3692,24 @@
       ]
     },
     {
+      "id": "path_policy_seq100_all_profiles_val2024_forward2025_result_20260709",
+      "date": "2026-07-09",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_seq100_all_profiles_val2024_forward2025_result_20260709.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "Status: `completed / all_profile_roll_forward_comparison / research_default_updated / no_active_execution_change`.; Main evaluation policy remains `2024 validation` + `2025 train-through-2024 forward test`.; Selected default research profile: `seq100_todayclose_path_only/daily_only_summary_v2_ohlcva_aux_low`.; Reason: among aligned 60d path-output profiles, `ohlcva_aux_low` has both the strongest 2024 validation IC (`0.1626`) and the strongest 2025 forward IC (`0.1927`), while also improving forward Top1 over the previous default (`22.51%` vs `18.44%`).",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
       "id": "path_policy_seq100_mainline_slimming_contract_20260707",
       "date": "2026-07-07",
       "r_id": "",
@@ -3765,7 +3783,7 @@
       "research_programs": [],
       "study_families": [],
       "run_tags": [],
-      "verdict": "Status: `completed / roll_forward_test / research_only / no_active_change`.; The old `2012-2023 train / 2024 validation / 2025 test` results should be treated as stale-train forward checks. They are useful, but they do not answer the user's production-like question: \"after one more year of data is available, what happens if the model is retrained through 2024 and tested on 2025?\"; The formal roll-forward test in this reference uses `2012-2024` as train, refits normalization on train-year dates through 2024, fixes `epochs=1`, and reports 2025 `test` split metrics.; Current judgment: low-weight OHLCVA auxiliary is the best balanced roll-forward candidate because it has the strongest 2025 IC (`0.1927`). Equal OHLCVA path-loss remains Top1-biased: it has strongest Top1/Top10 but weakest IC.",
+      "verdict": "Status: `completed / roll_forward_test / research_only / no_active_change`.; The old `2012-2023 train / 2024 validation / 2025 test` results should be treated as stale-train forward checks. They are useful, but they do not answer the user's production-like question: \"after one more year of data is available, what happens if the model is retrained through 2024 and tested on 2025?\"; The formal roll-forward test in this reference uses `2012-2024` as train, refits normalization on train-year dates through 2024, fixes `epochs=1`, and reports 2025 `test` split metrics.; Evaluation policy after this run: profile assessment should mainly pair the original 2024 validation evidence with the 2025 train-through-2024 forward test. The 2024 validation split remains the selection/stability anchor; the 2025 forward split is the recent production-like out-of-sample anchor.",
       "blockers": [],
       "next_allowed_actions": [],
       "active_artifact_impact": "unchanged",

@@ -53,7 +53,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule -
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-daily-only --json`
 - 当前主线 daily-only + summary_v2 组合对照入口：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-daily-only-summary-v2 --json`
-- 当前主线 price-delta / 低权重 OHLCVA 辅助对照入口：
+- 当前主线 price-delta 对照 / 默认低权重 OHLCVA 辅助入口：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-daily-only-summary-v2-price-delta --json`
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-daily-only-summary-v2-ohlcva-aux-low --json`
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-daily-only-summary-v2-ohlcva-aux-low-price-delta --json`
@@ -81,7 +81,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule -
 - 工作区维护报告：
   `python daily_research/tools/workspace_maintenance.py report`
 
-当前默认研究概念面已收窄为 `seq100_x32_daily_input -> today_close_anchor -> future60_ohlc_path -> summary_v2_multi_horizon_ohlc -> path_trade_value_v2 -> path_value_spread`。`daily_only_summary_v2` 是当前默认研究入口，使用 `daily_raw + daily_state` 32 维输入和 `5/10/20/40/60` 多窗口 OHLC 派生 summary loss；后续主评价口径以 `2024 validation` 和 `2025 train-through-2024 forward test` 为核心：2024 验证集用于 profile 选择、训练过程判断和稳定性对照，2025 forward test 用 `2012-2024 train / 2025 forward test / epochs=1` 模拟训练集随时间推进后的最近一年外推。旧 `2012-2023 train / 2024 validation / 2025 test` 中的 2025 test 只作为 stale-train 外推检查，不再代表真正测试口径。在 roll-forward 口径下，default daily-only summary_v2 的 2025 test IC/Top1/Top3/Top10 为 `0.1846/18.44%/10.09%/6.96%`；`daily_only_summary_v2_ohlcva_aux_low` 的 IC 最强，为 `0.1927`，Top1/Top3/Top10 为 `22.51%/7.73%/6.72%`；`daily_only_summary_v2_ohlcva_aux_low_price_delta` 的 Top1/Top3 更强，为 `24.61%/11.77%`，但 IC 降至 `0.1861`；`daily_only_summary_v2_ohlcva_path_equal` Top1/Top10 最强，为 `25.18%/7.28%`，但 IC 最弱 `0.1768`。旧 `all_channels_base_summary` 保留为 broad-TopK 对照基线；`summary_v2_no60`、输入消融、direct-value rank、`alpha_v2`、`path20`、`symbol_embedding`、`residual_score`、`richer_target`、`ohlcva_unified` 和 `rank_heavy_top1` 默认只作为历史、对照或暂停分支。
+当前默认研究概念面已收窄为 `seq100_x32_daily_input -> today_close_anchor -> future60_ohlc_path -> summary_v2_multi_horizon_ohlc -> low_weight_va_auxiliary -> path_trade_value_v2 -> path_value_spread`。`daily_only_summary_v2_ohlcva_aux_low` 是当前默认研究入口：使用 `daily_raw + daily_state` 32 维输入、`5/10/20/40/60` 多窗口 OHLC 派生 summary loss，并以低权重 VA 辅助监督 (`va_level=0.02`, `va_delta=0.01`) 约束量价表征；summary/value/rank 仍保持 price-only OHLC 派生 `path_trade_value_v2`。后续主评价口径以 `2024 validation` 和 `2025 train-through-2024 forward test` 为核心：2024 验证集用于 profile 选择、训练过程判断和稳定性对照，2025 forward test 用 `2012-2024 train / 2025 forward test / epochs=1` 模拟训练集随时间推进后的最近一年外推。旧 `2012-2023 train / 2024 validation / 2025 test` 中的 2025 test 只作为 stale-train 外推检查，不再代表真正测试口径。全量 profile 对照表见 `daily_research/output/path_policy/sequence_path_training/seq100_all_profiles_val2024_forward2025_comparison_20260709.csv`；在 path-output 家族中，`ohlcva_aux_low` 同时取得最高 2024 validation IC (`0.1626`) 和最高 2025 forward IC (`0.1927`)，2025 Top1/Top3/Top10 为 `22.51%/7.73%/6.72%`，因此替代旧 `daily_only_summary_v2` 默认主线。旧 `all_channels_base_summary` 保留为 broad-TopK 对照基线；`summary_v2_no60`、输入消融、direct-value rank、`alpha_v2`、`path20`、`symbol_embedding`、`residual_score`、`richer_target`、`ohlcva_unified` 和 `rank_heavy_top1` 默认只作为历史、对照或暂停分支。
 
 真实运行时优先使用显式 `yolos` Python，例如：
 

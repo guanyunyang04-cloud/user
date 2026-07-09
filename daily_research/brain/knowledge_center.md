@@ -46,19 +46,19 @@
 - `daily_research` 当前研究消费 QDP v2 数据基底；旧 daily_research lake / copied manifest / single memmap 不再是数据 owner。
 - QDP active data base and downstream pack status are recorded in `state_center.md` under `qdp_consumption`.
 - 当前主要研究方向是 `seq100_path_value_research`：用过去 100 日路径和状态序列预测未来路径，路径摘要和 path value 从预测路径派生；收盘后短线选股经验保留为可复用研究线。
-- 当前默认主线已升级为 `seq100_todayclose_path_only/daily_only_summary_v2`：`research_store_view -> seq100_x32_daily_input -> today_close_anchor -> future60_ohlc_path -> summary_v2_multi_horizon_ohlc -> path_trade_value_v2 -> path_value_spread`。
-- Today-close daily-only summary_v2 is the default research mainline; old all-channel base summary remains a broad-TopK baseline, and topK path-value spread remains research evidence, not promotion evidence.
+- 当前默认主线已升级为 `seq100_todayclose_path_only/daily_only_summary_v2_ohlcva_aux_low`：`research_store_view -> seq100_x32_daily_input -> today_close_anchor -> future60_ohlc_path -> summary_v2_multi_horizon_ohlc -> low_weight_va_auxiliary -> path_trade_value_v2 -> path_value_spread`。
+- Today-close daily-only summary_v2 with low-weight VA auxiliary supervision is the default research mainline; old daily-only summary_v2 and all-channel base summary remain comparison baselines, and topK path-value spread remains research evidence, not promotion evidence.
 - `Path20` / `alpha_path20_neural_policy_v1` 是历史证据代号和代码 namespace，不再代表当前目标定义。
 - `summary_v2_multi_horizon_ohlc` is an explicit comparison profile that keeps OHLC output and only expands OHLC-derived summary-loss constraints; its narrow CLI default uses `early_stopping_patience=2`, and the multi-horizon loss is vectorized without changing the per-horizon objective.
 - `summary_v2_no60` is a strict control profile for `summary_v2_multi_horizon_ohlc`: it keeps the same OHLC-derived summary family and removes only the full 60-day window. It is not `summary_v3`; adding new shape summaries must be a separate experiment.
-- `daily_only_no_minute`、`daily_only_summary_v2`、`no_intraday_summary` and `no_limit_structure` are explicit input ablation or combination profiles that keep daily labels, splits, loss and model output semantics aligned with the default mainline while changing input channel families and/or summary_v2 constraints.
+- `daily_only_no_minute`、old `daily_only_summary_v2`、`no_intraday_summary` and `no_limit_structure` are explicit input ablation or combination profiles that keep daily labels, splits, loss and model output semantics aligned with the default mainline while changing input channel families and/or summary_v2 constraints.
 - `daily_only_summary_v2_price_delta` is an explicit close-rhythm auxiliary profile: it supervises first differences of anchored close log returns with `price_delta_loss`, while keeping OHLC path output and price-only `path_trade_value_v2`.
-- `daily_only_summary_v2_ohlcva_aux` and `daily_only_summary_v2_ohlcva_aux_low` are explicit volume/amount auxiliary-supervision profiles: they predict a 6D OHLCVA auxiliary path but keep `future_path` as 4D OHLC and keep summary/value/rank on price-only `path_trade_value_v2`.
+- `daily_only_summary_v2_ohlcva_aux_low` is the default volume/amount auxiliary-supervision profile: it predicts a 6D OHLCVA auxiliary path at low weights (`va_level0.02/va_delta0.01`) but keeps `future_path` as 4D OHLC and keeps summary/value/rank on price-only `path_trade_value_v2`; high-weight `daily_only_summary_v2_ohlcva_aux` remains a comparison profile.
 - Current low-VA evidence says volume/amount auxiliary supervision can help narrow Top1/Top3 selection as a representation regularizer, but VA forecast MAE is not itself the decision metric; combining low VA and `price_delta_loss` was not additive in the 2026-07-09 comparison.
 - `daily_only_summary_v2_ohlcva_path_equal` is a stricter OHLCVA reconstruction comparison: OHLCVA six fields enter main `path_loss` equally, but summary/value/rank still use price-only OHLC-derived `path_trade_value_v2`; 2026-07-09 evidence says it can produce the strongest isolated test Top1 but hurts IC and broader TopK versus low-weight VA auxiliary.
 - Primary seq100 evaluation now uses two anchors: `2024 validation` for profile selection/training stability and `2025 train-through-2024 forward test` for the closest production-like recent-year out-of-sample check.
 - `train_through_2024_test_2025` is the production-like 2025 roll-forward口径: train years are 2012-2024, normalization is fit on train-year dates through 2024, `epochs=1` is fixed before seeing 2025, and 2025 is the forward test. The older 2012-2023 trained 2025 results are stale-train checks, not the preferred current test口径.
-- 2025 roll-forward evidence strengthens the low-weight VA auxiliary interpretation: it produced the best IC (`0.1927`), while equal OHLCVA path-loss stayed Top1-biased and weaker on IC.
+- 2025 roll-forward evidence plus 2024 validation promotes low-weight VA auxiliary to the default research profile: it produced the best 2024 validation IC (`0.1626`) and the best 2025 forward IC (`0.1927`) among aligned path-output profiles, while equal OHLCVA path-loss and all-channel summary_v2 stayed Top1-biased and weaker on IC.
 - `direct_value_rank_5d/10d/60d` are explicit comparison profiles that output only a scalar score and directly learn true future OHLC-derived `path_trade_value_v2_{horizon}d`; they are useful ranking evidence but do not replace the default OHLC path-output mainline.
 - `symbol_embedding`、`residual_score`、`richer_target`、`ohlcva_unified` and `rank_heavy_top1` are comparison or paused surfaces, not default concepts.
 - continuous_policy 的长期思想是日级连续交易执行模型；当前不是 active/default 或执行解冻依据。
@@ -79,7 +79,7 @@
 ## Research Line Index
 ### object `seq100_todayclose_path_only`
 `status`: current primary research mainline.
-`usage`: 默认训练、评估和接管解释都从 `daily_research.path_policy.seq100_mainline train` 进入，其 profile 是 `daily_only_summary_v2`；只有用户显式要求时才展开 comparison branch。
+`usage`: 默认训练、评估和接管解释都从 `daily_research.path_policy.seq100_mainline train` 进入，其 profile 是 `daily_only_summary_v2_ohlcva_aux_low`；只有用户显式要求时才展开 comparison branch。
 
 ### object `shortline_after_close_research`
 `status`: supporting research prior.

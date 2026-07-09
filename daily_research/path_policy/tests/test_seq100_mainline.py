@@ -51,6 +51,9 @@ def test_mainline_contract_keeps_default_surface_small() -> None:
     assert contract["default_train_profile"]["early_stopping_patience"] == 2
     assert contract["default_train_profile"]["input_channel_profile"] == "daily_only"
     assert contract["default_train_profile"]["summary_loss_profile"] == "multi_horizon_ohlc"
+    assert contract["default_train_profile"]["model_type"] == "gru_ohlcva_aux_path_value"
+    assert contract["default_train_profile"]["va_level_loss_weight"] == 0.02
+    assert contract["default_train_profile"]["va_delta_loss_weight"] == 0.01
     assert contract["legacy_all_channels_base_train_profile"]["input_channel_profile"] == "all"
     assert contract["legacy_all_channels_base_train_profile"]["summary_loss_profile"] == "base"
     assert contract["legacy_all_channels_base_train_profile"]["early_stopping_patience"] == 2
@@ -93,26 +96,27 @@ def test_mainline_contract_keeps_default_surface_small() -> None:
 
 def test_path_policy_package_default_points_to_seq100_mainline() -> None:
     assert path_policy.PATH_POLICY_DEFAULT_MAINLINE == "seq100_todayclose_path_only"
-    assert path_policy.SEQ100_MAINLINE_PROFILE == "seq100_todayclose_path_only_daily_only_summary_v2"
+    assert path_policy.SEQ100_MAINLINE_PROFILE == "seq100_todayclose_path_only_daily_only_summary_v2_ohlcva_aux_low"
 
 
-def test_todayclose_path_only_train_argv_uses_default_daily_only_summary_v2() -> None:
+def test_todayclose_path_only_train_argv_uses_default_low_va_aux_profile() -> None:
     profile = TodayClosePathOnlyProfile(run_tag="unit_mainline", epochs=1, max_samples_per_split=32, device="cpu")
     argv = build_todayclose_path_only_train_argv(profile)
 
     assert argv[:3] == ["train", "--store-view", str(DEFAULT_STORE_VIEW)]
     assert "--model-type" in argv
-    assert argv[argv.index("--model-type") + 1] == "gru_path_value"
+    assert argv[argv.index("--model-type") + 1] == "gru_ohlcva_aux_path_value"
     assert argv[argv.index("--path-loss-weight") + 1] == "0.45"
     assert argv[argv.index("--rank-loss-weight") + 1] == "0.15"
     assert argv[argv.index("--summary-loss-profile") + 1] == "multi_horizon_ohlc"
     assert argv[argv.index("--input-channel-profile") + 1] == "daily_only"
+    assert argv[argv.index("--va-level-loss-weight") + 1] == "0.02"
+    assert argv[argv.index("--va-delta-loss-weight") + 1] == "0.01"
     assert argv[argv.index("--prediction-mode") + 1] == "compact"
     assert argv[argv.index("--top-k") + 1] == "1,3,5,10,20,50,100"
     assert "--with-symbol" not in argv
     assert "--richer-path" not in argv
     assert "gru_path_value_residual" not in argv
-    assert "gru_ohlcva_path_value" not in argv
 
 
 def test_todayclose_legacy_all_channels_base_train_argv_keeps_old_default_baseline() -> None:
@@ -366,9 +370,15 @@ def test_train_cli_profiles_default_and_comparisons(capsys) -> None:
     assert base["profile"]["early_stopping_patience"] == 2
     assert base["profile"]["input_channel_profile"] == "daily_only"
     assert base["profile"]["summary_loss_profile"] == "multi_horizon_ohlc"
+    assert base["profile"]["model_type"] == "gru_ohlcva_aux_path_value"
+    assert base["profile"]["va_level_loss_weight"] == 0.02
+    assert base["profile"]["va_delta_loss_weight"] == 0.01
     assert base["argv"][base["argv"].index("--early-stopping-patience") + 1] == "2"
     assert base["argv"][base["argv"].index("--input-channel-profile") + 1] == "daily_only"
     assert base["argv"][base["argv"].index("--summary-loss-profile") + 1] == "multi_horizon_ohlc"
+    assert base["argv"][base["argv"].index("--model-type") + 1] == "gru_ohlcva_aux_path_value"
+    assert base["argv"][base["argv"].index("--va-level-loss-weight") + 1] == "0.02"
+    assert base["argv"][base["argv"].index("--va-delta-loss-weight") + 1] == "0.01"
 
     assert main(["train-legacy-all-channels-base", "--dry-run", "--json"]) == 0
     legacy = json.loads(capsys.readouterr().out)
@@ -395,6 +405,11 @@ def test_train_cli_profiles_default_and_comparisons(capsys) -> None:
     assert daily_only["profile"]["early_stopping_patience"] == 2
     assert daily_only["profile"]["input_channel_profile"] == "daily_only"
     assert daily_only["argv"][daily_only["argv"].index("--input-channel-profile") + 1] == "daily_only"
+
+    assert main(["train-daily-only", "--prediction-mode", "none", "--dry-run", "--json"]) == 0
+    daily_only_no_predictions = json.loads(capsys.readouterr().out)
+    assert daily_only_no_predictions["profile"]["prediction_mode"] == "none"
+    assert daily_only_no_predictions["argv"][daily_only_no_predictions["argv"].index("--prediction-mode") + 1] == "none"
 
     assert main(["train-daily-only-summary-v2", "--dry-run", "--json"]) == 0
     daily_only_summary_v2 = json.loads(capsys.readouterr().out)
