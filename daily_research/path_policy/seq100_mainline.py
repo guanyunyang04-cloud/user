@@ -26,6 +26,13 @@ DEFAULT_DAILY_ONLY_SUMMARY_V2_RUN_TAG = "seq100_todayclose_path_only_daily_only_
 LEGACY_ALL_CHANNELS_BASE_RUN_TAG = "seq100_todayclose_path_only_all_channels_base"
 DEFAULT_SUMMARY_V2_RUN_TAG = "seq100_todayclose_path_only_summary_v2"
 DEFAULT_SUMMARY_V2_NO60_RUN_TAG = "seq100_todayclose_path_only_summary_v2_no60"
+DEFAULT_SUMMARY_V2_PRICE_DELTA_RUN_TAG = "seq100_todayclose_path_only_summary_v2_price_delta"
+DEFAULT_SUMMARY_V2_OHLCVA_AUX_RUN_TAG = "seq100_todayclose_path_only_summary_v2_ohlcva_aux"
+DEFAULT_SUMMARY_V2_OHLCVA_AUX_LOW_RUN_TAG = "seq100_todayclose_path_only_summary_v2_ohlcva_aux_low"
+DEFAULT_SUMMARY_V2_OHLCVA_AUX_LOW_PRICE_DELTA_RUN_TAG = (
+    "seq100_todayclose_path_only_summary_v2_ohlcva_aux_low_price_delta"
+)
+DEFAULT_SUMMARY_V2_OHLCVA_PATH_EQUAL_RUN_TAG = "seq100_todayclose_path_only_summary_v2_ohlcva_path_equal"
 DEFAULT_DAILY_ONLY_RUN_TAG = "seq100_todayclose_path_only_daily_only"
 DEFAULT_DAILY_ONLY_SUMMARY_V2_PRICE_DELTA_RUN_TAG = "seq100_todayclose_path_only_daily_only_summary_v2_price_delta"
 DEFAULT_DAILY_ONLY_SUMMARY_V2_OHLCVA_AUX_RUN_TAG = "seq100_todayclose_path_only_daily_only_summary_v2_ohlcva_aux"
@@ -56,6 +63,11 @@ COMPARISON_CONCEPTS = {
     "rank_heavy_top1": "Observation branch for narrow Top1 behavior; not the default ranking objective.",
     "summary_v2_multi_horizon_ohlc": "Explicit experiment that keeps OHLC output but expands summary loss to OHLC-derived 5/10/20/40/60-day constraints.",
     "summary_v2_no60": "Explicit single-factor experiment that keeps summary_v2 OHLC constraints but removes the full 60-day window.",
+    "summary_v2_price_delta": "All-channel summary_v2 combination that adds close-to-close log-delta supervision.",
+    "summary_v2_ohlcva_aux": "All-channel summary_v2 combination that adds VA auxiliary path supervision and keeps price-only value/rank.",
+    "summary_v2_ohlcva_aux_low": "All-channel summary_v2 combination with lower-weight VA auxiliary supervision.",
+    "summary_v2_ohlcva_aux_low_price_delta": "All-channel summary_v2 combination with lower-weight VA auxiliary supervision plus close-delta loss.",
+    "summary_v2_ohlcva_path_equal": "All-channel summary_v2 combination where OHLCVA fields enter path_loss equally while value/rank remain price-only.",
     "daily_only_no_minute": "Explicit input ablation that keeps labels/loss fixed but removes intraday_summary and limit_structure input channels.",
     "all_channels_base_summary": "Legacy broad-TopK baseline that uses all input channels with the base 60-day summary loss.",
     "daily_only_summary_v2": "Previous default research profile that uses daily-only inputs with multi-horizon OHLC summary_v2 constraints.",
@@ -250,6 +262,96 @@ def build_todayclose_summary_v2_train_argv(profile: TodayClosePathOnlyProfile) -
         direct_value_horizon=0,
     )
     return build_todayclose_path_only_train_argv(summary_profile)
+
+
+def _build_todayclose_summary_v2_all_channels_variant_train_argv(
+    profile: TodayClosePathOnlyProfile,
+    *,
+    path_loss_profile: str = PATH_LOSS_PROFILE_DEFAULT,
+    price_delta_loss_weight: float = 0.0,
+    va_level_loss_weight: float = 0.0,
+    va_delta_loss_weight: float = 0.0,
+    model_type: str = "gru_path_value",
+) -> list[str]:
+    variant_profile = TodayClosePathOnlyProfile(
+        store_view=profile.store_view,
+        output_root=profile.output_root,
+        run_tag=profile.run_tag,
+        epochs=profile.epochs,
+        batch_size=profile.batch_size,
+        hidden_dim=profile.hidden_dim,
+        layers=profile.layers,
+        dropout=profile.dropout,
+        learning_rate=profile.learning_rate,
+        weight_decay=profile.weight_decay,
+        path_loss_weight=profile.path_loss_weight,
+        path_loss_profile=path_loss_profile,
+        summary_loss_weight=profile.summary_loss_weight,
+        richer_loss_weight=0.0,
+        price_delta_loss_weight=price_delta_loss_weight,
+        va_level_loss_weight=va_level_loss_weight,
+        va_delta_loss_weight=va_delta_loss_weight,
+        value_loss_weight=profile.value_loss_weight,
+        rank_loss_weight=profile.rank_loss_weight,
+        rank_max_per_side=profile.rank_max_per_side,
+        device=profile.device,
+        prediction_mode=profile.prediction_mode,
+        early_stopping_patience=profile.early_stopping_patience,
+        early_stopping_min_delta=profile.early_stopping_min_delta,
+        top_k=profile.top_k,
+        max_samples_per_split=profile.max_samples_per_split,
+        summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
+        input_channel_profile=INPUT_CHANNEL_PROFILE_ALL,
+        model_type=model_type,
+        direct_value_horizon=0,
+    )
+    return build_todayclose_path_only_train_argv(variant_profile)
+
+
+def build_todayclose_summary_v2_price_delta_train_argv(profile: TodayClosePathOnlyProfile) -> list[str]:
+    return _build_todayclose_summary_v2_all_channels_variant_train_argv(
+        profile,
+        price_delta_loss_weight=profile.price_delta_loss_weight,
+        model_type="gru_path_value",
+    )
+
+
+def build_todayclose_summary_v2_ohlcva_aux_train_argv(profile: TodayClosePathOnlyProfile) -> list[str]:
+    return _build_todayclose_summary_v2_all_channels_variant_train_argv(
+        profile,
+        va_level_loss_weight=0.05,
+        va_delta_loss_weight=0.02,
+        model_type="gru_ohlcva_aux_path_value",
+    )
+
+
+def build_todayclose_summary_v2_ohlcva_aux_low_train_argv(profile: TodayClosePathOnlyProfile) -> list[str]:
+    return _build_todayclose_summary_v2_all_channels_variant_train_argv(
+        profile,
+        va_level_loss_weight=0.02,
+        va_delta_loss_weight=0.01,
+        model_type="gru_ohlcva_aux_path_value",
+    )
+
+
+def build_todayclose_summary_v2_ohlcva_aux_low_price_delta_train_argv(
+    profile: TodayClosePathOnlyProfile,
+) -> list[str]:
+    return _build_todayclose_summary_v2_all_channels_variant_train_argv(
+        profile,
+        price_delta_loss_weight=profile.price_delta_loss_weight,
+        va_level_loss_weight=0.02,
+        va_delta_loss_weight=0.01,
+        model_type="gru_ohlcva_aux_path_value",
+    )
+
+
+def build_todayclose_summary_v2_ohlcva_path_equal_train_argv(profile: TodayClosePathOnlyProfile) -> list[str]:
+    return _build_todayclose_summary_v2_all_channels_variant_train_argv(
+        profile,
+        path_loss_profile=PATH_LOSS_PROFILE_OHLCVA_EQUAL,
+        model_type="gru_ohlcva_aux_path_value",
+    )
 
 
 def build_todayclose_summary_v2_no60_train_argv(profile: TodayClosePathOnlyProfile) -> list[str]:
@@ -690,6 +792,64 @@ def mainline_contract() -> dict[str, Any]:
                 va_delta_loss_weight=0.0,
             )
         ),
+        "summary_v2_price_delta_train_profile": asdict(
+            TodayClosePathOnlyProfile(
+                run_tag=DEFAULT_SUMMARY_V2_PRICE_DELTA_RUN_TAG,
+                early_stopping_patience=2,
+                summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
+                input_channel_profile=INPUT_CHANNEL_PROFILE_ALL,
+                model_type="gru_path_value",
+                price_delta_loss_weight=0.03,
+                va_level_loss_weight=0.0,
+                va_delta_loss_weight=0.0,
+            )
+        ),
+        "summary_v2_ohlcva_aux_train_profile": asdict(
+            TodayClosePathOnlyProfile(
+                run_tag=DEFAULT_SUMMARY_V2_OHLCVA_AUX_RUN_TAG,
+                early_stopping_patience=2,
+                summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
+                input_channel_profile=INPUT_CHANNEL_PROFILE_ALL,
+                model_type="gru_ohlcva_aux_path_value",
+                va_level_loss_weight=0.05,
+                va_delta_loss_weight=0.02,
+            )
+        ),
+        "summary_v2_ohlcva_aux_low_train_profile": asdict(
+            TodayClosePathOnlyProfile(
+                run_tag=DEFAULT_SUMMARY_V2_OHLCVA_AUX_LOW_RUN_TAG,
+                early_stopping_patience=2,
+                summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
+                input_channel_profile=INPUT_CHANNEL_PROFILE_ALL,
+                model_type="gru_ohlcva_aux_path_value",
+                va_level_loss_weight=0.02,
+                va_delta_loss_weight=0.01,
+            )
+        ),
+        "summary_v2_ohlcva_aux_low_price_delta_train_profile": asdict(
+            TodayClosePathOnlyProfile(
+                run_tag=DEFAULT_SUMMARY_V2_OHLCVA_AUX_LOW_PRICE_DELTA_RUN_TAG,
+                early_stopping_patience=2,
+                summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
+                input_channel_profile=INPUT_CHANNEL_PROFILE_ALL,
+                model_type="gru_ohlcva_aux_path_value",
+                price_delta_loss_weight=0.03,
+                va_level_loss_weight=0.02,
+                va_delta_loss_weight=0.01,
+            )
+        ),
+        "summary_v2_ohlcva_path_equal_train_profile": asdict(
+            TodayClosePathOnlyProfile(
+                run_tag=DEFAULT_SUMMARY_V2_OHLCVA_PATH_EQUAL_RUN_TAG,
+                early_stopping_patience=2,
+                path_loss_profile=PATH_LOSS_PROFILE_OHLCVA_EQUAL,
+                summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
+                input_channel_profile=INPUT_CHANNEL_PROFILE_ALL,
+                model_type="gru_ohlcva_aux_path_value",
+                va_level_loss_weight=0.0,
+                va_delta_loss_weight=0.0,
+            )
+        ),
         "daily_only_train_profile": asdict(
             TodayClosePathOnlyProfile(
                 run_tag=DEFAULT_DAILY_ONLY_RUN_TAG,
@@ -959,6 +1119,56 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_train_args(train_summary_v2, default_run_tag=DEFAULT_SUMMARY_V2_RUN_TAG, default_early_stopping_patience=2)
 
+    train_summary_v2_price_delta = sub.add_parser(
+        "train-summary-v2-price-delta",
+        help="Train all-channel summary_v2 with close log-delta price rhythm supervision.",
+    )
+    _add_train_args(
+        train_summary_v2_price_delta,
+        default_run_tag=DEFAULT_SUMMARY_V2_PRICE_DELTA_RUN_TAG,
+        default_early_stopping_patience=2,
+    )
+
+    train_summary_v2_ohlcva_aux = sub.add_parser(
+        "train-summary-v2-ohlcva-aux",
+        help="Train all-channel summary_v2 with VA auxiliary path supervision and price-only value/rank.",
+    )
+    _add_train_args(
+        train_summary_v2_ohlcva_aux,
+        default_run_tag=DEFAULT_SUMMARY_V2_OHLCVA_AUX_RUN_TAG,
+        default_early_stopping_patience=2,
+    )
+
+    train_summary_v2_ohlcva_aux_low = sub.add_parser(
+        "train-summary-v2-ohlcva-aux-low",
+        help="Train all-channel summary_v2 with lower-weight VA auxiliary supervision.",
+    )
+    _add_train_args(
+        train_summary_v2_ohlcva_aux_low,
+        default_run_tag=DEFAULT_SUMMARY_V2_OHLCVA_AUX_LOW_RUN_TAG,
+        default_early_stopping_patience=2,
+    )
+
+    train_summary_v2_ohlcva_aux_low_price_delta = sub.add_parser(
+        "train-summary-v2-ohlcva-aux-low-price-delta",
+        help="Train all-channel summary_v2 with lower-weight VA auxiliary supervision plus close delta loss.",
+    )
+    _add_train_args(
+        train_summary_v2_ohlcva_aux_low_price_delta,
+        default_run_tag=DEFAULT_SUMMARY_V2_OHLCVA_AUX_LOW_PRICE_DELTA_RUN_TAG,
+        default_early_stopping_patience=2,
+    )
+
+    train_summary_v2_ohlcva_path_equal = sub.add_parser(
+        "train-summary-v2-ohlcva-path-equal",
+        help="Train all-channel summary_v2 with equal-field OHLCVA path reconstruction and price-only value/rank.",
+    )
+    _add_train_args(
+        train_summary_v2_ohlcva_path_equal,
+        default_run_tag=DEFAULT_SUMMARY_V2_OHLCVA_PATH_EQUAL_RUN_TAG,
+        default_early_stopping_patience=2,
+    )
+
     train_summary_v2_no60 = sub.add_parser(
         "train-summary-v2-no60",
         help="Train the summary_v2 single-factor experiment without the full 60-day window.",
@@ -1114,6 +1324,13 @@ def main(argv: list[str] | None = None) -> int:
     input_profile_by_command = {
         "train": INPUT_CHANNEL_PROFILE_DAILY_ONLY,
         "train-legacy-all-channels-base": INPUT_CHANNEL_PROFILE_ALL,
+        "train-summary-v2": INPUT_CHANNEL_PROFILE_ALL,
+        "train-summary-v2-no60": INPUT_CHANNEL_PROFILE_ALL,
+        "train-summary-v2-price-delta": INPUT_CHANNEL_PROFILE_ALL,
+        "train-summary-v2-ohlcva-aux": INPUT_CHANNEL_PROFILE_ALL,
+        "train-summary-v2-ohlcva-aux-low": INPUT_CHANNEL_PROFILE_ALL,
+        "train-summary-v2-ohlcva-aux-low-price-delta": INPUT_CHANNEL_PROFILE_ALL,
+        "train-summary-v2-ohlcva-path-equal": INPUT_CHANNEL_PROFILE_ALL,
         "train-daily-only": INPUT_CHANNEL_PROFILE_DAILY_ONLY,
         "train-daily-only-summary-v2": INPUT_CHANNEL_PROFILE_DAILY_ONLY,
         "train-daily-only-summary-v2-price-delta": INPUT_CHANNEL_PROFILE_DAILY_ONLY,
@@ -1129,6 +1346,11 @@ def main(argv: list[str] | None = None) -> int:
         "train-legacy-all-channels-base": SUMMARY_LOSS_PROFILE_BASE,
         "train-summary-v2": SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
         "train-summary-v2-no60": SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC_NO60,
+        "train-summary-v2-price-delta": SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
+        "train-summary-v2-ohlcva-aux": SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
+        "train-summary-v2-ohlcva-aux-low": SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
+        "train-summary-v2-ohlcva-aux-low-price-delta": SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
+        "train-summary-v2-ohlcva-path-equal": SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
         "train-daily-only-summary-v2": SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
         "train-daily-only-summary-v2-price-delta": SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
         "train-daily-only-summary-v2-ohlcva-aux": SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
@@ -1141,6 +1363,11 @@ def main(argv: list[str] | None = None) -> int:
         "train-legacy-all-channels-base",
         "train-summary-v2",
         "train-summary-v2-no60",
+        "train-summary-v2-price-delta",
+        "train-summary-v2-ohlcva-aux",
+        "train-summary-v2-ohlcva-aux-low",
+        "train-summary-v2-ohlcva-aux-low-price-delta",
+        "train-summary-v2-ohlcva-path-equal",
         "train-daily-only",
         "train-daily-only-summary-v2",
         "train-daily-only-summary-v2-price-delta",
@@ -1164,33 +1391,43 @@ def main(argv: list[str] | None = None) -> int:
             max_samples_per_split=int(args.max_samples_per_split),
             path_loss_weight=0.0 if int(direct_horizon) > 0 else 0.45,
             path_loss_profile=PATH_LOSS_PROFILE_OHLCVA_EQUAL
-            if args.command == "train-daily-only-summary-v2-ohlcva-path-equal"
+            if args.command
+            in {
+                "train-summary-v2-ohlcva-path-equal",
+                "train-daily-only-summary-v2-ohlcva-path-equal",
+            }
             else PATH_LOSS_PROFILE_DEFAULT,
             summary_loss_weight=0.0 if int(direct_horizon) > 0 else 0.20,
             richer_loss_weight=0.0,
             price_delta_loss_weight=0.03
             if args.command
             in {
+                "train-summary-v2-price-delta",
+                "train-summary-v2-ohlcva-aux-low-price-delta",
                 "train-daily-only-summary-v2-price-delta",
                 "train-daily-only-summary-v2-ohlcva-aux-low-price-delta",
             }
             else 0.0,
             va_level_loss_weight=0.05
-            if args.command == "train-daily-only-summary-v2-ohlcva-aux"
+            if args.command in {"train-summary-v2-ohlcva-aux", "train-daily-only-summary-v2-ohlcva-aux"}
             else 0.02
             if args.command
             in {
                 "train",
+                "train-summary-v2-ohlcva-aux-low",
+                "train-summary-v2-ohlcva-aux-low-price-delta",
                 "train-daily-only-summary-v2-ohlcva-aux-low",
                 "train-daily-only-summary-v2-ohlcva-aux-low-price-delta",
             }
             else 0.0,
             va_delta_loss_weight=0.02
-            if args.command == "train-daily-only-summary-v2-ohlcva-aux"
+            if args.command in {"train-summary-v2-ohlcva-aux", "train-daily-only-summary-v2-ohlcva-aux"}
             else 0.01
             if args.command
             in {
                 "train",
+                "train-summary-v2-ohlcva-aux-low",
+                "train-summary-v2-ohlcva-aux-low-price-delta",
                 "train-daily-only-summary-v2-ohlcva-aux-low",
                 "train-daily-only-summary-v2-ohlcva-aux-low-price-delta",
             }
@@ -1209,6 +1446,10 @@ def main(argv: list[str] | None = None) -> int:
                 if args.command
                 in {
                     "train",
+                    "train-summary-v2-ohlcva-aux",
+                    "train-summary-v2-ohlcva-aux-low",
+                    "train-summary-v2-ohlcva-aux-low-price-delta",
+                    "train-summary-v2-ohlcva-path-equal",
                     "train-daily-only-summary-v2-ohlcva-aux",
                     "train-daily-only-summary-v2-ohlcva-aux-low",
                     "train-daily-only-summary-v2-ohlcva-aux-low-price-delta",
@@ -1226,6 +1467,16 @@ def main(argv: list[str] | None = None) -> int:
             train_argv = build_todayclose_legacy_all_channels_base_train_argv(profile)
         elif args.command == "train-summary-v2-no60":
             train_argv = build_todayclose_summary_v2_no60_train_argv(profile)
+        elif args.command == "train-summary-v2-price-delta":
+            train_argv = build_todayclose_summary_v2_price_delta_train_argv(profile)
+        elif args.command == "train-summary-v2-ohlcva-aux":
+            train_argv = build_todayclose_summary_v2_ohlcva_aux_train_argv(profile)
+        elif args.command == "train-summary-v2-ohlcva-aux-low":
+            train_argv = build_todayclose_summary_v2_ohlcva_aux_low_train_argv(profile)
+        elif args.command == "train-summary-v2-ohlcva-aux-low-price-delta":
+            train_argv = build_todayclose_summary_v2_ohlcva_aux_low_price_delta_train_argv(profile)
+        elif args.command == "train-summary-v2-ohlcva-path-equal":
+            train_argv = build_todayclose_summary_v2_ohlcva_path_equal_train_argv(profile)
         elif args.command == "train-daily-only":
             train_argv = build_todayclose_daily_only_train_argv(profile)
         elif args.command == "train-daily-only-summary-v2":
