@@ -1,5 +1,8 @@
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.tmp/
+.playwright-cli/
 node_modules/
 *.tsbuildinfo
 *.pkl
@@ -54,5 +57,3 @@ t0_project/backtest_output/
 t0_project/logs/
 t0_project/models/
 t0_project/ppo_tdx_tensorboard/
-
-a_stock_daily_selection/output/artifacts/*.pkl

@@ -1,6 +1,6 @@
 # Repository Retention Cleanup — 2026-07-10
 
-- Status: `in_progress / authorized cleanup / guarded physical deletion`.
+- Status: `completed / cleanup, evidence writeback, guards and full health verified`.
 - Authorization: the user approved the repository/brain optimization plan and explicitly waived per-step confirmations.
 - Rollback anchor for tracked files: Git HEAD `1fa2ae82a918b1458c99898ded97ad649c2d0b83`.
 - Active execution impact: none; this cleanup does not create or modify `daily_research/output/active_execution_strategy.json`.
@@ -50,7 +50,45 @@
 - Post-delete `qdp check --quick --runtime fast --json` returned `status=ok` with all 17 required domains and no findings; no audit file was written.
 - The same nine first/middle/last active shards remained readable after source deletion.
 
-## Pending phases
+## Phase 3 — Research-store reachability and output retention
 
-- Research-output prediction trimming and active-view retention graph.
-- Repository hygiene and control-plane compaction.
+- Added `daily_research/brain/research_store_retention_policy.json` with two active today-close views and explicit cold-component tombstones.
+- Rebuilt `research_store_index.json` as a schema-v2 pointer-only index with relative view paths and SHA-256 hashes; it no longer inlines panel/label manifests.
+- Active dependency graph retained exactly six component IDs: the two active views, panel store, today-close label store, and normal/rollforward sample indexes.
+- Archived manifest hashes, shapes, provenance and inventory digests to `daily_research/brain/references/research_store_cold_assets_archive_20260710_105437.{md,json}` before deleting 9 unreachable components.
+- Cold-component reclaim: `61,582,271,039` bytes (`57.353 GiB`); post-delete active-view verification returned `ok` with no inactive disk views.
+- Prediction trim removed 86 large prediction CSV/parquet/feather files across 43 summarized runs: `17,583,163,833` bytes (`16.376 GiB`), with zero skips. Summary JSON, metrics, reports and checkpoints were retained and marked with trim manifests.
+- Directory GC then removed 63 unreferenced partial/smoke directories: `3,270,410,936` bytes (`3.046 GiB`), with zero skips.
+- Post-cleanup scan reported zero safe-directory, prediction-trim and cold-component candidates. Both active views loaded a real test sample with `input_shape=[100,32]`, `path_shape=[60,4]` and `price_anchor=today_close`.
+
+## Aggregate reclaim
+
+- Phase 1: `8,824,048,307` bytes.
+- Phase 2: `44,891,842,512` bytes.
+- Phase 3: `82,435,845,808` bytes.
+- Total: `136,151,736,627` bytes (`126.82 GiB`, `136.15 GB`).
+
+## Phase 4 — Repository and control-plane hygiene
+
+- Removed the orphan root `package.json` / `package-lock.json` and root `node_modules` dependency tree (about 82 MB, not included in the data-reclaim total above); no root JavaScript source or build entry depended on them.
+- Removed 10 tracked `.playwright-cli` logs plus empty `.tmp` / `.agents` directories. Root `.gitignore` now covers `.pytest_cache/`, `.tmp/` and `.playwright-cli/` in addition to `node_modules/`.
+- Archived the only durable facts from the output-only `a_stock_daily_selection/` directory to `brain/references/a_stock_daily_selection_archive_20260710.md`, then removed its 8 tracked output files and stale brain-catalog exception.
+- Preserved `daily_stock_analysis-main/.github/workflows` as upstream standalone templates. They are not active GitHub Actions in this monorepo, but remain part of that embedded project's public standalone contract.
+- Slimmed the workspace workflow CLI by removing the dead/redundant `handoff`, `preflight`, `workflow-guide`, `select-workflow` and `audit-brain` command surfaces. Their useful implementation functions remain internal to capsule/platform code. `status` remains public because it uniquely returns the complete explicit-`run_tag` evidence packet and is still a current `daily_research` playbook dependency.
+
+### Final verification
+
+- Workflow/capsule/platform focused suite: 82 passed.
+- Full `tools/brain` suite: 314 passed.
+- Research-store and seq100 focused suite: 35 passed; QDP focused suite: 13 passed.
+- Research-store dry-runs: zero safe-delete, prediction-trim and cold-component candidates; both active views verify `ok` and each loads a real test sample with input `[100,32]`, path `[60,4]`, anchor `today_close`.
+- QDP final state: 17/17 dataset directories referenced, zero unreferenced bytes, zero missing manifests/shards, `status=ok`, and quick check `status=ok` without a persisted audit.
+- Repository hygiene paths are absent and `daily_research/output/active_execution_strategy.json` is unchanged.
+- Evidence registry rebuild: `status=ok`, 160 records, zero duplicate IDs and zero missing paths.
+- Full doc guard, integrity, brain-sync, skill-sync, brain-structure, agent-meta and multi-paradigm checks all returned `ok`; integrity/sync/lint reported zero errors and zero warnings.
+- Workspace-brain full health returned `status=ok`; final `git diff --check` passed after removing one trailing blank line from `.gitignore`.
+
+## Closeout result
+
+- No known safe-delete, prediction-trim, cold-component, QDP GC, repository-hygiene or brain-guard work remains from this cleanup plan.
+- The resulting tracked changes are intentionally left unstaged and uncommitted for user review; no commit or push was requested in this closeout.

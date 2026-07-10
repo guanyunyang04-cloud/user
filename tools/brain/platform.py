@@ -334,10 +334,6 @@ def build_brain_catalog() -> dict[str, Any]:
             brain_id = "tools"
             status = "non_truth_tooling"
             manifest_ref = ""
-        elif root.as_posix() == "a_stock_daily_selection/brain":
-            brain_id = "a_stock_daily_selection"
-            status = "external_or_inactive_missing_manifest"
-            manifest_ref = ""
         else:
             brain_id = root.parent.as_posix().replace("/", "_").replace("-", "_")
             status = "discovered_untracked" if workspace_path(manifest_path).exists() else "missing_manifest"

@@ -18,7 +18,7 @@
 - `tools/`：主脑与工作区工具。
 - `docs/`：工作区级文档索引。
 - `canonical_data/`：历史/过渡资产入口，不是当前 QDP v2 active 数据基底。
-- `a_stock_daily_selection/`：待整理旧目录；当前不注册分脑。
+- `a_stock_daily_selection/`：2026-07-10 已归档并删除；历史摘要见 `brain/references/a_stock_daily_selection_archive_20260710.md`。
 
 ## 2. 接管边界
 - `agent-first`: agent 先理解用户目标，再按需要读取主脑、分脑、代码和产物。

@@ -9,15 +9,12 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.brain.platform import (
-    audit_brain_system,
-    build_workflow_guide,
     build_workflow_state,
     build_writeback_plan,
     check_brain_health,
     print_json,
     resolve_bootstrap,
     resolve_workflow_child_brain,
-    select_workflow_for_task,
     write_workflow_output,
 )
 from tools.brain.capsule import build_task_capsule
@@ -53,11 +50,6 @@ def build_parser() -> argparse.ArgumentParser:
     route.add_argument("--json", action="store_true")
     route.add_argument("--write-output", action="store_true")
 
-    handoff = sub.add_parser("handoff", help="Deprecated. Use bootstrap --brain instead.")
-    handoff.add_argument("--child", default="")
-    handoff.add_argument("--json", action="store_true")
-    handoff.add_argument("--write-output", action="store_true")
-
     health = sub.add_parser("health", help="Run read-only brain and environment health checks.")
     health.add_argument("--brain", default="workspace")
     health.add_argument("--mode", default="compact", choices=("compact", "standard", "full"))
@@ -72,13 +64,6 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--run-tag", default="")
     status.add_argument("--json", action="store_true")
     status.add_argument("--write-output", action="store_true")
-
-    preflight = sub.add_parser("preflight", help="Build read-only preflight state for a workflow.")
-    preflight.add_argument("--workflow", required=True)
-    preflight.add_argument("--run-tag", default="")
-    preflight.add_argument("--task", default="")
-    preflight.add_argument("--json", action="store_true")
-    preflight.add_argument("--write-output", action="store_true")
 
     capsule = sub.add_parser("capsule", help="Build a main-brain-first task capsule.")
     capsule.add_argument("--task", default="")
@@ -102,22 +87,6 @@ def build_parser() -> argparse.ArgumentParser:
     query.add_argument("--q", required=True)
     query.add_argument("--json", action="store_true")
     query.add_argument("--write-output", action="store_true")
-
-    guide = sub.add_parser("workflow-guide", help="Return a workflow checklist and guard guide.")
-    guide.add_argument("--workflow", required=True)
-    guide.add_argument("--json", action="store_true")
-    guide.add_argument("--write-output", action="store_true")
-
-    selector = sub.add_parser("select-workflow", help="Select a brain workflow from task intent.")
-    selector.add_argument("--task", required=True)
-    selector.add_argument("--intent", default="read", choices=("read", "mutate", "writeback"))
-    selector.add_argument("--json", action="store_true")
-    selector.add_argument("--write-output", action="store_true")
-
-    audit = sub.add_parser("audit-brain", help="Audit all workspace brain roots, language policy, workflows, and guards.")
-    audit.add_argument("--scope", default="all", choices=("all", "attached"))
-    audit.add_argument("--json", action="store_true")
-    audit.add_argument("--write-output", action="store_true")
 
     writeback = sub.add_parser("writeback-plan", help="Generate a routed brain writeback plan.")
     writeback.add_argument("--source", default="latest")
@@ -146,8 +115,6 @@ def build_payload(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
         return "bootstrap", resolve_bootstrap(None if brain == "workspace" else brain).to_dict()
     if args.command == "route":
         return "route", route_task_to_brain(str(getattr(args, "task", "") or ""))
-    if args.command == "handoff":
-        raise ValueError("handoff is removed; use bootstrap --brain <brain_id|workspace>")
     if args.command == "health":
         brain = str(getattr(args, "brain", "") or "workspace")
         return "health", check_brain_health(
@@ -157,18 +124,13 @@ def build_payload(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
             include_project_consistency=bool(getattr(args, "include_project_consistency", False)),
             include_openmp_strict=bool(getattr(args, "include_openmp_strict", False)),
         ).to_dict()
-    if args.command in {"status", "preflight"}:
+    if args.command == "status":
         child_brain = resolve_workflow_child_brain(args.workflow)
-        payload = build_workflow_state(
+        return "status", build_workflow_state(
             args.workflow,
             run_tag=str(getattr(args, "run_tag", "") or ""),
             child_brain=child_brain,
         ).to_dict()
-        if args.command == "preflight":
-            payload = dict(payload)
-            payload["preflight_only"] = True
-            payload["task"] = str(getattr(args, "task", "") or "")
-        return args.command, payload
     if args.command == "capsule":
         return "capsule", build_task_capsule(
             task=str(getattr(args, "task", "") or ""),
@@ -188,20 +150,6 @@ def build_payload(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
         return "evidence_index", build_evidence_registry()
     if args.command == "query":
         return "query", query_evidence_registry(str(getattr(args, "q", "") or ""))
-    if args.command == "workflow-guide":
-        workflow_id = str(getattr(args, "workflow", "") or "")
-        child_brain = resolve_workflow_child_brain(workflow_id)
-        return "workflow_guide", build_workflow_guide(
-            workflow_id,
-            child_brain=child_brain,
-        )
-    if args.command == "select-workflow":
-        return "select_workflow", select_workflow_for_task(
-            str(getattr(args, "task", "") or ""),
-            intent=str(getattr(args, "intent", "") or "read"),
-        )
-    if args.command == "audit-brain":
-        return "audit_brain", audit_brain_system(scope=str(getattr(args, "scope", "") or "all"))
     if args.command == "writeback-plan":
         return "writeback_plan", build_writeback_plan(
             args.source,

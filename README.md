@@ -43,8 +43,8 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap
 - 分脑项目：`daily_research/`、`quant_data_platform/`、`t0_project/`、`daily_stock_analysis-main/`、`traditional_quant_research/`。
 - 主脑基础设施：`brain/`、`tools/`。
 - 共享数据资产：`canonical_data/`，仅保留 registry/memmap/data 资产，治理入口归 `quant_data_platform/brain/`。
-- 待整理旧资产：`a_stock_daily_selection/`，仅保留历史输出，不承载阅读文档或项目事实。
-- 缓存/依赖：`.pytest_cache/`、`.playwright-cli/`、`node_modules/`。
+- 已归档旧资产：`a_stock_daily_selection/` 的历史输出已收敛到 `brain/references/a_stock_daily_selection_archive_20260710.md`，原目录已删除。
+- 本地缓存/依赖：`.pytest_cache/`、`.tmp/`、`.playwright-cli/`、各项目 `node_modules/` 均不进入版本库。
 
 如果 README、AGENTS、CLAUDE、SKILL 与主脑冲突，以 `brain/` 当前文档和实际工具守卫为准；capsule / route 输出只是诊断信号。
 

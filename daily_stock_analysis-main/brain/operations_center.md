@@ -5,7 +5,7 @@
 - `frontend_desktop_surface`: `daily_stock_analysis-main/apps`
 - `bot_agent_surface`: `daily_stock_analysis-main/bot`, `daily_stock_analysis-main/src/agent`
 - `data_provider_surface`: `daily_stock_analysis-main/data_provider`
-- `ops_surface`: `daily_stock_analysis-main/scripts`, `daily_stock_analysis-main/.github/workflows`
+- `ops_surface`: `daily_stock_analysis-main/scripts`; nested `.github/workflows` are preserved upstream/standalone templates and are not active GitHub Actions in this monorepo.
 - `tests_surface`: `daily_stock_analysis-main/tests`
 - `public_docs_surface`: `daily_stock_analysis-main/README.md`, canonical body in `brain/references/public_docs/`
 - `ai_compat_surface`: `AGENTS.md`, `CLAUDE.md`, `.github/*instructions*`, `SKILL.md`

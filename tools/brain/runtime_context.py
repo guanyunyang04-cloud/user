@@ -26,7 +26,8 @@ def deep_dive_commands(*, selected_brain_id: str = "", target_kind: str = "", ca
             "C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py health --mode full --cwd .",
             'C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --workflow auto --intent read --verbosity full --json',
             "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow bootstrap --brain workspace --json",
-            "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow audit-brain --scope all --json",
+            "C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py brain-structure-audit --cwd . --mode full",
+            "C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py agent-meta-audit --cwd . --mode full",
         ]
     commands = [
         'C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow current-frontier --json',

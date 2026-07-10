@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 158,
+  "record_count": 160,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -24,6 +24,32 @@
         "Treat noncanonical brain roots as warnings until explicitly attached through `brain/brain_manifest.json`."
       ],
       "active_artifact_impact": "not_stated",
+      "dataset_ids": []
+    },
+    {
+      "id": "repository_retention_cleanup_20260710",
+      "date": "2026-07-10",
+      "r_id": "",
+      "path": "brain/references/repository_retention_cleanup_20260710.md",
+      "tags": [
+        "brain"
+      ],
+      "workflow": "brain",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "qdp_v2_path_value_predictability_full_stream_20260704_223040",
+        "qdp_v2_path_value_predictability_full_stream_v2_20260704_223929"
+      ],
+      "verdict": "Action boundary: remove only these files after confirming no Git process is running; retain the recent cruft pack and the May 24 stash.",
+      "blockers": [
+        "Root: `daily_research/cache/rebuild_quarantine/20260531_seed7_failed_attempts/`.",
+        "Two failed `forecast_feature_store.dat` files, each `2,891,616,448` bytes; total `5,783,232,896` bytes.",
+        "Failure evidence: the non-empty `launch_stderr.log` records the failed rebuild; all log files are retained.",
+        "Slimmed the workspace workflow CLI by removing the dead/redundant `handoff`, `preflight`, `workflow-guide`, `select-workflow` and `audit-brain` command surfaces. Their useful implementation functions remain internal to capsule/platform code. `status` remains public because it uniquely returns the complete explicit-`run_tag` evidence packet and is still a current `daily_research` playbook dependency."
+      ],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "guarded",
       "dataset_ids": []
     },
     {
@@ -4722,6 +4748,27 @@
         "Keep `daily_research/output/active_execution_strategy.json` untouched unless a future explicit promotion/recovery authority is given."
       ],
       "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "research_store_cold_assets_archive_20260710_105437",
+      "date": "",
+      "r_id": "",
+      "path": "daily_research/brain/references/research_store_cold_assets_archive_20260710_105437.md",
+      "tags": [
+        "daily_research"
+      ],
+      "workflow": "daily_research",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "qdp_v2_alpha_v2_full_contract_2012_2025_20260702_01",
+        "qdp_v2_alpha_v2_full_contract_2012_2025_20260702_01_training_pack"
+      ],
+      "verdict": "",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "not_stated",
       "dataset_ids": []
     },
     {
