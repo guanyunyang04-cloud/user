@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 156,
+  "record_count": 157,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -3784,6 +3784,24 @@
       "study_families": [],
       "run_tags": [],
       "verdict": "Status: `completed / roll_forward_test / research_only / no_active_change`.; The old `2012-2023 train / 2024 validation / 2025 test` results should be treated as stale-train forward checks. They are useful, but they do not answer the user's production-like question: \"after one more year of data is available, what happens if the model is retrained through 2024 and tested on 2025?\"; The formal roll-forward test in this reference uses `2012-2024` as train, refits normalization on train-year dates through 2024, fixes `epochs=1`, and reports 2025 `test` split metrics.; Evaluation policy after this run: profile assessment should mainly pair the original 2024 validation evidence with the 2025 train-through-2024 forward test. The 2024 validation split remains the selection/stability anchor; the 2025 forward split is the recent production-like out-of-sample anchor.",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_seq100_summary_v2_all_channels_combo_result_20260710",
+      "date": "2026-07-10",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_seq100_summary_v2_all_channels_combo_result_20260710.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "Status: `completed / all_channel_summary_v2_combo / no_default_change / no_active_execution_change`.; Main evaluation policy remains `2024 validation` + `2025 train-through-2024 forward test`.; Result: none of the five all-channel `summary_v2` combinations replaces the current default research profile `seq100_todayclose_path_only/daily_only_summary_v2_ohlcva_aux_low`.; Reason: the current default keeps the strongest paired IC anchors: 2024 validation IC `0.1626` and 2025 forward IC `0.1927`. The all-channel anchor `summary_v2_all_channels` remains the strongest narrow forward Top1 branch (`27.30%`), but its forward IC is only `0.1417`.",
       "blockers": [],
       "next_allowed_actions": [],
       "active_artifact_impact": "unchanged",

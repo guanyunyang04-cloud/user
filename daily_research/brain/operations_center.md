@@ -1,5 +1,5 @@
 # Daily Research 过程目录
-快照日期：`2026-07-09`
+快照日期：`2026-07-10`
 
 本文件保存可调用过程、环境基线、命令入口和验证选择。它描述“怎么做”，不承担当前事实长卷；当前对象实例见 `state_center.md`。
 
@@ -60,6 +60,11 @@
 `dry_run_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train --dry-run --json`
 `summary_v2_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2 --json`
 `summary_v2_no60_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2-no60 --json`
+`summary_v2_price_delta_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2-price-delta --json`
+`summary_v2_ohlcva_aux_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2-ohlcva-aux --json`
+`summary_v2_ohlcva_aux_low_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2-ohlcva-aux-low --json`
+`summary_v2_ohlcva_aux_low_price_delta_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2-ohlcva-aux-low-price-delta --json`
+`summary_v2_ohlcva_path_equal_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2-ohlcva-path-equal --json`
 `legacy_all_channels_base_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-legacy-all-channels-base --json`
 `daily_only_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-daily-only --json`
 `daily_only_summary_v2_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-daily-only-summary-v2 --json`
@@ -77,6 +82,7 @@
 `fixed_profile`: `store_view=seq100_path60_todayclose_ohlcva`；`model_type=gru_ohlcva_aux_path_value`；`input_channel_profile=daily_only`；`summary_loss_profile=multi_horizon_ohlc`；`loss=path0.45/summary0.20/value0.20/rank0.15/va_level0.02/va_delta0.01`；`top_k=1,3,5,10,20,50,100`；`prediction_mode=compact`。
 `legacy_broad_topk_baseline`: `all_channels_base_summary` uses `input_channel_profile=all` and `summary_loss_profile=base`; keep it as explicit broad-TopK comparison, not the default research entrance.
 `comparison_profile`: `summary_v2_multi_horizon_ohlc` keeps `model_type=gru_path_value` and `path_dim=4`, but changes `summary_loss_profile=multi_horizon_ohlc` to constrain OHLC-derived 5/10/20/40/60-day summaries; the narrow CLI default uses `early_stopping_patience=2`.
+`all_channel_summary_v2_combo_profile`: `train-summary-v2-price-delta`、`train-summary-v2-ohlcva-aux`、`train-summary-v2-ohlcva-aux-low`、`train-summary-v2-ohlcva-aux-low-price-delta` and `train-summary-v2-ohlcva-path-equal` keep `input_channel_profile=all` and `summary_loss_profile=multi_horizon_ohlc`, then add the requested price-delta, VA auxiliary or equal OHLCVA path-loss constraint. The 2026-07-10 result says none replaces the default `daily_only_summary_v2_ohlcva_aux_low`; retain them as all-channel comparison branches.
 `summary_control_profile`: `summary_v2_no60` keeps the same OHLC-derived summary family and loss weight as `summary_v2_multi_horizon_ohlc`, but changes `summary_loss_profile=multi_horizon_ohlc_no60`, using windows `5/10/20/40` only. It is a single-factor control and must not include new shape summaries.
 `input_ablation_profile`: `daily_only_no_minute` keeps labels/loss/splits fixed but uses `input_channel_profile=daily_only`, removing `intraday_summary` and `limit_structure`; old `daily_only_summary_v2` combines `input_channel_profile=daily_only` with `summary_loss_profile=multi_horizon_ohlc` and remains a pure-OHLC comparison; `no_intraday_summary` keeps `daily_raw + daily_state + limit_structure`; `no_limit_structure` keeps `daily_raw + daily_state + intraday_summary`; the narrow CLIs default to `early_stopping_patience=2`.
 `price_delta_profile`: `daily_only_summary_v2_price_delta` keeps `model_type=gru_path_value`, `input_channel_profile=daily_only`, `summary_loss_profile=multi_horizon_ohlc`, and adds `price_delta0.03` auxiliary SmoothL1 on first differences of anchored close log returns.
@@ -129,6 +135,11 @@
 - Seq100 legacy all-channel base dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-legacy-all-channels-base --dry-run --json`
 - Seq100 summary_v2 dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2 --dry-run --json`
 - Seq100 summary_v2 no60 dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2-no60 --dry-run --json`
+- Seq100 all-channel summary_v2 price-delta dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2-price-delta --dry-run --json`
+- Seq100 all-channel summary_v2 OHLCVA aux dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2-ohlcva-aux --dry-run --json`
+- Seq100 all-channel summary_v2 OHLCVA aux low dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2-ohlcva-aux-low --dry-run --json`
+- Seq100 all-channel summary_v2 OHLCVA aux low + price-delta dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2-ohlcva-aux-low-price-delta --dry-run --json`
+- Seq100 all-channel summary_v2 OHLCVA equal path-loss dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2-ohlcva-path-equal --dry-run --json`
 - Seq100 daily-only dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-daily-only --dry-run --json`
 - Seq100 daily-only summary_v2 dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-daily-only-summary-v2 --dry-run --json`
 - Seq100 no-intraday-summary dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-no-intraday-summary --dry-run --json`

@@ -1,5 +1,5 @@
 # Daily Research 知识对象
-快照日期：`2026-07-09`
+快照日期：`2026-07-10`
 
 本文件保存稳定对象类、长期事实和方法论。它不承载当前状态长卷，也不复刻历史证据；完整 rXX、长命令和 dated review 在 `references/`。
 
@@ -50,6 +50,7 @@
 - Today-close daily-only summary_v2 with low-weight VA auxiliary supervision is the default research mainline; old daily-only summary_v2 and all-channel base summary remain comparison baselines, and topK path-value spread remains research evidence, not promotion evidence.
 - `Path20` / `alpha_path20_neural_policy_v1` 是历史证据代号和代码 namespace，不再代表当前目标定义。
 - `summary_v2_multi_horizon_ohlc` is an explicit comparison profile that keeps OHLC output and only expands OHLC-derived summary-loss constraints; its narrow CLI default uses `early_stopping_patience=2`, and the multi-horizon loss is vectorized without changing the per-horizon objective.
+- All-channel `summary_v2_multi_horizon_ohlc` is retained as a narrow Top1 comparison branch, not the default. The 2026-07-10 all-channel combo check says adding `price_delta`、VA auxiliary supervision or equal OHLCVA path-loss did not repair the weak 2025 forward IC relative to the selected daily-only low-VA default.
 - `summary_v2_no60` is a strict control profile for `summary_v2_multi_horizon_ohlc`: it keeps the same OHLC-derived summary family and removes only the full 60-day window. It is not `summary_v3`; adding new shape summaries must be a separate experiment.
 - `daily_only_no_minute`、old `daily_only_summary_v2`、`no_intraday_summary` and `no_limit_structure` are explicit input ablation or combination profiles that keep daily labels, splits, loss and model output semantics aligned with the default mainline while changing input channel families and/or summary_v2 constraints.
 - `daily_only_summary_v2_price_delta` is an explicit close-rhythm auxiliary profile: it supervises first differences of anchored close log returns with `price_delta_loss`, while keeping OHLC path output and price-only `path_trade_value_v2`.
