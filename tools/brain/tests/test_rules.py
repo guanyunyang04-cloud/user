@@ -40,7 +40,11 @@ class BrainRulesTest(unittest.TestCase):
         self.assertEqual(finding.code, "loose_latest_stale_requires_explicit_tag")
 
     def test_active_artifact_diff_is_hard_failure(self) -> None:
-        with patch.object(brain_rules, "_run_git_diff_name", return_value="diff --git ..."):
+        with patch.object(
+            brain_rules.daily_research_adapter,
+            "active_artifact_diff_status",
+            return_value={"status": "tracked_dirty"},
+        ):
             payload = brain_rules.run_brain_rules(has_explicit_run_tag=True, check_control_plane_lengths=False)
 
         self.assertEqual(payload["status"], "failed")

@@ -194,6 +194,14 @@ def test_build_and_verify_unified_store_views_remaps_path20(workspace: Path) -> 
 
     assert result["status"] == "built"
     assert verification["status"] == "ok"
+    index = json.loads(
+        (workspace / "daily_research/data/research_store/research_store_index.json").read_text(encoding="utf-8")
+    )
+    assert index["schema_version"] == 2
+    assert "panel_store" not in index
+    assert "label_stores" not in index
+    assert all(not Path(item["path"]).is_absolute() for item in index["views"].values())
+    assert all(len(item["sha256"]) == 64 for item in index["views"].values())
     path20_view = json.loads(
         (workspace / "daily_research/data/research_store/views/seq100_path20_nextopen_ohlc_from_path60.json").read_text(
             encoding="utf-8"

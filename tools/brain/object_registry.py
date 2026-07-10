@@ -144,7 +144,9 @@ def match_objects_for_task(task: str, *, paths: list[str] | None = None) -> list
         path_matches = _dedupe(path_matches)
         if not object_id or not owner or not object_type:
             continue
-        if not routing_matches and not write_matches and not path_matches:
+        # Generic mutation verbs (update/cleanup/write) only set the mode after
+        # object-specific routing or path evidence has selected the object.
+        if not routing_matches and not path_matches:
             continue
         reason = str(item.get("write_reason" if write_matches or path_matches else "read_reason", "") or "")
         matches.append(

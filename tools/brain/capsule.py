@@ -205,8 +205,17 @@ def _preflight_blockers(*, routing: dict[str, Any], main_context: dict[str, Any]
     if str(routing.get("selected_brain_id", "") or "") and routing.get("status") != "selected":
         blockers.append("missing_child_brain")
     active_guard_status = str(guards.get("active_artifact_guard", {}).get("status", "") or "")
-    if active_guard_status and active_guard_status != "clean":
+    object_routes = routing.get("object_routes", []) if isinstance(routing.get("object_routes"), list) else []
+    active_write_requested = any(
+        isinstance(item, dict)
+        and item.get("object") == "active_execution_artifact"
+        and item.get("mode") == "write"
+        for item in object_routes
+    )
+    if active_guard_status == "tracked_dirty":
         blockers.append("active_artifact_dirty")
+    elif normalized_intent in {"mutate", "writeback"} and active_write_requested and active_guard_status != "tracked_clean":
+        blockers.append(f"active_artifact_{active_guard_status or 'unknown'}")
     skill_status = _skill_sync_status()
     if not bool(skill_status.get("all_in_sync")):
         blockers.append("stale_or_missing_global_skill")
@@ -356,7 +365,7 @@ def build_task_capsule(
     main_context = compact_main_context(raw_main_context, profile=context_profile)
     skill_status = _skill_sync_status()
     preflight_blockers = _preflight_blockers(routing=routing, main_context=main_context, intent=intent, guards=guards)
-    mutation_allowed = str(intent or "read") not in {"mutate", "writeback"} or "not_on_main_for_mutation" not in preflight_blockers
+    mutation_allowed = str(intent or "read") not in {"mutate", "writeback"} or not preflight_blockers
     risk_signals.extend(preflight_blockers)
     for finding in guards.get("rule_report", {}).get("findings", []):
         if isinstance(finding, dict) and str(finding.get("severity", "") or "") == "warning":

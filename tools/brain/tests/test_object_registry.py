@@ -32,6 +32,10 @@ class ObjectRegistryTest(unittest.TestCase):
         self.assertEqual(by_id["qdp_v2_active_data_base"].owner, "quant_data_platform")
         self.assertEqual(by_id["sequence_training_pack"].owner, "daily_research")
 
+    def test_generic_write_verb_does_not_select_an_unmentioned_object(self) -> None:
+        self.assertEqual(match_objects_for_task("清理脑区治理规则")[0].object_id, "brain_sync_surface")
+        self.assertFalse(any(item.object_id == "qdp_v2_active_data_base" for item in match_objects_for_task("清理脑区治理规则")))
+
     def test_path_match_finds_protected_active_artifact(self) -> None:
         matches = match_objects_for_paths(["daily_research/output/active_execution_strategy.json"])
         by_id = {item.object_id: item for item in matches}

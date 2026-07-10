@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -17,6 +18,7 @@ from daily_research.path_policy.qdp_v2_sequence_path_pack import validate_sequen
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RESEARCH_STORE_ROOT = Path("daily_research/data/research_store")
 DEFAULT_LEGACY_SEQUENCE_PACK_ROOT = DEFAULT_RESEARCH_STORE_ROOT / "sequence_pack"
+DEFAULT_RETENTION_POLICY = Path("daily_research/brain/research_store_retention_policy.json")
 DEFAULT_PANEL_STORE_ID = "qdp_v2_mainboard_2012_2025_v1"
 DELETE_CONFIRMATION = "DELETE_REPLACED_SEQUENCE_PACKS"
 LEGACY_PACK_NAMES = (
@@ -64,6 +66,194 @@ def _write_json(path: str | Path, payload: Mapping[str, Any]) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(dict(payload), ensure_ascii=False, indent=2, default=_json_default) + "\n", encoding="utf-8")
     return target
+
+
+def _sha256_file(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with _workspace_path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def load_research_store_retention_policy(
+    policy_path: str | Path = DEFAULT_RETENTION_POLICY,
+) -> dict[str, Any]:
+    path = _workspace_path(policy_path)
+    if not path.exists():
+        return {}
+    payload = _read_json(path)
+    if payload.get("artifact_type") not in {None, "research_store_retention_policy"}:
+        raise ValueError(f"not a research store retention policy: {path}")
+    return payload
+
+
+def discover_research_store_views(
+    store_root: str | Path = DEFAULT_RESEARCH_STORE_ROOT,
+) -> dict[str, Path]:
+    store_root_path = _workspace_path(store_root)
+    views_root = store_root_path / "views"
+    discovered: dict[str, Path] = {}
+    if not views_root.exists():
+        return discovered
+    for path in sorted(views_root.glob("*.json")):
+        payload = _read_json(path)
+        view_id = str(dict(payload.get("artifact_view", {}) or {}).get("view_id", "") or path.stem)
+        if view_id in discovered:
+            raise ValueError(f"duplicate research store view_id={view_id}: {path} and {discovered[view_id]}")
+        discovered[view_id] = path
+    return discovered
+
+
+def _store_relative(path: str | Path, *, store_root: Path) -> str:
+    resolved = _workspace_path(path).resolve()
+    try:
+        return resolved.relative_to(store_root.resolve()).as_posix()
+    except ValueError:
+        return _relative(resolved)
+
+
+def _component_id(path: str | Path, *, store_root: Path) -> str:
+    resolved = _workspace_path(path).resolve()
+    try:
+        relative = resolved.relative_to(store_root.resolve())
+    except ValueError:
+        return ""
+    parts = relative.parts
+    if not parts:
+        return ""
+    family = parts[0]
+    if family in {"panel_store", "label_store", "sharded_memmap", "training_pack", "sequence_pack"}:
+        return "/".join(parts[:2]) if len(parts) >= 2 else family
+    if family in {"sample_index", "views"}:
+        return relative.as_posix()
+    return "/".join(parts[:2]) if len(parts) >= 2 else family
+
+
+def _runtime_paths_from_view(view: Mapping[str, Any]) -> list[str]:
+    paths: list[str] = []
+    for section in ("feature_channels", "label_arrays", "masks"):
+        for meta in dict(view.get(section, {}) or {}).values():
+            if not isinstance(meta, Mapping):
+                continue
+            if meta.get("path"):
+                paths.append(str(meta["path"]))
+            for shard in list(meta.get("shards", []) or []):
+                if isinstance(shard, Mapping) and shard.get("path"):
+                    paths.append(str(shard["path"]))
+    if view.get("sample_index_path"):
+        paths.append(str(view["sample_index_path"]))
+    artifact_view = dict(view.get("artifact_view", {}) or {})
+    for key in ("panel_store_manifest", "source_view"):
+        if artifact_view.get(key):
+            paths.append(str(artifact_view[key]))
+    for value in dict(artifact_view.get("label_sources", {}) or {}).values():
+        if value:
+            paths.append(str(value))
+    return paths
+
+
+def build_active_view_dependency_graph(
+    *,
+    store_root: str | Path = DEFAULT_RESEARCH_STORE_ROOT,
+    policy_path: str | Path = DEFAULT_RETENTION_POLICY,
+    active_view_ids: list[str] | tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    store_root_path = _workspace_path(store_root)
+    discovered = discover_research_store_views(store_root_path)
+    policy = load_research_store_retention_policy(policy_path)
+    selected_ids = sorted({str(item) for item in list(active_view_ids or policy.get("active_view_ids", []) or [])})
+    if not selected_ids:
+        selected_ids = sorted(discovered)
+    views: dict[str, Any] = {}
+    active_components: set[str] = set()
+    missing_views: list[str] = []
+    missing_runtime_paths: list[dict[str, str]] = []
+    for view_id in selected_ids:
+        view_path = discovered.get(view_id)
+        if view_path is None:
+            missing_views.append(view_id)
+            continue
+        payload = _read_json(view_path)
+        components = {_component_id(view_path, store_root=store_root_path)}
+        runtime_paths: list[dict[str, Any]] = []
+        for raw_path in _runtime_paths_from_view(payload):
+            candidate = Path(raw_path)
+            if not candidate.is_absolute():
+                candidate = WORKSPACE_ROOT / candidate
+            component = _component_id(candidate, store_root=store_root_path)
+            if component:
+                components.add(component)
+            exists = candidate.exists()
+            runtime_paths.append(
+                {
+                    "path": _relative(candidate),
+                    "component_id": component,
+                    "exists": exists,
+                }
+            )
+            if not exists:
+                missing_runtime_paths.append({"view_id": view_id, "path": _relative(candidate)})
+        components.discard("")
+        active_components.update(components)
+        views[view_id] = {
+            "path": _relative(view_path),
+            "sha256": _sha256_file(view_path),
+            "components": sorted(components),
+            "runtime_path_count": len(runtime_paths),
+        }
+    return {
+        "schema_version": 1,
+        "artifact_type": "research_store_active_view_dependency_graph",
+        "store_root": _relative(store_root_path),
+        "policy_path": _relative(policy_path) if _workspace_path(policy_path).exists() else "",
+        "active_view_ids": selected_ids,
+        "views": views,
+        "active_component_ids": sorted(active_components),
+        "missing_views": missing_views,
+        "missing_runtime_paths": missing_runtime_paths,
+        "inactive_disk_view_ids": sorted(set(discovered) - set(selected_ids)),
+    }
+
+
+def build_research_store_index(
+    *,
+    store_root: str | Path = DEFAULT_RESEARCH_STORE_ROOT,
+    policy_path: str | Path = DEFAULT_RETENTION_POLICY,
+    active_view_ids: list[str] | tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    store_root_path = _workspace_path(store_root)
+    graph = build_active_view_dependency_graph(
+        store_root=store_root_path,
+        policy_path=policy_path,
+        active_view_ids=active_view_ids,
+    )
+    discovered = discover_research_store_views(store_root_path)
+    views: dict[str, Any] = {}
+    for view_id in graph["active_view_ids"]:
+        path = discovered.get(str(view_id))
+        if path is None:
+            continue
+        payload = _read_json(path)
+        artifact_view = dict(payload.get("artifact_view", {}) or {})
+        views[str(view_id)] = {
+            "path": _store_relative(path, store_root=store_root_path),
+            "sha256": _sha256_file(path),
+            "view_type": str(artifact_view.get("view_type", "research_store_view") or "research_store_view"),
+        }
+    index = {
+        "schema_version": 2,
+        "artifact_type": "qdp_v2_research_store_index",
+        "created_at": _now(),
+        "store_root": _relative(store_root_path),
+        "retention_policy": _relative(policy_path) if _workspace_path(policy_path).exists() else "",
+        "active_view_ids": list(graph["active_view_ids"]),
+        "views": views,
+        "active_component_ids": list(graph["active_component_ids"]),
+        "inactive_disk_view_ids": list(graph["inactive_disk_view_ids"]),
+    }
+    index_path = _write_json(store_root_path / "research_store_index.json", index)
+    return {**index, "index_path": _relative(index_path)}
 
 
 def _hardlink_file(source: str | Path, target: str | Path, *, overwrite: bool = False) -> Path:
@@ -365,30 +555,16 @@ def build_unified_store_from_legacy_packs(
             },
         ),
     }
-    index = {
-        "schema_version": 1,
-        "artifact_type": "qdp_v2_research_store_index",
-        "created_at": _now(),
-        "store_root": str(store_root_path.resolve()),
-        "panel_store": panel_store,
-        "label_stores": {
-            "path60_nextopen_ohlc_v1": labels_path60_ohlc,
-            "path60_nextopen_ohlcva_v1": labels_path60_ohlcva,
-            "path60_todayclose_ohlcva_v1": labels_todayclose,
-            "path20_nextopen_ohlc_v1": labels_path20_ohlc,
-        },
-        "views": {name: str((store_root_path / "views" / f"{name}.json").resolve()) for name in views},
-        "legacy_packs_replaced": list(LEGACY_PACK_NAMES),
-    }
-    index_path = _write_json(store_root_path / "research_store_index.json", index)
-    index["index_path"] = str(index_path.resolve())
-    _write_json(index_path, index)
+    index = build_research_store_index(
+        store_root=store_root_path,
+        active_view_ids=list(views),
+    )
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "built",
         "generated_at": _now(),
-        "index_path": str(index_path.resolve()),
-        "view_paths": index["views"],
+        "index_path": index["index_path"],
+        "view_paths": {name: item["path"] for name, item in dict(index["views"]).items()},
         "legacy_packs_replaced": list(LEGACY_PACK_NAMES),
     }
 
@@ -397,7 +573,7 @@ def _open_memmap(meta: Mapping[str, Any], *, dtype: str) -> np.memmap:
     return np.memmap(str(meta["path"]), dtype=dtype, mode="r", shape=tuple(int(item) for item in meta["shape"]))
 
 
-def verify_unified_store_views(
+def _verify_all_legacy_views_with_path20_equivalence(
     *,
     store_root: str | Path = DEFAULT_RESEARCH_STORE_ROOT,
     legacy_root: str | Path = DEFAULT_LEGACY_SEQUENCE_PACK_ROOT,
@@ -406,7 +582,11 @@ def verify_unified_store_views(
     store_root_path = _workspace_path(store_root)
     legacy_root_path = _workspace_path(legacy_root)
     index = _read_json(store_root_path / "research_store_index.json")
-    view_paths = {name: Path(path) for name, path in dict(index.get("views", {}) or {}).items()}
+    view_paths: dict[str, Path] = {}
+    for name, item in dict(index.get("views", {}) or {}).items():
+        raw_path = item.get("path", "") if isinstance(item, Mapping) else item
+        path = Path(str(raw_path))
+        view_paths[str(name)] = path if path.is_absolute() else store_root_path / path
     for name, path in view_paths.items():
         validate_sequence_pack(path)
     path20_view = _read_json(view_paths["seq100_path20_nextopen_ohlc_from_path60"])
@@ -478,8 +658,8 @@ def verify_unified_store_views(
         expected_shape = tuple(int(item) for item in path20["label_arrays"]["future_ohlc_path"]["shape"])
         if tuple(int(item) for item in view_label.shape) != expected_shape:
             raise ValueError(f"path20 moved label shape mismatch: expected={expected_shape} actual={view_label.shape}")
-        if "path20_nextopen_ohlc_v1" not in dict(index.get("label_stores", {}) or {}):
-            raise ValueError("path20 source label is missing and no path20 label store is registered")
+        if not Path(str(path20_view["label_arrays"]["future_ohlc_path"].get("path", "") or "")).exists():
+            raise ValueError("path20 source label is missing and the moved path20 label store is unavailable")
     return {
         "schema_version": 1,
         "status": "ok",
@@ -491,6 +671,81 @@ def verify_unified_store_views(
     }
 
 
+def verify_unified_store_views(
+    *,
+    store_root: str | Path = DEFAULT_RESEARCH_STORE_ROOT,
+    legacy_root: str | Path = DEFAULT_LEGACY_SEQUENCE_PACK_ROOT,
+    policy_path: str | Path = DEFAULT_RETENTION_POLICY,
+    max_checks: int = 128,
+) -> dict[str, Any]:
+    store_root_path = _workspace_path(store_root)
+    index_path = store_root_path / "research_store_index.json"
+    index = _read_json(index_path) if index_path.exists() else {}
+    graph = build_active_view_dependency_graph(store_root=store_root_path, policy_path=policy_path)
+    discovered = discover_research_store_views(store_root_path)
+    active_ids = [str(item) for item in list(graph.get("active_view_ids", []) or [])]
+    indexed_views = dict(index.get("views", {}) or {})
+    blockers: list[str] = []
+    validations: dict[str, Any] = {}
+
+    if int(index.get("schema_version", 0) or 0) != 2:
+        blockers.append("research_store_index_schema_must_be_v2")
+    if list(index.get("active_view_ids", []) or []) != active_ids:
+        blockers.append("research_store_index_active_view_ids_mismatch")
+    if set(indexed_views) != set(active_ids):
+        blockers.append("research_store_index_view_set_mismatch")
+    for view_id in active_ids:
+        view_path = discovered.get(view_id)
+        if view_path is None:
+            blockers.append(f"missing_active_view:{view_id}")
+            continue
+        item = indexed_views.get(view_id)
+        if not isinstance(item, Mapping):
+            blockers.append(f"missing_v2_index_entry:{view_id}")
+            continue
+        indexed_path = Path(str(item.get("path", "") or ""))
+        if not indexed_path.is_absolute():
+            indexed_path = store_root_path / indexed_path
+        if indexed_path.resolve() != view_path.resolve():
+            blockers.append(f"indexed_view_path_mismatch:{view_id}")
+            continue
+        expected_hash = str(item.get("sha256", "") or "")
+        actual_hash = _sha256_file(view_path)
+        if not expected_hash or expected_hash != actual_hash:
+            blockers.append(f"indexed_view_hash_mismatch:{view_id}")
+        validation = validate_sequence_pack(view_path)
+        validations[view_id] = validation
+        if validation.get("status") != "ok":
+            blockers.extend(f"{view_id}:{item}" for item in list(validation.get("blockers", []) or []))
+    blockers.extend(f"missing_runtime_path:{item['view_id']}:{item['path']}" for item in graph["missing_runtime_paths"])
+    blockers.extend(f"missing_policy_view:{view_id}" for view_id in graph["missing_views"])
+
+    result: dict[str, Any] = {
+        "schema_version": 2,
+        "status": "blocked" if blockers else "ok",
+        "generated_at": _now(),
+        "index_path": _relative(index_path),
+        "policy_path": graph.get("policy_path", ""),
+        "active_view_ids": active_ids,
+        "validated_views": {view_id: _relative(discovered[view_id]) for view_id in active_ids if view_id in discovered},
+        "inactive_disk_view_ids": list(graph.get("inactive_disk_view_ids", []) or []),
+        "active_component_ids": list(graph.get("active_component_ids", []) or []),
+        "dependency_graph": graph.get("views", {}),
+        "validations": validations,
+        "blockers": blockers,
+    }
+    if not blockers and "seq100_path20_nextopen_ohlc_from_path60" in active_ids:
+        legacy_result = _verify_all_legacy_views_with_path20_equivalence(
+            store_root=store_root_path,
+            legacy_root=legacy_root,
+            max_checks=max_checks,
+        )
+        for key in ("path20_equivalence_checks", "path20_label_source", "path20_sample_count"):
+            if key in legacy_result:
+                result[key] = legacy_result[key]
+    return result
+
+
 def delete_replaced_legacy_packs(
     *,
     store_root: str | Path = DEFAULT_RESEARCH_STORE_ROOT,
@@ -500,6 +755,8 @@ def delete_replaced_legacy_packs(
     if str(confirm_delete or "") != DELETE_CONFIRMATION:
         raise ValueError(f"delete requires --confirm-delete {DELETE_CONFIRMATION}")
     verification = verify_unified_store_views(store_root=store_root, legacy_root=legacy_root)
+    if verification.get("status") != "ok":
+        raise RuntimeError(f"research store verification blocked deletion: {verification.get('blockers', [])}")
     root = _workspace_path(legacy_root).resolve()
     deleted: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
@@ -541,8 +798,13 @@ def build_parser() -> argparse.ArgumentParser:
     verify = sub.add_parser("verify")
     verify.add_argument("--store-root", type=Path, default=DEFAULT_RESEARCH_STORE_ROOT)
     verify.add_argument("--legacy-root", type=Path, default=DEFAULT_LEGACY_SEQUENCE_PACK_ROOT)
+    verify.add_argument("--policy-path", type=Path, default=DEFAULT_RETENTION_POLICY)
     verify.add_argument("--max-checks", type=int, default=128)
     verify.add_argument("--json", action="store_true")
+    refresh = sub.add_parser("refresh-index")
+    refresh.add_argument("--store-root", type=Path, default=DEFAULT_RESEARCH_STORE_ROOT)
+    refresh.add_argument("--policy-path", type=Path, default=DEFAULT_RETENTION_POLICY)
+    refresh.add_argument("--json", action="store_true")
     delete = sub.add_parser("delete-replaced-legacy-packs")
     delete.add_argument("--store-root", type=Path, default=DEFAULT_RESEARCH_STORE_ROOT)
     delete.add_argument("--legacy-root", type=Path, default=DEFAULT_LEGACY_SEQUENCE_PACK_ROOT)
@@ -564,7 +826,13 @@ def main(argv: list[str] | None = None) -> int:
         result = verify_unified_store_views(
             store_root=args.store_root,
             legacy_root=args.legacy_root,
+            policy_path=args.policy_path,
             max_checks=int(args.max_checks),
+        )
+    elif args.command == "refresh-index":
+        result = build_research_store_index(
+            store_root=args.store_root,
+            policy_path=args.policy_path,
         )
     elif args.command == "delete-replaced-legacy-packs":
         result = delete_replaced_legacy_packs(

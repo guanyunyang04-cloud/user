@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from unittest.mock import patch
 
 from tools.brain.capsule import build_task_capsule
 from tools.brain.routing import route_task_to_brain
@@ -129,6 +130,60 @@ class BrainCapsuleTest(unittest.TestCase):
                 payload = route_task_to_brain(task)
                 self.assertEqual(payload["status"], "selected")
                 self.assertEqual(payload["selected_brain_id"], "daily_research")
+
+    def test_route_preserves_actual_research_and_execution_objects(self) -> None:
+        research = route_task_to_brain("评估默认研究主线模型")
+        research_objects = {item["object"]: item for item in research["object_routes"]}
+        self.assertEqual(research["selected_brain_id"], "daily_research")
+        self.assertIn("model_research_evidence", research_objects)
+        self.assertNotIn("sequence_training_pack", research_objects)
+
+        execution = route_task_to_brain("切换默认执行策略并写入 active_execution_strategy")
+        execution_objects = {item["object"]: item for item in execution["object_routes"]}
+        self.assertEqual(execution["selected_brain_id"], "daily_research")
+        self.assertEqual(execution_objects["active_execution_artifact"]["mode"], "write")
+
+    def test_capsule_fails_closed_for_missing_active_artifact_on_execution_write(self) -> None:
+        missing = {
+            "path": "daily_research/output/active_execution_strategy.json",
+            "status": "missing",
+            "exists": False,
+            "tracked": False,
+            "ignored": True,
+            "clean": False,
+            "returncode": 1,
+            "diff_line_count": 0,
+        }
+        with patch("tools.brain.adapters.daily_research.active_artifact_diff_status", return_value=missing):
+            payload = build_task_capsule(
+                task="切换默认执行策略并写入 active_execution_strategy",
+                workflow="auto",
+                intent="mutate",
+            )
+
+        self.assertFalse(payload["mutation_allowed"])
+        self.assertIn("active_artifact_missing", payload["preflight_blockers"])
+
+    def test_capsule_allows_research_mutation_when_missing_active_artifact_is_read_only(self) -> None:
+        missing = {
+            "path": "daily_research/output/active_execution_strategy.json",
+            "status": "missing",
+            "exists": False,
+            "tracked": False,
+            "ignored": True,
+            "clean": False,
+            "returncode": 1,
+            "diff_line_count": 0,
+        }
+        with patch("tools.brain.adapters.daily_research.active_artifact_diff_status", return_value=missing):
+            payload = build_task_capsule(
+                task="评估默认研究主线模型",
+                workflow="auto",
+                intent="mutate",
+            )
+
+        self.assertTrue(payload["mutation_allowed"])
+        self.assertNotIn("active_artifact_missing", payload["preflight_blockers"])
 
     def test_route_intraday_task_to_t0_project(self) -> None:
         payload = route_task_to_brain("盘中 RL 原型接管")

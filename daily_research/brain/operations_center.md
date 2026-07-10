@@ -33,6 +33,7 @@
 
 ### object `execution_runtime`
 `state`: frozen skeleton / read-only diagnostics / candidate wrappers.
+`active_artifact`: `daily_research/output/active_execution_strategy.json`; missing or ignored-untracked is not a clean execution state.
 `app_entry`: `conda run -n yolos python daily_research/execution/run_execution_app.py web --port 8765`
 `manual_flow`: refresh data/signals -> generate trade plan -> simulate account posting -> review status.
 `activation`: only execution tasks select this object.
@@ -40,8 +41,8 @@
 ## Procedure Entries
 ### procedure `brain_maintenance`
 `input`: changed brain docs, registry, workflow, skill, or governance files.
-`steps`: keep hot-path docs compact；move long history to `references/`；run doc guard, integrity check, burden audit；sync skill when skill files changed.
-`validation`: `doc_guard changed`；`integrity_check --json`；`brain-burden-audit --mode compact`。
+`steps`: keep hot-path docs compact；move long history to `references/`；run doc guard, integrity check, structure audit；sync skill when skill files changed.
+`validation`: `doc_guard changed`；`integrity_check --json`；`brain-structure-audit --mode compact`。
 
 ### procedure `shortline_research_work`
 `input`: QDP pack / manifest, feature diagnostics, shortline condition priors.
@@ -156,7 +157,7 @@
 - Selective verification: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.selective_verification --paths <changed_paths> --json`
 - Brain doc guard: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed`
 - Brain integrity: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json`
-- Brain burden: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py brain-burden-audit --cwd . --mode compact`
+- Brain structure: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe brain/skills/workspace-brain/scripts/brain_runtime.py brain-structure-audit --cwd . --mode compact`
 
 ## Validation Selection Function
 - `brain_docs_changed -> doc_guard + integrity_check + burden_audit`

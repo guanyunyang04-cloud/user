@@ -99,6 +99,7 @@
 - Seq100 2025 roll-forward profile result：`daily_research/brain/references/path_policy_seq100_rollforward_2025_result_20260709.md`
 - Seq100 all-profile 2024 validation + 2025 forward result：`daily_research/brain/references/path_policy_seq100_all_profiles_val2024_forward2025_result_20260709.md`
 - Seq100 all-channel summary_v2 combo result：`daily_research/brain/references/path_policy_seq100_summary_v2_all_channels_combo_result_20260710.md`
+- Archived Path20/alpha-v2 July run reconciliation：`daily_research/brain/references/path_policy_alpha_v2_july_archived_runs_reconciliation_20260710.md`
 - Shortline plan：`daily_research/brain/references/shortline_after_close_research_plan_20260624.md`
 - Stage 0 diagnostic：`daily_research/brain/references/shortline_stage0_fixed_next_open_diagnostic_20260624.md`
 - Feature profile / semantics：`daily_research/brain/references/shortline_upside_feature_profile_20260624.md`、`daily_research/brain/references/shortline_upside_feature_semantics_20260624.md`

@@ -391,6 +391,32 @@ def _registry_matches(task: str, descriptors: list[BrainRouteDescriptor]) -> lis
     return candidates
 
 
+def _object_registry_matches(task: str) -> list[RouteCandidate]:
+    matched_by_owner: dict[str, list[Any]] = {}
+    for match in match_objects_for_task(task):
+        matched_by_owner.setdefault(match.owner, []).append(match)
+    candidates: list[RouteCandidate] = []
+    for owner, matches in matched_by_owner.items():
+        brain_id = "workspace_governance" if owner == "workspace" else owner
+        terms = _dedupe(
+            [
+                *[match.object_id for match in matches],
+                *[term for match in matches for term in match.matched_terms],
+                *[term for match in matches for term in match.matched_write_terms],
+            ]
+        )
+        candidates.append(
+            RouteCandidate(
+                brain_id=brain_id,
+                score=60 + len(matches),
+                matched_terms=terms,
+                sources=["object_registry_match"],
+                evidence_strength="hard",
+            )
+        )
+    return candidates
+
+
 def _merge_candidates(candidates: list[RouteCandidate]) -> list[RouteCandidate]:
     merged: dict[str, dict[str, Any]] = {}
     for candidate in candidates:
@@ -442,34 +468,18 @@ def _daily_research_object_matched(task: str) -> bool:
 
 def _object_routes_for_task(task: str, *, primary_brain_id: str) -> list[dict[str, str]]:
     registry_matches = match_objects_for_task(task)
-    qdp_matched = any(item.object_id == QDP_OBJECT_ID for item in registry_matches)
-    research_matched = any(item.owner == DAILY_RESEARCH_OWNER for item in registry_matches)
     object_routes: list[dict[str, str]] = []
-    if qdp_matched:
-        qdp_mode = "read_only" if primary_brain_id == DAILY_RESEARCH_OWNER else ("write" if _qdp_write_matched(task) else "read_only")
+    for match in registry_matches:
+        mode = "write" if match.matched_write_terms or match.default_mode == "write" else "read_only"
+        if match.object_id == QDP_OBJECT_ID and primary_brain_id == DAILY_RESEARCH_OWNER and not match.matched_write_terms:
+            mode = "read_only"
+        reason = match.route_reason or ("object mutation" if mode == "write" else "object inspection")
         object_routes.append(
             {
-                "object": QDP_OBJECT_ID,
-                "owner": QDP_OWNER,
-                "mode": qdp_mode,
-                "reason": "source facts" if qdp_mode == "read_only" else "data base maintenance",
-            }
-        )
-    if research_matched or primary_brain_id == DAILY_RESEARCH_OWNER:
-        object_routes.append(
-            {
-                "object": "sequence_training_pack",
-                "owner": DAILY_RESEARCH_OWNER,
-                "mode": "write",
-                "reason": "research artifact",
-            }
-        )
-        object_routes.append(
-            {
-                "object": "model_research_evidence",
-                "owner": DAILY_RESEARCH_OWNER,
-                "mode": "write",
-                "reason": "model, loss, evaluation, or research conclusion",
+                "object": match.object_id,
+                "owner": match.owner,
+                "mode": mode,
+                "reason": reason,
             }
         )
     return object_routes
@@ -479,11 +489,12 @@ def _writeback_targets_for_task(*, primary_brain_id: str, supporting_brain_ids: 
     targets: list[str] = []
     has_daily_write = any(item.get("owner") == "daily_research" and item.get("mode") == "write" for item in object_routes)
     has_qdp_write = any(item.get("owner") == "quant_data_platform" and item.get("mode") == "write" for item in object_routes)
+    has_workspace_write = any(item.get("owner") == "workspace" and item.get("mode") == "write" for item in object_routes)
     if primary_brain_id == "daily_research" or has_daily_write:
         targets.extend(["daily_research/brain/state_center.md", "daily_research/brain/references/"])
     if primary_brain_id == "quant_data_platform" or has_qdp_write:
         targets.extend(["quant_data_platform/brain/state_center.md", "quant_data_platform/brain/references/"])
-    if supporting_brain_ids or len({item.get("owner") for item in object_routes if item.get("owner")}) > 1:
+    if has_workspace_write or supporting_brain_ids or len({item.get("owner") for item in object_routes if item.get("owner")}) > 1:
         targets.append("brain/state_center.md")
     return _dedupe(targets)
 
@@ -518,6 +529,7 @@ def route_task_to_brain(task: str) -> dict[str, Any]:
         *_project_path_matches(text, descriptors),
         *_descriptor_term_matches(text, descriptors),
         *_workspace_matches(text),
+        *_object_registry_matches(text),
         *_registry_matches(text, descriptors),
     ]
     candidates = _merge_candidates(raw_candidates)

@@ -102,7 +102,7 @@ def test_qdp_v2_status_reads_active_and_dataset_manifests_without_catalog(tmp_pa
     write_dataset_manifest(root, manifest)
     _write_active(root, {"market_daily_raw": manifest.dataset_id})
 
-    payload = status_payload(workspace_root=workspace)
+    payload = status_payload(workspace_root=workspace, verify_files=True)
 
     assert payload["status"] == "ok"
     assert payload["datasets"]["market_daily_raw"]["existing_shards"] == 1
@@ -167,12 +167,41 @@ def test_qdp_v2_quick_check_does_not_scan_all_parquet_footers(tmp_path: Path) ->
     write_dataset_manifest(root, manifest)
     _write_active(root, {"trading_calendar": manifest.dataset_id})
 
-    quick = run_check(workspace_root=workspace, full=False, no_write=True)
+    quick = run_check(workspace_root=workspace, full=False)
     active = audit_active(workspace_root=workspace, write=False, verify_footers=True)
 
     assert quick["active"]["status"] == "ok"
     assert active["status"] == "error"
     assert any("row_count_mismatch" in item for item in active["errors"])
+
+
+def test_qdp_v2_status_is_metadata_only_by_default(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    root = qdp_v2_root(workspace)
+    manifest = DatasetManifest(
+        dataset_id="trading_calendar__metadata_only",
+        domain="trading_calendar",
+        layer="raw",
+        frequency="",
+        contract_version="qdp_v2_trading_calendar_v1",
+        primary_key=["trade_date"],
+        start_date="2026-01-05",
+        end_date="2026-01-05",
+        row_count=1,
+        schema_hash="unit",
+        shards=[ShardManifestEntry(path="datasets/trading_calendar/trading_calendar__metadata_only/shards/missing.parquet", row_count=1)],
+        source={"provider": "unit"},
+        quality={"path_refs_exist": True},
+    )
+    write_dataset_manifest(root, manifest)
+    _write_active(root, {"trading_calendar": manifest.dataset_id})
+
+    payload = status_payload(workspace_root=workspace)
+
+    assert payload["status"] == "ok"
+    assert payload["datasets"]["trading_calendar"]["existing_shards"] is None
+    assert payload["datasets"]["trading_calendar"]["file_verification"] == "not_requested"
+    assert not (root / "audits").exists()
 
 
 def test_qdp_v2_database_audit_reports_duplicate_primary_keys(tmp_path: Path) -> None:

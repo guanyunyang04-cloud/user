@@ -12,13 +12,12 @@ from quant_data_platform.qdp_v2.manifest import (
     qdp_v2_root,
     read_active_manifest,
     read_dataset_manifest,
-    resolve_manifest_path,
     utc_now,
 )
-from quant_data_platform.qdp_v2.status import _active_dataset_refs
+from quant_data_platform.qdp_v2.status import _active_dataset_refs, _dataset_file_index, _manifest_path_key
 
 
-def audit_active(*, workspace_root: str | Path | None = None, write: bool = True, verify_footers: bool = True) -> dict[str, Any]:
+def audit_active(*, workspace_root: str | Path | None = None, write: bool = False, verify_footers: bool = True) -> dict[str, Any]:
     root = qdp_v2_root(workspace_root)
     active = read_active_manifest(root)
     if not active:
@@ -35,9 +34,10 @@ def audit_active(*, workspace_root: str | Path | None = None, write: bool = True
         missing_shards: list[str] = []
         footer_errors: list[str] = []
         footer_rows = 0
+        file_index = _dataset_file_index(manifest_path.parent)
         for shard in manifest.shards:
-            shard_path = resolve_manifest_path(shard.path, root=root)
-            if not shard_path.exists():
+            shard_path = Path(shard.path) if Path(shard.path).is_absolute() else root / shard.path
+            if _manifest_path_key(shard.path, root) not in file_index:
                 missing_shards.append(str(shard_path))
                 continue
             if verify_footers:
@@ -145,14 +145,14 @@ def _parquet_row_count(path: Path) -> int:
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="qdp check --quick", description="Audit qdp_v2 active manifests.")
     parser.add_argument("--workspace-root", default="")
-    parser.add_argument("--no-write", action="store_true")
+    parser.add_argument("--write-audit", action="store_true", help="Persist an audit JSON; checks are read-only by default.")
     parser.add_argument("--json", action="store_true")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
-    payload = audit_active(workspace_root=str(args.workspace_root or "") or None, write=not bool(args.no_write))
+    payload = audit_active(workspace_root=str(args.workspace_root or "") or None, write=bool(args.write_audit))
     print(json.dumps(json_safe(payload), ensure_ascii=False, indent=2) if args.json else _format(payload))
     return 0 if payload.get("status") == "ok" else 2
 

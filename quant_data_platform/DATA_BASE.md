@@ -1,5 +1,7 @@
 # QDP v2 Data Base
 
+Canonical brain source: `quant_data_platform/brain/state_center.md`.
+
 This file describes the current active local data base. The source of truth is:
 
 1. `data/qdp_v2/active/active.json`
@@ -77,10 +79,12 @@ Known boundaries:
 
 ```bash
 conda run -n yolos python -m quant_data_platform.cli status
+conda run -n yolos python -m quant_data_platform.cli status --verify-files
 conda run -n yolos python -m quant_data_platform.cli list
 conda run -n yolos python -m quant_data_platform.cli describe market_intraday_1m
 conda run -n yolos python -m quant_data_platform.cli describe market_intraday_1m --full --json
 conda run -n yolos python -m quant_data_platform.cli check --quick --json
+conda run -n yolos python -m quant_data_platform.cli check --quick --write-audit --json
 conda run -n yolos python -m quant_data_platform.cli check meta --runtime fast --writeback --json
 conda run -n yolos python -m quant_data_platform.cli rebuild scope-active --runtime fast --workers 4 --activate --json
 conda run -n yolos python -m quant_data_platform.cli rebuild limit-intraday --runtime fast --json

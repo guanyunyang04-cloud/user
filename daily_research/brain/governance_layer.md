@@ -48,12 +48,12 @@
 
 ### procedure `brain_maintenance`
 `input`: brain docs or skill changes
-`steps`: 保持热路径 compact；把长历史下沉到 `references/`；运行 `doc_guard`、`integrity_check` 和 `brain-burden-audit`；必要时更新 skill。
+`steps`: 保持热路径 compact；把长历史下沉到 `references/`；运行 `doc_guard`、`integrity_check` 和 `brain-structure-audit`；必要时更新 skill。
 `side_effects`: brain docs, registry, skill files。
 
 ## Guard Entrypoints
 - Brain docs: `python -m tools.brain.doc_guard check --scope changed`
 - Brain integrity: `python -m tools.brain.integrity_check --json`
-- Burden audit: `python brain/skills/workspace-brain/scripts/brain_runtime.py brain-burden-audit --cwd . --mode compact`
+- Structure audit: `python brain/skills/workspace-brain/scripts/brain_runtime.py brain-structure-audit --cwd . --mode compact`
 - Research consistency: `python daily_research/tools/project_consistency_check.py --mode research`
 - Execution consistency: only when `execution_surface` is active, use `--mode execution` or `--mode full`

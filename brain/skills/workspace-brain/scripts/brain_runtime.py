@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -78,6 +79,9 @@ def _output_text(value: object) -> str:
 
 
 def _run_command(cwd: Path, command: list[str], *, timeout_sec: float | None = None) -> dict[str, Any]:
+    env = dict(os.environ)
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
     try:
         result = subprocess.run(
             command,
@@ -85,8 +89,10 @@ def _run_command(cwd: Path, command: list[str], *, timeout_sec: float | None = N
             capture_output=True,
             text=True,
             encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=timeout_sec,
+            env=env,
         )
     except subprocess.TimeoutExpired as exc:
         stdout = _output_text(exc.output)
@@ -398,20 +404,39 @@ def health(cwd: Path, *, mode: str = "compact", timeout_sec: float = 60.0) -> di
         next_actions.append("rerun_integrity_with_more_time")
     if integrity_summary["error_count"]:
         next_actions.append("fix_integrity_errors")
+    if integrity_result["returncode"] != 0 and not integrity_result.get("timed_out"):
+        next_actions.append("fix_integrity_check")
     if doc_guard_result.get("timed_out"):
         next_actions.append("rerun_doc_guard_with_more_time")
+    elif doc_guard_result["returncode"] != 0:
+        next_actions.append("fix_doc_guard_errors")
     if skill_sync_result.get("timed_out"):
         next_actions.append("rerun_skill_sync_with_more_time")
+    elif skill_sync_result["returncode"] != 0 or not skill_sync.get("all_in_sync", False):
+        next_actions.append("fix_skill_sync")
     if frontier_result.get("timed_out"):
         next_actions.append("rerun_frontier_with_more_time")
+    elif frontier_result["returncode"] != 0:
+        next_actions.append("fix_frontier_check")
     if frontier_summary.get("brain_may_be_stale"):
         next_actions.append("review_frontier_reconciliation")
+    if catalog_summary.get("status") == "error":
+        next_actions.append("fix_brain_catalog")
     if not next_actions:
         next_actions.append("inspect_goal_and_relevant_context")
 
     timed_out = any(bool(result.get("timed_out")) for result in (skill_sync_result, integrity_result, doc_guard_result, frontier_result))
+    required_results = (skill_sync_result, integrity_result, doc_guard_result, frontier_result)
+    hard_failed = (
+        detected["status"] != "ok"
+        or any(result["returncode"] != 0 and not result.get("timed_out") for result in required_results)
+        or not bool(skill_sync.get("all_in_sync", False))
+        or bool(integrity_summary["error_count"])
+        or catalog_summary.get("status") == "error"
+    )
+    overall_status = "failed" if hard_failed else ("warning" if timed_out or frontier_summary.get("brain_may_be_stale") else "ok")
     payload = {
-        "status": "ok" if detected["status"] == "ok" and integrity_result["returncode"] == 0 and not timed_out else "warning",
+        "status": overall_status,
         "mode": "full",
         "health_level": "deep",
         "detect": detected,
@@ -540,13 +565,6 @@ def _workspace_relative(workspace_root: Path, path: Path) -> str:
     return path.resolve().relative_to(workspace_root.resolve()).as_posix()
 
 
-def _reference_count(root: Path) -> int:
-    references = root / "references"
-    if not references.exists():
-        return 0
-    return sum(1 for item in references.iterdir() if item.is_file())
-
-
 def _catalog_record(
     *,
     brain_id: str,
@@ -554,7 +572,6 @@ def _catalog_record(
     manifest_path: str,
     status: str,
     body_root: str,
-    last_guard_status: str,
 ) -> dict[str, Any]:
     return {
         "brain_id": brain_id,
@@ -563,9 +580,7 @@ def _catalog_record(
         "status": status,
         "body_root": body_root,
         "references_path": f"{root}/references" if root else "",
-        "references_count": _reference_count(Path(root)) if root else 0,
         "language_policy": "zh_semantic_en_identifiers_v1",
-        "last_guard_status": last_guard_status,
     }
 
 
@@ -586,7 +601,6 @@ def _rebuild_catalog(workspace_root: Path, main_manifest: dict[str, Any]) -> dic
             manifest_path="brain/brain_manifest.json",
             status="canonical_root",
             body_root=".",
-            last_guard_status="ok",
         )
     ]
     for child in main_manifest.get("child_brains", []) if isinstance(main_manifest.get("child_brains"), list) else []:
@@ -605,14 +619,12 @@ def _rebuild_catalog(workspace_root: Path, main_manifest: dict[str, Any]) -> dic
                 manifest_path=child_path,
                 status="attached" if str(child.get("attach_status", "") or "").startswith("attached") else "discovered_untracked",
                 body_root=body_root or str(Path(root).parent).replace("\\", "/"),
-                last_guard_status="ok",
             )
         )
     seen = {str(item.get("brain_id", "")) for item in records}
     records.extend(item for item in preserved if str(item.get("brain_id", "")) not in seen)
     return {
-        "schema_version": 1,
-        "generated_at": datetime.now().date().isoformat(),
+        "schema_version": 2,
         "language_policy": "zh_semantic_en_identifiers_v1",
         "brains": records,
     }

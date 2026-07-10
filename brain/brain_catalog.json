@@ -1,6 +1,5 @@
 {
-  "schema_version": 1,
-  "generated_at": "2026-06-11",
+  "schema_version": 2,
   "language_policy": "zh_semantic_en_identifiers_v1",
   "brains": [
     {
@@ -10,9 +9,7 @@
       "status": "canonical_root",
       "body_root": ".",
       "references_path": "brain/references",
-      "references_count": 9,
-      "language_policy": "zh_semantic_en_identifiers_v1",
-      "last_guard_status": "ok"
+      "language_policy": "zh_semantic_en_identifiers_v1"
     },
     {
       "brain_id": "daily_research",
@@ -21,9 +18,7 @@
       "status": "attached",
       "body_root": "daily_research",
       "references_path": "daily_research/brain/references",
-      "references_count": 134,
-      "language_policy": "zh_semantic_en_identifiers_v1",
-      "last_guard_status": "ok"
+      "language_policy": "zh_semantic_en_identifiers_v1"
     },
     {
       "brain_id": "t0_project",
@@ -32,9 +27,7 @@
       "status": "attached",
       "body_root": "t0_project",
       "references_path": "t0_project/brain/references",
-      "references_count": 2,
-      "language_policy": "zh_semantic_en_identifiers_v1",
-      "last_guard_status": "ok"
+      "language_policy": "zh_semantic_en_identifiers_v1"
     },
     {
       "brain_id": "daily_stock_analysis-main",
@@ -43,9 +36,7 @@
       "status": "attached",
       "body_root": "daily_stock_analysis-main",
       "references_path": "daily_stock_analysis-main/brain/references",
-      "references_count": 1,
-      "language_policy": "zh_semantic_en_identifiers_v1",
-      "last_guard_status": "ok"
+      "language_policy": "zh_semantic_en_identifiers_v1"
     },
     {
       "brain_id": "traditional_quant_research",
@@ -54,9 +45,7 @@
       "status": "attached",
       "body_root": "traditional_quant_research",
       "references_path": "traditional_quant_research/brain/references",
-      "references_count": 4,
-      "language_policy": "zh_semantic_en_identifiers_v1",
-      "last_guard_status": "ok"
+      "language_policy": "zh_semantic_en_identifiers_v1"
     },
     {
       "brain_id": "quant_data_platform",
@@ -65,9 +54,7 @@
       "status": "attached",
       "body_root": "quant_data_platform",
       "references_path": "quant_data_platform/brain/references",
-      "references_count": 0,
-      "language_policy": "zh_semantic_en_identifiers_v1",
-      "last_guard_status": "ok"
+      "language_policy": "zh_semantic_en_identifiers_v1"
     },
     {
       "brain_id": "tools",
@@ -76,9 +63,7 @@
       "status": "non_truth_tooling",
       "body_root": "tools",
       "references_path": "",
-      "references_count": 0,
-      "language_policy": "zh_semantic_en_identifiers_v1",
-      "last_guard_status": "not_guarded"
+      "language_policy": "zh_semantic_en_identifiers_v1"
     }
   ]
 }

@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 157,
+  "record_count": 158,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -3254,6 +3254,29 @@
         "`train_date_stride=3` remains a diagnostic shortcut, not the only valid training semantics."
       ],
       "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_alpha_v2_july_archived_runs_reconciliation_20260710",
+      "date": "2026-07-10",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_alpha_v2_july_archived_runs_reconciliation_20260710.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [
+        "qdp_v2_alpha_v2_no_symbol_h256_t4_b512_full_e12_w0_20260702_01",
+        "qdp_v2_alpha_v2_symbol_h256_t4_b512_full_e12_w0_20260702_01",
+        "qdp_v2_alpha_score_symbol_h256_t4_b512_w1_full_e12_20260703_01",
+        "qdp_v2_active_20260626"
+      ],
+      "verdict": "Shared boundary: all three runs are `shadow_only=true`, `promotion_allowed=false`, and declare `active_execution_strategy_expected_diff=none`.",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "guarded",
       "dataset_ids": []
     },
     {

@@ -23,6 +23,7 @@ HOT_PATHS = (
     "daily_research/brain/state_center.md",
     "daily_research/brain/knowledge_center.md",
     "daily_research/brain/operations_center.md",
+    "daily_research/brain/governance_layer.md",
 )
 
 STALE_PATTERNS = {
@@ -38,6 +39,7 @@ STALE_PATTERNS = {
     "qdp clean": "Use qdp rebuild for long-lived rebuildable tables.",
     "migrate-v2": "Migration is not a current public QDP workflow.",
     "activate-v2": "Activation is internal; public active state is managed by QDP workflows.",
+    "brain-burden-audit": "Removed command; use brain-structure-audit.",
 }
 
 ALLOWED_BY_PATH = {

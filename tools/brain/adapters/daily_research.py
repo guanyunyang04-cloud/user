@@ -593,19 +593,47 @@ def resolve_run_evidence(run_tag: str, workflow: str | None = None) -> RunEviden
 
 
 def active_artifact_diff_status() -> dict[str, Any]:
-    result = subprocess.run(
-        ["git", "diff", "--", ACTIVE_ARTIFACT.as_posix()],
-        cwd=str(WORKSPACE_ROOT),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
-    diff_text = result.stdout or ""
+    path_text = ACTIVE_ARTIFACT.as_posix()
+    absolute_path = WORKSPACE_ROOT / ACTIVE_ARTIFACT
+
+    def run_git(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(WORKSPACE_ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+
+    tracked_result = run_git("ls-files", "--error-unmatch", "--", path_text)
+    tracked = tracked_result.returncode == 0
+    exists = absolute_path.is_file()
+    ignored_result = run_git("check-ignore", "-q", "--", path_text)
+    ignored = ignored_result.returncode == 0
+    diff_result: subprocess.CompletedProcess[str] | None = None
+    diff_text = ""
+    if tracked:
+        # HEAD covers both staged and unstaged changes; a tracked deletion is dirty too.
+        diff_result = run_git("diff", "--no-ext-diff", "HEAD", "--", path_text)
+        diff_text = (diff_result.stdout or "") + (diff_result.stderr or "")
+        status = "tracked_clean" if diff_result.returncode == 0 and not diff_text.strip() else "tracked_dirty"
+    elif not exists:
+        status = "missing"
+    elif ignored:
+        status = "ignored_untracked"
+    else:
+        status = "untracked"
+
     return {
-        "path": ACTIVE_ARTIFACT.as_posix(),
-        "status": "clean" if result.returncode == 0 and not diff_text.strip() else "dirty",
-        "returncode": result.returncode,
+        "path": path_text,
+        "status": status,
+        "exists": exists,
+        "tracked": tracked,
+        "ignored": ignored,
+        "clean": status == "tracked_clean",
+        "returncode": diff_result.returncode if diff_result is not None else tracked_result.returncode,
         "diff_line_count": len(diff_text.splitlines()),
     }
 
@@ -635,12 +663,9 @@ def child_context_additions() -> dict[str, Any]:
 
 
 def capsule_guard_additions(rule_report: Mapping[str, Any]) -> dict[str, Any]:
-    findings = rule_report.get("findings", []) if isinstance(rule_report, Mapping) else []
+    del rule_report  # The artifact state is a direct sensor, not inferred from rule findings.
     return {
-        "active_artifact_guard": {
-            "path": ACTIVE_ARTIFACT.as_posix(),
-            "status": "clean" if not any(f["code"] == "active_artifact_diff" for f in findings) else "dirty",
-        },
+        "active_artifact_guard": active_artifact_diff_status(),
         "frontier_report": build_frontier_report(),
     }
 

@@ -1,10 +1,8 @@
 ﻿from __future__ import annotations
 
 import json
-import subprocess
 import sys
 from dataclasses import asdict, dataclass
-from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from tools.brain.platform import WORKSPACE_ROOT
@@ -24,21 +22,9 @@ class BrainRuleFinding:
         return asdict(self)
 
 
-def _run_git_diff_name(path: Path) -> str:
-    result = subprocess.run(
-        ["git", "diff", "--", path.as_posix()],
-        cwd=str(WORKSPACE_ROOT),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
-    return result.stdout or result.stderr or ""
-
-
 def check_active_artifact_diff() -> BrainRuleFinding | None:
-    diff = _run_git_diff_name(ACTIVE_ARTIFACT)
-    if diff.strip():
+    state = daily_research_adapter.active_artifact_diff_status()
+    if state.get("status") == "tracked_dirty":
         return BrainRuleFinding("error", "active_artifact_diff", f"{ACTIVE_ARTIFACT.as_posix()} has uncommitted diff")
     return None
 

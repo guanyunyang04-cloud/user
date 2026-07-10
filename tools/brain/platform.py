@@ -236,13 +236,6 @@ def load_workflow_registry(child_brain: str | None = None) -> dict[str, dict[str
     return {str(key): dict(value) for key, value in payload.items() if isinstance(value, dict)}
 
 
-def _reference_count(brain_root: Path) -> int:
-    references = workspace_path(brain_root / "references")
-    if not references.exists():
-        return 0
-    return sum(1 for item in references.iterdir() if item.is_file())
-
-
 def _catalog_record(
     *,
     brain_id: str,
@@ -250,7 +243,6 @@ def _catalog_record(
     manifest_path: Path | str,
     status: str,
     body_root: Path | str,
-    last_guard_status: str,
 ) -> dict[str, Any]:
     root_text = root.as_posix()
     references = root / "references"
@@ -261,9 +253,7 @@ def _catalog_record(
         "status": status,
         "body_root": Path(str(body_root)).as_posix() if str(body_root).strip() else "",
         "references_path": references.as_posix() if workspace_path(references).exists() else "",
-        "references_count": _reference_count(root),
         "language_policy": LANGUAGE_POLICY_ID,
-        "last_guard_status": last_guard_status,
     }
 
 
@@ -301,7 +291,6 @@ def build_brain_catalog() -> dict[str, Any]:
             manifest_path=MAIN_MANIFEST,
             status="canonical_root",
             body_root=Path("."),
-            last_guard_status="ok",
         )
     ]
     canonical_roots = {Path("brain").as_posix()}
@@ -322,7 +311,6 @@ def build_brain_catalog() -> dict[str, Any]:
                 manifest_path=child_path,
                 status="attached" if str(child.get("attach_status", "")).startswith("attached") else "discovered_untracked",
                 body_root=Path(str(child.get("body_root", "") or root.parent.as_posix())),
-                last_guard_status="ok",
             )
         )
 
@@ -361,7 +349,6 @@ def build_brain_catalog() -> dict[str, Any]:
                 manifest_path=manifest_ref,
                 status=status,
                 body_root=root.parent,
-                last_guard_status="not_guarded",
             )
         )
 
@@ -380,13 +367,11 @@ def build_brain_catalog() -> dict[str, Any]:
                 manifest_path=str(record.get("manifest_path", "") or ""),
                 status=status,
                 body_root=Path(str(record.get("body_root", "") or root.parent.as_posix())),
-                last_guard_status=str(record.get("last_guard_status", "") or "not_guarded"),
             )
         )
 
     return {
-        "schema_version": 1,
-        "generated_at": datetime.now().date().isoformat(),
+        "schema_version": 2,
         "language_policy": LANGUAGE_POLICY_ID,
         "brains": records,
     }

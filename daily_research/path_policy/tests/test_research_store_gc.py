@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from daily_research.path_policy import research_store_gc as gc
+from daily_research.path_policy import research_store_view as store_view
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -16,6 +17,7 @@ def _write_json(path: Path, payload: dict) -> None:
 @pytest.fixture()
 def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(gc, "WORKSPACE_ROOT", tmp_path)
+    monkeypatch.setattr(store_view, "WORKSPACE_ROOT", tmp_path)
     return tmp_path
 
 
@@ -118,6 +120,19 @@ def test_sequence_training_summary_counts_as_study_summary(workspace: Path) -> N
     assert item.summary_path.endswith("sequence_path_training_summary.json")
 
 
+def test_path_value_predictability_summary_counts_as_study_summary(workspace: Path) -> None:
+    study = workspace / "daily_research/output/path_policy/path_value_predictability/path_value_full"
+    _write_json(study / "path_value_predictability_summary.json", {"run_tag": "path_value_full"})
+    prediction = study / "predictions/prediction_rows.parquet"
+    prediction.parent.mkdir(parents=True)
+    prediction.write_bytes(b"1234567890")
+
+    item = gc.classify_study(study, reference_text="", large_file_threshold_bytes=1)
+
+    assert item.classification == "study_with_large_prediction_outputs"
+    assert item.summary_path.endswith("path_value_predictability_summary.json")
+
+
 def test_build_report_groups_safe_delete_and_trim_candidates(workspace: Path) -> None:
     pack_root = workspace / "daily_research/data/research_store/sequence_pack"
     smoke = pack_root / "smoke_seq100_path20"
@@ -217,6 +232,26 @@ def test_trim_prediction_outputs_deletes_only_prediction_files_and_marks_summary
     assert summary["prediction_trim_manifest"].endswith("prediction_trim_manifest.json")
 
 
+def test_trim_prediction_outputs_scans_multiple_artifact_roots(workspace: Path) -> None:
+    roots = [
+        workspace / "daily_research/output/path_policy/studies",
+        workspace / "daily_research/output/path_policy/sequence_path_training",
+    ]
+    for idx, root in enumerate(roots):
+        study = root / f"run_{idx}"
+        _write_json(study / "study_summary.json", {"run_tag": f"run_{idx}"})
+        (study / f"prediction_rows_{idx}.csv").write_bytes(b"1234567890")
+
+    result = gc.trim_prediction_outputs(
+        artifact_roots=roots,
+        reference_roots=[],
+        large_file_threshold_mb=0.000001,
+    )
+
+    assert result["totals"]["candidate_study_count"] == 2
+    assert result["totals"]["candidate_file_count"] == 2
+
+
 def test_delete_safe_candidates_requires_confirmation(workspace: Path) -> None:
     target = workspace / "daily_research/data/research_store/sequence_pack/smoke_seq100_path20"
     target.mkdir(parents=True)
@@ -271,6 +306,54 @@ def test_delete_safe_candidates_deletes_only_allowed_safe_directories(workspace:
     assert not safe.exists()
     assert outside.exists()
     assert result["skipped"][0]["reason"] == "outside_allowed_roots"
+
+
+def test_prune_cold_store_archives_and_preserves_active_view_dependencies(workspace: Path) -> None:
+    store = workspace / "daily_research/data/research_store"
+    active_sample = store / "sample_index/active.parquet"
+    active_sample.parent.mkdir(parents=True)
+    active_sample.write_bytes(b"active")
+    cold_sample = store / "sample_index/cold.parquet"
+    cold_sample.write_bytes(b"cold")
+    view_path = store / "views/active_view.json"
+    _write_json(
+        view_path,
+        {
+            "artifact_type": "qdp_v2_sequence_path_pack",
+            "artifact_view": {"view_id": "active_view", "view_type": "research_store_view"},
+            "feature_channels": {},
+            "label_arrays": {},
+            "masks": {},
+            "sample_index_path": str(active_sample.resolve()),
+            "sample_count": 1,
+            "sample_count_by_split": {"test": 1},
+        },
+    )
+    policy_path = workspace / "daily_research/brain/research_store_retention_policy.json"
+    _write_json(
+        policy_path,
+        {
+            "artifact_type": "research_store_retention_policy",
+            "active_view_ids": ["active_view"],
+            "cold_component_paths": ["sample_index/cold.parquet"],
+        },
+    )
+    store_view.build_research_store_index(store_root=store, policy_path=policy_path)
+
+    result = gc.prune_cold_research_store(
+        store_root=store,
+        policy_path=policy_path,
+        archive_root=workspace / "daily_research/brain/references",
+        delete=True,
+        confirm_delete=gc.COLD_STORE_CONFIRMATION,
+    )
+
+    assert result["status"] == "deleted_and_verified"
+    assert result["deleted_count"] == 1
+    assert active_sample.exists()
+    assert view_path.exists()
+    assert not cold_sample.exists()
+    assert Path(result["archive_paths"]["json"]).name.startswith("research_store_cold_assets_archive_")
 
 
 def test_migrate_legacy_sequence_pack_moves_dir_and_rewrites_paths(workspace: Path) -> None:

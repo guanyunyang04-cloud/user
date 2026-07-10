@@ -242,6 +242,65 @@ class WorkspaceBrainRuntimeInitTest(unittest.TestCase):
         self.assertEqual(payload["frontier"]["timeout_sec"], 11)
         self.assertIn("rerun_frontier_with_more_time", payload["next_actions"])
 
+    def test_brain_runtime_full_health_fails_when_doc_guard_fails(self) -> None:
+        runtime = load_runtime_module()
+
+        def fake_run_command(cwd: Path, command: list[str], *, timeout_sec: float | None = None) -> dict[str, object]:
+            joined = " ".join(command)
+            if "skill_install" in joined:
+                stdout = json.dumps({"all_in_sync": True, "skills": []})
+                return _runtime_result(command, timeout_sec, stdout=stdout)
+            if "integrity_check" in joined:
+                stdout = json.dumps({"status": "ok", "error_count": 0, "warning_count": 0, "findings": []})
+                return _runtime_result(command, timeout_sec, stdout=stdout)
+            if "current-frontier" in joined:
+                stdout = json.dumps({"brain_may_be_stale": False, "warnings": []})
+                return _runtime_result(command, timeout_sec, stdout=stdout)
+            return _runtime_result(command, timeout_sec, returncode=1, stderr="layout failed")
+
+        def _runtime_result(
+            command: list[str],
+            timeout_sec: float | None,
+            *,
+            returncode: int = 0,
+            stdout: str = "",
+            stderr: str = "",
+        ) -> dict[str, object]:
+            return {
+                "command": command,
+                "returncode": returncode,
+                "ok": returncode == 0,
+                "timed_out": False,
+                "timeout_sec": timeout_sec,
+                "stdout": stdout,
+                "stderr": stderr,
+                "stdout_tail": stdout,
+                "stderr_tail": stderr,
+            }
+
+        with (
+            patch.object(runtime, "_run_command", side_effect=fake_run_command),
+            patch("tools.brain.platform.build_brain_catalog", return_value={"brains": []}),
+        ):
+            payload = runtime.health(ROOT, mode="full", timeout_sec=17)
+
+        self.assertEqual(payload["status"], "failed")
+        self.assertEqual(payload["doc_guard"]["status"], "failed")
+        self.assertIn("fix_doc_guard_errors", payload["next_actions"])
+
+    def test_brain_runtime_deep_check_forces_utf8_and_replaces_decode_errors(self) -> None:
+        runtime = load_runtime_module()
+        completed = subprocess.CompletedProcess(["check"], 0, stdout="ok", stderr="")
+        with patch.object(runtime.subprocess, "run", return_value=completed) as run:
+            result = runtime._run_command(ROOT, ["check"], timeout_sec=1)
+
+        kwargs = run.call_args.kwargs
+        self.assertEqual(kwargs["encoding"], "utf-8")
+        self.assertEqual(kwargs["errors"], "replace")
+        self.assertEqual(kwargs["env"]["PYTHONUTF8"], "1")
+        self.assertEqual(kwargs["env"]["PYTHONIOENCODING"], "utf-8")
+        self.assertTrue(result["ok"])
+
     def test_brain_runtime_deep_check_timeout_is_structured(self) -> None:
         runtime = load_runtime_module()
         with patch.object(

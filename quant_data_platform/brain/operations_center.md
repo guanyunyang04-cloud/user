@@ -20,7 +20,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli status
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli list
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli describe market_intraday_1m
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli describe market_intraday_1m --full --json
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli check --quick --no-write
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli check --quick
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli check meta --runtime fast --duckdb-memory-limit 12GB --threads 4 --writeback --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild 5m --runtime fast --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild daily-panel --runtime fast --json

@@ -4,6 +4,7 @@ import time
 import unittest
 import inspect
 import json
+import subprocess
 from tempfile import TemporaryDirectory
 from pathlib import Path
 from unittest.mock import patch
@@ -207,7 +208,7 @@ class BrainPlatformTest(unittest.TestCase):
         catalog = build_brain_catalog()
 
         self.assertIn("brain_system_audit", registry)
-        self.assertEqual(catalog["schema_version"], 1)
+        self.assertEqual(catalog["schema_version"], 2)
         self.assertIn("brains", catalog)
 
     def test_child_workflow_registry_path_is_derived_from_manifest(self) -> None:
@@ -497,6 +498,41 @@ class BrainPlatformTest(unittest.TestCase):
 
         self.assertIn("latest_study_summary", freshness["artifacts"])
         self.assertEqual(active_guard["path"], "daily_research/output/active_execution_strategy.json")
+
+    def test_active_artifact_guard_distinguishes_missing_ignored_clean_and_dirty(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            def git(*args: str) -> None:
+                subprocess.run(
+                    ["git", *args],
+                    cwd=root,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    check=True,
+                )
+
+            git("init")
+            git("config", "user.email", "brain-test@example.invalid")
+            git("config", "user.name", "Brain Test")
+            (root / ".gitignore").write_text("daily_research/output/*\n", encoding="utf-8")
+            artifact = root / "daily_research/output/active_execution_strategy.json"
+            artifact.parent.mkdir(parents=True)
+
+            with patch.object(daily_research_adapter, "WORKSPACE_ROOT", root):
+                self.assertEqual(daily_research_adapter.active_artifact_diff_status()["status"], "missing")
+                artifact.write_text("{}\n", encoding="utf-8")
+                self.assertEqual(daily_research_adapter.active_artifact_diff_status()["status"], "ignored_untracked")
+
+                git("add", ".gitignore")
+                git("add", "-f", "daily_research/output/active_execution_strategy.json")
+                git("commit", "-m", "fixture")
+                self.assertEqual(daily_research_adapter.active_artifact_diff_status()["status"], "tracked_clean")
+
+                artifact.write_text('{"changed": true}\n', encoding="utf-8")
+                self.assertEqual(daily_research_adapter.active_artifact_diff_status()["status"], "tracked_dirty")
 
     def test_platform_source_does_not_embed_daily_research_fact_constants(self) -> None:
         source = inspect.getsource(brain_platform)

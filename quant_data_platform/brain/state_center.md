@@ -74,6 +74,12 @@
 `state`: production Python environment is `yolos`; update workflow may use mootdx/BaoStock/CNInfo according to domain.
 `boundary`: provider staging and update outputs must pass manifest/audit gates before active pointer changes.
 
+### object `qdp_storage_retention`
+`state`: on `2026-07-10`, manifest-aware GC removed 26 unreferenced dataset directories and reclaimed `44,891,842,512` bytes; 17 active dataset directories remain.
+`proof`: every removed dataset had a same-domain active replacement covering its date range; all active shard targets were materialized and non-symlink; pre/post quick check and post-delete `status --verify-files` passed.
+`runtime`: metadata-only `qdp status` completes in about 0.6s; read-only `qdp check --quick --runtime fast` completes in about 2.5s on the current store.
+`invariant`: future deletion still requires active-manifest traversal, dry-run, replacement evidence for unique-data boundaries, and post-delete file verification.
+
 ## Pure Functions
 - `active_table(domain)`: read `active.json.datasets[domain]` and then the referenced `dataset.json`.
 - `describe_table(domain, full=false)`: summary by default; full manifest only with `--full --json`.
@@ -86,7 +92,7 @@
 `output`: active scope and table summaries, without requiring a catalog.
 
 ### procedure `quick_quality_check`
-`command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli check --quick --no-write --json`
+`command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli check --quick --json`；默认只读，只有显式 `--write-audit` 才写审计文件。
 `output`: fast manifest/contract/path check.
 
 ### procedure `meta_quality_check`

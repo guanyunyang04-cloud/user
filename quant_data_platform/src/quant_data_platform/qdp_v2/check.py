@@ -7,7 +7,9 @@ from typing import Any
 
 from quant_data_platform.core.json_io import json_safe
 from quant_data_platform.qdp_v2.audit import audit_active
-from quant_data_platform.qdp_v2.database_audit import audit_database
+from quant_data_platform.qdp_v2.database_audit import REQUIRED_DOMAINS, audit_database
+from quant_data_platform.qdp_v2.manifest import qdp_v2_root, read_active_manifest
+from quant_data_platform.qdp_v2.status import active_dataset_map
 
 
 def run_check(
@@ -15,24 +17,31 @@ def run_check(
     workspace_root: str | Path | None = None,
     full: bool = False,
     runtime: str = "balanced",
-    no_write: bool = False,
+    write: bool = False,
 ) -> dict[str, Any]:
     if full:
-        return audit_database(workspace_root=workspace_root, deep=True, runtime=runtime, write=not no_write)
-    active = audit_active(workspace_root=workspace_root, write=not no_write, verify_footers=False)
-    database = audit_database(workspace_root=workspace_root, deep=False, runtime=runtime, write=False)
-    status = "ok" if active.get("status") == "ok" and database.get("status") == "ok" else "needs_attention"
+        return audit_database(workspace_root=workspace_root, deep=True, runtime=runtime, write=write)
+    active = audit_active(workspace_root=workspace_root, write=write, verify_footers=False)
+    manifest = read_active_manifest(qdp_v2_root(workspace_root))
+    active_domains = set(active_dataset_map(manifest))
+    missing_required = sorted(REQUIRED_DOMAINS.difference(active_domains))
+    database_status = "ok" if not missing_required else "needs_attention"
+    status = "ok" if active.get("status") == "ok" and database_status == "ok" else "needs_attention"
     return {
         "status": status,
         "mode": "quick",
         "active": active,
         "database": {
-            "status": database.get("status"),
-            "dataset_count": database.get("dataset_count"),
-            "finding_count": database.get("finding_count"),
-            "coverage": database.get("coverage", {}),
-            "errors": database.get("errors", []),
-            "warnings": database.get("warnings", []),
+            "status": database_status,
+            "dataset_count": len(active_domains),
+            "finding_count": len(missing_required),
+            "coverage": {
+                "active_domains": sorted(active_domains),
+                "required_domains": sorted(REQUIRED_DOMAINS),
+                "missing_required_domains": missing_required,
+            },
+            "errors": [],
+            "warnings": [f"required_domains_missing:{','.join(missing_required)}"] if missing_required else [],
         },
     }
 
@@ -44,7 +53,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     mode.add_argument("--quick", action="store_true", help="Run manifest/footer and coverage checks.")
     mode.add_argument("--full", action="store_true", help="Run deep row-level and cross-frequency checks.")
     parser.add_argument("--runtime", default="balanced", choices=("safe", "balanced", "fast"))
-    parser.add_argument("--no-write", action="store_true")
+    parser.add_argument("--write-audit", action="store_true", help="Persist audit output; checks are read-only by default.")
     parser.add_argument("--json", action="store_true")
     return parser
 
@@ -55,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
         workspace_root=str(args.workspace_root or "") or None,
         full=bool(args.full),
         runtime=str(args.runtime or "balanced"),
-        no_write=bool(args.no_write),
+        write=bool(args.write_audit),
     )
     if bool(args.json):
         print(json.dumps(json_safe(payload), ensure_ascii=False, indent=2))

@@ -44,6 +44,13 @@ class BrainRouteCliTest(unittest.TestCase):
         self.assertTrue(payload["decision_required"])
         self.assertEqual(payload["recommended_default"], "workspace")
 
+    def test_route_cli_exposes_active_execution_object(self) -> None:
+        payload = run_cli("route", "--task", "切换默认执行策略并写入 active_execution_strategy", "--json")
+
+        by_id = {item["object"]: item for item in payload["object_routes"]}
+        self.assertEqual(payload["selected_brain_id"], "daily_research")
+        self.assertEqual(by_id["active_execution_artifact"]["mode"], "write")
+
 
 if __name__ == "__main__":
     unittest.main()

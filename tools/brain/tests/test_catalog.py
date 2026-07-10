@@ -1,7 +1,6 @@
 ﻿from __future__ import annotations
 
 import unittest
-from datetime import date
 
 from tools.brain.platform import build_brain_catalog
 
@@ -23,18 +22,16 @@ class BrainCatalogTest(unittest.TestCase):
         self.assertNotIn("daily_research_cache_legacy", brains)
         self.assertNotIn("a_stock_daily_selection", brains)
 
-    def test_catalog_records_language_policy_and_guard_status(self) -> None:
+    def test_catalog_records_only_stable_registry_fields(self) -> None:
         catalog = build_brain_catalog()
 
+        self.assertEqual(catalog["schema_version"], 2)
         self.assertEqual(catalog["language_policy"], "zh_semantic_en_identifiers_v1")
+        self.assertNotIn("generated_at", catalog)
         for item in catalog["brains"]:
             self.assertIn("language_policy", item)
-            self.assertIn("last_guard_status", item)
-
-    def test_catalog_generated_at_uses_current_date(self) -> None:
-        catalog = build_brain_catalog()
-
-        self.assertEqual(catalog["generated_at"], date.today().isoformat())
+            self.assertNotIn("references_count", item)
+            self.assertNotIn("last_guard_status", item)
 
 
 if __name__ == "__main__":

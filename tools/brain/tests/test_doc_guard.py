@@ -40,6 +40,16 @@ class DocGuardTest(unittest.TestCase):
             ),
             "",
         )
+        self.assertTrue(doc_guard._is_allowed_doc_path("quant_data_platform/DATA_BASE.md"))
+        self.assertTrue(doc_guard._requires_canonical_marker("quant_data_platform/DATA_BASE.md"))
+        self.assertTrue(doc_guard._is_allowed_doc_path("tools/archive_repair/README.md"))
+        self.assertFalse(doc_guard._requires_canonical_marker("daily_stock_analysis-main/CLAUDE.md"))
+
+    def test_required_snippets_follow_current_object_schema(self) -> None:
+        state_snippets = doc_guard.REQUIRED_DOC_SNIPPETS["daily_research/brain/state_center.md"]
+        self.assertIn("## Object Instances", state_snippets)
+        self.assertIn("### object `seq100_path_value_research`", state_snippets)
+        self.assertNotIn("r65_portfolio_set_v5_status_20260514.md", state_snippets)
 
     def test_generated_and_output_markdown_do_not_require_canonical_marker(self) -> None:
         self.assertFalse(

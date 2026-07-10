@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
+from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping
+
+from daily_research.path_policy.research_store_view import (
+    DEFAULT_RETENTION_POLICY,
+    build_active_view_dependency_graph,
+    build_research_store_index,
+    load_research_store_retention_policy,
+    verify_unified_store_views,
+)
 
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
@@ -24,6 +34,11 @@ DEFAULT_RESEARCH_STORE_COMPONENT_ROOTS = (
     DEFAULT_RESEARCH_STORE_ROOT / "training_pack",
 )
 DEFAULT_STUDIES_ROOT = Path("daily_research/output/path_policy/studies")
+DEFAULT_ARTIFACT_ROOTS = (
+    DEFAULT_STUDIES_ROOT,
+    Path("daily_research/output/path_policy/sequence_path_training"),
+    Path("daily_research/output/path_policy/path_value_predictability"),
+)
 DEFAULT_REFERENCE_ROOTS = (
     Path("daily_research/brain"),
     Path("daily_research/brain/references"),
@@ -31,12 +46,15 @@ DEFAULT_REFERENCE_ROOTS = (
     Path("brain/references"),
 )
 DEFAULT_REPORT_ROOT = Path("daily_research/output/path_policy/research_gc")
+DEFAULT_COLD_ARCHIVE_ROOT = Path("daily_research/brain/references")
 DELETE_CONFIRMATION = "DELETE_RESEARCH_ARTIFACTS"
 TRIM_CONFIRMATION = "TRIM_PREDICTION_OUTPUTS"
+COLD_STORE_CONFIRMATION = "DELETE_COLD_RESEARCH_STORE_COMPONENTS"
 SUMMARY_FILE_NAMES = (
     "study_summary.json",
     "sequence_path_training_summary.json",
     "sequence_flat_lgbm_summary.json",
+    "path_value_predictability_summary.json",
 )
 
 
@@ -65,6 +83,8 @@ class ArtifactItem:
     manifest_path: str = ""
     summary_path: str = ""
     large_files: list[dict[str, Any]] | None = None
+    component_id: str = ""
+    active_reachable: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -361,7 +381,7 @@ def classify_study(path: str | Path, *, reference_text: str, large_file_threshol
     size = _directory_size(artifact_dir)
     referenced = _is_referenced(name, reference_text)
     large_files = _large_files(artifact_dir, threshold_bytes=large_file_threshold_bytes, max_files=12)
-    large_prediction_files = [item for item in large_files if item.get("kind") == "prediction_output"]
+    large_prediction_files = _large_prediction_files(artifact_dir, threshold_bytes=large_file_threshold_bytes)
     reasons: list[str] = []
     classification = "study_review_required"
     recommendation = "review_before_cleanup"
@@ -375,17 +395,19 @@ def classify_study(path: str | Path, *, reference_text: str, large_file_threshol
         cleanup_action = "delete_directory"
         reasons.append("missing_study_summary_json")
         safe_delete = not referenced
+    elif large_prediction_files:
+        classification = "study_with_large_prediction_outputs"
+        recommendation = "trim_prediction_outputs_after_summary_and_metrics_are_preserved"
+        cleanup_action = "trim_large_prediction_files"
+        reasons.append("large_prediction_outputs")
+        if any(token in lower_name for token in ("smoke", "speed", "throughput", "debug")):
+            reasons.append("smoke_speed_or_throughput_run")
     elif any(token in lower_name for token in ("smoke", "speed", "throughput", "debug")):
         classification = "smoke_or_throughput_study"
         recommendation = "delete_if_not_referenced_or_archive_summary"
         cleanup_action = "delete_directory"
         reasons.append("smoke_speed_or_throughput_run")
         safe_delete = not referenced
-    elif large_prediction_files:
-        classification = "study_with_large_prediction_outputs"
-        recommendation = "trim_prediction_outputs_after_summary_and_metrics_are_preserved"
-        cleanup_action = "trim_large_prediction_files"
-        reasons.append("large_prediction_outputs")
     else:
         classification = "study_with_summary"
         recommendation = "keep"
@@ -414,9 +436,40 @@ def classify_study(path: str | Path, *, reference_text: str, large_file_threshol
     )
 
 
-def classify_research_store_component(path: str | Path, *, large_file_threshold_bytes: int) -> ArtifactItem:
+def classify_research_store_component(
+    path: str | Path,
+    *,
+    component_id: str,
+    active_component_ids: set[str],
+    cold_component_ids: set[str],
+    large_file_threshold_bytes: int,
+) -> ArtifactItem:
     artifact_dir = _workspace_path(path)
     size = _directory_size(artifact_dir)
+    active = component_id in active_component_ids
+    cold = component_id in cold_component_ids
+    if active:
+        classification = "active_research_store_component"
+        recommendation = "keep_reachable_from_active_view"
+        cleanup_action = "keep"
+        reasons = ["reachable_from_active_view"]
+    elif cold:
+        classification = "cold_research_store_component"
+        recommendation = "archive_manifest_then_delete_with_cold_store_confirmation"
+        cleanup_action = "delete_cold_component"
+        reasons = ["explicit_cold_component_allowlist", "not_reachable_from_active_view"]
+    else:
+        classification = "unclassified_research_store_component"
+        recommendation = "review_or_add_to_retention_policy"
+        cleanup_action = "manual_review"
+        reasons = ["not_reachable_from_active_view", "not_explicitly_allowlisted_cold"]
+    manifest_path = ""
+    if artifact_dir.is_file() and artifact_dir.suffix.lower() == ".json":
+        manifest_path = _relative(artifact_dir)
+    elif artifact_dir.is_dir():
+        manifests = sorted(path for path in artifact_dir.rglob("*.json") if "manifest" in path.name.lower())
+        if manifests:
+            manifest_path = _relative(manifests[0])
     return ArtifactItem(
         artifact_type="research_store_component",
         name=artifact_dir.name,
@@ -425,14 +478,16 @@ def classify_research_store_component(path: str | Path, *, large_file_threshold_
         file_count=size.file_count,
         size_gb=round(float(size.size_bytes) / 1024**3, 4),
         last_modified=_format_mtime(size.latest_mtime),
-        classification="research_store_shared_component",
-        recommendation="keep_managed_by_view_manifest",
-        cleanup_action="keep",
+        classification=classification,
+        recommendation=recommendation,
+        cleanup_action=cleanup_action,
         safe_to_delete_directory=False,
         referenced_by_brain=False,
-        reasons=["shared_store_component"],
-        manifest_path=_relative(artifact_dir / "manifest.json") if (artifact_dir / "manifest.json").exists() else "",
+        reasons=reasons,
+        manifest_path=manifest_path,
         large_files=_large_files(artifact_dir, threshold_bytes=large_file_threshold_bytes, max_files=12),
+        component_id=component_id,
+        active_reachable=active,
     )
 
 
@@ -443,6 +498,34 @@ def _scan_child_dirs(roots: Iterable[str | Path]) -> list[Path]:
         if not base.exists():
             continue
         out.extend(sorted(path for path in base.iterdir() if path.is_dir()))
+    return out
+
+
+def _artifact_roots(
+    *,
+    artifact_roots: Iterable[str | Path] | None,
+    studies_root: str | Path | None,
+) -> tuple[str | Path, ...]:
+    if artifact_roots is not None:
+        return tuple(artifact_roots)
+    if studies_root is not None:
+        return (studies_root,)
+    return DEFAULT_ARTIFACT_ROOTS
+
+
+def _research_store_components(store_root: str | Path) -> list[tuple[str, Path]]:
+    root = _workspace_path(store_root)
+    out: list[tuple[str, Path]] = []
+    for family in ("panel_store", "label_store", "sharded_memmap", "training_pack", "sequence_pack"):
+        base = root / family
+        if not base.exists():
+            continue
+        out.extend((f"{family}/{path.name}", path) for path in sorted(base.iterdir()) if path.is_dir())
+    for family, pattern in (("sample_index", "*"), ("views", "*.json")):
+        base = root / family
+        if not base.exists():
+            continue
+        out.extend((f"{family}/{path.name}", path) for path in sorted(base.glob(pattern)) if path.is_file())
     return out
 
 
@@ -460,38 +543,43 @@ def _group_totals(items: Iterable[ArtifactItem]) -> dict[str, dict[str, Any]]:
 def build_research_gc_report(
     *,
     sequence_pack_roots: Iterable[str | Path] = DEFAULT_SEQUENCE_PACK_ROOTS,
-    research_store_component_roots: Iterable[str | Path] = DEFAULT_RESEARCH_STORE_COMPONENT_ROOTS,
-    studies_root: str | Path = DEFAULT_STUDIES_ROOT,
+    research_store_root: str | Path = DEFAULT_RESEARCH_STORE_ROOT,
+    policy_path: str | Path = DEFAULT_RETENTION_POLICY,
+    artifact_roots: Iterable[str | Path] | None = None,
+    studies_root: str | Path | None = None,
     reference_roots: Iterable[str | Path] = DEFAULT_REFERENCE_ROOTS,
-    large_file_threshold_mb: float = 256.0,
+    large_file_threshold_mb: float = 64.0,
     max_items: int = 200,
 ) -> dict[str, Any]:
     threshold_bytes = max(int(float(large_file_threshold_mb) * 1024 * 1024), 1)
     reference_text = _collect_reference_text(reference_roots)
+    selected_artifact_roots = _artifact_roots(artifact_roots=artifact_roots, studies_root=studies_root)
     sequence_items = [
         classify_sequence_pack(path, reference_text=reference_text, large_file_threshold_bytes=threshold_bytes)
         for path in _scan_child_dirs(sequence_pack_roots)
     ]
     study_items = [
         classify_study(path, reference_text=reference_text, large_file_threshold_bytes=threshold_bytes)
-        for path in _scan_child_dirs([studies_root])
+        for path in _scan_child_dirs(selected_artifact_roots)
     ]
-    component_items: list[ArtifactItem] = []
-    for root in research_store_component_roots:
-        base = _workspace_path(root)
-        if not base.exists():
-            continue
-        children = [path for path in sorted(base.iterdir()) if path.is_dir()]
-        if children:
-            component_items.extend(
-                classify_research_store_component(path, large_file_threshold_bytes=threshold_bytes)
-                for path in children
-            )
-        else:
-            component_items.append(classify_research_store_component(base, large_file_threshold_bytes=threshold_bytes))
+    policy = load_research_store_retention_policy(policy_path)
+    graph = build_active_view_dependency_graph(store_root=research_store_root, policy_path=policy_path)
+    active_component_ids = set(graph.get("active_component_ids", []) or [])
+    cold_component_ids = {str(item) for item in list(policy.get("cold_component_paths", []) or [])}
+    component_items = [
+        classify_research_store_component(
+            path,
+            component_id=component_id,
+            active_component_ids=active_component_ids,
+            cold_component_ids=cold_component_ids,
+            large_file_threshold_bytes=threshold_bytes,
+        )
+        for component_id, path in _research_store_components(research_store_root)
+    ]
     all_items = sorted([*sequence_items, *component_items, *study_items], key=lambda item: item.size_bytes, reverse=True)
     safe_delete = [item for item in all_items if item.safe_to_delete_directory]
     trim_candidates = [item for item in all_items if item.cleanup_action == "trim_large_prediction_files"]
+    cold_components = [item for item in component_items if item.cleanup_action == "delete_cold_component"]
     total_size = sum(item.size_bytes for item in all_items)
     safe_delete_size = sum(item.size_bytes for item in safe_delete)
     trim_candidate_large_file_size = sum(
@@ -501,7 +589,7 @@ def build_research_gc_report(
         if file_item.get("kind") == "prediction_output"
     )
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "dry_run",
         "generated_at": _now(),
         "workspace_root": str(WORKSPACE_ROOT.resolve()),
@@ -510,14 +598,17 @@ def build_research_gc_report(
             "delete_requires": ["--delete", f"--confirm-delete {DELETE_CONFIRMATION}"],
             "safe_delete_directory_rule": "only unreferenced smoke/partial/interrupted artifacts under allowed research roots",
             "prediction_trim_rule": f"use trim-predictions --delete --confirm-trim {TRIM_CONFIRMATION}; directory GC does not delete whole studies for prediction bloat",
+            "cold_store_rule": f"only explicit policy allowlist entries that are unreachable from active views; delete with prune-cold-store --delete --confirm-delete {COLD_STORE_CONFIRMATION}",
         },
         "roots": {
             "sequence_pack_roots": [_relative(path) for path in sequence_pack_roots],
-            "research_store_component_roots": [_relative(path) for path in research_store_component_roots],
-            "studies_root": _relative(studies_root),
+            "research_store_root": _relative(research_store_root),
+            "retention_policy": _relative(policy_path) if _workspace_path(policy_path).exists() else "",
+            "artifact_roots": [_relative(path) for path in selected_artifact_roots],
             "reference_roots": [_relative(path) for path in reference_roots],
             "preferred_research_store_root": _relative(DEFAULT_RESEARCH_STORE_ROOT),
         },
+        "active_view_dependency_graph": graph,
         "totals": {
             "artifact_count": len(all_items),
             "size_bytes": total_size,
@@ -528,10 +619,14 @@ def build_research_gc_report(
             "prediction_trim_candidate_count": len(trim_candidates),
             "prediction_trim_candidate_size_bytes": trim_candidate_large_file_size,
             "prediction_trim_candidate_size_gb": round(float(trim_candidate_large_file_size) / 1024**3, 4),
+            "cold_component_candidate_count": len(cold_components),
+            "cold_component_candidate_size_bytes": sum(item.size_bytes for item in cold_components),
+            "cold_component_candidate_size_gb": round(sum(item.size_bytes for item in cold_components) / 1024**3, 4),
         },
         "classification_totals": _group_totals(all_items),
         "safe_delete_candidates": [item.to_dict() for item in safe_delete[:max_items]],
         "prediction_trim_candidates": [item.to_dict() for item in trim_candidates[:max_items]],
+        "cold_component_candidates": [item.to_dict() for item in sorted(cold_components, key=lambda row: row.size_bytes, reverse=True)],
         "largest_artifacts": [item.to_dict() for item in all_items[:max_items]],
     }
 
@@ -547,12 +642,14 @@ def write_markdown_report(path: str | Path, report: Mapping[str, Any]) -> Path:
         f"- Total scanned size: `{totals.get('size_gb', 0)} GB`",
         f"- Safe delete candidates: `{totals.get('safe_delete_candidate_count', 0)}` / `{totals.get('safe_delete_candidate_size_gb', 0)} GB`",
         f"- Prediction trim candidates: `{totals.get('prediction_trim_candidate_count', 0)}` / `{totals.get('prediction_trim_candidate_size_gb', 0)} GB`",
+        f"- Explicit cold store candidates: `{totals.get('cold_component_candidate_count', 0)}` / `{totals.get('cold_component_candidate_size_gb', 0)} GB`",
         "",
         "## Policy",
         "",
         "- Active QDP datasets are not delete candidates.",
         "- Directory deletion requires explicit delete flags and only applies to unreferenced smoke/partial/interrupted research artifacts.",
         "- Large prediction output trimming uses the separate `trim-predictions` command; directory GC does not delete whole studies for prediction bloat.",
+        "- Cold shared-store components require the retention-policy allowlist, active-view reachability proof, archived manifests, and the separate `prune-cold-store` confirmation.",
         "",
         "## Largest Artifacts",
         "",
@@ -832,9 +929,10 @@ def _mark_summaries_prediction_trimmed(study_dir: Path, manifest_path: Path, *, 
 
 def trim_prediction_outputs(
     *,
-    studies_root: str | Path = DEFAULT_STUDIES_ROOT,
+    artifact_roots: Iterable[str | Path] | None = None,
+    studies_root: str | Path | None = None,
     reference_roots: Iterable[str | Path] = DEFAULT_REFERENCE_ROOTS,
-    large_file_threshold_mb: float = 256.0,
+    large_file_threshold_mb: float = 64.0,
     max_items: int = 1000,
     delete: bool = False,
     confirm_trim: str = "",
@@ -842,7 +940,7 @@ def trim_prediction_outputs(
     if delete and str(confirm_trim or "") != TRIM_CONFIRMATION:
         raise ValueError(f"prediction trim requires --confirm-trim {TRIM_CONFIRMATION}")
     threshold_bytes = max(int(float(large_file_threshold_mb) * 1024 * 1024), 1)
-    root = _workspace_path(studies_root)
+    selected_roots = tuple(_workspace_path(path) for path in _artifact_roots(artifact_roots=artifact_roots, studies_root=studies_root))
     reference_text = _collect_reference_text(reference_roots)
     candidates: list[dict[str, Any]] = []
     totals = {
@@ -855,9 +953,9 @@ def trim_prediction_outputs(
         "deleted_size_gb": 0.0,
         "skipped_file_count": 0,
     }
-    for study_dir in _scan_child_dirs([root]):
+    for study_dir in _scan_child_dirs(selected_roots):
         item = classify_study(study_dir, reference_text=reference_text, large_file_threshold_bytes=threshold_bytes)
-        if item.cleanup_action != "trim_large_prediction_files":
+        if not _study_summary_paths(study_dir):
             continue
         files = _large_prediction_files(study_dir, threshold_bytes=threshold_bytes)
         if not files:
@@ -867,7 +965,7 @@ def trim_prediction_outputs(
         skipped_files: list[dict[str, Any]] = []
         manifest_path = ""
         if delete:
-            if not _path_is_inside(study_dir, [root]):
+            if not _path_is_inside(study_dir, list(selected_roots)):
                 skipped_files.append({"path": _relative(study_dir), "reason": "study_outside_allowed_root"})
             else:
                 for file_item in files:
@@ -929,11 +1027,11 @@ def trim_prediction_outputs(
         "policy": {
             "deletes_active_qdp_data": False,
             "delete_requires": ["--delete", f"--confirm-trim {TRIM_CONFIRMATION}"],
-            "trim_rule": "delete only large prediction_output files under studies root; keep summaries, metrics, reports and checkpoints",
+            "trim_rule": "delete only large prediction_output files under configured artifact roots; keep summaries, metrics, reports and checkpoints",
             "large_file_threshold_mb": float(large_file_threshold_mb),
         },
         "roots": {
-            "studies_root": _relative(root),
+            "artifact_roots": [_relative(root) for root in selected_roots],
             "reference_roots": [_relative(path) for path in reference_roots],
         },
         "totals": totals,
@@ -941,14 +1039,283 @@ def trim_prediction_outputs(
     }
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _shape_samples(value: Any, *, prefix: str = "", limit: int = 40) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            key_path = f"{prefix}.{key}" if prefix else str(key)
+            if str(key).lower().endswith("shape") and isinstance(item, (list, tuple)):
+                out.append({"key": key_path, "shape": list(item)})
+            if len(out) < limit:
+                out.extend(_shape_samples(item, prefix=key_path, limit=limit - len(out)))
+            if len(out) >= limit:
+                break
+    elif isinstance(value, list):
+        for idx, item in enumerate(value[:20]):
+            out.extend(_shape_samples(item, prefix=f"{prefix}[{idx}]", limit=limit - len(out)))
+            if len(out) >= limit:
+                break
+    return out[:limit]
+
+
+def _provenance_summary(payload: Mapping[str, Any]) -> dict[str, Any]:
+    keys = (
+        "artifact_type",
+        "schema_version",
+        "store_id",
+        "label_store_id",
+        "manifest_json",
+        "source_manifest",
+        "source_manifest_json",
+        "source_qdp_sharded_manifest_json",
+        "source_training_pack_manifest_json",
+        "derived_from_pack_manifest",
+        "artifact_migration",
+        "created_at",
+        "generated_at",
+    )
+    return {key: payload[key] for key in keys if key in payload}
+
+
+def _archive_component_summary(component_id: str, path: Path) -> dict[str, Any]:
+    files = [path] if path.is_file() else sorted(item for item in path.rglob("*") if item.is_file())
+    inventory_hash = hashlib.sha256()
+    suffix_totals: Counter[str] = Counter()
+    size_bytes = 0
+    latest_mtime = 0.0
+    for file_path in files:
+        stat = file_path.stat()
+        relative = file_path.name if path.is_file() else file_path.relative_to(path).as_posix()
+        inventory_hash.update(f"{relative}\0{int(stat.st_size)}\n".encode("utf-8"))
+        suffix_totals[file_path.suffix.lower() or "<none>"] += int(stat.st_size)
+        size_bytes += int(stat.st_size)
+        latest_mtime = max(latest_mtime, float(stat.st_mtime))
+    manifest_files = [
+        item
+        for item in files
+        if item.suffix.lower() == ".json" and ("manifest" in item.name.lower() or item == path)
+    ]
+    manifest_inventory_hash = hashlib.sha256()
+    manifest_samples: list[dict[str, Any]] = []
+    shape_samples: list[dict[str, Any]] = []
+    provenance_samples: list[dict[str, Any]] = []
+    for manifest_path in manifest_files:
+        content_hash = _sha256_file(manifest_path)
+        relative = manifest_path.name if path.is_file() else manifest_path.relative_to(path).as_posix()
+        manifest_inventory_hash.update(f"{relative}\0{content_hash}\n".encode("utf-8"))
+        payload = _read_json(manifest_path)
+        if len(manifest_samples) < 40:
+            manifest_samples.append(
+                {
+                    "path": relative,
+                    "sha256": content_hash,
+                    "size_bytes": manifest_path.stat().st_size,
+                    "artifact_type": payload.get("artifact_type", ""),
+                }
+            )
+        if payload and len(shape_samples) < 40:
+            for item in _shape_samples(payload, limit=40 - len(shape_samples)):
+                shape_samples.append({"manifest": relative, **item})
+        provenance = _provenance_summary(payload)
+        if provenance and len(provenance_samples) < 20:
+            provenance_samples.append({"manifest": relative, **provenance})
+    return {
+        "component_id": component_id,
+        "path": _relative(path),
+        "kind": "file" if path.is_file() else "directory",
+        "size_bytes": size_bytes,
+        "size_gb": round(size_bytes / 1024**3, 4),
+        "file_count": len(files),
+        "latest_mtime": _format_mtime(latest_mtime),
+        "inventory_sha256": inventory_hash.hexdigest(),
+        "content_sha256": _sha256_file(path) if path.is_file() else "",
+        "hash_scope": "full_file_content" if path.is_file() else "relative_path_and_size_inventory_plus_full_manifest_content",
+        "suffix_size_bytes": dict(sorted(suffix_totals.items())),
+        "manifest_file_count": len(manifest_files),
+        "manifest_inventory_sha256": manifest_inventory_hash.hexdigest() if manifest_files else "",
+        "manifest_samples": manifest_samples,
+        "shape_samples": shape_samples,
+        "provenance_samples": provenance_samples,
+    }
+
+
+def _write_cold_archive_markdown(path: str | Path, payload: Mapping[str, Any]) -> Path:
+    target = _workspace_path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Research Store Cold Asset Archive",
+        "",
+        f"- Generated at: `{payload.get('generated_at', '')}`",
+        f"- Status: `{payload.get('status', '')}`",
+        f"- Active views: `{', '.join(payload.get('active_view_ids', []) or [])}`",
+        f"- Archived components: `{len(payload.get('components', []) or [])}`",
+        f"- Archived size: `{payload.get('totals', {}).get('size_gb', 0)} GiB`",
+        "",
+        "The active-view dependency graph was verified before deletion. Directory hashes cover relative path + size inventory and full content hashes for manifest JSON files; standalone files use full-content SHA-256.",
+        "",
+        "| Size GiB | Files | Component | Inventory SHA-256 |",
+        "|---:|---:|---|---|",
+    ]
+    for item in list(payload.get("components", []) or []):
+        lines.append(
+            f"| {item.get('size_gb', 0)} | {item.get('file_count', 0)} | `{item.get('component_id', '')}` | `{item.get('inventory_sha256', '')}` |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Active components retained",
+            "",
+            *[f"- `{item}`" for item in list(payload.get("active_component_ids", []) or [])],
+            "",
+        ]
+    )
+    target.write_text("\n".join(lines), encoding="utf-8")
+    return target
+
+
+def prune_cold_research_store(
+    *,
+    store_root: str | Path = DEFAULT_RESEARCH_STORE_ROOT,
+    policy_path: str | Path = DEFAULT_RETENTION_POLICY,
+    archive_root: str | Path = DEFAULT_COLD_ARCHIVE_ROOT,
+    delete: bool = False,
+    confirm_delete: str = "",
+) -> dict[str, Any]:
+    if delete and str(confirm_delete or "") != COLD_STORE_CONFIRMATION:
+        raise ValueError(f"cold store deletion requires --confirm-delete {COLD_STORE_CONFIRMATION}")
+    store_root_path = _workspace_path(store_root).resolve()
+    policy = load_research_store_retention_policy(policy_path)
+    if not policy:
+        raise ValueError(f"missing retention policy: {_workspace_path(policy_path)}")
+    graph = build_active_view_dependency_graph(store_root=store_root_path, policy_path=policy_path)
+    active_component_ids = set(graph.get("active_component_ids", []) or [])
+    requested = [str(item) for item in list(policy.get("cold_component_paths", []) or [])]
+    candidates: list[dict[str, Any]] = []
+    blockers: list[str] = []
+    missing: list[str] = []
+    for component_id in requested:
+        candidate = (store_root_path / Path(component_id)).resolve()
+        try:
+            candidate.relative_to(store_root_path)
+        except ValueError:
+            blockers.append(f"outside_store_root:{component_id}")
+            continue
+        if component_id in active_component_ids:
+            blockers.append(f"cold_component_is_active:{component_id}")
+            continue
+        if not candidate.exists():
+            missing.append(component_id)
+            continue
+        size = _directory_size(candidate)
+        candidates.append(
+            {
+                "component_id": component_id,
+                "path": _relative(candidate),
+                "size_bytes": size.size_bytes,
+                "size_gb": round(size.size_bytes / 1024**3, 4),
+                "file_count": size.file_count,
+            }
+        )
+    pre_verification = verify_unified_store_views(store_root=store_root_path, policy_path=policy_path)
+    if pre_verification.get("status") != "ok":
+        blockers.extend(f"active_view_verification:{item}" for item in list(pre_verification.get("blockers", []) or []))
+    result: dict[str, Any] = {
+        "schema_version": 1,
+        "status": "blocked" if blockers else ("ready" if not delete else "deleting"),
+        "generated_at": _now(),
+        "store_root": _relative(store_root_path),
+        "policy_path": _relative(policy_path),
+        "active_view_ids": list(graph.get("active_view_ids", []) or []),
+        "active_component_ids": sorted(active_component_ids),
+        "candidates": sorted(candidates, key=lambda item: int(item["size_bytes"]), reverse=True),
+        "missing_allowlist_entries": missing,
+        "blockers": blockers,
+        "totals": {
+            "candidate_count": len(candidates),
+            "size_bytes": sum(int(item["size_bytes"]) for item in candidates),
+            "size_gb": round(sum(int(item["size_bytes"]) for item in candidates) / 1024**3, 4),
+        },
+        "pre_verification": pre_verification,
+    }
+    if blockers or not delete:
+        return result
+
+    component_summaries = [
+        _archive_component_summary(item["component_id"], _workspace_path(item["path"])) for item in result["candidates"]
+    ]
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    archive_payload: dict[str, Any] = {
+        "schema_version": 1,
+        "artifact_type": "research_store_cold_asset_archive",
+        "status": "archived_before_delete",
+        "generated_at": _now(),
+        "store_root": _relative(store_root_path),
+        "policy_path": _relative(policy_path),
+        "active_view_ids": result["active_view_ids"],
+        "active_component_ids": result["active_component_ids"],
+        "dependency_graph": graph.get("views", {}),
+        "totals": result["totals"],
+        "components": component_summaries,
+    }
+    json_path = _write_json(Path(archive_root) / f"research_store_cold_assets_archive_{stamp}.json", archive_payload)
+    markdown_path = _write_cold_archive_markdown(
+        Path(archive_root) / f"research_store_cold_assets_archive_{stamp}.md",
+        archive_payload,
+    )
+    deleted: list[dict[str, Any]] = []
+    for item in result["candidates"]:
+        path = _workspace_path(item["path"])
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+        deleted.append(dict(item))
+    index = build_research_store_index(store_root=store_root_path, policy_path=policy_path)
+    post_verification = verify_unified_store_views(store_root=store_root_path, policy_path=policy_path)
+    archive_payload["status"] = "deleted_and_verified" if post_verification.get("status") == "ok" else "deleted_verification_blocked"
+    archive_payload["deleted_at"] = _now()
+    archive_payload["deleted"] = deleted
+    archive_payload["post_verification"] = {
+        "status": post_verification.get("status"),
+        "blockers": post_verification.get("blockers", []),
+        "validated_views": post_verification.get("validated_views", {}),
+    }
+    _write_json(json_path, archive_payload)
+    _write_cold_archive_markdown(markdown_path, archive_payload)
+    result.update(
+        {
+            "status": "deleted_and_verified" if post_verification.get("status") == "ok" else "deleted_verification_blocked",
+            "deleted": deleted,
+            "deleted_count": len(deleted),
+            "deleted_size_bytes": sum(int(item["size_bytes"]) for item in deleted),
+            "deleted_size_gb": round(sum(int(item["size_bytes"]) for item in deleted) / 1024**3, 4),
+            "archive_paths": {"json": _relative(json_path), "markdown": _relative(markdown_path)},
+            "index": index,
+            "post_verification": post_verification,
+        }
+    )
+    return result
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Dry-run and guarded cleanup for daily_research model-ready artifacts.")
     sub = parser.add_subparsers(dest="command", required=True)
     scan = sub.add_parser("scan", help="Build a dry-run research artifact GC report.")
     scan.add_argument("--sequence-pack-root", action="append", type=Path, default=None)
-    scan.add_argument("--studies-root", type=Path, default=DEFAULT_STUDIES_ROOT)
+    scan.add_argument("--artifact-root", action="append", type=Path, default=None)
+    scan.add_argument("--studies-root", type=Path, default=None, help="Legacy single-root alias for --artifact-root.")
+    scan.add_argument("--store-root", type=Path, default=DEFAULT_RESEARCH_STORE_ROOT)
+    scan.add_argument("--policy-path", type=Path, default=DEFAULT_RETENTION_POLICY)
     scan.add_argument("--reference-root", action="append", type=Path, default=None)
-    scan.add_argument("--large-file-threshold-mb", type=float, default=256.0)
+    scan.add_argument("--large-file-threshold-mb", type=float, default=64.0)
     scan.add_argument("--max-items", type=int, default=200)
     scan.add_argument("--write-report", action="store_true")
     scan.add_argument("--report-root", type=Path, default=DEFAULT_REPORT_ROOT)
@@ -963,15 +1330,23 @@ def build_parser() -> argparse.ArgumentParser:
     migrate.add_argument("--report-root", type=Path, default=DEFAULT_REPORT_ROOT)
     migrate.add_argument("--json", action="store_true")
     trim = sub.add_parser("trim-predictions", help="Dry-run or delete large prediction output files while keeping study summaries and metrics.")
-    trim.add_argument("--studies-root", type=Path, default=DEFAULT_STUDIES_ROOT)
+    trim.add_argument("--artifact-root", action="append", type=Path, default=None)
+    trim.add_argument("--studies-root", type=Path, default=None, help="Legacy single-root alias for --artifact-root.")
     trim.add_argument("--reference-root", action="append", type=Path, default=None)
-    trim.add_argument("--large-file-threshold-mb", type=float, default=256.0)
+    trim.add_argument("--large-file-threshold-mb", type=float, default=64.0)
     trim.add_argument("--max-items", type=int, default=1000)
     trim.add_argument("--write-report", action="store_true")
     trim.add_argument("--report-root", type=Path, default=DEFAULT_REPORT_ROOT)
     trim.add_argument("--delete", action="store_true")
     trim.add_argument("--confirm-trim", default="")
     trim.add_argument("--json", action="store_true")
+    prune = sub.add_parser("prune-cold-store", help="Archive and delete explicit cold research_store components after active-view verification.")
+    prune.add_argument("--store-root", type=Path, default=DEFAULT_RESEARCH_STORE_ROOT)
+    prune.add_argument("--policy-path", type=Path, default=DEFAULT_RETENTION_POLICY)
+    prune.add_argument("--archive-root", type=Path, default=DEFAULT_COLD_ARCHIVE_ROOT)
+    prune.add_argument("--delete", action="store_true")
+    prune.add_argument("--confirm-delete", default="")
+    prune.add_argument("--json", action="store_true")
     return parser
 
 
@@ -979,9 +1354,13 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "scan":
         sequence_pack_roots = tuple(args.sequence_pack_root) if args.sequence_pack_root else DEFAULT_SEQUENCE_PACK_ROOTS
+        artifact_roots = tuple(args.artifact_root) if args.artifact_root else None
         reference_roots = tuple(args.reference_root) if args.reference_root else DEFAULT_REFERENCE_ROOTS
         report = build_research_gc_report(
             sequence_pack_roots=sequence_pack_roots,
+            research_store_root=args.store_root,
+            policy_path=args.policy_path,
+            artifact_roots=artifact_roots,
             studies_root=args.studies_root,
             reference_roots=reference_roots,
             large_file_threshold_mb=float(args.large_file_threshold_mb),
@@ -994,9 +1373,10 @@ def main(argv: list[str] | None = None) -> int:
             report = dict(report)
             report["report_paths"] = {"json": _relative(json_path), "markdown": _relative(md_path)}
         if args.delete:
+            selected_artifact_roots = _artifact_roots(artifact_roots=artifact_roots, studies_root=args.studies_root)
             delete_result = delete_safe_candidates(
                 report,
-                allowed_roots=[*sequence_pack_roots, args.studies_root],
+                allowed_roots=[*sequence_pack_roots, *selected_artifact_roots],
                 confirm_delete=str(args.confirm_delete or ""),
             )
             report = dict(report)
@@ -1019,8 +1399,10 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0
     if args.command == "trim-predictions":
+        artifact_roots = tuple(args.artifact_root) if args.artifact_root else None
         reference_roots = tuple(args.reference_root) if args.reference_root else DEFAULT_REFERENCE_ROOTS
         report = trim_prediction_outputs(
+            artifact_roots=artifact_roots,
             studies_root=args.studies_root,
             reference_roots=reference_roots,
             large_file_threshold_mb=float(args.large_file_threshold_mb),
@@ -1035,6 +1417,16 @@ def main(argv: list[str] | None = None) -> int:
             md_path = write_prediction_trim_markdown_report(args.report_root / f"{prefix}_{stamp}.md", report)
             report = dict(report)
             report["report_paths"] = {"json": _relative(json_path), "markdown": _relative(md_path)}
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "prune-cold-store":
+        report = prune_cold_research_store(
+            store_root=args.store_root,
+            policy_path=args.policy_path,
+            archive_root=args.archive_root,
+            delete=bool(args.delete),
+            confirm_delete=str(args.confirm_delete or ""),
+        )
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0
     raise ValueError(f"unsupported command: {args.command}")

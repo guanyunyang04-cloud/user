@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,6 @@ from quant_data_platform.qdp_v2.manifest import (
     qdp_v2_root,
     read_active_manifest,
     read_dataset_manifest,
-    resolve_manifest_path,
 )
 
 
@@ -20,7 +20,7 @@ def v2_active_exists(workspace_root: str | Path | None = None) -> bool:
     return (root / "active" / "active.json").exists()
 
 
-def status_payload(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
+def status_payload(*, workspace_root: str | Path | None = None, verify_files: bool = False) -> dict[str, Any]:
     root = qdp_v2_root(workspace_root)
     active = read_active_manifest(root)
     if not active:
@@ -31,6 +31,7 @@ def status_payload(*, workspace_root: str | Path | None = None) -> dict[str, Any
         }
     datasets: dict[str, Any] = {}
     missing: list[dict[str, str]] = []
+    missing_shards: list[dict[str, Any]] = []
     for _, domain, dataset_id in _active_dataset_refs(active):
         manifest_path = dataset_manifest_for_id(root, dataset_id, domain)
         if manifest_path is None:
@@ -38,10 +39,18 @@ def status_payload(*, workspace_root: str | Path | None = None) -> dict[str, Any
             continue
         manifest = read_dataset_manifest(manifest_path)
         shard_count = len(manifest.shards)
-        existing_shards = 0
-        for shard in manifest.shards:
-            if resolve_manifest_path(shard.path, root=root).exists():
-                existing_shards += 1
+        existing_shards: int | None = None
+        if verify_files:
+            file_index = _dataset_file_index(manifest_path.parent)
+            existing_shards = sum(1 for shard in manifest.shards if _manifest_path_key(shard.path, root) in file_index)
+            if existing_shards != shard_count:
+                missing_shards.append(
+                    {
+                        "domain": domain,
+                        "dataset_id": dataset_id,
+                        "missing_shard_count": shard_count - existing_shards,
+                    }
+                )
         datasets[domain] = {
             "dataset_id": manifest.dataset_id,
             "domain": manifest.domain,
@@ -53,17 +62,33 @@ def status_payload(*, workspace_root: str | Path | None = None) -> dict[str, Any
             "row_count": manifest.row_count,
             "shard_count": shard_count,
             "existing_shards": existing_shards,
+            "file_verification": "verified" if verify_files else "not_requested",
         }
     return {
-        "status": "ok" if not missing else "missing_dataset_manifest",
+        "status": "missing_dataset_manifest" if missing else ("missing_shards" if missing_shards else "ok"),
         "qdp_v2_root": str(root.resolve()),
         "active_as_of_date": str(active.get("active_as_of_date", "") or ""),
         "scope": dict(active.get("scope", {}) or {}),
         "active_manifest": str((root / "active" / "active.json").resolve()),
         "dataset_count": len(datasets),
         "missing": missing,
+        "missing_shards": missing_shards,
         "datasets": datasets,
     }
+
+
+def _manifest_path_key(path: str | Path, root: Path) -> str:
+    candidate = Path(path)
+    absolute = candidate if candidate.is_absolute() else root / candidate
+    return os.path.normcase(os.path.abspath(str(absolute)))
+
+
+def _dataset_file_index(dataset_dir: Path) -> set[str]:
+    files: set[str] = set()
+    for dirpath, _, filenames in os.walk(dataset_dir):
+        for filename in filenames:
+            files.add(os.path.normcase(os.path.abspath(os.path.join(dirpath, filename))))
+    return files
 
 
 def print_status(payload: dict[str, Any], *, as_json: bool) -> None:
@@ -79,7 +104,8 @@ def print_status(payload: dict[str, Any], *, as_json: bool) -> None:
         print(
             f"{key}: {item.get('dataset_id')} "
             f"{item.get('start_date', '')}..{item.get('end_date', '')} "
-            f"rows={item.get('row_count', 0)} shards={item.get('existing_shards', 0)}/{item.get('shard_count', 0)}"
+            f"rows={item.get('row_count', 0)} shards="
+            f"{item.get('existing_shards') if item.get('existing_shards') is not None else 'not_verified'}/{item.get('shard_count', 0)}"
         )
     missing = list(payload.get("missing", []) or [])
     if missing:
@@ -108,13 +134,14 @@ def active_dataset_map(active: dict[str, Any] | Any) -> dict[str, str]:
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="qdp status", description="Show qdp_v2 active data base status.")
     parser.add_argument("--workspace-root", default="")
+    parser.add_argument("--verify-files", action="store_true", help="Verify every active shard path; omitted status is metadata-only.")
     parser.add_argument("--json", action="store_true")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
-    payload = status_payload(workspace_root=str(args.workspace_root or "") or None)
+    payload = status_payload(workspace_root=str(args.workspace_root or "") or None, verify_files=bool(args.verify_files))
     print_status(payload, as_json=bool(args.json))
     return 0 if str(payload.get("status", "")) in {"ok", "not_initialized"} else 2
 
