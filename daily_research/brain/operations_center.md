@@ -1,5 +1,5 @@
 # Daily Research 过程目录
-快照日期：`2026-07-10`
+快照日期：`2026-07-11`
 
 本文件保存可调用过程、环境基线、命令入口和验证选择。它描述“怎么做”，不承担当前事实长卷；当前对象实例见 `state_center.md`。
 
@@ -54,6 +54,13 @@
 `input`: QDP v2 active tables or existing compatibility sequence pack, model/loss/value-function change, evaluation request.
 `steps`: route task as primary `daily_research` with supporting read-only `quant_data_platform` when QDP data is referenced；start from `seq100_mainline` unless the user explicitly asks for a comparison branch；prefer `--store-view daily_research/data/research_store/views/<view>.json` over self-contained full packs；train/evaluate models；write compact current conclusion to `state_center.md` and dated evidence to `references/`.
 `validation`: recompute `max(train.date_idx + forward_days) < min(oos.date_idx)`；verify manifest/schema and normalization cutoff；fixed OOS must not select checkpoints；compare paired daily IC/TopK on identical universe hashes；keep complete-case and execution boundaries explicit.
+
+### procedure `seq100_corrected_source_pack`
+`source_view`: `quant_data_platform/data/qdp_v2/views/seq100_pit_2012_2025_formal__9d6feb2a5ba7f15a7635b42f.json`.
+`manifest`: `daily_research/data/research_store/sequence_pack/qdp_v2_seq100_path60_todayclose_pit_adjusted_2012_2025_v1/manifest.json`.
+`semantics`: lookback100/forward60、today-close、back-adjusted OHLC、tick-rounded open-below-limit entry、signal-day PIT pool、carry-adjusted-close suspension valuation、unfilled retained、separate price/VA/availability masks.
+`split_boundary`: source index uses 2012-2025 as one source/train role；do not recreate fixed validation/test；purged walk-forward builders own all inner/outer roles and fold-specific normalization.
+`validation`: run `qdp_v2_sequence_path_pack validate --manifest <manifest> --json` and require `status=ok`, PIT price missing=0, exact five-domain view binding and active manifest unchanged.
 
 ### procedure `seq100_mainline_default`
 `input`: train, compare, or summarize the current seq100 today-close path-value line.

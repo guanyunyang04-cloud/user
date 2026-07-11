@@ -553,9 +553,9 @@ def test_paired_comparisons_use_continuous_mbb_and_reject_non_finite_values() ->
 
 
 def test_run_study_rejects_partial_profiles_and_unsafe_fold_overwrite(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="profiles must be exactly"):
+    with pytest.raises(ValueError, match="unsupported profiles"):
         run_walkforward_study(
-            profiles=("summary_v2_all_channels",),
+            profiles=("not_a_profile",),
             study_root=tmp_path / "partial",
         )
     with pytest.raises(ValueError, match="overwrite-folds requires --rerun-completed"):
@@ -607,7 +607,7 @@ def test_explicit_legacy_binding_validates_then_records_reconstruction(tmp_path:
     )
     assert result["status"] == "completed"
     assert result["bound_fold_count"] == 1
-    assert result["bound_run_count"] == 2
+    assert result["bound_run_count"] == len(PROFILE_COMMANDS)
     rebound_view = json.loads(view_path.read_text(encoding="utf-8"))
     binding = rebound_view["fold_training_contract_binding"]
     assert binding["method"] == "post_run_reconstruction_v1"
@@ -711,7 +711,7 @@ def test_legacy_binding_resumes_after_partial_writes(tmp_path: Path, monkeypatch
         device="cpu",
     )
     assert resumed["status"] == "completed"
-    assert resumed["changed_file_count"] == 2
+    assert resumed["changed_file_count"] == len(PROFILE_COMMANDS)
     completed_manifest = json.loads((study_root / "study_manifest.json").read_text(encoding="utf-8"))
     for entry in completed_manifest["entries"].values():
         completed_summary = json.loads(Path(entry["summary_path"]).read_text(encoding="utf-8"))

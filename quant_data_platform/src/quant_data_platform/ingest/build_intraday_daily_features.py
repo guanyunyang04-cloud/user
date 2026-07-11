@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -36,8 +36,9 @@ _INTRADAY_5M_REQUIRED_COLUMNS = {
     "volume",
     "amount",
 }
-INTRADAY_DAILY_FEATURE_CONTRACT_VERSION = "intraday_daily_features_v3"
+INTRADAY_DAILY_FEATURE_CONTRACT_VERSION = "intraday_daily_features_v4"
 LAST_5M_RET_POLICY = "last_close_to_previous_5m_close_return"
+OPEN_GAP_PREVIOUS_CLOSE_POLICY = "latest_strictly_prior_close_across_source_shards"
 
 
 @dataclass(frozen=True)
@@ -123,11 +124,12 @@ def build_intraday_daily_features(config: BuildIntradayDailyFeaturesConfig) -> B
 
     progress_path = cfg.progress_path or _default_progress_path(lake)
     source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
-    source_shards = [
+    all_source_shards = [
         dict(item)
         for item in list(source_manifest.get("shards", []) or [])
         if str(dict(item).get("status", "") or "") == "stored" and int(dict(item).get("row_count", 0) or 0) > 0
     ]
+    source_shards = list(all_source_shards)
     if cfg.years:
         allowed_years = set(int(item) for item in cfg.years)
         source_shards = [record for record in source_shards if _shard_intersects_years(record, allowed_years)]
@@ -158,11 +160,46 @@ def build_intraday_daily_features(config: BuildIntradayDailyFeaturesConfig) -> B
             progress_path=progress_path,
         )
 
+    _write_progress(
+        progress_path,
+        {
+            "event": "previous_close_context_start",
+            "source_shard_count": len(all_source_shards),
+            "target_shard_count": len(source_shards),
+            "policy": OPEN_GAP_PREVIOUS_CLOSE_POLICY,
+        },
+    )
+    previous_close_contexts = _build_cross_shard_previous_close_contexts(
+        source_records=all_source_shards,
+        target_records=source_shards,
+    )
+    _write_progress(
+        progress_path,
+        {
+            "event": "previous_close_context_completed",
+            "seeded_shard_count": sum(bool(values) for values in previous_close_contexts.values()),
+            "seeded_symbol_count": sum(len(values) for values in previous_close_contexts.values()),
+            "policy": OPEN_GAP_PREVIOUS_CLOSE_POLICY,
+        },
+    )
+
     records: list[dict[str, Any]] = []
     errors: list[str] = []
     if cfg.workers <= 1 or len(source_shards) <= 1:
         for idx, source_record in enumerate(source_shards, start=1):
-            records.append(_build_one_shard(lake=lake, cfg=cfg, shard_dir=shard_dir, source_record=source_record, progress_path=progress_path, index=idx, total=len(source_shards), auction_1m_index=auction_1m_index))
+            records.append(
+                _build_one_shard(
+                    lake=lake,
+                    cfg=cfg,
+                    shard_dir=shard_dir,
+                    source_record=source_record,
+                    progress_path=progress_path,
+                    index=idx,
+                    total=len(source_shards),
+                    auction_1m_index=auction_1m_index,
+                    previous_close_by_symbol=previous_close_contexts.get(_source_path_key(source_record), {}),
+                )
+            )
     else:
         with ThreadPoolExecutor(max_workers=min(cfg.workers, len(source_shards))) as executor:
             futures = {
@@ -176,6 +213,7 @@ def build_intraday_daily_features(config: BuildIntradayDailyFeaturesConfig) -> B
                     index=idx,
                     total=len(source_shards),
                     auction_1m_index=auction_1m_index,
+                    previous_close_by_symbol=previous_close_contexts.get(_source_path_key(source_record), {}),
                 ): source_record
                 for idx, source_record in enumerate(source_shards, start=1)
             }
@@ -413,6 +451,102 @@ def _overlay_one_feature_shard(
     return record
 
 
+def _build_cross_shard_previous_close_contexts(
+    *,
+    source_records: Sequence[dict[str, Any]],
+    target_records: Sequence[dict[str, Any]],
+) -> dict[str, dict[str, float]]:
+    """Return the strictly-prior close needed by each target shard's first symbol-day.
+
+    Feature shards are intentionally independent materializations, but ``open_gap`` is
+    a time-series feature.  Reading a small boundary projection up front keeps the
+    parallel shard build deterministic and also lets a year-filtered rebuild inherit
+    the last close from an earlier, non-output source shard.
+    """
+
+    target_keys = {_source_path_key(record) for record in target_records}
+    contexts = {key: {} for key in target_keys if key}
+    if not contexts or not source_records:
+        return contexts
+
+    summaries_by_path: dict[str, pd.DataFrame] = {}
+    for record in source_records:
+        path_key = _source_path_key(record)
+        if not path_key or path_key in summaries_by_path:
+            continue
+        source_path = Path(str(record.get("path", "") or ""))
+        if not source_path.exists():
+            raise FileNotFoundError(f"source_shard_not_found_during_previous_close_scan: {source_path}")
+        summaries_by_path[path_key] = _read_intraday_shard_boundary_summary(source_path)
+
+    history_by_symbol: dict[str, list[tuple[pd.Timestamp, float, str]]] = {}
+    for path_key, summary in summaries_by_path.items():
+        for row in summary.itertuples(index=False):
+            history_by_symbol.setdefault(str(row.symbol), []).append(
+                (pd.Timestamp(row.last_date), float(row.last_close), path_key)
+            )
+    for history in history_by_symbol.values():
+        history.sort(key=lambda item: (item[0], item[2]))
+
+    for path_key in contexts:
+        summary = summaries_by_path.get(path_key)
+        if summary is None or summary.empty:
+            continue
+        seeds = contexts[path_key]
+        for row in summary.itertuples(index=False):
+            first_date = pd.Timestamp(row.first_date)
+            for last_date, last_close, history_path in reversed(history_by_symbol.get(str(row.symbol), [])):
+                if last_date >= first_date:
+                    continue
+                if history_path == path_key:
+                    continue
+                seeds[str(row.symbol)] = float(last_close)
+                break
+    return contexts
+
+
+def _read_intraday_shard_boundary_summary(source_path: Path) -> pd.DataFrame:
+    required = ["symbol", "trade_date", "bar_time", "close"]
+    try:
+        data = pd.read_parquet(source_path, columns=required)
+    except Exception as exc:
+        raise ValueError(f"previous_close_boundary_projection_failed: path={source_path}: {exc}") from exc
+    if data.empty:
+        return pd.DataFrame(columns=["symbol", "first_date", "last_date", "last_close"])
+
+    data = data.loc[:, required].copy()
+    data["symbol"] = data["symbol"].astype(str).str.strip().str.upper()
+    data["trade_date"] = pd.to_datetime(data["trade_date"], errors="coerce").dt.normalize()
+    data["bar_time"] = _fast_bar_time(data["bar_time"])
+    data["close"] = pd.to_numeric(data["close"], errors="coerce").replace([np.inf, -np.inf], np.nan)
+    data = data.loc[
+        data["symbol"].str.len().gt(0)
+        & data["symbol"].str.lower().ne("nan")
+        & data["trade_date"].notna()
+    ]
+    if data.empty:
+        return pd.DataFrame(columns=["symbol", "first_date", "last_date", "last_close"])
+
+    first_dates = data.groupby("symbol", sort=True, dropna=False)["trade_date"].min().rename("first_date")
+    valid_close = data.loc[data["close"].gt(0)].sort_values(["symbol", "trade_date", "bar_time"])
+    if valid_close.empty:
+        return pd.DataFrame(columns=["symbol", "first_date", "last_date", "last_close"])
+    terminal = (
+        valid_close.groupby("symbol", sort=True, dropna=False)
+        .tail(1)
+        .set_index("symbol")[["trade_date", "close"]]
+        .rename(columns={"trade_date": "last_date", "close": "last_close"})
+    )
+    return first_dates.to_frame().join(terminal, how="inner").reset_index()
+
+
+def _source_path_key(record: Mapping[str, Any]) -> str:
+    raw = str(record.get("path", "") or "").strip()
+    if not raw:
+        return ""
+    return str(Path(raw).resolve()).casefold()
+
+
 def _build_one_shard(
     *,
     lake: ResearchDataLake,
@@ -423,6 +557,7 @@ def _build_one_shard(
     index: int,
     total: int,
     auction_1m_index: dict[str, Any] | None = None,
+    previous_close_by_symbol: Mapping[str, float] | None = None,
 ) -> dict[str, Any]:
     source_path = Path(str(source_record.get("path", "") or ""))
     if not source_path.exists():
@@ -441,7 +576,12 @@ def _build_one_shard(
             materialization="resume_hit",
         )
     raw = pd.read_parquet(source_path)
-    features = _build_intraday_daily_feature_frame_fast(raw, source=cfg.source_name, adjusted_flag=cfg.adjusted_flag)
+    features = _build_intraday_daily_feature_frame_fast(
+        raw,
+        source=cfg.source_name,
+        adjusted_flag=cfg.adjusted_flag,
+        previous_close_by_symbol=previous_close_by_symbol,
+    )
     if cfg.auction_1m_dataset_id and auction_1m_index:
         features = _apply_auction_1m_overlay(features, auction_1m_index=auction_1m_index, source_record=source_record)
     features.to_parquet(target_path, index=False)
@@ -474,6 +614,7 @@ def _build_intraday_daily_feature_frame_fast(
     *,
     source: str,
     adjusted_flag: str,
+    previous_close_by_symbol: Mapping[str, float] | None = None,
 ) -> pd.DataFrame:
     bars = _prepare_intraday_5m_bars(intraday_frame, source=source, adjusted_flag=adjusted_flag)
     if bars.empty:
@@ -560,6 +701,15 @@ def _build_intraday_daily_feature_frame_fast(
     out.loc[~enough, ["first_30m_range", "last_30m_range"]] = np.nan
 
     prev_close = base["last_close"].groupby(level="symbol", sort=False).shift(1)
+    if previous_close_by_symbol:
+        symbols = pd.Index(base.index.get_level_values("symbol").astype(str))
+        first_for_symbol = ~symbols.duplicated(keep="first")
+        seed = pd.Series(
+            symbols.map(lambda symbol: previous_close_by_symbol.get(str(symbol), np.nan)),
+            index=base.index,
+            dtype="float64",
+        )
+        prev_close.loc[first_for_symbol] = seed.loc[first_for_symbol]
     out["open_gap"] = _safe_return_series(base["first_open"], prev_close)
     gap_sign = np.sign(out["open_gap"])
     out["open_gap_first_30m_follow_through"] = gap_sign * out["first_30m_ret"]
@@ -1314,6 +1464,7 @@ def _feature_dataset_spec(cfg: BuildIntradayDailyFeaturesConfig, *, source_metad
         "feature_source_name": cfg.source_name,
         "feature_contract_version": INTRADAY_DAILY_FEATURE_CONTRACT_VERSION,
         "last_5m_ret_policy": LAST_5M_RET_POLICY,
+        "open_gap_previous_close_policy": OPEN_GAP_PREVIOUS_CLOSE_POLICY,
         "adjusted_flag": cfg.adjusted_flag,
         "raw_ohlcv_policy": "raw_ohlcv_never_overwritten",
         "auction_process_policy": "unobservable_use_open_as_opening_result_only",
@@ -1327,6 +1478,8 @@ def _feature_overlay_dataset_spec(
     feature_metadata: dict[str, Any],
     auction_1m_metadata: dict[str, Any],
 ) -> dict[str, Any]:
+    feature_parameters = dict(feature_metadata.get("parameters", {}) or {})
+    source_feature_contract_version = str(feature_parameters.get("feature_contract_version", "") or "unknown_legacy")
     return {
         "source": "intraday_daily_features_auction_1m_overlay",
         "domain": DataDomain.INTRADAY_DAILY_FEATURES,
@@ -1339,8 +1492,12 @@ def _feature_overlay_dataset_spec(
         "auction_1m_dataset_id": cfg.auction_1m_dataset_id,
         "auction_1m_fingerprint": str(auction_1m_metadata.get("fingerprint", "") or ""),
         "auction_feature_policy": "override_opening_closing_auction_fields_from_mootdx_240_1m_0931_1500",
-        "feature_contract_version": INTRADAY_DAILY_FEATURE_CONTRACT_VERSION,
+        "feature_contract_version": source_feature_contract_version,
+        "source_feature_contract_version": source_feature_contract_version,
         "last_5m_ret_policy": LAST_5M_RET_POLICY,
+        "open_gap_previous_close_policy": str(
+            feature_parameters.get("open_gap_previous_close_policy", "") or "unknown_legacy"
+        ),
         "raw_ohlcv_policy": "raw_ohlcv_never_overwritten",
         "auction_process_policy": "mootdx_240_0931_opening_and_1500_closing_overlay",
         "prediction_policy": "daily_features_for_next_day_or_multi_day_prediction_not_intraday_realtime",

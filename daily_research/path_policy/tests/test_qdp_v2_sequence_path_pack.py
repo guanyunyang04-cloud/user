@@ -7,27 +7,43 @@ import torch
 from daily_research.path_policy.qdp_v2_sequence_path_pack import (
     DAILY_RAW_FEATURES,
     DEFAULT_OUTPUT_ROOT,
+    ENTRY_RULE_OPEN_BELOW_LIMIT,
     PATH_OHLCVA_FIELDS,
     PATH_SUMMARY_COLUMNS,
+    _apply_back_adjustment,
     _build_sample_index,
     _compute_future_path_and_masks,
+    _fill_suspended_daily_raw,
     _fit_normalization,
     path_summary_columns,
     path_value_column,
 )
 from daily_research.path_policy.qdp_v2_sequence_flat_lgbm import _feature_names, _select_indices
-from daily_research.path_policy.qdp_v2_sequence_path_training import DateGroupedBatchSampler, SequencePathModel, SequencePathPackDataset, _compute_loss
+from daily_research.path_policy.qdp_v2_sequence_path_training import (
+    DateGroupedBatchSampler,
+    GlobalTailBatchSampler,
+    SequencePathModel,
+    SequencePathPackDataset,
+    ShuffledBatchSampler,
+    _compute_loss,
+)
 from daily_research.path_policy.qdp_v2_sequence_path_training import (
     INPUT_CHANNEL_PROFILE_DAILY_ONLY,
     INPUT_CHANNEL_PROFILE_NO_INTRADAY_SUMMARY,
     INPUT_CHANNEL_PROFILE_NO_LIMIT_STRUCTURE,
     PATH_LOSS_PROFILE_OHLCVA_EQUAL,
+    PATH_VALUE_GRADIENT_PROFILE_HARD_ST,
+    PATH_VALUE_GRADIENT_PROFILE_SMOOTH,
+    RANK_TRAINING_PROFILE_GLOBAL_TAIL_512,
     SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC_NO60,
     SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
     _derive_path_summary_numpy,
     _derive_path_summary_torch,
+    _derived_path_rank_score_and_target,
     _multi_horizon_ohlc_summary_loss_loop,
     _multi_horizon_ohlc_summary_loss_vectorized,
+    _global_tail_rank_loss_by_date,
+    _realize_path_value_v2_plan_numpy,
     _realize_predicted_plan_numpy,
     _summary_loss_windows,
     derived_path_summary_columns,
@@ -148,6 +164,107 @@ def test_entry_buyable_blocks_next_open_limit_up() -> None:
     assert label_valid[1, 0]
 
 
+def test_strict_tick_entry_rule_allows_one_tick_below_limit() -> None:
+    raw = _raw_panel(
+        open_values=[8.0, 9.0, 9.99, 10.0, 10.0],
+        high_values=[8.5, 9.5, 10.0, 10.1, 10.1],
+        low_values=[7.5, 8.5, 9.8, 9.9, 9.9],
+        close_values=[8.2, 9.2, 9.99, 10.0, 10.0],
+    )
+    up_limit = np.full((5, 1), np.nan, dtype=np.float32)
+    up_limit[2, 0] = 10.0
+    up_limit[3, 0] = 10.0
+
+    _path, _ohlcva, _summary, _input_valid, entry_filled, _label_valid = _compute_future_path_and_masks(
+        raw_panel=raw,
+        up_limit_panel=up_limit,
+        lookback_days=1,
+        forward_days=1,
+        entry_rule=ENTRY_RULE_OPEN_BELOW_LIMIT,
+    )
+
+    assert entry_filled[1, 0]
+    assert not entry_filled[2, 0]
+
+
+def test_back_adjustment_changes_only_ohlc_and_preserves_raw_open() -> None:
+    daily = pd.DataFrame(
+        {
+            "symbol": ["000001.SZ", "000001.SZ"],
+            "trade_date": ["2024-01-02", "2024-01-03"],
+            "open": [10.0, 9.0],
+            "high": [10.5, 9.5],
+            "low": [9.5, 8.5],
+            "close": [10.0, 9.0],
+            "volume": [100.0, 200.0],
+            "amount": [1000.0, 2000.0],
+        }
+    )
+    factor = pd.DataFrame(
+        {
+            "symbol": ["000001.SZ", "000001.SZ"],
+            "trade_date": ["2024-01-02", "2024-01-03"],
+            "adjust_factor": [1.0, 10.0 / 9.0],
+        }
+    )
+
+    adjusted = _apply_back_adjustment(daily, factor)
+
+    assert adjusted["raw_open"].tolist() == [10.0, 9.0]
+    assert np.allclose(adjusted["close"].to_numpy(), [10.0, 10.0])
+    assert adjusted["volume"].tolist() == [100.0, 200.0]
+    assert adjusted["amount"].tolist() == [1000.0, 2000.0]
+
+
+def test_price_label_remains_valid_when_va_aux_is_missing() -> None:
+    raw = _raw_panel(
+        open_values=[10.0, 10.0, 10.0, 10.0],
+        high_values=[10.5, 10.5, 10.5, 10.5],
+        low_values=[9.5, 9.5, 9.5, 9.5],
+        close_values=[10.0, 10.0, 10.0, 10.0],
+    )
+    raw[2, 0, DAILY_RAW_FEATURES.index("amount_log")] = np.nan
+    price_valid = np.zeros((4, 1), dtype=bool)
+    va_valid = np.zeros((4, 1), dtype=bool)
+
+    future_path, future_ohlcva, _summary, _input, _entry, label_valid = _compute_future_path_and_masks(
+        raw_panel=raw,
+        up_limit_panel=np.full((4, 1), np.nan, dtype=np.float32),
+        lookback_days=2,
+        forward_days=1,
+        separate_price_va_validity=True,
+        price_label_valid_out=price_valid,
+        va_aux_valid_out=va_valid,
+    )
+
+    assert label_valid[1, 0]
+    assert price_valid[1, 0]
+    assert not va_valid[1, 0]
+    assert np.isfinite(future_path[1, 0]).all()
+    assert np.isnan(future_ohlcva[1, 0, 0, 5])
+
+
+def test_suspension_fill_carries_price_but_does_not_create_observed_bar() -> None:
+    raw = _raw_panel(
+        open_values=[10.0, np.nan, 11.0],
+        high_values=[10.5, np.nan, 11.5],
+        low_values=[9.5, np.nan, 10.5],
+        close_values=[10.0, np.nan, 11.0],
+        volume_values=[100.0, np.nan, 200.0],
+        amount_values=[1000.0, np.nan, 2000.0],
+    )
+    suspended = np.array([[False], [True], [False]])
+    has_bar = np.array([[True], [False], [True]])
+
+    _fill_suspended_daily_raw(raw, suspended_panel=suspended, has_bar_panel=has_bar)
+
+    for field in ("open", "high", "low", "close"):
+        assert raw[1, 0, DAILY_RAW_FEATURES.index(field)] == 10.0
+    assert raw[1, 0, DAILY_RAW_FEATURES.index("volume")] == 0.0
+    assert raw[1, 0, DAILY_RAW_FEATURES.index("amount")] == 0.0
+    assert not has_bar[1, 0]
+
+
 def test_ohlcva_volume_amount_targets_use_signal_day_trailing_history() -> None:
     raw = _raw_panel(
         open_values=[10.0, 10.0, 10.0, 10.0, 10.0],
@@ -197,6 +314,34 @@ def test_sample_index_requires_input_entry_and_label_masks() -> None:
     assert sample_index[["trade_date", "symbol"]].to_dict("records") == [
         {"trade_date": "2024-01-03", "symbol": "000001.SZ"},
         {"trade_date": "2024-01-04", "symbol": "000002.SZ"},
+    ]
+
+
+def test_pit_sample_index_retains_unfilled_rows_after_signal_day_filter() -> None:
+    dates = ["2024-01-02", "2024-01-03", "2024-01-04"]
+    symbols = ["000001.SZ", "000002.SZ"]
+    input_valid = np.array([[True, True], [True, True], [True, True]])
+    entry_filled = np.array([[False, True], [True, True], [True, True]])
+    price_valid = np.array([[True, True], [True, True], [True, True]])
+    signal_eligible = np.array([[True, False], [True, True], [True, True]])
+
+    sample_index = _build_sample_index(
+        date_values=dates,
+        symbol_values=symbols,
+        start_date="2024-01-02",
+        end_date="2024-01-02",
+        train_years=(),
+        validation_years=(2024,),
+        test_years=(),
+        input_valid=input_valid,
+        entry_buyable=entry_filled,
+        label_valid=price_valid,
+        signal_eligible=signal_eligible,
+        require_entry_filled=False,
+    )
+
+    assert sample_index[["trade_date", "symbol", "entry_filled"]].to_dict("records") == [
+        {"trade_date": "2024-01-02", "symbol": "000001.SZ", "entry_filled": False}
     ]
 
 
@@ -322,6 +467,97 @@ def test_path_value_v2_numpy_and_torch_match() -> None:
     assert np.allclose(np_summary, torch_summary, atol=1.0e-6)
 
 
+def test_path_value_v2_hard_st_matches_hard_inference_and_keeps_smooth_gradient() -> None:
+    smooth_path = torch.zeros((3, 60, 4), dtype=torch.float32, requires_grad=True)
+    smooth_value = _derive_path_summary_torch(
+        smooth_path,
+        smooth_value=True,
+        path_value_gradient_profile=PATH_VALUE_GRADIENT_PROFILE_SMOOTH,
+    )[:, -1]
+    smooth_value.sum().backward()
+    smooth_gradient = smooth_path.grad.detach().clone()
+
+    hard_st_path = torch.zeros((3, 60, 4), dtype=torch.float32, requires_grad=True)
+    hard_st_value = _derive_path_summary_torch(
+        hard_st_path,
+        smooth_value=True,
+        path_value_gradient_profile=PATH_VALUE_GRADIENT_PROFILE_HARD_ST,
+    )[:, -1]
+    hard_st_value.sum().backward()
+    hard_st_gradient = hard_st_path.grad.detach().clone()
+
+    hard_inference = _derive_path_summary_numpy(np.zeros((3, 60, 4), dtype=np.float32))[:, -1]
+    assert np.allclose(hard_st_value.detach().numpy(), hard_inference, atol=1.0e-7)
+    assert not np.allclose(smooth_value.detach().numpy(), hard_inference, atol=1.0e-3)
+    assert torch.allclose(hard_st_gradient, smooth_gradient, atol=1.0e-7, rtol=1.0e-6)
+
+
+def test_path_value_v2_target_excludes_nontradable_exit_days() -> None:
+    path = np.zeros((1, 4, 4), dtype=np.float32)
+    path[0, :, 3] = [0.01, 0.20, 0.04, 0.03]
+    path[0, :, 1] = path[0, :, 3]
+    tradable = np.asarray([[True, False, True, True]], dtype=bool)
+
+    numpy_summary = _derive_path_summary_numpy(path, tradable_path=tradable)
+    torch_summary = _derive_path_summary_torch(
+        torch.from_numpy(path),
+        smooth_value=False,
+        tradable_path=torch.from_numpy(tradable),
+    ).numpy()
+
+    assert numpy_summary[0, 8] != 2.0
+    assert np.allclose(numpy_summary, torch_summary, atol=1.0e-6)
+
+    no_exit = np.zeros((1, 4), dtype=bool)
+    numpy_no_exit = _derive_path_summary_numpy(path, tradable_path=no_exit)
+    torch_no_exit = _derive_path_summary_torch(
+        torch.from_numpy(path),
+        smooth_value=False,
+        tradable_path=torch.from_numpy(no_exit),
+    ).numpy()
+    assert np.isnan(numpy_no_exit[0, 8:]).all()
+    assert np.isnan(torch_no_exit[0, 8:]).all()
+
+
+def test_path_value_v2_realized_plan_reports_exit_timing_regret_and_defers_suspended_exit() -> None:
+    true_path = np.zeros((1, 4, 4), dtype=np.float32)
+    true_path[0, :, 3] = [0.01, 0.03, 0.10, 0.04]
+    true_path[0, :, 1] = true_path[0, :, 3]
+    pred_summary = np.zeros((1, len(derived_path_summary_columns(4))), dtype=np.float32)
+    exit_idx = derived_path_summary_columns(4).index("best_exit_day_4d")
+    pred_summary[0, exit_idx] = 2.0
+    tradable = np.asarray([[True, False, True, True]], dtype=bool)
+
+    realized = _realize_path_value_v2_plan_numpy(
+        pred_summary,
+        true_path,
+        forward_days=4,
+        tradable_path=tradable,
+    )
+
+    assert realized["predicted_exit_day"][0] == 2.0
+    assert realized["realized_plan_exit_day"][0] == 3.0
+    assert realized["realized_plan_exit_tradable"][0] == 1.0
+    assert realized["realized_plan_return"][0] == np.float32(0.10)
+    assert realized["opportunity_value"][0] >= realized["realized_plan_value"][0]
+    assert np.isclose(
+        realized["oracle_regret"][0],
+        realized["opportunity_value"][0] - realized["realized_plan_value"][0],
+    )
+
+    unfilled = _realize_path_value_v2_plan_numpy(
+        pred_summary,
+        true_path,
+        forward_days=4,
+        tradable_path=tradable,
+        entry_filled=np.asarray([False]),
+    )
+    assert unfilled["realized_plan_entry_filled"][0] == 0.0
+    assert unfilled["realized_plan_covered"][0] == 1.0
+    assert unfilled["realized_plan_value"][0] == 0.0
+    assert unfilled["oracle_regret"][0] == unfilled["opportunity_value"][0]
+
+
 def test_multi_horizon_ohlc_summary_loss_uses_available_windows() -> None:
     assert _summary_loss_windows(20) == (5, 10, 20)
     assert _summary_loss_windows(60) == (5, 10, 20, 40, 60)
@@ -430,6 +666,24 @@ def test_multi_horizon_ohlc_summary_loss_vectorized_matches_loop() -> None:
         vectorized_loss = _multi_horizon_ohlc_summary_loss_vectorized(pred_path, target_path, price_anchor=price_anchor)
 
         assert torch.allclose(vectorized_loss, loop_loss, atol=1.0e-7)
+
+
+def test_multi_horizon_target_exit_fields_are_ignored_without_tradable_days() -> None:
+    target_path = torch.zeros((2, 60, 4))
+    pred_path = target_path.clone().requires_grad_(True)
+    tradable = torch.zeros((2, 60), dtype=torch.bool)
+
+    loss = _multi_horizon_ohlc_summary_loss_vectorized(
+        pred_path,
+        target_path,
+        price_anchor="next_open",
+        target_tradable_path=tradable,
+    )
+
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert pred_path.grad is not None
+    assert torch.isfinite(pred_path.grad).all()
 
 
 def test_today_close_anchor_path_value_matches_next_open_anchor() -> None:
@@ -951,6 +1205,29 @@ def test_sequence_pack_dataset_get_batch_reads_date_grouped_windows(tmp_path) ->
     assert any("__intraday_summary__" in name for name in no_limit_names)
     assert all("__limit_structure__" not in name for name in no_limit_names)
 
+    mask_meta = {}
+    for mask_name in ["has_bar", "is_suspended", "previous_close_valid", "zero_range", "corr_valid", "tradable"]:
+        mask_path = tmp_path / f"{mask_name}.bool.dat"
+        mask_values = np.ones((5, 2), dtype=bool)
+        mask_memmap = np.memmap(mask_path, dtype="bool", mode="w+", shape=mask_values.shape)
+        mask_memmap[:] = mask_values
+        mask_memmap.flush()
+        mask_meta[mask_name] = {"path": str(mask_path), "shape": list(mask_values.shape)}
+    masked_manifest = {**manifest, "masks": mask_meta}
+    masked_daily = SequencePathPackDataset(
+        masked_manifest,
+        split="train",
+        input_channel_profile=INPUT_CHANNEL_PROFILE_DAILY_ONLY,
+    )
+    masked_all = SequencePathPackDataset(masked_manifest, split="train")
+
+    assert masked_daily.input_mask_features == ["has_bar", "is_suspended", "previous_close_valid", "zero_range"]
+    assert masked_daily.get_batch([0, 1])["x"].shape == (2, 3, 7)
+    assert masked_all.input_mask_features[-1] == "corr_valid"
+    assert masked_all.get_batch([0, 1])["x"].shape == (2, 3, 10)
+    assert masked_all.get_batch([0, 1])["y_tradable_path"].shape == (2, 20)
+    assert masked_daily.path_value_targets().shape == (2,)
+
 
 def test_date_grouped_batch_sampler_merges_small_dates_without_losing_date_groups() -> None:
     sample_index = pd.DataFrame(
@@ -969,6 +1246,113 @@ def test_date_grouped_batch_sampler_merges_small_dates_without_losing_date_group
 
     assert len(sampler) == 2
     assert batches == [[0, 1, 2, 3], [4, 5]]
+
+
+def test_shuffled_batch_sampler_fills_path_batches_across_dates_without_loss() -> None:
+    sampler = ShuffledBatchSampler(10, batch_size=4, shuffle=False, seed=7)
+
+    assert list(sampler) == [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9]]
+    assert len(sampler) == 3
+
+
+def test_global_tail_512_sampler_uses_frozen_unique_daily_groups_and_prior_false_positives() -> None:
+    sample_index = pd.DataFrame({"date_idx": np.zeros(700, dtype=np.int32)})
+    targets = np.linspace(1.0, 0.0, num=700, dtype=np.float32)
+    prior = np.full(700, -1.0, dtype=np.float32)
+    prior[300:428] = np.linspace(2.0, 1.0, num=128, dtype=np.float32)
+    sampler = GlobalTailBatchSampler(
+        sample_index,
+        targets,
+        batch_size=512,
+        shuffle=False,
+        seed=7,
+        prior_epoch_scores=prior,
+    )
+
+    slate, groups = sampler.build_slate(0, epoch=0)
+
+    assert len(slate) == len(set(slate)) == 512
+    assert len(groups["true_top"]) == 32
+    assert len(groups["true_rank_33_256"]) == 128
+    assert len(groups["middle"]) == 128
+    assert len(groups["bottom"]) == 96
+    assert len(groups["prior_epoch_false_positive"]) == 128
+    assert set(groups["true_top"]) == set(range(32))
+    assert set(groups["bottom"]) == set(range(604, 700))
+    assert set(groups["prior_epoch_false_positive"]) == set(range(300, 428))
+
+
+def test_global_tail_512_sampler_keeps_every_small_date_as_one_slate() -> None:
+    sample_index = pd.DataFrame(
+        {"date_idx": np.repeat(np.arange(3, dtype=np.int32), [4, 7, 11])}
+    )
+    targets = np.linspace(1.0, 0.0, num=len(sample_index), dtype=np.float32)
+    sampler = GlobalTailBatchSampler(
+        sample_index,
+        targets,
+        batch_size=512,
+        shuffle=False,
+        seed=7,
+    )
+
+    slates = list(sampler)
+
+    assert len(slates) == 3
+    assert [len(slate) for slate in slates] == [4, 7, 11]
+    for date_idx, slate in enumerate(slates):
+        assert set(sample_index.iloc[slate]["date_idx"].astype(int)) == {date_idx}
+
+
+def test_global_tail_rank_loss_rewards_correct_target_order() -> None:
+    target = torch.linspace(1.0, -1.0, steps=512)
+    date_idx = torch.zeros(512, dtype=torch.long)
+
+    correct = _global_tail_rank_loss_by_date(target.clone(), target, date_idx)
+    reversed_loss = _global_tail_rank_loss_by_date(-target, target, date_idx)
+
+    assert torch.isfinite(correct)
+    assert correct < reversed_loss
+
+
+def test_compute_loss_accepts_global_tail_profile_on_single_daily_slate() -> None:
+    true_path = torch.zeros(8, 5, 4)
+    true_path[:, :, 3] = torch.linspace(0.0, 0.14, steps=8).view(-1, 1)
+    pred_path = true_path.clone().requires_grad_(True)
+    date_idx = torch.ones(8, dtype=torch.long)
+
+    loss, parts = _compute_loss(
+        {"future_path": pred_path},
+        true_path,
+        torch.empty(8, 0),
+        date_idx,
+        value_index=0,
+        path_weight=0.0,
+        summary_weight=0.0,
+        value_weight=0.0,
+        rank_weight=1.0,
+        rank_training_profile=RANK_TRAINING_PROFILE_GLOBAL_TAIL_512,
+    )
+
+    assert torch.isfinite(loss)
+    assert parts["rank_loss"] >= 0.0
+
+
+def test_separated_rank_score_rejects_unified_ohlcva_value_semantics() -> None:
+    target_path = torch.zeros((4, 5, 4))
+    tradable = torch.ones((4, 5), dtype=torch.bool)
+
+    try:
+        _derived_path_rank_score_and_target(
+            {"future_path": torch.zeros((4, 5, 6))},
+            target_path,
+            price_anchor="next_open",
+            path_value_gradient_profile=PATH_VALUE_GRADIENT_PROFILE_HARD_ST,
+            target_tradable_path=tradable,
+        )
+    except ValueError as error:
+        assert "unified OHLCVA" in str(error)
+    else:
+        raise AssertionError("global-tail rank score must reject six-field unified value semantics")
 
 
 def test_future_path_columns_support_sixty_day_horizon() -> None:

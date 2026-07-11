@@ -17,6 +17,10 @@ from daily_research.path_policy.qdp_v2_sequence_path_training import (
     INPUT_CHANNEL_PROFILE_NO_LIMIT_STRUCTURE,
     PATH_LOSS_PROFILE_DEFAULT,
     PATH_LOSS_PROFILE_OHLCVA_EQUAL,
+    PATH_VALUE_GRADIENT_PROFILE_HARD_ST,
+    PATH_VALUE_GRADIENT_PROFILE_SMOOTH,
+    RANK_TRAINING_PROFILE_GLOBAL_TAIL_512,
+    RANK_TRAINING_PROFILE_LOCAL_CHUNK,
     SUMMARY_LOSS_PROFILE_BASE,
     SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC_NO60,
     SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
@@ -40,6 +44,12 @@ DEFAULT_DAILY_ONLY_RUN_TAG = "seq100_todayclose_path_only_daily_only"
 DEFAULT_DAILY_ONLY_SUMMARY_V2_PRICE_DELTA_RUN_TAG = "seq100_todayclose_path_only_daily_only_summary_v2_price_delta"
 DEFAULT_DAILY_ONLY_SUMMARY_V2_OHLCVA_AUX_RUN_TAG = "seq100_todayclose_path_only_daily_only_summary_v2_ohlcva_aux"
 DEFAULT_DAILY_ONLY_SUMMARY_V2_OHLCVA_AUX_LOW_RUN_TAG = "seq100_todayclose_path_only_daily_only_summary_v2_ohlcva_aux_low"
+DEFAULT_DAILY_ONLY_SUMMARY_V2_OHLCVA_AUX_LOW_HARD_ST_RUN_TAG = (
+    "seq100_todayclose_path_only_daily_only_summary_v2_ohlcva_aux_low_hard_st"
+)
+DEFAULT_DAILY_ONLY_SUMMARY_V2_OHLCVA_AUX_LOW_HARD_ST_GLOBAL_TAIL_RUN_TAG = (
+    "seq100_todayclose_path_only_daily_only_summary_v2_ohlcva_aux_low_hard_st_global_tail_512"
+)
 DEFAULT_DAILY_ONLY_SUMMARY_V2_OHLCVA_AUX_LOW_PRICE_DELTA_RUN_TAG = "seq100_todayclose_path_only_daily_only_summary_v2_ohlcva_aux_low_price_delta"
 DEFAULT_DAILY_ONLY_SUMMARY_V2_OHLCVA_PATH_EQUAL_RUN_TAG = "seq100_todayclose_path_only_daily_only_summary_v2_ohlcva_path_equal"
 DEFAULT_RUN_TAG = DEFAULT_DAILY_ONLY_SUMMARY_V2_OHLCVA_AUX_LOW_RUN_TAG
@@ -77,6 +87,8 @@ COMPARISON_CONCEPTS = {
     "daily_only_summary_v2_price_delta": "Explicit price rhythm experiment that adds close-to-close log-delta supervision while keeping OHLC path value semantics.",
     "daily_only_summary_v2_ohlcva_aux": "Explicit volume/amount auxiliary experiment: predicts OHLCVA jointly but keeps price-only summary/value/rank semantics.",
     "daily_only_summary_v2_ohlcva_aux_low_price_delta": "Combined lower-weight VA auxiliary plus close-delta price rhythm experiment.",
+    "daily_only_summary_v2_ohlcva_aux_low_hard_st": "Single-factor path-value experiment with hard-max forward semantics and smooth straight-through gradients.",
+    "daily_only_summary_v2_ohlcva_aux_low_hard_st_global_tail": "Separated path reconstruction and global-tail daily ranking experiment.",
     "daily_only_summary_v2_ohlcva_path_equal": "Full OHLCVA path reconstruction experiment: six fields enter path_loss equally while value/rank remain price-only.",
     "no_intraday_summary": "Explicit input ablation that removes intraday_summary while retaining limit_structure.",
     "no_limit_structure": "Explicit input ablation that removes limit_structure while retaining intraday_summary.",
@@ -129,6 +141,11 @@ class TodayClosePathOnlyProfile:
     input_channel_profile: str = INPUT_CHANNEL_PROFILE_DAILY_ONLY
     model_type: str = "gru_ohlcva_aux_path_value"
     direct_value_horizon: int = 0
+    path_value_gradient_profile: str = PATH_VALUE_GRADIENT_PROFILE_SMOOTH
+    rank_training_profile: str = RANK_TRAINING_PROFILE_LOCAL_CHUNK
+    rank_batch_size: int = 512
+    rank_interval: int = 4
+    prefetch_batches: int = 1
 
 
 def build_todayclose_path_only_train_argv(profile: TodayClosePathOnlyProfile) -> list[str]:
@@ -182,6 +199,16 @@ def build_todayclose_path_only_train_argv(profile: TodayClosePathOnlyProfile) ->
         str(profile.direct_value_horizon),
         "--rank-max-per-side",
         str(profile.rank_max_per_side),
+        "--path-value-gradient-profile",
+        profile.path_value_gradient_profile,
+        "--rank-training-profile",
+        profile.rank_training_profile,
+        "--rank-batch-size",
+        str(profile.rank_batch_size),
+        "--rank-interval",
+        str(profile.rank_interval),
+        "--prefetch-batches",
+        str(profile.prefetch_batches),
         "--device",
         profile.device,
         "--seed",
@@ -221,6 +248,8 @@ class ProfileSpec:
     direct_value_horizon: int = 0
     batch_size: int = 512
     early_stopping_patience: int = 2
+    path_value_gradient_profile: str = PATH_VALUE_GRADIENT_PROFILE_SMOOTH
+    rank_training_profile: str = RANK_TRAINING_PROFILE_LOCAL_CHUNK
 
     def apply(self, profile: TodayClosePathOnlyProfile) -> TodayClosePathOnlyProfile:
         return replace(
@@ -238,6 +267,8 @@ class ProfileSpec:
             input_channel_profile=self.input_channel_profile,
             model_type=self.model_type,
             direct_value_horizon=self.direct_value_horizon,
+            path_value_gradient_profile=self.path_value_gradient_profile,
+            rank_training_profile=self.rank_training_profile,
         )
 
     def default_profile(self) -> TodayClosePathOnlyProfile:
@@ -263,6 +294,8 @@ def _profile_spec(
     va_level: float = 0.0,
     va_delta: float = 0.0,
     direct_horizon: int = 0,
+    path_value_gradient_profile: str = PATH_VALUE_GRADIENT_PROFILE_SMOOTH,
+    rank_training_profile: str = RANK_TRAINING_PROFILE_LOCAL_CHUNK,
 ) -> ProfileSpec:
     direct = int(direct_horizon) > 0
     return ProfileSpec(
@@ -281,6 +314,8 @@ def _profile_spec(
         value_loss_weight=0.50 if direct else 0.20,
         rank_loss_weight=0.50 if direct else 0.15,
         direct_value_horizon=int(direct_horizon),
+        path_value_gradient_profile=path_value_gradient_profile,
+        rank_training_profile=rank_training_profile,
         batch_size=2048 if direct else 512,
     )
 
@@ -408,6 +443,29 @@ PROFILE_SPECS = {
             model_type="gru_ohlcva_aux_path_value",
             va_level=0.02,
             va_delta=0.01,
+        ),
+        _profile_spec(
+            "train-daily-only-summary-v2-ohlcva-aux-low-hard-st",
+            DEFAULT_DAILY_ONLY_SUMMARY_V2_OHLCVA_AUX_LOW_HARD_ST_RUN_TAG,
+            "Train the daily-only low-VA summary_v2 model with hard-max forward path value and straight-through smooth gradients.",
+            input_profile=INPUT_CHANNEL_PROFILE_DAILY_ONLY,
+            summary_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
+            model_type="gru_ohlcva_aux_path_value",
+            va_level=0.02,
+            va_delta=0.01,
+            path_value_gradient_profile=PATH_VALUE_GRADIENT_PROFILE_HARD_ST,
+        ),
+        _profile_spec(
+            "train-daily-only-summary-v2-ohlcva-aux-low-hard-st-global-tail",
+            DEFAULT_DAILY_ONLY_SUMMARY_V2_OHLCVA_AUX_LOW_HARD_ST_GLOBAL_TAIL_RUN_TAG,
+            "Train the hard-ST daily-only profile with separated global-tail 512 ranking slates.",
+            input_profile=INPUT_CHANNEL_PROFILE_DAILY_ONLY,
+            summary_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
+            model_type="gru_ohlcva_aux_path_value",
+            va_level=0.02,
+            va_delta=0.01,
+            path_value_gradient_profile=PATH_VALUE_GRADIENT_PROFILE_HARD_ST,
+            rank_training_profile=RANK_TRAINING_PROFILE_GLOBAL_TAIL_512,
         ),
         _profile_spec(
             "train-daily-only-summary-v2-ohlcva-aux-low-price-delta",
@@ -546,6 +604,18 @@ def build_todayclose_daily_only_summary_v2_ohlcva_aux_train_argv(profile: TodayC
 
 def build_todayclose_daily_only_summary_v2_ohlcva_aux_low_train_argv(profile: TodayClosePathOnlyProfile) -> list[str]:
     return _profile_argv(profile, "train-daily-only-summary-v2-ohlcva-aux-low")
+
+
+def build_todayclose_daily_only_summary_v2_ohlcva_aux_low_hard_st_train_argv(
+    profile: TodayClosePathOnlyProfile,
+) -> list[str]:
+    return _profile_argv(profile, "train-daily-only-summary-v2-ohlcva-aux-low-hard-st")
+
+
+def build_todayclose_daily_only_summary_v2_ohlcva_aux_low_hard_st_global_tail_train_argv(
+    profile: TodayClosePathOnlyProfile,
+) -> list[str]:
+    return _profile_argv(profile, "train-daily-only-summary-v2-ohlcva-aux-low-hard-st-global-tail")
 
 
 def build_todayclose_daily_only_summary_v2_ohlcva_aux_low_price_delta_train_argv(
@@ -765,7 +835,12 @@ def _add_train_args(
     parser.add_argument("--batch-size", type=int, default=int(default_batch_size))
     parser.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
-    parser.add_argument("--max-samples-per-split", type=int, default=0)
+    parser.add_argument(
+        "--max-samples-per-split",
+        type=int,
+        default=0,
+        help="Training-only complete-date screening cap; evaluation splits remain full-universe.",
+    )
     parser.add_argument("--early-stopping-patience", type=int, default=int(default_early_stopping_patience))
     parser.add_argument("--early-stopping-min-delta", type=float, default=0.0)
     parser.add_argument("--prediction-mode", default="compact", choices=("full", "compact", "none"))

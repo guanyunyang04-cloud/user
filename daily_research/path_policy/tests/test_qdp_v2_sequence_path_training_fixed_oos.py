@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -92,14 +93,26 @@ def _build_tiny_pack(tmp_path: Path, *, fixed_oos: bool) -> Path:
         },
     }
     if fixed_oos:
-        manifest["fold_training_contract"] = {
+        manifest["purged_walkforward"] = {
             "schema_version": 1,
-            "algorithm": "sha256",
-            "sha256": "a" * 64,
-            "sample_index_sha256": "b" * 64,
-            "normalization_sha256": "c" * 64,
-            "payload": {"forward_days": forward_days, "lookback_days": lookback_days},
+            "method": "tiny_test_fixture",
+            "split_roles": {"fit": "train", "evaluation": "oos"},
+            "oos_year": 2022,
+            "oos_start": "2022-01-04",
+            "oos_start_date_idx": 4,
+            "purge_rule": "date_idx + forward_days < oos_start_date_idx",
+            "label_overlap_count": 0,
         }
+        manifest["normalization"].update(
+            {
+                "fit_scope": "feature_dates_before_oos_start",
+                "fit_date_end_exclusive": "2022-01-04",
+                "oos_feature_date_count": 0,
+            }
+        )
+        from daily_research.path_policy.seq100_walkforward import _compute_fold_training_contract
+
+        manifest["fold_training_contract"] = _compute_fold_training_contract(manifest)
     manifest_path = tmp_path / "manifest.json"
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     return manifest_path
@@ -225,6 +238,80 @@ def test_fixed_oos_skips_training_evaluation_and_evaluates_oos_once(
     assert persisted["resolved_training_config"] == expected_config
 
 
+def test_fixed_oos_global_tail_runs_separate_rank_step_and_persists_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_path = _build_tiny_pack(tmp_path, fixed_oos=True)
+    calls = _install_fake_evaluation(monkeypatch)
+    config = replace(
+        _config(tmp_path, manifest_path, evaluation_mode="fixed_oos"),
+        rank_training_profile=training.RANK_TRAINING_PROFILE_GLOBAL_TAIL_512,
+        rank_batch_size=512,
+        # The tiny fixture has only one path batch.  A larger interval verifies
+        # that the epoch-end drain still gives its date one equal-weight slate.
+        rank_interval=4,
+        path_value_gradient_profile=training.PATH_VALUE_GRADIENT_PROFILE_HARD_ST,
+    )
+
+    summary = training.train_sequence_path_model(config)
+    history = pd.read_csv(Path(summary["outputs"]["training_history_csv"]))
+
+    assert calls == ["oos"]
+    assert history.loc[0, "rank_batch_count"] == 1
+    assert history.loc[0, "rank_sample_count"] == 4
+    assert np.isfinite(history.loc[0, "global_tail_rank_loss"])
+    assert summary["rank_training_profile"] == training.RANK_TRAINING_PROFILE_GLOBAL_TAIL_512
+    assert summary["path_value_gradient_profile"] == training.PATH_VALUE_GRADIENT_PROFILE_HARD_ST
+
+
+def test_global_tail_hard_negative_mining_uses_frozen_epoch_end_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_path = _build_tiny_pack(tmp_path, fixed_oos=True)
+    _install_fake_evaluation(monkeypatch)
+    mining_calls: list[int] = []
+    forward_modes: list[tuple[bool, bool]] = []
+    real_mine = training._mine_global_tail_scores
+
+    def observed_mine(**kwargs: Any) -> np.ndarray:
+        mining_calls.append(int(len(kwargs["dataset"])))
+        hook = kwargs["model"].register_forward_pre_hook(
+            lambda model, _inputs: forward_modes.append(
+                (bool(model.training), bool(training.torch.is_grad_enabled()))
+            )
+        )
+        try:
+            return real_mine(**kwargs)
+        finally:
+            hook.remove()
+
+    monkeypatch.setattr(training, "_mine_global_tail_scores", observed_mine)
+    config = replace(
+        _config(tmp_path, manifest_path, evaluation_mode="fixed_oos"),
+        epochs=2,
+        batch_size=1024,
+        rank_training_profile=training.RANK_TRAINING_PROFILE_GLOBAL_TAIL_512,
+        rank_batch_size=512,
+        rank_interval=4,
+        path_value_gradient_profile=training.PATH_VALUE_GRADIENT_PROFILE_HARD_ST,
+    )
+
+    summary = training.train_sequence_path_model(config)
+    history = pd.read_csv(Path(summary["outputs"]["training_history_csv"]))
+
+    # Mining occurs once between epochs, after every date slate from epoch 1.
+    assert mining_calls == [4]
+    assert forward_modes == [(False, False)]
+    assert history["rank_batch_count"].tolist() == [1, 1]
+    assert history["rank_sample_count"].tolist() == [4, 4]
+    assert history.loc[0, "hard_negative_mining_sample_count"] == 4
+    assert history.loc[0, "hard_negative_mining_seconds"] >= 0.0
+    assert history.loc[0, "hard_negative_mining_samples_per_second"] >= 0.0
+    assert history.loc[1, "hard_negative_mining_sample_count"] == 0
+
+
 def test_fixed_oos_rejects_early_stopping(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -240,6 +327,24 @@ def test_fixed_oos_rejects_early_stopping(
                 evaluation_mode="fixed_oos",
                 early_stopping_patience=1,
             )
+        )
+
+    assert calls == []
+
+
+def test_fixed_oos_rejects_tampered_training_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_path = _build_tiny_pack(tmp_path, fixed_oos=True)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["fold_training_contract"]["sha256"] = "0" * 64
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    calls = _install_fake_evaluation(monkeypatch)
+
+    with pytest.raises(ValueError, match="fold_training_contract"):
+        training.train_sequence_path_model(
+            _config(tmp_path, manifest_path, evaluation_mode="fixed_oos")
         )
 
     assert calls == []

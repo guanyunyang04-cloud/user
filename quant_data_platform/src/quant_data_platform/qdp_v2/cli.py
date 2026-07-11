@@ -28,9 +28,12 @@ commands:
   rebuild share-capital-daily Rebuild daily PIT share-capital table.
   rebuild valuation-market-cap Rebuild valuation with market-cap fields.
   rebuild index-constituents-daily Rebuild daily PIT index constituents.
+  rebuild pit-signal-universe Build date-local main-board non-ST signal eligibility and daily hashes.
+  rebuild pit-market-substrate Build a non-active PIT daily market/factor/status/limit dataset view.
   rebuild scope-active    Rebuild active tables under the current mainboard non-delisted scope.
   rebuild limit-intraday  Rebuild 1m-derived limit-board features.
   rebuild training-pack   Build research training pack from active data.
+  verify pit-market-view  Verify all five atomic overrides in a non-active PIT dataset view.
   gc --dry-run            Show unreferenced data directories.
   update                  Update the active data base.
 
@@ -52,6 +55,9 @@ targets:
   share-capital-daily Rebuild one-row-per-symbol-day share-capital facts.
   valuation-market-cap Rebuild market-cap fields from close and share capital.
   index-constituents-daily Expand index snapshots to daily PIT membership.
+  pit-signal-universe Build date-local main-board non-ST signal eligibility and daily hashes.
+  pit-market-substrate Build non-active market_daily_raw, security_status, limit_status,
+                       adjust_factor, and an explicit research dataset view.
   scope-active        Rebuild all active symbol tables under current scope.
   limit-intraday     Rebuild 1m-derived limit-board features.
   training-pack       Build sharded memmap and training pack from active data.
@@ -75,6 +81,9 @@ COMMAND_MODULES: dict[tuple[str, ...], str] = {
     ("rebuild", "share-capital-daily"): "quant_data_platform.qdp_v2.completion",
     ("rebuild", "valuation-market-cap"): "quant_data_platform.qdp_v2.completion",
     ("rebuild", "index-constituents-daily"): "quant_data_platform.qdp_v2.completion",
+    ("rebuild", "pit-signal-universe"): "quant_data_platform.qdp_v2.completion",
+    ("rebuild", "pit-market-substrate"): "quant_data_platform.qdp_v2.pit_market_substrate",
+    ("verify", "pit-market-view"): "quant_data_platform.qdp_v2.pit_market_substrate",
     ("rebuild", "scope-active"): "quant_data_platform.qdp_v2.completion",
     ("rebuild", "limit-intraday"): "quant_data_platform.qdp_v2.limit_intraday_features",
     ("rebuild", "training-pack"): "quant_data_platform.qdp_v2.training_pack",
@@ -91,6 +100,8 @@ ENV_GUARDED_PREFIXES = {
     ("rebuild", "share-capital-daily"),
     ("rebuild", "valuation-market-cap"),
     ("rebuild", "index-constituents-daily"),
+    ("rebuild", "pit-signal-universe"),
+    ("rebuild", "pit-market-substrate"),
     ("rebuild", "scope-active"),
     ("rebuild", "limit-intraday"),
     ("rebuild", "training-pack"),
@@ -108,6 +119,9 @@ ARG_ALIASES: dict[tuple[str, ...], list[str]] = {
     ("rebuild", "share-capital-daily"): ["share-capital-daily"],
     ("rebuild", "valuation-market-cap"): ["valuation-market-cap"],
     ("rebuild", "index-constituents-daily"): ["index-constituents-daily"],
+    ("rebuild", "pit-signal-universe"): ["pit-signal-universe"],
+    ("rebuild", "pit-market-substrate"): ["build"],
+    ("verify", "pit-market-view"): ["verify-view"],
     ("rebuild", "scope-active"): ["scope-active"],
     ("check", "meta"): ["audit"],
 }

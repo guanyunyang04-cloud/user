@@ -50,6 +50,91 @@ def test_fast_intraday_daily_features_last_5m_ret_uses_previous_close_for_closin
     assert float(features["closing_auction_ret"].iloc[0]) == pytest.approx(10.3 / 10.2 - 1.0)
 
 
+def test_build_intraday_daily_features_seeds_open_gap_across_year_shards(tmp_path) -> None:
+    lake_root = tmp_path / "lake"
+    lake = ResearchDataLake(lake_root)
+    shard_dir = tmp_path / "raw_5m"
+    shard_dir.mkdir()
+
+    def write_day(path: Path, *, trade_date: str, prices: list[float]) -> None:
+        opens = prices[:-1]
+        closes = prices[1:]
+        pd.DataFrame(
+            {
+                "symbol": ["000001.SZ"] * len(opens),
+                "trade_date": [trade_date] * len(opens),
+                "bar_time": ["09:30:00", "09:35:00", "09:40:00", "09:45:00", "09:50:00", "09:55:00"],
+                "open": opens,
+                "high": [max(open_, close) + 0.1 for open_, close in zip(opens, closes)],
+                "low": [min(open_, close) - 0.1 for open_, close in zip(opens, closes)],
+                "close": closes,
+                "volume": [100.0] * len(opens),
+                "amount": [close * 100.0 for close in closes],
+                "source": ["unit"] * len(opens),
+                "adjusted_flag": ["none"] * len(opens),
+            }
+        ).to_parquet(path, index=False)
+
+    prior_path = shard_dir / "2025.parquet"
+    target_path = shard_dir / "2026.parquet"
+    write_day(prior_path, trade_date="2025-12-31", prices=[10.0, 10.1, 10.2, 10.3, 10.4, 10.45, 10.5])
+    write_day(target_path, trade_date="2026-01-02", prices=[11.0, 11.1, 11.2, 11.3, 11.4, 11.45, 11.5])
+    source = lake.save_sharded_domain_dataset(
+        domain=DataDomain.MARKET_INTRADAY_5M,
+        spec={
+            "domain": DataDomain.MARKET_INTRADAY_5M,
+            "dataset": "unit_cross_year_5m",
+            "start_date": "2025-12-31",
+            "end_date": "2026-01-02",
+            "sharded": True,
+        },
+        shard_records=[
+            {
+                "domain": DataDomain.MARKET_INTRADAY_5M,
+                "status": "stored",
+                "path": str(prior_path.resolve()),
+                "row_count": 6,
+                "start_date": "2025-12-31",
+                "end_date": "2025-12-31",
+            },
+            {
+                "domain": DataDomain.MARKET_INTRADAY_5M,
+                "status": "stored",
+                "path": str(target_path.resolve()),
+                "row_count": 6,
+                "start_date": "2026-01-02",
+                "end_date": "2026-01-02",
+            },
+        ],
+        source="unit",
+        reuse=False,
+    )
+
+    result = build_intraday_daily_features(
+        BuildIntradayDailyFeaturesConfig(
+            lake_root=lake_root,
+            source_dataset_id=source.dataset_id,
+            start_date="2026-01-01",
+            end_date="2026-12-31",
+            years=(2026,),
+            workers=2,
+            resume=False,
+            reuse=False,
+        )
+    )
+
+    assert result.status == "completed"
+    assert result.shard_count == 1
+    metadata = lake.describe_dataset(result.dataset_id)
+    manifest_path = Path(metadata["content_paths"]["shard_manifest"])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    features = pd.read_parquet(manifest["shards"][0]["path"])
+    assert features["trade_date"].tolist() == ["2026-01-02"]
+    assert float(features["open_gap"].iloc[0]) == pytest.approx(11.0 / 10.5 - 1.0)
+    assert float(features["open_gap_first_30m_follow_through"].iloc[0]) == pytest.approx(11.5 / 11.0 - 1.0)
+    assert float(features["open_gap_first_30m_reversal"].iloc[0]) == pytest.approx(-(11.5 / 11.0 - 1.0))
+
+
 def test_intraday_daily_feature_dataset_spec_records_last_5m_contract(tmp_path) -> None:
     lake = ResearchDataLake(tmp_path / "lake")
     source_record = lake.save_sharded_domain_dataset(

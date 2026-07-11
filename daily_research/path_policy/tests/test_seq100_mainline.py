@@ -612,6 +612,20 @@ def test_train_cli_profiles_default_and_comparisons(capsys) -> None:
     assert ohlcva_aux_low["profile"]["va_level_loss_weight"] == 0.02
     assert ohlcva_aux_low["profile"]["va_delta_loss_weight"] == 0.01
 
+    assert main(["train-daily-only-summary-v2-ohlcva-aux-low-hard-st", "--dry-run", "--json"]) == 0
+    hard_st = json.loads(capsys.readouterr().out)
+    assert hard_st["profile"]["path_value_gradient_profile"] == "hard_st"
+    assert hard_st["profile"]["rank_training_profile"] == "local_chunk"
+    assert hard_st["argv"][hard_st["argv"].index("--path-value-gradient-profile") + 1] == "hard_st"
+
+    assert main(["train-daily-only-summary-v2-ohlcva-aux-low-hard-st-global-tail", "--dry-run", "--json"]) == 0
+    global_tail = json.loads(capsys.readouterr().out)
+    assert global_tail["profile"]["path_value_gradient_profile"] == "hard_st"
+    assert global_tail["profile"]["rank_training_profile"] == "global_tail_512"
+    assert global_tail["profile"]["rank_batch_size"] == 512
+    assert global_tail["profile"]["rank_interval"] == 4
+    assert global_tail["argv"][global_tail["argv"].index("--rank-training-profile") + 1] == "global_tail_512"
+
     assert main(["train-daily-only-summary-v2-ohlcva-aux-low-price-delta", "--dry-run", "--json"]) == 0
     ohlcva_aux_low_delta = json.loads(capsys.readouterr().out)
     assert ohlcva_aux_low_delta["profile"]["model_type"] == "gru_ohlcva_aux_path_value"

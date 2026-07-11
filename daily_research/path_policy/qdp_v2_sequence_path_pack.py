@@ -54,6 +54,31 @@ DAILY_RAW_FEATURES = [
 PATH_OHLC_FIELDS = ["open", "high", "low", "close"]
 PATH_OHLCVA_FIELDS = ["open", "high", "low", "close", "volume", "amount"]
 
+PRICE_ADJUSTMENT_NONE = "none"
+PRICE_ADJUSTMENT_BACK = "back_adjust"
+ENTRY_RULE_LEGACY = "legacy_999_tolerance"
+ENTRY_RULE_OPEN_BELOW_LIMIT = "open_below_limit_tick"
+SAMPLE_FILTER_COMPLETE_CASE = "complete_case_filled"
+SAMPLE_FILTER_SIGNAL_ELIGIBLE = "signal_eligible_price_label"
+SUSPENSION_FILL_NONE = "none"
+SUSPENSION_FILL_CARRY_CLOSE = "carry_adjusted_close"
+REQUIRED_PIT_MARKET_VIEW_OVERRIDES = {
+    "market_daily_raw",
+    "adjust_factor",
+    "limit_status",
+    "security_status",
+    "pit_signal_universe",
+}
+
+PIT_MAINBOARD_PREFIXES = ("000", "001", "002", "003", "600", "601", "603", "605")
+
+
+def _is_pit_mainboard_symbol(symbol: str) -> bool:
+    normalized = str(symbol).upper().strip()
+    code = normalized.split(".", 1)[0]
+    exchange = normalized.split(".", 1)[1] if "." in normalized else ""
+    return exchange in {"SH", "SZ"} and code.startswith(PIT_MAINBOARD_PREFIXES)
+
 
 def path_summary_columns(forward_days: int) -> list[str]:
     suffix = f"{int(forward_days)}d"
@@ -125,6 +150,36 @@ def _read_active(root: Path) -> dict[str, Any]:
     return json.loads((root / "active" / "active.json").read_text(encoding="utf-8"))
 
 
+def _apply_research_dataset_view(
+    root: Path,
+    active: Mapping[str, Any],
+    view_path: str | Path | None,
+) -> tuple[dict[str, Any], dict[str, Any] | None, str]:
+    if view_path is None:
+        return dict(active), None, ""
+    path = Path(view_path).resolve()
+    view = json.loads(path.read_text(encoding="utf-8-sig"))
+    if str(view.get("kind", "") or "") != "qdp_v2_research_dataset_view":
+        raise ValueError(f"not a qdp_v2 research dataset view: {path}")
+    datasets = dict(view.get("datasets", {}) or {})
+    overrides = dict(view.get("overrides", {}) or {})
+    missing_overrides = sorted(REQUIRED_PIT_MARKET_VIEW_OVERRIDES.difference(overrides))
+    if missing_overrides:
+        raise ValueError(f"research dataset view missing required overrides: {missing_overrides}")
+    for domain, dataset_id in datasets.items():
+        manifest_path = root / "datasets" / str(domain) / str(dataset_id) / "dataset.json"
+        if not manifest_path.exists():
+            raise FileNotFoundError(f"research dataset view manifest not found: {manifest_path}")
+    selected = dict(active)
+    selected["datasets"] = datasets
+    selected["research_dataset_view"] = {
+        "view_id": str(view.get("view_id", "") or ""),
+        "view_path": str(path),
+        "overrides": overrides,
+    }
+    return selected, view, str(path)
+
+
 def _relative_shard_paths(root: Path, manifest: Mapping[str, Any]) -> list[Path]:
     paths: list[Path] = []
     for shard in list(manifest.get("shards", []) or []):
@@ -156,6 +211,81 @@ def _read_dataset_date_range(root: Path, active: Mapping[str, Any], domain: str,
     if "symbol" in frame.columns:
         frame["symbol"] = frame["symbol"].astype(str).str.upper().str.strip()
     return frame
+
+
+def _read_dataset_symbols_date_range(root: Path, active: Mapping[str, Any], domain: str, start: str, end: str) -> list[str]:
+    manifest = _dataset_manifest(root, active, domain)
+    paths = _relative_shard_paths(root, manifest)
+    filt = (ds.field("trade_date") >= str(start)) & (ds.field("trade_date") <= str(end))
+    table = ds.dataset([str(path) for path in paths], format="parquet").to_table(columns=["symbol"], filter=filt)
+    return sorted({str(item).upper().strip() for item in table.column("symbol").unique().to_pylist() if str(item).strip()})
+
+
+def _sql_path_list(paths: Iterable[Path]) -> str:
+    quoted = ["'" + str(Path(path).resolve()).replace("'", "''") + "'" for path in paths]
+    return "[" + ",".join(quoted) + "]"
+
+
+def _audit_pit_price_coverage(
+    root: Path,
+    active: Mapping[str, Any],
+    *,
+    start: str,
+    end: str,
+) -> dict[str, Any]:
+    """Exact Gate-0 anti-join between PIT-eligible rows and the active daily substrate."""
+
+    import duckdb  # type: ignore
+
+    pit_manifest = _dataset_manifest(root, active, "pit_signal_universe")
+    daily_manifest = _dataset_manifest(root, active, "market_daily_raw")
+    pit_sql = _sql_path_list(_relative_shard_paths(root, pit_manifest))
+    daily_sql = _sql_path_list(_relative_shard_paths(root, daily_manifest))
+    start_sql = str(start).replace("'", "''")
+    end_sql = str(end).replace("'", "''")
+    con = duckdb.connect(":memory:")
+    try:
+        row = con.execute(
+            f"""
+            with missing as (
+              select u.trade_date, u.symbol
+              from read_parquet({pit_sql}, union_by_name=true) u
+              left join read_parquet({daily_sql}, union_by_name=true) d
+                on u.trade_date = d.trade_date and u.symbol = d.symbol
+              where cast(u.eligible_for_signal as boolean)
+                and u.trade_date between '{start_sql}' and '{end_sql}'
+                and d.symbol is null
+            )
+            select
+              count(*) as missing_rows,
+              count(distinct symbol) as missing_symbols,
+              min(trade_date) as first_missing_date,
+              max(trade_date) as last_missing_date
+            from missing
+            """
+        ).fetchone()
+        examples = con.execute(
+            f"""
+            select u.trade_date, u.symbol
+            from read_parquet({pit_sql}, union_by_name=true) u
+            left join read_parquet({daily_sql}, union_by_name=true) d
+              on u.trade_date = d.trade_date and u.symbol = d.symbol
+            where cast(u.eligible_for_signal as boolean)
+              and u.trade_date between '{start_sql}' and '{end_sql}'
+              and d.symbol is null
+            order by u.trade_date, u.symbol
+            limit 5
+            """
+        ).fetchall()
+    finally:
+        con.close()
+    return {
+        "missing_rows": int(row[0] or 0),
+        "missing_symbols": int(row[1] or 0),
+        "first_missing_date": str(row[2] or ""),
+        "last_missing_date": str(row[3] or ""),
+        "examples": [{"trade_date": str(item[0]), "symbol": str(item[1])} for item in examples],
+    }
 
 
 def _read_trading_dates(root: Path, active: Mapping[str, Any], start: str, end: str) -> list[str]:
@@ -306,6 +436,87 @@ def _write_panel_values(
     panel.flush()
 
 
+def _write_scalar_panel_values(
+    panel: np.ndarray,
+    frame: pd.DataFrame,
+    value_column: str,
+    *,
+    date_to_idx: Mapping[str, int],
+    symbol_to_idx: Mapping[str, int],
+) -> None:
+    if frame.empty or value_column not in frame.columns:
+        return
+    indexed = _index_frame(frame, date_to_idx, symbol_to_idx)
+    if indexed.empty:
+        return
+    values = pd.to_numeric(indexed[value_column], errors="coerce").to_numpy(dtype=np.float32, copy=True)
+    panel[indexed["_date_idx"].to_numpy(dtype=np.int64), indexed["_symbol_idx"].to_numpy(dtype=np.int64)] = values
+    if hasattr(panel, "flush"):
+        panel.flush()
+
+
+def _write_status_panels(
+    *,
+    frame: pd.DataFrame,
+    status_valid: np.ndarray,
+    is_st: np.ndarray,
+    is_suspended: np.ndarray,
+    is_delisted: np.ndarray,
+    date_to_idx: Mapping[str, int],
+    symbol_to_idx: Mapping[str, int],
+) -> None:
+    if frame.empty:
+        return
+    indexed = _index_frame(frame, date_to_idx, symbol_to_idx)
+    if indexed.empty:
+        return
+    date_idx = indexed["_date_idx"].to_numpy(dtype=np.int64)
+    symbol_idx = indexed["_symbol_idx"].to_numpy(dtype=np.int64)
+    status_valid[date_idx, symbol_idx] = True
+    for column, panel in (("is_st", is_st), ("is_suspended", is_suspended), ("is_delisted", is_delisted)):
+        values = indexed[column].fillna(False).astype(bool).to_numpy(copy=True) if column in indexed.columns else np.zeros(len(indexed), dtype=bool)
+        panel[date_idx, symbol_idx] = values
+    for panel in (status_valid, is_st, is_suspended, is_delisted):
+        if hasattr(panel, "flush"):
+            panel.flush()
+
+
+def _write_pit_universe_panels(
+    *,
+    frame: pd.DataFrame,
+    status_valid: np.ndarray,
+    is_st: np.ndarray,
+    is_suspended: np.ndarray,
+    is_delisted: np.ndarray,
+    universe_has_bar: np.ndarray,
+    signal_eligible: np.ndarray,
+    date_to_idx: Mapping[str, int],
+    symbol_to_idx: Mapping[str, int],
+) -> None:
+    if frame.empty:
+        return
+    indexed = _index_frame(frame, date_to_idx, symbol_to_idx)
+    if indexed.empty:
+        return
+    date_idx = indexed["_date_idx"].to_numpy(dtype=np.int64)
+    symbol_idx = indexed["_symbol_idx"].to_numpy(dtype=np.int64)
+    status_valid[date_idx, symbol_idx] = True
+    mappings = (
+        ("is_st", is_st),
+        ("is_suspended", is_suspended),
+        ("is_delisted", is_delisted),
+        ("has_bar", universe_has_bar),
+        ("eligible_for_signal", signal_eligible),
+    )
+    for column, panel in mappings:
+        if column not in indexed.columns:
+            raise ValueError(f"PIT signal universe is missing required column: {column}")
+        panel[date_idx, symbol_idx] = indexed[column].fillna(False).astype(bool).to_numpy(copy=True)
+    for panel in (status_valid, is_st, is_suspended, is_delisted, universe_has_bar, signal_eligible):
+        if hasattr(panel, "flush"):
+            panel.flush()
+
+
 def _prepare_daily_frame(daily: pd.DataFrame) -> pd.DataFrame:
     daily = daily.sort_values(["symbol", "trade_date"], kind="mergesort").reset_index(drop=True)
     for col in ["open", "high", "low", "close", "volume", "amount"]:
@@ -322,6 +533,127 @@ def _prepare_daily_frame(daily: pd.DataFrame) -> pd.DataFrame:
     return daily.replace([np.inf, -np.inf], np.nan)
 
 
+def _apply_back_adjustment(daily: pd.DataFrame, factor: pd.DataFrame) -> pd.DataFrame:
+    """Apply the canonical back-adjust factor to OHLC while preserving raw execution prices.
+
+    The factor is a label/feature-side price transformation.  Volume and amount remain in
+    their native units, and ``raw_open`` is retained so the next-open fill rule can still be
+    evaluated in the exchange's 0.01-yuan tick space.
+    """
+
+    required_daily = {"symbol", "trade_date", *PATH_OHLC_FIELDS}
+    missing_daily = sorted(required_daily.difference(daily.columns))
+    if missing_daily:
+        raise ValueError(f"daily frame is missing price columns: {missing_daily}")
+    factor_column = "adjust_factor" if "adjust_factor" in factor.columns else "back_adjust_factor"
+    required_factor = {"symbol", "trade_date", factor_column}
+    missing_factor = sorted(required_factor.difference(factor.columns))
+    if missing_factor:
+        raise ValueError(f"adjust factor frame is missing columns: {missing_factor}")
+
+    factor_values = factor[["symbol", "trade_date", factor_column]].copy()
+    factor_values["symbol"] = factor_values["symbol"].astype(str).str.upper().str.strip()
+    factor_values["trade_date"] = factor_values["trade_date"].astype(str)
+    factor_values[factor_column] = pd.to_numeric(factor_values[factor_column], errors="coerce")
+    if bool(factor_values.duplicated(["symbol", "trade_date"]).any()):
+        raise ValueError("adjust factor contains duplicate symbol-day keys")
+
+    out = daily.copy()
+    out["symbol"] = out["symbol"].astype(str).str.upper().str.strip()
+    out["trade_date"] = out["trade_date"].astype(str)
+    out["raw_open"] = pd.to_numeric(out["open"], errors="coerce").astype("float64")
+    out = out.merge(
+        factor_values.rename(columns={factor_column: "price_adjust_factor"}),
+        on=["symbol", "trade_date"],
+        how="left",
+        sort=False,
+        validate="one_to_one",
+    )
+    valid_factor = np.isfinite(out["price_adjust_factor"].to_numpy(dtype=np.float64, copy=False)) & out[
+        "price_adjust_factor"
+    ].gt(0.0).to_numpy(dtype=bool, copy=False)
+    if not bool(valid_factor.all()):
+        bad = out.loc[~valid_factor, ["symbol", "trade_date"]].head(5).to_dict("records")
+        raise ValueError(f"back-adjust factor must be finite and positive for every daily bar; examples={bad}")
+    for column in PATH_OHLC_FIELDS:
+        out[column] = pd.to_numeric(out[column], errors="coerce").astype("float64") * out["price_adjust_factor"]
+    return out
+
+
+def _price_to_tick_units(values: np.ndarray, *, tick_size: float = 0.01) -> np.ndarray:
+    numeric = np.asarray(values, dtype=np.float64)
+    return np.floor(numeric / float(tick_size) + 0.5)
+
+
+def _entry_fill_mask(
+    entry_open: np.ndarray,
+    entry_up_limit: np.ndarray,
+    *,
+    entry_suspended: np.ndarray | None = None,
+    rule: str = ENTRY_RULE_LEGACY,
+    tick_size: float = 0.01,
+) -> np.ndarray:
+    open_values = np.asarray(entry_open, dtype=np.float64)
+    limit_values = np.asarray(entry_up_limit, dtype=np.float64)
+    entry_ok = np.isfinite(open_values)
+    if entry_suspended is not None:
+        entry_ok &= ~np.asarray(entry_suspended, dtype=bool)
+    normalized_rule = str(rule).strip().lower()
+    if normalized_rule == ENTRY_RULE_LEGACY:
+        limit_blocked = np.isfinite(limit_values) & entry_ok & (open_values >= limit_values * 0.999)
+    elif normalized_rule == ENTRY_RULE_OPEN_BELOW_LIMIT:
+        limit_blocked = (
+            np.isfinite(limit_values)
+            & entry_ok
+            & (_price_to_tick_units(open_values, tick_size=tick_size) >= _price_to_tick_units(limit_values, tick_size=tick_size))
+        )
+    else:
+        raise ValueError(f"unsupported entry rule: {rule}")
+    return entry_ok & (~limit_blocked)
+
+
+def _fill_suspended_daily_raw(
+    raw_panel: np.ndarray,
+    *,
+    suspended_panel: np.ndarray,
+    has_bar_panel: np.ndarray,
+) -> None:
+    """Carry the last observed adjusted close through explicit suspension days in-place."""
+
+    if raw_panel.shape[:2] != suspended_panel.shape or raw_panel.shape[:2] != has_bar_panel.shape:
+        raise ValueError("daily, suspended, and has_bar panels must share date/symbol dimensions")
+    open_idx = DAILY_RAW_FEATURES.index("open")
+    high_idx = DAILY_RAW_FEATURES.index("high")
+    low_idx = DAILY_RAW_FEATURES.index("low")
+    close_idx = DAILY_RAW_FEATURES.index("close")
+    zero_columns = [
+        DAILY_RAW_FEATURES.index("volume"),
+        DAILY_RAW_FEATURES.index("amount"),
+        DAILY_RAW_FEATURES.index("volume_log"),
+        DAILY_RAW_FEATURES.index("amount_log"),
+        DAILY_RAW_FEATURES.index("open_ret_prev_close"),
+        DAILY_RAW_FEATURES.index("high_ret_prev_close"),
+        DAILY_RAW_FEATURES.index("low_ret_prev_close"),
+        DAILY_RAW_FEATURES.index("close_ret_prev_close"),
+        DAILY_RAW_FEATURES.index("intraday_range_raw"),
+    ]
+    close_panel = raw_panel[:, :, close_idx]
+    n_dates, n_symbols = close_panel.shape
+    for symbol_idx in range(n_symbols):
+        last_close = np.nan
+        for date_idx in range(n_dates):
+            current_close = float(close_panel[date_idx, symbol_idx])
+            if bool(has_bar_panel[date_idx, symbol_idx]) and math.isfinite(current_close):
+                last_close = current_close
+                continue
+            if not bool(suspended_panel[date_idx, symbol_idx]) or not math.isfinite(last_close):
+                continue
+            raw_panel[date_idx, symbol_idx, [open_idx, high_idx, low_idx, close_idx]] = np.float32(last_close)
+            raw_panel[date_idx, symbol_idx, zero_columns] = np.float32(0.0)
+    if hasattr(raw_panel, "flush"):
+        raw_panel.flush()
+
+
 def _compute_future_path_and_masks(
     *,
     raw_panel: np.ndarray,
@@ -329,6 +661,12 @@ def _compute_future_path_and_masks(
     lookback_days: int,
     forward_days: int,
     price_anchor: str = "next_open",
+    raw_entry_open_panel: np.ndarray | None = None,
+    suspended_panel: np.ndarray | None = None,
+    entry_rule: str = ENTRY_RULE_LEGACY,
+    separate_price_va_validity: bool = False,
+    price_label_valid_out: np.ndarray | None = None,
+    va_aux_valid_out: np.ndarray | None = None,
     future_path_out: np.ndarray | None = None,
     future_ohlcva_path_out: np.ndarray | None = None,
     path_summary_out: np.ndarray | None = None,
@@ -342,9 +680,23 @@ def _compute_future_path_and_masks(
     volume_log_panel = raw_panel[:, :, DAILY_RAW_FEATURES.index("volume_log")]
     amount_log_panel = raw_panel[:, :, DAILY_RAW_FEATURES.index("amount_log")]
     n_dates, n_symbols = open_panel.shape
+    execution_open_panel = open_panel if raw_entry_open_panel is None else np.asarray(raw_entry_open_panel)
+    if execution_open_panel.shape != open_panel.shape:
+        raise ValueError("raw_entry_open_panel must match the daily date/symbol shape")
+    suspension_values = np.zeros_like(open_panel, dtype=bool) if suspended_panel is None else np.asarray(suspended_panel, dtype=bool)
+    if suspension_values.shape != open_panel.shape:
+        raise ValueError("suspended_panel must match the daily date/symbol shape")
     input_valid = np.zeros((n_dates, n_symbols), dtype=bool)
     entry_buyable = np.zeros((n_dates, n_symbols), dtype=bool)
     label_valid = np.zeros((n_dates, n_symbols), dtype=bool)
+    price_label_valid = (
+        np.zeros((n_dates, n_symbols), dtype=bool) if price_label_valid_out is None else price_label_valid_out
+    )
+    va_aux_valid = np.zeros((n_dates, n_symbols), dtype=bool) if va_aux_valid_out is None else va_aux_valid_out
+    if price_label_valid.shape != (n_dates, n_symbols) or va_aux_valid.shape != (n_dates, n_symbols):
+        raise ValueError("price_label_valid_out and va_aux_valid_out must match the daily date/symbol shape")
+    price_label_valid[:] = False
+    va_aux_valid[:] = False
     summary_columns = path_summary_columns(forward_days)
     future_path = None
     if bool(write_legacy_ohlc_path):
@@ -377,11 +729,16 @@ def _compute_future_path_and_masks(
         if end_idx > n_dates:
             continue
         entry_open = open_panel[entry_idx].astype("float64", copy=False)
+        execution_entry_open = execution_open_panel[entry_idx].astype("float64", copy=False)
         signal_close = close_panel[date_idx].astype("float64", copy=False)
         entry_up_limit = up_limit_panel[entry_idx].astype("float64", copy=False)
-        entry_ok = np.isfinite(entry_open)
-        limit_blocked = np.isfinite(entry_up_limit) & entry_ok & (entry_open >= entry_up_limit * 0.999)
-        entry_buyable[date_idx] = entry_ok & (~limit_blocked)
+        anchor_ok = np.isfinite(entry_open)
+        entry_buyable[date_idx] = _entry_fill_mask(
+            execution_entry_open,
+            entry_up_limit,
+            entry_suspended=suspension_values[entry_idx],
+            rule=str(entry_rule),
+        )
         fut_open = open_panel[entry_idx:end_idx]
         fut_high = high_panel[entry_idx:end_idx]
         fut_low = low_panel[entry_idx:end_idx]
@@ -393,24 +750,29 @@ def _compute_future_path_and_masks(
             warnings.simplefilter("ignore", category=RuntimeWarning)
             trailing_volume_log = np.nanmean(volume_log_panel[history_start : date_idx + 1], axis=0)
             trailing_amount_log = np.nanmean(amount_log_panel[history_start : date_idx + 1], axis=0)
-        path_ok = (
+        price_ok = (
             np.isfinite(fut_open).all(axis=0)
             & np.isfinite(fut_high).all(axis=0)
             & np.isfinite(fut_low).all(axis=0)
             & np.isfinite(fut_close).all(axis=0)
-            & np.isfinite(fut_volume_log).all(axis=0)
+            & anchor_ok
+        )
+        va_ok = (
+            np.isfinite(fut_volume_log).all(axis=0)
             & np.isfinite(fut_amount_log).all(axis=0)
             & np.isfinite(trailing_volume_log)
             & np.isfinite(trailing_amount_log)
-            & entry_ok
         )
         if str(price_anchor) == "today_close":
             denom = np.where(signal_close != 0.0, signal_close, np.nan)
-            path_ok &= np.isfinite(denom)
         elif str(price_anchor) == "next_open":
             denom = np.where(entry_open != 0.0, entry_open, np.nan)
         else:
             raise ValueError(f"unsupported price_anchor: {price_anchor}")
+        price_ok &= np.isfinite(denom)
+        price_label_valid[date_idx] = price_ok
+        va_aux_valid[date_idx] = va_ok
+        path_ok = price_ok if bool(separate_price_va_validity) else (price_ok & va_ok)
         label_valid[date_idx] = path_ok
         paths = [
             fut_open.T / denom[:, None] - 1.0,
@@ -500,6 +862,8 @@ def _build_sample_index(
     input_valid: np.ndarray,
     entry_buyable: np.ndarray,
     label_valid: np.ndarray,
+    signal_eligible: np.ndarray | None = None,
+    require_entry_filled: bool = True,
 ) -> pd.DataFrame:
     rows: list[pd.DataFrame] = []
     date_arr = np.asarray(date_values, dtype=object)
@@ -516,7 +880,11 @@ def _build_sample_index(
             split = "test"
         else:
             continue
-        mask = input_valid[date_idx] & entry_buyable[date_idx] & label_valid[date_idx]
+        mask = input_valid[date_idx] & label_valid[date_idx]
+        if signal_eligible is not None:
+            mask &= np.asarray(signal_eligible[date_idx], dtype=bool)
+        if bool(require_entry_filled):
+            mask &= entry_buyable[date_idx]
         symbol_idx = np.flatnonzero(mask).astype(np.int32)
         if len(symbol_idx) == 0:
             continue
@@ -531,11 +899,24 @@ def _build_sample_index(
                     "symbol_idx": symbol_idx,
                     "symbol": symbol_arr[symbol_idx],
                     "entry_trade_date": date_arr[date_idx + 1] if date_idx + 1 < len(date_arr) else "",
+                    "entry_filled": entry_buyable[date_idx, symbol_idx],
                 }
             )
         )
     if not rows:
-        return pd.DataFrame(columns=["sample_id", "split", "year", "trade_date", "date_idx", "symbol_idx", "symbol", "entry_trade_date"])
+        return pd.DataFrame(
+            columns=[
+                "sample_id",
+                "split",
+                "year",
+                "trade_date",
+                "date_idx",
+                "symbol_idx",
+                "symbol",
+                "entry_trade_date",
+                "entry_filled",
+            ]
+        )
     out = pd.concat(rows, ignore_index=True)
     out["sample_id"] = np.arange(len(out), dtype=np.int64)
     return out
@@ -556,11 +937,68 @@ class SequencePackConfig:
     write_legacy_ohlc_label: bool = True
     label_shard_size: int = 0
     price_anchor: str = "next_open"
+    price_adjustment: str = PRICE_ADJUSTMENT_NONE
+    entry_rule: str = ENTRY_RULE_LEGACY
+    sample_filter: str = SAMPLE_FILTER_COMPLETE_CASE
+    suspension_fill: str = SUSPENSION_FILL_NONE
+    pit_universe_manifest: Path | None = None
+    dataset_view: Path | None = None
 
 
 def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
+    price_adjustment = str(config.price_adjustment).strip().lower()
+    entry_rule = str(config.entry_rule).strip().lower()
+    sample_filter = str(config.sample_filter).strip().lower()
+    suspension_fill = str(config.suspension_fill).strip().lower()
+    if price_adjustment not in {PRICE_ADJUSTMENT_NONE, PRICE_ADJUSTMENT_BACK}:
+        raise ValueError(f"unsupported price adjustment: {config.price_adjustment}")
+    if entry_rule not in {ENTRY_RULE_LEGACY, ENTRY_RULE_OPEN_BELOW_LIMIT}:
+        raise ValueError(f"unsupported entry rule: {config.entry_rule}")
+    if sample_filter not in {SAMPLE_FILTER_COMPLETE_CASE, SAMPLE_FILTER_SIGNAL_ELIGIBLE}:
+        raise ValueError(f"unsupported sample filter: {config.sample_filter}")
+    if suspension_fill not in {SUSPENSION_FILL_NONE, SUSPENSION_FILL_CARRY_CLOSE}:
+        raise ValueError(f"unsupported suspension fill: {config.suspension_fill}")
     root = config.qdp_root.resolve()
-    active = _read_active(root)
+    canonical_active = _read_active(root)
+    active_manifest_dataset_ids = dict(canonical_active.get("datasets", {}) or {})
+    active, research_dataset_view, resolved_dataset_view = _apply_research_dataset_view(
+        root,
+        canonical_active,
+        config.dataset_view,
+    )
+    resolved_pit_manifest = ""
+    if sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE:
+        if config.pit_universe_manifest is not None:
+            pit_manifest_path = Path(config.pit_universe_manifest).resolve()
+            pit_manifest = json.loads(pit_manifest_path.read_text(encoding="utf-8"))
+            if str(pit_manifest.get("domain", "")) != "pit_signal_universe":
+                raise ValueError(f"not a pit_signal_universe manifest: {pit_manifest_path}")
+            pit_dataset_id = str(pit_manifest.get("dataset_id", "") or "")
+            expected_path = root / "datasets" / "pit_signal_universe" / pit_dataset_id / "dataset.json"
+            if not pit_dataset_id or expected_path.resolve() != pit_manifest_path:
+                raise ValueError(
+                    "pit universe manifest must be the canonical QDP dataset manifest under the configured qdp_root"
+                )
+            active = dict(active)
+            active_datasets = dict(active.get("datasets", {}) or {})
+            active_datasets["pit_signal_universe"] = pit_dataset_id
+            active["datasets"] = active_datasets
+            resolved_pit_manifest = str(pit_manifest_path)
+        elif str(dict(active.get("datasets", {}) or {}).get("pit_signal_universe", "") or ""):
+            resolved_pit_manifest = str(
+                (
+                    root
+                    / "datasets"
+                    / "pit_signal_universe"
+                    / str(dict(active.get("datasets", {}) or {})["pit_signal_universe"])
+                    / "dataset.json"
+                ).resolve()
+            )
+        else:
+            raise ValueError(
+                "sample_filter=signal_eligible_price_label requires --pit-universe-manifest or an active "
+                "pit_signal_universe pointer"
+            )
     active_scope = dict(active.get("scope", {}) or {})
     scope_start = str(active_scope.get("start_date", "2011-11-22") or "2011-11-22")
     active_end = str(active.get("active_as_of_date", active_scope.get("end_date", config.end_date)) or config.end_date)
@@ -580,12 +1018,76 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
     panel_start_pos = max(0, sample_start_pos - int(config.lookback_days) + 1)
     panel_end_pos = min(len(all_open_dates) - 1, sample_end_pos + int(config.forward_days))
     date_values = all_open_dates[panel_start_pos : panel_end_pos + 1]
+    pit_price_coverage = {
+        "missing_rows": 0,
+        "missing_symbols": 0,
+        "first_missing_date": "",
+        "last_missing_date": "",
+        "examples": [],
+    }
+    if sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE:
+        _write_json(progress_path, {"status": "auditing_pit_price_coverage", "updated_at": _now()})
+        pit_price_coverage = _audit_pit_price_coverage(
+            root,
+            active,
+            start=str(config.start_date),
+            end=str(config.end_date),
+        )
+        if int(pit_price_coverage["missing_rows"]) > 0:
+            _write_json(
+                progress_path,
+                {
+                    "status": "blocked",
+                    "blocker": "pit_eligible_rows_missing_active_daily_prices",
+                    "pit_price_coverage": pit_price_coverage,
+                    "updated_at": _now(),
+                },
+            )
+            raise ValueError(
+                "PIT signal universe is not aligned to the active market_daily_raw substrate; "
+                f"missing_rows={pit_price_coverage['missing_rows']}, "
+                f"missing_symbols={pit_price_coverage['missing_symbols']}, "
+                f"dates={pit_price_coverage['first_missing_date']}..{pit_price_coverage['last_missing_date']}. "
+                "Activate a matching PIT-complete price substrate before building."
+            )
     _write_json(progress_path, {"status": "reading_daily", "updated_at": _now()})
     daily = _read_dataset_date_range(root, active, "market_daily_raw", DAILY_RAW_COLUMNS, date_values[0], date_values[-1])
     if daily.empty:
         raise ValueError("market_daily_raw returned no rows")
+    daily["raw_open"] = pd.to_numeric(daily["open"], errors="coerce").astype("float64")
+    if sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE:
+        daily = daily[daily["symbol"].map(_is_pit_mainboard_symbol)].copy()
+        if daily.empty:
+            raise ValueError("PIT mainboard filter removed every market_daily_raw row")
+    if price_adjustment == PRICE_ADJUSTMENT_BACK:
+        _write_json(progress_path, {"status": "reading_adjust_factor", "updated_at": _now()})
+        factor = _read_dataset_date_range(
+            root,
+            active,
+            "adjust_factor",
+            ["symbol", "trade_date", "adjust_factor", "back_adjust_factor"],
+            date_values[0],
+            date_values[-1],
+        )
+        daily = _apply_back_adjustment(daily, factor)
+        del factor
+        gc.collect()
     daily = _prepare_daily_frame(daily)
-    symbol_values = sorted(daily["symbol"].astype(str).str.upper().str.strip().unique().tolist())
+    daily_symbols = set(daily["symbol"].astype(str).str.upper().str.strip().unique().tolist())
+    pit_symbols: set[str] = set()
+    if sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE:
+        _write_json(progress_path, {"status": "reading_pit_symbol_scope", "updated_at": _now()})
+        pit_symbols = set(
+            _read_dataset_symbols_date_range(
+                root,
+                active,
+                "pit_signal_universe",
+                date_values[0],
+                date_values[-1],
+            )
+        )
+        pit_symbols = {symbol for symbol in pit_symbols if _is_pit_mainboard_symbol(symbol)}
+    symbol_values = sorted(daily_symbols | pit_symbols)
     date_to_idx = {date: idx for idx, date in enumerate(date_values)}
     symbol_to_idx = {symbol: idx for idx, symbol in enumerate(symbol_values)}
     n_dates = len(date_values)
@@ -603,13 +1105,126 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         panel_dir / "limit_structure.float32.dat", (n_dates, n_symbols, len(LIMIT_SIGNAL_COLUMNS)), fill_value=np.nan
     )
     up_limit_panel = _fill_float_memmap(label_dir / "entry_up_limit.float32.dat", (n_dates, n_symbols), fill_value=np.nan)
+    raw_open_panel = _fill_float_memmap(label_dir / "entry_open_raw.float32.dat", (n_dates, n_symbols), fill_value=np.nan)
+    has_bar_panel = _fill_bool_memmap(mask_dir / "has_bar.bool.dat", (n_dates, n_symbols))
+    universe_has_bar_panel = _fill_bool_memmap(mask_dir / "pit_universe_has_bar.bool.dat", (n_dates, n_symbols))
+    status_valid_panel = _fill_bool_memmap(mask_dir / "status_valid.bool.dat", (n_dates, n_symbols))
+    is_st_panel = _fill_bool_memmap(mask_dir / "is_st.bool.dat", (n_dates, n_symbols))
+    is_suspended_panel = _fill_bool_memmap(mask_dir / "is_suspended.bool.dat", (n_dates, n_symbols))
+    is_delisted_panel = _fill_bool_memmap(mask_dir / "is_delisted.bool.dat", (n_dates, n_symbols))
+    signal_eligible_panel = _fill_bool_memmap(mask_dir / "signal_eligible.bool.dat", (n_dates, n_symbols))
+    tradable_panel = _fill_bool_memmap(mask_dir / "tradable.bool.dat", (n_dates, n_symbols))
+    previous_close_valid_panel = _fill_bool_memmap(mask_dir / "previous_close_valid.bool.dat", (n_dates, n_symbols))
+    corr_valid_panel = _fill_bool_memmap(mask_dir / "corr_valid.bool.dat", (n_dates, n_symbols))
+    zero_range_panel = _fill_bool_memmap(mask_dir / "zero_range.bool.dat", (n_dates, n_symbols))
 
     _write_json(progress_path, {"status": "writing_daily_panels", "updated_at": _now()})
     daily_with_state = _add_raw_daily_signals(daily.copy())
     _write_panel_values(daily_raw, daily_with_state, DAILY_RAW_FEATURES, date_to_idx=date_to_idx, symbol_to_idx=symbol_to_idx)
     _write_panel_values(daily_state, daily_with_state, RAW_SIGNAL_COLUMNS, date_to_idx=date_to_idx, symbol_to_idx=symbol_to_idx)
+    _write_scalar_panel_values(
+        raw_open_panel,
+        daily_with_state,
+        "raw_open",
+        date_to_idx=date_to_idx,
+        symbol_to_idx=symbol_to_idx,
+    )
+    has_bar_panel[:] = np.isfinite(raw_open_panel)
+    has_bar_panel.flush()
+    if n_dates > 1:
+        previous_close_valid_panel[1:] = has_bar_panel[1:] & np.maximum.accumulate(has_bar_panel[:-1], axis=0)
+    high_values = daily_raw[:, :, DAILY_RAW_FEATURES.index("high")]
+    low_values = daily_raw[:, :, DAILY_RAW_FEATURES.index("low")]
+    zero_range_panel[:] = has_bar_panel & np.isfinite(high_values) & np.isfinite(low_values) & np.isclose(high_values, low_values)
+    previous_close_valid_panel.flush()
+    zero_range_panel.flush()
     del daily_with_state
     gc.collect()
+
+    missing_eligible_bar_count = 0
+    if sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE:
+        for year in range(int(date_values[0][:4]), int(date_values[-1][:4]) + 1):
+            _write_json(progress_path, {"status": "writing_pit_signal_universe", "year": year, "updated_at": _now()})
+            pit_universe = _read_dataset_date_range(
+                root,
+                active,
+                "pit_signal_universe",
+                [
+                    "symbol",
+                    "trade_date",
+                    "is_st",
+                    "is_suspended",
+                    "is_delisted",
+                    "has_bar",
+                    "eligible_for_signal",
+                ],
+                f"{year}-01-01",
+                f"{year}-12-31",
+            )
+            _write_pit_universe_panels(
+                frame=pit_universe,
+                status_valid=status_valid_panel,
+                is_st=is_st_panel,
+                is_suspended=is_suspended_panel,
+                is_delisted=is_delisted_panel,
+                universe_has_bar=universe_has_bar_panel,
+                signal_eligible=signal_eligible_panel,
+                date_to_idx=date_to_idx,
+                symbol_to_idx=symbol_to_idx,
+            )
+            del pit_universe
+            gc.collect()
+        requested_date_mask = np.asarray(
+            [str(config.start_date) <= date <= str(config.end_date) for date in date_values],
+            dtype=bool,
+        )
+        missing_eligible_bars = signal_eligible_panel[requested_date_mask] & (~has_bar_panel[requested_date_mask])
+        missing_eligible_bar_count = int(np.count_nonzero(missing_eligible_bars))
+        if missing_eligible_bar_count:
+            raise ValueError(
+                "PIT signal universe contains eligible symbol-days absent from the active market_daily_raw dataset; "
+                f"count={missing_eligible_bar_count}. Activate a matching PIT-complete price substrate before building."
+            )
+        tradable_panel[:] = has_bar_panel & status_valid_panel & (~is_suspended_panel) & (~is_delisted_panel)
+    elif suspension_fill == SUSPENSION_FILL_CARRY_CLOSE:
+        for year in range(int(date_values[0][:4]), int(date_values[-1][:4]) + 1):
+            _write_json(progress_path, {"status": "writing_security_status", "year": year, "updated_at": _now()})
+            status = _read_dataset_date_range(
+                root,
+                active,
+                "security_status",
+                ["symbol", "trade_date", "is_st", "is_suspended", "is_delisted"],
+                f"{year}-01-01",
+                f"{year}-12-31",
+            )
+            _write_status_panels(
+                frame=status,
+                status_valid=status_valid_panel,
+                is_st=is_st_panel,
+                is_suspended=is_suspended_panel,
+                is_delisted=is_delisted_panel,
+                date_to_idx=date_to_idx,
+                symbol_to_idx=symbol_to_idx,
+            )
+            del status
+            gc.collect()
+        universe_has_bar_panel[:] = has_bar_panel
+        signal_eligible_panel[:] = has_bar_panel
+        tradable_panel[:] = has_bar_panel & status_valid_panel & (~is_suspended_panel) & (~is_delisted_panel)
+    else:
+        universe_has_bar_panel[:] = has_bar_panel
+        signal_eligible_panel[:] = has_bar_panel
+        tradable_panel[:] = has_bar_panel
+    universe_has_bar_panel.flush()
+    signal_eligible_panel.flush()
+    tradable_panel.flush()
+    if suspension_fill == SUSPENSION_FILL_CARRY_CLOSE:
+        _write_json(progress_path, {"status": "filling_suspended_prices", "updated_at": _now()})
+        _fill_suspended_daily_raw(
+            daily_raw,
+            suspended_panel=is_suspended_panel,
+            has_bar_panel=has_bar_panel,
+        )
 
     for domain, columns, feature_columns, panel in [
         ("intraday_daily_features", ["symbol", "trade_date", *INTRADAY_SIGNAL_COLUMNS], INTRADAY_SIGNAL_COLUMNS, intraday_summary),
@@ -621,6 +1236,11 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             _write_panel_values(panel, frame, feature_columns, date_to_idx=date_to_idx, symbol_to_idx=symbol_to_idx)
             del frame
             gc.collect()
+
+    corr_column = "intraday_price_volume_corr"
+    if corr_column in INTRADAY_SIGNAL_COLUMNS:
+        corr_valid_panel[:] = np.isfinite(intraday_summary[:, :, INTRADAY_SIGNAL_COLUMNS.index(corr_column)])
+        corr_valid_panel.flush()
 
     for year in range(int(date_values[0][:4]), int(date_values[-1][:4]) + 1):
         _write_json(progress_path, {"status": "writing_entry_limits", "year": year, "updated_at": _now()})
@@ -664,12 +1284,21 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         (n_dates, n_symbols, len(summary_columns)),
         fill_value=np.nan,
     )
+    price_label_valid_store = _fill_bool_memmap(mask_dir / "price_label_valid.bool.dat", (n_dates, n_symbols))
+    va_aux_valid_store = _fill_bool_memmap(mask_dir / "va_aux_valid.bool.dat", (n_dates, n_symbols))
+    separate_price_va_validity = sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE
     future_path, future_ohlcva_path, path_summary, input_valid, entry_buyable, label_valid = _compute_future_path_and_masks(
         raw_panel=daily_raw,
         up_limit_panel=up_limit_panel,
         lookback_days=int(config.lookback_days),
         forward_days=int(config.forward_days),
         price_anchor=str(config.price_anchor),
+        raw_entry_open_panel=raw_open_panel,
+        suspended_panel=is_suspended_panel,
+        entry_rule=entry_rule,
+        separate_price_va_validity=separate_price_va_validity,
+        price_label_valid_out=price_label_valid_store,
+        va_aux_valid_out=va_aux_valid_store,
         future_path_out=future_path_store,
         future_ohlcva_path_out=future_ohlcva_path_store,
         path_summary_out=path_summary_store,
@@ -679,6 +1308,8 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         future_path.flush()
     future_ohlcva_path.flush()
     path_summary_store.flush()
+    price_label_valid_store.flush()
+    va_aux_valid_store.flush()
     input_valid_store = _fill_bool_memmap(mask_dir / "input_valid.bool.dat", tuple(int(item) for item in input_valid.shape))
     entry_buyable_store = _fill_bool_memmap(mask_dir / "entry_buyable.bool.dat", tuple(int(item) for item in entry_buyable.shape))
     label_valid_store = _fill_bool_memmap(mask_dir / "label_valid.bool.dat", tuple(int(item) for item in label_valid.shape))
@@ -701,6 +1332,8 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         input_valid=input_valid,
         entry_buyable=entry_buyable,
         label_valid=label_valid,
+        signal_eligible=signal_eligible_panel if sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE else None,
+        require_entry_filled=sample_filter == SAMPLE_FILTER_COMPLETE_CASE,
     )
     sample_index_path = output_dir / "sample_index.parquet"
     sample_index.to_parquet(sample_index_path, index=False)
@@ -714,7 +1347,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         "limit_structure": _fit_normalization(limit_structure, train_date_mask),
     }
 
-    active_dataset_ids = dict(active.get("datasets", {}) or {})
+    source_dataset_ids = dict(active.get("datasets", {}) or {})
     split_counts = sample_index["split"].value_counts().to_dict() if not sample_index.empty else {}
     path_anchor_name = "signal_day_close" if str(config.price_anchor) == "today_close" else "next_calendar_trading_day_open"
     if isinstance(future_ohlcva_path_store, DateShardedFloatStore):
@@ -760,7 +1393,13 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         "qdp_root": str(root),
         "active_manifest": str((root / "active" / "active.json").resolve()),
         "active_as_of_date": active.get("active_as_of_date", ""),
-        "active_datasets": active_dataset_ids,
+        "active_datasets": active_manifest_dataset_ids,
+        "research_source_datasets": source_dataset_ids,
+        "research_dataset_view": {
+            "path": resolved_dataset_view or None,
+            "view_id": str(dict(research_dataset_view or {}).get("view_id", "") or "") or None,
+            "overrides": dict(dict(research_dataset_view or {}).get("overrides", {}) or {}),
+        },
         "scope": active_scope,
         "lookback_days": int(config.lookback_days),
         "forward_days": int(config.forward_days),
@@ -769,6 +1408,22 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         "train_years": list(config.train_years),
         "validation_years": list(config.validation_years),
         "test_years": list(config.test_years),
+        "data_semantics": {
+            "price_adjustment": price_adjustment,
+            "price_adjustment_factor_column": "adjust_factor" if price_adjustment == PRICE_ADJUSTMENT_BACK else None,
+            "entry_rule": entry_rule,
+            "entry_tick_size": 0.01,
+            "sample_filter": sample_filter,
+            "suspension_fill": suspension_fill,
+            "label_valid_alias": "price_label_valid" if separate_price_va_validity else "complete_ohlcva_label_valid",
+            "unfilled_samples_retained": sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE,
+            "pit_universe_domain": "pit_signal_universe" if sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE else None,
+            "pit_universe_manifest": resolved_pit_manifest or None,
+            "pit_universe_symbol_count": int(len(pit_symbols)),
+            "pit_symbols_without_active_daily_rows": int(len(pit_symbols.difference(daily_symbols))),
+            "eligible_symbol_days_without_active_daily_bar": int(missing_eligible_bar_count),
+            "pit_price_coverage_gate": pit_price_coverage,
+        },
         "date_values": date_values,
         "symbol_values": symbol_values,
         "date_count": int(n_dates),
@@ -790,18 +1445,62 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             },
         },
         "label_arrays": label_arrays,
+        "execution_arrays": {
+            "entry_open_raw": {
+                "path": str((label_dir / "entry_open_raw.float32.dat").resolve()),
+                "shape": [n_dates, n_symbols],
+                "units": "CNY_raw_exchange_price",
+            },
+            "entry_up_limit_raw": {
+                "path": str((label_dir / "entry_up_limit.float32.dat").resolve()),
+                "shape": [n_dates, n_symbols],
+                "units": "CNY_raw_exchange_price",
+            },
+        },
         "masks": {
             "input_valid": {"path": str((mask_dir / "input_valid.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
             "entry_buyable": {"path": str((mask_dir / "entry_buyable.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
+            "entry_filled": {"path": str((mask_dir / "entry_buyable.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
             "label_valid": {"path": str((mask_dir / "label_valid.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
+            "price_label_valid": {"path": str((mask_dir / "price_label_valid.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
+            "va_aux_valid": {"path": str((mask_dir / "va_aux_valid.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
+            "has_bar": {"path": str((mask_dir / "has_bar.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
+            "price_observed": {"path": str((mask_dir / "has_bar.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
+            "pit_universe_has_bar": {"path": str((mask_dir / "pit_universe_has_bar.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
+            "status_valid": {"path": str((mask_dir / "status_valid.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
+            "is_st": {"path": str((mask_dir / "is_st.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
+            "is_suspended": {"path": str((mask_dir / "is_suspended.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
+            "is_delisted": {"path": str((mask_dir / "is_delisted.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
+            "signal_eligible": {"path": str((mask_dir / "signal_eligible.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
+            "tradable": {"path": str((mask_dir / "tradable.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
+            "previous_close_valid": {"path": str((mask_dir / "previous_close_valid.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
+            "corr_valid": {"path": str((mask_dir / "corr_valid.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
+            "zero_range": {"path": str((mask_dir / "zero_range.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
+        },
+        "mask_views": {
+            "observed_price_path": {
+                "source_mask": "price_observed",
+                "shape": [n_dates, n_symbols, int(config.forward_days)],
+                "indexing": "source[signal_date_idx+1:signal_date_idx+1+forward_days, symbol_idx]",
+                "materialized": False,
+            },
+            "tradable_path": {
+                "source_mask": "tradable",
+                "shape": [n_dates, n_symbols, int(config.forward_days)],
+                "indexing": "source[signal_date_idx+1:signal_date_idx+1+forward_days, symbol_idx]",
+                "materialized": False,
+            },
         },
         "sample_index_path": str(sample_index_path.resolve()),
         "normalization": normalization,
         "label_semantics": {
             "entry_anchor": "signal day close decision, next calendar trading day open entry",
+            "entry_fill": "evaluated after ranking from raw next-day open, suspension state, and the configured exchange-tick limit rule",
             "price_anchor": str(config.price_anchor),
-            "future_ohlc_path": f"OHLC returns are relative to {path_anchor_name}.",
+            "future_ohlc_path": f"OHLC returns are relative to {path_anchor_name}; price adjustment={price_adjustment}.",
             "future_ohlcva_path": f"OHLC returns are relative to {path_anchor_name}; volume and amount are log-relative to trailing 20 trading days ending on signal date.",
+            "suspended_path": "explicit suspension days carry the last adjusted close with zero volume/amount only when suspension_fill=carry_adjusted_close; tradable remains false",
+            "future_mask_view": "for signal index d, future observed/tradable masks are masks[d+1:d+1+forward_days] transposed by symbol",
             "path_trade_value_v2": "derived from next calendar trading day open entry even when price_anchor=today_close",
             path_value_column(config.forward_days): "future_final_return + 0.50*future_max_return + 0.35*future_min_return + 0.20*drawdown_after_peak",
             "path_type_labels": "derived_explanation_only_not_primary_training_target",
@@ -1049,6 +1748,42 @@ def _build_parser() -> argparse.ArgumentParser:
         default="next_open",
         help="Anchor future OHLC labels to next trading day open or signal-day close.",
     )
+    build.add_argument(
+        "--price-adjustment",
+        choices=(PRICE_ADJUSTMENT_NONE, PRICE_ADJUSTMENT_BACK),
+        default=PRICE_ADJUSTMENT_NONE,
+        help="Use raw prices or multiply OHLC by the active canonical back-adjust factor.",
+    )
+    build.add_argument(
+        "--entry-rule",
+        choices=(ENTRY_RULE_LEGACY, ENTRY_RULE_OPEN_BELOW_LIMIT),
+        default=ENTRY_RULE_LEGACY,
+        help="Next-open execution rule. open_below_limit_tick only blocks an open at the rounded exchange limit.",
+    )
+    build.add_argument(
+        "--sample-filter",
+        choices=(SAMPLE_FILTER_COMPLETE_CASE, SAMPLE_FILTER_SIGNAL_ELIGIBLE),
+        default=SAMPLE_FILTER_COMPLETE_CASE,
+        help="Legacy complete-case/filled samples or signal-day PIT universe with unfilled rows retained.",
+    )
+    build.add_argument(
+        "--suspension-fill",
+        choices=(SUSPENSION_FILL_NONE, SUSPENSION_FILL_CARRY_CLOSE),
+        default=SUSPENSION_FILL_NONE,
+        help="Optionally carry the last adjusted close through explicit suspension days while preserving masks.",
+    )
+    build.add_argument(
+        "--pit-universe-manifest",
+        type=Path,
+        default=None,
+        help="Immutable QDP pit_signal_universe dataset.json; avoids activating the research-scope pointer.",
+    )
+    build.add_argument(
+        "--dataset-view",
+        type=Path,
+        default=None,
+        help="Non-active qdp_v2 research dataset view. Must atomically override market_daily_raw, adjust_factor, limit_status, security_status, and pit_signal_universe.",
+    )
     build.add_argument("--json", action="store_true")
     reanchor = sub.add_parser("reanchor")
     reanchor.add_argument("--source-manifest", type=Path, required=True)
@@ -1088,6 +1823,12 @@ def main(argv: list[str] | None = None) -> int:
             write_legacy_ohlc_label=not bool(args.no_legacy_ohlc_label),
             label_shard_size=int(args.label_shard_size),
             price_anchor=str(args.price_anchor),
+            price_adjustment=str(args.price_adjustment),
+            entry_rule=str(args.entry_rule),
+            sample_filter=str(args.sample_filter),
+            suspension_fill=str(args.suspension_fill),
+            pit_universe_manifest=Path(args.pit_universe_manifest) if args.pit_universe_manifest is not None else None,
+            dataset_view=Path(args.dataset_view) if args.dataset_view is not None else None,
         )
         result = build_sequence_pack(cfg)
     elif args.command == "reanchor":

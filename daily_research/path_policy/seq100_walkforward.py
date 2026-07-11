@@ -30,8 +30,18 @@ DEFAULT_SEED = 7
 PROFILE_COMMANDS = {
     "summary_v2_all_channels": "train-summary-v2",
     "daily_only_summary_v2_ohlcva_aux_low": "train-daily-only-summary-v2-ohlcva-aux-low",
+    "daily_only_summary_v2_ohlcva_aux_low_hard_st": "train-daily-only-summary-v2-ohlcva-aux-low-hard-st",
+    "daily_only_summary_v2_ohlcva_aux_low_hard_st_global_tail": "train-daily-only-summary-v2-ohlcva-aux-low-hard-st-global-tail",
 }
-REQUIRED_PROFILES = tuple(PROFILE_COMMANDS)
+LEGACY_REQUIRED_PROFILES = (
+    "summary_v2_all_channels",
+    "daily_only_summary_v2_ohlcva_aux_low",
+)
+INNER_SCREEN_PROFILES = (
+    "daily_only_summary_v2_ohlcva_aux_low",
+    "daily_only_summary_v2_ohlcva_aux_low_hard_st",
+    "daily_only_summary_v2_ohlcva_aux_low_hard_st_global_tail",
+)
 STUDY_RUN_TAG = "seq100_purged_walkforward_2022_2025"
 FOLD_TRAINING_CONTRACT_BINDING_METHOD = "post_run_reconstruction_v1"
 FOLD_METADATA_RECONCILIATION_METHOD = "staged_metadata_only_v1"
@@ -123,11 +133,66 @@ def _canonicalize_json(payload: Any) -> Any:
     return json.loads(json.dumps(payload, default=_json_default, allow_nan=False))
 
 
+def _source_view_provenance(
+    source_path: str | Path,
+    source_manifest: Mapping[str, Any],
+) -> dict[str, Any]:
+    manifest_path = _workspace_path(source_path).resolve()
+    sample_path = _workspace_path(str(source_manifest.get("sample_index_path", "") or "")).resolve()
+    if not manifest_path.is_file():
+        raise FileNotFoundError(manifest_path)
+    if not sample_path.is_file():
+        raise FileNotFoundError(sample_path)
+    artifact_view = dict(source_manifest.get("artifact_view", {}) or {})
+    return {
+        "schema_version": 1,
+        "manifest_path": str(manifest_path),
+        "manifest_sha256": _sha256_file(manifest_path),
+        "sample_index_path": str(sample_path),
+        "sample_index_sha256": _sha256_file(sample_path),
+        "artifact_type": str(source_manifest.get("artifact_type", "")),
+        "artifact_view_id": str(artifact_view.get("view_id", "")),
+        "created_at": str(source_manifest.get("created_at", "")),
+    }
+
+
+def _validated_source_view_provenance(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    stored = dict(manifest.get("source_view_provenance", {}) or {})
+    required = {
+        "schema_version",
+        "manifest_path",
+        "manifest_sha256",
+        "sample_index_path",
+        "sample_index_sha256",
+        "artifact_type",
+    }
+    missing = sorted(required.difference(stored))
+    if missing:
+        raise ValueError(f"fold source_view_provenance is missing fields: {missing}")
+    source_path = _workspace_path(str(stored["manifest_path"])).resolve()
+    sample_path = _workspace_path(str(stored["sample_index_path"])).resolve()
+    if not source_path.is_file() or _sha256_file(source_path) != str(stored["manifest_sha256"]):
+        raise ValueError("fold source manifest is missing or its SHA-256 changed")
+    if not sample_path.is_file() or _sha256_file(sample_path) != str(stored["sample_index_sha256"]):
+        raise ValueError("fold source sample index is missing or its SHA-256 changed")
+    current = _read_json(source_path)
+    if str(current.get("artifact_type", "")) != str(stored["artifact_type"]):
+        raise ValueError("fold source artifact type changed")
+    if _workspace_path(str(current.get("sample_index_path", "") or "")).resolve() != sample_path:
+        raise ValueError("fold source sample-index path changed")
+    return stored
+
+
 def _normalize_profiles(profiles: Sequence[str]) -> tuple[str, ...]:
     values = tuple(str(item).strip() for item in profiles if str(item).strip())
-    if len(values) != len(REQUIRED_PROFILES) or set(values) != set(REQUIRED_PROFILES):
-        raise ValueError(f"profiles must be exactly {list(REQUIRED_PROFILES)}")
-    return REQUIRED_PROFILES
+    if not values:
+        raise ValueError("at least one profile is required")
+    unknown = sorted(set(values).difference(PROFILE_COMMANDS))
+    if unknown:
+        raise ValueError(f"unsupported profiles: {unknown}")
+    if len(values) != len(set(values)):
+        raise ValueError("profiles must be unique")
+    return values
 
 
 def _parse_years(raw: str | Iterable[int]) -> tuple[int, ...]:
@@ -384,6 +449,7 @@ def _compute_fold_training_contract(
         "label_semantics": dict(manifest.get("label_semantics", {}) or {}),
         "masks": dict(manifest.get("masks", {}) or {}),
         "scope": dict(manifest.get("scope", {}) or {}),
+        "source_view_provenance": dict(manifest.get("source_view_provenance", {}) or {}),
         "date_values_sha256": _canonical_json_sha256(list(manifest.get("date_values", []) or [])),
         "symbol_values_sha256": _canonical_json_sha256(list(manifest.get("symbol_values", []) or [])),
     }
@@ -430,6 +496,7 @@ def build_purged_walkforward_fold(
         raise ValueError("source date_values must be non-empty and unique")
     sample_index_path = _workspace_path(str(source.get("sample_index_path", "") or ""))
     source_index = pd.read_parquet(sample_index_path)
+    source_provenance = _source_view_provenance(source_path, source)
     required_columns = {"split", "trade_date", "date_idx", "symbol_idx", "symbol"}
     missing = sorted(required_columns - set(source_index.columns))
     if missing:
@@ -559,6 +626,7 @@ def build_purged_walkforward_fold(
             "normalization": normalization,
             "artifact_view": artifact_view,
             "purged_walkforward": purged_walkforward,
+            "source_view_provenance": source_provenance,
         }
     )
     manifest["fold_training_contract"] = _compute_fold_training_contract(
@@ -602,6 +670,11 @@ def verify_purged_walkforward_view(view_path: str | Path) -> dict[str, Any]:
     contract = dict(manifest.get("purged_walkforward", {}) or {})
     if not contract:
         blockers.append("missing_purged_walkforward_contract")
+    if str(contract.get("method", "")) == "expanding_train_fixed_oos":
+        try:
+            _validated_source_view_provenance(manifest)
+        except (FileNotFoundError, ValueError) as exc:
+            blockers.append(f"source_view_provenance:{exc}")
     sample_path = _workspace_path(str(manifest.get("sample_index_path", "") or ""))
     frame = pd.read_parquet(sample_path) if sample_path.exists() else pd.DataFrame()
     if frame.empty:
@@ -1044,6 +1117,11 @@ def _resolved_profile_config(
         "input_channel_profile": str(resolved.input_channel_profile),
         "direct_value_horizon": int(resolved.direct_value_horizon),
         "rank_max_per_side": int(resolved.rank_max_per_side),
+        "path_value_gradient_profile": str(resolved.path_value_gradient_profile),
+        "rank_training_profile": str(resolved.rank_training_profile),
+        "rank_batch_size": int(resolved.rank_batch_size),
+        "rank_interval": int(resolved.rank_interval),
+        "prefetch_batches": int(resolved.prefetch_batches),
         "device": str(device),
         "amp": True,
         "seed": int(seed),
@@ -1226,8 +1304,17 @@ def _validate_summary_provenance(
     if recorded_config is None:
         if not allow_unbound_legacy_preflight:
             problems.append("resolved_training_config is missing")
-    elif _canonicalize_json(recorded_config) != expected_config:
-        problems.append("resolved_training_config does not match the registered profile")
+    else:
+        normalized_recorded = dict(recorded_config)
+        # Historical completed runs predate the additive training-core controls.
+        # Their missing values have the exact legacy/default semantics below.
+        normalized_recorded.setdefault("path_value_gradient_profile", "smooth_current")
+        normalized_recorded.setdefault("rank_training_profile", "local_chunk")
+        normalized_recorded.setdefault("rank_batch_size", 512)
+        normalized_recorded.setdefault("rank_interval", 4)
+        normalized_recorded.setdefault("prefetch_batches", 1)
+        if _canonicalize_json(normalized_recorded) != expected_config:
+            problems.append("resolved_training_config does not match the registered profile")
 
     checkpoint = _workspace_path(str(summary.get("best_checkpoint", "") or ""))
     if not checkpoint.is_file():
@@ -1454,7 +1541,7 @@ def run_walkforward_study(
     *,
     source_view: str | Path = DEFAULT_SOURCE_VIEW,
     oos_years: Iterable[int] = DEFAULT_OOS_YEARS,
-    profiles: Sequence[str] = tuple(PROFILE_COMMANDS),
+    profiles: Sequence[str] = LEGACY_REQUIRED_PROFILES,
     study_root: str | Path = DEFAULT_STUDY_ROOT,
     store_root: str | Path = DEFAULT_STORE_ROOT,
     train_start_year: int = 2012,
@@ -2354,6 +2441,43 @@ def summarize_walkforward_study(
     return summary
 
 
+def run_inner_screen_study(
+    *,
+    source_view: str | Path = DEFAULT_SOURCE_VIEW,
+    study_root: str | Path = "daily_research/output/path_policy/studies/seq100_pit_inner_2018_2021",
+    store_root: str | Path = DEFAULT_STORE_ROOT,
+    train_start_year: int = 2012,
+    seed: int = DEFAULT_SEED,
+    epochs: int = 1,
+    device: str = "cuda",
+    python_executable: str | Path = DEFAULT_PYTHON,
+    overwrite_folds: bool = False,
+    rerun_completed: bool = False,
+    bootstrap_replications: int = DEFAULT_BOOTSTRAP_REPLICATIONS,
+) -> dict[str, Any]:
+    """Run only the frozen 2018-2021 inner profile screen.
+
+    This entry point deliberately excludes 2022-2025. Those years remain sealed
+    until a champion is frozen from the inner evidence.
+    """
+
+    return run_walkforward_study(
+        source_view=source_view,
+        oos_years=(2018, 2019, 2020, 2021),
+        profiles=INNER_SCREEN_PROFILES,
+        study_root=study_root,
+        store_root=store_root,
+        train_start_year=int(train_start_year),
+        seed=int(seed),
+        epochs=int(epochs),
+        device=str(device),
+        python_executable=python_executable,
+        overwrite_folds=bool(overwrite_folds),
+        rerun_completed=bool(rerun_completed),
+        bootstrap_replications=int(bootstrap_replications),
+    )
+
+
 def _print(payload: Any, *, as_json: bool) -> None:
     print(json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default) if as_json else payload)
 
@@ -2385,7 +2509,7 @@ def _build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run-study")
     run.add_argument("--source-view", type=Path, default=DEFAULT_SOURCE_VIEW)
     run.add_argument("--oos-years", default="2022-2025")
-    run.add_argument("--profiles", default=",".join(PROFILE_COMMANDS))
+    run.add_argument("--profiles", default=",".join(LEGACY_REQUIRED_PROFILES))
     run.add_argument("--study-root", type=Path, default=DEFAULT_STUDY_ROOT)
     run.add_argument("--store-root", type=Path, default=DEFAULT_STORE_ROOT)
     run.add_argument("--train-start-year", type=int, default=2012)
@@ -2397,6 +2521,20 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--rerun-completed", action="store_true")
     run.add_argument("--bootstrap-replications", type=int, default=DEFAULT_BOOTSTRAP_REPLICATIONS)
     run.add_argument("--json", action="store_true")
+
+    inner = sub.add_parser("run-inner-screen")
+    inner.add_argument("--source-view", type=Path, default=DEFAULT_SOURCE_VIEW)
+    inner.add_argument("--study-root", type=Path, default=Path("daily_research/output/path_policy/studies/seq100_pit_inner_2018_2021"))
+    inner.add_argument("--store-root", type=Path, default=DEFAULT_STORE_ROOT)
+    inner.add_argument("--train-start-year", type=int, default=2012)
+    inner.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    inner.add_argument("--epochs", type=int, default=1)
+    inner.add_argument("--device", default="cuda", choices=("cpu", "cuda", "auto"))
+    inner.add_argument("--python", type=Path, default=DEFAULT_PYTHON)
+    inner.add_argument("--overwrite-folds", action="store_true")
+    inner.add_argument("--rerun-completed", action="store_true")
+    inner.add_argument("--bootstrap-replications", type=int, default=DEFAULT_BOOTSTRAP_REPLICATIONS)
+    inner.add_argument("--json", action="store_true")
 
     bind = sub.add_parser(
         "bind-legacy-run-contracts",
@@ -2450,6 +2588,20 @@ def main(argv: list[str] | None = None) -> int:
             source_view=args.source_view,
             oos_years=_parse_years(str(args.oos_years)),
             profiles=tuple(item.strip() for item in str(args.profiles).split(",") if item.strip()),
+            study_root=args.study_root,
+            store_root=args.store_root,
+            train_start_year=int(args.train_start_year),
+            seed=int(args.seed),
+            epochs=int(args.epochs),
+            device=str(args.device),
+            python_executable=args.python,
+            overwrite_folds=bool(args.overwrite_folds),
+            rerun_completed=bool(args.rerun_completed),
+            bootstrap_replications=int(args.bootstrap_replications),
+        )
+    elif args.command == "run-inner-screen":
+        result = run_inner_screen_study(
+            source_view=args.source_view,
             study_root=args.study_root,
             store_root=args.store_root,
             train_start_year=int(args.train_start_year),

@@ -8,6 +8,7 @@ import json
 import math
 import random
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -43,6 +44,25 @@ PATH_VALUE_V2_WAITING_PENALTY = 0.04
 PATH_VALUE_V2_DRAWDOWN_PENALTY = 0.60
 PATH_VALUE_V2_TRANSACTION_COST = 0.002
 PATH_VALUE_V2_TEMPERATURE = 0.03
+PATH_VALUE_GRADIENT_PROFILE_SMOOTH = "smooth_current"
+PATH_VALUE_GRADIENT_PROFILE_HARD_ST = "hard_st"
+PATH_VALUE_GRADIENT_PROFILES = (
+    PATH_VALUE_GRADIENT_PROFILE_SMOOTH,
+    PATH_VALUE_GRADIENT_PROFILE_HARD_ST,
+)
+RANK_TRAINING_PROFILE_LOCAL_CHUNK = "local_chunk"
+RANK_TRAINING_PROFILE_GLOBAL_TAIL_512 = "global_tail_512"
+RANK_TRAINING_PROFILES = (
+    RANK_TRAINING_PROFILE_LOCAL_CHUNK,
+    RANK_TRAINING_PROFILE_GLOBAL_TAIL_512,
+)
+GLOBAL_TAIL_GROUP_COUNTS = {
+    "true_top": 32,
+    "true_rank_33_256": 128,
+    "middle": 128,
+    "bottom": 96,
+    "prior_epoch_false_positive": 128,
+}
 SUMMARY_LOSS_PROFILE_BASE = "base"
 SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC = "multi_horizon_ohlc"
 SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC_NO60 = "multi_horizon_ohlc_no60"
@@ -74,6 +94,8 @@ INPUT_CHANNEL_PROFILE_ORDERS = {
     INPUT_CHANNEL_PROFILE_NO_INTRADAY_SUMMARY: ("daily_raw", "daily_state", "limit_structure"),
     INPUT_CHANNEL_PROFILE_NO_LIMIT_STRUCTURE: ("daily_raw", "daily_state", "intraday_summary"),
 }
+BASE_INPUT_MASK_FEATURES = ("has_bar", "is_suspended", "previous_close_valid", "zero_range")
+INTRADAY_INPUT_MASK_FEATURES = ("corr_valid",)
 UNIFIED_VALUE_WAIT_PENALTY = 0.015
 UNIFIED_VALUE_HOLD_PENALTY = 0.025
 UNIFIED_VALUE_DRAWDOWN_PENALTY = 0.60
@@ -319,6 +341,97 @@ def _validated_sample_date_indices(
     return numeric.astype(np.int64)
 
 
+DATE_COMPLETE_SPREAD_LIMIT_POLICY = "date_complete_even_spread_v1"
+
+
+def _limit_sample_index_by_complete_dates(
+    sample_index: pd.DataFrame,
+    *,
+    max_samples: int,
+    context: str,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Limit training work without truncating a daily cross-section.
+
+    Ranking metrics and global-tail slates require complete signal-date
+    universes.  A row-level ``head(N)`` limit violates that invariant and also
+    concentrates expanding-window folds in the earliest years.  This limiter
+    therefore keeps whole dates selected at deterministic, evenly spaced
+    positions over the available history.
+    """
+
+    frame = sample_index.reset_index(drop=True)
+    requested = int(max_samples)
+    original_rows = int(len(frame))
+    original_dates = int(frame["date_idx"].nunique()) if original_rows else 0
+    audit: dict[str, Any] = {
+        "policy": "all_rows",
+        "requested_max_samples": requested,
+        "original_row_count": original_rows,
+        "selected_row_count": original_rows,
+        "original_date_count": original_dates,
+        "selected_date_count": original_dates,
+        "date_complete": True,
+    }
+    if original_rows:
+        audit.update(
+            {
+                "selected_trade_date_start": str(frame["trade_date"].astype(str).min()),
+                "selected_trade_date_end": str(frame["trade_date"].astype(str).max()),
+            }
+        )
+    if requested <= 0 or original_rows <= requested:
+        return frame, audit
+
+    group_sizes = frame.groupby("date_idx", sort=True).size()
+    if group_sizes.empty:
+        return frame, audit
+    largest_date_rows = int(group_sizes.max())
+    if requested < largest_date_rows:
+        raise ValueError(
+            f"{context} max_samples={requested} is smaller than the largest complete date "
+            f"cross-section ({largest_date_rows}); increase the limit or disable it"
+        )
+
+    date_values = group_sizes.index.to_numpy(dtype=np.int64, copy=True)
+    sizes = group_sizes.to_numpy(dtype=np.int64, copy=True)
+    upper_date_count = min(int(date_values.size), max(int(requested // max(int(sizes.min()), 1)), 1))
+    selected_positions: np.ndarray | None = None
+    for date_count in range(upper_date_count, 0, -1):
+        if date_count == 1:
+            positions = np.asarray([int(date_values.size // 2)], dtype=np.int64)
+        else:
+            positions = np.rint(np.linspace(0, int(date_values.size) - 1, num=date_count)).astype(np.int64)
+            positions = np.unique(positions)
+        if int(sizes[positions].sum()) <= requested:
+            selected_positions = positions
+            break
+    if selected_positions is None or int(selected_positions.size) == 0:
+        raise ValueError(f"{context} could not select a complete-date sample within max_samples={requested}")
+
+    selected_dates = date_values[selected_positions]
+    limited = frame.loc[frame["date_idx"].astype(np.int64).isin(selected_dates)].reset_index(drop=True)
+    selected_group_sizes = limited.groupby("date_idx", sort=True).size()
+    expected_group_sizes = group_sizes.loc[selected_group_sizes.index]
+    if not selected_group_sizes.equals(expected_group_sizes):
+        raise AssertionError(f"{context} date-complete sampling invariant failed")
+    if int(len(limited)) > requested:
+        raise AssertionError(f"{context} sample limit exceeded")
+
+    audit.update(
+        {
+            "policy": DATE_COMPLETE_SPREAD_LIMIT_POLICY,
+            "selected_row_count": int(len(limited)),
+            "selected_date_count": int(selected_group_sizes.size),
+            "selected_trade_date_start": str(limited["trade_date"].astype(str).min()),
+            "selected_trade_date_end": str(limited["trade_date"].astype(str).max()),
+            "selected_date_idx_start": int(selected_dates.min()),
+            "selected_date_idx_end": int(selected_dates.max()),
+            "largest_complete_date_row_count": largest_date_rows,
+        }
+    )
+    return limited, audit
+
+
 class SequencePathPackDataset(Dataset):
     def __init__(
         self,
@@ -337,9 +450,12 @@ class SequencePathPackDataset(Dataset):
         missing_index_columns = sorted(required_index_columns.difference(sample_index.columns))
         if missing_index_columns:
             raise ValueError(f"pack sample index is missing required columns: {missing_index_columns}")
-        self.sample_index = sample_index[sample_index["split"].astype(str).eq(str(split))].reset_index(drop=True)
-        if int(max_samples) > 0 and len(self.sample_index) > int(max_samples):
-            self.sample_index = self.sample_index.head(int(max_samples)).reset_index(drop=True)
+        split_index = sample_index[sample_index["split"].astype(str).eq(str(split))].reset_index(drop=True)
+        self.sample_index, self.sample_selection = _limit_sample_index_by_complete_dates(
+            split_index,
+            max_samples=int(max_samples),
+            context=f"{split} sample index",
+        )
         self.date_idx_values = _validated_sample_date_indices(
             self.sample_index,
             context=f"{split} sample index",
@@ -359,7 +475,34 @@ class SequencePathPackDataset(Dataset):
         self.feature_arrays = {name: _open_memmap(channels[name], dtype="float32") for name in self.channel_order}
         self.feature_columns = {name: list(channels[name].get("columns", []) or []) for name in self.channel_order}
         self.normalization = dict(self.manifest.get("normalization", {}) or {})
+        self.normalization_mean: dict[str, np.ndarray] = {}
+        self.normalization_std: dict[str, np.ndarray] = {}
+        for name in self.channel_order:
+            stats = dict(self.normalization.get(name, {}) or {})
+            feature_count = len(self.feature_columns[name])
+            self.normalization_mean[name] = np.asarray(
+                stats.get("mean", [0.0] * feature_count),
+                dtype=np.float32,
+            )
+            self.normalization_std[name] = np.maximum(
+                np.asarray(stats.get("std", [1.0] * feature_count), dtype=np.float32),
+                np.float32(1.0e-6),
+            )
         labels = dict(self.manifest.get("label_arrays", {}) or {})
+        masks = dict(self.manifest.get("masks", {}) or {})
+        requested_input_masks = [*BASE_INPUT_MASK_FEATURES]
+        if "intraday_summary" in self.channel_order:
+            requested_input_masks.extend(INTRADAY_INPUT_MASK_FEATURES)
+        self.input_mask_features = [name for name in requested_input_masks if name in masks]
+        self.input_mask_arrays = {
+            name: _open_memmap(masks[name], dtype="bool") for name in self.input_mask_features
+        }
+        self.tradable_panel = _open_memmap(masks["tradable"], dtype="bool") if "tradable" in masks else None
+        self.observed_price_panel = (
+            _open_memmap(masks.get("price_observed", masks.get("has_bar")), dtype="bool")
+            if ("price_observed" in masks or "has_bar" in masks)
+            else None
+        )
         self.future_ohlcva_path = _open_label_array(labels["future_ohlcva_path"], dtype="float32") if "future_ohlcva_path" in labels else None
         self.future_path = _open_label_array(labels["future_ohlc_path"], dtype="float32") if "future_ohlc_path" in labels else None
         if self.future_path is None and self.future_ohlcva_path is None:
@@ -381,7 +524,9 @@ class SequencePathPackDataset(Dataset):
             else value_column_for_path(self.forward_days, path_dim=output_path_dim)
         )
         self.value_index = self.path_summary_columns.index(self.value_column)
-        self.input_dim = int(sum(len(self.feature_columns[name]) for name in self.channel_order))
+        self.input_dim = int(
+            sum(len(self.feature_columns[name]) for name in self.channel_order) + len(self.input_mask_features)
+        )
         requested_richer_targets = {
             "daily_raw": RICHER_DAILY_RAW_TARGETS,
             "daily_state": RICHER_DAILY_STATE_TARGETS,
@@ -410,28 +555,71 @@ class SequencePathPackDataset(Dataset):
         self.richer_path_dim = int(len(self.richer_path_fields))
         manifest_symbols = list(self.manifest.get("symbol_values", []) or [])
         self.symbol_count = int(len(manifest_symbols)) or int(self.sample_index["symbol_idx"].astype(int).max() + 1)
+        self._path_value_targets_cache: np.ndarray | None = None
 
     def __len__(self) -> int:
         return int(len(self.sample_index))
 
+    def path_value_targets(self, *, chunk_size: int = 16384) -> np.ndarray:
+        """Return the hard path-value-v2 target for every loaded sample.
+
+        Corrected packs may persist this scalar in ``sample_index``.  Legacy packs
+        fall back to a one-time chunked derivation from OHLC labels; the result is
+        cached for all subsequent global-tail epochs.
+        """
+
+        if self._path_value_targets_cache is not None:
+            return self._path_value_targets_cache
+        for column in ("path_trade_value_v2_target", path_value_v2_column(self.forward_days)):
+            if column in self.sample_index.columns:
+                target = pd.to_numeric(self.sample_index[column], errors="coerce").to_numpy(dtype=np.float32, copy=True)
+                self._path_value_targets_cache = target
+                return target
+        target = np.full(len(self), np.nan, dtype=np.float32)
+        step = max(int(chunk_size), 1)
+        for start in range(0, len(self), step):
+            stop = min(start + step, len(self))
+            date_idx = self.date_idx_values[start:stop].astype(np.int64, copy=False)
+            label_symbol_idx = self.label_symbol_idx_values[start:stop].astype(np.int64, copy=False)
+            path = (
+                np.asarray(
+                    self.future_path[date_idx, label_symbol_idx, : self.forward_days, :4],
+                    dtype=np.float32,
+                ).copy()
+                if self.future_path is not None
+                else np.asarray(
+                    self.future_ohlcva_path[date_idx, label_symbol_idx, : self.forward_days, :4],
+                    dtype=np.float32,
+                ).copy()
+            )
+            tradable_path = self._future_mask_batch(
+                self.tradable_panel,
+                date_idx,
+                self.symbol_idx_values[start:stop].astype(np.int64, copy=False),
+            )
+            target[start:stop] = _derive_path_summary_numpy(
+                path,
+                price_anchor=self.price_anchor,
+                tradable_path=tradable_path,
+            )[:, -1]
+        self._path_value_targets_cache = target
+        return target
+
     def _normalize(self, name: str, values: np.ndarray) -> np.ndarray:
-        stats = dict(self.normalization.get(name, {}) or {})
-        mean = np.asarray(stats.get("mean", [0.0] * values.shape[-1]), dtype=np.float32)
-        std = np.asarray(stats.get("std", [1.0] * values.shape[-1]), dtype=np.float32)
-        out = (values.astype(np.float32, copy=False) - mean.reshape(1, -1)) / np.maximum(std.reshape(1, -1), 1.0e-6)
+        mean = self.normalization_mean[name]
+        std = self.normalization_std[name]
+        out = (values.astype(np.float32, copy=False) - mean.reshape(1, -1)) / std.reshape(1, -1)
         return np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32, copy=False)
 
     def _normalize_batch(self, name: str, values: np.ndarray) -> np.ndarray:
-        stats = dict(self.normalization.get(name, {}) or {})
-        mean = np.asarray(stats.get("mean", [0.0] * values.shape[-1]), dtype=np.float32)
-        std = np.asarray(stats.get("std", [1.0] * values.shape[-1]), dtype=np.float32)
-        out = (values.astype(np.float32, copy=False) - mean.reshape(1, 1, -1)) / np.maximum(std.reshape(1, 1, -1), 1.0e-6)
+        mean = self.normalization_mean[name]
+        std = self.normalization_std[name]
+        out = (values.astype(np.float32, copy=False) - mean.reshape(1, 1, -1)) / std.reshape(1, 1, -1)
         return np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32, copy=False)
 
     def _normalize_selected_future_batch(self, name: str, values: np.ndarray, indices: list[int]) -> np.ndarray:
-        stats = dict(self.normalization.get(name, {}) or {})
-        mean_all = np.asarray(stats.get("mean", [0.0] * len(self.feature_columns[name])), dtype=np.float32)
-        std_all = np.asarray(stats.get("std", [1.0] * len(self.feature_columns[name])), dtype=np.float32)
+        mean_all = self.normalization_mean[name]
+        std_all = self.normalization_std[name]
         mean = mean_all[np.asarray(indices, dtype=np.int64)]
         std = np.maximum(std_all[np.asarray(indices, dtype=np.int64)], 1.0e-6)
         return (values.astype(np.float32, copy=False) - mean.reshape(1, 1, -1)) / std.reshape(1, 1, -1)
@@ -463,6 +651,24 @@ class SequencePathPackDataset(Dataset):
         out = np.concatenate(parts, axis=2).astype(np.float32, copy=False)
         return out
 
+    def _future_mask_batch(
+        self,
+        panel: np.ndarray | None,
+        date_idx: np.ndarray,
+        symbol_idx: np.ndarray,
+    ) -> np.ndarray | None:
+        if panel is None:
+            return None
+        values = np.zeros((int(date_idx.size), self.forward_days), dtype=bool)
+        for current_date in np.unique(date_idx):
+            mask = date_idx == int(current_date)
+            symbols = symbol_idx[mask]
+            start = int(current_date) + 1
+            end = start + int(self.forward_days)
+            block = np.asarray(panel[start:end, symbols], dtype=bool)
+            values[np.flatnonzero(mask), : block.shape[0]] = np.transpose(block, (1, 0))
+        return values
+
     def __getitem__(self, idx: int) -> dict[str, Any]:
         row = self.sample_index.iloc[int(idx)]
         date_idx = int(row["date_idx"])
@@ -474,6 +680,15 @@ class SequencePathPackDataset(Dataset):
             self._normalize(name, np.asarray(self.feature_arrays[name][start:end, symbol_idx, :], dtype=np.float32))
             for name in self.channel_order
         ]
+        if self.input_mask_features:
+            mask_values = np.stack(
+                [
+                    np.asarray(self.input_mask_arrays[name][start:end, symbol_idx], dtype=np.float32)
+                    for name in self.input_mask_features
+                ],
+                axis=1,
+            )
+            parts.append(mask_values)
         x = np.concatenate(parts, axis=1).astype(np.float32, copy=False)
         y_path = (
             np.asarray(self.future_path[date_idx, label_symbol_idx, : self.forward_days, :4], dtype=np.float32).copy()
@@ -514,6 +729,7 @@ class SequencePathPackDataset(Dataset):
         include_ohlcva_path: bool = True,
         include_richer_path: bool = True,
         include_summary: bool = True,
+        include_metadata: bool = True,
     ) -> dict[str, Any]:
         idx = np.asarray(indices, dtype=np.int64)
         if idx.ndim != 1 or idx.size == 0:
@@ -534,6 +750,20 @@ class SequencePathPackDataset(Dataset):
                 block = np.asarray(self.feature_arrays[name][start:end, symbols, :], dtype=np.float32)
                 values[mask, :, :] = np.transpose(block, (1, 0, 2))
             channel_parts.append(self._normalize_batch(name, values))
+        if self.input_mask_features:
+            mask_values = np.empty(
+                (batch_size, self.lookback_days, len(self.input_mask_features)),
+                dtype=np.float32,
+            )
+            for current_date in np.unique(date_idx):
+                mask = date_idx == int(current_date)
+                symbols = symbol_idx[mask]
+                start = int(current_date) - self.lookback_days + 1
+                end = int(current_date) + 1
+                for field_idx, name in enumerate(self.input_mask_features):
+                    block = np.asarray(self.input_mask_arrays[name][start:end, symbols], dtype=np.float32)
+                    mask_values[mask, :, field_idx] = np.transpose(block, (1, 0))
+            channel_parts.append(mask_values)
         x = np.concatenate(channel_parts, axis=2).astype(np.float32, copy=False)
         y_path = (
             np.asarray(self.future_path[date_idx, label_symbol_idx, : self.forward_days, :4], dtype=np.float32).copy()
@@ -548,6 +778,8 @@ class SequencePathPackDataset(Dataset):
                 else y_path.copy()
             )
         y_richer_path = self._future_richer_path_batch(y_path, date_idx, symbol_idx) if bool(include_richer_path) else None
+        y_tradable_path = self._future_mask_batch(self.tradable_panel, date_idx, symbol_idx)
+        y_observed_price_path = self._future_mask_batch(self.observed_price_panel, date_idx, symbol_idx)
         y_summary = None
         if bool(include_summary):
             y_summary = (
@@ -563,12 +795,23 @@ class SequencePathPackDataset(Dataset):
             "y_path": torch.from_numpy(y_path),
             "date_idx": torch.from_numpy(date_idx.astype(np.int64, copy=False)),
             "symbol_idx": torch.from_numpy(symbol_idx.astype(np.int64, copy=False)),
-            "trade_date": [str(item) for item in self.trade_date_values[idx]],
-            "symbol": [str(item) for item in self.symbol_values[idx]],
         }
+        if bool(include_metadata):
+            batch["trade_date"] = [str(item) for item in self.trade_date_values[idx]]
+            batch["symbol"] = [str(item) for item in self.symbol_values[idx]]
         batch["y_ohlcva_path"] = torch.from_numpy(y_ohlcva_path) if y_ohlcva_path is not None else None
         batch["y_richer_path"] = torch.from_numpy(y_richer_path) if y_richer_path is not None else None
         batch["y_summary"] = torch.from_numpy(y_summary) if y_summary is not None else None
+        batch["y_tradable_path"] = torch.from_numpy(y_tradable_path) if y_tradable_path is not None else None
+        batch["y_observed_price_path"] = (
+            torch.from_numpy(y_observed_price_path) if y_observed_price_path is not None else None
+        )
+        entry_filled = (
+            self.sample_index["entry_filled"].astype(bool).to_numpy(copy=False)[idx]
+            if "entry_filled" in self.sample_index.columns
+            else np.ones(int(idx.size), dtype=bool)
+        )
+        batch["entry_filled"] = torch.from_numpy(np.asarray(entry_filled, dtype=bool))
         return batch
 
 
@@ -640,6 +883,132 @@ class DateGroupedBatchSampler(BatchSampler):
 
     def __len__(self) -> int:
         return self._count_batches(self._date_order(self.epoch))
+
+
+class ShuffledBatchSampler(BatchSampler):
+    """Full-sample path batches without date-boundary remainder waste."""
+
+    def __init__(self, sample_count: int, *, batch_size: int, shuffle: bool, seed: int) -> None:
+        self.sample_count = max(int(sample_count), 0)
+        self.batch_size = max(int(batch_size), 1)
+        self.shuffle = bool(shuffle)
+        self.seed = int(seed)
+        self.epoch = 0
+
+    def __iter__(self) -> Iterator[list[int]]:
+        indices = np.arange(self.sample_count, dtype=np.int64)
+        if self.shuffle:
+            np.random.default_rng(self.seed + self.epoch).shuffle(indices)
+        self.epoch += 1
+        for start in range(0, self.sample_count, self.batch_size):
+            yield indices[start : start + self.batch_size].tolist()
+
+    def __len__(self) -> int:
+        return int(math.ceil(self.sample_count / self.batch_size)) if self.sample_count else 0
+
+
+class GlobalTailBatchSampler(BatchSampler):
+    """One auditable target-stratified ranking slate per signal date."""
+
+    def __init__(
+        self,
+        sample_index: pd.DataFrame,
+        target_values: np.ndarray,
+        *,
+        batch_size: int = 512,
+        shuffle: bool,
+        seed: int,
+        prior_epoch_scores: np.ndarray | None = None,
+    ) -> None:
+        if int(batch_size) != sum(GLOBAL_TAIL_GROUP_COUNTS.values()):
+            raise ValueError("global_tail_512 requires batch_size=512 and the frozen 32/128/128/96/128 allocation")
+        target = np.asarray(target_values, dtype=np.float32).reshape(-1)
+        if len(sample_index) != int(target.size):
+            raise ValueError("sample_index and target_values must have equal length")
+        prior = None if prior_epoch_scores is None else np.asarray(prior_epoch_scores, dtype=np.float32).reshape(-1)
+        if prior is not None and int(prior.size) != int(target.size):
+            raise ValueError("prior_epoch_scores must match target_values")
+        self.sample_index = sample_index
+        self.target_values = target
+        self.prior_epoch_scores = prior
+        self.batch_size = int(batch_size)
+        self.shuffle = bool(shuffle)
+        self.seed = int(seed)
+        self.epoch = 0
+        groups: dict[int, np.ndarray] = {}
+        for date_idx, raw_group in sample_index.groupby("date_idx", sort=True).groups.items():
+            indices = np.asarray(list(raw_group), dtype=np.int64)
+            finite = np.isfinite(target[indices])
+            if bool(finite.any()):
+                groups[int(date_idx)] = indices[finite]
+        self.groups = groups
+        self.date_indices = list(groups)
+
+    @staticmethod
+    def _sample(pool: np.ndarray, count: int, rng: np.random.Generator) -> np.ndarray:
+        values = np.asarray(pool, dtype=np.int64)
+        if int(values.size) <= int(count):
+            return values.copy()
+        return rng.choice(values, size=int(count), replace=False).astype(np.int64, copy=False)
+
+    def build_slate(self, date_idx: int, *, epoch: int | None = None) -> tuple[list[int], dict[str, list[int]]]:
+        current_epoch = self.epoch if epoch is None else int(epoch)
+        rng = np.random.default_rng(self.seed + current_epoch * 1000003 + int(date_idx))
+        indices = self.groups[int(date_idx)]
+        ranked = indices[np.argsort(-self.target_values[indices], kind="mergesort")]
+        if int(ranked.size) <= self.batch_size:
+            values = ranked.tolist()
+            return values, {"all_available": values}
+
+        top = ranked[: GLOBAL_TAIL_GROUP_COUNTS["true_top"]]
+        near_pool = ranked[GLOBAL_TAIL_GROUP_COUNTS["true_top"] : min(256, int(ranked.size))]
+        bottom_pool = ranked[-GLOBAL_TAIL_GROUP_COUNTS["bottom"] :]
+        body_end = max(256, int(ranked.size) - GLOBAL_TAIL_GROUP_COUNTS["bottom"])
+        hard_pool = ranked[256:body_end]
+        if self.prior_epoch_scores is not None:
+            prior = self.prior_epoch_scores[hard_pool]
+            finite_prior = np.isfinite(prior)
+            hard_pool = hard_pool[finite_prior]
+            prior = prior[finite_prior]
+            hard = hard_pool[np.argsort(-prior, kind="mergesort")[: GLOBAL_TAIL_GROUP_COUNTS["prior_epoch_false_positive"]]]
+        else:
+            hard = self._sample(hard_pool, GLOBAL_TAIL_GROUP_COUNTS["prior_epoch_false_positive"], rng)
+        near = self._sample(near_pool, GLOBAL_TAIL_GROUP_COUNTS["true_rank_33_256"], rng)
+        bottom = self._sample(bottom_pool, GLOBAL_TAIL_GROUP_COUNTS["bottom"], rng)
+        selected = set(np.concatenate([top, near, bottom, hard]).tolist())
+        middle_pool = np.asarray([item for item in ranked[256:body_end] if int(item) not in selected], dtype=np.int64)
+        middle = self._sample(middle_pool, GLOBAL_TAIL_GROUP_COUNTS["middle"], rng)
+        categories = {
+            "true_top": top.tolist(),
+            "true_rank_33_256": near.tolist(),
+            "middle": middle.tolist(),
+            "bottom": bottom.tolist(),
+            "prior_epoch_false_positive": hard.tolist(),
+        }
+        slate = [item for values in categories.values() for item in values]
+        if len(slate) < self.batch_size:
+            used = set(slate)
+            fill_pool = np.asarray([item for item in ranked if int(item) not in used], dtype=np.int64)
+            fill = self._sample(fill_pool, self.batch_size - len(slate), rng).tolist()
+            categories["fallback_fill"] = fill
+            slate.extend(fill)
+        if len(slate) != self.batch_size or len(set(slate)) != len(slate):
+            raise RuntimeError("global-tail slate must contain 512 unique samples")
+        rng.shuffle(slate)
+        return slate, categories
+
+    def __iter__(self) -> Iterator[list[int]]:
+        dates = list(self.date_indices)
+        if self.shuffle:
+            np.random.default_rng(self.seed + self.epoch).shuffle(dates)
+        current_epoch = self.epoch
+        self.epoch += 1
+        for date_idx in dates:
+            slate, _ = self.build_slate(date_idx, epoch=current_epoch)
+            yield slate
+
+    def __len__(self) -> int:
+        return len(self.date_indices)
 
 
 class SequencePathModel(nn.Module):
@@ -772,24 +1141,28 @@ class SequencePathModel(nn.Module):
 
 def _finite_smooth_l1(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     mask = torch.isfinite(target)
-    if not bool(mask.any()):
-        return pred.sum() * 0.0
-    return F.smooth_l1_loss(pred[mask], target[mask], reduction="mean")
+    safe_target = torch.where(mask, target, pred.detach())
+    raw_loss = F.smooth_l1_loss(pred, safe_target, reduction="none")
+    masked_loss = torch.where(mask, raw_loss, torch.zeros_like(raw_loss))
+    count = mask.sum().to(dtype=pred.dtype)
+    return masked_loss.sum() / torch.clamp(count, min=1.0)
 
 
 def _finite_smooth_l1_fields_equal(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     if int(pred.shape[-1]) != int(target.shape[-1]):
         raise ValueError(f"field dim mismatch: predicted={pred.shape[-1]} target={target.shape[-1]}")
-    losses: list[torch.Tensor] = []
-    for field_idx in range(int(target.shape[-1])):
-        field_target = target[:, :, field_idx]
-        field_pred = pred[:, :, field_idx]
-        mask = torch.isfinite(field_target)
-        if bool(mask.any()):
-            losses.append(F.smooth_l1_loss(field_pred[mask], field_target[mask], reduction="mean"))
-    if not losses:
-        return pred.sum() * 0.0
-    return torch.stack(losses).mean()
+    mask = torch.isfinite(target)
+    safe_target = torch.where(mask, target, pred.detach())
+    raw_loss = F.smooth_l1_loss(pred, safe_target, reduction="none")
+    masked_loss = torch.where(mask, raw_loss, torch.zeros_like(raw_loss))
+    reduce_dims = tuple(range(int(target.ndim) - 1))
+    counts = mask.sum(dim=reduce_dims).to(dtype=pred.dtype)
+    field_losses = masked_loss.sum(dim=reduce_dims) / torch.clamp(counts, min=1.0)
+    valid_fields = counts > 0
+    return torch.where(valid_fields, field_losses, torch.zeros_like(field_losses)).sum() / torch.clamp(
+        valid_fields.sum().to(dtype=pred.dtype),
+        min=1.0,
+    )
 
 
 def _finite_smooth_l1_columns(pred: torch.Tensor, target: torch.Tensor, columns: list[int]) -> torch.Tensor:
@@ -797,6 +1170,74 @@ def _finite_smooth_l1_columns(pred: torch.Tensor, target: torch.Tensor, columns:
         return pred.sum() * 0.0
     index = torch.as_tensor(columns, device=pred.device, dtype=torch.long)
     return _finite_smooth_l1(pred.index_select(1, index), target.index_select(1, index))
+
+
+def _normalize_path_value_gradient_profile(value: str) -> str:
+    profile = str(value or PATH_VALUE_GRADIENT_PROFILE_SMOOTH).strip().lower()
+    if profile not in PATH_VALUE_GRADIENT_PROFILES:
+        raise ValueError(f"path_value_gradient_profile must be one of {PATH_VALUE_GRADIENT_PROFILES}")
+    return profile
+
+
+def _normalize_rank_training_profile(value: str) -> str:
+    profile = str(value or RANK_TRAINING_PROFILE_LOCAL_CHUNK).strip().lower()
+    if profile not in RANK_TRAINING_PROFILES:
+        raise ValueError(f"rank_training_profile must be one of {RANK_TRAINING_PROFILES}")
+    return profile
+
+
+def _path_value_with_gradient_profile(
+    hard_value: torch.Tensor,
+    candidates: torch.Tensor,
+    *,
+    temperature: float,
+    profile: str,
+    reduction_dim: int,
+) -> torch.Tensor:
+    """Return the configured differentiable value without changing hard inference semantics.
+
+    ``hard_st`` has the exact hard-max forward value used by NumPy inference, while its
+    backward pass follows the temperature-smoothed log-sum-exp surrogate.  The legacy
+    ``smooth_current`` profile remains available so existing evidence stays reproducible.
+    """
+
+    normalized = _normalize_path_value_gradient_profile(profile)
+    scale = max(float(temperature), 1.0e-6)
+    smooth_value = scale * torch.logsumexp(candidates / scale, dim=int(reduction_dim))
+    if normalized == PATH_VALUE_GRADIENT_PROFILE_HARD_ST:
+        return hard_value.detach() + smooth_value - smooth_value.detach()
+    return smooth_value
+
+
+def _loss_parts_payload(
+    *,
+    total: torch.Tensor,
+    path_loss: torch.Tensor,
+    summary_loss: torch.Tensor,
+    richer_loss: torch.Tensor,
+    price_delta_loss: torch.Tensor,
+    va_level_loss: torch.Tensor,
+    va_delta_loss: torch.Tensor,
+    value_loss: torch.Tensor,
+    rank_loss: torch.Tensor,
+    residual_penalty: torch.Tensor,
+    return_tensors: bool,
+) -> dict[str, float] | dict[str, torch.Tensor]:
+    tensors = {
+        "loss": total,
+        "path_loss": path_loss,
+        "summary_loss": summary_loss,
+        "richer_loss": richer_loss,
+        "price_delta_loss": price_delta_loss,
+        "va_level_loss": va_level_loss,
+        "va_delta_loss": va_delta_loss,
+        "value_loss": value_loss,
+        "rank_loss": rank_loss,
+        "residual_penalty": residual_penalty,
+    }
+    if bool(return_tensors):
+        return {key: value.detach() for key, value in tensors.items()}
+    return {key: float(value.detach().cpu().item()) for key, value in tensors.items()}
 
 
 def _rank_loss_by_date(score: torch.Tensor, target: torch.Tensor, date_idx: torch.Tensor, *, max_per_side: int = 64) -> torch.Tensor:
@@ -817,6 +1258,93 @@ def _rank_loss_by_date(score: torch.Tensor, target: torch.Tensor, date_idx: torc
     if not losses:
         return score.sum() * 0.0
     return torch.stack(losses).mean()
+
+
+def _global_tail_rank_loss_by_date(
+    score: torch.Tensor,
+    target: torch.Tensor,
+    date_idx: torch.Tensor,
+    *,
+    top_count: int = 32,
+) -> torch.Tensor:
+    """Target-gap weighted pairwise loss over each global-tail daily slate."""
+
+    losses: list[torch.Tensor] = []
+    for date in torch.unique(date_idx):
+        mask = (date_idx == date) & torch.isfinite(target) & torch.isfinite(score)
+        valid_indices = torch.where(mask)[0]
+        if int(valid_indices.numel()) < 4:
+            continue
+        s = score.index_select(0, valid_indices)
+        y = target.index_select(0, valid_indices)
+        order = torch.argsort(y, descending=True)
+        s = s.index_select(0, order)
+        y = y.index_select(0, order)
+        target_gap = y.view(-1, 1) - y.view(1, -1)
+        score_gap = s.view(-1, 1) - s.view(1, -1)
+        ordered_pair = target_gap > 0.0
+        abs_gap = torch.where(ordered_pair, target_gap, torch.zeros_like(target_gap))
+        positive_count = torch.clamp(ordered_pair.sum().to(dtype=s.dtype), min=1.0)
+        gap_scale = torch.clamp(abs_gap.sum() / positive_count, min=1.0e-6)
+        gap_weight = torch.clamp(abs_gap / gap_scale, min=0.25, max=4.0)
+        top = min(int(top_count), int(s.numel()))
+        top_pair = torch.zeros_like(ordered_pair)
+        top_pair[:top, :] = True
+        pair_weight = gap_weight * torch.where(
+            top_pair,
+            torch.full_like(target_gap, 2.0),
+            torch.ones_like(target_gap),
+        )
+        raw = F.softplus(-score_gap) * pair_weight
+        losses.append(torch.where(ordered_pair, raw, torch.zeros_like(raw)).sum() / positive_count)
+    if not losses:
+        return score.sum() * 0.0
+    return torch.stack(losses).mean()
+
+
+def _rank_loss_for_profile(
+    score: torch.Tensor,
+    target: torch.Tensor,
+    date_idx: torch.Tensor,
+    *,
+    profile: str,
+    max_per_side: int,
+) -> torch.Tensor:
+    normalized = _normalize_rank_training_profile(profile)
+    if normalized == RANK_TRAINING_PROFILE_GLOBAL_TAIL_512:
+        return _global_tail_rank_loss_by_date(score, target, date_idx)
+    return _rank_loss_by_date(score, target, date_idx, max_per_side=max_per_side)
+
+
+def _derived_path_rank_score_and_target(
+    outputs: Mapping[str, torch.Tensor],
+    target_path: torch.Tensor,
+    *,
+    price_anchor: str,
+    path_value_gradient_profile: str,
+    target_tradable_path: torch.Tensor | None = None,
+    residual_weight: float = 0.25,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if "future_path" not in outputs:
+        raise ValueError("separated path ranking requires future_path output")
+    if int(outputs["future_path"].shape[-1]) != 4:
+        raise ValueError("global-tail ranking requires price-only OHLC path value, not unified OHLCVA value semantics")
+    target_summary = _derive_path_summary_torch(
+        target_path[:, :, :4],
+        smooth_value=False,
+        price_anchor=price_anchor,
+        tradable_path=target_tradable_path,
+    ).detach()
+    predicted_summary = _derive_path_summary_torch(
+        outputs["future_path"],
+        smooth_value=True,
+        price_anchor=price_anchor,
+        path_value_gradient_profile=path_value_gradient_profile,
+    )
+    score = predicted_summary[:, -1]
+    if "residual_score" in outputs:
+        score = score + float(residual_weight) * outputs["residual_score"]
+    return score, target_summary[:, -1]
 
 
 def _delta_along_days(path: torch.Tensor) -> torch.Tensor:
@@ -862,6 +1390,7 @@ def _multi_horizon_ohlc_summary_features(
     *,
     price_anchor: str,
     include_full_horizon: bool = True,
+    tradable_path: torch.Tensor | None = None,
 ) -> torch.Tensor:
     path = _legacy_entry_relative_path_torch(path[:, :, :4], price_anchor=price_anchor)
     batch_size = int(path.shape[0])
@@ -906,10 +1435,22 @@ def _multi_horizon_ohlc_summary_features(
         - float(PATH_VALUE_V2_WAITING_PENALTY) * waiting.unsqueeze(0)
         - float(PATH_VALUE_V2_TRANSACTION_COST)
     )
-    candidate = torch.where(valid_by_horizon, candidate, torch.full_like(candidate, float("-inf")))
+    candidate_valid = valid_by_horizon
+    if tradable_path is not None:
+        if tuple(tradable_path.shape) != (batch_size, forward_days):
+            raise ValueError(f"tradable_path must have shape {(batch_size, forward_days)}")
+        candidate_valid = candidate_valid & tradable_path.to(dtype=torch.bool).unsqueeze(2)
+    candidate = torch.where(candidate_valid, candidate, torch.full_like(candidate, float("-inf")))
     best_idx = torch.argmax(candidate, dim=1)
     best_exit_close = torch.gather(close_ret, 1, best_idx)
     best_pre_exit_drawdown = torch.gather(pre_exit_drawdown, 1, best_idx)
+    has_tradable_exit = candidate_valid.any(dim=1)
+    best_exit_close = torch.where(has_tradable_exit, best_exit_close, torch.full_like(best_exit_close, float("nan")))
+    best_pre_exit_drawdown = torch.where(
+        has_tradable_exit,
+        best_pre_exit_drawdown,
+        torch.full_like(best_pre_exit_drawdown, float("nan")),
+    )
 
     return torch.stack(
         [
@@ -930,11 +1471,13 @@ def _multi_horizon_ohlc_summary_loss_vectorized(
     *,
     price_anchor: str,
     include_full_horizon: bool = True,
+    target_tradable_path: torch.Tensor | None = None,
 ) -> torch.Tensor:
     target_features = _multi_horizon_ohlc_summary_features(
         target_path,
         price_anchor=price_anchor,
         include_full_horizon=bool(include_full_horizon),
+        tradable_path=target_tradable_path,
     ).detach()
     pred_features = _multi_horizon_ohlc_summary_features(
         pred_path,
@@ -944,7 +1487,12 @@ def _multi_horizon_ohlc_summary_loss_vectorized(
     if int(pred_features.shape[1]) == 0:
         return pred_path.sum() * 0.0
     finite_target = torch.isfinite(target_features)
-    raw_loss = F.smooth_l1_loss(pred_features, target_features, reduction="none")
+    # Feeding NaN targets into smooth_l1_loss and masking the resulting loss is
+    # not sufficient: autograd can still propagate NaN through the zeroed branch.
+    # Substitute detached predictions before evaluating the loss so unavailable
+    # exit fields contribute exactly zero value and zero (finite) gradient.
+    safe_target = torch.where(finite_target, target_features, pred_features.detach())
+    raw_loss = F.smooth_l1_loss(pred_features, safe_target, reduction="none")
     masked_loss = torch.where(finite_target, raw_loss, torch.zeros_like(raw_loss))
     horizon_counts = finite_target.sum(dim=(0, 2))
     horizon_loss = torch.where(
@@ -961,6 +1509,8 @@ def _derived_summary_loss(
     *,
     summary_loss_profile: str,
     price_anchor: str,
+    path_value_gradient_profile: str = PATH_VALUE_GRADIENT_PROFILE_SMOOTH,
+    target_tradable_path: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     profile = str(summary_loss_profile or SUMMARY_LOSS_PROFILE_BASE).strip().lower()
     if profile not in SUMMARY_LOSS_PROFILES:
@@ -972,9 +1522,20 @@ def _derived_summary_loss(
             pred_path,
             target_path,
             price_anchor=price_anchor,
+            target_tradable_path=target_tradable_path,
         )
-        target_summary = _derive_path_summary_torch(target_path, smooth_value=False, price_anchor=price_anchor).detach()
-        pred_summary = _derive_path_summary_torch(pred_path, smooth_value=True, price_anchor=price_anchor)
+        target_summary = _derive_path_summary_torch(
+            target_path,
+            smooth_value=False,
+            price_anchor=price_anchor,
+            tradable_path=target_tradable_path,
+        ).detach()
+        pred_summary = _derive_path_summary_torch(
+            pred_path,
+            smooth_value=True,
+            price_anchor=price_anchor,
+            path_value_gradient_profile=path_value_gradient_profile,
+        )
         return summary_loss, target_summary, pred_summary
 
     if profile == SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC_NO60 and path_dim == 4:
@@ -983,13 +1544,34 @@ def _derived_summary_loss(
             target_path,
             price_anchor=price_anchor,
             include_full_horizon=False,
+            target_tradable_path=target_tradable_path,
         )
-        target_summary = _derive_path_summary_torch(target_path, smooth_value=False, price_anchor=price_anchor).detach()
-        pred_summary = _derive_path_summary_torch(pred_path, smooth_value=True, price_anchor=price_anchor)
+        target_summary = _derive_path_summary_torch(
+            target_path,
+            smooth_value=False,
+            price_anchor=price_anchor,
+            tradable_path=target_tradable_path,
+        ).detach()
+        pred_summary = _derive_path_summary_torch(
+            pred_path,
+            smooth_value=True,
+            price_anchor=price_anchor,
+            path_value_gradient_profile=path_value_gradient_profile,
+        )
         return summary_loss, target_summary, pred_summary
 
-    target_summary = _derive_path_summary_torch(target_path, smooth_value=False, price_anchor=price_anchor).detach()
-    pred_summary = _derive_path_summary_torch(pred_path, smooth_value=True, price_anchor=price_anchor)
+    target_summary = _derive_path_summary_torch(
+        target_path,
+        smooth_value=False,
+        price_anchor=price_anchor,
+        tradable_path=target_tradable_path,
+    ).detach()
+    pred_summary = _derive_path_summary_torch(
+        pred_path,
+        smooth_value=True,
+        price_anchor=price_anchor,
+        path_value_gradient_profile=path_value_gradient_profile,
+    )
     summary_loss = _finite_smooth_l1_columns(
         pred_summary,
         target_summary,
@@ -1022,7 +1604,11 @@ def _compute_loss(
     summary_loss_profile: str = SUMMARY_LOSS_PROFILE_BASE,
     path_loss_profile: str = PATH_LOSS_PROFILE_DEFAULT,
     direct_value_horizon: int = 0,
-) -> tuple[torch.Tensor, dict[str, float]]:
+    path_value_gradient_profile: str = PATH_VALUE_GRADIENT_PROFILE_SMOOTH,
+    rank_training_profile: str = RANK_TRAINING_PROFILE_LOCAL_CHUNK,
+    y_tradable_path: torch.Tensor | None = None,
+    return_tensor_parts: bool = False,
+) -> tuple[torch.Tensor, dict[str, float] | dict[str, torch.Tensor]]:
     normalized_path_loss_profile = str(path_loss_profile or PATH_LOSS_PROFILE_DEFAULT).strip().lower()
     if normalized_path_loss_profile not in PATH_LOSS_PROFILES:
         raise ValueError(f"path_loss_profile must be one of {PATH_LOSS_PROFILES}")
@@ -1034,6 +1620,7 @@ def _compute_loss(
             y_path[:, :horizon, :4],
             smooth_value=False,
             price_anchor=price_anchor,
+            tradable_path=(y_tradable_path[:, :horizon] if y_tradable_path is not None else None),
         ).detach()
         value_column = value_column_for_path(horizon, path_dim=4)
         value_index = derived_path_summary_columns(horizon, path_dim=4).index(value_column)
@@ -1046,7 +1633,17 @@ def _compute_loss(
         va_delta_loss = score.sum() * 0.0
         residual_penalty = score.sum() * 0.0
         value_loss = _finite_smooth_l1(score, value_target)
-        rank_loss = _rank_loss_by_date(score, value_target, date_idx, max_per_side=int(rank_max_per_side))
+        rank_loss = (
+            _rank_loss_for_profile(
+                score,
+                value_target,
+                date_idx,
+                profile=rank_training_profile,
+                max_per_side=int(rank_max_per_side),
+            )
+            if float(rank_weight) != 0.0
+            else score.sum() * 0.0
+        )
         total = (
             float(value_weight) * value_loss
             + float(rank_weight) * rank_loss
@@ -1058,18 +1655,22 @@ def _compute_loss(
             + float(va_delta_weight) * va_delta_loss
             + float(residual_penalty_weight) * residual_penalty
         )
-        return total, {
-            "loss": float(total.detach().cpu().item()),
-            "path_loss": float(path_loss.detach().cpu().item()),
-            "summary_loss": float(summary_loss.detach().cpu().item()),
-            "richer_loss": float(richer_loss.detach().cpu().item()),
-            "price_delta_loss": float(price_delta_loss.detach().cpu().item()),
-            "va_level_loss": float(va_level_loss.detach().cpu().item()),
-            "va_delta_loss": float(va_delta_loss.detach().cpu().item()),
-            "value_loss": float(value_loss.detach().cpu().item()),
-            "rank_loss": float(rank_loss.detach().cpu().item()),
-            "residual_penalty": float(residual_penalty.detach().cpu().item()),
-        }
+        parts = _loss_parts_payload(
+            total=total,
+            path_loss=path_loss,
+            summary_loss=summary_loss,
+            richer_loss=richer_loss,
+            price_delta_loss=price_delta_loss,
+            va_level_loss=va_level_loss,
+            va_delta_loss=va_delta_loss,
+            value_loss=value_loss,
+            rank_loss=rank_loss,
+            residual_penalty=residual_penalty,
+            return_tensors=return_tensor_parts,
+        )
+        if bool(return_tensor_parts):
+            parts["_ranking_score"] = score.detach()
+        return total, parts
 
     if normalized_path_loss_profile == PATH_LOSS_PROFILE_OHLCVA_EQUAL:
         if y_ohlcva_path is None:
@@ -1080,13 +1681,20 @@ def _compute_loss(
         path_loss = _finite_smooth_l1_fields_equal(predicted_ohlcva[:, :, :6], y_ohlcva_path[:, :, :6])
     else:
         path_loss = _finite_smooth_l1(outputs["future_path"], y_path)
-    price_delta_loss = _finite_smooth_l1(
-        _close_log_delta_from_anchor(outputs["future_path"]),
-        _close_log_delta_from_anchor(y_path),
-    )
+    price_delta_loss = outputs["future_path"].sum() * 0.0
+    if float(price_delta_weight) != 0.0:
+        price_delta_loss = _finite_smooth_l1(
+            _close_log_delta_from_anchor(outputs["future_path"]),
+            _close_log_delta_from_anchor(y_path),
+        )
     va_level_loss = outputs["future_path"].sum() * 0.0
     va_delta_loss = outputs["future_path"].sum() * 0.0
-    if y_ohlcva_path is not None and "future_ohlcva_aux_path" in outputs:
+    need_va_diagnostics = bool(
+        float(va_level_weight) != 0.0
+        or float(va_delta_weight) != 0.0
+        or normalized_path_loss_profile == PATH_LOSS_PROFILE_OHLCVA_EQUAL
+    )
+    if need_va_diagnostics and y_ohlcva_path is not None and "future_ohlcva_aux_path" in outputs:
         predicted_aux = outputs["future_ohlcva_aux_path"]
         if int(predicted_aux.shape[-1]) < 6 or int(y_ohlcva_path.shape[-1]) < 6:
             raise ValueError("future_ohlcva_aux_path requires 6-dimensional OHLCVA targets")
@@ -1096,7 +1704,7 @@ def _compute_loss(
             _delta_along_days(y_ohlcva_path[:, :, 4:6]),
         )
     richer_loss = outputs["future_path"].sum() * 0.0
-    if y_richer_path is not None and "future_richer_path" in outputs:
+    if float(richer_weight) != 0.0 and y_richer_path is not None and "future_richer_path" in outputs:
         predicted_richer = outputs["future_richer_path"]
         if int(predicted_richer.shape[-1]) != int(y_richer_path.shape[-1]):
             raise ValueError(f"richer path dim mismatch: predicted={predicted_richer.shape[-1]} target={y_richer_path.shape[-1]}")
@@ -1115,6 +1723,8 @@ def _compute_loss(
             y_path,
             summary_loss_profile=summary_loss_profile,
             price_anchor=price_anchor,
+            path_value_gradient_profile=path_value_gradient_profile,
+            target_tradable_path=y_tradable_path,
         )
         value_target = target_summary[:, -1]
         path_value_score = pred_summary[:, -1]
@@ -1130,7 +1740,17 @@ def _compute_loss(
             value_loss = path_value_loss
     if "score" in outputs:
         value_loss = _finite_smooth_l1(score, value_target)
-    rank_loss = _rank_loss_by_date(score, value_target, date_idx, max_per_side=int(rank_max_per_side))
+    rank_loss = (
+        _rank_loss_for_profile(
+            score,
+            value_target,
+            date_idx,
+            profile=rank_training_profile,
+            max_per_side=int(rank_max_per_side),
+        )
+        if float(rank_weight) != 0.0
+        else score.sum() * 0.0
+    )
     total = (
         float(path_weight) * path_loss
         + float(summary_weight) * summary_loss
@@ -1142,18 +1762,22 @@ def _compute_loss(
         + float(va_delta_weight) * va_delta_loss
         + float(residual_penalty_weight) * residual_penalty
     )
-    return total, {
-        "loss": float(total.detach().cpu().item()),
-        "path_loss": float(path_loss.detach().cpu().item()),
-        "summary_loss": float(summary_loss.detach().cpu().item()),
-        "richer_loss": float(richer_loss.detach().cpu().item()),
-        "price_delta_loss": float(price_delta_loss.detach().cpu().item()),
-        "va_level_loss": float(va_level_loss.detach().cpu().item()),
-        "va_delta_loss": float(va_delta_loss.detach().cpu().item()),
-        "value_loss": float(value_loss.detach().cpu().item()),
-        "rank_loss": float(rank_loss.detach().cpu().item()),
-        "residual_penalty": float(residual_penalty.detach().cpu().item()),
-    }
+    parts = _loss_parts_payload(
+        total=total,
+        path_loss=path_loss,
+        summary_loss=summary_loss,
+        richer_loss=richer_loss,
+        price_delta_loss=price_delta_loss,
+        va_level_loss=va_level_loss,
+        va_delta_loss=va_delta_loss,
+        value_loss=value_loss,
+        rank_loss=rank_loss,
+        residual_penalty=residual_penalty,
+        return_tensors=return_tensor_parts,
+    )
+    if bool(return_tensor_parts):
+        parts["_ranking_score"] = score.detach()
+    return total, parts
 
 
 def _batch_to_device(
@@ -1192,6 +1816,154 @@ def _batch_to_device(
 def _iter_index_batches(dataset: SequencePathPackDataset, *, batch_size: int, shuffle: bool, seed: int) -> Iterator[list[int]]:
     sampler = DateGroupedBatchSampler(dataset.sample_index, batch_size=int(batch_size), shuffle=bool(shuffle), seed=int(seed))
     yield from sampler
+
+
+def _pin_tensor_batch(batch: dict[str, Any]) -> dict[str, Any]:
+    for key, value in batch.items():
+        if isinstance(value, torch.Tensor) and value.device.type == "cpu":
+            batch[key] = value.pin_memory()
+    return batch
+
+
+def _iter_prefetched_batches(
+    dataset: SequencePathPackDataset,
+    index_batches: Iterator[list[int]] | BatchSampler,
+    *,
+    get_batch_kwargs: Mapping[str, Any],
+    prefetch_batches: int,
+    pin_memory: bool,
+) -> Iterator[tuple[list[int], dict[str, Any]]]:
+    """Overlap one CPU memmap/normalization gather with the active GPU step."""
+
+    iterator = iter(index_batches)
+
+    def load(indices: list[int]) -> tuple[list[int], dict[str, Any]]:
+        batch = dataset.get_batch(indices, **dict(get_batch_kwargs))
+        if bool(pin_memory):
+            batch = _pin_tensor_batch(batch)
+        return indices, batch
+
+    if int(prefetch_batches) <= 0:
+        for indices in iterator:
+            yield load(indices)
+        return
+    workers = 1
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="seq100-batch-prefetch") as executor:
+        try:
+            first_indices = next(iterator)
+        except StopIteration:
+            return
+        future: Future[tuple[list[int], dict[str, Any]]] = executor.submit(load, first_indices)
+        while True:
+            current = future.result()
+            try:
+                next_indices = next(iterator)
+            except StopIteration:
+                yield current
+                break
+            future = executor.submit(load, next_indices)
+            yield current
+
+
+def _run_global_tail_rank_step(
+    *,
+    model: nn.Module,
+    dataset: SequencePathPackDataset,
+    indices: list[int],
+    device: torch.device,
+    optimizer: torch.optim.Optimizer,
+    scaler: Any,
+    amp_enabled: bool,
+    path_value_gradient_profile: str,
+    rank_loss_weight: float,
+    residual_score_weight: float,
+) -> tuple[torch.Tensor, int]:
+    """Run one rank-only optimizer step for a single-date global-tail slate."""
+
+    batch = dataset.get_batch(
+        indices,
+        include_ohlcva_path=False,
+        include_richer_path=False,
+        include_summary=False,
+        include_metadata=False,
+    )
+    tradable_path = (
+        batch["y_tradable_path"].to(device, non_blocking=device.type == "cuda")
+        if batch.get("y_tradable_path") is not None
+        else None
+    )
+    x, y_path, _y_ohlcva, _y_richer, _y_summary, date_idx, symbol_idx = _batch_to_device(batch, device)
+    optimizer.zero_grad(set_to_none=True)
+    with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
+        outputs = model(x, symbol_idx=symbol_idx)
+        score, target = _derived_path_rank_score_and_target(
+            outputs,
+            y_path,
+            price_anchor=dataset.price_anchor,
+            path_value_gradient_profile=path_value_gradient_profile,
+            target_tradable_path=tradable_path,
+            residual_weight=float(residual_score_weight),
+        )
+        rank_loss = _global_tail_rank_loss_by_date(score, target, date_idx)
+        weighted_loss = float(rank_loss_weight) * rank_loss
+    scaler.scale(weighted_loss).backward()
+    scaler.unscale_(optimizer)
+    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+    scaler.step(optimizer)
+    scaler.update()
+    return rank_loss.detach(), int(x.shape[0])
+
+
+@torch.no_grad()
+def _mine_global_tail_scores(
+    *,
+    model: nn.Module,
+    dataset: SequencePathPackDataset,
+    device: torch.device,
+    batch_size: int,
+    amp_enabled: bool,
+    path_value_gradient_profile: str,
+    residual_score_weight: float,
+) -> np.ndarray:
+    """Score the full train split from one frozen epoch-end model state."""
+
+    scores = np.full(len(dataset), np.nan, dtype=np.float32)
+    was_training = bool(model.training)
+    model.eval()
+    try:
+        sampler = ShuffledBatchSampler(
+            len(dataset),
+            batch_size=int(batch_size),
+            shuffle=False,
+            seed=0,
+        )
+        for indices in sampler:
+            batch = dataset.get_batch(
+                indices,
+                include_ohlcva_path=False,
+                include_richer_path=False,
+                include_summary=False,
+                include_metadata=False,
+            )
+            x = batch["x"].to(device, non_blocking=device.type == "cuda")
+            symbol_idx = batch["symbol_idx"].to(device, non_blocking=device.type == "cuda")
+            with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
+                outputs = model(x, symbol_idx=symbol_idx)
+                if "future_path" not in outputs or int(outputs["future_path"].shape[-1]) != 4:
+                    raise ValueError("global-tail mining requires price-only OHLC path predictions")
+                predicted_summary = _derive_path_summary_torch(
+                    outputs["future_path"],
+                    smooth_value=True,
+                    price_anchor=dataset.price_anchor,
+                    path_value_gradient_profile=path_value_gradient_profile,
+                )
+                score = predicted_summary[:, -1]
+                if "residual_score" in outputs:
+                    score = score + float(residual_score_weight) * outputs["residual_score"]
+            scores[np.asarray(indices, dtype=np.int64)] = score.detach().float().cpu().numpy()
+    finally:
+        model.train(was_training)
+    return scores
 
 
 def _daily_spearman(frame: pd.DataFrame, *, score_col: str, target_col: str) -> pd.DataFrame:
@@ -1234,6 +2006,16 @@ def _topk_daily_rows(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forw
         "missed_opportunity",
         "realized_entry_day",
         "realized_exit_day",
+        "predicted_exit_day",
+        "realized_plan_entry_filled",
+        "realized_plan_exit_day",
+        "realized_plan_exit_tradable",
+        "realized_plan_covered",
+        "realized_plan_return",
+        "realized_plan_drawdown",
+        "opportunity_value",
+        "realized_plan_value",
+        "oracle_regret",
     ]
     for trade_date, raw_group in frame.groupby("trade_date", sort=True):
         group = raw_group.dropna(subset=["score", value_column]).copy()
@@ -1284,6 +2066,14 @@ def _topk_daily_rows(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forw
                 row["selected_in_trade_max_drawdown_mean"] = float(pd.to_numeric(top[f"in_trade_max_drawdown_{suffix}"], errors="coerce").mean())
             if "realized_fill" in top.columns:
                 row["selected_realized_fill_rate"] = float(pd.to_numeric(top["realized_fill"], errors="coerce").mean())
+            if "realized_plan_entry_filled" in top.columns:
+                row["selected_entry_fill_rate"] = float(
+                    pd.to_numeric(top["realized_plan_entry_filled"], errors="coerce").mean()
+                )
+            if "realized_plan_covered" in top.columns:
+                row["selected_realized_plan_coverage"] = float(
+                    pd.to_numeric(top["realized_plan_covered"], errors="coerce").mean()
+                )
             if "missed_opportunity" in top.columns:
                 row["selected_missed_opportunity_rate"] = float(pd.to_numeric(top["missed_opportunity"], errors="coerce").mean())
             rows.append(row)
@@ -1308,6 +2098,14 @@ def _topk_candidate_rows(
         f"best_exit_close_return_{suffix}",
         f"pre_exit_max_drawdown_{suffix}",
         f"in_trade_max_drawdown_{suffix}",
+        "predicted_exit_day",
+        "realized_plan_entry_filled",
+        "realized_plan_covered",
+        "realized_plan_exit_day",
+        "realized_plan_return",
+        "opportunity_value",
+        "realized_plan_value",
+        "oracle_regret",
     ]
     rows: list[dict[str, Any]] = []
     for trade_date, raw_group in frame.groupby("trade_date", sort=True):
@@ -1386,7 +2184,6 @@ def _split_metrics_for_score(
         "prediction_csv": str(prediction_csv),
     }
     return ic, metrics
-    return pd.DataFrame(rows)
 
 
 def _find_latest_baseline_summary(forward_days: int) -> dict[str, Any]:
@@ -1514,7 +2311,11 @@ def _legacy_entry_relative_path_numpy(path: np.ndarray, *, price_anchor: str) ->
     return converted.astype(np.float32, copy=False)
 
 
-def _candidate_path_values_torch(path: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def _candidate_path_values_torch(
+    path: torch.Tensor,
+    *,
+    tradable_path: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
     forward_days = int(path.shape[1])
     close_ret = path[:, :, 3]
     low_ret = path[:, :, 2]
@@ -1528,6 +2329,10 @@ def _candidate_path_values_torch(path: torch.Tensor) -> tuple[torch.Tensor, torc
         - float(PATH_VALUE_V2_WAITING_PENALTY) * waiting
         - float(PATH_VALUE_V2_TRANSACTION_COST)
     )
+    if tradable_path is not None:
+        if tuple(tradable_path.shape) != tuple(candidate.shape):
+            raise ValueError(f"tradable_path must have shape {tuple(candidate.shape)}")
+        candidate = torch.where(tradable_path.to(dtype=torch.bool), candidate, torch.full_like(candidate, float("-inf")))
     return candidate, pre_exit_drawdown
 
 
@@ -1585,7 +2390,12 @@ def _unified_trade_candidates_torch(path: torch.Tensor) -> tuple[torch.Tensor, d
     }
 
 
-def _derive_unified_path_summary_torch(path: torch.Tensor, *, smooth_value: bool) -> torch.Tensor:
+def _derive_unified_path_summary_torch(
+    path: torch.Tensor,
+    *,
+    smooth_value: bool,
+    path_value_gradient_profile: str = PATH_VALUE_GRADIENT_PROFILE_SMOOTH,
+) -> torch.Tensor:
     forward_days = int(path.shape[1])
     high_ret = path[:, :, 1]
     low_ret = path[:, :, 2]
@@ -1610,8 +2420,13 @@ def _derive_unified_path_summary_torch(path: torch.Tensor, *, smooth_value: bool
     flat = candidate.view(candidate.shape[0], -1)
     hard_value, flat_idx = torch.max(flat, dim=1)
     if smooth_value:
-        temperature = max(float(UNIFIED_VALUE_TEMPERATURE), 1.0e-6)
-        best_value = temperature * torch.logsumexp(flat / temperature, dim=1)
+        best_value = _path_value_with_gradient_profile(
+            hard_value,
+            flat,
+            temperature=UNIFIED_VALUE_TEMPERATURE,
+            profile=path_value_gradient_profile,
+            reduction_dim=1,
+        )
     else:
         best_value = hard_value
     best_entry_idx = torch.div(flat_idx, forward_days, rounding_mode="floor")
@@ -1650,9 +2465,22 @@ def _derive_unified_path_summary_torch(path: torch.Tensor, *, smooth_value: bool
     )
 
 
-def _derive_path_summary_torch(path: torch.Tensor, *, smooth_value: bool, price_anchor: str = "next_open") -> torch.Tensor:
+def _derive_path_summary_torch(
+    path: torch.Tensor,
+    *,
+    smooth_value: bool,
+    price_anchor: str = "next_open",
+    path_value_gradient_profile: str = PATH_VALUE_GRADIENT_PROFILE_SMOOTH,
+    tradable_path: torch.Tensor | None = None,
+) -> torch.Tensor:
     if int(path.shape[2]) >= 6:
-        return _derive_unified_path_summary_torch(path, smooth_value=smooth_value)
+        if tradable_path is not None:
+            raise ValueError("tradable_path-aware unified OHLCVA value is not implemented")
+        return _derive_unified_path_summary_torch(
+            path,
+            smooth_value=smooth_value,
+            path_value_gradient_profile=path_value_gradient_profile,
+        )
     path = _legacy_entry_relative_path_torch(path, price_anchor=price_anchor)
     forward_days = int(path.shape[1])
     high_ret = path[:, :, 1]
@@ -1668,15 +2496,33 @@ def _derive_path_summary_torch(path: torch.Tensor, *, smooth_value: bool, price_
     drawdown_after_peak = (1.0 + min_after_peak) / torch.clamp(1.0 + max_ret, min=1.0e-6) - 1.0
     time_above = (close_ret > 0.0).to(path.dtype).mean(dim=1)
     time_below = (close_ret < 0.0).to(path.dtype).mean(dim=1)
-    candidate, pre_exit_drawdown = _candidate_path_values_torch(path)
+    candidate, pre_exit_drawdown = _candidate_path_values_torch(path, tradable_path=tradable_path)
     best_value_hard, best_idx = torch.max(candidate, dim=1)
     if smooth_value:
-        temperature = max(float(PATH_VALUE_V2_TEMPERATURE), 1.0e-6)
-        best_value = temperature * torch.logsumexp(candidate / temperature, dim=1)
+        best_value = _path_value_with_gradient_profile(
+            best_value_hard,
+            candidate,
+            temperature=PATH_VALUE_V2_TEMPERATURE,
+            profile=path_value_gradient_profile,
+            reduction_dim=1,
+        )
     else:
         best_value = best_value_hard
     best_exit_close = close_ret.gather(1, best_idx.view(-1, 1)).squeeze(1)
     best_pre_exit_drawdown = pre_exit_drawdown.gather(1, best_idx.view(-1, 1)).squeeze(1)
+    has_tradable_exit = torch.isfinite(best_value_hard)
+    best_exit_day = torch.where(
+        has_tradable_exit,
+        best_idx.to(path.dtype) + 1.0,
+        torch.full_like(best_value_hard, float("nan")),
+    )
+    best_exit_close = torch.where(has_tradable_exit, best_exit_close, torch.full_like(best_exit_close, float("nan")))
+    best_pre_exit_drawdown = torch.where(
+        has_tradable_exit,
+        best_pre_exit_drawdown,
+        torch.full_like(best_pre_exit_drawdown, float("nan")),
+    )
+    best_value = torch.where(has_tradable_exit, best_value, torch.full_like(best_value, float("nan")))
     return torch.stack(
         [
             max_ret,
@@ -1687,7 +2533,7 @@ def _derive_path_summary_torch(path: torch.Tensor, *, smooth_value: bool, price_
             drawdown_after_peak,
             time_above,
             time_below,
-            best_idx.to(path.dtype) + 1.0,
+            best_exit_day,
             best_exit_close,
             best_pre_exit_drawdown,
             best_value,
@@ -1696,11 +2542,18 @@ def _derive_path_summary_torch(path: torch.Tensor, *, smooth_value: bool, price_
     )
 
 
-def _derive_path_summary_numpy(path: np.ndarray, *, price_anchor: str = "next_open") -> np.ndarray:
+def _derive_path_summary_numpy(
+    path: np.ndarray,
+    *,
+    price_anchor: str = "next_open",
+    tradable_path: np.ndarray | None = None,
+) -> np.ndarray:
     values = np.asarray(path, dtype=np.float32)
     if values.ndim != 3 or values.shape[2] not in {4, 6}:
         raise ValueError("path must have shape [batch, forward_days, 4 or 6]")
     if values.shape[2] >= 6:
+        if tradable_path is not None:
+            raise ValueError("tradable_path-aware unified OHLCVA value is not implemented")
         return _derive_unified_path_summary_numpy(values)
     values = _legacy_entry_relative_path_numpy(values, price_anchor=price_anchor)
     forward_days = int(values.shape[1])
@@ -1728,6 +2581,11 @@ def _derive_path_summary_numpy(path: np.ndarray, *, price_anchor: str = "next_op
         - float(PATH_VALUE_V2_WAITING_PENALTY) * waiting.reshape(1, -1)
         - float(PATH_VALUE_V2_TRANSACTION_COST)
     )
+    tradable = None if tradable_path is None else np.asarray(tradable_path, dtype=bool)
+    if tradable is not None:
+        if tradable.shape != candidate.shape:
+            raise ValueError(f"tradable_path must have shape {candidate.shape}, got {tradable.shape}")
+        candidate = np.where(tradable, candidate, -np.inf)
     best_idx = np.nanargmax(np.where(np.isfinite(candidate), candidate, -np.inf), axis=1)
     row = np.arange(values.shape[0])
     best_exit_close = close_ret[row, best_idx]
@@ -1749,7 +2607,117 @@ def _derive_path_summary_numpy(path: np.ndarray, *, price_anchor: str = "next_op
             best_value,
         ]
     )
+    invalid_value = ~np.isfinite(best_value)
+    summary[invalid_value, 8:] = np.nan
     return summary.astype(np.float32, copy=False)
+
+
+def _realize_path_value_v2_plan_numpy(
+    pred_summary: np.ndarray,
+    true_path: np.ndarray,
+    *,
+    forward_days: int,
+    price_anchor: str = "next_open",
+    tradable_path: np.ndarray | None = None,
+    entry_filled: np.ndarray | None = None,
+) -> dict[str, np.ndarray]:
+    """Evaluate the exit day selected from a predicted four-field OHLC path.
+
+    The opportunity target remains the hard maximum over the realized path.  The
+    realized-plan value instead evaluates the same deterministic candidate function
+    at the predicted exit day, making exit-timing error and oracle regret observable.
+    If a tradability mask is supplied, a suspended planned exit is deferred to the
+    first later tradable day; no later tradable day leaves the plan unrealized.
+    """
+
+    values = _legacy_entry_relative_path_numpy(np.asarray(true_path, dtype=np.float32), price_anchor=price_anchor)
+    summary = np.asarray(pred_summary, dtype=np.float64)
+    horizon = int(forward_days)
+    if values.ndim != 3 or int(values.shape[1]) != horizon or int(values.shape[2]) < 4:
+        raise ValueError("true_path must have shape [batch, forward_days, >=4]")
+    columns = legacy_derived_path_summary_columns(horizon)
+    exit_day_idx = columns.index(f"best_exit_day_{horizon}d")
+    value_idx = columns.index(path_value_v2_column(horizon))
+    n = int(values.shape[0])
+    predicted_exit_day = np.full(n, np.nan, dtype=np.float32)
+    realized_exit_day = np.full(n, np.nan, dtype=np.float32)
+    realized_return = np.full(n, np.nan, dtype=np.float32)
+    realized_drawdown = np.full(n, np.nan, dtype=np.float32)
+    realized_value = np.full(n, np.nan, dtype=np.float32)
+    exit_tradable = np.zeros(n, dtype=np.float32)
+    realized_covered = np.zeros(n, dtype=np.float32)
+    filled = (
+        np.asarray(entry_filled, dtype=bool).reshape(-1)
+        if entry_filled is not None
+        else np.ones(n, dtype=bool)
+    )
+    if int(filled.size) != n:
+        raise ValueError("entry_filled must match the path batch size")
+
+    true_summary = _derive_path_summary_numpy(
+        values,
+        price_anchor="next_open",
+        tradable_path=tradable_path,
+    )
+    opportunity_value = true_summary[:, value_idx].astype(np.float32, copy=False)
+    close_ret = values[:, :, 3].astype(np.float64, copy=False)
+    low_ret = values[:, :, 2].astype(np.float64, copy=False)
+    pre_exit_drawdown = np.maximum(-np.minimum.accumulate(low_ret, axis=1), 0.0)
+    day = np.arange(horizon, dtype=np.float64)
+    waiting = np.sqrt((day + 1.0) / max(float(horizon), 1.0))
+    candidate = (
+        close_ret
+        - float(PATH_VALUE_V2_DRAWDOWN_PENALTY) * pre_exit_drawdown
+        - float(PATH_VALUE_V2_WAITING_PENALTY) * waiting.reshape(1, -1)
+        - float(PATH_VALUE_V2_TRANSACTION_COST)
+    )
+    tradable = (
+        np.asarray(tradable_path, dtype=bool)
+        if tradable_path is not None
+        else np.ones((n, horizon), dtype=bool)
+    )
+    if tradable.shape != (n, horizon):
+        raise ValueError(f"tradable_path must have shape {(n, horizon)}, got {tradable.shape}")
+
+    for row in range(n):
+        raw_day = summary[row, exit_day_idx]
+        if not np.isfinite(raw_day):
+            continue
+        planned = int(round(float(raw_day))) - 1
+        if planned < 0 or planned >= horizon:
+            continue
+        predicted_exit_day[row] = np.float32(planned + 1)
+        if not bool(filled[row]):
+            realized_return[row] = 0.0
+            realized_drawdown[row] = 0.0
+            realized_value[row] = 0.0
+            realized_covered[row] = 1.0
+            continue
+        later = np.flatnonzero(tradable[row, planned:])
+        if not len(later):
+            continue
+        actual = planned + int(later[0])
+        if not np.isfinite(candidate[row, actual]):
+            continue
+        exit_tradable[row] = 1.0
+        realized_covered[row] = 1.0
+        realized_exit_day[row] = np.float32(actual + 1)
+        realized_return[row] = np.float32(close_ret[row, actual])
+        realized_drawdown[row] = np.float32(pre_exit_drawdown[row, actual])
+        realized_value[row] = np.float32(candidate[row, actual])
+
+    return {
+        "predicted_exit_day": predicted_exit_day,
+        "realized_plan_entry_filled": filled.astype(np.float32, copy=False),
+        "realized_plan_exit_day": realized_exit_day,
+        "realized_plan_exit_tradable": exit_tradable,
+        "realized_plan_covered": realized_covered,
+        "realized_plan_return": realized_return,
+        "realized_plan_drawdown": realized_drawdown,
+        "opportunity_value": opportunity_value,
+        "realized_plan_value": realized_value,
+        "oracle_regret": opportunity_value - realized_value,
+    }
 
 
 def _entry_exit_ret_numpy(path: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -1986,6 +2954,14 @@ def _predict_split(
     va_abs_count = 0
     va_delta_abs_sum = 0.0
     va_delta_abs_count = 0
+    price_path_abs_sum = np.zeros(4, dtype=np.float64)
+    price_path_abs_count = np.zeros(4, dtype=np.int64)
+    observed_path_count = 0
+    observed_path_total = 0
+    tradable_path_count = 0
+    tradable_path_total = 0
+    entry_filled_count = 0
+    entry_candidate_count = 0
     first_write = True
     model.eval()
 
@@ -2039,6 +3015,25 @@ def _predict_split(
             include_richer_path=False,
             include_summary=not bool(uses_derived_path_value or uses_direct_value),
         )
+        true_tradable_np = (
+            batch["y_tradable_path"].numpy().astype(bool, copy=False)
+            if batch.get("y_tradable_path") is not None
+            else None
+        )
+        true_observed_np = (
+            batch["y_observed_price_path"].numpy().astype(bool, copy=False)
+            if batch.get("y_observed_price_path") is not None
+            else None
+        )
+        entry_filled_np = batch["entry_filled"].numpy().astype(bool, copy=False)
+        entry_filled_count += int(entry_filled_np.sum())
+        entry_candidate_count += int(entry_filled_np.size)
+        if true_observed_np is not None:
+            observed_path_count += int(true_observed_np.sum())
+            observed_path_total += int(true_observed_np.size)
+        if true_tradable_np is not None:
+            tradable_path_count += int(true_tradable_np.sum())
+            tradable_path_total += int(true_tradable_np.size)
         x, y_path, y_ohlcva_path, _y_richer_path, y_summary, _date_idx, symbol_idx = _batch_to_device(batch, device)
         target_path = y_ohlcva_path if output_path_dim >= 6 and y_ohlcva_path is not None else y_path
         trade_dates = list(batch["trade_date"])
@@ -2051,7 +3046,11 @@ def _predict_split(
         if uses_direct_value:
             score_np = out["score"].detach().float().cpu().numpy()
             eval_true_path_np = true_path_np[:, :eval_forward_days, :4]
-            true_summary_np = _derive_path_summary_numpy(eval_true_path_np, price_anchor=dataset.price_anchor)
+            true_summary_np = _derive_path_summary_numpy(
+                eval_true_path_np,
+                price_anchor=dataset.price_anchor,
+                tradable_path=(true_tradable_np[:, :eval_forward_days] if true_tradable_np is not None else None),
+            )
             pred_summary_np = np.full_like(true_summary_np, np.nan)
             pred_summary_np[:, summary_columns.index(value_column)] = score_np
             pred_path_np = np.empty((int(score_np.shape[0]), 0, 4), dtype=np.float32)
@@ -2065,7 +3064,11 @@ def _predict_split(
         else:
             pred_path_np = out["future_path"].detach().float().cpu().numpy()
             pred_summary_np = _derive_path_summary_numpy(pred_path_np, price_anchor=dataset.price_anchor)
-            true_summary_np = _derive_path_summary_numpy(true_path_np, price_anchor=dataset.price_anchor)
+            true_summary_np = _derive_path_summary_numpy(
+                true_path_np,
+                price_anchor=dataset.price_anchor,
+                tradable_path=true_tradable_np,
+            )
             path_value_score_np = pred_summary_np[:, summary_columns.index(value_column)]
             if "residual_score" in out:
                 residual_np = out["residual_score"].detach().float().cpu().numpy()
@@ -2088,6 +3091,16 @@ def _predict_split(
             if bool(finite_va_delta.any()):
                 va_delta_abs_sum += float(np.abs(pred_va_delta[finite_va_delta] - true_va_delta[finite_va_delta]).sum())
                 va_delta_abs_count += int(finite_va_delta.sum())
+        if not uses_direct_value and int(pred_path_np.shape[1]) > 0:
+            for field_idx in range(4):
+                true_field = true_path_np[:, :, field_idx]
+                pred_field = pred_path_np[:, :, field_idx]
+                finite_field = np.isfinite(true_field)
+                if bool(finite_field.any()):
+                    price_path_abs_sum[field_idx] += float(
+                        np.abs(pred_field[finite_field] - true_field[finite_field]).sum()
+                    )
+                    price_path_abs_count[field_idx] += int(finite_field.sum())
         rows: dict[str, Any] = {
             "trade_date": trade_dates,
             "symbol": symbols,
@@ -2102,6 +3115,18 @@ def _predict_split(
         realized_cols: list[str] = []
         if output_path_dim >= 6:
             realized = _realize_predicted_plan_numpy(pred_summary_np, true_path_np, forward_days=dataset.forward_days)
+            for col, values in realized.items():
+                rows[col] = values
+                realized_cols.append(col)
+        elif uses_derived_path_value and not uses_direct_value:
+            realized = _realize_path_value_v2_plan_numpy(
+                pred_summary_np,
+                true_path_np,
+                forward_days=dataset.forward_days,
+                price_anchor=dataset.price_anchor,
+                tradable_path=true_tradable_np,
+                entry_filled=entry_filled_np,
+            )
             for col, values in realized.items():
                 rows[col] = values
                 realized_cols.append(col)
@@ -2145,7 +3170,7 @@ def _predict_split(
         if pred_aux_np is not None:
             del pred_aux_np, true_ohlcva_np, pred_va, true_va, finite_va, pred_va_delta, true_va_delta, finite_va_delta
         del x, y_path, y_ohlcva_path, _y_richer_path, y_summary, target_path, symbol_idx, out, pred_path_np, pred_summary_np, score_np, true_path_np, true_summary_np, chunk, metric_frame
-        del trade_dates, symbols
+        del trade_dates, symbols, true_tradable_np, true_observed_np, entry_filled_np
         if predict_batch_count % 100 == 0:
             gc.collect()
             _trim_working_set()
@@ -2168,6 +3193,20 @@ def _predict_split(
         "prediction_mean": float(prediction_sums.get("score", 0.0) / max(prediction_counts.get("score", 0), 1)),
         "va_level_mae": float(va_abs_sum / va_abs_count) if va_abs_count > 0 else np.nan,
         "va_delta_mae": float(va_delta_abs_sum / va_delta_abs_count) if va_delta_abs_count > 0 else np.nan,
+        "path_mae": float(price_path_abs_sum.sum() / price_path_abs_count.sum())
+        if int(price_path_abs_count.sum()) > 0
+        else np.nan,
+        **{
+            f"path_{field}_mae": (
+                float(price_path_abs_sum[field_idx] / price_path_abs_count[field_idx])
+                if int(price_path_abs_count[field_idx]) > 0
+                else np.nan
+            )
+            for field_idx, field in enumerate(PATH_OHLC_FIELDS)
+        },
+        "entry_fill_rate": float(entry_filled_count / entry_candidate_count) if entry_candidate_count else np.nan,
+        "observed_price_path_rate": float(observed_path_count / observed_path_total) if observed_path_total else np.nan,
+        "tradable_path_rate": float(tradable_path_count / tradable_path_total) if tradable_path_total else np.nan,
         "prediction_csv": prediction_csv,
     }
     diagnostics: dict[str, dict[str, Any]] = {}
@@ -2279,6 +3318,14 @@ def _write_report(
     else:
         lines.append("- No symbol id or symbol embedding is used.")
     lines.append("- Path types are explanation labels; the model trains on numeric paths and path value.")
+    lines.append(
+        f"- Path-value gradient profile: `{summary.get('path_value_gradient_profile', PATH_VALUE_GRADIENT_PROFILE_SMOOTH)}`."
+    )
+    ranking_contract = dict(summary.get("ranking_contract", {}) or {})
+    lines.append(
+        f"- Rank training profile: `{ranking_contract.get('profile', RANK_TRAINING_PROFILE_LOCAL_CHUNK)}`; "
+        f"separate path/rank batches={bool(ranking_contract.get('path_and_rank_batches_separate', False))}."
+    )
     if str(summary.get("evaluation_mode", "")) == EVALUATION_MODE_FIXED_OOS:
         lines.append("- OOS was not read during training and did not select the checkpoint.")
     else:
@@ -2326,6 +3373,11 @@ class TrainConfig:
     early_stopping_patience: int
     early_stopping_min_delta: float
     evaluation_mode: str = EVALUATION_MODE_STANDARD
+    path_value_gradient_profile: str = PATH_VALUE_GRADIENT_PROFILE_SMOOTH
+    rank_training_profile: str = RANK_TRAINING_PROFILE_LOCAL_CHUNK
+    rank_batch_size: int = 512
+    rank_interval: int = 4
+    prefetch_batches: int = 1
 
 
 def _resolved_training_config(config: TrainConfig, *, evaluation_mode: str) -> dict[str, Any]:
@@ -2372,21 +3424,41 @@ def _validate_fixed_oos_split_contract(
             f"label_overlap_count={overlap_count}"
         )
     contract = dict(manifest.get("purged_walkforward", {}) or {})
-    if contract:
-        declared_start = int(contract.get("oos_start_date_idx", -1))
-        if declared_start != oos_start_idx:
-            raise ValueError("fixed_oos manifest oos_start_date_idx does not match the sample index")
-        if int(contract.get("label_overlap_count", -1)) != 0:
-            raise ValueError("fixed_oos manifest does not declare label_overlap_count=0")
-        normalization = dict(manifest.get("normalization", {}) or {})
-        if normalization.get("fit_scope") != "feature_dates_before_oos_start":
-            raise ValueError("fixed_oos normalization must use feature_dates_before_oos_start")
-        if str(normalization.get("fit_date_end_exclusive", "")) != str(contract.get("oos_start", "")):
-            raise ValueError("fixed_oos normalization cutoff does not match OOS start")
+    if not contract:
+        raise ValueError("fixed_oos requires a purged_walkforward contract")
+    declared_start = int(contract.get("oos_start_date_idx", -1))
+    if declared_start != oos_start_idx:
+        raise ValueError("fixed_oos manifest oos_start_date_idx does not match the sample index")
+    if int(contract.get("label_overlap_count", -1)) != 0:
+        raise ValueError("fixed_oos manifest does not declare label_overlap_count=0")
+    normalization = dict(manifest.get("normalization", {}) or {})
+    if normalization.get("fit_scope") != "feature_dates_before_oos_start":
+        raise ValueError("fixed_oos normalization must use feature_dates_before_oos_start")
+    if str(normalization.get("fit_date_end_exclusive", "")) != str(contract.get("oos_start", "")):
+        raise ValueError("fixed_oos normalization cutoff does not match OOS start")
+
+    # The walk-forward builder binds the sample index, normalization, panels,
+    # masks, and split/purge metadata into this immutable digest.  Recompute it
+    # here as well so a direct training CLI call cannot bypass orchestration QA.
+    from daily_research.path_policy.seq100_walkforward import (
+        _validated_fold_training_contract,
+        _validated_source_view_provenance,
+    )
+
+    _validated_fold_training_contract(manifest)
+    if str(contract.get("method", "")) == "expanding_train_fixed_oos":
+        _validated_source_view_provenance(manifest)
 
 
 def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     evaluation_mode = _validate_evaluation_mode(config)
+    path_value_gradient_profile = _normalize_path_value_gradient_profile(config.path_value_gradient_profile)
+    rank_training_profile = _normalize_rank_training_profile(config.rank_training_profile)
+    if rank_training_profile == RANK_TRAINING_PROFILE_GLOBAL_TAIL_512:
+        if int(config.rank_batch_size) != 512:
+            raise ValueError("global_tail_512 requires rank_batch_size=512")
+        if int(config.rank_interval) <= 0:
+            raise ValueError("global_tail_512 requires rank_interval > 0")
     _set_seed(config.seed)
     manifest = json.loads(Path(config.pack_manifest).read_text(encoding="utf-8"))
     fold_training_contract = manifest.get("fold_training_contract")
@@ -2412,7 +3484,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         oos_ds = SequencePathPackDataset(
             manifest,
             split="oos",
-            max_samples=int(config.max_samples_per_split),
+            max_samples=0,
             input_channel_profile=str(config.input_channel_profile),
         )
         if len(oos_ds) == 0:
@@ -2423,13 +3495,13 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         val_ds = SequencePathPackDataset(
             manifest,
             split="validation",
-            max_samples=int(config.max_samples_per_split),
+            max_samples=0,
             input_channel_profile=str(config.input_channel_profile),
         )
         test_ds = SequencePathPackDataset(
             manifest,
             split="test",
-            max_samples=int(config.max_samples_per_split),
+            max_samples=0,
             input_channel_profile=str(config.input_channel_profile),
         )
         if len(val_ds) == 0 or len(test_ds) == 0:
@@ -2454,6 +3526,10 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     uses_ohlcva_path = bool(getattr(model, "uses_ohlcva_path", False))
     uses_ohlcva_aux_path = bool(getattr(model, "uses_ohlcva_aux_path", False))
     uses_richer_path = bool(getattr(model, "uses_richer_path", False))
+    if rank_training_profile == RANK_TRAINING_PROFILE_GLOBAL_TAIL_512 and (
+        not uses_derived_path_value or uses_direct_value or uses_ohlcva_path
+    ):
+        raise ValueError("global_tail_512 currently requires a price-only derived path-value model")
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(config.learning_rate), weight_decay=float(config.weight_decay))
     scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
     best_val_ic = -1e9
@@ -2461,37 +3537,81 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     epochs_without_improvement = 0
     best_path = output_dir / ("final_model.pt" if evaluation_mode == EVALUATION_MODE_FIXED_OOS else "best_model.pt")
     history: list[dict[str, Any]] = []
+    global_tail_targets: np.ndarray | None = None
+    prior_epoch_scores: np.ndarray | None = None
+    if rank_training_profile == RANK_TRAINING_PROFILE_GLOBAL_TAIL_512:
+        _write_json(progress_path, {"status": "loading_global_tail_targets", "updated_at": _now()})
+        global_tail_targets = train_ds.path_value_targets()
+        if not bool(np.isfinite(global_tail_targets).any()):
+            raise ValueError("global_tail_512 requires finite path-value targets")
     for epoch in range(1, int(config.epochs) + 1):
+        epoch_started_at = time.perf_counter()
         _write_json(progress_path, {"status": "training", "epoch": epoch, "updated_at": _now()})
         model.train()
-        loss_totals: dict[str, float] = {
-            "loss": 0.0,
-            "path_loss": 0.0,
-            "summary_loss": 0.0,
-            "richer_loss": 0.0,
-            "price_delta_loss": 0.0,
-            "va_level_loss": 0.0,
-            "va_delta_loss": 0.0,
-            "value_loss": 0.0,
-            "rank_loss": 0.0,
-            "residual_penalty": 0.0,
-        }
+        loss_total_keys = (
+            "loss",
+            "path_loss",
+            "summary_loss",
+            "richer_loss",
+            "price_delta_loss",
+            "va_level_loss",
+            "va_delta_loss",
+            "value_loss",
+            "rank_loss",
+            "residual_penalty",
+        )
+        # Keep scalar diagnostics on-device for the whole epoch.  The former ten
+        # ``.cpu().item()`` calls per batch serialized the CUDA stream.
+        loss_totals_tensor = torch.zeros(len(loss_total_keys), device=device, dtype=torch.float64)
+        rank_loss_total_tensor = torch.zeros((), device=device, dtype=torch.float64)
         batch_count = 0
         sample_count = 0
-        train_batches = DateGroupedBatchSampler(
-            train_ds.sample_index,
-            batch_size=int(config.batch_size),
-            shuffle=True,
-            seed=int(config.seed) + int(epoch) * 1009,
-        )
+        rank_batch_count = 0
+        rank_sample_count = 0
+        if rank_training_profile == RANK_TRAINING_PROFILE_GLOBAL_TAIL_512:
+            train_batches = ShuffledBatchSampler(
+                len(train_ds),
+                batch_size=int(config.batch_size),
+                shuffle=True,
+                seed=int(config.seed) + int(epoch) * 1009,
+            )
+            assert global_tail_targets is not None
+            rank_batches = GlobalTailBatchSampler(
+                train_ds.sample_index,
+                global_tail_targets,
+                batch_size=int(config.rank_batch_size),
+                shuffle=True,
+                seed=int(config.seed) + int(epoch) * 2027,
+                prior_epoch_scores=prior_epoch_scores,
+            )
+            rank_batch_iterator: Iterator[list[int]] | None = iter(rank_batches)
+        else:
+            train_batches = DateGroupedBatchSampler(
+                train_ds.sample_index,
+                batch_size=int(config.batch_size),
+                shuffle=True,
+                seed=int(config.seed) + int(epoch) * 1009,
+            )
+            rank_batch_iterator = None
         total_batches = len(train_batches)
-        for batch_indices in train_batches:
+        loaded_train_batches = _iter_prefetched_batches(
+            train_ds,
+            train_batches,
+            get_batch_kwargs={
+                "include_ohlcva_path": bool(uses_ohlcva_path or uses_ohlcva_aux_path),
+                "include_richer_path": uses_richer_path,
+                "include_summary": not bool(uses_derived_path_value or uses_direct_value),
+                "include_metadata": False,
+            },
+            prefetch_batches=int(config.prefetch_batches) if device.type == "cuda" else 0,
+            pin_memory=bool(device.type == "cuda" and int(config.prefetch_batches) > 0),
+        )
+        for batch_indices, batch in loaded_train_batches:
             batch_start = time.perf_counter()
-            batch = train_ds.get_batch(
-                batch_indices,
-                include_ohlcva_path=bool(uses_ohlcva_path or uses_ohlcva_aux_path),
-                include_richer_path=uses_richer_path,
-                include_summary=not bool(uses_derived_path_value or uses_direct_value),
+            y_tradable_path = (
+                batch["y_tradable_path"].to(device, non_blocking=device.type == "cuda")
+                if batch.get("y_tradable_path") is not None
+                else None
             )
             x, y_path, y_ohlcva_path, y_richer_path, y_summary, date_idx, symbol_idx = _batch_to_device(batch, device)
             target_path = y_ohlcva_path if uses_ohlcva_path and y_ohlcva_path is not None else y_path
@@ -2511,7 +3631,11 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     path_loss_profile=str(config.path_loss_profile),
                     summary_weight=float(config.summary_loss_weight),
                     value_weight=float(config.value_loss_weight),
-                    rank_weight=float(config.rank_loss_weight),
+                    rank_weight=(
+                        0.0
+                        if rank_training_profile == RANK_TRAINING_PROFILE_GLOBAL_TAIL_512
+                        else float(config.rank_loss_weight)
+                    ),
                     richer_weight=float(config.richer_loss_weight),
                     rank_max_per_side=int(config.rank_max_per_side),
                     price_delta_weight=float(config.price_delta_loss_weight),
@@ -2522,16 +3646,42 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     price_anchor=train_ds.price_anchor,
                     summary_loss_profile=str(config.summary_loss_profile),
                     direct_value_horizon=int(config.direct_value_horizon),
+                    path_value_gradient_profile=path_value_gradient_profile,
+                    rank_training_profile=RANK_TRAINING_PROFILE_LOCAL_CHUNK,
+                    y_tradable_path=y_tradable_path,
+                    return_tensor_parts=True,
                 )
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scaler.step(optimizer)
             scaler.update()
-            for key, value in parts.items():
-                loss_totals[key] += float(value)
+            loss_totals_tensor.add_(
+                torch.stack([parts[key].to(dtype=torch.float64) for key in loss_total_keys])
+            )
             batch_count += 1
             sample_count += int(x.shape[0])
+            if rank_batch_iterator is not None and batch_count % int(config.rank_interval) == 0:
+                try:
+                    rank_indices = next(rank_batch_iterator)
+                except StopIteration:
+                    rank_batch_iterator = None
+                else:
+                    rank_loss, rank_samples = _run_global_tail_rank_step(
+                        model=model,
+                        dataset=train_ds,
+                        indices=rank_indices,
+                        device=device,
+                        optimizer=optimizer,
+                        scaler=scaler,
+                        amp_enabled=amp_enabled,
+                        path_value_gradient_profile=path_value_gradient_profile,
+                        rank_loss_weight=float(config.rank_loss_weight),
+                        residual_score_weight=float(config.residual_score_weight),
+                    )
+                    rank_loss_total_tensor.add_(rank_loss.to(dtype=torch.float64))
+                    rank_batch_count += 1
+                    rank_sample_count += int(rank_samples)
             batch_seconds = float(time.perf_counter() - batch_start)
             if batch_count == 1 or batch_count % 25 == 0:
                 _write_json(
@@ -2542,17 +3692,76 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                         "batch": int(batch_count),
                         "total_batches": int(total_batches),
                         "sample_count": int(sample_count),
+                        "rank_batch_count": int(rank_batch_count),
                         "last_batch_seconds": batch_seconds,
                         "updated_at": _now(),
                     },
                 )
-            del x, y_path, y_ohlcva_path, y_richer_path, target_path, y_summary, date_idx, symbol_idx, out, loss, parts
-            if batch_count % 200 == 0:
-                gc.collect()
-                _trim_working_set()
+            del x, y_path, y_ohlcva_path, y_richer_path, target_path, y_summary, y_tradable_path, date_idx, symbol_idx, out, loss, parts
+        # ``rank_interval`` controls interleaving, not date sampling.  Drain any
+        # remaining slates so every included date contributes exactly one rank
+        # step even for small debug subsets or larger path batch sizes.
+        if rank_batch_iterator is not None:
+            for rank_indices in rank_batch_iterator:
+                rank_loss, rank_samples = _run_global_tail_rank_step(
+                    model=model,
+                    dataset=train_ds,
+                    indices=rank_indices,
+                    device=device,
+                    optimizer=optimizer,
+                    scaler=scaler,
+                    amp_enabled=amp_enabled,
+                    path_value_gradient_profile=path_value_gradient_profile,
+                    rank_loss_weight=float(config.rank_loss_weight),
+                    residual_score_weight=float(config.residual_score_weight),
+                )
+                rank_loss_total_tensor.add_(rank_loss.to(dtype=torch.float64))
+                rank_batch_count += 1
+                rank_sample_count += int(rank_samples)
+        mining_seconds = 0.0
+        mining_sample_count = 0
+        if (
+            rank_training_profile == RANK_TRAINING_PROFILE_GLOBAL_TAIL_512
+            and epoch < int(config.epochs)
+        ):
+            mining_started_at = time.perf_counter()
+            prior_epoch_scores = _mine_global_tail_scores(
+                model=model,
+                dataset=train_ds,
+                device=device,
+                batch_size=int(config.batch_size),
+                amp_enabled=amp_enabled,
+                path_value_gradient_profile=path_value_gradient_profile,
+                residual_score_weight=float(config.residual_score_weight),
+            )
+            mining_seconds = float(time.perf_counter() - mining_started_at)
+            mining_sample_count = int(np.isfinite(prior_epoch_scores).sum())
+        loss_totals = {
+            key: float(value)
+            for key, value in zip(loss_total_keys, loss_totals_tensor.detach().cpu().tolist(), strict=True)
+        }
+        training_seconds = float(time.perf_counter() - epoch_started_at)
         train_row = {
             "epoch": int(epoch),
             "train_sample_count": int(sample_count),
+            "rank_batch_count": int(rank_batch_count),
+            "rank_sample_count": int(rank_sample_count),
+            "global_tail_rank_loss": (
+                float(rank_loss_total_tensor.detach().cpu().item()) / max(rank_batch_count, 1)
+                if rank_batch_count
+                else 0.0
+            ),
+            "optimizer_step_count": int(batch_count + rank_batch_count),
+            "training_seconds": training_seconds,
+            "path_samples_per_second": float(sample_count / max(training_seconds, 1.0e-9)),
+            "optimizer_samples_per_second": float(
+                (sample_count + rank_sample_count) / max(training_seconds, 1.0e-9)
+            ),
+            "hard_negative_mining_seconds": float(mining_seconds),
+            "hard_negative_mining_sample_count": int(mining_sample_count),
+            "hard_negative_mining_samples_per_second": float(
+                mining_sample_count / max(mining_seconds, 1.0e-9)
+            ) if mining_sample_count else 0.0,
             **{key: float(value / max(batch_count, 1)) for key, value in loss_totals.items()},
         }
         if evaluation_mode == EVALUATION_MODE_STANDARD:
@@ -2747,6 +3956,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         "forward_days": int(train_ds.forward_days),
         "price_anchor": str(train_ds.price_anchor),
         "value_column": str(active_value_column),
+        "path_value_gradient_profile": path_value_gradient_profile,
+        "rank_training_profile": rank_training_profile,
         "path_summary_columns": list(active_summary_columns),
         "direct_value_horizon": int(config.direct_value_horizon) if uses_direct_value else 0,
         "device": str(device),
@@ -2765,8 +3976,15 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         "best_epoch": int(best_epoch),
         "batch_size": int(config.batch_size),
         "max_samples_per_split": int(config.max_samples_per_split),
+        "sample_selection": {
+            "train": dict(train_ds.sample_selection),
+            **({"oos": dict(oos_ds.sample_selection)} if oos_ds is not None else {}),
+            **({"validation": dict(val_ds.sample_selection)} if val_ds is not None else {}),
+            **({"test": dict(test_ds.sample_selection)} if test_ds is not None else {}),
+        },
         "input_channel_profile": str(train_ds.input_channel_profile),
         "input_channels": list(train_ds.channel_order),
+        "input_mask_features": list(train_ds.input_mask_features),
         "model": {
             "type": f"SequencePathModel_{str(config.model_type)}",
             "input_dim": int(train_ds.input_dim),
@@ -2793,11 +4011,32 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "richer": float(config.richer_loss_weight) if bool(getattr(model, "uses_richer_path", False)) else 0.0,
             "price_delta": float(config.price_delta_loss_weight),
             "value": float(config.value_loss_weight),
+            "path_value_gradient_profile": path_value_gradient_profile,
             "rank": float(config.rank_loss_weight),
+            "rank_training_profile": rank_training_profile,
+            "rank_batch_size": int(config.rank_batch_size),
+            "rank_interval": int(config.rank_interval),
             "rank_max_per_side": int(config.rank_max_per_side),
             "summary_profile": str(config.summary_loss_profile),
             "va_level": float(config.va_level_loss_weight),
             "va_delta": float(config.va_delta_loss_weight),
+        },
+        "ranking_contract": {
+            "profile": rank_training_profile,
+            "path_and_rank_batches_separate": bool(
+                rank_training_profile == RANK_TRAINING_PROFILE_GLOBAL_TAIL_512
+            ),
+            "date_weighting": "equal" if rank_training_profile == RANK_TRAINING_PROFILE_GLOBAL_TAIL_512 else "batch_local",
+            "tail_group_counts": (
+                dict(GLOBAL_TAIL_GROUP_COUNTS)
+                if rank_training_profile == RANK_TRAINING_PROFILE_GLOBAL_TAIL_512
+                else {}
+            ),
+            "hard_negative_source": (
+                "prior_epoch_frozen_eval_full_train_scores"
+                if rank_training_profile == RANK_TRAINING_PROFILE_GLOBAL_TAIL_512
+                else "none"
+            ),
         },
         "early_stopping": {
             "metric": "validation_rank_ic_mean" if evaluation_mode == EVALUATION_MODE_STANDARD else "",
@@ -2907,12 +4146,35 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Input channel profile: all channels or daily_only without minute-derived intraday/limit channels.",
     )
     train.add_argument("--rank-max-per-side", type=int, default=64)
+    train.add_argument(
+        "--path-value-gradient-profile",
+        default=PATH_VALUE_GRADIENT_PROFILE_SMOOTH,
+        choices=PATH_VALUE_GRADIENT_PROFILES,
+        help="Value surrogate: legacy smooth forward value or hard-max forward with straight-through smooth gradients.",
+    )
+    train.add_argument(
+        "--rank-training-profile",
+        default=RANK_TRAINING_PROFILE_LOCAL_CHUNK,
+        choices=RANK_TRAINING_PROFILES,
+        help="Legacy random date chunks or separated full-day global-tail ranking slates.",
+    )
+    train.add_argument("--rank-batch-size", type=int, default=512)
+    train.add_argument("--rank-interval", type=int, default=4, help="Run one separated rank step after this many path steps.")
+    train.add_argument("--prefetch-batches", type=int, default=1, choices=(0, 1))
     train.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     train.add_argument("--amp", dest="amp", action="store_true", default=True)
     train.add_argument("--no-amp", dest="amp", action="store_false")
     train.add_argument("--seed", type=int, default=DEFAULT_SEED)
     train.add_argument("--top-k", default="5,10,20,50,100")
-    train.add_argument("--max-samples-per-split", type=int, default=0)
+    train.add_argument(
+        "--max-samples-per-split",
+        type=int,
+        default=0,
+        help=(
+            "Training-only screening cap. Keeps complete dates spread across the full train history; "
+            "validation/test/OOS evaluation remains full-universe."
+        ),
+    )
     train.add_argument("--prediction-mode", default="compact", choices=("full", "compact", "none"))
     train.add_argument(
         "--evaluation-mode",
@@ -2988,6 +4250,11 @@ def main(argv: list[str] | None = None) -> int:
         early_stopping_patience=int(args.early_stopping_patience),
         early_stopping_min_delta=float(args.early_stopping_min_delta),
         evaluation_mode=str(args.evaluation_mode),
+        path_value_gradient_profile=str(args.path_value_gradient_profile),
+        rank_training_profile=str(args.rank_training_profile),
+        rank_batch_size=int(args.rank_batch_size),
+        rank_interval=int(args.rank_interval),
+        prefetch_batches=int(args.prefetch_batches),
     )
     result = train_sequence_path_model(cfg)
     print(json.dumps(result, ensure_ascii=False, indent=2, default=_json_default) if bool(args.json) else result)

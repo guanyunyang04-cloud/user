@@ -1,5 +1,5 @@
 # Quant Data Platform 状态程序
-快照日期：`2026-07-07`
+快照日期：`2026-07-11`
 
 ## Module Interface
 `exports`: QDP v2 active data base status、active table list、dataset manifest summaries、quality/audit entrypoints。
@@ -9,7 +9,7 @@
 ### object `qdp_project`
 `type`: shared_manifest_first_data_base_instance
 `state`: v2 已成为当前 active 数据基底；旧 lake/ingest/memmap/canonical 命令已从公开 CLI 归档。
-`public_cli`: `qdp status/list/describe/check/rebuild/gc/update`
+`public_cli`: `qdp status/list/describe/check/rebuild/verify/gc/update`
 `python`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`
 
 ### object `qdp_v2_active_data_base`
@@ -22,6 +22,7 @@
 `symbol_start_overrides`: `600036.SH -> 2016-07-25`
 `active_symbol_count`: `3037`
 `active_table_count`: `17`
+`scope_boundary`: 17 个 core symbol tables 仍是 2026-06-26 当前存续 3037 股的静态范围；历史不按当前存续筛选时必须使用独立 `pit_mainboard_non_st_v1` 研究范围，不能把 core `universe_snapshot` 误称为无幸存者偏差股票池。
 `evidence`: `qdp status --json`、`qdp check --quick --json`、`qdp check meta --runtime fast --duckdb-memory-limit 12GB --threads 4 --writeback --json`
 `meta_quality_state`: PIT/metadata/factor/index proof passed with zero findings on 2026-07-01.
 
@@ -31,7 +32,29 @@
 `caches`: `market_intraday_5m`、`market_daily_panel`
 `derived_features`: `intraday_daily_features`、`limit_intraday_features`
 `derived_events`: `limit_status`
+`candidate_research_scope_tables`: `pit_signal_universe`、`pit_signal_universe_daily`（已构建、未写入当前 `active.json`）
 `boundary`: 1m and daily raw are source facts; 5m/panel/features are reproducible caches or derived tables.
+
+### object `pit_mainboard_non_st_v1`
+`type/state`: date_local_research_universe / candidate_ready_not_active
+`datasets`: eligibility `pit_signal_universe__7c8d1f2986a646a5cb8a93a6`；daily audit `pit_signal_universe_daily__7c8d1f2986a646a5cb8a93a6`
+`scope`: 逐交易日已上市沪深主板普通 A 股；研究池剔除当日 ST/已退市，信号池再剔除当日停牌与无 bar。
+`coverage/evidence`: `2016-01-04..2026-06-01`、2526 日、3393 个历史证券、7,451,610 个唯一证券日；375 个历史曾合格证券不在源末日合格成员中。
+`pit_boundary`: source 历史名称存在回填行为，名称和未来 `out_date` 均不输出为模型输入；逐日 eligibility 只使用当日上市/板块/ST/停牌/bar 事实。
+`channel_boundary`: core OHLCV/分钟/limit/辅助表仍为当前 3037 股范围；该对象修复股票池定义，但尚未单独恢复额外历史证券的全通道数据。
+`activation_boundary`: 当前 `active.json` 保持原 17 表；在额外历史证券的价格/特征通道与下游 pack 通过质量门前，不激活这两个候选 pointer。
+`evidence`: `quant_data_platform/brain/references/pit_signal_universe_20260711.md`
+
+### object `pit_market_substrate_v2`
+`type/state`: immutable_research_dataset_view / formal_2012_2025_research_window_ready_not_active
+`atomic_overrides`: `market_daily_raw`、`security_status`、`limit_status`、`adjust_factor`、`pit_signal_universe`；seq100 `--dataset-view` 拒绝任何不完整覆盖，避免 PIT universe 与 active survivor-scope 价格/因子混用。
+`inputs`: 可重复 traditional PIT snapshot；也可直接读取 recovery cache 的 `daily_stock_lists + security_master` 并拼接独立 QDP market-daily backfill manifest；factor events 可重复输入，active dense factor 只作为只读来源。
+`gates`: 五表主键唯一；`eligible_for_research && !is_suspended` 对 market 做独立 anti-join，且校验预期 market 起止日期；security-status 与 PIT row-count 对齐；每个 market key 必须有正 `back_adjust_factor` 和 provenance；任何缺口阻止 view 生成。
+`limit_semantics`: `prior_valid_adjusted_close / current_back_adjust_factor` 转回当日 raw reference，再按当日 ST 5%/普通 10% 和 0.01 tick half-up；避免除权日沿用上一 raw close。
+`probe`: non-active view `seq100_pit_2016_2026_probe__58498361379f14f30e77cf90`；3393 symbols、7,440,688 market/factor/limit keys、7,451,610 PIT/status keys、7,031,085 signal-eligible rows、Gate-0 missing=0、factor missing/nonpositive=0、PK duplicate=0；`active.json` byte-for-byte unchanged。
+`formal_view`: `seq100_pit_2012_2025_formal__9d6feb2a5ba7f15a7635b42f`；底层覆盖 `2012-01-04..2026-06-01` 以支持 2025 年末 forward-60 标签；3409 symbols、3496 dates、9,530,656 market/factor/limit keys、9,542,426 PIT/status keys、8,805,538 signal-eligible rows；所有增强 Gate-0/factor/PK checks 为 0 findings。
+`activation_boundary`: formal view 与五个 dataset 均保持 non-active；`active.json` SHA-256 在构建前后均为 `E56F72A6CBA8BCF86055817F6A0EC5E7391271FB3C27B4D628C3ABC62944051E`。
+`evidence`: `quant_data_platform/brain/references/pit_market_substrate_20260711.md`
 
 ### object `meta_domain_quality_proof`
 `type`: active_quality_evidence

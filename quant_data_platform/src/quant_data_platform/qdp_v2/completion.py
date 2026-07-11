@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -27,10 +28,404 @@ from quant_data_platform.qdp_v2.status import active_dataset_map
 
 
 ACTIVE_SCOPE_NAME = "mainboard_hs_a_ex_current_st_name_delisted_v2"
+PIT_SIGNAL_UNIVERSE_DOMAIN = "pit_signal_universe"
+PIT_SIGNAL_UNIVERSE_DAILY_DOMAIN = "pit_signal_universe_daily"
+PIT_SIGNAL_UNIVERSE_CONTRACT = "qdp_v2_pit_signal_universe_v1"
+PIT_SIGNAL_UNIVERSE_DAILY_CONTRACT = "qdp_v2_pit_signal_universe_daily_v1"
+DEFAULT_TRADITIONAL_PIT_ROOT = "traditional_quant_research/data/raw/baostock_daily_mainboard_v2_pit"
 MAINBOARD_SCOPE_SQL = (
     "regexp_matches(symbol, '^(600|601|603|605)[0-9]{3}[.]SH$') "
     "or regexp_matches(symbol, '^(000|001|002|003)[0-9]{3}[.]SZ$')"
 )
+
+
+def rebuild_pit_signal_universe(
+    *,
+    workspace_root: str | Path | None = None,
+    runtime: str = "fast",
+    duckdb_memory_limit: str = "",
+    threads: int = 0,
+    snapshot_root: str | Path = "",
+    start_date: str = "",
+    end_date: str = "",
+    activate: bool = False,
+) -> dict[str, Any]:
+    """Build an auditable date-local signal universe without current-survivor filtering.
+
+    The source snapshot contains retrospective ``out_date`` and a name column whose
+    historical values are not guaranteed to be point-in-time.  Neither column is
+    emitted or used as a model feature.  A security remains eligible on dates when
+    it was listed and non-ST even if it delisted later.
+    """
+
+    root, active, _datasets, memory_limit, thread_count = _runtime_context(
+        workspace_root=workspace_root,
+        runtime=runtime,
+        duckdb_memory_limit=duckdb_memory_limit,
+        threads=threads,
+    )
+    resolved_snapshot, source_manifest = _resolve_traditional_pit_snapshot(
+        qdp_root=root,
+        snapshot_root=snapshot_root,
+    )
+    source_path = resolved_snapshot / "daily_universe.parquet"
+    if not source_path.exists():
+        raise FileNotFoundError(f"traditional PIT daily_universe not found: {source_path}")
+    source_sha256 = _sha256_file(source_path)
+    snapshot_id = str(source_manifest.get("snapshot_id", resolved_snapshot.name) or resolved_snapshot.name)
+    date_filter = _pit_date_filter(start_date=start_date, end_date=end_date)
+    fingerprint = {
+        "source_snapshot_id": snapshot_id,
+        "source_daily_universe_sha256": source_sha256,
+        "start_date": str(start_date or ""),
+        "end_date": str(end_date or ""),
+        "contract": PIT_SIGNAL_UNIVERSE_CONTRACT,
+        "daily_contract": PIT_SIGNAL_UNIVERSE_DAILY_CONTRACT,
+    }
+    universe_dataset_id = f"{PIT_SIGNAL_UNIVERSE_DOMAIN}__{stable_hash(fingerprint)}"
+    daily_dataset_id = f"{PIT_SIGNAL_UNIVERSE_DAILY_DOMAIN}__{stable_hash(fingerprint)}"
+    universe_dir, universe_staging, universe_target = _prepare_target(
+        root,
+        PIT_SIGNAL_UNIVERSE_DOMAIN,
+        universe_dataset_id,
+        "part_000000_pit_signal_universe.parquet",
+    )
+    daily_dir, daily_staging, daily_target = _prepare_target(
+        root,
+        PIT_SIGNAL_UNIVERSE_DAILY_DOMAIN,
+        daily_dataset_id,
+        "part_000000_pit_signal_universe_daily.parquet",
+    )
+
+    import duckdb  # type: ignore
+
+    con = duckdb.connect(":memory:")
+    try:
+        _configure(con, memory_limit=memory_limit, threads=thread_count)
+        source_columns = {str(row[0]).lower() for row in con.execute(
+            f"describe select * from read_parquet({_sql_literal(str(source_path))})"
+        ).fetchall()}
+        required_columns = {
+            "date",
+            "code",
+            "out_date",
+            "is_listed_on_date",
+            "is_mainboard",
+            "is_common_a_share",
+            "is_st_on_date",
+            "is_suspended_on_date",
+            "has_bar",
+            "is_tradeable",
+        }
+        missing_columns = sorted(required_columns.difference(source_columns))
+        if missing_columns:
+            raise ValueError(f"traditional_pit_source_schema_missing:{','.join(missing_columns)}")
+        name_quality_expr = (
+            "coalesce(cast(name_on_date as varchar), '') like '%退%'"
+            if "name_on_date" in source_columns
+            else "false"
+        )
+        source_sql = _sql_literal(str(source_path))
+        mainboard_sql = (
+            "regexp_matches(symbol, '^(600|601|603|605)[0-9]{3}[.]SH$') "
+            "or regexp_matches(symbol, '^(000|001|002|003)[0-9]{3}[.]SZ$')"
+        )
+        con.execute(
+            f"""
+            copy (
+              with source_rows as (
+                select
+                  upper(trim(cast(code as varchar))) as symbol,
+                  try_cast(date as date) as trade_date_value,
+                  try_cast(nullif(trim(cast(out_date as varchar)), '') as date) as delist_date_value,
+                  coalesce(try_cast(is_listed_on_date as boolean), false) as source_is_listed,
+                  coalesce(try_cast(is_mainboard as boolean), false) as source_is_mainboard,
+                  coalesce(try_cast(is_common_a_share as boolean), false) as is_common_a_share,
+                  coalesce(try_cast(is_st_on_date as boolean), false) as is_st,
+                  coalesce(try_cast(is_suspended_on_date as boolean), false) as is_suspended,
+                  coalesce(try_cast(has_bar as boolean), false) as has_bar
+                from read_parquet({source_sql})
+                where try_cast(date as date) is not null
+                  and trim(coalesce(cast(code as varchar), '')) <> ''
+                  {date_filter}
+              ),
+              facts as (
+                select
+                  symbol,
+                  strftime(trade_date_value, '%Y-%m-%d') as trade_date,
+                  source_is_listed as is_listed,
+                  (source_is_mainboard and ({mainboard_sql})) as is_mainboard,
+                  is_common_a_share,
+                  is_st,
+                  is_suspended,
+                  has_bar,
+                  (delist_date_value is not null and trade_date_value >= delist_date_value) as is_delisted
+                from source_rows
+              ),
+              eligibility as (
+                select
+                  *,
+                  (is_listed and is_mainboard and is_common_a_share and not is_st and not is_delisted)
+                    as eligible_for_research
+                from facts
+              )
+              select
+                symbol,
+                trade_date,
+                is_listed,
+                is_mainboard,
+                is_common_a_share,
+                is_st,
+                is_suspended,
+                has_bar,
+                is_delisted,
+                eligible_for_research,
+                (eligible_for_research and not is_suspended and has_bar) as eligible_for_signal,
+                case
+                  when not is_listed then 'not_listed'
+                  when not is_mainboard then 'non_mainboard'
+                  when not is_common_a_share then 'non_common_a_share'
+                  when is_delisted then 'delisted'
+                  when is_st then 'st'
+                  when is_suspended then 'suspended'
+                  when not has_bar then 'missing_bar'
+                  else ''
+                end as primary_exclusion_reason,
+                'traditional_baostock_pit_daily_universe' as source
+              from eligibility
+              order by trade_date, symbol
+            ) to {_sql_literal(str(universe_target))} (format parquet, compression zstd)
+            """
+        )
+        universe_stats = _one(
+            con,
+            f"""
+            select
+              count(*) as row_count,
+              count(distinct trade_date || '|' || symbol) as distinct_keys,
+              min(trade_date) as start_date,
+              max(trade_date) as end_date,
+              count(distinct trade_date) as date_count,
+              count(distinct symbol) as symbol_count,
+              sum(case when eligible_for_research then 1 else 0 end) as research_eligible_rows,
+              count(distinct case when eligible_for_research then symbol end) as research_eligible_symbols,
+              sum(case when eligible_for_signal then 1 else 0 end) as signal_eligible_rows,
+              count(distinct case when eligible_for_signal then symbol end) as signal_eligible_symbols,
+              sum(case when is_st then 1 else 0 end) as st_rows,
+              sum(case when is_suspended then 1 else 0 end) as suspended_rows,
+              sum(case when not has_bar then 1 else 0 end) as missing_bar_rows,
+              sum(case when is_delisted then 1 else 0 end) as delisted_rows,
+              sum(case when not is_mainboard then 1 else 0 end) as non_mainboard_rows
+            from read_parquet({_sql_literal(str(universe_target))})
+            """,
+        )
+        survivor_stats = _one(
+            con,
+            f"""
+            with u as (
+              select * from read_parquet({_sql_literal(str(universe_target))})
+            ), latest as (
+              select distinct symbol from u
+              where trade_date = (select max(trade_date) from u) and eligible_for_research
+            ), historical as (
+              select distinct symbol from u where eligible_for_research
+            )
+            select
+              (select count(*) from latest) as latest_research_eligible_symbols,
+              (select count(*) from historical) as historical_research_eligible_symbols,
+              (select count(*) from historical h left join latest l using(symbol) where l.symbol is null)
+                as historical_eligible_not_latest_symbols
+            """,
+        )
+        source_quality = _one(
+            con,
+            f"""
+            with src as (
+              select
+                upper(trim(cast(code as varchar))) as symbol,
+                try_cast(date as date) as trade_date_value,
+                try_cast(nullif(trim(cast(out_date as varchar)), '') as date) as delist_date_value,
+                coalesce(try_cast(is_listed_on_date as boolean), false) as listed,
+                coalesce(try_cast(is_mainboard as boolean), false) as mainboard,
+                coalesce(try_cast(is_common_a_share as boolean), false) as common_a,
+                coalesce(try_cast(is_st_on_date as boolean), false) as st,
+                coalesce(try_cast(is_suspended_on_date as boolean), false) as suspended,
+                coalesce(try_cast(has_bar as boolean), false) as bar,
+                coalesce(try_cast(is_tradeable as boolean), false) as source_tradeable,
+                ({name_quality_expr}) as source_name_contains_delist
+              from read_parquet({source_sql})
+              where try_cast(date as date) is not null
+                and trim(coalesce(cast(code as varchar), '')) <> ''
+                {date_filter}
+            )
+            select
+              count(distinct case when delist_date_value is not null then symbol end) as source_symbols_with_out_date,
+              sum(case when source_name_contains_delist then 1 else 0 end) as source_name_contains_delist_rows_ignored,
+              sum(case when source_tradeable != (
+                listed and mainboard and ({mainboard_sql}) and common_a and not st and not suspended and bar
+                and not (delist_date_value is not null and trade_date_value >= delist_date_value)
+              ) then 1 else 0 end) as source_tradeable_mismatch_rows
+            from src
+            """,
+        )
+        universe_stats.update(survivor_stats)
+        universe_stats.update(source_quality)
+        universe_schema = _duckdb_schema(con, universe_target)
+
+        con.execute(
+            f"""
+            copy (
+              select
+                trade_date,
+                count(*) as covered_symbols,
+                sum(case when is_listed and is_mainboard and is_common_a_share then 1 else 0 end)
+                  as listed_mainboard_common_symbols,
+                sum(case when eligible_for_research then 1 else 0 end) as research_eligible_symbols,
+                sum(case when eligible_for_signal then 1 else 0 end) as signal_eligible_symbols,
+                sum(case when is_st then 1 else 0 end) as st_symbols,
+                sum(case when is_suspended then 1 else 0 end) as suspended_symbols,
+                sum(case when not has_bar then 1 else 0 end) as missing_bar_symbols,
+                sum(case when is_delisted then 1 else 0 end) as delisted_rows,
+                md5(coalesce(
+                  string_agg(symbol, ',' order by symbol) filter (where eligible_for_signal),
+                  ''
+                )) as signal_membership_hash,
+                'traditional_baostock_pit_daily_universe' as source
+              from read_parquet({_sql_literal(str(universe_target))})
+              group by trade_date
+              order by trade_date
+            ) to {_sql_literal(str(daily_target))} (format parquet, compression zstd)
+            """
+        )
+        daily_stats = _one(
+            con,
+            f"""
+            select
+              count(*) as row_count,
+              count(distinct trade_date) as distinct_keys,
+              min(trade_date) as start_date,
+              max(trade_date) as end_date,
+              min(signal_eligible_symbols) as min_signal_eligible_symbols,
+              max(signal_eligible_symbols) as max_signal_eligible_symbols,
+              count(distinct signal_membership_hash) as distinct_membership_hashes
+            from read_parquet({_sql_literal(str(daily_target))})
+            """,
+        )
+        daily_schema = _duckdb_schema(con, daily_target)
+    finally:
+        con.close()
+
+    universe_key_blockers = _key_blockers(universe_stats)
+    daily_key_blockers = _key_blockers(daily_stats)
+    blockers = universe_key_blockers + [item for item in daily_key_blockers if item not in universe_key_blockers]
+    if int(universe_stats.get("source_tradeable_mismatch_rows", 0) or 0) != 0:
+        blockers.append("source_tradeable_semantics_mismatch")
+    if int(universe_stats.get("delisted_rows", 0) or 0) != 0:
+        blockers.append("post_delist_rows_present")
+    if int(universe_stats.get("row_count", 0) or 0) == 0:
+        blockers.append("empty_pit_signal_universe")
+
+    universe_final = _commit_single_shard(universe_staging, universe_dir, universe_target)
+    daily_final = _commit_single_shard(daily_staging, daily_dir, daily_target)
+    common_source = {
+        "provider": "traditional_baostock_pit_snapshot",
+        "created_by": "rebuild_pit_signal_universe",
+        "created_at": utc_now(),
+        "source_snapshot_id": snapshot_id,
+        "source_manifest_path": str((resolved_snapshot / "manifest.json").resolve()),
+        "source_daily_universe_path": str(source_path.resolve()),
+        "source_daily_universe_sha256": source_sha256,
+    }
+    universe_manifest = _single_shard_manifest(
+        root=root,
+        domain=PIT_SIGNAL_UNIVERSE_DOMAIN,
+        dataset_id=universe_dataset_id,
+        layer="derived",
+        frequency="1d",
+        contract_version=PIT_SIGNAL_UNIVERSE_CONTRACT,
+        primary_key=["trade_date", "symbol"],
+        stats=universe_stats,
+        schema=universe_schema,
+        final_path=universe_final,
+        content_key="pit_mainboard_non_st_signal_eligibility",
+        source=common_source,
+        quality={
+            "path_refs_exist": True,
+            "primary_key_unique": not blockers,
+            "date_local_eligibility": True,
+            "current_survivor_filter_used": False,
+            "future_metadata_not_emitted": True,
+            "historical_name_not_used": True,
+            "future_out_date_not_exposed": True,
+            "source_tradeable_mismatch_rows": int(universe_stats.get("source_tradeable_mismatch_rows", 0) or 0),
+            "historical_eligible_not_latest_symbols": int(universe_stats.get("historical_eligible_not_latest_symbols", 0) or 0),
+        },
+        notes=[
+            "Eligibility is reconstructed independently on each trade date.",
+            "Main-board code, listed/common-A, non-ST and non-delisted define the research universe.",
+            "Signal eligibility additionally requires a bar and excludes same-day suspension.",
+            "Retrospective out_date and non-PIT historical name values are not emitted as model inputs.",
+        ],
+    )
+    daily_manifest = _single_shard_manifest(
+        root=root,
+        domain=PIT_SIGNAL_UNIVERSE_DAILY_DOMAIN,
+        dataset_id=daily_dataset_id,
+        layer="derived",
+        frequency="1d",
+        contract_version=PIT_SIGNAL_UNIVERSE_DAILY_CONTRACT,
+        primary_key=["trade_date"],
+        stats=daily_stats,
+        schema=daily_schema,
+        final_path=daily_final,
+        content_key="pit_mainboard_non_st_signal_universe_daily_audit",
+        source={**common_source, "eligibility_dataset_id": universe_dataset_id},
+        quality={
+            "path_refs_exist": True,
+            "primary_key_unique": not blockers,
+            "membership_hash_contract": "md5(comma-joined eligible symbols sorted ascending)",
+            "eligibility_dataset_id": universe_dataset_id,
+        },
+        notes=["One row per trade date with counts and a deterministic eligible-membership hash."],
+    )
+    universe_manifest_path = write_dataset_manifest(root, universe_manifest)
+    daily_manifest_path = write_dataset_manifest(root, daily_manifest)
+    active_path = ""
+    if activate and not blockers:
+        active_payload = dict(active)
+        dataset_map = dict(active_payload.get("datasets", {}) or active_dataset_map(active_payload))
+        dataset_map[PIT_SIGNAL_UNIVERSE_DOMAIN] = universe_dataset_id
+        dataset_map[PIT_SIGNAL_UNIVERSE_DAILY_DOMAIN] = daily_dataset_id
+        active_payload["datasets"] = dict(sorted(dataset_map.items()))
+        research_scopes = dict(active_payload.get("research_scopes", {}) or {})
+        research_scopes["pit_mainboard_non_st_v1"] = {
+            "eligibility_dataset_id": universe_dataset_id,
+            "daily_audit_dataset_id": daily_dataset_id,
+            "start_date": str(universe_stats.get("start_date", "") or ""),
+            "end_date": str(universe_stats.get("end_date", "") or ""),
+            "semantics": "date-local listed Shanghai/Shenzhen main-board common A shares; non-ST; signal day non-suspended with bar",
+            "current_survivor_filter_used": False,
+        }
+        active_payload["research_scopes"] = research_scopes
+        active_payload["updated_at"] = utc_now()
+        active_path = str(write_active_manifest(root, active_payload).resolve())
+
+    payload = {
+        "status": "ok" if not blockers else "blocked",
+        "blockers": blockers,
+        "target_dataset_id": universe_dataset_id,
+        "daily_audit_dataset_id": daily_dataset_id,
+        "manifest_path": str(universe_manifest_path.resolve()),
+        "daily_audit_manifest_path": str(daily_manifest_path.resolve()),
+        "active_manifest": active_path,
+        "source_snapshot_id": snapshot_id,
+        "source_snapshot_path": str(resolved_snapshot.resolve()),
+        "stats": universe_stats,
+        "daily_stats": daily_stats,
+        "runtime_environment": runtime_environment(),
+    }
+    atomic_write_json(root / "runs" / f"rebuild_pit_signal_universe_{_stamp()}.json", payload)
+    return payload
 
 
 def rebuild_scope_active(
@@ -1163,6 +1558,55 @@ def _sql_literal(value: str) -> str:
     return "'" + str(value).replace("\\", "/").replace("'", "''") + "'"
 
 
+def _resolve_traditional_pit_snapshot(*, qdp_root: Path, snapshot_root: str | Path = "") -> tuple[Path, dict[str, Any]]:
+    workspace = qdp_root.parents[2]
+    candidate = Path(snapshot_root) if str(snapshot_root or "").strip() else Path(DEFAULT_TRADITIONAL_PIT_ROOT)
+    if not candidate.is_absolute():
+        candidate = workspace / candidate
+    candidate = candidate.resolve()
+    if (candidate / "manifest.json").exists():
+        resolved = candidate
+    else:
+        latest_path = candidate / "latest_manifest.json"
+        if not latest_path.exists():
+            raise FileNotFoundError(f"traditional PIT latest_manifest not found: {latest_path}")
+        latest = json.loads(latest_path.read_text(encoding="utf-8-sig"))
+        snapshot_path = str(latest.get("snapshot_path", "") or "").strip()
+        if not snapshot_path:
+            raise ValueError(f"traditional PIT latest_manifest has no snapshot_path: {latest_path}")
+        resolved = Path(snapshot_path)
+        if not resolved.is_absolute():
+            resolved = workspace / resolved
+        resolved = resolved.resolve()
+    manifest_path = resolved / "manifest.json"
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"traditional PIT manifest not found: {manifest_path}")
+    payload = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"traditional PIT manifest must be a JSON object: {manifest_path}")
+    return resolved, dict(payload)
+
+
+def _sha256_file(path: Path, *, chunk_size: int = 4 * 1024 * 1024) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(int(chunk_size))
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _pit_date_filter(*, start_date: str = "", end_date: str = "") -> str:
+    clauses: list[str] = []
+    if str(start_date or "").strip():
+        clauses.append(f"try_cast(date as date) >= date {_sql_literal(str(start_date).strip())}")
+    if str(end_date or "").strip():
+        clauses.append(f"try_cast(date as date) <= date {_sql_literal(str(end_date).strip())}")
+    return "" if not clauses else "and " + " and ".join(clauses)
+
+
 def _stamp() -> str:
     return utc_now().replace(":", "").replace("-", "")
 
@@ -1178,6 +1622,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         cmd.add_argument("--threads", type=int, default=0)
         cmd.add_argument("--activate", action="store_true")
         cmd.add_argument("--json", action="store_true")
+    pit = sub.add_parser("pit-signal-universe")
+    pit.add_argument("--workspace-root", default="")
+    pit.add_argument("--runtime", default="fast", choices=("safe", "balanced", "fast"))
+    pit.add_argument("--duckdb-memory-limit", default="")
+    pit.add_argument("--threads", type=int, default=0)
+    pit.add_argument("--snapshot-root", default="")
+    pit.add_argument("--start-date", default="")
+    pit.add_argument("--end-date", default="")
+    pit.add_argument("--activate", action="store_true")
+    pit.add_argument("--json", action="store_true")
     scope = sub.add_parser("scope-active")
     scope.add_argument("--workspace-root", default="")
     scope.add_argument("--runtime", default="fast", choices=("safe", "balanced", "fast"))
@@ -1211,6 +1665,17 @@ def main(argv: list[str] | None = None) -> int:
         payload = rebuild_valuation_market_cap(**common)
     elif args.command == "index-constituents-daily":
         payload = rebuild_index_constituents_daily(**common)
+    elif args.command == "pit-signal-universe":
+        payload = rebuild_pit_signal_universe(
+            workspace_root=str(args.workspace_root or "") or None,
+            runtime=str(args.runtime or "fast"),
+            duckdb_memory_limit=str(args.duckdb_memory_limit or ""),
+            threads=int(args.threads or 0),
+            snapshot_root=str(args.snapshot_root or ""),
+            start_date=str(args.start_date or ""),
+            end_date=str(args.end_date or ""),
+            activate=bool(args.activate),
+        )
     elif args.command == "scope-active":
         payload = rebuild_scope_active(
             workspace_root=str(args.workspace_root or "") or None,

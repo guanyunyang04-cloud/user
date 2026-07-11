@@ -18,6 +18,8 @@ No separate catalog is required to know what the active data base contains.
 - Active window: `2011-11-22` to `2026-06-26`.
 - Special continuity boundary: `600036.SH` starts at `2016-07-25`.
 - Active symbol scope count: `3037`.
+- This 3037-symbol core scope is conditioned on the 2026-06-26 survivor set. It must not be used as proof of a survivorship-free historical universe.
+- A separate candidate research scope, `pit_mainboard_non_st_v1`, reconstructs date-local eligibility for 2016-01-04..2026-06-01 without the current-survivor filter. Its datasets are built and audited but are not present in the current `active.json`.
 - Primary use case: short-line price/volume research.
 - Memmap is not part of the data base. It is a downstream research/training artifact and is not recorded in `active.json`.
 
@@ -30,7 +32,7 @@ No separate catalog is required to know what the active data base contains.
 | `market_intraday_5m` | 5-minute OHLCV bars derived from 1m, 48 bars/day | raw-derived | 5m | 402,849,072 | 2011-11-22..2026-06-26 |
 | `market_daily_panel` | Rectangular daily research panel with `has_bar` | cache | 1d | 10,758,956 | 2011-11-22..2026-06-26 |
 | `trading_calendar` | Trading calendar | raw | calendar | 5,331 | 2011-11-22..2026-06-26 |
-| `universe_snapshot` | PIT tradable universe scope | raw | 1d | 8,617,077 | 2011-11-22..2026-06-26 |
+| `universe_snapshot` | Core 3037-symbol daily universe facts; current-survivor conditioned | raw | 1d | 8,617,077 | 2011-11-22..2026-06-26 |
 | `security_status` | PIT listing/ST/suspension/status fields | raw | 1d | 8,617,077 | 2011-11-22..2026-06-26 |
 | `valuation` | Daily valuation fields with market-cap fields | raw | 1d | 8,617,077 | 2011-11-22..2026-06-26 |
 | `adjust_factor` | Standard daily back-adjust factors aligned to daily raw keys | raw | 1d | 8,392,689 | 2011-11-22..2026-06-26 |
@@ -42,6 +44,13 @@ No separate catalog is required to know what the active data base contains.
 | `name_change` | Name-change event facts | raw | event | 2,240 | 2011-11-23..2026-06-26 |
 | `intraday_daily_features` | Daily features summarized from intraday bars | derived | 1d | 8,392,689 | 2011-11-22..2026-06-26 |
 | `limit_intraday_features` | 1m-derived limit-board features | derived | 1d | 8,392,689 | 2011-11-22..2026-06-26 |
+
+Candidate research-scope datasets (not active):
+
+| Domain | Contract | Layer | Frequency | Rows | Coverage |
+|---|---|---:|---:|---:|---:|
+| `pit_signal_universe` | Date-local main-board non-ST research/signal eligibility | derived | 1d | 7,451,610 | 2016-01-04..2026-06-01 |
+| `pit_signal_universe_daily` | Daily eligibility counts and deterministic membership hash | derived | 1d | 2,526 | 2016-01-04..2026-06-01 |
 
 ## Layer Rules
 
@@ -64,6 +73,7 @@ The current active data base has passed:
 - Exact primary-key checks for valuation and daily intraday feature tables.
 - Cross-frequency audit: daily rows and 1m symbol-days are aligned over the active window.
 - PIT/meta/factor/index proof: calendar continuity, universe/security_status open-date coverage, scope filtering, adjustment-factor alignment to `market_daily_raw`, industry alignment to `universe_snapshot`, and index-constituent date/scope checks all pass.
+- Candidate `pit_signal_universe` proof: unique symbol-date keys, date-local eligibility, no current-survivor filter, no future name/`out_date` feature exposure, exact match to source tradeability semantics, and one deterministic membership hash per date. This proves the candidate data, not active-pointer promotion.
 - `qdp check --full` is not a routine close-out command for this local setup because it repeats very large row-level scans; use the targeted proof commands above.
 
 Known boundaries:
@@ -74,6 +84,8 @@ Known boundaries:
 - `adjust_factor.adjust_factor` uses positive `back_adjust_factor` semantics. Source `fore_adjust_factor` is retained as evidence but may be non-positive and should not be used as a positive multiplicative factor.
 - `industry_concept.industry` has no blank or `UNKNOWN` rows. The remaining new-stock gap for `001399.SZ` was filled from AkShare/CNInfo company profile industry.
 - `industry_concept` intentionally stores only industry labels. Historical concept tags are not included because no reliable PIT concept-tag source is active.
+- `pit_signal_universe` fixes the universe-definition boundary only. Core OHLCV/intraday/limit/auxiliary tables still cover the current 3037-symbol scope, so restored multi-channel history for the additional securities remains a separate requirement.
+- The PIT research scope source ends on 2026-06-01, 18 open dates before the core QDP end date; it fully covers the planned 2018–2025 research windows.
 
 ## Common Commands
 
@@ -87,6 +99,7 @@ conda run -n yolos python -m quant_data_platform.cli check --quick --json
 conda run -n yolos python -m quant_data_platform.cli check --quick --write-audit --json
 conda run -n yolos python -m quant_data_platform.cli check meta --runtime fast --writeback --json
 conda run -n yolos python -m quant_data_platform.cli rebuild scope-active --runtime fast --workers 4 --activate --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild pit-signal-universe --runtime fast --threads 4 --json
 conda run -n yolos python -m quant_data_platform.cli rebuild limit-intraday --runtime fast --json
 conda run -n yolos python -m quant_data_platform.cli gc --dry-run --with-size --json
 ```

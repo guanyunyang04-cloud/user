@@ -1,5 +1,5 @@
 # Quant Data Platform 过程目录
-快照日期：`2026-07-01`
+快照日期：`2026-07-11`
 
 ## Runtime Objects
 ### object `qdp_body_map`
@@ -26,6 +26,9 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuil
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild daily-panel --runtime fast --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild valuation --runtime fast --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild scope-active --runtime fast --workers 4 --activate --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild pit-signal-universe --runtime fast --threads 4 --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild pit-market-substrate --snapshot-root <snapshot-or-recovery-root> --market-bars-source <optional-manifest> --factor-events <manifest> --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli verify pit-market-view --view <view.json>
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild industry-concept-filled --runtime fast --activate --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild share-capital-daily --runtime fast --activate --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild valuation-market-cap --runtime fast --activate --json
@@ -46,9 +49,15 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli update
 `side_effects`: optional audit files only.
 
 ### procedure `rebuild_cache_or_feature`
-`input`: target `5m|daily-panel|valuation|scope-active|industry-concept-filled|share-capital-daily|valuation-market-cap|limit-intraday`
+`input`: target `5m|daily-panel|valuation|scope-active|pit-signal-universe|pit-market-substrate|industry-concept-filled|share-capital-daily|valuation-market-cap|limit-intraday`
 `steps`: rebuild from active raw facts or explicit input dataset；validate new manifest；activate only after audit.
 `side_effects`: new dataset manifest and optional active pointer update.
+
+### procedure `verify_pit_research_view`
+`input`: immutable five-domain research view JSON.
+`steps`: run `verify pit-market-view`；require atomic overrides for market/status/limit/factor/PIT；check independent research-eligible non-suspended anti-join, status/PIT row-count alignment, factor positivity/provenance, and active manifest hash.
+`formal_view`: `quant_data_platform/data/qdp_v2/views/seq100_pit_2012_2025_formal__9d6feb2a5ba7f15a7635b42f.json`.
+`side_effects`: none.
 
 ### procedure `garbage_collect_data_base`
 `input`: dry-run or explicit delete

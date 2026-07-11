@@ -92,7 +92,7 @@ def _maybe_run_qdp_v2(raw_argv: list[str]) -> int | None:
     if not positional:
         positional = ["--help"]
     first = positional[0]
-    if first in {"-h", "--help", "status", "list", "describe", "check", "rebuild", "gc", "update"}:
+    if first in {"-h", "--help", "status", "list", "describe", "check", "rebuild", "verify", "gc", "update"}:
         from quant_data_platform.qdp_v2.cli import dispatch
 
         return dispatch(_with_workspace(positional, workspace))
@@ -121,7 +121,7 @@ def _print_archived(command: str, *, as_json: bool) -> None:
         "status": "archived",
         "command": command,
         "message": ARCHIVE_NOTICE,
-        "current_commands": ["status", "list", "describe", "check", "rebuild", "gc", "update"],
+        "current_commands": ["status", "list", "describe", "check", "rebuild", "verify", "gc", "update"],
         "archive_notes": "tools/archive_v1/README.md",
     }
     if as_json:
@@ -130,7 +130,7 @@ def _print_archived(command: str, *, as_json: bool) -> None:
     print(f"status: {payload['status']}")
     print(f"command: {payload['command']}")
     print(f"message: {payload['message']}")
-    print("current_commands: status, list, describe, check, rebuild, gc, update")
+    print("current_commands: status, list, describe, check, rebuild, verify, gc, update")
 
 
 def _extract_workspace_root(raw_argv: list[str]) -> str:
