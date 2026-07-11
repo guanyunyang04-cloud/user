@@ -22,10 +22,16 @@ DEFAULT_PYTHON = Path("C:/Users/ASUS/miniconda3/envs/yolos/python.exe")
 DEFAULT_STORE_ROOT = Path("daily_research/data/research_store")
 DEFAULT_SOURCE_VIEW = DEFAULT_STORE_ROOT / "views/seq100_path60_todayclose_ohlcva.json"
 DEFAULT_OOS_YEARS = (2022, 2023, 2024, 2025)
+DEFAULT_DEVELOPMENT_YEARS = (2022, 2023, 2024, 2025)
 DEFAULT_STUDY_ROOT = Path("daily_research/output/path_policy/studies/seq100_purged_walkforward_2022_2025")
 DEFAULT_BOOTSTRAP_REPLICATIONS = 10_000
 DEFAULT_BLOCK_LENGTH = 60
 DEFAULT_SEED = 7
+APPROVED_DEVELOPMENT_CONTRACT_PATH = Path(
+    "daily_research/brain/references/seq100_candidate_complete_development_walkforward_contract_20260711.json"
+)
+APPROVED_DEVELOPMENT_CONTRACT_ID = "seq100_candidate_complete_development_walkforward_contract_20260711_v1"
+APPROVED_DEVELOPMENT_CONTRACT_SHA256 = "e461c3e4654b0e97b31508874f2eacf89258d5219bf0fb452d8f1690ee193f11"
 
 PROFILE_COMMANDS = {
     "summary_v2_all_channels": "train-summary-v2",
@@ -133,6 +139,24 @@ def _canonicalize_json(payload: Any) -> Any:
     return json.loads(json.dumps(payload, default=_json_default, allow_nan=False))
 
 
+def approved_development_contract_binding() -> dict[str, Any]:
+    path = _workspace_path(APPROVED_DEVELOPMENT_CONTRACT_PATH).resolve()
+    payload = _read_json(path)
+    declared = str(payload.get("contract_sha256", "") or "")
+    semantic_payload = {key: value for key, value in payload.items() if key != "contract_sha256"}
+    computed = _canonical_json_sha256(semantic_payload)
+    if str(payload.get("contract_id", "")) != APPROVED_DEVELOPMENT_CONTRACT_ID:
+        raise ValueError("approved development contract id changed")
+    if declared != APPROVED_DEVELOPMENT_CONTRACT_SHA256 or computed != declared:
+        raise ValueError("approved development contract semantic digest changed")
+    return {
+        "path": str(path),
+        "contract_id": APPROVED_DEVELOPMENT_CONTRACT_ID,
+        "contract_sha256": declared,
+        "contract_file_sha256": _sha256_file(path),
+    }
+
+
 def _source_backing_file_inventory(source_manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
     paths: set[Path] = set()
 
@@ -170,13 +194,17 @@ def _source_view_provenance(
 ) -> dict[str, Any]:
     manifest_path = _workspace_path(source_path).resolve()
     sample_path = _workspace_path(str(source_manifest.get("sample_index_path", "") or "")).resolve()
+    candidate_value = str(source_manifest.get("candidate_index_path", "") or "")
+    candidate_path = _workspace_path(candidate_value).resolve() if candidate_value else None
     if not manifest_path.is_file():
         raise FileNotFoundError(manifest_path)
     if not sample_path.is_file():
         raise FileNotFoundError(sample_path)
+    if candidate_path is not None and not candidate_path.is_file():
+        raise FileNotFoundError(candidate_path)
     artifact_view = dict(source_manifest.get("artifact_view", {}) or {})
     backing_files = _source_backing_file_inventory(source_manifest)
-    return {
+    provenance = {
         "schema_version": 1,
         "manifest_path": str(manifest_path),
         "manifest_sha256": _sha256_file(manifest_path),
@@ -188,6 +216,14 @@ def _source_view_provenance(
         "backing_files": backing_files,
         "backing_files_sha256": _canonical_json_sha256(backing_files),
     }
+    if candidate_path is not None:
+        provenance.update(
+            {
+                "candidate_index_path": str(candidate_path),
+                "candidate_index_sha256": _sha256_file(candidate_path),
+            }
+        )
+    return provenance
 
 
 def _validated_source_view_provenance(manifest: Mapping[str, Any]) -> dict[str, Any]:
@@ -211,11 +247,23 @@ def _validated_source_view_provenance(manifest: Mapping[str, Any]) -> dict[str, 
         raise ValueError("fold source manifest is missing or its SHA-256 changed")
     if not sample_path.is_file() or _sha256_file(sample_path) != str(stored["sample_index_sha256"]):
         raise ValueError("fold source sample index is missing or its SHA-256 changed")
+    candidate_value = str(stored.get("candidate_index_path", "") or "")
+    if candidate_value:
+        candidate_path = _workspace_path(candidate_value).resolve()
+        if not candidate_path.is_file() or _sha256_file(candidate_path) != str(
+            stored.get("candidate_index_sha256", "")
+        ):
+            raise ValueError("fold source candidate index is missing or its SHA-256 changed")
     current = _read_json(source_path)
     if str(current.get("artifact_type", "")) != str(stored["artifact_type"]):
         raise ValueError("fold source artifact type changed")
     if _workspace_path(str(current.get("sample_index_path", "") or "")).resolve() != sample_path:
         raise ValueError("fold source sample-index path changed")
+    current_candidate_value = str(current.get("candidate_index_path", "") or "")
+    if bool(candidate_value) != bool(current_candidate_value):
+        raise ValueError("fold source candidate-index declaration changed")
+    if candidate_value and _workspace_path(current_candidate_value).resolve() != candidate_path:
+        raise ValueError("fold source candidate-index path changed")
     current_backing_files = _source_backing_file_inventory(current)
     if current_backing_files != list(stored.get("backing_files", []) or []):
         raise ValueError("fold source backing-file identity changed")
@@ -824,6 +872,589 @@ def build_purged_walkforward_folds(
         "status": "ok",
         "source_view": str(_workspace_path(source_view).resolve()),
         "oos_years": [int(item["oos_year"]) for item in folds],
+        "folds": folds,
+    }
+
+
+DEVELOPMENT_CANDIDATE_COLUMNS = {
+    "candidate_id",
+    "split",
+    "year",
+    "trade_date",
+    "date_idx",
+    "symbol_idx",
+    "symbol",
+    "entry_trade_date",
+    "entry_filled",
+    "label_valid",
+    "price_label_valid",
+    "va_aux_valid",
+}
+
+
+def development_view_id(development_year: int) -> str:
+    return f"seq100_path60_todayclose_ohlcva_development_{int(development_year)}"
+
+
+def development_view_path(
+    development_year: int,
+    *,
+    store_root: str | Path = DEFAULT_STORE_ROOT,
+) -> Path:
+    return _workspace_path(store_root) / "views" / f"{development_view_id(development_year)}.json"
+
+
+def _max_label_dependency_days(source: Mapping[str, Any]) -> int:
+    forward_days = int(source.get("forward_days", 0) or 0)
+    if forward_days <= 0:
+        raise ValueError("source view forward_days must be positive")
+    execution = dict(source.get("execution_contract", {}) or {})
+    candidates = [
+        int(source.get("max_label_dependency_days", 0) or 0),
+        int(execution.get("max_label_dependency_days", 0) or 0),
+        int(execution.get("label_dependency_days", 0) or 0),
+    ]
+    tail_days = int(execution.get("execution_tail_days", source.get("execution_tail_days", 0)) or 0)
+    if tail_days < 0:
+        raise ValueError("execution_tail_days must be non-negative")
+    candidates.append(forward_days + tail_days)
+    dependency_days = max(candidates)
+    if dependency_days < forward_days:
+        raise ValueError("max_label_dependency_days cannot be shorter than forward_days")
+    return dependency_days
+
+
+def _fit_development_normalization(
+    source: Mapping[str, Any],
+    *,
+    start_idx: int,
+    end_idx_exclusive: int,
+    date_values: Sequence[str],
+) -> dict[str, Any]:
+    normalization = _fit_fold_normalization(
+        source,
+        start_idx=int(start_idx),
+        end_idx_exclusive=int(end_idx_exclusive),
+        date_values=date_values,
+    )
+    normalization["fit_scope"] = "feature_dates_before_development_start"
+    normalization["development_feature_date_count"] = int(normalization.pop("oos_feature_date_count", 0))
+    return normalization
+
+
+def _compute_development_fold_training_contract(
+    manifest: Mapping[str, Any],
+    *,
+    sample_frame: pd.DataFrame | None = None,
+    candidate_frame: pd.DataFrame | None = None,
+) -> dict[str, Any]:
+    sample_path = _workspace_path(str(manifest.get("sample_index_path", "") or ""))
+    candidate_path = _workspace_path(str(manifest.get("candidate_index_path", "") or ""))
+    if not sample_path.is_file():
+        raise FileNotFoundError(f"missing development supervised sample index: {sample_path}")
+    if not candidate_path.is_file():
+        raise FileNotFoundError(f"missing development candidate index: {candidate_path}")
+    samples = pd.read_parquet(sample_path) if sample_frame is None else sample_frame.copy()
+    candidates = pd.read_parquet(candidate_path) if candidate_frame is None else candidate_frame.copy()
+    sample_required = {"split", "trade_date", "date_idx", "symbol_idx", "symbol"}
+    sample_missing = sorted(sample_required.difference(samples.columns))
+    candidate_missing = sorted(DEVELOPMENT_CANDIDATE_COLUMNS.difference(candidates.columns))
+    if sample_missing:
+        raise ValueError(f"development supervised index missing columns: {sample_missing}")
+    if candidate_missing:
+        raise ValueError(f"development candidate index missing columns: {candidate_missing}")
+    if samples.empty or bool(samples.duplicated(["date_idx", "symbol_idx"]).any()):
+        raise ValueError("development supervised index must be non-empty with unique date/symbol rows")
+    if candidates.empty or bool(candidates.duplicated(["date_idx", "symbol_idx"]).any()):
+        raise ValueError("development candidate index must be non-empty with unique date/symbol rows")
+    if bool(candidates["candidate_id"].duplicated().any()):
+        raise ValueError("development candidate_id values must be unique")
+    samples["split"] = samples["split"].astype(str)
+    candidates["split"] = candidates["split"].astype(str)
+    if set(samples["split"].unique()) != {"train", "development"}:
+        raise ValueError("development supervised index requires train/development splits")
+    if set(candidates["split"].unique()) != {"development"}:
+        raise ValueError("development candidate index must contain only development rows")
+    train = samples[samples["split"].eq("train")]
+    development = samples[samples["split"].eq("development")]
+    if train.empty or development.empty:
+        raise ValueError("development fold requires non-empty train and supervised development rows")
+    contract = dict(manifest.get("development_walkforward", {}) or {})
+    if not contract:
+        raise ValueError("fold is missing development_walkforward metadata")
+    if dict(manifest.get("research_contract", {}) or {}) != approved_development_contract_binding():
+        raise ValueError("fold is not bound to the approved development contract")
+    if dict(manifest.get("development_contract", {}) or {}) != approved_development_contract_binding():
+        raise ValueError("fold development contract alias changed")
+    development_year = int(contract.get("development_year", 0) or 0)
+    observed_sample_years = sorted({int(str(value)[:4]) for value in development["trade_date"].astype(str)})
+    observed_candidate_years = sorted({int(value) for value in candidates["year"].astype(int)})
+    if observed_sample_years != [development_year] or observed_candidate_years != [development_year]:
+        raise ValueError("development year does not match supervised/candidate indexes")
+    development_start_idx = int(candidates["date_idx"].astype(int).min())
+    dependency_days = int(contract.get("max_label_dependency_days", 0) or 0)
+    if dependency_days <= 0:
+        raise ValueError("development contract requires positive max_label_dependency_days")
+    overlap_count = int(((train["date_idx"].astype(int) + dependency_days) >= development_start_idx).sum())
+    if overlap_count:
+        raise ValueError(f"training label dependencies overlap development: {overlap_count}")
+    if str(contract.get("purge_rule", "")) != (
+        "max_label_dependency_date_idx < development_start_date_idx"
+    ):
+        raise ValueError("development purge rule is not the registered strict boundary")
+    if int(contract.get("label_dependency_overlap_count", -1)) != 0:
+        raise ValueError("development metadata reports label dependency overlap")
+
+    candidate_keys = candidates.set_index(["date_idx", "symbol_idx"], drop=False)
+    supervised_keys = development.set_index(["date_idx", "symbol_idx"], drop=False)
+    missing_supervised = supervised_keys.index.difference(candidate_keys.index)
+    if len(missing_supervised):
+        raise ValueError("supervised development rows are missing from the full candidate index")
+    aligned = candidate_keys.loc[supervised_keys.index]
+    if not bool(
+        np.equal(
+            supervised_keys["trade_date"].astype(str).to_numpy(),
+            aligned["trade_date"].astype(str).to_numpy(),
+        ).all()
+    ) or not bool(
+        np.equal(
+            supervised_keys["symbol"].astype(str).to_numpy(),
+            aligned["symbol"].astype(str).to_numpy(),
+        ).all()
+    ):
+        raise ValueError("supervised/candidate key metadata differs")
+
+    normalization = dict(manifest.get("normalization", {}) or {})
+    if normalization.get("fit_scope") != "feature_dates_before_development_start":
+        raise ValueError("development normalization fit scope is not pre-development")
+    if str(normalization.get("fit_date_end_exclusive", "")) != str(contract.get("development_start", "")):
+        raise ValueError("development normalization cutoff does not match development start")
+    if int(normalization.get("development_feature_date_count", -1) or 0) != 0:
+        raise ValueError("development normalization includes development feature dates")
+    for name, meta in dict(manifest.get("feature_channels", {}) or {}).items():
+        width = len(list(dict(meta).get("columns", []) or []))
+        stats = dict(normalization.get(name, {}) or {})
+        if width and (
+            len(list(stats.get("mean", []) or [])) != width
+            or len(list(stats.get("std", []) or [])) != width
+        ):
+            raise ValueError(f"development normalization width mismatch for {name}")
+
+    sample_sha256 = _sha256_file(sample_path)
+    candidate_sha256 = _sha256_file(candidate_path)
+    split_payload = {
+        "roles": {"fit": "train", "evaluation": "development"},
+        "supervised_counts": {
+            str(key): int(value) for key, value in samples["split"].value_counts().sort_index().items()
+        },
+        "candidate_counts": {"development": int(len(candidates))},
+        "train_date_idx_min": int(train["date_idx"].astype(int).min()),
+        "train_date_idx_max": int(train["date_idx"].astype(int).max()),
+        "development_date_idx_min": development_start_idx,
+        "development_date_idx_max": int(candidates["date_idx"].astype(int).max()),
+        "development_year": development_year,
+    }
+    contract_payload = {
+        key: contract.get(key)
+        for key in (
+            "schema_version",
+            "method",
+            "split_roles",
+            "train_start_year",
+            "development_year",
+            "development_start",
+            "development_end",
+            "source_padding_end",
+            "source_padding_trade_date_count",
+            "development_start_date_idx",
+            "forward_days",
+            "execution_tail_days",
+            "max_label_dependency_days",
+            "safe_train_signal_end",
+            "max_train_dependency_end",
+            "purge_rule",
+            "purged_row_count",
+            "purged_signal_date_count",
+            "label_dependency_overlap_count",
+            "candidate_universe_rule",
+            "candidate_count",
+            "supervised_development_count",
+            "unsupervised_candidate_count",
+            "normalization_cutoff_exclusive",
+        )
+    }
+    payload = {
+        "schema_version": 1,
+        "artifact_type": "seq100_development_fold_training_contract",
+        "lookback_days": int(manifest.get("lookback_days", 0) or 0),
+        "forward_days": int(manifest.get("forward_days", 0) or 0),
+        "max_label_dependency_days": dependency_days,
+        "supervised_sample_index": {
+            "sha256": sample_sha256,
+            "row_count": int(len(samples)),
+            "columns": [str(column) for column in samples.columns],
+            "dtypes": {str(column): str(dtype) for column, dtype in samples.dtypes.items()},
+        },
+        "candidate_index": {
+            "sha256": candidate_sha256,
+            "row_count": int(len(candidates)),
+            "columns": [str(column) for column in candidates.columns],
+            "dtypes": {str(column): str(dtype) for column, dtype in candidates.dtypes.items()},
+            "full_signal_day_universe": True,
+            "future_label_required_for_membership": False,
+            "entry_fill_required_for_membership": False,
+        },
+        "split": split_payload,
+        "development_walkforward": contract_payload,
+        "normalization": normalization,
+        "feature_channels": dict(manifest.get("feature_channels", {}) or {}),
+        "label_arrays": dict(manifest.get("label_arrays", {}) or {}),
+        "label_semantics": dict(manifest.get("label_semantics", {}) or {}),
+        "execution_contract": dict(manifest.get("execution_contract", {}) or {}),
+        "research_contract": dict(manifest.get("research_contract", {}) or {}),
+        "development_contract": dict(manifest.get("development_contract", {}) or {}),
+        "masks": dict(manifest.get("masks", {}) or {}),
+        "scope": dict(manifest.get("scope", {}) or {}),
+        "source_view_provenance": dict(manifest.get("source_view_provenance", {}) or {}),
+        "date_values_sha256": _canonical_json_sha256(list(manifest.get("date_values", []) or [])),
+        "symbol_values_sha256": _canonical_json_sha256(list(manifest.get("symbol_values", []) or [])),
+    }
+    return {
+        "schema_version": 1,
+        "algorithm": "sha256",
+        "sha256": _canonical_json_sha256(payload),
+        "sample_index_sha256": sample_sha256,
+        "candidate_index_sha256": candidate_sha256,
+        "normalization_sha256": _canonical_json_sha256(normalization),
+        "payload": payload,
+    }
+
+
+def _validated_development_fold_training_contract(
+    manifest: Mapping[str, Any],
+    *,
+    sample_frame: pd.DataFrame | None = None,
+    candidate_frame: pd.DataFrame | None = None,
+) -> dict[str, Any]:
+    stored = dict(manifest.get("development_fold_training_contract", {}) or {})
+    if not stored:
+        raise ValueError("fold manifest is missing development_fold_training_contract")
+    computed = _compute_development_fold_training_contract(
+        manifest,
+        sample_frame=sample_frame,
+        candidate_frame=candidate_frame,
+    )
+    if stored != computed:
+        raise ValueError("development_fold_training_contract does not match current training material")
+    return computed
+
+
+def build_development_walkforward_fold(
+    source_view: str | Path = DEFAULT_SOURCE_VIEW,
+    development_year: int = 2025,
+    train_start_year: int = 2012,
+    store_root: str | Path = DEFAULT_STORE_ROOT,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    source_path = _workspace_path(source_view).resolve()
+    source = _read_json(source_path)
+    if source.get("artifact_type") != "qdp_v2_sequence_path_pack":
+        raise ValueError(f"not a sequence path pack view: {source_path}")
+    forward_days = int(source.get("forward_days", 0) or 0)
+    dependency_days = _max_label_dependency_days(source)
+    execution = dict(source.get("execution_contract", {}) or {})
+    execution_tail_days = int(
+        execution.get("execution_tail_days", source.get("execution_tail_days", dependency_days - forward_days))
+        or 0
+    )
+    date_values = [str(item) for item in list(source.get("date_values", []) or [])]
+    if not date_values or len(date_values) != len(set(date_values)):
+        raise ValueError("source date_values must be non-empty and unique")
+    sample_path = _workspace_path(str(source.get("sample_index_path", "") or ""))
+    candidate_path = _workspace_path(str(source.get("candidate_index_path", "") or ""))
+    if not candidate_path.is_file():
+        raise FileNotFoundError("development folds require source candidate_index_path")
+    source_samples = pd.read_parquet(sample_path)
+    source_candidates = pd.read_parquet(candidate_path)
+    source_provenance = _source_view_provenance(source_path, source)
+    sample_required = {"split", "trade_date", "date_idx", "symbol_idx", "symbol"}
+    sample_missing = sorted(sample_required.difference(source_samples.columns))
+    candidate_missing = sorted(DEVELOPMENT_CANDIDATE_COLUMNS.difference(source_candidates.columns))
+    if sample_missing:
+        raise ValueError(f"source supervised index missing columns: {sample_missing}")
+    if candidate_missing:
+        raise ValueError(f"source candidate index missing columns: {candidate_missing}")
+    if bool(source_samples.duplicated(["date_idx", "symbol_idx"]).any()):
+        raise ValueError("source supervised index contains duplicate date/symbol rows")
+    if bool(source_candidates.duplicated(["date_idx", "symbol_idx"]).any()):
+        raise ValueError("source candidate index contains duplicate date/symbol rows")
+
+    def normalize_index(frame: pd.DataFrame, *, name: str) -> pd.DataFrame:
+        result = frame.copy()
+        result["trade_date"] = result["trade_date"].astype(str)
+        result["date_idx"] = result["date_idx"].astype(np.int64)
+        if bool(((result["date_idx"] < 0) | (result["date_idx"] >= len(date_values))).any()):
+            raise ValueError(f"source {name} date_idx is outside date_values")
+        expected = np.asarray(date_values, dtype=object)[result["date_idx"].to_numpy(dtype=np.int64)]
+        if not bool(np.equal(result["trade_date"].to_numpy(dtype=object), expected).all()):
+            raise ValueError(f"source {name} trade_date does not match date_values[date_idx]")
+        return result
+
+    samples = normalize_index(source_samples, name="supervised index")
+    candidates = normalize_index(source_candidates, name="candidate index")
+    sample_year = samples["trade_date"].str.slice(0, 4).astype(int)
+    candidate_year = candidates["trade_date"].str.slice(0, 4).astype(int)
+    development_candidate_mask = candidate_year.eq(int(development_year))
+    development_sample_mask = sample_year.eq(int(development_year))
+    if not bool(development_candidate_mask.any()) or not bool(development_sample_mask.any()):
+        raise ValueError(f"source has no candidate/supervised rows for development year {development_year}")
+    development_candidates = candidates.loc[development_candidate_mask].copy()
+    development_dates = sorted(development_candidates["trade_date"].unique().tolist())
+    development_start = str(development_dates[0])
+    development_end = str(development_dates[-1])
+    date_to_idx = {date: idx for idx, date in enumerate(date_values)}
+    development_start_idx = int(date_to_idx[development_start])
+    development_end_idx = int(date_to_idx[development_end])
+    if development_end_idx + dependency_days >= len(date_values):
+        raise ValueError(
+            "development candidates require a complete max-label-dependency source padding window"
+        )
+    source_padding_end = str(date_values[development_end_idx + dependency_days])
+
+    sample_date_idx = samples["date_idx"].to_numpy(dtype=np.int64, copy=False)
+    pre_development = sample_date_idx < development_start_idx
+    after_train_start = sample_year.to_numpy(dtype=np.int64, copy=False) >= int(train_start_year)
+    train_mask = pre_development & after_train_start & (
+        sample_date_idx + dependency_days < development_start_idx
+    )
+    purge_mask = pre_development & after_train_start & (
+        sample_date_idx + dependency_days >= development_start_idx
+    )
+    selected_mask = train_mask | development_sample_mask.to_numpy(dtype=bool, copy=False)
+    fold_samples = samples.loc[selected_mask].copy()
+    fold_samples.insert(1, "source_split", fold_samples["split"].astype(str).to_numpy(copy=True))
+    fold_samples["split"] = np.where(train_mask[selected_mask], "train", "development")
+    fold_samples["year"] = fold_samples["trade_date"].str.slice(0, 4).astype(np.int16)
+    fold_samples["label_end_date_idx"] = fold_samples["date_idx"].astype(np.int64) + forward_days
+    fold_samples["dependency_end_date_idx"] = fold_samples["date_idx"].astype(np.int64) + dependency_days
+    fold_samples = fold_samples.sort_values(["date_idx", "symbol_idx"], kind="mergesort").reset_index(drop=True)
+    fold_samples["sample_id"] = np.arange(len(fold_samples), dtype=np.int64)
+    train_rows = fold_samples[fold_samples["split"].eq("train")]
+    development_rows = fold_samples[fold_samples["split"].eq("development")]
+    if train_rows.empty or development_rows.empty:
+        raise ValueError("development fold requires non-empty train and supervised development splits")
+    overlap_count = int(
+        (train_rows["dependency_end_date_idx"].astype(int) >= development_start_idx).sum()
+    )
+    if overlap_count:
+        raise AssertionError("purge invariant failed: training dependencies overlap development")
+
+    development_candidates["source_split"] = development_candidates["split"].astype(str)
+    development_candidates["split"] = "development"
+    development_candidates["year"] = int(development_year)
+    development_candidates = development_candidates.sort_values(
+        ["date_idx", "symbol_idx"], kind="mergesort"
+    ).reset_index(drop=True)
+    development_candidates["candidate_id"] = np.arange(len(development_candidates), dtype=np.int64)
+    supervised_keys = pd.MultiIndex.from_frame(development_rows[["date_idx", "symbol_idx"]])
+    candidate_keys = pd.MultiIndex.from_frame(development_candidates[["date_idx", "symbol_idx"]])
+    if len(supervised_keys.difference(candidate_keys)):
+        raise ValueError("development candidates do not cover all supervised development rows")
+
+    normalization_start_idx = next(
+        (idx for idx, date in enumerate(date_values) if int(str(date)[:4]) >= int(train_start_year)),
+        -1,
+    )
+    if normalization_start_idx < 0 or normalization_start_idx >= development_start_idx:
+        raise ValueError("development normalization range is empty")
+    normalization = _fit_development_normalization(
+        source,
+        start_idx=normalization_start_idx,
+        end_idx_exclusive=development_start_idx,
+        date_values=date_values,
+    )
+
+    store_root_path = _workspace_path(store_root)
+    view_id = development_view_id(development_year)
+    sample_target = store_root_path / "sample_index" / f"{view_id}.parquet"
+    candidate_target = store_root_path / "candidate_index" / f"{view_id}.parquet"
+    view_target = store_root_path / "views" / f"{view_id}.json"
+    if not overwrite and (sample_target.exists() or candidate_target.exists() or view_target.exists()):
+        raise FileExistsError(f"development fold already exists for {development_year}")
+    _write_parquet(sample_target, fold_samples)
+    _write_parquet(candidate_target, development_candidates)
+
+    purge_dates = sorted(samples.loc[purge_mask, "trade_date"].astype(str).unique().tolist())
+    safe_train_signal_end = str(train_rows["trade_date"].max())
+    max_train_dependency_idx = int(train_rows["dependency_end_date_idx"].max())
+    max_train_dependency_end = str(date_values[max_train_dependency_idx])
+    development_contract = {
+        "schema_version": 1,
+        "method": "expanding_train_development_walkforward",
+        "split_roles": {"fit": "train", "evaluation": "development"},
+        "train_start_year": int(train_start_year),
+        "development_year": int(development_year),
+        "development_start": development_start,
+        "development_end": development_end,
+        "source_padding_end": source_padding_end,
+        "source_padding_trade_date_count": dependency_days,
+        "development_start_date_idx": development_start_idx,
+        "forward_days": forward_days,
+        "execution_tail_days": execution_tail_days,
+        "max_label_dependency_days": dependency_days,
+        "safe_train_signal_end": safe_train_signal_end,
+        "max_train_dependency_end": max_train_dependency_end,
+        "purge_rule": "max_label_dependency_date_idx < development_start_date_idx",
+        "purged_row_count": int(purge_mask.sum()),
+        "purged_signal_date_count": int(len(purge_dates)),
+        "purged_signal_start": str(purge_dates[0]) if purge_dates else "",
+        "purged_signal_end": str(purge_dates[-1]) if purge_dates else "",
+        "label_dependency_overlap_count": overlap_count,
+        "candidate_universe_rule": "signal_day_input_valid_and_signal_eligible",
+        "candidate_count": int(len(development_candidates)),
+        "supervised_development_count": int(len(development_rows)),
+        "unsupervised_candidate_count": int(len(development_candidates) - len(development_rows)),
+        "normalization_cutoff_exclusive": development_start,
+    }
+    artifact_view = dict(source.get("artifact_view", {}) or {})
+    artifact_view.update(
+        {
+            "schema_version": 1,
+            "view_id": view_id,
+            "view_type": "development_walkforward_research_store_view",
+            "source_view": str(source_path),
+            "development_audit": development_contract,
+        }
+    )
+    manifest = dict(source)
+    for legacy_key in ("validation_years", "test_years", "oos_years", "purged_walkforward"):
+        manifest.pop(legacy_key, None)
+    manifest.update(
+        {
+            "created_at": _now(),
+            "start_date": f"{int(train_start_year)}-01-01",
+            "end_date": development_end,
+            "train_years": sorted({int(value) for value in train_rows["year"].astype(int).tolist()}),
+            "development_years": [int(development_year)],
+            "split_roles": {"fit": "train", "evaluation": "development"},
+            "sample_index_path": str(sample_target.resolve()),
+            "sample_count": int(len(fold_samples)),
+            "sample_count_by_split": {
+                "train": int(len(train_rows)),
+                "development": int(len(development_rows)),
+            },
+            "candidate_index_path": str(candidate_target.resolve()),
+            "candidate_count": int(len(development_candidates)),
+            "candidate_count_by_split": {"development": int(len(development_candidates))},
+            "normalization": normalization,
+            "artifact_view": artifact_view,
+            "development_walkforward": development_contract,
+            "source_view_provenance": source_provenance,
+            "research_contract": approved_development_contract_binding(),
+            "development_contract": approved_development_contract_binding(),
+            "max_label_dependency_days": dependency_days,
+        }
+    )
+    manifest["development_fold_training_contract"] = _compute_development_fold_training_contract(
+        manifest,
+        sample_frame=fold_samples,
+        candidate_frame=development_candidates,
+    )
+    _write_json(view_target, manifest)
+    verification = verify_development_walkforward_view(view_target)
+    if verification["status"] != "ok":
+        raise RuntimeError(f"development fold verification failed: {verification['blockers']}")
+    return {
+        "status": "ok",
+        "development_year": int(development_year),
+        "view_id": view_id,
+        "view_path": str(view_target.resolve()),
+        "sample_index_path": str(sample_target.resolve()),
+        "candidate_index_path": str(candidate_target.resolve()),
+        "sample_count_by_split": manifest["sample_count_by_split"],
+        "candidate_count_by_split": manifest["candidate_count_by_split"],
+        "development_fold_training_contract": manifest["development_fold_training_contract"],
+        "development_walkforward": development_contract,
+        "verification": verification,
+    }
+
+
+def verify_development_walkforward_view(view_path: str | Path) -> dict[str, Any]:
+    path = _workspace_path(view_path)
+    manifest = _read_json(path)
+    blockers: list[str] = []
+    base_validation = validate_sequence_pack(path)
+    blockers.extend(str(item) for item in list(base_validation.get("blockers", []) or []))
+    contract = dict(manifest.get("development_walkforward", {}) or {})
+    if str(contract.get("method", "")) != "expanding_train_development_walkforward":
+        blockers.append("missing_development_walkforward_contract")
+    try:
+        _validated_source_view_provenance(manifest)
+    except (FileNotFoundError, ValueError) as exc:
+        blockers.append(f"source_view_provenance:{exc}")
+    sample_path = _workspace_path(str(manifest.get("sample_index_path", "") or ""))
+    candidate_path = _workspace_path(str(manifest.get("candidate_index_path", "") or ""))
+    samples = pd.read_parquet(sample_path) if sample_path.is_file() else pd.DataFrame()
+    candidates = pd.read_parquet(candidate_path) if candidate_path.is_file() else pd.DataFrame()
+    if samples.empty:
+        blockers.append("empty_development_supervised_index")
+    if candidates.empty:
+        blockers.append("empty_development_candidate_index")
+    if not samples.empty and not candidates.empty:
+        try:
+            _validated_development_fold_training_contract(
+                manifest,
+                sample_frame=samples,
+                candidate_frame=candidates,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            blockers.append(f"development_fold_training_contract_invalid:{exc}")
+    if dict(manifest.get("split_roles", {}) or {}) != {"fit": "train", "evaluation": "development"}:
+        blockers.append("development_split_roles_metadata_mismatch")
+    development_year = int(contract.get("development_year", 0) or 0)
+    if list(manifest.get("development_years", []) or []) != [development_year]:
+        blockers.append("development_years_metadata_mismatch")
+    if any(key in manifest for key in ("test_years", "oos_years")):
+        blockers.append("test_or_oos_semantics_present")
+    return {
+        "status": "blocked" if blockers else "ok",
+        "blockers": blockers,
+        "view_path": str(path.resolve()),
+        "view_id": str(dict(manifest.get("artifact_view", {}) or {}).get("view_id", path.stem)),
+        "development_year": development_year,
+        "sample_count_by_split": dict(manifest.get("sample_count_by_split", {}) or {}),
+        "candidate_count_by_split": dict(manifest.get("candidate_count_by_split", {}) or {}),
+        "label_dependency_overlap_count": int(contract.get("label_dependency_overlap_count", -1)),
+        "development_fold_training_contract_sha256": str(
+            dict(manifest.get("development_fold_training_contract", {}) or {}).get("sha256", "")
+        ),
+        "development_walkforward": contract,
+    }
+
+
+def build_development_walkforward_folds(
+    *,
+    source_view: str | Path = DEFAULT_SOURCE_VIEW,
+    development_years: Iterable[int] = DEFAULT_DEVELOPMENT_YEARS,
+    train_start_year: int = 2012,
+    store_root: str | Path = DEFAULT_STORE_ROOT,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    years = _parse_years(development_years)
+    folds = [
+        build_development_walkforward_fold(
+            source_view=source_view,
+            development_year=int(year),
+            train_start_year=int(train_start_year),
+            store_root=store_root,
+            overwrite=bool(overwrite),
+        )
+        for year in years
+    ]
+    return {
+        "status": "ok",
+        "source_view": str(_workspace_path(source_view).resolve()),
+        "development_years": [int(item["development_year"]) for item in folds],
         "folds": folds,
     }
 
@@ -2561,6 +3192,28 @@ def _build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--view", type=Path, required=True)
     verify.add_argument("--json", action="store_true")
 
+    build_development = sub.add_parser("build-development-fold")
+    build_development.add_argument("--source-view", type=Path, default=DEFAULT_SOURCE_VIEW)
+    build_development.add_argument("--development-year", type=int, required=True)
+    build_development.add_argument("--train-start-year", type=int, default=2012)
+    build_development.add_argument("--store-root", type=Path, default=DEFAULT_STORE_ROOT)
+    build_development.add_argument("--overwrite", action="store_true")
+    build_development.add_argument("--json", action="store_true")
+
+    build_all_development = sub.add_parser("build-development-folds")
+    build_all_development.add_argument("--source-view", type=Path, default=DEFAULT_SOURCE_VIEW)
+    build_all_development.add_argument(
+        "--development-years", default=",".join(map(str, DEFAULT_DEVELOPMENT_YEARS))
+    )
+    build_all_development.add_argument("--train-start-year", type=int, default=2012)
+    build_all_development.add_argument("--store-root", type=Path, default=DEFAULT_STORE_ROOT)
+    build_all_development.add_argument("--overwrite", action="store_true")
+    build_all_development.add_argument("--json", action="store_true")
+
+    verify_development = sub.add_parser("verify-development")
+    verify_development.add_argument("--view", type=Path, required=True)
+    verify_development.add_argument("--json", action="store_true")
+
     run = sub.add_parser("run-study")
     run.add_argument("--source-view", type=Path, default=DEFAULT_SOURCE_VIEW)
     run.add_argument("--oos-years", required=True)
@@ -2638,6 +3291,24 @@ def main(argv: list[str] | None = None) -> int:
         )
     elif args.command == "verify":
         result = verify_purged_walkforward_view(args.view)
+    elif args.command == "build-development-fold":
+        result = build_development_walkforward_fold(
+            source_view=args.source_view,
+            development_year=int(args.development_year),
+            train_start_year=int(args.train_start_year),
+            store_root=args.store_root,
+            overwrite=bool(args.overwrite),
+        )
+    elif args.command == "build-development-folds":
+        result = build_development_walkforward_folds(
+            source_view=args.source_view,
+            development_years=_parse_years(str(args.development_years)),
+            train_start_year=int(args.train_start_year),
+            store_root=args.store_root,
+            overwrite=bool(args.overwrite),
+        )
+    elif args.command == "verify-development":
+        result = verify_development_walkforward_view(args.view)
     elif args.command == "run-study":
         result = run_walkforward_study(
             source_view=args.source_view,

@@ -5,6 +5,7 @@ import pandas as pd
 import torch
 
 from daily_research.path_policy.qdp_v2_sequence_path_pack import (
+    AShareExecutionCostConfig,
     DAILY_RAW_FEATURES,
     DEFAULT_OUTPUT_ROOT,
     ENTRY_RULE_OPEN_BELOW_LIMIT,
@@ -13,10 +14,13 @@ from daily_research.path_policy.qdp_v2_sequence_path_pack import (
     _apply_back_adjustment,
     _build_sample_index,
     _compute_future_path_and_masks,
+    _exit_fill_mask,
     _fill_suspended_daily_raw,
     _fit_normalization,
+    _resolve_deferred_exit_days,
     path_summary_columns,
     path_value_column,
+    simulate_a_share_round_trip,
 )
 from daily_research.path_policy.qdp_v2_sequence_flat_lgbm import _feature_names, _select_indices
 from daily_research.path_policy.qdp_v2_sequence_path_training import (
@@ -211,6 +215,7 @@ def test_back_adjustment_changes_only_ohlc_and_preserves_raw_open() -> None:
     adjusted = _apply_back_adjustment(daily, factor)
 
     assert adjusted["raw_open"].tolist() == [10.0, 9.0]
+    assert adjusted["raw_close"].tolist() == [10.0, 9.0]
     assert np.allclose(adjusted["close"].to_numpy(), [10.0, 10.0])
     assert adjusted["volume"].tolist() == [100.0, 200.0]
     assert adjusted["amount"].tolist() == [1000.0, 2000.0]
@@ -343,6 +348,130 @@ def test_pit_sample_index_retains_unfilled_rows_after_signal_day_filter() -> Non
     assert sample_index[["trade_date", "symbol", "entry_filled"]].to_dict("records") == [
         {"trade_date": "2024-01-02", "symbol": "000001.SZ", "entry_filled": False}
     ]
+
+
+def test_candidate_index_is_not_gated_by_future_labels_or_entry_fill() -> None:
+    dates = ["2024-01-02", "2024-01-03"]
+    symbols = ["000001.SZ", "000002.SZ"]
+    input_valid = np.ones((2, 2), dtype=bool)
+    entry_filled = np.asarray([[False, True], [True, True]], dtype=bool)
+    label_valid = np.asarray([[False, True], [True, True]], dtype=bool)
+    price_valid = np.asarray([[False, True], [True, True]], dtype=bool)
+    va_valid = np.asarray([[True, False], [True, True]], dtype=bool)
+    signal_eligible = np.asarray([[True, True], [True, True]], dtype=bool)
+
+    supervised = _build_sample_index(
+        date_values=dates,
+        symbol_values=symbols,
+        start_date="2024-01-02",
+        end_date="2024-01-02",
+        train_years=(),
+        validation_years=(2024,),
+        test_years=(),
+        input_valid=input_valid,
+        entry_buyable=entry_filled,
+        label_valid=label_valid,
+        price_label_valid=price_valid,
+        va_aux_valid=va_valid,
+        signal_eligible=signal_eligible,
+        require_entry_filled=False,
+    )
+    candidates = _build_sample_index(
+        date_values=dates,
+        symbol_values=symbols,
+        start_date="2024-01-02",
+        end_date="2024-01-02",
+        train_years=(),
+        validation_years=(2024,),
+        test_years=(),
+        input_valid=input_valid,
+        entry_buyable=entry_filled,
+        label_valid=label_valid,
+        price_label_valid=price_valid,
+        va_aux_valid=va_valid,
+        signal_eligible=signal_eligible,
+        require_entry_filled=False,
+        require_label_valid=False,
+        id_column="candidate_id",
+    )
+
+    assert supervised["symbol"].tolist() == ["000002.SZ"]
+    assert candidates["symbol"].tolist() == ["000001.SZ", "000002.SZ"]
+    invalid = candidates.loc[candidates["symbol"] == "000001.SZ"].iloc[0]
+    assert not bool(invalid["entry_filled"])
+    assert not bool(invalid["label_valid"])
+    assert not bool(invalid["price_label_valid"])
+    assert bool(invalid["va_aux_valid"])
+
+
+def test_exit_sellable_blocks_down_limit_suspension_and_missing_bar() -> None:
+    sellable = _exit_fill_mask(
+        np.asarray([9.00, 9.01, np.nan, 10.00], dtype=np.float32),
+        np.asarray([9.00, 9.00, 9.00, np.nan], dtype=np.float32),
+        exit_observed=np.asarray([True, True, False, True]),
+        exit_status_valid=np.asarray([True, True, True, True]),
+        exit_suspended=np.asarray([False, False, False, True]),
+        exit_delisted=np.asarray([False, False, False, False]),
+    )
+
+    assert sellable.tolist() == [False, True, False, False]
+
+
+def test_deferred_exit_uses_first_sellable_day_inside_execution_tail() -> None:
+    sellable = np.asarray(
+        [
+            [True, False, False, True, True],
+            [True, False, False, False, False],
+            [True, True, True, True, True],
+        ],
+        dtype=bool,
+    )
+    resolved = _resolve_deferred_exit_days(
+        np.asarray([2.0, 2.0, 1.0]),
+        sellable,
+        forward_days=3,
+        execution_tail_days=2,
+    )
+
+    assert resolved[0] == 4.0
+    assert np.isnan(resolved[1])
+    assert resolved[2] == 2.0
+
+
+def test_round_trip_costs_apply_board_lot_minimum_commission_and_sell_tax() -> None:
+    cost = AShareExecutionCostConfig(slippage_bps=0.0)
+    result = simulate_a_share_round_trip(
+        allocated_cash=10_000.0,
+        entry_price=10.0,
+        exit_price=11.0,
+        cost=cost,
+    )
+    too_small = simulate_a_share_round_trip(
+        allocated_cash=900.0,
+        entry_price=10.0,
+        exit_price=11.0,
+        cost=cost,
+    )
+    historical_tax = simulate_a_share_round_trip(
+        allocated_cash=10_000.0,
+        entry_price=10.0,
+        exit_price=11.0,
+        cost=cost,
+        exit_trade_date="2022-01-04",
+    )
+
+    assert result["filled"] is True
+    assert result["shares"] == 900
+    assert np.isclose(result["ending_cash"], 10_884.861)
+    assert np.isclose(result["net_return"], 0.0884861)
+    assert np.isclose(historical_tax["ending_cash"], 10_879.911)
+    assert too_small == {
+        "filled": False,
+        "shares": 0,
+        "ending_cash": 900.0,
+        "net_return": 0.0,
+        "total_cost": 0.0,
+    }
 
 
 def test_normalization_uses_only_train_date_mask() -> None:

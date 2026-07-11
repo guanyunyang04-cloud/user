@@ -118,10 +118,16 @@ def test_mainline_contract_keeps_default_surface_small() -> None:
     assert contract["direct_value_train_profiles"]["60d"]["direct_value_horizon"] == 60
     assert "symbol_embedding" in ARCHIVED_CONCEPTS
     assert "active_execution_strategy.json" in contract["evidence_boundary"]
-    assert contract["primary_evaluation_policy"]["method"] == "purged_expanding_walk_forward"
-    assert contract["primary_evaluation_policy"]["train_label_rule"] == "label_end_trade_date < oos_start_trade_date"
-    assert contract["primary_evaluation_policy"]["checkpoint_policy"] == "final_epoch"
-    assert contract["next_decision_surface"] == "complete_case_oos_universe_or_preregistered_multiseed"
+    assert contract["primary_evaluation_policy"]["method"] == "purged_expanding_development_walkforward"
+    assert contract["primary_evaluation_policy"]["split_roles"] == {
+        "fit": "train",
+        "evaluation": "development",
+    }
+    assert contract["primary_evaluation_policy"]["checkpoint_policy"] == "best_development_total_loss"
+    assert contract["primary_evaluation_policy"]["training_sample_policy"] == "all_rows"
+    assert contract["primary_evaluation_policy"]["seed"] == 7
+    assert contract["legacy_fixed_oos_policy"]["status"] == "compatibility_only"
+    assert contract["next_decision_surface"] == "full_candidate_development_walkforward_or_loss_redesign"
 
 
 def test_path_policy_package_default_points_to_seq100_mainline() -> None:
@@ -145,10 +151,31 @@ def test_todayclose_path_only_train_argv_uses_default_low_va_aux_profile() -> No
     assert argv[argv.index("--prediction-mode") + 1] == "compact"
     assert argv[argv.index("--seed") + 1] == "7"
     assert argv[argv.index("--evaluation-mode") + 1] == "standard"
+    assert argv[argv.index("--min-complete-epochs") + 1] == "1"
     assert argv[argv.index("--top-k") + 1] == "1,3,5,10,20,50,100"
     assert "--with-symbol" not in argv
     assert "--richer-path" not in argv
     assert "gru_path_value_residual" not in argv
+
+
+def test_todayclose_profile_forwards_development_loss_early_stopping_contract() -> None:
+    profile = TodayClosePathOnlyProfile(
+        run_tag="development_unit",
+        evaluation_mode="development",
+        early_stopping_patience=2,
+        early_stopping_metric="development_total_loss",
+        early_stopping_mode="min",
+        min_complete_epochs=1,
+        max_samples_per_split=0,
+    )
+    argv = build_todayclose_path_only_train_argv(profile)
+
+    assert argv[argv.index("--evaluation-mode") + 1] == "development"
+    assert argv[argv.index("--early-stopping-metric") + 1] == "development_total_loss"
+    assert argv[argv.index("--early-stopping-mode") + 1] == "min"
+    assert argv[argv.index("--early-stopping-patience") + 1] == "2"
+    assert argv[argv.index("--min-complete-epochs") + 1] == "1"
+    assert argv[argv.index("--max-samples-per-split") + 1] == "0"
 
 
 def test_todayclose_legacy_all_channels_base_train_argv_keeps_old_default_baseline() -> None:

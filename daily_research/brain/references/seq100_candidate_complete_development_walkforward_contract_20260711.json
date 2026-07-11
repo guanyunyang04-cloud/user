@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "contract_id": "seq100_candidate_complete_development_walkforward_contract_20260711_v1",
+  "status": "approved_implementation",
+  "approved_at": "2026-07-11",
+  "supersedes": "seq100_pit_adjusted_global_tail_contract_20260711",
+  "retired_study_record": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_pit_adjusted_global_tail_generation_20260711_v1\\study_retirement.json",
+  "research_scope": {
+    "decision_time": "signal_day_after_close",
+    "exchange_scope": "Shanghai and Shenzhen A-share main board",
+    "excluded_boards": ["ChiNext", "STAR", "BSE"],
+    "eligibility_semantics": "point_in_time",
+    "future_status_must_not_filter_history": true
+  },
+  "data_contract": {
+    "lookback_days": 100,
+    "prediction_forward_days": 60,
+    "execution_tail_days": 20,
+    "max_label_dependency_days": 80,
+    "candidate_eligible": "input_valid_at_signal & signal_eligible_at_signal",
+    "candidate_must_not_depend_on": ["price_label_valid", "va_aux_valid", "entry_filled", "future_status", "future_execution_outcome"],
+    "indexes": {
+      "candidate_index": "all signal-day candidates used for scoring and TopK",
+      "sample_index": "supervised rows used for loss with explicit availability masks"
+    },
+    "price_semantics": "back-adjusted OHLC for model paths; raw exchange prices for execution checks",
+    "active_qdp_change_allowed": false
+  },
+  "execution_contract": {
+    "entry": "next trading day raw open; fill only when bar exists, not suspended, and tick-rounded open is below tick-rounded up-limit",
+    "unfilled_entry": "retain cash; no rank replacement",
+    "earliest_exit": "T+1 after entry",
+    "planned_exit": "predicted-path selected exit day at raw close",
+    "blocked_exit": "if suspended, delisted, no valid bar/volume, or tick-rounded close is at tick-rounded down-limit, retry through the 20-day execution tail",
+    "unresolved_or_delisted_terminal": "precommitted conservative terminal recovery; unexplained data gaps block artifact construction",
+    "costs": "manifest-bound configurable commissions, minimum commission, stamp duty by effective date, transfer fees, lot rounding, and base/double-slippage scenarios"
+  },
+  "development_protocol": {
+    "years": [2022, 2023, 2024, 2025],
+    "method": "purged_expanding_development_walkforward",
+    "split_roles": {"fit": "train", "evaluation": "development"},
+    "train_start_year": 2012,
+    "purge_rule": "max_label_dependency_date_idx < development_start_date_idx",
+    "seed": 7,
+    "max_samples_per_split": 0,
+    "historical_test_set": null,
+    "historical_outer_audit": false,
+    "true_forward_lockbox": "predictions and orders created after the frozen champion timestamp in 2026"
+  },
+  "early_stopping": {
+    "metric": "development_total_loss",
+    "mode": "min",
+    "minimum_complete_epochs": 1,
+    "maximum_epochs": 10,
+    "patience": 2,
+    "restore_best_checkpoint": true,
+    "loss_components_required": ["path_loss", "summary_loss", "richer_loss", "price_delta_loss", "va_level_loss", "va_delta_loss", "value_loss", "rank_loss", "residual_penalty"],
+    "topk_must_not_select_within_run_checkpoint": true,
+    "per_fold_best_epoch_reported": true,
+    "optimizer_step_count_reported": true
+  },
+  "metric_contract": {
+    "optimization_primary": "development_total_loss",
+    "decision_metrics": ["Top1 realized-plan and opportunity", "Top3 realized-plan and opportunity", "Top5 realized-plan and opportunity", "Top10 realized-plan and opportunity"],
+    "guardrails": ["worst development year", "leave-best-year-out result", "oracle regret", "entry and exit fill", "cash utilization", "coverage", "hit and loss tail rates", "rank IC", "selected-path MAE", "exit-day error", "block-bootstrap/HAC uncertainty"],
+    "portfolio_metrics": ["net return", "Sharpe/Sortino", "maximum drawdown", "turnover", "concurrent positions", "capital utilization", "fees and slippage"],
+    "aggregation": "equal development-year weight; identical daily candidate universe across TopK values"
+  },
+  "experiment_budget": {
+    "seed_policy": "seed 7 only during discovery",
+    "candidate_limit_per_generation": 5,
+    "one_core_change_per_candidate": true,
+    "failed_trials_retained": true,
+    "low_budget_screen_used_for_selection": false,
+    "full_fold_data_required": true
+  },
+  "initial_candidate_ladder": ["linear_factor", "tabular_gbdt", "gru_path100", "gru_tail_aligned_if_loss_misaligned", "gru_exit_aligned_if_exit_regret_persists"],
+  "window_policy": {
+    "first_control": "lookback100_forward60",
+    "test_horizon_before_lookback": true,
+    "optional_horizons": [40, 20],
+    "lookback120_only_after_loss_and_horizon_stabilize": true,
+    "no_cartesian_window_grid": true
+  },
+  "protected_boundaries": {
+    "overwrite_legacy_artifacts": false,
+    "resume_retired_generation": false,
+    "change_active_execution": false,
+    "change_qdp_active": false
+  },
+  "completion": "select champion on 2022-2025 development evidence, retrain through 2025, freeze all identities, then begin 2026 forward lockbox",
+  "contract_sha256": "e461c3e4654b0e97b31508874f2eacf89258d5219bf0fb452d8f1690ee193f11"
+}

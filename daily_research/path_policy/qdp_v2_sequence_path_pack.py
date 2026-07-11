@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import hashlib
 import json
 import math
 import os
@@ -28,6 +29,7 @@ DEFAULT_QDP_ROOT = Path("quant_data_platform/data/qdp_v2")
 DEFAULT_OUTPUT_ROOT = Path("daily_research/data/research_store/sequence_pack")
 DEFAULT_LOOKBACK_DAYS = 100
 DEFAULT_FORWARD_DAYS = 20
+DEFAULT_EXECUTION_TAIL_DAYS = 20
 DEFAULT_START_DATE = "2012-01-01"
 DEFAULT_END_DATE = "2025-12-31"
 DEFAULT_TRAIN_YEARS = tuple(range(2012, 2024))
@@ -62,6 +64,14 @@ SAMPLE_FILTER_COMPLETE_CASE = "complete_case_filled"
 SAMPLE_FILTER_SIGNAL_ELIGIBLE = "signal_eligible_price_label"
 SUSPENSION_FILL_NONE = "none"
 SUSPENSION_FILL_CARRY_CLOSE = "carry_adjusted_close"
+DEFAULT_LOT_SIZE = 100
+DEFAULT_COMMISSION_BPS = 3.0
+DEFAULT_MIN_COMMISSION_CNY = 5.0
+DEFAULT_STAMP_TAX_BPS = 5.0
+DEFAULT_STAMP_TAX_SCHEDULE = (("1900-01-01", 10.0), ("2023-08-28", 5.0))
+DEFAULT_TRANSFER_FEE_BPS = 0.1
+DEFAULT_SLIPPAGE_BPS = 7.0
+DEFAULT_STRESS_SLIPPAGE_MULTIPLIER = 2.0
 REQUIRED_PIT_MARKET_VIEW_OVERRIDES = {
     "market_daily_raw",
     "adjust_factor",
@@ -71,6 +81,25 @@ REQUIRED_PIT_MARKET_VIEW_OVERRIDES = {
 }
 
 PIT_MAINBOARD_PREFIXES = ("000", "001", "002", "003", "600", "601", "603", "605")
+
+
+@dataclass(frozen=True)
+class AShareExecutionCostConfig:
+    """Deterministic research assumptions for one A-share round trip.
+
+    Rates are explicit experiment inputs rather than claims about a broker account.  The
+    minimum commission and board-lot constraint make small-account simulations materially
+    different from a flat percentage haircut.
+    """
+
+    lot_size: int = DEFAULT_LOT_SIZE
+    commission_bps: float = DEFAULT_COMMISSION_BPS
+    minimum_commission_cny: float = DEFAULT_MIN_COMMISSION_CNY
+    stamp_tax_bps: float = DEFAULT_STAMP_TAX_BPS
+    stamp_tax_schedule: tuple[tuple[str, float], ...] = DEFAULT_STAMP_TAX_SCHEDULE
+    transfer_fee_bps: float = DEFAULT_TRANSFER_FEE_BPS
+    slippage_bps: float = DEFAULT_SLIPPAGE_BPS
+    stress_slippage_multiplier: float = DEFAULT_STRESS_SLIPPAGE_MULTIPLIER
 
 
 def _is_pit_mainboard_symbol(symbol: str) -> bool:
@@ -128,6 +157,35 @@ def _write_json(path: Path, payload: Mapping[str, Any]) -> str:
     return str(path.resolve())
 
 
+def _bind_research_contract(path: str | Path | None) -> dict[str, Any] | None:
+    if path is None:
+        return None
+    resolved = Path(path).resolve()
+    raw_bytes = resolved.read_bytes()
+    payload = json.loads(raw_bytes.decode("utf-8-sig"))
+    declared_digest = str(payload.get("contract_sha256", "") or "").lower()
+    semantic_payload = dict(payload)
+    semantic_payload.pop("contract_sha256", None)
+    semantic_bytes = json.dumps(
+        semantic_payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    semantic_digest = hashlib.sha256(semantic_bytes).hexdigest()
+    if declared_digest and declared_digest != semantic_digest:
+        raise ValueError(
+            "research contract semantic digest mismatch: "
+            f"declared={declared_digest}, actual={semantic_digest}"
+        )
+    return {
+        "path": str(resolved),
+        "contract_id": str(payload.get("contract_id", "") or ""),
+        "contract_sha256": semantic_digest,
+        "contract_file_sha256": hashlib.sha256(raw_bytes).hexdigest(),
+    }
+
+
 def _parse_years(raw: str | Iterable[int] | None, *, default: tuple[int, ...]) -> tuple[int, ...]:
     if raw is None:
         return default
@@ -144,6 +202,28 @@ def _parse_years(raw: str | Iterable[int] | None, *, default: tuple[int, ...]) -
         else:
             values.append(int(item))
     return tuple(sorted(set(values))) or default
+
+
+def _parse_rate_schedule(
+    raw: str | Iterable[tuple[str, float]] | None,
+    *,
+    default: tuple[tuple[str, float], ...],
+) -> tuple[tuple[str, float], ...]:
+    if raw is None:
+        return default
+    if not isinstance(raw, str):
+        values = tuple((str(date), float(rate)) for date, rate in raw)
+        return values or default
+    values: list[tuple[str, float]] = []
+    for chunk in raw.split(","):
+        item = chunk.strip()
+        if not item:
+            continue
+        date_text, separator, rate_text = item.partition(":")
+        if not separator:
+            raise ValueError(f"invalid effective-date rate: {item}")
+        values.append((date_text.strip(), float(rate_text.strip())))
+    return tuple(values) or default
 
 
 def _read_active(root: Path) -> dict[str, Any]:
@@ -537,8 +617,8 @@ def _apply_back_adjustment(daily: pd.DataFrame, factor: pd.DataFrame) -> pd.Data
     """Apply the canonical back-adjust factor to OHLC while preserving raw execution prices.
 
     The factor is a label/feature-side price transformation.  Volume and amount remain in
-    their native units, and ``raw_open`` is retained so the next-open fill rule can still be
-    evaluated in the exchange's 0.01-yuan tick space.
+    their native units, and ``raw_open``/``raw_close`` are retained so entry and exit rules
+    can still be evaluated in the exchange's 0.01-yuan tick space.
     """
 
     required_daily = {"symbol", "trade_date", *PATH_OHLC_FIELDS}
@@ -562,6 +642,7 @@ def _apply_back_adjustment(daily: pd.DataFrame, factor: pd.DataFrame) -> pd.Data
     out["symbol"] = out["symbol"].astype(str).str.upper().str.strip()
     out["trade_date"] = out["trade_date"].astype(str)
     out["raw_open"] = pd.to_numeric(out["open"], errors="coerce").astype("float64")
+    out["raw_close"] = pd.to_numeric(out["close"], errors="coerce").astype("float64")
     out = out.merge(
         factor_values.rename(columns={factor_column: "price_adjust_factor"}),
         on=["symbol", "trade_date"],
@@ -583,6 +664,207 @@ def _apply_back_adjustment(daily: pd.DataFrame, factor: pd.DataFrame) -> pd.Data
 def _price_to_tick_units(values: np.ndarray, *, tick_size: float = 0.01) -> np.ndarray:
     numeric = np.asarray(values, dtype=np.float64)
     return np.floor(numeric / float(tick_size) + 0.5)
+
+
+def _exit_fill_mask(
+    exit_close: np.ndarray,
+    exit_down_limit: np.ndarray,
+    *,
+    exit_observed: np.ndarray | None = None,
+    exit_status_valid: np.ndarray | None = None,
+    exit_suspended: np.ndarray | None = None,
+    exit_delisted: np.ndarray | None = None,
+    require_status_valid: bool = True,
+    tick_size: float = 0.01,
+) -> np.ndarray:
+    """Return days on which a close-priced exit is deterministically executable.
+
+    The rule is deliberately conservative: an observed close at the rounded down-limit is
+    treated as queue-blocked.  A planned exit can therefore be retried on later dates using
+    the 2-D ``exit_sellable`` panel without changing the prediction horizon.
+    """
+
+    close_values = np.asarray(exit_close, dtype=np.float64)
+    limit_values = np.asarray(exit_down_limit, dtype=np.float64)
+    if close_values.shape != limit_values.shape:
+        raise ValueError("exit_close and exit_down_limit must share shape")
+    exit_ok = np.isfinite(close_values)
+    for name, values, expected in (
+        ("exit_observed", exit_observed, True),
+        ("exit_status_valid", exit_status_valid, True),
+        ("exit_suspended", exit_suspended, False),
+        ("exit_delisted", exit_delisted, False),
+    ):
+        if values is None:
+            if name == "exit_status_valid" and bool(require_status_valid):
+                raise ValueError("exit_status_valid is required when require_status_valid=True")
+            continue
+        mask = np.asarray(values, dtype=bool)
+        if mask.shape != close_values.shape:
+            raise ValueError(f"{name} must match the exit price shape")
+        if name == "exit_status_valid" and not bool(require_status_valid):
+            continue
+        exit_ok &= mask if expected else ~mask
+    down_limit_blocked = (
+        np.isfinite(limit_values)
+        & np.isfinite(close_values)
+        & (_price_to_tick_units(close_values, tick_size=tick_size) <= _price_to_tick_units(limit_values, tick_size=tick_size))
+    )
+    return exit_ok & (~down_limit_blocked)
+
+
+def _resolve_deferred_exit_days(
+    planned_exit_days: np.ndarray,
+    exit_sellable_path: np.ndarray,
+    *,
+    forward_days: int,
+    execution_tail_days: int,
+) -> np.ndarray:
+    """Resolve 1-based planned exits to the first sellable day within the tail window."""
+
+    planned = np.asarray(planned_exit_days, dtype=np.float64).reshape(-1)
+    sellable = np.asarray(exit_sellable_path, dtype=bool)
+    if sellable.ndim != 2 or sellable.shape[0] != planned.shape[0]:
+        raise ValueError("exit_sellable_path must be [sample, day] and match planned_exit_days")
+    horizon = int(forward_days) + int(execution_tail_days)
+    if int(forward_days) <= 0 or int(execution_tail_days) < 0:
+        raise ValueError("forward_days must be positive and execution_tail_days must be non-negative")
+    if sellable.shape[1] < horizon:
+        raise ValueError("exit_sellable_path is shorter than forward_days + execution_tail_days")
+    if horizon < 2:
+        raise ValueError("exit window must include T+1 after the entry day")
+    resolved = np.full(planned.shape, np.nan, dtype=np.float32)
+    for row_idx, raw_day in enumerate(planned):
+        if not math.isfinite(float(raw_day)):
+            continue
+        # Path day 1 is the entry day; A-share T+1 makes path day 2 the earliest exit.
+        planned_day = max(2, min(max(int(round(float(raw_day))), 1), int(forward_days)))
+        future = np.flatnonzero(sellable[row_idx, planned_day - 1 : horizon])
+        if future.size:
+            resolved[row_idx] = np.float32(planned_day + int(future[0]))
+    return resolved
+
+
+def _execution_cost_contract(config: AShareExecutionCostConfig) -> dict[str, Any]:
+    numeric = {
+        "commission_bps": float(config.commission_bps),
+        "minimum_commission_cny": float(config.minimum_commission_cny),
+        "stamp_tax_bps": float(config.stamp_tax_bps),
+        "transfer_fee_bps": float(config.transfer_fee_bps),
+        "slippage_bps": float(config.slippage_bps),
+        "stress_slippage_multiplier": float(config.stress_slippage_multiplier),
+    }
+    if int(config.lot_size) <= 0:
+        raise ValueError("lot_size must be positive")
+    if any((not math.isfinite(value)) or value < 0.0 for value in numeric.values()):
+        raise ValueError("execution cost assumptions must be finite and non-negative")
+    if numeric["stress_slippage_multiplier"] < 1.0:
+        raise ValueError("stress_slippage_multiplier must be at least 1")
+    stamp_schedule: list[dict[str, Any]] = []
+    previous_date = ""
+    for effective_date, rate_bps in config.stamp_tax_schedule:
+        try:
+            date_text = pd.Timestamp(str(effective_date)).strftime("%Y-%m-%d")
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid stamp-tax effective date: {effective_date}") from exc
+        rate = float(rate_bps)
+        if not math.isfinite(rate) or rate < 0.0:
+            raise ValueError("stamp-tax schedule rates must be finite and non-negative")
+        if previous_date and date_text <= previous_date:
+            raise ValueError("stamp-tax schedule must be strictly increasing by effective date")
+        stamp_schedule.append({"effective_date": date_text, "stamp_tax_bps": rate})
+        previous_date = date_text
+    if not stamp_schedule:
+        stamp_schedule.append({"effective_date": "1900-01-01", "stamp_tax_bps": numeric["stamp_tax_bps"]})
+    return {
+        "contract": "a_share_round_trip_cashflow_v1",
+        "lot_size": int(config.lot_size),
+        **numeric,
+        "stamp_tax_schedule": stamp_schedule,
+        "commission_sides": ["buy", "sell"],
+        "minimum_commission_applied_per_order": True,
+        "stamp_tax_sides": ["sell"],
+        "transfer_fee_sides": ["buy", "sell"],
+        "slippage_application": "buy_price*(1+bps/10000), sell_price*(1-bps/10000)",
+        "unaffordable_or_unfilled_order": "retain_cash",
+    }
+
+
+def simulate_a_share_round_trip(
+    *,
+    allocated_cash: float,
+    entry_price: float,
+    exit_price: float,
+    cost: AShareExecutionCostConfig = AShareExecutionCostConfig(),
+    slippage_multiplier: float = 1.0,
+    exit_trade_date: str | None = None,
+) -> dict[str, float | int | bool]:
+    """Apply board-lot, minimum-fee, tax, transfer-fee, and slippage assumptions."""
+
+    contract = _execution_cost_contract(cost)
+    cash = float(allocated_cash)
+    entry = float(entry_price)
+    exit_value = float(exit_price)
+    multiplier = float(slippage_multiplier)
+    if not all(math.isfinite(value) for value in (cash, entry, exit_value, multiplier)):
+        raise ValueError("cash, prices, and slippage_multiplier must be finite")
+    if cash < 0.0 or entry <= 0.0 or exit_value < 0.0 or multiplier < 0.0:
+        raise ValueError("cash/prices/slippage_multiplier are outside the supported range")
+    slip = float(contract["slippage_bps"]) * multiplier / 10_000.0
+    buy_price = entry * (1.0 + slip)
+    sell_price = exit_value * max(0.0, 1.0 - slip)
+    lot_size = int(contract["lot_size"])
+    shares = int(cash // (buy_price * lot_size)) * lot_size
+    commission_rate = float(contract["commission_bps"]) / 10_000.0
+    transfer_rate = float(contract["transfer_fee_bps"]) / 10_000.0
+    minimum_commission = float(contract["minimum_commission_cny"])
+    while shares > 0:
+        buy_gross = float(shares) * buy_price
+        buy_commission = max(minimum_commission, buy_gross * commission_rate)
+        buy_transfer_fee = buy_gross * transfer_rate
+        if buy_gross + buy_commission + buy_transfer_fee <= cash + 1.0e-9:
+            break
+        shares -= lot_size
+    if shares <= 0:
+        return {
+            "filled": False,
+            "shares": 0,
+            "ending_cash": cash,
+            "net_return": 0.0,
+            "total_cost": 0.0,
+        }
+    buy_gross = float(shares) * buy_price
+    buy_commission = max(minimum_commission, buy_gross * commission_rate)
+    buy_transfer_fee = buy_gross * transfer_rate
+    cash_after_buy = cash - buy_gross - buy_commission - buy_transfer_fee
+    sell_gross = float(shares) * sell_price
+    sell_commission = max(minimum_commission, sell_gross * commission_rate)
+    sell_transfer_fee = sell_gross * transfer_rate
+    stamp_tax_bps = float(contract["stamp_tax_bps"])
+    if exit_trade_date is not None:
+        try:
+            trade_date = pd.Timestamp(str(exit_trade_date)).strftime("%Y-%m-%d")
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid exit_trade_date: {exit_trade_date}") from exc
+        matched = [
+            float(item["stamp_tax_bps"])
+            for item in list(contract["stamp_tax_schedule"])
+            if str(item["effective_date"]) <= trade_date
+        ]
+        if not matched:
+            raise ValueError("exit_trade_date predates the configured stamp-tax schedule")
+        stamp_tax_bps = matched[-1]
+    stamp_tax = sell_gross * stamp_tax_bps / 10_000.0
+    ending_cash = cash_after_buy + sell_gross - sell_commission - sell_transfer_fee - stamp_tax
+    explicit_cost = buy_commission + buy_transfer_fee + sell_commission + sell_transfer_fee + stamp_tax
+    slippage_cost = float(shares) * ((buy_price - entry) + (exit_value - sell_price))
+    return {
+        "filled": True,
+        "shares": int(shares),
+        "ending_cash": float(ending_cash),
+        "net_return": float(ending_cash / cash - 1.0) if cash > 0.0 else 0.0,
+        "total_cost": float(explicit_cost + slippage_cost),
+    }
 
 
 def _entry_fill_mask(
@@ -862,9 +1144,28 @@ def _build_sample_index(
     input_valid: np.ndarray,
     entry_buyable: np.ndarray,
     label_valid: np.ndarray,
+    price_label_valid: np.ndarray | None = None,
+    va_aux_valid: np.ndarray | None = None,
     signal_eligible: np.ndarray | None = None,
     require_entry_filled: bool = True,
+    require_label_valid: bool = True,
+    id_column: str = "sample_id",
 ) -> pd.DataFrame:
+    if str(id_column) not in {"sample_id", "candidate_id"}:
+        raise ValueError("id_column must be sample_id or candidate_id")
+    expected_shape = (len(date_values), len(symbol_values))
+    for name, values in (
+        ("input_valid", input_valid),
+        ("entry_buyable", entry_buyable),
+        ("label_valid", label_valid),
+        ("price_label_valid", price_label_valid),
+        ("va_aux_valid", va_aux_valid),
+        ("signal_eligible", signal_eligible),
+    ):
+        if values is not None and np.asarray(values).shape != expected_shape:
+            raise ValueError(f"{name} must have shape {expected_shape}")
+    price_valid_values = label_valid if price_label_valid is None else price_label_valid
+    va_valid_values = label_valid if va_aux_valid is None else va_aux_valid
     rows: list[pd.DataFrame] = []
     date_arr = np.asarray(date_values, dtype=object)
     symbol_arr = np.asarray(symbol_values, dtype=object)
@@ -880,9 +1181,11 @@ def _build_sample_index(
             split = "test"
         else:
             continue
-        mask = input_valid[date_idx] & label_valid[date_idx]
+        mask = np.asarray(input_valid[date_idx], dtype=bool).copy()
         if signal_eligible is not None:
             mask &= np.asarray(signal_eligible[date_idx], dtype=bool)
+        if bool(require_label_valid):
+            mask &= np.asarray(label_valid[date_idx], dtype=bool)
         if bool(require_entry_filled):
             mask &= entry_buyable[date_idx]
         symbol_idx = np.flatnonzero(mask).astype(np.int32)
@@ -891,7 +1194,7 @@ def _build_sample_index(
         rows.append(
             pd.DataFrame(
                 {
-                    "sample_id": np.arange(len(symbol_idx), dtype=np.int64),
+                    str(id_column): np.arange(len(symbol_idx), dtype=np.int64),
                     "split": split,
                     "year": np.int16(year),
                     "trade_date": str(trade_date),
@@ -900,13 +1203,16 @@ def _build_sample_index(
                     "symbol": symbol_arr[symbol_idx],
                     "entry_trade_date": date_arr[date_idx + 1] if date_idx + 1 < len(date_arr) else "",
                     "entry_filled": entry_buyable[date_idx, symbol_idx],
+                    "label_valid": label_valid[date_idx, symbol_idx],
+                    "price_label_valid": price_valid_values[date_idx, symbol_idx],
+                    "va_aux_valid": va_valid_values[date_idx, symbol_idx],
                 }
             )
         )
     if not rows:
         return pd.DataFrame(
             columns=[
-                "sample_id",
+                str(id_column),
                 "split",
                 "year",
                 "trade_date",
@@ -915,10 +1221,13 @@ def _build_sample_index(
                 "symbol",
                 "entry_trade_date",
                 "entry_filled",
+                "label_valid",
+                "price_label_valid",
+                "va_aux_valid",
             ]
         )
     out = pd.concat(rows, ignore_index=True)
-    out["sample_id"] = np.arange(len(out), dtype=np.int64)
+    out[str(id_column)] = np.arange(len(out), dtype=np.int64)
     return out
 
 
@@ -941,6 +1250,11 @@ class SequencePackConfig:
     entry_rule: str = ENTRY_RULE_LEGACY
     sample_filter: str = SAMPLE_FILTER_COMPLETE_CASE
     suspension_fill: str = SUSPENSION_FILL_NONE
+    execution_tail_days: int = DEFAULT_EXECUTION_TAIL_DAYS
+    require_full_dependency_padding: bool = True
+    unresolved_exit_recovery_fraction: float = 0.0
+    execution_cost: AShareExecutionCostConfig = AShareExecutionCostConfig()
+    research_contract: Path | None = None
     pit_universe_manifest: Path | None = None
     dataset_view: Path | None = None
 
@@ -958,6 +1272,18 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         raise ValueError(f"unsupported sample filter: {config.sample_filter}")
     if suspension_fill not in {SUSPENSION_FILL_NONE, SUSPENSION_FILL_CARRY_CLOSE}:
         raise ValueError(f"unsupported suspension fill: {config.suspension_fill}")
+    execution_tail_days = int(config.execution_tail_days)
+    if execution_tail_days < 0:
+        raise ValueError("execution_tail_days must be non-negative")
+    unresolved_exit_recovery_fraction = float(config.unresolved_exit_recovery_fraction)
+    if (
+        not math.isfinite(unresolved_exit_recovery_fraction)
+        or unresolved_exit_recovery_fraction < 0.0
+        or unresolved_exit_recovery_fraction > 1.0
+    ):
+        raise ValueError("unresolved_exit_recovery_fraction must be finite and between 0 and 1")
+    execution_cost_contract = _execution_cost_contract(config.execution_cost)
+    research_contract_binding = _bind_research_contract(config.research_contract)
     root = config.qdp_root.resolve()
     canonical_active = _read_active(root)
     active_manifest_dataset_ids = dict(canonical_active.get("datasets", {}) or {})
@@ -1016,7 +1342,19 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
     sample_start_pos = int(start_positions[0])
     sample_end_pos = int(end_positions[-1])
     panel_start_pos = max(0, sample_start_pos - int(config.lookback_days) + 1)
-    panel_end_pos = min(len(all_open_dates) - 1, sample_end_pos + int(config.forward_days))
+    required_dependency_days = int(config.forward_days) + execution_tail_days
+    required_panel_end_pos = sample_end_pos + required_dependency_days
+    dependency_padding_complete = required_panel_end_pos < len(all_open_dates)
+    if bool(config.require_full_dependency_padding) and not dependency_padding_complete:
+        available = max(0, len(all_open_dates) - 1 - sample_end_pos)
+        raise ValueError(
+            "requested sample window lacks full forward+execution dependency padding: "
+            f"required={required_dependency_days}, available={available}"
+        )
+    panel_end_pos = min(
+        len(all_open_dates) - 1,
+        required_panel_end_pos,
+    )
     date_values = all_open_dates[panel_start_pos : panel_end_pos + 1]
     pit_price_coverage = {
         "missing_rows": 0,
@@ -1055,6 +1393,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
     if daily.empty:
         raise ValueError("market_daily_raw returned no rows")
     daily["raw_open"] = pd.to_numeric(daily["open"], errors="coerce").astype("float64")
+    daily["raw_close"] = pd.to_numeric(daily["close"], errors="coerce").astype("float64")
     if sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE:
         daily = daily[daily["symbol"].map(_is_pit_mainboard_symbol)].copy()
         if daily.empty:
@@ -1105,7 +1444,9 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         panel_dir / "limit_structure.float32.dat", (n_dates, n_symbols, len(LIMIT_SIGNAL_COLUMNS)), fill_value=np.nan
     )
     up_limit_panel = _fill_float_memmap(label_dir / "entry_up_limit.float32.dat", (n_dates, n_symbols), fill_value=np.nan)
+    down_limit_panel = _fill_float_memmap(label_dir / "exit_down_limit.float32.dat", (n_dates, n_symbols), fill_value=np.nan)
     raw_open_panel = _fill_float_memmap(label_dir / "entry_open_raw.float32.dat", (n_dates, n_symbols), fill_value=np.nan)
+    raw_close_panel = _fill_float_memmap(label_dir / "exit_close_raw.float32.dat", (n_dates, n_symbols), fill_value=np.nan)
     has_bar_panel = _fill_bool_memmap(mask_dir / "has_bar.bool.dat", (n_dates, n_symbols))
     universe_has_bar_panel = _fill_bool_memmap(mask_dir / "pit_universe_has_bar.bool.dat", (n_dates, n_symbols))
     status_valid_panel = _fill_bool_memmap(mask_dir / "status_valid.bool.dat", (n_dates, n_symbols))
@@ -1114,6 +1455,11 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
     is_delisted_panel = _fill_bool_memmap(mask_dir / "is_delisted.bool.dat", (n_dates, n_symbols))
     signal_eligible_panel = _fill_bool_memmap(mask_dir / "signal_eligible.bool.dat", (n_dates, n_symbols))
     tradable_panel = _fill_bool_memmap(mask_dir / "tradable.bool.dat", (n_dates, n_symbols))
+    exit_has_valid_bar_volume_panel = _fill_bool_memmap(
+        mask_dir / "exit_has_valid_bar_volume.bool.dat",
+        (n_dates, n_symbols),
+    )
+    exit_sellable_panel = _fill_bool_memmap(mask_dir / "exit_sellable.bool.dat", (n_dates, n_symbols))
     previous_close_valid_panel = _fill_bool_memmap(mask_dir / "previous_close_valid.bool.dat", (n_dates, n_symbols))
     corr_valid_panel = _fill_bool_memmap(mask_dir / "corr_valid.bool.dat", (n_dates, n_symbols))
     zero_range_panel = _fill_bool_memmap(mask_dir / "zero_range.bool.dat", (n_dates, n_symbols))
@@ -1129,8 +1475,23 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         date_to_idx=date_to_idx,
         symbol_to_idx=symbol_to_idx,
     )
+    _write_scalar_panel_values(
+        raw_close_panel,
+        daily_with_state,
+        "raw_close",
+        date_to_idx=date_to_idx,
+        symbol_to_idx=symbol_to_idx,
+    )
     has_bar_panel[:] = np.isfinite(raw_open_panel)
     has_bar_panel.flush()
+    volume_values = daily_raw[:, :, DAILY_RAW_FEATURES.index("volume")]
+    exit_has_valid_bar_volume_panel[:] = (
+        has_bar_panel
+        & np.isfinite(raw_close_panel)
+        & np.isfinite(volume_values)
+        & (volume_values > 0.0)
+    )
+    exit_has_valid_bar_volume_panel.flush()
     if n_dates > 1:
         previous_close_valid_panel[1:] = has_bar_panel[1:] & np.maximum.accumulate(has_bar_panel[:-1], axis=0)
     high_values = daily_raw[:, :, DAILY_RAW_FEATURES.index("high")]
@@ -1244,14 +1605,39 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
 
     for year in range(int(date_values[0][:4]), int(date_values[-1][:4]) + 1):
         _write_json(progress_path, {"status": "writing_entry_limits", "year": year, "updated_at": _now()})
-        limit = _read_dataset_date_range(root, active, "limit_status", ["symbol", "trade_date", "up_limit"], f"{year}-01-01", f"{year}-12-31")
+        limit = _read_dataset_date_range(
+            root,
+            active,
+            "limit_status",
+            ["symbol", "trade_date", "up_limit", "down_limit"],
+            f"{year}-01-01",
+            f"{year}-12-31",
+        )
         if not limit.empty:
             limit = _index_frame(limit, date_to_idx, symbol_to_idx)
-            values = pd.to_numeric(limit["up_limit"], errors="coerce").to_numpy(dtype=np.float32, copy=True)
-            up_limit_panel[limit["_date_idx"].to_numpy(dtype=np.int64), limit["_symbol_idx"].to_numpy(dtype=np.int64)] = values
+            date_idx = limit["_date_idx"].to_numpy(dtype=np.int64)
+            symbol_idx = limit["_symbol_idx"].to_numpy(dtype=np.int64)
+            up_values = pd.to_numeric(limit["up_limit"], errors="coerce").to_numpy(dtype=np.float32, copy=True)
+            down_values = pd.to_numeric(limit["down_limit"], errors="coerce").to_numpy(dtype=np.float32, copy=True)
+            up_limit_panel[date_idx, symbol_idx] = up_values
+            down_limit_panel[date_idx, symbol_idx] = down_values
             up_limit_panel.flush()
+            down_limit_panel.flush()
         del limit
         gc.collect()
+
+    exit_sellable_panel[:] = _exit_fill_mask(
+        raw_close_panel,
+        down_limit_panel,
+        exit_observed=exit_has_valid_bar_volume_panel,
+        exit_status_valid=status_valid_panel,
+        exit_suspended=is_suspended_panel,
+        exit_delisted=is_delisted_panel,
+        require_status_valid=(
+            sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE or suspension_fill == SUSPENSION_FILL_CARRY_CLOSE
+        ),
+    )
+    exit_sellable_panel.flush()
 
     _write_json(progress_path, {"status": "computing_labels", "updated_at": _now()})
     summary_columns = path_summary_columns(config.forward_days)
@@ -1313,12 +1699,18 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
     input_valid_store = _fill_bool_memmap(mask_dir / "input_valid.bool.dat", tuple(int(item) for item in input_valid.shape))
     entry_buyable_store = _fill_bool_memmap(mask_dir / "entry_buyable.bool.dat", tuple(int(item) for item in entry_buyable.shape))
     label_valid_store = _fill_bool_memmap(mask_dir / "label_valid.bool.dat", tuple(int(item) for item in label_valid.shape))
+    candidate_eligible_store = _fill_bool_memmap(
+        mask_dir / "candidate_eligible.bool.dat",
+        tuple(int(item) for item in input_valid.shape),
+    )
     input_valid_store[:] = input_valid
     entry_buyable_store[:] = entry_buyable
     label_valid_store[:] = label_valid
+    candidate_eligible_store[:] = input_valid & np.asarray(signal_eligible_panel, dtype=bool)
     input_valid_store.flush()
     entry_buyable_store.flush()
     label_valid_store.flush()
+    candidate_eligible_store.flush()
 
     _write_json(progress_path, {"status": "building_sample_index", "updated_at": _now()})
     sample_index = _build_sample_index(
@@ -1332,11 +1724,33 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         input_valid=input_valid,
         entry_buyable=entry_buyable,
         label_valid=label_valid,
+        price_label_valid=price_label_valid_store,
+        va_aux_valid=va_aux_valid_store,
         signal_eligible=signal_eligible_panel if sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE else None,
         require_entry_filled=sample_filter == SAMPLE_FILTER_COMPLETE_CASE,
     )
     sample_index_path = output_dir / "sample_index.parquet"
     sample_index.to_parquet(sample_index_path, index=False)
+    candidate_index = _build_sample_index(
+        date_values=date_values,
+        symbol_values=symbol_values,
+        start_date=config.start_date,
+        end_date=config.end_date,
+        train_years=config.train_years,
+        validation_years=config.validation_years,
+        test_years=config.test_years,
+        input_valid=input_valid,
+        entry_buyable=entry_buyable,
+        label_valid=label_valid,
+        price_label_valid=price_label_valid_store,
+        va_aux_valid=va_aux_valid_store,
+        signal_eligible=signal_eligible_panel,
+        require_entry_filled=False,
+        require_label_valid=False,
+        id_column="candidate_id",
+    )
+    candidate_index_path = output_dir / "candidate_index.parquet"
+    candidate_index.to_parquet(candidate_index_path, index=False)
 
     train_date_mask = np.array([int(date[:4]) in set(config.train_years) for date in date_values], dtype=bool)
     normalization = {
@@ -1349,6 +1763,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
 
     source_dataset_ids = dict(active.get("datasets", {}) or {})
     split_counts = sample_index["split"].value_counts().to_dict() if not sample_index.empty else {}
+    candidate_split_counts = candidate_index["split"].value_counts().to_dict() if not candidate_index.empty else {}
     path_anchor_name = "signal_day_close" if str(config.price_anchor) == "today_close" else "next_calendar_trading_day_open"
     if isinstance(future_ohlcva_path_store, DateShardedFloatStore):
         future_ohlcva_meta = future_ohlcva_path_store.manifest(
@@ -1400,9 +1815,15 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             "view_id": str(dict(research_dataset_view or {}).get("view_id", "") or "") or None,
             "overrides": dict(dict(research_dataset_view or {}).get("overrides", {}) or {}),
         },
+        "research_contract": research_contract_binding,
+        "development_contract": research_contract_binding,
         "scope": active_scope,
         "lookback_days": int(config.lookback_days),
         "forward_days": int(config.forward_days),
+        "execution_tail_days": execution_tail_days,
+        "max_label_dependency_days": required_dependency_days,
+        "dependency_padding_complete": bool(dependency_padding_complete),
+        "available_dependency_padding_days": int(panel_end_pos - sample_end_pos),
         "start_date": str(config.start_date),
         "end_date": str(config.end_date),
         "train_years": list(config.train_years),
@@ -1416,6 +1837,9 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             "sample_filter": sample_filter,
             "suspension_fill": suspension_fill,
             "label_valid_alias": "price_label_valid" if separate_price_va_validity else "complete_ohlcva_label_valid",
+            "candidate_filter": "signal_day_input_valid_and_pit_signal_eligible_only",
+            "supervision_filter": "candidate_filter_and_label_valid",
+            "candidate_selection_uses_future_labels": False,
             "unfilled_samples_retained": sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE,
             "pit_universe_domain": "pit_signal_universe" if sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE else None,
             "pit_universe_manifest": resolved_pit_manifest or None,
@@ -1430,6 +1854,8 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         "symbol_count": int(n_symbols),
         "sample_count": int(len(sample_index)),
         "sample_count_by_split": {str(key): int(value) for key, value in split_counts.items()},
+        "candidate_count": int(len(candidate_index)),
+        "candidate_count_by_split": {str(key): int(value) for key, value in candidate_split_counts.items()},
         "feature_channels": {
             "daily_raw": {"path": str((panel_dir / "daily_raw.float32.dat").resolve()), "shape": [n_dates, n_symbols, len(DAILY_RAW_FEATURES)], "columns": DAILY_RAW_FEATURES},
             "daily_state": {"path": str((panel_dir / "daily_state.float32.dat").resolve()), "shape": [n_dates, n_symbols, len(RAW_SIGNAL_COLUMNS)], "columns": RAW_SIGNAL_COLUMNS},
@@ -1456,9 +1882,46 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
                 "shape": [n_dates, n_symbols],
                 "units": "CNY_raw_exchange_price",
             },
+            "exit_close_raw": {
+                "path": str((label_dir / "exit_close_raw.float32.dat").resolve()),
+                "shape": [n_dates, n_symbols],
+                "units": "CNY_raw_exchange_price",
+            },
+            "exit_down_limit_raw": {
+                "path": str((label_dir / "exit_down_limit.float32.dat").resolve()),
+                "shape": [n_dates, n_symbols],
+                "units": "CNY_raw_exchange_price",
+            },
+        },
+        "execution_cost_contract": execution_cost_contract,
+        "terminal_execution_contract": {
+            "unresolved_after_tail": "apply_precommitted_recovery_fraction",
+            "recovery_fraction_of_entry_notional": unresolved_exit_recovery_fraction,
+            "default_interpretation": "zero_recovery_total_loss" if unresolved_exit_recovery_fraction == 0.0 else "configured_partial_recovery",
+        },
+        "execution_views": {
+            "exit_close_raw_path": {
+                "source_array": "exit_close_raw",
+                "shape": [n_dates, n_symbols, required_dependency_days],
+                "indexing": "source[signal_date_idx+1:signal_date_idx+1+forward_days+execution_tail_days, symbol_idx]",
+                "materialized": False,
+            },
+            "exit_down_limit_raw_path": {
+                "source_array": "exit_down_limit_raw",
+                "shape": [n_dates, n_symbols, required_dependency_days],
+                "indexing": "source[signal_date_idx+1:signal_date_idx+1+forward_days+execution_tail_days, symbol_idx]",
+                "materialized": False,
+            },
+            "exit_sellable_path": {
+                "source_mask": "exit_sellable",
+                "shape": [n_dates, n_symbols, required_dependency_days],
+                "indexing": "source[signal_date_idx+1:signal_date_idx+1+forward_days+execution_tail_days, symbol_idx]",
+                "materialized": False,
+            },
         },
         "masks": {
             "input_valid": {"path": str((mask_dir / "input_valid.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
+            "candidate_eligible": {"path": str((mask_dir / "candidate_eligible.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
             "entry_buyable": {"path": str((mask_dir / "entry_buyable.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
             "entry_filled": {"path": str((mask_dir / "entry_buyable.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
             "label_valid": {"path": str((mask_dir / "label_valid.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
@@ -1473,6 +1936,8 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             "is_delisted": {"path": str((mask_dir / "is_delisted.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
             "signal_eligible": {"path": str((mask_dir / "signal_eligible.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
             "tradable": {"path": str((mask_dir / "tradable.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
+            "exit_has_valid_bar_volume": {"path": str((mask_dir / "exit_has_valid_bar_volume.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
+            "exit_sellable": {"path": str((mask_dir / "exit_sellable.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
             "previous_close_valid": {"path": str((mask_dir / "previous_close_valid.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
             "corr_valid": {"path": str((mask_dir / "corr_valid.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
             "zero_range": {"path": str((mask_dir / "zero_range.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
@@ -1490,12 +1955,29 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
                 "indexing": "source[signal_date_idx+1:signal_date_idx+1+forward_days, symbol_idx]",
                 "materialized": False,
             },
+            "exit_sellable_path": {
+                "source_mask": "exit_sellable",
+                "shape": [n_dates, n_symbols, int(config.forward_days) + execution_tail_days],
+                "indexing": "source[signal_date_idx+1:signal_date_idx+1+forward_days+execution_tail_days, symbol_idx]",
+                "materialized": False,
+            },
         },
         "sample_index_path": str(sample_index_path.resolve()),
+        "candidate_index_path": str(candidate_index_path.resolve()),
+        "index_semantics": {
+            "sample_index": "supervised rows; candidate eligibility plus label_valid (and legacy entry fill when configured)",
+            "candidate_index": "full scoring universe; signal-day input_valid plus signal_eligible, never future-label or entry-fill gated",
+            "join_key": ["date_idx", "symbol_idx"],
+            "label_flags": ["label_valid", "price_label_valid", "va_aux_valid"],
+        },
         "normalization": normalization,
         "label_semantics": {
             "entry_anchor": "signal day close decision, next calendar trading day open entry",
             "entry_fill": "evaluated after ranking from raw next-day open, suspension state, and the configured exchange-tick limit rule",
+            "earliest_exit": "path day 2 (T+1 after the next-open entry day)",
+            "exit_fill": "planned close exit defers to the first observed, status-valid, non-suspended, non-delisted day whose raw close is above the tick-rounded down limit",
+            "exit_retry_window": f"prediction remains {int(config.forward_days)} days; exit may defer for {execution_tail_days} additional trading days",
+            "unresolved_exit": f"after the retry window recover {unresolved_exit_recovery_fraction:.6f} of entry notional before costs",
             "price_anchor": str(config.price_anchor),
             "future_ohlc_path": f"OHLC returns are relative to {path_anchor_name}; price adjustment={price_adjustment}.",
             "future_ohlcva_path": f"OHLC returns are relative to {path_anchor_name}; volume and amount are log-relative to trailing 20 trading days ending on signal date.",
@@ -1572,6 +2054,14 @@ def reanchor_sequence_pack(
         masks[str(name)] = copied
     sample_index_src = Path(str(source["sample_index_path"]))
     sample_index_path = _hardlink_file(sample_index_src, output_dir / "sample_index.parquet", overwrite=overwrite)
+    candidate_index_path: Path | None = None
+    if str(source.get("candidate_index_path", "") or ""):
+        candidate_index_src = Path(str(source["candidate_index_path"]))
+        candidate_index_path = _hardlink_file(
+            candidate_index_src,
+            output_dir / "candidate_index.parquet",
+            overwrite=overwrite,
+        )
     source_label_dir = Path(str(source_path.parent / "labels"))
     entry_up_limit_src = source_label_dir / "entry_up_limit.float32.dat"
     if not entry_up_limit_src.exists():
@@ -1677,6 +2167,8 @@ def reanchor_sequence_pack(
             },
         }
     )
+    if candidate_index_path is not None:
+        manifest["candidate_index_path"] = str(candidate_index_path.resolve())
     manifest_path = output_dir / "manifest.json"
     _write_json(manifest_path, manifest)
     _write_json(progress_path, {"status": "completed", "manifest_json": str(manifest_path.resolve()), "updated_at": _now()})
@@ -1689,7 +2181,7 @@ def validate_sequence_pack(manifest_path: str | Path) -> dict[str, Any]:
     blockers: list[str] = []
     if manifest.get("artifact_type") != "qdp_v2_sequence_path_pack":
         blockers.append("not_qdp_v2_sequence_path_pack")
-    for section in ["feature_channels", "label_arrays", "masks"]:
+    for section in ["feature_channels", "label_arrays", "execution_arrays", "masks"]:
         for name, meta in dict(manifest.get(section, {}) or {}).items():
             dtype = "bool" if section == "masks" else "float32"
             shards = list(meta.get("shards", []) or [])
@@ -1717,12 +2209,25 @@ def validate_sequence_pack(manifest_path: str | Path) -> dict[str, Any]:
     sample_index_path = Path(str(manifest.get("sample_index_path", "") or ""))
     if not sample_index_path.exists():
         blockers.append("missing_sample_index")
+    candidate_index_raw = str(manifest.get("candidate_index_path", "") or "")
+    if candidate_index_raw:
+        if not Path(candidate_index_raw).exists():
+            blockers.append("missing_candidate_index")
+    elif bool(dict(manifest.get("data_semantics", {}) or {}).get("candidate_selection_uses_future_labels") is False):
+        blockers.append("missing_candidate_index")
+    if (
+        bool(dict(manifest.get("data_semantics", {}) or {}).get("candidate_selection_uses_future_labels") is False)
+        and manifest.get("dependency_padding_complete") is not True
+    ):
+        blockers.append("incomplete_forward_execution_dependency_padding")
     return {
         "status": "blocked" if blockers else "ok",
         "blockers": blockers,
         "manifest_path": str(path.resolve()),
         "sample_count": int(manifest.get("sample_count", 0) or 0),
         "sample_count_by_split": dict(manifest.get("sample_count_by_split", {}) or {}),
+        "candidate_count": int(manifest.get("candidate_count", 0) or 0),
+        "candidate_count_by_split": dict(manifest.get("candidate_count_by_split", {}) or {}),
     }
 
 
@@ -1771,6 +2276,46 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=(SUSPENSION_FILL_NONE, SUSPENSION_FILL_CARRY_CLOSE),
         default=SUSPENSION_FILL_NONE,
         help="Optionally carry the last adjusted close through explicit suspension days while preserving masks.",
+    )
+    build.add_argument(
+        "--execution-tail-days",
+        type=int,
+        default=DEFAULT_EXECUTION_TAIL_DAYS,
+        help="Additional trading days available only for deferred exit execution; does not extend the prediction target.",
+    )
+    build.add_argument(
+        "--require-full-dependency-padding",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Block unless every requested signal date has forward_days + execution_tail_days of calendar padding.",
+    )
+    build.add_argument(
+        "--unresolved-exit-recovery-fraction",
+        type=float,
+        default=0.0,
+        help="Precommitted terminal recovery fraction after the execution tail; 0 is total-loss recovery.",
+    )
+    build.add_argument("--lot-size", type=int, default=DEFAULT_LOT_SIZE)
+    build.add_argument("--commission-bps", type=float, default=DEFAULT_COMMISSION_BPS)
+    build.add_argument("--minimum-commission-cny", type=float, default=DEFAULT_MIN_COMMISSION_CNY)
+    build.add_argument("--stamp-tax-bps", type=float, default=DEFAULT_STAMP_TAX_BPS)
+    build.add_argument(
+        "--stamp-tax-schedule",
+        default=",".join(f"{date}:{rate:g}" for date, rate in DEFAULT_STAMP_TAX_SCHEDULE),
+        help="Comma-separated effective-date rates, for example 1900-01-01:10,2023-08-28:5.",
+    )
+    build.add_argument("--transfer-fee-bps", type=float, default=DEFAULT_TRANSFER_FEE_BPS)
+    build.add_argument("--slippage-bps", type=float, default=DEFAULT_SLIPPAGE_BPS)
+    build.add_argument(
+        "--stress-slippage-multiplier",
+        type=float,
+        default=DEFAULT_STRESS_SLIPPAGE_MULTIPLIER,
+    )
+    build.add_argument(
+        "--research-contract",
+        type=Path,
+        default=None,
+        help="Approved immutable research contract; semantic and raw-file SHA-256 identities are bound into the pack manifest.",
     )
     build.add_argument(
         "--pit-universe-manifest",
@@ -1827,6 +2372,23 @@ def main(argv: list[str] | None = None) -> int:
             entry_rule=str(args.entry_rule),
             sample_filter=str(args.sample_filter),
             suspension_fill=str(args.suspension_fill),
+            execution_tail_days=int(args.execution_tail_days),
+            require_full_dependency_padding=bool(args.require_full_dependency_padding),
+            unresolved_exit_recovery_fraction=float(args.unresolved_exit_recovery_fraction),
+            execution_cost=AShareExecutionCostConfig(
+                lot_size=int(args.lot_size),
+                commission_bps=float(args.commission_bps),
+                minimum_commission_cny=float(args.minimum_commission_cny),
+                stamp_tax_bps=float(args.stamp_tax_bps),
+                stamp_tax_schedule=_parse_rate_schedule(
+                    args.stamp_tax_schedule,
+                    default=DEFAULT_STAMP_TAX_SCHEDULE,
+                ),
+                transfer_fee_bps=float(args.transfer_fee_bps),
+                slippage_bps=float(args.slippage_bps),
+                stress_slippage_multiplier=float(args.stress_slippage_multiplier),
+            ),
+            research_contract=Path(args.research_contract) if args.research_contract is not None else None,
             pit_universe_manifest=Path(args.pit_universe_manifest) if args.pit_universe_manifest is not None else None,
             dataset_view=Path(args.dataset_view) if args.dataset_view is not None else None,
         )

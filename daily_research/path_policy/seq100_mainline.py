@@ -135,6 +135,9 @@ class TodayClosePathOnlyProfile:
     evaluation_mode: str = EVALUATION_MODE_STANDARD
     early_stopping_patience: int = 2
     early_stopping_min_delta: float = 0.0
+    early_stopping_metric: str = ""
+    early_stopping_mode: str = ""
+    min_complete_epochs: int = 1
     top_k: str = DEFAULT_TOP_K
     max_samples_per_split: int = 0
     summary_loss_profile: str = SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC
@@ -149,7 +152,7 @@ class TodayClosePathOnlyProfile:
 
 
 def build_todayclose_path_only_train_argv(profile: TodayClosePathOnlyProfile) -> list[str]:
-    return [
+    argv = [
         "train",
         "--store-view",
         str(profile.store_view),
@@ -225,7 +228,14 @@ def build_todayclose_path_only_train_argv(profile: TodayClosePathOnlyProfile) ->
         str(profile.early_stopping_patience),
         "--early-stopping-min-delta",
         str(profile.early_stopping_min_delta),
+        "--min-complete-epochs",
+        str(profile.min_complete_epochs),
     ]
+    if profile.early_stopping_metric:
+        argv.extend(["--early-stopping-metric", profile.early_stopping_metric])
+    if profile.early_stopping_mode:
+        argv.extend(["--early-stopping-mode", profile.early_stopping_mode])
+    return argv
 
 
 @dataclass(frozen=True)
@@ -708,14 +718,23 @@ def mainline_contract() -> dict[str, Any]:
             "active_execution_strategy.json, live/default, broker, or trade-plan changes."
         ),
         "primary_evaluation_policy": {
+            "method": "purged_expanding_development_walkforward",
+            "split_roles": {"fit": "train", "evaluation": "development"},
+            "train_label_rule": "dependency_end_trade_date < development_start_trade_date",
+            "checkpoint_policy": "best_development_total_loss",
+            "development_access": "evaluate_after_each_complete_epoch_for_early_stopping_and_model_selection",
+            "development_years": [2022, 2023, 2024, 2025],
+            "seed": 7,
+            "training_sample_policy": "all_rows",
+            "minimum_complete_epochs": 1,
+        },
+        "legacy_fixed_oos_policy": {
             "method": "purged_expanding_walk_forward",
             "split_roles": {"fit": "train", "evaluation": "oos"},
-            "train_label_rule": "label_end_trade_date < oos_start_trade_date",
             "checkpoint_policy": "final_epoch",
-            "oos_access": "evaluate_once_after_training",
-            "formal_years": [2022, 2023, 2024, 2025],
+            "status": "compatibility_only",
         },
-        "next_decision_surface": "complete_case_oos_universe_or_preregistered_multiseed",
+        "next_decision_surface": "full_candidate_development_walkforward_or_loss_redesign",
     }
 
 
@@ -843,6 +862,9 @@ def _add_train_args(
     )
     parser.add_argument("--early-stopping-patience", type=int, default=int(default_early_stopping_patience))
     parser.add_argument("--early-stopping-min-delta", type=float, default=0.0)
+    parser.add_argument("--early-stopping-metric", default="")
+    parser.add_argument("--early-stopping-mode", default="")
+    parser.add_argument("--min-complete-epochs", type=int, default=1)
     parser.add_argument("--prediction-mode", default="compact", choices=("full", "compact", "none"))
     parser.add_argument("--evaluation-mode", default=EVALUATION_MODE_STANDARD, choices=EVALUATION_MODES)
     parser.add_argument("--dry-run", action="store_true")
@@ -877,6 +899,9 @@ def main(argv: list[str] | None = None) -> int:
         evaluation_mode=str(args.evaluation_mode),
         early_stopping_patience=int(args.early_stopping_patience),
         early_stopping_min_delta=float(args.early_stopping_min_delta),
+        early_stopping_metric=str(args.early_stopping_metric),
+        early_stopping_mode=str(args.early_stopping_mode),
+        min_complete_epochs=int(args.min_complete_epochs),
         max_samples_per_split=int(args.max_samples_per_split),
     )
     profile = spec.apply(base_profile)

@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import os
+import subprocess
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -13,10 +14,15 @@ from typing import Any, Iterable, Mapping, Sequence
 import pandas as pd
 
 from daily_research.path_policy.seq100_walkforward import (
+    APPROVED_DEVELOPMENT_CONTRACT_PATH,
     DEFAULT_PYTHON,
     WORKSPACE_ROOT,
+    _validated_development_fold_training_contract,
     _validated_fold_training_contract,
+    approved_development_contract_binding,
+    development_view_path,
     purged_view_path,
+    verify_development_walkforward_view,
     verify_purged_walkforward_view,
 )
 
@@ -24,6 +30,9 @@ from daily_research.path_policy.seq100_walkforward import (
 CONTRACT_ID = "seq100_pit_adjusted_global_tail_contract_20260711"
 INNER_OOS_YEARS = (2018, 2019, 2020, 2021)
 OUTER_OOS_YEARS = (2022, 2023, 2024, 2025)
+DEVELOPMENT_YEARS = (2022, 2023, 2024, 2025)
+DEVELOPMENT_SEED = 7
+DEFAULT_DEVELOPMENT_PROFILES = ("baseline", "hard_st")
 SCREEN_SEEDS = (7,)
 CONFIRM_SEEDS = (7, 17, 29)
 DEFAULT_ROOT = Path("daily_research/output/path_policy/studies/seq100_pit_adjusted_global_tail_generation_20260711_v1")
@@ -35,6 +44,14 @@ DEFAULT_STORE_ROOT = Path(
     "daily_research/data/research_store/walkforward/"
     "seq100_pit_adjusted_global_tail_contract_20260711_v1"
 )
+DEFAULT_DEVELOPMENT_ROOT = Path(
+    "daily_research/output/path_policy/studies/"
+    "seq100_candidate_complete_development_walkforward_20260711_v1"
+)
+DEFAULT_DEVELOPMENT_STORE_ROOT = Path(
+    "daily_research/data/research_store/walkforward/"
+    "seq100_candidate_complete_development_walkforward_20260711_v1"
+)
 REGISTRY_SCHEMA_VERSION = 2
 EVIDENCE_POLICY_RUN_ARTIFACTS = "run_artifacts_only"
 EVIDENCE_POLICY_SYNTHETIC_ALLOWED = "synthetic_metrics_allowed_for_tests"
@@ -44,6 +61,14 @@ CODE_PROVENANCE_PATHS = (
     Path("daily_research/path_policy/seq100_walkforward.py"),
     Path("daily_research/path_policy/seq100_research_generation.py"),
     Path("daily_research/brain/references/seq100_pit_adjusted_global_tail_contract_20260711.json"),
+)
+DEVELOPMENT_CODE_PROVENANCE_PATHS = (
+    Path("daily_research/path_policy/seq100_mainline.py"),
+    Path("daily_research/path_policy/qdp_v2_sequence_path_pack.py"),
+    Path("daily_research/path_policy/qdp_v2_sequence_path_training.py"),
+    Path("daily_research/path_policy/seq100_walkforward.py"),
+    Path("daily_research/path_policy/seq100_research_generation.py"),
+    APPROVED_DEVELOPMENT_CONTRACT_PATH,
 )
 
 PROFILE_COMMANDS = {
@@ -61,6 +86,49 @@ METRIC_NAMES = (
     "fill_rate",
     "path_mae",
 )
+DEVELOPMENT_TOP_K = (1, 3, 5, 10)
+DEVELOPMENT_METRIC_NAMES = tuple(
+    f"top{top_k}_{name}"
+    for top_k in DEVELOPMENT_TOP_K
+    for name in (
+        "opportunity_alpha",
+        "net_realized_plan_return_base_alpha",
+        "net_realized_plan_return_stress_alpha",
+        "net_realized_plan_value_base_alpha",
+        "net_realized_plan_value_stress_alpha",
+        "oracle_regret",
+        "entry_fill_rate",
+        "realized_plan_coverage",
+    )
+) + (
+    "development_total_loss",
+    "daily_rank_ic",
+    "path_mae",
+)
+DEVELOPMENT_SELECTION_POLICY = {
+    "role": "development_model_selection",
+    "primary": "mean_topk_net_realized_plan_return_base_alpha",
+    "direction": "maximize",
+    "top_k": list(DEVELOPMENT_TOP_K),
+    "aggregation": "equal_development_year_weight",
+    "eligibility": {
+        "mean_top3_net_realized_plan_return_base_alpha_min": 0.0,
+        "mean_top10_net_realized_plan_return_base_alpha_min": 0.0,
+        "mean_top3_net_realized_plan_return_stress_alpha_min": 0.0,
+        "positive_top3_development_years_min": 3,
+        "all_topk_realized_plan_coverage": 1.0,
+    },
+    "tie_breakers": [
+        "worst_development_year_top3_net_realized_plan_return_base_alpha",
+        "leave_best_year_out_top3_net_realized_plan_return_base_alpha",
+        "mean_topk_net_realized_plan_value_base_alpha",
+        "mean_topk_opportunity_alpha",
+        "daily_rank_ic",
+    ],
+    "required_years": list(DEVELOPMENT_YEARS),
+    "historical_test_set": None,
+    "historical_outer_audit": False,
+}
 SELECTION_POLICY = {
     "primary": "top3_opportunity_alpha",
     "direction": "maximize",
@@ -119,16 +187,20 @@ def _validated_registry(registry: Mapping[str, Any]) -> dict[str, Any]:
     return dict(registry)
 
 
-def _current_code_provenance() -> dict[str, Any]:
+def _current_code_provenance(
+    paths: Sequence[Path] = CODE_PROVENANCE_PATHS,
+) -> dict[str, Any]:
     files = [
         {"path": str(_workspace_path(path).resolve()), "sha256": _file_sha256(path)}
-        for path in CODE_PROVENANCE_PATHS
+        for path in paths
     ]
     return {"files": files, "sha256": _payload_sha256(files)}
 
 
 def _validate_code_provenance(expected: Mapping[str, Any]) -> dict[str, Any]:
-    current = _current_code_provenance()
+    expected_files = list(dict(expected or {}).get("files", []) or [])
+    paths = tuple(Path(str(item.get("path", "") or "")) for item in expected_files)
+    current = _current_code_provenance(paths or CODE_PROVENANCE_PATHS)
     if current != dict(expected or {}):
         raise ValueError("registered research code provenance changed")
     return current
@@ -170,6 +242,62 @@ def _validate_source_view(
     missing_masks = sorted(required_masks.difference(masks))
     if missing_masks:
         raise ValueError(f"research generation source is missing corrected masks: {missing_masks}")
+    return source_path, source, source_sha256
+
+
+def _validate_development_source_view(
+    source_view: str | Path,
+    *,
+    require_corrected_contract: bool,
+) -> tuple[Path, dict[str, Any], str]:
+    source_path, source, source_sha256 = _validate_source_view(
+        source_view,
+        require_corrected_contract=bool(require_corrected_contract),
+    )
+    if not require_corrected_contract:
+        return source_path, source, source_sha256
+    approved = approved_development_contract_binding()
+    if dict(source.get("research_contract", {}) or {}) != approved:
+        raise ValueError("development source is not bound to the approved successor contract")
+    if dict(source.get("development_contract", {}) or {}) != approved:
+        raise ValueError("development source contract alias differs from the approved successor contract")
+    candidate_path = _workspace_path(str(source.get("candidate_index_path", "") or "")).resolve()
+    if not candidate_path.is_file():
+        raise ValueError("development source requires a candidate_index_path")
+    if int(source.get("candidate_count", 0) or 0) <= 0:
+        raise ValueError("development source candidate_count must be positive")
+    if int(source.get("execution_tail_days", 0) or 0) != 20:
+        raise ValueError("development source execution_tail_days must equal 20")
+    max_dependency = int(source.get("max_label_dependency_days", 0) or 0)
+    if max_dependency != 80:
+        raise ValueError("development source max_label_dependency_days must equal 80")
+    if source.get("dependency_padding_complete") is not True:
+        raise ValueError("development source requires complete dependency padding")
+    if int(source.get("available_dependency_padding_days", 0) or 0) < max_dependency:
+        raise ValueError("development source does not expose the full dependency padding window")
+    execution_arrays = dict(source.get("execution_arrays", {}) or {})
+    required_execution_arrays = {
+        "entry_open_raw",
+        "entry_up_limit_raw",
+        "exit_close_raw",
+        "exit_down_limit_raw",
+    }
+    missing_execution_arrays = sorted(required_execution_arrays.difference(execution_arrays))
+    if missing_execution_arrays:
+        raise ValueError(f"development source is missing execution arrays: {missing_execution_arrays}")
+    masks = dict(source.get("masks", {}) or {})
+    required_execution_masks = {"candidate_eligible", "exit_has_valid_bar_volume", "exit_sellable"}
+    missing_execution_masks = sorted(required_execution_masks.difference(masks))
+    if missing_execution_masks:
+        raise ValueError(f"development source is missing execution masks: {missing_execution_masks}")
+    if not dict(source.get("execution_cost_contract", {}) or {}):
+        raise ValueError("development source requires an execution_cost_contract")
+    terminal = dict(source.get("terminal_execution_contract", {}) or {})
+    if str(terminal.get("unresolved_after_tail", "")) != "apply_precommitted_recovery_fraction":
+        raise ValueError("development source requires precommitted terminal recovery")
+    execution_views = dict(source.get("execution_views", {}) or {})
+    if not {"exit_close_raw_path", "exit_down_limit_raw_path", "exit_sellable_path"}.issubset(execution_views):
+        raise ValueError("development source is missing execution tail views")
     return source_path, source, source_sha256
 
 
@@ -216,6 +344,72 @@ def _fold_bindings(
             "fold_training_contract_sha256": str(fold_contract["sha256"]),
             "source_view_sha256": str(source_view_sha256),
             "train_start_year": int(train_start_year),
+        }
+    return bindings
+
+
+def _development_fold_bindings(
+    *,
+    years: Sequence[int],
+    store_root: Path,
+    source_view_sha256: str,
+    train_start_year: int,
+    require_existing: bool,
+) -> dict[str, dict[str, Any]]:
+    bindings: dict[str, dict[str, Any]] = {}
+    approved = approved_development_contract_binding()
+    for year in years:
+        view_path = development_view_path(int(year), store_root=store_root).resolve()
+        if not view_path.is_file():
+            if require_existing:
+                raise FileNotFoundError(
+                    f"missing prebuilt development fold for {year}: {view_path}; build and verify folds first"
+                )
+            bindings[str(int(year))] = {
+                "development_year": int(year),
+                "view_path": str(view_path),
+                "view_sha256": "",
+                "development_fold_training_contract_sha256": "",
+                "candidate_index_sha256": "",
+                "execution_cost_contract_sha256": "",
+                "source_view_sha256": str(source_view_sha256),
+                "train_start_year": int(train_start_year),
+                "research_contract_sha256": str(approved["contract_sha256"]),
+            }
+            continue
+        verification = verify_development_walkforward_view(view_path)
+        if str(verification.get("status", "")) != "ok":
+            raise ValueError(
+                f"development fold verification failed for {year}: {verification.get('blockers', [])}"
+            )
+        manifest = _read_json(view_path)
+        if dict(manifest.get("research_contract", {}) or {}) != approved:
+            raise ValueError(f"development fold {year} contract identity changed")
+        if dict(manifest.get("development_contract", {}) or {}) != approved:
+            raise ValueError(f"development fold {year} contract alias changed")
+        provenance = dict(manifest.get("source_view_provenance", {}) or {})
+        if str(provenance.get("manifest_sha256", "")) != str(source_view_sha256):
+            raise ValueError(f"development fold {year} is not derived from the registered source")
+        walkforward = dict(manifest.get("development_walkforward", {}) or {})
+        if int(walkforward.get("development_year", -1)) != int(year):
+            raise ValueError(f"development fold {year} year metadata mismatch")
+        if int(walkforward.get("train_start_year", -1)) != int(train_start_year):
+            raise ValueError(f"development fold {year} train_start_year mismatch")
+        if int(walkforward.get("max_label_dependency_days", 0) or 0) != 80:
+            raise ValueError(f"development fold {year} does not use the approved 80-day dependency")
+        fold_contract = _validated_development_fold_training_contract(manifest)
+        execution_cost_sha256 = _payload_sha256(dict(manifest.get("execution_cost_contract", {}) or {}))
+        bindings[str(int(year))] = {
+            "development_year": int(year),
+            "view_path": str(view_path),
+            "view_sha256": _file_sha256(view_path),
+            "development_fold_training_contract_sha256": str(fold_contract["sha256"]),
+            "sample_index_sha256": str(fold_contract["sample_index_sha256"]),
+            "candidate_index_sha256": str(fold_contract["candidate_index_sha256"]),
+            "execution_cost_contract_sha256": execution_cost_sha256,
+            "source_view_sha256": str(source_view_sha256),
+            "train_start_year": int(train_start_year),
+            "research_contract_sha256": str(approved["contract_sha256"]),
         }
     return bindings
 
@@ -439,6 +633,391 @@ def _build_jobs(
     return jobs
 
 
+def _normalize_development_profiles(profiles: Sequence[str]) -> tuple[str, ...]:
+    values = tuple(str(item).strip() for item in profiles if str(item).strip())
+    if not values or len(values) != len(set(values)):
+        raise ValueError("development profiles must be a non-empty unique sequence")
+    unknown = sorted(set(values).difference(PROFILE_COMMANDS))
+    if unknown:
+        raise ValueError(f"unsupported development profiles: {unknown}")
+    if len(values) > 5:
+        raise ValueError("approved development generation allows at most five candidates")
+    return values
+
+
+def _development_job_id(profile: str, year: int) -> str:
+    return f"development:{profile}:year{int(year)}:seed{DEVELOPMENT_SEED}"
+
+
+def _development_training_command(
+    *,
+    profile: str,
+    year: int,
+    maximum_epochs: int,
+    patience: int,
+    min_delta: float,
+    minimum_complete_epochs: int,
+    root: Path,
+    view_path: Path,
+    python_executable: Path,
+) -> list[str]:
+    return [
+        str(_workspace_path(python_executable)),
+        "-m",
+        "daily_research.path_policy.seq100_mainline",
+        PROFILE_COMMANDS[profile],
+        "--store-view",
+        str(view_path.resolve()),
+        "--output-root",
+        str((root / "runs" / "development").resolve()),
+        "--run-tag",
+        f"seq100_development_{profile}_{int(year)}_seed{DEVELOPMENT_SEED}",
+        "--epochs",
+        str(int(maximum_epochs)),
+        "--device",
+        "cuda",
+        "--seed",
+        str(DEVELOPMENT_SEED),
+        "--max-samples-per-split",
+        "0",
+        "--early-stopping-patience",
+        str(int(patience)),
+        "--early-stopping-min-delta",
+        str(float(min_delta)),
+        "--early-stopping-metric",
+        "development_total_loss",
+        "--early-stopping-mode",
+        "min",
+        "--min-complete-epochs",
+        str(int(minimum_complete_epochs)),
+        "--prediction-mode",
+        "none",
+        "--evaluation-mode",
+        "development",
+        "--json",
+    ]
+
+
+def _development_fold_build_commands(
+    *,
+    years: Sequence[int],
+    source_view: Path,
+    store_root: Path,
+    train_start_year: int,
+    python_executable: Path,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "development_year": int(year),
+            "view_path": str(development_view_path(int(year), store_root=store_root).resolve()),
+            "command": [
+                str(_workspace_path(python_executable)),
+                "-m",
+                "daily_research.path_policy.seq100_walkforward",
+                "build-development-fold",
+                "--source-view",
+                str(_workspace_path(source_view).resolve()),
+                "--development-year",
+                str(int(year)),
+                "--train-start-year",
+                str(int(train_start_year)),
+                "--store-root",
+                str(_workspace_path(store_root).resolve()),
+                "--json",
+            ],
+        }
+        for year in years
+    ]
+
+
+def _expected_development_resolved_profile_config(job: Mapping[str, Any]) -> dict[str, Any]:
+    from daily_research.path_policy.seq100_mainline import PROFILE_SPECS
+
+    profile = PROFILE_SPECS[str(job["profile_command"])].default_profile()
+    return {
+        "epochs": int(job["maximum_epochs"]),
+        "batch_size": int(profile.batch_size),
+        "model_type": str(profile.model_type),
+        "hidden_dim": int(profile.hidden_dim),
+        "layers": int(profile.layers),
+        "dropout": float(profile.dropout),
+        "symbol_embedding_dim": 16,
+        "learning_rate": float(profile.learning_rate),
+        "weight_decay": float(profile.weight_decay),
+        "path_loss_weight": float(profile.path_loss_weight),
+        "path_loss_profile": str(profile.path_loss_profile),
+        "summary_loss_weight": float(profile.summary_loss_weight),
+        "richer_loss_weight": float(profile.richer_loss_weight),
+        "price_delta_loss_weight": float(profile.price_delta_loss_weight),
+        "va_level_loss_weight": float(profile.va_level_loss_weight),
+        "va_delta_loss_weight": float(profile.va_delta_loss_weight),
+        "value_loss_weight": float(profile.value_loss_weight),
+        "rank_loss_weight": float(profile.rank_loss_weight),
+        "residual_score_weight": 0.25,
+        "residual_penalty_weight": 0.01,
+        "summary_loss_profile": str(profile.summary_loss_profile),
+        "input_channel_profile": str(profile.input_channel_profile),
+        "direct_value_horizon": int(profile.direct_value_horizon),
+        "rank_max_per_side": int(profile.rank_max_per_side),
+        "device": "cuda",
+        "amp": True,
+        "seed": DEVELOPMENT_SEED,
+        "top_k": [int(item) for item in str(profile.top_k).split(",") if item],
+        "max_samples_per_split": 0,
+        "prediction_mode": "none",
+        "early_stopping_patience": int(job["early_stopping"]["patience"]),
+        "early_stopping_min_delta": float(job["early_stopping"]["min_delta"]),
+        "early_stopping_metric": "development_total_loss",
+        "early_stopping_mode": "min",
+        "minimum_complete_epochs": int(job["early_stopping"]["minimum_complete_epochs"]),
+        "evaluation_mode": "development",
+        "path_value_gradient_profile": str(profile.path_value_gradient_profile),
+        "rank_training_profile": str(profile.rank_training_profile),
+        "rank_batch_size": int(profile.rank_batch_size),
+        "rank_interval": int(profile.rank_interval),
+        "prefetch_batches": int(profile.prefetch_batches),
+    }
+
+
+def _build_development_jobs(
+    *,
+    profiles: Sequence[str],
+    years: Sequence[int],
+    maximum_epochs: int,
+    patience: int,
+    min_delta: float,
+    minimum_complete_epochs: int,
+    root: Path,
+    fold_bindings: Mapping[str, Mapping[str, Any]],
+    python_executable: Path,
+) -> list[dict[str, Any]]:
+    jobs: list[dict[str, Any]] = []
+    for profile in profiles:
+        for year in years:
+            binding = dict(fold_bindings.get(str(int(year)), {}) or {})
+            if not binding:
+                raise ValueError(f"missing development fold binding for {year}")
+            view_path = _workspace_path(str(binding.get("view_path", "") or "")).resolve()
+            job = {
+                "job_id": _development_job_id(profile, int(year)),
+                "phase": "development",
+                "profile": str(profile),
+                "profile_command": PROFILE_COMMANDS[str(profile)],
+                "development_year": int(year),
+                "seed": DEVELOPMENT_SEED,
+                "maximum_epochs": int(maximum_epochs),
+                "max_samples_per_split": 0,
+                "evaluation_mode": "development",
+                "checkpoint_policy": "best_development_total_loss",
+                "early_stopping": {
+                    "metric": "development_total_loss",
+                    "mode": "min",
+                    "patience": int(patience),
+                    "min_delta": float(min_delta),
+                    "minimum_complete_epochs": int(minimum_complete_epochs),
+                    "restore_best_checkpoint": True,
+                },
+                "view_path": str(view_path),
+                "view_sha256": str(binding.get("view_sha256", "")),
+                "development_fold_training_contract_sha256": str(
+                    binding.get("development_fold_training_contract_sha256", "")
+                ),
+                "candidate_index_sha256": str(binding.get("candidate_index_sha256", "")),
+                "execution_cost_contract_sha256": str(
+                    binding.get("execution_cost_contract_sha256", "")
+                ),
+                "source_view_sha256": str(binding.get("source_view_sha256", "")),
+                "research_contract_sha256": str(binding.get("research_contract_sha256", "")),
+                "metric_names": list(DEVELOPMENT_METRIC_NAMES),
+            }
+            job["command"] = _development_training_command(
+                profile=str(profile),
+                year=int(year),
+                maximum_epochs=int(maximum_epochs),
+                patience=int(patience),
+                min_delta=float(min_delta),
+                minimum_complete_epochs=int(minimum_complete_epochs),
+                root=root,
+                view_path=view_path,
+                python_executable=python_executable,
+            )
+            job["expected_resolved_training_config"] = _expected_development_resolved_profile_config(job)
+            jobs.append(job)
+    return jobs
+
+
+def initialize_development_registry(
+    *,
+    root: str | Path = DEFAULT_DEVELOPMENT_ROOT,
+    source_view: str | Path = DEFAULT_SOURCE_VIEW,
+    store_root: str | Path = DEFAULT_DEVELOPMENT_STORE_ROOT,
+    profiles: Sequence[str] = DEFAULT_DEVELOPMENT_PROFILES,
+    development_years: Sequence[int] = DEVELOPMENT_YEARS,
+    seed: int = DEVELOPMENT_SEED,
+    maximum_epochs: int = 10,
+    patience: int = 2,
+    min_delta: float = 0.0,
+    minimum_complete_epochs: int = 1,
+    train_start_year: int = 2012,
+    python_executable: str | Path = DEFAULT_PYTHON,
+    require_corrected_source: bool = True,
+    require_existing_folds: bool = True,
+    evidence_policy: str = EVIDENCE_POLICY_RUN_ARTIFACTS,
+    kpi_portfolio_contract_path: str | Path | None = None,
+    additional_provenance_paths: Sequence[str | Path] = (),
+) -> dict[str, Any]:
+    root_path = _workspace_path(root)
+    years = _validate_exact_years(development_years, DEVELOPMENT_YEARS, label="development")
+    selected_profiles = _normalize_development_profiles(profiles)
+    if int(seed) != DEVELOPMENT_SEED:
+        raise ValueError(f"development discovery seed is frozen at {DEVELOPMENT_SEED}")
+    if int(maximum_epochs) != 10:
+        raise ValueError("approved development maximum_epochs is frozen at 10")
+    if int(patience) != 2:
+        raise ValueError("approved development early-stopping patience is frozen at 2")
+    if int(minimum_complete_epochs) != 1:
+        raise ValueError("approved development minimum_complete_epochs is frozen at 1")
+    if not math.isfinite(float(min_delta)) or float(min_delta) < 0.0:
+        raise ValueError("development early-stopping min_delta must be finite and non-negative")
+    if int(train_start_year) != 2012:
+        raise ValueError("approved development train_start_year is frozen at 2012")
+    if evidence_policy not in {EVIDENCE_POLICY_RUN_ARTIFACTS, EVIDENCE_POLICY_SYNTHETIC_ALLOWED}:
+        raise ValueError(f"unsupported evidence policy: {evidence_policy}")
+    if evidence_policy == EVIDENCE_POLICY_RUN_ARTIFACTS and (
+        not bool(require_corrected_source) or not bool(require_existing_folds)
+    ):
+        raise ValueError("run-artifact development registries require corrected source and existing folds")
+    if evidence_policy == EVIDENCE_POLICY_RUN_ARTIFACTS and kpi_portfolio_contract_path is None:
+        raise ValueError(
+            "formal development registration is blocked until a KPI/portfolio net-execution contract is provided"
+        )
+    source_path, _, source_sha256 = _validate_development_source_view(
+        source_view,
+        require_corrected_contract=bool(require_corrected_source),
+    )
+    store_root_path = _workspace_path(store_root).resolve()
+    fold_bindings = _development_fold_bindings(
+        years=years,
+        store_root=store_root_path,
+        source_view_sha256=source_sha256,
+        train_start_year=int(train_start_year),
+        require_existing=bool(require_existing_folds),
+    )
+    approved = approved_development_contract_binding()
+    jobs = _build_development_jobs(
+        profiles=selected_profiles,
+        years=years,
+        maximum_epochs=int(maximum_epochs),
+        patience=int(patience),
+        min_delta=float(min_delta),
+        minimum_complete_epochs=int(minimum_complete_epochs),
+        root=root_path,
+        fold_bindings=fold_bindings,
+        python_executable=_workspace_path(python_executable),
+    )
+    contract_paths = (
+        ()
+        if kpi_portfolio_contract_path is None
+        else (_workspace_path(kpi_portfolio_contract_path).resolve(),)
+    )
+    extra_paths = (
+        *contract_paths,
+        *tuple(_workspace_path(path).resolve() for path in additional_provenance_paths),
+    )
+    missing_extra = [str(path) for path in extra_paths if not path.is_file()]
+    if missing_extra:
+        raise FileNotFoundError(f"additional development provenance paths are missing: {missing_extra}")
+    provenance_paths = (*DEVELOPMENT_CODE_PROVENANCE_PATHS, *extra_paths)
+    if len({str(_workspace_path(path).resolve()) for path in provenance_paths}) != len(provenance_paths):
+        raise ValueError("development provenance paths must be unique")
+    code_provenance = _current_code_provenance(provenance_paths)
+    body = {
+        "schema_version": 1,
+        "artifact_type": "seq100_development_walkforward_registry",
+        "contract_id": str(approved["contract_id"]),
+        "research_contract": approved,
+        "status": "registered",
+        "study_root": str(root_path.resolve()),
+        "source_view": str(source_path.resolve()),
+        "source_view_sha256": source_sha256,
+        "store_root": str(store_root_path),
+        "fold_bindings": fold_bindings,
+        "evidence_policy": str(evidence_policy),
+        "code_provenance": code_provenance,
+        "additional_provenance_paths": [str(path) for path in extra_paths],
+        "kpi_portfolio_contract": (
+            None
+            if kpi_portfolio_contract_path is None
+            else {
+                "path": str(contract_paths[0]),
+                "sha256": _file_sha256(contract_paths[0]),
+            }
+        ),
+        "train_start_year": int(train_start_year),
+        "development_years": list(years),
+        "evidence_role": "historical_development_for_checkpoint_model_and_champion_selection",
+        "historical_test_set": None,
+        "historical_outer_audit": False,
+        "profiles": [
+            {"profile": profile, "profile_command": PROFILE_COMMANDS[profile]}
+            for profile in selected_profiles
+        ],
+        "training_protocol": {
+            "seed": DEVELOPMENT_SEED,
+            "max_samples_per_split": 0,
+            "full_fold_data_required": True,
+            "low_budget_screen_used_for_selection": False,
+            "maximum_epochs": int(maximum_epochs),
+            "early_stopping": {
+                "metric": "development_total_loss",
+                "mode": "min",
+                "patience": int(patience),
+                "min_delta": float(min_delta),
+                "minimum_complete_epochs": int(minimum_complete_epochs),
+                "restore_best_checkpoint": True,
+            },
+        },
+        "kpi_contract": {
+            "metric_names": list(DEVELOPMENT_METRIC_NAMES),
+            "top_k": list(DEVELOPMENT_TOP_K),
+            "optimization_metric": "development_total_loss",
+            "checkpoint_selection_uses_topk": False,
+            "champion_primary": "equal_weight_top1_3_5_10_alpha_net_realized_plan_return_base",
+            "net_execution_columns_required": [
+                "gross_realized_plan_return",
+                "net_realized_plan_return_base",
+                "net_realized_plan_return_stress",
+                "net_realized_plan_value_base",
+                "net_realized_plan_value_stress",
+                "realized_plan_covered",
+            ],
+            "legacy_gross_realized_plan_columns_allowed_for_selection": False,
+            "realized_plan_coverage_required": 1.0,
+            "base_and_double_slippage_scenarios_required": True,
+            "execution_cost_contract_sha256_required": True,
+            "model_selection": DEVELOPMENT_SELECTION_POLICY,
+        },
+        "fold_builds": _development_fold_build_commands(
+            years=years,
+            source_view=source_path,
+            store_root=store_root_path,
+            train_start_year=int(train_start_year),
+            python_executable=_workspace_path(python_executable),
+        ),
+        "jobs": jobs,
+        "protected_boundaries": {
+            "active_execution_changed": False,
+            "qdp_active_changed": False,
+            "legacy_artifacts_overwritten": False,
+            "retired_generation_resumed": False,
+        },
+    }
+    registry = {**body, "registry_sha256": _payload_sha256(body)}
+    path = _write_json(root_path / "development_registry.json", registry, immutable=True)
+    _initialize_ledger(root_path)
+    return {**registry, "registry_path": str(path.resolve())}
+
+
 def initialize_candidate_registry(
     *,
     root: str | Path = DEFAULT_ROOT,
@@ -625,7 +1204,127 @@ def _expected_resolved_profile_config(job: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _validate_development_run_job_binding(summary: Mapping[str, Any], job: Mapping[str, Any]) -> None:
+    command = list(job.get("command", []) or [])
+    expected = {
+        "run_tag": _command_option(command, "--run-tag"),
+        "seed": DEVELOPMENT_SEED,
+        "development_year": int(job["development_year"]),
+        "pack_manifest": str(Path(str(job["view_path"])).resolve()),
+    }
+    actual = {
+        "run_tag": str(summary.get("run_tag", "")),
+        "seed": int(summary.get("seed", -1)),
+        "development_year": int(summary.get("development_year", -1)),
+        "pack_manifest": str(Path(str(summary.get("pack_manifest", ""))).resolve()),
+    }
+    for key, value in expected.items():
+        if actual[key] != value:
+            raise ValueError(f"development run summary does not match registered job for {key}")
+    output_dir = _workspace_path(str(summary.get("output_dir", "") or "")).resolve()
+    if not output_dir.is_dir():
+        raise ValueError("development run summary output_dir is missing")
+    if str(summary.get("evaluation_mode", "")) != "development":
+        raise ValueError("development results require development evaluation mode")
+    if list(summary.get("evaluation_splits", []) or []) != ["development"]:
+        raise ValueError("development results must evaluate only the development split")
+    if str(summary.get("evaluation_split", "")) != "development":
+        raise ValueError("development evaluation_split must be development")
+    if str(summary.get("checkpoint_policy", "")) != "best_development_total_loss":
+        raise ValueError("development results require best_development_total_loss checkpoints")
+    maximum_epochs = int(job["maximum_epochs"])
+    completed_epochs = int(summary.get("completed_epochs", -1))
+    best_epoch = int(summary.get("best_epoch", -1))
+    if int(summary.get("epochs", -1)) != maximum_epochs:
+        raise ValueError("development run maximum epoch budget changed")
+    if not 1 <= best_epoch <= completed_epochs <= maximum_epochs:
+        raise ValueError("development best/completed epoch provenance is invalid")
+    if int(summary.get("best_optimizer_step", 0) or 0) <= 0:
+        raise ValueError("development run must report best_optimizer_step")
+    if int(summary.get("optimizer_step_count", 0) or 0) <= 0:
+        raise ValueError("development run must report optimizer_step_count")
+    if int(summary.get("max_samples_per_split", -1)) != 0:
+        raise ValueError("development jobs require all fold training samples")
+    early = dict(summary.get("early_stopping", {}) or {})
+    registered_early = dict(job.get("early_stopping", {}) or {})
+    for key in ("metric", "mode", "patience", "min_delta", "minimum_complete_epochs"):
+        if early.get(key) != registered_early.get(key):
+            raise ValueError(f"development early-stopping config mismatch for {key}")
+    if bool(early.get("restore_best_checkpoint", False)) is not True:
+        raise ValueError("development run must restore the best checkpoint")
+    if not math.isfinite(float(early.get("best_value", math.nan))):
+        raise ValueError("development early-stopping best_value must be finite")
+    resolved = dict(summary.get("resolved_training_config", {}) or {})
+    expected_resolved = dict(job.get("expected_resolved_training_config", {}) or {})
+    if not expected_resolved:
+        raise ValueError("development job is missing resolved training-config snapshot")
+    for key, expected_value in expected_resolved.items():
+        if resolved.get(key) != expected_value:
+            raise ValueError(f"development resolved training config mismatch for {key}")
+
+    approved = approved_development_contract_binding()
+    if dict(summary.get("research_contract", {}) or {}) != approved:
+        raise ValueError("development run is not bound to the approved contract")
+    view_path = _workspace_path(str(job["view_path"])).resolve()
+    expected_view_sha = str(job.get("view_sha256", ""))
+    if expected_view_sha:
+        if not view_path.is_file() or _file_sha256(view_path) != expected_view_sha:
+            raise ValueError("registered development fold view changed")
+        manifest = _read_json(view_path)
+        fold_contract = _validated_development_fold_training_contract(manifest)
+        expected_fold_sha = str(job.get("development_fold_training_contract_sha256", ""))
+        if str(fold_contract.get("sha256", "")) != expected_fold_sha:
+            raise ValueError("registered development fold contract changed")
+        summary_fold = dict(summary.get("development_fold_training_contract", {}) or {})
+        if str(summary_fold.get("sha256", "")) != expected_fold_sha:
+            raise ValueError("run summary development fold contract mismatch")
+        if str(fold_contract.get("candidate_index_sha256", "")) != str(
+            job.get("candidate_index_sha256", "")
+        ):
+            raise ValueError("registered development candidate index changed")
+        candidate_path = _workspace_path(str(manifest.get("candidate_index_path", "") or "")).resolve()
+        if str(Path(str(summary.get("candidate_index_path", ""))).resolve()) != str(candidate_path):
+            raise ValueError("development summary candidate_index_path mismatch")
+        if str(summary.get("candidate_index_sha256", "")) != str(
+            fold_contract.get("candidate_index_sha256", "")
+        ):
+            raise ValueError("development summary candidate index SHA mismatch")
+        execution_cost_sha256 = _payload_sha256(dict(manifest.get("execution_cost_contract", {}) or {}))
+        if execution_cost_sha256 != str(job.get("execution_cost_contract_sha256", "")):
+            raise ValueError("registered execution cost contract changed")
+        if str(summary.get("execution_cost_contract_sha256", "")) != execution_cost_sha256:
+            raise ValueError("development summary execution cost contract SHA mismatch")
+
+    selection = dict(summary.get("sample_selection", {}) or {})
+    train_selection = dict(selection.get("train", {}) or {})
+    candidate_selection = dict(selection.get("development_candidates", {}) or {})
+    if not train_selection or not candidate_selection:
+        raise ValueError("development summary is missing train/candidate sample-selection provenance")
+    if (
+        str(train_selection.get("policy", "")) != "all_rows"
+        or int(train_selection.get("requested_max_samples", -1)) != 0
+        or int(train_selection.get("selected_row_count", -1))
+        != int(train_selection.get("original_row_count", -2))
+    ):
+        raise ValueError("development training must consume all supervised train rows")
+    if (
+        str(candidate_selection.get("policy", "")) != "all_candidates"
+        or int(candidate_selection.get("selected_row_count", -1))
+        != int(candidate_selection.get("original_row_count", -2))
+    ):
+        raise ValueError("development evaluation must score the full candidate universe")
+    expected_value_profile = "hard_st" if str(job["profile"]) in {"hard_st", "hard_st_global_tail"} else "smooth_current"
+    expected_rank_profile = "global_tail_512" if str(job["profile"]) == "hard_st_global_tail" else "local_chunk"
+    if str(summary.get("path_value_gradient_profile", "")) != expected_value_profile:
+        raise ValueError("development path-value profile does not match registered profile")
+    if str(summary.get("rank_training_profile", "")) != expected_rank_profile:
+        raise ValueError("development ranking profile does not match registered profile")
+
+
 def _validate_run_job_binding(summary: Mapping[str, Any], job: Mapping[str, Any]) -> None:
+    if str(job.get("evaluation_mode", "")) == "development":
+        _validate_development_run_job_binding(summary, job)
+        return
     command = list(job.get("command", []) or [])
     expected = {
         "run_tag": _command_option(command, "--run-tag"),
@@ -707,6 +1406,96 @@ def _validate_run_job_binding(summary: Mapping[str, Any], job: Mapping[str, Any]
         raise ValueError("run ranking profile does not match registered profile")
 
 
+def _development_metrics_from_run_dir(
+    root: Path,
+    *,
+    summary: Mapping[str, Any],
+    job: Mapping[str, Any],
+) -> tuple[dict[str, float], list[dict[str, str]]]:
+    checkpoint_path = _workspace_path(str(summary.get("best_checkpoint", "") or "")).resolve()
+    if checkpoint_path.parent != root.resolve() or not checkpoint_path.is_file():
+        raise ValueError("development best checkpoint must be an existing file inside the run directory")
+    topk_path = root / "topk_metrics.csv"
+    split_path = root / "split_metrics.csv"
+    topk = pd.read_csv(topk_path)
+    split = pd.read_csv(split_path)
+    if "split" in topk.columns:
+        topk = topk.loc[topk["split"].astype(str).eq("development")]
+    if "split" in split.columns:
+        split = split.loc[split["split"].astype(str).eq("development")]
+    if len(split) != 1:
+        raise ValueError("development outputs must contain exactly one development split row")
+
+    def pick(row: pd.Series, names: Sequence[str], label: str) -> float:
+        for name in names:
+            if name in row.index and pd.notna(row[name]):
+                return _finite_float(row[name], name=label)
+        raise ValueError(f"development output is missing {label}; tried {list(names)}")
+
+    metrics: dict[str, float] = {}
+    for top_k in DEVELOPMENT_TOP_K:
+        rows = topk.loc[pd.to_numeric(topk["top_k"], errors="coerce").eq(int(top_k))]
+        if len(rows) != 1:
+            raise ValueError(f"development outputs require exactly one Top{top_k} row")
+        row = rows.iloc[0]
+        prefix = f"top{top_k}"
+        metrics[f"{prefix}_opportunity_alpha"] = pick(
+            row, ["alpha_opportunity_value"], f"{prefix}_opportunity_alpha"
+        )
+        for metric_name in (
+            "net_realized_plan_return_base",
+            "net_realized_plan_return_stress",
+            "net_realized_plan_value_base",
+            "net_realized_plan_value_stress",
+        ):
+            metrics[f"{prefix}_{metric_name}_alpha"] = pick(
+                row,
+                [f"alpha_{metric_name}"],
+                f"{prefix}_{metric_name}_alpha",
+            )
+        metrics[f"{prefix}_oracle_regret"] = pick(
+            row, ["selected_oracle_regret", "alpha_oracle_regret"], f"{prefix}_oracle_regret"
+        )
+        metrics[f"{prefix}_entry_fill_rate"] = pick(
+            row,
+            ["selected_entry_fill_rate", "selected_realized_fill_rate"],
+            f"{prefix}_entry_fill_rate",
+        )
+        metrics[f"{prefix}_realized_plan_coverage"] = pick(
+            row,
+            ["selected_realized_plan_coverage"],
+            f"{prefix}_realized_plan_coverage",
+        )
+        if metrics[f"{prefix}_realized_plan_coverage"] != 1.0:
+            raise ValueError(f"{prefix} candidate-complete net realized-plan coverage must equal 1.0")
+    early = dict(summary.get("early_stopping", {}) or {})
+    metrics["development_total_loss"] = _finite_float(
+        early.get("best_value", math.nan), name="development_total_loss"
+    )
+    split_row = split.iloc[0]
+    metrics["daily_rank_ic"] = pick(split_row, ["rank_ic_mean"], "daily_rank_ic")
+    metrics["path_mae"] = pick(split_row, ["path_mae"], "path_mae")
+    if set(metrics) != set(DEVELOPMENT_METRIC_NAMES):
+        raise AssertionError("development KPI extraction drifted from the registered metric contract")
+    evidence_paths = [
+        root / "sequence_path_training_summary.json",
+        topk_path,
+        split_path,
+        root / "daily_topk_metrics.csv",
+        root / "daily_rank_ic.csv",
+        root / "training_history.csv",
+        root / "topk_candidates.parquet",
+        checkpoint_path,
+    ]
+    evidence_files: list[dict[str, str]] = []
+    for path in evidence_paths:
+        resolved_path = path.resolve()
+        if not resolved_path.is_file():
+            raise FileNotFoundError(f"registered development evidence is missing: {resolved_path}")
+        evidence_files.append({"path": str(resolved_path), "sha256": _file_sha256(resolved_path)})
+    return metrics, evidence_files
+
+
 def _metrics_from_run_dir(
     run_dir: str | Path,
     *,
@@ -718,6 +1507,8 @@ def _metrics_from_run_dir(
     _validate_run_job_binding(summary, job)
     if _workspace_path(str(summary.get("output_dir", "") or "")).resolve() != root.resolve():
         raise ValueError("run directory does not match summary output_dir")
+    if str(job.get("evaluation_mode", "")) == "development":
+        return _development_metrics_from_run_dir(root, summary=summary, job=job)
     checkpoint_path = _workspace_path(str(summary.get("best_checkpoint", "") or "")).resolve()
     if checkpoint_path.parent != root.resolve() or checkpoint_path.name != "final_model.pt":
         raise ValueError("fixed-OOS evidence must bind the final checkpoint inside the run directory")
@@ -793,24 +1584,44 @@ def register_result(
         if str(registry.get("evidence_policy", "")) != EVIDENCE_POLICY_SYNTHETIC_ALLOWED:
             raise ValueError("this registry accepts only verifiable run artifacts")
         assert metrics is not None
-        missing = sorted(set(METRIC_NAMES) - set(metrics))
-        extra = sorted(set(metrics) - set(METRIC_NAMES))
+        metric_names = (
+            DEVELOPMENT_METRIC_NAMES
+            if str(job.get("evaluation_mode", "")) == "development"
+            else METRIC_NAMES
+        )
+        missing = sorted(set(metric_names) - set(metrics))
+        extra = sorted(set(metrics) - set(metric_names))
         if missing or extra:
             raise ValueError(f"metrics mismatch: missing={missing}, extra={extra}")
-        normalized = {name: _finite_float(metrics[name], name=name) for name in METRIC_NAMES}
+        normalized = {name: _finite_float(metrics[name], name=name) for name in metric_names}
         evidence_files = []
         evidence_source = "synthetic_metrics"
-    record_body = {
+    record_body: dict[str, Any] = {
         "job_id": str(job_id),
         "registry_sha256": str(registry["registry_sha256"]),
         "profile": str(job["profile"]),
         "phase": str(job["phase"]),
-        "oos_year": int(job["oos_year"]),
         "seed": int(job["seed"]),
         "metrics": normalized,
         "evidence_source": evidence_source,
         "evidence_files": evidence_files,
     }
+    if str(job.get("evaluation_mode", "")) == "development":
+        record_body["development_year"] = int(job["development_year"])
+        record_body["checkpoint_policy"] = "best_development_total_loss"
+        if run_dir is not None:
+            run_summary = _read_json(_workspace_path(run_dir) / "sequence_path_training_summary.json")
+            early = dict(run_summary.get("early_stopping", {}) or {})
+            record_body["training_outcome"] = {
+                "best_epoch": int(run_summary["best_epoch"]),
+                "completed_epochs": int(run_summary["completed_epochs"]),
+                "best_optimizer_step": int(run_summary["best_optimizer_step"]),
+                "optimizer_step_count": int(run_summary["optimizer_step_count"]),
+                "stopped_early": bool(early.get("stopped_early", False)),
+                "development_total_loss": float(early["best_value"]),
+            }
+    else:
+        record_body["oos_year"] = int(job["oos_year"])
     record = {**record_body, "result_sha256": _payload_sha256(record_body)}
     ledger_path = _validated_ledger_path(registry, root_path / "result_ledger.json")
     with _exclusive_update_lock(root_path / "result_ledger.lock"):
@@ -846,7 +1657,11 @@ def _completed_results(
             raise ValueError(f"result digest mismatch: {job_id}")
         if str(record.get("registry_sha256", "")) != str(validated_registry.get("registry_sha256", "")):
             raise ValueError(f"result registry binding mismatch: {job_id}")
-        for key in ("profile", "phase", "oos_year", "seed"):
+        binding_keys = ["profile", "phase", "seed"]
+        binding_keys.append(
+            "development_year" if str(job.get("evaluation_mode", "")) == "development" else "oos_year"
+        )
+        for key in binding_keys:
             if record.get(key) != job.get(key):
                 raise ValueError(f"result job binding mismatch for {job_id}: {key}")
         evidence_source = str(record.get("evidence_source", ""))
@@ -944,6 +1759,302 @@ def select_profiles(
         "ranking": ranked,
         "winner": str(ranked[0]["profile"]),
     }
+
+
+def _aggregate_development_records(records: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    rows = [
+        {
+            "profile": str(item["profile"]),
+            "development_year": int(item["development_year"]),
+            "seed": int(item["seed"]),
+            **{name: float(dict(item["metrics"])[name]) for name in DEVELOPMENT_METRIC_NAMES},
+        }
+        for item in records
+    ]
+    frame = pd.DataFrame(rows)
+    output: dict[str, dict[str, Any]] = {}
+    for profile, group in frame.groupby("profile", sort=False):
+        if sorted(group["development_year"].astype(int).tolist()) != list(DEVELOPMENT_YEARS):
+            raise ValueError(f"development profile {profile} does not have exactly one result per required year")
+        if set(group["seed"].astype(int).tolist()) != {DEVELOPMENT_SEED}:
+            raise ValueError(f"development profile {profile} does not use only seed {DEVELOPMENT_SEED}")
+        by_year = group.set_index("development_year").sort_index()
+        top3_years = by_year["top3_net_realized_plan_return_base_alpha"].astype(float)
+        leave_best = top3_years.drop(index=top3_years.idxmax())
+        topk_net_return_base = [
+            float(group[f"top{k}_net_realized_plan_return_base_alpha"].mean())
+            for k in DEVELOPMENT_TOP_K
+        ]
+        topk_net_value_base = [
+            float(group[f"top{k}_net_realized_plan_value_base_alpha"].mean())
+            for k in DEVELOPMENT_TOP_K
+        ]
+        topk_opportunity = [float(group[f"top{k}_opportunity_alpha"].mean()) for k in DEVELOPMENT_TOP_K]
+        output[str(profile)] = {
+            "profile": str(profile),
+            "job_count": int(len(group)),
+            "seed": DEVELOPMENT_SEED,
+            "development_year_count": int(group["development_year"].nunique()),
+            **{name: float(group[name].mean()) for name in DEVELOPMENT_METRIC_NAMES},
+            "mean_topk_net_realized_plan_return_base_alpha": float(
+                sum(topk_net_return_base) / len(topk_net_return_base)
+            ),
+            "mean_topk_net_realized_plan_value_base_alpha": float(
+                sum(topk_net_value_base) / len(topk_net_value_base)
+            ),
+            "mean_topk_opportunity_alpha": float(sum(topk_opportunity) / len(topk_opportunity)),
+            "worst_development_year_top3_net_realized_plan_return_base_alpha": float(top3_years.min()),
+            "leave_best_year_out_top3_net_realized_plan_return_base_alpha": float(leave_best.mean()),
+            "positive_top3_development_years": int((top3_years > 0.0).sum()),
+            "development_year_top3_net_realized_plan_return_base_alpha": {
+                str(int(year)): float(value) for year, value in top3_years.items()
+            },
+            "development_year_topk": {
+                str(int(year)): {
+                    f"top{k}_net_realized_plan_return_base_alpha": float(
+                        by_year.loc[year, f"top{k}_net_realized_plan_return_base_alpha"]
+                    )
+                    for k in DEVELOPMENT_TOP_K
+                }
+                for year in by_year.index
+            },
+        }
+    return output
+
+
+def select_development_profiles(
+    *,
+    registry_path: str | Path,
+    ledger_path: str | Path,
+) -> dict[str, Any]:
+    registry = _validated_registry(_read_json(registry_path))
+    if str(registry.get("artifact_type", "")) != "seq100_development_walkforward_registry":
+        raise ValueError("development selection requires a development walkforward registry")
+    canonical_ledger = _validated_ledger_path(registry, ledger_path)
+    approved = approved_development_contract_binding()
+    if dict(registry.get("research_contract", {}) or {}) != approved:
+        raise ValueError("development registry contract identity changed")
+    evidence_policy = str(registry.get("evidence_policy", EVIDENCE_POLICY_RUN_ARTIFACTS))
+    source_path, _, source_sha256 = _validate_development_source_view(
+        str(registry["source_view"]),
+        require_corrected_contract=(evidence_policy == EVIDENCE_POLICY_RUN_ARTIFACTS),
+    )
+    if source_sha256 != str(registry["source_view_sha256"]):
+        raise ValueError("development source changed before selection")
+    current_fold_bindings = _development_fold_bindings(
+        years=DEVELOPMENT_YEARS,
+        store_root=_workspace_path(str(registry["store_root"])).resolve(),
+        source_view_sha256=source_sha256,
+        train_start_year=int(registry["train_start_year"]),
+        require_existing=(evidence_policy == EVIDENCE_POLICY_RUN_ARTIFACTS),
+    )
+    if current_fold_bindings != dict(registry.get("fold_bindings", {}) or {}):
+        raise ValueError("development fold bindings changed before selection")
+    records = _completed_results(registry, _read_json(canonical_ledger))
+    aggregates = _aggregate_development_records(records)
+    profiles = [str(item["profile"]) for item in list(registry.get("profiles", []) or [])]
+    ranked: list[dict[str, Any]] = []
+    for profile in profiles:
+        aggregate = aggregates.get(profile)
+        if aggregate is None:
+            raise RuntimeError(f"development aggregate is missing profile: {profile}")
+        checks = {
+            "mean_top3_net_realized_plan_return_base_alpha_positive": float(
+                aggregate["top3_net_realized_plan_return_base_alpha"]
+            ) > 0.0,
+            "mean_top10_net_realized_plan_return_base_alpha_positive": float(
+                aggregate["top10_net_realized_plan_return_base_alpha"]
+            ) > 0.0,
+            "mean_top3_net_realized_plan_return_stress_alpha_positive": float(
+                aggregate["top3_net_realized_plan_return_stress_alpha"]
+            ) > 0.0,
+            "at_least_three_positive_top3_years": int(aggregate["positive_top3_development_years"]) >= 3,
+            "candidate_complete_realized_plan_coverage": all(
+                float(aggregate[f"top{k}_realized_plan_coverage"]) == 1.0
+                for k in DEVELOPMENT_TOP_K
+            ),
+        }
+        ranked.append({**aggregate, "eligibility": {"passed": all(checks.values()), "checks": checks}})
+    ranked.sort(
+        key=lambda item: (
+            bool(dict(item["eligibility"])["passed"]),
+            float(item["mean_topk_net_realized_plan_return_base_alpha"]),
+            float(item["worst_development_year_top3_net_realized_plan_return_base_alpha"]),
+            float(item["leave_best_year_out_top3_net_realized_plan_return_base_alpha"]),
+            float(item["mean_topk_net_realized_plan_value_base_alpha"]),
+            float(item["mean_topk_opportunity_alpha"]),
+            float(item["daily_rank_ic"]),
+        ),
+        reverse=True,
+    )
+    winner = str(ranked[0]["profile"]) if ranked and bool(ranked[0]["eligibility"]["passed"]) else None
+    return {
+        "registry_sha256": str(registry["registry_sha256"]),
+        "evidence_role": str(registry["evidence_role"]),
+        "development_years": list(DEVELOPMENT_YEARS),
+        "selection_policy": DEVELOPMENT_SELECTION_POLICY,
+        "ranking": ranked,
+        "winner": winner,
+        "historical_test_set": None,
+        "historical_outer_audit": False,
+        "source_view": str(source_path),
+    }
+
+
+def freeze_development_champion(
+    *,
+    root: str | Path,
+    registry_path: str | Path,
+    ledger_path: str | Path,
+    champion: str,
+) -> dict[str, Any]:
+    registry = _validated_registry(_read_json(registry_path))
+    root_path = _validated_study_root(registry, root)
+    canonical_ledger = _validated_ledger_path(registry, ledger_path)
+    selection = select_development_profiles(registry_path=registry_path, ledger_path=canonical_ledger)
+    selected = selection.get("winner")
+    if selected is None:
+        raise ValueError("no development profile passes the deployment-oriented eligibility gates")
+    if str(champion) != str(selected):
+        raise ValueError(f"explicit development champion {champion!r} is not the policy winner {selected!r}")
+    records = _completed_results(registry, _read_json(canonical_ledger))
+    body = {
+        "schema_version": 1,
+        "artifact_type": "seq100_development_selected_champion",
+        "contract_id": str(registry["contract_id"]),
+        "research_contract": dict(registry["research_contract"]),
+        "status": "development_selected",
+        "study_root": str(root_path.resolve()),
+        "champion": str(selected),
+        "profile_command": PROFILE_COMMANDS[str(selected)],
+        "development_registry": str(_workspace_path(registry_path).resolve()),
+        "development_registry_sha256": str(registry["registry_sha256"]),
+        "source_view": str(registry["source_view"]),
+        "source_view_sha256": str(registry["source_view_sha256"]),
+        "fold_bindings": dict(registry["fold_bindings"]),
+        "code_provenance": dict(registry["code_provenance"]),
+        "ledger_path": str(canonical_ledger.resolve()),
+        "ledger_sha256": _file_sha256(canonical_ledger),
+        "development_result_sha256s": {
+            str(item["job_id"]): str(item["result_sha256"])
+            for item in sorted(records, key=lambda value: str(value["job_id"]))
+        },
+        "selection": selection,
+        "development_years_consumed": list(DEVELOPMENT_YEARS),
+        "historical_test_set": None,
+        "historical_outer_audit": False,
+        "next_evidence": "retrain_through_2025_then_begin_2026_true_forward_lockbox",
+        "active_execution_changed": False,
+        "qdp_active_changed": False,
+    }
+    frozen = {**body, "freeze_sha256": _payload_sha256(body)}
+    path = _write_json(root_path / "development_champion.json", frozen, immutable=True)
+    return {**frozen, "freeze_path": str(path.resolve())}
+
+
+def _candidate_run_directories(job: Mapping[str, Any]) -> list[Path]:
+    command = list(job.get("command", []) or [])
+    output_root = _workspace_path(_command_option(command, "--output-root")).resolve()
+    run_tag = _command_option(command, "--run-tag")
+    if not output_root.is_dir():
+        return []
+    return sorted(
+        (path for path in output_root.glob(f"{run_tag}_*") if path.is_dir()),
+        key=lambda path: path.stat().st_mtime_ns,
+        reverse=True,
+    )
+
+
+def run_development_registry(
+    *,
+    root: str | Path,
+    registry_path: str | Path,
+    max_jobs: int = 0,
+) -> dict[str, Any]:
+    registry = _validated_registry(_read_json(registry_path))
+    if str(registry.get("artifact_type", "")) != "seq100_development_walkforward_registry":
+        raise ValueError("runner requires a development walkforward registry")
+    root_path = _validated_study_root(registry, root)
+    _validate_code_provenance(dict(registry.get("code_provenance", {}) or {}))
+    if int(max_jobs) < 0:
+        raise ValueError("max_jobs must be non-negative")
+    ledger_path = _validated_ledger_path(registry, root_path / "result_ledger.json")
+    ledger = _initialize_ledger(root_path)
+    registered = set(dict(ledger.get("results", {}) or {}))
+    jobs = list(_registry_jobs(registry).values())
+    pending = [job for job in jobs if str(job["job_id"]) not in registered]
+    if int(max_jobs) > 0:
+        pending = pending[: int(max_jobs)]
+    state_path = root_path / "runner_logs" / "development" / "runner_state.json"
+    completed_now: list[str] = []
+    for job in pending:
+        job_id = str(job["job_id"])
+        state = {
+            "schema_version": 1,
+            "artifact_type": "seq100_development_runner_state",
+            "status": "recovering_or_running",
+            "registry_sha256": str(registry["registry_sha256"]),
+            "job_id": job_id,
+            "completed_now": list(completed_now),
+            "updated_at": _now(),
+        }
+        _write_json(state_path, state, immutable=False)
+        recovered = False
+        recovery_errors: list[str] = []
+        for run_dir in _candidate_run_directories(job):
+            try:
+                register_result(
+                    root=root_path,
+                    registry_path=registry_path,
+                    job_id=job_id,
+                    run_dir=run_dir,
+                )
+            except (FileNotFoundError, KeyError, ValueError) as exc:
+                recovery_errors.append(f"{run_dir}:{exc}")
+                continue
+            recovered = True
+            break
+        if not recovered:
+            command = [str(item) for item in list(job.get("command", []) or [])]
+            completed = subprocess.run(command, cwd=WORKSPACE_ROOT, check=False)
+            if int(completed.returncode) != 0:
+                _write_json(
+                    state_path,
+                    {
+                        **state,
+                        "status": "failed",
+                        "returncode": int(completed.returncode),
+                        "recovery_errors": recovery_errors,
+                        "updated_at": _now(),
+                    },
+                    immutable=False,
+                )
+                raise RuntimeError(f"development job failed with exit code {completed.returncode}: {job_id}")
+            candidates = _candidate_run_directories(job)
+            if not candidates:
+                raise FileNotFoundError(f"development job produced no discoverable run directory: {job_id}")
+            register_result(
+                root=root_path,
+                registry_path=registry_path,
+                job_id=job_id,
+                run_dir=candidates[0],
+            )
+        completed_now.append(job_id)
+    final_ledger = _read_json(ledger_path)
+    remaining = sorted(set(_registry_jobs(registry)) - set(dict(final_ledger.get("results", {}) or {})))
+    final_state = {
+        "schema_version": 1,
+        "artifact_type": "seq100_development_runner_state",
+        "status": "completed" if not remaining else "paused_at_job_boundary",
+        "registry_sha256": str(registry["registry_sha256"]),
+        "completed_now": completed_now,
+        "registered_job_count": len(_registry_jobs(registry)) - len(remaining),
+        "total_job_count": len(_registry_jobs(registry)),
+        "remaining_job_ids": remaining,
+        "updated_at": _now(),
+    }
+    _write_json(state_path, final_state, immutable=False)
+    return {**final_state, "runner_state_path": str(state_path.resolve())}
 
 
 def create_confirmation_registry(
@@ -1346,6 +2457,36 @@ def _parser() -> argparse.ArgumentParser:
     finalize = sub.add_parser("finalize-outer-audit")
     finalize.add_argument("--root", type=Path, default=DEFAULT_ROOT)
     finalize.add_argument("--ledger", type=Path, required=True)
+
+    development = sub.add_parser(
+        "init-development",
+        help="Register the candidate-complete 2022-2025 development walkforward matrix.",
+    )
+    development.add_argument("--root", type=Path, default=DEFAULT_DEVELOPMENT_ROOT)
+    development.add_argument("--source-view", type=Path, default=DEFAULT_SOURCE_VIEW)
+    development.add_argument("--store-root", type=Path, default=DEFAULT_DEVELOPMENT_STORE_ROOT)
+    development.add_argument("--profiles", default=",".join(DEFAULT_DEVELOPMENT_PROFILES))
+    development.add_argument("--maximum-epochs", type=int, default=10)
+    development.add_argument("--patience", type=int, default=2)
+    development.add_argument("--min-delta", type=float, default=0.0)
+    development.add_argument("--minimum-complete-epochs", type=int, default=1)
+    development.add_argument("--kpi-portfolio-contract", type=Path)
+    development.add_argument("--additional-provenance-path", type=Path, action="append", default=[])
+
+    run_development = sub.add_parser("run-development")
+    run_development.add_argument("--root", type=Path, default=DEFAULT_DEVELOPMENT_ROOT)
+    run_development.add_argument("--registry", type=Path, required=True)
+    run_development.add_argument("--max-jobs", type=int, default=0)
+
+    select_development = sub.add_parser("select-development")
+    select_development.add_argument("--registry", type=Path, required=True)
+    select_development.add_argument("--ledger", type=Path, required=True)
+
+    freeze_development = sub.add_parser("freeze-development")
+    freeze_development.add_argument("--root", type=Path, default=DEFAULT_DEVELOPMENT_ROOT)
+    freeze_development.add_argument("--registry", type=Path, required=True)
+    freeze_development.add_argument("--ledger", type=Path, required=True)
+    freeze_development.add_argument("--champion", choices=PROFILE_ORDER, required=True)
     return parser
 
 
@@ -1392,8 +2533,39 @@ def main(argv: list[str] | None = None) -> int:
             epochs=args.epochs,
             seed=args.seed,
         )
-    else:
+    elif args.command == "finalize-outer-audit":
         result = finalize_outer_audit(root=args.root, ledger_path=args.ledger)
+    elif args.command == "init-development":
+        result = initialize_development_registry(
+            root=args.root,
+            source_view=args.source_view,
+            store_root=args.store_root,
+            profiles=tuple(item.strip() for item in str(args.profiles).split(",") if item.strip()),
+            maximum_epochs=int(args.maximum_epochs),
+            patience=int(args.patience),
+            min_delta=float(args.min_delta),
+            minimum_complete_epochs=int(args.minimum_complete_epochs),
+            kpi_portfolio_contract_path=args.kpi_portfolio_contract,
+            additional_provenance_paths=tuple(args.additional_provenance_path),
+        )
+    elif args.command == "run-development":
+        result = run_development_registry(
+            root=args.root,
+            registry_path=args.registry,
+            max_jobs=int(args.max_jobs),
+        )
+    elif args.command == "select-development":
+        result = select_development_profiles(
+            registry_path=args.registry,
+            ledger_path=args.ledger,
+        )
+    else:
+        result = freeze_development_champion(
+            root=args.root,
+            registry_path=args.registry,
+            ledger_path=args.ledger,
+            champion=args.champion,
+        )
     print(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False))
     return 0
 

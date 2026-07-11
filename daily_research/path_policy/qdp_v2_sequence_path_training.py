@@ -28,6 +28,7 @@ from daily_research.path_policy.qdp_v2_sequence_path_pack import (
     PATH_OHLC_FIELDS,
     PATH_SUMMARY_COLUMNS,
     _json_default,
+    _resolve_deferred_exit_days,
     _write_json,
     path_summary_columns,
     path_value_column,
@@ -39,7 +40,17 @@ DEFAULT_TOP_K = (5, 10, 20, 50, 100)
 DEFAULT_SEED = 7
 EVALUATION_MODE_STANDARD = "standard"
 EVALUATION_MODE_FIXED_OOS = "fixed_oos"
-EVALUATION_MODES = (EVALUATION_MODE_STANDARD, EVALUATION_MODE_FIXED_OOS)
+EVALUATION_MODE_DEVELOPMENT = "development"
+EVALUATION_MODES = (
+    EVALUATION_MODE_STANDARD,
+    EVALUATION_MODE_FIXED_OOS,
+    EVALUATION_MODE_DEVELOPMENT,
+)
+EARLY_STOPPING_METRIC_VALIDATION_RANK_IC = "validation_rank_ic_mean"
+EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS = "development_total_loss"
+EARLY_STOPPING_MODE_MIN = "min"
+EARLY_STOPPING_MODE_MAX = "max"
+EARLY_STOPPING_MODES = (EARLY_STOPPING_MODE_MIN, EARLY_STOPPING_MODE_MAX)
 PATH_VALUE_V2_WAITING_PENALTY = 0.04
 PATH_VALUE_V2_DRAWDOWN_PENALTY = 0.60
 PATH_VALUE_V2_TRANSACTION_COST = 0.002
@@ -213,6 +224,14 @@ def _trim_working_set() -> None:
 
 def _now() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _file_sha256(path: Path, *, chunk_size: int = 1024 * 1024) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        while chunk := handle.read(int(chunk_size)):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _parse_int_list(raw: str | None, *, default: tuple[int, ...]) -> tuple[int, ...]:
@@ -440,21 +459,49 @@ class SequencePathPackDataset(Dataset):
         split: str,
         max_samples: int = 0,
         input_channel_profile: str = INPUT_CHANNEL_PROFILE_ALL,
+        index_role: str = "supervised",
     ) -> None:
         self.manifest = dict(manifest)
+        self.index_role = str(index_role or "supervised").strip().lower()
+        if self.index_role not in {"supervised", "candidate"}:
+            raise ValueError("index_role must be supervised or candidate")
+        if self.index_role == "candidate" and int(max_samples) != 0:
+            raise ValueError("candidate scoring requires max_samples=0")
         self.input_channel_profile = str(input_channel_profile or INPUT_CHANNEL_PROFILE_ALL).strip().lower()
         self.lookback_days = int(self.manifest.get("lookback_days", DEFAULT_LOOKBACK_DAYS) or DEFAULT_LOOKBACK_DAYS)
         self.forward_days = int(self.manifest.get("forward_days", DEFAULT_FORWARD_DAYS) or DEFAULT_FORWARD_DAYS)
-        sample_index = pd.read_parquet(str(self.manifest["sample_index_path"]))
+        index_key = "candidate_index_path" if self.index_role == "candidate" else "sample_index_path"
+        if not str(self.manifest.get(index_key, "") or ""):
+            raise ValueError(f"manifest is missing required {index_key} for index_role={self.index_role}")
+        self.index_path = Path(str(self.manifest[index_key])).resolve()
+        sample_index = pd.read_parquet(str(self.index_path))
         required_index_columns = {"split", "date_idx", "symbol_idx", "trade_date", "symbol"}
+        if self.index_role == "candidate":
+            required_index_columns.update(
+                {
+                    "candidate_id",
+                    "entry_filled",
+                    "label_valid",
+                    "price_label_valid",
+                    "va_aux_valid",
+                }
+            )
         missing_index_columns = sorted(required_index_columns.difference(sample_index.columns))
         if missing_index_columns:
-            raise ValueError(f"pack sample index is missing required columns: {missing_index_columns}")
+            raise ValueError(f"pack {self.index_role} index is missing required columns: {missing_index_columns}")
         split_index = sample_index[sample_index["split"].astype(str).eq(str(split))].reset_index(drop=True)
         self.sample_index, self.sample_selection = _limit_sample_index_by_complete_dates(
             split_index,
             max_samples=int(max_samples),
-            context=f"{split} sample index",
+            context=f"{split} {self.index_role} index",
+        )
+        self.sample_selection.update(
+            {
+                "policy": "all_candidates" if self.index_role == "candidate" else self.sample_selection["policy"],
+                "index_role": self.index_role,
+                "index_path": str(self.index_path),
+                "index_sha256": _file_sha256(self.index_path) if self.index_role == "candidate" else "",
+            }
         )
         self.date_idx_values = _validated_sample_date_indices(
             self.sample_index,
@@ -498,6 +545,9 @@ class SequencePathPackDataset(Dataset):
             name: _open_memmap(masks[name], dtype="bool") for name in self.input_mask_features
         }
         self.tradable_panel = _open_memmap(masks["tradable"], dtype="bool") if "tradable" in masks else None
+        self.exit_sellable_panel = (
+            _open_memmap(masks["exit_sellable"], dtype="bool") if "exit_sellable" in masks else None
+        )
         self.observed_price_panel = (
             _open_memmap(masks.get("price_observed", masks.get("has_bar")), dtype="bool")
             if ("price_observed" in masks or "has_bar" in masks)
@@ -555,7 +605,35 @@ class SequencePathPackDataset(Dataset):
         self.richer_path_dim = int(len(self.richer_path_fields))
         manifest_symbols = list(self.manifest.get("symbol_values", []) or [])
         self.symbol_count = int(len(manifest_symbols)) or int(self.sample_index["symbol_idx"].astype(int).max() + 1)
+        execution_arrays = dict(self.manifest.get("execution_arrays", {}) or {})
+        self.entry_open_raw_panel = (
+            _open_memmap(execution_arrays["entry_open_raw"], dtype="float32")
+            if "entry_open_raw" in execution_arrays
+            else None
+        )
+        self.exit_close_raw_panel = (
+            _open_memmap(execution_arrays["exit_close_raw"], dtype="float32")
+            if "exit_close_raw" in execution_arrays
+            else None
+        )
+        self.execution_tail_days = int(self.manifest.get("execution_tail_days", 0) or 0)
+        terminal_contract = dict(self.manifest.get("terminal_execution_contract", {}) or {})
+        self.terminal_recovery_fraction = float(
+            terminal_contract.get("recovery_fraction_of_entry_notional", 0.0) or 0.0
+        )
+        self.has_deterministic_execution = bool(
+            self.entry_open_raw_panel is not None
+            and self.exit_close_raw_panel is not None
+            and self.exit_sellable_panel is not None
+            and self.execution_tail_days >= 0
+        )
         self._path_value_targets_cache: np.ndarray | None = None
+
+    def _index_flag(self, name: str, indices: np.ndarray, *, default: bool) -> np.ndarray:
+        if name not in self.sample_index.columns:
+            return np.full(int(indices.size), bool(default), dtype=bool)
+        values = self.sample_index[name].iloc[indices].astype("boolean").fillna(False)
+        return values.to_numpy(dtype=bool, copy=True)
 
     def __len__(self) -> int:
         return int(len(self.sample_index))
@@ -656,16 +734,39 @@ class SequencePathPackDataset(Dataset):
         panel: np.ndarray | None,
         date_idx: np.ndarray,
         symbol_idx: np.ndarray,
+        *,
+        days: int | None = None,
     ) -> np.ndarray | None:
         if panel is None:
             return None
-        values = np.zeros((int(date_idx.size), self.forward_days), dtype=bool)
+        requested_days = int(self.forward_days if days is None else days)
+        values = np.zeros((int(date_idx.size), requested_days), dtype=bool)
         for current_date in np.unique(date_idx):
             mask = date_idx == int(current_date)
             symbols = symbol_idx[mask]
             start = int(current_date) + 1
-            end = start + int(self.forward_days)
+            end = start + requested_days
             block = np.asarray(panel[start:end, symbols], dtype=bool)
+            values[np.flatnonzero(mask), : block.shape[0]] = np.transpose(block, (1, 0))
+        return values
+
+    def _future_float_panel_batch(
+        self,
+        panel: np.ndarray | None,
+        date_idx: np.ndarray,
+        symbol_idx: np.ndarray,
+        *,
+        days: int,
+    ) -> np.ndarray | None:
+        if panel is None:
+            return None
+        values = np.full((int(date_idx.size), int(days)), np.nan, dtype=np.float32)
+        for current_date in np.unique(date_idx):
+            mask = date_idx == int(current_date)
+            symbols = symbol_idx[mask]
+            start = int(current_date) + 1
+            end = start + int(days)
+            block = np.asarray(panel[start:end, symbols], dtype=np.float32)
             values[np.flatnonzero(mask), : block.shape[0]] = np.transpose(block, (1, 0))
         return values
 
@@ -777,9 +878,36 @@ class SequencePathPackDataset(Dataset):
                 if self.future_ohlcva_path is not None
                 else y_path.copy()
             )
+        label_valid = self._index_flag("label_valid", idx, default=True)
+        price_label_valid = self._index_flag("price_label_valid", idx, default=True) & label_valid
+        va_aux_valid = self._index_flag("va_aux_valid", idx, default=True) & label_valid
+        if bool((~price_label_valid).any()):
+            y_path[~price_label_valid, :, :] = np.nan
+            if y_ohlcva_path is not None:
+                y_ohlcva_path[~price_label_valid, :, :4] = np.nan
+        if y_ohlcva_path is not None and int(y_ohlcva_path.shape[-1]) > 4 and bool((~va_aux_valid).any()):
+            y_ohlcva_path[~va_aux_valid, :, 4:] = np.nan
         y_richer_path = self._future_richer_path_batch(y_path, date_idx, symbol_idx) if bool(include_richer_path) else None
         y_tradable_path = self._future_mask_batch(self.tradable_panel, date_idx, symbol_idx)
         y_observed_price_path = self._future_mask_batch(self.observed_price_panel, date_idx, symbol_idx)
+        execution_days = int(self.forward_days + self.execution_tail_days)
+        exit_sellable_path = self._future_mask_batch(
+            self.exit_sellable_panel,
+            date_idx,
+            symbol_idx,
+            days=execution_days,
+        )
+        exit_close_raw_path = self._future_float_panel_batch(
+            self.exit_close_raw_panel,
+            date_idx,
+            symbol_idx,
+            days=execution_days,
+        )
+        entry_open_raw = (
+            np.asarray(self.entry_open_raw_panel[date_idx + 1, symbol_idx], dtype=np.float32).copy()
+            if self.entry_open_raw_panel is not None
+            else None
+        )
         y_summary = None
         if bool(include_summary):
             y_summary = (
@@ -790,6 +918,8 @@ class SequencePathPackDataset(Dataset):
                     price_anchor=self.price_anchor,
                 )
             )
+            if bool((~label_valid).any()):
+                y_summary[~label_valid, :] = np.nan
         batch = {
             "x": torch.from_numpy(x),
             "y_path": torch.from_numpy(y_path),
@@ -806,12 +936,24 @@ class SequencePathPackDataset(Dataset):
         batch["y_observed_price_path"] = (
             torch.from_numpy(y_observed_price_path) if y_observed_price_path is not None else None
         )
+        batch["entry_open_raw"] = (
+            torch.from_numpy(entry_open_raw) if entry_open_raw is not None else None
+        )
+        batch["exit_close_raw_path"] = (
+            torch.from_numpy(exit_close_raw_path) if exit_close_raw_path is not None else None
+        )
+        batch["exit_sellable_path"] = (
+            torch.from_numpy(exit_sellable_path) if exit_sellable_path is not None else None
+        )
         entry_filled = (
             self.sample_index["entry_filled"].astype(bool).to_numpy(copy=False)[idx]
             if "entry_filled" in self.sample_index.columns
             else np.ones(int(idx.size), dtype=bool)
         )
         batch["entry_filled"] = torch.from_numpy(np.asarray(entry_filled, dtype=bool))
+        batch["label_valid"] = torch.from_numpy(label_valid)
+        batch["price_label_valid"] = torch.from_numpy(price_label_valid)
+        batch["va_aux_valid"] = torch.from_numpy(va_aux_valid)
         return batch
 
 
@@ -1969,11 +2111,29 @@ def _mine_global_tail_scores(
 def _daily_spearman(frame: pd.DataFrame, *, score_col: str, target_col: str) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     for trade_date, group in frame.groupby("trade_date", sort=True):
-        if len(group) < 5:
+        valid = group[[score_col, target_col]].apply(pd.to_numeric, errors="coerce").dropna()
+        if len(valid) < 5:
             continue
-        corr = group[[score_col, target_col]].corr(method="spearman").iloc[0, 1]
-        rows.append({"trade_date": str(trade_date), "rank_ic": float(corr) if pd.notna(corr) else np.nan, "count": int(len(group))})
+        corr = valid.corr(method="spearman").iloc[0, 1]
+        rows.append(
+            {
+                "trade_date": str(trade_date),
+                "rank_ic": float(corr) if pd.notna(corr) else np.nan,
+                "count": int(len(valid)),
+            }
+        )
     return pd.DataFrame(rows)
+
+
+def _finite_threshold_rate(values: pd.Series, *, threshold: float, comparison: str) -> float:
+    numeric = pd.to_numeric(values, errors="coerce").dropna()
+    if numeric.empty:
+        return np.nan
+    if comparison == "ge":
+        return float((numeric >= float(threshold)).mean())
+    if comparison == "le":
+        return float((numeric <= float(threshold)).mean())
+    raise ValueError("comparison must be ge or le")
 
 
 def _topk_daily_rows(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forward_days: int, value_column: str) -> list[dict[str, Any]]:
@@ -2011,14 +2171,20 @@ def _topk_daily_rows(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forw
         "realized_plan_exit_day",
         "realized_plan_exit_tradable",
         "realized_plan_covered",
+        "realized_plan_terminal_recovery",
         "realized_plan_return",
+        "realized_plan_gross_return",
         "realized_plan_drawdown",
         "opportunity_value",
         "realized_plan_value",
         "oracle_regret",
     ]
     for trade_date, raw_group in frame.groupby("trade_date", sort=True):
-        group = raw_group.dropna(subset=["score", value_column]).copy()
+        # Candidate completeness is a scoring invariant.  A finite score enters
+        # the daily ranking even when future supervision is unavailable; metric
+        # means below ignore NaN labels instead of deleting the candidate before
+        # Top-K selection.
+        group = raw_group.dropna(subset=["score"]).copy()
         if group.empty:
             continue
         sort_columns = ["score", *( ["symbol"] if "symbol" in group.columns else [])]
@@ -2038,19 +2204,50 @@ def _topk_daily_rows(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forw
                 "universe_count": int(len(group)),
                 "selected_count": int(len(top)),
                 "universe_hash": universe_hash,
+                "universe_labeled_count": int(pd.to_numeric(group[value_column], errors="coerce").notna().sum()),
+                "selected_labeled_count": int(pd.to_numeric(top[value_column], errors="coerce").notna().sum()),
             }
+            row["universe_label_coverage"] = float(row["universe_labeled_count"] / max(len(group), 1))
+            row["selected_label_coverage"] = float(row["selected_labeled_count"] / max(len(top), 1))
             for col in [*metric_cols, *[col for col in optional_metric_cols if col in group.columns]]:
-                universe_mean = pd.to_numeric(group[col], errors="coerce").mean()
-                selected_mean = pd.to_numeric(top[col], errors="coerce").mean()
+                universe_values = pd.to_numeric(group[col], errors="coerce")
+                selected_values = pd.to_numeric(top[col], errors="coerce")
+                universe_count = int(universe_values.notna().sum())
+                selected_count = int(selected_values.notna().sum())
+                row[f"universe_{col}_coverage"] = float(universe_count / max(len(group), 1))
+                row[f"selected_{col}_coverage"] = float(selected_count / max(len(top), 1))
+                execution_primary = col in {"realized_plan_return", "realized_plan_value"}
+                universe_mean = (
+                    universe_values.mean()
+                    if not execution_primary or universe_count == len(group)
+                    else np.nan
+                )
+                selected_mean = (
+                    selected_values.mean()
+                    if not execution_primary or selected_count == len(top)
+                    else np.nan
+                )
                 row[f"selected_{col}"] = float(selected_mean)
                 row[f"universe_{col}"] = float(universe_mean)
                 row[f"alpha_{col}"] = float(selected_mean - universe_mean)
-            row["selected_hit_5pct_rate"] = float((pd.to_numeric(top[f"future_max_return_{suffix}"], errors="coerce") >= 0.05).mean())
-            row["selected_hit_10pct_rate"] = float((pd.to_numeric(top[f"future_max_return_{suffix}"], errors="coerce") >= 0.10).mean())
-            row["selected_hit_20pct_rate"] = float((pd.to_numeric(top[f"future_max_return_{suffix}"], errors="coerce") >= 0.20).mean())
-            row["selected_loss_3pct_rate"] = float((pd.to_numeric(top[f"future_min_return_{suffix}"], errors="coerce") <= -0.03).mean())
-            row["selected_loss_5pct_rate"] = float((pd.to_numeric(top[f"future_min_return_{suffix}"], errors="coerce") <= -0.05).mean())
-            row["selected_loss_10pct_rate"] = float((pd.to_numeric(top[f"future_min_return_{suffix}"], errors="coerce") <= -0.10).mean())
+            row["selected_hit_5pct_rate"] = _finite_threshold_rate(
+                top[f"future_max_return_{suffix}"], threshold=0.05, comparison="ge"
+            )
+            row["selected_hit_10pct_rate"] = _finite_threshold_rate(
+                top[f"future_max_return_{suffix}"], threshold=0.10, comparison="ge"
+            )
+            row["selected_hit_20pct_rate"] = _finite_threshold_rate(
+                top[f"future_max_return_{suffix}"], threshold=0.20, comparison="ge"
+            )
+            row["selected_loss_3pct_rate"] = _finite_threshold_rate(
+                top[f"future_min_return_{suffix}"], threshold=-0.03, comparison="le"
+            )
+            row["selected_loss_5pct_rate"] = _finite_threshold_rate(
+                top[f"future_min_return_{suffix}"], threshold=-0.05, comparison="le"
+            )
+            row["selected_loss_10pct_rate"] = _finite_threshold_rate(
+                top[f"future_min_return_{suffix}"], threshold=-0.10, comparison="le"
+            )
             row["selected_peak_day_mean"] = float(pd.to_numeric(top[f"future_peak_day_{suffix}"], errors="coerce").mean())
             if f"best_exit_day_{suffix}" in top.columns:
                 row["selected_best_exit_day_mean"] = float(pd.to_numeric(top[f"best_exit_day_{suffix}"], errors="coerce").mean())
@@ -2101,15 +2298,17 @@ def _topk_candidate_rows(
         "predicted_exit_day",
         "realized_plan_entry_filled",
         "realized_plan_covered",
+        "realized_plan_terminal_recovery",
         "realized_plan_exit_day",
         "realized_plan_return",
+        "realized_plan_gross_return",
         "opportunity_value",
         "realized_plan_value",
         "oracle_regret",
     ]
     rows: list[dict[str, Any]] = []
     for trade_date, raw_group in frame.groupby("trade_date", sort=True):
-        group = raw_group.dropna(subset=["score", value_column]).copy()
+        group = raw_group.dropna(subset=["score"]).copy()
         if group.empty:
             continue
         sort_columns = ["score", *( ["symbol"] if "symbol" in group.columns else [])]
@@ -2130,6 +2329,7 @@ def _topk_candidate_rows(
                 "score": float(item["score"]),
                 "universe_count": int(len(group)),
                 "universe_hash": universe_hash,
+                "label_available": bool(pd.notna(pd.to_numeric(pd.Series([item.get(value_column)]), errors="coerce").iloc[0])),
             }
             for column in metric_columns:
                 if column in item.index:
@@ -2147,7 +2347,19 @@ def _aggregate_topk_daily_rows(rows: list[dict[str, Any]]) -> pd.DataFrame:
     for top_k, group in daily.groupby("top_k", sort=True):
         out: dict[str, Any] = {"top_k": int(top_k), "day_count": int(len(group))}
         for col in [c for c in group.columns if c not in {"trade_date", "top_k", "universe_hash", "score_column"}]:
-            out[col] = float(pd.to_numeric(group[col], errors="coerce").mean())
+            values = pd.to_numeric(group[col], errors="coerce")
+            execution_primary = any(
+                token in col
+                for token in (
+                    "selected_realized_plan_return",
+                    "universe_realized_plan_return",
+                    "alpha_realized_plan_return",
+                    "selected_realized_plan_value",
+                    "universe_realized_plan_value",
+                    "alpha_realized_plan_value",
+                )
+            ) and not col.endswith("_coverage")
+            out[col] = float(values.mean()) if not execution_primary or bool(values.notna().all()) else np.nan
         out_rows.append(out)
     return pd.DataFrame(out_rows)
 
@@ -2155,6 +2367,23 @@ def _aggregate_topk_daily_rows(rows: list[dict[str, Any]]) -> pd.DataFrame:
 def _topk_metrics(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forward_days: int, value_column: str) -> pd.DataFrame:
     rows = _topk_daily_rows(frame, top_k_values=top_k_values, forward_days=forward_days, value_column=value_column)
     return _aggregate_topk_daily_rows(rows)
+
+
+def _validate_development_topk_execution_coverage(topk: pd.DataFrame) -> None:
+    required = {
+        "selected_realized_plan_return_coverage",
+        "selected_realized_plan_value_coverage",
+        "selected_realized_plan_coverage",
+    }
+    missing = sorted(required.difference(topk.columns))
+    if missing:
+        raise ValueError(f"development TopK is missing deterministic execution coverage columns: {missing}")
+    for column in sorted(required):
+        values = pd.to_numeric(topk[column], errors="coerce")
+        if values.empty or not bool(np.isfinite(values).all()) or not bool((values >= 1.0 - 1.0e-12).all()):
+            raise ValueError(
+                f"development TopK cannot use partial execution outcomes: {column} must be 100%"
+            )
 
 
 def _split_metrics_for_score(
@@ -2620,6 +2849,11 @@ def _realize_path_value_v2_plan_numpy(
     price_anchor: str = "next_open",
     tradable_path: np.ndarray | None = None,
     entry_filled: np.ndarray | None = None,
+    entry_open_raw: np.ndarray | None = None,
+    exit_close_raw_path: np.ndarray | None = None,
+    exit_sellable_path: np.ndarray | None = None,
+    execution_tail_days: int = 0,
+    terminal_recovery_fraction: float = 0.0,
 ) -> dict[str, np.ndarray]:
     """Evaluate the exit day selected from a predicted four-field OHLC path.
 
@@ -2646,6 +2880,7 @@ def _realize_path_value_v2_plan_numpy(
     realized_value = np.full(n, np.nan, dtype=np.float32)
     exit_tradable = np.zeros(n, dtype=np.float32)
     realized_covered = np.zeros(n, dtype=np.float32)
+    terminal_recovery_applied = np.zeros(n, dtype=np.float32)
     filled = (
         np.asarray(entry_filled, dtype=bool).reshape(-1)
         if entry_filled is not None
@@ -2653,6 +2888,27 @@ def _realize_path_value_v2_plan_numpy(
     )
     if int(filled.size) != n:
         raise ValueError("entry_filled must match the path batch size")
+    raw_execution_supplied = any(
+        item is not None for item in (entry_open_raw, exit_close_raw_path, exit_sellable_path)
+    )
+    if raw_execution_supplied and not all(
+        item is not None for item in (entry_open_raw, exit_close_raw_path, exit_sellable_path)
+    ):
+        raise ValueError("raw execution evaluation requires entry open, exit close path, and exit sellable path")
+    execution_days = int(horizon + int(execution_tail_days))
+    raw_entry = None
+    raw_exit = None
+    sellable = None
+    resolved_exit_days = None
+    if raw_execution_supplied:
+        raw_entry = np.asarray(entry_open_raw, dtype=np.float64).reshape(-1)
+        raw_exit = np.asarray(exit_close_raw_path, dtype=np.float64)
+        sellable = np.asarray(exit_sellable_path, dtype=bool)
+        if int(raw_entry.size) != n or raw_exit.shape != (n, execution_days) or sellable.shape != (n, execution_days):
+            raise ValueError("raw execution arrays do not match batch and forward+tail dimensions")
+        recovery = float(terminal_recovery_fraction)
+        if not math.isfinite(recovery) or recovery < 0.0 or recovery > 1.0:
+            raise ValueError("terminal_recovery_fraction must be within [0, 1]")
 
     true_summary = _derive_path_summary_numpy(
         values,
@@ -2679,19 +2935,71 @@ def _realize_path_value_v2_plan_numpy(
     if tradable.shape != (n, horizon):
         raise ValueError(f"tradable_path must have shape {(n, horizon)}, got {tradable.shape}")
 
+    if raw_execution_supplied:
+        resolved_exit_days = _resolve_deferred_exit_days(
+            summary[:, exit_day_idx],
+            sellable,
+            forward_days=horizon,
+            execution_tail_days=int(execution_tail_days),
+        )
+
     for row in range(n):
         raw_day = summary[row, exit_day_idx]
         if not np.isfinite(raw_day):
             continue
-        planned = int(round(float(raw_day))) - 1
-        if planned < 0 or planned >= horizon:
-            continue
+        # The entry occurs on path day 1.  A-share T+1 makes path day 2 the
+        # earliest legal exit even if the predicted path peaks immediately.
+        planned = max(1, min(int(round(float(raw_day))) - 1, horizon - 1))
         predicted_exit_day[row] = np.float32(planned + 1)
         if not bool(filled[row]):
             realized_return[row] = 0.0
             realized_drawdown[row] = 0.0
             realized_value[row] = 0.0
             realized_covered[row] = 1.0
+            continue
+        if raw_execution_supplied:
+            assert raw_entry is not None and raw_exit is not None and resolved_exit_days is not None
+            resolved_day = resolved_exit_days[row]
+            if np.isfinite(resolved_day):
+                actual = int(round(float(resolved_day))) - 1
+                entry_price = float(raw_entry[row])
+                exit_price = float(raw_exit[row, actual])
+                if not math.isfinite(entry_price) or entry_price <= 0.0:
+                    continue
+                if not math.isfinite(exit_price) or exit_price < 0.0:
+                    continue
+                gross_return = exit_price / entry_price - 1.0
+                exit_tradable[row] = 1.0
+                realized_covered[row] = 1.0
+                realized_exit_day[row] = np.float32(actual + 1)
+                realized_return[row] = np.float32(gross_return)
+                observed_day = min(actual, horizon - 1)
+                observed_low = low_ret[row, : observed_day + 1]
+                realized_drawdown[row] = np.float32(
+                    max(-float(np.nanmin(observed_low)), 0.0)
+                    if bool(np.isfinite(observed_low).any())
+                    else 0.0
+                )
+                wait_penalty = float(PATH_VALUE_V2_WAITING_PENALTY) * math.sqrt(
+                    float(actual + 1) / max(float(execution_days), 1.0)
+                )
+                realized_value[row] = np.float32(
+                    gross_return
+                    - float(PATH_VALUE_V2_DRAWDOWN_PENALTY) * float(realized_drawdown[row])
+                    - wait_penalty
+                    - float(PATH_VALUE_V2_TRANSACTION_COST)
+                )
+            else:
+                # A filled position that cannot exit through the complete retry
+                # window is settled by the manifest-bound terminal rule.  It is
+                # an observed execution outcome, not a missing label.
+                recovery = float(terminal_recovery_fraction)
+                terminal_recovery_applied[row] = 1.0
+                realized_covered[row] = 1.0
+                realized_exit_day[row] = np.float32(execution_days)
+                realized_return[row] = np.float32(recovery - 1.0)
+                realized_drawdown[row] = np.float32(1.0 - recovery)
+                realized_value[row] = np.float32(recovery - 1.0)
             continue
         later = np.flatnonzero(tradable[row, planned:])
         if not len(later):
@@ -2712,7 +3020,9 @@ def _realize_path_value_v2_plan_numpy(
         "realized_plan_exit_day": realized_exit_day,
         "realized_plan_exit_tradable": exit_tradable,
         "realized_plan_covered": realized_covered,
+        "realized_plan_terminal_recovery": terminal_recovery_applied,
         "realized_plan_return": realized_return,
+        "realized_plan_gross_return": realized_return.copy(),
         "realized_plan_drawdown": realized_drawdown,
         "opportunity_value": opportunity_value,
         "realized_plan_value": realized_value,
@@ -3026,6 +3336,21 @@ def _predict_split(
             else None
         )
         entry_filled_np = batch["entry_filled"].numpy().astype(bool, copy=False)
+        entry_open_raw_np = (
+            batch["entry_open_raw"].numpy().astype(np.float32, copy=False)
+            if batch.get("entry_open_raw") is not None
+            else None
+        )
+        exit_close_raw_path_np = (
+            batch["exit_close_raw_path"].numpy().astype(np.float32, copy=False)
+            if batch.get("exit_close_raw_path") is not None
+            else None
+        )
+        exit_sellable_path_np = (
+            batch["exit_sellable_path"].numpy().astype(bool, copy=False)
+            if batch.get("exit_sellable_path") is not None
+            else None
+        )
         entry_filled_count += int(entry_filled_np.sum())
         entry_candidate_count += int(entry_filled_np.size)
         if true_observed_np is not None:
@@ -3126,6 +3451,11 @@ def _predict_split(
                 price_anchor=dataset.price_anchor,
                 tradable_path=true_tradable_np,
                 entry_filled=entry_filled_np,
+                entry_open_raw=entry_open_raw_np,
+                exit_close_raw_path=exit_close_raw_path_np,
+                exit_sellable_path=exit_sellable_path_np,
+                execution_tail_days=int(dataset.execution_tail_days),
+                terminal_recovery_fraction=float(dataset.terminal_recovery_fraction),
             )
             for col, values in realized.items():
                 rows[col] = values
@@ -3171,6 +3501,7 @@ def _predict_split(
             del pred_aux_np, true_ohlcva_np, pred_va, true_va, finite_va, pred_va_delta, true_va_delta, finite_va_delta
         del x, y_path, y_ohlcva_path, _y_richer_path, y_summary, target_path, symbol_idx, out, pred_path_np, pred_summary_np, score_np, true_path_np, true_summary_np, chunk, metric_frame
         del trade_dates, symbols, true_tradable_np, true_observed_np, entry_filled_np
+        del entry_open_raw_np, exit_close_raw_path_np, exit_sellable_path_np
         if predict_batch_count % 100 == 0:
             gc.collect()
             _trim_working_set()
@@ -3268,7 +3599,9 @@ def _write_report(
     if early.get("metric"):
         lines.append(
             f"Early stopping monitors {early.get('metric', 'validation_rank_ic_mean')} with "
-            f"patience={int(early.get('patience', 0))}, min_delta={float(early.get('min_delta', 0.0)):.4g}."
+            f"mode={early.get('mode', '')}, patience={int(early.get('patience', 0))}, "
+            f"min_complete_epochs={int(early.get('minimum_complete_epochs', 1))}, "
+            f"min_delta={float(early.get('min_delta', 0.0)):.4g}."
         )
     elif str(summary.get("checkpoint_policy", "")) == "final_epoch":
         lines.append("The epoch count is fixed in advance; OOS is evaluated once after the final checkpoint is saved.")
@@ -3328,6 +3661,10 @@ def _write_report(
     )
     if str(summary.get("evaluation_mode", "")) == EVALUATION_MODE_FIXED_OOS:
         lines.append("- OOS was not read during training and did not select the checkpoint.")
+    elif str(summary.get("evaluation_mode", "")) == EVALUATION_MODE_DEVELOPMENT:
+        lines.append(
+            "- Development total loss alone selects the checkpoint; Top-K diagnostics score the complete candidate index and do not select within-run epochs."
+        )
     else:
         lines.append("- This is a first sequence model; failed improvement over baseline should be diagnosed, not hidden by test-set tuning.")
     path = output_dir / "sequence_path_training_report.md"
@@ -3378,6 +3715,10 @@ class TrainConfig:
     rank_batch_size: int = 512
     rank_interval: int = 4
     prefetch_batches: int = 1
+    early_stopping_metric: str = ""
+    early_stopping_mode: str = ""
+    min_complete_epochs: int = 1
+    development_contract: Path | None = None
 
 
 def _resolved_training_config(config: TrainConfig, *, evaluation_mode: str) -> dict[str, Any]:
@@ -3392,12 +3733,96 @@ def _validate_evaluation_mode(config: TrainConfig) -> str:
         raise ValueError("epochs must be positive")
     if int(getattr(config, "max_samples_per_split", 0)) < 0:
         raise ValueError("max_samples_per_split must be non-negative")
+    if int(getattr(config, "early_stopping_patience", 0)) < 0:
+        raise ValueError("early_stopping_patience must be non-negative")
+    if float(getattr(config, "early_stopping_min_delta", 0.0)) < 0.0:
+        raise ValueError("early_stopping_min_delta must be non-negative")
+    if int(getattr(config, "min_complete_epochs", 1)) < 1:
+        raise ValueError("min_complete_epochs must be at least 1")
+    if int(getattr(config, "min_complete_epochs", 1)) > int(getattr(config, "epochs", 1)):
+        raise ValueError("min_complete_epochs cannot exceed epochs")
     mode = str(config.evaluation_mode or EVALUATION_MODE_STANDARD).strip().lower()
     if mode not in EVALUATION_MODES:
         raise ValueError(f"evaluation_mode must be one of {EVALUATION_MODES}")
     if mode == EVALUATION_MODE_FIXED_OOS and int(config.early_stopping_patience) != 0:
         raise ValueError("fixed_oos requires early_stopping_patience=0 because OOS cannot select checkpoints")
+    metric = str(getattr(config, "early_stopping_metric", "") or "").strip().lower()
+    stopping_mode = str(getattr(config, "early_stopping_mode", "") or "").strip().lower()
+    if stopping_mode and stopping_mode not in EARLY_STOPPING_MODES:
+        raise ValueError(f"early_stopping_mode must be one of {EARLY_STOPPING_MODES}")
+    if mode == EVALUATION_MODE_DEVELOPMENT:
+        if int(config.max_samples_per_split) != 0:
+            raise ValueError("development requires max_samples_per_split=0 so every fold uses full training data")
+        if int(config.early_stopping_patience) <= 0:
+            raise ValueError("development requires early_stopping_patience > 0")
+        if metric != EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS:
+            raise ValueError(
+                "development requires early_stopping_metric=development_total_loss"
+            )
+        if stopping_mode != EARLY_STOPPING_MODE_MIN:
+            raise ValueError("development requires early_stopping_mode=min")
+    elif mode == EVALUATION_MODE_STANDARD:
+        if metric and metric != EARLY_STOPPING_METRIC_VALIDATION_RANK_IC:
+            raise ValueError("standard early stopping metric must be validation_rank_ic_mean")
+        if stopping_mode and stopping_mode != EARLY_STOPPING_MODE_MAX:
+            raise ValueError("standard early_stopping_mode must be max")
+    elif metric or stopping_mode:
+        raise ValueError("fixed_oos does not accept an early-stopping metric or mode")
     return mode
+
+
+def _canonical_json_sha256(payload: Any) -> str:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=_json_default)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _validated_development_contract(path: Path) -> dict[str, Any]:
+    contract_path = Path(path).resolve()
+    payload = json.loads(contract_path.read_text(encoding="utf-8"))
+    declared = str(payload.get("contract_sha256", "") or "")
+    semantic_payload = dict(payload)
+    semantic_payload.pop("contract_sha256", None)
+    computed = _canonical_json_sha256(semantic_payload)
+    if not declared or computed != declared:
+        raise ValueError("development contract semantic sha256 does not match contract_sha256")
+    protocol = dict(payload.get("development_protocol", {}) or {})
+    if dict(protocol.get("split_roles", {}) or {}) != {"fit": "train", "evaluation": "development"}:
+        raise ValueError("development contract must declare train/development split roles")
+    early = dict(payload.get("early_stopping", {}) or {})
+    if (
+        str(early.get("metric", "")) != EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS
+        or str(early.get("mode", "")) != EARLY_STOPPING_MODE_MIN
+        or int(early.get("minimum_complete_epochs", 0)) < 1
+        or not bool(early.get("restore_best_checkpoint", False))
+    ):
+        raise ValueError("development contract early-stopping semantics are incompatible")
+    return {
+        "contract_id": str(payload.get("contract_id", "")),
+        "path": str(contract_path),
+        "contract_sha256": declared,
+        "contract_file_sha256": _file_sha256(contract_path),
+    }
+
+
+def _development_split_storage_name(manifest: Mapping[str, Any]) -> str:
+    contract = dict(manifest.get("development_walkforward", {}) or {})
+    split_roles = dict(contract.get("split_roles", {}) or {})
+    if split_roles != {"fit": "train", "evaluation": "development"}:
+        raise ValueError("development fold must declare split_roles fit=train and evaluation=development")
+    index_paths = [Path(str(manifest.get("sample_index_path", "") or ""))]
+    if str(manifest.get("candidate_index_path", "") or ""):
+        index_paths.append(Path(str(manifest["candidate_index_path"])))
+    split_sets = [
+        set(pd.read_parquet(str(path), columns=["split"])["split"].astype(str).unique())
+        for path in index_paths
+    ]
+    if split_sets and all("development" in values for values in split_sets):
+        return "development"
+    # Explicit compatibility only: the manifest's canonical evaluation role is
+    # development, while both stored indexes use the retired physical name oos.
+    if split_sets and all("oos" in values for values in split_sets):
+        return "oos"
+    raise ValueError("development fold indexes must contain the canonical development split")
 
 
 def _validate_fixed_oos_split_contract(
@@ -3454,6 +3879,211 @@ def _validate_fixed_oos_split_contract(
         _validated_source_view_provenance(manifest)
 
 
+def _validate_development_split_contract(
+    *,
+    manifest: Mapping[str, Any],
+    train_ds: SequencePathPackDataset,
+    development_ds: SequencePathPackDataset,
+) -> None:
+    dependency_days = int(
+        dict(manifest.get("development_walkforward", {}) or {}).get(
+            "max_label_dependency_days",
+            manifest.get("max_label_dependency_days", train_ds.forward_days),
+        )
+    )
+    if dependency_days <= 0:
+        raise ValueError("development max_label_dependency_days must be positive")
+    if int(development_ds.forward_days) != int(train_ds.forward_days):
+        raise ValueError("development train and evaluation forward_days must match")
+    train_date_idx = _validated_sample_date_indices(
+        train_ds.sample_index,
+        context="development train sample index",
+    )
+    development_date_idx = _validated_sample_date_indices(
+        development_ds.sample_index,
+        context="development supervised sample index",
+    )
+    development_start_idx = int(development_date_idx.min())
+    dependency_column = next(
+        (
+            name
+            for name in (
+                "dependency_end_date_idx",
+                "max_label_dependency_date_idx",
+                "label_dependency_end_date_idx",
+            )
+            if name in train_ds.sample_index.columns
+        ),
+        "",
+    )
+    if dependency_column:
+        dependency_end = pd.to_numeric(
+            train_ds.sample_index[dependency_column], errors="coerce"
+        ).to_numpy(dtype=np.float64, na_value=np.nan)
+        if not bool(np.isfinite(dependency_end).all()):
+            raise ValueError(f"development train {dependency_column} must contain finite values")
+    else:
+        dependency_end = train_date_idx + dependency_days
+    overlap_count = int((dependency_end >= development_start_idx).sum())
+    if overlap_count:
+        raise ValueError(
+            "development requires every training label dependency to end before development: "
+            f"label_overlap_count={overlap_count}"
+        )
+    contract = dict(manifest.get("development_walkforward", {}) or {})
+    declared_start = int(
+        contract.get("development_start_date_idx", contract.get("oos_start_date_idx", -1))
+    )
+    if declared_start != development_start_idx:
+        raise ValueError("development manifest start date index does not match supervised index")
+    if int(
+        contract.get(
+            "label_dependency_overlap_count",
+            contract.get("label_overlap_count", contract.get("dependency_overlap_count", -1)),
+        )
+    ) != 0:
+        raise ValueError("development manifest does not declare label dependency overlap count=0")
+    normalization = dict(manifest.get("normalization", {}) or {})
+    expected_start = str(contract.get("development_start", contract.get("oos_start", "")) or "")
+    if normalization.get("fit_scope") not in {
+        "feature_dates_before_development_start",
+        "feature_dates_before_oos_start",
+    }:
+        raise ValueError("development normalization must use only feature dates before development start")
+    if str(normalization.get("fit_date_end_exclusive", "")) != expected_start:
+        raise ValueError("development normalization cutoff does not match development start")
+    from daily_research.path_policy.seq100_walkforward import (
+        _validated_development_fold_training_contract,
+    )
+
+    _validated_development_fold_training_contract(manifest)
+
+
+VALIDATION_LOSS_KEYS = (
+    "loss",
+    "path_loss",
+    "summary_loss",
+    "richer_loss",
+    "price_delta_loss",
+    "va_level_loss",
+    "va_delta_loss",
+    "value_loss",
+    "rank_loss",
+    "residual_penalty",
+)
+
+
+@torch.no_grad()
+def _evaluate_development_loss(
+    *,
+    model: nn.Module,
+    dataset: SequencePathPackDataset,
+    device: torch.device,
+    config: TrainConfig,
+    amp_enabled: bool,
+    path_value_gradient_profile: str,
+    rank_training_profile: str,
+) -> dict[str, Any]:
+    """Evaluate the configured mathematical objective over every supervised row."""
+
+    uses_direct_value = bool(getattr(model, "uses_direct_value", False))
+    uses_derived_path_value = bool(getattr(model, "uses_derived_path_value", False))
+    uses_ohlcva_path = bool(getattr(model, "uses_ohlcva_path", False))
+    uses_ohlcva_aux_path = bool(getattr(model, "uses_ohlcva_aux_path", False))
+    uses_richer_path = bool(getattr(model, "uses_richer_path", False))
+    totals = torch.zeros(len(VALIDATION_LOSS_KEYS), device=device, dtype=torch.float64)
+    sample_count = 0
+    batch_count = 0
+    started_at = time.perf_counter()
+    was_training = bool(model.training)
+    model.eval()
+    try:
+        batches = DateGroupedBatchSampler(
+            dataset.sample_index,
+            batch_size=int(config.batch_size),
+            shuffle=False,
+            seed=0,
+        )
+        for indices in batches:
+            batch = dataset.get_batch(
+                indices,
+                include_ohlcva_path=bool(uses_ohlcva_path or uses_ohlcva_aux_path),
+                include_richer_path=uses_richer_path,
+                include_summary=not bool(uses_derived_path_value or uses_direct_value),
+                include_metadata=False,
+            )
+            y_tradable_path = (
+                batch["y_tradable_path"].to(device, non_blocking=device.type == "cuda")
+                if batch.get("y_tradable_path") is not None
+                else None
+            )
+            x, y_path, y_ohlcva_path, y_richer_path, y_summary, date_idx, symbol_idx = _batch_to_device(
+                batch, device
+            )
+            target_path = y_ohlcva_path if uses_ohlcva_path and y_ohlcva_path is not None else y_path
+            with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
+                outputs = model(x, symbol_idx=symbol_idx)
+                _loss, parts = _compute_loss(
+                    outputs,
+                    target_path,
+                    y_summary,
+                    date_idx,
+                    y_ohlcva_path=y_ohlcva_path,
+                    y_richer_path=y_richer_path,
+                    value_index=dataset.value_index,
+                    path_weight=float(config.path_loss_weight),
+                    path_loss_profile=str(config.path_loss_profile),
+                    summary_weight=float(config.summary_loss_weight),
+                    value_weight=float(config.value_loss_weight),
+                    rank_weight=float(config.rank_loss_weight),
+                    richer_weight=float(config.richer_loss_weight),
+                    rank_max_per_side=int(config.rank_max_per_side),
+                    price_delta_weight=float(config.price_delta_loss_weight),
+                    va_level_weight=float(config.va_level_loss_weight),
+                    va_delta_weight=float(config.va_delta_loss_weight),
+                    residual_weight=float(config.residual_score_weight),
+                    residual_penalty_weight=float(config.residual_penalty_weight),
+                    price_anchor=dataset.price_anchor,
+                    summary_loss_profile=str(config.summary_loss_profile),
+                    direct_value_horizon=int(config.direct_value_horizon),
+                    path_value_gradient_profile=path_value_gradient_profile,
+                    rank_training_profile=rank_training_profile,
+                    y_tradable_path=y_tradable_path,
+                    return_tensor_parts=True,
+                )
+            current_count = int(x.shape[0])
+            totals.add_(
+                torch.stack([parts[key].to(dtype=torch.float64) for key in VALIDATION_LOSS_KEYS]),
+                alpha=float(current_count),
+            )
+            sample_count += current_count
+            batch_count += 1
+            del batch, x, y_path, y_ohlcva_path, y_richer_path, y_summary, y_tradable_path
+            del date_idx, symbol_idx, target_path, outputs, _loss, parts
+    finally:
+        model.train(was_training)
+    if sample_count != len(dataset):
+        raise RuntimeError(
+            f"development loss evaluation did not cover all supervised rows: {sample_count} != {len(dataset)}"
+        )
+    means = totals.detach().cpu().numpy() / max(sample_count, 1)
+    result = {
+        key: float(value)
+        for key, value in zip(VALIDATION_LOSS_KEYS, means.tolist(), strict=True)
+    }
+    if not np.isfinite(result["loss"]):
+        raise ValueError("development_total_loss must be finite")
+    result.update(
+        {
+            "sample_count": int(sample_count),
+            "batch_count": int(batch_count),
+            "seconds": float(time.perf_counter() - started_at),
+            "aggregation": "sample_weighted_batch_mean_all_supervised_rows",
+        }
+    )
+    return result
+
+
 def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     evaluation_mode = _validate_evaluation_mode(config)
     path_value_gradient_profile = _normalize_path_value_gradient_profile(config.path_value_gradient_profile)
@@ -3465,7 +4095,26 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             raise ValueError("global_tail_512 requires rank_interval > 0")
     _set_seed(config.seed)
     manifest = json.loads(Path(config.pack_manifest).read_text(encoding="utf-8"))
-    fold_training_contract = manifest.get("fold_training_contract")
+    development_contract_binding: dict[str, Any] = {}
+    if evaluation_mode == EVALUATION_MODE_DEVELOPMENT:
+        manifest_contract = dict(manifest.get("research_contract", {}) or {})
+        contract_path_raw = (
+            config.development_contract
+            or manifest_contract.get("path")
+        )
+        if not contract_path_raw:
+            raise ValueError("development requires an approved development_contract path")
+        development_contract_binding = _validated_development_contract(Path(contract_path_raw))
+        for field in ("contract_id", "contract_sha256", "contract_file_sha256"):
+            if str(manifest_contract.get(field, "") or "") != str(
+                development_contract_binding[field]
+            ):
+                raise ValueError(f"manifest research_contract {field} does not match approved contract")
+    fold_training_contract = (
+        manifest.get("development_fold_training_contract")
+        if evaluation_mode == EVALUATION_MODE_DEVELOPMENT
+        else manifest.get("fold_training_contract")
+    )
     if fold_training_contract is not None and not isinstance(fold_training_contract, Mapping):
         raise ValueError("fold_training_contract must be a JSON object")
     device = _resolve_device(config.device)
@@ -3482,6 +4131,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     )
     if len(train_ds) == 0:
         raise ValueError("training split is empty")
+    development_ds = None
+    development_scoring_ds = None
     if evaluation_mode == EVALUATION_MODE_FIXED_OOS:
         val_ds = None
         test_ds = None
@@ -3494,6 +4145,41 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         if len(oos_ds) == 0:
             raise ValueError("oos split is empty")
         _validate_fixed_oos_split_contract(manifest=manifest, train_ds=train_ds, oos_ds=oos_ds)
+    elif evaluation_mode == EVALUATION_MODE_DEVELOPMENT:
+        val_ds = None
+        test_ds = None
+        oos_ds = None
+        development_storage_split = _development_split_storage_name(manifest)
+        development_ds = SequencePathPackDataset(
+            manifest,
+            split=development_storage_split,
+            max_samples=0,
+            input_channel_profile=str(config.input_channel_profile),
+        )
+        development_scoring_ds = SequencePathPackDataset(
+            manifest,
+            split=development_storage_split,
+            max_samples=0,
+            input_channel_profile=str(config.input_channel_profile),
+            index_role="candidate",
+        )
+        if len(development_ds) == 0:
+            raise ValueError("development supervised split is empty")
+        if len(development_scoring_ds) == 0:
+            raise ValueError("development candidate split is empty")
+        if not bool(manifest.get("dependency_padding_complete", False)):
+            raise ValueError("development requires complete forward+execution-tail date padding")
+        if not bool(development_scoring_ds.has_deterministic_execution):
+            raise ValueError(
+                "development execution evaluator requires entry_open_raw, exit_close_raw, and exit_sellable"
+            )
+        if int(development_scoring_ds.execution_tail_days) <= 0:
+            raise ValueError("development requires a positive execution_tail_days retry window")
+        _validate_development_split_contract(
+            manifest=manifest,
+            train_ds=train_ds,
+            development_ds=development_ds,
+        )
     else:
         oos_ds = None
         val_ds = SequencePathPackDataset(
@@ -3537,9 +4223,12 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(config.learning_rate), weight_decay=float(config.weight_decay))
     scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
     best_val_ic = -1e9
+    best_development_loss = float("inf")
     best_epoch = 0
     epochs_without_improvement = 0
-    best_path = output_dir / ("final_model.pt" if evaluation_mode == EVALUATION_MODE_FIXED_OOS else "best_model.pt")
+    best_path = output_dir / (
+        "final_model.pt" if evaluation_mode == EVALUATION_MODE_FIXED_OOS else "best_model.pt"
+    )
     history: list[dict[str, Any]] = []
     global_tail_targets: np.ndarray | None = None
     prior_epoch_scores: np.ndarray | None = None
@@ -3820,6 +4509,127 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 "updated_at": _now(),
             }
             del val_ic, val_topk, val_daily_topk, val_candidates
+        elif evaluation_mode == EVALUATION_MODE_DEVELOPMENT:
+            assert development_ds is not None and development_scoring_ds is not None
+            epoch_dir = output_dir / f"epoch_{epoch:03d}"
+            _write_json(
+                progress_path,
+                {"status": "evaluating_development_loss", "epoch": int(epoch), "updated_at": _now()},
+            )
+            development_loss = _evaluate_development_loss(
+                model=model,
+                dataset=development_ds,
+                device=device,
+                config=config,
+                amp_enabled=amp_enabled,
+                path_value_gradient_profile=path_value_gradient_profile,
+                rank_training_profile=rank_training_profile,
+            )
+            _write_json(
+                progress_path,
+                {"status": "diagnosing_development_topk", "epoch": int(epoch), "updated_at": _now()},
+            )
+            (
+                development_ic,
+                development_topk,
+                development_daily_topk,
+                development_candidates,
+                development_metrics,
+            ) = _predict_split(
+                model=model,
+                dataset=development_scoring_ds,
+                device=device,
+                output_dir=epoch_dir,
+                split="development",
+                batch_size=int(config.batch_size),
+                amp_enabled=amp_enabled,
+                top_k=config.top_k,
+                write_predictions=False,
+                write_path_predictions=False,
+                direct_value_horizon=int(config.direct_value_horizon),
+            )
+            if uses_derived_path_value:
+                _validate_development_topk_execution_coverage(development_topk)
+            diagnostics_path = epoch_dir / "development_epoch_diagnostics.json"
+            _write_json(
+                diagnostics_path,
+                {
+                    "epoch": int(epoch),
+                    "checkpoint_selector": EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS,
+                    "topk_selects_checkpoint": False,
+                    "loss": development_loss,
+                    "candidate_metrics": development_metrics,
+                    "topk": development_topk.to_dict("records"),
+                },
+            )
+            current_development_loss = float(development_loss["loss"])
+            improved = bool(
+                current_development_loss
+                < best_development_loss - float(config.early_stopping_min_delta)
+            )
+            for key in VALIDATION_LOSS_KEYS:
+                history_key = "development_total_loss" if key == "loss" else f"development_{key}"
+                train_row[history_key] = float(development_loss[key])
+            train_row.update(
+                {
+                    "development_supervised_sample_count": int(development_loss["sample_count"]),
+                    "development_candidate_count": int(len(development_scoring_ds)),
+                    "development_loss_seconds": float(development_loss["seconds"]),
+                    "development_rank_ic_mean": float(development_metrics["rank_ic_mean"]),
+                    "development_diagnostics_json": str(diagnostics_path.resolve()),
+                    "checkpoint_policy": "best_development_total_loss",
+                    "is_best": bool(improved),
+                }
+            )
+            if improved:
+                best_development_loss = current_development_loss
+                best_epoch = int(epoch)
+                epochs_without_improvement = 0
+                checkpoint_payload = {
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "scaler_state_dict": scaler.state_dict(),
+                    "python_random_state": random.getstate(),
+                    "numpy_random_state": np.random.get_state(),
+                    "torch_random_state": torch.get_rng_state(),
+                    "cuda_random_states": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [],
+                    "config": config.__dict__,
+                    "resolved_training_config": _resolved_training_config(
+                        config, evaluation_mode=evaluation_mode
+                    ),
+                    "input_dim": train_ds.input_dim,
+                    "summary_columns": train_ds.path_summary_columns,
+                    "feature_channels": manifest.get("feature_channels", {}),
+                    "fold_training_contract": fold_training_contract,
+                    "research_contract": development_contract_binding,
+                    "development_candidate_index": {
+                        "path": str(development_scoring_ds.index_path),
+                        "sha256": str(development_scoring_ds.sample_selection["index_sha256"]),
+                        "row_count": int(len(development_scoring_ds)),
+                    },
+                    "best_epoch": int(epoch),
+                    "best_development_total_loss": best_development_loss,
+                    "development_loss_components": development_loss,
+                    "checkpoint_policy": "best_development_total_loss",
+                }
+                torch.save(checkpoint_payload, best_path)
+            else:
+                epochs_without_improvement += 1
+            train_row["early_stopping_wait"] = int(epochs_without_improvement)
+            history.append(train_row)
+            progress_payload = {
+                "status": "epoch_completed",
+                "epoch": int(epoch),
+                "development_total_loss": current_development_loss,
+                "best_development_total_loss": float(best_development_loss),
+                "best_epoch": int(best_epoch),
+                "early_stopping_wait": int(epochs_without_improvement),
+                "early_stopping_patience": int(config.early_stopping_patience),
+                "minimum_complete_epochs": int(config.min_complete_epochs),
+                "topk_selects_checkpoint": False,
+                "updated_at": _now(),
+            }
+            del development_ic, development_topk, development_daily_topk, development_candidates
         else:
             train_row["checkpoint_policy"] = "final_epoch"
             history.append(train_row)
@@ -3836,18 +4646,29 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             torch.cuda.empty_cache()
         gc.collect()
         _trim_working_set()
-        if (
+        standard_should_stop = bool(
             evaluation_mode == EVALUATION_MODE_STANDARD
             and int(config.early_stopping_patience) > 0
             and epochs_without_improvement >= int(config.early_stopping_patience)
-        ):
+        )
+        development_should_stop = bool(
+            evaluation_mode == EVALUATION_MODE_DEVELOPMENT
+            and int(epoch) >= int(config.min_complete_epochs)
+            and epochs_without_improvement >= int(config.early_stopping_patience)
+        )
+        if standard_should_stop or development_should_stop:
+            stopping_metric_payload = (
+                {"best_development_total_loss": float(best_development_loss)}
+                if evaluation_mode == EVALUATION_MODE_DEVELOPMENT
+                else {"best_validation_rank_ic_mean": float(best_val_ic)}
+            )
             _write_json(
                 progress_path,
                 {
                     "status": "early_stopped",
                     "epoch": int(epoch),
                     "best_epoch": int(best_epoch),
-                    "best_validation_rank_ic_mean": float(best_val_ic),
+                    **stopping_metric_payload,
                     "early_stopping_wait": int(epochs_without_improvement),
                     "updated_at": _now(),
                 },
@@ -3870,11 +4691,16 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     elif best_path.exists():
         payload = torch.load(best_path, map_location=device, weights_only=False)
         model.load_state_dict(payload["model_state_dict"])
+    elif evaluation_mode == EVALUATION_MODE_DEVELOPMENT:
+        raise RuntimeError("development training completed without a finite best-loss checkpoint")
     _write_json(progress_path, {"status": "final_evaluation", "updated_at": _now()})
     evaluation_datasets: list[tuple[str, SequencePathPackDataset]]
     if evaluation_mode == EVALUATION_MODE_FIXED_OOS:
         assert oos_ds is not None
         evaluation_datasets = [("oos", oos_ds)]
+    elif evaluation_mode == EVALUATION_MODE_DEVELOPMENT:
+        assert development_scoring_ds is not None
+        evaluation_datasets = [("development", development_scoring_ds)]
     else:
         assert val_ds is not None and test_ds is not None
         evaluation_datasets = [("validation", val_ds), ("test", test_ds)]
@@ -3902,6 +4728,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         daily_ic_frames.append(split_ic.assign(split=split_name))
         daily_topk_frames.append(split_daily_topk.assign(split=split_name))
         candidate_frames.append(split_candidates.assign(split=split_name))
+        if evaluation_mode == EVALUATION_MODE_DEVELOPMENT and uses_derived_path_value:
+            _validate_development_topk_execution_coverage(split_topk)
     split_metrics = pd.DataFrame(metric_rows)
     topk = pd.concat(topk_frames, ignore_index=True)
     daily_ic = pd.concat(daily_ic_frames, ignore_index=True)
@@ -3937,9 +4765,23 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         if bool(getattr(model, "uses_derived_path_value", False))
         else list(train_ds.path_summary_columns)
     )
-    walkforward_contract = dict(manifest.get("purged_walkforward", {}) or {})
+    walkforward_contract = dict(
+        manifest.get(
+            "development_walkforward"
+            if evaluation_mode == EVALUATION_MODE_DEVELOPMENT
+            else "purged_walkforward",
+            {},
+        )
+        or {}
+    )
     evaluation_splits = [name for name, _ in evaluation_datasets]
-    checkpoint_policy = "final_epoch" if evaluation_mode == EVALUATION_MODE_FIXED_OOS else "best_validation_rank_ic"
+    checkpoint_policy = (
+        "final_epoch"
+        if evaluation_mode == EVALUATION_MODE_FIXED_OOS
+        else "best_development_total_loss"
+        if evaluation_mode == EVALUATION_MODE_DEVELOPMENT
+        else "best_validation_rank_ic"
+    )
     prediction_outputs = {
         f"{split_name}_predictions_csv": (
             str((output_dir / "predictions" / f"{split_name}_predictions.csv").resolve())
@@ -3972,8 +4814,19 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         "evaluation_split": evaluation_splits[0] if len(evaluation_splits) == 1 else "",
         "checkpoint_policy": checkpoint_policy,
         "resolved_training_config": _resolved_training_config(config, evaluation_mode=evaluation_mode),
-        "fold_year": int(walkforward_contract.get("oos_year", 0) or 0),
-        "train_label_end_before": str(walkforward_contract.get("oos_start", "") or ""),
+        "fold_year": int(
+            walkforward_contract.get(
+                "development_year", walkforward_contract.get("oos_year", 0)
+            )
+            or 0
+        ),
+        "development_year": int(walkforward_contract.get("development_year", 0) or 0),
+        "train_label_end_before": str(
+            walkforward_contract.get(
+                "development_start", walkforward_contract.get("oos_start", "")
+            )
+            or ""
+        ),
         "normalization_cutoff": str(walkforward_contract.get("normalization_cutoff_exclusive", "") or ""),
         "epochs": int(config.epochs),
         "completed_epochs": int(len(history)),
@@ -3985,6 +4838,16 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             **({"oos": dict(oos_ds.sample_selection)} if oos_ds is not None else {}),
             **({"validation": dict(val_ds.sample_selection)} if val_ds is not None else {}),
             **({"test": dict(test_ds.sample_selection)} if test_ds is not None else {}),
+            **(
+                {"development_supervised": dict(development_ds.sample_selection)}
+                if development_ds is not None
+                else {}
+            ),
+            **(
+                {"development_candidates": dict(development_scoring_ds.sample_selection)}
+                if development_scoring_ds is not None
+                else {}
+            ),
         },
         "input_channel_profile": str(train_ds.input_channel_profile),
         "input_channels": list(train_ds.channel_order),
@@ -4043,16 +4906,40 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             ),
         },
         "early_stopping": {
-            "metric": "validation_rank_ic_mean" if evaluation_mode == EVALUATION_MODE_STANDARD else "",
+            "metric": (
+                EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS
+                if evaluation_mode == EVALUATION_MODE_DEVELOPMENT
+                else EARLY_STOPPING_METRIC_VALIDATION_RANK_IC
+                if evaluation_mode == EVALUATION_MODE_STANDARD
+                else ""
+            ),
+            "mode": (
+                EARLY_STOPPING_MODE_MIN
+                if evaluation_mode == EVALUATION_MODE_DEVELOPMENT
+                else EARLY_STOPPING_MODE_MAX
+                if evaluation_mode == EVALUATION_MODE_STANDARD
+                else ""
+            ),
             "patience": int(config.early_stopping_patience),
             "min_delta": float(config.early_stopping_min_delta),
+            "minimum_complete_epochs": int(config.min_complete_epochs),
+            "restore_best_checkpoint": bool(evaluation_mode != EVALUATION_MODE_FIXED_OOS),
+            "topk_selects_checkpoint": False if evaluation_mode == EVALUATION_MODE_DEVELOPMENT else None,
+            "best_value": (
+                float(best_development_loss)
+                if evaluation_mode == EVALUATION_MODE_DEVELOPMENT
+                else float(best_val_ic)
+                if evaluation_mode == EVALUATION_MODE_STANDARD
+                else None
+            ),
             "stopped_early": bool(
-                evaluation_mode == EVALUATION_MODE_STANDARD
+                evaluation_mode in {EVALUATION_MODE_STANDARD, EVALUATION_MODE_DEVELOPMENT}
                 and int(config.early_stopping_patience) > 0
                 and len(history) < int(config.epochs)
             ),
         },
         "best_checkpoint": str(best_path.resolve()),
+        "best_checkpoint_sha256": _file_sha256(best_path),
         "history": history,
         "split_metrics": split_metrics.to_dict("records"),
         "outputs": {
@@ -4066,6 +4953,33 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         },
         "baseline_feature_summary": baseline_summary.get("output_dir", ""),
     }
+    if evaluation_mode == EVALUATION_MODE_DEVELOPMENT:
+        assert development_scoring_ds is not None
+        summary["research_contract"] = development_contract_binding
+        summary["development_candidate_index"] = {
+            "path": str(development_scoring_ds.index_path),
+            "sha256": str(development_scoring_ds.sample_selection["index_sha256"]),
+            "row_count": int(len(development_scoring_ds)),
+            "date_count": int(development_scoring_ds.sample_index["date_idx"].nunique()),
+            "policy": "all_candidates",
+        }
+        summary["candidate_index_path"] = str(development_scoring_ds.index_path)
+        summary["candidate_index_sha256"] = str(
+            development_scoring_ds.sample_selection["index_sha256"]
+        )
+        summary["development_fold_training_contract"] = fold_training_contract
+        summary["development_execution_evaluation"] = {
+            "entry": "raw_next_open",
+            "earliest_exit_day": 2,
+            "exit_retry_days": int(development_scoring_ds.execution_tail_days),
+            "exit_prices": "raw_close",
+            "terminal_recovery_fraction": float(
+                development_scoring_ds.terminal_recovery_fraction
+            ),
+            "realized_plan_return_semantics": "gross_raw_execution_return",
+            "realized_plan_value_cost_semantics": "path_value_v2_fixed_transaction_cost_surrogate",
+            "full_account_net_costs_required_for_deployment": True,
+        }
     if fold_training_contract is not None:
         summary["fold_training_contract"] = fold_training_contract
     if bool(getattr(model, "uses_residual_score", False)):
@@ -4184,7 +5098,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--evaluation-mode",
         default=EVALUATION_MODE_STANDARD,
         choices=EVALUATION_MODES,
-        help="standard selects a checkpoint on validation; fixed_oos saves the final epoch then evaluates oos once.",
+        help=(
+            "standard selects by validation rank IC; fixed_oos evaluates OOS only after its final epoch; "
+            "development selects by full supervised development loss and diagnoses TopK on all candidates."
+        ),
     )
     train.add_argument(
         "--allow-large-predictions",
@@ -4193,6 +5110,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     train.add_argument("--early-stopping-patience", type=int, default=0)
     train.add_argument("--early-stopping-min-delta", type=float, default=0.0)
+    train.add_argument("--early-stopping-metric", default="")
+    train.add_argument("--early-stopping-mode", default="", choices=("", *EARLY_STOPPING_MODES))
+    train.add_argument("--min-complete-epochs", type=int, default=1)
+    train.add_argument("--development-contract", type=Path, default=None)
     train.add_argument("--json", action="store_true")
     return parser
 
@@ -4259,6 +5180,10 @@ def main(argv: list[str] | None = None) -> int:
         rank_batch_size=int(args.rank_batch_size),
         rank_interval=int(args.rank_interval),
         prefetch_batches=int(args.prefetch_batches),
+        early_stopping_metric=str(args.early_stopping_metric),
+        early_stopping_mode=str(args.early_stopping_mode),
+        min_complete_epochs=int(args.min_complete_epochs),
+        development_contract=(Path(args.development_contract) if args.development_contract else None),
     )
     result = train_sequence_path_model(cfg)
     print(json.dumps(result, ensure_ascii=False, indent=2, default=_json_default) if bool(args.json) else result)
