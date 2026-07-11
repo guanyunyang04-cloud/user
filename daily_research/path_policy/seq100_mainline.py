@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from daily_research.path_policy.qdp_v2_sequence_path_training import (
+    DEFAULT_SEED,
+    EVALUATION_MODE_STANDARD,
+    EVALUATION_MODES,
     INPUT_CHANNEL_PROFILE_ALL,
     INPUT_CHANNEL_PROFILE_DAILY_ONLY,
     INPUT_CHANNEL_PROFILE_NO_INTRADAY_SUMMARY,
@@ -115,7 +118,9 @@ class TodayClosePathOnlyProfile:
     rank_loss_weight: float = 0.15
     rank_max_per_side: int = 64
     device: str = "auto"
+    seed: int = DEFAULT_SEED
     prediction_mode: str = "compact"
+    evaluation_mode: str = EVALUATION_MODE_STANDARD
     early_stopping_patience: int = 2
     early_stopping_min_delta: float = 0.0
     top_k: str = DEFAULT_TOP_K
@@ -179,12 +184,16 @@ def build_todayclose_path_only_train_argv(profile: TodayClosePathOnlyProfile) ->
         str(profile.rank_max_per_side),
         "--device",
         profile.device,
+        "--seed",
+        str(profile.seed),
         "--top-k",
         profile.top_k,
         "--max-samples-per-split",
         str(profile.max_samples_per_split),
         "--prediction-mode",
         profile.prediction_mode,
+        "--evaluation-mode",
+        profile.evaluation_mode,
         "--early-stopping-patience",
         str(profile.early_stopping_patience),
         "--early-stopping-min-delta",
@@ -628,7 +637,15 @@ def mainline_contract() -> dict[str, Any]:
             "Sequence path-value metrics are research evidence. They do not activate "
             "active_execution_strategy.json, live/default, broker, or trade-plan changes."
         ),
-        "next_decision_surface": "execution_layer_backtest",
+        "primary_evaluation_policy": {
+            "method": "purged_expanding_walk_forward",
+            "split_roles": {"fit": "train", "evaluation": "oos"},
+            "train_label_rule": "label_end_trade_date < oos_start_trade_date",
+            "checkpoint_policy": "final_epoch",
+            "oos_access": "evaluate_once_after_training",
+            "formal_years": [2022, 2023, 2024, 2025],
+        },
+        "next_decision_surface": "complete_case_oos_universe_or_preregistered_multiseed",
     }
 
 
@@ -657,7 +674,7 @@ def summarize_sequence_run(run_dir: Path) -> dict[str, Any]:
     slim_splits = {}
     for row in split_rows:
         split = row.get("split", "")
-        if split in {"validation", "test"}:
+        if split:
             slim_splits[split] = {
                 "row_count": int(float(row.get("row_count") or 0)),
                 "date_count": int(float(row.get("date_count") or 0)),
@@ -666,7 +683,7 @@ def summarize_sequence_run(run_dir: Path) -> dict[str, Any]:
                 "value_column": row.get("value_column", summary.get("value_column", "")),
             }
 
-    slim_topk: dict[str, dict[str, dict[str, float]]] = {"validation": {}, "test": {}}
+    slim_topk: dict[str, dict[str, dict[str, float]]] = {split: {} for split in slim_splits}
     for row in topk_rows:
         split = row.get("split", "")
         top_k = row.get("top_k", "")
@@ -686,6 +703,11 @@ def summarize_sequence_run(run_dir: Path) -> dict[str, Any]:
     return {
         "run_dir": str(run_dir),
         "generated_at": summary.get("generated_at", ""),
+        "run_tag": summary.get("run_tag", ""),
+        "seed": summary.get("seed", ""),
+        "fold_year": summary.get("fold_year", ""),
+        "evaluation_mode": summary.get("evaluation_mode", ""),
+        "checkpoint_policy": summary.get("checkpoint_policy", ""),
         "pack_manifest": summary.get("pack_manifest", ""),
         "input_channel_profile": summary.get("input_channel_profile", ""),
         "input_channels": summary.get("input_channels", []),
@@ -742,10 +764,12 @@ def _add_train_args(
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=int(default_batch_size))
     parser.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
+    parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--max-samples-per-split", type=int, default=0)
     parser.add_argument("--early-stopping-patience", type=int, default=int(default_early_stopping_patience))
     parser.add_argument("--early-stopping-min-delta", type=float, default=0.0)
     parser.add_argument("--prediction-mode", default="compact", choices=("full", "compact", "none"))
+    parser.add_argument("--evaluation-mode", default=EVALUATION_MODE_STANDARD, choices=EVALUATION_MODES)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
 
@@ -773,7 +797,9 @@ def main(argv: list[str] | None = None) -> int:
         epochs=int(args.epochs),
         batch_size=int(args.batch_size),
         device=str(args.device),
+        seed=int(args.seed),
         prediction_mode=str(args.prediction_mode),
+        evaluation_mode=str(args.evaluation_mode),
         early_stopping_patience=int(args.early_stopping_patience),
         early_stopping_min_delta=float(args.early_stopping_min_delta),
         max_samples_per_split=int(args.max_samples_per_split),

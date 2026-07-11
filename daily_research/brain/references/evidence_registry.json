@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 160,
+  "record_count": 161,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -3821,6 +3821,43 @@
       "dataset_ids": []
     },
     {
+      "id": "path_policy_seq100_purged_walkforward_2022_2025_result_20260710",
+      "date": "2026-07-10",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_seq100_purged_walkforward_2022_2025_result_20260710.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [
+        "seq100_purged_walkforward_2022_2025"
+      ],
+      "run_tags": [
+        "seq100_purged_walkforward_2022_2025",
+        "summary_v2_all_channels_purged_oos2022_seed7_20260710_131412",
+        "daily_only_summary_v2_ohlcva_aux_low_purged_oos2022_seed7_20260710_133647",
+        "summary_v2_all_channels_purged_oos2023_seed7_20260710_135055",
+        "daily_only_summary_v2_ohlcva_aux_low_purged_oos2023_seed7_20260710_141510",
+        "summary_v2_all_channels_purged_oos2024_seed7_20260710_143051",
+        "daily_only_summary_v2_ohlcva_aux_low_purged_oos2024_seed7_20260710_145831",
+        "summary_v2_all_channels_purged_oos2025_seed7_20260710_151612",
+        "daily_only_summary_v2_ohlcva_aux_low_purged_oos2025_seed7_20260710_154643"
+      ],
+      "verdict": "Status: `completed / purged_expanding_walk_forward / no_default_change / no_active_execution_change`.; Study family: `seq100_purged_walkforward_2022_2025`.; The formal seq100 evaluation policy is now 2022-2025 purged expanding OOS. A train row is valid only when `label_end_trade_date < oos_start_trade_date`.; The old `2024 validation + 2025 train-through-2024 forward test` evidence is pre-purge historical evidence. It must not be mixed with or used to override this study.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Keep `daily_only_summary_v2_ohlcva_aux_low` as the default research profile.",
+        "Keep `summary_v2_all_channels` as a narrow Top1/Top3 comparison branch; do not promote it from this study.",
+        "If the source of the bundle difference matters, run a purged one-factor ablation that aligns model head and VA losses while changing only the input channel set.",
+        "Before changing the default, test training variance with preregistered additional seeds or wait for a genuinely new future OOS period.",
+        "Treat the complete-case universe issue as the next data/evaluation correction before execution-layer promotion.",
+        "Execution-layer backtesting remains a separate task and requires explicit execution evidence; this study does not unfreeze execution."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
       "id": "path_policy_seq100_rollforward_2025_result_20260709",
       "date": "2026-07-09",
       "r_id": "",
@@ -4763,7 +4800,8 @@
       "study_families": [],
       "run_tags": [
         "qdp_v2_alpha_v2_full_contract_2012_2025_20260702_01",
-        "qdp_v2_alpha_v2_full_contract_2012_2025_20260702_01_training_pack"
+        "qdp_v2_alpha_v2_full_contract_2012_2025_20260702_01_training_pack",
+        "qdp_v2_mainboard_2012_2025_v1"
       ],
       "verdict": "",
       "blockers": [],

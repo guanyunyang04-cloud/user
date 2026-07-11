@@ -1,12 +1,12 @@
 # Daily Research 治理对象
-快照日期：`2026-06-27`
+快照日期：`2026-07-10`
 
 本文件描述对象级不变量、纯判断函数和治理过程。它不要求每次任务复述全部边界；agent 先选择相关对象，再激活对应治理。
 
 ## Governed Objects
 ### object `research_surface`
 `scope`: scorer、feature、model、backtest、candidate review、research document。
-`invariants`: 结论带证据等级；数据来自 QDP explicit id / manifest / pack；低预算结果只产生候选或诊断。
+`invariants`: 结论带证据等级；数据来自 QDP explicit id / manifest / pack；低预算结果只产生候选或诊断；forward-path fold 必须满足 `train.label_end_trade_date < oos_start_trade_date`，仅按 signal year 切分不构成 PIT 隔离；`fixed_oos` 不得参与 checkpoint selection 或 early stopping。
 `inactive_boundaries`: live/default、broker、paper/live、active artifact。
 
 ### object `execution_surface`

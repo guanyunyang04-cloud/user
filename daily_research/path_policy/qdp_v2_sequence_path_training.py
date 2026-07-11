@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 import gc
+import hashlib
 import json
 import math
 import random
@@ -35,6 +36,9 @@ from daily_research.path_policy.qdp_v2_sequence_path_pack import (
 DEFAULT_OUTPUT_ROOT = Path("daily_research/output/path_policy/sequence_path_training")
 DEFAULT_TOP_K = (5, 10, 20, 50, 100)
 DEFAULT_SEED = 7
+EVALUATION_MODE_STANDARD = "standard"
+EVALUATION_MODE_FIXED_OOS = "fixed_oos"
+EVALUATION_MODES = (EVALUATION_MODE_STANDARD, EVALUATION_MODE_FIXED_OOS)
 PATH_VALUE_V2_WAITING_PENALTY = 0.04
 PATH_VALUE_V2_DRAWDOWN_PENALTY = 0.60
 PATH_VALUE_V2_TRANSACTION_COST = 0.002
@@ -288,6 +292,33 @@ def _input_channel_order(profile: str) -> list[str]:
     return list(INPUT_CHANNEL_PROFILE_ORDERS[value])
 
 
+def _validated_sample_date_indices(
+    sample_index: pd.DataFrame,
+    *,
+    context: str,
+    allow_empty: bool = False,
+) -> np.ndarray:
+    if not isinstance(sample_index, pd.DataFrame):
+        raise ValueError(f"{context} must be a pandas DataFrame")
+    if "date_idx" not in sample_index.columns:
+        raise ValueError(f"{context} is missing required date_idx column")
+    if sample_index.empty:
+        if allow_empty:
+            return np.empty(0, dtype=np.int64)
+        raise ValueError(f"{context} is empty")
+    numeric = pd.to_numeric(sample_index["date_idx"], errors="coerce").to_numpy(
+        dtype=np.float64,
+        na_value=np.nan,
+    )
+    if not bool(np.isfinite(numeric).all()) or not bool(np.equal(numeric, np.trunc(numeric)).all()):
+        raise ValueError(f"{context} date_idx must contain only finite integers")
+    if bool((numeric < 0).any()):
+        raise ValueError(f"{context} date_idx must be non-negative")
+    if bool((numeric > np.iinfo(np.int32).max).any()):
+        raise ValueError(f"{context} date_idx exceeds the supported int32 range")
+    return numeric.astype(np.int64)
+
+
 class SequencePathPackDataset(Dataset):
     def __init__(
         self,
@@ -302,10 +333,18 @@ class SequencePathPackDataset(Dataset):
         self.lookback_days = int(self.manifest.get("lookback_days", DEFAULT_LOOKBACK_DAYS) or DEFAULT_LOOKBACK_DAYS)
         self.forward_days = int(self.manifest.get("forward_days", DEFAULT_FORWARD_DAYS) or DEFAULT_FORWARD_DAYS)
         sample_index = pd.read_parquet(str(self.manifest["sample_index_path"]))
+        required_index_columns = {"split", "date_idx", "symbol_idx", "trade_date", "symbol"}
+        missing_index_columns = sorted(required_index_columns.difference(sample_index.columns))
+        if missing_index_columns:
+            raise ValueError(f"pack sample index is missing required columns: {missing_index_columns}")
         self.sample_index = sample_index[sample_index["split"].astype(str).eq(str(split))].reset_index(drop=True)
         if int(max_samples) > 0 and len(self.sample_index) > int(max_samples):
             self.sample_index = self.sample_index.head(int(max_samples)).reset_index(drop=True)
-        self.date_idx_values = self.sample_index["date_idx"].astype(np.int32).to_numpy(copy=True)
+        self.date_idx_values = _validated_sample_date_indices(
+            self.sample_index,
+            context=f"{split} sample index",
+            allow_empty=True,
+        ).astype(np.int32, copy=False)
         self.symbol_idx_values = self.sample_index["symbol_idx"].astype(np.int32).to_numpy(copy=True)
         self.label_symbol_idx_values = (
             self.sample_index["label_symbol_idx"].astype(np.int32).to_numpy(copy=True)
@@ -1196,13 +1235,28 @@ def _topk_daily_rows(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forw
         "realized_entry_day",
         "realized_exit_day",
     ]
-    for top_k in top_k_values:
-        for trade_date, group in frame.groupby("trade_date", sort=True):
-            group = group.dropna(subset=["score", value_column])
-            if group.empty:
-                continue
-            top = group.sort_values("score", ascending=False, kind="mergesort").head(int(top_k))
-            row: dict[str, Any] = {"trade_date": str(trade_date), "top_k": int(top_k)}
+    for trade_date, raw_group in frame.groupby("trade_date", sort=True):
+        group = raw_group.dropna(subset=["score", value_column]).copy()
+        if group.empty:
+            continue
+        sort_columns = ["score", *( ["symbol"] if "symbol" in group.columns else [])]
+        ascending = [False, *( [True] if "symbol" in group.columns else [])]
+        group = group.sort_values(sort_columns, ascending=ascending, kind="mergesort")
+        universe_symbols = (
+            sorted(group["symbol"].astype(str).tolist())
+            if "symbol" in group.columns
+            else [str(item) for item in sorted(group.index.tolist())]
+        )
+        universe_hash = hashlib.sha256("\n".join(universe_symbols).encode("utf-8")).hexdigest()
+        for top_k in top_k_values:
+            top = group.head(int(top_k))
+            row: dict[str, Any] = {
+                "trade_date": str(trade_date),
+                "top_k": int(top_k),
+                "universe_count": int(len(group)),
+                "selected_count": int(len(top)),
+                "universe_hash": universe_hash,
+            }
             for col in [*metric_cols, *[col for col in optional_metric_cols if col in group.columns]]:
                 universe_mean = pd.to_numeric(group[col], errors="coerce").mean()
                 selected_mean = pd.to_numeric(top[col], errors="coerce").mean()
@@ -1236,6 +1290,57 @@ def _topk_daily_rows(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forw
     return rows
 
 
+def _topk_candidate_rows(
+    frame: pd.DataFrame,
+    *,
+    max_top_k: int,
+    forward_days: int,
+    value_column: str,
+) -> list[dict[str, Any]]:
+    suffix = f"{int(forward_days)}d"
+    metric_columns = [
+        value_column,
+        f"future_max_return_{suffix}",
+        f"future_min_return_{suffix}",
+        f"future_final_return_{suffix}",
+        f"drawdown_after_peak_{suffix}",
+        f"best_exit_day_{suffix}",
+        f"best_exit_close_return_{suffix}",
+        f"pre_exit_max_drawdown_{suffix}",
+        f"in_trade_max_drawdown_{suffix}",
+    ]
+    rows: list[dict[str, Any]] = []
+    for trade_date, raw_group in frame.groupby("trade_date", sort=True):
+        group = raw_group.dropna(subset=["score", value_column]).copy()
+        if group.empty:
+            continue
+        sort_columns = ["score", *( ["symbol"] if "symbol" in group.columns else [])]
+        ascending = [False, *( [True] if "symbol" in group.columns else [])]
+        group = group.sort_values(sort_columns, ascending=ascending, kind="mergesort")
+        universe_symbols = (
+            sorted(group["symbol"].astype(str).tolist())
+            if "symbol" in group.columns
+            else [str(item) for item in sorted(group.index.tolist())]
+        )
+        universe_hash = hashlib.sha256("\n".join(universe_symbols).encode("utf-8")).hexdigest()
+        top = group.head(max(int(max_top_k), 0))
+        for rank, (_, item) in enumerate(top.iterrows(), start=1):
+            row: dict[str, Any] = {
+                "trade_date": str(trade_date),
+                "score_rank": int(rank),
+                "symbol": str(item.get("symbol", "")),
+                "score": float(item["score"]),
+                "universe_count": int(len(group)),
+                "universe_hash": universe_hash,
+            }
+            for column in metric_columns:
+                if column in item.index:
+                    value = pd.to_numeric(pd.Series([item[column]]), errors="coerce").iloc[0]
+                    row[column] = float(value) if pd.notna(value) else np.nan
+            rows.append(row)
+    return rows
+
+
 def _aggregate_topk_daily_rows(rows: list[dict[str, Any]]) -> pd.DataFrame:
     daily = pd.DataFrame(rows)
     if daily.empty:
@@ -1243,7 +1348,7 @@ def _aggregate_topk_daily_rows(rows: list[dict[str, Any]]) -> pd.DataFrame:
     out_rows: list[dict[str, Any]] = []
     for top_k, group in daily.groupby("top_k", sort=True):
         out: dict[str, Any] = {"top_k": int(top_k), "day_count": int(len(group))}
-        for col in [c for c in group.columns if c not in {"trade_date", "top_k"}]:
+        for col in [c for c in group.columns if c not in {"trade_date", "top_k", "universe_hash", "score_column"}]:
             out[col] = float(pd.to_numeric(group[col], errors="coerce").mean())
         out_rows.append(out)
     return pd.DataFrame(out_rows)
@@ -1839,7 +1944,7 @@ def _predict_split(
     write_predictions: bool,
     write_path_predictions: bool = True,
     direct_value_horizon: int = 0,
-) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     pred_dir = output_dir / "predictions"
     if write_predictions:
         pred_dir.mkdir(parents=True, exist_ok=True)
@@ -1870,6 +1975,7 @@ def _predict_split(
     pending_frames: list[pd.DataFrame] = []
     ic_rows_by_score: dict[str, list[dict[str, Any]]] = {"score": []}
     topk_daily_rows_by_score: dict[str, list[dict[str, Any]]] = {"score": []}
+    topk_candidate_rows: list[dict[str, Any]] = []
     row_count = 0
     date_values: set[str] = set()
     target_sum = 0.0
@@ -1884,7 +1990,7 @@ def _predict_split(
     model.eval()
 
     def flush_pending_date() -> None:
-        nonlocal pending_date, pending_frames, ic_rows_by_score, topk_daily_rows_by_score
+        nonlocal pending_date, pending_frames, ic_rows_by_score, topk_daily_rows_by_score, topk_candidate_rows
         if not pending_frames:
             pending_date = None
             return
@@ -1901,14 +2007,25 @@ def _predict_split(
             if score_col != "score":
                 score_frame = date_frame.copy()
                 score_frame["score"] = score_frame[score_col].to_numpy(copy=False)
-            topk_daily_rows_by_score.setdefault(score_col, []).extend(
-                _topk_daily_rows(
+            daily_rows = _topk_daily_rows(
+                score_frame,
+                top_k_values=top_k,
+                forward_days=eval_forward_days,
+                value_column=value_column,
+            )
+            for row in daily_rows:
+                row["score_column"] = str(score_col)
+            topk_daily_rows_by_score.setdefault(score_col, []).extend(daily_rows)
+            if score_col == "score":
+                candidate_rows = _topk_candidate_rows(
                     score_frame,
-                    top_k_values=top_k,
+                    max_top_k=max(top_k, default=0),
                     forward_days=eval_forward_days,
                     value_column=value_column,
                 )
-            )
+                for row in candidate_rows:
+                    row["score_column"] = "score"
+                topk_candidate_rows.extend(candidate_rows)
         pending_frames = []
         pending_date = None
 
@@ -2034,6 +2151,8 @@ def _predict_split(
             _trim_working_set()
     flush_pending_date()
     ic = pd.DataFrame(ic_rows_by_score.get("score", []))
+    daily_topk = pd.DataFrame(topk_daily_rows_by_score.get("score", []))
+    topk_candidates = pd.DataFrame(topk_candidate_rows)
     topk = _aggregate_topk_daily_rows(topk_daily_rows_by_score.get("score", []))
     prediction_csv = str(pred_path.resolve()) if write_predictions else ""
     metrics = {
@@ -2063,7 +2182,7 @@ def _predict_split(
             "topk": score_topk.to_dict("records"),
         }
     metrics["score_diagnostics"] = diagnostics
-    return ic, topk, metrics
+    return ic, topk, daily_topk, topk_candidates, metrics
 
 
 def _write_report(
@@ -2107,11 +2226,13 @@ def _write_report(
             "Summary loss uses the same OHLC-derived constraints as multi-horizon summary v2, excluding the full-horizon window."
         )
     early = dict(summary.get("early_stopping", {}) or {})
-    if early:
+    if early.get("metric"):
         lines.append(
             f"Early stopping monitors {early.get('metric', 'validation_rank_ic_mean')} with "
             f"patience={int(early.get('patience', 0))}, min_delta={float(early.get('min_delta', 0.0)):.4g}."
         )
+    elif str(summary.get("checkpoint_policy", "")) == "final_epoch":
+        lines.append("The epoch count is fixed in advance; OOS is evaluated once after the final checkpoint is saved.")
     lines.append("")
     lines.append("## Split Metrics")
     lines.append("")
@@ -2158,7 +2279,10 @@ def _write_report(
     else:
         lines.append("- No symbol id or symbol embedding is used.")
     lines.append("- Path types are explanation labels; the model trains on numeric paths and path value.")
-    lines.append("- This is a first sequence model; failed improvement over baseline should be diagnosed, not hidden by test-set tuning.")
+    if str(summary.get("evaluation_mode", "")) == EVALUATION_MODE_FIXED_OOS:
+        lines.append("- OOS was not read during training and did not select the checkpoint.")
+    else:
+        lines.append("- This is a first sequence model; failed improvement over baseline should be diagnosed, not hidden by test-set tuning.")
     path = output_dir / "sequence_path_training_report.md"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return str(path.resolve())
@@ -2201,11 +2325,73 @@ class TrainConfig:
     prediction_mode: str
     early_stopping_patience: int
     early_stopping_min_delta: float
+    evaluation_mode: str = EVALUATION_MODE_STANDARD
+
+
+def _resolved_training_config(config: TrainConfig, *, evaluation_mode: str) -> dict[str, Any]:
+    excluded = {"pack_manifest", "output_root", "run_tag"}
+    payload = {key: value for key, value in config.__dict__.items() if key not in excluded}
+    payload["evaluation_mode"] = str(evaluation_mode)
+    return json.loads(json.dumps(payload, default=_json_default))
+
+
+def _validate_evaluation_mode(config: TrainConfig) -> str:
+    mode = str(config.evaluation_mode or EVALUATION_MODE_STANDARD).strip().lower()
+    if mode not in EVALUATION_MODES:
+        raise ValueError(f"evaluation_mode must be one of {EVALUATION_MODES}")
+    if mode == EVALUATION_MODE_FIXED_OOS and int(config.early_stopping_patience) != 0:
+        raise ValueError("fixed_oos requires early_stopping_patience=0 because OOS cannot select checkpoints")
+    return mode
+
+
+def _validate_fixed_oos_split_contract(
+    *,
+    manifest: Mapping[str, Any],
+    train_ds: SequencePathPackDataset,
+    oos_ds: SequencePathPackDataset,
+) -> None:
+    train_forward_days = int(train_ds.forward_days)
+    if train_forward_days <= 0:
+        raise ValueError("fixed_oos forward_days must be positive")
+    if int(oos_ds.forward_days) != train_forward_days:
+        raise ValueError("fixed_oos train and OOS forward_days must match")
+    train_date_idx = _validated_sample_date_indices(
+        train_ds.sample_index,
+        context="fixed_oos train sample index",
+    )
+    oos_date_idx = _validated_sample_date_indices(
+        oos_ds.sample_index,
+        context="fixed_oos oos sample index",
+    )
+    oos_start_idx = int(oos_date_idx.min())
+    label_end_idx = train_date_idx + train_forward_days
+    overlap_count = int((label_end_idx >= oos_start_idx).sum())
+    if overlap_count:
+        raise ValueError(
+            "fixed_oos requires every training label to end before OOS: "
+            f"label_overlap_count={overlap_count}"
+        )
+    contract = dict(manifest.get("purged_walkforward", {}) or {})
+    if contract:
+        declared_start = int(contract.get("oos_start_date_idx", -1))
+        if declared_start != oos_start_idx:
+            raise ValueError("fixed_oos manifest oos_start_date_idx does not match the sample index")
+        if int(contract.get("label_overlap_count", -1)) != 0:
+            raise ValueError("fixed_oos manifest does not declare label_overlap_count=0")
+        normalization = dict(manifest.get("normalization", {}) or {})
+        if normalization.get("fit_scope") != "feature_dates_before_oos_start":
+            raise ValueError("fixed_oos normalization must use feature_dates_before_oos_start")
+        if str(normalization.get("fit_date_end_exclusive", "")) != str(contract.get("oos_start", "")):
+            raise ValueError("fixed_oos normalization cutoff does not match OOS start")
 
 
 def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
+    evaluation_mode = _validate_evaluation_mode(config)
     _set_seed(config.seed)
     manifest = json.loads(Path(config.pack_manifest).read_text(encoding="utf-8"))
+    fold_training_contract = manifest.get("fold_training_contract")
+    if fold_training_contract is not None and not isinstance(fold_training_contract, Mapping):
+        raise ValueError("fold_training_contract must be a JSON object")
     device = _resolve_device(config.device)
     amp_enabled = bool(config.amp and device.type == "cuda")
     output_dir = config.output_root / f"{config.run_tag}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -2218,18 +2404,36 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         max_samples=int(config.max_samples_per_split),
         input_channel_profile=str(config.input_channel_profile),
     )
-    val_ds = SequencePathPackDataset(
-        manifest,
-        split="validation",
-        max_samples=int(config.max_samples_per_split),
-        input_channel_profile=str(config.input_channel_profile),
-    )
-    test_ds = SequencePathPackDataset(
-        manifest,
-        split="test",
-        max_samples=int(config.max_samples_per_split),
-        input_channel_profile=str(config.input_channel_profile),
-    )
+    if len(train_ds) == 0:
+        raise ValueError("training split is empty")
+    if evaluation_mode == EVALUATION_MODE_FIXED_OOS:
+        val_ds = None
+        test_ds = None
+        oos_ds = SequencePathPackDataset(
+            manifest,
+            split="oos",
+            max_samples=int(config.max_samples_per_split),
+            input_channel_profile=str(config.input_channel_profile),
+        )
+        if len(oos_ds) == 0:
+            raise ValueError("oos split is empty")
+        _validate_fixed_oos_split_contract(manifest=manifest, train_ds=train_ds, oos_ds=oos_ds)
+    else:
+        oos_ds = None
+        val_ds = SequencePathPackDataset(
+            manifest,
+            split="validation",
+            max_samples=int(config.max_samples_per_split),
+            input_channel_profile=str(config.input_channel_profile),
+        )
+        test_ds = SequencePathPackDataset(
+            manifest,
+            split="test",
+            max_samples=int(config.max_samples_per_split),
+            input_channel_profile=str(config.input_channel_profile),
+        )
+        if len(val_ds) == 0 or len(test_ds) == 0:
+            raise ValueError("standard evaluation requires non-empty validation and test splits")
     if str(config.model_type) in (OHLCVA_MODEL_TYPES | OHLCVA_AUX_MODEL_TYPES) and not bool(train_ds.has_ohlcva_path):
         raise ValueError(f"model_type={config.model_type} requires a pack with label_arrays.future_ohlcva_path")
     model = SequencePathModel(
@@ -2255,7 +2459,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     best_val_ic = -1e9
     best_epoch = 0
     epochs_without_improvement = 0
-    best_path = output_dir / "best_model.pt"
+    best_path = output_dir / ("final_model.pt" if evaluation_mode == EVALUATION_MODE_FIXED_OOS else "best_model.pt")
     history: list[dict[str, Any]] = []
     for epoch in range(1, int(config.epochs) + 1):
         _write_json(progress_path, {"status": "training", "epoch": epoch, "updated_at": _now()})
@@ -2351,48 +2555,48 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "train_sample_count": int(sample_count),
             **{key: float(value / max(batch_count, 1)) for key, value in loss_totals.items()},
         }
-        _write_json(progress_path, {"status": "validating_epoch", "epoch": int(epoch), "updated_at": _now()})
-        val_ic, val_topk, val_metrics = _predict_split(
-            model=model,
-            dataset=val_ds,
-            device=device,
-            output_dir=output_dir / f"epoch_{epoch:03d}",
-            split="validation",
-            batch_size=int(config.batch_size),
-            amp_enabled=amp_enabled,
-            top_k=config.top_k,
-            write_predictions=False,
-            write_path_predictions=False,
-            direct_value_horizon=int(config.direct_value_horizon),
-        )
-        current_val_ic = float(val_metrics["rank_ic_mean"])
-        improved = bool(np.isfinite(current_val_ic) and current_val_ic > best_val_ic + float(config.early_stopping_min_delta))
-        train_row["validation_rank_ic_mean"] = current_val_ic
-        train_row["is_best"] = bool(improved)
-        if improved:
-            best_val_ic = current_val_ic
-            best_epoch = int(epoch)
-            epochs_without_improvement = 0
-            torch.save(
-                {
-                    "model_state_dict": model.state_dict(),
-                    "config": config.__dict__,
-                    "input_dim": train_ds.input_dim,
-                    "summary_columns": train_ds.path_summary_columns,
-                    "feature_channels": manifest.get("feature_channels", {}),
-                    "best_epoch": int(epoch),
-                    "best_validation_rank_ic_mean": best_val_ic,
-                },
-                best_path,
+        if evaluation_mode == EVALUATION_MODE_STANDARD:
+            assert val_ds is not None
+            _write_json(progress_path, {"status": "validating_epoch", "epoch": int(epoch), "updated_at": _now()})
+            val_ic, val_topk, val_daily_topk, val_candidates, val_metrics = _predict_split(
+                model=model,
+                dataset=val_ds,
+                device=device,
+                output_dir=output_dir / f"epoch_{epoch:03d}",
+                split="validation",
+                batch_size=int(config.batch_size),
+                amp_enabled=amp_enabled,
+                top_k=config.top_k,
+                write_predictions=False,
+                write_path_predictions=False,
+                direct_value_horizon=int(config.direct_value_horizon),
             )
-        else:
-            epochs_without_improvement += 1
-        train_row["early_stopping_wait"] = int(epochs_without_improvement)
-        history.append(train_row)
-        pd.DataFrame(history).to_csv(output_dir / "training_history_partial.csv", index=False, encoding="utf-8-sig")
-        _write_json(
-            progress_path,
-            {
+            current_val_ic = float(val_metrics["rank_ic_mean"])
+            improved = bool(np.isfinite(current_val_ic) and current_val_ic > best_val_ic + float(config.early_stopping_min_delta))
+            train_row["validation_rank_ic_mean"] = current_val_ic
+            train_row["is_best"] = bool(improved)
+            if improved:
+                best_val_ic = current_val_ic
+                best_epoch = int(epoch)
+                epochs_without_improvement = 0
+                torch.save(
+                    {
+                        "model_state_dict": model.state_dict(),
+                        "config": config.__dict__,
+                        "input_dim": train_ds.input_dim,
+                        "summary_columns": train_ds.path_summary_columns,
+                        "feature_channels": manifest.get("feature_channels", {}),
+                        "best_epoch": int(epoch),
+                        "best_validation_rank_ic_mean": best_val_ic,
+                        "checkpoint_policy": "best_validation_rank_ic",
+                    },
+                    best_path,
+                )
+            else:
+                epochs_without_improvement += 1
+            train_row["early_stopping_wait"] = int(epochs_without_improvement)
+            history.append(train_row)
+            progress_payload = {
                 "status": "epoch_completed",
                 "epoch": int(epoch),
                 "validation_rank_ic_mean": float(val_metrics["rank_ic_mean"]),
@@ -2401,14 +2605,29 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 "early_stopping_wait": int(epochs_without_improvement),
                 "early_stopping_patience": int(config.early_stopping_patience),
                 "updated_at": _now(),
-            },
-        )
-        del val_ic, val_topk
+            }
+            del val_ic, val_topk, val_daily_topk, val_candidates
+        else:
+            train_row["checkpoint_policy"] = "final_epoch"
+            history.append(train_row)
+            progress_payload = {
+                "status": "epoch_completed",
+                "epoch": int(epoch),
+                "checkpoint_policy": "final_epoch",
+                "oos_evaluated": False,
+                "updated_at": _now(),
+            }
+        pd.DataFrame(history).to_csv(output_dir / "training_history_partial.csv", index=False, encoding="utf-8-sig")
+        _write_json(progress_path, progress_payload)
         if device.type == "cuda":
             torch.cuda.empty_cache()
         gc.collect()
         _trim_working_set()
-        if int(config.early_stopping_patience) > 0 and epochs_without_improvement >= int(config.early_stopping_patience):
+        if (
+            evaluation_mode == EVALUATION_MODE_STANDARD
+            and int(config.early_stopping_patience) > 0
+            and epochs_without_improvement >= int(config.early_stopping_patience)
+        ):
             _write_json(
                 progress_path,
                 {
@@ -2421,46 +2640,71 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 },
             )
             break
-    if best_path.exists():
+    if evaluation_mode == EVALUATION_MODE_FIXED_OOS:
+        best_epoch = int(len(history))
+        torch.save(
+            {
+                "model_state_dict": model.state_dict(),
+                "config": config.__dict__,
+                "input_dim": train_ds.input_dim,
+                "summary_columns": train_ds.path_summary_columns,
+                "feature_channels": manifest.get("feature_channels", {}),
+                "best_epoch": int(best_epoch),
+                "checkpoint_policy": "final_epoch",
+            },
+            best_path,
+        )
+    elif best_path.exists():
         payload = torch.load(best_path, map_location=device, weights_only=False)
         model.load_state_dict(payload["model_state_dict"])
     _write_json(progress_path, {"status": "final_evaluation", "updated_at": _now()})
-    val_ic, val_topk, val_metrics = _predict_split(
-        model=model,
-        dataset=val_ds,
-        device=device,
-        output_dir=output_dir,
-        split="validation",
-        batch_size=int(config.batch_size),
-        amp_enabled=amp_enabled,
-        top_k=config.top_k,
-        write_predictions=str(config.prediction_mode) != "none",
-        write_path_predictions=str(config.prediction_mode) == "full",
-        direct_value_horizon=int(config.direct_value_horizon),
-    )
-    test_ic, test_topk, test_metrics = _predict_split(
-        model=model,
-        dataset=test_ds,
-        device=device,
-        output_dir=output_dir,
-        split="test",
-        batch_size=int(config.batch_size),
-        amp_enabled=amp_enabled,
-        top_k=config.top_k,
-        write_predictions=str(config.prediction_mode) != "none",
-        write_path_predictions=str(config.prediction_mode) == "full",
-        direct_value_horizon=int(config.direct_value_horizon),
-    )
-    split_metrics = pd.DataFrame([val_metrics, test_metrics])
-    topk = pd.concat([val_topk.assign(split="validation"), test_topk.assign(split="test")], ignore_index=True)
-    daily_ic = pd.concat([val_ic.assign(split="validation"), test_ic.assign(split="test")], ignore_index=True)
+    evaluation_datasets: list[tuple[str, SequencePathPackDataset]]
+    if evaluation_mode == EVALUATION_MODE_FIXED_OOS:
+        assert oos_ds is not None
+        evaluation_datasets = [("oos", oos_ds)]
+    else:
+        assert val_ds is not None and test_ds is not None
+        evaluation_datasets = [("validation", val_ds), ("test", test_ds)]
+    metric_rows: list[dict[str, Any]] = []
+    topk_frames: list[pd.DataFrame] = []
+    daily_ic_frames: list[pd.DataFrame] = []
+    daily_topk_frames: list[pd.DataFrame] = []
+    candidate_frames: list[pd.DataFrame] = []
+    for split_name, evaluation_ds in evaluation_datasets:
+        split_ic, split_topk, split_daily_topk, split_candidates, split_metric = _predict_split(
+            model=model,
+            dataset=evaluation_ds,
+            device=device,
+            output_dir=output_dir,
+            split=split_name,
+            batch_size=int(config.batch_size),
+            amp_enabled=amp_enabled,
+            top_k=config.top_k,
+            write_predictions=str(config.prediction_mode) != "none",
+            write_path_predictions=str(config.prediction_mode) == "full",
+            direct_value_horizon=int(config.direct_value_horizon),
+        )
+        metric_rows.append(split_metric)
+        topk_frames.append(split_topk.assign(split=split_name))
+        daily_ic_frames.append(split_ic.assign(split=split_name))
+        daily_topk_frames.append(split_daily_topk.assign(split=split_name))
+        candidate_frames.append(split_candidates.assign(split=split_name))
+    split_metrics = pd.DataFrame(metric_rows)
+    topk = pd.concat(topk_frames, ignore_index=True)
+    daily_ic = pd.concat(daily_ic_frames, ignore_index=True)
+    daily_topk = pd.concat(daily_topk_frames, ignore_index=True)
+    topk_candidates = pd.concat(candidate_frames, ignore_index=True)
     split_metrics_path = output_dir / "split_metrics.csv"
     topk_path = output_dir / "topk_metrics.csv"
     daily_ic_path = output_dir / "daily_rank_ic.csv"
+    daily_topk_path = output_dir / "daily_topk_metrics.csv"
+    topk_candidates_path = output_dir / "topk_candidates.parquet"
     history_path = output_dir / "training_history.csv"
     split_metrics.to_csv(split_metrics_path, index=False, encoding="utf-8-sig")
     topk.to_csv(topk_path, index=False, encoding="utf-8-sig")
     daily_ic.to_csv(daily_ic_path, index=False, encoding="utf-8-sig")
+    daily_topk.to_csv(daily_topk_path, index=False, encoding="utf-8-sig")
+    topk_candidates.to_parquet(topk_candidates_path, index=False)
     pd.DataFrame(history).to_csv(history_path, index=False, encoding="utf-8-sig")
     uses_direct_value = bool(getattr(model, "uses_direct_value", False))
     baseline_forward_days = int(config.direct_value_horizon) if uses_direct_value else int(train_ds.forward_days)
@@ -2480,9 +2724,23 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         if bool(getattr(model, "uses_derived_path_value", False))
         else list(train_ds.path_summary_columns)
     )
+    walkforward_contract = dict(manifest.get("purged_walkforward", {}) or {})
+    evaluation_splits = [name for name, _ in evaluation_datasets]
+    checkpoint_policy = "final_epoch" if evaluation_mode == EVALUATION_MODE_FIXED_OOS else "best_validation_rank_ic"
+    prediction_outputs = {
+        f"{split_name}_predictions_csv": (
+            str((output_dir / "predictions" / f"{split_name}_predictions.csv").resolve())
+            if str(config.prediction_mode) != "none"
+            else ""
+        )
+        for split_name in evaluation_splits
+    }
     summary = {
         "artifact_type": "qdp_v2_sequence_path_training",
         "generated_at": _now(),
+        "run_tag": str(config.run_tag),
+        "seed": int(config.seed),
+        "top_k": [int(item) for item in config.top_k],
         "pack_manifest": str(Path(config.pack_manifest).resolve()),
         "output_dir": str(output_dir.resolve()),
         "lookback_days": int(train_ds.lookback_days),
@@ -2494,12 +2752,19 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         "device": str(device),
         "amp_enabled": bool(amp_enabled),
         "prediction_mode": str(config.prediction_mode),
+        "evaluation_mode": evaluation_mode,
+        "evaluation_splits": evaluation_splits,
+        "evaluation_split": evaluation_splits[0] if len(evaluation_splits) == 1 else "",
+        "checkpoint_policy": checkpoint_policy,
+        "resolved_training_config": _resolved_training_config(config, evaluation_mode=evaluation_mode),
+        "fold_year": int(walkforward_contract.get("oos_year", 0) or 0),
+        "train_label_end_before": str(walkforward_contract.get("oos_start", "") or ""),
+        "normalization_cutoff": str(walkforward_contract.get("normalization_cutoff_exclusive", "") or ""),
         "epochs": int(config.epochs),
         "completed_epochs": int(len(history)),
         "best_epoch": int(best_epoch),
         "batch_size": int(config.batch_size),
         "max_samples_per_split": int(config.max_samples_per_split),
-        "prediction_mode": str(config.prediction_mode),
         "input_channel_profile": str(train_ds.input_channel_profile),
         "input_channels": list(train_ds.channel_order),
         "model": {
@@ -2535,10 +2800,14 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "va_delta": float(config.va_delta_loss_weight),
         },
         "early_stopping": {
-            "metric": "validation_rank_ic_mean",
+            "metric": "validation_rank_ic_mean" if evaluation_mode == EVALUATION_MODE_STANDARD else "",
             "patience": int(config.early_stopping_patience),
             "min_delta": float(config.early_stopping_min_delta),
-            "stopped_early": bool(int(config.early_stopping_patience) > 0 and len(history) < int(config.epochs)),
+            "stopped_early": bool(
+                evaluation_mode == EVALUATION_MODE_STANDARD
+                and int(config.early_stopping_patience) > 0
+                and len(history) < int(config.epochs)
+            ),
         },
         "best_checkpoint": str(best_path.resolve()),
         "history": history,
@@ -2547,16 +2816,15 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "split_metrics_csv": str(split_metrics_path.resolve()),
             "topk_metrics_csv": str(topk_path.resolve()),
             "daily_rank_ic_csv": str(daily_ic_path.resolve()),
+            "daily_topk_metrics_csv": str(daily_topk_path.resolve()),
+            "topk_candidates_parquet": str(topk_candidates_path.resolve()),
             "training_history_csv": str(history_path.resolve()),
-            "validation_predictions_csv": str((output_dir / "predictions" / "validation_predictions.csv").resolve())
-            if str(config.prediction_mode) != "none"
-            else "",
-            "test_predictions_csv": str((output_dir / "predictions" / "test_predictions.csv").resolve())
-            if str(config.prediction_mode) != "none"
-            else "",
+            **prediction_outputs,
         },
         "baseline_feature_summary": baseline_summary.get("output_dir", ""),
     }
+    if fold_training_contract is not None:
+        summary["fold_training_contract"] = fold_training_contract
     if bool(getattr(model, "uses_residual_score", False)):
         summary["loss_weights"]["residual_score_weight"] = float(config.residual_score_weight)
         summary["loss_weights"]["residual_penalty"] = float(config.residual_penalty_weight)
@@ -2647,6 +2915,12 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument("--max-samples-per-split", type=int, default=0)
     train.add_argument("--prediction-mode", default="compact", choices=("full", "compact", "none"))
     train.add_argument(
+        "--evaluation-mode",
+        default=EVALUATION_MODE_STANDARD,
+        choices=EVALUATION_MODES,
+        help="standard selects a checkpoint on validation; fixed_oos saves the final epoch then evaluates oos once.",
+    )
+    train.add_argument(
         "--allow-large-predictions",
         action="store_true",
         help="Allow prediction-mode=full to write wide per-day path prediction CSVs.",
@@ -2713,6 +2987,7 @@ def main(argv: list[str] | None = None) -> int:
         prediction_mode=str(args.prediction_mode),
         early_stopping_patience=int(args.early_stopping_patience),
         early_stopping_min_delta=float(args.early_stopping_min_delta),
+        evaluation_mode=str(args.evaluation_mode),
     )
     result = train_sequence_path_model(cfg)
     print(json.dumps(result, ensure_ascii=False, indent=2, default=_json_default) if bool(args.json) else result)

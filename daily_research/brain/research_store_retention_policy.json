@@ -6,6 +6,13 @@
   "retention_model": "active_view_reachability_plus_explicit_cold_allowlist",
   "active_view_ids": [
     "seq100_path60_todayclose_ohlcva",
+    "seq100_path60_todayclose_ohlcva_train2012_2024_val2025_test2025",
+    "seq100_path60_todayclose_ohlcva_purged_oos2022",
+    "seq100_path60_todayclose_ohlcva_purged_oos2023",
+    "seq100_path60_todayclose_ohlcva_purged_oos2024",
+    "seq100_path60_todayclose_ohlcva_purged_oos2025"
+  ],
+  "deprecated_view_ids": [
     "seq100_path60_todayclose_ohlcva_train2012_2024_val2025_test2025"
   ],
   "cold_component_paths": [

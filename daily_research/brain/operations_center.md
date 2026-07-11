@@ -21,14 +21,15 @@
 `owner`: `daily_research`
 `preferred_root`: `daily_research/data/research_store`
 `compat_roots`: none active; old `quant_data_platform/data/qdp_v2/research/` artifacts were physically migrated or deleted on 2026-07-07.
-`retention_policy`: `daily_research/brain/research_store_retention_policy.json`；model-ready data keeps only components reachable from its two active today-close views; QDP active data remains read-only unless explicitly changed.
+`retention_policy`: `daily_research/brain/research_store_retention_policy.json`；model-ready data protects the source view, four formal purged folds, and the deprecated 2025 view retained for historical reproducibility; QDP active data remains read-only unless explicitly changed.
 
 ### object `seq100_mainline`
 `owner`: `daily_research`
 `contract`: `daily_research/brain/references/path_policy_seq100_mainline_slimming_contract_20260707.md`
 `cli`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline`
 `default_view`: `daily_research/data/research_store/views/seq100_path60_todayclose_ohlcva.json`
-`rollforward_2025_view`: `daily_research/data/research_store/views/seq100_path60_todayclose_ohlcva_train2012_2024_val2025_test2025.json`
+`formal_walkforward_views`: `daily_research/data/research_store/views/seq100_path60_todayclose_ohlcva_purged_oos{2022,2023,2024,2025}.json`
+`deprecated_rollforward_2025_view`: `daily_research/data/research_store/views/seq100_path60_todayclose_ohlcva_train2012_2024_val2025_test2025.json`；historical reproduction only, not a new verdict input.
 `rule`: default work uses the today-close daily-only summary_v2 profile with low-weight VA auxiliary supervision; legacy all-channel base, old pure daily-only summary_v2, richer, residual, symbol, OHLCVA-unified and rank-heavy variants are comparison/archived surfaces unless explicitly requested.
 
 ### object `execution_runtime`
@@ -52,20 +53,24 @@
 ### procedure `seq100_path_value_research_work`
 `input`: QDP v2 active tables or existing compatibility sequence pack, model/loss/value-function change, evaluation request.
 `steps`: route task as primary `daily_research` with supporting read-only `quant_data_platform` when QDP data is referenced；start from `seq100_mainline` unless the user explicitly asks for a comparison branch；prefer `--store-view daily_research/data/research_store/views/<view>.json` over self-contained full packs；train/evaluate models；write compact current conclusion to `state_center.md` and dated evidence to `references/`.
-`validation`: no PIT leakage, manifest/schema consistency, validation/test predictions, rank IC, topK realized/path value spread, comparison only against named baseline surfaces.
+`validation`: recompute `max(train.date_idx + forward_days) < min(oos.date_idx)`；verify manifest/schema and normalization cutoff；fixed OOS must not select checkpoints；compare paired daily IC/TopK on identical universe hashes；keep complete-case and execution boundaries explicit.
 
 ### procedure `seq100_mainline_default`
 `input`: train, compare, or summarize the current seq100 today-close path-value line.
 `profile_registry`: `daily_research.path_policy.seq100_mainline.PROFILE_SPECS` is the single source for command names, run tags, input/loss/model overrides and parser defaults.
 `help_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline --help`
 `contract_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline contract --json`
-`train_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train --json`
+`single_model_train_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train --json`；compatibility/diagnostic entry only, not a formal verdict by itself.
 `dry_run_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline <train-command> --dry-run --json`
 `summary_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline summarize --run-dir <run_dir> --json`
 `fixed_profile`: `store_view=seq100_path60_todayclose_ohlcva`；`model_type=gru_ohlcva_aux_path_value`；`input=daily_only`；`summary=multi_horizon_ohlc`；`loss=path0.45/summary0.20/value0.20/rank0.15/va0.02/0.01`；`prediction_mode=compact`。
 `comparison_rule`: every non-default command shown by `--help` is comparison-only unless a dated evidence reference changes the default; all-channel, price-delta, equal-OHLCVA, input-ablation and direct-value families remain available through the registry.
-`primary_evaluation_rule`: use 2024 validation for selection/stability and 2025 train-through-2024 forward test for the recent out-of-sample check.
-`rollforward_2025_profile`: pass the registered rollforward view with `--epochs 1 --early-stopping-patience 0`; interpret the duplicated 2025 validation/test split using `test` only.
+`primary_evaluation_rule`: use purged expanding outer OOS folds with `train.label_end_trade_date < oos_start_trade_date`; freeze profile/seed/epoch/primary metric/checkpoint policy before OOS; do not reuse OOS for early stopping or best-epoch selection.
+`walkforward_cli`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_walkforward`
+`walkforward_build_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_walkforward build-folds --oos-years 2022-2025 --json`
+`walkforward_run_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_walkforward run-study --oos-years 2022-2025 --profiles summary_v2_all_channels,daily_only_summary_v2_ohlcva_aux_low --seed 7 --epochs 1 --device cuda --bootstrap-replications 10000 --json`
+`walkforward_summary_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_walkforward summarize-study --bootstrap-replications 10000 --block-length 60 --json`
+`fixed_oos_contract`: only `train/oos`; `evaluation_mode=fixed_oos`；`early_stopping_patience=0`；save final checkpoint before evaluating OOS exactly once；retain daily TopK and compact Top100 candidates even when `prediction_mode=none`.
 `side_effects`: research artifacts only；does not activate execution surface.
 
 ### procedure `research_store_gc`
@@ -78,7 +83,7 @@
 `view_verify_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.research_store_view verify --json`
 `guards`: directory GC uses `DELETE_RESEARCH_ARTIFACTS`; prediction trim uses `TRIM_PREDICTION_OUTPUTS`; cold-store prune uses `DELETE_COLD_RESEARCH_STORE_COMPONENTS` and archives manifest/hash/provenance before deletion.
 `prevention_rule`: default prediction mode is compact; full row payloads require explicit opt-in. QDP active datasets are outside this procedure.
-`validation`: post-scan candidate sets empty；active views verify；normal and rollforward sample loads succeed.
+`validation`: post-scan candidate sets empty；all six protected views verify；formal folds have zero label overlap；all-channel `[100,84]` and daily-only `[100,32]` sample loads succeed.
 
 ### procedure `qdp_data_request`
 `input`: missing field, stale dataset, provider coverage gap, canonical requirement.

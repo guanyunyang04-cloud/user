@@ -48,20 +48,21 @@
 `active_concept_surface`: `research_store_view`、`seq100_x32_daily_input`、`today_close_anchor`、`future60_ohlc_path`、`summary_v2_multi_horizon_ohlc`、`low_weight_va_auxiliary`、`path_trade_value_v2`、`path_value_spread`。
 `input_principle`: 过去 100 日 `daily_raw + daily_state` 序列；`intraday_summary` 和 `limit_structure` 不再作为默认输入，但旧 all-channel base 保留为 broad-TopK 对照基线；不使用 symbol embedding 作为默认主线。
 `output_principle`: 预测未来 OHLC 路径，并用低权重 VA auxiliary path 约束量价表征；路径摘要和 path trade value 从预测 OHLC 路径派生，排序使用预测路径价值而不是独立固定标签。
-`default_entry`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train --json`。
+`model_training_entry`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train --json`；兼容的单模型训练入口，不能单独形成正式 verdict。
+`formal_evaluation_entry`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_walkforward run-study --oos-years 2022-2025 --profiles summary_v2_all_channels,daily_only_summary_v2_ohlcva_aux_low --seed 7 --epochs 1 --device cuda --bootstrap-replications 10000 --json`。
 `comparison_surface`: `table_path60_baseline`、`path_only_next_open`、`rank_heavy_top1`、`all_channels_base_summary`、`summary_v2_multi_horizon_ohlc`、`summary_v2_no60`、`summary_v2_price_delta`、`summary_v2_ohlcva_aux`、`summary_v2_ohlcva_aux_low`、`summary_v2_ohlcva_aux_low_price_delta`、`summary_v2_ohlcva_path_equal`、`daily_only_no_minute`、`daily_only_summary_v2`、`daily_only_summary_v2_price_delta`、`daily_only_summary_v2_ohlcva_aux`、`daily_only_summary_v2_ohlcva_aux_low_price_delta`、`daily_only_summary_v2_ohlcva_path_equal`、`no_intraday_summary`、`no_limit_structure`、`direct_value_rank_5d`、`direct_value_rank_10d`、`direct_value_rank_60d`。
 `archived_or_paused_surface`: `alpha_v2`、`path20`、`symbol_embedding`、`residual_score`、`richer_target`、`ohlcva_unified`。
-`primary_evaluation_policy`: 后续模型/profile 评价主要看 `2024 validation` + `2025 train-through-2024 forward test`。2024 validation 负责 profile 选择、训练过程判断和同口径稳定性对照；2025 forward test 负责模拟 2024 数据已可用于训练后的最近一年真实外推。旧 `2012-2023 train / 2024 validation / 2025 test` 中的 2025 test 只保留为 stale-train forward check。
-`current_evidence`: old `2012-2023 train / 2024 validation / 2025 test` results are stale-train forward checks, not the main production-like test口径. The full profile table now pairs `2024 validation` with `2012-2024 train / 2025 forward test / epochs=1`. Among aligned 60d path-output profiles, `daily_only_summary_v2_ohlcva_aux_low` has the strongest 2024 validation IC (`0.1626`) and strongest 2025 forward IC (`0.1927`), with 2025 Top1/Top3/Top10 `22.51%/7.73%/6.72%`; it replaces old `daily_only_summary_v2` (`0.1846`, `18.44%/10.09%/6.96%`) as the default research mainline. `summary_v2_all_channels` has stronger narrow Top1 (`27.30%`) but weak IC (`0.1417`). The 2026-07-10 all-channel summary_v2 combination check tested `price_delta`、high/low VA auxiliary、low VA + price-delta and equal OHLCVA path-loss; none replaced the default: their 2025 forward ICs were `0.1348/0.1464/0.1625/0.1262/0.1574`, all below default `0.1927`, and only the original all-channel anchor kept the strongest narrow Top1. `ohlcva_aux_low_price_delta` and `ohlcva_path_equal` are TopK-biased; high-weight VA is weak; direct-value rankers remain comparison branches. No profile is promoted to active/default execution; all path-value spread remains research evidence, not promotion evidence.
+`primary_evaluation_policy`: 正式模型/profile 判断使用 2022-2025 purged expanding `train/oos`：每条训练标签必须满足 `label_end_trade_date < oos_start_trade_date`；归一化只用 OOS 首日前已公开 feature dates；epoch/checkpoint 预先固定；训练期间不读 OOS，结束后只评估一次。旧 fixed validation/test 与 duplicated 2025 split 降为 pre-purge 历史证据。
+`current_evidence`: seed 7、epoch 1 的 2022-2025 purged walk-forward 已完成。`summary_v2_all_channels` 与默认 `daily_only_summary_v2_ohlcva_aux_low` 的四年 Top3 alpha 点估计都为正，fold-equal 均值分别为 `10.03%/9.38%`；all-channel 配对优势仅 `+0.65 percentage points (0.0065)`，HAC 95% CI `[-2.41 pp, +3.72 pp]`、连续有序 969 日 non-circular 60d block-bootstrap 95% CI `[-2.76 pp, +3.49 pp]`，且 2023 差值 `-4.60 pp`。按年 grouped/fold-equal bootstrap 只作敏感性检查。IC 配对均值 `-0.00095`，同样不显著。结论是 summary_v2 结构可行、all-channel 保留窄 Top1/Top3 对照价值，但本研究没有做 summary_v2-vs-base 因素检验，也没有稳定证据替代更简单且 worst-fold 更强的 daily-only 默认。旧 2025 口径含 171,290 条训练标签跨入 2025，旧数值不可与新口径直接比较。所有 path-value spread 仍是研究证据，不构成 execution promotion。
 `artifact_owner`: `daily_research`; preferred new root is `daily_research/data/research_store/<artifact_id>/`.
 `historical_artifacts`: old QDP research artifacts were physically migrated or deleted on 2026-07-07; `quant_data_platform/data/qdp_v2/research/` no longer exists as a training-pack location.
 `resource_state`: 2026-07-10 repository/QDP/research cleanup has reclaimed `136,151,736,627` bytes (`126.82 GiB`) in total. The research-store phase archived and deleted 9 unreachable cold components (`57.353 GiB`), trimmed 86 prediction files across 43 runs (`16.376 GiB`), and deleted 63 unreferenced partial/smoke directories (`3.046 GiB`). Post-cleanup scan has zero safe-directory, prediction-trim, or cold-component candidates.
 `gc_report`: `brain/references/repository_retention_cleanup_20260710.md`；cold component manifests/hashes/provenance are in `daily_research/brain/references/research_store_cold_assets_archive_20260710_105437.{md,json}`.
-`research_store_physical`: schema-v2 pointer index + retention policy keep only components reachable from the two active today-close views: one shared panel store, one today-close OHLCVA label store, and two sample indexes. Historical alpha-v2 bulk and next-open/path20 stores were archived then removed.
-`research_store_views`: `seq100_path60_todayclose_ohlcva`；`seq100_path60_todayclose_ohlcva_train2012_2024_val2025_test2025`.
-`rollforward_views`: `seq100_path60_todayclose_ohlcva_train2012_2024_val2025_test2025` is a lightweight view with shared labels/panels, new sample_index and normalization fit on 2012-2024 train-year dates.
+`research_store_physical`: schema-v2 pointer index + retention policy protect one source view, four purged walk-forward fold views, and the deprecated legacy 2025 view for historical reproducibility; all share one panel store and one today-close OHLCVA label store. Current index has 6 views and 14 reachable components.
+`research_store_views`: source `seq100_path60_todayclose_ohlcva`；formal folds `seq100_path60_todayclose_ohlcva_purged_oos{2022,2023,2024,2025}`；deprecated pre-purge `seq100_path60_todayclose_ohlcva_train2012_2024_val2025_test2025`.
+`rollforward_views`: formal fold views expose only `train/oos`, carry label-end purge and complete-case audit fields, and refit normalization before each OOS start. The legacy duplicated validation/test view is retained only for historical reproducibility and must not be used for a new verdict.
 `store_view_note`: next-open/path20 views are historical evidence only; their former manifests and component hashes are preserved in the cold-asset archive, not as runnable active views.
-`next_method`: `run_execution_layer_backtest()`
+`next_method`: `resolve_complete_case_oos_universe_or_run_preregistered_multiseed()`；execution backtest remains separate and frozen.
 
 ### object `alpha_v2_history`
 `type`: archived_research_line
@@ -71,7 +72,7 @@
 - `select_relevant_objects(task)`: 从任务文本和路径选择对象；无关对象不激活。
 - `classify_evidence(run)`: 把 smoke、dry-run、short-window、interrupted、insufficient、failed、completed run 分到对应证据等级。
 - `activate_execution_boundary(objects, method)`: 只有 `execution_surface` 的 restore/activate/trade-plan 方法被调用时返回 true。
-- `derive_next_action(seq100_state, evidence)`: 当前返回 `run_execution_layer_backtest()`；旧 shortline 只在需要执行层先验时显式调用。
+- `derive_next_action(seq100_state, evidence)`: 当前优先返回 `resolve_complete_case_oos_universe_or_run_preregistered_multiseed()`；execution backtest 仍是独立、受保护的后续任务。
 - `resolve_data_access(task)`: 任何新增数据需求都返回 QDP v2 provider/update/table request，不返回 direct online provider。
 
 ## Procedures
@@ -89,16 +90,17 @@
 - QDP replacement activation：`daily_research/brain/references/qdp_alpha_v2_replacement_data_base_activation_20260626.md`
 - Seq100 path-value orchestration：`daily_research/brain/references/seq100_path_value_research_orchestration_20260706.md`
 - Seq100 mainline slimming contract：`daily_research/brain/references/path_policy_seq100_mainline_slimming_contract_20260707.md`
-- Seq100 summary_v2 result：`daily_research/brain/references/seq100_summary_v2_multi_horizon_ohlc_result_20260707.md`
-- Seq100 daily-only no-minute result：`daily_research/brain/references/seq100_daily_only_no_minute_result_20260708.md`
-- Seq100 input ablation and summary_v2 no60 result：`daily_research/brain/references/seq100_input_ablation_and_summary_v2_no60_result_20260708.md`
-- Seq100 daily-only summary_v2 result：`daily_research/brain/references/seq100_daily_only_summary_v2_result_20260708.md`
-- Seq100 direct-value rank result：`daily_research/brain/references/seq100_direct_value_rank_result_20260708.md`
-- Seq100 price-delta and low OHLCVA auxiliary result：`daily_research/brain/references/path_policy_seq100_price_delta_ohlcva_aux_low_result_20260709.md`
-- Seq100 OHLCVA equal path-loss result：`daily_research/brain/references/path_policy_seq100_ohlcva_path_equal_result_20260709.md`
-- Seq100 2025 roll-forward profile result：`daily_research/brain/references/path_policy_seq100_rollforward_2025_result_20260709.md`
-- Seq100 all-profile 2024 validation + 2025 forward result：`daily_research/brain/references/path_policy_seq100_all_profiles_val2024_forward2025_result_20260709.md`
-- Seq100 all-channel summary_v2 combo result：`daily_research/brain/references/path_policy_seq100_summary_v2_all_channels_combo_result_20260710.md`
+- Seq100 summary_v2 result (pre-purge historical evidence)：`daily_research/brain/references/seq100_summary_v2_multi_horizon_ohlc_result_20260707.md`
+- Seq100 daily-only no-minute result (pre-purge historical evidence)：`daily_research/brain/references/seq100_daily_only_no_minute_result_20260708.md`
+- Seq100 input ablation and summary_v2 no60 result (pre-purge historical evidence)：`daily_research/brain/references/seq100_input_ablation_and_summary_v2_no60_result_20260708.md`
+- Seq100 daily-only summary_v2 result (pre-purge historical evidence)：`daily_research/brain/references/seq100_daily_only_summary_v2_result_20260708.md`
+- Seq100 direct-value rank result (pre-purge historical evidence)：`daily_research/brain/references/seq100_direct_value_rank_result_20260708.md`
+- Seq100 price-delta and low OHLCVA auxiliary result (pre-purge historical evidence)：`daily_research/brain/references/path_policy_seq100_price_delta_ohlcva_aux_low_result_20260709.md`
+- Seq100 OHLCVA equal path-loss result (pre-purge historical evidence)：`daily_research/brain/references/path_policy_seq100_ohlcva_path_equal_result_20260709.md`
+- Seq100 2025 roll-forward profile result (pre-purge historical evidence)：`daily_research/brain/references/path_policy_seq100_rollforward_2025_result_20260709.md`
+- Seq100 all-profile 2024 validation + 2025 forward result (pre-purge historical evidence)：`daily_research/brain/references/path_policy_seq100_all_profiles_val2024_forward2025_result_20260709.md`
+- Seq100 all-channel summary_v2 combo result (pre-purge historical evidence)：`daily_research/brain/references/path_policy_seq100_summary_v2_all_channels_combo_result_20260710.md`
+- Seq100 purged 2022-2025 walk-forward result (authoritative current evidence)：`daily_research/brain/references/path_policy_seq100_purged_walkforward_2022_2025_result_20260710.md`
 - Archived Path20/alpha-v2 July run reconciliation：`daily_research/brain/references/path_policy_alpha_v2_july_archived_runs_reconciliation_20260710.md`
 - Shortline plan：`daily_research/brain/references/shortline_after_close_research_plan_20260624.md`
 - Stage 0 diagnostic：`daily_research/brain/references/shortline_stage0_fixed_next_open_diagnostic_20260624.md`

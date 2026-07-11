@@ -43,7 +43,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule -
 
 - 当前 seq100 path-value 主线：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline contract --json`
-- 当前主线训练入口：
+- 当前主线单模型训练入口（兼容/诊断用途，不能单独形成正式 verdict）：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train --json`
 - 当前主线 summary_v2 对照入口：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-summary-v2 --json`
@@ -65,7 +65,12 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule -
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-daily-only-summary-v2-ohlcva-aux-low-price-delta --json`
 - 当前主线 OHLCVA 六字段等权 path-loss 对照入口：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-daily-only-summary-v2-ohlcva-path-equal --json`
-- 当前主线 2025 roll-forward 测试 view：
+- 当前主线 purged 多年 walk-forward 入口：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_walkforward build-folds --oos-years 2022-2025 --json`
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_walkforward run-study --oos-years 2022-2025 --profiles summary_v2_all_channels,daily_only_summary_v2_ohlcva_aux_low --seed 7 --epochs 1 --device cuda --json`
+- 正式 fold views：
+  `daily_research/data/research_store/views/seq100_path60_todayclose_ohlcva_purged_oos{2022,2023,2024,2025}.json`
+- 旧 2025 duplicated validation/test view 仅保留历史复现，不再用于正式判断：
   `daily_research/data/research_store/views/seq100_path60_todayclose_ohlcva_train2012_2024_val2025_test2025.json`
 - 当前主线部分分钟线输入消融入口：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train-no-intraday-summary --json`
@@ -87,7 +92,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule -
 - 工作区维护报告：
   `python daily_research/tools/workspace_maintenance.py report`
 
-当前默认研究概念面已收窄为 `seq100_x32_daily_input -> today_close_anchor -> future60_ohlc_path -> summary_v2_multi_horizon_ohlc -> low_weight_va_auxiliary -> path_trade_value_v2 -> path_value_spread`。`daily_only_summary_v2_ohlcva_aux_low` 是当前默认研究入口：使用 `daily_raw + daily_state` 32 维输入、`5/10/20/40/60` 多窗口 OHLC 派生 summary loss，并以低权重 VA 辅助监督 (`va_level=0.02`, `va_delta=0.01`) 约束量价表征；summary/value/rank 仍保持 price-only OHLC 派生 `path_trade_value_v2`。后续主评价口径以 `2024 validation` 和 `2025 train-through-2024 forward test` 为核心：2024 验证集用于 profile 选择、训练过程判断和稳定性对照，2025 forward test 用 `2012-2024 train / 2025 forward test / epochs=1` 模拟训练集随时间推进后的最近一年外推。旧 `2012-2023 train / 2024 validation / 2025 test` 中的 2025 test 只作为 stale-train 外推检查，不再代表真正测试口径。全量 profile 对照表见 `daily_research/output/path_policy/sequence_path_training/seq100_all_profiles_val2024_forward2025_comparison_20260709.csv`；all-channel summary_v2 组合对照表见 `daily_research/output/path_policy/sequence_path_training/summary_v2_all_channels_combo_val2024_forward2025_comparison_20260710.csv`。在 path-output 家族中，`ohlcva_aux_low` 同时取得最高 2024 validation IC (`0.1626`) 和最高 2025 forward IC (`0.1927`)，2025 Top1/Top3/Top10 为 `22.51%/7.73%/6.72%`，因此替代旧 `daily_only_summary_v2` 默认主线。`summary_v2_all_channels` 保留为窄 Top1 对照：2025 forward Top1 `27.30%`，但 forward IC 仅 `0.1417`；新增 all-channel `price_delta`、VA auxiliary、low VA、low VA + price-delta、OHLCVA equal path-loss 组合均未替代默认。旧 `all_channels_base_summary` 保留为 broad-TopK 对照基线；`summary_v2_no60`、输入消融、direct-value rank、`alpha_v2`、`path20`、`symbol_embedding`、`residual_score`、`richer_target`、`ohlcva_unified` 和 `rank_heavy_top1` 默认只作为历史、对照或暂停分支。
+当前默认研究概念面已收窄为 `seq100_x32_daily_input -> today_close_anchor -> future60_ohlc_path -> summary_v2_multi_horizon_ohlc -> low_weight_va_auxiliary -> path_trade_value_v2 -> path_value_spread`。`daily_only_summary_v2_ohlcva_aux_low` 是当前默认研究入口：使用 `daily_raw + daily_state` 32 维输入、`5/10/20/40/60` 多窗口 OHLC 派生 summary loss，并以低权重 VA 辅助监督 (`va_level=0.02`, `va_delta=0.01`) 约束量价表征；summary/value/rank 仍保持 price-only OHLC 派生 `path_trade_value_v2`。正式评价已改为 2022-2025 purged expanding `train/oos`：每条训练标签必须在 OOS 首日前结束，归一化不使用 OOS feature dates，训练期间不读取 OOS，固定 final epoch 后只评估一次。旧 `2024 validation + 2025 train-through-2024 forward test` 含标签跨年问题，降为 pre-purge 历史证据。新四年结果中，all-channel 和默认 profile 的 Top3 alpha 点估计都四年为正；all-channel fold-equal 均值略高 (`10.03%` vs `9.38%`)，但配对差仅 `+0.65 percentage points (0.0065)`，HAC 与连续有序 969 日 non-circular 60 日块 bootstrap 区间均跨 0；按年 grouped bootstrap 仅作敏感性检查。2023 又明显反向，因此不替换更简单、worst-fold 更强的 daily-only 默认。完整结论见 `daily_research/brain/references/path_policy_seq100_purged_walkforward_2022_2025_result_20260710.md`。旧 `all_channels_base_summary` 保留为 broad-TopK 对照基线；`summary_v2_no60`、输入消融、direct-value rank、`alpha_v2`、`path20`、`symbol_embedding`、`residual_score`、`richer_target`、`ohlcva_unified` 和 `rank_heavy_top1` 默认只作为历史、对照或暂停分支。
 
 真实运行时优先使用显式 `yolos` Python，例如：
 

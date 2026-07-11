@@ -195,6 +195,17 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
         self.assertIn("mh_grid_decision_utility_v1_baseline_sparse_long_seed19_20260525_02", tags)
         self.assertIn("mh25_path_aux_daily1_45_multiseed_seed19_20260526_01", tags)
 
+    def test_adapter_indexes_explicit_year_range_walkforward_run_tag(self) -> None:
+        text = """
+## Run Tags
+- `seq100_purged_walkforward_2022_2025`
+"""
+
+        self.assertEqual(
+            daily_research_evidence.run_tags(text),
+            ["seq100_purged_walkforward_2022_2025"],
+        )
+
     def test_adapter_ignores_removed_study_tag_section_for_run_instances(self) -> None:
         text = """
         - Mainline: `alpha_multi_horizon_utility_policy_v1`.

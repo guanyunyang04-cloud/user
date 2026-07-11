@@ -118,6 +118,10 @@ def test_mainline_contract_keeps_default_surface_small() -> None:
     assert contract["direct_value_train_profiles"]["60d"]["direct_value_horizon"] == 60
     assert "symbol_embedding" in ARCHIVED_CONCEPTS
     assert "active_execution_strategy.json" in contract["evidence_boundary"]
+    assert contract["primary_evaluation_policy"]["method"] == "purged_expanding_walk_forward"
+    assert contract["primary_evaluation_policy"]["train_label_rule"] == "label_end_trade_date < oos_start_trade_date"
+    assert contract["primary_evaluation_policy"]["checkpoint_policy"] == "final_epoch"
+    assert contract["next_decision_surface"] == "complete_case_oos_universe_or_preregistered_multiseed"
 
 
 def test_path_policy_package_default_points_to_seq100_mainline() -> None:
@@ -139,6 +143,8 @@ def test_todayclose_path_only_train_argv_uses_default_low_va_aux_profile() -> No
     assert argv[argv.index("--va-level-loss-weight") + 1] == "0.02"
     assert argv[argv.index("--va-delta-loss-weight") + 1] == "0.01"
     assert argv[argv.index("--prediction-mode") + 1] == "compact"
+    assert argv[argv.index("--seed") + 1] == "7"
+    assert argv[argv.index("--evaluation-mode") + 1] == "standard"
     assert argv[argv.index("--top-k") + 1] == "1,3,5,10,20,50,100"
     assert "--with-symbol" not in argv
     assert "--richer-path" not in argv
@@ -718,3 +724,42 @@ def test_summarize_sequence_run_reads_direct_value_horizon_metric(tmp_path: Path
 
     assert summary["value_column"] == "path_trade_value_v2_5d"
     assert summary["topk"]["test"]["1"]["path_value_spread"] == 0.03
+
+
+def test_summarize_sequence_run_keeps_fixed_oos_provenance(tmp_path: Path) -> None:
+    (tmp_path / "sequence_path_training_summary.json").write_text(
+        """{
+  "generated_at": "2026-07-10T00:00:00+08:00",
+  "run_tag": "summary_v2_all_channels_purged_oos2022_seed7",
+  "seed": 7,
+  "fold_year": 2022,
+  "evaluation_mode": "fixed_oos",
+  "checkpoint_policy": "final_epoch",
+  "pack_manifest": "daily_research/data/research_store/views/seq100_path60_todayclose_ohlcva_purged_oos2022.json",
+  "price_anchor": "today_close",
+  "value_column": "path_trade_value_v2_60d",
+  "best_epoch": 1,
+  "model": {"input_dim": 84},
+  "loss_weights": {"path": 0.45, "summary": 0.2, "value": 0.2, "rank": 0.15}
+}""",
+        encoding="utf-8",
+    )
+    (tmp_path / "split_metrics.csv").write_text(
+        "split,row_count,date_count,rank_ic_mean,rank_ic_positive_day_rate,value_column\n"
+        "oos,100,10,0.12,0.7,path_trade_value_v2_60d\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "topk_metrics.csv").write_text(
+        "split,top_k,alpha_path_trade_value_v2_60d,selected_best_exit_day_mean,selected_hit_10pct_rate,selected_loss_5pct_rate\n"
+        "oos,3,0.08,24.5,0.77,0.80\n",
+        encoding="utf-8",
+    )
+
+    summary = summarize_sequence_run(tmp_path)
+
+    assert summary["splits"]["oos"]["rank_ic_mean"] == 0.12
+    assert summary["topk"]["oos"]["3"]["path_value_spread"] == 0.08
+    assert summary["evaluation_mode"] == "fixed_oos"
+    assert summary["checkpoint_policy"] == "final_epoch"
+    assert summary["fold_year"] == 2022
+    assert summary["seed"] == 7
