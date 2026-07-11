@@ -423,6 +423,65 @@ def test_build_purged_fold_enforces_label_end_before_oos_and_refits_normalizatio
     assert verification["label_overlap_count"] == 0
 
 
+def test_purged_fold_rejects_changed_source_manifest(tmp_path: Path) -> None:
+    store_root = tmp_path / "research_store"
+    source_view = _build_source_view(store_root)
+    result = build_purged_walkforward_fold(
+        source_view=source_view,
+        oos_year=2022,
+        train_start_year=2021,
+        store_root=store_root,
+    )
+    view_path = Path(result["view_path"])
+    source = json.loads(source_view.read_text(encoding="utf-8"))
+    source["tampered_after_fold_build"] = True
+    source_view.write_text(json.dumps(source), encoding="utf-8")
+
+    verification = verify_purged_walkforward_view(view_path)
+
+    assert verification["status"] == "blocked"
+    assert any("source_view_provenance" in item for item in verification["blockers"])
+
+
+def test_purged_fold_rejects_sample_date_index_mapping_mismatch(tmp_path: Path) -> None:
+    store_root = tmp_path / "research_store"
+    source_view = _build_source_view(store_root)
+    source = json.loads(source_view.read_text(encoding="utf-8"))
+    sample_path = Path(source["sample_index_path"])
+    sample = pd.read_parquet(sample_path)
+    sample.loc[0, "trade_date"] = DATES[1]
+    sample.to_parquet(sample_path, index=False)
+
+    with pytest.raises(ValueError, match=r"trade_date.*date_values\[date_idx\]"):
+        build_purged_walkforward_fold(
+            source_view=source_view,
+            oos_year=2022,
+            train_start_year=2021,
+            store_root=store_root,
+        )
+
+
+def test_purged_fold_rejects_changed_source_backing_file(tmp_path: Path) -> None:
+    store_root = tmp_path / "research_store"
+    source_view = _build_source_view(store_root)
+    result = build_purged_walkforward_fold(
+        source_view=source_view,
+        oos_year=2022,
+        train_start_year=2021,
+        store_root=store_root,
+    )
+    source = json.loads(source_view.read_text(encoding="utf-8"))
+    backing_path = Path(source["feature_channels"]["daily_raw"]["path"])
+    payload = bytearray(backing_path.read_bytes())
+    payload[0] ^= 1
+    backing_path.write_bytes(payload)
+
+    verification = verify_purged_walkforward_view(Path(result["view_path"]))
+
+    assert verification["status"] == "blocked"
+    assert any("backing-file identity changed" in item for item in verification["blockers"])
+
+
 def test_hac_and_moving_block_intervals_are_finite_and_reproducible() -> None:
     values = np.sin(np.arange(64, dtype=np.float64) / 5.0) + np.arange(64, dtype=np.float64) / 100.0
 

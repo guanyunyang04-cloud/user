@@ -133,6 +133,37 @@ def _canonicalize_json(payload: Any) -> Any:
     return json.loads(json.dumps(payload, default=_json_default, allow_nan=False))
 
 
+def _source_backing_file_inventory(source_manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
+    paths: set[Path] = set()
+
+    def collect(value: Any) -> None:
+        if isinstance(value, Mapping):
+            raw_path = value.get("path")
+            if isinstance(raw_path, str) and raw_path.strip():
+                paths.add(_workspace_path(raw_path).resolve())
+            for nested in value.values():
+                collect(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                collect(nested)
+
+    for section in ("feature_channels", "label_arrays", "execution_arrays", "masks"):
+        collect(dict(source_manifest.get(section, {}) or {}))
+    inventory: list[dict[str, Any]] = []
+    for path in sorted(paths, key=lambda item: str(item).lower()):
+        if not path.is_file():
+            raise FileNotFoundError(path)
+        stat = path.stat()
+        inventory.append(
+            {
+                "path": str(path),
+                "size": int(stat.st_size),
+                "mtime_ns": int(stat.st_mtime_ns),
+            }
+        )
+    return inventory
+
+
 def _source_view_provenance(
     source_path: str | Path,
     source_manifest: Mapping[str, Any],
@@ -144,6 +175,7 @@ def _source_view_provenance(
     if not sample_path.is_file():
         raise FileNotFoundError(sample_path)
     artifact_view = dict(source_manifest.get("artifact_view", {}) or {})
+    backing_files = _source_backing_file_inventory(source_manifest)
     return {
         "schema_version": 1,
         "manifest_path": str(manifest_path),
@@ -153,6 +185,8 @@ def _source_view_provenance(
         "artifact_type": str(source_manifest.get("artifact_type", "")),
         "artifact_view_id": str(artifact_view.get("view_id", "")),
         "created_at": str(source_manifest.get("created_at", "")),
+        "backing_files": backing_files,
+        "backing_files_sha256": _canonical_json_sha256(backing_files),
     }
 
 
@@ -165,6 +199,8 @@ def _validated_source_view_provenance(manifest: Mapping[str, Any]) -> dict[str, 
         "sample_index_path",
         "sample_index_sha256",
         "artifact_type",
+        "backing_files",
+        "backing_files_sha256",
     }
     missing = sorted(required.difference(stored))
     if missing:
@@ -180,6 +216,11 @@ def _validated_source_view_provenance(manifest: Mapping[str, Any]) -> dict[str, 
         raise ValueError("fold source artifact type changed")
     if _workspace_path(str(current.get("sample_index_path", "") or "")).resolve() != sample_path:
         raise ValueError("fold source sample-index path changed")
+    current_backing_files = _source_backing_file_inventory(current)
+    if current_backing_files != list(stored.get("backing_files", []) or []):
+        raise ValueError("fold source backing-file identity changed")
+    if _canonical_json_sha256(current_backing_files) != str(stored.get("backing_files_sha256", "")):
+        raise ValueError("fold source backing-file inventory digest changed")
     return stored
 
 
@@ -410,6 +451,7 @@ def _compute_fold_training_contract(
             "schema_version",
             "method",
             "split_roles",
+            "train_start_year",
             "oos_year",
             "oos_start",
             "oos_start_trade_date",
@@ -508,6 +550,11 @@ def build_purged_walkforward_fold(
     index = source_index.copy()
     index["trade_date"] = index["trade_date"].astype(str)
     index["date_idx"] = index["date_idx"].astype(np.int64)
+    if bool(((index["date_idx"] < 0) | (index["date_idx"] >= len(date_values))).any()):
+        raise ValueError("source sample index date_idx is outside date_values")
+    expected_trade_dates = np.asarray(date_values, dtype=object)[index["date_idx"].to_numpy(dtype=np.int64)]
+    if not bool(np.equal(index["trade_date"].to_numpy(dtype=object), expected_trade_dates).all()):
+        raise ValueError("source sample index trade_date does not match date_values[date_idx]")
     index_year = index["trade_date"].str.slice(0, 4).astype(int)
     oos_mask = index_year.eq(int(oos_year))
     if not bool(oos_mask.any()):
@@ -576,6 +623,7 @@ def build_purged_walkforward_fold(
         "schema_version": 1,
         "method": "expanding_train_fixed_oos",
         "split_roles": {"fit": "train", "evaluation": "oos"},
+        "train_start_year": int(train_start_year),
         "oos_year": int(oos_year),
         "oos_start": oos_start,
         "oos_start_trade_date": oos_start,
@@ -702,6 +750,13 @@ def verify_purged_walkforward_view(view_path: str | Path) -> dict[str, Any]:
             observed_train_years = sorted({int(str(value)[:4]) for value in train["trade_date"].astype(str)})
             if list(manifest.get("train_years", []) or []) != observed_train_years:
                 blockers.append("train_years_metadata_mismatch")
+            declared_train_start = int(contract.get("train_start_year", -1))
+            if (
+                not observed_train_years
+                or observed_train_years[0] < declared_train_start
+                or str(manifest.get("start_date", "")) != f"{declared_train_start}-01-01"
+            ):
+                blockers.append("train_start_year_mismatch")
             if list(manifest.get("oos_years", []) or []) != [oos_year]:
                 blockers.append("oos_years_metadata_mismatch")
             if list(manifest.get("validation_years", []) or []) or list(manifest.get("test_years", []) or []):
@@ -2496,7 +2551,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     build_all = sub.add_parser("build-folds")
     build_all.add_argument("--source-view", type=Path, default=DEFAULT_SOURCE_VIEW)
-    build_all.add_argument("--oos-years", default="2022-2025")
+    build_all.add_argument("--oos-years", required=True)
     build_all.add_argument("--train-start-year", type=int, default=2012)
     build_all.add_argument("--store-root", type=Path, default=DEFAULT_STORE_ROOT)
     build_all.add_argument("--overwrite", action="store_true")
@@ -2508,7 +2563,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     run = sub.add_parser("run-study")
     run.add_argument("--source-view", type=Path, default=DEFAULT_SOURCE_VIEW)
-    run.add_argument("--oos-years", default="2022-2025")
+    run.add_argument("--oos-years", required=True)
     run.add_argument("--profiles", default=",".join(LEGACY_REQUIRED_PROFILES))
     run.add_argument("--study-root", type=Path, default=DEFAULT_STUDY_ROOT)
     run.add_argument("--store-root", type=Path, default=DEFAULT_STORE_ROOT)

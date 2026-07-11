@@ -3388,6 +3388,10 @@ def _resolved_training_config(config: TrainConfig, *, evaluation_mode: str) -> d
 
 
 def _validate_evaluation_mode(config: TrainConfig) -> str:
+    if int(getattr(config, "epochs", 1)) <= 0:
+        raise ValueError("epochs must be positive")
+    if int(getattr(config, "max_samples_per_split", 0)) < 0:
+        raise ValueError("max_samples_per_split must be non-negative")
     mode = str(config.evaluation_mode or EVALUATION_MODE_STANDARD).strip().lower()
     if mode not in EVALUATION_MODES:
         raise ValueError(f"evaluation_mode must be one of {EVALUATION_MODES}")

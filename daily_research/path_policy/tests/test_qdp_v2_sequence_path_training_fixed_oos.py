@@ -208,6 +208,87 @@ def _install_fake_evaluation(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return calls
 
 
+def test_training_sample_limit_keeps_complete_dates_spread_across_history() -> None:
+    rows = [
+        {
+            "split": "train",
+            "date_idx": date_idx,
+            "symbol_idx": symbol_idx,
+            "trade_date": f"2020-01-{date_idx + 1:02d}",
+            "symbol": f"00000{symbol_idx + 1}.SZ",
+        }
+        for date_idx in range(6)
+        for symbol_idx in range(3)
+    ]
+    frame = pd.DataFrame(rows)
+
+    selected, audit = training._limit_sample_index_by_complete_dates(
+        frame,
+        max_samples=9,
+        context="test train",
+    )
+
+    assert len(selected) == 9
+    assert selected["date_idx"].nunique() == 3
+    assert selected["date_idx"].min() == 0
+    assert selected["date_idx"].max() == 5
+    assert selected.groupby("date_idx").size().eq(3).all()
+    assert audit["policy"] == training.DATE_COMPLETE_SPREAD_LIMIT_POLICY
+    assert audit["date_complete"] is True
+    with pytest.raises(ValueError, match="largest complete date"):
+        training._limit_sample_index_by_complete_dates(frame, max_samples=2, context="test train")
+
+
+def test_fixed_oos_applies_sample_cap_only_to_training(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_path = _build_tiny_pack(tmp_path, fixed_oos=True)
+    _install_fake_evaluation(monkeypatch)
+    calls: list[tuple[str, int]] = []
+    real_dataset = training.SequencePathPackDataset
+
+    def observed_dataset(manifest: dict[str, Any], *, split: str, max_samples: int, input_channel_profile: str):
+        calls.append((str(split), int(max_samples)))
+        return real_dataset(
+            manifest,
+            split=split,
+            max_samples=max_samples,
+            input_channel_profile=input_channel_profile,
+        )
+
+    monkeypatch.setattr(training, "SequencePathPackDataset", observed_dataset)
+    config = replace(
+        _config(tmp_path, manifest_path, evaluation_mode="fixed_oos"),
+        max_samples_per_split=4,
+    )
+
+    summary = training.train_sequence_path_model(config)
+
+    assert calls == [("train", 4), ("oos", 0)]
+    assert summary["sample_selection"]["oos"]["policy"] == "all_rows"
+    assert summary["sample_selection"]["oos"]["requested_max_samples"] == 0
+    assert summary["sample_selection"]["oos"]["selected_row_count"] == 4
+    assert summary["sample_selection"]["oos"]["original_row_count"] == 4
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (("epochs", 0, "epochs must be positive"), ("max_samples_per_split", -1, "must be non-negative")),
+)
+def test_training_rejects_non_positive_epochs_and_negative_sample_limit(
+    tmp_path: Path,
+    field: str,
+    value: int,
+    message: str,
+) -> None:
+    manifest_path = _build_tiny_pack(tmp_path, fixed_oos=True)
+    config = replace(_config(tmp_path, manifest_path, evaluation_mode="fixed_oos"), **{field: value})
+
+    with pytest.raises(ValueError, match=message):
+        training.train_sequence_path_model(config)
+
+
 def test_fixed_oos_skips_training_evaluation_and_evaluates_oos_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
