@@ -1,13 +1,23 @@
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pandas as pd
+import pytest
 import torch
+
+import daily_research.path_policy.qdp_v2_sequence_path_pack as sequence_pack
+from daily_research.path_policy.qdp_v2_raw_rising_path_atlas import (
+    RAW_SIGNAL_COLUMNS,
+    _add_raw_daily_signals,
+)
 
 from daily_research.path_policy.qdp_v2_sequence_path_pack import (
     AShareExecutionCostConfig,
     DAILY_RAW_FEATURES,
     DEFAULT_OUTPUT_ROOT,
+    DateShardedFloatStore,
     ENTRY_RULE_OPEN_BELOW_LIMIT,
     PATH_OHLCVA_FIELDS,
     PATH_SUMMARY_COLUMNS,
@@ -17,7 +27,10 @@ from daily_research.path_policy.qdp_v2_sequence_path_pack import (
     _exit_fill_mask,
     _fill_suspended_daily_raw,
     _fit_normalization,
+    _prepare_daily_frame,
+    _prepare_daily_with_state_memory_bounded,
     _resolve_deferred_exit_days,
+    _write_sample_index_streaming,
     path_summary_columns,
     path_value_column,
     simulate_a_share_round_trip,
@@ -58,6 +71,135 @@ from daily_research.path_policy.qdp_v2_sequence_path_training import (
 
 def test_sequence_pack_default_output_root_is_daily_research_store() -> None:
     assert DEFAULT_OUTPUT_ROOT.as_posix() == "daily_research/data/research_store/sequence_pack"
+
+
+def test_memory_bounded_daily_preparation_matches_legacy_composition() -> None:
+    dates = pd.date_range("2024-01-02", periods=30, freq="B").strftime("%Y-%m-%d")
+    rows: list[dict[str, object]] = []
+    for symbol_idx, symbol in enumerate(("000001.SZ", "600000.SH")):
+        for day_idx, trade_date in enumerate(dates):
+            close = 10.0 + symbol_idx + day_idx * 0.05
+            rows.append(
+                {
+                    "symbol": symbol,
+                    "trade_date": trade_date,
+                    "open": close - 0.03,
+                    "high": close + 0.08,
+                    "low": close - 0.09,
+                    "close": close,
+                    "volume": 1000.0 + day_idx,
+                    "amount": 10000.0 + day_idx * 20.0,
+                    "raw_open": close - 0.03,
+                    "raw_close": close,
+                }
+            )
+    daily = pd.DataFrame(rows).sample(frac=1.0, random_state=7).reset_index(drop=True)
+    legacy = _add_raw_daily_signals(_prepare_daily_frame(daily.copy()))
+    bounded = _prepare_daily_with_state_memory_bounded(daily.copy())
+    columns = [*DAILY_RAW_FEATURES, *RAW_SIGNAL_COLUMNS, "raw_open", "raw_close"]
+    pd.testing.assert_frame_equal(
+        bounded[["symbol", "trade_date", *columns]].reset_index(drop=True),
+        legacy[["symbol", "trade_date", *columns]].reset_index(drop=True),
+        check_dtype=False,
+        check_exact=False,
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
+
+
+def test_date_sharded_store_keeps_only_one_mapping_open_and_can_revisit(tmp_path) -> None:
+    store = DateShardedFloatStore(
+        directory=tmp_path / "labels",
+        name="future",
+        shape=(4, 2, 2, 1),
+        shard_size=2,
+    )
+    first = np.full((2, 2, 1), 1.0, dtype=np.float32)
+    third = np.full((2, 2, 1), 3.0, dtype=np.float32)
+    second = np.full((2, 2, 1), 2.0, dtype=np.float32)
+    store.set_date(0, first)
+    store.set_date(2, third)
+    assert len(store._shards) == 1
+    store.set_date(1, second)
+    assert len(store._shards) == 1
+    store.flush()
+    assert len(store._shards) == 0
+    assert len(store.shard_metas) == 2
+    reopened = np.memmap(
+        tmp_path / "labels" / "future.000000_000001.float32.dat",
+        dtype="float32",
+        mode="r",
+        shape=(2, 2, 2, 1),
+    )
+    np.testing.assert_allclose(reopened[0], first)
+    np.testing.assert_allclose(reopened[1], second)
+
+
+def test_memory_guard_stops_safely_and_records_progress(tmp_path, monkeypatch) -> None:
+    assert sequence_pack.DEFAULT_MINIMUM_FREE_MEMORY_GB == 1.0
+    progress = tmp_path / "progress.json"
+    monkeypatch.setattr(sequence_pack, "_available_physical_memory_gb", lambda: 1.25)
+    with pytest.raises(MemoryError, match="memory guard blocked"):
+        sequence_pack._enforce_memory_guard(
+            stage="large_stage",
+            minimum_free_gb=3.0,
+            progress_path=progress,
+        )
+    payload = json.loads(progress.read_text(encoding="utf-8"))
+    assert payload["blocker"] == "minimum_free_memory_guard"
+    assert payload["available_memory_gb"] == 1.25
+
+
+def test_streaming_index_writer_matches_in_memory_candidate_index(tmp_path) -> None:
+    dates = ["2024-01-02", "2024-01-03", "2025-01-02"]
+    symbols = ["000001.SZ", "000002.SZ"]
+    input_valid = np.ones((3, 2), dtype=bool)
+    entry = np.asarray([[True, False], [True, True], [False, True]], dtype=bool)
+    label = np.asarray([[True, False], [True, True], [False, True]], dtype=bool)
+    signal = np.ones((3, 2), dtype=bool)
+    expected = _build_sample_index(
+        date_values=dates,
+        symbol_values=symbols,
+        start_date="2024-01-01",
+        end_date="2025-12-31",
+        train_years=(2024,),
+        validation_years=(2025,),
+        test_years=(2099,),
+        input_valid=input_valid,
+        entry_buyable=entry,
+        label_valid=label,
+        price_label_valid=label,
+        va_aux_valid=label,
+        signal_eligible=signal,
+        require_entry_filled=False,
+        require_label_valid=False,
+        id_column="candidate_id",
+    )
+    path = tmp_path / "candidate_index.parquet"
+    stats = _write_sample_index_streaming(
+        output_path=path,
+        date_values=dates,
+        symbol_values=symbols,
+        start_date="2024-01-01",
+        end_date="2025-12-31",
+        train_years=(2024,),
+        validation_years=(2025,),
+        test_years=(2099,),
+        input_valid=input_valid,
+        entry_buyable=entry,
+        label_valid=label,
+        price_label_valid=label,
+        va_aux_valid=label,
+        signal_eligible=signal,
+        require_entry_filled=False,
+        require_label_valid=False,
+        id_column="candidate_id",
+        target_row_group_size=2,
+    )
+    actual = pd.read_parquet(path)
+    pd.testing.assert_frame_equal(actual, expected, check_dtype=False)
+    assert stats["row_count"] == len(expected)
+    assert stats["split_counts"] == {"train": 4, "validation": 2}
 
 
 def _raw_panel(
@@ -1441,6 +1583,26 @@ def test_global_tail_rank_loss_rewards_correct_target_order() -> None:
 
     assert torch.isfinite(correct)
     assert correct < reversed_loss
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA AMP is unavailable")
+def test_global_tail_rank_loss_prevents_fp16_pair_count_overflow() -> None:
+    score = torch.linspace(1.0, -1.0, steps=512, device="cuda", dtype=torch.float16).requires_grad_(True)
+    target = torch.linspace(1.0, -1.0, steps=512, device="cuda", dtype=torch.float32)
+    date_idx = torch.zeros(512, device="cuda", dtype=torch.long)
+
+    with torch.amp.autocast(device_type="cuda", enabled=True):
+        actual = _global_tail_rank_loss_by_date(score, target, date_idx)
+    expected = _global_tail_rank_loss_by_date(score.detach().float(), target, date_idx)
+
+    assert actual.dtype == torch.float32
+    assert float(actual) > 0.0
+    assert torch.isinf(torch.tensor(512 * 511 // 2, device="cuda", dtype=torch.float16))
+    torch.testing.assert_close(actual, expected, rtol=1.0e-6, atol=1.0e-8)
+    actual.backward()
+    assert score.grad is not None
+    assert torch.isfinite(score.grad).all()
+    assert float(score.grad.abs().sum()) > 0.0
 
 
 def test_compute_loss_accepts_global_tail_profile_on_single_daily_slate() -> None:

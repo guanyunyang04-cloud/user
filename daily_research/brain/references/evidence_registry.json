@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 161,
+  "record_count": 162,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -3755,6 +3755,35 @@
       "verdict": "Status: `completed / all_profile_roll_forward_comparison / research_default_updated / no_active_execution_change`.; Main evaluation policy remains `2024 validation` + `2025 train-through-2024 forward test`.; Selected default research profile: `seq100_todayclose_path_only/daily_only_summary_v2_ohlcva_aux_low`.; Reason: among aligned 60d path-output profiles, `ohlcva_aux_low` has both the strongest 2024 validation IC (`0.1626`) and the strongest 2025 forward IC (`0.1927`), while also improving forward Top1 over the previous default (`22.51%` vs `18.44%`).",
       "blockers": [],
       "next_allowed_actions": [],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_seq100_candidate_complete_development_v3_result_20260712",
+      "date": "2026-07-12",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_seq100_candidate_complete_development_v3_result_20260712.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [
+        "seq100_candidate_complete_development_walkforward"
+      ],
+      "run_tags": [
+        "qdp_v2_seq100_path60_todayclose_candidate_complete_2012_2025_v7"
+      ],
+      "verdict": "All `8/8` registered jobs completed and passed evidence-integrity checks.; Both profiles failed the pre-registered eligibility gates.; `development_selection.json` records `winner = null`.; Do not run `freeze-development`, promote either profile, or change the active execution artifact.",
+      "blockers": [
+        "No profile passed the Top3, Top10, stress, and positive-year eligibility gates, so there is no champion that may be frozen.",
+        "Predicted exit execution is negative despite strong ex-post opportunity ranking; exit-policy and loss alignment must be resolved first."
+      ],
+      "next_allowed_actions": [
+        "Audit fixed, current predicted, and oracle executable exits on the frozen v3 candidates and cost contract.",
+        "Train one execution-aligned soft exit candidate only if the audit confirms that exit timing is the dominant correctable gap.",
+        "Test `global_tail_512` only after an execution-aligned candidate passes the pre-registered eligibility gates."
+      ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": []
     },

@@ -21,6 +21,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import BatchSampler, Dataset
 
+from daily_research.path_policy.seq100_candidate_execution import (
+    DEFAULT_DAILY_COHORT_CASH_CNY,
+    evaluate_candidate_execution,
+)
 from daily_research.path_policy.qdp_v2_sequence_path_pack import (
     DEFAULT_FORWARD_DAYS,
     DEFAULT_LOOKBACK_DAYS,
@@ -38,6 +42,10 @@ from daily_research.path_policy.qdp_v2_sequence_path_pack import (
 DEFAULT_OUTPUT_ROOT = Path("daily_research/output/path_policy/sequence_path_training")
 DEFAULT_TOP_K = (5, 10, 20, 50, 100)
 DEFAULT_SEED = 7
+WORKING_SET_MEMORY_CHECK_INTERVAL_BATCHES = 32
+WORKING_SET_TRIM_COOLDOWN_BATCHES = 256
+WORKING_SET_TRIM_TRIGGER_AVAILABLE_GB = 2.0
+WORKING_SET_TRIM_FALLBACK_INTERVAL_BATCHES = 1024
 EVALUATION_MODE_STANDARD = "standard"
 EVALUATION_MODE_FIXED_OOS = "fixed_oos"
 EVALUATION_MODE_DEVELOPMENT = "development"
@@ -208,18 +216,81 @@ RICHER_LIMIT_TARGETS = [
 ]
 
 
-def _trim_working_set() -> None:
+def _trim_working_set() -> bool:
     if not hasattr(ctypes, "WinDLL"):
-        return
+        return False
     try:
         kernel32 = ctypes.WinDLL("kernel32.dll", use_last_error=True)
         psapi = ctypes.WinDLL("psapi.dll", use_last_error=True)
         kernel32.GetCurrentProcess.restype = ctypes.c_void_p
         psapi.EmptyWorkingSet.argtypes = [ctypes.c_void_p]
         psapi.EmptyWorkingSet.restype = ctypes.c_bool
-        psapi.EmptyWorkingSet(kernel32.GetCurrentProcess())
+        return bool(psapi.EmptyWorkingSet(kernel32.GetCurrentProcess()))
     except Exception:
-        return
+        return False
+
+
+def _available_physical_memory_gb() -> float | None:
+    try:
+        import psutil  # type: ignore
+
+        return float(psutil.virtual_memory().available) / float(1024**3)
+    except (ImportError, AttributeError, OSError):
+        return None
+
+
+def _current_process_memory_gb() -> dict[str, float | None]:
+    try:
+        import psutil  # type: ignore
+
+        info = psutil.Process().memory_full_info()
+        private_bytes = getattr(info, "private", getattr(info, "uss", None))
+        return {
+            "working_set_gb": float(info.rss) / float(1024**3),
+            "private_gb": (
+                float(private_bytes) / float(1024**3) if private_bytes is not None else None
+            ),
+        }
+    except (ImportError, AttributeError, OSError):
+        return {"working_set_gb": None, "private_gb": None}
+
+
+def _maybe_trim_training_working_set(
+    *,
+    batch_count: int,
+    last_trim_batch: int,
+) -> tuple[int, dict[str, Any] | None]:
+    current_batch = int(batch_count)
+    previous_trim = int(last_trim_batch)
+    if current_batch <= 0 or current_batch % WORKING_SET_MEMORY_CHECK_INTERVAL_BATCHES != 0:
+        return previous_trim, None
+    if previous_trim > 0 and current_batch - previous_trim < WORKING_SET_TRIM_COOLDOWN_BATCHES:
+        return previous_trim, None
+    available_before = _available_physical_memory_gb()
+    if available_before is None:
+        should_trim = current_batch - previous_trim >= WORKING_SET_TRIM_FALLBACK_INTERVAL_BATCHES
+        reason = "periodic_fallback"
+    else:
+        should_trim = available_before < WORKING_SET_TRIM_TRIGGER_AVAILABLE_GB
+        reason = "low_available_memory"
+    if not should_trim:
+        return previous_trim, None
+    process_before = _current_process_memory_gb()
+    trim_succeeded = bool(_trim_working_set())
+    available_after = _available_physical_memory_gb()
+    process_after = _current_process_memory_gb()
+    return (current_batch if trim_succeeded else previous_trim), {
+        "batch": current_batch,
+        "reason": reason,
+        "trim_succeeded": trim_succeeded,
+        "trigger_available_gb": float(WORKING_SET_TRIM_TRIGGER_AVAILABLE_GB),
+        "available_before_gb": float(available_before) if available_before is not None else None,
+        "available_after_gb": float(available_after) if available_after is not None else None,
+        "working_set_before_gb": process_before["working_set_gb"],
+        "working_set_after_gb": process_after["working_set_gb"],
+        "private_before_gb": process_before["private_gb"],
+        "private_after_gb": process_after["private_gb"],
+    }
 
 
 def _now() -> str:
@@ -516,6 +587,14 @@ class SequencePathPackDataset(Dataset):
         )
         self.trade_date_values = self.sample_index["trade_date"].astype(str).to_numpy(copy=True)
         self.symbol_values = self.sample_index["symbol"].astype(str).to_numpy(copy=True)
+        self.entry_filled_values = (
+            self.sample_index["entry_filled"]
+            .astype("boolean")
+            .fillna(False)
+            .to_numpy(dtype=bool, copy=True)
+            if "entry_filled" in self.sample_index.columns
+            else np.ones(len(self.sample_index), dtype=bool)
+        )
         self.split = str(split)
         channels = dict(self.manifest.get("feature_channels", {}) or {})
         self.channel_order = _input_channel_order(self.input_channel_profile)
@@ -655,6 +734,7 @@ class SequencePathPackDataset(Dataset):
                 return target
         target = np.full(len(self), np.nan, dtype=np.float32)
         step = max(int(chunk_size), 1)
+        last_trim_chunk = 0
         for start in range(0, len(self), step):
             stop = min(start + step, len(self))
             date_idx = self.date_idx_values[start:stop].astype(np.int64, copy=False)
@@ -680,6 +760,12 @@ class SequencePathPackDataset(Dataset):
                 price_anchor=self.price_anchor,
                 tradable_path=tradable_path,
             )[:, -1]
+            del path, tradable_path
+            batch_equivalent = int(math.ceil(stop / 512.0))
+            last_trim_chunk, _trim_event = _maybe_trim_training_working_set(
+                batch_count=batch_equivalent,
+                last_trim_batch=last_trim_chunk,
+            )
         self._path_value_targets_cache = target
         return target
 
@@ -831,6 +917,8 @@ class SequencePathPackDataset(Dataset):
         include_richer_path: bool = True,
         include_summary: bool = True,
         include_metadata: bool = True,
+        include_observation: bool = True,
+        include_execution: bool = True,
     ) -> dict[str, Any]:
         idx = np.asarray(indices, dtype=np.int64)
         if idx.ndim != 1 or idx.size == 0:
@@ -889,25 +977,33 @@ class SequencePathPackDataset(Dataset):
             y_ohlcva_path[~va_aux_valid, :, 4:] = np.nan
         y_richer_path = self._future_richer_path_batch(y_path, date_idx, symbol_idx) if bool(include_richer_path) else None
         y_tradable_path = self._future_mask_batch(self.tradable_panel, date_idx, symbol_idx)
-        y_observed_price_path = self._future_mask_batch(self.observed_price_panel, date_idx, symbol_idx)
-        execution_days = int(self.forward_days + self.execution_tail_days)
-        exit_sellable_path = self._future_mask_batch(
-            self.exit_sellable_panel,
-            date_idx,
-            symbol_idx,
-            days=execution_days,
-        )
-        exit_close_raw_path = self._future_float_panel_batch(
-            self.exit_close_raw_panel,
-            date_idx,
-            symbol_idx,
-            days=execution_days,
-        )
-        entry_open_raw = (
-            np.asarray(self.entry_open_raw_panel[date_idx + 1, symbol_idx], dtype=np.float32).copy()
-            if self.entry_open_raw_panel is not None
+        y_observed_price_path = (
+            self._future_mask_batch(self.observed_price_panel, date_idx, symbol_idx)
+            if bool(include_observation)
             else None
         )
+        exit_sellable_path = None
+        exit_close_raw_path = None
+        entry_open_raw = None
+        if bool(include_execution):
+            execution_days = int(self.forward_days + self.execution_tail_days)
+            exit_sellable_path = self._future_mask_batch(
+                self.exit_sellable_panel,
+                date_idx,
+                symbol_idx,
+                days=execution_days,
+            )
+            exit_close_raw_path = self._future_float_panel_batch(
+                self.exit_close_raw_panel,
+                date_idx,
+                symbol_idx,
+                days=execution_days,
+            )
+            entry_open_raw = (
+                np.asarray(self.entry_open_raw_panel[date_idx + 1, symbol_idx], dtype=np.float32).copy()
+                if self.entry_open_raw_panel is not None
+                else None
+            )
         y_summary = None
         if bool(include_summary):
             y_summary = (
@@ -945,12 +1041,12 @@ class SequencePathPackDataset(Dataset):
         batch["exit_sellable_path"] = (
             torch.from_numpy(exit_sellable_path) if exit_sellable_path is not None else None
         )
-        entry_filled = (
-            self.sample_index["entry_filled"].astype(bool).to_numpy(copy=False)[idx]
-            if "entry_filled" in self.sample_index.columns
-            else np.ones(int(idx.size), dtype=bool)
+        entry_filled = self.entry_filled_values[idx] if bool(include_execution) else None
+        batch["entry_filled"] = (
+            torch.from_numpy(np.asarray(entry_filled, dtype=bool))
+            if entry_filled is not None
+            else None
         )
-        batch["entry_filled"] = torch.from_numpy(np.asarray(entry_filled, dtype=bool))
         batch["label_valid"] = torch.from_numpy(label_valid)
         batch["price_label_valid"] = torch.from_numpy(price_label_valid)
         batch["va_aux_valid"] = torch.from_numpy(va_aux_valid)
@@ -1282,29 +1378,35 @@ class SequencePathModel(nn.Module):
 
 
 def _finite_smooth_l1(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-    mask = torch.isfinite(target)
-    safe_target = torch.where(mask, target, pred.detach())
-    raw_loss = F.smooth_l1_loss(pred, safe_target, reduction="none")
-    masked_loss = torch.where(mask, raw_loss, torch.zeros_like(raw_loss))
-    count = mask.sum().to(dtype=pred.dtype)
-    return masked_loss.sum() / torch.clamp(count, min=1.0)
+    with torch.amp.autocast(device_type=pred.device.type, enabled=False):
+        loss_pred = pred.float()
+        loss_target = target.float()
+        mask = torch.isfinite(loss_target)
+        safe_target = torch.where(mask, loss_target, loss_pred.detach())
+        raw_loss = F.smooth_l1_loss(loss_pred, safe_target, reduction="none")
+        masked_loss = torch.where(mask, raw_loss, torch.zeros_like(raw_loss))
+        count = mask.sum().to(dtype=loss_pred.dtype)
+        return masked_loss.sum() / torch.clamp(count, min=1.0)
 
 
 def _finite_smooth_l1_fields_equal(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     if int(pred.shape[-1]) != int(target.shape[-1]):
         raise ValueError(f"field dim mismatch: predicted={pred.shape[-1]} target={target.shape[-1]}")
-    mask = torch.isfinite(target)
-    safe_target = torch.where(mask, target, pred.detach())
-    raw_loss = F.smooth_l1_loss(pred, safe_target, reduction="none")
-    masked_loss = torch.where(mask, raw_loss, torch.zeros_like(raw_loss))
-    reduce_dims = tuple(range(int(target.ndim) - 1))
-    counts = mask.sum(dim=reduce_dims).to(dtype=pred.dtype)
-    field_losses = masked_loss.sum(dim=reduce_dims) / torch.clamp(counts, min=1.0)
-    valid_fields = counts > 0
-    return torch.where(valid_fields, field_losses, torch.zeros_like(field_losses)).sum() / torch.clamp(
-        valid_fields.sum().to(dtype=pred.dtype),
-        min=1.0,
-    )
+    with torch.amp.autocast(device_type=pred.device.type, enabled=False):
+        loss_pred = pred.float()
+        loss_target = target.float()
+        mask = torch.isfinite(loss_target)
+        safe_target = torch.where(mask, loss_target, loss_pred.detach())
+        raw_loss = F.smooth_l1_loss(loss_pred, safe_target, reduction="none")
+        masked_loss = torch.where(mask, raw_loss, torch.zeros_like(raw_loss))
+        reduce_dims = tuple(range(int(loss_target.ndim) - 1))
+        counts = mask.sum(dim=reduce_dims).to(dtype=loss_pred.dtype)
+        field_losses = masked_loss.sum(dim=reduce_dims) / torch.clamp(counts, min=1.0)
+        valid_fields = counts > 0
+        return torch.where(valid_fields, field_losses, torch.zeros_like(field_losses)).sum() / torch.clamp(
+            valid_fields.sum().to(dtype=loss_pred.dtype),
+            min=1.0,
+        )
 
 
 def _finite_smooth_l1_columns(pred: torch.Tensor, target: torch.Tensor, columns: list[int]) -> torch.Tensor:
@@ -1411,37 +1513,40 @@ def _global_tail_rank_loss_by_date(
 ) -> torch.Tensor:
     """Target-gap weighted pairwise loss over each global-tail daily slate."""
 
-    losses: list[torch.Tensor] = []
-    for date in torch.unique(date_idx):
-        mask = (date_idx == date) & torch.isfinite(target) & torch.isfinite(score)
-        valid_indices = torch.where(mask)[0]
-        if int(valid_indices.numel()) < 4:
-            continue
-        s = score.index_select(0, valid_indices)
-        y = target.index_select(0, valid_indices)
-        order = torch.argsort(y, descending=True)
-        s = s.index_select(0, order)
-        y = y.index_select(0, order)
-        target_gap = y.view(-1, 1) - y.view(1, -1)
-        score_gap = s.view(-1, 1) - s.view(1, -1)
-        ordered_pair = target_gap > 0.0
-        abs_gap = torch.where(ordered_pair, target_gap, torch.zeros_like(target_gap))
-        positive_count = torch.clamp(ordered_pair.sum().to(dtype=s.dtype), min=1.0)
-        gap_scale = torch.clamp(abs_gap.sum() / positive_count, min=1.0e-6)
-        gap_weight = torch.clamp(abs_gap / gap_scale, min=0.25, max=4.0)
-        top = min(int(top_count), int(s.numel()))
-        top_pair = torch.zeros_like(ordered_pair)
-        top_pair[:top, :] = True
-        pair_weight = gap_weight * torch.where(
-            top_pair,
-            torch.full_like(target_gap, 2.0),
-            torch.ones_like(target_gap),
-        )
-        raw = F.softplus(-score_gap) * pair_weight
-        losses.append(torch.where(ordered_pair, raw, torch.zeros_like(raw)).sum() / positive_count)
-    if not losses:
-        return score.sum() * 0.0
-    return torch.stack(losses).mean()
+    with torch.amp.autocast(device_type=score.device.type, enabled=False):
+        loss_score = score.float()
+        loss_target = target.float()
+        losses: list[torch.Tensor] = []
+        for date in torch.unique(date_idx):
+            mask = (date_idx == date) & torch.isfinite(loss_target) & torch.isfinite(loss_score)
+            valid_indices = torch.where(mask)[0]
+            if int(valid_indices.numel()) < 4:
+                continue
+            s = loss_score.index_select(0, valid_indices)
+            y = loss_target.index_select(0, valid_indices)
+            order = torch.argsort(y, descending=True)
+            s = s.index_select(0, order)
+            y = y.index_select(0, order)
+            target_gap = y.view(-1, 1) - y.view(1, -1)
+            score_gap = s.view(-1, 1) - s.view(1, -1)
+            ordered_pair = target_gap > 0.0
+            abs_gap = torch.where(ordered_pair, target_gap, torch.zeros_like(target_gap))
+            positive_count = torch.clamp(ordered_pair.sum().to(dtype=torch.float32), min=1.0)
+            gap_scale = torch.clamp(abs_gap.sum() / positive_count, min=1.0e-6)
+            gap_weight = torch.clamp(abs_gap / gap_scale, min=0.25, max=4.0)
+            top = min(int(top_count), int(s.numel()))
+            top_pair = torch.zeros_like(ordered_pair)
+            top_pair[:top, :] = True
+            pair_weight = gap_weight * torch.where(
+                top_pair,
+                torch.full_like(target_gap, 2.0),
+                torch.ones_like(target_gap),
+            )
+            raw = F.softplus(-score_gap) * pair_weight
+            losses.append(torch.where(ordered_pair, raw, torch.zeros_like(raw)).sum() / positive_count)
+        if not losses:
+            return loss_score.sum() * 0.0
+        return torch.stack(losses).mean()
 
 
 def _rank_loss_for_profile(
@@ -2028,6 +2133,8 @@ def _run_global_tail_rank_step(
         include_richer_path=False,
         include_summary=False,
         include_metadata=False,
+        include_observation=False,
+        include_execution=False,
     )
     tradable_path = (
         batch["y_tradable_path"].to(device, non_blocking=device.type == "cuda")
@@ -2079,13 +2186,16 @@ def _mine_global_tail_scores(
             shuffle=False,
             seed=0,
         )
-        for indices in sampler:
+        last_trim_batch = 0
+        for batch_number, indices in enumerate(sampler, start=1):
             batch = dataset.get_batch(
                 indices,
                 include_ohlcva_path=False,
                 include_richer_path=False,
                 include_summary=False,
                 include_metadata=False,
+                include_observation=False,
+                include_execution=False,
             )
             x = batch["x"].to(device, non_blocking=device.type == "cuda")
             symbol_idx = batch["symbol_idx"].to(device, non_blocking=device.type == "cuda")
@@ -2103,6 +2213,11 @@ def _mine_global_tail_scores(
                 if "residual_score" in outputs:
                     score = score + float(residual_score_weight) * outputs["residual_score"]
             scores[np.asarray(indices, dtype=np.int64)] = score.detach().float().cpu().numpy()
+            del batch, x, symbol_idx, outputs, predicted_summary, score
+            last_trim_batch, _trim_event = _maybe_trim_training_working_set(
+                batch_count=batch_number,
+                last_trim_batch=last_trim_batch,
+            )
     finally:
         model.train(was_training)
     return scores
@@ -2134,6 +2249,82 @@ def _finite_threshold_rate(values: pd.Series, *, threshold: float, comparison: s
     if comparison == "le":
         return float((numeric <= float(threshold)).mean())
     raise ValueError("comparison must be ge or le")
+
+
+_EXECUTION_INTERNAL_COLUMNS = {
+    "_execution_signal_date_idx",
+    "_execution_entry_open_raw",
+    "_execution_entry_filled",
+    "_execution_exit_close_raw_path",
+    "_execution_exit_sellable_path",
+}
+_EXECUTION_DAILY_MERGE_KEYS = ("trade_date", "top_k", "universe_hash")
+
+
+def _candidate_universe_hash(symbols: pd.Series | list[str]) -> str:
+    normalized = sorted(str(item) for item in list(symbols))
+    return hashlib.sha256("\n".join(normalized).encode("utf-8")).hexdigest()
+
+
+def _merge_candidate_execution_daily_rows(
+    opportunity_rows: list[dict[str, Any]],
+    execution_rows: pd.DataFrame,
+    *,
+    expected_candidate_count: int,
+    expected_universe_hash: str,
+) -> list[dict[str, Any]]:
+    """One-to-one merge execution cashflows into the already-ranked daily diagnostics."""
+
+    opportunity = pd.DataFrame(opportunity_rows)
+    execution = execution_rows.copy()
+    if opportunity.empty or execution.empty:
+        raise ValueError("candidate-complete development requires non-empty daily TopK rows")
+    required = {*_EXECUTION_DAILY_MERGE_KEYS, "universe_count", "selected_count"}
+    for name, frame in (("opportunity", opportunity), ("execution", execution)):
+        missing = sorted(required.difference(frame.columns))
+        if missing:
+            raise ValueError(f"{name} daily TopK rows are missing merge fields: {missing}")
+        if bool(frame.duplicated(list(_EXECUTION_DAILY_MERGE_KEYS)).any()):
+            raise ValueError(f"{name} daily TopK rows contain duplicate merge keys")
+        universe_counts = pd.to_numeric(frame["universe_count"], errors="coerce")
+        if not bool(universe_counts.eq(int(expected_candidate_count)).all()):
+            raise ValueError(
+                f"{name} daily TopK candidate count drifted from the candidate index: "
+                f"expected={expected_candidate_count}, observed={universe_counts.tolist()}"
+            )
+        if not bool(frame["universe_hash"].astype(str).eq(str(expected_universe_hash)).all()):
+            raise ValueError(f"{name} daily TopK universe hash drifted from the candidate index")
+    opportunity_keys = set(
+        map(tuple, opportunity[list(_EXECUTION_DAILY_MERGE_KEYS)].astype(str).to_numpy())
+    )
+    execution_keys = set(
+        map(tuple, execution[list(_EXECUTION_DAILY_MERGE_KEYS)].astype(str).to_numpy())
+    )
+    if opportunity_keys != execution_keys:
+        raise ValueError("opportunity and execution daily TopK keys do not match exactly")
+    overlap = sorted(
+        set(opportunity.columns)
+        .intersection(execution.columns)
+        .difference(_EXECUTION_DAILY_MERGE_KEYS)
+    )
+    for column in [name for name in overlap if name in {"universe_count", "selected_count"}]:
+        left = pd.to_numeric(opportunity[column], errors="coerce")
+        right_by_key = execution.set_index(list(_EXECUTION_DAILY_MERGE_KEYS))[column]
+        right = opportunity[list(_EXECUTION_DAILY_MERGE_KEYS)].apply(
+            lambda row: right_by_key.loc[tuple(row.tolist())], axis=1
+        )
+        if not bool(left.eq(pd.to_numeric(right, errors="coerce")).all()):
+            raise ValueError(f"opportunity/execution {column} mismatch")
+    merged = opportunity.drop(columns=overlap).merge(
+        execution,
+        on=list(_EXECUTION_DAILY_MERGE_KEYS),
+        how="inner",
+        validate="one_to_one",
+        sort=False,
+    )
+    if len(merged) != len(opportunity):
+        raise AssertionError("candidate execution daily merge changed the TopK row count")
+    return merged.to_dict("records")
 
 
 def _topk_daily_rows(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forward_days: int, value_column: str) -> list[dict[str, Any]]:
@@ -2195,7 +2386,7 @@ def _topk_daily_rows(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forw
             if "symbol" in group.columns
             else [str(item) for item in sorted(group.index.tolist())]
         )
-        universe_hash = hashlib.sha256("\n".join(universe_symbols).encode("utf-8")).hexdigest()
+        universe_hash = _candidate_universe_hash(universe_symbols)
         for top_k in top_k_values:
             top = group.head(int(top_k))
             row: dict[str, Any] = {
@@ -2227,9 +2418,13 @@ def _topk_daily_rows(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forw
                     if not execution_primary or selected_count == len(top)
                     else np.nan
                 )
-                row[f"selected_{col}"] = float(selected_mean)
-                row[f"universe_{col}"] = float(universe_mean)
-                row[f"alpha_{col}"] = float(selected_mean - universe_mean)
+                row[f"selected_{col}"] = float(selected_mean) if pd.notna(selected_mean) else np.nan
+                row[f"universe_{col}"] = float(universe_mean) if pd.notna(universe_mean) else np.nan
+                row[f"alpha_{col}"] = (
+                    float(selected_mean - universe_mean)
+                    if pd.notna(selected_mean) and pd.notna(universe_mean)
+                    else np.nan
+                )
             row["selected_hit_5pct_rate"] = _finite_threshold_rate(
                 top[f"future_max_return_{suffix}"], threshold=0.05, comparison="ge"
             )
@@ -2302,10 +2497,41 @@ def _topk_candidate_rows(
         "realized_plan_exit_day",
         "realized_plan_return",
         "realized_plan_gross_return",
+        "gross_realized_plan_return",
+        "net_realized_plan_return_base",
+        "net_realized_plan_return_stress",
         "opportunity_value",
         "realized_plan_value",
+        "net_realized_plan_value_base",
+        "net_realized_plan_value_stress",
         "oracle_regret",
+        "realized_plan_planned_exit_day",
+        "realized_plan_resolved_exit_day",
+        "realized_plan_resolved_exit_date",
+        "realized_plan_exit_date",
+        "realized_plan_exit_status",
+        "entry_order_filled_base",
+        "entry_order_filled_stress",
+        "shares",
+        "shares_base",
+        "shares_stress",
+        "execution_cost_base_cny",
+        "execution_cost_stress_cny",
+        "cash_utilization",
+        "cash_utilization_base",
+        "cash_utilization_stress",
+        "ending_cash_base_cny",
+        "ending_cash_stress_cny",
+        "candidate_allocation_cash_cny",
+        "value_label_available",
+        "execution_cost_contract_sha256",
     ]
+    string_metric_columns = {
+        "realized_plan_resolved_exit_date",
+        "realized_plan_exit_date",
+        "realized_plan_exit_status",
+        "execution_cost_contract_sha256",
+    }
     rows: list[dict[str, Any]] = []
     for trade_date, raw_group in frame.groupby("trade_date", sort=True):
         group = raw_group.dropna(subset=["score"]).copy()
@@ -2319,7 +2545,7 @@ def _topk_candidate_rows(
             if "symbol" in group.columns
             else [str(item) for item in sorted(group.index.tolist())]
         )
-        universe_hash = hashlib.sha256("\n".join(universe_symbols).encode("utf-8")).hexdigest()
+        universe_hash = _candidate_universe_hash(universe_symbols)
         top = group.head(max(int(max_top_k), 0))
         for rank, (_, item) in enumerate(top.iterrows(), start=1):
             row: dict[str, Any] = {
@@ -2333,6 +2559,9 @@ def _topk_candidate_rows(
             }
             for column in metric_columns:
                 if column in item.index:
+                    if column in string_metric_columns:
+                        row[column] = str(item[column]) if pd.notna(item[column]) else None
+                        continue
                     value = pd.to_numeric(pd.Series([item[column]]), errors="coerce").iloc[0]
                     row[column] = float(value) if pd.notna(value) else np.nan
             rows.append(row)
@@ -2346,7 +2575,29 @@ def _aggregate_topk_daily_rows(rows: list[dict[str, Any]]) -> pd.DataFrame:
     out_rows: list[dict[str, Any]] = []
     for top_k, group in daily.groupby("top_k", sort=True):
         out: dict[str, Any] = {"top_k": int(top_k), "day_count": int(len(group))}
-        for col in [c for c in group.columns if c not in {"trade_date", "top_k", "universe_hash", "score_column"}]:
+        if "execution_cost_contract_sha256" in group.columns:
+            contract_hashes = sorted(
+                {
+                    str(value)
+                    for value in group["execution_cost_contract_sha256"].dropna().tolist()
+                    if str(value)
+                }
+            )
+            if len(contract_hashes) != 1:
+                raise ValueError("daily TopK rows must bind exactly one execution cost contract")
+            out["execution_cost_contract_sha256"] = contract_hashes[0]
+        ignored = {
+            "trade_date",
+            "top_k",
+            "universe_hash",
+            "score_column",
+            "selected_symbols",
+            "selected_symbols_json",
+            "selected_exit_status_counts_json",
+            "universe_exit_status_counts_json",
+            "execution_cost_contract_sha256",
+        }
+        for col in [c for c in group.columns if c not in ignored]:
             values = pd.to_numeric(group[col], errors="coerce")
             execution_primary = any(
                 token in col
@@ -2357,6 +2608,7 @@ def _aggregate_topk_daily_rows(rows: list[dict[str, Any]]) -> pd.DataFrame:
                     "selected_realized_plan_value",
                     "universe_realized_plan_value",
                     "alpha_realized_plan_value",
+                    "net_realized_plan_return",
                 )
             ) and not col.endswith("_coverage")
             out[col] = float(values.mean()) if not execution_primary or bool(values.notna().all()) else np.nan
@@ -2370,20 +2622,66 @@ def _topk_metrics(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forward
 
 
 def _validate_development_topk_execution_coverage(topk: pd.DataFrame) -> None:
-    required = {
+    required_complete = {
         "selected_realized_plan_return_coverage",
-        "selected_realized_plan_value_coverage",
         "selected_realized_plan_coverage",
+        "universe_realized_plan_return_coverage",
+        "universe_realized_plan_coverage",
     }
-    missing = sorted(required.difference(topk.columns))
+    missing = sorted(required_complete.difference(topk.columns))
     if missing:
         raise ValueError(f"development TopK is missing deterministic execution coverage columns: {missing}")
-    for column in sorted(required):
+    for column in sorted(required_complete):
         values = pd.to_numeric(topk[column], errors="coerce")
         if values.empty or not bool(np.isfinite(values).all()) or not bool((values >= 1.0 - 1.0e-12).all()):
             raise ValueError(
                 f"development TopK cannot use partial execution outcomes: {column} must be 100%"
             )
+    value_coverage_columns = {
+        "selected_realized_plan_value_coverage",
+        "universe_realized_plan_value_coverage",
+    }
+    missing_value_coverage = sorted(value_coverage_columns.difference(topk.columns))
+    if missing_value_coverage:
+        raise ValueError(
+            f"development TopK is missing labeled value coverage columns: {missing_value_coverage}"
+        )
+    for column in sorted(value_coverage_columns):
+        values = pd.to_numeric(topk[column], errors="coerce")
+        if (
+            values.empty
+            or not bool(np.isfinite(values).all())
+            or not bool(values.between(0.0, 1.0, inclusive="both").all())
+        ):
+            raise ValueError(f"development TopK labeled value coverage is invalid: {column}")
+    required_net_returns = {
+        f"{scope}_{metric}"
+        for scope in ("selected", "universe", "alpha")
+        for metric in (
+            "net_realized_plan_return_base",
+            "net_realized_plan_return_stress",
+        )
+    }
+    required_net_values = {
+        f"{scope}_{metric}"
+        for scope in ("selected", "universe", "alpha")
+        for metric in (
+            "net_realized_plan_value_base",
+            "net_realized_plan_value_stress",
+        )
+    }
+    missing_net = sorted((required_net_returns | required_net_values).difference(topk.columns))
+    if missing_net:
+        raise ValueError(f"development TopK is missing candidate-complete net metrics: {missing_net}")
+    for column in sorted(required_net_returns):
+        values = pd.to_numeric(topk[column], errors="coerce")
+        if values.empty or not bool(np.isfinite(values).all()):
+            raise ValueError(f"development TopK net-return metric must be finite and complete: {column}")
+    if "execution_cost_contract_sha256" not in topk.columns:
+        raise ValueError("development TopK is missing execution_cost_contract_sha256")
+    hashes = topk["execution_cost_contract_sha256"].astype(str)
+    if hashes.empty or not bool(hashes.str.fullmatch(r"[0-9a-f]{64}").all()):
+        raise ValueError("development TopK execution cost contract hash is invalid")
 
 
 def _split_metrics_for_score(
@@ -2789,14 +3087,23 @@ def _derive_path_summary_numpy(
     high_ret = values[:, :, 1].astype(np.float64, copy=False)
     low_ret = values[:, :, 2].astype(np.float64, copy=False)
     close_ret = values[:, :, 3].astype(np.float64, copy=False)
-    max_ret = np.nanmax(high_ret, axis=1)
-    min_ret = np.nanmin(low_ret, axis=1)
+    finite_high = np.isfinite(high_ret)
+    finite_low = np.isfinite(low_ret)
+    safe_high = np.where(finite_high, high_ret, -np.inf)
+    safe_low = np.where(finite_low, low_ret, np.inf)
+    max_ret = np.max(safe_high, axis=1)
+    min_ret = np.min(safe_low, axis=1)
+    max_ret[~finite_high.any(axis=1)] = np.nan
+    min_ret[~finite_low.any(axis=1)] = np.nan
     final_ret = close_ret[:, -1]
-    peak_idx = np.nanargmax(np.where(np.isfinite(high_ret), high_ret, -np.inf), axis=1)
-    trough_idx = np.nanargmin(np.where(np.isfinite(low_ret), low_ret, np.inf), axis=1)
+    peak_idx = np.argmax(safe_high, axis=1)
+    trough_idx = np.argmin(safe_low, axis=1)
     min_after_peak = np.full(values.shape[0], np.nan, dtype=np.float64)
     for row_idx, pidx in enumerate(peak_idx):
-        min_after_peak[row_idx] = np.nanmin(low_ret[row_idx, int(pidx) :])
+        tail = low_ret[row_idx, int(pidx) :]
+        finite_tail = tail[np.isfinite(tail)]
+        if finite_tail.size:
+            min_after_peak[row_idx] = float(finite_tail.min())
     drawdown_after_peak = (1.0 + min_after_peak) / np.maximum(1.0 + max_ret, 1.0e-6) - 1.0
     time_above = np.nanmean(close_ret > 0.0, axis=1)
     time_below = np.nanmean(close_ret < 0.0, axis=1)
@@ -3249,6 +3556,46 @@ def _predict_split(
             else list(dataset.path_summary_columns)
         )
         value_column = value_column_for_path(dataset.forward_days, path_dim=output_path_dim) if uses_derived_path_value else str(dataset.value_column)
+    candidate_complete_development = bool(
+        str(split) == "development" and str(dataset.index_role) == "candidate"
+    )
+    expected_development_universes: dict[str, dict[str, Any]] = {}
+    seen_development_dates: set[str] = set()
+    execution_date_values: tuple[str, ...] = ()
+    if candidate_complete_development:
+        raw_date_values = list(dataset.manifest.get("date_values", []) or [])
+        if not raw_date_values:
+            raise ValueError("candidate-complete development requires manifest date_values")
+        execution_date_values = tuple(
+            pd.Timestamp(value).strftime("%Y-%m-%d") for value in raw_date_values
+        )
+        if bool(dataset.sample_index.duplicated(["trade_date", "symbol"]).any()):
+            raise ValueError("development candidate index contains duplicate trade_date/symbol rows")
+        for trade_date, group in dataset.sample_index.groupby("trade_date", sort=False):
+            normalized_date = pd.Timestamp(trade_date).strftime("%Y-%m-%d")
+            signal_indices = pd.to_numeric(group["date_idx"], errors="coerce").to_numpy(
+                dtype=np.float64
+            )
+            if (
+                not bool(np.isfinite(signal_indices).all())
+                or not bool(np.equal(signal_indices, np.rint(signal_indices)).all())
+                or len(np.unique(signal_indices)) != 1
+            ):
+                raise ValueError(f"development candidate date_idx is invalid for {normalized_date}")
+            signal_idx = int(round(float(signal_indices[0])))
+            if signal_idx < 0 or signal_idx >= len(execution_date_values):
+                raise ValueError(f"development candidate date_idx is outside manifest date_values: {signal_idx}")
+            if execution_date_values[signal_idx] != normalized_date:
+                raise ValueError(
+                    "development candidate trade_date/date_idx mismatch: "
+                    f"trade_date={normalized_date}, date_values[{signal_idx}]={execution_date_values[signal_idx]}"
+                )
+            symbols = group["symbol"].astype(str).tolist()
+            expected_development_universes[normalized_date] = {
+                "candidate_count": int(len(group)),
+                "universe_hash": _candidate_universe_hash(symbols),
+                "signal_date_idx": signal_idx,
+            }
     pending_date: str | None = None
     pending_frames: list[pd.DataFrame] = []
     ic_rows_by_score: dict[str, list[dict[str, Any]]] = {"score": []}
@@ -3281,6 +3628,89 @@ def _predict_split(
             pending_date = None
             return
         date_frame = pd.concat(pending_frames, ignore_index=True, copy=False)
+        execution_daily_rows: pd.DataFrame | None = None
+        if candidate_complete_development:
+            observed_dates = sorted(
+                pd.to_datetime(date_frame["trade_date"], errors="raise").dt.strftime("%Y-%m-%d").unique()
+            )
+            if len(observed_dates) != 1:
+                raise ValueError(f"pending development slate spans multiple dates: {observed_dates}")
+            trade_date = observed_dates[0]
+            if trade_date in seen_development_dates:
+                raise ValueError(f"development candidate date was split into non-contiguous slates: {trade_date}")
+            expected = expected_development_universes.get(trade_date)
+            if expected is None:
+                raise ValueError(f"development prediction contains an unregistered candidate date: {trade_date}")
+            observed_symbols = date_frame["symbol"].astype(str)
+            observed_hash = _candidate_universe_hash(observed_symbols.tolist())
+            if int(len(date_frame)) != int(expected["candidate_count"]):
+                raise ValueError(
+                    "development daily candidate count drifted from candidate index: "
+                    f"trade_date={trade_date}, expected={expected['candidate_count']}, observed={len(date_frame)}"
+                )
+            if observed_hash != str(expected["universe_hash"]):
+                raise ValueError(f"development daily universe hash drifted for {trade_date}")
+            score_values = pd.to_numeric(date_frame["score"], errors="coerce").to_numpy(
+                dtype=np.float64
+            )
+            if not bool(np.isfinite(score_values).all()):
+                invalid_count = int((~np.isfinite(score_values)).sum())
+                raise ValueError(
+                    "candidate-complete development requires a finite score for every candidate: "
+                    f"trade_date={trade_date}, invalid_count={invalid_count}"
+                )
+            missing_execution = sorted(_EXECUTION_INTERNAL_COLUMNS.difference(date_frame.columns))
+            if missing_execution:
+                raise ValueError(f"development slate is missing raw execution inputs: {missing_execution}")
+            signal_indices = pd.to_numeric(
+                date_frame["_execution_signal_date_idx"], errors="coerce"
+            ).to_numpy(dtype=np.float64)
+            if (
+                not bool(np.isfinite(signal_indices).all())
+                or not bool(np.equal(signal_indices, int(expected["signal_date_idx"])).all())
+            ):
+                raise ValueError(f"development signal date indices are misaligned for {trade_date}")
+            execution_input = date_frame.drop(
+                columns=[
+                    "_execution_signal_date_idx",
+                    "_execution_exit_close_raw_path",
+                    "_execution_exit_sellable_path",
+                ]
+            ).rename(
+                columns={
+                    "_execution_entry_open_raw": "entry_open_raw",
+                    "_execution_entry_filled": "entry_filled",
+                }
+            )
+            if "predicted_exit_day" not in execution_input.columns:
+                raise ValueError("development candidate model does not emit predicted_exit_day")
+            exit_close = np.stack(
+                date_frame["_execution_exit_close_raw_path"].to_numpy(), axis=0
+            ).astype(np.float32, copy=False)
+            exit_sellable = np.stack(
+                date_frame["_execution_exit_sellable_path"].to_numpy(), axis=0
+            ).astype(bool, copy=False)
+            execution = evaluate_candidate_execution(
+                execution_input,
+                exit_close,
+                exit_sellable,
+                manifest=dataset.manifest,
+                signal_date_idx=signal_indices.astype(np.int64),
+                date_values=execution_date_values,
+                top_k_values=top_k,
+                legacy_gross_value_column=(
+                    "realized_plan_value"
+                    if "realized_plan_value" in execution_input.columns
+                    else None
+                ),
+            )
+            date_frame = execution.candidates
+            execution_daily_rows = execution.daily_topk
+            if execution.execution_cost_contract_sha256 != str(
+                execution_daily_rows["execution_cost_contract_sha256"].iloc[0]
+            ):
+                raise ValueError("candidate execution result has inconsistent cost-contract hashes")
+            seen_development_dates.add(trade_date)
         score_columns = ["score"]
         for optional_score in ["path_value_score", "residual_score"]:
             if optional_score in date_frame.columns:
@@ -3299,6 +3729,15 @@ def _predict_split(
                 forward_days=eval_forward_days,
                 value_column=value_column,
             )
+            if score_col == "score" and execution_daily_rows is not None:
+                only_date = pd.Timestamp(date_frame["trade_date"].iloc[0]).strftime("%Y-%m-%d")
+                expected = expected_development_universes[only_date]
+                daily_rows = _merge_candidate_execution_daily_rows(
+                    daily_rows,
+                    execution_daily_rows,
+                    expected_candidate_count=int(expected["candidate_count"]),
+                    expected_universe_hash=str(expected["universe_hash"]),
+                )
             for row in daily_rows:
                 row["score_column"] = str(score_col)
             topk_daily_rows_by_score.setdefault(score_col, []).extend(daily_rows)
@@ -3336,6 +3775,8 @@ def _predict_split(
             else None
         )
         entry_filled_np = batch["entry_filled"].numpy().astype(bool, copy=False)
+        price_label_valid_np = batch["price_label_valid"].numpy().astype(bool, copy=False)
+        signal_date_idx_np = batch["date_idx"].numpy().astype(np.int64, copy=True)
         entry_open_raw_np = (
             batch["entry_open_raw"].numpy().astype(np.float32, copy=False)
             if batch.get("entry_open_raw") is not None
@@ -3460,6 +3901,13 @@ def _predict_split(
             for col, values in realized.items():
                 rows[col] = values
                 realized_cols.append(col)
+        if "predicted_exit_day" not in rows:
+            exit_day_column = f"best_exit_day_{eval_forward_days}d"
+            if exit_day_column in summary_columns:
+                rows["predicted_exit_day"] = pred_summary_np[
+                    :, summary_columns.index(exit_day_column)
+                ]
+                realized_cols.append("predicted_exit_day")
         chunk = pd.DataFrame(rows)
         if write_predictions:
             if bool(write_path_predictions) and not uses_direct_value:
@@ -3476,6 +3924,22 @@ def _predict_split(
             if optional_score in chunk.columns:
                 metric_frame[optional_score] = chunk[optional_score].to_numpy(copy=False)
         metric_frame = metric_frame.rename(columns={f"true_{c}": c for c in summary_columns})
+        if candidate_complete_development:
+            if any(
+                value is None
+                for value in (entry_open_raw_np, exit_close_raw_path_np, exit_sellable_path_np)
+            ):
+                raise ValueError(
+                    "candidate-complete development requires raw entry, exit-close, and exit-sellable arrays"
+                )
+            metric_frame["_execution_signal_date_idx"] = signal_date_idx_np
+            metric_frame["_execution_entry_open_raw"] = entry_open_raw_np
+            metric_frame["_execution_entry_filled"] = entry_filled_np
+            metric_frame["_execution_exit_close_raw_path"] = list(exit_close_raw_path_np)
+            metric_frame["_execution_exit_sellable_path"] = list(exit_sellable_path_np)
+            metric_frame["value_label_available"] = price_label_valid_np
+            if "realized_plan_value" in metric_frame.columns:
+                metric_frame.loc[~price_label_valid_np, "realized_plan_value"] = np.nan
         row_count += int(len(metric_frame))
         date_values.update(str(item) for item in metric_frame["trade_date"].unique())
         target_values = pd.to_numeric(metric_frame[value_column], errors="coerce").to_numpy(dtype=np.float64, copy=False)
@@ -3501,11 +3965,20 @@ def _predict_split(
             del pred_aux_np, true_ohlcva_np, pred_va, true_va, finite_va, pred_va_delta, true_va_delta, finite_va_delta
         del x, y_path, y_ohlcva_path, _y_richer_path, y_summary, target_path, symbol_idx, out, pred_path_np, pred_summary_np, score_np, true_path_np, true_summary_np, chunk, metric_frame
         del trade_dates, symbols, true_tradable_np, true_observed_np, entry_filled_np
+        del price_label_valid_np, signal_date_idx_np
         del entry_open_raw_np, exit_close_raw_path_np, exit_sellable_path_np
         if predict_batch_count % 100 == 0:
             gc.collect()
             _trim_working_set()
     flush_pending_date()
+    if candidate_complete_development:
+        expected_dates = set(expected_development_universes)
+        if seen_development_dates != expected_dates:
+            raise ValueError(
+                "development prediction did not evaluate every candidate date exactly once: "
+                f"missing={sorted(expected_dates - seen_development_dates)}, "
+                f"unexpected={sorted(seen_development_dates - expected_dates)}"
+            )
     ic = pd.DataFrame(ic_rows_by_score.get("score", []))
     daily_topk = pd.DataFrame(topk_daily_rows_by_score.get("score", []))
     topk_candidates = pd.DataFrame(topk_candidate_rows)
@@ -3540,6 +4013,25 @@ def _predict_split(
         "tradable_path_rate": float(tradable_path_count / tradable_path_total) if tradable_path_total else np.nan,
         "prediction_csv": prediction_csv,
     }
+    if candidate_complete_development:
+        contract_hashes = sorted(
+            {
+                str(value)
+                for value in daily_topk.get(
+                    "execution_cost_contract_sha256", pd.Series(dtype="string")
+                ).dropna()
+            }
+        )
+        if len(contract_hashes) != 1:
+            raise ValueError("development daily TopK must bind exactly one execution cost contract")
+        metrics.update(
+            {
+                "execution_cost_contract_sha256": contract_hashes[0],
+                "candidate_complete_score_coverage": 1.0,
+                "candidate_universe_date_count_verified": int(len(seen_development_dates)),
+                "candidate_universe_hash_policy": "sha256_sorted_symbol_newline_v1",
+            }
+        )
     diagnostics: dict[str, dict[str, Any]] = {}
     for score_col, rows_for_score in ic_rows_by_score.items():
         score_ic = pd.DataFrame(rows_for_score)
@@ -3600,7 +4092,7 @@ def _write_report(
         lines.append(
             f"Early stopping monitors {early.get('metric', 'validation_rank_ic_mean')} with "
             f"mode={early.get('mode', '')}, patience={int(early.get('patience', 0))}, "
-            f"min_complete_epochs={int(early.get('minimum_complete_epochs', 1))}, "
+            f"minimum_complete_epochs={int(early.get('minimum_complete_epochs', 1))}, "
             f"min_delta={float(early.get('min_delta', 0.0)):.4g}."
         )
     elif str(summary.get("checkpoint_policy", "")) == "final_epoch":
@@ -3717,7 +4209,7 @@ class TrainConfig:
     prefetch_batches: int = 1
     early_stopping_metric: str = ""
     early_stopping_mode: str = ""
-    min_complete_epochs: int = 1
+    minimum_complete_epochs: int = 1
     development_contract: Path | None = None
 
 
@@ -3737,10 +4229,10 @@ def _validate_evaluation_mode(config: TrainConfig) -> str:
         raise ValueError("early_stopping_patience must be non-negative")
     if float(getattr(config, "early_stopping_min_delta", 0.0)) < 0.0:
         raise ValueError("early_stopping_min_delta must be non-negative")
-    if int(getattr(config, "min_complete_epochs", 1)) < 1:
-        raise ValueError("min_complete_epochs must be at least 1")
-    if int(getattr(config, "min_complete_epochs", 1)) > int(getattr(config, "epochs", 1)):
-        raise ValueError("min_complete_epochs cannot exceed epochs")
+    if int(getattr(config, "minimum_complete_epochs", 1)) < 1:
+        raise ValueError("minimum_complete_epochs must be at least 1")
+    if int(getattr(config, "minimum_complete_epochs", 1)) > int(getattr(config, "epochs", 1)):
+        raise ValueError("minimum_complete_epochs cannot exceed epochs")
     mode = str(config.evaluation_mode or EVALUATION_MODE_STANDARD).strip().lower()
     if mode not in EVALUATION_MODES:
         raise ValueError(f"evaluation_mode must be one of {EVALUATION_MODES}")
@@ -3994,6 +4486,8 @@ def _evaluate_development_loss(
     totals = torch.zeros(len(VALIDATION_LOSS_KEYS), device=device, dtype=torch.float64)
     sample_count = 0
     batch_count = 0
+    last_trim_batch = 0
+    working_set_trim_events: list[dict[str, Any]] = []
     started_at = time.perf_counter()
     was_training = bool(model.training)
     model.eval()
@@ -4004,14 +4498,21 @@ def _evaluate_development_loss(
             shuffle=False,
             seed=0,
         )
-        for indices in batches:
-            batch = dataset.get_batch(
-                indices,
-                include_ohlcva_path=bool(uses_ohlcva_path or uses_ohlcva_aux_path),
-                include_richer_path=uses_richer_path,
-                include_summary=not bool(uses_derived_path_value or uses_direct_value),
-                include_metadata=False,
-            )
+        loaded_batches = _iter_prefetched_batches(
+            dataset,
+            batches,
+            get_batch_kwargs={
+                "include_ohlcva_path": bool(uses_ohlcva_path or uses_ohlcva_aux_path),
+                "include_richer_path": uses_richer_path,
+                "include_summary": not bool(uses_derived_path_value or uses_direct_value),
+                "include_metadata": False,
+                "include_observation": False,
+                "include_execution": False,
+            },
+            prefetch_batches=int(config.prefetch_batches) if device.type == "cuda" else 0,
+            pin_memory=bool(device.type == "cuda" and int(config.prefetch_batches) > 0),
+        )
+        for _indices, batch in loaded_batches:
             y_tradable_path = (
                 batch["y_tradable_path"].to(device, non_blocking=device.type == "cuda")
                 if batch.get("y_tradable_path") is not None
@@ -4060,6 +4561,12 @@ def _evaluate_development_loss(
             batch_count += 1
             del batch, x, y_path, y_ohlcva_path, y_richer_path, y_summary, y_tradable_path
             del date_idx, symbol_idx, target_path, outputs, _loss, parts
+            last_trim_batch, trim_event = _maybe_trim_training_working_set(
+                batch_count=batch_count,
+                last_trim_batch=last_trim_batch,
+            )
+            if trim_event is not None:
+                working_set_trim_events.append(trim_event)
     finally:
         model.train(was_training)
     if sample_count != len(dataset):
@@ -4079,6 +4586,7 @@ def _evaluate_development_loss(
             "batch_count": int(batch_count),
             "seconds": float(time.perf_counter() - started_at),
             "aggregation": "sample_weighted_batch_mean_all_supervised_rows",
+            "working_set_trim_events": working_set_trim_events,
         }
     )
     return result
@@ -4096,6 +4604,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     _set_seed(config.seed)
     manifest = json.loads(Path(config.pack_manifest).read_text(encoding="utf-8"))
     development_contract_binding: dict[str, Any] = {}
+    execution_cost_contract_sha256 = ""
     if evaluation_mode == EVALUATION_MODE_DEVELOPMENT:
         manifest_contract = dict(manifest.get("research_contract", {}) or {})
         contract_path_raw = (
@@ -4110,6 +4619,10 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 development_contract_binding[field]
             ):
                 raise ValueError(f"manifest research_contract {field} does not match approved contract")
+        execution_cost_contract = dict(manifest.get("execution_cost_contract", {}) or {})
+        if not execution_cost_contract:
+            raise ValueError("development requires a manifest-bound execution_cost_contract")
+        execution_cost_contract_sha256 = _canonical_json_sha256(execution_cost_contract)
     fold_training_contract = (
         manifest.get("development_fold_training_contract")
         if evaluation_mode == EVALUATION_MODE_DEVELOPMENT
@@ -4225,6 +4738,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     best_val_ic = -1e9
     best_development_loss = float("inf")
     best_epoch = 0
+    best_optimizer_step = 0
+    optimizer_step_count = 0
     epochs_without_improvement = 0
     best_path = output_dir / (
         "final_model.pt" if evaluation_mode == EVALUATION_MODE_FIXED_OOS else "best_model.pt"
@@ -4261,6 +4776,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         sample_count = 0
         rank_batch_count = 0
         rank_sample_count = 0
+        last_trim_batch = 0
+        working_set_trim_events: list[dict[str, Any]] = []
         if rank_training_profile == RANK_TRAINING_PROFILE_GLOBAL_TAIL_512:
             train_batches = ShuffledBatchSampler(
                 len(train_ds),
@@ -4295,6 +4812,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 "include_richer_path": uses_richer_path,
                 "include_summary": not bool(uses_derived_path_value or uses_direct_value),
                 "include_metadata": False,
+                "include_observation": False,
+                "include_execution": False,
             },
             prefetch_batches=int(config.prefetch_batches) if device.type == "cuda" else 0,
             pin_memory=bool(device.type == "cuda" and int(config.prefetch_batches) > 0),
@@ -4386,11 +4905,18 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                         "total_batches": int(total_batches),
                         "sample_count": int(sample_count),
                         "rank_batch_count": int(rank_batch_count),
+                        "working_set_trim_count": int(len(working_set_trim_events)),
                         "last_batch_seconds": batch_seconds,
                         "updated_at": _now(),
                     },
                 )
             del x, y_path, y_ohlcva_path, y_richer_path, target_path, y_summary, y_tradable_path, date_idx, symbol_idx, out, loss, parts
+            last_trim_batch, trim_event = _maybe_trim_training_working_set(
+                batch_count=batch_count,
+                last_trim_batch=last_trim_batch,
+            )
+            if trim_event is not None:
+                working_set_trim_events.append(trim_event)
         # ``rank_interval`` controls interleaving, not date sampling.  Drain any
         # remaining slates so every included date contributes exactly one rank
         # step even for small debug subsets or larger path batch sizes.
@@ -4434,6 +4960,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             for key, value in zip(loss_total_keys, loss_totals_tensor.detach().cpu().tolist(), strict=True)
         }
         training_seconds = float(time.perf_counter() - epoch_started_at)
+        epoch_optimizer_step_count = int(batch_count + rank_batch_count)
+        optimizer_step_count += epoch_optimizer_step_count
         train_row = {
             "epoch": int(epoch),
             "train_sample_count": int(sample_count),
@@ -4444,7 +4972,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 if rank_batch_count
                 else 0.0
             ),
-            "optimizer_step_count": int(batch_count + rank_batch_count),
+            "epoch_optimizer_step_count": epoch_optimizer_step_count,
+            "optimizer_step_count": int(optimizer_step_count),
             "training_seconds": training_seconds,
             "path_samples_per_second": float(sample_count / max(training_seconds, 1.0e-9)),
             "optimizer_samples_per_second": float(
@@ -4455,6 +4984,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "hard_negative_mining_samples_per_second": float(
                 mining_sample_count / max(mining_seconds, 1.0e-9)
             ) if mining_sample_count else 0.0,
+            "working_set_trim_count": int(len(working_set_trim_events)),
+            "working_set_trim_events": working_set_trim_events,
             **{key: float(value / max(batch_count, 1)) for key, value in loss_totals.items()},
         }
         if evaluation_mode == EVALUATION_MODE_STANDARD:
@@ -4480,6 +5011,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             if improved:
                 best_val_ic = current_val_ic
                 best_epoch = int(epoch)
+                best_optimizer_step = int(optimizer_step_count)
                 epochs_without_improvement = 0
                 torch.save(
                     {
@@ -4489,6 +5021,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                         "summary_columns": train_ds.path_summary_columns,
                         "feature_channels": manifest.get("feature_channels", {}),
                         "best_epoch": int(epoch),
+                        "best_optimizer_step": int(best_optimizer_step),
+                        "optimizer_step_count": int(optimizer_step_count),
                         "best_validation_rank_ic_mean": best_val_ic,
                         "checkpoint_policy": "best_validation_rank_ic",
                     },
@@ -4525,31 +5059,6 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 path_value_gradient_profile=path_value_gradient_profile,
                 rank_training_profile=rank_training_profile,
             )
-            _write_json(
-                progress_path,
-                {"status": "diagnosing_development_topk", "epoch": int(epoch), "updated_at": _now()},
-            )
-            (
-                development_ic,
-                development_topk,
-                development_daily_topk,
-                development_candidates,
-                development_metrics,
-            ) = _predict_split(
-                model=model,
-                dataset=development_scoring_ds,
-                device=device,
-                output_dir=epoch_dir,
-                split="development",
-                batch_size=int(config.batch_size),
-                amp_enabled=amp_enabled,
-                top_k=config.top_k,
-                write_predictions=False,
-                write_path_predictions=False,
-                direct_value_horizon=int(config.direct_value_horizon),
-            )
-            if uses_derived_path_value:
-                _validate_development_topk_execution_coverage(development_topk)
             diagnostics_path = epoch_dir / "development_epoch_diagnostics.json"
             _write_json(
                 diagnostics_path,
@@ -4558,8 +5067,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     "checkpoint_selector": EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS,
                     "topk_selects_checkpoint": False,
                     "loss": development_loss,
-                    "candidate_metrics": development_metrics,
-                    "topk": development_topk.to_dict("records"),
+                    "candidate_diagnostics": "deferred_until_restored_best_checkpoint",
                 },
             )
             current_development_loss = float(development_loss["loss"])
@@ -4575,8 +5083,11 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     "development_supervised_sample_count": int(development_loss["sample_count"]),
                     "development_candidate_count": int(len(development_scoring_ds)),
                     "development_loss_seconds": float(development_loss["seconds"]),
-                    "development_rank_ic_mean": float(development_metrics["rank_ic_mean"]),
+                    "development_loss_working_set_trim_count": int(
+                        len(development_loss.get("working_set_trim_events", []) or [])
+                    ),
                     "development_diagnostics_json": str(diagnostics_path.resolve()),
+                    "development_candidate_diagnostics": "deferred_until_restored_best_checkpoint",
                     "checkpoint_policy": "best_development_total_loss",
                     "is_best": bool(improved),
                 }
@@ -4584,6 +5095,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             if improved:
                 best_development_loss = current_development_loss
                 best_epoch = int(epoch)
+                best_optimizer_step = int(optimizer_step_count)
                 epochs_without_improvement = 0
                 checkpoint_payload = {
                     "model_state_dict": model.state_dict(),
@@ -4608,8 +5120,11 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                         "row_count": int(len(development_scoring_ds)),
                     },
                     "best_epoch": int(epoch),
+                    "best_optimizer_step": int(best_optimizer_step),
+                    "optimizer_step_count": int(optimizer_step_count),
                     "best_development_total_loss": best_development_loss,
                     "development_loss_components": development_loss,
+                    "execution_cost_contract_sha256": execution_cost_contract_sha256,
                     "checkpoint_policy": "best_development_total_loss",
                 }
                 torch.save(checkpoint_payload, best_path)
@@ -4625,11 +5140,10 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 "best_epoch": int(best_epoch),
                 "early_stopping_wait": int(epochs_without_improvement),
                 "early_stopping_patience": int(config.early_stopping_patience),
-                "minimum_complete_epochs": int(config.min_complete_epochs),
+                "minimum_complete_epochs": int(config.minimum_complete_epochs),
                 "topk_selects_checkpoint": False,
                 "updated_at": _now(),
             }
-            del development_ic, development_topk, development_daily_topk, development_candidates
         else:
             train_row["checkpoint_policy"] = "final_epoch"
             history.append(train_row)
@@ -4653,7 +5167,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         )
         development_should_stop = bool(
             evaluation_mode == EVALUATION_MODE_DEVELOPMENT
-            and int(epoch) >= int(config.min_complete_epochs)
+            and int(epoch) >= int(config.minimum_complete_epochs)
             and epochs_without_improvement >= int(config.early_stopping_patience)
         )
         if standard_should_stop or development_should_stop:
@@ -4676,6 +5190,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             break
     if evaluation_mode == EVALUATION_MODE_FIXED_OOS:
         best_epoch = int(len(history))
+        best_optimizer_step = int(optimizer_step_count)
         torch.save(
             {
                 "model_state_dict": model.state_dict(),
@@ -4684,6 +5199,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 "summary_columns": train_ds.path_summary_columns,
                 "feature_channels": manifest.get("feature_channels", {}),
                 "best_epoch": int(best_epoch),
+                "best_optimizer_step": int(best_optimizer_step),
+                "optimizer_step_count": int(optimizer_step_count),
                 "checkpoint_policy": "final_epoch",
             },
             best_path,
@@ -4831,7 +5348,31 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         "epochs": int(config.epochs),
         "completed_epochs": int(len(history)),
         "best_epoch": int(best_epoch),
+        "best_optimizer_step": int(best_optimizer_step),
+        "optimizer_step_count": int(optimizer_step_count),
         "batch_size": int(config.batch_size),
+        "memory_management": {
+            "system_available_memory_kill_threshold_gb": "launcher_bound",
+            "working_set_probe_interval_batches": int(
+                WORKING_SET_MEMORY_CHECK_INTERVAL_BATCHES
+            ),
+            "working_set_trim_trigger_available_gb": float(
+                WORKING_SET_TRIM_TRIGGER_AVAILABLE_GB
+            ),
+            "working_set_trim_cooldown_batches": int(WORKING_SET_TRIM_COOLDOWN_BATCHES),
+            "working_set_trim_fallback_interval_batches": int(
+                WORKING_SET_TRIM_FALLBACK_INTERVAL_BATCHES
+            ),
+            "training_trim_event_count": int(
+                sum(int(row.get("working_set_trim_count", 0) or 0) for row in history)
+            ),
+            "development_loss_trim_event_count": int(
+                sum(
+                    int(row.get("development_loss_working_set_trim_count", 0) or 0)
+                    for row in history
+                )
+            ),
+        },
         "max_samples_per_split": int(config.max_samples_per_split),
         "sample_selection": {
             "train": dict(train_ds.sample_selection),
@@ -4922,7 +5463,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             ),
             "patience": int(config.early_stopping_patience),
             "min_delta": float(config.early_stopping_min_delta),
-            "minimum_complete_epochs": int(config.min_complete_epochs),
+            "minimum_complete_epochs": int(config.minimum_complete_epochs),
             "restore_best_checkpoint": bool(evaluation_mode != EVALUATION_MODE_FIXED_OOS),
             "topk_selects_checkpoint": False if evaluation_mode == EVALUATION_MODE_DEVELOPMENT else None,
             "best_value": (
@@ -4967,6 +5508,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         summary["candidate_index_sha256"] = str(
             development_scoring_ds.sample_selection["index_sha256"]
         )
+        summary["execution_cost_contract_sha256"] = execution_cost_contract_sha256
         summary["development_fold_training_contract"] = fold_training_contract
         summary["development_execution_evaluation"] = {
             "entry": "raw_next_open",
@@ -4976,9 +5518,15 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "terminal_recovery_fraction": float(
                 development_scoring_ds.terminal_recovery_fraction
             ),
-            "realized_plan_return_semantics": "gross_raw_execution_return",
-            "realized_plan_value_cost_semantics": "path_value_v2_fixed_transaction_cost_surrogate",
-            "full_account_net_costs_required_for_deployment": True,
+            "daily_cohort_cash_cny": float(DEFAULT_DAILY_COHORT_CASH_CNY),
+            "allocation": "equal_cash_per_top_k_name_with_unfilled_cash_retained",
+            "gross_realized_plan_return_semantics": "raw_execution_return_before_costs",
+            "net_realized_plan_return_semantics": "manifest_bound_lots_fees_tax_transfer_and_slippage",
+            "net_realized_plan_value_semantics": "gross_path_value_plus_net_return_minus_gross_return",
+            "execution_scenarios": ["base_slippage", "double_slippage_stress"],
+            "label_dependent_value_missing_policy": "report_coverage_and_never_impute",
+            "candidate_diagnostics_timing": "restored_best_checkpoint_only",
+            "portfolio_review_required_before_champion_freeze": True,
         }
     if fold_training_contract is not None:
         summary["fold_training_contract"] = fold_training_contract
@@ -5182,7 +5730,7 @@ def main(argv: list[str] | None = None) -> int:
         prefetch_batches=int(args.prefetch_batches),
         early_stopping_metric=str(args.early_stopping_metric),
         early_stopping_mode=str(args.early_stopping_mode),
-        min_complete_epochs=int(args.min_complete_epochs),
+        minimum_complete_epochs=int(args.min_complete_epochs),
         development_contract=(Path(args.development_contract) if args.development_contract else None),
     )
     result = train_sequence_path_model(cfg)

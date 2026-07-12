@@ -13,6 +13,10 @@ from typing import Any, Iterable, Mapping, Sequence
 
 import pandas as pd
 
+from daily_research.path_policy.seq100_candidate_execution import (
+    DEFAULT_DAILY_COHORT_CASH_CNY,
+    DEFAULT_TOP_K_VALUES,
+)
 from daily_research.path_policy.seq100_walkforward import (
     APPROVED_DEVELOPMENT_CONTRACT_PATH,
     DEFAULT_PYTHON,
@@ -40,6 +44,10 @@ DEFAULT_SOURCE_VIEW = Path(
     "daily_research/data/research_store/sequence_pack/"
     "qdp_v2_seq100_path60_todayclose_pit_adjusted_2012_2025_v1/manifest.json"
 )
+DEFAULT_DEVELOPMENT_SOURCE_VIEW = Path(
+    "daily_research/data/research_store/sequence_pack/"
+    "qdp_v2_seq100_path60_todayclose_candidate_complete_2012_2025_v7/manifest.json"
+)
 DEFAULT_STORE_ROOT = Path(
     "daily_research/data/research_store/walkforward/"
     "seq100_pit_adjusted_global_tail_contract_20260711_v1"
@@ -51,6 +59,13 @@ DEFAULT_DEVELOPMENT_ROOT = Path(
 DEFAULT_DEVELOPMENT_STORE_ROOT = Path(
     "daily_research/data/research_store/walkforward/"
     "seq100_candidate_complete_development_walkforward_20260711_v1"
+)
+DEFAULT_DEVELOPMENT_KPI_PORTFOLIO_CONTRACT = Path(
+    "daily_research/brain/references/"
+    "seq100_development_kpi_portfolio_contract_20260712.json"
+)
+DEVELOPMENT_KPI_PORTFOLIO_CONTRACT_ID = (
+    "seq100_development_kpi_portfolio_contract_20260712_v1"
 )
 REGISTRY_SCHEMA_VERSION = 2
 EVIDENCE_POLICY_RUN_ARTIFACTS = "run_artifacts_only"
@@ -66,6 +81,7 @@ DEVELOPMENT_CODE_PROVENANCE_PATHS = (
     Path("daily_research/path_policy/seq100_mainline.py"),
     Path("daily_research/path_policy/qdp_v2_sequence_path_pack.py"),
     Path("daily_research/path_policy/qdp_v2_sequence_path_training.py"),
+    Path("daily_research/path_policy/seq100_candidate_execution.py"),
     Path("daily_research/path_policy/seq100_walkforward.py"),
     Path("daily_research/path_policy/seq100_research_generation.py"),
     APPROVED_DEVELOPMENT_CONTRACT_PATH,
@@ -98,7 +114,12 @@ DEVELOPMENT_METRIC_NAMES = tuple(
         "net_realized_plan_value_stress_alpha",
         "oracle_regret",
         "entry_fill_rate",
-        "realized_plan_coverage",
+        "selected_realized_plan_return_coverage",
+        "universe_realized_plan_return_coverage",
+        "selected_realized_plan_coverage",
+        "universe_realized_plan_coverage",
+        "selected_realized_plan_value_coverage",
+        "universe_realized_plan_value_coverage",
     )
 ) + (
     "development_total_loss",
@@ -116,11 +137,13 @@ DEVELOPMENT_SELECTION_POLICY = {
         "mean_top10_net_realized_plan_return_base_alpha_min": 0.0,
         "mean_top3_net_realized_plan_return_stress_alpha_min": 0.0,
         "positive_top3_development_years_min": 3,
-        "all_topk_realized_plan_coverage": 1.0,
+        "all_topk_execution_return_and_plan_coverage": 1.0,
     },
     "tie_breakers": [
         "worst_development_year_top3_net_realized_plan_return_base_alpha",
         "leave_best_year_out_top3_net_realized_plan_return_base_alpha",
+        "mean_topk_selected_realized_plan_value_coverage",
+        "mean_topk_universe_realized_plan_value_coverage",
         "mean_topk_net_realized_plan_value_base_alpha",
         "mean_topk_opportunity_alpha",
         "daily_rank_ic",
@@ -177,6 +200,145 @@ def _file_sha256(path: str | Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _validated_development_kpi_portfolio_contract(path: str | Path) -> dict[str, Any]:
+    resolved = _workspace_path(path).resolve()
+    payload = _read_json(resolved)
+    if int(payload.get("schema_version", 0) or 0) != 1:
+        raise ValueError("development KPI/portfolio contract schema_version changed")
+    if str(payload.get("artifact_type", "")) != "seq100_development_kpi_portfolio_contract":
+        raise ValueError("invalid development KPI/portfolio contract artifact_type")
+    if str(payload.get("contract_id", "")) != DEVELOPMENT_KPI_PORTFOLIO_CONTRACT_ID:
+        raise ValueError("development KPI/portfolio contract id changed")
+    if str(payload.get("status", "")) != "approved_implementation":
+        raise ValueError("development KPI/portfolio contract is not approved for implementation")
+    approved = approved_development_contract_binding()
+    if str(payload.get("research_contract_id", "")) != str(approved["contract_id"]):
+        raise ValueError("development KPI/portfolio contract is bound to another research contract")
+    if list(payload.get("development_years", []) or []) != list(DEVELOPMENT_YEARS):
+        raise ValueError("development KPI/portfolio contract years changed")
+    top_k = tuple(int(value) for value in list(payload.get("top_k", []) or []))
+    if top_k != DEVELOPMENT_TOP_K or top_k != tuple(DEFAULT_TOP_K_VALUES):
+        raise ValueError("development KPI/portfolio contract TopK must be 1,3,5,10")
+    daily_cash = float(payload.get("daily_cohort_cash_cny", math.nan))
+    if not math.isfinite(daily_cash) or not math.isclose(
+        daily_cash,
+        float(DEFAULT_DAILY_COHORT_CASH_CNY),
+        rel_tol=0.0,
+        abs_tol=1.0e-9,
+    ):
+        raise ValueError("development KPI/portfolio contract daily cohort cash changed")
+    expected_capital_semantics = {
+        "allocation": "equal_cash_per_selected_name_within_each_signal_day_and_top_k",
+        "entry_unfilled": "retain_cash_without_rank_replacement",
+        "unused_top_k_slot": "retain_cash",
+        "lot_rounding": "manifest_bound_board_lot",
+        "minimum_commission": "applied_per_order",
+        "daily_cohort_role": "common_research_notional_for_candidate_comparison_not_a_live_account_balance",
+    }
+    if dict(payload.get("capital_semantics", {}) or {}) != expected_capital_semantics:
+        raise ValueError("development KPI/portfolio capital semantics changed")
+    expected_execution_scenarios = {
+        "base": "manifest_bound_commission_tax_transfer_fee_and_base_slippage",
+        "stress": "same_cost_contract_with_double_slippage",
+        "cost_contract_identity": "execution_cost_contract_sha256",
+    }
+    if dict(payload.get("execution_scenarios", {}) or {}) != expected_execution_scenarios:
+        raise ValueError("development KPI/portfolio execution scenarios changed")
+    checkpoint = dict(payload.get("checkpoint_selection", {}) or {})
+    if (
+        str(checkpoint.get("metric", "")) != "development_total_loss"
+        or str(checkpoint.get("mode", "")) != "min"
+        or bool(checkpoint.get("top_k_metrics_select_within_run_checkpoint", True))
+    ):
+        raise ValueError("development KPI/portfolio checkpoint policy changed")
+    selection = dict(payload.get("candidate_selection", {}) or {})
+    required_fold_metrics = {
+        "opportunity_alpha",
+        "net_realized_plan_return_base_alpha",
+        "net_realized_plan_return_stress_alpha",
+        "net_realized_plan_value_base_alpha",
+        "net_realized_plan_value_stress_alpha",
+        "oracle_regret",
+        "entry_fill_rate",
+        "selected_realized_plan_return_coverage",
+        "universe_realized_plan_return_coverage",
+        "selected_realized_plan_coverage",
+        "universe_realized_plan_coverage",
+        "selected_realized_plan_value_coverage",
+        "universe_realized_plan_value_coverage",
+        "daily_rank_ic",
+        "path_mae",
+    }
+    if (
+        str(selection.get("primary", ""))
+        != "equal_year_and_equal_top_k_mean_alpha_net_realized_plan_return_base"
+        or set(selection.get("required_fold_metrics", []) or []) != required_fold_metrics
+        or not bool(selection.get("identical_candidate_universe_required", False))
+        or not bool(selection.get("finite_score_for_every_candidate_required", False))
+        or float(
+            selection.get("execution_return_and_plan_coverage_required", math.nan)
+        )
+        != 1.0
+        or not bool(
+            selection.get("label_dependent_value_coverage_must_be_reported", False)
+        )
+        or not bool(selection.get("must_not_be_imputed", False))
+    ):
+        raise ValueError("development KPI/portfolio candidate-completeness policy changed")
+    required_candidate_columns = {
+        "gross_realized_plan_return",
+        "net_realized_plan_return_base",
+        "net_realized_plan_return_stress",
+        "net_realized_plan_value_base",
+        "net_realized_plan_value_stress",
+        "realized_plan_covered",
+        "execution_cost_base_cny",
+        "execution_cost_stress_cny",
+        "cash_utilization_base",
+        "cash_utilization_stress",
+    }
+    actual_candidate_columns = set(payload.get("required_candidate_columns", []) or [])
+    if not required_candidate_columns.issubset(actual_candidate_columns):
+        raise ValueError("development KPI/portfolio contract is missing candidate execution columns")
+    required_review = {
+        "net_return",
+        "sharpe",
+        "sortino",
+        "maximum_drawdown",
+        "turnover",
+        "concurrent_positions",
+        "capital_utilization",
+        "fees_and_slippage",
+        "selected_path_mae",
+        "exit_day_error",
+        "hac_or_moving_block_bootstrap_uncertainty",
+    }
+    if not required_review.issubset(
+        set(payload.get("portfolio_review_required_before_champion_freeze", []) or [])
+    ):
+        raise ValueError("development KPI/portfolio contract is missing portfolio review metrics")
+    if dict(payload.get("protected_boundaries", {}) or {}) != {
+        "changes_active_execution": False,
+        "changes_qdp_active": False,
+        "live_capital_assumption": False,
+    }:
+        raise ValueError("development KPI/portfolio protected boundaries changed")
+    return {
+        "path": str(resolved),
+        "sha256": _file_sha256(resolved),
+        "contract_id": str(payload.get("contract_id", "")),
+        "research_contract_id": str(payload["research_contract_id"]),
+        "top_k": list(top_k),
+        "daily_cohort_cash_cny": daily_cash,
+        "candidate_selection": {
+            "execution_return_and_plan_coverage_required": 1.0,
+            "label_dependent_value_coverage_must_be_reported": True,
+            "must_not_be_imputed": True,
+        },
+        "portfolio_review_required_before_champion_freeze": sorted(required_review),
+    }
 
 
 def _validated_registry(registry: Mapping[str, Any]) -> dict[str, Any]:
@@ -849,7 +1011,7 @@ def _build_development_jobs(
 def initialize_development_registry(
     *,
     root: str | Path = DEFAULT_DEVELOPMENT_ROOT,
-    source_view: str | Path = DEFAULT_SOURCE_VIEW,
+    source_view: str | Path = DEFAULT_DEVELOPMENT_SOURCE_VIEW,
     store_root: str | Path = DEFAULT_DEVELOPMENT_STORE_ROOT,
     profiles: Sequence[str] = DEFAULT_DEVELOPMENT_PROFILES,
     development_years: Sequence[int] = DEVELOPMENT_YEARS,
@@ -863,7 +1025,7 @@ def initialize_development_registry(
     require_corrected_source: bool = True,
     require_existing_folds: bool = True,
     evidence_policy: str = EVIDENCE_POLICY_RUN_ARTIFACTS,
-    kpi_portfolio_contract_path: str | Path | None = None,
+    kpi_portfolio_contract_path: str | Path | None = DEFAULT_DEVELOPMENT_KPI_PORTFOLIO_CONTRACT,
     additional_provenance_paths: Sequence[str | Path] = (),
 ) -> dict[str, Any]:
     root_path = _workspace_path(root)
@@ -915,11 +1077,12 @@ def initialize_development_registry(
         fold_bindings=fold_bindings,
         python_executable=_workspace_path(python_executable),
     )
-    contract_paths = (
-        ()
+    kpi_portfolio_contract = (
+        None
         if kpi_portfolio_contract_path is None
-        else (_workspace_path(kpi_portfolio_contract_path).resolve(),)
+        else _validated_development_kpi_portfolio_contract(kpi_portfolio_contract_path)
     )
+    contract_paths = () if kpi_portfolio_contract is None else (Path(kpi_portfolio_contract["path"]),)
     extra_paths = (
         *contract_paths,
         *tuple(_workspace_path(path).resolve() for path in additional_provenance_paths),
@@ -945,14 +1108,7 @@ def initialize_development_registry(
         "evidence_policy": str(evidence_policy),
         "code_provenance": code_provenance,
         "additional_provenance_paths": [str(path) for path in extra_paths],
-        "kpi_portfolio_contract": (
-            None
-            if kpi_portfolio_contract_path is None
-            else {
-                "path": str(contract_paths[0]),
-                "sha256": _file_sha256(contract_paths[0]),
-            }
-        ),
+        "kpi_portfolio_contract": kpi_portfolio_contract,
         "train_start_year": int(train_start_year),
         "development_years": list(years),
         "evidence_role": "historical_development_for_checkpoint_model_and_champion_selection",
@@ -992,7 +1148,9 @@ def initialize_development_registry(
                 "realized_plan_covered",
             ],
             "legacy_gross_realized_plan_columns_allowed_for_selection": False,
-            "realized_plan_coverage_required": 1.0,
+            "execution_return_and_plan_coverage_required": 1.0,
+            "label_dependent_value_coverage_must_be_reported": True,
+            "must_not_be_imputed": True,
             "base_and_double_slippage_scenarios_required": True,
             "execution_cost_contract_sha256_required": True,
             "model_selection": DEVELOPMENT_SELECTION_POLICY,
@@ -1461,13 +1619,30 @@ def _development_metrics_from_run_dir(
             ["selected_entry_fill_rate", "selected_realized_fill_rate"],
             f"{prefix}_entry_fill_rate",
         )
-        metrics[f"{prefix}_realized_plan_coverage"] = pick(
-            row,
-            ["selected_realized_plan_coverage"],
-            f"{prefix}_realized_plan_coverage",
-        )
-        if metrics[f"{prefix}_realized_plan_coverage"] != 1.0:
-            raise ValueError(f"{prefix} candidate-complete net realized-plan coverage must equal 1.0")
+        coverage_columns = {
+            "selected_realized_plan_return_coverage": "selected_realized_plan_return_coverage",
+            "universe_realized_plan_return_coverage": "universe_realized_plan_return_coverage",
+            "selected_realized_plan_coverage": "selected_realized_plan_coverage",
+            "universe_realized_plan_coverage": "universe_realized_plan_coverage",
+            "selected_realized_plan_value_coverage": "selected_realized_plan_value_coverage",
+            "universe_realized_plan_value_coverage": "universe_realized_plan_value_coverage",
+        }
+        for metric_name, column in coverage_columns.items():
+            metrics[f"{prefix}_{metric_name}"] = pick(
+                row,
+                [column],
+                f"{prefix}_{metric_name}",
+            )
+        for metric_name in (
+            "selected_realized_plan_return_coverage",
+            "universe_realized_plan_return_coverage",
+            "selected_realized_plan_coverage",
+            "universe_realized_plan_coverage",
+        ):
+            if metrics[f"{prefix}_{metric_name}"] != 1.0:
+                raise ValueError(
+                    f"{prefix} candidate-complete {metric_name} must equal 1.0"
+                )
     early = dict(summary.get("early_stopping", {}) or {})
     metrics["development_total_loss"] = _finite_float(
         early.get("best_value", math.nan), name="development_total_loss"
@@ -1789,6 +1964,14 @@ def _aggregate_development_records(records: Sequence[Mapping[str, Any]]) -> dict
             float(group[f"top{k}_net_realized_plan_value_base_alpha"].mean())
             for k in DEVELOPMENT_TOP_K
         ]
+        topk_selected_value_coverage = [
+            float(group[f"top{k}_selected_realized_plan_value_coverage"].mean())
+            for k in DEVELOPMENT_TOP_K
+        ]
+        topk_universe_value_coverage = [
+            float(group[f"top{k}_universe_realized_plan_value_coverage"].mean())
+            for k in DEVELOPMENT_TOP_K
+        ]
         topk_opportunity = [float(group[f"top{k}_opportunity_alpha"].mean()) for k in DEVELOPMENT_TOP_K]
         output[str(profile)] = {
             "profile": str(profile),
@@ -1801,6 +1984,12 @@ def _aggregate_development_records(records: Sequence[Mapping[str, Any]]) -> dict
             ),
             "mean_topk_net_realized_plan_value_base_alpha": float(
                 sum(topk_net_value_base) / len(topk_net_value_base)
+            ),
+            "mean_topk_selected_realized_plan_value_coverage": float(
+                sum(topk_selected_value_coverage) / len(topk_selected_value_coverage)
+            ),
+            "mean_topk_universe_realized_plan_value_coverage": float(
+                sum(topk_universe_value_coverage) / len(topk_universe_value_coverage)
             ),
             "mean_topk_opportunity_alpha": float(sum(topk_opportunity) / len(topk_opportunity)),
             "worst_development_year_top3_net_realized_plan_return_base_alpha": float(top3_years.min()),
@@ -1869,9 +2058,15 @@ def select_development_profiles(
                 aggregate["top3_net_realized_plan_return_stress_alpha"]
             ) > 0.0,
             "at_least_three_positive_top3_years": int(aggregate["positive_top3_development_years"]) >= 3,
-            "candidate_complete_realized_plan_coverage": all(
-                float(aggregate[f"top{k}_realized_plan_coverage"]) == 1.0
+            "candidate_complete_execution_return_and_plan_coverage": all(
+                float(aggregate[f"top{k}_{metric_name}"]) == 1.0
                 for k in DEVELOPMENT_TOP_K
+                for metric_name in (
+                    "selected_realized_plan_return_coverage",
+                    "universe_realized_plan_return_coverage",
+                    "selected_realized_plan_coverage",
+                    "universe_realized_plan_coverage",
+                )
             ),
         }
         ranked.append({**aggregate, "eligibility": {"passed": all(checks.values()), "checks": checks}})
@@ -1881,6 +2076,8 @@ def select_development_profiles(
             float(item["mean_topk_net_realized_plan_return_base_alpha"]),
             float(item["worst_development_year_top3_net_realized_plan_return_base_alpha"]),
             float(item["leave_best_year_out_top3_net_realized_plan_return_base_alpha"]),
+            float(item["mean_topk_selected_realized_plan_value_coverage"]),
+            float(item["mean_topk_universe_realized_plan_value_coverage"]),
             float(item["mean_topk_net_realized_plan_value_base_alpha"]),
             float(item["mean_topk_opportunity_alpha"]),
             float(item["daily_rank_ic"]),
@@ -2463,14 +2660,18 @@ def _parser() -> argparse.ArgumentParser:
         help="Register the candidate-complete 2022-2025 development walkforward matrix.",
     )
     development.add_argument("--root", type=Path, default=DEFAULT_DEVELOPMENT_ROOT)
-    development.add_argument("--source-view", type=Path, default=DEFAULT_SOURCE_VIEW)
+    development.add_argument("--source-view", type=Path, default=DEFAULT_DEVELOPMENT_SOURCE_VIEW)
     development.add_argument("--store-root", type=Path, default=DEFAULT_DEVELOPMENT_STORE_ROOT)
     development.add_argument("--profiles", default=",".join(DEFAULT_DEVELOPMENT_PROFILES))
     development.add_argument("--maximum-epochs", type=int, default=10)
     development.add_argument("--patience", type=int, default=2)
     development.add_argument("--min-delta", type=float, default=0.0)
     development.add_argument("--minimum-complete-epochs", type=int, default=1)
-    development.add_argument("--kpi-portfolio-contract", type=Path)
+    development.add_argument(
+        "--kpi-portfolio-contract",
+        type=Path,
+        default=DEFAULT_DEVELOPMENT_KPI_PORTFOLIO_CONTRACT,
+    )
     development.add_argument("--additional-provenance-path", type=Path, action="append", default=[])
 
     run_development = sub.add_parser("run-development")

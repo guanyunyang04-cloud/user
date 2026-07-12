@@ -43,8 +43,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--min-available-gb",
         type=float,
-        default=0.0,
-        help="Kill the command if system available physical memory stays below this threshold. 0 disables this guard.",
+        default=1.0,
+        help="Kill the command if system available physical memory stays below this threshold (default: 1.0 GiB; 0 disables).",
     )
     parser.add_argument("--interval-seconds", type=float, default=0.75)
     parser.add_argument("--consecutive-breaches", type=int, default=2)

@@ -42,11 +42,15 @@ def _build_development_pack(tmp_path: Path) -> Path:
     source["va_aux_valid"] = True
     source["sample_id"] = np.arange(len(source), dtype=np.int64)
 
-    candidate = source[source["split"].eq("development")].copy().reset_index(drop=True)
-    candidate["candidate_id"] = np.arange(len(candidate), dtype=np.int64)
     # This candidate must remain in the scoring slate although it has no future
     # opportunity/path label.  It is an unfilled entry, so execution is cash 0.
-    candidate.loc[3, ["entry_filled", "label_valid", "price_label_valid", "va_aux_valid"]] = False
+    development_source_rows = source.index[source["split"].eq("development")]
+    source.loc[
+        development_source_rows[-1],
+        ["entry_filled", "label_valid", "price_label_valid", "va_aux_valid"],
+    ] = False
+    candidate = source[source["split"].eq("development")].copy().reset_index(drop=True)
+    candidate["candidate_id"] = np.arange(len(candidate), dtype=np.int64)
     supervised = source[
         source["split"].eq("train")
         | (source["split"].eq("development") & source["label_valid"])
@@ -61,6 +65,17 @@ def _build_development_pack(tmp_path: Path) -> Path:
     raw_exit = np.full((date_count, symbol_count), 11.0, dtype=np.float32)
     exit_sellable = np.ones((date_count, symbol_count), dtype=bool)
     manifest["candidate_index_path"] = str(candidate_path.resolve())
+    manifest["date_values"] = [
+        "2021-12-27",
+        "2021-12-28",
+        "2021-12-29",
+        "2021-12-30",
+        "2021-12-31",
+        "2022-01-04",
+        "2022-01-05",
+        "2022-01-06",
+        "2022-01-07",
+    ]
     manifest["execution_tail_days"] = 1
     manifest["max_label_dependency_days"] = 3
     manifest["dependency_padding_complete"] = True
@@ -78,6 +93,20 @@ def _build_development_pack(tmp_path: Path) -> Path:
     manifest["terminal_execution_contract"] = {
         "unresolved_after_tail": "apply_precommitted_recovery_fraction",
         "recovery_fraction_of_entry_notional": 0.0,
+    }
+    manifest["execution_cost_contract"] = {
+        "contract": "a_share_round_trip_cashflow_v1",
+        "lot_size": 100,
+        "commission_bps": 3.0,
+        "minimum_commission_cny": 5.0,
+        "stamp_tax_bps": 5.0,
+        "stamp_tax_schedule": [
+            {"effective_date": "1900-01-01", "stamp_tax_bps": 10.0},
+            {"effective_date": "2023-08-28", "stamp_tax_bps": 5.0},
+        ],
+        "transfer_fee_bps": 0.1,
+        "slippage_bps": 7.0,
+        "stress_slippage_multiplier": 2.0,
     }
     manifest["research_contract"] = _bind_research_contract(APPROVED_CONTRACT)
     manifest["development_walkforward"] = {
@@ -114,6 +143,20 @@ def _install_development_diagnostics(monkeypatch: pytest.MonkeyPatch) -> list[st
                     "selected_realized_plan_return_coverage": 1.0,
                     "selected_realized_plan_value_coverage": 1.0,
                     "selected_realized_plan_coverage": 1.0,
+                    "universe_realized_plan_return_coverage": 1.0,
+                    "universe_realized_plan_value_coverage": 0.75,
+                    "universe_realized_plan_coverage": 1.0,
+                    "execution_cost_contract_sha256": "0" * 64,
+                    **{
+                        f"{scope}_net_realized_plan_return_{scenario}": 0.0
+                        for scope in ("selected", "universe", "alpha")
+                        for scenario in ("base", "stress")
+                    },
+                    **{
+                        f"{scope}_net_realized_plan_value_{scenario}": 0.0
+                        for scope in ("selected", "universe", "alpha")
+                        for scenario in ("base", "stress")
+                    },
                 }
             ]
         )
@@ -170,7 +213,7 @@ def test_development_early_stops_on_total_loss_and_restores_best_epoch(
         early_stopping_patience=2,
         early_stopping_metric=training.EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS,
         early_stopping_mode=training.EARLY_STOPPING_MODE_MIN,
-        min_complete_epochs=1,
+        minimum_complete_epochs=1,
         development_contract=APPROVED_CONTRACT,
     )
 
@@ -182,7 +225,11 @@ def test_development_early_stops_on_total_loss_and_restores_best_epoch(
     assert summary["early_stopping"]["best_value"] == 2.0
     assert summary["early_stopping"]["stopped_early"] is True
     assert summary["early_stopping"]["topk_selects_checkpoint"] is False
-    assert calls == ["development"] * 5  # four epoch diagnostics plus restored-best final evaluation
+    assert 0 < summary["best_optimizer_step"] <= summary["optimizer_step_count"]
+    assert summary["resolved_training_config"]["minimum_complete_epochs"] == 1
+    assert "min_complete_epochs" not in summary["resolved_training_config"]
+    assert len(summary["execution_cost_contract_sha256"]) == 64
+    assert calls == ["development"]  # Only the restored-best checkpoint gets candidate diagnostics.
     assert summary["sample_selection"]["train"]["policy"] == "all_rows"
     assert summary["sample_selection"]["development_supervised"]["selected_row_count"] == 3
     assert summary["sample_selection"]["development_candidates"]["policy"] == "all_candidates"
@@ -193,6 +240,9 @@ def test_development_early_stops_on_total_loss_and_restores_best_epoch(
     )
     checkpoint = torch.load(summary["best_checkpoint"], map_location="cpu", weights_only=False)
     assert checkpoint["best_epoch"] == 2
+    assert checkpoint["best_optimizer_step"] == summary["best_optimizer_step"]
+    assert checkpoint["optimizer_step_count"] == summary["best_optimizer_step"]
+    assert checkpoint["execution_cost_contract_sha256"] == summary["execution_cost_contract_sha256"]
     assert checkpoint["best_development_total_loss"] == 2.0
     assert checkpoint["checkpoint_policy"] == "best_development_total_loss"
     assert all("development_total_loss" in row for row in summary["history"])
@@ -206,7 +256,7 @@ def test_development_early_stops_on_total_loss_and_restores_best_epoch(
         ({"early_stopping_patience": 0}, "patience"),
         ({"early_stopping_metric": "validation_rank_ic_mean"}, "development_total_loss"),
         ({"early_stopping_mode": "max"}, "mode=min"),
-        ({"min_complete_epochs": 0}, "at least 1"),
+        ({"minimum_complete_epochs": 0}, "at least 1"),
     ],
 )
 def test_development_rejects_non_contract_training_controls(
@@ -222,7 +272,7 @@ def test_development_rejects_non_contract_training_controls(
         early_stopping_patience=2,
         early_stopping_metric=training.EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS,
         early_stopping_mode=training.EARLY_STOPPING_MODE_MIN,
-        min_complete_epochs=1,
+        minimum_complete_epochs=1,
         development_contract=APPROVED_CONTRACT,
     )
     config = replace(config, **updates)
@@ -299,3 +349,297 @@ def test_raw_execution_enforces_t_plus_one_cash_and_terminal_recovery() -> None:
     assert result["realized_plan_exit_day"][1:].tolist() == [3.0, 3.0]
     assert result["realized_plan_covered"].tolist() == [1.0, 1.0, 1.0]
     assert result["realized_plan_terminal_recovery"].tolist() == [0.0, 0.0, 1.0]
+
+
+class _DeterministicCandidatePathModel(torch.nn.Module):
+    uses_derived_path_value = True
+    uses_direct_value = False
+    uses_ohlcva_path = False
+    uses_ohlcva_aux_path = False
+    residual_weight = 0.0
+
+    def __init__(self, *, nonfinite_symbol_idx: int | None = None) -> None:
+        super().__init__()
+        self.nonfinite_symbol_idx = nonfinite_symbol_idx
+
+    def forward(self, x: torch.Tensor, *, symbol_idx: torch.Tensor) -> dict[str, torch.Tensor]:
+        batch = int(x.shape[0])
+        scale = (symbol_idx.to(dtype=torch.float32) + 1.0) * 0.02
+        path = torch.zeros((batch, 2, 4), dtype=x.dtype, device=x.device)
+        path[:, 0, 1] = scale
+        path[:, 0, 2] = -0.01
+        path[:, 0, 3] = scale * 0.5
+        path[:, 1, 0] = scale * 0.5
+        path[:, 1, 1] = scale * 1.5
+        path[:, 1, 2] = -0.005
+        path[:, 1, 3] = scale
+        if self.nonfinite_symbol_idx is not None:
+            path[symbol_idx.eq(int(self.nonfinite_symbol_idx))] = torch.nan
+        return {"future_path": path}
+
+
+def test_predict_split_merges_candidate_complete_execution_after_full_date(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _build_development_pack(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    dataset = training.SequencePathPackDataset(
+        manifest,
+        split="development",
+        max_samples=0,
+        input_channel_profile=training.INPUT_CHANNEL_PROFILE_DAILY_ONLY,
+        index_role="candidate",
+    )
+
+    _ic, topk, daily, candidates, metrics = training._predict_split(
+        model=_DeterministicCandidatePathModel(),
+        dataset=dataset,
+        device=torch.device("cpu"),
+        output_dir=tmp_path / "predict",
+        split="development",
+        batch_size=2,
+        amp_enabled=False,
+        top_k=(1, 3),
+        write_predictions=False,
+        write_path_predictions=False,
+    )
+
+    assert len(daily) == 2
+    assert daily["universe_count"].eq(4).all()
+    assert daily["universe_hash"].nunique() == 1
+    assert daily["execution_cost_contract_sha256"].str.fullmatch(r"[0-9a-f]{64}").all()
+    assert daily["selected_realized_plan_return_coverage"].eq(1.0).all()
+    assert daily["universe_realized_plan_return_coverage"].eq(1.0).all()
+    assert daily["selected_realized_plan_coverage"].eq(1.0).all()
+    assert np.isfinite(daily["selected_net_realized_plan_return_base"]).all()
+    assert np.isfinite(daily["selected_net_realized_plan_return_stress"]).all()
+    assert {
+        "alpha_opportunity_value",
+        "selected_oracle_regret",
+        "selected_execution_cost_base_cny",
+        "selected_cash_utilization_base",
+        "selected_exit_status_counts_json",
+    }.issubset(daily.columns)
+
+    top1 = daily.loc[daily["top_k"].eq(1)].iloc[0]
+    assert top1["selected_symbols"] == ["000004.SZ"]
+    assert top1["selected_entry_fill_rate"] == 0.0
+    assert top1["selected_net_realized_plan_return_base"] == 0.0
+    assert top1["selected_realized_plan_value_coverage"] == 0.0
+    assert pd.isna(top1["selected_net_realized_plan_value_base"])
+    top3 = daily.loc[daily["top_k"].eq(3)].iloc[0]
+    assert top3["selected_realized_plan_value_coverage"] == pytest.approx(2.0 / 3.0)
+
+    assert candidates.iloc[0]["symbol"] == "000004.SZ"
+    assert not bool(candidates.iloc[0]["label_available"])
+    assert candidates.iloc[0]["value_label_available"] == 0.0
+    assert pd.isna(candidates.iloc[0]["net_realized_plan_value_base"])
+    assert candidates.iloc[0]["realized_plan_exit_status"] == "entry_unfilled_cash"
+    assert {
+        "net_realized_plan_return_base",
+        "net_realized_plan_return_stress",
+        "execution_cost_base_cny",
+        "cash_utilization_base",
+        "realized_plan_covered",
+    }.issubset(candidates.columns)
+    training._validate_development_topk_execution_coverage(topk)
+    assert topk.loc[topk["top_k"].eq(1), "selected_realized_plan_value_coverage"].iloc[0] == 0.0
+    assert metrics["candidate_complete_score_coverage"] == 1.0
+    assert metrics["candidate_universe_date_count_verified"] == 1
+
+
+def test_predict_split_rejects_nonfinite_development_candidate_score(tmp_path: Path) -> None:
+    manifest_path = _build_development_pack(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    dataset = training.SequencePathPackDataset(
+        manifest,
+        split="development",
+        max_samples=0,
+        input_channel_profile=training.INPUT_CHANNEL_PROFILE_DAILY_ONLY,
+        index_role="candidate",
+    )
+
+    with pytest.raises(ValueError, match="finite score for every candidate"):
+        training._predict_split(
+            model=_DeterministicCandidatePathModel(nonfinite_symbol_idx=3),
+            dataset=dataset,
+            device=torch.device("cpu"),
+            output_dir=tmp_path / "predict_nonfinite",
+            split="development",
+            batch_size=2,
+            amp_enabled=False,
+            top_k=(1, 3),
+            write_predictions=False,
+            write_path_predictions=False,
+        )
+
+
+def test_adaptive_working_set_trim_uses_margin_and_cooldown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    available = iter([1.5, 3.25, 3.0])
+    trim_calls: list[bool] = []
+    monkeypatch.setattr(training, "_available_physical_memory_gb", lambda: next(available))
+    monkeypatch.setattr(
+        training,
+        "_current_process_memory_gb",
+        lambda: {"working_set_gb": 7.0, "private_gb": 4.0},
+    )
+    monkeypatch.setattr(training, "_trim_working_set", lambda: trim_calls.append(True) or True)
+
+    last_trim, event = training._maybe_trim_training_working_set(
+        batch_count=31,
+        last_trim_batch=0,
+    )
+    assert (last_trim, event) == (0, None)
+
+    last_trim, event = training._maybe_trim_training_working_set(
+        batch_count=32,
+        last_trim_batch=last_trim,
+    )
+    assert last_trim == 32
+    assert event is not None
+    assert event["reason"] == "low_available_memory"
+    assert event["trim_succeeded"] is True
+    assert event["available_before_gb"] == 1.5
+    assert event["available_after_gb"] == 3.25
+    assert len(trim_calls) == 1
+
+    cooled_last, cooled_event = training._maybe_trim_training_working_set(
+        batch_count=64,
+        last_trim_batch=last_trim,
+    )
+    assert (cooled_last, cooled_event) == (last_trim, None)
+
+    final_last, final_event = training._maybe_trim_training_working_set(
+        batch_count=288,
+        last_trim_batch=last_trim,
+    )
+    assert (final_last, final_event) == (last_trim, None)
+    assert len(trim_calls) == 1
+
+
+def test_working_set_trim_fallback_and_failed_api_do_not_fake_cooldown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(training, "_available_physical_memory_gb", lambda: None)
+    monkeypatch.setattr(
+        training,
+        "_current_process_memory_gb",
+        lambda: {"working_set_gb": None, "private_gb": None},
+    )
+    monkeypatch.setattr(training, "_trim_working_set", lambda: False)
+
+    last_trim, event = training._maybe_trim_training_working_set(
+        batch_count=1024,
+        last_trim_batch=0,
+    )
+    assert last_trim == 0
+    assert event is not None
+    assert event["reason"] == "periodic_fallback"
+    assert event["trim_succeeded"] is False
+
+
+def test_development_loss_records_working_set_trim_without_training_progress_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_path = _build_development_pack(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    dataset = training.SequencePathPackDataset(
+        manifest,
+        split="development",
+        max_samples=0,
+        input_channel_profile=training.INPUT_CHANNEL_PROFILE_DAILY_ONLY,
+    )
+    config = replace(
+        _config(tmp_path, manifest_path, evaluation_mode=training.EVALUATION_MODE_DEVELOPMENT),
+        batch_size=4,
+    )
+    model = training.SequencePathModel(
+        input_dim=dataset.input_dim,
+        hidden_dim=int(config.hidden_dim),
+        layers=int(config.layers),
+        forward_days=dataset.forward_days,
+        summary_dim=len(dataset.path_summary_columns),
+        dropout=float(config.dropout),
+        model_type=str(config.model_type),
+        symbol_count=int(dataset.symbol_count),
+        symbol_embedding_dim=int(config.symbol_embedding_dim),
+        richer_path_dim=int(dataset.richer_path_dim),
+    )
+    trim_event = {"reason": "low_available_memory", "trim_succeeded": True}
+    monkeypatch.setattr(
+        training,
+        "_maybe_trim_training_working_set",
+        lambda **kwargs: (int(kwargs["batch_count"]), trim_event),
+    )
+
+    result = training._evaluate_development_loss(
+        model=model,
+        dataset=dataset,
+        device=torch.device("cpu"),
+        config=config,
+        amp_enabled=False,
+        path_value_gradient_profile=training.PATH_VALUE_GRADIENT_PROFILE_SMOOTH,
+        rank_training_profile=training.RANK_TRAINING_PROFILE_LOCAL_CHUNK,
+    )
+
+    assert result["sample_count"] == len(dataset)
+    assert result["working_set_trim_events"] == [trim_event]
+    assert np.isfinite(result["loss"])
+
+
+def test_training_batch_can_skip_unused_observation_and_execution_arrays(tmp_path: Path) -> None:
+    manifest_path = _build_development_pack(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    dataset = training.SequencePathPackDataset(
+        manifest,
+        split="train",
+        input_channel_profile=training.INPUT_CHANNEL_PROFILE_DAILY_ONLY,
+    )
+
+    batch = dataset.get_batch(
+        [0],
+        include_metadata=False,
+        include_observation=False,
+        include_execution=False,
+    )
+
+    assert batch["y_observed_price_path"] is None
+    assert batch["entry_open_raw"] is None
+    assert batch["exit_close_raw_path"] is None
+    assert batch["exit_sellable_path"] is None
+    assert batch["entry_filled"] is None
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA AMP is unavailable")
+def test_finite_smooth_l1_preserves_fp32_math_under_cuda_amp() -> None:
+    shape = (512, 60, 4)
+    element_count = int(np.prod(shape))
+    pred = torch.linspace(-0.08, 0.08, element_count, device="cuda", dtype=torch.float16).requires_grad_(True)
+    target = torch.linspace(-0.03, 0.03, element_count, device="cuda", dtype=torch.float32)
+
+    with torch.amp.autocast(device_type="cuda", enabled=True):
+        actual = training._finite_smooth_l1(pred, target)
+        fields_actual = training._finite_smooth_l1_fields_equal(
+            pred.reshape(shape),
+            target.reshape(shape),
+        )
+    expected = torch.nn.functional.smooth_l1_loss(
+        pred.float(),
+        target.float(),
+        reduction="mean",
+    )
+
+    assert actual.dtype == torch.float32
+    assert float(actual) > 0.0
+    assert torch.isinf(torch.tensor(element_count, device="cuda", dtype=torch.float16))
+    torch.testing.assert_close(actual, expected, rtol=1.0e-6, atol=1.0e-9)
+    assert fields_actual.dtype == torch.float32
+    assert float(fields_actual) > 0.0
+    torch.testing.assert_close(fields_actual, expected, rtol=1.0e-6, atol=1.0e-9)
+    actual.backward()
+    assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all()
+    assert float(pred.grad.abs().sum()) > 0.0

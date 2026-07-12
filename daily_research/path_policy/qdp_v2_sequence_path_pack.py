@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import gc
 import hashlib
 import json
@@ -14,7 +15,9 @@ from typing import Any, Iterable, Mapping
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 import pyarrow.dataset as ds
+import pyarrow.parquet as pq
 
 from daily_research.path_policy.qdp_v2_raw_rising_path_atlas import (
     DAILY_RAW_COLUMNS,
@@ -30,6 +33,7 @@ DEFAULT_OUTPUT_ROOT = Path("daily_research/data/research_store/sequence_pack")
 DEFAULT_LOOKBACK_DAYS = 100
 DEFAULT_FORWARD_DAYS = 20
 DEFAULT_EXECUTION_TAIL_DAYS = 20
+DEFAULT_MINIMUM_FREE_MEMORY_GB = 1.0
 DEFAULT_START_DATE = "2012-01-01"
 DEFAULT_END_DATE = "2025-12-31"
 DEFAULT_TRAIN_YEARS = tuple(range(2012, 2024))
@@ -133,6 +137,58 @@ PATH_SUMMARY_COLUMNS = path_summary_columns(DEFAULT_FORWARD_DAYS)
 
 def _now() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _available_physical_memory_gb() -> float | None:
+    """Return currently available physical memory without making it a hard dependency."""
+
+    try:
+        import psutil  # type: ignore
+
+        return float(psutil.virtual_memory().available) / float(1024**3)
+    except (ImportError, AttributeError, OSError):
+        return None
+
+
+def _trim_process_working_set() -> None:
+    """Return released pages to Windows after large Arrow/pandas stages."""
+
+    if os.name != "nt":
+        return
+    try:
+        handle = ctypes.windll.kernel32.GetCurrentProcess()
+        ctypes.windll.psapi.EmptyWorkingSet(handle)
+    except (AttributeError, OSError):
+        return
+
+
+def _enforce_memory_guard(
+    *,
+    stage: str,
+    minimum_free_gb: float,
+    progress_path: Path | None = None,
+) -> float | None:
+    minimum = float(minimum_free_gb)
+    if not math.isfinite(minimum) or minimum < 0.0:
+        raise ValueError("minimum_free_memory_gb must be finite and non-negative")
+    available = _available_physical_memory_gb()
+    if available is None or minimum <= 0.0:
+        return available
+    if available < minimum:
+        payload = {
+            "status": "blocked",
+            "blocker": "minimum_free_memory_guard",
+            "stage": str(stage),
+            "available_memory_gb": float(available),
+            "minimum_free_memory_gb": float(minimum),
+            "updated_at": _now(),
+        }
+        if progress_path is not None:
+            _write_json(progress_path, payload)
+        raise MemoryError(
+            f"memory guard blocked stage={stage}: available={available:.2f}GB < minimum={minimum:.2f}GB"
+        )
+    return available
 
 
 def _json_default(value: Any) -> Any:
@@ -294,11 +350,39 @@ def _read_dataset_date_range(root: Path, active: Mapping[str, Any], domain: str,
 
 
 def _read_dataset_symbols_date_range(root: Path, active: Mapping[str, Any], domain: str, start: str, end: str) -> list[str]:
+    import duckdb  # type: ignore
+
     manifest = _dataset_manifest(root, active, domain)
     paths = _relative_shard_paths(root, manifest)
-    filt = (ds.field("trade_date") >= str(start)) & (ds.field("trade_date") <= str(end))
-    table = ds.dataset([str(path) for path in paths], format="parquet").to_table(columns=["symbol"], filter=filt)
-    return sorted({str(item).upper().strip() for item in table.column("symbol").unique().to_pylist() if str(item).strip()})
+    path_sql = _sql_path_list(paths)
+    start_text = str(start)
+    end_text = str(end)
+    symbols: set[str] = set()
+    for year in range(int(start_text[:4]), int(end_text[:4]) + 1):
+        part_start = max(start_text, f"{year}-01-01")
+        part_end = min(end_text, f"{year}-12-31")
+        start_sql = part_start.replace("'", "''")
+        end_sql = part_end.replace("'", "''")
+        con = duckdb.connect(":memory:")
+        try:
+            con.execute("set threads=2")
+            con.execute("set memory_limit='512MB'")
+            rows = con.execute(
+                f"""
+                select distinct upper(trim(cast(symbol as varchar))) as symbol
+                from read_parquet({path_sql}, union_by_name=true)
+                where cast(trade_date as varchar) between '{start_sql}' and '{end_sql}'
+                  and symbol is not null
+                  and trim(cast(symbol as varchar)) <> ''
+                """
+            ).fetchall()
+            symbols.update(str(row[0]) for row in rows)
+        finally:
+            con.close()
+        del rows
+        gc.collect()
+        _trim_process_working_set()
+    return sorted(symbols)
 
 
 def _sql_path_list(paths: Iterable[Path]) -> str:
@@ -407,27 +491,49 @@ class DateShardedFloatStore:
         self.shard_size = max(int(shard_size), 1)
         self.directory.mkdir(parents=True, exist_ok=True)
         self._shards: dict[int, tuple[int, int, np.memmap, Path]] = {}
+        self._initialized_starts: set[int] = set()
         self.shard_metas: list[dict[str, Any]] = []
+
+    def _close_open_shards(self) -> None:
+        for key, (_start, _end, arr, _path) in list(self._shards.items()):
+            arr.flush()
+            mmap_handle = getattr(arr, "_mmap", None)
+            if mmap_handle is not None:
+                mmap_handle.close()
+            del self._shards[key]
 
     def _open_shard(self, date_idx: int) -> tuple[int, int, np.memmap, Path]:
         start = (int(date_idx) // self.shard_size) * self.shard_size
         end = min(start + self.shard_size, self.shape[0])
         if start in self._shards:
             return self._shards[start]
+        # Label dates are written in ascending order.  Keeping every ~600-MB
+        # mapping open lets Windows grow the process working set until the host
+        # becomes unstable, so retain only the active shard mapping.
+        self._close_open_shards()
         path = self.directory / f"{self.name}.{start:06d}_{end - 1:06d}.float32.dat"
-        arr = np.memmap(path, dtype="float32", mode="w+", shape=(end - start, *self.shape[1:]))
-        arr[:] = np.nan
-        arr.flush()
+        revisit = start in self._initialized_starts
+        arr = np.memmap(
+            path,
+            dtype="float32",
+            mode="r+" if revisit else "w+",
+            shape=(end - start, *self.shape[1:]),
+        )
+        if not revisit:
+            arr[:] = np.nan
+            arr.flush()
+            self._initialized_starts.add(start)
         item = (start, end, arr, path)
         self._shards[start] = item
-        self.shard_metas.append(
-            {
-                "path": str(path.resolve()),
-                "date_start_idx": int(start),
-                "date_end_idx": int(end - 1),
-                "shape": [int(end - start), *[int(dim) for dim in self.shape[1:]]],
-            }
-        )
+        if not revisit:
+            self.shard_metas.append(
+                {
+                    "path": str(path.resolve()),
+                    "date_start_idx": int(start),
+                    "date_end_idx": int(end - 1),
+                    "shape": [int(end - start), *[int(dim) for dim in self.shape[1:]]],
+                }
+            )
         return item
 
     def set_date(self, date_idx: int, values: np.ndarray) -> None:
@@ -439,8 +545,7 @@ class DateShardedFloatStore:
         arr[int(date_idx) - start, ~mask, :, :] = np.nan
 
     def flush(self) -> None:
-        for _start, _end, arr, _path in self._shards.values():
-            arr.flush()
+        self._close_open_shards()
 
     def manifest(self, *, fields: list[str], anchor: str, extra: Mapping[str, Any] | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -611,6 +716,47 @@ def _prepare_daily_frame(daily: pd.DataFrame) -> pd.DataFrame:
     daily["amount_log"] = np.log1p(daily["amount"])
     daily["intraday_range_raw"] = daily["high"].div(daily["low"].replace(0.0, np.nan)).sub(1.0)
     return daily.replace([np.inf, -np.inf], np.nan)
+
+
+def _prepare_daily_with_state_memory_bounded(daily: pd.DataFrame) -> pd.DataFrame:
+    """Build both daily feature groups with one symbol/date sort.
+
+    The legacy composition sorted and copied the multi-million-row frame once in
+    ``_prepare_daily_frame`` and then again in ``_add_raw_daily_signals``.  On the
+    15-GB research workstation that leaves several full pandas frames resident at
+    the same time.  The state builder already establishes the required order, so
+    append the pack-only columns to that result in place.
+    """
+
+    out = _add_raw_daily_signals(daily)
+    prev_close = pd.to_numeric(out["prev_close"], errors="coerce").astype("float64")
+    for name, numerator in (
+        ("open_ret_prev_close", out["open"]),
+        ("high_ret_prev_close", out["high"]),
+        ("low_ret_prev_close", out["low"]),
+        ("close_ret_prev_close", out["close"]),
+    ):
+        out[name] = (
+            pd.to_numeric(numerator, errors="coerce")
+            .astype("float64")
+            .div(prev_close.replace(0.0, np.nan))
+            .sub(1.0)
+            .replace([np.inf, -np.inf], np.nan)
+        )
+    out["volume_log"] = np.log1p(pd.to_numeric(out["volume"], errors="coerce")).replace(
+        [np.inf, -np.inf], np.nan
+    )
+    out["amount_log"] = np.log1p(pd.to_numeric(out["amount"], errors="coerce")).replace(
+        [np.inf, -np.inf], np.nan
+    )
+    out["intraday_range_raw"] = (
+        pd.to_numeric(out["high"], errors="coerce")
+        .astype("float64")
+        .div(pd.to_numeric(out["low"], errors="coerce").astype("float64").replace(0.0, np.nan))
+        .sub(1.0)
+        .replace([np.inf, -np.inf], np.nan)
+    )
+    return out
 
 
 def _apply_back_adjustment(daily: pd.DataFrame, factor: pd.DataFrame) -> pd.DataFrame:
@@ -1119,6 +1265,8 @@ def _compute_future_path_and_masks(
             if isinstance(path_summary, np.memmap):
                 path_summary.flush()
             gc.collect()
+            if (date_idx + 1) % max(int(flush_every_dates) * 4, 1) == 0:
+                _trim_process_working_set()
     return future_path, future_ohlcva_path, path_summary, input_valid, entry_buyable, label_valid
 
 
@@ -1231,6 +1379,154 @@ def _build_sample_index(
     return out
 
 
+def _write_sample_index_streaming(
+    *,
+    output_path: Path,
+    date_values: list[str],
+    symbol_values: list[str],
+    start_date: str,
+    end_date: str,
+    train_years: tuple[int, ...],
+    validation_years: tuple[int, ...],
+    test_years: tuple[int, ...],
+    input_valid: np.ndarray,
+    entry_buyable: np.ndarray,
+    label_valid: np.ndarray,
+    price_label_valid: np.ndarray | None = None,
+    va_aux_valid: np.ndarray | None = None,
+    signal_eligible: np.ndarray | None = None,
+    require_entry_filled: bool = True,
+    require_label_valid: bool = True,
+    id_column: str = "sample_id",
+    target_row_group_size: int = 250_000,
+) -> dict[str, Any]:
+    """Write a candidate or supervision index without materializing all years in RAM."""
+
+    if str(id_column) not in {"sample_id", "candidate_id"}:
+        raise ValueError("id_column must be sample_id or candidate_id")
+    expected_shape = (len(date_values), len(symbol_values))
+    for name, values in (
+        ("input_valid", input_valid),
+        ("entry_buyable", entry_buyable),
+        ("label_valid", label_valid),
+        ("price_label_valid", price_label_valid),
+        ("va_aux_valid", va_aux_valid),
+        ("signal_eligible", signal_eligible),
+    ):
+        if values is not None and np.asarray(values).shape != expected_shape:
+            raise ValueError(f"{name} must have shape {expected_shape}")
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output_path.with_suffix(output_path.suffix + ".tmp")
+    if temporary.exists():
+        temporary.unlink()
+    price_valid_values = label_valid if price_label_valid is None else price_label_valid
+    va_valid_values = label_valid if va_aux_valid is None else va_aux_valid
+    date_arr = np.asarray(date_values, dtype=object)
+    symbol_arr = np.asarray(symbol_values, dtype=object)
+    pending: list[pd.DataFrame] = []
+    pending_rows = 0
+    total_rows = 0
+    split_counts: dict[str, int] = {}
+    writer: pq.ParquetWriter | None = None
+
+    def flush_pending() -> None:
+        nonlocal pending, pending_rows, writer
+        if not pending:
+            return
+        frame = pd.concat(pending, ignore_index=True, copy=False)
+        table = pa.Table.from_pandas(frame, preserve_index=False)
+        if writer is None:
+            writer = pq.ParquetWriter(
+                temporary,
+                table.schema,
+                compression="zstd",
+                use_dictionary=["split", "symbol", "trade_date", "entry_trade_date"],
+            )
+        writer.write_table(table, row_group_size=max(int(target_row_group_size), 1))
+        pending = []
+        pending_rows = 0
+        del frame, table
+        gc.collect()
+        _trim_process_working_set()
+
+    try:
+        for date_idx, trade_date in enumerate(date_values):
+            if trade_date < str(start_date) or trade_date > str(end_date):
+                continue
+            year = int(str(trade_date)[:4])
+            if year in train_years:
+                split = "train"
+            elif year in validation_years:
+                split = "validation"
+            elif year in test_years:
+                split = "test"
+            else:
+                continue
+            mask = np.asarray(input_valid[date_idx], dtype=bool).copy()
+            if signal_eligible is not None:
+                mask &= np.asarray(signal_eligible[date_idx], dtype=bool)
+            if bool(require_label_valid):
+                mask &= np.asarray(label_valid[date_idx], dtype=bool)
+            if bool(require_entry_filled):
+                mask &= np.asarray(entry_buyable[date_idx], dtype=bool)
+            symbol_idx = np.flatnonzero(mask).astype(np.int32)
+            if not len(symbol_idx):
+                continue
+            row_count = int(len(symbol_idx))
+            frame = pd.DataFrame(
+                {
+                    str(id_column): np.arange(total_rows, total_rows + row_count, dtype=np.int64),
+                    "split": split,
+                    "year": np.full(row_count, year, dtype=np.int16),
+                    "trade_date": str(trade_date),
+                    "date_idx": np.full(row_count, date_idx, dtype=np.int32),
+                    "symbol_idx": symbol_idx,
+                    "symbol": symbol_arr[symbol_idx],
+                    "entry_trade_date": date_arr[date_idx + 1] if date_idx + 1 < len(date_arr) else "",
+                    "entry_filled": np.asarray(entry_buyable[date_idx, symbol_idx], dtype=bool),
+                    "label_valid": np.asarray(label_valid[date_idx, symbol_idx], dtype=bool),
+                    "price_label_valid": np.asarray(price_valid_values[date_idx, symbol_idx], dtype=bool),
+                    "va_aux_valid": np.asarray(va_valid_values[date_idx, symbol_idx], dtype=bool),
+                }
+            )
+            pending.append(frame)
+            pending_rows += row_count
+            total_rows += row_count
+            split_counts[split] = int(split_counts.get(split, 0) + row_count)
+            if pending_rows >= max(int(target_row_group_size), 1):
+                flush_pending()
+        flush_pending()
+        if writer is None:
+            empty = _build_sample_index(
+                date_values=[],
+                symbol_values=[],
+                start_date=start_date,
+                end_date=end_date,
+                train_years=train_years,
+                validation_years=validation_years,
+                test_years=test_years,
+                input_valid=np.zeros((0, 0), dtype=bool),
+                entry_buyable=np.zeros((0, 0), dtype=bool),
+                label_valid=np.zeros((0, 0), dtype=bool),
+                require_entry_filled=require_entry_filled,
+                require_label_valid=require_label_valid,
+                id_column=id_column,
+            )
+            empty.to_parquet(temporary, index=False)
+    finally:
+        if writer is not None:
+            writer.close()
+    os.replace(temporary, output_path)
+    return {
+        "path": str(output_path.resolve()),
+        "row_count": int(total_rows),
+        "split_counts": {str(key): int(value) for key, value in split_counts.items()},
+        "write_policy": "date_ordered_streaming_zstd",
+        "target_row_group_size": int(target_row_group_size),
+    }
+
+
 @dataclass(frozen=True)
 class SequencePackConfig:
     qdp_root: Path
@@ -1252,6 +1548,7 @@ class SequencePackConfig:
     suspension_fill: str = SUSPENSION_FILL_NONE
     execution_tail_days: int = DEFAULT_EXECUTION_TAIL_DAYS
     require_full_dependency_padding: bool = True
+    minimum_free_memory_gb: float = DEFAULT_MINIMUM_FREE_MEMORY_GB
     unresolved_exit_recovery_fraction: float = 0.0
     execution_cost: AShareExecutionCostConfig = AShareExecutionCostConfig()
     research_contract: Path | None = None
@@ -1331,7 +1628,33 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
     output_dir = config.output_root / str(config.run_tag)
     output_dir.mkdir(parents=True, exist_ok=True)
     progress_path = output_dir / "progress.json"
+    memory_observation_path = output_dir / "memory_observations.json"
+    memory_observations: list[dict[str, Any]] = []
     _write_json(progress_path, {"status": "started", "updated_at": _now()})
+
+    def memory_guard(stage: str) -> float | None:
+        available = _enforce_memory_guard(
+            stage=stage,
+            minimum_free_gb=float(config.minimum_free_memory_gb),
+            progress_path=progress_path,
+        )
+        memory_observations.append(
+            {
+                "stage": str(stage),
+                "available_memory_gb": float(available) if available is not None else None,
+                "observed_at": _now(),
+            }
+        )
+        _write_json(
+            memory_observation_path,
+            {
+                "minimum_free_memory_gb": float(config.minimum_free_memory_gb),
+                "observations": memory_observations,
+            },
+        )
+        return available
+
+    memory_guard("build_start")
     all_open_dates = _read_trading_dates(root, active, scope_start, active_end)
     if not all_open_dates:
         raise ValueError("no open trading dates in active scope")
@@ -1364,6 +1687,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         "examples": [],
     }
     if sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE:
+        memory_guard("audit_pit_price_coverage")
         _write_json(progress_path, {"status": "auditing_pit_price_coverage", "updated_at": _now()})
         pit_price_coverage = _audit_pit_price_coverage(
             root,
@@ -1388,31 +1712,21 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
                 f"dates={pit_price_coverage['first_missing_date']}..{pit_price_coverage['last_missing_date']}. "
                 "Activate a matching PIT-complete price substrate before building."
             )
-    _write_json(progress_path, {"status": "reading_daily", "updated_at": _now()})
-    daily = _read_dataset_date_range(root, active, "market_daily_raw", DAILY_RAW_COLUMNS, date_values[0], date_values[-1])
-    if daily.empty:
-        raise ValueError("market_daily_raw returned no rows")
-    daily["raw_open"] = pd.to_numeric(daily["open"], errors="coerce").astype("float64")
-    daily["raw_close"] = pd.to_numeric(daily["close"], errors="coerce").astype("float64")
-    if sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE:
-        daily = daily[daily["symbol"].map(_is_pit_mainboard_symbol)].copy()
-        if daily.empty:
-            raise ValueError("PIT mainboard filter removed every market_daily_raw row")
-    if price_adjustment == PRICE_ADJUSTMENT_BACK:
-        _write_json(progress_path, {"status": "reading_adjust_factor", "updated_at": _now()})
-        factor = _read_dataset_date_range(
+    memory_guard("read_daily_symbol_scope")
+    _write_json(progress_path, {"status": "reading_daily_symbol_scope", "updated_at": _now()})
+    daily_symbols = set(
+        _read_dataset_symbols_date_range(
             root,
             active,
-            "adjust_factor",
-            ["symbol", "trade_date", "adjust_factor", "back_adjust_factor"],
+            "market_daily_raw",
             date_values[0],
             date_values[-1],
         )
-        daily = _apply_back_adjustment(daily, factor)
-        del factor
-        gc.collect()
-    daily = _prepare_daily_frame(daily)
-    daily_symbols = set(daily["symbol"].astype(str).str.upper().str.strip().unique().tolist())
+    )
+    if sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE:
+        daily_symbols = {symbol for symbol in daily_symbols if _is_pit_mainboard_symbol(symbol)}
+    if not daily_symbols:
+        raise ValueError("market_daily_raw returned no symbols in the requested panel range")
     pit_symbols: set[str] = set()
     if sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE:
         _write_json(progress_path, {"status": "reading_pit_symbol_scope", "updated_at": _now()})
@@ -1464,24 +1778,114 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
     corr_valid_panel = _fill_bool_memmap(mask_dir / "corr_valid.bool.dat", (n_dates, n_symbols))
     zero_range_panel = _fill_bool_memmap(mask_dir / "zero_range.bool.dat", (n_dates, n_symbols))
 
-    _write_json(progress_path, {"status": "writing_daily_panels", "updated_at": _now()})
-    daily_with_state = _add_raw_daily_signals(daily.copy())
-    _write_panel_values(daily_raw, daily_with_state, DAILY_RAW_FEATURES, date_to_idx=date_to_idx, symbol_to_idx=symbol_to_idx)
-    _write_panel_values(daily_state, daily_with_state, RAW_SIGNAL_COLUMNS, date_to_idx=date_to_idx, symbol_to_idx=symbol_to_idx)
-    _write_scalar_panel_values(
-        raw_open_panel,
-        daily_with_state,
-        "raw_open",
-        date_to_idx=date_to_idx,
-        symbol_to_idx=symbol_to_idx,
-    )
-    _write_scalar_panel_values(
-        raw_close_panel,
-        daily_with_state,
-        "raw_close",
-        date_to_idx=date_to_idx,
-        symbol_to_idx=symbol_to_idx,
-    )
+    # Initializing multi-gigabyte memmaps touches every page.  The data is
+    # already flushed, so evict those clean pages before loading yearly pandas
+    # chunks; otherwise the initialized mappings and the first chunk overlap in
+    # the physical working set on 16-GB hosts.
+    gc.collect()
+    _trim_process_working_set()
+    memory_guard("panel_allocation_completed")
+
+    # Stream one calendar year at a time with enough pre-year history to make
+    # every rolling feature exact for candidate-eligible rows.  This avoids the
+    # previous 9.5-million-row daily/factor pandas merge that exhausted RAM.
+    daily_history_days = max(int(config.lookback_days), 60)
+    for year in range(int(date_values[0][:4]), int(date_values[-1][:4]) + 1):
+        target_dates = [date for date in date_values if int(date[:4]) == int(year)]
+        if not target_dates:
+            continue
+        target_start = str(target_dates[0])
+        target_end = str(target_dates[-1])
+        target_start_idx = int(date_to_idx[target_start])
+        read_start = str(date_values[max(0, target_start_idx - daily_history_days)])
+        memory_guard(f"daily_panel_{year}_read")
+        _write_json(
+            progress_path,
+            {
+                "status": "writing_daily_panels",
+                "year": int(year),
+                "read_start": read_start,
+                "target_start": target_start,
+                "target_end": target_end,
+                "updated_at": _now(),
+            },
+        )
+        daily_chunk = _read_dataset_date_range(
+            root,
+            active,
+            "market_daily_raw",
+            DAILY_RAW_COLUMNS,
+            read_start,
+            target_end,
+        )
+        if daily_chunk.empty:
+            _write_json(
+                progress_path,
+                {
+                    "status": "daily_panel_padding_year_without_rows",
+                    "year": int(year),
+                    "target_start": target_start,
+                    "target_end": target_end,
+                    "updated_at": _now(),
+                },
+            )
+            continue
+        daily_chunk["raw_open"] = pd.to_numeric(daily_chunk["open"], errors="coerce").astype("float64")
+        daily_chunk["raw_close"] = pd.to_numeric(daily_chunk["close"], errors="coerce").astype("float64")
+        if sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE:
+            daily_chunk = daily_chunk[daily_chunk["symbol"].map(_is_pit_mainboard_symbol)].copy()
+            if daily_chunk.empty:
+                raise ValueError(f"PIT mainboard filter removed every daily row for streamed year {year}")
+        if price_adjustment == PRICE_ADJUSTMENT_BACK:
+            memory_guard(f"daily_panel_{year}_factor")
+            factor_chunk = _read_dataset_date_range(
+                root,
+                active,
+                "adjust_factor",
+                ["symbol", "trade_date", "adjust_factor", "back_adjust_factor"],
+                read_start,
+                target_end,
+            )
+            daily_chunk = _apply_back_adjustment(daily_chunk, factor_chunk)
+            del factor_chunk
+            gc.collect()
+        daily_with_state = _prepare_daily_with_state_memory_bounded(daily_chunk)
+        del daily_chunk
+        target_mask = daily_with_state["trade_date"].astype(str).between(target_start, target_end)
+        target_frame = daily_with_state.loc[target_mask]
+        _write_panel_values(
+            daily_raw,
+            target_frame,
+            DAILY_RAW_FEATURES,
+            date_to_idx=date_to_idx,
+            symbol_to_idx=symbol_to_idx,
+        )
+        _write_panel_values(
+            daily_state,
+            target_frame,
+            RAW_SIGNAL_COLUMNS,
+            date_to_idx=date_to_idx,
+            symbol_to_idx=symbol_to_idx,
+        )
+        _write_scalar_panel_values(
+            raw_open_panel,
+            target_frame,
+            "raw_open",
+            date_to_idx=date_to_idx,
+            symbol_to_idx=symbol_to_idx,
+        )
+        _write_scalar_panel_values(
+            raw_close_panel,
+            target_frame,
+            "raw_close",
+            date_to_idx=date_to_idx,
+            symbol_to_idx=symbol_to_idx,
+        )
+        del target_frame, target_mask, daily_with_state
+        gc.collect()
+        _trim_process_working_set()
+        memory_guard(f"daily_panel_{year}_completed")
+
     has_bar_panel[:] = np.isfinite(raw_open_panel)
     has_bar_panel.flush()
     volume_values = daily_raw[:, :, DAILY_RAW_FEATURES.index("volume")]
@@ -1499,12 +1903,13 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
     zero_range_panel[:] = has_bar_panel & np.isfinite(high_values) & np.isfinite(low_values) & np.isclose(high_values, low_values)
     previous_close_valid_panel.flush()
     zero_range_panel.flush()
-    del daily_with_state
     gc.collect()
+    _trim_process_working_set()
 
     missing_eligible_bar_count = 0
     if sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE:
         for year in range(int(date_values[0][:4]), int(date_values[-1][:4]) + 1):
+            memory_guard(f"pit_signal_universe_{year}")
             _write_json(progress_path, {"status": "writing_pit_signal_universe", "year": year, "updated_at": _now()})
             pit_universe = _read_dataset_date_range(
                 root,
@@ -1535,6 +1940,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             )
             del pit_universe
             gc.collect()
+            _trim_process_working_set()
         requested_date_mask = np.asarray(
             [str(config.start_date) <= date <= str(config.end_date) for date in date_values],
             dtype=bool,
@@ -1549,6 +1955,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         tradable_panel[:] = has_bar_panel & status_valid_panel & (~is_suspended_panel) & (~is_delisted_panel)
     elif suspension_fill == SUSPENSION_FILL_CARRY_CLOSE:
         for year in range(int(date_values[0][:4]), int(date_values[-1][:4]) + 1):
+            memory_guard(f"security_status_{year}")
             _write_json(progress_path, {"status": "writing_security_status", "year": year, "updated_at": _now()})
             status = _read_dataset_date_range(
                 root,
@@ -1569,6 +1976,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             )
             del status
             gc.collect()
+            _trim_process_working_set()
         universe_has_bar_panel[:] = has_bar_panel
         signal_eligible_panel[:] = has_bar_panel
         tradable_panel[:] = has_bar_panel & status_valid_panel & (~is_suspended_panel) & (~is_delisted_panel)
@@ -1592,11 +2000,13 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         ("limit_intraday_features", ["symbol", "trade_date", *LIMIT_SIGNAL_COLUMNS], LIMIT_SIGNAL_COLUMNS, limit_structure),
     ]:
         for year in range(int(date_values[0][:4]), int(date_values[-1][:4]) + 1):
+            memory_guard(f"{domain}_{year}")
             _write_json(progress_path, {"status": f"writing_{domain}", "year": year, "updated_at": _now()})
             frame = _read_dataset_date_range(root, active, domain, columns, f"{year}-01-01", f"{year}-12-31")
             _write_panel_values(panel, frame, feature_columns, date_to_idx=date_to_idx, symbol_to_idx=symbol_to_idx)
             del frame
             gc.collect()
+            _trim_process_working_set()
 
     corr_column = "intraday_price_volume_corr"
     if corr_column in INTRADAY_SIGNAL_COLUMNS:
@@ -1604,6 +2014,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         corr_valid_panel.flush()
 
     for year in range(int(date_values[0][:4]), int(date_values[-1][:4]) + 1):
+        memory_guard(f"limit_status_{year}")
         _write_json(progress_path, {"status": "writing_entry_limits", "year": year, "updated_at": _now()})
         limit = _read_dataset_date_range(
             root,
@@ -1625,6 +2036,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             down_limit_panel.flush()
         del limit
         gc.collect()
+        _trim_process_working_set()
 
     exit_sellable_panel[:] = _exit_fill_mask(
         raw_close_panel,
@@ -1639,6 +2051,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
     )
     exit_sellable_panel.flush()
 
+    memory_guard("computing_labels")
     _write_json(progress_path, {"status": "computing_labels", "updated_at": _now()})
     summary_columns = path_summary_columns(config.forward_days)
     future_path_store = (
@@ -1712,8 +2125,11 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
     label_valid_store.flush()
     candidate_eligible_store.flush()
 
+    memory_guard("labels_completed")
     _write_json(progress_path, {"status": "building_sample_index", "updated_at": _now()})
-    sample_index = _build_sample_index(
+    sample_index_path = output_dir / "sample_index.parquet"
+    sample_index_stats = _write_sample_index_streaming(
+        output_path=sample_index_path,
         date_values=date_values,
         symbol_values=symbol_values,
         start_date=config.start_date,
@@ -1729,9 +2145,11 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         signal_eligible=signal_eligible_panel if sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE else None,
         require_entry_filled=sample_filter == SAMPLE_FILTER_COMPLETE_CASE,
     )
-    sample_index_path = output_dir / "sample_index.parquet"
-    sample_index.to_parquet(sample_index_path, index=False)
-    candidate_index = _build_sample_index(
+    memory_guard("sample_index_completed")
+    _write_json(progress_path, {"status": "building_candidate_index", "updated_at": _now()})
+    candidate_index_path = output_dir / "candidate_index.parquet"
+    candidate_index_stats = _write_sample_index_streaming(
+        output_path=candidate_index_path,
         date_values=date_values,
         symbol_values=symbol_values,
         start_date=config.start_date,
@@ -1749,9 +2167,9 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         require_label_valid=False,
         id_column="candidate_id",
     )
-    candidate_index_path = output_dir / "candidate_index.parquet"
-    candidate_index.to_parquet(candidate_index_path, index=False)
 
+    memory_guard("candidate_index_completed")
+    _write_json(progress_path, {"status": "fitting_normalization", "updated_at": _now()})
     train_date_mask = np.array([int(date[:4]) in set(config.train_years) for date in date_values], dtype=bool)
     normalization = {
         "fit_scope": "train_year_dates_only",
@@ -1760,10 +2178,11 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         "intraday_summary": _fit_normalization(intraday_summary, train_date_mask),
         "limit_structure": _fit_normalization(limit_structure, train_date_mask),
     }
+    memory_guard("manifest_assembly")
 
     source_dataset_ids = dict(active.get("datasets", {}) or {})
-    split_counts = sample_index["split"].value_counts().to_dict() if not sample_index.empty else {}
-    candidate_split_counts = candidate_index["split"].value_counts().to_dict() if not candidate_index.empty else {}
+    split_counts = dict(sample_index_stats["split_counts"])
+    candidate_split_counts = dict(candidate_index_stats["split_counts"])
     path_anchor_name = "signal_day_close" if str(config.price_anchor) == "today_close" else "next_calendar_trading_day_open"
     if isinstance(future_ohlcva_path_store, DateShardedFloatStore):
         future_ohlcva_meta = future_ohlcva_path_store.manifest(
@@ -1824,6 +2243,22 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         "max_label_dependency_days": required_dependency_days,
         "dependency_padding_complete": bool(dependency_padding_complete),
         "available_dependency_padding_days": int(panel_end_pos - sample_end_pos),
+        "resource_guard": {
+            "minimum_free_memory_gb": float(config.minimum_free_memory_gb),
+            "available_memory_probe": "psutil.virtual_memory.available",
+            "label_store_max_open_shards": 1,
+            "daily_feature_sort_passes": 1,
+            "memory_observations_path": str(memory_observation_path.resolve()),
+            "memory_observations_sha256": hashlib.sha256(memory_observation_path.read_bytes()).hexdigest(),
+            "minimum_observed_available_memory_gb": min(
+                (
+                    float(item["available_memory_gb"])
+                    for item in memory_observations
+                    if item["available_memory_gb"] is not None
+                ),
+                default=None,
+            ),
+        },
         "start_date": str(config.start_date),
         "end_date": str(config.end_date),
         "train_years": list(config.train_years),
@@ -1852,9 +2287,9 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         "symbol_values": symbol_values,
         "date_count": int(n_dates),
         "symbol_count": int(n_symbols),
-        "sample_count": int(len(sample_index)),
+        "sample_count": int(sample_index_stats["row_count"]),
         "sample_count_by_split": {str(key): int(value) for key, value in split_counts.items()},
-        "candidate_count": int(len(candidate_index)),
+        "candidate_count": int(candidate_index_stats["row_count"]),
         "candidate_count_by_split": {str(key): int(value) for key, value in candidate_split_counts.items()},
         "feature_channels": {
             "daily_raw": {"path": str((panel_dir / "daily_raw.float32.dat").resolve()), "shape": [n_dates, n_symbols, len(DAILY_RAW_FEATURES)], "columns": DAILY_RAW_FEATURES},
@@ -1969,6 +2404,8 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             "candidate_index": "full scoring universe; signal-day input_valid plus signal_eligible, never future-label or entry-fill gated",
             "join_key": ["date_idx", "symbol_idx"],
             "label_flags": ["label_valid", "price_label_valid", "va_aux_valid"],
+            "sample_index_write": sample_index_stats,
+            "candidate_index_write": candidate_index_stats,
         },
         "normalization": normalization,
         "label_semantics": {
@@ -2290,6 +2727,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Block unless every requested signal date has forward_days + execution_tail_days of calendar padding.",
     )
     build.add_argument(
+        "--minimum-free-memory-gb",
+        type=float,
+        default=DEFAULT_MINIMUM_FREE_MEMORY_GB,
+        help="Stop safely before a large stage when available physical memory falls below this threshold.",
+    )
+    build.add_argument(
         "--unresolved-exit-recovery-fraction",
         type=float,
         default=0.0,
@@ -2374,6 +2817,7 @@ def main(argv: list[str] | None = None) -> int:
             suspension_fill=str(args.suspension_fill),
             execution_tail_days=int(args.execution_tail_days),
             require_full_dependency_padding=bool(args.require_full_dependency_padding),
+            minimum_free_memory_gb=float(args.minimum_free_memory_gb),
             unresolved_exit_recovery_fraction=float(args.unresolved_exit_recovery_fraction),
             execution_cost=AShareExecutionCostConfig(
                 lot_size=int(args.lot_size),
