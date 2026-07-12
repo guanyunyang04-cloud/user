@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "contract_id": "seq100_dynamic_qcurve_development_contract_20260712_v1",
+  "contract_sha256": "2e134c2378c66f1dc6eb48d156ff9c47047f1ee627d06b2450dd059d84c71a33",
+  "status": "approved_implementation",
+  "approved_at": "2026-07-12",
+  "supersedes_model_objective": "predicted_path_opportunity_score_v2",
+  "research_scope": {
+    "decision_time": "signal_day_after_close",
+    "universe": "Shanghai and Shenzhen A-share main board PIT universe",
+    "maximum_positions": 3,
+    "maximum_position_weight": 0.6,
+    "cash_allowed": true,
+    "active_execution_change_allowed": false,
+    "active_qdp_change_allowed": false
+  },
+  "data_contract": {
+    "source_pack": "candidate-complete v7, read-only",
+    "derived_pack": "qcurve candidate-complete v8",
+    "lookback_days": 100,
+    "prediction_forward_days": 60,
+    "execution_tail_days": 20,
+    "max_label_dependency_days": 80,
+    "entry": "D+1 raw open, strictly below tick-rounded up limit",
+    "earliest_new_position_exit": "D+2 raw open",
+    "planned_exit_offsets": [2, 60],
+    "blocked_exit": "defer to first open_sellable day through D+80",
+    "terminal_recovery_fraction": 0.0,
+    "reference_portfolio_cash_cny": 1000000.0,
+    "reference_position_cash_cny": 333333.3333333333,
+    "candidate_selection_uses_future_data": false,
+    "supervision_and_candidate_indexes_are_separate": true
+  },
+  "target_contract": {
+    "primary": "executable net log-return term structure",
+    "enter_horizons": "2..60",
+    "hold_horizons": "1..60",
+    "entry_unfilled": "zero log return / retained cash",
+    "target_floor": "log(max(1 + net_return, 1e-4))",
+    "oracle_exit_day_is_training_target": false,
+    "rank_anchor_horizons": [2, 5, 10, 20, 40, 60],
+    "risk_preference": "drawdown diagnostic only"
+  },
+  "model_contract": {
+    "profiles": ["qcurve_lgbm", "qcurve_gru", "qcurve_multiscale_ma"],
+    "outputs": ["mean", "q20", "q50", "q80", "p_positive"],
+    "quantile_ordering": "q20 <= q50 <= q80 by parameterization",
+    "path_role": "15 percent auxiliary supervision only",
+    "rank_scope": "complete signal-date cross-section",
+    "rank_top_count": 32,
+    "rank_true_top3_weight": 4.0
+  },
+  "loss_contract": {
+    "mean_huber": 0.25,
+    "quantile_pinball": 0.2,
+    "positive_bce": 0.05,
+    "soft_exit_expected_log_wealth": 0.1,
+    "full_day_top3_rank": 0.25,
+    "structured_price_trend_aux": 0.1,
+    "va_vwap_aux": 0.05,
+    "soft_exit_temperature": 0.03,
+    "normalization": "train-only per-horizon median and MAD"
+  },
+  "development_protocol": {
+    "years": [2022, 2023, 2024, 2025],
+    "method": "purged_expanding_development_walkforward",
+    "train_start_year": 2012,
+    "purge_rule": "max_label_dependency_date_idx < development_start_date_idx",
+    "seed": 7,
+    "maximum_epochs": 10,
+    "minimum_complete_epochs": 1,
+    "early_stopping_metric": "development_total_loss",
+    "early_stopping_mode": "min",
+    "early_stopping_patience": 2,
+    "topk_selects_checkpoint": false,
+    "historical_test_set": null,
+    "multi_seed": false,
+    "low_budget_screen": false,
+    "full_fold_data_required": true
+  },
+  "allocation_contract": {
+    "q20_gate": 0.0,
+    "capital_shadow_rate": "fourth-highest positive compound rate, else zero",
+    "path_value": "max_h(mean(h) - rho * holding_days(h))",
+    "weights": "positive path value proportional with iterative 60 percent cap",
+    "locked_unsellable_positions_retain_weight": true,
+    "unfilled_buy_has_no_intraday_replacement": true,
+    "recommended_horizon_is_recomputed_daily": true
+  },
+  "eligibility": {
+    "base_portfolio_absolute_and_alpha_positive_years_min": 3,
+    "base_equal_year_mean_and_median_positive": true,
+    "stress_positive_years_min": 2,
+    "stress_equal_year_mean_positive": true,
+    "top3_absolute_and_alpha_positive_years_min": 3,
+    "q20_breach_rate_range": [0.15, 0.25],
+    "candidate_execution_and_q_label_coverage": 1.0,
+    "maximum_drawdown_is_gate": false,
+    "winner_null_when_ineligible": true
+  },
+  "protected_boundaries": {
+    "overwrite_v7": false,
+    "overwrite_historical_evidence": false,
+    "change_active_execution": false,
+    "change_qdp_active": false
+  }
+}
