@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 162,
+  "record_count": 163,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -3844,6 +3844,24 @@
         "seq100_todayclose_path_only_daily_only_summary_v2_ohlcva_aux_low_price_delta_20260709_014409"
       ],
       "verdict": "Status: `completed / explicit_comparison / research_only / no_active_change`.; `daily_only_summary_v2_price_delta` completed with close-to-close log-delta price rhythm supervision. It improved validation/test IC versus the current default, but did not improve the narrow Top1 path-value spread.; `daily_only_summary_v2_ohlcva_aux_low` completed with lower VA auxiliary weights. It produced the best validation IC among this comparison set and the strongest test Top1/Top3 path-value spread.; `daily_only_summary_v2_ohlcva_aux_low_price_delta` completed, but the combined constraints were weaker than either single addition on test IC and TopK.",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_seq100_process_complexity_slimming_20260712",
+      "date": "2026-07-12",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_seq100_process_complexity_slimming_20260712.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "Verdict: targeted cleanup completed; retain the historical compatibility engine, use the slim current façade, and keep execution frozen until an execution-aligned candidate passes the four-year gates.",
       "blockers": [],
       "next_allowed_actions": [],
       "active_artifact_impact": "unchanged",

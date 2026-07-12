@@ -332,7 +332,7 @@ REQUIRED_DOC_SNIPPETS = {
     "daily_research/brain/operations_center.md": (
         "## Runtime Objects",
         "## Procedure Entries",
-        "### procedure `seq100_mainline_default`",
+        "### procedure `seq100_development_workflow`",
         "### procedure `research_store_gc`",
         "## Command Palette",
         "## Validation Selection Function",

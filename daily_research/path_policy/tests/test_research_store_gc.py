@@ -80,6 +80,99 @@ def test_referenced_smoke_pack_is_not_safe_to_delete(workspace: Path) -> None:
     assert item.safe_to_delete_directory is False
 
 
+def test_cleanup_inventory_does_not_retain_its_delete_candidates(workspace: Path) -> None:
+    pack_root = workspace / "daily_research/data/research_store/sequence_pack"
+    smoke = pack_root / "smoke_seq100_path20"
+    _write_json(smoke / "manifest.json", {"feature_channels": {}, "label_arrays": {}})
+    references = workspace / "daily_research/brain/references"
+    _write_json(
+        references / "process_pack_cleanup_inventory.json",
+        {
+            "artifact_type": "seq100_process_pack_cleanup_inventory",
+            "status": "pre_delete_inventory",
+            "candidates": [{"path": str(smoke)}],
+        },
+    )
+
+    report = gc.build_research_gc_report(
+        sequence_pack_roots=[pack_root],
+        artifact_roots=[],
+        reference_roots=[references],
+        large_file_threshold_mb=1,
+    )
+
+    assert report["totals"]["safe_delete_candidate_count"] == 1
+    assert report["safe_delete_candidates"][0]["name"] == smoke.name
+
+
+def test_build_report_protects_study_referenced_by_newer_registry(workspace: Path) -> None:
+    studies = workspace / "daily_research/output/path_policy/studies"
+    retired = studies / "generation_v1"
+    _write_json(retired / "study_retirement.json", {"status": "retired"})
+    successor = studies / "generation_v2"
+    _write_json(successor / "study_summary.json", {"status": "completed"})
+    _write_json(
+        successor / "development_registry.json",
+        {"additional_provenance_paths": [str(retired / "study_retirement.json")]},
+    )
+
+    report = gc.build_research_gc_report(
+        sequence_pack_roots=[],
+        studies_root=studies,
+        reference_roots=[],
+        large_file_threshold_mb=1,
+    )
+
+    retired_item = next(item for item in report["largest_artifacts"] if item["name"] == "generation_v1")
+    assert retired_item["safe_to_delete_directory"] is False
+    assert retired_item["referenced_by_artifact"] is True
+    assert "referenced_by_registered_artifact" in retired_item["reasons"]
+    assert retired_item["reference_sources"] == [
+        "daily_research/output/path_policy/studies/generation_v2/development_registry.json"
+    ]
+
+
+def test_build_report_honors_explicit_retention_policy_paths(workspace: Path) -> None:
+    pack_root = workspace / "daily_research/data/research_store/sequence_pack"
+    partial = pack_root / "candidate_partial"
+    _write_json(partial / "progress.json", {"status": "interrupted"})
+    studies = workspace / "daily_research/output/path_policy/studies"
+    retired = studies / "protected_generation_v1"
+    _write_json(retired / "study_retirement.json", {"status": "retired"})
+    policy_path = workspace / "daily_research/brain/research_store_retention_policy.json"
+    _write_json(
+        policy_path,
+        {
+            "artifact_type": "research_store_retention_policy",
+            "protected_sequence_pack_paths": ["sequence_pack/candidate_partial"],
+            "protected_evidence_chain_paths": [
+                "daily_research/output/path_policy/studies/protected_generation_v1"
+            ],
+        },
+    )
+
+    report = gc.build_research_gc_report(
+        sequence_pack_roots=[pack_root],
+        research_store_root=workspace / "daily_research/data/research_store",
+        studies_root=studies,
+        policy_path=policy_path,
+        reference_roots=[],
+        large_file_threshold_mb=1,
+    )
+
+    by_key = {(item["artifact_type"], item["name"]): item for item in report["largest_artifacts"]}
+    for artifact_type, name in (
+        ("sequence_pack", "candidate_partial"),
+        ("study", "protected_generation_v1"),
+    ):
+        item = by_key[(artifact_type, name)]
+        assert item["safe_to_delete_directory"] is False
+        assert item["referenced_by_artifact"] is True
+        assert item["reference_sources"] == [
+            "daily_research/brain/research_store_retention_policy.json"
+        ]
+
+
 def test_progress_json_interrupted_pack_is_safe_when_unreferenced(workspace: Path) -> None:
     pack = workspace / "daily_research/data/research_store/sequence_pack/qdp_v2_seq100_path60_partial"
     _write_json(pack / "manifest.json", {"feature_channels": {}, "label_arrays": {}})

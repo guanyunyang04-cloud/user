@@ -1,5 +1,5 @@
 # Daily Research 知识对象
-快照日期：`2026-07-10`
+快照日期：`2026-07-12`
 
 本文件保存稳定对象类、长期事实和方法论。它不承载当前状态长卷，也不复刻历史证据；完整 rXX、长命令和 dated review 在 `references/`。
 
@@ -45,26 +45,15 @@
 ## Long-Term Facts
 - `daily_research` 当前研究消费 QDP v2 数据基底；旧 daily_research lake / copied manifest / single memmap 不再是数据 owner。
 - QDP active data base and downstream pack status are recorded in `state_center.md` under `qdp_consumption`.
-- 当前主要研究方向是 `seq100_path_value_research`：用过去 100 日路径和状态序列预测未来路径，路径摘要和 path value 从预测路径派生；收盘后短线选股经验保留为可复用研究线。
-- 当前默认主线已升级为 `seq100_todayclose_path_only/daily_only_summary_v2_ohlcva_aux_low`：`research_store_view -> seq100_x32_daily_input -> today_close_anchor -> future60_ohlc_path -> summary_v2_multi_horizon_ohlc -> low_weight_va_auxiliary -> path_trade_value_v2 -> path_value_spread`。
-- Today-close daily-only summary_v2 with low-weight VA auxiliary supervision is the default research mainline; old daily-only summary_v2 and all-channel base summary remain comparison baselines, and topK path-value spread remains research evidence, not promotion evidence.
-- `Path20` / `alpha_path20_neural_policy_v1` 是历史证据代号和代码 namespace，不再代表当前目标定义。
-- `summary_v2_multi_horizon_ohlc` is an explicit comparison profile that keeps OHLC output and only expands OHLC-derived summary-loss constraints; its narrow CLI default uses `early_stopping_patience=2`, and the multi-horizon loss is vectorized without changing the per-horizon objective.
-- All-channel `summary_v2_multi_horizon_ohlc` is retained as a narrow Top1 comparison branch, not the default. Pre-purge historical combo evidence reported that adding `price_delta`、VA auxiliary supervision or equal OHLCVA path-loss did not repair the old 2025 forward IC; that result is hypothesis history, not a current formal verdict.
-- `summary_v2_no60` is a strict control profile for `summary_v2_multi_horizon_ohlc`: it keeps the same OHLC-derived summary family and removes only the full 60-day window. It is not `summary_v3`; adding new shape summaries must be a separate experiment.
-- `daily_only_no_minute`、old `daily_only_summary_v2`、`no_intraday_summary` and `no_limit_structure` are explicit input ablation or combination profiles that keep daily labels, splits, loss and model output semantics aligned with the default mainline while changing input channel families and/or summary_v2 constraints.
-- `daily_only_summary_v2_price_delta` is an explicit close-rhythm auxiliary profile: it supervises first differences of anchored close log returns with `price_delta_loss`, while keeping OHLC path output and price-only `path_trade_value_v2`.
-- `daily_only_summary_v2_ohlcva_aux_low` is the default volume/amount auxiliary-supervision profile: it predicts a 6D OHLCVA auxiliary path at low weights (`va_level0.02/va_delta0.01`) but keeps `future_path` as 4D OHLC and keeps summary/value/rank on price-only `path_trade_value_v2`; high-weight `daily_only_summary_v2_ohlcva_aux` remains a comparison profile.
-- Pre-purge historical low-VA comparisons suggested that volume/amount auxiliary supervision can help narrow Top1/Top3 selection as a representation regularizer, while VA forecast MAE is not itself the decision metric and low VA plus `price_delta_loss` was not additive. These observations are hypothesis-generating only under the current purged policy.
-- `daily_only_summary_v2_ohlcva_path_equal` is a stricter OHLCVA reconstruction comparison: OHLCVA six fields enter main `path_loss` equally, but summary/value/rank still use price-only OHLC-derived `path_trade_value_v2`; pre-purge historical evidence reported stronger isolated Top1 but weaker IC and broader TopK versus low-weight VA auxiliary, so the directional result is not a current formal verdict.
-- `path_value_v2_hard_st` is an implemented comparison profile: forward score equals deterministic hard-max inference while backward uses the former smooth gradient. `global_tail_512` is an implemented separated rank-batch comparison with true-tail strata and prior-epoch false positives. Neither has screening or model-quality evidence yet, and neither changes the default.
-- Corrected packs carry PIT eligibility, adjusted OHLC, entry-fill, observation/tradability and availability masks into the trainer. The former 402,987-key survivor-scope gap is closed by an atomic non-active five-domain view; absence from auxiliary current-survivor channels remains an availability-mask state, not ineligibility. Gate 0 must be an independent `eligible_for_research && !is_suspended` anti-join, never a check of `eligible_for_signal` after that field already requires a market row.
-- Primary seq100 evaluation uses purged expanding `train/oos` folds: every training label must end strictly before the first OOS trading day, normalization excludes OOS feature dates, checkpoint policy is fixed before OOS, and OOS is evaluated once after training. Signal-year splitting alone is unsafe for forward-path labels.
-- The former `2024 validation + 2025 train-through-2024 forward test` views and results are pre-purge historical evidence. In the old 2025 view, 171,290 late-2024 train rows used labels ending inside 2025; those results cannot be mixed with formal purged OOS evidence.
-- The 2022-2025 seed-7 purged walk-forward keeps `daily_only_summary_v2_ohlcva_aux_low` as the default research profile. Both it and all-channel summary_v2 had positive Top3 alpha point estimates in all four folds; all-channel's paired Top3 advantage was only `+0.65 percentage points (0.0065)`, with HAC `[-2.41 pp, +3.72 pp]` and primary continuous ordered 969-day MBB `[-2.76 pp, +3.49 pp]` intervals crossing zero. Its 2023 Top3 difference was `-4.60 percentage points`; fold-grouped bootstrap is sensitivity evidence only.
-- Multi-year rolling OOS increases temporal/regime confidence versus one fixed recent test, but overlapping 60-day labels, shared expanding history, prior profile selection, complete-case label filtering and single-seed variance prevent treating folds or days as independent pristine tests.
-- `direct_value_rank_5d/10d/60d` are explicit comparison profiles that output only a scalar score and directly learn true future OHLC-derived `path_trade_value_v2_{horizon}d`; they are useful ranking evidence but do not replace the default OHLC path-output mainline.
-- `symbol_embedding`、`residual_score`、`richer_target`、`ohlcva_unified` and `rank_heavy_top1` are comparison or paused surfaces, not default concepts.
+- 当前主要研究方向是 `seq100_path_value_research`：用过去 100 日状态序列预测未来路径，但路径预测只是表征手段，最终排序目标必须对齐成本后可执行收益。
+- Candidate-complete v3 的 2022-2025 `train/development` 正式矩阵结论是 `winner=null`；`daily_only_summary_v2_ohlcva_aux_low` 仅保留为 baseline control，不再称 default/champion，hard-ST 已被否决。
+- `predicted_path_opportunity_score_v2` 是预测路径上的机会评分；历史字段名 `path_trade_value_v2` 只是兼容别名。opportunity score、realized-plan return 与 live PnL 必须分层解释。
+- 当前 checkpoint 层只使用 `development_total_loss`；候选层使用 Top1/3/5/10 成本后 realized-plan alpha、stress、覆盖率和跨年稳定性；opportunity alpha、oracle regret、rank IC、path MAE、fill rate 只作诊断。
+- 当前正式评估使用 2022-2025 purged expanding `train/development`：训练标签依赖结束日必须早于 development 首日，归一化也只使用此前已公开 feature dates；development 可按用户合同参与早停、loss 和冠军选择，因此不是独立 test。
+- 多年 development 比单一固定年份提供更强的制度/行情覆盖，但共享 expanding history、60 日标签相关性、单 seed 与反复设计决策意味着它不是四个独立 lockbox；真正的新信息从未来冻结冠军后的新预测与订单开始。
+- Corrected candidate-complete pack 同时承载 PIT eligibility、后复权 OHLC、candidate/supervision 双索引、entry-fill、停牌/可交易状态和 availability masks；缺失辅助通道是 mask 状态，不是自动剔除。
+- Hard-ST 放大了机会分与预测退出的错配；在固定退出、当前预测退出、oracle executable exit 审计和单一 soft-exit 候选通过前，不运行 `global_tail_512`。
+- 旧 all-channel、summary/no60/price-delta/VA/input-ablation/direct-value、`Path20`、`alpha_v2` 等 profile 只保留在代码 registry 与 dated references 中供按需复现，不再占用当前概念热路径。
 - continuous_policy 的长期思想是日级连续交易执行模型；当前不是 active/default 或执行解冻依据。
 - daily execution 的事实层是手动流程、作业证据和只读 daily verdict；Web 可运行或旧 runtime state 只提供辅助线索。
 - evidence registry v3 使用 `research_programs`、`study_families`、`run_tags` 三层索引。
@@ -83,7 +72,7 @@
 ## Research Line Index
 ### object `seq100_todayclose_path_only`
 `status`: current primary research mainline.
-`usage`: 默认训练、评估和接管解释都从 `daily_research.path_policy.seq100_mainline train` 进入，其 profile 是 `daily_only_summary_v2_ohlcva_aux_low`；只有用户显式要求时才展开 comparison branch。
+`usage`: 当前接管从 `daily_research.path_policy.seq100_development contract` 与 `state_center.md` 进入；四步正式流程是 `register/run/select/freeze`。`seq100_mainline` 仅保留单模型诊断和历史 profile 兼容。
 
 ### object `shortline_after_close_research`
 `status`: supporting research prior.

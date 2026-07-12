@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 from collections import Counter
 from dataclasses import asdict, dataclass
@@ -85,10 +86,13 @@ class ArtifactItem:
     large_files: list[dict[str, Any]] | None = None
     component_id: str = ""
     active_reachable: bool = False
+    referenced_by_artifact: bool = False
+    reference_sources: list[str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["large_files"] = list(self.large_files or [])
+        payload["reference_sources"] = list(self.reference_sources or [])
         return payload
 
 
@@ -159,6 +163,16 @@ def _read_json(path: str | Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _is_cleanup_inventory(path: str | Path) -> bool:
+    """Return whether a JSON record audits deletion instead of retaining its targets."""
+
+    candidate = _workspace_path(path)
+    if candidate.suffix.lower() != ".json":
+        return False
+    artifact_type = str(_read_json(candidate).get("artifact_type", "")).strip().lower()
+    return artifact_type.endswith("_cleanup_inventory")
+
+
 def _collect_reference_text(reference_roots: Iterable[str | Path]) -> str:
     chunks: list[str] = []
     for root in reference_roots:
@@ -168,11 +182,64 @@ def _collect_reference_text(reference_roots: Iterable[str | Path]) -> str:
         for path in base.rglob("*"):
             if not path.is_file() or path.suffix.lower() not in {".md", ".json", ".txt"}:
                 continue
+            # Cleanup inventories are tombstones/audit records. Treating their
+            # candidate paths as retention references makes guarded GC unable to
+            # delete the exact artifacts the inventory was created to audit.
+            if _is_cleanup_inventory(path):
+                continue
             try:
                 chunks.append(path.read_text(encoding="utf-8", errors="ignore"))
             except Exception:
                 continue
     return "\n".join(chunks).lower()
+
+
+def _collect_reference_sources(reference_roots: Iterable[str | Path]) -> list[tuple[Path, str]]:
+    sources: list[tuple[Path, str]] = []
+    seen: set[Path] = set()
+    for root in reference_roots:
+        base = _workspace_path(root)
+        if not base.exists():
+            continue
+        candidates = [base] if base.is_file() else base.rglob("*")
+        for path in candidates:
+            if not path.is_file() or path.suffix.lower() not in {".json", ".md"}:
+                continue
+            try:
+                resolved = path.resolve()
+            except OSError:
+                continue
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            try:
+                sources.append((resolved, path.read_text(encoding="utf-8", errors="ignore").lower()))
+            except OSError:
+                continue
+    return sources
+
+
+def _build_artifact_reference_index(
+    artifact_paths: Iterable[str | Path],
+    reference_sources: Iterable[tuple[Path, str]],
+) -> dict[Path, list[str]]:
+    paths_by_name: dict[str, list[Path]] = {}
+    for raw_path in artifact_paths:
+        path = _workspace_path(raw_path).resolve()
+        paths_by_name.setdefault(path.name.lower(), []).append(path)
+    if not paths_by_name:
+        return {}
+    pattern = re.compile("|".join(re.escape(name) for name in sorted(paths_by_name, key=len, reverse=True)))
+    index: dict[Path, set[str]] = {path: set() for paths in paths_by_name.values() for path in paths}
+    for source_path, text in reference_sources:
+        matched_names = {match.group(0).lower() for match in pattern.finditer(text)}
+        for name in matched_names:
+            for artifact_path in paths_by_name.get(name, []):
+                try:
+                    source_path.resolve().relative_to(artifact_path)
+                except ValueError:
+                    index[artifact_path].add(_relative(source_path))
+    return {path: sorted(sources) for path, sources in index.items() if sources}
 
 
 def _is_referenced(name: str, reference_text: str) -> bool:
@@ -301,7 +368,13 @@ def _manifest_references_outside_dir(manifest: Mapping[str, Any], artifact_dir: 
     return False
 
 
-def classify_sequence_pack(path: str | Path, *, reference_text: str, large_file_threshold_bytes: int) -> ArtifactItem:
+def classify_sequence_pack(
+    path: str | Path,
+    *,
+    reference_text: str,
+    large_file_threshold_bytes: int,
+    external_reference_sources: Iterable[str] = (),
+) -> ArtifactItem:
     artifact_dir = _workspace_path(path)
     name = artifact_dir.name
     manifest_path = artifact_dir / "manifest.json"
@@ -311,7 +384,10 @@ def classify_sequence_pack(path: str | Path, *, reference_text: str, large_file_
     progress = _read_json(progress_path)
     manifest = _read_json(manifest_path)
     size = _directory_size(artifact_dir)
-    referenced = _is_referenced(name, reference_text)
+    brain_referenced = _is_referenced(name, reference_text)
+    external_sources = sorted(set(external_reference_sources))
+    artifact_referenced = bool(external_sources)
+    referenced = brain_referenced or artifact_referenced
     reasons: list[str] = []
     classification = "sequence_pack_review_required"
     recommendation = "review_before_cleanup"
@@ -352,8 +428,11 @@ def classify_sequence_pack(path: str | Path, *, reference_text: str, large_file_
         cleanup_action = "manual_review"
         reasons.append("not_classified_as_smoke_partial_or_full")
 
-    if referenced:
+    if brain_referenced:
         reasons.append("referenced_by_brain_docs")
+    if artifact_referenced:
+        reasons.append("referenced_by_registered_artifact")
+    if referenced:
         safe_delete = False
     return ArtifactItem(
         artifact_type="sequence_pack",
@@ -367,19 +446,30 @@ def classify_sequence_pack(path: str | Path, *, reference_text: str, large_file_
         recommendation=recommendation,
         cleanup_action=cleanup_action,
         safe_to_delete_directory=safe_delete,
-        referenced_by_brain=referenced,
+        referenced_by_brain=brain_referenced,
         reasons=reasons,
         manifest_path=_relative(manifest_path) if manifest_path.exists() else "",
         large_files=_large_files(artifact_dir, threshold_bytes=large_file_threshold_bytes, max_files=8),
+        referenced_by_artifact=artifact_referenced,
+        reference_sources=external_sources[:8],
     )
 
 
-def classify_study(path: str | Path, *, reference_text: str, large_file_threshold_bytes: int) -> ArtifactItem:
+def classify_study(
+    path: str | Path,
+    *,
+    reference_text: str,
+    large_file_threshold_bytes: int,
+    external_reference_sources: Iterable[str] = (),
+) -> ArtifactItem:
     artifact_dir = _workspace_path(path)
     name = artifact_dir.name
     summary_path = _primary_study_summary_path(artifact_dir)
     size = _directory_size(artifact_dir)
-    referenced = _is_referenced(name, reference_text)
+    brain_referenced = _is_referenced(name, reference_text)
+    external_sources = sorted(set(external_reference_sources))
+    artifact_referenced = bool(external_sources)
+    referenced = brain_referenced or artifact_referenced
     large_files = _large_files(artifact_dir, threshold_bytes=large_file_threshold_bytes, max_files=12)
     large_prediction_files = _large_prediction_files(artifact_dir, threshold_bytes=large_file_threshold_bytes)
     reasons: list[str] = []
@@ -414,8 +504,11 @@ def classify_study(path: str | Path, *, reference_text: str, large_file_threshol
         cleanup_action = "keep"
         reasons.append("study_summary_exists")
 
-    if referenced:
+    if brain_referenced:
         reasons.append("referenced_by_brain_docs")
+    if artifact_referenced:
+        reasons.append("referenced_by_registered_artifact")
+    if referenced:
         safe_delete = False
     return ArtifactItem(
         artifact_type="study",
@@ -429,10 +522,12 @@ def classify_study(path: str | Path, *, reference_text: str, large_file_threshol
         recommendation=recommendation,
         cleanup_action=cleanup_action,
         safe_to_delete_directory=safe_delete,
-        referenced_by_brain=referenced,
+        referenced_by_brain=brain_referenced,
         reasons=reasons,
         summary_path=_relative(summary_path) if summary_path.exists() else "",
         large_files=large_files,
+        referenced_by_artifact=artifact_referenced,
+        reference_sources=external_sources[:8],
     )
 
 
@@ -501,6 +596,15 @@ def _scan_child_dirs(roots: Iterable[str | Path]) -> list[Path]:
     return out
 
 
+def _resolve_policy_paths(values: Iterable[str | Path], *, relative_root: str | Path) -> set[Path]:
+    root = _workspace_path(relative_root).resolve()
+    return {
+        (Path(value) if Path(value).is_absolute() else root / Path(value)).resolve()
+        for value in values
+        if str(value or "").strip()
+    }
+
+
 def _artifact_roots(
     *,
     artifact_roots: Iterable[str | Path] | None,
@@ -553,16 +657,53 @@ def build_research_gc_report(
 ) -> dict[str, Any]:
     threshold_bytes = max(int(float(large_file_threshold_mb) * 1024 * 1024), 1)
     reference_text = _collect_reference_text(reference_roots)
+    policy = load_research_store_retention_policy(policy_path)
     selected_artifact_roots = _artifact_roots(artifact_roots=artifact_roots, studies_root=studies_root)
+    sequence_paths = _scan_child_dirs(sequence_pack_roots)
+    study_paths = _scan_child_dirs(selected_artifact_roots)
+    artifact_reference_roots = (
+        *selected_artifact_roots,
+        _workspace_path(research_store_root) / "walkforward",
+        _workspace_path(research_store_root) / "views",
+    )
+    artifact_reference_sources = _collect_reference_sources(artifact_reference_roots)
+    artifact_reference_index = _build_artifact_reference_index(
+        [*sequence_paths, *study_paths],
+        artifact_reference_sources,
+    )
+    policy_reference = _relative(policy_path)
+    protected_sequence_paths = _resolve_policy_paths(
+        list(policy.get("protected_sequence_pack_paths", []) or []),
+        relative_root=research_store_root,
+    )
+    protected_study_paths = _resolve_policy_paths(
+        list(policy.get("protected_evidence_chain_paths", []) or []),
+        relative_root=WORKSPACE_ROOT,
+    )
+    for path in sequence_paths:
+        if path.resolve() in protected_sequence_paths:
+            artifact_reference_index.setdefault(path.resolve(), []).append(policy_reference)
+    for path in study_paths:
+        if path.resolve() in protected_study_paths:
+            artifact_reference_index.setdefault(path.resolve(), []).append(policy_reference)
     sequence_items = [
-        classify_sequence_pack(path, reference_text=reference_text, large_file_threshold_bytes=threshold_bytes)
-        for path in _scan_child_dirs(sequence_pack_roots)
+        classify_sequence_pack(
+            path,
+            reference_text=reference_text,
+            large_file_threshold_bytes=threshold_bytes,
+            external_reference_sources=artifact_reference_index.get(path.resolve(), []),
+        )
+        for path in sequence_paths
     ]
     study_items = [
-        classify_study(path, reference_text=reference_text, large_file_threshold_bytes=threshold_bytes)
-        for path in _scan_child_dirs(selected_artifact_roots)
+        classify_study(
+            path,
+            reference_text=reference_text,
+            large_file_threshold_bytes=threshold_bytes,
+            external_reference_sources=artifact_reference_index.get(path.resolve(), []),
+        )
+        for path in study_paths
     ]
-    policy = load_research_store_retention_policy(policy_path)
     graph = build_active_view_dependency_graph(store_root=research_store_root, policy_path=policy_path)
     active_component_ids = set(graph.get("active_component_ids", []) or [])
     cold_component_ids = {str(item) for item in list(policy.get("cold_component_paths", []) or [])}
@@ -596,7 +737,7 @@ def build_research_gc_report(
         "policy": {
             "deletes_active_qdp_data": False,
             "delete_requires": ["--delete", f"--confirm-delete {DELETE_CONFIRMATION}"],
-            "safe_delete_directory_rule": "only unreferenced smoke/partial/interrupted artifacts under allowed research roots",
+            "safe_delete_directory_rule": "only smoke/partial/interrupted artifacts unreferenced by brain docs, registered artifacts, or explicit retention policy under allowed research roots",
             "prediction_trim_rule": f"use trim-predictions --delete --confirm-trim {TRIM_CONFIRMATION}; directory GC does not delete whole studies for prediction bloat",
             "cold_store_rule": f"only explicit policy allowlist entries that are unreachable from active views; delete with prune-cold-store --delete --confirm-delete {COLD_STORE_CONFIRMATION}",
         },
@@ -606,6 +747,9 @@ def build_research_gc_report(
             "retention_policy": _relative(policy_path) if _workspace_path(policy_path).exists() else "",
             "artifact_roots": [_relative(path) for path in selected_artifact_roots],
             "reference_roots": [_relative(path) for path in reference_roots],
+            "artifact_reference_roots": [_relative(path) for path in artifact_reference_roots],
+            "artifact_reference_source_count": len(artifact_reference_sources),
+            "policy_protected_path_count": len(protected_sequence_paths | protected_study_paths),
             "preferred_research_store_root": _relative(DEFAULT_RESEARCH_STORE_ROOT),
         },
         "active_view_dependency_graph": graph,

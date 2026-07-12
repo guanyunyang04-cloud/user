@@ -46,6 +46,30 @@ ALLOWED_BY_PATH = {
     "brain/skills/workspace-brain/SKILL.md": {"memmap registry", "active_sharded_memmap"},
 }
 
+REQUIRED_BY_PATH = {
+    "daily_research/brain/state_center.md": {
+        "seq100_development": "Current seq100 facade is missing from state.",
+        "winner=null": "Current state must preserve the no-winner deployment boundary.",
+        "qdp_v2_seq100_path60_todayclose_candidate_complete_2012_2025_v7": (
+            "Current candidate-complete source pack is missing from state."
+        ),
+    },
+    "daily_research/brain/operations_center.md": {
+        "seq100_development": "Current seq100 facade is missing from operations.",
+        "train/development": "Current development fold roles are missing from operations.",
+        "memory_guard.py --min-available-gb 1.0": "The approved 1 GiB hard memory guard is missing.",
+    },
+    "daily_research/brain/knowledge_center.md": {
+        "winner=null": "The durable no-winner result is missing from knowledge.",
+        "train/development": "Current development semantics are missing from knowledge.",
+        "baseline control": "Baseline must be described as a control rather than a champion/default.",
+    },
+    "daily_research/brain/governance_layer.md": {
+        "train/development": "Current development governance is missing.",
+        "fixed_oos": "Historical fixed-OOS governance must remain explicit.",
+    },
+}
+
 
 def audit(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
     root = Path(workspace_root or ".").resolve()
@@ -64,6 +88,16 @@ def audit(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
                 continue
             if pattern.lower() in text.lower():
                 findings.append({"severity": "error", "path": rel, "pattern": pattern, "message": message})
+        for fragment, message in REQUIRED_BY_PATH.get(rel, {}).items():
+            if fragment.lower() not in text.lower():
+                findings.append(
+                    {
+                        "severity": "error",
+                        "path": rel,
+                        "pattern": f"missing:{fragment}",
+                        "message": message,
+                    }
+                )
     errors = [item for item in findings if item.get("severity") == "error"]
     warnings = [item for item in findings if item.get("severity") == "warning"]
     return {

@@ -50,6 +50,9 @@ class DocGuardTest(unittest.TestCase):
         self.assertIn("## Object Instances", state_snippets)
         self.assertIn("### object `seq100_path_value_research`", state_snippets)
         self.assertNotIn("r65_portfolio_set_v5_status_20260514.md", state_snippets)
+        operations_snippets = doc_guard.REQUIRED_DOC_SNIPPETS["daily_research/brain/operations_center.md"]
+        self.assertIn("### procedure `seq100_development_workflow`", operations_snippets)
+        self.assertNotIn("### procedure `seq100_mainline_default`", operations_snippets)
 
     def test_generated_and_output_markdown_do_not_require_canonical_marker(self) -> None:
         self.assertFalse(

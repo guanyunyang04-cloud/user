@@ -3,7 +3,7 @@
   "artifact_type": "research_store_retention_policy",
   "owner": "daily_research",
   "store_root": "daily_research/data/research_store",
-  "retention_model": "active_view_reachability_plus_explicit_cold_allowlist",
+  "retention_model": "active_view_reachability_plus_explicit_current_and_evidence_protection_plus_cold_allowlist",
   "active_view_ids": [
     "seq100_path60_todayclose_ohlcva",
     "seq100_path60_todayclose_ohlcva_train2012_2024_val2025_test2025",
@@ -15,6 +15,22 @@
   "deprecated_view_ids": [
     "seq100_path60_todayclose_ohlcva_train2012_2024_val2025_test2025"
   ],
+  "current_model_ready_assets": {
+    "source_pack_manifest": "daily_research/data/research_store/sequence_pack/qdp_v2_seq100_path60_todayclose_candidate_complete_2012_2025_v7/manifest.json",
+    "development_store_root": "daily_research/data/research_store/walkforward/seq100_candidate_complete_development_walkforward_20260711_v1",
+    "fold_roles": "train/development",
+    "development_years": [2022, 2023, 2024, 2025]
+  },
+  "protected_sequence_pack_paths": [
+    "sequence_pack/qdp_v2_seq100_path60_todayclose_candidate_complete_2012_2025_v7",
+    "sequence_pack/qdp_v2_seq100_path60_todayclose_pit_adjusted_2012_2025_v1"
+  ],
+  "protected_evidence_chain_paths": [
+    "daily_research/output/path_policy/studies/seq100_candidate_complete_development_walkforward_20260711_v1",
+    "daily_research/output/path_policy/studies/seq100_candidate_complete_development_walkforward_20260712_v2",
+    "daily_research/output/path_policy/studies/seq100_candidate_complete_development_walkforward_20260712_v3"
+  ],
+  "compatibility_view_status": "historical_replay_only_not_current_verdict",
   "cold_component_paths": [
     "label_store/path20_nextopen_ohlc_v1",
     "label_store/path60_nextopen_ohlc_v1",

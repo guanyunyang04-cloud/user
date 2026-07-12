@@ -5,7 +5,7 @@
 
 ## Module Interface
 `imports`: `qdp_v2_data_base` from `quant_data_platform`；`evidence_registry` from `daily_research/brain/references/evidence_registry.json`；`active_execution_artifact` from `daily_research/output/active_execution_strategy.json`，只在执行相关任务中激活。
-`exports`: `current_research_pointer = seq100_todayclose_path_only/daily_only_summary_v2_ohlcva_aux_low`；`execution_state = frozen_skeleton_only`；`data_access_policy = qdp_only`。
+`exports`: `current_research_pointer = seq100_candidate_complete_development/winner_null_exit_policy_audit`；`execution_state = frozen_skeleton_only`；`data_access_policy = qdp_only`。
 
 ## Object Instances
 ### object `daily_research_project`
@@ -43,15 +43,15 @@
 
 ### object `seq100_path_value_research`
 `type`: active_research_program
-`state`: 当前唯一默认研究主线；用 QDP v2 active 数据构造 model-ready research artifacts，由 `daily_research` 拥有和解释。
-`default_mainline`: `seq100_todayclose_path_only/daily_only_summary_v2_ohlcva_aux_low`。
-`active_concept_surface`: `research_store_view`、`seq100_x32_daily_input`、`today_close_anchor`、`future60_ohlc_path`、`summary_v2_multi_horizon_ohlc`、`low_weight_va_auxiliary`、`path_trade_value_v2`、`path_value_spread`。
+`state`: 当前唯一主动研究程序；candidate-complete v3 已以 `winner=null` 关闭，尚无可部署 profile，当前阶段是退出策略错配审计。
+`baseline_control`: `daily_only_summary_v2_ohlcva_aux_low` 仅是冻结对照，不是 default/champion；`hard_st` 已被正式结果否决。
+`active_concept_surface`: `candidate_complete_pit_input`、`future60_ohlc_path`、`predicted_path_opportunity_score_v2`、`executable_realized_plan_return`、`execution_aligned_soft_exit`；历史字段 `path_trade_value_v2` 只作为 `predicted_path_opportunity_score_v2` 的兼容别名。
 `input_principle`: 过去 100 日 `daily_raw + daily_state` 序列；`intraday_summary` 和 `limit_structure` 不再作为默认输入，但旧 all-channel base 保留为 broad-TopK 对照基线；不使用 symbol embedding 作为默认主线。
-`output_principle`: 预测未来 OHLC 路径，并用低权重 VA auxiliary path 约束量价表征；路径摘要和 path trade value 从预测 OHLC 路径派生，排序使用预测路径价值而不是独立固定标签。
-`model_training_entry`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline train --json`；兼容的单模型训练入口，不能单独形成正式 verdict。
-`formal_evaluation_entry`: 先用 `seq100_research_generation init-development` 冻结候选与四折合同，再以 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe tools/memory_guard.py --min-available-gb 1.0 -- <yolos-python> -m daily_research.path_policy.seq100_research_generation run-development --root <study-root> --registry <study-root>/development_registry.json` 运行完整矩阵，最后调用 `select-development --registry ... --ledger ...`；不得绕过 registry 直接形成正式 verdict。
-`comparison_surface`: `table_path60_baseline`、`path_only_next_open`、`rank_heavy_top1`、`all_channels_base_summary`、`summary_v2_multi_horizon_ohlc`、`summary_v2_no60`、`summary_v2_price_delta`、`summary_v2_ohlcva_aux`、`summary_v2_ohlcva_aux_low`、`summary_v2_ohlcva_aux_low_price_delta`、`summary_v2_ohlcva_path_equal`、`daily_only_no_minute`、`daily_only_summary_v2`、`daily_only_summary_v2_price_delta`、`daily_only_summary_v2_ohlcva_aux`、`daily_only_summary_v2_ohlcva_aux_low_price_delta`、`daily_only_summary_v2_ohlcva_path_equal`、`path_value_v2_hard_st`、`global_tail_512`、`no_intraday_summary`、`no_limit_structure`、`direct_value_rank_5d`、`direct_value_rank_10d`、`direct_value_rank_60d`。
-`archived_or_paused_surface`: `alpha_v2`、`path20`、`symbol_embedding`、`residual_score`、`richer_target`、`ohlcva_unified`。
+`output_principle`: 预测路径只是表征手段；排序核心必须逐步对齐成本后可执行收益。opportunity score、realized-plan return 与 live PnL 是三个不同层级，不再合并解释。
+`current_contract_entry`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_development contract`。
+`model_training_entry`: `daily_research.path_policy.seq100_mainline` 保留为单模型诊断/历史 profile 兼容入口，不能单独形成正式 verdict。
+`formal_evaluation_entry`: 当前 façade 仅暴露 `seq100_development register/run/select/freeze` 四个操作步骤；`run` 必须由 `tools/memory_guard.py --min-available-gb 1.0 -- ...` 包裹。登记时冻结完整四折合同，选择结果为 `winner=null` 时 `freeze` 必须失败；旧 `seq100_research_generation` 仅作冻结 registry 和历史 fixed-OOS 流程的兼容引擎。
+`comparison_surface`: 历史 profile/ablation 只在 `seq100_mainline.PROFILE_SPECS` 与 evidence registry 中按需激活，不再展开到当前热路径；当前只保留 baseline control、被否决的 hard-ST 和尚未实现的单一 soft-exit 候选概念。
 `primary_evaluation_policy`: 正式模型/profile 判断使用 2022-2025 purged expanding `train/development`，四年直接参与 checkpoint、loss 设计和冠军选择；无历史 test/outer audit。每条训练标签必须满足 `max_label_dependency_date_idx < development_start_date_idx`，归一化只用 development 首日前已公开 feature dates；每折使用全部合格训练行，至少完成一个完整 epoch，最多 10 epoch，仅按 `development_total_loss`、patience 2 早停并恢复 best checkpoint；Top1/3/5/10 不选择折内 checkpoint，但用于候选资格和设计决策。真正 lockbox 从未来冠军冻结后的 2026 新预测/订单开始。
 `current_evidence`: candidate-complete v3 正式矩阵已完成 `8/8` jobs：seed 7、baseline/hard-ST、2022-2025 四折均 `best_epoch=1`、`completed_epochs=3`、early-stop=true。四年等权成本后 realized-plan alpha：baseline Top1/3/5/10 为 `-2.89%/-1.83%/-1.24%/-0.06%`，hard-ST 为 `-10.36%/-7.99%/-5.26%/-2.28%`；Top3 正收益年份分别 `0/4` 与 `1/4`，两者均未通过资格门，`winner=null`，不得 freeze。baseline Top3 opportunity alpha 仍为 `+39.87%`，但可执行 alpha 为 `-1.83%`、oracle regret `0.5651`，说明主要问题是预测退出/执行目标错配；hard-ST 放大错配，不直接继续 global-tail。候选与执行收益覆盖均为 100%，不是数据缺口；QDP active 与 execution 均未改变。
 `next_generation_implementation`: additive PIT/后复权/成交/停牌语义、candidate/supervision 双索引、availability masks、realized-plan/oracle-regret、hard-ST、global-tail、pinned prefetch、loss-based early stopping、candidate-complete 四折 registry/ledger/selection 与 portfolio freeze gate 均已实现。v3 已实际训练 `318,564` optimizer steps、`146,867,538` sample exposures；8 个作业均使用 `1.0 GiB` 可用物理内存硬保护且未触发，训练器内部 `2.0 GiB` 工作集软回收线保留。baseline/2022 的 exit 120 已证实仅为 stdout transport 中断，证据完整且未重训。
@@ -59,11 +59,11 @@
 `corrected_source_pack`: `daily_research/data/research_store/sequence_pack/qdp_v2_seq100_path60_todayclose_candidate_complete_2012_2025_v7/manifest.json`，SHA-256 `710b0421e554c31912ef249ca0a3df8fc1b0b3ba8b595a06784cae8fa34b7bda`；3509 panel dates、3404 PIT symbols、8,204,961 supervised samples、8,208,431 signal-day candidates，2012-2025 source role 无固定 validation/test；candidate eligibility 不依赖未来标签或 entry fill，执行/价格覆盖 gate 无缺口。
 `artifact_owner`: `daily_research`; preferred new root is `daily_research/data/research_store/<artifact_id>/`.
 `historical_artifacts`: old QDP research artifacts were physically migrated or deleted on 2026-07-07; `quant_data_platform/data/qdp_v2/research/` no longer exists as a training-pack location.
-`resource_state`: 2026-07-10 repository/QDP/research cleanup has reclaimed `136,151,736,627` bytes (`126.82 GiB`) in total. The research-store phase archived and deleted 9 unreachable cold components (`57.353 GiB`), trimmed 86 prediction files across 43 runs (`16.376 GiB`), and deleted 63 unreferenced partial/smoke directories (`3.046 GiB`). Post-cleanup scan has zero safe-directory, prediction-trim, or cold-component candidates.
-`gc_report`: `brain/references/repository_retention_cleanup_20260710.md`；cold component manifests/hashes/provenance are in `daily_research/brain/references/research_store_cold_assets_archive_20260710_105437.{md,json}`.
-`research_store_physical`: schema-v2 pointer index + retention policy protect one source view, four purged walk-forward fold views, and the deprecated legacy 2025 view for historical reproducibility; all share one panel store and one today-close OHLCVA label store. Current index has 6 views and 14 reachable components.
-`research_store_views`: source `seq100_path60_todayclose_ohlcva`；formal folds `seq100_path60_todayclose_ohlcva_purged_oos{2022,2023,2024,2025}`；deprecated pre-purge `seq100_path60_todayclose_ohlcva_train2012_2024_val2025_test2025`.
-`rollforward_views`: formal fold views expose only `train/oos`, carry label-end purge and complete-case audit fields, and refit normalization before each OOS start. The legacy duplicated validation/test view is retained only for historical reproducibility and must not be used for a new verdict.
+`resource_state`: repository/QDP/research cleanup has reclaimed `162,801,581,702` bytes (`151.62 GiB`) in total. On 2026-07-12, guarded GC additionally archived and deleted 9 unreferenced partial/smoke sequence packs totaling `26,649,845,075` bytes (`24.8196 GiB`); the post-delete scan has zero safe-directory candidates and all protected evidence hashes remain unchanged.
+`gc_report`: `brain/references/repository_retention_cleanup_20260710.md`；本轮清单与结果见 `daily_research/brain/references/seq100_process_pack_cleanup_inventory_20260712.json` 和 `daily_research/brain/references/path_policy_seq100_process_complexity_slimming_20260712.md`。
+`research_store_physical`: schema-v2 shared-view index 的 6 个 view / 14 个 reachable components 现在只承担兼容与历史复现；当前正式资产是独立保护的 candidate-complete v7 source pack、四个 `train/development` fold view 与 v1→v2→v3 退休/结果证据链。
+`research_store_views`: current source 是 candidate-complete v7 manifest；current folds 是 registry 绑定的 `seq100_path60_todayclose_ohlcva_development_{2022,2023,2024,2025}.json`。旧 source/purged-OOS/duplicated-2025 views 保留为 compatibility replay，不参与新 verdict。
+`rollforward_views`: 当前正式 fold 只暴露 `train/development` 并在 development 首日前 purge 标签依赖、拟合归一化；旧 `train/oos` folds 仅供历史复现。
 `store_view_note`: next-open/path20 views are historical evidence only; their former manifests and component hashes are preserved in the cold-asset archive, not as runnable active views.
 `next_method`: `audit_fixed_vs_predicted_vs_oracle_exit_then_train_execution_aligned_soft_exit()`；先在冻结候选和同一成本合同上拆解固定退出、当前预测退出和 oracle executable exit，再把 soft exit distribution 的 expected executable net return/value 作为单一核心改动；path/summary 保留为辅助。该候选通过前不跑 `global_tail_512`，execution remains separate and frozen.
 
@@ -103,13 +103,14 @@
 - Seq100 2025 roll-forward profile result (pre-purge historical evidence)：`daily_research/brain/references/path_policy_seq100_rollforward_2025_result_20260709.md`
 - Seq100 all-profile 2024 validation + 2025 forward result (pre-purge historical evidence)：`daily_research/brain/references/path_policy_seq100_all_profiles_val2024_forward2025_result_20260709.md`
 - Seq100 all-channel summary_v2 combo result (pre-purge historical evidence)：`daily_research/brain/references/path_policy_seq100_summary_v2_all_channels_combo_result_20260710.md`
-- Seq100 purged 2022-2025 walk-forward result (authoritative current evidence)：`daily_research/brain/references/path_policy_seq100_purged_walkforward_2022_2025_result_20260710.md`
+- Seq100 purged 2022-2025 fixed-OOS walk-forward result (historical comparison evidence)：`daily_research/brain/references/path_policy_seq100_purged_walkforward_2022_2025_result_20260710.md`
 - Seq100 PIT-adjusted/global-tail approved contract：`daily_research/brain/references/seq100_pit_adjusted_global_tail_contract_20260711.md`
 - Seq100 corrected pack semantics implementation and Gate-0 blocker：`daily_research/brain/references/seq100_pit_pack_semantics_implementation_20260711.md`
 - Seq100 formal PIT view and corrected source-pack completion：`daily_research/brain/references/seq100_pit_formal_view_and_pack_20260711.md`
 - Seq100 hard-ST/global-tail training-core implementation and throughput：`daily_research/brain/references/seq100_training_core_implementation_20260711.md`
 - Seq100 two-stage candidate/freeze/one-time outer-audit orchestrator implementation：`daily_research/brain/references/seq100_research_generation_orchestration_implementation_20260711.md`
 - Seq100 candidate-complete 2022-2025 development v3 result (`winner=null`, authoritative current evidence)：`daily_research/brain/references/path_policy_seq100_candidate_complete_development_v3_result_20260712.md`
+- Seq100 process-pack cleanup and concept slimming result：`daily_research/brain/references/path_policy_seq100_process_complexity_slimming_20260712.md`
 - Archived Path20/alpha-v2 July run reconciliation：`daily_research/brain/references/path_policy_alpha_v2_july_archived_runs_reconciliation_20260710.md`
 - Shortline plan：`daily_research/brain/references/shortline_after_close_research_plan_20260624.md`
 - Stage 0 diagnostic：`daily_research/brain/references/shortline_stage0_fixed_next_open_diagnostic_20260624.md`
