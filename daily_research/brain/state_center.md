@@ -43,7 +43,7 @@
 
 ### object `seq100_path_value_research`
 `type`: active_research_program
-`state`: 当前唯一主动研究程序；candidate-complete v3 已以 `winner=null` 关闭，尚无可部署 profile，当前阶段是退出策略错配审计。
+`state`: candidate-complete v3 已以 `winner=null` 关闭；后续 Q-only 动态 Q 曲线受控对照也已按用户决定提前终止，仍无可部署 profile，当前不再自动续跑该方向。
 `baseline_control`: `daily_only_summary_v2_ohlcva_aux_low` 仅是冻结对照，不是 default/champion；`hard_st` 已被正式结果否决。
 `active_concept_surface`: `candidate_complete_pit_input`、`future60_ohlc_path`、`predicted_path_opportunity_score_v2`、`executable_realized_plan_return`、`execution_aligned_soft_exit`；历史字段 `path_trade_value_v2` 只作为 `predicted_path_opportunity_score_v2` 的兼容别名。
 `input_principle`: 过去 100 日 `daily_raw + daily_state` 序列；`intraday_summary` 和 `limit_structure` 不再作为默认输入，但旧 all-channel base 保留为 broad-TopK 对照基线；不使用 symbol embedding 作为默认主线。
@@ -54,6 +54,7 @@
 `comparison_surface`: 历史 profile/ablation 只在 `seq100_mainline.PROFILE_SPECS` 与 evidence registry 中按需激活，不再展开到当前热路径；当前只保留 baseline control、被否决的 hard-ST 和尚未实现的单一 soft-exit 候选概念。
 `primary_evaluation_policy`: 正式模型/profile 判断使用 2022-2025 purged expanding `train/development`，四年直接参与 checkpoint、loss 设计和冠军选择；无历史 test/outer audit。每条训练标签必须满足 `max_label_dependency_date_idx < development_start_date_idx`，归一化只用 development 首日前已公开 feature dates；每折使用全部合格训练行，至少完成一个完整 epoch，最多 10 epoch，仅按 `development_total_loss`、patience 2 早停并恢复 best checkpoint；Top1/3/5/10 不选择折内 checkpoint，但用于候选资格和设计决策。真正 lockbox 从未来冠军冻结后的 2026 新预测/订单开始。
 `current_evidence`: candidate-complete v3 正式矩阵已完成 `8/8` jobs：seed 7、baseline/hard-ST、2022-2025 四折均 `best_epoch=1`、`completed_epochs=3`、early-stop=true。四年等权成本后 realized-plan alpha：baseline Top1/3/5/10 为 `-2.89%/-1.83%/-1.24%/-0.06%`，hard-ST 为 `-10.36%/-7.99%/-5.26%/-2.28%`；Top3 正收益年份分别 `0/4` 与 `1/4`，两者均未通过资格门，`winner=null`，不得 freeze。baseline Top3 opportunity alpha 仍为 `+39.87%`，但可执行 alpha 为 `-1.83%`、oracle regret `0.5651`，说明主要问题是预测退出/执行目标错配；hard-ST 放大错配，不直接继续 global-tail。候选与执行收益覆盖均为 100%，不是数据缺口；QDP active 与 execution 均未改变。
+`qonly_termination_evidence`: additive Q-only study 完成 `10/12` 逻辑任务后提前结束：LGBM 四折全现金；GRU Q-only 在 2022 `+41.31%`，但 2023 全现金、2024 `-57.65%`、2025 alpha 为负；multiscale Q-only 的 2022/2023 Top3 成本后绝对收益连续为负，使冻结的 Top3 `3/4` 正年份门槛在剩余两折中已不可达。Multiscale/2024 部分 epoch 与 2025 均 cancelled，`winner=null`，不得恢复后混入同一矩阵；详见 `daily_research/brain/references/path_policy_seq100_qonly_early_termination_result_20260713.md`。
 `next_generation_implementation`: additive PIT/后复权/成交/停牌语义、candidate/supervision 双索引、availability masks、realized-plan/oracle-regret、hard-ST、global-tail、pinned prefetch、loss-based early stopping、candidate-complete 四折 registry/ledger/selection 与 portfolio freeze gate 均已实现。v3 已实际训练 `318,564` optimizer steps、`146,867,538` sample exposures；8 个作业均使用 `1.0 GiB` 可用物理内存硬保护且未触发，训练器内部 `2.0 GiB` 工作集软回收线保留。baseline/2022 的 exit 120 已证实仅为 stdout transport 中断，证据完整且未重训。
 `gate0_state`: 原 active survivor-scope 的 `402,987` 个缺行情键阻塞已由 non-active 五域 view `seq100_pit_2012_2025_formal__9d6feb2a5ba7f15a7635b42f` 消除；独立 research-eligible/non-suspended anti-join、pack price coverage 和 factor coverage 均为 0 缺口。
 `corrected_source_pack`: `daily_research/data/research_store/sequence_pack/qdp_v2_seq100_path60_todayclose_candidate_complete_2012_2025_v7/manifest.json`，SHA-256 `710b0421e554c31912ef249ca0a3df8fc1b0b3ba8b595a06784cae8fa34b7bda`；3509 panel dates、3404 PIT symbols、8,204,961 supervised samples、8,208,431 signal-day candidates，2012-2025 source role 无固定 validation/test；candidate eligibility 不依赖未来标签或 entry fill，执行/价格覆盖 gate 无缺口。
@@ -65,7 +66,7 @@
 `research_store_views`: current source 是 candidate-complete v7 manifest；current folds 是 registry 绑定的 `seq100_path60_todayclose_ohlcva_development_{2022,2023,2024,2025}.json`。旧 source/purged-OOS/duplicated-2025 views 保留为 compatibility replay，不参与新 verdict。
 `rollforward_views`: 当前正式 fold 只暴露 `train/development` 并在 development 首日前 purge 标签依赖、拟合归一化；旧 `train/oos` folds 仅供历史复现。
 `store_view_note`: next-open/path20 views are historical evidence only; their former manifests and component hashes are preserved in the cold-asset archive, not as runnable active views.
-`next_method`: `audit_fixed_vs_predicted_vs_oracle_exit_then_train_execution_aligned_soft_exit()`；先在冻结候选和同一成本合同上拆解固定退出、当前预测退出和 oracle executable exit，再把 soft exit distribution 的 expected executable net return/value 作为单一核心改动；path/summary 保留为辅助。该候选通过前不跑 `global_tail_512`，execution remains separate and frozen.
+`next_method`: `pause_until_new_executable_ranking_hypothesis()`；不再自动续跑 Q-only/TCN 或恢复已取消 checkpoint。若重新启动，先提出能改变成本后 Top3 排序和跨年 calibration 的新假设，再建立新的 additive study；execution remains separate and frozen.
 
 ### object `alpha_v2_history`
 `type`: archived_research_line
@@ -111,6 +112,7 @@
 - Seq100 two-stage candidate/freeze/one-time outer-audit orchestrator implementation：`daily_research/brain/references/seq100_research_generation_orchestration_implementation_20260711.md`
 - Seq100 candidate-complete 2022-2025 development v3 result (`winner=null`, authoritative current evidence)：`daily_research/brain/references/path_policy_seq100_candidate_complete_development_v3_result_20260712.md`
 - Seq100 process-pack cleanup and concept slimming result：`daily_research/brain/references/path_policy_seq100_process_complexity_slimming_20260712.md`
+- Seq100 Q-only controlled comparison early termination (`winner=null`)：`daily_research/brain/references/path_policy_seq100_qonly_early_termination_result_20260713.md`
 - Archived Path20/alpha-v2 July run reconciliation：`daily_research/brain/references/path_policy_alpha_v2_july_archived_runs_reconciliation_20260710.md`
 - Shortline plan：`daily_research/brain/references/shortline_after_close_research_plan_20260624.md`
 - Stage 0 diagnostic：`daily_research/brain/references/shortline_stage0_fixed_next_open_diagnostic_20260624.md`

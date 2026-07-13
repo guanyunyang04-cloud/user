@@ -398,12 +398,14 @@ class QCurveModel(nn.Module):
         encoder_type: str = "gru",
         horizon_embedding_dim: int = 32,
         input_group_dims: tuple[int, int, int] | None = None,
+        enable_auxiliary_heads: bool = True,
     ) -> None:
         super().__init__()
         encoder = str(encoder_type).strip().lower()
         if encoder not in {"gru", "multiscale_tcn"}:
             raise ValueError("encoder_type must be gru or multiscale_tcn")
         self.encoder_type = encoder
+        self.enable_auxiliary_heads = bool(enable_auxiliary_heads)
         self.input_group_dims = tuple(int(value) for value in input_group_dims) if input_group_dims else None
         if self.input_group_dims is not None:
             if encoder != "multiscale_tcn":
@@ -452,16 +454,20 @@ class QCurveModel(nn.Module):
             nn.Dropout(float(dropout)),
             nn.Linear(int(hidden_dim), 5),
         )
-        self.path_aux_head = nn.Sequential(
-            nn.Linear(int(hidden_dim) + int(horizon_embedding_dim), int(hidden_dim)),
-            nn.GELU(),
-            nn.Linear(int(hidden_dim), 6),
-        )
-        self.trend_aux_head = nn.Sequential(
-            nn.Linear(int(hidden_dim), int(hidden_dim)),
-            nn.GELU(),
-            nn.Linear(int(hidden_dim), 5),
-        )
+        if self.enable_auxiliary_heads:
+            self.path_aux_head: nn.Module | None = nn.Sequential(
+                nn.Linear(int(hidden_dim) + int(horizon_embedding_dim), int(hidden_dim)),
+                nn.GELU(),
+                nn.Linear(int(hidden_dim), 6),
+            )
+            self.trend_aux_head: nn.Module | None = nn.Sequential(
+                nn.Linear(int(hidden_dim), int(hidden_dim)),
+                nn.GELU(),
+                nn.Linear(int(hidden_dim), 5),
+            )
+        else:
+            self.path_aux_head = None
+            self.trend_aux_head = None
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         normalized = self.input_norm(x)
@@ -517,6 +523,9 @@ class QCurveModel(nn.Module):
             start = 0 if action_name == "hold" else 1
             for name, value in ordered.items():
                 outputs[f"{action_name}_{name}"] = value[:, start:]
+
+        if self.path_aux_head is None or self.trend_aux_head is None:
+            return outputs
 
         aux_raw = self.path_aux_head(torch.cat([pooled_expanded, horizon_emb], dim=-1))
         close_delta = aux_raw[..., 0]

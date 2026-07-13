@@ -53,6 +53,7 @@
 - 多年 development 比单一固定年份提供更强的制度/行情覆盖，但共享 expanding history、60 日标签相关性、单 seed 与反复设计决策意味着它不是四个独立 lockbox；真正的新信息从未来冻结冠军后的新预测与订单开始。
 - Corrected candidate-complete pack 同时承载 PIT eligibility、后复权 OHLC、candidate/supervision 双索引、entry-fill、停牌/可交易状态和 availability masks；缺失辅助通道是 mask 状态，不是自动剔除。
 - Hard-ST 放大了机会分与预测退出的错配；在固定退出、当前预测退出、oracle executable exit 审计和单一 soft-exit 候选通过前，不运行 `global_tail_512`。
+- Q-only 动态 Q 曲线受控对照已提前终止：GRU 跨年失稳，multiscale 在已完成两年中连续出现负 Top3 成本后绝对收益；删除辅助头本身不足以解决可执行排序与 calibration 问题。
 - 旧 all-channel、summary/no60/price-delta/VA/input-ablation/direct-value、`Path20`、`alpha_v2` 等 profile 只保留在代码 registry 与 dated references 中供按需复现，不再占用当前概念热路径。
 - continuous_policy 的长期思想是日级连续交易执行模型；当前不是 active/default 或执行解冻依据。
 - daily execution 的事实层是手动流程、作业证据和只读 daily verdict；Web 可运行或旧 runtime state 只提供辅助线索。
@@ -66,6 +67,7 @@
 - 固定 horizon 不是目标本体；判断重点是赚钱相关排序、spread、hit lift、月稳和 calibration。
 - 工程复杂度会制造循环；runner、profile、loss、diagnostics 应服务明确阻塞点。
 - 执行异常不是研究结论；timeout、脚本入口失败、残留进程或资源挤占先归因，再决定证据等级。
+- 当冻结的跨年资格门在剩余任务中已数学不可达，继续完成矩阵不再增加冠军判定信息；应保留已完成证据、显式取消剩余任务并禁止把部分 checkpoint 混入完整结果。
 - 数据资产要可复用、可审计、可查询；事实数据进入 QDP active data base，model-ready 训练 artifacts 进入 `daily_research/data/research_store`。
 - 训练用数据集不是事实源；新 model-ready training artifacts 优先进入 `daily_research/data/research_store`，QDP active data base 只保存共享事实和质量证明。
 

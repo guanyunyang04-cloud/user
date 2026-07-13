@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "contract_id": "seq100_dynamic_qcurve_qonly_contract_20260713_v1",
+  "status": "approved_implementation",
+  "approved_at": "2026-07-13",
+  "code_baseline": "e9ac92874295aac7571f1909cd59675579d37ed8",
+  "source_pack": "qdp_v2_seq100_dynamic_qcurve_candidate_complete_2012_2025_v8",
+  "profiles": [
+    "qcurve_lgbm",
+    "qcurve_gru_qonly",
+    "qcurve_multiscale_ma_qonly"
+  ],
+  "qonly_objective": {
+    "version": "qcurve_qonly_proportional_v1",
+    "auxiliary_heads": false,
+    "loss_weights": {
+      "mean_loss": 0.29411764705882354,
+      "quantile_loss": 0.23529411764705885,
+      "positive_loss": 0.05882352941176471,
+      "soft_exit_loss": 0.11764705882352942,
+      "rank_loss": 0.29411764705882354
+    },
+    "full_day_rank": {
+      "anchors": [2, 5, 10, 20, 40, 60],
+      "top_count": 32,
+      "true_top3_weight": 4.0
+    }
+  },
+  "training": {
+    "development_years": [2022, 2023, 2024, 2025],
+    "train_start_year": 2012,
+    "seed": 7,
+    "maximum_epochs": 10,
+    "patience": 2,
+    "checkpoint_metric": "development_total_loss",
+    "topk_selects_checkpoint": false,
+    "full_eligible_rows": true,
+    "historical_test": null,
+    "multi_seed": false,
+    "single_concurrency": true,
+    "memory_guard_min_available_gb": 1.0,
+    "in_epoch_checkpoint_date_interval": 50,
+    "in_epoch_checkpoint_seconds": 600
+  },
+  "numeric_acceleration": {
+    "amp_candidate": "fp16",
+    "amp_total_loss_relative_tolerance": 0.02,
+    "amp_component_relative_tolerance": 0.03,
+    "amp_primary_gradient_cosine_minimum": 0.98,
+    "microbatch_candidates": [512, 768, 1024],
+    "gpu_peak_gib_maximum": 5.2,
+    "fast_cudnn": true,
+    "bitwise_deterministic": false,
+    "seed_controls_initialization_dropout_and_date_order": true
+  },
+  "performance_gate": {
+    "multiscale_speedup_minimum": 2.5,
+    "projected_2022_train_epoch_seconds_maximum": 5400,
+    "architecture_reduction_allowed": false
+  },
+  "deployment_epoch": {
+    "formula": "mean((loss_y(e)-best_loss_y)/max(abs(best_loss_y),1e-8))",
+    "tie_tolerance": 0.0001,
+    "tie_break": "smaller_epoch",
+    "fixed_epoch_fold_replay": false
+  },
+  "protected_boundaries": {
+    "overwrite_v7_or_v8": false,
+    "change_qdp_active": false,
+    "change_active_execution": false,
+    "freeze_or_promote_winner": false
+  }
+}

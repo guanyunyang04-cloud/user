@@ -51,7 +51,7 @@
 
 ### procedure `seq100_path_value_research_work`
 `input`: candidate-complete v7 pack、exit-policy audit、single model/loss/value-function change、2022-2025 development evaluation request.
-`steps`: first audit fixed/predicted/oracle executable exits on frozen candidates and costs；change one core mechanism at a time；register the full four-fold matrix through `seq100_development`；run every fold on all eligible rows；select by the frozen gates；write compact current conclusion to `state_center.md` and dated evidence to `references/`.
+`steps`: first audit fixed/predicted/oracle executable exits on frozen candidates and costs；change one core mechanism at a time；register the full four-fold matrix through `seq100_development`；run every fold on all eligible rows；select by the frozen gates；write compact current conclusion to `state_center.md` and dated evidence to `references/`. If the user terminates the direction or a frozen gate becomes mathematically unreachable, stop all related processes, mark unfinished entries cancelled/result-invalid, keep `winner=null`, and write an explicit early-termination reference instead of silently leaving a runnable registry.
 `validation`: require `max_label_dependency_date_idx < development_start_date_idx`；normalization only uses feature dates before development；checkpoint selection uses only `development_total_loss`；Top1/3/5/10 cost-adjusted realized-plan metrics decide candidate eligibility；keep opportunity score、realized-plan return and live PnL separate.
 
 ### procedure `seq100_corrected_source_pack`
