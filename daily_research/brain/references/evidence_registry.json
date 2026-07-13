@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "status": "ok",
-  "record_count": 163,
+  "record_count": 165,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -3788,6 +3788,43 @@
       "dataset_ids": []
     },
     {
+      "id": "path_policy_seq100_exit_policy_price_basis_audit_result_20260713",
+      "date": "2026-07-13",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_seq100_exit_policy_price_basis_audit_result_20260713.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [
+        "seq100_candidate_complete_exit_policy_audit"
+      ],
+      "run_tags": [
+        "qdp_v2_seq100_path60_todayclose_candidate_complete_2012_2025_v7"
+      ],
+      "verdict": "The zero-training audit completed on the frozen candidate-complete v3; Replacing the predicted exit with a fixed exit does not rescue executable; A per-candidate, hindsight executable oracle also has negative Top3 alpha:; Executable-oracle alpha turns positive at Top5/Top10. At a common CNY",
+      "blockers": [
+        "QDP adjustment-factor temporal/event consistency is invalid: active and PIT factors contain daily changes that are not explained by corporate actions.",
+        "Candidate-complete v7 is blocked: its back-adjusted opportunity labels and trained models cannot support a new champion or economic opportunity claim.",
+        "Corrected Top3 evidence is absent: no repaired pack currently shows stable positive executable-oracle alpha."
+      ],
+      "next_allowed_actions": [
+        "Add a QDP adjustment-factor quality gate requiring piecewise stability between corporate actions, event-day adjusted-return continuity, and no arbitrary daily raw-price tracking; quarantine offending symbols/providers.",
+        "Trace and repair the external Tonghuashun factor sidecar normalization, then build a new immutable QDP dataset and independent quality proof without overwriting evidence or changing active merely to make this study pass.",
+        "Build an additive PIT view and new sequence pack with factor temporal/event validation in addition to key coverage and positivity.",
+        "Define one economically coherent execution price basis: raw prices for limits/fills plus validated share/cash entitlement handling, or an equivalent validated total-return representation.",
+        "Re-evaluate the frozen v3 score on corrected labels and rerun fixed/predicted/oracle auditing before retraining; retire the ranking target if corrected executable Top3 oracle alpha remains non-positive.",
+        "Register one soft-exit additive study only if the corrected zero-training audit shows stable positive executable Top3 oracle alpha."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "corporate_actions__a415e50cd459b3d93cc76e5a",
+        "adjust_factor__4e0e31d3c1fd34bfcfa7a7dd",
+        "adjust_factor__9d6feb2a5ba7f15a7635b42f"
+      ]
+    },
+    {
       "id": "path_policy_seq100_mainline_slimming_contract_20260707",
       "date": "2026-07-07",
       "r_id": "",
@@ -3902,6 +3939,25 @@
         "Execution-layer backtesting remains a separate task and requires explicit execution evidence; this study does not unfreeze execution."
       ],
       "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "path_policy_seq100_qonly_early_termination_result_20260713",
+      "date": "2026-07-13",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_seq100_qonly_early_termination_result_20260713.md",
+      "tags": [
+        "path_policy",
+        "gpu"
+      ],
+      "workflow": "path_policy",
+      "research_programs": [],
+      "study_families": [],
+      "run_tags": [],
+      "verdict": "",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "not_stated",
       "dataset_ids": []
     },
     {

@@ -1,5 +1,5 @@
 # Daily Research 过程目录
-快照日期：`2026-07-12`
+快照日期：`2026-07-13`
 
 本文件保存可调用过程、环境基线、命令入口和验证选择。它描述“怎么做”，不承担当前事实长卷；当前对象实例见 `state_center.md`。
 
@@ -29,7 +29,7 @@
 `compatibility_engine`: `daily_research.path_policy.seq100_research_generation`；保留冻结 registry 的复现和旧 screen/confirmation/fixed-OOS 命令，不是新研究热路径。
 `source_pack`: `daily_research/data/research_store/sequence_pack/qdp_v2_seq100_path60_todayclose_candidate_complete_2012_2025_v7/manifest.json`
 `formal_fold_views`: registry 所绑定的 `seq100_path60_todayclose_ohlcva_development_{2022,2023,2024,2025}.json`。
-`rule`: 当前无 default/champion profile；baseline 仅作 control，hard-ST 已否决，global-tail 暂停，直到一个 execution-aligned soft-exit 候选通过四年资格门。
+`rule`: 当前无 default/champion profile；baseline 仅作历史 control，hard-ST 已否决，Q-only 已终止。复权因子时序/事件一致性缺陷修复并完成 additive pack 零训练复审前，soft-exit 与 global-tail 均暂停。
 
 ### object `execution_runtime`
 `state`: frozen skeleton / read-only diagnostics / candidate wrappers.
@@ -51,7 +51,7 @@
 
 ### procedure `seq100_path_value_research_work`
 `input`: candidate-complete v7 pack、exit-policy audit、single model/loss/value-function change、2022-2025 development evaluation request.
-`steps`: first audit fixed/predicted/oracle executable exits on frozen candidates and costs；change one core mechanism at a time；register the full four-fold matrix through `seq100_development`；run every fold on all eligible rows；select by the frozen gates；write compact current conclusion to `state_center.md` and dated evidence to `references/`. If the user terminates the direction or a frozen gate becomes mathematically unreachable, stop all related processes, mark unfinished entries cancelled/result-invalid, keep `winner=null`, and write an explicit early-termination reference instead of silently leaving a runnable registry.
+`steps`: frozen fixed/predicted/oracle audit 已完成并发现 QDP factor blocker；当前先通过 `qdp_data_request` 修复 factor 时序/事件语义并重建 additive pack，再对冻结 score 做零训练复审。只有复审证明 Top3 executable oracle alpha 稳定为正，才允许 change one core mechanism、注册新的四折矩阵。若用户终止方向或冻结门槛数学不可达，停止相关进程、标记 unfinished 为 cancelled/result-invalid、保持 `winner=null` 并写显式证据。
 `validation`: require `max_label_dependency_date_idx < development_start_date_idx`；normalization only uses feature dates before development；checkpoint selection uses only `development_total_loss`；Top1/3/5/10 cost-adjusted realized-plan metrics decide candidate eligibility；keep opportunity score、realized-plan return and live PnL separate.
 
 ### procedure `seq100_corrected_source_pack`
@@ -59,7 +59,15 @@
 `manifest`: `daily_research/data/research_store/sequence_pack/qdp_v2_seq100_path60_todayclose_candidate_complete_2012_2025_v7/manifest.json`.
 `semantics`: lookback100/forward60、today-close、back-adjusted OHLC、candidate/supervision 双索引、tick-rounded open-below-limit entry、signal-day PIT pool、carry-adjusted-close suspension valuation、unfilled retained、separate price/VA/availability masks.
 `split_boundary`: source index uses 2012-2025 as one source role and contains no fixed validation/test；development builders own the four train/development roles and fold-specific normalization.
-`validation`: run `qdp_v2_sequence_path_pack validate --manifest <manifest> --json` and require `status=ok`, PIT price missing=0, exact five-domain view binding and active manifest unchanged.
+`validation`: 现有 `status=ok`、PIT price missing=0、five-domain binding、factor non-null/positive 只证明结构覆盖。新 pack 还必须要求 factor 在公司行动之间分段稳定、事件日 adjusted return 连续、无逐日 price-following 异常，并对已知反例 `600076.SH/2024` 给出修复证明；active manifest 仍须受保护。
+
+### procedure `seq100_exit_policy_audit`
+`input`: frozen candidate-complete v3 study、v7 pack、2022-2025 baseline/hard-ST rankings.
+`command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe tools/memory_guard.py --min-available-gb 1.0 -- C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_exit_policy_audit --output-root daily_research/output/path_policy/studies/seq100_candidate_complete_exit_policy_audit_2022_2025_v1`
+`price_basis_command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_exit_policy_price_basis_diagnostic --audit-root daily_research/output/path_policy/studies/seq100_candidate_complete_exit_policy_audit_2022_2025_v1`
+`semantics`: zero training；fixed day2/5/10/20/40/60、frozen predicted、cost-after executable oracle；stateless Top1/3/5/10 full-universe benchmark + stateful Top3 max3；D+1 raw open、T+1、blocked retry D+80、manifest costs、zero terminal recovery。
+`validation`: candidate universe count/hash identity、daily key uniqueness and complete coverage、oracle per-candidate dominance、vector/scalar exact replay、QDP active hash and active-execution state unchanged。
+`result`: completed；Top3 不能被 fixed/oracle 修复，Rank1 executable inversion，QDP adjustment-factor blocker；详见 `references/path_policy_seq100_exit_policy_price_basis_audit_result_20260713.md`。
 
 ### procedure `seq100_development_workflow`
 `input`: explicit study root、fold store root、candidate profile set；baseline is control, not an implied champion.
@@ -109,6 +117,8 @@
 - Task capsule: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule --task "<task>" --json`
 - Frontier: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow current-frontier --json`
 - Seq100 current workflow/contract: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_development --help` / `... seq100_development contract`
+- Seq100 zero-training exit audit: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_exit_policy_audit --help`
+- Seq100 price-basis diagnostic: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_exit_policy_price_basis_diagnostic --help`
 - Seq100 historical profiles: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_mainline --help`
 - Research-store scan / verify: `... research_store_gc scan --json` / `... research_store_view verify --json`
 - Evidence rebuild: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow evidence-index --rebuild --json`

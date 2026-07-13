@@ -1,5 +1,5 @@
 # Daily Research 知识对象
-快照日期：`2026-07-12`
+快照日期：`2026-07-13`
 
 本文件保存稳定对象类、长期事实和方法论。它不承载当前状态长卷，也不复刻历史证据；完整 rXX、长命令和 dated review 在 `references/`。
 
@@ -52,7 +52,8 @@
 - 当前正式评估使用 2022-2025 purged expanding `train/development`：训练标签依赖结束日必须早于 development 首日，归一化也只使用此前已公开 feature dates；development 可按用户合同参与早停、loss 和冠军选择，因此不是独立 test。
 - 多年 development 比单一固定年份提供更强的制度/行情覆盖，但共享 expanding history、60 日标签相关性、单 seed 与反复设计决策意味着它不是四个独立 lockbox；真正的新信息从未来冻结冠军后的新预测与订单开始。
 - Corrected candidate-complete pack 同时承载 PIT eligibility、后复权 OHLC、candidate/supervision 双索引、entry-fill、停牌/可交易状态和 availability masks；缺失辅助通道是 mask 状态，不是自动剔除。
-- Hard-ST 放大了机会分与预测退出的错配；在固定退出、当前预测退出、oracle executable exit 审计和单一 soft-exit 候选通过前，不运行 `global_tail_512`。
+- 冻结排名退出审计已完成：Hard-ST 确实放大预测退出错误，但固定 day2 与 hindsight executable oracle 在 Top3 仍为负 alpha，退出 timing 不是唯一缺陷；Rank4-10 的 oracle alpha 转正而 Rank1 为负，说明最高分端存在执行空间排序反转。
+- Candidate-complete v7 的 factor coverage 为 100% 不等于 factor semantics 正确。active/PIT Tonghuashun `back_adjust_factor` 可在无公司行动时逐日跳变，并把 Rank1 后复权机会标签从原始价格约 `+18%` 放大到约 `+85%`；修复前不运行 soft-exit 或 `global_tail_512`。
 - Q-only 动态 Q 曲线受控对照已提前终止：GRU 跨年失稳，multiscale 在已完成两年中连续出现负 Top3 成本后绝对收益；删除辅助头本身不足以解决可执行排序与 calibration 问题。
 - 旧 all-channel、summary/no60/price-delta/VA/input-ablation/direct-value、`Path20`、`alpha_v2` 等 profile 只保留在代码 registry 与 dated references 中供按需复现，不再占用当前概念热路径。
 - continuous_policy 的长期思想是日级连续交易执行模型；当前不是 active/default 或执行解冻依据。
@@ -64,6 +65,8 @@
 - 卖出同时涉及继续持有机会成本、现金价值、资金来源责任和风险状态，比买入更难。
 - 单项 gate 清零容易制造假进展；收益、月度质量、drawdown、source count、cash timing、exposure 和 intent conflict 要一起看。
 - 更强模型不是自动解决方案；错误的 target、receiver/source semantics 或 evidence route 会被模型放大。
+- 复权因子质量门不能只检查非空、正值、键覆盖和 provenance；还必须检查公司行动之间的分段稳定性、事件日调整连续性、与 raw price 的独立性，并隔离会逐日跟随价格变化的伪 factor。
+- 标签价格、成交价格和持仓价值必须共享一个经济一致的桥：raw price 用于涨跌停和成交，持仓跨公司行动时必须显式处理股数/现金权益或使用经过验证的等价 total-return 表示。否则 opportunity alpha 与 executable alpha 不可比较。
 - 固定 horizon 不是目标本体；判断重点是赚钱相关排序、spread、hit lift、月稳和 calibration。
 - 工程复杂度会制造循环；runner、profile、loss、diagnostics 应服务明确阻塞点。
 - 执行异常不是研究结论；timeout、脚本入口失败、残留进程或资源挤占先归因，再决定证据等级。
