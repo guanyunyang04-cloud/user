@@ -1,16 +1,29 @@
 # Quant Data Platform 状态程序
-快照日期：`2026-07-11`
+快照日期：`2026-07-14`
 
 ## Module Interface
-`exports`: QDP v2 active data base status、active table list、dataset manifest summaries、quality/audit entrypoints。
+`exports`: QDP v2 active data base status、QDP v3 rebuild/candidate status、dataset manifest summaries、quality/audit entrypoints。
 `consumers`: `daily_research`、`traditional_quant_research`、`t0_project`。
 
 ## Object Instances
 ### object `qdp_project`
 `type`: shared_manifest_first_data_base_instance
-`state`: v2 已成为当前 active 数据基底；旧 lake/ingest/memmap/canonical 命令已从公开 CLI 归档。
-`public_cli`: `qdp status/list/describe/check/rebuild/verify/gc/update`
+`state`: v2 仍是唯一 active 数据基底；v3 的 provider、raw、identity、build、audit、CAS release 与 GC 代码面已建立，但尚未完成全历史回灌或 active 切换。
+`public_cli`: 共用 `status/list/describe/check/gc/update`；v3 新增 `ingest/build candidate/audit/diff/publish/rollback/compatibility`；v2 legacy rebuild/verify 通过 `--generation v2` 保留。
 `python`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`
+
+### object `qdp_v3_rebuild`
+`type/state`: immutable_manifest_v3_candidate_pipeline / implementation_ready_backfill_blocked_by_m0
+`root`: `quant_data_platform/data/qdp_v3`
+`contract`: 日期分区 raw 不可变修订链；canonical 主键使用稳定 `security_id + 时间键`；历史代码由有证据的 `symbol_history` 恢复；quality tier 为 `strict/provisional/quarantined`。
+`providers`: BaoStock `0.9.3` wheel SHA-256 `acbd19403285bc4e254cee8297cf0e2646ae2276e5af7e549deed3988ab02293`；mootdx `0.11.7`。
+`implemented_domains`: 全 A 股批量日线/状态/估值、批量因子事件、逐证券因子史、security identity/symbol history、PIT signal/open、双源 5m、xdxr/股本、财务/业绩/行业/指数次级域。
+`compatibility`: 0.9.1 full golden 已捕获；0.9.3 full gate 为 `passed`（34 anchors、0 issues、普通多页 5537 rows、wheel hash 匹配）。报告不是 `passed/full` 时仍禁止 live date-partition ingest。
+`live_smoke`: strict A 股日线 `1699/2811/5207` rows；strict factor events `27` rows；ETF adapter `1574` rows provisional；`600000.SH/2020-01-02` 由完整 BaoStock 48 bars 单源进入 strict。
+`pit_name_boundary`: stock-basic 当前名称禁止反填历史；`name_on_date` 只能来自日期级 all-stock snapshot 或带 hash 的官方证据，semantic audit 回查 raw。
+`identity_regression`: `300114.SZ` 有效至 `2025-02-16`，`302132.SZ` 自 `2025-02-17` 生效；2016 provider 当前代码必须恢复为 `300114.SZ`。
+`release_boundary`: v3 没有 active manifest；只构建过一个单日 smoke candidate，未执行全量回灌、publish 或 active 切换；v2 active SHA-256 仍为 `e56f72a6cba8bcf86055817f6a0ec5e7391271fb3c27b4d628c3abc62944051e`。
+`evidence`: `quant_data_platform/brain/references/qdp_v3_rebuild_20260713.md`
 
 ### object `qdp_v2_active_data_base`
 `type`: active_manifest_first_data_base
@@ -24,7 +37,8 @@
 `active_table_count`: `17`
 `scope_boundary`: 17 个 core symbol tables 仍是 2026-06-26 当前存续 3037 股的静态范围；历史不按当前存续筛选时必须使用独立 `pit_mainboard_non_st_v1` 研究范围，不能把 core `universe_snapshot` 误称为无幸存者偏差股票池。
 `evidence`: `qdp status --json`、`qdp check --quick --json`、`qdp check meta --runtime fast --duckdb-memory-limit 12GB --threads 4 --writeback --json`
-`meta_quality_state`: PIT/metadata/factor/index proof passed with zero findings on 2026-07-01.
+`meta_quality_state`: 2026-07-01 的 PIT/metadata/factor/index 检查只证明结构、键覆盖和正值；2026-07-13 的语义审计证明旧因子可在无公司行动时逐日跳变，因此旧因子及其调整收益结论均降为 provisional。
+`lineage_health`: 当前 17 个 active dataset 的 parquet/manifest 仍可读，但每个 active manifest 各引用一个已经不存在的 source ancestor，共 17 个缺失 dataset id；M0 freeze 状态为 `blocked_missing_lineage`，发布 v3 前必须恢复祖先或形成经明确授权的替代恢复证明。
 
 ### object `active_tables`
 `type`: current_table_set
@@ -57,11 +71,11 @@
 `evidence`: `quant_data_platform/brain/references/pit_market_substrate_20260711.md`
 
 ### object `meta_domain_quality_proof`
-`type`: active_quality_evidence
-`state`: passed
+`type`: historical_structural_quality_evidence
+`state`: structurally_passed_semantically_superseded
 `domains`: `trading_calendar`、`universe_snapshot`、`security_status`、`adjust_factor`、`industry_concept`、`index_constituents`
 `audit_path`: `quant_data_platform/data/qdp_v2/audits/meta_domain_quality_20260701T140834+0000.json`
-`adjust_factor`: active dataset `adjust_factor__4e0e31d3c1fd34bfcfa7a7dd`; one row per `market_daily_raw` key; `adjust_factor` uses positive `back_adjust_factor`; `default_factor_rows=1`; `ffilled_rows=42474`.
+`adjust_factor`: active dataset `adjust_factor__4e0e31d3c1fd34bfcfa7a7dd`; one row per `market_daily_raw` key、正值与 provenance 仍成立，但不再构成语义正确证明；`600076.SH/2024` 无事件日异常跳变是固定反例。
 `industry_concept`: one row per universe key; blank/UNKNOWN industry rows are `0`; `001399.SZ` was filled from AkShare/CNInfo profile industry; concept tags are not part of the active short-line data base because no reliable PIT concept-tag source is active.
 `security_status`: historical ST rows remain PIT flags; active scope has `delisted_rows=0`.
 
@@ -95,13 +109,14 @@
 ### object `provider_runtime`
 `type`: upstream_ingest_runtime
 `state`: production Python environment is `yolos`; update workflow may use mootdx/BaoStock/CNInfo according to domain.
-`boundary`: provider staging and update outputs must pass manifest/audit gates before active pointer changes.
+`boundary`: BaoStock batch ingest 必须先通过 0.9.3 full compatibility gate；provider staging、identity、factor、PIT、5m 与 lineage 均通过 semantic audit 后才允许 CAS active pointer change。
 
 ### object `qdp_storage_retention`
 `state`: on `2026-07-10`, manifest-aware GC removed 26 unreferenced dataset directories and reclaimed `44,891,842,512` bytes; 17 active dataset directories remain.
 `proof`: every removed dataset had a same-domain active replacement covering its date range; all active shard targets were materialized and non-symlink; pre/post quick check and post-delete `status --verify-files` passed.
 `runtime`: metadata-only `qdp status` completes in about 0.6s; read-only `qdp check --quick --runtime fast` completes in about 2.5s on the current store.
 `invariant`: future deletion still requires active-manifest traversal, dry-run, replacement evidence for unique-data boundaries, and post-delete file verification.
+`m0_correction`: v3 freeze 审计发现 17 个 active input ancestor 已缺失；当前所有 39 个仍存在的 v2 dataset 及 17 个缺失祖先 id 均被 pin，v3 首次发布和成功增量更新前禁止删除型 GC。
 
 ## Pure Functions
 - `active_table(domain)`: read `active.json.datasets[domain]` and then the referenced `dataset.json`.

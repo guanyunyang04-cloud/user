@@ -1,0 +1,16 @@
+{
+  "lock_version": 1,
+  "updated_at": "2026-07-13",
+  "python_environment": "yolos",
+  "providers": {
+    "baostock": {
+      "version": "0.9.3",
+      "distribution": "baostock-0.9.3-py3-none-any.whl",
+      "sha256": "acbd19403285bc4e254cee8297cf0e2646ae2276e5af7e549deed3988ab02293",
+      "runtime_version_source": "importlib.metadata.version"
+    },
+    "mootdx": {
+      "version": "0.11.7"
+    }
+  }
+}

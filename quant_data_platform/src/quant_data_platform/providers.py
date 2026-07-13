@@ -1,19 +1,27 @@
 from __future__ import annotations
 
 import os
+import io
+import json
 import math
 import multiprocessing
 import queue as queue_module
+import threading
 import time
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from importlib.metadata import PackageNotFoundError, distribution as package_distribution, version as package_version
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import requests
 
 from quant_data_platform.domains.contracts import (
     DataDomain,
+    DatePartitionFetchRequest,
+    DatePartitionProviderResult,
     DomainFetchRequest,
     FetchRequest,
     ProviderResult,
@@ -77,6 +85,40 @@ QDP_PRODUCTION_V1_OPTIONAL_DOMAINS: tuple[str, ...] = (
 QDP_PRODUCTION_V1_RESEARCH_FUTURE_DOMAINS: tuple[str, ...] = (
     DataDomain.ANNOUNCEMENT,
 )
+QDP_PRODUCTION_V2_REQUIRED_DOMAINS: tuple[str, ...] = (
+    DataDomain.MARKET_DAILY,
+    DataDomain.TRADING_CALENDAR,
+    DataDomain.SECURITY_IDENTITY,
+    DataDomain.SYMBOL_HISTORY,
+    DataDomain.SECURITY_STATUS,
+    DataDomain.ADJUST_FACTOR_EVENT,
+)
+QDP_PRODUCTION_V2_OPTIONAL_DOMAINS: tuple[str, ...] = (
+    DataDomain.MARKET_INTRADAY_5M,
+    DataDomain.ADJUST_FACTOR_DAILY,
+    DataDomain.VALUATION,
+    DataDomain.INDUSTRY_CONCEPT,
+    DataDomain.INDEX_CONSTITUENTS,
+    DataDomain.FINANCIAL_QUARTERLY,
+    DataDomain.PERFORMANCE_FORECAST,
+    DataDomain.PERFORMANCE_EXPRESS,
+    DataDomain.CORPORATE_ACTIONS,
+    DataDomain.SHARE_CAPITAL,
+)
+QDP_PRODUCTION_V2_RESEARCH_FUTURE_DOMAINS: tuple[str, ...] = (
+    DataDomain.ANNOUNCEMENT,
+)
+
+BAOSTOCK_BATCH_VERSION = "0.9.3"
+BAOSTOCK_BATCH_WHEEL_SHA256 = "acbd19403285bc4e254cee8297cf0e2646ae2276e5af7e549deed3988ab02293"
+BAOSTOCK_BULK_PER_PAGE_COUNT = 20_000
+
+
+def _quiet_baostock_call(operation: Any, /, *args: Any, **kwargs: Any) -> Any:
+    """Keep provider banner text out of machine-readable CLI stdout/stderr."""
+
+    with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+        return operation(*args, **kwargs)
 
 
 _PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
@@ -86,10 +128,12 @@ _PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
             DataDomain.MARKET_INTRADAY_5M,
             DataDomain.MARKET_INTRADAY_1M,
             DataDomain.INTRADAY_DAILY_FEATURES,
+            DataDomain.CORPORATE_ACTIONS,
+            DataDomain.SHARE_CAPITAL,
         ),
         "requires_token": False,
         "formal_eligible": True,
-        "notes": "Fast online market source for recent unadjusted OHLCV; daily bars use endpoint-specific volume_factor=100",
+        "notes": "Fast online market source for recent unadjusted OHLCV plus TDX xdxr corporate-action/share-capital evidence; daily bars use endpoint-specific volume_factor=100",
     },
     "baostock": {
         "domains": (
@@ -101,6 +145,10 @@ _PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
             DataDomain.VALUATION,
             DataDomain.INDEX_CONSTITUENTS,
             DataDomain.ADJUST_FACTOR,
+            DataDomain.ADJUST_FACTOR_EVENT,
+            DataDomain.ADJUST_FACTOR_DAILY,
+            DataDomain.SECURITY_IDENTITY,
+            DataDomain.SYMBOL_HISTORY,
             DataDomain.MARKET_INTRADAY_5M,
             DataDomain.INTRADAY_DAILY_FEATURES,
             DataDomain.FINANCIAL_QUARTERLY,
@@ -128,6 +176,16 @@ _PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
         "requires_token": False,
         "formal_eligible": True,
         "notes": "Router provider: mootdx_online for recent market data, BaoStock for structured history, CNInfo for raw disclosure probes",
+    },
+    "qdp_production_v2": {
+        "domains": (
+            *QDP_PRODUCTION_V2_REQUIRED_DOMAINS,
+            *QDP_PRODUCTION_V2_OPTIONAL_DOMAINS,
+            *QDP_PRODUCTION_V2_RESEARCH_FUTURE_DOMAINS,
+        ),
+        "requires_token": False,
+        "formal_eligible": True,
+        "notes": "QDP v3 router: BaoStock 0.9.3 date batches for daily/status/valuation/factor events, mootdx for recent 5m, BaoStock symbol/range endpoints for repair, CNInfo for official disclosure evidence",
     },
     "eastmoney_efinance": {
         "domains": (DataDomain.MARKET_DAILY, DataDomain.UNIVERSE_SNAPSHOT, DataDomain.VALUATION),
@@ -239,6 +297,25 @@ def provider_capability_matrix(provider_plan: str = "formal_free_v3") -> list[di
             },
             "cninfo": set(),
         }
+    elif plan == "qdp_production_v2":
+        provider_names = ("baostock", "mootdx_online", "cninfo")
+        default_domains_by_provider = {
+            "baostock": {
+                DataDomain.MARKET_DAILY,
+                DataDomain.TRADING_CALENDAR,
+                DataDomain.SECURITY_STATUS,
+                DataDomain.VALUATION,
+                DataDomain.ADJUST_FACTOR_EVENT,
+                DataDomain.ADJUST_FACTOR_DAILY,
+                DataDomain.INDUSTRY_CONCEPT,
+                DataDomain.INDEX_CONSTITUENTS,
+                DataDomain.FINANCIAL_QUARTERLY,
+                DataDomain.PERFORMANCE_FORECAST,
+                DataDomain.PERFORMANCE_EXPRESS,
+            },
+            "mootdx_online": {DataDomain.MARKET_INTRADAY_5M, DataDomain.CORPORATE_ACTIONS, DataDomain.SHARE_CAPITAL},
+            "cninfo": set(),
+        }
     elif plan == "research_rebuild_minimal_free":
         provider_names = ("research_rebuild_minimal_free",)
         default_domains_by_provider = {}
@@ -250,8 +327,11 @@ def provider_capability_matrix(provider_plan: str = "formal_free_v3") -> list[di
         *FORMAL_FREE_V3_REQUIRED_DOMAINS,
         *FORMAL_FREE_V3_OPTIONAL_DOMAINS,
         *QDP_PRODUCTION_V1_OPTIONAL_DOMAINS,
+        *QDP_PRODUCTION_V2_REQUIRED_DOMAINS,
+        *QDP_PRODUCTION_V2_OPTIONAL_DOMAINS,
         *FORMAL_FREE_V3_RESEARCH_FUTURE_DOMAINS,
         *QDP_PRODUCTION_V1_RESEARCH_FUTURE_DOMAINS,
+        *QDP_PRODUCTION_V2_RESEARCH_FUTURE_DOMAINS,
     )
     for provider_name in provider_names:
         meta = _PROVIDER_CAPABILITIES.get(provider_name, {"domains": (), "requires_token": False, "formal_eligible": False, "notes": ""})
@@ -270,7 +350,7 @@ def provider_capability_matrix(provider_plan: str = "formal_free_v3") -> list[di
                     and domain in supported
                 )
                 or (
-                    plan == "qdp_production_v1"
+                    plan in {"qdp_production_v1", "qdp_production_v2"}
                     and domain in default_domains_by_provider.get(provider_name, set())
                     and domain in supported
                 )
@@ -281,6 +361,15 @@ def provider_capability_matrix(provider_plan: str = "formal_free_v3") -> list[di
                 elif domain in QDP_PRODUCTION_V1_OPTIONAL_DOMAINS:
                     requirement = "optional"
                 elif domain in QDP_PRODUCTION_V1_RESEARCH_FUTURE_DOMAINS:
+                    requirement = "research_future"
+                else:
+                    requirement = "unsupported"
+            elif plan == "qdp_production_v2":
+                if domain in QDP_PRODUCTION_V2_REQUIRED_DOMAINS:
+                    requirement = "required"
+                elif domain in QDP_PRODUCTION_V2_OPTIONAL_DOMAINS:
+                    requirement = "optional"
+                elif domain in QDP_PRODUCTION_V2_RESEARCH_FUTURE_DOMAINS:
                     requirement = "research_future"
                 else:
                     requirement = "unsupported"
@@ -511,7 +600,85 @@ class MootdxOnlineProvider:
                 coverage_report=coverage,
                 error_report=list(intraday.error_report or []),
             )
+        if request.domain in {DataDomain.CORPORATE_ACTIONS, DataDomain.SHARE_CAPITAL}:
+            raw_result = self.fetch_xdxr_raw(request.symbols)
+            data = _mootdx_xdxr_domain_frame(
+                raw_result.data,
+                domain=request.domain,
+                source=self.name,
+                as_of_date=request.end_date,
+            )
+            data = _filter_domain_date_window(data, request.start_date, request.end_date)
+            coverage = coverage_report_for_domain(data, request, provider=self.name)
+            coverage.update(raw_result.coverage_report)
+            coverage.update(
+                {
+                    "domain": request.domain,
+                    "normalized_row_count": int(len(data)),
+                    "pit_note": "TDX xdxr is corroborating evidence; official disclosure is required to arbitrate disputed factors.",
+                }
+            )
+            return ProviderResult(provider=self.name, data=data, coverage_report=coverage, error_report=raw_result.error_report)
         raise RuntimeError(f"unsupported_domain: {self.name} does not support {request.domain}")
+
+    def fetch_xdxr_raw(self, symbols: Any) -> ProviderResult:
+        """Fetch raw TDX ex-right and share-capital records without semantic loss."""
+
+        normalized_symbols = tuple(
+            FetchRequest(symbols=tuple(symbols or ()), start_date="2000-01-01", end_date="2000-01-01").normalized().symbols
+        )
+        rows: list[pd.DataFrame] = []
+        errors: list[dict[str, Any]] = []
+        if not normalized_symbols:
+            return ProviderResult(provider=self.name, data=pd.DataFrame(), coverage_report={"endpoint": "xdxr", "row_count": 0}, error_report=[])
+        client = _open_mootdx_client(self._client_factory)
+        try:
+            for symbol in normalized_symbols:
+                last_error: Exception | None = None
+                frame = pd.DataFrame()
+                for attempt in range(1, 4):
+                    try:
+                        payload = client.xdxr(symbol=_mootdx_symbol(symbol))
+                        frame = payload.copy() if isinstance(payload, pd.DataFrame) else pd.DataFrame(payload or [])
+                        last_error = None
+                        break
+                    except Exception as exc:
+                        last_error = exc
+                        if attempt < 3:
+                            time.sleep(float((0, 2, 5)[attempt]))
+                if last_error is not None:
+                    errors.append(
+                        {
+                            "provider": self.name,
+                            "domain": "xdxr_raw",
+                            "symbol": symbol,
+                            "code": "symbol_fetch_error",
+                            "error_type": type(last_error).__name__,
+                            "message": str(last_error),
+                            "attempts": 3,
+                        }
+                    )
+                    continue
+                if not frame.empty:
+                    frame["provider_symbol"] = symbol
+                    rows.append(frame)
+        finally:
+            _close_mootdx_client(client)
+        data = pd.concat(rows, ignore_index=True, sort=False) if rows else pd.DataFrame()
+        return ProviderResult(
+            provider=self.name,
+            data=data,
+            coverage_report={
+                "provider": self.name,
+                "domain": "xdxr_raw",
+                "endpoint": "xdxr/get_xdxr_info",
+                "row_count": int(len(data)),
+                "symbol_count": len(normalized_symbols),
+                "successful_symbol_count": len(normalized_symbols) - len(errors),
+                "raw_share_unit": "10k_shares",
+            },
+            error_report=errors,
+        )
 
     def fetch_quote_snapshot(self, symbols: Iterable[str]) -> ProviderResult:
         validate_provider_name(self.name)
@@ -670,11 +837,113 @@ class MootdxOnlineProvider:
         return ProviderResult(provider=self.name, data=data, coverage_report=coverage, error_report=errors)
 
 
+class _BaostockGlobalLimiter:
+    """Process-local limiter shared by every BaoStock endpoint.
+
+    BaoStock sessions are stateful and its public service is sensitive to
+    bursts.  QDP therefore starts at one in-flight request.  The second slot
+    is unlocked only after 1,000 observed requests with a network-error rate
+    below 0.5%; it is never raised above two.
+    """
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition()
+        self._active = 0
+        self._limit = 1
+        self._requests = 0
+        self._network_errors = 0
+
+    @contextmanager
+    def slot(self):
+        with self._condition:
+            while self._active >= self._limit:
+                self._condition.wait()
+            self._active += 1
+        failed = False
+        try:
+            yield
+        except BaseException:
+            failed = True
+            raise
+        finally:
+            with self._condition:
+                self._active -= 1
+                self._requests += 1
+                if failed:
+                    self._network_errors += 1
+                if self._limit == 1 and self._requests >= 1_000:
+                    error_rate = self._network_errors / max(self._requests, 1)
+                    if error_rate < 0.005:
+                        self._limit = 2
+                self._condition.notify_all()
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._condition:
+            return {
+                "active": self._active,
+                "limit": self._limit,
+                "requests": self._requests,
+                "network_errors": self._network_errors,
+                "network_error_rate": self._network_errors / max(self._requests, 1),
+            }
+
+
+_BAOSTOCK_GLOBAL_LIMITER = _BaostockGlobalLimiter()
+
+
+def baostock_runtime_version() -> str:
+    try:
+        return str(package_version("baostock"))
+    except PackageNotFoundError as exc:
+        raise RuntimeError("baostock is not installed in the yolos environment") from exc
+
+
+def baostock_runtime_archive_sha256() -> str:
+    """Return pip's recorded source-archive hash when one is available."""
+
+    try:
+        direct_url = package_distribution("baostock").read_text("direct_url.json")
+    except PackageNotFoundError as exc:
+        raise RuntimeError("baostock is not installed in the yolos environment") from exc
+    if not direct_url:
+        return ""
+    try:
+        payload = json.loads(direct_url)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("baostock_direct_url_metadata_invalid") from exc
+    archive = dict(payload.get("archive_info", {}) or {})
+    hashes = dict(archive.get("hashes", {}) or {})
+    value = str(hashes.get("sha256", "") or "")
+    if not value and str(archive.get("hash", "")).startswith("sha256="):
+        value = str(archive["hash"]).split("=", 1)[1]
+    return value.strip().lower()
+
+
+def assert_baostock_batch_runtime() -> str:
+    installed = baostock_runtime_version()
+    if installed != BAOSTOCK_BATCH_VERSION:
+        raise RuntimeError(
+            "baostock_batch_version_mismatch: "
+            f"expected={BAOSTOCK_BATCH_VERSION} installed={installed}; "
+            "batch data is forbidden from canonical staging"
+        )
+    archive_sha = baostock_runtime_archive_sha256()
+    if archive_sha and archive_sha != BAOSTOCK_BATCH_WHEEL_SHA256:
+        raise RuntimeError(
+            "baostock_batch_wheel_hash_mismatch: "
+            f"expected={BAOSTOCK_BATCH_WHEEL_SHA256} installed_archive={archive_sha}; "
+            "batch data is forbidden from canonical staging"
+        )
+    return installed
+
+
 @dataclass
 class BaostockProvider:
     name: str = "baostock"
     _market_daily_max_workers: int = 4
     _intraday_max_workers: int = 1
+    _bulk_timeout_seconds: int = 120
+    _bulk_retry_backoff_seconds: tuple[int, ...] = (2, 5, 15)
 
     def fetch_market_bars(self, request: FetchRequest) -> ProviderResult:
         validate_provider_name(self.name)
@@ -816,6 +1085,67 @@ class BaostockProvider:
                 if not frame.empty:
                     rows.append(frame)
         return rows, errors
+
+    def fetch_date_partition(self, request: DatePartitionFetchRequest) -> DatePartitionProviderResult:
+        """Fetch one BaoStock 0.9.3 bulk response without ordinary paging."""
+
+        request = request.normalized()
+        assert_baostock_batch_runtime()
+        if request.fetch_mode == "date_events":
+            endpoint = "query_daily_adjust_factor"
+        elif request.universe_kind == "etf":
+            endpoint = "query_daily_history_k_ETF"
+        else:
+            endpoint = "query_daily_history_k_AStock"
+        started = time.perf_counter()
+        raw, response_meta = _fetch_baostock_bulk_partition_with_retry(
+            endpoint=endpoint,
+            trade_date=request.trade_date,
+            timeout_seconds=int(self._bulk_timeout_seconds),
+            backoff_seconds=tuple(self._bulk_retry_backoff_seconds),
+        )
+        if request.fetch_mode == "date_events":
+            data = _baostock_bulk_adjust_factor_event_frame(raw, query_date=request.trade_date)
+        else:
+            data = _baostock_bulk_daily_domain_frame(raw, domain=request.domain, query_date=request.trade_date)
+        elapsed = time.perf_counter() - started
+        coverage = {
+            **response_meta,
+            "provider": self.name,
+            "endpoint": endpoint,
+            "package_version": BAOSTOCK_BATCH_VERSION,
+            "wheel_sha256": BAOSTOCK_BATCH_WHEEL_SHA256,
+            "query_date": request.trade_date,
+            "universe_kind": request.universe_kind,
+            "fetch_mode": request.fetch_mode,
+            "row_count": int(len(raw)),
+            "elapsed_seconds": round(float(elapsed), 6),
+            "limiter": _BAOSTOCK_GLOBAL_LIMITER.snapshot(),
+        }
+        return DatePartitionProviderResult(
+            provider=self.name,
+            request=request,
+            raw_data=raw,
+            data=data,
+            coverage_report=coverage,
+            error_report=[],
+        )
+
+    def fetch_all_stock_audit_evidence(self, *, trade_date: str) -> pd.DataFrame:
+        """Return one lossless ``query_all_stock`` A-share audit snapshot.
+
+        This is separate from ``fetch_domain`` because the standard universe
+        contract omits BaoStock's ``tradeStatus`` field.  QDP v3 needs that
+        field to classify a missing bulk-daily row as suspended rather than as
+        an unexplained provider gap.
+        """
+
+        validate_provider_name(self.name)
+        return _fetch_baostock_all_stock_frame_with_timeout(
+            domain=DataDomain.UNIVERSE_SNAPSHOT,
+            trade_date=str(trade_date),
+            timeout_seconds=120,
+        )
 
     def fetch_domain(self, request: DomainFetchRequest) -> ProviderResult:
         request = request.normalized()
@@ -1195,10 +1525,54 @@ class QdpProductionV1Provider:
         raise RuntimeError(f"unsupported_domain: {self.name} does not support {request.domain}")
 
 
+@dataclass
+class QdpProductionV2Provider:
+    """Provider routing contract for the QDP v3 data base."""
+
+    name: str = "qdp_production_v2"
+
+    def __post_init__(self) -> None:
+        self._mootdx = MootdxOnlineProvider()
+        self._baostock = BaostockProvider()
+        self._cninfo = CninfoAnnouncementProvider()
+
+    def fetch_market_bars(self, request: FetchRequest) -> ProviderResult:
+        # Symbol/range daily queries are repair and compatibility endpoints in
+        # v3; the all-market primary path is fetch_date_partition().
+        return self._baostock.fetch_market_bars(request)
+
+    def fetch_date_partition(self, request: DatePartitionFetchRequest) -> DatePartitionProviderResult:
+        return self._baostock.fetch_date_partition(request)
+
+    def fetch_domain(self, request: DomainFetchRequest) -> ProviderResult:
+        request = request.normalized()
+        if request.domain in {DataDomain.MARKET_INTRADAY_5M, DataDomain.CORPORATE_ACTIONS, DataDomain.SHARE_CAPITAL}:
+            return self._mootdx.fetch_domain(request)
+        if request.domain in {
+            DataDomain.MARKET_DAILY,
+            DataDomain.TRADING_CALENDAR,
+            DataDomain.UNIVERSE_SNAPSHOT,
+            DataDomain.SECURITY_STATUS,
+            DataDomain.INDUSTRY_CONCEPT,
+            DataDomain.VALUATION,
+            DataDomain.INDEX_CONSTITUENTS,
+            DataDomain.ADJUST_FACTOR,
+            DataDomain.FINANCIAL_QUARTERLY,
+            DataDomain.PERFORMANCE_FORECAST,
+            DataDomain.PERFORMANCE_EXPRESS,
+        }:
+            return self._baostock.fetch_domain(request)
+        if request.domain == DataDomain.ANNOUNCEMENT:
+            return self._cninfo.fetch_domain(request)
+        raise RuntimeError(f"unsupported_domain: {self.name} does not support {request.domain}")
+
+
 def build_default_providers(provider_plan: str = "default_free") -> list:
     plan = str(provider_plan or "default_free").strip().lower()
     if plan == "qdp_production_v1":
         return [QdpProductionV1Provider()]
+    if plan == "qdp_production_v2":
+        return [QdpProductionV2Provider()]
     if plan == "mootdx_online":
         return [MootdxOnlineProvider()]
     if plan == "research_rebuild_minimal_free":
@@ -1292,6 +1666,88 @@ def _mootdx_symbol(symbol: str) -> str:
     if raw.startswith(("SH", "SZ", "BJ")) and raw[2:].isdigit():
         raw = raw[2:]
     return raw[-6:].zfill(6)
+
+
+def _mootdx_xdxr_domain_frame(
+    raw: pd.DataFrame,
+    *,
+    domain: str,
+    source: str,
+    as_of_date: str,
+) -> pd.DataFrame:
+    """Convert TDX xdxr records while keeping ambiguous fields conservative.
+
+    ``songzhuangu`` is a combined 送转 value in the TDX protocol, so it is
+    deliberately not mislabeled as either bonus shares or capital-reserve
+    transfers in the generic contract.  The lossless raw record is retained
+    by QDP v3 and used by its dedicated corporate-action transform.
+    """
+
+    normalized_domain = str(domain)
+    if raw is None or raw.empty:
+        return normalize_domain_frame(
+            pd.DataFrame(),
+            domain=normalized_domain,
+            source=source,
+            as_of_date=as_of_date,
+            require_columns=False,
+        )
+    frame = raw.copy()
+    required = {"provider_symbol", "year", "month", "day", "category"}
+    missing = sorted(required - set(frame.columns))
+    if missing:
+        raise ValueError(f"mootdx_xdxr_missing_fields:{missing}")
+    dates = pd.to_datetime(
+        {
+            "year": pd.to_numeric(frame["year"], errors="coerce"),
+            "month": pd.to_numeric(frame["month"], errors="coerce"),
+            "day": pd.to_numeric(frame["day"], errors="coerce"),
+        },
+        errors="coerce",
+    ).dt.strftime("%Y-%m-%d")
+    category = pd.to_numeric(frame["category"], errors="coerce")
+    if normalized_domain == DataDomain.CORPORATE_ACTIONS:
+        mask = category.eq(1)
+        selected = frame.loc[mask].copy()
+        selected_dates = dates.loc[mask]
+        generic = pd.DataFrame(
+            {
+                "symbol": selected["provider_symbol"],
+                "trade_date": selected_dates,
+                "ex_date": selected_dates,
+                "action_type": selected.get("name", pd.Series(index=selected.index, dtype=str)),
+                "cash_dividend_per_10": pd.to_numeric(selected.get("fenhong"), errors="coerce"),
+                "bonus_share_per_10": np.nan,
+                "transfer_share_per_10": np.nan,
+                "description": "TDX xdxr; songzhuangu is combined and remains only in lossless raw evidence",
+            },
+            index=selected.index,
+        )
+    elif normalized_domain == DataDomain.SHARE_CAPITAL:
+        total = pd.to_numeric(frame.get("houzongguben", pd.Series(index=frame.index, dtype=float)), errors="coerce") * 10_000.0
+        floating = pd.to_numeric(frame.get("panhouliutong", pd.Series(index=frame.index, dtype=float)), errors="coerce") * 10_000.0
+        mask = total.notna() | floating.notna()
+        selected = frame.loc[mask].copy()
+        generic = pd.DataFrame(
+            {
+                "symbol": selected["provider_symbol"],
+                "trade_date": dates.loc[mask],
+                "change_reason": selected.get("name", pd.Series(index=selected.index, dtype=str)),
+                "total_share": total.loc[mask],
+                "float_share": floating.loc[mask],
+                "restricted_share": (total - floating).where(total.ge(floating)).loc[mask],
+            },
+            index=selected.index,
+        )
+    else:
+        raise ValueError(f"mootdx_xdxr_unsupported_domain:{domain}")
+    return normalize_domain_frame(
+        generic.reset_index(drop=True),
+        domain=normalized_domain,
+        source=source,
+        as_of_date=as_of_date,
+        require_columns=False,
+    )
 
 
 def _is_mootdx_index_symbol(symbol: str) -> bool:
@@ -1570,6 +2026,178 @@ def _from_baostock_code(value: Any) -> str:
     return str(value or "").strip().upper()
 
 
+def _baostock_bulk_query_to_frame(query: Any, failure_label: str) -> pd.DataFrame:
+    """Decode a BaoStock batch response exactly once.
+
+    This function intentionally never calls ``next()`` or ``get_row_data()``.
+    BaoStock 0.9.3's ordinary iterator uses 2,000 as a paging heuristic and
+    can attempt a bogus page when a batch response contains exactly 2,000
+    rows.  Batch endpoints carry one already-decoded ``data`` payload with a
+    declared 20,000-row capacity, so direct structural validation is the only
+    safe interpretation.
+    """
+
+    error_code = str(getattr(query, "error_code", "1"))
+    error_msg = str(getattr(query, "error_msg", ""))
+    if error_code != "0":
+        raise RuntimeError(f"{failure_label}_query_error:{error_code}: {error_msg}")
+    raw_per_page = getattr(query, "per_page_count", None)
+    try:
+        per_page_count = int(raw_per_page)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"{failure_label}_invalid_per_page_count:{raw_per_page!r}") from exc
+    if per_page_count != BAOSTOCK_BULK_PER_PAGE_COUNT:
+        raise RuntimeError(
+            f"{failure_label}_unexpected_per_page_count:"
+            f"expected={BAOSTOCK_BULK_PER_PAGE_COUNT} actual={per_page_count}"
+        )
+    fields = [str(item) for item in (getattr(query, "fields", None) or [])]
+    if len(fields) != len(set(fields)):
+        raise RuntimeError(f"{failure_label}_duplicate_fields:{fields}")
+    payload = getattr(query, "data", None)
+    if payload is None:
+        raise RuntimeError(f"{failure_label}_missing_bulk_payload")
+    if not isinstance(payload, (list, tuple)):
+        raise RuntimeError(f"{failure_label}_invalid_bulk_payload_type:{type(payload).__name__}")
+    rows = list(payload)
+    if len(rows) >= BAOSTOCK_BULK_PER_PAGE_COUNT:
+        raise RuntimeError(
+            f"{failure_label}_potential_truncation:"
+            f"row_count={len(rows)} capacity={BAOSTOCK_BULK_PER_PAGE_COUNT}"
+        )
+    if rows and not fields:
+        raise RuntimeError(f"{failure_label}_missing_fields_for_nonempty_payload")
+    normalized_rows: list[list[Any]] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, (list, tuple)):
+            raise RuntimeError(f"{failure_label}_invalid_row_type:index={index} type={type(row).__name__}")
+        values = list(row)
+        if len(values) != len(fields):
+            raise RuntimeError(
+                f"{failure_label}_field_width_mismatch:"
+                f"index={index} expected={len(fields)} actual={len(values)}"
+            )
+        normalized_rows.append(values)
+    return pd.DataFrame(normalized_rows, columns=fields)
+
+
+def _baostock_bulk_daily_domain_frame(raw: pd.DataFrame, *, domain: str, query_date: str) -> pd.DataFrame:
+    if raw is None or raw.empty:
+        return pd.DataFrame()
+    required = {"date", "code"}
+    missing = sorted(required - set(raw.columns))
+    if missing:
+        raise RuntimeError(f"baostock_bulk_daily_schema_error:missing={missing}")
+    provider_symbol = raw["code"].map(_from_baostock_code)
+    if domain == DataDomain.MARKET_DAILY:
+        market_fields = ["open", "high", "low", "close", "preclose", "volume", "amount", "pctChg", "adjustflag"]
+        missing = sorted(set(market_fields) - set(raw.columns))
+        if missing:
+            raise RuntimeError(f"baostock_bulk_daily_market_schema_error:missing={missing}")
+        frame = pd.DataFrame(
+            {
+                "trade_date": raw["date"].astype(str),
+                "provider_symbol": provider_symbol,
+                "open": pd.to_numeric(raw["open"], errors="coerce"),
+                "high": pd.to_numeric(raw["high"], errors="coerce"),
+                "low": pd.to_numeric(raw["low"], errors="coerce"),
+                "close": pd.to_numeric(raw["close"], errors="coerce"),
+                "preclose": pd.to_numeric(raw["preclose"], errors="coerce"),
+                "volume": pd.to_numeric(raw["volume"], errors="coerce"),
+                "amount": pd.to_numeric(raw["amount"], errors="coerce"),
+                "pct_chg": pd.to_numeric(raw["pctChg"], errors="coerce"),
+                "adjustflag": raw["adjustflag"].astype(str),
+                "source": "baostock",
+            }
+        )
+        return frame.reset_index(drop=True)
+    if domain == DataDomain.SECURITY_STATUS:
+        status_fields = ["tradestatus", "isST"]
+        missing = sorted(set(status_fields) - set(raw.columns))
+        if missing:
+            raise RuntimeError(f"baostock_bulk_daily_status_schema_error:missing={missing}")
+        trade_status = raw["tradestatus"].fillna("").astype(str).str.strip()
+        return pd.DataFrame(
+            {
+                "trade_date": raw["date"].astype(str),
+                "provider_symbol": provider_symbol,
+                "tradestatus": trade_status,
+                "is_st": raw["isST"].fillna("").astype(str).str.strip().eq("1"),
+                "is_suspended": trade_status.ne("1"),
+                "status_source": "baostock.query_daily_history_k_AStock",
+                "source": "baostock",
+            }
+        ).reset_index(drop=True)
+    if domain == DataDomain.VALUATION:
+        valuation_fields = ["turn", "peTTM", "pbMRQ", "psTTM", "pcfNcfTTM"]
+        missing = sorted(set(valuation_fields) - set(raw.columns))
+        if missing:
+            raise RuntimeError(f"baostock_bulk_daily_valuation_schema_error:missing={missing}")
+        return pd.DataFrame(
+            {
+                "trade_date": raw["date"].astype(str),
+                "provider_symbol": provider_symbol,
+                "turnover_rate": pd.to_numeric(raw["turn"], errors="coerce"),
+                "pe_ttm": pd.to_numeric(raw["peTTM"], errors="coerce"),
+                "pb_mrq": pd.to_numeric(raw["pbMRQ"], errors="coerce"),
+                "ps_ttm": pd.to_numeric(raw["psTTM"], errors="coerce"),
+                "pcf_ncf_ttm": pd.to_numeric(raw["pcfNcfTTM"], errors="coerce"),
+                "source": "baostock",
+            }
+        ).reset_index(drop=True)
+    raise RuntimeError(f"baostock_bulk_daily_unsupported_domain:{domain}")
+
+
+def _exact_column(frame: pd.DataFrame, candidates: tuple[str, ...], *, label: str) -> str:
+    present = [name for name in candidates if name in frame.columns]
+    if not present:
+        raise RuntimeError(f"{label}_missing_field:accepted={list(candidates)}")
+    if len(present) > 1:
+        reference = frame[present[0]].astype(str)
+        if any(not reference.equals(frame[name].astype(str)) for name in present[1:]):
+            raise RuntimeError(f"{label}_conflicting_alias_fields:{present}")
+    return present[0]
+
+
+def _baostock_bulk_adjust_factor_event_frame(raw: pd.DataFrame, *, query_date: str) -> pd.DataFrame:
+    columns = [
+        "provider_symbol",
+        "divid_operate_date",
+        "fore_adjust_factor",
+        "back_adjust_factor",
+        "adjust_factor",
+        "query_date",
+        "source_method",
+        "source",
+    ]
+    if raw is None or raw.empty:
+        return pd.DataFrame(columns=columns)
+    code_field = _exact_column(raw, ("code",), label="baostock_bulk_adjust_factor")
+    event_date_field = _exact_column(raw, ("dividOperateDate", "divid_operate_date"), label="baostock_bulk_adjust_factor")
+    fore_field = _exact_column(raw, ("foreAdjustFactor", "fore_adjust_factor"), label="baostock_bulk_adjust_factor")
+    back_field = _exact_column(raw, ("backAdjustFactor", "back_adjust_factor"), label="baostock_bulk_adjust_factor")
+    factor_field = _exact_column(raw, ("adjustFacto", "adjustFactor", "adjust_factor"), label="baostock_bulk_adjust_factor")
+    event_dates = raw[event_date_field].fillna("").astype(str).str.strip()
+    unexpected = sorted(set(event_dates.loc[event_dates.ne(str(query_date))].tolist()))
+    if unexpected:
+        raise RuntimeError(
+            "baostock_bulk_adjust_factor_event_date_mismatch:"
+            f"query_date={query_date} returned={unexpected[:10]}"
+        )
+    return pd.DataFrame(
+        {
+            "provider_symbol": raw[code_field].map(_from_baostock_code),
+            "divid_operate_date": event_dates,
+            "fore_adjust_factor": pd.to_numeric(raw[fore_field], errors="coerce"),
+            "back_adjust_factor": pd.to_numeric(raw[back_field], errors="coerce"),
+            "adjust_factor": pd.to_numeric(raw[factor_field], errors="coerce"),
+            "query_date": str(query_date),
+            "source_method": "date_batch",
+            "source": "baostock",
+        }
+    ).loc[:, columns].reset_index(drop=True)
+
+
 def _baostock_query_to_frame(query: Any, failure_label: str) -> pd.DataFrame:
     error_code = str(getattr(query, "error_code", "1"))
     error_msg = str(getattr(query, "error_msg", ""))
@@ -1653,6 +2281,10 @@ def _baostock_all_stock_frame(query: Any, *, trade_date: str) -> pd.DataFrame:
             "list_status": "L",
             "list_date": "",
             "delist_date": "",
+            # QDP v3's audit-specific accessor preserves these extension
+            # columns.  The normal universe contract still drops them.
+            "trade_status": raw["tradeStatus"],
+            "is_suspended": raw["tradeStatus"].eq("0"),
             "source": "baostock",
         }
     )
@@ -1769,11 +2401,11 @@ def _baostock_query_to_frame_with_relogin(
             if attempt >= attempts or not _is_baostock_not_logged_in_error(exc):
                 raise
             try:
-                bs.logout()
+                _quiet_baostock_call(bs.logout)
             except Exception:
                 pass
             time.sleep(min(2.0 * attempt, 5.0))
-            login = bs.login()
+            login = _quiet_baostock_call(bs.login)
             if getattr(login, "error_code", "1") != "0" and attempt >= attempts - 1:
                 raise RuntimeError(f"baostock {relogin_context} relogin failed: {getattr(login, 'error_msg', '')}") from exc
     return pd.DataFrame()
@@ -1868,6 +2500,22 @@ def _baostock_financial_quarterly_frame_from_bs(bs: Any, request: DomainFetchReq
                 payload = raw.iloc[-1].to_dict()
                 row.update({str(key): value for key, value in payload.items()})
             if has_payload:
+                # Several BaoStock finance tables expose ``pubDate`` while
+                # the adapter also predeclares ``publish_date``.  Preserve
+                # the provider date explicitly; otherwise the generic
+                # normalizer would conservatively infer one from report_date
+                # and erase valuable PIT evidence.
+                provider_publish = next(
+                    (
+                        str(row.get(key, "") or "").strip()
+                        for key in ("pubDate", "publishDate")
+                        if str(row.get(key, "") or "").strip()
+                    ),
+                    "",
+                )
+                if provider_publish:
+                    row["publish_date"] = provider_publish
+                    row["lag_policy"] = "publish_date_plus_1d_in_features"
                 rows.append(row)
     return pd.DataFrame(rows)
 
@@ -1948,6 +2596,39 @@ def _baostock_symbol_error(provider: str, symbol: str, exc: BaseException, *, fi
     }
 
 
+def _baostock_bulk_partition_worker(queue: Any, endpoint: str, trade_date: str) -> None:
+    try:
+        import baostock as bs  # type: ignore
+
+        installed = assert_baostock_batch_runtime()
+        login = _quiet_baostock_call(bs.login)
+        if getattr(login, "error_code", "1") != "0":
+            queue.put({"status": "error", "error_type": "RuntimeError", "error": f"baostock login failed: {getattr(login, 'error_msg', '')}"})
+            return
+        try:
+            if endpoint == "query_daily_history_k_AStock":
+                query = bs.query_daily_history_k_AStock(date=trade_date)
+            elif endpoint == "query_daily_history_k_ETF":
+                query = bs.query_daily_history_k_ETF(date=trade_date)
+            elif endpoint == "query_daily_adjust_factor":
+                query = bs.query_daily_adjust_factor(date=trade_date)
+            else:
+                raise RuntimeError(f"unsupported_baostock_bulk_endpoint:{endpoint}")
+            frame = _baostock_bulk_query_to_frame(query, endpoint)
+            meta = {
+                "error_code": str(getattr(query, "error_code", "")),
+                "error_msg": str(getattr(query, "error_msg", "")),
+                "per_page_count": int(getattr(query, "per_page_count", 0) or 0),
+                "fields": [str(item) for item in (getattr(query, "fields", None) or [])],
+                "package_version": installed,
+            }
+        finally:
+            _quiet_baostock_call(bs.logout)
+        queue.put({"status": "ok", "data": frame, "meta": meta})
+    except Exception as exc:
+        queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
+
+
 def _baostock_history_worker(
     queue: Any,
     symbol: str,
@@ -1958,7 +2639,7 @@ def _baostock_history_worker(
     try:
         import baostock as bs  # type: ignore
 
-        login = bs.login()
+        login = _quiet_baostock_call(bs.login)
         if getattr(login, "error_code", "1") != "0":
             queue.put({"status": "error", "error_type": "RuntimeError", "error": f"baostock login failed: {getattr(login, 'error_msg', '')}"})
             return
@@ -1973,7 +2654,7 @@ def _baostock_history_worker(
             )
             frame = _baostock_history_frame(query, symbol=symbol)
         finally:
-            bs.logout()
+            _quiet_baostock_call(bs.logout)
         queue.put({"status": "ok", "data": frame})
     except Exception as exc:
         queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
@@ -1989,7 +2670,7 @@ def _baostock_intraday_5m_worker(
     try:
         import baostock as bs  # type: ignore
 
-        login = bs.login()
+        login = _quiet_baostock_call(bs.login)
         if getattr(login, "error_code", "1") != "0":
             queue.put({"status": "error", "error_type": "RuntimeError", "error": f"baostock login failed: {getattr(login, 'error_msg', '')}"})
             return
@@ -2004,7 +2685,7 @@ def _baostock_intraday_5m_worker(
             )
             frame = _baostock_intraday_5m_frame(query, symbol=symbol)
         finally:
-            bs.logout()
+            _quiet_baostock_call(bs.logout)
         queue.put({"status": "ok", "data": frame})
     except Exception as exc:
         queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
@@ -2014,14 +2695,14 @@ def _baostock_stock_basic_worker(queue: Any, trade_date: str) -> None:
     try:
         import baostock as bs  # type: ignore
 
-        login = bs.login()
+        login = _quiet_baostock_call(bs.login)
         if getattr(login, "error_code", "1") != "0":
             queue.put({"status": "error", "error_type": "RuntimeError", "error": f"baostock login failed: {getattr(login, 'error_msg', '')}"})
             return
         try:
             frame = _baostock_stock_basic_frame(bs.query_stock_basic(), trade_date=trade_date)
         finally:
-            bs.logout()
+            _quiet_baostock_call(bs.logout)
         queue.put({"status": "ok", "data": frame})
     except Exception as exc:
         queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
@@ -2031,7 +2712,7 @@ def _baostock_all_stock_worker(queue: Any, domain: str, trade_date: str) -> None
     try:
         import baostock as bs  # type: ignore
 
-        login = bs.login()
+        login = _quiet_baostock_call(bs.login)
         if getattr(login, "error_code", "1") != "0":
             queue.put({"status": "error", "error_type": "RuntimeError", "error": f"baostock login failed: {getattr(login, 'error_msg', '')}"})
             return
@@ -2042,7 +2723,7 @@ def _baostock_all_stock_worker(queue: Any, domain: str, trade_date: str) -> None
             else:
                 frame = _baostock_all_stock_frame(query, trade_date=trade_date)
         finally:
-            bs.logout()
+            _quiet_baostock_call(bs.logout)
         queue.put({"status": "ok", "data": frame})
     except Exception as exc:
         queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
@@ -2052,14 +2733,14 @@ def _baostock_industry_worker(queue: Any, trade_date: str) -> None:
     try:
         import baostock as bs  # type: ignore
 
-        login = bs.login()
+        login = _quiet_baostock_call(bs.login)
         if getattr(login, "error_code", "1") != "0":
             queue.put({"status": "error", "error_type": "RuntimeError", "error": f"baostock login failed: {getattr(login, 'error_msg', '')}"})
             return
         try:
             frame = _baostock_industry_frame(bs.query_stock_industry(date=trade_date), trade_date=trade_date)
         finally:
-            bs.logout()
+            _quiet_baostock_call(bs.logout)
         queue.put({"status": "ok", "data": frame})
     except Exception as exc:
         queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
@@ -2069,14 +2750,14 @@ def _baostock_index_constituents_worker(queue: Any, trade_date: str) -> None:
     try:
         import baostock as bs  # type: ignore
 
-        login = bs.login()
+        login = _quiet_baostock_call(bs.login)
         if getattr(login, "error_code", "1") != "0":
             queue.put({"status": "error", "error_type": "RuntimeError", "error": f"baostock login failed: {getattr(login, 'error_msg', '')}"})
             return
         try:
             frame = _baostock_index_constituents_frame(bs, trade_date=trade_date)
         finally:
-            bs.logout()
+            _quiet_baostock_call(bs.logout)
         queue.put({"status": "ok", "data": frame})
     except Exception as exc:
         queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
@@ -2086,7 +2767,7 @@ def _baostock_financial_quarterly_worker(queue: Any, symbols: tuple[str, ...], s
     try:
         import baostock as bs  # type: ignore
 
-        login = bs.login()
+        login = _quiet_baostock_call(bs.login)
         if getattr(login, "error_code", "1") != "0":
             queue.put({"status": "error", "error_type": "RuntimeError", "error": f"baostock login failed: {getattr(login, 'error_msg', '')}"})
             return
@@ -2101,7 +2782,7 @@ def _baostock_financial_quarterly_worker(queue: Any, symbols: tuple[str, ...], s
                 ),
             )
         finally:
-            bs.logout()
+            _quiet_baostock_call(bs.logout)
         queue.put({"status": "ok", "data": frame})
     except Exception as exc:
         queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
@@ -2111,7 +2792,7 @@ def _baostock_performance_worker(queue: Any, domain: str, symbols: tuple[str, ..
     try:
         import baostock as bs  # type: ignore
 
-        login = bs.login()
+        login = _quiet_baostock_call(bs.login)
         if getattr(login, "error_code", "1") != "0":
             queue.put({"status": "error", "error_type": "RuntimeError", "error": f"baostock login failed: {getattr(login, 'error_msg', '')}"})
             return
@@ -2126,7 +2807,7 @@ def _baostock_performance_worker(queue: Any, domain: str, symbols: tuple[str, ..
                 ),
             )
         finally:
-            bs.logout()
+            _quiet_baostock_call(bs.logout)
         queue.put({"status": "ok", "data": frame})
     except Exception as exc:
         queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
@@ -2136,7 +2817,7 @@ def _baostock_adjust_factor_worker(queue: Any, symbols: tuple[str, ...], start_d
     try:
         import baostock as bs  # type: ignore
 
-        login = bs.login()
+        login = _quiet_baostock_call(bs.login)
         if getattr(login, "error_code", "1") != "0":
             queue.put({"status": "error", "error_type": "RuntimeError", "error": f"baostock login failed: {getattr(login, 'error_msg', '')}"})
             return
@@ -2151,7 +2832,7 @@ def _baostock_adjust_factor_worker(queue: Any, symbols: tuple[str, ...], start_d
                 ),
             )
         finally:
-            bs.logout()
+            _quiet_baostock_call(bs.logout)
         queue.put({"status": "ok", "data": frame})
     except Exception as exc:
         queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
@@ -2161,7 +2842,7 @@ def _baostock_valuation_worker(queue: Any, symbols: tuple[str, ...], start_date:
     try:
         import baostock as bs  # type: ignore
 
-        login = bs.login()
+        login = _quiet_baostock_call(bs.login)
         if getattr(login, "error_code", "1") != "0":
             queue.put({"status": "error", "error_type": "RuntimeError", "error": f"baostock login failed: {getattr(login, 'error_msg', '')}"})
             return
@@ -2176,7 +2857,7 @@ def _baostock_valuation_worker(queue: Any, symbols: tuple[str, ...], start_date:
                 ),
             )
         finally:
-            bs.logout()
+            _quiet_baostock_call(bs.logout)
         queue.put({"status": "ok", "data": frame})
     except Exception as exc:
         queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
@@ -2186,7 +2867,7 @@ def _baostock_trade_calendar_worker(queue: Any, start_date: str, end_date: str, 
     try:
         import baostock as bs  # type: ignore
 
-        login = bs.login()
+        login = _quiet_baostock_call(bs.login)
         if getattr(login, "error_code", "1") != "0":
             queue.put({"status": "error", "error_type": "RuntimeError", "error": f"baostock login failed: {getattr(login, 'error_msg', '')}"})
             return
@@ -2198,10 +2879,81 @@ def _baostock_trade_calendar_worker(queue: Any, start_date: str, end_date: str, 
             frame = pd.DataFrame(rows, columns=["trade_date", "is_open"])
             frame["exchange"] = exchange
         finally:
-            bs.logout()
+            _quiet_baostock_call(bs.logout)
         queue.put({"status": "ok", "data": frame})
     except Exception as exc:
         queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
+
+
+def _fetch_baostock_bulk_partition_once(
+    *,
+    endpoint: str,
+    trade_date: str,
+    timeout_seconds: int = 120,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    timeout = max(float(timeout_seconds or 0), 1.0)
+    context = multiprocessing.get_context("spawn")
+    payload_queue = context.Queue()
+    process = context.Process(
+        target=_baostock_bulk_partition_worker,
+        kwargs={"queue": payload_queue, "endpoint": str(endpoint), "trade_date": str(trade_date)},
+    )
+    with _BAOSTOCK_GLOBAL_LIMITER.slot():
+        process.start()
+        try:
+            payload = payload_queue.get(timeout=timeout)
+        except queue_module.Empty:
+            process.join(0)
+            if process.is_alive():
+                process.terminate()
+                process.join(5)
+                raise TimeoutError(f"baostock_bulk_timeout:{endpoint}: exceeded {int(timeout)} seconds")
+            if process.exitcode not in {0, None}:
+                raise RuntimeError(f"baostock_bulk_worker_failed:{endpoint}:exitcode={process.exitcode}")
+            raise RuntimeError(f"baostock_bulk_worker_returned_no_payload:{endpoint}")
+        process.join(5)
+        if process.is_alive():
+            process.terminate()
+            process.join(5)
+            raise RuntimeError(f"baostock_bulk_worker_did_not_exit:{endpoint}")
+    if not isinstance(payload, dict) or payload.get("status") != "ok":
+        error_type = str(payload.get("error_type", "RuntimeError")) if isinstance(payload, dict) else "RuntimeError"
+        error = str(payload.get("error", payload) if isinstance(payload, dict) else payload)
+        raise RuntimeError(f"baostock_bulk_worker_error:{endpoint}:{error_type}: {error}")
+    data = payload.get("data")
+    if not isinstance(data, pd.DataFrame):
+        raise RuntimeError(f"baostock_bulk_worker_invalid_data:{endpoint}:{type(data).__name__}")
+    meta = dict(payload.get("meta", {}) or {})
+    return data.copy(), meta
+
+
+def _fetch_baostock_bulk_partition_with_retry(
+    *,
+    endpoint: str,
+    trade_date: str,
+    timeout_seconds: int = 120,
+    backoff_seconds: tuple[int, ...] = (2, 5, 15),
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    errors: list[str] = []
+    attempts = len(tuple(backoff_seconds)) + 1
+    for attempt in range(1, attempts + 1):
+        try:
+            frame, meta = _fetch_baostock_bulk_partition_once(
+                endpoint=endpoint,
+                trade_date=trade_date,
+                timeout_seconds=timeout_seconds,
+            )
+            meta.update({"attempt_count": attempt, "retry_errors": list(errors)})
+            return frame, meta
+        except Exception as exc:
+            errors.append(f"attempt={attempt}:{type(exc).__name__}:{exc}")
+            if attempt >= attempts:
+                break
+            time.sleep(float(tuple(backoff_seconds)[attempt - 1]))
+    raise RuntimeError(
+        f"baostock_bulk_fetch_failed:endpoint={endpoint} trade_date={trade_date} "
+        f"attempts={attempts} errors={' | '.join(errors)}"
+    )
 
 
 def _fetch_baostock_payload_with_timeout(
@@ -2219,19 +2971,20 @@ def _fetch_baostock_payload_with_timeout(
         target=target,
         kwargs={"queue": payload_queue, **kwargs},
     )
-    process.start()
-    try:
-        payload = payload_queue.get(timeout=timeout)
-    except queue_module.Empty:
-        process.join(0)
-        if process.is_alive():
-            process.terminate()
-            process.join(5)
-            raise TimeoutError(f"{timeout_label}: exceeded {int(timeout)} seconds")
-        if process.exitcode not in {0, None}:
-            raise RuntimeError(f"{failure_label}_worker_failed: exitcode={process.exitcode}")
-        raise RuntimeError(f"{failure_label}_worker_returned_no_payload")
-    process.join(5)
+    with _BAOSTOCK_GLOBAL_LIMITER.slot():
+        process.start()
+        try:
+            payload = payload_queue.get(timeout=timeout)
+        except queue_module.Empty:
+            process.join(0)
+            if process.is_alive():
+                process.terminate()
+                process.join(5)
+                raise TimeoutError(f"{timeout_label}: exceeded {int(timeout)} seconds")
+            if process.exitcode not in {0, None}:
+                raise RuntimeError(f"{failure_label}_worker_failed: exitcode={process.exitcode}")
+            raise RuntimeError(f"{failure_label}_worker_returned_no_payload")
+        process.join(5)
     if not isinstance(payload, dict) or payload.get("status") != "ok":
         error_type = str(payload.get("error_type", "RuntimeError")) if isinstance(payload, dict) else "RuntimeError"
         error = str(payload.get("error", payload) if isinstance(payload, dict) else payload)

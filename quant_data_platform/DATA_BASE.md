@@ -1,4 +1,4 @@
-# QDP v2 Data Base
+# QDP Data Base: v2 Active, v3 Rebuild
 
 Canonical brain source: `quant_data_platform/brain/state_center.md`.
 
@@ -9,6 +9,17 @@ This file describes the current active local data base. The source of truth is:
 3. Parquet shards referenced by each `dataset.json`
 
 No separate catalog is required to know what the active data base contains.
+
+## Current Safety Status (2026-07-14)
+
+- v2 remains the only active data base. Its active manifest SHA-256 is `e56f72a6cba8bcf86055817f6a0ec5e7391271fb3c27b4d628c3abc62944051e`.
+- QDP v3 code now implements immutable date-partition raw storage, stable security identity, PIT symbol history, batch daily/factor ingestion, dual-source 5-minute selection, factor-event arbitration, manifest v3, recursive GC, candidate audit, CAS publish and rollback.
+- No v3 full-history backfill, publication or active switch has occurred. One single-date candidate smoke exists only as pipeline evidence.
+- M0 freeze found 17 missing v2 source ancestors referenced by the 17 active dataset manifests. The leaf manifests and parquet data remain readable, but lineage is incomplete; v3 publication is blocked until this is repaired or replaced by an explicitly approved recovery proof.
+- The old v2 adjustment-factor checks proved key coverage, positivity and provenance only. They did not prove company-action semantics. `600076.SH/2024` is a fixed counterexample with non-event factor jumps, so old adjusted returns and dependent research remain provisional.
+- BaoStock 0.9.3 full compatibility passed across 34 anchors with zero issues; the ordinary multi-page proof returned 5537 rows and the wheel hash matched the lock. Live strict smoke also passed for three A-share dates and one factor-event date; ETF remains provisional by design.
+
+Detailed implementation and audit state: `brain/references/qdp_v3_rebuild_20260713.md`.
 
 ## Scope
 

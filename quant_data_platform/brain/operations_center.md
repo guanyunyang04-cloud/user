@@ -1,10 +1,10 @@
 # Quant Data Platform 过程目录
-快照日期：`2026-07-11`
+快照日期：`2026-07-14`
 
 ## Runtime Objects
 ### object `qdp_body_map`
 `code`: `quant_data_platform/src`
-`data`: `quant_data_platform/data/qdp_v2`
+`data`: active `quant_data_platform/data/qdp_v2`；rebuild/candidate `quant_data_platform/data/qdp_v3`
 `references`: `quant_data_platform/brain/references`
 `tests`: `quant_data_platform/tests`
 `archives`: `tools/archive_v1`、`tools/archive_repair`
@@ -37,6 +37,24 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli gc --d
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli update --as-of-date <date> --dry-run --runtime fast --json
 ```
 
+QDP v3 重建入口：
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 status --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 compatibility run --smoke --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 compatibility run --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 ingest --provider baostock --mode date-snapshot --start-date <date> --end-date <date> --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 ingest --provider baostock --mode date-events --start-date <date> --end-date <date> --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 build candidate --start-date 2010-01-01 --end-date <date> --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 audit --candidate <id> --semantic --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 diff --candidate <id> --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 publish --candidate <id> --expect-active-sha <sha> --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 gc --dry-run --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 update --as-of-date <date> --dry-run --bootstrap --start-date 2010-01-01 --json
+```
+
+`compatibility run` 的当前 full report 已为 `status=passed, scope=full, issue_count=0`；任何后续报告不满足该条件时，live date-snapshot/date-events 和 canonical staging 都会阻断。首次 rebuild 仍受 M0 v2 lineage freeze 阻断；不要用 `--no-publish` 绕过 raw/identity/factor 质量门来制造“可用”结论。
+
 ## Procedure Entries
 ### procedure `describe_active_table`
 `input`: table/domain name
@@ -68,8 +86,21 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli update
 `input`: changed QDP CLI/data scope/table semantics/quality conclusion
 `steps`: update QDP hot-path brain docs；update consumers if their data dependency wording changed；run brain sync audit and doc/integrity checks.
 
+### procedure `qdp_v3_initial_rebuild`
+`input`: full BaoStock compatibility proof、已修复的 v2 M0 freeze、start/end date。
+`steps`: calendar；security master；由旧到新 date-snapshot 与 date-events；stable identity/symbol history；legacy factor history + xdxr/official arbitration；主板双源 5m；次级 PIT；build candidate；semantic audit；diff；CAS publish。
+`resume`: 每日、每证券和每 symbol-month 都写 job state；不可变 raw 内容相同则复用 hash，不重复写。
+`hard_stop`: full compatibility 未通过、M0 lineage 缺失、raw partition quarantined、未映射主板 identity、factor disputed/baseline unproven、strict 5m 覆盖不足或 semantic audit 非 passed。
+
+### procedure `qdp_v3_incremental_update`
+`input`: existing v3 active and as-of date。
+`steps`: 最近 10 个交易日日线重取；最近 60 个交易日因子事件重取；当日 mootdx 5m；BaoStock 缺口修补/抽检；PIT 与衍生表重建；candidate semantic audit；CAS publish。
+`boundary`: active CAS 失败时 active byte content 不变；训练包/memmap 不属于此 DAG。
+
 ## Validation Selection
 - `qdp_cli_changed -> py_compile + qdp --help + focused qdp tests`
+- `qdp_v3_provider_or_contract_changed -> compileall + tests/data_platform + compatibility smoke/full proof`
+- `qdp_v3_candidate_or_release_changed -> candidate quick/full/semantic audit + active SHA comparison + v3 GC dry-run`
 - `active_manifest_or_dataset_changed -> qdp status + qdp check --quick + qdp gc --dry-run`
 - `raw_data_or_cache_changed -> qdp check --quick + qdp check meta + targeted PK/cross-frequency audit`
 - `brain_docs_changed -> brain_sync_audit + doc_guard changed + integrity_check`

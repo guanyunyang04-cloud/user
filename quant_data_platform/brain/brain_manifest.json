@@ -94,7 +94,12 @@
     ],
     "terms": [
       "qdp_v2",
+      "qdp_v3",
       "manifest-first",
+      "security_id",
+      "symbol_history",
+      "date-partition",
+      "BaoStock 0.9.3",
       "active.json",
       "dataset.json",
       "parquet",

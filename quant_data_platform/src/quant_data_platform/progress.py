@@ -10,10 +10,13 @@ T = TypeVar("T")
 
 _ACTIVE_STAGE_PROGRESS_STACK: list["StageProgress"] = []
 _STDOUT_AVAILABLE = True
+_PROGRESS_SUPPRESSION_DEPTH = 0
 
 
 def _write_stdout(text: str) -> bool:
     global _STDOUT_AVAILABLE
+    if _PROGRESS_SUPPRESSION_DEPTH:
+        return True
     if not _STDOUT_AVAILABLE:
         return False
     try:
@@ -28,6 +31,18 @@ def _write_stdout(text: str) -> bool:
     except ValueError:
         _STDOUT_AVAILABLE = False
         return False
+
+
+@contextmanager
+def suppress_progress() -> Iterator[None]:
+    """Temporarily silence progress chatter while preserving result stdout."""
+
+    global _PROGRESS_SUPPRESSION_DEPTH
+    _PROGRESS_SUPPRESSION_DEPTH += 1
+    try:
+        yield
+    finally:
+        _PROGRESS_SUPPRESSION_DEPTH = max(0, _PROGRESS_SUPPRESSION_DEPTH - 1)
 
 
 def _current_stage_progress() -> "StageProgress | None":

@@ -32,7 +32,6 @@ commands:
   rebuild pit-market-substrate Build a non-active PIT daily market/factor/status/limit dataset view.
   rebuild scope-active    Rebuild active tables under the current mainboard non-delisted scope.
   rebuild limit-intraday  Rebuild 1m-derived limit-board features.
-  rebuild training-pack   Build research training pack from active data.
   verify pit-market-view  Verify all five atomic overrides in a non-active PIT dataset view.
   gc --dry-run            Show unreferenced data directories.
   update                  Update the active data base.
@@ -60,7 +59,6 @@ targets:
                        adjust_factor, and an explicit research dataset view.
   scope-active        Rebuild all active symbol tables under current scope.
   limit-intraday     Rebuild 1m-derived limit-board features.
-  training-pack       Build sharded memmap and training pack from active data.
 """
 
 
@@ -86,7 +84,6 @@ COMMAND_MODULES: dict[tuple[str, ...], str] = {
     ("verify", "pit-market-view"): "quant_data_platform.qdp_v2.pit_market_substrate",
     ("rebuild", "scope-active"): "quant_data_platform.qdp_v2.completion",
     ("rebuild", "limit-intraday"): "quant_data_platform.qdp_v2.limit_intraday_features",
-    ("rebuild", "training-pack"): "quant_data_platform.qdp_v2.training_pack",
 }
 
 ENV_GUARDED_PREFIXES = {
@@ -104,7 +101,6 @@ ENV_GUARDED_PREFIXES = {
     ("rebuild", "pit-market-substrate"),
     ("rebuild", "scope-active"),
     ("rebuild", "limit-intraday"),
-    ("rebuild", "training-pack"),
 }
 
 ARG_ALIASES: dict[tuple[str, ...], list[str]] = {

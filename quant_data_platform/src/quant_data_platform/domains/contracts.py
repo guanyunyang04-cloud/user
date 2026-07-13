@@ -31,6 +31,12 @@ class DataDomain:
     MARKET_INTRADAY_5M = "market_intraday_5m"
     INTRADAY_DAILY_FEATURES = "intraday_daily_features"
     ADJUST_FACTOR = "adjust_factor"
+    ADJUST_FACTOR_EVENT = "adjust_factor_event"
+    ADJUST_FACTOR_DAILY = "adjust_factor_daily"
+    SECURITY_IDENTITY = "security_identity"
+    SYMBOL_HISTORY = "symbol_history"
+    ELIGIBLE_SIGNAL_D = "eligible_signal_D"
+    TRADABLE_OPEN_D1 = "tradable_open_D1"
     TRADING_CALENDAR = "trading_calendar"
     UNIVERSE_SNAPSHOT = "universe_snapshot"
     SECURITY_STATUS = "security_status"
@@ -245,6 +251,68 @@ DOMAIN_STANDARD_COLUMNS: dict[str, list[str]] = {
         "factor_semantics",
         "source",
     ],
+    DataDomain.ADJUST_FACTOR_EVENT: [
+        "security_id",
+        "divid_operate_date",
+        "symbol_on_date",
+        "provider_symbol",
+        "fore_adjust_factor",
+        "back_adjust_factor",
+        "adjust_factor",
+        "query_date",
+        "source_method",
+        "verification_status",
+        "source",
+    ],
+    DataDomain.ADJUST_FACTOR_DAILY: [
+        "security_id",
+        "trade_date",
+        "symbol_on_date",
+        "fore_adjust_factor",
+        "back_adjust_factor",
+        "adjust_factor",
+        "factor_event_date",
+        "baseline_status",
+        "source",
+    ],
+    DataDomain.SECURITY_IDENTITY: [
+        "security_id",
+        "official_org_id",
+        "issuer_name",
+        "exchange",
+        "list_date",
+        "current_symbol",
+        "identity_source",
+    ],
+    DataDomain.SYMBOL_HISTORY: [
+        "security_id",
+        "symbol",
+        "effective_from",
+        "effective_to",
+        "name_on_date",
+        "board_on_date",
+        "evidence_source",
+        "official_document_hash",
+    ],
+    DataDomain.ELIGIBLE_SIGNAL_D: [
+        "security_id",
+        "trade_date",
+        "symbol_on_date",
+        "is_eligible_signal",
+        "eligibility_reason",
+        "source",
+    ],
+    DataDomain.TRADABLE_OPEN_D1: [
+        "security_id",
+        "trade_date",
+        "symbol_on_date",
+        "next_trade_date",
+        "next_symbol_on_date",
+        "open_d1",
+        "tradable_open_d1",
+        "tradability_reason",
+        "source",
+    ],
     DataDomain.TRADING_CALENDAR: ["trade_date", "is_open", "exchange", "source"],
     DataDomain.UNIVERSE_SNAPSHOT: [
         "symbol",
@@ -422,6 +490,47 @@ class DomainFetchRequest:
 
 
 @dataclass(frozen=True)
+class DatePartitionFetchRequest:
+    """Request one provider-owned market partition for a single trade date.
+
+    Date-partition endpoints are deliberately separate from symbol/range
+    endpoints.  In particular, BaoStock 0.9.3 bulk responses must never pass
+    through the ordinary paginated ``ResultData.next()`` iterator.
+    """
+
+    domain: str
+    trade_date: str
+    universe_kind: str = "all_a"
+    fetch_mode: str = "date_snapshot"
+
+    def normalized(self) -> "DatePartitionFetchRequest":
+        domain = normalize_domain(self.domain)
+        universe_kind = str(self.universe_kind or "all_a").strip().lower()
+        fetch_mode = str(self.fetch_mode or "date_snapshot").strip().lower()
+        if universe_kind not in {"all_a", "etf"}:
+            raise ValueError(f"unsupported universe_kind: {self.universe_kind}")
+        if fetch_mode not in {"date_snapshot", "date_events"}:
+            raise ValueError(f"unsupported fetch_mode: {self.fetch_mode}")
+        snapshot_domains = {
+            DataDomain.MARKET_DAILY,
+            DataDomain.SECURITY_STATUS,
+            DataDomain.VALUATION,
+        }
+        if fetch_mode == "date_snapshot" and domain not in snapshot_domains:
+            raise ValueError(f"date_snapshot does not support domain: {domain}")
+        if fetch_mode == "date_events" and domain != DataDomain.ADJUST_FACTOR_EVENT:
+            raise ValueError(f"date_events does not support domain: {domain}")
+        if universe_kind == "etf" and fetch_mode != "date_snapshot":
+            raise ValueError("ETF date partition only supports date_snapshot")
+        return DatePartitionFetchRequest(
+            domain=domain,
+            trade_date=_normalize_date(self.trade_date),
+            universe_kind=universe_kind,
+            fetch_mode=fetch_mode,
+        )
+
+
+@dataclass(frozen=True)
 class ProviderResult:
     provider: str
     data: pd.DataFrame
@@ -430,6 +539,16 @@ class ProviderResult:
 
 
 DomainProviderResult = ProviderResult
+
+
+@dataclass(frozen=True)
+class DatePartitionProviderResult:
+    provider: str
+    request: DatePartitionFetchRequest
+    raw_data: pd.DataFrame
+    data: pd.DataFrame
+    coverage_report: dict[str, Any] = field(default_factory=dict)
+    error_report: list[dict[str, Any]] = field(default_factory=list)
 
 
 class MarketProvider(Protocol):
@@ -443,6 +562,13 @@ class DomainProvider(Protocol):
     name: str
 
     def fetch_domain(self, request: DomainFetchRequest) -> DomainProviderResult:
+        ...
+
+
+class DatePartitionProvider(Protocol):
+    name: str
+
+    def fetch_date_partition(self, request: DatePartitionFetchRequest) -> DatePartitionProviderResult:
         ...
 
 
@@ -472,6 +598,14 @@ def normalize_domain(domain: str) -> str:
         "adjust_factor": DataDomain.ADJUST_FACTOR,
         "adjustment_factor": DataDomain.ADJUST_FACTOR,
         "复权因子": DataDomain.ADJUST_FACTOR,
+        "factor_event": DataDomain.ADJUST_FACTOR_EVENT,
+        "adjust_factor_event": DataDomain.ADJUST_FACTOR_EVENT,
+        "factor_daily": DataDomain.ADJUST_FACTOR_DAILY,
+        "adjust_factor_daily": DataDomain.ADJUST_FACTOR_DAILY,
+        "eligible_signal_d": DataDomain.ELIGIBLE_SIGNAL_D,
+        "tradable_open_d1": DataDomain.TRADABLE_OPEN_D1,
+        "security_identity": DataDomain.SECURITY_IDENTITY,
+        "symbol_history": DataDomain.SYMBOL_HISTORY,
         "calendar": DataDomain.TRADING_CALENDAR,
         "trade_calendar": DataDomain.TRADING_CALENDAR,
         "universe": DataDomain.UNIVERSE_SNAPSHOT,

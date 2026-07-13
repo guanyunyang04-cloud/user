@@ -1,5 +1,5 @@
 # 主脑状态程序
-快照日期：`2026-07-01`
+快照日期：`2026-07-14`
 
 本文件只保存 `H:\quant_project` 当前跨项目对象。项目细节写入对应分脑；历史过程进入各自 `references/`。
 
@@ -22,8 +22,8 @@
 ### object `quant_data_platform_child`
 `type`: shared_data_base_child_brain
 `path`: `quant_data_platform/brain/`
-`state`: QDP 当前事实是 v2 manifest-first 本地数据基底：`parquet + dataset.json + active.json`。`active.json` 只记录当前表指针和数据范围；memmap/training pack 是下游研究产物，不属于 active 数据基底。
-`public_commands`: `qdp status/list/describe/check/rebuild/gc/update`。
+`state`: QDP 当前唯一 active 仍是 v2 manifest-first 数据基底；v3 identity-first/date-partition/candidate pipeline 已实现，BaoStock 0.9.3 的 34-anchor full compatibility 与 live adapter smoke 已通过，但尚未全量回灌或发布。M0 发现 v2 active manifests 引用的 17 个 source ancestors 缺失，v3 发布受阻；旧 factor 语义及依赖研究为 provisional。
+`public_commands`: 共用 `qdp status/list/describe/check/gc/update`；v3 增加 `ingest/build/audit/diff/publish/rollback/compatibility`，v2 legacy rebuild/verify 使用 `--generation v2`。
 
 ### object `daily_research_child`
 `type`: production_research_child_brain

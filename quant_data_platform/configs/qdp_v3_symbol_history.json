@@ -1,0 +1,36 @@
+{
+  "contract_version": "qdp_stable_security_id_pit_symbol_v1",
+  "identities": [
+    {
+      "security_id": "QDP-CN-SZSE-AVICCAC-20100827",
+      "official_org_id": "",
+      "issuer_name": "中航成飞股份有限公司",
+      "exchange": "SZSE",
+      "list_date": "2010-08-27",
+      "current_symbol": "302132.SZ",
+      "identity_source": "cninfo_official_code_change"
+    }
+  ],
+  "symbol_history": [
+    {
+      "security_id": "QDP-CN-SZSE-AVICCAC-20100827",
+      "symbol": "300114.SZ",
+      "effective_from": "2010-08-27",
+      "effective_to": "2025-02-16",
+      "name_on_date": "中航电测",
+      "board_on_date": "ChiNext",
+      "evidence_source": "https://static.cninfo.com.cn/finalpage/2025-02-15/1222544408.PDF",
+      "official_document_hash": "dd68049c48df826848f361fd9e7b23dd20b6805144a2e5bc36e54db638611488"
+    },
+    {
+      "security_id": "QDP-CN-SZSE-AVICCAC-20100827",
+      "symbol": "302132.SZ",
+      "effective_from": "2025-02-17",
+      "effective_to": "9999-12-31",
+      "name_on_date": "中航成飞",
+      "board_on_date": "ChiNext",
+      "evidence_source": "https://static.cninfo.com.cn/finalpage/2025-02-15/1222544408.PDF",
+      "official_document_hash": "dd68049c48df826848f361fd9e7b23dd20b6805144a2e5bc36e54db638611488"
+    }
+  ]
+}
