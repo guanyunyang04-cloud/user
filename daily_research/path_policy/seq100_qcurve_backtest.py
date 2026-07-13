@@ -101,7 +101,7 @@ def _apply_turnover_gate(
     equity: float,
     contract: QCurveCostContract,
     slippage_multiplier: float,
-) -> tuple[pd.DataFrame, dict[str, float]]:
+) -> tuple[pd.DataFrame, dict[str, float | None]]:
     working = allocation.copy()
     current = working.set_index("symbol")["current_weight"].astype(float).clip(lower=0.0)
     proposed = working.set_index("symbol")["target_weight"].astype(float).clip(lower=0.0)
@@ -111,7 +111,7 @@ def _apply_turnover_gate(
         & (~np.isfinite(working["path_value"]) | working["path_value"].le(0.0))
     ]
     if not mandatory_exit.empty:
-        return working, {"turnover_gate_applied": 0.0, "expected_gain": float("nan"), "estimated_cost": 0.0}
+        return working, {"turnover_gate_applied": 0.0, "expected_gain": None, "estimated_cost": 0.0}
     values = working.set_index("symbol")["path_value"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
     old_utility = float((current * values).sum())
     new_utility = float((proposed * values).sum())

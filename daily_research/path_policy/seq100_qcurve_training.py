@@ -34,6 +34,7 @@ from daily_research.path_policy.seq100_qcurve_data import (
 DEFAULT_SEED = 7
 DEFAULT_MAX_EPOCHS = 10
 DEFAULT_PATIENCE = 2
+DEFAULT_MINIMUM_COMPLETE_EPOCHS = 1
 DEFAULT_MICROBATCH_SIZE = 512
 SOFT_RECLAIM_AVAILABLE_GIB = 2.0
 LOSS_WEIGHTS = QCurveLossWeights()
@@ -78,6 +79,16 @@ def _dropout_seed(seed: int) -> None:
     torch.manual_seed(int(seed))
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(int(seed))
+
+
+def _early_stopping_reached(
+    *,
+    wait: int,
+    patience: int,
+    completed_epoch: int,
+    minimum_complete_epochs: int,
+) -> bool:
+    return int(wait) >= int(patience) and int(completed_epoch) >= int(minimum_complete_epochs)
 
 
 def _soft_reclaim() -> dict[str, float]:
@@ -571,6 +582,7 @@ def train_neural_qcurve_fold(
     seed: int = DEFAULT_SEED,
     max_epochs: int = DEFAULT_MAX_EPOCHS,
     patience: int = DEFAULT_PATIENCE,
+    minimum_complete_epochs: int = DEFAULT_MINIMUM_COMPLETE_EPOCHS,
     microbatch_size: int = DEFAULT_MICROBATCH_SIZE,
     learning_rate: float = 3.0e-4,
 ) -> dict[str, Any]:
@@ -586,6 +598,8 @@ def train_neural_qcurve_fold(
         raise ValueError("maximum epochs must be within 1..10")
     if int(patience) != 2:
         raise ValueError("the frozen Q-curve development contract requires patience 2")
+    if int(minimum_complete_epochs) < 1 or int(minimum_complete_epochs) > int(max_epochs):
+        raise ValueError("minimum_complete_epochs must be within 1..max_epochs")
     resolved_device = torch.device(device if device != "cuda" or torch.cuda.is_available() else "cpu")
     _set_seed(seed)
     pack = QCurvePack(fold["pack_manifest"])
@@ -621,7 +635,12 @@ def train_neural_qcurve_fold(
         best_epoch = int(resumed["best_epoch"])
         wait = int(resumed["early_stopping_wait"])
         start_epoch = int(resumed["epoch"]) + 1
-        if wait >= int(patience):
+        if _early_stopping_reached(
+            wait=wait,
+            patience=patience,
+            completed_epoch=int(resumed["epoch"]),
+            minimum_complete_epochs=minimum_complete_epochs,
+        ):
             start_epoch = int(max_epochs) + 1
     else:
         loss_scales, loss_scale_reference, loss_scale_calibration = _freeze_loss_scales(
@@ -638,6 +657,7 @@ def train_neural_qcurve_fold(
             "status": "training",
             "profile": profile,
             "development_year": int(fold["development_year"]),
+            "minimum_complete_epochs": int(minimum_complete_epochs),
             "loss_scales": loss_scales,
             "started_at": _now(),
         },
@@ -748,7 +768,12 @@ def train_neural_qcurve_fold(
                 "updated_at": _now(),
             },
         )
-        if wait >= int(patience):
+        if _early_stopping_reached(
+            wait=wait,
+            patience=patience,
+            completed_epoch=epoch,
+            minimum_complete_epochs=minimum_complete_epochs,
+        ):
             break
     checkpoint = torch.load(checkpoint_path, map_location=resolved_device, weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
@@ -779,6 +804,8 @@ def train_neural_qcurve_fold(
             "metric": "development_total_loss",
             "mode": "min",
             "patience": int(patience),
+            "minimum_complete_epochs": int(minimum_complete_epochs),
+            "diagnostic_minimum_epoch_override": bool(int(minimum_complete_epochs) > 1),
             "topk_selects_checkpoint": False,
             "restored_best_checkpoint": True,
         },
@@ -868,6 +895,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--max-epochs", type=int, default=DEFAULT_MAX_EPOCHS)
     parser.add_argument("--patience", type=int, default=DEFAULT_PATIENCE)
+    parser.add_argument(
+        "--minimum-complete-epochs",
+        type=int,
+        default=DEFAULT_MINIMUM_COMPLETE_EPOCHS,
+    )
     parser.add_argument("--microbatch-size", type=int, default=DEFAULT_MICROBATCH_SIZE)
     parser.add_argument("--learning-rate", type=float, default=3.0e-4)
     parser.add_argument("--smoke-one-day", action="store_true")
@@ -892,6 +924,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             seed=int(args.seed),
             max_epochs=int(args.max_epochs),
             patience=int(args.patience),
+            minimum_complete_epochs=int(args.minimum_complete_epochs),
             microbatch_size=int(args.microbatch_size),
             learning_rate=float(args.learning_rate),
         )

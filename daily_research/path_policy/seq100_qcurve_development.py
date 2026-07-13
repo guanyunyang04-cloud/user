@@ -148,6 +148,7 @@ def _job_command(entry: Mapping[str, Any], *, python: str | Path) -> list[str]:
         if str(entry["profile"]) == "qcurve_lgbm"
         else "daily_research.path_policy.seq100_qcurve_training"
     )
+    max_epochs = int(entry.get("max_epochs", MAX_EPOCHS))
     command = [
         str(_workspace_path(python)),
         "-m",
@@ -159,12 +160,15 @@ def _job_command(entry: Mapping[str, Any], *, python: str | Path) -> list[str]:
         "--seed",
         str(SEED),
         "--max-epochs",
-        str(MAX_EPOCHS),
+        str(max_epochs),
         "--patience",
         str(PATIENCE),
     ]
     if str(entry["profile"]) != "qcurve_lgbm":
         command.extend(["--profile", str(entry["profile"]), "--device", "cuda", "--microbatch-size", "512"])
+        minimum_complete_epochs = int(entry.get("minimum_complete_epochs", 1))
+        if minimum_complete_epochs > 1:
+            command.extend(["--minimum-complete-epochs", str(minimum_complete_epochs)])
     return command
 
 

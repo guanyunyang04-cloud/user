@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import json
 
 import numpy as np
+import pandas as pd
 import pytest
 import torch
 
@@ -11,15 +13,27 @@ from daily_research.path_policy.seq100_qcurve import (
     QCurveModel,
     structured_qcurve_auxiliary_loss,
 )
-from daily_research.path_policy.seq100_qcurve_backtest import PortfolioState, _execute_targets
+from daily_research.path_policy.seq100_qcurve_backtest import (
+    PortfolioState,
+    _apply_turnover_gate,
+    _execute_targets,
+)
 from daily_research.path_policy.seq100_qcurve_lgbm import (
     ENTER_ANCHORS,
     HOLD_ANCHORS,
     _curves_from_anchors,
     _interpolate,
 )
-from daily_research.path_policy.seq100_qcurve_training import _train_gradient_cache_day
-from daily_research.path_policy.seq100_qcurve_development import DEVELOPMENT_YEARS, PROFILES, select_profiles
+from daily_research.path_policy.seq100_qcurve_training import (
+    _early_stopping_reached,
+    _train_gradient_cache_day,
+)
+from daily_research.path_policy.seq100_qcurve_development import (
+    DEVELOPMENT_YEARS,
+    PROFILES,
+    _job_command,
+    select_profiles,
+)
 
 
 CONTRACT = QCurveCostContract(
@@ -183,6 +197,57 @@ def test_stateful_execution_respects_lots_costs_and_unsellable_lock() -> None:
     )
     assert trades == []
     assert state.positions[0].shares == bought
+
+
+def test_mandatory_exit_turnover_gate_is_strict_json_serializable() -> None:
+    allocation = pd.DataFrame(
+        [
+            {
+                "symbol": "0",
+                "is_held": True,
+                "sellable_next_open": True,
+                "path_value": float("-inf"),
+                "current_weight": 0.5,
+                "target_weight": 0.0,
+                "selected": False,
+            }
+        ]
+    )
+    _, diagnostics = _apply_turnover_gate(
+        allocation,
+        equity=1_000_000.0,
+        contract=CONTRACT,
+        slippage_multiplier=1.0,
+    )
+    assert diagnostics["expected_gain"] is None
+    json.dumps(diagnostics, allow_nan=False)
+
+
+def test_minimum_complete_epoch_allows_one_recorded_diagnostic_extension() -> None:
+    assert not _early_stopping_reached(
+        wait=2,
+        patience=2,
+        completed_epoch=5,
+        minimum_complete_epochs=6,
+    )
+    assert _early_stopping_reached(
+        wait=2,
+        patience=2,
+        completed_epoch=6,
+        minimum_complete_epochs=6,
+    )
+    command = _job_command(
+        {
+            "profile": "qcurve_gru",
+            "fold_path": "fold.json",
+            "output_dir": "output",
+            "max_epochs": 6,
+            "minimum_complete_epochs": 6,
+        },
+        python="C:/Users/ASUS/miniconda3/envs/yolos/python.exe",
+    )
+    assert command[command.index("--max-epochs") + 1] == "6"
+    assert command[command.index("--minimum-complete-epochs") + 1] == "6"
 
 
 def test_grouped_projection_rejects_wrong_dimensions() -> None:
