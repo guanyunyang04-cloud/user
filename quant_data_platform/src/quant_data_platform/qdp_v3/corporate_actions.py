@@ -62,6 +62,9 @@ OFFICIAL_FACTOR_EVIDENCE_COLUMNS = [
     "fore_adjust_factor",
     "back_adjust_factor",
     "adjust_factor",
+    "price_adjustment_applicable",
+    "factor_semantics",
+    "holder_entitlement_ratio",
     "notes",
 ]
 
@@ -81,6 +84,11 @@ FACTOR_CANONICAL_COLUMNS = [
     "arbitration_source",
     "arbitration_document_hash",
     "arbitration_xdxr_confirmed",
+    "price_adjustment_applicable",
+    "factor_semantics",
+    "holder_entitlement_ratio",
+    "semantic_evidence_source",
+    "semantic_document_hash",
 ]
 
 _OFFICIAL_SOURCES = {"cninfo", "sse", "szse", "bse"}
@@ -89,6 +97,73 @@ _SHA256 = re.compile(r"^[0-9a-fA-F]{64}$")
 
 def default_official_evidence_config(workspace_root: str | Path | None = None) -> Path:
     return qdp_paths(workspace_root).project_root / "configs" / "qdp_v3_corporate_action_evidence.json"
+
+
+def default_factor_semantic_override_config(workspace_root: str | Path | None = None) -> Path:
+    return qdp_paths(workspace_root).project_root / "configs" / "qdp_v3_factor_semantic_overrides.json"
+
+
+def apply_factor_semantic_overrides(
+    events: pd.DataFrame,
+    *,
+    identity_registry: SecurityIdentityRegistry,
+    workspace_root: str | Path | None = None,
+    config_path: str | Path | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Apply narrowly-scoped, document-hashed semantic classifications."""
+
+    path = Path(config_path or default_factor_semantic_override_config(workspace_root))
+    payload = read_json(path)
+    if not payload:
+        return events.copy(), pd.DataFrame(), pd.DataFrame()
+    if payload.get("schema_version") != "qdp_v3_factor_semantic_overrides_v1":
+        raise ValueError(f"factor_semantic_override_schema_mismatch:{path}")
+    out = events.copy()
+    rows: list[dict[str, Any]] = []
+    missing: list[dict[str, Any]] = []
+    for index, item in enumerate(list(payload.get("events", []) or [])):
+        if not isinstance(item, dict):
+            raise ValueError(f"factor_semantic_override_row_invalid:{index}")
+        provider_symbol = normalize_symbol(item.get("provider_symbol", ""))
+        security_id = str(item.get("security_id", "") or identity_registry.security_id_for_provider_symbol(provider_symbol))
+        event_date = str(item.get("event_date", "") or "")[:10]
+        source = str(item.get("official_source", "") or "").lower()
+        document_hash = str(item.get("official_document_sha256", "") or "").lower()
+        semantics = str(item.get("factor_semantics", "") or "")
+        applicable = item.get("price_adjustment_applicable")
+        holder_ratio = pd.to_numeric(item.get("holder_entitlement_ratio"), errors="coerce")
+        if (
+            not security_id
+            or len(event_date) != 10
+            or source not in _OFFICIAL_SOURCES
+            or not _SHA256.fullmatch(document_hash)
+            or not semantics
+            or not isinstance(applicable, bool)
+        ):
+            raise ValueError(f"factor_semantic_override_key_invalid:{index}")
+        mask = out["security_id"].astype(str).eq(security_id) & out["divid_operate_date"].astype(str).eq(event_date)
+        evidence = {
+            "security_id": security_id,
+            "event_date": event_date,
+            "provider_symbol": provider_symbol,
+            "price_adjustment_applicable": bool(applicable),
+            "factor_semantics": semantics,
+            "holder_entitlement_ratio": float(holder_ratio) if np.isfinite(holder_ratio) else np.nan,
+            "official_source": source,
+            "official_document_url": str(item.get("official_document_url", "") or ""),
+            "official_document_sha256": document_hash,
+            "notes": str(item.get("notes", "") or ""),
+        }
+        rows.append(evidence)
+        if not mask.any():
+            missing.append({**evidence, "conflict_type": "semantic_override_event_missing"})
+            continue
+        out.loc[mask, "price_adjustment_applicable"] = bool(applicable)
+        out.loc[mask, "factor_semantics"] = semantics
+        out.loc[mask, "holder_entitlement_ratio"] = evidence["holder_entitlement_ratio"]
+        out.loc[mask, "semantic_evidence_source"] = source
+        out.loc[mask, "semantic_document_hash"] = document_hash
+    return out, pd.DataFrame(rows), pd.DataFrame(missing)
 
 
 def _numeric(frame: pd.DataFrame, column: str) -> pd.Series:
@@ -205,6 +280,158 @@ def canonicalize_mootdx_xdxr(
     return accepted_actions, accepted_capitals, conflicts
 
 
+def canonicalize_proxy_dividends(
+    refs: Iterable[RawPartitionRef],
+    *,
+    identity_registry: SecurityIdentityRegistry,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    frames: list[pd.DataFrame] = []
+    conflicts: list[pd.DataFrame] = []
+    for ref in refs:
+        raw = read_raw_partition(ref)
+        if raw.empty:
+            continue
+        required = {"ts_code", "ex_date"}
+        if not required.issubset(raw.columns):
+            conflicts.append(
+                pd.DataFrame(
+                    [
+                        {
+                            "provider_symbol": normalize_symbol(ref.partition_value),
+                            "conflict_type": "tushare_proxy_dividend_schema_invalid",
+                            "missing": sorted(required - set(raw.columns)),
+                        }
+                    ]
+                )
+            )
+            continue
+        event_date = raw["ex_date"].fillna("").astype(str).str.strip().str.slice(0, 10)
+        compact = event_date.str.fullmatch(r"\d{8}")
+        event_date.loc[compact] = (
+            event_date.loc[compact].str.slice(0, 4)
+            + "-"
+            + event_date.loc[compact].str.slice(4, 6)
+            + "-"
+            + event_date.loc[compact].str.slice(6, 8)
+        )
+        base = pd.DataFrame(
+            {
+                "event_date": event_date,
+                "provider_symbol": raw["ts_code"].map(normalize_symbol),
+                "category": 1,
+            }
+        )
+        mapped = identity_registry.map_frame(base, provider_symbol_column="provider_symbol", date_column="event_date")
+        mapped["action_type"] = raw.get("div_proc", pd.Series("dividend", index=raw.index)).fillna("dividend").astype(str)
+        # Ex-right reference prices use the pre-tax cash entitlement.  Tushare
+        # exposes that as cash_div_tax; cash_div is retained as fallback only.
+        pretax = _numeric(raw, "cash_div_tax")
+        fallback = _numeric(raw, "cash_div")
+        mapped["cash_dividend_per_10"] = pretax.where(pretax.notna(), fallback) * 10.0
+        mapped["rights_price"] = np.nan
+        mapped["bonus_transfer_per_10"] = _numeric(raw, "stk_div") * 10.0
+        mapped["rights_share_per_10"] = np.nan
+        mapped["exercise_fraction"] = np.nan
+        mapped["exercise_price"] = np.nan
+        mapped["verification_status"] = "tushare_proxy_dividend_unreconciled"
+        mapped["source"] = "tushare_proxy.dividend"
+        invalid = mapped["identity_mapping_status"].ne("mapped") | mapped["event_date"].eq("")
+        if invalid.any():
+            bad = mapped.loc[invalid].copy()
+            bad["conflict_type"] = "tushare_proxy_dividend_identity_or_date_invalid"
+            conflicts.append(bad)
+        frames.append(mapped.loc[~invalid, XDXR_EVENT_COLUMNS])
+    actions = pd.concat(frames, ignore_index=True, sort=False) if frames else pd.DataFrame(columns=XDXR_EVENT_COLUMNS)
+    if not actions.empty:
+        actions = actions.drop_duplicates(
+            [
+                "security_id",
+                "event_date",
+                "cash_dividend_per_10",
+                "bonus_transfer_per_10",
+                "source",
+            ],
+            keep="last",
+        ).sort_values(["event_date", "security_id"], kind="mergesort").reset_index(drop=True)
+    conflict_frame = pd.concat(conflicts, ignore_index=True, sort=False) if conflicts else pd.DataFrame()
+    return actions, conflict_frame
+
+
+def corroborate_corporate_actions(
+    xdxr_actions: pd.DataFrame,
+    proxy_actions: pd.DataFrame,
+    *,
+    relative_tolerance: float = 1e-6,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    """Return action terms proven by both unofficial transport paths."""
+
+    key = ["security_id", "event_date"]
+    if xdxr_actions.empty or proxy_actions.empty:
+        return pd.DataFrame(columns=XDXR_EVENT_COLUMNS), pd.DataFrame(), {
+            "xdxr_event_count": int(len(xdxr_actions)),
+            "proxy_dividend_event_count": int(len(proxy_actions)),
+            "corroborated_event_count": 0,
+            "value_conflict_count": 0,
+        }
+    numeric = ["cash_dividend_per_10", "bonus_transfer_per_10"]
+    merged = xdxr_actions.merge(proxy_actions, on=key, how="inner", suffixes=("_xdxr", "_proxy"))
+    accepted: list[dict[str, Any]] = []
+    conflicts: list[dict[str, Any]] = []
+    for row in merged.to_dict("records"):
+        mismatch: dict[str, float] = {}
+        compared = 0
+        for column in numeric:
+            left = pd.to_numeric(row.get(f"{column}_xdxr"), errors="coerce")
+            right = pd.to_numeric(row.get(f"{column}_proxy"), errors="coerce")
+            if not np.isfinite(left) and not np.isfinite(right):
+                continue
+            if not np.isfinite(left) or not np.isfinite(right):
+                mismatch[column] = float("inf")
+                continue
+            compared += 1
+            error = abs(float(left) - float(right)) / max(abs(float(left)), abs(float(right)), np.finfo(float).tiny)
+            if error > relative_tolerance:
+                mismatch[column] = float(error)
+        if mismatch or compared == 0:
+            conflicts.append(
+                {
+                    "security_id": row["security_id"],
+                    "event_date": row["event_date"],
+                    "conflict_type": "xdxr_tushare_proxy_action_terms_mismatch" if mismatch else "no_comparable_action_terms",
+                    "relative_errors": mismatch,
+                }
+            )
+            continue
+        accepted.append(
+            {
+                "security_id": row["security_id"],
+                "event_date": row["event_date"],
+                "symbol_on_date": row.get("symbol_on_date_xdxr", ""),
+                "provider_symbol": row.get("provider_symbol_xdxr", ""),
+                "category": row.get("category_xdxr", 1),
+                "action_type": row.get("action_type_xdxr", ""),
+                **{column: row.get(f"{column}_xdxr") for column in XDXR_EVENT_COLUMNS if column in numeric},
+                "rights_price": row.get("rights_price_xdxr"),
+                "rights_share_per_10": row.get("rights_share_per_10_xdxr"),
+                "exercise_fraction": row.get("exercise_fraction_xdxr"),
+                "exercise_price": row.get("exercise_price_xdxr"),
+                "identity_mapping_status": "mapped",
+                "verification_status": "xdxr+tushare_proxy_corroborated",
+                "source": "mootdx.xdxr+tushare_proxy.dividend",
+            }
+        )
+    frame = pd.DataFrame(accepted, columns=XDXR_EVENT_COLUMNS)
+    conflict_frame = pd.DataFrame(conflicts)
+    return frame, conflict_frame, {
+        "xdxr_event_count": int(len(xdxr_actions)),
+        "proxy_dividend_event_count": int(len(proxy_actions)),
+        "matched_key_count": int(len(merged)),
+        "corroborated_event_count": int(len(frame)),
+        "value_conflict_count": int(len(conflict_frame)),
+        "relative_tolerance": float(relative_tolerance),
+    }
+
+
 def load_official_factor_evidence(
     *,
     identity_registry: SecurityIdentityRegistry,
@@ -249,6 +476,9 @@ def load_official_factor_evidence(
                 "fore_adjust_factor": float(factor_values[0]),
                 "back_adjust_factor": float(factor_values[1]),
                 "adjust_factor": float(factor_values[2]),
+                "price_adjustment_applicable": bool(item.get("price_adjustment_applicable", True)),
+                "factor_semantics": str(item.get("factor_semantics", "price_continuity_cumulative_factor") or "price_continuity_cumulative_factor"),
+                "holder_entitlement_ratio": pd.to_numeric(item.get("holder_entitlement_ratio"), errors="coerce"),
                 "notes": str(item.get("notes", "") or ""),
             }
         )
@@ -335,6 +565,18 @@ def arbitrate_adjust_factor_disputes(
                 "arbitration_source": evidence["official_source"],
                 "arbitration_document_hash": evidence["official_document_sha256"],
                 "arbitration_xdxr_confirmed": bool(has_xdxr),
+                "price_adjustment_applicable": (
+                    True
+                    if pd.isna(evidence.get("price_adjustment_applicable"))
+                    else bool(evidence.get("price_adjustment_applicable"))
+                ),
+                "factor_semantics": str(
+                    evidence.get("factor_semantics", "price_continuity_cumulative_factor")
+                    or "price_continuity_cumulative_factor"
+                ),
+                "holder_entitlement_ratio": pd.to_numeric(
+                    evidence.get("holder_entitlement_ratio"), errors="coerce"
+                ),
             }
         )
     accepted_frame = pd.DataFrame(accepted, columns=FACTOR_CANONICAL_COLUMNS)

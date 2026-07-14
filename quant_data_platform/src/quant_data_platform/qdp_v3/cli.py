@@ -12,6 +12,11 @@ from quant_data_platform.qdp_v3.compatibility import capture_baostock_0_9_1_gold
 from quant_data_platform.qdp_v3.corporate_actions import ingest_mootdx_xdxr
 from quant_data_platform.qdp_v3.freeze import freeze_v2, validate_v2_freeze_proof
 from quant_data_platform.qdp_v3.gc import collect_garbage
+from quant_data_platform.qdp_v3.historical import (
+    ingest_tushare_proxy_intraday,
+    ingest_tushare_proxy_reference,
+    proxy_symbol_inventory,
+)
 from quant_data_platform.qdp_v3.ingest import (
     ingest_baostock_date_partitions,
     ingest_factor_symbol_histories,
@@ -22,6 +27,7 @@ from quant_data_platform.qdp_v3.ingest import (
 from quant_data_platform.qdp_v3.intraday import ingest_intraday_5m
 from quant_data_platform.qdp_v3.manifest import active_manifest_sha256, dataset_manifest_for_id, manifest_sha256, read_dataset_manifest
 from quant_data_platform.qdp_v3.paths import qdp_v3_paths
+from quant_data_platform.qdp_v3.proxy_compatibility import lock_bootstrap_cutoff, run_tushare_proxy_compatibility_gate
 from quant_data_platform.qdp_v3.release import diff_candidate, publish_candidate, read_candidate, rollback_active
 from quant_data_platform.qdp_v3.secondary import ingest_baostock_report_domain, ingest_baostock_snapshot_domain
 from quant_data_platform.qdp_v3.update import plan_update, run_update
@@ -38,6 +44,8 @@ QDP v3 manifest-first data-base commands:
                                  Fetch resumable date partitions.
   ingest --provider mootdx --mode corporate-actions
                                  Preserve per-security TDX xdxr evidence.
+  ingest --provider tushare-proxy --mode historical --domain DOMAIN
+                                 Capture resumable 2010+ historical raw facts.
   build candidate                Build immutable canonical datasets and a candidate.
   audit --candidate ID           Run quick, full, or semantic candidate gates.
   diff --candidate ID            Compare a candidate with v3 active.
@@ -50,6 +58,8 @@ QDP v3 manifest-first data-base commands:
   freeze v2                      Freeze and pin the legacy v2 evidence base.
   compatibility capture-golden  Save 0.9.1 per-symbol golden fixtures.
   compatibility run             Prove 0.9.3 batch/legacy compatibility.
+  compatibility run --provider tushare-proxy
+                                 Prove proxy entitlement, APIs and reverse pagination.
 
 Human-readable output is the default. Use --json for stable machine output.
 """
@@ -78,6 +88,7 @@ def _emit(payload: dict[str, Any], *, as_json: bool) -> None:
 def _status(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="qdp status", description="Show QDP v3 state without scanning data payloads.")
     _common(parser)
+    parser.add_argument("--run", default="", help="Show one resumable ingest/update job.")
     args = parser.parse_args(argv)
     paths = qdp_v3_paths(_workspace(args))
     active = read_json(paths.active_manifest)
@@ -98,6 +109,13 @@ def _status(argv: list[str]) -> int:
             **validate_v2_freeze_proof(freeze),
         },
     }
+    if args.run:
+        run_path = paths.jobs / f"{str(args.run)}.json"
+        run_state = read_json(run_path)
+        if not run_state:
+            raise FileNotFoundError(f"qdp_v3_run_not_found:{args.run}")
+        payload["run"] = run_state
+        payload["run_path"] = str(run_path.resolve())
     _emit(payload, as_json=bool(args.json))
     return 0
 
@@ -178,8 +196,11 @@ def _audit(argv: list[str], *, prog: str = "qdp audit") -> int:
 def _ingest(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="qdp ingest", description="Ingest immutable, resumable QDP v3 provider partitions.")
     _common(parser)
-    parser.add_argument("--provider", default="baostock", choices=("baostock", "mootdx"))
-    parser.add_argument("--mode", required=True, choices=("date-snapshot", "date-events", "factor-symbol-history", "calendar", "security-master", "intraday-5m", "corporate-actions", "financial-quarterly", "performance-forecast", "performance-express", "industry", "index-constituents"))
+    parser.add_argument("--provider", default="baostock", choices=("baostock", "mootdx", "tushare-proxy"))
+    parser.add_argument("--mode", required=True, choices=("historical", "date-snapshot", "date-events", "factor-symbol-history", "calendar", "security-master", "intraday-5m", "corporate-actions", "financial-quarterly", "performance-forecast", "performance-express", "industry", "index-constituents"))
+    parser.add_argument("--domain", default="", choices=("", "stock-basic", "trade-calendar", "daily", "daily-basic", "factor", "identity", "status", "dividend", "financial", "intraday"))
+    parser.add_argument("--frequency", default="", choices=("", "1m", "5m"))
+    parser.add_argument("--resume", action="store_true")
     parser.add_argument("--trade-date", action="append", default=[])
     parser.add_argument("--start-date", default="")
     parser.add_argument("--end-date", default="")
@@ -198,7 +219,64 @@ def _ingest(argv: list[str]) -> int:
     parser.add_argument("--symbols-file", default="")
     args = parser.parse_args(argv)
     workspace = _workspace(args)
-    if args.mode in {"financial-quarterly", "performance-forecast", "performance-express"}:
+    if args.mode == "historical":
+        if args.provider != "tushare-proxy":
+            parser.error("historical mode requires --provider tushare-proxy")
+        if not args.domain or not args.start_date or not args.end_date:
+            parser.error("historical mode requires --domain, --start-date, and --end-date")
+        symbols = list(args.symbol)
+        if args.symbols_file:
+            symbols.extend(item.strip() for item in Path(args.symbols_file).read_text(encoding="utf-8").splitlines() if item.strip())
+        inventory_symbols, lifecycle = proxy_symbol_inventory(
+            workspace_root=workspace,
+            mainboard_only=args.domain == "intraday",
+        )
+        if not symbols:
+            symbols = inventory_symbols
+        dates = sorted(set(str(item)[:10] for item in args.trade_date if str(item).strip()))
+        if not dates and args.domain in {"daily", "daily-basic", "status"}:
+            dates = resolve_trade_dates(
+                start_date=str(args.start_date),
+                end_date=str(args.end_date),
+                workspace_root=workspace,
+            )
+        if args.domain == "intraday":
+            if not args.frequency:
+                parser.error("historical intraday requires --frequency 1m|5m")
+            if not symbols:
+                parser.error("historical intraday requires proxy stock-basic raw or --symbol/--symbols-file")
+            cutoff = lock_bootstrap_cutoff(
+                requested_cutoff=str(args.end_date),
+                workspace_root=workspace,
+            )
+            payload = ingest_tushare_proxy_intraday(
+                symbols=symbols,
+                frequency=str(args.frequency),
+                start_date=str(args.start_date),
+                end_date=str(cutoff["bootstrap_cutoff"]),
+                workspace_root=workspace,
+                lifecycle_ranges=lifecycle,
+                resume=bool(args.resume),
+                job_id=str(args.job_id),
+                max_workers=4,
+            )
+        else:
+            if args.frequency:
+                parser.error("--frequency is only valid for --domain intraday")
+            if args.domain in {"factor", "identity", "dividend", "financial"} and not symbols:
+                parser.error(f"historical {args.domain} requires proxy stock-basic raw or --symbol/--symbols-file")
+            payload = ingest_tushare_proxy_reference(
+                domain=str(args.domain),
+                start_date=str(args.start_date),
+                end_date=str(args.end_date),
+                trade_dates=dates,
+                symbols=symbols,
+                workspace_root=workspace,
+                resume=bool(args.resume),
+                job_id=str(args.job_id),
+                max_workers=4,
+            )
+    elif args.mode in {"financial-quarterly", "performance-forecast", "performance-express"}:
         if args.provider != "baostock":
             parser.error("report-domain modes require --provider baostock")
         symbols = list(args.symbol)
@@ -413,6 +491,8 @@ def _update(argv: list[str]) -> int:
     parser.add_argument("--as-of-date", required=True)
     parser.add_argument("--start-date", default="")
     parser.add_argument("--bootstrap", action="store_true")
+    parser.add_argument("--historical-provider", default="", choices=("", "tushare-proxy"))
+    parser.add_argument("--include-1m", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--no-5m", action="store_true")
     parser.add_argument("--no-secondary", action="store_true")
@@ -425,7 +505,9 @@ def _update(argv: list[str]) -> int:
         "bootstrap": bool(args.bootstrap),
         "start_date": str(args.start_date),
         "include_5m": not bool(args.no_5m),
+        "include_1m": bool(args.include_1m),
         "include_secondary": not bool(args.no_secondary),
+        "historical_provider": str(args.historical_provider),
     }
     if args.dry_run:
         payload = plan_update(**kwargs)
@@ -455,11 +537,20 @@ def _compatibility_capture(argv: list[str]) -> int:
 
 
 def _compatibility_run(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(prog="qdp compatibility run", description="Run the BaoStock 0.9.3 batch and legacy API compatibility gate.")
+    parser = argparse.ArgumentParser(prog="qdp compatibility run", description="Run a provider compatibility and protocol gate.")
     _common(parser)
+    parser.add_argument("--provider", default="baostock", choices=("baostock", "tushare-proxy"))
+    parser.add_argument("--as-of-date", default="")
     parser.add_argument("--smoke", action="store_true")
     args = parser.parse_args(argv)
-    payload = run_baostock_0_9_3_compatibility_gate(workspace_root=_workspace(args), smoke=bool(args.smoke))
+    if args.provider == "tushare-proxy":
+        payload = run_tushare_proxy_compatibility_gate(
+            workspace_root=_workspace(args),
+            as_of_date=str(args.as_of_date),
+            smoke=bool(args.smoke),
+        )
+    else:
+        payload = run_baostock_0_9_3_compatibility_gate(workspace_root=_workspace(args), smoke=bool(args.smoke))
     _emit(payload, as_json=bool(args.json))
     return 0 if payload.get("status") == "passed" else 2
 

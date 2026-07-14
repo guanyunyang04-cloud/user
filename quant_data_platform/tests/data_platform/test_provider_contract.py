@@ -21,7 +21,6 @@ from quant_data_platform.providers import (
     QdpProductionV1Provider,
     EastmoneyEfinanceProvider,
     ResearchRebuildMinimalFreeProvider,
-    TushareHttpOptionalProvider,
     build_default_providers,
     provider_capability_matrix,
 )
@@ -201,7 +200,7 @@ class DataPlatformProviderContractTest(unittest.TestCase):
             formal_refresh_domains,
             {"market_daily", "trading_calendar", "universe_snapshot"},
         )
-        self.assertFalse({"akshare_eastmoney", "sina_tencent_realtime", "tushare_http_optional"} & set(provider_names))
+        self.assertFalse({"akshare_eastmoney", "sina_tencent_realtime", "tushare_proxy"} & set(provider_names))
 
     def test_research_rebuild_minimal_free_provider_routes_only_rebuild_domains(self) -> None:
         provider = ResearchRebuildMinimalFreeProvider()
@@ -364,26 +363,9 @@ class DataPlatformProviderContractTest(unittest.TestCase):
         self.assertEqual(result.provider, "baostock")
         self.assertEqual(result.data["source"].tolist(), ["baostock"])
 
-    def test_tushare_http_provider_does_not_set_execution_timeout(self) -> None:
-        calls: list[dict[str, object]] = []
-
-        class FakeResponse:
-            def raise_for_status(self) -> None:
-                pass
-
-            def json(self) -> dict[str, object]:
-                return {"code": 0, "data": {"fields": ["ts_code", "trade_date", "open", "high", "low", "close", "vol", "amount"], "items": []}}
-
-        def fake_post(*args, **kwargs):
-            calls.append(dict(kwargs))
-            return FakeResponse()
-
-        request = FetchRequest(symbols=("000001.SZ",), start_date="2026-01-05", end_date="2026-01-05")
-        with mock.patch("quant_data_platform.providers.requests.post", fake_post):
-            TushareHttpOptionalProvider(token="token").fetch_market_bars(request)
-
-        self.assertEqual(len(calls), 1)
-        self.assertNotIn("timeout", calls[0])
+    def test_legacy_tushare_optional_provider_plan_is_removed(self) -> None:
+        with self.assertRaises(ValueError):
+            build_default_providers("tushare_optional")
 
     def test_baostock_stock_basic_frame_maps_stock_rows(self) -> None:
         class FakeQuery:

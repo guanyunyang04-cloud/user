@@ -485,7 +485,13 @@ def audit_factor_semantics(events: pd.DataFrame, daily: pd.DataFrame) -> Quality
         if invalid.any():
             findings.append(_finding("factor_event_nonpositive_or_nonfinite", "All event factors must be finite and positive.", domain=domain, count=int(invalid.sum())))
     if "verification_status" in events.columns:
-        allowed = {"verified_dual_path", "official_arbitrated", "xdxr_official_arbitrated"}
+        allowed = {
+            "verified_dual_path",
+            "official_arbitrated",
+            "xdxr_official_arbitrated",
+            "verified_third_path_ratio_pre_batch",
+            "verified_third_path_baseline_pre_batch",
+        }
         unverified = ~events["verification_status"].fillna("").astype(str).isin(allowed)
         if unverified.any():
             findings.append(
@@ -497,6 +503,61 @@ def audit_factor_semantics(events: pd.DataFrame, daily: pd.DataFrame) -> Quality
                     sample=events.loc[unverified, event_key + ["verification_status"]].head(20).to_dict("records"),
                 )
             )
+    if not events.empty:
+        semantic_required = {"price_adjustment_applicable", "factor_semantics", "holder_entitlement_ratio"}
+        missing_semantic = sorted(semantic_required - set(events.columns))
+        if missing_semantic:
+            findings.append(
+                _finding(
+                    "factor_event_semantic_fields_missing",
+                    f"Missing special-event semantic fields: {missing_semantic}.",
+                    domain=domain,
+                    count=len(missing_semantic),
+                    sample=missing_semantic,
+                )
+            )
+        else:
+            semantics = events["factor_semantics"].fillna("").astype(str).str.strip()
+            blank_semantics = semantics.eq("")
+            if blank_semantics.any():
+                findings.append(
+                    _finding(
+                        "factor_event_semantics_blank",
+                        "Every factor event must state whether it represents price continuity or holder entitlement.",
+                        domain=domain,
+                        count=int(blank_semantics.sum()),
+                    )
+                )
+            non_applicable = ~events["price_adjustment_applicable"].fillna(False).astype(bool)
+            mislabeled = non_applicable & semantics.eq("price_continuity_cumulative_factor")
+            if mislabeled.any():
+                findings.append(
+                    _finding(
+                        "factor_nonprice_event_mislabeled",
+                        "A non-applicable holder-entitlement event is labeled as an ordinary price-continuity factor.",
+                        domain=domain,
+                        count=int(mislabeled.sum()),
+                    )
+                )
+            regression = (
+                events["provider_symbol"].astype(str).str.contains("600000", regex=False)
+                & events["divid_operate_date"].astype(str).eq("2006-05-12")
+            )
+            if regression.any():
+                passed = (
+                    non_applicable
+                    & semantics.eq("share_reform_holder_consideration")
+                    & pd.to_numeric(events.get("holder_entitlement_ratio"), errors="coerce").sub(0.3).abs().le(1e-12)
+                )
+                if not passed.loc[regression].all():
+                    findings.append(
+                        _finding(
+                            "factor_600000_share_reform_semantics_regression",
+                            "600000.SH/2006-05-12 must remain a 10-for-3 holder entitlement, not an ordinary price factor.",
+                            domain=domain,
+                            count=int((regression & ~passed).sum()),
+                        )
+                    )
     if set(factor_columns + daily_key).issubset(daily.columns) and not daily.empty:
         ordered = daily.sort_values(daily_key).copy()
         numeric_daily = ordered[factor_columns].apply(pd.to_numeric, errors="coerce")
@@ -504,7 +565,10 @@ def audit_factor_semantics(events: pd.DataFrame, daily: pd.DataFrame) -> Quality
         if invalid.any():
             findings.append(_finding("factor_daily_nonpositive_or_nonfinite", "Known daily factors must be finite and positive.", domain=domain, count=int(invalid.sum())))
         changed = ordered.groupby("security_id", sort=False)[factor_columns].transform(lambda item: item.ne(item.shift()) & item.notna() & item.shift().notna()).any(axis=1)
-        event_keys = set(zip(events.get("security_id", []), events.get("divid_operate_date", [])))
+        daily_events = events
+        if "price_adjustment_applicable" in events.columns:
+            daily_events = events.loc[events["price_adjustment_applicable"].fillna(False).astype(bool)]
+        event_keys = set(zip(daily_events.get("security_id", []), daily_events.get("divid_operate_date", [])))
         changed_keys = list(zip(ordered.loc[changed, "security_id"], ordered.loc[changed, "trade_date"]))
         illegal = [key for key in changed_keys if key not in event_keys]
         if illegal:
@@ -512,8 +576,8 @@ def audit_factor_semantics(events: pd.DataFrame, daily: pd.DataFrame) -> Quality
             regression = [key for key in illegal if "600076" in str(key[0])]
             if regression:
                 findings.append(_finding("factor_600076_non_event_jump_regression", "600076.SH reproduced the known non-event factor-jump failure.", domain=domain, count=len(regression), sample=regression))
-        if not events.empty:
-            event_values = events.loc[:, event_key + factor_columns].rename(columns={"divid_operate_date": "trade_date"})
+        if not daily_events.empty:
+            event_values = daily_events.loc[:, event_key + factor_columns].rename(columns={"divid_operate_date": "trade_date"})
             daily_on_event = ordered.loc[:, daily_key + factor_columns].merge(event_values, on=daily_key, how="inner", suffixes=("_daily", "_event"))
             mismatched: list[dict[str, Any]] = []
             for column in factor_columns:

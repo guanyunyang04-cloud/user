@@ -34,6 +34,7 @@ from quant_data_platform.domains.contracts import (
     validate_provider_name,
 )
 from quant_data_platform.progress import create_progress, progress_write
+from quant_data_platform.tushare_proxy import TushareProxyProvider
 
 
 FORMAL_FREE_V3_REQUIRED_DOMAINS: tuple[str, ...] = (
@@ -95,6 +96,7 @@ QDP_PRODUCTION_V2_REQUIRED_DOMAINS: tuple[str, ...] = (
     DataDomain.ADJUST_FACTOR_EVENT,
 )
 QDP_PRODUCTION_V2_OPTIONAL_DOMAINS: tuple[str, ...] = (
+    DataDomain.MARKET_INTRADAY_1M,
     DataDomain.MARKET_INTRADAY_5M,
     DataDomain.ADJUST_FACTOR_DAILY,
     DataDomain.VALUATION,
@@ -219,11 +221,26 @@ _PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
         "formal_eligible": True,
         "notes": "Tonghuashun concept/hotspot supplement through public endpoints when available",
     },
-    "tushare_http_optional": {
-        "domains": (DataDomain.MARKET_DAILY, DataDomain.TRADING_CALENDAR, DataDomain.UNIVERSE_SNAPSHOT, DataDomain.VALUATION, DataDomain.LIMIT_STATUS),
+    "tushare_proxy": {
+        "domains": (
+            DataDomain.MARKET_DAILY,
+            DataDomain.MARKET_INTRADAY_1M,
+            DataDomain.MARKET_INTRADAY_5M,
+            DataDomain.TRADING_CALENDAR,
+            DataDomain.UNIVERSE_SNAPSHOT,
+            DataDomain.SECURITY_STATUS,
+            DataDomain.VALUATION,
+            DataDomain.LIMIT_STATUS,
+            DataDomain.ADJUST_FACTOR,
+            DataDomain.FINANCIAL_QUARTERLY,
+            DataDomain.PERFORMANCE_FORECAST,
+            DataDomain.PERFORMANCE_EXPRESS,
+            DataDomain.CORPORATE_ACTIONS,
+            DataDomain.NAME_CHANGE,
+        ),
         "requires_token": True,
-        "formal_eligible": False,
-        "notes": "token-gated optional source; never required by formal_free_v3",
+        "formal_eligible": True,
+        "notes": "Time-limited Tushare-compatible HTTP historical bootstrap source; upstream provenance is not exposed and it is never the sole truth source.",
     },
     "sina_tencent_realtime": {
         "domains": (),
@@ -273,7 +290,7 @@ def _formal_requirement(domain: str) -> str:
 def provider_capability_matrix(provider_plan: str = "formal_free_v3") -> list[dict[str, Any]]:
     plan = str(provider_plan or "formal_free_v3").strip().lower()
     if plan == "formal_free_v3":
-        provider_names = ("baostock", "eastmoney_efinance", "akshare_eastmoney", "tencent_finance", "tonghuashun_hotspot", "tushare_http_optional")
+        provider_names = ("baostock", "eastmoney_efinance", "akshare_eastmoney", "tencent_finance", "tonghuashun_hotspot")
         default_domains_by_provider: dict[str, set[str]] = {}
     elif plan == "qdp_production_v1":
         provider_names = ("mootdx_online", "baostock", "cninfo")
@@ -299,7 +316,7 @@ def provider_capability_matrix(provider_plan: str = "formal_free_v3") -> list[di
             "cninfo": set(),
         }
     elif plan == "qdp_production_v2":
-        provider_names = ("baostock", "mootdx_online", "cninfo")
+        provider_names = ("baostock", "mootdx_online", "tushare_proxy", "cninfo")
         default_domains_by_provider = {
             "baostock": {
                 DataDomain.MARKET_DAILY,
@@ -314,7 +331,23 @@ def provider_capability_matrix(provider_plan: str = "formal_free_v3") -> list[di
                 DataDomain.PERFORMANCE_FORECAST,
                 DataDomain.PERFORMANCE_EXPRESS,
             },
-            "mootdx_online": {DataDomain.MARKET_INTRADAY_5M, DataDomain.CORPORATE_ACTIONS, DataDomain.SHARE_CAPITAL},
+            "mootdx_online": {DataDomain.MARKET_INTRADAY_1M, DataDomain.MARKET_INTRADAY_5M, DataDomain.CORPORATE_ACTIONS, DataDomain.SHARE_CAPITAL},
+            "tushare_proxy": {
+                DataDomain.MARKET_DAILY,
+                DataDomain.MARKET_INTRADAY_1M,
+                DataDomain.MARKET_INTRADAY_5M,
+                DataDomain.TRADING_CALENDAR,
+                DataDomain.UNIVERSE_SNAPSHOT,
+                DataDomain.SECURITY_STATUS,
+                DataDomain.VALUATION,
+                DataDomain.LIMIT_STATUS,
+                DataDomain.ADJUST_FACTOR,
+                DataDomain.FINANCIAL_QUARTERLY,
+                DataDomain.PERFORMANCE_FORECAST,
+                DataDomain.PERFORMANCE_EXPRESS,
+                DataDomain.CORPORATE_ACTIONS,
+                DataDomain.NAME_CHANGE,
+            },
             "cninfo": set(),
         }
     elif plan == "research_rebuild_minimal_free":
@@ -1706,114 +1739,6 @@ class BaostockProvider:
 
 
 @dataclass
-class TushareHttpOptionalProvider:
-    name: str = "tushare_http_optional"
-    token: str = ""
-
-    def fetch_market_bars(self, request: FetchRequest) -> ProviderResult:
-        validate_provider_name(self.name)
-        token = str(self.token or os.environ.get("TUSHARE_TOKEN", "")).strip()
-        if not token:
-            raise RuntimeError("TUSHARE_TOKEN is not configured; tushare_http_optional is disabled")
-        request = request.normalized()
-        frames: list[pd.DataFrame] = []
-        for symbol in request.symbols:
-            response = requests.post(
-                "http://api.tushare.pro",
-                json={
-                    "api_name": "daily",
-                    "token": token,
-                    "params": {
-                        "ts_code": symbol,
-                        "start_date": request.start_date.replace("-", ""),
-                        "end_date": request.end_date.replace("-", ""),
-                    },
-                    "fields": "ts_code,trade_date,open,high,low,close,vol,amount",
-                },
-            )
-            response.raise_for_status()
-            payload = response.json()
-            if payload.get("code") != 0:
-                raise RuntimeError(payload.get("msg") or f"tushare error code {payload.get('code')}")
-            data = payload.get("data") or {}
-            frame = pd.DataFrame(data.get("items") or [], columns=data.get("fields") or [])
-            if not frame.empty:
-                frames.append(frame.rename(columns={"ts_code": "symbol", "vol": "volume"}))
-        data = normalize_market_frame(pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(), source=self.name, adjusted_flag=request.adjusted_flag, require_columns=False)
-        return ProviderResult(provider=self.name, data=data)
-
-    def fetch_domain(self, request: DomainFetchRequest) -> ProviderResult:
-        request = request.normalized()
-        if request.domain == DataDomain.MARKET_DAILY:
-            return self.fetch_market_bars(
-                FetchRequest(
-                    symbols=request.symbols,
-                    start_date=request.start_date,
-                    end_date=request.end_date,
-                    adjusted_flag=request.adjusted_flag,
-                )
-            )
-        token = str(self.token or os.environ.get("TUSHARE_TOKEN", "")).strip()
-        if not token:
-            raise RuntimeError("TUSHARE_TOKEN is not configured; tushare_http_optional is disabled")
-        if request.domain == DataDomain.TRADING_CALENDAR:
-            frame = self._post_tushare(
-                token=token,
-                api_name="trade_cal",
-                params={"start_date": request.start_date.replace("-", ""), "end_date": request.end_date.replace("-", "")},
-                fields="cal_date,is_open,exchange",
-            ).rename(columns={"cal_date": "trade_date"})
-        elif request.domain == DataDomain.UNIVERSE_SNAPSHOT:
-            frame = self._post_tushare(
-                token=token,
-                api_name="stock_basic",
-                params={"list_status": "L"},
-                fields="ts_code,name,market,list_status,list_date,delist_date",
-            ).rename(columns={"ts_code": "symbol", "market": "board"})
-            frame["trade_date"] = request.end_date
-        elif request.domain == DataDomain.VALUATION:
-            frames = []
-            for trade_date in _date_range_strings(request.start_date, request.end_date):
-                frames.append(
-                    self._post_tushare(
-                        token=token,
-                        api_name="daily_basic",
-                        params={"trade_date": trade_date.replace("-", "")},
-                        fields="ts_code,trade_date,total_mv,circ_mv,pe,pb,turnover_rate",
-                    ).rename(columns={"ts_code": "symbol"})
-                )
-            frame = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-        elif request.domain == DataDomain.LIMIT_STATUS:
-            frames = []
-            for trade_date in _date_range_strings(request.start_date, request.end_date):
-                frames.append(
-                    self._post_tushare(
-                        token=token,
-                        api_name="stk_limit",
-                        params={"trade_date": trade_date.replace("-", "")},
-                        fields="ts_code,trade_date,up_limit,down_limit",
-                    ).rename(columns={"ts_code": "symbol"})
-                )
-            frame = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-        else:
-            raise RuntimeError(f"unsupported_domain: {self.name} does not support {request.domain}")
-        data = normalize_domain_frame(frame, domain=request.domain, source=self.name, as_of_date=request.end_date, require_columns=False)
-        return ProviderResult(provider=self.name, data=data)
-
-    def _post_tushare(self, *, token: str, api_name: str, params: dict[str, Any], fields: str) -> pd.DataFrame:
-        response = requests.post(
-            "http://api.tushare.pro",
-            json={"api_name": api_name, "token": token, "params": params, "fields": fields},
-        )
-        response.raise_for_status()
-        payload = response.json()
-        if payload.get("code") != 0:
-            raise RuntimeError(payload.get("msg") or f"tushare error code {payload.get('code')}")
-        data = payload.get("data") or {}
-        return pd.DataFrame(data.get("items") or [], columns=data.get("fields") or [])
-
-
-@dataclass
 class SinaTencentRealtimeProvider:
     name: str = "sina_tencent_realtime"
 
@@ -2032,7 +1957,7 @@ class QdpProductionV2Provider:
 
     def fetch_domain(self, request: DomainFetchRequest) -> ProviderResult:
         request = request.normalized()
-        if request.domain in {DataDomain.MARKET_INTRADAY_5M, DataDomain.CORPORATE_ACTIONS, DataDomain.SHARE_CAPITAL}:
+        if request.domain in {DataDomain.MARKET_INTRADAY_1M, DataDomain.MARKET_INTRADAY_5M, DataDomain.CORPORATE_ACTIONS, DataDomain.SHARE_CAPITAL}:
             return self._mootdx.fetch_domain(request)
         if request.domain in {
             DataDomain.MARKET_DAILY,
@@ -2079,8 +2004,8 @@ def build_default_providers(provider_plan: str = "default_free") -> list:
         return [BaostockProvider()]
     if plan == "default_free_with_realtime":
         return [EastmoneyEfinanceProvider(), AkshareEastmoneyProvider(), BaostockProvider(), SinaTencentRealtimeProvider()]
-    if plan == "tushare_optional":
-        return [TushareHttpOptionalProvider()]
+    if plan == "tushare_proxy":
+        return [TushareProxyProvider()]
     raise ValueError(f"Unsupported provider_plan: {provider_plan}")
 
 
@@ -2232,6 +2157,9 @@ def _probe_mootdx_protocol_clients(Quotes: Any, candidates: tuple[tuple[str, int
             payload = client.bars(symbol="600000", frequency=9, start=0, offset=2)
             if payload is None or len(payload) == 0:
                 raise RuntimeError("empty_daily_probe")
+            minute_payload = client.bars(symbol="600000", frequency=8, start=0, offset=2)
+            if minute_payload is None or len(minute_payload) == 0:
+                raise RuntimeError("empty_1m_probe")
             return time.perf_counter() - started, server, client, ""
         except Exception as exc:
             if client is not None:

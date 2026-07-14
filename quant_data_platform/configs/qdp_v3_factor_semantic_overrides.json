@@ -1,0 +1,16 @@
+{
+  "schema_version": "qdp_v3_factor_semantic_overrides_v1",
+  "events": [
+    {
+      "provider_symbol": "600000.SH",
+      "event_date": "2006-05-12",
+      "price_adjustment_applicable": false,
+      "factor_semantics": "share_reform_holder_consideration",
+      "holder_entitlement_ratio": 0.3,
+      "official_source": "cninfo",
+      "official_document_url": "https://static.cninfo.com.cn/finalpage/2006-05-09/17033921.PDF",
+      "official_document_sha256": "82c03a5013303c5641728d4047a7eaa936897486f5a071279926dcb25fd4c1dc",
+      "notes": "Share-reform consideration: holders of tradable shares received 3 shares per 10; retain as holder-entitlement evidence and exclude from price-continuity factors unless separately proven."
+    }
+  ]
+}

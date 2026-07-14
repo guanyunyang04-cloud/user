@@ -435,7 +435,13 @@ def build_adjust_factor_daily(market_daily: pd.DataFrame, events: pd.DataFrame) 
         return pd.DataFrame(columns=columns)
     event_columns = ["divid_operate_date", "fore_adjust_factor", "back_adjust_factor", "adjust_factor"]
     rows: list[pd.DataFrame] = []
-    event_groups = {key: group.copy() for key, group in events.groupby("security_id", sort=False)} if not events.empty else {}
+    applicable_events = events.copy()
+    if not applicable_events.empty and "price_adjustment_applicable" in applicable_events.columns:
+        applicable = applicable_events["price_adjustment_applicable"].fillna(False).astype(bool)
+        applicable_events = applicable_events.loc[applicable].copy()
+    event_groups = {
+        key: group.copy() for key, group in applicable_events.groupby("security_id", sort=False)
+    } if not applicable_events.empty else {}
     for security_id, market_group in market_daily.groupby("security_id", sort=False):
         market = market_group.loc[:, ["security_id", "trade_date", "symbol_on_date"]].sort_values("trade_date").copy()
         market["_trade_ts"] = pd.to_datetime(market["trade_date"], errors="raise")

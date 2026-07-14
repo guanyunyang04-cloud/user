@@ -18,6 +18,7 @@ from quant_data_platform.qdp_v3.constants import (
     DOMAIN_INDUSTRY,
     DOMAIN_ELIGIBLE_SIGNAL_D,
     DOMAIN_MARKET_DAILY_RAW,
+    DOMAIN_MARKET_INTRADAY_1M,
     DOMAIN_MARKET_INTRADAY_5M,
     DOMAIN_PERFORMANCE_EXPRESS,
     DOMAIN_PERFORMANCE_FORECAST,
@@ -41,20 +42,48 @@ from quant_data_platform.qdp_v3.constants import (
     RAW_INTRADAY_5M_SELECTED,
     RAW_SECURITY_MASTER,
     RAW_TRADING_CALENDAR,
+    RAW_TUSHARE_PROXY_ADJ_FACTOR,
+    RAW_TUSHARE_PROXY_DAILY,
+    RAW_TUSHARE_PROXY_DAILY_BASIC,
+    RAW_TUSHARE_PROXY_DIVIDEND,
+    RAW_TUSHARE_PROXY_FINANCIAL,
+    RAW_TUSHARE_PROXY_NAMECHANGE,
+    RAW_TUSHARE_PROXY_STK_LIMIT,
+    RAW_TUSHARE_PROXY_STOCK_BASIC,
+    RAW_TUSHARE_PROXY_SUSPEND,
+    RAW_TUSHARE_PROXY_TRADE_CALENDAR,
 )
 from quant_data_platform.qdp_v3.corporate_actions import (
     FACTOR_CANONICAL_COLUMNS,
+    apply_factor_semantic_overrides,
     arbitrate_adjust_factor_disputes,
     build_share_capital_daily,
+    canonicalize_proxy_dividends,
     canonicalize_mootdx_xdxr,
+    corroborate_corporate_actions,
     load_official_factor_evidence,
     reconstruct_xdxr_reference_prices,
 )
 from quant_data_platform.qdp_v3.datasets import dataset_input_ref, write_dataset, write_partitioned_dataset
 from quant_data_platform.qdp_v3.identity import SecurityIdentityRegistry, board_for_symbol, normalize_symbol
 from quant_data_platform.qdp_v3.intraday import canonicalize_selected_5m, is_complete_5m_day
+from quant_data_platform.qdp_v3.intraday_build import build_proxy_intraday_datasets
 from quant_data_platform.qdp_v3.manifest import ProviderEvidence, dataset_manifest_for_id, manifest_sha256
 from quant_data_platform.qdp_v3.paths import ensure_qdp_v3_layout
+from quant_data_platform.qdp_v3.proxy_lowfreq import (
+    audit_proxy_calendar,
+    audit_proxy_daily_against_baostock,
+    audit_proxy_daily_basic,
+    audit_proxy_suspend_status,
+)
+from quant_data_platform.qdp_v3.proxy_factor import (
+    derive_proxy_factor_evidence,
+    reconcile_proxy_factor_third_path,
+)
+from quant_data_platform.qdp_v3.proxy_financial import (
+    canonicalize_proxy_daily_basic_capital,
+    canonicalize_proxy_financial,
+)
 from quant_data_platform.qdp_v3.quality import (
     QualityFinding,
     QualityReport,
@@ -599,6 +628,54 @@ def build_candidate(
         end_value=effective_end,
     )
     name_observations, all_stock_symbols = _pit_name_observations(all_stock_refs)
+    proxy_daily_refs = iter_raw_partitions(
+        RAW_TUSHARE_PROXY_DAILY,
+        workspace_root=workspace_root,
+        start_value=start_date,
+        end_value=effective_end,
+    )
+    proxy_daily_basic_refs = iter_raw_partitions(
+        RAW_TUSHARE_PROXY_DAILY_BASIC,
+        workspace_root=workspace_root,
+        start_value=start_date,
+        end_value=effective_end,
+    )
+    proxy_suspend_refs = iter_raw_partitions(
+        RAW_TUSHARE_PROXY_SUSPEND,
+        workspace_root=workspace_root,
+        start_value=start_date,
+        end_value=effective_end,
+    )
+    proxy_stk_limit_refs = iter_raw_partitions(
+        RAW_TUSHARE_PROXY_STK_LIMIT,
+        workspace_root=workspace_root,
+        start_value=start_date,
+        end_value=effective_end,
+    )
+    proxy_calendar_refs = iter_raw_partitions(
+        RAW_TUSHARE_PROXY_TRADE_CALENDAR,
+        workspace_root=workspace_root,
+    )
+    proxy_dividend_refs = iter_raw_partitions(
+        RAW_TUSHARE_PROXY_DIVIDEND,
+        workspace_root=workspace_root,
+    )
+    proxy_stock_basic_refs = iter_raw_partitions(
+        RAW_TUSHARE_PROXY_STOCK_BASIC,
+        workspace_root=workspace_root,
+    )
+    proxy_namechange_refs = iter_raw_partitions(
+        RAW_TUSHARE_PROXY_NAMECHANGE,
+        workspace_root=workspace_root,
+    )
+    proxy_factor_refs = iter_raw_partitions(
+        RAW_TUSHARE_PROXY_ADJ_FACTOR,
+        workspace_root=workspace_root,
+    )
+    proxy_financial_refs = iter_raw_partitions(
+        RAW_TUSHARE_PROXY_FINANCIAL,
+        workspace_root=workspace_root,
+    )
 
     provider_symbols: set[str] = set(all_stock_symbols)
     for ref in daily_refs:
@@ -614,6 +691,12 @@ def build_candidate(
     provider_symbols.update(ref.partition_value for ref in symbol_factor_refs)
     xdxr_refs = iter_raw_partitions(RAW_CORPORATE_ACTION_XDXR, workspace_root=workspace_root)
     provider_symbols.update(ref.partition_value for ref in xdxr_refs)
+    for ref in proxy_stock_basic_refs:
+        evidence = read_raw_partition(ref)
+        if "ts_code" in evidence.columns:
+            provider_symbols.update(evidence["ts_code"].astype(str).tolist())
+    provider_symbols.update(ref.partition_value for ref in proxy_namechange_refs)
+    provider_symbols.update(ref.partition_value for ref in proxy_factor_refs)
     secondary_domains = (
         DOMAIN_FINANCIAL_QUARTERLY,
         DOMAIN_PERFORMANCE_FORECAST,
@@ -644,6 +727,14 @@ def build_candidate(
     xdxr_actions, share_capital_events, xdxr_conflicts = canonicalize_mootdx_xdxr(
         [(ref.partition_value, read_raw_partition(ref)) for ref in xdxr_refs],
         identity_registry=registry,
+    )
+    proxy_dividend_actions, proxy_dividend_conflicts = canonicalize_proxy_dividends(
+        proxy_dividend_refs,
+        identity_registry=registry,
+    )
+    corroborated_actions, action_cross_conflicts, action_cross_metrics = corroborate_corporate_actions(
+        xdxr_actions,
+        proxy_dividend_actions,
     )
     official_factor_evidence = load_official_factor_evidence(
         identity_registry=registry,
@@ -701,9 +792,18 @@ def build_candidate(
         frequency="event",
         primary_key=["security_id"],
         quality_report=identity_report,
-        raw_content_hashes=[security_master_ref.content_sha256] if security_master_ref else [],
-        provider_evidence=_provider_evidence([security_master_ref] if security_master_ref else []),
-        build={"contract": QDP_V3_CONTRACT_VERSION, "identity_config": str(identity_config or "default")},
+        raw_content_hashes=(
+            ([security_master_ref.content_sha256] if security_master_ref else [])
+            + [ref.content_sha256 for ref in proxy_stock_basic_refs]
+        ),
+        provider_evidence=_provider_evidence(
+            ([security_master_ref] if security_master_ref else []) + proxy_stock_basic_refs
+        ),
+        build={
+            "contract": QDP_V3_CONTRACT_VERSION,
+            "identity_config": str(identity_config or "default"),
+            "tushare_proxy_stock_basic_role": "historical_inventory_evidence_not_merge_authority",
+        },
         coverage={"security_count": int(len(identity_frame))},
         date_column="",
         partitioning="single",
@@ -721,15 +821,17 @@ def build_candidate(
         raw_content_hashes=(
             ([security_master_ref.content_sha256] if security_master_ref else [])
             + [ref.content_sha256 for ref in all_stock_refs]
+            + [ref.content_sha256 for ref in proxy_namechange_refs]
         ),
         provider_evidence=_provider_evidence(
-            ([security_master_ref] if security_master_ref else []) + all_stock_refs
+            ([security_master_ref] if security_master_ref else []) + all_stock_refs + proxy_namechange_refs
         ),
         build={
             "contract": QDP_V3_CONTRACT_VERSION,
             "official_code_changes_only": True,
             "pit_name_source": "baostock.query_all_stock(date_snapshot)",
             "current_stock_basic_name_backfill_forbidden": True,
+            "tushare_proxy_namechange_role": "arbitration_task_discovery_only",
         },
         coverage={
             "history_row_count": int(len(history_frame)),
@@ -780,21 +882,62 @@ def build_candidate(
                 sample=daily_resolved_conflict_sample[:20],
             )
         )
+    proxy_daily_metrics: dict[str, Any] = {}
+    proxy_daily_conflicts: list[dict[str, Any]] = []
+    if proxy_daily_refs:
+        proxy_findings, proxy_daily_metrics, proxy_daily_conflicts = audit_proxy_daily_against_baostock(
+            proxy_refs=proxy_daily_refs,
+            baostock_refs=daily_refs,
+            registry=registry,
+        )
+        raw_daily_findings.extend(proxy_findings)
+    elif (paths.metadata / "tushare_proxy_bootstrap_cutoff.json").exists():
+        raw_daily_findings.append(
+            QualityFinding(
+                code="tushare_proxy_daily_bootstrap_evidence_missing",
+                severity="blocker",
+                message="The locked historical bootstrap requires proxy daily evidence for cross-source reconciliation.",
+                domain=DOMAIN_MARKET_DAILY_RAW,
+            )
+        )
+    valuation_cross_findings: list[QualityFinding] = []
+    valuation_cross_metrics: dict[str, Any] = {}
+    valuation_cross_conflicts: list[dict[str, Any]] = []
+    if proxy_daily_basic_refs:
+        valuation_cross_findings, valuation_cross_metrics, valuation_cross_conflicts = audit_proxy_daily_basic(
+            proxy_refs=proxy_daily_basic_refs,
+            baostock_refs=daily_refs,
+            registry=registry,
+        )
+    elif (paths.metadata / "tushare_proxy_bootstrap_cutoff.json").exists():
+        valuation_cross_findings.append(
+            QualityFinding(
+                code="tushare_proxy_daily_basic_bootstrap_evidence_missing",
+                severity="blocker",
+                message="The locked bootstrap requires daily_basic for valuation and share-capital reconciliation.",
+                domain=DOMAIN_VALUATION_DAILY,
+            )
+        )
+    status_cross_findings, status_cross_metrics, status_cross_conflicts = audit_proxy_suspend_status(
+        proxy_refs=proxy_suspend_refs,
+        baostock_refs=daily_refs,
+        registry=registry,
+    )
     market_report = _merge_reports(DOMAIN_MARKET_DAILY_RAW, staged_daily["reports"][DOMAIN_MARKET_DAILY_RAW], raw_daily_findings)
     status_report = _merge_reports(
         DOMAIN_SECURITY_STATUS_DAILY,
         staged_daily["reports"][DOMAIN_SECURITY_STATUS_DAILY],
-        [item for item in raw_daily_findings if item.severity == "blocker"],
+        [item for item in raw_daily_findings if item.severity == "blocker"] + status_cross_findings,
     )
     valuation_report = _merge_reports(
         DOMAIN_VALUATION_DAILY,
         staged_daily["reports"][DOMAIN_VALUATION_DAILY],
-        [item for item in raw_daily_findings if item.severity == "blocker"],
+        [item for item in raw_daily_findings if item.severity == "blocker"] + valuation_cross_findings,
     )
     eligible_report = _merge_reports(
         DOMAIN_ELIGIBLE_SIGNAL_D,
         staged_daily["reports"][DOMAIN_ELIGIBLE_SIGNAL_D],
-        [item for item in raw_daily_findings if item.severity == "blocker"],
+        [item for item in raw_daily_findings if item.severity == "blocker"] + status_cross_findings,
     )
     tradable_report = _merge_reports(
         DOMAIN_TRADABLE_OPEN_D1,
@@ -803,6 +946,7 @@ def build_candidate(
     )
     identity_inputs = [identity_input, history_input]
     daily_evidence = _provider_evidence(daily_refs)
+    market_daily_evidence = _provider_evidence([*daily_refs, *proxy_daily_refs])
     common_build = {"contract": QDP_V3_CONTRACT_VERSION, "start_date": start_date, "end_date": effective_end, "raw_universe": "all_a"}
     market_manifest = write_partitioned_dataset(
         root=paths.root,
@@ -813,14 +957,20 @@ def build_candidate(
         primary_key=["security_id", "trade_date"],
         quality_report=market_report,
         inputs=identity_inputs,
-        provider_evidence=daily_evidence,
-        raw_content_hashes=[ref.content_sha256 for ref in daily_refs],
-        build=common_build,
-        coverage={"start_date": snapshot_dates[0], "end_date": snapshot_dates[-1], "security_count": len(set(staged_daily["security_ids"]) - {""})},
+        provider_evidence=market_daily_evidence,
+        raw_content_hashes=[ref.content_sha256 for ref in [*daily_refs, *proxy_daily_refs]],
+        build={**common_build, "proxy_daily_unit_conversion": {"volume": "lot_to_share_x100", "amount": "thousand_cny_to_cny_x1000"}},
+        coverage={
+            "start_date": snapshot_dates[0],
+            "end_date": snapshot_dates[-1],
+            "security_count": len(set(staged_daily["security_ids"]) - {""}),
+            "tushare_proxy_cross_check": proxy_daily_metrics,
+        },
         units={"price": "CNY/share", "volume": "share", "amount": "CNY", "pct_chg": "percent"},
         quarantine=(
             ([{"resolution_status": "unresolved", "row_count": daily_quarantine_count, "sample": daily_quarantine_sample}] if daily_quarantine_count else [])
             + ([{"resolution_status": "resolved", "row_count": daily_resolved_conflict_count, "sample": daily_resolved_conflict_sample}] if daily_resolved_conflict_count else [])
+            + ([{"resolution_status": "unresolved", "reason": "cross_source_value_conflict", "row_count": int(proxy_daily_metrics.get("value_conflict_count", len(proxy_daily_conflicts))), "sample": proxy_daily_conflicts[:100]}] if proxy_daily_conflicts else [])
         ),
         partitioning="natural_year",
     )
@@ -834,10 +984,11 @@ def build_candidate(
         primary_key=["security_id", "trade_date"],
         quality_report=status_report,
         inputs=identity_inputs + [market_input],
-        provider_evidence=daily_evidence,
-        raw_content_hashes=[ref.content_sha256 for ref in daily_refs],
-        build=common_build,
-        coverage={"start_date": snapshot_dates[0], "end_date": snapshot_dates[-1]},
+        provider_evidence=_provider_evidence([*daily_refs, *proxy_suspend_refs]),
+        raw_content_hashes=[ref.content_sha256 for ref in [*daily_refs, *proxy_suspend_refs]],
+        build={**common_build, "proxy_suspend_role": "full_day_status_cross_check"},
+        coverage={"start_date": snapshot_dates[0], "end_date": snapshot_dates[-1], "proxy_suspend_cross_check": status_cross_metrics},
+        quarantine=status_cross_conflicts[:100],
         partitioning="natural_year",
     )
     valuation_manifest = write_partitioned_dataset(
@@ -849,11 +1000,12 @@ def build_candidate(
         primary_key=["security_id", "trade_date"],
         quality_report=valuation_report,
         inputs=identity_inputs + [market_input],
-        provider_evidence=daily_evidence,
-        raw_content_hashes=[ref.content_sha256 for ref in daily_refs],
-        build=common_build,
-        coverage={"start_date": snapshot_dates[0], "end_date": snapshot_dates[-1]},
+        provider_evidence=_provider_evidence([*daily_refs, *proxy_daily_basic_refs]),
+        raw_content_hashes=[ref.content_sha256 for ref in [*daily_refs, *proxy_daily_basic_refs]],
+        build={**common_build, "proxy_daily_basic_role": "valuation_and_market_cap_cross_check"},
+        coverage={"start_date": snapshot_dates[0], "end_date": snapshot_dates[-1], "proxy_daily_basic_cross_check": valuation_cross_metrics},
         units={"turnover_rate": "percent"},
+        quarantine=valuation_cross_conflicts[:100],
         partitioning="natural_year",
     )
     status_input = dataset_input_ref(paths.root, status_manifest)
@@ -890,6 +1042,22 @@ def build_candidate(
     )
 
     calendar, calendar_refs, calendar_findings = _calendar_frame(workspace_root, snapshot_dates)
+    proxy_calendar_metrics: dict[str, Any] = {}
+    if proxy_calendar_refs:
+        proxy_calendar_findings, proxy_calendar_metrics = audit_proxy_calendar(
+            proxy_refs=proxy_calendar_refs,
+            canonical_calendar=calendar,
+        )
+        calendar_findings.extend(proxy_calendar_findings)
+    elif (paths.metadata / "tushare_proxy_bootstrap_cutoff.json").exists():
+        calendar_findings.append(
+            QualityFinding(
+                code="tushare_proxy_trade_calendar_bootstrap_evidence_missing",
+                severity="blocker",
+                message="The locked bootstrap requires a proxy trade-calendar cross-check.",
+                domain=DOMAIN_TRADING_CALENDAR,
+            )
+        )
     calendar_report = _merge_reports(
         DOMAIN_TRADING_CALENDAR,
         [audit_table_contract(calendar, domain=DOMAIN_TRADING_CALENDAR, primary_key=["trade_date", "exchange"])],
@@ -903,26 +1071,42 @@ def build_candidate(
         frequency="1d",
         primary_key=["trade_date", "exchange"],
         quality_report=calendar_report,
-        provider_evidence=_provider_evidence(calendar_refs),
-        raw_content_hashes=[ref.content_sha256 for ref in calendar_refs],
-        build={"contract": QDP_V3_CONTRACT_VERSION},
-        coverage={"start_date": str(calendar["trade_date"].min()), "end_date": str(calendar["trade_date"].max())},
+        provider_evidence=_provider_evidence([*calendar_refs, *proxy_calendar_refs]),
+        raw_content_hashes=[ref.content_sha256 for ref in [*calendar_refs, *proxy_calendar_refs]],
+        build={"contract": QDP_V3_CONTRACT_VERSION, "proxy_calendar_role": "cross_source_trading_day_proof"},
+        coverage={"start_date": str(calendar["trade_date"].min()), "end_date": str(calendar["trade_date"].max()), "proxy_cross_check": proxy_calendar_metrics},
         partitioning="year",
     )
     calendar_input = dataset_input_ref(paths.root, calendar_manifest)
+
+    proxy_secondary_frames, proxy_secondary_conflicts, proxy_secondary_refs = canonicalize_proxy_financial(
+        proxy_financial_refs,
+        identity_registry=registry,
+        calendar=calendar,
+    )
 
     secondary_manifests: list[Any] = []
     secondary_conflicts: dict[str, pd.DataFrame] = {}
     for secondary_domain in secondary_domains:
         refs = secondary_refs[secondary_domain]
-        if not refs:
+        proxy_frame = proxy_secondary_frames.get(secondary_domain, pd.DataFrame())
+        domain_proxy_refs = proxy_secondary_refs.get(secondary_domain, [])
+        if not refs and proxy_frame.empty:
             continue
-        secondary_frame, conflicts = canonicalize_secondary_domain(
-            domain=secondary_domain,
-            refs=refs,
-            identity_registry=registry,
-            calendar=calendar,
-        )
+        if refs:
+            secondary_frame, conflicts = canonicalize_secondary_domain(
+                domain=secondary_domain,
+                refs=refs,
+                identity_registry=registry,
+                calendar=calendar,
+            )
+        else:
+            secondary_frame, conflicts = pd.DataFrame(), pd.DataFrame()
+        if not proxy_frame.empty:
+            secondary_frame = pd.concat([secondary_frame, proxy_frame], ignore_index=True, sort=False)
+        proxy_conflicts = proxy_secondary_conflicts.get(secondary_domain, pd.DataFrame())
+        if not proxy_conflicts.empty:
+            conflicts = pd.concat([conflicts, proxy_conflicts], ignore_index=True, sort=False)
         secondary_conflicts[secondary_domain] = conflicts
         if secondary_domain in {DOMAIN_FINANCIAL_QUARTERLY, DOMAIN_PERFORMANCE_FORECAST, DOMAIN_PERFORMANCE_EXPRESS}:
             primary_key = ["security_id", "report_date", "publish_date", "source"]
@@ -939,12 +1123,13 @@ def build_candidate(
             date_column = "trade_date"
             frequency = "snapshot_event"
             unavailable = secondary_frame.iloc[0:0]
-        findings = _raw_quality_findings(refs, domain=secondary_domain)
+        all_secondary_refs = [*refs, *domain_proxy_refs]
+        findings = _raw_quality_findings(all_secondary_refs, domain=secondary_domain)
         findings.append(
             QualityFinding(
-                code="secondary_domain_single_source_provisional",
+                code="secondary_domain_requires_official_reconciliation",
                 severity="warning",
-                message="Secondary PIT data remains explicitly provisional until independent or official reconciliation.",
+                message="Secondary PIT data remains provisional until cross-source agreement and disclosure semantics are independently proved.",
                 domain=secondary_domain,
                 provisional=True,
             )
@@ -986,8 +1171,8 @@ def build_candidate(
             primary_key=primary_key,
             quality_report=report,
             inputs=[*identity_inputs, calendar_input],
-            provider_evidence=_provider_evidence(refs),
-            raw_content_hashes=[ref.content_sha256 for ref in refs],
+            provider_evidence=_provider_evidence(all_secondary_refs),
+            raw_content_hashes=[ref.content_sha256 for ref in all_secondary_refs],
             build={
                 "contract": QDP_V3_CONTRACT_VERSION,
                 "unknown_values": "preserved",
@@ -1016,12 +1201,13 @@ def build_candidate(
         for year, market_path in market_parts:
             market_year = pd.read_parquet(market_path, engine="pyarrow")
             proof_market = pd.concat([previous_last, market_year], ignore_index=True) if not previous_last.empty else market_year
-            year_actions = xdxr_actions.loc[xdxr_actions["event_date"].astype(str).str.startswith(year)]
+            year_actions = corroborated_actions.loc[corroborated_actions["event_date"].astype(str).str.startswith(year)]
             if not year_actions.empty:
                 proof_frames.append(reconstruct_xdxr_reference_prices(proof_market, year_actions))
             previous_last = market_year.sort_values(["security_id", "trade_date"]).drop_duplicates("security_id", keep="last")
         reference_proof = pd.concat(proof_frames, ignore_index=True) if proof_frames else pd.DataFrame()
-        action_findings = _raw_quality_findings(xdxr_refs, domain=DOMAIN_CORPORATE_ACTIONS)
+        action_evidence_refs = [*xdxr_refs, *proxy_dividend_refs]
+        action_findings = _raw_quality_findings(action_evidence_refs, domain=DOMAIN_CORPORATE_ACTIONS)
         action_findings.append(
             QualityFinding(
                 code="xdxr_requires_official_disclosure_for_strict_use",
@@ -1042,6 +1228,24 @@ def build_candidate(
                     sample=xdxr_conflicts.head(20).to_dict("records"),
                 )
             )
+        if not proxy_dividend_conflicts.empty or not action_cross_conflicts.empty:
+            combined_action_conflicts = pd.concat(
+                [item for item in (proxy_dividend_conflicts, action_cross_conflicts) if not item.empty],
+                ignore_index=True,
+                sort=False,
+            )
+            action_findings.append(
+                QualityFinding(
+                    code="corporate_action_cross_source_conflicts",
+                    severity="blocker",
+                    message="Tushare-compatible dividend evidence conflicts with identity or TDX action terms.",
+                    domain=DOMAIN_CORPORATE_ACTIONS,
+                    count=int(len(combined_action_conflicts)),
+                    sample=combined_action_conflicts.head(20).to_dict("records"),
+                )
+            )
+        else:
+            combined_action_conflicts = pd.DataFrame()
         if not reference_proof.empty:
             mismatched = reference_proof.loc[reference_proof["proof_status"].eq("reference_price_mismatch")]
             unproven = reference_proof.loc[~reference_proof["proof_status"].isin(["proved", "reference_price_mismatch"])]
@@ -1069,25 +1273,36 @@ def build_candidate(
                         provisional=True,
                     )
                 )
+        action_evidence = pd.concat(
+            [item for item in (xdxr_actions, proxy_dividend_actions) if not item.empty],
+            ignore_index=True,
+            sort=False,
+        ) if not xdxr_actions.empty or not proxy_dividend_actions.empty else pd.DataFrame(columns=xdxr_actions.columns)
         action_report = _merge_reports(
             DOMAIN_CORPORATE_ACTIONS,
-            [audit_table_contract(xdxr_actions, domain=DOMAIN_CORPORATE_ACTIONS, primary_key=["security_id", "event_date", "category"])],
+            [audit_table_contract(action_evidence, domain=DOMAIN_CORPORATE_ACTIONS, primary_key=["security_id", "event_date", "category", "source"])],
             action_findings,
         )
         corporate_action_manifest = write_dataset(
             root=paths.root,
             domain=DOMAIN_CORPORATE_ACTIONS,
-            frame=xdxr_actions,
+            frame=action_evidence,
             layer="canonical_evidence",
             frequency="event",
-            primary_key=["security_id", "event_date", "category"],
+            primary_key=["security_id", "event_date", "category", "source"],
             quality_report=action_report,
             inputs=identity_inputs,
-            provider_evidence=_provider_evidence(xdxr_refs),
-            raw_content_hashes=[ref.content_sha256 for ref in xdxr_refs],
-            build={"contract": QDP_V3_CONTRACT_VERSION, "authority": "corroborating_only", "raw_share_unit": "10k_shares"},
-            coverage={"event_count": int(len(xdxr_actions)), "reference_proof_count": int(len(reference_proof))},
-            quarantine=xdxr_conflicts.head(100).to_dict("records") if not xdxr_conflicts.empty else [],
+            provider_evidence=_provider_evidence(action_evidence_refs),
+            raw_content_hashes=[ref.content_sha256 for ref in action_evidence_refs],
+            build={"contract": QDP_V3_CONTRACT_VERSION, "authority": "corroborating_only", "raw_share_unit": "10k_shares", "cross_source_proof": action_cross_metrics},
+            coverage={"event_count": int(len(action_evidence)), "reference_proof_count": int(len(reference_proof)), **action_cross_metrics},
+            quarantine=(
+                pd.concat([item for item in (xdxr_conflicts, combined_action_conflicts) if not item.empty], ignore_index=True, sort=False)
+                .head(100)
+                .to_dict("records")
+                if not xdxr_conflicts.empty or not combined_action_conflicts.empty
+                else []
+            ),
             date_column="event_date",
             partitioning="year",
         )
@@ -1164,6 +1379,118 @@ def build_candidate(
             partitioning="natural_year",
         )
 
+    if proxy_daily_basic_refs:
+        proxy_capital_parts: list[tuple[str, Path]] = []
+        proxy_capital_reports: list[QualityReport] = []
+        proxy_capital_conflicts: list[pd.DataFrame] = []
+        current_capital_year = ""
+        capital_buffer: list[pd.DataFrame] = []
+
+        def flush_proxy_capital(year: str) -> None:
+            if not year or not capital_buffer:
+                return
+            frame = pd.concat(capital_buffer, ignore_index=True, sort=False)
+            proxy_capital_reports.append(
+                audit_table_contract(
+                    frame,
+                    domain=DOMAIN_SHARE_CAPITAL_DAILY,
+                    primary_key=["security_id", "trade_date"],
+                )
+            )
+            path = staging_root / DOMAIN_SHARE_CAPITAL_DAILY / f"{year}.parquet"
+            atomic_write_parquet(
+                path,
+                frame.sort_values(["security_id", "trade_date"], kind="mergesort").reset_index(drop=True),
+            )
+            proxy_capital_parts.append((year, path))
+            capital_buffer.clear()
+
+        for ref in proxy_daily_basic_refs:
+            year = str(ref.partition_value)[:4]
+            if current_capital_year and year != current_capital_year:
+                flush_proxy_capital(current_capital_year)
+            current_capital_year = year
+            capital, conflicts = canonicalize_proxy_daily_basic_capital(
+                read_raw_partition(ref),
+                query_date=ref.partition_value,
+                identity_registry=registry,
+            )
+            if not capital.empty:
+                capital_buffer.append(capital)
+            if not conflicts.empty:
+                proxy_capital_conflicts.append(conflicts)
+        flush_proxy_capital(current_capital_year)
+        combined_capital_conflicts = (
+            pd.concat(proxy_capital_conflicts, ignore_index=True, sort=False)
+            if proxy_capital_conflicts
+            else pd.DataFrame()
+        )
+        proxy_capital_findings = _raw_quality_findings(
+            proxy_daily_basic_refs,
+            domain=DOMAIN_SHARE_CAPITAL_DAILY,
+        )
+        proxy_capital_findings.append(
+            QualityFinding(
+                code="share_capital_daily_proxy_source_provisional",
+                severity="warning",
+                message="Daily share capital is observed without future fill, but remains provisional pending official capital-event reconciliation.",
+                domain=DOMAIN_SHARE_CAPITAL_DAILY,
+                provisional=True,
+            )
+        )
+        if not combined_capital_conflicts.empty:
+            proxy_capital_findings.append(
+                QualityFinding(
+                    code="share_capital_daily_proxy_conflicts",
+                    severity="blocker",
+                    message="Proxy daily_basic share-capital rows fail identity or unit/order constraints.",
+                    domain=DOMAIN_SHARE_CAPITAL_DAILY,
+                    count=int(len(combined_capital_conflicts)),
+                    sample=combined_capital_conflicts.head(20).to_dict("records"),
+                )
+            )
+        proxy_capital_report = _merge_reports(
+            DOMAIN_SHARE_CAPITAL_DAILY,
+            proxy_capital_reports,
+            proxy_capital_findings,
+        )
+        capital_inputs = [*identity_inputs]
+        if share_capital_event_manifest is not None:
+            capital_inputs.append(dataset_input_ref(paths.root, share_capital_event_manifest))
+        share_capital_daily_manifest = write_partitioned_dataset(
+            root=paths.root,
+            domain=DOMAIN_SHARE_CAPITAL_DAILY,
+            partition_frames=_partition_frames_from_stage(proxy_capital_parts),
+            layer="canonical_pit",
+            frequency="1d",
+            primary_key=["security_id", "trade_date"],
+            quality_report=proxy_capital_report,
+            inputs=capital_inputs,
+            provider_evidence=_provider_evidence(proxy_daily_basic_refs),
+            raw_content_hashes=[ref.content_sha256 for ref in proxy_daily_basic_refs],
+            build={
+                "contract": QDP_V3_CONTRACT_VERSION,
+                "source": "tushare_proxy.daily_basic",
+                "unit_conversion": "ten_thousand_shares_to_shares_x10000",
+                "future_backfill": False,
+            },
+            coverage={
+                "start_date": min(ref.partition_value for ref in proxy_daily_basic_refs),
+                "end_date": max(ref.partition_value for ref in proxy_daily_basic_refs),
+                "conflict_count": int(len(combined_capital_conflicts)),
+            },
+            units={
+                "total_share": "share",
+                "float_share": "share",
+                "free_share": "share",
+                "restricted_share": "share",
+                "reported_total_mv": "CNY",
+                "reported_circ_mv": "CNY",
+            },
+            quarantine=combined_capital_conflicts.head(100).to_dict("records") if not combined_capital_conflicts.empty else [],
+            partitioning="natural_year",
+        )
+
     event_frames: list[pd.DataFrame] = []
     factor_identity_conflicts: list[pd.DataFrame] = []
     for ref, raw in zip(factor_refs, factor_raw_frames):
@@ -1201,6 +1528,17 @@ def build_candidate(
     symbol_events = pd.concat(nonempty_symbol_event_frames, ignore_index=True) if nonempty_symbol_event_frames else pd.DataFrame(columns=event_columns)
     comparable_start = min((ref.partition_value for ref in factor_refs), default=str(start_date))
     comparable_end = max((ref.partition_value for ref in factor_refs), default=effective_end)
+    proxy_factor_baselines, proxy_factor_events, proxy_factor_conflicts, proxy_factor_metrics = derive_proxy_factor_evidence(
+        proxy_factor_refs,
+        identity_registry=registry,
+    )
+    proxy_pre_batch_events, proxy_factor_disputes, proxy_factor_findings, proxy_factor_reconcile_metrics = reconcile_proxy_factor_third_path(
+        symbol_events,
+        proxy_baselines=proxy_factor_baselines,
+        proxy_events=proxy_factor_events,
+        comparable_start=comparable_start,
+        comparable_end=comparable_end,
+    )
     events, disputed_events, dual_path_metrics = reconcile_adjust_factor_events(
         batch_events,
         symbol_events,
@@ -1214,15 +1552,33 @@ def build_candidate(
     )
     for column in FACTOR_CANONICAL_COLUMNS:
         if column not in events.columns:
-            events[column] = False if column == "arbitration_xdxr_confirmed" else ""
+            if column in {"arbitration_xdxr_confirmed"}:
+                events[column] = False
+            elif column == "price_adjustment_applicable":
+                events[column] = True
+            elif column == "factor_semantics":
+                events[column] = "price_continuity_cumulative_factor"
+            elif column == "holder_entitlement_ratio":
+                events[column] = float("nan")
+            elif column in {"semantic_evidence_source", "semantic_document_hash"}:
+                events[column] = ""
+            else:
+                events[column] = ""
     events = events.loc[:, FACTOR_CANONICAL_COLUMNS]
     if not arbitrated_events.empty:
         events = pd.concat([events, arbitrated_events], ignore_index=True).sort_values(
             ["divid_operate_date", "security_id"], kind="mergesort"
         ).reset_index(drop=True)
+    if not proxy_pre_batch_events.empty:
+        events = pd.concat([events, proxy_pre_batch_events], ignore_index=True, sort=False)
+        events = events.sort_values(["divid_operate_date", "security_id"], kind="mergesort").drop_duplicates(
+            ["security_id", "divid_operate_date"], keep="first"
+        ).reset_index(drop=True)
     dual_path_metrics.update(
         {
             **arbitration_metrics,
+            "tushare_proxy_factor_evidence": proxy_factor_metrics,
+            "tushare_proxy_factor_reconciliation": proxy_factor_reconcile_metrics,
             "pre_arbitration_disputed_event_count": int(len(disputed_events)),
             "remaining_disputed_event_count": int(len(remaining_disputes)),
         }
@@ -1232,9 +1588,38 @@ def build_candidate(
         events["verification_status"] = "batch_only_unverified"
         for column in FACTOR_CANONICAL_COLUMNS:
             if column not in events.columns:
-                events[column] = False if column == "arbitration_xdxr_confirmed" else ""
+                if column == "arbitration_xdxr_confirmed":
+                    events[column] = False
+                elif column == "price_adjustment_applicable":
+                    events[column] = True
+                elif column == "factor_semantics":
+                    events[column] = "price_continuity_cumulative_factor"
+                elif column == "holder_entitlement_ratio":
+                    events[column] = float("nan")
+                elif column in {"semantic_evidence_source", "semantic_document_hash"}:
+                    events[column] = ""
+                else:
+                    events[column] = ""
         events = events.loc[:, FACTOR_CANONICAL_COLUMNS]
         dual_path_metrics["unverified_batch_events_admitted_for_nonrelease_build"] = int(len(events))
+    if not events.empty:
+        events["price_adjustment_applicable"] = events["price_adjustment_applicable"].where(
+            events["price_adjustment_applicable"].notna(), True
+        ).astype(bool)
+        events["factor_semantics"] = (
+            events["factor_semantics"]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .replace("", "price_continuity_cumulative_factor")
+        )
+        events["semantic_evidence_source"] = events["semantic_evidence_source"].fillna("").astype(str)
+        events["semantic_document_hash"] = events["semantic_document_hash"].fillna("").astype(str)
+    events, semantic_override_evidence, semantic_override_missing = apply_factor_semantic_overrides(
+        events,
+        identity_registry=registry,
+        workspace_root=workspace_root,
+    )
     factor_identity_quarantine = (
         pd.concat(factor_identity_conflicts, ignore_index=True, sort=False)
         if factor_identity_conflicts
@@ -1259,13 +1644,54 @@ def build_candidate(
         if not factor_identity_quarantine.empty
         else pd.DataFrame()
     )
-    factor_quarantine_parts = [frame for frame in (factor_identity_quarantine, remaining_disputes) if not frame.empty]
+    factor_quarantine_parts = [
+        frame
+        for frame in (
+            factor_identity_quarantine,
+            remaining_disputes,
+            proxy_factor_conflicts,
+            proxy_factor_disputes,
+        )
+        if not frame.empty
+    ]
     factor_quarantine = (
         pd.concat(factor_quarantine_parts, ignore_index=True, sort=False)
         if factor_quarantine_parts
         else pd.DataFrame()
     )
     factor_extra: list[QualityFinding] = _raw_quality_findings(factor_refs, domain=DOMAIN_ADJUST_FACTOR_EVENT)
+    factor_extra.extend(proxy_factor_findings)
+    if not proxy_factor_conflicts.empty:
+        factor_extra.append(
+            QualityFinding(
+                code="tushare_proxy_factor_raw_conflicts",
+                severity="blocker",
+                message="Proxy factor evidence contains invalid identities, values, or restatement conflicts.",
+                domain=DOMAIN_ADJUST_FACTOR_EVENT,
+                count=int(len(proxy_factor_conflicts)),
+                sample=proxy_factor_conflicts.head(20).to_dict("records"),
+            )
+        )
+    if not proxy_factor_refs and (paths.metadata / "tushare_proxy_bootstrap_cutoff.json").exists():
+        factor_extra.append(
+            QualityFinding(
+                code="tushare_proxy_factor_third_path_missing",
+                severity="blocker",
+                message="The locked bootstrap requires Tushare-compatible adj_factor as a third historical factor path.",
+                domain=DOMAIN_ADJUST_FACTOR_EVENT,
+            )
+        )
+    if not semantic_override_missing.empty:
+        factor_extra.append(
+            QualityFinding(
+                code="factor_semantic_override_event_missing",
+                severity="blocker",
+                message="A document-hashed special corporate-action classification does not match a canonical factor event.",
+                domain=DOMAIN_ADJUST_FACTOR_EVENT,
+                count=int(len(semantic_override_missing)),
+                sample=semantic_override_missing.head(20).to_dict("records"),
+            )
+        )
     if not factor_refs:
         factor_extra.append(
             QualityFinding(
@@ -1294,7 +1720,15 @@ def build_candidate(
             "queried_security_count": len(observed_factor_security_ids),
             "missing_security_count": len(missing_factor_security_ids),
             "missing_batch_trade_date_count": len(missing_factor_batch_dates),
-            "proof_complete": bool(symbol_factor_refs and not missing_factor_security_ids and not missing_factor_batch_dates and remaining_disputes.empty),
+            "proof_complete": bool(
+                symbol_factor_refs
+                and proxy_factor_refs
+                and not missing_factor_security_ids
+                and not missing_factor_batch_dates
+                and remaining_disputes.empty
+                and proxy_factor_conflicts.empty
+                and proxy_factor_disputes.empty
+            ),
         }
     )
     if require_factor_dual_path and not symbol_factor_refs:
@@ -1371,6 +1805,8 @@ def build_candidate(
             )
         )
     market_event_mask = events["divid_operate_date"].astype(str).between(snapshot_dates[0], snapshot_dates[-1]) if not events.empty else pd.Series(dtype=bool)
+    if not events.empty and "price_adjustment_applicable" in events.columns:
+        market_event_mask &= events["price_adjustment_applicable"].fillna(False).astype(bool)
     events_requiring_reference = events.loc[market_event_mask, ["security_id", "divid_operate_date"]].drop_duplicates() if not events.empty else pd.DataFrame(columns=["security_id", "divid_operate_date"])
     if not events_requiring_reference.empty:
         proof = reference_proof.rename(columns={"event_date": "divid_operate_date"}) if not reference_proof.empty else pd.DataFrame(columns=["security_id", "divid_operate_date", "proof_status"])
@@ -1429,9 +1865,16 @@ def build_candidate(
         primary_key=["security_id", "divid_operate_date"],
         quality_report=event_report,
         inputs=[*identity_inputs, *([corporate_action_input] if corporate_action_input is not None else [])],
-        provider_evidence=_provider_evidence([*factor_refs, *symbol_factor_refs, *xdxr_refs]),
-        raw_content_hashes=[ref.content_sha256 for ref in [*factor_refs, *symbol_factor_refs, *xdxr_refs]],
-        build={"contract": QDP_V3_CONTRACT_VERSION, "source_method": "date_batch+symbol_history+official_arbitration", "dual_path_required": require_factor_dual_path, "dual_path_proof": dual_path_metrics, "official_evidence_count": int(len(official_factor_evidence))},
+        provider_evidence=_provider_evidence([*factor_refs, *symbol_factor_refs, *proxy_factor_refs, *xdxr_refs]),
+        raw_content_hashes=[ref.content_sha256 for ref in [*factor_refs, *symbol_factor_refs, *proxy_factor_refs, *xdxr_refs]],
+        build={
+            "contract": QDP_V3_CONTRACT_VERSION,
+            "source_method": "date_batch+symbol_history+tushare_proxy_ratio+official_arbitration",
+            "dual_path_required": require_factor_dual_path,
+            "dual_path_proof": dual_path_metrics,
+            "official_evidence_count": int(len(official_factor_evidence)),
+            "semantic_override_evidence": semantic_override_evidence.to_dict("records"),
+        },
         coverage={"event_count": int(len(events)), "start_date": str(events["divid_operate_date"].min()) if not events.empty else "", "end_date": str(events["divid_operate_date"].max()) if not events.empty else "", **dual_path_metrics},
         quarantine=factor_quarantine.head(100).to_dict("records") if not factor_quarantine.empty else [],
         date_column="divid_operate_date",
@@ -1447,22 +1890,49 @@ def build_candidate(
         primary_key=["security_id", "trade_date"],
         quality_report=factor_daily_report,
         inputs=[market_input, event_input, history_input],
-        provider_evidence=_provider_evidence([*factor_refs, *symbol_factor_refs]),
-        raw_content_hashes=[ref.content_sha256 for ref in [*factor_refs, *symbol_factor_refs]],
+        provider_evidence=_provider_evidence([*factor_refs, *symbol_factor_refs, *proxy_factor_refs]),
+        raw_content_hashes=[ref.content_sha256 for ref in [*factor_refs, *symbol_factor_refs, *proxy_factor_refs]],
         build={"contract": QDP_V3_CONTRACT_VERSION, "baseline_policy": "no_unproven_1.0", "forward_fill_events_only": True},
         coverage={"start_date": snapshot_dates[0], "end_date": snapshot_dates[-1], "baseline_unproven_rows": baseline_unproven_rows},
         partitioning="natural_year",
     )
 
-    intraday_manifest, intraday_refs, intraday_info = _build_intraday_dataset(
+    proxy_1m_manifest, proxy_5m_manifest, proxy_intraday_refs, proxy_intraday_info = build_proxy_intraday_datasets(
         paths=paths,
         workspace_root=workspace_root,
         registry=registry,
+        market_parts=market_parts,
         status_parts=status_parts,
         inputs=[identity_input, history_input, market_input, status_input],
-        start_date=max(str(start_date), "2011-11-22"),
+        start_date=max(str(start_date), "2010-01-01"),
         end_date=effective_end,
+        staging_root=staging_root,
     )
+    if proxy_1m_manifest is not None:
+        intraday_manifest = proxy_5m_manifest
+        intraday_refs = proxy_intraday_refs
+        intraday_info = {
+            "findings": list(proxy_intraday_info.get("findings", []) or []),
+            "coverage": dict(proxy_intraday_info.get("coverage_5m", {}) or {}),
+            "quarantine": list(proxy_intraday_info.get("quarantine", []) or []),
+            "quarantine_count": int(proxy_intraday_info.get("quarantine_count", 0) or 0),
+            "missing_sample": list(proxy_intraday_info.get("missing_sample", []) or []),
+        }
+    else:
+        intraday_manifest, legacy_intraday_refs, intraday_info = _build_intraday_dataset(
+            paths=paths,
+            workspace_root=workspace_root,
+            registry=registry,
+            status_parts=status_parts,
+            inputs=[identity_input, history_input, market_input, status_input],
+            start_date=max(str(start_date), "2011-11-22"),
+            end_date=effective_end,
+        )
+        intraday_refs = [*proxy_intraday_refs, *legacy_intraday_refs]
+        intraday_info["findings"] = [
+            *list(proxy_intraday_info.get("findings", []) or []),
+            *list(intraday_info.get("findings", []) or []),
+        ]
 
     manifests = [
         calendar_manifest,
@@ -1482,6 +1952,8 @@ def build_candidate(
     manifests.extend(secondary_manifests)
     if intraday_manifest is not None:
         manifests.append(intraday_manifest)
+    if proxy_1m_manifest is not None:
+        manifests.append(proxy_1m_manifest)
     dataset_ids = {manifest.domain: manifest.dataset_id for manifest in manifests}
     dataset_shas: dict[str, str] = {}
     for manifest in manifests:
@@ -1511,11 +1983,27 @@ def build_candidate(
         blockers.append({"code": "daily_coverage_starts_after_required_open_date", "required": required_first_open, "actual": first_snapshot})
     if max(snapshot_dates) < required_last_open:
         blockers.append({"code": "daily_coverage_ends_before_required_open_date", "required": required_last_open, "actual": max(snapshot_dates)})
+    if proxy_1m_manifest is None:
+        blockers.extend(
+            item.to_dict()
+            for item in proxy_intraday_info.get("findings", [])
+            if item.severity == "blocker"
+        )
     if intraday_manifest is None:
         blockers.extend(item.to_dict() for item in intraday_info.get("findings", []) if item.severity == "blocker")
     secondary_raw_refs = [ref for refs in secondary_refs.values() for ref in refs]
     raw_refs = [
         *daily_refs,
+        *proxy_daily_refs,
+        *proxy_daily_basic_refs,
+        *proxy_suspend_refs,
+        *proxy_stk_limit_refs,
+        *proxy_calendar_refs,
+        *proxy_dividend_refs,
+        *proxy_stock_basic_refs,
+        *proxy_namechange_refs,
+        *proxy_factor_refs,
+        *proxy_financial_refs,
         *all_stock_refs,
         *calendar_refs,
         *factor_refs,
@@ -1531,12 +2019,70 @@ def build_candidate(
         quarantine_summary.append({"domain": DOMAIN_MARKET_DAILY_RAW, "resolution_status": "unresolved", "row_count": daily_quarantine_count, "sample": daily_quarantine_sample[:20]})
     if daily_resolved_conflict_count:
         quarantine_summary.append({"domain": DOMAIN_MARKET_DAILY_RAW, "resolution_status": "resolved", "row_count": daily_resolved_conflict_count, "sample": daily_resolved_conflict_sample[:20]})
+    if proxy_daily_conflicts:
+        quarantine_summary.append(
+            {
+                "domain": DOMAIN_MARKET_DAILY_RAW,
+                "resolution_status": "unresolved",
+                "reason": "tushare_proxy_baostock_value_conflict",
+                "row_count": int(proxy_daily_metrics.get("value_conflict_count", len(proxy_daily_conflicts))),
+                "sample": proxy_daily_conflicts[:20],
+            }
+        )
+    if valuation_cross_conflicts:
+        quarantine_summary.append(
+            {
+                "domain": DOMAIN_VALUATION_DAILY,
+                "resolution_status": "unresolved",
+                "reason": "tushare_proxy_daily_basic_cross_source_conflict",
+                "row_count": int(valuation_cross_metrics.get("value_conflict_count", len(valuation_cross_conflicts))),
+                "sample": valuation_cross_conflicts[:20],
+            }
+        )
+    if status_cross_conflicts:
+        quarantine_summary.append(
+            {
+                "domain": DOMAIN_SECURITY_STATUS_DAILY,
+                "resolution_status": "unresolved",
+                "reason": "tushare_proxy_suspend_cross_source_conflict",
+                "row_count": len(status_cross_conflicts),
+                "sample": status_cross_conflicts[:20],
+            }
+        )
     if not factor_unresolved.empty:
         quarantine_summary.append({"domain": DOMAIN_ADJUST_FACTOR_EVENT, "resolution_status": "unresolved", "row_count": int(len(factor_unresolved)), "sample": factor_unresolved.head(20).to_dict("records")})
     if not factor_resolved.empty:
         quarantine_summary.append({"domain": DOMAIN_ADJUST_FACTOR_EVENT, "resolution_status": "resolved", "row_count": int(len(factor_resolved)), "sample": factor_resolved.head(20).to_dict("records")})
+    if not proxy_factor_conflicts.empty or not proxy_factor_disputes.empty:
+        proxy_factor_quarantine = pd.concat(
+            [item for item in (proxy_factor_conflicts, proxy_factor_disputes) if not item.empty],
+            ignore_index=True,
+            sort=False,
+        )
+        quarantine_summary.append(
+            {
+                "domain": DOMAIN_ADJUST_FACTOR_EVENT,
+                "resolution_status": "unresolved",
+                "reason": "tushare_proxy_factor_third_path",
+                "row_count": int(len(proxy_factor_quarantine)),
+                "sample": proxy_factor_quarantine.head(20).to_dict("records"),
+            }
+        )
     if not xdxr_conflicts.empty:
         quarantine_summary.append({"domain": DOMAIN_CORPORATE_ACTIONS, "row_count": int(len(xdxr_conflicts)), "sample": xdxr_conflicts.head(20).to_dict("records")})
+    if not proxy_dividend_conflicts.empty or not action_cross_conflicts.empty:
+        action_quarantine = pd.concat(
+            [item for item in (proxy_dividend_conflicts, action_cross_conflicts) if not item.empty],
+            ignore_index=True,
+            sort=False,
+        )
+        quarantine_summary.append(
+            {
+                "domain": DOMAIN_CORPORATE_ACTIONS,
+                "row_count": int(len(action_quarantine)),
+                "sample": action_quarantine.head(20).to_dict("records"),
+            }
+        )
     for domain, conflicts in secondary_conflicts.items():
         if not conflicts.empty:
             quarantine_summary.append({"domain": domain, "row_count": int(len(conflicts)), "sample": conflicts.head(20).to_dict("records")})
@@ -1549,6 +2095,15 @@ def build_candidate(
                 "sample": list(intraday_info.get("quarantine", []) or [])[:10] + list(intraday_info.get("missing_sample", []) or [])[:10],
             }
         )
+    if proxy_intraday_info.get("quarantine_count") or proxy_intraday_info.get("coverage_1m", {}).get("strict_missing_stock_day_count"):
+        quarantine_summary.append(
+            {
+                "domain": DOMAIN_MARKET_INTRADAY_1M,
+                "row_count": int(proxy_intraday_info.get("quarantine_count", 0) or 0),
+                "missing_stock_day_count": int(proxy_intraday_info.get("coverage_1m", {}).get("strict_missing_stock_day_count", 0) or 0),
+                "sample": list(proxy_intraday_info.get("quarantine", []) or [])[:10] + list(proxy_intraday_info.get("missing_sample", []) or [])[:10],
+            }
+        )
     build_contract = {
         "contract": QDP_V3_CONTRACT_VERSION,
         "start_date": str(start_date),
@@ -1557,6 +2112,29 @@ def build_candidate(
         "strict_research_view": "shanghai_shenzhen_mainboard",
         "factor_dual_path_required": bool(require_factor_dual_path),
     }
+    intraday_1m_watermark = str(dict(proxy_intraday_info.get("coverage_1m", {}) or {}).get("watermark", "") or "")
+    intraday_1m_lag = len(
+        [date for date in expected_open_dates if intraday_1m_watermark < date <= max(snapshot_dates)]
+    ) if intraday_1m_watermark else len([date for date in expected_open_dates if date <= max(snapshot_dates)])
+    bootstrap_cutoff_payload = read_json(paths.metadata / "tushare_proxy_bootstrap_cutoff.json")
+    bootstrap_cutoff = str(bootstrap_cutoff_payload.get("bootstrap_cutoff", "") or "")[:10]
+    required_bootstrap_watermark = min(bootstrap_cutoff, max(snapshot_dates)) if bootstrap_cutoff else ""
+    if required_bootstrap_watermark and intraday_1m_watermark < required_bootstrap_watermark:
+        blockers.append(
+            {
+                "code": "bootstrap_intraday_1m_not_complete_to_locked_cutoff",
+                "required_watermark": required_bootstrap_watermark,
+                "actual_watermark": intraday_1m_watermark,
+            }
+        )
+    if intraday_1m_lag > 10:
+        blockers.append(
+            {
+                "code": "market_intraday_1m_lag_exceeds_10_trading_days",
+                "lag_trading_days": intraday_1m_lag,
+                "watermark": intraday_1m_watermark,
+            }
+        )
     candidate = write_candidate(
         datasets=dataset_ids,
         dataset_manifest_sha256=dataset_shas,
@@ -1570,7 +2148,12 @@ def build_candidate(
             "missing_snapshot_date_count": len(missing_snapshot_dates),
             "raw_security_count": len(set(staged_daily["security_ids"]) - {""}),
             "research_view": "mainboard_hs_pit",
+            "intraday_1m": dict(proxy_intraday_info.get("coverage_1m", {}) or {}),
             "intraday_5m": dict(intraday_info.get("coverage", {}) or {}),
+            "market_daily_watermark": max(snapshot_dates),
+            "market_intraday_1m_watermark": intraday_1m_watermark,
+            "market_intraday_1m_lag_trading_days": intraday_1m_lag,
+            "market_intraday_5m_watermark": str(dict(intraday_info.get("coverage", {}) or {}).get("watermark", max(snapshot_dates) if intraday_manifest is not None else "") or ""),
         },
         build=build_contract,
         raw_partitions=[ref.to_dict(root=paths.root) for ref in raw_refs],

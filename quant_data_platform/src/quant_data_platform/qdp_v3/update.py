@@ -10,6 +10,11 @@ from quant_data_platform.qdp_v3.audit import audit_candidate
 from quant_data_platform.qdp_v3.build import build_candidate
 from quant_data_platform.qdp_v3.corporate_actions import ingest_mootdx_xdxr
 from quant_data_platform.qdp_v3.freeze import freeze_v2, validate_v2_freeze_proof
+from quant_data_platform.qdp_v3.historical import (
+    ingest_tushare_proxy_intraday_pair,
+    ingest_tushare_proxy_reference,
+    proxy_symbol_inventory,
+)
 from quant_data_platform.qdp_v3.identity import SecurityIdentityRegistry, board_for_symbol, normalize_symbol
 from quant_data_platform.qdp_v3.ingest import (
     ingest_baostock_date_partitions,
@@ -18,6 +23,8 @@ from quant_data_platform.qdp_v3.ingest import (
     ingest_trading_calendar,
 )
 from quant_data_platform.qdp_v3.intraday import ingest_intraday_5m
+from quant_data_platform.qdp_v3.mootdx_1m import ingest_mootdx_intraday_1m
+from quant_data_platform.qdp_v3.proxy_compatibility import lock_bootstrap_cutoff, run_tushare_proxy_compatibility_gate
 from quant_data_platform.qdp_v3.constants import (
     RAW_ADJUST_FACTOR_EVENT,
     RAW_ADJUST_FACTOR_SYMBOL_HISTORY,
@@ -75,7 +82,9 @@ def plan_update(
     bootstrap: bool = False,
     start_date: str = "",
     include_5m: bool = True,
+    include_1m: bool = False,
     include_secondary: bool = True,
+    historical_provider: str = "",
 ) -> dict[str, Any]:
     paths = qdp_v3_paths(workspace_root)
     active = read_json(paths.active_manifest)
@@ -91,7 +100,9 @@ def plan_update(
     dates, calendar_source = _calendar_dates_read_only(start_date=effective_start, end_date=str(as_of_date), workspace_root=workspace_root)
     daily_dates = dates if bootstrap else dates[-10:]
     factor_dates = dates if bootstrap else dates[-60:]
-    intraday_dates = [date for date in dates if date >= "2020-01-01"] if bootstrap and include_5m else dates[-1:] if include_5m and dates else []
+    intraday_dates = dates if bootstrap and include_5m else dates[-1:] if include_5m and dates else []
+    incremental_1m_dates = dates[-10:] if include_1m and not bootstrap else dates if include_1m else []
+    use_proxy_bootstrap = bool(bootstrap and str(historical_provider).strip().lower() == "tushare-proxy")
     freeze_state = read_json(paths.metadata / "v2_freeze_20260713.json")
     freeze_validation = validate_v2_freeze_proof(freeze_state)
     return {
@@ -105,12 +116,16 @@ def plan_update(
             {"stage": "freeze_v2", "enabled": not bool(freeze_validation.get("acceptable", False)), "current_status": freeze_state.get("status", "missing"), "proof_kind": freeze_validation.get("proof_kind", ""), "missing_dataset_count": len(freeze_state.get("missing_dataset_ids", []) or [])},
             {"stage": "calendar", "start_date": effective_start, "end_date": str(as_of_date)},
             {"stage": "security_master", "as_of_date": str(as_of_date)},
+            {"stage": "tushare_proxy_compatibility", "enabled": use_proxy_bootstrap},
+            {"stage": "tushare_proxy_cutoff", "enabled": use_proxy_bootstrap, "bootstrap_cutoff": str(as_of_date)},
+            {"stage": "tushare_proxy_reference", "enabled": use_proxy_bootstrap, "domains": ["stock-basic", "trade-calendar", "daily", "daily-basic", "identity", "status", "factor", "dividend", "financial"]},
             {"stage": "daily_date_snapshot", **_date_task_summary(daily_dates)},
             {"stage": "factor_date_events", **_date_task_summary(factor_dates)},
             {"stage": "factor_symbol_history", "scope": "all securities once; resumable"},
             {"stage": "corporate_action_xdxr", "scope": "all securities on bootstrap; recent factor-event securities on incremental updates"},
             {"stage": "secondary_pit", "enabled": bool(include_secondary), "domains": ["financial_quarterly", "performance_forecast", "performance_express", "industry_concept", "index_constituents"]},
             {"stage": "intraday_5m", "enabled": bool(include_5m), "trade_date_count": len(intraday_dates), **{key: value for key, value in _date_task_summary(intraday_dates).items() if key != "task_count"}},
+            {"stage": "intraday_1m", "enabled": bool(include_1m), "provider": "tushare_proxy" if use_proxy_bootstrap else "mootdx_online", **_date_task_summary(incremental_1m_dates)},
             {"stage": "build_candidate"},
             {"stage": "semantic_audit"},
             {"stage": "diff_candidate", "against": "active"},
@@ -244,7 +259,9 @@ def run_update(
     bootstrap: bool = False,
     start_date: str = "",
     include_5m: bool = True,
+    include_1m: bool = False,
     include_secondary: bool = True,
+    historical_provider: str = "",
     publish: bool = True,
     hash_v2_shards: bool = False,
 ) -> dict[str, Any]:
@@ -255,11 +272,16 @@ def run_update(
         bootstrap=bootstrap,
         start_date=start_date,
         include_5m=include_5m,
+        include_1m=include_1m,
         include_secondary=include_secondary,
+        historical_provider=historical_provider,
     )
     if plan.get("status") != "planned":
         return plan
-    run_id = f"update__{stable_hash({'as_of_date': as_of_date, 'bootstrap': bootstrap, 'started_at': utc_now()}, length=20)}"
+    if bootstrap:
+        run_id = f"bootstrap__{stable_hash({'as_of_date': as_of_date, 'start_date': plan['start_date'], 'historical_provider': historical_provider}, length=20)}"
+    else:
+        run_id = f"update__{stable_hash({'as_of_date': as_of_date, 'started_at': utc_now()}, length=20)}"
     run_path = paths.jobs / f"{run_id}.json"
     state: dict[str, Any] = {"status": "running", "run_id": run_id, "plan": plan, "stages": [], "started_at": utc_now()}
     atomic_write_json(run_path, state)
@@ -282,6 +304,34 @@ def run_update(
             refreshed_freeze = read_json(freeze_path)
             if not validate_v2_freeze_proof(refreshed_freeze).get("acceptable", False):
                 raise RuntimeError(f"v2_freeze_stage_incomplete:{freeze_result.get('status')}")
+        use_proxy_bootstrap = bool(
+            bootstrap and str(historical_provider or "").strip().lower() == "tushare-proxy"
+        )
+        if use_proxy_bootstrap:
+            compatibility = run_tushare_proxy_compatibility_gate(
+                workspace_root=workspace_root,
+                as_of_date=str(as_of_date),
+                smoke=False,
+            )
+            record("tushare_proxy_compatibility", compatibility)
+            if compatibility.get("status") != "passed":
+                raise RuntimeError("tushare_proxy_compatibility_gate_failed")
+            cutoff = lock_bootstrap_cutoff(
+                requested_cutoff=str(as_of_date),
+                workspace_root=workspace_root,
+            )
+            record("tushare_proxy_cutoff", cutoff)
+            for reference_domain in ("stock-basic", "trade-calendar"):
+                result = ingest_tushare_proxy_reference(
+                    domain=reference_domain,
+                    start_date=str(plan["start_date"]),
+                    end_date=str(cutoff["bootstrap_cutoff"]),
+                    workspace_root=workspace_root,
+                    resume=True,
+                )
+                record(f"tushare_proxy_{reference_domain}", result)
+                if result.get("status") != "completed":
+                    raise RuntimeError(f"tushare_proxy_{reference_domain}_incomplete")
         calendar, _ = ingest_trading_calendar(
             start_date=str(plan["start_date"]),
             end_date=str(as_of_date),
@@ -293,6 +343,63 @@ def run_update(
         dates = [date for date in dates if str(plan["start_date"]) <= date <= str(as_of_date)]
         daily_dates = dates if bootstrap else dates[-10:]
         factor_dates = dates if bootstrap else dates[-60:]
+        proxy_all_symbols: list[str] = []
+        proxy_mainboard_symbols: list[str] = []
+        proxy_lifecycle: dict[str, tuple[str, str]] = {}
+        if use_proxy_bootstrap:
+            proxy_all_symbols, _ = proxy_symbol_inventory(
+                workspace_root=workspace_root,
+                mainboard_only=False,
+            )
+            proxy_mainboard_symbols, proxy_lifecycle = proxy_symbol_inventory(
+                workspace_root=workspace_root,
+                mainboard_only=True,
+            )
+            reference_plan = (
+                ("daily", dates, ()),
+                ("daily-basic", dates, ()),
+                ("status", dates, ()),
+                ("factor", (), proxy_all_symbols),
+                ("identity", (), proxy_all_symbols),
+                ("dividend", (), proxy_all_symbols),
+                ("financial", (), proxy_all_symbols),
+            )
+            for reference_domain, reference_dates, reference_symbols in reference_plan:
+                result = ingest_tushare_proxy_reference(
+                    domain=reference_domain,
+                    start_date="1990-01-01" if reference_domain in {"factor", "identity", "dividend"} else str(plan["start_date"]),
+                    end_date=str(as_of_date),
+                    trade_dates=reference_dates,
+                    symbols=reference_symbols,
+                    workspace_root=workspace_root,
+                    resume=True,
+                    max_workers=4,
+                )
+                record(f"tushare_proxy_{reference_domain}", result)
+                if result.get("status") != "completed":
+                    raise RuntimeError(f"tushare_proxy_{reference_domain}_incomplete:{result.get('status')}")
+            if include_1m:
+                for wave_start, wave_end, wave_name in (
+                    (str(plan["start_date"]), min("2019-12-31", str(as_of_date)), "2010_2019"),
+                    ("2020-01-01", str(as_of_date), "2020_cutoff"),
+                ):
+                    if wave_start > wave_end:
+                        continue
+                    proxy_intraday = ingest_tushare_proxy_intraday_pair(
+                        symbols=proxy_mainboard_symbols,
+                        start_date=wave_start,
+                        end_date=wave_end,
+                        workspace_root=workspace_root,
+                        lifecycle_ranges=proxy_lifecycle,
+                        resume=True,
+                        run_label=f"bootstrap_{wave_name}_{str(as_of_date).replace('-', '')}",
+                    )
+                    record(f"tushare_proxy_intraday_{wave_name}", proxy_intraday)
+                    if proxy_intraday.get("status") != "completed":
+                        state["status"] = str(proxy_intraday.get("status") or "paused")
+                        state["finished_at"] = utc_now()
+                        atomic_write_json(run_path, state)
+                        return {**state, "run_path": str(run_path.resolve())}
         security_ref = ingest_security_master(as_of_date=str(as_of_date), workspace_root=workspace_root, refresh=True)
         security_master = read_raw_partition(security_ref)
         record("security_master", {"status": "completed", "content_sha256": security_ref.content_sha256, "row_count": security_ref.row_count})
@@ -300,7 +407,7 @@ def run_update(
             mode="date-snapshot",
             trade_dates=daily_dates,
             workspace_root=workspace_root,
-            refresh=True,
+            refresh=not bootstrap,
             cross_check=True,
             security_master=security_master,
             job_id=f"{run_id}__daily",
@@ -312,7 +419,7 @@ def run_update(
             mode="date-events",
             trade_dates=factor_dates,
             workspace_root=workspace_root,
-            refresh=True,
+            refresh=not bootstrap,
             cross_check=False,
             job_id=f"{run_id}__factor",
         )
@@ -393,7 +500,7 @@ def run_update(
                 record(f"secondary_{report_domain}", report_result)
                 if report_result.get("failed_count"):
                     raise RuntimeError(f"secondary_{report_domain}_stage_failed")
-        if include_5m:
+        if include_5m and not use_proxy_bootstrap:
             intraday_dates = [date for date in dates if date >= "2020-01-01"] if bootstrap else dates[-1:]
             intraday_result = ingest_intraday_5m(
                 symbols=_mainboard_symbols(security_master),
@@ -403,6 +510,16 @@ def run_update(
                 refresh=not bootstrap,
             )
             record("intraday_5m", intraday_result)
+        if include_1m and not use_proxy_bootstrap:
+            one_minute_result = ingest_mootdx_intraday_1m(
+                trade_dates=dates[-10:],
+                workspace_root=workspace_root,
+                refresh=True,
+                job_id=f"{run_id}__intraday_1m",
+            )
+            record("intraday_1m", one_minute_result)
+            if one_minute_result.get("status") not in {"completed", "pending_provider_unhealthy"}:
+                raise RuntimeError(f"intraday_1m_stage_failed:{one_minute_result.get('status')}")
         candidate = build_candidate(
             workspace_root=workspace_root,
             start_date=str(plan["start_date"] if bootstrap else "2010-01-01"),

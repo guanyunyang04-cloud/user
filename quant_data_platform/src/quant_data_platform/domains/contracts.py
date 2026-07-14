@@ -531,6 +531,56 @@ class DatePartitionFetchRequest:
 
 
 @dataclass(frozen=True)
+class HistoryPageFetchRequest:
+    """Request one reverse-chronological page from a history endpoint.
+
+    This contract is intentionally separate from both symbol/range and
+    date-partition requests.  Providers that cap a response at ``page_size``
+    must expose the next cursor explicitly; callers must not interpret a full
+    page as end-of-history.
+    """
+
+    domain: str
+    provider_symbol: str
+    frequency: str
+    start_at: str
+    end_at: str
+    page_size: int = 8_000
+
+    def normalized(self) -> "HistoryPageFetchRequest":
+        domain = normalize_domain(self.domain)
+        if domain not in {DataDomain.MARKET_INTRADAY_1M, DataDomain.MARKET_INTRADAY_5M}:
+            raise ValueError(f"history_page_domain_not_intraday:{domain}")
+        frequency = str(self.frequency or "").strip().lower()
+        aliases = {"1min": "1m", "1minute": "1m", "5min": "5m", "5minute": "5m"}
+        frequency = aliases.get(frequency, frequency)
+        expected_domain = {
+            "1m": DataDomain.MARKET_INTRADAY_1M,
+            "5m": DataDomain.MARKET_INTRADAY_5M,
+        }.get(frequency)
+        if expected_domain is None:
+            raise ValueError(f"history_page_frequency_unsupported:{self.frequency}")
+        if domain != expected_domain:
+            raise ValueError(f"history_page_domain_frequency_mismatch:{domain}:{frequency}")
+        symbol = _normalize_symbol(self.provider_symbol)
+        start_at = _normalize_timestamp(self.start_at)
+        end_at = _normalize_timestamp(self.end_at)
+        if pd.Timestamp(end_at) < pd.Timestamp(start_at):
+            raise ValueError(f"history_page_invalid_range:{start_at}:{end_at}")
+        page_size = int(self.page_size)
+        if page_size < 1 or page_size > 8_000:
+            raise ValueError(f"history_page_size_out_of_range:{page_size}")
+        return HistoryPageFetchRequest(
+            domain=domain,
+            provider_symbol=symbol,
+            frequency=frequency,
+            start_at=start_at,
+            end_at=end_at,
+            page_size=page_size,
+        )
+
+
+@dataclass(frozen=True)
 class ProviderResult:
     provider: str
     data: pd.DataFrame
@@ -551,6 +601,21 @@ class DatePartitionProviderResult:
     error_report: list[dict[str, Any]] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class HistoryPageResult:
+    provider: str
+    request: HistoryPageFetchRequest
+    raw_data: pd.DataFrame
+    fields: tuple[str, ...]
+    row_count: int
+    min_timestamp: str
+    max_timestamp: str
+    next_end_at: str
+    response_sha256: str
+    is_complete: bool
+    request_metadata_without_token: dict[str, Any] = field(default_factory=dict)
+
+
 class MarketProvider(Protocol):
     name: str
 
@@ -569,6 +634,13 @@ class DatePartitionProvider(Protocol):
     name: str
 
     def fetch_date_partition(self, request: DatePartitionFetchRequest) -> DatePartitionProviderResult:
+        ...
+
+
+class HistoryPageProvider(Protocol):
+    name: str
+
+    def fetch_history_page(self, request: HistoryPageFetchRequest) -> HistoryPageResult:
         ...
 
 
@@ -1773,6 +1845,15 @@ def _normalize_date(value: Any) -> str:
     if value is None or str(value).strip() == "":
         raise ValueError("date cannot be empty")
     return pd.Timestamp(value).strftime("%Y-%m-%d")
+
+
+def _normalize_timestamp(value: Any) -> str:
+    if value is None or str(value).strip() == "":
+        raise ValueError("timestamp cannot be empty")
+    timestamp = pd.Timestamp(value)
+    if timestamp.tzinfo is not None:
+        timestamp = timestamp.tz_convert("Asia/Shanghai").tz_localize(None)
+    return timestamp.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _prepare_domain_frame(

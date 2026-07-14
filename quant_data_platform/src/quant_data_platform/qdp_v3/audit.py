@@ -15,6 +15,7 @@ from quant_data_platform.qdp_v3.constants import (
     DOMAIN_INDUSTRY,
     DOMAIN_ELIGIBLE_SIGNAL_D,
     DOMAIN_MARKET_DAILY_RAW,
+    DOMAIN_MARKET_INTRADAY_1M,
     DOMAIN_MARKET_INTRADAY_5M,
     DOMAIN_PERFORMANCE_EXPRESS,
     DOMAIN_PERFORMANCE_FORECAST,
@@ -33,6 +34,7 @@ from quant_data_platform.qdp_v3.constants import (
 from quant_data_platform.qdp_v3.corporate_actions import build_share_capital_daily, reconstruct_xdxr_reference_prices
 from quant_data_platform.qdp_v3.datasets import read_dataset_frame
 from quant_data_platform.qdp_v3.identity import SecurityIdentityRegistry, normalize_symbol
+from quant_data_platform.qdp_v3.intraday_1m import is_complete_1m_day
 from quant_data_platform.qdp_v3.manifest import (
     atomic_write_json,
     dataset_manifest_for_id,
@@ -57,6 +59,7 @@ STREAMING_DOMAINS = {
     DOMAIN_ADJUST_FACTOR_DAILY,
     DOMAIN_SHARE_CAPITAL_DAILY,
     DOMAIN_MARKET_INTRADAY_5M,
+    DOMAIN_MARKET_INTRADAY_1M,
     DOMAIN_VALUATION_DAILY,
 }
 
@@ -191,23 +194,34 @@ def _audit_dataset_manifest_and_shards(
             if domain in STREAMING_DOMAINS:
                 partition_month = str(shard.partition.get("value", "") or "")
                 source_partition = str(shard.partition.get("source_partition", "") or "")
-                if domain == DOMAIN_MARKET_INTRADAY_5M:
+                if domain in {DOMAIN_MARKET_INTRADAY_1M, DOMAIN_MARKET_INTRADAY_5M}:
                     security_ids = sorted(set(part.get("security_id", pd.Series(dtype=str)).astype(str)))
-                    observed_months = sorted(set(part.get("trade_date", pd.Series(dtype=str)).astype(str).str.slice(0, 7).str.replace("-", "", regex=False)))
-                    partition_identity = (security_ids[0], partition_month) if len(security_ids) == 1 else (source_partition, partition_month)
+                    partition_kind = str(shard.partition.get("kind", "") or "")
+                    if partition_kind == "natural_year_security_bucket":
+                        observed_periods = sorted(set(part.get("trade_date", pd.Series(dtype=str)).astype(str).str.slice(0, 4)))
+                        declared_year = partition_month[:4]
+                        partition_identity = (security_ids[0], declared_year) if len(security_ids) == 1 else (source_partition, declared_year)
+                        source_valid = bool(source_partition.startswith(f"{declared_year}_b"))
+                        period_valid = observed_periods == [declared_year]
+                    else:
+                        observed_periods = sorted(set(part.get("trade_date", pd.Series(dtype=str)).astype(str).str.slice(0, 7).str.replace("-", "", regex=False)))
+                        declared_year = partition_month
+                        partition_identity = (security_ids[0], partition_month) if len(security_ids) == 1 else (source_partition, partition_month)
+                        source_valid = len(security_ids) == 1 and source_partition == f"{security_ids[0]}_{partition_month}"
+                        period_valid = observed_periods == [partition_month]
                     if partition_identity in intraday_partitions:
-                        findings.append(_blocker("intraday_cross_shard_partition_duplicate", "A security-month appears in more than one canonical shard.", domain=domain, partition=partition_identity))
+                        findings.append(_blocker("intraday_cross_shard_partition_duplicate", "A security-period appears in more than one canonical shard.", domain=domain, partition=partition_identity))
                     intraday_partitions.add(partition_identity)
-                    if len(security_ids) != 1 or observed_months != [partition_month] or source_partition != f"{security_ids[0]}_{partition_month}":
+                    if len(security_ids) != 1 or not period_valid or not source_valid:
                         findings.append(
                             _blocker(
                                 "intraday_shard_partition_contract_invalid",
-                                "5m shard does not contain exactly its declared security-month.",
+                                "Intraday shard does not contain exactly its declared security-period.",
                                 domain=domain,
                                 path=str(shard_path),
                                 security_ids=security_ids[:10],
-                                observed_months=observed_months[:10],
-                                declared_month=partition_month,
+                                observed_periods=observed_periods[:10],
+                                declared_period=declared_year,
                                 source_partition=source_partition,
                             )
                         )
@@ -223,6 +237,20 @@ def _audit_dataset_manifest_and_shards(
                 if domain == DOMAIN_MARKET_INTRADAY_5M:
                     strict = part.loc[part["quality_tier"].eq("strict")].copy() if "quality_tier" in part.columns else part
                     findings.extend(item.to_dict() for item in audit_intraday_5m(strict).blockers)
+                elif domain == DOMAIN_MARKET_INTRADAY_1M:
+                    strict = part.loc[part["quality_tier"].eq("strict")].copy() if "quality_tier" in part.columns else part
+                    for (security_id, trade_date), day in strict.groupby(["security_id", "trade_date"], sort=False):
+                        if not is_complete_1m_day(day):
+                            findings.append(
+                                _blocker(
+                                    "strict_1m_day_contract_invalid",
+                                    "Strict 1m stock-day must contain the exact 240-bar canonical time set.",
+                                    domain=domain,
+                                    security_id=str(security_id),
+                                    trade_date=str(trade_date),
+                                    bar_count=int(len(day)),
+                                )
+                            )
                 elif domain == DOMAIN_MARKET_DAILY_RAW:
                     findings.extend(item.to_dict() for item in audit_canonical_daily(part).blockers)
             else:
@@ -572,6 +600,72 @@ def audit_candidate(
                         sample=report_frame.loc[leaked_unknown, ["security_id", "report_date", "publish_date", "available_date", "availability_status"]].head(20).to_dict("records"),
                     )
                 )
+        one_minute_manifest = manifests.get(DOMAIN_MARKET_INTRADAY_1M)
+        candidate_1m_coverage = dict(candidate.coverage.get("intraday_1m", {}) or {})
+        if one_minute_manifest is None:
+            findings.append(_blocker("strict_1m_dataset_missing", "Final v3 release requires the tiered 1m dataset and coverage proof."))
+        else:
+            coverage_1m = dict(one_minute_manifest.coverage or {})
+            expected_1m = int(coverage_1m.get("expected_stock_day_count", 0) or 0)
+            covered_1m = int(coverage_1m.get("strict_covered_stock_day_count", 0) or 0)
+            rate_1m = float(coverage_1m.get("strict_coverage_rate", 0.0) or 0.0)
+            if expected_1m <= 0:
+                findings.append(_blocker("strict_1m_coverage_denominator_missing", "1m release proof has no PIT tradable-stock-day denominator."))
+            elif covered_1m > expected_1m or rate_1m < 0.9995:
+                findings.append(
+                    _blocker(
+                        "strict_1m_coverage_gate_failed",
+                        "1m strict coverage must be internally consistent and at least 99.95%.",
+                        count=max(0, expected_1m - covered_1m),
+                        sample=[{"expected": expected_1m, "covered": covered_1m, "rate": rate_1m}],
+                    )
+                )
+            candidate_watermark = str(candidate_1m_coverage.get("watermark", "") or "")
+            manifest_watermark = str(coverage_1m.get("watermark", "") or "")
+            if candidate_watermark != manifest_watermark:
+                findings.append(
+                    _blocker(
+                        "intraday_1m_watermark_manifest_mismatch",
+                        "Candidate and 1m dataset watermarks must be identical.",
+                        candidate_watermark=candidate_watermark,
+                        manifest_watermark=manifest_watermark,
+                    )
+                )
+            if bool(coverage_1m.get("non_continuous_history_hole", False)):
+                findings.append(
+                    _blocker(
+                        "intraday_1m_non_continuous_history_hole",
+                        "The 1m watermark cannot skip an earlier incomplete date.",
+                        sample=list(coverage_1m.get("later_explained_date_sample", []) or []),
+                    )
+                )
+            cutoff_payload = read_json(paths.metadata / "tushare_proxy_bootstrap_cutoff.json")
+            bootstrap_cutoff = str(cutoff_payload.get("bootstrap_cutoff", "") or "")[:10]
+            required_bootstrap_watermark = min(bootstrap_cutoff, str(candidate.coverage.get("end_date", "") or bootstrap_cutoff)) if bootstrap_cutoff else ""
+            if required_bootstrap_watermark and manifest_watermark < required_bootstrap_watermark:
+                findings.append(
+                    _blocker(
+                        "intraday_1m_locked_bootstrap_cutoff_not_covered",
+                        "Initial proxy 1m history must be continuous through the immutable bootstrap cutoff.",
+                        required_watermark=required_bootstrap_watermark,
+                        actual_watermark=manifest_watermark,
+                    )
+                )
+            daily_watermark = str(candidate.coverage.get("market_daily_watermark", candidate.coverage.get("end_date", "")) or "")
+            calendar_dates = sorted(date for date in open_dates if manifest_watermark < date <= daily_watermark)
+            lag_days = len(calendar_dates) if manifest_watermark else len(
+                [date for date in open_dates if date <= daily_watermark]
+            )
+            if lag_days > 10:
+                findings.append(
+                    _blocker(
+                        "intraday_1m_watermark_lag_exceeds_10_trading_days",
+                        "The independent 1m watermark may lag daily by at most ten trading days.",
+                        lag_trading_days=lag_days,
+                        market_intraday_1m_watermark=manifest_watermark,
+                        market_daily_watermark=daily_watermark,
+                    )
+                )
         intraday = frames.get(DOMAIN_MARKET_INTRADAY_5M)
         intraday_manifest = manifests.get(DOMAIN_MARKET_INTRADAY_5M)
         candidate_intraday_coverage = dict(candidate.coverage.get("intraday_5m", {}) or {})
@@ -608,6 +702,35 @@ def audit_candidate(
                             "5m strict coverage must be internally consistent and at least 99.95%.",
                             count=max(0, expected - covered),
                             sample=[{"expected": expected, "covered": covered, "rate": rate}],
+                        )
+                    )
+                if bool(coverage.get("non_continuous_history_hole", False)):
+                    findings.append(
+                        _blocker(
+                            "intraday_5m_non_continuous_history_hole",
+                            "The 5m watermark cannot skip an earlier incomplete date.",
+                            sample=list(coverage.get("later_explained_date_sample", []) or []),
+                        )
+                    )
+                manifest_5m_watermark = str(coverage.get("watermark", "") or "")
+                candidate_5m_watermark = str(candidate.coverage.get("market_intraday_5m_watermark", "") or "")
+                if candidate_5m_watermark != manifest_5m_watermark:
+                    findings.append(
+                        _blocker(
+                            "intraday_5m_watermark_manifest_mismatch",
+                            "Candidate and 5m dataset watermarks must be identical.",
+                            candidate_watermark=candidate_5m_watermark,
+                            manifest_watermark=manifest_5m_watermark,
+                        )
+                    )
+                daily_watermark = str(candidate.coverage.get("market_daily_watermark", candidate.coverage.get("end_date", "")) or "")
+                if manifest_5m_watermark < daily_watermark:
+                    findings.append(
+                        _blocker(
+                            "intraday_5m_watermark_behind_daily",
+                            "Only 1m has an independent lag allowance; 5m must reach the daily watermark.",
+                            market_intraday_5m_watermark=manifest_5m_watermark,
+                            market_daily_watermark=daily_watermark,
                         )
                     )
     blocker_count = sum(str(item.get("severity", "")) == "blocker" for item in findings)

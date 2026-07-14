@@ -541,6 +541,7 @@ def _probe_mootdx(config: ProviderEvalConfig, *, cache_dir: Path) -> tuple[list[
     for endpoint, call_factory in (
         ("quote_connectivity", lambda network_mode: _call_mootdx_quotes(symbol=symbol, network_mode=network_mode)),
         ("bars_daily_small", lambda network_mode: _call_mootdx_bars(symbol=symbol, network_mode=network_mode)),
+        ("bars_1m_latest", lambda network_mode: _call_mootdx_1m_bars(symbol=symbol, network_mode=network_mode)),
     ):
         probe_results, frame = _cached_or_call(
             config,
@@ -659,6 +660,70 @@ def _call_mootdx_bars(*, symbol: str, network_mode: str) -> tuple[ProbeResult, p
         )
 
 
+def _call_mootdx_1m_bars(*, symbol: str, network_mode: str) -> tuple[ProbeResult, pd.DataFrame]:
+    start = time.perf_counter()
+    try:
+        with _clean_proxy_env(enabled=network_mode == "clean_proxy_env"):
+            from mootdx.quotes import Quotes  # type: ignore
+
+            client = Quotes.factory(market="std")
+            try:
+                payload = client.bars(symbol=_mootdx_symbol(symbol), frequency=8, start=0, offset=32)
+            finally:
+                with contextlib.suppress(Exception):
+                    client.close()
+        elapsed = time.perf_counter() - start
+        raw = payload.copy() if isinstance(payload, pd.DataFrame) else pd.DataFrame(payload)
+        if raw.empty:
+            frame = normalize_domain_frame(
+                pd.DataFrame(),
+                domain=DataDomain.MARKET_INTRADAY_1M,
+                source="mootdx_probe",
+                as_of_date="",
+                require_columns=False,
+            )
+        else:
+            frame = raw.reset_index(drop=True).copy()
+            frame["symbol"] = symbol
+            frame = normalize_domain_frame(
+                frame,
+                domain=DataDomain.MARKET_INTRADAY_1M,
+                source="mootdx_probe",
+                as_of_date="",
+                require_columns=False,
+            )
+        frame = _tag_frame(frame, eval_provider="mootdx", endpoint="bars_1m_latest")
+        return (
+            _result_from_frame(
+                provider="mootdx",
+                endpoint="bars_1m_latest",
+                domain=DataDomain.MARKET_INTRADAY_1M,
+                symbols=(symbol,),
+                start_date="",
+                end_date="",
+                adjusted_flag="none",
+                network_mode=network_mode,
+                elapsed_sec=elapsed,
+                frame=frame,
+                ok=True,
+            ),
+            frame,
+        )
+    except Exception as exc:
+        return (
+            ProbeResult(
+                provider="mootdx",
+                endpoint="bars_1m_latest",
+                domain=DataDomain.MARKET_INTRADAY_1M,
+                symbol_count=1,
+                network_mode=network_mode,
+                ok=False,
+                elapsed_sec=float(time.perf_counter() - start),
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+            ),
+            pd.DataFrame(),
+        )
 def _probe_cninfo(config: ProviderEvalConfig, *, cache_dir: Path) -> tuple[list[ProbeResult], list[pd.DataFrame]]:
     results = [_probe_import("requests", provider="cninfo")]
     start_date, end_date = config.windows[-2] if len(config.windows) >= 2 else config.windows[0]
