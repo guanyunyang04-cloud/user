@@ -6,6 +6,7 @@ import json
 import math
 import multiprocessing
 import queue as queue_module
+import socket
 import threading
 import time
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
@@ -517,6 +518,59 @@ class MootdxOnlineProvider:
     page_size: int = 800
     max_pages: int = 12
     _client_factory: Any = None
+    _reuse_client: bool = True
+    _client: Any = field(default=None, init=False, repr=False)
+    _client_guard: Any = field(default_factory=threading.RLock, init=False, repr=False)
+    _failed_servers: set[tuple[str, int]] = field(default_factory=set, init=False, repr=False)
+    _circuit_open_until: float = field(default=0.0, init=False, repr=False)
+    _circuit_reason: str = field(default="", init=False, repr=False)
+    _circuit_cooldown_seconds: float = 300.0
+    supports_backward_range_prefetch: bool = field(default=True, init=False)
+
+    def _reset_client_locked(self, *, mark_failed: bool = False) -> None:
+        client = self._client
+        self._client = None
+        if client is None:
+            return
+        if mark_failed and self._client_factory is None:
+            server = getattr(client, "server", None)
+            try:
+                normalized = (str(server[0]), int(server[1]))
+            except Exception:
+                normalized = None
+            if normalized is not None:
+                self._failed_servers.add(normalized)
+        _close_mootdx_client(client)
+
+    def _get_client_locked(self) -> Any:
+        if time.monotonic() < self._circuit_open_until:
+            raise RuntimeError(f"mootdx_circuit_open:{self._circuit_reason}")
+        if self._circuit_open_until:
+            self._circuit_open_until = 0.0
+            self._circuit_reason = ""
+            self._failed_servers.clear()
+        if self._client is None:
+            self._client = _open_mootdx_client(
+                self._client_factory,
+                excluded_servers=tuple(sorted(self._failed_servers)),
+            )
+        return self._client
+
+    def _trip_circuit_locked(self, exc: BaseException) -> None:
+        self._circuit_reason = f"{type(exc).__name__}: {exc}"
+        self._circuit_open_until = time.monotonic() + max(1.0, float(self._circuit_cooldown_seconds))
+        self._reset_client_locked(mark_failed=True)
+
+    def _record_client_success_locked(self) -> None:
+        self._circuit_open_until = 0.0
+        self._circuit_reason = ""
+
+    def close(self) -> None:
+        with self._client_guard:
+            self._reset_client_locked()
+            self._failed_servers.clear()
+            self._circuit_open_until = 0.0
+            self._circuit_reason = ""
 
     def fetch_market_bars(self, request: FetchRequest) -> ProviderResult:
         validate_provider_name(self.name)
@@ -631,22 +685,38 @@ class MootdxOnlineProvider:
         errors: list[dict[str, Any]] = []
         if not normalized_symbols:
             return ProviderResult(provider=self.name, data=pd.DataFrame(), coverage_report={"endpoint": "xdxr", "row_count": 0}, error_report=[])
-        client = _open_mootdx_client(self._client_factory)
-        try:
+        with self._client_guard:
             for symbol in normalized_symbols:
+                if time.monotonic() < self._circuit_open_until:
+                    errors.append(
+                        {
+                            "provider": self.name,
+                            "domain": "xdxr_raw",
+                            "symbol": symbol,
+                            "code": "provider_circuit_open",
+                            "error_type": "RuntimeError",
+                            "message": self._circuit_reason,
+                            "attempts": 0,
+                        }
+                    )
+                    continue
                 last_error: Exception | None = None
                 frame = pd.DataFrame()
                 for attempt in range(1, 4):
                     try:
+                        client = self._get_client_locked()
                         payload = client.xdxr(symbol=_mootdx_symbol(symbol))
                         frame = payload.copy() if isinstance(payload, pd.DataFrame) else pd.DataFrame(payload or [])
+                        self._record_client_success_locked()
                         last_error = None
                         break
                     except Exception as exc:
                         last_error = exc
+                        self._reset_client_locked(mark_failed=True)
                         if attempt < 3:
                             time.sleep(float((0, 2, 5)[attempt]))
                 if last_error is not None:
+                    self._trip_circuit_locked(last_error)
                     errors.append(
                         {
                             "provider": self.name,
@@ -662,8 +732,8 @@ class MootdxOnlineProvider:
                 if not frame.empty:
                     frame["provider_symbol"] = symbol
                     rows.append(frame)
-        finally:
-            _close_mootdx_client(client)
+            if not self._reuse_client:
+                self._reset_client_locked()
         data = pd.concat(rows, ignore_index=True, sort=False) if rows else pd.DataFrame()
         return ProviderResult(
             provider=self.name,
@@ -687,22 +757,26 @@ class MootdxOnlineProvider:
         errors: list[dict[str, Any]] = []
         if not normalized_symbols:
             return ProviderResult(provider=self.name, data=pd.DataFrame(), error_report=errors)
-        client = _open_mootdx_client(self._client_factory)
-        try:
-            payload = client.quotes(symbol=[_mootdx_symbol(symbol) for symbol in normalized_symbols])
-            frame = payload.copy() if isinstance(payload, pd.DataFrame) else pd.DataFrame(payload)
-            if not frame.empty:
-                frame = _normalize_mootdx_quote_snapshot(
-                    frame,
-                    symbols=normalized_symbols,
-                    source=self.name,
-                    volume_factor=100.0,
-                )
-                rows.append(frame)
-        except Exception as exc:
-            errors.append({"provider": self.name, "domain": "quote_snapshot", "code": "provider_exception", "error_type": type(exc).__name__, "message": str(exc)})
-        finally:
-            _close_mootdx_client(client)
+        with self._client_guard:
+            try:
+                client = self._get_client_locked()
+                payload = client.quotes(symbol=[_mootdx_symbol(symbol) for symbol in normalized_symbols])
+                self._record_client_success_locked()
+                frame = payload.copy() if isinstance(payload, pd.DataFrame) else pd.DataFrame(payload)
+                if not frame.empty:
+                    frame = _normalize_mootdx_quote_snapshot(
+                        frame,
+                        symbols=normalized_symbols,
+                        source=self.name,
+                        volume_factor=100.0,
+                    )
+                    rows.append(frame)
+            except Exception as exc:
+                self._reset_client_locked(mark_failed=True)
+                errors.append({"provider": self.name, "domain": "quote_snapshot", "code": "provider_exception", "error_type": type(exc).__name__, "message": str(exc)})
+            finally:
+                if not self._reuse_client:
+                    self._reset_client_locked()
         data = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
         return ProviderResult(
             provider=self.name,
@@ -738,31 +812,45 @@ class MootdxOnlineProvider:
         if not symbols:
             data = normalize_domain_frame(pd.DataFrame(), domain=request.domain, source=self.name, as_of_date=request.end_date, adjusted_flag=request.adjusted_flag, require_columns=False)
             return ProviderResult(provider=self.name, data=data, error_report=errors)
-        try:
-            client = _open_mootdx_client(self._client_factory)
-        except Exception as exc:
-            data = normalize_domain_frame(pd.DataFrame(), domain=request.domain, source=self.name, as_of_date=request.end_date, adjusted_flag=request.adjusted_flag, require_columns=False)
-            return ProviderResult(
-                provider=self.name,
-                data=data,
-                error_report=[
-                    {
-                        "provider": self.name,
-                        "domain": request.domain,
-                        "code": "client_open_error",
-                        "error_type": type(exc).__name__,
-                        "message": str(exc),
-                    }
-                ],
-            )
-        try:
+        with self._client_guard:
+            try:
+                client = self._get_client_locked()
+            except Exception as exc:
+                data = normalize_domain_frame(pd.DataFrame(), domain=request.domain, source=self.name, as_of_date=request.end_date, adjusted_flag=request.adjusted_flag, require_columns=False)
+                return ProviderResult(
+                    provider=self.name,
+                    data=data,
+                    error_report=[
+                        {
+                            "provider": self.name,
+                            "domain": request.domain,
+                            "code": "client_open_error",
+                            "error_type": type(exc).__name__,
+                            "message": str(exc),
+                        }
+                    ],
+                )
             for idx, symbol in enumerate(symbols, start=1):
                 if idx == 1 or idx % 50 == 0 or idx == len(symbols):
                     progress_write(f"mootdx_online_{request.domain}={idx}/{len(symbols)} symbol={symbol}")
+                if time.monotonic() < self._circuit_open_until:
+                    errors.append(
+                        {
+                            "provider": self.name,
+                            "domain": request.domain,
+                            "symbol": symbol,
+                            "code": "provider_circuit_open",
+                            "error_type": "RuntimeError",
+                            "message": self._circuit_reason,
+                            "attempts": 0,
+                        }
+                    )
+                    continue
                 last_exc: Exception | None = None
                 frame = pd.DataFrame()
                 for attempt in range(1, 4):
                     try:
+                        client = self._get_client_locked()
                         frame = _fetch_mootdx_bars_window(
                             client=client,
                             symbol=symbol,
@@ -775,27 +863,24 @@ class MootdxOnlineProvider:
                             adjusted_flag=request.adjusted_flag,
                             volume_factor=float(volume_factor),
                         )
+                        self._record_client_success_locked()
                         last_exc = None
                         break
                     except Exception as exc:
                         last_exc = exc
-                        _close_mootdx_client(client)
+                        self._reset_client_locked(mark_failed=True)
                         time.sleep(min(3.0, 0.5 * attempt))
-                        try:
-                            client = _open_mootdx_client(self._client_factory)
-                        except Exception as open_exc:
-                            last_exc = open_exc
-                            time.sleep(min(3.0, 0.5 * attempt))
                 try:
                     if last_exc is not None:
                         raise last_exc
                 except Exception as exc:
                     errors.append({"provider": self.name, "domain": request.domain, "symbol": symbol, "code": "symbol_fetch_error", "error_type": type(exc).__name__, "message": str(exc), "attempts": 3})
+                    self._trip_circuit_locked(exc)
                     continue
                 if not frame.empty:
                     rows.append(frame)
-        finally:
-            _close_mootdx_client(client)
+            if not self._reuse_client:
+                self._reset_client_locked()
         raw = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
         data = normalize_domain_frame(
             raw,
@@ -1044,6 +1129,8 @@ class BaostockProvider:
     _bulk_timeout_seconds: int = 120
     _bulk_retry_backoff_seconds: tuple[int, ...] = (2, 5, 15)
     _reuse_date_partition_session: bool = True
+    _reuse_symbol_range_session: bool = False
+    supports_symbol_range_prefetch: bool = field(default=True, init=False)
     _date_partition_session: Any = field(default=None, init=False, repr=False)
     _date_partition_session_guard: Any = field(default_factory=threading.Lock, init=False, repr=False)
 
@@ -1076,6 +1163,87 @@ class BaostockProvider:
         if session is not None:
             session.close()
 
+    def close(self) -> None:
+        """Close the shared BaoStock login used by every provider endpoint."""
+
+        self.close_date_partition_session()
+
+    def _persistent_frame_request(
+        self,
+        payload: dict[str, Any],
+        *,
+        timeout_seconds: int,
+    ) -> tuple[pd.DataFrame, list[dict[str, Any]], dict[str, Any]]:
+        response, attempt_count, retry_errors = self._persistent_date_request(
+            payload,
+            timeout_seconds=timeout_seconds,
+        )
+        session_retry_errors = list(retry_errors)
+        frame = response.get("data")
+        if not isinstance(frame, pd.DataFrame):
+            raise RuntimeError(
+                "baostock_persistent_frame_invalid_data:"
+                f"kind={payload.get('kind', '')}:{type(frame).__name__}"
+            )
+        error_report = [
+            dict(item)
+            for item in list(response.get("error_report", []) or [])
+            if isinstance(item, dict)
+        ]
+        meta = dict(response.get("meta", {}) or {})
+        retryable_kinds = {
+            "history_symbols",
+            "intraday_5m_symbols",
+            "financial_quarterly_symbols",
+            "performance_symbols",
+            "valuation_symbols",
+            "adjust_factor_symbols",
+        }
+        failed_symbols = tuple(
+            dict.fromkeys(
+                str(item.get("symbol", ""))
+                for item in error_report
+                if str(item.get("symbol", ""))
+            )
+        )
+        symbol_retry_count = 0
+        if failed_symbols and str(payload.get("kind", "")) in retryable_kinds:
+            retry_payload = {**payload, "symbols": failed_symbols}
+            symbol_retry_count = len(failed_symbols)
+            self.close_date_partition_session()
+            try:
+                retry_response, retry_attempt_count, retry_session_errors = self._persistent_date_request(
+                    retry_payload,
+                    timeout_seconds=timeout_seconds,
+                )
+                retry_frame = retry_response.get("data")
+                if not isinstance(retry_frame, pd.DataFrame):
+                    raise RuntimeError(
+                        "baostock_persistent_retry_invalid_data:"
+                        f"kind={payload.get('kind', '')}:{type(retry_frame).__name__}"
+                    )
+                if not retry_frame.empty:
+                    frame = pd.concat([frame, retry_frame], ignore_index=True, sort=False)
+                error_report = [
+                    dict(item)
+                    for item in list(retry_response.get("error_report", []) or [])
+                    if isinstance(item, dict)
+                ]
+                attempt_count += retry_attempt_count
+                session_retry_errors.extend(retry_session_errors)
+            except Exception as exc:
+                for item in error_report:
+                    item["retry_error"] = f"{type(exc).__name__}: {exc}"
+        meta.update(
+            {
+                "attempt_count": attempt_count,
+                "retry_errors": session_retry_errors,
+                "session_reused": True,
+                "symbol_retry_count": symbol_retry_count,
+            }
+        )
+        return frame.copy(), error_report, meta
+
     def fetch_market_bars(self, request: FetchRequest) -> ProviderResult:
         validate_provider_name(self.name)
         request = request.normalized()
@@ -1087,6 +1255,32 @@ class BaostockProvider:
         if not symbols:
             data = normalize_market_frame(pd.DataFrame(), source=self.name, adjusted_flag=request.adjusted_flag, require_columns=False)
             return ProviderResult(provider=self.name, data=data, error_report=errors)
+        if self._reuse_symbol_range_session:
+            frame, persistent_errors, meta = self._persistent_frame_request(
+                {
+                    "kind": "history_symbols",
+                    "symbols": symbols,
+                    "start_date": request.start_date,
+                    "end_date": request.end_date,
+                    "adjusted_flag": request.adjusted_flag,
+                },
+                timeout_seconds=max(90, 60 * len(symbols)),
+            )
+            data = normalize_market_frame(
+                frame,
+                source=self.name,
+                adjusted_flag=request.adjusted_flag,
+                require_columns=False,
+            )
+            coverage = coverage_report_for_frame(data, request, provider=self.name)
+            coverage.update(meta)
+            coverage["download_strategy"] = "single_login_sequential_symbols"
+            return ProviderResult(
+                provider=self.name,
+                data=data,
+                coverage_report=coverage,
+                error_report=persistent_errors,
+            )
         with create_progress(total=len(symbols), desc="Baostock market_daily", unit="symbol", leave=False) as progress:
             if len(symbols) == 1 or max_workers <= 1:
                 for idx, symbol in enumerate(symbols, start=1):
@@ -1159,6 +1353,22 @@ class BaostockProvider:
         max_workers = min(max(1, int(self._intraday_max_workers or 1)), len(symbols)) if symbols else 0
         if not symbols:
             return rows, errors
+        if self._reuse_symbol_range_session:
+            frame, persistent_errors, _meta = self._persistent_frame_request(
+                {
+                    "kind": "intraday_5m_symbols",
+                    "symbols": symbols,
+                    "start_date": request.start_date,
+                    "end_date": request.end_date,
+                    "adjusted_flag": request.adjusted_flag,
+                },
+                timeout_seconds=max(180, 90 * len(symbols)),
+            )
+            if not frame.empty and "symbol" in frame.columns:
+                rows.extend(group.reset_index(drop=True) for _, group in frame.groupby("symbol", sort=False))
+            elif not frame.empty:
+                rows.append(frame)
+            return rows, persistent_errors
         if len(symbols) == 1 or max_workers <= 1:
             for idx, symbol in enumerate(symbols, start=1):
                 if idx == 1 or idx % 50 == 0 or idx == len(symbols):
@@ -1386,6 +1596,65 @@ class BaostockProvider:
             frame = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
             data = normalize_domain_frame(frame, domain=request.domain, source=self.name, as_of_date=request.end_date, adjusted_flag=request.adjusted_flag, require_columns=False)
             return ProviderResult(provider=self.name, data=data, error_report=errors)
+        if self._reuse_symbol_range_session:
+            if request.domain == DataDomain.TRADING_CALENDAR:
+                payload = {
+                    "kind": "trade_calendar",
+                    "start_date": request.start_date,
+                    "end_date": request.end_date,
+                    "exchange": request.exchange,
+                }
+                timeout_seconds = 120
+            elif request.domain in {DataDomain.UNIVERSE_SNAPSHOT, DataDomain.SECURITY_STATUS}:
+                payload = {"kind": "all_stock", "domain": request.domain, "trade_date": request.end_date}
+                timeout_seconds = 120
+            elif request.domain == DataDomain.INDUSTRY_CONCEPT:
+                payload = {"kind": "industry", "trade_date": request.end_date}
+                timeout_seconds = 300
+            elif request.domain == DataDomain.INDEX_CONSTITUENTS:
+                payload = {"kind": "index_constituents", "trade_date": request.end_date}
+                timeout_seconds = 180
+            elif request.domain == DataDomain.FINANCIAL_QUARTERLY:
+                payload = {
+                    "kind": "financial_quarterly_symbols",
+                    "symbols": request.symbols,
+                    "start_date": request.start_date,
+                    "end_date": request.end_date,
+                }
+                timeout_seconds = max(600, 180 * len(request.symbols))
+            elif request.domain in {DataDomain.PERFORMANCE_FORECAST, DataDomain.PERFORMANCE_EXPRESS}:
+                payload = {
+                    "kind": "performance_symbols",
+                    "domain": request.domain,
+                    "symbols": request.symbols,
+                    "start_date": request.start_date,
+                    "end_date": request.end_date,
+                }
+                timeout_seconds = max(600, 90 * len(request.symbols))
+            elif request.domain == DataDomain.VALUATION:
+                payload = {
+                    "kind": "valuation_symbols",
+                    "symbols": request.symbols,
+                    "start_date": request.start_date,
+                    "end_date": request.end_date,
+                }
+                timeout_seconds = max(600, 90 * len(request.symbols))
+            elif request.domain == DataDomain.ADJUST_FACTOR:
+                payload = {
+                    "kind": "adjust_factor_symbols",
+                    "symbols": request.symbols,
+                    "start_date": request.start_date,
+                    "end_date": request.end_date,
+                }
+                timeout_seconds = max(900, 90 * len(request.symbols))
+            else:
+                raise RuntimeError(f"unsupported_domain: {self.name} does not support {request.domain}")
+            frame, errors, meta = self._persistent_frame_request(payload, timeout_seconds=timeout_seconds)
+            data = normalize_domain_frame(frame, domain=request.domain, source=self.name, as_of_date=request.end_date, require_columns=False)
+            coverage = coverage_report_for_domain(data, request, provider=self.name)
+            coverage.update(meta)
+            coverage["download_strategy"] = "single_login_sequential_requests"
+            return ProviderResult(provider=self.name, data=data, coverage_report=coverage, error_report=errors)
         if request.domain == DataDomain.TRADING_CALENDAR:
             frame = _fetch_baostock_trade_calendar_frame_with_timeout(
                 start_date=request.start_date,
@@ -1704,6 +1973,10 @@ class QdpProductionV1Provider:
         self._baostock = BaostockProvider()
         self._cninfo = CninfoAnnouncementProvider()
 
+    def close(self) -> None:
+        self._mootdx.close()
+        self._baostock.close()
+
     def fetch_market_bars(self, request: FetchRequest) -> ProviderResult:
         return self._mootdx.fetch_market_bars(request)
 
@@ -1742,8 +2015,12 @@ class QdpProductionV2Provider:
 
     def __post_init__(self) -> None:
         self._mootdx = MootdxOnlineProvider()
-        self._baostock = BaostockProvider()
+        self._baostock = BaostockProvider(_reuse_symbol_range_session=True)
         self._cninfo = CninfoAnnouncementProvider()
+
+    def close(self) -> None:
+        self._mootdx.close()
+        self._baostock.close()
 
     def fetch_market_bars(self, request: FetchRequest) -> ProviderResult:
         # Symbol/range daily queries are repair and compatibility endpoints in
@@ -1807,38 +2084,33 @@ def build_default_providers(provider_plan: str = "default_free") -> list:
     raise ValueError(f"Unsupported provider_plan: {provider_plan}")
 
 
-def _open_mootdx_client(client_factory: Any = None) -> Any:
+def _open_mootdx_client(
+    client_factory: Any = None,
+    *,
+    excluded_servers: tuple[tuple[str, int], ...] = (),
+) -> Any:
     if callable(client_factory):
         return client_factory()
     try:
         from mootdx.quotes import Quotes  # type: ignore
     except Exception as exc:
         raise RuntimeError("mootdx is not installed in the yolos environment") from exc
-    options = (
-        {"multithread": False, "heartbeat": False, "bestip": False, "timeout": 20},
-        {"multithread": False, "heartbeat": True, "bestip": False, "timeout": 20},
-        {"multithread": True, "heartbeat": True, "bestip": False, "timeout": 20},
-    )
-    errors: list[str] = []
-    server_candidates = _mootdx_hq_server_candidates()
-    for attempt in range(2):
-        for server in server_candidates:
-            for option in options:
-                try:
-                    return Quotes.factory(market="std", server=server, **option)
-                except Exception as exc:
-                    errors.append(f"attempt={attempt + 1} server={server} option={option}: {type(exc).__name__}: {exc}")
-                    time.sleep(0.1)
-        for option in options:
-            try:
-                return Quotes.factory(market="std", **option)
-            except Exception as exc:
-                errors.append(f"attempt={attempt + 1} server=default option={option}: {type(exc).__name__}: {exc}")
-                time.sleep(0.1)
-    raise RuntimeError("mootdx_client_open_failed: " + " | ".join(errors[-4:]))
+    option = {"multithread": False, "heartbeat": False, "bestip": False, "timeout": 3, "auto_retry": False, "raise_exception": True}
+    excluded = {(str(item[0]), int(item[1])) for item in excluded_servers}
+    cached_server, cached_error = _mootdx_protocol_cache_snapshot(excluded_servers=excluded)
+    if cached_error:
+        raise RuntimeError(cached_error)
+    if cached_server is not None:
+        try:
+            return Quotes.factory(market="std", server=cached_server, **option)
+        except Exception:
+            _clear_mootdx_protocol_cache()
+    all_candidates = _mootdx_reachable_server_candidates(_mootdx_hq_server_candidates())
+    server_candidates = tuple(item for item in all_candidates if item not in excluded)
+    return _probe_mootdx_protocol_clients(Quotes, server_candidates, option=option)
 
 
-def _mootdx_hq_server_candidates(limit: int = 12) -> tuple[tuple[str, int], ...]:
+def _mootdx_hq_server_candidates(limit: int = 38) -> tuple[tuple[str, int], ...]:
     try:
         import mootdx.config as mootdx_config  # type: ignore
 
@@ -1857,6 +2129,135 @@ def _mootdx_hq_server_candidates(limit: int = 12) -> tuple[tuple[str, int], ...]
         if len(out) >= int(limit):
             break
     return tuple(dict.fromkeys(out))
+
+
+_MOOTDX_REACHABLE_CACHE_LOCK = threading.Lock()
+_MOOTDX_REACHABLE_CACHE: tuple[tuple[str, int], ...] = ()
+_MOOTDX_REACHABLE_CACHE_AT = 0.0
+_MOOTDX_PROTOCOL_CACHE_LOCK = threading.Lock()
+_MOOTDX_PROTOCOL_SERVER: tuple[str, int] | None = None
+_MOOTDX_PROTOCOL_ERROR = ""
+_MOOTDX_PROTOCOL_CACHE_AT = 0.0
+
+
+def _mootdx_reachable_server_candidates(
+    candidates: tuple[tuple[str, int], ...],
+    *,
+    timeout_seconds: float = 1.2,
+    cache_seconds: float = 300.0,
+) -> tuple[tuple[str, int], ...]:
+    """Rank TCP-reachable TDX servers in parallel before opening mootdx.
+
+    The bundled 0.11.7 server list contains many retired addresses. Testing
+    them serially can add minutes before every fallback. This lightweight
+    probe is only a reachability filter; the first real bars call still proves
+    protocol health and failed protocol endpoints are excluded by the provider.
+    """
+
+    global _MOOTDX_REACHABLE_CACHE, _MOOTDX_REACHABLE_CACHE_AT
+    now = time.monotonic()
+    with _MOOTDX_REACHABLE_CACHE_LOCK:
+        if _MOOTDX_REACHABLE_CACHE and now - _MOOTDX_REACHABLE_CACHE_AT < float(cache_seconds):
+            cached = tuple(item for item in _MOOTDX_REACHABLE_CACHE if item in candidates)
+            if cached:
+                return cached
+
+    def probe(server: tuple[str, int]) -> tuple[float, tuple[str, int]] | None:
+        started = time.perf_counter()
+        try:
+            connection = socket.create_connection(server, timeout=max(0.2, float(timeout_seconds)))
+        except OSError:
+            return None
+        try:
+            return time.perf_counter() - started, server
+        finally:
+            connection.close()
+
+    reachable: list[tuple[float, tuple[str, int]]] = []
+    workers = min(16, max(1, len(candidates)))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        for result in executor.map(probe, candidates):
+            if result is not None:
+                reachable.append(result)
+    ranked = tuple(server for _, server in sorted(reachable))
+    if not ranked:
+        raise RuntimeError("mootdx_no_tcp_reachable_hq_server")
+    with _MOOTDX_REACHABLE_CACHE_LOCK:
+        _MOOTDX_REACHABLE_CACHE = ranked
+        _MOOTDX_REACHABLE_CACHE_AT = time.monotonic()
+    return ranked
+
+
+def _mootdx_protocol_cache_snapshot(
+    *,
+    excluded_servers: set[tuple[str, int]],
+    cache_seconds: float = 300.0,
+) -> tuple[tuple[str, int] | None, str]:
+    with _MOOTDX_PROTOCOL_CACHE_LOCK:
+        fresh = time.monotonic() - _MOOTDX_PROTOCOL_CACHE_AT < float(cache_seconds)
+        if not fresh:
+            return None, ""
+        if _MOOTDX_PROTOCOL_ERROR:
+            return None, _MOOTDX_PROTOCOL_ERROR
+        if _MOOTDX_PROTOCOL_SERVER is not None and _MOOTDX_PROTOCOL_SERVER not in excluded_servers:
+            return _MOOTDX_PROTOCOL_SERVER, ""
+    return None, ""
+
+
+def _clear_mootdx_protocol_cache() -> None:
+    global _MOOTDX_PROTOCOL_SERVER, _MOOTDX_PROTOCOL_ERROR, _MOOTDX_PROTOCOL_CACHE_AT
+    with _MOOTDX_PROTOCOL_CACHE_LOCK:
+        _MOOTDX_PROTOCOL_SERVER = None
+        _MOOTDX_PROTOCOL_ERROR = ""
+        _MOOTDX_PROTOCOL_CACHE_AT = 0.0
+
+
+def _probe_mootdx_protocol_clients(Quotes: Any, candidates: tuple[tuple[str, int], ...], *, option: dict[str, Any]) -> Any:
+    """Select the fastest server that returns a real TDX bars payload."""
+
+    global _MOOTDX_PROTOCOL_SERVER, _MOOTDX_PROTOCOL_ERROR, _MOOTDX_PROTOCOL_CACHE_AT
+    if not candidates:
+        error = "mootdx_no_unexcluded_protocol_candidate"
+        with _MOOTDX_PROTOCOL_CACHE_LOCK:
+            _MOOTDX_PROTOCOL_SERVER = None
+            _MOOTDX_PROTOCOL_ERROR = error
+            _MOOTDX_PROTOCOL_CACHE_AT = time.monotonic()
+        raise RuntimeError(error)
+
+    def probe(server: tuple[str, int]) -> tuple[float, tuple[str, int], Any | None, str]:
+        client = None
+        started = time.perf_counter()
+        try:
+            client = Quotes.factory(market="std", server=server, **option)
+            payload = client.bars(symbol="600000", frequency=9, start=0, offset=2)
+            if payload is None or len(payload) == 0:
+                raise RuntimeError("empty_daily_probe")
+            return time.perf_counter() - started, server, client, ""
+        except Exception as exc:
+            if client is not None:
+                _close_mootdx_client(client)
+            return time.perf_counter() - started, server, None, f"{type(exc).__name__}: {exc}"
+
+    workers = min(16, len(candidates))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        results = list(executor.map(probe, candidates))
+    successes = sorted((item for item in results if item[2] is not None), key=lambda item: item[0])
+    if successes:
+        _, selected_server, selected_client, _ = successes[0]
+        for _, _, client, _ in successes[1:]:
+            _close_mootdx_client(client)
+        with _MOOTDX_PROTOCOL_CACHE_LOCK:
+            _MOOTDX_PROTOCOL_SERVER = selected_server
+            _MOOTDX_PROTOCOL_ERROR = ""
+            _MOOTDX_PROTOCOL_CACHE_AT = time.monotonic()
+        return selected_client
+    details = " | ".join(f"server={server}:{error}" for _, server, _, error in results[-4:])
+    error = "mootdx_no_protocol_healthy_hq_server:" + details
+    with _MOOTDX_PROTOCOL_CACHE_LOCK:
+        _MOOTDX_PROTOCOL_SERVER = None
+        _MOOTDX_PROTOCOL_ERROR = error
+        _MOOTDX_PROTOCOL_CACHE_AT = time.monotonic()
+    raise RuntimeError(error)
 
 
 def _close_mootdx_client(client: Any) -> None:
@@ -2838,6 +3239,110 @@ def _baostock_bulk_partition_worker(queue: Any, endpoint: str, trade_date: str) 
         queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
 
 
+def _baostock_persistent_symbol_frames(
+    bs: Any,
+    *,
+    kind: str,
+    command: dict[str, Any],
+) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
+    """Run a symbol batch without reopening the BaoStock session per symbol."""
+
+    symbols = tuple(str(item) for item in tuple(command.get("symbols", ()) or ()))
+    start_date = str(command.get("start_date", ""))
+    end_date = str(command.get("end_date", ""))
+    adjusted_flag = str(command.get("adjusted_flag", "none") or "none")
+    frames: list[pd.DataFrame] = []
+    errors: list[dict[str, Any]] = []
+    domain_by_kind = {
+        "history_symbols": DataDomain.MARKET_DAILY,
+        "intraday_5m_symbols": DataDomain.MARKET_INTRADAY_5M,
+        "financial_quarterly_symbols": DataDomain.FINANCIAL_QUARTERLY,
+        "performance_symbols": str(command.get("domain", "")),
+        "valuation_symbols": DataDomain.VALUATION,
+        "adjust_factor_symbols": DataDomain.ADJUST_FACTOR,
+    }
+    domain = domain_by_kind.get(kind, kind)
+    for symbol in symbols:
+        try:
+            if kind == "history_symbols":
+                query = bs.query_history_k_data_plus(
+                    _to_baostock_code(symbol),
+                    "date,code,open,high,low,close,volume,amount",
+                    start_date=start_date,
+                    end_date=end_date,
+                    frequency="d",
+                    adjustflag="2" if adjusted_flag in {"front", "qfq"} else "3",
+                )
+                frame = _baostock_history_frame(query, symbol=symbol)
+            elif kind == "intraday_5m_symbols":
+                query = bs.query_history_k_data_plus(
+                    _to_baostock_code(symbol),
+                    "date,time,code,open,high,low,close,volume,amount,adjustflag",
+                    start_date=start_date,
+                    end_date=end_date,
+                    frequency="5",
+                    adjustflag="2" if adjusted_flag in {"front", "qfq"} else "3",
+                )
+                frame = _baostock_intraday_5m_frame(query, symbol=symbol)
+            elif kind == "financial_quarterly_symbols":
+                frame = _baostock_financial_quarterly_frame_from_bs(
+                    bs,
+                    DomainFetchRequest(
+                        domain=DataDomain.FINANCIAL_QUARTERLY,
+                        symbols=(symbol,),
+                        start_date=start_date,
+                        end_date=end_date,
+                    ),
+                )
+            elif kind == "performance_symbols":
+                frame = _baostock_performance_frame_from_bs(
+                    bs,
+                    DomainFetchRequest(
+                        domain=str(command.get("domain", "")),
+                        symbols=(symbol,),
+                        start_date=start_date,
+                        end_date=end_date,
+                    ),
+                )
+            elif kind == "valuation_symbols":
+                frame = _baostock_valuation_frame_from_history(
+                    bs,
+                    DomainFetchRequest(
+                        domain=DataDomain.VALUATION,
+                        symbols=(symbol,),
+                        start_date=start_date,
+                        end_date=end_date,
+                    ),
+                )
+            elif kind == "adjust_factor_symbols":
+                frame = _baostock_adjust_factor_frame_from_bs(
+                    bs,
+                    DomainFetchRequest(
+                        domain=DataDomain.ADJUST_FACTOR,
+                        symbols=(symbol,),
+                        start_date=start_date,
+                        end_date=end_date,
+                    ),
+                )
+            else:
+                raise RuntimeError(f"unsupported_baostock_symbol_command:{kind}")
+        except Exception as exc:
+            errors.append(
+                {
+                    "provider": "baostock",
+                    "domain": domain,
+                    "symbol": symbol,
+                    "code": "symbol_fetch_exception",
+                    "error_type": type(exc).__name__,
+                    "message": str(exc),
+                }
+            )
+            continue
+        if isinstance(frame, pd.DataFrame) and not frame.empty:
+            frames.append(frame)
+    return (pd.concat(frames, ignore_index=True, sort=False) if frames else pd.DataFrame()), errors
+
+
 def _baostock_persistent_session_worker(command_queue: Any, response_queue: Any) -> None:
     """Serve sequential BaoStock commands under one isolated login."""
 
@@ -2868,6 +3373,7 @@ def _baostock_persistent_session_worker(command_queue: Any, response_queue: Any)
                 kind = str(command.get("kind", ""))
                 trade_date = str(command.get("trade_date", ""))
                 extra_response: dict[str, Any] = {}
+                error_report: list[dict[str, Any]] = []
                 if kind in {"bulk", "bulk_with_all_stock"}:
                     endpoint = str(command.get("endpoint", ""))
                     installed = assert_baostock_batch_runtime()
@@ -2901,6 +3407,51 @@ def _baostock_persistent_session_worker(command_queue: Any, response_queue: Any)
                         else _baostock_all_stock_frame(query, trade_date=trade_date)
                     )
                     meta = {"error_code": "0", "error_msg": "", "package_version": assert_baostock_batch_runtime()}
+                elif kind in {
+                    "history_symbols",
+                    "intraday_5m_symbols",
+                    "financial_quarterly_symbols",
+                    "performance_symbols",
+                    "valuation_symbols",
+                    "adjust_factor_symbols",
+                }:
+                    frame, error_report = _baostock_persistent_symbol_frames(
+                        bs,
+                        kind=kind,
+                        command=command,
+                    )
+                    meta = {"error_code": "0", "error_msg": "", "package_version": baostock_runtime_version()}
+                elif kind == "trade_calendar":
+                    query = bs.query_trade_dates(
+                        start_date=str(command.get("start_date", "")),
+                        end_date=str(command.get("end_date", "")),
+                    )
+                    raw = _baostock_query_to_frame(query, "baostock_trade_calendar")
+                    if raw.empty:
+                        frame = pd.DataFrame(columns=["trade_date", "is_open", "exchange"])
+                    else:
+                        date_field = "calendar_date" if "calendar_date" in raw.columns else raw.columns[0]
+                        open_field = "is_trading_day" if "is_trading_day" in raw.columns else raw.columns[1]
+                        frame = pd.DataFrame(
+                            {
+                                "trade_date": raw[date_field],
+                                "is_open": raw[open_field],
+                                "exchange": str(command.get("exchange", "SSE") or "SSE"),
+                            }
+                        )
+                    meta = {"error_code": "0", "error_msg": "", "package_version": baostock_runtime_version()}
+                elif kind == "industry":
+                    frame = _baostock_industry_frame(
+                        bs.query_stock_industry(date=trade_date),
+                        trade_date=trade_date,
+                    )
+                    meta = {"error_code": "0", "error_msg": "", "package_version": baostock_runtime_version()}
+                elif kind == "index_constituents":
+                    frame = _baostock_index_constituents_frame(bs, trade_date=trade_date)
+                    meta = {"error_code": "0", "error_msg": "", "package_version": baostock_runtime_version()}
+                elif kind == "stock_basic":
+                    frame = _baostock_stock_basic_frame(bs.query_stock_basic(), trade_date=trade_date)
+                    meta = {"error_code": "0", "error_msg": "", "package_version": baostock_runtime_version()}
                 else:
                     raise RuntimeError(f"unsupported_baostock_persistent_command:{kind}")
                 response_queue.put(
@@ -2909,6 +3460,7 @@ def _baostock_persistent_session_worker(command_queue: Any, response_queue: Any)
                         "request_id": request_id,
                         "data": frame,
                         "meta": {**meta, "worker_elapsed_seconds": round(time.perf_counter() - started, 6)},
+                        "error_report": error_report,
                         **extra_response,
                     }
                 )

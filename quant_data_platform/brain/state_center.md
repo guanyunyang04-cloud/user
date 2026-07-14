@@ -20,7 +20,7 @@
 `implemented_domains`: 全 A 股批量日线/状态/估值、批量因子事件、逐证券因子史、security identity/symbol history、PIT signal/open、双源 5m、xdxr/股本、财务/业绩/行业/指数次级域。
 `compatibility`: 0.9.1 full golden 已捕获；0.9.3 full gate 为 `passed`（34 anchors、0 issues、普通多页 5537 rows、wheel hash 匹配）。报告不是 `passed/full` 时仍禁止 live date-partition ingest。
 `historical_backfill`: 2010/2011/2012 分别有 `242/244/243` 个交易日；日线、`query_all_stock` 和日期因子事件均为 `729/729` strict 分区。日线共 `1,578,095` rows；因子事件共 `5,192` rows、135 个合法零事件日；三年均无缺日、结构 blocker 或 20,000 行截断。
-`download_runtime`: 生产日期回灌复用单一隔离 BaoStock 子进程和单一 login；日线与同日 `query_all_stock` 在同一 session 原子获取；`max_workers=2` 只做两日期预取，网络 session/request concurrency 始终为 1。2012 日线约 `1239.7s`，相近规模 2011 旧路径约 `2932.7s`，约 `2.4x`；2012 因子约 `79.6s`，2011 旧路径约 `937.4s`，约 `11.8x`。
+`download_runtime`: 生产日期与 symbol-range 长任务都复用任务内单一 BaoStock login，网络并发保持 1；5m 按证券整段获取后切月，raw 分区按键直接复用；mootdx 用协议探针和 300 秒失败缓存快速 fallback；财务季报按证券生命周期加 550 日缓冲裁剪。日期回灌、warm-session、5m 请求缩减和财务调用估算的完整实测边界见 evidence reference，任何逻辑请求减少均不得冒充实测吞吐倍数。
 `rejected_parallel_route`: 两个独立 BaoStock login 的 live probe 出现 `10001001 用户未登录`，因此禁止生产双 session；历史低错误率不得自动解锁第二个网络槽。每个 ingest job 有 OS advisory single-writer lock，进程异常退出后自动释放。
 `adapter_smoke_boundary`: ETF adapter `1574` rows provisional；`600000.SH/2020-01-02` 由完整 BaoStock 48 bars 单源进入 strict。
 `pit_name_boundary`: stock-basic 当前名称禁止反填历史；`name_on_date` 只能来自日期级 all-stock snapshot 或带 hash 的官方证据，semantic audit 回查 raw。
@@ -113,7 +113,7 @@
 
 ### object `provider_runtime`
 `type`: upstream_ingest_runtime
-`state`: production Python environment is `yolos`; update workflow may use mootdx/BaoStock/CNInfo according to domain。BaoStock 日期任务使用持久单 login、同日日线/all-stock 原子请求和两日期本地预取，不运行双网络 session。
+`state`: production Python environment is `yolos`; update workflow may use mootdx/BaoStock/CNInfo according to domain。BaoStock 日期及 symbol-range 长任务使用任务内持久单 login，不运行双网络 session；5m 以 symbol-range 请求后本地切月；mootdx 先做协议级节点健康检查并负缓存不可用状态。
 `boundary`: BaoStock batch ingest 必须先通过 0.9.3 full compatibility gate；provider staging、identity、factor、PIT、5m 与 lineage 均通过 semantic audit 后才允许 CAS active pointer change。
 
 ### object `qdp_storage_retention`

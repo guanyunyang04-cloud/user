@@ -3,7 +3,7 @@ from __future__ import annotations
 from bisect import bisect_right
 from importlib import metadata as importlib_metadata
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 import pandas as pd
 
@@ -103,6 +103,7 @@ def ingest_baostock_report_domain(
     refresh: bool = False,
     chunk_size: int = 8,
     job_id: str = "",
+    symbol_lifecycle_ranges: Mapping[str, tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
     normalized = str(domain).strip().lower()
     if normalized not in REPORT_DOMAINS:
@@ -113,8 +114,26 @@ def ingest_baostock_report_domain(
     normalized_symbols = sorted({normalize_symbol(item) for item in symbols if normalize_symbol(item)})
     if not normalized_symbols:
         raise ValueError("secondary_report_symbols_empty")
+    lifecycle = {
+        normalize_symbol(symbol): (str(values[0])[:10], str(values[1])[:10])
+        for symbol, values in dict(symbol_lifecycle_ranges or {}).items()
+        if normalize_symbol(symbol) and isinstance(values, (tuple, list)) and len(values) >= 2
+    }
+    effective_ranges: dict[str, tuple[str, str]] = {}
+    for symbol in normalized_symbols:
+        list_date, delist_date = lifecycle.get(symbol, ("", ""))
+        effective_start = str(start_date)
+        effective_end = str(end_date)
+        if normalized == DOMAIN_FINANCIAL_QUARTERLY and len(list_date) == 10:
+            evidence_start = pd.Timestamp(list_date) - pd.Timedelta(days=550)
+            evidence_start = evidence_start.to_period("Q").start_time.strftime("%Y-%m-%d")
+            effective_start = max(effective_start, evidence_start)
+        if normalized == DOMAIN_FINANCIAL_QUARTERLY and len(delist_date) == 10 and delist_date < str(end_date):
+            effective_end = pd.offsets.QuarterEnd().rollback(pd.Timestamp(delist_date)).strftime("%Y-%m-%d")
+        effective_ranges[symbol] = (effective_start, effective_end)
+    range_contract_sha = stable_hash(effective_ranges, length=32)
     if not job_id:
-        job_id = f"ingest_{normalized}__{stable_hash({'symbols': normalized_symbols, 'start': start_date, 'end': end_date}, length=20)}"
+        job_id = f"ingest_{normalized}__{stable_hash({'symbols': normalized_symbols, 'start': start_date, 'end': end_date, 'ranges': range_contract_sha}, length=20)}"
     job_path = qdp_v3_paths(workspace_root).jobs / f"{job_id}.json"
     state = read_json(job_path) or {
         "job_id": job_id,
@@ -123,11 +142,12 @@ def ingest_baostock_report_domain(
         "start_date": str(start_date),
         "end_date": str(end_date),
         "symbols": normalized_symbols,
+        "effective_ranges_sha256": range_contract_sha,
         "tasks": {symbol: {"status": "pending", "error": ""} for symbol in normalized_symbols},
         "created_at": utc_now(),
     }
-    signature = {key: state.get(key) for key in ("mode", "start_date", "end_date", "symbols")}
-    expected = {"mode": normalized, "start_date": str(start_date), "end_date": str(end_date), "symbols": normalized_symbols}
+    signature = {key: state.get(key) for key in ("mode", "start_date", "end_date", "symbols", "effective_ranges_sha256")}
+    expected = {"mode": normalized, "start_date": str(start_date), "end_date": str(end_date), "symbols": normalized_symbols, "effective_ranges_sha256": range_contract_sha}
     if signature != expected:
         raise RuntimeError(f"secondary_report_job_contract_conflict:{job_id}")
     tasks = dict(state.get("tasks", {}) or {})
@@ -140,16 +160,24 @@ def ingest_baostock_report_domain(
             tasks[symbol] = {"status": "skipped", "row_count": existing[token].row_count, "content_sha256": existing[token].content_sha256, "error": ""}
         elif not refresh and str(dict(tasks.get(symbol, {}) or {}).get("status", "")) == "completed":
             continue
+        elif effective_ranges[symbol][0] > effective_ranges[symbol][1]:
+            tasks[symbol] = {"status": "completed", "row_count": 0, "not_applicable": True, "error": ""}
         else:
             pending.append(symbol)
-    source = provider or BaostockProvider()
+    source = provider or BaostockProvider(_reuse_symbol_range_session=True)
     state.update({"status": "running", "tasks": tasks, "updated_at": utc_now()})
     atomic_write_json(job_path, state)
-    for offset in range(0, len(pending), max(1, int(chunk_size))):
-        chunk = pending[offset : offset + max(1, int(chunk_size))]
+    pending_by_range: dict[tuple[str, str], list[str]] = {}
+    for symbol in pending:
+        pending_by_range.setdefault(effective_ranges[symbol], []).append(symbol)
+    chunks: list[tuple[tuple[str, str], list[str]]] = []
+    size = max(1, int(chunk_size))
+    for effective_range, range_symbols in sorted(pending_by_range.items()):
+        chunks.extend((effective_range, range_symbols[offset : offset + size]) for offset in range(0, len(range_symbols), size))
+    for (effective_start, effective_end), chunk in chunks:
         try:
             result = source.fetch_domain(
-                DomainFetchRequest(domain=provider_domain, symbols=tuple(chunk), start_date=str(start_date), end_date=str(end_date))
+                DomainFetchRequest(domain=provider_domain, symbols=tuple(chunk), start_date=effective_start, end_date=effective_end)
             )
             errors = {normalize_symbol(item.get("symbol", "")): item for item in result.error_report if isinstance(item, dict) and item.get("symbol")}
             for symbol in chunk:
@@ -167,7 +195,13 @@ def ingest_baostock_report_domain(
                         "endpoint": normalized,
                         "package_version": importlib_metadata.version("baostock"),
                         "wheel_sha256": BAOSTOCK_BATCH_WHEEL_SHA256,
-                        "request": {"symbol": symbol, "start_date": str(start_date), "end_date": str(end_date)},
+                        "request": {
+                            "symbol": symbol,
+                            "start_date": str(start_date),
+                            "end_date": str(end_date),
+                            "provider_start_date": effective_start,
+                            "provider_end_date": effective_end,
+                        },
                         "error_code": "0",
                         "quality_tier": QUALITY_PROVISIONAL,
                         "quality_note": "PIT availability is rebuilt from an explicit publish date and the next exchange trading day; inferred publish dates remain unavailable.",
@@ -183,6 +217,8 @@ def ingest_baostock_report_domain(
     failed = [{"symbol": symbol, **dict(task)} for symbol, task in tasks.items() if str(dict(task).get("status", "")) == "failed"]
     state.update({"status": "partial" if failed else "completed", "tasks": tasks, "updated_at": utc_now()})
     atomic_write_json(job_path, state)
+    if provider is None:
+        source.close()
     return {
         "status": state["status"],
         "domain": normalized,
@@ -191,6 +227,8 @@ def ingest_baostock_report_domain(
         "completed_count": sum(str(dict(item).get("status", "")) == "completed" for item in tasks.values()),
         "skipped_count": sum(str(dict(item).get("status", "")) == "skipped" for item in tasks.values()),
         "failed_count": len(failed),
+        "provider_query_chunk_count": len(chunks),
+        "lifecycle_clipped_symbol_count": sum(effective_ranges[symbol] != (str(start_date), str(end_date)) for symbol in normalized_symbols),
         "failed": failed[:50],
         "job_path": str(job_path.resolve()),
     }

@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from quant_data_platform.domains.contracts import ProviderResult
+from quant_data_platform.providers import MootdxOnlineProvider
 from quant_data_platform.qdp_v3.audit import _audit_symbol_history_name_evidence
 from quant_data_platform.qdp_v3.constants import (
     DOMAIN_FINANCIAL_QUARTERLY,
@@ -37,7 +38,7 @@ from quant_data_platform.qdp_v3.intraday import (
     select_5m_day,
 )
 from quant_data_platform.qdp_v3.storage import iter_raw_partitions, read_raw_partition, read_raw_receipt, write_raw_partition
-from quant_data_platform.qdp_v3.secondary import canonicalize_secondary_domain
+from quant_data_platform.qdp_v3.secondary import canonicalize_secondary_domain, ingest_baostock_report_domain
 from quant_data_platform.qdp_v3.transforms import (
     build_adjust_factor_daily,
     build_signal_and_open_pit_views,
@@ -635,6 +636,153 @@ def test_5m_ingest_uses_symbol_month_tasks_pit_trading_days_and_stratum_escalati
     assert all(call.start_date[:7] == call.end_date[:7] == "2026-06" for call in [*mootdx.calls, *baostock.calls])
     assert result["strict_stock_day_count"] == 2
     assert result["quarantined_stock_day_count"] == 2
+
+
+def test_5m_ingest_prefetches_one_mootdx_range_and_splits_monthly(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    dates = ["2026-01-05", "2026-02-02"]
+    instances = []
+
+    class Client:
+        def __init__(self) -> None:
+            self.calls = []
+            self.closed = 0
+            instances.append(self)
+
+        def bars(self, *, symbol: str, frequency: int, start: int, offset: int) -> pd.DataFrame:
+            self.calls.append((symbol, frequency, start, offset))
+            return pd.DataFrame(
+                [
+                    {
+                        "datetime": f"{trade_date} {bar_end}:00",
+                        "open": 10.0,
+                        "high": 10.1,
+                        "low": 9.9,
+                        "close": 10.0,
+                        "volume": 100.0,
+                        "amount": 1000.0,
+                    }
+                    for trade_date in dates
+                    for bar_end in EXPECTED_5M_BAR_ENDS
+                ]
+            )
+
+        def close(self) -> None:
+            self.closed += 1
+
+    mootdx = MootdxOnlineProvider(_client_factory=Client)
+    baostock = _FakeIntradayProvider(dates, source="baostock")
+    first = ingest_intraday_5m(
+        symbols=["600000.SH"],
+        trade_dates=dates,
+        workspace_root=workspace,
+        mootdx_provider=mootdx,
+        baostock_provider=baostock,
+        comparison_sample_count=0,
+    )
+
+    assert first["status"] == "completed"
+    assert first["mootdx_download_strategy"] == "single_symbol_range_split_monthly"
+    assert first["range_prefetch_network_request_count"] == 1
+    assert first["range_prefetch_written_partition_count"] == 2
+    assert len(instances) == 1
+    assert len(instances[0].calls) == 1
+    assert baostock.calls == []
+
+    second = ingest_intraday_5m(
+        symbols=["600000.SH"],
+        trade_dates=dates,
+        workspace_root=workspace,
+        mootdx_provider=mootdx,
+        baostock_provider=baostock,
+        comparison_sample_count=0,
+    )
+    assert second["range_prefetch_network_request_count"] == 0
+    assert second["range_prefetch_reused_partition_count"] == 2
+    assert len(instances[0].calls) == 1
+    mootdx.close()
+    assert instances[0].closed == 1
+
+
+def test_5m_ingest_prefetches_one_baostock_fallback_range(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    dates = ["2026-01-05", "2026-02-02"]
+
+    class MissingMootdx:
+        def fetch_domain(self, request):
+            return ProviderResult(
+                provider="mootdx",
+                data=pd.DataFrame(),
+                error_report=[{"symbol": request.symbols[0], "message": "unavailable"}],
+            )
+
+    class RangeBaostock:
+        supports_symbol_range_prefetch = True
+
+        def __init__(self) -> None:
+            self.calls = []
+
+        def fetch_domain(self, request):
+            self.calls.append(request)
+            frames = [
+                _bars("baostock", trade_date=trade_date).assign(provider_symbol=request.symbols[0])
+                for trade_date in dates
+                if request.start_date <= trade_date <= request.end_date
+            ]
+            return ProviderResult(provider="baostock", data=pd.concat(frames, ignore_index=True), error_report=[])
+
+    baostock = RangeBaostock()
+    result = ingest_intraday_5m(
+        symbols=["600000.SH"],
+        trade_dates=dates,
+        workspace_root=workspace,
+        mootdx_provider=MissingMootdx(),
+        baostock_provider=baostock,
+        comparison_sample_count=0,
+    )
+
+    assert result["status"] == "completed"
+    assert result["baostock_download_strategy"] == "single_symbol_range_split_monthly"
+    assert result["baostock_range_prefetch_network_request_count"] == 1
+    assert result["baostock_range_prefetch_written_partition_count"] == 2
+    assert len(baostock.calls) == 1
+    assert baostock.calls[0].start_date == dates[0]
+    assert baostock.calls[0].end_date == dates[-1]
+
+
+def test_financial_ingest_clips_prelisting_history_and_batches_by_quarter(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+
+    class Provider:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def fetch_domain(self, request):
+            self.calls.append(request)
+            return ProviderResult(provider="baostock", data=pd.DataFrame(), error_report=[])
+
+    provider = Provider()
+    result = ingest_baostock_report_domain(
+        domain=DOMAIN_FINANCIAL_QUARTERLY,
+        symbols=["600000.SH", "600001.SH", "600002.SH"],
+        start_date="2010-01-01",
+        end_date="2026-06-26",
+        workspace_root=workspace,
+        provider=provider,
+        chunk_size=8,
+        symbol_lifecycle_ranges={
+            "600000.SH": ("2025-01-10", ""),
+            "600001.SH": ("2025-02-10", ""),
+            "600002.SH": ("2010-01-01", ""),
+        },
+    )
+
+    assert result["status"] == "completed"
+    assert result["provider_query_chunk_count"] == 2
+    assert result["lifecycle_clipped_symbol_count"] == 2
+    grouped = {tuple(call.symbols): call.start_date for call in provider.calls}
+    assert grouped[("600000.SH", "600001.SH")] == "2023-07-01"
+    assert grouped[("600002.SH",)] == "2010-01-01"
 
 
 def test_raw_partition_is_idempotent_and_preserves_revision(tmp_path: Path) -> None:

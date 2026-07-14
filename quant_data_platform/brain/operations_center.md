@@ -89,7 +89,8 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --gene
 ### procedure `qdp_v3_initial_rebuild`
 `input`: full BaoStock compatibility proof、已修复的 v2 M0 freeze、start/end date。
 `steps`: calendar；security master；由旧到新 date-snapshot 与 date-events；stable identity/symbol history；legacy factor history + xdxr/official arbitration；主板双源 5m；次级 PIT；build candidate；semantic audit；diff；CAS publish。
-`resume`: 每日、每证券和每 symbol-month 都写 job state；不可变 raw 内容相同则复用 hash，不重复写。
+`resume`: 每日、每证券和每 symbol-month 都写 job state；不可变 raw 内容相同则复用 hash，不重复写。5m 的恢复单位仍是 symbol-month，但网络单位是每证券完整目标区间，下载后本地切月；不得恢复旧的逐月远端回翻。
+`download_runtime`: BaoStock 网络并发固定为 1 并复用任务内 login；日期任务可做两日期本地预取。mootdx 启动时并行做 TCP/协议健康选择，失败负缓存 300 秒；不可用时立即走 BaoStock。财务季报按证券生命周期加 550 日前置缓冲裁剪。
 `hard_stop`: full compatibility 未通过、M0 lineage 缺失、raw partition quarantined、未映射主板 identity、factor disputed/baseline unproven、strict 5m 覆盖不足或 semantic audit 非 passed。
 
 ### procedure `qdp_v3_incremental_update`

@@ -14,10 +14,11 @@ No separate catalog is required to know what the active data base contains.
 
 - v2 remains the only active data base. Its active manifest SHA-256 is `e56f72a6cba8bcf86055817f6a0ec5e7391271fb3c27b4d628c3abc62944051e`.
 - QDP v3 code now implements immutable date-partition raw storage, stable security identity, PIT symbol history, batch daily/factor ingestion, dual-source 5-minute selection, factor-event arbitration, manifest v3, recursive GC, candidate audit, CAS publish and rollback.
-- No v3 full-history backfill, publication or active switch has occurred. One single-date candidate smoke exists only as pipeline evidence.
-- M0 freeze found 17 missing v2 source ancestors referenced by the 17 active dataset manifests. The leaf manifests and parquet data remain readable, but lineage is incomplete; v3 publication is blocked until this is repaired or replaced by an explicitly approved recovery proof.
+- QDP v3 已完成 2010—2012 共 729 个交易日的全 A 股日线、`query_all_stock` 与日期因子事件 strict raw 回灌；最新三年 candidate 已证明 identity/PIT/manifest 链路，但因子仍为 quarantined。后续年份、因子双路径仲裁、5m 全量、publication 和 active switch 尚未完成。
+- M0 freeze found 17 missing v2 source ancestors referenced by the 17 active dataset manifests. The leaf manifests and parquet data remain readable, but lineage is incomplete；用户已明确授权以 39 个现存 dataset/23,777 个文件的逐文件 hash 证明替代不可恢复祖先，使重建可继续，但该合同不等于 `lineage_complete=true`，删除型 GC 仍禁止。
 - The old v2 adjustment-factor checks proved key coverage, positivity and provenance only. They did not prove company-action semantics. `600076.SH/2024` is a fixed counterexample with non-event factor jumps, so old adjusted returns and dependent research remain provisional.
 - BaoStock 0.9.3 full compatibility passed across 34 anchors with zero issues; the ordinary multi-page proof returned 5537 rows and the wheel hash matched the lock. Live strict smoke also passed for three A-share dates and one factor-event date; ETF remains provisional by design.
+- 下载 runtime 已将 BaoStock 日期与 symbol-range 长任务改为任务内单 login 复用；5m 按证券整段获取后切成可恢复月分区；mootdx 使用协议健康探针、300 秒失败缓存和快速 BaoStock fallback。当前公共 mootdx 节点在本机协议探针失败，这是运行时外部状态而非永久源结论。
 
 Detailed implementation and audit state: `brain/references/qdp_v3_rebuild_20260713.md`.
 

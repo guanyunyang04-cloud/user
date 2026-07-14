@@ -156,10 +156,23 @@ live 2016 snapshot 同时出现旧/新别名，说明 canonical 必须先映射�
 
 修复后 `2012-09-10` 的 expected/raw/all-stock 均为 2,459 codes，missing/extra 为 0，分区由 quarantined 转为 strict；内容 hash 未被伪造或替换，只新增了正确的质量评估。
 
+## 2026-07-14 全域下载提速
+
+在继续历史回灌前，对 BaoStock、mootdx、5m 分片和财务查询做了实际调用链审计并完成以下改造：
+
+1. BaoStock 日期批量之外，逐证券因子史、财务/业绩域和 5m symbol-range 也可在各自长任务内复用单一隔离子进程/login。响应按 symbol 隔离错误，只重试失败 symbol，成功 symbol 不重复下载；通用 provider 默认仍保持原隔离调用合同，避免改变既有调用方语义。
+2. mootdx 对内置服务器先并行 TCP 排序，再用两行 `600000` 日线做真实协议探针；只缓存协议健康节点，失败节点进入 300 秒 circuit/negative cache。当前机器所有公共候选均未通过协议 bars 探针：旧首次失败约 `23.138s`，新首次全源判定约 `6.435s`，同一失败窗口后续约 `0.008s`，随后可立即转 BaoStock。这只是 2026-07-14 的外部节点状态。
+3. mootdx 历史分页从最新日期向后回翻，因此 5m 不再按 symbol-month 重复请求远端；每只证券一次获取完整目标区间，规范化后切成不可变月分区。对 2020-01 至 2026-06 的 78 个月，估算页面上界从约 4,280 降为 105（`40.76x`），顶层请求从 78 降为 1。
+4. BaoStock 5m fallback 在首次需要某证券时也一次获取完整目标区间并本地切月。`600000.SH/2020-01-02..2026-06-26` live probe 返回 75,312 rows、1,569 dates，每日均为 48 根，耗时约 `57.795s`；同 session 月度探针外推约慢 `1.6x`。因此只能把 78 倍表述为逻辑请求数减少，不能表述为实测吞吐提升。
+5. symbol-month 恢复改为确定键直接查 raw partition，消除分区增长时反复遍历整个 raw domain 的 O(N²) 文件系统开销。
+6. 完整财务季报按 security master 生命周期裁剪：起点为上市日前 550 日所在季度，保留约 6 个前置季度作初始 TTM/PIT 证据，退市后不再查询；业绩预告和快报保持全局范围。当前 5,537 个证券估算五类季度 endpoint calls 从 1,799,525 降为 1,256,305，减少 543,220（`30.19%`）。
+
+warm-session 小样本显示第二批逐证券因子史约从 `1.87s` 降至 `0.33s`（约 `5.7x`），第二个月 BaoStock 5m 约从 `1.85s` 降至 `0.20s`（约 `9.2x`）；首次持久会话仍包含约 `2.56s` 登录成本。旧/新调用的逐证券因子史 67 rows 与 5m 912 rows 均逐值等价，质量选择与禁止跨源拼接的闸门未放宽。
+
 ## 当前验证与下一动作
 
-- QDP v3 定向 provider/identity/manifest 测试：57 passed。
-- `quant_data_platform/tests` 完整回归：334 passed，只有 1 个既有 pandas FutureWarning。
+- 新下载调用链的 provider/identity/intraday 定向回归：46 passed。
+- `quant_data_platform/tests` 完整回归：340 passed，只有 1 个既有 pandas FutureWarning。
 - v2 active SHA 未改变；没有 v3 publish 或 active pointer change。
 - 没有删除 v2、旧 1m、旧 5m；删除型 GC 继续禁止。
 - 三个仍期望已归档 v1 CLI 可执行的旧测试已改为验证 archive boundary，防止训练 pack/memmap/provider-eval 被重新接回 QDP 日常 CLI。

@@ -48,7 +48,13 @@
 ### class `qdp_v3_intraday_5m`
 `definition`: 标准右闭合 48 根 bar；完整 mootdx 优先，完整 BaoStock fallback，任何不完整来源都不得跨源拼接。
 `tiers`: 2020 年以来逐证券探针决定 strict 覆盖；2011-11-22..2019-12-31 旧 TDX 只为 provisional；更早明确无覆盖；1m 退出 active 但不删除。
+`download_rule`: mootdx 向历史反向分页，禁止按 symbol-month 重复从最新日期回翻；每只证券一次获取目标完整区间、规范化后切月。BaoStock fallback 也在首次需要时取该证券完整区间并切月缓存。月分区恢复必须按确定键直接查找，不能随分区增长反复全目录扫描。
 `release_gate`: 2020 年以来 PIT 有效交易股票日 strict 覆盖至少 99.95%，每个 strict 股票日必须恰好 48 根且来源冲突已解决。
+
+### class `qdp_v3_provider_transport`
+`baostock_rule`: 日期批量与 symbol-range 是两种独立持久会话协议；生产 QDP v3 长任务复用一个隔离子进程中的单 login，逐 symbol 错误可单独重试，成功 symbol 不重复请求。通用 provider 默认仍保留旧隔离调用合同，只有显式启用的 v3 任务复用 symbol-range session。
+`mootdx_rule`: TCP 可连接不等于 TDX 协议可用；节点选择必须同时通过小样本 bars 协议探针。首轮可并行探测候选，已失败节点排除；全源失败须负缓存并快速返回，让单源 fallback 接管，不能为每只证券重复等待全部坏节点。
+`financial_rule`: 只对完整财务季报按证券上市/退市生命周期裁剪查询；上市前保留足够季度用于初始 TTM/PIT 证明。业绩预告和快报可能发生在常规季度边界之外，不得套用同一裁剪。
 
 ### class `industry_concept_complete`
 `definition`: QDP v2 active `industry_concept` is aligned exactly to `universe_snapshot` keys.
@@ -64,6 +70,7 @@
 ### class `mootdx_online`
 `domain`: fast daily/1m/5m market bars and quote-like market data.
 `production_role`: preferred market bar source when coverage and unit audit pass.
+`current_health_boundary`: 2026-07-14 当前机器的内置公共节点未通过协议 bars 探针；runtime 会缓存失败 300 秒并快速 fallback。该状态需在以后运行时重探，不应固化为数据源永久不可用。
 
 ### class `baostock_online`
 `domain`: trading calendar, universe/listing status, security status, industry labels, index constituents, turnover/valuation and structural daily fields.
@@ -84,6 +91,8 @@
 - Scope filtering must not inherit stale nested audit blocks from source manifests; transformed datasets need fresh proof or clearly marked inherited proof.
 - provider 的当前证券代码会重述历史；任何以 symbol 直接作为长期主键的设计都不能证明历史身份正确。
 - 对有状态公共 provider，更多 login 不等于更高吞吐；先复用单 session、合并同日请求并流水化本地处理，同时用 OS job lock 防止重复进程浪费带宽和覆盖进度。
+- 对从当前向历史分页的 provider，任务分区不能直接等同网络请求分区；应按 provider 的最低重复工作量请求大区间，再在 raw 层切成可恢复的小分区。
+- provider 节点健康必须验证实际协议查询；纯 TCP 探活只适合候选排序，不能作为生产可用证明。
 - 因子键覆盖、正值、来源字段齐全与 daily 对齐都只是结构证明，不等价于因子语义正确。
 - 当前 active 可读不等于 lineage 完整；GC 必须递归保护 active/candidate/pin/rollback/audit 的全部 inputs，而不能只保留 active 叶子。
 

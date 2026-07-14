@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from quant_data_platform.domains.contracts import DataDomain, DatePartitionFetchRequest, DomainFetchRequest
+from quant_data_platform.domains.contracts import DataDomain, DatePartitionFetchRequest, DomainFetchRequest, FetchRequest
 from quant_data_platform.providers import (
     BAOSTOCK_BULK_PER_PAGE_COUNT,
     BaostockProvider,
@@ -192,6 +192,126 @@ def test_combined_daily_and_all_stock_fetch_is_one_persistent_command(monkeypatc
     assert result.coverage_report["combined_all_stock_audit"] is True
     assert result.raw_data.equals(raw)
     assert universe.equals(audit)
+
+
+def test_baostock_symbol_range_repairs_share_the_persistent_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = BaostockProvider(_reuse_symbol_range_session=True)
+    commands: list[dict[str, object]] = []
+    frame = pd.DataFrame(
+        {
+            "trade_date": ["2026-06-26"],
+            "symbol": ["600000.SH"],
+            "open": [10.0],
+            "high": [10.1],
+            "low": [9.9],
+            "close": [10.0],
+            "volume": [100.0],
+            "amount": [1000.0],
+        }
+    )
+
+    def fake_request(payload: dict[str, object], *, timeout_seconds: int):
+        commands.append({**payload, "timeout_seconds": timeout_seconds})
+        return {"data": frame, "error_report": [], "meta": {"worker_elapsed_seconds": 0.1}}, 1, []
+
+    monkeypatch.setattr(provider, "_persistent_date_request", fake_request)
+    result = provider.fetch_market_bars(
+        FetchRequest(
+            symbols=("600000.SH",),
+            start_date="2026-06-26",
+            end_date="2026-06-26",
+        )
+    )
+
+    assert commands == [
+        {
+            "kind": "history_symbols",
+            "symbols": ("600000.SH",),
+            "start_date": "2026-06-26",
+            "end_date": "2026-06-26",
+            "adjusted_flag": "none",
+            "timeout_seconds": 90,
+        }
+    ]
+    assert len(result.data) == 1
+    assert result.coverage_report["session_reused"] is True
+    assert result.coverage_report["download_strategy"] == "single_login_sequential_symbols"
+
+
+def test_baostock_persistent_symbol_errors_restart_once_and_retry_only_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = BaostockProvider(_reuse_symbol_range_session=True)
+    commands = []
+    closes = []
+
+    def row(symbol: str) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "trade_date": ["2026-06-26"],
+                "symbol": [symbol],
+                "open": [10.0],
+                "high": [10.1],
+                "low": [9.9],
+                "close": [10.0],
+                "volume": [100.0],
+                "amount": [1000.0],
+            }
+        )
+
+    responses = iter(
+        [
+            (
+                {"data": row("600000.SH"), "error_report": [{"symbol": "600001.SH", "message": "transient"}], "meta": {}},
+                1,
+                [],
+            ),
+            ({"data": row("600001.SH"), "error_report": [], "meta": {}}, 1, []),
+        ]
+    )
+
+    def fake_request(payload: dict[str, object], *, timeout_seconds: int):
+        commands.append({**payload, "timeout_seconds": timeout_seconds})
+        return next(responses)
+
+    monkeypatch.setattr(provider, "_persistent_date_request", fake_request)
+    monkeypatch.setattr(provider, "close_date_partition_session", lambda: closes.append(True))
+    result = provider.fetch_market_bars(
+        FetchRequest(
+            symbols=("600000.SH", "600001.SH"),
+            start_date="2026-06-26",
+            end_date="2026-06-26",
+        )
+    )
+
+    assert commands[0]["symbols"] == ("600000.SH", "600001.SH")
+    assert commands[1]["symbols"] == ("600001.SH",)
+    assert closes == [True]
+    assert sorted(result.data["symbol"].tolist()) == ["600000.SH", "600001.SH"]
+    assert result.error_report == []
+    assert result.coverage_report["symbol_retry_count"] == 1
+
+
+def test_mootdx_provider_reuses_one_client_until_explicit_close() -> None:
+    instances = []
+
+    class Client:
+        def __init__(self) -> None:
+            self.closed = 0
+            instances.append(self)
+
+        def xdxr(self, *, symbol: str) -> pd.DataFrame:
+            return pd.DataFrame([{"year": 2026, "month": 6, "day": 26, "category": 1}])
+
+        def close(self) -> None:
+            self.closed += 1
+
+    provider = MootdxOnlineProvider(_client_factory=Client)
+    provider.fetch_xdxr_raw(["600000.SH"])
+    provider.fetch_xdxr_raw(["600036.SH"])
+
+    assert len(instances) == 1
+    assert instances[0].closed == 0
+    provider.close()
+    assert instances[0].closed == 1
 
 
 def test_mootdx_xdxr_raw_and_domain_adapter_preserve_semantics() -> None:

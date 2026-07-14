@@ -343,6 +343,30 @@ def iter_raw_partitions(
     return refs
 
 
+def get_raw_partition(
+    raw_domain: str,
+    *,
+    partition_field: str,
+    partition_value: str,
+    workspace_root: str | Path | None = None,
+) -> RawPartitionRef | None:
+    """Resolve one known raw partition directly without scanning its domain."""
+
+    paths = qdp_v3_paths(workspace_root)
+    field = _safe_partition_value(partition_field)
+    value = _safe_partition_value(partition_value)
+    latest_path = paths.raw / str(raw_domain) / f"{field}={value}" / "latest.json"
+    if not latest_path.exists():
+        return None
+    ref = _ref_from_latest(latest_path, root=paths.root)
+    if ref.partition_field != field or ref.partition_value != str(partition_value):
+        raise RuntimeError(
+            "raw_partition_direct_lookup_mismatch:"
+            f"expected={field}={partition_value}:actual={ref.partition_field}={ref.partition_value}"
+        )
+    return ref
+
+
 def read_raw_partition(ref: RawPartitionRef, *, verify_hash: bool = True) -> pd.DataFrame:
     receipt = read_raw_receipt(ref)
     if verify_hash:

@@ -22,7 +22,7 @@
 ### object `quant_data_platform_child`
 `type`: shared_data_base_child_brain
 `path`: `quant_data_platform/brain/`
-`state`: QDP 当前唯一 active 仍是 v2 manifest-first 数据基底；v3 identity-first/date-partition/candidate pipeline 已实现，BaoStock 0.9.3 full compatibility 通过，2010—2012 共 729 个日线/all-stock/因子事件日期分区已 strict 回灌。M0 的 17 个缺失 ancestors 以用户明确授权、逐文件 hash 且不伪称恢复的替代冻结证明闭合，但删除型 GC 仍禁止；因子双路径仲裁、后续年份和 5m 全量未完成，v3 未发布。
+`state`: QDP 当前唯一 active 仍是 v2 manifest-first 数据基底；v3 identity-first/date-partition/candidate pipeline 已实现，BaoStock 0.9.3 full compatibility 通过，2010—2012 共 729 个日线/all-stock/因子事件日期分区已 strict 回灌。下载 runtime 已完成单 login 复用、5m 按证券整段获取后切月、mootdx 协议健康负缓存和财务生命周期裁剪。M0 的 17 个缺失 ancestors 以用户明确授权、逐文件 hash 且不伪称恢复的替代冻结证明闭合，但删除型 GC 仍禁止；因子双路径仲裁、后续年份和 5m 全量未完成，v3 未发布。
 `public_commands`: 共用 `qdp status/list/describe/check/gc/update`；v3 增加 `ingest/build/audit/diff/publish/rollback/compatibility`，v2 legacy rebuild/verify 使用 `--generation v2`。
 
 ### object `daily_research_child`

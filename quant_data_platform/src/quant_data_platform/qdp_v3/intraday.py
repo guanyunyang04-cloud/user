@@ -11,6 +11,7 @@ import pandas as pd
 from quant_data_platform.core.json_io import read_json
 from quant_data_platform.domains.contracts import DataDomain, DomainFetchRequest
 from quant_data_platform.providers import BAOSTOCK_BATCH_WHEEL_SHA256, BaostockProvider, MootdxOnlineProvider
+from quant_data_platform.progress import progress_write
 from quant_data_platform.qdp_v3.constants import (
     EXPECTED_5M_BAR_ENDS,
     MOOTDX_VERSION,
@@ -25,7 +26,7 @@ from quant_data_platform.qdp_v3.constants import (
     RAW_SECURITY_MASTER,
 )
 from quant_data_platform.qdp_v3.identity import normalize_symbol
-from quant_data_platform.qdp_v3.storage import iter_raw_partitions, read_raw_partition, read_raw_receipt, write_raw_partition
+from quant_data_platform.qdp_v3.storage import get_raw_partition, iter_raw_partitions, read_raw_partition, read_raw_receipt, write_raw_partition
 
 
 SELECTED_COLUMNS = [
@@ -343,13 +344,12 @@ def _stored_intraday_audit_evidence(
 
 
 def _latest_month_partition(raw_domain: str, partition_value: str, *, workspace_root: str | Path | None) -> Any | None:
-    refs = iter_raw_partitions(
+    return get_raw_partition(
         raw_domain,
+        partition_field="symbol_month",
+        partition_value=partition_value,
         workspace_root=workspace_root,
-        start_value=partition_value,
-        end_value=partition_value,
     )
-    return refs[-1] if refs else None
 
 
 def canonicalize_selected_5m(
@@ -413,8 +413,19 @@ def _merge_month_partition(
     receipt: dict[str, Any],
     workspace_root: str | Path | None,
     replace_trade_dates: Iterable[str] = (),
+    existing_ref: Any | None = None,
+    lookup_existing: bool = True,
 ) -> Any:
-    existing = [ref for ref in iter_raw_partitions(raw_domain, workspace_root=workspace_root) if ref.partition_value == partition_value]
+    if lookup_existing:
+        direct = get_raw_partition(
+            raw_domain,
+            partition_field="symbol_month",
+            partition_value=partition_value,
+            workspace_root=workspace_root,
+        )
+        existing = [direct] if direct is not None else []
+    else:
+        existing = [existing_ref] if existing_ref is not None else []
     combined = frame.copy()
     if existing:
         try:
@@ -446,6 +457,241 @@ def _merge_month_partition(
     )[0]
 
 
+def _raw_request_covers_dates(ref: Any, dates: list[str]) -> bool:
+    if ref is None or not dates:
+        return False
+    receipt = read_raw_receipt(ref)
+    if list(receipt.get("provider_errors", []) or []):
+        return False
+    request = dict(receipt.get("request", {}) or {})
+    start_date = str(request.get("start_date", "") or "")[:10]
+    end_date = str(request.get("end_date", "") or "")[:10]
+    return bool(start_date and end_date and start_date <= dates[0] and end_date >= dates[-1])
+
+
+def _prefetch_mootdx_symbol_ranges(
+    *,
+    symbols: list[str],
+    trade_dates: list[str],
+    required_dates_by_symbol: Mapping[str, set[str]],
+    daily_covered_dates: set[str],
+    source: MootdxOnlineProvider,
+    workspace_root: str | Path | None,
+    refresh: bool,
+) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]], dict[str, int]]:
+    """Download each symbol once, then split its response into monthly raw partitions.
+
+    TDX bar pagination walks backward from the latest quote. Querying one old
+    month at a time therefore downloads the same newer pages repeatedly. A
+    single earliest-to-latest request per symbol removes that quadratic network
+    pattern while preserving the existing immutable symbol-month raw contract.
+    """
+
+    existing: dict[str, Any] = {}
+    refs: dict[str, Any] = {}
+    errors_by_symbol: dict[str, list[dict[str, Any]]] = {}
+    metrics = {
+        "range_prefetch_network_request_count": 0,
+        "range_prefetch_downloaded_symbol_count": 0,
+        "range_prefetch_reused_partition_count": 0,
+        "range_prefetch_written_partition_count": 0,
+    }
+    for index, symbol in enumerate(symbols, start=1):
+        symbol_dates = [
+            date
+            for date in trade_dates
+            if date not in daily_covered_dates or date in required_dates_by_symbol.get(symbol, set())
+        ]
+        if not symbol_dates:
+            continue
+        dates_by_month = {
+            month: [date for date in symbol_dates if date.startswith(month)]
+            for month in sorted({date[:7] for date in symbol_dates})
+        }
+        partition_by_month = {month: f"{symbol}_{month.replace('-', '')}" for month in dates_by_month}
+        for partition_value in partition_by_month.values():
+            ref = get_raw_partition(
+                RAW_INTRADAY_5M_MOOTDX,
+                partition_field="symbol_month",
+                partition_value=partition_value,
+                workspace_root=workspace_root,
+            )
+            if ref is not None:
+                existing[partition_value] = ref
+                refs[partition_value] = ref
+        if not refresh and all(
+            _raw_request_covers_dates(existing.get(partition_by_month[month]), dates_by_month[month])
+            for month in dates_by_month
+        ):
+            metrics["range_prefetch_reused_partition_count"] += len(dates_by_month)
+            continue
+        if index == 1 or index % 50 == 0 or index == len(symbols):
+            progress_write(
+                f"mootdx_5m_range_prefetch={index}/{len(symbols)} symbol={symbol} "
+                f"range={symbol_dates[0]}..{symbol_dates[-1]}"
+            )
+        metrics["range_prefetch_network_request_count"] += 1
+        try:
+            result = source.fetch_domain(
+                DomainFetchRequest(
+                    domain=DataDomain.MARKET_INTRADAY_5M,
+                    symbols=(symbol,),
+                    start_date=symbol_dates[0],
+                    end_date=symbol_dates[-1],
+                    adjusted_flag="none",
+                )
+            )
+            provider_errors = [
+                dict(item)
+                for item in list(result.error_report or [])
+                if isinstance(item, Mapping)
+            ]
+            if provider_errors:
+                errors_by_symbol[symbol] = provider_errors
+                continue
+            normalized = normalize_provider_5m(result.data, provider_symbol=symbol, source="mootdx")
+            normalized = normalized.loc[
+                normalized["provider_symbol"].eq(symbol) & normalized["trade_date"].isin(symbol_dates)
+            ].copy()
+        except Exception as exc:
+            errors_by_symbol[symbol] = [
+                {"provider": "mootdx", "symbol": symbol, "error": f"{type(exc).__name__}: {exc}"}
+            ]
+            continue
+        metrics["range_prefetch_downloaded_symbol_count"] += 1
+        for month, month_dates in dates_by_month.items():
+            partition_value = partition_by_month[month]
+            month_frame = normalized.loc[normalized["trade_date"].isin(month_dates)].copy()
+            ref = _merge_month_partition(
+                raw_domain=RAW_INTRADAY_5M_MOOTDX,
+                partition_value=partition_value,
+                frame=month_frame,
+                key=["provider_symbol", "trade_date", "bar_end", "source"],
+                receipt={
+                    "provider": "mootdx",
+                    "endpoint": "Quotes.bars",
+                    "package_version": MOOTDX_VERSION,
+                    "quality_tier": QUALITY_PROVISIONAL,
+                    "download_strategy": "single_symbol_range_split_monthly",
+                    "request": {
+                        "symbol": symbol,
+                        "month": month,
+                        "start_date": month_dates[0],
+                        "end_date": month_dates[-1],
+                        "range_start_date": symbol_dates[0],
+                        "range_end_date": symbol_dates[-1],
+                    },
+                    "provider_errors": [],
+                },
+                workspace_root=workspace_root,
+                replace_trade_dates=month_dates,
+                existing_ref=existing.get(partition_value),
+                lookup_existing=False,
+            )
+            refs[partition_value] = ref
+            metrics["range_prefetch_written_partition_count"] += 1
+    return refs, errors_by_symbol, metrics
+
+
+def _prefetch_baostock_symbol_range(
+    *,
+    symbol: str,
+    symbol_dates: list[str],
+    source: BaostockProvider,
+    workspace_root: str | Path | None,
+    refresh: bool,
+    known_refs: dict[str, Any],
+) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, int]]:
+    """Fetch one BaoStock 5m history range and materialize its monthly shards."""
+
+    metrics = {
+        "baostock_range_prefetch_network_request_count": 0,
+        "baostock_range_prefetch_reused_partition_count": 0,
+        "baostock_range_prefetch_written_partition_count": 0,
+    }
+    if not symbol_dates:
+        return known_refs, [], metrics
+    dates_by_month = {
+        month: [date for date in symbol_dates if date.startswith(month)]
+        for month in sorted({date[:7] for date in symbol_dates})
+    }
+    partition_by_month = {month: f"{symbol}_{month.replace('-', '')}" for month in dates_by_month}
+    for partition_value in partition_by_month.values():
+        if partition_value in known_refs:
+            continue
+        ref = get_raw_partition(
+            RAW_INTRADAY_5M_BAOSTOCK,
+            partition_field="symbol_month",
+            partition_value=partition_value,
+            workspace_root=workspace_root,
+        )
+        if ref is not None:
+            known_refs[partition_value] = ref
+    if not refresh and all(
+        _raw_request_covers_dates(known_refs.get(partition_by_month[month]), dates_by_month[month])
+        for month in dates_by_month
+    ):
+        metrics["baostock_range_prefetch_reused_partition_count"] = len(dates_by_month)
+        return known_refs, [], metrics
+    metrics["baostock_range_prefetch_network_request_count"] = 1
+    try:
+        result = source.fetch_domain(
+            DomainFetchRequest(
+                domain=DataDomain.MARKET_INTRADAY_5M,
+                symbols=(symbol,),
+                start_date=symbol_dates[0],
+                end_date=symbol_dates[-1],
+                adjusted_flag="none",
+            )
+        )
+        provider_errors = [
+            dict(item)
+            for item in list(result.error_report or [])
+            if isinstance(item, Mapping)
+        ]
+        if provider_errors:
+            return known_refs, provider_errors, metrics
+        normalized = normalize_provider_5m(result.data, provider_symbol=symbol, source="baostock")
+        normalized = normalized.loc[
+            normalized["provider_symbol"].eq(symbol) & normalized["trade_date"].isin(symbol_dates)
+        ].copy()
+    except Exception as exc:
+        return known_refs, [{"provider": "baostock", "symbol": symbol, "error": f"{type(exc).__name__}: {exc}"}], metrics
+    for month, month_dates in dates_by_month.items():
+        partition_value = partition_by_month[month]
+        month_frame = normalized.loc[normalized["trade_date"].isin(month_dates)].copy()
+        ref = _merge_month_partition(
+            raw_domain=RAW_INTRADAY_5M_BAOSTOCK,
+            partition_value=partition_value,
+            frame=month_frame,
+            key=["provider_symbol", "trade_date", "bar_end", "source"],
+            receipt={
+                "provider": "baostock",
+                "endpoint": "query_history_k_data_plus(frequency=5)",
+                "package_version": importlib_metadata.version("baostock"),
+                "wheel_sha256": BAOSTOCK_BATCH_WHEEL_SHA256,
+                "quality_tier": QUALITY_PROVISIONAL,
+                "download_strategy": "single_symbol_range_split_monthly",
+                "request": {
+                    "symbol": symbol,
+                    "month": month,
+                    "start_date": month_dates[0],
+                    "end_date": month_dates[-1],
+                    "range_start_date": symbol_dates[0],
+                    "range_end_date": symbol_dates[-1],
+                },
+                "provider_errors": [],
+            },
+            workspace_root=workspace_root,
+            replace_trade_dates=month_dates,
+            existing_ref=known_refs.get(partition_value),
+            lookup_existing=False,
+        )
+        known_refs[partition_value] = ref
+        metrics["baostock_range_prefetch_written_partition_count"] += 1
+    return known_refs, [], metrics
+
+
 def ingest_intraday_5m(
     *,
     symbols: Iterable[str],
@@ -467,13 +713,33 @@ def ingest_intraday_5m(
 
         assert_baostock_compatibility_gate(workspace_root)
     mootdx_source = mootdx_provider or MootdxOnlineProvider()
-    baostock_source = baostock_provider or BaostockProvider()
+    baostock_source = baostock_provider or BaostockProvider(_reuse_symbol_range_session=True)
     sample_frame = sampling_universe.copy() if isinstance(sampling_universe, pd.DataFrame) else pd.DataFrame({"provider_symbol": symbol_list})
     stored_forced, daily_reference, required_dates_by_symbol, daily_covered_dates = _stored_intraday_audit_evidence(
         symbols=set(symbol_list),
         trade_dates=dates,
         workspace_root=workspace_root,
     )
+    range_prefetch_enabled = bool(getattr(mootdx_source, "supports_backward_range_prefetch", False))
+    if range_prefetch_enabled:
+        mootdx_prefetch_refs, mootdx_prefetch_errors, prefetch_metrics = _prefetch_mootdx_symbol_ranges(
+            symbols=symbol_list,
+            trade_dates=dates,
+            required_dates_by_symbol=required_dates_by_symbol,
+            daily_covered_dates=daily_covered_dates,
+            source=mootdx_source,
+            workspace_root=workspace_root,
+            refresh=refresh,
+        )
+    else:
+        mootdx_prefetch_refs = {}
+        mootdx_prefetch_errors = {}
+        prefetch_metrics = {
+            "range_prefetch_network_request_count": 0,
+            "range_prefetch_downloaded_symbol_count": 0,
+            "range_prefetch_reused_partition_count": 0,
+            "range_prefetch_written_partition_count": 0,
+        }
     date_set = set(dates)
     explicit_forced = {
         (normalize_symbol(symbol), str(trade_date)[:10])
@@ -487,8 +753,72 @@ def ingest_intraday_5m(
     active_symbol_month_count = 0
     excluded_nontrading_stock_day_count = 0
     empty_columns = ["provider_symbol", "trade_date", "bar_end", "open", "high", "low", "close", "volume", "amount", "source"]
+    all_symbol_dates_by_symbol = {
+        symbol: [
+            date
+            for date in dates
+            if date not in daily_covered_dates or date in required_dates_by_symbol.get(symbol, set())
+        ]
+        for symbol in symbol_list
+    }
+    baostock_range_prefetch_enabled = bool(getattr(baostock_source, "supports_symbol_range_prefetch", False))
+    baostock_prefetched_symbols: set[str] = set()
+    baostock_prefetch_refs: dict[str, Any] = {}
+    baostock_prefetch_errors: dict[str, list[dict[str, Any]]] = {}
+    baostock_prefetch_metrics = {
+        "baostock_range_prefetch_network_request_count": 0,
+        "baostock_range_prefetch_reused_partition_count": 0,
+        "baostock_range_prefetch_written_partition_count": 0,
+    }
 
     def fetch_month(source: Any, *, source_name: str, symbol: str, month_dates: list[str]) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
+        if source_name == "mootdx" and range_prefetch_enabled:
+            if symbol in mootdx_prefetch_errors:
+                return pd.DataFrame(columns=empty_columns), list(mootdx_prefetch_errors[symbol])
+            partition_value = f"{symbol}_{month_dates[0][:7].replace('-', '')}"
+            ref = mootdx_prefetch_refs.get(partition_value)
+            if ref is None:
+                return pd.DataFrame(columns=empty_columns), [
+                    {
+                        "provider": "mootdx",
+                        "symbol": symbol,
+                        "error": "range_prefetch_partition_missing",
+                    }
+                ]
+            frame = read_raw_partition(ref)
+            frame = frame.loc[
+                frame["provider_symbol"].eq(symbol) & frame["trade_date"].isin(month_dates)
+            ].copy()
+            return frame, []
+        if source_name == "baostock" and baostock_range_prefetch_enabled:
+            if symbol not in baostock_prefetched_symbols:
+                refs, errors, metrics = _prefetch_baostock_symbol_range(
+                    symbol=symbol,
+                    symbol_dates=all_symbol_dates_by_symbol[symbol],
+                    source=baostock_source,
+                    workspace_root=workspace_root,
+                    refresh=refresh,
+                    known_refs=baostock_prefetch_refs,
+                )
+                baostock_prefetch_refs.update(refs)
+                if errors:
+                    baostock_prefetch_errors[symbol] = errors
+                for key, value in metrics.items():
+                    baostock_prefetch_metrics[key] += int(value)
+                baostock_prefetched_symbols.add(symbol)
+            if symbol in baostock_prefetch_errors:
+                return pd.DataFrame(columns=empty_columns), list(baostock_prefetch_errors[symbol])
+            partition_value = f"{symbol}_{month_dates[0][:7].replace('-', '')}"
+            ref = baostock_prefetch_refs.get(partition_value)
+            if ref is None:
+                return pd.DataFrame(columns=empty_columns), [
+                    {"provider": "baostock", "symbol": symbol, "error": "range_prefetch_partition_missing"}
+                ]
+            frame = read_raw_partition(ref)
+            frame = frame.loc[
+                frame["provider_symbol"].eq(symbol) & frame["trade_date"].isin(month_dates)
+            ].copy()
+            return frame, []
         request = DomainFetchRequest(
             domain=DataDomain.MARKET_INTRADAY_5M,
             symbols=(symbol,),
@@ -515,11 +845,7 @@ def ingest_intraday_5m(
         strict_month = month >= "2020-01"
         month_frame = sample_frame.loc[sample_frame["month"].astype(str).eq(month)].copy() if "month" in sample_frame.columns else sample_frame.copy()
         symbol_dates_by_symbol = {
-            symbol: [
-                date
-                for date in month_dates
-                if date not in daily_covered_dates or date in required_dates_by_symbol.get(symbol, set())
-            ]
+            symbol: [date for date in all_symbol_dates_by_symbol[symbol] if date.startswith(month)]
             for symbol in symbol_list
         }
         active_symbols = [symbol for symbol in symbol_list if symbol_dates_by_symbol[symbol]]
@@ -662,41 +988,45 @@ def ingest_intraday_5m(
             provider_errors = [*mootdx_errors, *baostock_errors]
             mootdx_ref = None
             if not mootdx_errors:
-                mootdx_ref = _merge_month_partition(
-                    raw_domain=RAW_INTRADAY_5M_MOOTDX,
-                    partition_value=partition_value,
-                    frame=mootdx_month,
-                    key=["provider_symbol", "trade_date", "bar_end", "source"],
-                    receipt={
-                        "provider": "mootdx",
-                        "endpoint": "Quotes.bars",
-                        "package_version": MOOTDX_VERSION,
-                        "quality_tier": QUALITY_PROVISIONAL,
-                        "request": {"symbol": symbol, "month": month, "start_date": symbol_dates[0], "end_date": symbol_dates[-1]},
-                        "provider_errors": [],
-                    },
-                    workspace_root=workspace_root,
-                    replace_trade_dates=month_dates,
-                )
+                mootdx_ref = mootdx_prefetch_refs.get(partition_value) if range_prefetch_enabled else None
+                if mootdx_ref is None:
+                    mootdx_ref = _merge_month_partition(
+                        raw_domain=RAW_INTRADAY_5M_MOOTDX,
+                        partition_value=partition_value,
+                        frame=mootdx_month,
+                        key=["provider_symbol", "trade_date", "bar_end", "source"],
+                        receipt={
+                            "provider": "mootdx",
+                            "endpoint": "Quotes.bars",
+                            "package_version": MOOTDX_VERSION,
+                            "quality_tier": QUALITY_PROVISIONAL,
+                            "request": {"symbol": symbol, "month": month, "start_date": symbol_dates[0], "end_date": symbol_dates[-1]},
+                            "provider_errors": [],
+                        },
+                        workspace_root=workspace_root,
+                        replace_trade_dates=month_dates,
+                    )
             baostock_ref = None
             if need_baostock and not baostock_errors:
-                baostock_ref = _merge_month_partition(
-                    raw_domain=RAW_INTRADAY_5M_BAOSTOCK,
-                    partition_value=partition_value,
-                    frame=baostock_month,
-                    key=["provider_symbol", "trade_date", "bar_end", "source"],
-                    receipt={
-                        "provider": "baostock",
-                        "endpoint": "query_history_k_data_plus(frequency=5)",
-                        "package_version": importlib_metadata.version("baostock"),
-                        "wheel_sha256": BAOSTOCK_BATCH_WHEEL_SHA256,
-                        "quality_tier": QUALITY_PROVISIONAL,
-                        "request": {"symbol": symbol, "month": month, "start_date": symbol_dates[0], "end_date": symbol_dates[-1]},
-                        "provider_errors": [],
-                    },
-                    workspace_root=workspace_root,
-                    replace_trade_dates=month_dates,
-                )
+                baostock_ref = baostock_prefetch_refs.get(partition_value) if baostock_range_prefetch_enabled else None
+                if baostock_ref is None:
+                    baostock_ref = _merge_month_partition(
+                        raw_domain=RAW_INTRADAY_5M_BAOSTOCK,
+                        partition_value=partition_value,
+                        frame=baostock_month,
+                        key=["provider_symbol", "trade_date", "bar_end", "source"],
+                        receipt={
+                            "provider": "baostock",
+                            "endpoint": "query_history_k_data_plus(frequency=5)",
+                            "package_version": importlib_metadata.version("baostock"),
+                            "wheel_sha256": BAOSTOCK_BATCH_WHEEL_SHA256,
+                            "quality_tier": QUALITY_PROVISIONAL,
+                            "request": {"symbol": symbol, "month": month, "start_date": symbol_dates[0], "end_date": symbol_dates[-1]},
+                            "provider_errors": [],
+                        },
+                        workspace_root=workspace_root,
+                        replace_trade_dates=month_dates,
+                    )
             selected_days: list[pd.DataFrame] = []
             day_results: list[dict[str, Any]] = []
             for date in symbol_dates:
@@ -762,6 +1092,10 @@ def ingest_intraday_5m(
             selected_refs.append(ref.content_sha256)
             results.extend({"symbol": symbol, "month": month, **item} for item in day_results)
     failed = [item for item in results if item.get("status") == QUALITY_QUARANTINED]
+    if mootdx_provider is None:
+        mootdx_source.close()
+    if baostock_provider is None:
+        baostock_source.close()
     return {
         "status": "partial" if failed else "completed",
         "symbol_count": len(symbol_list),
@@ -773,6 +1107,10 @@ def ingest_intraday_5m(
         "provisional_stock_day_count": sum(item.get("status") == QUALITY_PROVISIONAL for item in results),
         "quarantined_stock_day_count": len(failed),
         "selected_partition_hashes": sorted(set(selected_refs)),
+        "mootdx_download_strategy": "single_symbol_range_split_monthly" if range_prefetch_enabled else "symbol_month",
+        "baostock_download_strategy": "single_symbol_range_split_monthly" if baostock_range_prefetch_enabled else "symbol_month",
+        **prefetch_metrics,
+        **baostock_prefetch_metrics,
         "forced_comparison_stock_day_count": sum(
             1
             for symbol, trade_date in forced_stock_days

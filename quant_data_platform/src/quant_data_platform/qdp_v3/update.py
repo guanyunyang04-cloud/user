@@ -156,6 +156,24 @@ def _all_stock_symbols(security_master: pd.DataFrame) -> list[str]:
     return sorted({symbol for symbol in symbols if board_for_symbol(symbol) in {"MainBoard", "ChiNext", "STAR"}})
 
 
+def _security_lifecycle_ranges(security_master: pd.DataFrame) -> dict[str, tuple[str, str]]:
+    if security_master.empty:
+        return {}
+    symbol_column = "symbol" if "symbol" in security_master.columns else "provider_symbol" if "provider_symbol" in security_master.columns else ""
+    if not symbol_column:
+        return {}
+    out: dict[str, tuple[str, str]] = {}
+    for row in security_master.itertuples(index=False):
+        payload = row._asdict()
+        symbol = normalize_symbol(payload.get(symbol_column, ""))
+        if not symbol:
+            continue
+        list_date = str(payload.get("list_date", "") or "")[:10]
+        delist_date = str(payload.get("delist_date", "") or "")[:10]
+        out[symbol] = (list_date, delist_date)
+    return out
+
+
 def _recent_factor_event_symbols(*, trade_dates: list[str], workspace_root: str | Path | None) -> list[str]:
     if not trade_dates:
         return []
@@ -302,6 +320,7 @@ def run_update(
         if factor_result.get("failed_count"):
             raise RuntimeError("factor_date_events_stage_failed")
         all_symbols = _all_stock_symbols(security_master)
+        lifecycle_ranges = _security_lifecycle_ranges(security_master)
         factor_event_symbols = _recent_factor_event_symbols(trade_dates=factor_dates, workspace_root=workspace_root)
         missing_factor_symbols = _missing_symbol_partitions(
             symbols=all_symbols,
@@ -369,6 +388,7 @@ def run_update(
                     refresh=True,
                     chunk_size=8 if report_domain == "financial_quarterly" else 32,
                     job_id=f"{run_id}__secondary_{report_domain}",
+                    symbol_lifecycle_ranges=lifecycle_ranges,
                 )
                 record(f"secondary_{report_domain}", report_result)
                 if report_result.get("failed_count"):

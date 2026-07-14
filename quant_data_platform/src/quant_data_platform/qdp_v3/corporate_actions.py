@@ -513,6 +513,8 @@ def ingest_mootdx_xdxr(
     failed_tasks = [{"symbol": symbol, **dict(task)} for symbol, task in tasks.items() if str(dict(task).get("status", "")) == "failed"]
     state.update({"status": "partial" if failed_tasks else "completed", "tasks": tasks, "updated_at": utc_now()})
     atomic_write_json(job_path, state)
+    if provider is None:
+        source.close()
     return {
         "status": state["status"],
         "job_id": job_id,

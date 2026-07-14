@@ -330,7 +330,7 @@ def ingest_factor_symbol_histories(
     if contract != {"start_date": str(start_date), "end_date": str(end_date), "symbols": normalized}:
         raise RuntimeError(f"factor_symbol_history_job_contract_conflict:{job_id}")
     tasks = dict(state.get("tasks", {}) or {})
-    source = provider or BaostockProvider()
+    source = provider or BaostockProvider(_reuse_symbol_range_session=True)
     existing = {ref.partition_value: ref for ref in iter_raw_partitions(RAW_ADJUST_FACTOR_SYMBOL_HISTORY, workspace_root=workspace_root)}
     pending: list[str] = []
     for symbol in normalized:
@@ -404,6 +404,8 @@ def ingest_factor_symbol_histories(
     failed = [{"symbol": symbol, **dict(task)} for symbol, task in tasks.items() if str(dict(task).get("status", "")) == "failed"]
     state.update({"status": "partial" if failed else "completed", "tasks": tasks, "updated_at": utc_now()})
     atomic_write_json(job_path, state)
+    if provider is None:
+        source.close()
     return {
         "status": state["status"],
         "job_id": job_id,
