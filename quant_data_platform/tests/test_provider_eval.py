@@ -228,7 +228,7 @@ def test_provider_eval_does_not_touch_registry_or_canonical(tmp_path: Path) -> N
     assert canonical.read_text(encoding="utf-8") == before_canonical
 
 
-def test_qdp_cli_provider_eval_dispatch(monkeypatch, tmp_path: Path) -> None:
+def test_qdp_cli_provider_eval_is_archived(monkeypatch, tmp_path: Path, capsys) -> None:
     from quant_data_platform import cli as qdp_cli
 
     captured = {}
@@ -257,9 +257,8 @@ def test_qdp_cli_provider_eval_dispatch(monkeypatch, tmp_path: Path) -> None:
         ]
     )
 
-    assert rc == 0
-    config = captured["config"]
-    assert config.providers == ("current_qdp",)
-    assert config.symbols == ("000001.SZ",)
-    assert config.windows == (("2024-06-03", "2024-06-07"),)
-    assert config.output_root == tmp_path
+    assert rc == 2
+    assert captured == {}
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "archived"
+    assert payload["command"] == "provider-eval"

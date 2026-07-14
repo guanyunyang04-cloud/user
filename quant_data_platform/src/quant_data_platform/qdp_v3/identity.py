@@ -171,11 +171,13 @@ class SecurityIdentityRegistry:
                     master_row = matched.iloc[-1].to_dict()
             list_date = _iso_date_or_blank(master_row.get("list_date", ""))
             delist_date = _iso_date_or_blank(master_row.get("delist_date", ""))
-            effective_to = (
-                (pd.Timestamp(delist_date) - pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-                if delist_date
-                else "9999-12-31"
-            )
+            # BaoStock includes a terminal status row on outDate for ordinary
+            # delistings/absorptions.  Keep that date inside a single-symbol
+            # identity interval so the final suspended/delisted fact remains
+            # mappable.  Official multi-symbol change records override this
+            # generic interval explicitly (for example 300114 ends on
+            # 2025-02-16 before 302132 starts on 2025-02-17).
+            effective_to = delist_date or "9999-12-31"
             name = str(master_row.get("name", "") or master_row.get("code_name", "") or "").strip()
             provider_board = str(master_row.get("board", "") or "").strip()
             board = provider_board if provider_board in {"MainBoard", "ChiNext", "STAR", "BSE"} else board_for_symbol(symbol)

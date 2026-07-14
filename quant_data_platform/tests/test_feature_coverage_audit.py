@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pandas as pd
 
@@ -103,7 +105,7 @@ def test_feature_coverage_audit_reports_suspicious_groups(tmp_path) -> None:
     )
 
 
-def test_cli_audit_sharded_feature_coverage(tmp_path) -> None:
+def test_cli_audit_sharded_feature_coverage_is_archived(tmp_path, capsys) -> None:
     manifest = _fixture_manifest(tmp_path)
     output_root = tmp_path / "out"
 
@@ -126,8 +128,9 @@ def test_cli_audit_sharded_feature_coverage(tmp_path) -> None:
             "2024",
             "--json",
         ]
-    ) == 0
+    ) == 2
 
-    report = read_json(output_root / "cli_unit" / "coverage_audit_report.json")
-    assert report["artifact_type"] == "qdp_sharded_feature_coverage_audit"
-    assert report["contract"]["registry_impact"] == "unchanged"
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "archived"
+    assert payload["command"] == "audit-sharded-feature-coverage"
+    assert not (output_root / "cli_unit" / "coverage_audit_report.json").exists()

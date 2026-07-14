@@ -15,6 +15,7 @@ from quant_data_platform.qdp_v2.manifest import (
     qdp_v2_root,
 )
 from quant_data_platform.qdp_v3.constants import MANIFEST_VERSION, QUALITY_STRICT, STRICT_RELEASE_DOMAINS
+from quant_data_platform.qdp_v3.freeze import validate_v2_freeze_proof
 from quant_data_platform.qdp_v3.manifest import (
     active_manifest_sha256,
     atomic_write_json,
@@ -273,8 +274,9 @@ def publish_candidate(
     graph_findings = validate_candidate_graph(candidate, workspace_root=workspace_root)
     blockers = list(candidate.blockers) + graph_findings
     freeze = read_json(paths.metadata / "v2_freeze_20260713.json")
-    if freeze.get("status") != "complete" or not bool(freeze.get("hash_shards", False)):
-        blockers.append({"code": "qdp_v2_full_freeze_proof_missing"})
+    freeze_validation = validate_v2_freeze_proof(freeze)
+    if not freeze_validation.get("acceptable", False):
+        blockers.append({"code": "qdp_v2_freeze_proof_missing_or_invalid", "issues": freeze_validation.get("issues", [])})
     for domain in STRICT_RELEASE_DOMAINS:
         if domain not in candidate.datasets:
             blockers.append({"code": "strict_release_domain_missing", "domain": domain})

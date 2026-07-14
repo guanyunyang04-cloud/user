@@ -8,21 +8,26 @@
 ## Object Instances
 ### object `qdp_project`
 `type`: shared_manifest_first_data_base_instance
-`state`: v2 仍是唯一 active 数据基底；v3 的 provider、raw、identity、build、audit、CAS release 与 GC 代码面已建立，但尚未完成全历史回灌或 active 切换。
+`state`: v2 仍是唯一 active 数据基底；v3 的 provider、raw、identity、build、audit、CAS release 与 GC 代码面已建立，2010—2012 日线与日期因子事件 raw 回灌已完成并为 strict，但尚未完成后续年份、因子双路径仲裁、5m 全量或 active 切换。
 `public_cli`: 共用 `status/list/describe/check/gc/update`；v3 新增 `ingest/build candidate/audit/diff/publish/rollback/compatibility`；v2 legacy rebuild/verify 通过 `--generation v2` 保留。
 `python`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`
 
 ### object `qdp_v3_rebuild`
-`type/state`: immutable_manifest_v3_candidate_pipeline / implementation_ready_backfill_blocked_by_m0
+`type/state`: immutable_manifest_v3_candidate_pipeline / historical_backfill_in_progress_with_authorized_m0_gap
 `root`: `quant_data_platform/data/qdp_v3`
 `contract`: 日期分区 raw 不可变修订链；canonical 主键使用稳定 `security_id + 时间键`；历史代码由有证据的 `symbol_history` 恢复；quality tier 为 `strict/provisional/quarantined`。
 `providers`: BaoStock `0.9.3` wheel SHA-256 `acbd19403285bc4e254cee8297cf0e2646ae2276e5af7e549deed3988ab02293`；mootdx `0.11.7`。
 `implemented_domains`: 全 A 股批量日线/状态/估值、批量因子事件、逐证券因子史、security identity/symbol history、PIT signal/open、双源 5m、xdxr/股本、财务/业绩/行业/指数次级域。
 `compatibility`: 0.9.1 full golden 已捕获；0.9.3 full gate 为 `passed`（34 anchors、0 issues、普通多页 5537 rows、wheel hash 匹配）。报告不是 `passed/full` 时仍禁止 live date-partition ingest。
-`live_smoke`: strict A 股日线 `1699/2811/5207` rows；strict factor events `27` rows；ETF adapter `1574` rows provisional；`600000.SH/2020-01-02` 由完整 BaoStock 48 bars 单源进入 strict。
+`historical_backfill`: 2010/2011/2012 分别有 `242/244/243` 个交易日；日线、`query_all_stock` 和日期因子事件均为 `729/729` strict 分区。日线共 `1,578,095` rows；因子事件共 `5,192` rows、135 个合法零事件日；三年均无缺日、结构 blocker 或 20,000 行截断。
+`download_runtime`: 生产日期回灌复用单一隔离 BaoStock 子进程和单一 login；日线与同日 `query_all_stock` 在同一 session 原子获取；`max_workers=2` 只做两日期预取，网络 session/request concurrency 始终为 1。2012 日线约 `1239.7s`，相近规模 2011 旧路径约 `2932.7s`，约 `2.4x`；2012 因子约 `79.6s`，2011 旧路径约 `937.4s`，约 `11.8x`。
+`rejected_parallel_route`: 两个独立 BaoStock login 的 live probe 出现 `10001001 用户未登录`，因此禁止生产双 session；历史低错误率不得自动解锁第二个网络槽。每个 ingest job 有 OS advisory single-writer lock，进程异常退出后自动释放。
+`adapter_smoke_boundary`: ETF adapter `1574` rows provisional；`600000.SH/2020-01-02` 由完整 BaoStock 48 bars 单源进入 strict。
 `pit_name_boundary`: stock-basic 当前名称禁止反填历史；`name_on_date` 只能来自日期级 all-stock snapshot 或带 hash 的官方证据，semantic audit 回查 raw。
-`identity_regression`: `300114.SZ` 有效至 `2025-02-16`，`302132.SZ` 自 `2025-02-17` 生效；2016 provider 当前代码必须恢复为 `300114.SZ`。
-`release_boundary`: v3 没有 active manifest；只构建过一个单日 smoke candidate，未执行全量回灌、publish 或 active 切换；v2 active SHA-256 仍为 `e56f72a6cba8bcf86055817f6a0ec5e7391271fb3c27b4d628c3abc62944051e`。
+`identity_regression`: 官方代码历史固定为 `000022.SZ -> 001872.SZ @ 2018-12-26`、`000043.SZ -> 001914.SZ @ 2019-12-16`、`300114.SZ -> 302132.SZ @ 2025-02-17`；raw code-set 对账按 PIT symbol interval 计算，禁止把新代码的原上市日期反推为历史预期代码。
+`candidate_state`: `candidate__5060cee5169a45e4162200ad` 覆盖 2010—2012 全部 729 个交易日和 2,483 个 securities；日线、状态、估值、identity、symbol history、calendar 和 PIT signal/open 均 strict，只有 factor event/daily 因 `factor_event_not_verified_or_arbitrated` 与 `factor_reference_price_proof_missing` 保持 quarantined。semantic audit 仅出现这两个唯一 blocker code；无 identity/PIT/manifest blocker。
+`local_build_performance`: 三年 candidate 本地流式构建约 42.6 分钟，明显慢于已优化的下载；这是后续独立的 canonical build 单核/向量化优化项，不应通过降低审计或发布门解决。
+`release_boundary`: v3 没有 active manifest；未执行 publish 或 active 切换。后续年份、逐证券因子史/xdxr/官方仲裁、2010 baseline 与 5m gate 未完成前不得发布；v2 active SHA-256 仍为 `e56f72a6cba8bcf86055817f6a0ec5e7391271fb3c27b4d628c3abc62944051e`。
 `evidence`: `quant_data_platform/brain/references/qdp_v3_rebuild_20260713.md`
 
 ### object `qdp_v2_active_data_base`
@@ -38,7 +43,7 @@
 `scope_boundary`: 17 个 core symbol tables 仍是 2026-06-26 当前存续 3037 股的静态范围；历史不按当前存续筛选时必须使用独立 `pit_mainboard_non_st_v1` 研究范围，不能把 core `universe_snapshot` 误称为无幸存者偏差股票池。
 `evidence`: `qdp status --json`、`qdp check --quick --json`、`qdp check meta --runtime fast --duckdb-memory-limit 12GB --threads 4 --writeback --json`
 `meta_quality_state`: 2026-07-01 的 PIT/metadata/factor/index 检查只证明结构、键覆盖和正值；2026-07-13 的语义审计证明旧因子可在无公司行动时逐日跳变，因此旧因子及其调整收益结论均降为 provisional。
-`lineage_health`: 当前 17 个 active dataset 的 parquet/manifest 仍可读，但每个 active manifest 各引用一个已经不存在的 source ancestor，共 17 个缺失 dataset id；M0 freeze 状态为 `blocked_missing_lineage`，发布 v3 前必须恢复祖先或形成经明确授权的替代恢复证明。
+`lineage_health`: 当前 17 个 active dataset 的 parquet/manifest 仍可读，但各引用一个已经不存在的 source ancestor，共 17 个缺失 dataset id。全盘搜索未恢复副本；用户明确授权后形成不伪称恢复的替代冻结证明，M0 状态为 `complete_with_authorized_lineage_gap`。39 个仍存在 dataset、23,738 shards、23,777 files 已逐文件 hash；删除型 GC 继续禁止到 v3 首次发布且完成一次成功增量更新。
 
 ### object `active_tables`
 `type`: current_table_set
@@ -108,7 +113,7 @@
 
 ### object `provider_runtime`
 `type`: upstream_ingest_runtime
-`state`: production Python environment is `yolos`; update workflow may use mootdx/BaoStock/CNInfo according to domain.
+`state`: production Python environment is `yolos`; update workflow may use mootdx/BaoStock/CNInfo according to domain。BaoStock 日期任务使用持久单 login、同日日线/all-stock 原子请求和两日期本地预取，不运行双网络 session。
 `boundary`: BaoStock batch ingest 必须先通过 0.9.3 full compatibility gate；provider staging、identity、factor、PIT、5m 与 lineage 均通过 semantic audit 后才允许 CAS active pointer change。
 
 ### object `qdp_storage_retention`
@@ -116,7 +121,7 @@
 `proof`: every removed dataset had a same-domain active replacement covering its date range; all active shard targets were materialized and non-symlink; pre/post quick check and post-delete `status --verify-files` passed.
 `runtime`: metadata-only `qdp status` completes in about 0.6s; read-only `qdp check --quick --runtime fast` completes in about 2.5s on the current store.
 `invariant`: future deletion still requires active-manifest traversal, dry-run, replacement evidence for unique-data boundaries, and post-delete file verification.
-`m0_correction`: v3 freeze 审计发现 17 个 active input ancestor 已缺失；当前所有 39 个仍存在的 v2 dataset 及 17 个缺失祖先 id 均被 pin，v3 首次发布和成功增量更新前禁止删除型 GC。
+`m0_correction`: v3 freeze 审计发现 17 个 active input ancestor 已缺失；当前所有 39 个仍存在的 v2 dataset 及 17 个缺失祖先 id 均被 pin。用户授权的替代缺口证明只允许重建继续，不代表祖先已恢复；v3 首次发布和成功增量更新前禁止删除型 GC。
 
 ## Pure Functions
 - `active_table(domain)`: read `active.json.datasets[domain]` and then the referenced `dataset.json`.

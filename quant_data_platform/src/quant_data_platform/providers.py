@@ -10,7 +10,7 @@ import threading
 import time
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError, distribution as package_distribution, version as package_version
 from typing import Any
 
@@ -841,9 +841,10 @@ class _BaostockGlobalLimiter:
     """Process-local limiter shared by every BaoStock endpoint.
 
     BaoStock sessions are stateful and its public service is sensitive to
-    bursts.  QDP therefore starts at one in-flight request.  The second slot
-    is unlocked only after 1,000 observed requests with a network-error rate
-    below 0.5%; it is never raised above two.
+    bursts. QDP therefore defaults to one in-flight request and never raises
+    that ceiling automatically. A live two-login probe showed that BaoStock
+    can invalidate one session when another logs in, even at a zero historical
+    error rate.
     """
 
     def __init__(self) -> None:
@@ -871,10 +872,6 @@ class _BaostockGlobalLimiter:
                 self._requests += 1
                 if failed:
                     self._network_errors += 1
-                if self._limit == 1 and self._requests >= 1_000:
-                    error_rate = self._network_errors / max(self._requests, 1)
-                    if error_rate < 0.005:
-                        self._limit = 2
                 self._condition.notify_all()
 
     def snapshot(self) -> dict[str, Any]:
@@ -887,8 +884,110 @@ class _BaostockGlobalLimiter:
                 "network_error_rate": self._network_errors / max(self._requests, 1),
             }
 
+    def configure_limit(self, limit: int) -> dict[str, Any]:
+        normalized = int(limit)
+        if normalized not in {1, 2}:
+            raise ValueError("baostock_global_concurrency_must_be_1_or_2")
+        with self._condition:
+            self._limit = normalized
+            self._condition.notify_all()
+        return self.snapshot()
+
 
 _BAOSTOCK_GLOBAL_LIMITER = _BaostockGlobalLimiter()
+
+
+def configure_baostock_global_concurrency(max_workers: int) -> dict[str, Any]:
+    """Set the process-wide BaoStock request ceiling to one or two slots.
+
+    Production date-partition ingestion always configures one slot. The
+    two-slot setting remains an explicit low-level test hook; it is never
+    selected from historical error-rate statistics.
+    """
+
+    return _BAOSTOCK_GLOBAL_LIMITER.configure_limit(int(max_workers))
+
+
+def baostock_global_limiter_snapshot() -> dict[str, Any]:
+    return _BAOSTOCK_GLOBAL_LIMITER.snapshot()
+
+
+class _BaostockPersistentSession:
+    """One isolated BaoStock login reused across sequential QDP requests."""
+
+    def __init__(self) -> None:
+        self._context = multiprocessing.get_context("spawn")
+        self._command_queue: Any | None = None
+        self._response_queue: Any | None = None
+        self._process: Any | None = None
+        self._lock = threading.Lock()
+        self._sequence = 0
+
+    def _start_locked(self) -> None:
+        if self._process is not None and self._process.is_alive():
+            return
+        self._terminate_locked()
+        self._command_queue = self._context.Queue()
+        self._response_queue = self._context.Queue()
+        self._process = self._context.Process(
+            target=_baostock_persistent_session_worker,
+            kwargs={"command_queue": self._command_queue, "response_queue": self._response_queue},
+        )
+        self._process.daemon = True
+        self._process.start()
+
+    def _terminate_locked(self) -> None:
+        process = self._process
+        self._process = None
+        if process is not None:
+            if process.is_alive():
+                process.terminate()
+            process.join(5)
+        for channel in (self._command_queue, self._response_queue):
+            if channel is not None:
+                try:
+                    channel.close()
+                except Exception:
+                    pass
+        self._command_queue = None
+        self._response_queue = None
+
+    def request(self, payload: dict[str, Any], *, timeout_seconds: int) -> dict[str, Any]:
+        timeout = max(float(timeout_seconds or 0), 1.0)
+        with self._lock:
+            self._start_locked()
+            self._sequence += 1
+            request_id = self._sequence
+            command = {**payload, "request_id": request_id}
+            try:
+                with _BAOSTOCK_GLOBAL_LIMITER.slot():
+                    self._command_queue.put(command)
+                    response = self._response_queue.get(timeout=timeout)
+                    if not isinstance(response, dict) or response.get("request_id") != request_id:
+                        raise RuntimeError("baostock_persistent_session_response_mismatch")
+                    if response.get("status") != "ok":
+                        raise RuntimeError(
+                            "baostock_persistent_session_error:"
+                            f"{response.get('error_type', 'RuntimeError')}: {response.get('error', response)}"
+                        )
+                return response
+            except queue_module.Empty as exc:
+                self._terminate_locked()
+                raise TimeoutError(f"baostock_persistent_session_timeout:{int(timeout)}") from exc
+            except Exception:
+                self._terminate_locked()
+                raise
+
+    def close(self) -> None:
+        with self._lock:
+            process = self._process
+            if process is not None and process.is_alive() and self._command_queue is not None:
+                try:
+                    self._command_queue.put({"kind": "close", "request_id": -1})
+                    process.join(5)
+                except Exception:
+                    pass
+            self._terminate_locked()
 
 
 def baostock_runtime_version() -> str:
@@ -944,6 +1043,38 @@ class BaostockProvider:
     _intraday_max_workers: int = 1
     _bulk_timeout_seconds: int = 120
     _bulk_retry_backoff_seconds: tuple[int, ...] = (2, 5, 15)
+    _reuse_date_partition_session: bool = True
+    _date_partition_session: Any = field(default=None, init=False, repr=False)
+    _date_partition_session_guard: Any = field(default_factory=threading.Lock, init=False, repr=False)
+
+    def _persistent_date_request(self, payload: dict[str, Any], *, timeout_seconds: int) -> tuple[dict[str, Any], int, list[str]]:
+        errors: list[str] = []
+        attempts = len(tuple(self._bulk_retry_backoff_seconds)) + 1
+        for attempt in range(1, attempts + 1):
+            try:
+                with self._date_partition_session_guard:
+                    if self._date_partition_session is None:
+                        self._date_partition_session = _BaostockPersistentSession()
+                    session = self._date_partition_session
+                return session.request(payload, timeout_seconds=timeout_seconds), attempt, errors
+            except Exception as exc:
+                errors.append(f"attempt={attempt}:{type(exc).__name__}:{exc}")
+                self.close_date_partition_session()
+                if attempt >= attempts:
+                    break
+                time.sleep(float(tuple(self._bulk_retry_backoff_seconds)[attempt - 1]))
+        raise RuntimeError(
+            "baostock_persistent_request_failed:"
+            f"kind={payload.get('kind', '')} trade_date={payload.get('trade_date', '')} "
+            f"attempts={attempts} errors={' | '.join(errors)}"
+        )
+
+    def close_date_partition_session(self) -> None:
+        with self._date_partition_session_guard:
+            session = self._date_partition_session
+            self._date_partition_session = None
+        if session is not None:
+            session.close()
 
     def fetch_market_bars(self, request: FetchRequest) -> ProviderResult:
         validate_provider_name(self.name)
@@ -1098,12 +1229,23 @@ class BaostockProvider:
         else:
             endpoint = "query_daily_history_k_AStock"
         started = time.perf_counter()
-        raw, response_meta = _fetch_baostock_bulk_partition_with_retry(
-            endpoint=endpoint,
-            trade_date=request.trade_date,
-            timeout_seconds=int(self._bulk_timeout_seconds),
-            backoff_seconds=tuple(self._bulk_retry_backoff_seconds),
-        )
+        if self._reuse_date_partition_session:
+            payload, attempt_count, retry_errors = self._persistent_date_request(
+                {"kind": "bulk", "endpoint": endpoint, "trade_date": request.trade_date},
+                timeout_seconds=int(self._bulk_timeout_seconds),
+            )
+            raw = payload.get("data")
+            if not isinstance(raw, pd.DataFrame):
+                raise RuntimeError(f"baostock_persistent_bulk_invalid_data:{type(raw).__name__}")
+            response_meta = dict(payload.get("meta", {}) or {})
+            response_meta.update({"attempt_count": attempt_count, "retry_errors": retry_errors, "session_reused": True})
+        else:
+            raw, response_meta = _fetch_baostock_bulk_partition_with_retry(
+                endpoint=endpoint,
+                trade_date=request.trade_date,
+                timeout_seconds=int(self._bulk_timeout_seconds),
+                backoff_seconds=tuple(self._bulk_retry_backoff_seconds),
+            )
         if request.fetch_mode == "date_events":
             data = _baostock_bulk_adjust_factor_event_frame(raw, query_date=request.trade_date)
         else:
@@ -1131,6 +1273,64 @@ class BaostockProvider:
             error_report=[],
         )
 
+    def fetch_date_partition_with_all_stock(
+        self, request: DatePartitionFetchRequest
+    ) -> tuple[DatePartitionProviderResult, pd.DataFrame]:
+        """Fetch one A-share daily partition and its audit universe atomically."""
+
+        request = request.normalized()
+        if request.fetch_mode != "date_snapshot" or request.universe_kind != "all_a":
+            raise ValueError("combined_all_stock_fetch_requires_all_a_date_snapshot")
+        assert_baostock_batch_runtime()
+        endpoint = "query_daily_history_k_AStock"
+        started = time.perf_counter()
+        payload, attempt_count, retry_errors = self._persistent_date_request(
+            {"kind": "bulk_with_all_stock", "endpoint": endpoint, "trade_date": request.trade_date},
+            timeout_seconds=int(self._bulk_timeout_seconds),
+        )
+        raw = payload.get("data")
+        universe_frame = payload.get("audit_data")
+        if not isinstance(raw, pd.DataFrame) or not isinstance(universe_frame, pd.DataFrame):
+            raise RuntimeError(
+                "baostock_persistent_combined_invalid_data:"
+                f"daily={type(raw).__name__}:all_stock={type(universe_frame).__name__}"
+            )
+        response_meta = dict(payload.get("meta", {}) or {})
+        response_meta.update(
+            {
+                "attempt_count": attempt_count,
+                "retry_errors": retry_errors,
+                "session_reused": True,
+                "combined_all_stock_audit": True,
+            }
+        )
+        data = _baostock_bulk_daily_domain_frame(raw, domain=request.domain, query_date=request.trade_date)
+        elapsed = time.perf_counter() - started
+        coverage = {
+            **response_meta,
+            "provider": self.name,
+            "endpoint": endpoint,
+            "package_version": BAOSTOCK_BATCH_VERSION,
+            "wheel_sha256": BAOSTOCK_BATCH_WHEEL_SHA256,
+            "query_date": request.trade_date,
+            "universe_kind": request.universe_kind,
+            "fetch_mode": request.fetch_mode,
+            "row_count": int(len(raw)),
+            "elapsed_seconds": round(float(elapsed), 6),
+            "limiter": _BAOSTOCK_GLOBAL_LIMITER.snapshot(),
+        }
+        return (
+            DatePartitionProviderResult(
+                provider=self.name,
+                request=request,
+                raw_data=raw,
+                data=data,
+                coverage_report=coverage,
+                error_report=[],
+            ),
+            universe_frame.copy(),
+        )
+
     def fetch_all_stock_audit_evidence(self, *, trade_date: str) -> pd.DataFrame:
         """Return one lossless ``query_all_stock`` A-share audit snapshot.
 
@@ -1141,6 +1341,15 @@ class BaostockProvider:
         """
 
         validate_provider_name(self.name)
+        if self._reuse_date_partition_session:
+            payload, _, _ = self._persistent_date_request(
+                {"kind": "all_stock", "domain": DataDomain.UNIVERSE_SNAPSHOT, "trade_date": str(trade_date)},
+                timeout_seconds=120,
+            )
+            frame = payload.get("data")
+            if not isinstance(frame, pd.DataFrame):
+                raise RuntimeError(f"baostock_persistent_all_stock_invalid_data:{type(frame).__name__}")
+            return frame.copy()
         return _fetch_baostock_all_stock_frame_with_timeout(
             domain=DataDomain.UNIVERSE_SNAPSHOT,
             trade_date=str(trade_date),
@@ -2627,6 +2836,90 @@ def _baostock_bulk_partition_worker(queue: Any, endpoint: str, trade_date: str) 
         queue.put({"status": "ok", "data": frame, "meta": meta})
     except Exception as exc:
         queue.put({"status": "error", "error_type": type(exc).__name__, "error": str(exc)})
+
+
+def _baostock_persistent_session_worker(command_queue: Any, response_queue: Any) -> None:
+    """Serve sequential BaoStock commands under one isolated login."""
+
+    import baostock as bs  # type: ignore
+
+    login = _quiet_baostock_call(bs.login)
+    login_error = ""
+    if getattr(login, "error_code", "1") != "0":
+        login_error = f"baostock login failed: {getattr(login, 'error_msg', '')}"
+    try:
+        while True:
+            command = command_queue.get()
+            request_id = int(command.get("request_id", 0) or 0) if isinstance(command, dict) else 0
+            if not isinstance(command, dict):
+                response_queue.put(
+                    {"status": "error", "request_id": request_id, "error_type": "TypeError", "error": "persistent command must be a mapping"}
+                )
+                continue
+            if command.get("kind") == "close":
+                break
+            if login_error:
+                response_queue.put(
+                    {"status": "error", "request_id": request_id, "error_type": "RuntimeError", "error": login_error}
+                )
+                break
+            started = time.perf_counter()
+            try:
+                kind = str(command.get("kind", ""))
+                trade_date = str(command.get("trade_date", ""))
+                extra_response: dict[str, Any] = {}
+                if kind in {"bulk", "bulk_with_all_stock"}:
+                    endpoint = str(command.get("endpoint", ""))
+                    installed = assert_baostock_batch_runtime()
+                    if endpoint == "query_daily_history_k_AStock":
+                        query = bs.query_daily_history_k_AStock(date=trade_date)
+                    elif endpoint == "query_daily_history_k_ETF":
+                        query = bs.query_daily_history_k_ETF(date=trade_date)
+                    elif endpoint == "query_daily_adjust_factor":
+                        query = bs.query_daily_adjust_factor(date=trade_date)
+                    else:
+                        raise RuntimeError(f"unsupported_baostock_bulk_endpoint:{endpoint}")
+                    frame = _baostock_bulk_query_to_frame(query, endpoint)
+                    meta = {
+                        "error_code": str(getattr(query, "error_code", "")),
+                        "error_msg": str(getattr(query, "error_msg", "")),
+                        "per_page_count": int(getattr(query, "per_page_count", 0) or 0),
+                        "fields": [str(item) for item in (getattr(query, "fields", None) or [])],
+                        "package_version": installed,
+                    }
+                    if kind == "bulk_with_all_stock":
+                        audit_query = bs.query_all_stock(day=trade_date)
+                        extra_response["audit_data"] = _baostock_all_stock_frame(
+                            audit_query, trade_date=trade_date
+                        )
+                elif kind == "all_stock":
+                    domain = str(command.get("domain", DataDomain.UNIVERSE_SNAPSHOT))
+                    query = bs.query_all_stock(day=trade_date)
+                    frame = (
+                        _baostock_status_frame_from_all_stock(query, trade_date=trade_date)
+                        if domain == DataDomain.SECURITY_STATUS
+                        else _baostock_all_stock_frame(query, trade_date=trade_date)
+                    )
+                    meta = {"error_code": "0", "error_msg": "", "package_version": assert_baostock_batch_runtime()}
+                else:
+                    raise RuntimeError(f"unsupported_baostock_persistent_command:{kind}")
+                response_queue.put(
+                    {
+                        "status": "ok",
+                        "request_id": request_id,
+                        "data": frame,
+                        "meta": {**meta, "worker_elapsed_seconds": round(time.perf_counter() - started, 6)},
+                        **extra_response,
+                    }
+                )
+            except Exception as exc:
+                response_queue.put(
+                    {"status": "error", "request_id": request_id, "error_type": type(exc).__name__, "error": str(exc)}
+                )
+                break
+    finally:
+        if not login_error:
+            _quiet_baostock_call(bs.logout)
 
 
 def _baostock_history_worker(

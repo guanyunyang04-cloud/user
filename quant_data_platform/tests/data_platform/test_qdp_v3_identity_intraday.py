@@ -100,6 +100,41 @@ def test_provider_current_code_restores_pit_symbol() -> None:
     assert registry.symbol_for_date(frames.market_daily_raw.loc[0, "security_id"], "2025-02-17") == "302132.SZ"
 
 
+def test_official_main_board_code_changes_restore_historical_symbols() -> None:
+    registry = SecurityIdentityRegistry.from_sources(
+        provider_symbols=["001872.SZ", "001914.SZ"],
+        config_path=_identity_config(),
+    )
+
+    port_id = registry.security_id_for_provider_symbol("001872.SZ")
+    property_id = registry.security_id_for_provider_symbol("001914.SZ")
+    assert registry.symbol_for_date(port_id, "2012-09-10") == "000022.SZ"
+    assert registry.symbol_for_date(port_id, "2018-12-26") == "001872.SZ"
+    assert registry.symbol_for_date(property_id, "2012-09-10") == "000043.SZ"
+    assert registry.symbol_for_date(property_id, "2019-12-16") == "001914.SZ"
+
+
+def test_provider_current_duplicate_prefers_official_symbol_on_date() -> None:
+    old_symbol = _daily_raw(code="sz.300114", trade_date="2010-09-08")
+    current_symbol = _daily_raw(code="sz.302132", trade_date="2010-09-08")
+    current_symbol.loc[0, "turn"] = "1.0001"
+    current_symbol.loc[0, "pctChg"] = "5.0001"
+
+    frames = derive_daily_domains(
+        pd.concat([old_symbol, current_symbol], ignore_index=True),
+        query_date="2010-09-08",
+        identity_registry=_registry(),
+    )
+
+    assert len(frames.market_daily_raw) == 1
+    assert frames.market_daily_raw.loc[0, "provider_symbol"] == "300114.SZ"
+    assert frames.market_daily_raw.loc[0, "symbol_on_date"] == "300114.SZ"
+    assert len(frames.valuation_daily) == 1
+    assert frames.valuation_daily.loc[0, "provider_symbol"] == "300114.SZ"
+    assert set(frames.quarantine["resolution_status"]) == {"resolved"}
+    assert set(frames.quarantine["resolution_method"]) == {"official_pit_symbol_on_date"}
+
+
 def test_current_master_name_is_not_backfilled_before_date_local_observation() -> None:
     master = pd.DataFrame(
         {
@@ -134,7 +169,7 @@ def test_current_master_name_is_not_backfilled_before_date_local_observation() -
     assert "query_all_stock" in history.iloc[-1]["evidence_source"]
 
 
-def test_board_and_out_date_semantics_are_pit_safe() -> None:
+def test_board_and_terminal_out_date_semantics_are_pit_safe() -> None:
     assert board_for_symbol("689009.SH") == "STAR"
     master = pd.DataFrame(
         {
@@ -148,7 +183,10 @@ def test_board_and_out_date_semantics_are_pit_safe() -> None:
     history = SecurityIdentityRegistry.from_sources(
         provider_symbols=["600001.SH"], security_master=master
     ).identity_frames()[1]
-    assert history.loc[0, "effective_to"] == "2009-12-28"
+    assert history.loc[0, "effective_to"] == "2009-12-29"
+    assert SecurityIdentityRegistry.from_sources(
+        provider_symbols=["302132.SZ"], config_path=_identity_config()
+    ).symbol_for_date("QDP-CN-SZSE-AVICCAC-20100827", "2025-02-17") == "302132.SZ"
 
 
 def test_semantic_audit_rejects_current_name_backfill(tmp_path: Path) -> None:

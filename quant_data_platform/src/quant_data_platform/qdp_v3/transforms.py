@@ -29,6 +29,7 @@ def _deduplicate_mapped_rows(
     key: list[str],
     compare_columns: list[str],
     conflict_type: str,
+    prefer_symbol_on_date: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     if frame.empty:
         return frame.copy(), pd.DataFrame()
@@ -38,18 +39,37 @@ def _deduplicate_mapped_rows(
     keep_indices: list[int] = list(frame.index[~duplicate])
     conflicts: list[dict[str, Any]] = []
     for key_values, group in frame.loc[duplicate].groupby(key, sort=False, dropna=False):
+        preferred = group.iloc[0:0]
+        if prefer_symbol_on_date and {"provider_symbol", "symbol_on_date"}.issubset(group.columns):
+            preferred = group.loc[
+                group["symbol_on_date"].astype(str).ne("")
+                & group["provider_symbol"].astype(str).eq(group["symbol_on_date"].astype(str))
+            ]
         comparison = group.loc[:, compare_columns].copy()
         comparison = comparison.astype("string").fillna("<QDP_NULL>").drop_duplicates()
         if len(comparison) == 1:
-            keep_indices.append(int(group.index[0]))
+            selected = preferred.iloc[0] if len(preferred) == 1 else group.iloc[0]
+            keep_indices.append(int(selected.name))
             continue
         values = key_values if isinstance(key_values, tuple) else (key_values,)
         conflict = {column: value for column, value in zip(key, values)}
+        differing_columns = [
+            column
+            for column in compare_columns
+            if group[column].astype("string").fillna("<QDP_NULL>").nunique(dropna=False) > 1
+        ]
+        resolved = len(preferred) == 1
+        if resolved:
+            keep_indices.append(int(preferred.index[0]))
         conflict.update(
             {
                 "conflict_type": conflict_type,
                 "provider_symbols": sorted(set(group.get("provider_symbol", pd.Series(dtype=str)).astype(str))),
                 "row_count": int(len(group)),
+                "differing_columns": differing_columns,
+                "resolution_status": "resolved" if resolved else "unresolved",
+                "resolution_method": "official_pit_symbol_on_date" if resolved else "",
+                "selected_provider_symbol": str(preferred.iloc[0]["provider_symbol"]) if resolved else "",
             }
         )
         conflicts.append(conflict)
@@ -138,6 +158,7 @@ def derive_daily_domains(
         key=["security_id", "trade_date"],
         compare_columns=["open", "high", "low", "close", "preclose", "volume", "amount", "pct_chg", "tradestatus"],
         conflict_type="identity_mapped_daily_value_conflict",
+        prefer_symbol_on_date=True,
     )
     status = base.loc[
         :,
@@ -159,6 +180,7 @@ def derive_daily_domains(
         key=["security_id", "trade_date"],
         compare_columns=["tradestatus", "is_st", "is_suspended", "list_status"],
         conflict_type="identity_mapped_status_conflict",
+        prefer_symbol_on_date=True,
     )
     valuation = base.loc[
         :,
@@ -181,6 +203,7 @@ def derive_daily_domains(
         key=["security_id", "trade_date"],
         compare_columns=["turnover_rate", "pe_ttm", "pb_mrq", "ps_ttm", "pcf_ncf_ttm"],
         conflict_type="identity_mapped_valuation_conflict",
+        prefer_symbol_on_date=True,
     )
     quarantine = pd.concat(
         [item for item in (market_conflicts, status_conflicts, valuation_conflicts) if not item.empty],
@@ -252,6 +275,7 @@ def derive_adjust_factor_events(
         key=["security_id", "divid_operate_date"],
         compare_columns=["fore_adjust_factor", "back_adjust_factor", "adjust_factor"],
         conflict_type="identity_mapped_factor_event_conflict",
+        prefer_symbol_on_date=True,
     )
     return events.sort_values(["divid_operate_date", "security_id"]).reset_index(drop=True), conflicts
 
@@ -303,6 +327,7 @@ def derive_symbol_adjust_factor_events(
         key=["security_id", "divid_operate_date"],
         compare_columns=["fore_adjust_factor", "back_adjust_factor", "adjust_factor"],
         conflict_type="identity_mapped_symbol_factor_history_conflict",
+        prefer_symbol_on_date=True,
     )
     return events.sort_values(["divid_operate_date", "security_id"]).reset_index(drop=True), conflicts
 

@@ -6,6 +6,7 @@ import pytest
 from quant_data_platform.domains.contracts import DataDomain, DatePartitionFetchRequest, DomainFetchRequest
 from quant_data_platform.providers import (
     BAOSTOCK_BULK_PER_PAGE_COUNT,
+    BaostockProvider,
     assert_baostock_batch_runtime,
     _baostock_bulk_adjust_factor_event_frame,
     _baostock_bulk_query_to_frame,
@@ -153,6 +154,46 @@ def test_date_partition_request_contract() -> None:
         ).normalized()
 
 
+def test_combined_daily_and_all_stock_fetch_is_one_persistent_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    from quant_data_platform import providers
+
+    raw = _daily_raw(["sh.600000"])
+    audit = pd.DataFrame({"symbol": ["600000.SH"], "trade_date": ["2026-06-26"]})
+    commands: list[dict[str, object]] = []
+    provider = BaostockProvider()
+
+    def fake_request(payload: dict[str, object], *, timeout_seconds: int):
+        commands.append({**payload, "timeout_seconds": timeout_seconds})
+        return {
+            "data": raw,
+            "audit_data": audit,
+            "meta": {"error_code": "0", "per_page_count": 20_000},
+        }, 1, []
+
+    monkeypatch.setattr(providers, "assert_baostock_batch_runtime", lambda: "0.9.3")
+    monkeypatch.setattr(provider, "_persistent_date_request", fake_request)
+    request = DatePartitionFetchRequest(
+        domain=DataDomain.MARKET_DAILY,
+        trade_date="2026-06-26",
+        universe_kind="all_a",
+        fetch_mode="date_snapshot",
+    )
+
+    result, universe = provider.fetch_date_partition_with_all_stock(request)
+
+    assert commands == [
+        {
+            "kind": "bulk_with_all_stock",
+            "endpoint": "query_daily_history_k_AStock",
+            "trade_date": "2026-06-26",
+            "timeout_seconds": 120,
+        }
+    ]
+    assert result.coverage_report["combined_all_stock_audit"] is True
+    assert result.raw_data.equals(raw)
+    assert universe.equals(audit)
+
+
 def test_mootdx_xdxr_raw_and_domain_adapter_preserve_semantics() -> None:
     class Client:
         def xdxr(self, *, symbol: str) -> pd.DataFrame:
@@ -266,6 +307,53 @@ def test_daily_code_gap_requires_explicit_lifecycle_or_status_classification() -
     )
     assert blocked.quality_tier == "quarantined"
     assert {finding.code for finding in blocked.blockers} == {"daily_raw_code_gap_provider_gap"}
+
+
+def test_daily_code_set_uses_pit_symbol_intervals_instead_of_current_code_list_date() -> None:
+    raw = _daily_raw(["sz.000022", "sz.000043", "sz.300114"], trade_date="2012-09-10")
+    expected = ["000022.SZ", "000043.SZ", "300114.SZ"]
+    master = pd.DataFrame(
+        [
+            {"symbol": "000022.SZ", "list_date": "1993-05-05", "delist_date": "2018-12-26"},
+            {"symbol": "001872.SZ", "list_date": "1993-05-05", "delist_date": ""},
+            {"symbol": "000043.SZ", "list_date": "1994-09-28", "delist_date": "2019-12-16"},
+            {"symbol": "001914.SZ", "list_date": "1994-09-28", "delist_date": ""},
+            {"symbol": "300114.SZ", "list_date": "2010-08-27", "delist_date": "2025-02-17"},
+            {"symbol": "302132.SZ", "list_date": "2010-08-27", "delist_date": ""},
+        ]
+    )
+    history = pd.DataFrame(
+        [
+            {"symbol": "000022.SZ", "effective_from": "1993-05-05", "effective_to": "2018-12-25"},
+            {"symbol": "001872.SZ", "effective_from": "2018-12-26", "effective_to": "9999-12-31"},
+            {"symbol": "000043.SZ", "effective_from": "1994-09-28", "effective_to": "2019-12-15"},
+            {"symbol": "001914.SZ", "effective_from": "2019-12-16", "effective_to": "9999-12-31"},
+            {"symbol": "300114.SZ", "effective_from": "2010-08-27", "effective_to": "2025-02-16"},
+            {"symbol": "302132.SZ", "effective_from": "2025-02-17", "effective_to": "9999-12-31"},
+        ]
+    )
+    identity = {
+        "000022.SZ": "port",
+        "001872.SZ": "port",
+        "000043.SZ": "property",
+        "001914.SZ": "property",
+        "300114.SZ": "avic",
+        "302132.SZ": "avic",
+    }
+
+    report = audit_baostock_daily_raw(
+        raw,
+        query_date="2012-09-10",
+        expected_codes=expected,
+        expected_code_evidence=pd.DataFrame({"symbol": expected}),
+        security_master=master,
+        identity_security_by_symbol=identity,
+        symbol_history=history,
+    )
+
+    assert report.quality_tier == "strict"
+    assert report.metrics["security_master_active_code_count"] == 3
+    assert report.metrics["missing_code_count"] == 0
 
 
 def test_neighbor_count_jump_only_passes_with_listing_lifecycle_evidence() -> None:

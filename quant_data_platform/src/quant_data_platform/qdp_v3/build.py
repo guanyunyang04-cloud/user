@@ -5,8 +5,6 @@ from typing import Any, Iterable
 import os
 import sqlite3
 import tempfile
-import shutil
-import uuid
 
 import pandas as pd
 
@@ -273,6 +271,22 @@ def _build_intraday_dataset(
     start_date: str,
     end_date: str,
 ) -> tuple[Any | None, list[RawPartitionRef], dict[str, Any]]:
+    if str(end_date) < "2020-01-01":
+        return None, [], {
+            "findings": [],
+            "coverage": {
+                "release_applicable": False,
+                "required_start_date": "2020-01-01",
+                "end_date": str(end_date),
+                "expected_stock_day_count": 0,
+                "strict_covered_stock_day_count": 0,
+                "strict_missing_stock_day_count": 0,
+                "strict_coverage_rate": 0.0,
+            },
+            "quarantine": [],
+            "quarantine_count": 0,
+            "missing_sample": [],
+        }
     refs = iter_raw_partitions(RAW_INTRADAY_5M_SELECTED, workspace_root=workspace_root)
     if not refs:
         return None, [], {
@@ -378,7 +392,7 @@ def _build_intraday_dataset(
             ).fetchall()
         ]
         coverage_rate = float(covered_count / expected_count) if expected_count else 0.0
-        if expected_count == 0 and str(end_date) >= "2020-01-01":
+        if expected_count == 0:
             findings.append(QualityFinding(code="strict_5m_expected_universe_empty", severity="blocker", message="No tradable PIT main-board stock-days were available for 5m coverage proof.", domain=DOMAIN_MARKET_INTRADAY_5M))
         elif coverage_rate < 0.9995:
             findings.append(
@@ -469,6 +483,8 @@ def _stage_daily_domains(
     reports: dict[str, list[QualityReport]] = {domain: [] for domain in domains}
     quarantine_count = 0
     quarantine_sample: list[dict[str, Any]] = []
+    resolved_conflict_count = 0
+    resolved_conflict_sample: list[dict[str, Any]] = []
     security_ids: set[str] = set()
     current_year = ""
     buffers: dict[str, list[pd.DataFrame]] = {domain: [] for domain in domains}
@@ -508,15 +524,25 @@ def _stage_daily_domains(
         buffers[DOMAIN_VALUATION_DAILY].append(derived.valuation_daily)
         security_ids.update(derived.market_daily_raw["security_id"].astype(str))
         if not derived.quarantine.empty:
-            quarantine_count += int(len(derived.quarantine))
+            resolution = derived.quarantine.get(
+                "resolution_status", pd.Series("unresolved", index=derived.quarantine.index)
+            ).fillna("unresolved").astype(str)
+            resolved = derived.quarantine.loc[resolution.eq("resolved")]
+            unresolved = derived.quarantine.loc[~resolution.eq("resolved")]
+            quarantine_count += int(len(unresolved))
+            resolved_conflict_count += int(len(resolved))
             if len(quarantine_sample) < 100:
-                quarantine_sample.extend(derived.quarantine.head(100 - len(quarantine_sample)).to_dict("records"))
+                quarantine_sample.extend(unresolved.head(100 - len(quarantine_sample)).to_dict("records"))
+            if len(resolved_conflict_sample) < 100:
+                resolved_conflict_sample.extend(resolved.head(100 - len(resolved_conflict_sample)).to_dict("records"))
     flush(current_year)
     return {
         "staged": staged,
         "reports": reports,
         "quarantine_count": quarantine_count,
         "quarantine_sample": quarantine_sample,
+        "resolved_conflict_count": resolved_conflict_count,
+        "resolved_conflict_sample": resolved_conflict_sample,
         "security_ids": security_ids,
     }
 
@@ -716,8 +742,11 @@ def build_candidate(
     )
     history_input = dataset_input_ref(paths.root, history_manifest)
 
-    staging_root = paths.jobs / f".candidate_stage_{uuid.uuid4().hex}"
-    staging_root.mkdir(parents=True, exist_ok=False)
+    # TemporaryDirectory cleans up on ordinary exceptions as well as normal
+    # completion.  A stale directory from a hard process kill remains clearly
+    # marked and contains no canonical truth; raw and datasets stay immutable.
+    staging_directory = tempfile.TemporaryDirectory(prefix=".candidate_stage_", dir=str(paths.jobs))
+    staging_root = Path(staging_directory.name)
     staged_daily = _stage_daily_domains(refs=daily_refs, registry=registry, staging_root=staging_root)
     market_parts = staged_daily["staged"][DOMAIN_MARKET_DAILY_RAW]
     status_parts = staged_daily["staged"][DOMAIN_SECURITY_STATUS_DAILY]
@@ -726,6 +755,8 @@ def build_candidate(
     tradable_parts, tradable_partition_reports = _stage_tradable_open(market_parts=market_parts, staging_root=staging_root)
     daily_quarantine_count = int(staged_daily["quarantine_count"])
     daily_quarantine_sample = list(staged_daily["quarantine_sample"])
+    daily_resolved_conflict_count = int(staged_daily["resolved_conflict_count"])
+    daily_resolved_conflict_sample = list(staged_daily["resolved_conflict_sample"])
     raw_daily_findings = _raw_quality_findings(daily_refs, domain=DOMAIN_MARKET_DAILY_RAW)
     if daily_quarantine_count:
         raw_daily_findings.append(
@@ -736,6 +767,17 @@ def build_candidate(
                 domain=DOMAIN_MARKET_DAILY_RAW,
                 count=daily_quarantine_count,
                 sample=daily_quarantine_sample[:20],
+            )
+        )
+    if daily_resolved_conflict_count:
+        raw_daily_findings.append(
+            QualityFinding(
+                code="provider_current_symbol_duplicates_resolved",
+                severity="warning",
+                message="Conflicting provider-current duplicate rows were excluded in favor of the official PIT symbol_on_date row.",
+                domain=DOMAIN_MARKET_DAILY_RAW,
+                count=daily_resolved_conflict_count,
+                sample=daily_resolved_conflict_sample[:20],
             )
         )
     market_report = _merge_reports(DOMAIN_MARKET_DAILY_RAW, staged_daily["reports"][DOMAIN_MARKET_DAILY_RAW], raw_daily_findings)
@@ -776,7 +818,10 @@ def build_candidate(
         build=common_build,
         coverage={"start_date": snapshot_dates[0], "end_date": snapshot_dates[-1], "security_count": len(set(staged_daily["security_ids"]) - {""})},
         units={"price": "CNY/share", "volume": "share", "amount": "CNY", "pct_chg": "percent"},
-        quarantine=[{"row_count": daily_quarantine_count, "sample": daily_quarantine_sample}] if daily_quarantine_count else [],
+        quarantine=(
+            ([{"resolution_status": "unresolved", "row_count": daily_quarantine_count, "sample": daily_quarantine_sample}] if daily_quarantine_count else [])
+            + ([{"resolution_status": "resolved", "row_count": daily_resolved_conflict_count, "sample": daily_resolved_conflict_sample}] if daily_resolved_conflict_count else [])
+        ),
         partitioning="natural_year",
     )
     market_input = dataset_input_ref(paths.root, market_manifest)
@@ -1120,12 +1165,12 @@ def build_candidate(
         )
 
     event_frames: list[pd.DataFrame] = []
-    factor_conflicts: list[pd.DataFrame] = []
+    factor_identity_conflicts: list[pd.DataFrame] = []
     for ref, raw in zip(factor_refs, factor_raw_frames):
         events_for_date, conflicts = derive_adjust_factor_events(raw, query_date=ref.partition_value, identity_registry=registry)
         event_frames.append(events_for_date)
         if not conflicts.empty:
-            factor_conflicts.append(conflicts)
+            factor_identity_conflicts.append(conflicts)
     event_columns = [
         "security_id",
         "divid_operate_date",
@@ -1140,7 +1185,8 @@ def build_candidate(
         "identity_mapping_status",
         "source",
     ]
-    batch_events = pd.concat(event_frames, ignore_index=True) if event_frames else pd.DataFrame(columns=event_columns)
+    nonempty_event_frames = [frame for frame in event_frames if not frame.empty]
+    batch_events = pd.concat(nonempty_event_frames, ignore_index=True) if nonempty_event_frames else pd.DataFrame(columns=event_columns)
     symbol_event_frames: list[pd.DataFrame] = []
     for ref in symbol_factor_refs:
         symbol_events_for_security, conflicts = derive_symbol_adjust_factor_events(
@@ -1150,8 +1196,9 @@ def build_candidate(
         )
         symbol_event_frames.append(symbol_events_for_security)
         if not conflicts.empty:
-            factor_conflicts.append(conflicts)
-    symbol_events = pd.concat(symbol_event_frames, ignore_index=True) if symbol_event_frames else pd.DataFrame(columns=event_columns)
+            factor_identity_conflicts.append(conflicts)
+    nonempty_symbol_event_frames = [frame for frame in symbol_event_frames if not frame.empty]
+    symbol_events = pd.concat(nonempty_symbol_event_frames, ignore_index=True) if nonempty_symbol_event_frames else pd.DataFrame(columns=event_columns)
     comparable_start = min((ref.partition_value for ref in factor_refs), default=str(start_date))
     comparable_end = max((ref.partition_value for ref in factor_refs), default=effective_end)
     events, disputed_events, dual_path_metrics = reconcile_adjust_factor_events(
@@ -1188,9 +1235,36 @@ def build_candidate(
                 events[column] = False if column == "arbitration_xdxr_confirmed" else ""
         events = events.loc[:, FACTOR_CANONICAL_COLUMNS]
         dual_path_metrics["unverified_batch_events_admitted_for_nonrelease_build"] = int(len(events))
-    if not remaining_disputes.empty:
-        factor_conflicts.append(remaining_disputes)
-    factor_quarantine = pd.concat(factor_conflicts, ignore_index=True, sort=False) if factor_conflicts else pd.DataFrame()
+    factor_identity_quarantine = (
+        pd.concat(factor_identity_conflicts, ignore_index=True, sort=False)
+        if factor_identity_conflicts
+        else pd.DataFrame()
+    )
+    factor_resolution = (
+        factor_identity_quarantine.get(
+            "resolution_status", pd.Series("unresolved", index=factor_identity_quarantine.index)
+        )
+        .fillna("unresolved")
+        .astype(str)
+        if not factor_identity_quarantine.empty
+        else pd.Series(dtype=str)
+    )
+    factor_resolved = (
+        factor_identity_quarantine.loc[factor_resolution.eq("resolved")]
+        if not factor_identity_quarantine.empty
+        else pd.DataFrame()
+    )
+    factor_unresolved = (
+        factor_identity_quarantine.loc[~factor_resolution.eq("resolved")]
+        if not factor_identity_quarantine.empty
+        else pd.DataFrame()
+    )
+    factor_quarantine_parts = [frame for frame in (factor_identity_quarantine, remaining_disputes) if not frame.empty]
+    factor_quarantine = (
+        pd.concat(factor_quarantine_parts, ignore_index=True, sort=False)
+        if factor_quarantine_parts
+        else pd.DataFrame()
+    )
     factor_extra: list[QualityFinding] = _raw_quality_findings(factor_refs, domain=DOMAIN_ADJUST_FACTOR_EVENT)
     if not factor_refs:
         factor_extra.append(
@@ -1275,14 +1349,25 @@ def build_candidate(
                 provisional=True,
             )
         )
-    if not factor_quarantine.empty:
+    if not factor_unresolved.empty:
         factor_extra.append(
             QualityFinding(
                 code="factor_identity_conflicts_quarantined",
                 severity="blocker",
                 message="Factor events disagree after stable-identity mapping.",
                 domain=DOMAIN_ADJUST_FACTOR_EVENT,
-                count=int(len(factor_quarantine)),
+                count=int(len(factor_unresolved)),
+            )
+        )
+    if not factor_resolved.empty:
+        factor_extra.append(
+            QualityFinding(
+                code="factor_provider_symbol_duplicates_resolved",
+                severity="warning",
+                message="Provider-current factor duplicates were excluded in favor of the official PIT symbol_on_date row.",
+                domain=DOMAIN_ADJUST_FACTOR_EVENT,
+                count=int(len(factor_resolved)),
+                sample=factor_resolved.head(20).to_dict("records"),
             )
         )
     market_event_mask = events["divid_operate_date"].astype(str).between(snapshot_dates[0], snapshot_dates[-1]) if not events.empty else pd.Series(dtype=bool)
@@ -1443,9 +1528,13 @@ def build_candidate(
         raw_refs.append(security_master_ref)
     quarantine_summary: list[dict[str, Any]] = []
     if daily_quarantine_count:
-        quarantine_summary.append({"domain": DOMAIN_MARKET_DAILY_RAW, "row_count": daily_quarantine_count, "sample": daily_quarantine_sample[:20]})
-    if not factor_quarantine.empty:
-        quarantine_summary.append({"domain": DOMAIN_ADJUST_FACTOR_EVENT, "row_count": int(len(factor_quarantine)), "sample": factor_quarantine.head(20).to_dict("records")})
+        quarantine_summary.append({"domain": DOMAIN_MARKET_DAILY_RAW, "resolution_status": "unresolved", "row_count": daily_quarantine_count, "sample": daily_quarantine_sample[:20]})
+    if daily_resolved_conflict_count:
+        quarantine_summary.append({"domain": DOMAIN_MARKET_DAILY_RAW, "resolution_status": "resolved", "row_count": daily_resolved_conflict_count, "sample": daily_resolved_conflict_sample[:20]})
+    if not factor_unresolved.empty:
+        quarantine_summary.append({"domain": DOMAIN_ADJUST_FACTOR_EVENT, "resolution_status": "unresolved", "row_count": int(len(factor_unresolved)), "sample": factor_unresolved.head(20).to_dict("records")})
+    if not factor_resolved.empty:
+        quarantine_summary.append({"domain": DOMAIN_ADJUST_FACTOR_EVENT, "resolution_status": "resolved", "row_count": int(len(factor_resolved)), "sample": factor_resolved.head(20).to_dict("records")})
     if not xdxr_conflicts.empty:
         quarantine_summary.append({"domain": DOMAIN_CORPORATE_ACTIONS, "row_count": int(len(xdxr_conflicts)), "sample": xdxr_conflicts.head(20).to_dict("records")})
     for domain, conflicts in secondary_conflicts.items():
@@ -1488,5 +1577,5 @@ def build_candidate(
         quarantine=quarantine_summary,
         workspace_root=workspace_root,
     )
-    shutil.rmtree(staging_root, ignore_errors=True)
+    staging_directory.cleanup()
     return candidate

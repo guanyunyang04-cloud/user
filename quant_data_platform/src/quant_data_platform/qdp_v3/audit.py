@@ -574,27 +574,42 @@ def audit_candidate(
                 )
         intraday = frames.get(DOMAIN_MARKET_INTRADAY_5M)
         intraday_manifest = manifests.get(DOMAIN_MARKET_INTRADAY_5M)
-        if intraday_manifest is None:
-            findings.append(_blocker("strict_5m_dataset_missing", "Final v3 release requires the strict/provisional 5m dataset and coverage proof."))
-        else:
-            if intraday is not None:
-                strict_intraday = intraday.loc[intraday["quality_tier"].eq("strict")].copy() if "quality_tier" in intraday.columns else intraday
-                findings.extend(item.to_dict() for item in audit_intraday_5m(strict_intraday).blockers)
-            coverage = dict(intraday_manifest.coverage if intraday_manifest is not None else {})
-            expected = int(coverage.get("expected_stock_day_count", 0) or 0)
-            covered = int(coverage.get("strict_covered_stock_day_count", 0) or 0)
-            rate = float(coverage.get("strict_coverage_rate", 0.0) or 0.0)
-            if expected <= 0:
-                findings.append(_blocker("strict_5m_coverage_denominator_missing", "5m release proof has no PIT tradable-stock-day denominator."))
-            elif covered > expected or rate < 0.9995:
-                findings.append(
-                    _blocker(
-                        "strict_5m_coverage_gate_failed",
-                        "5m strict coverage must be internally consistent and at least 99.95%.",
-                        count=max(0, expected - covered),
-                        sample=[{"expected": expected, "covered": covered, "rate": rate}],
-                    )
+        candidate_intraday_coverage = dict(candidate.coverage.get("intraday_5m", {}) or {})
+        candidate_end = str(candidate.coverage.get("end_date", "") or "")
+        required_start = str(candidate_intraday_coverage.get("required_start_date", "2020-01-01") or "2020-01-01")
+        explicitly_not_applicable = candidate_intraday_coverage.get("release_applicable") is False
+        intraday_release_applicable = not (explicitly_not_applicable and candidate_end and candidate_end < required_start)
+        if explicitly_not_applicable and (not candidate_end or candidate_end >= required_start):
+            findings.append(
+                _blocker(
+                    "strict_5m_release_applicability_invalid",
+                    "A candidate reaching the strict 5m policy window cannot declare intraday release checks not applicable.",
+                    candidate_end_date=candidate_end,
+                    required_start_date=required_start,
                 )
+            )
+        if intraday_release_applicable:
+            if intraday_manifest is None:
+                findings.append(_blocker("strict_5m_dataset_missing", "Final v3 release requires the strict/provisional 5m dataset and coverage proof."))
+            else:
+                if intraday is not None:
+                    strict_intraday = intraday.loc[intraday["quality_tier"].eq("strict")].copy() if "quality_tier" in intraday.columns else intraday
+                    findings.extend(item.to_dict() for item in audit_intraday_5m(strict_intraday).blockers)
+                coverage = dict(intraday_manifest.coverage if intraday_manifest is not None else {})
+                expected = int(coverage.get("expected_stock_day_count", 0) or 0)
+                covered = int(coverage.get("strict_covered_stock_day_count", 0) or 0)
+                rate = float(coverage.get("strict_coverage_rate", 0.0) or 0.0)
+                if expected <= 0:
+                    findings.append(_blocker("strict_5m_coverage_denominator_missing", "5m release proof has no PIT tradable-stock-day denominator."))
+                elif covered > expected or rate < 0.9995:
+                    findings.append(
+                        _blocker(
+                            "strict_5m_coverage_gate_failed",
+                            "5m strict coverage must be internally consistent and at least 99.95%.",
+                            count=max(0, expected - covered),
+                            sample=[{"expected": expected, "covered": covered, "rate": rate}],
+                        )
+                    )
     blocker_count = sum(str(item.get("severity", "")) == "blocker" for item in findings)
     payload = {
         "manifest_version": MANIFEST_VERSION,

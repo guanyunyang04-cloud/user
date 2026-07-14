@@ -9,7 +9,7 @@ from quant_data_platform.core.json_io import read_json
 from quant_data_platform.qdp_v3.audit import audit_candidate
 from quant_data_platform.qdp_v3.build import build_candidate
 from quant_data_platform.qdp_v3.corporate_actions import ingest_mootdx_xdxr
-from quant_data_platform.qdp_v3.freeze import freeze_v2
+from quant_data_platform.qdp_v3.freeze import freeze_v2, validate_v2_freeze_proof
 from quant_data_platform.qdp_v3.identity import SecurityIdentityRegistry, board_for_symbol, normalize_symbol
 from quant_data_platform.qdp_v3.ingest import (
     ingest_baostock_date_partitions,
@@ -54,6 +54,20 @@ def _calendar_dates_read_only(*, start_date: str, end_date: str, workspace_root:
     return dates, "business_day_fallback_dry_run_only"
 
 
+def _date_task_summary(dates: list[str]) -> dict[str, Any]:
+    """Keep plans useful without serializing thousands of redundant dates."""
+
+    if not dates:
+        return {"task_count": 0, "start_date": "", "end_date": "", "sample_dates": []}
+    sample = dates if len(dates) <= 10 else [*dates[:5], *dates[-5:]]
+    return {
+        "task_count": len(dates),
+        "start_date": dates[0],
+        "end_date": dates[-1],
+        "sample_dates": sample,
+    }
+
+
 def plan_update(
     *,
     as_of_date: str,
@@ -79,6 +93,7 @@ def plan_update(
     factor_dates = dates if bootstrap else dates[-60:]
     intraday_dates = [date for date in dates if date >= "2020-01-01"] if bootstrap and include_5m else dates[-1:] if include_5m and dates else []
     freeze_state = read_json(paths.metadata / "v2_freeze_20260713.json")
+    freeze_validation = validate_v2_freeze_proof(freeze_state)
     return {
         "status": "planned",
         "bootstrap": bool(bootstrap),
@@ -87,15 +102,15 @@ def plan_update(
         "active_sha256": active_manifest_sha256(workspace_root),
         "calendar_source": calendar_source,
         "stages": [
-            {"stage": "freeze_v2", "enabled": freeze_state.get("status") != "complete", "current_status": freeze_state.get("status", "missing"), "missing_dataset_count": len(freeze_state.get("missing_dataset_ids", []) or [])},
+            {"stage": "freeze_v2", "enabled": not bool(freeze_validation.get("acceptable", False)), "current_status": freeze_state.get("status", "missing"), "proof_kind": freeze_validation.get("proof_kind", ""), "missing_dataset_count": len(freeze_state.get("missing_dataset_ids", []) or [])},
             {"stage": "calendar", "start_date": effective_start, "end_date": str(as_of_date)},
             {"stage": "security_master", "as_of_date": str(as_of_date)},
-            {"stage": "daily_date_snapshot", "task_count": len(daily_dates), "dates": daily_dates},
-            {"stage": "factor_date_events", "task_count": len(factor_dates), "dates": factor_dates},
+            {"stage": "daily_date_snapshot", **_date_task_summary(daily_dates)},
+            {"stage": "factor_date_events", **_date_task_summary(factor_dates)},
             {"stage": "factor_symbol_history", "scope": "all securities once; resumable"},
             {"stage": "corporate_action_xdxr", "scope": "all securities on bootstrap; recent factor-event securities on incremental updates"},
             {"stage": "secondary_pit", "enabled": bool(include_secondary), "domains": ["financial_quarterly", "performance_forecast", "performance_express", "industry_concept", "index_constituents"]},
-            {"stage": "intraday_5m", "enabled": bool(include_5m), "trade_date_count": len(intraday_dates), "dates": intraday_dates},
+            {"stage": "intraday_5m", "enabled": bool(include_5m), "trade_date_count": len(intraday_dates), **{key: value for key, value in _date_task_summary(intraday_dates).items() if key != "task_count"}},
             {"stage": "build_candidate"},
             {"stage": "semantic_audit"},
             {"stage": "diff_candidate", "against": "active"},
@@ -237,15 +252,17 @@ def run_update(
 
     try:
         freeze_path = paths.metadata / "v2_freeze_20260713.json"
-        if not freeze_path.exists() or read_json(freeze_path).get("status") != "complete":
+        freeze_state = read_json(freeze_path) if freeze_path.exists() else {}
+        if not validate_v2_freeze_proof(freeze_state).get("acceptable", False):
             # Re-check reachability cheaply before hashing hundreds of GB.  A
             # missing v2 ancestor cannot be repaired by hashing extant shards.
-            freeze_result = freeze_v2(workspace_root=workspace_root, hash_shards=False)
+            freeze_result = freeze_v2(workspace_root=workspace_root, hash_shards=bool(hash_v2_shards))
             record("freeze_v2", freeze_result)
-            if freeze_result.get("status") == "metadata_only":
+            if freeze_result.get("status") == "metadata_only" and not hash_v2_shards:
                 freeze_result = freeze_v2(workspace_root=workspace_root, hash_shards=True)
                 record("freeze_v2_full_hash", freeze_result)
-            if freeze_result.get("status") != "complete":
+            refreshed_freeze = read_json(freeze_path)
+            if not validate_v2_freeze_proof(refreshed_freeze).get("acceptable", False):
                 raise RuntimeError(f"v2_freeze_stage_incomplete:{freeze_result.get('status')}")
         calendar, _ = ingest_trading_calendar(
             start_date=str(plan["start_date"]),

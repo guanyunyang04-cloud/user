@@ -10,7 +10,7 @@ from quant_data_platform.qdp_v3.audit import audit_candidate
 from quant_data_platform.qdp_v3.build import build_candidate
 from quant_data_platform.qdp_v3.compatibility import capture_baostock_0_9_1_golden, run_baostock_0_9_3_compatibility_gate
 from quant_data_platform.qdp_v3.corporate_actions import ingest_mootdx_xdxr
-from quant_data_platform.qdp_v3.freeze import freeze_v2
+from quant_data_platform.qdp_v3.freeze import freeze_v2, validate_v2_freeze_proof
 from quant_data_platform.qdp_v3.gc import collect_garbage
 from quant_data_platform.qdp_v3.ingest import (
     ingest_baostock_date_partitions,
@@ -83,6 +83,7 @@ def _status(argv: list[str]) -> int:
     active = read_json(paths.active_manifest)
     candidates = sorted(paths.candidates.glob("*.json")) if paths.candidates.exists() else []
     raw_domains = sorted(path.name for path in paths.raw.iterdir() if path.is_dir()) if paths.raw.exists() else []
+    freeze = read_json(paths.metadata / "v2_freeze_20260713.json")
     payload = {
         "status": "active" if active else "not_published",
         "generation": "v3",
@@ -92,6 +93,10 @@ def _status(argv: list[str]) -> int:
         "candidate_count": len(candidates),
         "latest_candidate_id": candidates[-1].stem if candidates else "",
         "raw_domains": raw_domains,
+        "v2_freeze": {
+            "status": freeze.get("status", "missing"),
+            **validate_v2_freeze_proof(freeze),
+        },
     }
     _emit(payload, as_json=bool(args.json))
     return 0
@@ -181,6 +186,13 @@ def _ingest(argv: list[str]) -> int:
     parser.add_argument("--universe-kind", default="all_a", choices=("all_a", "etf"))
     parser.add_argument("--refresh", action="store_true")
     parser.add_argument("--no-cross-check", action="store_true")
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        choices=(1, 2),
+        default=1,
+        help="Prefetch up to two dates while keeping one persistent BaoStock login and one in-flight network request.",
+    )
     parser.add_argument("--job-id", default="")
     parser.add_argument("--symbol", action="append", default=[])
     parser.add_argument("--symbols-file", default="")
@@ -289,6 +301,7 @@ def _ingest(argv: list[str]) -> int:
                 refresh=bool(args.refresh),
                 cross_check=not bool(args.no_cross_check),
                 job_id=str(args.job_id),
+                max_workers=int(args.max_workers),
             )
     _emit(payload, as_json=bool(args.json))
     return 0 if payload.get("status") in {"completed", "strict"} else 2
@@ -301,6 +314,7 @@ def _build(argv: list[str]) -> int:
     parser.add_argument("--end-date", default="")
     parser.add_argument("--identity-config", default="")
     parser.add_argument("--allow-unverified-factor-dual-path", action="store_true")
+    parser.add_argument("--full", action="store_true", help="Emit the full candidate manifest including raw partition references.")
     args = parser.parse_args(argv)
     candidate = build_candidate(
         workspace_root=_workspace(args),
@@ -309,7 +323,19 @@ def _build(argv: list[str]) -> int:
         identity_config=str(args.identity_config) or None,
         require_factor_dual_path=not bool(args.allow_unverified_factor_dual_path),
     )
-    payload = candidate.to_dict()
+    payload = candidate.to_dict() if args.full else {
+        "status": candidate.status,
+        "candidate_id": candidate.candidate_id,
+        "created_at": candidate.created_at,
+        "dataset_count": len(candidate.datasets),
+        "datasets": candidate.datasets,
+        "quality_tiers": candidate.quality_tiers,
+        "blocker_count": len(candidate.blockers),
+        "blocker_codes": sorted({str(item.get("code", "")) for item in candidate.blockers}),
+        "coverage": candidate.coverage,
+        "quarantine_count": len(candidate.quarantine),
+        "raw_partition_count": len(candidate.raw_partitions),
+    }
     payload["candidate_path"] = str((qdp_v3_paths(_workspace(args)).candidates / f"{candidate.candidate_id}.json").resolve())
     _emit(payload, as_json=bool(args.json))
     return 0
@@ -367,8 +393,16 @@ def _freeze(argv: list[str]) -> int:
     _common(parser)
     parser.add_argument("--metadata-only", action="store_true", help="Pin immediately without reading every shard byte; full hashing remains required before release.")
     parser.add_argument("--expect-active-sha", default="e56f72a6cba8bcf86055817f6a0ec5e7391271fb3c27b4d628c3abc62944051e")
+    parser.add_argument("--accept-missing-lineage", action="store_true", help="Use an explicitly authorized substitute proof when ancestor manifests are irrecoverable.")
+    parser.add_argument("--authorization-note", default="", help="Required audit note for --accept-missing-lineage.")
     args = parser.parse_args(argv)
-    payload = freeze_v2(workspace_root=_workspace(args), hash_shards=not bool(args.metadata_only), expected_active_sha256=str(args.expect_active_sha))
+    payload = freeze_v2(
+        workspace_root=_workspace(args),
+        hash_shards=not bool(args.metadata_only),
+        expected_active_sha256=str(args.expect_active_sha),
+        accept_missing_lineage=bool(args.accept_missing_lineage),
+        authorization_note=str(args.authorization_note),
+    )
     _emit(payload, as_json=bool(args.json))
     return 0
 

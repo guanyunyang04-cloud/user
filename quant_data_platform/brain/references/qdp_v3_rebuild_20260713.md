@@ -4,9 +4,9 @@
 
 ## 结论
 
-QDP v3 已从方案进入可执行代码：BaoStock 0.9.3 日期批量协议、不可变 raw、稳定证券身份、PIT 代码历史、因子事件双路径、双源 5m、次级 PIT、manifest v3、candidate 审计、CAS 发布/回滚和递归 GC 均已落地并有自动化测试。
+QDP v3 已从方案进入可执行和历史回灌阶段：BaoStock 0.9.3 日期批量协议、不可变 raw、稳定证券身份、PIT 代码历史、因子事件双路径、双源 5m、次级 PIT、manifest v3、candidate 审计、CAS 发布/回滚和递归 GC 均已落地并有自动化测试；2010—2012 日线与日期因子事件 raw 已完成。
 
-但“代码可执行”不等于“v3 数据已经可用”。当前没有执行 2010 年以来全量回灌，没有发布 v3 active，也没有改动 v2 active pointer。M0 反而发现 v2 现有 lineage 已不完整，因此首次 v3 rebuild 在入口处硬阻断。
+但“raw 回灌 strict”不等于“v3 因子和全部数据已经可用”。当前没有发布 v3 active，也没有改动 v2 active pointer。M0 发现的 17 个缺失 v2 ancestor 由用户明确授权的替代冻结证明闭合入口，但该证明不声称祖先已恢复，删除型 GC 继续禁止。因子双路径仲裁、2010 baseline、后续年份和 5m 全量仍未完成。
 
 ## 固定运行时
 
@@ -36,7 +36,7 @@ QDP v3 已从方案进入可执行代码：BaoStock 0.9.3 日期批量协议、�
 
 日期批量响应不经过普通 `ResultData.next()`：解析器直接读取单次响应的 `fields/data`，强制 `per_page_count == 20000`，字段宽度必须一致，行数达到 20,000 视为潜在截断。provider error、超时、解压/CRC/消息体异常都抛出错误，不能解释成合法空数据。
 
-所有 BaoStock endpoint 共享进程级 limiter；初始并发 1，累计 1,000 请求且网络错误率低于 0.5% 才允许升到 2。批量 endpoint timeout 120 秒，退避 2/5/15 秒。
+所有 BaoStock endpoint 共享进程级 limiter，生产网络并发固定为 1。两个独立 login 的 live probe 即使在历史错误率为 0 时仍出现 `10001001 用户未登录`，因此取消按 1,000 请求错误率自动升为双 session 的路线。批量 endpoint timeout 120 秒，退避 2/5/15 秒。
 
 日线 raw 必须满足日期一致、`(date, code)` 唯一、`adjustflag=3`、0 < rows < 20,000，并与 `query_all_stock`、security master 和相邻日对账。缺口被逐项分为 `not_yet_listed`、`already_delisted`、`suspended`、官方代码重述、identity mapping problem 或 provider gap；后两类和任何未解释大跳变阻断。
 
@@ -86,7 +86,7 @@ freeze 保存并 pin 了 39 个仍存在的 v2 dataset，同时 pin 了 17 个 a
 - `universe_snapshot__a468bc540bf34f07fa93a1d0`
 - `valuation__5005fb2d8755d7f0c2f3aa4c`
 
-状态为 `blocked_missing_lineage`。搜索未找到副本；不能假定一定由哪一次 GC 删除。v2 GC 现在读取 freeze pin，dry-run 不再把仍存在的数据列为可删。发布函数还要求 `status=complete` 且 full shard hash proof，因此无法绕过。
+初次状态为 `blocked_missing_lineage`。搜索未找到副本；不能假定一定由哪一次 GC 删除。用户随后明确授权接受不可恢复 lineage gap 的替代证明：39 个仍存在 dataset、23,738 shards、23,777 files 已全量 hash，缺失 id 和引用证据继续保留，最终状态为 `complete_with_authorized_lineage_gap`。发布验证只能显式接受该授权合同，不能把它伪装为 `lineage_complete=true`；删除型 GC 仍禁止到 v3 首次发布并成功完成一次增量更新。
 
 ## 兼容性证据
 
@@ -112,18 +112,56 @@ synthetic bulk rows 的 1999/2000/2001 正常、20000 阻断由自动化测试�
 
 live 2016 snapshot 同时出现旧/新别名，说明 canonical 必须先映射到稳定 identity，再恢复 `symbol_on_date`；不能把批量返回 code 当历史主键。
 
-## 验证与未执行事项
+## 2010—2012 历史回灌
 
-截至本记录：
+日期 raw 分区结果：
 
-- `tests/data_platform`：210 passed，1 个既有 pandas FutureWarning。
-- `compileall`：通过。
-- 单日 `2010-01-04` candidate smoke 已完成；symbol history、日线、状态、估值与 PIT 研究视图为 strict。semantic audit 按预期被因子参考价证明和 2020+ 5m 覆盖阻断，没有 identity/name/raw hash/manifest lineage 错误。
-- `qdp diff --against active` 在首次 v3 发布前会自动以 v2 active 为基线；smoke 已正确识别 v2 active SHA、跨版本主键变化和 schema 增删。该 diff 已进入 update DAG 的 semantic-audit 与 CAS-publish 之间。
-- v3 GC dry-run：11 个 candidate datasets 全部 reachable，16 个 raw versions 因 candidate 引用或未满 30 天均不可清理。
-- v2 active SHA 未改变。
-- 没有全历史 backfill。
-- 没有 v3 publish 或 active pointer change。
-- 没有删除 v2、旧 1m、旧 5m。
+| 年份 | 交易日 | 日线 rows | all-stock rows | 因子事件 rows | 零事件日 | 质量 |
+|---|---:|---:|---:|---:|---:|---|
+| 2010 | 242 | 453,319 | 453,236 | 1,495 | 38 | 全部 strict |
+| 2011 | 244 | 537,338 | 537,094 | 1,762 | 45 | 全部 strict |
+| 2012 | 243 | 587,438 | 587,196 | 1,935 | 52 | 全部 strict |
 
-下一安全动作是：恢复 M0 缺失 lineage，或由用户明确批准并定义可替代的完整冻结证明；随后才启动 2010 至今的可恢复全量日期回灌。full compatibility 与少量 live adapter smoke 已完成，不再是当前阻塞点。
+合计 729 个交易日、1,578,095 行日线和 5,192 条因子事件。逐年复核均无缺日、日期错位、重复键、非法 adjustflag、20,000 行截断或结构 blocker。日线与 all-stock 行数差异来自已显式仲裁的 provider 当前代码重述，不代表漏数。
+
+最新 candidate 为 `candidate__5060cee5169a45e4162200ad`：覆盖 2010—2012 的 729/729 日、2,483 个 securities。日线、状态、估值、identity、symbol history、PIT signal/open 与 calendar 为 strict；factor event/daily 仍因 `factor_event_not_verified_or_arbitrated` 和 `factor_reference_price_proof_missing` quarantined。semantic audit 报告 `data/qdp_v3/audits/candidate__5060cee5169a45e4162200ad/20260714T052337+0000__semantic.json` 只出现这两个唯一 blocker code，未出现 identity、PIT、manifest lineage 或不适用的 pre-2020 5m blocker。
+
+三年 candidate 本地构建约 42.6 分钟，CPU 基本单核持续推进，峰值工作集约 1.56GB。该耗时是 canonical build 的独立性能债，不是网络下载瓶颈；后续应优化向量化/分片增量构建，不能用跳过 identity、PIT 或 factor gate 换速度。
+
+## 下载提速与失败路线
+
+最终生产路线：
+
+1. 一个隔离 spawn 子进程只登录 BaoStock 一次，跨日期复用 session。
+2. 同一交易日的 batch daily 与 `query_all_stock` 在该 session 内作为一个原子命令执行。
+3. `max_workers=2` 只让 CPU/存储处理与下一日期网络请求流水化；网络 session 数和同时在途请求数均为 1。
+4. 覆盖范围更大的 strict calendar 可直接复用；前一交易日映射和 raw refs 一次建索引，去掉逐日全目录扫描的 O(N²) 路径。
+5. 每个 job id 使用 OS advisory single-writer lock；重复进程立即报错，进程崩溃后由 OS 自动释放，不依赖可过期 PID 文件。
+
+实测相近年度：
+
+- 日线：2011 旧路径约 `2932.7s`，2012 新路径约 `1239.7s`，约 `2.4x`。
+- 因子事件：2011 旧路径约 `937.4s`，2012 新路径约 `79.6s`，约 `11.8x`。
+- 2012 因子新取 235 日、复用 8 日探针，0 失败、0 网络错误。
+
+曾测试两个独立 BaoStock login。因子小探针成功，但日线探针在 `2012-01-06` 返回 `10001001 用户未登录`，说明第二次登录可使另一 session 失效；该路线被永久否决，现有 revoke 证据保留在 `data/qdp_v3/metadata/baostock_parallel_health_gate.json`。历史错误率再低也不自动开放第二个网络槽。
+
+## 新增官方代码历史
+
+2012 审计曾把 `001872.SZ`、`001914.SZ`、`302132.SZ` 误判为 provider 缺口，原因是当前 security master 给新代码继承了原证券上市日。现改为按官方 symbol interval 生成当日预期集合：
+
+- `000022.SZ` 至 `2018-12-25`，`001872.SZ` 自 `2018-12-26`；CNInfo PDF SHA-256 `bf406b1759dd7fda45cc46927e36316840b0b1152bb40677a7b52e11568d4350`。
+- `000043.SZ` 至 `2019-12-15`，`001914.SZ` 自 `2019-12-16`；CNInfo PDF SHA-256 `46160431c51df23c30b3be802eb140492255128fb166d103ed735a62f303ab05`。
+- `300114.SZ` 至 `2025-02-16`，`302132.SZ` 自 `2025-02-17`；既有官方证据继续有效。
+
+修复后 `2012-09-10` 的 expected/raw/all-stock 均为 2,459 codes，missing/extra 为 0，分区由 quarantined 转为 strict；内容 hash 未被伪造或替换，只新增了正确的质量评估。
+
+## 当前验证与下一动作
+
+- QDP v3 定向 provider/identity/manifest 测试：57 passed。
+- `quant_data_platform/tests` 完整回归：334 passed，只有 1 个既有 pandas FutureWarning。
+- v2 active SHA 未改变；没有 v3 publish 或 active pointer change。
+- 没有删除 v2、旧 1m、旧 5m；删除型 GC 继续禁止。
+- 三个仍期望已归档 v1 CLI 可执行的旧测试已改为验证 archive boundary，防止训练 pack/memmap/provider-eval 被重新接回 QDP 日常 CLI。
+
+下一安全动作是继续 2013 以后日期回灌，同时启动逐证券完整因子史、mootdx xdxr 和官方公告仲裁；只有 2010 baseline、参考价一 tick 证明、因子双路径和 5m 发布门全部通过后，才构建全历史 release candidate。full compatibility、M0 入口和 2010—2012 raw 已不再是当前阻塞点。

@@ -113,6 +113,7 @@ def audit_baostock_daily_raw(
     neighbor_date: str = "",
     count_change_explained: bool = False,
     identity_security_by_symbol: Mapping[str, str] | None = None,
+    symbol_history: pd.DataFrame | None = None,
 ) -> QualityReport:
     domain = str(raw_domain or "baostock_daily_astock_raw")
     findings: list[QualityFinding] = []
@@ -155,6 +156,7 @@ def audit_baostock_daily_raw(
     gap_classifications: dict[str, list[str]] = {}
     master_rows: dict[str, dict[str, Any]] = {}
     evidence_rows: dict[str, dict[str, Any]] = {}
+    symbol_effective_intervals: dict[str, list[tuple[str, str]]] = {}
     if isinstance(security_master, pd.DataFrame) and not security_master.empty:
         master_symbol_column = (
             "symbol"
@@ -168,6 +170,16 @@ def audit_baostock_daily_raw(
                 symbol = normalize_symbol(row.get(master_symbol_column, ""))
                 if symbol:
                     master_rows[symbol] = row
+    if isinstance(symbol_history, pd.DataFrame) and not symbol_history.empty:
+        required = {"symbol", "effective_from", "effective_to"}
+        if not required.issubset(symbol_history.columns):
+            raise ValueError(f"symbol_history_columns_missing:{sorted(required - set(symbol_history.columns))}")
+        for row in symbol_history.loc[:, sorted(required)].to_dict("records"):
+            symbol = normalize_symbol(row.get("symbol", ""))
+            effective_from = _clean_date(row.get("effective_from", ""))
+            effective_to = _clean_date(row.get("effective_to", ""))
+            if symbol and effective_from and effective_to:
+                symbol_effective_intervals.setdefault(symbol, []).append((effective_from, effective_to))
     if isinstance(expected_code_evidence, pd.DataFrame) and not expected_code_evidence.empty:
         evidence_symbol_column = (
             "symbol"
@@ -183,7 +195,13 @@ def audit_baostock_daily_raw(
                     evidence_rows[symbol] = row
     def active_master_codes(at_date: str) -> set[str]:
         active: set[str] = set()
-        for symbol, row in master_rows.items():
+        for symbol in set(master_rows) | set(symbol_effective_intervals):
+            intervals = symbol_effective_intervals.get(symbol, [])
+            if intervals:
+                if any(start <= str(at_date) <= end for start, end in intervals):
+                    active.add(symbol)
+                continue
+            row = master_rows.get(symbol, {})
             list_date = _clean_date(row.get("list_date", ""))
             delist_date = _clean_date(row.get("delist_date", ""))
             if list_date and str(at_date) < list_date:

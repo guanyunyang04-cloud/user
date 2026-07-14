@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pandas as pd
 
@@ -135,7 +137,7 @@ def test_project_feature_store_to_schema_reorders_and_fills_missing(tmp_path) ->
     np.testing.assert_allclose(np.asarray(projected)[:, 0, 2], [1.0, 2.0])
 
 
-def test_cli_sharded_dry_run_writes_plan(tmp_path, monkeypatch) -> None:
+def test_cli_sharded_dry_run_is_archived(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("QDP_WORKSPACE_ROOT", str(tmp_path))
     (tmp_path / "brain").mkdir(parents=True)
     (tmp_path / "brain" / "brain_manifest.json").write_text('{"brain_type": "main"}', encoding="utf-8")
@@ -155,15 +157,12 @@ def test_cli_sharded_dry_run_writes_plan(tmp_path, monkeypatch) -> None:
             "symbol,exchange,industry",
             "--json",
         ]
-    ) == 0
+    ) == 2
     plan = qdp_paths(tmp_path).memmap_dir / "sharded_memmap_plan.json"
-    assert plan.exists()
-    assert read_json(plan)["workers"] == 4
-    assert read_json(plan)["year_input_cache"] is True
-    assert read_json(plan)["canonical_dataset_id"] == "policy_input_bundle__override"
-    assert read_json(plan)["pool_view_id"] == "policy_pool_view__unit"
-    assert read_json(plan)["include_static_context"] is True
-    assert read_json(plan)["static_context_fields"] == ["symbol", "exchange", "industry"]
+    assert not plan.exists()
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "archived"
+    assert payload["command"] == "build-sharded-memmap"
 
 
 def test_sharded_config_normalizes_workers() -> None:

@@ -29,7 +29,7 @@
 `definition`: 以稳定 `security_id`、PIT `symbol_history`、不可变日期 raw 分区和递归 manifest lineage 为核心的下一代数据基底。
 `primary_keys`: 日线/状态/估值/因子为 `security_id + trade_date`；5m 为 `security_id + trade_date + bar_end`；provider code 永久保留为 `provider_symbol` 而不是历史身份。
 `identity_rule`: 只有官方公告或可靠代码变更记录才能合并两个 symbol；相同 IPO 日期、相似名称或 provider 返回相同行情都不能自动合并。
-`fixed_regression`: 中航电测/中航成飞使用一个稳定 security id；历史当前代码重述必须恢复为当日真实代码。
+`fixed_regression`: 中航电测/中航成飞、深赤湾A/招商港口、中航善达/招商积余分别使用稳定 security id；历史当前代码重述必须恢复为当日真实代码。security master 中新代码继承的原上市日不能替代官方 symbol 生效区间。
 
 ### class `baostock_date_partition_protocol`
 `version`: `baostock==0.9.3`
@@ -37,6 +37,8 @@
 `events`: `query_daily_adjust_factor(date)` 只返回 `dividOperateDate == query_date` 的事件，不是全市场因子截面。
 `parser_rule`: 批量响应直接读取一次 `fields/data`，验证 `per_page_count=20000`，禁止调用普通 `next()`；达到 20,000 行、字段宽度错误、解压/CRC/消息体错误都阻断。
 `factor_aliases`: 只显式接受 `adjustFacto`、`adjustFactor`、`adjust_factor`，不按模糊位置映射。
+`runtime_rule`: 日期回灌复用一个隔离子进程中的单一 BaoStock login；同日日线与 `query_all_stock` 原子获取。`max_workers=2` 只预取两个日期，本地处理可流水化，但网络 session 和同时在途请求始终为 1。
+`rejected_route`: 不允许以历史低错误率自动开启第二个 BaoStock login；live 双 session 探针已证明登录状态会互相失效。速度来自消除逐日登录、覆盖日历复用和 O(N²) 扫描，而不是放宽质量闸门。
 
 ### class `qdp_v3_factor_event_model`
 `definition`: `adjust_factor_event` 与 `adjust_factor_daily` 分离；batch date-events 与 legacy symbol-history 首次重建必须做事件键和值的双路径全集比较。
@@ -81,6 +83,7 @@
 - PIT/meta 域的质量证明应写进 manifest：主键唯一、交易日覆盖、scope 过滤、跨域 key 对齐和显式 unknown/default 标记。
 - Scope filtering must not inherit stale nested audit blocks from source manifests; transformed datasets need fresh proof or clearly marked inherited proof.
 - provider 的当前证券代码会重述历史；任何以 symbol 直接作为长期主键的设计都不能证明历史身份正确。
+- 对有状态公共 provider，更多 login 不等于更高吞吐；先复用单 session、合并同日请求并流水化本地处理，同时用 OS job lock 防止重复进程浪费带宽和覆盖进度。
 - 因子键覆盖、正值、来源字段齐全与 daily 对齐都只是结构证明，不等价于因子语义正确。
 - 当前 active 可读不等于 lineage 完整；GC 必须递归保护 active/candidate/pin/rollback/audit 的全部 inputs，而不能只保留 active 叶子。
 
