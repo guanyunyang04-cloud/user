@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Iterable
-import os
-import sqlite3
 import tempfile
 
 import pandas as pd
@@ -18,7 +16,6 @@ from quant_data_platform.qdp_v3.constants import (
     DOMAIN_INDUSTRY,
     DOMAIN_ELIGIBLE_SIGNAL_D,
     DOMAIN_MARKET_DAILY_RAW,
-    DOMAIN_MARKET_INTRADAY_1M,
     DOMAIN_MARKET_INTRADAY_5M,
     DOMAIN_PERFORMANCE_EXPRESS,
     DOMAIN_PERFORMANCE_FORECAST,
@@ -33,13 +30,11 @@ from quant_data_platform.qdp_v3.constants import (
     QDP_V3_CONTRACT_VERSION,
     QUALITY_PROVISIONAL,
     QUALITY_QUARANTINED,
-    QUALITY_STRICT,
     RAW_ADJUST_FACTOR_EVENT,
     RAW_ADJUST_FACTOR_SYMBOL_HISTORY,
     RAW_ALL_STOCK,
     RAW_CORPORATE_ACTION_XDXR,
     RAW_DAILY_ASTOCK,
-    RAW_INTRADAY_5M_SELECTED,
     RAW_SECURITY_MASTER,
     RAW_TRADING_CALENDAR,
     RAW_TUSHARE_PROXY_ADJ_FACTOR,
@@ -65,9 +60,8 @@ from quant_data_platform.qdp_v3.corporate_actions import (
     reconstruct_xdxr_reference_prices,
 )
 from quant_data_platform.qdp_v3.datasets import dataset_input_ref, write_dataset, write_partitioned_dataset
-from quant_data_platform.qdp_v3.identity import SecurityIdentityRegistry, board_for_symbol, normalize_symbol
-from quant_data_platform.qdp_v3.intraday import canonicalize_selected_5m, is_complete_5m_day
-from quant_data_platform.qdp_v3.intraday_build import build_proxy_intraday_datasets
+from quant_data_platform.qdp_v3.identity import SecurityIdentityRegistry, normalize_symbol
+from quant_data_platform.qdp_v3.intraday_build import build_proxy_intraday_dataset
 from quant_data_platform.qdp_v3.manifest import ProviderEvidence, dataset_manifest_for_id, manifest_sha256
 from quant_data_platform.qdp_v3.paths import ensure_qdp_v3_layout
 from quant_data_platform.qdp_v3.proxy_lowfreq import (
@@ -89,7 +83,6 @@ from quant_data_platform.qdp_v3.quality import (
     QualityReport,
     audit_canonical_daily,
     audit_factor_semantics,
-    audit_intraday_5m,
     audit_table_contract,
     report_for,
 )
@@ -270,235 +263,6 @@ def _calendar_frame(workspace_root: str | Path | None, snapshot_dates: list[str]
     calendar["trade_date"] = calendar["trade_date"].astype(str).str.slice(0, 10)
     calendar = calendar.drop_duplicates(["trade_date", "exchange"], keep="last").sort_values(["trade_date", "exchange"]).reset_index(drop=True)
     return calendar, refs, findings
-
-
-def _read_selected_intraday_group(
-    refs: list[RawPartitionRef],
-    *,
-    registry: SecurityIdentityRegistry,
-    start_date: str,
-    end_date: str,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    frames: list[pd.DataFrame] = []
-    for ref in refs:
-        frame = read_raw_partition(ref)
-        if frame.empty:
-            continue
-        dates = frame["trade_date"].astype(str).str.slice(0, 10)
-        frames.append(frame.loc[dates.between(start_date, end_date)].copy())
-    raw = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-    return canonicalize_selected_5m(raw, identity_registry=registry)
-
-
-def _build_intraday_dataset(
-    *,
-    paths: Any,
-    workspace_root: str | Path | None,
-    registry: SecurityIdentityRegistry,
-    status_parts: list[tuple[str, Path]],
-    inputs: list[Any],
-    start_date: str,
-    end_date: str,
-) -> tuple[Any | None, list[RawPartitionRef], dict[str, Any]]:
-    if str(end_date) < "2020-01-01":
-        return None, [], {
-            "findings": [],
-            "coverage": {
-                "release_applicable": False,
-                "required_start_date": "2020-01-01",
-                "end_date": str(end_date),
-                "expected_stock_day_count": 0,
-                "strict_covered_stock_day_count": 0,
-                "strict_missing_stock_day_count": 0,
-                "strict_coverage_rate": 0.0,
-            },
-            "quarantine": [],
-            "quarantine_count": 0,
-            "missing_sample": [],
-        }
-    refs = iter_raw_partitions(RAW_INTRADAY_5M_SELECTED, workspace_root=workspace_root)
-    if not refs:
-        return None, [], {
-            "findings": [
-                QualityFinding(
-                    code="strict_5m_raw_missing",
-                    severity="blocker",
-                    message="No selected mootdx/BaoStock 5-minute raw partitions exist.",
-                    domain=DOMAIN_MARKET_INTRADAY_5M,
-                )
-            ],
-            "coverage": {"expected_stock_day_count": 0, "strict_covered_stock_day_count": 0, "strict_coverage_rate": 0.0},
-            "quarantine": [],
-        }
-
-    groups: dict[tuple[str, str], list[RawPartitionRef]] = {}
-    relevant_refs: list[RawPartitionRef] = []
-    for ref in refs:
-        frame = read_raw_partition(ref)
-        if frame.empty or "trade_date" not in frame.columns or "provider_symbol" not in frame.columns:
-            continue
-        dates = frame["trade_date"].astype(str).str.slice(0, 10)
-        relevant = frame.loc[dates.between(start_date, end_date), ["provider_symbol", "trade_date"]]
-        if relevant.empty:
-            continue
-        relevant_refs.append(ref)
-        for row in relevant.drop_duplicates().itertuples(index=False):
-            provider_symbol = str(row.provider_symbol)
-            security_id = registry.security_id_for_provider_symbol(provider_symbol) or f"UNMAPPED::{provider_symbol}"
-            groups.setdefault((security_id, str(row.trade_date)[:7].replace("-", "")), []).append(ref)
-    for key in list(groups):
-        groups[key] = sorted({ref.payload_path: ref for ref in groups[key]}.values(), key=lambda item: str(item.payload_path))
-
-    database_fd, database_name = tempfile.mkstemp(prefix="qdp_v3_5m_coverage_", suffix=".sqlite", dir=str(paths.jobs))
-    os.close(database_fd)
-    findings: list[QualityFinding] = []
-    quarantine_count = 0
-    quarantine_sample: list[dict[str, Any]] = []
-    strict_row_count = 0
-    provisional_row_count = 0
-    connection: sqlite3.Connection | None = None
-    try:
-        connection = sqlite3.connect(database_name)
-        connection.execute("PRAGMA journal_mode=OFF")
-        connection.execute("PRAGMA synchronous=OFF")
-        connection.execute("CREATE TABLE expected (security_id TEXT NOT NULL, trade_date TEXT NOT NULL, PRIMARY KEY (security_id, trade_date)) WITHOUT ROWID")
-        connection.execute("CREATE TABLE actual (security_id TEXT NOT NULL, trade_date TEXT NOT NULL, PRIMARY KEY (security_id, trade_date)) WITHOUT ROWID")
-        for _, status_path in status_parts:
-            expected = pd.read_parquet(status_path, engine="pyarrow")
-            expected["trade_date"] = expected["trade_date"].astype(str).str.slice(0, 10)
-            expected = expected.loc[
-                expected["trade_date"].between(max(str(start_date), "2020-01-01"), str(end_date))
-                & expected["tradestatus"].astype(str).eq("1")
-                & expected["symbol_on_date"].map(board_for_symbol).eq("MainBoard"),
-                ["security_id", "trade_date"],
-            ].drop_duplicates()
-            connection.executemany("INSERT OR IGNORE INTO expected VALUES (?, ?)", expected.itertuples(index=False, name=None))
-        connection.commit()
-
-        for (security_id, month), group_refs in sorted(groups.items()):
-            canonical, quarantined = _read_selected_intraday_group(
-                group_refs,
-                registry=registry,
-                start_date=start_date,
-                end_date=end_date,
-            )
-            if not quarantined.empty:
-                quarantine_count += int(len(quarantined))
-                if len(quarantine_sample) < 20:
-                    quarantine_sample.extend(quarantined.head(20 - len(quarantine_sample)).to_dict("records"))
-            if canonical.empty:
-                continue
-            valid_indices: list[int] = []
-            actual_keys: list[tuple[str, str]] = []
-            for (_, trade_date), day in canonical.groupby(["security_id", "trade_date"], sort=False):
-                if not is_complete_5m_day(day):
-                    quarantine_count += int(len(day))
-                    if len(quarantine_sample) < 20:
-                        quarantine_sample.append(
-                            {
-                                "security_id": security_id,
-                                "trade_date": str(trade_date),
-                                "conflict_type": "selected_intraday_day_not_complete",
-                                "bar_count": int(len(day)),
-                            }
-                        )
-                    continue
-                valid_indices.extend(day.index.tolist())
-                if day["quality_tier"].eq(QUALITY_STRICT).all() and str(trade_date) >= "2020-01-01":
-                    actual_keys.append((str(day["security_id"].iloc[0]), str(trade_date)))
-            valid = canonical.loc[valid_indices] if valid_indices else canonical.iloc[0:0]
-            strict_row_count += int(valid["quality_tier"].eq(QUALITY_STRICT).sum())
-            provisional_row_count += int(valid["quality_tier"].eq(QUALITY_PROVISIONAL).sum())
-            connection.executemany("INSERT OR IGNORE INTO actual VALUES (?, ?)", actual_keys)
-        connection.commit()
-        expected_count = int(connection.execute("SELECT COUNT(*) FROM expected").fetchone()[0])
-        covered_count = int(connection.execute("SELECT COUNT(*) FROM expected INNER JOIN actual USING (security_id, trade_date)").fetchone()[0])
-        missing_count = expected_count - covered_count
-        missing_sample = [
-            {"security_id": row[0], "trade_date": row[1], "reason": "strict_5m_missing_or_quarantined"}
-            for row in connection.execute(
-                "SELECT expected.security_id, expected.trade_date FROM expected LEFT JOIN actual USING (security_id, trade_date) WHERE actual.security_id IS NULL ORDER BY expected.trade_date, expected.security_id LIMIT 20"
-            ).fetchall()
-        ]
-        coverage_rate = float(covered_count / expected_count) if expected_count else 0.0
-        if expected_count == 0:
-            findings.append(QualityFinding(code="strict_5m_expected_universe_empty", severity="blocker", message="No tradable PIT main-board stock-days were available for 5m coverage proof.", domain=DOMAIN_MARKET_INTRADAY_5M))
-        elif coverage_rate < 0.9995:
-            findings.append(
-                QualityFinding(
-                    code="strict_5m_coverage_below_99_95_percent",
-                    severity="blocker",
-                    message="Strict 5m coverage is below the 99.95% release floor.",
-                    domain=DOMAIN_MARKET_INTRADAY_5M,
-                    count=missing_count,
-                    sample=missing_sample,
-                )
-            )
-        if quarantine_count:
-            findings.append(
-                QualityFinding(
-                    code="intraday_rows_quarantined",
-                    severity="warning",
-                    message="Unmapped, conflicting, or incomplete 5m rows were excluded from strict visibility.",
-                    domain=DOMAIN_MARKET_INTRADAY_5M,
-                    count=quarantine_count,
-                    sample=quarantine_sample,
-                )
-            )
-        coverage = {
-            "required_start_date": max(str(start_date), "2020-01-01"),
-            "end_date": str(end_date),
-            "expected_stock_day_count": expected_count,
-            "strict_covered_stock_day_count": covered_count,
-            "strict_missing_stock_day_count": missing_count,
-            "strict_coverage_rate": coverage_rate,
-            "strict_row_count": strict_row_count,
-            "provisional_row_count": provisional_row_count,
-        }
-    finally:
-        try:
-            if connection is not None:
-                connection.close()
-        except Exception:
-            pass
-        Path(database_name).unlink(missing_ok=True)
-
-    report = report_for(DOMAIN_MARKET_INTRADAY_5M, findings, metrics=coverage)
-
-    def partition_frames() -> Iterable[tuple[str, str, pd.DataFrame]]:
-        yielded = False
-        for (security_id, month), group_refs in sorted(groups.items()):
-            canonical, _ = _read_selected_intraday_group(group_refs, registry=registry, start_date=start_date, end_date=end_date)
-            if canonical.empty:
-                continue
-            valid_days = [day for _, day in canonical.groupby(["security_id", "trade_date"], sort=False) if is_complete_5m_day(day)]
-            valid = pd.concat(valid_days, ignore_index=True) if valid_days else canonical.iloc[0:0]
-            if valid.empty:
-                continue
-            yielded = True
-            yield f"{security_id}_{month}", month, valid
-        if not yielded:
-            empty = canonicalize_selected_5m(pd.DataFrame(), identity_registry=registry)[0]
-            yield "empty", "", empty
-
-    manifest = write_partitioned_dataset(
-        root=paths.root,
-        domain=DOMAIN_MARKET_INTRADAY_5M,
-        partition_frames=partition_frames(),
-        layer="canonical_tiered",
-        frequency="5m",
-        primary_key=["security_id", "trade_date", "bar_end"],
-        quality_report=report,
-        partitioning="natural_month",
-        inputs=inputs,
-        provider_evidence=_provider_evidence(relevant_refs),
-        raw_content_hashes=[ref.content_sha256 for ref in relevant_refs],
-        build={"contract": QDP_V3_CONTRACT_VERSION, "source_policy": "complete_mootdx_else_complete_baostock_never_stitch", "default_visibility": QUALITY_STRICT},
-        coverage=coverage,
-        units={"price": "CNY/share", "volume": "share", "amount": "CNY"},
-        quarantine=[{"row_count": quarantine_count, "sample": quarantine_sample}, {"stock_day_count": coverage["strict_missing_stock_day_count"], "sample": missing_sample}],
-    )
-    return manifest, relevant_refs, {"findings": findings, "coverage": coverage, "quarantine": quarantine_sample, "quarantine_count": quarantine_count, "missing_sample": missing_sample}
 
 
 def _stage_daily_domains(
@@ -1897,7 +1661,7 @@ def build_candidate(
         partitioning="natural_year",
     )
 
-    proxy_1m_manifest, proxy_5m_manifest, proxy_intraday_refs, proxy_intraday_info = build_proxy_intraday_datasets(
+    proxy_5m_manifest, proxy_intraday_refs, proxy_intraday_info = build_proxy_intraday_dataset(
         paths=paths,
         workspace_root=workspace_root,
         registry=registry,
@@ -1908,31 +1672,26 @@ def build_candidate(
         end_date=effective_end,
         staging_root=staging_root,
     )
-    if proxy_1m_manifest is not None:
+    if proxy_5m_manifest is not None:
         intraday_manifest = proxy_5m_manifest
         intraday_refs = proxy_intraday_refs
         intraday_info = {
             "findings": list(proxy_intraday_info.get("findings", []) or []),
-            "coverage": dict(proxy_intraday_info.get("coverage_5m", {}) or {}),
+            "coverage": dict(proxy_intraday_info.get("coverage", {}) or {}),
             "quarantine": list(proxy_intraday_info.get("quarantine", []) or []),
             "quarantine_count": int(proxy_intraday_info.get("quarantine_count", 0) or 0),
             "missing_sample": list(proxy_intraday_info.get("missing_sample", []) or []),
         }
     else:
-        intraday_manifest, legacy_intraday_refs, intraday_info = _build_intraday_dataset(
-            paths=paths,
-            workspace_root=workspace_root,
-            registry=registry,
-            status_parts=status_parts,
-            inputs=[identity_input, history_input, market_input, status_input],
-            start_date=max(str(start_date), "2011-11-22"),
-            end_date=effective_end,
-        )
-        intraday_refs = [*proxy_intraday_refs, *legacy_intraday_refs]
-        intraday_info["findings"] = [
-            *list(proxy_intraday_info.get("findings", []) or []),
-            *list(intraday_info.get("findings", []) or []),
-        ]
+        intraday_manifest = None
+        intraday_refs = proxy_intraday_refs
+        intraday_info = {
+            "findings": list(proxy_intraday_info.get("findings", []) or []),
+            "coverage": dict(proxy_intraday_info.get("coverage", {}) or {}),
+            "quarantine": list(proxy_intraday_info.get("quarantine", []) or []),
+            "quarantine_count": int(proxy_intraday_info.get("quarantine_count", 0) or 0),
+            "missing_sample": list(proxy_intraday_info.get("missing_sample", []) or []),
+        }
 
     manifests = [
         calendar_manifest,
@@ -1952,8 +1711,6 @@ def build_candidate(
     manifests.extend(secondary_manifests)
     if intraday_manifest is not None:
         manifests.append(intraday_manifest)
-    if proxy_1m_manifest is not None:
-        manifests.append(proxy_1m_manifest)
     dataset_ids = {manifest.domain: manifest.dataset_id for manifest in manifests}
     dataset_shas: dict[str, str] = {}
     for manifest in manifests:
@@ -1983,7 +1740,7 @@ def build_candidate(
         blockers.append({"code": "daily_coverage_starts_after_required_open_date", "required": required_first_open, "actual": first_snapshot})
     if max(snapshot_dates) < required_last_open:
         blockers.append({"code": "daily_coverage_ends_before_required_open_date", "required": required_last_open, "actual": max(snapshot_dates)})
-    if proxy_1m_manifest is None:
+    if proxy_5m_manifest is None:
         blockers.extend(
             item.to_dict()
             for item in proxy_intraday_info.get("findings", [])
@@ -2095,15 +1852,6 @@ def build_candidate(
                 "sample": list(intraday_info.get("quarantine", []) or [])[:10] + list(intraday_info.get("missing_sample", []) or [])[:10],
             }
         )
-    if proxy_intraday_info.get("quarantine_count") or proxy_intraday_info.get("coverage_1m", {}).get("strict_missing_stock_day_count"):
-        quarantine_summary.append(
-            {
-                "domain": DOMAIN_MARKET_INTRADAY_1M,
-                "row_count": int(proxy_intraday_info.get("quarantine_count", 0) or 0),
-                "missing_stock_day_count": int(proxy_intraday_info.get("coverage_1m", {}).get("strict_missing_stock_day_count", 0) or 0),
-                "sample": list(proxy_intraday_info.get("quarantine", []) or [])[:10] + list(proxy_intraday_info.get("missing_sample", []) or [])[:10],
-            }
-        )
     build_contract = {
         "contract": QDP_V3_CONTRACT_VERSION,
         "start_date": str(start_date),
@@ -2112,29 +1860,9 @@ def build_candidate(
         "strict_research_view": "shanghai_shenzhen_mainboard",
         "factor_dual_path_required": bool(require_factor_dual_path),
     }
-    intraday_1m_watermark = str(dict(proxy_intraday_info.get("coverage_1m", {}) or {}).get("watermark", "") or "")
-    intraday_1m_lag = len(
-        [date for date in expected_open_dates if intraday_1m_watermark < date <= max(snapshot_dates)]
-    ) if intraday_1m_watermark else len([date for date in expected_open_dates if date <= max(snapshot_dates)])
-    bootstrap_cutoff_payload = read_json(paths.metadata / "tushare_proxy_bootstrap_cutoff.json")
-    bootstrap_cutoff = str(bootstrap_cutoff_payload.get("bootstrap_cutoff", "") or "")[:10]
-    required_bootstrap_watermark = min(bootstrap_cutoff, max(snapshot_dates)) if bootstrap_cutoff else ""
-    if required_bootstrap_watermark and intraday_1m_watermark < required_bootstrap_watermark:
-        blockers.append(
-            {
-                "code": "bootstrap_intraday_1m_not_complete_to_locked_cutoff",
-                "required_watermark": required_bootstrap_watermark,
-                "actual_watermark": intraday_1m_watermark,
-            }
-        )
-    if intraday_1m_lag > 10:
-        blockers.append(
-            {
-                "code": "market_intraday_1m_lag_exceeds_10_trading_days",
-                "lag_trading_days": intraday_1m_lag,
-                "watermark": intraday_1m_watermark,
-            }
-        )
+    intraday_5m_watermark = str(
+        dict(intraday_info.get("coverage", {}) or {}).get("watermark", "") or ""
+    )
     candidate = write_candidate(
         datasets=dataset_ids,
         dataset_manifest_sha256=dataset_shas,
@@ -2148,12 +1876,9 @@ def build_candidate(
             "missing_snapshot_date_count": len(missing_snapshot_dates),
             "raw_security_count": len(set(staged_daily["security_ids"]) - {""}),
             "research_view": "mainboard_hs_pit",
-            "intraday_1m": dict(proxy_intraday_info.get("coverage_1m", {}) or {}),
             "intraday_5m": dict(intraday_info.get("coverage", {}) or {}),
             "market_daily_watermark": max(snapshot_dates),
-            "market_intraday_1m_watermark": intraday_1m_watermark,
-            "market_intraday_1m_lag_trading_days": intraday_1m_lag,
-            "market_intraday_5m_watermark": str(dict(intraday_info.get("coverage", {}) or {}).get("watermark", max(snapshot_dates) if intraday_manifest is not None else "") or ""),
+            "market_intraday_5m_watermark": intraday_5m_watermark,
         },
         build=build_contract,
         raw_partitions=[ref.to_dict(root=paths.root) for ref in raw_refs],

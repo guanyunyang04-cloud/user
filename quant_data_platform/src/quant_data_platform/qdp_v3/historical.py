@@ -13,7 +13,7 @@ from typing import Any, Callable, Iterable, Mapping
 import pandas as pd
 
 from quant_data_platform.core.json_io import read_json
-from quant_data_platform.domains.contracts import DataDomain, HistoryPageFetchRequest
+from quant_data_platform.domains.contracts import HistoryPageFetchRequest
 from quant_data_platform.qdp_v3.constants import (
     QUALITY_PROVISIONAL,
     QUALITY_QUARANTINED,
@@ -22,7 +22,6 @@ from quant_data_platform.qdp_v3.constants import (
     RAW_TUSHARE_PROXY_DAILY_BASIC,
     RAW_TUSHARE_PROXY_DIVIDEND,
     RAW_TUSHARE_PROXY_FINANCIAL,
-    RAW_TUSHARE_PROXY_INTRADAY_1M,
     RAW_TUSHARE_PROXY_INTRADAY_5M,
     RAW_TUSHARE_PROXY_NAMECHANGE,
     RAW_TUSHARE_PROXY_STK_LIMIT,
@@ -31,7 +30,7 @@ from quant_data_platform.qdp_v3.constants import (
     RAW_TUSHARE_PROXY_TRADE_CALENDAR,
 )
 from quant_data_platform.qdp_v3.manifest import atomic_write_json, sha256_file, stable_hash, utc_now
-from quant_data_platform.qdp_v3.identity import board_for_symbol, normalize_symbol
+from quant_data_platform.qdp_v3.identity import SecurityIdentityRegistry, board_for_symbol, normalize_symbol
 from quant_data_platform.qdp_v3.paths import ensure_qdp_v3_layout, qdp_v3_paths
 from quant_data_platform.qdp_v3.storage import (
     RawPartitionRef,
@@ -55,10 +54,19 @@ from quant_data_platform.tushare_proxy import (
 
 GIB = 1024**3
 MIN_FREE_SPACE_BYTES = 200 * GIB
-MAX_HISTORY_WORKERS = 4
+MAX_HISTORY_WORKERS = 3
 PROTOCOL_CIRCUIT_THRESHOLD = 5
 ERROR_WINDOW_SIZE = 200
 ERROR_RATE_WORKER_REDUCTION = 0.02
+PRODUCTION_GATE_MIN_REQUESTS = 1_000
+PRODUCTION_GATE_MAX_ERROR_RATE = 0.005
+
+
+def _proxy_performance_gate_failed(metrics: Mapping[str, Any]) -> bool:
+    return (
+        int(metrics.get("request_count", 0) or 0) >= PRODUCTION_GATE_MIN_REQUESTS
+        and float(metrics.get("error_rate", 0.0) or 0.0) > PRODUCTION_GATE_MAX_ERROR_RATE
+    )
 
 
 @dataclass(frozen=True)
@@ -621,6 +629,7 @@ def ingest_tushare_proxy_reference(
 
     effective_workers = 1 if normalized_domain == "stock-basic" else max(1, min(int(max_workers), MAX_HISTORY_WORKERS))
     completed_since_checkpoint = 0
+    performance_gate_failed = False
     with ThreadPoolExecutor(max_workers=effective_workers) as executor:
         pending_iter = iter(pending)
         futures: dict[Future[tuple[str, RawPartitionRef | None, BaseException | None]], str] = {}
@@ -658,7 +667,7 @@ def ingest_tushare_proxy_reference(
                         state.error = str(redact_secrets(error, secrets=(source.config.token,)))
                         if isinstance(error, TushareProxyProtocolError):
                             job.protocol_error_streak += 1
-                    job.metrics = source.metrics.snapshot()
+                    job.metrics = source.operational_metrics()
                     # Raw partitions are themselves immutable checkpoints.  A
                     # coarse job checkpoint avoids O(task_count^2) JSON I/O;
                     # after a crash, completed-but-uncheckpointed tasks are
@@ -667,6 +676,10 @@ def ingest_tushare_proxy_reference(
                         _save_historical_job(job, workspace_root=workspace_root)
                         completed_since_checkpoint = 0
                     if job.protocol_error_streak >= PROTOCOL_CIRCUIT_THRESHOLD:
+                        stop = True
+                        break
+                    if _proxy_performance_gate_failed(job.metrics):
+                        performance_gate_failed = True
                         stop = True
                         break
             if stop:
@@ -683,11 +696,13 @@ def ingest_tushare_proxy_reference(
         for isinstance_text in ("quota", "entitlement", "过期", "额度")
     ):
         job.status = "paused_quota"
+    elif performance_gate_failed:
+        job.status = "paused_rate_limit_quality_gate"
     elif job.protocol_error_streak >= PROTOCOL_CIRCUIT_THRESHOLD:
         job.status = "circuit_open_protocol"
     else:
         job.status = "partial"
-    job.metrics = source.metrics.snapshot()
+    job.metrics = source.operational_metrics()
     _save_historical_job(job, workspace_root=workspace_root)
     return {
         "status": job.status,
@@ -700,19 +715,6 @@ def ingest_tushare_proxy_reference(
         "metrics": job.metrics,
         "job_path": str(_historical_job_path(job.job_id, workspace_root=workspace_root).resolve()),
     }
-
-
-def _intraday_raw_domain(frequency: str) -> str:
-    normalized = str(frequency).strip().lower()
-    if normalized == "1m":
-        return RAW_TUSHARE_PROXY_INTRADAY_1M
-    if normalized == "5m":
-        return RAW_TUSHARE_PROXY_INTRADAY_5M
-    raise ValueError(f"unsupported_intraday_frequency:{frequency}")
-
-
-def _intraday_data_domain(frequency: str) -> str:
-    return DataDomain.MARKET_INTRADAY_1M if frequency == "1m" else DataDomain.MARKET_INTRADAY_5M
 
 
 def _timestamp_column(frame: pd.DataFrame) -> str:
@@ -846,6 +848,47 @@ def _combine_intraday_staging(
     return combined, receipts
 
 
+def _merge_intraday_range_frames(
+    prior: pd.DataFrame,
+    current: pd.DataFrame,
+    *,
+    symbol: str,
+) -> tuple[pd.DataFrame, str]:
+    """Merge adjacent immutable captures without inventing an empty timestamp schema."""
+
+    left = prior.copy()
+    right = current.copy()
+    timestamp_column = _timestamp_column(right) or _timestamp_column(left)
+    if not timestamp_column:
+        if left.empty and right.empty:
+            return pd.concat([left, right], ignore_index=True, sort=False), ""
+        raise RuntimeError(f"intraday_range_merge_timestamp_missing:{symbol}")
+    for frame in (left, right):
+        frame_timestamp_column = _timestamp_column(frame)
+        if frame_timestamp_column and frame_timestamp_column != timestamp_column:
+            frame.rename(columns={frame_timestamp_column: timestamp_column}, inplace=True)
+    merged = pd.concat([left, right], ignore_index=True, sort=False)
+    if merged.empty:
+        return merged, timestamp_column
+    timestamps = pd.to_datetime(merged[timestamp_column], errors="coerce")
+    if timestamps.isna().any():
+        raise RuntimeError(f"intraday_range_merge_timestamp_invalid:{symbol}")
+    duplicate = timestamps.duplicated(keep=False)
+    if duplicate.any():
+        compare_columns = [column for column in merged.columns if column != "provider_symbol"]
+        duplicate_rows = merged.loc[duplicate].assign(_timestamp=timestamps.loc[duplicate])
+        for _, group in duplicate_rows.groupby("_timestamp", sort=False):
+            values = group.drop(columns=["_timestamp"])[compare_columns]
+            if len(values.astype("string").fillna("<NULL>").drop_duplicates()) != 1:
+                raise RuntimeError(f"intraday_range_merge_value_conflict:{symbol}")
+        merged = (
+            merged.assign(_timestamp=timestamps)
+            .drop_duplicates("_timestamp", keep="last")
+            .drop(columns=["_timestamp"])
+        )
+    return merged, timestamp_column
+
+
 def _lifecycle_overlaps(
     symbol: str,
     *,
@@ -874,15 +917,64 @@ def _task_time_range(
     return f"{effective_start} 00:00:00", f"{effective_end} 23:59:59"
 
 
+def _official_restatement_aliases(
+    symbols: Iterable[str],
+    *,
+    workspace_root: str | Path | None,
+) -> dict[str, tuple[str, ...]]:
+    normalized = sorted({normalize_symbol(item) for item in symbols if normalize_symbol(item)})
+    registry = SecurityIdentityRegistry.from_sources(
+        provider_symbols=normalized,
+        workspace_root=workspace_root,
+    )
+    available = set(normalized)
+    aliases: dict[str, tuple[str, ...]] = {}
+    for _, group in registry.symbol_history.groupby("security_id", sort=False):
+        group_symbols = sorted(set(group["symbol"].astype(str)) & available)
+        if len(group_symbols) < 2:
+            continue
+        for symbol in group_symbols:
+            aliases[symbol] = tuple(item for item in group_symbols if item != symbol)
+    return aliases
+
+
+def _prove_provider_symbol_restatement(
+    *,
+    client: TushareProxyClient,
+    provider_symbol: str,
+    aliases: Iterable[str],
+    start_at: str,
+    end_at: str,
+) -> dict[str, Any]:
+    for alias in aliases:
+        result = client.fetch_history_page(
+            HistoryPageFetchRequest(
+                provider_symbol=alias,
+                start_at=start_at,
+                end_at=end_at,
+                page_size=1,
+            )
+        )
+        if result.row_count > 0:
+            return {
+                "reason": "provider_current_code_restatement",
+                "empty_provider_symbol": provider_symbol,
+                "history_provider_symbol": alias,
+                "evidence_response_sha256": result.response_sha256,
+                "evidence_timestamp": result.max_timestamp,
+            }
+    return {}
+
+
 def _run_intraday_symbol(
     *,
     symbol: str,
-    frequency: str,
     client: TushareProxyClient,
     job: HistoricalJobState,
     job_guard: threading.RLock,
     workspace_root: str | Path | None,
     lifecycle_ranges: Mapping[str, tuple[str, str]] | None,
+    restatement_aliases: Mapping[str, tuple[str, ...]],
     minimum_free_bytes: int,
 ) -> tuple[str, str]:
     state = job.tasks[symbol]
@@ -892,13 +984,13 @@ def _run_intraday_symbol(
         end_date=job.end_date,
         lifecycle_ranges=lifecycle_ranges,
     )
-    task_root = _staging_root(job.job_id, workspace_root=workspace_root) / _safe_task_component(f"{symbol}__{frequency}")
+    task_root = _staging_root(job.job_id, workspace_root=workspace_root) / _safe_task_component(symbol)
     _hydrate_intraday_task_state(task_root, state)
-    raw_domain = _intraday_raw_domain(frequency)
+    raw_domain = RAW_TUSHARE_PROXY_INTRADAY_5M
     existing = get_raw_partition(
         raw_domain,
-        partition_field="provider_symbol_frequency",
-        partition_value=f"{symbol}__{frequency}",
+        partition_field="provider_symbol",
+        partition_value=symbol,
         workspace_root=workspace_root,
     )
     existing_receipt = read_raw_receipt(existing) if existing is not None else {}
@@ -922,7 +1014,7 @@ def _run_intraday_symbol(
         receipts = _validate_staged_pages(task_root, expected_page_count=state.page_count)
         expected_cursor = str(receipts[-1].get("next_end_at", "") or "")
         if str(state.cursor_end_at or "") != expected_cursor:
-            raise RuntimeError(f"historical_cursor_staging_mismatch:{symbol}:{frequency}")
+            raise RuntimeError(f"historical_cursor_staging_mismatch:{symbol}")
     cursor_end_at = str(state.cursor_end_at or end_at)
     previous_min = ""
     if state.page_count:
@@ -942,16 +1034,14 @@ def _run_intraday_symbol(
                 _save_intraday_task_state(task_root, state)
             return symbol, "paused_disk"
         request = HistoryPageFetchRequest(
-            domain=_intraday_data_domain(frequency),
             provider_symbol=symbol,
-            frequency=frequency,
             start_at=start_at,
             end_at=cursor_end_at,
             page_size=TUSHARE_PROXY_HISTORY_PAGE_SIZE,
         )
         result = client.fetch_history_page(request)
         if previous_min and result.max_timestamp and pd.Timestamp(result.max_timestamp) >= pd.Timestamp(previous_min):
-            raise TushareProxyProtocolError(f"history_page_cross_page_overlap:{symbol}:{frequency}")
+            raise TushareProxyProtocolError(f"history_page_cross_page_overlap:{symbol}")
         page_number = state.page_count + 1
         _write_staged_page(task_root=task_root, page_number=page_number, result=result)
         with job_guard:
@@ -962,15 +1052,15 @@ def _run_intraday_symbol(
             state.error_code = ""
             state.error = ""
             state.updated_at = utc_now()
-            job.metrics = client.metrics.snapshot()
+            job.metrics = client.operational_metrics()
             _save_intraday_task_state(task_root, state)
         previous_min = str(result.min_timestamp or previous_min)
         if result.is_complete:
             break
         if not result.next_end_at:
-            raise TushareProxyProtocolError(f"history_page_missing_next_cursor:{symbol}:{frequency}")
+            raise TushareProxyProtocolError(f"history_page_missing_next_cursor:{symbol}")
         if pd.Timestamp(result.next_end_at) >= pd.Timestamp(cursor_end_at):
-            raise TushareProxyProtocolError(f"history_page_cursor_not_decreasing:{symbol}:{frequency}")
+            raise TushareProxyProtocolError(f"history_page_cursor_not_decreasing:{symbol}")
         cursor_end_at = result.next_end_at
     combined, receipts = _combine_intraday_staging(
         task_root=task_root,
@@ -978,8 +1068,17 @@ def _run_intraday_symbol(
         start_at=start_at,
         end_at=end_at,
     )
+    legitimate_empty_evidence: dict[str, Any] = {}
     if combined.empty:
-        raise RuntimeError(f"intraday_empty_despite_lifecycle_overlap:{symbol}:{frequency}")
+        legitimate_empty_evidence = _prove_provider_symbol_restatement(
+            client=client,
+            provider_symbol=symbol,
+            aliases=restatement_aliases.get(symbol, ()),
+            start_at=start_at,
+            end_at=end_at,
+        )
+        if not legitimate_empty_evidence:
+            raise RuntimeError(f"intraday_empty_despite_lifecycle_overlap:{symbol}")
     timestamp_column = _timestamp_column(combined)
     combined = combined.copy()
     if "provider_symbol" not in combined.columns:
@@ -989,35 +1088,28 @@ def _run_intraday_symbol(
     merged_from_content_sha256 = ""
     if existing is not None and not existing_covers_request:
         prior = read_raw_partition(existing)
-        prior_timestamp_column = _timestamp_column(prior)
-        if not prior.empty and prior_timestamp_column != timestamp_column:
-            prior = prior.rename(columns={prior_timestamp_column: timestamp_column})
-        merged = pd.concat([prior, combined], ignore_index=True, sort=False)
-        timestamps = pd.to_datetime(merged[timestamp_column], errors="coerce")
-        if timestamps.isna().any():
-            raise RuntimeError(f"intraday_range_merge_timestamp_invalid:{symbol}:{frequency}")
-        duplicate = timestamps.duplicated(keep=False)
-        if duplicate.any():
-            compare_columns = [column for column in merged.columns if column != "provider_symbol"]
-            for _, group in merged.loc[duplicate].assign(_timestamp=timestamps.loc[duplicate]).groupby("_timestamp", sort=False):
-                if len(group.drop(columns=["_timestamp"])[compare_columns].astype("string").fillna("<NULL>").drop_duplicates()) != 1:
-                    raise RuntimeError(f"intraday_range_merge_value_conflict:{symbol}:{frequency}")
-            merged = merged.assign(_timestamp=timestamps).drop_duplicates("_timestamp", keep="last").drop(columns=["_timestamp"])
-        combined = merged
+        combined, timestamp_column = _merge_intraday_range_frames(
+            prior,
+            combined,
+            symbol=symbol,
+        )
         overall_start_at = min(filter(None, (existing_start, start_at)), default=start_at)
         overall_end_at = max(filter(None, (existing_end, end_at)), default=end_at)
         merged_from_content_sha256 = existing.content_sha256
-    combined = combined.sort_values(timestamp_column, ascending=False).reset_index(drop=True)
+    if timestamp_column and not combined.empty:
+        combined = combined.sort_values(timestamp_column, ascending=False).reset_index(drop=True)
+    else:
+        combined = combined.reset_index(drop=True)
     ref, _ = write_raw_partition(
         raw_domain=raw_domain,
-        partition_field="provider_symbol_frequency",
-        partition_value=f"{symbol}__{frequency}",
+        partition_field="provider_symbol",
+        partition_value=symbol,
         frame=combined,
         receipt={
             **client.config.public_metadata(),
             "endpoint": "stk_mins",
             "provider_symbol": symbol,
-            "frequency": frequency,
+            "frequency": "5m",
             "start_at": overall_start_at,
             "end_at": overall_end_at,
             "captured_range": {"start_at": start_at, "end_at": end_at},
@@ -1036,7 +1128,9 @@ def _run_intraday_symbol(
                 for item in receipts
             ],
             "quality_tier": QUALITY_PROVISIONAL,
-            "quality_note": "raw_complete_symbol_history_pending_daily_identity_and_1m_5m_semantic_gates",
+            "quality_note": "raw_complete_symbol_history_pending_daily_identity_and_5m_semantic_gates",
+            "legitimate_empty": bool(legitimate_empty_evidence),
+            "legitimate_empty_evidence": legitimate_empty_evidence,
         },
         workspace_root=workspace_root,
     )
@@ -1049,7 +1143,7 @@ def _run_intraday_symbol(
         state.error = ""
         state.updated_at = utc_now()
         job.protocol_error_streak = 0
-        job.metrics = client.metrics.snapshot()
+        job.metrics = client.operational_metrics()
     shutil.rmtree(task_root, ignore_errors=True)
     return symbol, "completed"
 
@@ -1057,7 +1151,6 @@ def _run_intraday_symbol(
 def ingest_tushare_proxy_intraday(
     *,
     symbols: Iterable[str],
-    frequency: str,
     start_date: str,
     end_date: str,
     workspace_root: str | Path | None = None,
@@ -1069,8 +1162,6 @@ def ingest_tushare_proxy_intraday(
     minimum_free_bytes: int = MIN_FREE_SPACE_BYTES,
 ) -> dict[str, Any]:
     ensure_qdp_v3_layout(workspace_root)
-    normalized_frequency = str(frequency or "").strip().lower()
-    _intraday_raw_domain(normalized_frequency)
     normalized_symbols = sorted(
         {
             str(item).strip().upper()
@@ -1089,14 +1180,14 @@ def ingest_tushare_proxy_intraday(
     source = client or TushareProxyClient()
     resolved_job_id = str(
         job_id
-        or f"tushare_proxy__intraday_{normalized_frequency}__{stable_hash({'start': start_date, 'end': end_date, 'symbols': normalized_symbols}, length=20)}"
+        or f"tushare_proxy__intraday_5m__{stable_hash({'start': start_date, 'end': end_date, 'symbols': normalized_symbols}, length=20)}"
     )
     job = _load_or_create_historical_job(
         job_id=resolved_job_id,
         domain="intraday",
         start_date=str(start_date),
         end_date=str(end_date),
-        frequency=normalized_frequency,
+        frequency="5m",
         task_ids=normalized_symbols,
         provider_metadata=source.config.public_metadata(),
         workspace_root=workspace_root,
@@ -1111,6 +1202,10 @@ def ingest_tushare_proxy_intraday(
     job.status = "running"
     _save_historical_job(job, workspace_root=workspace_root)
     pending = [item for item in job.task_ids if job.tasks[item].status != "completed"]
+    restatement_aliases = _official_restatement_aliases(
+        normalized_symbols,
+        workspace_root=workspace_root,
+    )
     job_guard = threading.RLock()
     current_worker_limit = max(1, min(int(max_workers), MAX_HISTORY_WORKERS))
     next_index = 0
@@ -1126,12 +1221,12 @@ def ingest_tushare_proxy_intraday(
             future = executor.submit(
                 _run_intraday_symbol,
                 symbol=symbol,
-                frequency=normalized_frequency,
                 client=source,
                 job=job,
                 job_guard=job_guard,
                 workspace_root=workspace_root,
                 lifecycle_ranges=lifecycle_ranges,
+                restatement_aliases=restatement_aliases,
                 minimum_free_bytes=int(minimum_free_bytes),
             )
             live[future] = symbol
@@ -1179,8 +1274,10 @@ def ingest_tushare_proxy_intraday(
                 finally:
                     source.close_thread_session()
                     with job_guard:
-                        job.metrics = source.metrics.snapshot()
+                        job.metrics = source.operational_metrics()
                         _save_historical_job(job, workspace_root=workspace_root)
+            if _proxy_performance_gate_failed(source.operational_metrics()):
+                stop_reason = "paused_rate_limit_quality_gate"
             recent_outcomes = recent_outcomes[-ERROR_WINDOW_SIZE:]
             if len(recent_outcomes) >= ERROR_WINDOW_SIZE:
                 error_rate = 1.0 - (sum(recent_outcomes) / len(recent_outcomes))
@@ -1200,13 +1297,13 @@ def ingest_tushare_proxy_intraday(
         job.status = "partial"
     else:
         job.status = "pending"
-    job.metrics = source.metrics.snapshot()
+    job.metrics = source.operational_metrics()
     _save_historical_job(job, workspace_root=workspace_root)
     return {
         "status": job.status,
         "run_id": job.job_id,
         "domain": "intraday",
-        "frequency": normalized_frequency,
+        "frequency": "5m",
         "start_date": str(start_date),
         "bootstrap_cutoff": str(end_date),
         "task_count": len(job.tasks),
@@ -1217,66 +1314,4 @@ def ingest_tushare_proxy_intraday(
         "worker_limit_final": int(current_worker_limit),
         "minimum_free_bytes": int(minimum_free_bytes),
         "job_path": str(_historical_job_path(job.job_id, workspace_root=workspace_root).resolve()),
-    }
-
-
-def ingest_tushare_proxy_intraday_pair(
-    *,
-    symbols: Iterable[str],
-    start_date: str,
-    end_date: str,
-    workspace_root: str | Path | None = None,
-    lifecycle_ranges: Mapping[str, tuple[str, str]] | None = None,
-    resume: bool = True,
-    run_label: str = "",
-    minimum_free_bytes: int = MIN_FREE_SPACE_BYTES,
-) -> dict[str, Any]:
-    """Run 1m/5m capture together with an approximately 5:1 request bias."""
-
-    shared_client = TushareProxyClient()
-    normalized_symbols = tuple(sorted({str(item).strip().upper() for item in symbols if str(item).strip()}))
-    label = str(run_label or stable_hash({"start": start_date, "end": end_date}, length=12))
-
-    def run(frequency: str, workers: int) -> dict[str, Any]:
-        return ingest_tushare_proxy_intraday(
-            symbols=normalized_symbols,
-            frequency=frequency,
-            start_date=start_date,
-            end_date=end_date,
-            workspace_root=workspace_root,
-            client=shared_client,
-            lifecycle_ranges=lifecycle_ranges,
-            resume=resume,
-            job_id=f"tushare_proxy__intraday_{frequency}__{label}",
-            max_workers=workers,
-            minimum_free_bytes=minimum_free_bytes,
-        )
-
-    # Four 1m workers and one 5m worker share a three-request semaphore and
-    # one token bucket. This produces the requested ~83/17 allocation without
-    # ever exceeding the account's actual concurrency contract.
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        one_future = executor.submit(run, "1m", 4)
-        five_future = executor.submit(run, "5m", 1)
-        one = one_future.result()
-        five = five_future.result()
-    statuses = {str(one.get("status", "")), str(five.get("status", ""))}
-    if statuses == {"completed"}:
-        status = "completed"
-    elif "paused_quota" in statuses:
-        status = "paused_quota"
-    elif "paused_disk" in statuses:
-        status = "paused_disk"
-    elif "circuit_open_protocol" in statuses:
-        status = "circuit_open_protocol"
-    else:
-        status = "partial"
-    return {
-        "status": status,
-        "start_date": str(start_date),
-        "end_date": str(end_date),
-        "allocation_policy": "four_1m_workers_one_5m_worker_shared_135rpm_limiter",
-        "one_minute": one,
-        "five_minute": five,
-        "metrics": shared_client.metrics.snapshot(),
     }

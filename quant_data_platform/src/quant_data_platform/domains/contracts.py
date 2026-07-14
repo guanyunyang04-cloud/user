@@ -532,7 +532,7 @@ class DatePartitionFetchRequest:
 
 @dataclass(frozen=True)
 class HistoryPageFetchRequest:
-    """Request one reverse-chronological page from a history endpoint.
+    """Request one reverse-chronological 5-minute history page.
 
     This contract is intentionally separate from both symbol/range and
     date-partition requests.  Providers that cap a response at ``page_size``
@@ -540,28 +540,12 @@ class HistoryPageFetchRequest:
     page as end-of-history.
     """
 
-    domain: str
     provider_symbol: str
-    frequency: str
     start_at: str
     end_at: str
     page_size: int = 8_000
 
     def normalized(self) -> "HistoryPageFetchRequest":
-        domain = normalize_domain(self.domain)
-        if domain not in {DataDomain.MARKET_INTRADAY_1M, DataDomain.MARKET_INTRADAY_5M}:
-            raise ValueError(f"history_page_domain_not_intraday:{domain}")
-        frequency = str(self.frequency or "").strip().lower()
-        aliases = {"1min": "1m", "1minute": "1m", "5min": "5m", "5minute": "5m"}
-        frequency = aliases.get(frequency, frequency)
-        expected_domain = {
-            "1m": DataDomain.MARKET_INTRADAY_1M,
-            "5m": DataDomain.MARKET_INTRADAY_5M,
-        }.get(frequency)
-        if expected_domain is None:
-            raise ValueError(f"history_page_frequency_unsupported:{self.frequency}")
-        if domain != expected_domain:
-            raise ValueError(f"history_page_domain_frequency_mismatch:{domain}:{frequency}")
         symbol = _normalize_symbol(self.provider_symbol)
         start_at = _normalize_timestamp(self.start_at)
         end_at = _normalize_timestamp(self.end_at)
@@ -571,9 +555,7 @@ class HistoryPageFetchRequest:
         if page_size < 1 or page_size > 8_000:
             raise ValueError(f"history_page_size_out_of_range:{page_size}")
         return HistoryPageFetchRequest(
-            domain=domain,
             provider_symbol=symbol,
-            frequency=frequency,
             start_at=start_at,
             end_at=end_at,
             page_size=page_size,

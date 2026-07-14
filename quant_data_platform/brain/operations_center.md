@@ -18,8 +18,8 @@
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli status
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli list
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli describe market_intraday_1m
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli describe market_intraday_1m --full --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli describe market_intraday_5m
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli describe market_intraday_5m --full --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli check --quick
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli check meta --runtime fast --duckdb-memory-limit 12GB --threads 4 --writeback --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild 5m --runtime fast --json
@@ -41,19 +41,21 @@ QDP v3 重建入口：
 
 ```powershell
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 status --json
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 compatibility run --smoke --json
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 compatibility run --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 compatibility run --provider mootdx --as-of-date <date> --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 compatibility run --provider tushare-proxy --as-of-date 2026-07-13 --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 ingest --provider baostock --mode date-snapshot --start-date <date> --end-date <date> --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 ingest --provider baostock --mode date-events --start-date <date> --end-date <date> --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 ingest --provider tushare-proxy --mode historical --domain intraday --start-date 2010-01-01 --end-date 2026-07-13 --resume --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 build candidate --start-date 2010-01-01 --end-date <date> --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 audit --candidate <id> --semantic --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 diff --candidate <id> --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 publish --candidate <id> --expect-active-sha <sha> --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 gc --dry-run --json
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 update --as-of-date <date> --dry-run --bootstrap --start-date 2010-01-01 --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 update --bootstrap --historical-provider tushare-proxy --start-date 2010-01-01 --as-of-date 2026-07-13 --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli retire-v2-intraday --expect-active-sha <v3-active-sha> --delete --yes --json
 ```
 
-`compatibility run` 的当前 full report 已为 `status=passed, scope=full, issue_count=0`；任何后续报告不满足该条件时，live date-snapshot/date-events 和 canonical staging 都会阻断。首次 rebuild 仍受 M0 v2 lineage freeze 阻断；不要用 `--no-publish` 绕过 raw/identity/factor 质量门来制造“可用”结论。
+BaoStock full compatibility、Tushare 5m-only compatibility 与 mootdx 5m 协议 gate 当前均通过；Tushare gate 还必须证明 8,000 行反向分页、2010 早期覆盖和分钟股/元单位。任何后续报告失败时，对应 raw 不得进入 canonical。不要用 `--no-publish` 绕过 raw/identity/factor/5m 质量门来制造“可用”结论。
 
 ## Procedure Entries
 ### procedure `describe_active_table`
@@ -63,7 +65,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --gene
 
 ### procedure `check_active_data_base`
 `input`: quick or full mode
-`steps`: quick for manifest/coverage；`check meta --writeback` for PIT/meta/factor/index exact proof；use targeted PK/cross-frequency scans for 1m/5m and daily/intraday evidence instead of routinely running monolithic `check --full`.
+`steps`: quick for manifest/coverage；`check meta --writeback` for PIT/meta/factor/index exact proof；当前 v2 可做 1m/5m 旧合同扫描，v3 只做 5m 与 daily 的 PK/聚合证据，不再要求 1m。避免日常运行 monolithic `check --full`。
 `side_effects`: optional audit files only.
 
 ### procedure `rebuild_cache_or_feature`
@@ -87,16 +89,21 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --gene
 `steps`: update QDP hot-path brain docs；update consumers if their data dependency wording changed；run brain sync audit and doc/integrity checks.
 
 ### procedure `qdp_v3_initial_rebuild`
-`input`: full BaoStock compatibility proof、已修复的 v2 M0 freeze、start/end date。
-`steps`: calendar；security master；由旧到新 date-snapshot 与 date-events；stable identity/symbol history；legacy factor history + xdxr/official arbitration；主板双源 5m；次级 PIT；build candidate；semantic audit；diff；CAS publish。
-`resume`: 每日、每证券和每 symbol-month 都写 job state；不可变 raw 内容相同则复用 hash，不重复写。5m 的恢复单位仍是 symbol-month，但网络单位是每证券完整目标区间，下载后本地切月；不得恢复旧的逐月远端回翻。
-`download_runtime`: BaoStock 网络并发固定为 1 并复用任务内 login；日期任务可做两日期本地预取。mootdx 启动时并行做 TCP/协议健康选择，失败负缓存 300 秒；不可用时立即走 BaoStock。财务季报按证券生命周期加 550 日前置缓冲裁剪。
-`hard_stop`: full compatibility 未通过、M0 lineage 缺失、raw partition quarantined、未映射主板 identity、factor disputed/baseline unproven、strict 5m 覆盖不足或 semantic audit 非 passed。
+`input`: BaoStock/Tushare/mootdx compatibility proof、已授权的 v2 M0 freeze、`2010-01-01..2026-07-13` 固定历史范围。
+`steps`: Tushare reference domains；BaoStock date-snapshot/date-events；stable identity/symbol history；Tushare 两波历史 5m；legacy factor history + xdxr/official arbitration；次级 PIT；5m-only candidate；semantic audit；diff；CAS publish。
+`resume`: 低频按日/证券写 job；Tushare 5m 每页写 staging/cursor，每证券完整后合并成一个 immutable raw 并清 staging。内容 hash 相同则复用；不得恢复旧的逐月远端回翻，也不得生成 1m job。
+`download_runtime`: Tushare 3 workers、最多 3 in-flight、135 次/分钟目标、共享 429 冷却、低于 200 GiB 暂停；BaoStock 网络并发 1；mootdx 并行 TCP 排序后以真实 `frequency=0` 48-bar 请求选最快 3 个健康节点，失败负缓存 300 秒；财务按生命周期裁剪。
+`hard_stop`: 任一 compatibility 失败、M0 未授权、raw quarantined、未映射主板 identity、factor disputed/baseline unproven、2010 起 strict 5m 覆盖低于 99.95%、5m watermark 不等于 daily 或 semantic audit 非 passed。
 
 ### procedure `qdp_v3_incremental_update`
 `input`: existing v3 active and as-of date。
-`steps`: 最近 10 个交易日日线重取；最近 60 个交易日因子事件重取；当日 mootdx 5m；BaoStock 缺口修补/抽检；PIT 与衍生表重建；candidate semantic audit；CAS publish。
-`boundary`: active CAS 失败时 active byte content 不变；训练包/memmap 不属于此 DAG。
+`steps`: 最近 10 个交易日日线重取；最近 60 个交易日因子事件重取；mootdx 最近 10 日 5m；BaoStock 完整日 fallback/抽检；PIT 与衍生表重建；candidate semantic audit；CAS publish。
+`boundary`: 5m watermark 不得落后或超前于日线；没有 1m watermark/lag。active CAS 失败时 active byte content 不变；训练包/memmap 不属于此 DAG。
+
+### procedure `retire_v2_intraday_after_v3_publish`
+`input`: 已发布 v3 active SHA 与显式 `--delete --yes`。
+`steps`: 验证 v3 不含 1m、5m 覆盖至少 99.95%、watermark 等于日线、semantic audit/diff/hash 全通过、下游已切换且无运行 job/消费者；写 immutable retirement manifest；只删除 v2 `market_intraday_1m`、`market_intraday_5m`、`intraday_daily_features`、`limit_intraday_features` parquet；再跑 v3 status/check/path scan。
+`boundary`: v3 尚未发布或任一前置失败时命令必须拒绝删除；保留旧 manifest、文件清单、字节数和替代 dataset id。
 
 ## Validation Selection
 - `qdp_cli_changed -> py_compile + qdp --help + focused qdp tests`

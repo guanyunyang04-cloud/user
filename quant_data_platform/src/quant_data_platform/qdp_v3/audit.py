@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +18,6 @@ from quant_data_platform.qdp_v3.constants import (
     DOMAIN_INDUSTRY,
     DOMAIN_ELIGIBLE_SIGNAL_D,
     DOMAIN_MARKET_DAILY_RAW,
-    DOMAIN_MARKET_INTRADAY_1M,
     DOMAIN_MARKET_INTRADAY_5M,
     DOMAIN_PERFORMANCE_EXPRESS,
     DOMAIN_PERFORMANCE_FORECAST,
@@ -34,7 +36,7 @@ from quant_data_platform.qdp_v3.constants import (
 from quant_data_platform.qdp_v3.corporate_actions import build_share_capital_daily, reconstruct_xdxr_reference_prices
 from quant_data_platform.qdp_v3.datasets import read_dataset_frame
 from quant_data_platform.qdp_v3.identity import SecurityIdentityRegistry, normalize_symbol
-from quant_data_platform.qdp_v3.intraday_1m import is_complete_1m_day
+from quant_data_platform.qdp_v3.intraday import stable_security_bucket
 from quant_data_platform.qdp_v3.manifest import (
     atomic_write_json,
     dataset_manifest_for_id,
@@ -49,6 +51,7 @@ from quant_data_platform.qdp_v3.quality import audit_canonical_daily, audit_fact
 from quant_data_platform.qdp_v3.release import read_candidate, validate_candidate_graph
 from quant_data_platform.qdp_v3.storage import frame_content_sha256
 from quant_data_platform.qdp_v3.transforms import build_eligible_signal_view, build_tradable_open_view
+from quant_data_platform.tushare_proxy import TUSHARE_PROXY_TOKEN_ENV
 
 
 STREAMING_DOMAINS = {
@@ -59,7 +62,6 @@ STREAMING_DOMAINS = {
     DOMAIN_ADJUST_FACTOR_DAILY,
     DOMAIN_SHARE_CAPITAL_DAILY,
     DOMAIN_MARKET_INTRADAY_5M,
-    DOMAIN_MARKET_INTRADAY_1M,
     DOMAIN_VALUATION_DAILY,
 }
 
@@ -72,9 +74,145 @@ def _warning(code: str, message: str, **details: Any) -> dict[str, Any]:
     return {"code": code, "severity": "warning", "message": message, **details}
 
 
+_SECRET_ARTIFACT_SUFFIXES = frozenset({".json", ".jsonl", ".log", ".md", ".txt", ".toml", ".yaml", ".yml"})
+_EMBEDDED_TOKEN_URL = re.compile(r"/token=(?!<redacted>)[^\s\"'?#]+", re.IGNORECASE)
+
+
+def _json_contains_unredacted_secret_key(value: Any) -> bool:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalized = str(key).strip().lower()
+            if normalized in {"token", "access_token", "api_token", "authorization", "password", "secret"}:
+                serialized = str(item or "").strip()
+                is_content_hash = bool(re.fullmatch(r"[0-9a-fA-F]{64}", serialized))
+                if serialized not in {"", "<redacted>"} and not is_content_hash:
+                    return True
+            if _json_contains_unredacted_secret_key(item):
+                return True
+    elif isinstance(value, list):
+        return any(_json_contains_unredacted_secret_key(item) for item in value)
+    return False
+
+
+def _audit_secret_artifacts(
+    paths: Any,
+    *,
+    workspace_root: str | Path | None,
+    candidate: Any | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Reject credentials in repository text and QDP runtime control artifacts."""
+
+    token = str(os.environ.get(TUSHARE_PROXY_TOKEN_ENV, "") or "")
+    workspace = Path(workspace_root or paths.root.parents[2]).resolve()
+    artifact_roots = (
+        paths.jobs,
+        paths.metadata,
+        paths.compatibility,
+        paths.candidates,
+        paths.active,
+        paths.rollbacks,
+        paths.pins,
+        paths.audits,
+    )
+    repository_roots = (
+        workspace / "brain",
+        workspace / "quant_data_platform" / "brain",
+        workspace / "quant_data_platform" / "configs",
+        workspace / "quant_data_platform" / "src",
+    )
+    files: dict[Path, bool] = {}
+    for root in artifact_roots:
+        if root.exists():
+            for path in root.rglob("*"):
+                if path.is_file() and path.suffix.lower() in _SECRET_ARTIFACT_SUFFIXES:
+                    files[path.resolve()] = True
+    if candidate is not None:
+        for item in candidate.raw_partitions:
+            for field_name in ("quality_assessment_path",):
+                value = str(item.get(field_name, "") or "")
+                if not value:
+                    continue
+                path = resolve_manifest_path(value, root=paths.root)
+                if path.exists() and path.is_file():
+                    files[path.resolve()] = True
+        for domain, dataset_id in candidate.datasets.items():
+            path = dataset_manifest_for_id(paths.root, str(dataset_id), str(domain))
+            if path is not None and path.exists():
+                files[path.resolve()] = True
+    for root in repository_roots:
+        if root.exists():
+            for path in root.rglob("*"):
+                if path.is_file() and path.suffix.lower() in _SECRET_ARTIFACT_SUFFIXES | {".py"}:
+                    files.setdefault(path.resolve(), False)
+
+    exact_matches: list[str] = []
+    token_url_matches: list[str] = []
+    secret_key_matches: list[str] = []
+    for path, is_runtime_artifact in sorted(files.items(), key=lambda item: str(item[0])):
+        try:
+            if path.stat().st_size > 64 * 1024 * 1024:
+                continue
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+        display = path.relative_to(workspace).as_posix() if path.is_relative_to(workspace) else str(path)
+        if token and token in text:
+            exact_matches.append(display)
+        if not is_runtime_artifact:
+            continue
+        if _EMBEDDED_TOKEN_URL.search(text):
+            token_url_matches.append(display)
+        if path.suffix.lower() in {".json", ".jsonl"}:
+            try:
+                payload = json.loads(text)
+            except (TypeError, ValueError):
+                payload = None
+            if payload is not None and _json_contains_unredacted_secret_key(payload):
+                secret_key_matches.append(display)
+
+    findings: list[dict[str, Any]] = []
+    if exact_matches:
+        findings.append(
+            _blocker(
+                "tushare_proxy_token_material_leaked",
+                "The configured proxy credential appears in repository or QDP runtime text.",
+                count=len(set(exact_matches)),
+                sample=sorted(set(exact_matches))[:20],
+            )
+        )
+    if token_url_matches:
+        findings.append(
+            _blocker(
+                "tushare_proxy_token_url_leaked",
+                "A QDP runtime artifact contains an unredacted token-in-path URL.",
+                count=len(set(token_url_matches)),
+                sample=sorted(set(token_url_matches))[:20],
+            )
+        )
+    if secret_key_matches:
+        findings.append(
+            _blocker(
+                "runtime_artifact_unredacted_secret_key",
+                "A QDP runtime JSON artifact contains a non-redacted credential field.",
+                count=len(set(secret_key_matches)),
+                sample=sorted(set(secret_key_matches))[:20],
+            )
+        )
+    return findings, {
+        "secret_scanned_file_count": len(files),
+        "secret_exact_match_count": len(set(exact_matches)),
+        "secret_token_url_match_count": len(set(token_url_matches)),
+        "secret_key_match_count": len(set(secret_key_matches)),
+    }
+
+
 def _audit_raw_references(candidate: Any, *, root: Path, full: bool) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     checked = 0
+    configured_token = str(os.environ.get(TUSHARE_PROXY_TOKEN_ENV, "") or "")
+    secret_exact_paths: list[str] = []
+    secret_url_paths: list[str] = []
+    secret_key_paths: list[str] = []
     checked_revision_dirs: set[Path] = set()
     for item in candidate.raw_partitions:
         payload_path = resolve_manifest_path(str(item.get("payload_path", "")), root=root)
@@ -83,6 +221,13 @@ def _audit_raw_references(candidate: Any, *, root: Path, full: bool) -> tuple[li
             findings.append(_blocker("candidate_raw_partition_missing", "Raw payload or receipt is missing.", raw_domain=item.get("raw_domain"), partition_value=item.get("partition_value")))
             continue
         receipt = read_json(receipt_path)
+        serialized_receipt = json.dumps(receipt, ensure_ascii=False, default=str)
+        if configured_token and configured_token in serialized_receipt:
+            secret_exact_paths.append(str(receipt_path))
+        if _EMBEDDED_TOKEN_URL.search(serialized_receipt):
+            secret_url_paths.append(str(receipt_path))
+        if _json_contains_unredacted_secret_key(receipt):
+            secret_key_paths.append(str(receipt_path))
         expected_content = str(item.get("content_sha256", "") or "")
         if str(receipt.get("content_sha256", "") or "") != expected_content:
             findings.append(_blocker("candidate_raw_receipt_content_hash_mismatch", "Candidate raw hash differs from receipt.", receipt_path=str(receipt_path)))
@@ -149,7 +294,39 @@ def _audit_raw_references(candidate: Any, *, root: Path, full: bool) -> tuple[li
                 if frame_content_sha256(frame) != expected_content:
                     findings.append(_blocker("raw_decompressed_content_hash_mismatch", "Raw decompressed content differs from receipt.", payload_path=str(payload_path)))
         checked += 1
-    return findings, {"raw_partition_checked_count": checked}
+    if secret_exact_paths:
+        findings.append(
+            _blocker(
+                "tushare_proxy_token_material_leaked",
+                "The configured proxy credential appears in a candidate raw receipt.",
+                count=len(set(secret_exact_paths)),
+                sample=sorted(set(secret_exact_paths))[:20],
+            )
+        )
+    if secret_url_paths:
+        findings.append(
+            _blocker(
+                "tushare_proxy_token_url_leaked",
+                "A candidate raw receipt contains an unredacted token-in-path URL.",
+                count=len(set(secret_url_paths)),
+                sample=sorted(set(secret_url_paths))[:20],
+            )
+        )
+    if secret_key_paths:
+        findings.append(
+            _blocker(
+                "runtime_artifact_unredacted_secret_key",
+                "A candidate raw receipt contains a non-redacted credential field.",
+                count=len(set(secret_key_paths)),
+                sample=sorted(set(secret_key_paths))[:20],
+            )
+        )
+    return findings, {
+        "raw_partition_checked_count": checked,
+        "raw_receipt_secret_exact_match_count": len(set(secret_exact_paths)),
+        "raw_receipt_secret_token_url_match_count": len(set(secret_url_paths)),
+        "raw_receipt_secret_key_match_count": len(set(secret_key_paths)),
+    }
 
 
 def _audit_dataset_manifest_and_shards(
@@ -194,34 +371,51 @@ def _audit_dataset_manifest_and_shards(
             if domain in STREAMING_DOMAINS:
                 partition_month = str(shard.partition.get("value", "") or "")
                 source_partition = str(shard.partition.get("source_partition", "") or "")
-                if domain in {DOMAIN_MARKET_INTRADAY_1M, DOMAIN_MARKET_INTRADAY_5M}:
-                    security_ids = sorted(set(part.get("security_id", pd.Series(dtype=str)).astype(str)))
+                if domain == DOMAIN_MARKET_INTRADAY_5M:
+                    security_ids = sorted(
+                        item
+                        for item in set(part.get("security_id", pd.Series(dtype=str)).astype(str))
+                        if item
+                    )
                     partition_kind = str(shard.partition.get("kind", "") or "")
                     if partition_kind == "natural_year_security_bucket":
+                        partition_match = re.fullmatch(r"(\d{4})/bucket=(\d{2})", partition_month)
                         observed_periods = sorted(set(part.get("trade_date", pd.Series(dtype=str)).astype(str).str.slice(0, 4)))
-                        declared_year = partition_month[:4]
-                        partition_identity = (security_ids[0], declared_year) if len(security_ids) == 1 else (source_partition, declared_year)
-                        source_valid = bool(source_partition.startswith(f"{declared_year}_b"))
+                        declared_year = partition_match.group(1) if partition_match else partition_month[:4]
+                        declared_bucket = int(partition_match.group(2)) if partition_match else -1
+                        partition_identity = (declared_year, f"{declared_bucket:02d}")
+                        source_valid = bool(
+                            partition_match
+                            and source_partition == f"{declared_year}_b{declared_bucket:02d}"
+                        )
                         period_valid = observed_periods == [declared_year]
+                        bucket_valid = bool(security_ids) and declared_bucket >= 0 and all(
+                            stable_security_bucket(security_id) == declared_bucket
+                            for security_id in security_ids
+                        )
+                        partition_contract_valid = period_valid and source_valid and bucket_valid
                     else:
                         observed_periods = sorted(set(part.get("trade_date", pd.Series(dtype=str)).astype(str).str.slice(0, 7).str.replace("-", "", regex=False)))
                         declared_year = partition_month
                         partition_identity = (security_ids[0], partition_month) if len(security_ids) == 1 else (source_partition, partition_month)
                         source_valid = len(security_ids) == 1 and source_partition == f"{security_ids[0]}_{partition_month}"
                         period_valid = observed_periods == [partition_month]
+                        declared_bucket = -1
+                        partition_contract_valid = len(security_ids) == 1 and period_valid and source_valid
                     if partition_identity in intraday_partitions:
                         findings.append(_blocker("intraday_cross_shard_partition_duplicate", "A security-period appears in more than one canonical shard.", domain=domain, partition=partition_identity))
                     intraday_partitions.add(partition_identity)
-                    if len(security_ids) != 1 or not period_valid or not source_valid:
+                    if not partition_contract_valid:
                         findings.append(
                             _blocker(
                                 "intraday_shard_partition_contract_invalid",
-                                "Intraday shard does not contain exactly its declared security-period.",
+                                "Intraday shard rows do not match the declared time and security-bucket partition.",
                                 domain=domain,
                                 path=str(shard_path),
                                 security_ids=security_ids[:10],
                                 observed_periods=observed_periods[:10],
                                 declared_period=declared_year,
+                                declared_bucket=declared_bucket,
                                 source_partition=source_partition,
                             )
                         )
@@ -237,20 +431,6 @@ def _audit_dataset_manifest_and_shards(
                 if domain == DOMAIN_MARKET_INTRADAY_5M:
                     strict = part.loc[part["quality_tier"].eq("strict")].copy() if "quality_tier" in part.columns else part
                     findings.extend(item.to_dict() for item in audit_intraday_5m(strict).blockers)
-                elif domain == DOMAIN_MARKET_INTRADAY_1M:
-                    strict = part.loc[part["quality_tier"].eq("strict")].copy() if "quality_tier" in part.columns else part
-                    for (security_id, trade_date), day in strict.groupby(["security_id", "trade_date"], sort=False):
-                        if not is_complete_1m_day(day):
-                            findings.append(
-                                _blocker(
-                                    "strict_1m_day_contract_invalid",
-                                    "Strict 1m stock-day must contain the exact 240-bar canonical time set.",
-                                    domain=domain,
-                                    security_id=str(security_id),
-                                    trade_date=str(trade_date),
-                                    bar_count=int(len(day)),
-                                )
-                            )
                 elif domain == DOMAIN_MARKET_DAILY_RAW:
                     findings.extend(item.to_dict() for item in audit_canonical_daily(part).blockers)
             else:
@@ -429,6 +609,13 @@ def audit_candidate(
             if not mismatch.empty:
                 findings.append(_blocker("market_status_key_misalignment", "Market and status facts do not have identical keys.", count=int(len(mismatch)), sample=mismatch.head(20).to_dict("records"), year=year))
     if normalized_mode == "semantic":
+        secret_findings, secret_metrics = _audit_secret_artifacts(
+            paths,
+            workspace_root=workspace_root,
+            candidate=candidate,
+        )
+        findings.extend(secret_findings)
+        raw_metrics.update(secret_metrics)
         identity = frames.get(DOMAIN_SECURITY_IDENTITY)
         history = frames.get(DOMAIN_SYMBOL_HISTORY)
         market_manifest = manifests.get(DOMAIN_MARKET_DAILY_RAW)
@@ -600,77 +787,11 @@ def audit_candidate(
                         sample=report_frame.loc[leaked_unknown, ["security_id", "report_date", "publish_date", "available_date", "availability_status"]].head(20).to_dict("records"),
                     )
                 )
-        one_minute_manifest = manifests.get(DOMAIN_MARKET_INTRADAY_1M)
-        candidate_1m_coverage = dict(candidate.coverage.get("intraday_1m", {}) or {})
-        if one_minute_manifest is None:
-            findings.append(_blocker("strict_1m_dataset_missing", "Final v3 release requires the tiered 1m dataset and coverage proof."))
-        else:
-            coverage_1m = dict(one_minute_manifest.coverage or {})
-            expected_1m = int(coverage_1m.get("expected_stock_day_count", 0) or 0)
-            covered_1m = int(coverage_1m.get("strict_covered_stock_day_count", 0) or 0)
-            rate_1m = float(coverage_1m.get("strict_coverage_rate", 0.0) or 0.0)
-            if expected_1m <= 0:
-                findings.append(_blocker("strict_1m_coverage_denominator_missing", "1m release proof has no PIT tradable-stock-day denominator."))
-            elif covered_1m > expected_1m or rate_1m < 0.9995:
-                findings.append(
-                    _blocker(
-                        "strict_1m_coverage_gate_failed",
-                        "1m strict coverage must be internally consistent and at least 99.95%.",
-                        count=max(0, expected_1m - covered_1m),
-                        sample=[{"expected": expected_1m, "covered": covered_1m, "rate": rate_1m}],
-                    )
-                )
-            candidate_watermark = str(candidate_1m_coverage.get("watermark", "") or "")
-            manifest_watermark = str(coverage_1m.get("watermark", "") or "")
-            if candidate_watermark != manifest_watermark:
-                findings.append(
-                    _blocker(
-                        "intraday_1m_watermark_manifest_mismatch",
-                        "Candidate and 1m dataset watermarks must be identical.",
-                        candidate_watermark=candidate_watermark,
-                        manifest_watermark=manifest_watermark,
-                    )
-                )
-            if bool(coverage_1m.get("non_continuous_history_hole", False)):
-                findings.append(
-                    _blocker(
-                        "intraday_1m_non_continuous_history_hole",
-                        "The 1m watermark cannot skip an earlier incomplete date.",
-                        sample=list(coverage_1m.get("later_explained_date_sample", []) or []),
-                    )
-                )
-            cutoff_payload = read_json(paths.metadata / "tushare_proxy_bootstrap_cutoff.json")
-            bootstrap_cutoff = str(cutoff_payload.get("bootstrap_cutoff", "") or "")[:10]
-            required_bootstrap_watermark = min(bootstrap_cutoff, str(candidate.coverage.get("end_date", "") or bootstrap_cutoff)) if bootstrap_cutoff else ""
-            if required_bootstrap_watermark and manifest_watermark < required_bootstrap_watermark:
-                findings.append(
-                    _blocker(
-                        "intraday_1m_locked_bootstrap_cutoff_not_covered",
-                        "Initial proxy 1m history must be continuous through the immutable bootstrap cutoff.",
-                        required_watermark=required_bootstrap_watermark,
-                        actual_watermark=manifest_watermark,
-                    )
-                )
-            daily_watermark = str(candidate.coverage.get("market_daily_watermark", candidate.coverage.get("end_date", "")) or "")
-            calendar_dates = sorted(date for date in open_dates if manifest_watermark < date <= daily_watermark)
-            lag_days = len(calendar_dates) if manifest_watermark else len(
-                [date for date in open_dates if date <= daily_watermark]
-            )
-            if lag_days > 10:
-                findings.append(
-                    _blocker(
-                        "intraday_1m_watermark_lag_exceeds_10_trading_days",
-                        "The independent 1m watermark may lag daily by at most ten trading days.",
-                        lag_trading_days=lag_days,
-                        market_intraday_1m_watermark=manifest_watermark,
-                        market_daily_watermark=daily_watermark,
-                    )
-                )
         intraday = frames.get(DOMAIN_MARKET_INTRADAY_5M)
         intraday_manifest = manifests.get(DOMAIN_MARKET_INTRADAY_5M)
         candidate_intraday_coverage = dict(candidate.coverage.get("intraday_5m", {}) or {})
         candidate_end = str(candidate.coverage.get("end_date", "") or "")
-        required_start = str(candidate_intraday_coverage.get("required_start_date", "2020-01-01") or "2020-01-01")
+        required_start = str(candidate_intraday_coverage.get("required_start_date", "2010-01-01") or "2010-01-01")
         explicitly_not_applicable = candidate_intraday_coverage.get("release_applicable") is False
         intraday_release_applicable = not (explicitly_not_applicable and candidate_end and candidate_end < required_start)
         if explicitly_not_applicable and (not candidate_end or candidate_end >= required_start):
@@ -712,6 +833,30 @@ def audit_candidate(
                             sample=list(coverage.get("later_explained_date_sample", []) or []),
                         )
                     )
+                cutoff_payload = read_json(paths.metadata / "tushare_proxy_bootstrap_cutoff.json")
+                cutoff = str(cutoff_payload.get("bootstrap_cutoff", "") or "")[:10]
+                candidate_end = str(candidate.coverage.get("end_date", "") or "")[:10]
+                if cutoff and candidate_end >= cutoff:
+                    proof = read_json(paths.metadata / "tushare_proxy_bootstrap_cutoff_5m_proof.json")
+                    minute_proofs = list(proof.get("minute_proofs", []) or [])
+                    proof_valid = (
+                        str(proof.get("bootstrap_cutoff", "") or "") == cutoff
+                        and str(proof.get("frequency", "") or "") == "5m"
+                        and bool(minute_proofs)
+                        and all(
+                            int(item.get("row_count", 0) or 0) == 48
+                            and str(item.get("max_timestamp", "") or "").endswith("15:00:00")
+                            for item in minute_proofs
+                        )
+                    )
+                    if not proof_valid:
+                        findings.append(
+                            _blocker(
+                                "bootstrap_cutoff_5m_proof_missing_or_invalid",
+                                "The immutable bootstrap cutoff must be re-proved with a complete 48-bar 5m sample.",
+                                bootstrap_cutoff=cutoff,
+                            )
+                        )
                 manifest_5m_watermark = str(coverage.get("watermark", "") or "")
                 candidate_5m_watermark = str(candidate.coverage.get("market_intraday_5m_watermark", "") or "")
                 if candidate_5m_watermark != manifest_5m_watermark:
@@ -724,11 +869,11 @@ def audit_candidate(
                         )
                     )
                 daily_watermark = str(candidate.coverage.get("market_daily_watermark", candidate.coverage.get("end_date", "")) or "")
-                if manifest_5m_watermark < daily_watermark:
+                if manifest_5m_watermark != daily_watermark:
                     findings.append(
                         _blocker(
-                            "intraday_5m_watermark_behind_daily",
-                            "Only 1m has an independent lag allowance; 5m must reach the daily watermark.",
+                            "intraday_5m_watermark_daily_mismatch",
+                            "The sole intraday watermark must equal the daily watermark.",
                             market_intraday_5m_watermark=manifest_5m_watermark,
                             market_daily_watermark=daily_watermark,
                         )

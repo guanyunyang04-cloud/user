@@ -32,11 +32,13 @@ TUSHARE_PROXY_PROTOCOL = "tushare_compatible_http"
 TUSHARE_PROXY_DEFAULT_URL = "https://ts.gyzcloud.top/api"
 TUSHARE_PROXY_TOKEN_ENV = "QDP_TUSHARE_PROXY_TOKEN"
 TUSHARE_PROXY_URL_ENV = "QDP_TUSHARE_PROXY_URL"
-TUSHARE_PROXY_SAFE_RATE_PER_MINUTE = 135
-TUSHARE_PROXY_BURST = 4
+TUSHARE_PROXY_SAFE_RATE_PER_MINUTE = 96
+TUSHARE_PROXY_BURST = 1
 TUSHARE_PROXY_HISTORY_PAGE_SIZE = 8_000
 TUSHARE_PROXY_DEFAULT_MINUTE_DAILY_LIMIT = 20_000
 TUSHARE_PROXY_DEFAULT_MAX_IN_FLIGHT = 3
+TUSHARE_PROXY_MIN_ADAPTIVE_RATE_PER_MINUTE = 90
+TUSHARE_PROXY_RATE_REDUCTION_COOLDOWN_SECONDS = 60.0
 
 _SECRET_KEY_FRAGMENTS = ("token", "secret", "password", "authorization", "api_key", "apikey")
 _TIMESTAMP_ALIASES = ("trade_time", "datetime", "trade_datetime", "trade_date", "date", "time")
@@ -189,10 +191,13 @@ class TushareProxyRateLimiter:
         self.capacity = float(int(burst))
         self._tokens = self.capacity
         self._updated_at = float(clock())
+        self._blocked_until = self._updated_at
         self._clock = clock
         self._sleeper = sleeper
         self._guard = threading.Lock()
         self._request_count = 0
+        self._next_rate_reduction_at = float("-inf")
+        self._rate_reduction_count = 0
 
     def acquire(self) -> None:
         refill_per_second = float(self.rate_per_minute) / 60.0
@@ -200,15 +205,40 @@ class TushareProxyRateLimiter:
             wait_seconds = 0.0
             with self._guard:
                 now = float(self._clock())
-                elapsed = max(0.0, now - self._updated_at)
-                self._tokens = min(self.capacity, self._tokens + elapsed * refill_per_second)
-                self._updated_at = now
-                if self._tokens >= 1.0:
-                    self._tokens -= 1.0
-                    self._request_count += 1
-                    return
-                wait_seconds = max((1.0 - self._tokens) / refill_per_second, 0.001)
+                if now < self._blocked_until:
+                    wait_seconds = max(self._blocked_until - now, 0.001)
+                    self._updated_at = now
+                else:
+                    elapsed = max(0.0, now - self._updated_at)
+                    self._tokens = min(self.capacity, self._tokens + elapsed * refill_per_second)
+                    self._updated_at = now
+                    if self._tokens >= 1.0:
+                        self._tokens -= 1.0
+                        self._request_count += 1
+                        return
+                    wait_seconds = max((1.0 - self._tokens) / refill_per_second, 0.001)
             self._sleeper(wait_seconds)
+
+    def defer(self, seconds: float, *, rate_limited: bool = False) -> None:
+        """Apply one gateway throttle response to every worker sharing this limiter."""
+
+        delay = max(float(seconds), 0.0)
+        with self._guard:
+            now = float(self._clock())
+            self._blocked_until = max(self._blocked_until, now + delay)
+            if rate_limited:
+                self._tokens = 0.0
+                if now >= self._next_rate_reduction_at:
+                    reduced = max(
+                        TUSHARE_PROXY_MIN_ADAPTIVE_RATE_PER_MINUTE,
+                        int(self.rate_per_minute * 0.9),
+                    )
+                    if reduced < self.rate_per_minute:
+                        self.rate_per_minute = reduced
+                        self._rate_reduction_count += 1
+                    self._next_rate_reduction_at = (
+                        now + TUSHARE_PROXY_RATE_REDUCTION_COOLDOWN_SECONDS
+                    )
 
     def snapshot(self) -> dict[str, Any]:
         with self._guard:
@@ -217,6 +247,8 @@ class TushareProxyRateLimiter:
                 "burst": int(self.capacity),
                 "request_count": int(self._request_count),
                 "available_tokens": float(self._tokens),
+                "blocked_for_seconds": max(0.0, float(self._blocked_until - self._clock())),
+                "rate_reduction_count": int(self._rate_reduction_count),
             }
 
 
@@ -292,9 +324,8 @@ class TushareProxyClient:
         self._session_factory = session_factory
         self._thread_local = threading.local()
         self._sleeper = sleeper
-        # The gateway currently documents a global default of three in-flight
-        # requests per account. Four workers remain useful for connection and
-        # parsing overlap, while this semaphore prevents avoidable 429s.
+        # Three workers overlap connection and parsing work. Any throttle
+        # response feeds a shared limiter cooldown so retries do not stampede.
         self._in_flight = threading.BoundedSemaphore(TUSHARE_PROXY_DEFAULT_MAX_IN_FLIGHT)
 
     def _session(self) -> requests.Session:
@@ -318,6 +349,9 @@ class TushareProxyClient:
                 session.close()
             finally:
                 self._thread_local.session = None
+
+    def operational_metrics(self) -> dict[str, Any]:
+        return {**self.metrics.snapshot(), "limiter": self.limiter.snapshot()}
 
     def fetch_frame(
         self,
@@ -363,6 +397,13 @@ class TushareProxyClient:
                 if int(getattr(response, "status_code", 0) or 0) in _RETRYABLE_HTTP_STATUS:
                     if int(response.status_code) == 429:
                         self.metrics.record(elapsed=elapsed, status="rate_limit")
+                        headers = getattr(response, "headers", {}) or {}
+                        retry_after = 2.0
+                        try:
+                            retry_after = max(2.0, min(float(headers.get("Retry-After", 2.0)), 60.0))
+                        except (TypeError, ValueError):
+                            retry_after = 2.0
+                        self.limiter.defer(retry_after, rate_limited=True)
                     else:
                         self.metrics.record(elapsed=elapsed, status="network_error")
                     last_error = TushareProxyError(f"tushare_proxy_http_retryable:{response.status_code}")
@@ -520,7 +561,7 @@ class TushareProxyClient:
             api_name="stk_mins",
             params={
                 "ts_code": normalized.provider_symbol,
-                "freq": {"1m": "1min", "5m": "5min"}[normalized.frequency],
+                "freq": "5min",
                 "start_date": normalized.start_at,
                 "end_date": normalized.end_at,
                 "limit": normalized.page_size,

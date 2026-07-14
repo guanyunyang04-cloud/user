@@ -13,12 +13,12 @@
 
 ### class `raw_fact_table`
 
-`examples`: `market_daily_raw`、`market_intraday_1m`、PIT status/state tables、valuation、adjust_factor、event facts。
+`examples`: v3 `market_daily_raw`、`market_intraday_5m`、PIT status/state tables、valuation、adjust_factor、event facts；v2 `market_intraday_1m` 只是发布前受保护的旧 active 事实。
 `invariant`: 不用研究矩形填充或派生特征替代原始事实。
 
 ### class `cache_or_derived_table`
 
-`examples`: `market_intraday_5m`、`market_daily_panel`、`intraday_daily_features`、`limit_intraday_features`、`limit_status`。
+`examples`: `market_daily_panel`、`intraday_daily_features`、`limit_intraday_features`、`limit_status`；只有 v2 的旧 5m 是 1m 派生缓存，v3 5m 不是缓存。
 `invariant`: 可从 raw facts 重建；便于研究读取，但不是第二份真相。
 
 ### class `provider_object`
@@ -57,10 +57,19 @@
 
 ### class `qdp_v3_intraday_5m`
 
-`definition`: 标准右闭合 48 根 bar；完整 mootdx 优先，完整 BaoStock fallback，任何不完整来源都不得跨源拼接。
-`tiers`: 2020 年以来逐证券探针决定 strict 覆盖；2011-11-22..2019-12-31 旧 TDX 只为 provisional；更早明确无覆盖；1m 退出 active 但不删除。
-`download_rule`: mootdx 向历史反向分页，禁止按 symbol-month 重复从最新日期回翻；每只证券一次获取目标完整区间、规范化后切月。BaoStock fallback 也在首次需要时取该证券完整区间并切月缓存。月分区恢复必须按确定键直接查找，不能随分区增长反复全目录扫描。
-`release_gate`: 2020 年以来 PIT 有效交易股票日 strict 覆盖至少 99.95%，每个 strict 股票日必须恰好 48 根且来源冲突已解决。
+`definition`: v3 唯一分钟事实域；标准右闭合 48 根 bar，主键 `security_id + trade_date + bar_end`，按自然年和稳定 64 个 security bucket 分片。v3 不存在 1m raw、watermark、转换或发布门。
+`historical_source`: `2010-01-01..2026-07-13` 由 Tushare-compatible proxy 的完整 5m 候选与日线聚合对账；proxy provenance 不透明，因此不是官方真值源。`vol/amount` 已证明为股/元，scale 为 1.0。
+`incremental_source`: 截止日后完整 mootdx 优先，完整 BaoStock fallback；任一来源不完整时禁止拼接，两个完整来源超阈值冲突时 quarantine。
+`tiers`: 不再以 2020 作固定质量边界。任何年份都由 48-bar 结构、日线量价、身份和来源证据决定 strict/provisional/quarantine；旧 TDX 单源只可作 provisional/audit 证据。
+`download_rule`: proxy 每证券按时间倒序最多 8,000 行串行翻页并页级断点恢复，证券完成后合并成一个 immutable raw；mootdx 最近窗口从 `start=0, offset=800` 开始，目标日期齐全即停止；BaoStock 只接管完整日，禁止跨源拼接。
+`release_gate`: 2010 年以来 PIT 有效主板交易股票日 strict 覆盖至少 99.95%，每个预期股票日必须被解释；5m watermark 必须与日线 watermark 完全相等。
+
+### class `tushare_proxy_historical_bootstrap`
+
+`role`: 限时、一次性的历史启动源，不使用 Tushare SDK，不承担截止日后的持续更新，也不被称为官方真值源。
+`secret_boundary`: Token 只从 `QDP_TUSHARE_PROXY_TOKEN` 读取；日志、异常、job、receipt、manifest 和 MCP URL 均不得保存明文 Token，只可保存 SHA-256 指纹与公开账户元数据。
+`transport`: 每 worker 独立 HTTP session，共享进程级限速器、最多 3 个在途请求和 429 冷却；8,000 行满页必须继续，非零 code、字段宽度、gzip/JSON 或页间顺序错误不得解释为空数据。
+`resume`: 页级 staging/cursor；额度耗尽为 `paused_quota`，断网、续期或进程终止后从同一 job 恢复。
 
 ### class `qdp_v3_provider_transport`
 
@@ -83,9 +92,9 @@
 
 ### class `mootdx_online`
 
-`domain`: fast daily/1m/5m market bars and quote-like market data.
-`production_role`: preferred market bar source when coverage and unit audit pass.
-`current_health_boundary`: 2026-07-14 当前机器的内置公共节点未通过协议 bars 探针；runtime 会缓存失败 300 秒并快速 fallback。该状态需在以后运行时重探，不应固化为数据源永久不可用。
+`domain`: fast recent daily/5m market bars and quote-like market data；v3 不使用 mootdx 1m。
+`production_role`: 2026-07-13 后完整 5m 的优先更新源；BaoStock 是完整日 fallback/audit。
+`current_health_boundary`: 节点候选来自持久化 last-good、tdxpy 与 mootdx 内置列表的去重并集；TCP 只排序，真实 `frequency=0` 的 48 bars/15:00 才证明健康。2026-07-14 固定三证券验证通过，冷启动约 9.69 秒、last-good 热启动约 0.08 秒，缓存最快 3 个健康节点；全源失败才负缓存 300 秒。
 
 ### class `baostock_online`
 
@@ -100,7 +109,7 @@
 ## Long-Term Lessons
 
 - 数据基底和研究训练产物要分开：active data base 是源头，memmap/training pack 是下游研究加速产物。
-- 1m 和 daily raw 是事实源；5m、daily panel、日内特征和涨跌停特征是缓存或派生。
+- v3 中 daily 与 5m 是事实源，1m 已退出生产合同；“1m 为事实、5m 为缓存”只描述发布前的 v2 legacy active，不能继续作为 QDP 总体语义。
 - DuckDB/catalog 类索引可以是工具，但不能成为本地数据基底唯一事实源。
 - 旧迁移、修复、兼容命令不应留在日常 CLI；保留到 archive/reference 即可。
 - 质量证明字段如 schema hash 和 audit path 应保留在 manifest，但默认 `describe` 应显示人读摘要。

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,7 @@ from quant_data_platform.qdp_v3.build import build_candidate
 from quant_data_platform.qdp_v3.corporate_actions import ingest_mootdx_xdxr
 from quant_data_platform.qdp_v3.freeze import freeze_v2, validate_v2_freeze_proof
 from quant_data_platform.qdp_v3.historical import (
-    ingest_tushare_proxy_intraday_pair,
+    ingest_tushare_proxy_intraday,
     ingest_tushare_proxy_reference,
     proxy_symbol_inventory,
 )
@@ -23,7 +24,6 @@ from quant_data_platform.qdp_v3.ingest import (
     ingest_trading_calendar,
 )
 from quant_data_platform.qdp_v3.intraday import ingest_intraday_5m
-from quant_data_platform.qdp_v3.mootdx_1m import ingest_mootdx_intraday_1m
 from quant_data_platform.qdp_v3.proxy_compatibility import lock_bootstrap_cutoff, run_tushare_proxy_compatibility_gate
 from quant_data_platform.qdp_v3.constants import (
     RAW_ADJUST_FACTOR_EVENT,
@@ -34,6 +34,7 @@ from quant_data_platform.qdp_v3.constants import (
 from quant_data_platform.qdp_v3.manifest import active_manifest_sha256, atomic_write_json, stable_hash, utc_now
 from quant_data_platform.qdp_v3.paths import ensure_qdp_v3_layout, qdp_v3_paths
 from quant_data_platform.qdp_v3.release import diff_candidate, publish_candidate
+from quant_data_platform.qdp_v3.retirement import retire_v2_intraday
 from quant_data_platform.qdp_v3.secondary import ingest_baostock_report_domain, ingest_baostock_snapshot_domain
 from quant_data_platform.qdp_v3.storage import iter_raw_partitions, read_raw_partition
 
@@ -81,8 +82,6 @@ def plan_update(
     workspace_root: str | Path | None = None,
     bootstrap: bool = False,
     start_date: str = "",
-    include_5m: bool = True,
-    include_1m: bool = False,
     include_secondary: bool = True,
     historical_provider: str = "",
 ) -> dict[str, Any]:
@@ -100,8 +99,7 @@ def plan_update(
     dates, calendar_source = _calendar_dates_read_only(start_date=effective_start, end_date=str(as_of_date), workspace_root=workspace_root)
     daily_dates = dates if bootstrap else dates[-10:]
     factor_dates = dates if bootstrap else dates[-60:]
-    intraday_dates = dates if bootstrap and include_5m else dates[-1:] if include_5m and dates else []
-    incremental_1m_dates = dates[-10:] if include_1m and not bootstrap else dates if include_1m else []
+    intraday_dates = dates if bootstrap else dates[-10:]
     use_proxy_bootstrap = bool(bootstrap and str(historical_provider).strip().lower() == "tushare-proxy")
     freeze_state = read_json(paths.metadata / "v2_freeze_20260713.json")
     freeze_validation = validate_v2_freeze_proof(freeze_state)
@@ -124,12 +122,13 @@ def plan_update(
             {"stage": "factor_symbol_history", "scope": "all securities once; resumable"},
             {"stage": "corporate_action_xdxr", "scope": "all securities on bootstrap; recent factor-event securities on incremental updates"},
             {"stage": "secondary_pit", "enabled": bool(include_secondary), "domains": ["financial_quarterly", "performance_forecast", "performance_express", "industry_concept", "index_constituents"]},
-            {"stage": "intraday_5m", "enabled": bool(include_5m), "trade_date_count": len(intraday_dates), **{key: value for key, value in _date_task_summary(intraday_dates).items() if key != "task_count"}},
-            {"stage": "intraday_1m", "enabled": bool(include_1m), "provider": "tushare_proxy" if use_proxy_bootstrap else "mootdx_online", **_date_task_summary(incremental_1m_dates)},
+            {"stage": "intraday_5m", "enabled": True, "provider": "tushare_proxy" if use_proxy_bootstrap else "mootdx_online_with_baostock_fallback", "trade_date_count": len(intraday_dates), **{key: value for key, value in _date_task_summary(intraday_dates).items() if key != "task_count"}},
             {"stage": "build_candidate"},
             {"stage": "semantic_audit"},
             {"stage": "diff_candidate", "against": "active"},
             {"stage": "cas_publish"},
+            {"stage": "post_publish_semantic_hash_audit"},
+            {"stage": "retire_v2_intraday", "enabled": bool(bootstrap), "delete": True, "guarded": True},
         ],
     }
 
@@ -258,8 +257,6 @@ def run_update(
     workspace_root: str | Path | None = None,
     bootstrap: bool = False,
     start_date: str = "",
-    include_5m: bool = True,
-    include_1m: bool = False,
     include_secondary: bool = True,
     historical_provider: str = "",
     publish: bool = True,
@@ -271,8 +268,6 @@ def run_update(
         workspace_root=workspace_root,
         bootstrap=bootstrap,
         start_date=start_date,
-        include_5m=include_5m,
-        include_1m=include_1m,
         include_secondary=include_secondary,
         historical_provider=historical_provider,
     )
@@ -343,89 +338,120 @@ def run_update(
         dates = [date for date in dates if str(plan["start_date"]) <= date <= str(as_of_date)]
         daily_dates = dates if bootstrap else dates[-10:]
         factor_dates = dates if bootstrap else dates[-60:]
-        proxy_all_symbols: list[str] = []
-        proxy_mainboard_symbols: list[str] = []
-        proxy_lifecycle: dict[str, tuple[str, str]] = {}
-        if use_proxy_bootstrap:
-            proxy_all_symbols, _ = proxy_symbol_inventory(
-                workspace_root=workspace_root,
-                mainboard_only=False,
-            )
-            proxy_mainboard_symbols, proxy_lifecycle = proxy_symbol_inventory(
-                workspace_root=workspace_root,
-                mainboard_only=True,
-            )
-            reference_plan = (
-                ("daily", dates, ()),
-                ("daily-basic", dates, ()),
-                ("status", dates, ()),
-                ("factor", (), proxy_all_symbols),
-                ("identity", (), proxy_all_symbols),
-                ("dividend", (), proxy_all_symbols),
-                ("financial", (), proxy_all_symbols),
-            )
-            for reference_domain, reference_dates, reference_symbols in reference_plan:
-                result = ingest_tushare_proxy_reference(
-                    domain=reference_domain,
-                    start_date="1990-01-01" if reference_domain in {"factor", "identity", "dividend"} else str(plan["start_date"]),
-                    end_date=str(as_of_date),
-                    trade_dates=reference_dates,
-                    symbols=reference_symbols,
-                    workspace_root=workspace_root,
-                    resume=True,
-                    max_workers=4,
-                )
-                record(f"tushare_proxy_{reference_domain}", result)
-                if result.get("status") != "completed":
-                    raise RuntimeError(f"tushare_proxy_{reference_domain}_incomplete:{result.get('status')}")
-            if include_1m:
-                for wave_start, wave_end, wave_name in (
-                    (str(plan["start_date"]), min("2019-12-31", str(as_of_date)), "2010_2019"),
-                    ("2020-01-01", str(as_of_date), "2020_cutoff"),
-                ):
-                    if wave_start > wave_end:
-                        continue
-                    proxy_intraday = ingest_tushare_proxy_intraday_pair(
-                        symbols=proxy_mainboard_symbols,
-                        start_date=wave_start,
-                        end_date=wave_end,
-                        workspace_root=workspace_root,
-                        lifecycle_ranges=proxy_lifecycle,
-                        resume=True,
-                        run_label=f"bootstrap_{wave_name}_{str(as_of_date).replace('-', '')}",
-                    )
-                    record(f"tushare_proxy_intraday_{wave_name}", proxy_intraday)
-                    if proxy_intraday.get("status") != "completed":
-                        state["status"] = str(proxy_intraday.get("status") or "paused")
-                        state["finished_at"] = utc_now()
-                        atomic_write_json(run_path, state)
-                        return {**state, "run_path": str(run_path.resolve())}
         security_ref = ingest_security_master(as_of_date=str(as_of_date), workspace_root=workspace_root, refresh=True)
         security_master = read_raw_partition(security_ref)
         record("security_master", {"status": "completed", "content_sha256": security_ref.content_sha256, "row_count": security_ref.row_count})
-        daily_result = ingest_baostock_date_partitions(
-            mode="date-snapshot",
-            trade_dates=daily_dates,
-            workspace_root=workspace_root,
-            refresh=not bootstrap,
-            cross_check=True,
-            security_master=security_master,
-            job_id=f"{run_id}__daily",
-        )
+
+        def run_baostock_core() -> tuple[dict[str, Any], dict[str, Any]]:
+            daily = ingest_baostock_date_partitions(
+                mode="date-snapshot",
+                trade_dates=daily_dates,
+                workspace_root=workspace_root,
+                refresh=not bootstrap,
+                cross_check=True,
+                security_master=security_master,
+                job_id=f"{run_id}__daily",
+            )
+            factor = ingest_baostock_date_partitions(
+                mode="date-events",
+                trade_dates=factor_dates,
+                workspace_root=workspace_root,
+                refresh=not bootstrap,
+                cross_check=False,
+                job_id=f"{run_id}__factor",
+            )
+            return daily, factor
+
+        proxy_all_symbols: list[str] = []
+        proxy_mainboard_symbols: list[str] = []
+        proxy_lifecycle: dict[str, tuple[str, str]] = {}
+        proxy_pause_status = ""
+        proxy_pause_result: dict[str, Any] = {}
+        if use_proxy_bootstrap:
+            with ThreadPoolExecutor(max_workers=1, thread_name_prefix="qdp-v3-baostock-core") as executor:
+                baostock_future = executor.submit(run_baostock_core)
+                proxy_all_symbols, _ = proxy_symbol_inventory(
+                    workspace_root=workspace_root,
+                    mainboard_only=False,
+                )
+                proxy_mainboard_symbols, proxy_lifecycle = proxy_symbol_inventory(
+                    workspace_root=workspace_root,
+                    mainboard_only=True,
+                )
+                reference_plan = (
+                    ("daily", dates, ()),
+                    ("daily-basic", dates, ()),
+                    ("identity", (), proxy_all_symbols),
+                    ("status", dates, ()),
+                    ("factor", (), proxy_all_symbols),
+                    ("dividend", (), proxy_all_symbols),
+                    ("financial", (), proxy_all_symbols),
+                )
+                proxy_error: RuntimeError | None = None
+                for reference_domain, reference_dates, reference_symbols in reference_plan:
+                    result = ingest_tushare_proxy_reference(
+                        domain=reference_domain,
+                        start_date="1990-01-01" if reference_domain in {"factor", "identity", "dividend"} else str(plan["start_date"]),
+                        end_date=str(as_of_date),
+                        trade_dates=reference_dates,
+                        symbols=reference_symbols,
+                        workspace_root=workspace_root,
+                        resume=True,
+                        max_workers=3,
+                    )
+                    record(f"tushare_proxy_{reference_domain}", result)
+                    if result.get("status") != "completed":
+                        stage_status = str(result.get("status") or "partial")
+                        if stage_status.startswith("paused_"):
+                            proxy_pause_status = stage_status
+                            proxy_pause_result = result
+                        else:
+                            proxy_error = RuntimeError(
+                                f"tushare_proxy_{reference_domain}_incomplete:{stage_status}"
+                            )
+                        break
+                    if baostock_future.done() and baostock_future.exception() is not None:
+                        proxy_error = RuntimeError("baostock_core_failed_during_proxy_bootstrap")
+                        break
+                if not proxy_pause_status and proxy_error is None:
+                    for wave_start, wave_end, wave_name in (
+                        (str(plan["start_date"]), min("2019-12-31", str(as_of_date)), "2010_2019"),
+                        ("2020-01-01", str(as_of_date), "2020_cutoff"),
+                    ):
+                        if wave_start > wave_end:
+                            continue
+                        proxy_intraday = ingest_tushare_proxy_intraday(
+                            symbols=proxy_mainboard_symbols,
+                            start_date=wave_start,
+                            end_date=wave_end,
+                            workspace_root=workspace_root,
+                            lifecycle_ranges=proxy_lifecycle,
+                            resume=True,
+                            job_id=f"tushare_proxy__intraday_5m__bootstrap_{wave_name}_{str(as_of_date).replace('-', '')}",
+                            max_workers=3,
+                        )
+                        record(f"tushare_proxy_intraday_5m_{wave_name}", proxy_intraday)
+                        if proxy_intraday.get("status") != "completed":
+                            proxy_pause_status = str(proxy_intraday.get("status") or "paused")
+                            proxy_pause_result = proxy_intraday
+                            break
+                daily_result, factor_result = baostock_future.result()
+                if proxy_error is not None:
+                    raise proxy_error
+        else:
+            daily_result, factor_result = run_baostock_core()
         record("daily_date_snapshot", daily_result)
         if daily_result.get("failed_count"):
             raise RuntimeError("daily_date_snapshot_stage_failed")
-        factor_result = ingest_baostock_date_partitions(
-            mode="date-events",
-            trade_dates=factor_dates,
-            workspace_root=workspace_root,
-            refresh=not bootstrap,
-            cross_check=False,
-            job_id=f"{run_id}__factor",
-        )
         record("factor_date_events", factor_result)
         if factor_result.get("failed_count"):
             raise RuntimeError("factor_date_events_stage_failed")
+        if proxy_pause_status:
+            state["status"] = proxy_pause_status
+            state["finished_at"] = utc_now()
+            state["paused_stage"] = proxy_pause_result
+            atomic_write_json(run_path, state)
+            return {**state, "run_path": str(run_path.resolve())}
         all_symbols = _all_stock_symbols(security_master)
         lifecycle_ranges = _security_lifecycle_ranges(security_master)
         factor_event_symbols = _recent_factor_event_symbols(trade_dates=factor_dates, workspace_root=workspace_root)
@@ -500,8 +526,8 @@ def run_update(
                 record(f"secondary_{report_domain}", report_result)
                 if report_result.get("failed_count"):
                     raise RuntimeError(f"secondary_{report_domain}_stage_failed")
-        if include_5m and not use_proxy_bootstrap:
-            intraday_dates = [date for date in dates if date >= "2020-01-01"] if bootstrap else dates[-1:]
+        if not use_proxy_bootstrap:
+            intraday_dates = dates[-10:]
             intraday_result = ingest_intraday_5m(
                 symbols=_mainboard_symbols(security_master),
                 trade_dates=intraday_dates,
@@ -510,16 +536,6 @@ def run_update(
                 refresh=not bootstrap,
             )
             record("intraday_5m", intraday_result)
-        if include_1m and not use_proxy_bootstrap:
-            one_minute_result = ingest_mootdx_intraday_1m(
-                trade_dates=dates[-10:],
-                workspace_root=workspace_root,
-                refresh=True,
-                job_id=f"{run_id}__intraday_1m",
-            )
-            record("intraday_1m", one_minute_result)
-            if one_minute_result.get("status") not in {"completed", "pending_provider_unhealthy"}:
-                raise RuntimeError(f"intraday_1m_stage_failed:{one_minute_result.get('status')}")
         candidate = build_candidate(
             workspace_root=workspace_root,
             start_date=str(plan["start_date"] if bootstrap else "2010-01-01"),
@@ -531,6 +547,10 @@ def run_update(
         record("semantic_audit", audit)
         candidate_diff = diff_candidate(candidate.candidate_id, workspace_root=workspace_root, against="active")
         record("diff_candidate", candidate_diff)
+        atomic_write_json(
+            paths.audits / candidate.candidate_id / "v2_v3_diff.json",
+            candidate_diff,
+        )
         state["diff"] = candidate_diff
         if publish:
             publish_result = publish_candidate(
@@ -541,9 +561,35 @@ def run_update(
             record("cas_publish", publish_result)
         else:
             publish_result = {"status": "not_requested"}
-        state["status"] = "completed" if publish_result.get("status") in {"published", "not_requested"} else "blocked"
         state["candidate_id"] = candidate.candidate_id
         state["publish"] = publish_result
+        if publish_result.get("status") == "published":
+            post_publish_audit = audit_candidate(
+                candidate_id=candidate.candidate_id,
+                mode="semantic",
+                workspace_root=workspace_root,
+            )
+            record("post_publish_semantic_hash_audit", post_publish_audit)
+            if post_publish_audit.get("status") != "passed":
+                state["status"] = "published_validation_failed"
+            elif bootstrap:
+                state["status"] = "published_pending_cleanup"
+                atomic_write_json(run_path, state)
+                retirement = retire_v2_intraday(
+                    expect_active_sha=str(publish_result.get("active_sha256", "") or ""),
+                    workspace_root=workspace_root,
+                    delete=True,
+                    yes=True,
+                )
+                record("retire_v2_intraday", retirement)
+                state["retirement"] = retirement
+                state["status"] = "completed" if retirement.get("status") == "retired" else "published_cleanup_blocked"
+            else:
+                state["status"] = "completed"
+        elif publish_result.get("status") == "not_requested":
+            state["status"] = "completed"
+        else:
+            state["status"] = "blocked"
     except Exception as exc:
         state["status"] = "failed"
         state["error"] = f"{type(exc).__name__}: {exc}"

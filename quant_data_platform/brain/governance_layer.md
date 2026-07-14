@@ -23,11 +23,11 @@
 `invariant`: 双路径事件键和值一致或被官方证据唯一仲裁；非事件日不跳变；因子有限正值；参考价误差不超过一 tick；baseline unproven 不得产生 strict adjusted return；执行价只用 raw。
 
 ### object `intraday_5m_quality_tier`
-`scope`: mootdx、BaoStock、旧 TDX 5m raw/canonical。
-`invariant`: 单个 strict 股票日来自一个完整来源并有 48 根右闭合 bars；禁止跨源拼接；2011-2019 旧 TDX 仅 provisional；未解决冲突进入 quarantine。
+`scope`: Tushare proxy、mootdx、BaoStock、旧 TDX 5m raw/canonical。
+`invariant`: v3 5m 是唯一分钟事实域；单个 strict 股票日来自一个完整来源并有 48 根右闭合 bars、稳定 identity 与日线量价证明；禁止跨源拼接；质量不以 2020 固定分层，旧 TDX 单源仅 provisional；未解决冲突进入 quarantine。
 
 ### object `raw_market_data`
-`scope`: `market_daily_raw`、`market_intraday_1m` and provider raw/staging data.
+`scope`: v3 `market_daily_raw`、`market_intraday_5m` and provider raw/staging data；v2 `market_intraday_1m` 仅作为退休前受保护的 legacy active。
 `invariant`: preserve original OHLCV units and adjustment state; derived adjusted fields or features are separate outputs.
 
 ### object `pit_historical_semantics`
@@ -35,12 +35,16 @@
 `invariant`: current snapshots do not backfill historical semantics without PIT/available-time proof.
 
 ### object `rebuildable_cache`
-`scope`: 5m bars, daily panel, intraday daily features, limit intraday features.
+`scope`: daily panel, intraday daily features, limit intraday features；v2 旧 5m 可由旧 1m 重建，但 v3 5m 不属于 cache。
 `invariant`: cache/derived tables must be reproducible from active raw facts or an explicit source dataset.
 
 ### object `data_cleanup`
 `scope`: unreferenced dataset dirs, archived repair outputs, staging outputs.
-`invariant`: v3 GC 递归保护 active/candidate/pin/rollback/audit 的 `inputs[]`；不可达超过 30 天才移入 `.trash`，再保留 7 天；v3 首次发布和成功增量更新前 v2、旧 1m、旧 5m 与分钟证据全部 pin。
+`invariant`: 常规 v3 GC 递归保护 active/candidate/pin/rollback/audit 的 `inputs[]`，不可达超过 30 天才移入 `.trash`，再保留 7 天。用户已单独授权在 v3 CAS 发布、5m 覆盖/hash、semantic audit、v2/v3 diff、下游切换、无消费者/job 与 retirement manifest 全部通过后，立即物理退休 v2 旧 1m、旧 5m、`intraday_daily_features`、`limit_intraday_features`；任一条件失败不得删除。
+
+### object `provider_secret`
+`scope`: `QDP_TUSHARE_PROXY_TOKEN` and proxy transport metadata.
+`invariant`: Token 只存在于进程环境；仓库、日志、异常、job、receipt、manifest 和带 Token 的 URL 均不得出现明文。只允许 SHA-256 指纹与非敏感账户元数据。
 
 ### object `archived_v1_surface`
 `scope`: old lake/catalog/canonical/memmap/daily-update/repair commands.

@@ -26,9 +26,11 @@ from quant_data_platform.qdp_v3.ingest import (
 )
 from quant_data_platform.qdp_v3.intraday import ingest_intraday_5m
 from quant_data_platform.qdp_v3.manifest import active_manifest_sha256, dataset_manifest_for_id, manifest_sha256, read_dataset_manifest
+from quant_data_platform.qdp_v3.mootdx_compatibility import run_mootdx_5m_compatibility_gate
 from quant_data_platform.qdp_v3.paths import qdp_v3_paths
 from quant_data_platform.qdp_v3.proxy_compatibility import lock_bootstrap_cutoff, run_tushare_proxy_compatibility_gate
 from quant_data_platform.qdp_v3.release import diff_candidate, publish_candidate, read_candidate, rollback_active
+from quant_data_platform.qdp_v3.retirement import retire_v2_intraday
 from quant_data_platform.qdp_v3.secondary import ingest_baostock_report_domain, ingest_baostock_snapshot_domain
 from quant_data_platform.qdp_v3.update import plan_update, run_update
 
@@ -53,6 +55,7 @@ QDP v3 manifest-first data-base commands:
                                  Compare-and-swap publish after semantic audit.
   rollback --expect-active-sha SHA
                                  Restore the latest rollback manifest.
+  retire-v2-intraday             Retire v2 minute shards after verified v3 publication.
   update                         Execute ingest -> build -> audit -> CAS publish.
   gc                             Traverse active/candidate/pin/rollback/audit lineage.
   freeze v2                      Freeze and pin the legacy v2 evidence base.
@@ -60,6 +63,8 @@ QDP v3 manifest-first data-base commands:
   compatibility run             Prove 0.9.3 batch/legacy compatibility.
   compatibility run --provider tushare-proxy
                                  Prove proxy entitlement, APIs and reverse pagination.
+  compatibility run --provider mootdx
+                                 Prove dynamic-node discovery and recent complete 5m bars.
 
 Human-readable output is the default. Use --json for stable machine output.
 """
@@ -199,7 +204,6 @@ def _ingest(argv: list[str]) -> int:
     parser.add_argument("--provider", default="baostock", choices=("baostock", "mootdx", "tushare-proxy"))
     parser.add_argument("--mode", required=True, choices=("historical", "date-snapshot", "date-events", "factor-symbol-history", "calendar", "security-master", "intraday-5m", "corporate-actions", "financial-quarterly", "performance-forecast", "performance-express", "industry", "index-constituents"))
     parser.add_argument("--domain", default="", choices=("", "stock-basic", "trade-calendar", "daily", "daily-basic", "factor", "identity", "status", "dividend", "financial", "intraday"))
-    parser.add_argument("--frequency", default="", choices=("", "1m", "5m"))
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--trade-date", action="append", default=[])
     parser.add_argument("--start-date", default="")
@@ -241,8 +245,6 @@ def _ingest(argv: list[str]) -> int:
                 workspace_root=workspace,
             )
         if args.domain == "intraday":
-            if not args.frequency:
-                parser.error("historical intraday requires --frequency 1m|5m")
             if not symbols:
                 parser.error("historical intraday requires proxy stock-basic raw or --symbol/--symbols-file")
             cutoff = lock_bootstrap_cutoff(
@@ -251,18 +253,15 @@ def _ingest(argv: list[str]) -> int:
             )
             payload = ingest_tushare_proxy_intraday(
                 symbols=symbols,
-                frequency=str(args.frequency),
                 start_date=str(args.start_date),
                 end_date=str(cutoff["bootstrap_cutoff"]),
                 workspace_root=workspace,
                 lifecycle_ranges=lifecycle,
                 resume=bool(args.resume),
                 job_id=str(args.job_id),
-                max_workers=4,
+                max_workers=3,
             )
         else:
-            if args.frequency:
-                parser.error("--frequency is only valid for --domain intraday")
             if args.domain in {"factor", "identity", "dividend", "financial"} and not symbols:
                 parser.error(f"historical {args.domain} requires proxy stock-basic raw or --symbol/--symbols-file")
             payload = ingest_tushare_proxy_reference(
@@ -274,7 +273,7 @@ def _ingest(argv: list[str]) -> int:
                 workspace_root=workspace,
                 resume=bool(args.resume),
                 job_id=str(args.job_id),
-                max_workers=4,
+                max_workers=3,
             )
     elif args.mode in {"financial-quarterly", "performance-forecast", "performance-express"}:
         if args.provider != "baostock":
@@ -466,6 +465,26 @@ def _gc(argv: list[str]) -> int:
     return 0
 
 
+def _retire_v2_intraday(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="qdp retire-v2-intraday",
+        description="Physically retire the v2 intraday chain after all v3 release guards pass.",
+    )
+    _common(parser)
+    parser.add_argument("--expect-active-sha", required=True)
+    parser.add_argument("--delete", action="store_true")
+    parser.add_argument("--yes", action="store_true")
+    args = parser.parse_args(argv)
+    payload = retire_v2_intraday(
+        expect_active_sha=str(args.expect_active_sha),
+        workspace_root=_workspace(args),
+        delete=bool(args.delete),
+        yes=bool(args.yes),
+    )
+    _emit(payload, as_json=bool(args.json))
+    return 0 if payload.get("status") in {"ready_to_delete", "retired"} else 2
+
+
 def _freeze(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="qdp freeze v2", description="Hash and pin the QDP v2 active/minute evidence base.")
     _common(parser)
@@ -492,9 +511,7 @@ def _update(argv: list[str]) -> int:
     parser.add_argument("--start-date", default="")
     parser.add_argument("--bootstrap", action="store_true")
     parser.add_argument("--historical-provider", default="", choices=("", "tushare-proxy"))
-    parser.add_argument("--include-1m", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--no-5m", action="store_true")
     parser.add_argument("--no-secondary", action="store_true")
     parser.add_argument("--no-publish", action="store_true")
     parser.add_argument("--hash-v2-shards", action="store_true")
@@ -504,8 +521,6 @@ def _update(argv: list[str]) -> int:
         "workspace_root": _workspace(args),
         "bootstrap": bool(args.bootstrap),
         "start_date": str(args.start_date),
-        "include_5m": not bool(args.no_5m),
-        "include_1m": bool(args.include_1m),
         "include_secondary": not bool(args.no_secondary),
         "historical_provider": str(args.historical_provider),
     }
@@ -539,7 +554,7 @@ def _compatibility_capture(argv: list[str]) -> int:
 def _compatibility_run(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="qdp compatibility run", description="Run a provider compatibility and protocol gate.")
     _common(parser)
-    parser.add_argument("--provider", default="baostock", choices=("baostock", "tushare-proxy"))
+    parser.add_argument("--provider", default="baostock", choices=("baostock", "mootdx", "tushare-proxy"))
     parser.add_argument("--as-of-date", default="")
     parser.add_argument("--smoke", action="store_true")
     args = parser.parse_args(argv)
@@ -548,6 +563,11 @@ def _compatibility_run(argv: list[str]) -> int:
             workspace_root=_workspace(args),
             as_of_date=str(args.as_of_date),
             smoke=bool(args.smoke),
+        )
+    elif args.provider == "mootdx":
+        payload = run_mootdx_5m_compatibility_gate(
+            workspace_root=_workspace(args),
+            as_of_date=str(args.as_of_date),
         )
     else:
         payload = run_baostock_0_9_3_compatibility_gate(workspace_root=_workspace(args), smoke=bool(args.smoke))
@@ -566,6 +586,7 @@ COMMANDS: dict[tuple[str, ...], Callable[[list[str]], int]] = {
     ("diff",): _diff,
     ("publish",): _publish,
     ("rollback",): _rollback,
+    ("retire-v2-intraday",): _retire_v2_intraday,
     ("gc",): _gc,
     ("freeze", "v2"): _freeze,
     ("compatibility", "capture-golden"): _compatibility_capture,

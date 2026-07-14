@@ -86,7 +86,7 @@ freeze 保存并 pin 了 39 个仍存在的 v2 dataset，同时 pin 了 17 个 a
 - `universe_snapshot__a468bc540bf34f07fa93a1d0`
 - `valuation__5005fb2d8755d7f0c2f3aa4c`
 
-初次状态为 `blocked_missing_lineage`。搜索未找到副本；不能假定一定由哪一次 GC 删除。用户随后明确授权接受不可恢复 lineage gap 的替代证明：39 个仍存在 dataset、23,738 shards、23,777 files 已全量 hash，缺失 id 和引用证据继续保留，最终状态为 `complete_with_authorized_lineage_gap`。发布验证只能显式接受该授权合同，不能把它伪装为 `lineage_complete=true`；删除型 GC 仍禁止到 v3 首次发布并成功完成一次增量更新。
+初次状态为 `blocked_missing_lineage`。搜索未找到副本；不能假定一定由哪一次 GC 删除。用户随后明确授权接受不可恢复 lineage gap 的替代证明：39 个仍存在 dataset、23,738 shards、23,777 files 已全量 hash，缺失 id 和引用证据继续保留，最终状态为 `complete_with_authorized_lineage_gap`。发布验证只能显式接受该授权合同，不能把它伪装为 `lineage_complete=true`；后续 5m-only 授权将删除边界更新为“v3 发布与发布后全部校验通过，再由专用 retirement 命令只清理四条旧分钟链”。
 
 ## 兼容性证据
 
@@ -178,3 +178,40 @@ warm-session 小样本显示第二批逐证券因子史约从 `1.87s` 降至 `0.
 - 三个仍期望已归档 v1 CLI 可执行的旧测试已改为验证 archive boundary，防止训练 pack/memmap/provider-eval 被重新接回 QDP 日常 CLI。
 
 下一安全动作是继续 2013 以后日期回灌，同时启动逐证券完整因子史、mootdx xdxr 和官方公告仲裁；只有 2010 baseline、参考价一 tick 证明、因子双路径和 5m 发布门全部通过后，才构建全历史 release candidate。full compatibility、M0 入口和 2010—2012 raw 已不再是当前阻塞点。
+
+## 2026-07-14 5m-only 合同收敛与 Tushare bootstrap
+
+用户随后明确取消 v3 1m，QDP v3 合同更新为 `qdp_v3_20260714_bootstrap_5m`、schema `3.2.0`、manifest `3`。`market_intraday_5m` 成为唯一分钟 canonical 事实域，正式起点为 2010-01-01；旧 2020 strict 分界已删除，质量按每个股票日的结构、日线、身份与来源证据决定。v2 当前 active 的 1m/5m 合同保持原样，直到 v3 正式发布与发布后校验全部通过。
+
+代码面删除了 v3 `intraday_1m.py`、`mootdx_1m.py`、`--include-1m`、`--frequency 1m|5m`、1m watermark/lag、241→240 和 1m→5m 生产转换。`HistoryPageFetchRequest` 固定为 5m，Tushare provider 内部固定 `stk_mins(freq=5min)`；canonical 5m 以 `security_id, trade_date, bar_end` 为主键，按自然年和稳定 64 个 security bucket 分片。候选发布要求 5m watermark 与 daily 完全相等，不只是“不落后”。
+
+Tushare-compatible proxy 被限定为 `2010-01-01..2026-07-13` 的一次性历史启动源，`upstream_provenance=not_exposed`，不使用 SDK。Token 只从 `QDP_TUSHARE_PROXY_TOKEN` 读取；exact-token 全工作区文本扫描为 0。历史页每次最多 8,000 行、时间倒序，页级 staging/cursor 可恢复；单证券完成后合并为一个 immutable raw。三个 worker 共享进程级 limiter，最多 3 个在途请求；429 会对全部 worker 施加共享冷却。实测 135/121/108 次每分钟均持续触发网关 429，而独立成功吞吐约为 94 次/分钟；因此生产默认收敛为 96 次/分钟、burst 1，保留 3 workers 覆盖慢响应，并在 429 后按冷却窗口自适应降至最低 90。把在途数固定降为 2 的实测成功吞吐仅约 80 次/分钟，不作为默认路线。
+
+分钟单位用固定样本与同源日线聚合证明：
+
+- `600000.SH/2010-01-04`：48 bars，volume ratio `0.99999943`，amount ratio `1.00049729`。
+- `000001.SZ/2010-01-04`：48 bars，volume ratio `0.99999686`，amount ratio `1.00007160`。
+- `302132.SZ/2016-01-06`：48 bars，volume ratio `0.99999352`，amount ratio `1.00005662`；旧代码 `300114.SZ` 返回空，再次证明 provider code 不能作历史身份。
+- `600000.SH/2026-07-13`：48 bars，volume ratio `1.00000050`，amount ratio `1.00000000`。
+
+唯一稳定换算是分钟 raw `vol=share`、`amount=CNY`，两者 canonical scale 均为 1.0；兼容闸门现会在 `(1,100)` 与 `(1,1000)` 候选中证明唯一尺度，manifest 显式记录 raw units 和 scale。
+
+mootdx 节点不再依赖硬编码 IP。候选是持久化 last-good、`tdxpy.constants.hq_hosts`、mootdx `HQ_HOSTS/SERVER.HQ` 的去重并集；先并发 TCP 排序，再对最快 24 个中的最多 8 个做真实 `frequency=0` 5m 请求。`600000.SH`、`000001.SZ`、`600076.SH` 最近完整日均为 48 bars 且止于 15:00；冷启动 9.6877 秒、热启动 0.0784 秒，保存最快 3 个协议健康节点。全源失败才打开 300 秒负缓存并交给 BaoStock。
+
+新增 `retire-v2-intraday` 只在 v3 active SHA、semantic audit、5m 99.95% 覆盖、daily/5m watermark、全部 shard hash、v2/v3 diff、下游切换和无运行 job/消费者全部通过后执行；先写 immutable retirement manifest，再只删除 v2 `market_intraday_1m`、`market_intraday_5m`、`intraday_daily_features`、`limit_intraday_features` parquet。当前 v3 未发布，因此该命令会拒绝删除，v2 active SHA 未改变。
+
+验证结果：5m-only/provider/identity 目标测试 76 passed；加入单位与 pre-2020 evidence-driven 回归后相关测试 36 passed；完整 `tests/data_platform` 为 239 passed、1 个既有 pandas FutureWarning；`compileall` 与 `git diff --check` 通过。后台 bootstrap 已从原 job 断点恢复，`stock_basic` 与 `trade_cal` 完成，`daily` 正在推进；日志无协议/网络错误，额度或外部下载未完成前不构造 candidate、不发布、不退休 v2。
+
+## 2026-07-14 5m-only 实施闭环与生产恢复
+
+进一步审计修复了三个会影响正式 canonical 的边界：同一 `security_id` 的新旧 provider code 只要历史值有任何差异就整体进入 quarantine，不能因 PIT code 恰好存在而忽略另一个别名；完整 mootdx 与不完整 BaoStock 并存时仍选择完整 mootdx，只有两个完整来源超阈值冲突才隔离；两波历史捕获即使都是有官方代码重述证据的合法空分区也能稳定合并，不要求伪造时间列。对应回归已加入 identity/intraday 与 proxy 测试。
+
+Tushare 参考域的实际执行顺序收敛为 `daily -> daily_basic -> identity -> status -> factor -> dividend -> financial`。BaoStock 2013+ 日期日线/因子回灌在单独线程与 Tushare 并行，但 BaoStock 内部继续保持一个持久 login 和一个网络在途；Tushare quota/disk 暂停时先记录 BaoStock 结果，再以可恢复状态退出。2026-07-14 22:43 本地证据快照中，全市场 `daily` 与 `daily_basic` 均完成 `4011/4011`；DAG 已自动切换到 5,864 个 L/D/P 全历史 identity 任务并完成 `3072/5864`。修正 limiter 后的新进程前 1,053 个真实请求为 `1053/1053` 成功，网络、协议、429 均为 0；旧进程的 7% 级 429 重试不再被最终任务成功掩盖。BaoStock job 同时为 731 个已有日期复用加 182 个新日期完成并继续向 2013+ 推进。所有 job/cursor 均为原子 JSON 或 immutable raw，v2 active 未改变。
+
+mootdx 当前代码重新运行真实闸门，`600000.SH`、`000001.SZ`、`600076.SH` 在 `2026-07-13` 均为 48 根且最后一根 15:00；冷启动 `1.4336s`、last-good 热启动 `0.0692s`。报告为 `data/qdp_v3/compatibility/mootdx_5m__edc251d8b9a04640fab6f93b.json`，没有硬编码探针 IP。
+
+semantic audit 新增自动 secret gate：控制目录、仓库生产文本、candidate 实际 dataset manifest/quality proof 以及已有 lineage 审计单次读取的 raw receipt 都检查当前 Token 精确值、未脱敏 token URL 和 credential 字段；内容 hash 形式的兼容缓存 token 明确不误判。当前运行产物扫描为零泄露。首次 bootstrap CAS 发布后会再跑一次 semantic/full-shard hash 审计；只有复核通过才自动调用 `retire-v2-intraday --delete --yes`，任一前置失败状态为 `published_cleanup_blocked` 且不删除旧 parquet。
+
+接管复核又修正了两个发布证据边界：已有 5m cutoff proof 通过时必须返回 sidecar 中的 48 根证据，不能把 immutable legacy 1m 锁中的 241 根回写到 run 状态；canonical 5m 构建和 full audit 统一为自然年加稳定 64 个 `security_id` bucket，每个 year/bucket 只生成一个可包含多证券的 shard，并逐证券复核稳定桶归属。
+
+最终代码验证为 `255 passed`、1 个既有 pandas FutureWarning；`compileall`、`git diff --check`、`brain_sync_audit`、`doc_guard` 与 `integrity_check` 均通过。CLI 会拒绝 `--include-1m` 和 `--frequency 1m`；v3 生产路由中的 1m 引用为零，剩余 `market_intraday_1m` 字样只存在于 v2 冻结与受保护退休清单。当前 H 盘空闲仍高于 200 GiB 暂停阈值。全量参考域、历史 5m、identity/factor/PIT 仲裁、candidate 与发布仍是进行中任务，不能把“代码已实现”误写成“数据基底已发布”。

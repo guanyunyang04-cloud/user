@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 import pandas as pd
 import pytest
 
@@ -10,6 +12,12 @@ from quant_data_platform.providers import (
     assert_baostock_batch_runtime,
     _baostock_bulk_adjust_factor_event_frame,
     _baostock_bulk_query_to_frame,
+    _clear_mootdx_protocol_cache,
+    _mootdx_complete_5m_probe,
+    _mootdx_hq_server_candidates,
+    _mootdx_protocol_cache_snapshot,
+    _mootdx_protocol_servers_snapshot,
+    _probe_mootdx_protocol_clients,
     _quiet_baostock_call,
     MootdxOnlineProvider,
 )
@@ -312,6 +320,109 @@ def test_mootdx_provider_reuses_one_client_until_explicit_close() -> None:
     assert instances[0].closed == 0
     provider.close()
     assert instances[0].closed == 1
+
+
+def _complete_probe_payload(trade_date: str = "2026-07-14") -> pd.DataFrame:
+    timestamps = [
+        *pd.date_range(f"{trade_date} 09:35", f"{trade_date} 11:30", freq="5min"),
+        *pd.date_range(f"{trade_date} 13:05", f"{trade_date} 15:00", freq="5min"),
+    ]
+    return pd.DataFrame({"datetime": timestamps, "close": [10.0] * len(timestamps)})
+
+
+def test_mootdx_candidates_merge_last_good_tdxpy_and_mootdx(monkeypatch: pytest.MonkeyPatch) -> None:
+    from quant_data_platform import providers
+    import mootdx.config as mootdx_config
+    import tdxpy.constants as tdxpy_constants
+
+    monkeypatch.setattr(providers, "_mootdx_persisted_last_good_servers", lambda: (("last.good", 7709),))
+    monkeypatch.setattr(
+        tdxpy_constants,
+        "hq_hosts",
+        [("tdx", "1.1.1.1", 7709), ("duplicate", "2.2.2.2", 7709)],
+    )
+    monkeypatch.setattr(
+        mootdx_config,
+        "HQ_HOSTS",
+        [("mootdx", "3.3.3.3", 7709), ("duplicate", "2.2.2.2", 7709)],
+    )
+    monkeypatch.setattr(
+        mootdx_config,
+        "get",
+        lambda key: [("server", "4.4.4.4", 80)] if key == "SERVER.HQ" else [],
+    )
+
+    candidates = _mootdx_hq_server_candidates()
+
+    assert candidates[0] == ("last.good", 7709)
+    assert set(candidates) == {
+        ("last.good", 7709),
+        ("1.1.1.1", 7709),
+        ("2.2.2.2", 7709),
+        ("3.3.3.3", 7709),
+        ("4.4.4.4", 80),
+    }
+
+
+def test_mootdx_protocol_probe_requires_complete_5m_and_keeps_fastest_three(monkeypatch: pytest.MonkeyPatch) -> None:
+    from quant_data_platform import providers
+
+    _clear_mootdx_protocol_cache()
+    persisted: list[tuple[tuple[str, int], ...]] = []
+    monkeypatch.setattr(providers, "_persist_mootdx_last_good_servers", lambda servers: persisted.append(servers))
+    calls: list[tuple[tuple[str, int], int, int]] = []
+
+    class Client:
+        def __init__(self, server: tuple[str, int]) -> None:
+            self.server = server
+
+        def bars(self, *, symbol: str, frequency: int, start: int, offset: int) -> pd.DataFrame:
+            calls.append((self.server, frequency, offset))
+            time.sleep(int(self.server[0][-1]) * 0.02)
+            return _complete_probe_payload()
+
+        def close(self) -> None:
+            return None
+
+    class Quotes:
+        @staticmethod
+        def factory(*, market: str, server: tuple[str, int], **_option):
+            return Client(server)
+
+    candidates = tuple((f"node{index}", 7709) for index in range(1, 6))
+    selected = _probe_mootdx_protocol_clients(Quotes, candidates, option={})
+
+    assert selected.server == ("node1", 7709)
+    assert _mootdx_protocol_servers_snapshot() == (("node1", 7709), ("node2", 7709), ("node3", 7709))
+    assert persisted == [(("node1", 7709), ("node2", 7709), ("node3", 7709))]
+    assert all(frequency == 0 and offset == 96 for _, frequency, offset in calls)
+    assert _mootdx_complete_5m_probe(_complete_probe_payload()) == (True, "2026-07-14")
+    assert _mootdx_complete_5m_probe(_complete_probe_payload().iloc[:-1]) == (False, "")
+
+
+def test_mootdx_all_protocol_failures_open_negative_cache() -> None:
+    _clear_mootdx_protocol_cache()
+
+    class Client:
+        server = ("bad", 7709)
+
+        def bars(self, **_kwargs) -> pd.DataFrame:
+            return pd.DataFrame()
+
+        def close(self) -> None:
+            return None
+
+    class Quotes:
+        @staticmethod
+        def factory(**_kwargs):
+            return Client()
+
+    with pytest.raises(RuntimeError, match="no_protocol_healthy"):
+        _probe_mootdx_protocol_clients(Quotes, (("bad", 7709),), option={})
+    server, error = _mootdx_protocol_cache_snapshot(excluded_servers=set())
+    assert server is None
+    assert "no_protocol_healthy" in error
+    _clear_mootdx_protocol_cache()
 
 
 def test_mootdx_xdxr_raw_and_domain_adapter_preserve_semantics() -> None:

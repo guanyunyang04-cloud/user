@@ -9,9 +9,10 @@ import pytest
 
 from quant_data_platform.domains.contracts import ProviderResult
 from quant_data_platform.providers import MootdxOnlineProvider
-from quant_data_platform.qdp_v3.audit import _audit_symbol_history_name_evidence
+from quant_data_platform.qdp_v3.audit import _audit_dataset_manifest_and_shards, _audit_symbol_history_name_evidence
 from quant_data_platform.qdp_v3.constants import (
     DOMAIN_FINANCIAL_QUARTERLY,
+    DOMAIN_MARKET_INTRADAY_5M,
     EXPECTED_5M_BAR_ENDS,
     RAW_DAILY_ASTOCK,
     RAW_FINANCIAL_QUARTERLY,
@@ -30,13 +31,19 @@ from quant_data_platform.qdp_v3.identity import (
     board_for_symbol,
 )
 from quant_data_platform.qdp_v3.intraday import (
+    CANONICAL_5M_COLUMNS,
     canonicalize_selected_5m,
     deterministic_stratified_monthly_sample,
     ingest_intraday_5m,
     is_complete_5m_day,
     normalize_provider_5m,
     select_5m_day,
+    stable_security_bucket,
 )
+from quant_data_platform.qdp_v3.intraday_build import _choose_provider_day, _frames_from_bucketed_stage
+from quant_data_platform.qdp_v3.datasets import write_partitioned_dataset
+from quant_data_platform.qdp_v3.manifest import manifest_sha256
+from quant_data_platform.qdp_v3.quality import report_for
 from quant_data_platform.qdp_v3.storage import iter_raw_partitions, read_raw_partition, read_raw_receipt, write_raw_partition
 from quant_data_platform.qdp_v3.secondary import canonicalize_secondary_domain, ingest_baostock_report_domain
 from quant_data_platform.qdp_v3.transforms import (
@@ -508,6 +515,69 @@ def _bars(source: str, *, complete: bool = True, trade_date: str = "2026-06-26")
     )
 
 
+def test_intraday_stage_coalesces_natural_year_security_bucket_and_full_audit_accepts_it(
+    tmp_path: Path,
+) -> None:
+    first_by_bucket: dict[int, str] = {}
+    security_ids: tuple[str, str] | None = None
+    bucket = -1
+    for index in range(1024):
+        security_id = f"security_{index:04d}"
+        bucket = stable_security_bucket(security_id)
+        if bucket in first_by_bucket:
+            security_ids = (first_by_bucket[bucket], security_id)
+            break
+        first_by_bucket[bucket] = security_id
+    assert security_ids is not None
+
+    staged: list[tuple[str, int, Path]] = []
+    for index, security_id in enumerate(security_ids):
+        frame = _bars("tushare_proxy", trade_date="2026-07-13").assign(
+            security_id=security_id,
+            symbol_on_date=f"60000{index}.SH",
+            provider_symbol=f"60000{index}.SH",
+            quality_tier="strict",
+            source_selection_reason="unit",
+            identity_mapping_status="mapped",
+        )
+        frame = frame.loc[:, CANONICAL_5M_COLUMNS]
+        path = tmp_path / f"{security_id}.parquet"
+        frame.to_parquet(path, index=False)
+        staged.append(("2026", bucket, path))
+
+    partition_frames = list(_frames_from_bucketed_stage(staged))
+    assert len(partition_frames) == 1
+    shard_key, partition_value, combined = partition_frames[0]
+    assert shard_key == f"2026_b{bucket:02d}"
+    assert partition_value == f"2026/bucket={bucket:02d}"
+    assert set(combined["security_id"]) == set(security_ids)
+
+    root = tmp_path / "qdp_v3"
+    manifest = write_partitioned_dataset(
+        root=root,
+        domain=DOMAIN_MARKET_INTRADAY_5M,
+        partition_frames=partition_frames,
+        layer="canonical_tiered",
+        frequency="5m",
+        primary_key=["security_id", "trade_date", "bar_end"],
+        quality_report=report_for(DOMAIN_MARKET_INTRADAY_5M, []),
+        partitioning="natural_year_security_bucket",
+    )
+    manifest_path = root / "datasets" / DOMAIN_MARKET_INTRADAY_5M / manifest.dataset_id / "dataset.json"
+    findings, audited_manifest, _ = _audit_dataset_manifest_and_shards(
+        root=root,
+        domain=DOMAIN_MARKET_INTRADAY_5M,
+        dataset_id=manifest.dataset_id,
+        expected_manifest_sha=manifest_sha256(manifest_path),
+        full=True,
+    )
+
+    assert audited_manifest is not None
+    assert len(audited_manifest.shards) == 1
+    assert "intraday_shard_partition_contract_invalid" not in {item["code"] for item in findings}
+    assert "intraday_cross_shard_partition_duplicate" not in {item["code"] for item in findings}
+
+
 def test_5m_source_policy_never_stitches() -> None:
     selected, evidence = select_5m_day(mootdx=_bars("mootdx", complete=False), baostock=_bars("baostock"), trade_date="2026-06-26")
     assert len(selected) == 48
@@ -517,6 +587,51 @@ def test_5m_source_policy_never_stitches() -> None:
     selected, evidence = select_5m_day(mootdx=_bars("mootdx", complete=False), baostock=_bars("baostock", complete=False), trade_date="2026-06-26")
     assert selected.empty
     assert evidence["status"] == "quarantined"
+
+
+def test_5m_quality_tier_is_evidence_driven_before_2020() -> None:
+    trade_date = "2010-01-04"
+    selected, evidence = select_5m_day(
+        mootdx=_bars("mootdx", trade_date=trade_date),
+        baostock=_bars("baostock", complete=False, trade_date=trade_date),
+        trade_date=trade_date,
+    )
+
+    assert len(selected) == 48
+    assert selected["quality_tier"].eq("strict").all()
+    assert evidence["status"] == "strict"
+
+
+def test_5m_complete_mootdx_survives_unavailable_baostock_audit() -> None:
+    selected, evidence = select_5m_day(
+        mootdx=_bars("mootdx"),
+        baostock=_bars("baostock", complete=False),
+        trade_date="2026-06-26",
+        compare_sources=True,
+    )
+
+    assert len(selected) == 48
+    assert evidence["status"] == "strict"
+    assert evidence["comparison"]["reason"] == "baostock_comparison_unavailable"
+
+
+def test_provider_code_restatement_conflict_is_quarantined_before_pit_preference() -> None:
+    registry = _registry()
+    old_code = _bars("tushare_proxy", trade_date="2016-01-04")
+    old_code["provider_symbol"] = "300114.SZ"
+    new_code = old_code.copy()
+    new_code["provider_symbol"] = "302132.SZ"
+    new_code.loc[new_code.index[0], "close"] = 10.02
+
+    selected, reason = _choose_provider_day(
+        pd.concat([old_code, new_code], ignore_index=True),
+        security_id=str(registry.security_id_for_provider_symbol("300114.SZ")),
+        trade_date="2016-01-04",
+        registry=registry,
+    )
+
+    assert selected.empty
+    assert reason == "provider_code_restatement_value_conflict"
 
 
 @pytest.mark.parametrize(

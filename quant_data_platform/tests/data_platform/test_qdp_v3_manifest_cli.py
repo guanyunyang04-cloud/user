@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 
 from quant_data_platform.cli import main as public_cli
+from quant_data_platform.qdp_v3.audit import _audit_raw_references, _audit_secret_artifacts
 from quant_data_platform.qdp_v3.datasets import read_dataset_frame, write_dataset, write_partitioned_dataset
 from quant_data_platform.qdp_v3.gc import collect_garbage
 from quant_data_platform.qdp_v3.freeze import freeze_v2, validate_v2_freeze_proof
@@ -15,10 +17,21 @@ from quant_data_platform.qdp_v3.manifest import dataset_manifest_for_id, read_da
 from quant_data_platform.qdp_v3.paths import qdp_v3_paths
 from quant_data_platform.qdp_v3.quality import report_for
 from quant_data_platform.qdp_v3.release import _active_manifest_lock, diff_candidate, write_candidate
+from quant_data_platform.qdp_v3.retirement import _downstream_consumer_references, retire_v2_intraday
 from quant_data_platform.qdp_v3.storage import write_raw_partition
+from quant_data_platform.qdp_v3.update import plan_update
 from quant_data_platform.qdp_v3.constants import (
     DOMAIN_ADJUST_FACTOR_DAILY,
     DOMAIN_ADJUST_FACTOR_EVENT,
+    DOMAIN_CORPORATE_ACTIONS,
+    DOMAIN_FINANCIAL_QUARTERLY,
+    DOMAIN_INDEX_CONSTITUENTS,
+    DOMAIN_INDUSTRY,
+    DOMAIN_MARKET_INTRADAY_5M,
+    DOMAIN_PERFORMANCE_EXPRESS,
+    DOMAIN_PERFORMANCE_FORECAST,
+    DOMAIN_SHARE_CAPITAL_DAILY,
+    DOMAIN_SHARE_CAPITAL_EVENT,
     DOMAIN_VALUATION_DAILY,
     RAW_ADJUST_FACTOR_EVENT,
     RAW_CORPORATE_ACTION_XDXR,
@@ -34,6 +47,69 @@ def _workspace(tmp_path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"schema_version": 1, "brain_type": "main"}), encoding="utf-8")
     return workspace
+
+
+def test_semantic_secret_scan_rejects_runtime_token_material(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = _workspace(tmp_path)
+    paths = qdp_v3_paths(workspace)
+    paths.jobs.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("QDP_TUSHARE_PROXY_TOKEN", "unit-runtime-secret")
+    (paths.jobs / "bad.log").write_text(
+        "request failed unit-runtime-secret https://example.test/mcp/token=abc",
+        encoding="utf-8",
+    )
+
+    findings, metrics = _audit_secret_artifacts(paths, workspace_root=workspace)
+
+    codes = {item["code"] for item in findings}
+    assert "tushare_proxy_token_material_leaked" in codes
+    assert "tushare_proxy_token_url_leaked" in codes
+    assert metrics["secret_exact_match_count"] == 1
+
+
+def test_raw_receipt_secret_scan_reuses_lineage_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = _workspace(tmp_path)
+    monkeypatch.setenv("QDP_TUSHARE_PROXY_TOKEN", "receipt-secret")
+    ref, _ = write_raw_partition(
+        raw_domain="secret_scan_raw",
+        partition_field="trade_date",
+        partition_value="2026-07-13",
+        frame=pd.DataFrame({"value": [1]}),
+        receipt={"provider": "unit", "token": "receipt-secret", "quality_tier": "provisional"},
+        workspace_root=workspace,
+    )
+    candidate = type(
+        "CandidateFixture",
+        (),
+        {
+            "raw_partitions": [
+                {
+                    "raw_domain": ref.raw_domain,
+                    "partition_value": ref.partition_value,
+                    "payload_path": str(ref.payload_path),
+                    "receipt_path": str(ref.receipt_path),
+                    "content_sha256": ref.content_sha256,
+                }
+            ]
+        },
+    )()
+
+    findings, metrics = _audit_raw_references(
+        candidate,
+        root=qdp_v3_paths(workspace).root,
+        full=False,
+    )
+
+    codes = {item["code"] for item in findings}
+    assert "tushare_proxy_token_material_leaked" in codes
+    assert "runtime_artifact_unredacted_secret_key" in codes
+    assert metrics["raw_receipt_secret_exact_match_count"] == 1
 
 
 def test_trade_date_resolution_reuses_covering_calendar_partition(tmp_path: Path) -> None:
@@ -63,9 +139,252 @@ def test_trade_date_resolution_reuses_covering_calendar_partition(tmp_path: Path
     assert dates == ["2012-01-04", "2012-01-05"]
 
 
+def test_bootstrap_plan_is_5m_only_and_declares_post_publish_retirement(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    calendar = pd.DataFrame(
+        {
+            "trade_date": ["2010-01-04", "2026-07-13"],
+            "is_open": [True, True],
+            "exchange": ["SSE", "SSE"],
+        }
+    )
+    write_raw_partition(
+        raw_domain=RAW_TRADING_CALENDAR,
+        partition_field="request_range",
+        partition_value="2010-01-01_2026-07-13",
+        frame=calendar,
+        receipt={"quality_tier": "strict", "provider": "unit"},
+        workspace_root=workspace,
+    )
+
+    plan = plan_update(
+        as_of_date="2026-07-13",
+        workspace_root=workspace,
+        bootstrap=True,
+        start_date="2010-01-01",
+        historical_provider="tushare-proxy",
+    )
+
+    stages = {item["stage"]: item for item in plan["stages"]}
+    assert "intraday_1m" not in stages
+    assert stages["intraday_5m"]["provider"] == "tushare_proxy"
+    assert stages["post_publish_semantic_hash_audit"]["stage"] == "post_publish_semantic_hash_audit"
+    assert stages["retire_v2_intraday"] == {
+        "stage": "retire_v2_intraday",
+        "enabled": True,
+        "delete": True,
+        "guarded": True,
+    }
+
+
 def test_release_requires_strict_valuation_and_factor_domains() -> None:
-    required = {DOMAIN_VALUATION_DAILY, DOMAIN_ADJUST_FACTOR_EVENT, DOMAIN_ADJUST_FACTOR_DAILY}
+    required = {
+        DOMAIN_VALUATION_DAILY,
+        DOMAIN_ADJUST_FACTOR_EVENT,
+        DOMAIN_ADJUST_FACTOR_DAILY,
+        DOMAIN_MARKET_INTRADAY_5M,
+        DOMAIN_CORPORATE_ACTIONS,
+        DOMAIN_SHARE_CAPITAL_EVENT,
+        DOMAIN_SHARE_CAPITAL_DAILY,
+        DOMAIN_FINANCIAL_QUARTERLY,
+        DOMAIN_PERFORMANCE_FORECAST,
+        DOMAIN_PERFORMANCE_EXPRESS,
+        DOMAIN_INDUSTRY,
+        DOMAIN_INDEX_CONSTITUENTS,
+    }
     assert required.issubset(set(STRICT_RELEASE_DOMAINS))
+    assert "market_intraday_1m" not in STRICT_RELEASE_DOMAINS
+
+
+def test_v2_intraday_retirement_finds_downstream_dataset_consumers(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    consumer = workspace / "daily_research" / "output" / "active_dataset.json"
+    consumer.parent.mkdir(parents=True, exist_ok=True)
+    consumer.write_text(
+        json.dumps({"dataset_id": "market_intraday_1m__legacy"}),
+        encoding="utf-8",
+    )
+
+    matches = _downstream_consumer_references(
+        workspace_root=workspace,
+        target_dataset_ids={"market_intraday_1m__legacy"},
+    )
+
+    assert matches == [
+        {
+            "path": "daily_research/output/active_dataset.json",
+            "dataset_ids": ["market_intraday_1m__legacy"],
+        }
+    ]
+
+
+def test_v3_cli_rejects_retired_1m_options() -> None:
+    from quant_data_platform.qdp_v3.cli import dispatch
+
+    with pytest.raises(SystemExit):
+        dispatch(
+            [
+                "ingest",
+                "--provider",
+                "tushare-proxy",
+                "--mode",
+                "historical",
+                "--domain",
+                "intraday",
+                "--start-date",
+                "2010-01-01",
+                "--end-date",
+                "2026-07-13",
+                "--frequency",
+                "1m",
+            ]
+        )
+    with pytest.raises(SystemExit):
+        dispatch(["update", "--as-of-date", "2026-07-13", "--include-1m"])
+
+
+def test_v2_intraday_retirement_cannot_delete_before_v3_publish(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    shard = (
+        workspace
+        / "quant_data_platform"
+        / "data"
+        / "qdp_v2"
+        / "datasets"
+        / "market_intraday_1m"
+        / "legacy"
+        / "shards"
+        / "part.parquet"
+    )
+    shard.parent.mkdir(parents=True, exist_ok=True)
+    shard.write_bytes(b"do-not-delete")
+
+    result = retire_v2_intraday(
+        expect_active_sha="none",
+        workspace_root=workspace,
+        delete=True,
+        yes=True,
+    )
+
+    assert result["status"] == "blocked"
+    assert shard.exists()
+    assert any(item["code"] == "qdp_v3_active_missing" for item in result["blockers"])
+
+
+def test_v2_intraday_retirement_runs_post_delete_qdp_and_consumer_checks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import quant_data_platform.qdp_v3.audit as audit_module
+    import quant_data_platform.qdp_v3.retirement as retirement_module
+
+    workspace = _workspace(tmp_path)
+    paths = qdp_v3_paths(workspace)
+    paths.active.mkdir(parents=True, exist_ok=True)
+    paths.active_manifest.write_text(
+        json.dumps(
+            {
+                "candidate_id": "candidate__unit",
+                "datasets": {DOMAIN_MARKET_INTRADAY_5M: "market_intraday_5m__unit"},
+                "coverage": {"market_daily_watermark": "2026-07-13"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    diff_path = paths.audits / "candidate__unit" / "v2_v3_diff.json"
+    diff_path.parent.mkdir(parents=True, exist_ok=True)
+    diff_path.write_text("{}", encoding="utf-8")
+
+    v2_root = tmp_path / "v2"
+    v2_active_path = v2_root / "active.json"
+    v2_active_path.parent.mkdir(parents=True, exist_ok=True)
+    v2_active_path.write_text(
+        json.dumps(
+            {
+                "datasets": {
+                    domain: f"{domain}__unit"
+                    for domain in retirement_module.V2_INTRADAY_RETIREMENT_DOMAINS
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    retired_shard = v2_root / "datasets" / "market_intraday_5m" / "unit" / "part.parquet"
+    retired_shard.parent.mkdir(parents=True, exist_ok=True)
+    retired_shard.write_bytes(b"retire-me")
+
+    monkeypatch.setattr(retirement_module, "active_manifest_sha256", lambda *_args, **_kwargs: "active-sha")
+    monkeypatch.setattr(retirement_module, "qdp_v2_root", lambda *_args, **_kwargs: v2_root)
+    monkeypatch.setattr(retirement_module, "v2_active_manifest_path", lambda *_args, **_kwargs: v2_active_path)
+    monkeypatch.setattr(retirement_module, "dataset_manifest_for_id", lambda *_args, **_kwargs: tmp_path / "five.json")
+    monkeypatch.setattr(
+        retirement_module,
+        "read_dataset_manifest",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            quality_tier="strict",
+            coverage={"strict_coverage_rate": 0.9995, "watermark": "2026-07-13"},
+            shards=[],
+        ),
+    )
+    monkeypatch.setattr(
+        retirement_module,
+        "latest_candidate_audit",
+        lambda *_args, **_kwargs: {"status": "passed", "mode": "semantic"},
+    )
+    monkeypatch.setattr(retirement_module, "_running_qdp_jobs", lambda *_args, **_kwargs: [])
+    consumer_scans: list[set[str]] = []
+
+    def no_consumers(*, workspace_root: Path, target_dataset_ids: set[str]) -> list[dict[str, object]]:
+        consumer_scans.append(set(target_dataset_ids))
+        return []
+
+    monkeypatch.setattr(retirement_module, "_downstream_consumer_references", no_consumers)
+    monkeypatch.setattr(
+        retirement_module,
+        "_v2_retirement_inventory",
+        lambda **_kwargs: (
+            [
+                {"domain": domain, "dataset_id": f"{domain}__unit", "manifest": {"dataset_id": f"{domain}__unit"}}
+                for domain in retirement_module.V2_INTRADAY_RETIREMENT_DOMAINS
+            ],
+            [],
+            [retired_shard],
+        ),
+    )
+    post_delete_calls: list[dict[str, object]] = []
+
+    def passed_quick_audit(**kwargs: object) -> dict[str, object]:
+        post_delete_calls.append(dict(kwargs))
+        return {"status": "passed", "mode": "quick", "blocker_count": 0}
+
+    monkeypatch.setattr(audit_module, "audit_candidate", passed_quick_audit)
+
+    result = retire_v2_intraday(
+        expect_active_sha="active-sha",
+        workspace_root=workspace,
+        delete=True,
+        yes=True,
+    )
+
+    assert result["status"] == "retired"
+    assert not retired_shard.exists()
+    assert len(consumer_scans) == 2
+    assert post_delete_calls == [
+        {
+            "candidate_id": "candidate__unit",
+            "mode": "quick",
+            "workspace_root": workspace,
+            "write_report": False,
+        }
+    ]
+    completion = json.loads(Path(result["retirement_completion"]).read_text(encoding="utf-8"))
+    assert completion["post_delete_validation"] == {
+        "active_sha256_unchanged": True,
+        "downstream_consumer_reference_count": 0,
+        "qdp_v3_quick_check_blocker_count": 0,
+        "qdp_v3_quick_check_status": "passed",
+        "remaining_v2_intraday_data_file_count": 0,
+    }
 
 
 def _write_v2_lineage_gap_fixture(workspace: Path) -> tuple[str, str]:
@@ -604,4 +923,4 @@ def test_small_candidate_build_uses_streamed_year_partitions(tmp_path: Path) -> 
     assert audit["status"] == "failed"
     assert audit["blocker_count"] > 0
     audit_codes = {str(item.get("code", "")) for item in audit["findings"]}
-    assert "strict_5m_dataset_missing" not in audit_codes
+    assert "strict_5m_dataset_missing" in audit_codes

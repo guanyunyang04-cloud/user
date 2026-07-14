@@ -22,8 +22,8 @@
 ### object `quant_data_platform_child`
 `type`: shared_data_base_child_brain
 `path`: `quant_data_platform/brain/`
-`state`: QDP 当前唯一 active 仍是 v2 manifest-first 数据基底；v3 identity-first/date-partition/candidate pipeline 已实现，BaoStock 0.9.3 full compatibility 通过，2010—2012 共 729 个日线/all-stock/因子事件日期分区已 strict 回灌。下载 runtime 已完成单 login 复用、5m 按证券整段获取后切月、mootdx 协议健康负缓存和财务生命周期裁剪。M0 的 17 个缺失 ancestors 以用户明确授权、逐文件 hash 且不伪称恢复的替代冻结证明闭合，但删除型 GC 仍禁止；因子双路径仲裁、后续年份和 5m 全量未完成，v3 未发布。
-`public_commands`: 共用 `qdp status/list/describe/check/gc/update`；v3 增加 `ingest/build/audit/diff/publish/rollback/compatibility`，v2 legacy rebuild/verify 使用 `--generation v2`。
+`state`: QDP 当前唯一 active 仍是 v2 manifest-first 数据基底；v3 已锁定为 2010 起、5m-only 的 identity-first/date-partition/candidate pipeline，1m 不再采集、构建、发布或更新。BaoStock 2010—2012 的 729 个日线/all-stock/因子事件日期分区已 strict；Tushare proxy 的 stock basic、交易日历、4,011 个全市场日线与 4,011 个 daily_basic 任务已完成，5,864 个 identity 任务及后续 status/factor/dividend/financial/5m 正在原 DAG 断点运行，同时 BaoStock 2013+ 日期回灌并行推进；mootdx 最近 5m 三证券协议闸门通过。M0 的 17 个缺失 ancestors 以授权替代证明闭合，但在 v3 发布与发布后 5m/lineage/hash 校验前 v2 不删除；因子仲裁、全历史 5m、candidate 和发布仍未完成。
+`public_commands`: 共用 `qdp status/list/describe/check/gc/update`；v3 增加 `ingest/build/audit/diff/publish/rollback/compatibility`，发布校验后有受保护的 `retire-v2-intraday`；v2 legacy rebuild/verify 在退休前使用 `--generation v2`。
 
 ### object `daily_research_child`
 `type`: production_research_child_brain

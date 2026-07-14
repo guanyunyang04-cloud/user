@@ -1,9 +1,9 @@
 # Quant Data Platform 身份对象
-快照日期：`2026-07-01`
+快照日期：`2026-07-14`
 
 ## object `quant_data_platform_project`
 `type`: shared_manifest_first_data_base_brain
-`definition`: 主脑管辖下的共享量化数据基底分脑，负责 QDP v2 本地单机数据基底、provider ingest、数据校验、可重建缓存和数据清理。
+`definition`: 主脑管辖下的共享量化数据基底分脑，负责受保护的 QDP v2 active 与 identity-first、5m-only 的 QDP v3 重建/发布面、provider ingest、数据校验、可重建缓存和数据清理。
 `not`: 旧 v1 工作流平台、下游训练产物注册中心、某个研究项目的私有数据湖。
 `north_star`: 建立简单、准确、可审计、可更新的本地数据基底。
 `truth_source`: `parquet + dataset.json + active.json`。
@@ -21,7 +21,7 @@
 
 ## object `provider_ingest_surface`
 `type`: upstream_source_surface
-`current_route`: `mootdx` for fast daily/1m/5m market bars；`BaoStock` for calendar, universe/status and structural daily fields；`CNInfo` only if disclosure work is explicitly reactivated.
+`current_route`: Tushare-compatible proxy 仅负责 `2010-01-01..2026-07-13` 历史启动；`mootdx` 负责截止日后的优先 5m；`BaoStock` 负责长期日线/状态/因子事件及完整 5m fallback；交易所/CNInfo 只作身份、公司行动与披露仲裁。v3 不存在 1m provider route。
 `consumer_boundary`: research projects consume QDP outputs or explicit downstream packs, not direct online provider calls.
 
 ## object `downstream_research_artifacts`

@@ -26,6 +26,7 @@ v3 commands:
   diff --candidate ID           Compare a candidate with active.
   publish --candidate ID        Compare-and-swap publish an audited candidate.
   rollback                      Restore the latest rollback manifest.
+  retire-v2-intraday            Delete the replaced v2 minute shards after v3 verification.
   freeze v2                     Hash and pin the legacy evidence base.
   update                         Run the v3 ingest/build/audit/publish DAG.
   gc                             Run transitive manifest-aware v3 GC.
@@ -107,6 +108,7 @@ V3_ONLY_PREFIXES = {
     ("diff",),
     ("publish",),
     ("rollback",),
+    ("retire-v2-intraday",),
     ("freeze", "v2"),
     ("compatibility",),
 }

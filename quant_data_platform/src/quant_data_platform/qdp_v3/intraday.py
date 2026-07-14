@@ -44,6 +44,24 @@ SELECTED_COLUMNS = [
     "source_selection_reason",
 ]
 
+CANONICAL_5M_COLUMNS = [
+    "security_id",
+    "trade_date",
+    "bar_end",
+    "symbol_on_date",
+    "provider_symbol",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "amount",
+    "source",
+    "quality_tier",
+    "source_selection_reason",
+    "identity_mapping_status",
+]
+
 
 def _bar_end(value: Any) -> str:
     raw = str(value or "").strip()
@@ -92,6 +110,42 @@ def normalize_provider_5m(frame: pd.DataFrame, *, provider_symbol: str, source: 
     return data.loc[:, ["provider_symbol", "trade_date", "bar_end", "open", "high", "low", "close", "volume", "amount", "source"]].dropna(subset=["trade_date"]).reset_index(drop=True)
 
 
+def normalize_tushare_proxy_5m(frame: pd.DataFrame, *, provider_symbol: str) -> pd.DataFrame:
+    """Normalize ``stk_mins``; its raw volume/amount are already shares/CNY.
+
+    The compatibility gate proves the unique 1.0 scales against Tushare daily
+    volume (lots) and amount (thousand CNY) before bootstrap data is admitted.
+    """
+
+    if frame is None or frame.empty:
+        return normalize_provider_5m(pd.DataFrame(), provider_symbol=provider_symbol, source="tushare_proxy")
+    data = frame.copy()
+    timestamp_column = next(
+        (
+            column
+            for column in ("trade_time", "datetime", "trade_datetime", "date", "time")
+            if column in data.columns
+        ),
+        "",
+    )
+    if timestamp_column:
+        timestamps = pd.to_datetime(data[timestamp_column], errors="coerce")
+    elif "trade_date" in data.columns and "bar_time" in data.columns:
+        timestamps = pd.to_datetime(
+            data["trade_date"].astype(str).str.slice(0, 10) + " " + data["bar_time"].astype(str),
+            errors="coerce",
+        )
+    else:
+        raise ValueError("tushare_proxy_5m_timestamp_column_missing")
+    if timestamps.isna().any():
+        raise ValueError("tushare_proxy_5m_timestamp_missing_or_invalid")
+    data["trade_date"] = timestamps.dt.strftime("%Y-%m-%d")
+    data["bar_time"] = timestamps.dt.strftime("%H:%M")
+    if "vol" in data.columns and "volume" not in data.columns:
+        data = data.rename(columns={"vol": "volume"})
+    return normalize_provider_5m(data, provider_symbol=provider_symbol, source="tushare_proxy")
+
+
 def is_complete_5m_day(frame: pd.DataFrame) -> bool:
     if frame is None or len(frame) != 48:
         return False
@@ -109,6 +163,57 @@ def is_complete_5m_day(frame: pd.DataFrame) -> bool:
     if (numeric["low"] > numeric[["open", "high", "close"]].min(axis=1)).any():
         return False
     return True
+
+
+def reconcile_5m_with_daily(day: pd.DataFrame, daily: Mapping[str, Any] | pd.Series | None) -> dict[str, Any]:
+    """Check one complete 5m stock-day against the unadjusted daily fact."""
+
+    if not is_complete_5m_day(day):
+        return {"comparable": False, "conflict": True, "reason": "5m_day_incomplete"}
+    if daily is None:
+        return {"comparable": False, "conflict": False, "reason": "daily_reference_missing"}
+    ordered = day.sort_values("bar_end")
+    intraday = {
+        "open": float(ordered.iloc[0]["open"]),
+        "high": float(pd.to_numeric(ordered["high"], errors="coerce").max()),
+        "low": float(pd.to_numeric(ordered["low"], errors="coerce").min()),
+        "close": float(ordered.iloc[-1]["close"]),
+        "volume": float(pd.to_numeric(ordered["volume"], errors="coerce").sum()),
+        "amount": float(pd.to_numeric(ordered["amount"], errors="coerce").sum()),
+    }
+    reference = {
+        key: float(pd.to_numeric(daily.get(key), errors="coerce"))
+        for key in intraday
+    }
+    if not all(np.isfinite(value) for value in reference.values()):
+        return {"comparable": False, "conflict": False, "reason": "daily_reference_incomplete"}
+    price_diff = {
+        key: abs(intraday[key] - reference[key])
+        for key in ("open", "high", "low", "close")
+    }
+    volume_diff = abs(intraday["volume"] - reference["volume"])
+    amount_diff = abs(intraday["amount"] - reference["amount"])
+    conflict = (
+        any(value > 0.010000001 for value in price_diff.values())
+        or volume_diff > max(100.0, 1e-5 * abs(reference["volume"]))
+        or amount_diff > max(1_000.0, 0.001 * abs(reference["amount"]))
+    )
+    return {
+        "comparable": True,
+        "conflict": bool(conflict),
+        "intraday_aggregate": intraday,
+        "daily_reference": reference,
+        "price_absolute_difference": price_diff,
+        "volume_absolute_difference": volume_diff,
+        "volume_relative_difference": volume_diff / max(abs(reference["volume"]), 1.0),
+        "amount_absolute_difference": amount_diff,
+        "amount_relative_difference": amount_diff / max(abs(reference["amount"]), 1.0),
+    }
+
+
+def stable_security_bucket(security_id: str, *, bucket_count: int = 64) -> int:
+    digest = hashlib.sha256(str(security_id).encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") % int(bucket_count)
 
 
 def compare_complete_5m_days(primary: pd.DataFrame, secondary: pd.DataFrame) -> dict[str, Any]:
@@ -164,9 +269,10 @@ def select_5m_day(
                 "comparison": comparison,
             }
     if compare_sources and mootdx_complete and not baostock_complete:
-        return pd.DataFrame(columns=SELECTED_COLUMNS), {
-            "status": QUALITY_QUARANTINED,
-            "reason": "required_baostock_comparison_unavailable",
+        comparison = {
+            "comparable": False,
+            "conflict": False,
+            "reason": "baostock_comparison_unavailable",
             "mootdx_bar_count": int(len(mootdx_day)),
             "baostock_bar_count": int(len(baostock_day)),
         }
@@ -183,7 +289,7 @@ def select_5m_day(
             "mootdx_bar_count": int(len(mootdx_day)),
             "baostock_bar_count": int(len(baostock_day)),
         }
-    tier = QUALITY_STRICT if str(trade_date) >= "2020-01-01" else QUALITY_PROVISIONAL
+    tier = QUALITY_STRICT
     chosen["quality_tier"] = tier
     chosen["source_selection_reason"] = reason
     return chosen.loc[:, SELECTED_COLUMNS].sort_values("bar_end").reset_index(drop=True), {
@@ -359,32 +465,15 @@ def canonicalize_selected_5m(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Map provider-current symbols to stable identities without hiding conflicts."""
 
-    columns = [
-        "security_id",
-        "trade_date",
-        "bar_end",
-        "symbol_on_date",
-        "provider_symbol",
-        "open",
-        "high",
-        "low",
-        "close",
-        "volume",
-        "amount",
-        "source",
-        "quality_tier",
-        "source_selection_reason",
-        "identity_mapping_status",
-    ]
     if frame is None or frame.empty:
-        return pd.DataFrame(columns=columns), pd.DataFrame()
+        return pd.DataFrame(columns=CANONICAL_5M_COLUMNS), pd.DataFrame()
     mapped = identity_registry.map_frame(frame, provider_symbol_column="provider_symbol", date_column="trade_date")
     mapped["bar_end"] = mapped["bar_end"].map(_bar_end)
     invalid = mapped["identity_mapping_status"].ne("mapped")
     quarantine = mapped.loc[invalid].copy()
     if not quarantine.empty:
         quarantine["conflict_type"] = quarantine["identity_mapping_status"]
-    canonical = mapped.loc[~invalid, columns].copy()
+    canonical = mapped.loc[~invalid, CANONICAL_5M_COLUMNS].copy()
     key = ["security_id", "trade_date", "bar_end"]
     duplicate = canonical.duplicated(key, keep=False)
     conflict_rows: list[pd.DataFrame] = []
@@ -842,7 +931,6 @@ def ingest_intraday_5m(
     for month in sorted({date[:7] for date in dates}):
         month_dates = [date for date in dates if date.startswith(month)]
         month_key = month.replace("-", "")
-        strict_month = month >= "2020-01"
         month_frame = sample_frame.loc[sample_frame["month"].astype(str).eq(month)].copy() if "month" in sample_frame.columns else sample_frame.copy()
         symbol_dates_by_symbol = {
             symbol: [date for date in all_symbol_dates_by_symbol[symbol] if date.startswith(month)]
@@ -935,7 +1023,7 @@ def ingest_intraday_5m(
                 reasons.append("volume_or_amount_rate_gt_0_5_percent")
             if stats["provider_error_count"] or incomplete_proof:
                 reasons.append("sample_or_forced_proof_incomplete")
-            if strict_month and reasons:
+            if reasons:
                 escalated_strata.add(stratum)
             escalated_records.append(
                 {
@@ -945,7 +1033,7 @@ def ingest_intraday_5m(
                     "high_low_gt_one_tick_rate": high_low_rate,
                     "volume_gt_one_percent_rate": volume_rate,
                     "amount_gt_one_percent_rate": amount_rate,
-                    "escalated": bool(strict_month and reasons),
+                    "escalated": bool(reasons),
                     "reasons": reasons,
                 }
             )
@@ -1035,7 +1123,7 @@ def ingest_intraday_5m(
                     mootdx=mootdx_month,
                     baostock=baostock_month,
                     trade_date=date,
-                    compare_sources=date in compare_dates and mootdx_complete and strict_month,
+                    compare_sources=date in compare_dates and mootdx_complete,
                 )
                 scopes = []
                 if symbol in samples:

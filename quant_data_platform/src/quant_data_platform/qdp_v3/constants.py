@@ -7,8 +7,8 @@ from quant_data_platform.providers import (
 
 
 MANIFEST_VERSION = 3
-QDP_V3_CONTRACT_VERSION = "qdp_v3_20260714_bootstrap_1m"
-SCHEMA_VERSION = "3.1.0"
+QDP_V3_CONTRACT_VERSION = "qdp_v3_20260714_bootstrap_5m"
+SCHEMA_VERSION = "3.2.0"
 SECURITY_IDENTITY_CONTRACT = "qdp_stable_security_id_pit_symbol_v1"
 TIMEZONE = "Asia/Shanghai"
 
@@ -29,7 +29,6 @@ RAW_SECURITY_MASTER = "baostock_security_master_raw"
 RAW_INTRADAY_5M_MOOTDX = "mootdx_intraday_5m_raw"
 RAW_INTRADAY_5M_BAOSTOCK = "baostock_intraday_5m_raw"
 RAW_INTRADAY_5M_SELECTED = "qdp_intraday_5m_selected_raw"
-RAW_INTRADAY_1M_MOOTDX = "mootdx_intraday_1m_raw"
 RAW_TUSHARE_PROXY_STOCK_BASIC = "tushare_proxy_stock_basic_raw"
 RAW_TUSHARE_PROXY_TRADE_CALENDAR = "tushare_proxy_trade_calendar_raw"
 RAW_TUSHARE_PROXY_DAILY = "tushare_proxy_daily_raw"
@@ -40,7 +39,6 @@ RAW_TUSHARE_PROXY_SUSPEND = "tushare_proxy_suspend_raw"
 RAW_TUSHARE_PROXY_STK_LIMIT = "tushare_proxy_stk_limit_raw"
 RAW_TUSHARE_PROXY_DIVIDEND = "tushare_proxy_dividend_raw"
 RAW_TUSHARE_PROXY_FINANCIAL = "tushare_proxy_financial_raw"
-RAW_TUSHARE_PROXY_INTRADAY_1M = "tushare_proxy_intraday_1m_raw"
 RAW_TUSHARE_PROXY_INTRADAY_5M = "tushare_proxy_intraday_5m_raw"
 RAW_CORPORATE_ACTION_XDXR = "mootdx_corporate_action_xdxr_raw"
 RAW_FINANCIAL_QUARTERLY = "baostock_financial_quarterly_raw"
@@ -59,7 +57,6 @@ DOMAIN_ELIGIBLE_SIGNAL_D = "eligible_signal_D"
 DOMAIN_TRADABLE_OPEN_D1 = "tradable_open_D1"
 DOMAIN_ADJUST_FACTOR_EVENT = "adjust_factor_event"
 DOMAIN_ADJUST_FACTOR_DAILY = "adjust_factor_daily"
-DOMAIN_MARKET_INTRADAY_1M = "market_intraday_1m"
 DOMAIN_MARKET_INTRADAY_5M = "market_intraday_5m"
 DOMAIN_CORPORATE_ACTIONS = "corporate_actions"
 DOMAIN_SHARE_CAPITAL_EVENT = "share_capital_event"
@@ -92,8 +89,15 @@ STRICT_RELEASE_DOMAINS = (
     DOMAIN_ADJUST_FACTOR_DAILY,
     DOMAIN_ELIGIBLE_SIGNAL_D,
     DOMAIN_TRADABLE_OPEN_D1,
-    DOMAIN_MARKET_INTRADAY_1M,
     DOMAIN_MARKET_INTRADAY_5M,
+    DOMAIN_CORPORATE_ACTIONS,
+    DOMAIN_SHARE_CAPITAL_EVENT,
+    DOMAIN_SHARE_CAPITAL_DAILY,
+    DOMAIN_FINANCIAL_QUARTERLY,
+    DOMAIN_PERFORMANCE_FORECAST,
+    DOMAIN_PERFORMANCE_EXPRESS,
+    DOMAIN_INDUSTRY,
+    DOMAIN_INDEX_CONSTITUENTS,
 )
 
 BAOSTOCK_DAILY_FIELDS = (
@@ -136,19 +140,6 @@ PACKAGE_LOCK = {
         "production_role": "historical_bootstrap",
     },
 }
-
-EXPECTED_1M_BAR_ENDS = tuple(
-    [f"{hour:02d}:{minute:02d}" for hour, minute in (
-        *[(9, minute) for minute in range(31, 60)],
-        *[(10, minute) for minute in range(0, 60)],
-        *[(11, minute) for minute in range(0, 31)],
-        *[(13, minute) for minute in range(1, 60)],
-        *[(14, minute) for minute in range(0, 60)],
-        (15, 0),
-    )]
-)
-
-assert len(EXPECTED_1M_BAR_ENDS) == 240
 
 EXPECTED_5M_BAR_ENDS = tuple(
     [f"{hour:02d}:{minute:02d}" for hour, minute in (

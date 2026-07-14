@@ -1,19 +1,26 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 
-from quant_data_platform.domains.contracts import DataDomain, HistoryPageFetchRequest
-from quant_data_platform.qdp_v3.constants import EXPECTED_1M_BAR_ENDS, EXPECTED_5M_BAR_ENDS
-from quant_data_platform.qdp_v3.intraday_1m import (
-    aggregate_1m_to_5m,
-    is_complete_1m_day,
-    normalize_provider_1m,
+from quant_data_platform.domains.contracts import HistoryPageFetchRequest, HistoryPageResult
+from quant_data_platform.qdp_v3.constants import EXPECTED_5M_BAR_ENDS
+from quant_data_platform.qdp_v3.historical import (
+    _merge_intraday_range_frames,
+    _official_restatement_aliases,
+    _proxy_performance_gate_failed,
+    _prove_provider_symbol_restatement,
 )
+from quant_data_platform.qdp_v3.intraday import is_complete_5m_day, normalize_tushare_proxy_5m
 from quant_data_platform.qdp_v3.intraday_build import _quality_coverage
 from quant_data_platform.qdp_v3.identity import SecurityIdentityRegistry
+from quant_data_platform.qdp_v3.paths import ensure_qdp_v3_layout
+from quant_data_platform.qdp_v3.proxy_compatibility import _evaluate_5m_unit_contract, lock_bootstrap_cutoff
 from quant_data_platform.qdp_v3.proxy_factor import (
     derive_proxy_factor_evidence,
     reconcile_proxy_factor_third_path,
@@ -23,6 +30,7 @@ from quant_data_platform.tushare_proxy import (
     TushareProxyClient,
     TushareProxyConfig,
     TushareProxyProtocolError,
+    TushareProxyRateLimiter,
     redact_secrets,
 )
 
@@ -31,6 +39,7 @@ from quant_data_platform.tushare_proxy import (
 class _FakeResponse:
     payload: object
     status_code: int = 200
+    headers: dict[str, str] = field(default_factory=dict)
 
     def json(self):
         return self.payload
@@ -84,9 +93,7 @@ def test_history_page_full_page_requires_next_cursor(row_count: int, complete: b
     client = _client(_history_payload(row_count))
     result = client.fetch_history_page(
         HistoryPageFetchRequest(
-            domain=DataDomain.MARKET_INTRADAY_1M,
             provider_symbol="600000.SH",
-            frequency="1m",
             start_at="2010-01-01 00:00:00",
             end_at="2026-03-31 15:00:00",
         )
@@ -103,6 +110,67 @@ def test_proxy_rejects_field_width_mismatch() -> None:
         client.fetch_frame(api_name="daily", params={}, fields="a,b")
 
 
+def test_rate_limit_response_defers_all_workers_until_retry_after() -> None:
+    now = [0.0]
+
+    def advance(seconds: float) -> None:
+        now[0] += float(seconds)
+
+    limiter = TushareProxyRateLimiter(
+        rate_per_minute=135,
+        burst=4,
+        clock=lambda: now[0],
+        sleeper=advance,
+    )
+    session = _FakeSession(
+        [
+            _FakeResponse({}, status_code=429, headers={"Retry-After": "3"}),
+            _FakeResponse({"code": 0, "data": {"fields": ["a"], "items": [[1]]}}),
+        ]
+    )
+    client = TushareProxyClient(
+        TushareProxyConfig(token="unit-test-secret", url="https://example.test/api", retries=1),
+        limiter=limiter,
+        session_factory=lambda: session,
+        sleeper=advance,
+    )
+
+    result = client.fetch_frame(api_name="daily", params={}, fields="a")
+
+    assert result.frame.to_dict("records") == [{"a": 1}]
+    assert now[0] == pytest.approx(3.0)
+    assert client.metrics.rate_limit_count == 1
+    assert client.metrics.success_count == 1
+    assert limiter.snapshot()["rate_per_minute"] == 121
+    assert limiter.snapshot()["rate_reduction_count"] == 1
+
+
+def test_rate_limiter_reduces_at_most_once_per_cooldown_window() -> None:
+    now = [0.0]
+    limiter = TushareProxyRateLimiter(
+        rate_per_minute=135,
+        burst=4,
+        clock=lambda: now[0],
+        sleeper=lambda seconds: now.__setitem__(0, now[0] + float(seconds)),
+    )
+
+    limiter.defer(2.0, rate_limited=True)
+    limiter.defer(2.0, rate_limited=True)
+    assert limiter.snapshot()["rate_per_minute"] == 121
+    assert limiter.snapshot()["rate_reduction_count"] == 1
+
+    now[0] = 61.0
+    limiter.defer(2.0, rate_limited=True)
+    assert limiter.snapshot()["rate_per_minute"] == 108
+    assert limiter.snapshot()["rate_reduction_count"] == 2
+
+
+def test_production_performance_gate_uses_attempt_error_rate_after_one_thousand_requests() -> None:
+    assert not _proxy_performance_gate_failed({"request_count": 999, "error_rate": 1.0})
+    assert not _proxy_performance_gate_failed({"request_count": 1_000, "error_rate": 0.005})
+    assert _proxy_performance_gate_failed({"request_count": 1_000, "error_rate": 0.0051})
+
+
 def test_recursive_redaction_covers_token_and_mcp_url() -> None:
     redacted = redact_secrets(
         {"token": "abc", "message": "failed abc https://example/mcp/token=abc?q=1"},
@@ -113,10 +181,9 @@ def test_recursive_redaction_covers_token_and_mcp_url() -> None:
     assert "<redacted>" in serialized
 
 
-def _raw_241() -> pd.DataFrame:
-    times = ["09:30", *EXPECTED_1M_BAR_ENDS]
+def _raw_5m() -> pd.DataFrame:
     rows = []
-    for index, bar_end in enumerate(times):
+    for bar_end in EXPECTED_5M_BAR_ENDS:
         rows.append(
             {
                 "ts_code": "600000.SH",
@@ -125,33 +192,221 @@ def _raw_241() -> pd.DataFrame:
                 "high": 10.1,
                 "low": 9.9,
                 "close": 10.0,
-                "vol": 1.0,
-                "amount": 10.0,
+                "vol": 100.0,
+                "amount": 1_000.0,
             }
         )
-    rows[0].update({"open": 9.8, "high": 10.2, "low": 9.7, "close": 9.9, "vol": 2.0, "amount": 20.0})
-    rows[1].update({"open": 10.0, "high": 10.3, "low": 9.8, "close": 10.1, "vol": 3.0, "amount": 30.0})
     return pd.DataFrame(rows)
 
 
-def test_proxy_241_to_canonical_240_and_5m() -> None:
-    one = normalize_provider_1m(
-        _raw_241(),
-        provider_symbol="600000.SH",
-        source="tushare_proxy",
-        merge_0930_into_0931=True,
-    )
-    assert is_complete_1m_day(one)
-    first = one.loc[one["bar_end"].eq("09:31")].iloc[0]
-    assert first["open"] == pytest.approx(9.8)
-    assert first["high"] == pytest.approx(10.3)
-    assert first["low"] == pytest.approx(9.7)
-    assert first["close"] == pytest.approx(10.1)
-    assert first["volume"] == pytest.approx(5.0)
-    assert first["amount"] == pytest.approx(50.0)
-    five = aggregate_1m_to_5m(one)
+def test_proxy_direct_5m_normalization_has_exact_bar_contract() -> None:
+    five = normalize_tushare_proxy_5m(_raw_5m(), provider_symbol="600000.SH")
+    assert is_complete_5m_day(five)
     assert len(five) == 48
     assert tuple(five["bar_end"]) == EXPECTED_5M_BAR_ENDS
+    assert five["volume"].eq(100.0).all()
+
+
+def test_proxy_5m_unit_contract_selects_unique_identity_scales() -> None:
+    minute = pd.DataFrame({"vol": [600.0, 400.0], "amount": [6_000.0, 4_000.0]})
+    daily = pd.DataFrame({"vol": [10.0], "amount": [10.0]})
+
+    result = _evaluate_5m_unit_contract(minute, daily)
+
+    assert result["raw_volume_unit"] == "share"
+    assert result["raw_amount_unit"] == "CNY"
+    assert result["canonical_volume_scale"] == 1.0
+    assert result["canonical_amount_scale"] == 1.0
+
+
+class _CutoffClient:
+    def __init__(self) -> None:
+        self.config = TushareProxyConfig(token="unit-test-secret", url="https://example.test/api")
+        self.history_requests: list[HistoryPageFetchRequest] = []
+
+    def fetch_frame(self, *, api_name: str, params: dict, fields: str):
+        if api_name == "trade_cal":
+            frame = pd.DataFrame(
+                [{"exchange": "SSE", "cal_date": "20260713", "is_open": "1", "pretrade_date": "20260710"}]
+            )
+        elif api_name == "daily":
+            frame = pd.DataFrame(
+                [{"ts_code": "600000.SH", "trade_date": "20260713", "open": 10, "high": 10, "low": 10, "close": 10, "pre_close": 10, "vol": 1, "amount": 1}]
+            )
+        else:  # pragma: no cover - protects the fixture contract
+            raise AssertionError(api_name)
+        return SimpleNamespace(frame=frame, response_sha256=f"{api_name}-sha")
+
+    def fetch_history_page(self, request: HistoryPageFetchRequest) -> HistoryPageResult:
+        self.history_requests.append(request)
+        return HistoryPageResult(
+            provider="tushare_proxy",
+            request=request,
+            raw_data=_raw_5m().assign(trade_time=lambda frame: frame["trade_time"].str.replace("2010-01-04", "2026-07-13")),
+            fields=("ts_code", "trade_time", "open", "high", "low", "close", "vol", "amount"),
+            row_count=48,
+            min_timestamp="2026-07-13 09:35:00",
+            max_timestamp="2026-07-13 15:00:00",
+            next_end_at="",
+            response_sha256="5m-sha",
+            is_complete=True,
+            request_metadata_without_token={},
+        )
+
+
+def test_existing_cutoff_without_5m_proof_is_revalidated_without_relocking(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QDP_WORKSPACE_ROOT", str(tmp_path))
+    paths = ensure_qdp_v3_layout(tmp_path)
+    cutoff_path = paths.metadata / "tushare_proxy_bootstrap_cutoff.json"
+    old_lock = {
+        "status": "locked",
+        "bootstrap_cutoff": "2026-07-13",
+        "frequency": "1m",
+        "minute_proofs": [{"provider_symbol": "600000.SH", "row_count": 241}],
+    }
+    cutoff_path.write_text(json.dumps(old_lock), encoding="utf-8")
+
+    client = _CutoffClient()
+    result = lock_bootstrap_cutoff(
+        requested_cutoff="2026-07-13",
+        workspace_root=tmp_path,
+        client=client,
+    )
+
+    proof_path = paths.metadata / "tushare_proxy_bootstrap_cutoff_5m_proof.json"
+    proof = json.loads(proof_path.read_text(encoding="utf-8"))
+    assert result["status"] == "revalidated_existing_lock"
+    assert proof["frequency"] == "5m"
+    assert proof["minute_proofs"][0]["row_count"] == 48
+    assert proof["minute_proofs"][0]["max_timestamp"] == "2026-07-13 15:00:00"
+    assert json.loads(cutoff_path.read_text(encoding="utf-8")) == old_lock
+    assert client.history_requests[0].start_at == "2026-07-13 00:00:00"
+    assert client.history_requests[0].end_at == "2026-07-13 23:59:59"
+
+
+def test_existing_cutoff_with_5m_proof_returns_5m_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QDP_WORKSPACE_ROOT", str(tmp_path))
+    paths = ensure_qdp_v3_layout(tmp_path)
+    cutoff_path = paths.metadata / "tushare_proxy_bootstrap_cutoff.json"
+    proof_path = paths.metadata / "tushare_proxy_bootstrap_cutoff_5m_proof.json"
+    old_lock = {
+        "status": "locked",
+        "bootstrap_cutoff": "2026-07-13",
+        "frequency": "1m",
+        "minute_proofs": [{"provider_symbol": "600000.SH", "row_count": 241}],
+    }
+    five_minute_proof = {
+        "status": "revalidated_existing_lock",
+        "bootstrap_cutoff": "2026-07-13",
+        "frequency": "5m",
+        "minute_proofs": [
+            {
+                "provider_symbol": "600000.SH",
+                "row_count": 48,
+                "max_timestamp": "2026-07-13 15:00:00",
+            }
+        ],
+    }
+    cutoff_path.write_text(json.dumps(old_lock), encoding="utf-8")
+    proof_path.write_text(json.dumps(five_minute_proof), encoding="utf-8")
+
+    result = lock_bootstrap_cutoff(
+        requested_cutoff="2026-07-13",
+        workspace_root=tmp_path,
+        client=_CutoffClient(),
+    )
+
+    assert result["status"] == "already_locked_5m_proved"
+    assert result["frequency"] == "5m"
+    assert result["minute_proofs"][0]["row_count"] == 48
+    assert result["minute_proofs"][0]["max_timestamp"] == "2026-07-13 15:00:00"
+    assert json.loads(cutoff_path.read_text(encoding="utf-8")) == old_lock
+
+
+def test_existing_cutoff_with_incomplete_5m_proof_is_revalidated(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QDP_WORKSPACE_ROOT", str(tmp_path))
+    paths = ensure_qdp_v3_layout(tmp_path)
+    cutoff_path = paths.metadata / "tushare_proxy_bootstrap_cutoff.json"
+    proof_path = paths.metadata / "tushare_proxy_bootstrap_cutoff_5m_proof.json"
+    cutoff_path.write_text(
+        json.dumps({"status": "locked", "bootstrap_cutoff": "2026-07-13"}),
+        encoding="utf-8",
+    )
+    proof_path.write_text(
+        json.dumps(
+            {
+                "status": "revalidated_existing_lock",
+                "bootstrap_cutoff": "2026-07-13",
+                "frequency": "5m",
+                "minute_proofs": [
+                    {
+                        "provider_symbol": "600000.SH",
+                        "row_count": 47,
+                        "max_timestamp": "2026-07-13 15:00:00",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    client = _CutoffClient()
+    result = lock_bootstrap_cutoff(
+        requested_cutoff="2026-07-13",
+        workspace_root=tmp_path,
+        client=client,
+    )
+
+    assert result["status"] == "revalidated_existing_lock"
+    assert result["frequency"] == "5m"
+    assert result["minute_proofs"][0]["row_count"] == 48
+    assert len(client.history_requests) == 1
+
+
+def test_official_alias_can_prove_provider_restatement_empty_history() -> None:
+    workspace = Path(__file__).resolve().parents[3]
+    aliases = _official_restatement_aliases(
+        ["300114.SZ", "302132.SZ"],
+        workspace_root=workspace,
+    )
+    assert aliases["300114.SZ"] == ("302132.SZ",)
+
+    client = _CutoffClient()
+    evidence = _prove_provider_symbol_restatement(
+        client=client,
+        provider_symbol="300114.SZ",
+        aliases=aliases["300114.SZ"],
+        start_at="2016-01-01 00:00:00",
+        end_at="2016-12-31 23:59:59",
+    )
+
+    assert evidence["reason"] == "provider_current_code_restatement"
+    assert evidence["history_provider_symbol"] == "302132.SZ"
+    assert client.history_requests[0].page_size == 1
+
+
+def test_two_legitimate_empty_intraday_waves_merge_without_timestamp_schema() -> None:
+    prior = pd.DataFrame(columns=["provider_symbol"])
+    current = pd.DataFrame(columns=["provider_symbol"])
+
+    merged, timestamp_column = _merge_intraday_range_frames(
+        prior,
+        current,
+        symbol="300114.SZ",
+    )
+
+    assert merged.empty
+    assert list(merged.columns) == ["provider_symbol"]
+    assert timestamp_column == ""
 
 
 def test_proxy_factor_comparison_is_constant_scale_invariant(tmp_path) -> None:
@@ -216,8 +471,8 @@ def test_intraday_watermark_excludes_trailing_lag_but_rejects_internal_hole() ->
     connection = duckdb.connect(":memory:")
     try:
         connection.execute("CREATE TABLE expected (security_id VARCHAR, trade_date VARCHAR)")
-        connection.execute("CREATE TABLE actual_1m (security_id VARCHAR, trade_date VARCHAR)")
-        connection.execute("CREATE TABLE explained_1m (security_id VARCHAR, trade_date VARCHAR)")
+        connection.execute("CREATE TABLE actual_5m (security_id VARCHAR, trade_date VARCHAR)")
+        connection.execute("CREATE TABLE explained_5m (security_id VARCHAR, trade_date VARCHAR)")
         expected = [
             (security, date)
             for date in ("2026-07-09", "2026-07-10", "2026-07-13")
@@ -225,11 +480,11 @@ def test_intraday_watermark_excludes_trailing_lag_but_rejects_internal_hole() ->
         ]
         connection.executemany("INSERT INTO expected VALUES (?, ?)", expected)
         connection.executemany(
-            "INSERT INTO actual_1m VALUES (?, ?)",
+            "INSERT INTO actual_5m VALUES (?, ?)",
             [("S1", "2026-07-09"), ("S2", "2026-07-09")],
         )
         connection.executemany(
-            "INSERT INTO explained_1m VALUES (?, ?)",
+            "INSERT INTO explained_5m VALUES (?, ?)",
             [("S1", "2026-07-09"), ("S2", "2026-07-09"), ("S1", "2026-07-13")],
         )
         coverage, _ = _quality_coverage(connection)

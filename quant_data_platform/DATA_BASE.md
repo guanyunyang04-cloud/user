@@ -13,12 +13,12 @@ No separate catalog is required to know what the active data base contains.
 ## Current Safety Status (2026-07-14)
 
 - v2 remains the only active data base. Its active manifest SHA-256 is `e56f72a6cba8bcf86055817f6a0ec5e7391271fb3c27b4d628c3abc62944051e`.
-- QDP v3 code now implements immutable date-partition raw storage, stable security identity, PIT symbol history, batch daily/factor ingestion, dual-source 5-minute selection, factor-event arbitration, manifest v3, recursive GC, candidate audit, CAS publish and rollback.
-- QDP v3 已完成 2010—2012 共 729 个交易日的全 A 股日线、`query_all_stock` 与日期因子事件 strict raw 回灌；最新三年 candidate 已证明 identity/PIT/manifest 链路，但因子仍为 quarantined。后续年份、因子双路径仲裁、5m 全量、publication 和 active switch 尚未完成。
-- M0 freeze found 17 missing v2 source ancestors referenced by the 17 active dataset manifests. The leaf manifests and parquet data remain readable, but lineage is incomplete；用户已明确授权以 39 个现存 dataset/23,777 个文件的逐文件 hash 证明替代不可恢复祖先，使重建可继续，但该合同不等于 `lineage_complete=true`，删除型 GC 仍禁止。
+- QDP v3 contract is `qdp_v3_20260714_bootstrap_5m` / schema `3.2.0` / manifest `3`. It has no 1-minute domain: `market_intraday_5m` is the sole intraday canonical fact, not a 1m-derived cache.
+- QDP v3 已完成 2010—2012 共 729 个交易日的全 A 股日线、`query_all_stock` 与日期因子事件 strict raw 回灌；Tushare-compatible proxy 的参考域和历史 5m bootstrap 正在可恢复运行。旧三年 candidate 只证明 identity/PIT/manifest 链路，因子和新 5m-only 发布合同尚未闭合。
+- M0 freeze found 17 missing v2 source ancestors referenced by the 17 active dataset manifests. The leaf manifests and parquet data remain readable, but lineage is incomplete；用户已明确授权以 39 个现存 dataset/23,777 个文件的逐文件 hash 证明替代不可恢复祖先，使重建可继续，但该合同不等于 `lineage_complete=true`。v3 发布与验证前禁止删除；发布后只有 5m coverage/hash、diff、下游切换、无消费者/job 和 retirement manifest 全通过，才可删除四条旧分钟链。
 - The old v2 adjustment-factor checks proved key coverage, positivity and provenance only. They did not prove company-action semantics. `600076.SH/2024` is a fixed counterexample with non-event factor jumps, so old adjusted returns and dependent research remain provisional.
 - BaoStock 0.9.3 full compatibility passed across 34 anchors with zero issues; the ordinary multi-page proof returned 5537 rows and the wheel hash matched the lock. Live strict smoke also passed for three A-share dates and one factor-event date; ETF remains provisional by design.
-- 下载 runtime 已将 BaoStock 日期与 symbol-range 长任务改为任务内单 login 复用；5m 按证券整段获取后切成可恢复月分区；mootdx 使用协议健康探针、300 秒失败缓存和快速 BaoStock fallback。当前公共 mootdx 节点在本机协议探针失败，这是运行时外部状态而非永久源结论。
+- 下载 runtime 已将 BaoStock 日期与 symbol-range 长任务改为任务内单 login 复用；Tushare 历史 5m 使用 8,000 行反向分页、页级断点和单证券 immutable raw；mootdx 节点集合来自 last-good、tdxpy 与 mootdx 自带列表，固定三证券的 48-bar/15:00 协议探针已通过，冷启动约 9.69 秒、热启动约 0.08 秒，失败时负缓存 300 秒并走 BaoStock 完整日 fallback。
 
 Detailed implementation and audit state: `brain/references/qdp_v3_rebuild_20260713.md`.
 
@@ -64,10 +64,20 @@ Candidate research-scope datasets (not active):
 | `pit_signal_universe` | Date-local main-board non-ST research/signal eligibility | derived | 1d | 7,451,610 | 2016-01-04..2026-06-01 |
 | `pit_signal_universe_daily` | Daily eligibility counts and deterministic membership hash | derived | 1d | 2,526 | 2016-01-04..2026-06-01 |
 
+## QDP v3 Target Contract
+
+- Formal data begins at `2010-01-01`; later-listed securities begin on their actual listing date.
+- Low-frequency raw preserves all A shares. Historical 5m covers the PIT superset of Shanghai/Shenzhen main-board identities, including delisted, historical ST and code-change securities.
+- Through `2026-07-13`, a complete Tushare-proxy 5m day must reconcile to daily OHLCV/amount before becoming strict. Raw `vol` is shares and raw `amount` is CNY; both canonical scales are `1.0`.
+- After `2026-07-13`, complete mootdx is preferred and complete BaoStock is fallback. Sources are never stitched, and a material conflict between two complete sources is quarantined.
+- Quality is evidence-driven for every year; 2020 is not a tier boundary. Strict coverage from 2010 must be at least 99.95%, with exactly 48 right-closed bars per normal trading stock-day.
+- The 5m watermark must equal the daily watermark. There is no 1m watermark, lag allowance, raw domain, build path or update task.
+- Tushare proxy is a temporary bootstrap source with non-exposed upstream provenance, not an official truth source. Its Token exists only in `QDP_TUSHARE_PROXY_TOKEN` and is forbidden from repository files, logs, jobs, receipts and manifests.
+
 ## Layer Rules
 
 - `raw` means stored source facts or normalized source facts.
-- `raw-derived` means the table is stored for speed but must be reproducible from a lower-level raw table. Current `market_intraday_5m` is derived from `market_intraday_1m`.
+- `raw-derived` in the table above describes the current v2 active only: its `market_intraday_5m` is derived from v2 `market_intraday_1m`. QDP v3 classifies 5m as a canonical fact and has no 1m table.
 - `derived` means feature tables that can be rebuilt from raw tables.
 - `cache` means a convenience table for research access. Current `market_daily_panel` should not replace `market_daily_raw` as the source fact table.
 - `active.json` is intentionally flat: `datasets.<domain> = <dataset_id>`. Layer meaning lives in each `dataset.json`.
@@ -101,17 +111,15 @@ Known boundaries:
 
 ## Common Commands
 
-```bash
-conda run -n yolos python -m quant_data_platform.cli status
-conda run -n yolos python -m quant_data_platform.cli status --verify-files
-conda run -n yolos python -m quant_data_platform.cli list
-conda run -n yolos python -m quant_data_platform.cli describe market_intraday_1m
-conda run -n yolos python -m quant_data_platform.cli describe market_intraday_1m --full --json
-conda run -n yolos python -m quant_data_platform.cli check --quick --json
-conda run -n yolos python -m quant_data_platform.cli check --quick --write-audit --json
-conda run -n yolos python -m quant_data_platform.cli check meta --runtime fast --writeback --json
-conda run -n yolos python -m quant_data_platform.cli rebuild scope-active --runtime fast --workers 4 --activate --json
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli rebuild pit-signal-universe --runtime fast --threads 4 --json
-conda run -n yolos python -m quant_data_platform.cli rebuild limit-intraday --runtime fast --json
-conda run -n yolos python -m quant_data_platform.cli gc --dry-run --with-size --json
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli status
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli status --verify-files
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli list
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli describe market_intraday_5m
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli check --quick --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli check meta --runtime fast --writeback --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 compatibility run --provider mootdx --as-of-date <date> --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 compatibility run --provider tushare-proxy --as-of-date 2026-07-13 --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v3 update --bootstrap --historical-provider tushare-proxy --start-date 2010-01-01 --as-of-date 2026-07-13 --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli retire-v2-intraday --expect-active-sha <v3-active-sha> --delete --yes --json
 ```
