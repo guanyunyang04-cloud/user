@@ -24,6 +24,20 @@ for path in (SRC, ROOT):
         sys.path.insert(0, text)
 
 
+@pytest.fixture(autouse=True)
+def isolate_qdp_tests_from_user_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never let persisted production roots or credentials leak into pytest."""
+
+    for name in (
+        "QDP_WORKSPACE_ROOT",
+        "QDP_DATA_ROOT",
+        "QDP_RUNTIME_ROOT",
+        "QDP_TUSHARE_PROXY_TOKEN",
+        "QDP_TUSHARE_PROXY_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     for item in items:
         filename = Path(str(getattr(item, "path", getattr(item, "fspath", "")))).name

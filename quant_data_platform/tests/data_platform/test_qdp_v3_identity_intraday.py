@@ -698,6 +698,62 @@ class _FakeIntradayProvider:
         return ProviderResult(provider=self.source, data=pd.concat(frames, ignore_index=True) if frames else pd.DataFrame())
 
 
+def test_fast_5m_ingest_makes_zero_baostock_requests_when_mootdx_is_complete(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    dates = ["2026-07-13", "2026-07-14"]
+    mootdx = _FakeIntradayProvider(dates, source="mootdx")
+    baostock = _FakeIntradayProvider(dates, source="baostock")
+
+    result = ingest_intraday_5m(
+        symbols=["600000.SH"],
+        trade_dates=dates,
+        workspace_root=workspace,
+        mootdx_provider=mootdx,
+        baostock_provider=baostock,
+        refresh=True,
+    )
+
+    assert result["status"] == "completed"
+    assert result["mode"] == "trusted_source_fast"
+    assert result["baostock_fallback_stock_day_count"] == 0
+    assert result["baostock_fallback_request_count"] == 0
+    assert baostock.calls == []
+
+
+def test_fast_5m_ingest_requests_baostock_only_for_incomplete_mootdx_dates(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    dates = ["2026-07-13", "2026-07-14"]
+
+    class PartiallyIncompleteMootdx(_FakeIntradayProvider):
+        def fetch_domain(self, request):
+            result = super().fetch_domain(request)
+            data = result.data
+            incomplete = data["trade_date"].eq("2026-07-14")
+            drop_index = data.loc[incomplete].index[-1]
+            return ProviderResult(provider="mootdx", data=data.drop(index=drop_index), error_report=[])
+
+    mootdx = PartiallyIncompleteMootdx(dates, source="mootdx")
+    baostock = _FakeIntradayProvider(dates, source="baostock")
+    result = ingest_intraday_5m(
+        symbols=["600000.SH"],
+        trade_dates=dates,
+        workspace_root=workspace,
+        mootdx_provider=mootdx,
+        baostock_provider=baostock,
+        refresh=True,
+    )
+
+    assert result["status"] == "completed"
+    assert result["strict_stock_day_count"] == 2
+    assert result["baostock_fallback_stock_day_count"] == 1
+    assert result["baostock_fallback_request_count"] == 1
+    assert [(call.start_date, call.end_date) for call in baostock.calls] == [("2026-07-14", "2026-07-14")]
+    selected_ref = iter_raw_partitions("qdp_intraday_5m_selected_raw", workspace_root=workspace)[0]
+    selected = read_raw_partition(selected_ref)
+    source_by_date = selected.groupby("trade_date")["source"].unique().map(set).to_dict()
+    assert source_by_date == {"2026-07-13": {"mootdx"}, "2026-07-14": {"baostock"}}
+
+
 def test_5m_ingest_uses_symbol_month_tasks_pit_trading_days_and_stratum_escalation(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     dates = ["2026-06-25", "2026-06-26"]
@@ -740,6 +796,7 @@ def test_5m_ingest_uses_symbol_month_tasks_pit_trading_days_and_stratum_escalati
         baostock_provider=baostock,
         comparison_sample_count=1,
         sampling_universe=universe,
+        audit_cross_sources=True,
     )
 
     assert result["status"] == "partial"
@@ -857,7 +914,7 @@ def test_5m_ingest_prefetches_one_baostock_fallback_range(tmp_path: Path) -> Non
     )
 
     assert result["status"] == "completed"
-    assert result["baostock_download_strategy"] == "single_symbol_range_split_monthly"
+    assert result["baostock_download_strategy"] == "fallback_dates_only"
     assert result["baostock_range_prefetch_network_request_count"] == 1
     assert result["baostock_range_prefetch_written_partition_count"] == 2
     assert len(baostock.calls) == 1

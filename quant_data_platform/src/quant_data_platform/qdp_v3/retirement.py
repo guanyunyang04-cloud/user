@@ -9,7 +9,13 @@ from quant_data_platform.core.paths import qdp_paths
 from quant_data_platform.qdp_v2.manifest import active_manifest_path as v2_active_manifest_path
 from quant_data_platform.qdp_v2.manifest import dataset_manifest_for_id as v2_dataset_manifest_for_id
 from quant_data_platform.qdp_v2.manifest import qdp_v2_root
-from quant_data_platform.qdp_v3.constants import DOMAIN_MARKET_INTRADAY_5M, QUALITY_STRICT
+from quant_data_platform.qdp_v3.constants import (
+    BOOTSTRAP_CUTOFF,
+    DOMAIN_MARKET_INTRADAY_5M,
+    MIN_STRICT_5M_COVERAGE,
+    QUALITY_STRICT,
+    V2_RETIREMENT_GATE_FILENAME,
+)
 from quant_data_platform.qdp_v3.manifest import (
     active_manifest_sha256,
     atomic_write_json,
@@ -157,6 +163,22 @@ def retire_v2_intraday(
     if not active:
         blockers.append({"code": "qdp_v3_active_missing"})
     datasets = {str(k): str(v) for k, v in dict(active.get("datasets", {}) or {}).items()}
+    retirement_gate = read_json(paths.metadata / V2_RETIREMENT_GATE_FILENAME)
+    candidate_id = str(active.get("candidate_id", "") or "")
+    if retirement_gate.get("status") != "incremental_verified":
+        blockers.append(
+            {
+                "code": "post_cutoff_incremental_publish_not_verified",
+                "gate_status": str(retirement_gate.get("status", "") or "missing"),
+            }
+        )
+    else:
+        if str(retirement_gate.get("bootstrap_cutoff", "") or "") != BOOTSTRAP_CUTOFF:
+            blockers.append({"code": "retirement_gate_cutoff_mismatch"})
+        if str(retirement_gate.get("incremental_active_sha256", "") or "").lower() != current_sha.lower():
+            blockers.append({"code": "retirement_gate_active_sha_mismatch"})
+        if str(retirement_gate.get("incremental_candidate_id", "") or "") != candidate_id:
+            blockers.append({"code": "retirement_gate_candidate_mismatch"})
     if "market_intraday_1m" in datasets:
         blockers.append({"code": "qdp_v3_active_still_contains_1m"})
     five_id = datasets.get(DOMAIN_MARKET_INTRADAY_5M, "")
@@ -169,7 +191,7 @@ def retire_v2_intraday(
         rate = float(coverage.get("strict_coverage_rate", 0.0) or 0.0)
         five_watermark = str(coverage.get("watermark", "") or "")
         daily_watermark = str(dict(active.get("coverage", {}) or {}).get("market_daily_watermark", "") or "")
-        if five_manifest.quality_tier != QUALITY_STRICT or rate < 0.9995:
+        if five_manifest.quality_tier != QUALITY_STRICT or rate < MIN_STRICT_5M_COVERAGE:
             blockers.append(
                 {
                     "code": "qdp_v3_active_5m_coverage_not_proven",
@@ -181,6 +203,15 @@ def retire_v2_intraday(
             blockers.append(
                 {
                     "code": "qdp_v3_active_5m_watermark_not_equal_daily",
+                    "market_intraday_5m_watermark": five_watermark,
+                    "market_daily_watermark": daily_watermark,
+                }
+            )
+        if five_watermark <= BOOTSTRAP_CUTOFF or daily_watermark <= BOOTSTRAP_CUTOFF:
+            blockers.append(
+                {
+                    "code": "qdp_v3_active_watermark_not_post_cutoff",
+                    "bootstrap_cutoff": BOOTSTRAP_CUTOFF,
                     "market_intraday_5m_watermark": five_watermark,
                     "market_daily_watermark": daily_watermark,
                 }
@@ -200,7 +231,6 @@ def retire_v2_intraday(
                         "actual": actual,
                     }
                 )
-    candidate_id = str(active.get("candidate_id", "") or "")
     audit = latest_candidate_audit(candidate_id, workspace_root=workspace_root) if candidate_id else {}
     if not (audit.get("status") == "passed" and audit.get("mode") == "semantic"):
         blockers.append({"code": "qdp_v3_active_semantic_audit_missing_or_failed", "candidate_id": candidate_id})

@@ -1,6 +1,8 @@
 # QDP v3 数据基底重建实施与审计记录
 
-日期：`2026-07-13..2026-07-14`
+日期：`2026-07-13..2026-07-15`
+
+> 当前合同（2026-07-15）：本文按时间记录了多轮设计与执行，前文中的双源历史验证、99.95% 覆盖、因子官方仲裁、BaoStock 2013+ 历史复刻和首次发布即退休均已被最后一节取代。当前规范以 `qdp_v3_20260715_trusted_source_5m`、schema `3.3.0`、manifest `4` 及 QDP hot-path brain 为准。
 
 ## 结论
 
@@ -215,3 +217,19 @@ semantic audit 新增自动 secret gate：控制目录、仓库生产文本、ca
 接管复核又修正了两个发布证据边界：已有 5m cutoff proof 通过时必须返回 sidecar 中的 48 根证据，不能把 immutable legacy 1m 锁中的 241 根回写到 run 状态；canonical 5m 构建和 full audit 统一为自然年加稳定 64 个 `security_id` bucket，每个 year/bucket 只生成一个可包含多证券的 shard，并逐证券复核稳定桶归属。
 
 最终代码验证为 `255 passed`、1 个既有 pandas FutureWarning；`compileall`、`git diff --check`、`brain_sync_audit`、`doc_guard` 与 `integrity_check` 均通过。CLI 会拒绝 `--include-1m` 和 `--frequency 1m`；v3 生产路由中的 1m 引用为零，剩余 `market_intraday_1m` 字样只存在于 v2 冻结与受保护退休清单。当前 H 盘空闲仍高于 200 GiB 暂停阈值。全量参考域、历史 5m、identity/factor/PIT 仲裁、candidate 与发布仍是进行中任务，不能把“代码已实现”误写成“数据基底已发布”。
+
+## 2026-07-15 可信单源、紧凑存储与两阶段退休
+
+用户明确将个人研究的数据合同进一步简化为可信单源：Tushare-compatible proxy 独占 `2010-01-01..2026-07-13` historical canonical；截止日后 BaoStock 更新日线、状态和因子事件，mootdx 优先更新完整 5m 股票日，只有 mootdx 不完整时才使用 BaoStock 完整日 fallback。历史 BaoStock/Tushare 全量逐行验证、2013+ BaoStock 历史复刻和“两个完整来源冲突仲裁”退出生产 DAG。指定来源仍必须通过 schema、单位、分页、主键、stable identity、PIT 和完整性闸门；不完整数据 quarantine，不拼接、不插值。
+
+合同更新为 `qdp_v3_20260715_trusted_source_5m`、schema `3.3.0`、manifest `4`。新 active 只产生 strict/quarantined，legacy provisional 只读。首次正式 candidate 只要求九域：`trading_calendar`、`security_identity`、`symbol_history`、`market_daily_raw`、`security_status_daily`、`adjust_factor_daily`、`eligible_signal_D`、`tradable_open_D1`、`market_intraday_5m`。估值、factor events、财务、分红、行业、指数和股本降为非阻塞 enrichment。5m strict 覆盖低于 98% 阻断，98%—99% 告警，至少 99% 正常；5m/daily watermark 必须相等。
+
+因子合同同步简化：每只证券首个 2010+ Tushare `adj_factor` 归一为 1，保留相邻因子比率；cutoff 后只把 BaoStock 新事件比率续接到已有序列，避免重复乘入历史变化。pre-2010 官方 baseline、三路径全集一致、xdxr/dividend/公告仲裁和逐事件参考价不再是首次发布条件。`300114/302132`、`000022/001872`、`000043/001914`、`600076` 等已知例外由 `configs/qdp_v3_corrections.json` 在 normalize 后、canonical 写入前处理；raw 永不改写，correction 重复、区间冲突或 old value 不匹配会阻断构建。
+
+H 盘不再先复制到 F。用户取消备份后直接运行了提升权限的 `chkdsk H: /f`；结果为 dirty bit=false、HealthStatus=Healthy、OperationalStatus=OK、bad sectors=0，日志保存在 `C:\Users\ASUS\AppData\Local\QDP\maintenance\chkdsk_H_20260715.log`。数据根固定为 `H:\quant_project\quant_data_platform\data`，runtime root 为 `C:\Users\ASUS\AppData\Local\QDP\runtime`；H 只保存大数据和少量 manifest，C 保存 SQLite WAL、job、cursor、heartbeat 与 staging。
+
+紧凑存储代码已实现并修正分区策略：reference raw 固定为 undated x 1，低频时序 raw 为 year x 1，只有 5m raw 为 year x 16 stable security buckets；均使用 zstd，目标 part 约 384 MiB、最大 1 GiB。SQLite 记录 receipt 与 bundle row-group 映射，并导出带 SHA256 sidecar 的 `raw_index.parquet`、`raw_receipts.parquet`，因此发布 manifest 不依赖 C 盘数据库。bundle-aware read 支持 latest 与精确历史 revision；SQLite 丢失时可从校验过的 export 恢复。删除有双重保护：必须先在小域完成不删源 round-trip，再显式 `compact --delete-source --yes`；当前尚未全量 compact 或删除 legacy raw。
+
+现有 Tushare stock-basic、calendar、4,011 个 daily、4,011 个 daily-basic 和 5,864 个 identity raw 继续复用；旧 `stk_limit` 过程任务已中断，新 status 路由只保留 `suspend_d`。所有陈旧 provider job 已接管为 `interrupted_recoverable`，生产下载尚未恢复；下一生产顺序是先完成 compact 验证，再运行 5m-only compatibility 和全历史 5m，额度耗尽后补 status/factor，最后构建九域 candidate。v2 active 未改变。H 上 2026-07-15 00:52 出现的空 v3 active（SHA-256 `4215123b7f0d64c855a2f2a5c414930dfd41c25289b4cf53ae9ccd2c6fc0d19d`）已确认无候选/无数据并删除；public read 现通过 manifest v4、候选/哈希、完整九域与 published-at 验证 active，pytest 也自动清除 production roots/credentials。默认 status 已恢复为 v2 `status=ok`、as-of `2026-06-26`、17 datasets。
+
+退休被改为严格两阶段：bootstrap CAS publish 只写 `awaiting_post_cutoff_incremental` gate，不删除 v2；必须再完成一次 watermark 晚于 `2026-07-13` 的增量 CAS publish，并通过 active SHA/candidate、daily/5m watermark、coverage、semantic audit、diff、全部 shard hash、下游切换和无消费者/job 检查，才写 retirement manifest 并物理删除 v2 的 1m、旧 5m 与两条分钟特征链。首次发布即删除的旧描述已失效。

@@ -24,7 +24,6 @@ from quant_data_platform.qdp_v3.constants import (
     RAW_TUSHARE_PROXY_FINANCIAL,
     RAW_TUSHARE_PROXY_INTRADAY_5M,
     RAW_TUSHARE_PROXY_NAMECHANGE,
-    RAW_TUSHARE_PROXY_STK_LIMIT,
     RAW_TUSHARE_PROXY_STOCK_BASIC,
     RAW_TUSHARE_PROXY_SUSPEND,
     RAW_TUSHARE_PROXY_TRADE_CALENDAR,
@@ -32,13 +31,18 @@ from quant_data_platform.qdp_v3.constants import (
 from quant_data_platform.qdp_v3.manifest import atomic_write_json, sha256_file, stable_hash, utc_now
 from quant_data_platform.qdp_v3.identity import SecurityIdentityRegistry, board_for_symbol, normalize_symbol
 from quant_data_platform.qdp_v3.paths import ensure_qdp_v3_layout, qdp_v3_paths
+from quant_data_platform.qdp_v3.runtime_index import RuntimeIndex
 from quant_data_platform.qdp_v3.storage import (
     RawPartitionRef,
     atomic_write_parquet,
     get_raw_partition,
+    iter_raw_partitions,
+    read_raw_partition,
+    write_empty_raw_partition,
     write_raw_partition,
     read_raw_receipt,
 )
+from quant_data_platform.qdp_v3.supervisor import supervise_job
 from quant_data_platform.tushare_proxy import (
     TUSHARE_PROXY_HISTORY_PAGE_SIZE,
     TUSHARE_PROXY_NAME,
@@ -198,14 +202,6 @@ REFERENCE_SPECS: dict[str, tuple[ProxyRawSpec, ...]] = {
             fields=("ts_code", "trade_date", "suspend_timing", "suspend_type"),
             request_kind="trade_date",
         ),
-        ProxyRawSpec(
-            name="stk_limit",
-            api_name="stk_limit",
-            raw_domain=RAW_TUSHARE_PROXY_STK_LIMIT,
-            partition_field="trade_date",
-            fields=("trade_date", "ts_code", "pre_close", "up_limit", "down_limit"),
-            request_kind="trade_date",
-        ),
     ),
     "dividend": (
         ProxyRawSpec(
@@ -308,33 +304,13 @@ def proxy_symbol_inventory(
 ) -> tuple[list[str], dict[str, tuple[str, str]]]:
     """Read the latest L/D/P proxy security inventory without survivor bias."""
 
-    paths = qdp_v3_paths(workspace_root)
-    domain_root = paths.raw / RAW_TUSHARE_PROXY_STOCK_BASIC
-    refs: list[RawPartitionRef] = []
-    if domain_root.exists():
-        for latest_path in sorted(domain_root.glob("*/latest.json")):
-            latest = read_json(latest_path)
-            version_path = Path(str(latest.get("version_path", "") or ""))
-            if not version_path.is_absolute():
-                version_path = paths.root / version_path
-            receipt = read_json(version_path / "receipt.json")
-            payload_path = version_path / "payload.parquet"
-            if receipt and payload_path.exists():
-                refs.append(
-                    RawPartitionRef(
-                        raw_domain=RAW_TUSHARE_PROXY_STOCK_BASIC,
-                        partition_field=str(receipt.get("partition_field", "") or "as_of_date"),
-                        partition_value=str(receipt.get("partition_value", "") or ""),
-                        content_sha256=str(receipt.get("content_sha256", "") or ""),
-                        payload_path=payload_path,
-                        receipt_path=version_path / "receipt.json",
-                        row_count=int(receipt.get("row_count", 0) or 0),
-                        quality_tier=str(receipt.get("quality_tier", "") or QUALITY_PROVISIONAL),
-                    )
-                )
+    refs = iter_raw_partitions(
+        RAW_TUSHARE_PROXY_STOCK_BASIC,
+        workspace_root=workspace_root,
+    )
     if not refs:
         return [], {}
-    frame = pd.read_parquet(refs[-1].payload_path, engine="pyarrow")
+    frame = read_raw_partition(refs[-1])
     symbol_column = "ts_code" if "ts_code" in frame.columns else "symbol" if "symbol" in frame.columns else ""
     if not symbol_column:
         raise RuntimeError("tushare_proxy_stock_basic_symbol_column_missing")
@@ -366,7 +342,7 @@ def proxy_symbol_inventory(
 
 
 def _staging_root(job_id: str, *, workspace_root: str | Path | None) -> Path:
-    return qdp_v3_paths(workspace_root).jobs / "staging" / str(job_id)
+    return qdp_v3_paths(workspace_root).staging / str(job_id)
 
 
 def _load_or_create_historical_job(
@@ -537,31 +513,33 @@ def _fetch_and_store_reference_task(
             workspace_root=workspace_root,
         )
         if existing is not None:
-            prior = pd.read_parquet(existing.payload_path, engine="pyarrow")
+            prior = read_raw_partition(existing)
             frame = pd.concat([prior, frame], ignore_index=True, sort=False)
             if "ts_code" in frame.columns:
                 frame = frame.drop_duplicates(["ts_code"], keep="last")
-    ref, _ = write_raw_partition(
+    raw_receipt = {
+        **client.config.public_metadata(),
+        "api_name": spec.api_name,
+        "request": result.request_metadata_without_token,
+        "response_sha256": result.response_sha256,
+        "elapsed_seconds": result.elapsed_seconds,
+        "attempts": result.attempts,
+        "quality_tier": QUALITY_PROVISIONAL,
+        "quality_note": "trusted_historical_source_pending_structural_identity_and_pit_gates",
+    }
+    writer = write_empty_raw_partition if frame.empty else write_raw_partition
+    ref, _ = writer(
         raw_domain=spec.raw_domain,
         partition_field=spec.partition_field,
         partition_value=partition_value,
         frame=frame,
-        receipt={
-            **client.config.public_metadata(),
-            "api_name": spec.api_name,
-            "request": result.request_metadata_without_token,
-            "response_sha256": result.response_sha256,
-            "elapsed_seconds": result.elapsed_seconds,
-            "attempts": result.attempts,
-            "quality_tier": QUALITY_PROVISIONAL,
-            "quality_note": "third_party_historical_bootstrap_requires_cross_source_canonical_audit",
-        },
+        receipt=raw_receipt,
         workspace_root=workspace_root,
     )
     return ref
 
 
-def ingest_tushare_proxy_reference(
+def _ingest_tushare_proxy_reference_impl(
     *,
     domain: str,
     start_date: str,
@@ -688,8 +666,25 @@ def ingest_tushare_proxy_reference(
                 break
             fill_queue()
     statuses = [state.status for state in job.tasks.values()]
+    export_payload: dict[str, Any] = {}
+    export_error: BaseException | None = None
     if all(item == "completed" for item in statuses):
         job.status = "completed"
+        try:
+            export = RuntimeIndex(workspace_root=workspace_root).export_raw_index(
+                qdp_v3_paths(workspace_root).metadata / "raw_index"
+            )
+            export_payload = {
+                "path": str(export.parquet_path.resolve()),
+                "sha256": export.sha256,
+                "row_count": int(export.row_count),
+                "receipts_path": str(export.receipts_path.resolve()),
+                "receipts_sha256": export.receipts_sha256,
+                "receipt_count": int(export.receipt_count),
+            }
+        except BaseException as exc:
+            export_error = exc
+            job.status = "failed_raw_index_export"
     elif any(item == "pending" for item in statuses) and any(
         isinstance_text in state.error.lower()
         for state in job.tasks.values()
@@ -703,7 +698,15 @@ def ingest_tushare_proxy_reference(
     else:
         job.status = "partial"
     job.metrics = source.operational_metrics()
+    if export_payload:
+        job.metrics["raw_index_export"] = export_payload
+    if export_error is not None:
+        job.metrics["raw_index_export_error"] = type(export_error).__name__
     _save_historical_job(job, workspace_root=workspace_root)
+    if export_error is not None:
+        raise RuntimeError(
+            f"tushare_proxy_reference_raw_index_export_failed:{type(export_error).__name__}"
+        ) from export_error
     return {
         "status": job.status,
         "run_id": job.job_id,
@@ -713,8 +716,58 @@ def ingest_tushare_proxy_reference(
         "pending_count": sum(state.status == "pending" for state in job.tasks.values()),
         "failed_count": sum(state.status == "failed" for state in job.tasks.values()),
         "metrics": job.metrics,
+        "raw_index_export": export_payload,
         "job_path": str(_historical_job_path(job.job_id, workspace_root=workspace_root).resolve()),
     }
+
+
+def ingest_tushare_proxy_reference(
+    *,
+    domain: str,
+    start_date: str,
+    end_date: str,
+    trade_dates: Iterable[str] = (),
+    symbols: Iterable[str] = (),
+    workspace_root: str | Path | None = None,
+    client: TushareProxyClient | None = None,
+    resume: bool = True,
+    job_id: str = "",
+    max_workers: int = MAX_HISTORY_WORKERS,
+) -> dict[str, Any]:
+    normalized_domain = str(domain or "").strip().lower().replace("_", "-")
+    materialized_dates = tuple(str(item) for item in trade_dates)
+    materialized_symbols = tuple(str(item) for item in symbols)
+    specs = FINANCIAL_APIS if normalized_domain == "financial" else REFERENCE_SPECS.get(normalized_domain, ())
+    if not specs:
+        raise ValueError(f"unsupported_tushare_proxy_historical_domain:{domain}")
+    tasks = [
+        f"{spec.api_name}::{task_id}"
+        for spec in specs
+        for task_id in _reference_task_ids(
+            spec,
+            trade_dates=materialized_dates,
+            symbols=materialized_symbols,
+        )
+    ]
+    if not tasks:
+        raise ValueError(f"tushare_proxy_historical_tasks_empty:{normalized_domain}")
+    resolved_job_id = str(
+        job_id
+        or f"tushare_proxy__{normalized_domain}__{stable_hash({'start': start_date, 'end': end_date, 'tasks': tasks}, length=20)}"
+    )
+    with supervise_job(resolved_job_id, workspace_root=workspace_root):
+        return _ingest_tushare_proxy_reference_impl(
+            domain=normalized_domain,
+            start_date=start_date,
+            end_date=end_date,
+            trade_dates=materialized_dates,
+            symbols=materialized_symbols,
+            workspace_root=workspace_root,
+            client=client,
+            resume=resume,
+            job_id=resolved_job_id,
+            max_workers=max_workers,
+        )
 
 
 def _timestamp_column(frame: pd.DataFrame) -> str:
@@ -1128,7 +1181,7 @@ def _run_intraday_symbol(
                 for item in receipts
             ],
             "quality_tier": QUALITY_PROVISIONAL,
-            "quality_note": "raw_complete_symbol_history_pending_daily_identity_and_5m_semantic_gates",
+            "quality_note": "trusted_historical_source_pending_daily_identity_and_5m_structural_gates",
             "legitimate_empty": bool(legitimate_empty_evidence),
             "legitimate_empty_evidence": legitimate_empty_evidence,
         },
@@ -1148,7 +1201,7 @@ def _run_intraday_symbol(
     return symbol, "completed"
 
 
-def ingest_tushare_proxy_intraday(
+def _ingest_tushare_proxy_intraday_impl(
     *,
     symbols: Iterable[str],
     start_date: str,
@@ -1315,3 +1368,51 @@ def ingest_tushare_proxy_intraday(
         "minimum_free_bytes": int(minimum_free_bytes),
         "job_path": str(_historical_job_path(job.job_id, workspace_root=workspace_root).resolve()),
     }
+
+
+def ingest_tushare_proxy_intraday(
+    *,
+    symbols: Iterable[str],
+    start_date: str,
+    end_date: str,
+    workspace_root: str | Path | None = None,
+    client: TushareProxyClient | None = None,
+    lifecycle_ranges: Mapping[str, tuple[str, str]] | None = None,
+    resume: bool = True,
+    job_id: str = "",
+    max_workers: int = MAX_HISTORY_WORKERS,
+    minimum_free_bytes: int = MIN_FREE_SPACE_BYTES,
+) -> dict[str, Any]:
+    materialized_symbols = tuple(str(item) for item in symbols)
+    normalized_symbols = sorted(
+        {
+            str(item).strip().upper()
+            for item in materialized_symbols
+            if str(item).strip()
+            and _lifecycle_overlaps(
+                str(item).strip().upper(),
+                start_date=start_date,
+                end_date=end_date,
+                lifecycle_ranges=lifecycle_ranges,
+            )
+        }
+    )
+    if not normalized_symbols:
+        raise ValueError("tushare_proxy_intraday_symbols_empty")
+    resolved_job_id = str(
+        job_id
+        or f"tushare_proxy__intraday_5m__{stable_hash({'start': start_date, 'end': end_date, 'symbols': normalized_symbols}, length=20)}"
+    )
+    with supervise_job(resolved_job_id, workspace_root=workspace_root):
+        return _ingest_tushare_proxy_intraday_impl(
+            symbols=materialized_symbols,
+            start_date=start_date,
+            end_date=end_date,
+            workspace_root=workspace_root,
+            client=client,
+            lifecycle_ranges=lifecycle_ranges,
+            resume=resume,
+            job_id=resolved_job_id,
+            max_workers=max_workers,
+            minimum_free_bytes=minimum_free_bytes,
+        )

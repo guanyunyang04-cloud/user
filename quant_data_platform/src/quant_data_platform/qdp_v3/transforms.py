@@ -217,6 +217,154 @@ def derive_daily_domains(
     )
 
 
+def derive_trusted_proxy_daily_domains(
+    raw: pd.DataFrame,
+    *,
+    query_date: str,
+    identity_registry: SecurityIdentityRegistry,
+) -> DailyDomainFrames:
+    required = {"ts_code", "trade_date", "open", "high", "low", "close", "pre_close", "vol", "amount"}
+    missing = sorted(required - set(raw.columns))
+    if missing:
+        raise ValueError(f"tushare_proxy_daily_raw_missing_fields:{missing}")
+    dates = raw["trade_date"].fillna("").astype(str).str.replace("-", "", regex=False)
+    compact = dates.str.fullmatch(r"\d{8}")
+    dates.loc[compact] = (
+        dates.loc[compact].str.slice(0, 4)
+        + "-"
+        + dates.loc[compact].str.slice(4, 6)
+        + "-"
+        + dates.loc[compact].str.slice(6, 8)
+    )
+    base = pd.DataFrame(
+        {
+            "trade_date": dates,
+            "provider_symbol": raw["ts_code"].map(normalize_symbol),
+            "open": _numeric(raw, "open"),
+            "high": _numeric(raw, "high"),
+            "low": _numeric(raw, "low"),
+            "close": _numeric(raw, "close"),
+            "preclose": _numeric(raw, "pre_close"),
+            "volume": _numeric(raw, "vol") * 100.0,
+            "amount": _numeric(raw, "amount") * 1_000.0,
+            "pct_chg": _numeric(raw, "pct_chg"),
+            "tradestatus": "1",
+        }
+    )
+    bad_date = base["trade_date"].ne(str(query_date))
+    if bad_date.any():
+        raise ValueError(f"tushare_proxy_daily_query_date_mismatch:{sorted(base.loc[bad_date, 'trade_date'].unique())[:10]}")
+    base = identity_registry.map_frame(base)
+    base["is_st"] = base["name_on_date"].str.upper().str.contains("ST", regex=False)
+    market = base.loc[
+        :,
+        [
+            "security_id", "trade_date", "symbol_on_date", "provider_symbol", "open", "high", "low",
+            "close", "preclose", "volume", "amount", "pct_chg", "tradestatus", "identity_mapping_status",
+        ],
+    ].copy()
+    market["source"] = "tushare_proxy.daily"
+    market, market_conflicts = _deduplicate_mapped_rows(
+        market,
+        key=["security_id", "trade_date"],
+        compare_columns=["open", "high", "low", "close", "preclose", "volume", "amount", "pct_chg"],
+        conflict_type="trusted_proxy_identity_mapped_daily_value_conflict",
+        prefer_symbol_on_date=True,
+    )
+    status = base.loc[
+        :,
+        ["security_id", "trade_date", "symbol_on_date", "provider_symbol", "tradestatus", "is_st", "identity_mapping_status"],
+    ].copy()
+    status["is_suspended"] = False
+    status["list_status"] = "listed"
+    status["status_source"] = "tushare_proxy.daily+namechange"
+    status, status_conflicts = _deduplicate_mapped_rows(
+        status,
+        key=["security_id", "trade_date"],
+        compare_columns=["tradestatus", "is_st", "is_suspended", "list_status"],
+        conflict_type="trusted_proxy_identity_mapped_status_conflict",
+        prefer_symbol_on_date=True,
+    )
+    valuation = base.loc[:, ["security_id", "trade_date", "symbol_on_date", "provider_symbol", "identity_mapping_status"]].copy()
+    for column in ("turnover_rate", "pe_ttm", "pb_mrq", "ps_ttm", "pcf_ncf_ttm"):
+        valuation[column] = np.nan
+    valuation["source"] = "tushare_proxy.daily_no_valuation"
+    quarantine = pd.concat(
+        [item for item in (market_conflicts, status_conflicts) if not item.empty],
+        ignore_index=True,
+    ) if any(not item.empty for item in (market_conflicts, status_conflicts)) else pd.DataFrame()
+    return DailyDomainFrames(
+        market_daily_raw=market.sort_values(["trade_date", "security_id"]).reset_index(drop=True),
+        security_status_daily=status.sort_values(["trade_date", "security_id"]).reset_index(drop=True),
+        valuation_daily=valuation.sort_values(["trade_date", "security_id"]).reset_index(drop=True),
+        quarantine=quarantine,
+    )
+
+
+def derive_trusted_proxy_suspend_status(
+    raw: pd.DataFrame,
+    *,
+    query_date: str,
+    identity_registry: SecurityIdentityRegistry,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Map explicit Tushare ``suspend_d`` facts to status-only rows."""
+
+    columns = [
+        "security_id",
+        "trade_date",
+        "symbol_on_date",
+        "provider_symbol",
+        "tradestatus",
+        "is_st",
+        "identity_mapping_status",
+        "is_suspended",
+        "list_status",
+        "status_source",
+    ]
+    if raw is None or raw.empty:
+        return pd.DataFrame(columns=columns), pd.DataFrame()
+    required = {"ts_code", "trade_date"}
+    missing = sorted(required - set(raw.columns))
+    if missing:
+        raise ValueError(f"tushare_proxy_suspend_raw_missing_fields:{missing}")
+    dates = raw["trade_date"].fillna("").astype(str).str.replace("-", "", regex=False)
+    compact = dates.str.fullmatch(r"\d{8}")
+    dates.loc[compact] = (
+        dates.loc[compact].str.slice(0, 4)
+        + "-"
+        + dates.loc[compact].str.slice(4, 6)
+        + "-"
+        + dates.loc[compact].str.slice(6, 8)
+    )
+    unexpected = sorted(set(dates.loc[dates.ne(str(query_date))]))
+    if unexpected:
+        raise ValueError(f"tushare_proxy_suspend_query_date_mismatch:{unexpected[:10]}")
+    mapped = identity_registry.map_frame(
+        pd.DataFrame(
+            {
+                "trade_date": dates,
+                "provider_symbol": raw["ts_code"].map(normalize_symbol),
+            }
+        )
+    )
+    mapped["tradestatus"] = "0"
+    mapped["is_st"] = mapped["name_on_date"].fillna("").astype(str).str.upper().str.contains(
+        "ST", regex=False
+    )
+    mapped["is_suspended"] = True
+    mapped["list_status"] = "listed"
+    mapped["status_source"] = "tushare_proxy.suspend_d"
+    status = mapped.loc[:, columns]
+    status, conflicts = _deduplicate_mapped_rows(
+        status,
+        key=["security_id", "trade_date"],
+        compare_columns=["tradestatus", "is_st", "is_suspended", "list_status"],
+        conflict_type="trusted_proxy_identity_mapped_suspend_status_conflict",
+        prefer_symbol_on_date=True,
+    )
+    return status.sort_values(["trade_date", "security_id"]).reset_index(drop=True), conflicts
+
+
 def derive_adjust_factor_events(
     raw: pd.DataFrame,
     *,

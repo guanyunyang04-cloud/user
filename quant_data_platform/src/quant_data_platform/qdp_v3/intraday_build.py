@@ -10,7 +10,6 @@ from quant_data_platform.core.json_io import read_json
 from quant_data_platform.qdp_v3.constants import (
     DOMAIN_MARKET_INTRADAY_5M,
     QDP_V3_CONTRACT_VERSION,
-    QUALITY_PROVISIONAL,
     QUALITY_QUARANTINED,
     QUALITY_STRICT,
     RAW_INTRADAY_5M_SELECTED,
@@ -28,7 +27,7 @@ from quant_data_platform.qdp_v3.intraday import (
     stable_security_bucket,
 )
 from quant_data_platform.qdp_v3.manifest import ProviderEvidence
-from quant_data_platform.qdp_v3.quality import QualityFinding, report_for
+from quant_data_platform.qdp_v3.quality import QualityFinding, audit_strict_5m_coverage, report_for
 from quant_data_platform.qdp_v3.storage import (
     RawPartitionRef,
     atomic_write_parquet,
@@ -322,8 +321,8 @@ def _selected_incremental_frame(
                 normalized["source"] = normalized["selected_source"].fillna(normalized["source"]).astype(str)
                 normalized = normalized.drop(columns=["selected_source"])
         normalized["quality_tier"] = normalized.get(
-            "quality_tier", pd.Series(QUALITY_PROVISIONAL, index=normalized.index)
-        ).fillna(QUALITY_PROVISIONAL).astype(str)
+            "quality_tier", pd.Series(QUALITY_QUARANTINED, index=normalized.index)
+        ).fillna(QUALITY_QUARANTINED).astype(str)
         normalized["source_selection_reason"] = normalized.get(
             "source_selection_reason", pd.Series("selected_complete_5m", index=normalized.index)
         ).fillna("selected_complete_5m").astype(str)
@@ -404,7 +403,6 @@ def build_proxy_intraday_dataset(
     quarantine_count = 0
     quarantine_sample: list[dict[str, Any]] = []
     strict_stock_days = 0
-    provisional_stock_days = 0
     selected_unmapped: list[str] = []
 
     def quarantine(item: dict[str, Any]) -> None:
@@ -451,12 +449,17 @@ def build_proxy_intraday_dataset(
                         }
                     )
                     continue
-                tier = QUALITY_STRICT if daily_result.get("comparable") else QUALITY_PROVISIONAL
-                reason = (
-                    "tushare_proxy_complete_and_daily_consistent"
-                    if tier == QUALITY_STRICT
-                    else "tushare_proxy_complete_daily_proof_missing"
-                )
+                if not daily_result.get("comparable"):
+                    quarantine(
+                        {
+                            "security_id": security_id,
+                            "trade_date": trade_date,
+                            "reason": "tushare_proxy_complete_daily_proof_missing",
+                        }
+                    )
+                    continue
+                tier = QUALITY_STRICT
+                reason = "tushare_proxy_complete_and_daily_consistent"
                 chosen = chosen.copy()
                 chosen["quality_tier"] = tier
                 chosen["source_selection_reason"] = reason
@@ -471,11 +474,8 @@ def build_proxy_intraday_dataset(
                     )
                     continue
                 canonical_years.setdefault(trade_date[:4], []).append(canonical)
-                if tier == QUALITY_STRICT:
-                    strict_stock_days += 1
-                    strict_keys.append((security_id, trade_date))
-                else:
-                    provisional_stock_days += 1
+                strict_stock_days += 1
+                strict_keys.append((security_id, trade_date))
             if explained_keys:
                 connection.executemany("INSERT OR IGNORE INTO explained_5m VALUES (?, ?)", explained_keys)
             if strict_keys:
@@ -516,12 +516,17 @@ def build_proxy_intraday_dataset(
                             }
                         )
                         continue
-                    raw_tiers = set(selected_day["quality_tier"].fillna(QUALITY_PROVISIONAL).astype(str))
-                    tier = (
-                        QUALITY_STRICT
-                        if raw_tiers == {QUALITY_STRICT} and daily_result.get("comparable")
-                        else QUALITY_PROVISIONAL
-                    )
+                    raw_tiers = set(selected_day["quality_tier"].fillna(QUALITY_QUARANTINED).astype(str))
+                    if raw_tiers != {QUALITY_STRICT} or not daily_result.get("comparable"):
+                        quarantine(
+                            {
+                                "security_id": security_id,
+                                "trade_date": trade_date,
+                                "reason": "selected_5m_not_strict_or_daily_proof_missing",
+                            }
+                        )
+                        continue
+                    tier = QUALITY_STRICT
                     selected_day = selected_day.copy()
                     selected_day["quality_tier"] = tier
                     canonical, identity_quarantine = canonicalize_selected_5m(
@@ -533,11 +538,8 @@ def build_proxy_intraday_dataset(
                         continue
                     bucket = stable_security_bucket(security_id)
                     canonical_by_bucket.setdefault(bucket, []).append(canonical)
-                    if tier == QUALITY_STRICT:
-                        strict_stock_days += 1
-                        strict_keys.append((security_id, trade_date))
-                    else:
-                        provisional_stock_days += 1
+                    strict_stock_days += 1
+                    strict_keys.append((security_id, trade_date))
                 if explained_keys:
                     connection.executemany("INSERT OR IGNORE INTO explained_5m VALUES (?, ?)", explained_keys)
                 if strict_keys:
@@ -564,7 +566,7 @@ def build_proxy_intraday_dataset(
         "bootstrap_cutoff": bootstrap_cutoff,
         "selected_incremental_partition_count": len(selected_refs),
         "strict_stock_day_count": strict_stock_days,
-        "provisional_stock_day_count": provisional_stock_days,
+        "provisional_stock_day_count": 0,
         "canonical_year_bucket_shard_count": len({(year, bucket) for year, bucket, _ in staged}),
     }
     findings: list[QualityFinding] = []
@@ -580,32 +582,14 @@ def build_proxy_intraday_dataset(
                 sample=[{"provider_symbol": item} for item in unmapped[:20]],
             )
         )
-    if int(coverage.get("expected_stock_day_count", 0)) == 0:
-        findings.append(
-            QualityFinding(
-                code="strict_intraday_expected_universe_empty",
-                severity="blocker",
-                message="No PIT main-board traded stock-days exist in the expected 5m coverage table.",
-                domain=DOMAIN_MARKET_INTRADAY_5M,
-            )
-        )
-    elif float(coverage.get("strict_coverage_rate", 0.0)) < 0.9995:
-        findings.append(
-            QualityFinding(
-                code="strict_5m_coverage_below_99_95_percent",
-                severity="blocker",
-                message="Strict historical 5m coverage is below the 99.95% release floor.",
-                domain=DOMAIN_MARKET_INTRADAY_5M,
-                count=int(coverage.get("strict_missing_stock_day_count", 0)),
-                sample=missing_sample,
-            )
-        )
+    coverage["strict_missing_sample"] = missing_sample
+    findings.extend(audit_strict_5m_coverage(coverage))
     if bool(coverage.get("non_continuous_history_hole", False)):
         findings.append(
             QualityFinding(
                 code="strict_5m_non_continuous_history_hole",
-                severity="blocker",
-                message="5m evidence exists after an earlier unexplained date.",
+                severity="warning",
+                message="5m evidence exists after an earlier unexplained date; incomplete days remain quarantined.",
                 domain=DOMAIN_MARKET_INTRADAY_5M,
                 sample=list(coverage.get("later_explained_date_sample", []) or []),
             )

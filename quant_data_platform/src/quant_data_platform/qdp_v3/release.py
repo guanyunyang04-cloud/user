@@ -14,7 +14,13 @@ from quant_data_platform.qdp_v2.manifest import (
     dataset_manifest_for_id as v2_dataset_manifest_for_id,
     qdp_v2_root,
 )
-from quant_data_platform.qdp_v3.constants import MANIFEST_VERSION, QUALITY_STRICT, STRICT_RELEASE_DOMAINS
+from quant_data_platform.qdp_v3.constants import (
+    LEGACY_MANIFEST_VERSIONS,
+    MANIFEST_VERSION,
+    QUALITY_PROVISIONAL,
+    QUALITY_STRICT,
+    STRICT_RELEASE_DOMAINS,
+)
 from quant_data_platform.qdp_v3.freeze import validate_v2_freeze_proof
 from quant_data_platform.qdp_v3.manifest import (
     active_manifest_sha256,
@@ -173,9 +179,69 @@ def read_candidate(candidate_id_or_path: str | Path, *, workspace_root: str | Pa
     if not payload:
         raise FileNotFoundError(f"candidate_missing:{candidate_id_or_path}")
     result = CandidateManifestV3.from_mapping(payload)
-    if result.manifest_version != MANIFEST_VERSION:
+    if result.manifest_version not in {MANIFEST_VERSION, *LEGACY_MANIFEST_VERSIONS}:
         raise RuntimeError(f"candidate_manifest_version_mismatch:{result.manifest_version}")
     return result
+
+
+def validate_published_active(
+    workspace_root: str | Path | None = None,
+) -> dict[str, Any]:
+    """Validate the small publication pointer without scanning dataset shards."""
+
+    paths = qdp_v3_paths(workspace_root)
+    active = read_json(paths.active_manifest)
+    blockers: list[str] = []
+    if not active:
+        return {"valid": False, "active": {}, "blockers": ["active_manifest_missing"]}
+
+    if int(active.get("manifest_version", 0) or 0) != MANIFEST_VERSION:
+        blockers.append("active_manifest_version_invalid")
+    candidate_id = str(active.get("candidate_id", "") or "")
+    if not candidate_id:
+        blockers.append("active_candidate_id_missing")
+    candidate_file = candidate_path(candidate_id, workspace_root=workspace_root) if candidate_id else None
+    if candidate_file is None or not candidate_file.exists():
+        blockers.append("active_candidate_manifest_missing")
+
+    expected_domains = set(STRICT_RELEASE_DOMAINS)
+    active_datasets = {
+        str(domain): str(dataset_id)
+        for domain, dataset_id in dict(active.get("datasets", {}) or {}).items()
+    }
+    if set(active_datasets) != expected_domains:
+        blockers.append("active_release_domains_invalid")
+
+    candidate: CandidateManifestV3 | None = None
+    if candidate_file is not None and candidate_file.exists():
+        expected_sha = str(active.get("candidate_manifest_sha256", "") or "")
+        actual_sha = manifest_sha256(candidate_file)
+        if not expected_sha or expected_sha != actual_sha:
+            blockers.append("active_candidate_manifest_hash_invalid")
+        try:
+            candidate = read_candidate(candidate_file, workspace_root=workspace_root)
+        except (FileNotFoundError, RuntimeError, TypeError, ValueError):
+            blockers.append("active_candidate_manifest_invalid")
+        if candidate is not None:
+            if candidate.manifest_version != MANIFEST_VERSION:
+                blockers.append("active_candidate_version_invalid")
+            if candidate.candidate_id != candidate_id:
+                blockers.append("active_candidate_id_mismatch")
+            if candidate.datasets != active_datasets:
+                blockers.append("active_candidate_datasets_mismatch")
+            if candidate.dataset_manifest_sha256 != {
+                str(domain): str(value)
+                for domain, value in dict(active.get("dataset_manifest_sha256", {}) or {}).items()
+            }:
+                blockers.append("active_dataset_manifest_hashes_mismatch")
+    if not str(active.get("published_at", "") or ""):
+        blockers.append("active_published_at_missing")
+
+    return {
+        "valid": not blockers,
+        "active": active,
+        "blockers": sorted(set(blockers)),
+    }
 
 
 def validate_candidate_graph(candidate: CandidateManifestV3, *, workspace_root: str | Path | None = None) -> list[dict[str, Any]]:
@@ -273,6 +339,26 @@ def publish_candidate(
         raise RuntimeError(f"active_compare_and_swap_failed:expected={expected} actual={current_sha}")
     graph_findings = validate_candidate_graph(candidate, workspace_root=workspace_root)
     blockers = list(candidate.blockers) + graph_findings
+    expected_domains = set(STRICT_RELEASE_DOMAINS)
+    actual_domains = set(candidate.datasets)
+    if actual_domains != expected_domains:
+        blockers.append(
+            {
+                "code": "candidate_core_domain_contract_mismatch",
+                "missing_domains": sorted(expected_domains - actual_domains),
+                "unexpected_domains": sorted(actual_domains - expected_domains),
+            }
+        )
+    provisional_domains = sorted(
+        domain for domain, tier in candidate.quality_tiers.items() if tier == QUALITY_PROVISIONAL
+    )
+    if provisional_domains:
+        blockers.append(
+            {
+                "code": "candidate_provisional_quality_forbidden",
+                "domains": provisional_domains,
+            }
+        )
     freeze = read_json(paths.metadata / "v2_freeze_20260713.json")
     freeze_validation = validate_v2_freeze_proof(freeze)
     if not freeze_validation.get("acceptable", False):
@@ -395,8 +481,9 @@ def _manifest_diff_summary(path: Path | None) -> dict[str, Any]:
 
 def _active_diff_context(workspace_root: str | Path | None) -> tuple[str, dict[str, Any], str, Path | None]:
     v3_path = qdp_v3_paths(workspace_root).active_manifest
-    if v3_path.exists():
-        return "v3", read_json(v3_path), sha256_file(v3_path), v3_path
+    validation = validate_published_active(workspace_root)
+    if validation["valid"]:
+        return "v3", dict(validation["active"]), sha256_file(v3_path), v3_path
     v2_root = qdp_v2_root(workspace_root)
     v2_path = v2_active_manifest_path(v2_root)
     if v2_path.exists():

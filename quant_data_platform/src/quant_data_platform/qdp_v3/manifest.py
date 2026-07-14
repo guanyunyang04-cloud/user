@@ -10,6 +10,7 @@ from typing import Any, Mapping, Sequence
 
 from quant_data_platform.core.json_io import json_safe, read_json
 from quant_data_platform.qdp_v3.constants import (
+    LEGACY_MANIFEST_VERSIONS,
     MANIFEST_VERSION,
     QDP_V3_CONTRACT_VERSION,
     QUALITY_TIERS,
@@ -181,7 +182,7 @@ class DatasetManifestV3:
     timezone: str = TIMEZONE
 
     def __post_init__(self) -> None:
-        if int(self.manifest_version) != MANIFEST_VERSION:
+        if int(self.manifest_version) not in {MANIFEST_VERSION, *LEGACY_MANIFEST_VERSIONS}:
             raise ValueError(f"qdp_v3_manifest_version_mismatch:{self.manifest_version}")
         if self.quality_tier not in QUALITY_TIERS:
             raise ValueError(f"invalid_quality_tier:{self.quality_tier}")

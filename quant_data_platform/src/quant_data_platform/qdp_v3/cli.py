@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable
 
@@ -9,6 +10,7 @@ from quant_data_platform.core.json_io import json_safe, read_json
 from quant_data_platform.qdp_v3.audit import audit_candidate
 from quant_data_platform.qdp_v3.build import build_candidate
 from quant_data_platform.qdp_v3.compatibility import capture_baostock_0_9_1_golden, run_baostock_0_9_3_compatibility_gate
+from quant_data_platform.qdp_v3.compaction import compact_raw_domain
 from quant_data_platform.qdp_v3.corporate_actions import ingest_mootdx_xdxr
 from quant_data_platform.qdp_v3.freeze import freeze_v2, validate_v2_freeze_proof
 from quant_data_platform.qdp_v3.gc import collect_garbage
@@ -29,7 +31,13 @@ from quant_data_platform.qdp_v3.manifest import active_manifest_sha256, dataset_
 from quant_data_platform.qdp_v3.mootdx_compatibility import run_mootdx_5m_compatibility_gate
 from quant_data_platform.qdp_v3.paths import qdp_v3_paths
 from quant_data_platform.qdp_v3.proxy_compatibility import lock_bootstrap_cutoff, run_tushare_proxy_compatibility_gate
-from quant_data_platform.qdp_v3.release import diff_candidate, publish_candidate, read_candidate, rollback_active
+from quant_data_platform.qdp_v3.release import (
+    diff_candidate,
+    publish_candidate,
+    read_candidate,
+    rollback_active,
+    validate_published_active,
+)
 from quant_data_platform.qdp_v3.retirement import retire_v2_intraday
 from quant_data_platform.qdp_v3.secondary import ingest_baostock_report_domain, ingest_baostock_snapshot_domain
 from quant_data_platform.qdp_v3.update import plan_update, run_update
@@ -41,7 +49,7 @@ QDP v3 manifest-first data-base commands:
   status                         Show v3 active/candidate/raw state.
   list                           List v3 active or candidate datasets.
   describe <domain|dataset-id>   Read one v3 dataset manifest.
-  check --candidate ID           Audit a v3 candidate.
+  check [--candidate ID]         Audit active by default, or one candidate.
   ingest --provider baostock --mode date-snapshot|date-events
                                  Fetch resumable date partitions.
   ingest --provider mootdx --mode corporate-actions
@@ -49,6 +57,7 @@ QDP v3 manifest-first data-base commands:
   ingest --provider tushare-proxy --mode historical --domain DOMAIN
                                  Capture resumable 2010+ historical raw facts.
   build candidate                Build immutable canonical datasets and a candidate.
+  compact --raw-domain DOMAIN    Bundle verified raw partitions into large Parquet files.
   audit --candidate ID           Run quick, full, or semantic candidate gates.
   diff --candidate ID            Compare a candidate with v3 active.
   publish --candidate ID --expect-active-sha SHA
@@ -96,7 +105,8 @@ def _status(argv: list[str]) -> int:
     parser.add_argument("--run", default="", help="Show one resumable ingest/update job.")
     args = parser.parse_args(argv)
     paths = qdp_v3_paths(_workspace(args))
-    active = read_json(paths.active_manifest)
+    active_validation = validate_published_active(_workspace(args))
+    active = dict(active_validation["active"]) if active_validation["valid"] else {}
     candidates = sorted(paths.candidates.glob("*.json")) if paths.candidates.exists() else []
     raw_domains = sorted(path.name for path in paths.raw.iterdir() if path.is_dir()) if paths.raw.exists() else []
     freeze = read_json(paths.metadata / "v2_freeze_20260713.json")
@@ -114,6 +124,12 @@ def _status(argv: list[str]) -> int:
             **validate_v2_freeze_proof(freeze),
         },
     }
+    if not active_validation["valid"] and paths.active_manifest.exists():
+        payload["invalid_active"] = {
+            "path": str(paths.active_manifest.resolve()),
+            "sha256": active_manifest_sha256(_workspace(args)),
+            "blockers": list(active_validation["blockers"]),
+        }
     if args.run:
         run_path = paths.jobs / f"{str(args.run)}.json"
         run_state = read_json(run_path)
@@ -136,7 +152,10 @@ def _list(argv: list[str]) -> int:
         datasets = candidate.datasets
         source = candidate.candidate_id
     else:
-        active = read_json(paths.active_manifest)
+        validation = validate_published_active(_workspace(args))
+        if not validation["valid"]:
+            raise RuntimeError("qdp_v3_active_missing_or_invalid")
+        active = dict(validation["active"])
         datasets = dict(active.get("datasets", {}) or {})
         source = "active"
     rows: list[dict[str, Any]] = []
@@ -167,7 +186,10 @@ def _describe(argv: list[str]) -> int:
             domain_hint = target
             dataset_id = candidate.datasets[target]
     else:
-        active = read_json(paths.active_manifest)
+        validation = validate_published_active(_workspace(args))
+        if not validation["valid"]:
+            raise RuntimeError("qdp_v3_active_missing_or_invalid")
+        active = dict(validation["active"])
         active_datasets = dict(active.get("datasets", {}) or {})
         if target in active_datasets:
             domain_hint = target
@@ -198,6 +220,45 @@ def _audit(argv: list[str], *, prog: str = "qdp audit") -> int:
     return 0 if payload.get("status") == "passed" else 2
 
 
+def _check(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="qdp check",
+        description="Audit the QDP v3 active data base, or an explicitly selected candidate.",
+    )
+    _common(parser)
+    parser.add_argument("--candidate", default="")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--quick", action="store_true")
+    modes.add_argument("--full", action="store_true")
+    modes.add_argument("--semantic", action="store_true")
+    parser.add_argument("--no-write-report", action="store_true")
+    args = parser.parse_args(argv)
+    workspace = _workspace(args)
+    target = "candidate"
+    candidate_id = str(args.candidate or "")
+    if not candidate_id:
+        validation = validate_published_active(workspace)
+        if not validation["valid"]:
+            raise RuntimeError("qdp_v3_active_missing_or_invalid")
+        active = dict(validation["active"])
+        candidate_id = str(active.get("candidate_id", "") or "")
+        if not candidate_id:
+            raise RuntimeError("qdp_v3_active_candidate_id_missing")
+        target = "active"
+    mode = "semantic" if args.semantic else "full" if args.full else "quick"
+    payload = audit_candidate(
+        candidate_id=candidate_id,
+        mode=mode,
+        workspace_root=workspace,
+        write_report=not bool(args.no_write_report),
+    )
+    payload["target"] = target
+    if target == "active":
+        payload["active_sha256"] = active_manifest_sha256(workspace)
+    _emit(payload, as_json=bool(args.json))
+    return 0 if payload.get("status") == "passed" else 2
+
+
 def _ingest(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="qdp ingest", description="Ingest immutable, resumable QDP v3 provider partitions.")
     _common(parser)
@@ -210,7 +271,6 @@ def _ingest(argv: list[str]) -> int:
     parser.add_argument("--end-date", default="")
     parser.add_argument("--universe-kind", default="all_a", choices=("all_a", "etf"))
     parser.add_argument("--refresh", action="store_true")
-    parser.add_argument("--no-cross-check", action="store_true")
     parser.add_argument(
         "--max-workers",
         type=int,
@@ -376,7 +436,7 @@ def _ingest(argv: list[str]) -> int:
                 universe_kind=str(args.universe_kind),
                 workspace_root=workspace,
                 refresh=bool(args.refresh),
-                cross_check=not bool(args.no_cross_check),
+                cross_check=False,
                 job_id=str(args.job_id),
                 max_workers=int(args.max_workers),
             )
@@ -390,7 +450,6 @@ def _build(argv: list[str]) -> int:
     parser.add_argument("--start-date", default="2010-01-01")
     parser.add_argument("--end-date", default="")
     parser.add_argument("--identity-config", default="")
-    parser.add_argument("--allow-unverified-factor-dual-path", action="store_true")
     parser.add_argument("--full", action="store_true", help="Emit the full candidate manifest including raw partition references.")
     args = parser.parse_args(argv)
     candidate = build_candidate(
@@ -398,7 +457,7 @@ def _build(argv: list[str]) -> int:
         start_date=str(args.start_date),
         end_date=str(args.end_date),
         identity_config=str(args.identity_config) or None,
-        require_factor_dual_path=not bool(args.allow_unverified_factor_dual_path),
+        require_factor_dual_path=False,
     )
     payload = candidate.to_dict() if args.full else {
         "status": candidate.status,
@@ -465,6 +524,41 @@ def _gc(argv: list[str]) -> int:
     return 0
 
 
+def _compact(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="qdp compact",
+        description="Verify and compact legacy immutable raw partitions into large Parquet bundles.",
+    )
+    _common(parser)
+    parser.add_argument("--raw-domain", action="append", required=True)
+    parser.add_argument("--export-index-dir", default="")
+    parser.add_argument("--delete-source", action="store_true")
+    parser.add_argument("--yes", action="store_true")
+    args = parser.parse_args(argv)
+    if args.delete_source and not args.yes:
+        raise ValueError("raw_compaction_source_deletion_requires_yes")
+    workspace = _workspace(args)
+    export_root = Path(args.export_index_dir) if args.export_index_dir else qdp_v3_paths(workspace).metadata / "raw_index"
+    results: list[dict[str, Any]] = []
+    for raw_domain in sorted(set(str(item) for item in args.raw_domain if str(item))):
+        result = compact_raw_domain(
+            raw_domain,
+            workspace_root=workspace,
+            export_index_dir=export_root,
+            delete_sources=bool(args.delete_source),
+            yes=bool(args.yes),
+        )
+        results.append(asdict(result))
+    payload = {
+        "status": "completed",
+        "raw_domain_count": len(results),
+        "results": results,
+        "sources_deleted": bool(args.delete_source),
+    }
+    _emit(payload, as_json=bool(args.json))
+    return 0
+
+
 def _retire_v2_intraday(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="qdp retire-v2-intraday",
@@ -512,7 +606,6 @@ def _update(argv: list[str]) -> int:
     parser.add_argument("--bootstrap", action="store_true")
     parser.add_argument("--historical-provider", default="", choices=("", "tushare-proxy"))
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--no-secondary", action="store_true")
     parser.add_argument("--no-publish", action="store_true")
     parser.add_argument("--hash-v2-shards", action="store_true")
     args = parser.parse_args(argv)
@@ -521,7 +614,6 @@ def _update(argv: list[str]) -> int:
         "workspace_root": _workspace(args),
         "bootstrap": bool(args.bootstrap),
         "start_date": str(args.start_date),
-        "include_secondary": not bool(args.no_secondary),
         "historical_provider": str(args.historical_provider),
     }
     if args.dry_run:
@@ -579,8 +671,9 @@ COMMANDS: dict[tuple[str, ...], Callable[[list[str]], int]] = {
     ("status",): _status,
     ("list",): _list,
     ("describe",): _describe,
-    ("check",): lambda argv: _audit(argv, prog="qdp check"),
+    ("check",): _check,
     ("ingest",): _ingest,
+    ("compact",): _compact,
     ("build", "candidate"): _build,
     ("audit",): _audit,
     ("diff",): _diff,

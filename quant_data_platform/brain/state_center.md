@@ -1,5 +1,5 @@
 # Quant Data Platform 状态程序
-快照日期：`2026-07-14`
+快照日期：`2026-07-15`
 
 ## Module Interface
 `exports`: QDP v2 active data base status、QDP v3 rebuild/candidate status、dataset manifest summaries、quality/audit entrypoints。
@@ -8,27 +8,29 @@
 ## Object Instances
 ### object `qdp_project`
 `type`: shared_manifest_first_data_base_instance
-`state`: v2 仍是唯一 active 数据基底；v3 已收敛为 5m-only，provider、raw、identity、build、audit、CAS release、retirement 与 GC 代码面已建立。BaoStock 2010—2012 日线/日期因子事件 raw 已 strict 完成，Tushare 代理历史 bootstrap 正在可恢复运行；因子仲裁、全历史 5m、candidate 和 active 切换尚未完成。
-`public_cli`: 共用 `status/list/describe/check/gc/update`；v3 新增 `ingest/build candidate/audit/diff/publish/rollback/compatibility`；首次 bootstrap 发布后会重跑 semantic/hash 审计并在全部前置通过时自动执行受保护的 `retire-v2-intraday`，也可单独 dry-run/执行该命令。v2 legacy rebuild/verify 在退休前仍通过 `--generation v2` 只读保留。
+`state`: v2 仍是唯一有效、可研究的 active 数据基底；v3 已收敛为可信单源、5m-only、紧凑 raw bundle 合同。历史 provider job 已接管为 `interrupted_recoverable`，尚未恢复下载；正式 candidate 和 active 切换均未完成。2026-07-15 发现的空 v3 active 占位已确认无候选/无数据并删除；默认 status 已恢复到 v2。
+`public_cli`: 公共面为 `status/list/describe/check/update/gc`，管理面为 `ingest/compact/build/audit/diff/publish/rollback/retire-v2-intraday`。read routing 只接受通过 `validate_published_active()` 的 v3，否则默认 v2；`check` 也可显式指定 candidate，任何 v2 写命令必须显式给出 `--generation v2`。
 `python`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`
 
 ### object `qdp_v3_rebuild`
-`type/state`: immutable_manifest_v3_candidate_pipeline / historical_backfill_in_progress_with_authorized_m0_gap
+`type/state`: immutable_manifest_v3_candidate_pipeline / interrupted_recoverable_waiting_for_compaction_and_bootstrap
 `root`: `quant_data_platform/data/qdp_v3`
-`contract`: `qdp_v3_20260714_bootstrap_5m` / schema `3.2.0` / manifest `3`；正式起点 `2010-01-01`；日期分区 raw 不可变修订链；canonical 主键使用稳定 `security_id + 时间键`；历史代码由有证据的 `symbol_history` 恢复；quality tier 为 `strict/provisional/quarantined`。v3 不采集、构建、发布或更新 1m，`market_intraday_5m` 是唯一分钟事实域。
+`contract`: `qdp_v3_20260715_trusted_source_5m` / schema `3.3.0` / manifest `4`；正式起点 `2010-01-01`；canonical 主键使用稳定 `security_id + 时间键`。新生产数据只发布 `strict/quarantined`，旧 `provisional` 仅可读；v3 不采集、构建、发布或更新 1m。
 `providers`: BaoStock `0.9.3` wheel SHA-256 `acbd19403285bc4e254cee8297cf0e2646ae2276e5af7e549deed3988ab02293`；mootdx `0.11.7`；Tushare-compatible proxy 仅作 2010-01-01..2026-07-13 历史启动源，`upstream_provenance=not_exposed`，Token 只从环境变量读取。
-`implemented_domains`: 全 A 股批量日线/状态/估值、批量因子事件、逐证券因子史、security identity/symbol history、PIT signal/open、5m 唯一分钟事实域、xdxr/股本、财务/业绩/行业/指数次级域；v3 1m 路由与转换代码已删除。
-`compatibility`: 0.9.1 full golden 已捕获；0.9.3 full gate 为 `passed`（34 anchors、0 issues、普通多页 5537 rows、wheel hash 匹配）。报告不是 `passed/full` 时仍禁止 live date-partition ingest。
-`historical_backfill`: 2010/2011/2012 分别有 `242/244/243` 个交易日；日线、`query_all_stock` 和日期因子事件均为 `729/729` strict 分区。日线共 `1,578,095` rows；因子事件共 `5,192` rows、135 个合法零事件日；三年均无缺日、结构 blocker 或 20,000 行截断。
-`proxy_bootstrap`: Tushare `stock_basic`、`trade_cal`、4,011 个全市场 `daily` 与 4,011 个 `daily_basic` 日期任务已完成；5,864 个全历史 L/D/P identity 任务正在原 job 推进，之后按 status/factor/dividend/financial 顺序执行。历史 5m 固定反向 8,000 行分页、3 workers/最多 3 in-flight；live 429 证据将默认 limiter 修正为 96 次/分钟、burst 1，并保留共享冷却和最低 90 的自适应降速。重启后的前 1,053 个真实请求为 `1053/1053` 成功、0 网络/协议/限流错误，已通过低于 0.5% 的生产闸门。低于 200 GiB 自动暂停；全历史预计约 65,613 个分钟请求，额度耗尽必须进入 `paused_quota` 而非空数据。
-`download_runtime`: BaoStock 2013+ 日线/因子日期回灌在独立线程与 Tushare 参考域并行，但 BaoStock 内部仍复用单一 login 且网络在途数为 1；Tushare 历史 5m 每证券串行翻页并在完成后合并为一个 immutable raw 分区。mootdx 候选由 last-good、tdxpy 与 mootdx 内置列表合并；最新真实闸门冷启动 `1.43s`、热启动 `0.07s`，三只固定证券均为 48 bars 且止于 15:00，保存最快 3 个健康节点并用 300 秒负缓存快速 fallback。
+`implemented_domains`: 首次发布只要求 calendar、identity/symbol history、daily/status、adjust-factor daily、PIT signal/open 与 5m；估值、事件、财务、分红、行业、指数和股本均为非阻塞 enrichment。v3 1m 路由与转换代码已删除。
+`compatibility`: 0.9.1 full golden 已捕获；BaoStock 0.9.3 full gate 为 `passed`（34 anchors、0 issues、普通多页 5537 rows、wheel hash 匹配）。该报告仍约束 cutoff 后 BaoStock 增量，但不再要求 BaoStock 证明 Tushare historical canonical。
+`legacy_baostock_history`: 2010/2011/2012 已有 `729/729` 个日线、all-stock 和日期因子事件分区，日线 `1,578,095` rows、因子事件 `5,192` rows。它们作为可追溯 legacy evidence 紧凑归档，不进入 Tushare 独占的 historical canonical，也不继续 2013+ 历史复刻。
+`proxy_bootstrap`: Tushare `stock_basic`、`trade_cal`、4,011 个全市场 `daily`、4,011 个 `daily_basic` 与 5,864 个 identity 任务已有 raw。新调度优先用分钟额度抓全历史 5m；额度耗尽后只补 `status/factor`，跳过 dividend/financial。三个 worker 共享单一 `96 rpm / burst 1` limiter。
+`download_runtime`: Tushare 独占 `2010-01-01..2026-07-13` 历史启动；历史 BaoStock 复刻和逐行跨源验证退出生产 DAG。截止日后 BaoStock 维护日线/状态/因子事件，mootdx 优先更新完整 5m 股票日，BaoStock 作完整日 fallback。job 使用 30 秒 heartbeat 与 OS advisory lock；超过 5 分钟且无锁才回退到可恢复 pending。
+`storage_state`: `QDP_DATA_ROOT=H:\quant_project\quant_data_platform\data`；`QDP_RUNTIME_ROOT=C:\Users\ASUS\AppData\Local\QDP\runtime`。reference raw 为 undated x 1，低频时序 raw 为 year x 1，只有 5m raw 为 year x 16；zstd，目标约 384 MiB/最大 1 GiB。SQLite runtime index 可导出带 SHA256 的 `raw_index.parquet` 与 `raw_receipts.parquet`。旧 raw 小文件尚未全量 compact 或删除，生产下载尚未恢复。
+`disk_health`: H 已于 2026-07-15 完成 `chkdsk H: /f`，dirty bit=false、HealthStatus=Healthy、OperationalStatus=OK、bad sectors=0；日志为 `C:\Users\ASUS\AppData\Local\QDP\maintenance\chkdsk_H_20260715.log`。用户取消 F 盘备份，当前没有 F 盘备份/fallback 前置。
 `rejected_parallel_route`: 两个独立 BaoStock login 的 live probe 出现 `10001001 用户未登录`，因此禁止生产双 session；历史低错误率不得自动解锁第二个网络槽。每个 ingest job 有 OS advisory single-writer lock，进程异常退出后自动释放。
 `adapter_smoke_boundary`: ETF adapter `1574` rows provisional；mootdx 的 `600000.SH/000001.SZ/600076.SH` 最近完整日均为 48 bars 且止于 15:00。Tushare 5m 的 `vol/amount` 已用沪深、早期/近期固定样本证明为股/元，canonical scale 均为 1.0。
-`pit_name_boundary`: stock-basic 当前名称禁止反填历史；`name_on_date` 只能来自日期级 all-stock snapshot 或带 hash 的官方证据，semantic audit 回查 raw。
+`pit_name_boundary`: stock-basic 当前名称禁止反填历史；Tushare `namechange` 与日期级 snapshot 是合法 PIT 名称证据。代码/名称例外通过区间化 `qdp_v3_corrections.json` 修正，官方文档 hash 不再是发布前置。
 `identity_regression`: 官方代码历史固定为 `000022.SZ -> 001872.SZ @ 2018-12-26`、`000043.SZ -> 001914.SZ @ 2019-12-16`、`300114.SZ -> 302132.SZ @ 2025-02-17`；raw code-set 对账按 PIT symbol interval 计算，禁止把新代码的原上市日期反推为历史预期代码。
-`candidate_state`: 历史 candidate `candidate__5060cee5169a45e4162200ad` 仅证明 2010—2012 的日线/identity/PIT/manifest 链路；它缺少新的全历史 5m-only 合同且 factor event/daily 仍被 `factor_event_not_verified_or_arbitrated` 与 `factor_reference_price_proof_missing` 阻断，不能发布。
+`candidate_state`: 历史 candidate `candidate__5060cee5169a45e4162200ad` 属于旧合同，已 superseded；它只保留为 2010—2012 链路证据，不能发布。新的 trusted-source candidate 尚未构建；旧 factor arbitration blocker 不再定义当前发布合同。
 `local_build_performance`: 三年 candidate 本地流式构建约 42.6 分钟，明显慢于已优化的下载；这是后续独立的 canonical build 单核/向量化优化项，不应通过降低审计或发布门解决。
-`release_boundary`: v3 没有 active manifest；未执行 publish 或 active 切换。全历史参考域、身份、逐证券因子史/xdxr/官方仲裁、2010 baseline 与 2010 起 5m strict gate 未完成前不得发布；5m watermark 必须与日线完全相等。v2 active SHA-256 仍为 `e56f72a6cba8bcf86055817f6a0ec5e7391271fb3c27b4d628c3abc62944051e`。
+`release_boundary`: v3 没有 active manifest，未执行有效 publish 或 active 切换。首次 candidate 只要求九域：calendar、identity/symbol history、daily/status、adjust-factor daily、eligible signal、tradable open 与 5m。全历史核心域、identity/PIT、2010 起完整 5m 与 bundle/index/hash gate 未完成前不得发布。5m strict 覆盖低于 98% 阻断、98%—99% 警告、至少 99% 正常。首次发布后还必须完成一次 watermark 晚于 `2026-07-13` 的增量发布，才允许退休 v2；v2 active SHA-256 仍为 `e56f72a6cba8bcf86055817f6a0ec5e7391271fb3c27b4d628c3abc62944051e`。
 `evidence`: `quant_data_platform/brain/references/qdp_v3_rebuild_20260713.md`
 
 ### object `qdp_v2_active_data_base`
@@ -55,50 +57,13 @@
 `candidate_research_scope_tables`: `pit_signal_universe`、`pit_signal_universe_daily`（已构建、未写入当前 `active.json`）
 `boundary`: 这是当前 v2 active 的历史合同：1m/daily 为事实，5m 为 1m 派生缓存。它不得外推为 v3 语义；v3 以 5m 为唯一分钟事实且没有 1m。
 
-### object `pit_mainboard_non_st_v1`
-`type/state`: date_local_research_universe / candidate_ready_not_active
-`datasets`: eligibility `pit_signal_universe__7c8d1f2986a646a5cb8a93a6`；daily audit `pit_signal_universe_daily__7c8d1f2986a646a5cb8a93a6`
-`scope`: 逐交易日已上市沪深主板普通 A 股；研究池剔除当日 ST/已退市，信号池再剔除当日停牌与无 bar。
-`coverage/evidence`: `2016-01-04..2026-06-01`、2526 日、3393 个历史证券、7,451,610 个唯一证券日；375 个历史曾合格证券不在源末日合格成员中。
-`pit_boundary`: source 历史名称存在回填行为，名称和未来 `out_date` 均不输出为模型输入；逐日 eligibility 只使用当日上市/板块/ST/停牌/bar 事实。
-`channel_boundary`: core OHLCV/分钟/limit/辅助表仍为当前 3037 股范围；该对象修复股票池定义，但尚未单独恢复额外历史证券的全通道数据。
-`activation_boundary`: 当前 `active.json` 保持原 17 表；在额外历史证券的价格/特征通道与下游 pack 通过质量门前，不激活这两个候选 pointer。
-`evidence`: `quant_data_platform/brain/references/pit_signal_universe_20260711.md`
+### object `v2_nonactive_pit_research_evidence`
+`type/state/datasets`: immutable_research_views / audited_not_active；`pit_signal_universe__7c8d1f2986a646a5cb8a93a6`、`pit_signal_universe_daily__7c8d1f2986a646a5cb8a93a6`；formal view `seq100_pit_2012_2025_formal__9d6feb2a5ba7f15a7635b42f`。
+`boundary`: 它们证明 date-local universe 与五表原子 view 的结构，但不在 v2 `active.json`，也不能证明旧 dense factor 语义正确；下游必须显式选择。完整范围、行数和 gate 证据见 `references/pit_signal_universe_20260711.md` 与 `references/pit_market_substrate_20260711.md`。
 
-### object `pit_market_substrate_v2`
-`type/state`: immutable_research_dataset_view / formal_2012_2025_research_window_ready_not_active
-`atomic_overrides`: `market_daily_raw`、`security_status`、`limit_status`、`adjust_factor`、`pit_signal_universe`；seq100 `--dataset-view` 拒绝任何不完整覆盖，避免 PIT universe 与 active survivor-scope 价格/因子混用。
-`inputs`: 可重复 traditional PIT snapshot；也可直接读取 recovery cache 的 `daily_stock_lists + security_master` 并拼接独立 QDP market-daily backfill manifest；factor events 可重复输入，active dense factor 只作为只读来源。
-`gates`: 五表主键唯一；`eligible_for_research && !is_suspended` 对 market 做独立 anti-join，且校验预期 market 起止日期；security-status 与 PIT row-count 对齐；每个 market key 必须有正 `back_adjust_factor` 和 provenance；任何缺口阻止 view 生成。
-`limit_semantics`: `prior_valid_adjusted_close / current_back_adjust_factor` 转回当日 raw reference，再按当日 ST 5%/普通 10% 和 0.01 tick half-up；避免除权日沿用上一 raw close。
-`probe`: non-active view `seq100_pit_2016_2026_probe__58498361379f14f30e77cf90`；3393 symbols、7,440,688 market/factor/limit keys、7,451,610 PIT/status keys、7,031,085 signal-eligible rows、Gate-0 missing=0、factor missing/nonpositive=0、PK duplicate=0；`active.json` byte-for-byte unchanged。
-`formal_view`: `seq100_pit_2012_2025_formal__9d6feb2a5ba7f15a7635b42f`；底层覆盖 `2012-01-04..2026-06-01` 以支持 2025 年末 forward-60 标签；3409 symbols、3496 dates、9,530,656 market/factor/limit keys、9,542,426 PIT/status keys、8,805,538 signal-eligible rows；所有增强 Gate-0/factor/PK checks 为 0 findings。
-`activation_boundary`: formal view 与五个 dataset 均保持 non-active；`active.json` SHA-256 在构建前后均为 `E56F72A6CBA8BCF86055817F6A0EC5E7391271FB3C27B4D628C3ABC62944051E`。
-`evidence`: `quant_data_platform/brain/references/pit_market_substrate_20260711.md`
-
-### object `meta_domain_quality_proof`
-`type`: historical_structural_quality_evidence
-`state`: structurally_passed_semantically_superseded
-`domains`: `trading_calendar`、`universe_snapshot`、`security_status`、`adjust_factor`、`industry_concept`、`index_constituents`
-`audit_path`: `quant_data_platform/data/qdp_v2/audits/meta_domain_quality_20260701T140834+0000.json`
-`adjust_factor`: active dataset `adjust_factor__4e0e31d3c1fd34bfcfa7a7dd`; one row per `market_daily_raw` key、正值与 provenance 仍成立，但不再构成语义正确证明；`600076.SH/2024` 无事件日异常跳变是固定反例。
-`industry_concept`: one row per universe key; blank/UNKNOWN industry rows are `0`; `001399.SZ` was filled from AkShare/CNInfo profile industry; concept tags are not part of the active short-line data base because no reliable PIT concept-tag source is active.
-`security_status`: historical ST rows remain PIT flags; active scope has `delisted_rows=0`.
-
-### object `scope_active_rebuild_20260701`
-`type`: active_scope_correction
-`state`: completed
-`scope_name`: `mainboard_hs_a_ex_current_st_name_delisted_v2`
-`excluded_current_name_contains`: `退市`
-`excluded_symbols`: `600193.SH`、`600608.SH`、`600636.SH`、`600696.SH`、`605081.SH`
-`active_symbol_count_after`: `3037`
-`effect`: all active symbol-bearing datasets were rebuilt under the same scope; `trading_calendar` unchanged.
-
-### object `share_valuation_completion_20260701`
-`type`: active_quality_completion
-`state`: completed
-`share_capital`: active dataset `share_capital__2ef0e66db12236b868b8c626`; `total_share_null_rows=0`、`float_share_null_rows=0`、`restricted_share_null_rows=0`.
-`valuation`: active dataset `valuation__1e4c0d84334ff43e9f4e8fba`; `total_mv_null_rows=0`、`circ_mv_null_rows=0`; `pb_null_rows=229` and `turnover_rate_null_rows=224390` remain source/metric availability boundaries, not key/coverage failures.
+### object `v2_quality_history`
+`type/state`: active_structural_proof / semantically_superseded_by_v3；2026-07-01 scope rebuild 将 v2 active 收敛到 3037 个当前主板非 ST/非退市 symbol；share-capital/market-cap 关键字段已补齐，industry 无 blank/UNKNOWN。旧 factor 仍只证明键覆盖、正值和 provenance，`600076.SH/2024` 是语义反例。
+`evidence`: `data/qdp_v2/audits/meta_domain_quality_20260701T140834+0000.json`；这些历史质量明细不再展开在 hot path。
 
 ### object `archived_v1_workflows`
 `type`: archived_process_surface
@@ -114,8 +79,8 @@
 
 ### object `provider_runtime`
 `type`: upstream_ingest_runtime
-`state`: production Python environment is `yolos`；Tushare proxy 只负责固定截止日历史启动，BaoStock 长期维护日线/状态/因子事件并作 5m fallback，mootdx 负责截止日后的优先 5m。BaoStock 长任务使用任务内持久单 login；mootdx 先做真实 5m 协议健康检查并负缓存不可用状态。
-`boundary`: BaoStock 与 Tushare 兼容闸门、mootdx 5m 健康证明、provider staging、identity、factor、PIT、5m、lineage 与自动密钥扫描均通过 semantic audit 后才允许 CAS active pointer change；发布后再次执行 semantic/full-shard hash 复核，任意完整来源冲突不得用优先级强行覆盖。
+`state`: production Python environment is `yolos`；Tushare proxy 是固定截止日的可信历史启动源，BaoStock/mootdx 只负责截止日后的免费增量。raw payload 存大 Parquet bundle，运行 job/cursor/index 位于 `QDP_RUNTIME_ROOT`。
+`boundary`: provider 不再互相证明数值正确，但 schema、单位、identity、PIT、48-bar 完整性、lineage、secret scan 和 CAS 仍必须通过；不完整股票日 quarantine，不拼接、不插值。
 
 ### object `qdp_storage_retention`
 `state`: on `2026-07-10`, manifest-aware GC removed 26 unreferenced dataset directories and reclaimed `44,891,842,512` bytes; 17 active dataset directories remain.
@@ -123,6 +88,8 @@
 `runtime`: metadata-only `qdp status` completes in about 0.6s; read-only `qdp check --quick --runtime fast` completes in about 2.5s on the current store.
 `invariant`: future deletion still requires active-manifest traversal, dry-run, replacement evidence for unique-data boundaries, and post-delete file verification.
 `m0_correction`: v3 freeze 审计发现 17 个 active input ancestor 已缺失；当前所有 39 个仍存在的 v2 dataset 及 17 个缺失祖先 id 均被 pin。用户授权的替代缺口证明只允许重建继续，不代表祖先已恢复；v3 发布、5m 覆盖/hash 复核、v2/v3 diff、下游切换和 retirement manifest 全部完成前禁止删除旧分钟 parquet。满足全部条件后只退休 v2 的 1m、旧 5m 与两条分钟特征链。
+`raw_compaction`: v3 legacy raw 当前仍是大量小文件，已实现 bundle writer、SQLite WAL index、catalog export、bundle-aware read 和双重删除保护。必须先在小域完成不删源 round-trip，再用 `--delete-source --yes` 演练并复核，之后才可全量 compact；这不授权提前删除 v2。H 的 1 MiB allocation unit 是紧凑化的直接原因。
+`retirement_sequence`: v3 首次发布只建立 `awaiting_post_cutoff_incremental` gate；完成一次 cutoff 后增量发布、watermark/coverage/hash/audit/diff/consumer 检查后才写 retirement manifest 并删除四域 parquet。任一失败保持 v2 数据不变。
 
 ## Pure Functions
 - `active_table(domain)`: read `active.json.datasets[domain]` and then the referenced `dataset.json`.
@@ -132,15 +99,15 @@
 
 ## Procedures
 ### procedure `inspect_qdp_status`
-`command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli status --json`
+`command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v2 status --json`
 `output`: active scope and table summaries, without requiring a catalog.
 
 ### procedure `quick_quality_check`
-`command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli check --quick --json`；默认只读，只有显式 `--write-audit` 才写审计文件。
+`command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v2 check --quick --json`；默认只读，只有显式 `--write-audit` 才写审计文件。
 `output`: fast manifest/contract/path check.
 
 ### procedure `meta_quality_check`
-`command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli check meta --runtime fast --duckdb-memory-limit 12GB --threads 4 --writeback --json`
+`command`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --generation v2 check meta --runtime fast --duckdb-memory-limit 12GB --threads 4 --writeback --json`
 `output`: global exact primary-key and coverage/alignment proof for PIT/meta/factor/index domains.
 
 ### procedure `update_dry_run`

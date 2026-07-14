@@ -190,7 +190,7 @@ class SecurityIdentityRegistry:
                         "exchange": exchange_for_symbol(symbol),
                         "list_date": list_date,
                         "current_symbol": symbol,
-                        "identity_source": "baostock_stock_basic" if master_row else "provider_symbol_stable",
+                        "identity_source": str(master_row.get("identity_source", "") or "baostock_stock_basic") if master_row else "provider_symbol_stable",
                     }
                 )
                 known_security_ids.add(security_id)
@@ -205,7 +205,7 @@ class SecurityIdentityRegistry:
                     # observations split this interval later.
                     "name_on_date": "",
                     "board_on_date": board,
-                    "evidence_source": "baostock.query_stock_basic" if master_row else "provider_symbol_stable_no_change_evidence",
+                    "evidence_source": str(master_row.get("identity_source", "") or "baostock.query_stock_basic") if master_row else "provider_symbol_stable_no_change_evidence",
                     "official_document_hash": "",
                 }
             )
@@ -313,9 +313,7 @@ class SecurityIdentityRegistry:
                     raise ValueError(f"symbol_history_overlapping_intervals:{security_id}")
                 previous_to = str(row.effective_to)
             if group["symbol"].nunique() > 1:
-                missing_evidence = group["evidence_source"].eq("") | ~group["official_document_hash"].str.fullmatch(
-                    r"[0-9a-fA-F]{64}", na=False
-                )
+                missing_evidence = group["evidence_source"].eq("")
                 if missing_evidence.any():
                     aliases = group.loc[missing_evidence, "symbol"].astype(str).tolist()
                     raise ValueError(f"multi_symbol_identity_official_evidence_missing:{security_id}:{aliases[:10]}")
@@ -349,7 +347,7 @@ class SecurityIdentityRegistry:
     ) -> pd.DataFrame:
         if frame is None or frame.empty:
             out = frame.copy() if isinstance(frame, pd.DataFrame) else pd.DataFrame()
-            for column in ("security_id", "symbol_on_date", "identity_mapping_status"):
+            for column in ("security_id", "symbol_on_date", "name_on_date", "board_on_date", "identity_mapping_status"):
                 if column not in out.columns:
                     out[column] = pd.Series(dtype="string")
             return out
@@ -360,6 +358,8 @@ class SecurityIdentityRegistry:
         out[date_column] = out[date_column].astype(str).str.slice(0, 10)
         out["security_id"] = out[provider_symbol_column].map(self._alias_to_security).fillna("")
         out["symbol_on_date"] = ""
+        out["name_on_date"] = ""
+        out["board_on_date"] = ""
         for security_id, indices in out.groupby("security_id", sort=False).groups.items():
             if not security_id:
                 continue
@@ -371,6 +371,8 @@ class SecurityIdentityRegistry:
                 mask = dates.ge(str(row.effective_from)) & dates.le(str(row.effective_to))
                 if mask.any():
                     out.loc[dates.index[mask], "symbol_on_date"] = str(row.symbol)
+                    out.loc[dates.index[mask], "name_on_date"] = str(row.name_on_date)
+                    out.loc[dates.index[mask], "board_on_date"] = str(row.board_on_date)
         out["identity_mapping_status"] = "mapped"
         out.loc[out["security_id"].eq(""), "identity_mapping_status"] = "unmapped_provider_symbol"
         out.loc[out["security_id"].ne("") & out["symbol_on_date"].eq(""), "identity_mapping_status"] = "no_pit_symbol_interval"

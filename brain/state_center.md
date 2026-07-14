@@ -1,5 +1,5 @@
 # 主脑状态程序
-快照日期：`2026-07-14`
+快照日期：`2026-07-15`
 
 本文件只保存 `H:\quant_project` 当前跨项目对象。项目细节写入对应分脑；历史过程进入各自 `references/`。
 
@@ -22,8 +22,8 @@
 ### object `quant_data_platform_child`
 `type`: shared_data_base_child_brain
 `path`: `quant_data_platform/brain/`
-`state`: QDP 当前唯一 active 仍是 v2 manifest-first 数据基底；v3 已锁定为 2010 起、5m-only 的 identity-first/date-partition/candidate pipeline，1m 不再采集、构建、发布或更新。BaoStock 2010—2012 的 729 个日线/all-stock/因子事件日期分区已 strict；Tushare proxy 的 stock basic、交易日历、4,011 个全市场日线与 4,011 个 daily_basic 任务已完成，5,864 个 identity 任务及后续 status/factor/dividend/financial/5m 正在原 DAG 断点运行，同时 BaoStock 2013+ 日期回灌并行推进；mootdx 最近 5m 三证券协议闸门通过。M0 的 17 个缺失 ancestors 以授权替代证明闭合，但在 v3 发布与发布后 5m/lineage/hash 校验前 v2 不删除；因子仲裁、全历史 5m、candidate 和发布仍未完成。
-`public_commands`: 共用 `qdp status/list/describe/check/gc/update`；v3 增加 `ingest/build/audit/diff/publish/rollback/compatibility`，发布校验后有受保护的 `retire-v2-intraday`；v2 legacy rebuild/verify 在退休前使用 `--generation v2`。
+`state`: QDP 当前唯一有效、可研究的 active 仍是 v2。v3 合同已收敛为 `qdp_v3_20260715_trusted_source_5m` / schema `3.3.0` / manifest `4`：2010 起、5m-only、稳定 identity、可信单源与紧凑 raw bundle；reference raw 为 undated x 1，低频为 year x 1，只有 5m 为 year x 16。Tushare proxy 独占 `2010-01-01..2026-07-13` 历史，cutoff 后 BaoStock 更新日线/状态/因子、mootdx 优先更新 5m、BaoStock 仅作完整日 fallback。H 已修复且健康，数据根留在 H，runtime 已迁至 C；用户取消 F 盘备份。旧 raw 尚未全量 compact，历史 5m/factor、九域 candidate 和发布尚未完成，下载任务保持 `interrupted_recoverable`。空 v3 active 占位已删除，active validation 与 pytest 环境隔离已加，默认 status 恢复为 v2。v3 首次有效发布后还必须完成一次 cutoff 后增量发布，才可受保护地退休 v2 四条分钟链。
+`public_commands`: 共用 `qdp status/list/describe/check/gc/update`；v3 管理面为 `ingest/compact/build/audit/diff/publish/rollback/compatibility/retire-v2-intraday`；v2 legacy 写命令必须显式使用 `--generation v2`。
 
 ### object `daily_research_child`
 `type`: production_research_child_brain

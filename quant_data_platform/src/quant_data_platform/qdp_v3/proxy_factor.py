@@ -29,6 +29,18 @@ PROXY_FACTOR_EVENT_COLUMNS = [
     "factor_ratio",
 ]
 
+TRUSTED_FACTOR_DAILY_COLUMNS = [
+    "security_id",
+    "trade_date",
+    "symbol_on_date",
+    "provider_symbol",
+    "fore_adjust_factor",
+    "back_adjust_factor",
+    "adjust_factor",
+    "baseline_status",
+    "source",
+]
+
 
 def _relative_error(left: float, right: float) -> float:
     return abs(float(left) - float(right)) / max(abs(float(left)), abs(float(right)), np.finfo(float).tiny)
@@ -200,6 +212,251 @@ def derive_proxy_factor_evidence(
         "relative_tolerance": float(relative_tolerance),
     }
     return baselines.reset_index(drop=True), proxy_events.reset_index(drop=True), conflicts.reset_index(drop=True), metrics
+
+
+def trusted_proxy_factor_daily_from_refs(
+    refs: Iterable[RawPartitionRef],
+    *,
+    identity_registry: SecurityIdentityRegistry,
+    start_date: str = "2010-01-01",
+) -> pd.DataFrame:
+    frames: list[pd.DataFrame] = []
+    for ref in refs:
+        raw = read_raw_partition(ref)
+        if raw.empty:
+            continue
+        if not {"trade_date", "adj_factor"}.issubset(raw.columns):
+            raise ValueError(f"trusted_proxy_factor_raw_schema_invalid:{ref.partition_value}")
+        provider = (
+            raw["ts_code"].map(normalize_symbol)
+            if "ts_code" in raw.columns
+            else pd.Series(normalize_symbol(ref.partition_value), index=raw.index)
+        )
+        base = pd.DataFrame(
+            {
+                "trade_date": raw["trade_date"],
+                "provider_symbol": provider,
+                "adj_factor": raw["adj_factor"],
+            }
+        )
+        mapped = identity_registry.map_frame(base, provider_symbol_column="provider_symbol", date_column="trade_date")
+        unresolved = mapped["identity_mapping_status"].ne("mapped")
+        if unresolved.any():
+            raise ValueError(f"trusted_proxy_factor_identity_unmapped:{int(unresolved.sum())}")
+        frames.append(mapped)
+    combined = pd.concat(frames, ignore_index=True, sort=False) if frames else pd.DataFrame(
+        columns=["security_id", "trade_date", "symbol_on_date", "provider_symbol", "adj_factor"]
+    )
+    return normalize_trusted_proxy_factors(combined, start_date=start_date)
+
+
+def normalize_trusted_proxy_factors(
+    frame: pd.DataFrame,
+    *,
+    start_date: str = "2010-01-01",
+) -> pd.DataFrame:
+    """Normalize each Tushare factor history to its first 2010+ observation."""
+
+    required = {"security_id", "trade_date", "adj_factor"}
+    missing = sorted(required - set(frame.columns))
+    if missing:
+        raise ValueError(f"trusted_proxy_factor_fields_missing:{missing}")
+    data = frame.copy()
+    data["trade_date"] = data["trade_date"].fillna("").astype(str).str.replace("-", "", regex=False)
+    compact = data["trade_date"].str.fullmatch(r"\d{8}")
+    data.loc[compact, "trade_date"] = (
+        data.loc[compact, "trade_date"].str.slice(0, 4)
+        + "-"
+        + data.loc[compact, "trade_date"].str.slice(4, 6)
+        + "-"
+        + data.loc[compact, "trade_date"].str.slice(6, 8)
+    )
+    data["adj_factor"] = pd.to_numeric(data["adj_factor"], errors="coerce")
+    invalid = data["security_id"].fillna("").astype(str).eq("") | ~np.isfinite(data["adj_factor"]) | data["adj_factor"].le(0)
+    if invalid.any():
+        raise ValueError(f"trusted_proxy_factor_invalid_rows:{int(invalid.sum())}")
+    data = data.loc[data["trade_date"].ge(str(start_date))].copy()
+    duplicate = data.duplicated(["security_id", "trade_date"], keep=False)
+    if duplicate.any():
+        conflicts = data.loc[duplicate].groupby(["security_id", "trade_date"])["adj_factor"].nunique().gt(1)
+        if conflicts.any():
+            raise ValueError(f"trusted_proxy_factor_duplicate_conflict:{int(conflicts.sum())}")
+        data = data.drop_duplicates(["security_id", "trade_date"], keep="last")
+    data = data.sort_values(["security_id", "trade_date"], kind="mergesort")
+    baseline = data.groupby("security_id", sort=False)["adj_factor"].transform("first")
+    data["adjust_factor"] = data["adj_factor"] / baseline
+    data["fore_adjust_factor"] = data["adjust_factor"]
+    data["back_adjust_factor"] = data["adjust_factor"]
+    data["baseline_status"] = "trusted_source_ratio"
+    first_index = data.groupby("security_id", sort=False).head(1).index
+    data.loc[first_index, "baseline_status"] = "trusted_source_2010_normalized"
+    data["source"] = "tushare_proxy.adj_factor"
+    for column in ("symbol_on_date", "provider_symbol"):
+        if column not in data.columns:
+            data[column] = ""
+    return data.loc[:, TRUSTED_FACTOR_DAILY_COLUMNS].reset_index(drop=True)
+
+
+def continue_trusted_factors_with_baostock(
+    proxy_daily: pd.DataFrame,
+    baostock_events: pd.DataFrame,
+    *,
+    cutoff: str,
+    baostock_history: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Extend proxy factors with post-cutoff BaoStock absolute-factor ratios.
+
+    ``baostock_events`` is the authoritative post-cutoff event stream.  The
+    optional ``baostock_history`` supplies the provider's complete absolute
+    factor history used to anchor the first new event at the cutoff.  Keeping
+    those roles separate prevents a pre-cutoff change already represented in
+    the proxy series from being multiplied a second time.
+    """
+
+    required_proxy = {"security_id", "trade_date", "adjust_factor"}
+    required_bao = {"security_id", "divid_operate_date", "adjust_factor"}
+    if not required_proxy.issubset(proxy_daily.columns):
+        raise ValueError(f"trusted_factor_proxy_fields_missing:{sorted(required_proxy - set(proxy_daily.columns))}")
+    if baostock_events.empty:
+        return pd.DataFrame(columns=TRUSTED_FACTOR_DAILY_COLUMNS)
+    if not required_bao.issubset(baostock_events.columns):
+        raise ValueError(f"trusted_factor_baostock_fields_missing:{sorted(required_bao - set(baostock_events.columns))}")
+    proxy = proxy_daily.copy()
+    proxy["trade_date"] = proxy["trade_date"].astype(str).str.slice(0, 10)
+    proxy["adjust_factor"] = pd.to_numeric(proxy["adjust_factor"], errors="coerce")
+    bao = baostock_events.copy()
+    bao["divid_operate_date"] = bao["divid_operate_date"].astype(str).str.slice(0, 10)
+    bao["adjust_factor"] = pd.to_numeric(bao["adjust_factor"], errors="coerce")
+    absolute_history_all = (
+        baostock_history if baostock_history is not None else baostock_events
+    ).copy()
+    if not required_bao.issubset(absolute_history_all.columns):
+        raise ValueError(
+            "trusted_factor_baostock_history_fields_missing:"
+            f"{sorted(required_bao - set(absolute_history_all.columns))}"
+        )
+    absolute_history_all["divid_operate_date"] = (
+        absolute_history_all["divid_operate_date"].astype(str).str.slice(0, 10)
+    )
+    absolute_history_all["adjust_factor"] = pd.to_numeric(
+        absolute_history_all["adjust_factor"], errors="coerce"
+    )
+    invalid = ~np.isfinite(bao["adjust_factor"]) | bao["adjust_factor"].le(0)
+    history_invalid = ~np.isfinite(absolute_history_all["adjust_factor"]) | absolute_history_all[
+        "adjust_factor"
+    ].le(0)
+    if invalid.any() or history_invalid.any():
+        raise ValueError(
+            "trusted_factor_baostock_invalid_rows:"
+            f"events={int(invalid.sum())}:history={int(history_invalid.sum())}"
+        )
+    for label, frame in (("events", bao), ("history", absolute_history_all)):
+        duplicate = frame.duplicated(["security_id", "divid_operate_date"], keep=False)
+        if duplicate.any():
+            conflicts = (
+                frame.loc[duplicate]
+                .groupby(["security_id", "divid_operate_date"], dropna=False)["adjust_factor"]
+                .nunique()
+                .gt(1)
+            )
+            if conflicts.any():
+                raise ValueError(f"trusted_factor_baostock_{label}_duplicate_conflict:{int(conflicts.sum())}")
+            frame.drop_duplicates(["security_id", "divid_operate_date"], keep="last", inplace=True)
+    rows: list[dict[str, Any]] = []
+    post_events = bao.loc[bao["divid_operate_date"].gt(str(cutoff))].copy()
+    for security_id, events in post_events.sort_values(
+        ["security_id", "divid_operate_date"], kind="mergesort"
+    ).groupby("security_id", sort=False):
+        first_event_date = str(events.iloc[0]["divid_operate_date"])
+        proxy_history = proxy.loc[
+            proxy["security_id"].astype(str).eq(str(security_id))
+            & proxy["trade_date"].lt(first_event_date)
+        ].sort_values("trade_date", kind="mergesort")
+        if proxy_history.empty:
+            raise ValueError(f"trusted_factor_proxy_anchor_missing:{security_id}")
+        current = float(proxy_history.iloc[-1]["adjust_factor"])
+        absolute_history = absolute_history_all.loc[
+            absolute_history_all["security_id"].astype(str).eq(str(security_id))
+        ].sort_values("divid_operate_date", kind="mergesort")
+        pre_event = absolute_history.loc[
+            absolute_history["divid_operate_date"].lt(first_event_date)
+        ]
+        if pre_event.empty:
+            raise ValueError(
+                f"trusted_factor_baostock_ratio_anchor_missing:{security_id}:{first_event_date}"
+            )
+        previous = float(pre_event.iloc[-1]["adjust_factor"])
+        absolute_by_date = {
+            str(row.divid_operate_date): float(row.adjust_factor)
+            for row in absolute_history.itertuples(index=False)
+        }
+        for event in events.itertuples(index=False):
+            event_date = str(event.divid_operate_date)
+            absolute = absolute_by_date.get(event_date)
+            if absolute is None:
+                raise ValueError(f"trusted_factor_baostock_event_history_missing:{security_id}:{event_date}")
+            current *= float(absolute) / previous
+            previous = float(absolute)
+            rows.append(
+                {
+                    "security_id": str(security_id),
+                    "trade_date": event_date,
+                    "symbol_on_date": str(getattr(event, "symbol_on_date", "") or ""),
+                    "provider_symbol": str(getattr(event, "provider_symbol", "") or ""),
+                    "fore_adjust_factor": current,
+                    "back_adjust_factor": current,
+                    "adjust_factor": current,
+                    "baseline_status": "trusted_source_continued",
+                    "source": "baostock.adjust_factor_event_ratio",
+                }
+            )
+    return pd.DataFrame(rows, columns=TRUSTED_FACTOR_DAILY_COLUMNS)
+
+
+def build_trusted_factor_daily(
+    market_daily: pd.DataFrame,
+    proxy_daily: pd.DataFrame,
+    continuation_events: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Align trusted factor observations to canonical market dates and forward-fill."""
+
+    required = {"security_id", "trade_date"}
+    if not required.issubset(market_daily.columns):
+        raise ValueError(f"trusted_factor_market_fields_missing:{sorted(required - set(market_daily.columns))}")
+    observations = [proxy_daily]
+    if isinstance(continuation_events, pd.DataFrame) and not continuation_events.empty:
+        observations.append(continuation_events)
+    factors = pd.concat(observations, ignore_index=True, sort=False)
+    factors["trade_date"] = factors["trade_date"].astype(str).str.slice(0, 10)
+    factors = factors.sort_values(["security_id", "trade_date"], kind="mergesort").drop_duplicates(
+        ["security_id", "trade_date"], keep="last"
+    )
+    market_columns = ["security_id", "trade_date"]
+    for column in ("symbol_on_date", "provider_symbol"):
+        if column in market_daily.columns:
+            market_columns.append(column)
+    market = market_daily.loc[:, market_columns].copy()
+    market["trade_date"] = market["trade_date"].astype(str).str.slice(0, 10)
+    value_columns = ["fore_adjust_factor", "back_adjust_factor", "adjust_factor", "baseline_status", "source"]
+    market["_is_market_row"] = True
+    factor_rows = factors[["security_id", "trade_date", *value_columns]].copy()
+    factor_rows["_is_market_row"] = False
+    combined = pd.concat([factor_rows, market], ignore_index=True, sort=False)
+    combined = combined.sort_values(["security_id", "trade_date", "_is_market_row"], kind="mergesort")
+    combined[value_columns] = combined.groupby("security_id", sort=False)[value_columns].ffill()
+    carried = combined.loc[combined["_is_market_row"].fillna(False)].drop(columns=["_is_market_row"])
+    merged = market.drop(columns=["_is_market_row"]).merge(
+        carried[["security_id", "trade_date", *value_columns]],
+        on=["security_id", "trade_date"],
+        how="left",
+    ).sort_values(["security_id", "trade_date"], kind="mergesort")
+    missing = merged["adjust_factor"].isna()
+    if missing.any():
+        raise ValueError(f"trusted_factor_market_coverage_missing:{int(missing.sum())}")
+    for column in ("symbol_on_date", "provider_symbol"):
+        if column not in merged.columns:
+            merged[column] = ""
+    return merged.loc[:, TRUSTED_FACTOR_DAILY_COLUMNS].reset_index(drop=True)
 
 
 def reconcile_proxy_factor_third_path(

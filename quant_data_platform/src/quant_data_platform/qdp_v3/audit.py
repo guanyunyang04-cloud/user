@@ -30,10 +30,13 @@ from quant_data_platform.qdp_v3.constants import (
     DOMAIN_TRADING_CALENDAR,
     DOMAIN_VALUATION_DAILY,
     MANIFEST_VERSION,
+    QUALITY_PROVISIONAL,
     RAW_ALL_STOCK,
     RAW_DAILY_ASTOCK,
+    RAW_TUSHARE_PROXY_NAMECHANGE,
+    STRICT_RELEASE_DOMAINS,
 )
-from quant_data_platform.qdp_v3.corporate_actions import build_share_capital_daily, reconstruct_xdxr_reference_prices
+from quant_data_platform.qdp_v3.corporate_actions import build_share_capital_daily
 from quant_data_platform.qdp_v3.datasets import read_dataset_frame
 from quant_data_platform.qdp_v3.identity import SecurityIdentityRegistry, normalize_symbol
 from quant_data_platform.qdp_v3.intraday import stable_security_bucket
@@ -47,9 +50,20 @@ from quant_data_platform.qdp_v3.manifest import (
     utc_now,
 )
 from quant_data_platform.qdp_v3.paths import ensure_qdp_v3_layout
-from quant_data_platform.qdp_v3.quality import audit_canonical_daily, audit_factor_semantics, audit_intraday_5m, audit_table_contract
+from quant_data_platform.qdp_v3.quality import (
+    audit_canonical_daily,
+    audit_intraday_5m,
+    audit_strict_5m_coverage,
+    audit_table_contract,
+    audit_trusted_factor_daily,
+)
 from quant_data_platform.qdp_v3.release import read_candidate, validate_candidate_graph
-from quant_data_platform.qdp_v3.storage import frame_content_sha256
+from quant_data_platform.qdp_v3.storage import (
+    RawPartitionRef,
+    get_raw_partition_version,
+    read_raw_partition,
+    read_raw_receipt,
+)
 from quant_data_platform.qdp_v3.transforms import build_eligible_signal_view, build_tradable_open_view
 from quant_data_platform.tushare_proxy import TUSHARE_PROXY_TOKEN_ENV
 
@@ -206,7 +220,53 @@ def _audit_secret_artifacts(
     }
 
 
-def _audit_raw_references(candidate: Any, *, root: Path, full: bool) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _candidate_raw_ref(
+    item: dict[str, Any],
+    *,
+    root: Path,
+    workspace_root: str | Path | None,
+) -> RawPartitionRef:
+    raw_domain = str(item.get("raw_domain", "") or "")
+    partition_field = str(item.get("partition_field", "") or "")
+    partition_value = str(item.get("partition_value", "") or "")
+    content_sha256 = str(item.get("content_sha256", "") or "")
+    if not partition_field:
+        receipt_path = resolve_manifest_path(str(item.get("receipt_path", "")), root=root)
+        if receipt_path.suffix.lower() == ".json" and receipt_path.exists():
+            partition_field = str(read_json(receipt_path).get("partition_field", "") or "")
+    if not raw_domain or not partition_field or not partition_value or not content_sha256:
+        raise RuntimeError(
+            "candidate_raw_partition_identity_incomplete:"
+            f"{raw_domain}:{partition_field}={partition_value}:{content_sha256}"
+        )
+    effective_workspace = workspace_root
+    if effective_workspace is None:
+        if root.name == "qdp_v3" and root.parent.name == "data":
+            effective_workspace = root.parents[2]
+        else:
+            raise RuntimeError(f"candidate_raw_workspace_root_required:{root}")
+    ref = get_raw_partition_version(
+        raw_domain,
+        partition_field=partition_field,
+        partition_value=partition_value,
+        content_sha256=content_sha256,
+        workspace_root=effective_workspace,
+    )
+    if ref is None:
+        raise FileNotFoundError(
+            "candidate_raw_partition_not_found:"
+            f"{raw_domain}:{partition_field}={partition_value}:{content_sha256}"
+        )
+    return ref
+
+
+def _audit_raw_references(
+    candidate: Any,
+    *,
+    root: Path,
+    full: bool,
+    workspace_root: str | Path | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     checked = 0
     configured_token = str(os.environ.get(TUSHARE_PROXY_TOKEN_ENV, "") or "")
@@ -215,12 +275,39 @@ def _audit_raw_references(candidate: Any, *, root: Path, full: bool) -> tuple[li
     secret_key_paths: list[str] = []
     checked_revision_dirs: set[Path] = set()
     for item in candidate.raw_partitions:
-        payload_path = resolve_manifest_path(str(item.get("payload_path", "")), root=root)
-        receipt_path = resolve_manifest_path(str(item.get("receipt_path", "")), root=root)
-        if not payload_path.exists() or not receipt_path.exists():
-            findings.append(_blocker("candidate_raw_partition_missing", "Raw payload or receipt is missing.", raw_domain=item.get("raw_domain"), partition_value=item.get("partition_value")))
+        try:
+            ref = _candidate_raw_ref(
+                item,
+                root=root,
+                workspace_root=workspace_root,
+            )
+            receipt = read_raw_receipt(ref)
+        except FileNotFoundError as exc:
+            findings.append(
+                _blocker(
+                    "candidate_raw_partition_missing",
+                    "The exact raw content version referenced by the candidate is missing.",
+                    raw_domain=item.get("raw_domain"),
+                    partition_value=item.get("partition_value"),
+                    content_sha256=item.get("content_sha256"),
+                    error=str(exc),
+                )
+            )
             continue
-        receipt = read_json(receipt_path)
+        except (OSError, RuntimeError, ValueError) as exc:
+            findings.append(
+                _blocker(
+                    "candidate_raw_partition_invalid",
+                    "The exact raw content version could not be resolved safely.",
+                    raw_domain=item.get("raw_domain"),
+                    partition_value=item.get("partition_value"),
+                    content_sha256=item.get("content_sha256"),
+                    error=str(exc),
+                )
+            )
+            continue
+        payload_path = ref.payload_path
+        receipt_path = ref.receipt_path
         serialized_receipt = json.dumps(receipt, ensure_ascii=False, default=str)
         if configured_token and configured_token in serialized_receipt:
             secret_exact_paths.append(str(receipt_path))
@@ -235,7 +322,17 @@ def _audit_raw_references(candidate: Any, *, root: Path, full: bool) -> tuple[li
         quality_assessment_sha = str(item.get("quality_assessment_sha256", "") or "")
         if quality_assessment or quality_assessment_sha:
             assessment_path = resolve_manifest_path(quality_assessment, root=root)
-            if not assessment_path.exists():
+            bundled_assessment_sha = str(
+                receipt.get("quality_assessment_sha256", "") or ""
+            )
+            if (
+                not assessment_path.exists()
+                and ref.storage_kind == "bundle"
+                and quality_assessment_sha
+                and bundled_assessment_sha == quality_assessment_sha
+            ):
+                pass
+            elif not assessment_path.exists():
                 findings.append(
                     _blocker(
                         "candidate_raw_quality_assessment_missing",
@@ -252,7 +349,11 @@ def _audit_raw_references(candidate: Any, *, root: Path, full: bool) -> tuple[li
                     )
                 )
         versions_dir = receipt_path.parent.parent
-        if versions_dir not in checked_revision_dirs and versions_dir.exists():
+        if (
+            ref.storage_kind == "legacy"
+            and versions_dir not in checked_revision_dirs
+            and versions_dir.exists()
+        ):
             checked_revision_dirs.add(versions_dir)
             version_receipts: dict[str, dict[str, Any]] = {}
             for version in [path for path in versions_dir.iterdir() if path.is_dir()]:
@@ -286,13 +387,18 @@ def _audit_raw_references(candidate: Any, *, root: Path, full: bool) -> tuple[li
                     )
                 )
         if full:
-            expected_parquet = str(receipt.get("parquet_sha256", "") or "")
-            if not expected_parquet or sha256_file(payload_path) != expected_parquet:
-                findings.append(_blocker("raw_parquet_hash_mismatch", "Raw parquet bytes differ from receipt.", payload_path=str(payload_path)))
-            else:
-                frame = pd.read_parquet(payload_path, engine="pyarrow")
-                if frame_content_sha256(frame) != expected_content:
-                    findings.append(_blocker("raw_decompressed_content_hash_mismatch", "Raw decompressed content differs from receipt.", payload_path=str(payload_path)))
+            try:
+                read_raw_partition(ref, verify_hash=True)
+            except (OSError, RuntimeError, ValueError) as exc:
+                findings.append(
+                    _blocker(
+                        "raw_partition_verification_failed",
+                        "Raw storage bytes or decoded content differ from the immutable reference.",
+                        payload_path=str(payload_path),
+                        storage_kind=ref.storage_kind,
+                        error=str(exc),
+                    )
+                )
         checked += 1
     if secret_exact_paths:
         findings.append(
@@ -480,6 +586,7 @@ def _audit_symbol_history_name_evidence(
     candidate: Any,
     *,
     root: Path,
+    workspace_root: str | Path | None = None,
 ) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     if history.empty:
@@ -489,8 +596,11 @@ def _audit_symbol_history_name_evidence(
     evidence = data.get("evidence_source", pd.Series("", index=data.index)).fillna("").astype(str)
     document_hash = data.get("official_document_hash", pd.Series("", index=data.index)).fillna("").astype(str)
     has_date_snapshot = evidence.str.contains("query_all_stock", regex=False)
+    has_trusted_namechange = evidence.str.contains("tushare_proxy.namechange", regex=False)
     has_official_document = document_hash.str.fullmatch(r"[0-9a-fA-F]{64}", na=False)
-    unsupported = data.loc[names.ne("") & ~(has_date_snapshot | has_official_document)]
+    unsupported = data.loc[
+        names.ne("") & ~(has_date_snapshot | has_trusted_namechange | has_official_document)
+    ]
     if not unsupported.empty:
         findings.append(
             _blocker(
@@ -498,6 +608,18 @@ def _audit_symbol_history_name_evidence(
                 "Historical names require a date-local snapshot or an official document hash.",
                 count=int(len(unsupported)),
                 sample=unsupported.head(20).to_dict("records"),
+            )
+        )
+
+    if has_trusted_namechange.any() and not any(
+        str(item.get("raw_domain", "")) == RAW_TUSHARE_PROXY_NAMECHANGE
+        for item in candidate.raw_partitions
+    ):
+        findings.append(
+            _blocker(
+                "symbol_history_trusted_namechange_raw_missing",
+                "Tushare namechange-derived history has no immutable raw lineage.",
+                count=int(has_trusted_namechange.sum()),
             )
         )
 
@@ -537,10 +659,18 @@ def _audit_symbol_history_name_evidence(
                 )
             )
             continue
-        payload_path = resolve_manifest_path(str(item.get("payload_path", "")), root=root)
-        if not payload_path.exists():
+        try:
+            ref = _candidate_raw_ref(
+                item,
+                root=root,
+                workspace_root=workspace_root,
+            )
+            raw = read_raw_partition(ref)
+        except (FileNotFoundError, OSError, RuntimeError, ValueError):
             continue
-        raw = pd.read_parquet(payload_path, columns=["symbol", "name"], engine="pyarrow")
+        if not {"symbol", "name"}.issubset(raw.columns):
+            continue
+        raw = raw.loc[:, ["symbol", "name"]].copy()
         raw["symbol"] = raw["symbol"].map(normalize_symbol)
         raw["name"] = raw["name"].fillna("").astype(str).str.strip()
         actual = set(zip(raw["symbol"].astype(str), raw["name"].astype(str)))
@@ -562,6 +692,55 @@ def _audit_symbol_history_name_evidence(
     return findings
 
 
+def _audit_market_status_key_alignment(
+    market_path: Path,
+    status_path: Path,
+    *,
+    year: str,
+) -> list[dict[str, Any]]:
+    """Require every market row to have status while allowing explicit suspensions."""
+
+    key = ["security_id", "trade_date"]
+    market_keys = pd.read_parquet(market_path, columns=key, engine="pyarrow").drop_duplicates()
+    status = pd.read_parquet(
+        status_path,
+        columns=[*key, "tradestatus", "is_suspended"],
+        engine="pyarrow",
+    ).drop_duplicates(key, keep="last")
+    findings: list[dict[str, Any]] = []
+    missing_status = market_keys.merge(status[key], on=key, how="left", indicator=True)
+    missing_status = missing_status.loc[missing_status["_merge"].ne("both")]
+    if not missing_status.empty:
+        findings.append(
+            _blocker(
+                "market_status_key_missing",
+                "Every market fact must have a matching status fact.",
+                count=int(len(missing_status)),
+                sample=missing_status.head(20).to_dict("records"),
+                year=year,
+            )
+        )
+    status_only = status.merge(market_keys, on=key, how="left", indicator=True)
+    status_only = status_only.loc[status_only["_merge"].eq("left_only")]
+    if not status_only.empty:
+        suspended = status_only["is_suspended"].astype(str).str.lower().isin(
+            {"1", "true", "t", "yes"}
+        )
+        stopped = status_only["tradestatus"].astype(str).eq("0")
+        invalid = status_only.loc[~(suspended & stopped)]
+        if not invalid.empty:
+            findings.append(
+                _blocker(
+                    "status_only_row_not_suspended",
+                    "A status fact without a market bar must be an explicit suspension.",
+                    count=int(len(invalid)),
+                    sample=invalid.head(20).to_dict("records"),
+                    year=year,
+                )
+            )
+    return findings
+
+
 def audit_candidate(
     *,
     candidate_id: str,
@@ -576,9 +755,36 @@ def audit_candidate(
     candidate = read_candidate(candidate_id, workspace_root=workspace_root)
     full = normalized_mode in {"full", "semantic"}
     findings: list[dict[str, Any]] = []
+    expected_domains = set(STRICT_RELEASE_DOMAINS)
+    actual_domains = set(candidate.datasets)
+    if actual_domains != expected_domains:
+        findings.append(
+            _blocker(
+                "candidate_core_domain_contract_mismatch",
+                "A production candidate must expose exactly the nine trusted-source core domains.",
+                missing_domains=sorted(expected_domains - actual_domains),
+                unexpected_domains=sorted(actual_domains - expected_domains),
+            )
+        )
+    provisional_domains = sorted(
+        domain for domain, tier in candidate.quality_tiers.items() if tier == QUALITY_PROVISIONAL
+    )
+    if provisional_domains:
+        findings.append(
+            _blocker(
+                "candidate_provisional_quality_forbidden",
+                "New production candidates may contain only strict or quarantined datasets.",
+                domains=provisional_domains,
+            )
+        )
     findings.extend(_blocker(str(item.get("code", "candidate_blocker")), str(item.get("message", item.get("code", "candidate blocker"))), **{key: value for key, value in item.items() if key not in {"code", "message", "severity"}}) for item in candidate.blockers)
     findings.extend(_blocker(str(item.get("code", "candidate_graph_error")), "Candidate lineage graph is invalid.", **{key: value for key, value in item.items() if key != "code"}) for item in validate_candidate_graph(candidate, workspace_root=workspace_root))
-    raw_findings, raw_metrics = _audit_raw_references(candidate, root=paths.root, full=full)
+    raw_findings, raw_metrics = _audit_raw_references(
+        candidate,
+        root=paths.root,
+        full=full,
+        workspace_root=workspace_root,
+    )
     findings.extend(raw_findings)
     manifests: dict[str, Any] = {}
     frames: dict[str, pd.DataFrame] = {}
@@ -602,12 +808,13 @@ def audit_candidate(
             if year not in market_parts or year not in status_parts:
                 findings.append(_blocker("market_status_partition_misalignment", "Market and status natural-year partitions differ.", year=year))
                 continue
-            market_keys = pd.read_parquet(market_parts[year], columns=["security_id", "trade_date"], engine="pyarrow").drop_duplicates()
-            status_keys = pd.read_parquet(status_parts[year], columns=["security_id", "trade_date"], engine="pyarrow").drop_duplicates()
-            mismatch = market_keys.merge(status_keys, on=["security_id", "trade_date"], how="outer", indicator=True)
-            mismatch = mismatch.loc[mismatch["_merge"].ne("both")]
-            if not mismatch.empty:
-                findings.append(_blocker("market_status_key_misalignment", "Market and status facts do not have identical keys.", count=int(len(mismatch)), sample=mismatch.head(20).to_dict("records"), year=year))
+            findings.extend(
+                _audit_market_status_key_alignment(
+                    market_parts[year],
+                    status_parts[year],
+                    year=year,
+                )
+            )
     if normalized_mode == "semantic":
         secret_findings, secret_metrics = _audit_secret_artifacts(
             paths,
@@ -623,7 +830,14 @@ def audit_candidate(
             findings.append(_blocker("semantic_identity_inputs_missing", "Semantic identity audit requires identity, history, and market datasets."))
         else:
             registry = SecurityIdentityRegistry(identity, history)
-            findings.extend(_audit_symbol_history_name_evidence(history, candidate, root=paths.root))
+            findings.extend(
+                _audit_symbol_history_name_evidence(
+                    history,
+                    candidate,
+                    root=paths.root,
+                    workspace_root=workspace_root,
+                )
+            )
             security_id = registry.security_id_for_provider_symbol("302132.SZ")
             if not security_id or registry.symbol_for_date(security_id, "2016-01-04") != "300114.SZ":
                 findings.append(_blocker("semantic_code_history_regression_failed", "2016 history for provider 302132 did not restore 300114.SZ."))
@@ -670,63 +884,14 @@ def audit_candidate(
                     findings.append(_blocker("tradable_open_d1_nonfuture_date", "D+1 label rows must point strictly after the signal date.", count=int(invalid.sum()), year=year))
                 current_first = market_part.sort_values(["security_id", "trade_date"]).drop_duplicates("security_id", keep="first")
                 future_first = current_first if future_first.empty else pd.concat([current_first, future_first], ignore_index=True).sort_values(["security_id", "trade_date"]).drop_duplicates("security_id", keep="first")
-        events = frames.get(DOMAIN_ADJUST_FACTOR_EVENT)
         factors_manifest = manifests.get(DOMAIN_ADJUST_FACTOR_DAILY)
-        if events is None or factors_manifest is None:
-            findings.append(_blocker("semantic_factor_inputs_missing", "Semantic factor audit requires event and daily factor datasets."))
+        if factors_manifest is None:
+            findings.append(_blocker("semantic_factor_inputs_missing", "Semantic factor audit requires the trusted-source daily factor dataset."))
         else:
-            previous_last = pd.DataFrame()
-            event_keys = set(zip(events.get("security_id", []), events.get("divid_operate_date", [])))
             for year, factor_path in sorted(_partition_paths(paths.root, factors_manifest).items()):
                 factors = pd.read_parquet(factor_path, engine="pyarrow")
-                factor_report = audit_factor_semantics(events, factors)
+                factor_report = audit_trusted_factor_daily(factors)
                 findings.extend(item.to_dict() for item in factor_report.blockers)
-                first = factors.sort_values(["security_id", "trade_date"]).drop_duplicates("security_id", keep="first")
-                if not previous_last.empty:
-                    boundary = previous_last.merge(first, on="security_id", suffixes=("_previous", "_current"))
-                    changed = pd.Series(False, index=boundary.index)
-                    for column in ("fore_adjust_factor", "back_adjust_factor", "adjust_factor"):
-                        left = pd.to_numeric(boundary[f"{column}_previous"], errors="coerce")
-                        right = pd.to_numeric(boundary[f"{column}_current"], errors="coerce")
-                        changed |= left.notna() & right.notna() & left.ne(right)
-                    illegal = boundary.loc[changed & ~boundary.apply(lambda row: (row["security_id"], row["trade_date_current"]) in event_keys, axis=1)]
-                    if not illegal.empty:
-                        findings.append(_blocker("factor_cross_year_non_event_jump", "Factor changed across a year boundary without an event.", count=int(len(illegal)), sample=illegal[["security_id", "trade_date_current"]].head(20).to_dict("records")))
-                previous_last = factors.sort_values(["security_id", "trade_date"]).drop_duplicates("security_id", keep="last")
-            corporate_actions = frames.get(DOMAIN_CORPORATE_ACTIONS)
-            if corporate_actions is None:
-                findings.append(_blocker("factor_reference_price_proof_missing", "Ex-right reference-price reconstruction needs validated corporate actions."))
-            elif market_manifest is not None and not events.empty:
-                proof_frames: list[pd.DataFrame] = []
-                previous_last = pd.DataFrame()
-                market_parts = _partition_paths(paths.root, market_manifest)
-                for year, market_path in sorted(market_parts.items()):
-                    market_part = pd.read_parquet(market_path, engine="pyarrow")
-                    proof_market = pd.concat([previous_last, market_part], ignore_index=True) if not previous_last.empty else market_part
-                    year_actions = corporate_actions.loc[corporate_actions["event_date"].astype(str).str.startswith(year)]
-                    if not year_actions.empty:
-                        proof_frames.append(reconstruct_xdxr_reference_prices(proof_market, year_actions))
-                    previous_last = market_part.sort_values(["security_id", "trade_date"]).drop_duplicates("security_id", keep="last")
-                proof = pd.concat(proof_frames, ignore_index=True) if proof_frames else pd.DataFrame(columns=["security_id", "event_date", "proof_status"])
-                event_window = events.loc[
-                    events["divid_operate_date"].astype(str).between(str(min(market_parts)), str(max(market_parts)) + "-12-31"),
-                    ["security_id", "divid_operate_date"],
-                ].drop_duplicates()
-                compared = event_window.merge(
-                    proof[["security_id", "event_date", "proof_status"]].rename(columns={"event_date": "divid_operate_date"}),
-                    on=["security_id", "divid_operate_date"],
-                    how="left",
-                )
-                failed = compared.loc[compared["proof_status"].ne("proved")]
-                if not failed.empty:
-                    findings.append(
-                        _blocker(
-                            "factor_reference_price_semantic_gate_failed",
-                            "Every validated in-window factor event must reconstruct the ex-right reference price within one tick.",
-                            count=int(len(failed)),
-                            sample=failed.head(20).to_dict("records"),
-                        )
-                    )
         capital_events = frames.get(DOMAIN_SHARE_CAPITAL_EVENT)
         capital_daily_manifest = manifests.get(DOMAIN_SHARE_CAPITAL_DAILY)
         if capital_daily_manifest is not None:
@@ -811,25 +976,12 @@ def audit_candidate(
                     strict_intraday = intraday.loc[intraday["quality_tier"].eq("strict")].copy() if "quality_tier" in intraday.columns else intraday
                     findings.extend(item.to_dict() for item in audit_intraday_5m(strict_intraday).blockers)
                 coverage = dict(intraday_manifest.coverage if intraday_manifest is not None else {})
-                expected = int(coverage.get("expected_stock_day_count", 0) or 0)
-                covered = int(coverage.get("strict_covered_stock_day_count", 0) or 0)
-                rate = float(coverage.get("strict_coverage_rate", 0.0) or 0.0)
-                if expected <= 0:
-                    findings.append(_blocker("strict_5m_coverage_denominator_missing", "5m release proof has no PIT tradable-stock-day denominator."))
-                elif covered > expected or rate < 0.9995:
-                    findings.append(
-                        _blocker(
-                            "strict_5m_coverage_gate_failed",
-                            "5m strict coverage must be internally consistent and at least 99.95%.",
-                            count=max(0, expected - covered),
-                            sample=[{"expected": expected, "covered": covered, "rate": rate}],
-                        )
-                    )
+                findings.extend(item.to_dict() for item in audit_strict_5m_coverage(coverage))
                 if bool(coverage.get("non_continuous_history_hole", False)):
                     findings.append(
-                        _blocker(
+                        _warning(
                             "intraday_5m_non_continuous_history_hole",
-                            "The 5m watermark cannot skip an earlier incomplete date.",
+                            "Incomplete historical stock-days remain quarantined and research windows must be continuous.",
                             sample=list(coverage.get("later_explained_date_sample", []) or []),
                         )
                     )

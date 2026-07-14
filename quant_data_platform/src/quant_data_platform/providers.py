@@ -88,31 +88,6 @@ QDP_PRODUCTION_V1_OPTIONAL_DOMAINS: tuple[str, ...] = (
 QDP_PRODUCTION_V1_RESEARCH_FUTURE_DOMAINS: tuple[str, ...] = (
     DataDomain.ANNOUNCEMENT,
 )
-QDP_PRODUCTION_V2_REQUIRED_DOMAINS: tuple[str, ...] = (
-    DataDomain.MARKET_DAILY,
-    DataDomain.TRADING_CALENDAR,
-    DataDomain.SECURITY_IDENTITY,
-    DataDomain.SYMBOL_HISTORY,
-    DataDomain.SECURITY_STATUS,
-    DataDomain.ADJUST_FACTOR_EVENT,
-)
-QDP_PRODUCTION_V2_OPTIONAL_DOMAINS: tuple[str, ...] = (
-    DataDomain.MARKET_INTRADAY_1M,
-    DataDomain.MARKET_INTRADAY_5M,
-    DataDomain.ADJUST_FACTOR_DAILY,
-    DataDomain.VALUATION,
-    DataDomain.INDUSTRY_CONCEPT,
-    DataDomain.INDEX_CONSTITUENTS,
-    DataDomain.FINANCIAL_QUARTERLY,
-    DataDomain.PERFORMANCE_FORECAST,
-    DataDomain.PERFORMANCE_EXPRESS,
-    DataDomain.CORPORATE_ACTIONS,
-    DataDomain.SHARE_CAPITAL,
-)
-QDP_PRODUCTION_V2_RESEARCH_FUTURE_DOMAINS: tuple[str, ...] = (
-    DataDomain.ANNOUNCEMENT,
-)
-
 BAOSTOCK_BATCH_VERSION = "0.9.3"
 BAOSTOCK_BATCH_WHEEL_SHA256 = "acbd19403285bc4e254cee8297cf0e2646ae2276e5af7e549deed3988ab02293"
 BAOSTOCK_BULK_PER_PAGE_COUNT = 20_000
@@ -181,16 +156,6 @@ _PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
         "formal_eligible": True,
         "notes": "Router provider: mootdx_online for recent market data, BaoStock for structured history, CNInfo for raw disclosure probes",
     },
-    "qdp_production_v2": {
-        "domains": (
-            *QDP_PRODUCTION_V2_REQUIRED_DOMAINS,
-            *QDP_PRODUCTION_V2_OPTIONAL_DOMAINS,
-            *QDP_PRODUCTION_V2_RESEARCH_FUTURE_DOMAINS,
-        ),
-        "requires_token": False,
-        "formal_eligible": True,
-        "notes": "QDP v3 router: BaoStock 0.9.3 date batches for daily/status/valuation/factor events, mootdx for recent 5m, BaoStock symbol/range endpoints for repair, CNInfo for official disclosure evidence",
-    },
     "eastmoney_efinance": {
         "domains": (DataDomain.MARKET_DAILY, DataDomain.UNIVERSE_SNAPSHOT, DataDomain.VALUATION),
         "requires_token": False,
@@ -225,7 +190,6 @@ _PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
     "tushare_proxy": {
         "domains": (
             DataDomain.MARKET_DAILY,
-            DataDomain.MARKET_INTRADAY_1M,
             DataDomain.MARKET_INTRADAY_5M,
             DataDomain.TRADING_CALENDAR,
             DataDomain.UNIVERSE_SNAPSHOT,
@@ -241,7 +205,7 @@ _PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
         ),
         "requires_token": True,
         "formal_eligible": True,
-        "notes": "Time-limited Tushare-compatible HTTP historical bootstrap source; upstream provenance is not exposed and it is never the sole truth source.",
+        "notes": "Trusted time-limited source for the fixed 2010-01-01 through 2026-07-13 historical bootstrap; QDP v3 uses only its 5m minute capability.",
     },
     "sina_tencent_realtime": {
         "domains": (),
@@ -316,41 +280,6 @@ def provider_capability_matrix(provider_plan: str = "formal_free_v3") -> list[di
             },
             "cninfo": set(),
         }
-    elif plan == "qdp_production_v2":
-        provider_names = ("baostock", "mootdx_online", "tushare_proxy", "cninfo")
-        default_domains_by_provider = {
-            "baostock": {
-                DataDomain.MARKET_DAILY,
-                DataDomain.TRADING_CALENDAR,
-                DataDomain.SECURITY_STATUS,
-                DataDomain.VALUATION,
-                DataDomain.ADJUST_FACTOR_EVENT,
-                DataDomain.ADJUST_FACTOR_DAILY,
-                DataDomain.INDUSTRY_CONCEPT,
-                DataDomain.INDEX_CONSTITUENTS,
-                DataDomain.FINANCIAL_QUARTERLY,
-                DataDomain.PERFORMANCE_FORECAST,
-                DataDomain.PERFORMANCE_EXPRESS,
-            },
-            "mootdx_online": {DataDomain.MARKET_INTRADAY_1M, DataDomain.MARKET_INTRADAY_5M, DataDomain.CORPORATE_ACTIONS, DataDomain.SHARE_CAPITAL},
-            "tushare_proxy": {
-                DataDomain.MARKET_DAILY,
-                DataDomain.MARKET_INTRADAY_1M,
-                DataDomain.MARKET_INTRADAY_5M,
-                DataDomain.TRADING_CALENDAR,
-                DataDomain.UNIVERSE_SNAPSHOT,
-                DataDomain.SECURITY_STATUS,
-                DataDomain.VALUATION,
-                DataDomain.LIMIT_STATUS,
-                DataDomain.ADJUST_FACTOR,
-                DataDomain.FINANCIAL_QUARTERLY,
-                DataDomain.PERFORMANCE_FORECAST,
-                DataDomain.PERFORMANCE_EXPRESS,
-                DataDomain.CORPORATE_ACTIONS,
-                DataDomain.NAME_CHANGE,
-            },
-            "cninfo": set(),
-        }
     elif plan == "research_rebuild_minimal_free":
         provider_names = ("research_rebuild_minimal_free",)
         default_domains_by_provider = {}
@@ -362,11 +291,8 @@ def provider_capability_matrix(provider_plan: str = "formal_free_v3") -> list[di
         *FORMAL_FREE_V3_REQUIRED_DOMAINS,
         *FORMAL_FREE_V3_OPTIONAL_DOMAINS,
         *QDP_PRODUCTION_V1_OPTIONAL_DOMAINS,
-        *QDP_PRODUCTION_V2_REQUIRED_DOMAINS,
-        *QDP_PRODUCTION_V2_OPTIONAL_DOMAINS,
         *FORMAL_FREE_V3_RESEARCH_FUTURE_DOMAINS,
         *QDP_PRODUCTION_V1_RESEARCH_FUTURE_DOMAINS,
-        *QDP_PRODUCTION_V2_RESEARCH_FUTURE_DOMAINS,
     )
     for provider_name in provider_names:
         meta = _PROVIDER_CAPABILITIES.get(provider_name, {"domains": (), "requires_token": False, "formal_eligible": False, "notes": ""})
@@ -385,7 +311,7 @@ def provider_capability_matrix(provider_plan: str = "formal_free_v3") -> list[di
                     and domain in supported
                 )
                 or (
-                    plan in {"qdp_production_v1", "qdp_production_v2"}
+                    plan == "qdp_production_v1"
                     and domain in default_domains_by_provider.get(provider_name, set())
                     and domain in supported
                 )
@@ -396,15 +322,6 @@ def provider_capability_matrix(provider_plan: str = "formal_free_v3") -> list[di
                 elif domain in QDP_PRODUCTION_V1_OPTIONAL_DOMAINS:
                     requirement = "optional"
                 elif domain in QDP_PRODUCTION_V1_RESEARCH_FUTURE_DOMAINS:
-                    requirement = "research_future"
-                else:
-                    requirement = "unsupported"
-            elif plan == "qdp_production_v2":
-                if domain in QDP_PRODUCTION_V2_REQUIRED_DOMAINS:
-                    requirement = "required"
-                elif domain in QDP_PRODUCTION_V2_OPTIONAL_DOMAINS:
-                    requirement = "optional"
-                elif domain in QDP_PRODUCTION_V2_RESEARCH_FUTURE_DOMAINS:
                     requirement = "research_future"
                 else:
                     requirement = "unsupported"
@@ -1933,58 +1850,10 @@ class QdpProductionV1Provider:
         raise RuntimeError(f"unsupported_domain: {self.name} does not support {request.domain}")
 
 
-@dataclass
-class QdpProductionV2Provider:
-    """Provider routing contract for the QDP v3 data base."""
-
-    name: str = "qdp_production_v2"
-
-    def __post_init__(self) -> None:
-        self._mootdx = MootdxOnlineProvider()
-        self._baostock = BaostockProvider(_reuse_symbol_range_session=True)
-        self._cninfo = CninfoAnnouncementProvider()
-
-    def close(self) -> None:
-        self._mootdx.close()
-        self._baostock.close()
-
-    def fetch_market_bars(self, request: FetchRequest) -> ProviderResult:
-        # Symbol/range daily queries are repair and compatibility endpoints in
-        # v3; the all-market primary path is fetch_date_partition().
-        return self._baostock.fetch_market_bars(request)
-
-    def fetch_date_partition(self, request: DatePartitionFetchRequest) -> DatePartitionProviderResult:
-        return self._baostock.fetch_date_partition(request)
-
-    def fetch_domain(self, request: DomainFetchRequest) -> ProviderResult:
-        request = request.normalized()
-        if request.domain in {DataDomain.MARKET_INTRADAY_1M, DataDomain.MARKET_INTRADAY_5M, DataDomain.CORPORATE_ACTIONS, DataDomain.SHARE_CAPITAL}:
-            return self._mootdx.fetch_domain(request)
-        if request.domain in {
-            DataDomain.MARKET_DAILY,
-            DataDomain.TRADING_CALENDAR,
-            DataDomain.UNIVERSE_SNAPSHOT,
-            DataDomain.SECURITY_STATUS,
-            DataDomain.INDUSTRY_CONCEPT,
-            DataDomain.VALUATION,
-            DataDomain.INDEX_CONSTITUENTS,
-            DataDomain.ADJUST_FACTOR,
-            DataDomain.FINANCIAL_QUARTERLY,
-            DataDomain.PERFORMANCE_FORECAST,
-            DataDomain.PERFORMANCE_EXPRESS,
-        }:
-            return self._baostock.fetch_domain(request)
-        if request.domain == DataDomain.ANNOUNCEMENT:
-            return self._cninfo.fetch_domain(request)
-        raise RuntimeError(f"unsupported_domain: {self.name} does not support {request.domain}")
-
-
 def build_default_providers(provider_plan: str = "default_free") -> list:
     plan = str(provider_plan or "default_free").strip().lower()
     if plan == "qdp_production_v1":
         return [QdpProductionV1Provider()]
-    if plan == "qdp_production_v2":
-        return [QdpProductionV2Provider()]
     if plan == "mootdx_online":
         return [MootdxOnlineProvider()]
     if plan == "research_rebuild_minimal_free":

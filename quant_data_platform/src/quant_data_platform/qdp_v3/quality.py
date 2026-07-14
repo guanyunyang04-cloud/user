@@ -9,9 +9,10 @@ import pandas as pd
 from quant_data_platform.qdp_v3.constants import (
     BAOSTOCK_DAILY_FIELDS,
     EXPECTED_5M_BAR_ENDS,
-    QUALITY_PROVISIONAL,
+    MIN_STRICT_5M_COVERAGE,
     QUALITY_QUARANTINED,
     QUALITY_STRICT,
+    WARN_STRICT_5M_COVERAGE,
 )
 from quant_data_platform.qdp_v3.identity import normalize_symbol
 
@@ -59,8 +60,6 @@ def report_for(domain: str, findings: Iterable[QualityFinding], *, metrics: dict
     items = list(findings)
     if any(item.blocks_release for item in items):
         tier = QUALITY_QUARANTINED
-    elif any(item.provisional for item in items):
-        tier = QUALITY_PROVISIONAL
     else:
         tier = QUALITY_STRICT
     return QualityReport(domain=domain, quality_tier=tier, findings=items, metrics=dict(metrics or {}))
@@ -608,6 +607,39 @@ def audit_factor_semantics(events: pd.DataFrame, daily: pd.DataFrame) -> Quality
     return report_for(domain, findings, metrics={"event_rows": int(len(events)), "daily_rows": int(len(daily))})
 
 
+def audit_trusted_factor_daily(daily: pd.DataFrame) -> QualityReport:
+    """Validate the single-source cumulative factor used by the lean contract."""
+
+    domain = "adjust_factor_daily"
+    base = audit_table_contract(daily, domain=domain, primary_key=["security_id", "trade_date"])
+    findings = list(base.findings)
+    factor_columns = ["fore_adjust_factor", "back_adjust_factor", "adjust_factor"]
+    missing = sorted(set(factor_columns) - set(daily.columns))
+    if missing:
+        findings.append(_finding("trusted_factor_fields_missing", f"Missing factor fields: {missing}.", domain=domain, count=len(missing), sample=missing))
+        return report_for(domain, findings, metrics={"daily_rows": int(len(daily))})
+    numeric = daily[factor_columns].apply(pd.to_numeric, errors="coerce")
+    finite = np.isfinite(numeric.to_numpy(dtype="float64")).all(axis=1)
+    invalid = ~finite | numeric.le(0).any(axis=1)
+    if invalid.any():
+        findings.append(_finding("trusted_factor_nonpositive_or_nonfinite", "Trusted-source factors must be finite and positive.", domain=domain, count=int(invalid.sum())))
+    if not daily.empty and "baseline_status" in daily.columns:
+        baseline_rows = daily.loc[daily["baseline_status"].eq("trusted_source_2010_normalized")]
+        baseline_factor = pd.to_numeric(baseline_rows["adjust_factor"], errors="coerce")
+        bad_baseline = ~np.isfinite(baseline_factor) | baseline_factor.sub(1.0).abs().gt(1e-12)
+        if bad_baseline.any():
+            findings.append(
+                _finding(
+                    "trusted_factor_2010_baseline_not_one",
+                    "Each security's first observation from 2010 onward must be normalized to 1.",
+                    domain=domain,
+                    count=int(bad_baseline.sum()),
+                    sample=baseline_rows.loc[bad_baseline, ["security_id", "trade_date", "adjust_factor"]].head(20).to_dict("records"),
+                )
+            )
+    return report_for(domain, findings, metrics={"daily_rows": int(len(daily))})
+
+
 def audit_intraday_5m(frame: pd.DataFrame) -> QualityReport:
     domain = "market_intraday_5m"
     findings: list[QualityFinding] = []
@@ -627,4 +659,89 @@ def audit_intraday_5m(frame: pd.DataFrame) -> QualityReport:
             bad_days.append({"security_id": security_id, "trade_date": trade_date, "bar_count": len(bars)})
     if bad_days:
         findings.append(_finding("intraday_5m_not_48_complete_bars", "Strict stock-days require the exact 48 right-closed bars.", domain=domain, count=len(bad_days), sample=bad_days))
+    numeric_columns = ["open", "high", "low", "close", "volume", "amount"]
+    numeric = frame[numeric_columns].apply(pd.to_numeric, errors="coerce")
+    finite = pd.DataFrame(
+        np.isfinite(numeric.to_numpy(dtype="float64")),
+        index=numeric.index,
+        columns=numeric_columns,
+    )
+    invalid_price = ~finite[["open", "high", "low", "close"]].all(axis=1) | numeric[
+        ["open", "high", "low", "close"]
+    ].le(0).any(axis=1)
+    invalid_relation = (
+        numeric["high"].lt(numeric[["open", "close", "low"]].max(axis=1))
+        | numeric["low"].gt(numeric[["open", "close", "high"]].min(axis=1))
+    )
+    invalid_flow = ~finite[["volume", "amount"]].all(axis=1) | numeric[["volume", "amount"]].lt(0).any(axis=1)
+    if invalid_price.any():
+        findings.append(_finding("intraday_5m_invalid_price", "5m OHLC must be finite and positive.", domain=domain, count=int(invalid_price.sum())))
+    if invalid_relation.any():
+        findings.append(_finding("intraday_5m_invalid_ohlc", "5m OHLC ordering is invalid.", domain=domain, count=int(invalid_relation.sum())))
+    if invalid_flow.any():
+        findings.append(_finding("intraday_5m_invalid_flow", "5m volume and amount must be finite and non-negative.", domain=domain, count=int(invalid_flow.sum())))
+    source_count = frame.groupby(["security_id", "trade_date"], sort=False)["source"].nunique(dropna=False)
+    mixed_source = source_count.gt(1)
+    if mixed_source.any():
+        findings.append(
+            _finding(
+                "intraday_5m_stock_day_mixed_source",
+                "A canonical stock-day cannot splice bars from multiple sources.",
+                domain=domain,
+                count=int(mixed_source.sum()),
+                sample=[{"security_id": key[0], "trade_date": key[1]} for key in mixed_source.loc[mixed_source].index[:20]],
+            )
+        )
     return report_for(domain, findings, metrics={"row_count": int(len(frame)), "stock_day_count": int(frame.groupby(["security_id", "trade_date"]).ngroups), "invalid_stock_day_count": len(bad_days)})
+
+
+def audit_strict_5m_coverage(coverage: Mapping[str, Any]) -> list[QualityFinding]:
+    """Apply the lean trusted-source release floor to PIT stock-day coverage."""
+
+    domain = "market_intraday_5m"
+    expected = int(coverage.get("expected_stock_day_count", 0) or 0)
+    covered = int(coverage.get("strict_covered_stock_day_count", 0) or 0)
+    rate = float(coverage.get("strict_coverage_rate", 0.0) or 0.0)
+    missing = max(0, expected - covered)
+    sample = list(coverage.get("strict_missing_sample", coverage.get("missing_sample", [])) or [])[:20]
+    if expected <= 0:
+        return [
+            _finding(
+                "strict_5m_coverage_denominator_missing",
+                "5m release proof has no PIT tradable-stock-day denominator.",
+                domain=domain,
+            )
+        ]
+    calculated = covered / expected
+    if covered > expected or abs(calculated - rate) > 1e-9:
+        return [
+            _finding(
+                "strict_5m_coverage_inconsistent",
+                "5m covered/expected counts do not agree with the reported rate.",
+                domain=domain,
+                count=missing,
+                sample=[{"expected": expected, "covered": covered, "reported_rate": rate, "calculated_rate": calculated}],
+            )
+        ]
+    if rate < MIN_STRICT_5M_COVERAGE:
+        return [
+            _finding(
+                "strict_5m_coverage_below_98_percent",
+                "Strict 5m coverage is below the 98% release floor.",
+                domain=domain,
+                count=missing,
+                sample=sample,
+            )
+        ]
+    if rate < WARN_STRICT_5M_COVERAGE:
+        return [
+            _finding(
+                "strict_5m_coverage_below_99_percent",
+                "Strict 5m coverage is publishable but below the 99% normal target.",
+                domain=domain,
+                severity="warning",
+                count=missing,
+                sample=sample,
+            )
+        ]
+    return []

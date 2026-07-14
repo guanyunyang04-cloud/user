@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,13 +14,13 @@ from quant_data_platform.qdp_v3.datasets import read_dataset_frame, write_datase
 from quant_data_platform.qdp_v3.gc import collect_garbage
 from quant_data_platform.qdp_v3.freeze import freeze_v2, validate_v2_freeze_proof
 from quant_data_platform.qdp_v3.ingest import _ingest_job_lock, resolve_trade_dates
-from quant_data_platform.qdp_v3.manifest import dataset_manifest_for_id, read_dataset_manifest
+from quant_data_platform.qdp_v3.manifest import active_manifest_sha256, dataset_manifest_for_id, read_dataset_manifest
 from quant_data_platform.qdp_v3.paths import qdp_v3_paths
 from quant_data_platform.qdp_v3.quality import report_for
 from quant_data_platform.qdp_v3.release import _active_manifest_lock, diff_candidate, write_candidate
 from quant_data_platform.qdp_v3.retirement import _downstream_consumer_references, retire_v2_intraday
 from quant_data_platform.qdp_v3.storage import write_raw_partition
-from quant_data_platform.qdp_v3.update import plan_update
+from quant_data_platform.qdp_v3.update import _advance_retirement_gate, plan_update
 from quant_data_platform.qdp_v3.constants import (
     DOMAIN_ADJUST_FACTOR_DAILY,
     DOMAIN_ADJUST_FACTOR_EVENT,
@@ -38,6 +39,7 @@ from quant_data_platform.qdp_v3.constants import (
     RAW_DAILY_ASTOCK,
     RAW_TRADING_CALENDAR,
     STRICT_RELEASE_DOMAINS,
+    V2_RETIREMENT_GATE_FILENAME,
 )
 
 
@@ -139,7 +141,7 @@ def test_trade_date_resolution_reuses_covering_calendar_partition(tmp_path: Path
     assert dates == ["2012-01-04", "2012-01-05"]
 
 
-def test_bootstrap_plan_is_5m_only_and_declares_post_publish_retirement(tmp_path: Path) -> None:
+def test_bootstrap_plan_is_5m_only_and_defers_retirement_until_incremental_publish(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     calendar = pd.DataFrame(
         {
@@ -171,28 +173,144 @@ def test_bootstrap_plan_is_5m_only_and_declares_post_publish_retirement(tmp_path
     assert stages["post_publish_semantic_hash_audit"]["stage"] == "post_publish_semantic_hash_audit"
     assert stages["retire_v2_intraday"] == {
         "stage": "retire_v2_intraday",
-        "enabled": True,
+        "enabled": False,
         "delete": True,
         "guarded": True,
+        "reason": "requires_later_post_cutoff_incremental_publish",
     }
+    assert stages["await_post_cutoff_incremental_publish"]["bootstrap_cutoff"] == "2026-07-13"
 
 
-def test_release_requires_strict_valuation_and_factor_domains() -> None:
+def test_retirement_gate_requires_a_later_equal_watermark_incremental_publish(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    paths = qdp_v3_paths(workspace)
+    paths.metadata.mkdir(parents=True, exist_ok=True)
+    bootstrap = _advance_retirement_gate(
+        paths=paths,
+        bootstrap=True,
+        run_id="bootstrap__unit",
+        candidate_id="candidate__bootstrap",
+        active_sha256="bootstrap-sha",
+        active={
+            "coverage": {
+                "market_daily_watermark": "2026-07-13",
+                "market_intraday_5m_watermark": "2026-07-13",
+            }
+        },
+    )
+    assert bootstrap["status"] == "awaiting_post_cutoff_incremental"
+
+    blocked = _advance_retirement_gate(
+        paths=paths,
+        bootstrap=False,
+        run_id="update__blocked",
+        candidate_id="candidate__blocked",
+        active_sha256="blocked-sha",
+        active={
+            "coverage": {
+                "market_daily_watermark": "2026-07-14",
+                "market_intraday_5m_watermark": "2026-07-13",
+            }
+        },
+    )
+    assert blocked["status"] == "incremental_verification_blocked"
+
+    verified = _advance_retirement_gate(
+        paths=paths,
+        bootstrap=False,
+        run_id="update__verified",
+        candidate_id="candidate__incremental",
+        active_sha256="incremental-sha",
+        active={
+            "coverage": {
+                "market_daily_watermark": "2026-07-14",
+                "market_intraday_5m_watermark": "2026-07-14",
+            }
+        },
+    )
+    assert verified["status"] == "incremental_verified"
+    assert verified["incremental_candidate_id"] == "candidate__incremental"
+
+
+def test_bootstrap_publish_persists_gate_and_never_calls_retirement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import quant_data_platform.qdp_v3.update as update_module
+
+    workspace = _workspace(tmp_path)
+    paths = qdp_v3_paths(workspace)
+    monkeypatch.setattr(update_module, "requeue_stale_jobs", lambda **_kwargs: {})
+    monkeypatch.setattr(update_module, "supervise_job", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(
+        update_module,
+        "plan_update",
+        lambda **_kwargs: {
+            "status": "planned",
+            "bootstrap": True,
+            "start_date": "2010-01-01",
+            "as_of_date": "2026-07-13",
+            "historical_provider": "tushare-proxy",
+            "active_sha256": "none",
+            "stages": [],
+        },
+    )
+    monkeypatch.setattr(update_module, "validate_v2_freeze_proof", lambda *_args, **_kwargs: {"acceptable": True})
+    monkeypatch.setattr(update_module, "_run_bootstrap_capture", lambda **_kwargs: ("completed", ""))
+    candidate = SimpleNamespace(candidate_id="candidate__bootstrap", blockers=[])
+    monkeypatch.setattr(update_module, "build_candidate", lambda **_kwargs: candidate)
+    monkeypatch.setattr(update_module, "audit_candidate", lambda **_kwargs: {"status": "passed", "mode": "semantic"})
+    monkeypatch.setattr(update_module, "diff_candidate", lambda *_args, **_kwargs: {"status": "completed"})
+
+    def publish(**_kwargs: object) -> dict[str, object]:
+        paths.active_manifest.parent.mkdir(parents=True, exist_ok=True)
+        paths.active_manifest.write_text(
+            json.dumps(
+                {
+                    "candidate_id": candidate.candidate_id,
+                    "coverage": {
+                        "market_daily_watermark": "2026-07-13",
+                        "market_intraday_5m_watermark": "2026-07-13",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return {"status": "published", "active_sha256": "bootstrap-sha"}
+
+    monkeypatch.setattr(update_module, "publish_candidate", publish)
+    monkeypatch.setattr(
+        update_module,
+        "retire_v2_intraday",
+        lambda **_kwargs: pytest.fail("bootstrap must not retire v2"),
+    )
+
+    result = update_module.run_update(
+        as_of_date="2026-07-13",
+        workspace_root=workspace,
+        bootstrap=True,
+        start_date="2010-01-01",
+        historical_provider="tushare-proxy",
+    )
+
+    assert result["status"] == "published_awaiting_incremental_update"
+    gate = json.loads((paths.metadata / V2_RETIREMENT_GATE_FILENAME).read_text(encoding="utf-8"))
+    assert gate["status"] == "awaiting_post_cutoff_incremental"
+
+
+def test_release_requires_only_trusted_market_core_domains() -> None:
     required = {
-        DOMAIN_VALUATION_DAILY,
-        DOMAIN_ADJUST_FACTOR_EVENT,
         DOMAIN_ADJUST_FACTOR_DAILY,
         DOMAIN_MARKET_INTRADAY_5M,
-        DOMAIN_CORPORATE_ACTIONS,
-        DOMAIN_SHARE_CAPITAL_EVENT,
-        DOMAIN_SHARE_CAPITAL_DAILY,
-        DOMAIN_FINANCIAL_QUARTERLY,
-        DOMAIN_PERFORMANCE_FORECAST,
-        DOMAIN_PERFORMANCE_EXPRESS,
-        DOMAIN_INDUSTRY,
-        DOMAIN_INDEX_CONSTITUENTS,
+        "trading_calendar",
+        "security_identity",
+        "symbol_history",
+        "market_daily_raw",
+        "security_status_daily",
+        "eligible_signal_D",
+        "tradable_open_D1",
     }
-    assert required.issubset(set(STRICT_RELEASE_DOMAINS))
+    assert set(STRICT_RELEASE_DOMAINS) == required
     assert "market_intraday_1m" not in STRICT_RELEASE_DOMAINS
 
 
@@ -271,6 +389,45 @@ def test_v2_intraday_retirement_cannot_delete_before_v3_publish(tmp_path: Path) 
     assert any(item["code"] == "qdp_v3_active_missing" for item in result["blockers"])
 
 
+def test_v2_intraday_retirement_missing_incremental_gate_never_deletes(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    paths = qdp_v3_paths(workspace)
+    paths.active.mkdir(parents=True, exist_ok=True)
+    paths.active_manifest.write_text(
+        json.dumps(
+            {
+                "candidate_id": "candidate__bootstrap_only",
+                "datasets": {},
+                "coverage": {"market_daily_watermark": "2026-07-13"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    shard = (
+        workspace
+        / "quant_data_platform"
+        / "data"
+        / "qdp_v2"
+        / "datasets"
+        / "market_intraday_5m"
+        / "legacy"
+        / "shards"
+        / "part.parquet"
+    )
+    shard.parent.mkdir(parents=True, exist_ok=True)
+    shard.write_bytes(b"must-remain")
+
+    result = retire_v2_intraday(
+        expect_active_sha=active_manifest_sha256(workspace),
+        workspace_root=workspace,
+        delete=True,
+        yes=True,
+    )
+
+    assert shard.exists()
+    assert any(item["code"] == "post_cutoff_incremental_publish_not_verified" for item in result["blockers"])
+
+
 def test_v2_intraday_retirement_runs_post_delete_qdp_and_consumer_checks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -286,7 +443,7 @@ def test_v2_intraday_retirement_runs_post_delete_qdp_and_consumer_checks(
             {
                 "candidate_id": "candidate__unit",
                 "datasets": {DOMAIN_MARKET_INTRADAY_5M: "market_intraday_5m__unit"},
-                "coverage": {"market_daily_watermark": "2026-07-13"},
+                "coverage": {"market_daily_watermark": "2026-07-14"},
             }
         ),
         encoding="utf-8",
@@ -294,6 +451,19 @@ def test_v2_intraday_retirement_runs_post_delete_qdp_and_consumer_checks(
     diff_path = paths.audits / "candidate__unit" / "v2_v3_diff.json"
     diff_path.parent.mkdir(parents=True, exist_ok=True)
     diff_path.write_text("{}", encoding="utf-8")
+    gate_path = paths.metadata / V2_RETIREMENT_GATE_FILENAME
+    gate_path.parent.mkdir(parents=True, exist_ok=True)
+    gate_path.write_text(
+        json.dumps(
+            {
+                "status": "incremental_verified",
+                "bootstrap_cutoff": "2026-07-13",
+                "incremental_candidate_id": "candidate__unit",
+                "incremental_active_sha256": "active-sha",
+            }
+        ),
+        encoding="utf-8",
+    )
 
     v2_root = tmp_path / "v2"
     v2_active_path = v2_root / "active.json"
@@ -322,7 +492,7 @@ def test_v2_intraday_retirement_runs_post_delete_qdp_and_consumer_checks(
         "read_dataset_manifest",
         lambda *_args, **_kwargs: SimpleNamespace(
             quality_tier="strict",
-            coverage={"strict_coverage_rate": 0.9995, "watermark": "2026-07-13"},
+            coverage={"strict_coverage_rate": 0.98, "watermark": "2026-07-14"},
             shards=[],
         ),
     )
@@ -907,16 +1077,11 @@ def test_small_candidate_build_uses_streamed_year_partitions(tmp_path: Path) -> 
     assert payload["shards"][0]["partition"]["value"] == "2016"
     assert candidate.datasets["eligible_signal_D"]
     assert candidate.datasets["tradable_open_D1"]
-    assert candidate.datasets["corporate_actions"]
-    assert candidate.datasets["share_capital_event"]
-    assert candidate.datasets["share_capital_daily"]
+    assert "corporate_actions" not in candidate.datasets
+    assert "share_capital_event" not in candidate.datasets
+    assert "share_capital_daily" not in candidate.datasets
     blocker_codes = {str(item.get("code", "")) for item in candidate.blockers}
     assert "factor_identity_conflicts_quarantined" not in blocker_codes
-    assert "factor_event_not_verified_or_arbitrated" in blocker_codes
-    capital_path = dataset_manifest_for_id(qdp_v3_paths(workspace).root, candidate.datasets["share_capital_daily"], "share_capital_daily")
-    assert capital_path is not None
-    capital = read_dataset_frame(qdp_v3_paths(workspace).root, read_dataset_manifest(capital_path))
-    assert capital.loc[0, "total_share"] == pytest.approx(2_200_000.0)
     from quant_data_platform.qdp_v3.audit import audit_candidate
 
     audit = audit_candidate(candidate_id=candidate.candidate_id, mode="semantic", workspace_root=workspace, write_report=False)

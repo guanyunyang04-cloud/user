@@ -6,7 +6,6 @@ import tempfile
 
 import pandas as pd
 
-from quant_data_platform.core.json_io import read_json
 from quant_data_platform.qdp_v3.constants import (
     DOMAIN_ADJUST_FACTOR_DAILY,
     DOMAIN_ADJUST_FACTOR_EVENT,
@@ -27,6 +26,7 @@ from quant_data_platform.qdp_v3.constants import (
     DOMAIN_TRADABLE_OPEN_D1,
     DOMAIN_TRADING_CALENDAR,
     DOMAIN_VALUATION_DAILY,
+    BOOTSTRAP_CUTOFF,
     QDP_V3_CONTRACT_VERSION,
     QUALITY_PROVISIONAL,
     QUALITY_QUARANTINED,
@@ -59,20 +59,18 @@ from quant_data_platform.qdp_v3.corporate_actions import (
     load_official_factor_evidence,
     reconstruct_xdxr_reference_prices,
 )
+from quant_data_platform.qdp_v3.corrections import CorrectionSet, apply_corrections, load_corrections
 from quant_data_platform.qdp_v3.datasets import dataset_input_ref, write_dataset, write_partitioned_dataset
 from quant_data_platform.qdp_v3.identity import SecurityIdentityRegistry, normalize_symbol
 from quant_data_platform.qdp_v3.intraday_build import build_proxy_intraday_dataset
 from quant_data_platform.qdp_v3.manifest import ProviderEvidence, dataset_manifest_for_id, manifest_sha256
 from quant_data_platform.qdp_v3.paths import ensure_qdp_v3_layout
-from quant_data_platform.qdp_v3.proxy_lowfreq import (
-    audit_proxy_calendar,
-    audit_proxy_daily_against_baostock,
-    audit_proxy_daily_basic,
-    audit_proxy_suspend_status,
-)
 from quant_data_platform.qdp_v3.proxy_factor import (
+    build_trusted_factor_daily,
+    continue_trusted_factors_with_baostock,
     derive_proxy_factor_evidence,
     reconcile_proxy_factor_third_path,
+    trusted_proxy_factor_daily_from_refs,
 )
 from quant_data_platform.qdp_v3.proxy_financial import (
     canonicalize_proxy_daily_basic_capital,
@@ -84,6 +82,7 @@ from quant_data_platform.qdp_v3.quality import (
     audit_canonical_daily,
     audit_factor_semantics,
     audit_table_contract,
+    audit_trusted_factor_daily,
     report_for,
 )
 from quant_data_platform.qdp_v3.release import CandidateManifestV3, write_candidate
@@ -97,6 +96,8 @@ from quant_data_platform.qdp_v3.transforms import (
     build_tradable_open_view,
     derive_adjust_factor_events,
     derive_daily_domains,
+    derive_trusted_proxy_daily_domains,
+    derive_trusted_proxy_suspend_status,
     derive_symbol_adjust_factor_events,
     reconcile_adjust_factor_events,
     trading_calendar_from_snapshot_dates,
@@ -184,7 +185,7 @@ def _merge_reports(domain: str, reports: Iterable[QualityReport], extra: Iterabl
 def _provider_evidence(refs: list[RawPartitionRef]) -> list[ProviderEvidence]:
     if not refs:
         return []
-    receipts = [read_json(ref.receipt_path) for ref in refs]
+    receipts = [read_raw_receipt(ref) for ref in refs]
     by_endpoint: dict[tuple[str, str, str, str], list[tuple[RawPartitionRef, dict[str, Any]]]] = {}
     for ref, receipt in zip(refs, receipts):
         key = (
@@ -212,12 +213,205 @@ def _provider_evidence(refs: list[RawPartitionRef]) -> list[ProviderEvidence]:
     return evidence
 
 
-def _latest_security_master(workspace_root: str | Path | None) -> tuple[pd.DataFrame, RawPartitionRef | None]:
+def _latest_security_master(
+    workspace_root: str | Path | None,
+    *,
+    end_date: str = "",
+) -> tuple[pd.DataFrame, RawPartitionRef | None]:
     refs = iter_raw_partitions(RAW_SECURITY_MASTER, workspace_root=workspace_root)
+    if end_date:
+        refs = [ref for ref in refs if str(ref.partition_value)[:10] <= str(end_date)[:10]]
     if not refs:
         return pd.DataFrame(), None
     ref = refs[-1]
     return read_raw_partition(ref), ref
+
+
+def _unique_refs_by_date(refs: Iterable[RawPartitionRef], *, source: str) -> list[RawPartitionRef]:
+    by_date: dict[str, RawPartitionRef] = {}
+    duplicates: list[str] = []
+    for ref in refs:
+        trade_date = str(ref.partition_value)[:10]
+        if trade_date in by_date:
+            duplicates.append(trade_date)
+        by_date[trade_date] = ref
+    if duplicates:
+        raise RuntimeError(f"trusted_daily_partition_date_duplicate:{source}:{sorted(set(duplicates))[:20]}")
+    return [by_date[trade_date] for trade_date in sorted(by_date)]
+
+
+def _compose_trusted_daily_refs(
+    proxy_refs: Iterable[RawPartitionRef],
+    baostock_refs: Iterable[RawPartitionRef],
+    *,
+    start_date: str,
+    end_date: str,
+    cutoff: str = BOOTSTRAP_CUTOFF,
+) -> tuple[list[RawPartitionRef], dict[str, Any]]:
+    """Select one authoritative provider per date around the bootstrap cutoff."""
+
+    start = str(start_date)[:10]
+    end = str(end_date)[:10]
+    boundary = str(cutoff)[:10]
+    proxy_all = _unique_refs_by_date(proxy_refs, source="tushare_proxy")
+    baostock_all = _unique_refs_by_date(baostock_refs, source="baostock")
+    proxy_selected = [
+        ref for ref in proxy_all
+        if start <= str(ref.partition_value)[:10] <= min(end, boundary)
+    ]
+    baostock_selected = [
+        ref for ref in baostock_all
+        if max(start, boundary) < str(ref.partition_value)[:10] <= end
+    ]
+    proxy_dates = {str(ref.partition_value)[:10] for ref in proxy_selected}
+    baostock_dates = {str(ref.partition_value)[:10] for ref in baostock_selected}
+    overlap = sorted(proxy_dates & baostock_dates)
+    if overlap:
+        raise RuntimeError(f"trusted_daily_source_overlap:{overlap[:20]}")
+    selected = sorted(
+        [*proxy_selected, *baostock_selected],
+        key=lambda ref: str(ref.partition_value)[:10],
+    )
+    return selected, {
+        "cutoff": boundary,
+        "tushare_proxy_partition_count": len(proxy_selected),
+        "baostock_partition_count": len(baostock_selected),
+        "ignored_tushare_post_cutoff_count": sum(
+            start <= str(ref.partition_value)[:10] <= end and str(ref.partition_value)[:10] > boundary
+            for ref in proxy_all
+        ),
+        "ignored_baostock_through_cutoff_count": sum(
+            start <= str(ref.partition_value)[:10] <= end and str(ref.partition_value)[:10] <= boundary
+            for ref in baostock_all
+        ),
+    }
+
+
+def _compose_security_master_inventory(
+    proxy_master: pd.DataFrame,
+    baostock_master: pd.DataFrame,
+    *,
+    baostock_as_of_date: str,
+    cutoff: str = BOOTSTRAP_CUTOFF,
+) -> pd.DataFrame:
+    frames: list[pd.DataFrame] = []
+    if isinstance(proxy_master, pd.DataFrame) and not proxy_master.empty:
+        frames.append(proxy_master.copy())
+    if (
+        isinstance(baostock_master, pd.DataFrame)
+        and not baostock_master.empty
+        and str(baostock_as_of_date)[:10] > str(cutoff)[:10]
+    ):
+        current = baostock_master.copy()
+        current["identity_source"] = "baostock.query_stock_basic"
+        frames.append(current)
+    if not frames:
+        return pd.DataFrame()
+    combined = pd.concat(frames, ignore_index=True, sort=False)
+    symbol_column = "symbol" if "symbol" in combined.columns else "provider_symbol" if "provider_symbol" in combined.columns else ""
+    if not symbol_column:
+        raise ValueError("trusted_security_master_symbol_column_missing")
+    combined["_normalized_symbol"] = combined[symbol_column].map(normalize_symbol)
+    combined = combined.loc[combined["_normalized_symbol"].ne("")]
+    return combined.drop_duplicates("_normalized_symbol", keep="last").drop(columns="_normalized_symbol").reset_index(drop=True)
+
+
+def _compose_calendar_frames(
+    proxy_calendar: pd.DataFrame,
+    baostock_calendar: pd.DataFrame,
+    *,
+    start_date: str,
+    end_date: str,
+    cutoff: str = BOOTSTRAP_CUTOFF,
+) -> pd.DataFrame:
+    start = str(start_date)[:10]
+    end = str(end_date)[:10]
+    boundary = str(cutoff)[:10]
+    selected: list[pd.DataFrame] = []
+    for source, frame, lower_exclusive, upper_inclusive in (
+        ("tushare_proxy", proxy_calendar, "", min(end, boundary)),
+        ("baostock", baostock_calendar, boundary, end),
+    ):
+        if not isinstance(frame, pd.DataFrame) or frame.empty:
+            continue
+        part = frame.copy()
+        if "trade_date" not in part.columns or "is_open" not in part.columns:
+            raise ValueError(f"trusted_calendar_fields_missing:{source}")
+        part["trade_date"] = part["trade_date"].astype(str).str.slice(0, 10)
+        mask = part["trade_date"].between(start, upper_inclusive)
+        if lower_exclusive:
+            mask &= part["trade_date"].gt(lower_exclusive)
+        part = part.loc[mask].copy()
+        if part.empty:
+            continue
+        part["_contract_source"] = source
+        selected.append(part)
+    if not selected:
+        return pd.DataFrame(columns=["trade_date", "is_open", "exchange", "source"])
+    combined = pd.concat(selected, ignore_index=True, sort=False)
+    if "exchange" not in combined.columns:
+        combined["exchange"] = "SSE/SZSE"
+    key = ["trade_date", "exchange"]
+    source_overlap = combined.groupby(key, sort=False)["_contract_source"].nunique().gt(1)
+    if source_overlap.any():
+        raise RuntimeError(f"trusted_calendar_source_overlap:{int(source_overlap.sum())}")
+    conflicts = combined.groupby(key, sort=False)["is_open"].nunique(dropna=False).gt(1)
+    if conflicts.any():
+        raise RuntimeError(f"trusted_calendar_internal_conflict:{int(conflicts.sum())}")
+    return (
+        combined.drop(columns="_contract_source")
+        .drop_duplicates(key, keep="last")
+        .sort_values(key)
+        .reset_index(drop=True)
+    )
+
+
+def _watermark_contract_findings(
+    *,
+    calendar: pd.DataFrame,
+    snapshot_dates: Iterable[str],
+    intraday_watermark: str,
+    requested_end_date: str,
+) -> tuple[list[dict[str, Any]], str]:
+    requested_end = str(requested_end_date)[:10]
+    findings: list[dict[str, Any]] = []
+    if calendar.empty or "trade_date" not in calendar.columns or "is_open" not in calendar.columns:
+        return [{"code": "release_calendar_missing_for_requested_end", "requested_end_date": requested_end}], ""
+    dates = calendar["trade_date"].astype(str).str.slice(0, 10)
+    calendar_end = str(dates.max())
+    if calendar_end < requested_end:
+        findings.append(
+            {
+                "code": "calendar_coverage_ends_before_requested_end",
+                "requested_end_date": requested_end,
+                "calendar_end_date": calendar_end,
+            }
+        )
+    opened = calendar["is_open"].astype(str).str.lower().isin({"1", "true", "t", "yes"})
+    eligible = dates.loc[opened & dates.le(requested_end)]
+    required_watermark = str(eligible.max()) if not eligible.empty else ""
+    daily_watermark = max((str(item)[:10] for item in snapshot_dates), default="")
+    if not required_watermark:
+        findings.append({"code": "requested_end_has_no_open_calendar_watermark", "requested_end_date": requested_end})
+    elif daily_watermark != required_watermark:
+        findings.append(
+            {
+                "code": "market_daily_watermark_not_at_requested_end",
+                "requested_end_date": requested_end,
+                "required_watermark": required_watermark,
+                "market_daily_watermark": daily_watermark,
+            }
+        )
+    if str(intraday_watermark or "") != required_watermark:
+        findings.append(
+            {
+                "code": "market_intraday_5m_watermark_not_at_requested_end",
+                "requested_end_date": requested_end,
+                "required_watermark": required_watermark,
+                "market_intraday_5m_watermark": str(intraday_watermark or ""),
+            }
+        )
+    return findings, required_watermark
 
 
 def _pit_name_observations(refs: Iterable[RawPartitionRef]) -> tuple[pd.DataFrame, set[str]]:
@@ -244,6 +438,51 @@ def _pit_name_observations(refs: Iterable[RawPartitionRef]) -> tuple[pd.DataFram
     return pd.DataFrame(records, columns=["symbol", "trade_date", "name"]), provider_symbols
 
 
+def _trusted_proxy_name_observations(refs: Iterable[RawPartitionRef]) -> tuple[pd.DataFrame, set[str]]:
+    records: list[dict[str, str]] = []
+    symbols: set[str] = set()
+    for ref in refs:
+        raw = read_raw_partition(ref)
+        if raw.empty or not {"ts_code", "name", "start_date"}.issubset(raw.columns):
+            continue
+        for row in raw.loc[:, ["ts_code", "name", "start_date"]].to_dict("records"):
+            symbol = normalize_symbol(row.get("ts_code", ""))
+            compact = str(row.get("start_date", "") or "").replace("-", "")[:8]
+            trade_date = f"{compact[:4]}-{compact[4:6]}-{compact[6:8]}" if len(compact) == 8 else ""
+            name = str(row.get("name", "") or "").strip()
+            if symbol:
+                symbols.add(symbol)
+            if symbol and trade_date and name:
+                records.append({"symbol": symbol, "trade_date": trade_date, "name": name})
+    return pd.DataFrame(records, columns=["symbol", "trade_date", "name"]), symbols
+
+
+def _trusted_proxy_security_master(refs: Iterable[RawPartitionRef]) -> pd.DataFrame:
+    frames = [read_raw_partition(ref) for ref in refs]
+    raw = pd.concat(frames, ignore_index=True, sort=False) if frames else pd.DataFrame()
+    if raw.empty or "ts_code" not in raw.columns:
+        return pd.DataFrame()
+
+    def dates(column: str) -> pd.Series:
+        values = raw.get(column, pd.Series("", index=raw.index)).fillna("").astype(str).str.replace("-", "", regex=False)
+        compact = values.str.fullmatch(r"\d{8}")
+        values.loc[compact] = values.loc[compact].str.slice(0, 4) + "-" + values.loc[compact].str.slice(4, 6) + "-" + values.loc[compact].str.slice(6, 8)
+        return values
+
+    market = raw.get("market", pd.Series("", index=raw.index)).fillna("").astype(str)
+    board = market.map({"主板": "MainBoard", "创业板": "ChiNext", "科创板": "STAR", "北交所": "BSE"}).fillna("")
+    return pd.DataFrame(
+        {
+            "symbol": raw["ts_code"].map(normalize_symbol),
+            "name": raw.get("name", pd.Series("", index=raw.index)).fillna("").astype(str),
+            "list_date": dates("list_date"),
+            "delist_date": dates("delist_date"),
+            "board": board,
+            "identity_source": "tushare_proxy.stock_basic",
+        }
+    ).drop_duplicates("symbol", keep="last")
+
+
 def _calendar_frame(workspace_root: str | Path | None, snapshot_dates: list[str]) -> tuple[pd.DataFrame, list[RawPartitionRef], list[QualityFinding]]:
     refs = iter_raw_partitions(RAW_TRADING_CALENDAR, workspace_root=workspace_root)
     findings: list[QualityFinding] = []
@@ -265,13 +504,63 @@ def _calendar_frame(workspace_root: str | Path | None, snapshot_dates: list[str]
     return calendar, refs, findings
 
 
+def _trusted_proxy_calendar_frame(
+    refs: list[RawPartitionRef],
+    *,
+    snapshot_dates: list[str],
+) -> tuple[pd.DataFrame, list[QualityFinding]]:
+    if not refs:
+        return trading_calendar_from_snapshot_dates(snapshot_dates, source="snapshot_date_inference"), [
+            QualityFinding(
+                code="trusted_proxy_calendar_missing",
+                severity="blocker",
+                message="The trusted historical calendar source is missing.",
+                domain=DOMAIN_TRADING_CALENDAR,
+            )
+        ]
+    raw = pd.concat([read_raw_partition(ref) for ref in refs], ignore_index=True, sort=False)
+    required = {"cal_date", "is_open"}
+    if not required.issubset(raw.columns):
+        raise ValueError(f"trusted_proxy_calendar_fields_missing:{sorted(required - set(raw.columns))}")
+    dates = raw["cal_date"].fillna("").astype(str).str.replace("-", "", regex=False)
+    compact = dates.str.fullmatch(r"\d{8}")
+    dates.loc[compact] = (
+        dates.loc[compact].str.slice(0, 4)
+        + "-"
+        + dates.loc[compact].str.slice(4, 6)
+        + "-"
+        + dates.loc[compact].str.slice(6, 8)
+    )
+    calendar = pd.DataFrame(
+        {
+            "trade_date": dates,
+            "is_open": raw["is_open"].astype(str).str.lower().isin({"1", "true", "t", "yes"}),
+            "exchange": "SSE/SZSE",
+            "source": "tushare_proxy.trade_cal",
+        }
+    )
+    conflict = calendar.groupby("trade_date", sort=False)["is_open"].nunique().gt(1)
+    if conflict.any():
+        raise ValueError(f"trusted_proxy_calendar_internal_conflict:{int(conflict.sum())}")
+    calendar = calendar.drop_duplicates(["trade_date", "exchange"], keep="last").sort_values("trade_date").reset_index(drop=True)
+    return calendar, []
+
+
 def _stage_daily_domains(
     *,
     refs: list[RawPartitionRef],
     registry: SecurityIdentityRegistry,
     staging_root: Path,
+    suspend_refs: Iterable[RawPartitionRef] = (),
+    include_valuation: bool = True,
+    corrections: CorrectionSet | None = None,
 ) -> dict[str, Any]:
-    domains = (DOMAIN_MARKET_DAILY_RAW, DOMAIN_SECURITY_STATUS_DAILY, DOMAIN_VALUATION_DAILY, DOMAIN_ELIGIBLE_SIGNAL_D)
+    domains = (
+        DOMAIN_MARKET_DAILY_RAW,
+        DOMAIN_SECURITY_STATUS_DAILY,
+        *([DOMAIN_VALUATION_DAILY] if include_valuation else []),
+        DOMAIN_ELIGIBLE_SIGNAL_D,
+    )
     staged: dict[str, list[tuple[str, Path]]] = {domain: [] for domain in domains}
     reports: dict[str, list[QualityReport]] = {domain: [] for domain in domains}
     quarantine_count = 0
@@ -279,25 +568,85 @@ def _stage_daily_domains(
     resolved_conflict_count = 0
     resolved_conflict_sample: list[dict[str, Any]] = []
     security_ids: set[str] = set()
+    corrections_applied: list[dict[str, Any]] = []
     current_year = ""
     buffers: dict[str, list[pd.DataFrame]] = {domain: [] for domain in domains}
+    suspend_by_year: dict[str, list[pd.DataFrame]] = {}
+
+    for suspend_ref in suspend_refs:
+        suspend_status, suspend_conflicts = derive_trusted_proxy_suspend_status(
+            read_raw_partition(suspend_ref),
+            query_date=suspend_ref.partition_value,
+            identity_registry=registry,
+        )
+        if corrections is not None and not suspend_status.empty:
+            suspend_status, applied = apply_corrections(
+                suspend_status,
+                provider="tushare_proxy",
+                domain=DOMAIN_SECURITY_STATUS_DAILY,
+                corrections=corrections,
+            )
+            corrections_applied.extend(applied)
+        if not suspend_status.empty:
+            suspend_by_year.setdefault(str(suspend_ref.partition_value)[:4], []).append(suspend_status)
+            security_ids.update(suspend_status["security_id"].astype(str))
+        if not suspend_conflicts.empty:
+            quarantine_count += int(len(suspend_conflicts))
+            if len(quarantine_sample) < 100:
+                quarantine_sample.extend(
+                    suspend_conflicts.head(100 - len(quarantine_sample)).to_dict("records")
+                )
 
     def flush(year: str) -> None:
         nonlocal quarantine_count
         if not year:
             return
         market = pd.concat(buffers[DOMAIN_MARKET_DAILY_RAW], ignore_index=True)
-        status = pd.concat(buffers[DOMAIN_SECURITY_STATUS_DAILY], ignore_index=True)
-        valuation = pd.concat(buffers[DOMAIN_VALUATION_DAILY], ignore_index=True)
+        status_frames = [
+            *buffers[DOMAIN_SECURITY_STATUS_DAILY],
+            *suspend_by_year.get(year, []),
+        ]
+        status = pd.concat(status_frames, ignore_index=True)
+        status_key = ["security_id", "trade_date"]
+        duplicated = status.duplicated(status_key, keep=False)
+        if duplicated.any():
+            keep = status.loc[~duplicated].copy()
+            for _, group in status.loc[duplicated].groupby(status_key, sort=False, dropna=False):
+                semantic = group[
+                    ["tradestatus", "is_st", "is_suspended", "list_status"]
+                ].astype("string").fillna("<NULL>").drop_duplicates()
+                if len(semantic) == 1:
+                    keep = pd.concat([keep, group.iloc[[0]]], ignore_index=True)
+                else:
+                    quarantine_count += 1
+                    if len(quarantine_sample) < 100:
+                        quarantine_sample.append(
+                            {
+                                "conflict_type": "trusted_proxy_daily_suspend_status_conflict",
+                                "security_id": str(group.iloc[0]["security_id"]),
+                                "trade_date": str(group.iloc[0]["trade_date"]),
+                            }
+                        )
+            status = keep.reset_index(drop=True)
+        valuation = (
+            pd.concat(buffers[DOMAIN_VALUATION_DAILY], ignore_index=True)
+            if include_valuation
+            else pd.DataFrame()
+        )
         eligible = build_eligible_signal_view(status)
         frames = {
             DOMAIN_MARKET_DAILY_RAW: market,
             DOMAIN_SECURITY_STATUS_DAILY: status,
-            DOMAIN_VALUATION_DAILY: valuation,
             DOMAIN_ELIGIBLE_SIGNAL_D: eligible,
         }
+        if include_valuation:
+            frames[DOMAIN_VALUATION_DAILY] = valuation
         reports[DOMAIN_MARKET_DAILY_RAW].append(audit_canonical_daily(market))
-        for domain in (DOMAIN_SECURITY_STATUS_DAILY, DOMAIN_VALUATION_DAILY, DOMAIN_ELIGIBLE_SIGNAL_D):
+        for domain in (
+            DOMAIN_SECURITY_STATUS_DAILY,
+            *([DOMAIN_VALUATION_DAILY] if include_valuation else []),
+            DOMAIN_ELIGIBLE_SIGNAL_D,
+        ):
             reports[domain].append(audit_table_contract(frames[domain], domain=domain, primary_key=["security_id", "trade_date"]))
         for domain, frame in frames.items():
             path = staging_root / domain / f"{year}.parquet"
@@ -311,10 +660,40 @@ def _stage_daily_domains(
         if current_year and year != current_year:
             flush(current_year)
         current_year = year
-        derived = derive_daily_domains(read_raw_partition(ref), query_date=ref.partition_value, identity_registry=registry)
+        trusted_proxy_ref = ref.raw_domain == RAW_TUSHARE_PROXY_DAILY
+        derive = derive_trusted_proxy_daily_domains if trusted_proxy_ref else derive_daily_domains
+        derived = derive(read_raw_partition(ref), query_date=ref.partition_value, identity_registry=registry)
+        if corrections is not None:
+            provider = "tushare_proxy" if trusted_proxy_ref else "baostock"
+            market, applied = apply_corrections(
+                derived.market_daily_raw,
+                provider=provider,
+                domain=DOMAIN_MARKET_DAILY_RAW,
+                corrections=corrections,
+            )
+            corrections_applied.extend(applied)
+            status, applied = apply_corrections(
+                derived.security_status_daily,
+                provider=provider,
+                domain=DOMAIN_SECURITY_STATUS_DAILY,
+                corrections=corrections,
+            )
+            corrections_applied.extend(applied)
+            if include_valuation:
+                valuation, applied = apply_corrections(
+                    derived.valuation_daily,
+                    provider=provider,
+                    domain=DOMAIN_VALUATION_DAILY,
+                    corrections=corrections,
+                )
+                corrections_applied.extend(applied)
+            else:
+                valuation = derived.valuation_daily.iloc[0:0].copy()
+            derived = type(derived)(market, status, valuation, derived.quarantine)
         buffers[DOMAIN_MARKET_DAILY_RAW].append(derived.market_daily_raw)
         buffers[DOMAIN_SECURITY_STATUS_DAILY].append(derived.security_status_daily)
-        buffers[DOMAIN_VALUATION_DAILY].append(derived.valuation_daily)
+        if include_valuation:
+            buffers[DOMAIN_VALUATION_DAILY].append(derived.valuation_daily)
         security_ids.update(derived.market_daily_raw["security_id"].astype(str))
         if not derived.quarantine.empty:
             resolution = derived.quarantine.get(
@@ -337,6 +716,7 @@ def _stage_daily_domains(
         "resolved_conflict_count": resolved_conflict_count,
         "resolved_conflict_sample": resolved_conflict_sample,
         "security_ids": security_ids,
+        "corrections_applied": corrections_applied,
     }
 
 
@@ -376,29 +756,60 @@ def build_candidate(
     start_date: str = "2010-01-01",
     end_date: str = "",
     identity_config: str | Path | None = None,
-    require_factor_dual_path: bool = True,
+    require_factor_dual_path: bool = False,
 ) -> CandidateManifestV3:
     paths = ensure_qdp_v3_layout(workspace_root)
-    daily_refs = iter_raw_partitions(RAW_DAILY_ASTOCK, workspace_root=workspace_root, start_value=start_date, end_value=end_date)
+    corrections = load_corrections(workspace_root=workspace_root)
+    baostock_daily_refs = iter_raw_partitions(
+        RAW_DAILY_ASTOCK,
+        workspace_root=workspace_root,
+        start_value=start_date,
+        end_value=end_date,
+    )
+    proxy_daily_refs = iter_raw_partitions(
+        RAW_TUSHARE_PROXY_DAILY,
+        workspace_root=workspace_root,
+        start_value=start_date,
+        end_value=end_date,
+    )
+    available_daily_dates = [
+        str(ref.partition_value)[:10]
+        for ref in [*proxy_daily_refs, *baostock_daily_refs]
+    ]
+    if not available_daily_dates:
+        raise RuntimeError("qdp_v3_daily_raw_partitions_missing")
+    effective_end = str(end_date or max(available_daily_dates))[:10]
+    trusted_proxy_daily = bool(proxy_daily_refs)
+    if trusted_proxy_daily:
+        daily_refs, daily_source_composition = _compose_trusted_daily_refs(
+            proxy_daily_refs,
+            baostock_daily_refs,
+            start_date=start_date,
+            end_date=effective_end,
+        )
+    else:
+        daily_refs = _unique_refs_by_date(baostock_daily_refs, source="baostock_legacy")
+        daily_source_composition = {
+            "cutoff": BOOTSTRAP_CUTOFF,
+            "tushare_proxy_partition_count": 0,
+            "baostock_partition_count": len(daily_refs),
+            "legacy_baostock_read_compatibility": True,
+        }
     if not daily_refs:
         raise RuntimeError("qdp_v3_daily_raw_partitions_missing")
-    snapshot_dates = [ref.partition_value for ref in daily_refs]
-    effective_end = str(end_date or snapshot_dates[-1])
-    security_master, security_master_ref = _latest_security_master(workspace_root)
-    all_stock_refs = iter_raw_partitions(
+    snapshot_dates = [str(ref.partition_value)[:10] for ref in daily_refs]
+    security_master, security_master_ref = _latest_security_master(
+        workspace_root,
+        end_date=effective_end,
+    )
+    all_stock_refs = [] if trusted_proxy_daily else iter_raw_partitions(
         RAW_ALL_STOCK,
         workspace_root=workspace_root,
         start_value=start_date,
         end_value=effective_end,
     )
     name_observations, all_stock_symbols = _pit_name_observations(all_stock_refs)
-    proxy_daily_refs = iter_raw_partitions(
-        RAW_TUSHARE_PROXY_DAILY,
-        workspace_root=workspace_root,
-        start_value=start_date,
-        end_value=effective_end,
-    )
-    proxy_daily_basic_refs = iter_raw_partitions(
+    proxy_daily_basic_refs = [] if trusted_proxy_daily else iter_raw_partitions(
         RAW_TUSHARE_PROXY_DAILY_BASIC,
         workspace_root=workspace_root,
         start_value=start_date,
@@ -410,7 +821,7 @@ def build_candidate(
         start_value=start_date,
         end_value=effective_end,
     )
-    proxy_stk_limit_refs = iter_raw_partitions(
+    proxy_stk_limit_refs = [] if trusted_proxy_daily else iter_raw_partitions(
         RAW_TUSHARE_PROXY_STK_LIMIT,
         workspace_root=workspace_root,
         start_value=start_date,
@@ -420,7 +831,7 @@ def build_candidate(
         RAW_TUSHARE_PROXY_TRADE_CALENDAR,
         workspace_root=workspace_root,
     )
-    proxy_dividend_refs = iter_raw_partitions(
+    proxy_dividend_refs = [] if trusted_proxy_daily else iter_raw_partitions(
         RAW_TUSHARE_PROXY_DIVIDEND,
         workspace_root=workspace_root,
     )
@@ -436,16 +847,31 @@ def build_candidate(
         RAW_TUSHARE_PROXY_ADJ_FACTOR,
         workspace_root=workspace_root,
     )
-    proxy_financial_refs = iter_raw_partitions(
+    proxy_financial_refs = [] if trusted_proxy_daily else iter_raw_partitions(
         RAW_TUSHARE_PROXY_FINANCIAL,
         workspace_root=workspace_root,
     )
 
+    proxy_name_observations, proxy_name_symbols = _trusted_proxy_name_observations(proxy_namechange_refs)
+    if trusted_proxy_daily:
+        proxy_security_master = _trusted_proxy_security_master(proxy_stock_basic_refs)
+        security_master = _compose_security_master_inventory(
+            proxy_security_master,
+            security_master,
+            baostock_as_of_date=security_master_ref.partition_value if security_master_ref else "",
+        )
+        name_observations = proxy_name_observations
+        all_stock_symbols = proxy_name_symbols
+    elif not proxy_name_observations.empty:
+        name_observations = pd.concat([name_observations, proxy_name_observations], ignore_index=True)
+        all_stock_symbols.update(proxy_name_symbols)
+
     provider_symbols: set[str] = set(all_stock_symbols)
     for ref in daily_refs:
         raw = read_raw_partition(ref)
-        if "code" in raw.columns:
-            provider_symbols.update(raw["code"].astype(str).tolist())
+        symbol_column = "ts_code" if ref.raw_domain == RAW_TUSHARE_PROXY_DAILY else "code"
+        if symbol_column in raw.columns:
+            provider_symbols.update(raw[symbol_column].astype(str).tolist())
     factor_refs = iter_raw_partitions(RAW_ADJUST_FACTOR_EVENT, workspace_root=workspace_root, end_value=effective_end)
     factor_raw_frames = [read_raw_partition(ref) for ref in factor_refs]
     for raw in factor_raw_frames:
@@ -453,7 +879,9 @@ def build_candidate(
             provider_symbols.update(raw["code"].astype(str).tolist())
     symbol_factor_refs = iter_raw_partitions(RAW_ADJUST_FACTOR_SYMBOL_HISTORY, workspace_root=workspace_root)
     provider_symbols.update(ref.partition_value for ref in symbol_factor_refs)
-    xdxr_refs = iter_raw_partitions(RAW_CORPORATE_ACTION_XDXR, workspace_root=workspace_root)
+    xdxr_refs = [] if trusted_proxy_daily else iter_raw_partitions(
+        RAW_CORPORATE_ACTION_XDXR, workspace_root=workspace_root
+    )
     provider_symbols.update(ref.partition_value for ref in xdxr_refs)
     for ref in proxy_stock_basic_refs:
         evidence = read_raw_partition(ref)
@@ -469,7 +897,11 @@ def build_candidate(
         DOMAIN_INDEX_CONSTITUENTS,
     )
     secondary_refs = {
-        domain: refs_for_secondary_domain(domain, workspace_root=workspace_root)
+        domain: (
+            []
+            if trusted_proxy_daily
+            else refs_for_secondary_domain(domain, workspace_root=workspace_root)
+        )
         for domain in secondary_domains
     }
     for domain, refs in secondary_refs.items():
@@ -486,6 +918,16 @@ def build_candidate(
         config_path=identity_config,
         workspace_root=workspace_root,
     )
+    if trusted_proxy_daily and not name_observations.empty:
+        mapped_names = registry.map_frame(
+            name_observations.rename(columns={"symbol": "provider_symbol"}),
+            provider_symbol_column="provider_symbol",
+            date_column="trade_date",
+        )
+        name_observations = mapped_names.loc[
+            mapped_names["identity_mapping_status"].eq("mapped"),
+            ["symbol_on_date", "trade_date", "name"],
+        ].rename(columns={"symbol_on_date": "symbol"})
     registry = registry.with_pit_name_observations(name_observations)
     identity_frame, history_frame = registry.identity_frames()
     xdxr_actions, share_capital_events, xdxr_conflicts = canonicalize_mootdx_xdxr(
@@ -515,9 +957,9 @@ def build_candidate(
                 provisional=True,
             )
         )
-    history_findings = _raw_quality_findings(all_stock_refs, domain=DOMAIN_SYMBOL_HISTORY)
+    history_findings = [] if trusted_proxy_daily else _raw_quality_findings(all_stock_refs, domain=DOMAIN_SYMBOL_HISTORY)
     missing_name_snapshot_dates = sorted(set(snapshot_dates) - {ref.partition_value for ref in all_stock_refs})
-    if missing_name_snapshot_dates:
+    if missing_name_snapshot_dates and not trusted_proxy_daily:
         history_findings.append(
             QualityFinding(
                 code="symbol_history_name_snapshot_dates_missing",
@@ -573,6 +1015,7 @@ def build_candidate(
         partitioning="single",
     )
     identity_input = dataset_input_ref(paths.root, identity_manifest)
+    history_source_refs = proxy_namechange_refs if trusted_proxy_daily else (([security_master_ref] if security_master_ref else []) + all_stock_refs + proxy_namechange_refs)
     history_manifest = write_dataset(
         root=paths.root,
         domain=DOMAIN_SYMBOL_HISTORY,
@@ -582,26 +1025,20 @@ def build_candidate(
         primary_key=["security_id", "effective_from"],
         quality_report=history_report,
         inputs=[identity_input],
-        raw_content_hashes=(
-            ([security_master_ref.content_sha256] if security_master_ref else [])
-            + [ref.content_sha256 for ref in all_stock_refs]
-            + [ref.content_sha256 for ref in proxy_namechange_refs]
-        ),
-        provider_evidence=_provider_evidence(
-            ([security_master_ref] if security_master_ref else []) + all_stock_refs + proxy_namechange_refs
-        ),
+        raw_content_hashes=[ref.content_sha256 for ref in history_source_refs],
+        provider_evidence=_provider_evidence(history_source_refs),
         build={
             "contract": QDP_V3_CONTRACT_VERSION,
             "official_code_changes_only": True,
-            "pit_name_source": "baostock.query_all_stock(date_snapshot)",
+            "pit_name_source": "tushare_proxy.namechange" if trusted_proxy_daily else "baostock.query_all_stock(date_snapshot)",
             "current_stock_basic_name_backfill_forbidden": True,
-            "tushare_proxy_namechange_role": "arbitration_task_discovery_only",
+            "tushare_proxy_namechange_role": "trusted_historical_name_source" if trusted_proxy_daily else "legacy_arbitration_evidence",
         },
         coverage={
             "history_row_count": int(len(history_frame)),
             "name_observation_count": int(len(name_observations)),
-            "name_snapshot_count": len(all_stock_refs),
-            "missing_name_snapshot_count": len(missing_name_snapshot_dates),
+            "name_snapshot_count": len(proxy_namechange_refs) if trusted_proxy_daily else len(all_stock_refs),
+            "missing_name_snapshot_count": 0 if trusted_proxy_daily else len(missing_name_snapshot_dates),
         },
         date_column="effective_from",
         partitioning="single",
@@ -613,10 +1050,17 @@ def build_candidate(
     # marked and contains no canonical truth; raw and datasets stay immutable.
     staging_directory = tempfile.TemporaryDirectory(prefix=".candidate_stage_", dir=str(paths.jobs))
     staging_root = Path(staging_directory.name)
-    staged_daily = _stage_daily_domains(refs=daily_refs, registry=registry, staging_root=staging_root)
+    staged_daily = _stage_daily_domains(
+        refs=daily_refs,
+        registry=registry,
+        staging_root=staging_root,
+        suspend_refs=proxy_suspend_refs if trusted_proxy_daily else (),
+        include_valuation=not trusted_proxy_daily,
+        corrections=corrections,
+    )
     market_parts = staged_daily["staged"][DOMAIN_MARKET_DAILY_RAW]
     status_parts = staged_daily["staged"][DOMAIN_SECURITY_STATUS_DAILY]
-    valuation_parts = staged_daily["staged"][DOMAIN_VALUATION_DAILY]
+    valuation_parts = staged_daily["staged"].get(DOMAIN_VALUATION_DAILY, [])
     eligible_parts = staged_daily["staged"][DOMAIN_ELIGIBLE_SIGNAL_D]
     tradable_parts, tradable_partition_reports = _stage_tradable_open(market_parts=market_parts, staging_root=staging_root)
     daily_quarantine_count = int(staged_daily["quarantine_count"])
@@ -646,57 +1090,44 @@ def build_candidate(
                 sample=daily_resolved_conflict_sample[:20],
             )
         )
-    proxy_daily_metrics: dict[str, Any] = {}
+    proxy_daily_metrics: dict[str, Any] = {
+        "role": "trusted_historical_source",
+        "partition_count": int(daily_source_composition.get("tushare_proxy_partition_count", 0) or 0),
+        "cross_source_validation": False,
+    }
     proxy_daily_conflicts: list[dict[str, Any]] = []
-    if proxy_daily_refs:
-        proxy_findings, proxy_daily_metrics, proxy_daily_conflicts = audit_proxy_daily_against_baostock(
-            proxy_refs=proxy_daily_refs,
-            baostock_refs=daily_refs,
-            registry=registry,
-        )
-        raw_daily_findings.extend(proxy_findings)
-    elif (paths.metadata / "tushare_proxy_bootstrap_cutoff.json").exists():
+    if not proxy_daily_refs and (paths.metadata / "tushare_proxy_bootstrap_cutoff.json").exists():
         raw_daily_findings.append(
             QualityFinding(
                 code="tushare_proxy_daily_bootstrap_evidence_missing",
                 severity="blocker",
-                message="The locked historical bootstrap requires proxy daily evidence for cross-source reconciliation.",
+                message="The locked historical bootstrap requires its trusted Tushare daily source.",
                 domain=DOMAIN_MARKET_DAILY_RAW,
             )
         )
     valuation_cross_findings: list[QualityFinding] = []
-    valuation_cross_metrics: dict[str, Any] = {}
+    valuation_cross_metrics: dict[str, Any] = {"cross_source_validation": False}
     valuation_cross_conflicts: list[dict[str, Any]] = []
-    if proxy_daily_basic_refs:
-        valuation_cross_findings, valuation_cross_metrics, valuation_cross_conflicts = audit_proxy_daily_basic(
-            proxy_refs=proxy_daily_basic_refs,
-            baostock_refs=daily_refs,
-            registry=registry,
-        )
-    elif (paths.metadata / "tushare_proxy_bootstrap_cutoff.json").exists():
-        valuation_cross_findings.append(
-            QualityFinding(
-                code="tushare_proxy_daily_basic_bootstrap_evidence_missing",
-                severity="blocker",
-                message="The locked bootstrap requires daily_basic for valuation and share-capital reconciliation.",
-                domain=DOMAIN_VALUATION_DAILY,
-            )
-        )
-    status_cross_findings, status_cross_metrics, status_cross_conflicts = audit_proxy_suspend_status(
-        proxy_refs=proxy_suspend_refs,
-        baostock_refs=daily_refs,
-        registry=registry,
-    )
+    status_cross_findings: list[QualityFinding] = []
+    status_cross_metrics: dict[str, Any] = {"cross_source_validation": False}
+    status_cross_conflicts: list[dict[str, Any]] = []
     market_report = _merge_reports(DOMAIN_MARKET_DAILY_RAW, staged_daily["reports"][DOMAIN_MARKET_DAILY_RAW], raw_daily_findings)
     status_report = _merge_reports(
         DOMAIN_SECURITY_STATUS_DAILY,
         staged_daily["reports"][DOMAIN_SECURITY_STATUS_DAILY],
-        [item for item in raw_daily_findings if item.severity == "blocker"] + status_cross_findings,
+        [item for item in raw_daily_findings if item.severity == "blocker"]
+        + _raw_quality_findings(proxy_suspend_refs, domain=DOMAIN_SECURITY_STATUS_DAILY)
+        + status_cross_findings,
     )
-    valuation_report = _merge_reports(
-        DOMAIN_VALUATION_DAILY,
-        staged_daily["reports"][DOMAIN_VALUATION_DAILY],
-        [item for item in raw_daily_findings if item.severity == "blocker"] + valuation_cross_findings,
+    valuation_report = (
+        _merge_reports(
+            DOMAIN_VALUATION_DAILY,
+            staged_daily["reports"][DOMAIN_VALUATION_DAILY],
+            [item for item in raw_daily_findings if item.severity == "blocker"]
+            + valuation_cross_findings,
+        )
+        if valuation_parts
+        else None
     )
     eligible_report = _merge_reports(
         DOMAIN_ELIGIBLE_SIGNAL_D,
@@ -710,8 +1141,21 @@ def build_candidate(
     )
     identity_inputs = [identity_input, history_input]
     daily_evidence = _provider_evidence(daily_refs)
-    market_daily_evidence = _provider_evidence([*daily_refs, *proxy_daily_refs])
-    common_build = {"contract": QDP_V3_CONTRACT_VERSION, "start_date": start_date, "end_date": effective_end, "raw_universe": "all_a"}
+    market_daily_evidence = daily_evidence
+    common_build = {
+        "contract": QDP_V3_CONTRACT_VERSION,
+        "start_date": start_date,
+        "end_date": effective_end,
+        "raw_universe": "all_a",
+        "historical_source": (
+            "tushare_proxy_through_cutoff_then_baostock"
+            if trusted_proxy_daily
+            else "legacy_baostock_read_compatibility"
+        ),
+        "daily_source_composition": daily_source_composition,
+        "cross_source_validation": False,
+        "corrections_applied": len(staged_daily.get("corrections_applied", [])),
+    }
     market_manifest = write_partitioned_dataset(
         root=paths.root,
         domain=DOMAIN_MARKET_DAILY_RAW,
@@ -722,13 +1166,17 @@ def build_candidate(
         quality_report=market_report,
         inputs=identity_inputs,
         provider_evidence=market_daily_evidence,
-        raw_content_hashes=[ref.content_sha256 for ref in [*daily_refs, *proxy_daily_refs]],
-        build={**common_build, "proxy_daily_unit_conversion": {"volume": "lot_to_share_x100", "amount": "thousand_cny_to_cny_x1000"}},
+        raw_content_hashes=[ref.content_sha256 for ref in daily_refs],
+        build={**common_build, "proxy_daily_unit_conversion": {"volume": "lot_to_share_x100", "amount": "thousand_cny_to_cny_x1000"} if trusted_proxy_daily else {}},
         coverage={
             "start_date": snapshot_dates[0],
             "end_date": snapshot_dates[-1],
             "security_count": len(set(staged_daily["security_ids"]) - {""}),
-            "tushare_proxy_cross_check": proxy_daily_metrics,
+            "trusted_source": (
+                "tushare_proxy_through_cutoff_then_baostock"
+                if trusted_proxy_daily
+                else "legacy_baostock"
+            ),
         },
         units={"price": "CNY/share", "volume": "share", "amount": "CNY", "pct_chg": "percent"},
         quarantine=(
@@ -750,8 +1198,8 @@ def build_candidate(
         inputs=identity_inputs + [market_input],
         provider_evidence=_provider_evidence([*daily_refs, *proxy_suspend_refs]),
         raw_content_hashes=[ref.content_sha256 for ref in [*daily_refs, *proxy_suspend_refs]],
-        build={**common_build, "proxy_suspend_role": "full_day_status_cross_check"},
-        coverage={"start_date": snapshot_dates[0], "end_date": snapshot_dates[-1], "proxy_suspend_cross_check": status_cross_metrics},
+        build={**common_build, "proxy_suspend_role": "trusted_status_evidence"},
+        coverage={"start_date": snapshot_dates[0], "end_date": snapshot_dates[-1]},
         quarantine=status_cross_conflicts[:100],
         partitioning="natural_year",
     )
@@ -766,12 +1214,12 @@ def build_candidate(
         inputs=identity_inputs + [market_input],
         provider_evidence=_provider_evidence([*daily_refs, *proxy_daily_basic_refs]),
         raw_content_hashes=[ref.content_sha256 for ref in [*daily_refs, *proxy_daily_basic_refs]],
-        build={**common_build, "proxy_daily_basic_role": "valuation_and_market_cap_cross_check"},
-        coverage={"start_date": snapshot_dates[0], "end_date": snapshot_dates[-1], "proxy_daily_basic_cross_check": valuation_cross_metrics},
+        build={**common_build, "proxy_daily_basic_role": "optional_enrichment"},
+        coverage={"start_date": snapshot_dates[0], "end_date": snapshot_dates[-1]},
         units={"turnover_rate": "percent"},
         quarantine=valuation_cross_conflicts[:100],
         partitioning="natural_year",
-    )
+    ) if valuation_parts and valuation_report is not None else None
     status_input = dataset_input_ref(paths.root, status_manifest)
     eligible_manifest = write_partitioned_dataset(
         root=paths.root,
@@ -805,20 +1253,60 @@ def build_candidate(
         partitioning="natural_year",
     )
 
-    calendar, calendar_refs, calendar_findings = _calendar_frame(workspace_root, snapshot_dates)
-    proxy_calendar_metrics: dict[str, Any] = {}
     if proxy_calendar_refs:
-        proxy_calendar_findings, proxy_calendar_metrics = audit_proxy_calendar(
-            proxy_refs=proxy_calendar_refs,
-            canonical_calendar=calendar,
+        proxy_calendar, proxy_calendar_findings = _trusted_proxy_calendar_frame(
+            proxy_calendar_refs,
+            snapshot_dates=snapshot_dates,
         )
-        calendar_findings.extend(proxy_calendar_findings)
-    elif (paths.metadata / "tushare_proxy_bootstrap_cutoff.json").exists():
+        if effective_end > BOOTSTRAP_CUTOFF:
+            baostock_calendar, baostock_calendar_refs, baostock_calendar_findings = _calendar_frame(
+                workspace_root,
+                snapshot_dates,
+            )
+        else:
+            baostock_calendar = pd.DataFrame()
+            baostock_calendar_refs = []
+            baostock_calendar_findings = []
+        calendar = _compose_calendar_frames(
+            proxy_calendar,
+            baostock_calendar,
+            start_date=start_date,
+            end_date=effective_end,
+        )
+        calendar_refs = [
+            *proxy_calendar_refs,
+            *(
+                baostock_calendar_refs
+                if effective_end > BOOTSTRAP_CUTOFF
+                else []
+            ),
+        ]
+        calendar_findings = [
+            *proxy_calendar_findings,
+            *(baostock_calendar_findings if effective_end > BOOTSTRAP_CUTOFF else []),
+        ]
+        if effective_end > BOOTSTRAP_CUTOFF and not baostock_calendar_refs:
+            calendar_findings.append(
+                QualityFinding(
+                    code="baostock_trade_calendar_increment_missing",
+                    severity="blocker",
+                    message="Post-cutoff canonical dates require a BaoStock calendar reaching the requested end.",
+                    domain=DOMAIN_TRADING_CALENDAR,
+                )
+            )
+    else:
+        calendar, calendar_refs, calendar_findings = _calendar_frame(workspace_root, snapshot_dates)
+    proxy_calendar_metrics: dict[str, Any] = {
+        "role": "trusted_historical_source",
+        "partition_count": len(proxy_calendar_refs),
+        "cross_source_validation": False,
+    }
+    if not proxy_calendar_refs and (paths.metadata / "tushare_proxy_bootstrap_cutoff.json").exists():
         calendar_findings.append(
             QualityFinding(
                 code="tushare_proxy_trade_calendar_bootstrap_evidence_missing",
                 severity="blocker",
-                message="The locked bootstrap requires a proxy trade-calendar cross-check.",
+                message="The locked bootstrap requires its trusted Tushare trade calendar.",
                 domain=DOMAIN_TRADING_CALENDAR,
             )
         )
@@ -835,10 +1323,18 @@ def build_candidate(
         frequency="1d",
         primary_key=["trade_date", "exchange"],
         quality_report=calendar_report,
-        provider_evidence=_provider_evidence([*calendar_refs, *proxy_calendar_refs]),
-        raw_content_hashes=[ref.content_sha256 for ref in [*calendar_refs, *proxy_calendar_refs]],
-        build={"contract": QDP_V3_CONTRACT_VERSION, "proxy_calendar_role": "cross_source_trading_day_proof"},
-        coverage={"start_date": str(calendar["trade_date"].min()), "end_date": str(calendar["trade_date"].max()), "proxy_cross_check": proxy_calendar_metrics},
+        provider_evidence=_provider_evidence(calendar_refs),
+        raw_content_hashes=[ref.content_sha256 for ref in calendar_refs],
+        build={
+            "contract": QDP_V3_CONTRACT_VERSION,
+            "source_contract": (
+                "tushare_proxy_through_cutoff_then_baostock"
+                if proxy_calendar_refs
+                else "legacy_baostock_read_compatibility"
+            ),
+            "bootstrap_cutoff": BOOTSTRAP_CUTOFF,
+        },
+        coverage={"start_date": str(calendar["trade_date"].min()), "end_date": str(calendar["trade_date"].max())},
         partitioning="year",
     )
     calendar_input = dataset_input_ref(paths.root, calendar_manifest)
@@ -1292,28 +1788,48 @@ def build_candidate(
     symbol_events = pd.concat(nonempty_symbol_event_frames, ignore_index=True) if nonempty_symbol_event_frames else pd.DataFrame(columns=event_columns)
     comparable_start = min((ref.partition_value for ref in factor_refs), default=str(start_date))
     comparable_end = max((ref.partition_value for ref in factor_refs), default=effective_end)
-    proxy_factor_baselines, proxy_factor_events, proxy_factor_conflicts, proxy_factor_metrics = derive_proxy_factor_evidence(
-        proxy_factor_refs,
-        identity_registry=registry,
-    )
-    proxy_pre_batch_events, proxy_factor_disputes, proxy_factor_findings, proxy_factor_reconcile_metrics = reconcile_proxy_factor_third_path(
-        symbol_events,
-        proxy_baselines=proxy_factor_baselines,
-        proxy_events=proxy_factor_events,
-        comparable_start=comparable_start,
-        comparable_end=comparable_end,
-    )
-    events, disputed_events, dual_path_metrics = reconcile_adjust_factor_events(
-        batch_events,
-        symbol_events,
-        comparable_start=comparable_start,
-        comparable_end=comparable_end,
-    )
-    arbitrated_events, remaining_disputes, arbitration_metrics = arbitrate_adjust_factor_disputes(
-        disputed_events,
-        xdxr_events=xdxr_actions,
-        official_evidence=official_factor_evidence,
-    )
+    if trusted_proxy_daily:
+        proxy_factor_conflicts = pd.DataFrame()
+        proxy_factor_disputes = pd.DataFrame()
+        proxy_factor_findings: list[QualityFinding] = []
+        proxy_factor_metrics = {
+            "role": "trusted_historical_daily_factor",
+            "cross_source_validation": False,
+        }
+        proxy_factor_reconcile_metrics = {"skipped_by_trusted_source_contract": True}
+        proxy_pre_batch_events = pd.DataFrame(columns=FACTOR_CANONICAL_COLUMNS)
+        events = pd.DataFrame(columns=FACTOR_CANONICAL_COLUMNS)
+        disputed_events = pd.DataFrame()
+        remaining_disputes = pd.DataFrame()
+        arbitrated_events = pd.DataFrame(columns=FACTOR_CANONICAL_COLUMNS)
+        arbitration_metrics: dict[str, Any] = {}
+        dual_path_metrics: dict[str, Any] = {
+            "trusted_source_contract": True,
+            "cross_source_validation": False,
+        }
+    else:
+        proxy_factor_baselines, proxy_factor_events, proxy_factor_conflicts, proxy_factor_metrics = derive_proxy_factor_evidence(
+            proxy_factor_refs,
+            identity_registry=registry,
+        )
+        proxy_pre_batch_events, proxy_factor_disputes, proxy_factor_findings, proxy_factor_reconcile_metrics = reconcile_proxy_factor_third_path(
+            symbol_events,
+            proxy_baselines=proxy_factor_baselines,
+            proxy_events=proxy_factor_events,
+            comparable_start=comparable_start,
+            comparable_end=comparable_end,
+        )
+        events, disputed_events, dual_path_metrics = reconcile_adjust_factor_events(
+            batch_events,
+            symbol_events,
+            comparable_start=comparable_start,
+            comparable_end=comparable_end,
+        )
+        arbitrated_events, remaining_disputes, arbitration_metrics = arbitrate_adjust_factor_disputes(
+            disputed_events,
+            xdxr_events=xdxr_actions,
+            official_evidence=official_factor_evidence,
+        )
     for column in FACTOR_CANONICAL_COLUMNS:
         if column not in events.columns:
             if column in {"arbitration_xdxr_confirmed"}:
@@ -1347,7 +1863,12 @@ def build_candidate(
             "remaining_disputed_event_count": int(len(remaining_disputes)),
         }
     )
-    if not require_factor_dual_path and events.empty and not batch_events.empty:
+    if (
+        not trusted_proxy_daily
+        and not require_factor_dual_path
+        and events.empty
+        and not batch_events.empty
+    ):
         events = batch_events.copy()
         events["verification_status"] = "batch_only_unverified"
         for column in FACTOR_CANONICAL_COLUMNS:
@@ -1607,10 +2128,79 @@ def build_candidate(
     factor_daily_parts: list[tuple[str, Path]] = []
     factor_partition_reports: list[QualityReport] = []
     baseline_unproven_rows = 0
+    trusted_proxy_factors = (
+        trusted_proxy_factor_daily_from_refs(
+            proxy_factor_refs,
+            identity_registry=registry,
+            start_date=max(str(start_date), "2010-01-01"),
+        )
+        if proxy_factor_refs
+        else pd.DataFrame()
+    )
+    existing_factor_security_ids = set(
+        trusted_proxy_factors.get("security_id", pd.Series(dtype=str)).astype(str)
+    )
+    post_cutoff_listings = identity_frame.loc[
+        identity_frame["list_date"].fillna("").astype(str).gt(BOOTSTRAP_CUTOFF)
+        & ~identity_frame["security_id"].astype(str).isin(existing_factor_security_ids)
+    ]
+    if not post_cutoff_listings.empty:
+        listing_baselines = pd.DataFrame(
+            {
+                "security_id": post_cutoff_listings["security_id"].astype(str),
+                "trade_date": post_cutoff_listings["list_date"].astype(str),
+                "symbol_on_date": [
+                    registry.symbol_for_date(str(row.security_id), str(row.list_date))
+                    for row in post_cutoff_listings.itertuples(index=False)
+                ],
+                "provider_symbol": post_cutoff_listings["current_symbol"].fillna("").astype(str),
+                "fore_adjust_factor": 1.0,
+                "back_adjust_factor": 1.0,
+                "adjust_factor": 1.0,
+                "baseline_status": "post_cutoff_listing_baseline",
+                "source": "baostock.security_master_listing_baseline",
+            }
+        )
+        trusted_proxy_factors = pd.concat(
+            [trusted_proxy_factors, listing_baselines], ignore_index=True, sort=False
+        )
+    post_cutoff_batch_events = (
+        batch_events.loc[batch_events["divid_operate_date"].astype(str).gt(BOOTSTRAP_CUTOFF)].copy()
+        if not batch_events.empty
+        else pd.DataFrame(columns=batch_events.columns)
+    )
+    trusted_continuation = (
+        continue_trusted_factors_with_baostock(
+            trusted_proxy_factors,
+            post_cutoff_batch_events,
+            cutoff=BOOTSTRAP_CUTOFF,
+            baostock_history=symbol_events,
+        )
+        if not trusted_proxy_factors.empty
+        and not post_cutoff_batch_events.empty
+        and effective_end > BOOTSTRAP_CUTOFF
+        else pd.DataFrame()
+    )
     for year, market_path in market_parts:
-        factor_daily = build_adjust_factor_daily(pd.read_parquet(market_path, engine="pyarrow"), events)
-        factor_partition_reports.append(audit_factor_semantics(events, factor_daily))
-        baseline_unproven_rows += int(factor_daily["baseline_status"].eq("baseline_unproven").sum())
+        market_year = pd.read_parquet(market_path, engine="pyarrow")
+        if not trusted_proxy_factors.empty:
+            factor_daily = build_trusted_factor_daily(
+                market_year,
+                trusted_proxy_factors,
+                trusted_continuation,
+            )
+            factor_daily, factor_corrections = apply_corrections(
+                factor_daily,
+                provider="tushare_proxy" if year <= BOOTSTRAP_CUTOFF[:4] else "baostock",
+                domain=DOMAIN_ADJUST_FACTOR_DAILY,
+                corrections=corrections,
+            )
+            staged_daily["corrections_applied"].extend(factor_corrections)
+            factor_partition_reports.append(audit_trusted_factor_daily(factor_daily))
+        else:
+            factor_daily = build_adjust_factor_daily(market_year, events)
+            factor_partition_reports.append(audit_factor_semantics(events, factor_daily))
+            baseline_unproven_rows += int(factor_daily["baseline_status"].eq("baseline_unproven").sum())
         factor_path = staging_root / DOMAIN_ADJUST_FACTOR_DAILY / f"{year}.parquet"
         atomic_write_parquet(factor_path, factor_daily.sort_values(["security_id", "trade_date"], kind="mergesort").reset_index(drop=True))
         factor_daily_parts.append((year, factor_path))
@@ -1618,7 +2208,7 @@ def build_candidate(
     factor_daily_report = _merge_reports(
         DOMAIN_ADJUST_FACTOR_DAILY,
         factor_partition_reports,
-        [item for item in factor_extra if item.severity == "blocker"],
+        [] if not trusted_proxy_factors.empty else [item for item in factor_extra if item.severity == "blocker"],
     )
     event_manifest = write_dataset(
         root=paths.root,
@@ -1653,10 +2243,15 @@ def build_candidate(
         frequency="1d",
         primary_key=["security_id", "trade_date"],
         quality_report=factor_daily_report,
-        inputs=[market_input, event_input, history_input],
+        inputs=[market_input, history_input] if not trusted_proxy_factors.empty else [market_input, event_input, history_input],
         provider_evidence=_provider_evidence([*factor_refs, *symbol_factor_refs, *proxy_factor_refs]),
         raw_content_hashes=[ref.content_sha256 for ref in [*factor_refs, *symbol_factor_refs, *proxy_factor_refs]],
-        build={"contract": QDP_V3_CONTRACT_VERSION, "baseline_policy": "no_unproven_1.0", "forward_fill_events_only": True},
+        build={
+            "contract": QDP_V3_CONTRACT_VERSION,
+            "baseline_policy": "first_2010_proxy_observation_normalized_to_1" if not trusted_proxy_factors.empty else "legacy_event_baseline",
+            "bootstrap_source": "tushare_proxy.adj_factor" if not trusted_proxy_factors.empty else "legacy_baostock_events",
+            "post_cutoff_policy": "baostock_event_ratio_continuation",
+        },
         coverage={"start_date": snapshot_dates[0], "end_date": snapshot_dates[-1], "baseline_unproven_rows": baseline_unproven_rows},
         partitioning="natural_year",
     )
@@ -1699,16 +2294,10 @@ def build_candidate(
         history_manifest,
         market_manifest,
         status_manifest,
-        valuation_manifest,
-        event_manifest,
         factor_daily_manifest,
         eligible_manifest,
         tradable_manifest,
     ]
-    for optional_manifest in (corporate_action_manifest, share_capital_event_manifest, share_capital_daily_manifest):
-        if optional_manifest is not None:
-            manifests.append(optional_manifest)
-    manifests.extend(secondary_manifests)
     if intraday_manifest is not None:
         manifests.append(intraday_manifest)
     dataset_ids = {manifest.domain: manifest.dataset_id for manifest in manifests}
@@ -1749,26 +2338,38 @@ def build_candidate(
     if intraday_manifest is None:
         blockers.extend(item.to_dict() for item in intraday_info.get("findings", []) if item.severity == "blocker")
     secondary_raw_refs = [ref for refs in secondary_refs.values() for ref in refs]
-    raw_refs = [
-        *daily_refs,
-        *proxy_daily_refs,
-        *proxy_daily_basic_refs,
-        *proxy_suspend_refs,
-        *proxy_stk_limit_refs,
-        *proxy_calendar_refs,
-        *proxy_dividend_refs,
-        *proxy_stock_basic_refs,
-        *proxy_namechange_refs,
-        *proxy_factor_refs,
-        *proxy_financial_refs,
-        *all_stock_refs,
-        *calendar_refs,
-        *factor_refs,
-        *symbol_factor_refs,
-        *xdxr_refs,
-        *secondary_raw_refs,
-        *intraday_refs,
-    ]
+    if trusted_proxy_daily:
+        raw_refs = [
+            *daily_refs,
+            *proxy_suspend_refs,
+            *proxy_calendar_refs,
+            *proxy_stock_basic_refs,
+            *proxy_namechange_refs,
+            *proxy_factor_refs,
+            *([] if effective_end <= BOOTSTRAP_CUTOFF else factor_refs),
+            *([] if effective_end <= BOOTSTRAP_CUTOFF else symbol_factor_refs),
+            *intraday_refs,
+        ]
+    else:
+        raw_refs = [
+            *daily_refs,
+            *proxy_daily_basic_refs,
+            *proxy_suspend_refs,
+            *proxy_stk_limit_refs,
+            *proxy_calendar_refs,
+            *proxy_dividend_refs,
+            *proxy_stock_basic_refs,
+            *proxy_namechange_refs,
+            *proxy_factor_refs,
+            *proxy_financial_refs,
+            *all_stock_refs,
+            *calendar_refs,
+            *factor_refs,
+            *symbol_factor_refs,
+            *xdxr_refs,
+            *secondary_raw_refs,
+            *intraday_refs,
+        ]
     if security_master_ref:
         raw_refs.append(security_master_ref)
     quarantine_summary: list[dict[str, Any]] = []
@@ -1784,26 +2385,6 @@ def build_candidate(
                 "reason": "tushare_proxy_baostock_value_conflict",
                 "row_count": int(proxy_daily_metrics.get("value_conflict_count", len(proxy_daily_conflicts))),
                 "sample": proxy_daily_conflicts[:20],
-            }
-        )
-    if valuation_cross_conflicts:
-        quarantine_summary.append(
-            {
-                "domain": DOMAIN_VALUATION_DAILY,
-                "resolution_status": "unresolved",
-                "reason": "tushare_proxy_daily_basic_cross_source_conflict",
-                "row_count": int(valuation_cross_metrics.get("value_conflict_count", len(valuation_cross_conflicts))),
-                "sample": valuation_cross_conflicts[:20],
-            }
-        )
-    if status_cross_conflicts:
-        quarantine_summary.append(
-            {
-                "domain": DOMAIN_SECURITY_STATUS_DAILY,
-                "resolution_status": "unresolved",
-                "reason": "tushare_proxy_suspend_cross_source_conflict",
-                "row_count": len(status_cross_conflicts),
-                "sample": status_cross_conflicts[:20],
             }
         )
     if not factor_unresolved.empty:
@@ -1856,13 +2437,25 @@ def build_candidate(
         "contract": QDP_V3_CONTRACT_VERSION,
         "start_date": str(start_date),
         "end_date": effective_end,
+        "requested_end_date": effective_end,
+        "bootstrap_cutoff": BOOTSTRAP_CUTOFF,
+        "daily_source_composition": daily_source_composition,
         "raw_scope": "all_a",
         "strict_research_view": "shanghai_shenzhen_mainboard",
-        "factor_dual_path_required": bool(require_factor_dual_path),
+        "factor_policy": "trusted_tushare_normalized_then_baostock_ratio_continuation",
+        "cross_source_validation": False,
     }
     intraday_5m_watermark = str(
         dict(intraday_info.get("coverage", {}) or {}).get("watermark", "") or ""
     )
+    watermark_findings, required_watermark = _watermark_contract_findings(
+        calendar=calendar,
+        snapshot_dates=snapshot_dates,
+        intraday_watermark=intraday_5m_watermark,
+        requested_end_date=effective_end,
+    )
+    blockers.extend(watermark_findings)
+    build_contract["required_watermark"] = required_watermark
     candidate = write_candidate(
         datasets=dataset_ids,
         dataset_manifest_sha256=dataset_shas,
@@ -1879,6 +2472,8 @@ def build_candidate(
             "intraday_5m": dict(intraday_info.get("coverage", {}) or {}),
             "market_daily_watermark": max(snapshot_dates),
             "market_intraday_5m_watermark": intraday_5m_watermark,
+            "requested_end_date": effective_end,
+            "required_watermark": required_watermark,
         },
         build=build_contract,
         raw_partitions=[ref.to_dict(root=paths.root) for ref in raw_refs],

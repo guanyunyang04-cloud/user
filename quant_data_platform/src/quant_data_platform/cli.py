@@ -21,6 +21,7 @@ QDP manifest-first data-base CLI.
 
 v3 commands:
   ingest                         Fetch immutable provider partitions.
+  compact                        Bundle verified raw partitions into large Parquet files.
   build candidate               Build canonical datasets and a candidate.
   audit --candidate ID          Run quick/full/semantic release gates.
   diff --candidate ID           Compare a candidate with active.
@@ -103,6 +104,7 @@ ARCHIVED_ALIASES = {
 
 V3_ONLY_PREFIXES = {
     ("ingest",),
+    ("compact",),
     ("build", "candidate"),
     ("audit",),
     ("diff",),
@@ -177,7 +179,7 @@ def _dispatch(raw_argv: list[str]) -> int:
         result = _run_qdp_v3(positional, workspace)
         if result is not None:
             return int(result)
-    else:
+    elif generation == "v2":
         result = _run_qdp_v2(positional, workspace)
         if result is not None:
             return int(result)
@@ -232,9 +234,10 @@ def _run_qdp_v3(positional: list[str], workspace: str) -> int | None:
 
 
 def _default_read_generation(workspace: str) -> str:
-    from quant_data_platform.qdp_v3.paths import qdp_v3_paths
+    from quant_data_platform.qdp_v3.release import validate_published_active
 
-    return "v3" if qdp_v3_paths(workspace or None).active_manifest.exists() else "v2"
+    validation = validate_published_active(workspace or None)
+    return "v3" if validation["valid"] else "v2"
 
 
 def _archived_command(raw_argv: list[str]) -> str:

@@ -1,14 +1,15 @@
 # Quant Data Platform 身份对象
-快照日期：`2026-07-14`
+快照日期：`2026-07-15`
 
 ## object `quant_data_platform_project`
 `type`: shared_manifest_first_data_base_brain
-`definition`: 主脑管辖下的共享量化数据基底分脑，负责受保护的 QDP v2 active 与 identity-first、5m-only 的 QDP v3 重建/发布面、provider ingest、数据校验、可重建缓存和数据清理。
+`definition`: 主脑管辖下的共享量化数据基底分脑，负责受保护的 QDP v2 active 与 trusted-source、identity-first、5m-only、compact-storage 的 QDP v3 重建/发布面、provider ingest、数据校验和数据清理。
 `not`: 旧 v1 工作流平台、下游训练产物注册中心、某个研究项目的私有数据湖。
 `north_star`: 建立简单、准确、可审计、可更新的本地数据基底。
 `truth_source`: `parquet + dataset.json + active.json`。
 `consumers`: `daily_research`、`traditional_quant_research`、`t0_project` and future research projects.
-`public_methods`: `status()`；`list()`；`describe(table)`；`check(mode)`；`rebuild(target)`；`gc()`；`update()`。
+`public_methods`: `status()`；`list()`；`describe(table)`；`check(target, mode)`；`update()`；`gc()`。
+`admin_methods`: `ingest()`；`compact()`；`build_candidate()`；`audit()`；`diff()`；`publish()`；`rollback()`；`retire_v2_intraday()`。
 
 ## object `qdp_v2_active_data_base`
 `type`: protected_data_object
@@ -21,8 +22,15 @@
 
 ## object `provider_ingest_surface`
 `type`: upstream_source_surface
-`current_route`: Tushare-compatible proxy 仅负责 `2010-01-01..2026-07-13` 历史启动；`mootdx` 负责截止日后的优先 5m；`BaoStock` 负责长期日线/状态/因子事件及完整 5m fallback；交易所/CNInfo 只作身份、公司行动与披露仲裁。v3 不存在 1m provider route。
+`current_route`: Tushare-compatible proxy 独占 `2010-01-01..2026-07-13` 历史启动；截止日后 `BaoStock` 负责日线/状态/因子事件，`mootdx` 负责优先 5m，`BaoStock` 只在 mootdx 股票日不完整时提供完整日 fallback。历史生产 DAG 不做跨源逐行验证，v3 不存在 1m provider route。
 `consumer_boundary`: research projects consume QDP outputs or explicit downstream packs, not direct online provider calls.
+
+## object `qdp_v3_storage_surface`
+`type`: compact_raw_and_runtime_split
+`data_root`: `H:\quant_project\quant_data_platform\data`
+`runtime_root`: `C:\Users\ASUS\AppData\Local\QDP\runtime`
+`definition`: H 只长期保存 canonical、manifest 和大 Parquet bundle；reference raw 使用 undated x 1，低频时序 raw 使用 year x 1，只有 5m raw 使用 year x 16 security buckets。C 保存 SQLite、job、cursor、heartbeat 和页级 staging。发布 manifest 使用导出的 raw index/receipt Parquet 及 SHA256，不依赖 C 盘数据库。
+`disk_boundary`: H 已于 2026-07-15 修复并通过健康闸门；用户取消 F 盘备份，当前流程没有 F 盘复制或 fallback。
 
 ## object `downstream_research_artifacts`
 `type`: non_active_data_base_artifact

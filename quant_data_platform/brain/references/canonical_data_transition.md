@@ -1,6 +1,6 @@
 # Canonical Data
 
-> 状态（2026-07-14）：本文记录的是 v1/v2 过渡历史，不再定义当前生产合同。当前 QDP v3 合同为 `qdp_v3_20260714_bootstrap_5m`：正式数据从 2010 起，5m 是唯一分钟 canonical 事实域，v3 不采集或保留 1m；当前唯一 active 仍是 v2，直到 v3 发布及发布后校验完成。
+> 状态（2026-07-15）：本文记录的是 v1/v2 过渡历史，不再定义当前生产合同。当前 QDP v3 合同为 `qdp_v3_20260715_trusted_source_5m` / schema `3.3.0` / manifest `4`：正式数据从 2010 起，5m 是唯一分钟 canonical 事实域，v3 不采集或保留 1m；当前唯一 active 仍是 v2。首次 v3 发布后还要完成一次 cutoff 后增量发布，才能受保护地退休 v2 分钟链。
 
 这里是工作区级 canonical 数据基底的过渡入口和兼容指针，不直接承载大体量 parquet / memmap 正文。
 
@@ -18,14 +18,13 @@
 - 原始 OHLCV 不被复权价覆盖；复权价、复权收益、分钟聚合特征都作为派生 sidecar。
 - BaoStock 仍可用于 PIT 状态、交易日历、上市/停牌/ST、估值、行业、指数成分等基础口径和日常更新。
 - TDX/tqcenter 可作为快速外部日线源，入湖后必须写明来源、复权状态、`fill_data` 和成交额单位转换。
-- 2010-01-01 至 2026-07-13 的 5 分钟历史由 Tushare-compatible proxy 直接回灌并逐股票日做结构、日线、身份和来源审计，不复用 1m 聚合物作为 v3 canonical。
-- 截止日后完整 mootdx 5m 优先，完整 BaoStock 5m fallback；两个完整来源冲突时隔离，不完整来源禁止拼接。
-- 1 分钟只存在于发布前受保护的 v2 legacy active；v3 不采集、构建、发布或更新 1m。v3 发布、全量校验和下游切换通过后，旧 1m 会按 retirement manifest 物理退休，不作为 cold archive 保留。
-- canonical 数据基底纳入日线、5 分钟日级特征、复权因子、估值、行业、指数成分和交易过滤域；训练 profile 再决定是否使用这些字段。
+- 2010-01-01 至 2026-07-13 的 5 分钟历史由 Tushare-compatible proxy 独占回灌，逐股票日做结构、同源日线聚合、身份和完整性审计，不复用 1m 聚合物，也不启动历史跨源逐行验证。
+- 截止日后完整 mootdx 5m 优先，只有 mootdx 不完整才用完整 BaoStock 5m fallback；不完整来源禁止拼接或插值。
+- 1 分钟只存在于受保护的 v2 legacy active；v3 不采集、构建、发布或更新 1m。v3 首次发布后还要完成一次 cutoff 后增量发布，并通过全量校验和下游切换，旧 1m 才会按 retirement manifest 物理退休，不作为 cold archive 保留。
+- v3 首次发布只纳入 calendar、identity/symbol history、daily/status、adjust factor daily、PIT signal/open 与 5m 九域；估值、行业、指数、财务、分红和股本为后续 enrichment，不阻塞首发。
 - 默认短线核心 profile 只纳入日线、5 分钟日级特征、复权收益派生等价格/量价相关信息。
 - 5 分钟日级特征默认包含开盘/尾盘收益与成交额占比、高低点出现时间、先高后低、日内回撤/上冲、VWAP 位置和斜率、上午/下午差异、量能集中度、午间跳变和收盘压力。
-- `valuation`、`industry_concept`、`index_constituents` 进入 canonical 数据基底；短线核心 profile 默认不用，结构风格或中线 profile 可显式启用。
-- `financial_quarterly`、`performance_forecast`、`performance_express` 是 v3 首次 release 的次级域；只按 `ann_date/f_ann_date` 的下一交易日可见并保留修订版本，未知发布日期不反填。
+- `valuation`、`industry_concept`、`index_constituents`、`financial_quarterly`、`performance_forecast` 和 `performance_express` 不属于 v3 首次 release gate；未来接入时仍必须满足 PIT available-time 语义。
 - `trading_calendar`、`universe_snapshot`、`security_status` 只作为交易可用性和风险过滤，不作为触发信号。
 - 共享 memmap 建成后由 registry 解析；实验只生成轻量 sample index 和 normalization manifest。当前 16GB 机器不安全执行全 A、256 特征、长窗口单进程全量 memmap，已加低内存保护；已先建立 capped validation memmap，下一步是分片 canonical feature/label store。
 - 旧 bundle、旧 parquet、旧 `.dat` 清理必须先有 dry-run、替代指针和随机一致性验证。

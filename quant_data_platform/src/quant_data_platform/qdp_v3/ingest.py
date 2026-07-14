@@ -188,7 +188,7 @@ def ingest_trading_calendar(
     existing = iter_raw_partitions(RAW_TRADING_CALENDAR, workspace_root=workspace_root)
     for ref in existing:
         if ref.partition_value == partition_value and not refresh:
-            return pd.read_parquet(ref.payload_path, engine="pyarrow"), ref
+            return read_raw_partition(ref), ref
     if not refresh:
         covering: list[tuple[int, RawPartitionRef]] = []
         for ref in existing:

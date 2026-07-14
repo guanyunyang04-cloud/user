@@ -1,6 +1,6 @@
 # Quant Data Platform 知识对象
 
-快照日期：`2026-07-14`
+快照日期：`2026-07-15`
 
 ## Object Classes
 
@@ -13,7 +13,7 @@
 
 ### class `raw_fact_table`
 
-`examples`: v3 `market_daily_raw`、`market_intraday_5m`、PIT status/state tables、valuation、adjust_factor、event facts；v2 `market_intraday_1m` 只是发布前受保护的旧 active 事实。
+`examples`: v3 首发核心中的 `market_daily_raw`、`market_intraday_5m`、`security_status_daily`、`adjust_factor_daily` 与 PIT identity/state；valuation、event、financial 等为非阻塞 enrichment；v2 `market_intraday_1m` 只是退休前受保护的旧 active 事实。
 `invariant`: 不用研究矩形填充或派生特征替代原始事实。
 
 ### class `cache_or_derived_table`
@@ -30,13 +30,13 @@
 
 `definition`: QDP v2 active `adjust_factor` is a daily dense factor table aligned exactly to `market_daily_raw` keys.
 `semantics`: 旧表只证明 `adjust_factor` 等于正 `back_adjust_factor` 且键覆盖完整；它没有证明公司行动语义，现有值可在非事件日逐日跟随价格跳变。
-`invariant`: 旧表和依赖它的调整收益只可作 provisional 历史证据；v3 必须从已核验事件正向构造日因子，并通过非事件日稳定、事件比率、除权参考价一 tick 与 2010 baseline 证明。
+`invariant`: 旧表和依赖它的调整收益只可作 provisional 历史证据；v3 以指定单源合同重建：每证券首个 2010+ Tushare 值归一为 1 并保留相邻比率，cutoff 后把 BaoStock 新事件比率续接到已有序列。因子必须有限正值，已知例外通过显式 correction 修正；不再要求跨源或 pre-2010 官方 baseline 证明。
 
 ### class `qdp_v3_identity_first_data_base`
 
-`definition`: 以稳定 `security_id`、PIT `symbol_history`、不可变日期 raw 分区和递归 manifest lineage 为核心的下一代数据基底。
+`definition`: 合同 `qdp_v3_20260715_trusted_source_5m`（schema `3.3.0`、manifest `4`）以稳定 `security_id`、PIT `symbol_history`、可信单源 raw、紧凑 bundle 和递归 manifest lineage 为核心。
 `primary_keys`: 日线/状态/估值/因子为 `security_id + trade_date`；5m 为 `security_id + trade_date + bar_end`；provider code 永久保留为 `provider_symbol` 而不是历史身份。
-`identity_rule`: 只有官方公告或可靠代码变更记录才能合并两个 symbol；相同 IPO 日期、相似名称或 provider 返回相同行情都不能自动合并。
+`identity_rule`: provider symbol 不可自动成为长期身份；代码合并和已知例外必须出现在经版本控制、区间无冲突且 old value 可复核的 `configs/qdp_v3_corrections.json`。官方公告可作为 reason/evidence，但文档 hash 不再是发布前置。
 `fixed_regression`: 中航电测/中航成飞、深赤湾A/招商港口、中航善达/招商积余分别使用稳定 security id；历史当前代码重述必须恢复为当日真实代码。security master 中新代码继承的原上市日不能替代官方 symbol 生效区间。
 
 ### class `baostock_date_partition_protocol`
@@ -48,34 +48,45 @@
 `factor_aliases`: 只显式接受 `adjustFacto`、`adjustFactor`、`adjust_factor`，不按模糊位置映射。
 `runtime_rule`: 日期回灌复用一个隔离子进程中的单一 BaoStock login；同日日线与 `query_all_stock` 原子获取。`max_workers=2` 只预取两个日期，本地处理可流水化，但网络 session 和同时在途请求始终为 1。
 `rejected_route`: 不允许以历史低错误率自动开启第二个 BaoStock login；live 双 session 探针已证明登录状态会互相失效。速度来自消除逐日登录、覆盖日历复用和 O(N²) 扫描，而不是放宽质量闸门。
+`production_role`: 已保存的 2010—2012 date-partition raw 作为 legacy 证据紧凑归档，但不进入 trusted historical canonical；生产路由只在 `2026-07-13` 后维护日线、状态、因子事件和 mootdx 不完整时的完整 5m 股票日。
 
 ### class `qdp_v3_factor_event_model`
 
-`definition`: `adjust_factor_event` 与 `adjust_factor_daily` 分离；batch date-events 与 legacy symbol-history 首次重建必须做事件键和值的双路径全集比较。
-`arbitration`: 只在 mootdx xdxr 与带官方文档 hash 的公告证据能唯一解释冲突时接受 disputed 事件；单源 xdxr、单源 BaoStock 或无历史 baseline 都不得自动进入 strict。
+`definition`: 首次发布只要求 `adjust_factor_daily`；历史以 Tushare `adj_factor` 的证券内相邻比率为准，首个 2010+ 值归一为 1。cutoff 后只接入 BaoStock 新事件比率，避免重复乘入历史变化。
+`correction_rule`: `600076` 等已知例外通过 `configs/qdp_v3_corrections.json` 在 normalize 后、canonical 写入前显式修正；raw 永不改写。correction 重复、区间冲突或 old value 不匹配时阻断构建。
+`non_requirements`: 首次发布不要求 `adjust_factor_event`、双路径全集一致、xdxr/dividend/官方公告仲裁、pre-2010 baseline 或除权参考价一 tick 证明。
 `execution_boundary`: 执行价始终使用 raw；复权只用于通过语义闸门后的收益和特征。
 
 ### class `qdp_v3_intraday_5m`
 
-`definition`: v3 唯一分钟事实域；标准右闭合 48 根 bar，主键 `security_id + trade_date + bar_end`，按自然年和稳定 64 个 security bucket 分片。v3 不存在 1m raw、watermark、转换或发布门。
-`historical_source`: `2010-01-01..2026-07-13` 由 Tushare-compatible proxy 的完整 5m 候选与日线聚合对账；proxy provenance 不透明，因此不是官方真值源。`vol/amount` 已证明为股/元，scale 为 1.0。
-`incremental_source`: 截止日后完整 mootdx 优先，完整 BaoStock fallback；任一来源不完整时禁止拼接，两个完整来源超阈值冲突时 quarantine。
-`tiers`: 不再以 2020 作固定质量边界。任何年份都由 48-bar 结构、日线量价、身份和来源证据决定 strict/provisional/quarantine；旧 TDX 单源只可作 provisional/audit 证据。
+`definition`: v3 唯一分钟事实域；标准右闭合 48 根 bar，主键 `security_id + trade_date + bar_end`，canonical 按自然年和稳定 64 个 security bucket 分片。v3 不存在 1m raw、watermark、转换或发布门。
+`historical_source`: `2010-01-01..2026-07-13` 独占使用 Tushare-compatible proxy；同源 Tushare 日线聚合只检测分页、单位和缺 bar，不调用 BaoStock/mootdx 逐行证明数值。proxy provenance 不透明但被合同指定为可信历史启动源；`vol/amount` canonical scale 均为 1.0。
+`incremental_source`: 截止日后完整 mootdx 优先；只有 mootdx 股票日不完整才使用完整 BaoStock。任一来源不完整时禁止拼接或插值，不为数值仲裁同时下载两源。
+`tiers`: 新生产数据只有 strict/quarantined；结构、identity 或完整性不合格进入 quarantine，旧 provisional 仅为 legacy 可读证据。
 `download_rule`: proxy 每证券按时间倒序最多 8,000 行串行翻页并页级断点恢复，证券完成后合并成一个 immutable raw；mootdx 最近窗口从 `start=0, offset=800` 开始，目标日期齐全即停止；BaoStock 只接管完整日，禁止跨源拼接。
-`release_gate`: 2010 年以来 PIT 有效主板交易股票日 strict 覆盖至少 99.95%，每个预期股票日必须被解释；5m watermark 必须与日线 watermark 完全相等。
+`release_gate`: 2010 年以来 PIT 有效主板交易股票日 strict 覆盖低于 98% 阻断，98%—99% 允许发布并告警，至少 99% 为正常；每个预期股票日必须被解释，5m watermark 必须与日线 watermark 完全相等。
 
 ### class `tushare_proxy_historical_bootstrap`
 
-`role`: 限时、一次性的历史启动源，不使用 Tushare SDK，不承担截止日后的持续更新，也不被称为官方真值源。
+`role`: 合同指定的可信、限时、一次性历史启动源，不使用 Tushare SDK，不承担截止日后的持续更新，也不宣称上游官方 provenance。
 `secret_boundary`: Token 只从 `QDP_TUSHARE_PROXY_TOKEN` 读取；日志、异常、job、receipt、manifest 和 MCP URL 均不得保存明文 Token，只可保存 SHA-256 指纹与公开账户元数据。
-`transport`: 每 worker 独立 HTTP session，共享进程级限速器、最多 3 个在途请求和 429 冷却；8,000 行满页必须继续，非零 code、字段宽度、gzip/JSON 或页间顺序错误不得解释为空数据。
+`transport`: 三个 worker 各自使用 HTTP session，但共享单一 `96 rpm / burst 1` 限速器、quota 状态和 429 冷却；8,000 行满页必须继续，非零 code、字段宽度、gzip/JSON 或页间顺序错误不得解释为空数据。
 `resume`: 页级 staging/cursor；额度耗尽为 `paused_quota`，断网、续期或进程终止后从同一 job 恢复。
 
 ### class `qdp_v3_provider_transport`
 
 `baostock_rule`: 日期批量与 symbol-range 是两种独立持久会话协议；生产 QDP v3 长任务复用一个隔离子进程中的单 login，逐 symbol 错误可单独重试，成功 symbol 不重复请求。通用 provider 默认仍保留旧隔离调用合同，只有显式启用的 v3 任务复用 symbol-range session。
 `mootdx_rule`: TCP 可连接不等于 TDX 协议可用；节点选择必须同时通过小样本 bars 协议探针。首轮可并行探测候选，已失败节点排除；全源失败须负缓存并快速返回，让单源 fallback 接管，不能为每只证券重复等待全部坏节点。
-`financial_rule`: 只对完整财务季报按证券上市/退市生命周期裁剪查询；上市前保留足够季度用于初始 TTM/PIT 证明。业绩预告和快报可能发生在常规季度边界之外，不得套用同一裁剪。
+`scope_rule`: 历史下载优先 5m，额度耗尽后只补核心 `status/factor`；daily_basic、valuation、dividend、financial、industry、index 和 share-capital 不阻塞首次发布。
+
+### class `qdp_v3_compact_raw_storage`
+
+`data_root`: `H:\quant_project\quant_data_platform\data`
+`runtime_root`: `C:\Users\ASUS\AppData\Local\QDP\runtime`
+`layout`: reference raw 固定 `year=undated/security_bucket=00`，低频时序 raw 按 `year=<year>/security_bucket=00`，只有 5m raw 按 `year=<year>/security_bucket=<00..15>`；均使用 zstd、目标约 384 MiB、最大 1 GiB。canonical 5m 仍使用稳定 64 buckets，与 5m raw 的 16-bucket layout 是两个独立合同。
+`index`: SQLite WAL 保存 job/cursor/page/receipt/bundle row-group 映射；发布前导出 `raw_index.parquet` 与 `raw_receipts.parquet` 及 SHA256 sidecar，因此 active 不依赖 C 盘运行数据库。
+`compaction_gate`: 逐源 content hash、row count、schema、bundle hash 和 row-group index 全部验证后，`compact --delete-source --yes` 才能删除对应 legacy 小文件；成功空响应只写 receipt/index。
+`disk_state`: H 为 exFAT 1 MiB allocation unit，2026-07-15 已完成 `chkdsk H: /f`，dirty bit=false、health=Healthy、operational=OK、bad sectors=0。用户取消 F 盘备份，F 不属于当前恢复或 fallback 路径。
 
 ### class `industry_concept_complete`
 
@@ -93,13 +104,13 @@
 ### class `mootdx_online`
 
 `domain`: fast recent daily/5m market bars and quote-like market data；v3 不使用 mootdx 1m。
-`production_role`: 2026-07-13 后完整 5m 的优先更新源；BaoStock 是完整日 fallback/audit。
+`production_role`: 2026-07-13 后完整 5m 的优先更新源；只有 mootdx 股票日不完整时才使用 BaoStock 完整日 fallback，不做常态跨源数值审计。
 `current_health_boundary`: 节点候选来自持久化 last-good、tdxpy 与 mootdx 内置列表的去重并集；TCP 只排序，真实 `frequency=0` 的 48 bars/15:00 才证明健康。2026-07-14 固定三证券验证通过，冷启动约 9.69 秒、last-good 热启动约 0.08 秒，缓存最快 3 个健康节点；全源失败才负缓存 300 秒。
 
 ### class `baostock_online`
 
 `domain`: trading calendar, universe/listing status, security status, industry labels, index constituents, turnover/valuation and structural daily fields.
-`bar_role`: v2 中主要作 audit/backfill；v3 中承担批量日线、状态、估值、日历、因子事件、财务和 5m 历史回补。
+`bar_role`: v2 中主要作 audit/backfill；v3 只在 cutoff 后承担日线、状态、因子事件与 mootdx 不完整时的完整 5m fallback。历史 BaoStock raw 可紧凑归档，但不进入 Tushare 独占的 historical canonical。
 
 ### class `cninfo_online`
 
@@ -113,14 +124,14 @@
 - DuckDB/catalog 类索引可以是工具，但不能成为本地数据基底唯一事实源。
 - 旧迁移、修复、兼容命令不应留在日常 CLI；保留到 archive/reference 即可。
 - 质量证明字段如 schema hash 和 audit path 应保留在 manifest，但默认 `describe` 应显示人读摘要。
-- 对复权因子不能把原始多来源 factor pool 直接当 active 真相；active 必须是标准化后的一键一行事实表。
+- 对复权因子不能把 provider 绝对尺度直接当跨证券可比真相；active 必须按证券归一、保留相邻比率并形成一键一行事实表。
 - PIT/meta 域的质量证明应写进 manifest：主键唯一、交易日覆盖、scope 过滤、跨域 key 对齐和显式 unknown/default 标记。
 - Scope filtering must not inherit stale nested audit blocks from source manifests; transformed datasets need fresh proof or clearly marked inherited proof.
 - provider 的当前证券代码会重述历史；任何以 symbol 直接作为长期主键的设计都不能证明历史身份正确。
 - 对有状态公共 provider，更多 login 不等于更高吞吐；先复用单 session、合并同日请求并流水化本地处理，同时用 OS job lock 防止重复进程浪费带宽和覆盖进度。
 - 对从当前向历史分页的 provider，任务分区不能直接等同网络请求分区；应按 provider 的最低重复工作量请求大区间，再在 raw 层切成可恢复的小分区。
 - provider 节点健康必须验证实际协议查询；纯 TCP 探活只适合候选排序，不能作为生产可用证明。
-- 因子键覆盖、正值、来源字段齐全与 daily 对齐都只是结构证明，不等价于因子语义正确。
+- 可信单源减少的是跨源仲裁，不是 schema、单位、identity、PIT、分页、完整性和 correction 约束；这些转换错误仍会直接污染研究。
 - 当前 active 可读不等于 lineage 完整；GC 必须递归保护 active/candidate/pin/rollback/audit 的全部 inputs，而不能只保留 active 叶子。
 
 ## Pure Functions
