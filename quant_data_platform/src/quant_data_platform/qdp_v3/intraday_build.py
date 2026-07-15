@@ -14,6 +14,7 @@ from quant_data_platform.qdp_v3.constants import (
     QUALITY_STRICT,
     RAW_EXTERNAL_QUANT_INTRADAY_5M,
     RAW_INTRADAY_5M_SELECTED,
+    RAW_LEGACY_V2_INTRADAY_5M,
     RAW_TUSHARE_PROXY_INTRADAY_5M,
 )
 from quant_data_platform.qdp_v3.datasets import write_partitioned_dataset
@@ -388,8 +389,15 @@ def _validate_source_day(
     trade_date: str,
     registry: Any,
     daily: dict[str, Any] | None,
+    require_daily_proof: bool = False,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    """Validate one provider's whole stock-day without borrowing any bars."""
+    """Validate one provider's whole stock-day without borrowing any bars.
+
+    Daily reconciliation is a hard gate only when the minute and daily facts
+    come from the same trusted provider.  For the direct archive, migrated v2,
+    and free providers, the current daily fact is cross-source evidence: it is
+    useful for diagnostics, but must not reject an otherwise complete day.
+    """
 
     chosen, identity_reason = _choose_provider_day(
         frame,
@@ -411,14 +419,14 @@ def _validate_source_day(
             "row_count": int(len(chosen)),
         }
     daily_result = reconcile_5m_with_daily(chosen, daily)
-    if daily_result.get("conflict"):
+    if require_daily_proof and daily_result.get("conflict"):
         return chosen.iloc[0:0], {
             "source": source,
             "valid": False,
             "reason": f"{source}_5m_daily_conflict",
             "evidence": daily_result,
         }
-    if not daily_result.get("comparable"):
+    if require_daily_proof and not daily_result.get("comparable"):
         return chosen.iloc[0:0], {
             "source": source,
             "valid": False,
@@ -430,6 +438,9 @@ def _validate_source_day(
         "valid": True,
         "reason": identity_reason,
         "evidence": daily_result,
+        "daily_reconciliation_role": (
+            "same_source_gate" if require_daily_proof else "cross_source_diagnostic_only"
+        ),
     }
 
 
@@ -437,6 +448,7 @@ def _select_historical_source_day(
     *,
     local_day: pd.DataFrame,
     proxy_day: pd.DataFrame,
+    legacy_day: pd.DataFrame | None = None,
     free_day: pd.DataFrame | None = None,
     security_id: str,
     trade_date: str,
@@ -446,9 +458,10 @@ def _select_historical_source_day(
     """Select exactly one complete source for a historical stock-day.
 
     The local direct-5m archive is authoritative when its *whole* day passes
-    structure and same-source daily reconciliation.  A complete selected
-    mootdx/BaoStock day is the next residual source; Tushare is consulted last.
-    Rows from different providers are never concatenated or bar-spliced.
+    structural and identity checks. A migrated legacy-v2 day is considered
+    next, followed by a complete selected mootdx/BaoStock day and, finally,
+    Tushare. Cross-source daily differences are diagnostic only. Rows from
+    different sources are never concatenated or bar-spliced.
     """
 
     local, local_result = _validate_source_day(
@@ -462,9 +475,29 @@ def _select_historical_source_day(
     if bool(local_result.get("valid")):
         selected = local.copy()
         selected["quality_tier"] = QUALITY_STRICT
-        reason = "external_quant_archive_complete_and_daily_consistent"
+        reason = "external_quant_archive_complete_structurally_valid"
         selected["source_selection_reason"] = reason
         return selected, reason, {"selected_source": "external_quant_archive", "local": local_result}
+
+    materialized_legacy = legacy_day if isinstance(legacy_day, pd.DataFrame) else pd.DataFrame()
+    legacy, legacy_result = _validate_source_day(
+        materialized_legacy,
+        source="legacy_v2_5m_migrated",
+        security_id=security_id,
+        trade_date=trade_date,
+        registry=registry,
+        daily=daily,
+    )
+    if bool(legacy_result.get("valid")):
+        selected = legacy.copy()
+        selected["quality_tier"] = QUALITY_STRICT
+        reason = "legacy_v2_5m_migrated_complete_structurally_valid"
+        selected["source_selection_reason"] = reason
+        return selected, reason, {
+            "selected_source": "legacy_v2_5m_migrated",
+            "local": local_result,
+            "legacy": legacy_result,
+        }
 
     materialized_free = free_day if isinstance(free_day, pd.DataFrame) else pd.DataFrame()
     free, free_result = _validate_source_day(
@@ -488,11 +521,12 @@ def _select_historical_source_day(
                 set(selected.get("source", pd.Series(dtype=str)).dropna().astype(str))
             )
             selected_source = selected_sources[0] if len(selected_sources) == 1 else "selected_free_5m"
-            reason = f"{selected_source}_complete_free_residual_and_daily_consistent"
+            reason = f"{selected_source}_complete_free_residual_structurally_valid"
             selected["source_selection_reason"] = reason
             return selected, reason, {
                 "selected_source": selected_source,
                 "local": local_result,
+                "legacy": legacy_result,
                 "free": free_result,
             }
         free_result = {
@@ -509,6 +543,7 @@ def _select_historical_source_day(
         trade_date=trade_date,
         registry=registry,
         daily=daily,
+        require_daily_proof=True,
     )
     if bool(proxy_result.get("valid")):
         selected = proxy.copy()
@@ -518,6 +553,7 @@ def _select_historical_source_day(
         return selected, reason, {
             "selected_source": "tushare_proxy",
             "local": local_result,
+            "legacy": legacy_result,
             "free": free_result,
             "proxy": proxy_result,
         }
@@ -525,6 +561,7 @@ def _select_historical_source_day(
     return local.iloc[0:0], "historical_5m_all_sources_rejected", {
         "selected_source": "",
         "local": local_result,
+        "legacy": legacy_result,
         "free": free_result,
         "proxy": proxy_result,
     }
@@ -682,6 +719,7 @@ def build_proxy_intraday_dataset(
     staging_root: Path,
 ) -> tuple[Any | None, list[RawPartitionRef], dict[str, Any]]:
     local_refs = iter_raw_partitions(RAW_EXTERNAL_QUANT_INTRADAY_5M, workspace_root=workspace_root)
+    legacy_refs = iter_raw_partitions(RAW_LEGACY_V2_INTRADAY_5M, workspace_root=workspace_root)
     proxy_refs = iter_raw_partitions(RAW_TUSHARE_PROXY_INTRADAY_5M, workspace_root=workspace_root)
     cutoff_payload = read_json(paths.metadata / "tushare_proxy_bootstrap_cutoff.json")
     bootstrap_cutoff = str(cutoff_payload.get("bootstrap_cutoff", "") or "")[:10]
@@ -689,12 +727,12 @@ def build_proxy_intraday_dataset(
     selected_upstream_refs, selected_upstream_hashes, unresolved_selected_inputs = (
         _selected_upstream_lineage(selected_refs, workspace_root=workspace_root)
     )
-    all_source_refs = [*local_refs, *proxy_refs, *selected_refs]
-    if not local_refs and not proxy_refs and not selected_refs:
+    all_source_refs = [*local_refs, *legacy_refs, *proxy_refs, *selected_refs]
+    if not local_refs and not legacy_refs and not proxy_refs and not selected_refs:
         finding = QualityFinding(
             code="strict_5m_raw_missing",
             severity="blocker",
-            message="No completed local-archive or Tushare-residual 5m raw security histories exist.",
+            message="No completed local-archive, migrated-v2, free-source, or Tushare-residual 5m raw security histories exist.",
             domain=DOMAIN_MARKET_INTRADAY_5M,
         )
         return None, all_source_refs, {
@@ -706,6 +744,7 @@ def build_proxy_intraday_dataset(
         }
 
     local_groups, local_unmapped = _raw_groups(local_refs, registry=registry)
+    legacy_groups, legacy_unmapped = _raw_groups(legacy_refs, registry=registry)
     proxy_groups, proxy_unmapped = _raw_groups(proxy_refs, registry=registry)
     # Proxy histories enter candidate lineage only when they are actually
     # selected or needed to explain a rejected residual. Histories duplicated
@@ -745,6 +784,7 @@ def build_proxy_intraday_dataset(
     strict_stock_days = 0
     historical_selected_source_stock_days: dict[str, int] = {
         "external_quant_archive": 0,
+        "legacy_v2_5m_migrated": 0,
         "tushare_proxy": 0,
     }
 
@@ -756,7 +796,7 @@ def build_proxy_intraday_dataset(
 
     try:
         historical_security_ids = sorted(
-            set(local_groups) | set(proxy_groups) | set(selected_by_security)
+            set(local_groups) | set(legacy_groups) | set(proxy_groups) | set(selected_by_security)
         )
         for security_id in historical_security_ids:
             local = _load_source_5m(
@@ -771,24 +811,33 @@ def build_proxy_intraday_dataset(
                 end_date=end_date,
                 source="tushare_proxy",
             )
+            legacy = _load_source_5m(
+                legacy_groups.get(security_id, []),
+                start_date=start_date,
+                end_date=end_date,
+                source="legacy_v2_5m_migrated",
+            )
             free = selected_by_security.get(security_id, pd.DataFrame()).copy()
-            if local.empty and proxy.empty and free.empty:
+            if local.empty and legacy.empty and proxy.empty and free.empty:
                 continue
             daily_by_date = _daily_reference_for_security(connection, security_id)
             canonical_years: dict[str, list[pd.DataFrame]] = {}
             explained_keys: list[tuple[str, str]] = []
             strict_keys: list[tuple[str, str]] = []
             local_dates = set(local["trade_date"].astype(str)) if not local.empty else set()
+            legacy_dates = set(legacy["trade_date"].astype(str)) if not legacy.empty else set()
             proxy_dates = set(proxy["trade_date"].astype(str)) if not proxy.empty else set()
             free_dates = set(free["trade_date"].astype(str)) if not free.empty else set()
-            for trade_date in sorted(local_dates | proxy_dates | free_dates):
+            for trade_date in sorted(local_dates | legacy_dates | proxy_dates | free_dates):
                 trade_date = str(trade_date)
                 explained_keys.append((security_id, trade_date))
                 local_day = local.loc[local["trade_date"].astype(str).eq(trade_date)].copy()
+                legacy_day = legacy.loc[legacy["trade_date"].astype(str).eq(trade_date)].copy()
                 proxy_day = proxy.loc[proxy["trade_date"].astype(str).eq(trade_date)].copy()
                 free_day = free.loc[free["trade_date"].astype(str).eq(trade_date)].copy()
                 chosen, selection_reason, source_evidence = _select_historical_source_day(
                     local_day=local_day,
+                    legacy_day=legacy_day,
                     proxy_day=proxy_day,
                     free_day=free_day,
                     security_id=security_id,
@@ -866,7 +915,7 @@ def build_proxy_intraday_dataset(
             deduped_proxy_refs.append(ref)
     all_refs: list[RawPartitionRef] = []
     seen_all_refs: set[tuple[str, str, str, str]] = set()
-    for ref in [*local_refs, *deduped_proxy_refs, *selected_refs, *selected_upstream_refs]:
+    for ref in [*local_refs, *legacy_refs, *deduped_proxy_refs, *selected_refs, *selected_upstream_refs]:
         key = (ref.raw_domain, ref.partition_field, ref.partition_value, ref.content_sha256)
         if key not in seen_all_refs:
             seen_all_refs.add(key)
@@ -881,13 +930,14 @@ def build_proxy_intraday_dataset(
         "strict_stock_day_count": strict_stock_days,
         "historical_selected_source_stock_days": historical_selected_source_stock_days,
         "external_quant_archive_raw_partition_count": len(local_refs),
+        "legacy_v2_migrated_raw_partition_count": len(legacy_refs),
         "tushare_proxy_residual_raw_partition_count": len(deduped_proxy_refs),
         "tushare_proxy_duplicate_raw_partition_excluded_count": len(proxy_refs) - len(deduped_proxy_refs),
         "provisional_stock_day_count": 0,
         "canonical_year_bucket_shard_count": len({(year, bucket) for year, bucket, _ in staged}),
     }
     findings: list[QualityFinding] = []
-    unmapped = sorted(set(local_unmapped + proxy_unmapped + selected_unmapped))
+    unmapped = sorted(set(local_unmapped + legacy_unmapped + proxy_unmapped + selected_unmapped))
     if unmapped:
         findings.append(
             QualityFinding(
@@ -957,8 +1007,8 @@ def build_proxy_intraday_dataset(
         ),
         build={
             "contract": QDP_V3_CONTRACT_VERSION,
-            "canonical_source_through_bootstrap": "complete_external_quant_archive_5m_with_free_2020plus_and_tushare_residuals",
-            "historical_source_selection_policy": "whole_stock_day_local_primary_then_complete_residual_never_stitch",
+            "canonical_source_through_bootstrap": "complete_external_quant_archive_then_migrated_v2_then_free_sources_then_tushare_residuals",
+            "historical_source_selection_policy": "whole_stock_day_direct_local_then_legacy_v2_then_free_then_tushare_never_stitch",
             "historical_network_route": "selected_mootdx_baostock_for_2020plus_before_tushare_residual",
             "historical_participating_sources": [
                 source

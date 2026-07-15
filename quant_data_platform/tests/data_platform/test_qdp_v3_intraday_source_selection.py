@@ -56,10 +56,12 @@ def _select(
     proxy: pd.DataFrame,
     daily: dict[str, float] | None,
     *,
+    legacy: pd.DataFrame | None = None,
     free: pd.DataFrame | None = None,
 ):
     return _select_historical_source_day(
         local_day=local,
+        legacy_day=legacy,
         proxy_day=proxy,
         free_day=free,
         security_id="sec-sh-600000",
@@ -80,7 +82,7 @@ def test_complete_free_source_day_wins_before_tushare_residual() -> None:
 
     assert len(selected) == 48
     assert set(selected["source"]) == {"baostock"}
-    assert reason == "baostock_complete_free_residual_and_daily_consistent"
+    assert reason == "baostock_complete_free_residual_structurally_valid"
     assert evidence["selected_source"] == "baostock"
     assert "proxy" not in evidence
 
@@ -103,15 +105,87 @@ def test_conflicting_free_source_aliases_are_rejected_before_proxy_fallback() ->
 
 def test_complete_local_archive_day_wins_without_comparing_or_combining_proxy() -> None:
     local = _day(source="external_quant_archive")
+    legacy = _day(source="legacy_v2_5m_migrated", price_offset=0.002)
     proxy = _day(source="tushare_proxy", price_offset=0.001)
 
-    selected, reason, evidence = _select(local, proxy, _daily(local))
+    selected, reason, evidence = _select(local, proxy, _daily(local), legacy=legacy)
 
     assert len(selected) == 48
     assert set(selected["source"]) == {"external_quant_archive"}
-    assert reason == "external_quant_archive_complete_and_daily_consistent"
+    assert reason == "external_quant_archive_complete_structurally_valid"
     assert evidence["selected_source"] == "external_quant_archive"
+    assert "legacy" not in evidence
     assert "proxy" not in evidence
+
+
+def test_complete_legacy_v2_day_wins_before_free_and_tushare_residual() -> None:
+    legacy = _day(source="legacy_v2_5m_migrated")
+    free = _day(source="baostock", price_offset=0.02)
+    free["quality_tier"] = "strict"
+    proxy = _day(source="tushare_proxy", price_offset=0.03)
+
+    selected, reason, evidence = _select(
+        pd.DataFrame(), proxy, _daily(free), legacy=legacy, free=free
+    )
+
+    assert len(selected) == 48
+    assert set(selected["source"]) == {"legacy_v2_5m_migrated"}
+    assert reason == "legacy_v2_5m_migrated_complete_structurally_valid"
+    assert evidence["selected_source"] == "legacy_v2_5m_migrated"
+    assert evidence["legacy"]["evidence"]["conflict"] is True
+    assert evidence["legacy"]["daily_reconciliation_role"] == "cross_source_diagnostic_only"
+    assert "free" not in evidence
+    assert "proxy" not in evidence
+
+
+def test_invalid_legacy_v2_day_falls_back_to_complete_free_day() -> None:
+    legacy = _day(source="legacy_v2_5m_migrated").iloc[:-1].copy()
+    free = _day(source="baostock")
+    free["quality_tier"] = "strict"
+
+    selected, _, evidence = _select(
+        pd.DataFrame(), pd.DataFrame(), _daily(free), legacy=legacy, free=free
+    )
+
+    assert len(selected) == 48
+    assert set(selected["source"]) == {"baostock"}
+    assert evidence["legacy"]["reason"] == "legacy_v2_5m_migrated_5m_structure_invalid"
+    assert evidence["selected_source"] == "baostock"
+
+
+def test_conflicting_legacy_v2_aliases_quarantine_the_whole_source_day() -> None:
+    legacy = _day(source="legacy_v2_5m_migrated")
+    conflicting_alias = _day(source="legacy_v2_5m_migrated", price_offset=0.02)
+    conflicting_alias["provider_symbol"] = "600001.SH"
+    legacy = pd.concat([legacy, conflicting_alias], ignore_index=True)
+
+    selected, reason, evidence = _select(
+        pd.DataFrame(), pd.DataFrame(), _daily(_day(source="reference")), legacy=legacy
+    )
+
+    assert selected.empty
+    assert reason == "historical_5m_all_sources_rejected"
+    assert evidence["legacy"]["reason"] == "provider_code_restatement_value_conflict"
+
+
+def test_partial_bars_from_all_historical_sources_are_never_spliced() -> None:
+    complete = _day(source="reference")
+    local = _day(source="external_quant_archive").iloc[:12].copy()
+    legacy = _day(source="legacy_v2_5m_migrated").iloc[12:24].copy()
+    free = _day(source="baostock").iloc[24:36].copy()
+    free["quality_tier"] = "strict"
+    proxy = _day(source="tushare_proxy").iloc[36:].copy()
+
+    selected, reason, evidence = _select(
+        local, proxy, _daily(complete), legacy=legacy, free=free
+    )
+
+    assert selected.empty
+    assert reason == "historical_5m_all_sources_rejected"
+    assert evidence["local"]["row_count"] == 12
+    assert evidence["legacy"]["row_count"] == 12
+    assert evidence["free"]["row_count"] == 12
+    assert evidence["proxy"]["row_count"] == 12
 
 
 def test_tushare_is_whole_day_residual_when_local_day_is_incomplete() -> None:
@@ -127,15 +201,18 @@ def test_tushare_is_whole_day_residual_when_local_day_is_incomplete() -> None:
     assert evidence["selected_source"] == "tushare_proxy"
 
 
-def test_tushare_is_whole_day_residual_when_local_conflicts_with_daily() -> None:
+def test_cross_source_daily_difference_does_not_reject_complete_local_day() -> None:
     proxy = _day(source="tushare_proxy")
     local = _day(source="external_quant_archive", volume=1_000.0)
 
-    selected, _, evidence = _select(local, proxy, _daily(proxy))
+    selected, reason, evidence = _select(local, proxy, _daily(proxy))
 
     assert len(selected) == 48
-    assert set(selected["source"]) == {"tushare_proxy"}
-    assert evidence["local"]["reason"] == "external_quant_archive_5m_daily_conflict"
+    assert set(selected["source"]) == {"external_quant_archive"}
+    assert reason == "external_quant_archive_complete_structurally_valid"
+    assert evidence["local"]["evidence"]["conflict"] is True
+    assert evidence["local"]["daily_reconciliation_role"] == "cross_source_diagnostic_only"
+    assert "proxy" not in evidence
 
 
 def test_complementary_partial_sources_are_never_spliced_into_a_complete_day() -> None:
@@ -151,15 +228,26 @@ def test_complementary_partial_sources_are_never_spliced_into_a_complete_day() -
     assert evidence["proxy"]["row_count"] == 24
 
 
-def test_complete_sources_are_rejected_when_daily_proof_is_missing() -> None:
+def test_local_day_needs_no_cross_source_daily_proof_but_tushare_still_does() -> None:
     local = _day(source="external_quant_archive")
     proxy = _day(source="tushare_proxy")
 
     selected, reason, evidence = _select(local, proxy, None)
 
+    assert len(selected) == 48
+    assert reason == "external_quant_archive_complete_structurally_valid"
+    assert evidence["local"]["evidence"]["reason"] == "daily_reference_missing"
+    assert evidence["local"]["daily_reconciliation_role"] == "cross_source_diagnostic_only"
+    assert "proxy" not in evidence
+
+
+def test_tushare_day_requires_same_source_daily_proof() -> None:
+    proxy = _day(source="tushare_proxy")
+
+    selected, reason, evidence = _select(pd.DataFrame(), proxy, None)
+
     assert selected.empty
     assert reason == "historical_5m_all_sources_rejected"
-    assert evidence["local"]["reason"] == "external_quant_archive_complete_daily_proof_missing"
     assert evidence["proxy"]["reason"] == "tushare_proxy_complete_daily_proof_missing"
 
 

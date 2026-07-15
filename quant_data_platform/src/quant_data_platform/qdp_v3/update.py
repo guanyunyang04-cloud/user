@@ -16,6 +16,7 @@ from quant_data_platform.qdp_v3.constants import (
     RAW_INTRADAY_5M_BAOSTOCK,
     RAW_INTRADAY_5M_MOOTDX,
     RAW_INTRADAY_5M_SELECTED,
+    RAW_LEGACY_V2_INTRADAY_5M,
     RAW_TRADING_CALENDAR,
     RAW_TUSHARE_PROXY_DAILY,
     RAW_TUSHARE_PROXY_INTRADAY_5M,
@@ -375,12 +376,25 @@ def plan_update(
         {"stage": "post_publish_semantic_hash_audit"},
     ]
     if bootstrap:
+        legacy_migration_stage = {
+            "stage": "legacy_v2_intraday_5m_migration",
+            "provider": "qdp_v2_active",
+            "priority": 0,
+            "mode": "reuse_or_migrate_strict_complete_stock_days",
+        }
         intraday_stage = (
             {
                 "stage": "intraday_5m_local_archive_then_tushare_residual",
                 "provider": "external_quant_archive_with_tushare_proxy_residual",
                 "priority": 1,
                 "source_paths": list(normalized_source_paths),
+                "source_priority": [
+                    "external_quant_archive",
+                    "qdp_v2_migration",
+                    "mootdx_or_baostock_complete_day",
+                    "tushare_proxy_residual",
+                ],
+                "archive_scope": "direct_plus_legacy_residual_only",
                 **_date_task_summary(dates),
             }
             if normalized_provider == LOCAL_ARCHIVE_BOOTSTRAP_PROVIDER
@@ -388,6 +402,7 @@ def plan_update(
                 "stage": "intraday_5m",
                 "provider": "tushare_proxy",
                 "priority": 1,
+                "routing": "existing_direct_plus_v2_then_free_2020_plus_then_tushare_residual",
                 **_date_task_summary(dates),
             }
         )
@@ -396,6 +411,7 @@ def plan_update(
             {"stage": "tushare_proxy_compatibility", "enabled": True},
             {"stage": "tushare_proxy_cutoff", "bootstrap_cutoff": str(as_of_date)},
             {"stage": "trusted_reference_prerequisites", "domains": ["stock-basic", "trade-calendar"]},
+            legacy_migration_stage,
             intraday_stage,
             {
                 "stage": "quota_tail_reference",
@@ -517,6 +533,162 @@ def _result_payload(value: Any) -> dict[str, Any]:
     raise TypeError(f"bootstrap_stage_result_not_serializable:{type(value).__name__}")
 
 
+def _migrate_v2_intraday_5m(
+    *,
+    symbols: Iterable[str],
+    start_date: str,
+    end_date: str,
+    workspace_root: str | Path | None,
+) -> dict[str, Any]:
+    """Delay the legacy adapter import so read-only commands stay lightweight."""
+
+    from quant_data_platform.qdp_v3.legacy_v2_5m import migrate_v2_active_intraday_5m
+
+    return _result_payload(
+        migrate_v2_active_intraday_5m(
+            workspace_root=workspace_root,
+            start_date=start_date,
+            end_date=end_date,
+            symbols=tuple(symbols),
+            workers=8,
+            strict=True,
+            min_available_gib=0.5,
+            low_memory_seconds=5.0,
+            min_free_disk_gib=200.0,
+        )
+    )
+
+
+def _intraday_primary_raw_domains() -> tuple[str, ...]:
+    """Ordered complete-day evidence used before the Tushare residual."""
+
+    return (
+        RAW_EXTERNAL_QUANT_INTRADAY_5M,
+        RAW_LEGACY_V2_INTRADAY_5M,
+        RAW_INTRADAY_5M_SELECTED,
+    )
+
+
+def _intraday_compact_raw_domains() -> tuple[str, ...]:
+    return (
+        RAW_EXTERNAL_QUANT_INTRADAY_5M,
+        RAW_LEGACY_V2_INTRADAY_5M,
+        RAW_INTRADAY_5M_MOOTDX,
+        RAW_INTRADAY_5M_BAOSTOCK,
+        RAW_INTRADAY_5M_SELECTED,
+        RAW_TUSHARE_PROXY_INTRADAY_5M,
+    )
+
+
+def _residual_route_scope(
+    residual: dict[str, Any],
+    *,
+    trade_dates: Iterable[str],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    symbols = tuple(sorted(set(residual.get("download_symbols", ()) or ())))
+    available_dates = tuple(sorted({_normalize_date(item) for item in trade_dates if _normalize_date(item)}))
+    route_dates: set[str] = set()
+    for group in residual.get("download_groups", ()) or ():
+        explicit = {_normalize_date(item) for item in group.get("trade_dates", ()) or () if _normalize_date(item)}
+        if explicit:
+            route_dates.update(explicit)
+            continue
+        group_start = str(group.get("start_date", "") or "")[:10]
+        group_end = str(group.get("end_date", "") or "")[:10]
+        if group_start and group_end:
+            route_dates.update(item for item in available_dates if group_start <= item <= group_end)
+    return symbols, tuple(sorted(route_dates))
+
+
+def _residual_archive_batches(
+    residual: dict[str, Any],
+    *,
+    trade_dates: Iterable[str],
+) -> list[dict[str, Any]]:
+    """Keep partial-coverage imports exact without re-indexing per security.
+
+    Securities with no positive source coverage can share one broad envelope:
+    every date in that envelope is still residual for them.  Partially covered
+    securities remain grouped by their exact missing-date set so a short gap
+    does not turn back into a full-history archive parse/output revision.
+    """
+
+    available_dates = tuple(sorted({_normalize_date(item) for item in trade_dates if _normalize_date(item)}))
+    download_symbols = set(residual.get("download_symbols", ()) or ())
+    partial_symbols = download_symbols.intersection(
+        set(residual.get("partially_covered_symbols", ()) or ())
+    )
+    fully_uncovered_symbols = download_symbols.difference(partial_symbols)
+    full_dates: set[str] = set()
+    partial_groups: dict[tuple[str, ...], set[str]] = {}
+    for group in residual.get("download_groups", ()) or ():
+        group_symbols = set(group.get("symbols", ()) or ())
+        explicit_dates = tuple(
+            sorted({_normalize_date(item) for item in group.get("trade_dates", ()) or () if _normalize_date(item)})
+        )
+        if not explicit_dates:
+            group_start = str(group.get("start_date", "") or "")[:10]
+            group_end = str(group.get("end_date", "") or "")[:10]
+            explicit_dates = tuple(item for item in available_dates if group_start <= item <= group_end)
+        if not explicit_dates:
+            continue
+        if group_symbols.intersection(fully_uncovered_symbols):
+            full_dates.update(explicit_dates)
+        partial = group_symbols.intersection(partial_symbols)
+        if partial:
+            partial_groups.setdefault(explicit_dates, set()).update(partial)
+
+    batches: list[dict[str, Any]] = []
+    if fully_uncovered_symbols:
+        dates = tuple(sorted(full_dates)) or available_dates
+        if dates:
+            batches.append(
+                {
+                    "kind": "fully_uncovered_envelope",
+                    "symbols": tuple(sorted(fully_uncovered_symbols)),
+                    "trade_dates": dates,
+                    "start_date": dates[0],
+                    "end_date": dates[-1],
+                }
+            )
+    for dates, symbols in sorted(partial_groups.items()):
+        batches.append(
+            {
+                "kind": "partial_exact_gap",
+                "symbols": tuple(sorted(symbols)),
+                "trade_dates": dates,
+                "start_date": dates[0],
+                "end_date": dates[-1],
+            }
+        )
+    return batches
+
+
+def _plan_bootstrap_intraday_residual(
+    *,
+    symbols: Iterable[str],
+    start_date: str,
+    end_date: str,
+    workspace_root: str | Path | None,
+    lifecycle_ranges: dict[str, tuple[str, str]],
+    trade_dates: Iterable[str],
+    expected_trade_dates_by_symbol: dict[str, tuple[str, ...]] | None = None,
+    treat_tushare_empty_as_known: bool,
+) -> dict[str, Any]:
+    return plan_intraday_residuals(
+        symbols=tuple(symbols),
+        start_date=start_date,
+        end_date=end_date,
+        primary_raw_domains=_intraday_primary_raw_domains(),
+        fallback_raw_domain=RAW_TUSHARE_PROXY_INTRADAY_5M,
+        workspace_root=workspace_root,
+        lifecycle_ranges=lifecycle_ranges,
+        trade_dates=tuple(trade_dates),
+        expected_trade_dates_by_symbol=expected_trade_dates_by_symbol,
+        treat_fallback_empty_as_known=treat_tushare_empty_as_known,
+    )
+
+
 def _run_bootstrap_capture(
     *,
     plan: dict[str, Any],
@@ -559,10 +731,35 @@ def _run_bootstrap_capture(
     mainboard_symbols, lifecycle = proxy_symbol_inventory(workspace_root=workspace_root, mainboard_only=True)
     if not dates or not all_symbols or not mainboard_symbols:
         raise RuntimeError("trusted_bootstrap_inventory_or_calendar_missing")
+
+    # The readable v2 leaf is valuable migration input even though its lost
+    # ancestors cannot be represented as complete source lineage.  Reuse it
+    # before touching local archives or consuming any minute entitlement.
+    try:
+        migration = _migrate_v2_intraday_5m(
+            symbols=mainboard_symbols,
+            start_date=start_date,
+            end_date=cutoff_date,
+            workspace_root=workspace_root,
+        )
+    except Exception as exc:
+        if type(exc).__name__.endswith("ResourceGuardError"):
+            migration = {
+                "status": "paused_resource_guard",
+                "stage": "legacy_v2_intraday_5m_migration",
+                "error_type": type(exc).__name__,
+            }
+            record("legacy_v2_intraday_5m_migration", migration)
+            return "paused_resource_guard", migration
+        raise
+    migration.setdefault("status", "completed")
+    record("legacy_v2_intraday_5m_migration", migration)
+    if str(migration.get("status", "")) not in {"completed", "success"}:
+        return str(migration.get("status") or "partial"), migration
+
     # Exact stock-day residuals require a complete trusted daily/status base so
     # legitimate suspensions are classified locally instead of sent to minute
-    # providers. These jobs are resumable and normally reuse prior bootstrap
-    # captures before the large archive import starts.
+    # providers. These jobs are resumable and normally reuse prior captures.
     for domain in ("daily", "status"):
         result = _proxy_reference_call(
             domain=domain,
@@ -586,213 +783,204 @@ def _run_bootstrap_capture(
         (start_date, min("2019-12-31", cutoff_date), "2010_2019"),
         ("2020-01-01", cutoff_date, "2020_cutoff"),
     )
-    if historical_provider == LOCAL_ARCHIVE_BOOTSTRAP_PROVIDER:
-        from quant_data_platform.qdp_v3.external_quant_5m import import_external_quant_5m
-
-        local_result = _result_payload(
-            import_external_quant_5m(
-                source_paths=tuple(plan.get("source_paths", ()) or ()),
-                symbols=mainboard_symbols,
-                workspace_root=workspace_root,
-                raw_domain=RAW_EXTERNAL_QUANT_INTRADAY_5M,
-                workers=8,
-                start_date=start_date,
-                end_date=cutoff_date,
-                min_available_gib=0.5,
-                min_free_disk_gib=200.0,
-            )
+    for wave_start, wave_end, wave_name in waves:
+        if wave_start > wave_end:
+            continue
+        wave_dates = tuple(item for item in dates if wave_start <= item <= wave_end)
+        residual = _plan_bootstrap_intraday_residual(
+            symbols=mainboard_symbols,
+            start_date=wave_start,
+            end_date=wave_end,
+            workspace_root=workspace_root,
+            lifecycle_ranges=lifecycle,
+            trade_dates=wave_dates,
+            # A historical successful-empty Tushare receipt must not suppress
+            # a viable local/free-source attempt.
+            treat_tushare_empty_as_known=False,
         )
-        local_result.setdefault("status", "completed")
-        record("external_quant_archive_intraday_5m", local_result)
-        local_status = str(local_result.get("status") or "completed")
-        if local_status not in {"completed", "success"}:
-            return local_status, local_result
+        record(f"intraday_5m_residual_after_v2_{wave_name}", residual)
 
-        for wave_start, wave_end, wave_name in waves:
-            if wave_start > wave_end:
-                continue
-            wave_dates = tuple(item for item in dates if wave_start <= item <= wave_end)
-            residual = plan_intraday_residuals(
-                symbols=mainboard_symbols,
-                start_date=wave_start,
-                end_date=wave_end,
-                primary_raw_domains=(RAW_EXTERNAL_QUANT_INTRADAY_5M, RAW_INTRADAY_5M_SELECTED),
-                fallback_raw_domain=RAW_TUSHARE_PROXY_INTRADAY_5M,
-                workspace_root=workspace_root,
-                lifecycle_ranges=lifecycle,
-                trade_dates=wave_dates,
-                # A historical Tushare empty response must not suppress a
-                # viable BaoStock/mootdx attempt in the 2020+ wave.
-                treat_fallback_empty_as_known=wave_start < "2020-01-01",
-            )
-            record(f"intraday_5m_residual_plan_coarse_{wave_name}", residual)
-            route_symbols = tuple(residual.get("download_symbols", ()) or ())
-            route_date_values: set[str] = set()
-            for residual_group in list(residual.get("download_groups", ()) or ()):
-                explicit_group_dates = list(residual_group.get("trade_dates", ()) or ())
-                if explicit_group_dates:
-                    route_date_values.update(str(item) for item in explicit_group_dates)
-                    continue
-                residual_start = str(residual_group.get("start_date", "") or "")
-                residual_end = str(residual_group.get("end_date", "") or "")
-                route_date_values.update(
-                    item for item in wave_dates if residual_start <= item <= residual_end
-                )
-            route_dates = tuple(sorted(route_date_values))
-            expected_trade_dates: dict[str, tuple[str, ...]] = {}
-            if route_symbols and route_dates:
-                expected_trade_dates, expected_evidence = _proxy_daily_expected_trade_dates(
-                    symbols=route_symbols,
-                    trade_dates=route_dates,
-                    identity_registry=identity_registry,
-                    workspace_root=workspace_root,
-                )
-                record(f"intraday_5m_expected_stock_days_{wave_name}", expected_evidence)
-                if expected_trade_dates:
-                    residual = plan_intraday_residuals(
-                        symbols=route_symbols,
-                        start_date=wave_start,
-                        end_date=wave_end,
-                        primary_raw_domains=(
-                            RAW_EXTERNAL_QUANT_INTRADAY_5M,
-                            RAW_INTRADAY_5M_SELECTED,
-                        ),
-                        fallback_raw_domain=RAW_TUSHARE_PROXY_INTRADAY_5M,
-                        workspace_root=workspace_root,
-                        lifecycle_ranges=lifecycle,
-                        trade_dates=route_dates,
-                        expected_trade_dates_by_symbol=expected_trade_dates,
-                        treat_fallback_empty_as_known=wave_start < "2020-01-01",
+        if historical_provider == LOCAL_ARCHIVE_BOOTSTRAP_PROVIDER and int(
+            residual.get("download_count", 0) or 0
+        ):
+            from quant_data_platform.qdp_v3.external_quant_5m import import_external_quant_5m
+
+            archive_batches = _residual_archive_batches(residual, trade_dates=wave_dates)
+            completed_batches: list[dict[str, Any]] = []
+            for batch_index, batch in enumerate(archive_batches, start=1):
+                local_symbols = tuple(batch["symbols"])
+                local_dates = tuple(batch["trade_dates"])
+                try:
+                    local_result = _result_payload(
+                        import_external_quant_5m(
+                            source_paths=tuple(plan.get("source_paths", ()) or ()),
+                            symbols=local_symbols,
+                            workspace_root=workspace_root,
+                            raw_domain=RAW_EXTERNAL_QUANT_INTRADAY_5M,
+                            workers=8,
+                            start_date=local_dates[0],
+                            end_date=local_dates[-1],
+                            min_available_gib=0.5,
+                            min_free_disk_gib=200.0,
+                        )
                     )
-            record(f"intraday_5m_residual_plan_{wave_name}", residual)
-            for group_index, group in enumerate(residual.get("download_groups", ()) or (), start=1):
-                group_start = str(group.get("start_date", "") or "")
-                group_end = str(group.get("end_date", "") or "")
-                group_symbols = tuple(group.get("symbols", ()) or ())
-                if not group_start or not group_end or not group_symbols:
-                    continue
-                tushare_groups: list[dict[str, Any]] = [
+                except Exception as exc:
+                    if type(exc).__name__.endswith("ResourceGuardError"):
+                        local_result = {
+                            "status": "paused_resource_guard",
+                            "stage": "external_quant_archive_intraday_5m_residual",
+                            "error_type": type(exc).__name__,
+                            "batch_index": batch_index,
+                            "batch_kind": str(batch["kind"]),
+                        }
+                        record(
+                            f"external_quant_archive_intraday_5m_residual_{wave_name}_{batch_index}",
+                            local_result,
+                        )
+                        return "paused_resource_guard", local_result
+                    raise
+                local_result.setdefault("status", "completed")
+                local_result["residual_batch_index"] = batch_index
+                local_result["residual_batch_kind"] = str(batch["kind"])
+                local_result["residual_input_symbol_count"] = len(local_symbols)
+                local_result["residual_input_trade_date_count"] = len(local_dates)
+                record(
+                    f"external_quant_archive_intraday_5m_residual_{wave_name}_{batch_index}",
+                    local_result,
+                )
+                local_status = str(local_result.get("status") or "completed")
+                if local_status not in {"completed", "success"}:
+                    return local_status, local_result
+                completed_batches.append(
                     {
-                        "start_date": group_start,
-                        "end_date": group_end,
-                        "symbols": list(group_symbols),
+                        "batch_index": batch_index,
+                        "kind": str(batch["kind"]),
+                        "symbol_count": len(local_symbols),
+                        "trade_date_count": len(local_dates),
+                        "start_date": local_dates[0],
+                        "end_date": local_dates[-1],
                     }
-                ]
-                if group_start >= "2020-01-01":
-                    group_dates = list(group.get("trade_dates", ()) or ())
-                    if not group_dates:
-                        group_dates = [item for item in route_dates if group_start <= item <= group_end]
-                    if group_dates:
-                        free_result = ingest_intraday_5m(
-                            symbols=group_symbols,
-                            trade_dates=group_dates,
-                            workspace_root=workspace_root,
-                            refresh=False,
-                            audit_cross_sources=False,
-                        )
-                        record(
-                            f"free_intraday_5m_residual_{wave_name}_{group_index}",
-                            free_result,
-                        )
-                        # A partial free-source result must not amplify into a
-                        # Tushare request for the entire original group. Re-read
-                        # the selected raw day evidence and route only the exact
-                        # stock-day gaps that remain.
-                        free_residual = plan_intraday_residuals(
-                            symbols=group_symbols,
-                            start_date=group_start,
-                            end_date=group_end,
-                            primary_raw_domains=(
-                                RAW_EXTERNAL_QUANT_INTRADAY_5M,
-                                RAW_INTRADAY_5M_SELECTED,
-                            ),
-                            fallback_raw_domain=RAW_TUSHARE_PROXY_INTRADAY_5M,
-                            workspace_root=workspace_root,
-                            lifecycle_ranges=lifecycle,
-                            trade_dates=tuple(group_dates),
-                            expected_trade_dates_by_symbol=expected_trade_dates,
-                            treat_fallback_empty_as_known=True,
-                        )
-                        record(
-                            f"free_intraday_5m_residual_replan_{wave_name}_{group_index}",
-                            free_residual,
-                        )
-                        tushare_groups = list(free_residual.get("download_groups", ()) or ())
-                for residual_index, residual_group in enumerate(tushare_groups, start=1):
-                    residual_start = str(residual_group.get("start_date", "") or "")
-                    residual_end = str(residual_group.get("end_date", "") or "")
-                    residual_symbols = tuple(residual_group.get("symbols", ()) or ())
-                    if not residual_start or not residual_end or not residual_symbols:
-                        continue
-                    residual_hash = stable_hash(
-                        {
-                            "start": residual_start,
-                            "end": residual_end,
-                            "symbols": residual_symbols,
-                        },
-                        length=16,
-                    )
-                    intraday_result = ingest_tushare_proxy_intraday(
-                        symbols=residual_symbols,
-                        start_date=residual_start,
-                        end_date=residual_end,
-                        workspace_root=workspace_root,
-                        lifecycle_ranges=lifecycle,
-                        resume=True,
-                        job_id=(
-                            "tushare_proxy__intraday_5m__local_residual_"
-                            f"{wave_name}_{residual_start.replace('-', '')}_"
-                            f"{residual_end.replace('-', '')}_{residual_hash}"
-                        ),
-                        max_workers=3,
-                    )
-                    record(
-                        (
-                            f"tushare_proxy_intraday_5m_residual_{wave_name}_"
-                            f"{group_index}_{residual_index}"
-                        ),
-                        intraday_result,
-                    )
-                    intraday_status = str(intraday_result.get("status") or "partial")
-                    if intraday_status != "completed":
-                        break
-                if intraday_status != "completed":
-                    break
-            if intraday_status != "completed":
-                break
-            final_residual = plan_intraday_residuals(
+                )
+            if completed_batches:
+                record(
+                    f"external_quant_archive_intraday_5m_residual_{wave_name}",
+                    {
+                        "status": "completed",
+                        "batch_count": len(completed_batches),
+                        "batches": completed_batches,
+                    },
+                )
+                residual = _plan_bootstrap_intraday_residual(
+                    symbols=mainboard_symbols,
+                    start_date=wave_start,
+                    end_date=wave_end,
+                    workspace_root=workspace_root,
+                    lifecycle_ranges=lifecycle,
+                    trade_dates=wave_dates,
+                    treat_tushare_empty_as_known=False,
+                )
+                record(f"intraday_5m_residual_after_local_{wave_name}", residual)
+
+        route_symbols, route_dates = _residual_route_scope(residual, trade_dates=wave_dates)
+        expected_trade_dates: dict[str, tuple[str, ...]] = {}
+        if route_symbols and route_dates:
+            expected_trade_dates, expected_evidence = _proxy_daily_expected_trade_dates(
+                symbols=route_symbols,
+                trade_dates=route_dates,
+                identity_registry=identity_registry,
+                workspace_root=workspace_root,
+            )
+            record(f"intraday_5m_expected_stock_days_{wave_name}", expected_evidence)
+            residual = _plan_bootstrap_intraday_residual(
                 symbols=route_symbols,
                 start_date=wave_start,
                 end_date=wave_end,
-                primary_raw_domains=(RAW_EXTERNAL_QUANT_INTRADAY_5M, RAW_INTRADAY_5M_SELECTED),
-                fallback_raw_domain=RAW_TUSHARE_PROXY_INTRADAY_5M,
+                workspace_root=workspace_root,
+                lifecycle_ranges=lifecycle,
+                trade_dates=route_dates,
+                expected_trade_dates_by_symbol=expected_trade_dates or None,
+                # There is no additional pre-Tushare source for the older
+                # wave, so a prior successful-empty response is a stable gap.
+                treat_tushare_empty_as_known=wave_start < "2020-01-01",
+            )
+        record(f"intraday_5m_residual_exact_{wave_name}", residual)
+
+        # Free sources are useful for the recent range, but only complete
+        # stock-days enter RAW_INTRADAY_5M_SELECTED.  No cross-source values are
+        # compared and no partial day is spliced into another provider.
+        if wave_start >= "2020-01-01":
+            for group_index, group in enumerate(residual.get("download_groups", ()) or (), start=1):
+                group_start = str(group.get("start_date", "") or "")[:10]
+                group_end = str(group.get("end_date", "") or "")[:10]
+                group_symbols = tuple(group.get("symbols", ()) or ())
+                group_dates = list(group.get("trade_dates", ()) or ())
+                if not group_dates:
+                    group_dates = [item for item in route_dates if group_start <= item <= group_end]
+                if not group_symbols or not group_dates:
+                    continue
+                free_result = ingest_intraday_5m(
+                    symbols=group_symbols,
+                    trade_dates=group_dates,
+                    workspace_root=workspace_root,
+                    refresh=False,
+                    audit_cross_sources=False,
+                )
+                record(f"free_intraday_5m_residual_{wave_name}_{group_index}", free_result)
+            residual = _plan_bootstrap_intraday_residual(
+                symbols=route_symbols,
+                start_date=wave_start,
+                end_date=wave_end,
                 workspace_root=workspace_root,
                 lifecycle_ranges=lifecycle,
                 trade_dates=route_dates,
                 expected_trade_dates_by_symbol=expected_trade_dates,
-                treat_fallback_empty_as_known=True,
+                treat_tushare_empty_as_known=True,
             )
-            record(f"intraday_5m_residual_final_{wave_name}", final_residual)
-            if int(final_residual.get("download_count", 0) or 0):
-                return "partial", final_residual
-    else:
-        for wave_start, wave_end, wave_name in waves:
-            if wave_start > wave_end:
+            record(f"intraday_5m_residual_after_free_{wave_name}", residual)
+
+        for group_index, group in enumerate(residual.get("download_groups", ()) or (), start=1):
+            residual_start = str(group.get("start_date", "") or "")[:10]
+            residual_end = str(group.get("end_date", "") or "")[:10]
+            residual_symbols = tuple(group.get("symbols", ()) or ())
+            if not residual_start or not residual_end or not residual_symbols:
                 continue
+            residual_hash = stable_hash(
+                {"start": residual_start, "end": residual_end, "symbols": residual_symbols},
+                length=16,
+            )
             intraday_result = ingest_tushare_proxy_intraday(
-                symbols=mainboard_symbols,
-                start_date=wave_start,
-                end_date=wave_end,
+                symbols=residual_symbols,
+                start_date=residual_start,
+                end_date=residual_end,
                 workspace_root=workspace_root,
                 lifecycle_ranges=lifecycle,
                 resume=True,
-                job_id=f"tushare_proxy__intraday_5m__bootstrap_{wave_name}_{cutoff_date.replace('-', '')}",
+                job_id=(
+                    "tushare_proxy__intraday_5m__final_residual_"
+                    f"{wave_name}_{residual_start.replace('-', '')}_"
+                    f"{residual_end.replace('-', '')}_{residual_hash}"
+                ),
                 max_workers=3,
             )
-            record(f"tushare_proxy_intraday_5m_{wave_name}", intraday_result)
+            record(f"tushare_proxy_intraday_5m_residual_{wave_name}_{group_index}", intraday_result)
             intraday_status = str(intraday_result.get("status") or "partial")
             if intraday_status != "completed":
                 break
+        if intraday_status != "completed":
+            break
+        final_residual = _plan_bootstrap_intraday_residual(
+            symbols=route_symbols,
+            start_date=wave_start,
+            end_date=wave_end,
+            workspace_root=workspace_root,
+            lifecycle_ranges=lifecycle,
+            trade_dates=route_dates,
+            expected_trade_dates_by_symbol=expected_trade_dates,
+            treat_tushare_empty_as_known=True,
+        )
+        record(f"intraday_5m_residual_final_{wave_name}", final_residual)
+        if int(final_residual.get("download_count", 0) or 0):
+            return "partial", final_residual
     # Minute quota is the scarce entitlement. Once exhausted, use the
     # remaining low-frequency capacity only for core status and factor facts.
     if intraday_status == "paused_quota":
@@ -827,13 +1015,7 @@ def _run_bootstrap_capture(
     # Source archives and v2 are untouched; only verified v3 legacy partitions
     # are removed after their bundle/hash round-trip succeeds.
     compact_results: list[dict[str, Any]] = []
-    for raw_domain in (
-        RAW_EXTERNAL_QUANT_INTRADAY_5M,
-        RAW_INTRADAY_5M_MOOTDX,
-        RAW_INTRADAY_5M_BAOSTOCK,
-        RAW_INTRADAY_5M_SELECTED,
-        RAW_TUSHARE_PROXY_INTRADAY_5M,
-    ):
+    for raw_domain in _intraday_compact_raw_domains():
         compacted = compact_raw_domain(
             raw_domain,
             workspace_root=workspace_root,

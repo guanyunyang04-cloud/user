@@ -233,3 +233,13 @@ H 盘不再先复制到 F。用户取消备份后直接运行了提升权限的 
 现有 Tushare stock-basic、calendar、4,011 个 daily、4,011 个 daily-basic 和 5,864 个 identity raw 继续复用；旧 `stk_limit` 过程任务已中断，新 status 路由只保留 `suspend_d`。所有陈旧 provider job 已接管为 `interrupted_recoverable`，生产下载尚未恢复；下一生产顺序是先完成 compact 验证，再运行 5m-only compatibility 和全历史 5m，额度耗尽后补 status/factor，最后构建九域 candidate。v2 active 未改变。H 上 2026-07-15 00:52 出现的空 v3 active（SHA-256 `4215123b7f0d64c855a2f2a5c414930dfd41c25289b4cf53ae9ccd2c6fc0d19d`）已确认无候选/无数据并删除；public read 现通过 manifest v4、候选/哈希、完整九域与 published-at 验证 active，pytest 也自动清除 production roots/credentials。默认 status 已恢复为 v2 `status=ok`、as-of `2026-06-26`、17 datasets。
 
 退休被改为严格两阶段：bootstrap CAS publish 只写 `awaiting_post_cutoff_incremental` gate，不删除 v2；必须再完成一次 watermark 晚于 `2026-07-13` 的增量 CAS publish，并通过 active SHA/candidate、daily/5m watermark、coverage、semantic audit、diff、全部 shard hash、下游切换和无消费者/job 检查，才写 retirement manifest 并物理删除 v2 的 1m、旧 5m 与两条分钟特征链。首次发布即删除的旧描述已失效。
+
+## 2026-07-15 v2 正确数据迁移与残差补齐
+
+用户随后把执行目标进一步简化为“改错误的、补没有的”，不再为历史 5m 重复下载一套近似数据。v2 active 5m 作为只读迁移输入：`402,849,072` 行、`8,392,689` 个完整 48-bar 股票日、`3,037` 个证券、`7,861` 个 shard，全部证券可映射到稳定 `security_id`。其缺失祖先仍如实记录，不能伪称 lineage 已恢复；新 v3 raw 会保存 active/manifest/shard hash，自身不直接依赖将来要退休的 v2 文件。
+
+历史 5m 来源优先级改为本地直接 archive、v2 migrated raw、2020+ mootdx/BaoStock 完整日、Tushare 最终残差。跨来源数值不比较，不把残缺来源拼成完整日；同一来源内部重复稳定主键冲突或非 48 根才拒绝。跨源日线聚合只保存诊断，只有 Tushare 5m 与同源 Tushare 日线核对继续作为硬门禁。`001872/000022` 与 `001914/000043` 的 159,120 根历史代码重述只修复 identity 字段，OHLCVA 不改。
+
+代码新增 v2 迁移器、CLI、残差优先调度和 canonical 来源选择。迁移器用 DuckDB 单次 fan-out 和 8 个本地 worker，将合法完整日写成 `legacy_v2_intraday_5m_raw`；0.5 GiB 可用内存连续 5 秒与 H 盘 200 GiB 空闲线仍是暂停闸门。旧全市场 Tushare supervisor 与全量 archive job 不恢复，已有 66 个直接 archive 分区保留。生产迁移尚未启动，v2 active、candidate 和 publish 均未改变。
+
+用户明确禁止 C 盘 runtime。原 `C:\Users\ASUS\AppData\Local\QDP\runtime` 的 161 个文件（约 0.103 GiB）已复制到仓库内 `H:\quant_project\quant_data_platform\data\qdp_runtime`、逐文件 SHA256 一致后删除 C 盘源目录；持久用户环境变量也已指向新路径。此后 job、SQLite、staging 和 DuckDB temp 均留在本仓库，不保留第二份 runtime 副本。

@@ -11,6 +11,7 @@ import pytest
 from quant_data_platform.qdp_v3.constants import (
     EXPECTED_5M_BAR_ENDS,
     RAW_EXTERNAL_QUANT_INTRADAY_5M,
+    RAW_LEGACY_V2_INTRADAY_5M,
     RAW_TUSHARE_PROXY_DAILY,
     RAW_TUSHARE_PROXY_INTRADAY_5M,
 )
@@ -172,13 +173,140 @@ def test_local_archive_update_plan_is_local_first_with_residual_only(tmp_path: P
 
     assert plan["status"] == "planned"
     stages = {item["stage"]: item for item in plan["stages"]}
+    stage_names = [item["stage"] for item in plan["stages"]]
     local = stages["intraday_5m_local_archive_then_tushare_residual"]
     assert local["provider"] == "external_quant_archive_with_tushare_proxy_residual"
     assert local["source_paths"] == [str(source)]
+    assert local["archive_scope"] == "direct_plus_legacy_residual_only"
+    assert stage_names.index("legacy_v2_intraday_5m_migration") < stage_names.index(
+        "intraday_5m_local_archive_then_tushare_residual"
+    )
+    assert local["source_priority"][:2] == ["external_quant_archive", "qdp_v2_migration"]
     assert not any(
         item.get("stage") == "intraday_5m" and item.get("provider") == "tushare_proxy"
         for item in plan["stages"]
     )
+
+
+def test_legacy_v2_raw_is_used_for_residuals_and_compaction() -> None:
+    import quant_data_platform.qdp_v3.update as update_module
+
+    assert RAW_LEGACY_V2_INTRADAY_5M in update_module._intraday_primary_raw_domains()
+    assert RAW_LEGACY_V2_INTRADAY_5M in update_module._intraday_compact_raw_domains()
+
+
+def test_local_archive_batches_keep_partial_coverage_gaps_exact() -> None:
+    import quant_data_platform.qdp_v3.update as update_module
+
+    batches = update_module._residual_archive_batches(
+        {
+            "download_symbols": ["000001.SZ", "000002.SZ", "600000.SH"],
+            "partially_covered_symbols": ["000001.SZ", "000002.SZ"],
+            "download_groups": [
+                {
+                    "start_date": "2010-01-04",
+                    "end_date": "2010-01-05",
+                    "trade_dates": ["2010-01-04", "2010-01-05"],
+                    "symbols": ["000001.SZ", "600000.SH"],
+                },
+                {
+                    "start_date": "2019-12-31",
+                    "end_date": "2019-12-31",
+                    "trade_dates": ["2019-12-31"],
+                    "symbols": ["000002.SZ", "600000.SH"],
+                },
+            ],
+        },
+        trade_dates=("2010-01-04", "2010-01-05", "2019-12-31"),
+    )
+
+    assert batches == [
+        {
+            "kind": "fully_uncovered_envelope",
+            "symbols": ("600000.SH",),
+            "trade_dates": ("2010-01-04", "2010-01-05", "2019-12-31"),
+            "start_date": "2010-01-04",
+            "end_date": "2019-12-31",
+        },
+        {
+            "kind": "partial_exact_gap",
+            "symbols": ("000001.SZ",),
+            "trade_dates": ("2010-01-04", "2010-01-05"),
+            "start_date": "2010-01-04",
+            "end_date": "2010-01-05",
+        },
+        {
+            "kind": "partial_exact_gap",
+            "symbols": ("000002.SZ",),
+            "trade_dates": ("2019-12-31",),
+            "start_date": "2019-12-31",
+            "end_date": "2019-12-31",
+        },
+    ]
+
+
+def test_v2_migration_resource_guard_pauses_before_network_minute_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import quant_data_platform.qdp_v3.update as update_module
+
+    class FakeResourceGuardError(RuntimeError):
+        pass
+
+    monkeypatch.setattr(
+        update_module,
+        "run_tushare_proxy_compatibility_gate",
+        lambda **_kwargs: {"status": "passed"},
+    )
+    monkeypatch.setattr(
+        update_module,
+        "lock_bootstrap_cutoff",
+        lambda **_kwargs: {"bootstrap_cutoff": "2026-07-13"},
+    )
+    monkeypatch.setattr(update_module, "_proxy_reference_call", lambda **_kwargs: {"status": "completed"})
+    monkeypatch.setattr(
+        update_module,
+        "_calendar_dates_read_only",
+        lambda **_kwargs: (["2026-07-13"], "unit"),
+    )
+    monkeypatch.setattr(
+        update_module,
+        "proxy_symbol_inventory",
+        lambda **_kwargs: (["600000.SH"], {"600000.SH": ("1999-11-10", "")}),
+    )
+    monkeypatch.setattr(
+        update_module,
+        "_migrate_v2_intraday_5m",
+        lambda **_kwargs: (_ for _ in ()).throw(FakeResourceGuardError("low memory")),
+    )
+    minute_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        update_module,
+        "ingest_tushare_proxy_intraday",
+        lambda **kwargs: minute_calls.append(dict(kwargs)) or {"status": "completed"},
+    )
+    recorded: list[tuple[str, dict[str, object]]] = []
+
+    status, paused = update_module._run_bootstrap_capture(
+        plan={
+            "start_date": "2010-01-01",
+            "as_of_date": "2026-07-13",
+            "historical_provider": "external-quant-archive",
+            "source_paths": [str(tmp_path / "5minute.zip")],
+        },
+        record=lambda stage, result: recorded.append((stage, result)),
+        workspace_root=_workspace(tmp_path),
+    )
+
+    assert status == "paused_resource_guard"
+    assert paused == {
+        "status": "paused_resource_guard",
+        "stage": "legacy_v2_intraday_5m_migration",
+        "error_type": "FakeResourceGuardError",
+    }
+    assert recorded[-1] == ("legacy_v2_intraday_5m_migration", paused)
+    assert minute_calls == []
 
 
 def test_trusted_daily_absence_excludes_suspension_from_minute_residual(tmp_path: Path) -> None:
@@ -339,6 +467,7 @@ def test_bootstrap_capture_routes_exact_residual_spans_without_using_old_full_jo
 
     workspace = _workspace(tmp_path)
     local_calls: list[dict[str, object]] = []
+    migration_calls: list[dict[str, object]] = []
     proxy_calls: list[dict[str, object]] = []
     free_calls: list[dict[str, object]] = []
     fake_adapter = types.ModuleType("quant_data_platform.qdp_v3.external_quant_5m")
@@ -379,26 +508,43 @@ def test_bootstrap_capture_routes_exact_residual_spans_without_using_old_full_jo
         return ["000005.SZ", "600000.SH"], {}
 
     monkeypatch.setattr(update_module, "proxy_symbol_inventory", inventory)
+    monkeypatch.setattr(
+        update_module,
+        "_migrate_v2_intraday_5m",
+        lambda **kwargs: migration_calls.append(dict(kwargs)) or {"status": "completed"},
+    )
     plan_calls: dict[str, int] = {}
+    primary_domain_calls: list[tuple[str, ...]] = []
 
     def residual_plan(**kwargs: object) -> dict[str, object]:
         start = str(kwargs["start_date"])
-        if start == "2026-03-28":
-            return {"download_count": 0, "download_groups": []}
+        primary_domain_calls.append(tuple(kwargs["primary_raw_domains"]))
         plan_calls[start] = plan_calls.get(start, 0) + 1
-        if plan_calls[start] > 1:
-            return {"download_count": 0, "download_groups": []}
+        if plan_calls[start] > 3:
+            return {"download_count": 0, "download_symbols": [], "download_groups": []}
         if start < "2020-01-01":
             return {
                 "download_count": 1,
+                "download_symbols": ["000005.SZ"],
                 "download_groups": [
-                    {"start_date": "2012-01-01", "end_date": "2012-12-31", "symbols": ["000005.SZ"]}
+                    {
+                        "start_date": "2012-01-03",
+                        "end_date": "2012-01-03",
+                        "trade_dates": ["2012-01-03"],
+                        "symbols": ["000005.SZ"],
+                    }
                 ],
             }
         return {
             "download_count": 1,
+            "download_symbols": ["600000.SH"],
             "download_groups": [
-                {"start_date": "2026-03-28", "end_date": "2026-07-13", "symbols": ["600000.SH"]}
+                {
+                    "start_date": "2026-03-30",
+                    "end_date": "2026-03-30",
+                    "trade_dates": ["2026-03-30"],
+                    "symbols": ["600000.SH"],
+                }
             ],
         }
 
@@ -428,14 +574,23 @@ def test_bootstrap_capture_routes_exact_residual_spans_without_using_old_full_jo
 
     assert status == "completed"
     assert blocker is None
-    assert local_calls[0]["symbols"] == ["000005.SZ", "600000.SH"]
-    assert local_calls[0]["workers"] == 8
+    assert migration_calls[0]["symbols"] == ["000005.SZ", "600000.SH"]
+    assert [(call["symbols"], call["start_date"], call["end_date"]) for call in local_calls] == [
+        (("000005.SZ",), "2012-01-03", "2012-01-03"),
+        (("600000.SH",), "2026-03-30", "2026-03-30"),
+    ]
+    assert all(call["workers"] == 8 for call in local_calls)
+    assert all(RAW_LEGACY_V2_INTRADAY_5M in domains for domains in primary_domain_calls)
     assert len(proxy_calls) == 1
     assert proxy_calls[0]["symbols"] == ("000005.SZ",)
-    assert proxy_calls[0]["start_date"] == "2012-01-01"
-    assert proxy_calls[0]["end_date"] == "2012-12-31"
-    assert "local_residual" in str(proxy_calls[0]["job_id"])
+    assert proxy_calls[0]["start_date"] == "2012-01-03"
+    assert proxy_calls[0]["end_date"] == "2012-01-03"
+    assert "final_residual" in str(proxy_calls[0]["job_id"])
     assert "__bootstrap_2010_2019_" not in str(proxy_calls[0]["job_id"])
     assert len(free_calls) == 1
     assert free_calls[0]["symbols"] == ("600000.SH",)
     assert free_calls[0]["trade_dates"] == ["2026-03-30"]
+    stage_names = [stage for stage, _result in recorded]
+    assert stage_names.index("legacy_v2_intraday_5m_migration") < stage_names.index(
+        "external_quant_archive_intraday_5m_residual_2010_2019"
+    )

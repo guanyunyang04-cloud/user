@@ -8,7 +8,7 @@
 ## Object Instances
 ### object `qdp_project`
 `type`: shared_manifest_first_data_base_instance
-`state`: v2 仍是唯一有效、可研究的 active 数据基底；v3 已收敛为可信单源、5m-only、紧凑 raw bundle 合同。2026-07-15 的 Tushare 历史 5m bootstrap 已恢复为后台 DAG，按页级 staging/原始分区断点续跑；正式 candidate 和 active 切换均未完成。2026-07-15 发现的空 v3 active 占位已确认无候选/无数据并删除；默认 status 已恢复到 v2。
+`state`: v2 仍是唯一有效、可研究的 active 数据基底；v3 已收敛为可信来源、5m-only、紧凑 raw bundle 合同。旧 Tushare 全市场分钟任务与全量 archive 任务均已停止并保留断点，当前路线先把 v2 的合法完整 5m 日迁移为 v3 自有 raw，再只补最终残差；正式 candidate 和 active 切换均未完成。2026-07-15 发现的空 v3 active 占位已确认无候选/无数据并删除；默认 status 已恢复到 v2。
 `public_cli`: 公共面为 `status/list/describe/check/update/gc`，管理面为 `ingest/compact/build/audit/diff/publish/rollback/retire-v2-intraday`。read routing 只接受通过 `validate_published_active()` 的 v3，否则默认 v2；`check` 也可显式指定 candidate，任何 v2 写命令必须显式给出 `--generation v2`。
 `python`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`
 
@@ -16,19 +16,19 @@
 `type/state`: immutable_manifest_v3_candidate_pipeline / interrupted_recoverable_waiting_for_compaction_and_bootstrap
 `root`: `quant_data_platform/data/qdp_v3`
 `contract`: `qdp_v3_20260715_trusted_source_5m` / schema `3.3.0` / manifest `4`；正式起点 `2010-01-01`；canonical 主键使用稳定 `security_id + 时间键`。新生产数据只发布 `strict/quarantined`，旧 `provisional` 仅可读；v3 不采集、构建、发布或更新 1m。
-`providers`: BaoStock `0.9.3` wheel SHA-256 `acbd19403285bc4e254cee8297cf0e2646ae2276e5af7e549deed3988ab02293`；mootdx `0.11.7`；Tushare-compatible proxy 仅作 2010-01-01..2026-07-13 历史启动源，`upstream_provenance=not_exposed`，Token 只从环境变量读取。
+`providers`: BaoStock `0.9.3` wheel SHA-256 `acbd19403285bc4e254cee8297cf0e2646ae2276e5af7e549deed3988ab02293`；mootdx `0.11.7`；Tushare-compatible proxy 负责低频历史基底与历史 5m 最终残差，`upstream_provenance=not_exposed`，Token 只从环境变量读取。
 `implemented_domains`: 首次发布只要求 calendar、identity/symbol history、daily/status、adjust-factor daily、PIT signal/open 与 5m；估值、事件、财务、分红、行业、指数和股本均为非阻塞 enrichment。v3 1m 路由与转换代码已删除。
 `compatibility`: 0.9.1 full golden 已捕获；BaoStock 0.9.3 full gate 为 `passed`（34 anchors、0 issues、普通多页 5537 rows、wheel hash 匹配）。该报告仍约束 cutoff 后 BaoStock 增量，但不再要求 BaoStock 证明 Tushare historical canonical。
 `legacy_baostock_history`: 2010/2011/2012 已有 `729/729` 个日线、all-stock 和日期因子事件分区，日线 `1,578,095` rows、因子事件 `5,192` rows。它们作为可追溯 legacy evidence 紧凑归档，不进入 Tushare 独占的 historical canonical，也不继续 2013+ 历史复刻。
-`proxy_bootstrap`: Tushare `stock_basic`、`trade_cal`、4,011 个全市场 `daily`、4,011 个 `daily_basic` 与 5,864 个 identity 任务已有 raw。新调度优先用分钟额度抓全历史 5m；额度耗尽后只补 `status/factor`，跳过 dividend/financial。三个 worker 共享单一 `96 rpm / burst 1` limiter；成功但生命周期内为空的分钟响应写 index-only `quarantined` 事实，不让少数 provider gap 阻塞全市场任务。
-`download_runtime`: Tushare 独占 `2010-01-01..2026-07-13` 历史启动；历史 BaoStock 复刻和逐行跨源验证退出生产 DAG。截止日后 BaoStock 维护日线/状态/因子事件，mootdx 优先更新完整 5m 股票日，BaoStock 作完整日 fallback。job 使用 30 秒 heartbeat 与 OS advisory lock；超过 5 分钟且无锁才回退到可恢复 pending。后台监督器以 3 worker 运行，1 秒采样物理内存；仅在可用内存连续低于 0.5 GiB 超过 5 秒时中断当前页并在 5 分钟后从 staging 断点恢复。
-`storage_state`: `QDP_DATA_ROOT=H:\quant_project\quant_data_platform\data`；`QDP_RUNTIME_ROOT=C:\Users\ASUS\AppData\Local\QDP\runtime`。reference raw 为 undated x 1，低频时序 raw 为 year x 1，只有 5m raw 为 year x 16；zstd，目标约 384 MiB/最大 1 GiB。2026-07-15 已将 94,589 个既有 v3 raw 小文件收敛为 71 个 bundle，`raw_index/raw_receipts` 均为 18,914 条且 SHA256、row-group、bundle 文件集已独立复核；逻辑/估算簇占用比为 1.017。新 5m bootstrap 的单证券 raw 是可恢复临时输入，按波次 compact，不与旧小文件布局混淆。
+`proxy_bootstrap`: Tushare `stock_basic`、`trade_cal`、4,011 个全市场 `daily`、4,011 个 `daily_basic` 与 5,864 个 identity 任务已有 raw。分钟代理只接收本地 archive、v2 迁移和 2020+ 免费源之后的最终残差；额度耗尽后只补 `status/factor`。三个 worker 共享单一 `96 rpm / burst 1` limiter；成功但生命周期内为空的分钟响应写 index-only `quarantined` 事实。
+`download_runtime`: v2 active 5m 只读叶包含 `402,849,072` 行、`8,392,689` 个 48-bar 股票日、`3,037` 个证券和 `7,861` 个 shard；全部证券可映射到稳定 identity。迁移器以 DuckDB 单次 fan-out、8 个本地 worker 和 0.5 GiB/5 秒资源闸门写成独立 v3 raw，不伪称补回缺失祖先。66 个已完成的本地直接 archive 分区保留并具有更高优先级；其余 archive、2020+ 免费源和 Tushare 只处理残差。不同来源的日线对照仅作诊断，只有 Tushare 5m 与同源日线核对是硬门禁。
+`storage_state`: `QDP_DATA_ROOT=H:\quant_project\quant_data_platform\data`；`QDP_RUNTIME_ROOT=H:\quant_project\quant_data_platform\data\qdp_runtime`。数据、job、SQLite、staging 和 DuckDB temp 全部位于本仓库；C 盘旧 runtime 的 161 个文件已逐文件 SHA256 校验迁移后删除。reference raw 为 undated x 1，低频时序 raw 为 year x 1，只有 5m raw 为 year x 16；zstd，目标约 384 MiB/最大 1 GiB。
 `disk_health`: H 已于 2026-07-15 完成 `chkdsk H: /f`，dirty bit=false、HealthStatus=Healthy、OperationalStatus=OK、bad sectors=0；日志为 `C:\Users\ASUS\AppData\Local\QDP\maintenance\chkdsk_H_20260715.log`。用户取消 F 盘备份，当前没有 F 盘备份/fallback 前置。
 `rejected_parallel_route`: 两个独立 BaoStock login 的 live probe 出现 `10001001 用户未登录`，因此禁止生产双 session；历史低错误率不得自动解锁第二个网络槽。每个 ingest job 有 OS advisory single-writer lock，进程异常退出后自动释放。
 `adapter_smoke_boundary`: ETF adapter `1574` rows provisional；mootdx 的 `600000.SH/000001.SZ/600076.SH` 最近完整日均为 48 bars 且止于 15:00。Tushare 5m 的 `vol/amount` 已用沪深、早期/近期固定样本证明为股/元，canonical scale 均为 1.0。
 `pit_name_boundary`: stock-basic 当前名称禁止反填历史；Tushare `namechange` 与日期级 snapshot 是合法 PIT 名称证据。代码/名称例外通过区间化 `qdp_v3_corrections.json` 修正，官方文档 hash 不再是发布前置。
 `identity_regression`: 官方代码历史固定为 `000022.SZ -> 001872.SZ @ 2018-12-26`、`000043.SZ -> 001914.SZ @ 2019-12-16`、`300114.SZ -> 302132.SZ @ 2025-02-17`；raw code-set 对账按 PIT symbol interval 计算，禁止把新代码的原上市日期反推为历史预期代码。
-`candidate_state`: 历史 candidate `candidate__5060cee5169a45e4162200ad` 属于旧合同，已 superseded；它只保留为 2010—2012 链路证据，不能发布。新的 trusted-source candidate 尚未构建；旧 factor arbitration blocker 不再定义当前发布合同。
+`candidate_state`: 历史 candidate `candidate__5060cee5169a45e4162200ad` 属于旧合同，已 superseded；它只保留为 2010—2012 链路证据，不能发布。新的 trusted-source candidate 尚未构建；v2 迁移代码与残差调度已通过测试，但生产迁移、compact、candidate、audit 和 publish 尚未完成。
 `local_build_performance`: 三年 candidate 本地流式构建约 42.6 分钟，明显慢于已优化的下载；这是后续独立的 canonical build 单核/向量化优化项，不应通过降低审计或发布门解决。
 `release_boundary`: v3 没有 active manifest，未执行有效 publish 或 active 切换。首次 candidate 只要求九域：calendar、identity/symbol history、daily/status、adjust-factor daily、eligible signal、tradable open 与 5m。全历史核心域、identity/PIT、2010 起完整 5m 与 bundle/index/hash gate 未完成前不得发布。5m strict 覆盖低于 98% 阻断、98%—99% 警告、至少 99% 正常。首次发布后还必须完成一次 watermark 晚于 `2026-07-13` 的增量发布，才允许退休 v2；v2 active SHA-256 仍为 `e56f72a6cba8bcf86055817f6a0ec5e7391271fb3c27b4d628c3abc62944051e`。
 `evidence`: `quant_data_platform/brain/references/qdp_v3_rebuild_20260713.md`
@@ -79,7 +79,7 @@
 
 ### object `provider_runtime`
 `type`: upstream_ingest_runtime
-`state`: production Python environment is `yolos`；Tushare proxy 是固定截止日的可信历史启动源，BaoStock/mootdx 只负责截止日后的免费增量。raw payload 存大 Parquet bundle，运行 job/cursor/index 位于 `QDP_RUNTIME_ROOT`。
+`state`: production Python environment is `yolos`；历史分钟路由为 direct archive、v2 migrated raw、免费完整日、Tushare residual，截止日后由 BaoStock/mootdx 维护增量。raw payload 存大 Parquet bundle，运行 job/cursor/index 位于仓库内 `QDP_RUNTIME_ROOT`。
 `boundary`: provider 不再互相证明数值正确，但 schema、单位、identity、PIT、48-bar 完整性、lineage、secret scan 和 CAS 仍必须通过；不完整股票日 quarantine，不拼接、不插值。
 
 ### object `qdp_storage_retention`

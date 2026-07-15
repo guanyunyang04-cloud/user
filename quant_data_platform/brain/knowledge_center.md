@@ -60,7 +60,7 @@
 ### class `qdp_v3_intraday_5m`
 
 `definition`: v3 唯一分钟事实域；标准右闭合 48 根 bar，主键 `security_id + trade_date + bar_end`，canonical 按自然年和稳定 64 个 security bucket 分片。v3 不存在 1m raw、watermark、转换或发布门。
-`historical_source`: `2010-01-01..2026-07-13` 独占使用 Tushare-compatible proxy；同源 Tushare 日线聚合只检测分页、单位和缺 bar，不调用 BaoStock/mootdx 逐行证明数值。proxy provenance 不透明但被合同指定为可信历史启动源；`vol/amount` canonical scale 均为 1.0。
+`historical_source`: `2010-01-01..2026-07-13` 按完整股票日优先使用本地直接 5m、v2 迁移完整日、2020+ mootdx/BaoStock 完整日，Tushare-compatible proxy 只补最终残差。不同来源不逐值比较；跨源日线差异只作诊断，Tushare 5m 仅与同源 Tushare 日线做分页、单位和缺 bar 硬检查。`vol/amount` canonical scale 均为 1.0。
 `incremental_source`: 截止日后完整 mootdx 优先；只有 mootdx 股票日不完整才使用完整 BaoStock。任一来源不完整时禁止拼接或插值，不为数值仲裁同时下载两源。
 `tiers`: 新生产数据只有 strict/quarantined；结构、identity 或完整性不合格进入 quarantine，旧 provisional 仅为 legacy 可读证据。
 `download_rule`: proxy 每证券按时间倒序最多 8,000 行串行翻页并页级断点恢复，证券完成后合并成一个 immutable raw；mootdx 最近窗口从 `start=0, offset=800` 开始，目标日期齐全即停止；BaoStock 只接管完整日，禁止跨源拼接。
@@ -68,7 +68,7 @@
 
 ### class `tushare_proxy_historical_bootstrap`
 
-`role`: 合同指定的可信、限时、一次性历史启动源，不使用 Tushare SDK，不承担截止日后的持续更新，也不宣称上游官方 provenance。
+`role`: 低频历史基底与历史 5m 最终残差源，不使用 Tushare SDK，不承担截止日后的持续更新，也不宣称上游官方 provenance。
 `secret_boundary`: Token 只从 `QDP_TUSHARE_PROXY_TOKEN` 读取；日志、异常、job、receipt、manifest 和 MCP URL 均不得保存明文 Token，只可保存 SHA-256 指纹与公开账户元数据。
 `transport`: 三个 worker 各自使用 HTTP session，但共享单一 `96 rpm / burst 1` 限速器、quota 状态和 429 冷却；8,000 行满页必须继续，非零 code、字段宽度、gzip/JSON 或页间顺序错误不得解释为空数据。
 `resume`: 页级 staging/cursor；额度耗尽为 `paused_quota`，断网、续期或进程终止后从同一 job 恢复。
@@ -77,12 +77,12 @@
 
 `baostock_rule`: 日期批量与 symbol-range 是两种独立持久会话协议；生产 QDP v3 长任务复用一个隔离子进程中的单 login，逐 symbol 错误可单独重试，成功 symbol 不重复请求。通用 provider 默认仍保留旧隔离调用合同，只有显式启用的 v3 任务复用 symbol-range session。
 `mootdx_rule`: TCP 可连接不等于 TDX 协议可用；节点选择必须同时通过小样本 bars 协议探针。首轮可并行探测候选，已失败节点排除；全源失败须负缓存并快速返回，让单源 fallback 接管，不能为每只证券重复等待全部坏节点。
-`scope_rule`: 历史下载优先 5m，额度耗尽后只补核心 `status/factor`；daily_basic、valuation、dividend、financial、industry、index 和 share-capital 不阻塞首次发布。
+`scope_rule`: 先迁移/复用本地完整日，再把最终 5m 残差交给代理；额度耗尽后只补核心 `status/factor`。daily_basic、valuation、dividend、financial、industry、index 和 share-capital 不阻塞首次发布。
 
 ### class `qdp_v3_compact_raw_storage`
 
 `data_root`: `H:\quant_project\quant_data_platform\data`
-`runtime_root`: `C:\Users\ASUS\AppData\Local\QDP\runtime`
+`runtime_root`: `H:\quant_project\quant_data_platform\data\qdp_runtime`
 `layout`: reference raw 固定 `year=undated/security_bucket=00`，低频时序 raw 按 `year=<year>/security_bucket=00`，只有 5m raw 按 `year=<year>/security_bucket=<00..15>`；均使用 zstd、目标约 384 MiB、最大 1 GiB。canonical 5m 仍使用稳定 64 buckets，与 5m raw 的 16-bucket layout 是两个独立合同。
 `index`: SQLite WAL 保存 job/cursor/page/receipt/bundle row-group 映射；发布前导出 `raw_index.parquet` 与 `raw_receipts.parquet` 及 SHA256 sidecar，因此 active 不依赖 C 盘运行数据库。
 `compaction_gate`: 逐源 content hash、row count、schema、bundle hash 和 row-group index 全部验证后，`compact --delete-source --yes` 才能删除对应 legacy 小文件；成功空响应只写 receipt/index。
@@ -110,7 +110,7 @@
 ### class `baostock_online`
 
 `domain`: trading calendar, universe/listing status, security status, industry labels, index constituents, turnover/valuation and structural daily fields.
-`bar_role`: v2 中主要作 audit/backfill；v3 只在 cutoff 后承担日线、状态、因子事件与 mootdx 不完整时的完整 5m fallback。历史 BaoStock raw 可紧凑归档，但不进入 Tushare 独占的 historical canonical。
+`bar_role`: v2 中主要作 audit/backfill；v3 在 2020+ 历史残差和 cutoff 后增量中可作为 mootdx 不完整时的完整 5m fallback，同时维护日线、状态和因子事件。只接受完整股票日，不与其他来源拼接。
 
 ### class `cninfo_online`
 

@@ -1004,7 +1004,10 @@ def _ingest_intraday_5m_fast(
                         trade_date=trade_date,
                         compare_sources=False,
                     )
-                    used_fallback = evidence.get("selected_source") == "baostock"
+                    selected_source = str(
+                        evidence.get("selected_source") or evidence.get("source") or ""
+                    )
+                    used_fallback = selected_source == "baostock"
                     day_results.append(
                         {
                             "trade_date": trade_date,

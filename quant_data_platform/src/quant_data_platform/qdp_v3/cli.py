@@ -28,6 +28,7 @@ from quant_data_platform.qdp_v3.ingest import (
     resolve_trade_dates,
 )
 from quant_data_platform.qdp_v3.intraday import ingest_intraday_5m
+from quant_data_platform.qdp_v3.legacy_v2_5m import migrate_v2_active_intraday_5m
 from quant_data_platform.qdp_v3.manifest import active_manifest_sha256, dataset_manifest_for_id, manifest_sha256, read_dataset_manifest
 from quant_data_platform.qdp_v3.mootdx_compatibility import run_mootdx_5m_compatibility_gate
 from quant_data_platform.qdp_v3.paths import qdp_v3_paths
@@ -59,6 +60,8 @@ QDP v3 manifest-first data-base commands:
                                  Capture resumable 2010+ historical raw facts.
   ingest --provider external-quant-archive --mode historical --domain intraday
                                  Import the user-supplied direct 5m archive.
+  ingest --provider qdp-v2-migration --mode historical --domain intraday
+                                 Migrate valid stock-days from the read-only v2 active 5m leaf.
   build candidate                Build immutable canonical datasets and a candidate.
   compact --raw-domain DOMAIN    Bundle verified raw partitions into large Parquet files.
   audit --candidate ID           Run quick, full, or semantic candidate gates.
@@ -268,7 +271,13 @@ def _ingest(argv: list[str]) -> int:
     parser.add_argument(
         "--provider",
         default="baostock",
-        choices=("baostock", "mootdx", "tushare-proxy", "external-quant-archive"),
+        choices=(
+            "baostock",
+            "mootdx",
+            "tushare-proxy",
+            "external-quant-archive",
+            "qdp-v2-migration",
+        ),
     )
     parser.add_argument("--mode", required=True, choices=("historical", "date-snapshot", "date-events", "factor-symbol-history", "calendar", "security-master", "intraday-5m", "corporate-actions", "financial-quarterly", "performance-forecast", "performance-express", "industry", "index-constituents"))
     parser.add_argument("--domain", default="", choices=("", "stock-basic", "trade-calendar", "daily", "daily-basic", "factor", "identity", "status", "dividend", "financial", "intraday"))
@@ -303,6 +312,32 @@ def _ingest(argv: list[str]) -> int:
     if args.mode == "historical":
         if not args.domain or not args.start_date or not args.end_date:
             parser.error("historical mode requires --domain, --start-date, and --end-date")
+        if args.provider == "qdp-v2-migration":
+            if args.domain != "intraday":
+                parser.error("qdp-v2-migration historical mode only supports --domain intraday")
+            symbols = list(args.symbol)
+            if args.symbols_file:
+                symbols.extend(
+                    item.strip()
+                    for item in Path(args.symbols_file).read_text(encoding="utf-8").splitlines()
+                    if item.strip()
+                )
+            job_path = (
+                qdp_v3_paths(workspace).jobs / f"{str(args.job_id)}.json"
+                if str(args.job_id or "").strip()
+                else None
+            )
+            result = migrate_v2_active_intraday_5m(
+                workspace_root=workspace,
+                symbols=tuple(symbols),
+                start_date=str(args.start_date),
+                end_date=str(args.end_date),
+                workers=int(args.max_workers),
+                job_path=job_path,
+            )
+            payload = result.to_dict()
+            _emit(payload, as_json=bool(args.json))
+            return 0 if payload.get("status") == "completed" else 2
         if args.provider == "external-quant-archive":
             if args.domain != "intraday":
                 parser.error("external-quant-archive historical mode only supports --domain intraday")

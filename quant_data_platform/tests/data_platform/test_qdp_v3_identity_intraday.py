@@ -752,6 +752,12 @@ def test_fast_5m_ingest_requests_baostock_only_for_incomplete_mootdx_dates(tmp_p
     selected = read_raw_partition(selected_ref)
     source_by_date = selected.groupby("trade_date")["source"].unique().map(set).to_dict()
     assert source_by_date == {"2026-07-13": {"mootdx"}, "2026-07-14": {"baostock"}}
+    receipt = read_raw_receipt(selected_ref)
+    fallback_by_date = {
+        str(item["trade_date"]): bool(item["used_baostock_fallback"])
+        for item in receipt["day_results"]
+    }
+    assert fallback_by_date == {"2026-07-13": False, "2026-07-14": True}
 
 
 def test_5m_ingest_uses_symbol_month_tasks_pit_trading_days_and_stratum_escalation(tmp_path: Path) -> None:
