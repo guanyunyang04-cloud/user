@@ -42,6 +42,11 @@ def workspace_root(start: str | Path | None = None) -> Path:
     for candidate in (initial, *initial.parents):
         if _is_main_brain_root(candidate):
             return candidate
+    # An explicit caller-supplied root is an isolation boundary even before
+    # its brain manifest has been created.  Falling back to the source checkout
+    # here can redirect tests, migrations, or recovery probes into production.
+    if start is not None:
+        return initial
     return Path(__file__).resolve().parents[4]
 
 

@@ -1122,6 +1122,7 @@ def _run_intraday_symbol(
         end_at=end_at,
     )
     legitimate_empty_evidence: dict[str, Any] = {}
+    quarantined_empty_evidence: dict[str, Any] = {}
     if combined.empty:
         legitimate_empty_evidence = _prove_provider_symbol_restatement(
             client=client,
@@ -1131,7 +1132,20 @@ def _run_intraday_symbol(
             end_at=end_at,
         )
         if not legitimate_empty_evidence:
-            raise RuntimeError(f"intraday_empty_despite_lifecycle_overlap:{symbol}")
+            # A successful empty response is a provider coverage gap, not a
+            # protocol failure.  Keep it explicit and quarantined so a small
+            # number of delisted/special securities cannot stall the entire
+            # personal-research bootstrap.  Candidate coverage still counts
+            # the missing stock-days and can enforce the configured 98% gate.
+            quarantined_empty_evidence = {
+                "reason": "provider_successful_empty_with_lifecycle_overlap",
+                "provider_symbol": symbol,
+                "requested_start_at": start_at,
+                "requested_end_at": end_at,
+                "response_sha256": str(
+                    receipts[-1].get("response_sha256", "") if receipts else ""
+                ),
+            }
     timestamp_column = _timestamp_column(combined)
     combined = combined.copy()
     if "provider_symbol" not in combined.columns:
@@ -1153,12 +1167,7 @@ def _run_intraday_symbol(
         combined = combined.sort_values(timestamp_column, ascending=False).reset_index(drop=True)
     else:
         combined = combined.reset_index(drop=True)
-    ref, _ = write_raw_partition(
-        raw_domain=raw_domain,
-        partition_field="provider_symbol",
-        partition_value=symbol,
-        frame=combined,
-        receipt={
+    receipt_payload = {
             **client.config.public_metadata(),
             "endpoint": "stk_mins",
             "provider_symbol": symbol,
@@ -1180,11 +1189,28 @@ def _run_intraday_symbol(
                 }
                 for item in receipts
             ],
-            "quality_tier": QUALITY_PROVISIONAL,
-            "quality_note": "trusted_historical_source_pending_daily_identity_and_5m_structural_gates",
+            "quality_tier": (
+                QUALITY_QUARANTINED
+                if quarantined_empty_evidence
+                else QUALITY_PROVISIONAL
+            ),
+            "quality_note": (
+                "trusted_source_successful_empty_provider_gap"
+                if quarantined_empty_evidence
+                else "trusted_historical_source_pending_daily_identity_and_5m_structural_gates"
+            ),
             "legitimate_empty": bool(legitimate_empty_evidence),
             "legitimate_empty_evidence": legitimate_empty_evidence,
-        },
+            "quarantined_empty": bool(quarantined_empty_evidence),
+            "quarantined_empty_evidence": quarantined_empty_evidence,
+        }
+    writer = write_empty_raw_partition if combined.empty else write_raw_partition
+    ref, _ = writer(
+        raw_domain=raw_domain,
+        partition_field="provider_symbol",
+        partition_value=symbol,
+        frame=combined,
+        receipt=receipt_payload,
         workspace_root=workspace_root,
     )
     with job_guard:

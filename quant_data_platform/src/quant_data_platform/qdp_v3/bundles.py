@@ -230,13 +230,18 @@ class RawBundleWriter:
             self._flush(key)
         return BundleWriteResult(parts=tuple(self._parts), indexed_rows=self._indexed_rows)
 
-    def abort(self) -> None:
+    def abort(self, *, remove_created_parts: bool = False) -> None:
         for state in self._open.values():
             try:
                 state.writer.close()
             finally:
                 state.temp_path.unlink(missing_ok=True)
         self._open.clear()
+        if remove_created_parts:
+            for part in self._parts:
+                if part.created:
+                    part.path.unlink(missing_ok=True)
+            self._parts.clear()
 
     def _new_state(self, key: tuple[str, str, int, str], schema: pa.Schema) -> _OpenBundle:
         domain, year, bucket, _ = key

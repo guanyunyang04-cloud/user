@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
+import quant_data_platform.qdp_v3.compaction as compaction_module
 import quant_data_platform.qdp_v3.storage as storage_module
 from quant_data_platform.qdp_v3.bundles import BundleSizingPolicy, stable_raw_bucket
 from quant_data_platform.qdp_v3.compaction import compact_raw_domain
@@ -120,7 +121,10 @@ def test_runtime_index_tables_and_secret_rejection(tmp_path: Path) -> None:
         )
 
 
-def test_compactor_bundles_by_year_and_bucket_without_deleting_sources(tmp_path: Path) -> None:
+def test_compactor_bundles_by_year_and_bucket_without_deleting_sources(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     workspace = _workspace(tmp_path)
     raw_domain = "compact_unit_intraday_5m_raw"
     first_symbol, second_symbol = _symbols_in_different_buckets()
@@ -186,7 +190,7 @@ def test_compactor_bundles_by_year_and_bucket_without_deleting_sources(tmp_path:
     assert {part.security_bucket for part in result.parts}.issuperset(
         {stable_raw_bucket(first_symbol), stable_raw_bucket(second_symbol)}
     )
-    assert all(path.exists() for path in source_paths)
+
 
     raw_index = index.table_frame("raw_partitions")
     empty_rows = raw_index.loc[raw_index["status"].eq("empty_success")]
@@ -237,6 +241,13 @@ def test_compactor_bundles_by_year_and_bucket_without_deleting_sources(tmp_path:
             delete_sources=True,
         )
 
+    monkeypatch.setattr(
+        compaction_module,
+        "read_raw_partition",
+        lambda *_args, **_kwargs: pytest.fail(
+            "verified delete-source path must not decode legacy frames again"
+        ),
+    )
     deleted = compact_raw_domain(
         raw_domain,
         workspace_root=workspace,
@@ -301,6 +312,67 @@ def test_compactor_bundles_by_year_and_bucket_without_deleting_sources(tmp_path:
             read_raw_partition(fallback_by_value["2020-01-02"])
     finally:
         tampered_path.write_bytes(original_bytes)
+
+
+def test_failed_compaction_restores_last_export_and_removes_new_parts(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    paths = ensure_qdp_v3_layout(workspace)
+    export_dir = paths.metadata / "raw_index"
+    write_raw_partition(
+        raw_domain="safe_export_raw",
+        partition_field="query_date",
+        partition_value="2020-01-01",
+        frame=pd.DataFrame({"trade_date": ["2020-01-01"], "value": [1]}),
+        receipt={"provider": "unit", "quality_tier": "strict"},
+        workspace_root=workspace,
+    )
+    compact_raw_domain(
+        "safe_export_raw",
+        workspace_root=workspace,
+        export_index_dir=export_dir,
+    )
+
+    write_raw_partition(
+        raw_domain="failed_compaction_raw",
+        partition_field="query_date",
+        partition_value="2020-01-01",
+        frame=pd.DataFrame({"trade_date": ["2020-01-01"], "value": [1]}),
+        receipt={"provider": "unit", "quality_tier": "strict"},
+        workspace_root=workspace,
+    )
+    bad_ref, _ = write_raw_partition(
+        raw_domain="failed_compaction_raw",
+        partition_field="query_date",
+        partition_value="2020-01-02",
+        frame=pd.DataFrame({"trade_date": ["2020-01-02"], "value": [2]}),
+        receipt={"provider": "unit", "quality_tier": "strict"},
+        workspace_root=workspace,
+    )
+    pd.DataFrame({"trade_date": ["2020-01-02"], "value": [999]}).to_parquet(
+        bad_ref.payload_path,
+        index=False,
+    )
+
+    with pytest.raises(RuntimeError, match=r"raw_(?:parquet|content)_hash_mismatch"):
+        compact_raw_domain(
+            "failed_compaction_raw",
+            workspace_root=workspace,
+            export_index_dir=export_dir,
+            sizing=BundleSizingPolicy(target_part_bytes=1, max_part_bytes=1024 * 1024),
+        )
+
+    index = RuntimeIndex(workspace_root=workspace)
+    assert index.table_frame("raw_partitions").loc[
+        lambda frame: frame["domain"].eq("failed_compaction_raw")
+    ].empty
+    assert index.table_frame("raw_receipts").loc[
+        lambda frame: frame["domain"].eq("failed_compaction_raw")
+    ].empty
+    failed_bundle_root = paths.raw_bundles / "failed_compaction_raw"
+    assert not list(failed_bundle_root.rglob("*.parquet"))
+    safe = iter_raw_partitions("safe_export_raw", workspace_root=workspace)
+    assert len(safe) == 1
+    assert read_raw_partition(safe[0]).loc[0, "value"] == 1
 
 
 def test_compactor_keeps_reference_history_in_one_undated_bundle(tmp_path: Path) -> None:

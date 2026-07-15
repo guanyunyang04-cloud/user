@@ -266,6 +266,115 @@ def verify_bundle_parts(parts: Iterable[BundlePartRef], *, runtime_index: Runtim
             raise RuntimeError(f"raw_bundle_index_hash_mismatch:{part.path}")
 
 
+def _verified_catalog_parts_for_legacy_sources(
+    selected: list[RawPartitionRef],
+    *,
+    raw_domain: str,
+    paths: Any,
+    runtime_index: RuntimeIndex,
+) -> tuple[tuple[BundlePartRef, ...], int, int] | None:
+    """Use an already exported bundle catalog to retire unchanged legacy bytes."""
+
+    if not selected:
+        return None
+    receipts = runtime_index.table_frame("raw_receipts")
+    mappings = runtime_index.table_frame("raw_partitions")
+    receipts = receipts.loc[receipts["domain"].astype(str).eq(str(raw_domain))]
+    mappings = mappings.loc[mappings["domain"].astype(str).eq(str(raw_domain))]
+    receipt_keys = {
+        (str(row.partition_key), str(row.source_content_sha256)): row
+        for row in receipts.itertuples(index=False)
+    }
+    mapping_groups = {
+        (str(key), str(content_sha)): group.copy()
+        for (key, content_sha), group in mappings.groupby(
+            ["partition_key", "source_content_sha256"],
+            sort=False,
+        )
+    }
+    expected_keys = {
+        (f"{ref.partition_field}={ref.partition_value}", ref.content_sha256)
+        for ref in selected
+    }
+    if not expected_keys.issubset(receipt_keys) or not expected_keys.issubset(mapping_groups):
+        return None
+
+    source_rows = 0
+    empty_count = 0
+    selected_bundle_paths: set[str] = set()
+    for ref in selected:
+        key = f"{ref.partition_field}={ref.partition_value}"
+        identity = (key, ref.content_sha256)
+        receipt_row = receipt_keys[identity]
+        current_receipt = read_raw_receipt(ref)
+        try:
+            indexed_receipt = json.loads(str(receipt_row.receipt_json))
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"raw_compaction_catalog_receipt_invalid:{raw_domain}:{key}") from exc
+        if any(indexed_receipt.get(name) != value for name, value in current_receipt.items()):
+            raise RuntimeError(f"raw_compaction_catalog_receipt_changed:{raw_domain}:{key}")
+        expected_parquet_sha = str(current_receipt.get("parquet_sha256", "") or "")
+        if not expected_parquet_sha or sha256_file(ref.payload_path) != expected_parquet_sha:
+            raise RuntimeError(f"raw_compaction_source_parquet_changed:{ref.payload_path}")
+        if int(receipt_row.row_count) != int(ref.row_count):
+            raise RuntimeError(f"raw_compaction_catalog_receipt_row_count_mismatch:{raw_domain}:{key}")
+
+        group = mapping_groups[identity]
+        statuses = set(group["status"].astype(str))
+        mapped_rows = int(group["row_count"].astype("int64").sum())
+        if mapped_rows != int(ref.row_count):
+            raise RuntimeError(f"raw_compaction_catalog_mapping_row_count_mismatch:{raw_domain}:{key}")
+        if int(ref.row_count) == 0:
+            if statuses != {"empty_success"} or len(group) != 1:
+                raise RuntimeError(f"raw_compaction_catalog_empty_mapping_invalid:{raw_domain}:{key}")
+            empty_count += 1
+        else:
+            if statuses != {"bundled"} or group["bundle_path"].astype(str).eq("").any():
+                raise RuntimeError(f"raw_compaction_catalog_mapping_invalid:{raw_domain}:{key}")
+            selected_bundle_paths.update(group["bundle_path"].astype(str))
+        source_rows += int(ref.row_count)
+
+    bundle_root = (paths.raw_bundles / str(raw_domain)).resolve()
+    parts: list[BundlePartRef] = []
+    for relative_path in sorted(selected_bundle_paths):
+        path = (paths.root / relative_path).resolve()
+        if not path.is_relative_to(bundle_root):
+            raise RuntimeError(f"raw_compaction_catalog_bundle_outside_domain:{path}")
+        group = mappings.loc[mappings["bundle_path"].astype(str).eq(relative_path)]
+        bundle_hashes = set(group["bundle_sha256"].astype(str))
+        if len(bundle_hashes) != 1:
+            raise RuntimeError(f"raw_compaction_catalog_bundle_hash_conflict:{path}")
+        expected_hash = next(iter(bundle_hashes))
+        if not path.exists() or sha256_file(path) != expected_hash:
+            raise RuntimeError(f"raw_compaction_catalog_bundle_hash_mismatch:{path}")
+        metadata = pq.read_metadata(path)
+        expected_groups = set(range(int(metadata.num_row_groups)))
+        actual_groups = set(group["row_group"].astype("int64"))
+        if actual_groups != expected_groups:
+            raise RuntimeError(f"raw_compaction_catalog_bundle_row_groups_mismatch:{path}")
+        if int(group["row_count"].astype("int64").sum()) != int(metadata.num_rows):
+            raise RuntimeError(f"raw_compaction_catalog_bundle_rows_mismatch:{path}")
+        components = Path(relative_path).parts
+        year_component = next((item for item in components if item.startswith("year=")), "year=undated")
+        bucket_component = next(
+            (item for item in components if item.startswith("security_bucket=")),
+            "security_bucket=00",
+        )
+        parts.append(
+            BundlePartRef(
+                path=path,
+                relative_path=str(relative_path),
+                sha256=expected_hash,
+                row_count=int(metadata.num_rows),
+                row_group_count=int(metadata.num_row_groups),
+                year=year_component.split("=", 1)[1],
+                security_bucket=int(bucket_component.split("=", 1)[1]),
+                created=False,
+            )
+        )
+    return tuple(parts), source_rows, empty_count
+
+
 def compact_raw_partitions(
     refs: Iterable[RawPartitionRef],
     *,
@@ -285,11 +394,39 @@ def compact_raw_partitions(
         raise ValueError("raw_compaction_source_deletion_requires_index_export")
     paths = ensure_qdp_v3_layout(workspace_root)
     index = runtime_index or RuntimeIndex(workspace_root=workspace_root)
-    writer = RawBundleWriter(paths=paths, runtime_index=index, sizing=sizing)
     selected = sorted(
         (ref for ref in refs if ref.raw_domain == str(raw_domain)),
         key=lambda ref: (ref.partition_value, ref.content_sha256),
     )
+    if delete_sources:
+        verified = _verified_catalog_parts_for_legacy_sources(
+            selected,
+            raw_domain=str(raw_domain),
+            paths=paths,
+            runtime_index=index,
+        )
+        if verified is not None:
+            parts, source_rows, empty_count = verified
+            export = index.export_raw_index(export_index_dir)
+            domain_root = (paths.raw / str(raw_domain)).resolve()
+            partition_dirs = sorted({ref.receipt_path.resolve().parents[2] for ref in selected})
+            for partition_dir in partition_dirs:
+                if partition_dir.parent != domain_root:
+                    raise RuntimeError(f"raw_compaction_delete_path_outside_domain:{partition_dir}")
+            for partition_dir in partition_dirs:
+                shutil.rmtree(partition_dir)
+            return RawCompactionResult(
+                raw_domain=str(raw_domain),
+                source_partition_count=len(selected),
+                source_row_count=source_rows,
+                empty_partition_count=empty_count,
+                indexed_row_count=source_rows,
+                parts=parts,
+                raw_index_export=export,
+                deleted_source_partition_count=len(partition_dirs),
+            )
+
+    writer = RawBundleWriter(paths=paths, runtime_index=index, sizing=sizing)
     source_rows = 0
     empty_count = 0
     try:
@@ -315,15 +452,16 @@ def compact_raw_partitions(
             for year, bucket, segment in _segments_for_ref(ref, frame):
                 writer.add(year=year, security_bucket=bucket, segment=segment)
         write_result = writer.finish()
+        if write_result.indexed_rows != source_rows:
+            raise RuntimeError(
+                f"raw_compaction_indexed_row_count_mismatch:{write_result.indexed_rows}:{source_rows}"
+            )
+        verify_bundle_parts(write_result.parts, runtime_index=index)
+        export = index.export_raw_index(export_index_dir) if export_index_dir is not None else None
     except BaseException:
-        writer.abort()
+        writer.abort(remove_created_parts=True)
+        index.restore_raw_domain_from_verified_export(str(raw_domain))
         raise
-    if write_result.indexed_rows != source_rows:
-        raise RuntimeError(
-            f"raw_compaction_indexed_row_count_mismatch:{write_result.indexed_rows}:{source_rows}"
-        )
-    verify_bundle_parts(write_result.parts, runtime_index=index)
-    export = index.export_raw_index(export_index_dir) if export_index_dir is not None else None
     deleted_partition_count = 0
     if delete_sources:
         receipt_rows = index.table_frame("raw_receipts")

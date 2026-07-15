@@ -549,6 +549,64 @@ class RuntimeIndex:
             connection.commit()
         return int(len(receipts))
 
+    def restore_raw_domain_from_verified_export(self, domain: str) -> tuple[int, int]:
+        """Restore one domain after a failed, not-yet-exported compaction attempt."""
+
+        normalized_domain = str(domain).strip()
+        if not normalized_domain:
+            raise ValueError("runtime_index_restore_domain_missing")
+        catalog = self._verified_export_catalog()
+        if catalog is None:
+            partitions = pd.DataFrame(columns=_RAW_PARTITION_COLUMNS)
+            receipts = pd.DataFrame(columns=_RAW_RECEIPT_COLUMNS)
+        else:
+            all_partitions, all_receipts = catalog
+            partitions = all_partitions.loc[
+                all_partitions["domain"].astype(str).eq(normalized_domain)
+            ].copy()
+            receipts = all_receipts.loc[
+                all_receipts["domain"].astype(str).eq(normalized_domain)
+            ].copy()
+
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "DELETE FROM raw_partitions WHERE domain = ?",
+                (normalized_domain,),
+            )
+            connection.execute(
+                "DELETE FROM raw_receipts WHERE domain = ?",
+                (normalized_domain,),
+            )
+            connection.executemany(
+                """
+                INSERT INTO raw_partitions (
+                    domain, partition_key, provider, request_range, row_count,
+                    response_sha256, source_content_sha256, bundle_path,
+                    row_group, status, bundle_sha256, source_schema_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    tuple(row[column] for column in _RAW_PARTITION_COLUMNS)
+                    for row in partitions.to_dict("records")
+                ],
+            )
+            connection.executemany(
+                """
+                INSERT INTO raw_receipts (
+                    domain, partition_key, provider, request_range, row_count,
+                    response_sha256, source_content_sha256, quality_tier,
+                    receipt_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    tuple(row[column] for column in _RAW_RECEIPT_COLUMNS)
+                    for row in receipts.to_dict("records")
+                ],
+            )
+            connection.commit()
+        return int(len(partitions)), int(len(receipts))
+
     def record_raw_partition(self, record: RawPartitionIndexRecord) -> None:
         if int(record.row_count) < 0:
             raise ValueError("runtime_index_negative_row_count")

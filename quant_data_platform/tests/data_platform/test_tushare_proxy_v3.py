@@ -11,6 +11,7 @@ import pytest
 from quant_data_platform.domains.contracts import HistoryPageFetchRequest, HistoryPageResult
 from quant_data_platform.qdp_v3.constants import EXPECTED_5M_BAR_ENDS
 from quant_data_platform.qdp_v3.historical import (
+    ingest_tushare_proxy_intraday,
     _merge_intraday_range_frames,
     _official_restatement_aliases,
     _proxy_performance_gate_failed,
@@ -25,7 +26,11 @@ from quant_data_platform.qdp_v3.proxy_factor import (
     derive_proxy_factor_evidence,
     reconcile_proxy_factor_third_path,
 )
-from quant_data_platform.qdp_v3.storage import write_raw_partition
+from quant_data_platform.qdp_v3.storage import (
+    get_raw_partition,
+    read_raw_receipt,
+    write_raw_partition,
+)
 from quant_data_platform.tushare_proxy import (
     TushareProxyClient,
     TushareProxyConfig,
@@ -407,6 +412,83 @@ def test_two_legitimate_empty_intraday_waves_merge_without_timestamp_schema() ->
     assert merged.empty
     assert list(merged.columns) == ["provider_symbol"]
     assert timestamp_column == ""
+
+
+class _SuccessfulEmptyHistoryClient:
+    def __init__(self) -> None:
+        self.config = TushareProxyConfig(
+            token="unit-test-secret",
+            url="https://example.test/api",
+        )
+
+    def fetch_history_page(self, request: HistoryPageFetchRequest) -> HistoryPageResult:
+        fields = (
+            "ts_code",
+            "trade_time",
+            "open",
+            "high",
+            "low",
+            "close",
+            "vol",
+            "amount",
+        )
+        return HistoryPageResult(
+            provider="tushare_proxy",
+            request=request,
+            raw_data=pd.DataFrame(columns=list(fields)),
+            fields=fields,
+            row_count=0,
+            min_timestamp="",
+            max_timestamp="",
+            next_end_at="",
+            response_sha256="a" * 64,
+            is_complete=True,
+            request_metadata_without_token={},
+        )
+
+    def operational_metrics(self) -> dict:
+        return {"request_count": 1, "success_count": 1, "error_rate": 0.0}
+
+    def close_thread_session(self) -> None:
+        return None
+
+
+def test_successful_empty_intraday_provider_gap_is_quarantined_not_failed(
+    tmp_path: Path,
+) -> None:
+    result = ingest_tushare_proxy_intraday(
+        symbols=["000005.SZ"],
+        start_date="2010-01-01",
+        end_date="2019-12-31",
+        workspace_root=tmp_path,
+        client=_SuccessfulEmptyHistoryClient(),
+        lifecycle_ranges={"000005.SZ": ("1990-12-10", "2023-06-30")},
+        max_workers=1,
+        minimum_free_bytes=0,
+    )
+
+    assert result["status"] == "completed"
+    assert result["completed_count"] == 1
+    ref = get_raw_partition(
+        "tushare_proxy_intraday_5m_raw",
+        partition_field="provider_symbol",
+        partition_value="000005.SZ",
+        workspace_root=tmp_path,
+    )
+    assert ref is not None
+    assert ref.row_count == 0
+    assert ref.quality_tier == "quarantined"
+    receipt = read_raw_receipt(ref)
+    assert receipt["quarantined_empty"] is True
+    assert (
+        receipt["quarantined_empty_evidence"]["reason"]
+        == "provider_successful_empty_with_lifecycle_overlap"
+    )
+    assert not list(
+        (ensure_qdp_v3_layout(tmp_path).raw / "tushare_proxy_intraday_5m_raw").rglob(
+            "*.parquet"
+        )
+    )
 
 
 def test_proxy_factor_comparison_is_constant_scale_invariant(tmp_path) -> None:

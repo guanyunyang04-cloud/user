@@ -100,3 +100,13 @@ def test_workspace_root_skips_child_sub_brain_manifest(tmp_path: Path, monkeypat
 
     assert workspace_root(child) == tmp_path.resolve()
     assert qdp_paths(child).workspace_root == tmp_path.resolve()
+
+
+def test_explicit_unmarked_workspace_is_an_isolation_boundary(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("QDP_WORKSPACE_ROOT", raising=False)
+
+    assert workspace_root(tmp_path) == tmp_path.resolve()
+    assert qdp_paths(tmp_path).workspace_root == tmp_path.resolve()
