@@ -1034,7 +1034,12 @@ def _ingest_intraday_5m_fast(
                         "quarantined_day_count": len(failed_days),
                         "audit_cross_sources": False,
                         "inputs": [
-                            {"raw_domain": item.raw_domain, "content_sha256": item.content_sha256}
+                            {
+                                "raw_domain": item.raw_domain,
+                                "partition_field": item.partition_field,
+                                "partition_value": item.partition_value,
+                                "content_sha256": item.content_sha256,
+                            }
                             for item in input_refs
                         ],
                         "provider_errors": [*mootdx_errors, *baostock_errors],
@@ -1498,8 +1503,30 @@ def _ingest_intraday_5m_audit(
                     "stratum": stratum_by_symbol[symbol],
                     "stratum_escalated": stratum_by_symbol[symbol] in escalated_strata,
                     "inputs": [
-                        *([{"raw_domain": mootdx_ref.raw_domain, "content_sha256": mootdx_ref.content_sha256}] if mootdx_ref else []),
-                        *([{"raw_domain": baostock_ref.raw_domain, "content_sha256": baostock_ref.content_sha256}] if baostock_ref else []),
+                        *(
+                            [
+                                {
+                                    "raw_domain": mootdx_ref.raw_domain,
+                                    "partition_field": mootdx_ref.partition_field,
+                                    "partition_value": mootdx_ref.partition_value,
+                                    "content_sha256": mootdx_ref.content_sha256,
+                                }
+                            ]
+                            if mootdx_ref
+                            else []
+                        ),
+                        *(
+                            [
+                                {
+                                    "raw_domain": baostock_ref.raw_domain,
+                                    "partition_field": baostock_ref.partition_field,
+                                    "partition_value": baostock_ref.partition_value,
+                                    "content_sha256": baostock_ref.content_sha256,
+                                }
+                            ]
+                            if baostock_ref
+                            else []
+                        ),
                     ],
                     "provider_errors": provider_errors,
                 },

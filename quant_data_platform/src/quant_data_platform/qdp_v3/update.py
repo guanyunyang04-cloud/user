@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -11,7 +12,10 @@ from quant_data_platform.qdp_v3.build import build_candidate
 from quant_data_platform.qdp_v3.constants import (
     BOOTSTRAP_CUTOFF,
     RAW_ADJUST_FACTOR_EVENT,
+    RAW_EXTERNAL_QUANT_INTRADAY_5M,
+    RAW_INTRADAY_5M_SELECTED,
     RAW_TRADING_CALENDAR,
+    RAW_TUSHARE_PROXY_INTRADAY_5M,
     RAW_TUSHARE_PROXY_TRADE_CALENDAR,
     V2_RETIREMENT_GATE_FILENAME,
 )
@@ -19,6 +23,7 @@ from quant_data_platform.qdp_v3.freeze import freeze_v2, validate_v2_freeze_proo
 from quant_data_platform.qdp_v3.historical import (
     ingest_tushare_proxy_intraday,
     ingest_tushare_proxy_reference,
+    plan_intraday_residuals,
     proxy_symbol_inventory,
 )
 from quant_data_platform.qdp_v3.identity import SecurityIdentityRegistry, board_for_symbol, normalize_symbol
@@ -43,6 +48,7 @@ from quant_data_platform.qdp_v3.supervisor import requeue_stale_jobs, supervise_
 
 
 TRUSTED_BOOTSTRAP_PROVIDER = "tushare-proxy"
+LOCAL_ARCHIVE_BOOTSTRAP_PROVIDER = "external-quant-archive"
 TRUSTED_BOOTSTRAP_START = "2010-01-01"
 INCREMENTAL_CALENDAR_LOOKBACK_DAYS = 120
 INCREMENTAL_DAILY_REFRESH_DAYS = 10
@@ -235,6 +241,7 @@ def plan_update(
     bootstrap: bool = False,
     start_date: str = "",
     historical_provider: str = "",
+    source_paths: Iterable[str | Path] = (),
 ) -> dict[str, Any]:
     paths = qdp_v3_paths(workspace_root)
     active_validation = validate_published_active(workspace_root)
@@ -245,11 +252,26 @@ def plan_update(
             "message": "No v3 active exists. Use --bootstrap for the initial trusted-source rebuild.",
             "active_sha256": active_manifest_sha256(workspace_root),
         }
-    normalized_provider = str(historical_provider or (TRUSTED_BOOTSTRAP_PROVIDER if bootstrap else "")).strip().lower()
-    if bootstrap and normalized_provider != TRUSTED_BOOTSTRAP_PROVIDER:
+    normalized_source_paths = tuple(str(Path(item)) for item in source_paths if str(item).strip())
+    normalized_provider = str(
+        historical_provider
+        or (
+            LOCAL_ARCHIVE_BOOTSTRAP_PROVIDER
+            if bootstrap and normalized_source_paths
+            else TRUSTED_BOOTSTRAP_PROVIDER if bootstrap else ""
+        )
+    ).strip().lower()
+    if bootstrap and normalized_provider not in {TRUSTED_BOOTSTRAP_PROVIDER, LOCAL_ARCHIVE_BOOTSTRAP_PROVIDER}:
         return {
             "status": "blocked",
-            "blocker": "qdp_v3_bootstrap_requires_trusted_tushare_proxy",
+            "blocker": "qdp_v3_bootstrap_historical_provider_unsupported",
+            "historical_provider": normalized_provider,
+            "active_sha256": active_manifest_sha256(workspace_root),
+        }
+    if bootstrap and normalized_provider == LOCAL_ARCHIVE_BOOTSTRAP_PROVIDER and not normalized_source_paths:
+        return {
+            "status": "blocked",
+            "blocker": "qdp_v3_local_archive_bootstrap_requires_source_path",
             "historical_provider": normalized_provider,
             "active_sha256": active_manifest_sha256(workspace_root),
         }
@@ -274,17 +296,28 @@ def plan_update(
         {"stage": "post_publish_semantic_hash_audit"},
     ]
     if bootstrap:
+        intraday_stage = (
+            {
+                "stage": "intraday_5m_local_archive_then_tushare_residual",
+                "provider": "external_quant_archive_with_tushare_proxy_residual",
+                "priority": 1,
+                "source_paths": list(normalized_source_paths),
+                **_date_task_summary(dates),
+            }
+            if normalized_provider == LOCAL_ARCHIVE_BOOTSTRAP_PROVIDER
+            else {
+                "stage": "intraday_5m",
+                "provider": "tushare_proxy",
+                "priority": 1,
+                **_date_task_summary(dates),
+            }
+        )
         stages = [
             {"stage": "freeze_v2", "enabled": not bool(freeze_validation.get("acceptable", False))},
             {"stage": "tushare_proxy_compatibility", "enabled": True},
             {"stage": "tushare_proxy_cutoff", "bootstrap_cutoff": str(as_of_date)},
             {"stage": "trusted_reference_prerequisites", "domains": ["stock-basic", "trade-calendar"]},
-            {
-                "stage": "intraday_5m",
-                "provider": "tushare_proxy",
-                "priority": 1,
-                **_date_task_summary(dates),
-            },
+            intraday_stage,
             {
                 "stage": "quota_tail_reference",
                 "priority": 2,
@@ -325,6 +358,7 @@ def plan_update(
         "start_date": effective_start,
         "as_of_date": str(as_of_date),
         "historical_provider": normalized_provider,
+        "source_paths": list(normalized_source_paths),
         "active_sha256": active_manifest_sha256(workspace_root),
         "calendar_source": calendar_source,
         "stages": stages,
@@ -391,6 +425,19 @@ def _finish_run(
     return {**state, "run_path": str(run_path.resolve())}
 
 
+def _result_payload(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        payload = to_dict()
+        if isinstance(payload, dict):
+            return dict(payload)
+    if is_dataclass(value):
+        return dict(asdict(value))
+    raise TypeError(f"bootstrap_stage_result_not_serializable:{type(value).__name__}")
+
+
 def _run_bootstrap_capture(
     *,
     plan: dict[str, Any],
@@ -435,26 +482,169 @@ def _run_bootstrap_capture(
         raise RuntimeError("trusted_bootstrap_inventory_or_calendar_missing")
     intraday_status = "completed"
     intraday_result: dict[str, Any] | None = None
-    for wave_start, wave_end, wave_name in (
+    historical_provider = str(plan.get("historical_provider", TRUSTED_BOOTSTRAP_PROVIDER) or TRUSTED_BOOTSTRAP_PROVIDER)
+    waves = (
         (start_date, min("2019-12-31", cutoff_date), "2010_2019"),
         ("2020-01-01", cutoff_date, "2020_cutoff"),
-    ):
-        if wave_start > wave_end:
-            continue
-        intraday_result = ingest_tushare_proxy_intraday(
-            symbols=mainboard_symbols,
-            start_date=wave_start,
-            end_date=wave_end,
-            workspace_root=workspace_root,
-            lifecycle_ranges=lifecycle,
-            resume=True,
-            job_id=f"tushare_proxy__intraday_5m__bootstrap_{wave_name}_{cutoff_date.replace('-', '')}",
-            max_workers=3,
+    )
+    if historical_provider == LOCAL_ARCHIVE_BOOTSTRAP_PROVIDER:
+        from quant_data_platform.qdp_v3.external_quant_5m import import_external_quant_5m
+
+        local_result = _result_payload(
+            import_external_quant_5m(
+                source_paths=tuple(plan.get("source_paths", ()) or ()),
+                symbols=mainboard_symbols,
+                workspace_root=workspace_root,
+                raw_domain=RAW_EXTERNAL_QUANT_INTRADAY_5M,
+                workers=3,
+                start_date=start_date,
+                end_date=cutoff_date,
+                min_available_gib=0.5,
+                min_free_disk_gib=200.0,
+            )
         )
-        record(f"tushare_proxy_intraday_5m_{wave_name}", intraday_result)
-        intraday_status = str(intraday_result.get("status") or "partial")
-        if intraday_status != "completed":
-            break
+        local_result.setdefault("status", "completed")
+        record("external_quant_archive_intraday_5m", local_result)
+        local_status = str(local_result.get("status") or "completed")
+        if local_status not in {"completed", "success"}:
+            return local_status, local_result
+
+        for wave_start, wave_end, wave_name in waves:
+            if wave_start > wave_end:
+                continue
+            residual = plan_intraday_residuals(
+                symbols=mainboard_symbols,
+                start_date=wave_start,
+                end_date=wave_end,
+                primary_raw_domains=(RAW_EXTERNAL_QUANT_INTRADAY_5M, RAW_INTRADAY_5M_SELECTED),
+                fallback_raw_domain=RAW_TUSHARE_PROXY_INTRADAY_5M,
+                workspace_root=workspace_root,
+                lifecycle_ranges=lifecycle,
+                trade_dates=tuple(item for item in dates if wave_start <= item <= wave_end),
+            )
+            record(f"intraday_5m_residual_plan_{wave_name}", residual)
+            for group_index, group in enumerate(residual.get("download_groups", ()) or (), start=1):
+                group_start = str(group.get("start_date", "") or "")
+                group_end = str(group.get("end_date", "") or "")
+                group_symbols = tuple(group.get("symbols", ()) or ())
+                if not group_start or not group_end or not group_symbols:
+                    continue
+                tushare_groups: list[dict[str, Any]] = [
+                    {
+                        "start_date": group_start,
+                        "end_date": group_end,
+                        "symbols": list(group_symbols),
+                    }
+                ]
+                if group_start >= "2020-01-01":
+                    group_dates = [item for item in dates if group_start <= item <= group_end]
+                    if group_dates:
+                        free_result = ingest_intraday_5m(
+                            symbols=group_symbols,
+                            trade_dates=group_dates,
+                            workspace_root=workspace_root,
+                            refresh=False,
+                            audit_cross_sources=False,
+                        )
+                        record(
+                            f"free_intraday_5m_residual_{wave_name}_{group_index}",
+                            free_result,
+                        )
+                        # A partial free-source result must not amplify into a
+                        # Tushare request for the entire original group. Re-read
+                        # the selected raw day evidence and route only the exact
+                        # stock-day gaps that remain.
+                        free_residual = plan_intraday_residuals(
+                            symbols=group_symbols,
+                            start_date=group_start,
+                            end_date=group_end,
+                            primary_raw_domains=(
+                                RAW_EXTERNAL_QUANT_INTRADAY_5M,
+                                RAW_INTRADAY_5M_SELECTED,
+                            ),
+                            fallback_raw_domain=RAW_TUSHARE_PROXY_INTRADAY_5M,
+                            workspace_root=workspace_root,
+                            lifecycle_ranges=lifecycle,
+                            trade_dates=tuple(group_dates),
+                        )
+                        record(
+                            f"free_intraday_5m_residual_replan_{wave_name}_{group_index}",
+                            free_residual,
+                        )
+                        tushare_groups = list(free_residual.get("download_groups", ()) or ())
+                for residual_index, residual_group in enumerate(tushare_groups, start=1):
+                    residual_start = str(residual_group.get("start_date", "") or "")
+                    residual_end = str(residual_group.get("end_date", "") or "")
+                    residual_symbols = tuple(residual_group.get("symbols", ()) or ())
+                    if not residual_start or not residual_end or not residual_symbols:
+                        continue
+                    residual_hash = stable_hash(
+                        {
+                            "start": residual_start,
+                            "end": residual_end,
+                            "symbols": residual_symbols,
+                        },
+                        length=16,
+                    )
+                    intraday_result = ingest_tushare_proxy_intraday(
+                        symbols=residual_symbols,
+                        start_date=residual_start,
+                        end_date=residual_end,
+                        workspace_root=workspace_root,
+                        lifecycle_ranges=lifecycle,
+                        resume=True,
+                        job_id=(
+                            "tushare_proxy__intraday_5m__local_residual_"
+                            f"{wave_name}_{residual_start.replace('-', '')}_"
+                            f"{residual_end.replace('-', '')}_{residual_hash}"
+                        ),
+                        max_workers=3,
+                    )
+                    record(
+                        (
+                            f"tushare_proxy_intraday_5m_residual_{wave_name}_"
+                            f"{group_index}_{residual_index}"
+                        ),
+                        intraday_result,
+                    )
+                    intraday_status = str(intraday_result.get("status") or "partial")
+                    if intraday_status != "completed":
+                        break
+                if intraday_status != "completed":
+                    break
+            if intraday_status != "completed":
+                break
+            final_residual = plan_intraday_residuals(
+                symbols=mainboard_symbols,
+                start_date=wave_start,
+                end_date=wave_end,
+                primary_raw_domains=(RAW_EXTERNAL_QUANT_INTRADAY_5M, RAW_INTRADAY_5M_SELECTED),
+                fallback_raw_domain=RAW_TUSHARE_PROXY_INTRADAY_5M,
+                workspace_root=workspace_root,
+                lifecycle_ranges=lifecycle,
+                trade_dates=tuple(item for item in dates if wave_start <= item <= wave_end),
+            )
+            record(f"intraday_5m_residual_final_{wave_name}", final_residual)
+            if int(final_residual.get("download_count", 0) or 0):
+                return "partial", final_residual
+    else:
+        for wave_start, wave_end, wave_name in waves:
+            if wave_start > wave_end:
+                continue
+            intraday_result = ingest_tushare_proxy_intraday(
+                symbols=mainboard_symbols,
+                start_date=wave_start,
+                end_date=wave_end,
+                workspace_root=workspace_root,
+                lifecycle_ranges=lifecycle,
+                resume=True,
+                job_id=f"tushare_proxy__intraday_5m__bootstrap_{wave_name}_{cutoff_date.replace('-', '')}",
+                max_workers=3,
+            )
+            record(f"tushare_proxy_intraday_5m_{wave_name}", intraday_result)
+            intraday_status = str(intraday_result.get("status") or "partial")
+            if intraday_status != "completed":
+                break
     # Minute quota is the scarce entitlement. Once exhausted, use the
     # remaining low-frequency capacity only for core status and factor facts.
     if intraday_status == "paused_quota":
@@ -583,6 +773,7 @@ def run_update(
     bootstrap: bool = False,
     start_date: str = "",
     historical_provider: str = "",
+    source_paths: Iterable[str | Path] = (),
     publish: bool = True,
     hash_v2_shards: bool = False,
 ) -> dict[str, Any]:
@@ -594,11 +785,12 @@ def run_update(
         bootstrap=bootstrap,
         start_date=start_date,
         historical_provider=historical_provider,
+        source_paths=source_paths,
     )
     if plan.get("status") != "planned":
         return plan
     run_id = (
-        f"bootstrap__{stable_hash({'as_of_date': as_of_date, 'start_date': plan['start_date'], 'historical_provider': plan['historical_provider']}, length=20)}"
+        f"bootstrap__{stable_hash({'as_of_date': as_of_date, 'start_date': plan['start_date'], 'historical_provider': plan['historical_provider'], 'source_paths': plan.get('source_paths', [])}, length=20)}"
         if bootstrap
         else f"update__{stable_hash({'as_of_date': as_of_date}, length=20)}"
     )

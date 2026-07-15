@@ -15,8 +15,11 @@ import pandas as pd
 from quant_data_platform.core.json_io import read_json
 from quant_data_platform.domains.contracts import HistoryPageFetchRequest
 from quant_data_platform.qdp_v3.constants import (
+    EXPECTED_5M_BAR_ENDS,
     QUALITY_PROVISIONAL,
     QUALITY_QUARANTINED,
+    QUALITY_STRICT,
+    RAW_INTRADAY_5M_SELECTED,
     RAW_TUSHARE_PROXY_ADJ_FACTOR,
     RAW_TUSHARE_PROXY_DAILY,
     RAW_TUSHARE_PROXY_DAILY_BASIC,
@@ -68,6 +71,7 @@ PRODUCTION_GATE_MIN_REQUESTS = 1_000
 # threshold as worker reduction so occasional TLS EOFs do not repeatedly stop
 # a multi-day historical capture that is otherwise making forward progress.
 PRODUCTION_GATE_MAX_ERROR_RATE = 0.02
+INTRADAY_CAPTURE_EVIDENCE_CONTRACT = "qdp_v3_intraday_capture_evidence_v1"
 
 
 def _proxy_performance_gate_failed(metrics: Mapping[str, Any]) -> bool:
@@ -987,6 +991,737 @@ def _task_time_range(
     return f"{effective_start} 00:00:00", f"{effective_end} 23:59:59"
 
 
+def _receipt_range_bounds(receipt: Mapping[str, Any]) -> tuple[str, str]:
+    """Return an explicitly captured request range from a raw receipt.
+
+    Historical residual planning must not infer completeness merely from a
+    partition's existence.  Prefer request/coverage bounds over observed
+    minima because a security can legitimately have no bar on the first or
+    last calendar day of its lifecycle.
+    """
+
+    containers: list[Mapping[str, Any]] = [receipt]
+    for key in ("coverage", "captured_range", "request", "request_range", "import_range"):
+        value = receipt.get(key)
+        if isinstance(value, Mapping):
+            containers.append(value)
+    pairs = (
+        ("coverage_start_date", "coverage_end_date"),
+        ("requested_start_date", "requested_end_date"),
+        ("start_date", "end_date"),
+        ("start_at", "end_at"),
+        ("min_trade_date", "max_trade_date"),
+        ("min_timestamp", "max_timestamp"),
+    )
+    for container in containers:
+        for start_key, end_key in pairs:
+            start = str(container.get(start_key, "") or "")[:10]
+            end = str(container.get(end_key, "") or "")[:10]
+            if start and end:
+                return start, end
+    return "", ""
+
+
+def _intraday_capture_evidence_root(
+    raw_domain: str,
+    *,
+    workspace_root: str | Path | None,
+) -> Path:
+    paths = ensure_qdp_v3_layout(workspace_root)
+    return paths.metadata / "intraday_capture_evidence" / _safe_task_component(raw_domain)
+
+
+def _write_intraday_capture_evidence(
+    *,
+    raw_domain: str,
+    provider_symbol: str,
+    capture_start_at: str,
+    capture_end_at: str,
+    capture_kind: str,
+    captured_row_count: int,
+    result_content_sha256: str,
+    network_pages: Iterable[Mapping[str, Any]] = (),
+    empty_gap_evidence: Mapping[str, Any] | None = None,
+    workspace_root: str | Path | None = None,
+) -> Path:
+    """Append immutable evidence for one successful residual request.
+
+    Raw receipts are content-addressed and intentionally immutable.  A request
+    that returns no new rows may therefore reuse an older raw version and its
+    older receipt.  This sidecar records the capture interval without changing
+    either object and lets residual planning distinguish "not requested" from
+    "requested successfully but empty/duplicate".
+    """
+
+    symbol = normalize_symbol(provider_symbol)
+    allowed_kinds = {"positive_capture", "empty_provider_gap", "empty_restatement"}
+    if capture_kind not in allowed_kinds:
+        raise ValueError(f"intraday_capture_evidence_kind_invalid:{capture_kind}")
+    start = str(capture_start_at or "")[:10]
+    end = str(capture_end_at or "")[:10]
+    if not symbol or not start or not end or pd.Timestamp(start) > pd.Timestamp(end):
+        raise ValueError(f"intraday_capture_evidence_range_invalid:{symbol}:{start}:{end}")
+    pages = [
+        {
+            "page_number": int(item.get("page_number", 0) or 0),
+            "response_sha256": str(item.get("response_sha256", "") or ""),
+            "row_count": int(item.get("row_count", 0) or 0),
+            "min_timestamp": str(item.get("min_timestamp", "") or ""),
+            "max_timestamp": str(item.get("max_timestamp", "") or ""),
+        }
+        for item in network_pages
+    ]
+    identity = {
+        "contract": INTRADAY_CAPTURE_EVIDENCE_CONTRACT,
+        "raw_domain": str(raw_domain),
+        "provider_symbol": symbol,
+        "capture_start_date": start,
+        "capture_end_date": end,
+        "capture_kind": capture_kind,
+        "captured_row_count": int(captured_row_count),
+        "result_content_sha256": str(result_content_sha256 or ""),
+        "network_pages": pages,
+        "empty_gap_evidence": dict(empty_gap_evidence or {}),
+    }
+    evidence_id = stable_hash(identity)
+    destination = (
+        _intraday_capture_evidence_root(raw_domain, workspace_root=workspace_root)
+        / _safe_task_component(symbol)
+        / f"{evidence_id}.json"
+    )
+    if destination.exists():
+        existing = read_json(destination)
+        existing_identity = {
+            key: existing.get(key)
+            for key in identity
+        }
+        if stable_hash(existing_identity) != evidence_id:
+            raise RuntimeError(f"intraday_capture_evidence_identity_mismatch:{destination}")
+        return destination
+    atomic_write_json(
+        destination,
+        {
+            **identity,
+            "evidence_id": evidence_id,
+            "captured_at": utc_now(),
+        },
+    )
+    return destination
+
+
+def _iter_intraday_capture_evidence(
+    raw_domain: str,
+    *,
+    workspace_root: str | Path | None,
+) -> list[dict[str, Any]]:
+    root = _intraday_capture_evidence_root(raw_domain, workspace_root=workspace_root)
+    if not root.exists():
+        return []
+    evidence: list[dict[str, Any]] = []
+    for path in sorted(root.glob("*/*.json")):
+        payload = read_json(path)
+        if str(payload.get("contract", "") or "") != INTRADAY_CAPTURE_EVIDENCE_CONTRACT:
+            raise RuntimeError(f"intraday_capture_evidence_contract_invalid:{path}")
+        evidence_id = str(payload.get("evidence_id", "") or "")
+        identity = {
+            key: payload.get(key)
+            for key in (
+                "contract",
+                "raw_domain",
+                "provider_symbol",
+                "capture_start_date",
+                "capture_end_date",
+                "capture_kind",
+                "captured_row_count",
+                "result_content_sha256",
+                "network_pages",
+                "empty_gap_evidence",
+            )
+        }
+        if not evidence_id or stable_hash(identity) != evidence_id:
+            raise RuntimeError(f"intraday_capture_evidence_hash_mismatch:{path}")
+        evidence.append(payload)
+    return evidence
+
+
+def raw_partition_covers_historical_request(
+    ref: RawPartitionRef | None,
+    receipt: Mapping[str, Any],
+    *,
+    start_at: str,
+    end_at: str,
+) -> bool:
+    """Whether a positive, usable raw partition proves the requested range.
+
+    In particular, a successful empty response is evidence of a provider gap,
+    not evidence that historical market data was captured.  This distinction
+    is important for delisted securities and prevents index-only quarantined
+    receipts from silently satisfying a resumed job.
+    """
+
+    if ref is None or int(ref.row_count) <= 0:
+        return False
+    quality = str(receipt.get("quality_tier", "") or ref.quality_tier or "").strip().lower()
+    if quality == QUALITY_QUARANTINED:
+        return False
+    if bool(receipt.get("quarantined_empty", False)) or receipt.get("quarantined_empty_evidence"):
+        return False
+    captured_start, captured_end = _receipt_range_bounds(receipt)
+    if not captured_start or not captured_end:
+        return False
+    return (
+        pd.Timestamp(captured_start) <= pd.Timestamp(str(start_at)[:10])
+        and pd.Timestamp(captured_end) >= pd.Timestamp(str(end_at)[:10])
+    )
+
+
+def _explicit_empty_provider_gap_covers(
+    ref: RawPartitionRef,
+    receipt: Mapping[str, Any],
+    *,
+    start_at: str,
+    end_at: str,
+) -> bool:
+    if int(ref.row_count) != 0:
+        return False
+    evidence = receipt.get("quarantined_empty_evidence")
+    if not bool(receipt.get("quarantined_empty", False)) or not isinstance(evidence, Mapping):
+        return False
+    if str(evidence.get("reason", "") or "") != "provider_successful_empty_with_lifecycle_overlap":
+        return False
+    captured_start, captured_end = _receipt_range_bounds(receipt)
+    if not captured_start or not captured_end:
+        return False
+    return (
+        pd.Timestamp(captured_start) <= pd.Timestamp(str(start_at)[:10])
+        and pd.Timestamp(captured_end) >= pd.Timestamp(str(end_at)[:10])
+    )
+
+
+def _merge_date_intervals(intervals: Iterable[tuple[str, str]]) -> list[tuple[str, str]]:
+    ordered = sorted(
+        (pd.Timestamp(start).normalize(), pd.Timestamp(end).normalize())
+        for start, end in intervals
+        if start and end and pd.Timestamp(start) <= pd.Timestamp(end)
+    )
+    merged: list[tuple[pd.Timestamp, pd.Timestamp]] = []
+    for start, end in ordered:
+        if not merged or start > merged[-1][1] + pd.Timedelta(days=1):
+            merged.append((start, end))
+        else:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+    return [(start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")) for start, end in merged]
+
+
+def _subtract_date_intervals(
+    target: tuple[str, str],
+    covered: Iterable[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    target_start, target_end = pd.Timestamp(target[0]), pd.Timestamp(target[1])
+    cursor = target_start
+    gaps: list[tuple[str, str]] = []
+    for start_text, end_text in _merge_date_intervals(covered):
+        start = max(pd.Timestamp(start_text), target_start)
+        end = min(pd.Timestamp(end_text), target_end)
+        if end < cursor or start > target_end:
+            continue
+        if start > cursor:
+            gaps.append((cursor.strftime("%Y-%m-%d"), (start - pd.Timedelta(days=1)).strftime("%Y-%m-%d")))
+        cursor = max(cursor, end + pd.Timedelta(days=1))
+        if cursor > target_end:
+            break
+    if cursor <= target_end:
+        gaps.append((cursor.strftime("%Y-%m-%d"), target_end.strftime("%Y-%m-%d")))
+    return gaps
+
+
+def _intersect_date_intervals(
+    target: tuple[str, str],
+    intervals: Iterable[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    target_start, target_end = pd.Timestamp(target[0]), pd.Timestamp(target[1])
+    intersections: list[tuple[str, str]] = []
+    for start_text, end_text in _merge_date_intervals(intervals):
+        start = max(target_start, pd.Timestamp(start_text))
+        end = min(target_end, pd.Timestamp(end_text))
+        if start <= end:
+            intersections.append((start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")))
+    return intersections
+
+
+def _normalize_trade_date_values(values: Iterable[Any]) -> set[str]:
+    normalized: set[str] = set()
+    for value in values:
+        text = str(value or "")[:10]
+        try:
+            timestamp = pd.Timestamp(text).normalize()
+        except (TypeError, ValueError):
+            continue
+        if pd.isna(timestamp):
+            continue
+        normalized.add(timestamp.strftime("%Y-%m-%d"))
+    return normalized
+
+
+def _receipt_day_result_dates(
+    receipt: Mapping[str, Any],
+    *,
+    statuses: set[str],
+) -> set[str]:
+    results = receipt.get("day_results")
+    if not isinstance(results, (list, tuple)):
+        return set()
+    dates: set[str] = set()
+    for item in results:
+        if not isinstance(item, Mapping):
+            continue
+        if str(item.get("status", "") or "").strip().lower() not in statuses:
+            continue
+        dates.update(_normalize_trade_date_values((item.get("trade_date", ""),)))
+    return dates
+
+
+def _receipt_explicit_complete_dates(receipt: Mapping[str, Any]) -> set[str]:
+    """Read exact complete-day evidence without treating min/max as coverage.
+
+    The external archive writer evolved while the bootstrap was running, so
+    accept the small set of explicit field spellings that appeared in its
+    resumable receipts.  An envelope such as ``coverage_start_date`` is
+    intentionally not accepted here: it cannot prove internal days.
+    """
+
+    dates: set[str] = set()
+    for key in (
+        "complete_trade_dates",
+        "complete_stock_days",
+        "complete_stock_day_dates",
+        "strict_trade_dates",
+    ):
+        values = receipt.get(key)
+        if isinstance(values, (list, tuple, set, frozenset)):
+            dates.update(_normalize_trade_date_values(values))
+    dates.update(_receipt_day_result_dates(receipt, statuses={QUALITY_STRICT}))
+    return dates
+
+
+def _frame_complete_5m_dates(frame: pd.DataFrame) -> set[str]:
+    """Return only stock-days that physically satisfy the strict 48-bar shape."""
+
+    if frame is None or frame.empty or "trade_date" not in frame.columns:
+        return set()
+    bar_column = "bar_end" if "bar_end" in frame.columns else "bar_time" if "bar_time" in frame.columns else ""
+    if not bar_column:
+        return set()
+    expected = set(EXPECTED_5M_BAR_ENDS)
+    complete: set[str] = set()
+    for trade_date, day in frame.groupby("trade_date", sort=False):
+        times = day[bar_column].astype(str).str.slice(0, 5)
+        if len(day) != len(EXPECTED_5M_BAR_ENDS) or times.duplicated().any() or set(times) != expected:
+            continue
+        required_numeric = [
+            column
+            for column in ("open", "high", "low", "close", "volume", "amount")
+            if column in day.columns
+        ]
+        if not {"open", "high", "low", "close"}.issubset(required_numeric):
+            continue
+        numeric = day.loc[:, required_numeric].apply(pd.to_numeric, errors="coerce")
+        if numeric.isna().any().any() or numeric.loc[:, ["open", "high", "low", "close"]].le(0).any().any():
+            continue
+        if "volume" in numeric and numeric["volume"].lt(0).any():
+            continue
+        if "amount" in numeric and numeric["amount"].lt(0).any():
+            continue
+        if (numeric["high"] < numeric.loc[:, ["open", "low", "close"]].max(axis=1)).any():
+            continue
+        if (numeric["low"] > numeric.loc[:, ["open", "high", "close"]].min(axis=1)).any():
+            continue
+        complete.update(_normalize_trade_date_values((trade_date,)))
+    return complete
+
+
+def _partition_complete_trade_dates(
+    ref: RawPartitionRef,
+    receipt: Mapping[str, Any],
+    *,
+    raw_domain: str,
+    workspace_root: str | Path | None,
+) -> set[str]:
+    """Resolve exact positive coverage for one minute partition.
+
+    Selected source-month partitions are allowed to be quarantined as a
+    whole: their strict ``day_results`` and the physical 48-bar payload still
+    prove the good days.  All other quarantined partitions remain unusable.
+    """
+
+    if int(ref.row_count) <= 0:
+        return set()
+    quality = str(receipt.get("quality_tier", "") or ref.quality_tier or "").strip().lower()
+    if raw_domain != RAW_INTRADAY_5M_SELECTED and quality == QUALITY_QUARANTINED:
+        return set()
+    explicit_dates = _receipt_explicit_complete_dates(receipt)
+    if raw_domain != RAW_INTRADAY_5M_SELECTED and explicit_dates:
+        expected_count = int(receipt.get("complete_stock_day_count", 0) or 0)
+        if not expected_count or expected_count == len(explicit_dates):
+            return explicit_dates
+
+    cache_root = ensure_qdp_v3_layout(workspace_root).jobs / "intraday_residual_coverage"
+    cache_path = cache_root / f"{ref.content_sha256}.json"
+    if cache_path.exists():
+        cached = read_json(cache_path)
+        if (
+            str(cached.get("contract", "") or "") == "qdp_v3_exact_5m_coverage_v1"
+            and str(cached.get("content_sha256", "") or "") == ref.content_sha256
+            and int(cached.get("row_count", -1) or -1) == int(ref.row_count)
+        ):
+            frame_dates = _normalize_trade_date_values(cached.get("complete_trade_dates", ()) or ())
+        else:
+            frame_dates = set()
+    else:
+        frame_dates = set()
+    if not frame_dates:
+        frame_dates = _frame_complete_5m_dates(read_raw_partition(ref))
+        cache_root.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(
+            cache_path,
+            {
+                "contract": "qdp_v3_exact_5m_coverage_v1",
+                "content_sha256": ref.content_sha256,
+                "row_count": int(ref.row_count),
+                "complete_trade_dates": sorted(frame_dates),
+            },
+        )
+    if not frame_dates:
+        return set()
+    if raw_domain == RAW_INTRADAY_5M_SELECTED:
+        # A selected month can contain strict and quarantined days.  Require
+        # both the selector decision and the actual strict bar shape.
+        return frame_dates.intersection(explicit_dates)
+    # For archive/proxy partitions the payload itself is exact evidence.  If
+    # the writer also emitted a complete-day list, use the conservative
+    # intersection so a stale or malformed receipt cannot broaden coverage.
+    return frame_dates.intersection(explicit_dates) if explicit_dates else frame_dates
+
+
+def _target_trade_dates(
+    *,
+    start_date: str,
+    end_date: str,
+    trade_dates: Iterable[str] | None,
+) -> tuple[list[str], str]:
+    start = pd.Timestamp(start_date).normalize()
+    end = pd.Timestamp(end_date).normalize()
+    if trade_dates is None:
+        # This fallback deliberately excludes weekends.  Production callers
+        # pass the QDP trading calendar so exchange holidays are excluded too.
+        values = pd.bdate_range(start, end)
+        source = "weekday_fallback"
+    else:
+        values = sorted(
+            pd.Timestamp(value).normalize()
+            for value in _normalize_trade_date_values(trade_dates)
+            if start <= pd.Timestamp(value).normalize() <= end
+        )
+        source = "provided_trade_dates"
+    return [value.strftime("%Y-%m-%d") for value in values], source
+
+
+def _contiguous_trade_date_runs(
+    dates: Iterable[str],
+    *,
+    calendar_dates: list[str],
+) -> list[list[str]]:
+    requested = sorted(_normalize_trade_date_values(dates))
+    if not requested:
+        return []
+    positions = {value: index for index, value in enumerate(calendar_dates)}
+    runs: list[list[str]] = []
+    for value in requested:
+        if (
+            not runs
+            or value not in positions
+            or runs[-1][-1] not in positions
+            or positions[value] != positions[runs[-1][-1]] + 1
+        ):
+            runs.append([value])
+        else:
+            runs[-1].append(value)
+    return runs
+
+
+def plan_intraday_residuals(
+    *,
+    symbols: Iterable[str],
+    start_date: str,
+    end_date: str,
+    primary_raw_domains: Iterable[str],
+    workspace_root: str | Path | None = None,
+    lifecycle_ranges: Mapping[str, tuple[str, str]] | None = None,
+    fallback_raw_domain: str = RAW_TUSHARE_PROXY_INTRADAY_5M,
+    identity_registry: SecurityIdentityRegistry | None = None,
+    supplemental_coverage: Iterable[Mapping[str, Any]] = (),
+    trade_dates: Iterable[str] | None = None,
+    expected_trade_dates_by_symbol: Mapping[str, Iterable[str]] | None = None,
+) -> dict[str, Any]:
+    """Plan only the stable-identity gaps left after local historical import.
+
+    A raw partition for any officially configured alias can satisfy another
+    alias of the same ``security_id``.  Positive fallback data also satisfies
+    coverage, while a previously successful-empty fallback response becomes
+    an explicit provider gap and is not pointlessly downloaded again.
+    """
+
+    requested = sorted(
+        {
+            normalize_symbol(item)
+            for item in symbols
+            if normalize_symbol(item)
+            and _lifecycle_overlaps(
+                normalize_symbol(item),
+                start_date=str(start_date),
+                end_date=str(end_date),
+                lifecycle_ranges=lifecycle_ranges,
+            )
+        }
+    )
+    domains = tuple(dict.fromkeys(str(item) for item in primary_raw_domains if str(item)))
+    source_domains = tuple(dict.fromkeys((*domains, str(fallback_raw_domain))))
+    refs_by_domain: dict[str, list[RawPartitionRef]] = {
+        domain: iter_raw_partitions(domain, workspace_root=workspace_root)
+        for domain in source_domains
+    }
+    capture_evidence_by_domain: dict[str, list[dict[str, Any]]] = {
+        domain: _iter_intraday_capture_evidence(domain, workspace_root=workspace_root)
+        for domain in source_domains
+    }
+    provider_symbols = set(requested)
+    for refs in refs_by_domain.values():
+        provider_symbols.update(
+            normalize_symbol(ref.partition_value)
+            for ref in refs
+            if ref.partition_field == "provider_symbol" and normalize_symbol(ref.partition_value)
+        )
+    for evidence in capture_evidence_by_domain.values():
+        provider_symbols.update(
+            normalize_symbol(item.get("provider_symbol", ""))
+            for item in evidence
+            if normalize_symbol(item.get("provider_symbol", ""))
+        )
+    registry = identity_registry or SecurityIdentityRegistry.from_sources(
+        provider_symbols=sorted(provider_symbols),
+        workspace_root=workspace_root,
+    )
+
+    calendar_dates, calendar_source = _target_trade_dates(
+        start_date=str(start_date),
+        end_date=str(end_date),
+        trade_dates=trade_dates,
+    )
+    calendar_set = set(calendar_dates)
+    positive_by_security: dict[str, list[tuple[set[str], str, str]]] = {}
+    empty_gaps_by_security: dict[str, set[str]] = {}
+    for domain, refs in refs_by_domain.items():
+        for ref in refs:
+            receipt = read_raw_receipt(ref)
+            request = receipt.get("request") if isinstance(receipt.get("request"), Mapping) else {}
+            provider_symbol = normalize_symbol(
+                ref.partition_value
+                if ref.partition_field == "provider_symbol"
+                else receipt.get("provider_symbol", "")
+                or request.get("symbol", "")
+            )
+            security_id = registry.security_id_for_provider_symbol(provider_symbol)
+            if not security_id:
+                continue
+            captured_start, captured_end = _receipt_range_bounds(receipt)
+            complete_dates = _partition_complete_trade_dates(
+                ref,
+                receipt,
+                raw_domain=domain,
+                workspace_root=workspace_root,
+            )
+            if complete_dates:
+                positive_by_security.setdefault(security_id, []).append(
+                    (complete_dates, domain, provider_symbol)
+                )
+            elif domain == str(fallback_raw_domain) and _explicit_empty_provider_gap_covers(
+                ref,
+                receipt,
+                start_at=captured_start or start_date,
+                end_at=captured_end or end_date,
+            ):
+                empty_gaps_by_security.setdefault(security_id, set()).update(
+                    date
+                    for date in calendar_dates
+                    if captured_start <= date <= captured_end
+                )
+    for domain, evidence_items in capture_evidence_by_domain.items():
+        for evidence in evidence_items:
+            if str(evidence.get("raw_domain", "") or "") != domain:
+                raise RuntimeError(
+                    "intraday_capture_evidence_domain_mismatch:"
+                    f"expected={domain}:actual={evidence.get('raw_domain', '')}"
+                )
+            provider_symbol = normalize_symbol(evidence.get("provider_symbol", ""))
+            security_id = registry.security_id_for_provider_symbol(provider_symbol)
+            captured_start = str(evidence.get("capture_start_date", "") or "")[:10]
+            captured_end = str(evidence.get("capture_end_date", "") or "")[:10]
+            capture_kind = str(evidence.get("capture_kind", "") or "")
+            if not security_id or not captured_start or not captured_end:
+                continue
+            # Positive capture envelopes do not prove every internal stock-day;
+            # the immutable raw payload above is the exact evidence.  Empty
+            # provider responses, on the other hand, explicitly prove a known
+            # provider gap for the requested trading dates.
+            if domain == str(fallback_raw_domain) and capture_kind in {
+                "empty_provider_gap",
+                "empty_restatement",
+            }:
+                empty_gaps_by_security.setdefault(security_id, set()).update(
+                    date
+                    for date in calendar_dates
+                    if captured_start <= date <= captured_end
+                )
+    for item in supplemental_coverage:
+        provider_symbol = normalize_symbol(item.get("provider_symbol", "") or item.get("symbol", ""))
+        security_id = registry.security_id_for_provider_symbol(provider_symbol)
+        explicit_dates = _normalize_trade_date_values(
+            item.get("complete_trade_dates", ()) or item.get("trade_dates", ()) or ()
+        )
+        captured_start = str(item.get("start_date", "") or "")[:10]
+        captured_end = str(item.get("end_date", "") or "")[:10]
+        if not explicit_dates and captured_start and captured_end:
+            explicit_dates = {
+                date
+                for date in calendar_dates
+                if captured_start <= date <= captured_end
+            }
+        if security_id and explicit_dates:
+            positive_by_security.setdefault(security_id, []).append(
+                (
+                    explicit_dates,
+                    str(item.get("raw_domain", "") or "supplemental_complete_source_route"),
+                    provider_symbol,
+                )
+            )
+
+    covered: list[str] = []
+    partially_covered: list[str] = []
+    download_spans: list[dict[str, Any]] = []
+    known_gaps: list[dict[str, Any]] = []
+    alias_coverage: list[dict[str, str]] = []
+    for symbol in requested:
+        target_start_at, target_end_at = _task_time_range(
+            symbol,
+            start_date=str(start_date),
+            end_date=str(end_date),
+            lifecycle_ranges=lifecycle_ranges,
+        )
+        target_start, target_end = target_start_at[:10], target_end_at[:10]
+        security_id = registry.security_id_for_provider_symbol(symbol)
+        target_dates = {
+            date
+            for date in calendar_dates
+            if target_start <= date <= target_end
+        }
+        expected_map = expected_trade_dates_by_symbol or {}
+        explicitly_expected = expected_map.get(symbol)
+        if explicitly_expected is None:
+            explicitly_expected = expected_map.get(security_id)
+        if explicitly_expected is not None:
+            target_dates.intersection_update(_normalize_trade_date_values(explicitly_expected))
+        positive = list(positive_by_security.get(security_id, ()))
+        positive_dates: set[str] = set()
+        for dates, _domain, _provider_symbol in positive:
+            positive_dates.update(dates)
+        covered_target_dates = target_dates.intersection(positive_dates)
+        uncovered = target_dates.difference(positive_dates)
+        if not uncovered:
+            covered.append(symbol)
+        elif covered_target_dates:
+            partially_covered.append(symbol)
+        aliases = sorted(
+            {
+                (item[1], item[2])
+                for item in positive
+                if item[2] != symbol and target_dates.intersection(item[0])
+            }
+        )
+        for raw_domain, alias in aliases:
+            alias_coverage.append(
+                {
+                    "security_id": security_id,
+                    "requested_symbol": symbol,
+                    "covered_by_symbol": alias,
+                    "raw_domain": raw_domain,
+                }
+            )
+        known_gap_dates = uncovered.intersection(empty_gaps_by_security.get(security_id, set()))
+        missing_download_dates = uncovered.difference(known_gap_dates)
+        for run in _contiguous_trade_date_runs(known_gap_dates, calendar_dates=calendar_dates):
+            known_gaps.append(
+                {
+                    "security_id": security_id,
+                    "provider_symbol": symbol,
+                    "start_date": run[0],
+                    "end_date": run[-1],
+                    "trade_dates": run,
+                    "reason": "tushare_proxy_successful_empty_provider_gap",
+                }
+            )
+        for run in _contiguous_trade_date_runs(missing_download_dates, calendar_dates=calendar_dates):
+            download_spans.append(
+                {
+                    "security_id": security_id,
+                    "provider_symbol": symbol,
+                    "start_date": run[0],
+                    "end_date": run[-1],
+                    "trade_dates": run,
+                }
+            )
+    grouped: dict[tuple[str, ...], set[str]] = {}
+    for item in download_spans:
+        key = tuple(str(value) for value in item["trade_dates"])
+        grouped.setdefault(key, set()).add(item["provider_symbol"])
+    download_groups = [
+        {
+            "start_date": dates[0],
+            "end_date": dates[-1],
+            "trade_dates": list(dates),
+            "symbols": sorted(symbols),
+        }
+        for dates, symbols in sorted(grouped.items())
+        if dates
+    ]
+    download = sorted({item["provider_symbol"] for item in download_spans})
+    residual = sorted({*download, *(item["provider_symbol"] for item in known_gaps)})
+    return {
+        "contract": "qdp_v3_intraday_residual_plan_v1",
+        "start_date": str(start_date),
+        "end_date": str(end_date),
+        "trade_calendar_source": calendar_source,
+        "trade_date_count": len(calendar_dates),
+        "requested_count": len(requested),
+        "covered_count": len(covered),
+        "partially_covered_count": len(partially_covered),
+        "residual_count": len(residual),
+        "download_count": len(download),
+        "download_span_count": len(download_spans),
+        "download_group_count": len(download_groups),
+        "known_provider_gap_count": len(known_gaps),
+        "covered_symbols": covered,
+        "partially_covered_symbols": partially_covered,
+        "residual_symbols": residual,
+        "download_symbols": download,
+        "download_spans": download_spans,
+        "download_groups": download_groups,
+        "known_provider_gaps": known_gaps,
+        "alias_coverage": alias_coverage,
+        "primary_raw_domains": list(domains),
+        "fallback_raw_domain": str(fallback_raw_domain),
+    }
+
+
 def _official_restatement_aliases(
     symbols: Iterable[str],
     *,
@@ -1066,12 +1801,11 @@ def _run_intraday_symbol(
     existing_receipt = read_raw_receipt(existing) if existing is not None else {}
     existing_start = str(existing_receipt.get("start_at", "") or "")
     existing_end = str(existing_receipt.get("end_at", "") or "")
-    existing_covers_request = bool(
-        existing is not None
-        and existing_start
-        and existing_end
-        and pd.Timestamp(existing_start) <= pd.Timestamp(start_at)
-        and pd.Timestamp(existing_end) >= pd.Timestamp(end_at)
+    existing_covers_request = raw_partition_covers_historical_request(
+        existing,
+        existing_receipt,
+        start_at=start_at,
+        end_at=end_at,
     )
     if existing_covers_request and state.status != "completed":
         with job_guard:
@@ -1143,6 +1877,7 @@ def _run_intraday_symbol(
         start_at=start_at,
         end_at=end_at,
     )
+    captured_row_count = int(len(combined))
     legitimate_empty_evidence: dict[str, Any] = {}
     quarantined_empty_evidence: dict[str, Any] = {}
     if combined.empty:
@@ -1189,6 +1924,17 @@ def _run_intraday_symbol(
         combined = combined.sort_values(timestamp_column, ascending=False).reset_index(drop=True)
     else:
         combined = combined.reset_index(drop=True)
+    network_pages = [
+        {
+            "page_number": int(item.get("page_number", 0) or 0),
+            "request": item.get("request", {}),
+            "response_sha256": item.get("response_sha256", ""),
+            "row_count": int(item.get("row_count", 0) or 0),
+            "min_timestamp": item.get("min_timestamp", ""),
+            "max_timestamp": item.get("max_timestamp", ""),
+        }
+        for item in receipts
+    ]
     receipt_payload = {
             **client.config.public_metadata(),
             "endpoint": "stk_mins",
@@ -1200,17 +1946,7 @@ def _run_intraday_symbol(
             "merged_from_content_sha256": merged_from_content_sha256,
             "page_size": TUSHARE_PROXY_HISTORY_PAGE_SIZE,
             "page_count": int(state.page_count),
-            "network_pages": [
-                {
-                    "page_number": int(item.get("page_number", 0) or 0),
-                    "request": item.get("request", {}),
-                    "response_sha256": item.get("response_sha256", ""),
-                    "row_count": int(item.get("row_count", 0) or 0),
-                    "min_timestamp": item.get("min_timestamp", ""),
-                    "max_timestamp": item.get("max_timestamp", ""),
-                }
-                for item in receipts
-            ],
+            "network_pages": network_pages,
             "quality_tier": (
                 QUALITY_QUARANTINED
                 if quarantined_empty_evidence
@@ -1233,6 +1969,29 @@ def _run_intraday_symbol(
         partition_value=symbol,
         frame=combined,
         receipt=receipt_payload,
+        workspace_root=workspace_root,
+    )
+    capture_kind = (
+        "positive_capture"
+        if captured_row_count > 0
+        else "empty_restatement"
+        if legitimate_empty_evidence
+        else "empty_provider_gap"
+    )
+    _write_intraday_capture_evidence(
+        raw_domain=raw_domain,
+        provider_symbol=symbol,
+        capture_start_at=start_at,
+        capture_end_at=end_at,
+        capture_kind=capture_kind,
+        captured_row_count=captured_row_count,
+        result_content_sha256=ref.content_sha256,
+        network_pages=network_pages,
+        empty_gap_evidence=(
+            legitimate_empty_evidence
+            if legitimate_empty_evidence
+            else quarantined_empty_evidence
+        ),
         workspace_root=workspace_root,
     )
     with job_guard:

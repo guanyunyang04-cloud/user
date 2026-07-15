@@ -12,6 +12,7 @@ from quant_data_platform.qdp_v3.build import build_candidate
 from quant_data_platform.qdp_v3.compatibility import capture_baostock_0_9_1_golden, run_baostock_0_9_3_compatibility_gate
 from quant_data_platform.qdp_v3.compaction import compact_raw_domain
 from quant_data_platform.qdp_v3.corporate_actions import ingest_mootdx_xdxr
+from quant_data_platform.qdp_v3.external_quant_5m import import_external_quant_5m
 from quant_data_platform.qdp_v3.freeze import freeze_v2, validate_v2_freeze_proof
 from quant_data_platform.qdp_v3.gc import collect_garbage
 from quant_data_platform.qdp_v3.historical import (
@@ -56,6 +57,8 @@ QDP v3 manifest-first data-base commands:
                                  Preserve per-security TDX xdxr evidence.
   ingest --provider tushare-proxy --mode historical --domain DOMAIN
                                  Capture resumable 2010+ historical raw facts.
+  ingest --provider external-quant-archive --mode historical --domain intraday
+                                 Import the user-supplied direct 5m archive.
   build candidate                Build immutable canonical datasets and a candidate.
   compact --raw-domain DOMAIN    Bundle verified raw partitions into large Parquet files.
   audit --candidate ID           Run quick, full, or semantic candidate gates.
@@ -262,7 +265,11 @@ def _check(argv: list[str]) -> int:
 def _ingest(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="qdp ingest", description="Ingest immutable, resumable QDP v3 provider partitions.")
     _common(parser)
-    parser.add_argument("--provider", default="baostock", choices=("baostock", "mootdx", "tushare-proxy"))
+    parser.add_argument(
+        "--provider",
+        default="baostock",
+        choices=("baostock", "mootdx", "tushare-proxy", "external-quant-archive"),
+    )
     parser.add_argument("--mode", required=True, choices=("historical", "date-snapshot", "date-events", "factor-symbol-history", "calendar", "security-master", "intraday-5m", "corporate-actions", "financial-quarterly", "performance-forecast", "performance-express", "industry", "index-constituents"))
     parser.add_argument("--domain", default="", choices=("", "stock-basic", "trade-calendar", "daily", "daily-basic", "factor", "identity", "status", "dividend", "financial", "intraday"))
     parser.add_argument("--resume", action="store_true")
@@ -274,20 +281,58 @@ def _ingest(argv: list[str]) -> int:
     parser.add_argument(
         "--max-workers",
         type=int,
-        choices=(1, 2),
-        default=1,
-        help="Prefetch up to two dates while keeping one persistent BaoStock login and one in-flight network request.",
+        choices=(1, 2, 3),
+        default=3,
+        help=(
+            "Provider worker count; historical Tushare/local imports default to three "
+            "while BaoStock date ingestion is capped internally."
+        ),
     )
+    parser.add_argument(
+        "--source-path",
+        action="append",
+        default=[],
+        help="Explicit local archive ZIP or 5m CSV directory; repeat for multiple non-overlapping source segments.",
+    )
+    parser.add_argument("--max-symbols", type=int, default=0, help="Limit local archive symbols for a smoke/benchmark run; zero means all.")
     parser.add_argument("--job-id", default="")
     parser.add_argument("--symbol", action="append", default=[])
     parser.add_argument("--symbols-file", default="")
     args = parser.parse_args(argv)
     workspace = _workspace(args)
     if args.mode == "historical":
-        if args.provider != "tushare-proxy":
-            parser.error("historical mode requires --provider tushare-proxy")
         if not args.domain or not args.start_date or not args.end_date:
             parser.error("historical mode requires --domain, --start-date, and --end-date")
+        if args.provider == "external-quant-archive":
+            if args.domain != "intraday":
+                parser.error("external-quant-archive historical mode only supports --domain intraday")
+            if not args.source_path:
+                parser.error("external-quant-archive historical mode requires at least one --source-path")
+            symbols = list(args.symbol)
+            if args.symbols_file:
+                symbols.extend(
+                    item.strip()
+                    for item in Path(args.symbols_file).read_text(encoding="utf-8").splitlines()
+                    if item.strip()
+                )
+            if not symbols:
+                symbols, _ = proxy_symbol_inventory(workspace_root=workspace, mainboard_only=True)
+            if not symbols:
+                parser.error("external-quant-archive requires proxy stock-basic raw or --symbol/--symbols-file")
+            result = import_external_quant_5m(
+                source_paths=tuple(args.source_path),
+                workspace_root=workspace,
+                symbols=tuple(symbols),
+                start_date=str(args.start_date),
+                end_date=str(args.end_date),
+                max_symbols=max(0, int(args.max_symbols)),
+                workers=int(args.max_workers),
+            )
+            payload = result.to_dict() if hasattr(result, "to_dict") else asdict(result)
+            _emit(payload, as_json=bool(args.json))
+            return 0 if payload.get("status") == "completed" else 2
+        if args.provider != "tushare-proxy":
+            parser.error("historical mode requires --provider tushare-proxy or external-quant-archive")
         symbols = list(args.symbol)
         if args.symbols_file:
             symbols.extend(item.strip() for item in Path(args.symbols_file).read_text(encoding="utf-8").splitlines() if item.strip())
@@ -319,7 +364,7 @@ def _ingest(argv: list[str]) -> int:
                 lifecycle_ranges=lifecycle,
                 resume=bool(args.resume),
                 job_id=str(args.job_id),
-                max_workers=3,
+                max_workers=int(args.max_workers),
             )
         else:
             if args.domain in {"factor", "identity", "dividend", "financial"} and not symbols:
@@ -333,7 +378,7 @@ def _ingest(argv: list[str]) -> int:
                 workspace_root=workspace,
                 resume=bool(args.resume),
                 job_id=str(args.job_id),
-                max_workers=3,
+                max_workers=int(args.max_workers),
             )
     elif args.mode in {"financial-quarterly", "performance-forecast", "performance-express"}:
         if args.provider != "baostock":
@@ -438,7 +483,7 @@ def _ingest(argv: list[str]) -> int:
                 refresh=bool(args.refresh),
                 cross_check=False,
                 job_id=str(args.job_id),
-                max_workers=int(args.max_workers),
+                max_workers=min(int(args.max_workers), 2),
             )
     _emit(payload, as_json=bool(args.json))
     return 0 if payload.get("status") in {"completed", "strict"} else 2
@@ -604,7 +649,17 @@ def _update(argv: list[str]) -> int:
     parser.add_argument("--as-of-date", required=True)
     parser.add_argument("--start-date", default="")
     parser.add_argument("--bootstrap", action="store_true")
-    parser.add_argument("--historical-provider", default="", choices=("", "tushare-proxy"))
+    parser.add_argument(
+        "--historical-provider",
+        default="",
+        choices=("", "tushare-proxy", "external-quant-archive"),
+    )
+    parser.add_argument(
+        "--source-path",
+        action="append",
+        default=[],
+        help="Explicit local 5m ZIP or directory used by the external archive bootstrap route.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--no-publish", action="store_true")
     parser.add_argument("--hash-v2-shards", action="store_true")
@@ -615,6 +670,7 @@ def _update(argv: list[str]) -> int:
         "bootstrap": bool(args.bootstrap),
         "start_date": str(args.start_date),
         "historical_provider": str(args.historical_provider),
+        "source_paths": tuple(args.source_path),
     }
     if args.dry_run:
         payload = plan_update(**kwargs)
