@@ -595,7 +595,7 @@ def _run_bootstrap_capture(
                 symbols=mainboard_symbols,
                 workspace_root=workspace_root,
                 raw_domain=RAW_EXTERNAL_QUANT_INTRADAY_5M,
-                workers=4,
+                workers=8,
                 start_date=start_date,
                 end_date=cutoff_date,
                 min_available_gib=0.5,

@@ -429,7 +429,7 @@ def test_bootstrap_capture_routes_exact_residual_spans_without_using_old_full_jo
     assert status == "completed"
     assert blocker is None
     assert local_calls[0]["symbols"] == ["000005.SZ", "600000.SH"]
-    assert local_calls[0]["workers"] == 4
+    assert local_calls[0]["workers"] == 8
     assert len(proxy_calls) == 1
     assert proxy_calls[0]["symbols"] == ("000005.SZ",)
     assert proxy_calls[0]["start_date"] == "2012-01-01"

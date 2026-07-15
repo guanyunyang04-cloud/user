@@ -42,7 +42,7 @@ from quant_data_platform.qdp_v3.storage import (
 
 DEFAULT_RAW_DOMAIN = "external_quant_intraday_5m_raw"
 SOURCE_NAME = "external_quant_archive"
-MAX_EXTERNAL_QUANT_WORKERS = 4
+MAX_EXTERNAL_QUANT_WORKERS = 8
 PROCESS_WATCHDOG_INTERVAL_SECONDS = 1.0
 PROCESS_HEARTBEAT_SECONDS = 30.0
 RAW_COLUMNS = [

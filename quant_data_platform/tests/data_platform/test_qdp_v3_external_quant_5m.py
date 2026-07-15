@@ -375,7 +375,7 @@ def test_parent_watchdog_rejects_low_disk_immediately(tmp_path: Path) -> None:
         watchdog.poll()
 
 
-def test_external_archive_public_api_caps_workers_at_four(tmp_path: Path) -> None:
+def test_external_archive_public_api_caps_workers_at_eight(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     source = tmp_path / "source.zip"
     _write_zip(source, {"5分钟/sh600000.csv": _source_day("2010-01-04")})
@@ -384,7 +384,7 @@ def test_external_archive_public_api_caps_workers_at_four(tmp_path: Path) -> Non
         import_external_quant_5m(
             [source],
             workspace_root=workspace,
-            workers=5,
+            workers=9,
             hash_containers=False,
             min_available_gib=0,
             min_free_disk_gib=0,
