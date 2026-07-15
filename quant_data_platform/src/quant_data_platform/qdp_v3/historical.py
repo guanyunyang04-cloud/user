@@ -1462,6 +1462,7 @@ def plan_intraday_residuals(
     supplemental_coverage: Iterable[Mapping[str, Any]] = (),
     trade_dates: Iterable[str] | None = None,
     expected_trade_dates_by_symbol: Mapping[str, Iterable[str]] | None = None,
+    treat_fallback_empty_as_known: bool = True,
 ) -> dict[str, Any]:
     """Plan only the stable-identity gaps left after local historical import.
 
@@ -1544,11 +1545,15 @@ def plan_intraday_residuals(
                 positive_by_security.setdefault(security_id, []).append(
                     (complete_dates, domain, provider_symbol)
                 )
-            elif domain == str(fallback_raw_domain) and _explicit_empty_provider_gap_covers(
+            elif (
+                treat_fallback_empty_as_known
+                and domain == str(fallback_raw_domain)
+                and _explicit_empty_provider_gap_covers(
                 ref,
                 receipt,
                 start_at=captured_start or start_date,
                 end_at=captured_end or end_date,
+                )
             ):
                 empty_gaps_by_security.setdefault(security_id, set()).update(
                     date
@@ -1573,7 +1578,7 @@ def plan_intraday_residuals(
             # the immutable raw payload above is the exact evidence.  Empty
             # provider responses, on the other hand, explicitly prove a known
             # provider gap for the requested trading dates.
-            if domain == str(fallback_raw_domain) and capture_kind in {
+            if treat_fallback_empty_as_known and domain == str(fallback_raw_domain) and capture_kind in {
                 "empty_provider_gap",
                 "empty_restatement",
             }:
@@ -1719,6 +1724,7 @@ def plan_intraday_residuals(
         "alias_coverage": alias_coverage,
         "primary_raw_domains": list(domains),
         "fallback_raw_domain": str(fallback_raw_domain),
+        "treat_fallback_empty_as_known": bool(treat_fallback_empty_as_known),
     }
 
 

@@ -4,17 +4,24 @@ import hashlib
 import io
 import json
 import math
+import multiprocessing
 import os
 import re
 import shutil
 import threading
 import time
 import zipfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import (
+    FIRST_COMPLETED,
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    as_completed,
+    wait,
+)
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -35,6 +42,9 @@ from quant_data_platform.qdp_v3.storage import (
 
 DEFAULT_RAW_DOMAIN = "external_quant_intraday_5m_raw"
 SOURCE_NAME = "external_quant_archive"
+MAX_EXTERNAL_QUANT_WORKERS = 4
+PROCESS_WATCHDOG_INTERVAL_SECONDS = 1.0
+PROCESS_HEARTBEAT_SECONDS = 30.0
 RAW_COLUMNS = [
     "provider_symbol",
     "trade_date",
@@ -333,6 +343,74 @@ def normalize_external_quant_5m(
     return _coerce_raw_schema(result)
 
 
+def _multiprocess_worker_available() -> bool:
+    """Whether Windows spawn can import the current Python entry point."""
+
+    try:
+        import __main__
+
+        entry = str(getattr(__main__, "__file__", "") or "")
+    except Exception:
+        return False
+    return bool(entry and entry not in {"<stdin>", "-c"})
+
+
+def _process_symbol_task(
+    *,
+    provider_symbol: str,
+    segments: Sequence[ExternalQuant5mSegment],
+    container_hashes: Mapping[Path, str],
+    raw_domain: str,
+    workspace_root: str | Path | None,
+    start_date: str,
+    end_date: str,
+    min_available_gib: float,
+    low_memory_seconds: float,
+    min_free_disk_gib: float,
+) -> ExternalQuant5mSymbolResult:
+    """One spawn-safe CPU-bound archive task with independent ZIP handles."""
+
+    try:
+        paths = ensure_qdp_v3_layout(workspace_root)
+        _resource_guard(
+            paths.root,
+            min_available_gib=min_available_gib,
+            low_memory_seconds=low_memory_seconds,
+            min_free_disk_gib=min_free_disk_gib,
+        )
+        with ExitStack() as stack:
+            zip_handles = {
+                source_path: stack.enter_context(
+                    zipfile.ZipFile(source_path, mode="r", metadata_encoding="gbk")
+                )
+                for source_path in sorted(
+                    {item.source_path for item in segments if item.source_kind == "zip"}
+                )
+            }
+            return _import_symbol(
+                provider_symbol=provider_symbol,
+                segments=segments,
+                zip_handles=zip_handles,
+                container_hashes=container_hashes,
+                raw_domain=raw_domain,
+                workspace_root=workspace_root,
+                start_date=start_date,
+                end_date=end_date,
+            )
+    except ExternalQuant5mResourceGuardError as exc:
+        return ExternalQuant5mSymbolResult(
+            provider_symbol=provider_symbol,
+            status="resource_guard",
+            error=f"{type(exc).__name__}:{exc}",
+        )
+    except Exception as exc:
+        return ExternalQuant5mSymbolResult(
+            provider_symbol=provider_symbol,
+            status="failed",
+            error=f"{type(exc).__name__}:{exc}",
+        )
+
+
 def import_external_quant_5m(
     source_paths: Iterable[str | Path],
     *,
@@ -437,7 +515,13 @@ def import_external_quant_5m(
         cache_path=paths.jobs / "external_quant_5m_container_hash_cache.json",
     )
     write_progress(status="running")
-    worker_count = min(max(1, int(workers or 1)), max(1, len(selected)))
+    requested_workers = int(workers or 1)
+    if requested_workers < 1 or requested_workers > MAX_EXTERNAL_QUANT_WORKERS:
+        raise ValueError(
+            "external_quant_5m_workers_out_of_range:"
+            f"requested={requested_workers}:max={MAX_EXTERNAL_QUANT_WORKERS}"
+        )
+    worker_count = min(requested_workers, max(1, len(selected)))
     chunks = [selected[index::worker_count] for index in range(worker_count)]
     chunks = [chunk for chunk in chunks if chunk]
     stop_event = threading.Event()
@@ -506,7 +590,152 @@ def import_external_quant_5m(
         return outcomes
 
     all_results: list[ExternalQuant5mSymbolResult] = []
-    if len(chunks) <= 1:
+    use_process_pool = worker_count > 1 and _multiprocess_worker_available()
+    with progress_lock:
+        progress["parallel_backend"] = "process" if use_process_pool else "thread"
+        progress["worker_count"] = worker_count
+    write_progress()
+    if use_process_pool:
+        context = multiprocessing.get_context("spawn")
+        selected_iterator = iter(selected)
+        pending_futures: dict[Any, str] = {}
+        watchdog = _ParentResourceWatchdog(
+            destination=paths.root,
+            min_available_gib=float(min_available_gib),
+            low_memory_seconds=float(low_memory_seconds),
+            min_free_disk_gib=float(min_free_disk_gib),
+        )
+        last_watchdog_heartbeat = time.monotonic()
+
+        def submit_next(executor: ProcessPoolExecutor) -> bool:
+            try:
+                symbol = next(selected_iterator)
+            except StopIteration:
+                return False
+            future = executor.submit(
+                _process_symbol_task,
+                provider_symbol=symbol,
+                segments=tuple(by_symbol[symbol]),
+                container_hashes=dict(container_hashes),
+                raw_domain=str(raw_domain),
+                workspace_root=workspace_root,
+                start_date=start,
+                end_date=end,
+                min_available_gib=float(min_available_gib),
+                low_memory_seconds=float(low_memory_seconds),
+                min_free_disk_gib=float(min_free_disk_gib),
+            )
+            pending_futures[future] = symbol
+            with progress_lock:
+                progress["running"] = int(progress["running"]) + 1
+                progress["last_symbol"] = symbol
+            write_progress()
+            return True
+
+        executor = ProcessPoolExecutor(max_workers=worker_count, mp_context=context)
+        executor_aborted = False
+        try:
+            for _ in range(worker_count):
+                if not submit_next(executor):
+                    break
+            while pending_futures:
+                completed_futures, _ = wait(
+                    tuple(pending_futures),
+                    timeout=PROCESS_WATCHDOG_INTERVAL_SECONDS,
+                    return_when=FIRST_COMPLETED,
+                )
+                watchdog.poll()
+                now = time.monotonic()
+                if now - last_watchdog_heartbeat >= PROCESS_HEARTBEAT_SECONDS:
+                    write_progress()
+                    last_watchdog_heartbeat = now
+                for future in completed_futures:
+                    symbol = pending_futures.pop(future)
+                    try:
+                        outcome = future.result()
+                    except Exception as exc:
+                        raise RuntimeError(
+                            f"external_quant_5m_process_result_failed:{type(exc).__name__}"
+                        ) from exc
+                    if outcome.status == "resource_guard":
+                        raise ExternalQuant5mResourceGuardError(
+                            outcome.error or "external_quant_5m_worker_resource_guard"
+                        )
+                    all_results.append(outcome)
+                    with progress_lock:
+                        progress["running"] = max(0, int(progress["running"]) - 1)
+                        progress["last_symbol"] = symbol
+                        progress["processed"] = int(progress["processed"]) + 1
+                        progress["pending"] = max(
+                            0,
+                            int(progress["total"]) - int(progress["processed"]),
+                        )
+                        if outcome.status != "failed":
+                            progress["completed"] = int(progress["completed"]) + 1
+                        progress[outcome.status] = int(progress.get(outcome.status, 0)) + 1
+                    write_progress()
+                    last_watchdog_heartbeat = time.monotonic()
+                    submit_next(executor)
+        except ExternalQuant5mResourceGuardError as exc:
+            executor_aborted = True
+            stop_event.set()
+            fatal_resource_errors.append(str(exc))
+            with progress_lock:
+                progress["pause_reason"] = "resource_guard"
+                progress["error_type"] = type(exc).__name__
+            write_progress(status="stopping_resource_guard")
+            unreaped = _abort_process_pool(executor, tuple(pending_futures))
+            with progress_lock:
+                progress["running"] = 0
+                progress["pending"] = max(
+                    0,
+                    int(progress["total"]) - int(progress["processed"]),
+                )
+                progress["worker_cleanup_incomplete"] = bool(unreaped)
+                progress["unreaped_worker_count"] = len(unreaped)
+            write_progress(status="paused_resource_guard")
+        except KeyboardInterrupt:
+            executor_aborted = True
+            stop_event.set()
+            with progress_lock:
+                progress["pause_reason"] = "keyboard_interrupt"
+                progress["error_type"] = "KeyboardInterrupt"
+            write_progress(status="stopping_interrupt")
+            unreaped = _abort_process_pool(executor, tuple(pending_futures))
+            with progress_lock:
+                progress["running"] = 0
+                progress["pending"] = max(
+                    0,
+                    int(progress["total"]) - int(progress["processed"]),
+                )
+                progress["worker_cleanup_incomplete"] = bool(unreaped)
+                progress["unreaped_worker_count"] = len(unreaped)
+            write_progress(status="interrupted_recoverable")
+            raise
+        except Exception as exc:
+            executor_aborted = True
+            stop_event.set()
+            with progress_lock:
+                progress["pause_reason"] = "process_pool_failure"
+                progress["error_type"] = type(exc).__name__
+            write_progress(status="stopping_pool_failure")
+            unreaped = _abort_process_pool(executor, tuple(pending_futures))
+            with progress_lock:
+                progress["running"] = 0
+                progress["pending"] = max(
+                    0,
+                    int(progress["total"]) - int(progress["processed"]),
+                )
+                progress["worker_cleanup_incomplete"] = bool(unreaped)
+                progress["unreaped_worker_count"] = len(unreaped)
+            write_progress(status="interrupted_recoverable")
+            raise ExternalQuant5mError(
+                f"external_quant_5m_process_pool_interrupted:{type(exc).__name__}"
+            ) from exc
+        finally:
+            if not executor_aborted:
+                executor.shutdown(wait=True, cancel_futures=False)
+    elif len(chunks) <= 1:
         all_results.extend(process_chunk(chunks[0]) if chunks else [])
     else:
         with ThreadPoolExecutor(max_workers=len(chunks), thread_name_prefix="qdp-external-5m") as executor:
@@ -1113,6 +1342,89 @@ def _available_memory_bytes() -> int:
         if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
             return 2**63 - 1
         return int(status.ullAvailPhys)
+
+
+@dataclass
+class _ParentResourceWatchdog:
+    """Non-blocking parent-side guard for work already running in children."""
+
+    destination: Path
+    min_available_gib: float
+    low_memory_seconds: float
+    min_free_disk_gib: float
+    clock: Callable[[], float] = time.monotonic
+    memory_reader: Callable[[], int] = _available_memory_bytes
+    disk_reader: Callable[[Path], int] = lambda path: int(shutil.disk_usage(path).free)
+    low_memory_since: float | None = None
+
+    def poll(self) -> None:
+        gib = float(1024**3)
+        now = float(self.clock())
+        minimum_memory = max(0.0, float(self.min_available_gib)) * gib
+        if minimum_memory > 0 and int(self.memory_reader()) < minimum_memory:
+            if self.low_memory_since is None:
+                self.low_memory_since = now
+            if now - self.low_memory_since >= max(0.0, float(self.low_memory_seconds)):
+                raise ExternalQuant5mResourceGuardError(
+                    "external_quant_5m_low_memory_sustained:"
+                    f"threshold_gib={float(self.min_available_gib):.3f}"
+                )
+        else:
+            self.low_memory_since = None
+        free_disk = int(self.disk_reader(self.destination))
+        if free_disk < max(0.0, float(self.min_free_disk_gib)) * gib:
+            raise ExternalQuant5mResourceGuardError(
+                "external_quant_5m_low_disk:"
+                f"free_gib={free_disk / gib:.3f}:"
+                f"threshold_gib={float(self.min_free_disk_gib):.3f}"
+            )
+
+
+def _abort_process_pool(
+    executor: ProcessPoolExecutor,
+    pending_futures: Sequence[Any],
+) -> tuple[int, ...]:
+    """Cancel queued work and terminate only worker processes owned by this pool."""
+
+    for future in pending_futures:
+        try:
+            future.cancel()
+        except Exception:
+            pass
+    processes = tuple((getattr(executor, "_processes", None) or {}).values())
+    for process in processes:
+        try:
+            if process.is_alive():
+                process.terminate()
+        except (OSError, ValueError):
+            pass
+    deadline = time.monotonic() + 3.0
+    for process in processes:
+        try:
+            process.join(timeout=max(0.0, deadline - time.monotonic()))
+        except (OSError, ValueError):
+            pass
+    for process in processes:
+        try:
+            if process.is_alive():
+                process.kill()
+        except (AttributeError, OSError, ValueError):
+            pass
+    kill_deadline = time.monotonic() + 2.0
+    for process in processes:
+        try:
+            process.join(timeout=max(0.0, kill_deadline - time.monotonic()))
+        except (OSError, ValueError):
+            pass
+    unreaped: list[int] = []
+    for process in processes:
+        try:
+            if process.is_alive():
+                unreaped.append(int(process.pid or 0))
+        except (OSError, ValueError):
+            unreaped.append(int(getattr(process, "pid", 0) or 0))
+    executor.shutdown(wait=False, cancel_futures=True)
+    return tuple(item for item in unreaped if item > 0)
 
 
 def _resource_guard(

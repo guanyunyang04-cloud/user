@@ -281,11 +281,11 @@ def _ingest(argv: list[str]) -> int:
     parser.add_argument(
         "--max-workers",
         type=int,
-        choices=(1, 2, 3),
-        default=3,
+        choices=(1, 2, 3, 4),
+        default=4,
         help=(
-            "Provider worker count; historical Tushare/local imports default to three "
-            "while BaoStock date ingestion is capped internally."
+            "Provider worker count; local CPU-bound imports default to four, "
+            "Tushare clamps to three, and BaoStock date ingestion caps internally."
         ),
     )
     parser.add_argument(

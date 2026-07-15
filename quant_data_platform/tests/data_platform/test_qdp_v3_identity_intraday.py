@@ -42,7 +42,7 @@ from quant_data_platform.qdp_v3.intraday import (
 )
 from quant_data_platform.qdp_v3.intraday_build import _choose_provider_day, _frames_from_bucketed_stage
 from quant_data_platform.qdp_v3.datasets import write_partitioned_dataset
-from quant_data_platform.qdp_v3.manifest import manifest_sha256
+from quant_data_platform.qdp_v3.manifest import manifest_sha256, sha256_file
 from quant_data_platform.qdp_v3.quality import report_for
 from quant_data_platform.qdp_v3.storage import iter_raw_partitions, read_raw_partition, read_raw_receipt, write_raw_partition
 from quant_data_platform.qdp_v3.secondary import canonicalize_secondary_domain, ingest_baostock_report_domain
@@ -984,6 +984,37 @@ def test_raw_partition_is_idempotent_and_preserves_revision(tmp_path: Path) -> N
     assert len(list(ref3.receipt_path.parent.glob("quality_assessments/*.json"))) == 2
     assert read_raw_partition(ref1).loc[0, "value"] == 1
     assert read_raw_partition(ref3).loc[0, "value"] == 2
+
+
+def test_raw_partition_recovers_payload_only_version_after_hard_stop(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    frame = pd.DataFrame({"value": [1, 2, 3]})
+    first, created = write_raw_partition(
+        raw_domain="unit_recover_raw",
+        partition_value="2026-01-05",
+        frame=frame,
+        receipt={"quality_tier": "strict", "provider": "unit"},
+        workspace_root=workspace,
+    )
+    assert created
+    payload_sha = sha256_file(first.payload_path)
+    latest_path = first.payload_path.parents[2] / "latest.json"
+    first.receipt_path.unlink()
+    latest_path.unlink()
+
+    recovered, recovered_created = write_raw_partition(
+        raw_domain="unit_recover_raw",
+        partition_value="2026-01-05",
+        frame=frame,
+        receipt={"quality_tier": "strict", "provider": "unit"},
+        workspace_root=workspace,
+    )
+
+    assert recovered_created
+    assert recovered.content_sha256 == first.content_sha256
+    assert sha256_file(recovered.payload_path) == payload_sha
+    assert read_raw_receipt(recovered)["provider"] == "unit"
+    assert read_raw_partition(recovered)["value"].tolist() == [1, 2, 3]
 
 
 def test_raw_content_hash_uses_persisted_parquet_representation(tmp_path: Path) -> None:

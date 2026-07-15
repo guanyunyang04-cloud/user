@@ -323,12 +323,8 @@ def write_raw_partition(
     quality_tier = str(dict(receipt).get("quality_tier", "") or "quarantined")
     revision_of = previous_sha if previous_sha and previous_sha != content_sha else ""
     created = False
-    if not payload_path.exists() or not receipt_path.exists():
-        if payload_path.exists() != receipt_path.exists():
-            staged_payload.unlink(missing_ok=True)
-            raise RuntimeError(f"incomplete_raw_version:{version_dir}")
-        version_dir.mkdir(parents=True, exist_ok=True)
-        staged_payload.replace(payload_path)
+
+    def stored_payload_receipt(persisted: pd.DataFrame) -> dict[str, Any]:
         payload = dict(receipt)
         payload.update(
             {
@@ -338,14 +334,33 @@ def write_raw_partition(
                 "partition_value": str(partition_value),
                 "content_sha256": content_sha,
                 "parquet_sha256": sha256_file(payload_path),
-                "row_count": int(len(persisted_frame)),
-                "fields": [str(item) for item in persisted_frame.columns],
-                "dtypes": [str(item) for item in persisted_frame.dtypes],
+                "row_count": int(len(persisted)),
+                "fields": [str(item) for item in persisted.columns],
+                "dtypes": [str(item) for item in persisted.dtypes],
                 "revision_of": revision_of,
                 "stored_at": utc_now(),
             }
         )
-        atomic_write_json(receipt_path, payload)
+        return payload
+
+    if payload_path.exists() and not receipt_path.exists():
+        # A hard stop can occur after the immutable payload rename but before
+        # the receipt's atomic replace. Recover only when the existing payload
+        # independently reproduces the content-addressed version directory.
+        orphaned_frame = pd.read_parquet(payload_path, engine="pyarrow")
+        if frame_content_sha256(orphaned_frame) != content_sha:
+            staged_payload.unlink(missing_ok=True)
+            raise RuntimeError(f"incomplete_raw_version_hash_mismatch:{version_dir}")
+        staged_payload.unlink(missing_ok=True)
+        atomic_write_json(receipt_path, stored_payload_receipt(orphaned_frame))
+        created = True
+    elif receipt_path.exists() and not payload_path.exists():
+        staged_payload.unlink(missing_ok=True)
+        raise RuntimeError(f"incomplete_raw_version_missing_payload:{version_dir}")
+    elif not payload_path.exists() and not receipt_path.exists():
+        version_dir.mkdir(parents=True, exist_ok=True)
+        staged_payload.replace(payload_path)
+        atomic_write_json(receipt_path, stored_payload_receipt(persisted_frame))
         created = True
     else:
         staged_payload.unlink(missing_ok=True)

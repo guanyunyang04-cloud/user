@@ -260,6 +260,9 @@ def test_production_performance_gate_uses_attempt_error_rate_after_one_thousand_
 def test_history_worker_limit_honors_low_memory_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("QDP_TUSHARE_PROXY_HISTORY_WORKERS", raising=False)
+    assert _history_worker_limit(4) == 3
+
     monkeypatch.setenv("QDP_TUSHARE_PROXY_HISTORY_WORKERS", "2")
     assert _history_worker_limit(3) == 2
     assert _history_worker_limit(1) == 1

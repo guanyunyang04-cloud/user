@@ -5,7 +5,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from quant_data_platform.qdp_v3.constants import RAW_TUSHARE_PROXY_INTRADAY_5M
+from quant_data_platform.qdp_v3.constants import (
+    EXPECTED_5M_BAR_ENDS,
+    RAW_TUSHARE_PROXY_INTRADAY_5M,
+)
 from quant_data_platform.qdp_v3.historical import (
     _iter_intraday_capture_evidence,
     _write_intraday_capture_evidence,
@@ -26,28 +29,40 @@ def _workspace(tmp_path: Path) -> Path:
     return workspace
 
 
-def _one_bar(symbol: str) -> pd.DataFrame:
+def _complete_day(symbol: str, trade_date: str) -> pd.DataFrame:
     return pd.DataFrame(
         {
-            "provider_symbol": [symbol],
-            "trade_date": ["2010-01-04"],
-            "bar_time": ["09:35:00"],
-            "open": [10.0],
-            "high": [10.1],
-            "low": [9.9],
-            "close": [10.0],
-            "volume": [100.0],
-            "amount": [1000.0],
+            "provider_symbol": symbol,
+            "trade_date": trade_date,
+            "bar_time": [f"{value}:00" for value in EXPECTED_5M_BAR_ENDS],
+            "open": 10.0,
+            "high": 10.1,
+            "low": 9.9,
+            "close": 10.0,
+            "volume": 100.0,
+            "amount": 1000.0,
         }
     )
 
 
-def _old_positive_partition(workspace: Path, symbol: str):
+def _old_positive_partition(
+    workspace: Path,
+    symbol: str,
+    *,
+    include_duplicate_extension: bool = False,
+):
+    frames = [_complete_day(symbol, "2010-01-04")]
+    if include_duplicate_extension:
+        # The immutable payload already contains 2011, but its original
+        # request receipt predates that range. A later overlapping request can
+        # therefore reuse the same content hash while capture evidence records
+        # that the range was actually requested.
+        frames.append(_complete_day(symbol, "2011-01-03"))
     ref, _ = write_raw_partition(
         raw_domain=RAW_TUSHARE_PROXY_INTRADAY_5M,
         partition_field="provider_symbol",
         partition_value=symbol,
-        frame=_one_bar(symbol),
+        frame=pd.concat(frames, ignore_index=True),
         receipt={
             "provider": "tushare_proxy",
             "quality_tier": "provisional",
@@ -97,6 +112,7 @@ def test_positive_old_plus_empty_residual_is_append_only_known_gap(tmp_path: Pat
         fallback_raw_domain=RAW_TUSHARE_PROXY_INTRADAY_5M,
         workspace_root=workspace,
         lifecycle_ranges={"600000.SH": ("1999-11-10", "")},
+        trade_dates=("2010-01-04", "2011-01-03"),
     )
     assert plan["download_count"] == 0
     assert plan["known_provider_gap_count"] == 1
@@ -104,8 +120,9 @@ def test_positive_old_plus_empty_residual_is_append_only_known_gap(tmp_path: Pat
         {
             "security_id": "QDP-CN-SSE-600000",
             "provider_symbol": "600000.SH",
-            "start_date": "2011-01-01",
-            "end_date": "2011-12-31",
+            "start_date": "2011-01-03",
+            "end_date": "2011-01-03",
+            "trade_dates": ["2011-01-03"],
             "reason": "tushare_proxy_successful_empty_provider_gap",
         }
     ]
@@ -113,7 +130,11 @@ def test_positive_old_plus_empty_residual_is_append_only_known_gap(tmp_path: Pat
 
 def test_duplicate_no_new_row_extension_records_range_and_is_idempotent(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
-    ref = _old_positive_partition(workspace, "600004.SH")
+    ref = _old_positive_partition(
+        workspace,
+        "600004.SH",
+        include_duplicate_extension=True,
+    )
     kwargs = {
         "raw_domain": RAW_TUSHARE_PROXY_INTRADAY_5M,
         "provider_symbol": "600004.SH",
@@ -127,8 +148,8 @@ def test_duplicate_no_new_row_extension_records_range_and_is_idempotent(tmp_path
                 "page_number": 1,
                 "response_sha256": "b" * 64,
                 "row_count": 48,
-                "min_timestamp": "2010-01-04 09:35:00",
-                "max_timestamp": "2010-01-04 15:00:00",
+                "min_timestamp": "2011-01-03 09:35:00",
+                "max_timestamp": "2011-01-03 15:00:00",
             }
         ],
         "workspace_root": workspace,
@@ -152,6 +173,7 @@ def test_duplicate_no_new_row_extension_records_range_and_is_idempotent(tmp_path
         fallback_raw_domain=RAW_TUSHARE_PROXY_INTRADAY_5M,
         workspace_root=workspace,
         lifecycle_ranges={"600004.SH": ("2003-04-28", "")},
+        trade_dates=("2010-01-04", "2011-01-03"),
     )
     assert plan["covered_symbols"] == ["600004.SH"]
     assert plan["download_count"] == 0

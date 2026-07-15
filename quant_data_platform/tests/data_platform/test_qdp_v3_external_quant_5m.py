@@ -329,6 +329,68 @@ def test_resource_guard_is_fatal_even_when_strict_is_false(
     assert read_json(jobs[0])["status"] == "paused_resource_guard"
 
 
+def test_parent_watchdog_requires_continuous_low_memory_and_resets(tmp_path: Path) -> None:
+    import quant_data_platform.qdp_v3.external_quant_5m as module
+
+    now = [0.0]
+    available = [int(0.4 * 1024**3)]
+    watchdog = module._ParentResourceWatchdog(
+        destination=tmp_path,
+        min_available_gib=0.5,
+        low_memory_seconds=5.0,
+        min_free_disk_gib=200.0,
+        clock=lambda: now[0],
+        memory_reader=lambda: available[0],
+        disk_reader=lambda _path: int(500 * 1024**3),
+    )
+
+    watchdog.poll()
+    now[0] = 4.9
+    watchdog.poll()
+    available[0] = int(0.6 * 1024**3)
+    now[0] = 5.0
+    watchdog.poll()
+    assert watchdog.low_memory_since is None
+
+    available[0] = int(0.4 * 1024**3)
+    now[0] = 10.0
+    watchdog.poll()
+    now[0] = 15.0
+    with pytest.raises(ExternalQuant5mResourceGuardError, match="low_memory_sustained"):
+        watchdog.poll()
+
+
+def test_parent_watchdog_rejects_low_disk_immediately(tmp_path: Path) -> None:
+    import quant_data_platform.qdp_v3.external_quant_5m as module
+
+    watchdog = module._ParentResourceWatchdog(
+        destination=tmp_path,
+        min_available_gib=0,
+        low_memory_seconds=5.0,
+        min_free_disk_gib=200.0,
+        memory_reader=lambda: int(8 * 1024**3),
+        disk_reader=lambda _path: int(199 * 1024**3),
+    )
+    with pytest.raises(ExternalQuant5mResourceGuardError, match="low_disk"):
+        watchdog.poll()
+
+
+def test_external_archive_public_api_caps_workers_at_four(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    source = tmp_path / "source.zip"
+    _write_zip(source, {"5分钟/sh600000.csv": _source_day("2010-01-04")})
+
+    with pytest.raises(ValueError, match="workers_out_of_range"):
+        import_external_quant_5m(
+            [source],
+            workspace_root=workspace,
+            workers=5,
+            hash_containers=False,
+            min_available_gib=0,
+            min_free_disk_gib=0,
+        )
+
+
 def test_subrange_smoke_cannot_replace_existing_wider_latest_partition(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     source_dir = tmp_path / "source"

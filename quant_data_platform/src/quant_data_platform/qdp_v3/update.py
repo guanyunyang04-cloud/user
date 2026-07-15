@@ -13,12 +13,16 @@ from quant_data_platform.qdp_v3.constants import (
     BOOTSTRAP_CUTOFF,
     RAW_ADJUST_FACTOR_EVENT,
     RAW_EXTERNAL_QUANT_INTRADAY_5M,
+    RAW_INTRADAY_5M_BAOSTOCK,
+    RAW_INTRADAY_5M_MOOTDX,
     RAW_INTRADAY_5M_SELECTED,
     RAW_TRADING_CALENDAR,
+    RAW_TUSHARE_PROXY_DAILY,
     RAW_TUSHARE_PROXY_INTRADAY_5M,
     RAW_TUSHARE_PROXY_TRADE_CALENDAR,
     V2_RETIREMENT_GATE_FILENAME,
 )
+from quant_data_platform.qdp_v3.compaction import compact_raw_domain
 from quant_data_platform.qdp_v3.freeze import freeze_v2, validate_v2_freeze_proof
 from quant_data_platform.qdp_v3.historical import (
     ingest_tushare_proxy_intraday,
@@ -53,6 +57,81 @@ TRUSTED_BOOTSTRAP_START = "2010-01-01"
 INCREMENTAL_CALENDAR_LOOKBACK_DAYS = 120
 INCREMENTAL_DAILY_REFRESH_DAYS = 10
 INCREMENTAL_FACTOR_REFRESH_DAYS = 60
+
+
+def _proxy_daily_expected_trade_dates(
+    *,
+    symbols: Iterable[str],
+    trade_dates: Iterable[str],
+    identity_registry: SecurityIdentityRegistry,
+    workspace_root: str | Path | None,
+) -> tuple[dict[str, tuple[str, ...]], dict[str, Any]]:
+    """Build exact traded stock-days from the trusted daily date partitions.
+
+    Absence from a successfully captured full-market daily partition is the
+    local proof that a listed security did not trade that day. The mapping is
+    returned only when every requested exchange date has a daily partition;
+    partial evidence must never turn an unknown day into a suspension.
+    """
+
+    dates = sorted({_normalize_date(item) for item in trade_dates if str(item)})
+    requested_symbols = sorted({normalize_symbol(item) for item in symbols if normalize_symbol(item)})
+    security_ids = {
+        str(security_id)
+        for symbol in requested_symbols
+        if (security_id := identity_registry.security_id_for_provider_symbol(symbol))
+    }
+    expected: dict[str, set[str]] = {str(security_id): set() for security_id in security_ids}
+    if not dates or not expected:
+        return {}, {
+            "status": "unavailable",
+            "reason": "trade_dates_or_identity_empty",
+            "requested_trade_date_count": len(dates),
+        }
+    covered_dates: set[str] = set()
+    refs = iter_raw_partitions(
+        RAW_TUSHARE_PROXY_DAILY,
+        workspace_root=workspace_root,
+        start_value=dates[0],
+        end_value=dates[-1],
+    )
+    date_set = set(dates)
+    for ref in refs:
+        partition_date = str(ref.partition_value)[:10]
+        if partition_date not in date_set:
+            continue
+        frame = read_raw_partition(ref)
+        covered_dates.add(partition_date)
+        if frame.empty:
+            continue
+        symbol_column = (
+            "ts_code"
+            if "ts_code" in frame.columns
+            else "code"
+            if "code" in frame.columns
+            else "provider_symbol"
+            if "provider_symbol" in frame.columns
+            else ""
+        )
+        if not symbol_column:
+            raise RuntimeError(f"proxy_daily_symbol_column_missing:{ref.partition_value}")
+        for provider_symbol in frame[symbol_column].map(normalize_symbol).drop_duplicates():
+            security_id = identity_registry.security_id_for_provider_symbol(provider_symbol)
+            if security_id in expected:
+                expected[str(security_id)].add(partition_date)
+    missing_dates = sorted(date_set.difference(covered_dates))
+    evidence = {
+        "status": "complete" if not missing_dates else "partial",
+        "requested_trade_date_count": len(dates),
+        "covered_trade_date_count": len(covered_dates),
+        "missing_trade_date_count": len(missing_dates),
+        "missing_trade_dates_sample": missing_dates[:20],
+        "security_count": len(expected),
+        "expected_stock_day_count": sum(len(value) for value in expected.values()),
+    }
+    if missing_dates:
+        return {}, evidence
+    return {key: tuple(sorted(value)) for key, value in expected.items()}, evidence
 
 
 def _advance_retirement_gate(
@@ -480,6 +559,26 @@ def _run_bootstrap_capture(
     mainboard_symbols, lifecycle = proxy_symbol_inventory(workspace_root=workspace_root, mainboard_only=True)
     if not dates or not all_symbols or not mainboard_symbols:
         raise RuntimeError("trusted_bootstrap_inventory_or_calendar_missing")
+    # Exact stock-day residuals require a complete trusted daily/status base so
+    # legitimate suspensions are classified locally instead of sent to minute
+    # providers. These jobs are resumable and normally reuse prior bootstrap
+    # captures before the large archive import starts.
+    for domain in ("daily", "status"):
+        result = _proxy_reference_call(
+            domain=domain,
+            dates=dates,
+            symbols=(),
+            start_date=start_date,
+            end_date=cutoff_date,
+            workspace_root=workspace_root,
+        )
+        record(f"tushare_proxy_pre_intraday_{domain}", result)
+        if result.get("status") != "completed":
+            return str(result.get("status") or "partial"), result
+    identity_registry = SecurityIdentityRegistry.from_sources(
+        provider_symbols=all_symbols,
+        workspace_root=workspace_root,
+    )
     intraday_status = "completed"
     intraday_result: dict[str, Any] | None = None
     historical_provider = str(plan.get("historical_provider", TRUSTED_BOOTSTRAP_PROVIDER) or TRUSTED_BOOTSTRAP_PROVIDER)
@@ -496,7 +595,7 @@ def _run_bootstrap_capture(
                 symbols=mainboard_symbols,
                 workspace_root=workspace_root,
                 raw_domain=RAW_EXTERNAL_QUANT_INTRADAY_5M,
-                workers=3,
+                workers=4,
                 start_date=start_date,
                 end_date=cutoff_date,
                 min_available_gib=0.5,
@@ -512,6 +611,7 @@ def _run_bootstrap_capture(
         for wave_start, wave_end, wave_name in waves:
             if wave_start > wave_end:
                 continue
+            wave_dates = tuple(item for item in dates if wave_start <= item <= wave_end)
             residual = plan_intraday_residuals(
                 symbols=mainboard_symbols,
                 start_date=wave_start,
@@ -520,8 +620,50 @@ def _run_bootstrap_capture(
                 fallback_raw_domain=RAW_TUSHARE_PROXY_INTRADAY_5M,
                 workspace_root=workspace_root,
                 lifecycle_ranges=lifecycle,
-                trade_dates=tuple(item for item in dates if wave_start <= item <= wave_end),
+                trade_dates=wave_dates,
+                # A historical Tushare empty response must not suppress a
+                # viable BaoStock/mootdx attempt in the 2020+ wave.
+                treat_fallback_empty_as_known=wave_start < "2020-01-01",
             )
+            record(f"intraday_5m_residual_plan_coarse_{wave_name}", residual)
+            route_symbols = tuple(residual.get("download_symbols", ()) or ())
+            route_date_values: set[str] = set()
+            for residual_group in list(residual.get("download_groups", ()) or ()):
+                explicit_group_dates = list(residual_group.get("trade_dates", ()) or ())
+                if explicit_group_dates:
+                    route_date_values.update(str(item) for item in explicit_group_dates)
+                    continue
+                residual_start = str(residual_group.get("start_date", "") or "")
+                residual_end = str(residual_group.get("end_date", "") or "")
+                route_date_values.update(
+                    item for item in wave_dates if residual_start <= item <= residual_end
+                )
+            route_dates = tuple(sorted(route_date_values))
+            expected_trade_dates: dict[str, tuple[str, ...]] = {}
+            if route_symbols and route_dates:
+                expected_trade_dates, expected_evidence = _proxy_daily_expected_trade_dates(
+                    symbols=route_symbols,
+                    trade_dates=route_dates,
+                    identity_registry=identity_registry,
+                    workspace_root=workspace_root,
+                )
+                record(f"intraday_5m_expected_stock_days_{wave_name}", expected_evidence)
+                if expected_trade_dates:
+                    residual = plan_intraday_residuals(
+                        symbols=route_symbols,
+                        start_date=wave_start,
+                        end_date=wave_end,
+                        primary_raw_domains=(
+                            RAW_EXTERNAL_QUANT_INTRADAY_5M,
+                            RAW_INTRADAY_5M_SELECTED,
+                        ),
+                        fallback_raw_domain=RAW_TUSHARE_PROXY_INTRADAY_5M,
+                        workspace_root=workspace_root,
+                        lifecycle_ranges=lifecycle,
+                        trade_dates=route_dates,
+                        expected_trade_dates_by_symbol=expected_trade_dates,
+                        treat_fallback_empty_as_known=wave_start < "2020-01-01",
+                    )
             record(f"intraday_5m_residual_plan_{wave_name}", residual)
             for group_index, group in enumerate(residual.get("download_groups", ()) or (), start=1):
                 group_start = str(group.get("start_date", "") or "")
@@ -537,7 +679,9 @@ def _run_bootstrap_capture(
                     }
                 ]
                 if group_start >= "2020-01-01":
-                    group_dates = [item for item in dates if group_start <= item <= group_end]
+                    group_dates = list(group.get("trade_dates", ()) or ())
+                    if not group_dates:
+                        group_dates = [item for item in route_dates if group_start <= item <= group_end]
                     if group_dates:
                         free_result = ingest_intraday_5m(
                             symbols=group_symbols,
@@ -566,6 +710,8 @@ def _run_bootstrap_capture(
                             workspace_root=workspace_root,
                             lifecycle_ranges=lifecycle,
                             trade_dates=tuple(group_dates),
+                            expected_trade_dates_by_symbol=expected_trade_dates,
+                            treat_fallback_empty_as_known=True,
                         )
                         record(
                             f"free_intraday_5m_residual_replan_{wave_name}_{group_index}",
@@ -615,14 +761,16 @@ def _run_bootstrap_capture(
             if intraday_status != "completed":
                 break
             final_residual = plan_intraday_residuals(
-                symbols=mainboard_symbols,
+                symbols=route_symbols,
                 start_date=wave_start,
                 end_date=wave_end,
                 primary_raw_domains=(RAW_EXTERNAL_QUANT_INTRADAY_5M, RAW_INTRADAY_5M_SELECTED),
                 fallback_raw_domain=RAW_TUSHARE_PROXY_INTRADAY_5M,
                 workspace_root=workspace_root,
                 lifecycle_ranges=lifecycle,
-                trade_dates=tuple(item for item in dates if wave_start <= item <= wave_end),
+                trade_dates=route_dates,
+                expected_trade_dates_by_symbol=expected_trade_dates,
+                treat_fallback_empty_as_known=True,
             )
             record(f"intraday_5m_residual_final_{wave_name}", final_residual)
             if int(final_residual.get("download_count", 0) or 0):
@@ -661,7 +809,7 @@ def _run_bootstrap_capture(
         return intraday_status, intraday_result
     if intraday_status != "completed":
         return intraday_status, intraday_result
-    for domain in ("daily", "daily-basic", "identity", "status", "factor"):
+    for domain in ("daily-basic", "identity", "factor"):
         result = _proxy_reference_call(
             domain=domain,
             dates=dates if domain in {"daily", "daily-basic", "status"} else (),
@@ -673,6 +821,35 @@ def _run_bootstrap_capture(
         record(f"tushare_proxy_{domain}", result)
         if result.get("status") != "completed":
             return str(result.get("status") or "partial"), result
+    # The minute capture paths are intentionally resumable per symbol/month.
+    # Before candidate construction, collapse those many small immutable files
+    # into verified year x 16-bucket bundles and export a portable raw index.
+    # Source archives and v2 are untouched; only verified v3 legacy partitions
+    # are removed after their bundle/hash round-trip succeeds.
+    compact_results: list[dict[str, Any]] = []
+    for raw_domain in (
+        RAW_EXTERNAL_QUANT_INTRADAY_5M,
+        RAW_INTRADAY_5M_MOOTDX,
+        RAW_INTRADAY_5M_BAOSTOCK,
+        RAW_INTRADAY_5M_SELECTED,
+        RAW_TUSHARE_PROXY_INTRADAY_5M,
+    ):
+        compacted = compact_raw_domain(
+            raw_domain,
+            workspace_root=workspace_root,
+            export_index_dir=qdp_v3_paths(workspace_root).metadata / "raw_index",
+            delete_sources=True,
+            yes=True,
+        )
+        compact_results.append(asdict(compacted))
+    record(
+        "compact_intraday_raw",
+        {
+            "status": "completed",
+            "domain_count": len(compact_results),
+            "results": compact_results,
+        },
+    )
     return "completed", None
 
 

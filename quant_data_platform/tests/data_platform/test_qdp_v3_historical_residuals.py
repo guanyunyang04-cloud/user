@@ -9,7 +9,9 @@ import pandas as pd
 import pytest
 
 from quant_data_platform.qdp_v3.constants import (
+    EXPECTED_5M_BAR_ENDS,
     RAW_EXTERNAL_QUANT_INTRADAY_5M,
+    RAW_TUSHARE_PROXY_DAILY,
     RAW_TUSHARE_PROXY_INTRADAY_5M,
 )
 from quant_data_platform.qdp_v3.historical import (
@@ -22,7 +24,7 @@ from quant_data_platform.qdp_v3.storage import (
     write_empty_raw_partition,
     write_raw_partition,
 )
-from quant_data_platform.qdp_v3.update import plan_update
+from quant_data_platform.qdp_v3.update import _proxy_daily_expected_trade_dates, plan_update
 
 
 def _workspace(tmp_path: Path) -> Path:
@@ -40,18 +42,18 @@ def _identity_config() -> Path:
     return Path(__file__).resolve().parents[2] / "configs" / "qdp_v3_symbol_history.json"
 
 
-def _one_bar(symbol: str) -> pd.DataFrame:
+def _one_bar(symbol: str, trade_date: str = "2010-01-04") -> pd.DataFrame:
     return pd.DataFrame(
         {
-            "provider_symbol": [symbol],
-            "trade_date": ["2010-01-04"],
-            "bar_time": ["09:35:00"],
-            "open": [10.0],
-            "high": [10.1],
-            "low": [9.9],
-            "close": [10.0],
-            "volume": [100.0],
-            "amount": [1000.0],
+            "provider_symbol": symbol,
+            "trade_date": trade_date,
+            "bar_time": [f"{value}:00" for value in EXPECTED_5M_BAR_ENDS],
+            "open": 10.0,
+            "high": 10.1,
+            "low": 9.9,
+            "close": 10.0,
+            "volume": 100.0,
+            "amount": 1000.0,
         }
     )
 
@@ -94,7 +96,7 @@ def test_residual_plan_uses_stable_identity_and_preserves_known_provider_gaps(
         raw_domain=RAW_EXTERNAL_QUANT_INTRADAY_5M,
         partition_field="provider_symbol",
         partition_value="302132.SZ",
-        frame=_one_bar("302132.SZ"),
+        frame=_one_bar("302132.SZ", "2010-08-30"),
         receipt={
             "provider": "external_quant_archive",
             "quality_tier": "strict",
@@ -139,6 +141,7 @@ def test_residual_plan_uses_stable_identity_and_preserves_known_provider_gaps(
             "600000.SH": ("1999-11-10", ""),
         },
         identity_registry=registry,
+        trade_dates=("2010-08-30",),
     )
 
     assert plan["covered_symbols"] == ["300114.SZ"]
@@ -178,13 +181,71 @@ def test_local_archive_update_plan_is_local_first_with_residual_only(tmp_path: P
     )
 
 
+def test_trusted_daily_absence_excludes_suspension_from_minute_residual(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    for trade_date, symbols in (
+        ("2012-01-03", ("600000.SH",)),
+        ("2012-01-04", ()),
+    ):
+        frame = pd.DataFrame(
+            {
+                "ts_code": list(symbols),
+                "trade_date": [trade_date.replace("-", "")] * len(symbols),
+                "open": [10.0] * len(symbols),
+                "high": [10.1] * len(symbols),
+                "low": [9.9] * len(symbols),
+                "close": [10.0] * len(symbols),
+            }
+        )
+        write_raw_partition(
+            raw_domain=RAW_TUSHARE_PROXY_DAILY,
+            partition_field="trade_date",
+            partition_value=trade_date,
+            frame=frame,
+            receipt={"provider": "tushare_proxy", "quality_tier": "strict"},
+            workspace_root=workspace,
+        )
+    registry = SecurityIdentityRegistry.from_sources(
+        provider_symbols=["600000.SH"],
+        config_path=_identity_config(),
+    )
+    expected, evidence = _proxy_daily_expected_trade_dates(
+        symbols=["600000.SH"],
+        trade_dates=["2012-01-03", "2012-01-04"],
+        identity_registry=registry,
+        workspace_root=workspace,
+    )
+
+    assert evidence["status"] == "complete"
+    assert expected["QDP-CN-SSE-600000"] == ("2012-01-03",)
+    plan = plan_intraday_residuals(
+        symbols=["600000.SH"],
+        start_date="2012-01-03",
+        end_date="2012-01-04",
+        primary_raw_domains=(),
+        workspace_root=workspace,
+        lifecycle_ranges={"600000.SH": ("1999-11-10", "")},
+        trade_dates=("2012-01-03", "2012-01-04"),
+        expected_trade_dates_by_symbol=expected,
+        identity_registry=registry,
+    )
+    assert plan["download_groups"] == [
+        {
+            "start_date": "2012-01-03",
+            "end_date": "2012-01-03",
+            "trade_dates": ["2012-01-03"],
+            "symbols": ["600000.SH"],
+        }
+    ]
+
+
 def test_residual_plan_emits_only_the_uncovered_tail_not_the_whole_wave(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     write_raw_partition(
         raw_domain=RAW_EXTERNAL_QUANT_INTRADAY_5M,
         partition_field="provider_symbol",
         partition_value="600000.SH",
-        frame=_one_bar("600000.SH"),
+        frame=_one_bar("600000.SH", "2026-03-27"),
         receipt={
             "provider": "external_quant_archive",
             "quality_tier": "strict",
@@ -201,13 +262,58 @@ def test_residual_plan_emits_only_the_uncovered_tail_not_the_whole_wave(tmp_path
         primary_raw_domains=(RAW_EXTERNAL_QUANT_INTRADAY_5M,),
         workspace_root=workspace,
         lifecycle_ranges={"600000.SH": ("1999-11-10", "")},
+        trade_dates=("2026-03-27", "2026-03-30"),
     )
 
     assert plan["partially_covered_symbols"] == ["600000.SH"]
     assert plan["download_groups"] == [
         {
-            "start_date": "2026-03-28",
-            "end_date": "2026-07-13",
+            "start_date": "2026-03-30",
+            "end_date": "2026-03-30",
+            "trade_dates": ["2026-03-30"],
+            "symbols": ["600000.SH"],
+        }
+    ]
+
+
+def test_internal_incomplete_archive_day_remains_an_exact_residual(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    first = _one_bar("600000.SH", "2012-01-03")
+    malformed = _one_bar("600000.SH", "2012-01-04").iloc[:-1].copy()
+    last = _one_bar("600000.SH", "2012-01-05")
+    write_raw_partition(
+        raw_domain=RAW_EXTERNAL_QUANT_INTRADAY_5M,
+        partition_field="provider_symbol",
+        partition_value="600000.SH",
+        frame=pd.concat([first, malformed, last], ignore_index=True),
+        receipt={
+            "provider": "external_quant_archive",
+            "quality_tier": "strict",
+            "coverage_start_date": "2012-01-03",
+            "coverage_end_date": "2012-01-05",
+            "complete_stock_day_count": 2,
+            "complete_trade_dates": ["2012-01-03", "2012-01-05"],
+            "incomplete_trade_dates": ["2012-01-04"],
+        },
+        workspace_root=workspace,
+    )
+
+    plan = plan_intraday_residuals(
+        symbols=["600000.SH"],
+        start_date="2012-01-03",
+        end_date="2012-01-05",
+        primary_raw_domains=(RAW_EXTERNAL_QUANT_INTRADAY_5M,),
+        workspace_root=workspace,
+        lifecycle_ranges={"600000.SH": ("1999-11-10", "")},
+        trade_dates=("2012-01-03", "2012-01-04", "2012-01-05"),
+    )
+
+    assert plan["partially_covered_symbols"] == ["600000.SH"]
+    assert plan["download_groups"] == [
+        {
+            "start_date": "2012-01-04",
+            "end_date": "2012-01-04",
+            "trade_dates": ["2012-01-04"],
             "symbols": ["600000.SH"],
         }
     ]
@@ -277,6 +383,8 @@ def test_bootstrap_capture_routes_exact_residual_spans_without_using_old_full_jo
 
     def residual_plan(**kwargs: object) -> dict[str, object]:
         start = str(kwargs["start_date"])
+        if start == "2026-03-28":
+            return {"download_count": 0, "download_groups": []}
         plan_calls[start] = plan_calls.get(start, 0) + 1
         if plan_calls[start] > 1:
             return {"download_count": 0, "download_groups": []}
@@ -321,7 +429,7 @@ def test_bootstrap_capture_routes_exact_residual_spans_without_using_old_full_jo
     assert status == "completed"
     assert blocker is None
     assert local_calls[0]["symbols"] == ["000005.SZ", "600000.SH"]
-    assert local_calls[0]["workers"] == 3
+    assert local_calls[0]["workers"] == 4
     assert len(proxy_calls) == 1
     assert proxy_calls[0]["symbols"] == ("000005.SZ",)
     assert proxy_calls[0]["start_date"] == "2012-01-01"
