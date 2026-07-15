@@ -200,8 +200,17 @@ def test_directory_segments_combine_and_exact_overlap_deduplicates(tmp_path: Pat
         min_available_gib=0,
         min_free_disk_gib=0,
     )
+    resumed = import_external_quant_5m(
+        [first_dir, second_dir],
+        workspace_root=workspace,
+        symbols=["600000.SH"],
+        workers=2,
+        min_available_gib=0,
+        min_free_disk_gib=0,
+    )
 
     assert result.completed_symbols == 1
+    assert resumed.reused_symbols == 1
     assert result.row_count == 3 * 48
     frame = read_raw_partition(result.refs[0])
     assert frame.groupby("trade_date").size().to_dict() == {

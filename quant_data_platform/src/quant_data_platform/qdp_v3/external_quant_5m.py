@@ -800,10 +800,12 @@ def _import_symbol(
     previous_frame = _empty_raw_frame()
     if previous is not None and previous.row_count > 0 and previous.quality_tier == "strict":
         previous_receipt = read_raw_receipt(previous)
-    # ZIP containers have a whole-file digest, so an exact prior receipt can
-    # be resumed without inflating and hashing every member again. Directory
-    # files are re-read because their per-file digest is the provenance root.
-    if previous is not None and all(item.source_kind == "zip" for item in segments):
+    # The inventory fingerprint includes the ZIP digest plus every directory
+    # member's path, size, and nanosecond mtime.  An exact strict receipt is
+    # therefore a valid resume point for both source kinds; re-reading it would
+    # defeat per-security crash recovery and duplicate the full historical
+    # frame in memory.
+    if previous is not None:
         receipt = previous_receipt or read_raw_receipt(previous)
         if (
             previous.row_count > 0
@@ -1020,42 +1022,63 @@ def _combine_segment_frames(
     if not frames:
         return _empty_raw_frame()
     keys = ["provider_symbol", "trade_date", "bar_time"]
+    values = [item for item in RAW_COLUMNS if item not in keys]
     combined = _coerce_raw_schema(frames[0])
     for frame in frames[1:]:
         incoming = _coerce_raw_schema(frame)
-        existing_keys = set(map(tuple, combined[keys].itertuples(index=False, name=None)))
-        incoming_keys = set(map(tuple, incoming[keys].itertuples(index=False, name=None)))
-        overlap = sorted(existing_keys.intersection(incoming_keys))
-        for key in overlap:
-            left_mask = pd.Series(True, index=combined.index)
-            right_mask = pd.Series(True, index=incoming.index)
-            for column, value in zip(keys, key):
-                left_mask &= combined[column].eq(value)
-                right_mask &= incoming[column].eq(value)
-            left = (
-                combined.loc[left_mask, RAW_COLUMNS]
-                .drop_duplicates()
-                .sort_values(RAW_COLUMNS, kind="stable")
-                .reset_index(drop=True)
+        existing_index = pd.MultiIndex.from_frame(combined[keys])
+        incoming_index = pd.MultiIndex.from_frame(incoming[keys])
+        overlap = existing_index.unique().intersection(incoming_index.unique()).sort_values()
+        if len(overlap):
+            left_overlap = combined.loc[existing_index.isin(overlap)].copy()
+            right_overlap = incoming.loc[incoming_index.isin(overlap)].copy()
+            left_counts = left_overlap.groupby(keys, sort=False, dropna=False).size()
+            right_counts = right_overlap.groupby(keys, sort=False, dropna=False).size()
+            complex_keys = left_counts.loc[left_counts.ne(1)].index.union(
+                right_counts.loc[right_counts.ne(1)].index
             )
-            right = (
-                incoming.loc[right_mask, RAW_COLUMNS]
-                .drop_duplicates()
-                .sort_values(RAW_COLUMNS, kind="stable")
-                .reset_index(drop=True)
-            )
-            if not left.equals(right):
-                raise ExternalQuant5mError(
-                    "external_quant_5m_overlap_conflict:"
-                    f"{provider_symbol}:{key[1]}:{key[2]}"
+            simple_keys = overlap.difference(complex_keys)
+            if len(simple_keys):
+                left_simple = (
+                    left_overlap.loc[pd.MultiIndex.from_frame(left_overlap[keys]).isin(simple_keys)]
+                    .set_index(keys)[values]
+                    .sort_index()
                 )
-        if overlap:
-            overlap_set = set(overlap)
-            keep = [
-                tuple(row) not in overlap_set
-                for row in incoming[keys].itertuples(index=False, name=None)
-            ]
-            incoming = incoming.loc[keep]
+                right_simple = (
+                    right_overlap.loc[pd.MultiIndex.from_frame(right_overlap[keys]).isin(simple_keys)]
+                    .set_index(keys)[values]
+                    .sort_index()
+                )
+                if not left_simple.equals(right_simple):
+                    equality = left_simple.eq(right_simple) | (
+                        left_simple.isna() & right_simple.isna()
+                    )
+                    first_bad = equality.all(axis=1).loc[lambda item: ~item].index[0]
+                    raise ExternalQuant5mError(
+                        "external_quant_5m_overlap_conflict:"
+                        f"{provider_symbol}:{first_bad[1]}:{first_bad[2]}"
+                    )
+            for key in complex_keys:
+                left_mask = pd.MultiIndex.from_frame(left_overlap[keys]).isin([key])
+                right_mask = pd.MultiIndex.from_frame(right_overlap[keys]).isin([key])
+                left = (
+                    left_overlap.loc[left_mask, RAW_COLUMNS]
+                    .drop_duplicates()
+                    .sort_values(RAW_COLUMNS, kind="stable")
+                    .reset_index(drop=True)
+                )
+                right = (
+                    right_overlap.loc[right_mask, RAW_COLUMNS]
+                    .drop_duplicates()
+                    .sort_values(RAW_COLUMNS, kind="stable")
+                    .reset_index(drop=True)
+                )
+                if not left.equals(right):
+                    raise ExternalQuant5mError(
+                        "external_quant_5m_overlap_conflict:"
+                        f"{provider_symbol}:{key[1]}:{key[2]}"
+                    )
+            incoming = incoming.loc[~incoming_index.isin(overlap)]
         combined = pd.concat([combined, incoming], ignore_index=True)
     return _coerce_raw_schema(combined)
 
