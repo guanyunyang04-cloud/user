@@ -59,11 +59,15 @@ from quant_data_platform.tushare_proxy import (
 GIB = 1024**3
 MIN_FREE_SPACE_BYTES = 200 * GIB
 MAX_HISTORY_WORKERS = 3
+HISTORY_WORKER_ENV = "QDP_TUSHARE_PROXY_HISTORY_WORKERS"
 PROTOCOL_CIRCUIT_THRESHOLD = 5
 ERROR_WINDOW_SIZE = 200
 ERROR_RATE_WORKER_REDUCTION = 0.02
 PRODUCTION_GATE_MIN_REQUESTS = 1_000
-PRODUCTION_GATE_MAX_ERROR_RATE = 0.005
+# Network attempts are retried per page.  Use the same sustained-error
+# threshold as worker reduction so occasional TLS EOFs do not repeatedly stop
+# a multi-day historical capture that is otherwise making forward progress.
+PRODUCTION_GATE_MAX_ERROR_RATE = 0.02
 
 
 def _proxy_performance_gate_failed(metrics: Mapping[str, Any]) -> bool:
@@ -71,6 +75,19 @@ def _proxy_performance_gate_failed(metrics: Mapping[str, Any]) -> bool:
         int(metrics.get("request_count", 0) or 0) >= PRODUCTION_GATE_MIN_REQUESTS
         and float(metrics.get("error_rate", 0.0) or 0.0) > PRODUCTION_GATE_MAX_ERROR_RATE
     )
+
+
+def _history_worker_limit(requested_workers: int) -> int:
+    """Clamp history concurrency, allowing an operational low-memory override."""
+
+    configured = os.environ.get(HISTORY_WORKER_ENV, "").strip()
+    if not configured:
+        return max(1, min(int(requested_workers), MAX_HISTORY_WORKERS))
+    try:
+        override = int(configured)
+    except ValueError as exc:
+        raise ValueError(f"history_worker_env_invalid:{configured}") from exc
+    return max(1, min(int(requested_workers), MAX_HISTORY_WORKERS, override))
 
 
 @dataclass(frozen=True)
@@ -1063,17 +1080,22 @@ def _run_intraday_symbol(
             state.row_count = int(existing.row_count)
             state.updated_at = utc_now()
         return symbol, "completed_existing_raw"
+    staged_receipts: list[dict[str, Any]] = []
+    staged_capture_complete = False
     if state.page_count:
-        receipts = _validate_staged_pages(task_root, expected_page_count=state.page_count)
-        expected_cursor = str(receipts[-1].get("next_end_at", "") or "")
+        staged_receipts = _validate_staged_pages(
+            task_root,
+            expected_page_count=state.page_count,
+        )
+        expected_cursor = str(staged_receipts[-1].get("next_end_at", "") or "")
         if str(state.cursor_end_at or "") != expected_cursor:
             raise RuntimeError(f"historical_cursor_staging_mismatch:{symbol}")
+        staged_capture_complete = bool(staged_receipts[-1].get("is_complete", False))
     cursor_end_at = str(state.cursor_end_at or end_at)
     previous_min = ""
     if state.page_count:
-        staged_receipts = _validate_staged_pages(task_root, expected_page_count=state.page_count)
         previous_min = str(staged_receipts[-1].get("min_timestamp", "") or "")
-    while True:
+    while not staged_capture_complete:
         has_capacity, free_bytes = _disk_has_capacity(
             workspace_root=workspace_root,
             minimum_free_bytes=minimum_free_bytes,
@@ -1286,7 +1308,7 @@ def _ingest_tushare_proxy_intraday_impl(
         workspace_root=workspace_root,
     )
     job_guard = threading.RLock()
-    current_worker_limit = max(1, min(int(max_workers), MAX_HISTORY_WORKERS))
+    current_worker_limit = _history_worker_limit(max_workers)
     next_index = 0
     live: dict[Future[tuple[str, str]], str] = {}
     stop_reason = ""

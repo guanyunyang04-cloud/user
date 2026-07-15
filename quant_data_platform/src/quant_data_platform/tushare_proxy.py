@@ -32,6 +32,7 @@ TUSHARE_PROXY_PROTOCOL = "tushare_compatible_http"
 TUSHARE_PROXY_DEFAULT_URL = "https://ts.gyzcloud.top/api"
 TUSHARE_PROXY_TOKEN_ENV = "QDP_TUSHARE_PROXY_TOKEN"
 TUSHARE_PROXY_URL_ENV = "QDP_TUSHARE_PROXY_URL"
+TUSHARE_PROXY_RATE_ENV = "QDP_TUSHARE_PROXY_RATE_PER_MINUTE"
 TUSHARE_PROXY_SAFE_RATE_PER_MINUTE = 96
 TUSHARE_PROXY_BURST = 1
 TUSHARE_PROXY_HISTORY_PAGE_SIZE = 8_000
@@ -123,9 +124,18 @@ class TushareProxyConfig:
 
     @classmethod
     def from_env(cls) -> "TushareProxyConfig":
+        configured_rate = str(
+            os.environ.get(TUSHARE_PROXY_RATE_ENV, TUSHARE_PROXY_SAFE_RATE_PER_MINUTE)
+            or TUSHARE_PROXY_SAFE_RATE_PER_MINUTE
+        ).strip()
+        try:
+            rate = int(configured_rate)
+        except ValueError as exc:
+            raise ValueError(f"tushare_proxy_rate_env_invalid:{configured_rate}") from exc
         return cls(
             token=str(os.environ.get(TUSHARE_PROXY_TOKEN_ENV, "") or "").strip(),
             url=str(os.environ.get(TUSHARE_PROXY_URL_ENV, TUSHARE_PROXY_DEFAULT_URL) or TUSHARE_PROXY_DEFAULT_URL).strip(),
+            safe_rate_per_minute=rate,
         ).validated()
 
     def validated(self) -> "TushareProxyConfig":
@@ -381,6 +391,7 @@ class TushareProxyClient:
         delays = (0.0, 2.0, 5.0, 15.0)
         last_error: BaseException | None = None
         attempts = int(self.config.retries) + 1
+        http_429_attempts = 0
         for attempt in range(1, attempts + 1):
             if attempt > 1:
                 self._sleeper(delays[min(attempt - 1, len(delays) - 1)])
@@ -396,6 +407,7 @@ class TushareProxyClient:
                 elapsed = time.monotonic() - started
                 if int(getattr(response, "status_code", 0) or 0) in _RETRYABLE_HTTP_STATUS:
                     if int(response.status_code) == 429:
+                        http_429_attempts += 1
                         self.metrics.record(elapsed=elapsed, status="rate_limit")
                         headers = getattr(response, "headers", {}) or {}
                         retry_after = 2.0
@@ -437,6 +449,11 @@ class TushareProxyClient:
                 elapsed = time.monotonic() - started
                 self.metrics.record(elapsed=elapsed, status="network_error")
                 last_error = TushareProxyError(_safe_error_message(exc, token=self.config.token))
+        if http_429_attempts == attempts:
+            # A transient minute-window throttle normally clears within the
+            # retry window. Exhausting every attempt is the gateway's observed
+            # behavior once the account's daily minute quota is spent.
+            raise TushareProxyQuotaError("tushare_proxy_http_429_exhausted")
         if isinstance(last_error, TushareProxyError):
             raise last_error
         raise TushareProxyError("tushare_proxy_request_failed")

@@ -403,6 +403,7 @@ def _run_bootstrap_capture(
         workspace_root=workspace_root,
         as_of_date=as_of_date,
         smoke=False,
+        reuse_passed=True,
     )
     record("tushare_proxy_compatibility", compatibility)
     if compatibility.get("status") != "passed":

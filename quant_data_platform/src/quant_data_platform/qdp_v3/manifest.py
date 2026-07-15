@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
+import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +21,10 @@ from quant_data_platform.qdp_v3.constants import (
     TIMEZONE,
 )
 from quant_data_platform.qdp_v3.paths import qdp_v3_paths
+
+
+_ATOMIC_REPLACE_ATTEMPTS = 20
+_ATOMIC_REPLACE_DELAY_SECONDS = 0.02
 
 
 def utc_now() -> str:
@@ -52,11 +58,20 @@ def sha256_file(path: str | Path, *, chunk_size: int = 8 * 1024 * 1024) -> str:
 def atomic_write_json(path: str | Path, payload: Mapping[str, Any]) -> Path:
     resolved = Path(path)
     resolved.parent.mkdir(parents=True, exist_ok=True)
-    temp = resolved.with_name(f".{resolved.name}.{os.getpid()}.tmp")
+    temp = resolved.with_name(f".{resolved.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     text = json.dumps(json_safe(dict(payload)), ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    temp.write_text(text, encoding="utf-8")
-    temp.replace(resolved)
-    return resolved
+    try:
+        temp.write_text(text, encoding="utf-8")
+        for attempt in range(_ATOMIC_REPLACE_ATTEMPTS):
+            try:
+                temp.replace(resolved)
+                return resolved
+            except PermissionError:
+                if attempt + 1 >= _ATOMIC_REPLACE_ATTEMPTS:
+                    raise
+                time.sleep(_ATOMIC_REPLACE_DELAY_SECONDS * (attempt + 1))
+    finally:
+        temp.unlink(missing_ok=True)
 
 
 def manifest_sha256(path: str | Path) -> str:

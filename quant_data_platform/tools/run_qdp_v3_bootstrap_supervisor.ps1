@@ -3,6 +3,8 @@ param(
     [string]$WorkspaceRoot = "H:\quant_project",
     [string]$BootstrapStart = "2010-01-01",
     [string]$BootstrapCutoff = "2026-07-13",
+    [ValidateRange(1, 3)][int]$HistoryWorkers = 3,
+    [ValidateRange(90, 105)][int]$RatePerMinute = 96,
     [switch]$Once,
     [switch]$ValidateOnly
 )
@@ -13,6 +15,10 @@ $ErrorActionPreference = "Stop"
 $Python = "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
 $Contract = "qdp_v3_20260715_trusted_source_5m"
 $MinimumFreeBytes = 200GB
+$MinimumFreePhysicalBytes = 512MB
+$LowMemorySustainSeconds = 5
+$MemoryPollSeconds = 1
+$StateHeartbeatSeconds = 15
 $QuotaResumeMinute = 10
 $TransientRetrySeconds = 300
 $MutexName = "Local\QDPV3Trusted5MBootstrapSupervisor"
@@ -54,6 +60,9 @@ function Protect-OutputFile {
         return
     }
     [string]$text = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
+    if ($null -eq $text) {
+        return
+    }
     if ($text.Contains($Secret)) {
         $text.Replace($Secret, "<redacted>") | Set-Content -LiteralPath $Path -Encoding utf8
     }
@@ -77,6 +86,8 @@ function Write-SupervisorState {
         workspace_root = $WorkspaceRoot
         bootstrap_start = $BootstrapStart
         bootstrap_cutoff = $BootstrapCutoff
+        history_workers = $HistoryWorkers
+        rate_per_minute = $RatePerMinute
         heartbeat_at = [DateTimeOffset]::Now.ToString("o")
     }
     foreach ($key in $Extra.Keys) {
@@ -145,10 +156,69 @@ function Invoke-QdpUpdate {
         stdout_path = $stdoutPath
         stderr_path = $stderrPath
     }
-    & $Python @arguments 1> $stdoutPath 2> $stderrPath
-    $exitCode = $LASTEXITCODE
+    $child = Start-Process -FilePath $Python -ArgumentList $arguments -WorkingDirectory $WorkspaceRoot -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru
+    if ($null -eq $child) {
+        return [pscustomobject]@{
+            status = "process_start_failed"
+            exit_code = -1
+            stdout_path = $stdoutPath
+            stderr_path = $stderrPath
+            run_id = ""
+            stage_count = 0
+        }
+    }
+    $childId = [int]$child.Id
+    $pausedForMemory = $false
+    $lowMemorySince = $null
+    $lastStateWrite = [DateTime]::MinValue
+    while ($true) {
+        $runningChild = Get-Process -Id $childId -ErrorAction SilentlyContinue
+        if ($null -eq $runningChild) {
+            break
+        }
+        Start-Sleep -Seconds $MemoryPollSeconds
+        $now = Get-Date
+        $freePhysicalBytes = [int64]((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory * 1KB)
+        if ($freePhysicalBytes -lt [int64]$MinimumFreePhysicalBytes) {
+            if ($null -eq $lowMemorySince) {
+                $lowMemorySince = $now
+            }
+            elseif (($now - $lowMemorySince).TotalSeconds -ge $LowMemorySustainSeconds) {
+                Stop-Process -Id $childId -Force -ErrorAction SilentlyContinue
+                $pausedForMemory = $true
+                break
+            }
+        }
+        else {
+            $lowMemorySince = $null
+        }
+        if (($now - $lastStateWrite).TotalSeconds -ge $StateHeartbeatSeconds -or $null -ne $lowMemorySince) {
+            Write-SupervisorState -Status "running" -Phase $Phase -Attempt $Attempt -Extra @{
+                child_pid = $childId
+                stdout_path = $stdoutPath
+                stderr_path = $stderrPath
+                free_physical_bytes = $freePhysicalBytes
+                low_memory_since = if ($null -eq $lowMemorySince) { "" } else { $lowMemorySince.ToString("o") }
+            }
+            $lastStateWrite = $now
+        }
+    }
+    # The CLI reports its durable status in stdout JSON.  Do not touch the
+    # Process object after exit: PowerShell can null it while the job is being
+    # reaped, which used to kill the supervisor instead of handling the run.
+    $exitCode = if ($pausedForMemory) { -1 } else { 0 }
     Protect-OutputFile -Path $stdoutPath -Secret $script:ProxyToken
     Protect-OutputFile -Path $stderrPath -Secret $script:ProxyToken
+    if ($pausedForMemory) {
+        return [pscustomobject]@{
+            status = "paused_memory"
+            exit_code = $exitCode
+            stdout_path = $stdoutPath
+            stderr_path = $stderrPath
+            run_id = ""
+            stage_count = 0
+        }
+    }
     if ($exitCode -ne 0) {
         return [pscustomobject]@{
             status = "process_failed"
@@ -203,6 +273,8 @@ try {
     $env:QDP_TUSHARE_PROXY_URL = Get-UserEnvironmentValue -Name "QDP_TUSHARE_PROXY_URL"
     $script:ProxyToken = Get-UserEnvironmentValue -Name "QDP_TUSHARE_PROXY_TOKEN"
     $env:QDP_TUSHARE_PROXY_TOKEN = $script:ProxyToken
+    $env:QDP_TUSHARE_PROXY_HISTORY_WORKERS = [string]$HistoryWorkers
+    $env:QDP_TUSHARE_PROXY_RATE_PER_MINUTE = [string]$RatePerMinute
     $env:PYTHONPATH = Join-Path $resolvedWorkspace "quant_data_platform\src"
 
     $script:SupervisorRoot = Join-Path $env:QDP_RUNTIME_ROOT "bootstrap_supervisor"
@@ -215,6 +287,8 @@ try {
             fixed_python = $Python
             data_root = $env:QDP_DATA_ROOT
             runtime_root = $env:QDP_RUNTIME_ROOT
+            history_workers = $HistoryWorkers
+            rate_per_minute = $RatePerMinute
         }
         exit 0
     }
@@ -227,6 +301,17 @@ try {
         if ([int64]$drive.Free -lt [int64]$MinimumFreeBytes) {
             $until = (Get-Date).AddMinutes(10)
             Wait-WithHeartbeat -Until $until -Reason "paused_disk" -Phase $phase -Attempt $attempt
+            continue
+        }
+        $freePhysicalBytes = [int64]((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory * 1KB)
+        if ($freePhysicalBytes -lt [int64]$MinimumFreePhysicalBytes) {
+            Start-Sleep -Seconds $LowMemorySustainSeconds
+            $freePhysicalBytes = [int64]((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory * 1KB)
+            if ($freePhysicalBytes -ge [int64]$MinimumFreePhysicalBytes) {
+                continue
+            }
+            $until = (Get-Date).AddMinutes(5)
+            Wait-WithHeartbeat -Until $until -Reason "paused_memory" -Phase $phase -Attempt $attempt
             continue
         }
 
@@ -263,6 +348,11 @@ try {
             $consecutiveFailures = 0
             continue
         }
+        if ($result.status -eq "paused_memory") {
+            $until = (Get-Date).AddMinutes(5)
+            Wait-WithHeartbeat -Until $until -Reason "waiting_memory_recovery" -Phase $phase -Attempt $attempt
+            continue
+        }
         if ($result.status -in @("paused_rate_limit_quality_gate", "paused_disk", "partial", "process_failed", "invalid_json", "failed")) {
             $consecutiveFailures += 1
             if ($consecutiveFailures -ge 3) {
@@ -295,6 +385,7 @@ catch {
         Write-SupervisorState -Status "failed" -Phase "bootstrap" -Attempt 0 -Extra @{
             error_type = $_.Exception.GetType().Name
             error = $message
+            stack = [string]$_.ScriptStackTrace
         }
     }
     exit 1

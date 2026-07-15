@@ -267,6 +267,28 @@ def test_job_supervisor_writes_active_and_stopped_heartbeat(tmp_path: Path) -> N
     assert stopped["stopped_at"]
 
 
+def test_atomic_json_write_retries_a_transient_windows_file_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "job.json"
+    original_replace = Path.replace
+    attempts = 0
+
+    def flaky_replace(self: Path, destination: str | Path) -> Path:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise PermissionError("simulated transient file lock")
+        return original_replace(self, destination)
+
+    monkeypatch.setattr(Path, "replace", flaky_replace)
+    atomic_write_json(target, {"status": "written"})
+
+    assert attempts == 2
+    assert json.loads(target.read_text(encoding="utf-8")) == {"status": "written"}
+
+
 def test_stale_running_job_is_requeued_only_without_os_lock(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     paths = ensure_qdp_v3_layout(workspace)

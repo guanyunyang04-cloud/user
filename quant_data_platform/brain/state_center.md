@@ -8,7 +8,7 @@
 ## Object Instances
 ### object `qdp_project`
 `type`: shared_manifest_first_data_base_instance
-`state`: v2 仍是唯一有效、可研究的 active 数据基底；v3 已收敛为可信单源、5m-only、紧凑 raw bundle 合同。历史 provider job 已接管为 `interrupted_recoverable`，尚未恢复下载；正式 candidate 和 active 切换均未完成。2026-07-15 发现的空 v3 active 占位已确认无候选/无数据并删除；默认 status 已恢复到 v2。
+`state`: v2 仍是唯一有效、可研究的 active 数据基底；v3 已收敛为可信单源、5m-only、紧凑 raw bundle 合同。2026-07-15 的 Tushare 历史 5m bootstrap 已恢复为后台 DAG，按页级 staging/原始分区断点续跑；正式 candidate 和 active 切换均未完成。2026-07-15 发现的空 v3 active 占位已确认无候选/无数据并删除；默认 status 已恢复到 v2。
 `public_cli`: 公共面为 `status/list/describe/check/update/gc`，管理面为 `ingest/compact/build/audit/diff/publish/rollback/retire-v2-intraday`。read routing 只接受通过 `validate_published_active()` 的 v3，否则默认 v2；`check` 也可显式指定 candidate，任何 v2 写命令必须显式给出 `--generation v2`。
 `python`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`
 
@@ -20,9 +20,9 @@
 `implemented_domains`: 首次发布只要求 calendar、identity/symbol history、daily/status、adjust-factor daily、PIT signal/open 与 5m；估值、事件、财务、分红、行业、指数和股本均为非阻塞 enrichment。v3 1m 路由与转换代码已删除。
 `compatibility`: 0.9.1 full golden 已捕获；BaoStock 0.9.3 full gate 为 `passed`（34 anchors、0 issues、普通多页 5537 rows、wheel hash 匹配）。该报告仍约束 cutoff 后 BaoStock 增量，但不再要求 BaoStock 证明 Tushare historical canonical。
 `legacy_baostock_history`: 2010/2011/2012 已有 `729/729` 个日线、all-stock 和日期因子事件分区，日线 `1,578,095` rows、因子事件 `5,192` rows。它们作为可追溯 legacy evidence 紧凑归档，不进入 Tushare 独占的 historical canonical，也不继续 2013+ 历史复刻。
-`proxy_bootstrap`: Tushare `stock_basic`、`trade_cal`、4,011 个全市场 `daily`、4,011 个 `daily_basic` 与 5,864 个 identity 任务已有 raw。新调度优先用分钟额度抓全历史 5m；额度耗尽后只补 `status/factor`，跳过 dividend/financial。三个 worker 共享单一 `96 rpm / burst 1` limiter。
-`download_runtime`: Tushare 独占 `2010-01-01..2026-07-13` 历史启动；历史 BaoStock 复刻和逐行跨源验证退出生产 DAG。截止日后 BaoStock 维护日线/状态/因子事件，mootdx 优先更新完整 5m 股票日，BaoStock 作完整日 fallback。job 使用 30 秒 heartbeat 与 OS advisory lock；超过 5 分钟且无锁才回退到可恢复 pending。
-`storage_state`: `QDP_DATA_ROOT=H:\quant_project\quant_data_platform\data`；`QDP_RUNTIME_ROOT=C:\Users\ASUS\AppData\Local\QDP\runtime`。reference raw 为 undated x 1，低频时序 raw 为 year x 1，只有 5m raw 为 year x 16；zstd，目标约 384 MiB/最大 1 GiB。SQLite runtime index 可导出带 SHA256 的 `raw_index.parquet` 与 `raw_receipts.parquet`。旧 raw 小文件尚未全量 compact 或删除，生产下载尚未恢复。
+`proxy_bootstrap`: Tushare `stock_basic`、`trade_cal`、4,011 个全市场 `daily`、4,011 个 `daily_basic` 与 5,864 个 identity 任务已有 raw。新调度优先用分钟额度抓全历史 5m；额度耗尽后只补 `status/factor`，跳过 dividend/financial。三个 worker 共享单一 `96 rpm / burst 1` limiter；成功但生命周期内为空的分钟响应写 index-only `quarantined` 事实，不让少数 provider gap 阻塞全市场任务。
+`download_runtime`: Tushare 独占 `2010-01-01..2026-07-13` 历史启动；历史 BaoStock 复刻和逐行跨源验证退出生产 DAG。截止日后 BaoStock 维护日线/状态/因子事件，mootdx 优先更新完整 5m 股票日，BaoStock 作完整日 fallback。job 使用 30 秒 heartbeat 与 OS advisory lock；超过 5 分钟且无锁才回退到可恢复 pending。后台监督器以 3 worker 运行，1 秒采样物理内存；仅在可用内存连续低于 0.5 GiB 超过 5 秒时中断当前页并在 5 分钟后从 staging 断点恢复。
+`storage_state`: `QDP_DATA_ROOT=H:\quant_project\quant_data_platform\data`；`QDP_RUNTIME_ROOT=C:\Users\ASUS\AppData\Local\QDP\runtime`。reference raw 为 undated x 1，低频时序 raw 为 year x 1，只有 5m raw 为 year x 16；zstd，目标约 384 MiB/最大 1 GiB。2026-07-15 已将 94,589 个既有 v3 raw 小文件收敛为 71 个 bundle，`raw_index/raw_receipts` 均为 18,914 条且 SHA256、row-group、bundle 文件集已独立复核；逻辑/估算簇占用比为 1.017。新 5m bootstrap 的单证券 raw 是可恢复临时输入，按波次 compact，不与旧小文件布局混淆。
 `disk_health`: H 已于 2026-07-15 完成 `chkdsk H: /f`，dirty bit=false、HealthStatus=Healthy、OperationalStatus=OK、bad sectors=0；日志为 `C:\Users\ASUS\AppData\Local\QDP\maintenance\chkdsk_H_20260715.log`。用户取消 F 盘备份，当前没有 F 盘备份/fallback 前置。
 `rejected_parallel_route`: 两个独立 BaoStock login 的 live probe 出现 `10001001 用户未登录`，因此禁止生产双 session；历史低错误率不得自动解锁第二个网络槽。每个 ingest job 有 OS advisory single-writer lock，进程异常退出后自动释放。
 `adapter_smoke_boundary`: ETF adapter `1574` rows provisional；mootdx 的 `600000.SH/000001.SZ/600076.SH` 最近完整日均为 48 bars 且止于 15:00。Tushare 5m 的 `vol/amount` 已用沪深、早期/近期固定样本证明为股/元，canonical scale 均为 1.0。
@@ -88,7 +88,7 @@
 `runtime`: metadata-only `qdp status` completes in about 0.6s; read-only `qdp check --quick --runtime fast` completes in about 2.5s on the current store.
 `invariant`: future deletion still requires active-manifest traversal, dry-run, replacement evidence for unique-data boundaries, and post-delete file verification.
 `m0_correction`: v3 freeze 审计发现 17 个 active input ancestor 已缺失；当前所有 39 个仍存在的 v2 dataset 及 17 个缺失祖先 id 均被 pin。用户授权的替代缺口证明只允许重建继续，不代表祖先已恢复；v3 发布、5m 覆盖/hash 复核、v2/v3 diff、下游切换和 retirement manifest 全部完成前禁止删除旧分钟 parquet。满足全部条件后只退休 v2 的 1m、旧 5m 与两条分钟特征链。
-`raw_compaction`: v3 legacy raw 当前仍是大量小文件，已实现 bundle writer、SQLite WAL index、catalog export、bundle-aware read 和双重删除保护。必须先在小域完成不删源 round-trip，再用 `--delete-source --yes` 演练并复核，之后才可全量 compact；这不授权提前删除 v2。H 的 1 MiB allocation unit 是紧凑化的直接原因。
+`raw_compaction`: v3 legacy raw 的小域演练、全域 bundle 写入和 `--delete-source --yes` 已完成；删除前后均验证 source content hash、catalog、bundle SHA、row-group、精确历史 revision、SQLite catalog 重建与 secret scan。H 的 1 MiB allocation unit 是此前高占用的直接原因；v2 删除仍只由发布后的 retirement gate 授权。
 `retirement_sequence`: v3 首次发布只建立 `awaiting_post_cutoff_incremental` gate；完成一次 cutoff 后增量发布、watermark/coverage/hash/audit/diff/consumer 检查后才写 retirement manifest 并删除四域 parquet。任一失败保持 v2 数据不变。
 
 ## Pure Functions

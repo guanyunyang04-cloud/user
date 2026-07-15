@@ -44,6 +44,47 @@ UNIT_CONTRACT_SAMPLE_DATE = "2010-01-04"
 UNIT_CONTRACT_SAMPLE_SYMBOLS = ("600000.SH", "000001.SZ")
 
 
+def _reusable_passed_report(
+    *,
+    paths: Any,
+    source: TushareProxyClient,
+    probe_date: str,
+    smoke: bool,
+) -> dict[str, Any]:
+    if smoke:
+        return {}
+    for report_path in sorted(
+        paths.compatibility.glob("tushare_proxy__*.json"),
+        key=lambda item: item.stat().st_mtime_ns,
+        reverse=True,
+    ):
+        payload = read_json(report_path)
+        if not payload or payload.get("status") != "passed":
+            continue
+        if bool(payload.get("smoke")) or str(payload.get("probe_date", "")) != probe_date:
+            continue
+        if str(payload.get("endpoint", "")) != source.config.url:
+            continue
+        entitlement = payload.get("entitlement")
+        if not isinstance(entitlement, Mapping):
+            continue
+        if str(entitlement.get("token_sha256", "")) != source.config.token_sha256:
+            continue
+        observed = {
+            str(item.get("api_name", ""))
+            for item in payload.get("probes", [])
+            if isinstance(item, Mapping) and item.get("status") == "passed"
+        }
+        if not set(REQUIRED_PROXY_APIS).issubset(observed):
+            continue
+        return {
+            **payload,
+            "report_path": str(report_path.resolve()),
+            "reused": True,
+        }
+    return {}
+
+
 def _evaluate_5m_unit_contract(minute: pd.DataFrame, daily: pd.DataFrame) -> dict[str, Any]:
     if minute.empty or daily.empty:
         raise RuntimeError("stk_mins_unit_contract_sample_missing")
@@ -115,10 +156,20 @@ def run_tushare_proxy_compatibility_gate(
     as_of_date: str = "",
     client: TushareProxyClient | None = None,
     smoke: bool = False,
+    reuse_passed: bool = False,
 ) -> dict[str, Any]:
     paths = ensure_qdp_v3_layout(workspace_root)
     source = client or TushareProxyClient()
     probe_date = str(as_of_date or latest_completed_business_date())[:10]
+    if reuse_passed:
+        reusable = _reusable_passed_report(
+            paths=paths,
+            source=source,
+            probe_date=probe_date,
+            smoke=smoke,
+        )
+        if reusable:
+            return reusable
     probes: list[dict[str, Any]] = []
     blockers: list[dict[str, Any]] = []
     entitlement: dict[str, Any] = {}

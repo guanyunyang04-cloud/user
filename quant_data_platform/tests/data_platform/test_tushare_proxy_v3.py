@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,17 +12,28 @@ import pytest
 from quant_data_platform.domains.contracts import HistoryPageFetchRequest, HistoryPageResult
 from quant_data_platform.qdp_v3.constants import EXPECTED_5M_BAR_ENDS
 from quant_data_platform.qdp_v3.historical import (
+    HistoricalJobState,
+    HistoricalTaskState,
+    _history_worker_limit,
     ingest_tushare_proxy_intraday,
     _merge_intraday_range_frames,
     _official_restatement_aliases,
     _proxy_performance_gate_failed,
     _prove_provider_symbol_restatement,
+    _run_intraday_symbol,
+    _staging_root,
+    _write_staged_page,
 )
 from quant_data_platform.qdp_v3.intraday import is_complete_5m_day, normalize_tushare_proxy_5m
 from quant_data_platform.qdp_v3.intraday_build import _quality_coverage
 from quant_data_platform.qdp_v3.identity import SecurityIdentityRegistry
 from quant_data_platform.qdp_v3.paths import ensure_qdp_v3_layout
-from quant_data_platform.qdp_v3.proxy_compatibility import _evaluate_5m_unit_contract, lock_bootstrap_cutoff
+from quant_data_platform.qdp_v3.proxy_compatibility import (
+    REQUIRED_PROXY_APIS,
+    _evaluate_5m_unit_contract,
+    lock_bootstrap_cutoff,
+    run_tushare_proxy_compatibility_gate,
+)
 from quant_data_platform.qdp_v3.proxy_factor import (
     derive_proxy_factor_evidence,
     reconcile_proxy_factor_third_path,
@@ -35,6 +47,7 @@ from quant_data_platform.tushare_proxy import (
     TushareProxyClient,
     TushareProxyConfig,
     TushareProxyProtocolError,
+    TushareProxyQuotaError,
     TushareProxyRateLimiter,
     redact_secrets,
 )
@@ -150,6 +163,74 @@ def test_rate_limit_response_defers_all_workers_until_retry_after() -> None:
     assert limiter.snapshot()["rate_reduction_count"] == 1
 
 
+def test_exhausted_http_429_retries_are_classified_as_daily_quota() -> None:
+    now = [0.0]
+
+    def advance(seconds: float) -> None:
+        now[0] += float(seconds)
+
+    session = _FakeSession(
+        [
+            _FakeResponse({}, status_code=429, headers={"Retry-After": "2"}),
+            _FakeResponse({}, status_code=429, headers={"Retry-After": "2"}),
+        ]
+    )
+    client = TushareProxyClient(
+        TushareProxyConfig(token="unit-test-secret", url="https://example.test/api", retries=1),
+        limiter=TushareProxyRateLimiter(
+            rate_per_minute=96,
+            burst=1,
+            clock=lambda: now[0],
+            sleeper=advance,
+        ),
+        session_factory=lambda: session,
+        sleeper=advance,
+    )
+
+    with pytest.raises(TushareProxyQuotaError, match="http_429_exhausted"):
+        client.fetch_frame(api_name="stk_mins", params={}, fields="ts_code,trade_time")
+
+    assert client.metrics.rate_limit_count == 2
+    assert client.metrics.success_count == 0
+
+
+def test_bootstrap_update_can_reuse_matching_passed_compatibility_report(tmp_path: Path) -> None:
+    paths = ensure_qdp_v3_layout(tmp_path)
+    client = TushareProxyClient(
+        TushareProxyConfig(token="unit-test-secret", url="https://example.test/api"),
+        session_factory=lambda: (_ for _ in ()).throw(AssertionError("network call not expected")),
+    )
+    report_path = paths.compatibility / "tushare_proxy__passed.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "status": "passed",
+                "provider": "tushare_proxy",
+                "endpoint": client.config.url,
+                "probe_date": "2026-07-13",
+                "smoke": False,
+                "entitlement": {"token_sha256": client.config.token_sha256},
+                "probes": [
+                    {"api_name": api_name, "status": "passed"}
+                    for api_name in REQUIRED_PROXY_APIS
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_tushare_proxy_compatibility_gate(
+        workspace_root=tmp_path,
+        as_of_date="2026-07-13",
+        client=client,
+        reuse_passed=True,
+    )
+
+    assert result["status"] == "passed"
+    assert result["reused"] is True
+    assert result["report_path"] == str(report_path.resolve())
+
+
 def test_rate_limiter_reduces_at_most_once_per_cooldown_window() -> None:
     now = [0.0]
     limiter = TushareProxyRateLimiter(
@@ -172,8 +253,32 @@ def test_rate_limiter_reduces_at_most_once_per_cooldown_window() -> None:
 
 def test_production_performance_gate_uses_attempt_error_rate_after_one_thousand_requests() -> None:
     assert not _proxy_performance_gate_failed({"request_count": 999, "error_rate": 1.0})
-    assert not _proxy_performance_gate_failed({"request_count": 1_000, "error_rate": 0.005})
-    assert _proxy_performance_gate_failed({"request_count": 1_000, "error_rate": 0.0051})
+    assert not _proxy_performance_gate_failed({"request_count": 1_000, "error_rate": 0.02})
+    assert _proxy_performance_gate_failed({"request_count": 1_000, "error_rate": 0.0201})
+
+
+def test_history_worker_limit_honors_low_memory_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QDP_TUSHARE_PROXY_HISTORY_WORKERS", "2")
+    assert _history_worker_limit(3) == 2
+    assert _history_worker_limit(1) == 1
+
+    monkeypatch.setenv("QDP_TUSHARE_PROXY_HISTORY_WORKERS", "bad")
+    with pytest.raises(ValueError, match="history_worker_env_invalid"):
+        _history_worker_limit(3)
+
+
+def test_proxy_rate_can_be_overridden_for_a_supervised_trial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QDP_TUSHARE_PROXY_TOKEN", "unit-test-secret")
+    monkeypatch.setenv("QDP_TUSHARE_PROXY_RATE_PER_MINUTE", "100")
+    assert TushareProxyConfig.from_env().safe_rate_per_minute == 100
+
+    monkeypatch.setenv("QDP_TUSHARE_PROXY_RATE_PER_MINUTE", "bad")
+    with pytest.raises(ValueError, match="tushare_proxy_rate_env_invalid"):
+        TushareProxyConfig.from_env()
 
 
 def test_recursive_redaction_covers_token_and_mcp_url() -> None:
@@ -453,6 +558,22 @@ class _SuccessfulEmptyHistoryClient:
         return None
 
 
+class _NoFetchHistoryClient:
+    def __init__(self) -> None:
+        self.config = TushareProxyConfig(
+            token="unit-test-secret",
+            url="https://example.test/api",
+        )
+        self.request_count = 0
+
+    def fetch_history_page(self, request: HistoryPageFetchRequest) -> HistoryPageResult:
+        self.request_count += 1
+        raise AssertionError("completed staging must not issue another page request")
+
+    def operational_metrics(self) -> dict:
+        return {"request_count": self.request_count, "success_count": 0, "error_rate": 0.0}
+
+
 def test_successful_empty_intraday_provider_gap_is_quarantined_not_failed(
     tmp_path: Path,
 ) -> None:
@@ -489,6 +610,69 @@ def test_successful_empty_intraday_provider_gap_is_quarantined_not_failed(
             "*.parquet"
         )
     )
+
+
+def test_completed_intraday_staging_resumes_without_repeating_the_first_page(
+    tmp_path: Path,
+) -> None:
+    symbol = "600000.SH"
+    job_id = "resume-complete-page"
+    request = HistoryPageFetchRequest(
+        provider_symbol=symbol,
+        start_at="2010-01-04 00:00:00",
+        end_at="2010-01-04 23:59:59",
+    )
+    result = HistoryPageResult(
+        provider="tushare_proxy",
+        request=request,
+        raw_data=_raw_5m().iloc[::-1].reset_index(drop=True),
+        fields=("ts_code", "trade_time", "open", "high", "low", "close", "vol", "amount"),
+        row_count=48,
+        min_timestamp="2010-01-04 09:35:00",
+        max_timestamp="2010-01-04 15:00:00",
+        next_end_at="",
+        response_sha256="b" * 64,
+        is_complete=True,
+        request_metadata_without_token={},
+    )
+    task_root = _staging_root(job_id, workspace_root=tmp_path) / symbol
+    _write_staged_page(task_root=task_root, page_number=1, result=result)
+    state = HistoricalTaskState(
+        task_id=symbol,
+        status="running",
+        cursor_end_at="",
+        page_count=1,
+        row_count=48,
+    )
+    job = HistoricalJobState(
+        job_id=job_id,
+        provider="tushare_proxy",
+        mode="historical",
+        domain="intraday",
+        start_date="2010-01-04",
+        end_date="2010-01-04",
+        frequency="5m",
+        task_ids=[symbol],
+        tasks={symbol: state},
+    )
+    client = _NoFetchHistoryClient()
+
+    _, outcome = _run_intraday_symbol(
+        symbol=symbol,
+        client=client,
+        job=job,
+        job_guard=threading.RLock(),
+        workspace_root=tmp_path,
+        lifecycle_ranges={symbol: ("1999-11-10", "")},
+        restatement_aliases={},
+        minimum_free_bytes=0,
+    )
+
+    assert outcome == "completed"
+    assert client.request_count == 0
+    assert state.status == "completed"
+    assert state.row_count == 48
+    assert not task_root.exists()
 
 
 def test_proxy_factor_comparison_is_constant_scale_invariant(tmp_path) -> None:

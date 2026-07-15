@@ -74,7 +74,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli retire
 `input`: 合同 `qdp_v3_20260715_trusted_source_5m`、已授权 M0 gap、固定历史范围 `2010-01-01..2026-07-13`。
 `steps`: 复用已完成 Tushare stock-basic/calendar/daily/daily-basic/identity raw；compact 旧 raw；优先用分钟额度回灌 Tushare 全历史 5m；额度耗尽后只补 `suspend_d/factor`；建立稳定 identity/PIT/corrections；构建九个核心域；quick/full/semantic audit；diff；CAS publish。
 `trusted_route`: 历史 canonical 只使用 Tushare，不启动 BaoStock/mootdx 全量逐行验证。已存在 BaoStock 历史 raw 只紧凑归档，不进入 historical canonical。
-`runtime`: Tushare 三个 HTTP worker 各自 Session，但共享一个 `96 rpm / burst 1` limiter、quota state 和 429 cooldown；每证券串行 8,000 行反向分页，不同证券并行；30 秒 heartbeat，超过 5 分钟且 OS lock 不存在才重置 stale task。
+`runtime`: Tushare 三个 HTTP worker 各自 Session，但共享一个 `96 rpm / burst 1` limiter、quota state 和 429 cooldown；每证券串行 8,000 行反向分页，不同证券并行；30 秒 heartbeat，超过 5 分钟且 OS lock 不存在才重置 stale task。后台监督器每秒监视可用物理内存，仅在连续低于 0.5 GiB 超过 5 秒时停止当前 child，5 分钟后从 page staging 恢复；成功空分钟响应写 index-only quarantine。
 `release_domains`: `trading_calendar`、`security_identity`、`symbol_history`、`market_daily_raw`、`security_status_daily`、`adjust_factor_daily`、`eligible_signal_D`、`tradable_open_D1`、`market_intraday_5m`。
 `hard_stop`: secret 泄漏、schema/unit/PK/identity/PIT/correction/bundle/index 失败、未解释股票日、5m strict coverage 低于 98%、5m/daily watermark 不等或 semantic audit 非 passed。
 
