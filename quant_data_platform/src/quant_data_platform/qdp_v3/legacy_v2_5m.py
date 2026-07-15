@@ -971,52 +971,84 @@ def _validated_complete_days(
     for column in _NUMERIC_COLUMNS:
         data[column] = pd.to_numeric(data[column], errors="coerce")
     data["adjusted_flag"] = data["adjusted_flag"].astype("string")
-    complete_frames: list[pd.DataFrame] = []
-    complete_dates: list[str] = []
-    rejected: dict[str, tuple[str, ...]] = {}
     expected = set(EXPECTED_5M_BAR_ENDS)
-    for trade_date, day in data.groupby("trade_date", sort=True, dropna=False):
+    numeric = data.loc[:, list(_NUMERIC_COLUMNS)].to_numpy(dtype="float64")
+    data["_pk_duplicate"] = data.duplicated(
+        ["trade_date", "bar_time"], keep=False
+    )
+    data["_time_expected"] = data["bar_time"].isin(expected)
+    adjusted = data["adjusted_flag"].str.strip().str.lower()
+    data["_adjusted_none"] = adjusted.notna() & adjusted.eq("none")
+    data["_numeric_finite"] = np.isfinite(numeric).all(axis=1)
+    data["_price_positive"] = data.loc[:, list(_PRICE_COLUMNS)].gt(0).all(axis=1)
+    data["_volume_amount_nonnegative"] = data[["volume", "amount"]].ge(0).all(axis=1)
+    data["_high_valid"] = data["high"].ge(
+        data[["open", "low", "close"]].max(axis=1)
+    )
+    data["_low_valid"] = data["low"].le(
+        data[["open", "high", "close"]].min(axis=1)
+    )
+    # This is the hot path for roughly 4,000 dates per security.  Aggregate
+    # every stock-day rule in one groupby instead of constructing thousands
+    # of tiny DataFrames in a Python loop.
+    day_metrics = data.groupby("trade_date", sort=True, dropna=False).agg(
+        row_count=("bar_time", "size"),
+        unique_bar_times=("bar_time", "nunique"),
+        has_pk_duplicate=("_pk_duplicate", "any"),
+        all_times_expected=("_time_expected", "all"),
+        all_adjusted_none=("_adjusted_none", "all"),
+        all_numeric_finite=("_numeric_finite", "all"),
+        all_prices_positive=("_price_positive", "all"),
+        all_volume_amount_nonnegative=("_volume_amount_nonnegative", "all"),
+        all_high_valid=("_high_valid", "all"),
+        all_low_valid=("_low_valid", "all"),
+    )
+    exact_time_set = (
+        day_metrics["row_count"].eq(48)
+        & day_metrics["unique_bar_times"].eq(48)
+        & day_metrics["all_times_expected"]
+    )
+    valid_day = (
+        ~day_metrics["has_pk_duplicate"]
+        & exact_time_set
+        & day_metrics["all_adjusted_none"]
+        & day_metrics["all_numeric_finite"]
+        & day_metrics["all_prices_positive"]
+        & day_metrics["all_volume_amount_nonnegative"]
+        & day_metrics["all_high_valid"]
+        & day_metrics["all_low_valid"]
+    )
+    complete_dates = tuple(
+        str(item) for item in day_metrics.index[valid_day].tolist()
+    )
+    rejected: dict[str, tuple[str, ...]] = {}
+    # Rejections are intentionally rare. Build human-readable reasons only
+    # for those dates; complete dates never cross the Python iteration boundary.
+    for trade_date, metrics in day_metrics.loc[~valid_day].iterrows():
         reasons: list[str] = []
-        keys = day[["trade_date", "bar_time"]]
-        if keys.duplicated(keep=False).any():
+        if bool(metrics["has_pk_duplicate"]):
             reasons.append("primary_key_duplicate")
-        times = tuple(sorted(day["bar_time"].dropna().astype(str)))
-        if len(day) != 48 or len(set(times)) != 48 or set(times) != expected:
+        if not bool(exact_time_set.loc[trade_date]):
             reasons.append("bar_time_set_not_exact_48")
-        adjusted = day["adjusted_flag"].str.strip().str.lower()
-        if adjusted.isna().any() or not adjusted.eq("none").all():
+        if not bool(metrics["all_adjusted_none"]):
             reasons.append("adjusted_flag_not_none")
-        numeric = day[list(_NUMERIC_COLUMNS)].to_numpy(dtype="float64")
-        if not np.isfinite(numeric).all():
+        if not bool(metrics["all_numeric_finite"]):
             reasons.append("numeric_non_finite")
         else:
-            if day[list(_PRICE_COLUMNS)].le(0).any().any():
+            if not bool(metrics["all_prices_positive"]):
                 reasons.append("price_not_positive")
-            if day[["volume", "amount"]].lt(0).any().any():
+            if not bool(metrics["all_volume_amount_nonnegative"]):
                 reasons.append("volume_or_amount_negative")
-            if (
-                day["high"]
-                < day[["open", "low", "close"]].max(axis=1)
-            ).any():
+            if not bool(metrics["all_high_valid"]):
                 reasons.append("high_relation_invalid")
-            if (
-                day["low"]
-                > day[["open", "high", "close"]].min(axis=1)
-            ).any():
+            if not bool(metrics["all_low_valid"]):
                 reasons.append("low_relation_invalid")
-        date_text = str(trade_date)
-        if reasons:
-            rejected[date_text] = tuple(dict.fromkeys(reasons))
-            continue
-        normalized = day.copy()
-        normalized["provider_symbol"] = provider_symbol
-        normalized["source"] = SOURCE_NAME
-        normalized = normalized.loc[:, RAW_COLUMNS]
-        normalized = normalized.sort_values("bar_time", kind="stable")
-        complete_frames.append(normalized)
-        complete_dates.append(date_text)
-    if complete_frames:
-        complete = pd.concat(complete_frames, ignore_index=True)
+        rejected[str(trade_date)] = tuple(reasons)
+    if complete_dates:
+        complete = data.loc[data["trade_date"].isin(complete_dates)].copy()
+        complete["provider_symbol"] = provider_symbol
+        complete["source"] = SOURCE_NAME
+        complete = complete.loc[:, RAW_COLUMNS]
         complete = complete.sort_values(
             ["trade_date", "bar_time"], kind="stable"
         ).reset_index(drop=True)
@@ -1028,7 +1060,7 @@ def _validated_complete_days(
         complete["source"] = complete["source"].astype("string")
     else:
         complete = _empty_raw_frame()
-    return complete, tuple(complete_dates), rejected
+    return complete, complete_dates, rejected
 
 
 def _relevant_shard_evidence(

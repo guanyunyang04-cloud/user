@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
+from pandas.testing import assert_frame_equal
 
 from quant_data_platform.core.json_io import read_json
 from quant_data_platform.qdp_v2.manifest import (
@@ -133,6 +136,103 @@ def _install_v2_active(
     return active_path, manifest_path, shard_paths
 
 
+def _reference_validated_complete_days(
+    staged: pd.DataFrame, provider_symbol: str
+) -> tuple[pd.DataFrame, tuple[str, ...], dict[str, tuple[str, ...]]]:
+    """Pre-vectorization implementation retained only as a regression oracle."""
+
+    import quant_data_platform.qdp_v3.legacy_v2_5m as module
+
+    data = staged.copy()
+    parsed_dates = pd.to_datetime(data["trade_date"], errors="coerce")
+    if parsed_dates.isna().any():
+        raise ValueError("invalid fixture date")
+    data["trade_date"] = parsed_dates.dt.strftime("%Y-%m-%d")
+    data["bar_time"] = data["bar_time"].map(module._normalize_bar_time)
+    for column in module._NUMERIC_COLUMNS:
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+    data["adjusted_flag"] = data["adjusted_flag"].astype("string")
+    complete_frames: list[pd.DataFrame] = []
+    complete_dates: list[str] = []
+    rejected: dict[str, tuple[str, ...]] = {}
+    expected = set(EXPECTED_5M_BAR_ENDS)
+    for trade_date, day in data.groupby("trade_date", sort=True, dropna=False):
+        reasons: list[str] = []
+        keys = day[["trade_date", "bar_time"]]
+        if keys.duplicated(keep=False).any():
+            reasons.append("primary_key_duplicate")
+        times = tuple(sorted(day["bar_time"].dropna().astype(str)))
+        if len(day) != 48 or len(set(times)) != 48 or set(times) != expected:
+            reasons.append("bar_time_set_not_exact_48")
+        adjusted = day["adjusted_flag"].str.strip().str.lower()
+        if adjusted.isna().any() or not adjusted.eq("none").all():
+            reasons.append("adjusted_flag_not_none")
+        numeric = day[list(module._NUMERIC_COLUMNS)].to_numpy(dtype="float64")
+        if not np.isfinite(numeric).all():
+            reasons.append("numeric_non_finite")
+        else:
+            if day[list(module._PRICE_COLUMNS)].le(0).any().any():
+                reasons.append("price_not_positive")
+            if day[["volume", "amount"]].lt(0).any().any():
+                reasons.append("volume_or_amount_negative")
+            if (
+                day["high"] < day[["open", "low", "close"]].max(axis=1)
+            ).any():
+                reasons.append("high_relation_invalid")
+            if (
+                day["low"] > day[["open", "high", "close"]].min(axis=1)
+            ).any():
+                reasons.append("low_relation_invalid")
+        date_text = str(trade_date)
+        if reasons:
+            rejected[date_text] = tuple(dict.fromkeys(reasons))
+            continue
+        normalized = day.copy()
+        normalized["provider_symbol"] = provider_symbol
+        normalized["source"] = module.SOURCE_NAME
+        normalized = normalized.loc[:, RAW_COLUMNS]
+        normalized = normalized.sort_values("bar_time", kind="stable")
+        complete_frames.append(normalized)
+        complete_dates.append(date_text)
+    if complete_frames:
+        complete = pd.concat(complete_frames, ignore_index=True)
+        complete = complete.sort_values(
+            ["trade_date", "bar_time"], kind="stable"
+        ).reset_index(drop=True)
+        for column in module._NUMERIC_COLUMNS:
+            complete[column] = complete[column].astype("float64")
+        for column in ("provider_symbol", "trade_date", "bar_time", "source"):
+            complete[column] = complete[column].astype("string")
+    else:
+        complete = module._empty_raw_frame()
+    return complete, tuple(complete_dates), rejected
+
+
+def _large_valid_fixture(days: int) -> pd.DataFrame:
+    dates = pd.bdate_range("2015-01-05", periods=days).strftime("%Y-%m-%d")
+    rows = days * 48
+    offsets = np.tile(np.arange(48, dtype="float64"), days) / 100.0
+    base = 10.0 + offsets
+    return pd.DataFrame(
+        {
+            "provider_symbol": np.repeat("600000.SH", rows),
+            "trade_date": np.repeat(dates.to_numpy(), 48),
+            "bar_time": np.tile(
+                [item.replace(":", "") + "00000" for item in EXPECTED_5M_BAR_ENDS],
+                days,
+            ),
+            "open": base,
+            "high": base + 0.2,
+            "low": base - 0.2,
+            "close": base + 0.1,
+            "volume": np.tile(np.arange(100, 148, dtype="float64"), days),
+            "amount": np.tile(np.arange(1_000, 1_048, dtype="float64"), days),
+            "adjusted_flag": np.repeat("none", rows),
+            "_v2_shard_path": np.repeat("fixture.parquet", rows),
+        }
+    )
+
+
 def test_migrates_only_complete_unadjusted_days_and_preserves_v2(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     first = pd.concat(
@@ -212,6 +312,74 @@ def test_migrates_only_complete_unadjusted_days_and_preserves_v2(tmp_path: Path)
     assert resumed.status == "completed"
     assert resumed.reused_symbols == 2
     assert resumed.created_symbols == 0
+
+
+def test_vectorized_day_validation_is_contract_equivalent_to_reference() -> None:
+    import quant_data_platform.qdp_v3.legacy_v2_5m as module
+
+    valid = _day("600000.SH", "2026-01-05")
+    short = _day("600000.SH", "2026-01-06", bars=47)
+    adjusted = _day("600000.SH", "2026-01-07", adjusted_flag="front")
+    duplicate = _day("600000.SH", "2026-01-08", duplicate_first=True)
+    non_finite = _day("600000.SH", "2026-01-09")
+    non_finite.loc[0, "open"] = np.nan
+    bad_price = _day("600000.SH", "2026-01-12")
+    bad_price.loc[0, "open"] = 0.0
+    bad_volume = _day("600000.SH", "2026-01-13")
+    bad_volume.loc[0, "volume"] = -1.0
+    bad_relations = _day("600000.SH", "2026-01-14")
+    bad_relations.loc[0, "high"] = bad_relations.loc[0, "close"] - 1.0
+    bad_relations.loc[1, "low"] = bad_relations.loc[1, "close"] + 1.0
+    staged = pd.concat(
+        [
+            valid,
+            short,
+            adjusted,
+            duplicate,
+            non_finite,
+            bad_price,
+            bad_volume,
+            bad_relations,
+        ],
+        ignore_index=True,
+    ).rename(columns={"symbol": "provider_symbol"})
+    staged["_v2_shard_path"] = "fixture.parquet"
+
+    expected_frame, expected_dates, expected_rejected = (
+        _reference_validated_complete_days(staged, "600000.SH")
+    )
+    actual_frame, actual_dates, actual_rejected = module._validated_complete_days(
+        staged, provider_symbol="600000.SH"
+    )
+
+    assert_frame_equal(actual_frame, expected_frame)
+    assert actual_dates == expected_dates
+    assert actual_rejected == expected_rejected
+
+
+def test_vectorized_day_validation_has_large_fixture_speedup() -> None:
+    import quant_data_platform.qdp_v3.legacy_v2_5m as module
+
+    staged = _large_valid_fixture(800)
+    reference_started = time.perf_counter()
+    reference = _reference_validated_complete_days(staged, "600000.SH")
+    reference_elapsed = time.perf_counter() - reference_started
+
+    vectorized_started = time.perf_counter()
+    vectorized = module._validated_complete_days(
+        staged, provider_symbol="600000.SH"
+    )
+    vectorized_elapsed = time.perf_counter() - vectorized_started
+
+    assert_frame_equal(vectorized[0], reference[0])
+    assert vectorized[1:] == reference[1:]
+    # A relative ratio is intentionally used instead of a wall-clock ceiling:
+    # it remains stable on slower or contended machines while catching a
+    # regression back to Python iteration over every complete stock-day.
+    assert vectorized_elapsed * 3 < reference_elapsed, (
+        f"expected >=3x speedup; vectorized={vectorized_elapsed:.4f}s "
+        f"reference={reference_elapsed:.4f}s"
+    )
 
 
 def test_rejects_adjusted_and_duplicate_days_without_writing_invalid_raw(
