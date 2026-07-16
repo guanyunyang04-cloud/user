@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from quant_data_platform.core.json_io import json_safe, read_json
-from quant_data_platform.qdp_v2.manifest import dataset_manifest_for_id, iter_dataset_manifests, qdp_v2_root, read_active_manifest, read_dataset_manifest
+from quant_data_platform.qdp_v2.manifest import iter_dataset_manifests, qdp_v2_root, read_active_manifest, read_dataset_manifest
 from quant_data_platform.qdp_v2.status import _active_dataset_refs
 
 
@@ -23,11 +23,8 @@ def lake_gc(
         raise ValueError("qdp_v2_gc_delete_requires_yes")
     root = qdp_v2_root(workspace_root)
     pin_ids, pin_records = _pinned_dataset_ids(root)
-    if delete and any(str(item.get("pin_name", "")) == "qdp_v3_m0_freeze" for item in pin_records):
-        raise RuntimeError("qdp_v2_gc_delete_blocked_by_qdp_v3_m0_freeze_pin")
     active = read_active_manifest(root)
-    roots = {dataset_id for _, _, dataset_id in _active_dataset_refs(active)} | pin_ids
-    referenced = _dataset_ancestor_closure(root, roots)
+    referenced = {dataset_id for _, _, dataset_id in _active_dataset_refs(active)} | pin_ids
     inventory = _dataset_dir_inventory(root, with_size=with_size or delete)
     unreferenced = [item for item in inventory if item["dataset_id"] not in referenced]
     referenced_items = [item for item in inventory if item["dataset_id"] in referenced]
@@ -76,33 +73,6 @@ def _pinned_dataset_ids(root: Path) -> tuple[set[str], list[dict[str, Any]]]:
         ids.update(values)
         records.append({"path": str(path.resolve()), "pin_name": str(payload.get("pin_name", "") or path.stem), "dataset_count": len(values)})
     return ids, records
-
-
-def _dataset_ancestor_closure(root: Path, roots: set[str]) -> set[str]:
-    reachable: set[str] = set()
-    pending = list(sorted(roots))
-    while pending:
-        dataset_id = pending.pop()
-        if dataset_id in reachable:
-            continue
-        reachable.add(dataset_id)
-        manifest_path = dataset_manifest_for_id(root, dataset_id)
-        if manifest_path is None:
-            continue
-        manifest = read_dataset_manifest(manifest_path)
-        ancestors: set[str] = set()
-        for key, value in dict(manifest.source or {}).items():
-            if str(key).endswith("dataset_id") and str(value or ""):
-                ancestors.add(str(value))
-        for shard in manifest.shards:
-            source_path = Path(str(shard.source_path or ""))
-            parts = source_path.parts
-            if "datasets" in parts:
-                index = parts.index("datasets")
-                if len(parts) > index + 2:
-                    ancestors.add(str(parts[index + 2]))
-        pending.extend(sorted(ancestors - reachable))
-    return reachable
 
 
 def _dataset_dir_inventory(root: Path, *, with_size: bool) -> list[dict[str, Any]]:

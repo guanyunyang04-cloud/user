@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pandas as pd
 
-from quant_data_platform.cli import _maybe_run_qdp_v2
 from quant_data_platform.qdp_v2.pit_market_substrate import (
     OVERRIDE_DOMAINS,
     build_pit_market_substrate,
@@ -257,22 +256,6 @@ def test_gate0_blocks_research_eligible_universe_row_without_market_bar(tmp_path
     else:
         raise AssertionError("missing market bars for research-eligible rows must block the view")
     assert active_path.read_bytes() == before
-
-
-def test_public_cli_dispatches_pit_view_commands(monkeypatch) -> None:
-    calls: list[list[str]] = []
-
-    def fake_dispatch(argv: list[str]) -> int:
-        calls.append(argv)
-        return 0
-
-    monkeypatch.setattr("quant_data_platform.qdp_v2.cli.dispatch", fake_dispatch)
-    assert _maybe_run_qdp_v2(["rebuild", "pit-market-substrate", "--help"]) == 0
-    assert _maybe_run_qdp_v2(["verify", "pit-market-view", "--help"]) == 0
-    assert calls == [
-        ["rebuild", "pit-market-substrate", "--help"],
-        ["verify", "pit-market-view", "--help"],
-    ]
 
 
 def test_recovery_cache_plus_independent_market_manifest(tmp_path: Path) -> None:

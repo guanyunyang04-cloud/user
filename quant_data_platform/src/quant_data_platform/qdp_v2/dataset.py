@@ -241,7 +241,7 @@ def _domain_role(domain: str, layer: str) -> str:
     roles = {
         "market_daily_raw": "raw daily OHLCV facts",
         "market_intraday_1m": "raw 1m OHLCV facts",
-        "market_intraday_5m": "5m cache rebuilt from 1m",
+        "market_intraday_5m": "canonical complete 48-bar 5m market facts",
         "market_daily_panel": "daily research panel cache",
         "intraday_daily_features": "daily features rebuilt from intraday bars",
         "limit_intraday_features": "limit-board features rebuilt from 1m bars",

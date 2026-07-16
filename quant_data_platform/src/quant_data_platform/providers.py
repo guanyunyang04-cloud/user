@@ -35,7 +35,6 @@ from quant_data_platform.domains.contracts import (
     validate_provider_name,
 )
 from quant_data_platform.progress import create_progress, progress_write
-from quant_data_platform.tushare_proxy import TushareProxyProvider
 
 
 FORMAL_FREE_V3_REQUIRED_DOMAINS: tuple[str, ...] = (
@@ -74,7 +73,6 @@ QDP_PRODUCTION_V1_REQUIRED_DOMAINS: tuple[str, ...] = (
     DataDomain.SECURITY_STATUS,
 )
 QDP_PRODUCTION_V1_OPTIONAL_DOMAINS: tuple[str, ...] = (
-    DataDomain.MARKET_INTRADAY_1M,
     DataDomain.MARKET_INTRADAY_5M,
     DataDomain.INTRADAY_DAILY_FEATURES,
     DataDomain.ADJUST_FACTOR,
@@ -105,7 +103,6 @@ _PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
         "domains": (
             DataDomain.MARKET_DAILY,
             DataDomain.MARKET_INTRADAY_5M,
-            DataDomain.MARKET_INTRADAY_1M,
             DataDomain.INTRADAY_DAILY_FEATURES,
             DataDomain.CORPORATE_ACTIONS,
             DataDomain.SHARE_CAPITAL,
@@ -187,26 +184,6 @@ _PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
         "formal_eligible": True,
         "notes": "Tonghuashun concept/hotspot supplement through public endpoints when available",
     },
-    "tushare_proxy": {
-        "domains": (
-            DataDomain.MARKET_DAILY,
-            DataDomain.MARKET_INTRADAY_5M,
-            DataDomain.TRADING_CALENDAR,
-            DataDomain.UNIVERSE_SNAPSHOT,
-            DataDomain.SECURITY_STATUS,
-            DataDomain.VALUATION,
-            DataDomain.LIMIT_STATUS,
-            DataDomain.ADJUST_FACTOR,
-            DataDomain.FINANCIAL_QUARTERLY,
-            DataDomain.PERFORMANCE_FORECAST,
-            DataDomain.PERFORMANCE_EXPRESS,
-            DataDomain.CORPORATE_ACTIONS,
-            DataDomain.NAME_CHANGE,
-        ),
-        "requires_token": True,
-        "formal_eligible": True,
-        "notes": "Trusted time-limited source for the fixed 2010-01-01 through 2026-07-13 historical bootstrap; QDP v3 uses only its 5m minute capability.",
-    },
     "sina_tencent_realtime": {
         "domains": (),
         "requires_token": False,
@@ -262,7 +239,6 @@ def provider_capability_matrix(provider_plan: str = "formal_free_v3") -> list[di
         default_domains_by_provider = {
             "mootdx_online": {
                 DataDomain.MARKET_DAILY,
-                DataDomain.MARKET_INTRADAY_1M,
                 DataDomain.MARKET_INTRADAY_5M,
                 DataDomain.INTRADAY_DAILY_FEATURES,
             },
@@ -562,15 +538,6 @@ class MootdxOnlineProvider:
                 raw_volume_unit="shares",
                 canonical_volume_unit="shares",
             )
-        if request.domain == DataDomain.MARKET_INTRADAY_1M:
-            return self._fetch_bars_domain(
-                request,
-                frequency=8,
-                endpoint="bars_frequency_8_1m",
-                volume_factor=1.0,
-                raw_volume_unit="shares",
-                canonical_volume_unit="shares",
-            )
         if request.domain == DataDomain.INTRADAY_DAILY_FEATURES:
             intraday = self._fetch_bars_domain(
                 DomainFetchRequest(
@@ -866,9 +833,7 @@ class MootdxOnlineProvider:
                 "source_stability_note": "online mootdx quote server; server stability must be monitored by provider-health/provider-eval",
             }
         )
-        if request.domain == DataDomain.MARKET_INTRADAY_1M:
-            coverage["bar_count_contract"] = "mootdx_1m_240_without_0930"
-        elif request.domain == DataDomain.MARKET_INTRADAY_5M:
+        if request.domain == DataDomain.MARKET_INTRADAY_5M:
             coverage["bar_count_contract"] = "mootdx_5m_48_full_trading_day"
         return ProviderResult(provider=self.name, data=data, coverage_report=coverage, error_report=errors)
 
@@ -1828,7 +1793,6 @@ class QdpProductionV1Provider:
         if request.domain in {
             DataDomain.MARKET_DAILY,
             DataDomain.MARKET_INTRADAY_5M,
-            DataDomain.MARKET_INTRADAY_1M,
             DataDomain.INTRADAY_DAILY_FEATURES,
         }:
             return self._mootdx.fetch_domain(request)
@@ -1874,8 +1838,6 @@ def build_default_providers(provider_plan: str = "default_free") -> list:
         return [BaostockProvider()]
     if plan == "default_free_with_realtime":
         return [EastmoneyEfinanceProvider(), AkshareEastmoneyProvider(), BaostockProvider(), SinaTencentRealtimeProvider()]
-    if plan == "tushare_proxy":
-        return [TushareProxyProvider()]
     raise ValueError(f"Unsupported provider_plan: {provider_plan}")
 
 

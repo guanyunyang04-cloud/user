@@ -4,14 +4,13 @@
   "description": "Machine-readable object ownership, routing, writeback, and closure hints for the workspace brain.",
   "objects": [
     {
-      "object_id": "qdp_v2_active_data_base",
+      "object_id": "qdp_current_data_store",
       "owner": "quant_data_platform",
       "type": "active_data_base_or_unique_data",
-      "description": "QDP v2 active manifest-first data base plus protected QDP v3 identity-first rebuild/candidate surface: active.json, dataset manifests, immutable raw, provider ingest, and quality proofs.",
+      "description": "QDP single mutable Parquet data store: one current table per domain, active.json as a light index, free-provider updates, and minimal structural checks.",
       "routing_terms": [
         "qdp",
         "qdp_v2",
-        "qdp_v3",
         "security_id",
         "symbol_history",
         "date partition",
@@ -55,8 +54,6 @@
         "quant_data_platform/data/qdp_v2/active/",
         "quant_data_platform/data/qdp_v2/datasets/",
         "quant_data_platform/src/quant_data_platform/qdp_v2/",
-        "quant_data_platform/data/qdp_v3/",
-        "quant_data_platform/src/quant_data_platform/qdp_v3/",
         "quant_data_platform/brain/"
       ],
       "default_mode": "read_only",

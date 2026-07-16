@@ -1,32 +1,37 @@
 # Quant Data Platform
 
-Canonical brain source: `quant_data_platform/brain/identity_layer.md`.
+QDP 是个人量化研究使用的单一可变数据仓库。当前数据位于
+`data/qdp_v2`；`v2` 只是历史目录名，不再表示 generation 或发布流程。
 
-主脑管辖下的共享量化数据平台分脑。本文只保留项目入口；当前 v2 active、v3 rebuild、安全阻断、数据契约和 provider 对象以 `quant_data_platform/brain/` 为准。
+## 当前边界
 
-## Entry
+- 每个 domain 只保留一套当前 Parquet 与一个 `dataset.json`；`active.json`
+  只是表名到目录的轻量索引。
+- 正式研究范围从 `2010-01-01` 开始，唯一分钟表是
+  `market_intraday_5m`，每个可用股票日必须是完整 48 根。
+- 已物理删除 1m、1m 派生特征、旧 generation、raw/candidate/publish
+  流程和 Tushare 下载实现。
+- 历史 5m 由本地购买数据构成主体；Tushare 的一次性补缺结果已经并入
+  当前表，原始下载与运行状态不再保留。
+- 后续更新以 BaoStock 为免费主源，默认使用 4 个独立连接；mootdx 先做
+  近期快速下载，BaoStock 再补 mootdx 未获得的完整股票日。不拼接、不插值。
+- 数据源默认可信，只保留主键、类型、OHLC 合法性、非负成交量和 48 根
+  完整日等必要检查，不做跨源逐行价格仲裁。
+- 所有数据、临时文件和运行状态都在 `H:\quant_project`；内存保护线是
+  可用物理内存低于 0.5 GiB 持续 5 秒。
 
-- 项目身份：`quant_data_platform/brain/identity_layer.md`
-- 当前状态：`quant_data_platform/brain/state_center.md`
-- 过程入口：`quant_data_platform/brain/operations_center.md`
-- 参考文档：`quant_data_platform/brain/references/`
+## 命令
 
-## Body
+```text
+qdp status
+qdp list
+qdp describe <table>
+qdp check --quick|--full
+qdp update
+qdp gc
+```
 
-- `src/`：平台代码。
-- `configs/`：canonical 数据域与 profile 配置。
-- `registry/`：可审计 manifest、registry 和指针。
-- `data/`：大数据资产、tmp、memmap、agent runs，默认不进 Git。
-- `tests/`：平台测试。
+没有 public generation、candidate、publish、rollback 或 1m rebuild 命令。
+训练包、memmap、模型与回测属于 `daily_research`，不属于 QDP 数据仓库。
 
-## Current Boundary
-
-- `data/qdp_v2` 仍是唯一有效、可研究的 active。2026-07-15 发现的空 v3 active 已确认无候选/无数据并删除；默认 status 已恢复为 v2 `status=ok`、as-of `2026-06-26`。
-- v3 当前合同是 `qdp_v3_20260715_trusted_source_5m` / schema `3.3.0` / manifest `4`；5m 是唯一分钟域，首次发布只要求九个市场核心域。
-- v3 低频历史基底继续复用可信 Tushare raw；历史 5m 改为“本地直接 5m > v2 完整日迁移 > 2020+ 免费完整日 > Tushare 最终残差”。v2 仅作只读迁移输入，新 candidate 不直接依赖将来会退休的 v2 文件。
-- 历史流程不再运行 BaoStock/Tushare 全量交叉验证；发布仍保留 schema、主键、identity、PIT、48 根 5m 和原子 CAS 闸门。
-- runtime job/cursor/heartbeat 与 OS advisory lock 位于 `QDP_RUNTIME_ROOT`；旧 Tushare 全市场 supervisor 已停止且不恢复。只有最终分钟残差才使用三个共享 `96 rpm / burst 1` worker，额度耗尽后只补 `status/factor`。
-- `QDP_DATA_ROOT` 与 `QDP_RUNTIME_ROOT` 均位于 H 盘本仓库；C 盘旧 runtime 已校验迁移并删除。H 已完成 `chkdsk /f` 并通过 clean/healthy/0-bad-sector 闸门；用户取消 F 盘备份。compact layout 为 reference=undated x 1、低频=year x 1、仅 5m=year x 16；legacy raw 只有在 bundle/index/hash round-trip 通过后才可删除。
-- 首次 v3 发布不退休 v2；必须再成功完成一次 `2026-07-13` 后的增量发布，retirement gate 通过后才删除 v2 四条旧分钟链。
-- 公共读取只在 v3 active 通过 manifest/候选/九域/published-at 验证后才切换到 v3，否则默认 v2；pytest 已隔离 production roots 和 credentials。任何 v2 写命令仍必须显式指定 `--generation v2`。
-- 训练包和 memmap 归 `daily_research`，不再属于 QDP CLI。
+项目事实与维护边界见 `quant_data_platform/brain/state_center.md`。

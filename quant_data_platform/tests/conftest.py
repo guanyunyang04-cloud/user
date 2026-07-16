@@ -32,10 +32,6 @@ def isolate_qdp_tests_from_user_environment(monkeypatch: pytest.MonkeyPatch) -> 
         "QDP_WORKSPACE_ROOT",
         "QDP_DATA_ROOT",
         "QDP_RUNTIME_ROOT",
-        "QDP_TUSHARE_PROXY_TOKEN",
-        "QDP_TUSHARE_PROXY_URL",
-        "QDP_TUSHARE_PROXY_HISTORY_WORKERS",
-        "QDP_TUSHARE_PROXY_RATE_PER_MINUTE",
     ):
         monkeypatch.delenv(name, raising=False)
 

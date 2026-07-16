@@ -94,7 +94,6 @@
     ],
     "terms": [
       "qdp_v2",
-      "qdp_v3",
       "manifest-first",
       "security_id",
       "symbol_history",
@@ -109,9 +108,7 @@
       "共享数据集",
       "数据集治理",
       "复权因子",
-      "5分钟数据",
-      "1分钟数据",
-      "intraday features"
+      "5分钟数据"
     ],
     "path_prefixes": [
       "quant_data_platform"

@@ -104,7 +104,7 @@ def _manifest_contract_findings(domain: str, manifest: dict[str, Any]) -> tuple[
         errors.append(f"pending_contract_active:{domain}:{dataset_id}:{contract}")
     expected_contracts = {
         "market_intraday_1m": "mootdx_1m_240_v1",
-        "market_intraday_5m": "mootdx_5m_48_v1",
+        "market_intraday_5m": "qdp_current_intraday_5m_48_v1",
         "market_daily_raw": "qdp_v2_market_daily_raw_v1",
         "market_daily_panel": "qdp_v2_market_daily_panel_v1",
         "pit_signal_universe": "qdp_v2_pit_signal_universe_v1",

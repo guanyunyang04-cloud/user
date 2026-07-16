@@ -22,8 +22,8 @@
 ### object `quant_data_platform_child`
 `type`: shared_data_base_child_brain
 `path`: `quant_data_platform/brain/`
-`state`: QDP 当前唯一有效、可研究的 active 仍是 v2。v3 合同已收敛为 `qdp_v3_20260715_trusted_source_5m` / schema `3.3.0` / manifest `4`：2010 起、5m-only、稳定 identity、可信单源与紧凑 raw bundle；reference raw 为 undated x 1，低频为 year x 1，只有 5m 为 year x 16。Tushare proxy 独占 `2010-01-01..2026-07-13` 历史，cutoff 后 BaoStock 更新日线/状态/因子、mootdx 优先更新 5m、BaoStock 仅作完整日 fallback。H 已修复且健康，数据根留在 H，runtime 已迁至 C；用户取消 F 盘备份。旧 raw 尚未全量 compact，历史 5m/factor、九域 candidate 和发布尚未完成，下载任务保持 `interrupted_recoverable`。空 v3 active 占位已删除，active validation 与 pytest 环境隔离已加，默认 status 恢复为 v2。v3 首次有效发布后还必须完成一次 cutoff 后增量发布，才可受保护地退休 v2 四条分钟链。
-`public_commands`: 共用 `qdp status/list/describe/check/gc/update`；v3 管理面为 `ingest/compact/build/audit/diff/publish/rollback/compatibility/retire-v2-intraday`；v2 legacy 写命令必须显式使用 `--generation v2`。
+`state`: QDP 已收敛为一套可直接增删改的通用 Parquet 数据仓库，正式范围 `2010-01-01..2026-07-13`，5m 是唯一分钟表。每个 domain 只保留一个当前目录；旧 1m、派生分钟链、旧 generation、qdp_v3/candidate/publish、Tushare raw/runtime 与一次性重建代码均已退休。历史主体来自本地购买 5m，Tushare 的一次性早期/退市补缺已并入当前表；后续由 mootdx 加速、4 个 BaoStock 连接补剩余完整日。H 健康，所有数据与 runtime 只在本仓库。
+`public_commands`: `qdp status/list/describe/check/update/gc`；不再公开 generation、candidate、publish、rollback、compact 或 1m rebuild。
 
 ### object `daily_research_child`
 `type`: production_research_child_brain

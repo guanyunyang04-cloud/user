@@ -57,11 +57,11 @@ class TdxFreeGuardTest(unittest.TestCase):
             "2026-05-22",
         )
 
-    def test_refresh_daily_script_help_bootstraps_project_imports(self) -> None:
+    def test_internal_refresh_daily_help_bootstraps_project_imports(self) -> None:
         repo_root = Path(__file__).resolve().parents[3]
 
         result = subprocess.run(
-            [sys.executable, "-m", "quant_data_platform.cli", "refresh-daily", "--help"],
+            [sys.executable, "-m", "quant_data_platform.ingest.refresh_daily", "--help"],
             cwd=str(repo_root),
             text=True,
             capture_output=True,

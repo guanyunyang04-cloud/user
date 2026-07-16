@@ -10,12 +10,15 @@ repair API remains the single manifest commit point.
 
 import argparse
 import hashlib
+import io
 import json
+import multiprocessing
 import os
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -28,7 +31,10 @@ import pyarrow.parquet as pq
 from quant_data_platform.core.paths import qdp_paths
 from quant_data_platform.domains.contracts import DataDomain, DomainFetchRequest
 from quant_data_platform.providers import MootdxOnlineProvider
-from quant_data_platform.qdp_v2.duckdb_resources import open_guarded_duckdb
+from quant_data_platform.qdp_v2.duckdb_resources import (
+    DuckDbMemoryFloorError,
+    open_guarded_duckdb,
+)
 from quant_data_platform.qdp_v2.manifest import (
     atomic_write_json,
     dataset_manifest_for_id,
@@ -43,7 +49,7 @@ from quant_data_platform.qdp_v2.repair import bulk_append_active_shards_from_par
 
 REPAIR_VERSION = 1
 BUCKET_COUNT = 16
-DEFAULT_WORKERS = 3
+DEFAULT_WORKERS = 4
 DEFAULT_START_DATE = "2026-06-29"
 DEFAULT_END_DATE = "2026-07-13"
 MEMORY_FLOOR_BYTES = int(0.5 * 1024**3)
@@ -180,28 +186,153 @@ class _DomainInput:
     paths: tuple[Path, ...]
 
 
+@dataclass(frozen=True)
+class _BaostockTask:
+    symbol: str
+    dates: tuple[str, ...]
+
+    @property
+    def start_date(self) -> str:
+        return min(self.dates)
+
+    @property
+    def end_date(self) -> str:
+        return max(self.dates)
+
+
+class _DirectBaostockSession:
+    """One simple BaoStock login reused for sequential 5m range queries."""
+
+    def __init__(self, *, socket_timeout_seconds: float = 90.0) -> None:
+        self._socket_timeout_seconds = max(1.0, float(socket_timeout_seconds))
+        self._bs: Any | None = None
+
+    def _ensure_login(self) -> Any:
+        if self._bs is not None:
+            return self._bs
+        import baostock as bs  # type: ignore
+
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            login = bs.login()
+        if str(getattr(login, "error_code", "1")) != "0":
+            raise RuntimeError(
+                f"baostock_login_failed:{getattr(login, 'error_msg', '')}"
+            )
+        from baostock.common import context as baostock_context  # type: ignore
+
+        active_socket = getattr(baostock_context, "default_socket", None)
+        if active_socket is not None:
+            active_socket.settimeout(self._socket_timeout_seconds)
+        self._bs = bs
+        return bs
+
+    def fetch(self, task: _BaostockTask) -> pd.DataFrame:
+        bs = self._ensure_login()
+        code, exchange = task.symbol.split(".", 1)
+        query = bs.query_history_k_data_plus(
+            f"{exchange.lower()}.{code}",
+            "date,time,code,open,high,low,close,volume,amount,adjustflag",
+            start_date=task.start_date,
+            end_date=task.end_date,
+            frequency="5",
+            adjustflag="3",
+        )
+        error_code = str(getattr(query, "error_code", "1"))
+        if error_code != "0":
+            raise RuntimeError(
+                "baostock_intraday_5m_query_error:"
+                f"{error_code}:{getattr(query, 'error_msg', '')}"
+            )
+        fields = [str(item) for item in (getattr(query, "fields", None) or [])]
+        rows: list[list[Any]] = []
+        while query.next():
+            rows.append(query.get_row_data())
+        raw = pd.DataFrame(rows, columns=fields) if fields else pd.DataFrame(rows)
+        return _normalize_baostock_raw_5m(raw, symbol=task.symbol)
+
+    def reset(self) -> None:
+        self.close()
+
+    def close(self) -> None:
+        bs = self._bs
+        self._bs = None
+        if bs is None:
+            return
+        try:
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                bs.logout()
+        except Exception:
+            pass
+
+
+_BAOSTOCK_PROCESS_SESSION: _DirectBaostockSession | None = None
+
+
+def _baostock_process_session(*, startup_delay_seconds: float = 0.0) -> _DirectBaostockSession:
+    global _BAOSTOCK_PROCESS_SESSION
+    if _BAOSTOCK_PROCESS_SESSION is None:
+        if float(startup_delay_seconds) > 0:
+            time.sleep(float(startup_delay_seconds))
+        _BAOSTOCK_PROCESS_SESSION = _DirectBaostockSession()
+    return _BAOSTOCK_PROCESS_SESSION
+
+
+def _normalize_baostock_raw_5m(raw: pd.DataFrame, *, symbol: str) -> pd.DataFrame:
+    if raw is None or raw.empty:
+        return pd.DataFrame(columns=INTRADAY_COLUMNS)
+    frame = raw.rename(columns={"date": "trade_date", "time": "bar_time"}).copy()
+    if "trade_date" not in frame or "bar_time" not in frame:
+        raise RecentMarketRepairError("baostock_intraday_missing_date_or_time")
+    digits = frame["bar_time"].astype(str).str.replace(r"\D", "", regex=True)
+    clock = digits.where(digits.str.len() < 12, digits.str.slice(8, 12))
+    clock = clock.str.slice(0, 4).str.pad(4, side="left", fillchar="0")
+    frame["bar_time"] = clock.str.slice(0, 2) + ":" + clock.str.slice(2, 4)
+    frame["symbol"] = str(symbol).strip().upper()
+    return frame
+
+
 def run_recent_daily_repair(
     *,
     trade_date: str = DEFAULT_END_DATE,
+    start_date: str | None = None,
     workspace_root: str | Path | None = None,
     workers: int = DEFAULT_WORKERS,
     resume: bool = True,
 ) -> dict[str, Any]:
-    date_text = _date_text(trade_date)
+    end = _date_text(trade_date)
+    start = _date_text(start_date or end)
+    if start > end:
+        raise ValueError(f"recent_repair_invalid_range:{start}>{end}")
     workspace = Path(workspace_root or Path.cwd()).resolve()
     _configure_workspace_runtime(workspace)
     inputs = _active_inputs(
         workspace,
-        (DAILY_DOMAIN, "universe_snapshot", "security_status"),
+        (DAILY_DOMAIN, "universe_snapshot", "security_status", "security_identity"),
     )
     active_sha = _sha256_file(qdp_v2_root(workspace) / "active" / "active.json")
-    symbols = _missing_daily_symbols(inputs, trade_date=date_text, workspace=workspace)
+    pairs = tuple(
+        sorted(
+            {
+                (symbol, date.strftime("%Y-%m-%d"))
+                for date in pd.bdate_range(start, end)
+                for symbol in _missing_daily_symbols(
+                    inputs,
+                    trade_date=date.strftime("%Y-%m-%d"),
+                    workspace=workspace,
+                )
+            }
+        )
+    )
+    wanted: dict[str, tuple[str, ...]] = {}
+    for symbol, date in pairs:
+        wanted[symbol] = (*wanted.get(symbol, ()), date)
     fingerprint = stable_hash(
         {
             "version": REPAIR_VERSION,
             "kind": "daily",
-            "trade_date": date_text,
-            "symbols": symbols,
+            "start_date": start,
+            "end_date": end,
+            "pairs": pairs,
             "active_sha256": active_sha,
             "manifest_sha256": {
                 key: value.manifest_sha256 for key, value in inputs.items()
@@ -214,14 +345,13 @@ def run_recent_daily_repair(
         runtime,
         fingerprint=fingerprint,
         kind="daily",
-        start_date=date_text,
-        end_date=date_text,
-        task_count=len(symbols),
+        start_date=start,
+        end_date=end,
+        task_count=len(pairs),
         resume=resume,
     )
     if state.get("status") == "applied":
         return state
-    wanted = {symbol: (date_text,) for symbol in symbols}
     with _SystemMemoryGuard() as guard:
         state = _download_buckets(
             runtime=runtime,
@@ -229,8 +359,8 @@ def run_recent_daily_repair(
             wanted=wanted,
             provider_domain=DataDomain.MARKET_DAILY,
             output_domain=DAILY_DOMAIN,
-            start_date=date_text,
-            end_date=date_text,
+            start_date=start,
+            end_date=end,
             workers=workers,
             guard=guard,
         )
@@ -239,7 +369,7 @@ def run_recent_daily_repair(
             state,
             runtime=runtime,
             domain=DAILY_DOMAIN,
-            reason=f"fill missing {date_text} daily rows from healthy mootdx",
+            reason=f"fill missing daily rows from healthy mootdx {start}..{end}",
             workspace=workspace,
         )
         state["minimum_available_bytes"] = guard.minimum_available_bytes
@@ -261,12 +391,7 @@ def run_recent_intraday_repair(
         raise ValueError(f"recent_repair_invalid_range:{start}>{end}")
     workspace = Path(workspace_root or Path.cwd()).resolve()
     _configure_workspace_runtime(workspace)
-    domains = (
-        DAILY_DOMAIN,
-        INTRADAY_DOMAIN,
-        "universe_snapshot",
-        "security_status",
-    )
+    domains = (DAILY_DOMAIN, INTRADAY_DOMAIN)
     inputs = _active_inputs(workspace, domains, start_date=start, end_date=end)
     active_sha = _sha256_file(qdp_v2_root(workspace) / "active" / "active.json")
     pairs = _missing_intraday_pairs(
@@ -330,173 +455,355 @@ def run_recent_intraday_repair(
     return state
 
 
-def run_tushare_intraday_fallback(
+def run_baostock_intraday_repair(
     *,
-    mootdx_state_path: str | Path,
+    start_date: str = "2020-01-01",
+    end_date: str = DEFAULT_END_DATE,
     workspace_root: str | Path | None = None,
     workers: int = DEFAULT_WORKERS,
     resume: bool = True,
 ) -> dict[str, Any]:
-    """Fill only mootdx-unresolved stock-days, primarily delisted securities."""
+    """Fill remaining traded 5m stock-days directly from BaoStock.
 
-    source_state_path = Path(mootdx_state_path).resolve()
-    source_state = json.loads(source_state_path.read_text(encoding="utf-8"))
-    unresolved_pairs = _unresolved_pairs_from_state(source_state)
-    if not unresolved_pairs:
-        return {"status": "nothing_to_fill", "task_count": 0}
+    BaoStock minute responses become slow when many years are requested at
+    once, so work is split by symbol and natural year.  Only stock-days absent
+    from the single active table are retained; provider payloads are never
+    persisted as a second dataset.
+    """
+
+    start = _date_text(start_date)
+    end = _date_text(end_date)
+    if start > end:
+        raise ValueError(f"recent_repair_invalid_range:{start}>{end}")
+    if int(workers) not in {1, 2, 3, 4}:
+        raise ValueError("baostock_intraday_workers_must_be_between_1_and_4")
     workspace = Path(workspace_root or Path.cwd()).resolve()
     _configure_workspace_runtime(workspace)
-    active = _active_inputs(
+    inputs = _active_inputs(
         workspace,
-        (INTRADAY_DOMAIN,),
-        start_date=min(item[1] for item in unresolved_pairs),
-        end_date=max(item[1] for item in unresolved_pairs),
-    )[INTRADAY_DOMAIN]
+        (DAILY_DOMAIN, INTRADAY_DOMAIN),
+        start_date=start,
+        end_date=end,
+    )
+    pairs = _missing_intraday_pairs(
+        inputs,
+        start_date=start,
+        end_date=end,
+        workspace=workspace,
+    )
+    wanted: dict[str, tuple[str, ...]] = {}
+    for symbol, trade_date in pairs:
+        wanted[symbol] = (*wanted.get(symbol, ()), trade_date)
     fingerprint = stable_hash(
         {
             "version": REPAIR_VERSION,
-            "kind": "tushare_intraday_fallback",
-            "source_state_sha256": _sha256_file(source_state_path),
-            "pairs": unresolved_pairs,
-            "active_manifest_sha256": active.manifest_sha256,
+            "kind": "baostock_intraday_5m",
+            "start_date": start,
+            "end_date": end,
+            "pairs": pairs,
+            "manifest_sha256": {
+                key: value.manifest_sha256 for key, value in inputs.items()
+            },
         },
         length=32,
     )
-    runtime = _runtime_root(workspace) / f"tushare_5m_fallback__{fingerprint[:24]}"
+    runtime = _runtime_root(workspace) / f"baostock_5m__{fingerprint[:24]}"
     state = _load_or_initialize_state(
         runtime,
         fingerprint=fingerprint,
-        kind="tushare_intraday_fallback",
-        start_date=min(item[1] for item in unresolved_pairs),
-        end_date=max(item[1] for item in unresolved_pairs),
-        task_count=len(unresolved_pairs),
+        kind="baostock_intraday_5m",
+        start_date=start,
+        end_date=end,
+        task_count=len(pairs),
         resume=resume,
     )
     if state.get("status") == "applied":
         return state
-    bundle_path = runtime / "bundles" / "market_intraday_5m_tushare_fallback.parquet"
-    if state.get("status") == "downloaded":
-        _validate_reused_bucket(
-            {
-                "bundle_path": str(bundle_path),
-                "bundle_sha256": state.get("bundle_sha256", ""),
-                "row_count": state.get("row_count", 0),
-            },
+    with _SystemMemoryGuard() as guard:
+        state = _download_baostock_buckets(
             runtime=runtime,
+            state=state,
+            wanted=wanted,
+            workers=int(workers),
+            guard=guard,
         )
-    else:
-        from quant_data_platform.qdp_v2.tushare_gap_repair import (
-            GapTask,
-            _fetch_gap_task,
+        guard.check("baostock_intraday_before_commit")
+        state = _commit_bundles(
+            state,
+            runtime=runtime,
+            domain=INTRADAY_DOMAIN,
+            reason=f"fill complete missing 5m stock-days from BaoStock {start}..{end}",
+            workspace=workspace,
         )
-        from quant_data_platform.tushare_proxy import TushareProxyClient
+        state["minimum_available_bytes"] = guard.minimum_available_bytes
+        atomic_write_json(runtime / "state.json", state)
+    return state
 
-        wanted = _unresolved_mapping(
-            {pair: "mootdx_unresolved" for pair in unresolved_pairs}
+
+def _download_baostock_buckets(
+    *,
+    runtime: Path,
+    state: dict[str, Any],
+    wanted: Mapping[str, Sequence[str]],
+    workers: int,
+    guard: _SystemMemoryGuard,
+) -> dict[str, Any]:
+    bundles = runtime / "bundles"
+    bundles.mkdir(parents=True, exist_ok=True)
+    completed = dict(state.get("buckets", {}) or {})
+    state["requested_workers"] = int(workers)
+    process_workers = min(max(1, int(workers)), 4)
+    state["workers"] = process_workers
+    atomic_write_json(runtime / "state.json", state)
+    pending: list[tuple[str, dict[str, tuple[str, ...]], Path, float]] = []
+    for bucket in range(BUCKET_COUNT):
+        key = f"{bucket:02d}"
+        bucket_wanted = {
+            symbol: tuple(sorted(set(str(item) for item in dates)))
+            for symbol, dates in wanted.items()
+            if _stable_bucket(symbol) == bucket
+        }
+        previous = completed.get(key)
+        if isinstance(previous, dict) and previous.get("status") == "completed":
+            _validate_reused_bucket(previous, runtime=runtime)
+            continue
+        pending.append(
+            (
+                key,
+                bucket_wanted,
+                bundles / f"{INTRADAY_DOMAIN}_bucket_{key}.parquet",
+                2.0 * (len(pending) % process_workers),
+            )
         )
-        tasks = [
-            GapTask(
-                symbol=symbol,
-                start_date=min(dates),
-                end_date=max(dates),
-                scope="recent_tail",
-            )
-            for symbol, dates in sorted(wanted.items())
-        ]
-        frames: list[pd.DataFrame] = []
-        errors: list[dict[str, str]] = []
-        client = TushareProxyClient()
-        with _SystemMemoryGuard() as guard:
-            with ThreadPoolExecutor(max_workers=min(max(1, int(workers)), len(tasks))) as executor:
-                futures = {
-                    executor.submit(
-                        _fetch_gap_task,
-                        task,
-                        client,
-                        guard,
-                        "tushare_proxy_5m_direct_gap_repair",
-                        200 * 1024**3,
-                        workspace,
-                    ): task
-                    for task in tasks
-                }
-                for future in as_completed(futures):
-                    task = futures[future]
-                    guard.check(f"tushare_fallback_result:{task.symbol}")
-                    try:
-                        capture = future.result()
-                    except BaseException as exc:
-                        errors.append(
-                            {
-                                "symbol": task.symbol,
-                                "error_type": type(exc).__name__,
-                                "message": str(exc)[:500],
-                            }
-                        )
-                        continue
-                    frame = pq.read_table(pa.BufferReader(capture.payload)).to_pandas()
-                    dates = set(wanted[task.symbol])
-                    frame = frame.loc[frame["trade_date"].astype(str).isin(dates)].copy()
-                    if not frame.empty:
-                        frames.append(frame)
-            try:
-                client.close_thread_session()
-            except AttributeError:
-                pass
-            combined = (
-                pd.concat(frames, ignore_index=True, sort=False)
-                if frames
-                else pd.DataFrame(columns=INTRADAY_COLUMNS)
-            )
-            accepted_pairs = {
-                (str(symbol), str(trade_date))
-                for (symbol, trade_date), day in combined.groupby(
-                    ["symbol", "trade_date"], sort=False
-                )
-                if len(day) == 48 and day["bar_time"].nunique() == 48
+    if pending:
+        context = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(
+            max_workers=min(process_workers, len(pending)),
+            mp_context=context,
+        ) as executor:
+            futures = {
+                executor.submit(
+                    _run_baostock_bucket_process,
+                    bucket_wanted,
+                    progress_label=key,
+                    bundle_path_text=str(bundle_path),
+                    startup_delay_seconds=startup_delay,
+                ): key
+                for key, bucket_wanted, bundle_path, startup_delay in pending
             }
-            requested_pairs = set(unresolved_pairs)
-            combined = combined.loc[
-                pd.MultiIndex.from_frame(combined[["symbol", "trade_date"]]).isin(
-                    pd.MultiIndex.from_tuples(
-                        sorted(accepted_pairs), names=("symbol", "trade_date")
-                    )
+            for future in as_completed(futures):
+                key = futures[future]
+                guard.check(f"baostock_bucket_{key}_result")
+                completed[key] = future.result()
+                state.update(
+                    {
+                        "status": "downloading",
+                        "buckets": completed,
+                        "completed_bucket_count": sum(
+                            item.get("status") == "completed"
+                            for item in completed.values()
+                        ),
+                        "updated_at": _utc_now(),
+                    }
                 )
-            ].copy() if accepted_pairs else combined.iloc[:0].copy()
-            if not combined.empty:
-                _write_final_parquet(combined, bundle_path, domain=INTRADAY_DOMAIN)
-            state.update(
-                {
-                    "status": "downloaded",
-                    "row_count": int(len(combined)),
-                    "accepted_day_count": len(accepted_pairs),
-                    "unresolved": [
-                        {"symbol": symbol, "trade_date": trade_date}
-                        for symbol, trade_date in sorted(requested_pairs - accepted_pairs)
-                    ],
-                    "unresolved_day_count": len(requested_pairs - accepted_pairs),
-                    "provider_error_count": len(errors),
-                    "provider_error_sample": errors[:10],
-                    "bundle_path": str(bundle_path) if not combined.empty else "",
-                    "bundle_sha256": _sha256_file(bundle_path) if not combined.empty else "",
-                    "minimum_available_bytes": guard.minimum_available_bytes,
-                    "updated_at": _utc_now(),
-                }
-            )
-            atomic_write_json(runtime / "state.json", state)
-    bundle_paths = [bundle_path] if bundle_path.is_file() else []
-    if bundle_paths:
-        result = bulk_append_active_shards_from_parquet(
-            INTRADAY_DOMAIN,
-            bundle_paths,
-            "fill exact mootdx recent gaps and delisted securities from Tushare",
-            workspace_root=workspace,
-        )
-    else:
-        result = {"status": "nothing_to_append", "row_count": 0}
-    state.update({"status": "applied", "commit": result, "updated_at": _utc_now()})
+                atomic_write_json(runtime / "state.json", state)
+                record = completed[key]
+                print(
+                    json.dumps(
+                        {
+                            "provider": "baostock",
+                            "bucket": key,
+                            "symbols": record["symbol_count"],
+                            "rows": record["row_count"],
+                            "unresolved_days": len(record["unresolved"]),
+                            "provider_errors": record["provider_error_count"],
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+    state["status"] = "downloaded"
+    state["buckets"] = completed
+    state["row_count"] = sum(int(item.get("row_count", 0)) for item in completed.values())
+    state["accepted_day_count"] = sum(
+        int(item.get("accepted_day_count", 0)) for item in completed.values()
+    )
+    state["unresolved_day_count"] = sum(
+        len(item.get("unresolved", []) or []) for item in completed.values()
+    )
+    state["updated_at"] = _utc_now()
     atomic_write_json(runtime / "state.json", state)
     return state
+
+
+def _run_baostock_bucket_process(
+    wanted: Mapping[str, Sequence[str]],
+    *,
+    progress_label: str,
+    bundle_path_text: str,
+    startup_delay_seconds: float = 0.0,
+) -> dict[str, Any]:
+    provider = _baostock_process_session(
+        startup_delay_seconds=startup_delay_seconds,
+    )
+    with _SystemMemoryGuard() as guard:
+        frame, unresolved, errors = _fetch_baostock_bucket(
+            wanted,
+            provider=provider,
+            guard=guard,
+            progress_label=progress_label,
+        )
+        bundle_path: Path | None = None
+        if not frame.empty:
+            bundle_path = Path(bundle_path_text).resolve()
+            _write_final_parquet(frame, bundle_path, domain=INTRADAY_DOMAIN)
+        return {
+            "status": "completed",
+            "symbol_count": len(wanted),
+            "requested_day_count": sum(len(item) for item in wanted.values()),
+            "accepted_day_count": int(len(frame) // 48),
+            "row_count": int(len(frame)),
+            "bundle_path": str(bundle_path) if bundle_path else "",
+            "bundle_sha256": _sha256_file(bundle_path) if bundle_path else "",
+            "unresolved": [
+                {"symbol": symbol, "trade_date": trade_date, "reason": reason}
+                for (symbol, trade_date), reason in sorted(unresolved.items())
+            ],
+            "provider_error_count": len(errors),
+            "provider_error_sample": errors[:10],
+            "minimum_available_bytes": guard.minimum_available_bytes,
+        }
+
+
+def _fetch_baostock_bucket(
+    wanted: Mapping[str, Sequence[str]],
+    *,
+    provider: _DirectBaostockSession,
+    guard: _SystemMemoryGuard,
+    progress_label: str,
+) -> tuple[pd.DataFrame, dict[tuple[str, str], str], list[dict[str, Any]]]:
+    tasks = _baostock_tasks(wanted)
+    if not tasks:
+        return (
+            pd.DataFrame(columns=INTRADAY_COLUMNS),
+            {},
+            [],
+        )
+    accepted: list[pd.DataFrame] = []
+    unresolved: dict[tuple[str, str], str] = {}
+    errors: list[dict[str, Any]] = []
+    for completed, task in enumerate(tasks, start=1):
+        guard.check(f"baostock_task_start:{task.symbol}:{task.start_date}")
+        if completed == 1 or completed % 10 == 0 or completed == len(tasks):
+            print(
+                json.dumps(
+                    {
+                        "provider": "baostock",
+                        "bucket": progress_label,
+                        "phase": "start_task",
+                        "task_index": completed,
+                        "task_count": len(tasks),
+                        "symbol": task.symbol,
+                        "start_date": task.start_date,
+                        "end_date": task.end_date,
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+        try:
+            frame, task_unresolved, task_errors = _fetch_baostock_task(
+                task,
+                provider=provider,
+            )
+        except BaseException as exc:
+            frame = pd.DataFrame(columns=INTRADAY_COLUMNS)
+            task_unresolved = {
+                (task.symbol, trade_date): "baostock_task_exception"
+                for trade_date in task.dates
+            }
+            task_errors = [
+                {
+                    "symbol": task.symbol,
+                    "start_date": task.start_date,
+                    "end_date": task.end_date,
+                    "error_type": type(exc).__name__,
+                    "message": str(exc)[:500],
+                }
+            ]
+        if not frame.empty:
+            accepted.append(frame)
+        unresolved.update(task_unresolved)
+        errors.extend(task_errors)
+        if completed == 1 or completed % 10 == 0 or completed == len(tasks):
+            print(
+                json.dumps(
+                    {
+                        "provider": "baostock",
+                        "bucket": progress_label,
+                        "completed_tasks": completed,
+                        "task_count": len(tasks),
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+    if accepted:
+        combined = pd.concat(accepted, ignore_index=True, sort=False)
+        keys = ["symbol", "trade_date", "bar_time"]
+        if combined.duplicated(keys).any():
+            raise RecentMarketRepairError("baostock_repair_duplicate_accepted_primary_key")
+        combined = combined.sort_values(keys, kind="stable").reset_index(drop=True)
+    else:
+        combined = pd.DataFrame(columns=INTRADAY_COLUMNS)
+    return combined, unresolved, errors
+
+
+def _baostock_tasks(wanted: Mapping[str, Sequence[str]]) -> tuple[_BaostockTask, ...]:
+    grouped: dict[tuple[str, str], list[str]] = {}
+    for symbol, dates in wanted.items():
+        for trade_date in dates:
+            date_text = str(trade_date)
+            grouped.setdefault((str(symbol), date_text[:4]), []).append(date_text)
+    return tuple(
+        _BaostockTask(symbol=symbol, dates=tuple(sorted(set(dates))))
+        for (symbol, _year), dates in sorted(grouped.items())
+    )
+
+
+def _fetch_baostock_task(
+    task: _BaostockTask,
+    *,
+    provider: _DirectBaostockSession | None = None,
+) -> tuple[pd.DataFrame, dict[tuple[str, str], str], list[dict[str, Any]]]:
+    errors: list[dict[str, Any]] = []
+    result_data = pd.DataFrame()
+    owned_provider = provider is None
+    client = provider or _DirectBaostockSession()
+    for attempt in range(1, 3):
+        try:
+            result_data = client.fetch(task)
+            break
+        except BaseException as exc:
+            errors.append(
+                {
+                    "symbol": task.symbol,
+                    "start_date": task.start_date,
+                    "end_date": task.end_date,
+                    "attempt": attempt,
+                    "error_type": type(exc).__name__,
+                    "message": str(exc)[:500],
+                }
+            )
+            client.reset()
+    if owned_provider:
+        client.close()
+    frame, unresolved = _validate_intraday_frame(
+        result_data,
+        {task.symbol: task.dates},
+        source_name="baostock",
+    )
+    return frame, unresolved, errors
 
 
 def _download_buckets(
@@ -744,6 +1051,8 @@ def _validate_daily_frame(
 def _validate_intraday_frame(
     frame: pd.DataFrame,
     wanted: Mapping[str, Sequence[str]],
+    *,
+    source_name: str = "mootdx_online",
 ) -> tuple[pd.DataFrame, dict[tuple[str, str], str]]:
     wanted_pairs = {(symbol, str(date)) for symbol, dates in wanted.items() for date in dates}
     if frame is None or frame.empty:
@@ -789,7 +1098,7 @@ def _validate_intraday_frame(
         sorted(valid_pairs), names=("symbol", "trade_date")
     ) if valid_pairs else selected_index[:0]
     out = data.loc[selected_index.isin(valid_index)].copy()
-    out["source"] = "mootdx_online"
+    out["source"] = str(source_name)
     out["adjusted_flag"] = "none"
     out = out.loc[:, INTRADAY_COLUMNS].reset_index(drop=True)
     unresolved = {
@@ -831,10 +1140,17 @@ def _missing_daily_symbols(
                 ON cast(s.symbol AS VARCHAR)=cast(u.symbol AS VARCHAR)
                AND cast(s.trade_date AS VARCHAR)=cast(u.trade_date AS VARCHAR)
               WHERE cast(u.trade_date AS VARCHAR)=?
-                AND lower(cast(u.board AS VARCHAR))='main'
                 AND upper(cast(u.list_status AS VARCHAR))='L'
                 AND NOT coalesce(try_cast(s.is_suspended AS BOOLEAN), false)
                 AND NOT coalesce(try_cast(s.is_delisted AS BOOLEAN), false)
+              UNION
+              SELECT DISTINCT cast(i.current_symbol AS VARCHAR) AS symbol
+              FROM read_parquet(?, union_by_name=true) AS i
+              WHERE coalesce(cast(i.current_symbol AS VARCHAR),'')<>''
+                AND NOT EXISTS (
+                  SELECT 1 FROM read_parquet(?, union_by_name=true) AS u2
+                  WHERE cast(u2.trade_date AS VARCHAR)=?
+                )
             ), existing AS (
               SELECT DISTINCT cast(symbol AS VARCHAR) AS symbol
               FROM read_parquet(?, union_by_name=true)
@@ -849,6 +1165,9 @@ def _missing_daily_symbols(
                 _path_texts(inputs["universe_snapshot"]),
                 _path_texts(inputs["security_status"]),
                 trade_date,
+                _path_texts(inputs["security_identity"]),
+                _path_texts(inputs["universe_snapshot"]),
+                trade_date,
                 _path_texts(inputs[DAILY_DOMAIN]),
                 trade_date,
             ],
@@ -857,6 +1176,55 @@ def _missing_daily_symbols(
 
 
 def _missing_intraday_pairs(
+    inputs: Mapping[str, _DomainInput],
+    *,
+    start_date: str,
+    end_date: str,
+    workspace: Path,
+) -> tuple[tuple[str, str], ...]:
+    rows: list[tuple[str, str]] = []
+    pending = list(_calendar_year_windows(start_date, end_date))
+    while pending:
+        window_start, window_end = pending.pop(0)
+        try:
+            rows.extend(
+                _missing_intraday_pairs_window(
+                    inputs,
+                    start_date=window_start,
+                    end_date=window_end,
+                    workspace=workspace,
+                )
+            )
+        except DuckDbMemoryFloorError:
+            first = pd.Timestamp(window_start)
+            last = pd.Timestamp(window_end)
+            if first >= last:
+                raise
+            midpoint = first + (last - first) // 2
+            left = (first.strftime("%Y-%m-%d"), midpoint.strftime("%Y-%m-%d"))
+            right = (
+                (midpoint + pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
+                last.strftime("%Y-%m-%d"),
+            )
+            pending[0:0] = [left, right]
+    return tuple(sorted(set(rows)))
+
+
+def _calendar_year_windows(start_date: str, end_date: str) -> tuple[tuple[str, str], ...]:
+    first = pd.Timestamp(start_date).normalize()
+    last = pd.Timestamp(end_date).normalize()
+    if first > last:
+        raise ValueError("start_date_after_end_date")
+    windows: list[tuple[str, str]] = []
+    cursor = first
+    while cursor <= last:
+        year_end = min(last, pd.Timestamp(year=cursor.year, month=12, day=31))
+        windows.append((cursor.strftime("%Y-%m-%d"), year_end.strftime("%Y-%m-%d")))
+        cursor = year_end + pd.Timedelta(days=1)
+    return tuple(windows)
+
+
+def _missing_intraday_pairs_window(
     inputs: Mapping[str, _DomainInput],
     *,
     start_date: str,
@@ -873,18 +1241,8 @@ def _missing_intraday_pairs(
               SELECT DISTINCT cast(d.symbol AS VARCHAR) AS symbol,
                               cast(d.trade_date AS VARCHAR) AS trade_date
               FROM read_parquet(?, union_by_name=true) AS d
-              INNER JOIN read_parquet(?, union_by_name=true) AS u
-                ON cast(u.symbol AS VARCHAR)=cast(d.symbol AS VARCHAR)
-               AND cast(u.trade_date AS VARCHAR)=cast(d.trade_date AS VARCHAR)
-              LEFT JOIN read_parquet(?, union_by_name=true) AS s
-                ON cast(s.symbol AS VARCHAR)=cast(d.symbol AS VARCHAR)
-               AND cast(s.trade_date AS VARCHAR)=cast(d.trade_date AS VARCHAR)
               WHERE cast(d.trade_date AS VARCHAR) BETWEEN ? AND ?
                 AND coalesce(try_cast(d.volume AS DOUBLE),0)>0
-                AND lower(cast(u.board AS VARCHAR))='main'
-                AND upper(cast(u.list_status AS VARCHAR))='L'
-                AND NOT coalesce(try_cast(s.is_suspended AS BOOLEAN), false)
-                AND NOT coalesce(try_cast(s.is_delisted AS BOOLEAN), false)
             ), complete AS (
               SELECT cast(symbol AS VARCHAR) AS symbol,
                      cast(trade_date AS VARCHAR) AS trade_date
@@ -900,8 +1258,6 @@ def _missing_intraday_pairs(
             """,
             [
                 _path_texts(inputs[DAILY_DOMAIN]),
-                _path_texts(inputs["universe_snapshot"]),
-                _path_texts(inputs["security_status"]),
                 start_date,
                 end_date,
                 _path_texts(inputs[INTRADAY_DOMAIN]),
@@ -1066,17 +1422,6 @@ def _unresolved_mapping(
     return {symbol: tuple(sorted(set(dates))) for symbol, dates in result.items()}
 
 
-def _unresolved_pairs_from_state(state: Mapping[str, Any]) -> tuple[tuple[str, str], ...]:
-    pairs: set[tuple[str, str]] = set()
-    for record in dict(state.get("buckets", {}) or {}).values():
-        for item in list(record.get("unresolved", []) or []):
-            symbol = str(item.get("symbol", "")).strip().upper()
-            trade_date = str(item.get("trade_date", ""))[:10]
-            if symbol and trade_date:
-                pairs.add((symbol, trade_date))
-    return tuple(sorted(pairs))
-
-
 def _split_symbols(symbols: Sequence[str], workers: int) -> tuple[tuple[str, ...], ...]:
     count = min(max(1, int(workers)), len(symbols))
     return tuple(tuple(symbols[index::count]) for index in range(count))
@@ -1126,13 +1471,13 @@ def _utc_now() -> str:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "command", choices=("daily", "intraday", "tushare-fallback", "all")
+        "command",
+        choices=("daily", "intraday", "baostock-intraday", "all"),
     )
     parser.add_argument("--workspace-root", default=str(Path.cwd()))
     parser.add_argument("--start-date", default=DEFAULT_START_DATE)
     parser.add_argument("--end-date", default=DEFAULT_END_DATE)
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
-    parser.add_argument("--mootdx-state-path", default="")
     parser.add_argument("--no-resume", action="store_true")
     return parser
 
@@ -1156,11 +1501,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             workers=args.workers,
             resume=resume,
         )
-    if args.command == "tushare-fallback":
-        if not str(args.mootdx_state_path or "").strip():
-            raise ValueError("--mootdx-state-path is required for tushare-fallback")
-        results["tushare_fallback"] = run_tushare_intraday_fallback(
-            mootdx_state_path=args.mootdx_state_path,
+    if args.command in {"baostock-intraday", "all"}:
+        results["baostock_intraday"] = run_baostock_intraday_repair(
+            start_date=args.start_date,
+            end_date=args.end_date,
             workspace_root=args.workspace_root,
             workers=args.workers,
             resume=resume,
