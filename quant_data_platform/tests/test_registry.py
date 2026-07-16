@@ -92,14 +92,31 @@ def test_registry_status_prefers_full_sharded_active_manifest(tmp_path: Path) ->
     assert status["active_sample_count"] == 0
 
 
-def test_workspace_root_skips_child_sub_brain_manifest(tmp_path: Path, monkeypatch) -> None:
+def test_explicit_workspace_root_does_not_inherit_parent_main_brain(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
     monkeypatch.delenv("QDP_WORKSPACE_ROOT", raising=False)
     _write(tmp_path / "brain" / "brain_manifest.json", {"schema_version": 1, "brain_type": "main"})
     child = tmp_path / "quant_data_platform"
     _write(child / "brain" / "brain_manifest.json", {"schema_version": 1, "brain_type": "sub_brain"})
 
-    assert workspace_root(child) == tmp_path.resolve()
-    assert qdp_paths(child).workspace_root == tmp_path.resolve()
+    assert workspace_root(child) == child.resolve()
+    assert qdp_paths(child).workspace_root == child.resolve()
+
+
+def test_implicit_workspace_root_discovers_parent_main_brain(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("QDP_WORKSPACE_ROOT", raising=False)
+    _write(tmp_path / "brain" / "brain_manifest.json", {"schema_version": 1, "brain_type": "main"})
+    child = tmp_path / "quant_data_platform"
+    _write(child / "brain" / "brain_manifest.json", {"schema_version": 1, "brain_type": "sub_brain"})
+    monkeypatch.chdir(child)
+
+    assert workspace_root() == tmp_path.resolve()
+    assert qdp_paths().workspace_root == tmp_path.resolve()
 
 
 def test_explicit_unmarked_workspace_is_an_isolation_boundary(
@@ -110,3 +127,12 @@ def test_explicit_unmarked_workspace_is_an_isolation_boundary(
 
     assert workspace_root(tmp_path) == tmp_path.resolve()
     assert qdp_paths(tmp_path).workspace_root == tmp_path.resolve()
+
+
+def test_env_workspace_root_overrides_explicit_start(tmp_path: Path, monkeypatch) -> None:
+    env_root = tmp_path / "env_workspace"
+    explicit_root = tmp_path / "explicit_workspace"
+    monkeypatch.setenv("QDP_WORKSPACE_ROOT", str(env_root))
+
+    assert workspace_root(explicit_root) == env_root.resolve()
+    assert qdp_paths(explicit_root).workspace_root == env_root.resolve()

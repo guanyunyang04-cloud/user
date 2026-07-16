@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from quant_data_platform.core.json_io import json_safe
+from quant_data_platform.qdp_v2.duckdb_resources import open_guarded_duckdb
 from quant_data_platform.qdp_v2.environment import runtime_environment
 from quant_data_platform.qdp_v2.manifest import (
     DatasetManifest,
@@ -1314,11 +1315,11 @@ def _write_active_scope_symbols(*, root: Path, datasets: Mapping[str, str], acti
     target = root / "runs" / f"active_scope_symbols_{stable_hash({'as_of': active_as_of, 'universe': universe.dataset_id, 'status': status.dataset_id, 'scope': ACTIVE_SCOPE_NAME})}.parquet"
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    import duckdb  # type: ignore
-
-    con = duckdb.connect(":memory:")
+    con = open_guarded_duckdb(
+        temp_directory=root / "tmp" / "active_scope_duckdb",
+        threads=2,
+    )
     try:
-        _configure(con, memory_limit="2GB", threads=2)
         base_cte = f"""
           with universe as (
             select

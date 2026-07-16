@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from quant_data_platform.core.json_io import json_safe
+from quant_data_platform.qdp_v2.duckdb_resources import open_guarded_duckdb
 from quant_data_platform.qdp_v2.environment import runtime_environment
 from quant_data_platform.qdp_v2.manifest import (
     DatasetManifest,
@@ -768,8 +769,6 @@ def _manifest_has_column(manifest: DatasetManifest, column: str) -> bool:
 
 
 def _write_mainboard_scope_symbols(*, root: Path, active: dict[str, Any], active_as_of: str) -> tuple[Path, dict[str, Any]]:
-    import duckdb  # type: ignore
-
     universe_id = _active_dataset_id_for_domain(active, "universe_snapshot")
     status_id = _active_dataset_id_for_domain(active, "security_status")
     universe = read_dataset_manifest(_require_dataset_manifest(root, universe_id, "universe_snapshot"))
@@ -778,9 +777,10 @@ def _write_mainboard_scope_symbols(*, root: Path, active: dict[str, Any], active
     status_paths = [str(_resolve_qdp_v2_path(root, shard.path)) for shard in status.shards]
     target = root / "runs" / f"mainboard_scope_symbols_{stable_hash({'as_of': active_as_of, 'universe': universe.dataset_id, 'status': status.dataset_id})}.parquet"
     target.parent.mkdir(parents=True, exist_ok=True)
-    with duckdb.connect(":memory:") as con:
-        con.execute("set memory_limit='2GB'")
-        con.execute("set threads=2")
+    with open_guarded_duckdb(
+        temp_directory=root / "tmp" / "mainboard_scope_duckdb",
+        threads=2,
+    ) as con:
         con.execute(
             f"""
             copy (

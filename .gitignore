@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .tmp/
+.qdp_tmp/
 .playwright-cli/
 node_modules/
 *.tsbuildinfo

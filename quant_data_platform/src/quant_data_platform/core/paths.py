@@ -38,15 +38,16 @@ def workspace_root(start: str | Path | None = None) -> Path:
     env_root = os.environ.get("QDP_WORKSPACE_ROOT", "").strip()
     if env_root:
         return Path(env_root).resolve()
-    initial = Path(start or Path.cwd()).resolve()
+    # A caller-supplied root is an exact isolation boundary.  In particular,
+    # fixtures and recovery probes nested below the production workspace must
+    # never inherit a parent brain or its active data pointers.
+    if start is not None:
+        return Path(start).resolve()
+
+    initial = Path.cwd().resolve()
     for candidate in (initial, *initial.parents):
         if _is_main_brain_root(candidate):
             return candidate
-    # An explicit caller-supplied root is an isolation boundary even before
-    # its brain manifest has been created.  Falling back to the source checkout
-    # here can redirect tests, migrations, or recovery probes into production.
-    if start is not None:
-        return initial
     return Path(__file__).resolve().parents[4]
 
 
