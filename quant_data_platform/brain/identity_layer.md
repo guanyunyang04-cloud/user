@@ -14,7 +14,7 @@
 
 `not`: 数据湖发布平台、candidate registry、下游训练产物仓库或实时交易系统。
 
-`public_methods`: `status()`、`list()`、`describe(table)`、`check(mode)`、`update()`、`gc()`。
+`public_methods`: `status()`、`list()`、`describe(table)`、`check(mode)`、`update()`、`compact()`、`gc()`。
 
 `consumers`: `daily_research`、`traditional_quant_research`、`t0_project` 和未来研究项目。
 

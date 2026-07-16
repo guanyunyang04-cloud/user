@@ -3,22 +3,31 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 from quant_data_platform.core.json_io import json_safe
 from quant_data_platform.core.paths import qdp_paths
+from quant_data_platform.qdp_v2.baostock_update import run_baostock_core_update
+from quant_data_platform.qdp_v2.database_audit import audit_latest_keys
+from quant_data_platform.qdp_v2.factor_update import run_factor_tail_update
 from quant_data_platform.qdp_v2.manifest import (
     dataset_manifest_for_id,
     qdp_v2_root,
     read_active_manifest,
     read_dataset_manifest,
+    write_active_manifest,
 )
 from quant_data_platform.qdp_v2.recent_market_repair import (
     run_baostock_intraday_repair,
-    run_recent_daily_repair,
     run_recent_intraday_repair,
 )
 
@@ -63,7 +72,11 @@ def plan_update(
         "start_date": start.strftime("%Y-%m-%d"),
         "as_of_date": target.strftime("%Y-%m-%d"),
         "workers": 4,
-        "provider_order": ["mootdx_online", "baostock"],
+        "provider_order": [
+            "baostock_core",
+            "mootdx_5m_accelerator",
+            "baostock_5m_fallback",
+        ],
         "coverage_before": coverage,
     }
 
@@ -90,39 +103,85 @@ def run_update(
         return plan
     start = str(plan["start_date"])
     end = str(plan["as_of_date"])
-    daily = run_recent_daily_repair(
-        start_date=start,
-        trade_date=end,
-        workspace_root=workspace,
-        workers=int(workers),
-    )
-    fast_5m = run_recent_intraday_repair(
-        start_date=start,
-        end_date=end,
-        workspace_root=workspace,
-        workers=int(workers),
-    )
-    baostock_5m = run_baostock_intraday_repair(
-        start_date=start,
-        end_date=end,
-        workspace_root=workspace,
-        workers=int(workers),
-    )
     payload = {
         **plan,
-        "status": "updated",
+        "status": "updating",
         "workers": int(workers),
-        "daily": _state_summary(daily),
-        "mootdx_5m": _state_summary(fast_5m),
-        "baostock_5m": _state_summary(baostock_5m),
     }
-    if not keep_runtime:
+    stage = "baostock_core"
+    try:
+        core = run_baostock_core_update(
+            start_date=start,
+            end_date=end,
+            workspace_root=workspace,
+        )
+        payload[stage] = _state_summary(core)
+
+        stage = "adjust_factor"
+        factor = run_factor_tail_update(
+            start_date=start,
+            end_date=end,
+            workspace_root=workspace,
+        )
+        payload[stage] = _state_summary(factor)
+
+        stage = "mootdx_5m"
+        fast_5m = run_recent_intraday_repair(
+            start_date=start,
+            end_date=end,
+            workspace_root=workspace,
+            workers=int(workers),
+        )
+        payload[stage] = _state_summary(fast_5m)
+
+        stage = "baostock_5m"
+        baostock_5m = run_baostock_intraday_repair(
+            start_date=start,
+            end_date=end,
+            workspace_root=workspace,
+            workers=int(workers),
+        )
+        payload[stage] = _state_summary(baostock_5m)
+
+        stage = "latest_check"
+        latest = audit_latest_keys(workspace_root=workspace)
+        payload[stage] = latest
+        if latest.get("status") not in {"ok", "warning"}:
+            raise RuntimeError(
+                f"post_update_latest_check_failed:{latest.get('status')}"
+            )
+        payload["active_as_of_date"] = _advance_active_date(workspace)
+        unresolved = int(baostock_5m.get("unresolved_day_count", 0) or 0)
+        provider_errors = int(baostock_5m.get("provider_error_count", 0) or 0)
+        payload["status"] = (
+            "updated_with_gaps" if unresolved or provider_errors else "updated"
+        )
+    except Exception as exc:
+        payload.update(
+            {
+                "status": "failed",
+                "failed_stage": stage,
+                "error_type": type(exc).__name__,
+                "error": str(exc)[:1000],
+                "runtime_cleanup": "retained_after_failure",
+            }
+        )
+        return payload
+
+    if not keep_runtime and payload["status"] == "updated":
         runtime = qdp_paths(workspace).data_dir / "qdp_runtime" / "recent_market_repair"
         if runtime.exists():
             resolved = runtime.resolve(strict=True)
             resolved.relative_to(workspace)
             shutil.rmtree(resolved)
-            payload["runtime_cleanup"] = "deleted_after_success"
+        core_runtime = qdp_paths(workspace).data_dir / "qdp_runtime" / "baostock_update"
+        if core_runtime.exists():
+            resolved = core_runtime.resolve(strict=True)
+            resolved.relative_to(workspace)
+            shutil.rmtree(resolved)
+        payload["runtime_cleanup"] = "deleted_after_success"
+    elif payload["status"] == "updated_with_gaps":
+        payload["runtime_cleanup"] = "retained_for_unresolved_days"
     return payload
 
 
@@ -138,9 +197,43 @@ def _state_summary(state: dict[str, Any]) -> dict[str, Any]:
             "provider_error_count",
             "workers",
             "minimum_available_bytes",
+            "missing_rows",
+            "open_date_count",
+            "missing_key_count",
+            "event_count",
+            "initialized_symbol_count",
+            "remaining_missing_key_count",
         )
         if key in state
     }
+
+
+def _advance_active_date(workspace: Path) -> str:
+    root = qdp_v2_root(workspace)
+    active = read_active_manifest(root)
+    daily_id = str(dict(active.get("datasets", {}) or {}).get("market_daily_raw", ""))
+    manifest_path = dataset_manifest_for_id(root, daily_id, "market_daily_raw")
+    if manifest_path is None:
+        raise RuntimeError("updated_daily_manifest_missing")
+    latest = str(read_dataset_manifest(manifest_path).end_date or "")
+    if not latest:
+        raise RuntimeError("updated_daily_end_date_missing")
+    active["active_as_of_date"] = latest
+    scope = dict(active.get("scope", {}) or {})
+    scope["end_date"] = latest
+    active["scope"] = scope
+    write_active_manifest(root, active)
+    return latest
+
+
+def _default_as_of_date() -> str:
+    now = datetime.now(ZoneInfo("Asia/Shanghai"))
+    candidate = pd.Timestamp(now.date())
+    if now.hour < 17:
+        candidate -= pd.offsets.BDay(1)
+    while candidate.weekday() >= 5:
+        candidate -= pd.Timedelta(days=1)
+    return candidate.strftime("%Y-%m-%d")
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -149,7 +242,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         description="Update the single current market store in place.",
     )
     parser.add_argument("--workspace-root", default="")
-    parser.add_argument("--as-of-date", required=True)
+    parser.add_argument("--as-of-date", default=_default_as_of_date())
     parser.add_argument("--start-date", default="")
     parser.add_argument("--lookback-days", type=int, default=10)
     parser.add_argument("--workers", type=int, default=4)
@@ -176,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(json_safe(payload), ensure_ascii=False, indent=2))
     else:
         print(_format(payload))
-    return 0 if payload.get("status") in {"planned", "updated"} else 2
+    return 0 if payload.get("status") in {"planned", "updated", "updated_with_gaps"} else 2
 
 
 def _format(payload: dict[str, Any]) -> str:
@@ -185,7 +278,7 @@ def _format(payload: dict[str, Any]) -> str:
         f"range: {payload.get('start_date', '')}..{payload.get('as_of_date', '')}",
         f"workers: {payload.get('workers', '')}",
     ]
-    for name in ("daily", "mootdx_5m", "baostock_5m"):
+    for name in ("baostock_core", "adjust_factor", "mootdx_5m", "baostock_5m", "latest_check"):
         if name in payload:
             lines.append(f"{name}: {payload[name]}")
     return "\n".join(lines)

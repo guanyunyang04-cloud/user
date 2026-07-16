@@ -7,7 +7,11 @@ from typing import Any
 
 from quant_data_platform.core.json_io import json_safe
 from quant_data_platform.qdp_v2.audit import audit_active
-from quant_data_platform.qdp_v2.database_audit import REQUIRED_DOMAINS, audit_database
+from quant_data_platform.qdp_v2.database_audit import (
+    REQUIRED_DOMAINS,
+    audit_database,
+    audit_latest_keys,
+)
 from quant_data_platform.qdp_v2.manifest import qdp_v2_root, read_active_manifest
 from quant_data_platform.qdp_v2.status import active_dataset_map
 
@@ -25,7 +29,12 @@ def run_check(
     manifest = read_active_manifest(qdp_v2_root(workspace_root))
     active_domains = set(active_dataset_map(manifest))
     missing_required = sorted(REQUIRED_DOMAINS.difference(active_domains))
-    database_status = "ok" if not missing_required else "needs_attention"
+    latest = audit_latest_keys(workspace_root=workspace_root)
+    database_status = (
+        "ok"
+        if not missing_required and latest.get("status") in {"ok", "warning"}
+        else "needs_attention"
+    )
     status = "ok" if active.get("status") == "ok" and database_status == "ok" else "needs_attention"
     return {
         "status": status,
@@ -34,12 +43,13 @@ def run_check(
         "database": {
             "status": database_status,
             "dataset_count": len(active_domains),
-            "finding_count": len(missing_required),
+            "finding_count": len(missing_required) + int(latest.get("finding_count", 0)),
             "coverage": {
                 "active_domains": sorted(active_domains),
                 "required_domains": sorted(REQUIRED_DOMAINS),
                 "missing_required_domains": missing_required,
             },
+            "latest_keys": latest,
             "errors": [],
             "warnings": [f"required_domains_missing:{','.join(missing_required)}"] if missing_required else [],
         },
@@ -50,8 +60,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="qdp check", description="Check the active qdp_v2 data base.")
     parser.add_argument("--workspace-root", default="")
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--quick", action="store_true", help="Run manifest/footer and coverage checks.")
-    mode.add_argument("--full", action="store_true", help="Run deep row-level and cross-frequency checks.")
+    mode.add_argument(
+        "--quick",
+        action="store_true",
+        help="Run manifest/file-presence and latest-key checks without scanning every footer.",
+    )
+    mode.add_argument(
+        "--full",
+        action="store_true",
+        help="Run deep schema, primary-key, OHLC, factor, identity and 48-bar checks.",
+    )
     parser.add_argument("--runtime", default="balanced", choices=("safe", "balanced", "fast"))
     parser.add_argument("--write-audit", action="store_true", help="Persist audit output; checks are read-only by default.")
     parser.add_argument("--json", action="store_true")

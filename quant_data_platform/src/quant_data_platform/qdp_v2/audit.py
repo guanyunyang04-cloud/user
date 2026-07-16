@@ -103,12 +103,8 @@ def _manifest_contract_findings(domain: str, manifest: dict[str, Any]) -> tuple[
     if "pending_rebuild" in contract or "pending_qdp_v2_normalization" in contract or "pending_qdp_v2_split" in contract:
         errors.append(f"pending_contract_active:{domain}:{dataset_id}:{contract}")
     expected_contracts = {
-        "market_intraday_1m": "mootdx_1m_240_v1",
         "market_intraday_5m": "qdp_current_intraday_5m_48_v1",
         "market_daily_raw": "qdp_v2_market_daily_raw_v1",
-        "market_daily_panel": "qdp_v2_market_daily_panel_v1",
-        "pit_signal_universe": "qdp_v2_pit_signal_universe_v1",
-        "pit_signal_universe_daily": "qdp_v2_pit_signal_universe_daily_v1",
     }
     expected = expected_contracts.get(domain)
     if expected and contract != expected:
@@ -119,60 +115,15 @@ def _manifest_contract_findings(domain: str, manifest: dict[str, Any]) -> tuple[
         errors.append(f"missing_5m_48_quality:{dataset_id}")
     if domain == "market_daily_raw" and quality.get("ohlcv_non_null") is not True:
         errors.append(f"market_daily_raw_not_marked_ohlcv_non_null:{dataset_id}")
-    if domain == "market_daily_panel" and quality.get("has_bar_contract") is not True:
-        errors.append(f"market_daily_panel_missing_has_bar_contract:{dataset_id}")
     if domain == "valuation":
         required = {"symbol", "trade_date", "total_mv", "circ_mv", "pe", "pb", "turnover_rate", "source"}
         missing = sorted(required.difference(schema))
         if missing:
             errors.append(f"valuation_schema_missing:{dataset_id}:{','.join(missing)}")
-    if domain == "pit_signal_universe":
-        required = {
-            "symbol",
-            "trade_date",
-            "is_listed",
-            "is_mainboard",
-            "is_common_a_share",
-            "is_st",
-            "is_suspended",
-            "has_bar",
-            "is_delisted",
-            "eligible_for_research",
-            "eligible_for_signal",
-            "primary_exclusion_reason",
-            "source",
-        }
-        missing = sorted(required.difference(schema))
-        if missing:
-            errors.append(f"pit_signal_universe_schema_missing:{dataset_id}:{','.join(missing)}")
-        if quality.get("date_local_eligibility") is not True:
-            errors.append(f"pit_signal_universe_not_marked_date_local:{dataset_id}")
-        if quality.get("current_survivor_filter_used") is not False:
-            errors.append(f"pit_signal_universe_survivor_filter_not_disabled:{dataset_id}")
-        if quality.get("future_metadata_not_emitted") is not True:
-            errors.append(f"pit_signal_universe_future_metadata_boundary_missing:{dataset_id}")
-    if domain == "pit_signal_universe_daily":
-        required = {
-            "trade_date",
-            "covered_symbols",
-            "research_eligible_symbols",
-            "signal_eligible_symbols",
-            "signal_membership_hash",
-            "source",
-        }
-        missing = sorted(required.difference(schema))
-        if missing:
-            errors.append(f"pit_signal_universe_daily_schema_missing:{dataset_id}:{','.join(missing)}")
-        if not str(quality.get("membership_hash_contract", "") or ""):
-            errors.append(f"pit_signal_universe_daily_hash_contract_missing:{dataset_id}")
     if domain in {
         "market_daily_raw",
-        "market_daily_panel",
-        "market_intraday_1m",
         "market_intraday_5m",
         "valuation",
-        "pit_signal_universe",
-        "pit_signal_universe_daily",
     }:
         if quality.get("primary_key_unique") not in {True, "checked"}:
             warnings.append(f"primary_key_uniqueness_not_deep_checked:{domain}:{dataset_id}")

@@ -32,7 +32,11 @@ from quant_data_platform.core.paths import qdp_paths
 from quant_data_platform.domains.contracts import DataDomain, DomainFetchRequest
 from quant_data_platform.providers import MootdxOnlineProvider
 from quant_data_platform.qdp_v2.duckdb_resources import (
+    DEFAULT_LOW_MEMORY_SECONDS,
+    DEFAULT_MEMORY_FLOOR_BYTES,
+    DEFAULT_POLL_SECONDS,
     DuckDbMemoryFloorError,
+    LOW_MEMORY_REASON,
     open_guarded_duckdb,
 )
 from quant_data_platform.qdp_v2.manifest import (
@@ -52,9 +56,9 @@ BUCKET_COUNT = 16
 DEFAULT_WORKERS = 4
 DEFAULT_START_DATE = "2026-06-29"
 DEFAULT_END_DATE = "2026-07-13"
-MEMORY_FLOOR_BYTES = int(0.5 * 1024**3)
-LOW_MEMORY_SECONDS = 5.0
-POLL_SECONDS = 0.25
+MEMORY_FLOOR_BYTES = DEFAULT_MEMORY_FLOOR_BYTES
+LOW_MEMORY_SECONDS = DEFAULT_LOW_MEMORY_SECONDS
+POLL_SECONDS = DEFAULT_POLL_SECONDS
 
 DAILY_DOMAIN = "market_daily_raw"
 INTRADAY_DOMAIN = "market_intraday_5m"
@@ -127,7 +131,7 @@ class RecentMarketMemoryError(RecentMarketRepairError):
 
 
 class _SystemMemoryGuard:
-    """Continuously observe the user-selected 0.5 GiB / five-second floor."""
+    """Continuously observe the shared physical-memory safety floor."""
 
     def __init__(self) -> None:
         self._stop = threading.Event()
@@ -152,9 +156,7 @@ class _SystemMemoryGuard:
 
     def check(self, label: str) -> None:
         if self._triggered.is_set():
-            raise RecentMarketMemoryError(
-                f"available_memory_below_0.5_gib_for_5_seconds:{label}"
-            )
+            raise RecentMarketMemoryError(f"{LOW_MEMORY_REASON}:{label}")
 
     def _run(self) -> None:
         try:
@@ -631,6 +633,9 @@ def _download_baostock_buckets(
     state["unresolved_day_count"] = sum(
         len(item.get("unresolved", []) or []) for item in completed.values()
     )
+    state["provider_error_count"] = sum(
+        int(item.get("provider_error_count", 0)) for item in completed.values()
+    )
     state["updated_at"] = _utc_now()
     atomic_write_json(runtime / "state.json", state)
     return state
@@ -895,6 +900,9 @@ def _download_buckets(
     )
     state["unresolved_day_count"] = sum(
         len(item.get("unresolved", []) or []) for item in completed.values()
+    )
+    state["provider_error_count"] = sum(
+        int(item.get("provider_error_count", 0)) for item in completed.values()
     )
     state["updated_at"] = _utc_now()
     atomic_write_json(runtime / "state.json", state)

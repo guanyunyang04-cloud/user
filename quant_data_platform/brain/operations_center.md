@@ -12,7 +12,7 @@
 
 `runtime`: `H:\quant_project\quant_data_platform\data\qdp_runtime`；任务完成并确认写入当前表后可直接删除。
 
-`memory`: 不固定限制 DuckDB 为 2 GiB；可用内存低于 0.5 GiB 持续 5 秒才中断。
+`memory`: 不固定限制 DuckDB 为 2 GiB；可用内存低于 0.5 GiB 持续 2 秒即中断。
 
 ## Current Command Palette
 
@@ -21,7 +21,10 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli status
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli list --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli describe market_intraday_5m --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli check --quick --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli update --as-of-date <date> --workers 4 --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli compact --dry-run --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli gc --dry-run --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli gc --runtime --delete --yes --json
 ```
 
 ## Procedures
@@ -29,10 +32,14 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli gc --d
 ### procedure `update_recent_market`
 
 ```powershell
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.qdp_v2.recent_market_repair all --start-date <date> --end-date <date> --workers 4 --workspace-root H:\quant_project
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli update --as-of-date <date> --workers 4 --workspace-root H:\quant_project
 ```
 
 `steps`: mootdx 先快速补当前窗口；重新计算缺口；4 个 BaoStock 进程各维持一个独立登录，只补剩余股票日；仅完整 48 根日写入当前 5m 表；提交后删除 runtime。
+
+### procedure `compact_5m`
+
+`steps`: `qdp compact --dry-run` 查看当前 shard 数；正式执行时单次流式按自然年写 Parquet；比较新旧逐年行数与全行指纹；manifest 原位切换成功后删除旧 shards 和 staging。
 
 ### procedure `direct_data_change`
 
@@ -42,7 +49,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.qdp_v2.rec
 
 ### procedure `cleanup`
 
-`steps`: 从 `active.json` 取得当前 14 个目录；删除其他 dataset generation、runtime、audit 和 provider staging；研究 event packs 不属于 canonical，不随 QDP GC 删除。
+`steps`: 从 `active.json` 取得当前 14 个目录；默认只删除其他 dataset generation。任务完成且无活动进程时，`gc --runtime --delete --yes` 可删除 runtime、audit spill 和 provider staging；研究 event packs 不属于 canonical，不随 QDP GC 删除。
 
 ### procedure `verify`
 

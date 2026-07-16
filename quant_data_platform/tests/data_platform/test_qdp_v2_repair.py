@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from quant_data_platform.core.json_io import read_json
+from quant_data_platform.qdp_v2 import repair as repair_module
 from quant_data_platform.qdp_v2.manifest import (
     DatasetManifest,
     ShardManifestEntry,
@@ -733,3 +734,27 @@ def test_atomic_parquet_mutation_rejects_target_hash_collision(
     assert all(path.exists() for path in shard_paths)
     assert collision.read_bytes() == b"not the prepared parquet"
     assert _log_records(workspace) == []
+
+
+def test_atomic_replace_retries_transient_windows_file_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source.tmp"
+    target = tmp_path / "target.parquet"
+    source.write_bytes(b"parquet payload")
+    original_replace = Path.replace
+    attempts = 0
+
+    def flaky_replace(path: Path, replacement: Path) -> Path:
+        nonlocal attempts
+        if path == source and attempts < 2:
+            attempts += 1
+            raise PermissionError("transient file lock")
+        return original_replace(path, replacement)
+
+    monkeypatch.setattr(Path, "replace", flaky_replace)
+    repair_module._replace_file_with_retry(source, target, timeout_seconds=1.0)
+
+    assert attempts == 2
+    assert target.read_bytes() == b"parquet payload"

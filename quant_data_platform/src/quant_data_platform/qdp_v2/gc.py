@@ -18,6 +18,7 @@ def lake_gc(
     yes: bool = False,
     with_size: bool = False,
     max_items: int = 200,
+    clean_runtime: bool = False,
 ) -> dict[str, Any]:
     if delete and not yes:
         raise ValueError("qdp_v2_gc_delete_requires_yes")
@@ -28,6 +29,12 @@ def lake_gc(
     inventory = _dataset_dir_inventory(root, with_size=with_size or delete)
     unreferenced = [item for item in inventory if item["dataset_id"] not in referenced]
     referenced_items = [item for item in inventory if item["dataset_id"] in referenced]
+    runtime = root.parent / "qdp_runtime"
+    runtime_items = (
+        _runtime_inventory(runtime, with_size=with_size or delete)
+        if clean_runtime
+        else []
+    )
     unreferenced = sorted(unreferenced, key=lambda item: int(item["bytes"]), reverse=True)
     referenced_items = sorted(referenced_items, key=lambda item: int(item["bytes"]), reverse=True)
     deleted: list[dict[str, Any]] = []
@@ -37,11 +44,22 @@ def lake_gc(
             if path.exists() and _is_inside(path, root / "datasets"):
                 shutil.rmtree(path)
                 deleted.append(item)
+    deleted_runtime: list[dict[str, Any]] = []
+    if delete and clean_runtime:
+        for item in runtime_items:
+            path = Path(str(item["path"]))
+            if not path.exists() or not _is_inside(path, runtime):
+                continue
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+            deleted_runtime.append(item)
     limit = max(0, int(max_items or 0))
     return {
         "status": "deleted" if delete else "dry_run",
         "qdp_v2_root": str(root.resolve()),
-        "destructive_actions_performed": bool(delete and deleted),
+        "destructive_actions_performed": bool(delete and (deleted or deleted_runtime)),
         "referenced_dataset_count": len(referenced),
         "pinned_dataset_count": len(pin_ids),
         "pin_records": pin_records,
@@ -53,6 +71,16 @@ def lake_gc(
         "deleted_bytes": sum(int(item["bytes"]) for item in deleted),
         "unreferenced": unreferenced[:limit] if limit else unreferenced,
         "deleted": deleted[:limit] if limit else deleted,
+        "runtime": {
+            "included": bool(clean_runtime),
+            "path": str(runtime.resolve()),
+            "item_count": len(runtime_items),
+            "bytes": sum(int(item["bytes"]) for item in runtime_items),
+            "deleted_item_count": len(deleted_runtime),
+            "deleted_bytes": sum(int(item["bytes"]) for item in deleted_runtime),
+            "items": runtime_items[:limit] if limit else runtime_items,
+            "deleted": deleted_runtime[:limit] if limit else deleted_runtime,
+        },
     }
 
 
@@ -124,6 +152,29 @@ def _directory_size(path: Path) -> int:
     return total
 
 
+def _runtime_inventory(root: Path, *, with_size: bool) -> list[dict[str, Any]]:
+    if not root.exists():
+        return []
+    items: list[dict[str, Any]] = []
+    for path in sorted(root.iterdir(), key=lambda item: item.name):
+        is_directory = path.is_dir()
+        try:
+            size = _directory_size(path) if is_directory and with_size else (
+                int(path.stat().st_size) if with_size else 0
+            )
+        except OSError:
+            size = 0
+        items.append(
+            {
+                "path": str(path.resolve()),
+                "kind": "directory" if is_directory else "file",
+                "bytes": int(size),
+                "gb": round(size / 1024**3, 4),
+            }
+        )
+    return items
+
+
 def _is_inside(path: Path, root: Path) -> bool:
     try:
         path.resolve().relative_to(root.resolve())
@@ -140,6 +191,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--yes", action="store_true")
     parser.add_argument("--with-size", action="store_true")
     parser.add_argument("--max-items", type=int, default=200)
+    parser.add_argument(
+        "--runtime",
+        action="store_true",
+        help="Include repository-local qdp_runtime files; deletion still requires --delete --yes.",
+    )
     parser.add_argument("--json", action="store_true")
     return parser
 
@@ -152,6 +208,7 @@ def main(argv: list[str] | None = None) -> int:
         yes=bool(args.yes),
         with_size=bool(args.with_size),
         max_items=int(args.max_items or 0),
+        clean_runtime=bool(args.runtime),
     )
     if bool(args.json):
         print(json.dumps(json_safe(payload), ensure_ascii=False, indent=2))
@@ -167,6 +224,8 @@ def _format(payload: dict[str, Any]) -> str:
         f"referenced_dataset_count: {payload.get('referenced_dataset_count', 0)}",
         f"unreferenced_dataset_dir_count: {payload.get('unreferenced_dataset_dir_count', 0)}",
         f"unreferenced_gb: {round(int(payload.get('unreferenced_bytes', 0)) / 1024**3, 4)}",
+        f"runtime_item_count: {payload.get('runtime', {}).get('item_count', 0)}",
+        f"runtime_gb: {round(int(payload.get('runtime', {}).get('bytes', 0)) / 1024**3, 4)}",
     ]
     for item in list(payload.get("unreferenced", []) or [])[:20]:
         lines.append(f"unreferenced: {item.get('domain')} {item.get('dataset_id')} {item.get('gb')}GB {item.get('path')}")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -1702,10 +1703,34 @@ def _write_and_validate_parquet(
             reference_schema=reference_schema,
             expected_content_hash=expected_content_hash,
         )
-        temporary.replace(target)
+        _replace_file_with_retry(temporary, target)
     finally:
-        temporary.unlink(missing_ok=True)
+        _unlink_file_with_retry(temporary)
     return True
+
+
+def _replace_file_with_retry(source: Path, target: Path, *, timeout_seconds: float = 5.0) -> None:
+    deadline = time.monotonic() + max(0.0, float(timeout_seconds))
+    while True:
+        try:
+            source.replace(target)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)
+
+
+def _unlink_file_with_retry(path: Path, *, timeout_seconds: float = 5.0) -> None:
+    deadline = time.monotonic() + max(0.0, float(timeout_seconds))
+    while True:
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)
 
 
 def _validate_existing_parquet(
@@ -1715,12 +1740,13 @@ def _validate_existing_parquet(
     reference_schema: pa.Schema,
     expected_content_hash: str,
 ) -> None:
-    parquet = pq.ParquetFile(path)
-    if int(parquet.metadata.num_rows) != len(expected_frame):
-        raise QdpV2RepairError(f"qdp_v2_repair_row_count_mismatch:{path}")
-    if not parquet.schema_arrow.equals(reference_schema, check_metadata=False):
-        raise QdpV2RepairError(f"qdp_v2_repair_parquet_schema_mismatch:{path}")
-    persisted = pd.read_parquet(path, engine="pyarrow")
+    with path.open("rb") as handle:
+        parquet = pq.ParquetFile(handle)
+        if int(parquet.metadata.num_rows) != len(expected_frame):
+            raise QdpV2RepairError(f"qdp_v2_repair_row_count_mismatch:{path}")
+        if not parquet.schema_arrow.equals(reference_schema, check_metadata=False):
+            raise QdpV2RepairError(f"qdp_v2_repair_parquet_schema_mismatch:{path}")
+        persisted = parquet.read().to_pandas()
     if frame_content_sha256(persisted) != expected_content_hash:
         raise QdpV2RepairError(f"qdp_v2_repair_content_hash_mismatch:{path}")
 

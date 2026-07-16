@@ -28,7 +28,7 @@
 
 ### object `resource_guard`
 
-`invariant`: 所有写入在 H 仓库内；可用内存低于 0.5 GiB 持续 5 秒才停止；Token 或 secret 不写文件/日志。
+`invariant`: 所有写入在 H 仓库内；可用内存低于 0.5 GiB 持续 2 秒即停止；Token 或 secret 不写文件/日志。
 
 ### object `research_boundary`
 

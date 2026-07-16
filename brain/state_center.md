@@ -1,5 +1,5 @@
 # 主脑状态程序
-快照日期：`2026-07-15`
+快照日期：`2026-07-17`
 
 本文件只保存 `H:\quant_project` 当前跨项目对象。项目细节写入对应分脑；历史过程进入各自 `references/`。
 
@@ -22,8 +22,8 @@
 ### object `quant_data_platform_child`
 `type`: shared_data_base_child_brain
 `path`: `quant_data_platform/brain/`
-`state`: QDP 已收敛为一套可直接增删改的通用 Parquet 数据仓库，正式范围 `2010-01-01..2026-07-13`，5m 是唯一分钟表。每个 domain 只保留一个当前目录；旧 1m、派生分钟链、旧 generation、qdp_v3/candidate/publish、Tushare raw/runtime 与一次性重建代码均已退休。历史主体来自本地购买 5m，Tushare 的一次性早期/退市补缺已并入当前表；后续由 mootdx 加速、4 个 BaoStock 连接补剩余完整日。H 健康，所有数据与 runtime 只在本仓库。
-`public_commands`: `qdp status/list/describe/check/update/gc`；不再公开 generation、candidate、publish、rollback、compact 或 1m rebuild。
+`state`: QDP 已收敛为一套可直接增删改的通用 Parquet 数据仓库，沪深主板价格域正式范围 `2010-01-01..2026-07-16`，5m 是唯一分钟表且已按自然年压缩为 17 个文件。每个 domain 只保留一个当前目录；旧 1m、派生分钟链、旧 generation、qdp_v3/candidate/publish、Tushare raw/runtime 与一次性重建代码均已退休。历史主体来自本地购买 5m，Tushare 的一次性早期/退市补缺已并入当前表；后续由 BaoStock 更新低频事实、mootdx 加速近期 5m、4 个 BaoStock 连接补剩余完整日。H 健康，所有数据与 runtime 只在本仓库。
+`public_commands`: `qdp status/list/describe/check/update/compact/gc`；不再公开 generation、candidate、publish、rollback 或 1m rebuild。
 
 ### object `daily_research_child`
 `type`: production_research_child_brain

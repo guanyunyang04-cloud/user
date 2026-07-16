@@ -3,9 +3,9 @@ from __future__ import annotations
 """Dynamic DuckDB memory control for repository-local QDP work.
 
 DuckDB still needs a finite buffer-manager limit, but a small fixed ceiling
-wastes most of the machine.  This module puts that internal ceiling at physical
-RAM minus the safety floor, then continuously interrupts work only when actual
-available memory remains below the configured free-memory floor.
+wastes most of the machine. This module puts that internal ceiling at available
+RAM minus the safety floor when the connection opens, then continuously
+interrupts work when available memory remains below that floor.
 """
 
 import threading
@@ -20,10 +20,10 @@ import duckdb
 GIB = 1024**3
 MIB = 1024**2
 DEFAULT_MEMORY_FLOOR_BYTES = int(0.5 * GIB)
-DEFAULT_LOW_MEMORY_SECONDS = 5.0
+DEFAULT_LOW_MEMORY_SECONDS = 2.0
 DEFAULT_POLL_SECONDS = 0.25
 DEFAULT_MINIMUM_LIMIT_BYTES = 64 * MIB
-LOW_MEMORY_REASON = "available_memory_below_0.5_gib_for_5_seconds"
+LOW_MEMORY_REASON = "available_memory_below_0.5_gib_for_2_seconds"
 
 
 class DuckDbMemoryFloorError(RuntimeError):
@@ -65,19 +65,18 @@ def dynamic_memory_limit_bytes(
     floor_bytes: int = DEFAULT_MEMORY_FLOOR_BYTES,
     minimum_bytes: int = DEFAULT_MINIMUM_LIMIT_BYTES,
 ) -> int:
-    """Keep DuckDB's internal ceiling from binding before the safety floor.
+    """Use currently available RAM while reserving the physical safety floor.
 
-    The ceiling is derived from physical RAM, not from free RAM at connection
-    open, because DuckDB's internal accounting can exceed its resident working
-    set.  The actual-available-memory watchdog is the final authority and
-    interrupts after five continuously low seconds.
+    DuckDB's limit is not a complete process-memory limit, so the two-second
+    available-memory watchdog remains the final authority after connection
+    startup.
     """
 
     available = max(0, int(available_bytes))
     total = available if total_bytes is None else max(0, int(total_bytes))
     floor = max(0, int(floor_bytes))
     minimum = max(1, int(minimum_bytes))
-    return max(minimum, total - floor)
+    return max(minimum, min(available, total) - floor)
 
 
 def configure_dynamic_duckdb(

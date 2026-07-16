@@ -61,6 +61,14 @@ FORMAL_FREE_V3_RESEARCH_FUTURE_DOMAINS: tuple[str, ...] = (
     DataDomain.RESEARCH_REPORT,
     DataDomain.IWENCAI_SEMANTIC,
 )
+QDP_CURRENT_REQUIRED_DOMAINS: tuple[str, ...] = (
+    DataDomain.MARKET_DAILY,
+    DataDomain.TRADING_CALENDAR,
+    DataDomain.UNIVERSE_SNAPSHOT,
+    DataDomain.SECURITY_STATUS,
+    DataDomain.ADJUST_FACTOR,
+    DataDomain.MARKET_INTRADAY_5M,
+)
 RESEARCH_REBUILD_MINIMAL_REQUIRED_DOMAINS: tuple[str, ...] = (
     DataDomain.MARKET_DAILY,
     DataDomain.TRADING_CALENDAR,
@@ -231,7 +239,13 @@ def _formal_requirement(domain: str) -> str:
 
 def provider_capability_matrix(provider_plan: str = "formal_free_v3") -> list[dict[str, Any]]:
     plan = str(provider_plan or "formal_free_v3").strip().lower()
-    if plan == "formal_free_v3":
+    if plan == "qdp_current":
+        provider_names = ("baostock", "mootdx_online")
+        default_domains_by_provider = {
+            "baostock": set(QDP_CURRENT_REQUIRED_DOMAINS),
+            "mootdx_online": {DataDomain.MARKET_INTRADAY_5M},
+        }
+    elif plan == "formal_free_v3":
         provider_names = ("baostock", "eastmoney_efinance", "akshare_eastmoney", "tencent_finance", "tonghuashun_hotspot")
         default_domains_by_provider: dict[str, set[str]] = {}
     elif plan == "qdp_production_v1":
@@ -264,6 +278,7 @@ def provider_capability_matrix(provider_plan: str = "formal_free_v3") -> list[di
         default_domains_by_provider = {}
     rows: list[dict[str, Any]] = []
     all_domains = (
+        *QDP_CURRENT_REQUIRED_DOMAINS,
         *FORMAL_FREE_V3_REQUIRED_DOMAINS,
         *FORMAL_FREE_V3_OPTIONAL_DOMAINS,
         *QDP_PRODUCTION_V1_OPTIONAL_DOMAINS,
@@ -276,6 +291,10 @@ def provider_capability_matrix(provider_plan: str = "formal_free_v3") -> list[di
         for domain in tuple(dict.fromkeys(all_domains)):
             formal_refresh = bool(
                 (
+                    plan == "qdp_current"
+                    and domain in default_domains_by_provider.get(provider_name, supported)
+                )
+                or (
                     plan == "formal_free_v3"
                     and meta.get("formal_eligible", False)
                     and _formal_requirement(domain) in {"required", "optional"}
@@ -1482,6 +1501,22 @@ class BaostockProvider:
             timeout_seconds=120,
         )
 
+    def fetch_stock_basic_snapshot(self, *, trade_date: str) -> pd.DataFrame:
+        """Return BaoStock's current stock master under the shared login."""
+
+        if self._reuse_date_partition_session:
+            frame, errors, _meta = self._persistent_frame_request(
+                {"kind": "stock_basic", "trade_date": str(trade_date)},
+                timeout_seconds=120,
+            )
+            if errors:
+                raise RuntimeError(f"baostock_stock_basic_errors:{len(errors)}")
+            return frame
+        return _fetch_baostock_stock_basic_frame_with_timeout(
+            trade_date=str(trade_date),
+            timeout_seconds=120,
+        )
+
     def fetch_domain(self, request: DomainFetchRequest) -> ProviderResult:
         request = request.normalized()
         if request.domain == DataDomain.MARKET_DAILY:
@@ -1816,6 +1851,8 @@ class QdpProductionV1Provider:
 
 def build_default_providers(provider_plan: str = "default_free") -> list:
     plan = str(provider_plan or "default_free").strip().lower()
+    if plan == "qdp_current":
+        return [BaostockProvider(), MootdxOnlineProvider()]
     if plan == "qdp_production_v1":
         return [QdpProductionV1Provider()]
     if plan == "mootdx_online":

@@ -10,12 +10,12 @@ from typing import Any, Iterable
 import pandas as pd
 
 if __package__ in {None, ""}:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from quant_data_platform.domains.contracts import DataDomain, DomainFetchRequest, normalize_domain
 from quant_data_platform.provider_manager import UnsupportedDomainError
 from quant_data_platform.providers import (
-    FORMAL_FREE_V3_REQUIRED_DOMAINS,
+    QDP_CURRENT_REQUIRED_DOMAINS,
     build_default_providers,
     provider_capability_matrix,
 )
@@ -23,9 +23,9 @@ from quant_data_platform.providers import (
 
 @dataclass(frozen=True)
 class ProviderHealthConfig:
-    provider_plan: str = "formal_free_v3"
+    provider_plan: str = "qdp_current"
     as_of_date: str = ""
-    domains: tuple[str, ...] = FORMAL_FREE_V3_REQUIRED_DOMAINS
+    domains: tuple[str, ...] = QDP_CURRENT_REQUIRED_DOMAINS
     symbols: tuple[str, ...] = ("000001.SZ", "600000.SH", "000300.SH")
     adjusted_flag: str = "none"
 
@@ -33,7 +33,7 @@ class ProviderHealthConfig:
 def run_provider_health(config: ProviderHealthConfig | None = None, *, providers: Iterable[Any] | None = None) -> dict[str, Any]:
     resolved = config or ProviderHealthConfig()
     as_of_date = _date_text(resolved.as_of_date or pd.Timestamp.now().strftime("%Y-%m-%d"))
-    domains = tuple(dict.fromkeys(normalize_domain(item) for item in (resolved.domains or FORMAL_FREE_V3_REQUIRED_DOMAINS)))
+    domains = tuple(dict.fromkeys(normalize_domain(item) for item in (resolved.domains or QDP_CURRENT_REQUIRED_DOMAINS)))
     provider_chain = list(providers) if providers is not None else build_default_providers(resolved.provider_plan)
     matrix = provider_capability_matrix(resolved.provider_plan)
     providers_payload: list[dict[str, Any]] = []
@@ -106,7 +106,7 @@ def run_provider_health(config: ProviderHealthConfig | None = None, *, providers
         "ok_domain_count": ok_count,
         "error_count": error_count,
     }
-    required_domains = set(FORMAL_FREE_V3_REQUIRED_DOMAINS)
+    required_domains = set(QDP_CURRENT_REQUIRED_DOMAINS)
     domain_status: dict[str, str] = {}
     for domain in domains:
         has_ok_provider = any(
@@ -159,9 +159,9 @@ def _update_execution_job_progress(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run read-only health checks for QDP data providers.")
-    parser.add_argument("--provider-plan", default="formal_free_v3")
+    parser.add_argument("--provider-plan", default="qdp_current")
     parser.add_argument("--as-of-date", default="")
-    parser.add_argument("--domains", default=",".join(FORMAL_FREE_V3_REQUIRED_DOMAINS))
+    parser.add_argument("--domains", default=",".join(QDP_CURRENT_REQUIRED_DOMAINS))
     parser.add_argument("--symbols", default="000001.SZ,600000.SH,000300.SH")
     parser.add_argument("--json", action="store_true")
     return parser
