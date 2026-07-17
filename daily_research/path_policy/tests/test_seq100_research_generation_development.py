@@ -14,11 +14,13 @@ def _contract_payload() -> dict[str, object]:
     )
 
 
-def test_init_development_cli_uses_candidate_complete_defaults() -> None:
-    args = generation._parser().parse_args(["init-development"])
+def test_init_development_cli_requires_explicit_source_manifest(tmp_path) -> None:
+    source = tmp_path / "manifest.json"
+    args = generation._parser().parse_args(
+        ["init-development", "--source-manifest", str(source)]
+    )
 
-    assert Path(args.source_view) == generation.DEFAULT_DEVELOPMENT_SOURCE_VIEW
-    assert "candidate_complete" in str(args.source_view)
+    assert Path(args.source_view) == source
     assert Path(args.kpi_portfolio_contract) == (
         generation.DEFAULT_DEVELOPMENT_KPI_PORTFOLIO_CONTRACT
     )

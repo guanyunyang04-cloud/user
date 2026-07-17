@@ -50,8 +50,8 @@ REQUIRED_BY_PATH = {
     "daily_research/brain/state_center.md": {
         "seq100_development": "Current seq100 facade is missing from state.",
         "winner=null": "Current state must preserve the no-winner deployment boundary.",
-        "qdp_v2_seq100_path60_todayclose_candidate_complete_2012_2025_v7": (
-            "Current candidate-complete source pack is missing from state."
+        "research_source_status=retired_qdp_scope": (
+            "Retired QDP-scope research packs must not be presented as current."
         ),
     },
     "daily_research/brain/operations_center.md": {

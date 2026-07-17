@@ -31,6 +31,8 @@ from daily_research.path_policy.qdp_v2_sequence_path_pack import (
     _prepare_daily_with_state_memory_bounded,
     _resolve_deferred_exit_days,
     _write_sample_index_streaming,
+    assert_qdp_source_fresh,
+    compute_long_suspension_masks,
     path_summary_columns,
     path_value_column,
     simulate_a_share_round_trip,
@@ -410,6 +412,74 @@ def test_suspension_fill_carries_price_but_does_not_create_observed_bar() -> Non
     assert raw[1, 0, DAILY_RAW_FEATURES.index("volume")] == 0.0
     assert raw[1, 0, DAILY_RAW_FEATURES.index("amount")] == 0.0
     assert not has_bar[1, 0]
+
+
+def test_long_suspension_break_triggers_on_twentieth_open_day_only() -> None:
+    nineteen = np.zeros((30, 1), dtype=bool)
+    nineteen[5:24, 0] = True
+    long_19, breaks_19 = compute_long_suspension_masks(nineteen)
+    assert not long_19.any()
+    assert not breaks_19.any()
+
+    twenty = np.zeros((30, 1), dtype=bool)
+    twenty[5:25, 0] = True
+    long_20, breaks_20 = compute_long_suspension_masks(twenty)
+    assert long_20[5:25, 0].all()
+    assert int(long_20.sum()) == 20
+    assert breaks_20[25, 0]
+    assert int(breaks_20.sum()) == 1
+
+
+def test_continuity_break_invalidates_crossing_input_and_dependency_tail() -> None:
+    n_dates = 70
+    raw = _raw_panel(
+        open_values=[10.0] * n_dates,
+        high_values=[10.5] * n_dates,
+        low_values=[9.5] * n_dates,
+        close_values=[10.0] * n_dates,
+    )
+    suspended = np.zeros((n_dates, 1), dtype=bool)
+    suspended[30:50, 0] = True
+    long_suspension, continuity_break = compute_long_suspension_masks(suspended)
+
+    _, _, _, input_valid, _, label_valid = _compute_future_path_and_masks(
+        raw_panel=raw,
+        up_limit_panel=np.full((n_dates, 1), np.nan, dtype=np.float32),
+        lookback_days=5,
+        forward_days=2,
+        suspended_panel=suspended,
+        long_suspension_panel=long_suspension,
+        continuity_break_panel=continuity_break,
+        execution_tail_days=3,
+    )
+
+    assert not input_valid[50, 0]  # lookback crosses the reopen break
+    assert input_valid[54, 0]  # five observations beginning on the reopen day
+    assert not label_valid[27, 0]  # forward path is clear, but the tail reaches the long halt
+    assert not label_valid[48, 0]  # forward path crosses the break
+
+
+def test_qdp_source_hash_mismatch_is_reported_as_stale(tmp_path) -> None:
+    root = tmp_path / "qdp_v2"
+    dataset_json = root / "datasets" / "market_daily_raw" / "daily__unit" / "dataset.json"
+    dataset_json.parent.mkdir(parents=True)
+    dataset_json.write_text('{"row_count": 1}\n', encoding="utf-8")
+    digest = sequence_pack._file_sha256(dataset_json)
+    manifest = {
+        "artifact_type": "qdp_v2_sequence_path_pack",
+        "qdp_root": str(root),
+        "qdp_source_manifests": {
+            "market_daily_raw": {
+                "dataset_id": "daily__unit",
+                "manifest_path": str(dataset_json),
+                "dataset_json_sha256": digest,
+            }
+        },
+    }
+    assert_qdp_source_fresh(manifest)
+    dataset_json.write_text('{"row_count": 2}\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="stale_qdp_source"):
+        assert_qdp_source_fresh(manifest)
 
 
 def test_ohlcva_volume_amount_targets_use_signal_day_trailing_history() -> None:

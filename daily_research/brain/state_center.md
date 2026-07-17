@@ -1,6 +1,8 @@
 # Daily Research 状态程序
 快照日期：`2026-07-14`
 
+`research_source_status=retired_qdp_scope`：旧 3,404 只 PIT/sequence packs 仅保留历史结论引用，实体包与默认入口已退休；任何新研究包都必须从当前可变 QDP 显式按需构建。
+
 本文件是 `daily_research` 的当前程序实例，不是历史长卷；它只保存接管时需要激活的对象、函数和过程入口。
 
 ## Module Interface
@@ -26,7 +28,7 @@
 `state`: QDP 当前 active 数据基底是 v2 manifest-first：`quant_data_platform/data/qdp_v2/active/active.json` + dataset manifests + parquet。
 `v3_transition`: QDP v3 重建代码、BaoStock full compatibility 和 live adapter smoke 已完成，但 full-history backfill、全量 semantic candidate audit 与 active publish 均未完成，且 M0 lineage 仍阻断；在 QDP 发布 v3 strict manifest 前，研究端不得把 v3 视为可消费数据。
 `lineage_boundary`: M0 已发现 v2 active manifests 的 17 个 source ancestors 缺失；现有 leaf 数据仍可读，但不可再把 active lineage 描述为完整可遍历。
-`active_data_scope`: `2011-11-22..2026-06-26`；沪深 A 股主板，剔除创业板/科创板/ST/退市；`600036.SH` from `2016-07-25`。
+`active_data_scope`: `2010-01-01..2026-07-16`；沪深 A 股主板，永久剔除已登记 ST/退市整理证券；QDP 内仍保留的证券历史按当前通用数据集直接使用。
 `downstream_pack_note`: memmap、sequence pack、normalization、sample_index、labels and model-ready panels are `daily_research` research artifacts under `daily_research/data/research_store/`; they are not the QDP active data base.
 `methods`: `inspect_qdp_status()`；`consume_qdp_table(domain)`；`consume_training_pack(manifest)`；`request_qdp_update_or_table(requirement) -> QDP`。
 

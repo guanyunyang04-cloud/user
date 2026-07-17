@@ -17,6 +17,9 @@ from quant_data_platform.domains.contracts import (
 )
 from quant_data_platform.providers import BaostockProvider
 from quant_data_platform.qdp_v2.duckdb_resources import open_guarded_duckdb
+from quant_data_platform.qdp_v2.permanent_exclusions import (
+    filter_excluded_candidates,
+)
 from quant_data_platform.qdp_v2.repair import (
     append_active_shard,
     resolve_active_domain,
@@ -75,7 +78,17 @@ def run_baostock_core_update(
             calendar.loc[calendar["is_open"], "trade_date"].astype(str).sort_values()
         )
 
-        stock_basic = source.fetch_stock_basic_snapshot(trade_date=end)
+        stock_basic_raw = source.fetch_stock_basic_snapshot(trade_date=end)
+        stock_basic = filter_excluded_candidates(
+            stock_basic_raw,
+            domain="universe_snapshot",
+            workspace_root=workspace,
+        )
+        provider_excluded_symbols = set(
+            stock_basic_raw.get("symbol", pd.Series(dtype=str)).astype(str).str.upper()
+        ).difference(
+            stock_basic.get("symbol", pd.Series(dtype=str)).astype(str).str.upper()
+        )
         identity, history = _identity_additions(
             stock_basic,
             workspace=workspace,
@@ -118,6 +131,17 @@ def run_baostock_core_update(
             "universe_snapshot": _concat(universe_frames),
             "security_status": _concat(status_frames),
             "market_daily_raw": _concat(daily_frames),
+        }
+        candidates = {
+            domain: _filter_provider_exclusions(
+                filter_excluded_candidates(
+                    frame,
+                    domain=domain,
+                    workspace_root=workspace,
+                ),
+                symbols=provider_excluded_symbols,
+            )
+            for domain, frame in candidates.items()
         }
         missing = {
             domain: _only_missing_keys(frame, domain=domain, workspace=workspace)
@@ -180,6 +204,11 @@ def _identity_additions(
     basic = stock_basic.copy()
     basic["symbol"] = basic["symbol"].astype(str).str.upper()
     basic = basic.loc[basic["symbol"].map(_is_supported_mainboard_symbol)].copy()
+    basic = filter_excluded_candidates(
+        basic,
+        domain="symbol_history",
+        workspace_root=workspace,
+    )
     history_context = resolve_active_domain("symbol_history", workspace_root=workspace)
     with open_guarded_duckdb(
         temp_directory=_runtime_root(workspace) / "identity_spill",
@@ -358,6 +387,16 @@ def _only_missing_keys(
 
 def _concat(frames: Sequence[pd.DataFrame]) -> pd.DataFrame:
     return pd.concat(list(frames), ignore_index=True, sort=False) if frames else pd.DataFrame()
+
+
+def _filter_provider_exclusions(
+    frame: pd.DataFrame, *, symbols: set[str]
+) -> pd.DataFrame:
+    if frame is None or frame.empty or not symbols or "symbol" not in frame:
+        return frame.copy() if isinstance(frame, pd.DataFrame) else pd.DataFrame()
+    return frame.loc[
+        ~frame["symbol"].astype(str).str.upper().isin(symbols)
+    ].reset_index(drop=True)
 
 
 def _empty_identity() -> pd.DataFrame:

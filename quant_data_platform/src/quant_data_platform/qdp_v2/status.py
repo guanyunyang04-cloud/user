@@ -64,6 +64,29 @@ def status_payload(*, workspace_root: str | Path | None = None, verify_files: bo
             "existing_shards": existing_shards,
             "file_verification": "verified" if verify_files else "not_requested",
         }
+    # Imported lazily because the in-place repair module depends on this file.
+    from quant_data_platform.qdp_v2.permanent_exclusions import (
+        load_registry,
+        registry_consistency,
+        registry_path,
+    )
+
+    registry_file = registry_path(workspace_root=workspace_root)
+    if registry_file.exists():
+        registry = load_registry(workspace_root=workspace_root, required=True)
+        exclusions = {
+            **registry_consistency(registry),
+            "policy_id": str(registry.get("policy_id", "")),
+            "registry_path": str(registry_file),
+        }
+    else:
+        exclusions = {
+            "status": "not_configured",
+            "policy_id": "",
+            "registry_path": str(registry_file),
+            "exclusion_count": 0,
+            "errors": [],
+        }
     return {
         "status": "missing_dataset_manifest" if missing else ("missing_shards" if missing_shards else "ok"),
         "qdp_v2_root": str(root.resolve()),
@@ -74,6 +97,7 @@ def status_payload(*, workspace_root: str | Path | None = None, verify_files: bo
         "missing": missing,
         "missing_shards": missing_shards,
         "datasets": datasets,
+        "permanent_exclusions": exclusions,
     }
 
 
@@ -100,6 +124,12 @@ def print_status(payload: dict[str, Any], *, as_json: bool) -> None:
     if payload.get("active_as_of_date"):
         print(f"active_as_of_date: {payload.get('active_as_of_date')}")
     print(f"dataset_count: {payload.get('dataset_count', 0)}")
+    exclusions = dict(payload.get("permanent_exclusions", {}) or {})
+    if exclusions:
+        print(
+            "permanent_exclusions: "
+            f"{exclusions.get('status', '')} count={exclusions.get('exclusion_count', 0)}"
+        )
     for key, item in dict(payload.get("datasets", {}) or {}).items():
         print(
             f"{key}: {item.get('dataset_id')} "

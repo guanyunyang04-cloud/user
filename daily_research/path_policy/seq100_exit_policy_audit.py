@@ -21,6 +21,10 @@ from daily_research.path_policy.seq100_candidate_execution import (
     _resolve_plan,
     parse_execution_cost_contract,
 )
+from daily_research.path_policy.qdp_v2_sequence_path_pack import (
+    assert_qdp_source_fresh,
+    assert_sequence_continuity_contract,
+)
 
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
@@ -28,10 +32,7 @@ SOURCE_STUDY_ROOT = Path(
     "daily_research/output/path_policy/studies/"
     "seq100_candidate_complete_development_walkforward_20260712_v3"
 )
-SOURCE_PACK_MANIFEST = Path(
-    "daily_research/data/research_store/sequence_pack/"
-    "qdp_v2_seq100_path60_todayclose_candidate_complete_2012_2025_v7/manifest.json"
-)
+SOURCE_PACK_MANIFEST = None
 DEFAULT_OUTPUT_ROOT = Path(
     "daily_research/output/path_policy/studies/"
     "seq100_candidate_complete_exit_policy_audit_2022_2025_v1"
@@ -138,9 +139,11 @@ def _policy_role(policy: str) -> str:
 
 
 class CandidateCompleteAuditPack:
-    def __init__(self, manifest_path: str | Path = SOURCE_PACK_MANIFEST) -> None:
+    def __init__(self, manifest_path: str | Path) -> None:
         self.manifest_path = _workspace_path(manifest_path).resolve()
         self.manifest = _read_json(self.manifest_path)
+        assert_qdp_source_fresh(self.manifest)
+        assert_sequence_continuity_contract(self.manifest)
         self.forward_days = int(self.manifest["forward_days"])
         self.execution_tail_days = int(self.manifest["execution_tail_days"])
         self.execution_days = self.forward_days + self.execution_tail_days
@@ -1144,7 +1147,7 @@ def _stateful_equal_year(metrics: pd.DataFrame) -> pd.DataFrame:
 def run_exit_policy_audit(
     *,
     source_study_root: str | Path = SOURCE_STUDY_ROOT,
-    pack_manifest: str | Path = SOURCE_PACK_MANIFEST,
+    pack_manifest: str | Path | None = SOURCE_PACK_MANIFEST,
     output_root: str | Path = DEFAULT_OUTPUT_ROOT,
     years: Sequence[int] = YEARS,
     profiles: Sequence[str] = PROFILES,
@@ -1165,6 +1168,8 @@ def run_exit_policy_audit(
     active_execution_sha256_before = (
         _sha256_file(active_execution_path) if active_execution_before else None
     )
+    if pack_manifest is None:
+        raise ValueError("run_exit_policy_audit requires an explicit pack_manifest")
     pack = CandidateCompleteAuditPack(pack_manifest)
     source_selection_path = _workspace_path(source_study_root) / "development_selection.json"
     source_selection = _read_json(source_selection_path)
@@ -1495,7 +1500,7 @@ def _parser() -> argparse.ArgumentParser:
         description="Zero-training frozen-ranking exit-policy audit for candidate-complete Seq100 v3."
     )
     parser.add_argument("--source-study-root", type=Path, default=SOURCE_STUDY_ROOT)
-    parser.add_argument("--pack-manifest", type=Path, default=SOURCE_PACK_MANIFEST)
+    parser.add_argument("--pack-manifest", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--years", type=int, nargs="+", default=list(YEARS))
     parser.add_argument("--profiles", nargs="+", default=list(PROFILES), choices=list(PROFILES))

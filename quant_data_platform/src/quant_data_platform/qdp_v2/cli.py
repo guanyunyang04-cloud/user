@@ -18,6 +18,7 @@ commands:
   describe <table>        Describe a current table.
   check --quick|--full    Validate manifests and data structure.
   update                  Add recent market data in place.
+  exclude                 Permanently remove ST/delisting-period securities.
   compact                 Merge the 5-minute table into yearly files.
   gc                      Remove unreferenced files.
 
@@ -33,6 +34,7 @@ COMMAND_MODULES: dict[tuple[str, ...], str] = {
     ("check",): "quant_data_platform.qdp_v2.check",
     ("gc",): "quant_data_platform.qdp_v2.gc",
     ("update",): "quant_data_platform.qdp_v2.update",
+    ("exclude",): "quant_data_platform.qdp_v2.permanent_exclusions",
     ("compact",): "quant_data_platform.qdp_v2.compact",
 }
 
@@ -87,6 +89,8 @@ def _requires_yolos(prefix: tuple[str, ...], args: list[str]) -> bool:
         return True
     if prefix == ("update",):
         return "--dry-run" not in args
+    if prefix == ("exclude",):
+        return "--apply" in args
     if prefix == ("compact",):
         return "--dry-run" not in args
     if prefix == ("gc",):

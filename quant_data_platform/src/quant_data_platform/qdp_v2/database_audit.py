@@ -30,6 +30,13 @@ from quant_data_platform.qdp_v2.manifest import (
     resolve_manifest_path,
     utc_now,
 )
+from quant_data_platform.qdp_v2.permanent_exclusions import (
+    POLICY_ID,
+    audit_exclusion_residuals,
+    load_registry,
+    registry_consistency,
+    registry_path,
+)
 from quant_data_platform.qdp_v2.status import active_dataset_map
 
 
@@ -236,8 +243,8 @@ def audit_latest_keys(
     }
     blocking = {key: value for key, value in errors.items() if int(value) > 0}
     coverage = float(five["coverage_ratio"])
-    if coverage < 0.98:
-        blocking["5m_complete_coverage_below_98_percent"] = int(
+    if int(five["missing_complete_day_count"]) > 0:
+        blocking["5m_complete_coverage_not_100_percent"] = int(
             five["missing_complete_day_count"]
         )
     if blocking:
@@ -368,23 +375,13 @@ def audit_database(
                     )
                 coverage = float(consistency["complete_coverage_ratio"])
                 missing_days = int(consistency["missing_positive_daily_count"])
-                if coverage < 0.98:
+                if missing_days:
                     findings.append(
                         _finding(
                             "high",
                             "coverage",
                             "market_intraday_5m",
-                            "historical_5m_coverage_below_98_percent",
-                            consistency,
-                        )
-                    )
-                elif missing_days:
-                    findings.append(
-                        _finding(
-                            "medium",
-                            "coverage",
-                            "market_intraday_5m",
-                            "historical_5m_positive_daily_gaps",
+                            "historical_5m_coverage_not_100_percent",
                             consistency,
                         )
                     )
@@ -410,16 +407,6 @@ def audit_database(
                             factor_semantics,
                         )
                     )
-                elif int(factor_semantics["raw_discontinuity_count"]) > 0:
-                    findings.append(
-                        _finding(
-                            "medium",
-                            "factor",
-                            "adjust_factor",
-                            "long_gap_raw_price_discontinuities",
-                            factor_semantics,
-                        )
-                    )
             if deep and {"market_daily_raw", "security_status"}.issubset(manifests):
                 status_semantics = _status_daily_consistency_check(
                     con,
@@ -442,6 +429,100 @@ def audit_database(
                             status_semantics,
                         )
                     )
+            if deep and {"security_identity", "symbol_history"}.issubset(manifests):
+                identity_history = _identity_history_consistency_check(
+                    con,
+                    root=root,
+                    identity=manifests["security_identity"],
+                    history=manifests["symbol_history"],
+                    sample_limit=max(1, int(sample_limit)),
+                )
+                cross_checks["identity_symbol_history"] = identity_history
+                if identity_history["status"] != "ok":
+                    findings.append(
+                        _finding(
+                            "high",
+                            "identity",
+                            "symbol_history",
+                            "identity_symbol_history_inconsistent",
+                            identity_history,
+                        )
+                    )
+            if deep and {"security_status", "trading_calendar"}.issubset(manifests):
+                continuity = _long_suspension_check(
+                    con,
+                    root=root,
+                    status=manifests["security_status"],
+                    calendar=manifests["trading_calendar"],
+                    sample_limit=max(1, int(sample_limit)),
+                )
+                cross_checks["long_suspension_continuity"] = continuity
+            if deep and {
+                "market_daily_raw",
+                "adjust_factor",
+                "security_status",
+                "trading_calendar",
+                "security_identity",
+            }.issubset(manifests):
+                reopen = _reopen_discontinuity_check(
+                    con,
+                    root=root,
+                    daily=manifests["market_daily_raw"],
+                    factor=manifests["adjust_factor"],
+                    status=manifests["security_status"],
+                    calendar=manifests["trading_calendar"],
+                    identity=manifests["security_identity"],
+                    sample_limit=max(1, int(sample_limit)),
+                )
+                cross_checks["reopen_discontinuities"] = reopen
+                if int(reopen["unexpected_discontinuity_count"]) > 0:
+                    findings.append(
+                        _finding(
+                            "high",
+                            "price_continuity",
+                            "market_daily_raw",
+                            "unexplained_adjacent_trade_price_discontinuity",
+                            reopen,
+                        )
+                    )
+
+    exclusion_file = registry_path(workspace_root=workspace_root)
+    exclusion_required = (
+        str(dict(active.get("scope", {}) or {}).get("permanent_exclusion_policy", ""))
+        == POLICY_ID
+    )
+    if exclusion_file.exists():
+        registry = load_registry(workspace_root=workspace_root, required=True)
+        registry_check = registry_consistency(registry)
+        residuals = audit_exclusion_residuals(
+            workspace_root=workspace_root,
+            registry=registry,
+        )
+        exclusion_check = {
+            "registry": registry_check,
+            "residuals": residuals,
+        }
+        cross_checks["permanent_exclusions"] = exclusion_check
+        if registry_check["status"] != "ok" or residuals["status"] != "ok":
+            findings.append(
+                _finding(
+                    "high",
+                    "scope",
+                    "permanent_exclusions",
+                    "permanent_exclusion_registry_or_residual_error",
+                    exclusion_check,
+                )
+            )
+    elif exclusion_required:
+        findings.append(
+            _finding(
+                "high",
+                "scope",
+                "permanent_exclusions",
+                "permanent_exclusion_registry_missing",
+                {"path": str(exclusion_file)},
+            )
+        )
 
     latest = audit_latest_keys(workspace_root=workspace_root)
     if latest.get("status") == "needs_attention":
@@ -1326,6 +1407,306 @@ def _paths_for_date(root: Path, manifest: DatasetManifest, trade_date: str) -> t
             and (not item.end_date or str(item.end_date) >= trade_date)
         )
     )
+
+
+def _identity_history_consistency_check(
+    con: Any,
+    *,
+    root: Path,
+    identity: DatasetManifest,
+    history: DatasetManifest,
+    sample_limit: int,
+) -> dict[str, Any]:
+    identity_paths = [
+        str(resolve_manifest_path(item.path, root=root)) for item in identity.shards
+    ]
+    history_paths = [
+        str(resolve_manifest_path(item.path, root=root)) for item in history.shards
+    ]
+    sql = """
+      WITH identities AS (
+        SELECT DISTINCT cast(security_id AS VARCHAR) AS security_id
+        FROM read_parquet(?, union_by_name=true)
+      ), histories AS (
+        SELECT DISTINCT cast(security_id AS VARCHAR) AS security_id,
+               upper(trim(cast(symbol AS VARCHAR))) AS symbol
+        FROM read_parquet(?, union_by_name=true)
+      )
+    """
+    row = con.execute(
+        sql
+        + """
+        SELECT
+          (SELECT count(*) FROM histories h ANTI JOIN identities i USING(security_id)),
+          (SELECT count(*) FROM identities i ANTI JOIN histories h USING(security_id)),
+          (SELECT count(*) FROM (
+             SELECT symbol FROM histories GROUP BY symbol
+             HAVING count(DISTINCT security_id)>1
+           ) conflicts)
+        """,
+        [identity_paths, history_paths],
+    ).fetchone()
+    orphan_history = int(row[0] or 0)
+    identity_without_history = int(row[1] or 0)
+    symbol_conflicts = int(row[2] or 0)
+    examples = con.execute(
+        sql
+        + f"""
+        SELECT 'orphan_history' AS reason,h.security_id,h.symbol
+        FROM histories h ANTI JOIN identities i USING(security_id)
+        LIMIT {int(sample_limit)}
+        """,
+        [identity_paths, history_paths],
+    ).fetchdf().to_dict("records") if orphan_history else []
+    return {
+        "status": (
+            "ok"
+            if not orphan_history and not identity_without_history and not symbol_conflicts
+            else "error"
+        ),
+        "orphan_symbol_history_count": orphan_history,
+        "identity_without_symbol_history_count": identity_without_history,
+        "symbol_multiple_identity_count": symbol_conflicts,
+        "examples": examples,
+    }
+
+
+def _long_suspension_check(
+    con: Any,
+    *,
+    root: Path,
+    status: DatasetManifest,
+    calendar: DatasetManifest,
+    sample_limit: int,
+    minimum_open_days: int = 20,
+) -> dict[str, Any]:
+    status_paths = [
+        str(resolve_manifest_path(item.path, root=root)) for item in status.shards
+    ]
+    calendar_paths = [
+        str(resolve_manifest_path(item.path, root=root)) for item in calendar.shards
+    ]
+    base = """
+      WITH open_dates AS (
+        SELECT DISTINCT cast(trade_date AS VARCHAR) AS trade_date
+        FROM read_parquet(?, union_by_name=true)
+        WHERE coalesce(try_cast(is_open AS BOOLEAN), false)
+      ), ordered AS (
+        SELECT cast(s.symbol AS VARCHAR) AS symbol,
+               cast(s.trade_date AS VARCHAR) AS trade_date,
+               coalesce(try_cast(s.is_suspended AS BOOLEAN), false) AS is_suspended,
+               lead(coalesce(try_cast(s.is_suspended AS BOOLEAN), false)) OVER(
+                 PARTITION BY cast(s.symbol AS VARCHAR)
+                 ORDER BY cast(s.trade_date AS VARCHAR)
+               ) AS next_is_suspended,
+               sum(CASE WHEN coalesce(try_cast(s.is_suspended AS BOOLEAN), false)
+                        THEN 0 ELSE 1 END) OVER(
+                 PARTITION BY cast(s.symbol AS VARCHAR)
+                 ORDER BY cast(s.trade_date AS VARCHAR)
+                 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+               ) AS segment_id
+        FROM read_parquet(?, union_by_name=true) s
+        JOIN open_dates d ON d.trade_date=cast(s.trade_date AS VARCHAR)
+      ), runs AS (
+        SELECT symbol,min(trade_date) AS start_date,max(trade_date) AS end_date,
+               count(*) AS suspended_open_days,
+               max(CASE WHEN next_is_suspended=false THEN 1 ELSE 0 END) AS has_reopen_break
+        FROM ordered
+        WHERE is_suspended
+        GROUP BY symbol,segment_id
+        HAVING count(*) >= ?
+      )
+    """
+    params = [calendar_paths, status_paths, int(minimum_open_days)]
+    row = con.execute(
+        base
+        + """
+        SELECT count(*),count(DISTINCT symbol),
+               coalesce(sum(has_reopen_break),0),
+               coalesce(sum(suspended_open_days),0)
+        FROM runs
+        """,
+        params,
+    ).fetchone()
+    examples = con.execute(
+        base
+        + f"""
+        SELECT symbol,start_date,end_date,suspended_open_days,
+               cast(has_reopen_break AS BOOLEAN) AS continuity_break
+        FROM runs ORDER BY suspended_open_days DESC,symbol,start_date
+        LIMIT {int(sample_limit)}
+        """,
+        params,
+    ).fetchdf().to_dict("records")
+    return {
+        "status": "ok",
+        "minimum_suspended_open_days": int(minimum_open_days),
+        "long_suspension_interval_count": int(row[0] or 0),
+        "affected_symbol_count": int(row[1] or 0),
+        "continuity_break_count": int(row[2] or 0),
+        "long_suspension_open_day_count": int(row[3] or 0),
+        "research_rule": (
+            "lookbacks, forward labels, and execution tails may not cross a "
+            "qualifying reopen break"
+        ),
+        "examples": examples,
+    }
+
+
+def _reopen_discontinuity_check(
+    con: Any,
+    *,
+    root: Path,
+    daily: DatasetManifest,
+    factor: DatasetManifest,
+    status: DatasetManifest,
+    calendar: DatasetManifest,
+    identity: DatasetManifest,
+    sample_limit: int,
+) -> dict[str, Any]:
+    daily_paths = [
+        str(resolve_manifest_path(item.path, root=root)) for item in daily.shards
+    ]
+    factor_paths = [
+        str(resolve_manifest_path(item.path, root=root)) for item in factor.shards
+    ]
+    status_paths = [
+        str(resolve_manifest_path(item.path, root=root)) for item in status.shards
+    ]
+    calendar_paths = [
+        str(resolve_manifest_path(item.path, root=root)) for item in calendar.shards
+    ]
+    identity_paths = [
+        str(resolve_manifest_path(item.path, root=root)) for item in identity.shards
+    ]
+    base = """
+      WITH prices AS (
+        SELECT cast(symbol AS VARCHAR) AS symbol,
+               cast(trade_date AS VARCHAR) AS trade_date,
+               try_cast(open AS DOUBLE) AS open,
+               lag(try_cast(close AS DOUBLE)) OVER(
+                 PARTITION BY cast(symbol AS VARCHAR)
+                 ORDER BY cast(trade_date AS VARCHAR)
+               ) AS prior_close,
+               lag(cast(trade_date AS VARCHAR)) OVER(
+                 PARTITION BY cast(symbol AS VARCHAR)
+                 ORDER BY cast(trade_date AS VARCHAR)
+               ) AS prior_trade_date,
+               row_number() OVER(
+                 PARTITION BY cast(symbol AS VARCHAR)
+                 ORDER BY cast(trade_date AS VARCHAR)
+               ) AS observation_number,
+               min(cast(trade_date AS VARCHAR)) OVER(
+                 PARTITION BY cast(symbol AS VARCHAR)
+               ) AS first_trade_date
+        FROM read_parquet(?, union_by_name=true)
+        WHERE try_cast(close AS DOUBLE)>0
+      ), factors AS (
+        SELECT cast(symbol AS VARCHAR) AS symbol,
+               cast(trade_date AS VARCHAR) AS trade_date,
+               try_cast(adjust_factor AS DOUBLE) AS factor,
+               lag(try_cast(adjust_factor AS DOUBLE)) OVER(
+                 PARTITION BY cast(symbol AS VARCHAR)
+                 ORDER BY cast(trade_date AS VARCHAR)
+               ) AS prior_factor
+        FROM read_parquet(?, union_by_name=true)
+      ), gaps AS (
+        SELECT p.symbol,p.prior_trade_date,p.trade_date,
+               p.observation_number,p.first_trade_date,i.list_date,
+               p.open/p.prior_close AS raw_open_ratio,
+               f.factor/f.prior_factor AS factor_ratio,
+               (p.open/p.prior_close)*(f.factor/f.prior_factor) AS adjusted_open_ratio
+        FROM prices p
+        LEFT JOIN factors f USING(symbol,trade_date)
+        LEFT JOIN (
+          SELECT upper(trim(cast(current_symbol AS VARCHAR))) AS symbol,
+                 cast(list_date AS VARCHAR) AS list_date
+          FROM read_parquet(?, union_by_name=true)
+        ) i USING(symbol)
+        WHERE p.prior_close>0
+          AND (p.open/p.prior_close<0.70 OR p.open/p.prior_close>1.30)
+      ), open_dates AS (
+        SELECT DISTINCT cast(trade_date AS VARCHAR) AS trade_date
+        FROM read_parquet(?, union_by_name=true)
+        WHERE coalesce(try_cast(is_open AS BOOLEAN), false)
+      ), status_rows AS (
+        SELECT cast(symbol AS VARCHAR) AS symbol,
+               cast(trade_date AS VARCHAR) AS trade_date,
+               coalesce(try_cast(is_suspended AS BOOLEAN), false) AS is_suspended
+        FROM read_parquet(?, union_by_name=true)
+      ), gap_status AS (
+        SELECT g.symbol,g.prior_trade_date,g.trade_date,g.observation_number,
+               g.first_trade_date,g.list_date,g.raw_open_ratio,
+               g.factor_ratio,g.adjusted_open_ratio,
+               count(d.trade_date) AS intervening_open_days,
+               count(s.trade_date) AS covered_status_days,
+               count(s.trade_date) FILTER (WHERE s.is_suspended) AS suspended_status_days,
+               count(s.trade_date) FILTER (WHERE NOT s.is_suspended) AS tradable_status_days
+        FROM gaps g
+        LEFT JOIN open_dates d
+          ON d.trade_date>g.prior_trade_date AND d.trade_date<g.trade_date
+        LEFT JOIN status_rows s
+          ON s.symbol=g.symbol AND s.trade_date=d.trade_date
+        GROUP BY g.symbol,g.prior_trade_date,g.trade_date,g.observation_number,
+                 g.first_trade_date,g.list_date,g.raw_open_ratio,
+                 g.factor_ratio,g.adjusted_open_ratio
+      ), classified AS (
+        SELECT *,
+          CASE
+            WHEN first_trade_date=list_date AND observation_number<=5
+              THEN 'listing_price_discovery'
+            WHEN intervening_open_days>0
+             AND covered_status_days=intervening_open_days
+             AND suspended_status_days=intervening_open_days
+              THEN 'reopen_discontinuity'
+            WHEN factor_ratio IS NOT NULL
+             AND (factor_ratio<0.99 OR factor_ratio>1.01)
+             AND adjusted_open_ratio BETWEEN 0.70 AND 1.30
+              THEN 'factor_compensated_corporate_action'
+            ELSE 'unexpected_discontinuity'
+          END AS classification
+        FROM gap_status
+      )
+    """
+    params = [daily_paths, factor_paths, identity_paths, calendar_paths, status_paths]
+    row = con.execute(
+        base
+        + """
+        SELECT count(*),
+               count(*) FILTER (WHERE classification='reopen_discontinuity'),
+               count(*) FILTER (WHERE classification='factor_compensated_corporate_action'),
+               count(*) FILTER (WHERE classification='listing_price_discovery'),
+               count(*) FILTER (WHERE classification='unexpected_discontinuity'),
+               count(*) FILTER (WHERE intervening_open_days>covered_status_days),
+               count(*) FILTER (WHERE tradable_status_days>0)
+        FROM classified
+        """,
+        params,
+    ).fetchone()
+    examples = con.execute(
+        base
+        + f"""
+        SELECT symbol,prior_trade_date,trade_date,raw_open_ratio,factor_ratio,
+               adjusted_open_ratio,intervening_open_days,covered_status_days,
+               suspended_status_days,classification
+        FROM classified
+        ORDER BY CASE WHEN classification='unexpected_discontinuity' THEN 0 ELSE 1 END,
+                 symbol,trade_date
+        LIMIT {int(sample_limit)}
+        """,
+        params,
+    ).fetchdf().to_dict("records")
+    return {
+        "status": "ok" if not int(row[4] or 0) else "error",
+        "raw_discontinuity_count": int(row[0] or 0),
+        "reopen_discontinuity_count": int(row[1] or 0),
+        "factor_compensated_corporate_action_count": int(row[2] or 0),
+        "listing_price_discovery_count": int(row[3] or 0),
+        "unexpected_discontinuity_count": int(row[4] or 0),
+        "status_missing_interval_count": int(row[5] or 0),
+        "tradable_day_inside_gap_count": int(row[6] or 0),
+        "examples": examples,
+    }
 
 
 def _audit_temp_directory(workspace: Path):

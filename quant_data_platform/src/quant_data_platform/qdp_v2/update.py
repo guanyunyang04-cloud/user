@@ -26,6 +26,10 @@ from quant_data_platform.qdp_v2.manifest import (
     read_dataset_manifest,
     write_active_manifest,
 )
+from quant_data_platform.qdp_v2.permanent_exclusions import (
+    purge_permanent_exclusions,
+    register_current_exclusions,
+)
 from quant_data_platform.qdp_v2.recent_market_repair import (
     run_baostock_intraday_repair,
     run_recent_intraday_repair,
@@ -117,6 +121,18 @@ def run_update(
         )
         payload[stage] = _state_summary(core)
 
+        stage = "permanent_exclusions"
+        exclusions = register_current_exclusions(
+            as_of_date=end,
+            workspace_root=workspace,
+        )
+        exclusion_state: dict[str, Any] = dict(exclusions)
+        if int(exclusions.get("new_exclusion_count", 0) or 0) > 0:
+            exclusion_state["purge"] = purge_permanent_exclusions(
+                workspace_root=workspace
+            )
+        payload[stage] = _state_summary(exclusion_state)
+
         stage = "adjust_factor"
         factor = run_factor_tail_update(
             start_date=start,
@@ -203,6 +219,9 @@ def _state_summary(state: dict[str, Any]) -> dict[str, Any]:
             "event_count",
             "initialized_symbol_count",
             "remaining_missing_key_count",
+            "exclusion_count",
+            "new_exclusion_count",
+            "removed_rows",
         )
         if key in state
     }
@@ -278,7 +297,7 @@ def _format(payload: dict[str, Any]) -> str:
         f"range: {payload.get('start_date', '')}..{payload.get('as_of_date', '')}",
         f"workers: {payload.get('workers', '')}",
     ]
-    for name in ("baostock_core", "adjust_factor", "mootdx_5m", "baostock_5m", "latest_check"):
+    for name in ("baostock_core", "permanent_exclusions", "adjust_factor", "mootdx_5m", "baostock_5m", "latest_check"):
         if name in payload:
             lines.append(f"{name}: {payload[name]}")
     return "\n".join(lines)

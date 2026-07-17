@@ -33,6 +33,7 @@ DEFAULT_OUTPUT_ROOT = Path("daily_research/data/research_store/sequence_pack")
 DEFAULT_LOOKBACK_DAYS = 100
 DEFAULT_FORWARD_DAYS = 20
 DEFAULT_EXECUTION_TAIL_DAYS = 20
+LONG_SUSPENSION_MIN_OPEN_DAYS = 20
 DEFAULT_MINIMUM_FREE_MEMORY_GB = 1.0
 DEFAULT_START_DATE = "2012-01-01"
 DEFAULT_END_DATE = "2025-12-31"
@@ -286,6 +287,119 @@ def _read_active(root: Path) -> dict[str, Any]:
     return json.loads((root / "active" / "active.json").read_text(encoding="utf-8"))
 
 
+def _file_sha256(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _qdp_source_manifest_bindings(
+    root: Path, active: Mapping[str, Any]
+) -> dict[str, dict[str, str]]:
+    bindings: dict[str, dict[str, str]] = {}
+    for domain, dataset_id in sorted(
+        dict(active.get("datasets", {}) or {}).items()
+    ):
+        path = (
+            root / "datasets" / str(domain) / str(dataset_id) / "dataset.json"
+        ).resolve()
+        if not path.is_file():
+            raise FileNotFoundError(f"QDP source dataset manifest not found: {path}")
+        bindings[str(domain)] = {
+            "dataset_id": str(dataset_id),
+            "manifest_path": str(path),
+            "dataset_json_sha256": _file_sha256(path),
+        }
+    return bindings
+
+
+def qdp_source_freshness(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    if str(manifest.get("artifact_type", "") or "") != "qdp_v2_sequence_path_pack":
+        return {"status": "not_applicable", "errors": []}
+    bindings = dict(manifest.get("qdp_source_manifests", {}) or {})
+    if not bindings:
+        return {
+            "status": "stale_qdp_source",
+            "errors": ["source_dataset_hashes_missing"],
+        }
+    root_raw = str(manifest.get("qdp_root", "") or "")
+    if not root_raw:
+        return {
+            "status": "stale_qdp_source",
+            "errors": ["qdp_root_missing"],
+        }
+    root = Path(root_raw).resolve()
+    errors: list[str] = []
+    source_ids = {
+        str(domain): str(dataset_id)
+        for domain, dataset_id in dict(
+            manifest.get("research_source_datasets", {}) or {}
+        ).items()
+    }
+    if source_ids and set(bindings) != set(source_ids):
+        errors.append("source_manifest_domain_set_mismatch")
+    for domain, raw in sorted(bindings.items()):
+        item = dict(raw or {})
+        dataset_id = str(item.get("dataset_id", "") or "")
+        if source_ids and source_ids.get(str(domain)) != dataset_id:
+            errors.append(f"source_manifest_dataset_id_mismatch:{domain}")
+        expected_hash = str(item.get("dataset_json_sha256", "") or "")
+        expected_path = (
+            root / "datasets" / str(domain) / dataset_id / "dataset.json"
+        ).resolve()
+        recorded_path = Path(str(item.get("manifest_path", "") or expected_path)).resolve()
+        if recorded_path != expected_path:
+            errors.append(f"source_manifest_path_mismatch:{domain}")
+            continue
+        if not expected_path.is_file():
+            errors.append(f"source_manifest_missing:{domain}")
+            continue
+        if not expected_hash or _file_sha256(expected_path) != expected_hash:
+            errors.append(f"source_manifest_hash_mismatch:{domain}")
+    return {
+        "status": "stale_qdp_source" if errors else "ok",
+        "errors": errors,
+    }
+
+
+def assert_qdp_source_fresh(manifest: Mapping[str, Any]) -> None:
+    result = qdp_source_freshness(manifest)
+    if result["status"] == "stale_qdp_source":
+        raise ValueError(
+            "stale_qdp_source:" + ",".join(str(item) for item in result["errors"])
+        )
+
+
+def sequence_continuity_contract(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    if str(manifest.get("artifact_type", "") or "") != "qdp_v2_sequence_path_pack":
+        return {"status": "not_applicable", "errors": []}
+    errors: list[str] = []
+    masks = dict(manifest.get("masks", {}) or {})
+    for name in ("long_suspension", "continuity_break"):
+        if name not in masks:
+            errors.append(f"mask_missing:{name}")
+    rule = dict(
+        dict(manifest.get("data_semantics", {}) or {}).get(
+            "continuity_break_rule", {}
+        )
+        or {}
+    )
+    if int(rule.get("minimum_consecutive_suspended_open_days", 0) or 0) != 20:
+        errors.append("minimum_suspension_days_not_20")
+    return {"status": "error" if errors else "ok", "errors": errors}
+
+
+def assert_sequence_continuity_contract(manifest: Mapping[str, Any]) -> None:
+    result = sequence_continuity_contract(manifest)
+    if result["status"] == "error":
+        raise ValueError(
+            "continuity_break_contract_missing:"
+            + ",".join(str(item) for item in result["errors"])
+        )
+
+
 def _apply_research_dataset_view(
     root: Path,
     active: Mapping[str, Any],
@@ -481,6 +595,15 @@ def _fill_bool_memmap(path: Path, shape: tuple[int, ...], *, fill_value: bool = 
     arr[:] = bool(fill_value)
     arr.flush()
     return arr
+
+
+def _open_manifest_memmap(meta: Mapping[str, Any], *, dtype: str) -> np.memmap:
+    return np.memmap(
+        Path(str(meta["path"])),
+        dtype=dtype,
+        mode="r",
+        shape=tuple(int(item) for item in meta["shape"]),
+    )
 
 
 class DateShardedFloatStore:
@@ -1082,6 +1205,42 @@ def _fill_suspended_daily_raw(
         raw_panel.flush()
 
 
+def compute_long_suspension_masks(
+    suspended_panel: np.ndarray,
+    *,
+    minimum_open_days: int = LONG_SUSPENSION_MIN_OPEN_DAYS,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Mark qualifying suspension runs and the first open day after each run."""
+
+    suspended = np.asarray(suspended_panel, dtype=bool)
+    if suspended.ndim != 2:
+        raise ValueError("suspended_panel must be a two-dimensional date/symbol mask")
+    minimum = int(minimum_open_days)
+    if minimum <= 0:
+        raise ValueError("minimum_open_days must be positive")
+    n_dates, n_symbols = suspended.shape
+    long_suspension = np.zeros_like(suspended, dtype=bool)
+    continuity_break = np.zeros_like(suspended, dtype=bool)
+    for symbol_idx in range(n_symbols):
+        run_start = -1
+        for date_idx in range(n_dates + 1):
+            is_suspended = date_idx < n_dates and bool(
+                suspended[date_idx, symbol_idx]
+            )
+            if is_suspended and run_start < 0:
+                run_start = date_idx
+                continue
+            if is_suspended or run_start < 0:
+                continue
+            run_length = date_idx - run_start
+            if run_length >= minimum:
+                long_suspension[run_start:date_idx, symbol_idx] = True
+                if date_idx < n_dates:
+                    continuity_break[date_idx, symbol_idx] = True
+            run_start = -1
+    return long_suspension, continuity_break
+
+
 def _compute_future_path_and_masks(
     *,
     raw_panel: np.ndarray,
@@ -1091,6 +1250,9 @@ def _compute_future_path_and_masks(
     price_anchor: str = "next_open",
     raw_entry_open_panel: np.ndarray | None = None,
     suspended_panel: np.ndarray | None = None,
+    long_suspension_panel: np.ndarray | None = None,
+    continuity_break_panel: np.ndarray | None = None,
+    execution_tail_days: int = 0,
     entry_rule: str = ENTRY_RULE_LEGACY,
     separate_price_va_validity: bool = False,
     price_label_valid_out: np.ndarray | None = None,
@@ -1114,6 +1276,26 @@ def _compute_future_path_and_masks(
     suspension_values = np.zeros_like(open_panel, dtype=bool) if suspended_panel is None else np.asarray(suspended_panel, dtype=bool)
     if suspension_values.shape != open_panel.shape:
         raise ValueError("suspended_panel must match the daily date/symbol shape")
+    long_suspension_values = (
+        np.zeros_like(open_panel, dtype=bool)
+        if long_suspension_panel is None
+        else np.asarray(long_suspension_panel, dtype=bool)
+    )
+    continuity_break_values = (
+        np.zeros_like(open_panel, dtype=bool)
+        if continuity_break_panel is None
+        else np.asarray(continuity_break_panel, dtype=bool)
+    )
+    if (
+        long_suspension_values.shape != open_panel.shape
+        or continuity_break_values.shape != open_panel.shape
+    ):
+        raise ValueError(
+            "long_suspension_panel and continuity_break_panel must match the daily date/symbol shape"
+        )
+    dependency_tail = int(execution_tail_days)
+    if dependency_tail < 0:
+        raise ValueError("execution_tail_days must be non-negative")
     input_valid = np.zeros((n_dates, n_symbols), dtype=bool)
     entry_buyable = np.zeros((n_dates, n_symbols), dtype=bool)
     label_valid = np.zeros((n_dates, n_symbols), dtype=bool)
@@ -1151,10 +1333,18 @@ def _compute_future_path_and_masks(
         start = date_idx - int(lookback_days) + 1
         entry_idx = date_idx + 1
         end_idx = entry_idx + int(forward_days)
+        dependency_end_idx = end_idx + dependency_tail
         if start < 0:
             continue
-        input_valid[date_idx] = finite_close[start : date_idx + 1].all(axis=0)
-        if end_idx > n_dates:
+        same_input_segment = (
+            np.ones(n_symbols, dtype=bool)
+            if start == date_idx
+            else ~continuity_break_values[start + 1 : date_idx + 1].any(axis=0)
+        )
+        input_valid[date_idx] = (
+            finite_close[start : date_idx + 1].all(axis=0) & same_input_segment
+        )
+        if dependency_end_idx > n_dates:
             continue
         entry_open = open_panel[entry_idx].astype("float64", copy=False)
         execution_entry_open = execution_open_panel[entry_idx].astype("float64", copy=False)
@@ -1191,6 +1381,12 @@ def _compute_future_path_and_masks(
             & np.isfinite(trailing_volume_log)
             & np.isfinite(trailing_amount_log)
         )
+        dependency_ok = ~(
+            long_suspension_values[entry_idx:dependency_end_idx].any(axis=0)
+            | continuity_break_values[entry_idx:dependency_end_idx].any(axis=0)
+        )
+        price_ok &= dependency_ok
+        va_ok &= dependency_ok
         if str(price_anchor) == "today_close":
             denom = np.where(signal_close != 0.0, signal_close, np.nan)
         elif str(price_anchor) == "next_open":
@@ -1623,6 +1819,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
                 "pit_signal_universe pointer"
             )
     active_scope = dict(active.get("scope", {}) or {})
+    qdp_source_manifests = _qdp_source_manifest_bindings(root, active)
     scope_start = str(active_scope.get("start_date", "2011-11-22") or "2011-11-22")
     active_end = str(active.get("active_as_of_date", active_scope.get("end_date", config.end_date)) or config.end_date)
     output_dir = config.output_root / str(config.run_tag)
@@ -1767,6 +1964,12 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
     is_st_panel = _fill_bool_memmap(mask_dir / "is_st.bool.dat", (n_dates, n_symbols))
     is_suspended_panel = _fill_bool_memmap(mask_dir / "is_suspended.bool.dat", (n_dates, n_symbols))
     is_delisted_panel = _fill_bool_memmap(mask_dir / "is_delisted.bool.dat", (n_dates, n_symbols))
+    long_suspension_panel = _fill_bool_memmap(
+        mask_dir / "long_suspension.bool.dat", (n_dates, n_symbols)
+    )
+    continuity_break_panel = _fill_bool_memmap(
+        mask_dir / "continuity_break.bool.dat", (n_dates, n_symbols)
+    )
     signal_eligible_panel = _fill_bool_memmap(mask_dir / "signal_eligible.bool.dat", (n_dates, n_symbols))
     tradable_panel = _fill_bool_memmap(mask_dir / "tradable.bool.dat", (n_dates, n_symbols))
     exit_has_valid_bar_volume_panel = _fill_bool_memmap(
@@ -1907,6 +2110,30 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
     _trim_process_working_set()
 
     missing_eligible_bar_count = 0
+    # Long-suspension continuity is a universal raw-data rule, independent of
+    # whether a pack elects to carry prices through ordinary suspension days.
+    for year in range(int(date_values[0][:4]), int(date_values[-1][:4]) + 1):
+        memory_guard(f"security_status_continuity_{year}")
+        status = _read_dataset_date_range(
+            root,
+            active,
+            "security_status",
+            ["symbol", "trade_date", "is_st", "is_suspended", "is_delisted"],
+            f"{year}-01-01",
+            f"{year}-12-31",
+        )
+        _write_status_panels(
+            frame=status,
+            status_valid=status_valid_panel,
+            is_st=is_st_panel,
+            is_suspended=is_suspended_panel,
+            is_delisted=is_delisted_panel,
+            date_to_idx=date_to_idx,
+            symbol_to_idx=symbol_to_idx,
+        )
+        del status
+        gc.collect()
+        _trim_process_working_set()
     if sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE:
         for year in range(int(date_values[0][:4]), int(date_values[-1][:4]) + 1):
             memory_guard(f"pit_signal_universe_{year}")
@@ -1954,29 +2181,6 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             )
         tradable_panel[:] = has_bar_panel & status_valid_panel & (~is_suspended_panel) & (~is_delisted_panel)
     elif suspension_fill == SUSPENSION_FILL_CARRY_CLOSE:
-        for year in range(int(date_values[0][:4]), int(date_values[-1][:4]) + 1):
-            memory_guard(f"security_status_{year}")
-            _write_json(progress_path, {"status": "writing_security_status", "year": year, "updated_at": _now()})
-            status = _read_dataset_date_range(
-                root,
-                active,
-                "security_status",
-                ["symbol", "trade_date", "is_st", "is_suspended", "is_delisted"],
-                f"{year}-01-01",
-                f"{year}-12-31",
-            )
-            _write_status_panels(
-                frame=status,
-                status_valid=status_valid_panel,
-                is_st=is_st_panel,
-                is_suspended=is_suspended_panel,
-                is_delisted=is_delisted_panel,
-                date_to_idx=date_to_idx,
-                symbol_to_idx=symbol_to_idx,
-            )
-            del status
-            gc.collect()
-            _trim_process_working_set()
         universe_has_bar_panel[:] = has_bar_panel
         signal_eligible_panel[:] = has_bar_panel
         tradable_panel[:] = has_bar_panel & status_valid_panel & (~is_suspended_panel) & (~is_delisted_panel)
@@ -1987,6 +2191,15 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
     universe_has_bar_panel.flush()
     signal_eligible_panel.flush()
     tradable_panel.flush()
+    long_suspension, continuity_break = compute_long_suspension_masks(
+        is_suspended_panel,
+        minimum_open_days=LONG_SUSPENSION_MIN_OPEN_DAYS,
+    )
+    long_suspension_panel[:] = long_suspension
+    continuity_break_panel[:] = continuity_break
+    long_suspension_panel.flush()
+    continuity_break_panel.flush()
+    del long_suspension, continuity_break
     if suspension_fill == SUSPENSION_FILL_CARRY_CLOSE:
         _write_json(progress_path, {"status": "filling_suspended_prices", "updated_at": _now()})
         _fill_suspended_daily_raw(
@@ -2094,6 +2307,9 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         price_anchor=str(config.price_anchor),
         raw_entry_open_panel=raw_open_panel,
         suspended_panel=is_suspended_panel,
+        long_suspension_panel=long_suspension_panel,
+        continuity_break_panel=continuity_break_panel,
+        execution_tail_days=execution_tail_days,
         entry_rule=entry_rule,
         separate_price_va_validity=separate_price_va_validity,
         price_label_valid_out=price_label_valid_store,
@@ -2181,6 +2397,13 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
     memory_guard("manifest_assembly")
 
     source_dataset_ids = dict(active.get("datasets", {}) or {})
+    assert_qdp_source_fresh(
+        {
+            "artifact_type": "qdp_v2_sequence_path_pack",
+            "qdp_root": str(root),
+            "qdp_source_manifests": qdp_source_manifests,
+        }
+    )
     split_counts = dict(sample_index_stats["split_counts"])
     candidate_split_counts = dict(candidate_index_stats["split_counts"])
     path_anchor_name = "signal_day_close" if str(config.price_anchor) == "today_close" else "next_calendar_trading_day_open"
@@ -2229,6 +2452,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         "active_as_of_date": active.get("active_as_of_date", ""),
         "active_datasets": active_manifest_dataset_ids,
         "research_source_datasets": source_dataset_ids,
+        "qdp_source_manifests": qdp_source_manifests,
         "research_dataset_view": {
             "path": resolved_dataset_view or None,
             "view_id": str(dict(research_dataset_view or {}).get("view_id", "") or "") or None,
@@ -2271,6 +2495,12 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             "entry_tick_size": 0.01,
             "sample_filter": sample_filter,
             "suspension_fill": suspension_fill,
+            "continuity_break_rule": {
+                "minimum_consecutive_suspended_open_days": LONG_SUSPENSION_MIN_OPEN_DAYS,
+                "break_position": "first_non_suspended_open_day_after_qualifying_run",
+                "input_rule": "lookback_must_remain_within_one_continuity_segment",
+                "label_rule": "forward_path_and_execution_tail_must_not_include_long_suspension_or_break",
+            },
             "label_valid_alias": "price_label_valid" if separate_price_va_validity else "complete_ohlcva_label_valid",
             "candidate_filter": "signal_day_input_valid_and_pit_signal_eligible_only",
             "supervision_filter": "candidate_filter_and_label_valid",
@@ -2368,6 +2598,8 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             "status_valid": {"path": str((mask_dir / "status_valid.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
             "is_st": {"path": str((mask_dir / "is_st.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
             "is_suspended": {"path": str((mask_dir / "is_suspended.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
+            "long_suspension": {"path": str((mask_dir / "long_suspension.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
+            "continuity_break": {"path": str((mask_dir / "continuity_break.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
             "is_delisted": {"path": str((mask_dir / "is_delisted.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
             "signal_eligible": {"path": str((mask_dir / "signal_eligible.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
             "tradable": {"path": str((mask_dir / "tradable.bool.dat").resolve()), "shape": [n_dates, n_symbols]},
@@ -2460,6 +2692,8 @@ def reanchor_sequence_pack(
     source = json.loads(source_path.read_text(encoding="utf-8"))
     if source.get("artifact_type") != "qdp_v2_sequence_path_pack":
         raise ValueError(f"not a sequence path pack manifest: {source_path}")
+    assert_qdp_source_fresh(source)
+    assert_sequence_continuity_contract(source)
     output_dir = output_root / str(run_tag)
     if output_dir.exists() and any(output_dir.iterdir()) and not bool(overwrite):
         raise FileExistsError(f"output directory already exists: {output_dir}")
@@ -2513,6 +2747,9 @@ def reanchor_sequence_pack(
         shape=tuple(int(item) for item in daily_raw_meta["shape"]),
     )
     up_limit_panel = np.memmap(entry_up_limit_path, dtype="float32", mode="r", shape=(n_dates, n_symbols))
+    suspended_panel = _open_manifest_memmap(masks["is_suspended"], dtype="bool")
+    long_suspension_panel = _open_manifest_memmap(masks["long_suspension"], dtype="bool")
+    continuity_break_panel = _open_manifest_memmap(masks["continuity_break"], dtype="bool")
 
     _write_json(progress_path, {"status": "computing_labels", "updated_at": _now()})
     summary_columns = path_summary_columns(forward_days)
@@ -2539,6 +2776,10 @@ def reanchor_sequence_pack(
         lookback_days=lookback_days,
         forward_days=forward_days,
         price_anchor=str(price_anchor),
+        suspended_panel=suspended_panel,
+        long_suspension_panel=long_suspension_panel,
+        continuity_break_panel=continuity_break_panel,
+        execution_tail_days=int(source.get("execution_tail_days", 0) or 0),
         future_path_out=future_path_store,
         future_ohlcva_path_out=future_ohlcva_path_store,
         path_summary_out=path_summary_store,
@@ -2616,6 +2857,12 @@ def validate_sequence_pack(manifest_path: str | Path) -> dict[str, Any]:
     path = Path(manifest_path)
     manifest = json.loads(path.read_text(encoding="utf-8"))
     blockers: list[str] = []
+    freshness = qdp_source_freshness(manifest)
+    if freshness["status"] == "stale_qdp_source":
+        blockers.append("stale_qdp_source")
+    continuity_contract = sequence_continuity_contract(manifest)
+    if continuity_contract["status"] == "error":
+        blockers.append("continuity_break_contract_missing")
     if manifest.get("artifact_type") != "qdp_v2_sequence_path_pack":
         blockers.append("not_qdp_v2_sequence_path_pack")
     for section in ["feature_channels", "label_arrays", "execution_arrays", "masks"]:
@@ -2665,6 +2912,8 @@ def validate_sequence_pack(manifest_path: str | Path) -> dict[str, Any]:
         "sample_count_by_split": dict(manifest.get("sample_count_by_split", {}) or {}),
         "candidate_count": int(manifest.get("candidate_count", 0) or 0),
         "candidate_count_by_split": dict(manifest.get("candidate_count_by_split", {}) or {}),
+        "qdp_source_freshness": freshness,
+        "continuity_contract": continuity_contract,
     }
 
 

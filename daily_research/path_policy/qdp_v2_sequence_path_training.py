@@ -34,6 +34,8 @@ from daily_research.path_policy.qdp_v2_sequence_path_pack import (
     _json_default,
     _resolve_deferred_exit_days,
     _write_json,
+    assert_qdp_source_fresh,
+    assert_sequence_continuity_contract,
     path_summary_columns,
     path_value_column,
 )
@@ -533,6 +535,8 @@ class SequencePathPackDataset(Dataset):
         index_role: str = "supervised",
     ) -> None:
         self.manifest = dict(manifest)
+        assert_qdp_source_fresh(self.manifest)
+        assert_sequence_continuity_contract(self.manifest)
         self.index_role = str(index_role or "supervised").strip().lower()
         if self.index_role not in {"supervised", "candidate"}:
             raise ValueError("index_role must be supervised or candidate")
@@ -4603,6 +4607,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             raise ValueError("global_tail_512 requires rank_interval > 0")
     _set_seed(config.seed)
     manifest = json.loads(Path(config.pack_manifest).read_text(encoding="utf-8"))
+    assert_qdp_source_fresh(manifest)
+    assert_sequence_continuity_contract(manifest)
     development_contract_binding: dict[str, Any] = {}
     execution_cost_contract_sha256 = ""
     if evaluation_mode == EVALUATION_MODE_DEVELOPMENT:

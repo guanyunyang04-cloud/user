@@ -1,6 +1,8 @@
 # Daily Research 过程目录
 快照日期：`2026-07-13`
 
+`research_source_status=retired_qdp_scope`：旧 sequence pack、兼容 views 和硬编码来源均不再是运行入口；命令必须显式接收当前 `--source-manifest` 或 `--store-view`。
+
 本文件保存可调用过程、环境基线、命令入口和验证选择。它描述“怎么做”，不承担当前事实长卷；当前对象实例见 `state_center.md`。
 
 ## Runtime Objects
@@ -21,13 +23,13 @@
 `owner`: `daily_research`
 `preferred_root`: `daily_research/data/research_store`
 `compat_roots`: none active; old `quant_data_platform/data/qdp_v2/research/` artifacts were physically migrated or deleted on 2026-07-07.
-`retention_policy`: `daily_research/brain/research_store_retention_policy.json`；显式保护 candidate-complete v7、四个 development folds、v1→v2→v3 证据链和兼容 replay views；QDP active data remains read-only unless explicitly changed.
+`retention_policy`: `daily_research/brain/research_store_retention_policy.json`；历史研究结论与小型证据可保留，旧大包和兼容 views 已退休；新包按当前 QDP 需要时重建。
 
 ### object `seq100_development`
 `owner`: `daily_research`
 `current_cli`: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_development`
 `compatibility_engine`: `daily_research.path_policy.seq100_research_generation`；保留冻结 registry 的复现和旧 screen/confirmation/fixed-OOS 命令，不是新研究热路径。
-`source_pack`: `daily_research/data/research_store/sequence_pack/qdp_v2_seq100_path60_todayclose_candidate_complete_2012_2025_v7/manifest.json`
+`source_pack`: 无默认来源；调用方必须显式传入当前 QDP 派生包，旧 candidate-complete v7 已退休。
 `formal_fold_views`: registry 所绑定的 `seq100_path60_todayclose_ohlcva_development_{2022,2023,2024,2025}.json`。
 `rule`: 当前无 default/champion profile；baseline 仅作历史 control，hard-ST 已否决，Q-only 已终止。复权因子时序/事件一致性缺陷修复并完成 additive pack 零训练复审前，soft-exit 与 global-tail 均暂停。
 

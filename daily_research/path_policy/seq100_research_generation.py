@@ -40,14 +40,8 @@ DEFAULT_DEVELOPMENT_PROFILES = ("baseline", "hard_st")
 SCREEN_SEEDS = (7,)
 CONFIRM_SEEDS = (7, 17, 29)
 DEFAULT_ROOT = Path("daily_research/output/path_policy/studies/seq100_pit_adjusted_global_tail_generation_20260711_v1")
-DEFAULT_SOURCE_VIEW = Path(
-    "daily_research/data/research_store/sequence_pack/"
-    "qdp_v2_seq100_path60_todayclose_pit_adjusted_2012_2025_v1/manifest.json"
-)
-DEFAULT_DEVELOPMENT_SOURCE_VIEW = Path(
-    "daily_research/data/research_store/sequence_pack/"
-    "qdp_v2_seq100_path60_todayclose_candidate_complete_2012_2025_v7/manifest.json"
-)
+DEFAULT_SOURCE_VIEW = None
+DEFAULT_DEVELOPMENT_SOURCE_VIEW = None
 DEFAULT_STORE_ROOT = Path(
     "daily_research/data/research_store/walkforward/"
     "seq100_pit_adjusted_global_tail_contract_20260711_v1"
@@ -1011,7 +1005,7 @@ def _build_development_jobs(
 def initialize_development_registry(
     *,
     root: str | Path = DEFAULT_DEVELOPMENT_ROOT,
-    source_view: str | Path = DEFAULT_DEVELOPMENT_SOURCE_VIEW,
+    source_view: str | Path | None = DEFAULT_DEVELOPMENT_SOURCE_VIEW,
     store_root: str | Path = DEFAULT_DEVELOPMENT_STORE_ROOT,
     profiles: Sequence[str] = DEFAULT_DEVELOPMENT_PROFILES,
     development_years: Sequence[int] = DEVELOPMENT_YEARS,
@@ -1053,6 +1047,8 @@ def initialize_development_registry(
         raise ValueError(
             "formal development registration is blocked until a KPI/portfolio net-execution contract is provided"
         )
+    if source_view is None:
+        raise ValueError("initialize_development_registry requires an explicit source_view")
     source_path, _, source_sha256 = _validate_development_source_view(
         source_view,
         require_corrected_contract=bool(require_corrected_source),
@@ -1179,7 +1175,7 @@ def initialize_development_registry(
 def initialize_candidate_registry(
     *,
     root: str | Path = DEFAULT_ROOT,
-    source_view: str | Path = DEFAULT_SOURCE_VIEW,
+    source_view: str | Path | None = DEFAULT_SOURCE_VIEW,
     store_root: str | Path = DEFAULT_STORE_ROOT,
     screen_seeds: Sequence[int] = SCREEN_SEEDS,
     screen_epochs: int = 2,
@@ -1191,6 +1187,8 @@ def initialize_candidate_registry(
     evidence_policy: str = EVIDENCE_POLICY_RUN_ARTIFACTS,
 ) -> dict[str, Any]:
     root_path = _workspace_path(root)
+    if source_view is None:
+        raise ValueError("initialize_candidate_registry requires an explicit source_view")
     source_path, _, source_sha256 = _validate_source_view(
         source_view,
         require_corrected_contract=bool(require_corrected_source),
@@ -2612,7 +2610,13 @@ def _parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     init = sub.add_parser("init")
     init.add_argument("--root", type=Path, default=DEFAULT_ROOT)
-    init.add_argument("--source-view", type=Path, default=DEFAULT_SOURCE_VIEW)
+    init.add_argument(
+        "--source-view",
+        "--source-manifest",
+        dest="source_view",
+        type=Path,
+        required=True,
+    )
     init.add_argument("--store-root", type=Path, default=DEFAULT_STORE_ROOT)
     init.add_argument("--screen-seeds", default=",".join(map(str, SCREEN_SEEDS)))
     init.add_argument("--screen-epochs", type=int, default=2)
@@ -2660,7 +2664,13 @@ def _parser() -> argparse.ArgumentParser:
         help="Register the candidate-complete 2022-2025 development walkforward matrix.",
     )
     development.add_argument("--root", type=Path, default=DEFAULT_DEVELOPMENT_ROOT)
-    development.add_argument("--source-view", type=Path, default=DEFAULT_DEVELOPMENT_SOURCE_VIEW)
+    development.add_argument(
+        "--source-view",
+        "--source-manifest",
+        dest="source_view",
+        type=Path,
+        required=True,
+    )
     development.add_argument("--store-root", type=Path, default=DEFAULT_DEVELOPMENT_STORE_ROOT)
     development.add_argument("--profiles", default=",".join(DEFAULT_DEVELOPMENT_PROFILES))
     development.add_argument("--maximum-epochs", type=int, default=10)

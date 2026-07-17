@@ -13,6 +13,12 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from daily_research.path_policy.qdp_v2_sequence_path_pack import (
+    assert_qdp_source_fresh,
+    assert_sequence_continuity_contract,
+    qdp_source_freshness,
+)
+
 from daily_research.path_policy.seq100_qcurve import (
     MA_STATE_FEATURES,
     QCURVE_ENTRY_HORIZONS,
@@ -23,12 +29,9 @@ from daily_research.path_policy.seq100_qcurve import (
 )
 
 
-DEFAULT_SOURCE_MANIFEST = Path(
-    "daily_research/data/research_store/sequence_pack/"
-    "qdp_v2_seq100_path60_todayclose_candidate_complete_2012_2025_v7/manifest.json"
-)
+DEFAULT_SOURCE_MANIFEST = None
 DEFAULT_OUTPUT_ROOT = Path("daily_research/data/research_store/sequence_pack")
-DEFAULT_RUN_TAG = "qdp_v2_seq100_dynamic_qcurve_candidate_complete_2012_2025_v8"
+DEFAULT_RUN_TAG = "qdp_seq100_dynamic_qcurve_on_demand"
 DEFAULT_CONTRACT = Path(
     "daily_research/brain/references/seq100_dynamic_qcurve_development_contract_20260712.json"
 )
@@ -565,7 +568,7 @@ def _materialize_qcurve_targets(
 
 def derive_qcurve_pack(
     *,
-    source_manifest: str | Path = DEFAULT_SOURCE_MANIFEST,
+    source_manifest: str | Path | None = DEFAULT_SOURCE_MANIFEST,
     output_root: str | Path = DEFAULT_OUTPUT_ROOT,
     run_tag: str = DEFAULT_RUN_TAG,
     contract_path: str | Path = DEFAULT_CONTRACT,
@@ -574,8 +577,12 @@ def derive_qcurve_pack(
     rebuild_qcurve_targets: bool = False,
     label_batch_size: int = 16_384,
 ) -> dict[str, Any]:
+    if source_manifest is None:
+        raise ValueError("derive_qcurve_pack requires an explicit source_manifest")
     source_path = Path(source_manifest).resolve()
     source = _read_json(source_path)
+    assert_qdp_source_fresh(source)
+    assert_sequence_continuity_contract(source)
     if source.get("artifact_type") != "qdp_v2_sequence_path_pack":
         raise ValueError("Q-curve source must be a qdp_v2_sequence_path_pack")
     if int(source.get("forward_days", 0)) != 60 or int(source.get("execution_tail_days", 0)) != 20:
@@ -838,6 +845,8 @@ def derive_qcurve_pack(
 def validate_qcurve_pack(manifest_path: str | Path) -> dict[str, Any]:
     manifest = _read_json(manifest_path)
     blockers: list[str] = []
+    if qdp_source_freshness(manifest)["status"] == "stale_qdp_source":
+        blockers.append("stale_qdp_source")
     if "ma_state" not in dict(manifest.get("feature_channels", {}) or {}):
         blockers.append("missing_ma_state")
     if not {"open_buyable", "open_sellable"}.issubset(dict(manifest.get("masks", {}) or {})):
@@ -886,7 +895,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Build the additive Seq100 dynamic Q-curve v8 pack.")
     sub = parser.add_subparsers(dest="command", required=True)
     derive = sub.add_parser("derive")
-    derive.add_argument("--source-manifest", type=Path, default=DEFAULT_SOURCE_MANIFEST)
+    derive.add_argument("--source-manifest", type=Path, required=True)
     derive.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     derive.add_argument("--run-tag", default=DEFAULT_RUN_TAG)
     derive.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
