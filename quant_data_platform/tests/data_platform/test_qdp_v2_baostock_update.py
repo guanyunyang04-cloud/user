@@ -140,6 +140,56 @@ def test_factor_tail_initializes_first_qdp_observation_to_one() -> None:
     assert metrics["initialized_symbol_count"] == 1
 
 
+def test_factor_tail_continues_with_cumulative_back_factor_ratio() -> None:
+    missing = pd.DataFrame(
+        {
+            "symbol": ["600000.SH"],
+            "trade_date": ["2026-07-15"],
+            "prior_date": ["2026-07-14"],
+            "prior_fore": [5.0],
+            "prior_back": [5.0],
+            "prior_adjust": [5.0],
+        }
+    )
+
+    class Provider:
+        def fetch_date_partition(self, request):
+            return SimpleNamespace(
+                data=pd.DataFrame(
+                    {
+                        "provider_symbol": ["600000.SH"],
+                        "divid_operate_date": ["2026-07-15"],
+                        "adjust_factor": [6.0],
+                        "back_adjust_factor": [1.02],
+                    }
+                )
+            )
+
+        def fetch_domain(self, request):
+            return SimpleNamespace(
+                data=pd.DataFrame(
+                    {
+                        "symbol": ["600000.SH", "600000.SH"],
+                        "trade_date": ["2025-07-15", "2026-07-15"],
+                        # Per-event factors are not cumulative and must not be
+                        # divided across events.
+                        "adjust_factor": [2.0, 6.0],
+                        "back_adjust_factor": [1.0, 1.02],
+                    }
+                ),
+                error_report=[],
+            )
+
+    rows, metrics = factor_update.build_factor_tail_rows(missing, provider=Provider())
+
+    assert rows["adjust_factor"].tolist() == [5.1]
+    assert rows["back_adjust_factor"].tolist() == [5.1]
+    assert rows["source"].tolist() == [
+        "baostock.back_adjust_factor_ratio+qdp_prior_carry"
+    ]
+    assert metrics["continued_event_count"] == 1
+
+
 def test_compact_prevalidated_mutation_id_matches_repair(tmp_path: Path) -> None:
     context = SimpleNamespace(
         root=tmp_path,

@@ -22,7 +22,7 @@
 ### object `quant_data_platform_child`
 `type`: shared_data_base_child_brain
 `path`: `quant_data_platform/brain/`
-`state`: QDP 已收敛为一套可直接增删改的通用 Parquet 数据仓库，沪深主板价格域正式范围 `2010-01-01..2026-07-16`，5m 是唯一分钟表且已按自然年压缩为 17 个文件。每个 domain 只保留一个当前目录；旧 1m、派生分钟链、旧 generation、qdp_v3/candidate/publish、Tushare raw/runtime 与一次性重建代码均已退休。历史主体来自本地购买 5m，Tushare 的一次性早期/退市补缺已并入当前表；后续由 BaoStock 更新低频事实、mootdx 加速近期 5m、4 个 BaoStock 连接补剩余完整日。H 健康，所有数据与 runtime 只在本仓库。
+`state`: QDP 已收敛为一套可直接增删改的通用 Parquet 数据仓库。价格域是 3,192 只当前上市沪深主板 A 股，正式范围 `2010-01-01..2026-07-16`；当前 ST 保留，正式退市后回溯清除该证券历史。5m 是唯一分钟表，现有 462,928,800 行、9,644,350 个完整股票日、17 个年度文件。每个 domain 只保留一个当前目录；旧 1m、派生分钟链、旧 generation 和 qdp_v3/candidate/publish 已退休。历史主体来自本地购买 5m；Tushare 仅定点补本地与免费源窗口外的当前研究证券缺口；后续由 BaoStock 更新低频事实、mootdx 加速近期 5m、4 个 BaoStock 连接补剩余完整日。旧 status 的 ST/停牌混淆已原位修正 15,528 行，全历史状态/日线语义矛盾为 0。最新 full audit 阻断错误 0，唯一正成交日 5m 缺口是 `600568.SH/2011-11-21`。H 健康，所有数据与 runtime 只在本仓库。
 `public_commands`: `qdp status/list/describe/check/update/compact/gc`；不再公开 generation、candidate、publish、rollback 或 1m rebuild。
 
 ### object `daily_research_child`

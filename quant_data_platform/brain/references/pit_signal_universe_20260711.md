@@ -1,9 +1,13 @@
 # PIT Signal Universe Internal Guide
 
-- Status: candidate ready; not active
+- Status: historical and retired; not active
 - Date: 2026-07-11
 - Owner: `quant_data_platform`
 - Audience: QDP and `daily_research` maintainers
+
+> Superseded on 2026-07-17 by the user-selected mutable current-listed survivor
+> scope. The candidate identifiers and instructions below are historical evidence;
+> they are not current QDP objects and must not be added to `active.json`.
 
 ## Purpose
 

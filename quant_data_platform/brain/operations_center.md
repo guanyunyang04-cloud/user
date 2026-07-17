@@ -17,6 +17,7 @@
 ## Current Command Palette
 
 ```powershell
+$env:PYTHONPATH = 'H:\quant_project\quant_data_platform\src'
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli status --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli list --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli describe market_intraday_5m --json
@@ -32,6 +33,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli gc --r
 ### procedure `update_recent_market`
 
 ```powershell
+$env:PYTHONPATH = 'H:\quant_project\quant_data_platform\src'
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli update --as-of-date <date> --workers 4 --workspace-root H:\quant_project
 ```
 

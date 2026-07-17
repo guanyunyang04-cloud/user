@@ -22,7 +22,7 @@
 
 `root`: `quant_data_platform/data/qdp_v2`；目录名 `v2` 仅为兼容历史路径。
 
-`scope`: A 股可获得记录，正式研究起点 `2010-01-01`；稳定身份与代码历史可早于该日期。
+`scope`: 3,192 只当前上市沪深主板 A 股的可获得记录，正式研究起点 `2010-01-01`；当前 ST 保留，正式退市后回溯清除该证券历史。稳定身份与代码历史可早于正式研究起点。
 
 `minute_domain`: 仅 `market_intraday_5m`，完整股票日为 48 根。
 
@@ -30,7 +30,7 @@
 
 ## object `provider_surface`
 
-`history`: 本地购买数据提供早期 5m 主体；Tushare 的一次性早期/退市补缺已经物化并退休下载实现。
+`history`: 本地购买数据提供早期 5m 主体；已接受的 Tushare 定点补缺已经并入当前表。Tushare 仅作为当前研究证券超出免费源窗口的显式历史缺口 fallback。
 
 `incremental`: mootdx 优先快速获取近期市场数据，BaoStock 用 4 个隔离连接补剩余完整日并承担免费持续更新。
 

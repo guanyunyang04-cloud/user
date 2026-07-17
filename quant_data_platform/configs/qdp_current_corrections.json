@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "as_of_date": "2026-07-16",
+  "factor_shifts": [
+    {"symbol": "600392.SH", "from_date": "2015-11-24", "to_date": "2015-11-23", "expected_ratio": 2.518184851518185},
+    {"symbol": "002667.SZ", "from_date": "2015-11-26", "to_date": "2015-11-23", "expected_ratio": 2.001970443349754},
+    {"symbol": "002602.SZ", "from_date": "2015-12-08", "to_date": "2015-11-23", "expected_ratio": 2.007726980038635},
+    {"symbol": "002639.SZ", "from_date": "2015-12-15", "to_date": "2015-11-23", "expected_ratio": 2.9990253411306043},
+    {"symbol": "002545.SZ", "from_date": "2015-12-17", "to_date": "2015-11-23", "expected_ratio": 3.1851612903225806},
+    {"symbol": "002683.SZ", "from_date": "2015-12-28", "to_date": "2015-11-23", "expected_ratio": 2.5224609375},
+    {"symbol": "002368.SZ", "from_date": "2015-12-31", "to_date": "2015-11-23", "expected_ratio": 1.5032154340836015},
+    {"symbol": "002481.SZ", "from_date": "2016-01-04", "to_date": "2015-11-23", "expected_ratio": 2.5026796756905316},
+    {"symbol": "000981.SZ", "from_date": "2016-03-16", "to_date": "2015-11-23", "expected_ratio": 2.998771498771499},
+    {"symbol": "002219.SZ", "from_date": "2016-06-22", "to_date": "2015-11-23", "expected_ratio": 2.499307159353349},
+    {"symbol": "000908.SZ", "from_date": "2026-06-30", "to_date": "2026-03-11", "expected_ratio": 1.4609540636042404}
+  ],
+  "factor_neutralizations": [
+    {"symbol": "600751.SH", "from_date": "2013-06-04", "expected_ratio": 2.291026276648488},
+    {"symbol": "600377.SH", "from_date": "2026-07-13", "expected_ratio": 2.771947453579901},
+    {"symbol": "600279.SH", "from_date": "2026-07-14", "expected_ratio": 1.919440584998247},
+    {"symbol": "600223.SH", "from_date": "2026-07-15", "expected_ratio": 1.5807798696179685},
+    {"symbol": "600522.SH", "from_date": "2026-07-15", "expected_ratio": 6.718463588504426},
+    {"symbol": "600165.SH", "from_date": "2026-06-30", "expected_ratio": 1.3556956930095263}
+  ],
+  "daily_from_5m": [
+    {"symbol": "600000.SH", "trade_date": "2026-07-13"}
+  ],
+  "local_minute_source_root": "H:/BaiduNetdiskDownload/\u91cf\u5316\u6570\u636e",
+  "local_1m_gap_fills": [
+    {"zip": "2010.zip", "member": "2010/sz001872.csv", "source_symbol": "000022.SZ", "current_symbol": "001872.SZ", "trade_date": "2010-08-10"},
+    {"zip": "2010.zip", "member": "2010/sz001914.csv", "source_symbol": "000043.SZ", "current_symbol": "001914.SZ", "trade_date": "2010-08-10"},
+    {"zip": "2015.zip", "member": "2015/sz001872.csv", "source_symbol": "000022.SZ", "current_symbol": "001872.SZ", "trade_date": "2015-11-23"},
+    {"zip": "2015.zip", "member": "2015/sz001914.csv", "source_symbol": "000043.SZ", "current_symbol": "001914.SZ", "trade_date": "2015-11-23"}
+  ],
+  "force_refetch_5m": [
+    {"symbol": "600584.SH", "trade_date": "2026-06-29", "reason": "volume_100x"},
+    {"symbol": "002569.SZ", "trade_date": "2026-07-02", "reason": "volume_100x"}
+  ]
+}

@@ -14,7 +14,7 @@
 
 `tables`: `security_identity`、`symbol_history`。
 
-`rule`: 代码变化证券共享稳定 security_id；日期查询恢复当日 symbol。当前三组固定变更为 `000022→001872`、`000043→001914`、`300114→302132`。
+`rule`: 代码变化证券共享稳定 security_id；日期查询恢复当日 symbol。当前研究范围内两组固定变更为 `000022→001872`、`000043→001914`。
 
 ### class `daily_market_fact`
 
@@ -32,11 +32,15 @@
 
 `table`: 与 daily key 对齐的正因子。历史异常已经直接修正；执行价格始终使用 raw，因子只用于研究复权。
 
+### class `security_status`
+
+`rule`: `is_st` 与 `is_suspended` 独立；只有当前交易日无 daily 行或 daily.volume<=0 才视为整日停牌。有正成交日线时不得标记停牌。
+
 ### class `trusted_provider`
 
-`rule`: 本地数据、mootdx、BaoStock 和已物化的 Tushare 结果默认可信。跨源差异不触发逐行仲裁；只有明显结构错误或少数已知特例才修正。
+`rule`: 本地数据、mootdx、BaoStock 和已物化/定点取得的 Tushare 结果默认可信。跨源差异不触发逐行仲裁；只有明显结构错误或少数已知特例才修正。
 
-`roles`: 本地数据负责早期主体；mootdx 负责近期速度；BaoStock 负责免费持续更新和完整日 fallback；Tushare 不再是运行时依赖。
+`roles`: 本地数据负责早期主体；mootdx 负责近期速度；BaoStock 负责免费持续更新和完整日 fallback；Tushare 只补当前研究证券在前三者窗口外的显式历史缺口，不参与普通增量。
 
 ### class `storage`
 
@@ -49,6 +53,7 @@
 - 5m 可以直接作为事实表，不需要保留 1m 或由 1m 重建。
 - 免费源之间应按覆盖能力互补，而不是互相证明价格正确。
 - 更多 BaoStock 登录只有在隔离进程实测稳定时使用；当前 4 连接已通过本次全量补缺。
+- 当前 QDP 是用户明确选择的 survivor store：当前 ST 仍视为研究证券，正式退市后才回溯删除；因此不宣称支持退市概率或无幸存者偏差研究。
 - raw/provider staging、runtime 和旧 generation 完成合并后应立即删除，避免 H 盘 1 MiB allocation unit 放大小文件占用。
 
 ## Pure Functions

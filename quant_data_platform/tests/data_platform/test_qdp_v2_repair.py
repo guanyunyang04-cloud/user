@@ -159,6 +159,74 @@ def _prepared(workspace: Path, name: str, frame: pd.DataFrame) -> Path:
     return path
 
 
+def test_mutate_supports_dimension_without_date_column(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    root = qdp_v2_root(workspace)
+    domain = "security_identity"
+    dataset_id = "security_identity__dimension_repair_fixture"
+    frame = pd.DataFrame(
+        {
+            "security_id": ["QDP-1", "QDP-2"],
+            "current_symbol": ["000001.SZ", "000002.SZ"],
+        }
+    )
+    shard = root / "datasets" / domain / dataset_id / "shards" / "part.parquet"
+    shard.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_parquet(shard, index=False, engine="pyarrow")
+    manifest = DatasetManifest(
+        dataset_id=dataset_id,
+        domain=domain,
+        layer="canonical",
+        frequency="static",
+        contract_version="unit",
+        primary_key=["security_id"],
+        start_date="",
+        end_date="",
+        row_count=2,
+        schema_hash="unit-schema",
+        shards=[
+            ShardManifestEntry(
+                path=shard.relative_to(root).as_posix(),
+                row_count=2,
+                start_date="",
+                end_date="",
+                file_size=shard.stat().st_size,
+                schema_hash="unit-schema",
+                content_key="fixture",
+            )
+        ],
+        source={"provider": "unit"},
+        quality={"primary_key_unique": True},
+        schema=[
+            {"name": "security_id", "type": "object"},
+            {"name": "current_symbol", "type": "object"},
+        ],
+    )
+    write_dataset_manifest(root, manifest)
+    write_active_manifest(
+        root,
+        {
+            "version": 2,
+            "active_as_of_date": "2026-01-06",
+            "datasets": {domain: dataset_id},
+        },
+    )
+    prepared = _prepared(workspace, "identity", frame.iloc[[0]].copy())
+
+    result = mutate_active_shards_from_parquet(
+        domain,
+        replacements=[(shard, prepared)],
+        reason="unit dimension repair",
+        workspace_root=workspace,
+    )
+
+    repaired = resolve_active_domain(domain, workspace_root=workspace)
+    assert result["status"] == "mutated"
+    assert repaired.manifest.row_count == 1
+    assert repaired.manifest.start_date == ""
+    assert repaired.manifest.end_date == ""
+
+
 def test_resolve_active_domain_uses_existing_active_dataset(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     active_path, manifest_path, shard_paths = _install_active(workspace)

@@ -11,8 +11,12 @@ from quant_data_platform.qdp_v2.check import run_check
 from quant_data_platform.qdp_v2.database_audit import (
     REQUIRED_DOMAINS,
     EXPECTED_BAR_TIMES,
+    _active_manifest,
     _audit_temp_directory,
     _bar_day_check,
+    _daily_intraday_consistency_check,
+    _factor_semantic_check,
+    _status_daily_partition_check,
     audit_database,
     audit_latest_keys,
 )
@@ -484,6 +488,162 @@ def test_bar_day_check_aggregates_independent_date_shards(tmp_path: Path) -> Non
         result = _bar_day_check(con, paths, sample_limit=5)
 
     assert result == {"status": "ok", "invalid_day_count": 0, "examples": []}
+
+
+def test_cross_frequency_check_rejects_100x_intraday_volume(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    root = qdp_v2_root(workspace)
+    date = "2026-01-05"
+    daily_id = _write_domain(
+        root,
+        "market_daily_raw",
+        pd.DataFrame(
+            {
+                "symbol": ["600584.SH"],
+                "trade_date": [date],
+                "open": [10.0],
+                "high": [10.2],
+                "low": [9.8],
+                "close": [10.1],
+                "volume": [100.0],
+                "amount": [1_000.0],
+            }
+        ),
+        contract="unit",
+        primary_key=["trade_date", "symbol"],
+    )
+    five_id = _write_domain(
+        root,
+        "market_intraday_5m",
+        pd.DataFrame(
+            {
+                "symbol": ["600584.SH"] * 48,
+                "trade_date": [date] * 48,
+                "bar_time": EXPECTED_BAR_TIMES,
+                "open": [10.0] * 48,
+                "high": [10.2] * 48,
+                "low": [9.8] * 48,
+                "close": [10.1] * 48,
+                "volume": [10_000.0 / 48] * 48,
+                "amount": [1_000.0 / 48] * 48,
+            }
+        ),
+        contract="unit",
+        primary_key=["trade_date", "symbol", "bar_time"],
+    )
+    daily = _active_manifest(root, daily_id, "market_daily_raw")
+    five = _active_manifest(root, five_id, "market_intraday_5m")
+    with open_guarded_duckdb(
+        temp_directory=workspace / "spill",
+        threads=1,
+        memory_sampler=lambda: 8 * 1024**3,
+        total_memory_sampler=lambda: 16 * 1024**3,
+    ) as con:
+        result = _daily_intraday_consistency_check(
+            con,
+            root=root,
+            daily=daily,
+            intraday=five,
+            sample_limit=5,
+        )
+
+    assert result["volume_100x_day_count"] == 1
+    assert result["invalid_day_count"] == 1
+
+
+def test_status_daily_semantics_detects_both_mismatch_directions(tmp_path: Path) -> None:
+    status_path = tmp_path / "status.parquet"
+    daily_path = tmp_path / "daily.parquet"
+    date = "2026-01-05"
+    _write_parquet(
+        status_path,
+        pd.DataFrame(
+            {
+                "symbol": ["000001.SZ", "000002.SZ", "000003.SZ", "000004.SZ"],
+                "trade_date": [date] * 4,
+                "is_suspended": [False, False, True, True],
+            }
+        ),
+    )
+    _write_parquet(
+        daily_path,
+        pd.DataFrame(
+            {
+                "symbol": ["000001.SZ", "000003.SZ", "000004.SZ"],
+                "trade_date": [date] * 3,
+                "volume": [100.0, 100.0, 0.0],
+            }
+        ),
+    )
+    with open_guarded_duckdb(
+        temp_directory=tmp_path / "status-spill",
+        threads=1,
+        memory_sampler=lambda: 8 * 1024**3,
+        total_memory_sampler=lambda: 16 * 1024**3,
+    ) as con:
+        result = _status_daily_partition_check(
+            con,
+            status_paths=[status_path],
+            daily_paths=[daily_path],
+            start_date=date,
+            end_date=date,
+            sample_limit=5,
+        )
+
+    assert result["semantic_mismatch_count"] == 2
+    assert result["unsuspended_without_positive_daily_count"] == 1
+    assert result["suspended_with_positive_daily_count"] == 1
+    assert result["null_suspension_flag_count"] == 0
+
+
+def test_factor_semantics_separates_short_pollution_from_long_gap(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    root = qdp_v2_root(workspace)
+    daily = pd.DataFrame(
+        {
+            "symbol": ["000001.SZ", "000001.SZ", "000002.SZ", "000002.SZ"],
+            "trade_date": ["2024-01-02", "2024-01-03", "2020-01-02", "2024-01-02"],
+            "open": [10.0, 10.0, 10.0, 20.0],
+            "close": [10.0, 10.0, 10.0, 20.0],
+        }
+    )
+    factors = pd.DataFrame(
+        {
+            "symbol": daily["symbol"],
+            "trade_date": daily["trade_date"],
+            "adjust_factor": [1.0, 1.5, 1.0, 2.0],
+        }
+    )
+    daily_id = _write_domain(
+        root,
+        "market_daily_raw",
+        daily,
+        contract="unit",
+        primary_key=["trade_date", "symbol"],
+    )
+    factor_id = _write_domain(
+        root,
+        "adjust_factor",
+        factors,
+        contract="unit",
+        primary_key=["trade_date", "symbol"],
+    )
+    with open_guarded_duckdb(
+        temp_directory=workspace / "factor-spill",
+        threads=1,
+        memory_sampler=lambda: 8 * 1024**3,
+        total_memory_sampler=lambda: 16 * 1024**3,
+    ) as con:
+        result = _factor_semantic_check(
+            con,
+            root=root,
+            daily=_active_manifest(root, daily_id, "market_daily_raw"),
+            factor=_active_manifest(root, factor_id, "adjust_factor"),
+            sample_limit=5,
+        )
+
+    assert result["uncompensated_change_count"] == 1
+    assert result["raw_discontinuity_count"] == 1
 
 
 def test_audit_spill_directory_is_workspace_local_and_ephemeral(tmp_path: Path) -> None:

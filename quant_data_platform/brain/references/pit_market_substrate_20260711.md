@@ -2,6 +2,11 @@
 
 Date: `2026-07-11`
 
+> Historical reference only. The non-active PIT substrate workflow was retired on
+> 2026-07-17 when QDP adopted the user-selected mutable current-listed survivor
+> scope. The current store and commands are defined in
+> `quant_data_platform/brain/state_center.md`.
+
 ## Contract
 
 `quant_data_platform.qdp_v2.pit_market_substrate` builds five content-addressed,

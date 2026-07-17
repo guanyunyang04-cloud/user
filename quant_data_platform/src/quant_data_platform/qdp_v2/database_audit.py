@@ -21,6 +21,7 @@ from quant_data_platform.qdp_v2.audit import audit_active
 from quant_data_platform.qdp_v2.duckdb_resources import open_guarded_duckdb
 from quant_data_platform.qdp_v2.manifest import (
     DatasetManifest,
+    ShardManifestEntry,
     atomic_write_json,
     dataset_manifest_for_id,
     qdp_v2_root,
@@ -204,6 +205,14 @@ def audit_latest_keys(
             paths["universe_snapshot"],
             trade_date,
         )
+        status_semantics = _status_daily_partition_check(
+            con,
+            status_paths=paths["security_status"],
+            daily_paths=paths["market_daily_raw"],
+            start_date=trade_date,
+            end_date=trade_date,
+            sample_limit=5,
+        )
         five = _latest_5m_stats(
             con,
             daily_paths=paths["market_daily_raw"],
@@ -217,6 +226,12 @@ def audit_latest_keys(
         "universe_missing_status": universe_status_missing,
         "status_extra_vs_universe": status_universe_extra,
         "daily_missing_universe": daily_universe_missing,
+        "status_daily_semantic_mismatch": int(
+            status_semantics["semantic_mismatch_count"]
+        ),
+        "status_null_suspension_flags": int(
+            status_semantics["null_suspension_flag_count"]
+        ),
         "invalid_5m_stock_days": int(five["invalid_day_count"]),
     }
     blocking = {key: value for key, value in errors.items() if int(value) > 0}
@@ -314,10 +329,13 @@ def audit_database(
     selected_threads = max(1, min(selected_threads, os.cpu_count() or 1))
     workspace = Path(workspace_root or Path.cwd()).resolve()
     reports: list[dict[str, Any]] = []
+    manifests: dict[str, DatasetManifest] = {}
+    cross_checks: dict[str, Any] = {}
     with _audit_temp_directory(workspace) as temp:
         with open_guarded_duckdb(temp_directory=temp, threads=selected_threads) as con:
             for domain, dataset_id in sorted(datasets.items()):
                 manifest = _active_manifest(root, dataset_id, domain)
+                manifests[domain] = manifest
                 report, domain_findings = _audit_dataset(
                     con,
                     root=root,
@@ -329,6 +347,101 @@ def audit_database(
                 )
                 reports.append(report)
                 findings.extend(domain_findings)
+            if deep and {"market_daily_raw", "market_intraday_5m"}.issubset(manifests):
+                consistency = _daily_intraday_consistency_check(
+                    con,
+                    root=root,
+                    daily=manifests["market_daily_raw"],
+                    intraday=manifests["market_intraday_5m"],
+                    sample_limit=max(1, int(sample_limit)),
+                )
+                cross_checks["daily_intraday_5m"] = consistency
+                if int(consistency["invalid_day_count"]) > 0:
+                    findings.append(
+                        _finding(
+                            "high",
+                            "cross_frequency",
+                            "market_intraday_5m",
+                            "daily_intraday_5m_semantic_mismatch",
+                            consistency,
+                        )
+                    )
+                coverage = float(consistency["complete_coverage_ratio"])
+                missing_days = int(consistency["missing_positive_daily_count"])
+                if coverage < 0.98:
+                    findings.append(
+                        _finding(
+                            "high",
+                            "coverage",
+                            "market_intraday_5m",
+                            "historical_5m_coverage_below_98_percent",
+                            consistency,
+                        )
+                    )
+                elif missing_days:
+                    findings.append(
+                        _finding(
+                            "medium",
+                            "coverage",
+                            "market_intraday_5m",
+                            "historical_5m_positive_daily_gaps",
+                            consistency,
+                        )
+                    )
+            if deep and {"market_daily_raw", "adjust_factor"}.issubset(manifests):
+                factor_semantics = _factor_semantic_check(
+                    con,
+                    root=root,
+                    daily=manifests["market_daily_raw"],
+                    factor=manifests["adjust_factor"],
+                    sample_limit=max(1, int(sample_limit)),
+                )
+                cross_checks["factor_semantics"] = factor_semantics
+                if (
+                    int(factor_semantics["uncompensated_change_count"]) > 0
+                    or int(factor_semantics["excessive_change_symbol_year_count"]) > 0
+                ):
+                    findings.append(
+                        _finding(
+                            "high",
+                            "factor",
+                            "adjust_factor",
+                            "adjust_factor_change_not_explained_by_raw_price",
+                            factor_semantics,
+                        )
+                    )
+                elif int(factor_semantics["raw_discontinuity_count"]) > 0:
+                    findings.append(
+                        _finding(
+                            "medium",
+                            "factor",
+                            "adjust_factor",
+                            "long_gap_raw_price_discontinuities",
+                            factor_semantics,
+                        )
+                    )
+            if deep and {"market_daily_raw", "security_status"}.issubset(manifests):
+                status_semantics = _status_daily_consistency_check(
+                    con,
+                    root=root,
+                    daily=manifests["market_daily_raw"],
+                    status=manifests["security_status"],
+                    sample_limit=max(1, int(sample_limit)),
+                )
+                cross_checks["status_daily_semantics"] = status_semantics
+                if (
+                    int(status_semantics["semantic_mismatch_count"]) > 0
+                    or int(status_semantics["null_suspension_flag_count"]) > 0
+                ):
+                    findings.append(
+                        _finding(
+                            "high",
+                            "status",
+                            "security_status",
+                            "security_status_daily_semantic_mismatch",
+                            status_semantics,
+                        )
+                    )
 
     latest = audit_latest_keys(workspace_root=workspace_root)
     if latest.get("status") == "needs_attention":
@@ -365,7 +478,7 @@ def audit_database(
         "missing_required_domains": missing_required,
         "datasets": reports,
         "latest_keys": latest,
-        "cross_dataset_checks": {"latest_keys": latest},
+        "cross_dataset_checks": {"latest_keys": latest, **cross_checks},
         "finding_count": len(findings),
         "findings": findings,
         "warnings": [item for item in findings if item["severity"] == "medium"],
@@ -395,6 +508,7 @@ def _audit_dataset(
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     all_paths = [resolve_manifest_path(item.path, root=root) for item in manifest.shards]
     paths = all_paths[:max_shards] if max_shards else all_paths
+    entries = list(manifest.shards[:max_shards] if max_shards else manifest.shards)
     findings: list[dict[str, Any]] = []
     columns: list[str] = []
     if paths:
@@ -422,7 +536,17 @@ def _audit_dataset(
     }
     if deep and paths and not missing_columns:
         if manifest.primary_key and not skip_primary_key:
-            pk = _primary_key_check(con, paths, manifest.primary_key, sample_limit)
+            pk = (
+                _ordered_intraday_primary_key_check(
+                    con,
+                    paths,
+                    entries,
+                    manifest.primary_key,
+                    sample_limit,
+                )
+                if manifest.domain == "market_intraday_5m"
+                else _primary_key_check(con, paths, manifest.primary_key, sample_limit)
+            )
             checks["primary_key"] = pk
             if int(pk["null_key_rows"]) > 0:
                 findings.append(
@@ -523,6 +647,90 @@ def _primary_key_check(
         "null_key_rows": null_count,
         "duplicate_rows": duplicate_rows,
         "examples": examples,
+    }
+
+
+def _ordered_intraday_primary_key_check(
+    con: Any,
+    paths: Sequence[Path],
+    entries: Sequence[ShardManifestEntry],
+    primary_key: Sequence[str],
+    sample_limit: int,
+) -> dict[str, Any]:
+    if set(primary_key) != {"symbol", "trade_date", "bar_time"}:
+        return {
+            "status": "error",
+            "null_key_rows": 0,
+            "duplicate_rows": 1,
+            "range_overlap_count": 0,
+            "examples": [{"reason": "unexpected_intraday_primary_key", "primary_key": list(primary_key)}],
+            "method": "partitioned_physical_order",
+        }
+    invalid_predicate = """
+      prior_symbol IS NOT NULL AND (
+        symbol < prior_symbol
+        OR (symbol = prior_symbol AND trade_date < prior_date)
+        OR (symbol = prior_symbol AND trade_date = prior_date AND bar_time <= prior_time)
+      )
+    """
+    ordered_cte = """
+      WITH ordered AS (
+        SELECT cast(symbol AS VARCHAR) AS symbol,
+               cast(trade_date AS VARCHAR) AS trade_date,
+               cast(bar_time AS VARCHAR) AS bar_time,
+               lag(cast(symbol AS VARCHAR)) OVER () AS prior_symbol,
+               lag(cast(trade_date AS VARCHAR)) OVER () AS prior_date,
+               lag(cast(bar_time AS VARCHAR)) OVER () AS prior_time
+        FROM read_parquet(?, union_by_name=true)
+      )
+    """
+    null_count = 0
+    invalid_count = 0
+    examples: list[dict[str, Any]] = []
+    for path in paths:
+        row = con.execute(
+            ordered_cte
+            + f"""
+              SELECT coalesce(sum(CASE WHEN symbol IS NULL OR trade_date IS NULL OR bar_time IS NULL THEN 1 ELSE 0 END),0),
+                     coalesce(sum(CASE WHEN {invalid_predicate} THEN 1 ELSE 0 END),0)
+              FROM ordered
+            """,
+            [[str(path)]],
+        ).fetchone()
+        null_count += int(row[0] or 0)
+        shard_invalid = int(row[1] or 0)
+        invalid_count += shard_invalid
+        remaining = max(0, int(sample_limit) - len(examples))
+        if shard_invalid and remaining:
+            rows = con.execute(
+                ordered_cte
+                + f"""
+                  SELECT symbol,trade_date,bar_time,prior_symbol,prior_date,prior_time
+                  FROM ordered WHERE {invalid_predicate}
+                  LIMIT {remaining}
+                """,
+                [[str(path)]],
+            ).fetchdf().to_dict("records")
+            for item in rows:
+                item["shard"] = str(path)
+            examples.extend(rows)
+
+    ranges = sorted(
+        (str(entry.start_date), str(entry.end_date))
+        for entry in entries
+        if str(entry.start_date) and str(entry.end_date)
+    )
+    range_overlap_count = sum(
+        int(left[1] >= right[0]) for left, right in zip(ranges, ranges[1:])
+    )
+    duplicate_rows = invalid_count + range_overlap_count
+    return {
+        "status": "ok" if not null_count and not duplicate_rows else "error",
+        "null_key_rows": null_count,
+        "duplicate_rows": duplicate_rows,
+        "range_overlap_count": range_overlap_count,
+        "examples": examples,
+        "method": "partitioned_physical_order",
     }
 
 
@@ -673,6 +881,408 @@ def _latest_5m_stats(
         "missing_complete_day_count": int(row[3]),
         "extra_complete_day_count": int(row[4]),
         "coverage_ratio": float(complete / expected) if expected else 1.0,
+    }
+
+
+def _status_daily_partition_check(
+    con: Any,
+    *,
+    status_paths: Sequence[Path],
+    daily_paths: Sequence[Path],
+    start_date: str,
+    end_date: str,
+    sample_limit: int,
+) -> dict[str, Any]:
+    base = """
+      WITH daily AS (
+        SELECT cast(symbol AS VARCHAR) AS symbol,
+               cast(trade_date AS VARCHAR) AS trade_date,
+               max(try_cast(volume AS DOUBLE)) AS volume
+        FROM read_parquet(?, union_by_name=true)
+        WHERE cast(trade_date AS VARCHAR) BETWEEN ? AND ?
+        GROUP BY symbol,trade_date
+      ), joined AS (
+        SELECT cast(s.symbol AS VARCHAR) AS symbol,
+               cast(s.trade_date AS VARCHAR) AS trade_date,
+               try_cast(s.is_suspended AS BOOLEAN) AS old_suspended,
+               d.volume AS daily_volume,
+               (d.symbol IS NULL OR coalesce(d.volume,0)<=0) AS expected_suspended
+        FROM read_parquet(?, union_by_name=true) s
+        LEFT JOIN daily d
+          ON cast(s.symbol AS VARCHAR)=d.symbol
+         AND cast(s.trade_date AS VARCHAR)=d.trade_date
+        WHERE cast(s.trade_date AS VARCHAR) BETWEEN ? AND ?
+      )
+    """
+    params = [
+        [str(path) for path in daily_paths],
+        str(start_date),
+        str(end_date),
+        [str(path) for path in status_paths],
+        str(start_date),
+        str(end_date),
+    ]
+    row = con.execute(
+        base
+        + """
+          SELECT count(*) AS status_rows,
+                 count(*) FILTER (WHERE old_suspended IS NULL) AS null_flags,
+                 count(*) FILTER (
+                   WHERE coalesce(old_suspended,false)<>expected_suspended
+                 ) AS mismatches,
+                 count(*) FILTER (
+                   WHERE coalesce(old_suspended,false)=false AND expected_suspended
+                 ) AS unsuspended_without_positive_daily,
+                 count(*) FILTER (
+                   WHERE old_suspended=true AND NOT expected_suspended
+                 ) AS suspended_with_positive_daily
+          FROM joined
+        """,
+        params,
+    ).fetchone()
+    remaining = max(0, int(sample_limit))
+    examples: list[dict[str, Any]] = []
+    if remaining and (int(row[1] or 0) or int(row[2] or 0)):
+        examples = con.execute(
+            base
+            + f"""
+              SELECT symbol,trade_date,old_suspended,expected_suspended,daily_volume,
+                     CASE
+                       WHEN old_suspended IS NULL THEN 'null_suspension_flag'
+                       WHEN coalesce(old_suspended,false)=false AND expected_suspended
+                         THEN 'unsuspended_without_positive_daily'
+                       WHEN old_suspended=true AND NOT expected_suspended
+                         THEN 'suspended_with_positive_daily'
+                       ELSE 'other'
+                     END AS reason
+              FROM joined
+              WHERE old_suspended IS NULL
+                 OR coalesce(old_suspended,false)<>expected_suspended
+              ORDER BY trade_date,symbol
+              LIMIT {remaining}
+            """,
+            params,
+        ).fetchdf().to_dict("records")
+    return {
+        "status_row_count": int(row[0] or 0),
+        "null_suspension_flag_count": int(row[1] or 0),
+        "semantic_mismatch_count": int(row[2] or 0),
+        "unsuspended_without_positive_daily_count": int(row[3] or 0),
+        "suspended_with_positive_daily_count": int(row[4] or 0),
+        "examples": examples,
+    }
+
+
+def _status_daily_consistency_check(
+    con: Any,
+    *,
+    root: Path,
+    daily: DatasetManifest,
+    status: DatasetManifest,
+    sample_limit: int,
+) -> dict[str, Any]:
+    totals = {
+        "status_row_count": 0,
+        "null_suspension_flag_count": 0,
+        "semantic_mismatch_count": 0,
+        "unsuspended_without_positive_daily_count": 0,
+        "suspended_with_positive_daily_count": 0,
+    }
+    examples: list[dict[str, Any]] = []
+    daily_entries = [
+        (resolve_manifest_path(item.path, root=root), item) for item in daily.shards
+    ]
+    for status_entry in status.shards:
+        start_date = str(status_entry.start_date or "")
+        end_date = str(status_entry.end_date or "")
+        if not start_date or not end_date:
+            raise ValueError("status_consistency_shard_range_missing")
+        status_path = resolve_manifest_path(status_entry.path, root=root)
+        daily_paths = [
+            path
+            for path, entry in daily_entries
+            if (
+                (not entry.start_date or str(entry.start_date) <= end_date)
+                and (not entry.end_date or str(entry.end_date) >= start_date)
+            )
+        ]
+        if not daily_paths:
+            raise ValueError(f"status_consistency_daily_paths_missing:{start_date}")
+        result = _status_daily_partition_check(
+            con,
+            status_paths=[status_path],
+            daily_paths=daily_paths,
+            start_date=start_date,
+            end_date=end_date,
+            sample_limit=max(0, int(sample_limit) - len(examples)),
+        )
+        for key in totals:
+            totals[key] += int(result[key])
+        examples.extend(result["examples"])
+    return {
+        "status": (
+            "ok"
+            if not totals["semantic_mismatch_count"]
+            and not totals["null_suspension_flag_count"]
+            else "error"
+        ),
+        **totals,
+        "semantics": "is_suspended iff daily row is absent or volume<=0",
+        "examples": examples,
+    }
+
+
+def _daily_intraday_consistency_check(
+    con: Any,
+    *,
+    root: Path,
+    daily: DatasetManifest,
+    intraday: DatasetManifest,
+    sample_limit: int,
+) -> dict[str, Any]:
+    totals = {
+        "positive_daily_count": 0,
+        "complete_positive_daily_count": 0,
+        "missing_positive_daily_count": 0,
+        "missing_daily_for_5m_count": 0,
+        "suspended_nonzero_5m_count": 0,
+        "price_mismatch_day_count": 0,
+        "flow_mismatch_day_count": 0,
+        "volume_100x_day_count": 0,
+        "invalid_day_count": 0,
+    }
+    examples: list[dict[str, Any]] = []
+    daily_entries = [
+        (resolve_manifest_path(item.path, root=root), item) for item in daily.shards
+    ]
+    for intraday_entry in intraday.shards:
+        start_date = str(intraday_entry.start_date or "")
+        end_date = str(intraday_entry.end_date or "")
+        if not start_date or not end_date:
+            raise ValueError("intraday_consistency_shard_range_missing")
+        intraday_path = resolve_manifest_path(intraday_entry.path, root=root)
+        daily_paths = [
+            path
+            for path, entry in daily_entries
+            if (
+                (not entry.start_date or str(entry.start_date) <= end_date)
+                and (not entry.end_date or str(entry.end_date) >= start_date)
+            )
+        ]
+        if not daily_paths:
+            raise ValueError(f"intraday_consistency_daily_paths_missing:{start_date}")
+        joined = """
+          WITH five AS (
+            SELECT cast(symbol AS VARCHAR) AS symbol,
+                   cast(trade_date AS VARCHAR) AS trade_date,
+                   count(*) AS bars,
+                   arg_min(try_cast(open AS DOUBLE),cast(bar_time AS VARCHAR)) AS open,
+                   max(try_cast(high AS DOUBLE)) AS high,
+                   min(try_cast(low AS DOUBLE)) AS low,
+                   arg_max(try_cast(close AS DOUBLE),cast(bar_time AS VARCHAR)) AS close,
+                   sum(try_cast(volume AS DOUBLE)) AS volume,
+                   sum(try_cast(amount AS DOUBLE)) AS amount
+            FROM read_parquet(?, union_by_name=true)
+            GROUP BY symbol,trade_date
+          ), day AS (
+            SELECT cast(symbol AS VARCHAR) AS symbol,
+                   cast(trade_date AS VARCHAR) AS trade_date,
+                   try_cast(open AS DOUBLE) AS open,
+                   try_cast(high AS DOUBLE) AS high,
+                   try_cast(low AS DOUBLE) AS low,
+                   try_cast(close AS DOUBLE) AS close,
+                   try_cast(volume AS DOUBLE) AS volume,
+                   try_cast(amount AS DOUBLE) AS amount
+            FROM read_parquet(?, union_by_name=true)
+            WHERE cast(trade_date AS VARCHAR) BETWEEN ? AND ?
+          ), joined AS (
+            SELECT coalesce(d.symbol,f.symbol) AS symbol,
+                   coalesce(d.trade_date,f.trade_date) AS trade_date,
+                   d.open AS dopen,d.high AS dhigh,d.low AS dlow,d.close AS dclose,
+                   d.volume AS dvolume,d.amount AS damount,
+                   f.bars,f.open AS fopen,f.high AS fhigh,f.low AS flow,f.close AS fclose,
+                   f.volume AS fvolume,f.amount AS famount,
+                   CASE WHEN d.volume>0 THEN abs(f.volume-d.volume)/greatest(abs(d.volume),1) END AS volume_rel,
+                   CASE WHEN d.amount>0 THEN abs(f.amount-d.amount)/greatest(abs(d.amount),1) END AS amount_rel,
+                   CASE WHEN d.volume>0 THEN f.volume/d.volume END AS volume_ratio,
+                   greatest(
+                     abs(f.open-d.open)/greatest(abs(d.open),1),
+                     abs(f.high-d.high)/greatest(abs(d.high),1),
+                     abs(f.low-d.low)/greatest(abs(d.low),1),
+                     abs(f.close-d.close)/greatest(abs(d.close),1)
+                   ) AS price_rel
+            FROM day d FULL OUTER JOIN five f USING(symbol,trade_date)
+          )
+        """
+        params = [[str(intraday_path)], [str(path) for path in daily_paths], start_date, end_date]
+        row = con.execute(
+            joined
+            + """
+              SELECT
+                count(*) FILTER (WHERE dvolume>0) AS positive_daily,
+                count(*) FILTER (WHERE dvolume>0 AND bars=48) AS complete_positive,
+                count(*) FILTER (WHERE dvolume>0 AND bars IS NULL) AS missing_positive,
+                count(*) FILTER (WHERE dvolume IS NULL AND bars IS NOT NULL) AS missing_daily,
+                count(*) FILTER (WHERE coalesce(dvolume,0)<=0 AND bars IS NOT NULL) AS suspended_nonzero,
+                count(*) FILTER (WHERE dvolume>0 AND bars IS NOT NULL AND price_rel>0.10) AS price_mismatch,
+                count(*) FILTER (WHERE dvolume>0 AND bars IS NOT NULL AND volume_rel>0.05 AND amount_rel>0.05) AS flow_mismatch,
+                count(*) FILTER (WHERE dvolume>0 AND bars IS NOT NULL AND (volume_ratio BETWEEN 95 AND 105 OR volume_ratio BETWEEN 0.0095 AND 0.0105)) AS volume_100x,
+                count(*) FILTER (WHERE bars IS NOT NULL AND (
+                  dvolume IS NULL OR coalesce(dvolume,0)<=0 OR price_rel>0.10
+                  OR (volume_rel>0.05 AND amount_rel>0.05)
+                  OR volume_ratio BETWEEN 95 AND 105 OR volume_ratio BETWEEN 0.0095 AND 0.0105
+                )) AS invalid_days
+              FROM joined
+            """,
+            params,
+        ).fetchone()
+        keys = list(totals)
+        for key, value in zip(keys, row, strict=True):
+            totals[key] += int(value or 0)
+        remaining = max(0, int(sample_limit) - len(examples))
+        if remaining and (int(row[2] or 0) or int(row[8] or 0)):
+            sample = con.execute(
+                joined
+                + f"""
+                  SELECT symbol,trade_date,bars,dvolume,fvolume,damount,famount,
+                         price_rel,volume_rel,amount_rel,volume_ratio,
+                         CASE
+                           WHEN dvolume>0 AND bars IS NULL THEN 'missing_positive_daily'
+                           WHEN dvolume IS NULL AND bars IS NOT NULL THEN 'missing_daily'
+                           WHEN coalesce(dvolume,0)<=0 AND bars IS NOT NULL THEN 'suspended_nonzero_5m'
+                           WHEN volume_ratio BETWEEN 95 AND 105 OR volume_ratio BETWEEN 0.0095 AND 0.0105 THEN 'volume_100x'
+                           WHEN price_rel>0.10 THEN 'price_mismatch'
+                           WHEN volume_rel>0.05 AND amount_rel>0.05 THEN 'flow_mismatch'
+                           ELSE 'other'
+                         END AS reason
+                  FROM joined
+                  WHERE (dvolume>0 AND bars IS NULL) OR (bars IS NOT NULL AND (
+                    dvolume IS NULL OR coalesce(dvolume,0)<=0 OR price_rel>0.10
+                    OR (volume_rel>0.05 AND amount_rel>0.05)
+                    OR volume_ratio BETWEEN 95 AND 105 OR volume_ratio BETWEEN 0.0095 AND 0.0105
+                  ))
+                  LIMIT {remaining}
+                """,
+                params,
+            ).fetchdf().to_dict("records")
+            examples.extend(sample)
+    positive = totals["positive_daily_count"]
+    complete = totals["complete_positive_daily_count"]
+    return {
+        "status": "ok" if not totals["invalid_day_count"] else "error",
+        **totals,
+        "complete_coverage_ratio": float(complete / positive) if positive else 1.0,
+        "examples": examples,
+    }
+
+
+def _factor_semantic_check(
+    con: Any,
+    *,
+    root: Path,
+    daily: DatasetManifest,
+    factor: DatasetManifest,
+    sample_limit: int,
+) -> dict[str, Any]:
+    daily_paths = [str(resolve_manifest_path(item.path, root=root)) for item in daily.shards]
+    factor_paths = [str(resolve_manifest_path(item.path, root=root)) for item in factor.shards]
+    base = """
+      WITH factors AS (
+        SELECT cast(symbol AS VARCHAR) AS symbol,
+               cast(trade_date AS VARCHAR) AS trade_date,
+               try_cast(adjust_factor AS DOUBLE) AS factor,
+               lag(try_cast(adjust_factor AS DOUBLE)) OVER(
+                 PARTITION BY symbol ORDER BY cast(trade_date AS VARCHAR)
+               ) AS prior_factor
+        FROM read_parquet(?, union_by_name=true)
+      ), prices AS (
+        SELECT cast(symbol AS VARCHAR) AS symbol,
+               cast(trade_date AS VARCHAR) AS trade_date,
+               try_cast(open AS DOUBLE) AS open,
+               lag(try_cast(close AS DOUBLE)) OVER(
+                 PARTITION BY symbol ORDER BY cast(trade_date AS VARCHAR)
+               ) AS prior_close,
+               lag(cast(trade_date AS VARCHAR)) OVER(
+                 PARTITION BY symbol ORDER BY cast(trade_date AS VARCHAR)
+               ) AS prior_date
+        FROM read_parquet(?, union_by_name=true)
+      ), changes AS (
+        SELECT f.symbol,f.trade_date,f.factor/f.prior_factor AS factor_ratio,
+               p.open/p.prior_close AS raw_open_ratio,
+               (f.factor/f.prior_factor)*(p.open/p.prior_close) AS adjusted_open_ratio,
+               date_diff('day',try_cast(p.prior_date AS DATE),try_cast(f.trade_date AS DATE)) AS gap_days
+        FROM factors f JOIN prices p USING(symbol,trade_date)
+        WHERE f.prior_factor>0 AND p.prior_close>0
+          AND (f.factor/f.prior_factor<0.99 OR f.factor/f.prior_factor>1.01)
+      )
+    """
+    params = [factor_paths, daily_paths]
+    row = con.execute(
+        base
+        + """
+          SELECT count(*) AS changes,
+                 count(*) FILTER (WHERE (adjusted_open_ratio<0.70 OR adjusted_open_ratio>1.30)
+                   AND gap_days<=10 AND raw_open_ratio BETWEEN 0.70 AND 1.30) AS factor_induced,
+                 count(*) FILTER (WHERE (adjusted_open_ratio<0.70 OR adjusted_open_ratio>1.30)
+                   AND NOT (gap_days<=10 AND raw_open_ratio BETWEEN 0.70 AND 1.30)) AS raw_discontinuity,
+                 coalesce(max(abs(adjusted_open_ratio-1)),0) AS max_error,
+                 count(*) FILTER (WHERE symbol='600076.SH' AND substr(trade_date,1,4)='2024') AS regression_changes,
+                 coalesce(max(abs(adjusted_open_ratio-1)) FILTER (
+                   WHERE symbol='600076.SH' AND substr(trade_date,1,4)='2024'
+                 ),0) AS regression_max_error
+          FROM changes
+        """,
+        params,
+    ).fetchone()
+    excessive = con.execute(
+        base
+        + """
+          SELECT count(*) FROM (
+            SELECT symbol,substr(trade_date,1,4) AS year,count(*) AS changes
+            FROM changes GROUP BY symbol,year HAVING count(*)>12
+          )
+        """,
+        params,
+    ).fetchone()[0]
+    examples = []
+    if int(row[1] or 0):
+        examples = con.execute(
+            base
+            + f"""
+              SELECT symbol,trade_date,gap_days,factor_ratio,raw_open_ratio,adjusted_open_ratio
+              FROM changes
+              WHERE (adjusted_open_ratio<0.70 OR adjusted_open_ratio>1.30)
+                AND gap_days<=10 AND raw_open_ratio BETWEEN 0.70 AND 1.30
+              ORDER BY abs(adjusted_open_ratio-1) DESC
+              LIMIT {int(sample_limit)}
+            """,
+            params,
+        ).fetchdf().to_dict("records")
+    raw_examples = []
+    if int(row[2] or 0):
+        raw_examples = con.execute(
+            base
+            + f"""
+              SELECT symbol,trade_date,gap_days,factor_ratio,raw_open_ratio,adjusted_open_ratio
+              FROM changes
+              WHERE (adjusted_open_ratio<0.70 OR adjusted_open_ratio>1.30)
+                AND NOT (gap_days<=10 AND raw_open_ratio BETWEEN 0.70 AND 1.30)
+              ORDER BY abs(adjusted_open_ratio-1) DESC
+              LIMIT {int(sample_limit)}
+            """,
+            params,
+        ).fetchdf().to_dict("records")
+    return {
+        "status": "ok" if not int(row[1] or 0) and not int(excessive or 0) else "error",
+        "factor_change_count": int(row[0] or 0),
+        "uncompensated_change_count": int(row[1] or 0),
+        "raw_discontinuity_count": int(row[2] or 0),
+        "max_compensation_error": float(row[3] or 0),
+        "excessive_change_symbol_year_count": int(excessive or 0),
+        "regression_600076_2024_change_count": int(row[4] or 0),
+        "regression_600076_2024_max_compensation_error": float(row[5] or 0),
+        "examples": examples,
+        "raw_discontinuity_examples": raw_examples,
     }
 
 

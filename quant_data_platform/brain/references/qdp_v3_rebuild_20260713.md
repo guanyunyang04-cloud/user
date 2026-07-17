@@ -2,7 +2,10 @@
 
 日期：`2026-07-13..2026-07-15`
 
-> 当前合同（2026-07-15）：本文按时间记录了多轮设计与执行，前文中的双源历史验证、99.95% 覆盖、因子官方仲裁、BaoStock 2013+ 历史复刻和首次发布即退休均已被最后一节取代。当前规范以 `qdp_v3_20260715_trusted_source_5m`、schema `3.3.0`、manifest `4` 及 QDP hot-path brain 为准。
+> 历史记录（2026-07-17）：本文中的 v3、immutable raw、candidate、publish、
+> 全量 Tushare bootstrap 和退市证券合同均已废止。当前唯一事实是
+> `quant_data_platform/brain/state_center.md` 所述的单一可变 `qdp_v2` 路径；
+> 本文只用于解释曾经做过什么，不得作为待执行计划、数据入口或当前规范。
 
 ## 结论
 

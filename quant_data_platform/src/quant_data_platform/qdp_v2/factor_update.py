@@ -22,7 +22,7 @@ from quant_data_platform.qdp_v2.repair import append_active_shard, resolve_activ
 
 FACTOR_DOMAIN = "adjust_factor"
 DAILY_DOMAIN = "market_daily_raw"
-FACTOR_SEMANTICS = "trusted_source_first_2010_observation_normalized_to_1_asof"
+FACTOR_SEMANTICS = "trusted_source_back_adjust_factor_ratio_normalized_to_qdp_asof"
 
 
 class FactorTailUpdateError(RuntimeError):
@@ -122,16 +122,23 @@ def build_factor_tail_rows(
     if not events.empty:
         events = events.loc[events["provider_symbol"].astype(str).isin(missing_symbols)].copy()
         events["divid_operate_date"] = events["divid_operate_date"].astype(str).str.slice(0, 10)
-        events["adjust_factor"] = pd.to_numeric(events["adjust_factor"], errors="coerce")
-        if events["adjust_factor"].isna().any() or events["adjust_factor"].le(0).any():
+        for column in ("adjust_factor", "back_adjust_factor"):
+            events[column] = pd.to_numeric(events[column], errors="coerce")
+        if (
+            events[["adjust_factor", "back_adjust_factor"]].isna().any().any()
+            or events[["adjust_factor", "back_adjust_factor"]].le(0).any().any()
+        ):
             raise FactorTailUpdateError("factor_tail_baostock_event_factor_invalid")
         duplicate = events.duplicated(["provider_symbol", "divid_operate_date"], keep=False)
         if duplicate.any():
             conflicts = (
                 events.loc[duplicate]
-                .groupby(["provider_symbol", "divid_operate_date"])["adjust_factor"]
+                .groupby(["provider_symbol", "divid_operate_date"])[
+                    ["adjust_factor", "back_adjust_factor"]
+                ]
                 .nunique()
                 .gt(1)
+                .any(axis=1)
             )
             if conflicts.any():
                 raise FactorTailUpdateError("factor_tail_baostock_event_duplicate_conflict")
@@ -154,11 +161,20 @@ def build_factor_tail_rows(
             )
         history = result.data.copy()
         history["trade_date"] = history["trade_date"].astype(str).str.slice(0, 10)
-        history["adjust_factor"] = pd.to_numeric(history["adjust_factor"], errors="coerce")
-        history = history.loc[np.isfinite(history["adjust_factor"]) & history["adjust_factor"].gt(0)]
+        for column in ("adjust_factor", "back_adjust_factor"):
+            history[column] = pd.to_numeric(history[column], errors="coerce")
+        history = history.loc[
+            np.isfinite(history["adjust_factor"])
+            & history["adjust_factor"].gt(0)
+            & np.isfinite(history["back_adjust_factor"])
+            & history["back_adjust_factor"].gt(0)
+        ]
 
     event_by_key = {
-        (str(row.provider_symbol), str(row.divid_operate_date)): float(row.adjust_factor)
+        (str(row.provider_symbol), str(row.divid_operate_date)): {
+            "adjust_factor": float(row.adjust_factor),
+            "back_adjust_factor": float(row.back_adjust_factor),
+        }
         for row in events.itertuples(index=False)
     } if not events.empty else {}
     history_by_symbol = {
@@ -188,8 +204,8 @@ def build_factor_tail_rows(
         has_qdp_baseline = prior_available or previous_generated is not None
         if not has_qdp_baseline:
             initialized_symbol_count += 1
-        absolute = event_by_key.get((symbol, trade_date))
-        if absolute is not None and has_qdp_baseline:
+        event = event_by_key.get((symbol, trade_date))
+        if event is not None and has_qdp_baseline:
             symbol_history = history_by_symbol.get(symbol)
             if symbol_history is None or symbol_history.empty:
                 raise FactorTailUpdateError(f"factor_tail_baostock_history_missing:{symbol}")
@@ -199,12 +215,27 @@ def build_factor_tail_rows(
                 raise FactorTailUpdateError(
                     f"factor_tail_baostock_ratio_anchor_missing:{symbol}:{trade_date}"
                 )
-            provider_current = float(current_history.iloc[-1]["adjust_factor"])
-            if not np.isclose(provider_current, absolute, rtol=1e-10, atol=1e-12):
+            history_current_adjust = float(current_history.iloc[-1]["adjust_factor"])
+            if not np.isclose(
+                history_current_adjust,
+                float(event["adjust_factor"]),
+                rtol=1e-10,
+                atol=1e-12,
+            ):
                 raise FactorTailUpdateError(
                     f"factor_tail_baostock_event_history_mismatch:{symbol}:{trade_date}"
                 )
-            provider_prior = float(prior_history.iloc[-1]["adjust_factor"])
+            provider_current = float(current_history.iloc[-1]["back_adjust_factor"])
+            if not np.isclose(
+                provider_current,
+                float(event["back_adjust_factor"]),
+                rtol=1e-10,
+                atol=1e-12,
+            ):
+                raise FactorTailUpdateError(
+                    f"factor_tail_baostock_back_factor_history_mismatch:{symbol}:{trade_date}"
+                )
+            provider_prior = float(prior_history.iloc[-1]["back_adjust_factor"])
             current *= provider_current / provider_prior
             continued_event_count += 1
         if not np.isfinite(current) or current <= 0:
@@ -220,7 +251,7 @@ def build_factor_tail_rows(
                 "factor_provider": "baostock",
                 "factor_semantics": FACTOR_SEMANTICS,
                 "source": (
-                    "baostock.adjust_factor_event_ratio+qdp_prior_carry"
+                    "baostock.back_adjust_factor_ratio+qdp_prior_carry"
                     if has_qdp_baseline
                     else "qdp_first_observation_normalized_to_1"
                 ),

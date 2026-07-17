@@ -15,67 +15,82 @@ candidate, publish or rollback surface.
 
 | Domain | Rows | Range | Shards |
 |---|---:|---|---:|
-| `adjust_factor` | 10,203,195 | 2010-01-04..2026-07-16 | 5 |
-| `corporate_actions` | 28,761 | 2011-11-28..2026-06-26 | 1 |
+| `adjust_factor` | 9,644,664 | 2010-01-04..2026-07-16 | 5 |
+| `corporate_actions` | 28,755 | 2011-11-28..2026-06-26 | 1 |
 | `index_constituents` | 2,567,239 | 2011-11-30..2026-06-26 | 1 |
-| `industry_concept` | 8,617,077 | 2011-11-22..2026-06-26 | 1 |
-| `market_daily_raw` | 10,203,195 | 2010-01-04..2026-07-16 | 37 |
-| `market_intraday_5m` | 472,590,576 | 2010-01-04..2026-07-16 | 17 |
-| `name_change` | 2,240 | 2011-11-23..2026-06-26 | 1 |
-| `security_identity` | 5,534 | identity master | 1 |
-| `security_status` | 10,551,539 | 2010-01-04..2026-07-16 | 36 |
-| `share_capital` | 8,617,077 | 2011-11-22..2026-06-26 | 1 |
-| `symbol_history` | 7,232 | 1990-12-10..current identity | 1 |
+| `industry_concept` | 8,611,140 | 2011-11-22..2026-06-26 | 1 |
+| `market_daily_raw` | 9,644,664 | 2010-01-04..2026-07-16 | 37 |
+| `market_intraday_5m` | 462,928,800 | 2010-01-04..2026-07-16 | 17 |
+| `name_change` | 2,229 | 2011-11-23..2026-06-26 | 1 |
+| `security_identity` | 3,192 | current identity master | 1 |
+| `security_status` | 9,927,671 | 2010-01-04..2026-07-16 | 34 |
+| `share_capital` | 8,611,140 | 2011-11-22..2026-06-26 | 1 |
+| `symbol_history` | 4,677 | current identities, including prior codes | 1 |
 | `trading_calendar` | 6,041 | 2010-01-01..2026-07-16 | 4 |
-| `universe_snapshot` | 10,551,539 | 2010-01-04..2026-07-16 | 36 |
-| `valuation` | 8,617,077 | 2011-11-22..2026-06-26 | 1 |
+| `universe_snapshot` | 9,927,671 | 2010-01-04..2026-07-16 | 36 |
+| `valuation` | 8,611,140 | 2011-11-22..2026-06-26 | 1 |
 
 ## Data Source Policy
 
 - Early 5m history comes primarily from the purchased local mootdx-derived ZIP.
-- Tushare was used once for early/delisted gaps. Its accepted rows are already
-  in the current tables; raw downloads, runtime and provider code were deleted.
+- Accepted targeted Tushare repairs are already in the current table; their raw
+  downloads are not retained. Tushare is an explicit, targeted historical-gap
+  fallback for current-scope securities only, not a routine update source.
 - Future updates use mootdx for speed and BaoStock as the free primary/fallback
-  source. BaoStock defaults to four isolated process-local connections.
+  source. BaoStock owns daily/status/factor updates and defaults to four isolated
+  process-local connections for 5m fallback.
 - Provider values are trusted. QDP checks only conversion risks: schema, key,
-  identity, OHLC legality, non-negative turnover and exact 48-bar stock-days.
+  identity, OHLC legality, non-negative turnover, factor semantics and exact
+  48-bar stock-days.
 - Sources are never stitched within a stock-day and missing bars are not
   interpolated.
-- The mutable price scope is Shanghai/Shenzhen main-board A shares. Historical
-  securities remain present; current-name survivor filtering is not used.
+- The mutable price scope is the 3,192 currently listed Shanghai/Shenzhen
+  main-board A shares. Current ST names remain. When a security formally leaves
+  the listed universe, all of its history is removed from QDP by design.
 
 ## Known Boundary
 
-The table contains 9,845,637 complete 48-bar stock-days. There are no complete
-5m days without a daily row. Of the daily rows, 357,558 have no complete 5m
-day; 357,550 are in the 2010—2019 early-source boundary and eight are in
-2020—2023. The eight recent cases were unavailable as complete days from the
-local archive, mootdx, BaoStock, Tushare and the AkShare probe, so they remain
-daily-only and are naturally excluded from complete-window research.
+The table contains 9,644,350 complete 48-bar stock-days. Against 9,644,351
+positive-volume daily rows, exactly one complete 5m day is missing:
+`600568.SH / 2011-11-21`. The local 1m/5m archive, BaoStock, mootdx, the earlier
+Tushare call and the current Tushare-compatible proxy all return no complete
+minute data for it. It remains daily-only and is excluded automatically from
+complete-window research. Historical complete-day coverage is
+99.99998963123594%; the latest date, `2026-07-16`, is 3,191/3,191 (100%).
 
-The retired one-time Tushare residual run accepted 495 stock-days (23,760
-rows). At that run's snapshot it reported 357,193 residual candidates, of
-which 357,178 were explicit upstream empty responses. These are historical
-execution metrics, not the current daily-minus-5m count; later BaoStock daily
-repairs changed the daily inventory.
+The full audit has zero invalid 48-bar days, daily/5m OHLC or turnover
+mismatches, 100x volume errors, or non-zero suspended bars. Daily/factor keys
+match exactly; non-positive factors, uncompensated short-interval changes and
+excessive-change symbol-years are all zero. Sixteen raw-price discontinuities
+after 53—990 day suspension/restructuring gaps remain as training-window
+warnings, not factor-contamination failures.
+
+Historical status was also normalized after finding that the old table mixed
+ST labels into `is_suspended` and missed 27 long-suspension ranges. QDP changed
+10,338 rows to suspended and 5,190 rows to tradable. The current invariant is:
+`is_suspended` iff the daily row is absent or its volume is non-positive;
+`is_st` remains independent. All 9,927,671 status rows now pass this check.
 
 ## Storage and Cleanup
 
 - 1m data, 1m-derived features, daily panel, limit-status copy, old dataset
-  generations, qdp_v3, raw/bootstrap/runtime/audit artifacts were deleted.
+  generations, qdp_v3 and obsolete raw/bootstrap artifacts were deleted.
 - Approximately 52.2 GiB of allocated H-drive space was reclaimed.
 - Parquet compression is retained because it reduces disk I/O and storage; it
   is not a second dataset. Validation runs on write batches, not repeated
   cross-source full-table copies.
-- The 5m table is compacted by natural year: 8,269 old shards became 17 files,
-  reducing logical Parquet size from about 6.77 GiB to 5.21 GiB without changing
-  its 472,590,576 rows.
+- The 5m table is compacted by natural year into 17 files, currently about
+  5.09 GiB for 462,928,800 rows.
 - Training packs, memmaps, models and backtests belong to research projects,
   not QDP.
+
+Latest formal full audit:
+`data/qdp_v2/audits/database_audit_20260717T092836+0000.json`.
 
 ## Commands
 
 ```powershell
+$env:PYTHONPATH = 'H:\quant_project\quant_data_platform\src'
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli status --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli list --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli describe market_intraday_5m --json

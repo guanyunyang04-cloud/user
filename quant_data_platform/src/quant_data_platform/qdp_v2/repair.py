@@ -1206,8 +1206,6 @@ def _inspect_prepared_parquets(
         raise ValueError("qdp_v2_repair_prepared_parquet_paths_required")
     _assert_unique_prepared_paths(paths)
     date_column = _date_column(context.manifest)
-    if not date_column:
-        raise QdpV2RepairError("qdp_v2_repair_date_column_missing")
     expected_columns = [str(item.get("name", "")) for item in context.manifest.schema]
     expected_columns = [item for item in expected_columns if item]
     metadata_rows: list[tuple[Path, int]] = []
@@ -1234,6 +1232,17 @@ def _inspect_prepared_parquets(
                 f"qdp_v2_repair_primary_key_columns_missing:{missing_keys}"
             )
         metadata_rows.append((path, row_count))
+
+    if not date_column:
+        return [
+            _PreparedParquetInfo(
+                source_path=path,
+                row_count=row_count,
+                start_date="",
+                end_date="",
+            )
+            for path, row_count in metadata_rows
+        ]
 
     results: list[_PreparedParquetInfo] = []
     quoted_date = _quote_identifier(date_column)
