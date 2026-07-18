@@ -1162,24 +1162,74 @@ def _parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     contract = sub.add_parser("contract", help="Print the fixed current research contract.")
     contract.add_argument("--compact", action="store_true")
+    contract.add_argument("--experiment", choices=("", "structured-path-v1"), default="")
+    diagnose = sub.add_parser("diagnose", help="Stream checkpoint diagnostics without wide predictions.")
+    diagnose.add_argument("--experiment", choices=("structured-path-v1",), default="structured-path-v1")
+    diagnose.add_argument("--source-study-root", type=Path, default=None)
+    diagnose.add_argument("--output-root", type=Path, default=None)
     prepare = sub.add_parser("prepare", help="Build the one daily-only pack and three folds.")
+    prepare.add_argument("--experiment", choices=("", "structured-path-v1"), default="")
     prepare.add_argument("--qdp-root", type=Path, default=QDP_ROOT)
-    prepare.add_argument("--study-root", type=Path, default=STUDY_ROOT)
+    prepare.add_argument("--study-root", type=Path, default=None)
     prepare.add_argument("--store-root", type=Path, default=STORE_ROOT)
     prepare.add_argument("--dry-run", action="store_true")
     run = sub.add_parser("run", help="Run pending folds sequentially.")
-    run.add_argument("--study-root", type=Path, default=STUDY_ROOT)
+    run.add_argument("--experiment", choices=("", "structured-path-v1"), default="")
+    run.add_argument("--study-root", type=Path, default=None)
     run.add_argument("--max-folds", type=int, default=0)
+    run.add_argument("--max-tasks", type=int, default=0)
     status = sub.add_parser("status", help="Report pack and fold progress.")
-    status.add_argument("--study-root", type=Path, default=STUDY_ROOT)
+    status.add_argument("--experiment", choices=("", "structured-path-v1"), default="")
+    status.add_argument("--study-root", type=Path, default=None)
     summarize = sub.add_parser("summarize", help="Aggregate all three completed folds.")
-    summarize.add_argument("--study-root", type=Path, default=STUDY_ROOT)
+    summarize.add_argument("--experiment", choices=("", "structured-path-v1"), default="")
+    summarize.add_argument("--study-root", type=Path, default=None)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    if args.command == "contract":
+    structured = str(getattr(args, "experiment", "")) == "structured-path-v1"
+    if structured:
+        from daily_research.path_policy import seq100_structured_experiment as structured_experiment
+
+        structured_root = Path(args.study_root) if getattr(args, "study_root", None) else structured_experiment.STUDY_ROOT
+        if args.command == "contract":
+            result = structured_experiment.contract()
+            indent = None if args.compact else 2
+        elif args.command == "diagnose":
+            result = structured_experiment.diagnose(
+                source_study_root=(
+                    Path(args.source_study_root)
+                    if args.source_study_root
+                    else structured_experiment.SOURCE_STUDY_ROOT
+                ),
+                output_root=(
+                    Path(args.output_root)
+                    if args.output_root
+                    else structured_experiment.STUDY_ROOT / "diagnostics" / "legacy_checkpoints"
+                ),
+            )
+            indent = 2
+        elif args.command == "prepare":
+            result = structured_experiment.prepare(
+                study_root=structured_root,
+                dry_run=bool(args.dry_run),
+            )
+            indent = 2
+        elif args.command == "run":
+            result = structured_experiment.run(
+                study_root=structured_root,
+                max_tasks=int(args.max_tasks or args.max_folds),
+            )
+            indent = 2
+        elif args.command == "status":
+            result = structured_experiment.status(study_root=structured_root)
+            indent = 2
+        else:
+            result = structured_experiment.summarize(study_root=structured_root)
+            indent = 2
+    elif args.command == "contract":
         result = current_contract()
         indent = None if args.compact else 2
     elif args.command == "prepare" and args.dry_run:
@@ -1188,18 +1238,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.command == "prepare":
         result = prepare_current_study(
             qdp_root=args.qdp_root,
-            study_root=args.study_root,
+            study_root=args.study_root or STUDY_ROOT,
             store_root=args.store_root,
         )
         indent = 2
     elif args.command == "run":
-        result = run_current_study(study_root=args.study_root, max_folds=args.max_folds)
+        result = run_current_study(study_root=args.study_root or STUDY_ROOT, max_folds=args.max_folds)
         indent = 2
     elif args.command == "status":
-        result = status_current_study(study_root=args.study_root)
+        result = status_current_study(study_root=args.study_root or STUDY_ROOT)
         indent = 2
     else:
-        result = summarize_current_study(study_root=args.study_root)
+        result = summarize_current_study(study_root=args.study_root or STUDY_ROOT)
         indent = 2
     print(json.dumps(result, ensure_ascii=False, indent=indent, default=_json_default, allow_nan=False))
     return 0

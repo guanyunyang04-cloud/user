@@ -58,6 +58,7 @@ EVALUATION_MODES = (
 )
 EARLY_STOPPING_METRIC_VALIDATION_RANK_IC = "validation_rank_ic_mean"
 EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS = "development_total_loss"
+EARLY_STOPPING_METRIC_DEVELOPMENT_PRICE_TOTAL_LOSS = "development_price_total_loss"
 EARLY_STOPPING_MODE_MIN = "min"
 EARLY_STOPPING_MODE_MAX = "max"
 EARLY_STOPPING_MODES = (EARLY_STOPPING_MODE_MIN, EARLY_STOPPING_MODE_MAX)
@@ -65,6 +66,7 @@ PATH_VALUE_V2_WAITING_PENALTY = 0.04
 PATH_VALUE_V2_DRAWDOWN_PENALTY = 0.60
 PATH_VALUE_V2_TRANSACTION_COST = 0.002
 PATH_VALUE_V2_TEMPERATURE = 0.03
+PATH_VALUE_V2_EARLIEST_LEGAL_EXIT_DAY = 2
 PATH_VALUE_GRADIENT_PROFILE_SMOOTH = "smooth_current"
 PATH_VALUE_GRADIENT_PROFILE_HARD_ST = "hard_st"
 PATH_VALUE_GRADIENT_PROFILES = (
@@ -126,6 +128,7 @@ UNIFIED_VALUE_TEMPERATURE = 0.03
 RICHER_MODEL_TYPES = {"gru_richer_path_value", "gru_richer_path_value_symbol"}
 OHLCVA_MODEL_TYPES = {"gru_ohlcva_path_value"}
 OHLCVA_AUX_MODEL_TYPES = {"gru_ohlcva_aux_path_value"}
+STRUCTURED_TURNOVER_MODEL_TYPES = {"gru_structured_joint_turnover"}
 DIRECT_VALUE_MODEL_TYPES = {"gru_direct_value"}
 PATH_VALUE_MODEL_TYPES = {
     "gru_path_value",
@@ -133,6 +136,7 @@ PATH_VALUE_MODEL_TYPES = {
     "gru_path_value_residual",
     *OHLCVA_MODEL_TYPES,
     *OHLCVA_AUX_MODEL_TYPES,
+    *STRUCTURED_TURNOVER_MODEL_TYPES,
     *RICHER_MODEL_TYPES,
 }
 RESIDUAL_MODEL_TYPES = {"gru_path_value_residual"}
@@ -655,6 +659,21 @@ class SequencePathPackDataset(Dataset):
         label_meta = labels.get("future_ohlc_path") or labels.get("future_ohlcva_path") or {}
         self.price_anchor = _normalize_price_anchor(label_meta)
         self.has_ohlcva_path = self.future_ohlcva_path is not None
+        turnover_supplement = dict(self.manifest.get("relative_turnover_supplement", {}) or {})
+        self.relative_turnover_log_panel = (
+            _open_memmap(turnover_supplement["log_turnover_pct"], dtype="float32")
+            if "log_turnover_pct" in turnover_supplement
+            else None
+        )
+        self.relative_turnover_baseline_panel = (
+            _open_memmap(turnover_supplement["past20_positive_median"], dtype="float32")
+            if "past20_positive_median" in turnover_supplement
+            else None
+        )
+        self.has_relative_turnover_supplement = bool(
+            self.relative_turnover_log_panel is not None
+            and self.relative_turnover_baseline_panel is not None
+        )
         self.ohlcva_path_fields = list(labels.get("future_ohlcva_path", {}).get("fields", []) or PATH_OHLCVA_FIELDS)
         output_path_dim = 6 if self.future_ohlcva_path is not None else 4
         self.path_summary = _open_memmap(labels["path_summary"], dtype="float32") if "path_summary" in labels else None
@@ -913,12 +932,26 @@ class SequencePathPackDataset(Dataset):
             np.asarray([date_idx], dtype=np.int64),
             np.asarray([symbol_idx], dtype=np.int64),
         )[0]
+        y_activity_path = None
+        if self.has_relative_turnover_supplement:
+            future_log = np.asarray(
+                self.relative_turnover_log_panel[
+                    date_idx + 1 : date_idx + 1 + self.forward_days,
+                    symbol_idx,
+                ],
+                dtype=np.float32,
+            )
+            baseline = np.float32(self.relative_turnover_baseline_panel[date_idx, symbol_idx])
+            y_activity_path = future_log - baseline
         return {
             "x": torch.from_numpy(x),
             "y_path": torch.from_numpy(y_path),
             "y_ohlcva_path": torch.from_numpy(y_ohlcva_path),
             "y_richer_path": torch.from_numpy(y_richer_path),
             "y_summary": torch.from_numpy(y_summary),
+            "y_activity_path": (
+                torch.from_numpy(y_activity_path) if y_activity_path is not None else None
+            ),
             "date_idx": int(date_idx),
             "symbol_idx": int(symbol_idx),
             "trade_date": str(row["trade_date"]),
@@ -935,6 +968,7 @@ class SequencePathPackDataset(Dataset):
         include_metadata: bool = True,
         include_observation: bool = True,
         include_execution: bool = True,
+        include_activity_path: bool = False,
     ) -> dict[str, Any]:
         idx = np.asarray(indices, dtype=np.int64)
         if idx.ndim != 1 or idx.size == 0:
@@ -992,6 +1026,22 @@ class SequencePathPackDataset(Dataset):
         if y_ohlcva_path is not None and int(y_ohlcva_path.shape[-1]) > 4 and bool((~va_aux_valid).any()):
             y_ohlcva_path[~va_aux_valid, :, 4:] = np.nan
         y_richer_path = self._future_richer_path_batch(y_path, date_idx, symbol_idx) if bool(include_richer_path) else None
+        y_activity_path = None
+        if bool(include_activity_path):
+            if not self.has_relative_turnover_supplement:
+                raise ValueError("structured turnover training requires relative_turnover_supplement")
+            future_log = self._future_float_panel_batch(
+                self.relative_turnover_log_panel,
+                date_idx,
+                symbol_idx,
+                days=self.forward_days,
+            )
+            assert future_log is not None and self.relative_turnover_baseline_panel is not None
+            baseline = np.asarray(
+                self.relative_turnover_baseline_panel[date_idx, symbol_idx],
+                dtype=np.float32,
+            ).reshape(-1, 1)
+            y_activity_path = future_log - baseline
         y_tradable_path = self._future_mask_batch(self.tradable_panel, date_idx, symbol_idx)
         y_observed_price_path = (
             self._future_mask_batch(self.observed_price_panel, date_idx, symbol_idx)
@@ -1044,6 +1094,9 @@ class SequencePathPackDataset(Dataset):
         batch["y_ohlcva_path"] = torch.from_numpy(y_ohlcva_path) if y_ohlcva_path is not None else None
         batch["y_richer_path"] = torch.from_numpy(y_richer_path) if y_richer_path is not None else None
         batch["y_summary"] = torch.from_numpy(y_summary) if y_summary is not None else None
+        batch["y_activity_path"] = (
+            torch.from_numpy(y_activity_path) if y_activity_path is not None else None
+        )
         batch["y_tradable_path"] = torch.from_numpy(y_tradable_path) if y_tradable_path is not None else None
         batch["y_observed_price_path"] = (
             torch.from_numpy(y_observed_price_path) if y_observed_price_path is not None else None
@@ -1290,6 +1343,7 @@ class SequencePathModel(nn.Module):
             "gru_path_value_residual",
             "gru_ohlcva_path_value",
             "gru_ohlcva_aux_path_value",
+            "gru_structured_joint_turnover",
             "gru_richer_path_value",
             "gru_richer_path_value_symbol",
             "gru_direct_value",
@@ -1298,7 +1352,7 @@ class SequencePathModel(nn.Module):
             raise ValueError(
                 "model_type must be gru_last, gru_attention, gru_path_value, gru_path_value_symbol, "
                 "gru_path_value_residual, gru_ohlcva_path_value, gru_ohlcva_aux_path_value, gru_richer_path_value, "
-                "gru_richer_path_value_symbol, or gru_direct_value"
+                "gru_richer_path_value_symbol, gru_structured_joint_turnover, or gru_direct_value"
             )
         self.model_type = normalized_model_type
         self.uses_derived_path_value = normalized_model_type in PATH_VALUE_MODEL_TYPES
@@ -1308,6 +1362,7 @@ class SequencePathModel(nn.Module):
         self.uses_richer_path = normalized_model_type in RICHER_MODEL_TYPES
         self.uses_ohlcva_path = normalized_model_type in OHLCVA_MODEL_TYPES
         self.uses_ohlcva_aux_path = normalized_model_type in OHLCVA_AUX_MODEL_TYPES
+        self.uses_structured_turnover = normalized_model_type in STRUCTURED_TURNOVER_MODEL_TYPES
         self.input_norm = nn.LayerNorm(input_dim)
         self.proj = nn.Linear(input_dim, hidden_dim)
         self.encoder = nn.GRU(
@@ -1339,7 +1394,35 @@ class SequencePathModel(nn.Module):
             if self.uses_ohlcva_aux_path
             else self.path_dim
         )
-        self.path_head = None if self.uses_direct_value else nn.Linear(head_dim, int(forward_days) * self.richer_path_dim)
+        self.path_head = (
+            None
+            if self.uses_direct_value or self.uses_structured_turnover
+            else nn.Linear(head_dim, int(forward_days) * self.richer_path_dim)
+        )
+        if self.uses_structured_turnover:
+            if self.uses_symbol_embedding:
+                raise ValueError("structured turnover model does not accept symbol embeddings")
+            self.structured_context = nn.Linear(int(hidden_dim) * 2, int(hidden_dim))
+            self.horizon_embedding = nn.Embedding(int(forward_days), 32)
+            self.decoder_input = nn.Linear(int(hidden_dim) + 32, int(hidden_dim))
+            self.future_decoder = nn.GRU(
+                input_size=int(hidden_dim),
+                hidden_size=int(hidden_dim),
+                num_layers=max(int(layers), 1),
+                batch_first=True,
+                dropout=float(dropout) if int(layers) > 1 else 0.0,
+            )
+            self.price_geometry_head = nn.Linear(int(hidden_dim), 4)
+            self.turnover_head = nn.Linear(int(hidden_dim), 1)
+            with torch.no_grad():
+                self.price_geometry_head.bias[2:].fill_(-3.0)
+        else:
+            self.structured_context = None
+            self.horizon_embedding = None
+            self.decoder_input = None
+            self.future_decoder = None
+            self.price_geometry_head = None
+            self.turnover_head = None
         if self.uses_derived_path_value:
             self.summary_head = None
             self.score_head = None
@@ -1356,7 +1439,37 @@ class SequencePathModel(nn.Module):
     def forward(self, x: torch.Tensor, symbol_idx: torch.Tensor | None = None) -> dict[str, torch.Tensor]:
         z = self.input_norm(x)
         z = F.gelu(self.proj(z))
-        encoded, _ = self.encoder(z)
+        encoded, encoder_hidden = self.encoder(z)
+        if self.uses_structured_turnover:
+            assert self.structured_context is not None
+            assert self.horizon_embedding is not None
+            assert self.decoder_input is not None
+            assert self.future_decoder is not None
+            assert self.price_geometry_head is not None
+            assert self.turnover_head is not None
+            attention_weights = torch.softmax(self.attention(encoded).squeeze(-1), dim=1)
+            attention_context = torch.sum(encoded * attention_weights.unsqueeze(-1), dim=1)
+            context = torch.tanh(
+                self.structured_context(torch.cat([encoded[:, -1, :], attention_context], dim=1))
+            )
+            horizons = torch.arange(self.forward_days, device=x.device, dtype=torch.long)
+            horizon_tokens = self.horizon_embedding(horizons).unsqueeze(0).expand(int(x.shape[0]), -1, -1)
+            decoder_inputs = F.gelu(
+                self.decoder_input(
+                    torch.cat(
+                        [context.unsqueeze(1).expand(-1, self.forward_days, -1), horizon_tokens],
+                        dim=2,
+                    )
+                )
+            )
+            future_states, _ = self.future_decoder(decoder_inputs, encoder_hidden)
+            raw_geometry = self.price_geometry_head(self.dropout(future_states))
+            future_geometry, future_path = _structured_geometry_to_ohlc_torch(raw_geometry)
+            return {
+                "future_path": future_path,
+                "future_price_geometry": future_geometry,
+                "future_activity_path": self.turnover_head(future_states).squeeze(-1),
+            }
         if self.model_type == "gru_attention":
             weights = torch.softmax(self.attention(encoded).squeeze(-1), dim=1)
             pooled = torch.sum(encoded * weights.unsqueeze(-1), dim=1)
@@ -1391,6 +1504,57 @@ class SequencePathModel(nn.Module):
             "path_summary": self.summary_head(pooled).view(-1, self.summary_dim),
             "score": self.score_head(pooled).squeeze(-1),
         }
+
+
+def _structured_geometry_to_ohlc_torch(
+    raw_geometry: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Transform unconstrained daily geometry into a continuous legal OHLC path."""
+
+    if raw_geometry.ndim != 3 or int(raw_geometry.shape[-1]) != 4:
+        raise ValueError("raw_geometry must have shape [batch, forward_days, 4]")
+    with torch.amp.autocast(device_type=raw_geometry.device.type, enabled=False):
+        raw = raw_geometry.float()
+        gap = 0.25 * torch.tanh(raw[:, :, 0])
+        body = 0.25 * torch.tanh(raw[:, :, 1])
+        upper = 0.25 * torch.sigmoid(raw[:, :, 2])
+        lower = 0.25 * torch.sigmoid(raw[:, :, 3])
+        geometry = torch.stack([gap, body, upper, lower], dim=2)
+        close_log = torch.cumsum(gap + body, dim=1)
+        previous_close_log = torch.cat(
+            [torch.zeros_like(close_log[:, :1]), close_log[:, :-1]], dim=1
+        )
+        open_log = previous_close_log + gap
+        high_log = torch.maximum(open_log, close_log) + upper
+        low_log = torch.minimum(open_log, close_log) - lower
+        path = torch.stack(
+            [
+                torch.expm1(open_log),
+                torch.expm1(high_log),
+                torch.expm1(low_log),
+                torch.expm1(close_log),
+            ],
+            dim=2,
+        )
+    return geometry, path
+
+
+def _ohlc_path_to_geometry_torch(path: torch.Tensor) -> torch.Tensor:
+    """Convert today-close-relative OHLC returns to daily log-price geometry."""
+
+    if path.ndim != 3 or int(path.shape[-1]) < 4:
+        raise ValueError("path must have shape [batch, forward_days, >=4]")
+    with torch.amp.autocast(device_type=path.device.type, enabled=False):
+        levels = torch.log(torch.clamp(1.0 + path[:, :, :4].float(), min=1.0e-6))
+        open_log, high_log, low_log, close_log = [levels[:, :, idx] for idx in range(4)]
+        previous_close_log = torch.cat(
+            [torch.zeros_like(close_log[:, :1]), close_log[:, :-1]], dim=1
+        )
+        gap = open_log - previous_close_log
+        body = close_log - open_log
+        upper = torch.clamp(high_log - torch.maximum(open_log, close_log), min=0.0)
+        lower = torch.clamp(torch.minimum(open_log, close_log) - low_log, min=0.0)
+        return torch.stack([gap, body, upper, lower], dim=2)
 
 
 def _finite_smooth_l1(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -1478,6 +1642,10 @@ def _loss_parts_payload(
     price_delta_loss: torch.Tensor,
     va_level_loss: torch.Tensor,
     va_delta_loss: torch.Tensor,
+    geometry_loss: torch.Tensor,
+    utility_curve_loss: torch.Tensor,
+    turnover_level_loss: torch.Tensor,
+    turnover_delta_loss: torch.Tensor,
     value_loss: torch.Tensor,
     rank_loss: torch.Tensor,
     residual_penalty: torch.Tensor,
@@ -1491,6 +1659,10 @@ def _loss_parts_payload(
         "price_delta_loss": price_delta_loss,
         "va_level_loss": va_level_loss,
         "va_delta_loss": va_delta_loss,
+        "geometry_loss": geometry_loss,
+        "utility_curve_loss": utility_curve_loss,
+        "turnover_level_loss": turnover_level_loss,
+        "turnover_delta_loss": turnover_delta_loss,
         "value_loss": value_loss,
         "rank_loss": rank_loss,
         "residual_penalty": residual_penalty,
@@ -1654,6 +1826,7 @@ def _multi_horizon_ohlc_summary_features(
     price_anchor: str,
     include_full_horizon: bool = True,
     tradable_path: torch.Tensor | None = None,
+    earliest_exit_day: int = PATH_VALUE_V2_EARLIEST_LEGAL_EXIT_DAY,
 ) -> torch.Tensor:
     path = _legacy_entry_relative_path_torch(path[:, :, :4], price_anchor=price_anchor)
     batch_size = int(path.shape[0])
@@ -1698,7 +1871,9 @@ def _multi_horizon_ohlc_summary_features(
         - float(PATH_VALUE_V2_WAITING_PENALTY) * waiting.unsqueeze(0)
         - float(PATH_VALUE_V2_TRANSACTION_COST)
     )
-    candidate_valid = valid_by_horizon
+    first_legal_idx = max(int(earliest_exit_day) - 1, 0)
+    legal_exit = day_idx.view(1, forward_days, 1) >= first_legal_idx
+    candidate_valid = valid_by_horizon & legal_exit
     if tradable_path is not None:
         if tuple(tradable_path.shape) != (batch_size, forward_days):
             raise ValueError(f"tradable_path must have shape {(batch_size, forward_days)}")
@@ -1851,6 +2026,7 @@ def _compute_loss(
     *,
     y_ohlcva_path: torch.Tensor | None = None,
     y_richer_path: torch.Tensor | None = None,
+    y_activity_path: torch.Tensor | None = None,
     value_index: int,
     path_weight: float = 0.35,
     summary_weight: float = 0.35,
@@ -1861,6 +2037,10 @@ def _compute_loss(
     price_delta_weight: float = 0.0,
     va_level_weight: float = 0.0,
     va_delta_weight: float = 0.0,
+    geometry_weight: float = 0.0,
+    utility_curve_weight: float = 0.0,
+    turnover_level_weight: float = 0.0,
+    turnover_delta_weight: float = 0.0,
     residual_weight: float = 0.25,
     residual_penalty_weight: float = 0.01,
     price_anchor: str = "next_open",
@@ -1894,6 +2074,10 @@ def _compute_loss(
         price_delta_loss = score.sum() * 0.0
         va_level_loss = score.sum() * 0.0
         va_delta_loss = score.sum() * 0.0
+        geometry_loss = score.sum() * 0.0
+        utility_curve_loss = score.sum() * 0.0
+        turnover_level_loss = score.sum() * 0.0
+        turnover_delta_loss = score.sum() * 0.0
         residual_penalty = score.sum() * 0.0
         value_loss = _finite_smooth_l1(score, value_target)
         rank_loss = (
@@ -1916,6 +2100,10 @@ def _compute_loss(
             + float(price_delta_weight) * price_delta_loss
             + float(va_level_weight) * va_level_loss
             + float(va_delta_weight) * va_delta_loss
+            + float(geometry_weight) * geometry_loss
+            + float(utility_curve_weight) * utility_curve_loss
+            + float(turnover_level_weight) * turnover_level_loss
+            + float(turnover_delta_weight) * turnover_delta_loss
             + float(residual_penalty_weight) * residual_penalty
         )
         parts = _loss_parts_payload(
@@ -1926,6 +2114,10 @@ def _compute_loss(
             price_delta_loss=price_delta_loss,
             va_level_loss=va_level_loss,
             va_delta_loss=va_delta_loss,
+            geometry_loss=geometry_loss,
+            utility_curve_loss=utility_curve_loss,
+            turnover_level_loss=turnover_level_loss,
+            turnover_delta_loss=turnover_delta_loss,
             value_loss=value_loss,
             rank_loss=rank_loss,
             residual_penalty=residual_penalty,
@@ -1952,6 +2144,10 @@ def _compute_loss(
         )
     va_level_loss = outputs["future_path"].sum() * 0.0
     va_delta_loss = outputs["future_path"].sum() * 0.0
+    geometry_loss = outputs["future_path"].sum() * 0.0
+    utility_curve_loss = outputs["future_path"].sum() * 0.0
+    turnover_level_loss = outputs["future_path"].sum() * 0.0
+    turnover_delta_loss = outputs["future_path"].sum() * 0.0
     need_va_diagnostics = bool(
         float(va_level_weight) != 0.0
         or float(va_delta_weight) != 0.0
@@ -1965,6 +2161,33 @@ def _compute_loss(
         va_delta_loss = _finite_smooth_l1(
             _delta_along_days(predicted_aux[:, :, 4:6]),
             _delta_along_days(y_ohlcva_path[:, :, 4:6]),
+        )
+    if "future_price_geometry" in outputs:
+        target_geometry = _ohlc_path_to_geometry_torch(y_path[:, :, :4])
+        geometry_loss = _finite_smooth_l1(outputs["future_price_geometry"], target_geometry)
+    if float(utility_curve_weight) != 0.0:
+        predicted_curve, _ = _candidate_path_values_torch(outputs["future_path"][:, :, :4])
+        target_curve, _ = _candidate_path_values_torch(
+            y_path[:, :, :4],
+            tradable_path=y_tradable_path,
+        )
+        utility_curve_loss = _finite_smooth_l1(
+            predicted_curve[:, PATH_VALUE_V2_EARLIEST_LEGAL_EXIT_DAY - 1 :],
+            target_curve[:, PATH_VALUE_V2_EARLIEST_LEGAL_EXIT_DAY - 1 :],
+        )
+    if "future_activity_path" in outputs:
+        if y_activity_path is None:
+            raise ValueError("future_activity_path output requires y_activity_path")
+        predicted_activity = outputs["future_activity_path"]
+        if tuple(predicted_activity.shape) != tuple(y_activity_path.shape):
+            raise ValueError(
+                f"activity path shape mismatch: predicted={tuple(predicted_activity.shape)} "
+                f"target={tuple(y_activity_path.shape)}"
+            )
+        turnover_level_loss = _finite_smooth_l1(predicted_activity, y_activity_path)
+        turnover_delta_loss = _finite_smooth_l1(
+            _delta_along_days(predicted_activity.unsqueeze(-1)),
+            _delta_along_days(y_activity_path.unsqueeze(-1)),
         )
     richer_loss = outputs["future_path"].sum() * 0.0
     if float(richer_weight) != 0.0 and y_richer_path is not None and "future_richer_path" in outputs:
@@ -2023,6 +2246,10 @@ def _compute_loss(
         + float(price_delta_weight) * price_delta_loss
         + float(va_level_weight) * va_level_loss
         + float(va_delta_weight) * va_delta_loss
+        + float(geometry_weight) * geometry_loss
+        + float(utility_curve_weight) * utility_curve_loss
+        + float(turnover_level_weight) * turnover_level_loss
+        + float(turnover_delta_weight) * turnover_delta_loss
         + float(residual_penalty_weight) * residual_penalty
     )
     parts = _loss_parts_payload(
@@ -2033,6 +2260,10 @@ def _compute_loss(
         price_delta_loss=price_delta_loss,
         va_level_loss=va_level_loss,
         va_delta_loss=va_delta_loss,
+        geometry_loss=geometry_loss,
+        utility_curve_loss=utility_curve_loss,
+        turnover_level_loss=turnover_level_loss,
+        turnover_delta_loss=turnover_delta_loss,
         value_loss=value_loss,
         rank_loss=rank_loss,
         residual_penalty=residual_penalty,
@@ -2048,6 +2279,7 @@ def _batch_to_device(
 ) -> tuple[
     torch.Tensor,
     torch.Tensor,
+    torch.Tensor | None,
     torch.Tensor | None,
     torch.Tensor | None,
     torch.Tensor | None,
@@ -2071,9 +2303,14 @@ def _batch_to_device(
         if batch.get("y_summary") is not None
         else None
     )
+    y_activity_path = (
+        batch["y_activity_path"].to(device, non_blocking=device.type == "cuda")
+        if batch.get("y_activity_path") is not None
+        else None
+    )
     date_idx = batch["date_idx"].to(device, non_blocking=device.type == "cuda")
     symbol_idx = batch["symbol_idx"].to(device, non_blocking=device.type == "cuda")
-    return x, y_path, y_ohlcva_path, y_richer_path, y_summary, date_idx, symbol_idx
+    return x, y_path, y_ohlcva_path, y_richer_path, y_summary, y_activity_path, date_idx, symbol_idx
 
 
 def _iter_index_batches(dataset: SequencePathPackDataset, *, batch_size: int, shuffle: bool, seed: int) -> Iterator[list[int]]:
@@ -2157,7 +2394,7 @@ def _run_global_tail_rank_step(
         if batch.get("y_tradable_path") is not None
         else None
     )
-    x, y_path, _y_ohlcva, _y_richer, _y_summary, date_idx, symbol_idx = _batch_to_device(batch, device)
+    x, y_path, _y_ohlcva, _y_richer, _y_summary, _y_activity, date_idx, symbol_idx = _batch_to_device(batch, device)
     optimizer.zero_grad(set_to_none=True)
     with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
         outputs = model(x, symbol_idx=symbol_idx)
@@ -2858,6 +3095,7 @@ def _candidate_path_values_torch(
     path: torch.Tensor,
     *,
     tradable_path: torch.Tensor | None = None,
+    earliest_exit_day: int = PATH_VALUE_V2_EARLIEST_LEGAL_EXIT_DAY,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     forward_days = int(path.shape[1])
     close_ret = path[:, :, 3]
@@ -2872,6 +3110,12 @@ def _candidate_path_values_torch(
         - float(PATH_VALUE_V2_WAITING_PENALTY) * waiting
         - float(PATH_VALUE_V2_TRANSACTION_COST)
     )
+    first_legal_idx = max(int(earliest_exit_day) - 1, 0)
+    if first_legal_idx >= forward_days:
+        raise ValueError("earliest_exit_day must be within the prediction horizon")
+    if first_legal_idx:
+        legal = day.view(1, -1) >= float(first_legal_idx)
+        candidate = torch.where(legal, candidate, torch.full_like(candidate, float("-inf")))
     if tradable_path is not None:
         if tuple(tradable_path.shape) != tuple(candidate.shape):
             raise ValueError(f"tradable_path must have shape {tuple(candidate.shape)}")
@@ -3015,6 +3259,7 @@ def _derive_path_summary_torch(
     price_anchor: str = "next_open",
     path_value_gradient_profile: str = PATH_VALUE_GRADIENT_PROFILE_SMOOTH,
     tradable_path: torch.Tensor | None = None,
+    earliest_exit_day: int = PATH_VALUE_V2_EARLIEST_LEGAL_EXIT_DAY,
 ) -> torch.Tensor:
     if int(path.shape[2]) >= 6:
         if tradable_path is not None:
@@ -3039,7 +3284,11 @@ def _derive_path_summary_torch(
     drawdown_after_peak = (1.0 + min_after_peak) / torch.clamp(1.0 + max_ret, min=1.0e-6) - 1.0
     time_above = (close_ret > 0.0).to(path.dtype).mean(dim=1)
     time_below = (close_ret < 0.0).to(path.dtype).mean(dim=1)
-    candidate, pre_exit_drawdown = _candidate_path_values_torch(path, tradable_path=tradable_path)
+    candidate, pre_exit_drawdown = _candidate_path_values_torch(
+        path,
+        tradable_path=tradable_path,
+        earliest_exit_day=earliest_exit_day,
+    )
     best_value_hard, best_idx = torch.max(candidate, dim=1)
     if smooth_value:
         best_value = _path_value_with_gradient_profile(
@@ -3090,6 +3339,7 @@ def _derive_path_summary_numpy(
     *,
     price_anchor: str = "next_open",
     tradable_path: np.ndarray | None = None,
+    earliest_exit_day: int = PATH_VALUE_V2_EARLIEST_LEGAL_EXIT_DAY,
 ) -> np.ndarray:
     values = np.asarray(path, dtype=np.float32)
     if values.ndim != 3 or values.shape[2] not in {4, 6}:
@@ -3133,6 +3383,11 @@ def _derive_path_summary_numpy(
         - float(PATH_VALUE_V2_WAITING_PENALTY) * waiting.reshape(1, -1)
         - float(PATH_VALUE_V2_TRANSACTION_COST)
     )
+    first_legal_idx = max(int(earliest_exit_day) - 1, 0)
+    if first_legal_idx >= forward_days:
+        raise ValueError("earliest_exit_day must be within the prediction horizon")
+    if first_legal_idx:
+        candidate[:, :first_legal_idx] = -np.inf
     tradable = None if tradable_path is None else np.asarray(tradable_path, dtype=bool)
     if tradable is not None:
         if tradable.shape != candidate.shape:
@@ -3816,7 +4071,7 @@ def _predict_split(
         if true_tradable_np is not None:
             tradable_path_count += int(true_tradable_np.sum())
             tradable_path_total += int(true_tradable_np.size)
-        x, y_path, y_ohlcva_path, _y_richer_path, y_summary, _date_idx, symbol_idx = _batch_to_device(batch, device)
+        x, y_path, y_ohlcva_path, _y_richer_path, y_summary, _y_activity_path, _date_idx, symbol_idx = _batch_to_device(batch, device)
         target_path = y_ohlcva_path if output_path_dim >= 6 and y_ohlcva_path is not None else y_path
         trade_dates = list(batch["trade_date"])
         symbols = list(batch["symbol"])
@@ -4227,6 +4482,10 @@ class TrainConfig:
     early_stopping_mode: str = ""
     minimum_complete_epochs: int = 1
     development_contract: Path | None = None
+    geometry_loss_weight: float = 0.0
+    utility_curve_loss_weight: float = 0.0
+    turnover_level_loss_weight: float = 0.0
+    turnover_delta_loss_weight: float = 0.0
 
 
 def _resolved_training_config(config: TrainConfig, *, evaluation_mode: str) -> dict[str, Any]:
@@ -4263,9 +4522,13 @@ def _validate_evaluation_mode(config: TrainConfig) -> str:
             raise ValueError("development requires max_samples_per_split=0 so every fold uses full training data")
         if int(config.early_stopping_patience) <= 0:
             raise ValueError("development requires early_stopping_patience > 0")
-        if metric != EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS:
+        if metric not in {
+            EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS,
+            EARLY_STOPPING_METRIC_DEVELOPMENT_PRICE_TOTAL_LOSS,
+        }:
             raise ValueError(
-                "development requires early_stopping_metric=development_total_loss"
+                "development requires early_stopping_metric=development_total_loss or "
+                "development_price_total_loss"
             )
         if stopping_mode != EARLY_STOPPING_MODE_MIN:
             raise ValueError("development requires early_stopping_mode=min")
@@ -4301,7 +4564,10 @@ def _validated_development_contract(path: Path) -> dict[str, Any]:
         raise ValueError("development contract must declare train/development split roles")
     early = dict(semantic_payload.get("early_stopping", {}) or {})
     if (
-        str(early.get("metric", "")) != EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS
+        str(early.get("metric", "")) not in {
+            EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS,
+            EARLY_STOPPING_METRIC_DEVELOPMENT_PRICE_TOTAL_LOSS,
+        }
         or str(early.get("mode", "")) != EARLY_STOPPING_MODE_MIN
         or int(early.get("minimum_complete_epochs", 0)) < 1
         or not bool(early.get("restore_best_checkpoint", False))
@@ -4479,10 +4745,25 @@ VALIDATION_LOSS_KEYS = (
     "price_delta_loss",
     "va_level_loss",
     "va_delta_loss",
+    "geometry_loss",
+    "utility_curve_loss",
+    "turnover_level_loss",
+    "turnover_delta_loss",
     "value_loss",
     "rank_loss",
     "residual_penalty",
 )
+
+
+def _development_price_total_loss(parts: Mapping[str, float]) -> float:
+    """Checkpoint selector shared by both legal-path profiles; auxiliaries are excluded."""
+
+    return float(
+        0.45 * float(parts["path_loss"])
+        + 0.20 * float(parts["summary_loss"])
+        + 0.20 * float(parts["value_loss"])
+        + 0.15 * float(parts["rank_loss"])
+    )
 
 
 @torch.no_grad()
@@ -4503,6 +4784,7 @@ def _evaluate_development_loss(
     uses_ohlcva_path = bool(getattr(model, "uses_ohlcva_path", False))
     uses_ohlcva_aux_path = bool(getattr(model, "uses_ohlcva_aux_path", False))
     uses_richer_path = bool(getattr(model, "uses_richer_path", False))
+    uses_activity_path = bool(getattr(model, "uses_structured_turnover", False))
     totals = torch.zeros(len(VALIDATION_LOSS_KEYS), device=device, dtype=torch.float64)
     sample_count = 0
     batch_count = 0
@@ -4528,6 +4810,7 @@ def _evaluate_development_loss(
                 "include_metadata": False,
                 "include_observation": False,
                 "include_execution": False,
+                "include_activity_path": uses_activity_path,
             },
             prefetch_batches=int(config.prefetch_batches) if device.type == "cuda" else 0,
             pin_memory=bool(device.type == "cuda" and int(config.prefetch_batches) > 0),
@@ -4538,7 +4821,7 @@ def _evaluate_development_loss(
                 if batch.get("y_tradable_path") is not None
                 else None
             )
-            x, y_path, y_ohlcva_path, y_richer_path, y_summary, date_idx, symbol_idx = _batch_to_device(
+            x, y_path, y_ohlcva_path, y_richer_path, y_summary, y_activity_path, date_idx, symbol_idx = _batch_to_device(
                 batch, device
             )
             target_path = y_ohlcva_path if uses_ohlcva_path and y_ohlcva_path is not None else y_path
@@ -4551,6 +4834,7 @@ def _evaluate_development_loss(
                     date_idx,
                     y_ohlcva_path=y_ohlcva_path,
                     y_richer_path=y_richer_path,
+                    y_activity_path=y_activity_path,
                     value_index=dataset.value_index,
                     path_weight=float(config.path_loss_weight),
                     path_loss_profile=str(config.path_loss_profile),
@@ -4562,6 +4846,10 @@ def _evaluate_development_loss(
                     price_delta_weight=float(config.price_delta_loss_weight),
                     va_level_weight=float(config.va_level_loss_weight),
                     va_delta_weight=float(config.va_delta_loss_weight),
+                    geometry_weight=float(config.geometry_loss_weight),
+                    utility_curve_weight=float(config.utility_curve_loss_weight),
+                    turnover_level_weight=float(config.turnover_level_loss_weight),
+                    turnover_delta_weight=float(config.turnover_delta_loss_weight),
                     residual_weight=float(config.residual_score_weight),
                     residual_penalty_weight=float(config.residual_penalty_weight),
                     price_anchor=dataset.price_anchor,
@@ -4579,7 +4867,7 @@ def _evaluate_development_loss(
             )
             sample_count += current_count
             batch_count += 1
-            del batch, x, y_path, y_ohlcva_path, y_richer_path, y_summary, y_tradable_path
+            del batch, x, y_path, y_ohlcva_path, y_richer_path, y_summary, y_activity_path, y_tradable_path
             del date_idx, symbol_idx, target_path, outputs, _loss, parts
             last_trim_batch, trim_event = _maybe_trim_training_working_set(
                 batch_count=batch_count,
@@ -4598,6 +4886,9 @@ def _evaluate_development_loss(
         key: float(value)
         for key, value in zip(VALIDATION_LOSS_KEYS, means.tolist(), strict=True)
     }
+    result[EARLY_STOPPING_METRIC_DEVELOPMENT_PRICE_TOTAL_LOSS] = (
+        _development_price_total_loss(result)
+    )
     if not np.isfinite(result["loss"]):
         raise ValueError("development_total_loss must be finite")
     result.update(
@@ -4616,6 +4907,9 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     evaluation_mode = _validate_evaluation_mode(config)
     path_value_gradient_profile = _normalize_path_value_gradient_profile(config.path_value_gradient_profile)
     rank_training_profile = _normalize_rank_training_profile(config.rank_training_profile)
+    development_selector = str(
+        config.early_stopping_metric or EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS
+    ).strip().lower()
     if rank_training_profile == RANK_TRAINING_PROFILE_GLOBAL_TAIL_512:
         if int(config.rank_batch_size) != 512:
             raise ValueError("global_tail_512 requires rank_batch_size=512")
@@ -4740,6 +5034,11 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             raise ValueError("standard evaluation requires non-empty validation and test splits")
     if str(config.model_type) in (OHLCVA_MODEL_TYPES | OHLCVA_AUX_MODEL_TYPES) and not bool(train_ds.has_ohlcva_path):
         raise ValueError(f"model_type={config.model_type} requires a pack with label_arrays.future_ohlcva_path")
+    if str(config.model_type) in STRUCTURED_TURNOVER_MODEL_TYPES:
+        if not bool(train_ds.has_relative_turnover_supplement):
+            raise ValueError("structured turnover model requires relative_turnover_supplement")
+        if str(train_ds.price_anchor) != "today_close":
+            raise ValueError("structured OHLC reconstruction requires price_anchor=today_close")
     model = SequencePathModel(
         input_dim=train_ds.input_dim,
         hidden_dim=int(config.hidden_dim),
@@ -4758,6 +5057,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     uses_ohlcva_path = bool(getattr(model, "uses_ohlcva_path", False))
     uses_ohlcva_aux_path = bool(getattr(model, "uses_ohlcva_aux_path", False))
     uses_richer_path = bool(getattr(model, "uses_richer_path", False))
+    uses_activity_path = bool(getattr(model, "uses_structured_turnover", False))
     if rank_training_profile == RANK_TRAINING_PROFILE_GLOBAL_TAIL_512 and (
         not uses_derived_path_value or uses_direct_value or uses_ohlcva_path
     ):
@@ -4785,18 +5085,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         epoch_started_at = time.perf_counter()
         _write_json(progress_path, {"status": "training", "epoch": epoch, "updated_at": _now()})
         model.train()
-        loss_total_keys = (
-            "loss",
-            "path_loss",
-            "summary_loss",
-            "richer_loss",
-            "price_delta_loss",
-            "va_level_loss",
-            "va_delta_loss",
-            "value_loss",
-            "rank_loss",
-            "residual_penalty",
-        )
+        loss_total_keys = VALIDATION_LOSS_KEYS
         # Keep scalar diagnostics on-device for the whole epoch.  The former ten
         # ``.cpu().item()`` calls per batch serialized the CUDA stream.
         loss_totals_tensor = torch.zeros(len(loss_total_keys), device=device, dtype=torch.float64)
@@ -4843,6 +5132,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 "include_metadata": False,
                 "include_observation": False,
                 "include_execution": False,
+                "include_activity_path": uses_activity_path,
             },
             prefetch_batches=int(config.prefetch_batches) if device.type == "cuda" else 0,
             pin_memory=bool(device.type == "cuda" and int(config.prefetch_batches) > 0),
@@ -4854,7 +5144,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 if batch.get("y_tradable_path") is not None
                 else None
             )
-            x, y_path, y_ohlcva_path, y_richer_path, y_summary, date_idx, symbol_idx = _batch_to_device(batch, device)
+            x, y_path, y_ohlcva_path, y_richer_path, y_summary, y_activity_path, date_idx, symbol_idx = _batch_to_device(batch, device)
             target_path = y_ohlcva_path if uses_ohlcva_path and y_ohlcva_path is not None else y_path
             del batch
             optimizer.zero_grad(set_to_none=True)
@@ -4867,6 +5157,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     date_idx,
                     y_ohlcva_path=y_ohlcva_path,
                     y_richer_path=y_richer_path,
+                    y_activity_path=y_activity_path,
                     value_index=train_ds.value_index,
                     path_weight=float(config.path_loss_weight),
                     path_loss_profile=str(config.path_loss_profile),
@@ -4882,6 +5173,10 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     price_delta_weight=float(config.price_delta_loss_weight),
                     va_level_weight=float(config.va_level_loss_weight),
                     va_delta_weight=float(config.va_delta_loss_weight),
+                    geometry_weight=float(config.geometry_loss_weight),
+                    utility_curve_weight=float(config.utility_curve_loss_weight),
+                    turnover_level_weight=float(config.turnover_level_loss_weight),
+                    turnover_delta_weight=float(config.turnover_delta_loss_weight),
                     residual_weight=float(config.residual_score_weight),
                     residual_penalty_weight=float(config.residual_penalty_weight),
                     price_anchor=train_ds.price_anchor,
@@ -4939,7 +5234,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                         "updated_at": _now(),
                     },
                 )
-            del x, y_path, y_ohlcva_path, y_richer_path, target_path, y_summary, y_tradable_path, date_idx, symbol_idx, out, loss, parts
+            del x, y_path, y_ohlcva_path, y_richer_path, target_path, y_summary, y_activity_path, y_tradable_path, date_idx, symbol_idx, out, loss, parts
             last_trim_batch, trim_event = _maybe_trim_training_working_set(
                 batch_count=batch_count,
                 last_trim_batch=last_trim_batch,
@@ -5093,13 +5388,18 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 diagnostics_path,
                 {
                     "epoch": int(epoch),
-                    "checkpoint_selector": EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS,
+                    "checkpoint_selector": development_selector,
                     "topk_selects_checkpoint": False,
                     "loss": development_loss,
                     "candidate_diagnostics": "deferred_until_restored_best_checkpoint",
                 },
             )
-            current_development_loss = float(development_loss["loss"])
+            selector_key = (
+                "loss"
+                if development_selector == EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS
+                else development_selector
+            )
+            current_development_loss = float(development_loss[selector_key])
             improved = bool(
                 current_development_loss
                 < best_development_loss - float(config.early_stopping_min_delta)
@@ -5107,6 +5407,9 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             for key in VALIDATION_LOSS_KEYS:
                 history_key = "development_total_loss" if key == "loss" else f"development_{key}"
                 train_row[history_key] = float(development_loss[key])
+            train_row[EARLY_STOPPING_METRIC_DEVELOPMENT_PRICE_TOTAL_LOSS] = float(
+                development_loss[EARLY_STOPPING_METRIC_DEVELOPMENT_PRICE_TOTAL_LOSS]
+            )
             train_row.update(
                 {
                     "development_supervised_sample_count": int(development_loss["sample_count"]),
@@ -5117,7 +5420,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     ),
                     "development_diagnostics_json": str(diagnostics_path.resolve()),
                     "development_candidate_diagnostics": "deferred_until_restored_best_checkpoint",
-                    "checkpoint_policy": "best_development_total_loss",
+                    "checkpoint_policy": f"best_{development_selector}",
                     "is_best": bool(improved),
                 }
             )
@@ -5151,10 +5454,11 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     "best_epoch": int(epoch),
                     "best_optimizer_step": int(best_optimizer_step),
                     "optimizer_step_count": int(optimizer_step_count),
-                    "best_development_total_loss": best_development_loss,
+                    "best_development_metric": development_selector,
+                    "best_development_metric_value": best_development_loss,
                     "development_loss_components": development_loss,
                     "execution_cost_contract_sha256": execution_cost_contract_sha256,
-                    "checkpoint_policy": "best_development_total_loss",
+                    "checkpoint_policy": f"best_{development_selector}",
                 }
                 torch.save(checkpoint_payload, best_path)
             else:
@@ -5164,8 +5468,9 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             progress_payload = {
                 "status": "epoch_completed",
                 "epoch": int(epoch),
-                "development_total_loss": current_development_loss,
-                "best_development_total_loss": float(best_development_loss),
+                "development_metric": development_selector,
+                "development_metric_value": current_development_loss,
+                "best_development_metric_value": float(best_development_loss),
                 "best_epoch": int(best_epoch),
                 "early_stopping_wait": int(epochs_without_improvement),
                 "early_stopping_patience": int(config.early_stopping_patience),
@@ -5201,7 +5506,10 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         )
         if standard_should_stop or development_should_stop:
             stopping_metric_payload = (
-                {"best_development_total_loss": float(best_development_loss)}
+                {
+                    "best_development_metric": development_selector,
+                    "best_development_metric_value": float(best_development_loss),
+                }
                 if evaluation_mode == EVALUATION_MODE_DEVELOPMENT
                 else {"best_validation_rank_ic_mean": float(best_val_ic)}
             )
@@ -5324,7 +5632,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     checkpoint_policy = (
         "final_epoch"
         if evaluation_mode == EVALUATION_MODE_FIXED_OOS
-        else "best_development_total_loss"
+        else f"best_{development_selector}"
         if evaluation_mode == EVALUATION_MODE_DEVELOPMENT
         else "best_validation_rank_ic"
     )
@@ -5435,6 +5743,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "uses_richer_path": bool(getattr(model, "uses_richer_path", False)),
             "uses_ohlcva_path": bool(getattr(model, "uses_ohlcva_path", False)),
             "uses_ohlcva_aux_path": bool(getattr(model, "uses_ohlcva_aux_path", False)),
+            "uses_structured_turnover": bool(getattr(model, "uses_structured_turnover", False)),
             "path_dim": int(getattr(model, "path_dim", 4)),
             "richer_path_dim": int(getattr(model, "richer_path_dim", 4)),
             "richer_path_fields": list(train_ds.richer_path_fields) if bool(getattr(model, "uses_richer_path", False)) else [],
@@ -5457,6 +5766,15 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "summary_profile": str(config.summary_loss_profile),
             "va_level": float(config.va_level_loss_weight),
             "va_delta": float(config.va_delta_loss_weight),
+            "geometry": float(config.geometry_loss_weight),
+            "utility_curve": float(config.utility_curve_loss_weight),
+            "turnover_level": float(config.turnover_level_loss_weight),
+            "turnover_delta": float(config.turnover_delta_loss_weight),
+        },
+        "legal_exit_contract": {
+            "earliest_legal_exit_day": PATH_VALUE_V2_EARLIEST_LEGAL_EXIT_DAY,
+            "exit_argmax_domain": [PATH_VALUE_V2_EARLIEST_LEGAL_EXIT_DAY, int(train_ds.forward_days)],
+            "tie_break": "earliest_legal_day",
         },
         "ranking_contract": {
             "profile": rank_training_profile,
@@ -5477,7 +5795,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         },
         "early_stopping": {
             "metric": (
-                EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS
+                development_selector
                 if evaluation_mode == EVALUATION_MODE_DEVELOPMENT
                 else EARLY_STOPPING_METRIC_VALIDATION_RANK_IC
                 if evaluation_mode == EVALUATION_MODE_STANDARD
@@ -5591,6 +5909,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "gru_path_value_residual",
             "gru_ohlcva_path_value",
             "gru_ohlcva_aux_path_value",
+            "gru_structured_joint_turnover",
             "gru_richer_path_value",
             "gru_richer_path_value_symbol",
             "gru_direct_value",
@@ -5623,6 +5942,10 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument("--price-delta-loss-weight", type=float, default=0.0)
     train.add_argument("--va-level-loss-weight", type=float, default=0.0)
     train.add_argument("--va-delta-loss-weight", type=float, default=0.0)
+    train.add_argument("--geometry-loss-weight", type=float, default=0.0)
+    train.add_argument("--utility-curve-loss-weight", type=float, default=0.0)
+    train.add_argument("--turnover-level-loss-weight", type=float, default=0.0)
+    train.add_argument("--turnover-delta-loss-weight", type=float, default=0.0)
     train.add_argument("--value-loss-weight", type=float, default=0.25)
     train.add_argument("--rank-loss-weight", type=float, default=0.15)
     train.add_argument("--direct-value-horizon", type=int, default=0)
@@ -5735,6 +6058,10 @@ def main(argv: list[str] | None = None) -> int:
         price_delta_loss_weight=float(args.price_delta_loss_weight),
         va_level_loss_weight=float(args.va_level_loss_weight),
         va_delta_loss_weight=float(args.va_delta_loss_weight),
+        geometry_loss_weight=float(args.geometry_loss_weight),
+        utility_curve_loss_weight=float(args.utility_curve_loss_weight),
+        turnover_level_loss_weight=float(args.turnover_level_loss_weight),
+        turnover_delta_loss_weight=float(args.turnover_delta_loss_weight),
         value_loss_weight=float(args.value_loss_weight),
         rank_loss_weight=float(args.rank_loss_weight),
         residual_score_weight=float(args.residual_score_weight),

@@ -8,6 +8,7 @@ import pytest
 import torch
 
 import daily_research.path_policy.qdp_v2_sequence_path_pack as sequence_pack
+import daily_research.path_policy.qdp_v2_sequence_path_training as sequence_training
 from daily_research.path_policy.qdp_v2_raw_rising_path_atlas import (
     RAW_SIGNAL_COLUMNS,
     _add_raw_daily_signals,
@@ -825,6 +826,10 @@ def test_sequence_path_model_outputs_path_summary_and_score() -> None:
         "price_delta_loss",
         "va_level_loss",
         "va_delta_loss",
+        "geometry_loss",
+        "utility_curve_loss",
+        "turnover_level_loss",
+        "turnover_delta_loss",
         "value_loss",
         "rank_loss",
         "residual_penalty",
@@ -960,6 +965,135 @@ def test_path_value_v2_target_excludes_nontradable_exit_days() -> None:
     ).numpy()
     assert np.isnan(numpy_no_exit[0, 8:]).all()
     assert np.isnan(torch_no_exit[0, 8:]).all()
+
+
+def test_path_value_v2_searches_the_legal_domain_instead_of_clamping_day_one() -> None:
+    path = np.zeros((1, 4, 4), dtype=np.float32)
+    path[0, :, 1] = [0.50, 0.02, 0.20, 0.03]
+    path[0, :, 2] = 0.0
+    path[0, :, 3] = [0.50, 0.02, 0.20, 0.03]
+
+    legal_numpy = _derive_path_summary_numpy(path)
+    legal_torch = _derive_path_summary_torch(
+        torch.from_numpy(path), smooth_value=False
+    ).detach().numpy()
+    legacy = _derive_path_summary_numpy(path, earliest_exit_day=1)
+
+    assert legacy[0, 8] == 1.0
+    assert legal_numpy[0, 8] == 3.0
+    assert legal_torch[0, 8] == 3.0
+
+
+def test_path_value_v2_legal_ties_choose_the_earliest_legal_day(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sequence_training, "PATH_VALUE_V2_WAITING_PENALTY", 0.0)
+    path = np.zeros((1, 4, 4), dtype=np.float32)
+    path[0, 1:3, 3] = 0.05
+    path[0, 1:3, 1] = 0.05
+
+    summary = _derive_path_summary_numpy(path)
+
+    assert summary[0, 8] == 2.0
+
+
+def test_path_value_v2_day_one_tradability_does_not_create_a_legal_exit() -> None:
+    path = np.zeros((1, 4, 4), dtype=np.float32)
+    tradable = np.asarray([[True, False, False, False]], dtype=bool)
+
+    numpy_summary = _derive_path_summary_numpy(path, tradable_path=tradable)
+    torch_summary = _derive_path_summary_torch(
+        torch.from_numpy(path),
+        smooth_value=False,
+        tradable_path=torch.from_numpy(tradable),
+    ).detach().numpy()
+
+    assert np.isnan(numpy_summary[0, 8:]).all()
+    assert np.isnan(torch_summary[0, 8:]).all()
+
+
+def test_structured_geometry_round_trip_and_ohlc_legality() -> None:
+    raw = torch.randn(5, 60, 4)
+    geometry, path = sequence_training._structured_geometry_to_ohlc_torch(raw)
+    recovered = sequence_training._ohlc_path_to_geometry_torch(path)
+
+    assert geometry.dtype == torch.float32
+    assert path.dtype == torch.float32
+    assert torch.allclose(geometry, recovered, atol=2.0e-5, rtol=2.0e-5)
+    assert bool(torch.all(path[:, :, 1] >= torch.maximum(path[:, :, 0], path[:, :, 3])))
+    assert bool(torch.all(path[:, :, 2] <= torch.minimum(path[:, :, 0], path[:, :, 3])))
+
+
+def test_structured_turnover_model_has_shared_future_states_and_price_only_score() -> None:
+    model = SequencePathModel(
+        input_dim=32,
+        hidden_dim=16,
+        layers=2,
+        forward_days=60,
+        summary_dim=12,
+        dropout=0.0,
+        model_type="gru_structured_joint_turnover",
+    )
+    out = model(torch.randn(4, 100, 32))
+    assert set(out) == {"future_path", "future_price_geometry", "future_activity_path"}
+    assert out["future_path"].shape == (4, 60, 4)
+    assert out["future_price_geometry"].shape == (4, 60, 4)
+    assert out["future_activity_path"].shape == (4, 60)
+
+    score_before = _derive_path_summary_torch(
+        out["future_path"], smooth_value=False, price_anchor="today_close"
+    )[:, -1]
+    changed = dict(out)
+    changed["future_activity_path"] = out["future_activity_path"] + 10_000.0
+    score_after = _derive_path_summary_torch(
+        changed["future_path"], smooth_value=False, price_anchor="today_close"
+    )[:, -1]
+    assert torch.equal(score_before, score_after)
+
+
+def test_structured_joint_loss_is_finite_and_backpropagates_through_decoder() -> None:
+    model = SequencePathModel(
+        input_dim=32,
+        hidden_dim=16,
+        layers=2,
+        forward_days=10,
+        summary_dim=12,
+        dropout=0.0,
+        model_type="gru_structured_joint_turnover",
+    )
+    x = torch.randn(8, 100, 32)
+    target_raw = torch.randn(8, 10, 4)
+    _target_geometry, y_path = sequence_training._structured_geometry_to_ohlc_torch(target_raw)
+    y_activity = torch.randn(8, 10)
+    y_activity[0, :] = float("nan")
+    tradable = torch.ones(8, 10, dtype=torch.bool)
+    tradable[:, 4] = False
+    out = model(x)
+    loss, parts = _compute_loss(
+        out,
+        y_path.detach(),
+        torch.empty(8, 0),
+        torch.zeros(8, dtype=torch.long),
+        y_activity_path=y_activity,
+        value_index=0,
+        path_weight=0.35,
+        summary_weight=0.20,
+        value_weight=0.15,
+        rank_weight=0.15,
+        geometry_weight=0.10,
+        utility_curve_weight=0.05,
+        turnover_level_weight=0.02,
+        turnover_delta_weight=0.01,
+        price_anchor="today_close",
+        summary_loss_profile=SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC,
+        path_value_gradient_profile=PATH_VALUE_GRADIENT_PROFILE_HARD_ST,
+        y_tradable_path=tradable,
+    )
+    loss.backward()
+    assert torch.isfinite(loss)
+    assert all(np.isfinite(float(parts[key])) for key in parts)
+    assert model.future_decoder.weight_hh_l0.grad is not None
+    assert bool(torch.isfinite(model.future_decoder.weight_hh_l0.grad).all())
 
 
 def test_path_value_v2_realized_plan_reports_exit_timing_regret_and_defers_suspended_exit() -> None:
@@ -1258,6 +1392,10 @@ def test_gru_path_value_model_outputs_only_future_path_and_loss_uses_derived_sco
         "price_delta_loss",
         "va_level_loss",
         "va_delta_loss",
+        "geometry_loss",
+        "utility_curve_loss",
+        "turnover_level_loss",
+        "turnover_delta_loss",
         "value_loss",
         "rank_loss",
         "residual_penalty",

@@ -126,6 +126,10 @@ class TodayClosePathOnlyProfile:
     price_delta_loss_weight: float = 0.0
     va_level_loss_weight: float = 0.02
     va_delta_loss_weight: float = 0.01
+    geometry_loss_weight: float = 0.0
+    utility_curve_loss_weight: float = 0.0
+    turnover_level_loss_weight: float = 0.0
+    turnover_delta_loss_weight: float = 0.0
     value_loss_weight: float = 0.20
     rank_loss_weight: float = 0.15
     rank_max_per_side: int = 64
@@ -190,6 +194,14 @@ def build_todayclose_path_only_train_argv(profile: TodayClosePathOnlyProfile) ->
         str(profile.va_level_loss_weight),
         "--va-delta-loss-weight",
         str(profile.va_delta_loss_weight),
+        "--geometry-loss-weight",
+        str(profile.geometry_loss_weight),
+        "--utility-curve-loss-weight",
+        str(profile.utility_curve_loss_weight),
+        "--turnover-level-loss-weight",
+        str(profile.turnover_level_loss_weight),
+        "--turnover-delta-loss-weight",
+        str(profile.turnover_delta_loss_weight),
         "--value-loss-weight",
         str(profile.value_loss_weight),
         "--rank-loss-weight",

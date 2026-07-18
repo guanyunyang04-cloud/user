@@ -543,6 +543,12 @@ def _compute_fold_training_contract(
         "date_values_sha256": _canonical_json_sha256(list(manifest.get("date_values", []) or [])),
         "symbol_values_sha256": _canonical_json_sha256(list(manifest.get("symbol_values", []) or [])),
     }
+    if manifest.get("relative_turnover_supplement"):
+        payload["relative_turnover_supplement"] = dict(
+            manifest.get("relative_turnover_supplement", {}) or {}
+        )
+    if manifest.get("legal_exit_contract"):
+        payload["legal_exit_contract"] = dict(manifest.get("legal_exit_contract", {}) or {})
     return {
         "schema_version": 1,
         "algorithm": "sha256",
