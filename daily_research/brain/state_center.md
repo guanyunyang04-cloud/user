@@ -49,6 +49,7 @@
 
 ### object `seq100_path_value_research`
 `type`: active_research_program
+`current_conclusion_20260719`: 修复后 QDP 上的 D2-D60 三年滚动重验显示 legal-flat 与 structured-joint-turnover 的等权 Top3 成本后 alpha 分别为 `+4.5883%` 与 `+5.7054%`，但结构化组合三年 close 路径误差均恶化且 2023/2025 退出日坍缩，故预注册一致改进判据未通过、`winner=null`，不做最终拟合或部署变更。
 `state`: candidate-complete v3 已以 `winner=null` 关闭；后续 Q-only 动态 Q 曲线受控对照也已按用户决定提前终止。冻结排名的零训练退出审计已完成，并将上游 QDP 复权因子时序错误确定为当前硬阻塞；仍无可部署 profile，不再训练 soft-exit、续跑 Q-only 或启动 global-tail。
 `baseline_control`: `daily_only_summary_v2_ohlcva_aux_low` 仅是冻结对照，不是 default/champion；`hard_st` 已被正式结果否决。
 `active_concept_surface`: `candidate_complete_pit_input`、`future60_ohlc_path`、`predicted_path_opportunity_score_v2`、`executable_realized_plan_return`、`execution_aligned_soft_exit`；历史字段 `path_trade_value_v2` 只作为 `predicted_path_opportunity_score_v2` 的兼容别名。

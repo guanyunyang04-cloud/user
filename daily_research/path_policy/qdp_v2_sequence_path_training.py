@@ -5383,6 +5383,16 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 path_value_gradient_profile=path_value_gradient_profile,
                 rank_training_profile=rank_training_profile,
             )
+            # Older callers and test doubles return only VALIDATION_LOSS_KEYS.  Keep
+            # that contract valid by deriving the price-only selector locally when
+            # the evaluator has not attached it yet.
+            if EARLY_STOPPING_METRIC_DEVELOPMENT_PRICE_TOTAL_LOSS not in development_loss:
+                development_loss[EARLY_STOPPING_METRIC_DEVELOPMENT_PRICE_TOTAL_LOSS] = (
+                    _development_price_total_loss(development_loss)
+                )
+            development_loss[EARLY_STOPPING_METRIC_DEVELOPMENT_PRICE_TOTAL_LOSS] = float(
+                development_loss[EARLY_STOPPING_METRIC_DEVELOPMENT_PRICE_TOTAL_LOSS]
+            )
             diagnostics_path = epoch_dir / "development_epoch_diagnostics.json"
             _write_json(
                 diagnostics_path,
@@ -5460,6 +5470,9 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     "execution_cost_contract_sha256": execution_cost_contract_sha256,
                     "checkpoint_policy": f"best_{development_selector}",
                 }
+                checkpoint_payload[f"best_{development_selector}"] = float(
+                    best_development_loss
+                )
                 torch.save(checkpoint_payload, best_path)
             else:
                 epochs_without_improvement += 1

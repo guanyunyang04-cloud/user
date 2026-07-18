@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import gc
 import json
 import math
 import os
@@ -164,6 +165,34 @@ def _validate_supplement_manifest(path: Path, pack: Mapping[str, Any]) -> dict[s
     return payload
 
 
+def _promote_supplement_staging(
+    staging: Path,
+    target: Path,
+    pack: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate closed staging files, bind their final paths, and publish once."""
+
+    manifest_path = staging / "manifest.json"
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"incomplete relative turnover staging: {manifest_path}")
+    payload = _read_json(manifest_path)
+    for key in ("log_turnover_pct", "past20_positive_median"):
+        meta = dict(payload.get(key, {}) or {})
+        staged_file = staging / Path(str(meta.get("path", "") or "")).name
+        if not staged_file.is_file():
+            raise FileNotFoundError(f"missing staged supplement file: {staged_file}")
+        if _file_sha256(staged_file) != str(meta.get("sha256", "")):
+            raise ValueError(f"staged supplement checksum mismatch: {staged_file}")
+        meta["path"] = str((target / staged_file.name).resolve())
+        payload[key] = meta
+    _write_json(manifest_path, payload)
+    if target.exists():
+        raise FileExistsError(f"refusing to replace an existing supplement: {target}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(staging, target)
+    return _validate_supplement_manifest(target / "manifest.json", pack)
+
+
 def build_relative_turnover_supplement(
     *,
     pack_manifest: Path = PACK_MANIFEST,
@@ -178,6 +207,8 @@ def build_relative_turnover_supplement(
         return _validate_supplement_manifest(manifest_path, pack)
 
     staging = target.with_name(target.name + ".staging")
+    if (staging / "manifest.json").is_file():
+        return _promote_supplement_staging(staging, target, pack)
     if staging.exists():
         _remove_path(staging)
     staging.mkdir(parents=True, exist_ok=False)
@@ -302,7 +333,12 @@ def build_relative_turnover_supplement(
         if int(comparable.sum()) < 100 or unit_audit["systematic_multiplier_detected"]:
             raise ValueError(f"relative turnover unit audit failed: {unit_audit}")
 
+        for mapped in (baseline_panel, log_panel, daily):
+            mmap_handle = getattr(mapped, "_mmap", None)
+            if mmap_handle is not None:
+                mmap_handle.close()
         del baseline_panel, log_panel, daily
+        gc.collect()
         payload = {
             "schema_version": 1,
             "artifact_type": "seq100_relative_turnover_supplement",
@@ -345,12 +381,9 @@ def build_relative_turnover_supplement(
             "past20_positive_median": _memmap_meta(baseline_path, shape),
         }
         _write_json(staging / "manifest.json", payload)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(staging, target)
-        return _validate_supplement_manifest(target / "manifest.json", pack)
+        return _promote_supplement_staging(staging, target, pack)
     except Exception:
-        if staging.exists():
-            _remove_path(staging)
+        # Keep a checksum-bound completed staging directory for deterministic resume.
         raise
 
 
@@ -905,6 +938,13 @@ def stream_checkpoint_diagnostics(
     legal_exit_counts: dict[int, int] = {}
     top3_exit_counts: dict[int, int] = {}
     actual_exit_counts: dict[int, int] = {}
+    top3_actual_exit_counts: dict[int, int] = {}
+    exit_deferral_count = 0
+    exit_deferral_eligible_count = 0
+    exit_deferral_days_sum = 0.0
+    top3_exit_deferral_count = 0
+    top3_exit_deferral_eligible_count = 0
+    top3_exit_deferral_days_sum = 0.0
     d1_count = 0
     candidate_count = 0
     changed_after_legal_search = 0
@@ -1110,11 +1150,28 @@ def stream_checkpoint_diagnostics(
                 executable_alphas.append(
                     float(daily_row["alpha_net_realized_plan_return_base"])
                 )
-                _increment_counts(
-                    actual_exit_counts,
-                    pd.to_numeric(
-                        execution.candidates["realized_plan_resolved_exit_day"], errors="coerce"
-                    ).to_numpy(dtype=np.float64),
+                planned_exit_days = pd.to_numeric(
+                    execution.candidates["realized_plan_planned_exit_day"], errors="coerce"
+                ).to_numpy(dtype=np.float64)
+                resolved_exit_days = pd.to_numeric(
+                    execution.candidates["realized_plan_resolved_exit_day"], errors="coerce"
+                ).to_numpy(dtype=np.float64)
+                _increment_counts(actual_exit_counts, resolved_exit_days)
+                _increment_counts(top3_actual_exit_counts, resolved_exit_days[top3])
+                deferral_eligible = np.isfinite(planned_exit_days) & np.isfinite(
+                    resolved_exit_days
+                )
+                deferral_days = resolved_exit_days - planned_exit_days
+                deferred = deferral_eligible & (deferral_days > 0.0)
+                exit_deferral_eligible_count += int(deferral_eligible.sum())
+                exit_deferral_count += int(deferred.sum())
+                exit_deferral_days_sum += float(deferral_days[deferred].sum())
+                top3_eligible = deferral_eligible[top3]
+                top3_deferred = top3_eligible & (deferral_days[top3] > 0.0)
+                top3_exit_deferral_eligible_count += int(top3_eligible.sum())
+                top3_exit_deferral_count += int(top3_deferred.sum())
+                top3_exit_deferral_days_sum += float(
+                    deferral_days[top3][top3_deferred].sum()
                 )
                 fixed_daily["predicted"].append(executable_alphas[-1])
 
@@ -1289,10 +1346,28 @@ def stream_checkpoint_diagnostics(
         "actual_exit_day_distribution": {
             str(key): value for key, value in sorted(actual_exit_counts.items())
         },
+        "top3_actual_exit_day_distribution": {
+            str(key): value for key, value in sorted(top3_actual_exit_counts.items())
+        },
+        "exit_deferral_rate": float(
+            exit_deferral_count / max(exit_deferral_eligible_count, 1)
+        ),
+        "mean_exit_deferral_days_when_deferred": float(
+            exit_deferral_days_sum / max(exit_deferral_count, 1)
+        ),
+        "top3_exit_deferral_rate": float(
+            top3_exit_deferral_count / max(top3_exit_deferral_eligible_count, 1)
+        ),
+        "top3_mean_exit_deferral_days_when_deferred": float(
+            top3_exit_deferral_days_sum / max(top3_exit_deferral_count, 1)
+        ),
         "legal_exit_day_entropy": _entropy_from_counts(legal_exit_counts),
         "top3_exit_day_entropy": _entropy_from_counts(top3_exit_counts),
         "legal_exit_max_day_share": float(
             max(legal_exit_counts.values(), default=0) / max(sum(legal_exit_counts.values()), 1)
+        ),
+        "top3_legal_exit_max_day_share": float(
+            max(top3_exit_counts.values(), default=0) / max(sum(top3_exit_counts.values()), 1)
         ),
         "tie_rate": float(tie_count / max(candidate_count, 1)),
         "earliest_tie_break_count": int(earliest_tie_count),
@@ -1446,9 +1521,41 @@ def summarize(*, study_root: Path = STUDY_ROOT) -> dict[str, Any]:
                     "legal_exit_day_entropy": float(
                         path_diagnostics["legal_exit_day_entropy"]
                     ),
+                    "top3_exit_day_entropy": float(
+                        path_diagnostics["top3_exit_day_entropy"]
+                    ),
                     "legal_exit_max_day_share": float(
                         path_diagnostics["legal_exit_max_day_share"]
                     ),
+                    "top3_legal_exit_max_day_share": float(
+                        path_diagnostics["top3_legal_exit_max_day_share"]
+                    ),
+                    "exit_deferral_rate": float(
+                        path_diagnostics["exit_deferral_rate"]
+                    ),
+                    "mean_exit_deferral_days_when_deferred": float(
+                        path_diagnostics["mean_exit_deferral_days_when_deferred"]
+                    ),
+                    "top3_exit_deferral_rate": float(
+                        path_diagnostics["top3_exit_deferral_rate"]
+                    ),
+                    "top3_mean_exit_deferral_days_when_deferred": float(
+                        path_diagnostics["top3_mean_exit_deferral_days_when_deferred"]
+                    ),
+                    "tie_rate": float(path_diagnostics["tie_rate"]),
+                    "tie_margin_mean": float(path_diagnostics["tie_margin"]["mean"]),
+                    "tie_margin_median": float(
+                        path_diagnostics["tie_margin"]["median"]
+                    ),
+                    "oracle_executable_alpha": float(
+                        path_diagnostics["oracle_executable_alpha"]
+                    ),
+                    **{
+                        f"ohlc_path_mae_{key}": float(value)
+                        for key, value in dict(
+                            path_diagnostics["ohlc_path_mae_by_horizon"]
+                        ).items()
+                    },
                     "ohlc_geometry_violation_count": int(
                         path_diagnostics["ohlc_geometry_violation_count"]
                     ),
@@ -1568,22 +1675,93 @@ def summarize(*, study_root: Path = STUDY_ROOT) -> dict[str, Any]:
         "",
         "- Report only; no final fit, QDP update, pack mutation, or deployment change.",
         "- All ranking and planned exits use the legal D2-D60 price-path domain.",
+        "- Percentages below are equal-day annual cohort means; the final row for each profile is an equal-year mean.",
         "",
-        "| profile | year | best epoch | Top3 alpha | Top3 absolute | universe | rank IC |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        "## Economic results",
+        "",
+        "| profile | year | epoch | Top1 alpha | Top3 alpha | Top5 alpha | Top10 alpha | Top3 absolute | universe | stress alpha | opportunity alpha | opp-exec gap | rank IC |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for profile in PROFILE_ORDER:
         for row in profiles[profile]["yearly_metrics"]:
             lines.append(
                 f"| {profile} | {row['development_year']} | {row['best_epoch']} | "
-                f"{row['top3_base_alpha']:.4%} | {row['top3_selected_base']:.4%} | "
-                f"{row['top3_universe_base']:.4%} | {row['rank_ic']:.6f} |"
+                f"{row['top1_base_alpha']:.4%} | {row['top3_base_alpha']:.4%} | "
+                f"{row['top5_base_alpha']:.4%} | {row['top10_base_alpha']:.4%} | "
+                f"{row['top3_selected_base']:.4%} | {row['top3_universe_base']:.4%} | "
+                f"{row['top3_stress_alpha']:.4%} | {row['top3_opportunity_alpha']:.4%} | "
+                f"{row['top3_opportunity_execution_gap']:.4%} | {row['rank_ic']:.6f} |"
+            )
+        equal = profiles[profile]["equal_year_metrics"]
+        lines.append(
+            f"| {profile} | equal-year | {profiles[profile]['best_epoch_median']} | "
+            f"{equal['top1_base_alpha']:.4%} | {equal['top3_base_alpha']:.4%} | "
+            f"{equal['top5_base_alpha']:.4%} | {equal['top10_base_alpha']:.4%} | "
+            f"{equal['top3_selected_base']:.4%} | {equal['top3_universe_base']:.4%} | "
+            f"{equal['top3_stress_alpha']:.4%} | {equal['top3_opportunity_alpha']:.4%} | "
+            f"{equal['top3_opportunity_execution_gap']:.4%} | {equal['rank_ic']:.6f} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Exit and path diagnostics",
+            "",
+            "| profile | year | entry fill | score/return coverage | avg actual exit | Top3 deferral | deferred days | unresolved | exit regret | raw oracle regret | utility MAE/corr | close MAE | direction | path corr | Top3 exit entropy/max share | geometry violations | turnover level/delta MAE |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for profile in PROFILE_ORDER:
+        for row in profiles[profile]["yearly_metrics"]:
+            turnover = (
+                "n/a"
+                if row["turnover_level_mae"] is None
+                else f"{row['turnover_level_mae']:.6f}/{row['turnover_delta_mae']:.6f}"
+            )
+            lines.append(
+                f"| {profile} | {row['development_year']} | {row['top3_entry_fill_rate']:.4%} | "
+                f"{row['candidate_score_coverage']:.2%}/{row['top3_execution_return_coverage']:.2%} | "
+                f"D{row['top3_average_exit_day']:.2f} | {row['top3_exit_deferral_rate']:.4%} | "
+                f"{row['top3_mean_exit_deferral_days_when_deferred']:.3f} | "
+                f"{row['top3_unresolved_exit_rate']:.4%} | {row['exit_regret']:.6f} | "
+                f"{row['exact_raw_oracle_executable_regret']:.6f} | "
+                f"{row['utility_curve_mae']:.6f}/{row['utility_curve_correlation']:.6f} | "
+                f"{row['close_cumulative_path_mae']:.6f} | {row['close_direction_accuracy']:.4%} | "
+                f"{row['predicted_true_close_path_correlation']:.6f} | "
+                f"{max(float(row['top3_exit_day_entropy']), 0.0):.4f}/{row['top3_legal_exit_max_day_share']:.2%} | "
+                f"{int(row['ohlc_geometry_violation_count'])} | {turnover} |"
             )
     lines.extend(
         [
             "",
+            "## OHLC path MAE by horizon",
+            "",
+            "| profile | year | D1-5 | D6-10 | D11-20 | D21-40 | D41-60 |",
+            "|---|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for profile in PROFILE_ORDER:
+        for row in profiles[profile]["yearly_metrics"]:
+            lines.append(
+                f"| {profile} | {row['development_year']} | "
+                f"{row['ohlc_path_mae_D1_5']:.6f} | {row['ohlc_path_mae_D6_10']:.6f} | "
+                f"{row['ohlc_path_mae_D11_20']:.6f} | {row['ohlc_path_mae_D21_40']:.6f} | "
+                f"{row['ohlc_path_mae_D41_60']:.6f} |"
+            )
+    lines.extend(
+        [
+            "",
+            "## Locked judgement",
+            "",
             f"Equal-year Top3 alpha delta (structured - legal flat): "
             f"`{comparison['equal_year_top3_alpha_delta']:.4%}`.",
+            f"Structured positive Top3 years: `{structured['positive_top3_years']}/3`; "
+            f"worst-year alpha: `{structured['worst_year_top3_base_alpha']:.4%}`.",
+            f"Equal-year exit regret lower: `{comparison['equal_year_exit_regret_lower']}`; "
+            f"close-path non-worse years: `{comparison['close_path_nonworse_year_count']}/3`; "
+            f"new exit-day collapse: `{comparison['new_exit_day_collapse']}`; "
+            f"structured geometry violations: `{comparison['structured_geometry_violation_count']}`.",
+            f"Consistent improvement evidence under the pre-registered rule: "
+            f"`{comparison['consistent_improvement_evidence']}`.",
             "",
             "No automatic winner is declared. The structured result is a combined architecture effect and cannot be attributed to one component.",
         ]
