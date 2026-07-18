@@ -3,6 +3,8 @@
 
 `research_source_status=retired_qdp_scope`：旧 3,404 只 PIT/sequence packs 仅保留历史结论引用，实体包与默认入口已退休；任何新研究包都必须从当前可变 QDP 显式按需构建。
 
+`current_research_conclusion=seq100_corrected_rolling_2023_2025_v1_completed`：修复后 QDP 上的 daily-only Seq100 在 2023—2025 三年等权 Top3 成本后 alpha 为 `+0.8789%`、`3/3` 年为正且最差年为 `+0.2388%`，本轮仅报告结果，未执行最终拟合、部署或 QDP 更新。
+
 本文件是 `daily_research` 的当前程序实例，不是历史长卷；它只保存接管时需要激活的对象、函数和过程入口。
 
 ## Module Interface

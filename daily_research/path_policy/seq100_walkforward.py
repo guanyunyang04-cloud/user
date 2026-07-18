@@ -982,10 +982,14 @@ def _compute_development_fold_training_contract(
     contract = dict(manifest.get("development_walkforward", {}) or {})
     if not contract:
         raise ValueError("fold is missing development_walkforward metadata")
-    if dict(manifest.get("research_contract", {}) or {}) != approved_development_contract_binding():
-        raise ValueError("fold is not bound to the approved development contract")
-    if dict(manifest.get("development_contract", {}) or {}) != approved_development_contract_binding():
+    research_contract = dict(manifest.get("research_contract", {}) or {})
+    if not research_contract:
+        raise ValueError("fold is not bound to a development research contract")
+    if dict(manifest.get("development_contract", {}) or {}) != research_contract:
         raise ValueError("fold development contract alias changed")
+    for field in ("contract_id", "contract_sha256", "contract_file_sha256"):
+        if not str(research_contract.get(field, "") or ""):
+            raise ValueError(f"fold research contract is missing {field}")
     development_year = int(contract.get("development_year", 0) or 0)
     observed_sample_years = sorted({int(str(value)[:4]) for value in development["trade_date"].astype(str)})
     observed_candidate_years = sorted({int(value) for value in candidates["year"].astype(int)})
@@ -1327,6 +1331,9 @@ def build_development_walkforward_fold(
         }
     )
     manifest = dict(source)
+    source_contract_binding = dict(source.get("research_contract", {}) or {})
+    if not source_contract_binding:
+        source_contract_binding = approved_development_contract_binding()
     for legacy_key in ("validation_years", "test_years", "oos_years", "purged_walkforward"):
         manifest.pop(legacy_key, None)
     manifest.update(
@@ -1350,8 +1357,8 @@ def build_development_walkforward_fold(
             "artifact_view": artifact_view,
             "development_walkforward": development_contract,
             "source_view_provenance": source_provenance,
-            "research_contract": approved_development_contract_binding(),
-            "development_contract": approved_development_contract_binding(),
+            "research_contract": source_contract_binding,
+            "development_contract": source_contract_binding,
             "max_label_dependency_days": dependency_days,
         }
     )

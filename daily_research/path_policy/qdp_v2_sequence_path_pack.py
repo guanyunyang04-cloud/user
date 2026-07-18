@@ -67,8 +67,12 @@ ENTRY_RULE_LEGACY = "legacy_999_tolerance"
 ENTRY_RULE_OPEN_BELOW_LIMIT = "open_below_limit_tick"
 SAMPLE_FILTER_COMPLETE_CASE = "complete_case_filled"
 SAMPLE_FILTER_SIGNAL_ELIGIBLE = "signal_eligible_price_label"
+SAMPLE_FILTER_CURRENT_QDP = "current_qdp_candidate_complete"
 SUSPENSION_FILL_NONE = "none"
 SUSPENSION_FILL_CARRY_CLOSE = "carry_adjusted_close"
+FEATURE_PROFILE_ALL = "all"
+FEATURE_PROFILE_DAILY_ONLY = "daily_only"
+FEATURE_PROFILES = (FEATURE_PROFILE_ALL, FEATURE_PROFILE_DAILY_ONLY)
 DEFAULT_LOT_SIZE = 100
 DEFAULT_COMMISSION_BPS = 3.0
 DEFAULT_MIN_COMMISSION_CNY = 5.0
@@ -220,8 +224,11 @@ def _bind_research_contract(path: str | Path | None) -> dict[str, Any] | None:
     resolved = Path(path).resolve()
     raw_bytes = resolved.read_bytes()
     payload = json.loads(raw_bytes.decode("utf-8-sig"))
-    declared_digest = str(payload.get("contract_sha256", "") or "").lower()
-    semantic_payload = dict(payload)
+    mutable_study = str(payload.get("artifact_type", "")) == "seq100_current_study"
+    semantic_payload = dict(payload.get("contract", {}) or {}) if mutable_study else dict(payload)
+    declared_digest = str(
+        payload.get("contract_sha256", semantic_payload.get("contract_sha256", "")) or ""
+    ).lower()
     semantic_payload.pop("contract_sha256", None)
     semantic_bytes = json.dumps(
         semantic_payload,
@@ -237,9 +244,11 @@ def _bind_research_contract(path: str | Path | None) -> dict[str, Any] | None:
         )
     return {
         "path": str(resolved),
-        "contract_id": str(payload.get("contract_id", "") or ""),
+        "contract_id": str(semantic_payload.get("contract_id", payload.get("contract_id", "")) or ""),
         "contract_sha256": semantic_digest,
-        "contract_file_sha256": hashlib.sha256(raw_bytes).hexdigest(),
+        "contract_file_sha256": (
+            semantic_digest if mutable_study else hashlib.sha256(raw_bytes).hexdigest()
+        ),
     }
 
 
@@ -248,6 +257,8 @@ def _parse_years(raw: str | Iterable[int] | None, *, default: tuple[int, ...]) -
         return default
     if not isinstance(raw, str):
         return tuple(sorted({int(item) for item in raw}))
+    if not raw.strip():
+        return ()
     values: list[int] = []
     for chunk in raw.split(","):
         item = chunk.strip()
@@ -258,7 +269,7 @@ def _parse_years(raw: str | Iterable[int] | None, *, default: tuple[int, ...]) -
             values.extend(range(start, end + 1))
         else:
             values.append(int(item))
-    return tuple(sorted(set(values))) or default
+    return tuple(sorted(set(values)))
 
 
 def _parse_rate_schedule(
@@ -823,6 +834,162 @@ def _write_pit_universe_panels(
     for panel in (status_valid, is_st, is_suspended, is_delisted, universe_has_bar, signal_eligible):
         if hasattr(panel, "flush"):
             panel.flush()
+
+
+def _write_current_universe_panel(
+    *,
+    frame: pd.DataFrame,
+    universe_present: np.ndarray,
+    date_to_idx: Mapping[str, int],
+    symbol_to_idx: Mapping[str, int],
+    listing_dates: dict[str, str],
+) -> None:
+    """Write the mutable QDP universe without importing a separate PIT sidecar."""
+
+    if frame.empty:
+        return
+    indexed = _index_frame(frame, date_to_idx, symbol_to_idx)
+    if indexed.empty:
+        return
+    date_idx = indexed["_date_idx"].to_numpy(dtype=np.int64)
+    symbol_idx = indexed["_symbol_idx"].to_numpy(dtype=np.int64)
+    universe_present[date_idx, symbol_idx] = True
+    if "list_date" in indexed.columns:
+        values = indexed[["symbol", "list_date"]].copy()
+        values["symbol"] = values["symbol"].astype(str)
+        values["list_date"] = values["list_date"].astype(str)
+        values = values[values["list_date"].str.fullmatch(r"\d{4}-\d{2}-\d{2}", na=False)]
+        for symbol, list_date in values.drop_duplicates("symbol").itertuples(index=False, name=None):
+            previous = listing_dates.get(str(symbol), "")
+            if not previous or str(list_date) < previous:
+                listing_dates[str(symbol)] = str(list_date)
+    if hasattr(universe_present, "flush"):
+        universe_present.flush()
+
+
+def _round_price_half_up(values: np.ndarray) -> np.ndarray:
+    numeric = np.asarray(values, dtype=np.float64)
+    return np.floor(numeric * 100.0 + 0.5 + 1.0e-10) / 100.0
+
+
+def derive_mainboard_limit_panels(
+    *,
+    daily_raw: np.ndarray,
+    raw_close: np.ndarray,
+    has_bar: np.ndarray,
+    status_valid: np.ndarray,
+    is_st: np.ndarray,
+    date_values: Sequence[str],
+    symbol_values: Sequence[str],
+    listing_dates: Mapping[str, str] | None = None,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """Reconstruct historical main-board daily limits from the canonical price basis.
+
+    The current mutable QDP deliberately has no separate ``limit_status`` domain.
+    Corporate-action reference prices are recovered from the ratio between raw and
+    canonical adjusted closes.  Known IPO no-limit windows are excluded, and any
+    remaining observed high/low outside the reconstructed band is treated as an
+    auditable special no-limit session rather than a false execution block.
+    """
+
+    shape = np.asarray(raw_close).shape
+    if len(shape) != 2 or np.asarray(has_bar).shape != shape:
+        raise ValueError("daily limit inputs must share a two-dimensional date/symbol shape")
+    adjusted_close = np.asarray(daily_raw)[..., DAILY_RAW_FEATURES.index("close")].astype(
+        np.float64, copy=False
+    )
+    adjusted_high = np.asarray(daily_raw)[..., DAILY_RAW_FEATURES.index("high")].astype(
+        np.float64, copy=False
+    )
+    adjusted_low = np.asarray(daily_raw)[..., DAILY_RAW_FEATURES.index("low")].astype(
+        np.float64, copy=False
+    )
+    raw_close_values = np.asarray(raw_close, dtype=np.float64)
+    valid_bar = np.asarray(has_bar, dtype=bool)
+    valid_status = np.asarray(status_valid, dtype=bool)
+    st_values = np.asarray(is_st, dtype=bool)
+    up_limit = np.full(shape, np.nan, dtype=np.float32)
+    down_limit = np.full(shape, np.nan, dtype=np.float32)
+    last_adjusted_close = np.full(shape[1], np.nan, dtype=np.float64)
+    listing_map = dict(listing_dates or {})
+    listing_idx = np.full(shape[1], -1, dtype=np.int64)
+    listing_after_registration = np.zeros(shape[1], dtype=bool)
+    date_array = np.asarray([str(item) for item in date_values], dtype=object)
+    for symbol_idx, symbol in enumerate(symbol_values):
+        listed = str(listing_map.get(str(symbol), "") or "")
+        if listed:
+            position = int(np.searchsorted(date_array, listed, side="left"))
+            if 0 <= position < len(date_array):
+                listing_idx[symbol_idx] = position
+                listing_after_registration[symbol_idx] = listed >= "2023-04-10"
+
+    standard_limit_days = 0
+    ipo_no_limit_days = 0
+    inferred_special_no_limit_days = 0
+    invalid_reference_days = 0
+    for date_idx, trade_date in enumerate(date_array.tolist()):
+        raw = raw_close_values[date_idx]
+        adjusted = adjusted_close[date_idx]
+        factor = np.divide(
+            adjusted,
+            raw,
+            out=np.full(shape[1], np.nan, dtype=np.float64),
+            where=np.isfinite(adjusted) & np.isfinite(raw) & (raw > 0.0),
+        )
+        reference = np.divide(
+            last_adjusted_close,
+            factor,
+            out=np.full(shape[1], np.nan, dtype=np.float64),
+            where=np.isfinite(last_adjusted_close) & np.isfinite(factor) & (factor > 0.0),
+        )
+        rate = np.where(st_values[date_idx], 0.05, 0.10)
+        candidate = valid_bar[date_idx] & valid_status[date_idx] & np.isfinite(reference) & (reference > 0.0)
+        age = date_idx - listing_idx + 1
+        known_listing = listing_idx >= 0
+        ipo_no_limit = known_listing & (age >= 1) & np.where(
+            listing_after_registration, age <= 5, age <= 1
+        )
+        candidate &= ~ipo_no_limit
+        ipo_no_limit_days += int(np.count_nonzero(valid_bar[date_idx] & ipo_no_limit))
+
+        up = _round_price_half_up(reference * (1.0 + rate))
+        down = _round_price_half_up(reference * (1.0 - rate))
+        raw_high = np.divide(
+            adjusted_high[date_idx],
+            factor,
+            out=np.full(shape[1], np.nan, dtype=np.float64),
+            where=np.isfinite(adjusted_high[date_idx]) & np.isfinite(factor) & (factor > 0.0),
+        )
+        raw_low = np.divide(
+            adjusted_low[date_idx],
+            factor,
+            out=np.full(shape[1], np.nan, dtype=np.float64),
+            where=np.isfinite(adjusted_low[date_idx]) & np.isfinite(factor) & (factor > 0.0),
+        )
+        outside = candidate & (
+            (np.isfinite(raw_high) & (raw_high > up + 0.011))
+            | (np.isfinite(raw_low) & (raw_low < down - 0.011))
+        )
+        inferred_special_no_limit_days += int(np.count_nonzero(outside))
+        usable = candidate & ~outside & np.isfinite(up) & np.isfinite(down) & (down > 0.0)
+        up_limit[date_idx, usable] = up[usable].astype(np.float32)
+        down_limit[date_idx, usable] = down[usable].astype(np.float32)
+        standard_limit_days += int(np.count_nonzero(usable))
+        invalid_reference_days += int(np.count_nonzero(valid_bar[date_idx] & valid_status[date_idx] & ~np.isfinite(reference)))
+
+        update = valid_bar[date_idx] & np.isfinite(adjusted) & (adjusted > 0.0)
+        last_adjusted_close[update] = adjusted[update]
+
+    return up_limit, down_limit, {
+        "method": "adjusted_reference_mainboard_rule_v1",
+        "standard_limit_day_count": int(standard_limit_days),
+        "ipo_no_limit_day_count": int(ipo_no_limit_days),
+        "inferred_special_no_limit_day_count": int(inferred_special_no_limit_days),
+        "invalid_reference_day_count": int(invalid_reference_days),
+        "normal_rate": 0.10,
+        "st_rate": 0.05,
+        "registration_reform_effective_date": "2023-04-10",
+    }
 
 
 def _prepare_daily_frame(daily: pd.DataFrame) -> pd.DataFrame:
@@ -1750,6 +1917,7 @@ class SequencePackConfig:
     research_contract: Path | None = None
     pit_universe_manifest: Path | None = None
     dataset_view: Path | None = None
+    feature_profile: str = FEATURE_PROFILE_ALL
 
 
 def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
@@ -1757,14 +1925,25 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
     entry_rule = str(config.entry_rule).strip().lower()
     sample_filter = str(config.sample_filter).strip().lower()
     suspension_fill = str(config.suspension_fill).strip().lower()
+    feature_profile = str(config.feature_profile).strip().lower()
     if price_adjustment not in {PRICE_ADJUSTMENT_NONE, PRICE_ADJUSTMENT_BACK}:
         raise ValueError(f"unsupported price adjustment: {config.price_adjustment}")
     if entry_rule not in {ENTRY_RULE_LEGACY, ENTRY_RULE_OPEN_BELOW_LIMIT}:
         raise ValueError(f"unsupported entry rule: {config.entry_rule}")
-    if sample_filter not in {SAMPLE_FILTER_COMPLETE_CASE, SAMPLE_FILTER_SIGNAL_ELIGIBLE}:
+    if sample_filter not in {
+        SAMPLE_FILTER_COMPLETE_CASE,
+        SAMPLE_FILTER_SIGNAL_ELIGIBLE,
+        SAMPLE_FILTER_CURRENT_QDP,
+    }:
         raise ValueError(f"unsupported sample filter: {config.sample_filter}")
     if suspension_fill not in {SUSPENSION_FILL_NONE, SUSPENSION_FILL_CARRY_CLOSE}:
         raise ValueError(f"unsupported suspension fill: {config.suspension_fill}")
+    if feature_profile not in FEATURE_PROFILES:
+        raise ValueError(f"unsupported feature profile: {config.feature_profile}")
+    candidate_complete = sample_filter in {
+        SAMPLE_FILTER_SIGNAL_ELIGIBLE,
+        SAMPLE_FILTER_CURRENT_QDP,
+    }
     execution_tail_days = int(config.execution_tail_days)
     if execution_tail_days < 0:
         raise ValueError("execution_tail_days must be non-negative")
@@ -1920,7 +2099,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             date_values[-1],
         )
     )
-    if sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE:
+    if candidate_complete:
         daily_symbols = {symbol for symbol in daily_symbols if _is_pit_mainboard_symbol(symbol)}
     if not daily_symbols:
         raise ValueError("market_daily_raw returned no symbols in the requested panel range")
@@ -1937,7 +2116,23 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             )
         )
         pit_symbols = {symbol for symbol in pit_symbols if _is_pit_mainboard_symbol(symbol)}
-    symbol_values = sorted(daily_symbols | pit_symbols)
+    current_universe_symbols: set[str] = set()
+    if sample_filter == SAMPLE_FILTER_CURRENT_QDP:
+        current_universe_symbols = set(
+            _read_dataset_symbols_date_range(
+                root,
+                active,
+                "universe_snapshot",
+                date_values[0],
+                date_values[-1],
+            )
+        )
+        current_universe_symbols = {
+            symbol for symbol in current_universe_symbols if _is_pit_mainboard_symbol(symbol)
+        }
+        if not current_universe_symbols:
+            raise ValueError("current QDP universe_snapshot returned no main-board symbols")
+    symbol_values = sorted(daily_symbols | pit_symbols | current_universe_symbols)
     date_to_idx = {date: idx for idx, date in enumerate(date_values)}
     symbol_to_idx = {symbol: idx for idx, symbol in enumerate(symbol_values)}
     n_dates = len(date_values)
@@ -1948,11 +2143,23 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
     mask_dir = output_dir / "masks"
     daily_raw = _fill_float_memmap(panel_dir / "daily_raw.float32.dat", (n_dates, n_symbols, len(DAILY_RAW_FEATURES)), fill_value=np.nan)
     daily_state = _fill_float_memmap(panel_dir / "daily_state.float32.dat", (n_dates, n_symbols, len(RAW_SIGNAL_COLUMNS)), fill_value=np.nan)
-    intraday_summary = _fill_float_memmap(
-        panel_dir / "intraday_summary.float32.dat", (n_dates, n_symbols, len(INTRADAY_SIGNAL_COLUMNS)), fill_value=np.nan
+    intraday_summary = (
+        _fill_float_memmap(
+            panel_dir / "intraday_summary.float32.dat",
+            (n_dates, n_symbols, len(INTRADAY_SIGNAL_COLUMNS)),
+            fill_value=np.nan,
+        )
+        if feature_profile == FEATURE_PROFILE_ALL
+        else None
     )
-    limit_structure = _fill_float_memmap(
-        panel_dir / "limit_structure.float32.dat", (n_dates, n_symbols, len(LIMIT_SIGNAL_COLUMNS)), fill_value=np.nan
+    limit_structure = (
+        _fill_float_memmap(
+            panel_dir / "limit_structure.float32.dat",
+            (n_dates, n_symbols, len(LIMIT_SIGNAL_COLUMNS)),
+            fill_value=np.nan,
+        )
+        if feature_profile == FEATURE_PROFILE_ALL
+        else None
     )
     up_limit_panel = _fill_float_memmap(label_dir / "entry_up_limit.float32.dat", (n_dates, n_symbols), fill_value=np.nan)
     down_limit_panel = _fill_float_memmap(label_dir / "exit_down_limit.float32.dat", (n_dates, n_symbols), fill_value=np.nan)
@@ -2110,6 +2317,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
     _trim_process_working_set()
 
     missing_eligible_bar_count = 0
+    listing_dates: dict[str, str] = {}
     # Long-suspension continuity is a universal raw-data rule, independent of
     # whether a pack elects to carry prices through ordinary suspension days.
     for year in range(int(date_values[0][:4]), int(date_values[-1][:4]) + 1):
@@ -2180,6 +2388,45 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
                 f"count={missing_eligible_bar_count}. Activate a matching PIT-complete price substrate before building."
             )
         tradable_panel[:] = has_bar_panel & status_valid_panel & (~is_suspended_panel) & (~is_delisted_panel)
+    elif sample_filter == SAMPLE_FILTER_CURRENT_QDP:
+        for year in range(int(date_values[0][:4]), int(date_values[-1][:4]) + 1):
+            memory_guard(f"current_qdp_universe_{year}")
+            _write_json(
+                progress_path,
+                {"status": "writing_current_qdp_universe", "year": year, "updated_at": _now()},
+            )
+            universe = _read_dataset_date_range(
+                root,
+                active,
+                "universe_snapshot",
+                ["symbol", "trade_date", "list_date"],
+                f"{year}-01-01",
+                f"{year}-12-31",
+            )
+            _write_current_universe_panel(
+                frame=universe,
+                universe_present=universe_has_bar_panel,
+                date_to_idx=date_to_idx,
+                symbol_to_idx=symbol_to_idx,
+                listing_dates=listing_dates,
+            )
+            del universe
+            gc.collect()
+            _trim_process_working_set()
+        signal_eligible_panel[:] = (
+            universe_has_bar_panel
+            & has_bar_panel
+            & status_valid_panel
+            & (~is_st_panel)
+            & (~is_suspended_panel)
+            & (~is_delisted_panel)
+        )
+        tradable_panel[:] = (
+            has_bar_panel
+            & status_valid_panel
+            & (~is_suspended_panel)
+            & (~is_delisted_panel)
+        )
     elif suspension_fill == SUSPENSION_FILL_CARRY_CLOSE:
         universe_has_bar_panel[:] = has_bar_panel
         signal_eligible_panel[:] = has_bar_panel
@@ -2208,46 +2455,69 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             has_bar_panel=has_bar_panel,
         )
 
-    for domain, columns, feature_columns, panel in [
-        ("intraday_daily_features", ["symbol", "trade_date", *INTRADAY_SIGNAL_COLUMNS], INTRADAY_SIGNAL_COLUMNS, intraday_summary),
-        ("limit_intraday_features", ["symbol", "trade_date", *LIMIT_SIGNAL_COLUMNS], LIMIT_SIGNAL_COLUMNS, limit_structure),
-    ]:
-        for year in range(int(date_values[0][:4]), int(date_values[-1][:4]) + 1):
-            memory_guard(f"{domain}_{year}")
-            _write_json(progress_path, {"status": f"writing_{domain}", "year": year, "updated_at": _now()})
-            frame = _read_dataset_date_range(root, active, domain, columns, f"{year}-01-01", f"{year}-12-31")
-            _write_panel_values(panel, frame, feature_columns, date_to_idx=date_to_idx, symbol_to_idx=symbol_to_idx)
-            del frame
-            gc.collect()
-            _trim_process_working_set()
+    if feature_profile == FEATURE_PROFILE_ALL:
+        assert intraday_summary is not None and limit_structure is not None
+        for domain, columns, feature_columns, panel in [
+            ("intraday_daily_features", ["symbol", "trade_date", *INTRADAY_SIGNAL_COLUMNS], INTRADAY_SIGNAL_COLUMNS, intraday_summary),
+            ("limit_intraday_features", ["symbol", "trade_date", *LIMIT_SIGNAL_COLUMNS], LIMIT_SIGNAL_COLUMNS, limit_structure),
+        ]:
+            for year in range(int(date_values[0][:4]), int(date_values[-1][:4]) + 1):
+                memory_guard(f"{domain}_{year}")
+                _write_json(progress_path, {"status": f"writing_{domain}", "year": year, "updated_at": _now()})
+                frame = _read_dataset_date_range(root, active, domain, columns, f"{year}-01-01", f"{year}-12-31")
+                _write_panel_values(panel, frame, feature_columns, date_to_idx=date_to_idx, symbol_to_idx=symbol_to_idx)
+                del frame
+                gc.collect()
+                _trim_process_working_set()
 
     corr_column = "intraday_price_volume_corr"
-    if corr_column in INTRADAY_SIGNAL_COLUMNS:
+    if intraday_summary is not None and corr_column in INTRADAY_SIGNAL_COLUMNS:
         corr_valid_panel[:] = np.isfinite(intraday_summary[:, :, INTRADAY_SIGNAL_COLUMNS.index(corr_column)])
         corr_valid_panel.flush()
 
-    for year in range(int(date_values[0][:4]), int(date_values[-1][:4]) + 1):
-        memory_guard(f"limit_status_{year}")
-        _write_json(progress_path, {"status": "writing_entry_limits", "year": year, "updated_at": _now()})
-        limit = _read_dataset_date_range(
-            root,
-            active,
-            "limit_status",
-            ["symbol", "trade_date", "up_limit", "down_limit"],
-            f"{year}-01-01",
-            f"{year}-12-31",
+    limit_reconstruction = {"method": "provider_limit_status"}
+    if "limit_status" in dict(active.get("datasets", {}) or {}):
+        for year in range(int(date_values[0][:4]), int(date_values[-1][:4]) + 1):
+            memory_guard(f"limit_status_{year}")
+            _write_json(progress_path, {"status": "writing_entry_limits", "year": year, "updated_at": _now()})
+            limit = _read_dataset_date_range(
+                root,
+                active,
+                "limit_status",
+                ["symbol", "trade_date", "up_limit", "down_limit"],
+                f"{year}-01-01",
+                f"{year}-12-31",
+            )
+            if not limit.empty:
+                limit = _index_frame(limit, date_to_idx, symbol_to_idx)
+                date_idx = limit["_date_idx"].to_numpy(dtype=np.int64)
+                symbol_idx = limit["_symbol_idx"].to_numpy(dtype=np.int64)
+                up_values = pd.to_numeric(limit["up_limit"], errors="coerce").to_numpy(dtype=np.float32, copy=True)
+                down_values = pd.to_numeric(limit["down_limit"], errors="coerce").to_numpy(dtype=np.float32, copy=True)
+                up_limit_panel[date_idx, symbol_idx] = up_values
+                down_limit_panel[date_idx, symbol_idx] = down_values
+                up_limit_panel.flush()
+                down_limit_panel.flush()
+            del limit
+            gc.collect()
+            _trim_process_working_set()
+    else:
+        memory_guard("derive_mainboard_limits")
+        derived_up, derived_down, limit_reconstruction = derive_mainboard_limit_panels(
+            daily_raw=daily_raw,
+            raw_close=raw_close_panel,
+            has_bar=has_bar_panel,
+            status_valid=status_valid_panel,
+            is_st=is_st_panel,
+            date_values=date_values,
+            symbol_values=symbol_values,
+            listing_dates=listing_dates,
         )
-        if not limit.empty:
-            limit = _index_frame(limit, date_to_idx, symbol_to_idx)
-            date_idx = limit["_date_idx"].to_numpy(dtype=np.int64)
-            symbol_idx = limit["_symbol_idx"].to_numpy(dtype=np.int64)
-            up_values = pd.to_numeric(limit["up_limit"], errors="coerce").to_numpy(dtype=np.float32, copy=True)
-            down_values = pd.to_numeric(limit["down_limit"], errors="coerce").to_numpy(dtype=np.float32, copy=True)
-            up_limit_panel[date_idx, symbol_idx] = up_values
-            down_limit_panel[date_idx, symbol_idx] = down_values
-            up_limit_panel.flush()
-            down_limit_panel.flush()
-        del limit
+        up_limit_panel[:] = derived_up
+        down_limit_panel[:] = derived_down
+        up_limit_panel.flush()
+        down_limit_panel.flush()
+        del derived_up, derived_down
         gc.collect()
         _trim_process_working_set()
 
@@ -2259,7 +2529,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         exit_suspended=is_suspended_panel,
         exit_delisted=is_delisted_panel,
         require_status_valid=(
-            sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE or suspension_fill == SUSPENSION_FILL_CARRY_CLOSE
+            candidate_complete or suspension_fill == SUSPENSION_FILL_CARRY_CLOSE
         ),
     )
     exit_sellable_panel.flush()
@@ -2298,7 +2568,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
     )
     price_label_valid_store = _fill_bool_memmap(mask_dir / "price_label_valid.bool.dat", (n_dates, n_symbols))
     va_aux_valid_store = _fill_bool_memmap(mask_dir / "va_aux_valid.bool.dat", (n_dates, n_symbols))
-    separate_price_va_validity = sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE
+    separate_price_va_validity = candidate_complete
     future_path, future_ohlcva_path, path_summary, input_valid, entry_buyable, label_valid = _compute_future_path_and_masks(
         raw_panel=daily_raw,
         up_limit_panel=up_limit_panel,
@@ -2358,8 +2628,8 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         label_valid=label_valid,
         price_label_valid=price_label_valid_store,
         va_aux_valid=va_aux_valid_store,
-        signal_eligible=signal_eligible_panel if sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE else None,
-        require_entry_filled=sample_filter == SAMPLE_FILTER_COMPLETE_CASE,
+        signal_eligible=signal_eligible_panel if candidate_complete else None,
+        require_entry_filled=not candidate_complete,
     )
     memory_guard("sample_index_completed")
     _write_json(progress_path, {"status": "building_candidate_index", "updated_at": _now()})
@@ -2391,9 +2661,10 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         "fit_scope": "train_year_dates_only",
         "daily_raw": _fit_normalization(daily_raw, train_date_mask),
         "daily_state": _fit_normalization(daily_state, train_date_mask),
-        "intraday_summary": _fit_normalization(intraday_summary, train_date_mask),
-        "limit_structure": _fit_normalization(limit_structure, train_date_mask),
     }
+    if intraday_summary is not None and limit_structure is not None:
+        normalization["intraday_summary"] = _fit_normalization(intraday_summary, train_date_mask)
+        normalization["limit_structure"] = _fit_normalization(limit_structure, train_date_mask)
     memory_guard("manifest_assembly")
 
     source_dataset_ids = dict(active.get("datasets", {}) or {})
@@ -2444,6 +2715,33 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             },
             **label_arrays,
         }
+    feature_channels = {
+        "daily_raw": {
+            "path": str((panel_dir / "daily_raw.float32.dat").resolve()),
+            "shape": [n_dates, n_symbols, len(DAILY_RAW_FEATURES)],
+            "columns": DAILY_RAW_FEATURES,
+        },
+        "daily_state": {
+            "path": str((panel_dir / "daily_state.float32.dat").resolve()),
+            "shape": [n_dates, n_symbols, len(RAW_SIGNAL_COLUMNS)],
+            "columns": RAW_SIGNAL_COLUMNS,
+        },
+    }
+    if intraday_summary is not None and limit_structure is not None:
+        feature_channels.update(
+            {
+                "intraday_summary": {
+                    "path": str((panel_dir / "intraday_summary.float32.dat").resolve()),
+                    "shape": [n_dates, n_symbols, len(INTRADAY_SIGNAL_COLUMNS)],
+                    "columns": INTRADAY_SIGNAL_COLUMNS,
+                },
+                "limit_structure": {
+                    "path": str((panel_dir / "limit_structure.float32.dat").resolve()),
+                    "shape": [n_dates, n_symbols, len(LIMIT_SIGNAL_COLUMNS)],
+                    "columns": LIMIT_SIGNAL_COLUMNS,
+                },
+            }
+        )
     manifest = {
         "artifact_type": "qdp_v2_sequence_path_pack",
         "created_at": _now(),
@@ -2488,6 +2786,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         "train_years": list(config.train_years),
         "validation_years": list(config.validation_years),
         "test_years": list(config.test_years),
+        "feature_profile": feature_profile,
         "data_semantics": {
             "price_adjustment": price_adjustment,
             "price_adjustment_factor_column": "adjust_factor" if price_adjustment == PRICE_ADJUSTMENT_BACK else None,
@@ -2495,6 +2794,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             "entry_tick_size": 0.01,
             "sample_filter": sample_filter,
             "suspension_fill": suspension_fill,
+            "model_input_mask_features": [] if feature_profile == FEATURE_PROFILE_DAILY_ONLY else None,
             "continuity_break_rule": {
                 "minimum_consecutive_suspended_open_days": LONG_SUSPENSION_MIN_OPEN_DAYS,
                 "break_position": "first_non_suspended_open_day_after_qualifying_run",
@@ -2502,16 +2802,27 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
                 "label_rule": "forward_path_and_execution_tail_must_not_include_long_suspension_or_break",
             },
             "label_valid_alias": "price_label_valid" if separate_price_va_validity else "complete_ohlcva_label_valid",
-            "candidate_filter": "signal_day_input_valid_and_pit_signal_eligible_only",
+            "candidate_filter": (
+                "signal_day_input_valid_and_current_qdp_universe_status_eligible"
+                if sample_filter == SAMPLE_FILTER_CURRENT_QDP
+                else "signal_day_input_valid_and_pit_signal_eligible_only"
+            ),
             "supervision_filter": "candidate_filter_and_label_valid",
             "candidate_selection_uses_future_labels": False,
-            "unfilled_samples_retained": sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE,
+            "unfilled_samples_retained": candidate_complete,
+            "candidate_universe_domain": (
+                "universe_snapshot"
+                if sample_filter == SAMPLE_FILTER_CURRENT_QDP
+                else ("pit_signal_universe" if sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE else None)
+            ),
+            "current_qdp_universe_symbol_count": int(len(current_universe_symbols)),
             "pit_universe_domain": "pit_signal_universe" if sample_filter == SAMPLE_FILTER_SIGNAL_ELIGIBLE else None,
             "pit_universe_manifest": resolved_pit_manifest or None,
             "pit_universe_symbol_count": int(len(pit_symbols)),
             "pit_symbols_without_active_daily_rows": int(len(pit_symbols.difference(daily_symbols))),
             "eligible_symbol_days_without_active_daily_bar": int(missing_eligible_bar_count),
             "pit_price_coverage_gate": pit_price_coverage,
+            "limit_reconstruction": limit_reconstruction,
         },
         "date_values": date_values,
         "symbol_values": symbol_values,
@@ -2521,20 +2832,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         "sample_count_by_split": {str(key): int(value) for key, value in split_counts.items()},
         "candidate_count": int(candidate_index_stats["row_count"]),
         "candidate_count_by_split": {str(key): int(value) for key, value in candidate_split_counts.items()},
-        "feature_channels": {
-            "daily_raw": {"path": str((panel_dir / "daily_raw.float32.dat").resolve()), "shape": [n_dates, n_symbols, len(DAILY_RAW_FEATURES)], "columns": DAILY_RAW_FEATURES},
-            "daily_state": {"path": str((panel_dir / "daily_state.float32.dat").resolve()), "shape": [n_dates, n_symbols, len(RAW_SIGNAL_COLUMNS)], "columns": RAW_SIGNAL_COLUMNS},
-            "intraday_summary": {
-                "path": str((panel_dir / "intraday_summary.float32.dat").resolve()),
-                "shape": [n_dates, n_symbols, len(INTRADAY_SIGNAL_COLUMNS)],
-                "columns": INTRADAY_SIGNAL_COLUMNS,
-            },
-            "limit_structure": {
-                "path": str((panel_dir / "limit_structure.float32.dat").resolve()),
-                "shape": [n_dates, n_symbols, len(LIMIT_SIGNAL_COLUMNS)],
-                "columns": LIMIT_SIGNAL_COLUMNS,
-            },
-        },
+        "feature_channels": feature_channels,
         "label_arrays": label_arrays,
         "execution_arrays": {
             "entry_open_raw": {
@@ -2953,9 +3251,19 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     build.add_argument(
         "--sample-filter",
-        choices=(SAMPLE_FILTER_COMPLETE_CASE, SAMPLE_FILTER_SIGNAL_ELIGIBLE),
+        choices=(
+            SAMPLE_FILTER_COMPLETE_CASE,
+            SAMPLE_FILTER_SIGNAL_ELIGIBLE,
+            SAMPLE_FILTER_CURRENT_QDP,
+        ),
         default=SAMPLE_FILTER_COMPLETE_CASE,
         help="Legacy complete-case/filled samples or signal-day PIT universe with unfilled rows retained.",
+    )
+    build.add_argument(
+        "--feature-profile",
+        choices=FEATURE_PROFILES,
+        default=FEATURE_PROFILE_ALL,
+        help="Materialize all input channels or the daily-only channels used by the current seq100 study.",
     )
     build.add_argument(
         "--suspension-fill",
@@ -3084,6 +3392,7 @@ def main(argv: list[str] | None = None) -> int:
             research_contract=Path(args.research_contract) if args.research_contract is not None else None,
             pit_universe_manifest=Path(args.pit_universe_manifest) if args.pit_universe_manifest is not None else None,
             dataset_view=Path(args.dataset_view) if args.dataset_view is not None else None,
+            feature_profile=str(args.feature_profile),
         )
         result = build_sequence_pack(cfg)
     elif args.command == "reanchor":

@@ -27,12 +27,14 @@ from daily_research.path_policy.qdp_v2_sequence_path_pack import (
     _exit_fill_mask,
     _fill_suspended_daily_raw,
     _fit_normalization,
+    _parse_years,
     _prepare_daily_frame,
     _prepare_daily_with_state_memory_bounded,
     _resolve_deferred_exit_days,
     _write_sample_index_streaming,
     assert_qdp_source_fresh,
     compute_long_suspension_masks,
+    derive_mainboard_limit_panels,
     path_summary_columns,
     path_value_column,
     simulate_a_share_round_trip,
@@ -73,6 +75,106 @@ from daily_research.path_policy.qdp_v2_sequence_path_training import (
 
 def test_sequence_pack_default_output_root_is_daily_research_store() -> None:
     assert DEFAULT_OUTPUT_ROOT.as_posix() == "daily_research/data/research_store/sequence_pack"
+
+
+def test_explicit_empty_year_set_does_not_restore_the_default_test_year() -> None:
+    assert _parse_years("", default=(2025,)) == ()
+    assert _parse_years(None, default=(2025,)) == (2025,)
+
+
+def _daily_limit_fixture(
+    raw_close: np.ndarray,
+    factor: np.ndarray,
+    raw_high: np.ndarray | None = None,
+    raw_low: np.ndarray | None = None,
+) -> np.ndarray:
+    close = np.asarray(raw_close, dtype=np.float64) * np.asarray(factor, dtype=np.float64)
+    high = (
+        np.asarray(raw_high, dtype=np.float64)
+        if raw_high is not None
+        else np.asarray(raw_close, dtype=np.float64) * 1.02
+    ) * np.asarray(factor, dtype=np.float64)
+    low = (
+        np.asarray(raw_low, dtype=np.float64)
+        if raw_low is not None
+        else np.asarray(raw_close, dtype=np.float64) * 0.98
+    ) * np.asarray(factor, dtype=np.float64)
+    panel = np.full((*close.shape, len(DAILY_RAW_FEATURES)), np.nan, dtype=np.float32)
+    panel[..., DAILY_RAW_FEATURES.index("close")] = close
+    panel[..., DAILY_RAW_FEATURES.index("high")] = high
+    panel[..., DAILY_RAW_FEATURES.index("low")] = low
+    return panel
+
+
+def test_mainboard_limit_reconstruction_handles_ex_right_reference_and_st_rate() -> None:
+    dates = ["2024-01-02", "2024-01-03", "2024-01-04"]
+    raw_close = np.asarray([[10.0], [5.0], [5.0]], dtype=np.float32)
+    factor = np.asarray([[2.0], [4.0], [4.0]], dtype=np.float32)
+    daily_raw = _daily_limit_fixture(raw_close, factor)
+
+    up, down, audit = derive_mainboard_limit_panels(
+        daily_raw=daily_raw,
+        raw_close=raw_close,
+        has_bar=np.ones_like(raw_close, dtype=bool),
+        status_valid=np.ones_like(raw_close, dtype=bool),
+        is_st=np.asarray([[False], [False], [True]], dtype=bool),
+        date_values=dates,
+        symbol_values=["600000.SH"],
+    )
+
+    assert np.isnan(up[0, 0])
+    assert up[1, 0] == pytest.approx(5.50)
+    assert down[1, 0] == pytest.approx(4.50)
+    assert up[2, 0] == pytest.approx(5.25)
+    assert down[2, 0] == pytest.approx(4.75)
+    assert audit["standard_limit_day_count"] == 2
+
+
+def test_mainboard_limit_reconstruction_excludes_registration_ipo_window() -> None:
+    dates = pd.date_range("2024-01-02", periods=7, freq="B").strftime("%Y-%m-%d").tolist()
+    raw_close = np.full((7, 1), 10.0, dtype=np.float32)
+    daily_raw = _daily_limit_fixture(raw_close, np.ones_like(raw_close))
+
+    up, down, audit = derive_mainboard_limit_panels(
+        daily_raw=daily_raw,
+        raw_close=raw_close,
+        has_bar=np.ones_like(raw_close, dtype=bool),
+        status_valid=np.ones_like(raw_close, dtype=bool),
+        is_st=np.zeros_like(raw_close, dtype=bool),
+        date_values=dates,
+        symbol_values=["001999.SZ"],
+        listing_dates={"001999.SZ": dates[0]},
+    )
+
+    assert np.isnan(up[:5, 0]).all()
+    assert up[5, 0] == pytest.approx(11.0)
+    assert down[5, 0] == pytest.approx(9.0)
+    assert audit["ipo_no_limit_day_count"] == 5
+
+
+def test_mainboard_limit_reconstruction_marks_observed_special_session_no_limit() -> None:
+    dates = ["2024-01-02", "2024-01-03"]
+    raw_close = np.asarray([[10.0], [11.5]], dtype=np.float32)
+    daily_raw = _daily_limit_fixture(
+        raw_close,
+        np.ones_like(raw_close),
+        raw_high=np.asarray([[10.2], [12.0]], dtype=np.float32),
+        raw_low=np.asarray([[9.8], [10.0]], dtype=np.float32),
+    )
+
+    up, down, audit = derive_mainboard_limit_panels(
+        daily_raw=daily_raw,
+        raw_close=raw_close,
+        has_bar=np.ones_like(raw_close, dtype=bool),
+        status_valid=np.ones_like(raw_close, dtype=bool),
+        is_st=np.zeros_like(raw_close, dtype=bool),
+        date_values=dates,
+        symbol_values=["600000.SH"],
+    )
+
+    assert np.isnan(up[1, 0])
+    assert np.isnan(down[1, 0])
+    assert audit["inferred_special_no_limit_day_count"] == 1
 
 
 def test_memory_bounded_daily_preparation_matches_legacy_composition() -> None:
@@ -1560,10 +1662,21 @@ def test_sequence_pack_dataset_get_batch_reads_date_grouped_windows(tmp_path) ->
         split="train",
         input_channel_profile=INPUT_CHANNEL_PROFILE_DAILY_ONLY,
     )
+    explicit_unmasked_daily = SequencePathPackDataset(
+        {
+            **masked_manifest,
+            "data_semantics": {"model_input_mask_features": []},
+        },
+        split="train",
+        input_channel_profile=INPUT_CHANNEL_PROFILE_DAILY_ONLY,
+    )
     masked_all = SequencePathPackDataset(masked_manifest, split="train")
 
     assert masked_daily.input_mask_features == ["has_bar", "is_suspended", "previous_close_valid", "zero_range"]
     assert masked_daily.get_batch([0, 1])["x"].shape == (2, 3, 7)
+    assert explicit_unmasked_daily.input_mask_features == []
+    assert explicit_unmasked_daily.input_dim == 3
+    assert explicit_unmasked_daily.get_batch([0, 1])["x"].shape == (2, 3, 3)
     assert masked_all.input_mask_features[-1] == "corr_valid"
     assert masked_all.get_batch([0, 1])["x"].shape == (2, 3, 10)
     assert masked_all.get_batch([0, 1])["y_tradable_path"].shape == (2, 20)

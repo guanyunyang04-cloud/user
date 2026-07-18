@@ -620,9 +620,21 @@ class SequencePathPackDataset(Dataset):
             )
         labels = dict(self.manifest.get("label_arrays", {}) or {})
         masks = dict(self.manifest.get("masks", {}) or {})
-        requested_input_masks = [*BASE_INPUT_MASK_FEATURES]
-        if "intraday_summary" in self.channel_order:
-            requested_input_masks.extend(INTRADAY_INPUT_MASK_FEATURES)
+        data_semantics = dict(self.manifest.get("data_semantics", {}) or {})
+        if "model_input_mask_features" in data_semantics:
+            declared_input_masks = data_semantics.get("model_input_mask_features")
+            if not isinstance(declared_input_masks, list):
+                raise ValueError("data_semantics.model_input_mask_features must be a list")
+            requested_input_masks = [str(name) for name in declared_input_masks]
+            missing_input_masks = sorted(set(requested_input_masks).difference(masks))
+            if missing_input_masks:
+                raise ValueError(
+                    f"declared model input masks are missing from the pack: {missing_input_masks}"
+                )
+        else:
+            requested_input_masks = [*BASE_INPUT_MASK_FEATURES]
+            if "intraday_summary" in self.channel_order:
+                requested_input_masks.extend(INTRADAY_INPUT_MASK_FEATURES)
         self.input_mask_features = [name for name in requested_input_masks if name in masks]
         self.input_mask_arrays = {
             name: _open_memmap(masks[name], dtype="bool") for name in self.input_mask_features
@@ -4275,16 +4287,19 @@ def _canonical_json_sha256(payload: Any) -> str:
 def _validated_development_contract(path: Path) -> dict[str, Any]:
     contract_path = Path(path).resolve()
     payload = json.loads(contract_path.read_text(encoding="utf-8"))
-    declared = str(payload.get("contract_sha256", "") or "")
-    semantic_payload = dict(payload)
+    mutable_study = str(payload.get("artifact_type", "")) == "seq100_current_study"
+    semantic_payload = dict(payload.get("contract", {}) or {}) if mutable_study else dict(payload)
+    declared = str(
+        payload.get("contract_sha256", semantic_payload.get("contract_sha256", "")) or ""
+    )
     semantic_payload.pop("contract_sha256", None)
     computed = _canonical_json_sha256(semantic_payload)
     if not declared or computed != declared:
         raise ValueError("development contract semantic sha256 does not match contract_sha256")
-    protocol = dict(payload.get("development_protocol", {}) or {})
+    protocol = dict(semantic_payload.get("development_protocol", {}) or {})
     if dict(protocol.get("split_roles", {}) or {}) != {"fit": "train", "evaluation": "development"}:
         raise ValueError("development contract must declare train/development split roles")
-    early = dict(payload.get("early_stopping", {}) or {})
+    early = dict(semantic_payload.get("early_stopping", {}) or {})
     if (
         str(early.get("metric", "")) != EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS
         or str(early.get("mode", "")) != EARLY_STOPPING_MODE_MIN
@@ -4293,10 +4308,11 @@ def _validated_development_contract(path: Path) -> dict[str, Any]:
     ):
         raise ValueError("development contract early-stopping semantics are incompatible")
     return {
-        "contract_id": str(payload.get("contract_id", "")),
+        "contract_id": str(semantic_payload.get("contract_id", payload.get("contract_id", ""))),
         "path": str(contract_path),
         "contract_sha256": declared,
-        "contract_file_sha256": _file_sha256(contract_path),
+        "contract_file_sha256": declared if mutable_study else _file_sha256(contract_path),
+        "expected_input_dim": int(dict(semantic_payload.get("profile", {}) or {}).get("input_dim", 0) or 0),
     }
 
 
@@ -4648,6 +4664,13 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         max_samples=int(config.max_samples_per_split),
         input_channel_profile=str(config.input_channel_profile),
     )
+    expected_input_dim = int(development_contract_binding.get("expected_input_dim", 0) or 0)
+    if evaluation_mode == EVALUATION_MODE_DEVELOPMENT and expected_input_dim > 0:
+        if int(train_ds.input_dim) != expected_input_dim:
+            raise ValueError(
+                "development model input dimension does not match the research contract: "
+                f"{train_ds.input_dim} != {expected_input_dim}"
+            )
     if len(train_ds) == 0:
         raise ValueError("training split is empty")
     development_ds = None

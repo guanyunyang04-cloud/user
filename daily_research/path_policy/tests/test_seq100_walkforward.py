@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -93,7 +94,13 @@ def _build_source_view(store_root: Path) -> Path:
     }
     masks = {
         name: _write_array(arrays_root / f"{name}.bool.dat", valid_mask, dtype="bool")
-        for name in ("input_valid", "entry_buyable", "label_valid")
+        for name in (
+            "input_valid",
+            "entry_buyable",
+            "label_valid",
+            "long_suspension",
+            "continuity_break",
+        )
     }
 
     # The source split is deliberately unsuitable. The fold builder must derive
@@ -111,7 +118,25 @@ def _build_source_view(store_root: Path) -> Path:
     ]
     sample_index_path = store_root / "sample_index" / "tiny_source.parquet"
     sample_index_path.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(rows).to_parquet(sample_index_path, index=False)
+    sample_frame = pd.DataFrame(rows)
+    sample_frame.to_parquet(sample_index_path, index=False)
+    candidate = sample_frame.copy()
+    candidate["candidate_id"] = np.arange(len(candidate), dtype=np.int64)
+    candidate["year"] = candidate["trade_date"].str.slice(0, 4).astype(np.int16)
+    candidate["entry_trade_date"] = np.asarray(DATES, dtype=object)[
+        np.minimum(candidate["date_idx"].to_numpy(dtype=np.int64) + 1, len(DATES) - 1)
+    ]
+    for column in ("entry_filled", "label_valid", "price_label_valid", "va_aux_valid"):
+        candidate[column] = True
+    candidate_index_path = store_root / "candidate_index" / "tiny_source.parquet"
+    candidate_index_path.parent.mkdir(parents=True, exist_ok=True)
+    candidate.to_parquet(candidate_index_path, index=False)
+
+    qdp_root = store_root / "tiny_qdp"
+    qdp_manifest = qdp_root / "datasets" / "fixture" / "fixture-v1" / "dataset.json"
+    qdp_manifest.parent.mkdir(parents=True, exist_ok=True)
+    qdp_manifest.write_text('{"dataset_id":"fixture-v1"}', encoding="utf-8")
+    qdp_hash = hashlib.sha256(qdp_manifest.read_bytes()).hexdigest()
 
     source_view = {
         "artifact_type": "qdp_v2_sequence_path_pack",
@@ -129,6 +154,26 @@ def _build_source_view(store_root: Path) -> Path:
         "label_arrays": label_arrays,
         "masks": masks,
         "sample_index_path": str(sample_index_path.resolve()),
+        "candidate_index_path": str(candidate_index_path.resolve()),
+        "candidate_count": int(len(candidate)),
+        "candidate_count_by_split": {"legacy": int(len(candidate))},
+        "qdp_root": str(qdp_root.resolve()),
+        "research_source_datasets": {"fixture": "fixture-v1"},
+        "qdp_source_manifests": {
+            "fixture": {
+                "dataset_id": "fixture-v1",
+                "manifest_path": str(qdp_manifest.resolve()),
+                "dataset_json_sha256": qdp_hash,
+            }
+        },
+        "dependency_padding_complete": True,
+        "data_semantics": {
+            "candidate_selection_uses_future_labels": False,
+            "continuity_break_rule": {
+                "minimum_consecutive_suspended_open_days": 20,
+                "break_position": "first_non_suspended_open_day_after_qualifying_run",
+            },
+        },
         "normalization": {
             "fit_scope": "intentionally_stale",
             **{channel: {"mean": [999.0], "std": [999.0]} for channel in feature_channels},
@@ -139,6 +184,32 @@ def _build_source_view(store_root: Path) -> Path:
     source_path.parent.mkdir(parents=True, exist_ok=True)
     source_path.write_text(json.dumps(source_view), encoding="utf-8")
     return source_path
+
+
+def test_development_fold_preserves_source_research_contract(tmp_path: Path) -> None:
+    store_root = tmp_path / "research_store"
+    source_view = _build_source_view(store_root)
+    source = json.loads(source_view.read_text(encoding="utf-8"))
+    binding = {
+        "path": str(tmp_path / "study.json"),
+        "contract_id": "current-study",
+        "contract_sha256": "a" * 64,
+        "contract_file_sha256": "a" * 64,
+    }
+    source["research_contract"] = binding
+    source["development_contract"] = binding
+    source_view.write_text(json.dumps(source), encoding="utf-8")
+
+    result = build_development_walkforward_fold(
+        source_view=source_view,
+        development_year=2022,
+        train_start_year=2021,
+        store_root=store_root,
+    )
+    fold = json.loads(Path(result["view_path"]).read_text(encoding="utf-8"))
+
+    assert fold["research_contract"] == binding
+    assert fold["development_contract"] == binding
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
