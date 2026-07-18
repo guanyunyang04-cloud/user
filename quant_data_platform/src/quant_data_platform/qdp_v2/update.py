@@ -17,6 +17,11 @@ if __package__ in {None, ""}:
 from quant_data_platform.core.json_io import json_safe
 from quant_data_platform.core.paths import qdp_paths
 from quant_data_platform.qdp_v2.baostock_update import run_baostock_core_update
+from quant_data_platform.qdp_v2.auxiliary_update import (
+    plan_auxiliary_update,
+    run_auxiliary_repair,
+    run_auxiliary_update,
+)
 from quant_data_platform.qdp_v2.database_audit import audit_latest_keys
 from quant_data_platform.qdp_v2.factor_update import run_factor_tail_update
 from quant_data_platform.qdp_v2.manifest import (
@@ -93,10 +98,17 @@ def run_update(
     workers: int = 4,
     workspace_root: str | Path | None = None,
     keep_runtime: bool = False,
+    core_only: bool = False,
+    repair_auxiliary: bool = False,
 ) -> dict[str, Any]:
     if int(workers) not in {1, 2, 3, 4}:
         raise ValueError("workers_must_be_between_1_and_4")
     workspace = Path(workspace_root or Path.cwd()).resolve()
+    if repair_auxiliary:
+        return run_auxiliary_repair(
+            as_of_date=as_of_date,
+            workspace_root=workspace,
+        )
     plan = plan_update(
         as_of_date=as_of_date,
         start_date=start_date,
@@ -114,10 +126,17 @@ def run_update(
     }
     stage = "baostock_core"
     try:
+        valuation_cache = (
+            qdp_paths(workspace).data_dir
+            / "qdp_runtime"
+            / "auxiliary_tail"
+            / "baostock_valuation.parquet"
+        ).resolve()
         core = run_baostock_core_update(
             start_date=start,
             end_date=end,
             workspace_root=workspace,
+            valuation_cache_path=None if core_only else valuation_cache,
         )
         payload[stage] = _state_summary(core)
 
@@ -158,6 +177,19 @@ def run_update(
             workers=int(workers),
         )
         payload[stage] = _state_summary(baostock_5m)
+
+        if not core_only:
+            stage = "auxiliary"
+            auxiliary = run_auxiliary_update(
+                as_of_date=end,
+                workspace_root=workspace,
+                baostock_valuation_cache_path=valuation_cache,
+            )
+            payload[stage] = _state_summary(auxiliary)
+            if auxiliary.get("status") not in {"current", "repaired", "updated"}:
+                raise RuntimeError(
+                    f"post_update_auxiliary_failed:{auxiliary.get('status')}"
+                )
 
         stage = "latest_check"
         latest = audit_latest_keys(workspace_root=workspace)
@@ -267,28 +299,56 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--keep-runtime", action="store_true")
+    parser.add_argument(
+        "--core-only",
+        action="store_true",
+        help="Update only the core market domains; auxiliary staleness remains visible.",
+    )
+    parser.add_argument(
+        "--repair-auxiliary",
+        action="store_true",
+        help="Repair only the six auxiliary domains; never runs core or 5m history.",
+    )
     parser.add_argument("--json", action="store_true")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
+    if args.repair_auxiliary and args.core_only:
+        raise ValueError("repair_auxiliary_and_core_only_are_mutually_exclusive")
     kwargs = {
         "as_of_date": str(args.as_of_date),
         "start_date": str(args.start_date or ""),
         "lookback_days": int(args.lookback_days),
         "workspace_root": str(args.workspace_root or "") or None,
     }
-    payload = plan_update(**kwargs) if args.dry_run else run_update(
-        **kwargs,
-        workers=int(args.workers),
-        keep_runtime=bool(args.keep_runtime),
-    )
+    if args.dry_run and args.repair_auxiliary:
+        payload = plan_auxiliary_update(
+            as_of_date=str(args.as_of_date),
+            workspace_root=str(args.workspace_root or "") or None,
+        )
+    elif args.dry_run:
+        payload = plan_update(**kwargs)
+        payload["auxiliary"] = "skipped_by_core_only" if args.core_only else "included"
+    else:
+        payload = run_update(
+            **kwargs,
+            workers=int(args.workers),
+            keep_runtime=bool(args.keep_runtime),
+            core_only=bool(args.core_only),
+            repair_auxiliary=bool(args.repair_auxiliary),
+        )
     if args.json:
         print(json.dumps(json_safe(payload), ensure_ascii=False, indent=2))
     else:
         print(_format(payload))
-    return 0 if payload.get("status") in {"planned", "updated", "updated_with_gaps"} else 2
+    return 0 if payload.get("status") in {
+        "planned",
+        "updated",
+        "updated_with_gaps",
+        "repaired",
+    } else 2
 
 
 def _format(payload: dict[str, Any]) -> str:
@@ -297,7 +357,7 @@ def _format(payload: dict[str, Any]) -> str:
         f"range: {payload.get('start_date', '')}..{payload.get('as_of_date', '')}",
         f"workers: {payload.get('workers', '')}",
     ]
-    for name in ("baostock_core", "permanent_exclusions", "adjust_factor", "mootdx_5m", "baostock_5m", "latest_check"):
+    for name in ("baostock_core", "permanent_exclusions", "adjust_factor", "mootdx_5m", "baostock_5m", "auxiliary", "latest_check"):
         if name in payload:
             lines.append(f"{name}: {payload[name]}")
     return "\n".join(lines)

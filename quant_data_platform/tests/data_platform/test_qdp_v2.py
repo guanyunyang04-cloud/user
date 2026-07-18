@@ -130,6 +130,12 @@ def test_required_domains_match_the_current_general_store() -> None:
         "universe_snapshot",
         "adjust_factor",
         "market_intraday_5m",
+        "industry_concept",
+        "share_capital",
+        "valuation",
+        "name_change",
+        "corporate_actions",
+        "index_constituents",
     }
     assert "market_intraday_1m" not in REQUIRED_DOMAINS
     assert "limit_intraday_features" not in REQUIRED_DOMAINS

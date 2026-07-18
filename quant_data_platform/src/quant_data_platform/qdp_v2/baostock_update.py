@@ -52,6 +52,7 @@ def run_baostock_core_update(
     workspace_root: str | Path | None = None,
     provider: Any | None = None,
     apply: bool = True,
+    valuation_cache_path: str | Path | None = None,
 ) -> dict[str, Any]:
     start = _date_text(start_date)
     end = _date_text(end_date)
@@ -95,6 +96,7 @@ def run_baostock_core_update(
         )
 
         daily_frames: list[pd.DataFrame] = []
+        valuation_frames: list[pd.DataFrame] = []
         universe_frames: list[pd.DataFrame] = []
         status_frames: list[pd.DataFrame] = []
         for trade_date in open_dates:
@@ -111,6 +113,10 @@ def run_baostock_core_update(
                     f"baostock_daily_partition_errors:{trade_date}"
                 )
             daily = _daily_frame(result.data, trade_date=trade_date)
+            valuation = _valuation_frame(
+                getattr(result, "raw_data", pd.DataFrame()),
+                trade_date=trade_date,
+            )
             universe, status = _universe_and_status_frames(
                 all_stock,
                 stock_basic=stock_basic,
@@ -121,6 +127,7 @@ def run_baostock_core_update(
                     f"baostock_reference_partition_empty:{trade_date}"
                 )
             daily_frames.append(daily)
+            valuation_frames.append(valuation)
             universe_frames.append(universe)
             status_frames.append(status)
 
@@ -156,6 +163,28 @@ def run_baostock_core_update(
             "missing_rows": counts,
             "provider": "baostock",
         }
+        if valuation_cache_path is not None:
+            cache = Path(valuation_cache_path).resolve()
+            if workspace not in cache.parents:
+                raise BaostockCoreUpdateError(
+                    f"valuation_cache_outside_workspace:{cache}"
+                )
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            temporary = cache.with_name(f".{cache.name}.tmp")
+            temporary.unlink(missing_ok=True)
+            cache.unlink(missing_ok=True)
+            valuation = _concat(valuation_frames)
+            try:
+                valuation.to_parquet(
+                    temporary,
+                    index=False,
+                    compression="zstd",
+                )
+                temporary.replace(cache)
+            finally:
+                temporary.unlink(missing_ok=True)
+            payload["valuation_cache_path"] = str(cache)
+            payload["valuation_cache_row_count"] = int(len(valuation))
         if not apply or not any(counts.values()):
             return payload
 
@@ -290,6 +319,39 @@ def _daily_frame(frame: pd.DataFrame, *, trade_date: str) -> pd.DataFrame:
     data["source"] = "baostock"
     data["adjusted_flag"] = "none"
     return data.loc[:, columns].drop_duplicates(["trade_date", "symbol"], keep="last").reset_index(drop=True)
+
+
+def _valuation_frame(frame: pd.DataFrame, *, trade_date: str) -> pd.DataFrame:
+    columns = ["symbol", "trade_date", "pe", "pb", "turnover_rate"]
+    if frame is None or frame.empty:
+        return pd.DataFrame(columns=columns)
+    required = {"code", "peTTM", "pbMRQ", "turn"}
+    missing = sorted(required.difference(frame.columns))
+    if missing:
+        raise BaostockCoreUpdateError(
+            f"baostock_daily_valuation_fields_missing:{trade_date}:{missing}"
+        )
+    data = frame.copy()
+    code = data["code"].fillna("").astype(str).str.lower()
+    data["symbol"] = np.where(
+        code.str.startswith("sh."),
+        code.str.slice(3) + ".SH",
+        np.where(
+            code.str.startswith("sz."),
+            code.str.slice(3) + ".SZ",
+            "",
+        ),
+    )
+    data["trade_date"] = str(trade_date)
+    data["pe"] = pd.to_numeric(data["peTTM"], errors="coerce")
+    data["pb"] = pd.to_numeric(data["pbMRQ"], errors="coerce")
+    data["turnover_rate"] = pd.to_numeric(data["turn"], errors="coerce")
+    data = data.loc[data["symbol"].map(_is_supported_mainboard_symbol)]
+    return (
+        data.loc[:, columns]
+        .drop_duplicates(["trade_date", "symbol"], keep="last")
+        .reset_index(drop=True)
+    )
 
 
 def _universe_and_status_frames(

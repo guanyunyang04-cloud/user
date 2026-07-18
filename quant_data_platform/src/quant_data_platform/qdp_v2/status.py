@@ -63,6 +63,34 @@ def status_payload(*, workspace_root: str | Path | None = None, verify_files: bo
             "shard_count": shard_count,
             "existing_shards": existing_shards,
             "file_verification": "verified" if verify_files else "not_requested",
+            "checked_through": str(
+                dict(manifest.source or {}).get("checked_through", "")
+            ),
+            "source_contract": str(
+                dict(manifest.source or {}).get("source_contract", "")
+            ),
+            "missing_daily_keys": dict(manifest.source or {}).get(
+                "missing_daily_keys"
+            ),
+            "future_source_dates": dict(manifest.quality or {}).get(
+                "future_source_dates"
+            ),
+            "secondary_validation_status": str(
+                dict(manifest.source or {}).get(
+                    "secondary_validation_status", ""
+                )
+            ),
+            "secondary_validation_at": str(
+                dict(manifest.source or {}).get(
+                    "secondary_validation_at", ""
+                )
+            ),
+            "secondary_compared_count": dict(manifest.source or {}).get(
+                "secondary_compared_count"
+            ),
+            "secondary_material_mismatch_count": dict(
+                manifest.source or {}
+            ).get("secondary_material_mismatch_count"),
         }
     # Imported lazily because the in-place repair module depends on this file.
     from quant_data_platform.qdp_v2.permanent_exclusions import (
@@ -137,6 +165,17 @@ def print_status(payload: dict[str, Any], *, as_json: bool) -> None:
             f"rows={item.get('row_count', 0)} shards="
             f"{item.get('existing_shards') if item.get('existing_shards') is not None else 'not_verified'}/{item.get('shard_count', 0)}"
         )
+        if item.get("checked_through"):
+            print(
+                "  auxiliary: "
+                f"checked_through={item.get('checked_through')} "
+                f"missing_daily_keys={item.get('missing_daily_keys')} "
+                f"future_source_dates={item.get('future_source_dates')} "
+                f"secondary={item.get('secondary_validation_status')} "
+                f"compared={item.get('secondary_compared_count')} "
+                f"mismatches={item.get('secondary_material_mismatch_count')} "
+                f"validated_at={item.get('secondary_validation_at')}"
+            )
     missing = list(payload.get("missing", []) or [])
     if missing:
         print(f"missing: {json.dumps(json_safe(missing), ensure_ascii=False)}")

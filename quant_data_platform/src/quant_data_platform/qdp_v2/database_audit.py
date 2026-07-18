@@ -14,10 +14,12 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+import pandas as pd
 import pyarrow.parquet as pq
 
 from quant_data_platform.core.json_io import json_safe
 from quant_data_platform.qdp_v2.audit import audit_active
+from quant_data_platform.qdp_v2.auxiliary_update import AUXILIARY_DOMAINS
 from quant_data_platform.qdp_v2.duckdb_resources import open_guarded_duckdb
 from quant_data_platform.qdp_v2.manifest import (
     DatasetManifest,
@@ -51,6 +53,7 @@ REQUIRED_DOMAINS = {
     "universe_snapshot",
     "adjust_factor",
     "market_intraday_5m",
+    *AUXILIARY_DOMAINS,
 }
 
 REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -115,6 +118,66 @@ REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
         "amount",
         "source",
         "adjusted_flag",
+    ),
+    "industry_concept": (
+        "symbol",
+        "trade_date",
+        "industry",
+        "source",
+        "industry_fill_method",
+        "industry_source_date",
+        "industry_standard",
+    ),
+    "share_capital": (
+        "symbol",
+        "trade_date",
+        "total_share",
+        "float_share",
+        "restricted_share",
+        "total_share_source_date",
+        "float_share_source_date",
+        "restricted_share_source_date",
+        "share_fill_method",
+        "source",
+    ),
+    "valuation": (
+        "symbol",
+        "trade_date",
+        "total_mv",
+        "circ_mv",
+        "pe",
+        "pb",
+        "turnover_rate",
+        "source",
+    ),
+    "name_change": (
+        "symbol",
+        "trade_date",
+        "old_name",
+        "new_name",
+        "change_type",
+        "source",
+    ),
+    "corporate_actions": (
+        "symbol",
+        "trade_date",
+        "announcement_date",
+        "ex_date",
+        "record_date",
+        "dividend_pay_date",
+        "action_type",
+        "cash_dividend_per_10",
+        "bonus_share_per_10",
+        "transfer_share_per_10",
+        "source",
+    ),
+    "index_constituents": (
+        "index_symbol",
+        "symbol",
+        "trade_date",
+        "index_name",
+        "source",
+        "source_snapshot_date",
     ),
 }
 
@@ -483,6 +546,30 @@ def audit_database(
                             "market_daily_raw",
                             "unexplained_adjacent_trade_price_discontinuity",
                             reopen,
+                        )
+                    )
+            auxiliary_required = {
+                "market_daily_raw",
+                "universe_snapshot",
+                "adjust_factor",
+                *AUXILIARY_DOMAINS,
+            }
+            if deep and auxiliary_required.issubset(manifests):
+                auxiliary = _auxiliary_semantics_check(
+                    con,
+                    root=root,
+                    manifests=manifests,
+                    sample_limit=max(1, int(sample_limit)),
+                )
+                cross_checks["auxiliary_domains"] = auxiliary
+                if auxiliary["status"] != "ok":
+                    findings.append(
+                        _finding(
+                            "high",
+                            "auxiliary",
+                            "auxiliary_domains",
+                            "auxiliary_strict_pit_or_completeness_error",
+                            auxiliary,
                         )
                     )
 
@@ -1713,6 +1800,260 @@ def _audit_temp_directory(workspace: Path):
     runtime = workspace / "quant_data_platform" / "data" / "qdp_runtime"
     runtime.mkdir(parents=True, exist_ok=True)
     return tempfile.TemporaryDirectory(prefix="audit_spill_", dir=str(runtime))
+
+
+def _auxiliary_semantics_check(
+    con: Any,
+    *,
+    root: Path,
+    manifests: Mapping[str, DatasetManifest],
+    sample_limit: int,
+) -> dict[str, Any]:
+    del sample_limit
+
+    def register(domain: str) -> str:
+        name = "aux_" + domain.replace("-", "_")
+        paths = [
+            resolve_manifest_path(item.path, root=root).resolve()
+            for item in manifests[domain].shards
+        ]
+        literals = ",".join("'" + str(path).replace("'", "''") + "'" for path in paths)
+        con.execute(
+            f"CREATE OR REPLACE TEMP VIEW {_q(name)} AS "
+            f"SELECT * FROM read_parquet([{literals}], union_by_name=true)"
+        )
+        return _q(name)
+
+    tables = {
+        domain: register(domain)
+        for domain in (
+            "market_daily_raw",
+            "universe_snapshot",
+            "adjust_factor",
+            *AUXILIARY_DOMAINS,
+        )
+    }
+    target = str(manifests["market_daily_raw"].end_date or "")
+    daily = tables["market_daily_raw"]
+    checks: dict[str, Any] = {}
+    blocking = 0
+
+    for domain in ("industry_concept", "share_capital", "valuation"):
+        table = tables[domain]
+        missing = int(
+            con.execute(
+                f"SELECT count(*) FROM (SELECT symbol,trade_date FROM {daily} "
+                "WHERE trade_date<=? EXCEPT SELECT symbol,trade_date FROM "
+                + table
+                + ")",
+                [target],
+            ).fetchone()[0]
+        )
+        extra = int(
+            con.execute(
+                f"SELECT count(*) FROM (SELECT symbol,trade_date FROM {table} "
+                "EXCEPT SELECT symbol,trade_date FROM "
+                + daily
+                + " WHERE trade_date<=?)",
+                [target],
+            ).fetchone()[0]
+        )
+        checks[f"{domain}_missing_daily_keys"] = missing
+        checks[f"{domain}_extra_daily_keys"] = extra
+        blocking += missing + extra
+
+    industry = tables["industry_concept"]
+    industry_invalid = int(
+        con.execute(
+            f"SELECT count(*) FROM {industry} WHERE "
+            "coalesce(trim(industry),'')='' OR "
+            "coalesce(trim(industry_standard),'')='' OR "
+            "industry_fill_method NOT IN ('direct_snapshot','prior_ffill') OR "
+            "try_cast(industry_source_date AS DATE)>try_cast(trade_date AS DATE)"
+        ).fetchone()[0]
+    )
+    checks["industry_invalid_or_future_count"] = industry_invalid
+    blocking += industry_invalid
+
+    share = tables["share_capital"]
+    share_invalid = int(
+        con.execute(
+            f"SELECT count(*) FROM {share} WHERE total_share<=0 OR float_share<0 OR "
+            "float_share>total_share OR restricted_share<0 OR "
+            "abs(restricted_share-greatest(total_share-float_share,0))>1e-6 OR "
+            "try_cast(total_share_source_date AS DATE)>try_cast(trade_date AS DATE) OR "
+            "try_cast(float_share_source_date AS DATE)>try_cast(trade_date AS DATE) OR "
+            "try_cast(restricted_share_source_date AS DATE)>try_cast(trade_date AS DATE)"
+        ).fetchone()[0]
+    )
+    checks["share_capital_invalid_or_future_count"] = share_invalid
+    blocking += share_invalid
+
+    valuation = tables["valuation"]
+    valuation_formula = int(
+        con.execute(
+            f"""
+            SELECT count(*)
+            FROM {valuation} v
+            JOIN {daily} d USING(symbol,trade_date)
+            JOIN {share} s USING(symbol,trade_date)
+            WHERE abs(v.total_mv-d.close*s.total_share)>
+                    greatest(abs(d.close*s.total_share)*1e-8,1e-6)
+               OR abs(v.circ_mv-d.close*s.float_share)>
+                    greatest(abs(d.close*s.float_share)*1e-8,1e-6)
+            """
+        ).fetchone()[0]
+    )
+    valuation_nulls = con.execute(
+        f"SELECT count(*) FILTER(WHERE pe IS NULL), "
+        "count(*) FILTER(WHERE pb IS NULL), "
+        "count(*) FILTER(WHERE turnover_rate IS NULL) FROM " + valuation
+    ).fetchone()
+    checks["valuation_formula_error_count"] = valuation_formula
+    checks["valuation_provider_null_counts"] = {
+        "pe": int(valuation_nulls[0] or 0),
+        "pb": int(valuation_nulls[1] or 0),
+        "turnover_rate": int(valuation_nulls[2] or 0),
+    }
+    blocking += valuation_formula
+
+    name_change = tables["name_change"]
+    name_invalid = int(
+        con.execute(
+            f"SELECT count(*) FROM {name_change} WHERE "
+            "coalesce(trim(old_name),'')='' OR coalesce(trim(new_name),'')='' OR "
+            "old_name=new_name"
+        ).fetchone()[0]
+    )
+    universe = tables["universe_snapshot"]
+    name_latest_mismatch = int(
+        con.execute(
+            f"""
+            WITH e AS (
+              SELECT symbol,new_name FROM {name_change}
+              QUALIFY row_number() OVER(PARTITION BY symbol ORDER BY trade_date DESC)=1
+            ), u AS (
+              SELECT symbol,trim(name) AS name FROM {universe} WHERE trade_date=?
+            )
+            SELECT count(*) FROM e JOIN u USING(symbol) WHERE e.new_name<>u.name
+            """,
+            [target],
+        ).fetchone()[0]
+    )
+    checks["name_change_invalid_count"] = name_invalid
+    checks["name_change_latest_name_mismatch_count"] = name_latest_mismatch
+    blocking += name_invalid + name_latest_mismatch
+
+    corporate = tables["corporate_actions"]
+    corporate_invalid = int(
+        con.execute(
+            f"SELECT count(*) FROM {corporate} WHERE ex_date IS NULL OR "
+            "trade_date<>ex_date OR announcement_date IS NULL OR "
+            "try_cast(announcement_date AS DATE)>try_cast(ex_date AS DATE) OR "
+            "(record_date IS NOT NULL AND try_cast(record_date AS DATE)>try_cast(ex_date AS DATE)) OR "
+            "(dividend_pay_date IS NOT NULL AND try_cast(dividend_pay_date AS DATE)<try_cast(ex_date AS DATE)) OR "
+            "coalesce(cash_dividend_per_10,0)+coalesce(bonus_share_per_10,0)+"
+            "coalesce(transfer_share_per_10,0)<=0"
+        ).fetchone()[0]
+    )
+    factor = tables["adjust_factor"]
+    corporate_without_factor = int(
+        con.execute(
+            f"""
+            WITH changes AS (
+              SELECT symbol,trade_date,adjust_factor,
+                     lag(adjust_factor) OVER(PARTITION BY symbol ORDER BY trade_date) AS prior
+              FROM {factor}
+            )
+            SELECT count(*) FROM {corporate} c
+            LEFT JOIN changes f USING(symbol,trade_date)
+            WHERE f.prior IS NULL OR abs(f.adjust_factor/f.prior-1)<1e-12
+            """
+        ).fetchone()[0]
+    )
+    checks["corporate_action_invalid_count"] = corporate_invalid
+    checks["corporate_action_without_factor_change_count"] = corporate_without_factor
+    blocking += corporate_invalid
+
+    index = tables["index_constituents"]
+    index_row = con.execute(
+        f"SELECT count(*) FILTER(WHERE try_cast(source_snapshot_date AS DATE)>"
+        "try_cast(trade_date AS DATE)), min(trade_date), max(trade_date), "
+        "max(source_snapshot_date), count(distinct index_symbol) FROM " + index
+    ).fetchone()
+    index_future = int(index_row[0] or 0)
+    latest_snapshot = str(index_row[3] or "")
+    snapshot_age = (
+        (pd.Timestamp(target) - pd.Timestamp(latest_snapshot)).days
+        if latest_snapshot
+        else 999999
+    )
+    maximum_snapshot_gap = int(
+        con.execute(
+            f"""
+            WITH snapshots AS (
+              SELECT DISTINCT index_symbol, source_snapshot_date FROM {index}
+            ), gaps AS (
+              SELECT date_diff(
+                       'day',
+                       try_cast(source_snapshot_date AS DATE),
+                       lead(try_cast(source_snapshot_date AS DATE)) OVER (
+                         PARTITION BY index_symbol
+                         ORDER BY try_cast(source_snapshot_date AS DATE)
+                       )
+                     ) AS gap_days
+              FROM snapshots
+            )
+            SELECT coalesce(max(gap_days), 0) FROM gaps
+            """
+        ).fetchone()[0]
+    )
+    index_contract_errors = (
+        index_future
+        + int(str(index_row[1] or "") != "2010-01-04")
+        + int(str(index_row[2] or "") != target)
+        + int(int(index_row[4] or 0) != 3)
+        + int(snapshot_age > 40)
+        + int(maximum_snapshot_gap > 40)
+    )
+    checks["index_future_snapshot_count"] = index_future
+    checks["index_latest_snapshot_age_days"] = snapshot_age
+    checks["index_maximum_snapshot_gap_days"] = maximum_snapshot_gap
+    checks["index_contract_error_count"] = index_contract_errors
+    blocking += index_contract_errors
+
+    watermark_errors: list[str] = []
+    secondary_status_errors: list[str] = []
+    secondary_mismatches = 0
+    for domain in AUXILIARY_DOMAINS:
+        source = dict(manifests[domain].source or {})
+        checked = str(source.get("checked_through", "") or "")
+        if checked != target:
+            watermark_errors.append(f"{domain}:{checked or 'missing'}")
+        validation_status = str(
+            source.get("secondary_validation_status", "") or ""
+        )
+        if validation_status not in {"ok", "not_comparable"}:
+            secondary_status_errors.append(
+                f"{domain}:{validation_status or 'missing'}"
+            )
+        secondary_mismatches += int(
+            source.get("secondary_material_mismatch_count", 0) or 0
+        )
+    checks["watermark_errors"] = watermark_errors
+    checks["secondary_validation_status_errors"] = secondary_status_errors
+    checks["secondary_material_mismatch_count"] = secondary_mismatches
+    blocking += (
+        len(watermark_errors)
+        + len(secondary_status_errors)
+        + secondary_mismatches
+    )
+    return {
+        "status": "ok" if blocking == 0 else "needs_attention",
+        "target_date": target,
+        "blocking_error_count": int(blocking),
+        "checks": checks,
+    }
 
 
 def _path_texts(paths: Iterable[Path]) -> list[str]:

@@ -29,6 +29,7 @@ from quant_data_platform.qdp_v2.manifest import (
     qdp_v2_root,
     read_dataset_manifest,
     resolve_manifest_path,
+    schema_hash,
 )
 from quant_data_platform.qdp_v2.status import active_dataset_map
 
@@ -121,6 +122,244 @@ def resolve_active_domain(
         manifest_sha256=manifest_sha,
         manifest=manifest,
     )
+
+
+def replace_active_table_from_parquet(
+    domain: str,
+    prepared_parquet_path: str | Path,
+    *,
+    reason: str,
+    workspace_root: str | Path | None = None,
+    primary_key: Sequence[str] | None = None,
+    contract_version: str = "",
+    source_updates: Mapping[str, Any] | None = None,
+    quality_updates: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Replace every shard in one active table, including schema migrations.
+
+    Auxiliary tables are intentionally small single-table domains whose
+    contract can evolve in place.  The dataset manifest remains the commit
+    point and the active dataset id is never changed.  Old shards are removed
+    only after the new manifest is durable.
+    """
+
+    repair_reason = _required_reason(reason)
+    context = resolve_active_domain(domain, workspace_root=workspace_root)
+    prepared = _resolve_prepared_parquet_path(
+        prepared_parquet_path,
+        workspace_root=workspace_root,
+    )
+    parquet = pq.ParquetFile(prepared)
+    arrow_schema = parquet.schema_arrow
+    row_count = int(parquet.metadata.num_rows)
+    if row_count <= 0:
+        raise QdpV2RepairError(f"qdp_v2_repair_frame_empty:{prepared}")
+
+    keys = [str(item) for item in (primary_key or context.manifest.primary_key)]
+    if not keys:
+        raise QdpV2RepairError("qdp_v2_repair_primary_key_missing")
+    missing_keys = sorted(set(keys).difference(arrow_schema.names))
+    if missing_keys:
+        raise QdpV2RepairError(
+            f"qdp_v2_repair_primary_key_columns_missing:{missing_keys}"
+        )
+
+    date_column = next(
+        (item for item in _DATE_COLUMNS if item in arrow_schema.names),
+        "",
+    )
+    start_date = ""
+    end_date = ""
+    with _open_repair_duckdb(context) as connection:
+        quoted_keys = ",".join(_quote_identifier(item) for item in keys)
+        null_predicate = " OR ".join(
+            f"{_quote_identifier(item)} IS NULL" for item in keys
+        )
+        duplicate = connection.execute(
+            "SELECT 1 FROM read_parquet(?) "
+            f"WHERE NOT ({null_predicate}) GROUP BY {quoted_keys} "
+            "HAVING count(*) > 1 LIMIT 1",
+            [str(prepared)],
+        ).fetchone()
+        null_key = connection.execute(
+            "SELECT 1 FROM read_parquet(?) "
+            f"WHERE {null_predicate} LIMIT 1",
+            [str(prepared)],
+        ).fetchone()
+        if null_key:
+            raise QdpV2RepairError("qdp_v2_repair_primary_key_null")
+        if duplicate:
+            raise QdpV2RepairError("qdp_v2_repair_primary_key_duplicate")
+        if date_column:
+            quoted_date = _quote_identifier(date_column)
+            row = connection.execute(
+                "SELECT count(*) FILTER (WHERE try_cast("
+                f"{quoted_date} AS DATE) IS NULL), "
+                f"strftime(min(try_cast({quoted_date} AS DATE)), '%Y-%m-%d'), "
+                f"strftime(max(try_cast({quoted_date} AS DATE)), '%Y-%m-%d') "
+                "FROM read_parquet(?)",
+                [str(prepared)],
+            ).fetchone()
+            if row is None or int(row[0] or 0) != 0 or not row[1] or not row[2]:
+                raise QdpV2RepairError(
+                    f"qdp_v2_repair_date_value_invalid:{prepared}"
+                )
+            start_date, end_date = str(row[1]), str(row[2])
+
+    info = _PreparedParquetInfo(
+        source_path=prepared,
+        row_count=row_count,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    installed = _install_prepared_parquet(
+        info,
+        target_dir=_active_shard_directory(context),
+        target_name=lambda digest: f"auxiliary_replace_{digest[:24]}.parquet",
+    )
+    created = installed.created
+    try:
+        new_schema = _manifest_schema_from_arrow(arrow_schema)
+        new_schema_hash = schema_hash(new_schema)
+        entry = ShardManifestEntry(
+            path=_path_for_manifest(installed.target_path, root=context.root),
+            row_count=row_count,
+            start_date=start_date,
+            end_date=end_date,
+            status="stored",
+            file_size=installed.target_path.stat().st_size,
+            schema_hash=new_schema_hash,
+            source_path=str(prepared),
+            content_key=f"auxiliary-replace:{installed.file_sha256[:24]}",
+            metadata={
+                "repair_reason": repair_reason,
+                "repair_file_sha256": installed.file_sha256,
+                "replaces": [item.path for item in context.manifest.shards],
+            },
+        )
+        payload = context.manifest.to_dict()
+        payload.update(
+            {
+                "dataset_id": context.dataset_id,
+                "domain": context.domain,
+                "primary_key": keys,
+                "start_date": start_date,
+                "end_date": end_date,
+                "row_count": row_count,
+                "schema": new_schema,
+                "schema_hash": new_schema_hash,
+                "shards": [entry.to_dict()],
+            }
+        )
+        if contract_version:
+            payload["contract_version"] = str(contract_version)
+        source = dict(payload.get("source", {}) or {})
+        source.update(dict(source_updates or {}))
+        source.update(
+            {
+                "last_repair_action": "replace_active_table_from_parquet",
+                "last_repair_reason": repair_reason,
+                "last_repair_at": _utc_now(),
+            }
+        )
+        payload["source"] = source
+        quality = dict(payload.get("quality", {}) or {})
+        quality.update(dict(quality_updates or {}))
+        payload["quality"] = quality
+        notes = [str(item) for item in list(payload.get("notes", []) or [])]
+        note = f"replace_active_table_from_parquet:{repair_reason}"
+        if note not in notes:
+            notes.append(note)
+        payload["notes"] = notes
+
+        _assert_context_unchanged(context)
+        _commit_manifest(context, payload)
+        old_paths = [
+            resolve_manifest_path(item.path, root=context.root).resolve()
+            for item in context.manifest.shards
+        ]
+        deleted: list[str] = []
+        for old_path in old_paths:
+            if old_path == installed.target_path:
+                continue
+            old_path.unlink(missing_ok=True)
+            deleted.append(str(old_path))
+        _append_repair_log(
+            workspace_root,
+            {
+                "action": "replace_active_table_from_parquet",
+                "domain": context.domain,
+                "dataset_id": context.dataset_id,
+                "reason": repair_reason,
+                "manifest_sha256_before": context.manifest_sha256,
+                "manifest_sha256_after": _sha256_file(context.manifest_path),
+                "new_shard_path": str(installed.target_path),
+                "new_shard_sha256": installed.file_sha256,
+                "deleted_shard_paths": deleted,
+                "row_count": row_count,
+            },
+        )
+        return {
+            "status": "replaced",
+            "domain": context.domain,
+            "dataset_id": context.dataset_id,
+            "row_count": row_count,
+            "start_date": start_date,
+            "end_date": end_date,
+            "new_shard_path": str(installed.target_path),
+            "deleted_shard_paths": deleted,
+        }
+    except BaseException:
+        if created and _sha256_file(context.manifest_path) == context.manifest_sha256:
+            installed.target_path.unlink(missing_ok=True)
+        raise
+
+
+def update_active_manifest_metadata(
+    domain: str,
+    *,
+    reason: str,
+    workspace_root: str | Path | None = None,
+    source_updates: Mapping[str, Any] | None = None,
+    quality_updates: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Atomically update active-domain metadata without touching its shards."""
+
+    repair_reason = _required_reason(reason)
+    context = resolve_active_domain(domain, workspace_root=workspace_root)
+    payload = context.manifest.to_dict()
+    source = dict(payload.get("source", {}) or {})
+    source.update(dict(source_updates or {}))
+    source.update(
+        {
+            "last_metadata_update_reason": repair_reason,
+            "last_metadata_update_at": _utc_now(),
+        }
+    )
+    payload["source"] = source
+    quality = dict(payload.get("quality", {}) or {})
+    quality.update(dict(quality_updates or {}))
+    payload["quality"] = quality
+    _assert_context_unchanged(context)
+    _commit_manifest(context, payload)
+    _append_repair_log(
+        workspace_root,
+        {
+            "action": "update_active_manifest_metadata",
+            "domain": context.domain,
+            "dataset_id": context.dataset_id,
+            "reason": repair_reason,
+            "manifest_sha256_before": context.manifest_sha256,
+            "manifest_sha256_after": _sha256_file(context.manifest_path),
+            "row_count": context.manifest.row_count,
+        },
+    )
+    return {
+        "status": "metadata_updated",
+        "domain": context.domain,
+        "dataset_id": context.dataset_id,
+        "row_count": context.manifest.row_count,
+    }
 
 
 def replace_active_shards(
@@ -2058,6 +2297,24 @@ def _path_for_manifest(path: Path, *, root: Path) -> str:
         return str(resolved)
 
 
+def _manifest_schema_from_arrow(schema: pa.Schema) -> list[dict[str, str]]:
+    def sql_type(value: pa.DataType) -> str:
+        if pa.types.is_boolean(value):
+            return "BOOLEAN"
+        if pa.types.is_integer(value):
+            return "BIGINT"
+        if pa.types.is_floating(value) or pa.types.is_decimal(value):
+            return "DOUBLE"
+        if pa.types.is_date(value) or pa.types.is_timestamp(value):
+            return "TIMESTAMP"
+        return "VARCHAR"
+
+    return [
+        {"name": field.name, "type": sql_type(field.type)}
+        for field in schema
+    ]
+
+
 def _parquet_list_sql(paths: Sequence[Path]) -> str:
     if not paths:
         raise QdpV2RepairError("qdp_v2_repair_parquet_path_list_empty")
@@ -2102,6 +2359,7 @@ __all__ = [
     "bulk_append_active_shards_from_parquet",
     "frame_content_sha256",
     "mutate_active_shards_from_parquet",
+    "replace_active_table_from_parquet",
     "repair_log_path",
     "replace_active_shard_from_parquet",
     "replace_active_shards",
