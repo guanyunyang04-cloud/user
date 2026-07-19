@@ -72,6 +72,9 @@ route 不决定写回权；对象归属和证据内容决定写回位置。
 ## 5. 项目提交方法
 - 提交助手是可选辅助，不是最终答复门禁：
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.project_commit --project-id <project|workspace-brain> --task-summary "<summary>" --verified <commands> --json`
+- 用户同时要求提交和推送时，显式列出本次任务路径并使用单一可重试入口：
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.project_commit --project-id <project|workspace-brain> --task-summary "<summary>" --verified <commands> --expect-paths <task_paths> --push --json`
+- 该入口必须检查未跟踪文件、远端领先/分叉、精确暂存范围，并在成功后验证本地与远端提交一致；不得以 `git add .`、force push 或静默 rebase 代替。
 - 需要提交时明确 pathspec、验证证据和提交说明；不需要提交时报告改动与验证即可。
 
 ## 6. 工作区迁移对象

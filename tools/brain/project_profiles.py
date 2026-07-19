@@ -83,6 +83,7 @@ def _workspace_brain_allowed_prefixes() -> list[str]:
         [
             "brain/",
             "tools/brain/",
+            "AGENTS.md",
             "README.md",
             ".gitignore",
             "node_modules/",

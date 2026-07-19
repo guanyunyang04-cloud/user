@@ -4,7 +4,14 @@ import subprocess
 import unittest
 from unittest.mock import patch
 
-from tools.brain.project_commit import build_commit_message, check_commit_scope, split_commit_paths, stage_and_commit_project
+from tools.brain.project_commit import (
+    _git_output,
+    build_commit_message,
+    check_commit_scope,
+    inspect_push_target,
+    split_commit_paths,
+    stage_and_commit_project,
+)
 from tools.brain.project_profiles import load_project_profile
 
 
@@ -285,6 +292,207 @@ class ProjectCommitTest(unittest.TestCase):
         self.assertEqual(pathspec_calls, [])
         self.assertTrue(any(item and item[0] == "commit" for item in git_calls))
 
+    def test_push_preflight_blocks_when_remote_branch_is_ahead(self) -> None:
+        calls: list[list[str]] = []
+
+        def fake_run_git(args: list[str]) -> subprocess.CompletedProcess[str]:
+            calls.append(args)
+            outputs = {
+                ("symbolic-ref", "--quiet", "--short", "HEAD"): "main\n",
+                ("remote", "get-url", "origin"): "https://example.invalid/repo.git\n",
+                ("rev-list", "--left-right", "--count", "HEAD...refs/remotes/origin/main"): "0\t1\n",
+            }
+            return subprocess.CompletedProcess(args, 0, stdout=outputs.get(tuple(args), ""), stderr="")
+
+        with patch("tools.brain.project_commit._run_git", side_effect=fake_run_git):
+            payload = inspect_push_target(remote="origin")
+
+        self.assertEqual(payload["status"], "blocked")
+        self.assertEqual(payload["reason"], "git_remote_branch_ahead")
+        self.assertEqual(payload["remote_ahead"], 1)
+        self.assertIn(["fetch", "--prune", "origin"], calls)
+
+    def test_stage_commit_and_push_is_one_verified_operation(self) -> None:
+        git_calls: list[list[str]] = []
+
+        def fake_run_git(args: list[str]) -> subprocess.CompletedProcess[str]:
+            git_calls.append(args)
+            if args == ["rev-parse", "HEAD"]:
+                return subprocess.CompletedProcess(args, 0, stdout="abc123\n", stderr="")
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+        push_target = {
+            "status": "ok",
+            "remote": "origin",
+            "branch": "main",
+            "remote_branch_exists": True,
+            "local_ahead": 0,
+            "remote_ahead": 0,
+        }
+        published = {
+            "status": "ok",
+            "remote": "origin",
+            "branch": "main",
+            "head": "abc123",
+            "remote_head": "abc123",
+        }
+        staged = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        with (
+            patch(
+                "tools.brain.project_commit.load_project_profile",
+                return_value={
+                    "commit_policy": {
+                        "allowed_prefixes": ["daily_research/"],
+                        "message_prefix": "daily_research",
+                    }
+                },
+            ),
+            patch(
+                "tools.brain.project_commit.changed_paths",
+                return_value=[
+                    "daily_research/new_module.py",
+                    "daily_research/unrelated_work.py",
+                ],
+            ),
+            patch(
+                "tools.brain.project_commit._stage_project_paths",
+                return_value=staged,
+            ) as stage_mock,
+            patch(
+                "tools.brain.project_commit._git_path_list",
+                side_effect=[[], ["daily_research/new_module.py"]],
+            ),
+            patch("tools.brain.project_commit._run_git", side_effect=fake_run_git),
+            patch("tools.brain.project_commit.inspect_push_target", return_value=push_target),
+            patch("tools.brain.project_commit.push_current_branch", return_value=published) as push_mock,
+        ):
+            payload = stage_and_commit_project(
+                project_id="daily_research",
+                task_summary="add module",
+                verified=["pytest focused_test.py -q", "git diff --check"],
+                expected_paths=["daily_research/new_module.py"],
+                push=True,
+            )
+
+        self.assertEqual(payload["status"], "published")
+        self.assertEqual(payload["commit"], "abc123")
+        self.assertTrue(payload["committed_now"])
+        self.assertTrue(any(item and item[0] == "commit" for item in git_calls))
+        self.assertEqual(
+            payload["scope"]["ignored_project_paths"],
+            ["daily_research/unrelated_work.py"],
+        )
+        stage_mock.assert_called_once_with(["daily_research/new_module.py"])
+        push_mock.assert_called_once_with(remote="origin", branch="main")
+
+    def test_explicit_paths_block_previously_staged_unrelated_project_file(self) -> None:
+        with (
+            patch(
+                "tools.brain.project_commit.load_project_profile",
+                return_value={"commit_policy": {"allowed_prefixes": ["daily_research/"]}},
+            ),
+            patch(
+                "tools.brain.project_commit.changed_paths",
+                return_value=[
+                    "daily_research/new_module.py",
+                    "daily_research/unrelated_work.py",
+                ],
+            ),
+            patch(
+                "tools.brain.project_commit._git_path_list",
+                return_value=["daily_research/unrelated_work.py"],
+            ),
+            patch("tools.brain.project_commit._stage_project_paths") as stage_mock,
+        ):
+            payload = stage_and_commit_project(
+                project_id="daily_research",
+                task_summary="add module",
+                verified=["git diff --check"],
+                expected_paths=["daily_research/new_module.py"],
+            )
+
+        self.assertEqual(payload["status"], "blocked")
+        self.assertEqual(payload["reason"], "git_staged_unexpected_paths")
+        self.assertEqual(
+            payload["staged_unexpected_paths"],
+            ["daily_research/unrelated_work.py"],
+        )
+        stage_mock.assert_not_called()
+
+    def test_expected_untracked_path_missing_from_git_inventory_is_blocked(self) -> None:
+        with (
+            patch(
+                "tools.brain.project_commit.load_project_profile",
+                return_value={"commit_policy": {"allowed_prefixes": ["daily_research/"]}},
+            ),
+            patch("tools.brain.project_commit.changed_paths", return_value=[]),
+            patch("tools.brain.project_commit._git_path_is_tracked", return_value=False),
+        ):
+            payload = stage_and_commit_project(
+                project_id="daily_research",
+                task_summary="add module",
+                verified=["git diff --check"],
+                expected_paths=["daily_research/missing_module.py"],
+                push=True,
+            )
+
+        self.assertEqual(payload["status"], "blocked")
+        self.assertEqual(payload["reason"], "project_commit_expected_paths_missing")
+        self.assertEqual(
+            payload["scope"]["missing_expected_paths"],
+            ["daily_research/missing_module.py"],
+        )
+
+    def test_push_retry_publishes_existing_local_commit_without_new_changes(self) -> None:
+        push_target = {
+            "status": "ok",
+            "remote": "origin",
+            "branch": "main",
+            "remote_branch_exists": True,
+            "local_ahead": 1,
+            "remote_ahead": 0,
+        }
+        published = {
+            "status": "ok",
+            "remote": "origin",
+            "branch": "main",
+            "head": "abc123",
+            "remote_head": "abc123",
+        }
+        with (
+            patch(
+                "tools.brain.project_commit.load_project_profile",
+                return_value={"commit_policy": {"allowed_prefixes": ["daily_research/"]}},
+            ),
+            patch("tools.brain.project_commit.changed_paths", return_value=[]),
+            patch("tools.brain.project_commit.inspect_push_target", return_value=push_target),
+            patch("tools.brain.project_commit.push_current_branch", return_value=published),
+        ):
+            payload = stage_and_commit_project(
+                project_id="daily_research",
+                task_summary="retry publish",
+                verified=["git diff --check"],
+                push=True,
+            )
+
+        self.assertEqual(payload["status"], "published")
+        self.assertFalse(payload["committed_now"])
+        self.assertEqual(payload["commit"], "abc123")
+
+    def test_git_failure_output_redacts_url_credentials_and_query_tokens(self) -> None:
+        result = subprocess.CompletedProcess(
+            [],
+            1,
+            stdout="",
+            stderr="https://private-value@example.invalid/repo?token=another-private-value",
+        )
+
+        output = _git_output(result)
+
+        self.assertNotIn("private-value", output)
+        self.assertNotIn("another-private-value", output)
+        self.assertEqual(output, "https://***@example.invalid/repo?token=***")
+
     def test_workspace_brain_commit_scope_allows_root_governance_and_child_brain_docs(self) -> None:
         profile = load_project_profile("workspace-brain")
         allowed_prefixes = list(profile["commit_policy"]["allowed_prefixes"])
@@ -292,6 +500,7 @@ class ProjectCommitTest(unittest.TestCase):
             project_id="workspace-brain",
             changed_paths=[
                 ".gitignore",
+                "AGENTS.md",
                 "README.md",
                 "node_modules/package.json",
                 "daily_research/README.md",
