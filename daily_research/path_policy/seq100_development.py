@@ -1184,6 +1184,30 @@ def _parser() -> argparse.ArgumentParser:
     summarize = sub.add_parser("summarize", help="Aggregate all three completed folds.")
     summarize.add_argument("--experiment", choices=("", "structured-path-v1"), default="")
     summarize.add_argument("--study-root", type=Path, default=None)
+    vintages = sub.add_parser(
+        "evaluate-vintages",
+        help="Compare checkpoint vintages on the frozen 2025 candidate set.",
+    )
+    vintages.add_argument(
+        "--experiment", choices=("structured-path-v1",), default="structured-path-v1"
+    )
+    vintages.add_argument("--study-root", type=Path, default=None)
+    vintages.add_argument("--output-root", type=Path, default=None)
+    vintages.add_argument("--max-tasks", type=int, default=0)
+    vintage_task = sub.add_parser(
+        "evaluate-vintage-task",
+        help=argparse.SUPPRESS,
+    )
+    vintage_task.add_argument(
+        "--experiment", choices=("structured-path-v1",), default="structured-path-v1"
+    )
+    vintage_task.add_argument("--suite-contract", type=Path, required=True)
+    vintage_task.add_argument(
+        "--profile",
+        choices=("legal_flat_baseline", "structured_joint_turnover"),
+        required=True,
+    )
+    vintage_task.add_argument("--vintage", choices=(2023, 2024, 2025), type=int, required=True)
     return parser
 
 
@@ -1226,8 +1250,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "status":
             result = structured_experiment.status(study_root=structured_root)
             indent = 2
-        else:
+        elif args.command == "summarize":
             result = structured_experiment.summarize(study_root=structured_root)
+            indent = 2
+        elif args.command == "evaluate-vintages":
+            from daily_research.path_policy import seq100_checkpoint_freshness as freshness
+
+            result = freshness.evaluate_vintages(
+                study_root=structured_root,
+                output_root=(
+                    Path(args.output_root)
+                    if args.output_root
+                    else freshness.DEFAULT_OUTPUT_ROOT
+                ),
+                max_tasks=int(args.max_tasks),
+            )
+            indent = 2
+        else:
+            from daily_research.path_policy import seq100_checkpoint_freshness as freshness
+
+            result = freshness.evaluate_vintage_task(
+                suite_contract_path=Path(args.suite_contract),
+                profile=str(args.profile),
+                vintage=int(args.vintage),
+            )
             indent = 2
     elif args.command == "contract":
         result = current_contract()
