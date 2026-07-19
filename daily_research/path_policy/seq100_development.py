@@ -1208,11 +1208,102 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
     )
     vintage_task.add_argument("--vintage", choices=(2023, 2024, 2025), type=int, required=True)
+    prepare_2026 = sub.add_parser(
+        "prepare-2026-fold",
+        help="Build the frozen 2026 dependency overlay and development fold.",
+    )
+    prepare_2026.add_argument("--study-root", type=Path, default=None)
+    run_2026 = sub.add_parser(
+        "run-2026-fold",
+        help="Train the two 2026 profile checkpoints sequentially.",
+    )
+    run_2026.add_argument("--study-root", type=Path, default=None)
+    run_2026.add_argument("--max-tasks", type=int, default=0)
+    status_2026 = sub.add_parser(
+        "status-2026-fold",
+        help="Report 2026 fold preparation and training progress.",
+    )
+    status_2026.add_argument("--study-root", type=Path, default=None)
+    evaluate_2026 = sub.add_parser(
+        "evaluate-2026-vintages",
+        help="Compare 2023-2026 checkpoints on the complete frozen 2026 window.",
+    )
+    evaluate_2026.add_argument("--output-root", type=Path, default=None)
+    evaluate_2026.add_argument("--max-tasks", type=int, default=0)
+    evaluate_2026_task = sub.add_parser(
+        "evaluate-2026-vintage-task",
+        help=argparse.SUPPRESS,
+    )
+    evaluate_2026_task.add_argument("--suite-contract", type=Path, required=True)
+    evaluate_2026_task.add_argument(
+        "--profile",
+        choices=("legal_flat_baseline", "structured_joint_turnover"),
+        required=True,
+    )
+    evaluate_2026_task.add_argument(
+        "--vintage", choices=(2023, 2024, 2025, 2026), type=int, required=True
+    )
+    evaluate_2026_task.add_argument("--force-inference", action="store_true")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command in {
+        "prepare-2026-fold",
+        "run-2026-fold",
+        "status-2026-fold",
+        "evaluate-2026-vintages",
+        "evaluate-2026-vintage-task",
+    }:
+        from daily_research.path_policy import seq100_2026_fold_comparison as comparison_2026
+
+        if args.command == "prepare-2026-fold":
+            result = comparison_2026.prepare_2026_fold(
+                study_root=(
+                    Path(args.study_root)
+                    if args.study_root
+                    else comparison_2026.STUDY_ROOT
+                )
+            )
+        elif args.command == "run-2026-fold":
+            result = comparison_2026.run_2026_fold(
+                study_root=(
+                    Path(args.study_root)
+                    if args.study_root
+                    else comparison_2026.STUDY_ROOT
+                ),
+                max_tasks=int(args.max_tasks),
+            )
+        elif args.command == "status-2026-fold":
+            result = comparison_2026.status_2026_fold()
+        elif args.command == "evaluate-2026-vintages":
+            result = comparison_2026.evaluate_2026_vintages(
+                output_root=(
+                    Path(args.output_root)
+                    if args.output_root
+                    else comparison_2026.ANALYSIS_ROOT
+                ),
+                max_tasks=int(args.max_tasks),
+            )
+        else:
+            result = comparison_2026.evaluate_2026_vintage_task(
+                suite_contract_path=Path(args.suite_contract),
+                profile=str(args.profile),
+                vintage=int(args.vintage),
+                force_inference=bool(args.force_inference),
+            )
+        indent = 2
+        print(
+            json.dumps(
+                result,
+                ensure_ascii=False,
+                indent=indent,
+                default=_json_default,
+                allow_nan=False,
+            )
+        )
+        return 0
     structured = str(getattr(args, "experiment", "")) == "structured-path-v1"
     if structured:
         from daily_research.path_policy import seq100_structured_experiment as structured_experiment
