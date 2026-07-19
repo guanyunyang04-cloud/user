@@ -1244,6 +1244,21 @@ def _parser() -> argparse.ArgumentParser:
         "--vintage", choices=(2023, 2024, 2025, 2026), type=int, required=True
     )
     evaluate_2026_task.add_argument("--force-inference", action="store_true")
+    migrate_integrity = sub.add_parser(
+        "migrate-2026-contract-v2",
+        help="Archive the completed v1 comparison metadata and migrate it to integrity v2.",
+    )
+    migrate_integrity.add_argument("--output-root", type=Path, default=None)
+    build_compact_report = sub.add_parser(
+        "build-compact-report",
+        help="Archive the accumulated Seq100 report and replace it with the compact report.",
+    )
+    build_compact_report.add_argument("--artifact-path", type=Path, default=None)
+    verify_integrity = sub.add_parser(
+        "verify-research-integrity",
+        help="Verify the Seq100 integrity v2 contract, task bundles, archive, and report.",
+    )
+    verify_integrity.add_argument("--output-root", type=Path, default=None)
     return parser
 
 
@@ -1255,6 +1270,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "status-2026-fold",
         "evaluate-2026-vintages",
         "evaluate-2026-vintage-task",
+        "migrate-2026-contract-v2",
+        "build-compact-report",
+        "verify-research-integrity",
     }:
         from daily_research.path_policy import seq100_2026_fold_comparison as comparison_2026
 
@@ -1286,12 +1304,42 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ),
                 max_tasks=int(args.max_tasks),
             )
-        else:
+        elif args.command == "evaluate-2026-vintage-task":
             result = comparison_2026.evaluate_2026_vintage_task(
                 suite_contract_path=Path(args.suite_contract),
                 profile=str(args.profile),
                 vintage=int(args.vintage),
                 force_inference=bool(args.force_inference),
+            )
+        elif args.command == "migrate-2026-contract-v2":
+            from daily_research.path_policy import seq100_integrity_v2 as integrity
+
+            result = integrity.migrate_2026_contract_v2(
+                output_root=(
+                    Path(args.output_root)
+                    if args.output_root
+                    else comparison_2026.ANALYSIS_ROOT
+                )
+            )
+        elif args.command == "build-compact-report":
+            from daily_research.path_policy import build_seq100_research_report as report
+
+            result = report.build_compact_report(
+                artifact_path=(
+                    Path(args.artifact_path)
+                    if args.artifact_path
+                    else report.ARTIFACT_PATH
+                )
+            )
+        else:
+            from daily_research.path_policy import seq100_integrity_v2 as integrity
+
+            result = integrity.verify_research_integrity(
+                output_root=(
+                    Path(args.output_root)
+                    if args.output_root
+                    else comparison_2026.ANALYSIS_ROOT
+                )
             )
         indent = 2
         print(

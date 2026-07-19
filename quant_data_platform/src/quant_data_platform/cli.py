@@ -9,6 +9,13 @@ from quant_data_platform.progress import suppress_progress
 from quant_data_platform.qdp_v2.cli import HELP_TEXT, dispatch
 
 
+ARCHIVED_COMMANDS = {
+    "audit-sharded-feature-coverage",
+    "build-sharded-memmap",
+    "provider-eval",
+}
+
+
 def main(argv: list[str] | None = None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
     as_json = "--json" in raw
@@ -51,6 +58,21 @@ def _dispatch(raw: list[str]) -> int:
         forwarded.extend(["--workspace-root", workspace])
     result = dispatch(forwarded)
     if result is None:
+        command = str(positional[0])
+        if command in ARCHIVED_COMMANDS:
+            payload = {
+                "status": "archived",
+                "command": command,
+                "message": "This legacy command is intentionally unavailable in the mutable QDP store.",
+            }
+            if "--json" in positional:
+                print(json.dumps(json_safe(payload), ensure_ascii=False, indent=2))
+            else:
+                print(
+                    f"status: archived\ncommand: {command}\nmessage: {payload['message']}",
+                    file=sys.stderr,
+                )
+            return 2
         raise ValueError(f"unsupported_qdp_command:{' '.join(positional)}")
     return int(result)
 

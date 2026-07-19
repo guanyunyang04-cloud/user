@@ -37,6 +37,12 @@ def stable_hash(payload: Mapping[str, Any], *, length: int = 24) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[: int(length)]
 
 
+def canonical_manifest_sha256(payload: Mapping[str, Any]) -> str:
+    """Return a full canonical digest for a manifest-shaped mapping."""
+
+    return stable_hash(payload, length=64)
+
+
 def schema_hash(schema: list[Mapping[str, Any]] | Mapping[str, Any] | None) -> str:
     if not schema:
         return ""
@@ -185,3 +191,50 @@ def iter_dataset_manifests(root: str | Path) -> list[Path]:
     if not datasets_root.exists():
         return []
     return sorted(datasets_root.glob("*/*/dataset.json"))
+
+
+def qdp_snapshot_payload(root: str | Path) -> dict[str, Any]:
+    """Build the canonical identity payload for the current active QDP snapshot.
+
+    Shard content keys and repair compare-and-swap hashes remain internal to the
+    dataset manifests.  Research contracts only need one aggregate identity for
+    the active domain mapping and the canonical content of each active manifest.
+    """
+
+    resolved = Path(root).resolve()
+    active = read_active_manifest(resolved)
+    datasets = active.get("datasets", {})
+    if not isinstance(datasets, Mapping) or not datasets:
+        raise ValueError("QDP active manifest has no dataset mapping")
+
+    active_datasets: dict[str, Any] = {}
+    for raw_domain, raw_dataset_id in sorted(datasets.items(), key=lambda item: str(item[0])):
+        domain = str(raw_domain)
+        dataset_id = str(raw_dataset_id)
+        path = dataset_manifest_path(resolved, domain, dataset_id)
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"active QDP dataset manifest is missing: domain={domain} dataset_id={dataset_id}"
+            )
+        manifest = read_json(path)
+        if str(manifest.get("domain", "") or "") != domain:
+            raise ValueError(f"active QDP manifest domain drift: {path}")
+        if str(manifest.get("dataset_id", "") or "") != dataset_id:
+            raise ValueError(f"active QDP manifest dataset_id drift: {path}")
+        active_datasets[domain] = {
+            "dataset_id": dataset_id,
+            "manifest_sha256": canonical_manifest_sha256(manifest),
+        }
+
+    return {
+        "schema_version": "qdp_active_snapshot_v1",
+        "active_manifest_version": int(active.get("version", 0) or 0),
+        "active_as_of_date": str(active.get("active_as_of_date", "") or ""),
+        "datasets": active_datasets,
+    }
+
+
+def qdp_snapshot_sha256(root: str | Path) -> str:
+    """Return one aggregate digest for the current active QDP snapshot."""
+
+    return canonical_manifest_sha256(qdp_snapshot_payload(root))

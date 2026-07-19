@@ -2505,7 +2505,7 @@ def _reuse_2026_training_result(
     return result
 
 
-def evaluate_2026_vintage_task(
+def _evaluate_2026_vintage_task_v1(
     *, suite_contract_path: Path, profile: str, vintage: int, force_inference: bool = False
 ) -> dict[str, Any]:
     contract = _load_comparison_contract(suite_contract_path)
@@ -2777,7 +2777,7 @@ def _daily_pairwise_deltas(
     return pd.DataFrame(rows)
 
 
-def summarize_2026_comparison(*, suite_contract_path: Path) -> dict[str, Any]:
+def _summarize_2026_comparison_v1(*, suite_contract_path: Path) -> dict[str, Any]:
     contract = _load_comparison_contract(suite_contract_path)
     results: list[dict[str, Any]] = []
     for task in dict(contract["tasks"]).values():
@@ -2968,7 +2968,7 @@ def summarize_2026_comparison(*, suite_contract_path: Path) -> dict[str, Any]:
     return summary
 
 
-def evaluate_2026_vintages(
+def _evaluate_2026_vintages_v1(
     *, output_root: Path = ANALYSIS_ROOT, max_tasks: int = 0
 ) -> dict[str, Any]:
     if int(max_tasks) < 0:
@@ -3104,3 +3104,45 @@ def evaluate_2026_vintages(
             },
         )
         raise
+
+
+def evaluate_2026_vintage_task(
+    *, suite_contract_path: Path, profile: str, vintage: int, force_inference: bool = False
+) -> dict[str, Any]:
+    from daily_research.path_policy import seq100_integrity_v2 as integrity
+
+    if integrity.is_v2_contract(suite_contract_path.resolve()):
+        return integrity.evaluate_v2_task(
+            suite_contract_path=suite_contract_path,
+            profile=profile,
+            vintage=vintage,
+            force_inference=force_inference,
+        )
+    return _evaluate_2026_vintage_task_v1(
+        suite_contract_path=suite_contract_path,
+        profile=profile,
+        vintage=vintage,
+        force_inference=force_inference,
+    )
+
+
+def summarize_2026_comparison(*, suite_contract_path: Path) -> dict[str, Any]:
+    from daily_research.path_policy import seq100_integrity_v2 as integrity
+
+    if integrity.is_v2_contract(suite_contract_path.resolve()):
+        return integrity.evaluate_or_resume_2026_v2(
+            output_root=suite_contract_path.resolve().parent,
+            max_tasks=0,
+        )
+    return _summarize_2026_comparison_v1(suite_contract_path=suite_contract_path)
+
+
+def evaluate_2026_vintages(
+    *, output_root: Path = ANALYSIS_ROOT, max_tasks: int = 0
+) -> dict[str, Any]:
+    from daily_research.path_policy import seq100_integrity_v2 as integrity
+
+    return integrity.evaluate_or_resume_2026_v2(
+        output_root=output_root,
+        max_tasks=max_tasks,
+    )
