@@ -1409,8 +1409,16 @@ def _load_stage_decisions(study_root: Path) -> dict[str, Any]:
                 ),
             }
             changed = True
+        speed_review = dict(row.get("capital_speed_review", {}) or {})
         review = dict(row.get("capital_efficiency_review", {}) or {})
-        if str(review.get("status", "")) == "completed":
+        if str(speed_review.get("status", "")) == "completed":
+            row["decision_scope"] = "joint_model_capital_speed_primary"
+            row["interpretation"] = (
+                "A complete model is selected by continuous-account capital "
+                "speed. Its own exit is used only when it beats that model's "
+                "best fixed exit."
+            )
+        elif str(review.get("status", "")) == "completed":
             row["decision_scope"] = "continuous_account_profit_primary"
             row["interpretation"] = (
                 "The stage strategy is selected only by continuous-account "
@@ -1451,6 +1459,18 @@ def _incumbent_before_stage(decisions: Mapping[str, Any], stage: int) -> dict[st
     previous = _decision_for_stage(decisions, int(stage) - 1)
     if previous is None:
         raise ValueError(f"stage {stage} cannot start before stage {stage - 1} is decided")
+    speed_review = dict(previous.get("capital_speed_review", {}) or {})
+    if speed_review:
+        if str(speed_review.get("status", "")) != "completed":
+            raise ValueError(
+                f"Stage {stage - 1} capital-speed review is incomplete"
+            )
+        selected_model = speed_review.get("selected_model_descriptor")
+        if not isinstance(selected_model, Mapping):
+            raise ValueError(
+                f"Stage {stage - 1} capital-speed review has no selected model"
+            )
+        return dict(selected_model)
     review = dict(previous.get("capital_efficiency_review", {}) or {})
     if str(review.get("status", "")) != "completed":
         raise ValueError(
@@ -1473,24 +1493,9 @@ def _challenger_for_stage(decisions: Mapping[str, Any], stage: int) -> dict[str,
     elif int(stage) == 2:
         variant = InputVariant(current.lookback_days, turnover=True, intraday=False)
     elif int(stage) == 3:
-        previous = _decision_for_stage(decisions, 2)
-        if previous is None:
-            raise ValueError("stage 3 cannot start before stage 2 is decided")
-        review = dict(previous.get("capital_efficiency_review", {}) or {})
-        strategy = dict(review.get("selected_strategy", {}) or {})
-        ranking = _variant_from_payload(
-            dict(dict(strategy["ranking_descriptor"])["variant"])
-        )
-        exits = _variant_from_payload(
-            dict(dict(strategy["exit_descriptor"])["variant"])
-        )
-        if ranking.lookback_days != exits.lookback_days:
-            raise ValueError(
-                "Stage 3 cannot merge strategy components with different lookbacks"
-            )
         variant = InputVariant(
-            ranking.lookback_days,
-            turnover=bool(ranking.turnover or exits.turnover),
+            current.lookback_days,
+            turnover=current.turnover,
             intraday=True,
         )
     else:

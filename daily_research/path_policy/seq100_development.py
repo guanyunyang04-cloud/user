@@ -1282,10 +1282,28 @@ def _parser() -> argparse.ArgumentParser:
     review_ablation.add_argument("--study-root", type=Path, default=None)
     review_ablation_stage = sub.add_parser(
         "review-structured-input-stage-capital",
-        help="Run the finite-capital selector for a completed Stage 2 or Stage 3.",
+        help="Run the finite-capital review for a completed Stage 2 or Stage 3.",
     )
     review_ablation_stage.add_argument("--study-root", type=Path, default=None)
     review_ablation_stage.add_argument("--stage", type=int, choices=(2, 3), required=True)
+    capital_speed = sub.add_parser(
+        "review-structured-input-capital-speed",
+        help="Evaluate complete models with Top1/Top3, D2-D60, and own exits.",
+    )
+    capital_speed.add_argument("--study-root", type=Path, default=None)
+    capital_speed.add_argument("--stage", type=int, choices=(1, 2), required=True)
+    capital_speed.add_argument("--max-jobs", type=int, default=0)
+    verify_capital_speed = sub.add_parser(
+        "verify-structured-input-capital-speed",
+        help="Verify a completed joint-model capital-speed review.",
+    )
+    verify_capital_speed.add_argument("--study-root", type=Path, default=None)
+    verify_capital_speed.add_argument("--stage", type=int, choices=(1, 2), required=True)
+    summarize_capital_speed = sub.add_parser(
+        "summarize-structured-input-capital-speed",
+        help="Build the completed pre-Stage-3 capital-speed summary.",
+    )
+    summarize_capital_speed.add_argument("--study-root", type=Path, default=None)
     summarize_ablation = sub.add_parser(
         "summarize-structured-input-ablation",
         help="Evaluate stage gates and build the Structured input-ablation summary.",
@@ -1307,6 +1325,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "status-structured-input-ablation",
         "review-structured-input-stage1-capital",
         "review-structured-input-stage-capital",
+        "review-structured-input-capital-speed",
+        "verify-structured-input-capital-speed",
+        "summarize-structured-input-capital-speed",
         "summarize-structured-input-ablation",
         "verify-structured-input-ablation",
     }:
@@ -1327,6 +1348,27 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = ablation.run_stage_capital_review(
                 stage=int(args.stage), study_root=root
             )
+        elif args.command in {
+            "review-structured-input-capital-speed",
+            "verify-structured-input-capital-speed",
+            "summarize-structured-input-capital-speed",
+        }:
+            from daily_research.path_policy import seq100_structured_capital_speed
+
+            if args.command == "review-structured-input-capital-speed":
+                result = seq100_structured_capital_speed.run_capital_speed_review(
+                    stage=int(args.stage),
+                    study_root=root,
+                    max_jobs=int(args.max_jobs),
+                )
+            elif args.command == "verify-structured-input-capital-speed":
+                result = seq100_structured_capital_speed.verify_capital_speed_review(
+                    stage=int(args.stage), study_root=root
+                )
+            else:
+                result = seq100_structured_capital_speed.build_pre_stage3_summary(
+                    study_root=root
+                )
         elif args.command == "summarize-structured-input-ablation":
             result = ablation.summarize_structured_input_ablation(study_root=root)
         else:

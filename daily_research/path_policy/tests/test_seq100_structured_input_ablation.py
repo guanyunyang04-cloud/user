@@ -306,29 +306,46 @@ def test_stage2_waits_for_capital_review() -> None:
     assert ablation._incumbent_before_stage(decisions, 2) == branch
 
 
-def test_stage3_challenger_inherits_hybrid_feature_union() -> None:
-    ranking = {
+def test_capital_speed_model_supersedes_legacy_component_review() -> None:
+    legacy = ablation._initial_incumbent()
+    selected = {
         "source": "ablation_run",
         "origin_stage": 1,
         "variant": ablation.InputVariant(180).to_dict(),
     }
-    exits = {
+    decisions = {
+        "stages": [
+            {
+                "stage": 1,
+                "capital_speed_review": {
+                    "status": "completed",
+                    "selected_model_descriptor": selected,
+                },
+                "capital_efficiency_review": {
+                    "status": "completed",
+                    "training_branch_descriptor": legacy,
+                },
+            }
+        ]
+    }
+    assert ablation._incumbent_before_stage(decisions, 2) == selected
+
+
+def test_stage3_challenger_extends_one_complete_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    selected = {
         "source": "ablation_run",
         "origin_stage": 2,
         "variant": ablation.InputVariant(180, turnover=True).to_dict(),
     }
+    monkeypatch.setattr(ablation, "STUDY_ROOT", Path("missing-study-root"))
     decisions = {
         "stages": [
             {
                 "stage": 2,
-                "challenger": exits,
+                "challenger": selected,
                 "capital_efficiency_review": {
                     "status": "completed",
-                    "training_branch_descriptor": ranking,
-                    "selected_strategy": {
-                        "ranking_descriptor": ranking,
-                        "exit_descriptor": exits,
-                    },
+                    "training_branch_descriptor": selected,
                 },
             }
         ]
