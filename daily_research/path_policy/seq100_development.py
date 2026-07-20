@@ -1314,11 +1314,80 @@ def _parser() -> argparse.ArgumentParser:
         help="Verify Structured input-ablation data, tasks, reports, and boundaries.",
     )
     verify_ablation.add_argument("--study-root", type=Path, default=None)
+    prepare_window = sub.add_parser(
+        "prepare-structured-training-window",
+        help="Build bounded Structured 180x35 training-window fold views.",
+    )
+    prepare_window.add_argument("--study-root", type=Path, default=None)
+    run_window = sub.add_parser(
+        "run-structured-training-window",
+        help="Run one pending bounded-history training task by default.",
+    )
+    run_window.add_argument("--study-root", type=Path, default=None)
+    run_window.add_argument("--max-tasks", type=int, default=1)
+    evaluate_window = sub.add_parser(
+        "evaluate-structured-training-window",
+        help="Run resumable cohort and continuous-account window evaluation.",
+    )
+    evaluate_window.add_argument("--study-root", type=Path, default=None)
+    evaluate_window.add_argument("--max-jobs", type=int, default=0)
+    status_window = sub.add_parser(
+        "status-structured-training-window",
+        help="Report bounded-history experiment state for manual diagnostics.",
+    )
+    status_window.add_argument("--study-root", type=Path, default=None)
+    summarize_window = sub.add_parser(
+        "summarize-structured-training-window",
+        help="Build or read the final bounded-history comparison summary.",
+    )
+    summarize_window.add_argument("--study-root", type=Path, default=None)
+    verify_window = sub.add_parser(
+        "verify-structured-training-window",
+        help="Verify bounded views, tasks, results, monitor state, and boundaries.",
+    )
+    verify_window.add_argument("--study-root", type=Path, default=None)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command in {
+        "prepare-structured-training-window",
+        "run-structured-training-window",
+        "evaluate-structured-training-window",
+        "status-structured-training-window",
+        "summarize-structured-training-window",
+        "verify-structured-training-window",
+    }:
+        from daily_research.path_policy import seq100_structured_training_window as window
+
+        root = Path(args.study_root) if args.study_root else window.STUDY_ROOT
+        if args.command == "prepare-structured-training-window":
+            result = window.prepare_structured_training_window(study_root=root)
+        elif args.command == "run-structured-training-window":
+            result = window.run_structured_training_window(
+                study_root=root, max_tasks=int(args.max_tasks)
+            )
+        elif args.command == "evaluate-structured-training-window":
+            result = window.evaluate_structured_training_window(
+                study_root=root, max_jobs=int(args.max_jobs)
+            )
+        elif args.command == "status-structured-training-window":
+            result = window.status_structured_training_window(study_root=root)
+        elif args.command == "summarize-structured-training-window":
+            result = window.summarize_structured_training_window(study_root=root)
+        else:
+            result = window.verify_structured_training_window(study_root=root)
+        print(
+            json.dumps(
+                result,
+                ensure_ascii=False,
+                indent=2,
+                default=_json_default,
+                allow_nan=False,
+            )
+        )
+        return 0
     if args.command in {
         "prepare-structured-input-ablation",
         "run-structured-input-ablation",

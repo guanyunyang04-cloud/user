@@ -5,6 +5,14 @@
 - Use `C:/Users/ASUS/miniconda3/envs/yolos/python.exe` for Python modules and tests.
 - Do not use the base Conda environment or system Python unless the user explicitly asks.
 
+## Long-running local tasks
+
+- Prefer one foreground tool call with a timeout set to roughly 1.5-2 times the expected runtime.
+- Let a local supervisor and memory guard monitor progress; do not use repeated model-side polling.
+- Persist full stdout/stderr and progress on `H:`. Console output should be limited to phase or epoch changes, new 10% batch buckets, warnings, failures, and completion.
+- A supervisor must exit as soon as the child reaches a verified terminal state. Do not leave a background watcher running.
+- For resumable training workflows, launch at most one training task per invocation unless the user explicitly requests otherwise.
+
 ## Commit And Push Requests
 
 - Do not publish automatically. Run this workflow only when the user asks to commit, push, publish, or sync Git changes.
