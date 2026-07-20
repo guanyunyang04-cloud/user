@@ -103,17 +103,31 @@ PATH_LOSS_PROFILES = (
 MULTI_HORIZON_OHLC_WINDOWS = (5, 10, 20, 40, 60)
 INPUT_CHANNEL_PROFILE_ALL = "all"
 INPUT_CHANNEL_PROFILE_DAILY_ONLY = "daily_only"
+INPUT_CHANNEL_PROFILE_DAILY_ONLY_TURNOVER = "daily_only_turnover"
+INPUT_CHANNEL_PROFILE_DAILY_ONLY_INTRADAY = "daily_only_intraday"
+INPUT_CHANNEL_PROFILE_DAILY_ONLY_TURNOVER_INTRADAY = "daily_only_turnover_intraday"
 INPUT_CHANNEL_PROFILE_NO_INTRADAY_SUMMARY = "no_intraday_summary"
 INPUT_CHANNEL_PROFILE_NO_LIMIT_STRUCTURE = "no_limit_structure"
 INPUT_CHANNEL_PROFILES = (
     INPUT_CHANNEL_PROFILE_ALL,
     INPUT_CHANNEL_PROFILE_DAILY_ONLY,
+    INPUT_CHANNEL_PROFILE_DAILY_ONLY_TURNOVER,
+    INPUT_CHANNEL_PROFILE_DAILY_ONLY_INTRADAY,
+    INPUT_CHANNEL_PROFILE_DAILY_ONLY_TURNOVER_INTRADAY,
     INPUT_CHANNEL_PROFILE_NO_INTRADAY_SUMMARY,
     INPUT_CHANNEL_PROFILE_NO_LIMIT_STRUCTURE,
 )
 INPUT_CHANNEL_PROFILE_ORDERS = {
     INPUT_CHANNEL_PROFILE_ALL: ("daily_raw", "daily_state", "intraday_summary", "limit_structure"),
     INPUT_CHANNEL_PROFILE_DAILY_ONLY: ("daily_raw", "daily_state"),
+    INPUT_CHANNEL_PROFILE_DAILY_ONLY_TURNOVER: ("daily_raw", "daily_state", "turnover"),
+    INPUT_CHANNEL_PROFILE_DAILY_ONLY_INTRADAY: ("daily_raw", "daily_state", "intraday_micro"),
+    INPUT_CHANNEL_PROFILE_DAILY_ONLY_TURNOVER_INTRADAY: (
+        "daily_raw",
+        "daily_state",
+        "turnover",
+        "intraday_micro",
+    ),
     INPUT_CHANNEL_PROFILE_NO_INTRADAY_SUMMARY: ("daily_raw", "daily_state", "limit_structure"),
     INPUT_CHANNEL_PROFILE_NO_LIMIT_STRUCTURE: ("daily_raw", "daily_state", "intraday_summary"),
 }

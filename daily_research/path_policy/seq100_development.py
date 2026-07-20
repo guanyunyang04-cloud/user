@@ -1259,11 +1259,88 @@ def _parser() -> argparse.ArgumentParser:
         help="Verify the Seq100 integrity v2 contract, task bundles, archive, and report.",
     )
     verify_integrity.add_argument("--output-root", type=Path, default=None)
+    prepare_ablation = sub.add_parser(
+        "prepare-structured-input-ablation",
+        help="Build the Structured 180-day, turnover, and intraday ablation material.",
+    )
+    prepare_ablation.add_argument("--study-root", type=Path, default=None)
+    run_ablation = sub.add_parser(
+        "run-structured-input-ablation",
+        help="Run pending Structured input-ablation folds sequentially.",
+    )
+    run_ablation.add_argument("--study-root", type=Path, default=None)
+    run_ablation.add_argument("--max-tasks", type=int, default=0)
+    status_ablation = sub.add_parser(
+        "status-structured-input-ablation",
+        help="Report Structured input-ablation stage, fold, batch, and monitor status.",
+    )
+    status_ablation.add_argument("--study-root", type=Path, default=None)
+    review_ablation = sub.add_parser(
+        "review-structured-input-stage1-capital",
+        help="Review 100x32 versus 180x32 with fixed exits and finite capital.",
+    )
+    review_ablation.add_argument("--study-root", type=Path, default=None)
+    review_ablation_stage = sub.add_parser(
+        "review-structured-input-stage-capital",
+        help="Run the finite-capital selector for a completed Stage 2 or Stage 3.",
+    )
+    review_ablation_stage.add_argument("--study-root", type=Path, default=None)
+    review_ablation_stage.add_argument("--stage", type=int, choices=(2, 3), required=True)
+    summarize_ablation = sub.add_parser(
+        "summarize-structured-input-ablation",
+        help="Evaluate stage gates and build the Structured input-ablation summary.",
+    )
+    summarize_ablation.add_argument("--study-root", type=Path, default=None)
+    verify_ablation = sub.add_parser(
+        "verify-structured-input-ablation",
+        help="Verify Structured input-ablation data, tasks, reports, and boundaries.",
+    )
+    verify_ablation.add_argument("--study-root", type=Path, default=None)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command in {
+        "prepare-structured-input-ablation",
+        "run-structured-input-ablation",
+        "status-structured-input-ablation",
+        "review-structured-input-stage1-capital",
+        "review-structured-input-stage-capital",
+        "summarize-structured-input-ablation",
+        "verify-structured-input-ablation",
+    }:
+        from daily_research.path_policy import seq100_structured_input_ablation as ablation
+
+        root = Path(args.study_root) if args.study_root else ablation.STUDY_ROOT
+        if args.command == "prepare-structured-input-ablation":
+            result = ablation.prepare_structured_input_ablation(study_root=root)
+        elif args.command == "run-structured-input-ablation":
+            result = ablation.run_structured_input_ablation(
+                study_root=root, max_tasks=int(args.max_tasks)
+            )
+        elif args.command == "status-structured-input-ablation":
+            result = ablation.status_structured_input_ablation(study_root=root)
+        elif args.command == "review-structured-input-stage1-capital":
+            result = ablation.run_stage1_capital_review(study_root=root)
+        elif args.command == "review-structured-input-stage-capital":
+            result = ablation.run_stage_capital_review(
+                stage=int(args.stage), study_root=root
+            )
+        elif args.command == "summarize-structured-input-ablation":
+            result = ablation.summarize_structured_input_ablation(study_root=root)
+        else:
+            result = ablation.verify_structured_input_ablation(study_root=root)
+        print(
+            json.dumps(
+                result,
+                ensure_ascii=False,
+                indent=2,
+                default=_json_default,
+                allow_nan=False,
+            )
+        )
+        return 0
     if args.command in {
         "prepare-2026-fold",
         "run-2026-fold",

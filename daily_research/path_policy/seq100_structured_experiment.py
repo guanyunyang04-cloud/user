@@ -914,6 +914,7 @@ def stream_checkpoint_diagnostics(
     year: int,
     compare_legacy_domain: bool,
     fixed_exit_comparison: bool,
+    input_channel_profile: str = training.INPUT_CHANNEL_PROFILE_DAILY_ONLY,
 ) -> dict[str, Any]:
     """Re-infer one fold without ever writing a full-universe path prediction file."""
 
@@ -926,7 +927,7 @@ def stream_checkpoint_diagnostics(
         manifest,
         split="development",
         max_samples=0,
-        input_channel_profile=training.INPUT_CHANNEL_PROFILE_DAILY_ONLY,
+        input_channel_profile=str(input_channel_profile),
         index_role="candidate",
     )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -1325,6 +1326,7 @@ def stream_checkpoint_diagnostics(
         "artifact_type": "seq100_checkpoint_streaming_path_diagnostics",
         "created_at": _now(),
         "year": int(year),
+        "input_channel_profile": str(input_channel_profile),
         "run_dir": str(run_dir.resolve()),
         "checkpoint": str(run_summary["best_checkpoint"]),
         "candidate_count": int(candidate_count),
