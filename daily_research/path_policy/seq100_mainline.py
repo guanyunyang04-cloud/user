@@ -19,6 +19,7 @@ from daily_research.path_policy.qdp_v2_sequence_path_training import (
     PATH_LOSS_PROFILE_OHLCVA_EQUAL,
     PATH_VALUE_GRADIENT_PROFILE_HARD_ST,
     PATH_VALUE_GRADIENT_PROFILE_SMOOTH,
+    PATH_VALUE_DEFAULT_SEMANTIC,
     RANK_TRAINING_PROFILE_GLOBAL_TAIL_512,
     RANK_TRAINING_PROFILE_LOCAL_CHUNK,
     SUMMARY_LOSS_PROFILE_BASE,
@@ -142,6 +143,7 @@ class TodayClosePathOnlyProfile:
     early_stopping_metric: str = ""
     early_stopping_mode: str = ""
     min_complete_epochs: int = 1
+    development_fixed_final_epoch: bool = False
     top_k: str = DEFAULT_TOP_K
     max_samples_per_split: int = 0
     summary_loss_profile: str = SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC
@@ -149,6 +151,7 @@ class TodayClosePathOnlyProfile:
     model_type: str = "gru_ohlcva_aux_path_value"
     direct_value_horizon: int = 0
     path_value_gradient_profile: str = PATH_VALUE_GRADIENT_PROFILE_SMOOTH
+    path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC
     rank_training_profile: str = RANK_TRAINING_PROFILE_LOCAL_CHUNK
     rank_batch_size: int = 512
     rank_interval: int = 4
@@ -216,6 +219,8 @@ def build_todayclose_path_only_train_argv(profile: TodayClosePathOnlyProfile) ->
         str(profile.rank_max_per_side),
         "--path-value-gradient-profile",
         profile.path_value_gradient_profile,
+        "--path-value-semantic",
+        profile.path_value_semantic,
         "--rank-training-profile",
         profile.rank_training_profile,
         "--rank-batch-size",
@@ -247,6 +252,8 @@ def build_todayclose_path_only_train_argv(profile: TodayClosePathOnlyProfile) ->
         argv.extend(["--early-stopping-metric", profile.early_stopping_metric])
     if profile.early_stopping_mode:
         argv.extend(["--early-stopping-mode", profile.early_stopping_mode])
+    if profile.development_fixed_final_epoch:
+        argv.append("--development-fixed-final-epoch")
     return argv
 
 

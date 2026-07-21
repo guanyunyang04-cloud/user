@@ -1314,6 +1314,38 @@ def _parser() -> argparse.ArgumentParser:
         help="Verify Structured input-ablation data, tasks, reports, and boundaries.",
     )
     verify_ablation.add_argument("--study-root", type=Path, default=None)
+    prepare_global = sub.add_parser(
+        "prepare-structured-global-intraday",
+        help="Prepare the Structured global-tail, intraday, and capital-speed study.",
+    )
+    prepare_global.add_argument("--study-root", type=Path, default=None)
+    run_global = sub.add_parser(
+        "run-structured-global-intraday",
+        help="Run one pending Structured global/intraday training task by default.",
+    )
+    run_global.add_argument("--study-root", type=Path, default=None)
+    run_global.add_argument("--max-tasks", type=int, default=1)
+    evaluate_global = sub.add_parser(
+        "evaluate-structured-global-intraday",
+        help="Evaluate one complete model and its capital-policy grid by default.",
+    )
+    evaluate_global.add_argument("--study-root", type=Path, default=None)
+    evaluate_global.add_argument("--max-jobs", type=int, default=1)
+    status_global = sub.add_parser(
+        "status-structured-global-intraday",
+        help="Report Structured global/intraday workflow and monitor state.",
+    )
+    status_global.add_argument("--study-root", type=Path, default=None)
+    summarize_global = sub.add_parser(
+        "summarize-structured-global-intraday",
+        help="Build the final Structured global/intraday research summary.",
+    )
+    summarize_global.add_argument("--study-root", type=Path, default=None)
+    verify_global = sub.add_parser(
+        "verify-structured-global-intraday",
+        help="Verify Structured global/intraday contracts, tasks, results, and boundaries.",
+    )
+    verify_global.add_argument("--study-root", type=Path, default=None)
     prepare_window = sub.add_parser(
         "prepare-structured-training-window",
         help="Build bounded Structured 180x35 training-window fold views.",
@@ -1404,6 +1436,37 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command in {
+        "prepare-structured-global-intraday",
+        "run-structured-global-intraday",
+        "evaluate-structured-global-intraday",
+        "status-structured-global-intraday",
+        "summarize-structured-global-intraday",
+        "verify-structured-global-intraday",
+    }:
+        from daily_research.path_policy import seq100_structured_global_intraday as global_intraday
+
+        root = Path(args.study_root) if args.study_root else global_intraday.STUDY_ROOT
+        if args.command == "prepare-structured-global-intraday":
+            result = global_intraday.prepare_structured_global_intraday(study_root=root)
+        elif args.command == "run-structured-global-intraday":
+            result = global_intraday.run_structured_global_intraday(
+                study_root=root, max_tasks=int(args.max_tasks)
+            )
+        elif args.command == "evaluate-structured-global-intraday":
+            result = global_intraday.evaluate_structured_global_intraday(
+                study_root=root, max_jobs=int(args.max_jobs)
+            )
+        elif args.command == "status-structured-global-intraday":
+            result = global_intraday.status_structured_global_intraday(study_root=root)
+        elif args.command == "summarize-structured-global-intraday":
+            result = global_intraday.summarize_structured_global_intraday(study_root=root)
+        else:
+            result = global_intraday.verify_structured_global_intraday(
+                study_root=root, require_complete=False
+            )
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=_json_default, allow_nan=False))
+        return 0
     if args.command in {
         "prepare-structured-180x35-2026",
         "run-structured-180x35-2026",

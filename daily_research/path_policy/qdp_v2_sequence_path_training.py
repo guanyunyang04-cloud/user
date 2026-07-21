@@ -24,6 +24,7 @@ from torch.utils.data import BatchSampler, Dataset
 from daily_research.path_policy.seq100_candidate_execution import (
     DEFAULT_DAILY_COHORT_CASH_CNY,
     evaluate_candidate_execution,
+    parse_execution_cost_contract,
 )
 from daily_research.path_policy.qdp_v2_sequence_path_pack import (
     DEFAULT_FORWARD_DAYS,
@@ -67,6 +68,18 @@ PATH_VALUE_V2_DRAWDOWN_PENALTY = 0.60
 PATH_VALUE_V2_TRANSACTION_COST = 0.002
 PATH_VALUE_V2_TEMPERATURE = 0.03
 PATH_VALUE_V2_EARLIEST_LEGAL_EXIT_DAY = 2
+PATH_VALUE_SEMANTIC_V2 = "path_value_v2"
+PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3 = "capital_speed_v3"
+PATH_VALUE_SEMANTICS = (
+    PATH_VALUE_SEMANTIC_V2,
+    PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3,
+)
+PATH_VALUE_DEFAULT_SEMANTIC = PATH_VALUE_SEMANTIC_V2
+# Kept as the deterministic fallback for synthetic/legacy callers that do not
+# provide a manifest-derived cost path.  Production v3 training supplies the
+# date-specific proportional multiplier through ``path_value_growth_multiplier``.
+PATH_VALUE_V3_TRANSACTION_COST = 0.002
+PATH_VALUE_V3_EPSILON = 1.0e-6
 PATH_VALUE_GRADIENT_PROFILE_SMOOTH = "smooth_current"
 PATH_VALUE_GRADIENT_PROFILE_HARD_ST = "hard_st"
 PATH_VALUE_GRADIENT_PROFILES = (
@@ -755,7 +768,31 @@ class SequencePathPackDataset(Dataset):
             and self.exit_sellable_panel is not None
             and self.execution_tail_days >= 0
         )
-        self._path_value_targets_cache: np.ndarray | None = None
+        manifest_dates = list(self.manifest.get("date_values", []) or [])
+        date_count = len(manifest_dates)
+        if date_count:
+            self._v3_date_growth_multiplier = _v3_growth_multiplier_for_dates(
+                self.manifest,
+                np.arange(date_count, dtype=np.int64),
+                self.forward_days,
+            )
+        else:
+            self._v3_date_growth_multiplier = None
+        self._path_value_targets_cache: dict[str, np.ndarray] = {}
+
+    def _path_value_growth_multiplier(self, date_idx: np.ndarray) -> np.ndarray:
+        """Manifest-bound proportional cost path for capital-speed v3."""
+
+        indices = np.asarray(date_idx, dtype=np.int64).reshape(-1)
+        if self._v3_date_growth_multiplier is not None:
+            if bool((indices < 0).any()) or bool((indices >= len(self._v3_date_growth_multiplier)).any()):
+                raise ValueError("path-value date index is outside manifest date_values")
+            return np.asarray(self._v3_date_growth_multiplier[indices], dtype=np.float32)
+        return np.full(
+            (int(indices.size), self.forward_days),
+            1.0 - float(PATH_VALUE_V3_TRANSACTION_COST),
+            dtype=np.float32,
+        )
 
     def _index_flag(self, name: str, indices: np.ndarray, *, default: bool) -> np.ndarray:
         if name not in self.sample_index.columns:
@@ -766,7 +803,12 @@ class SequencePathPackDataset(Dataset):
     def __len__(self) -> int:
         return int(len(self.sample_index))
 
-    def path_value_targets(self, *, chunk_size: int = 16384) -> np.ndarray:
+    def path_value_targets(
+        self,
+        *,
+        chunk_size: int = 16384,
+        path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC,
+    ) -> np.ndarray:
         """Return the hard path-value-v2 target for every loaded sample.
 
         Corrected packs may persist this scalar in ``sample_index``.  Legacy packs
@@ -774,13 +816,16 @@ class SequencePathPackDataset(Dataset):
         cached for all subsequent global-tail epochs.
         """
 
-        if self._path_value_targets_cache is not None:
-            return self._path_value_targets_cache
-        for column in ("path_trade_value_v2_target", path_value_v2_column(self.forward_days)):
-            if column in self.sample_index.columns:
-                target = pd.to_numeric(self.sample_index[column], errors="coerce").to_numpy(dtype=np.float32, copy=True)
-                self._path_value_targets_cache = target
-                return target
+        semantic = _normalize_path_value_semantic(path_value_semantic)
+        cached = self._path_value_targets_cache.get(semantic)
+        if cached is not None:
+            return cached
+        if semantic == PATH_VALUE_SEMANTIC_V2:
+            for column in ("path_trade_value_v2_target", path_value_v2_column(self.forward_days)):
+                if column in self.sample_index.columns:
+                    target = pd.to_numeric(self.sample_index[column], errors="coerce").to_numpy(dtype=np.float32, copy=True)
+                    self._path_value_targets_cache[semantic] = target
+                    return target
         target = np.full(len(self), np.nan, dtype=np.float32)
         step = max(int(chunk_size), 1)
         last_trim_chunk = 0
@@ -808,6 +853,12 @@ class SequencePathPackDataset(Dataset):
                 path,
                 price_anchor=self.price_anchor,
                 tradable_path=tradable_path,
+                path_value_semantic=semantic,
+                path_value_growth_multiplier=(
+                    self._path_value_growth_multiplier(date_idx)
+                    if semantic == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3
+                    else None
+                ),
             )[:, -1]
             del path, tradable_path
             batch_equivalent = int(math.ceil(stop / 512.0))
@@ -815,7 +866,7 @@ class SequencePathPackDataset(Dataset):
                 batch_count=batch_equivalent,
                 last_trim_batch=last_trim_chunk,
             )
-        self._path_value_targets_cache = target
+        self._path_value_targets_cache[semantic] = target
         return target
 
     def _normalize(self, name: str, values: np.ndarray) -> np.ndarray:
@@ -957,6 +1008,9 @@ class SequencePathPackDataset(Dataset):
             )
             baseline = np.float32(self.relative_turnover_baseline_panel[date_idx, symbol_idx])
             y_activity_path = future_log - baseline
+        path_value_growth_multiplier = self._path_value_growth_multiplier(
+            np.asarray([date_idx], dtype=np.int64)
+        )[0]
         return {
             "x": torch.from_numpy(x),
             "y_path": torch.from_numpy(y_path),
@@ -970,6 +1024,7 @@ class SequencePathPackDataset(Dataset):
             "symbol_idx": int(symbol_idx),
             "trade_date": str(row["trade_date"]),
             "symbol": str(row["symbol"]),
+            "path_value_growth_multiplier": torch.from_numpy(path_value_growth_multiplier),
         }
 
     def get_batch(
@@ -1096,6 +1151,7 @@ class SequencePathPackDataset(Dataset):
             )
             if bool((~label_valid).any()):
                 y_summary[~label_valid, :] = np.nan
+        path_value_growth_multiplier = self._path_value_growth_multiplier(date_idx)
         batch = {
             "x": torch.from_numpy(x),
             "y_path": torch.from_numpy(y_path),
@@ -1133,6 +1189,7 @@ class SequencePathPackDataset(Dataset):
         batch["label_valid"] = torch.from_numpy(label_valid)
         batch["price_label_valid"] = torch.from_numpy(price_label_valid)
         batch["va_aux_valid"] = torch.from_numpy(va_aux_valid)
+        batch["path_value_growth_multiplier"] = torch.from_numpy(path_value_growth_multiplier)
         return batch
 
 
@@ -1617,6 +1674,66 @@ def _normalize_path_value_gradient_profile(value: str) -> str:
     return profile
 
 
+def _normalize_path_value_semantic(value: str | None) -> str:
+    semantic = str(value or PATH_VALUE_DEFAULT_SEMANTIC).strip().lower()
+    if semantic not in PATH_VALUE_SEMANTICS:
+        raise ValueError(f"path_value_semantic must be one of {PATH_VALUE_SEMANTICS}")
+    return semantic
+
+
+def _v3_growth_multiplier_for_dates(
+    manifest: Mapping[str, Any],
+    date_indices: np.ndarray,
+    forward_days: int,
+) -> np.ndarray:
+    """Return proportional round-trip growth multipliers for each path day.
+
+    The training target intentionally excludes lot-size/minimum-commission
+    effects (those are account-level and allocation-dependent), but it keeps
+    the date-dependent stamp-tax schedule and proportional commission,
+    transfer, and slippage terms from the execution contract.
+    """
+
+    indices = np.asarray(date_indices, dtype=np.int64).reshape(-1)
+    horizon = int(forward_days)
+    if horizon <= 0:
+        raise ValueError("forward_days must be positive")
+    dates = [pd.Timestamp(value).strftime("%Y-%m-%d") for value in list(manifest.get("date_values", []) or [])]
+    if not isinstance(manifest.get("execution_cost_contract"), Mapping) or not dates:
+        return np.full(
+            (int(indices.size), horizon),
+            1.0 - float(PATH_VALUE_V3_TRANSACTION_COST),
+            dtype=np.float32,
+        )
+    contract = parse_execution_cost_contract(manifest)
+    schedule = tuple(contract.stamp_tax_schedule)
+    out = np.full((int(indices.size), horizon), 1.0 - float(PATH_VALUE_V3_TRANSACTION_COST), dtype=np.float32)
+    if not indices.size:
+        return out
+    for row, signal_idx in enumerate(indices.tolist()):
+        for offset in range(horizon):
+            exit_idx = int(signal_idx) + int(offset) + 1
+            if exit_idx >= len(dates):
+                continue
+            exit_date = dates[exit_idx]
+            stamp_bps = 0.0
+            for effective, rate in schedule:
+                if str(effective) <= exit_date:
+                    stamp_bps = float(rate)
+                else:
+                    break
+            buy = (
+                (1.0 + float(contract.slippage_bps) / 10_000.0)
+                * (1.0 + (float(contract.commission_bps) + float(contract.transfer_fee_bps)) / 10_000.0)
+            )
+            sell = (
+                (1.0 - float(contract.slippage_bps) / 10_000.0)
+                * (1.0 - (float(contract.commission_bps) + float(contract.transfer_fee_bps) + stamp_bps) / 10_000.0)
+            )
+            out[row, offset] = np.float32(sell / max(buy, 1.0e-12))
+    return out
+
+
 def _normalize_rank_training_profile(value: str) -> str:
     profile = str(value or RANK_TRAINING_PROFILE_LOCAL_CHUNK).strip().lower()
     if profile not in RANK_TRAINING_PROFILES:
@@ -1771,6 +1888,8 @@ def _derived_path_rank_score_and_target(
     *,
     price_anchor: str,
     path_value_gradient_profile: str,
+    path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC,
+    path_value_growth_multiplier: torch.Tensor | None = None,
     target_tradable_path: torch.Tensor | None = None,
     residual_weight: float = 0.25,
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -1783,12 +1902,16 @@ def _derived_path_rank_score_and_target(
         smooth_value=False,
         price_anchor=price_anchor,
         tradable_path=target_tradable_path,
+        path_value_semantic=path_value_semantic,
+        path_value_growth_multiplier=path_value_growth_multiplier,
     ).detach()
     predicted_summary = _derive_path_summary_torch(
         outputs["future_path"],
         smooth_value=True,
         price_anchor=price_anchor,
         path_value_gradient_profile=path_value_gradient_profile,
+        path_value_semantic=path_value_semantic,
+        path_value_growth_multiplier=path_value_growth_multiplier,
     )
     score = predicted_summary[:, -1]
     if "residual_score" in outputs:
@@ -1962,6 +2085,8 @@ def _derived_summary_loss(
     summary_loss_profile: str,
     price_anchor: str,
     path_value_gradient_profile: str = PATH_VALUE_GRADIENT_PROFILE_SMOOTH,
+    path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC,
+    path_value_growth_multiplier: torch.Tensor | None = None,
     target_tradable_path: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     profile = str(summary_loss_profile or SUMMARY_LOSS_PROFILE_BASE).strip().lower()
@@ -1981,12 +2106,16 @@ def _derived_summary_loss(
             smooth_value=False,
             price_anchor=price_anchor,
             tradable_path=target_tradable_path,
+            path_value_semantic=path_value_semantic,
+            path_value_growth_multiplier=path_value_growth_multiplier,
         ).detach()
         pred_summary = _derive_path_summary_torch(
             pred_path,
             smooth_value=True,
             price_anchor=price_anchor,
             path_value_gradient_profile=path_value_gradient_profile,
+            path_value_semantic=path_value_semantic,
+            path_value_growth_multiplier=path_value_growth_multiplier,
         )
         return summary_loss, target_summary, pred_summary
 
@@ -2003,12 +2132,16 @@ def _derived_summary_loss(
             smooth_value=False,
             price_anchor=price_anchor,
             tradable_path=target_tradable_path,
+            path_value_semantic=path_value_semantic,
+            path_value_growth_multiplier=path_value_growth_multiplier,
         ).detach()
         pred_summary = _derive_path_summary_torch(
             pred_path,
             smooth_value=True,
             price_anchor=price_anchor,
             path_value_gradient_profile=path_value_gradient_profile,
+            path_value_semantic=path_value_semantic,
+            path_value_growth_multiplier=path_value_growth_multiplier,
         )
         return summary_loss, target_summary, pred_summary
 
@@ -2017,12 +2150,16 @@ def _derived_summary_loss(
         smooth_value=False,
         price_anchor=price_anchor,
         tradable_path=target_tradable_path,
+        path_value_semantic=path_value_semantic,
+        path_value_growth_multiplier=path_value_growth_multiplier,
     ).detach()
     pred_summary = _derive_path_summary_torch(
         pred_path,
         smooth_value=True,
         price_anchor=price_anchor,
         path_value_gradient_profile=path_value_gradient_profile,
+        path_value_semantic=path_value_semantic,
+        path_value_growth_multiplier=path_value_growth_multiplier,
     )
     summary_loss = _finite_smooth_l1_columns(
         pred_summary,
@@ -2062,6 +2199,8 @@ def _compute_loss(
     path_loss_profile: str = PATH_LOSS_PROFILE_DEFAULT,
     direct_value_horizon: int = 0,
     path_value_gradient_profile: str = PATH_VALUE_GRADIENT_PROFILE_SMOOTH,
+    path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC,
+    path_value_growth_multiplier: torch.Tensor | None = None,
     rank_training_profile: str = RANK_TRAINING_PROFILE_LOCAL_CHUNK,
     y_tradable_path: torch.Tensor | None = None,
     return_tensor_parts: bool = False,
@@ -2078,6 +2217,8 @@ def _compute_loss(
             smooth_value=False,
             price_anchor=price_anchor,
             tradable_path=(y_tradable_path[:, :horizon] if y_tradable_path is not None else None),
+            path_value_semantic=path_value_semantic,
+            path_value_growth_multiplier=path_value_growth_multiplier,
         ).detach()
         value_column = value_column_for_path(horizon, path_dim=4)
         value_index = derived_path_summary_columns(horizon, path_dim=4).index(value_column)
@@ -2180,10 +2321,16 @@ def _compute_loss(
         target_geometry = _ohlc_path_to_geometry_torch(y_path[:, :, :4])
         geometry_loss = _finite_smooth_l1(outputs["future_price_geometry"], target_geometry)
     if float(utility_curve_weight) != 0.0:
-        predicted_curve, _ = _candidate_path_values_torch(outputs["future_path"][:, :, :4])
+        predicted_curve, _ = _candidate_path_values_torch(
+            outputs["future_path"][:, :, :4],
+            path_value_semantic=path_value_semantic,
+            path_value_growth_multiplier=path_value_growth_multiplier,
+        )
         target_curve, _ = _candidate_path_values_torch(
             y_path[:, :, :4],
             tradable_path=y_tradable_path,
+            path_value_semantic=path_value_semantic,
+            path_value_growth_multiplier=path_value_growth_multiplier,
         )
         utility_curve_loss = _finite_smooth_l1(
             predicted_curve[:, PATH_VALUE_V2_EARLIEST_LEGAL_EXIT_DAY - 1 :],
@@ -2224,6 +2371,8 @@ def _compute_loss(
             summary_loss_profile=summary_loss_profile,
             price_anchor=price_anchor,
             path_value_gradient_profile=path_value_gradient_profile,
+            path_value_semantic=path_value_semantic,
+            path_value_growth_multiplier=path_value_growth_multiplier,
             target_tradable_path=y_tradable_path,
         )
         value_target = target_summary[:, -1]
@@ -2389,6 +2538,7 @@ def _run_global_tail_rank_step(
     scaler: Any,
     amp_enabled: bool,
     path_value_gradient_profile: str,
+    path_value_semantic: str,
     rank_loss_weight: float,
     residual_score_weight: float,
 ) -> tuple[torch.Tensor, int]:
@@ -2408,6 +2558,11 @@ def _run_global_tail_rank_step(
         if batch.get("y_tradable_path") is not None
         else None
     )
+    growth_multiplier = (
+        batch["path_value_growth_multiplier"].to(device, non_blocking=device.type == "cuda")
+        if path_value_semantic == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3
+        else None
+    )
     x, y_path, _y_ohlcva, _y_richer, _y_summary, _y_activity, date_idx, symbol_idx = _batch_to_device(batch, device)
     optimizer.zero_grad(set_to_none=True)
     with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
@@ -2417,6 +2572,8 @@ def _run_global_tail_rank_step(
             y_path,
             price_anchor=dataset.price_anchor,
             path_value_gradient_profile=path_value_gradient_profile,
+            path_value_semantic=path_value_semantic,
+            path_value_growth_multiplier=growth_multiplier,
             target_tradable_path=tradable_path,
             residual_weight=float(residual_score_weight),
         )
@@ -2439,6 +2596,7 @@ def _mine_global_tail_scores(
     batch_size: int,
     amp_enabled: bool,
     path_value_gradient_profile: str,
+    path_value_semantic: str,
     residual_score_weight: float,
 ) -> np.ndarray:
     """Score the full train split from one frozen epoch-end model state."""
@@ -2466,6 +2624,11 @@ def _mine_global_tail_scores(
             )
             x = batch["x"].to(device, non_blocking=device.type == "cuda")
             symbol_idx = batch["symbol_idx"].to(device, non_blocking=device.type == "cuda")
+            growth_multiplier = (
+                batch["path_value_growth_multiplier"].to(device, non_blocking=device.type == "cuda")
+                if path_value_semantic == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3
+                else None
+            )
             with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
                 outputs = model(x, symbol_idx=symbol_idx)
                 if "future_path" not in outputs or int(outputs["future_path"].shape[-1]) != 4:
@@ -2475,12 +2638,14 @@ def _mine_global_tail_scores(
                     smooth_value=True,
                     price_anchor=dataset.price_anchor,
                     path_value_gradient_profile=path_value_gradient_profile,
+                    path_value_semantic=path_value_semantic,
+                    path_value_growth_multiplier=growth_multiplier,
                 )
                 score = predicted_summary[:, -1]
                 if "residual_score" in outputs:
                     score = score + float(residual_score_weight) * outputs["residual_score"]
             scores[np.asarray(indices, dtype=np.int64)] = score.detach().float().cpu().numpy()
-            del batch, x, symbol_idx, outputs, predicted_summary, score
+            del batch, x, symbol_idx, growth_multiplier, outputs, predicted_summary, score
             last_trim_batch, _trim_event = _maybe_trim_training_working_set(
                 batch_count=batch_number,
                 last_trim_batch=last_trim_batch,
@@ -3110,20 +3275,41 @@ def _candidate_path_values_torch(
     *,
     tradable_path: torch.Tensor | None = None,
     earliest_exit_day: int = PATH_VALUE_V2_EARLIEST_LEGAL_EXIT_DAY,
+    path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC,
+    path_value_growth_multiplier: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    semantic = _normalize_path_value_semantic(path_value_semantic)
     forward_days = int(path.shape[1])
     close_ret = path[:, :, 3]
     low_ret = path[:, :, 2]
     worst_low_so_far = torch.cummin(low_ret, dim=1).values
     pre_exit_drawdown = torch.clamp(-worst_low_so_far, min=0.0)
     day = torch.arange(forward_days, device=path.device, dtype=path.dtype)
-    waiting = torch.sqrt((day + 1.0) / max(float(forward_days), 1.0)).view(1, -1)
-    candidate = (
-        close_ret
-        - float(PATH_VALUE_V2_DRAWDOWN_PENALTY) * pre_exit_drawdown
-        - float(PATH_VALUE_V2_WAITING_PENALTY) * waiting
-        - float(PATH_VALUE_V2_TRANSACTION_COST)
-    )
+    if semantic == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3:
+        if path_value_growth_multiplier is None:
+            multiplier = torch.full_like(close_ret, 1.0 - float(PATH_VALUE_V3_TRANSACTION_COST))
+        else:
+            multiplier = path_value_growth_multiplier.to(device=path.device, dtype=path.dtype)
+            if multiplier.ndim == 1:
+                multiplier = multiplier.view(1, -1)
+            if tuple(multiplier.shape) not in {tuple(close_ret.shape), (1, forward_days)}:
+                raise ValueError(
+                    "path_value_growth_multiplier must have shape "
+                    f"{tuple(close_ret.shape)} or {(1, forward_days)}"
+                )
+        net_growth = (1.0 + close_ret) * multiplier
+        valid_growth = torch.isfinite(net_growth) & (net_growth > 0.0)
+        safe_growth = torch.where(valid_growth, net_growth, torch.ones_like(net_growth))
+        candidate = torch.log(safe_growth) / torch.clamp(day.view(1, -1) + 1.0, min=1.0)
+        candidate = torch.where(valid_growth, candidate, torch.full_like(candidate, float("-inf")))
+    else:
+        waiting = torch.sqrt((day + 1.0) / max(float(forward_days), 1.0)).view(1, -1)
+        candidate = (
+            close_ret
+            - float(PATH_VALUE_V2_DRAWDOWN_PENALTY) * pre_exit_drawdown
+            - float(PATH_VALUE_V2_WAITING_PENALTY) * waiting
+            - float(PATH_VALUE_V2_TRANSACTION_COST)
+        )
     first_legal_idx = max(int(earliest_exit_day) - 1, 0)
     if first_legal_idx >= forward_days:
         raise ValueError("earliest_exit_day must be within the prediction horizon")
@@ -3274,6 +3460,8 @@ def _derive_path_summary_torch(
     path_value_gradient_profile: str = PATH_VALUE_GRADIENT_PROFILE_SMOOTH,
     tradable_path: torch.Tensor | None = None,
     earliest_exit_day: int = PATH_VALUE_V2_EARLIEST_LEGAL_EXIT_DAY,
+    path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC,
+    path_value_growth_multiplier: torch.Tensor | None = None,
 ) -> torch.Tensor:
     if int(path.shape[2]) >= 6:
         if tradable_path is not None:
@@ -3302,6 +3490,8 @@ def _derive_path_summary_torch(
         path,
         tradable_path=tradable_path,
         earliest_exit_day=earliest_exit_day,
+        path_value_semantic=path_value_semantic,
+        path_value_growth_multiplier=path_value_growth_multiplier,
     )
     best_value_hard, best_idx = torch.max(candidate, dim=1)
     if smooth_value:
@@ -3354,7 +3544,10 @@ def _derive_path_summary_numpy(
     price_anchor: str = "next_open",
     tradable_path: np.ndarray | None = None,
     earliest_exit_day: int = PATH_VALUE_V2_EARLIEST_LEGAL_EXIT_DAY,
+    path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC,
+    path_value_growth_multiplier: np.ndarray | None = None,
 ) -> np.ndarray:
+    semantic = _normalize_path_value_semantic(path_value_semantic)
     values = np.asarray(path, dtype=np.float32)
     if values.ndim != 3 or values.shape[2] not in {4, 6}:
         raise ValueError("path must have shape [batch, forward_days, 4 or 6]")
@@ -3390,13 +3583,32 @@ def _derive_path_summary_numpy(
     worst_low_so_far = np.minimum.accumulate(low_ret, axis=1)
     pre_exit_drawdown = np.maximum(-worst_low_so_far, 0.0)
     day = np.arange(forward_days, dtype=np.float64)
-    waiting = np.sqrt((day + 1.0) / max(float(forward_days), 1.0))
-    candidate = (
-        close_ret
-        - float(PATH_VALUE_V2_DRAWDOWN_PENALTY) * pre_exit_drawdown
-        - float(PATH_VALUE_V2_WAITING_PENALTY) * waiting.reshape(1, -1)
-        - float(PATH_VALUE_V2_TRANSACTION_COST)
-    )
+    if semantic == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3:
+        if path_value_growth_multiplier is None:
+            multiplier = np.full_like(close_ret, 1.0 - float(PATH_VALUE_V3_TRANSACTION_COST))
+        else:
+            multiplier = np.asarray(path_value_growth_multiplier, dtype=np.float64)
+            if multiplier.ndim == 1:
+                multiplier = multiplier.reshape(1, -1)
+            if multiplier.shape not in {close_ret.shape, (1, forward_days)}:
+                raise ValueError(
+                    "path_value_growth_multiplier must have shape "
+                    f"{close_ret.shape} or {(1, forward_days)}"
+                )
+        net_growth = (1.0 + close_ret) * multiplier
+        valid_growth = np.isfinite(net_growth) & (net_growth > 0.0)
+        candidate = np.full_like(net_growth, -np.inf, dtype=np.float64)
+        candidate[valid_growth] = np.log(net_growth[valid_growth]) / np.broadcast_to(
+            day.reshape(1, -1) + 1.0, net_growth.shape
+        )[valid_growth]
+    else:
+        waiting = np.sqrt((day + 1.0) / max(float(forward_days), 1.0))
+        candidate = (
+            close_ret
+            - float(PATH_VALUE_V2_DRAWDOWN_PENALTY) * pre_exit_drawdown
+            - float(PATH_VALUE_V2_WAITING_PENALTY) * waiting.reshape(1, -1)
+            - float(PATH_VALUE_V2_TRANSACTION_COST)
+        )
     first_legal_idx = max(int(earliest_exit_day) - 1, 0)
     if first_legal_idx >= forward_days:
         raise ValueError("earliest_exit_day must be within the prediction horizon")
@@ -3446,6 +3658,8 @@ def _realize_path_value_v2_plan_numpy(
     exit_sellable_path: np.ndarray | None = None,
     execution_tail_days: int = 0,
     terminal_recovery_fraction: float = 0.0,
+    path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC,
+    path_value_growth_multiplier: np.ndarray | None = None,
 ) -> dict[str, np.ndarray]:
     """Evaluate the exit day selected from a predicted four-field OHLC path.
 
@@ -3456,6 +3670,7 @@ def _realize_path_value_v2_plan_numpy(
     first later tradable day; no later tradable day leaves the plan unrealized.
     """
 
+    semantic = _normalize_path_value_semantic(path_value_semantic)
     values = _legacy_entry_relative_path_numpy(np.asarray(true_path, dtype=np.float32), price_anchor=price_anchor)
     summary = np.asarray(pred_summary, dtype=np.float64)
     horizon = int(forward_days)
@@ -3465,6 +3680,20 @@ def _realize_path_value_v2_plan_numpy(
     exit_day_idx = columns.index(f"best_exit_day_{horizon}d")
     value_idx = columns.index(path_value_v2_column(horizon))
     n = int(values.shape[0])
+    if path_value_growth_multiplier is None:
+        growth_multiplier = np.full(
+            (n, horizon),
+            1.0 - float(PATH_VALUE_V3_TRANSACTION_COST),
+            dtype=np.float64,
+        )
+    else:
+        growth_multiplier = np.asarray(path_value_growth_multiplier, dtype=np.float64)
+        if growth_multiplier.ndim == 1:
+            growth_multiplier = growth_multiplier.reshape(1, -1)
+        if growth_multiplier.shape not in {(n, horizon), (1, horizon)}:
+            raise ValueError("path_value_growth_multiplier shape does not match path batch")
+        if growth_multiplier.shape == (1, horizon) and n != 1:
+            growth_multiplier = np.broadcast_to(growth_multiplier, (n, horizon))
     predicted_exit_day = np.full(n, np.nan, dtype=np.float32)
     realized_exit_day = np.full(n, np.nan, dtype=np.float32)
     realized_return = np.full(n, np.nan, dtype=np.float32)
@@ -3506,19 +3735,29 @@ def _realize_path_value_v2_plan_numpy(
         values,
         price_anchor="next_open",
         tradable_path=tradable_path,
+        path_value_semantic=semantic,
+        path_value_growth_multiplier=growth_multiplier,
     )
     opportunity_value = true_summary[:, value_idx].astype(np.float32, copy=False)
     close_ret = values[:, :, 3].astype(np.float64, copy=False)
     low_ret = values[:, :, 2].astype(np.float64, copy=False)
     pre_exit_drawdown = np.maximum(-np.minimum.accumulate(low_ret, axis=1), 0.0)
     day = np.arange(horizon, dtype=np.float64)
-    waiting = np.sqrt((day + 1.0) / max(float(horizon), 1.0))
-    candidate = (
-        close_ret
-        - float(PATH_VALUE_V2_DRAWDOWN_PENALTY) * pre_exit_drawdown
-        - float(PATH_VALUE_V2_WAITING_PENALTY) * waiting.reshape(1, -1)
-        - float(PATH_VALUE_V2_TRANSACTION_COST)
-    )
+    if semantic == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3:
+        net_growth = (1.0 + close_ret) * growth_multiplier
+        candidate = np.full_like(net_growth, -np.inf, dtype=np.float64)
+        valid = np.isfinite(net_growth) & (net_growth > 0.0)
+        candidate[valid] = np.log(net_growth[valid]) / np.broadcast_to(
+            day.reshape(1, -1) + 1.0, net_growth.shape
+        )[valid]
+    else:
+        waiting = np.sqrt((day + 1.0) / max(float(horizon), 1.0))
+        candidate = (
+            close_ret
+            - float(PATH_VALUE_V2_DRAWDOWN_PENALTY) * pre_exit_drawdown
+            - float(PATH_VALUE_V2_WAITING_PENALTY) * waiting.reshape(1, -1)
+            - float(PATH_VALUE_V2_TRANSACTION_COST)
+        )
     tradable = (
         np.asarray(tradable_path, dtype=bool)
         if tradable_path is not None
@@ -3575,12 +3814,19 @@ def _realize_path_value_v2_plan_numpy(
                 wait_penalty = float(PATH_VALUE_V2_WAITING_PENALTY) * math.sqrt(
                     float(actual + 1) / max(float(execution_days), 1.0)
                 )
-                realized_value[row] = np.float32(
-                    gross_return
-                    - float(PATH_VALUE_V2_DRAWDOWN_PENALTY) * float(realized_drawdown[row])
-                    - wait_penalty
-                    - float(PATH_VALUE_V2_TRANSACTION_COST)
-                )
+                if semantic == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3:
+                    resolved_offset = min(actual, horizon - 1)
+                    growth = (1.0 + gross_return) * float(growth_multiplier[row, resolved_offset])
+                    realized_value[row] = np.float32(
+                        math.log(growth) / max(float(actual + 1), 1.0) if growth > 0.0 else np.nan
+                    )
+                else:
+                    realized_value[row] = np.float32(
+                        gross_return
+                        - float(PATH_VALUE_V2_DRAWDOWN_PENALTY) * float(realized_drawdown[row])
+                        - wait_penalty
+                        - float(PATH_VALUE_V2_TRANSACTION_COST)
+                    )
             else:
                 # A filled position that cannot exit through the complete retry
                 # window is settled by the manifest-bound terminal rule.  It is
@@ -3591,7 +3837,11 @@ def _realize_path_value_v2_plan_numpy(
                 realized_exit_day[row] = np.float32(execution_days)
                 realized_return[row] = np.float32(recovery - 1.0)
                 realized_drawdown[row] = np.float32(1.0 - recovery)
-                realized_value[row] = np.float32(recovery - 1.0)
+                realized_value[row] = np.float32(
+                    math.log(max(recovery, PATH_VALUE_V3_EPSILON)) / max(float(execution_days), 1.0)
+                    if semantic == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3
+                    else recovery - 1.0
+                )
             continue
         later = np.flatnonzero(tradable[row, planned:])
         if not len(later):
@@ -3814,6 +4064,7 @@ def _predict_split(
     write_predictions: bool,
     write_path_predictions: bool = True,
     direct_value_horizon: int = 0,
+    path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     pred_dir = output_dir / "predictions"
     if write_predictions:
@@ -4061,6 +4312,11 @@ def _predict_split(
         )
         entry_filled_np = batch["entry_filled"].numpy().astype(bool, copy=False)
         price_label_valid_np = batch["price_label_valid"].numpy().astype(bool, copy=False)
+        path_value_growth_multiplier_np = (
+            batch["path_value_growth_multiplier"].numpy().astype(np.float32, copy=False)
+            if path_value_semantic == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3
+            else None
+        )
         signal_date_idx_np = batch["date_idx"].numpy().astype(np.int64, copy=True)
         entry_open_raw_np = (
             batch["entry_open_raw"].numpy().astype(np.float32, copy=False)
@@ -4101,6 +4357,11 @@ def _predict_split(
                 eval_true_path_np,
                 price_anchor=dataset.price_anchor,
                 tradable_path=(true_tradable_np[:, :eval_forward_days] if true_tradable_np is not None else None),
+                path_value_semantic=path_value_semantic,
+                path_value_growth_multiplier=(
+                    path_value_growth_multiplier_np[:, :eval_forward_days]
+                    if path_value_growth_multiplier_np is not None else None
+                ),
             )
             pred_summary_np = np.full_like(true_summary_np, np.nan)
             pred_summary_np[:, summary_columns.index(value_column)] = score_np
@@ -4114,11 +4375,18 @@ def _predict_split(
             true_summary_np = y_summary.detach().float().cpu().numpy()
         else:
             pred_path_np = out["future_path"].detach().float().cpu().numpy()
-            pred_summary_np = _derive_path_summary_numpy(pred_path_np, price_anchor=dataset.price_anchor)
+            pred_summary_np = _derive_path_summary_numpy(
+                pred_path_np,
+                price_anchor=dataset.price_anchor,
+                path_value_semantic=path_value_semantic,
+                path_value_growth_multiplier=path_value_growth_multiplier_np,
+            )
             true_summary_np = _derive_path_summary_numpy(
                 true_path_np,
                 price_anchor=dataset.price_anchor,
                 tradable_path=true_tradable_np,
+                path_value_semantic=path_value_semantic,
+                path_value_growth_multiplier=path_value_growth_multiplier_np,
             )
             path_value_score_np = pred_summary_np[:, summary_columns.index(value_column)]
             if "residual_score" in out:
@@ -4182,6 +4450,8 @@ def _predict_split(
                 exit_sellable_path=exit_sellable_path_np,
                 execution_tail_days=int(dataset.execution_tail_days),
                 terminal_recovery_fraction=float(dataset.terminal_recovery_fraction),
+                path_value_semantic=path_value_semantic,
+                path_value_growth_multiplier=path_value_growth_multiplier_np,
             )
             for col, values in realized.items():
                 rows[col] = values
@@ -4488,6 +4758,7 @@ class TrainConfig:
     early_stopping_min_delta: float
     evaluation_mode: str = EVALUATION_MODE_STANDARD
     path_value_gradient_profile: str = PATH_VALUE_GRADIENT_PROFILE_SMOOTH
+    path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC
     rank_training_profile: str = RANK_TRAINING_PROFILE_LOCAL_CHUNK
     rank_batch_size: int = 512
     rank_interval: int = 4
@@ -4496,6 +4767,7 @@ class TrainConfig:
     early_stopping_mode: str = ""
     minimum_complete_epochs: int = 1
     development_contract: Path | None = None
+    development_fixed_final_epoch: bool = False
     geometry_loss_weight: float = 0.0
     utility_curve_loss_weight: float = 0.0
     turnover_level_loss_weight: float = 0.0
@@ -4564,7 +4836,10 @@ def _canonical_json_sha256(payload: Any) -> str:
 def _validated_development_contract(path: Path) -> dict[str, Any]:
     contract_path = Path(path).resolve()
     payload = json.loads(contract_path.read_text(encoding="utf-8"))
-    mutable_study = str(payload.get("artifact_type", "")) == "seq100_current_study"
+    mutable_study = (
+        str(payload.get("artifact_type", "")) == "seq100_current_study"
+        or isinstance(payload.get("contract"), Mapping)
+    )
     semantic_payload = dict(payload.get("contract", {}) or {}) if mutable_study else dict(payload)
     declared = str(
         payload.get("contract_sha256", semantic_payload.get("contract_sha256", "")) or ""
@@ -4789,6 +5064,7 @@ def _evaluate_development_loss(
     config: TrainConfig,
     amp_enabled: bool,
     path_value_gradient_profile: str,
+    path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC,
     rank_training_profile: str,
 ) -> dict[str, Any]:
     """Evaluate the configured mathematical objective over every supervised row."""
@@ -4835,6 +5111,11 @@ def _evaluate_development_loss(
                 if batch.get("y_tradable_path") is not None
                 else None
             )
+            path_value_growth_multiplier = (
+                batch["path_value_growth_multiplier"].to(device, non_blocking=device.type == "cuda")
+                if path_value_semantic == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3
+                else None
+            )
             x, y_path, y_ohlcva_path, y_richer_path, y_summary, y_activity_path, date_idx, symbol_idx = _batch_to_device(
                 batch, device
             )
@@ -4870,6 +5151,8 @@ def _evaluate_development_loss(
                     summary_loss_profile=str(config.summary_loss_profile),
                     direct_value_horizon=int(config.direct_value_horizon),
                     path_value_gradient_profile=path_value_gradient_profile,
+                    path_value_semantic=path_value_semantic,
+                    path_value_growth_multiplier=path_value_growth_multiplier,
                     rank_training_profile=rank_training_profile,
                     y_tradable_path=y_tradable_path,
                     return_tensor_parts=True,
@@ -4882,6 +5165,7 @@ def _evaluate_development_loss(
             sample_count += current_count
             batch_count += 1
             del batch, x, y_path, y_ohlcva_path, y_richer_path, y_summary, y_activity_path, y_tradable_path
+            del path_value_growth_multiplier
             del date_idx, symbol_idx, target_path, outputs, _loss, parts
             last_trim_batch, trim_event = _maybe_trim_training_working_set(
                 batch_count=batch_count,
@@ -4920,10 +5204,13 @@ def _evaluate_development_loss(
 def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     evaluation_mode = _validate_evaluation_mode(config)
     path_value_gradient_profile = _normalize_path_value_gradient_profile(config.path_value_gradient_profile)
+    path_value_semantic = _normalize_path_value_semantic(config.path_value_semantic)
     rank_training_profile = _normalize_rank_training_profile(config.rank_training_profile)
     development_selector = str(
         config.early_stopping_metric or EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS
     ).strip().lower()
+    if bool(config.development_fixed_final_epoch) and evaluation_mode != EVALUATION_MODE_DEVELOPMENT:
+        raise ValueError("development_fixed_final_epoch requires evaluation_mode=development")
     if rank_training_profile == RANK_TRAINING_PROFILE_GLOBAL_TAIL_512:
         if int(config.rank_batch_size) != 512:
             raise ValueError("global_tail_512 requires rank_batch_size=512")
@@ -5092,7 +5379,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     prior_epoch_scores: np.ndarray | None = None
     if rank_training_profile == RANK_TRAINING_PROFILE_GLOBAL_TAIL_512:
         _write_json(progress_path, {"status": "loading_global_tail_targets", "updated_at": _now()})
-        global_tail_targets = train_ds.path_value_targets()
+        global_tail_targets = train_ds.path_value_targets(path_value_semantic=path_value_semantic)
         if not bool(np.isfinite(global_tail_targets).any()):
             raise ValueError("global_tail_512 requires finite path-value targets")
     for epoch in range(1, int(config.epochs) + 1):
@@ -5158,6 +5445,11 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 if batch.get("y_tradable_path") is not None
                 else None
             )
+            path_value_growth_multiplier = (
+                batch["path_value_growth_multiplier"].to(device, non_blocking=device.type == "cuda")
+                if path_value_semantic == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3
+                else None
+            )
             x, y_path, y_ohlcva_path, y_richer_path, y_summary, y_activity_path, date_idx, symbol_idx = _batch_to_device(batch, device)
             target_path = y_ohlcva_path if uses_ohlcva_path and y_ohlcva_path is not None else y_path
             del batch
@@ -5197,6 +5489,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     summary_loss_profile=str(config.summary_loss_profile),
                     direct_value_horizon=int(config.direct_value_horizon),
                     path_value_gradient_profile=path_value_gradient_profile,
+                    path_value_semantic=path_value_semantic,
+                    path_value_growth_multiplier=path_value_growth_multiplier,
                     rank_training_profile=RANK_TRAINING_PROFILE_LOCAL_CHUNK,
                     y_tradable_path=y_tradable_path,
                     return_tensor_parts=True,
@@ -5226,6 +5520,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                         scaler=scaler,
                         amp_enabled=amp_enabled,
                         path_value_gradient_profile=path_value_gradient_profile,
+                        path_value_semantic=path_value_semantic,
                         rank_loss_weight=float(config.rank_loss_weight),
                         residual_score_weight=float(config.residual_score_weight),
                     )
@@ -5249,6 +5544,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     },
                 )
             del x, y_path, y_ohlcva_path, y_richer_path, target_path, y_summary, y_activity_path, y_tradable_path, date_idx, symbol_idx, out, loss, parts
+            del path_value_growth_multiplier
             last_trim_batch, trim_event = _maybe_trim_training_working_set(
                 batch_count=batch_count,
                 last_trim_batch=last_trim_batch,
@@ -5269,6 +5565,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     scaler=scaler,
                     amp_enabled=amp_enabled,
                     path_value_gradient_profile=path_value_gradient_profile,
+                    path_value_semantic=path_value_semantic,
                     rank_loss_weight=float(config.rank_loss_weight),
                     residual_score_weight=float(config.residual_score_weight),
                 )
@@ -5289,6 +5586,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 batch_size=int(config.batch_size),
                 amp_enabled=amp_enabled,
                 path_value_gradient_profile=path_value_gradient_profile,
+                path_value_semantic=path_value_semantic,
                 residual_score_weight=float(config.residual_score_weight),
             )
             mining_seconds = float(time.perf_counter() - mining_started_at)
@@ -5341,6 +5639,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 write_predictions=False,
                 write_path_predictions=False,
                 direct_value_horizon=int(config.direct_value_horizon),
+                path_value_semantic=path_value_semantic,
             )
             current_val_ic = float(val_metrics["rank_ic_mean"])
             improved = bool(np.isfinite(current_val_ic) and current_val_ic > best_val_ic + float(config.early_stopping_min_delta))
@@ -5395,6 +5694,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 config=config,
                 amp_enabled=amp_enabled,
                 path_value_gradient_profile=path_value_gradient_profile,
+                path_value_semantic=path_value_semantic,
                 rank_training_profile=rank_training_profile,
             )
             # Older callers and test doubles return only VALIDATION_LOSS_KEYS.  Keep
@@ -5424,8 +5724,10 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 else development_selector
             )
             current_development_loss = float(development_loss[selector_key])
+            fixed_final_epoch = bool(config.development_fixed_final_epoch)
             improved = bool(
-                current_development_loss
+                fixed_final_epoch
+                or current_development_loss
                 < best_development_loss - float(config.early_stopping_min_delta)
             )
             for key in VALIDATION_LOSS_KEYS:
@@ -5444,7 +5746,10 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     ),
                     "development_diagnostics_json": str(diagnostics_path.resolve()),
                     "development_candidate_diagnostics": "deferred_until_restored_best_checkpoint",
-                    "checkpoint_policy": f"best_{development_selector}",
+                    "checkpoint_policy": (
+                        "fixed_final_development_epoch"
+                        if fixed_final_epoch else f"best_{development_selector}"
+                    ),
                     "is_best": bool(improved),
                 }
             )
@@ -5482,7 +5787,10 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     "best_development_metric_value": best_development_loss,
                     "development_loss_components": development_loss,
                     "execution_cost_contract_sha256": execution_cost_contract_sha256,
-                    "checkpoint_policy": f"best_{development_selector}",
+                    "checkpoint_policy": (
+                        "fixed_final_development_epoch"
+                        if fixed_final_epoch else f"best_{development_selector}"
+                    ),
                 }
                 checkpoint_payload[f"best_{development_selector}"] = float(
                     best_development_loss
@@ -5528,6 +5836,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         )
         development_should_stop = bool(
             evaluation_mode == EVALUATION_MODE_DEVELOPMENT
+            and not bool(config.development_fixed_final_epoch)
             and int(epoch) >= int(config.minimum_complete_epochs)
             and epochs_without_improvement >= int(config.early_stopping_patience)
         )
@@ -5603,6 +5912,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             write_predictions=str(config.prediction_mode) != "none",
             write_path_predictions=str(config.prediction_mode) == "full",
             direct_value_horizon=int(config.direct_value_horizon),
+            path_value_semantic=path_value_semantic,
         )
         metric_rows.append(split_metric)
         topk_frames.append(split_topk.assign(split=split_name))
@@ -5659,6 +5969,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     checkpoint_policy = (
         "final_epoch"
         if evaluation_mode == EVALUATION_MODE_FIXED_OOS
+        else "fixed_final_development_epoch"
+        if evaluation_mode == EVALUATION_MODE_DEVELOPMENT and bool(config.development_fixed_final_epoch)
         else f"best_{development_selector}"
         if evaluation_mode == EVALUATION_MODE_DEVELOPMENT
         else "best_validation_rank_ic"
@@ -5684,6 +5996,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         "price_anchor": str(train_ds.price_anchor),
         "value_column": str(active_value_column),
         "path_value_gradient_profile": path_value_gradient_profile,
+        "path_value_semantic": path_value_semantic,
         "rank_training_profile": rank_training_profile,
         "path_summary_columns": list(active_summary_columns),
         "direct_value_horizon": int(config.direct_value_horizon) if uses_direct_value else 0,
@@ -5785,6 +6098,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "price_delta": float(config.price_delta_loss_weight),
             "value": float(config.value_loss_weight),
             "path_value_gradient_profile": path_value_gradient_profile,
+            "path_value_semantic": path_value_semantic,
             "rank": float(config.rank_loss_weight),
             "rank_training_profile": rank_training_profile,
             "rank_batch_size": int(config.rank_batch_size),
@@ -5998,6 +6312,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Value surrogate: legacy smooth forward value or hard-max forward with straight-through smooth gradients.",
     )
     train.add_argument(
+        "--path-value-semantic",
+        default=PATH_VALUE_DEFAULT_SEMANTIC,
+        choices=PATH_VALUE_SEMANTICS,
+        help="Economic path-value target used for value/rank supervision and planned exits.",
+    )
+    train.add_argument(
         "--rank-training-profile",
         default=RANK_TRAINING_PROFILE_LOCAL_CHUNK,
         choices=RANK_TRAINING_PROFILES,
@@ -6041,6 +6361,11 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument("--early-stopping-mode", default="", choices=("", *EARLY_STOPPING_MODES))
     train.add_argument("--min-complete-epochs", type=int, default=1)
     train.add_argument("--development-contract", type=Path, default=None)
+    train.add_argument(
+        "--development-fixed-final-epoch",
+        action="store_true",
+        help="Evaluate development for reporting but always keep the pre-registered final epoch.",
+    )
     train.add_argument("--json", action="store_true")
     return parser
 
@@ -6107,6 +6432,7 @@ def main(argv: list[str] | None = None) -> int:
         early_stopping_min_delta=float(args.early_stopping_min_delta),
         evaluation_mode=str(args.evaluation_mode),
         path_value_gradient_profile=str(args.path_value_gradient_profile),
+        path_value_semantic=str(args.path_value_semantic),
         rank_training_profile=str(args.rank_training_profile),
         rank_batch_size=int(args.rank_batch_size),
         rank_interval=int(args.rank_interval),
@@ -6115,6 +6441,7 @@ def main(argv: list[str] | None = None) -> int:
         early_stopping_mode=str(args.early_stopping_mode),
         minimum_complete_epochs=int(args.min_complete_epochs),
         development_contract=(Path(args.development_contract) if args.development_contract else None),
+        development_fixed_final_epoch=bool(args.development_fixed_final_epoch),
     )
     result = train_sequence_path_model(cfg)
     print(json.dumps(result, ensure_ascii=False, indent=2, default=_json_default) if bool(args.json) else result)

@@ -823,6 +823,8 @@ def _candidate_utility_curve_numpy(
     price_anchor: str,
     earliest_exit_day: int,
     tradable: np.ndarray | None = None,
+    path_value_semantic: str = training.PATH_VALUE_DEFAULT_SEMANTIC,
+    path_value_growth_multiplier: np.ndarray | None = None,
 ) -> np.ndarray:
     values = training._legacy_entry_relative_path_numpy(
         np.asarray(path, dtype=np.float32), price_anchor=price_anchor
@@ -831,13 +833,26 @@ def _candidate_utility_curve_numpy(
     low = values[:, :, 2]
     drawdown = np.maximum(-np.minimum.accumulate(low, axis=1), 0.0)
     day = np.arange(values.shape[1], dtype=np.float64)
-    candidate = (
-        close
-        - training.PATH_VALUE_V2_DRAWDOWN_PENALTY * drawdown
-        - training.PATH_VALUE_V2_WAITING_PENALTY
-        * np.sqrt((day + 1.0) / float(values.shape[1])).reshape(1, -1)
-        - training.PATH_VALUE_V2_TRANSACTION_COST
-    )
+    semantic = training._normalize_path_value_semantic(path_value_semantic)
+    if semantic == training.PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3:
+        if path_value_growth_multiplier is None:
+            multiplier = np.full_like(close, 1.0 - training.PATH_VALUE_V3_TRANSACTION_COST)
+        else:
+            multiplier = np.asarray(path_value_growth_multiplier, dtype=np.float64)
+        net_growth = (1.0 + close) * multiplier
+        valid = np.isfinite(net_growth) & (net_growth > 0.0)
+        candidate = np.full_like(net_growth, -np.inf)
+        candidate[valid] = np.log(net_growth[valid]) / np.broadcast_to(
+            day.reshape(1, -1) + 1.0, net_growth.shape
+        )[valid]
+    else:
+        candidate = (
+            close
+            - training.PATH_VALUE_V2_DRAWDOWN_PENALTY * drawdown
+            - training.PATH_VALUE_V2_WAITING_PENALTY
+            * np.sqrt((day + 1.0) / float(values.shape[1])).reshape(1, -1)
+            - training.PATH_VALUE_V2_TRANSACTION_COST
+        )
     candidate[:, : max(int(earliest_exit_day) - 1, 0)] = -np.inf
     if tradable is not None:
         candidate = np.where(np.asarray(tradable, dtype=bool), candidate, -np.inf)
@@ -915,6 +930,7 @@ def stream_checkpoint_diagnostics(
     compare_legacy_domain: bool,
     fixed_exit_comparison: bool,
     input_channel_profile: str = training.INPUT_CHANNEL_PROFILE_DAILY_ONLY,
+    path_value_semantic: str | None = None,
 ) -> dict[str, Any]:
     """Re-infer one fold without ever writing a full-universe path prediction file."""
 
@@ -932,6 +948,11 @@ def stream_checkpoint_diagnostics(
     )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model, run_summary = _load_checkpoint_model(run_dir, dataset, device=device)
+    active_path_value_semantic = training._normalize_path_value_semantic(
+        path_value_semantic
+        or run_summary.get("path_value_semantic")
+        or dict(run_summary.get("resolved_training_config", {}) or {}).get("path_value_semantic")
+    )
     uses_activity = bool(getattr(model, "uses_structured_turnover", False))
     date_values = np.asarray(manifest["date_values"], dtype=object)
     groups = dataset.sample_index.groupby("date_idx", sort=True).indices
@@ -1004,6 +1025,7 @@ def stream_checkpoint_diagnostics(
                 exit_sellable_parts: list[np.ndarray] = []
                 activity_pred_parts: list[np.ndarray] = []
                 activity_true_parts: list[np.ndarray] = []
+                growth_multiplier_parts: list[np.ndarray] = []
                 symbols: list[str] = []
                 for start in range(0, int(indices.size), 512):
                     chunk = indices[start : start + 512]
@@ -1027,6 +1049,9 @@ def stream_checkpoint_diagnostics(
                     entry_open_parts.append(batch["entry_open_raw"].numpy())
                     exit_close_parts.append(batch["exit_close_raw_path"].numpy())
                     exit_sellable_parts.append(batch["exit_sellable_path"].numpy().astype(bool))
+                    growth_multiplier_parts.append(
+                        batch["path_value_growth_multiplier"].numpy().astype(np.float32)
+                    )
                     if uses_activity:
                         activity_pred_parts.append(
                             output["future_activity_path"].float().cpu().numpy()
@@ -1041,6 +1066,7 @@ def stream_checkpoint_diagnostics(
                 entry_open = np.concatenate(entry_open_parts, axis=0)
                 exit_close = np.concatenate(exit_close_parts, axis=0)
                 exit_sellable = np.concatenate(exit_sellable_parts, axis=0)
+                growth_multiplier = np.concatenate(growth_multiplier_parts, axis=0)
                 pred_activity = (
                     np.concatenate(activity_pred_parts, axis=0) if activity_pred_parts else None
                 )
@@ -1051,16 +1077,26 @@ def stream_checkpoint_diagnostics(
                 signal_date_idx = np.full(len(indices), int(date_idx_raw), dtype=np.int64)
 
                 old_summary = training._derive_path_summary_numpy(
-                    pred_path, price_anchor=dataset.price_anchor, earliest_exit_day=1
+                    pred_path,
+                    price_anchor=dataset.price_anchor,
+                    earliest_exit_day=1,
+                    path_value_semantic=active_path_value_semantic,
+                    path_value_growth_multiplier=growth_multiplier,
                 )
                 legal_summary = training._derive_path_summary_numpy(
-                    pred_path, price_anchor=dataset.price_anchor, earliest_exit_day=2
+                    pred_path,
+                    price_anchor=dataset.price_anchor,
+                    earliest_exit_day=2,
+                    path_value_semantic=active_path_value_semantic,
+                    path_value_growth_multiplier=growth_multiplier,
                 )
                 true_summary = training._derive_path_summary_numpy(
                     true_path,
                     price_anchor=dataset.price_anchor,
                     tradable_path=tradable,
                     earliest_exit_day=2,
+                    path_value_semantic=active_path_value_semantic,
+                    path_value_growth_multiplier=growth_multiplier,
                 )
                 old_day = old_summary[:, 8]
                 legal_day = legal_summary[:, 8]
@@ -1078,13 +1114,19 @@ def stream_checkpoint_diagnostics(
                 _increment_counts(legal_exit_counts, legal_day)
 
                 predicted_curve = _candidate_utility_curve_numpy(
-                    pred_path, price_anchor=dataset.price_anchor, earliest_exit_day=2
+                    pred_path,
+                    price_anchor=dataset.price_anchor,
+                    earliest_exit_day=2,
+                    path_value_semantic=active_path_value_semantic,
+                    path_value_growth_multiplier=growth_multiplier,
                 )
                 true_curve = _candidate_utility_curve_numpy(
                     true_path,
                     price_anchor=dataset.price_anchor,
                     earliest_exit_day=2,
                     tradable=tradable,
+                    path_value_semantic=active_path_value_semantic,
+                    path_value_growth_multiplier=growth_multiplier,
                 )
                 legal_curve = predicted_curve[:, 1:]
                 sorted_curve = np.sort(legal_curve, axis=1)
@@ -1327,6 +1369,7 @@ def stream_checkpoint_diagnostics(
         "created_at": _now(),
         "year": int(year),
         "input_channel_profile": str(input_channel_profile),
+        "path_value_semantic": active_path_value_semantic,
         "run_dir": str(run_dir.resolve()),
         "checkpoint": str(run_summary["best_checkpoint"]),
         "candidate_count": int(candidate_count),
