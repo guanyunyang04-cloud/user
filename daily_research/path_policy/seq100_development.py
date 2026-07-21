@@ -1346,11 +1346,153 @@ def _parser() -> argparse.ArgumentParser:
         help="Verify bounded views, tasks, results, monitor state, and boundaries.",
     )
     verify_window.add_argument("--study-root", type=Path, default=None)
+    prepare_180_2026 = sub.add_parser(
+        "prepare-structured-180x35-2026",
+        help="Build the Structured 180x35 2026 fold and compact feature suffix.",
+    )
+    prepare_180_2026.add_argument("--study-root", type=Path, default=None)
+    run_180_2026 = sub.add_parser(
+        "run-structured-180x35-2026",
+        help="Train the fixed one-epoch Structured 180x35 2026 checkpoint.",
+    )
+    run_180_2026.add_argument("--study-root", type=Path, default=None)
+    run_180_2026.add_argument("--max-tasks", type=int, default=1)
+    evaluate_180_2026 = sub.add_parser(
+        "evaluate-structured-180x35-2026",
+        help="Run resumable full-label, extended-score, and fixed-D7 account jobs.",
+    )
+    evaluate_180_2026.add_argument("--study-root", type=Path, default=None)
+    evaluate_180_2026.add_argument("--max-jobs", type=int, default=1)
+    status_180_2026 = sub.add_parser(
+        "status-structured-180x35-2026",
+        help="Report Structured 180x35 2026 preparation, training, and evaluation state.",
+    )
+    status_180_2026.add_argument("--study-root", type=Path, default=None)
+    summarize_180_2026 = sub.add_parser(
+        "summarize-structured-180x35-2026",
+        help="Build the Structured 180x35 2026 D7 comparison summary.",
+    )
+    summarize_180_2026.add_argument("--study-root", type=Path, default=None)
+    verify_180_2026 = sub.add_parser(
+        "verify-structured-180x35-2026",
+        help="Verify the Structured 180x35 2026 study and protected boundaries.",
+    )
+    verify_180_2026.add_argument("--study-root", type=Path, default=None)
+    diagnose_180_2026 = sub.add_parser(
+        "diagnose-structured-180x35-2026",
+        help="Compare the 2025 checkpoint and scan execution without changing the default decision.",
+    )
+    diagnose_180_2026.add_argument("--output-root", type=Path, default=None)
+    verify_diagnose_180_2026 = sub.add_parser(
+        "verify-structured-180x35-2026-diagnostics",
+        help="Verify the 2025 checkpoint comparison and 2026 execution scan.",
+    )
+    verify_diagnose_180_2026.add_argument("--output-root", type=Path, default=None)
+    evaluate_vintages_180_2026 = sub.add_parser(
+        "evaluate-structured-180x35-2026-vintages",
+        help="Evaluate the 2023-2026 Structured 180x35 checkpoints on common 2026 material.",
+    )
+    evaluate_vintages_180_2026.add_argument("--output-root", type=Path, default=None)
+    evaluate_vintages_180_2026.add_argument("--max-jobs", type=int, default=0)
+    verify_vintages_180_2026 = sub.add_parser(
+        "verify-structured-180x35-2026-vintages",
+        help="Verify the four-vintage Structured 180x35 2026 comparison.",
+    )
+    verify_vintages_180_2026.add_argument("--output-root", type=Path, default=None)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command in {
+        "prepare-structured-180x35-2026",
+        "run-structured-180x35-2026",
+        "evaluate-structured-180x35-2026",
+        "status-structured-180x35-2026",
+        "summarize-structured-180x35-2026",
+        "verify-structured-180x35-2026",
+        "diagnose-structured-180x35-2026",
+        "verify-structured-180x35-2026-diagnostics",
+        "evaluate-structured-180x35-2026-vintages",
+        "verify-structured-180x35-2026-vintages",
+    }:
+        if args.command in {
+            "evaluate-structured-180x35-2026-vintages",
+            "verify-structured-180x35-2026-vintages",
+        }:
+            from daily_research.path_policy import seq100_structured_180x35_2026_vintages as vintages
+
+            root = Path(args.output_root) if args.output_root else vintages.OUTPUT_ROOT
+            result = (
+                vintages.evaluate_vintages(
+                    max_jobs=int(args.max_jobs), output_root=root
+                )
+                if args.command == "evaluate-structured-180x35-2026-vintages"
+                else vintages.verify_vintages(output_root=root)
+            )
+            print(
+                json.dumps(
+                    result,
+                    ensure_ascii=False,
+                    indent=2,
+                    default=_json_default,
+                    allow_nan=False,
+                )
+            )
+            return 0
+        if args.command in {
+            "diagnose-structured-180x35-2026",
+            "verify-structured-180x35-2026-diagnostics",
+        }:
+            from daily_research.path_policy import seq100_structured_180x35_2026_diagnostics as diagnostics
+
+            root = Path(args.output_root) if args.output_root else diagnostics.OUTPUT_ROOT
+            result = (
+                diagnostics.run_diagnostics(output_root=root)
+                if args.command == "diagnose-structured-180x35-2026"
+                else diagnostics.verify_diagnostics(output_root=root)
+            )
+            print(
+                json.dumps(
+                    result,
+                    ensure_ascii=False,
+                    indent=2,
+                    default=_json_default,
+                    allow_nan=False,
+                )
+            )
+            return 0
+        from daily_research.path_policy import seq100_structured_180x35_2026 as structured_180
+
+        root = Path(args.study_root) if args.study_root else structured_180.STUDY_ROOT
+        if args.command == "prepare-structured-180x35-2026":
+            result = structured_180.prepare_structured_180x35_2026(study_root=root)
+        elif args.command == "run-structured-180x35-2026":
+            result = structured_180.run_structured_180x35_2026(
+                study_root=root, max_tasks=int(args.max_tasks)
+            )
+        elif args.command == "evaluate-structured-180x35-2026":
+            result = structured_180.evaluate_structured_180x35_2026(
+                study_root=root, max_jobs=int(args.max_jobs)
+            )
+        elif args.command == "status-structured-180x35-2026":
+            result = structured_180.status_structured_180x35_2026(study_root=root)
+        elif args.command == "summarize-structured-180x35-2026":
+            result = structured_180.summarize_structured_180x35_2026(study_root=root)
+        else:
+            result = structured_180.verify_structured_180x35_2026(
+                study_root=root, require_complete=False
+            )
+        print(
+            json.dumps(
+                result,
+                ensure_ascii=False,
+                indent=2,
+                default=_json_default,
+                allow_nan=False,
+            )
+        )
+        return 0
     if args.command in {
         "prepare-structured-training-window",
         "run-structured-training-window",
