@@ -5,10 +5,11 @@ import sys
 from types import SimpleNamespace
 from pathlib import Path
 
+import duckdb
 import pandas as pd
 import pyarrow.parquet as pq
 
-from quant_data_platform.qdp_v2 import auxiliary_update
+from quant_data_platform.qdp_v2 import auxiliary_tail_update, auxiliary_update
 from quant_data_platform.qdp_v2.audit import _manifest_contract_findings
 from quant_data_platform.qdp_v2.auxiliary_tail_update import (
     _normalize_cninfo_share_change,
@@ -383,6 +384,53 @@ def test_baostock_snapshot_worker_checkpoints_each_date(
             "source_date": "2026-07-15",
             "source": "baostock.query_stock_industry",
         }
+    ]
+
+
+def test_index_tail_dates_casts_parquet_dates_before_max(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    current = tmp_path / "current_index.parquet"
+    calendar = tmp_path / "calendar.parquet"
+    with duckdb.connect() as con:
+        con.execute("CREATE TABLE current_index(trade_date CHAR(10))")
+        con.execute(
+            "INSERT INTO current_index VALUES ('2026-07-15'), ('2026-07-16')"
+        )
+        con.execute("COPY current_index TO ? (FORMAT PARQUET)", [str(current)])
+        assert con.execute(
+            "SELECT max(trade_date) FROM read_parquet(?)", [str(current)]
+        ).fetchone()[0] == "2026-07-"
+    pd.DataFrame(
+        {
+            "trade_date": [
+                "2026-07-15",
+                "2026-07-16",
+                "2026-07-17",
+                "2026-07-20",
+                "2026-07-21",
+            ],
+            "exchange": ["SSE"] * 5,
+            "is_open": [True] * 5,
+        }
+    ).to_parquet(calendar, index=False)
+    monkeypatch.setattr(
+        auxiliary_tail_update,
+        "_paths",
+        lambda ctx, domain: [
+            current if domain == "index_constituents" else calendar
+        ],
+    )
+    ctx = SimpleNamespace(
+        runtime=tmp_path / "runtime",
+        target_date="2026-07-21",
+    )
+
+    assert auxiliary_tail_update._index_tail_dates(ctx) == [
+        "2026-07-17",
+        "2026-07-20",
+        "2026-07-21",
     ]
 
 

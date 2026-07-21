@@ -242,7 +242,7 @@ def update_name_change_tail(ctx: AuxiliaryContext) -> dict[str, Any]:
     return result
 
 
-def update_index_tail(ctx: AuxiliaryContext) -> dict[str, Any]:
+def _index_tail_dates(ctx: AuxiliaryContext) -> list[str]:
     current = _scan_sql(_paths(ctx, "index_constituents"))
     calendar = _scan_sql(_paths(ctx, "trading_calendar"))
     spill = ctx.runtime / "tail_index_inventory_spill"
@@ -254,15 +254,26 @@ def update_index_tail(ctx: AuxiliaryContext) -> dict[str, Any]:
                 SELECT DISTINCT c.trade_date
                 FROM {calendar} c
                 WHERE c.exchange='SSE' AND c.is_open
-                  AND c.trade_date>(SELECT coalesce(max(trade_date),'2010-01-03')
-                                    FROM {current})
-                  AND c.trade_date<=?
+                  AND try_cast(c.trade_date AS DATE)>(
+                    SELECT coalesce(
+                      max(try_cast(trade_date AS DATE)),
+                      DATE '2010-01-03'
+                    )
+                    FROM {current}
+                  )
+                  AND try_cast(c.trade_date AS DATE)<=try_cast(? AS DATE)
                 ORDER BY c.trade_date
                 """,
                 [ctx.target_date],
             ).fetchall()
         ]
     shutil.rmtree(spill, ignore_errors=True)
+    return dates
+
+
+def update_index_tail(ctx: AuxiliaryContext) -> dict[str, Any]:
+    current = _scan_sql(_paths(ctx, "index_constituents"))
+    dates = _index_tail_dates(ctx)
     if not dates:
         metadata = _mark_checked(ctx, "index_constituents")
         return {"status": "already_complete", "row_count": 0, "metadata": metadata}

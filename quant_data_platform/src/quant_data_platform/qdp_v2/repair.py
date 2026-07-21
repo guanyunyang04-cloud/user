@@ -2230,7 +2230,9 @@ def _frame_date_range(
     frame: pd.DataFrame, manifest: DatasetManifest
 ) -> tuple[str, str]:
     column = _date_column(manifest)
-    if not column or column not in frame.columns:
+    if not column:
+        return "", ""
+    if column not in frame.columns:
         raise QdpV2RepairError("qdp_v2_repair_date_column_missing")
     return _series_date_range(frame[column])
 
