@@ -156,6 +156,7 @@ class TodayClosePathOnlyProfile:
     rank_batch_size: int = 512
     rank_interval: int = 4
     prefetch_batches: int = 1
+    activation_checkpoint_profile: str = "none"
 
 
 def build_todayclose_path_only_train_argv(profile: TodayClosePathOnlyProfile) -> list[str]:
@@ -229,6 +230,8 @@ def build_todayclose_path_only_train_argv(profile: TodayClosePathOnlyProfile) ->
         str(profile.rank_interval),
         "--prefetch-batches",
         str(profile.prefetch_batches),
+        "--activation-checkpoint-profile",
+        profile.activation_checkpoint_profile,
         "--device",
         profile.device,
         "--seed",

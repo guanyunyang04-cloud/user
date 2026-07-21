@@ -986,6 +986,9 @@ def stream_checkpoint_diagnostics(
     utility_count = 0
     utility_pred_values: list[np.ndarray] = []
     utility_true_values: list[np.ndarray] = []
+    predicted_score_values: list[np.ndarray] = []
+    true_score_values: list[np.ndarray] = []
+    true_exit_counts: dict[int, int] = {}
     regret_sum = 0.0
     regret_count = 0
     bucket_edges = ((1, 5), (6, 10), (11, 20), (21, 40), (41, 60))
@@ -1103,6 +1106,9 @@ def stream_checkpoint_diagnostics(
                 old_score = old_summary[:, -1]
                 legal_score = legal_summary[:, -1]
                 true_score = true_summary[:, -1]
+                predicted_score_values.append(legal_score.astype(np.float32, copy=True))
+                true_score_values.append(true_score.astype(np.float32, copy=True))
+                _increment_counts(true_exit_counts, true_summary[:, 8])
                 candidate_count += int(len(indices))
                 d1_count += int((old_day == 1).sum())
                 clamp_day = np.maximum(old_day, 2.0)
@@ -1151,8 +1157,14 @@ def stream_checkpoint_diagnostics(
                 row_index = np.arange(len(indices))
                 realized_at_plan = true_curve[row_index, planned_index]
                 true_best = np.max(true_curve, axis=1)
-                regret = true_best - realized_at_plan
-                finite_regret = np.isfinite(regret)
+                finite_regret = np.isfinite(true_best) & np.isfinite(realized_at_plan)
+                regret = np.full(true_best.shape, np.nan, dtype=np.float64)
+                np.subtract(
+                    true_best,
+                    realized_at_plan,
+                    out=regret,
+                    where=finite_regret,
+                )
                 regret_sum += float(regret[finite_regret].sum())
                 regret_count += int(finite_regret.sum())
 
@@ -1358,6 +1370,46 @@ def stream_checkpoint_diagnostics(
     utility_true = (
         np.concatenate(utility_true_values) if utility_true_values else np.asarray([], dtype=np.float32)
     )
+    predicted_scores = (
+        np.concatenate(predicted_score_values)
+        if predicted_score_values
+        else np.asarray([], dtype=np.float32)
+    )
+    true_scores = (
+        np.concatenate(true_score_values)
+        if true_score_values
+        else np.asarray([], dtype=np.float32)
+    )
+    paired_score_mask = np.isfinite(predicted_scores) & np.isfinite(true_scores)
+    paired_score_delta = np.abs(
+        predicted_scores[paired_score_mask].astype(np.float64)
+        - true_scores[paired_score_mask].astype(np.float64)
+    )
+    initial_value_loss = (
+        float(np.mean(np.where(paired_score_delta < 1.0, 0.5 * paired_score_delta**2, paired_score_delta - 0.5)))
+        if paired_score_delta.size
+        else None
+    )
+
+    def score_distribution(values: np.ndarray) -> dict[str, Any]:
+        finite = np.asarray(values[np.isfinite(values)], dtype=np.float64)
+        return {
+            "count": int(values.size),
+            "finite_count": int(finite.size),
+            "nonfinite_count": int(values.size - finite.size),
+            "negative_rate": float((finite < 0.0).mean()) if finite.size else None,
+            "zero_rate": float((finite == 0.0).mean()) if finite.size else None,
+            "positive_rate": float((finite > 0.0).mean()) if finite.size else None,
+            "mean": float(finite.mean()) if finite.size else None,
+            "std": float(finite.std()) if finite.size else None,
+            "minimum": float(finite.min()) if finite.size else None,
+            "p01": float(np.quantile(finite, 0.01)) if finite.size else None,
+            "p10": float(np.quantile(finite, 0.10)) if finite.size else None,
+            "median": float(np.median(finite)) if finite.size else None,
+            "p90": float(np.quantile(finite, 0.90)) if finite.size else None,
+            "p99": float(np.quantile(finite, 0.99)) if finite.size else None,
+            "maximum": float(finite.max()) if finite.size else None,
+        }
     path_output = output_dir / f"checkpoint_path_samples_{year}.parquet"
     pd.DataFrame(path_rows).to_parquet(path_output, index=False)
     fixed_result = {
@@ -1388,6 +1440,12 @@ def stream_checkpoint_diagnostics(
         "top3_legal_exit_day_distribution": {
             str(key): value for key, value in sorted(top3_exit_counts.items())
         },
+        "true_legal_exit_day_distribution": {
+            str(key): value for key, value in sorted(true_exit_counts.items())
+        },
+        "predicted_score_distribution": score_distribution(predicted_scores),
+        "true_score_distribution": score_distribution(true_scores),
+        "paired_score_smooth_l1": initial_value_loss,
         "actual_exit_day_distribution": {
             str(key): value for key, value in sorted(actual_exit_counts.items())
         },

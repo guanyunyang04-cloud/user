@@ -74,6 +74,7 @@ STALE_SECONDS = 15 * 60
 EXPECTED_QDP_AS_OF = "2026-07-16"
 OOS_START = "2026-01-05"
 OOS_END = "2026-03-19"
+RETIREMENT_FILE = "retirement.json"
 
 
 @dataclass(frozen=True)
@@ -341,6 +342,101 @@ def _state_path(study_root: Path) -> Path:
     return study_root.resolve() / "state.json"
 
 
+def _retirement_path(study_root: Path) -> Path:
+    return study_root.resolve() / RETIREMENT_FILE
+
+
+def retire_structured_global_intraday(
+    *, study_root: Path = STUDY_ROOT, successor_study_id: str
+) -> dict[str, Any]:
+    """Permanently freeze this abandoned workflow without touching its evidence."""
+
+    root = study_root.resolve()
+    path = _retirement_path(root)
+    if path.is_file():
+        retirement = _read_json(path)
+        if str(retirement.get("successor_study_id", "")) != str(successor_study_id):
+            raise ValueError("global study retirement successor drifted")
+        return retirement
+    if not (root / "study.json").is_file():
+        raise FileNotFoundError(root / "study.json")
+    completed_2023, partial_2023 = _classify_runs(root, V2_SPECS["g35v2"], 2023)
+    completed_2024, partial_2024 = _classify_runs(root, V2_SPECS["g35v2"], 2024)
+    retirement = {
+        "schema_version": 1,
+        "artifact_type": "seq100_structured_global_intraday_retirement",
+        "study_id": STUDY_ID,
+        "status": "abandoned",
+        "frozen_at": _now(),
+        "successor_study_id": str(successor_study_id),
+        "reason": (
+            "The simplified global_tail_512 recipe reduced effective daily ranking coverage, "
+            "required a second epoch for false-positive mining, and materially degraded the "
+            "completed G35V2/2023 ranking, path, exit, and account diagnostics."
+        ),
+        "completed_evidence": {
+            "g35v2_2023_runs": [str(value.resolve()) for value in completed_2023],
+            "g35v2_2023_partial_runs": [str(value.resolve()) for value in partial_2023],
+            "diagnostic_summary": str(
+                (root / "diagnostics/g35v2_2023/diagnostic_summary.md").resolve()
+            ),
+            "rank_ic": 0.0407,
+            "l35v2_rank_ic": 0.0965,
+            "path_mae": 0.4388,
+            "l35v2_path_mae": 0.0822,
+            "predicted_true_close_path_correlation": -0.1745,
+            "l35v2_predicted_true_close_path_correlation": 0.1376,
+            "top3_planned_exit_day": 56,
+            "top3_planned_exit_day_share": 1.0,
+        },
+        "preserved_partial_evidence": {
+            "g35v2_2024_completed_runs": [str(value.resolve()) for value in completed_2024],
+            "g35v2_2024_partial_runs": [str(value.resolve()) for value in partial_2024],
+        },
+        "mutation_contract": {
+            "delete_or_move_old_evidence": False,
+            "resume_training": False,
+            "resume_evaluation": False,
+            "resume_summary": False,
+        },
+    }
+    _write_json(path, retirement)
+    _set_state(
+        root,
+        "abandoned",
+        current_task=None,
+        current_evaluation_model=None,
+        error=None,
+        retirement=str(path.resolve()),
+        successor_study_id=str(successor_study_id),
+    )
+    _append_event(
+        root,
+        {
+            "event": "study_retired",
+            "status": "abandoned",
+            "message": "global-tail study frozen; no further work is permitted",
+            "successor_study_id": str(successor_study_id),
+        },
+    )
+    return retirement
+
+
+def _frozen_status(study_root: Path) -> dict[str, Any] | None:
+    path = _retirement_path(study_root)
+    if not path.is_file():
+        return None
+    return {
+        "status": "abandoned",
+        "study_root": str(study_root.resolve()),
+        "state": _load_state(study_root),
+        "retirement": _read_json(path),
+        "training_allowed": False,
+        "evaluation_allowed": False,
+        "summary_allowed": False,
+    }
+
+
 def _load_state(study_root: Path) -> dict[str, Any]:
     path = _state_path(study_root)
     return _read_json(path) if path.is_file() else {"status": "not_prepared"}
@@ -403,6 +499,9 @@ def _fairness(view_path: Path) -> dict[str, Any]:
 
 def prepare_structured_global_intraday(*, study_root: Path = STUDY_ROOT) -> dict[str, Any]:
     root = study_root.resolve()
+    frozen = _frozen_status(root)
+    if frozen is not None:
+        return frozen
     study_path = root / "study.json"
     if study_path.is_file():
         existing = _read_json(study_path)
@@ -792,6 +891,9 @@ def run_structured_global_intraday(
     *, study_root: Path = STUDY_ROOT, max_tasks: int = 1
 ) -> dict[str, Any]:
     root = study_root.resolve()
+    frozen = _frozen_status(root)
+    if frozen is not None:
+        return frozen
     if not (root / "study.json").is_file():
         prepare_structured_global_intraday(study_root=root)
     verify_structured_global_intraday(study_root=root, require_complete=False)
@@ -890,6 +992,9 @@ def run_structured_global_intraday(
 
 def status_structured_global_intraday(*, study_root: Path = STUDY_ROOT) -> dict[str, Any]:
     root = study_root.resolve()
+    frozen = _frozen_status(root)
+    if frozen is not None:
+        return frozen
     if not (root / "study.json").is_file():
         return {"status": "not_prepared", "study_root": str(root)}
     state = _load_state(root)
@@ -1485,6 +1590,9 @@ def evaluate_structured_global_intraday(
     *, study_root: Path = STUDY_ROOT, max_jobs: int = 1
 ) -> dict[str, Any]:
     root = study_root.resolve()
+    frozen = _frozen_status(root)
+    if frozen is not None:
+        return frozen
     state = _load_state(root)
     status = str(state.get("status", ""))
     if status == "oos_2026_evaluating":
@@ -1688,6 +1796,9 @@ def _markdown(summary: Mapping[str, Any]) -> str:
 
 def summarize_structured_global_intraday(*, study_root: Path = STUDY_ROOT) -> dict[str, Any]:
     root = study_root.resolve()
+    frozen = _frozen_status(root)
+    if frozen is not None:
+        return frozen
     state = _load_state(root)
     if str(state.get("status", "")) not in {"finalized", "oos_2026_training", "oos_2026_evaluating", "completed"}:
         raise ValueError("2023-2025 model selection is not finalized")

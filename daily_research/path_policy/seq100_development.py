@@ -1346,6 +1346,38 @@ def _parser() -> argparse.ArgumentParser:
         help="Verify Structured global/intraday contracts, tasks, results, and boundaries.",
     )
     verify_global.add_argument("--study-root", type=Path, default=None)
+    prepare_local_capital = sub.add_parser(
+        "prepare-structured-local-intraday-capital-speed",
+        help="Prepare the local Structured intraday and capital-speed factorial study.",
+    )
+    prepare_local_capital.add_argument("--study-root", type=Path, default=None)
+    run_local_capital = sub.add_parser(
+        "run-structured-local-intraday-capital-speed",
+        help="Run one pending local Structured factorial training fold by default.",
+    )
+    run_local_capital.add_argument("--study-root", type=Path, default=None)
+    run_local_capital.add_argument("--max-tasks", type=int, default=1)
+    evaluate_local_capital = sub.add_parser(
+        "evaluate-structured-local-intraday-capital-speed",
+        help="Evaluate one completed local Structured model by default.",
+    )
+    evaluate_local_capital.add_argument("--study-root", type=Path, default=None)
+    evaluate_local_capital.add_argument("--max-jobs", type=int, default=1)
+    status_local_capital = sub.add_parser(
+        "status-structured-local-intraday-capital-speed",
+        help="Report the local Structured factorial workflow and monitor state.",
+    )
+    status_local_capital.add_argument("--study-root", type=Path, default=None)
+    summarize_local_capital = sub.add_parser(
+        "summarize-structured-local-intraday-capital-speed",
+        help="Summarize the local Structured factorial and batch1024 decision.",
+    )
+    summarize_local_capital.add_argument("--study-root", type=Path, default=None)
+    verify_local_capital = sub.add_parser(
+        "verify-structured-local-intraday-capital-speed",
+        help="Verify local Structured contracts, tasks, results, and boundaries.",
+    )
+    verify_local_capital.add_argument("--study-root", type=Path, default=None)
     prepare_window = sub.add_parser(
         "prepare-structured-training-window",
         help="Build bounded Structured 180x35 training-window fold views.",
@@ -1466,6 +1498,53 @@ def main(argv: Sequence[str] | None = None) -> int:
                 study_root=root, require_complete=False
             )
         print(json.dumps(result, ensure_ascii=False, indent=2, default=_json_default, allow_nan=False))
+        return 0
+    if args.command in {
+        "prepare-structured-local-intraday-capital-speed",
+        "run-structured-local-intraday-capital-speed",
+        "evaluate-structured-local-intraday-capital-speed",
+        "status-structured-local-intraday-capital-speed",
+        "summarize-structured-local-intraday-capital-speed",
+        "verify-structured-local-intraday-capital-speed",
+    }:
+        from daily_research.path_policy import (
+            seq100_structured_local_intraday_capital_speed as local_capital,
+        )
+
+        root = Path(args.study_root) if args.study_root else local_capital.STUDY_ROOT
+        if args.command == "prepare-structured-local-intraday-capital-speed":
+            result = local_capital.prepare_structured_local_intraday_capital_speed(
+                study_root=root
+            )
+        elif args.command == "run-structured-local-intraday-capital-speed":
+            result = local_capital.run_structured_local_intraday_capital_speed(
+                study_root=root, max_tasks=int(args.max_tasks)
+            )
+        elif args.command == "evaluate-structured-local-intraday-capital-speed":
+            result = local_capital.evaluate_structured_local_intraday_capital_speed(
+                study_root=root, max_jobs=int(args.max_jobs)
+            )
+        elif args.command == "status-structured-local-intraday-capital-speed":
+            result = local_capital.status_structured_local_intraday_capital_speed(
+                study_root=root
+            )
+        elif args.command == "summarize-structured-local-intraday-capital-speed":
+            result = local_capital.summarize_structured_local_intraday_capital_speed(
+                study_root=root
+            )
+        else:
+            result = local_capital.verify_structured_local_intraday_capital_speed(
+                study_root=root, require_complete=True
+            )
+        print(
+            json.dumps(
+                result,
+                ensure_ascii=False,
+                indent=2,
+                default=_json_default,
+                allow_nan=False,
+            )
+        )
         return 0
     if args.command in {
         "prepare-structured-180x35-2026",

@@ -19,6 +19,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint as activation_checkpoint
 from torch.utils.data import BatchSampler, Dataset
 
 from daily_research.path_policy.seq100_candidate_execution import (
@@ -91,6 +92,12 @@ RANK_TRAINING_PROFILE_GLOBAL_TAIL_512 = "global_tail_512"
 RANK_TRAINING_PROFILES = (
     RANK_TRAINING_PROFILE_LOCAL_CHUNK,
     RANK_TRAINING_PROFILE_GLOBAL_TAIL_512,
+)
+ACTIVATION_CHECKPOINT_PROFILE_NONE = "none"
+ACTIVATION_CHECKPOINT_PROFILE_STRUCTURED_GRU = "structured_gru_encoder_decoder_v1"
+ACTIVATION_CHECKPOINT_PROFILES = (
+    ACTIVATION_CHECKPOINT_PROFILE_NONE,
+    ACTIVATION_CHECKPOINT_PROFILE_STRUCTURED_GRU,
 )
 GLOBAL_TAIL_GROUP_COUNTS = {
     "true_top": 32,
@@ -1403,6 +1410,7 @@ class SequencePathModel(nn.Module):
         symbol_count: int = 0,
         symbol_embedding_dim: int = 16,
         richer_path_dim: int = 4,
+        activation_checkpoint_profile: str = ACTIVATION_CHECKPOINT_PROFILE_NONE,
     ) -> None:
         super().__init__()
         normalized_model_type = str(model_type or "gru_last").strip().lower()
@@ -1434,6 +1442,23 @@ class SequencePathModel(nn.Module):
         self.uses_ohlcva_path = normalized_model_type in OHLCVA_MODEL_TYPES
         self.uses_ohlcva_aux_path = normalized_model_type in OHLCVA_AUX_MODEL_TYPES
         self.uses_structured_turnover = normalized_model_type in STRUCTURED_TURNOVER_MODEL_TYPES
+        checkpoint_profile = str(
+            activation_checkpoint_profile or ACTIVATION_CHECKPOINT_PROFILE_NONE
+        ).strip().lower()
+        if checkpoint_profile not in ACTIVATION_CHECKPOINT_PROFILES:
+            raise ValueError(
+                "activation_checkpoint_profile must be one of "
+                f"{ACTIVATION_CHECKPOINT_PROFILES}"
+            )
+        if (
+            checkpoint_profile == ACTIVATION_CHECKPOINT_PROFILE_STRUCTURED_GRU
+            and not self.uses_structured_turnover
+        ):
+            raise ValueError(
+                "structured_gru_encoder_decoder_v1 requires "
+                "model_type=gru_structured_joint_turnover"
+            )
+        self.activation_checkpoint_profile = checkpoint_profile
         self.input_norm = nn.LayerNorm(input_dim)
         self.proj = nn.Linear(input_dim, hidden_dim)
         self.encoder = nn.GRU(
@@ -1507,10 +1532,39 @@ class SequencePathModel(nn.Module):
         self.forward_days = int(forward_days)
         self.summary_dim = int(summary_dim)
 
+    def _run_gru(
+        self,
+        module: nn.GRU,
+        inputs: torch.Tensor,
+        hidden: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        use_checkpoint = bool(
+            self.activation_checkpoint_profile
+            == ACTIVATION_CHECKPOINT_PROFILE_STRUCTURED_GRU
+            and self.training
+            and torch.is_grad_enabled()
+        )
+        if not use_checkpoint:
+            return module(inputs) if hidden is None else module(inputs, hidden)
+        if hidden is None:
+            return activation_checkpoint(
+                module,
+                inputs,
+                use_reentrant=False,
+                preserve_rng_state=True,
+            )
+        return activation_checkpoint(
+            module,
+            inputs,
+            hidden,
+            use_reentrant=False,
+            preserve_rng_state=True,
+        )
+
     def forward(self, x: torch.Tensor, symbol_idx: torch.Tensor | None = None) -> dict[str, torch.Tensor]:
         z = self.input_norm(x)
         z = F.gelu(self.proj(z))
-        encoded, encoder_hidden = self.encoder(z)
+        encoded, encoder_hidden = self._run_gru(self.encoder, z)
         if self.uses_structured_turnover:
             assert self.structured_context is not None
             assert self.horizon_embedding is not None
@@ -1533,7 +1587,9 @@ class SequencePathModel(nn.Module):
                     )
                 )
             )
-            future_states, _ = self.future_decoder(decoder_inputs, encoder_hidden)
+            future_states, _ = self._run_gru(
+                self.future_decoder, decoder_inputs, encoder_hidden
+            )
             raw_geometry = self.price_geometry_head(self.dropout(future_states))
             future_geometry, future_path = _structured_geometry_to_ohlc_torch(raw_geometry)
             return {
@@ -4772,6 +4828,7 @@ class TrainConfig:
     utility_curve_loss_weight: float = 0.0
     turnover_level_loss_weight: float = 0.0
     turnover_delta_loss_weight: float = 0.0
+    activation_checkpoint_profile: str = ACTIVATION_CHECKPOINT_PROFILE_NONE
 
 
 def _resolved_training_config(config: TrainConfig, *, evaluation_mode: str) -> dict[str, Any]:
@@ -5351,6 +5408,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         symbol_count=int(train_ds.symbol_count),
         symbol_embedding_dim=int(config.symbol_embedding_dim),
         richer_path_dim=int(train_ds.richer_path_dim),
+        activation_checkpoint_profile=str(config.activation_checkpoint_profile),
     ).to(device)
     model.residual_weight = float(config.residual_score_weight)
     uses_direct_value = bool(getattr(model, "uses_direct_value", False))
@@ -6076,6 +6134,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "hidden_dim": int(config.hidden_dim),
             "layers": int(config.layers),
             "dropout": float(config.dropout),
+            "activation_checkpoint_profile": str(config.activation_checkpoint_profile),
             "uses_derived_path_value": bool(getattr(model, "uses_derived_path_value", False)),
             "uses_direct_value": bool(getattr(model, "uses_direct_value", False)),
             "uses_symbol_embedding": bool(getattr(model, "uses_symbol_embedding", False)),
@@ -6325,6 +6384,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     train.add_argument("--rank-batch-size", type=int, default=512)
     train.add_argument("--rank-interval", type=int, default=4, help="Run one separated rank step after this many path steps.")
+    train.add_argument(
+        "--activation-checkpoint-profile",
+        default=ACTIVATION_CHECKPOINT_PROFILE_NONE,
+        choices=ACTIVATION_CHECKPOINT_PROFILES,
+        help="Optional GRU activation checkpointing used by true large-batch probes.",
+    )
     train.add_argument("--prefetch-batches", type=int, default=1, choices=(0, 1))
     train.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     train.add_argument("--amp", dest="amp", action="store_true", default=True)
@@ -6442,6 +6507,7 @@ def main(argv: list[str] | None = None) -> int:
         minimum_complete_epochs=int(args.min_complete_epochs),
         development_contract=(Path(args.development_contract) if args.development_contract else None),
         development_fixed_final_epoch=bool(args.development_fixed_final_epoch),
+        activation_checkpoint_profile=str(args.activation_checkpoint_profile),
     )
     result = train_sequence_path_model(cfg)
     print(json.dumps(result, ensure_ascii=False, indent=2, default=_json_default) if bool(args.json) else result)
