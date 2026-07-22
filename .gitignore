@@ -12,6 +12,7 @@ node_modules/
 *.onnx
 
 brain/output/
+outputs/
 
 quant_data_platform/data/*
 !quant_data_platform/data/.gitkeep
