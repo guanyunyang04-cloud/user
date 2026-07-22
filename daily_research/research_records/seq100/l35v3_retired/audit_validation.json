@@ -1,0 +1,187 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "generated_at": "2026-07-22T00:19:20+08:00",
+  "scope": "read_only_derived_audit_no_training",
+  "checks": [
+    {
+      "check": "exit_share_sum_2023",
+      "status": "passed",
+      "observed": 0.9999999999999998,
+      "expected": 1.0
+    },
+    {
+      "check": "candidate_count_2023",
+      "status": "passed",
+      "observed": 703468,
+      "expected": 703468
+    },
+    {
+      "check": "d58_count_match_2023",
+      "status": "passed",
+      "observed": 176,
+      "expected": 176
+    },
+    {
+      "check": "top100_all_d2_2023",
+      "status": "passed",
+      "observed": 0,
+      "expected": 0
+    },
+    {
+      "check": "exit_share_sum_2024",
+      "status": "passed",
+      "observed": 0.9999999999999997,
+      "expected": 1.0
+    },
+    {
+      "check": "candidate_count_2024",
+      "status": "passed",
+      "observed": 715878,
+      "expected": 715878
+    },
+    {
+      "check": "d58_count_match_2024",
+      "status": "passed",
+      "observed": 136092,
+      "expected": 136092
+    },
+    {
+      "check": "top100_all_d2_2024",
+      "status": "passed",
+      "observed": 0,
+      "expected": 0
+    },
+    {
+      "check": "exit_share_sum_2025",
+      "status": "passed",
+      "observed": 0.9999999999999999,
+      "expected": 1.0
+    },
+    {
+      "check": "candidate_count_2025",
+      "status": "passed",
+      "observed": 724125,
+      "expected": 724125
+    },
+    {
+      "check": "d58_count_match_2025",
+      "status": "passed",
+      "observed": 197342,
+      "expected": 197342
+    },
+    {
+      "check": "top100_all_d2_2025",
+      "status": "passed",
+      "observed": 0,
+      "expected": 0
+    },
+    {
+      "check": "d58_account_compounding_top1",
+      "status": "passed",
+      "observed": 1.4012133087246443,
+      "expected": 1.4012133087246434
+    },
+    {
+      "check": "d58_daily_year_coverage_top1",
+      "status": "passed",
+      "observed": [
+        242,
+        242,
+        243
+      ],
+      "expected": [
+        242,
+        242,
+        243
+      ]
+    },
+    {
+      "check": "d58_account_compounding_top2",
+      "status": "passed",
+      "observed": 1.011383153699116,
+      "expected": 1.011383153699116
+    },
+    {
+      "check": "d58_daily_year_coverage_top2",
+      "status": "passed",
+      "observed": [
+        242,
+        242,
+        243
+      ],
+      "expected": [
+        242,
+        242,
+        243
+      ]
+    },
+    {
+      "check": "d58_account_compounding_top3",
+      "status": "passed",
+      "observed": 0.07138843113535875,
+      "expected": 0.0713884311353587
+    },
+    {
+      "check": "d58_daily_year_coverage_top3",
+      "status": "passed",
+      "observed": [
+        242,
+        242,
+        243
+      ],
+      "expected": [
+        242,
+        242,
+        243
+      ]
+    },
+    {
+      "check": "d58_within_group_row_count",
+      "status": "passed",
+      "observed": 3,
+      "expected": 3
+    },
+    {
+      "check": "d58_top2_realized_value_delta_positive_all_years",
+      "status": "passed",
+      "observed": [
+        0.0634756655018499,
+        0.038005937307614,
+        0.0633062337666577
+      ],
+      "expected": "all_positive"
+    }
+  ],
+  "source_row_counts": {
+    "audit_account_annual.csv": 3,
+    "audit_exact_day_shortlist.csv": 12,
+    "audit_exit_composition.csv": 3,
+    "audit_ic_comparison.csv": 3,
+    "audit_non_d2_rank_position.csv": 3,
+    "audit_strategy_comparison.csv": 8,
+    "audit_unit_time_comparison.csv": 3,
+    "d58_account_annual_metrics.csv": 18,
+    "d58_account_metrics.csv": 6,
+    "d58_unit_time_daily.csv": 2181,
+    "d58_unit_time_metrics.csv": 9,
+    "daily_selection_metrics.csv": 6543,
+    "exit_distribution.csv": 54,
+    "exit_group_metrics.csv": 24,
+    "filtered_account_annual_metrics.csv": 24,
+    "filtered_account_comparison.csv": 14,
+    "filtered_account_metrics.csv": 8,
+    "filtered_unit_time_exact.csv": 27,
+    "filtered_unit_time_exact_daily.csv": 6543,
+    "ic_scope_diagnostics.csv": 45,
+    "non_d2_exit_day_metrics.csv": 82,
+    "rank_band_metrics.csv": 27,
+    "selection_policy_metrics.csv": 27,
+    "d58_within_group_ic.csv": 3
+  },
+  "notes": [
+    "All account headline metrics use double_slippage.",
+    "D58 is an ex-post diagnostic selected after reviewing exact predicted-exit groups.",
+    "No checkpoint, prediction, QDP, base pack, source code, or live state was modified."
+  ]
+}

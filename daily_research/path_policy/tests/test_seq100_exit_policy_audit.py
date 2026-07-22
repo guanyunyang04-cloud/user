@@ -16,9 +16,6 @@ from daily_research.path_policy.seq100_exit_policy_audit import (
     oracle_executable_outcome_batch,
     resolve_planned_exit_batch,
 )
-from daily_research.path_policy.seq100_exit_policy_price_basis_diagnostic import (
-    _rank_bucket,
-)
 
 
 def _manifest() -> dict:
@@ -77,23 +74,6 @@ def _date_values() -> np.ndarray:
         ],
         dtype=object,
     )
-
-
-def test_rank_bucket_contract() -> None:
-    assert [_rank_bucket(rank) for rank in range(1, 11)] == [
-        "rank1",
-        "rank2_3",
-        "rank2_3",
-        "rank4_5",
-        "rank4_5",
-        "rank6_10",
-        "rank6_10",
-        "rank6_10",
-        "rank6_10",
-        "rank6_10",
-    ]
-    with pytest.raises(ValueError):
-        _rank_bucket(11)
 
 
 @pytest.mark.parametrize("slippage_multiplier", [1.0, 2.0])

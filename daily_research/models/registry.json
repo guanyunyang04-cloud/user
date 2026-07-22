@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "registry_id": "seq100_model_registry_v1",
+  "selected_research_baseline": "structured_joint_turnover_180x35_v2",
+  "selection_scope": "2023-2025 double-slippage continuous-account evidence; 2026 is confirmation only",
+  "bundles": [
+    {
+      "model_id": "legal_flat_baseline",
+      "year": 2023,
+      "lookback_days": 100,
+      "input_dim": 32,
+      "checkpoint": "daily_research/models/seq100/legal_flat_baseline/2023/checkpoint.pt",
+      "checkpoint_sha256": "3176128988dadfaca1e16c5a5dda70ffba29b53d996db5a19fee4b12a1783c72",
+      "training_summary": "daily_research/models/seq100/legal_flat_baseline/2023/training_summary.json",
+      "training_summary_sha256": "9eff91d95b75d5fa29e7cf683fa0799833a12f4bf2a3acd3a0307f4c1f25c573"
+    },
+    {
+      "model_id": "legal_flat_baseline",
+      "year": 2024,
+      "lookback_days": 100,
+      "input_dim": 32,
+      "checkpoint": "daily_research/models/seq100/legal_flat_baseline/2024/checkpoint.pt",
+      "checkpoint_sha256": "d068ee7ba5d329c4ad0f22f651e54441841c81ea839d2f3a8618605a3097a3d9",
+      "training_summary": "daily_research/models/seq100/legal_flat_baseline/2024/training_summary.json",
+      "training_summary_sha256": "2e2f6020414891d6756cb397a80f9b7e106cb540855972e13c0330b8142182a7"
+    },
+    {
+      "model_id": "legal_flat_baseline",
+      "year": 2025,
+      "lookback_days": 100,
+      "input_dim": 32,
+      "checkpoint": "daily_research/models/seq100/legal_flat_baseline/2025/checkpoint.pt",
+      "checkpoint_sha256": "04e875086a4d33b7ff1143d24d6ce639c0bfa731cca3ea160e64dc995d908ef0",
+      "training_summary": "daily_research/models/seq100/legal_flat_baseline/2025/training_summary.json",
+      "training_summary_sha256": "c17837dbde6566dbbe18bd3403dd88a328497ca10a9b6474f490f9bf9db44aff"
+    },
+    {
+      "model_id": "legal_flat_baseline",
+      "year": 2026,
+      "lookback_days": 100,
+      "input_dim": 32,
+      "checkpoint": "daily_research/models/seq100/legal_flat_baseline/2026/checkpoint.pt",
+      "checkpoint_sha256": "9e55a28ec0426364c8b00e4564d653f9a80184081860fb544efdd9c1a3cd9f5c",
+      "training_summary": "daily_research/models/seq100/legal_flat_baseline/2026/training_summary.json",
+      "training_summary_sha256": "c62c59835f0c2dfa2a604962bccea01542b1e235731fcf504500bd90a48d32a0"
+    },
+    {
+      "model_id": "structured_joint_turnover_100x32",
+      "year": 2023,
+      "lookback_days": 100,
+      "input_dim": 32,
+      "checkpoint": "daily_research/models/seq100/structured_joint_turnover_100x32/2023/checkpoint.pt",
+      "checkpoint_sha256": "79a25d1fae4a5c0634e5b67127a5396bdda57770299e09bdaf0158fe05e246bc",
+      "training_summary": "daily_research/models/seq100/structured_joint_turnover_100x32/2023/training_summary.json",
+      "training_summary_sha256": "19e5d6c8a43f62e1a72a222820059c1fbbb28fb57015b0bdad31a0ea434aef71"
+    },
+    {
+      "model_id": "structured_joint_turnover_100x32",
+      "year": 2024,
+      "lookback_days": 100,
+      "input_dim": 32,
+      "checkpoint": "daily_research/models/seq100/structured_joint_turnover_100x32/2024/checkpoint.pt",
+      "checkpoint_sha256": "5283e91e617e54088ce6e7f35ba8499767897efad92b2702092c699fbb33bede",
+      "training_summary": "daily_research/models/seq100/structured_joint_turnover_100x32/2024/training_summary.json",
+      "training_summary_sha256": "b5b9487d2664888452f358eafa890d24a0936f27661b2d50602bb4f1d50dcd12"
+    },
+    {
+      "model_id": "structured_joint_turnover_100x32",
+      "year": 2025,
+      "lookback_days": 100,
+      "input_dim": 32,
+      "checkpoint": "daily_research/models/seq100/structured_joint_turnover_100x32/2025/checkpoint.pt",
+      "checkpoint_sha256": "9498081cfdbc6b69c3488c33a81ca2a5c52a6b85ee0e4bf8efac785ab43a77d2",
+      "training_summary": "daily_research/models/seq100/structured_joint_turnover_100x32/2025/training_summary.json",
+      "training_summary_sha256": "42f72c9a34489b95d64ed418538009ff567e667f5673e7e8ae206df1b4c7bfb9"
+    },
+    {
+      "model_id": "structured_joint_turnover_100x32",
+      "year": 2026,
+      "lookback_days": 100,
+      "input_dim": 32,
+      "checkpoint": "daily_research/models/seq100/structured_joint_turnover_100x32/2026/checkpoint.pt",
+      "checkpoint_sha256": "6fe5e8c4e470774aeeed75f03601c25c5c661f549c906e84de66420f4151a3d5",
+      "training_summary": "daily_research/models/seq100/structured_joint_turnover_100x32/2026/training_summary.json",
+      "training_summary_sha256": "02d94757f82017450ca3b98c0b6a3e6d5683a66cde1fcb6aaabee12d09528aa7"
+    },
+    {
+      "model_id": "structured_joint_turnover_180x35_v2",
+      "year": 2023,
+      "lookback_days": 180,
+      "input_dim": 35,
+      "checkpoint": "daily_research/models/seq100/structured_joint_turnover_180x35_v2/2023/checkpoint.pt",
+      "checkpoint_sha256": "b293ada57c461c898e9a3639c741cab8017c34dc933e5bda3ce36616cd754f58",
+      "training_summary": "daily_research/models/seq100/structured_joint_turnover_180x35_v2/2023/training_summary.json",
+      "training_summary_sha256": "48d42d65cee50f91290e3582f6a512cc0c0d97eead72431000773029cf232092"
+    },
+    {
+      "model_id": "structured_joint_turnover_180x35_v2",
+      "year": 2024,
+      "lookback_days": 180,
+      "input_dim": 35,
+      "checkpoint": "daily_research/models/seq100/structured_joint_turnover_180x35_v2/2024/checkpoint.pt",
+      "checkpoint_sha256": "904e4179d06820cadd04e819fddc3f5115e58b55e8ecca3b5c6b32f848516ddf",
+      "training_summary": "daily_research/models/seq100/structured_joint_turnover_180x35_v2/2024/training_summary.json",
+      "training_summary_sha256": "34071aa7b870ce9296e76613df7e9d2305b62e9fa429fe0129adaef1ad31596a"
+    },
+    {
+      "model_id": "structured_joint_turnover_180x35_v2",
+      "year": 2025,
+      "lookback_days": 180,
+      "input_dim": 35,
+      "checkpoint": "daily_research/models/seq100/structured_joint_turnover_180x35_v2/2025/checkpoint.pt",
+      "checkpoint_sha256": "f06d2cad8430bbfe44a175b569d15e4103e9837a1c4c8e015553ebe60ce782a2",
+      "training_summary": "daily_research/models/seq100/structured_joint_turnover_180x35_v2/2025/training_summary.json",
+      "training_summary_sha256": "aa581220d027db024fbbb8f6094b079caa2c01dd5cf1a00497780aec147e4f8e"
+    },
+    {
+      "model_id": "structured_joint_turnover_180x35_v2",
+      "year": 2026,
+      "lookback_days": 180,
+      "input_dim": 35,
+      "checkpoint": "daily_research/models/seq100/structured_joint_turnover_180x35_v2/2026/checkpoint.pt",
+      "checkpoint_sha256": "faacdfba49ae6d17f4f36806f4ef35e2097cd090ca8d2c5c74bdabf27aeb6cfd",
+      "training_summary": "daily_research/models/seq100/structured_joint_turnover_180x35_v2/2026/training_summary.json",
+      "training_summary_sha256": "18d2ec13154b14de26708d3dcc86a5eebede64e6e9077be8271cc9dea8e4eab5"
+    }
+  ]
+}

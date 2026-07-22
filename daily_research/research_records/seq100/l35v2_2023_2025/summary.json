@@ -1,0 +1,1074 @@
+{
+  "schema_version": 1,
+  "artifact_type": "seq100_structured_capital_speed_pre_stage3_summary",
+  "status": "completed",
+  "created_at": "2026-07-20T17:12:05+08:00",
+  "study_id": "seq100_structured_input_ablation_rolling_2023_2025_v1",
+  "selection_years": [
+    2023,
+    2024,
+    2025
+  ],
+  "selection_year_role": "symmetric_and_simultaneous",
+  "selected_complete_model": {
+    "source": "ablation_run",
+    "origin_stage": 2,
+    "variant": {
+      "variant_id": "lookback180_turnover",
+      "lookback_days": 180,
+      "turnover": true,
+      "intraday": false,
+      "input_channel_profile": "daily_only_turnover",
+      "input_dim": 35
+    }
+  },
+  "stage1": {
+    "stage": 1,
+    "model_ids": [
+      "lookback100_daily",
+      "lookback180_daily"
+    ],
+    "selected_model_id": "lookback180_daily",
+    "global_growth_winner": {
+      "model_id": "lookback180_daily",
+      "top_k": 1,
+      "policy_name": "fixed_d35",
+      "policy_kind": "fixed",
+      "fixed_day": 35,
+      "slot_count": 1,
+      "cost_scenario": "base",
+      "annualized_log_growth": 1.1898413096362899,
+      "signal_period_cagr_trading_days": 2.286559620657262,
+      "signal_period_total_return": 29.956956711279528,
+      "liquidated_ending_equity_cny": 34314771.44583956,
+      "signal_period_maximum_drawdown": -0.4140874358632147,
+      "worst_calendar_year_return": 1.3092629492689087,
+      "mean_occupied_sessions": 35.0,
+      "mean_signal_capital_utilization": 0.9710366300117999,
+      "skipped_no_slot_signal_count": 646.0,
+      "closed_trade_count": 21.0,
+      "net_pnl_per_deployed_capital_session": 0.004820577420242423
+    },
+    "global_growth_winner_stress": {
+      "model_id": "lookback180_daily",
+      "top_k": 1,
+      "policy_name": "fixed_d35",
+      "policy_kind": "fixed",
+      "fixed_day": 35,
+      "slot_count": 1,
+      "cost_scenario": "double_slippage",
+      "annualized_log_growth": 1.1799030794354999,
+      "signal_period_cagr_trading_days": 2.2540588023894763,
+      "signal_period_total_return": 29.081992625003128,
+      "liquidated_ending_equity_cny": 33321562.861383904,
+      "signal_period_maximum_drawdown": -0.4173756455921175,
+      "worst_calendar_year_return": 1.2867382625570434,
+      "mean_occupied_sessions": 35.0,
+      "mean_signal_capital_utilization": 0.9710891788403803,
+      "skipped_no_slot_signal_count": 646.0,
+      "closed_trade_count": 21.0,
+      "net_pnl_per_deployed_capital_session": 0.004779280179027467
+    },
+    "global_annual": [
+      {
+        "cost_scenario": "base",
+        "year": 2023,
+        "net_return": 2.8424316095385542,
+        "maximum_drawdown": -0.2386754303396044,
+        "mean_capital_utilization": 0.9708504293348478
+      },
+      {
+        "cost_scenario": "base",
+        "year": 2024,
+        "net_return": 2.4888213062397617,
+        "maximum_drawdown": -0.3659308802895761,
+        "mean_capital_utilization": 0.9709801600495716
+      },
+      {
+        "cost_scenario": "base",
+        "year": 2025,
+        "net_return": 1.3092629492689087,
+        "maximum_drawdown": -0.1725343107856561,
+        "mean_capital_utilization": 0.9712783020063742
+      },
+      {
+        "cost_scenario": "double_slippage",
+        "year": 2023,
+        "net_return": 2.808010323442089,
+        "maximum_drawdown": -0.2392493548149249,
+        "mean_capital_utilization": 0.9709857122189388
+      },
+      {
+        "cost_scenario": "double_slippage",
+        "year": 2024,
+        "net_return": 2.454554310259203,
+        "maximum_drawdown": -0.36948531235559,
+        "mean_capital_utilization": 0.9710041393908108
+      },
+      {
+        "cost_scenario": "double_slippage",
+        "year": 2025,
+        "net_return": 1.2867382625570434,
+        "maximum_drawdown": -0.1736957905035013,
+        "mean_capital_utilization": 0.971276909166243
+      }
+    ],
+    "global_neighboring_fixed_days": [
+      {
+        "fixed_day": 32,
+        "cagr": 0.7104613816667615,
+        "maximum_drawdown": -0.5577445095405837,
+        "closed_trade_count": 23,
+        "net_pnl_per_deployed_capital_session": 0.0035295165449316
+      },
+      {
+        "fixed_day": 33,
+        "cagr": 0.2058749499168958,
+        "maximum_drawdown": -0.718190420336766,
+        "closed_trade_count": 23,
+        "net_pnl_per_deployed_capital_session": 0.0011636029246551
+      },
+      {
+        "fixed_day": 34,
+        "cagr": 1.5817291226592989,
+        "maximum_drawdown": -0.3545057309020513,
+        "closed_trade_count": 22,
+        "net_pnl_per_deployed_capital_session": 0.0040621450851283
+      },
+      {
+        "fixed_day": 35,
+        "cagr": 2.286559620657262,
+        "maximum_drawdown": -0.4140874358632147,
+        "closed_trade_count": 21,
+        "net_pnl_per_deployed_capital_session": 0.0048205774202424
+      },
+      {
+        "fixed_day": 36,
+        "cagr": 0.5668675679960444,
+        "maximum_drawdown": -0.4213635135161336,
+        "closed_trade_count": 21,
+        "net_pnl_per_deployed_capital_session": 0.0015863836688082
+      },
+      {
+        "fixed_day": 37,
+        "cagr": 0.9779178150435384,
+        "maximum_drawdown": -0.6785468105559433,
+        "closed_trade_count": 20,
+        "net_pnl_per_deployed_capital_session": 0.0049678926805515
+      },
+      {
+        "fixed_day": 38,
+        "cagr": 0.1989559247916439,
+        "maximum_drawdown": -0.5623606059026007,
+        "closed_trade_count": 20,
+        "net_pnl_per_deployed_capital_session": 0.0005905278761748
+      }
+    ],
+    "top3_slots3_winner": {
+      "model_id": "lookback180_daily",
+      "top_k": 3,
+      "policy_name": "fixed_d8",
+      "policy_kind": "fixed",
+      "fixed_day": 8,
+      "slot_count": 3,
+      "cost_scenario": "base",
+      "annualized_log_growth": 0.9375620265799448,
+      "signal_period_cagr_trading_days": 1.5537478533959033,
+      "signal_period_total_return": 13.95120706929587,
+      "liquidated_ending_equity_cny": 16648673.678437453,
+      "signal_period_maximum_drawdown": -0.4005163396779411,
+      "worst_calendar_year_return": 0.3010533089372285,
+      "mean_occupied_sessions": 8.010989010989011,
+      "mean_signal_capital_utilization": 0.868453380876861,
+      "skipped_no_slot_signal_count": 1221.0,
+      "closed_trade_count": 273.0,
+      "net_pnl_per_deployed_capital_session": 0.004733057203342574
+    },
+    "top3_slots3_annual": [
+      {
+        "cost_scenario": "base",
+        "year": 2023,
+        "net_return": 0.3010533089372285,
+        "maximum_drawdown": -0.2092890980387198,
+        "mean_capital_utilization": 0.8709026860733831
+      },
+      {
+        "cost_scenario": "base",
+        "year": 2024,
+        "net_return": 2.418892986145201,
+        "maximum_drawdown": -0.345012218164671,
+        "mean_capital_utilization": 0.8658304106158883
+      },
+      {
+        "cost_scenario": "base",
+        "year": 2025,
+        "net_return": 2.361210081819745,
+        "maximum_drawdown": -0.1998263784695487,
+        "mean_capital_utilization": 0.8686263312702642
+      },
+      {
+        "cost_scenario": "double_slippage",
+        "year": 2023,
+        "net_return": 0.2468672048129581,
+        "maximum_drawdown": -0.2185843489797831,
+        "mean_capital_utilization": 0.8710540768704995
+      },
+      {
+        "cost_scenario": "double_slippage",
+        "year": 2024,
+        "net_return": 2.27797393878796,
+        "maximum_drawdown": -0.3471057672025355,
+        "mean_capital_utilization": 0.8658120854568926
+      },
+      {
+        "cost_scenario": "double_slippage",
+        "year": 2025,
+        "net_return": 2.2238716017215907,
+        "maximum_drawdown": -0.2009345230023211,
+        "mean_capital_utilization": 0.8686275870202215
+      }
+    ],
+    "top3_slots3_neighboring_fixed_days": [
+      {
+        "fixed_day": 5,
+        "cagr": 0.8421237192480444,
+        "maximum_drawdown": -0.4176938993906961,
+        "closed_trade_count": 428,
+        "net_pnl_per_deployed_capital_session": 0.0027497946090268
+      },
+      {
+        "fixed_day": 6,
+        "cagr": 1.186533970564608,
+        "maximum_drawdown": -0.3337722251485453,
+        "closed_trade_count": 358,
+        "net_pnl_per_deployed_capital_session": 0.0038557117357899
+      },
+      {
+        "fixed_day": 7,
+        "cagr": 1.003117745586542,
+        "maximum_drawdown": -0.3939740727127016,
+        "closed_trade_count": 312,
+        "net_pnl_per_deployed_capital_session": 0.0034896372500391
+      },
+      {
+        "fixed_day": 8,
+        "cagr": 1.5537478533959033,
+        "maximum_drawdown": -0.4005163396779411,
+        "closed_trade_count": 273,
+        "net_pnl_per_deployed_capital_session": 0.0047330572033425
+      },
+      {
+        "fixed_day": 9,
+        "cagr": 0.9670293928853908,
+        "maximum_drawdown": -0.4396575864919714,
+        "closed_trade_count": 242,
+        "net_pnl_per_deployed_capital_session": 0.0028683476935568
+      },
+      {
+        "fixed_day": 10,
+        "cagr": 0.5869414220377491,
+        "maximum_drawdown": -0.468609052657197,
+        "closed_trade_count": 219,
+        "net_pnl_per_deployed_capital_session": 0.0022901011329784
+      },
+      {
+        "fixed_day": 11,
+        "cagr": 0.5978548033311417,
+        "maximum_drawdown": -0.483542993663866,
+        "closed_trade_count": 200,
+        "net_pnl_per_deployed_capital_session": 0.0026009948798074
+      }
+    ],
+    "winner_by_topk_slot": [
+      {
+        "model_id": "lookback180_daily",
+        "top_k": 1,
+        "policy_name": "fixed_d35",
+        "policy_kind": "fixed",
+        "fixed_day": 35,
+        "slot_count": 1,
+        "cost_scenario": "base",
+        "annualized_log_growth": 1.1898413096362899,
+        "signal_period_cagr_trading_days": 2.286559620657262,
+        "signal_period_total_return": 29.956956711279528,
+        "liquidated_ending_equity_cny": 34314771.44583956,
+        "signal_period_maximum_drawdown": -0.4140874358632147,
+        "worst_calendar_year_return": 1.3092629492689087,
+        "mean_occupied_sessions": 35.0,
+        "mean_signal_capital_utilization": 0.9710366300117999,
+        "skipped_no_slot_signal_count": 646.0,
+        "closed_trade_count": 21.0,
+        "net_pnl_per_deployed_capital_session": 0.004820577420242423
+      },
+      {
+        "model_id": "lookback180_daily",
+        "top_k": 1,
+        "policy_name": "fixed_d8",
+        "policy_kind": "fixed",
+        "fixed_day": 8,
+        "slot_count": 3,
+        "cost_scenario": "base",
+        "annualized_log_growth": 0.8291557907139693,
+        "signal_period_cagr_trading_days": 1.2913835162697915,
+        "signal_period_total_return": 9.935874791970482,
+        "liquidated_ending_equity_cny": 11267717.988095235,
+        "signal_period_maximum_drawdown": -0.3829637817682022,
+        "worst_calendar_year_return": 0.23174175316767487,
+        "mean_occupied_sessions": 8.171945701357465,
+        "mean_signal_capital_utilization": 0.7167339826473698,
+        "skipped_no_slot_signal_count": 148.0,
+        "closed_trade_count": 221.0,
+        "net_pnl_per_deployed_capital_session": 0.004355268196752968
+      },
+      {
+        "model_id": "lookback180_daily",
+        "top_k": 1,
+        "policy_name": "fixed_d46",
+        "policy_kind": "fixed",
+        "fixed_day": 46,
+        "slot_count": 6,
+        "cost_scenario": "base",
+        "annualized_log_growth": 0.6455193710229569,
+        "signal_period_cagr_trading_days": 0.9069772008160042,
+        "signal_period_total_return": 5.438349083157594,
+        "liquidated_ending_equity_cny": 6991361.467813132,
+        "signal_period_maximum_drawdown": -0.357110910856559,
+        "worst_calendar_year_return": 0.41225239003066294,
+        "mean_occupied_sessions": 46.02105263157895,
+        "mean_signal_capital_utilization": 0.9133706520593178,
+        "skipped_no_slot_signal_count": 324.0,
+        "closed_trade_count": 95.0,
+        "net_pnl_per_deployed_capital_session": 0.003703529462105067
+      },
+      {
+        "model_id": "lookback180_daily",
+        "top_k": 1,
+        "policy_name": "fixed_d46",
+        "policy_kind": "fixed",
+        "fixed_day": 46,
+        "slot_count": 12,
+        "cost_scenario": "base",
+        "annualized_log_growth": 0.519917984375244,
+        "signal_period_cagr_trading_days": 0.681889702807317,
+        "signal_period_total_return": 3.4813400571118027,
+        "liquidated_ending_equity_cny": 4688238.094716755,
+        "signal_period_maximum_drawdown": -0.31545500755069944,
+        "worst_calendar_year_return": 0.3273021553782658,
+        "mean_occupied_sessions": 46.01169590643275,
+        "mean_signal_capital_utilization": 0.8382295583280165,
+        "skipped_no_slot_signal_count": 107.0,
+        "closed_trade_count": 171.0,
+        "net_pnl_per_deployed_capital_session": 0.0031874479151347626
+      },
+      {
+        "model_id": "lookback180_daily",
+        "top_k": 1,
+        "policy_name": "fixed_d60",
+        "policy_kind": "fixed",
+        "fixed_day": 60,
+        "slot_count": 24,
+        "cost_scenario": "base",
+        "annualized_log_growth": 0.3443605202909188,
+        "signal_period_cagr_trading_days": 0.41108726940862733,
+        "signal_period_total_return": 1.7005427486821105,
+        "liquidated_ending_equity_cny": 2822878.632987553,
+        "signal_period_maximum_drawdown": -0.2568958779336866,
+        "worst_calendar_year_return": 0.2210325878399606,
+        "mean_occupied_sessions": 60.07070707070707,
+        "mean_signal_capital_utilization": 0.652414952257147,
+        "skipped_no_slot_signal_count": 12.0,
+        "closed_trade_count": 198.0,
+        "net_pnl_per_deployed_capital_session": 0.002653549536251197
+      },
+      {
+        "model_id": "lookback180_daily",
+        "top_k": 1,
+        "policy_name": "fixed_d60",
+        "policy_kind": "fixed",
+        "fixed_day": 60,
+        "slot_count": 48,
+        "cost_scenario": "base",
+        "annualized_log_growth": 0.18125352266972194,
+        "signal_period_cagr_trading_days": 0.1987190432254595,
+        "signal_period_total_return": 0.6869160302108344,
+        "liquidated_ending_equity_cny": 1726489.175503177,
+        "signal_period_maximum_drawdown": -0.1295753487882778,
+        "worst_calendar_year_return": 0.10672190396773207,
+        "mean_occupied_sessions": 60.06930693069307,
+        "mean_signal_capital_utilization": 0.33686652834543396,
+        "skipped_no_slot_signal_count": 0.0,
+        "closed_trade_count": 202.0,
+        "net_pnl_per_deployed_capital_session": 0.0024780062369670537
+      },
+      {
+        "model_id": "lookback180_daily",
+        "top_k": 3,
+        "policy_name": "fixed_d8",
+        "policy_kind": "fixed",
+        "fixed_day": 8,
+        "slot_count": 3,
+        "cost_scenario": "base",
+        "annualized_log_growth": 0.9375620265799448,
+        "signal_period_cagr_trading_days": 1.5537478533959033,
+        "signal_period_total_return": 13.95120706929587,
+        "liquidated_ending_equity_cny": 16648673.678437453,
+        "signal_period_maximum_drawdown": -0.4005163396779411,
+        "worst_calendar_year_return": 0.3010533089372285,
+        "mean_occupied_sessions": 8.010989010989011,
+        "mean_signal_capital_utilization": 0.868453380876861,
+        "skipped_no_slot_signal_count": 1221.0,
+        "closed_trade_count": 273.0,
+        "net_pnl_per_deployed_capital_session": 0.004733057203342574
+      },
+      {
+        "model_id": "lookback100_daily",
+        "top_k": 3,
+        "policy_name": "fixed_d19",
+        "policy_kind": "fixed",
+        "fixed_day": 19,
+        "slot_count": 6,
+        "cost_scenario": "base",
+        "annualized_log_growth": 0.7429641911357058,
+        "signal_period_cagr_trading_days": 1.1021574849665585,
+        "signal_period_total_return": 7.528322864175838,
+        "liquidated_ending_equity_cny": 8236082.305888945,
+        "signal_period_maximum_drawdown": -0.24572528482949252,
+        "worst_calendar_year_return": 0.4048358916848189,
+        "mean_occupied_sessions": 19.05217391304348,
+        "mean_signal_capital_utilization": 0.9244135411458024,
+        "skipped_no_slot_signal_count": 1188.0,
+        "closed_trade_count": 230.0,
+        "net_pnl_per_deployed_capital_session": 0.0030625573627654115
+      },
+      {
+        "model_id": "lookback100_daily",
+        "top_k": 3,
+        "policy_name": "fixed_d34",
+        "policy_kind": "fixed",
+        "fixed_day": 34,
+        "slot_count": 12,
+        "cost_scenario": "base",
+        "annualized_log_growth": 0.4944057552456053,
+        "signal_period_cagr_trading_days": 0.6395236711784942,
+        "signal_period_total_return": 3.163355523385391,
+        "liquidated_ending_equity_cny": 4243682.8335281005,
+        "signal_period_maximum_drawdown": -0.2566574228314875,
+        "worst_calendar_year_return": 0.3217841396791574,
+        "mean_occupied_sessions": 34.03112840466926,
+        "mean_signal_capital_utilization": 0.9419474510538647,
+        "skipped_no_slot_signal_count": 926.0,
+        "closed_trade_count": 257.0,
+        "net_pnl_per_deployed_capital_session": 0.002253057406521057
+      },
+      {
+        "model_id": "lookback180_daily",
+        "top_k": 3,
+        "policy_name": "fixed_d60",
+        "policy_kind": "fixed",
+        "fixed_day": 60,
+        "slot_count": 24,
+        "cost_scenario": "base",
+        "annualized_log_growth": 0.3816931308451245,
+        "signal_period_cagr_trading_days": 0.4647625257201682,
+        "signal_period_total_return": 2.00763600377652,
+        "liquidated_ending_equity_cny": 3097937.3547531567,
+        "signal_period_maximum_drawdown": -0.358689090903469,
+        "worst_calendar_year_return": 0.2010232934472007,
+        "mean_occupied_sessions": 60.01384083044983,
+        "mean_signal_capital_utilization": 0.9214100011799381,
+        "skipped_no_slot_signal_count": 560.0,
+        "closed_trade_count": 289.0,
+        "net_pnl_per_deployed_capital_session": 0.0021259681737466948
+      },
+      {
+        "model_id": "lookback100_daily",
+        "top_k": 3,
+        "policy_name": "fixed_d55",
+        "policy_kind": "fixed",
+        "fixed_day": 55,
+        "slot_count": 48,
+        "cost_scenario": "base",
+        "annualized_log_growth": 0.25135084547369296,
+        "signal_period_cagr_trading_days": 0.28576110867187254,
+        "signal_period_total_return": 1.064993834536244,
+        "liquidated_ending_equity_cny": 2153293.9089384656,
+        "signal_period_maximum_drawdown": -0.22812283178390924,
+        "worst_calendar_year_return": 0.14236638651569922,
+        "mean_occupied_sessions": 55.03578947368421,
+        "mean_signal_capital_utilization": 0.7017543987274443,
+        "skipped_no_slot_signal_count": 41.0,
+        "closed_trade_count": 475.0,
+        "net_pnl_per_deployed_capital_session": 0.001662429911470392
+      }
+    ],
+    "own_exit_win_count": 2,
+    "fixed_exit_win_count": 20,
+    "own_exit_comparison_count": 22
+  },
+  "stage2": {
+    "stage": 2,
+    "model_ids": [
+      "lookback180_daily",
+      "lookback180_turnover"
+    ],
+    "selected_model_id": "lookback180_turnover",
+    "global_growth_winner": {
+      "model_id": "lookback180_turnover",
+      "top_k": 1,
+      "policy_name": "fixed_d7",
+      "policy_kind": "fixed",
+      "fixed_day": 7,
+      "slot_count": 1,
+      "cost_scenario": "base",
+      "annualized_log_growth": 1.4255222374275829,
+      "signal_period_cagr_trading_days": 3.1600297988290764,
+      "signal_period_total_return": 60.100406445609956,
+      "liquidated_ending_equity_cny": 74781812.81429942,
+      "signal_period_maximum_drawdown": -0.46256777145536754,
+      "worst_calendar_year_return": 1.5292895877081474,
+      "mean_occupied_sessions": 7.0673076923076925,
+      "mean_signal_capital_utilization": 0.8569634638445084,
+      "skipped_no_slot_signal_count": 456.0,
+      "closed_trade_count": 104.0,
+      "net_pnl_per_deployed_capital_session": 0.005319209004934039
+    },
+    "global_growth_winner_stress": {
+      "model_id": "lookback180_turnover",
+      "top_k": 1,
+      "policy_name": "fixed_d7",
+      "policy_kind": "fixed",
+      "fixed_day": 7,
+      "slot_count": 1,
+      "cost_scenario": "double_slippage",
+      "annualized_log_growth": 1.3752542377440469,
+      "signal_period_cagr_trading_days": 2.9560823805367895,
+      "signal_period_total_return": 51.852199473225674,
+      "liquidated_ending_equity_cny": 64641268.795947395,
+      "signal_period_maximum_drawdown": -0.46444254946791175,
+      "worst_calendar_year_return": 1.4082655568031046,
+      "mean_occupied_sessions": 7.0673076923076925,
+      "mean_signal_capital_utilization": 0.8569531266771843,
+      "skipped_no_slot_signal_count": 456.0,
+      "closed_trade_count": 104.0,
+      "net_pnl_per_deployed_capital_session": 0.005125989478534086
+    },
+    "global_annual": [
+      {
+        "cost_scenario": "base",
+        "year": 2023,
+        "net_return": 2.3749486977669787,
+        "maximum_drawdown": -0.2026833649962562,
+        "mean_capital_utilization": 0.8552507086501757
+      },
+      {
+        "cost_scenario": "base",
+        "year": 2024,
+        "net_return": 6.157780356311528,
+        "maximum_drawdown": -0.4625677714553675,
+        "mean_capital_utilization": 0.8595400929267734
+      },
+      {
+        "cost_scenario": "base",
+        "year": 2025,
+        "net_return": 1.5292895877081474,
+        "maximum_drawdown": -0.2536056644695109,
+        "mean_capital_utilization": 0.8561031449931513
+      },
+      {
+        "cost_scenario": "double_slippage",
+        "year": 2023,
+        "net_return": 2.2159394724250627,
+        "maximum_drawdown": -0.2043619420886908,
+        "mean_capital_utilization": 0.8552311641607818
+      },
+      {
+        "cost_scenario": "double_slippage",
+        "year": 2024,
+        "net_return": 5.824185517968738,
+        "maximum_drawdown": -0.4644425494679117,
+        "mean_capital_utilization": 0.8595395383716122
+      },
+      {
+        "cost_scenario": "double_slippage",
+        "year": 2025,
+        "net_return": 1.4082655568031046,
+        "maximum_drawdown": -0.2577700214281081,
+        "mean_capital_utilization": 0.8560922349031841
+      }
+    ],
+    "global_neighboring_fixed_days": [
+      {
+        "fixed_day": 4,
+        "cagr": 1.129707414780198,
+        "maximum_drawdown": -0.5906688056911465,
+        "closed_trade_count": 181,
+        "net_pnl_per_deployed_capital_session": 0.0028725123218099
+      },
+      {
+        "fixed_day": 5,
+        "cagr": 0.7365460616219734,
+        "maximum_drawdown": -0.6463742616660721,
+        "closed_trade_count": 145,
+        "net_pnl_per_deployed_capital_session": 0.0019950493030698
+      },
+      {
+        "fixed_day": 6,
+        "cagr": 1.2020818141988432,
+        "maximum_drawdown": -0.4849842256414172,
+        "closed_trade_count": 121,
+        "net_pnl_per_deployed_capital_session": 0.0025364332820326
+      },
+      {
+        "fixed_day": 7,
+        "cagr": 3.1600297988290764,
+        "maximum_drawdown": -0.4625677714553675,
+        "closed_trade_count": 104,
+        "net_pnl_per_deployed_capital_session": 0.005319209004934
+      },
+      {
+        "fixed_day": 8,
+        "cagr": 1.3512818644435691,
+        "maximum_drawdown": -0.5439164715663092,
+        "closed_trade_count": 91,
+        "net_pnl_per_deployed_capital_session": 0.0030927399686793
+      },
+      {
+        "fixed_day": 9,
+        "cagr": 0.6848070248123341,
+        "maximum_drawdown": -0.6091548170918786,
+        "closed_trade_count": 81,
+        "net_pnl_per_deployed_capital_session": 0.0021330288615421
+      },
+      {
+        "fixed_day": 10,
+        "cagr": 0.5986242056117268,
+        "maximum_drawdown": -0.5340560357147448,
+        "closed_trade_count": 73,
+        "net_pnl_per_deployed_capital_session": 0.001971920714911
+      }
+    ],
+    "top3_slots3_winner": {
+      "model_id": "lookback180_turnover",
+      "top_k": 3,
+      "policy_name": "fixed_d7",
+      "policy_kind": "fixed",
+      "fixed_day": 7,
+      "slot_count": 3,
+      "cost_scenario": "base",
+      "annualized_log_growth": 1.0154743149048409,
+      "signal_period_cagr_trading_days": 1.760672515005988,
+      "signal_period_total_return": 17.719444665423907,
+      "liquidated_ending_equity_cny": 20549549.644600805,
+      "signal_period_maximum_drawdown": -0.3327805814758775,
+      "worst_calendar_year_return": 1.1808931963031903,
+      "mean_occupied_sessions": 7.019230769230769,
+      "mean_signal_capital_utilization": 0.8487045730907776,
+      "skipped_no_slot_signal_count": 1161.0,
+      "closed_trade_count": 312.0,
+      "net_pnl_per_deployed_capital_session": 0.0036496108497440743
+    },
+    "top3_slots3_annual": [
+      {
+        "cost_scenario": "base",
+        "year": 2023,
+        "net_return": 1.7851353815152264,
+        "maximum_drawdown": -0.1222062677489426,
+        "mean_capital_utilization": 0.8548434784617633
+      },
+      {
+        "cost_scenario": "base",
+        "year": 2024,
+        "net_return": 2.08185536293314,
+        "maximum_drawdown": -0.3327805814758775,
+        "mean_capital_utilization": 0.8461335375091091
+      },
+      {
+        "cost_scenario": "base",
+        "year": 2025,
+        "net_return": 1.1808931963031903,
+        "maximum_drawdown": -0.1505884273067181,
+        "mean_capital_utilization": 0.8451513858931864
+      },
+      {
+        "cost_scenario": "double_slippage",
+        "year": 2023,
+        "net_return": 1.6531381575034438,
+        "maximum_drawdown": -0.124630494468649,
+        "mean_capital_utilization": 0.8548738073549306
+      },
+      {
+        "cost_scenario": "double_slippage",
+        "year": 2024,
+        "net_return": 1.9396874735042653,
+        "maximum_drawdown": -0.3353699670279751,
+        "mean_capital_utilization": 0.846101251457513
+      },
+      {
+        "cost_scenario": "double_slippage",
+        "year": 2025,
+        "net_return": 1.0784176743288358,
+        "maximum_drawdown": -0.1515770097193149,
+        "mean_capital_utilization": 0.8451364792303492
+      }
+    ],
+    "top3_slots3_neighboring_fixed_days": [
+      {
+        "fixed_day": 4,
+        "cagr": 0.5542930345095582,
+        "maximum_drawdown": -0.4352633128166168,
+        "closed_trade_count": 544,
+        "net_pnl_per_deployed_capital_session": 0.0018598914109318
+      },
+      {
+        "fixed_day": 5,
+        "cagr": 0.6542684469776143,
+        "maximum_drawdown": -0.4709140298590131,
+        "closed_trade_count": 436,
+        "net_pnl_per_deployed_capital_session": 0.0020981448838787
+      },
+      {
+        "fixed_day": 6,
+        "cagr": 1.2372007912297387,
+        "maximum_drawdown": -0.4038100152729257,
+        "closed_trade_count": 363,
+        "net_pnl_per_deployed_capital_session": 0.0033026768905544
+      },
+      {
+        "fixed_day": 7,
+        "cagr": 1.760672515005988,
+        "maximum_drawdown": -0.3327805814758775,
+        "closed_trade_count": 312,
+        "net_pnl_per_deployed_capital_session": 0.003649610849744
+      },
+      {
+        "fixed_day": 8,
+        "cagr": 0.7660833552793813,
+        "maximum_drawdown": -0.3999896808911234,
+        "closed_trade_count": 272,
+        "net_pnl_per_deployed_capital_session": 0.0018996991126947
+      },
+      {
+        "fixed_day": 9,
+        "cagr": 1.2960330283778,
+        "maximum_drawdown": -0.3606576613573713,
+        "closed_trade_count": 243,
+        "net_pnl_per_deployed_capital_session": 0.0031574794815876
+      },
+      {
+        "fixed_day": 10,
+        "cagr": 0.994102087273976,
+        "maximum_drawdown": -0.3241855957499117,
+        "closed_trade_count": 217,
+        "net_pnl_per_deployed_capital_session": 0.0031106400356548
+      }
+    ],
+    "winner_by_topk_slot": [
+      {
+        "model_id": "lookback180_turnover",
+        "top_k": 1,
+        "policy_name": "fixed_d7",
+        "policy_kind": "fixed",
+        "fixed_day": 7,
+        "slot_count": 1,
+        "cost_scenario": "base",
+        "annualized_log_growth": 1.4255222374275829,
+        "signal_period_cagr_trading_days": 3.1600297988290764,
+        "signal_period_total_return": 60.100406445609956,
+        "liquidated_ending_equity_cny": 74781812.81429942,
+        "signal_period_maximum_drawdown": -0.46256777145536754,
+        "worst_calendar_year_return": 1.5292895877081474,
+        "mean_occupied_sessions": 7.0673076923076925,
+        "mean_signal_capital_utilization": 0.8569634638445084,
+        "skipped_no_slot_signal_count": 456.0,
+        "closed_trade_count": 104.0,
+        "net_pnl_per_deployed_capital_session": 0.005319209004934039
+      },
+      {
+        "model_id": "lookback180_daily",
+        "top_k": 1,
+        "policy_name": "fixed_d8",
+        "policy_kind": "fixed",
+        "fixed_day": 8,
+        "slot_count": 3,
+        "cost_scenario": "base",
+        "annualized_log_growth": 0.8291557907139693,
+        "signal_period_cagr_trading_days": 1.2913835162697915,
+        "signal_period_total_return": 9.935874791970482,
+        "liquidated_ending_equity_cny": 11267717.988095235,
+        "signal_period_maximum_drawdown": -0.3829637817682022,
+        "worst_calendar_year_return": 0.23174175316767487,
+        "mean_occupied_sessions": 8.171945701357465,
+        "mean_signal_capital_utilization": 0.7167339826473698,
+        "skipped_no_slot_signal_count": 148.0,
+        "closed_trade_count": 221.0,
+        "net_pnl_per_deployed_capital_session": 0.004355268196752968
+      },
+      {
+        "model_id": "lookback180_turnover",
+        "top_k": 1,
+        "policy_name": "fixed_d39",
+        "policy_kind": "fixed",
+        "fixed_day": 39,
+        "slot_count": 6,
+        "cost_scenario": "base",
+        "annualized_log_growth": 0.6555105869019024,
+        "signal_period_cagr_trading_days": 0.9261257209140947,
+        "signal_period_total_return": 5.626627609221134,
+        "liquidated_ending_equity_cny": 7540771.136350488,
+        "signal_period_maximum_drawdown": -0.4051730386386727,
+        "worst_calendar_year_return": 0.6014472228255723,
+        "mean_occupied_sessions": 39.10091743119266,
+        "mean_signal_capital_utilization": 0.9027001234565434,
+        "skipped_no_slot_signal_count": 292.0,
+        "closed_trade_count": 109.0,
+        "net_pnl_per_deployed_capital_session": 0.0036196740158286377
+      },
+      {
+        "model_id": "lookback180_turnover",
+        "top_k": 1,
+        "policy_name": "fixed_d31",
+        "policy_kind": "fixed",
+        "fixed_day": 31,
+        "slot_count": 12,
+        "cost_scenario": "base",
+        "annualized_log_growth": 0.5228748975947906,
+        "signal_period_cagr_trading_days": 0.6868702646190048,
+        "signal_period_total_return": 3.5197314644223017,
+        "liquidated_ending_equity_cny": 4935275.585849697,
+        "signal_period_maximum_drawdown": -0.18983341429908585,
+        "worst_calendar_year_return": 0.38105533405230196,
+        "mean_occupied_sessions": 31.217821782178216,
+        "mean_signal_capital_utilization": 0.6783456007397272,
+        "skipped_no_slot_signal_count": 37.0,
+        "closed_trade_count": 202.0,
+        "net_pnl_per_deployed_capital_session": 0.003344380948623908
+      },
+      {
+        "model_id": "lookback180_daily",
+        "top_k": 1,
+        "policy_name": "fixed_d60",
+        "policy_kind": "fixed",
+        "fixed_day": 60,
+        "slot_count": 24,
+        "cost_scenario": "base",
+        "annualized_log_growth": 0.3443605202909188,
+        "signal_period_cagr_trading_days": 0.41108726940862733,
+        "signal_period_total_return": 1.7005427486821105,
+        "liquidated_ending_equity_cny": 2822878.632987553,
+        "signal_period_maximum_drawdown": -0.2568958779336866,
+        "worst_calendar_year_return": 0.2210325878399606,
+        "mean_occupied_sessions": 60.07070707070707,
+        "mean_signal_capital_utilization": 0.652414952257147,
+        "skipped_no_slot_signal_count": 12.0,
+        "closed_trade_count": 198.0,
+        "net_pnl_per_deployed_capital_session": 0.002653549536251197
+      },
+      {
+        "model_id": "lookback180_daily",
+        "top_k": 1,
+        "policy_name": "fixed_d60",
+        "policy_kind": "fixed",
+        "fixed_day": 60,
+        "slot_count": 48,
+        "cost_scenario": "base",
+        "annualized_log_growth": 0.18125352266972194,
+        "signal_period_cagr_trading_days": 0.1987190432254595,
+        "signal_period_total_return": 0.6869160302108344,
+        "liquidated_ending_equity_cny": 1726489.175503177,
+        "signal_period_maximum_drawdown": -0.1295753487882778,
+        "worst_calendar_year_return": 0.10672190396773207,
+        "mean_occupied_sessions": 60.06930693069307,
+        "mean_signal_capital_utilization": 0.33686652834543396,
+        "skipped_no_slot_signal_count": 0.0,
+        "closed_trade_count": 202.0,
+        "net_pnl_per_deployed_capital_session": 0.0024780062369670537
+      },
+      {
+        "model_id": "lookback180_turnover",
+        "top_k": 3,
+        "policy_name": "fixed_d7",
+        "policy_kind": "fixed",
+        "fixed_day": 7,
+        "slot_count": 3,
+        "cost_scenario": "base",
+        "annualized_log_growth": 1.0154743149048409,
+        "signal_period_cagr_trading_days": 1.760672515005988,
+        "signal_period_total_return": 17.719444665423907,
+        "liquidated_ending_equity_cny": 20549549.644600805,
+        "signal_period_maximum_drawdown": -0.3327805814758775,
+        "worst_calendar_year_return": 1.1808931963031903,
+        "mean_occupied_sessions": 7.019230769230769,
+        "mean_signal_capital_utilization": 0.8487045730907776,
+        "skipped_no_slot_signal_count": 1161.0,
+        "closed_trade_count": 312.0,
+        "net_pnl_per_deployed_capital_session": 0.0036496108497440743
+      },
+      {
+        "model_id": "lookback180_turnover",
+        "top_k": 3,
+        "policy_name": "fixed_d9",
+        "policy_kind": "fixed",
+        "fixed_day": 9,
+        "slot_count": 6,
+        "cost_scenario": "base",
+        "annualized_log_growth": 0.8527389711677562,
+        "signal_period_cagr_trading_days": 1.346063861186141,
+        "signal_period_total_return": 10.70579776015628,
+        "liquidated_ending_equity_cny": 12123197.372241497,
+        "signal_period_maximum_drawdown": -0.29087352402892275,
+        "worst_calendar_year_return": 1.0195959810477655,
+        "mean_occupied_sessions": 9.052966101694915,
+        "mean_signal_capital_utilization": 0.8568790981706855,
+        "skipped_no_slot_signal_count": 598.0,
+        "closed_trade_count": 472.0,
+        "net_pnl_per_deployed_capital_session": 0.0034488855988077777
+      },
+      {
+        "model_id": "lookback180_turnover",
+        "top_k": 3,
+        "policy_name": "fixed_d34",
+        "policy_kind": "fixed",
+        "fixed_day": 34,
+        "slot_count": 12,
+        "cost_scenario": "base",
+        "annualized_log_growth": 0.558333309867162,
+        "signal_period_cagr_trading_days": 0.7477571019217584,
+        "signal_period_total_return": 4.006551159850471,
+        "liquidated_ending_equity_cny": 5263889.414971488,
+        "signal_period_maximum_drawdown": -0.33051818889077644,
+        "worst_calendar_year_return": 0.46885320845861767,
+        "mean_occupied_sessions": 34.1484375,
+        "mean_signal_capital_utilization": 0.931852925126679,
+        "skipped_no_slot_signal_count": 821.0,
+        "closed_trade_count": 256.0,
+        "net_pnl_per_deployed_capital_session": 0.0027994622811758204
+      },
+      {
+        "model_id": "lookback180_turnover",
+        "top_k": 3,
+        "policy_name": "fixed_d48",
+        "policy_kind": "fixed",
+        "fixed_day": 48,
+        "slot_count": 24,
+        "cost_scenario": "base",
+        "annualized_log_growth": 0.4545644116927326,
+        "signal_period_cagr_trading_days": 0.5754869698457479,
+        "signal_period_total_return": 2.711300117418721,
+        "liquidated_ending_equity_cny": 3948464.226160097,
+        "signal_period_maximum_drawdown": -0.2710166515448583,
+        "worst_calendar_year_return": 0.2518446395210836,
+        "mean_occupied_sessions": 48.0835734870317,
+        "mean_signal_capital_utilization": 0.8890732208438087,
+        "skipped_no_slot_signal_count": 379.0,
+        "closed_trade_count": 347.0,
+        "net_pnl_per_deployed_capital_session": 0.0023449027465013766
+      },
+      {
+        "model_id": "lookback180_turnover",
+        "top_k": 3,
+        "policy_name": "fixed_d49",
+        "policy_kind": "fixed",
+        "fixed_day": 49,
+        "slot_count": 48,
+        "cost_scenario": "base",
+        "annualized_log_growth": 0.2842903816344546,
+        "signal_period_cagr_trading_days": 0.328818739291636,
+        "signal_period_total_return": 1.270852219854243,
+        "liquidated_ending_equity_cny": 2381619.01921846,
+        "signal_period_maximum_drawdown": -0.22412819473360113,
+        "worst_calendar_year_return": 0.16971974497881126,
+        "mean_occupied_sessions": 49.04516129032258,
+        "mean_signal_capital_utilization": 0.6134303549311447,
+        "skipped_no_slot_signal_count": 35.0,
+        "closed_trade_count": 465.0,
+        "net_pnl_per_deployed_capital_session": 0.002022759207538199
+      }
+    ],
+    "own_exit_win_count": 0,
+    "fixed_exit_win_count": 22,
+    "own_exit_comparison_count": 22
+  },
+  "stage2_model_cohort_metrics": {
+    "lookback180_daily": [
+      {
+        "year": 2023,
+        "candidate_count": 703468,
+        "candidate_score_coverage": 1.0,
+        "rank_ic": 0.06617640537879096,
+        "path_mae": 0.08409429719353334,
+        "top1_base_alpha": 0.027228053521319913,
+        "top3_base_alpha": 0.02585686752573581,
+        "top3_selected_base": 0.024021220949268673,
+        "exit_regret": 0.09131864087071354,
+        "top3_average_exit_day": 13.665289256198347
+      },
+      {
+        "year": 2024,
+        "candidate_count": 715878,
+        "candidate_score_coverage": 1.0,
+        "rank_ic": 0.12483225973414315,
+        "path_mae": 0.1258169893327906,
+        "top1_base_alpha": 0.05358396790566675,
+        "top3_base_alpha": 0.04053951551667112,
+        "top3_selected_base": 0.042531606662331606,
+        "exit_regret": 0.1799755146664784,
+        "top3_average_exit_day": 16.008264462809915
+      },
+      {
+        "year": 2025,
+        "candidate_count": 724125,
+        "candidate_score_coverage": 1.0,
+        "rank_ic": 0.08253305261005406,
+        "path_mae": 0.10357351320374072,
+        "top1_base_alpha": 0.07412680727830623,
+        "top3_base_alpha": 0.056562436243273125,
+        "top3_selected_base": 0.06035309203576692,
+        "exit_regret": 0.1753676057928119,
+        "top3_average_exit_day": 15.116598079561042
+      }
+    ],
+    "lookback180_turnover": [
+      {
+        "year": 2023,
+        "candidate_count": 703468,
+        "candidate_score_coverage": 1.0,
+        "rank_ic": 0.0964711904735949,
+        "path_mae": 0.08220434142775743,
+        "top1_base_alpha": 0.06313181185467971,
+        "top3_base_alpha": 0.04697892645318631,
+        "top3_selected_base": 0.04565761574182421,
+        "exit_regret": 0.09225283197412242,
+        "top3_average_exit_day": 19.332644628099175
+      },
+      {
+        "year": 2024,
+        "candidate_count": 715878,
+        "candidate_score_coverage": 1.0,
+        "rank_ic": 0.10876555023084927,
+        "path_mae": 0.12524513179451383,
+        "top1_base_alpha": 0.05904676186218852,
+        "top3_base_alpha": 0.052394544829381544,
+        "top3_selected_base": 0.055914155631942006,
+        "exit_regret": 0.18615468838419694,
+        "top3_average_exit_day": 20.52617079889807
+      },
+      {
+        "year": 2025,
+        "candidate_count": 724125,
+        "candidate_score_coverage": 1.0,
+        "rank_ic": 0.11363001470770472,
+        "path_mae": 0.11021985030436246,
+        "top1_base_alpha": 0.03711047373613914,
+        "top3_base_alpha": 0.036083629134777105,
+        "top3_selected_base": 0.038367392493510274,
+        "exit_regret": 0.1736229007022441,
+        "top3_average_exit_day": 13.396433470507544
+      }
+    ]
+  },
+  "cross_model_hybrids_selected": false,
+  "stage3_started": false,
+  "qdp_changed": false,
+  "provider_called": false,
+  "live_state_changed": false
+}

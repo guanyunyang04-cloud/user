@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "artifact_type": "seq100_structured_global_intraday_retirement",
+  "study_id": "seq100_structured_global_intraday_capital_speed_rolling_2023_2025_v1",
+  "status": "abandoned",
+  "frozen_at": "2026-07-21T17:52:04+08:00",
+  "successor_study_id": "seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1",
+  "reason": "The simplified global_tail_512 recipe reduced effective daily ranking coverage, required a second epoch for false-positive mining, and materially degraded the completed G35V2/2023 ranking, path, exit, and account diagnostics.",
+  "completed_evidence": {
+    "g35v2_2023_runs": [
+      "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_global_intraday_capital_speed_rolling_2023_2025_v1\\runs\\g35v2\\seq100_structured_global_g35v2_2023_seed7_20260721_130816"
+    ],
+    "g35v2_2023_partial_runs": [],
+    "diagnostic_summary": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_global_intraday_capital_speed_rolling_2023_2025_v1\\diagnostics\\g35v2_2023\\diagnostic_summary.md",
+    "rank_ic": 0.0407,
+    "l35v2_rank_ic": 0.0965,
+    "path_mae": 0.4388,
+    "l35v2_path_mae": 0.0822,
+    "predicted_true_close_path_correlation": -0.1745,
+    "l35v2_predicted_true_close_path_correlation": 0.1376,
+    "top3_planned_exit_day": 56,
+    "top3_planned_exit_day_share": 1.0
+  },
+  "preserved_partial_evidence": {
+    "g35v2_2024_completed_runs": [],
+    "g35v2_2024_partial_runs": [
+      "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_global_intraday_capital_speed_rolling_2023_2025_v1\\runs\\g35v2\\seq100_structured_global_g35v2_2024_seed7_20260721_154149"
+    ]
+  },
+  "mutation_contract": {
+    "delete_or_move_old_evidence": false,
+    "resume_training": false,
+    "resume_evaluation": false,
+    "resume_summary": false
+  }
+}

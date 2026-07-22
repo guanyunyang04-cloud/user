@@ -1,0 +1,1422 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "L35V3 非 D2 退出审计",
+    "description": "核验退出塌缩、非 D2 分布、IC 含义与 D58 可交易性，并提出 Capital Allocation Value V4 方案。",
+    "generatedAt": "2026-07-22T00:09:21+08:00",
+    "cards": [
+      {
+        "id": "non_d2_share_card",
+        "dataset": "headline_exit",
+        "sourceId": "exit_source",
+        "description": "三年全部 2,143,471 个候选行的预测退出构成。",
+        "metrics": [
+          {
+            "label": "非 D2 候选占比",
+            "field": "non_d2_share",
+            "format": "percent"
+          },
+          {
+            "label": "D2 占比",
+            "field": "d2_share",
+            "format": "percent"
+          }
+        ]
+      },
+      {
+        "id": "rank_card",
+        "dataset": "headline_rank",
+        "sourceId": "exit_source",
+        "description": "逐日最高分非 D2 位置；三年 Top100 全部是 D2。",
+        "metrics": [
+          {
+            "label": "非 D2 最靠前名次",
+            "field": "best_non_d2_rank",
+            "format": "number"
+          },
+          {
+            "label": "Top100 非 D2 数",
+            "field": "top100_non_d2_count",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "nond2_account_card",
+        "dataset": "headline_nond2",
+        "sourceId": "strategy_source",
+        "description": "非 D2 Top1 / 1 槽位，双滑点连续账户。",
+        "metrics": [
+          {
+            "label": "广义非 D2 年化 log growth",
+            "field": "annualized_log_growth",
+            "format": "percent"
+          },
+          {
+            "label": "最大回撤",
+            "field": "maximum_drawdown",
+            "format": "percent",
+            "signed": true
+          },
+          {
+            "label": "平仓笔数",
+            "field": "closed_trades",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "d58_account_card",
+        "dataset": "headline_d58",
+        "sourceId": "strategy_source",
+        "description": "仅预测 D58 的 Top2 / 2 槽位，事后探索性规则。",
+        "metrics": [
+          {
+            "label": "D58 Top2 年化 log growth",
+            "field": "annualized_log_growth",
+            "format": "percent"
+          },
+          {
+            "label": "最大回撤",
+            "field": "maximum_drawdown",
+            "format": "percent",
+            "signed": true
+          },
+          {
+            "label": "平仓笔数",
+            "field": "closed_trades",
+            "format": "number"
+          }
+        ]
+      }
+    ],
+    "charts": [
+      {
+        "id": "exit_composition_chart",
+        "title": "L35V3 预测退出期限构成",
+        "subtitle": "2023-2025 全候选；堆叠占比，每年合计 100%。",
+        "type": "bar",
+        "dataset": "exit_composition",
+        "sourceId": "exit_source",
+        "encodings": {
+          "x": {
+            "field": "year",
+            "type": "ordinal",
+            "label": "年份"
+          },
+          "y": {
+            "fields": [
+              "d2",
+              "d3_d7",
+              "d8_d20",
+              "d21_d40",
+              "d41_d59",
+              "d60"
+            ],
+            "type": "quantitative",
+            "format": "percent",
+            "label": "候选占比"
+          },
+          "tooltip": [
+            {
+              "field": "non_d2_share",
+              "format": "percent",
+              "label": "非 D2 合计"
+            }
+          ]
+        },
+        "valueFormat": "percent",
+        "legend": {
+          "position": "bottom",
+          "sort": "spec"
+        },
+        "labels": {
+          "values": "none"
+        },
+        "settings": {
+          "groupMode": "stacked"
+        },
+        "layout": "full"
+      },
+      {
+        "id": "ic_scope_chart",
+        "title": "机会排序与实际退出决策的 Rank IC",
+        "subtitle": "逐日横截面均值；高 opportunity IC 没有转化为正 decision IC。",
+        "type": "bar",
+        "dataset": "ic_comparison",
+        "sourceId": "ic_source",
+        "encodings": {
+          "x": {
+            "field": "year",
+            "type": "ordinal",
+            "label": "年份"
+          },
+          "y": {
+            "fields": [
+              "opportunity_ic",
+              "decision_ic",
+              "top100_opportunity_ic",
+              "top100_decision_ic"
+            ],
+            "type": "quantitative",
+            "label": "平均 Rank IC"
+          },
+          "tooltip": [
+            {
+              "field": "year",
+              "label": "年份"
+            }
+          ]
+        },
+        "referenceLines": [
+          {
+            "axis": "y",
+            "value": 0.0,
+            "label": "0",
+            "color": "neutral",
+            "lineStyle": "dashed"
+          }
+        ],
+        "legend": {
+          "position": "bottom",
+          "sort": "spec"
+        },
+        "labels": {
+          "values": "all"
+        },
+        "settings": {
+          "groupMode": "grouped"
+        },
+        "layout": "full"
+      },
+      {
+        "id": "account_annual_chart",
+        "title": "非 D2 与 D58 筛选规则的逐年账户收益",
+        "subtitle": "双滑点连续账户；D58 是事后 exact-day 诊断，不是预注册策略。",
+        "type": "bar",
+        "dataset": "account_annual",
+        "sourceId": "annual_source",
+        "encodings": {
+          "x": {
+            "field": "year",
+            "type": "ordinal",
+            "label": "年份"
+          },
+          "y": {
+            "fields": [
+              "non_d2_top1",
+              "d58_top1",
+              "d58_top2"
+            ],
+            "type": "quantitative",
+            "format": "percent",
+            "label": "年度收益"
+          },
+          "tooltip": [
+            {
+              "field": "non_d2_top1_drawdown",
+              "format": "percent",
+              "label": "非 D2 Top1 回撤"
+            },
+            {
+              "field": "d58_top1_drawdown",
+              "format": "percent",
+              "label": "D58 Top1 回撤"
+            },
+            {
+              "field": "d58_top2_drawdown",
+              "format": "percent",
+              "label": "D58 Top2 回撤"
+            }
+          ]
+        },
+        "valueFormat": "percent",
+        "referenceLines": [
+          {
+            "axis": "y",
+            "value": 0.0,
+            "label": "0",
+            "color": "neutral",
+            "lineStyle": "dashed"
+          }
+        ],
+        "legend": {
+          "position": "bottom",
+          "sort": "spec"
+        },
+        "labels": {
+          "values": "all"
+        },
+        "settings": {
+          "groupMode": "grouped"
+        },
+        "layout": "full"
+      },
+      {
+        "id": "unit_time_chart",
+        "title": "广义非 D2 与 D58 Top2 的每日单位时间效益",
+        "subtitle": "双滑点；无足够 D58 候选时持有现金，按全部 242/242/243 个信号日平均。",
+        "type": "bar",
+        "dataset": "unit_time_comparison",
+        "sourceId": "unit_source",
+        "encodings": {
+          "x": {
+            "field": "year",
+            "type": "ordinal",
+            "label": "年份"
+          },
+          "y": {
+            "fields": [
+              "non_d2_top1_absolute",
+              "non_d2_top1_alpha",
+              "d58_top2_absolute",
+              "d58_top2_alpha"
+            ],
+            "type": "quantitative",
+            "format": "percent",
+            "label": "年化单位时间效益"
+          },
+          "tooltip": [
+            {
+              "field": "d58_top2_signal_rate",
+              "format": "percent",
+              "label": "D58 Top2 有信号日占比"
+            },
+            {
+              "field": "d58_top2_mean_selected_count",
+              "label": "D58 Top2 日均入选数"
+            }
+          ]
+        },
+        "valueFormat": "percent",
+        "referenceLines": [
+          {
+            "axis": "y",
+            "value": 0.0,
+            "label": "0",
+            "color": "neutral",
+            "lineStyle": "dashed"
+          }
+        ],
+        "legend": {
+          "position": "bottom",
+          "sort": "spec"
+        },
+        "labels": {
+          "values": "all"
+        },
+        "settings": {
+          "groupMode": "grouped"
+        },
+        "layout": "full"
+      }
+    ],
+    "tables": [
+      {
+        "id": "exact_day_table",
+        "title": "逐年表现领先的非 D2 exact-day 候选组",
+        "subtitle": "候选数至少 100 且候选级年化 realized speed 为正；每年前四名并保留 D58。此表是事后筛选。",
+        "dataset": "exact_day_shortlist",
+        "sourceId": "exact_day_source",
+        "defaultSort": {
+          "field": "year",
+          "direction": "asc"
+        },
+        "density": "compact",
+        "columns": [
+          {
+            "field": "year",
+            "label": "年份",
+            "format": "number"
+          },
+          {
+            "field": "predicted_exit",
+            "label": "预测退出",
+            "type": "text"
+          },
+          {
+            "field": "candidate_count",
+            "label": "候选行",
+            "format": "number"
+          },
+          {
+            "field": "signal_date_count",
+            "label": "覆盖信号日",
+            "format": "number"
+          },
+          {
+            "field": "median_daily_rank",
+            "label": "中位日排名",
+            "format": "number"
+          },
+          {
+            "field": "mean_gross_return",
+            "label": "平均毛收益",
+            "format": "percent"
+          },
+          {
+            "field": "gross_win_rate",
+            "label": "毛胜率",
+            "format": "percent"
+          },
+          {
+            "field": "annualized_realized_capital_speed",
+            "label": "年化 realized speed",
+            "format": "percent"
+          }
+        ]
+      },
+      {
+        "id": "strategy_table",
+        "title": "双滑点连续账户规则对比",
+        "subtitle": "2023-2025、100 万元、无杠杆、禁止 pyramiding；D58 与非 D2 规则均为事后诊断。",
+        "dataset": "strategy_comparison",
+        "sourceId": "strategy_source",
+        "defaultSort": {
+          "field": "annualized_log_growth",
+          "direction": "desc"
+        },
+        "density": "compact",
+        "columns": [
+          {
+            "field": "strategy",
+            "label": "规则",
+            "type": "text"
+          },
+          {
+            "field": "evidence_class",
+            "label": "证据等级",
+            "type": "text"
+          },
+          {
+            "field": "total_return",
+            "label": "总收益",
+            "format": "percent"
+          },
+          {
+            "field": "annualized_log_growth",
+            "label": "年化 log growth",
+            "format": "percent"
+          },
+          {
+            "field": "maximum_drawdown",
+            "label": "最大回撤",
+            "format": "percent",
+            "movement": true
+          },
+          {
+            "field": "closed_trades",
+            "label": "平仓笔数",
+            "format": "number"
+          },
+          {
+            "field": "win_rate",
+            "label": "胜率",
+            "format": "percent"
+          },
+          {
+            "field": "payoff_ratio",
+            "label": "盈亏比",
+            "format": "number"
+          },
+          {
+            "field": "profit_factor",
+            "label": "Profit factor",
+            "format": "number"
+          },
+          {
+            "field": "mean_occupied_sessions",
+            "label": "平均占用日",
+            "format": "number"
+          },
+          {
+            "field": "capital_utilization",
+            "label": "资金利用率",
+            "format": "percent"
+          }
+        ]
+      },
+      {
+        "id": "d58_ic_table",
+        "title": "D58 子池内的排序与 Top2 头部效应",
+        "subtitle": "IC 不稳定，但 Top2 相对 D58 子池均值的 realized capital-speed 增益三年均为正；2023 只有 16 个可选 Top2 的日期。",
+        "dataset": "d58_within_group_ic",
+        "sourceId": "d58_ic_source",
+        "defaultSort": {
+          "field": "year",
+          "direction": "asc"
+        },
+        "density": "compact",
+        "columns": [
+          {
+            "field": "year",
+            "label": "年份",
+            "format": "number"
+          },
+          {
+            "field": "candidate_count",
+            "label": "D58 候选",
+            "format": "number"
+          },
+          {
+            "field": "top2_eligible_date_count",
+            "label": "Top2 可选日",
+            "format": "number"
+          },
+          {
+            "field": "within_d58_opportunity_ic",
+            "label": "Opportunity IC",
+            "format": "number"
+          },
+          {
+            "field": "within_d58_decision_ic",
+            "label": "Decision IC",
+            "format": "number"
+          },
+          {
+            "field": "top2_opportunity_value_delta_annualized",
+            "label": "Top2 opportunity 增益",
+            "format": "percent"
+          },
+          {
+            "field": "top2_realized_plan_value_delta_annualized",
+            "label": "Top2 realized-speed 增益",
+            "format": "percent"
+          },
+          {
+            "field": "top2_realized_plan_return_delta",
+            "label": "Top2 收益增益",
+            "format": "percent"
+          }
+        ]
+      }
+    ],
+    "sources": [
+      {
+        "id": "exit_source",
+        "label": "L35V3 预测退出分布",
+        "path": "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_exit_composition.csv",
+        "query": {
+          "engine": "duckdb",
+          "language": "sql",
+          "sql": "SELECT * FROM read_csv_auto('daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_exit_composition.csv')",
+          "description": "按年汇总 L35V3 预测退出期限分布。",
+          "executed_at": "2026-07-22T00:09:21+08:00",
+          "tables_used": [
+            "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_exit_composition.csv",
+            "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/exit_group_metrics.csv",
+            "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/claim_checks.json"
+          ],
+          "filters": [
+            "development years: 2023-2025",
+            "all candidate rows"
+          ],
+          "metric_definitions": [
+            "候选占比 = 该预测退出组候选数 / 当年全部候选数。",
+            "非 D2 条件只依赖信号日模型输出。"
+          ]
+        }
+      },
+      {
+        "id": "exact_day_source",
+        "label": "非 D2 exact-day 候选级诊断",
+        "path": "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_exact_day_shortlist.csv",
+        "query": {
+          "engine": "duckdb",
+          "language": "sql",
+          "sql": "SELECT * FROM read_csv_auto('daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_exact_day_shortlist.csv')",
+          "description": "展示每年领先的正 realized-speed exact-day 组，并保留 D58。",
+          "executed_at": "2026-07-22T00:09:21+08:00",
+          "tables_used": [
+            "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_exact_day_shortlist.csv",
+            "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/non_d2_exit_day_metrics.csv"
+          ],
+          "filters": [
+            "candidate_count >= 100",
+            "positive candidate-level realized speed"
+          ],
+          "metric_definitions": [
+            "候选级 realized capital speed 不是连续账户收益。",
+            "exact-day 选择是查看开发期结果后的事后扫描。"
+          ]
+        }
+      },
+      {
+        "id": "ic_source",
+        "label": "机会 IC 与决策 IC 分解",
+        "path": "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_ic_comparison.csv",
+        "query": {
+          "engine": "duckdb",
+          "language": "sql",
+          "sql": "SELECT * FROM read_csv_auto('daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_ic_comparison.csv')",
+          "description": "比较 score 对 oracle opportunity 与自身退出实现价值的逐日 Rank IC。",
+          "executed_at": "2026-07-22T00:09:21+08:00",
+          "tables_used": [
+            "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_ic_comparison.csv",
+            "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/ic_scope_diagnostics.csv",
+            "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/claim_checks.json"
+          ],
+          "filters": [
+            "development years: 2023-2025",
+            "full cross-section and Top100"
+          ],
+          "metric_definitions": [
+            "Opportunity IC 对应真实路径事后最优 capital speed。",
+            "Decision IC 对应按模型自身预测退出后实现的 capital speed。"
+          ]
+        }
+      },
+      {
+        "id": "strategy_source",
+        "label": "非 D2 与 D58 连续账户诊断",
+        "path": "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_strategy_comparison.csv",
+        "query": {
+          "engine": "duckdb",
+          "language": "sql",
+          "sql": "SELECT * FROM read_csv_auto('daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_strategy_comparison.csv')",
+          "description": "在相同双滑点账户合同下比较筛选规则。",
+          "executed_at": "2026-07-22T00:09:21+08:00",
+          "tables_used": [
+            "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_strategy_comparison.csv",
+            "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/filtered_account_comparison.csv",
+            "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/filtered_account_annual_metrics.csv",
+            "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/d58_account_metrics.csv",
+            "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/d58_account_annual_metrics.csv"
+          ],
+          "filters": [
+            "signals: 2023-2025",
+            "double_slippage",
+            "cash allowed"
+          ],
+          "metric_definitions": [
+            "Annualized log growth = log(ending/start) × 252 / 727。",
+            "连续账户包含槽位、整手、最低佣金、递延和逐日盯市。"
+          ]
+        }
+      },
+      {
+        "id": "annual_source",
+        "label": "筛选规则逐年账户收益",
+        "path": "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_account_annual.csv",
+        "query": {
+          "engine": "duckdb",
+          "language": "sql",
+          "sql": "SELECT * FROM read_csv_auto('daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_account_annual.csv')",
+          "description": "比较广义非 D2 Top1 与 D58 Top1/Top2 的逐年账户收益。",
+          "executed_at": "2026-07-22T00:09:21+08:00",
+          "tables_used": [
+            "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_account_annual.csv",
+            "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/filtered_account_annual_metrics.csv",
+            "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/d58_account_annual_metrics.csv"
+          ],
+          "filters": [
+            "double_slippage",
+            "calendar years: 2023-2025"
+          ],
+          "metric_definitions": [
+            "年度收益由连续账户年初至年末逐日盯市权益计算。"
+          ]
+        }
+      },
+      {
+        "id": "unit_source",
+        "label": "每日独立单位时间效益",
+        "path": "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_unit_time_comparison.csv",
+        "query": {
+          "engine": "duckdb",
+          "language": "sql",
+          "sql": "SELECT * FROM read_csv_auto('daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_unit_time_comparison.csv')",
+          "description": "比较广义非 D2 Top1 与 D58 Top2 的绝对效益和相对 alpha。",
+          "executed_at": "2026-07-22T00:09:21+08:00",
+          "tables_used": [
+            "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_unit_time_comparison.csv",
+            "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/filtered_unit_time_exact.csv",
+            "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/d58_unit_time_metrics.csv"
+          ],
+          "filters": [
+            "double_slippage",
+            "daily independent cohorts",
+            "cash on no-signal dates"
+          ],
+          "metric_definitions": [
+            "绝对效益 = mean[log1p(selected return)/resolved day] × 252。",
+            "单位时间 alpha = mean[selected speed - universe speed] × 252。"
+          ]
+        }
+      },
+      {
+        "id": "d58_ic_source",
+        "label": "D58 子池内排序诊断",
+        "path": "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/d58_within_group_ic.csv",
+        "query": {
+          "engine": "duckdb",
+          "language": "sql",
+          "sql": "SELECT * FROM read_csv_auto('daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/d58_within_group_ic.csv') ORDER BY year",
+          "description": "在预测退出为 D58 的候选子池内，计算 score 对 opportunity 与自身退出实现价值的逐日 Rank IC，并比较 Top2 与子池均值。",
+          "executed_at": "2026-07-22T00:19:20+08:00",
+          "tables_used": [
+            "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/d58_within_group_ic.csv",
+            "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/claim_checks.json"
+          ],
+          "filters": [
+            "predicted_exit_day = 58",
+            "development years: 2023-2025",
+            "Top2 requires at least two D58 candidates on the signal date"
+          ],
+          "metric_definitions": [
+            "Within-D58 IC 在每个信号日的 D58 子池内计算 Spearman 相关后按日平均。",
+            "Top2 realized value delta = D58 子池内 score Top2 的 realized_plan_value 均值减去同日 D58 子池均值，再乘 252。"
+          ]
+        }
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# L35V3 非 D2 退出审计",
+        "layout": "full"
+      },
+      {
+        "id": "technical_summary",
+        "type": "markdown",
+        "layout": "full",
+        "body": "## 审计结论\n\n原分析的主线成立：预测路径并未完全同质化，但 Capital Speed V3 与 hard decision 共同造成 Top-K 全部落到 D2；高 Rank IC 衡量的是未来路径中的**机会排序**，不是模型按自身退出后能实现的**决策排序**。\n\n排除 D2 的确能显著降低原 model plan 的账户灾难，但广义“非 D2 就交易”仍有明显年份依赖。D58 是当前最值得保留的研究假设：它在候选级三年都为正，且有限资金回放转正；然而它来自事后扫描，连续账户交易数很少，不能直接升级为实盘规则。"
+      },
+      {
+        "id": "headline_metrics",
+        "type": "metric-strip",
+        "cardIds": [
+          "non_d2_share_card",
+          "rank_card",
+          "nond2_account_card",
+          "d58_account_card"
+        ],
+        "layout": "full"
+      },
+      {
+        "id": "metric_definitions",
+        "type": "markdown",
+        "layout": "full",
+        "body": "## 三种指标回答不同问题\n\n- **候选级 realized capital speed**：检查某一预测退出组中所有候选按自身计划退出后的平均单位时间表现，用于发现结构。\n- **每日独立单位时间效益**：假设每天重新分配资金；同时报告绝对效益和相对全候选池 alpha，并把无信号日视为持有现金。\n- **连续账户增长**：受槽位、持有期、跳过信号和权益路径约束，是最终资金增长指标，但可能只采样到少量交易。"
+      },
+      {
+        "id": "exit_section",
+        "type": "markdown",
+        "sourceId": "exit_source",
+        "layout": "full",
+        "body": "## 非 D2 很多，但主要是长尾而不是靠前机会\n\n三年合计非 D2 占 **42.98%**。2023 主要集中在 D60，2024 主要集中在 D41-D59，2025 则由 D41-D59 与 D60 共同主导；这不是稳定的中期限簇。更关键的是，三年每个信号日的 Top1 至 Top100 都是 D2。"
+      },
+      {
+        "id": "exit_composition_block",
+        "type": "chart",
+        "chartId": "exit_composition_chart",
+        "layout": "full"
+      },
+      {
+        "id": "exact_day_table_block",
+        "type": "table",
+        "tableId": "exact_day_table",
+        "layout": "full"
+      },
+      {
+        "id": "ic_section",
+        "type": "markdown",
+        "sourceId": "ic_source",
+        "layout": "full",
+        "body": "## 高 IC 证明机会识别改善，不证明当前退出可用\n\n全市场 opportunity IC 从 **0.1448** 升至 **0.2727**，但 decision IC 三年均为负。即使限制到 Top100，所有候选仍为 D2，机会 IC 只有中等水平，决策 IC 接近零。由此不能推出“非 D2 中间靠前一段排序更好”；事实上最高分非 D2 的逐日最佳名次分别只到 591、972 和 813。"
+      },
+      {
+        "id": "ic_chart_block",
+        "type": "chart",
+        "chartId": "ic_scope_chart",
+        "layout": "full"
+      },
+      {
+        "id": "d58_rank_section",
+        "type": "markdown",
+        "sourceId": "d58_ic_source",
+        "layout": "full",
+        "body": "## D58 内部不是全面排序有效，而是 Top2 头部效应\n\nD58 子池内 opportunity IC 分别为 **-0.1778、0.0706、0.1330**，decision IC 为 **0.1142、-0.1016、0.0498**，不具备三年一致的单调排序。另一方面，score Top2 相对同日 D58 子池均值的 realized capital-speed 增益三年均为正，约 **+6.35%、+3.80%、+6.33%** 年化。因此更准确的假设是“D58 子池头部可能有用”，而不是“所有非 D2 或所有 D58 都值得交易”。"
+      },
+      {
+        "id": "d58_ic_table_block",
+        "type": "table",
+        "tableId": "d58_ic_table",
+        "layout": "full"
+      },
+      {
+        "id": "trading_section",
+        "type": "markdown",
+        "sourceId": "strategy_source",
+        "layout": "full",
+        "body": "## 非 D2 可以研究性交易，D58 更像候选规则而非结论\n\n广义非 D2 Top1/1 槽位把原 Top1 model plan 的严重亏损改善为正增长，但年度结果为 2023 亏、2024 大涨、2025 小涨。D58 Top2/2 槽位的三年账户结果更好且三个年度均为正，不过仅有 **22 笔**平仓交易；58 日持有导致大量信号被槽位约束跳过，账户结果容易被少数路径主导。"
+      },
+      {
+        "id": "account_chart_block",
+        "type": "chart",
+        "chartId": "account_annual_chart",
+        "layout": "full"
+      },
+      {
+        "id": "unit_chart_block",
+        "type": "chart",
+        "chartId": "unit_time_chart",
+        "layout": "full"
+      },
+      {
+        "id": "strategy_table_block",
+        "type": "table",
+        "tableId": "strategy_table",
+        "layout": "full"
+      },
+      {
+        "id": "theory_review",
+        "type": "markdown",
+        "layout": "full",
+        "body": "## 对原理论分析的修正\n\n**可以确认：** `log1p(net return) / d` 会把正收益推向短端；全负路径会因除以更长时间而偏向长尾；当前模型通过路径间接学习退出，没有独立日期分类头；先分解排名与退出、再设计软效用监督，比直接加入 59 类 one-hot head 更合理。\n\n**需要降级表述：** 该公式并非完全没考虑资金再部署，它是“同类机会可重复”的平均增长率代理，只是没有显式建模真实信号到达、槽位、现金和跳过信号。`hard_st` 的主要问题是前向 argmax 不连续与温度平滑反向之间的目标错配，不宜笼统称为数值梯度不稳定。现有结果支持 V3 公式、路径形状和损失共同作用，但不能仅凭观察证明 rank loss 主动强化 D2，也不能把 D60 塌缩泛化到每一年。"
+      },
+      {
+        "id": "limitations",
+        "type": "markdown",
+        "layout": "full",
+        "body": "## 为什么现在还不能直接交易 D58\n\nD58 是查看 59 个 exact-day 组后挑出的唯一三年候选级效益均为正期限，存在多重比较和选择偏差；2023 只有 176 个候选行、覆盖 45 个信号日，而 2024-2025 近乎每天都有大量 D58，分布漂移很大。D58 Top2 账户虽三年均正，却只有 22 笔交易；每日独立指标中 2023 大多数日期实际持有现金，相对 alpha 部分来自回避负候选池。三年又都是开发期，所以这些结果足以支持新假设，不足以支持部署。"
+      },
+      {
+        "id": "proposal",
+        "type": "markdown",
+        "layout": "full",
+        "body": "## 建议的下一步：Capital Allocation Value V4\n\n1. 先对已有真实标签和预测路径做**不训练的 preflight**，比较当前 V3、加入现金动作、`Q(d)=E[net log return]-ρ×E[实际占用日]`、以及平滑效用曲线四种决策。\n2. 将现金设为 `Q_cash=0`；所有交易动作不高于零时不交易。`ρ` 代表槽位日影子价格，只能用训练历史和训练内账户估计，并按 Top-K/槽位合同固定。\n3. 监督整条 D2-D60 utility curve，并使用含现金动作的 soft target、curve Huber、expected regret、daily rank 与 trade/cash calibration；不要直接训练 59 类硬日期标签。\n4. D58 只作为冻结的诊断基准，不把它写进目标函数。若 preflight 合理，再只训练 L35V4 三折 1 epoch。最终仍以双滑点连续账户增长为主，同时报告绝对单位时间效益、相对 alpha、decision IC、现金比例和槽位利用率。"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-07-22T00:09:21+08:00",
+    "status": "ready",
+    "datasets": {
+      "headline_exit": [
+        {
+          "non_d2_share": 0.4297804822178607,
+          "d2_share": 0.5702195177821393,
+          "candidate_count": 2143471
+        }
+      ],
+      "headline_rank": [
+        {
+          "best_non_d2_rank": 591,
+          "top100_non_d2_count": 0,
+          "signal_date_count": 727
+        }
+      ],
+      "headline_nond2": [
+        {
+          "annualized_log_growth": 0.107857382873311,
+          "maximum_drawdown": -0.3078418358776655,
+          "closed_trades": 228
+        }
+      ],
+      "headline_d58": [
+        {
+          "annualized_log_growth": 0.2422328757067496,
+          "maximum_drawdown": -0.2573065569516666,
+          "closed_trades": 22
+        }
+      ],
+      "exit_composition": [
+        {
+          "year": "2023",
+          "d2": 0.487487703776149,
+          "d3_d7": 0.00685745478117,
+          "d8_d20": 0.0091688605594,
+          "d21_d40": 0.000776154707819,
+          "d41_d59": 0.090517265888427,
+          "d60": 0.405192560287035,
+          "non_d2_share": 0.512512296223851
+        },
+        {
+          "year": "2024",
+          "d2": 0.739167847035389,
+          "d3_d7": 0.013496713127097,
+          "d8_d20": 0.022911725182224,
+          "d21_d40": 0.033315732568957,
+          "d41_d59": 0.19010501789411,
+          "d60": 0.001002964192223,
+          "non_d2_share": 0.260832152964611
+        },
+        {
+          "year": "2025",
+          "d2": 0.483567063697566,
+          "d3_d7": 0.011357155187295,
+          "d8_d20": 0.009680649059209,
+          "d21_d40": 0.02209839461419,
+          "d41_d59": 0.324791990333161,
+          "d60": 0.148504747108579,
+          "non_d2_share": 0.516432936302434
+        }
+      ],
+      "ic_comparison": [
+        {
+          "year": "2023",
+          "opportunity_ic": 0.144832809273785,
+          "decision_ic": -0.083093112987926,
+          "top100_opportunity_ic": 0.047011562995067,
+          "top100_decision_ic": -0.003564244956397
+        },
+        {
+          "year": "2024",
+          "opportunity_ic": 0.204915983531084,
+          "decision_ic": -0.07078564945412,
+          "top100_opportunity_ic": 0.089361725714132,
+          "top100_decision_ic": 0.026088541778368
+        },
+        {
+          "year": "2025",
+          "opportunity_ic": 0.27274218159543,
+          "decision_ic": -0.054717660751432,
+          "top100_opportunity_ic": 0.06050306464487,
+          "top100_decision_ic": -0.003374949839034
+        }
+      ],
+      "exact_day_shortlist": [
+        {
+          "year": 2023,
+          "predicted_exit": "D58",
+          "candidate_count": 176,
+          "candidate_share": 0.000250189063326,
+          "signal_date_count": 45,
+          "median_daily_rank": 1478.0,
+          "mean_gross_return": 0.05069064280625,
+          "gross_win_rate": 0.670454545454545,
+          "annualized_realized_capital_speed": 0.179569652731875
+        },
+        {
+          "year": 2023,
+          "predicted_exit": "D4",
+          "candidate_count": 376,
+          "candidate_share": 0.000534494817106,
+          "signal_date_count": 161,
+          "median_daily_rank": 1369.0,
+          "mean_gross_return": 0.005557283537766,
+          "gross_win_rate": 0.492021276595745,
+          "annualized_realized_capital_speed": 0.134430108618638
+        },
+        {
+          "year": 2023,
+          "predicted_exit": "D11",
+          "candidate_count": 222,
+          "candidate_share": 0.000315579386696,
+          "signal_date_count": 107,
+          "median_daily_rank": 1308.0,
+          "mean_gross_return": 0.008311874273423,
+          "gross_win_rate": 0.509009009009009,
+          "annualized_realized_capital_speed": 0.08496948893773
+        },
+        {
+          "year": 2024,
+          "predicted_exit": "D12",
+          "candidate_count": 207,
+          "candidate_share": 0.000289155414749,
+          "signal_date_count": 79,
+          "median_daily_rank": 2164.0,
+          "mean_gross_return": 0.027236906669082,
+          "gross_win_rate": 0.51207729468599,
+          "annualized_realized_capital_speed": 0.407106018817218
+        },
+        {
+          "year": 2024,
+          "predicted_exit": "D22",
+          "candidate_count": 4240,
+          "candidate_share": 0.005922796901148,
+          "signal_date_count": 204,
+          "median_daily_rank": 2300.0,
+          "mean_gross_return": 0.035436572158318,
+          "gross_win_rate": 0.553537735849057,
+          "annualized_realized_capital_speed": 0.23482902437859
+        },
+        {
+          "year": 2024,
+          "predicted_exit": "D58",
+          "candidate_count": 136092,
+          "candidate_share": 0.19010501789411,
+          "signal_date_count": 242,
+          "median_daily_rank": 2622.0,
+          "mean_gross_return": 0.051262463389116,
+          "gross_win_rate": 0.534087235105664,
+          "annualized_realized_capital_speed": 0.135791296358872
+        },
+        {
+          "year": 2024,
+          "predicted_exit": "D40",
+          "candidate_count": 19604,
+          "candidate_share": 0.02738455435144,
+          "signal_date_count": 242,
+          "median_daily_rank": 2322.0,
+          "mean_gross_return": 0.040728109645915,
+          "gross_win_rate": 0.505866149765354,
+          "annualized_realized_capital_speed": 0.133446405104288
+        },
+        {
+          "year": 2025,
+          "predicted_exit": "D4",
+          "candidate_count": 383,
+          "candidate_share": 0.000528914206801,
+          "signal_date_count": 131,
+          "median_daily_rank": 1809.0,
+          "mean_gross_return": 0.0121006032947,
+          "gross_win_rate": 0.605744125326371,
+          "annualized_realized_capital_speed": 0.527191532821813
+        },
+        {
+          "year": 2025,
+          "predicted_exit": "D10",
+          "candidate_count": 759,
+          "candidate_share": 0.001048161574314,
+          "signal_date_count": 201,
+          "median_daily_rank": 1747.0,
+          "mean_gross_return": 0.025196835279315,
+          "gross_win_rate": 0.635046113306983,
+          "annualized_realized_capital_speed": 0.499271644702805
+        },
+        {
+          "year": 2025,
+          "predicted_exit": "D12",
+          "candidate_count": 1361,
+          "candidate_share": 0.00187950975315,
+          "signal_date_count": 224,
+          "median_daily_rank": 1724.0,
+          "mean_gross_return": 0.025679187065371,
+          "gross_win_rate": 0.655400440852314,
+          "annualized_realized_capital_speed": 0.432102294133763
+        },
+        {
+          "year": 2025,
+          "predicted_exit": "D28",
+          "candidate_count": 11669,
+          "candidate_share": 0.016114621094424,
+          "signal_date_count": 243,
+          "median_daily_rank": 1504.0,
+          "mean_gross_return": 0.056215852035621,
+          "gross_win_rate": 0.633044819607507,
+          "annualized_realized_capital_speed": 0.392989291040787
+        },
+        {
+          "year": 2025,
+          "predicted_exit": "D58",
+          "candidate_count": 197342,
+          "candidate_share": 0.272524771275677,
+          "signal_date_count": 243,
+          "median_daily_rank": 2128.0,
+          "mean_gross_return": 0.070139217131154,
+          "gross_win_rate": 0.613326103921112,
+          "annualized_realized_capital_speed": 0.227765791151077
+        }
+      ],
+      "strategy_comparison": [
+        {
+          "strategy": "D58 Top1 / 1 slots",
+          "evidence_class": "事后 exact-day 筛选",
+          "total_return": 1.401213308724643,
+          "annualized_log_growth": 0.303638909267588,
+          "maximum_drawdown": -0.590799980861503,
+          "closed_trades": 12,
+          "win_rate": 0.833333333333333,
+          "payoff_ratio": 0.951092434132415,
+          "profit_factor": 4.574410784713896,
+          "mean_trade_expectancy": 0.090487456930922,
+          "mean_occupied_sessions": 58.0,
+          "capital_utilization": 0.900704425851915
+        },
+        {
+          "strategy": "D58 Top2 / 2 slots",
+          "evidence_class": "事后 exact-day 筛选",
+          "total_return": 1.011383153699116,
+          "annualized_log_growth": 0.24223287570675,
+          "maximum_drawdown": -0.257306556951667,
+          "closed_trades": 22,
+          "win_rate": 0.772727272727273,
+          "payoff_ratio": 1.99748745242024,
+          "profit_factor": 6.139407014000515,
+          "mean_trade_expectancy": 0.099192806900328,
+          "mean_occupied_sessions": 58.0,
+          "capital_utilization": 0.798283872699991
+        },
+        {
+          "strategy": "非 D2 且 score>0 Top1",
+          "evidence_class": "事后诊断筛选",
+          "total_return": 0.380748442433285,
+          "annualized_log_growth": 0.111831742556392,
+          "maximum_drawdown": -0.451346188796676,
+          "closed_trades": 218,
+          "win_rate": 0.463302752293578,
+          "payoff_ratio": 1.367157375807319,
+          "profit_factor": 1.166101215537472,
+          "mean_trade_expectancy": 0.002232206193204,
+          "mean_occupied_sessions": 3.027522935779817,
+          "capital_utilization": 0.60637901771341
+        },
+        {
+          "strategy": "非 D2 Top1 / model plan",
+          "evidence_class": "事后诊断筛选",
+          "total_return": 0.365007590571565,
+          "annualized_log_growth": 0.107857382873311,
+          "maximum_drawdown": -0.307841835877666,
+          "closed_trades": 228,
+          "win_rate": 0.469298245614035,
+          "payoff_ratio": 1.336004568052309,
+          "profit_factor": 1.120263779627549,
+          "mean_trade_expectancy": 0.002210489674199,
+          "mean_occupied_sessions": 3.192982456140351,
+          "capital_utilization": 0.684676165424286
+        },
+        {
+          "strategy": "非 D2 Top3 / model plan",
+          "evidence_class": "事后诊断筛选",
+          "total_return": 0.071879514521732,
+          "annualized_log_growth": 0.024060857107048,
+          "maximum_drawdown": -0.308610225991604,
+          "closed_trades": 692,
+          "win_rate": 0.459537572254335,
+          "payoff_ratio": 1.248514826482025,
+          "profit_factor": 1.027172799519766,
+          "mean_trade_expectancy": 0.00079587549928,
+          "mean_occupied_sessions": 3.157514450867052,
+          "capital_utilization": 0.679620748496524
+        },
+        {
+          "strategy": "D58 Top3 / 3 slots",
+          "evidence_class": "事后 exact-day 筛选",
+          "total_return": 0.071388431135359,
+          "annualized_log_growth": 0.023902011610583,
+          "maximum_drawdown": -0.375640462098231,
+          "closed_trades": 30,
+          "win_rate": 0.466666666666667,
+          "payoff_ratio": 2.029706326207334,
+          "profit_factor": 1.610630767959674,
+          "mean_trade_expectancy": 0.043979588563826,
+          "mean_occupied_sessions": 58.0,
+          "capital_utilization": 0.732983167982754
+        },
+        {
+          "strategy": "非 D2 Top2 / model plan",
+          "evidence_class": "事后诊断筛选",
+          "total_return": 0.001768022828635,
+          "annualized_log_growth": 0.000612308600339,
+          "maximum_drawdown": -0.365087421624746,
+          "closed_trades": 460,
+          "win_rate": 0.454347826086956,
+          "payoff_ratio": 1.256936172229236,
+          "profit_factor": 1.005024354551943,
+          "mean_trade_expectancy": 0.000608455176883,
+          "mean_occupied_sessions": 3.165217391304348,
+          "capital_utilization": 0.680343304405777
+        },
+        {
+          "strategy": "原 score Top1 / model plan",
+          "evidence_class": "原模型计划",
+          "total_return": -0.940848499547532,
+          "annualized_log_growth": -0.980149432100976,
+          "maximum_drawdown": -0.951406069949111,
+          "closed_trades": 293,
+          "win_rate": 0.457337883959044,
+          "payoff_ratio": 0.981259737911591,
+          "profit_factor": 0.682208290310896,
+          "mean_trade_expectancy": -0.005983455488483,
+          "mean_occupied_sessions": 2.095563139931741,
+          "capital_utilization": 0.439470831614521
+        }
+      ],
+      "account_annual": [
+        {
+          "year": "2023",
+          "non_d2_top1": -0.159406499967842,
+          "d58_top1": 0.64096161833552,
+          "d58_top2": 0.119296092660317,
+          "non_d2_top1_drawdown": -0.247675620748865,
+          "d58_top1_drawdown": -0.304952796507613,
+          "d58_top2_drawdown": -0.166924654810493
+        },
+        {
+          "year": "2024",
+          "non_d2_top1": 0.518589184228975,
+          "d58_top1": -0.07586499933595,
+          "d58_top2": 0.689323066788205,
+          "non_d2_top1_drawdown": -0.207905042126546,
+          "d58_top1_drawdown": -0.462537027788608,
+          "d58_top2_drawdown": -0.257306556951667
+        },
+        {
+          "year": "2025",
+          "non_d2_top1": 0.069322577546689,
+          "d58_top1": 0.583422819984968,
+          "d58_top2": 0.06374396339744,
+          "non_d2_top1_drawdown": -0.240747914250711,
+          "d58_top1_drawdown": -0.274574643166379,
+          "d58_top2_drawdown": -0.165333724573771
+        }
+      ],
+      "unit_time_comparison": [
+        {
+          "year": "2023",
+          "non_d2_top1_absolute": -0.191372706471879,
+          "non_d2_top1_alpha": -0.06533315465516,
+          "d58_top2_absolute": 0.016363641450229,
+          "d58_top2_alpha": 0.142253407092125,
+          "d58_top2_signal_rate": 0.066115702479339,
+          "d58_top2_mean_selected_count": 0.132231404958678
+        },
+        {
+          "year": "2024",
+          "non_d2_top1_absolute": -0.369085621449725,
+          "non_d2_top1_alpha": -0.458984503782312,
+          "d58_top2_absolute": 0.125005981765112,
+          "d58_top2_alpha": 0.035100607159254,
+          "d58_top2_signal_rate": 1.0,
+          "d58_top2_mean_selected_count": 2.0
+        },
+        {
+          "year": "2025",
+          "non_d2_top1_absolute": 0.175610105137645,
+          "non_d2_top1_alpha": -0.071139369796011,
+          "d58_top2_absolute": 0.312463280857789,
+          "d58_top2_alpha": 0.065859490166812,
+          "d58_top2_signal_rate": 1.0,
+          "d58_top2_mean_selected_count": 2.0
+        }
+      ],
+      "d58_within_group_ic": [
+        {
+          "year": 2023,
+          "candidate_count": 176,
+          "signal_date_count": 45,
+          "top2_eligible_date_count": 16,
+          "within_d58_opportunity_ic": -0.177812163326869,
+          "within_d58_opportunity_ic_positive_day_rate": 0.5,
+          "within_d58_decision_ic": 0.114247730468706,
+          "within_d58_decision_ic_positive_day_rate": 0.625,
+          "top2_opportunity_value_delta_annualized": 0.189911727774075,
+          "top2_realized_plan_value_delta_annualized": 0.06347566550185,
+          "top2_realized_plan_return_delta": 0.014744615375794
+        },
+        {
+          "year": 2024,
+          "candidate_count": 136092,
+          "signal_date_count": 242,
+          "top2_eligible_date_count": 242,
+          "within_d58_opportunity_ic": 0.070575447557473,
+          "within_d58_opportunity_ic_positive_day_rate": 0.735537190082645,
+          "within_d58_decision_ic": -0.101603567814542,
+          "within_d58_decision_ic_positive_day_rate": 0.15702479338843,
+          "top2_opportunity_value_delta_annualized": 0.476610237359867,
+          "top2_realized_plan_value_delta_annualized": 0.038005937307614,
+          "top2_realized_plan_return_delta": 0.018236636384086
+        },
+        {
+          "year": 2025,
+          "candidate_count": 197342,
+          "signal_date_count": 243,
+          "top2_eligible_date_count": 243,
+          "within_d58_opportunity_ic": 0.133012148314788,
+          "within_d58_opportunity_ic_positive_day_rate": 0.880658436213992,
+          "within_d58_decision_ic": 0.049837053032467,
+          "within_d58_decision_ic_positive_day_rate": 0.68724279835391,
+          "top2_opportunity_value_delta_annualized": 0.467861187681417,
+          "top2_realized_plan_value_delta_annualized": 0.063306233766658,
+          "top2_realized_plan_return_delta": 0.022364294473674
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "exit_source",
+      "label": "L35V3 预测退出分布",
+      "path": "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_exit_composition.csv",
+      "query": {
+        "engine": "duckdb",
+        "language": "sql",
+        "sql": "SELECT * FROM read_csv_auto('daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_exit_composition.csv')",
+        "description": "按年汇总 L35V3 预测退出期限分布。",
+        "executed_at": "2026-07-22T00:09:21+08:00",
+        "tables_used": [
+          "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_exit_composition.csv",
+          "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/exit_group_metrics.csv",
+          "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/claim_checks.json"
+        ],
+        "filters": [
+          "development years: 2023-2025",
+          "all candidate rows"
+        ],
+        "metric_definitions": [
+          "候选占比 = 该预测退出组候选数 / 当年全部候选数。",
+          "非 D2 条件只依赖信号日模型输出。"
+        ]
+      }
+    },
+    {
+      "id": "exact_day_source",
+      "label": "非 D2 exact-day 候选级诊断",
+      "path": "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_exact_day_shortlist.csv",
+      "query": {
+        "engine": "duckdb",
+        "language": "sql",
+        "sql": "SELECT * FROM read_csv_auto('daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_exact_day_shortlist.csv')",
+        "description": "展示每年领先的正 realized-speed exact-day 组，并保留 D58。",
+        "executed_at": "2026-07-22T00:09:21+08:00",
+        "tables_used": [
+          "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_exact_day_shortlist.csv",
+          "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/non_d2_exit_day_metrics.csv"
+        ],
+        "filters": [
+          "candidate_count >= 100",
+          "positive candidate-level realized speed"
+        ],
+        "metric_definitions": [
+          "候选级 realized capital speed 不是连续账户收益。",
+          "exact-day 选择是查看开发期结果后的事后扫描。"
+        ]
+      }
+    },
+    {
+      "id": "ic_source",
+      "label": "机会 IC 与决策 IC 分解",
+      "path": "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_ic_comparison.csv",
+      "query": {
+        "engine": "duckdb",
+        "language": "sql",
+        "sql": "SELECT * FROM read_csv_auto('daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_ic_comparison.csv')",
+        "description": "比较 score 对 oracle opportunity 与自身退出实现价值的逐日 Rank IC。",
+        "executed_at": "2026-07-22T00:09:21+08:00",
+        "tables_used": [
+          "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_ic_comparison.csv",
+          "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/ic_scope_diagnostics.csv",
+          "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/claim_checks.json"
+        ],
+        "filters": [
+          "development years: 2023-2025",
+          "full cross-section and Top100"
+        ],
+        "metric_definitions": [
+          "Opportunity IC 对应真实路径事后最优 capital speed。",
+          "Decision IC 对应按模型自身预测退出后实现的 capital speed。"
+        ]
+      }
+    },
+    {
+      "id": "strategy_source",
+      "label": "非 D2 与 D58 连续账户诊断",
+      "path": "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_strategy_comparison.csv",
+      "query": {
+        "engine": "duckdb",
+        "language": "sql",
+        "sql": "SELECT * FROM read_csv_auto('daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_strategy_comparison.csv')",
+        "description": "在相同双滑点账户合同下比较筛选规则。",
+        "executed_at": "2026-07-22T00:09:21+08:00",
+        "tables_used": [
+          "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_strategy_comparison.csv",
+          "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/filtered_account_comparison.csv",
+          "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/filtered_account_annual_metrics.csv",
+          "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/d58_account_metrics.csv",
+          "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/d58_account_annual_metrics.csv"
+        ],
+        "filters": [
+          "signals: 2023-2025",
+          "double_slippage",
+          "cash allowed"
+        ],
+        "metric_definitions": [
+          "Annualized log growth = log(ending/start) × 252 / 727。",
+          "连续账户包含槽位、整手、最低佣金、递延和逐日盯市。"
+        ]
+      }
+    },
+    {
+      "id": "annual_source",
+      "label": "筛选规则逐年账户收益",
+      "path": "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_account_annual.csv",
+      "query": {
+        "engine": "duckdb",
+        "language": "sql",
+        "sql": "SELECT * FROM read_csv_auto('daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_account_annual.csv')",
+        "description": "比较广义非 D2 Top1 与 D58 Top1/Top2 的逐年账户收益。",
+        "executed_at": "2026-07-22T00:09:21+08:00",
+        "tables_used": [
+          "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_account_annual.csv",
+          "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/filtered_account_annual_metrics.csv",
+          "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/d58_account_annual_metrics.csv"
+        ],
+        "filters": [
+          "double_slippage",
+          "calendar years: 2023-2025"
+        ],
+        "metric_definitions": [
+          "年度收益由连续账户年初至年末逐日盯市权益计算。"
+        ]
+      }
+    },
+    {
+      "id": "unit_source",
+      "label": "每日独立单位时间效益",
+      "path": "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_unit_time_comparison.csv",
+      "query": {
+        "engine": "duckdb",
+        "language": "sql",
+        "sql": "SELECT * FROM read_csv_auto('daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_unit_time_comparison.csv')",
+        "description": "比较广义非 D2 Top1 与 D58 Top2 的绝对效益和相对 alpha。",
+        "executed_at": "2026-07-22T00:09:21+08:00",
+        "tables_used": [
+          "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/audit_unit_time_comparison.csv",
+          "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/filtered_unit_time_exact.csv",
+          "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/d58_unit_time_metrics.csv"
+        ],
+        "filters": [
+          "double_slippage",
+          "daily independent cohorts",
+          "cash on no-signal dates"
+        ],
+        "metric_definitions": [
+          "绝对效益 = mean[log1p(selected return)/resolved day] × 252。",
+          "单位时间 alpha = mean[selected speed - universe speed] × 252。"
+        ]
+      }
+    },
+    {
+      "id": "d58_ic_source",
+      "label": "D58 子池内排序诊断",
+      "path": "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/d58_within_group_ic.csv",
+      "query": {
+        "engine": "duckdb",
+        "language": "sql",
+        "sql": "SELECT * FROM read_csv_auto('daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/d58_within_group_ic.csv') ORDER BY year",
+        "description": "在预测退出为 D58 的候选子池内，计算 score 对 opportunity 与自身退出实现价值的逐日 Rank IC，并比较 Top2 与子池均值。",
+        "executed_at": "2026-07-22T00:19:20+08:00",
+        "tables_used": [
+          "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/d58_within_group_ic.csv",
+          "daily_research/output/path_policy/studies/seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1/analysis/l35v3_exit_audit_20260721/claim_checks.json"
+        ],
+        "filters": [
+          "predicted_exit_day = 58",
+          "development years: 2023-2025",
+          "Top2 requires at least two D58 candidates on the signal date"
+        ],
+        "metric_definitions": [
+          "Within-D58 IC 在每个信号日的 D58 子池内计算 Spearman 相关后按日平均。",
+          "Top2 realized value delta = D58 子池内 score Top2 的 realized_plan_value 均值减去同日 D58 子池均值，再乘 252。"
+        ]
+      }
+    }
+  ],
+  "package_info": {
+    "builder_version": "l35v3_exit_audit_v1",
+    "model": "L35V3",
+    "development_years": [
+      2023,
+      2024,
+      2025
+    ],
+    "cost_scenario": "double_slippage",
+    "training_performed": false
+  }
+}

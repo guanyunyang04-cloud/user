@@ -40,7 +40,6 @@ from daily_research.path_policy.qdp_v2_sequence_path_pack import (
     path_value_column,
     simulate_a_share_round_trip,
 )
-from daily_research.path_policy.qdp_v2_sequence_flat_lgbm import _feature_names, _select_indices
 from daily_research.path_policy.qdp_v2_sequence_path_training import (
     DateGroupedBatchSampler,
     GlobalTailBatchSampler,
@@ -1753,38 +1752,19 @@ def test_sequence_pack_dataset_get_batch_reads_date_grouped_windows(tmp_path) ->
     # First channel, first feature: dates 0..2 for symbol 0 and 1.
     assert torch.equal(batch["x"][0, :, 0], torch.tensor([0.0, 10.0, 20.0]))
     assert torch.equal(batch["x"][1, :, 0], torch.tensor([1.0, 11.0, 21.0]))
-    names = _feature_names(dataset)
-    assert len(names) == 15
-    assert names[0] == "t-2__daily_raw__daily_raw_0"
-    selected = _select_indices(dataset, samples_per_date=1, max_samples=0, seed=7)
-    assert selected.shape == (1,)
-
     daily_only = SequencePathPackDataset(manifest, split="train", input_channel_profile=INPUT_CHANNEL_PROFILE_DAILY_ONLY)
     daily_only_batch = daily_only.get_batch([0, 1])
 
     assert daily_only.channel_order == ["daily_raw", "daily_state"]
     assert daily_only.input_dim == 3
     assert daily_only_batch["x"].shape == (2, 3, 3)
-    daily_only_names = _feature_names(daily_only)
-    assert len(daily_only_names) == 9
-    assert all("__intraday_summary__" not in name for name in daily_only_names)
-    assert all("__limit_structure__" not in name for name in daily_only_names)
-
     no_intraday = SequencePathPackDataset(manifest, split="train", input_channel_profile=INPUT_CHANNEL_PROFILE_NO_INTRADAY_SUMMARY)
-    no_intraday_names = _feature_names(no_intraday)
     assert no_intraday.channel_order == ["daily_raw", "daily_state", "limit_structure"]
     assert no_intraday.input_dim == 4
-    assert len(no_intraday_names) == 12
-    assert all("__intraday_summary__" not in name for name in no_intraday_names)
-    assert any("__limit_structure__" in name for name in no_intraday_names)
 
     no_limit = SequencePathPackDataset(manifest, split="train", input_channel_profile=INPUT_CHANNEL_PROFILE_NO_LIMIT_STRUCTURE)
-    no_limit_names = _feature_names(no_limit)
     assert no_limit.channel_order == ["daily_raw", "daily_state", "intraday_summary"]
     assert no_limit.input_dim == 4
-    assert len(no_limit_names) == 12
-    assert any("__intraday_summary__" in name for name in no_limit_names)
-    assert all("__limit_structure__" not in name for name in no_limit_names)
 
     mask_meta = {}
     for mask_name in ["has_bar", "is_suspended", "previous_close_valid", "zero_range", "corr_valid", "tradable"]:

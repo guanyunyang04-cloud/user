@@ -1,8 +1,0 @@
-{
-  "schema_version": 1,
-  "description": "daily_research child-brain workflow registry. Workspace governance and brain-native fallback workflows live in brain/workflows/registry.json.",
-  "workflows": [
-    {"id": "continuous_policy_safe_screening", "title": "Continuous Policy Safe Screening", "category": "continuous_policy", "playbook": "daily_research/brain/workflows/playbooks/core.json#continuous_policy_safe_screening"},
-    {"id": "continuous_policy_result_review", "title": "Continuous Policy Result Review", "category": "continuous_policy", "playbook": "daily_research/brain/workflows/playbooks/core.json#continuous_policy_result_review"}
-  ]
-}

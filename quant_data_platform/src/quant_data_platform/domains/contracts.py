@@ -712,24 +712,7 @@ def validate_provider_name(provider_name: str, *, allow_tdx_family: bool = False
     if normalized in TDX_FAMILY_PROVIDER_NAMES and not allow_tdx_family:
         raise ValueError(
             "TDX-family provider is disabled by default. "
-            f"provider={provider_name}; use quant_data_platform.ingest.refresh_daily with non-TDX providers."
-        )
-    return normalized
-
-
-def ensure_tdx_free_data_source(data_source: str, *, allow_legacy: bool = False) -> str:
-    normalized = str(data_source or "lake").strip().lower()
-    aliases = {
-        "data_lake": "lake",
-        "csv_imported_lake": "lake",
-        "csv_lake": "lake",
-    }
-    normalized = aliases.get(normalized, normalized)
-    if normalized in TDX_FAMILY_PROVIDER_NAMES and not allow_legacy:
-        raise ValueError(
-            "TDX-family data_source is no longer allowed in formal daily_research paths. "
-            "Run `python -m quant_data_platform.ingest.refresh_daily ...` to update the lake, "
-            "then pass `--data-source lake --lake-dataset-id <explicit_id>`."
+            f"provider={provider_name}; use `qdp update` with the current providers."
         )
     return normalized
 

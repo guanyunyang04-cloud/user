@@ -1,4 +1,0 @@
-interface:
-  display_name: "Workspace Brain"
-  short_description: "Use the workspace main brain for takeover, routing, governance, and child-brain handoff."
-  default_prompt: "Start from the user's goal, git state, and the most relevant brain/body evidence; use capsule, route, or bootstrap as optional diagnostics when they reduce uncertainty."

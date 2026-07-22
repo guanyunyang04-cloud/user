@@ -1,0 +1,116 @@
+# Repository simplification audit — 2026-07-22
+
+## Outcome
+
+The workspace was reduced to four active top-level systems:
+
+- `quant_data_platform`: the current QDP store and its direct maintenance code;
+- `daily_research`: protected research data, registered Seq100 models, compact
+  evidence, two paused studies, and shared training/evaluation primitives;
+- `brain`: a takeover map and protected-object registry;
+- `tools`: the memory guard and one workspace-integrity check.
+
+There is no active frontend, execution application, broker/account/order state,
+compatibility facade, workflow engine, or terminal-experiment framework.
+
+## Protected material
+
+The following material was preserved and verified:
+
+- QDP: 187 files and 5,649,226,128 bytes before and after cleanup;
+  `active_as_of_date=2026-07-21`, 14 active datasets, and `check --quick=ok`.
+- Research store reconciliation:
+  `21,629,225,561 - 315,869,744 + 633,998,518 + 46,249,895 =
+  21,993,604,230` bytes and `223 - 24 + 261 + 2 = 462` files. The subtraction
+  is one proven duplicate overlay; additions are the protected traditional
+  BaoStock archive and two migrated 2026 fold indexes. No other store delta is
+  present.
+- Traditional source archive: 260 source files, 633,997,994 bytes, bundle
+  SHA-256 `8bc55aee97d2f2c5da490f97c9b1ba16e29f8cf8bd244236805ca2361a68bf2f`.
+- Migrated 2026 supervised index SHA-256:
+  `9da3e8ae4bbebc41b2d72bd11acc95b534bf001dad783415ff6da17f88ac2842`.
+- Migrated 2026 candidate index SHA-256:
+  `5160693cf9075856f11da158c9164c66c75b95248e7dd85113baf63c3aa09af6`.
+- Model registry: all 12 Legal flat, Structured 100×32, and L35V2 180×35
+  bundles for 2023–2026 passed checkpoint and training-summary SHA-256 checks.
+- Research evidence: 12 indexed conclusions backed by 33 compact report/metric
+  files. The 2026-07-21 read-only signal evidence remains included.
+- Paused studies: L35V2 2020–2022/six-fold confirmation and true batch 1024.
+
+No provider or QDP update command was invoked during cleanup. No QDP dataset,
+base pack, retained overlay, or registered checkpoint was rewritten.
+
+## Removed material
+
+- old frontend/product repository, T0/execution project, and all live/account/
+  order/client surfaces;
+- retired traditional-research runner/tests/output after moving its data and 160
+  reference documents;
+- legacy QDP lake/ingest/memmap/features/event-pack builders, old provider
+  evaluation/health/manager, v3 bootstrap, and one-off repair scripts;
+- Daily Research baseline, continuous-policy, deep-alpha, execution, maintenance
+  frameworks, report appenders, Q-curves, alpha/path20, global-tail, intraday,
+  Capital Speed V3, bounded-window, and other terminal experiment modules;
+- 55.81 GiB of Daily Research process output, 0.15 GiB cache, about 1.29 GiB
+  traditional process output, QDP agent runs/logs/spill, and temporary caches;
+- 446 study checkpoint files (about 12.38 GiB) after the 12 required model
+  bundles were copied and hash-verified in the stable registry;
+- multi-layer brain governance/workflow/runtime tooling and redundant skill
+  agents/scripts.
+
+Tracked source deleted by this change remains recoverable from Git history.
+Ignored generated output and duplicate/partial experiment artifacts were deleted
+from the workspace and are not recoverable there; this was explicitly authorized
+after compact evidence and required checkpoints were verified.
+
+## Complexity reduction
+
+| Measure | Before | After | Reduction |
+|---|---:|---:|---:|
+| Projected tracked files | 1,929 | 539 | 72.1% |
+| Python files | 1,073 | 67 | 93.8% |
+| Python LOC | 549,581 | 47,756 | 91.3% |
+| Test files | 333 | 19 | 94.3% |
+| Test LOC | 96,977 | 7,374 | 92.4% |
+| Non-Git workspace size | about 90.1 GiB | 26.383 GiB | about 63.7 GiB |
+
+The nine retained Seq100 modules are the pack builder, model trainer, fold
+contract validator, candidate/execution semantics, exit audit, finite-capital
+backtest, raw atlas, compact registry CLI, and package initializer. The large
+trainer and QDP provider module remain because they directly encode current
+model and data-update semantics; splitting them without behavioral change would
+add migration risk rather than remove a current concept.
+
+## Root-cause controls
+
+- `AGENTS.md` requires one current name/path/contract/CLI per concept, no default
+  backward compatibility, and experiment closure by evidence compaction plus
+  machinery removal.
+- `brain/object_registry.json` is the only protected-object map.
+- Brain hot paths are only `README.md`, `state.md`, and manifests; history is
+  reference-only.
+- The canonical and installed `workspace-brain` skill are byte-identical at
+  SHA-256 `50a40e01f9173becf205b2c5c88d2b4ac0553f8fe5f777b29764f65ff0a1f519`.
+  Its former workflow agents and scripts were removed.
+- User skill directories were audited. The independent A-share technical-
+  analysis skill remains bounded and reusable; only its generated bytecode cache
+  was removed. `.agents` skills and Codex/OpenAI/third-party skill packages were
+  not rewritten because they are not workspace-owned brain logic.
+- Tests now protect data/PIT boundaries, fold and normalization semantics,
+  training/evaluation behavior, execution/cost math, task contracts, QDP
+  manifest/repair/audit behavior, and compact registry integrity. Retired
+  wrappers and layouts are not tested.
+
+## Verification
+
+- `210 passed` across all retained Daily Research, brain, and QDP tests.
+- A real L35V2 2025 development fold recomputed exactly under the extracted
+  fold-contract module; contract SHA-256 remained
+  `05211f83d6ab7ae5d223749cefd3a738e392aa1865b761b88d03a3d05c4df50c`.
+- Compact Seq100 verification: 12/12 model bundles, 12/12 research records, and
+  2/2 active studies valid.
+- Workspace integrity: zero errors and zero warnings.
+- QDP status and quick check: `ok`.
+- `git diff --check` and staged deletion checks: clean.
+
+No commit, push, publication, training, inference, or real order was performed.

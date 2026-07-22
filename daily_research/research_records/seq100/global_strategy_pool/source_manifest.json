@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "artifact_type": "seq100_global_strategy_pool_audit_source_manifest",
+  "source_read_only": true,
+  "files": [
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_legal_structured_path_rolling_2023_2025_v1\\analysis\\finite_capital_20260719\\annual_metrics.csv",
+      "size": 282072,
+      "sha256": "72b3b406786485f06f162be388c2c67d3ed591e26030eb1e56cec4f31c8196d5"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_legal_structured_path_rolling_2023_2025_v1\\analysis\\finite_capital_20260719\\portfolio_metrics.csv",
+      "size": 319055,
+      "sha256": "07b8071c929ff75f71ff642cb71dd8b77c95ade548fa68339ee17edc9346725d"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_legal_structured_path_rolling_2023_2025_v1\\analysis\\finite_capital_20260719\\top1_annual_metrics.csv",
+      "size": 1867974,
+      "sha256": "e9ef4905b6994809bfb6e6f3386536daac231fed32aba77077facb75d3f02a8d"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_legal_structured_path_rolling_2023_2025_v1\\analysis\\finite_capital_20260719\\top1_metrics.csv",
+      "size": 2037240,
+      "sha256": "eb6dd2476c1bb900c39ea786c68e8ada9a514870288620c156822230b146130a"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_180x35_2026_fold_v1\\best_model.pt",
+      "size": 5786678,
+      "sha256": "faacdfba49ae6d17f4f36806f4ef35e2097cd090ca8d2c5c74bdabf27aeb6cfd"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_180x35_2026_fold_v1\\d7_account_metrics.csv",
+      "size": 4020,
+      "sha256": "b3a5017b2244f944671b21e402c838749a9f30f41442efa446979c70743e1bf4"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_180x35_2026_fold_v1\\full_label_metrics.csv",
+      "size": 4297,
+      "sha256": "105fdc8b381b566c3535b5947881b055a7ffea940e1b35e79b229148a448678a"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_180x35_2026_fold_v1\\monitor.json",
+      "size": 338,
+      "sha256": "727c824b3c0a1dc18b4ba0b060aad85705b20ea86296f784268ab662ae096469"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_180x35_2026_fold_v1\\progress.json",
+      "size": 268,
+      "sha256": "204b3675038babfdafb14abd25721acf30bd75a43868e9c8c1122b9c8b110d47"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_180x35_2026_fold_v1\\sequence_path_training_summary.json",
+      "size": 206279,
+      "sha256": "18d2ec13154b14de26708d3dcc86a5eebede64e6e9077be8271cc9dea8e4eab5"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_180x35_2026_fold_v1\\study.json",
+      "size": 11476,
+      "sha256": "e18e44173d9d97f97e94784f441e4cc8f7565bb8e04c7b8c72237d23205c0092"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_input_ablation_rolling_2023_2025_v1\\stage1_capital_review\\account_annual_metrics.csv",
+      "size": 105803,
+      "sha256": "81cef3ab34f91fd361e291350bb0e268e5bbf272ba37e172be1d87163184ebab"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_input_ablation_rolling_2023_2025_v1\\stage1_capital_review\\account_metrics.csv",
+      "size": 127563,
+      "sha256": "7bbde4d5333d856cb806a65d0a1fa4bb588d0579b9c3720c0e3d211a4798364c"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_input_ablation_rolling_2023_2025_v1\\stage1_capital_speed_review\\account_annual_metrics.csv",
+      "size": 1742349,
+      "sha256": "777184ece520a2c173ad65fe32a50a8653ef3148ad4e4b1a6868da58591fa89e"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_input_ablation_rolling_2023_2025_v1\\stage1_capital_speed_review\\account_metrics.csv",
+      "size": 2169386,
+      "sha256": "4880dfa04028d74645ef25cc42dd01e11f80ac3da7580ba1d935d4a022512df8"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_input_ablation_rolling_2023_2025_v1\\stage2_capital_review\\account_annual_metrics.csv",
+      "size": 55510,
+      "sha256": "447d93548dcf200eac2f1e939ef6c6f5998889afabbece12f3158471065454de"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_input_ablation_rolling_2023_2025_v1\\stage2_capital_review\\account_metrics.csv",
+      "size": 66623,
+      "sha256": "7432c385ae95d6d9771cff8c7641b2c8f40319dccfc11d5ac3a74688b48543e3"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1\\evaluations\\l35v2\\capital_annual_metrics.csv",
+      "size": 1257126,
+      "sha256": "ab963c097c789d52102846f23cf7d14697386d6d13d58160ee5c0ee0f59d24a4"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1\\evaluations\\l35v2\\capital_metrics.csv",
+      "size": 1739662,
+      "sha256": "c5e700ea10ac5a11ee63f0db4f6096e32bcb4de2858e834549dcaa12cfd195d4"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1\\evaluations\\l35v2\\unit_time_alpha_daily.csv",
+      "size": 82578191,
+      "sha256": "a48fec79e59572a7466d49649a68c06462caff30ebcbd0b064321b5cdddacb8b"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1\\evaluations\\l35v3\\capital_annual_metrics.csv",
+      "size": 1262879,
+      "sha256": "2e0bec1ed6f41e97006d3c75264b530f9de8a1b25822a2dbe2358125ee22563c"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1\\evaluations\\l35v3\\capital_metrics.csv",
+      "size": 1766393,
+      "sha256": "9b49f53162c7dc09342c8ab46b1d6b8189f199c7681a5f695b0d9743e2794bb3"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1\\evaluations\\l43v2\\capital_annual_metrics.csv",
+      "size": 1260571,
+      "sha256": "48fe7972d7c0eb5b50386b9b8d1a04d49c94c5ae921de84e0d687679507dc5c3"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_local_intraday_capital_speed_rolling_2023_2025_v1\\evaluations\\l43v2\\capital_metrics.csv",
+      "size": 1743265,
+      "sha256": "63c056544577d728e237de3cb3cc9ececeff7ceb152a470ee0c51a8c3cac61ec"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_training_window_ablation_2025_v1\\capital_annual_metrics.csv",
+      "size": 854669,
+      "sha256": "62a7645b41cb8b1a09a1b84ee197190757724e1c76cfbd4eefbc86cf9faee600"
+    },
+    {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_training_window_ablation_2025_v1\\capital_metrics.csv",
+      "size": 2004043,
+      "sha256": "826761d446b61869ebd841df15929ff217df61428f0be3a0b3c7d55f236ab76e"
+    }
+  ]
+}

@@ -110,9 +110,9 @@ def _build_tiny_pack(tmp_path: Path, *, fixed_oos: bool) -> Path:
                 "oos_feature_date_count": 0,
             }
         )
-        from daily_research.path_policy.seq100_walkforward import _compute_fold_training_contract
+        from daily_research.path_policy.seq100_fold_contract import compute_fold_training_contract
 
-        manifest["fold_training_contract"] = _compute_fold_training_contract(manifest)
+        manifest["fold_training_contract"] = compute_fold_training_contract(manifest)
     manifest_path = tmp_path / "manifest.json"
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     return manifest_path

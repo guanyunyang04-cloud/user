@@ -1,0 +1,282 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "2026 年迄今最佳现有执行结果",
+    "description": "现有 2026 可执行窗口的双滑点连续账户排名、截止日敏感性与单位时间诊断。",
+    "generatedAt": "2026-07-22T01:31:54+08:00",
+    "cards": [],
+    "charts": [
+      {
+        "id": "extended_return_chart",
+        "title": "121 日 D7 账户收益排名",
+        "subtitle": "四个 checkpoint、Top1/1 与 Top3/3；双滑点，正负收益以零线分隔。",
+        "type": "bar",
+        "dataset": "extended_ranking",
+        "sourceId": "d7_account_source",
+        "encodings": {
+          "x": {
+            "field": "strategy",
+            "type": "ordinal",
+            "label": "执行方式"
+          },
+          "y": {
+            "field": "total_return",
+            "type": "quantitative",
+            "format": "percent",
+            "label": "账户收益"
+          },
+          "color": {
+            "field": "checkpoint",
+            "type": "nominal",
+            "label": "Checkpoint"
+          },
+          "tooltip": [
+            {"field": "annualized_log_growth", "format": "percent", "label": "区间年化对数增长"},
+            {"field": "maximum_drawdown", "format": "percent", "label": "最大回撤"},
+            {"field": "trade_count", "format": "number", "label": "交易数"}
+          ]
+        },
+        "valueFormat": "percent",
+        "legend": {
+          "position": "bottom",
+          "sort": "spec"
+        },
+        "labels": {
+          "values": "all"
+        },
+        "settings": {
+          "groupMode": "grouped"
+        },
+        "layout": "full"
+      }
+    ],
+    "tables": [
+      {
+        "id": "extended_ranking_table",
+        "title": "121 个信号日的 D7 账户排名",
+        "subtitle": "2026 年 1 月 5 日至 7 月 7 日信号，D7 最晚于 7 月 16 日完成；100 万元初始资金、双滑点。",
+        "dataset": "extended_ranking",
+        "sourceId": "d7_account_source",
+        "defaultSort": {
+          "field": "rank",
+          "direction": "asc"
+        },
+        "density": "spacious",
+        "columns": [
+          {"field": "rank", "label": "排名", "format": "number"},
+          {"field": "checkpoint", "label": "Checkpoint", "type": "text"},
+          {"field": "strategy", "label": "执行方式", "type": "text"},
+          {"field": "total_return", "label": "账户收益", "format": "percent", "movement": true},
+          {"field": "annualized_log_growth", "label": "区间年化对数增长", "format": "percent", "movement": true},
+          {"field": "maximum_drawdown", "label": "最大回撤", "format": "percent", "movement": true},
+          {"field": "trade_count", "label": "交易数", "format": "number"}
+        ]
+      },
+      {
+        "id": "cutoff_table",
+        "title": "Top1/1 + D7 的截止日敏感性",
+        "subtitle": "严格 101 日窗口截至 6 月 8 日；扩展 121 日窗口增加最后 20 个信号日。",
+        "dataset": "cutoff_sensitivity",
+        "sourceId": "d7_account_source",
+        "defaultSort": {
+          "field": "checkpoint",
+          "direction": "asc"
+        },
+        "density": "spacious",
+        "columns": [
+          {"field": "checkpoint", "label": "Checkpoint", "type": "text"},
+          {"field": "strict_return", "label": "严格 101 日收益", "format": "percent", "movement": true},
+          {"field": "extended_return", "label": "扩展 121 日收益", "format": "percent", "movement": true},
+          {"field": "late_period_change", "label": "加入后 20 日的变化", "format": "percent", "movement": true}
+        ]
+      },
+      {
+        "id": "unit_time_table",
+        "title": "48 日共同窗口的单位时间诊断",
+        "subtitle": "每日 cohort 等权，双滑点；这是机会质量诊断，不是有限槽位账户收益。",
+        "dataset": "unit_time_diagnostics",
+        "sourceId": "unit_time_source",
+        "defaultSort": {
+          "field": "diagnostic",
+          "direction": "asc"
+        },
+        "density": "spacious",
+        "columns": [
+          {"field": "diagnostic", "label": "诊断口径", "type": "text"},
+          {"field": "checkpoint", "label": "Checkpoint", "type": "text"},
+          {"field": "strategy", "label": "执行方式", "type": "text"},
+          {"field": "selected_log_speed", "label": "选中组合年化 log speed", "format": "percent", "movement": true},
+          {"field": "alpha_log_speed", "label": "年化 alpha log speed", "format": "percent", "movement": true},
+          {"field": "signal_days", "label": "信号日", "format": "number"}
+        ]
+      }
+    ],
+    "sources": [
+      {
+        "id": "d7_account_source",
+        "label": "Structured 180×35 四年代 2026 D7 连续账户结果",
+        "path": "daily_research/output/path_policy/studies/seq100_structured_180x35_2026_fold_v1/analysis/checkpoint_vintages_2023_2026_20260721/d7_vintage_metrics.csv",
+        "query": {
+          "engine": "duckdb",
+          "language": "sql",
+          "sql": "SELECT * FROM read_csv_auto('daily_research/output/path_policy/studies/seq100_structured_180x35_2026_fold_v1/analysis/checkpoint_vintages_2023_2026_20260721/d7_vintage_metrics.csv') WHERE cost_scenario = 'double_slippage' ORDER BY window_name, mark_to_market_total_return DESC;",
+          "description": "四个 Structured 180×35 V2 checkpoint 在 2026 年严格与扩展 D7 窗口中的同合同有限资金账户结果。八个扩展窗口精确结果用表格而非图形呈现，以保留可审计数值。",
+          "executed_at": "2026-07-22T01:31:54+08:00",
+          "tables_used": [
+            "daily_research/output/path_policy/studies/seq100_structured_180x35_2026_fold_v1/analysis/checkpoint_vintages_2023_2026_20260721/d7_vintage_metrics.csv"
+          ],
+          "filters": [
+            "cost_scenario = double_slippage",
+            "signal_start = 2026-01-05",
+            "extended_121 signal_end = 2026-07-07",
+            "strict_101 signal_end = 2026-06-08"
+          ],
+          "metric_definitions": [
+            "账户收益 = mark_to_market_equity / 1,000,000 - 1；这些行全部已平仓，因此等于 realized cash return。",
+            "区间年化对数增长 = 按窗口交易日数将 log ending-equity ratio 年化；不是完整自然年 CAGR。",
+            "账户合同为无杠杆、禁止 pyramiding、次日开盘买入、固定 D7 合法收盘退出、不可卖时最多递延 20 个交易日。"
+          ]
+        }
+      },
+      {
+        "id": "unit_time_source",
+        "label": "Structured 180×35 四年代 2026 单位时间 alpha",
+        "path": "daily_research/output/path_policy/studies/seq100_structured_180x35_2026_fold_v1/analysis/checkpoint_vintages_2023_2026_20260721/policy_alpha_metrics.csv",
+        "query": {
+          "engine": "duckdb",
+          "language": "sql",
+          "sql": "SELECT checkpoint_vintage, policy_name, top_k, annualized_selected_log_speed, annualized_alpha_log_speed, signal_date_count FROM read_csv_auto('daily_research/output/path_policy/studies/seq100_structured_180x35_2026_fold_v1/analysis/checkpoint_vintages_2023_2026_20260721/policy_alpha_metrics.csv') WHERE cost_scenario = 'double_slippage' AND top_k = 1 ORDER BY annualized_alpha_log_speed DESC;",
+          "description": "48 个完整标签信号日上，D2–D60、model_plan 与 rolling_path 的每日独立 cohort 单位时间收益和 alpha。",
+          "executed_at": "2026-07-22T01:31:54+08:00",
+          "tables_used": [
+            "daily_research/output/path_policy/studies/seq100_structured_180x35_2026_fold_v1/analysis/checkpoint_vintages_2023_2026_20260721/policy_alpha_metrics.csv"
+          ],
+          "filters": [
+            "cost_scenario = double_slippage",
+            "signal dates = 2026-01-05..2026-03-19",
+            "top_k = 1"
+          ],
+          "metric_definitions": [
+            "选中组合年化 log speed = 每个信号日 log1p(selected return) / resolved holding day，跨日平均后乘 252。",
+            "年化 alpha log speed = 每个信号日的 selected log speed 减 universe log speed，跨日平均后乘 252。"
+          ]
+        }
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# 2026 年迄今最佳现有执行结果",
+        "layout": "full"
+      },
+      {
+        "id": "executive_summary",
+        "type": "markdown",
+        "body": "## Executive Summary（执行摘要）\n\n- **截至当前可完整执行到 2026 年 7 月 16 日的现有账户结果，冠军是 `Structured 180×35 V2` 的 2025 checkpoint，采用 `Top1 / 1 slot + fixed D7`。** 在 121 个信号日、双滑点下，100 万元增至 118.94 万元，收益 **+18.94%**。\n- **这不是所有模型、所有退出方式的最终全局冠军。** Legal 与 Structured 100×32 尚无同等 121 日账户评价；D2–D60、model plan 和 rolling path 只有 48 日共同窗口可比较。\n- **结论对截止日敏感。** 截至 6 月 8 日的严格窗口由 2023 checkpoint 领先；加入最后 20 个信号日后，2025 checkpoint 才成为第一，因此当前结果适合视为临时领先，而不是稳定升级证据。",
+        "layout": "full",
+        "sourceId": "d7_account_source"
+      },
+      {
+        "id": "scope",
+        "type": "markdown",
+        "body": "## 比较口径\n\n这里的“目前最好”指：已有产物中，使用相同 2026 扩展窗口、100 万元初始资金、无杠杆、双滑点和固定 D7 的**实际连续账户终值最高**。信号从 1 月 5 日到 7 月 7 日，最后一批 D7 于 7 月 16 日完成。",
+        "layout": "full",
+        "sourceId": "d7_account_source"
+      },
+      {
+        "id": "latest_finding",
+        "type": "markdown",
+        "body": "## 2025 checkpoint 的 Top1/1 在最新窗口领先\n\n冠军账户收益为 **+18.94%**，区间年化对数增长 **34.41%**，最大回撤 **-32.71%**，18 笔交易。胜率只有 **38.89%**，但盈亏比 **2.30**、profit factor **1.46**，因此盈利主要依靠较高盈亏比，而不是高胜率。Top3/3 在同一模型下亏损 24.50%，说明 2026 年目前的优势高度集中在第一名。",
+        "layout": "full",
+        "sourceId": "d7_account_source"
+      },
+      {
+        "id": "extended_ranking_block",
+        "type": "chart",
+        "chartId": "extended_return_chart",
+        "layout": "full"
+      },
+      {
+        "id": "extended_ranking_table_block",
+        "type": "table",
+        "tableId": "extended_ranking_table",
+        "layout": "full"
+      },
+      {
+        "id": "cutoff_finding",
+        "type": "markdown",
+        "body": "## 后 20 个信号日改变了冠军\n\n严格 101 日窗口中，2023 checkpoint 的 Top1/1 收益 **+63.07%**，高于 2025 checkpoint 的 **+39.38%**；扩展到 121 日后，两者分别降至 **+7.14%** 和 **+18.94%**。这说明后段交易显著拖累全部方案，并改变了相对排序。",
+        "layout": "full",
+        "sourceId": "d7_account_source"
+      },
+      {
+        "id": "cutoff_block",
+        "type": "table",
+        "tableId": "cutoff_table",
+        "layout": "full"
+      },
+      {
+        "id": "unit_time_finding",
+        "type": "markdown",
+        "body": "## 单位时间诊断回答的是另一个问题\n\n在所有退出方式都能公平比较的 48 日窗口，最高绝对选中组合速度是 2023 checkpoint 的 `Top1 + fixed D8`；最高相对 alpha 速度是 2025 checkpoint 的 `Top1 + rolling_path`。这些结果按每天可重新部署的独立 cohort 计算，不受槽位占用限制，所以不能替代 121 日连续账户冠军。",
+        "layout": "full",
+        "sourceId": "unit_time_source"
+      },
+      {
+        "id": "unit_time_block",
+        "type": "table",
+        "tableId": "unit_time_table",
+        "layout": "full"
+      },
+      {
+        "id": "recommendation",
+        "type": "markdown",
+        "body": "## 当前建议\n\n在**仅使用现有、已完成的 121 日账户证据**时，把 `Structured 180×35 V2 / 2025 checkpoint / Top1/1 / fixed D7` 记为当前临时冠军。不要据此替换已选基线或转为实盘：应先让 Legal、Structured 100×32，以及 D2–D60、model plan、rolling path 在同一扩展窗口完成同合同账户比较。",
+        "layout": "full"
+      },
+      {
+        "id": "questions",
+        "type": "markdown",
+        "body": "## 仍需回答的问题\n\n- 2025 checkpoint 的领先能否在后续月份保持，而不是由少数高盈亏比交易驱动？\n- Legal 与 Structured 100×32 在同一 121 日窗口、全部 Top-K/槽位组合中是否会超过当前冠军？\n- 在不事后选择 2026 期限的前提下，预注册执行规则能否在新信号上继续实现正增长？",
+        "layout": "full"
+      },
+      {
+        "id": "caveats",
+        "type": "markdown",
+        "body": "## 局限与假设\n\n- 121 日扩展结果目前只覆盖预定 D7 账户，不是全部退出方式的全市场扫描。\n- 2026 checkpoint 自身并非冠军：其 Top1/1 + D7 收益为 **-26.23%**。\n- 48 日内对 2026 checkpoint 事后扫描曾得到 `Top1/1 + fixed D6` 的正收益，但只有 8 笔交易，且属于 61 种策略中的事后最优，不能推翻上述主结论。\n- 所有数值来自研究回测，不代表未来收益，也不是实盘下单建议。",
+        "layout": "full",
+        "sourceId": "d7_account_source"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-07-22T01:31:54+08:00",
+    "status": "ready",
+    "datasets": {
+      "extended_ranking": [
+        {"rank": 1, "checkpoint": "2025", "strategy": "Top1/1 + fixed D7", "display_label": "2025 / Top1/1 + D7", "total_return": 0.1893663848074647, "annualized_log_growth": 0.34411039626919654, "maximum_drawdown": -0.3271359976331054, "trade_count": 18},
+        {"rank": 2, "checkpoint": "2023", "strategy": "Top1/1 + fixed D7", "display_label": "2023 / Top1/1 + D7", "total_return": 0.0713964716754687, "annualized_log_growth": 0.1368397924384542, "maximum_drawdown": -0.3983350230807702, "trade_count": 18},
+        {"rank": 3, "checkpoint": "2023", "strategy": "Top3/3 + fixed D7", "display_label": "2023 / Top3/3 + D7", "total_return": 0.031122156364496556, "annualized_log_growth": 0.060812722139988735, "maximum_drawdown": -0.2979819022679324, "trade_count": 54},
+        {"rank": 4, "checkpoint": "2026", "strategy": "Top3/3 + fixed D7", "display_label": "2026 / Top3/3 + D7", "total_return": -0.2064016152007545, "annualized_log_growth": -0.4587149219746615, "maximum_drawdown": -0.3284264802273551, "trade_count": 54},
+        {"rank": 5, "checkpoint": "2025", "strategy": "Top3/3 + fixed D7", "display_label": "2025 / Top3/3 + D7", "total_return": -0.24498290924510757, "annualized_log_growth": -0.5576043550663308, "maximum_drawdown": -0.3801417778827144, "trade_count": 54},
+        {"rank": 6, "checkpoint": "2026", "strategy": "Top1/1 + fixed D7", "display_label": "2026 / Top1/1 + D7", "total_return": -0.2622786656982993, "annualized_log_growth": -0.6035878631062014, "maximum_drawdown": -0.45260976472373193, "trade_count": 18},
+        {"rank": 7, "checkpoint": "2024", "strategy": "Top3/3 + fixed D7", "display_label": "2024 / Top3/3 + D7", "total_return": -0.3386630920884639, "annualized_log_growth": -0.8204720663574048, "maximum_drawdown": -0.4215285545826716, "trade_count": 53},
+        {"rank": 8, "checkpoint": "2024", "strategy": "Top1/1 + fixed D7", "display_label": "2024 / Top1/1 + D7", "total_return": -0.5158660662663235, "annualized_log_growth": -1.4393638532668223, "maximum_drawdown": -0.5843219035962628, "trade_count": 18}
+      ],
+      "cutoff_sensitivity": [
+        {"checkpoint": "2023", "strict_return": 0.6307162934128612, "extended_return": 0.0713964716754687, "late_period_change": -0.5593198217373925},
+        {"checkpoint": "2024", "strict_return": -0.3155989671331699, "extended_return": -0.5158660662663235, "late_period_change": -0.2002670991331536},
+        {"checkpoint": "2025", "strict_return": 0.39383230010070447, "extended_return": 0.1893663848074647, "late_period_change": -0.20446591529323977},
+        {"checkpoint": "2026", "strict_return": 0.03931036361689566, "extended_return": -0.2622786656982993, "late_period_change": -0.30158902931519494}
+      ],
+      "unit_time_diagnostics": [
+        {"diagnostic": "最高绝对速度", "checkpoint": "2023", "strategy": "Top1 + fixed D8", "selected_log_speed": 1.4997433204075865, "alpha_log_speed": 1.7308076196604758, "signal_days": 48},
+        {"diagnostic": "最高相对 alpha", "checkpoint": "2025", "strategy": "Top1 + rolling_path", "selected_log_speed": 1.4063172427333857, "alpha_log_speed": 1.8661526672881579, "signal_days": 48}
+      ]
+    }
+  }
+}

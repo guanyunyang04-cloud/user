@@ -1,23 +1,42 @@
-# Workspace Instructions
+# Workspace instructions
 
-## Python
+## Runtime
 
-- Use `C:/Users/ASUS/miniconda3/envs/yolos/python.exe` for Python modules and tests.
-- Do not use the base Conda environment or system Python unless the user explicitly asks.
+- Use `C:/Users/ASUS/miniconda3/envs/yolos/python.exe` for Python and pytest.
+- The shell is PowerShell. Use a PowerShell here-string for multiline Python.
 
-## Long-running local tasks
+## Protected assets
 
-- Prefer one foreground tool call with a timeout set to roughly 1.5-2 times the expected runtime.
-- Let a local supervisor and memory guard monitor progress; do not use repeated model-side polling.
-- Persist full stdout/stderr and progress on `H:`. Console output should be limited to phase or epoch changes, new 10% batch buckets, warnings, failures, and completion.
-- A supervisor must exit as soon as the child reaches a verified terminal state. Do not leave a background watcher running.
-- For resumable training workflows, launch at most one training task per invocation unless the user explicitly requests otherwise.
+Do not delete or rewrite QDP datasets, `daily_research/data/research_store`, or
+registered checkpoints unless the user explicitly targets that exact asset and
+there is a verified replacement or recovery path. The canonical list is
+`brain/object_registry.json`; verify it with `tools.brain.integrity_check`.
 
-## Commit And Push Requests
+## Keep the system small
 
-- Do not publish automatically. Run this workflow only when the user asks to commit, push, publish, or sync Git changes.
-- Start with `git status --short --branch --untracked-files=all`; a tracked-only diff is not a complete change inventory.
-- Include every new source, test, configuration, and documentation file that belongs to the requested task. Never use `git add .`, and never mix unrelated dirty paths.
-- Run focused verification and `git diff --check`, inspect the exact staged paths, fetch the remote, and block on a remote-ahead or diverged branch. Never force-push, reset, or silently rebase.
-- Prefer the repository helper with explicit `--expect-paths` and `--push`; it stages untracked task files, commits, pushes, and verifies the local and remote commit IDs in one resumable operation.
-- A commit-and-push request is complete only after `HEAD` equals the remote-tracking branch and the final Git status has been reported.
+- Extend an existing core module before creating a new framework or wrapper.
+- One concept has one current name, path, contract, and CLI. Backward
+  compatibility is opt-in, not the default.
+- An experiment starts as one contract in `daily_research/studies/` and writes
+  process material only under ignored output. When it ends, retain the compact
+  conclusion, key metrics, contract, and selected checkpoint; remove the runner,
+  logs, predictions, failed directories, and experiment-only tests.
+- Tests protect data integrity, PIT/no-future semantics, training/evaluation
+  meaning, recovery, and key numerical behavior. Do not test retired wrappers or
+  file layouts.
+- Brain documents describe current objects and state. Historical detail belongs
+  in references and must not re-enter the hot path.
+
+## Long tasks
+
+- Run one foreground training task per invocation unless the user asks otherwise.
+- Set tool timeout to roughly 1.5–2 times expected runtime. Let a local supervisor
+  and memory guard monitor it; do not poll from the model.
+- Keep full logs on `H:` and console output event-only. The supervisor exits as
+  soon as the child reaches a verified terminal state.
+
+## Git
+
+- Do not commit or push unless the user explicitly asks.
+- Preserve unrelated dirty paths. Run focused tests and `git diff --check` before
+  completion.

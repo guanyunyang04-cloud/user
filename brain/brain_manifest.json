@@ -1,188 +1,22 @@
 {
+  "schema_version": 2,
+  "brain_id": "workspace",
   "brain_type": "main",
-  "brain_version": "2026-06-12",
-  "entrypoint": "brain/identity_layer.md",
-  "read_order": ["brain/identity_layer.md", "brain/state_center.md", "brain/knowledge_center.md", "brain/master_brain.md", "brain/brain_architecture.md", "brain/operations_center.md", "brain/governance_layer.md"],
-  "identity_path": "brain/identity_layer.md",
-  "state_path": "brain/state_center.md",
-  "knowledge_path": "brain/knowledge_center.md",
-  "operations_path": "brain/operations_center.md",
-  "governance_path": "brain/governance_layer.md",
-  "governance": {
-    "default_objective_policy": "personal_researcher_direct_action",
-    "brain_body_match_required": true,
-    "cross_project_rules_write_first": "brain/master_brain.md"
-  },
-  "cognition_contract": {
-    "core_principle": "Agent 无状态，项目大脑有状态。",
-    "primary_identity": "个人研究者大脑：服务研究推进、资料收录、项目接管、快速重构和直接行动。",
-    "default_action_style": "objective_first_direct_change",
-    "architecture_style": "lean_shared_main_brain_kernel_with_regional_sub_brains",
-    "layers": ["identity", "memory", "cognition", "decision", "execution", "governance"],
-    "regional_model": [
-      {
-        "id": "orientation_system",
-        "function": "完成身份定向、当前状态定位和结构定位。",
-        "modules": ["identity_layer", "state_center", "brain_architecture"]
-      },
-      {
-        "id": "long_term_memory",
-        "function": "沉淀稳定事实、对象不变量和可复用教训。",
-        "modules": ["knowledge_center"]
-      },
-      {
-        "id": "executive_control",
-        "function": "给出当前对象指针、治理函数和过程边界。",
-        "modules": ["state_center", "governance_layer"]
-      },
-      {
-        "id": "sensorimotor_loop",
-        "function": "定义 body 地图、环境基线、命令入口和操作流程。",
-        "modules": ["operations_center"]
-      },
-      {
-        "id": "experience_buffer",
-        "function": "保存时间顺序证据，按需下钻。",
-        "modules": ["episodic_memory"]
-      }
-    ],
-    "required_preflight": ["goal_alignment", "project_scope", "protected_object_selection"],
-    "post_task_writeback": ["state", "knowledge", "next_action", "governance"]
-  },
-  "shared_regional_brain_contract": {
-    "contract_source": "brain/brain_architecture.md",
-    "derive_read_order_from_modules": true,
-    "default_module_order": ["identity_layer", "state_center", "knowledge_center", "brain_architecture", "operations_center", "governance_layer", "episodic_memory"],
-    "required_modules": ["identity_layer", "state_center", "knowledge_center", "brain_architecture", "operations_center", "governance_layer", "episodic_memory"],
-    "optional_modules": ["brain_operating_protocol"],
-    "fast_handoff_modules": ["identity_layer", "state_center", "knowledge_center", "operations_center"],
-    "region_bindings": {
-      "orientation_system": ["identity_layer", "state_center", "brain_architecture"],
-      "long_term_memory": ["knowledge_center"],
-      "executive_control": ["state_center", "governance_layer"],
-      "sensorimotor_loop": ["operations_center"],
-      "experience_buffer": ["episodic_memory"]
-    }
-  },
-  "hot_handoff_contract": {
-    "workspace_default_paths": ["brain/state_center.md", "brain/operations_center.md", "brain/governance_layer.md"],
-    "child_default_modules": ["state_center", "operations_center"],
-    "never_default_modules": ["episodic_memory"],
-    "hot_path_semantics": {
-      "workspace_core_doc": "current workspace object interfaces and routing state",
-      "child_state_center": "runtime object instances, pure functions, and current pointers",
-      "child_operations_center": "procedure catalog, command entries, and validation selection"
-    }
-  },
-  "agent_meta_protocol": {
-    "actor": "agent",
-    "substrate": "brain",
-    "tool_role": "sensor",
-    "authority": "propose_only",
-    "required_passes": ["task_start", "decision_boundary", "before_final"],
-    "before_final_mode": "closure_boundary_meta_question_discovery",
-    "before_final_trigger_policy": "low_noise",
-    "proposal_creation_policy": "auto_create_low_risk_proposed_status",
-    "proposal_creation_boundary": "Agent may create low-risk agent-learning proposals in proposed status without prior user approval; unclear, high-risk, or core-behavior-changing proposals ask first. Proposal implementation still requires explicit user approval.",
-    "implementation_approval_policy": "requires_explicit_user_approval_for_protocol_or_behavior_changes",
-    "before_final_human_override_rule": "A tool clear or audit clear result is only a sensor signal; human feedback and task facts outrank process defaults.",
-    "before_final_research_scope_grade_rule": "Before closing research/model conclusions, verify that the claimed conclusion level matches evidence scope and grade: universe_scope, dataset/pool binding, seed count, budget class, gate result, and diagnostic-vs-evidence-grade status. If mismatched, downgrade the conclusion wording before final.",
-    "writeback_boundary": "Core brain docs, workflow rules, skills, guards, and tests change only after user-authorized implementation; personal_researcher_contract defines direct-action defaults after approval.",
-    "proposal_queue": "brain/output/agent_learning/",
-    "pending_approval_statuses": ["proposed", "approved"],
-    "pending_approval_surface_rule": "Agent must proactively surface proposed or approved agent learning proposals in the next substantial update or final answer; if none exist, say there are no pending approvals when the queue was checked.",
-    "skill_sync_required": true
-  },
-  "brain_structure_contract": {
-    "hot_path_files": [
-      "brain/skills/workspace-brain/SKILL.md",
-      "brain/state_center.md",
-      "brain/knowledge_center.md",
-      "brain/governance_layer.md",
-      "quant_data_platform/brain/state_center.md",
-      "quant_data_platform/brain/operations_center.md",
-      "daily_research/brain/state_center.md",
-      "daily_research/brain/operations_center.md"
-    ],
-    "line_count_policy": "diagnostic_only_not_blocking",
-    "structural_signals": ["legacy_global_rule_terms", "missing_object_interface", "history_log_in_hot_path", "unsupported_legacy_entrypoint"],
-    "rule_classes": ["hard_safety", "operating_default", "deep_dive", "deprecated"],
-    "legacy_entrypoint_policy": "remove renamed brain tooling entrypoints instead of keeping legacy aliases"
-  },
-  "personal_researcher_contract": {
-    "default_mode": "direct_action",
-    "rules_as_tools": true,
-    "test_policy": "changed_surface_or_smoke_by_default",
-    "legacy_policy": "delete_or_deprecate_without_active_callers",
-    "explicit_only_skills": ["subagent-driven-development", "requesting-code-review", "finishing-a-development-branch", "using-git-worktrees", "verification-before-completion", "test-driven-development", "testing-strategies"],
-    "protected_object_types": ["active_data_base_or_unique_data_loss", "pit_or_no_leakage_violation", "live_default_paper_broker_or_active_artifact_change", "secrets_or_external_service_state", "cross_project_dirty_work_without_scope", "brain_sync_drift"]
-  },
-  "brain_contract": {
-    "required_sub_brain_keys": ["brain_type", "brain_id", "parent_brain", "attach_status", "entrypoint", "body_root", "shared_contract_source", "regional_specialization", "write_routes", "body_map", "modules", "handoff_contract"],
-    "recommended_sub_brain_keys": ["identity_path", "state_path", "knowledge_path", "operations_path", "governance_path"]
-  },
-  "child_brains": [
+  "entrypoint": "brain/README.md",
+  "state": "brain/state.md",
+  "object_registry": "brain/object_registry.json",
+  "children": [
     {
-      "id": "daily_research",
-      "path": "daily_research/brain/brain_manifest.json",
-      "role": "production_research_and_execution",
-      "regional_role": "production_research_and_execution_cortex",
-      "control_level": "managed_by_main_brain",
-      "body_root": "daily_research",
-      "entrypoint": "daily_research/brain/identity_layer.md",
-      "attach_status": "attached"
+      "brain_id": "daily_research",
+      "root": "daily_research/brain",
+      "entrypoint": "daily_research/brain/README.md"
     },
     {
-      "id": "t0_project",
-      "path": "t0_project/brain/brain_manifest.json",
-      "role": "intraday_experiment_and_rl",
-      "regional_role": "intraday_execution_and_rl_lab",
-      "control_level": "managed_by_main_brain",
-      "body_root": "t0_project",
-      "entrypoint": "t0_project/brain/identity_layer.md",
-      "attach_status": "attached"
-    },
-    {
-      "id": "daily_stock_analysis-main",
-      "path": "daily_stock_analysis-main/brain/brain_manifest.json",
-      "role": "multi_market_ai_stock_analysis",
-      "regional_role": "multi_market_product_cortex",
-      "control_level": "managed_by_main_brain",
-      "body_root": "daily_stock_analysis-main",
-      "entrypoint": "daily_stock_analysis-main/brain/identity_layer.md",
-      "attach_status": "attached"
-    },
-    {
-      "id": "traditional_quant_research",
-      "path": "traditional_quant_research/brain/brain_manifest.json",
-      "role": "traditional_quant_methods_research_lab",
-      "regional_role": "traditional_quant_methods_research_lab",
-      "control_level": "managed_by_main_brain",
-      "body_root": "traditional_quant_research",
-      "entrypoint": "traditional_quant_research/brain/identity_layer.md",
-      "attach_status": "attached"
-    },
-    {
-      "id": "quant_data_platform",
-      "path": "quant_data_platform/brain/brain_manifest.json",
-      "role": "canonical_quant_data_platform",
-      "regional_role": "canonical_quant_data_platform_cortex",
-      "control_level": "managed_by_main_brain",
-      "body_root": "quant_data_platform",
-      "entrypoint": "quant_data_platform/brain/identity_layer.md",
-      "attach_status": "attached"
+      "brain_id": "quant_data_platform",
+      "root": "quant_data_platform/brain",
+      "entrypoint": "quant_data_platform/brain/README.md"
     }
   ],
-  "write_routes": {
-    "workspace_identity": "brain/identity_layer.md",
-    "workspace_state": "brain/state_center.md",
-    "workspace_knowledge": "brain/knowledge_center.md",
-    "workspace_topology": "brain/master_brain.md",
-    "workspace_operations": "brain/operations_center.md",
-    "workspace_governance": "brain/governance_layer.md"
-  },
-  "handoff_contract": {
-    "agent_boot_order": ["brain/brain_manifest.json", "brain/identity_layer.md", "brain/state_center.md", "brain/knowledge_center.md", "<child>/brain/brain_manifest.json", "<child>/brain files derived from brain/brain_manifest.json#shared_regional_brain_contract", "<child>/brain/episodic_memory.md if evidence is needed"],
-    "principle": "Agents should attach to brains first, resolve the minimal centers, then enter body modules through the declared body_map."
-  }
+  "canonical_skill": "brain/skills/workspace-brain/SKILL.md",
+  "installed_skill": "C:/Users/ASUS/.codex/skills/workspace-brain/SKILL.md"
 }

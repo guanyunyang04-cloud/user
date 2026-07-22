@@ -4993,14 +4993,14 @@ def _validate_fixed_oos_split_contract(
     # The walk-forward builder binds the sample index, normalization, panels,
     # masks, and split/purge metadata into this immutable digest.  Recompute it
     # here as well so a direct training CLI call cannot bypass orchestration QA.
-    from daily_research.path_policy.seq100_walkforward import (
-        _validated_fold_training_contract,
-        _validated_source_view_provenance,
+    from daily_research.path_policy.seq100_fold_contract import (
+        validate_fold_training_contract,
+        validate_source_view_provenance,
     )
 
-    _validated_fold_training_contract(manifest)
+    validate_fold_training_contract(manifest)
     if str(contract.get("method", "")) == "expanding_train_fixed_oos":
-        _validated_source_view_provenance(manifest)
+        validate_source_view_provenance(manifest)
 
 
 def _validate_development_split_contract(
@@ -5076,11 +5076,11 @@ def _validate_development_split_contract(
         raise ValueError("development normalization must use only feature dates before development start")
     if str(normalization.get("fit_date_end_exclusive", "")) != expected_start:
         raise ValueError("development normalization cutoff does not match development start")
-    from daily_research.path_policy.seq100_walkforward import (
-        _validated_development_fold_training_contract,
+    from daily_research.path_policy.seq100_fold_contract import (
+        validate_development_fold_training_contract,
     )
 
-    _validated_development_fold_training_contract(manifest)
+    validate_development_fold_training_contract(manifest)
 
 
 VALIDATION_LOSS_KEYS = (

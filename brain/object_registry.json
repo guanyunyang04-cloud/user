@@ -1,302 +1,59 @@
 {
-  "schema_version": 1,
-  "registry_id": "workspace_brain_object_registry_v1",
-  "description": "Machine-readable object ownership, routing, writeback, and closure hints for the workspace brain.",
+  "schema_version": 2,
   "objects": [
     {
-      "object_id": "qdp_current_data_store",
+      "object_id": "qdp_datasets",
       "owner": "quant_data_platform",
-      "type": "active_data_base_or_unique_data",
-      "description": "QDP single mutable Parquet data store: one current table per domain, active.json as a light index, free-provider updates, and minimal structural checks.",
-      "routing_terms": [
-        "qdp",
-        "qdp_v2",
-        "security_id",
-        "symbol_history",
-        "date partition",
-        "BaoStock 0.9.3",
-        "active.json",
-        "dataset.json",
-        "manifest-first",
-        "provider ingest",
-        "provider",
-        "qdp check",
-        "qdp update",
-        "parquet active dataset",
-        "parquet",
-        "active 数据",
-        "数据基底",
-        "数据平台",
-        "数据质量",
-        "复权因子",
-        "1分钟数据",
-        "5分钟数据"
+      "type": "protected_data",
+      "paths": [
+        "quant_data_platform/data/qdp_v2",
+        "quant_data_platform/data/event_packs"
       ],
-      "write_terms": [
-        "provider ingest",
-        "qdp update",
-        "update",
-        "ingest",
-        "qdp gc",
-        "gc",
-        "cleanup",
-        "clean up",
-        "清理",
-        "删除",
-        "回收",
-        "active pointer",
-        "active manifest pointer",
-        "active.json 指针",
-        "重建数据基底",
-        "数据更新"
-      ],
-      "path_prefixes": [
-        "quant_data_platform/data/qdp_v2/active/",
-        "quant_data_platform/data/qdp_v2/datasets/",
-        "quant_data_platform/src/quant_data_platform/qdp_v2/",
-        "quant_data_platform/brain/"
-      ],
-      "default_mode": "read_only",
-      "write_reason": "data base maintenance",
-      "read_reason": "source facts",
-      "writeback_targets": [
-        "quant_data_platform/brain/state_center.md",
-        "quant_data_platform/brain/references/"
-      ],
-      "validation_commands": [
-        "qdp status --json",
-        "qdp check --quick --json",
-        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest quant_data_platform/tests/data_platform -q"
-      ],
-      "protected": true
+      "truth": "active.json + dataset.json + referenced parquet",
+      "mutation": "only explicit QDP data work with post-change status/check"
     },
     {
-      "object_id": "sequence_training_pack",
+      "object_id": "research_datasets",
       "owner": "daily_research",
-      "type": "research_artifact",
-      "description": "Model-ready sequence packs, memmaps, normalization, sample indexes, labels, and downstream training datasets.",
-      "routing_terms": [
-        "sequence_pack",
-        "sequence pack",
-        "sequence_path_training",
-        "training pack",
-        "训练包",
-        "research pack",
-        "research_store",
-        "memmap",
-        "path_policy",
-        "daily_research/data/research_store"
-      ],
-      "write_terms": [
-        "build",
-        "构建",
-        "生成",
-        "新增",
-        "训练包",
-        "pack"
-      ],
-      "path_prefixes": [
-        "daily_research/data/research_store/",
-        "daily_research/path_policy/"
-      ],
-      "default_mode": "write",
-      "write_reason": "research artifact",
-      "read_reason": "research artifact dependency",
-      "writeback_targets": [
-        "daily_research/brain/state_center.md",
-        "daily_research/brain/references/"
-      ],
-      "validation_commands": [
-        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.brain_sync_audit --json"
-      ],
-      "protected": false
+      "type": "protected_data",
+      "paths": ["daily_research/data/research_store"],
+      "truth": "pack/overlay manifests and their referenced material",
+      "mutation": "only explicit dataset work; duplicates require byte/semantic proof"
     },
     {
-      "object_id": "model_research_evidence",
+      "object_id": "seq100_models",
       "owner": "daily_research",
-      "type": "research_evidence",
-      "description": "Model code, loss design, evaluations, reports, stock profiles, backtests, and research conclusions.",
-      "routing_terms": [
-        "daily_research",
-        "daily research",
-        "gru",
-        "base gru",
-        "path-only",
-        "path_value",
-        "path value",
-        "residual-score",
-        "residual_score",
-        "ohlcva",
-        "today-close",
-        "todayclose",
-        "loss",
-        "model",
-        "模型",
-        "backtest",
-        "回测",
-        "stock profile",
-        "股票画像",
-        "模型训练",
-        "训练实验"
+      "type": "protected_model",
+      "paths": [
+        "daily_research/models/registry.json",
+        "daily_research/models/seq100"
       ],
-      "write_terms": [
-        "train",
-        "training",
-        "训练",
-        "evaluate",
-        "评估",
-        "report",
-        "summary",
-        "实验"
-      ],
-      "path_prefixes": [
-        "daily_research/path_policy/",
-        "daily_research/output/path_policy/",
-        "daily_research/brain/references/"
-      ],
-      "default_mode": "write",
-      "write_reason": "model, loss, evaluation, or research conclusion",
-      "read_reason": "research evidence",
-      "writeback_targets": [
-        "daily_research/brain/state_center.md",
-        "daily_research/brain/references/"
-      ],
-      "validation_commands": [
-        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.brain_sync_audit --json"
-      ],
-      "protected": false
+      "truth": "registry path and SHA-256",
+      "mutation": "register or replace a bundle atomically, then verify all hashes"
     },
     {
-      "object_id": "active_execution_artifact",
+      "object_id": "research_records",
       "owner": "daily_research",
-      "type": "active_execution_artifact",
-      "description": "Daily research live/default/paper/broker active artifact, promotion boundary, and trade-plan surface.",
-      "routing_terms": [
-        "active_execution_strategy",
-        "active artifact",
-        "active manifest",
-        "execution",
-        "执行",
-        "signal panel",
-        "production signal",
-        "trade plan",
-        "交易计划",
-        "paper",
-        "live",
-        "broker",
-        "promotion",
-        "default"
-      ],
-      "write_terms": [
-        "activate",
-        "restore",
-        "promotion",
-        "live",
-        "broker",
-        "切换",
-        "写入",
-        "更新"
-      ],
-      "path_prefixes": [
-        "daily_research/output/active_execution_strategy.json",
-        "daily_research/execution/",
-        "daily_research/brain/"
-      ],
-      "default_mode": "read_only",
-      "write_reason": "active execution artifact change",
-      "read_reason": "execution boundary inspection",
-      "writeback_targets": [
-        "daily_research/brain/state_center.md",
-        "daily_research/brain/references/"
-      ],
-      "validation_commands": [
-        "git diff -- daily_research/output/active_execution_strategy.json",
-        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed"
-      ],
-      "protected": true
+      "type": "compact_evidence",
+      "paths": ["daily_research/research_records"],
+      "truth": "indexed final report, key metrics, and contract",
+      "mutation": "append or replace one indexed conclusion; no process logs"
     },
     {
-      "object_id": "brain_sync_surface",
+      "object_id": "active_studies",
+      "owner": "daily_research",
+      "type": "active_research",
+      "paths": ["daily_research/studies"],
+      "truth": "one contract per unfinished study",
+      "mutation": "finish, compact evidence, and remove experiment-only machinery"
+    },
+    {
+      "object_id": "brain_system",
       "owner": "workspace",
-      "type": "brain_sync_surface",
-      "description": "Main brain, child brain hot paths, workflow tools, local skill contract, and writeback closure checks.",
-      "routing_terms": [
-        "brain",
-        "脑区",
-        "主脑",
-        "分脑",
-        "workspace-brain",
-        "capsule",
-        "route",
-        "routing",
-        "writeback",
-        "closure-check",
-        "brain_sync_audit",
-        "object registry"
-      ],
-      "write_terms": [
-        "修改",
-        "更新",
-        "维护",
-        "refactor",
-        "registry",
-        "skill sync"
-      ],
-      "path_prefixes": [
-        "brain/",
-        "tools/brain/",
-        "C:/Users/ASUS/.codex/skills/workspace-brain/"
-      ],
-      "default_mode": "write",
-      "write_reason": "brain architecture, workflow, or skill contract update",
-      "read_reason": "brain system inspection",
-      "writeback_targets": [
-        "brain/state_center.md",
-        "brain/references/"
-      ],
-      "validation_commands": [
-        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.doc_guard check --scope changed",
-        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json",
-        "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.brain_sync_audit --json"
-      ],
-      "protected": false
-    },
-    {
-      "object_id": "workspace_git_surface",
-      "owner": "workspace",
-      "type": "workspace_git_surface",
-      "description": "Repository dirty paths, branch, commit, push, cleanup, and rollback surface.",
-      "routing_terms": [
-        "git",
-        "commit",
-        "push",
-        "branch",
-        "worktree",
-        "dirty paths",
-        "提交",
-        "推送",
-        "分支"
-      ],
-      "write_terms": [
-        "commit",
-        "push",
-        "stage",
-        "add",
-        "提交",
-        "推送"
-      ],
-      "path_prefixes": [
-        ".git/"
-      ],
-      "default_mode": "read_only",
-      "write_reason": "repo mutation",
-      "read_reason": "repo status inspection",
-      "writeback_targets": [],
-      "validation_commands": [
-        "git status --short",
-        "git diff --check"
-      ],
-      "protected": true
+      "type": "takeover_map",
+      "paths": ["brain", "daily_research/brain", "quant_data_platform/brain"],
+      "truth": "manifest + README + state",
+      "mutation": "keep current facts only and run integrity_check"
     }
   ]
 }
